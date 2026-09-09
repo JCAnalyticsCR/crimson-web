@@ -307,13 +307,12 @@ body.has-cursor .hero__net{will-change:transform}
 
   /* Hero: CTA usable al primer segundo, sin intro */
   /* Primera pantalla limpia: fondo, red y titular a pantalla completa. Nada más. */
-  .hero{padding:24px var(--pad) 72px;min-height:calc(100svh - 62px);text-align:left;align-items:flex-start;justify-content:center}
+  .hero{padding:0;min-height:auto;text-align:left;align-items:stretch;justify-content:flex-start}
   .hero__cta,.hero__trust{display:none!important}
-  .hero::after{content:"";position:absolute;left:50%;bottom:28px;width:22px;height:22px;margin-left:-11px;border-right:2px solid var(--crimson);border-bottom:2px solid var(--crimson);transform:rotate(45deg);animation:hint 1.8s ease-in-out infinite;opacity:.8}
-  .hero__strip{position:static;height:auto;background:var(--ink);padding:16px 0 18px}
-  .hero__strip::before{content:"Proyectos recientes";display:block;padding:0 var(--pad) 10px;font-size:11px;letter-spacing:.22em;text-transform:uppercase;font-weight:700;color:#8a8a90}
+  .hero__content::after{content:"";position:absolute;left:50%;bottom:28px;width:22px;height:22px;margin-left:-11px;border-right:2px solid var(--crimson);border-bottom:2px solid var(--crimson);transform:rotate(45deg);animation:hint 1.8s ease-in-out infinite;opacity:.8}
+  .hero__strip{display:none}
   .hero__net{inset:-10% -30%;opacity:.85}
-  .hero__content{align-items:flex-start;gap:18px;width:100%}
+  .hero__content{align-items:flex-start;justify-content:center;gap:18px;width:100%;min-height:calc(100svh - 62px);padding:24px var(--pad) 84px}
   .eyebrow{font-size:11px;letter-spacing:.22em}
   .display br{display:none}
   .display{font-size:clamp(40px,11.5vw,52px);line-height:.95}
