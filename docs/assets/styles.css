@@ -460,6 +460,8 @@ body[data-tone=ink] .wa{background:var(--white);color:var(--ink)}
   .case,.case--lg{min-height:400px}
   .case__info,.case--lg .case__info{padding:90px 18px 18px;gap:4px}
   .case__info strong,.case--lg .case__info strong{font-size:24px}
+  .stats{grid-template-columns:1fr 1fr;gap:22px 12px;padding:28px 0}
+  .stats b{font-size:52px}
   .brands__row{gap:0}
   .brands__item{padding:8px 16px;flex-direction:column;gap:8px}
   .brands__item img{height:36px}
