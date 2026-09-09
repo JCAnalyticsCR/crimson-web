@@ -262,19 +262,27 @@ section{padding:var(--space) var(--pad)}
 .case--lg .case__info strong{font-size:32px}
 .case__loc{color:#cfcbc6;font-size:14px}
 
-/* ---------- TIENDA · CAM 06 ---------- */
-.tienda .wrap{display:flex;flex-direction:column;gap:48px}
-.tienda__grid{display:grid;grid-template-columns:1fr 1.6fr;gap:56px;align-items:center}
-.tienda__text{display:flex;flex-direction:column;gap:24px;align-items:flex-start}
-.products{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
-.product{aspect-ratio:4/5;background:#fff;display:block}
-.product>img{position:absolute;left:0;top:0;width:100%;height:68%;filter:none;object-fit:cover;transition:transform var(--dur-scene) var(--ease-enter)}
-.product::before{display:none}
-.product::after{content:"";position:absolute;left:0;right:0;bottom:0;height:32%;background:var(--ink-2);z-index:1;border-top:1px solid var(--hair-dark)}
-.product .feed__corners{inset:10px auto auto 10px;width:16px;height:16px;background:linear-gradient(var(--ink),var(--ink)) top left/16px 1.5px,linear-gradient(var(--ink),var(--ink)) top left/1.5px 16px;background-repeat:no-repeat;opacity:.55}
-.product__name{position:absolute;left:16px;right:16px;bottom:calc(32% - 46px);z-index:3;font-family:var(--serif);font-size:21px;color:#fff;letter-spacing:-.01em;line-height:1.1;text-wrap:balance}
-.product__cta{position:absolute;left:16px;bottom:12px;z-index:3;color:rgba(255,255,255,.6);font-size:10px}
-@media (hover:hover){.product:hover>img{transform:scale(1.04)}.product:hover .product__cta{color:#fff}}
+/* ---------- TIENDA · CAM 06: estante de productos ---------- */
+.tienda .wrap{display:flex;flex-direction:column;gap:56px}
+.tienda__head{display:grid;grid-template-columns:1.2fr 1fr;gap:40px;align-items:end}
+.tienda__aside{display:flex;flex-direction:column;gap:22px;align-items:flex-start}
+.products{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+.product{display:flex;flex-direction:column;gap:0;border-radius:var(--r);overflow:hidden;background:var(--ink-2);border:1px solid var(--hair-dark);transition:transform var(--dur-drawer) var(--ease-enter),border-color var(--dur-drawer)}
+.product__media{aspect-ratio:1;background:radial-gradient(80% 80% at 50% 40%,#fff 0,#f1eeea 100%);border-radius:0;isolation:auto}
+.product__media::before{display:none}
+.product__media>img{position:absolute;inset:0;object-fit:contain;padding:10%;filter:none;transition:transform var(--dur-scene) var(--ease-enter)}
+.product__media .feed__corners{inset:10px;opacity:.55;background-image:linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink))}
+.product__n{position:absolute;right:14px;top:12px;z-index:3;color:rgba(21,19,26,.45);font-size:10px}
+.product__body{display:flex;flex-direction:column;gap:6px;padding:14px 14px 16px;flex:1}
+.product__brand{color:rgba(244,241,238,.5);font-size:10px}
+.product__body strong{font-family:var(--serif);font-weight:400;font-size:20px;line-height:1.1;letter-spacing:-.01em;color:#fff;text-wrap:balance}
+.product__cta{margin-top:auto;padding-top:10px;color:rgba(244,241,238,.55);font-size:10px;transition:color var(--dur-micro)}
+@media (hover:hover){
+  .product:hover{transform:translateY(-4px);border-color:rgba(226,35,58,.45)}
+  .product:hover .product__media>img{transform:scale(1.06)}
+  .product:hover .product__cta{color:#fff}
+  .product:hover .feed__corners{inset:6px}
+}
 
 /* ---------- CONTACTO · CAM 07 (clímax) ---------- */
 .contacto{position:relative;overflow:hidden;padding-bottom:calc(var(--space)*.8)}
@@ -365,7 +373,9 @@ body[data-tone=ink] .wa{background:var(--white);color:var(--ink)}
   .cards{gap:12px}.card__media{aspect-ratio:3/4}
   .stats{grid-template-columns:repeat(2,1fr)}
   .cases{grid-template-columns:repeat(2,1fr)}.case--lg{min-height:380px}.case{min-height:240px}
-  .tienda__grid,.contacto__grid{grid-template-columns:1fr}
+  .tienda__head{grid-template-columns:1fr}
+  .products{grid-template-columns:repeat(3,1fr)}
+  .contacto__grid{grid-template-columns:1fr}
 }
 @media (min-width:1024px) and (max-width:1199px){.hud--bl,.hud--br{display:none!important}}
 
@@ -447,7 +457,7 @@ body[data-tone=ink] .wa{background:var(--white);color:var(--ink)}
   [data-snap] .reveal,[data-snap].reveal{opacity:1;transform:none;transition:none}
   @supports (animation-timeline: view()){
     [data-snap]>*{animation:focus linear both!important;animation-timeline:view(inline);animation-range:cover 0% cover 100%;transform-origin:center}
-    @keyframes focus{0%,100%{transform:scale(.95);opacity:.6}42%,58%{transform:scale(1);opacity:1}}
+    @keyframes focus{0%,100%{transform:scale(.97);opacity:.75}30%,70%{transform:scale(1);opacity:1}}
   }
   .snap-ui{display:flex;align-items:center;gap:16px;margin:10px 0 0;color:var(--muted)}
   .servicios .snap-ui,.tienda .snap-ui{color:var(--muted-dark)}
@@ -484,9 +494,11 @@ body[data-tone=ink] .wa{background:var(--white);color:var(--ink)}
   .cta-band{flex-direction:column;align-items:stretch;gap:16px}
   .cta-band .btn{width:100%}
 
-  .tienda__grid{display:flex;flex-direction:column;gap:28px}
-  .tienda__text .btn{width:100%}
-  .product{aspect-ratio:4/5}
+  .tienda__head{display:flex;flex-direction:column;align-items:stretch;gap:16px}
+  .tienda__aside{align-items:stretch}
+  .tienda__aside .btn{width:100%}
+  .products>*{flex-basis:64vw!important}
+  .product__body strong{font-size:22px}
 
   /* Contacto: el cierre */
   .contacto__grid{display:flex;flex-direction:column;gap:32px}
