@@ -271,7 +271,7 @@ body.has-cursor .hero__net{will-change:transform}
 @media (max-width:767px){
   :root{--pad:20px}
   html{-webkit-tap-highlight-color:transparent}
-  body{padding-bottom:calc(58px + env(safe-area-inset-bottom))}
+  body{padding-bottom:0}
   [data-snap] .reveal{opacity:1;transform:none;transition:none}
   .card__scan,.card__spin{display:none}
   .net-glow{animation:none;opacity:.5}
@@ -306,7 +306,12 @@ body.has-cursor .hero__net{will-change:transform}
   body.menu-open{position:fixed;width:100%;overflow:hidden}
 
   /* Hero: CTA usable al primer segundo, sin intro */
-  .hero{padding:40px var(--pad) 172px;min-height:auto;text-align:left;align-items:flex-start}
+  /* Primera pantalla limpia: fondo, red y titular a pantalla completa. Nada más. */
+  .hero{padding:24px var(--pad) 72px;min-height:calc(100svh - 62px);text-align:left;align-items:flex-start;justify-content:center}
+  .hero__cta,.hero__trust{display:none!important}
+  .hero::after{content:"";position:absolute;left:50%;bottom:28px;width:22px;height:22px;margin-left:-11px;border-right:2px solid var(--crimson);border-bottom:2px solid var(--crimson);transform:rotate(45deg);animation:hint 1.8s ease-in-out infinite;opacity:.8}
+  .hero__strip{position:static;height:auto;background:var(--ink);padding:16px 0 18px}
+  .hero__strip::before{content:"Proyectos recientes";display:block;padding:0 var(--pad) 10px;font-size:11px;letter-spacing:.22em;text-transform:uppercase;font-weight:700;color:#8a8a90}
   .hero__net{inset:-10% -30%;opacity:.85}
   .hero__content{align-items:flex-start;gap:18px;width:100%}
   .eyebrow{font-size:11px;letter-spacing:.22em}
@@ -316,7 +321,6 @@ body.has-cursor .hero__net{will-change:transform}
   .hero__cta .btn{flex:1 1 0;min-width:0;padding-inline:10px;white-space:nowrap}
   .hero__trust{display:none}
   .rise{animation-delay:calc(var(--i,0)*.07s);animation-duration:.6s}
-  .hero__strip{height:150px;padding-bottom:16px}
   /* El marquee en móvil es un carrusel táctil, no una pasada automática */
   .marquee{-webkit-mask-image:none;mask-image:none;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding:0 var(--pad)}
   .marquee::-webkit-scrollbar{display:none}
@@ -370,7 +374,9 @@ body.has-cursor .hero__net{will-change:transform}
 
   /* Contacto: teclado iOS sin zoom (16px), tarjetas táctiles */
   .contacto__grid{gap:40px}
-  .contacto__meta{gap:12px}
+  .contacto__meta{gap:10px}
+  .contacto__actions{display:grid!important;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px}
+  .contacto__actions .btn{width:100%}
   .contacto__meta a{min-height:44px}
   .contacto__qr{display:none} /* en el teléfono el QR no aplica: se abre WhatsApp directo */
   .form{padding:22px 18px;gap:12px}
@@ -387,7 +393,7 @@ body.has-cursor .hero__net{will-change:transform}
 
   /* Barra inferior de acción (safe-area iPhone) */
   .wa{display:none}
-  .mbar{display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:6px;position:fixed;left:0;right:0;bottom:0;z-index:35;padding:6px var(--pad) calc(6px + env(safe-area-inset-bottom));background:rgba(246,242,238,.97);border-top:1px solid rgba(21,19,26,.08);transition:transform var(--dur-drawer) var(--ease-enter)}
+  .mbar{display:none!important;grid-template-columns:1fr 1fr 1.2fr;gap:6px;position:fixed;left:0;right:0;bottom:0;z-index:35;padding:6px var(--pad) calc(6px + env(safe-area-inset-bottom));background:rgba(246,242,238,.97);border-top:1px solid rgba(21,19,26,.08);transition:transform var(--dur-drawer) var(--ease-enter)}
   .mbar a{display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;border-radius:12px;font-size:13px;font-weight:700;background:#fff;color:var(--ink);border:1px solid rgba(21,19,26,.1)}
   .mbar a:active{transform:scale(.96)}
   .mbar__wa{background:#15803d!important;color:#fff!important;border-color:transparent!important}
@@ -396,6 +402,7 @@ body.has-cursor .hero__net{will-change:transform}
   .menu-open .mbar,.menu-open .progress{display:none}
 }
 @keyframes marqueeY{to{background-position:0 -200%}}
+@keyframes hint{0%,100%{transform:translateY(0) rotate(45deg);opacity:.35}50%{transform:translateY(8px) rotate(45deg);opacity:.9}}
 
 /* Pantallas muy angostas (iPhone SE / Android compactos) */
 @media (max-width:380px){
