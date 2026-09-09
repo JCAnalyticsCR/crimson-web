@@ -244,13 +244,19 @@
   const wall = $('#wall');
   if (wall && !reduced) {
     const feeds = $$('.feed', wall);
-    const pool = ['foto-camaras-comunidad','foto-rack','foto-camara-residencia','foto-antena-camara','foto-patch-panel','foto-camaras-poste','foto-tecnico-rack','foto-instalacion-torre','foto-tecnico-poste'];
+    const pool = ['foto-camaras-comunidad','foto-rack-h','foto-camara-residencia-h','foto-antena-camara-h','foto-patch-panel','foto-camaras-poste-h','foto-tecnico-rack-h','foto-instalacion-torre','foto-tecnico-poste-h'];
     let k = 0, timer = 0;
     const swap = () => {
       feeds.forEach(f => f.classList.remove('is-active'));
       const f = feeds[k % feeds.length]; f.classList.add('is-switch', 'is-active');
       setTimeout(() => {
-        if (!isMobile.matches) { const img = f.querySelector('img'), name = pool[(k * 5 + 6) % pool.length]; img.src = `assets/img/${name}-800.webp`; img.srcset = `assets/img/${name}-480.webp 480w, assets/img/${name}-800.webp 800w`; }
+        if (!isMobile.matches) {
+          const img = f.querySelector('img');
+          const shown = feeds.map(x => (x.querySelector('img').src.match(/img\/(.+?)-\d+\.webp/) || [])[1]);
+          const free = pool.filter(n => !shown.includes(n));
+          const name = free[(k * 7) % free.length];
+          img.src = `assets/img/${name}-800.webp`; img.srcset = `assets/img/${name}-480.webp 480w, assets/img/${name}-800.webp 800w`;
+        }
         f.classList.remove('is-switch');
       }, 140);
       k++;

@@ -140,7 +140,11 @@ body[data-tone=ink] .hud{color:rgba(244,241,238,.72)}
 
 /* ---------- Marco de visor: UN componente para toda foto ---------- */
 .feed{position:relative;overflow:hidden;border-radius:var(--r);background:var(--ink);isolation:isolate;display:block}
-.feed>img{width:100%;height:100%;object-fit:cover;display:block;filter:contrast(1.05) saturate(.88);transition:transform var(--dur-scene) var(--ease-enter),filter var(--dur-section)}
+.feed>img{width:100%;height:100%;object-fit:cover;display:block;filter:contrast(1.05) saturate(.88);transition:transform var(--dur-scene) var(--ease-enter),filter var(--dur-section),opacity .6s var(--ease-enter)}
+/* Blur-up: la miniatura embebida se ve mientras carga la foto; la foto funde al llegar */
+img[data-lqip]{background-size:cover}
+img[data-lqip].is-loaded{}
+@starting-style{img[data-lqip]{opacity:0}}
 .feed::before{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;background:radial-gradient(120% 90% at 50% 50%,transparent 58%,rgba(21,19,26,.5) 100%)}
 .feed__corners{position:absolute;inset:12px;z-index:3;pointer-events:none;opacity:.9;transition:inset 500ms var(--ease-enter);
   background:
@@ -260,12 +264,15 @@ section{padding:var(--space) var(--pad)}
 
 /* ---------- TIENDA · CAM 06 ---------- */
 .tienda .wrap{display:flex;flex-direction:column;gap:48px}
-.tienda__grid{display:grid;grid-template-columns:1fr 1.3fr;gap:64px;align-items:center}
+.tienda__grid{display:grid;grid-template-columns:1fr 1.6fr;gap:56px;align-items:center}
 .tienda__text{display:flex;flex-direction:column;gap:24px;align-items:flex-start}
-.products{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.product{aspect-ratio:4/3}
-.product>img{position:absolute;inset:0;object-position:center 35%}
-.product__name{position:absolute;left:18px;bottom:16px;z-index:3;font-family:var(--serif);font-size:22px;color:#fff;letter-spacing:-.01em}
+.products{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.product{aspect-ratio:4/3;background:#fff}
+.product>img{position:absolute;inset:0;filter:none;object-fit:cover}
+.product::before{background:linear-gradient(0deg,rgba(21,19,26,.55),transparent 45%)}
+.product .feed__corners{background-image:linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink));opacity:.5}
+.product__name{position:absolute;left:18px;bottom:34px;z-index:3;font-family:var(--serif);font-size:22px;color:#fff;letter-spacing:-.01em;line-height:1.1}
+.product__cta{position:absolute;left:18px;bottom:14px;z-index:3;color:rgba(255,255,255,.75);font-size:10px}
 
 /* ---------- CONTACTO · CAM 07 (clímax) ---------- */
 .contacto{position:relative;overflow:hidden;padding-bottom:calc(var(--space)*.8)}
@@ -451,8 +458,6 @@ body[data-tone=ink] .wa{background:var(--white);color:var(--ink)}
   .case,.case--lg{min-height:400px}
   .case__info,.case--lg .case__info{padding:90px 18px 18px;gap:4px}
   .case__info strong,.case--lg .case__info strong{font-size:24px}
-  .stats{grid-template-columns:1fr 1fr;gap:22px 12px;padding:28px 0}
-  .stats b{font-size:52px}
   .brands__row{gap:0}
   .brands__item{padding:8px 16px;flex-direction:column;gap:8px}
   .brands__item img{height:36px}
