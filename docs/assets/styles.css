@@ -219,7 +219,8 @@ section{padding:var(--space) var(--pad)}
 .card__media>img{position:absolute;inset:0}
 .card__body{padding:24px 4px 0;display:flex;flex-direction:column;gap:12px}
 .card__body p{color:var(--muted-dark);line-height:1.55;text-wrap:pretty;font-size:15px}
-.card__spec{color:rgba(244,241,238,.6);margin-top:4px}
+.card__tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.card__tags li{font-size:10px;letter-spacing:.1em;padding:7px 10px;border:1px solid var(--hair-dark);border-radius:999px;color:rgba(244,241,238,.7)}
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:24px;padding:36px 0;border-top:1px solid var(--hair-dark);border-bottom:1px solid var(--hair-dark)}
 .stats div{display:flex;flex-direction:column;gap:8px}
 .stats b{font-family:var(--serif);font-weight:400;font-size:clamp(48px,5vw,80px);line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
@@ -230,7 +231,7 @@ section{padding:var(--space) var(--pad)}
 .brands__row{display:flex;flex-wrap:wrap;justify-content:center;gap:0}
 .brands__item{display:flex;align-items:center;gap:16px;padding:8px 36px;border-left:1px solid var(--hair-dark)}
 .brands__item:first-child{border-left:0}
-.brands__item img{height:44px;width:auto;filter:grayscale(1) invert(1) brightness(1.15);mix-blend-mode:screen;opacity:.85}
+.brands__item img{height:26px;width:auto;opacity:.8}
 .brands__item .meta{color:rgba(244,241,238,.55)}
 
 /* ---------- PROCESO · CAM 04 ---------- */
@@ -442,7 +443,6 @@ body[data-tone=ink] .wa{background:var(--white);color:var(--ink)}
   .tienda{background:linear-gradient(180deg,var(--bg-2) 0,var(--ink) 110px)}
   .wall .wrap,.servicios .wrap,.proceso .wrap,.casos .wrap,.tienda .wrap,.contacto .wrap{gap:36px}
   .wall__head,.servicios__head,.casos__head{display:flex;flex-direction:column;align-items:stretch;gap:16px}
-  .card__spec{letter-spacing:.06em;font-size:10px}
   .wall__grid{grid-template-columns:1fr 1fr;gap:8px}
   .wall__grid .feed{aspect-ratio:4/5}
   .wall__grid .feed:nth-child(1){grid-column:span 2;aspect-ratio:3/2}
@@ -465,16 +465,20 @@ body[data-tone=ink] .wa{background:var(--white);color:var(--ink)}
   .snap-ui__bar i{position:absolute;top:-.5px;left:0;height:2px;width:var(--w,20%);background:var(--crimson);transform:translateX(var(--x,0));transition:transform 80ms linear;opacity:1}
 
   .card{border-top:0;padding-top:0}
-  .card__media{aspect-ratio:4/5;max-height:none}
-  .card__body{padding:18px 2px 0;gap:10px}
+  .card__media{aspect-ratio:4/3;max-height:none}
+  .card__media>img{object-position:center 45%}
+  .card__body{padding:16px 2px 0;gap:10px}
+  .card__body p{font-size:15px}
   .case,.case--lg{min-height:400px}
   .case__info,.case--lg .case__info{padding:90px 18px 18px;gap:4px}
   .case__info strong,.case--lg .case__info strong{font-size:24px}
   .stats{grid-template-columns:1fr 1fr;gap:22px 12px;padding:28px 0}
   .stats b{font-size:52px}
   .brands__row{gap:0}
-  .brands__item{padding:8px 16px;flex-direction:column;gap:8px}
-  .brands__item img{height:36px}
+  .brands__row{flex-wrap:nowrap;justify-content:space-between;width:100%}
+  .brands__item{padding:4px 10px;flex-direction:column;gap:8px;flex:1;text-align:center}
+  .brands__item img{height:18px}
+  .brands__item .meta{font-size:8px;letter-spacing:.1em}
 
   /* Proceso: timeline vertical que se traza */
   .steps{display:flex;flex-direction:column;gap:0}
