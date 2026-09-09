@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Crimson Consulting · Videovigilancia, redes y control de acceso en Costa Rica</title>
 <meta name="description" content="Diseñamos e implementamos soluciones de videovigilancia, redes y control de acceso adaptadas a cada entorno. Evaluación, diseño, instalación y soporte en Costa Rica.">
-<meta name="theme-color" content="#f6f2ee">
+<meta name="theme-color" content="#f6f2ee" id="themeColor">
 <meta name="robots" content="noindex,nofollow">
 <link rel="canonical" href="https://jcanalyticscr.github.io/crimson-web/">
 <meta property="og:title" content="Crimson Consulting · Infraestructura que conecta y protege tu operación">
@@ -24,18 +24,21 @@
 <meta name="format-detection" content="telephone=yes">
 <link rel="preload" href="assets/fonts/InstrumentSerif-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="assets/fonts/Manrope-500.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="assets/fonts/fonts.css?v=3">
-<link rel="stylesheet" href="assets/styles.css?v=7">
+<link rel="stylesheet" href="assets/fonts/fonts.css?v=4">
+<link rel="stylesheet" href="assets/styles.css?v=10">
 <script>document.documentElement.classList.add('js')</script>
-<script type="application/json" id="site-config">{"tel":"+50688889892","wa":"50688889892","waLink":"https://wa.me/message/5YQKXZFUPHWLA1"}</script>
+<script type="application/json" id="site-config">{"tel":"+50688889892","wa":"50688889892","waLink":"https://wa.me/message/5YQKXZFUPHWLA1","place":"Alajuela, Costa Rica"}</script>
 </head>
-<body>
+<body data-tone="cream">
 <a class="skip" href="#top">Saltar al contenido</a>
 
-<!-- Capa cine (solo PC con hover) -->
+<!-- Capa consola (solo PC con puntero) -->
 <div class="grain" aria-hidden="true"></div>
-<div class="cursor" aria-hidden="true"><span class="cursor__ring"></span><span class="cursor__dot"></span></div>
-<div class="progress" aria-hidden="true"><span></span></div>
+<div class="cursor" aria-hidden="true"><span class="cursor__ring"></span><span class="cursor__dot"></span><span class="cursor__label"></span></div>
+<div class="hud hud--tl meta" aria-hidden="true"><span class="hud__rec"></span><span id="hudCam">REC · CAM 01 · HERO</span></div>
+<div class="hud hud--tr meta" aria-hidden="true"><span id="hudClock">00:00:00</span> · CR</div>
+<div class="hud hud--bl meta" aria-hidden="true"><span class="live"></span>SISTEMA EN LÍNEA · <span id="hudState">14 NODOS</span></div>
+<div class="hud hud--br meta" aria-hidden="true">ALAJUELA · 10.016° N, 84.212° O</div>
 
 <!-- NAV -->
 <header class="nav" id="nav">
@@ -43,11 +46,12 @@
     <img src="assets/img/logo.png" alt="Crimson Consulting" width="1024" height="237">
   </a>
   <nav class="nav__links" id="navLinks" aria-label="Principal">
-    <a href="#servicios">Servicios</a>
-    <a href="#proceso">Cómo trabajamos</a>
-    <a href="#casos">Proyectos</a>
-    <a href="https://crimsoncr.com/products/" target="_blank" rel="noopener">Tienda</a>
-    <a class="btn btn--ink" href="#contacto">Asesoría</a>
+    <a href="#monitoreo"><span class="meta nav__n">02</span>Monitoreo</a>
+    <a href="#servicios"><span class="meta nav__n">03</span>Servicios</a>
+    <a href="#proceso"><span class="meta nav__n">04</span>Cómo trabajamos</a>
+    <a href="#casos"><span class="meta nav__n">05</span>Instalaciones</a>
+    <a href="https://crimsoncr.com/products/" target="_blank" rel="noopener"><span class="meta nav__n">06</span>Tienda</a>
+    <a class="btn btn--ink nav__cta" href="#contacto"><span class="nav__cta-dot"></span>Asesoría</a>
     <div class="nav__mobile-extra">
       <a href="tel:+50688889892">Llamar · +506 8888 9892</a>
       <a href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener">WhatsApp</a>
@@ -58,238 +62,254 @@
 </header>
 
 <main id="top" tabindex="-1">
-<!-- HERO -->
-<section class="hero" id="hero">
+
+<!-- CAM 01 · HERO -->
+<section class="hero" id="hero" data-cam="01" data-label="HERO" data-tone="cream">
   <div class="hero__net" id="netHero" aria-hidden="true"></div>
-
-  <div class="hud hud--tl" aria-hidden="true"><span class="hud__rec"></span>REC · CAM 01</div>
-  <div class="hud hud--tr" aria-hidden="true"><span id="hudClock">00:00:00</span> · CR</div>
-  <div class="hud hud--bl" aria-hidden="true">SISTEMA EN LÍNEA · <span class="hud__ok">●</span> 14 NODOS</div>
-  <div class="hud hud--br" aria-hidden="true">ALAJUELA · 10.016° N, 84.212° O</div>
-
-  <div class="hero__content">
-    <p class="eyebrow rise" style="--i:0">Evaluación · Diseño · Instalación · Soporte</p>
-    <h1 class="display rise" style="--i:1">Infraestructura que <em>conecta</em> <br>y protege tu operación</h1>
-    <p class="lead rise" style="--i:2">Diseñamos e implementamos soluciones de videovigilancia, redes y control de acceso adaptadas a cada entorno.</p>
-    <div class="hero__cta rise" style="--i:3">
-      <a class="btn btn--crimson btn--lg" href="#contacto">Hablemos de tu proyecto</a>
-      <a class="btn btn--ghost btn--lg hide-mobile" href="#casos">Ver proyectos</a>
-      <a class="btn btn--wa btn--lg only-mobile" href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener">WhatsApp</a>
-    </div>
-    <ul class="hero__trust rise" style="--i:4"><li>Distribuidor Hikvision</li><li>Soporte local</li><li>Respuesta el mismo día</li></ul>
-  </div>
-
-  <div class="hero__strip">
-    <section class="marquee" id="marquee" aria-label="Proyectos recientes">
-      <div class="marquee__track">
-        <figure><img src="assets/img/foto-camaras-comunidad-800.webp" srcset="assets/img/foto-camaras-comunidad-480.webp 480w, assets/img/foto-camaras-comunidad-800.webp 800w, assets/img/foto-camaras-comunidad-1200.webp 1200w" sizes="(max-width:767px) 210px, 280px" alt="" loading="eager" width="1600" height="900"><figcaption>Seguridad comunitaria · La Julieta Sur</figcaption></figure>
-        <figure><img src="assets/img/foto-rack-800.webp" srcset="assets/img/foto-rack-480.webp 480w, assets/img/foto-rack-800.webp 800w, assets/img/foto-rack-1200.webp 1200w" sizes="(max-width:767px) 210px, 280px" alt="" loading="lazy" width="1400" height="2489"><figcaption>Rack de datos y cableado</figcaption></figure>
-        <figure><img src="assets/img/foto-antena-camara-800.webp" srcset="assets/img/foto-antena-camara-480.webp 480w, assets/img/foto-antena-camara-800.webp 800w, assets/img/foto-antena-camara-1200.webp 1200w" sizes="(max-width:767px) 210px, 280px" alt="" loading="lazy" width="1400" height="2487"><figcaption>Enlace inalámbrico y cámara</figcaption></figure>
-        <figure><img src="assets/img/foto-patch-panel-800.webp" srcset="assets/img/foto-patch-panel-480.webp 480w, assets/img/foto-patch-panel-800.webp 800w, assets/img/foto-patch-panel-1200.webp 1200w" sizes="(max-width:767px) 210px, 280px" alt="" loading="lazy" width="1600" height="900"><figcaption>Cableado estructurado</figcaption></figure>
-        <figure><img src="assets/img/foto-camaras-poste-800.webp" srcset="assets/img/foto-camaras-poste-480.webp 480w, assets/img/foto-camaras-poste-800.webp 800w, assets/img/foto-camaras-poste-1200.webp 1200w" sizes="(max-width:767px) 210px, 280px" alt="" loading="lazy" width="1400" height="2487"><figcaption>Videovigilancia perimetral</figcaption></figure>
-        <figure><img src="assets/img/foto-tecnico-rack-800.webp" srcset="assets/img/foto-tecnico-rack-480.webp 480w, assets/img/foto-tecnico-rack-800.webp 800w, assets/img/foto-tecnico-rack-1200.webp 1200w" sizes="(max-width:767px) 210px, 280px" alt="" loading="lazy" width="1400" height="2489"><figcaption>Instalación de gabinete</figcaption></figure>
-        <figure><img src="assets/img/foto-instalacion-torre-800.webp" srcset="assets/img/foto-instalacion-torre-480.webp 480w, assets/img/foto-instalacion-torre-800.webp 800w, assets/img/foto-instalacion-torre-1200.webp 1200w" sizes="(max-width:767px) 210px, 280px" alt="" loading="lazy" width="1600" height="901"><figcaption>Montaje en altura</figcaption></figure>
-        <figure><img src="assets/img/foto-camara-residencia-800.webp" srcset="assets/img/foto-camara-residencia-480.webp 480w, assets/img/foto-camara-residencia-800.webp 800w, assets/img/foto-camara-residencia-1200.webp 1200w" sizes="(max-width:767px) 210px, 280px" alt="" loading="lazy" width="1400" height="2489"><figcaption>Instalación residencial</figcaption></figure>
+  <div class="wrap hero__grid">
+    <p class="eyebrow hero__eyebrow"><span class="live"></span>Alajuela · Costa Rica</p>
+    <h1 class="display lines">
+      <span class="ln"><span>Infraestructura que <em>conecta</em></span></span>
+      <span class="ln"><span>y protege tu operación</span></span>
+    </h1>
+    <div class="hero__aside">
+      <p class="lead">Diseñamos e implementamos soluciones de videovigilancia, redes y control de acceso adaptadas a cada entorno.</p>
+      <div class="hero__cta">
+        <a class="btn btn--crimson btn--lg" href="#contacto" data-cursor="Ir"><span>Hablemos de tu proyecto</span><i class="btn__arrow" aria-hidden="true"></i></a>
+        <a class="btn btn--ghost btn--lg" href="#casos" data-cursor="Ver">Ver instalaciones</a>
       </div>
-    </section>
+    </div>
+    <p class="meta hero__index">01 / 07 &nbsp;—&nbsp; Evaluación · Diseño · Instalación · Soporte</p>
+  </div>
+  <div class="hero__hint meta" aria-hidden="true">Deslizá</div>
+</section>
+
+<!-- CAM 02 · MURO DE MONITORES -->
+<section class="wall" id="monitoreo" data-cam="02" data-label="MONITOREO" data-tone="ink">
+  <div class="wrap">
+    <div class="sec-idx meta reveal" aria-hidden="true"><span>02</span><i></i><span>Monitoreo</span></div>
+    <div class="wall__head">
+      <h2 class="display-2 lines reveal"><span class="ln"><span>Así se ve tu operación,</span></span><span class="ln"><span><em>en línea</em>.</span></span></h2>
+      <p class="lead lead--dark reveal" style="--d:1">Instalaciones reales de Crimson, vistas como las ve el cliente: desde su propio centro de monitoreo.</p>
+    </div>
+    <div class="wall__grid" id="wall">
+      <figure class="feed reveal" style="--d:0" data-cursor="CAM 01"><img src="assets/img/foto-camaras-comunidad-800.webp" srcset="assets/img/foto-camaras-comunidad-480.webp 480w, assets/img/foto-camaras-comunidad-800.webp 800w, assets/img/foto-camaras-comunidad-1200.webp 1200w" sizes="(max-width:767px) 50vw, 33vw" alt="Cámaras de seguridad comunitaria en La Julieta Sur" loading="lazy" width="1600" height="900"><span class="feed__corners"></span><figcaption class="feed__meta"><span>CAM 01 · La Julieta Sur</span><span class="feed__clock">00:00:00</span></figcaption></figure>
+      <figure class="feed reveal" style="--d:1" data-cursor="CAM 02"><img src="assets/img/foto-rack-800.webp" srcset="assets/img/foto-rack-480.webp 480w, assets/img/foto-rack-800.webp 800w, assets/img/foto-rack-1200.webp 1200w" sizes="(max-width:767px) 50vw, 33vw" alt="Rack de red con cableado estructurado" loading="lazy" width="1400" height="2489"><span class="feed__corners"></span><figcaption class="feed__meta"><span>CAM 02 · Rack de datos</span><span class="feed__clock">00:00:00</span></figcaption></figure>
+      <figure class="feed reveal" style="--d:2" data-cursor="CAM 03"><img src="assets/img/foto-camara-residencia-800.webp" srcset="assets/img/foto-camara-residencia-480.webp 480w, assets/img/foto-camara-residencia-800.webp 800w, assets/img/foto-camara-residencia-1200.webp 1200w" sizes="(max-width:767px) 50vw, 33vw" alt="Cámara instalada en residencia de Hacienda Pinilla" loading="lazy" width="1400" height="2489"><span class="feed__corners"></span><figcaption class="feed__meta"><span>CAM 03 · Hacienda Pinilla</span><span class="feed__clock">00:00:00</span></figcaption></figure>
+      <figure class="feed reveal" style="--d:3" data-cursor="CAM 04"><img src="assets/img/foto-antena-camara-800.webp" srcset="assets/img/foto-antena-camara-480.webp 480w, assets/img/foto-antena-camara-800.webp 800w, assets/img/foto-antena-camara-1200.webp 1200w" sizes="(max-width:767px) 50vw, 33vw" alt="Antena de enlace inalámbrico junto a cámara" loading="lazy" width="1400" height="2487"><span class="feed__corners"></span><figcaption class="feed__meta"><span>CAM 04 · Enlace inalámbrico</span><span class="feed__clock">00:00:00</span></figcaption></figure>
+      <figure class="feed reveal" style="--d:4" data-cursor="CAM 05"><img src="assets/img/foto-patch-panel-800.webp" srcset="assets/img/foto-patch-panel-480.webp 480w, assets/img/foto-patch-panel-800.webp 800w, assets/img/foto-patch-panel-1200.webp 1200w" sizes="(max-width:767px) 50vw, 33vw" alt="Patch panel con cableado estructurado" loading="lazy" width="1600" height="900"><span class="feed__corners"></span><figcaption class="feed__meta"><span>CAM 05 · Cableado</span><span class="feed__clock">00:00:00</span></figcaption></figure>
+      <figure class="feed reveal" style="--d:5" data-cursor="CAM 06"><img src="assets/img/foto-camaras-poste-800.webp" srcset="assets/img/foto-camaras-poste-480.webp 480w, assets/img/foto-camaras-poste-800.webp 800w, assets/img/foto-camaras-poste-1200.webp 1200w" sizes="(max-width:767px) 50vw, 33vw" alt="Cámaras de videovigilancia en poste" loading="lazy" width="1400" height="2487"><span class="feed__corners"></span><figcaption class="feed__meta"><span>CAM 06 · Perímetro</span><span class="feed__clock">00:00:00</span></figcaption></figure>
+    </div>
+    <p class="meta sec-foot reveal">Fin CAM 02 · continúa ↓</p>
   </div>
 </section>
 
-<!-- SERVICIOS -->
-<section class="servicios" id="servicios">
+<!-- CAM 03 · SERVICIOS -->
+<section class="servicios" id="servicios" data-cam="03" data-label="SERVICIOS" data-tone="ink">
   <div class="wrap">
+    <div class="sec-idx meta reveal" aria-hidden="true"><span>03</span><i></i><span>Servicios</span></div>
     <div class="servicios__head">
-      <h2 class="display-2 reveal">Soluciones profesionales<br>en <em>seguridad</em> y tecnología</h2>
+      <h2 class="display-2 lines reveal"><span class="ln"><span>Soluciones profesionales</span></span><span class="ln"><span>en <em>seguridad</em> y tecnología</span></span></h2>
       <p class="lead lead--dark reveal" style="--d:1">Cada proyecto se diseña sobre el terreno: analizamos el sitio, seleccionamos la tecnología adecuada y la instalamos con respaldo técnico continuo.</p>
     </div>
 
     <div class="cards" data-snap>
       <article class="card reveal" style="--d:0">
-        <div class="card__media">
+        <div class="feed card__media" data-cursor="CAM 03">
           <img src="assets/img/foto-camaras-poste-800.webp" srcset="assets/img/foto-camaras-poste-480.webp 480w, assets/img/foto-camaras-poste-800.webp 800w, assets/img/foto-camaras-poste-1200.webp 1200w" sizes="(max-width:767px) 84vw, (max-width:1279px) 33vw, 420px" alt="Cámaras de videovigilancia instaladas en poste" loading="lazy" width="1400" height="2487">
-          <span class="card__rec"><i></i>REC</span>
-          <span class="card__scan"></span>
+          <span class="feed__corners"></span>
+          <span class="feed__meta"><span class="rec"><i></i>REC</span><span>01</span></span>
         </div>
         <div class="card__body">
-          <span class="num">01</span>
-          <h3>Videovigilancia profesional</h3>
+          <h3><em>Videovigilancia</em> profesional</h3>
           <p>Sistemas de videovigilancia diseñados a la medida para proteger y monitorear espacios de forma confiable.</p>
-          <ul class="card__tags"><li>IP / PTZ / Térmica</li><li>Grabación NVR</li><li>Acceso remoto</li></ul>
+          <p class="meta card__spec">IP · PTZ · Térmica &nbsp;/&nbsp; NVR &nbsp;/&nbsp; Acceso remoto</p>
         </div>
       </article>
 
       <article class="card reveal" style="--d:1">
-        <div class="card__media">
+        <div class="feed card__media" data-cursor="CAM 03">
           <img src="assets/img/foto-rack-800.webp" srcset="assets/img/foto-rack-480.webp 480w, assets/img/foto-rack-800.webp 800w, assets/img/foto-rack-1200.webp 1200w" sizes="(max-width:767px) 84vw, (max-width:1279px) 33vw, 420px" alt="Rack de red con cableado estructurado" loading="lazy" width="1400" height="2489">
-          <div class="card__mininet" id="miniNet" aria-hidden="true"></div>
+          <span class="feed__corners"></span>
+          <span class="feed__meta"><span>ENLACE · OK</span><span>02</span></span>
         </div>
         <div class="card__body">
-          <span class="num">02</span>
-          <h3>Redes e infraestructura</h3>
+          <h3><em>Redes</em> e infraestructura</h3>
           <p>Diseño e implementación de redes estables y seguras que soportan sistemas críticos y crecimiento futuro.</p>
-          <ul class="card__tags"><li>Cableado estructurado</li><li>Fibra óptica</li><li>Enlaces inalámbricos</li></ul>
+          <p class="meta card__spec">Cableado estructurado &nbsp;/&nbsp; Fibra óptica &nbsp;/&nbsp; Enlaces PtP</p>
         </div>
       </article>
 
       <article class="card reveal" style="--d:2">
-        <div class="card__media">
+        <div class="feed card__media" data-cursor="CAM 03">
           <img src="assets/img/foto-tecnico-rack-800.webp" srcset="assets/img/foto-tecnico-rack-480.webp 480w, assets/img/foto-tecnico-rack-800.webp 800w, assets/img/foto-tecnico-rack-1200.webp 1200w" sizes="(max-width:767px) 84vw, (max-width:1279px) 33vw, 420px" alt="Técnico instalando gabinete de red" loading="lazy" width="1400" height="2489">
-          <span class="card__spin" aria-hidden="true"></span>
+          <span class="feed__corners"></span>
+          <span class="feed__meta"><span>SOPORTE · ACTIVO</span><span>03</span></span>
         </div>
         <div class="card__body">
-          <span class="num">03</span>
-          <h3>Control y soporte</h3>
+          <h3><em>Control</em> y soporte</h3>
           <p>Integración de control de acceso, respaldo eléctrico y acompañamiento técnico continuo.</p>
-          <ul class="card__tags"><li>Control de acceso</li><li>UPS / respaldo</li><li>Soporte continuo</li></ul>
+          <p class="meta card__spec">Control de acceso &nbsp;/&nbsp; UPS · Respaldo &nbsp;/&nbsp; Soporte continuo</p>
         </div>
       </article>
     </div>
 
     <div class="stats reveal">
-      <div><b data-count="120">0</b><span>+ proyectos instalados</span></div>
-      <div><b data-count="850">0</b><span>+ cámaras en operación</span></div>
-      <div><b>24/7</b><span>monitoreo disponible</span></div>
-      <div><b data-count="7">0</b><span>provincias atendidas</span></div>
+      <div><b>120<sup>+</sup></b><span class="meta">Proyectos instalados</span></div>
+      <div><b>850<sup>+</sup></b><span class="meta">Cámaras en operación</span></div>
+      <div><b>24/7</b><span class="meta">Monitoreo disponible</span></div>
+      <div><b>7</b><span class="meta">Provincias atendidas</span></div>
     </div>
 
     <div class="brands reveal">
-      <span class="brands__label">Marcas líderes · respaldo y soporte local</span>
-      <img src="assets/img/marca-hikvision.png" alt="Hikvision, distribuidor autorizado" width="675" height="675">
-      <img src="assets/img/marca-ubiquiti.png" alt="Ubiquiti" width="675" height="675">
-      <img src="assets/img/marca-apc.png" alt="APC by Schneider Electric" width="675" height="675">
+      <span class="meta brands__label">Marcas líderes · respaldo y soporte local</span>
+      <div class="brands__row">
+        <span class="brands__item"><img src="assets/img/marca-hikvision.png" alt="Hikvision" loading="lazy" width="675" height="675"><span class="meta">Distribuidor autorizado</span></span>
+        <span class="brands__item"><img src="assets/img/marca-ubiquiti.png" alt="Ubiquiti" loading="lazy" width="675" height="675"></span>
+        <span class="brands__item"><img src="assets/img/marca-apc.png" alt="APC by Schneider Electric" loading="lazy" width="675" height="675"></span>
+      </div>
     </div>
+    <p class="meta sec-foot reveal">Fin CAM 03 · continúa ↓</p>
   </div>
 </section>
 
-<!-- PROCESO -->
-<section class="proceso" id="proceso">
+<!-- CAM 04 · PROCESO -->
+<section class="proceso" id="proceso" data-cam="04" data-label="PROCESO" data-tone="cream">
   <div class="wrap">
+    <div class="sec-idx meta reveal" aria-hidden="true"><span>04</span><i></i><span>Cómo trabajamos</span></div>
     <div class="proceso__head">
-      <p class="eyebrow reveal">Cómo trabajamos</p>
-      <h2 class="display-2 reveal" style="--d:1">No creemos en soluciones <em>genéricas</em></h2>
-      <p class="lead reveal" style="--d:2">Analizamos cada entorno, diseñamos la mejor solución y la implementamos con respaldo técnico y acompañamiento profesional.</p>
+      <h2 class="display-2 lines reveal"><span class="ln"><span>No creemos en</span></span><span class="ln"><span>soluciones <em>genéricas</em></span></span></h2>
+      <p class="lead reveal" style="--d:1">Analizamos cada entorno, diseñamos la mejor solución y la implementamos con respaldo técnico y acompañamiento profesional.</p>
     </div>
 
     <ol class="steps">
-      <li class="reveal" style="--d:0"><span class="steps__n">1</span><h3>Evaluación técnica</h3><p>Visitamos el sitio, entendemos los objetivos reales del proyecto y levantamos los puntos críticos.</p></li>
-      <li class="reveal" style="--d:1"><span class="steps__n">2</span><h3>Diseño del proyecto</h3><p>Seleccionamos tecnología adecuada y escalable. Entregamos plano, alcance y presupuesto claro.</p></li>
-      <li class="reveal" style="--d:2"><span class="steps__n steps__n--hot">3</span><h3>Instalación &amp; soporte</h3><p>Instalación profesional, configuración, capacitación y soporte continuo con respaldo local.</p></li>
+      <li class="reveal" style="--d:0"><span class="steps__n meta">01</span><h3><em>Evaluación</em> técnica</h3><p>Visitamos el sitio, entendemos los objetivos reales del proyecto y levantamos los puntos críticos.</p></li>
+      <li class="reveal" style="--d:1"><span class="steps__n meta">02</span><h3><em>Diseño</em> del proyecto</h3><p>Seleccionamos tecnología adecuada y escalable. Entregamos plano, alcance y presupuesto claro.</p></li>
+      <li class="reveal" style="--d:2"><span class="steps__n steps__n--hot meta">03</span><h3><em>Instalación</em> y soporte</h3><p>Instalación profesional, configuración, capacitación y soporte continuo con respaldo local.</p></li>
     </ol>
 
     <div class="cta-band reveal">
       <div class="cta-band__text">¿Querés que evaluemos tu caso?</div>
-      <a class="btn btn--crimson" href="#contacto">Solicitar asesoría</a>
+      <a class="btn btn--crimson" href="#contacto" data-cursor="Ir"><span>Solicitar asesoría</span><i class="btn__arrow" aria-hidden="true"></i></a>
     </div>
   </div>
 </section>
 
-<!-- CASOS -->
-<section class="casos" id="casos">
+<!-- CAM 05 · INSTALACIONES -->
+<section class="casos" id="casos" data-cam="05" data-label="INSTALACIONES" data-tone="bone">
   <div class="wrap">
+    <div class="sec-idx meta reveal" aria-hidden="true"><span>05</span><i></i><span>Instalaciones</span></div>
     <div class="casos__head">
-      <h2 class="display-2 reveal">Casos de <em>éxito</em></h2>
+      <h2 class="display-2 lines reveal"><span class="ln"><span>Lo que ya está</span></span><span class="ln"><span><em>en línea</em></span></span></h2>
       <p class="lead reveal" style="--d:1">Instalaciones reales en comunidades, residencias y empresas de todo el país.</p>
     </div>
 
     <div class="cases" data-snap>
-      <article class="case case--lg reveal" style="--d:0">
+      <article class="feed case case--lg reveal" style="--d:0" data-cursor="CAM 05">
         <img src="assets/img/foto-camaras-comunidad-800.webp" srcset="assets/img/foto-camaras-comunidad-480.webp 480w, assets/img/foto-camaras-comunidad-800.webp 800w, assets/img/foto-camaras-comunidad-1200.webp 1200w" sizes="(max-width:767px) 84vw, (max-width:1279px) 50vw, 620px" alt="Cámaras de seguridad comunitaria instaladas en poste en La Julieta Sur" loading="lazy" width="1600" height="900">
+        <span class="feed__corners"></span>
         <div class="case__info">
-          <span class="case__tag">Seguridad comunitaria</span>
+          <span class="meta case__tag">Seguridad comunitaria</span>
           <strong>Proyecto Seguridad Comunitaria</strong>
           <span class="case__loc">La Julieta Sur, Alajuela</span>
         </div>
       </article>
-      <article class="case case--lg reveal" style="--d:1">
+      <article class="feed case case--lg reveal" style="--d:1" data-cursor="CAM 05">
         <img src="assets/img/foto-camara-residencia-800.webp" srcset="assets/img/foto-camara-residencia-480.webp 480w, assets/img/foto-camara-residencia-800.webp 800w, assets/img/foto-camara-residencia-1200.webp 1200w" sizes="(max-width:767px) 84vw, (max-width:1279px) 50vw, 620px" alt="Cámara de videovigilancia instalada en residencia de Hacienda Pinilla" loading="lazy" width="1400" height="2489">
+        <span class="feed__corners"></span>
         <div class="case__info">
-          <span class="case__tag">Red y seguridad</span>
+          <span class="meta case__tag">Red y seguridad</span>
           <strong>Proyecto de red y seguridad</strong>
           <span class="case__loc">Hacienda Pinilla, Guanacaste</span>
         </div>
       </article>
-      <article class="case reveal" style="--d:0">
+      <article class="feed case reveal" style="--d:0" data-cursor="CAM 05">
         <img src="assets/img/foto-patch-panel-800.webp" srcset="assets/img/foto-patch-panel-480.webp 480w, assets/img/foto-patch-panel-800.webp 800w, assets/img/foto-patch-panel-1200.webp 1200w" sizes="(max-width:767px) 84vw, (max-width:1279px) 50vw, 310px" alt="Patch panel con cableado estructurado ordenado" loading="lazy" width="1600" height="900">
-        <div class="case__info">
-          <span class="case__tag">Cableado estructurado</span>
-          <strong>Patch panel y certificación</strong>
-        </div>
+        <span class="feed__corners"></span>
+        <div class="case__info"><span class="meta case__tag">Cableado estructurado</span><strong>Patch panel y certificación</strong></div>
       </article>
-      <article class="case reveal" style="--d:1">
+      <article class="feed case reveal" style="--d:1" data-cursor="CAM 05">
         <img src="assets/img/foto-instalacion-torre-800.webp" srcset="assets/img/foto-instalacion-torre-480.webp 480w, assets/img/foto-instalacion-torre-800.webp 800w, assets/img/foto-instalacion-torre-1200.webp 1200w" sizes="(max-width:767px) 84vw, (max-width:1279px) 50vw, 310px" alt="Técnico instalando equipo en altura sobre torre" loading="lazy" width="1600" height="901">
-        <div class="case__info">
-          <span class="case__tag">Montaje en altura</span>
-          <strong>Instalación sobre torre</strong>
-        </div>
+        <span class="feed__corners"></span>
+        <div class="case__info"><span class="meta case__tag">Montaje en altura</span><strong>Instalación sobre torre</strong></div>
       </article>
-      <article class="case reveal" style="--d:2">
+      <article class="feed case reveal" style="--d:2" data-cursor="CAM 05">
         <img src="assets/img/foto-antena-camara-800.webp" srcset="assets/img/foto-antena-camara-480.webp 480w, assets/img/foto-antena-camara-800.webp 800w, assets/img/foto-antena-camara-1200.webp 1200w" sizes="(max-width:767px) 84vw, (max-width:1279px) 50vw, 310px" alt="Antena de enlace inalámbrico junto a cámara en poste" loading="lazy" width="1400" height="2487">
-        <div class="case__info">
-          <span class="case__tag">Enlace inalámbrico</span>
-          <strong>Antena y cámara en poste</strong>
-        </div>
+        <span class="feed__corners"></span>
+        <div class="case__info"><span class="meta case__tag">Enlace inalámbrico</span><strong>Antena y cámara en poste</strong></div>
       </article>
-      <article class="case reveal" style="--d:3">
-        <img src="assets/img/foto-tecnico-rack-800.webp" srcset="assets/img/foto-tecnico-rack-480.webp 480w, assets/img/foto-tecnico-rack-800.webp 800w, assets/img/foto-tecnico-rack-1200.webp 1200w" sizes="(max-width:767px) 84vw, (max-width:1279px) 50vw, 310px" alt="Técnico instalando gabinete de red" loading="lazy" width="1400" height="2489">
-        <div class="case__info">
-          <span class="case__tag">Gabinete de red</span>
-          <strong>Instalación de rack</strong>
-        </div>
+      <article class="feed case reveal" style="--d:3" data-cursor="CAM 05">
+        <img src="assets/img/foto-tecnico-poste-800.webp" srcset="assets/img/foto-tecnico-poste-480.webp 480w, assets/img/foto-tecnico-poste-800.webp 800w, assets/img/foto-tecnico-poste-1200.webp 1200w" sizes="(max-width:767px) 84vw, (max-width:1279px) 50vw, 310px" alt="Técnico trabajando en poste" loading="lazy" width="1400" height="2487">
+        <span class="feed__corners"></span>
+        <div class="case__info"><span class="meta case__tag">Tendido externo</span><strong>Trabajo en poste</strong></div>
       </article>
     </div>
   </div>
 </section>
 
-<!-- TIENDA -->
-<section class="tienda" id="tienda">
-  <div class="tienda__net" id="netShop" aria-hidden="true"></div>
-  <div class="wrap tienda__grid">
-    <div class="tienda__text">
-      <h2 class="display-2 reveal">Compra tecnología con <em>confianza</em> y respaldo</h2>
-      <p class="lead lead--dark reveal" style="--d:1">Productos seleccionados para soluciones integrales. Distribuidor autorizado Hikvision con garantía y soporte local.</p>
-      <a class="btn btn--white reveal" style="--d:2" href="https://crimsoncr.com/products" target="_blank" rel="noopener">Ver catálogo en línea</a>
-    </div>
-    <div class="products" data-snap>
-      <a class="product reveal" href="https://crimsoncr.com/products" target="_blank" rel="noopener" style="--d:0"><img src="assets/img/prod-ptz-800.webp" srcset="assets/img/prod-ptz-480.webp 480w, assets/img/prod-ptz-800.webp 800w, assets/img/prod-ptz-1200.webp 1200w" sizes="(max-width:767px) 66vw, (max-width:1279px) 25vw, 300px" alt="Cámara PTZ Hikvision" loading="lazy" width="1000" height="556"><span>Cámara PTZ</span></a>
-      <a class="product reveal" href="https://crimsoncr.com/products" target="_blank" rel="noopener" style="--d:1"><img src="assets/img/prod-ap-800.webp" srcset="assets/img/prod-ap-480.webp 480w, assets/img/prod-ap-800.webp 800w, assets/img/prod-ap-1200.webp 1200w" sizes="(max-width:767px) 66vw, (max-width:1279px) 25vw, 300px" alt="Access point" loading="lazy" width="1000" height="556"><span>Enlaces inalámbricos</span></a>
-      <a class="product reveal" href="https://crimsoncr.com/products" target="_blank" rel="noopener" style="--d:2"><img src="assets/img/prod-ups-800.webp" srcset="assets/img/prod-ups-480.webp 480w, assets/img/prod-ups-800.webp 800w, assets/img/prod-ups-1200.webp 1200w" sizes="(max-width:767px) 66vw, (max-width:1279px) 25vw, 300px" alt="UPS de respaldo" loading="lazy" width="1000" height="556"><span>UPS de respaldo</span></a>
-      <a class="product reveal" href="https://crimsoncr.com/products" target="_blank" rel="noopener" style="--d:3"><img src="assets/img/prod-router-800.webp" srcset="assets/img/prod-router-480.webp 480w, assets/img/prod-router-800.webp 800w, assets/img/prod-router-1200.webp 1200w" sizes="(max-width:767px) 66vw, (max-width:1279px) 25vw, 300px" alt="Router" loading="lazy" width="1000" height="556"><span>Routers &amp; switches</span></a>
-    </div>
-  </div>
-</section>
-
-<!-- CONTACTO -->
-<section class="contacto" id="contacto">
-  <div class="wrap contacto__grid">
-    <div class="contacto__text">
-      <p class="eyebrow reveal">Contacto</p>
-      <h2 class="display-2 reveal" style="--d:1">Asesoría, instalación y soporte técnico <em>profesional</em></h2>
-      <p class="lead reveal" style="--d:2">Contactanos hoy y recibí atención personalizada. Respondemos el mismo día.</p>
-      <div class="contacto__meta reveal" style="--d:3">
-        <a href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener"><span class="dot"></span>WhatsApp · +506 8888 9892</a>
-        <a href="tel:+50688889892"><span class="dot dot--ink"></span>Llamar · +506 8888 9892</a>
-        <span>Alajuela, Costa Rica</span>
-        <div class="contacto__actions only-mobile">
-          <a class="btn btn--wa" href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener">WhatsApp</a>
-          <a class="btn btn--ink" href="tel:+50688889892">Llamar</a>
-        </div>
-        <img class="contacto__qr" src="assets/img/qr-whatsapp.webp" alt="Código QR de WhatsApp Business de Crimson Consulting" loading="lazy" width="430" height="482">
+<!-- CAM 06 · TIENDA -->
+<section class="tienda" id="tienda" data-cam="06" data-label="TIENDA" data-tone="ink">
+  <div class="wrap">
+    <div class="sec-idx meta reveal" aria-hidden="true"><span>06</span><i></i><span>Tienda</span></div>
+    <div class="tienda__grid">
+      <div class="tienda__text">
+        <h2 class="display-2 lines reveal"><span class="ln"><span>Compra tecnología con</span></span><span class="ln"><span><em>confianza</em> y respaldo</span></span></h2>
+        <p class="lead lead--dark reveal" style="--d:1">Productos seleccionados para soluciones integrales. Distribuidor autorizado Hikvision con garantía y soporte local.</p>
+        <a class="btn btn--white reveal" style="--d:2" href="https://crimsoncr.com/products" target="_blank" rel="noopener" data-cursor="Abrir"><span>Ver catálogo en línea</span><i class="btn__arrow" aria-hidden="true"></i></a>
+      </div>
+      <div class="products" data-snap>
+        <a class="feed product reveal" href="https://crimsoncr.com/products" target="_blank" rel="noopener" style="--d:0" data-cursor="Tienda"><img src="assets/img/prod-ptz-800.webp" srcset="assets/img/prod-ptz-480.webp 480w, assets/img/prod-ptz-800.webp 800w" sizes="(max-width:767px) 70vw, (max-width:1279px) 25vw, 300px" alt="Cámara PTZ Hikvision" loading="lazy" width="1000" height="556"><span class="feed__corners"></span><span class="product__name">Cámara PTZ</span></a>
+        <a class="feed product reveal" href="https://crimsoncr.com/products" target="_blank" rel="noopener" style="--d:1" data-cursor="Tienda"><img src="assets/img/prod-ap-800.webp" srcset="assets/img/prod-ap-480.webp 480w, assets/img/prod-ap-800.webp 800w" sizes="(max-width:767px) 70vw, (max-width:1279px) 25vw, 300px" alt="Access point" loading="lazy" width="1000" height="556"><span class="feed__corners"></span><span class="product__name">Enlaces inalámbricos</span></a>
+        <a class="feed product reveal" href="https://crimsoncr.com/products" target="_blank" rel="noopener" style="--d:2" data-cursor="Tienda"><img src="assets/img/prod-ups-800.webp" srcset="assets/img/prod-ups-480.webp 480w, assets/img/prod-ups-800.webp 800w" sizes="(max-width:767px) 70vw, (max-width:1279px) 25vw, 300px" alt="UPS de respaldo" loading="lazy" width="1000" height="556"><span class="feed__corners"></span><span class="product__name">UPS de respaldo</span></a>
+        <a class="feed product reveal" href="https://crimsoncr.com/products" target="_blank" rel="noopener" style="--d:3" data-cursor="Tienda"><img src="assets/img/prod-router-800.webp" srcset="assets/img/prod-router-480.webp 480w, assets/img/prod-router-800.webp 800w" sizes="(max-width:767px) 70vw, (max-width:1279px) 25vw, 300px" alt="Router" loading="lazy" width="1000" height="556"><span class="feed__corners"></span><span class="product__name">Routers y switches</span></a>
       </div>
     </div>
+  </div>
+</section>
 
-    <form class="form reveal" id="form" style="--d:2" novalidate>
-      <label><span>Nombre</span><input name="nombre" type="text" autocomplete="name" autocapitalize="words" required placeholder="Tu nombre"></label>
-      <label><span>Teléfono</span><input name="telefono" type="tel" inputmode="tel" autocomplete="tel" required placeholder="+506 0000 0000"></label>
-      <label><span>Correo electrónico</span><input name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" placeholder="nombre@empresa.com"></label>
-      <label><span>Tipo de proyecto</span>
-        <select name="tipo">
-          <option>Videovigilancia</option><option>Redes e infraestructura</option><option>Control de acceso</option><option>Respaldo eléctrico / UPS</option><option>Proyecto integral</option>
-        </select>
-      </label>
-      <label><span>Mensaje</span><textarea name="mensaje" rows="4" placeholder="Contanos brevemente sobre tu sitio y lo que necesitás"></textarea></label>
-      <button class="btn btn--crimson btn--lg" type="submit">Enviar por WhatsApp</button>
-      <p class="form__note">Al enviar se abre WhatsApp con tu mensaje listo. Respondemos el mismo día.</p>
-    </form>
+<!-- CAM 07 · CONTACTO (clímax) -->
+<section class="contacto" id="contacto" data-cam="07" data-label="CONTACTO" data-tone="ink">
+  <div class="contacto__net" id="netContact" aria-hidden="true"></div>
+  <div class="wrap">
+    <div class="sec-idx meta reveal" aria-hidden="true"><span>07</span><i></i><span>Contacto</span></div>
+    <div class="contacto__grid">
+      <div class="contacto__text">
+        <h2 class="display-2 lines reveal"><span class="ln"><span>Hablemos de</span></span><span class="ln"><span><em>tu sitio</em>.</span></span></h2>
+        <p class="lead lead--dark reveal" style="--d:1">Contactanos y recibí atención personalizada. Respondemos el mismo día.</p>
+
+        <div class="pass reveal" style="--d:2" aria-label="Tarjeta de contacto">
+          <div class="pass__top"><img src="assets/img/logo.png" alt="" width="1024" height="237"><span class="meta">Pase de acceso · 07</span></div>
+          <a class="pass__tel" href="tel:+50688889892">+506 8888 9892</a>
+          <div class="pass__bottom"><span class="meta">WhatsApp Business · CR</span><span class="meta"><span class="live"></span>En línea</span></div>
+          <img class="pass__qr" src="assets/img/qr-whatsapp.webp" alt="" aria-hidden="true" loading="lazy" width="430" height="482">
+        </div>
+
+        <div class="contacto__actions reveal" style="--d:3">
+          <a class="btn btn--crimson btn--lg" id="waBtn" href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener" data-cursor="Ir"><span>Escribinos por WhatsApp</span><i class="btn__arrow" aria-hidden="true"></i></a>
+          <a class="btn btn--ghost btn--ghost-light btn--lg" href="tel:+50688889892">Llamar</a>
+        </div>
+      </div>
+
+      <form class="form reveal" id="form" style="--d:2" novalidate>
+        <p class="meta form__label">¿Preferís dejarnos los datos?</p>
+        <fieldset class="chips">
+          <legend class="sr-only">Tipo de proyecto</legend>
+          <label><input type="radio" name="tipo" value="Videovigilancia" checked><span>Videovigilancia</span></label>
+          <label><input type="radio" name="tipo" value="Redes e infraestructura"><span>Redes</span></label>
+          <label><input type="radio" name="tipo" value="Control de acceso"><span>Control de acceso</span></label>
+          <label><input type="radio" name="tipo" value="Respaldo eléctrico / UPS"><span>UPS</span></label>
+          <label><input type="radio" name="tipo" value="Proyecto integral"><span>Integral</span></label>
+        </fieldset>
+        <label class="field"><span>Nombre</span><input name="nombre" type="text" autocomplete="name" autocapitalize="words" required placeholder="Tu nombre"></label>
+        <label class="field"><span>Teléfono</span><input name="telefono" type="tel" inputmode="tel" autocomplete="tel" required placeholder="+506 0000 0000"></label>
+        <details class="form__more"><summary class="meta">Agregar detalle</summary>
+          <label class="field"><span>Correo electrónico</span><input name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" placeholder="nombre@empresa.com"></label>
+          <label class="field"><span>Mensaje</span><textarea name="mensaje" rows="3" placeholder="Contanos brevemente sobre tu sitio y lo que necesitás"></textarea></label>
+        </details>
+        <button class="btn btn--white btn--lg" type="submit" data-cursor="Enviar"><span>Enviar por WhatsApp</span><i class="btn__arrow" aria-hidden="true"></i></button>
+        <p class="meta form__note">Al enviar se abre WhatsApp con tu mensaje listo.</p>
+      </form>
+    </div>
   </div>
 </section>
 </main>
@@ -297,31 +317,27 @@
 <!-- FOOTER -->
 <footer class="footer">
   <div class="wrap">
-    <div class="footer__grid">
-      <div class="footer__brand">
-        <img src="assets/img/logo.png" alt="Crimson Consulting" width="1024" height="237">
-        <p>Soluciones en seguridad y tecnología<br>Alajuela, Costa Rica<br>+506 8888 9892</p>
-      </div>
-      <div><b>Servicios</b><a href="#servicios">Videovigilancia</a><a href="#servicios">Redes</a><a href="#servicios">Control de acceso</a><a href="#servicios">Soporte técnico</a></div>
-      <div><b>Enlaces</b><a href="#top">Inicio</a><a href="https://crimsoncr.com/products/" target="_blank" rel="noopener">Tienda</a><a href="https://www.crimsoncr.com/page/solicitud-de-asesoria-personalizada/" target="_blank" rel="noopener">Asesoría personalizada</a></div>
-      <div><b>Contacto</b><a href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener">WhatsApp</a><a href="https://www.facebook.com/crimsonconcr" target="_blank" rel="noopener">Facebook</a><a href="https://www.instagram.com/cr.crimsoncr/" target="_blank" rel="noopener">Instagram</a></div>
+    <div class="footer__brand">
+      <img src="assets/img/logo.png" alt="Crimson Consulting" width="1024" height="237" loading="lazy">
+      <p class="footer__claim">Infraestructura que conecta y protege.</p>
     </div>
-    <div class="footer__bottom">
+    <div class="footer__grid">
+      <div><span class="meta">Servicios</span><a href="#servicios">Videovigilancia</a><a href="#servicios">Redes</a><a href="#servicios">Control de acceso</a><a href="#servicios">Soporte técnico</a></div>
+      <div><span class="meta">Enlaces</span><a href="#top">Inicio</a><a href="https://crimsoncr.com/products/" target="_blank" rel="noopener">Tienda</a><a href="https://www.crimsoncr.com/page/solicitud-de-asesoria-personalizada/" target="_blank" rel="noopener">Asesoría personalizada</a></div>
+      <div><span class="meta">Contacto</span><a href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener">WhatsApp</a><a href="https://www.facebook.com/crimsonconcr" target="_blank" rel="noopener">Facebook</a><a href="https://www.instagram.com/cr.crimsoncr/" target="_blank" rel="noopener">Instagram</a></div>
+      <div><span class="meta">Sede</span><span>Alajuela, Costa Rica</span><a href="tel:+50688889892">+506 8888 9892</a></div>
+    </div>
+    <div class="footer__bottom meta">
       <span>© 2026 Crimson Consulting · Todos los derechos reservados</span>
       <div><a href="https://www.crimsoncr.com/terms" target="_blank" rel="noopener">Términos y condiciones</a><a href="https://www.crimsoncr.com/policies" target="_blank" rel="noopener">Política de privacidad</a></div>
     </div>
   </div>
 </footer>
 
-<nav class="mbar" aria-label="Acciones rápidas">
-  <a href="tel:+50688889892"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1L6.6 10.8z"/></svg><span>Llamar</span></a>
-  <a href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener" class="mbar__wa"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 1.8a8.2 8.2 0 1 1-4.2 15.3l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 0 1 12 3.8zm-3 4.4c-.2 0-.5 0-.7.3-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.2 5 4.4 2.5 1 3 .8 3.5.7.5 0 1.7-.7 2-1.4.2-.7.2-1.2.1-1.4l-.5-.3-1.9-.9c-.3-.1-.4-.2-.6.1l-.8 1c-.2.2-.3.2-.6.1-.3-.2-1.2-.4-2.3-1.4a8.6 8.6 0 0 1-1.6-2c-.2-.3 0-.4.1-.6l.4-.5.3-.5v-.5l-.9-2.1c-.2-.5-.4-.4-.6-.4H9z"/></svg><span>WhatsApp</span></a>
-  <a href="#contacto" class="mbar__cta"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M3 5h18v2H3zm0 6h12v2H3zm0 6h18v2H3z"/></svg><span>Cotizar</span></a>
-</nav>
-<a class="wa" href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener" aria-label="Escribinos por WhatsApp">
-  <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 1.8a8.2 8.2 0 1 1-4.2 15.3l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 0 1 12 3.8zm-3 4.4c-.2 0-.5 0-.7.3-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.2 5 4.4 2.5 1 3 .8 3.5.7.5 0 1.7-.7 2-1.4.2-.7.2-1.2.1-1.4l-.5-.3-1.9-.9c-.3-.1-.4-.2-.6.1l-.8 1c-.2.2-.3.2-.6.1-.3-.2-1.2-.4-2.3-1.4a8.6 8.6 0 0 1-1.6-2c-.2-.3 0-.4.1-.6l.4-.5.3-.5v-.5l-.9-2.1c-.2-.5-.4-.4-.6-.4H9z"/></svg>
+<a class="wa" href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener" aria-label="Escribinos por WhatsApp" data-cursor="WhatsApp">
+  <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 1.8a8.2 8.2 0 1 1-4.2 15.3l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 0 1 12 3.8zm-3 4.4c-.2 0-.5 0-.7.3-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.2 5 4.4 2.5 1 3 .8 3.5.7.5 0 1.7-.7 2-1.4.2-.7.2-1.2.1-1.4l-.5-.3-1.9-.9c-.3-.1-.4-.2-.6.1l-.8 1c-.2.2-.3.2-.6.1-.3-.2-1.2-.4-2.3-1.4a8.6 8.6 0 0 1-1.6-2c-.2-.3 0-.4.1-.6l.4-.5.3-.5v-.5l-.9-2.1c-.2-.5-.4-.4-.6-.4H9z"/></svg>
 </a>
 
-<script src="assets/main.js?v=3" defer></script>
+<script src="assets/main.js?v=8" defer></script>
 </body>
 </html>
