@@ -109,15 +109,49 @@
   const nav = $('#nav'), burger = $('#burger');
   const onScroll = () => nav.classList.toggle('is-scrolled', scrollY > 40);
   addEventListener('scroll', onScroll, { passive: true }); onScroll();
-  burger.addEventListener('click', () => {
-    const open = nav.classList.toggle('is-open');
+  // Bloqueo de scroll compatible con iOS Safari (position:fixed + restaurar scrollY)
+  let lockY = 0;
+  const setMenu = open => {
+    nav.classList.toggle('is-open', open);
     burger.setAttribute('aria-expanded', open);
     burger.setAttribute('aria-label', open ? 'Cerrar menú' : 'Abrir menú');
-    document.body.style.overflow = open ? 'hidden' : '';
+    if (open) { lockY = scrollY; document.body.classList.add('menu-open'); document.body.style.top = `-${lockY}px`; }
+    else { document.body.classList.remove('menu-open'); document.body.style.top = ''; scrollTo({ top: lockY, behavior: 'instant' }); }
+  };
+  burger.addEventListener('click', () => setMenu(!nav.classList.contains('is-open')));
+  $$('.nav__links a').forEach(a => a.addEventListener('click', () => nav.classList.contains('is-open') && setMenu(false)));
+  addEventListener('keydown', e => e.key === 'Escape' && nav.classList.contains('is-open') && setMenu(false));
+
+  /* ---------- Carruseles con snap (móvil): indicadores ---------- */
+  const isMobile = matchMedia('(max-width:767px)');
+  $$('[data-snap]').forEach(track => {
+    const items = [...track.children];
+    if (items.length < 2) return;
+    const dots = document.createElement('div');
+    dots.className = 'snap-dots'; dots.setAttribute('aria-hidden', 'true');
+    items.forEach(() => dots.appendChild(document.createElement('i')));
+    track.after(dots);
+    const update = () => {
+      if (!isMobile.matches) return;
+      const x = track.scrollLeft + track.clientWidth * .3;
+      let idx = 0;
+      items.forEach((it, i) => { if (it.offsetLeft - track.offsetLeft <= x) idx = i; });
+      [...dots.children].forEach((d, i) => d.classList.toggle('on', i === idx));
+    };
+    track.addEventListener('scroll', update, { passive: true }); update();
   });
-  $$('.nav__links a').forEach(a => a.addEventListener('click', () => {
-    nav.classList.remove('is-open'); burger.setAttribute('aria-expanded', 'false'); document.body.style.overflow = '';
-  }));
+
+  /* ---------- Barra inferior: se esconde al bajar, vuelve al subir ---------- */
+  const mbar = $('.mbar');
+  if (mbar) {
+    let lastY = scrollY, acc = 0;
+    addEventListener('scroll', () => {
+      const y = scrollY, dy = y - lastY; lastY = y; acc = Math.sign(dy) === Math.sign(acc) ? acc + dy : dy;
+      const nearBottom = innerHeight + y >= document.documentElement.scrollHeight - 200;
+      if (acc > 80 && !nearBottom) mbar.classList.add('is-hidden');
+      else if (acc < -40 || y < 10 || nearBottom) mbar.classList.remove('is-hidden');
+    }, { passive: true });
+  }
 
   /* ---------- Barra de progreso ---------- */
   const bar = $('.progress span');
