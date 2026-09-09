@@ -6,6 +6,9 @@
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const isPC = matchMedia('(min-width:1024px) and (hover:hover) and (prefers-reduced-motion: no-preference)').matches;
+  const isMobile = matchMedia('(max-width:767px)');
+  const CFG = (() => { try { return JSON.parse($('#site-config').textContent); } catch { return { tel: '+50688889892', wa: '50688889892', waLink: 'https://wa.me/message/5YQKXZFUPHWLA1' }; } })();
+  const scrollFns = []; // un solo listener de scroll con rAF (se llena abajo)
   const SVG = 'http://www.w3.org/2000/svg';
   const el = (tag, attrs = {}, ...kids) => {
     const n = document.createElementNS(SVG, tag);
@@ -30,7 +33,7 @@
       const dash = el('path', { d, class: 'net-dash' });
       dash.style.animationDelay = `${-i * 0.7}s`;
       svg.appendChild(dash);
-      if (!reduced && i % 2 === seed) {
+      if (!reduced && i % 2 === seed && !(isMobile.matches && i % 4 !== seed)) {
         const c = el('circle', { r: 4, fill: '#e2233a' });
         c.appendChild(el('animateMotion', { dur: `${PULSE + (i % 3)}s`, repeatCount: 'indefinite', path: d, begin: `${-i * 1.3}s` }));
         svg.appendChild(c);
@@ -48,6 +51,15 @@
   const netHero = $('#netHero'), netShop = $('#netShop');
   netHero && netHero.appendChild(buildNet(false, 0));
   netShop && netShop.appendChild(buildNet(true, 1));
+
+  // Pausar TODO lo que anima cuando su sección no se ve (CSS + SMIL)
+  if (!reduced) {
+    const io = new IntersectionObserver(entries => entries.forEach(en => {
+      en.target.classList.toggle('is-offscreen', !en.isIntersecting);
+      en.target.querySelectorAll('svg').forEach(s => en.isIntersecting ? s.unpauseAnimations() : s.pauseAnimations());
+    }), { rootMargin: '20%' });
+    $$('section, footer').forEach(s => io.observe(s));
+  }
 
   // Mini red de la tarjeta 02
   const mini = $('#miniNet');
@@ -74,10 +86,12 @@
     const LERP = 0.09; // calibrado: 0.16 se sentía a empujones
     let tx = 0, ty = 0, cx = 0, cy = 0;      // red
     let mx = -100, my = -100, px = -100, py = -100; // cursor
+    let raf = 0;
     addEventListener('pointermove', e => {
       const nx = e.clientX / innerWidth - .5, ny = e.clientY / innerHeight - .5;
       tx = nx * -28; ty = ny * -18;
       mx = e.clientX; my = e.clientY;
+      if (!raf) raf = requestAnimationFrame(loop);
     }, { passive: true });
     addEventListener('pointerover', e => {
       const t = e.target.closest('a,button,label,.product,.case');
@@ -85,15 +99,16 @@
     });
     let heroVisible = true;
     new IntersectionObserver(([en]) => heroVisible = en.isIntersecting, { rootMargin: '35%' }).observe(netHero);
-    (function loop() {
+    function loop() {
       px += (mx - px) * .35; py += (my - py) * .35;
       cursor.style.transform = `translate3d(${px}px,${py}px,0)`;
       if (heroVisible) {
         cx += (tx - cx) * LERP; cy += (ty - cy) * LERP;
         netHero.style.transform = `translate3d(${cx}px,${cy}px,0)`;
       }
-      requestAnimationFrame(loop);
-    })();
+      const idle = Math.abs(mx - px) + Math.abs(my - py) + (heroVisible ? Math.abs(tx - cx) + Math.abs(ty - cy) : 0) < .1;
+      raf = idle ? 0 : requestAnimationFrame(loop);
+    }
   }
 
   /* ---------- HUD reloj ---------- */
@@ -107,8 +122,8 @@
 
   /* ---------- Nav ---------- */
   const nav = $('#nav'), burger = $('#burger');
-  const onScroll = () => nav.classList.toggle('is-scrolled', scrollY > 40);
-  addEventListener('scroll', onScroll, { passive: true }); onScroll();
+  const onScroll = () => { if (document.body.classList.contains('menu-open')) return; nav.classList.toggle('is-scrolled', scrollY > 40); };
+  onScroll();
   // Bloqueo de scroll compatible con iOS Safari (position:fixed + restaurar scrollY)
   let lockY = 0;
   const setMenu = open => {
@@ -117,13 +132,14 @@
     burger.setAttribute('aria-label', open ? 'Cerrar menú' : 'Abrir menú');
     if (open) { lockY = scrollY; document.body.classList.add('menu-open'); document.body.style.top = `-${lockY}px`; }
     else { document.body.classList.remove('menu-open'); document.body.style.top = ''; scrollTo({ top: lockY, behavior: 'instant' }); }
+    $$('main, footer, .mbar, .wa').forEach(el => { el.inert = open; el.setAttribute('aria-hidden', open); });
+    if (open) setTimeout(() => $('.nav__links a').focus(), 400); else burger.focus();
   };
   burger.addEventListener('click', () => setMenu(!nav.classList.contains('is-open')));
   $$('.nav__links a').forEach(a => a.addEventListener('click', () => nav.classList.contains('is-open') && setMenu(false)));
   addEventListener('keydown', e => e.key === 'Escape' && nav.classList.contains('is-open') && setMenu(false));
 
   /* ---------- Carruseles con snap (móvil): indicadores ---------- */
-  const isMobile = matchMedia('(max-width:767px)');
   $$('[data-snap]').forEach(track => {
     const items = [...track.children];
     if (items.length < 2) return;
@@ -131,38 +147,58 @@
     dots.className = 'snap-dots'; dots.setAttribute('aria-hidden', 'true');
     items.forEach(() => dots.appendChild(document.createElement('i')));
     track.after(dots);
+    let offsets = [], w = 0;
+    const measure = () => { offsets = items.map(it => it.offsetLeft - track.offsetLeft); w = track.clientWidth; };
+    let tick = false;
     const update = () => {
-      if (!isMobile.matches) return;
-      const x = track.scrollLeft + track.clientWidth * .3;
-      let idx = 0;
-      items.forEach((it, i) => { if (it.offsetLeft - track.offsetLeft <= x) idx = i; });
-      [...dots.children].forEach((d, i) => d.classList.toggle('on', i === idx));
+      if (!isMobile.matches || tick) return; tick = true;
+      requestAnimationFrame(() => {
+        tick = false;
+        if (w !== track.clientWidth) measure();
+        const x = track.scrollLeft + w * .3;
+        let idx = 0;
+        offsets.forEach((o, i) => { if (o <= x) idx = i; });
+        [...dots.children].forEach((d, i) => d.classList.toggle('on', i === idx));
+      });
     };
-    track.addEventListener('scroll', update, { passive: true }); update();
+    measure(); track.addEventListener('scroll', update, { passive: true }); addEventListener('resize', measure, { passive: true }); update();
   });
 
   /* ---------- Barra inferior: se esconde al bajar, vuelve al subir ---------- */
   const mbar = $('.mbar');
   if (mbar) {
-    let lastY = scrollY, acc = 0;
-    addEventListener('scroll', () => {
+    let lastY = scrollY, acc = 0, typing = false;
+    scrollFns.push(() => {
+      if (typing) return;
       const y = scrollY, dy = y - lastY; lastY = y; acc = Math.sign(dy) === Math.sign(acc) ? acc + dy : dy;
-      const nearBottom = innerHeight + y >= document.documentElement.scrollHeight - 200;
+      const nearBottom = innerHeight + y >= docH - 200;
       if (acc > 80 && !nearBottom) mbar.classList.add('is-hidden');
       else if (acc < -40 || y < 10 || nearBottom) mbar.classList.remove('is-hidden');
-    }, { passive: true });
+    });
+    // Con el teclado abierto la barra taparía el campo activo
+    const formEl = $('#form');
+    formEl.addEventListener('focusin', () => { typing = true; mbar.classList.add('is-hidden'); });
+    formEl.addEventListener('focusout', () => setTimeout(() => { if (!formEl.contains(document.activeElement)) { typing = false; mbar.classList.remove('is-hidden'); } }, 80));
   }
 
   /* ---------- Barra de progreso ---------- */
   const bar = $('.progress span');
-  let lastP = -1;
-  addEventListener('scroll', () => {
-    const p = scrollY / (document.documentElement.scrollHeight - innerHeight);
+  let lastP = -1, docH = document.documentElement.scrollHeight;
+  addEventListener('resize', () => docH = document.documentElement.scrollHeight, { passive: true });
+  addEventListener('load', () => docH = document.documentElement.scrollHeight);
+  const updateProgress = () => {
+    const p = scrollY / (docH - innerHeight);
     if (Math.abs(p - lastP) > .003) { bar.style.transform = `scaleX(${p})`; lastP = p; }
+  };
+  scrollFns.push(onScroll, updateProgress);
+  let ticking = false;
+  addEventListener('scroll', () => {
+    if (ticking) return; ticking = true;
+    requestAnimationFrame(() => { scrollFns.forEach(f => f()); ticking = false; });
   }, { passive: true });
 
   /* ---------- Reveals ---------- */
-  const reveals = $$('.reveal');
+  const reveals = $$('.reveal').filter(r => !(isMobile.matches && r.closest('[data-snap]')));
   if (reduced) reveals.forEach(r => r.classList.add('in'));
   else {
     const io = new IntersectionObserver(entries => entries.forEach(en => {
@@ -202,12 +238,13 @@
       `Proyecto: ${f.get('tipo')}`,
       f.get('mensaje') ? `\n${f.get('mensaje')}` : ''
     ].join('\n');
-    open(`https://wa.me/50688889892?text=${encodeURIComponent(msg)}`, '_blank', 'noopener');
+    const a = Object.assign(document.createElement('a'), { href: `https://wa.me/${CFG.wa}?text=${encodeURIComponent(msg)}`, target: '_blank', rel: 'noopener' });
+    document.body.append(a); a.click(); a.remove();
   });
 
   /* ---------- Pausar marquee/red fuera de pantalla ---------- */
   const track = $('.marquee__track');
   // Duplicar para bucle sin costura (translateX(-50%) exige dos copias)
-  [...track.children].forEach(f => { const c = f.cloneNode(true); c.setAttribute('aria-hidden', 'true'); track.appendChild(c); });
+  [...track.children].forEach(f => { const c = f.cloneNode(true); c.setAttribute('aria-hidden', 'true'); c.querySelectorAll('img').forEach(i => i.loading = 'eager'); track.appendChild(c); });
   new IntersectionObserver(([en]) => track.style.animationPlayState = en.isIntersecting ? 'running' : 'paused').observe(track);
 })();
