@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="./image-slot.js"></script>
+<style>
+body{margin:0;background:#f6f2ee;font-family:Manrope,sans-serif;color:#15131a}
+a{color:#15131a;text-decoration:none}a:hover{color:#e2233a}
+@keyframes rise{0%{opacity:0;transform:translateY(28px)}100%{opacity:1;transform:none}}
+@keyframes marquee{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+@keyframes dash{to{stroke-dashoffset:-400}}
+@keyframes glow{0%,100%{opacity:.35}50%{opacity:.9}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+</style>
+</helmet>
+
+<!-- NAV -->
+<div style="position:sticky;top:0;z-index:10;display:flex;justify-content:space-between;align-items:center;padding:20px 5%;background:rgba(246,242,238,.85);backdrop-filter:blur(12px);border-bottom:1px solid rgba(21,19,26,.06)">
+  <img src="https://fygaro-subscribers.s3.amazonaws.com/0a90e18b-1207-44c7-80bc-c383418192d5/media_library/1aea3c93-cd50-4035-8844-139e62aa1788.png" alt="Crimson Consulting" style="height:44px">
+  <div style="display:flex;gap:32px;align-items:center;font-size:15px;font-weight:600;flex-wrap:wrap"><a href="#servicios">Servicios</a><a href="#proceso">Cómo trabajamos</a><a href="#casos">Proyectos</a><a href="https://crimsoncr.com/products/">Tienda</a><a href="#contacto" style="background:#15131a;color:#fff;padding:10px 20px;border-radius:999px" style-hover="background:#e2233a;color:#fff">Asesoría</a></div>
+</div>
+
+<!-- HERO -->
+<div style="position:relative;overflow:hidden;min-height:760px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:80px 5% 220px;background:linear-gradient(180deg,#f6f2ee 0%,#efe9e3 100%)">
+  <div style="position:absolute;inset:0;pointer-events:none;display:flex;justify-content:center">{{ network }}</div>
+  <div style="position:relative;display:flex;flex-direction:column;align-items:center;gap:26px">
+    <div style="font-size:13px;letter-spacing:.28em;text-transform:uppercase;color:#e2233a;font-weight:700;animation:rise 1s .1s both">Evaluación · Diseño · Instalación · Soporte</div>
+    <h1 style="margin:0;font-family:'Instrument Serif',serif;font-weight:400;font-size:clamp(56px,7.5vw,112px);line-height:.92;letter-spacing:-.015em;max-width:1100px;text-wrap:balance;animation:rise 1s .3s both">Infraestructura que <em style="color:#e2233a">conecta</em><br>y protege tu operación</h1>
+    <p style="margin:0;font-size:21px;line-height:1.5;color:#5a5560;max-width:620px;text-wrap:pretty;animation:rise 1s .5s both">Diseñamos e implementamos soluciones de videovigilancia, redes y control de acceso adaptadas a cada entorno.</p>
+    <a href="#contacto" style="background:#e2233a;color:#fff;padding:18px 36px;font-weight:700;font-size:16px;border-radius:999px;animation:rise 1s .7s both" style-hover="background:#c41a2f;color:#fff">Hablemos de tu proyecto</a>
+  </div>
+  <div style="position:absolute;left:0;right:0;bottom:0;height:190px;background:linear-gradient(0deg,#15131a 70%,rgba(21,19,26,0));display:flex;align-items:flex-end;padding-bottom:28px;overflow:hidden">
+    <div style="display:flex;gap:20px;width:max-content;animation:marquee 34s linear infinite;padding-left:20px">
+      <sc-for list="{{ marquee }}" as="m" hint-placeholder-count="10">
+        <div style="width:280px;height:120px;border-radius:10px;overflow:hidden;position:relative;flex:none"><div style="position:absolute;inset:0"><image-slot id="{{ m.id }}" shape="rect" placeholder="{{ m.place }}"></image-slot></div><div style="position:absolute;left:12px;bottom:10px;font-size:12px;color:#fff;font-weight:600;text-shadow:0 1px 6px rgba(0,0,0,.7);pointer-events:none">{{ m.label }}</div></div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+
+<!-- SERVICIOS -->
+<div id="servicios" style="background:#15131a;color:#f4f1ee;padding:120px 5%">
+  <div style="max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:64px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:40px;align-items:end">
+      <h2 style="margin:0;font-family:'Instrument Serif',serif;font-weight:400;font-size:clamp(40px,4.5vw,68px);line-height:1;letter-spacing:-.01em">Soluciones profesionales<br>en <em style="color:#e2233a">seguridad</em> y tecnología</h2>
+      <p style="margin:0;font-size:18px;line-height:1.55;color:#b9b5b0;text-wrap:pretty">Cada proyecto se diseña sobre el terreno: analizamos el sitio, seleccionamos la tecnología adecuada y la instalamos con respaldo técnico continuo.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:24px">
+      <div style="position:relative;overflow:hidden;border-radius:16px;background:#1e1c24;border:1px solid rgba(255,255,255,.08);display:flex;flex-direction:column" style-hover="border-color:rgba(226,35,58,.6)">
+        <div style="position:relative;height:260px"><image-slot id="s-cam" shape="rect" placeholder="Videovigilancia · foto de instalación"></image-slot><div style="position:absolute;left:16px;top:14px;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;letter-spacing:.1em;pointer-events:none"><span style="width:8px;height:8px;border-radius:50%;background:#e2233a;animation:blink 1s infinite"></span>REC</div></div>
+        <div style="padding:28px;display:flex;flex-direction:column;gap:12px"><div style="font-size:13px;letter-spacing:.2em;color:#e2233a;font-weight:700">01</div><h3 style="margin:0;font-size:26px;font-weight:700;letter-spacing:-.01em">Videovigilancia profesional</h3><p style="margin:0;color:#b9b5b0;line-height:1.55;text-wrap:pretty">Sistemas de videovigilancia diseñados a la medida para proteger y monitorear espacios de forma confiable.</p></div>
+      </div>
+      <div style="position:relative;overflow:hidden;border-radius:16px;background:#1e1c24;border:1px solid rgba(255,255,255,.08);display:flex;flex-direction:column" style-hover="border-color:rgba(226,35,58,.6)">
+        <div style="position:relative;height:260px;overflow:hidden"><image-slot id="s-net" shape="rect" placeholder="Redes · rack, fibra, antenas"></image-slot><div style="position:absolute;inset:0;pointer-events:none">{{ miniNet }}</div></div>
+        <div style="padding:28px;display:flex;flex-direction:column;gap:12px"><div style="font-size:13px;letter-spacing:.2em;color:#e2233a;font-weight:700">02</div><h3 style="margin:0;font-size:26px;font-weight:700;letter-spacing:-.01em">Redes e infraestructura</h3><p style="margin:0;color:#b9b5b0;line-height:1.55;text-wrap:pretty">Diseño e implementación de redes estables y seguras que soportan sistemas críticos y crecimiento futuro.</p></div>
+      </div>
+      <div style="position:relative;overflow:hidden;border-radius:16px;background:#1e1c24;border:1px solid rgba(255,255,255,.08);display:flex;flex-direction:column" style-hover="border-color:rgba(226,35,58,.6)">
+        <div style="position:relative;height:260px"><image-slot id="s-acc" shape="rect" placeholder="Control de acceso · UPS"></image-slot><div style="position:absolute;right:16px;top:14px;width:44px;height:44px;border-radius:50%;border:2px solid rgba(226,35,58,.4);border-top-color:#e2233a;animation:spin 2.4s linear infinite;pointer-events:none"></div></div>
+        <div style="padding:28px;display:flex;flex-direction:column;gap:12px"><div style="font-size:13px;letter-spacing:.2em;color:#e2233a;font-weight:700">03</div><h3 style="margin:0;font-size:26px;font-weight:700;letter-spacing:-.01em">Control y soporte</h3><p style="margin:0;color:#b9b5b0;line-height:1.55;text-wrap:pretty">Integración de control de acceso, respaldo eléctrico y acompañamiento técnico continuo.</p></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:16px 56px;align-items:center;justify-content:center;padding-top:24px;border-top:1px solid rgba(255,255,255,.1);color:#8a8a90;font-size:13px;letter-spacing:.12em;text-transform:uppercase;font-weight:600"><span>Marcas líderes · respaldo y soporte local</span><span style="color:#f4f1ee;font-size:20px;letter-spacing:.02em;text-transform:none;font-weight:700">Hikvision</span><span style="color:#f4f1ee;font-size:20px;letter-spacing:.02em;text-transform:none;font-weight:700">Ubiquiti</span><span style="color:#f4f1ee;font-size:20px;letter-spacing:.02em;text-transform:none;font-weight:700">APC</span></div>
+  </div>
+</div>
+
+<!-- PROCESO -->
+<div id="proceso" style="padding:120px 5%;background:#f6f2ee">
+  <div style="max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:64px">
+    <div style="display:flex;flex-direction:column;gap:20px;max-width:760px">
+      <div style="font-size:13px;letter-spacing:.28em;text-transform:uppercase;color:#e2233a;font-weight:700">Cómo trabajamos</div>
+      <h2 style="margin:0;font-family:'Instrument Serif',serif;font-weight:400;font-size:clamp(40px,4.5vw,68px);line-height:1;letter-spacing:-.01em">No creemos en soluciones <em style="color:#e2233a">genéricas</em></h2>
+      <p style="margin:0;font-size:18px;line-height:1.55;color:#5a5560;text-wrap:pretty">Analizamos cada entorno, diseñamos la mejor solución y la implementamos con respaldo técnico y acompañamiento profesional.</p>
+    </div>
+    <div style="position:relative;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:24px">
+      <div style="position:absolute;left:0;right:0;top:34px;height:1px;background:rgba(21,19,26,.12);pointer-events:none"></div>
+      <div style="position:absolute;left:0;right:0;top:34px;height:1px;background:repeating-linear-gradient(90deg,#e2233a 0 8px,transparent 8px 28px);background-size:200% 1px;animation:marquee 8s linear infinite;pointer-events:none;opacity:.7"></div>
+      <div style="position:relative;display:flex;flex-direction:column;gap:18px;padding-top:4px"><div style="width:64px;height:64px;border-radius:50%;background:#15131a;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;box-shadow:0 0 0 10px #f6f2ee">1</div><h3 style="margin:0;font-size:24px;font-weight:700">Evaluación técnica</h3><p style="margin:0;color:#5a5560;line-height:1.55">Analizamos el sitio y los objetivos reales del proyecto.</p></div>
+      <div style="position:relative;display:flex;flex-direction:column;gap:18px;padding-top:4px"><div style="width:64px;height:64px;border-radius:50%;background:#15131a;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;box-shadow:0 0 0 10px #f6f2ee">2</div><h3 style="margin:0;font-size:24px;font-weight:700">Diseño del proyecto</h3><p style="margin:0;color:#5a5560;line-height:1.55">Seleccionamos tecnología adecuada y escalable.</p></div>
+      <div style="position:relative;display:flex;flex-direction:column;gap:18px;padding-top:4px"><div style="width:64px;height:64px;border-radius:50%;background:#e2233a;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;box-shadow:0 0 0 10px #f6f2ee">3</div><h3 style="margin:0;font-size:24px;font-weight:700">Instalación &amp; soporte</h3><p style="margin:0;color:#5a5560;line-height:1.55">Instalación profesional y soporte continuo.</p></div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:24px;align-items:center;justify-content:space-between;padding:36px 40px;border-radius:20px;background:#fff;border:1px solid rgba(21,19,26,.08)">
+      <div style="font-size:24px;font-weight:600;letter-spacing:-.01em">¿Querés que evaluemos tu caso?</div>
+      <a href="https://www.crimsoncr.com/page/formulario-de-proyecto/" style="background:#e2233a;color:#fff;padding:16px 30px;font-weight:700;border-radius:999px" style-hover="background:#c41a2f;color:#fff">Solicitar asesoría</a>
+    </div>
+  </div>
+</div>
+
+<!-- CASOS -->
+<div id="casos" style="padding:120px 5%;background:#efe9e3">
+  <div style="max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:56px">
+    <div style="display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between;align-items:end">
+      <h2 style="margin:0;font-family:'Instrument Serif',serif;font-weight:400;font-size:clamp(40px,4.5vw,68px);line-height:1;letter-spacing:-.01em">Casos de <em style="color:#e2233a">éxito</em></h2>
+      <a href="#casos" style="font-weight:600;border-bottom:2px solid #e2233a;padding-bottom:4px">Ver todos los proyectos →</a>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:24px">
+      <div style="position:relative;border-radius:20px;overflow:hidden;min-height:460px;animation:bob 7s ease-in-out infinite">
+        <div style="position:absolute;inset:0"><image-slot id="case-1" shape="rect" placeholder="Foto proyecto · La Julieta Sur"></image-slot></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;padding:120px 32px 32px;background:linear-gradient(0deg,rgba(21,19,26,.9),transparent);color:#fff;pointer-events:none;display:flex;flex-direction:column;gap:6px"><div style="font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:#ff5d70;font-weight:700">Seguridad comunitaria</div><div style="font-size:28px;font-weight:700;letter-spacing:-.01em">Proyecto Seguridad Comunitaria</div><div style="color:#cfcbc6">La Julieta Sur, Alajuela</div></div>
+      </div>
+      <div style="position:relative;border-radius:20px;overflow:hidden;min-height:460px;animation:bob 7s ease-in-out infinite 2s">
+        <div style="position:absolute;inset:0"><image-slot id="case-2" shape="rect" placeholder="Foto proyecto · Hacienda Pinilla"></image-slot></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;padding:120px 32px 32px;background:linear-gradient(0deg,rgba(21,19,26,.9),transparent);color:#fff;pointer-events:none;display:flex;flex-direction:column;gap:6px"><div style="font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:#ff5d70;font-weight:700">Red y seguridad</div><div style="font-size:28px;font-weight:700;letter-spacing:-.01em">Proyecto de red y seguridad</div><div style="color:#cfcbc6">Hacienda Pinilla, Guanacaste</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TIENDA -->
+<div style="position:relative;overflow:hidden;background:#15131a;color:#f4f1ee;padding:120px 5%">
+  <div style="position:absolute;inset:0;pointer-events:none;opacity:.5;display:flex;justify-content:center">{{ networkDark }}</div>
+  <div style="position:relative;max-width:1280px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:48px;align-items:center">
+    <div style="display:flex;flex-direction:column;gap:24px">
+      <h2 style="margin:0;font-family:'Instrument Serif',serif;font-weight:400;font-size:clamp(40px,4.5vw,68px);line-height:1;letter-spacing:-.01em">Compra tecnología con <em style="color:#e2233a">confianza</em> y respaldo</h2>
+      <p style="margin:0;font-size:18px;line-height:1.55;color:#b9b5b0">Productos seleccionados para soluciones integrales.</p>
+      <a href="https://crimsoncr.com/products" style="align-self:flex-start;background:#fff;color:#15131a;padding:16px 30px;font-weight:700;border-radius:999px" style-hover="background:#e2233a;color:#fff">Accede a nuestro catálogo</a>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div style="height:200px;border-radius:14px;overflow:hidden;animation:bob 6s ease-in-out infinite"><image-slot id="shop-1" shape="rect" placeholder="Cámara"></image-slot></div>
+      <div style="height:200px;border-radius:14px;overflow:hidden;animation:bob 6s ease-in-out infinite 1.5s;margin-top:40px"><image-slot id="shop-2" shape="rect" placeholder="Access point"></image-slot></div>
+      <div style="height:200px;border-radius:14px;overflow:hidden;animation:bob 6s ease-in-out infinite 3s"><image-slot id="shop-3" shape="rect" placeholder="UPS"></image-slot></div>
+      <div style="height:200px;border-radius:14px;overflow:hidden;animation:bob 6s ease-in-out infinite 4.5s;margin-top:40px"><image-slot id="shop-4" shape="rect" placeholder="Switch"></image-slot></div>
+    </div>
+  </div>
+</div>
+
+<!-- CONTACTO -->
+<div id="contacto" style="padding:120px 5%;background:#f6f2ee">
+  <div style="max-width:1280px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:64px">
+    <div style="display:flex;flex-direction:column;gap:24px">
+      <div style="font-size:13px;letter-spacing:.28em;text-transform:uppercase;color:#e2233a;font-weight:700">Contacto</div>
+      <h2 style="margin:0;font-family:'Instrument Serif',serif;font-weight:400;font-size:clamp(40px,4.5vw,64px);line-height:1;letter-spacing:-.01em">Asesoría, instalación y soporte técnico <em style="color:#e2233a">profesional</em></h2>
+      <p style="margin:0;font-size:18px;line-height:1.55;color:#5a5560">¡Contáctenos hoy y reciba atención personalizada!</p>
+      <div style="display:flex;flex-direction:column;gap:10px;font-size:17px;font-weight:600"><a href="https://wa.me/message/5YQKXZFUPHWLA1" style="display:flex;align-items:center;gap:10px"><span style="width:8px;height:8px;border-radius:50%;background:#e2233a;animation:blink 1.4s infinite"></span>WhatsApp · +506 8888 9892</a><span style="color:#5a5560;font-weight:500">Alajuela, Costa Rica</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px;background:#fff;padding:36px;border-radius:20px;border:1px solid rgba(21,19,26,.08)">
+      <input placeholder="Nombre" style="font:inherit;font-size:16px;padding:16px 18px;border:1px solid rgba(21,19,26,.14);border-radius:10px;background:#faf8f6">
+      <input placeholder="Número de teléfono" style="font:inherit;font-size:16px;padding:16px 18px;border:1px solid rgba(21,19,26,.14);border-radius:10px;background:#faf8f6">
+      <input placeholder="Correo electrónico" style="font:inherit;font-size:16px;padding:16px 18px;border:1px solid rgba(21,19,26,.14);border-radius:10px;background:#faf8f6">
+      <textarea placeholder="Mensaje" rows="4" style="font:inherit;font-size:16px;padding:16px 18px;border:1px solid rgba(21,19,26,.14);border-radius:10px;background:#faf8f6;resize:vertical"></textarea>
+      <a href="#contacto" style="text-align:center;background:#e2233a;color:#fff;padding:18px;font-weight:700;border-radius:999px;margin-top:6px" style-hover="background:#c41a2f;color:#fff">Enviar mensaje</a>
+    </div>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<div style="background:#15131a;color:#b9b5b0;padding:64px 5% 40px">
+  <div style="max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:48px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:40px;font-size:15px;line-height:1.9">
+      <div style="display:flex;flex-direction:column;gap:12px"><img src="https://fygaro-subscribers.s3.amazonaws.com/0a90e18b-1207-44c7-80bc-c383418192d5/media_library/1aea3c93-cd50-4035-8844-139e62aa1788.png" alt="Crimson Consulting" style="height:44px;align-self:flex-start;filter:brightness(0) invert(1)"><span>Soluciones en seguridad y tecnología<br>Alajuela, Costa Rica<br>+506 88889892</span></div>
+      <div style="display:flex;flex-direction:column"><span style="color:#fff;font-weight:700;margin-bottom:8px">Servicios</span><span>Videovigilancia</span><span>Redes</span><span>Control de acceso</span><span>Soporte técnico</span></div>
+      <div style="display:flex;flex-direction:column"><span style="color:#fff;font-weight:700;margin-bottom:8px">Enlaces</span><a href="https://www.crimsoncr.com/" style="color:#b9b5b0">Inicio</a><a href="https://crimsoncr.com/products/" style="color:#b9b5b0">Tienda</a><a href="https://www.crimsoncr.com/page/solicitud-de-asesoria-personalizada/" style="color:#b9b5b0">Asesoría personalizada</a></div>
+      <div style="display:flex;flex-direction:column"><span style="color:#fff;font-weight:700;margin-bottom:8px">Contacto</span><a href="https://wa.me/message/5YQKXZFUPHWLA1" style="color:#b9b5b0">WhatsApp</a><a href="https://www.facebook.com/crimsonconcr" style="color:#b9b5b0">Facebook</a><a href="https://www.instagram.com/cr.crimsoncr/" style="color:#b9b5b0">Instagram</a></div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;font-size:13px;border-top:1px solid rgba(255,255,255,.1);padding-top:24px"><span>© 2026 Crimson Consulting · Todos los derechos reservados</span><div style="display:flex;gap:24px"><a href="https://www.crimsoncr.com/terms" style="color:#b9b5b0">Términos y Condiciones</a><a href="https://www.crimsoncr.com/policies" style="color:#b9b5b0">Políticas de Privacidad</a></div></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;pulseSpeed&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:6,&quot;min&quot;:2,&quot;max&quot;:14,&quot;step&quot;:1,&quot;unit&quot;:&quot;s&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Animación de red&quot;}}">
+class Component extends DCLogic {
+  net(dark, w, h, seed) {
+    const R = React.createElement;
+    const nodes = [[120,140],[380,90],[700,160],[1050,110],[1320,190],[200,420],[520,470],[900,430],[1250,470],[80,680],[420,700],[760,660],[1120,690],[1380,640]];
+    const links = [[0,1],[1,2],[2,3],[3,4],[0,5],[1,6],[2,6],[3,7],[4,8],[5,6],[6,7],[7,8],[5,9],[6,10],[7,11],[8,12],[8,13],[10,11],[11,12]];
+    const speed = this.props.pulseSpeed ?? 6;
+    const line = dark ? 'rgba(255,255,255,.12)' : 'rgba(21,19,26,.14)';
+    const node = dark ? '#f4f1ee' : '#15131a';
+    const els = [];
+    links.forEach(([a,b],i)=>{
+      const [x1,y1]=nodes[a],[x2,y2]=nodes[b]; const d=`M${x1} ${y1} L${x2} ${y2}`;
+      els.push(R('path',{key:'l'+i,d,stroke:line,strokeWidth:1.5,fill:'none'}));
+      els.push(R('path',{key:'d'+i,d,stroke:'rgba(226,35,58,.55)',strokeWidth:1.5,fill:'none',strokeDasharray:'6 22',style:{animation:`dash ${speed*2}s linear infinite`,animationDelay:`${-i*0.7}s`}}));
+      if(i%2===seed) els.push(R('circle',{key:'p'+i,r:4,fill:'#e2233a'},R('animateMotion',{dur:`${speed+(i%3)}s`,repeatCount:'indefinite',path:d,begin:`${-i*1.3}s`})));
+    });
+    nodes.forEach(([x,y],i)=>{
+      els.push(R('circle',{key:'g'+i,cx:x,cy:y,r:14,fill:'rgba(226,35,58,.18)',style:{animation:`glow ${3+(i%4)}s ease-in-out infinite`,animationDelay:`${i*0.4}s`}}));
+      els.push(R('circle',{key:'n'+i,cx:x,cy:y,r:5,fill:node}));
+    });
+    return R('svg',{viewBox:'0 0 1440 810',preserveAspectRatio:'xMidYMid slice',style:{width:'100%',height:'100%',display:'block'}},els);
+  }
+  miniNet() {
+    const R = React.createElement;
+    const pts=[[40,200],[140,90],[260,170],[380,60],[480,190]];
+    const els=[];
+    for(let i=0;i<pts.length-1;i++){const d=`M${pts[i][0]} ${pts[i][1]} L${pts[i+1][0]} ${pts[i+1][1]}`;
+      els.push(R('path',{key:'a'+i,d,stroke:'rgba(255,255,255,.3)',strokeWidth:1.5,fill:'none'}));
+      els.push(R('circle',{key:'p'+i,r:4,fill:'#e2233a'},R('animateMotion',{dur:'3s',repeatCount:'indefinite',path:d,begin:`${-i*0.8}s`})));}
+    pts.forEach(([x,y],i)=>els.push(R('circle',{key:'n'+i,cx:x,cy:y,r:5,fill:'#fff'})));
+    return R('svg',{viewBox:'0 0 520 260',preserveAspectRatio:'xMidYMid slice',style:{width:'100%',height:'100%',display:'block'}},els);
+  }
+  renderVals() {
+    const base=[
+      {id:'c-p1',place:'La Julieta Sur, Alajuela',label:'Seguridad comunitaria · La Julieta Sur'},
+      {id:'c-p2',place:'Hacienda Pinilla, Guanacaste',label:'Red y seguridad · Hacienda Pinilla'},
+      {id:'c-p3',place:'Proyecto 3',label:'Control de acceso · Alajuela'},
+      {id:'c-p4',place:'Proyecto 4',label:'Infraestructura de red · Heredia'},
+      {id:'c-p5',place:'Proyecto 5',label:'Videovigilancia · San José'}];
+    const marquee=[...base,...base.map(m=>({...m,id:m.id+'b'}))];
+    return { network:this.net(false,1440,810,0), networkDark:this.net(true,1440,810,1), miniNet:this.miniNet(), marquee };
+  }
+}
+</script>
+</body>
+</html>
