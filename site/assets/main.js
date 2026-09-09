@@ -173,5 +173,7 @@
 
   /* ---------- Pausar marquee/red fuera de pantalla ---------- */
   const track = $('.marquee__track');
+  // Duplicar para bucle sin costura (translateX(-50%) exige dos copias)
+  [...track.children].forEach(f => { const c = f.cloneNode(true); c.setAttribute('aria-hidden', 'true'); track.appendChild(c); });
   new IntersectionObserver(([en]) => track.style.animationPlayState = en.isIntersecting ? 'running' : 'paused').observe(track);
 })();
