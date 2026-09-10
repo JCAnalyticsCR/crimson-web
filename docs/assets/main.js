@@ -190,7 +190,7 @@
     burger.setAttribute('aria-label', open ? 'Cerrar menú' : 'Abrir menú');
     if (open) { lockY = scrollY; document.body.classList.add('menu-open'); document.body.style.top = `-${lockY}px`; themeMeta && (themeMeta.content = TC.cream); }
     else { document.body.classList.remove('menu-open'); document.body.style.top = ''; scrollTo({ top: lockY, behavior: 'instant' }); themeMeta && (themeMeta.content = TC[document.body.dataset.tone] || TC.cream); }
-    $$('main, footer, .wa').forEach(e => { e.inert = open; e.setAttribute('aria-hidden', open); });
+    $$('main, footer').forEach(e => { e.inert = open; e.setAttribute('aria-hidden', open); });
     if (open) setTimeout(() => $('.nav__links a').focus(), 400); else burger.focus();
   };
   burger.addEventListener('click', () => setMenu(!nav.classList.contains('is-open')));

@@ -337,11 +337,6 @@ section{padding:var(--space) var(--pad)}
 .footer__bottom{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;border-top:1px solid var(--hair-dark);padding-top:24px;color:#8a8a90;text-transform:none;letter-spacing:.04em}
 .footer__bottom div{display:flex;gap:24px}
 
-/* ---------- WhatsApp flotante (solo escritorio) ---------- */
-.wa{position:fixed;right:24px;bottom:24px;width:56px;height:56px;border-radius:50%;background:#128c4a;color:#fff;display:grid;place-items:center;z-index:30;box-shadow:0 12px 28px -10px rgba(0,0,0,.5);transition:transform var(--dur-micro) var(--ease-button),background var(--dur-micro)}
-.wa svg{display:block}
-@media (hover:hover){.wa:hover{transform:scale(1.07);background:#0f7a40}}
-
 /* ---------- Animaciones pausadas fuera de pantalla (IO) ---------- */
 .is-offscreen *{animation-play-state:paused!important}
 
@@ -398,7 +393,7 @@ section{padding:var(--space) var(--pad)}
   .display-2{line-height:1.04;letter-spacing:-.015em}
   .lead{max-width:32ch}
   .sec-idx{margin-bottom:22px}
-  .wa,.hud,.grain,.cursor{display:none!important}
+  .hud,.grain,.cursor{display:none!important}
   .feed:active>img{transform:scale(1.02)}
 
   /* Nav + menú a pantalla completa */
