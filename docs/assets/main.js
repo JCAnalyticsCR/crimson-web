@@ -188,14 +188,14 @@
   // Cuadro 1.85:1 con el video VERTICAL centrado a tamano real (sin zoom): mismos fotogramas que movil
   // Video 16:9 (banda reencuadrada del vertical que sigue al sujeto) en el lado derecho, sin zoom de mas
   // Casilla 16:9 a la derecha; adentro el plano VERTICAL completo (sin recorte ni ampliacion), como un monitor
-  const wideSet = { path: 'assets/frames/wide', ratio: '1.7778', w: 1280, h: 720, frames: 90 }; // clip 16:9 editado por el cliente (se congela del 9 s en adelante)
+  const wideSet = { path: 'assets/frames/wide', ratio: '1.7778', w: 1280, h: 720, frames: 90, ver: '?v=2' }; // clip 16:9 editado por el cliente (se congela del 9 s en adelante)
   const useWide = !isMobile.matches && q.get('hero') !== 'net' && !!$('#hero-d.scene');
   if (useWide) {
     document.body.classList.add('has-wide');
     document.documentElement.style.setProperty('--ratio', wideSet.ratio);
-    const po = $('#hero-d .scene__poster'); if (po) { po.src = `${wideSet.path}/f001.webp`; po.width = wideSet.w; po.height = wideSet.h; }
+    const po = $('#hero-d .scene__poster'); if (po) { po.src = `${wideSet.path}/f001.webp${wideSet.ver}`; po.width = wideSet.w; po.height = wideSet.h; }
   }
-  const mountScene = (scene, PATH, FRAMES) => {
+  const mountScene = (scene, PATH, FRAMES, VER = '') => {
     document.body.dataset.tone = 'ink'; const tm = $('#themeColor'); if (tm) tm.content = '#15131a';
     const ANIM_FIN = 0.78, FPS = 10;
     const LERP = isMobile.matches ? 0.08 : 0.09;
@@ -290,7 +290,7 @@
       const img = new Image();
       img.onload = () => { img.onload = null; img.onerror = null; img.decode().then(() => { listo(i, img, true); res(); }).catch(() => { listo(i, img, img.naturalWidth > 0); res(); }); };
       img.onerror = () => { listo(i, img, false); res(); };
-      img.src = `${PATH}/f${pad(i + 1)}.webp`;
+      img.src = `${PATH}/f${pad(i + 1)}.webp${VER}`;
     });
     const preload = async () => {
       await fetchFrame(0);
@@ -312,7 +312,7 @@
     window.__scene = { go: p => { stop(); target = current = p; lastLow = -1; lastP = -1; draw(p); applyCopy(p); }, loaded: () => settled };
   };
   if (isMobile.matches && $('#hero-m.scene')) mountScene($('#hero-m.scene'), 'assets/frames/hero', 88);
-  else if (useWide) mountScene($('#hero-d.scene'), wideSet.path, wideSet.frames);
+  else if (useWide) mountScene($('#hero-d.scene'), wideSet.path, wideSet.frames, wideSet.ver);
 
   /* ---------- Nav ---------- */
   const nav = $('#nav'), burger = $('#burger');
