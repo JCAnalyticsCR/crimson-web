@@ -180,7 +180,7 @@
       if (!w || !hh) return;
       const W = Math.round(w * dpr), H = Math.round(hh * dpr);
       if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; lastLow = -1; }
-      const fy = isMobile.matches ? .5 : .5 - .22 * smooth(.38, .62, frac);
+      const fy = isMobile.matches ? .5 : .5 - .34 * smooth(.38, .62, frac); // al final sube para que el encabezado del telefono no quede bajo la barra
       if (Math.abs(fy - focusY) > .002) { focusY = fy; lastLow = -1; }
       const exact = frac * (FRAMES - 1);
       let low = Math.max(0, Math.min(FRAMES - 1, Math.floor(exact))), high = Math.min(FRAMES - 1, low + 1), blend = exact - low;
