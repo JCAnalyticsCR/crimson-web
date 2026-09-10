@@ -188,16 +188,16 @@
   // Cuadro 1.85:1 con el video VERTICAL centrado a tamano real (sin zoom): mismos fotogramas que movil
   // Video 16:9 (banda reencuadrada del vertical que sigue al sujeto) en el lado derecho, sin zoom de mas
   // Casilla 16:9 a la derecha; adentro el plano VERTICAL completo (sin recorte ni ampliacion), como un monitor
-  const wideSet = { path: 'assets/frames/hero', ratio: '1.7778', w: 768, h: 1365 };
+  const wideSet = { path: 'assets/frames/wide', ratio: '1.7778', w: 1280, h: 720, frames: 90 }; // clip 16:9 editado por el cliente (se congela del 9 s en adelante)
   const useWide = !isMobile.matches && q.get('hero') !== 'net' && !!$('#hero-d.scene');
   if (useWide) {
     document.body.classList.add('has-wide');
     document.documentElement.style.setProperty('--ratio', wideSet.ratio);
     const po = $('#hero-d .scene__poster'); if (po) { po.src = `${wideSet.path}/f001.webp`; po.width = wideSet.w; po.height = wideSet.h; }
   }
-  const mountScene = (scene, PATH) => {
+  const mountScene = (scene, PATH, FRAMES) => {
     document.body.dataset.tone = 'ink'; const tm = $('#themeColor'); if (tm) tm.content = '#15131a';
-    const FRAMES = 88, ANIM_FIN = 0.78, FPS = 10; // el clip se apaga del 89 en adelante: se recorta ahi
+    const ANIM_FIN = 0.78, FPS = 10;
     const LERP = isMobile.matches ? 0.08 : 0.09;
     const pin = $('.scene__pin', scene), stage = $('.scene__stage', scene), canvas = $('.scene__canvas', scene);
     const poster = $('.scene__poster', scene), ambient = $('.scene__ambient', scene);
@@ -216,27 +216,11 @@
     // Cover manual. En escritorio el visor (media pagina) es mas ancho que el clip y recorta
     // arriba/abajo: focusY sigue al sujeto (camara centrada, luego sube para no cortar el telefono)
     let focusY = .5;
-    // Escritorio (casilla 16:9): el plano vertical COMPLETO va contenido y nitido al centro; los
-    // costados se rellenan con el mismo fotograma ampliado a cover desde un canvas de 32 px
-    // (interpolacion bilineal = desenfoque gratis) y oscurecido. Nada se estira ni se recorta.
-    const boxMode = !isMobile.matches;
-    const tiny = boxMode ? document.createElement('canvas') : null, tctx = tiny ? tiny.getContext('2d', { alpha: false }) : null;
-    if (tiny) { tiny.width = 32; tiny.height = 18; }
+    // Escritorio: el clip ya viene 16:9 (editado por el cliente) y llena la casilla 1:1; movil: cover con focusY
     const coverDraw = (img, alpha) => {
       const cw = canvas.width, ch = canvas.height, iw = img.naturalWidth, ih = img.naturalHeight;
-      ctx.globalAlpha = alpha;
-      if (boxMode) {
-        const kb = Math.max(tiny.width / iw, tiny.height / ih), bw = iw * kb, bh = ih * kb;
-        tctx.drawImage(img, (tiny.width - bw) / 2, (tiny.height - bh) / 2, bw, bh);
-        ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(tiny, 0, 0, cw, ch);
-        ctx.fillStyle = 'rgba(10,10,13,.62)'; ctx.fillRect(0, 0, cw, ch);
-        const k = Math.min(cw / iw, ch / ih), w = iw * k, hh = ih * k;
-        ctx.drawImage(img, (cw - w) / 2, (ch - hh) / 2, w, hh);
-        return;
-      }
       const k = Math.max(cw / iw, ch / ih), w = iw * k, hh = ih * k;
-      ctx.drawImage(img, (cw - w) / 2, -(hh - ch) * focusY, w, hh);
+      ctx.globalAlpha = alpha; ctx.drawImage(img, (cw - w) / 2, -(hh - ch) * focusY, w, hh);
     };
     // Ambiente: el mismo fotograma en 64x114 px; el navegador lo amplia con interpolacion
     // bilineal (desenfoque gratis, sin filter:blur, que mata el frame budget)
@@ -253,7 +237,7 @@
       if (!w || !hh) return;
       const W = Math.round(w * dpr), H = Math.round(hh * dpr);
       if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; lastLow = -1; }
-      const fy = isMobile.matches ? .5 : .5 - .34 * smooth(.38, .62, frac); // al final sube para que el encabezado del telefono no quede bajo la barra
+      const fy = .5; // al final sube para que el encabezado del telefono no quede bajo la barra
       if (Math.abs(fy - focusY) > .002) { focusY = fy; lastLow = -1; }
       const exact = frac * (FRAMES - 1);
       let low = Math.max(0, Math.min(FRAMES - 1, Math.floor(exact))), high = Math.min(FRAMES - 1, low + 1), blend = exact - low;
@@ -327,8 +311,8 @@
     }
     window.__scene = { go: p => { stop(); target = current = p; lastLow = -1; lastP = -1; draw(p); applyCopy(p); }, loaded: () => settled };
   };
-  if (isMobile.matches && $('#hero-m.scene')) mountScene($('#hero-m.scene'), 'assets/frames/hero');
-  else if (useWide) mountScene($('#hero-d.scene'), wideSet.path);
+  if (isMobile.matches && $('#hero-m.scene')) mountScene($('#hero-m.scene'), 'assets/frames/hero', 88);
+  else if (useWide) mountScene($('#hero-d.scene'), wideSet.path, wideSet.frames);
 
   /* ---------- Nav ---------- */
   const nav = $('#nav'), burger = $('#burger');

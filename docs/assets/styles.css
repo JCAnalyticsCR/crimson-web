@@ -552,9 +552,7 @@ section{padding:var(--space) var(--pad)}
   .hero--d .scene__grid{background:#000}
   .hero--d .scene__stage::before,.hero--d .scene__stage::after{display:none}
   /* La casilla es el monitor; el feed vertical va entero, centrado, a la altura de la casilla */
-  .hero--d .scene__stage{background:radial-gradient(60% 80% at 50% 50%,#17151c 0,#0a0a0d 100%)}
-  .hero--d .scene__stage .scene__poster{position:absolute;inset:auto;top:0;left:50%;translate:-50% 0;height:100%;width:auto;aspect-ratio:9/16;object-fit:contain;display:block;filter:none;-webkit-mask-image:none;mask-image:none}
-  .hero--d .scene__stage .scene__canvas{position:absolute;inset:0;width:100%;height:100%;display:block;filter:none;-webkit-mask-image:none;mask-image:none}
+  .hero--d .scene__stage .scene__poster,.hero--d .scene__stage .scene__canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;filter:none;-webkit-mask-image:none;mask-image:none}
   .hero--d .scene__canvas{z-index:1}
   .hero--d .scene__shade{display:none}
   .hero--d .scene__stage .feed__corners{z-index:3;inset:12px;opacity:.75}
