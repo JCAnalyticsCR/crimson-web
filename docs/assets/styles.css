@@ -167,19 +167,20 @@ img[data-lqip].is-loaded{}
 .hero{position:relative;height:calc(100svh + 260vh);margin-top:calc(-1 * var(--navh));padding:0;background:var(--ink);color:var(--white)}
 .scene__pin{position:sticky;top:0;height:100svh;overflow:hidden;background:#000}
 /* Blur en capa GPU sobre un canvas de 96 px que solo se repinta cada 3 fotogramas: costo acotado */
-.scene__ambient{position:absolute;inset:-8%;width:116%;height:116%;display:block;pointer-events:none;filter:blur(38px) brightness(.5) saturate(.9);transform:translateZ(0);will-change:filter}
+/* Un solo video: sin extension desenfocada; el plano se funde directo contra la tinta */
+.scene__ambient{display:none}
 .scene__ambient::after{content:""}
 .scene__grid{position:static;max-width:none;padding:0}
-.scene__veil{position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(90deg,rgba(21,19,26,.86) 0,rgba(21,19,26,.7) 45%,rgba(21,19,26,.3) 100%)}
+.scene__veil{display:none}
 /* Escritorio: el video ocupa la mitad derecha completa y se funde hacia la izquierda
    (mascara con degradado): no hay panel ni borde, la imagen se disuelve en la tinta del texto. */
-.scene__stage{position:absolute;top:0;bottom:0;left:46%;right:0;height:auto;width:auto;aspect-ratio:auto;margin:0;transform:none;border-radius:0;overflow:hidden;background:transparent;isolation:isolate;z-index:2;box-shadow:none;-webkit-mask-image:linear-gradient(90deg,rgba(0,0,0,0) 0,rgba(0,0,0,.35) 14%,#000 34%);mask-image:linear-gradient(90deg,rgba(0,0,0,0) 0,rgba(0,0,0,.35) 14%,#000 34%)}
+.scene__stage{position:absolute;top:0;bottom:0;left:50%;right:0;height:auto;width:auto;aspect-ratio:auto;margin:0;transform:none;border-radius:0;overflow:hidden;background:transparent;isolation:isolate;z-index:2;box-shadow:none;-webkit-mask-image:none;mask-image:none}
 .scene__stage::after{content:"";position:absolute;inset:0;z-index:2;pointer-events:none;background:linear-gradient(180deg,rgba(21,19,26,.35) 0,transparent 14%,transparent 86%,rgba(21,19,26,.45) 100%)}
 .scene__stage .feed__corners{display:none}
 /* El plano nitido va a ALTURA COMPLETA (sin recorte vertical) bajo la barra, centrado en la mitad
    derecha; a los lados lo extiende su propia version desenfocada (.scene__ambient) y sus bordes
    se funden con mask para que todo se lea como una sola imagen. */
-.scene__poster,.scene__canvas{position:absolute;top:var(--navh);bottom:auto;left:50%;height:calc(100svh - var(--navh));width:auto;aspect-ratio:9/16;transform:translateX(-50%);object-fit:cover;display:block;-webkit-mask-image:linear-gradient(90deg,rgba(0,0,0,0) 0,#000 9%,#000 91%,rgba(0,0,0,0) 100%);mask-image:linear-gradient(90deg,rgba(0,0,0,0) 0,#000 9%,#000 91%,rgba(0,0,0,0) 100%)}
+.scene__poster,.scene__canvas{position:absolute;top:var(--navh);bottom:auto;left:50%;height:calc(100svh - var(--navh));width:auto;aspect-ratio:9/16;transform:translateX(-50%);object-fit:cover;display:block;-webkit-mask-image:linear-gradient(90deg,rgba(0,0,0,0) 0,#000 14%,#000 100%);mask-image:linear-gradient(90deg,rgba(0,0,0,0) 0,#000 14%,#000 100%)}
 .scene__poster{filter:none}
 .scene__canvas{z-index:1}
 .scene__stage::before{display:none}

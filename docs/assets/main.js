@@ -169,7 +169,7 @@
     // bilineal (desenfoque gratis, sin filter:blur, que mata el frame budget)
     let lastAmb = -9;
     const drawAmbient = (img, idx) => {
-      if (!actx || isMobile.matches || Math.abs(idx - lastAmb) < 3) return;
+      if (!actx || isMobile.matches || ambient.offsetParent === null || Math.abs(idx - lastAmb) < 3) return;
       lastAmb = idx;
       const aw = ambient.width, ah = ambient.height, iw = img.naturalWidth, ih = img.naturalHeight;
       const k = Math.max(aw / iw, ah / ih), w = iw * k, hh = ih * k;
