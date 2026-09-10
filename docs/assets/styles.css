@@ -540,26 +540,31 @@ section{padding:var(--space) var(--pad)}
 /* ---------- HERO ESCRITORIO PANORAMICO (>=768px): video 2.35:1 / 1.85:1 con barras de cine ----------
    El cuadro ocupa todo el ancho, centrado vertical; las barras son negras como en sala.
    El texto se superpone al cuadro (abajo-izquierda) sobre un degradado. ---------- */
-:root{--navh:74px;--ratio:2.35}
+:root{--navh:74px;--ratio:1.85}
 .hero--d{display:none}
 @media (min-width:768px){
   body.has-wide #hero{display:none!important}
   body.has-wide .hero--d{display:block;position:relative;height:calc(100svh + 260vh);margin-top:calc(-1 * var(--navh));padding:0;background:#000;color:var(--white);min-height:0}
   .hero--d .scene__pin{position:sticky;top:0;height:100svh;overflow:hidden;background:#000}
   .hero--d .scene__grid{position:absolute;left:0;right:0;top:calc(50% + var(--navh) / 2);translate:0 -50%;aspect-ratio:var(--ratio);max-height:calc(100svh - var(--navh) - 24px);max-width:none;padding:0;margin:0 auto}
-  .hero--d .scene__stage{position:absolute;inset:0;margin:0;background:#000;isolation:isolate;z-index:2;border-radius:0;overflow:hidden;box-shadow:none}
+  /* El video vertical va CENTRADO en el cuadro a su tamano real: alto = alto del cuadro, sin zoom */
+  .hero--d .scene__stage{position:absolute;top:0;bottom:0;left:50%;translate:-50% 0;width:auto;height:100%;aspect-ratio:9/16;margin:0;background:#000;isolation:isolate;z-index:2;border-radius:0;overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.06)}
+  .hero--d .scene__grid{background:#000}
   .hero--d .scene__stage::before,.hero--d .scene__stage::after{display:none}
   .hero--d .scene__stage .scene__poster,.hero--d .scene__stage .scene__canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;filter:none;-webkit-mask-image:none;mask-image:none}
   .hero--d .scene__canvas{z-index:1}
-  .hero--d .scene__shade{display:block;position:absolute;inset:0;z-index:2;pointer-events:none;background:linear-gradient(90deg,rgba(21,19,26,.78) 0,rgba(21,19,26,.32) 38%,rgba(21,19,26,0) 62%),linear-gradient(0deg,rgba(21,19,26,.7) 0,transparent 42%)}
-  .hero--d .scene__stage .feed__corners{z-index:3;inset:16px;opacity:.7}
-  .hero--d .scene__stage .feed__meta{z-index:3;bottom:16px;left:auto;right:24px;justify-content:flex-end;gap:22px}
+  .hero--d .scene__shade{display:none}
+  .hero--d .scene__stage .feed__corners{z-index:3;inset:12px;opacity:.75}
+  .hero--d .scene__stage .feed__meta{z-index:3;bottom:14px;left:16px;right:16px;justify-content:space-between}
   .hero--d .scene__load{color:rgba(255,255,255,.55)}
-  .hero--d .scene__copy{position:absolute;z-index:4;left:clamp(32px,4vw,72px);bottom:clamp(28px,5vh,56px);display:flex;flex-direction:column;gap:18px;max-width:min(640px,50%);will-change:opacity,transform}
-  .hero--d .scene__copy--b{opacity:0;pointer-events:none}
-  .hero--d .scene__copy .display{font-size:clamp(36px,4.6vw,78px);line-height:.92;color:var(--white)}
-  .hero--d .scene__copy .display-2{font-size:clamp(32px,3.6vw,60px);color:var(--white)}
-  .hero--d .scene__copy .lead{color:rgba(244,241,238,.82);font-size:clamp(15px,1.15vw,18px);max-width:36ch}
+  /* Texto a los lados del video: titular a la izquierda, cierre a la derecha (la mitad del video ocupa 15.2% del cuadro en 1.85) */
+  .hero--d .scene__copy{position:absolute;z-index:4;top:50%;translate:0 -50%;display:flex;flex-direction:column;gap:18px;will-change:opacity,transform}
+  .hero--d .scene__copy--a{left:4%;right:57%;align-items:flex-end;text-align:right}
+  .hero--d .scene__copy--a .lead{text-align:right}
+  .hero--d .scene__copy--b{left:57%;right:4%;align-items:flex-start;text-align:left;opacity:0;pointer-events:none}
+  .hero--d .scene__copy .display{font-size:clamp(32px,3.5vw,60px);line-height:.94;color:var(--white)}
+  .hero--d .scene__copy .display-2{font-size:clamp(30px,3.2vw,54px);color:var(--white)}
+  .hero--d .scene__copy .lead{color:rgba(244,241,238,.82);font-size:clamp(14px,1.1vw,17px);max-width:34ch}
   .hero--d .hero__cta{display:flex;gap:12px;flex-wrap:wrap}
   .hero--d .hero__index{display:none}
   .hero--d .hero__hint{display:flex;position:absolute;right:var(--pad);bottom:22px;flex-direction:row;align-items:center;gap:12px;z-index:4;color:rgba(244,241,238,.6);transition:opacity .4s}

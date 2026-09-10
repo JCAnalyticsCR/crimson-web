@@ -185,7 +185,8 @@
      reduced-motion baja UN fotograma. */
   // Escritorio: version panoramica (2.35:1 por defecto, ?ratio=185 para comparar, ?hero=net para la red)
   const q = new URLSearchParams(location.search);
-  const wideSet = q.get('ratio') === '185' ? { path: 'assets/frames/w185', ratio: '1.85', w: 1152, h: 622 } : { path: 'assets/frames/w235', ratio: '2.35', w: 1152, h: 490 };
+  // Cuadro 1.85:1 con el video VERTICAL centrado a tamano real (sin zoom): mismos fotogramas que movil
+  const wideSet = { path: 'assets/frames/hero', ratio: q.get('ratio') === '235' ? '2.35' : '1.85', w: 768, h: 1365 };
   const useWide = !isMobile.matches && q.get('hero') !== 'net' && !!$('#hero-d.scene');
   if (useWide) {
     document.body.classList.add('has-wide');
