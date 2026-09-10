@@ -443,7 +443,9 @@ section{padding:var(--space) var(--pad)}
   /* Hero: solo fondo, red y titular. Texto anclado al tercio inferior. */
   .hero{height:calc(100svh + 190vh)}
   .scene__ambient,.scene__veil{display:none}
-  .scene__stage{position:absolute;inset:0;top:0;bottom:0;left:0;height:auto;width:auto;aspect-ratio:auto;transform:none;border-radius:0;box-shadow:none}
+  .scene__stage{position:absolute;inset:0;top:0;bottom:0;left:0;height:auto;width:auto;aspect-ratio:auto;transform:none;border-radius:0;box-shadow:none;-webkit-mask-image:none;mask-image:none;background:#000}
+  .scene__stage::after{display:none}
+  .scene__stage .feed__corners{display:block}
   .scene__shade{display:block;position:absolute;inset:0;z-index:2;pointer-events:none;background:linear-gradient(180deg,rgba(21,19,26,.55) 0,transparent 22%,transparent 50%,rgba(21,19,26,.9) 100%)}
   .scene__stage .feed__meta{bottom:auto;top:calc(var(--navh) + 14px);left:16px;right:16px;font-size:10px}
   .scene__stage .feed__corners{inset:calc(var(--navh) + 8px) 10px 10px 10px}
