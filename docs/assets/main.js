@@ -153,7 +153,7 @@
 
     // Dibujo: cover manual + mezcla entre fotogramas vecinos
     // El encuadre sigue al sujeto: la camara vive arriba (22%), el telefono al centro (50%)
-    let focusY = .42;
+    let focusY = .5;
     const coverDraw = (img, alpha) => {
       const cw = canvas.width, ch = canvas.height, iw = img.naturalWidth, ih = img.naturalHeight;
       const k = Math.max(cw / iw, ch / ih), w = iw * k, hh = ih * k;
@@ -164,7 +164,7 @@
       if (!w || !hh) return;
       const W = Math.round(w * dpr), H = Math.round(hh * dpr);
       if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; lastLow = -1; }
-      const fy = isMobile.matches ? .5 : .42 + .14 * smooth(.36, .6, frac);
+      const fy = isMobile.matches ? .5 : .5 + .08 * smooth(.36, .6, frac);
       if (Math.abs(fy - focusY) > .002) { focusY = fy; lastLow = -1; }
       const exact = frac * (FRAMES - 1);
       let low = Math.max(0, Math.min(FRAMES - 1, Math.floor(exact))), high = Math.min(FRAMES - 1, low + 1), blend = exact - low;
