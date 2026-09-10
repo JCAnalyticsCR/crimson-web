@@ -197,6 +197,18 @@
   $$('.nav__links a').forEach(a => a.addEventListener('click', () => nav.classList.contains('is-open') && setMenu(false)));
   addEventListener('keydown', e => e.key === 'Escape' && nav.classList.contains('is-open') && setMenu(false));
 
+  /* ---------- Anclas internas: aterrizar en el contenido, no en el borde de la sección ---------- */
+  $$('a[href^="#"]').forEach(a => a.addEventListener('click', e => {
+    const id = a.getAttribute('href').slice(1); const sec = id && document.getElementById(id);
+    if (!sec || id === 'top') return;
+    e.preventDefault();
+    if (nav.classList.contains('is-open')) setMenu(false);
+    const navH = nav.offsetHeight, pad = parseFloat(getComputedStyle(sec).paddingTop) || 0;
+    const y = sec.getBoundingClientRect().top + scrollY + pad - navH - 28;
+    scrollTo({ top: Math.max(0, y), behavior: reduced ? 'instant' : 'smooth' });
+    history.replaceState(null, '', '#' + id);
+  }));
+
   /* ---------- Un solo listener de scroll ---------- */
   scrollFns.push(onScroll);
   let ticking = false;
