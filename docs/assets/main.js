@@ -183,10 +183,18 @@
      Reglas del sistema: fotos y no <video>; decode() con fallback; lerp 0.09/0.08;
      DPR tope 2; bucle rAF pausado fuera de cuadro; animacion termina al 78% del pin;
      reduced-motion baja UN fotograma. */
-  const scene = isMobile.matches ? $('#hero-m.scene') : null; // la escena solo vive en movil
-  if (scene) { document.body.dataset.tone = 'ink'; const tm = $('#themeColor'); if (tm) tm.content = '#15131a'; }
-  if (scene) {
-    const FRAMES = 88, PATH = 'assets/frames/hero', ANIM_FIN = 0.78, FPS = 10; // el clip se apaga del 89 en adelante: se recorta ahi
+  // Escritorio: version panoramica (2.35:1 por defecto, ?ratio=185 para comparar, ?hero=net para la red)
+  const q = new URLSearchParams(location.search);
+  const wideSet = q.get('ratio') === '185' ? { path: 'assets/frames/w185', ratio: '1.85', w: 1152, h: 622 } : { path: 'assets/frames/w235', ratio: '2.35', w: 1152, h: 490 };
+  const useWide = !isMobile.matches && q.get('hero') !== 'net' && !!$('#hero-d.scene');
+  if (useWide) {
+    document.body.classList.add('has-wide');
+    document.documentElement.style.setProperty('--ratio', wideSet.ratio);
+    const po = $('#hero-d .scene__poster'); if (po) { po.src = `${wideSet.path}/f001.webp`; po.width = wideSet.w; po.height = wideSet.h; }
+  }
+  const mountScene = (scene, PATH) => {
+    document.body.dataset.tone = 'ink'; const tm = $('#themeColor'); if (tm) tm.content = '#15131a';
+    const FRAMES = 88, ANIM_FIN = 0.78, FPS = 10; // el clip se apaga del 89 en adelante: se recorta ahi
     const LERP = isMobile.matches ? 0.08 : 0.09;
     const pin = $('.scene__pin', scene), stage = $('.scene__stage', scene), canvas = $('.scene__canvas', scene);
     const poster = $('.scene__poster', scene), ambient = $('.scene__ambient', scene);
@@ -298,7 +306,9 @@
       addEventListener('resize', () => { lastLow = -1; lastP = -1; progress(); draw(current); applyCopy(current); }, { passive: true });
     }
     window.__scene = { go: p => { stop(); target = current = p; lastLow = -1; lastP = -1; draw(p); applyCopy(p); }, loaded: () => settled };
-  }
+  };
+  if (isMobile.matches && $('#hero-m.scene')) mountScene($('#hero-m.scene'), 'assets/frames/hero');
+  else if (useWide) mountScene($('#hero-d.scene'), wideSet.path);
 
   /* ---------- Nav ---------- */
   const nav = $('#nav'), burger = $('#burger');
