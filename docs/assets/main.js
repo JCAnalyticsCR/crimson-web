@@ -216,7 +216,8 @@
 
   /* ---------- Reveals (fallback IO; en móvil con view() el CSS manda) ---------- */
   const useNativeReveal = hasView && isMobile.matches && !reduced;
-  const reveals = $$('.reveal').filter(r => !r.closest('[data-snap]') && !(useNativeReveal && !r.classList.contains('lines') && !r.classList.contains('sec-idx')));
+  // En movil los carruseles se muestran ya visibles (CSS); en escritorio SI entran con el observer
+  const reveals = $$('.reveal').filter(r => !(isMobile.matches && r.closest('[data-snap]')) && !(useNativeReveal && !r.classList.contains('lines') && !r.classList.contains('sec-idx')));
   $$('.steps').forEach(s => reveals.push(s));
   if (reduced) reveals.forEach(r => r.classList.add('in'));
   else {

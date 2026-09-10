@@ -68,6 +68,8 @@ h3 em{font-style:italic;color:inherit}
 
 /* Reveals: IO añade .in (fallback); scroll-driven nativo donde exista */
 .js .reveal{opacity:0;transform:translateY(22px)}
+/* Red de seguridad: una tarjeta de carrusel nunca queda invisible */
+.js [data-snap]>.reveal{opacity:1;transform:none}
 .reveal{transition:opacity var(--dur-section) var(--ease-enter),transform var(--dur-section) var(--ease-enter);transition-delay:calc(var(--d,0)*100ms)}
 .reveal.in{opacity:1;transform:none}
 
@@ -115,7 +117,7 @@ h3 em{font-style:italic;color:inherit}
 .nav__cta-dot{width:7px;height:7px;border-radius:50%;background:var(--crimson);animation:blink 1s infinite}
 .nav__burger{display:none;width:44px;height:44px;border:0;background:transparent;cursor:pointer;flex-direction:column;justify-content:center;gap:5px;padding:10px}
 .nav__burger span{display:block;height:2px;background:currentColor;border-radius:2px;transition:transform var(--dur-drawer) var(--ease-enter),opacity var(--dur-micro)}
-.nav__mobile-extra{display:none}
+.nav__mobile-extra,.snap-ui{display:none}
 /* Tinte ambiente: nav y HUD siguen el tono de la sección activa */
 body[data-tone=ink] .nav{background:rgba(21,19,26,.78);border-color:var(--hair-dark);color:var(--white)}
 body[data-tone=ink] .nav__logo img{filter:brightness(0) invert(1)}
@@ -223,7 +225,7 @@ section{padding:var(--space) var(--pad)}
 .brands__row{display:flex;flex-wrap:wrap;justify-content:center;gap:0}
 .brands__item{display:flex;align-items:center;gap:16px;padding:8px 36px;border-left:1px solid var(--hair-dark)}
 .brands__item:first-child{border-left:0}
-.brands__item img{height:26px;width:auto;opacity:.8}
+.brands__item img{height:30px;width:auto;opacity:.92}
 .brands__item .meta{color:rgba(244,241,238,.55)}
 
 /* ---------- PROCESO · CAM 04 ---------- */
@@ -451,7 +453,7 @@ body[data-tone=ink] .wa{background:var(--white);color:var(--ink)}
     [data-snap]>*{animation:focus linear both!important;animation-timeline:view(inline);animation-range:cover 0% cover 100%;transform-origin:center}
     @keyframes focus{0%,100%{transform:scale(.97);opacity:.75}30%,70%{transform:scale(1);opacity:1}}
   }
-  .snap-ui{display:flex;align-items:center;gap:16px;margin:10px 0 0;color:var(--muted)}
+  .snap-ui{display:flex!important;align-items:center;gap:16px;margin:10px 0 0;color:var(--muted)}
   .servicios .snap-ui,.tienda .snap-ui{color:var(--muted-dark)}
   .snap-ui__bar{flex:1;height:1px;background:currentColor;opacity:.3;position:relative}
   .snap-ui__bar i{position:absolute;top:-.5px;left:0;height:2px;width:var(--w,20%);background:var(--crimson);transform:translateX(var(--x,0));transition:transform 80ms linear;opacity:1}
