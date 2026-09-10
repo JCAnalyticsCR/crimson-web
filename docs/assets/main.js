@@ -184,6 +184,7 @@
      DPR tope 2; bucle rAF pausado fuera de cuadro; animacion termina al 78% del pin;
      reduced-motion baja UN fotograma. */
   const scene = isMobile.matches ? $('#hero-m.scene') : null; // la escena solo vive en movil
+  if (scene) { document.body.dataset.tone = 'ink'; const tm = $('#themeColor'); if (tm) tm.content = '#15131a'; }
   if (scene) {
     const FRAMES = 88, PATH = 'assets/frames/hero', ANIM_FIN = 0.78, FPS = 10; // el clip se apaga del 89 en adelante: se recorta ahi
     const LERP = isMobile.matches ? 0.08 : 0.09;

@@ -557,6 +557,8 @@ section{padding:var(--space) var(--pad)}
   .scene__copy .display{color:var(--white)}
   .scene__copy .display-2{color:var(--white)}
   .scene__copy .lead{color:rgba(244,241,238,.8)}
+  .hero--m .hero__cta{display:flex!important;width:100%}
+  .hero--m .hero__cta .btn{width:100%}
   .js .hero--m .lines .ln>span{animation:lineUp 950ms var(--ease-enter) forwards}
   .js .hero--m .lines em{animation:inkIn 600ms 520ms both}
   .hero--m{height:calc(100svh + 190vh)}
