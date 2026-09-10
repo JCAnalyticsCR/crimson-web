@@ -557,13 +557,13 @@ section{padding:var(--space) var(--pad)}
   .hero--d .scene__stage .feed__corners{z-index:3;inset:12px;opacity:.75}
   .hero--d .scene__stage .feed__meta{z-index:3;bottom:14px;left:16px;right:16px;justify-content:space-between}
   .hero--d .scene__load{color:rgba(255,255,255,.55)}
-  /* Texto a los lados del video: titular a la izquierda, cierre a la derecha (la mitad del video ocupa 15.2% del cuadro en 1.85) */
+  /* Texto a los lados del video: el video vertical ocupa el 30.4% central del cuadro 1.85 (34.8%..65.2%) */
   .hero--d .scene__copy{position:absolute;z-index:4;top:50%;translate:0 -50%;display:flex;flex-direction:column;gap:18px;will-change:opacity,transform}
-  .hero--d .scene__copy--a{left:4%;right:57%;align-items:flex-end;text-align:right}
+  .hero--d .scene__copy--a{left:3%;right:68%;align-items:flex-end;text-align:right}
   .hero--d .scene__copy--a .lead{text-align:right}
-  .hero--d .scene__copy--b{left:57%;right:4%;align-items:flex-start;text-align:left;opacity:0;pointer-events:none}
-  .hero--d .scene__copy .display{font-size:clamp(32px,3.5vw,60px);line-height:.94;color:var(--white)}
-  .hero--d .scene__copy .display-2{font-size:clamp(30px,3.2vw,54px);color:var(--white)}
+  .hero--d .scene__copy--b{left:68%;right:3%;align-items:flex-start;text-align:left;opacity:0;pointer-events:none}
+  .hero--d .scene__copy .display{font-size:clamp(30px,3.1vw,54px);line-height:.94;color:var(--white)}
+  .hero--d .scene__copy .display-2{font-size:clamp(28px,2.9vw,48px);color:var(--white)}
   .hero--d .scene__copy .lead{color:rgba(244,241,238,.82);font-size:clamp(14px,1.1vw,17px);max-width:34ch}
   .hero--d .hero__cta{display:flex;gap:12px;flex-wrap:wrap}
   .hero--d .hero__index{display:none}
