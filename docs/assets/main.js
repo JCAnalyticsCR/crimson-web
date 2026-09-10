@@ -186,8 +186,8 @@
   // Escritorio: cuadro 16:9 (1.78:1) por defecto con el video vertical a la derecha, sin zoom; ?ratio=185|235 para comparar, ?hero=net para la red
   const q = new URLSearchParams(location.search);
   // Cuadro 1.85:1 con el video VERTICAL centrado a tamano real (sin zoom): mismos fotogramas que movil
-  const RATIOS = { '235': '2.35', '185': '1.85', '178': '1.7778' };
-  const wideSet = { path: 'assets/frames/hero', ratio: RATIOS[q.get('ratio')] || '1.7778', w: 768, h: 1365 };
+  // Video 16:9 (banda reencuadrada del vertical que sigue al sujeto) en el lado derecho, sin zoom de mas
+  const wideSet = { path: 'assets/frames/w178', ratio: '1.7778', w: 1152, h: 648 };
   const useWide = !isMobile.matches && q.get('hero') !== 'net' && !!$('#hero-d.scene');
   if (useWide) {
     document.body.classList.add('has-wide');
