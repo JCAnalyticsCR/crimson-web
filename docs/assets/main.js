@@ -105,7 +105,11 @@
       cursor.style.transform = `translate3d(${px}px,${py}px,0)`;
       raf = (Math.abs(mx - px) + Math.abs(my - py) < .1) ? 0 : requestAnimationFrame(loop);
     }
-    addEventListener('pointermove', e => { mx = e.clientX; my = e.clientY; if (!raf) raf = requestAnimationFrame(loop); }, { passive: true });
+    const stage3d = $('.scene__stage');
+    addEventListener('pointermove', e => {
+      mx = e.clientX; my = e.clientY; if (!raf) raf = requestAnimationFrame(loop);
+      if (stage3d) { stage3d.style.setProperty('--tilt', `${((mx / innerWidth) - .5) * 9}deg`); stage3d.style.setProperty('--tiltx', `${((my / innerHeight) - .5) * -5}deg`); }
+    }, { passive: true });
     addEventListener('pointerover', e => {
       const t = e.target.closest('[data-cursor],a,button,label,.feed');
       const isFrame = !!e.target.closest('.feed');
@@ -189,7 +193,7 @@
     // Coreografia del texto: A (titular) se va, B (payoff + CTA) llega con el telefono
     const applyCopy = p => {
       if (Math.abs(p - lastP) < 0.003) return; lastP = p;
-      const a = 1 - smooth(.16, .36, p), b = smooth(.56, .74, p);
+      const a = 1 - smooth(.30, .48, p), b = smooth(.52, .68, p);
       copyA.style.opacity = a.toFixed(3); copyA.style.transform = `translateY(${((1 - a) * -24).toFixed(1)}px)`; copyA.style.pointerEvents = a > .5 ? 'auto' : 'none';
       copyB.style.opacity = b.toFixed(3); copyB.style.transform = `translateY(${((1 - b) * 24).toFixed(1)}px)`; copyB.style.pointerEvents = b > .5 ? 'auto' : 'none';
       if (tc) { const sec = Math.floor(p * (FRAMES - 1) / FPS); tc.textContent = `00:${String(sec).padStart(2, '0')}`; }
