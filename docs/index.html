@@ -26,9 +26,9 @@
 <link rel="preload" href="assets/fonts/InstrumentSerif-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="assets/fonts/Manrope-500.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="assets/fonts/fonts.css?v=4">
-<link rel="stylesheet" href="assets/styles.css?v=21">
+<link rel="stylesheet" href="assets/styles.css?v=23">
 <script>document.documentElement.classList.add('js')</script>
-<script type="application/json" id="site-config">{"tel":"+50688889892","wa":"50688889892","waLink":"https://wa.me/message/5YQKXZFUPHWLA1","place":"Alajuela, Costa Rica"}</script>
+<script type="application/json" id="site-config">{"tel":"+50688889892","wa":"50688889892","mail":"info@crimsoncr.com","waLink":"https://wa.me/message/5YQKXZFUPHWLA1","place":"Alajuela, Costa Rica"}</script>
 </head>
 <body data-tone="cream">
 <a class="skip" href="#top">Saltar al contenido</a>
@@ -53,6 +53,7 @@
     <div class="nav__mobile-extra">
       <a href="tel:+50688889892">Llamar · +506 8888 9892</a>
       <a href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener">WhatsApp</a>
+      <a href="mailto:info@crimsoncr.com">info@crimsoncr.com</a>
       <span>Alajuela, Costa Rica</span>
     </div>
   </nav>
@@ -253,7 +254,7 @@
     <div class="tienda__head">
       <h2 class="display-2 lines reveal"><span class="ln"><span>Compra tecnología con</span></span><span class="ln"><span><em>confianza</em> y respaldo</span></span></h2>
       <div class="tienda__aside">
-        <p class="lead lead--dark reveal" style="--d:1">Productos seleccionados para soluciones integrales. Distribuidor autorizado Hikvision con garantía y soporte local.</p>
+        <p class="lead lead--dark reveal" style="--d:1">Productos seleccionados para soluciones integrales. Distribuidor autorizado Hikvision con garantía y soporte local. Entregas a todo el país.</p>
         <a class="btn btn--white reveal" style="--d:2" href="https://crimsoncr.com/products" target="_blank" rel="noopener" data-cursor="Abrir"><span>Ver catálogo en línea</span><i class="btn__arrow" aria-hidden="true"></i></a>
       </div>
     </div>
@@ -307,6 +308,7 @@
           <a class="btn btn--crimson btn--lg" id="waBtn" href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener" data-cursor="Ir"><span>Escribinos por WhatsApp</span><i class="btn__arrow" aria-hidden="true"></i></a>
           <a class="btn btn--ghost btn--ghost-light btn--lg" href="tel:+50688889892">Llamar</a>
         </div>
+        <p class="contacto__mail reveal" style="--d:4"><span class="meta">o escribinos a</span> <a href="mailto:info@crimsoncr.com">info@crimsoncr.com</a></p>
       </div>
 
       <form class="form reveal" id="form" style="--d:2" novalidate>
@@ -321,9 +323,17 @@
         </fieldset>
         <label class="field"><span>Nombre</span><input name="nombre" type="text" autocomplete="name" autocapitalize="words" required placeholder="Tu nombre"></label>
         <label class="field"><span>Teléfono</span><input name="telefono" type="tel" inputmode="tel" autocomplete="tel" required placeholder="+506 0000 0000"></label>
-        <details class="form__more"><summary class="meta">Agregar detalle</summary>
+        <details class="form__more"><summary class="meta">Agregar detalle del proyecto</summary>
           <label class="field"><span>Correo electrónico</span><input name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" placeholder="nombre@empresa.com"></label>
-          <label class="field"><span>Mensaje</span><textarea name="mensaje" rows="3" placeholder="Contanos brevemente sobre tu sitio y lo que necesitás"></textarea></label>
+          <div class="form__row">
+            <label class="field"><span>¿Dónde se implementaría?</span>
+              <select name="entorno"><option value="">Seleccionar</option><option>Casa</option><option>Negocio</option><option>Condominio</option><option>Oficina</option><option>Otro</option></select>
+            </label>
+            <label class="field"><span>¿En qué plazo?</span>
+              <select name="plazo"><option value="">Seleccionar</option><option>Inmediato</option><option>Próximas semanas</option><option>En evaluación</option><option>A futuro</option></select>
+            </label>
+          </div>
+          <label class="field"><span>Mensaje</span><textarea name="mensaje" rows="3" placeholder="Contanos qué necesitás o qué problema querés resolver"></textarea></label>
         </details>
         <button class="btn btn--white btn--lg" type="submit" data-cursor="Enviar"><span>Enviar por WhatsApp</span><i class="btn__arrow" aria-hidden="true"></i></button>
         <p class="meta form__note">Al enviar se abre WhatsApp con tu mensaje listo.</p>
@@ -343,8 +353,8 @@
     <div class="footer__grid">
       <div><span class="meta">Servicios</span><a href="#servicios">Videovigilancia</a><a href="#servicios">Redes</a><a href="#servicios">Control de acceso</a><a href="#servicios">Soporte técnico</a></div>
       <div><span class="meta">Enlaces</span><a href="#top">Inicio</a><a href="https://crimsoncr.com/products/" target="_blank" rel="noopener">Tienda</a><a href="https://www.crimsoncr.com/page/solicitud-de-asesoria-personalizada/" target="_blank" rel="noopener">Asesoría personalizada</a></div>
-      <div><span class="meta">Contacto</span><a href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener">WhatsApp</a><a href="https://www.facebook.com/crimsonconcr" target="_blank" rel="noopener">Facebook</a><a href="https://www.instagram.com/cr.crimsoncr/" target="_blank" rel="noopener">Instagram</a></div>
-      <div><span class="meta">Sede</span><span>Alajuela, Costa Rica</span><a href="tel:+50688889892">+506 8888 9892</a></div>
+      <div><span class="meta">Contacto</span><a href="mailto:info@crimsoncr.com">info@crimsoncr.com</a><a href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener">WhatsApp</a><a href="https://www.facebook.com/crimsonconcr" target="_blank" rel="noopener">Facebook</a><a href="https://www.instagram.com/cr.crimsoncr/" target="_blank" rel="noopener">Instagram</a></div>
+      <div><span class="meta">Sede</span><span>Alajuela, Costa Rica</span><a href="tel:+50688889892">+506 8888 9892</a><span>Grupo Empresarial Crimson SRL</span></div>
     </div>
     <div class="footer__bottom meta">
       <span>© 2026 Crimson Consulting · Todos los derechos reservados</span>
@@ -357,6 +367,6 @@
   <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 1.8a8.2 8.2 0 1 1-4.2 15.3l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 0 1 12 3.8zm-3 4.4c-.2 0-.5 0-.7.3-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.2 5 4.4 2.5 1 3 .8 3.5.7.5 0 1.7-.7 2-1.4.2-.7.2-1.2.1-1.4l-.5-.3-1.9-.9c-.3-.1-.4-.2-.6.1l-.8 1c-.2.2-.3.2-.6.1-.3-.2-1.2-.4-2.3-1.4a8.6 8.6 0 0 1-1.6-2c-.2-.3 0-.4.1-.6l.4-.5.3-.5v-.5l-.9-2.1c-.2-.5-.4-.4-.6-.4H9z"/></svg>
 </a>
 
-<script src="assets/main.js?v=13" defer></script>
+<script src="assets/main.js?v=14" defer></script>
 </body>
 </html>

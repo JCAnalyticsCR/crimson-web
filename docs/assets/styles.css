@@ -288,6 +288,10 @@ section{padding:var(--space) var(--pad)}
 .contacto__grid{display:grid;grid-template-columns:1.1fr 1fr;gap:64px;align-items:start}
 .contacto__text{display:flex;flex-direction:column;gap:28px}
 .contacto__actions{display:flex;gap:12px;flex-wrap:wrap}
+.contacto__mail{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.contacto__mail .meta{color:var(--muted-dark)}
+.contacto__mail a{font-size:17px;font-weight:600;color:#fff;border-bottom:1px solid rgba(226,35,58,.7);padding-bottom:2px}
+@media (hover:hover){.contacto__mail a:hover{color:var(--crimson)}}
 .pass{position:relative;aspect-ratio:1.586;max-width:460px;width:100%;border-radius:14px;padding:22px 24px;background:linear-gradient(135deg,#252230,#15131a);border:1px solid rgba(255,255,255,.12);box-shadow:0 40px 80px -40px rgba(0,0,0,.9),0 0 0 1px rgba(226,35,58,.08);display:grid;grid-template-rows:auto 1fr auto;color:#fff;overflow:hidden}
 .pass::after{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(60% 50% at 85% 0%,rgba(226,35,58,.28),transparent 70%)}
 .pass__top{display:flex;justify-content:space-between;align-items:center}
@@ -306,8 +310,11 @@ section{padding:var(--space) var(--pad)}
 .chips input:focus-visible+span{outline:2px solid var(--crimson);outline-offset:2px}
 .field{display:flex;flex-direction:column;gap:6px}
 .field>span{font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;text-transform:uppercase;color:rgba(244,241,238,.55)}
-.form input,.form textarea{font:inherit;font-size:16px;padding:12px 0;border:0;border-bottom:1px solid rgba(255,255,255,.2);border-radius:0;background:transparent;color:#fff;transition:border-color var(--dur-micro)}
-.form input:focus,.form textarea:focus{outline:0;border-bottom-color:var(--crimson)}
+.form input,.form textarea,.form select{font:inherit;font-size:16px;padding:12px 0;border:0;border-bottom:1px solid rgba(255,255,255,.2);border-radius:0;background:transparent;color:#fff;transition:border-color var(--dur-micro);-webkit-appearance:none;appearance:none}
+.form select{cursor:pointer;background-image:linear-gradient(45deg,transparent 50%,rgba(244,241,238,.6) 50%),linear-gradient(135deg,rgba(244,241,238,.6) 50%,transparent 50%);background-position:calc(100% - 10px) 22px,calc(100% - 5px) 22px;background-size:5px 5px;background-repeat:no-repeat;padding-right:24px}
+.form select option{background:var(--ink-2);color:#fff}
+.form__row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.form input:focus,.form textarea:focus,.form select:focus{outline:0;border-bottom-color:var(--crimson)}
 .form ::placeholder{color:rgba(244,241,238,.35);opacity:1}
 .form textarea{resize:vertical}
 .form__more{display:flex;flex-direction:column;gap:14px}
@@ -331,9 +338,9 @@ section{padding:var(--space) var(--pad)}
 .footer__bottom div{display:flex;gap:24px}
 
 /* ---------- WhatsApp flotante (solo escritorio) ---------- */
-.wa{position:fixed;right:22px;bottom:22px;width:54px;height:54px;border-radius:50%;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;z-index:30;box-shadow:0 0 0 1px rgba(226,35,58,.5),0 16px 34px -12px rgba(0,0,0,.6);transition:transform var(--dur-micro) var(--ease-button),background var(--dur-micro)}
-@media (hover:hover){.wa:hover{transform:scale(1.06);background:var(--crimson)}}
-body[data-tone=ink] .wa{background:var(--white);color:var(--ink)}
+.wa{position:fixed;right:24px;bottom:24px;width:56px;height:56px;border-radius:50%;background:#128c4a;color:#fff;display:grid;place-items:center;z-index:30;box-shadow:0 12px 28px -10px rgba(0,0,0,.5);transition:transform var(--dur-micro) var(--ease-button),background var(--dur-micro)}
+.wa svg{display:block}
+@media (hover:hover){.wa:hover{transform:scale(1.07);background:#0f7a40}}
 
 /* ---------- Animaciones pausadas fuera de pantalla (IO) ---------- */
 .is-offscreen *{animation-play-state:paused!important}
@@ -509,6 +516,8 @@ body[data-tone=ink] .wa{background:var(--white);color:var(--ink)}
   .contacto__actions .btn{width:100%}
   .form{padding:22px 18px;gap:16px}
   .chips span{min-height:46px;padding:0 14px}
+  .form__row{grid-template-columns:1fr;gap:14px}
+  .contacto__mail a{font-size:16px}
   .form input,.form textarea{font-size:16px}
 
   .footer{padding:40px var(--pad) calc(28px + env(safe-area-inset-bottom))}

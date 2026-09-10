@@ -326,7 +326,13 @@
     e.preventDefault();
     if (!form.reportValidity()) return;
     const f = new FormData(form);
-    const msg = [`Hola Crimson, soy ${f.get('nombre')}.`, `Tel: ${f.get('telefono')}${f.get('email') ? ` · Email: ${f.get('email')}` : ''}`, `Proyecto: ${f.get('tipo')}`, f.get('mensaje') ? `\n${f.get('mensaje')}` : ''].join('\n');
+    const ctx = [f.get('entorno'), f.get('plazo')].filter(Boolean).join(' · ');
+    const msg = [
+      `Hola Crimson, soy ${f.get('nombre')}.`,
+      `Tel: ${f.get('telefono')}${f.get('email') ? ` · Email: ${f.get('email')}` : ''}`,
+      `Proyecto: ${f.get('tipo')}${ctx ? ` (${ctx})` : ''}`,
+      f.get('mensaje') ? `\n${f.get('mensaje')}` : ''
+    ].join('\n');
     const a = Object.assign(document.createElement('a'), { href: `https://wa.me/${CFG.wa}?text=${encodeURIComponent(msg)}`, target: '_blank', rel: 'noopener' });
     document.body.append(a); a.click(); a.remove();
   });
