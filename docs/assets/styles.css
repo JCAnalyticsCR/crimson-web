@@ -236,7 +236,8 @@ section{padding:var(--space) var(--pad)}
 
 /* ---------- PROCESO · CAM 04 ---------- */
 .proceso .wrap{display:flex;flex-direction:column;gap:64px}
-.proceso__head{display:flex;flex-direction:column;gap:20px;max-width:760px}
+.proceso__head{display:grid;grid-template-columns:1.2fr 1fr;gap:40px;align-items:end}
+.proceso__aside{display:flex;flex-direction:column;gap:14px}
 .steps{position:relative;display:grid;grid-template-columns:repeat(3,1fr);gap:32px}
 .steps::before{content:"";position:absolute;left:0;right:0;top:20px;height:1px;background:var(--hair)}
 .steps::after{content:"";position:absolute;left:0;right:0;top:20px;height:1px;background:var(--crimson);transform-origin:left;transform:scaleX(0);transition:transform 1.6s var(--ease-scene) .2s;opacity:.8}
@@ -287,7 +288,7 @@ section{padding:var(--space) var(--pad)}
 
 /* ---------- CONTACTO · CAM 07 (clímax) ---------- */
 .contacto{position:relative;overflow:hidden;padding-bottom:calc(var(--space)*.8)}
-.contacto__net{position:absolute;inset:0;pointer-events:none;opacity:.45}
+.contacto__net{position:absolute;inset:0;pointer-events:none;opacity:.5;-webkit-mask-image:radial-gradient(60% 70% at 45% 50%,transparent 25%,#000 75%);mask-image:radial-gradient(60% 70% at 45% 50%,transparent 25%,#000 75%)}
 .contacto__net svg{width:100%;height:100%}
 .contacto .wrap{position:relative;display:flex;flex-direction:column;gap:56px}
 .contacto__grid{display:grid;grid-template-columns:1.1fr 1fr;gap:64px;align-items:start}
@@ -370,7 +371,7 @@ body[data-tone=ink] .wa{background:var(--white);color:var(--ink)}
 }
 @media (min-width:768px) and (max-width:1023px){
   .hero h1{grid-column:1/-1}.hero__aside{grid-column:1/9;margin-top:8px}.hero__index{grid-column:1/-1}
-  .wall__head,.servicios__head,.casos__head{grid-template-columns:1fr}
+  .wall__head,.servicios__head,.casos__head,.proceso__head{grid-template-columns:1fr}
   .cards{gap:12px}.card__media{aspect-ratio:3/4}
   .stats{grid-template-columns:repeat(2,1fr)}
   .cases{grid-template-columns:repeat(2,1fr)}.case--lg{min-height:380px}.case{min-height:240px}
@@ -442,7 +443,8 @@ body[data-tone=ink] .wa{background:var(--white);color:var(--ink)}
   .proceso{background:linear-gradient(180deg,var(--ink) 0,var(--bg) 110px)}
   .tienda{background:linear-gradient(180deg,var(--bg-2) 0,var(--ink) 110px)}
   .wall .wrap,.servicios .wrap,.proceso .wrap,.casos .wrap,.tienda .wrap,.contacto .wrap{gap:36px}
-  .wall__head,.servicios__head,.casos__head{display:flex;flex-direction:column;align-items:stretch;gap:16px}
+  .wall__head,.servicios__head,.casos__head,.proceso__head{display:flex;flex-direction:column;align-items:stretch;gap:16px}
+  .contacto__net{-webkit-mask-image:none;mask-image:none;opacity:.35}
   .wall__grid{grid-template-columns:1fr 1fr;gap:8px}
   .wall__grid .feed{aspect-ratio:4/5}
   .wall__grid .feed:nth-child(1){grid-column:span 2;aspect-ratio:3/2}
