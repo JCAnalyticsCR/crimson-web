@@ -10,12 +10,12 @@
   --crimson:#e2233a; --crimson-dark:#c41a2f; --crimson-soft:rgba(226,35,58,.18); --white:#f4f1ee;
   --ok:#1fa35a;
   /* Tipografia de titulares: sans geometrica, sin cursivas. ?font=space|bricolage|syne para comparar; Sora por defecto */
-  --serif:'Sora','Segoe UI',system-ui,sans-serif;--dw:700;
+  --serif:'Bricolage Grotesque','Segoe UI',system-ui,sans-serif;--dw:700;
   --sans:Manrope,system-ui,-apple-system,sans-serif;
   --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
 
   --fs-display:clamp(48px,8.4vw,140px);
-  --fs-d2:clamp(40px,5.4vw,84px);
+  --fs-d2:clamp(36px,4vw,64px);
   --fs-d3:clamp(26px,2.2vw,34px);
   --fs-lead:clamp(17px,1.25vw,20px);
   --fs-meta:11px;
@@ -47,7 +47,7 @@ ul,ol{list-style:none}
 .meta{font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;text-transform:uppercase;font-weight:500;font-variant-numeric:tabular-nums;color:var(--muted)}
 .eyebrow{font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.22em;text-transform:uppercase;color:var(--crimson);font-weight:500}
 html[data-font=space]{--serif:'Space Grotesk','Segoe UI',system-ui,sans-serif;--dw:700}
-html[data-font=bricolage]{--serif:'Bricolage Grotesque','Segoe UI',system-ui,sans-serif;--dw:700}
+html[data-font=sora]{--serif:'Sora','Segoe UI',system-ui,sans-serif;--dw:700}
 html[data-font=syne]{--serif:'Syne','Segoe UI',system-ui,sans-serif;--dw:800}
 .display{font-family:var(--serif);font-weight:var(--dw);font-size:var(--fs-display);line-height:.98;letter-spacing:-.03em;text-wrap:balance;hanging-punctuation:first}
 .display-2{font-family:var(--serif);font-weight:var(--dw);font-size:var(--fs-d2);line-height:1;letter-spacing:-.02em;text-wrap:balance}
@@ -200,7 +200,7 @@ section{padding:var(--space) var(--pad)}
 
 /* ---------- MURO DE MONITORES · CAM 02 ---------- */
 .wall .wrap{display:flex;flex-direction:column;gap:40px}
-.wall__head{display:grid;grid-template-columns:1.2fr 1fr;gap:40px;align-items:end}
+.wall__head{display:grid;grid-template-columns:1.5fr 1fr;gap:48px;align-items:end}
 .wall__grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
 .wall__grid .feed{aspect-ratio:3/2}
 .wall__grid .feed>img{position:absolute;inset:0;transition:filter 140ms steps(2),transform var(--dur-scene) var(--ease-enter)}
@@ -210,7 +210,7 @@ section{padding:var(--space) var(--pad)}
 
 /* ---------- SERVICIOS · CAM 03 ---------- */
 .servicios .wrap{display:flex;flex-direction:column;gap:44px}
-.servicios__head{display:grid;grid-template-columns:1.2fr 1fr;gap:40px;align-items:end}
+.servicios__head{display:grid;grid-template-columns:1.5fr 1fr;gap:48px;align-items:end}
 .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
 .card{display:flex;flex-direction:column;gap:0;border-top:1px solid var(--hair-dark);padding-top:16px}
 .card__media{aspect-ratio:4/5;max-height:420px}
@@ -234,7 +234,7 @@ section{padding:var(--space) var(--pad)}
 
 /* ---------- PROCESO · CAM 04 ---------- */
 .proceso .wrap{display:flex;flex-direction:column;gap:44px}
-.proceso__head{display:grid;grid-template-columns:1.2fr 1fr;gap:40px;align-items:end}
+.proceso__head{display:grid;grid-template-columns:1.5fr 1fr;gap:48px;align-items:end}
 .proceso__aside{display:flex;flex-direction:column;gap:14px}
 .steps{position:relative;display:grid;grid-template-columns:repeat(3,1fr);gap:28px}
 .steps::before{content:"";position:absolute;left:0;right:0;top:20px;height:1px;background:var(--hair)}
@@ -250,7 +250,7 @@ section{padding:var(--space) var(--pad)}
 
 /* ---------- INSTALACIONES · CAM 05 ---------- */
 .casos .wrap{display:flex;flex-direction:column;gap:40px}
-.casos__head{display:grid;grid-template-columns:1.2fr 1fr;gap:40px;align-items:end}
+.casos__head{display:grid;grid-template-columns:1.5fr 1fr;gap:48px;align-items:end}
 .cases{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
 .case{min-height:270px}
 .case--lg{grid-column:span 2;min-height:460px}
@@ -264,7 +264,7 @@ section{padding:var(--space) var(--pad)}
 
 /* ---------- TIENDA · CAM 06: estante de productos ---------- */
 .tienda .wrap{display:flex;flex-direction:column;gap:40px}
-.tienda__head{display:grid;grid-template-columns:1.2fr 1fr;gap:40px;align-items:end}
+.tienda__head{display:grid;grid-template-columns:1.5fr 1fr;gap:48px;align-items:end}
 .tienda__aside{display:flex;flex-direction:column;gap:22px;align-items:flex-start}
 .products{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
 .product{display:flex;flex-direction:column;gap:0;border-radius:var(--r);overflow:hidden;background:var(--ink-2);border:1px solid var(--hair-dark);transition:transform var(--dur-drawer) var(--ease-enter),border-color var(--dur-drawer)}
