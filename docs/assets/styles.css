@@ -29,7 +29,7 @@
 }
 *,*::before,*::after{box-sizing:border-box}
 html{scroll-behavior:smooth;-webkit-text-size-adjust:100%;overflow-x:clip}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.5;overflow-x:hidden;font-kerning:normal}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.5;overflow-x:clip;font-kerning:normal}
 section[id],main[id]{scroll-margin-top:calc(72px + env(safe-area-inset-top))}
 main:focus{outline:none}
 img{max-width:100%;height:auto;display:block}

@@ -197,17 +197,35 @@
   $$('.nav__links a').forEach(a => a.addEventListener('click', () => nav.classList.contains('is-open') && setMenu(false)));
   addEventListener('keydown', e => e.key === 'Escape' && nav.classList.contains('is-open') && setMenu(false));
 
-  /* ---------- Anclas internas: aterrizar en el contenido, no en el borde de la sección ---------- */
+  /* ---------- Anclas internas: la seccion queda encuadrada bajo el nav ---------- */
+  const NAV_GAP = 28;
+  // Ancla al primer elemento de contenido, no al borde de la seccion:
+  // asi el relleno superior (degradado de costura) no descuadra el resultado.
+  const scrollToSection = (sec, smooth = true) => {
+    const el = sec.querySelector('.sec-idx') || sec.querySelector('h2') || sec;
+    const y = el.getBoundingClientRect().top + scrollY - nav.offsetHeight - NAV_GAP;
+    scrollTo({ top: Math.max(0, y), behavior: (smooth && !reduced) ? 'smooth' : 'instant' });
+  };
+  const sectionFromHash = () => {
+    const id = location.hash.slice(1);
+    if (!id || id === 'top') return null;
+    const sec = document.getElementById(id);
+    return sec && sec.tagName === 'SECTION' ? sec : null;
+  };
   $$('a[href^="#"]').forEach(a => a.addEventListener('click', e => {
-    const id = a.getAttribute('href').slice(1); const sec = id && document.getElementById(id);
-    if (!sec || id === 'top') return;
+    const id = a.getAttribute('href').slice(1);
+    const sec = id && document.getElementById(id);
+    if (!sec) return;
     e.preventDefault();
     if (nav.classList.contains('is-open')) setMenu(false);
-    const navH = nav.offsetHeight, pad = parseFloat(getComputedStyle(sec).paddingTop) || 0;
-    const y = sec.getBoundingClientRect().top + scrollY + pad - navH - 28;
-    scrollTo({ top: Math.max(0, y), behavior: reduced ? 'instant' : 'smooth' });
+    if (id === 'top') scrollTo({ top: 0, behavior: reduced ? 'instant' : 'smooth' });
+    else scrollToSection(sec);
     history.replaceState(null, '', '#' + id);
   }));
+  // Entrada directa con ancla en la URL y navegacion atras/adelante
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+  addEventListener('hashchange', () => { const sec = sectionFromHash(); if (sec) scrollToSection(sec); });
+  addEventListener('load', () => { const sec = sectionFromHash(); if (sec) setTimeout(() => scrollToSection(sec, false), 80); });
 
   /* ---------- Un solo listener de scroll ---------- */
   scrollFns.push(onScroll);
