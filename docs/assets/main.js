@@ -141,6 +141,7 @@
     const LERP = isMobile.matches ? 0.08 : 0.09;
     const pin = $('.scene__pin', scene), stage = $('.scene__stage', scene), canvas = $('.scene__canvas', scene);
     const poster = $('.scene__poster', scene), ambient = $('.scene__ambient', scene);
+    const actx = ambient && ambient.getContext ? ambient.getContext('2d', { alpha: false }) : null;
     const copyA = $('.scene__copy--a', scene), copyB = $('.scene__copy--b', scene);
     const tc = $('.scene__tc', scene), loadEl = $('.scene__load', scene), hint = $('.hero__hint', scene);
     const ctx = canvas.getContext('2d', { alpha: false });
@@ -152,20 +153,27 @@
     const nearestLoaded = i => { for (let d = 0; d < FRAMES; d++) { if (ok[i - d]) return i - d; if (ok[i + d]) return i + d; } return -1; };
 
     // Dibujo: cover manual + mezcla entre fotogramas vecinos
-    // El encuadre sigue al sujeto: la camara vive arriba (22%), el telefono al centro (50%)
-    let focusY = .5;
+    // Cover manual (en escritorio el visor es 9:16 como el clip: no recorta nada)
     const coverDraw = (img, alpha) => {
       const cw = canvas.width, ch = canvas.height, iw = img.naturalWidth, ih = img.naturalHeight;
       const k = Math.max(cw / iw, ch / ih), w = iw * k, hh = ih * k;
-      ctx.globalAlpha = alpha; ctx.drawImage(img, (cw - w) / 2, -(hh - ch) * focusY, w, hh);
+      ctx.globalAlpha = alpha; ctx.drawImage(img, (cw - w) / 2, (ch - hh) / 2, w, hh);
+    };
+    // Ambiente: el mismo fotograma en 64x114 px; el navegador lo amplia con interpolacion
+    // bilineal (desenfoque gratis, sin filter:blur, que mata el frame budget)
+    let lastAmb = -9;
+    const drawAmbient = (img, idx) => {
+      if (!actx || isMobile.matches || Math.abs(idx - lastAmb) < 3) return;
+      lastAmb = idx;
+      const aw = ambient.width, ah = ambient.height, iw = img.naturalWidth, ih = img.naturalHeight;
+      const k = Math.max(aw / iw, ah / ih), w = iw * k, hh = ih * k;
+      actx.drawImage(img, (aw - w) / 2, (ah - hh) / 2, w, hh);
     };
     const draw = frac => {
       const dpr = Math.min(devicePixelRatio || 1, 2), w = stage.clientWidth, hh = stage.clientHeight;
       if (!w || !hh) return;
       const W = Math.round(w * dpr), H = Math.round(hh * dpr);
       if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; lastLow = -1; }
-      const fy = isMobile.matches ? .5 : .5 + .08 * smooth(.36, .6, frac);
-      if (Math.abs(fy - focusY) > .002) { focusY = fy; lastLow = -1; }
       const exact = frac * (FRAMES - 1);
       let low = Math.max(0, Math.min(FRAMES - 1, Math.floor(exact))), high = Math.min(FRAMES - 1, low + 1), blend = exact - low;
       if (!ok[low]) { const n = nearestLoaded(low); if (n < 0) return; low = high = n; blend = 0; }
@@ -175,6 +183,7 @@
       coverDraw(imgs[low], 1);
       if (high !== low && blend > 0.008) coverDraw(imgs[high], blend);
       ctx.globalAlpha = 1;
+      drawAmbient(imgs[blend > .5 ? high : low], blend > .5 ? high : low);
     };
 
     // Coreografia del texto: A (titular) se va, B (payoff + CTA) llega con el telefono
@@ -183,7 +192,6 @@
       const a = 1 - smooth(.16, .36, p), b = smooth(.56, .74, p);
       copyA.style.opacity = a.toFixed(3); copyA.style.transform = `translateY(${((1 - a) * -24).toFixed(1)}px)`; copyA.style.pointerEvents = a > .5 ? 'auto' : 'none';
       copyB.style.opacity = b.toFixed(3); copyB.style.transform = `translateY(${((1 - b) * 24).toFixed(1)}px)`; copyB.style.pointerEvents = b > .5 ? 'auto' : 'none';
-      if (ambient) ambient.style.opacity = (.6 * (1 - p)).toFixed(3);
       if (tc) { const sec = Math.floor(p * (FRAMES - 1) / FPS); tc.textContent = `00:${String(sec).padStart(2, '0')}`; }
       if (hint) hint.style.opacity = p > .03 ? '0' : '';
     };
