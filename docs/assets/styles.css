@@ -167,7 +167,7 @@ img[data-lqip].is-loaded{}
 .hero{position:relative;height:calc(100svh + 260vh);margin-top:calc(-1 * var(--navh));padding:0;background:var(--ink);color:var(--white)}
 .scene__pin{position:sticky;top:0;height:100svh;overflow:hidden;background:#000}
 /* Blur en capa GPU sobre un canvas de 96 px que solo se repinta cada 3 fotogramas: costo acotado */
-.scene__ambient{position:absolute;inset:-8%;width:116%;height:116%;display:block;pointer-events:none;filter:blur(28px) brightness(.55) saturate(.9);transform:translateZ(0);will-change:filter}
+.scene__ambient{position:absolute;inset:-8%;width:116%;height:116%;display:block;pointer-events:none;filter:blur(38px) brightness(.5) saturate(.9);transform:translateZ(0);will-change:filter}
 .scene__ambient::after{content:""}
 .scene__grid{position:static;max-width:none;padding:0}
 .scene__veil{position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(90deg,rgba(21,19,26,.86) 0,rgba(21,19,26,.7) 45%,rgba(21,19,26,.3) 100%)}
