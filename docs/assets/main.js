@@ -57,22 +57,8 @@
     });
     return svg;
   }
-  const netHero = $('#netHero'), netContact = $('#netContact');
-  const heroSvg = buildNet({ portrait: isMobile.matches, density: isMobile.matches ? .5 : 1 });
-  netHero && netHero.appendChild(heroSvg);
+  const netContact = $('#netContact');
   netContact && netContact.appendChild(buildNet({ dark: true, seed: 1, converge: true, portrait: isMobile.matches, density: isMobile.matches ? .5 : 1 }));
-
-  // Toque sobre la red (móvil): los nodos cercanos al dedo se encienden
-  if (isMobile.matches && !reduced && netHero) {
-    $('#hero').addEventListener('pointerdown', e => {
-      const pt = heroSvg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
-      let p; try { p = pt.matrixTransform(heroSvg.getScreenCTM().inverse()); } catch { return; }
-      $$('.net-node', heroSvg).forEach(n => {
-        const d = Math.hypot(n.cx.baseVal.value - p.x, n.cy.baseVal.value - p.y);
-        if (d < 260) { n.classList.add('hit'); n.previousElementSibling?.classList.add('hit'); setTimeout(() => { n.classList.remove('hit'); n.previousElementSibling?.classList.remove('hit'); }, 600 + d); }
-      });
-    }, { passive: true });
-  }
 
   // Pausar TODO lo que anima cuando su sección no se ve (CSS + SMIL)
   if (!reduced) {
@@ -113,34 +99,13 @@
   if (isPC) {
     document.body.classList.add('has-cursor');
     const cursor = $('.cursor'), label = $('.cursor__label');
-    const LERP = 0.09;
-    let tx = 0, ty = 0, cx = 0, cy = 0, mx = -100, my = -100, px = -100, py = -100, raf = 0, lastNear = -1;
-    const nodeEls = $$('.net-node', heroSvg), glowEls = $$('.net-glow', heroSvg);
-    let heroVisible = true;
-    new IntersectionObserver(([en]) => heroVisible = en.isIntersecting, { rootMargin: '35%' }).observe(netHero);
-    const nearest = () => {
-      const r = netHero.getBoundingClientRect(), sx = 1440 / r.width, sy = 810 / r.height;
-      let best = -1, bd = 150 * 150;
-      NODES.forEach(([x, y], i) => { const dx = (mx - r.left) * sx - x, dy = (my - r.top) * sy - y; const d = dx * dx + dy * dy; if (d < bd) { bd = d; best = i; } });
-      return best;
-    };
+    let mx = -100, my = -100, px = -100, py = -100, raf = 0;
     function loop() {
       px += (mx - px) * .35; py += (my - py) * .35;
       cursor.style.transform = `translate3d(${px}px,${py}px,0)`;
-      if (heroVisible) {
-        cx += (tx - cx) * LERP; cy += (ty - cy) * LERP;
-        netHero.style.transform = `translate3d(${cx}px,${cy}px,0)`;
-        const n = nearest();
-        if (n !== lastNear) { nodeEls.forEach((c, i) => c.classList.toggle('near', i === n)); glowEls.forEach((g, i) => g.classList.toggle('hit', i === n)); lastNear = n; }
-      }
-      const idle = Math.abs(mx - px) + Math.abs(my - py) + (heroVisible ? Math.abs(tx - cx) + Math.abs(ty - cy) : 0) < .1;
-      raf = idle ? 0 : requestAnimationFrame(loop);
+      raf = (Math.abs(mx - px) + Math.abs(my - py) < .1) ? 0 : requestAnimationFrame(loop);
     }
-    addEventListener('pointermove', e => {
-      tx = (e.clientX / innerWidth - .5) * -28; ty = (e.clientY / innerHeight - .5) * -18;
-      mx = e.clientX; my = e.clientY;
-      if (!raf) raf = requestAnimationFrame(loop);
-    }, { passive: true });
+    addEventListener('pointermove', e => { mx = e.clientX; my = e.clientY; if (!raf) raf = requestAnimationFrame(loop); }, { passive: true });
     addEventListener('pointerover', e => {
       const t = e.target.closest('[data-cursor],a,button,label,.feed');
       const isFrame = !!e.target.closest('.feed');
@@ -166,21 +131,118 @@
     $$('.btn').forEach(b => { b.addEventListener('pointerenter', () => hudState && (hudState.textContent = '● ENFOCANDO')); b.addEventListener('pointerleave', () => hudState && (hudState.textContent = '14 NODOS')); });
   }
 
-  /* ---------- Móvil: giroscopio con permiso (iOS) o parallax por scroll ---------- */
-  if (isMobile.matches && !reduced && netHero) {
-    let tx = 0, ty = 0, cx = 0, cy = 0, raf = 0, hv = true, tilt = false;
-    new IntersectionObserver(([e]) => hv = e.isIntersecting).observe(netHero);
-    const loop = () => { cx += (tx - cx) * .08; cy += (ty - cy) * .08; netHero.style.transform = `translate3d(${cx}px,${cy}px,0)`; raf = (Math.abs(tx - cx) + Math.abs(ty - cy) > .05) ? requestAnimationFrame(loop) : 0; };
-    const onTilt = e => { if (!hv) return; tilt = true; tx = Math.max(-14, Math.min(14, (e.gamma || 0) * .5)); ty = Math.max(-10, Math.min(10, ((e.beta || 0) - 45) * .3)); if (!raf) raf = requestAnimationFrame(loop); };
-    const arm = () => addEventListener('deviceorientation', onTilt, { passive: true });
-    const DOE = window.DeviceOrientationEvent;
-    if (DOE?.requestPermission) $('#hero').addEventListener('touchstart', () => DOE.requestPermission().then(s => s === 'granted' && arm()).catch(() => {}), { once: true, passive: true });
-    else if (DOE) arm();
-    scrollFns.push(() => { if (hv && !tilt && !raf) netHero.style.transform = `translate3d(0,${scrollY * -.15}px,0)`; });
+  /* ---------- CAM 01: video controlado por fotogramas (canvas), scrubbeado por scroll ----------
+     Reglas del sistema: fotos y no <video>; decode() con fallback; lerp 0.09/0.08;
+     DPR tope 2; bucle rAF pausado fuera de cuadro; animacion termina al 78% del pin;
+     reduced-motion baja UN fotograma. */
+  const scene = $('#hero.scene');
+  if (scene) {
+    const FRAMES = 88, PATH = 'assets/frames/hero', ANIM_FIN = 0.78, FPS = 10; // el clip se apaga del 89 en adelante: se recorta ahi
+    const LERP = isMobile.matches ? 0.08 : 0.09;
+    const pin = $('.scene__pin', scene), stage = $('.scene__stage', scene), canvas = $('.scene__canvas', scene);
+    const poster = $('.scene__poster', scene), ambient = $('.scene__ambient', scene);
+    const copyA = $('.scene__copy--a', scene), copyB = $('.scene__copy--b', scene);
+    const tc = $('.scene__tc', scene), loadEl = $('.scene__load', scene), hint = $('.hero__hint', scene);
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const imgs = new Array(FRAMES), ok = new Uint8Array(FRAMES);
+    const pad = n => String(n).padStart(3, '0');
+    let target = 0, current = 0, raf = 0, running = false, cancelled = false, settled = 0;
+    let lastLow = -1, lastHigh = -1, lastBlend = -1, lastP = -1;
+    const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+    const nearestLoaded = i => { for (let d = 0; d < FRAMES; d++) { if (ok[i - d]) return i - d; if (ok[i + d]) return i + d; } return -1; };
+
+    // Dibujo: cover manual + mezcla entre fotogramas vecinos
+    // El encuadre sigue al sujeto: la camara vive arriba (22%), el telefono al centro (50%)
+    let focusY = .42;
+    const coverDraw = (img, alpha) => {
+      const cw = canvas.width, ch = canvas.height, iw = img.naturalWidth, ih = img.naturalHeight;
+      const k = Math.max(cw / iw, ch / ih), w = iw * k, hh = ih * k;
+      ctx.globalAlpha = alpha; ctx.drawImage(img, (cw - w) / 2, -(hh - ch) * focusY, w, hh);
+    };
+    const draw = frac => {
+      const dpr = Math.min(devicePixelRatio || 1, 2), w = stage.clientWidth, hh = stage.clientHeight;
+      if (!w || !hh) return;
+      const W = Math.round(w * dpr), H = Math.round(hh * dpr);
+      if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; lastLow = -1; }
+      const fy = isMobile.matches ? .5 : .42 + .14 * smooth(.36, .6, frac);
+      if (Math.abs(fy - focusY) > .002) { focusY = fy; lastLow = -1; }
+      const exact = frac * (FRAMES - 1);
+      let low = Math.max(0, Math.min(FRAMES - 1, Math.floor(exact))), high = Math.min(FRAMES - 1, low + 1), blend = exact - low;
+      if (!ok[low]) { const n = nearestLoaded(low); if (n < 0) return; low = high = n; blend = 0; }
+      else if (!ok[high]) { high = low; blend = 0; }
+      if (low === lastLow && high === lastHigh && Math.abs(blend - lastBlend) < 0.015) return;
+      lastLow = low; lastHigh = high; lastBlend = blend;
+      coverDraw(imgs[low], 1);
+      if (high !== low && blend > 0.008) coverDraw(imgs[high], blend);
+      ctx.globalAlpha = 1;
+    };
+
+    // Coreografia del texto: A (titular) se va, B (payoff + CTA) llega con el telefono
+    const applyCopy = p => {
+      if (Math.abs(p - lastP) < 0.003) return; lastP = p;
+      const a = 1 - smooth(.16, .36, p), b = smooth(.56, .74, p);
+      copyA.style.opacity = a.toFixed(3); copyA.style.transform = `translateY(${((1 - a) * -24).toFixed(1)}px)`; copyA.style.pointerEvents = a > .5 ? 'auto' : 'none';
+      copyB.style.opacity = b.toFixed(3); copyB.style.transform = `translateY(${((1 - b) * 24).toFixed(1)}px)`; copyB.style.pointerEvents = b > .5 ? 'auto' : 'none';
+      if (ambient) ambient.style.opacity = (.6 * (1 - p)).toFixed(3);
+      if (tc) { const sec = Math.floor(p * (FRAMES - 1) / FPS); tc.textContent = `00:${String(sec).padStart(2, '0')}`; }
+      if (hint) hint.style.opacity = p > .03 ? '0' : '';
+    };
+
+    const tick = () => {
+      current += (target - current) * LERP;
+      if (Math.abs(target - current) < 0.0006) current = target;
+      draw(current); applyCopy(current);
+      raf = requestAnimationFrame(tick);
+    };
+    const start = () => { if (running) return; running = true; current = target; draw(current); applyCopy(current); raf = requestAnimationFrame(tick); };
+    const stop = () => { running = false; cancelAnimationFrame(raf); raf = 0; };
+
+    // Progreso del pin -> objetivo de la secuencia (comprimida al 78% del recorrido)
+    const progress = () => {
+      const len = scene.offsetHeight - pin.offsetHeight;
+      const p = len > 0 ? Math.min(1, Math.max(0, -scene.getBoundingClientRect().top / len)) : 0;
+      target = Math.min(1, p / ANIM_FIN);
+    };
+    scrollFns.push(progress); progress();
+
+    // Carga: decode() con fallback; el contador sube exactamente una vez por imagen
+    const listo = (i, img, good) => {
+      if (cancelled) return;
+      if (good) { imgs[i] = img; ok[i] = 1; }
+      settled++;
+      if (loadEl) loadEl.textContent = settled < FRAMES ? `CARGANDO ${Math.round(settled / FRAMES * 100)}%` : 'EN VIVO';
+      if (i === 0 || !running) draw(current);
+    };
+    const fetchFrame = i => new Promise(res => {
+      const img = new Image();
+      img.onload = () => { img.onload = null; img.onerror = null; img.decode().then(() => { listo(i, img, true); res(); }).catch(() => { listo(i, img, img.naturalWidth > 0); res(); }); };
+      img.onerror = () => { listo(i, img, false); res(); };
+      img.src = `${PATH}/f${pad(i + 1)}.webp`;
+    });
+    const preload = async () => {
+      await fetchFrame(0);
+      let next = 1;
+      const worker = async () => { while (next < FRAMES && !cancelled) { const i = next++; await fetchFrame(i); } };
+      await Promise.all(Array.from({ length: 5 }, worker));
+    };
+
+    if (reduced) {
+      // Un fotograma: el telefono con el panel en pantalla, la version estatica mas informativa
+      fetchFrame(59).then(() => { current = target = 59 / (FRAMES - 1); lastP = -1; draw(current); applyCopy(1); });
+    } else {
+      // El poster (f001) es el LCP: la secuencia arranca cuando el ya esta en pantalla
+      const posterReady = poster && !poster.complete ? new Promise(r => { poster.onload = r; poster.onerror = r; }) : Promise.resolve();
+      posterReady.then(preload);
+      new IntersectionObserver(([en]) => en.isIntersecting ? start() : stop(), { rootMargin: '35% 0px' }).observe(scene);
+      addEventListener('resize', () => { lastLow = -1; lastP = -1; progress(); draw(current); applyCopy(current); }, { passive: true });
+    }
+    window.__scene = { go: p => { stop(); target = current = p; lastLow = -1; lastP = -1; draw(p); applyCopy(p); }, loaded: () => settled };
   }
 
   /* ---------- Nav ---------- */
   const nav = $('#nav'), burger = $('#burger');
+  const setNavH = () => document.documentElement.style.setProperty('--navh', nav.offsetHeight + 'px');
+  setNavH(); addEventListener('resize', setNavH, { passive: true });
   const onScroll = () => { if (document.body.classList.contains('menu-open')) return; nav.classList.toggle('is-scrolled', scrollY > 40); };
   onScroll();
   let lockY = 0;

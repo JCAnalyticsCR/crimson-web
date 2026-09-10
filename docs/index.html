@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Crimson Consulting · Videovigilancia, redes y control de acceso en Costa Rica</title>
 <meta name="description" content="Diseñamos e implementamos soluciones de videovigilancia, redes y control de acceso adaptadas a cada entorno. Evaluación, diseño, instalación y soporte en Costa Rica.">
-<meta name="theme-color" content="#f6f2ee" id="themeColor">
+<meta name="theme-color" content="#15131a" id="themeColor">
 <meta name="robots" content="noindex,nofollow">
 <link rel="canonical" href="https://jcanalyticscr.github.io/crimson-web/">
 <meta property="og:title" content="Crimson Consulting · Infraestructura que conecta y protege tu operación">
@@ -23,14 +23,15 @@
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="apple-mobile-web-app-title" content="Crimson">
 <meta name="format-detection" content="telephone=yes">
+<link rel="preload" href="assets/frames/hero/f001.webp" as="image" fetchpriority="high">
 <link rel="preload" href="assets/fonts/InstrumentSerif-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="assets/fonts/Manrope-500.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="assets/fonts/fonts.css?v=4">
-<link rel="stylesheet" href="assets/styles.css?v=25">
+<link rel="stylesheet" href="assets/styles.css?v=31">
 <script>document.documentElement.classList.add('js')</script>
 <script type="application/json" id="site-config">{"tel":"+50688889892","wa":"50688889892","mail":"info@crimsoncr.com","waLink":"https://wa.me/message/5YQKXZFUPHWLA1","place":"Alajuela, Costa Rica"}</script>
 </head>
-<body data-tone="cream">
+<body data-tone="ink">
 <a class="skip" href="#top">Saltar al contenido</a>
 
 <!-- Capa consola (solo PC con puntero) -->
@@ -62,24 +63,39 @@
 
 <main id="top" tabindex="-1">
 
-<!-- CAM 01 · HERO -->
-<section class="hero" id="hero" data-cam="01" data-label="HERO" data-tone="cream">
-  <div class="hero__net" id="netHero" aria-hidden="true"></div>
-  <div class="wrap hero__grid">
-    <h1 class="display lines">
-      <span class="ln"><span>Infraestructura que <em>conecta</em></span></span>
-      <span class="ln"><span>y protege tu operación</span></span>
-    </h1>
-    <div class="hero__aside">
-      <p class="lead">Diseñamos e implementamos soluciones de videovigilancia, redes y control de acceso adaptadas a cada entorno.</p>
-      <div class="hero__cta">
-        <a class="btn btn--crimson btn--lg" href="#contacto" data-cursor="Ir"><span>Hablemos de tu proyecto</span><i class="btn__arrow" aria-hidden="true"></i></a>
-        <a class="btn btn--ghost btn--lg" href="#casos" data-cursor="Ver">Ver instalaciones</a>
+<!-- CAM 01 · HERO: escena de fotogramas controlada por scroll -->
+<section class="hero scene" id="hero" data-cam="01" data-label="HERO" data-tone="ink">
+  <div class="scene__pin">
+    <img class="scene__ambient" src="assets/frames/hero/f001.webp" alt="" aria-hidden="true" width="576" height="1024">
+    <div class="wrap scene__grid">
+      <div class="scene__copy scene__copy--a">
+        <h1 class="display lines">
+          <span class="ln"><span>Infraestructura que <em>conecta</em></span></span>
+          <span class="ln"><span>y protege tu operación</span></span>
+        </h1>
+        <p class="lead">Diseñamos e implementamos soluciones de videovigilancia, redes y control de acceso adaptadas a cada entorno.</p>
+      </div>
+
+      <figure class="scene__stage feed" data-cursor="CAM 01">
+        <img class="scene__poster" src="assets/frames/hero/f001.webp" alt="Cámara PTZ Hikvision instalada en la fachada de una residencia; al avanzar, la misma operación vista desde el teléfono" width="576" height="1024" fetchpriority="high">
+        <canvas class="scene__canvas" aria-hidden="true"></canvas>
+        <span class="scene__shade" aria-hidden="true"></span>
+        <span class="feed__corners"></span>
+        <figcaption class="feed__meta"><span>CAM 01 · <span class="scene__tc">00:00</span></span><span class="scene__load">CARGANDO 0%</span></figcaption>
+      </figure>
+
+      <div class="scene__copy scene__copy--b" aria-live="polite">
+        <h2 class="display-2">Tu operación,<br><em>en tu bolsillo</em>.</h2>
+        <p class="lead">Cámaras, red y accesos monitoreados desde tu teléfono, con respaldo técnico local.</p>
+        <div class="hero__cta">
+          <a class="btn btn--crimson btn--lg" href="#contacto" data-cursor="Ir"><span>Hablemos de tu proyecto</span><i class="btn__arrow" aria-hidden="true"></i></a>
+          <a class="btn btn--ghost btn--ghost-light btn--lg hide-mobile" href="#casos" data-cursor="Ver">Ver instalaciones</a>
+        </div>
       </div>
     </div>
     <p class="meta hero__index">01 / 07 &nbsp;—&nbsp; Evaluación · Diseño · Instalación · Soporte</p>
+    <div class="hero__hint meta" aria-hidden="true">Deslizá</div>
   </div>
-  <div class="hero__hint meta" aria-hidden="true">Deslizá</div>
 </section>
 
 <!-- CAM 02 · MURO DE MONITORES -->
@@ -362,6 +378,6 @@
     </div>
   </div>
 </footer>
-<script src="assets/main.js?v=15" defer></script>
+<script src="assets/main.js?v=21" defer></script>
 </body>
 </html>
