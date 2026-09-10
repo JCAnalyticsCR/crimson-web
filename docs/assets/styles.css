@@ -170,23 +170,23 @@ img[data-lqip].is-loaded{}
 .scene__ambient{position:absolute;inset:-8%;width:116%;height:116%;display:block;pointer-events:none;filter:blur(26px) brightness(.4) saturate(.85);transform:translateZ(0);will-change:filter}
 .scene__ambient::after{content:""}
 .scene__grid{position:static;max-width:none;padding:0}
-.scene__veil{position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(90deg,rgba(21,19,26,.82) 0,rgba(21,19,26,.5) 40%,rgba(21,19,26,.1) 70%,rgba(21,19,26,.35) 100%),linear-gradient(180deg,rgba(21,19,26,.5) 0,transparent 22%,transparent 78%,rgba(21,19,26,.6) 100%)}
-/* Escritorio: pantalla en 3D a la derecha, girada hacia el lector, sangra arriba y abajo.
-   --tilt/--tiltx los escribe main.js con el mouse (dos custom properties, cero repaint). */
-.scene__stage{position:absolute;top:50%;right:5vw;left:auto;bottom:auto;height:106svh;width:auto;aspect-ratio:9/16;margin:0;transform:perspective(1700px) translateY(-50%) rotateY(calc(-17deg + var(--tilt,0deg))) rotateX(var(--tiltx,0deg));transform-origin:50% 50%;border-radius:22px;overflow:hidden;background:#000;isolation:isolate;z-index:2;box-shadow:-40px 60px 120px -30px rgba(0,0,0,.85),0 0 0 1px rgba(255,255,255,.1);transition:transform 600ms var(--ease-enter);will-change:transform}
-.scene__stage::after{content:"";position:absolute;inset:0;z-index:2;pointer-events:none;background:linear-gradient(112deg,rgba(255,255,255,.14) 0,rgba(255,255,255,.04) 22%,transparent 46%),linear-gradient(0deg,rgba(21,19,26,.35),transparent 30%)}
-.scene__stage .feed__corners{opacity:.55}
+.scene__veil{position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(90deg,rgba(21,19,26,.86) 0,rgba(21,19,26,.7) 45%,rgba(21,19,26,.3) 100%)}
+/* Escritorio: el video ocupa la mitad derecha completa y se funde hacia la izquierda
+   (mascara con degradado): no hay panel ni borde, la imagen se disuelve en la tinta del texto. */
+.scene__stage{position:absolute;top:0;bottom:0;left:46%;right:0;height:auto;width:auto;aspect-ratio:auto;margin:0;transform:none;border-radius:0;overflow:hidden;background:transparent;isolation:isolate;z-index:2;box-shadow:none;-webkit-mask-image:linear-gradient(90deg,rgba(0,0,0,0) 0,rgba(0,0,0,.35) 14%,#000 34%);mask-image:linear-gradient(90deg,rgba(0,0,0,0) 0,rgba(0,0,0,.35) 14%,#000 34%)}
+.scene__stage::after{content:"";position:absolute;inset:0;z-index:2;pointer-events:none;background:linear-gradient(180deg,rgba(21,19,26,.55) 0,transparent 24%,transparent 76%,rgba(21,19,26,.7) 100%)}
+.scene__stage .feed__corners{display:none}
 .scene__poster,.scene__canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
 .scene__poster{filter:none}
 .scene__canvas{z-index:1}
 .scene__stage::before{display:none}
 .scene__shade{display:none}
 .scene__stage .feed__corners{z-index:3;inset:12px;opacity:.85}
-.scene__stage .feed__meta{z-index:3;bottom:14px;left:16px;right:16px;justify-content:space-between}
+.scene__stage .feed__meta{z-index:3;bottom:22px;left:auto;right:var(--pad);justify-content:flex-end;gap:22px}
 .scene__load{color:rgba(255,255,255,.55)}
 .scene__copy{position:absolute;z-index:4;display:flex;flex-direction:column;gap:22px;will-change:opacity,transform;top:50%;translate:0 -50%}
-.scene__copy--a{left:var(--pad);right:52%;align-items:flex-start;text-align:left}
-.scene__copy--b{left:var(--pad);right:52%;align-items:flex-start;text-align:left;opacity:0;pointer-events:none}
+.scene__copy--a{left:var(--pad);right:50%;align-items:flex-start;text-align:left}
+.scene__copy--b{left:var(--pad);right:50%;align-items:flex-start;text-align:left;opacity:0;pointer-events:none}
 .scene__copy .display{font-size:clamp(44px,5.2vw,92px);line-height:.92;color:var(--white)}
 .scene__copy .display-2{font-size:clamp(38px,4.2vw,70px);color:var(--white)}
 .scene__copy .lead{color:rgba(244,241,238,.8);max-width:36ch;font-size:clamp(16px,1.2vw,19px)}
@@ -197,7 +197,7 @@ img[data-lqip].is-loaded{}
 @keyframes dripX{from{background-position:-12px 0}to{background-position:40px 0}}
 .hero__index{opacity:0;animation:rise 900ms var(--ease-enter) .6s both}
 @keyframes rise{to{opacity:1;transform:none}}
-@media (min-width:768px) and (max-width:1099px){.scene__stage{height:100svh;right:3vw;transform:perspective(1400px) translateY(-50%) rotateY(-12deg)}.scene__copy--a,.scene__copy--b{right:48%}.scene__copy .display{font-size:clamp(32px,4.2vw,48px)}.scene__copy .display-2{font-size:clamp(28px,3.6vw,42px)}.scene__copy .lead{font-size:15px;max-width:28ch}}
+@media (min-width:768px) and (max-width:1099px){.scene__stage{left:42%}.scene__copy--a,.scene__copy--b{right:50%}.scene__copy .display{font-size:clamp(32px,4.2vw,48px)}.scene__copy .display-2{font-size:clamp(28px,3.6vw,42px)}.scene__copy .lead{font-size:15px;max-width:28ch}}
 
 /* Red animada (SVG generado en JS) */
 .net-line{stroke-width:1.5;fill:none}

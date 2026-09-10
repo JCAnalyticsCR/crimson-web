@@ -157,11 +157,13 @@
     const nearestLoaded = i => { for (let d = 0; d < FRAMES; d++) { if (ok[i - d]) return i - d; if (ok[i + d]) return i + d; } return -1; };
 
     // Dibujo: cover manual + mezcla entre fotogramas vecinos
-    // Cover manual (en escritorio el visor es 9:16 como el clip: no recorta nada)
+    // Cover manual. En escritorio el visor (media pagina) es mas ancho que el clip y recorta
+    // arriba/abajo: focusY sigue al sujeto (camara centrada, luego sube para no cortar el telefono)
+    let focusY = .5;
     const coverDraw = (img, alpha) => {
       const cw = canvas.width, ch = canvas.height, iw = img.naturalWidth, ih = img.naturalHeight;
       const k = Math.max(cw / iw, ch / ih), w = iw * k, hh = ih * k;
-      ctx.globalAlpha = alpha; ctx.drawImage(img, (cw - w) / 2, (ch - hh) / 2, w, hh);
+      ctx.globalAlpha = alpha; ctx.drawImage(img, (cw - w) / 2, -(hh - ch) * focusY, w, hh);
     };
     // Ambiente: el mismo fotograma en 64x114 px; el navegador lo amplia con interpolacion
     // bilineal (desenfoque gratis, sin filter:blur, que mata el frame budget)
@@ -178,6 +180,8 @@
       if (!w || !hh) return;
       const W = Math.round(w * dpr), H = Math.round(hh * dpr);
       if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; lastLow = -1; }
+      const fy = isMobile.matches ? .5 : .5 - .22 * smooth(.38, .62, frac);
+      if (Math.abs(fy - focusY) > .002) { focusY = fy; lastLow = -1; }
       const exact = frac * (FRAMES - 1);
       let low = Math.max(0, Math.min(FRAMES - 1, Math.floor(exact))), high = Math.min(FRAMES - 1, low + 1), blend = exact - low;
       if (!ok[low]) { const n = nearestLoaded(low); if (n < 0) return; low = high = n; blend = 0; }
