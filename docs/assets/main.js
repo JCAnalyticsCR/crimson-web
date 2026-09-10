@@ -271,28 +271,53 @@
     }, { passive: true });
   });
 
-  /* ---------- Muro de monitores: cambio de feed cada 5 s (PC), scanline en el activo ---------- */
+  /* ---------- Muro de monitores: rota la camara y su rotulo, sin parpadeo ---------- */
   const wall = $('#wall');
   if (wall && !reduced) {
     const feeds = $$('.feed', wall);
-    const pool = ['foto-camaras-comunidad','foto-rack-h','foto-camara-residencia-h','foto-antena-camara-h','foto-patch-panel','foto-camaras-poste-h','foto-tecnico-rack-h','foto-instalacion-torre','foto-tecnico-poste-h'];
+    // Cada entrada es foto + lugar: al rotar cambian juntos, el rotulo nunca miente
+    const POOL = [
+      { n: 'foto-camaras-comunidad', l: 'La Julieta Sur' },
+      { n: 'foto-rack-h', l: 'Rack de datos' },
+      { n: 'foto-camara-residencia-h', l: 'Hacienda Pinilla' },
+      { n: 'foto-antena-camara-h', l: 'Enlace inalámbrico' },
+      { n: 'foto-patch-panel', l: 'Cableado' },
+      { n: 'foto-camaras-poste-h', l: 'Perímetro' },
+      { n: 'foto-tecnico-rack-h', l: 'Gabinete de red' },
+      { n: 'foto-instalacion-torre', l: 'Montaje en altura' },
+      { n: 'foto-tecnico-poste-h', l: 'Tendido externo' },
+    ];
+    const nameOf = f => (f.querySelector('img').getAttribute('src').match(/img\/(.+?)-\d+\.webp/) || [])[1];
     let k = 0, timer = 0;
-    const swap = () => {
+    const swap = async () => {
       feeds.forEach(f => f.classList.remove('is-active'));
-      const f = feeds[k % feeds.length]; f.classList.add('is-switch', 'is-active');
+      const f = feeds[k % feeds.length];
+      f.classList.add('is-active');
+      k++;
+      if (isMobile.matches) return;
+      const shown = feeds.map(nameOf);
+      const free = POOL.filter(o => !shown.includes(o.n));
+      if (!free.length) return;
+      const pick = free[k % free.length];
+      // Precargar antes del corte: sin esto el marco queda en negro mientras descarga
+      const pre = new Image();
+      pre.src = `assets/img/${pick.n}-800.webp`;
+      try { await pre.decode(); } catch { return; }
+      f.classList.add('is-switch');
       setTimeout(() => {
-        if (!isMobile.matches) {
-          const img = f.querySelector('img');
-          const shown = feeds.map(x => (x.querySelector('img').src.match(/img\/(.+?)-\d+\.webp/) || [])[1]);
-          const free = pool.filter(n => !shown.includes(n));
-          const name = free[(k * 7) % free.length];
-          img.src = `assets/img/${name}-800.webp`; img.srcset = `assets/img/${name}-480.webp 480w, assets/img/${name}-800.webp 800w`;
-        }
+        const img = f.querySelector('img');
+        img.srcset = `assets/img/${pick.n}-480.webp 480w, assets/img/${pick.n}-800.webp 800w`;
+        img.src = `assets/img/${pick.n}-800.webp`;
+        img.alt = pick.l;
+        const label = f.querySelector('.feed__meta span');
+        if (label) label.textContent = `${label.textContent.split(' \u00b7 ')[0]} \u00b7 ${pick.l}`;
         f.classList.remove('is-switch');
       }, 140);
-      k++;
     };
-    new IntersectionObserver(([en]) => { if (en.isIntersecting) { swap(); timer = setInterval(swap, 5000); } else clearInterval(timer); }).observe(wall);
+    new IntersectionObserver(([en]) => {
+      clearInterval(timer);
+      if (en.isIntersecting) timer = setInterval(swap, 5200);
+    }, { rootMargin: '10%' }).observe(wall);
   }
 
   /* ---------- Formulario → WhatsApp ---------- */
