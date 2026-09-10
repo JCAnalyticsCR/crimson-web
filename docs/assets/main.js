@@ -62,6 +62,19 @@
   netHero && netHero.appendChild(heroSvg);
   netContact && netContact.appendChild(buildNet({ dark: true, seed: 1, converge: true, portrait: isMobile.matches, density: isMobile.matches ? .5 : 1 }));
 
+  // Escritorio: la misma red detras de cada seccion (hero de video + 02..06), en el tono de la seccion.
+  // Fuera de vista se pausan las animaciones SMIL (las CSS se pausan solas por visibilidad del compositor).
+  if (!isMobile.matches) {
+    const hosts = [['#hero-d .scene__pin', true], ['#monitoreo', true], ['#servicios', true], ['#proceso', false], ['#casos', false], ['#tienda', true]];
+    const netIO = new IntersectionObserver(entries => entries.forEach(en => { const s = en.target.firstElementChild; if (!s) return; en.isIntersecting ? s.unpauseAnimations() : s.pauseAnimations(); }), { rootMargin: '25% 0px' });
+    hosts.forEach(([sel, dark], i) => {
+      const host = $(sel); if (!host) return;
+      const wrap = document.createElement('div'); wrap.className = 'sec-net'; wrap.setAttribute('aria-hidden', 'true'); // el() crea en el namespace SVG
+      wrap.appendChild(buildNet({ dark, seed: i % 2, density: .5 }));
+      host.prepend(wrap); netIO.observe(wrap);
+    });
+  }
+
   // Toque sobre la red (móvil): los nodos cercanos al dedo se encienden
   if (isMobile.matches && !reduced && netHero) {
     $('#hero').addEventListener('pointerdown', e => {
