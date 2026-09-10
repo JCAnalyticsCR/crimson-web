@@ -544,11 +544,11 @@ section{padding:var(--space) var(--pad)}
 .hero--d{display:none}
 @media (min-width:768px){
   body.has-wide #hero{display:none!important}
-  body.has-wide .hero--d{display:block;position:relative;height:calc(100svh + 260vh);margin-top:calc(-1 * var(--navh));padding:0;background:#000;color:var(--white);min-height:0}
+  body.has-wide .hero--d{display:block;position:relative;overflow:visible;height:calc(100svh + 260vh);margin-top:calc(-1 * var(--navh));padding:0;background:#000;color:var(--white);min-height:0}
   .hero--d .scene__pin{position:sticky;top:0;height:100svh;overflow:hidden;background:#000}
   .hero--d .scene__grid{position:absolute;inset:0;top:var(--navh);aspect-ratio:auto;max-height:none;max-width:none;padding:0;margin:0}
   /* El video vertical va CENTRADO en el cuadro a su tamano real: alto = alto del cuadro, sin zoom */
-  .hero--d .scene__stage{position:absolute;top:50%;bottom:auto;left:auto;right:3%;translate:0 -50%;width:65%;max-height:calc(100% - 32px);height:auto;aspect-ratio:16/9;margin:0;background:#000;isolation:isolate;z-index:2;border-radius:0;overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.06)}
+  .hero--d .scene__stage{position:absolute;top:50%;bottom:auto;left:auto;right:3%;translate:0 -50%;width:min(65%,calc((100svh - var(--navh) - 76px) * 1.7778));max-height:none;height:auto;aspect-ratio:16/9;margin:0;background:#000;isolation:isolate;z-index:2;border-radius:0;overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.06)}
   .hero--d .scene__grid{background:#000}
   .hero--d .scene__stage::before,.hero--d .scene__stage::after{display:none}
   /* La casilla es el monitor; el feed vertical va entero, centrado, a la altura de la casilla */
@@ -585,7 +585,7 @@ section{padding:var(--space) var(--pad)}
 @media (max-width:767px){
   :root{--navh:69px}
   #hero,.hero--d{display:none!important}
-  .hero--m{display:block;position:relative;margin-top:calc(-1 * var(--navh));padding:0;background:var(--ink);color:var(--white);min-height:0}
+  .hero--m{display:block;position:relative;overflow:visible;margin-top:calc(-1 * var(--navh));padding:0;background:var(--ink);color:var(--white);min-height:0}
   .scene__pin{position:sticky;top:0;height:100svh;overflow:hidden;background:#000}
   .scene__ambient,.scene__veil{display:none}
   .scene__grid{position:static;max-width:none;padding:0}
