@@ -183,10 +183,11 @@
      Reglas del sistema: fotos y no <video>; decode() con fallback; lerp 0.09/0.08;
      DPR tope 2; bucle rAF pausado fuera de cuadro; animacion termina al 78% del pin;
      reduced-motion baja UN fotograma. */
-  // Escritorio: version panoramica (2.35:1 por defecto, ?ratio=185 para comparar, ?hero=net para la red)
+  // Escritorio: cuadro 16:9 (1.78:1) por defecto con el video vertical a la derecha, sin zoom; ?ratio=185|235 para comparar, ?hero=net para la red
   const q = new URLSearchParams(location.search);
   // Cuadro 1.85:1 con el video VERTICAL centrado a tamano real (sin zoom): mismos fotogramas que movil
-  const wideSet = { path: 'assets/frames/hero', ratio: q.get('ratio') === '235' ? '2.35' : '1.85', w: 768, h: 1365 };
+  const RATIOS = { '235': '2.35', '185': '1.85', '178': '1.7778' };
+  const wideSet = { path: 'assets/frames/hero', ratio: RATIOS[q.get('ratio')] || '1.7778', w: 768, h: 1365 };
   const useWide = !isMobile.matches && q.get('hero') !== 'net' && !!$('#hero-d.scene');
   if (useWide) {
     document.body.classList.add('has-wide');
