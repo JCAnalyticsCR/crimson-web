@@ -216,10 +216,27 @@
     // Cover manual. En escritorio el visor (media pagina) es mas ancho que el clip y recorta
     // arriba/abajo: focusY sigue al sujeto (camara centrada, luego sube para no cortar el telefono)
     let focusY = .5;
+    // Escritorio (casilla 16:9): el plano vertical COMPLETO va contenido y nitido al centro; los
+    // costados se rellenan con el mismo fotograma ampliado a cover desde un canvas de 32 px
+    // (interpolacion bilineal = desenfoque gratis) y oscurecido. Nada se estira ni se recorta.
+    const boxMode = !isMobile.matches;
+    const tiny = boxMode ? document.createElement('canvas') : null, tctx = tiny ? tiny.getContext('2d', { alpha: false }) : null;
+    if (tiny) { tiny.width = 32; tiny.height = 18; }
     const coverDraw = (img, alpha) => {
       const cw = canvas.width, ch = canvas.height, iw = img.naturalWidth, ih = img.naturalHeight;
+      ctx.globalAlpha = alpha;
+      if (boxMode) {
+        const kb = Math.max(tiny.width / iw, tiny.height / ih), bw = iw * kb, bh = ih * kb;
+        tctx.drawImage(img, (tiny.width - bw) / 2, (tiny.height - bh) / 2, bw, bh);
+        ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(tiny, 0, 0, cw, ch);
+        ctx.fillStyle = 'rgba(10,10,13,.62)'; ctx.fillRect(0, 0, cw, ch);
+        const k = Math.min(cw / iw, ch / ih), w = iw * k, hh = ih * k;
+        ctx.drawImage(img, (cw - w) / 2, (ch - hh) / 2, w, hh);
+        return;
+      }
       const k = Math.max(cw / iw, ch / ih), w = iw * k, hh = ih * k;
-      ctx.globalAlpha = alpha; ctx.drawImage(img, (cw - w) / 2, -(hh - ch) * focusY, w, hh);
+      ctx.drawImage(img, (cw - w) / 2, -(hh - ch) * focusY, w, hh);
     };
     // Ambiente: el mismo fotograma en 64x114 px; el navegador lo amplia con interpolacion
     // bilineal (desenfoque gratis, sin filter:blur, que mata el frame budget)
