@@ -563,9 +563,9 @@ section{padding:var(--space) var(--pad)}
   .hero--d .scene__copy{position:absolute;z-index:4;top:50%;translate:0 -50%;display:flex;flex-direction:column;gap:18px;will-change:opacity,transform}
   /* Video a la derecha (ocupa ~31.6% del cuadro 16:9); el texto vive en la columna izquierda */
   .hero--d .scene__copy--a{left:5%;right:62%;align-items:flex-start;text-align:left}
-  .hero--d .scene__copy--b{left:5%;right:62%;align-items:flex-start;text-align:left;opacity:0;pointer-events:none}
+  .hero--d .scene__copy--b{left:5%;right:60%;align-items:flex-start;text-align:left;opacity:0;pointer-events:none}
   .hero--d .scene__copy .display{font-size:clamp(44px,4.7vw,82px);line-height:.94;color:var(--white)}
-  .hero--d .scene__copy .display-2{font-size:clamp(42px,4.5vw,78px);line-height:.96;color:var(--white)}
+  .hero--d .scene__copy .display-2{font-size:clamp(54px,6vw,104px);line-height:.94;color:var(--white)}
   .hero--d .scene__copy .lead{color:rgba(244,241,238,.82);font-size:clamp(16px,1.25vw,20px);max-width:34ch}
   .hero--d .hero__cta{display:flex;gap:12px;flex-wrap:wrap}
   .hero--d .hero__index{position:absolute;left:5%;bottom:26px;z-index:4;color:rgba(244,241,238,.5)}
