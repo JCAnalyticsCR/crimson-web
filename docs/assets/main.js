@@ -179,8 +179,130 @@
     scrollFns.push(() => { if (hv && !tilt && !raf) netHero.style.transform = `translate3d(0,${scrollY * -.15}px,0)`; });
   }
 
+  /* ---------- CAM 01: video controlado por fotogramas (canvas), scrubbeado por scroll ----------
+     Reglas del sistema: fotos y no <video>; decode() con fallback; lerp 0.09/0.08;
+     DPR tope 2; bucle rAF pausado fuera de cuadro; animacion termina al 78% del pin;
+     reduced-motion baja UN fotograma. */
+  const scene = isMobile.matches ? $('#hero-m.scene') : null; // la escena solo vive en movil
+  if (scene) {
+    const FRAMES = 88, PATH = 'assets/frames/hero', ANIM_FIN = 0.78, FPS = 10; // el clip se apaga del 89 en adelante: se recorta ahi
+    const LERP = isMobile.matches ? 0.08 : 0.09;
+    const pin = $('.scene__pin', scene), stage = $('.scene__stage', scene), canvas = $('.scene__canvas', scene);
+    const poster = $('.scene__poster', scene), ambient = $('.scene__ambient', scene);
+    const actx = ambient && ambient.getContext ? ambient.getContext('2d', { alpha: false }) : null;
+    const copyA = $('.scene__copy--a', scene), copyB = $('.scene__copy--b', scene);
+    const tc = $('.scene__tc', scene), loadEl = $('.scene__load', scene), hint = $('.hero__hint', scene);
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const imgs = new Array(FRAMES), ok = new Uint8Array(FRAMES);
+    const pad = n => String(n).padStart(3, '0');
+    let target = 0, current = 0, raf = 0, running = false, cancelled = false, settled = 0;
+    let lastLow = -1, lastHigh = -1, lastBlend = -1, lastP = -1;
+    const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+    const nearestLoaded = i => { for (let d = 0; d < FRAMES; d++) { if (ok[i - d]) return i - d; if (ok[i + d]) return i + d; } return -1; };
+
+    // Dibujo: cover manual + mezcla entre fotogramas vecinos
+    // Cover manual. En escritorio el visor (media pagina) es mas ancho que el clip y recorta
+    // arriba/abajo: focusY sigue al sujeto (camara centrada, luego sube para no cortar el telefono)
+    let focusY = .5;
+    const coverDraw = (img, alpha) => {
+      const cw = canvas.width, ch = canvas.height, iw = img.naturalWidth, ih = img.naturalHeight;
+      const k = Math.max(cw / iw, ch / ih), w = iw * k, hh = ih * k;
+      ctx.globalAlpha = alpha; ctx.drawImage(img, (cw - w) / 2, -(hh - ch) * focusY, w, hh);
+    };
+    // Ambiente: el mismo fotograma en 64x114 px; el navegador lo amplia con interpolacion
+    // bilineal (desenfoque gratis, sin filter:blur, que mata el frame budget)
+    let lastAmb = -9;
+    const drawAmbient = (img, idx) => {
+      if (!actx || isMobile.matches || ambient.offsetParent === null || Math.abs(idx - lastAmb) < 3) return;
+      lastAmb = idx;
+      const aw = ambient.width, ah = ambient.height, iw = img.naturalWidth, ih = img.naturalHeight;
+      const k = Math.max(aw / iw, ah / ih), w = iw * k, hh = ih * k;
+      actx.drawImage(img, (aw - w) / 2, (ah - hh) / 2, w, hh);
+    };
+    const draw = frac => {
+      const dpr = Math.min(devicePixelRatio || 1, 2), w = canvas.clientWidth, hh = canvas.clientHeight;
+      if (!w || !hh) return;
+      const W = Math.round(w * dpr), H = Math.round(hh * dpr);
+      if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; lastLow = -1; }
+      const fy = isMobile.matches ? .5 : .5 - .34 * smooth(.38, .62, frac); // al final sube para que el encabezado del telefono no quede bajo la barra
+      if (Math.abs(fy - focusY) > .002) { focusY = fy; lastLow = -1; }
+      const exact = frac * (FRAMES - 1);
+      let low = Math.max(0, Math.min(FRAMES - 1, Math.floor(exact))), high = Math.min(FRAMES - 1, low + 1), blend = exact - low;
+      if (!ok[low]) { const n = nearestLoaded(low); if (n < 0) return; low = high = n; blend = 0; }
+      else if (!ok[high]) { high = low; blend = 0; }
+      if (low === lastLow && high === lastHigh && Math.abs(blend - lastBlend) < 0.015) return;
+      lastLow = low; lastHigh = high; lastBlend = blend;
+      coverDraw(imgs[low], 1);
+      if (high !== low && blend > 0.008) coverDraw(imgs[high], blend);
+      ctx.globalAlpha = 1;
+      drawAmbient(imgs[blend > .5 ? high : low], blend > .5 ? high : low);
+    };
+
+    // Coreografia del texto: A (titular) se va, B (payoff + CTA) llega con el telefono
+    const applyCopy = p => {
+      if (Math.abs(p - lastP) < 0.003) return; lastP = p;
+      const a = 1 - smooth(.30, .48, p), b = smooth(.52, .68, p);
+      copyA.style.opacity = a.toFixed(3); copyA.style.transform = `translateY(${((1 - a) * -24).toFixed(1)}px)`; copyA.style.pointerEvents = a > .5 ? 'auto' : 'none';
+      copyB.style.opacity = b.toFixed(3); copyB.style.transform = `translateY(${((1 - b) * 24).toFixed(1)}px)`; copyB.style.pointerEvents = b > .5 ? 'auto' : 'none';
+      if (tc) { const sec = Math.floor(p * (FRAMES - 1) / FPS); tc.textContent = `00:${String(sec).padStart(2, '0')}`; }
+      if (hint) hint.style.opacity = p > .03 ? '0' : '';
+    };
+
+    const tick = () => {
+      current += (target - current) * LERP;
+      if (Math.abs(target - current) < 0.0006) current = target;
+      draw(current); applyCopy(current);
+      raf = requestAnimationFrame(tick);
+    };
+    const start = () => { if (running) return; running = true; current = target; draw(current); applyCopy(current); raf = requestAnimationFrame(tick); };
+    const stop = () => { running = false; cancelAnimationFrame(raf); raf = 0; };
+
+    // Progreso del pin -> objetivo de la secuencia (comprimida al 78% del recorrido)
+    const progress = () => {
+      const len = scene.offsetHeight - pin.offsetHeight;
+      const p = len > 0 ? Math.min(1, Math.max(0, -scene.getBoundingClientRect().top / len)) : 0;
+      target = Math.min(1, p / ANIM_FIN);
+    };
+    scrollFns.push(progress); progress();
+
+    // Carga: decode() con fallback; el contador sube exactamente una vez por imagen
+    const listo = (i, img, good) => {
+      if (cancelled) return;
+      if (good) { imgs[i] = img; ok[i] = 1; }
+      settled++;
+      if (loadEl) loadEl.textContent = settled < FRAMES ? `CARGANDO ${Math.round(settled / FRAMES * 100)}%` : 'EN VIVO';
+      if (i === 0 || !running) draw(current);
+    };
+    const fetchFrame = i => new Promise(res => {
+      const img = new Image();
+      img.onload = () => { img.onload = null; img.onerror = null; img.decode().then(() => { listo(i, img, true); res(); }).catch(() => { listo(i, img, img.naturalWidth > 0); res(); }); };
+      img.onerror = () => { listo(i, img, false); res(); };
+      img.src = `${PATH}/f${pad(i + 1)}.webp`;
+    });
+    const preload = async () => {
+      await fetchFrame(0);
+      let next = 1;
+      const worker = async () => { while (next < FRAMES && !cancelled) { const i = next++; await fetchFrame(i); } };
+      await Promise.all(Array.from({ length: 5 }, worker));
+    };
+
+    if (reduced) {
+      // Un fotograma: el telefono con el panel en pantalla, la version estatica mas informativa
+      fetchFrame(59).then(() => { current = target = 59 / (FRAMES - 1); lastP = -1; draw(current); applyCopy(1); });
+    } else {
+      // El poster (f001) es el LCP: la secuencia arranca cuando el ya esta en pantalla
+      const posterReady = poster && !poster.complete ? new Promise(r => { poster.onload = r; poster.onerror = r; }) : Promise.resolve();
+      posterReady.then(preload);
+      new IntersectionObserver(([en]) => en.isIntersecting ? start() : stop(), { rootMargin: '35% 0px' }).observe(scene);
+      addEventListener('resize', () => { lastLow = -1; lastP = -1; progress(); draw(current); applyCopy(current); }, { passive: true });
+    }
+    window.__scene = { go: p => { stop(); target = current = p; lastLow = -1; lastP = -1; draw(p); applyCopy(p); }, loaded: () => settled };
+  }
+
   /* ---------- Nav ---------- */
   const nav = $('#nav'), burger = $('#burger');
+  const setNavH = () => document.documentElement.style.setProperty('--navh', nav.offsetHeight + 'px');
+  setNavH(); addEventListener('resize', setNavH, { passive: true });
   const onScroll = () => { if (document.body.classList.contains('menu-open')) return; nav.classList.toggle('is-scrolled', scrollY > 40); };
   onScroll();
   let lockY = 0;
