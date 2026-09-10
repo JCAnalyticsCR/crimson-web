@@ -187,7 +187,8 @@
   const q = new URLSearchParams(location.search);
   // Cuadro 1.85:1 con el video VERTICAL centrado a tamano real (sin zoom): mismos fotogramas que movil
   // Video 16:9 (banda reencuadrada del vertical que sigue al sujeto) en el lado derecho, sin zoom de mas
-  const wideSet = { path: 'assets/frames/w178', ratio: '1.7778', w: 1152, h: 648 };
+  // Casilla 16:9 a la derecha; adentro el plano VERTICAL completo (sin recorte ni ampliacion), como un monitor
+  const wideSet = { path: 'assets/frames/hero', ratio: '1.7778', w: 768, h: 1365 };
   const useWide = !isMobile.matches && q.get('hero') !== 'net' && !!$('#hero-d.scene');
   if (useWide) {
     document.body.classList.add('has-wide');
