@@ -176,7 +176,7 @@
       actx.drawImage(img, (aw - w) / 2, (ah - hh) / 2, w, hh);
     };
     const draw = frac => {
-      const dpr = Math.min(devicePixelRatio || 1, 2), w = stage.clientWidth, hh = stage.clientHeight;
+      const dpr = Math.min(devicePixelRatio || 1, 2), w = canvas.clientWidth, hh = canvas.clientHeight;
       if (!w || !hh) return;
       const W = Math.round(w * dpr), H = Math.round(hh * dpr);
       if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; lastLow = -1; }
