@@ -157,50 +157,23 @@ img[data-lqip].is-loaded{}
   .feed:hover>img{transform:scale(1.04);filter:contrast(1.05) saturate(1)}
 }
 
-/* ---------- HERO · CAM 01: video de fotogramas por scroll ----------
-   Escritorio: el plano VERTICAL completo se muestra a su resolucion real, nitido, centrado;
-   detras, el mismo fotograma en un canvas de 64 px ampliado por CSS (bilineal = desenfoque
-   gratis, sin filter:blur) y oscurecido: toda la vista es video, sin estirar el clip.
-   Movil: el clip es 9:16 como la pantalla, va a cover nativo.
-   La seccion mide 100svh + recorrido; la animacion termina al 78% (ANIM_FIN). */
-:root{--navh:74px}
-.hero{position:relative;height:calc(100svh + 260vh);margin-top:calc(-1 * var(--navh));padding:0;background:var(--ink);color:var(--white)}
-.scene__pin{position:sticky;top:0;height:100svh;overflow:hidden;background:#000}
-/* Blur en capa GPU sobre un canvas de 96 px que solo se repinta cada 3 fotogramas: costo acotado */
-/* Un solo video: sin extension desenfocada; el plano se funde directo contra la tinta */
-.scene__ambient{display:none}
-.scene__ambient::after{content:""}
-.scene__grid{position:static;max-width:none;padding:0}
-.scene__veil{display:none}
-/* Escritorio: el video ocupa la mitad derecha completa y se funde hacia la izquierda
-   (mascara con degradado): no hay panel ni borde, la imagen se disuelve en la tinta del texto. */
-.scene__stage{position:absolute;top:0;bottom:0;left:50%;right:0;height:auto;width:auto;aspect-ratio:auto;margin:0;transform:none;border-radius:0;overflow:hidden;background:transparent;isolation:isolate;z-index:2;box-shadow:none;-webkit-mask-image:none;mask-image:none}
-.scene__stage::after{content:"";position:absolute;inset:0;z-index:2;pointer-events:none;background:linear-gradient(180deg,rgba(21,19,26,.35) 0,transparent 14%,transparent 86%,rgba(21,19,26,.45) 100%)}
-.scene__stage .feed__corners{display:none}
-/* El plano nitido va a ALTURA COMPLETA (sin recorte vertical) bajo la barra, centrado en la mitad
-   derecha; a los lados lo extiende su propia version desenfocada (.scene__ambient) y sus bordes
-   se funden con mask para que todo se lea como una sola imagen. */
-.scene__stage .scene__poster,.scene__stage .scene__canvas{position:absolute;top:var(--navh);bottom:auto;left:50%;height:calc(100svh - var(--navh));width:auto;aspect-ratio:9/16;transform:translateX(-50%);filter:none;object-fit:cover;display:block;-webkit-mask-image:linear-gradient(90deg,rgba(0,0,0,0) 0,#000 14%,#000 100%);mask-image:linear-gradient(90deg,rgba(0,0,0,0) 0,#000 14%,#000 100%)}
-.scene__canvas{z-index:1}
-.scene__stage::before{display:none}
-.scene__shade{display:none}
-.scene__stage .feed__corners{z-index:3;inset:12px;opacity:.85}
-.scene__stage .feed__meta{z-index:3;bottom:22px;left:auto;right:var(--pad);justify-content:flex-end;gap:22px}
-.scene__load{color:rgba(255,255,255,.55)}
-.scene__copy{position:absolute;z-index:4;display:flex;flex-direction:column;gap:22px;will-change:opacity,transform;top:50%;translate:0 -50%}
-.scene__copy--a{left:var(--pad);right:50%;align-items:flex-start;text-align:left}
-.scene__copy--b{left:var(--pad);right:50%;align-items:flex-start;text-align:left;opacity:0;pointer-events:none}
-.scene__copy .display{font-size:clamp(44px,5.2vw,92px);line-height:.92;color:var(--white)}
-.scene__copy .display-2{font-size:clamp(38px,4.2vw,70px);color:var(--white)}
-.scene__copy .lead{color:rgba(244,241,238,.8);max-width:36ch;font-size:clamp(16px,1.2vw,19px)}
+/* ---------- HERO · CAM 01 ---------- */
+.hero{position:relative;overflow:hidden;min-height:min(calc(100svh - 72px),940px);display:flex;flex-direction:column;justify-content:center;padding:clamp(32px,6vh,84px) var(--pad) clamp(28px,5vh,68px);background:linear-gradient(180deg,var(--bg) 0%,var(--bg-2) 100%)}
+.hero::after{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(60% 50% at 85% 10%,rgba(226,35,58,.06),transparent 70%)}
+.hero__net{position:absolute;inset:-6%;pointer-events:none;z-index:0}
+.hero__net svg{width:100%;height:100%;display:block}
+.hero__grid{position:relative;z-index:1;width:100%;display:grid;grid-template-columns:repeat(12,1fr);gap:18px 24px;align-items:end}
+.hero h1{grid-column:1/11}
+.hero__aside{grid-column:8/13;display:flex;flex-direction:column;gap:20px;align-items:flex-start;margin-top:2px}
 .hero__cta{display:flex;gap:12px;flex-wrap:wrap}
-.hero__index{position:absolute;left:var(--pad);top:calc(var(--navh) + 22px);z-index:4;color:rgba(244,241,238,.5)}
-.hero__hint{display:flex;position:absolute;left:var(--pad);bottom:26px;flex-direction:row;align-items:center;gap:12px;z-index:4;color:rgba(244,241,238,.6);transition:opacity .4s}
-.hero__hint::before{content:"";width:40px;height:1px;background:linear-gradient(90deg,var(--crimson) 0 100%) no-repeat -12px 0/12px 1px,rgba(255,255,255,.22);animation:dripX 2.2s var(--ease-scene) infinite}
-@keyframes dripX{from{background-position:-12px 0}to{background-position:40px 0}}
-.hero__index{opacity:0;animation:rise 900ms var(--ease-enter) .6s both}
+.hero__index{grid-column:1/7;align-self:end;opacity:.8}
+.hero__hint{display:none}
+.rise{opacity:0;transform:translateY(20px);animation:rise 900ms var(--ease-enter) both;animation-delay:calc(.35s + var(--i,0)*.12s)}
+.hero__aside,.hero__index{opacity:0;animation:rise 900ms var(--ease-enter) both}
+.hero__aside{animation-delay:.4s}.hero__index{animation-delay:.6s}
+/* Portatiles: el titular cede para que los CTA entren en la primera vista */
+@media (min-width:768px) and (max-height:900px){.hero{--fs-display:clamp(44px,6.4vw,104px)}.hero .lead{font-size:17px}}
 @keyframes rise{to{opacity:1;transform:none}}
-@media (min-width:768px) and (max-width:1099px){.scene__stage{left:42%}.scene__copy--a,.scene__copy--b{right:50%}.scene__copy .display{font-size:clamp(32px,4.2vw,48px)}.scene__copy .display-2{font-size:clamp(28px,3.6vw,42px)}.scene__copy .lead{font-size:15px;max-width:28ch}}
 
 /* Red animada (SVG generado en JS) */
 .net-line{stroke-width:1.5;fill:none}
@@ -214,12 +187,12 @@ img[data-lqip].is-loaded{}
 
 /* ---------- Costuras entre tonos (sin cortes secos) ---------- */
 .wall,.servicios,.tienda,.contacto{background:var(--ink);color:var(--white)}
-.wall{background:var(--ink)}
+.wall{background:linear-gradient(180deg,var(--bg-2) 0,var(--ink) 120px)}
 .proceso{background:linear-gradient(180deg,var(--ink) 0,var(--bg) 120px)}
 .casos{background:linear-gradient(180deg,var(--bg) 0,var(--bg-2) 110px)}
 .tienda{background:linear-gradient(180deg,var(--bg-2) 0,var(--ink) 120px)}
 section{padding:var(--space) var(--pad)}
-.proceso,.tienda{padding-top:calc(var(--space) + 16px)}
+.wall,.proceso,.tienda{padding-top:calc(var(--space) + 16px)}
 
 /* ---------- MURO DE MONITORES · CAM 02 ---------- */
 .wall .wrap{display:flex;flex-direction:column;gap:40px}
@@ -383,6 +356,7 @@ section{padding:var(--space) var(--pad)}
   .cursor.is-hidden{opacity:0}
   body.has-cursor,body.has-cursor a,body.has-cursor button,body.has-cursor label{cursor:none}
   body.has-cursor input,body.has-cursor textarea,body.has-cursor select{cursor:text}
+  body.has-cursor .hero__net{will-change:transform}
 }
 
 /* =====================================================================
@@ -392,6 +366,7 @@ section{padding:var(--space) var(--pad)}
   .nav__links{gap:16px;font-size:13px}
 }
 @media (min-width:768px) and (max-width:1023px){
+  .hero h1{grid-column:1/-1}.hero__aside{grid-column:1/9;margin-top:8px}.hero__index{grid-column:1/-1}
   .wall__head,.servicios__head,.casos__head,.proceso__head{grid-template-columns:1fr}
   .cards{gap:12px}.card__media{aspect-ratio:3/4}
   .stats{grid-template-columns:repeat(2,1fr)}
@@ -444,30 +419,21 @@ section{padding:var(--space) var(--pad)}
   body.menu-open{position:fixed;width:100%;overflow:hidden}
 
   /* Hero: solo fondo, red y titular. Texto anclado al tercio inferior. */
-  .hero{height:calc(100svh + 190vh)}
-  .scene__ambient,.scene__veil{display:none}
-  .scene__stage{position:absolute;inset:0;top:0;bottom:0;left:0;height:auto;width:auto;aspect-ratio:auto;transform:none;border-radius:0;box-shadow:none;-webkit-mask-image:none;mask-image:none;background:#000}
-  .scene__stage .scene__poster,.scene__stage .scene__canvas{inset:0;top:0;bottom:0;left:0;height:100%;width:100%;aspect-ratio:auto;transform:none;-webkit-mask-image:none;mask-image:none}
-  .scene__stage::after{display:none}
-  .scene__stage .feed__corners{display:block}
-  .scene__shade{display:block;position:absolute;inset:0;z-index:2;pointer-events:none;background:linear-gradient(180deg,rgba(21,19,26,.55) 0,transparent 22%,transparent 50%,rgba(21,19,26,.9) 100%)}
-  .scene__stage .feed__meta{bottom:auto;top:calc(var(--navh) + 14px);left:16px;right:16px;font-size:10px}
-  .scene__stage .feed__corners{inset:calc(var(--navh) + 8px) 10px 10px 10px}
-  .scene__copy{left:var(--pad);right:var(--pad);top:auto;bottom:calc(72px + env(safe-area-inset-bottom));translate:none;max-width:none;gap:14px;align-items:flex-start;text-align:left}
-  .scene__copy--a .lead{text-align:left}
-  .scene__copy .display{font-size:clamp(38px,10.5vw,46px)}
-  .scene__copy .display-2{font-size:36px}
-  .scene__copy .lead{font-size:16px;max-width:none}
-  .hero__cta{width:100%}
-  .hero__cta .btn{width:100%}
-  .hero__index{display:none}
-  .hero__hint{left:50%;right:auto;transform:translateX(-50%);flex-direction:column;gap:10px;bottom:calc(22px + env(safe-area-inset-bottom));font-size:10px;letter-spacing:.3em}
-  .hero__hint::before{width:1px;height:40px;background:linear-gradient(var(--crimson) 0 100%) no-repeat 0 -12px/1px 12px,rgba(255,255,255,.2);animation:drip 2.2s var(--ease-scene) infinite}
+  .hero{padding:0;min-height:auto;justify-content:flex-start}
+  .hero__net{inset:-4% -10%}
+  .hero__grid{display:flex;flex-direction:column;justify-content:flex-end;gap:16px;min-height:calc(100svh - 60px);padding:24px var(--pad) 22svh}
+  .hero h1{margin-left:-.03em}
+  .hero__aside{margin-top:4px;gap:0}
+  .hero__cta,.hero__index{display:none}
+  .hero__aside{animation-delay:.5s}
+  .hero__hint{display:flex;position:absolute;left:50%;bottom:calc(22px + env(safe-area-inset-bottom));transform:translateX(-50%);flex-direction:column;align-items:center;gap:10px;font-size:10px;letter-spacing:.3em;color:var(--muted);transition:opacity .4s;z-index:1}
+  .hero__hint::before{content:"";width:1px;height:40px;background:linear-gradient(var(--crimson) 0 100%) no-repeat 0 -12px/1px 12px,rgba(21,19,26,.14);animation:drip 2.2s var(--ease-scene) infinite}
   @keyframes drip{from{background-position:0 -12px}to{background-position:0 40px}}
   .nav.is-scrolled~main .hero__hint{opacity:0}
 
   /* Costuras más cortas */
-  .proceso,.tienda{padding-top:calc(var(--space) + 12px)}
+  .wall,.proceso,.tienda{padding-top:calc(var(--space) + 12px)}
+  .wall{background:linear-gradient(180deg,var(--bg-2) 0,var(--ink) 84px)}
   .proceso{background:linear-gradient(180deg,var(--ink) 0,var(--bg) 84px)}
   .tienda{background:linear-gradient(180deg,var(--bg-2) 0,var(--ink) 84px)}
   .wall .wrap,.servicios .wrap,.proceso .wrap,.casos .wrap,.tienda .wrap,.contacto .wrap{gap:28px}
@@ -572,12 +538,10 @@ section{padding:var(--space) var(--pad)}
 
 /* ---------- Reduced motion: rama propia ---------- */
 @media (prefers-reduced-motion:reduce){
-  .hero{height:100svh!important}
-  .scene__copy--a{opacity:0!important}.scene__copy--b{opacity:1!important;pointer-events:auto!important}
   html{scroll-behavior:auto}
   *,*::before,*::after{animation:none!important;transition-duration:.01ms!important}
   .btn,.chips span{transition-duration:var(--dur-micro)!important}
-  .js .reveal,.js .lines .ln>span,.hero__index{opacity:1;transform:none}
+  .js .reveal,.js .lines .ln>span,.hero__aside,.hero__index{opacity:1;transform:none}
   .js .lines em{color:var(--crimson)}
   .net-dash{stroke-dasharray:none;stroke:rgba(226,35,58,.25)}
   .sec-idx i{transform:none}.steps::after{transform:none}
