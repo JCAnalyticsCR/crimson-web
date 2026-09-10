@@ -573,6 +573,7 @@ section{padding:var(--space) var(--pad)}
   .js .hero--d .lines .ln>span{animation:lineUp 950ms var(--ease-enter) forwards}
   .js .hero--d .lines em{animation:inkIn 600ms 520ms both}
   body.has-wide .wall{background:var(--ink)}
+  body.has-wide .hud--tr{display:none!important}
 }
 @media (min-width:768px) and (max-height:820px){.hero--d .scene__copy .display{font-size:clamp(32px,4vw,60px)}.hero--d .scene__copy .lead{font-size:15px}}
 @media (prefers-reduced-motion:reduce){.hero--d{height:100svh!important}}
