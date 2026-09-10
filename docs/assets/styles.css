@@ -548,12 +548,12 @@ section{padding:var(--space) var(--pad)}
   .hero--d .scene__pin{position:sticky;top:0;height:100svh;overflow:hidden;background:#000}
   .hero--d .scene__grid{position:absolute;inset:0;top:var(--navh);aspect-ratio:auto;max-height:none;max-width:none;padding:0;margin:0}
   /* El video vertical va CENTRADO en el cuadro a su tamano real: alto = alto del cuadro, sin zoom */
-  .hero--d .scene__stage{position:absolute;top:50%;bottom:auto;left:auto;right:3%;translate:0 -50%;width:min(58%,calc((100svh - var(--navh) - 76px) * 1.7778));max-height:none;height:auto;aspect-ratio:16/9;margin:0;background:#000;isolation:isolate;z-index:2;border-radius:0;overflow:hidden;box-shadow:none}
+  .hero--d .scene__stage{position:absolute;top:50%;bottom:auto;left:auto;right:3%;translate:0 -50%;transform:translateZ(0);backface-visibility:hidden;width:min(58%,calc((100svh - var(--navh) - 76px) * 1.7778));max-height:none;height:auto;aspect-ratio:16/9;margin:0;background:#000;isolation:isolate;z-index:2;border-radius:0;overflow:hidden;box-shadow:none}
   .hero--d .scene__grid{background:#000}
   .hero--d .scene__stage::before,.hero--d .scene__stage::after{display:none}
   /* La casilla es el monitor; el feed vertical va entero, centrado, a la altura de la casilla */
   /* Bordes difuminados: el video se funde con el negro por los cuatro lados (mascara doble, interseccion) */
-  .hero--d .scene__stage .scene__poster,.hero--d .scene__stage .scene__canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;filter:none;-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 11%,#000 89%,transparent 100%),linear-gradient(180deg,transparent 0,#000 13%,#000 87%,transparent 100%);mask-image:linear-gradient(90deg,transparent 0,#000 11%,#000 89%,transparent 100%),linear-gradient(180deg,transparent 0,#000 13%,#000 87%,transparent 100%);-webkit-mask-composite:source-in;mask-composite:intersect}
+  .hero--d .scene__stage .scene__poster,.hero--d .scene__stage .scene__canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;filter:none;-webkit-mask-image:linear-gradient(90deg,transparent 0 3px,#000 11%,#000 89%,transparent calc(100% - 3px) 100%),linear-gradient(180deg,transparent 0 3px,#000 13%,#000 87%,transparent calc(100% - 3px) 100%);mask-image:linear-gradient(90deg,transparent 0 3px,#000 11%,#000 89%,transparent calc(100% - 3px) 100%),linear-gradient(180deg,transparent 0 3px,#000 13%,#000 87%,transparent calc(100% - 3px) 100%);-webkit-mask-composite:source-in;mask-composite:intersect}
   .hero--d .scene__canvas{z-index:1}
   .hero--d .scene__shade{display:none}
   .hero--d .scene__stage .feed__corners{z-index:3;inset:26px;opacity:.55}
