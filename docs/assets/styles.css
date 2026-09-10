@@ -180,8 +180,7 @@ img[data-lqip].is-loaded{}
 /* El plano nitido va a ALTURA COMPLETA (sin recorte vertical) bajo la barra, centrado en la mitad
    derecha; a los lados lo extiende su propia version desenfocada (.scene__ambient) y sus bordes
    se funden con mask para que todo se lea como una sola imagen. */
-.scene__poster,.scene__canvas{position:absolute;top:var(--navh);bottom:auto;left:50%;height:calc(100svh - var(--navh));width:auto;aspect-ratio:9/16;transform:translateX(-50%);object-fit:cover;display:block;-webkit-mask-image:linear-gradient(90deg,rgba(0,0,0,0) 0,#000 14%,#000 100%);mask-image:linear-gradient(90deg,rgba(0,0,0,0) 0,#000 14%,#000 100%)}
-.scene__poster{filter:none}
+.scene__stage .scene__poster,.scene__stage .scene__canvas{position:absolute;top:var(--navh);bottom:auto;left:50%;height:calc(100svh - var(--navh));width:auto;aspect-ratio:9/16;transform:translateX(-50%);filter:none;object-fit:cover;display:block;-webkit-mask-image:linear-gradient(90deg,rgba(0,0,0,0) 0,#000 14%,#000 100%);mask-image:linear-gradient(90deg,rgba(0,0,0,0) 0,#000 14%,#000 100%)}
 .scene__canvas{z-index:1}
 .scene__stage::before{display:none}
 .scene__shade{display:none}
@@ -448,7 +447,7 @@ section{padding:var(--space) var(--pad)}
   .hero{height:calc(100svh + 190vh)}
   .scene__ambient,.scene__veil{display:none}
   .scene__stage{position:absolute;inset:0;top:0;bottom:0;left:0;height:auto;width:auto;aspect-ratio:auto;transform:none;border-radius:0;box-shadow:none;-webkit-mask-image:none;mask-image:none;background:#000}
-  .scene__poster,.scene__canvas{inset:0;top:0;bottom:0;left:0;height:100%;width:100%;aspect-ratio:auto;transform:none;-webkit-mask-image:none;mask-image:none}
+  .scene__stage .scene__poster,.scene__stage .scene__canvas{inset:0;top:0;bottom:0;left:0;height:100%;width:100%;aspect-ratio:auto;transform:none;-webkit-mask-image:none;mask-image:none}
   .scene__stage::after{display:none}
   .scene__stage .feed__corners{display:block}
   .scene__shade{display:block;position:absolute;inset:0;z-index:2;pointer-events:none;background:linear-gradient(180deg,rgba(21,19,26,.55) 0,transparent 22%,transparent 50%,rgba(21,19,26,.9) 100%)}
