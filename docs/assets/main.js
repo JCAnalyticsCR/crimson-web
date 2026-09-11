@@ -66,11 +66,12 @@
   // Fuera de vista se pausan las animaciones SMIL (las CSS se pausan solas por visibilidad del compositor).
   if (!isMobile.matches) {
     const hosts = [['#hero-d .scene__pin', true], ['#monitoreo', true], ['#servicios', true], ['#proceso', false], ['#casos', false], ['#tienda', true]];
+    const netIO = new IntersectionObserver(entries => entries.forEach(en => { const s = en.target.firstElementChild; if (!s) return; en.isIntersecting ? s.unpauseAnimations() : s.pauseAnimations(); }), { rootMargin: '25% 0px' });
     hosts.forEach(([sel, dark], i) => {
       const host = $(sel); if (!host) return;
       const wrap = document.createElement('div'); wrap.className = 'sec-net'; wrap.setAttribute('aria-hidden', 'true'); // el() crea en el namespace SVG
       wrap.appendChild(buildNet({ dark, seed: i % 2, density: .5 }));
-      host.prepend(wrap);
+      host.prepend(wrap); netIO.observe(wrap);
     });
   }
 
@@ -210,7 +211,7 @@
   const mountScene = (scene, PATH, FRAMES, VER = '') => {
     document.body.dataset.tone = 'ink'; const tm = $('#themeColor'); if (tm) tm.content = '#15131a';
     const ANIM_FIN = 0.78, FPS = 10;
-    const LERP = isMobile.matches ? 0.08 : 0.12;
+    const LERP = isMobile.matches ? 0.08 : 0.09;
     const pin = $('.scene__pin', scene), stage = $('.scene__stage', scene), canvas = $('.scene__canvas', scene);
     const poster = $('.scene__poster', scene), ambient = $('.scene__ambient', scene);
     const actx = ambient && ambient.getContext ? ambient.getContext('2d', { alpha: false }) : null;
@@ -245,7 +246,7 @@
       actx.drawImage(img, (aw - w) / 2, (ah - hh) / 2, w, hh);
     };
     const draw = frac => {
-      const dpr = Math.min(devicePixelRatio || 1, isMobile.matches ? 2 : 1.5), w = canvas.clientWidth, hh = canvas.clientHeight;
+      const dpr = Math.min(devicePixelRatio || 1, 2), w = canvas.clientWidth, hh = canvas.clientHeight;
       if (!w || !hh) return;
       const W = Math.round(w * dpr), H = Math.round(hh * dpr);
       if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; lastLow = -1; }
@@ -283,33 +284,12 @@
     const stop = () => { running = false; cancelAnimationFrame(raf); raf = 0; };
 
     // Progreso del pin -> objetivo de la secuencia (comprimida al 78% del recorrido)
-    // Escritorio: el inicio queda BLOQUEADO hasta terminar la escena. Con la pagina quieta en 0, la
-    // rueda/teclado avanzan la secuencia (scroll virtual); al completarla, la vista salta al final del
-    // pin (mismo fotograma, misma pantalla) y el scroll vuelve a ser nativo. Al volver arriba, se rebloquea.
-    let locked = !isMobile.matches && !reduced;
     const progress = () => {
-      if (locked && scrollY <= 1) return;
       const len = scene.offsetHeight - pin.offsetHeight;
       const p = len > 0 ? Math.min(1, Math.max(0, -scene.getBoundingClientRect().top / len)) : 0;
       target = Math.min(1, p / ANIM_FIN);
     };
     scrollFns.push(progress); progress();
-    if (locked) {
-      const RANGE = 1500; // px de rueda para recorrer toda la escena
-      const release = () => { locked = false; scrollTo({ top: scene.offsetHeight - pin.offsetHeight, behavior: 'instant' }); progress(); };
-      const step = d => { target = Math.min(1, Math.max(0, target + d)); if (target >= 1 && d > 0 && current > .96) release(); };
-      addEventListener('wheel', e => {
-        if (!locked || document.body.classList.contains('menu-open')) return;
-        if (scrollY > 1) { locked = false; return; }
-        e.preventDefault(); step(e.deltaY / RANGE);
-      }, { passive: false });
-      addEventListener('keydown', e => {
-        if (!locked || scrollY > 1 || e.target.closest('input,textarea,select')) return;
-        const d = { ArrowDown: .08, PageDown: .3, ' ': .3, ArrowUp: -.08, PageUp: -.3, End: 1 }[e.key];
-        if (d === undefined) return; e.preventDefault(); step(d);
-      });
-      scrollFns.push(() => { if (scrollY <= 1 && !locked) { locked = true; target = 0; } });
-    }
 
     // Carga: decode() con fallback; el contador sube exactamente una vez por imagen
     const listo = (i, img, good) => {
