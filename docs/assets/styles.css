@@ -580,9 +580,6 @@ section{padding:var(--space) var(--pad)}
   body.has-wide .wall{background:var(--ink)}
   /* Red de nodos detras de cada seccion (solo escritorio). z-index:-1 dentro de un contexto aislado:
      queda sobre el fondo de la seccion y debajo de todo su contenido, sin tocar el flujo. */
-  body.has-wide #monitoreo,body.has-wide #servicios,body.has-wide #proceso,body.has-wide #casos,body.has-wide #tienda{position:relative;isolation:isolate}
-  .sec-net{position:absolute;inset:0;z-index:-1;pointer-events:none;overflow:hidden;opacity:.42;-webkit-mask-image:radial-gradient(50% 55% at 50% 50%,transparent 18%,#000 72%);mask-image:radial-gradient(50% 55% at 50% 50%,transparent 18%,#000 72%)}
-  .sec-net svg{width:100%;height:100%;display:block}
   .hero--d .scene__pin .sec-net{z-index:0;opacity:.7;-webkit-mask-image:linear-gradient(90deg,#000 0,#000 45%,rgba(0,0,0,.35) 100%);mask-image:linear-gradient(90deg,#000 0,#000 45%,rgba(0,0,0,.35) 100%)}
   body.has-wide .hud--tr{display:none!important}
 }
@@ -639,6 +636,13 @@ section{padding:var(--space) var(--pad)}
   .hero--m{height:100svh!important}
   .scene__copy--a{opacity:0!important}.scene__copy--b{opacity:1!important;pointer-events:auto!important}
 }
+
+/* Red de nodos detras de cada seccion (escritorio y movil). z-index:-1 dentro de un contexto aislado:
+   sobre el fondo de la seccion y debajo de todo su contenido, sin tocar el flujo. */
+#monitoreo,#servicios,#proceso,#casos,#tienda{position:relative;isolation:isolate}
+.sec-net{position:absolute;inset:0;z-index:-1;pointer-events:none;overflow:hidden;opacity:.42;-webkit-mask-image:radial-gradient(50% 55% at 50% 50%,transparent 18%,#000 72%);mask-image:radial-gradient(50% 55% at 50% 50%,transparent 18%,#000 72%)}
+.sec-net svg{width:100%;height:100%;display:block}
+@media (max-width:767px){.sec-net{opacity:.5;-webkit-mask-image:none;mask-image:none}}
 
 /* ---------- Reduced motion: rama propia ---------- */
 @media (prefers-reduced-motion:reduce){
