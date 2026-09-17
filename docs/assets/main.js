@@ -66,7 +66,7 @@
   // Fuera de vista se pausan las animaciones SMIL (las CSS se pausan solas por visibilidad del compositor).
   {
     // Movil: las mismas redes en las secciones (variante vertical), sin tocar el hero movil
-    const hosts = [['#hero-d .scene__pin', true], ['#monitoreo', true], ['#servicios', true], ['#proceso', false], ['#casos', false], ['#tienda', true]];
+    const hosts = [['#hero-d .scene__pin', true], ['#monitoreo', true], ['#servicios', true], ['#porque', false], ['#proceso', false], ['#casos', false], ['#tienda', true]];
     if (isMobile.matches) hosts.shift();
     const netIO = new IntersectionObserver(entries => entries.forEach(en => { const s = en.target.firstElementChild; if (!s) return; en.isIntersecting ? s.unpauseAnimations() : s.pauseAnimations(); }), { rootMargin: '25% 0px' });
     hosts.forEach(([sel, dark], i) => {

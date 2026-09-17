@@ -192,7 +192,8 @@ img[data-lqip].is-loaded{}
 /* ---------- Costuras entre tonos (sin cortes secos) ---------- */
 .wall,.servicios,.tienda,.contacto{background:var(--ink);color:var(--white)}
 .wall{background:linear-gradient(180deg,var(--bg-2) 0,var(--ink) 120px)}
-.proceso{background:linear-gradient(180deg,var(--ink) 0,var(--bg) 120px)}
+.proceso{background:var(--bg)}
+.porque{background:linear-gradient(180deg,var(--ink) 0,var(--bg) 120px)}
 .casos{background:linear-gradient(180deg,var(--bg) 0,var(--bg-2) 110px)}
 .tienda{background:linear-gradient(180deg,var(--bg-2) 0,var(--ink) 120px)}
 section{padding:var(--space) var(--pad)}
@@ -236,6 +237,63 @@ section{padding:var(--space) var(--pad)}
 .proceso .wrap{display:flex;flex-direction:column;gap:44px}
 .proceso__head{display:grid;grid-template-columns:1.5fr 1fr;gap:48px;align-items:end}
 .proceso__aside{display:flex;flex-direction:column;gap:14px}
+
+/* ---------- 03 · Líneas de solución: pilares + 5 casillas demarcadas ---------- */
+.pillars{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;list-style:none;margin:0;padding:0}
+.pillars li{display:flex;align-items:center;gap:14px;padding:16px 18px;border:1px solid var(--hair-dark);border-radius:12px;background:rgba(255,255,255,.03)}
+.pillars svg{width:26px;height:26px;color:var(--crimson);flex:none}
+.pillars b{display:block;font-weight:700;font-size:15px;line-height:1.1}
+.pillars span{display:block;font-size:11px;color:var(--muted-dark);letter-spacing:.14em;text-transform:uppercase;margin-top:3px}
+.lineas{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;align-items:stretch}
+.linea{position:relative;display:flex;flex-direction:column;gap:16px;padding:18px 16px 16px;border:1px solid var(--hair-dark);border-radius:14px;background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.012));overflow:hidden;isolation:isolate}
+.linea::before{content:"LÍNEA " attr(data-n);position:absolute;top:16px;right:16px;font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:rgba(244,241,238,.42)}
+.linea__head{display:flex;flex-direction:column;gap:12px}
+.linea__icon{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;color:#fff}
+.linea__icon--crimson{background:var(--crimson)}
+.linea__icon--ink{background:var(--white);color:var(--ink)}
+.linea__icon svg{width:22px;height:22px}
+.linea h3{font-size:23px;line-height:1.02;display:flex;flex-direction:column;letter-spacing:-.01em}
+.linea h3 small{font-size:10.5px;letter-spacing:.24em;text-transform:uppercase;font-weight:600;color:var(--muted-dark);margin-bottom:5px}
+.linea__by{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--crimson);margin-top:-6px}
+.linea__media{aspect-ratio:16/11;border-radius:8px;background:#0e0d12}
+.linea__media>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:contrast(1.05) saturate(.9)}
+.linea__media .feed__corners{inset:8px}
+.linea__media .feed__meta{left:12px;right:12px;bottom:10px;font-size:9px}
+.linea__media--panel{display:grid;place-items:center;background:radial-gradient(80% 80% at 50% 100%,#241820 0,#0e0d12 70%)}
+.panel{width:100%;height:100%;display:block}
+.panel__line{stroke-dasharray:420;stroke-dashoffset:420;animation:panelDraw 1.8s var(--ease-scene) .3s forwards}
+.panel__dot{opacity:0;animation:panelDot .4s 1.9s forwards}
+.panel__bars rect{transform-origin:0 160px;transform:scaleY(0);animation:panelBar .9s var(--ease-enter) forwards}
+.panel__bars rect:nth-child(2){animation-delay:.08s}.panel__bars rect:nth-child(3){animation-delay:.16s}.panel__bars rect:nth-child(4){animation-delay:.24s}.panel__bars rect:nth-child(5){animation-delay:.32s}.panel__bars rect:nth-child(6){animation-delay:.4s}
+@keyframes panelDraw{to{stroke-dashoffset:0}}
+@keyframes panelDot{to{opacity:1}}
+@keyframes panelBar{to{transform:scaleY(1)}}
+.linea__list{display:flex;flex-direction:column;gap:9px;list-style:none;margin:0;padding:0;font-size:13.5px;line-height:1.35;color:rgba(244,241,238,.86);font-weight:500}
+.linea__list li{display:flex;gap:9px;align-items:flex-start}
+.linea__list li::before{content:"";flex:none;width:15px;height:15px;margin-top:2px;border-radius:50%;background:var(--crimson) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5 9-10'/%3E%3C/svg%3E") center/9px no-repeat}
+.linea__tag{margin-top:auto;padding:13px 14px;border-radius:8px;font-weight:600;font-size:13.5px;line-height:1.3;text-align:center;text-wrap:balance}
+.linea__tag--crimson{background:var(--crimson);color:#fff}
+.linea__tag--ink{background:var(--white);color:var(--ink)}
+
+/* ---------- 04 · Nosotros: por qué Crimson / a quiénes servimos / aliado JC Analytics ---------- */
+.porque .wrap{display:flex;flex-direction:column;gap:40px}
+.porque__grid{display:grid;grid-template-columns:1.05fr 1fr;gap:64px;align-items:start}
+.porque__col{display:flex;flex-direction:column;gap:30px}
+.razones{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border-bottom:1px solid var(--hair)}
+.razones li{display:flex;gap:18px;padding:18px 0;border-top:1px solid var(--hair);align-items:flex-start}
+.razones__icon{flex:none;width:46px;height:46px;border-radius:50%;border:1px solid var(--hair);display:grid;place-items:center;color:var(--crimson);background:#fff}
+.razones__icon svg{width:22px;height:22px}
+.razones b{display:block;font-size:12px;letter-spacing:.2em;text-transform:uppercase;margin-bottom:6px}
+.razones p{color:var(--muted);line-height:1.5;font-size:15px;max-width:40ch}
+.aliado{display:flex;gap:18px;align-items:center;padding:18px 20px;border-radius:14px;background:var(--ink);color:var(--white)}
+.aliado img{height:28px;width:auto;flex:none}
+.aliado p{font-size:14px;line-height:1.5;color:rgba(244,241,238,.78)}
+.aliado b{color:#fff;display:block;margin-bottom:2px}
+.sectores{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.sectores li{display:flex;align-items:center;gap:12px;padding:15px 16px;border:1px solid var(--hair);border-radius:12px;background:#fff;font-weight:600;font-size:14px;line-height:1.2}
+.sectores svg{width:22px;height:22px;color:var(--crimson);flex:none}
+.porque__note{color:var(--muted)}
+
 .steps{position:relative;display:grid;grid-template-columns:repeat(3,1fr);gap:28px}
 .steps::before{content:"";position:absolute;left:0;right:0;top:20px;height:1px;background:var(--hair)}
 .steps::after{content:"";position:absolute;left:0;right:0;top:20px;height:1px;background:var(--crimson);transform-origin:left;transform:scaleX(0);transition:transform 1.6s var(--ease-scene) .2s;opacity:.8}
@@ -385,7 +443,11 @@ section{padding:var(--space) var(--pad)}
    carruseles con peek y snap al centro, contacto como cierre.
    ===================================================================== */
 .only-mobile{display:none!important}
+@media (min-width:768px) and (max-width:1199px){.lineas{grid-template-columns:repeat(3,1fr)}.pillars{grid-template-columns:repeat(2,1fr)}.porque__grid{gap:40px}}
 @media (max-width:767px){
+  .pillars{grid-template-columns:1fr 1fr;gap:8px}.pillars li{padding:12px 12px;gap:10px}.pillars svg{width:22px;height:22px}.pillars b{font-size:14px}
+  .linea{gap:14px}.linea__media{aspect-ratio:16/10}
+  .porque__grid{grid-template-columns:1fr;gap:40px}.sectores{grid-template-columns:1fr}.aliado{flex-direction:column;align-items:flex-start;gap:12px}
   :root{--pad:20px;--space:52px;--fs-display:44px;--fs-d2:36px;--fs-d3:26px;--fs-lead:16px}
   html{-webkit-tap-highlight-color:transparent}
   .only-mobile{display:inline-flex!important}
@@ -639,7 +701,7 @@ section{padding:var(--space) var(--pad)}
 
 /* Red de nodos detras de cada seccion (escritorio y movil). z-index:-1 dentro de un contexto aislado:
    sobre el fondo de la seccion y debajo de todo su contenido, sin tocar el flujo. */
-#monitoreo,#servicios,#proceso,#casos,#tienda{position:relative;isolation:isolate}
+#monitoreo,#servicios,#porque,#proceso,#casos,#tienda{position:relative;isolation:isolate}
 .sec-net{position:absolute;inset:0;z-index:-1;pointer-events:none;overflow:hidden;opacity:.42;-webkit-mask-image:radial-gradient(50% 55% at 50% 50%,transparent 18%,#000 72%);mask-image:radial-gradient(50% 55% at 50% 50%,transparent 18%,#000 72%)}
 .sec-net svg{width:100%;height:100%;display:block}
 @media (max-width:767px){.sec-net{opacity:.5;-webkit-mask-image:none;mask-image:none}}
