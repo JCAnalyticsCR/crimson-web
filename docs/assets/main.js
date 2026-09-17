@@ -338,6 +338,7 @@
       i = (n + tabs.length) % tabs.length;
       tabs.forEach((t, k) => { const on = k === i; t.classList.toggle('is-active', on); t.setAttribute('aria-selected', on ? 'true' : 'false'); t.tabIndex = on ? 0 : -1; });
       panels.forEach((p, k) => p.classList.toggle('is-active', k === i));
+      $$('img[loading=lazy]', panels[i]).forEach(im => { im.loading = 'eager'; });
       con.style.setProperty('--dur', auto ? DUR + 'ms' : '0ms');
       if (rail.scrollWidth > rail.clientWidth + 4) rail.scrollTo({ left: tabs[i].offsetLeft - 16, behavior: 'smooth' });
       restart();
@@ -354,6 +355,36 @@
     stage.addEventListener('touchend', e => { const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy; if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.5) { auto = false; show(i + (dx < 0 ? 1 : -1)); } }, { passive: true });
     new IntersectionObserver(([en]) => { visible = en.isIntersecting; restart(); }, { threshold: .2 }).observe(con);
     show(0);
+  });
+
+  /* ---------- Radar de cobertura: el barrido "detecta" cada sector (lectura + resalte); tocar un punto lo nombra ---------- */
+  $$('.radar').forEach(r => {
+    const blips = $$('.radar__blip', r), lbls = $$('.radar__lbl', r), chips = $$('.radar__list li', r), out = $('.radar__readout b', r), sweepEl = $('.radar__sweep', r);
+    if (!blips.length) return;
+    const SW = (parseFloat(getComputedStyle(sweepEl).animationDuration) || 7) * 1000;
+    const frac = blips.map(b => { const d = parseFloat(b.style.animationDelay) * 1000; return ((d % SW) + SW) % SW / SW; });
+    const names = chips.map(c => c.textContent.trim());
+    let cur = -1, manualUntil = 0;
+    const set = i => { cur = i; blips.forEach((b, k) => b.classList.toggle('is-on', k === i)); lbls.forEach((l, k) => l.classList.toggle('is-on', k === i)); chips.forEach((c, k) => c.classList.toggle('is-on', k === i)); if (out) out.textContent = names[i] || ''; };
+    const pick = i => { manualUntil = performance.now() + 5000; set(i); };
+    blips.forEach((b, k) => { b.addEventListener('click', () => pick(k)); b.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(k); } }); });
+    chips.forEach((c, k) => c.addEventListener('click', () => pick(k)));
+    let visible = false, tm = 0;
+    const tick = () => {
+      if (!visible) return;
+      if (performance.now() > manualUntil && !reduced) {
+        const an = sweepEl.getAnimations()[0];
+        if (an && an.currentTime != null) {
+          const ph = (an.currentTime % SW) / SW;
+          let best = -1, bf = -1; frac.forEach((f, k) => { if (f <= ph && f > bf) { bf = f; best = k; } });
+          if (best < 0) { bf = -1; frac.forEach((f, k) => { if (f > bf) { bf = f; best = k; } }); }
+          if (best !== cur) set(best);
+        }
+      }
+      tm = setTimeout(tick, 150);
+    };
+    new IntersectionObserver(([en]) => { visible = en.isIntersecting; clearTimeout(tm); if (visible) tick(); }, { threshold: .2 }).observe(r);
+    if (reduced) set(0);
   });
 
   /* ---------- Nav ---------- */
