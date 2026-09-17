@@ -329,6 +329,33 @@
   if (isMobile.matches && $('#hero-m.scene')) mountScene($('#hero-m.scene'), 'assets/frames/hero', 88);
   else if (useWide) mountScene($('#hero-d.scene'), wideSet.path, wideSet.frames, wideSet.ver);
 
+  /* ---------- Consola de lineas de solucion: pestanas, avance automatico (hasta que el usuario toca), swipe ---------- */
+  $$('[data-consola]').forEach(con => {
+    const tabs = $$('.consola__tab', con), panels = $$('.consola__panel', con), rail = $('.consola__tabs', con), stage = $('.consola__stage', con);
+    const DUR = 6000; let i = 0, timer = 0, auto = !reduced, visible = false;
+    const restart = () => { clearTimeout(timer); if (auto && visible) timer = setTimeout(() => show(i + 1), DUR); };
+    const show = n => {
+      i = (n + tabs.length) % tabs.length;
+      tabs.forEach((t, k) => { const on = k === i; t.classList.toggle('is-active', on); t.setAttribute('aria-selected', on ? 'true' : 'false'); t.tabIndex = on ? 0 : -1; });
+      panels.forEach((p, k) => p.classList.toggle('is-active', k === i));
+      con.style.setProperty('--dur', auto ? DUR + 'ms' : '0ms');
+      if (rail.scrollWidth > rail.clientWidth + 4) rail.scrollTo({ left: tabs[i].offsetLeft - 16, behavior: 'smooth' });
+      restart();
+    };
+    tabs.forEach((t, k) => {
+      t.addEventListener('click', () => { auto = false; show(k); });
+      t.addEventListener('keydown', e => {
+        const d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]; if (!d) return;
+        e.preventDefault(); auto = false; show(i + d); tabs[i].focus();
+      });
+    });
+    let sx = 0, sy = 0;
+    stage.addEventListener('touchstart', e => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
+    stage.addEventListener('touchend', e => { const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy; if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.5) { auto = false; show(i + (dx < 0 ? 1 : -1)); } }, { passive: true });
+    new IntersectionObserver(([en]) => { visible = en.isIntersecting; restart(); }, { threshold: .2 }).observe(con);
+    show(0);
+  });
+
   /* ---------- Nav ---------- */
   const nav = $('#nav'), burger = $('#burger');
   const setNavH = () => document.documentElement.style.setProperty('--navh', nav.offsetHeight + 'px');
