@@ -1,0 +1,76 @@
+/* Sistema de diseno del portal Crimson · derivado de la landing ("sala de monitoreo").
+   Tokens en :root (claro) y en [data-theme=dark]. Nada de Fygaro: solo comportamiento. */
+
+@font-face { font-family: "Bricolage Grotesque"; src: url(/fonts/BricolageGrotesque-var.woff2) format("woff2"); font-weight: 200 800; font-display: swap; }
+@font-face { font-family: Manrope; src: url(/fonts/Manrope-400.woff2) format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: Manrope; src: url(/fonts/Manrope-500.woff2) format("woff2"); font-weight: 500; font-display: swap; }
+@font-face { font-family: Manrope; src: url(/fonts/Manrope-600.woff2) format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: Manrope; src: url(/fonts/Manrope-700.woff2) format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url(/fonts/JetBrainsMono-500.woff2) format("woff2"); font-weight: 500; font-display: swap; }
+
+:root {
+  /* marca */
+  --crimson: #e2233a;
+  --crimson-2: #ff5a6e;
+  --crimson-soft: rgba(226, 35, 58, 0.12);
+  --ink: #15131a;
+  --ink-2: #1e1c24;
+  --ink-3: #2a2731;
+  --cream: #f6f2ee;
+  --cream-2: #efe9e3;
+  --white: #ffffff;
+
+  /* semanticos (claro) */
+  --bg: #f3efea;
+  --bg-2: #ebe6df;
+  --surface: #ffffff;
+  --surface-2: #faf8f5;
+  --text: #15131a;
+  --text-2: #5a5560;
+  --text-3: #8a858f;
+  --hair: rgba(21, 19, 26, 0.10);
+  --hair-2: rgba(21, 19, 26, 0.16);
+  --nav-bg: #15131a;
+  --nav-text: #f4f1ee;
+  --nav-muted: rgba(244, 241, 238, 0.55);
+  --ok: #1f9d55;
+  --ok-soft: rgba(31, 157, 85, 0.12);
+  --warn: #d98a12;
+  --warn-soft: rgba(217, 138, 18, 0.14);
+  --bad: #e2233a;
+  --bad-soft: rgba(226, 35, 58, 0.12);
+  --info: #2f6fed;
+  --info-soft: rgba(47, 111, 237, 0.12);
+  --shadow: 0 10px 30px -18px rgba(21, 19, 26, 0.35);
+  --shadow-lg: 0 30px 60px -30px rgba(21, 19, 26, 0.45);
+
+  --sans: Manrope, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display: "Bricolage Grotesque", Manrope, system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+
+  --r-sm: 8px; --r: 12px; --r-lg: 16px; --r-xl: 20px;
+  --nav-w: 248px;
+  --top-h: 60px;
+  --ease: cubic-bezier(.22, 1, .36, 1);
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --bg: #0f0e12;
+  --bg-2: #15131a;
+  --surface: #1a1820;
+  --surface-2: #211f28;
+  --text: #f4f1ee;
+  --text-2: #b9b5b0;
+  --text-3: #7d7883;
+  --hair: rgba(255, 255, 255, 0.09);
+  --hair-2: rgba(255, 255, 255, 0.16);
+  --nav-bg: #0b0a0e;
+  --shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.8);
+  --shadow-lg: 0 30px 60px -30px rgba(0, 0, 0, 0.9);
+  --ok-soft: rgba(31, 157, 85, 0.2);
+  --warn-soft: rgba(217, 138, 18, 0.22);
+  --bad-soft: rgba(226, 35, 58, 0.2);
+  --info-soft: rgba(47, 111, 237, 0.2);
+  color-scheme: dark;
+}

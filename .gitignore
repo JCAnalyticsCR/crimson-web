@@ -4,3 +4,12 @@ CLAUDE.local.md
 node_modules/
 .DS_Store
 Thumbs.db
+# plataforma
+.venv/
+__pycache__/
+*.pyc
+api/crimson.db
+api/.pytest_cache/
+api/.ruff_cache/
+portal/dist/
+portal/node_modules/

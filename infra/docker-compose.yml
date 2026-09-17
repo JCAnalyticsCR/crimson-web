@@ -1,0 +1,43 @@
+# Entorno local completo: docker compose -f infra/docker-compose.yml up --build
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: crimson
+      POSTGRES_USER: crimson
+      POSTGRES_PASSWORD: crimson_local_only
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U crimson"], interval: 5s, retries: 10 }
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  api:
+    build: ../api
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://crimson:crimson_local_only@postgres:5432/crimson
+      REDIS_URL: redis://redis:6379/0
+      ENV: local
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+
+  worker:
+    build: { context: .., dockerfile: worker/Dockerfile }
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://crimson:crimson_local_only@postgres:5432/crimson
+      REDIS_URL: redis://redis:6379/0
+    depends_on: [api, redis]
+
+  portal:
+    build: ../portal
+    ports: ["5173:80"]
+    depends_on: [api]
+
+volumes:
+  pgdata:

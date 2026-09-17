@@ -1,0 +1,35 @@
+[project]
+name = "crimson-api"
+version = "0.1.0"
+description = "Crimson · plataforma de facturacion, cobros y control financiero (API)"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "sqlalchemy>=2.0",
+  "alembic",
+  "pydantic[email]>=2",
+  "pydantic-settings",
+  "psycopg[binary]",
+  "argon2-cffi",
+  "pyjwt",
+  "pyotp",
+  "python-multipart",
+  "httpx",
+  "celery",
+  "redis",
+]
+
+[dependency-groups]
+dev = ["pytest", "ruff", "pip-audit"]
+
+[tool.ruff]
+line-length = 160
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["B008", "E501"]  # Depends() en defaults es el patron de FastAPI; longitud la gobierna el formatter
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
