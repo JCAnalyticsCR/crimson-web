@@ -9,17 +9,18 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { to: "/", label: "Inicio", icon: I.home, end: true },
     { to: "/cotizaciones", label: "Cotizaciones", icon: I.quote },
     { to: "/facturas", label: "Facturas", icon: I.invoice },
+    { to: "/recurrencias", label: "Recurrencias", icon: I.refresh },
     { to: "/pagos", label: "Pagos", icon: I.pay },
   ]},
   { group: "Catálogo", items: [
     { to: "/clientes", label: "Clientes", icon: I.customers },
     { to: "/productos", label: "Productos & Servicios", icon: I.products },
-    { to: "/inventario", label: "Inventarios", icon: I.inventory, soon: true },
+    { to: "/inventario", label: "Inventarios", icon: I.inventory },
     { to: "/tienda", label: "Mi Tienda", icon: I.store, soon: true },
   ]},
   { group: "Control", items: [
-    { to: "/reportes", label: "Reportes", icon: I.reports, soon: true },
-    { to: "/contabilidad", label: "Contabilidad", icon: I.accounting, soon: true },
+    { to: "/reportes", label: "Reportes", icon: I.reports },
+    { to: "/contabilidad", label: "Contabilidad", icon: I.accounting },
     { to: "/ajustes", label: "Ajustes", icon: I.settings },
   ]},
 ];

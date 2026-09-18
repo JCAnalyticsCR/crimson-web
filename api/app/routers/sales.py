@@ -22,6 +22,7 @@ from ..schemas.sales import (
     QuoteOut,
 )
 from ..services import documents as svc
+from ..services import inventory as invsvc
 from ..services.documents import audit
 from ..services.totals import LineIn, compute_document, d
 
@@ -147,6 +148,7 @@ def update_quote(qid: int, data: DocumentIn, p: Principal = Depends(require("sal
 def convert_quote(qid: int, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
     q = _own(db, Quote, qid, p.tenant.id)
     inv = svc.convert_quote(db, p.tenant.id, p.user.id, q)
+    invsvc.deduct_for_invoice(db, inv, p.user.id)
     db.commit()
     return _inv_out(db, inv)
 
@@ -199,6 +201,7 @@ def create_invoice(data: DocumentIn, doc_type: str = "FE", p: Principal = Depend
     if doc_type not in ("FE", "TE", "FEE"):
         raise HTTPException(422, "doc_type debe ser FE, TE o FEE")
     inv = svc.create_invoice(db, p.tenant.id, p.user.id, data, doc_type)
+    invsvc.deduct_for_invoice(db, inv, p.user.id)
     db.commit()
     return _inv_out(db, inv)
 
@@ -229,6 +232,7 @@ def void_invoice(iid: int, p: Principal = Depends(require("sales", "anular")), d
     if inv.einvoice_status == "aceptada":
         raise HTTPException(409, "Factura aceptada por Hacienda: se anula emitiendo Nota de Credito (Fase 2)")
     inv.status = "anulada"
+    invsvc.restock_for_void(db, inv, p.user.id)
     audit(db, p.tenant.id, p.user.id, "void", "invoice", inv.id, ip=p.ip)
     db.commit()
     return _inv_out(db, inv)
@@ -373,6 +377,6 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
             "facturas_por_cobrar": unpaid,
             "documentos_rechazados": rejected,
             "enlaces_abiertos": links_open,
-            "stock_bajo": 0,
+            "stock_bajo": len(invsvc.low_stock(db, tid)),
         },
     }

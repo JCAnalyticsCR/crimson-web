@@ -26,6 +26,9 @@ async function tryRefresh(): Promise<boolean> {
   return refreshing;
 }
 
+/** Al abrir el portal: renovar por cookie antes de pedir /me (evita un 401 ruidoso por recarga). */
+export const bootstrap = () => (accessToken ? Promise.resolve(true) : tryRefresh());
+
 export async function api<T = unknown>(path: string, init: RequestInit & { json?: unknown; retry?: boolean } = {}): Promise<T> {
   const { json, retry = true, ...rest } = init;
   const headers: Record<string, string> = { ...(rest.headers as Record<string, string>) };
@@ -59,7 +62,7 @@ export type Doc = {
 };
 export type Quote = Doc & { converted_invoice_id: number | null };
 export type Payment = { id: number; method: string; kind: string; currency: string; amount: string; tip: string; external_ref: string | null; provider: string; paid_at: string; status: string };
-export type Invoice = Doc & { doc_type: string; consecutive: string | null; balance: string; quote_id: number | null; einvoice_status: string; payments: Payment[]; sale_condition: string; credit_days: number; payment_method: string };
+export type Invoice = Doc & { doc_type: string; consecutive: string | null; clave: string | null; balance: string; quote_id: number | null; einvoice_status: string; payments: Payment[]; sale_condition: string; credit_days: number; payment_method: string };
 export type DocListItem = { id: number; number: string; customer_name: string | null; currency: string; total: string; balance: string | null; status: string; issue_date: string; due_date: string | null };
 export type Dashboard = {
   pagos: { hoy: string; mes: string; mes_anterior: string; variacion: number | null };

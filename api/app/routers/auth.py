@@ -95,7 +95,8 @@ def login(data: LoginIn, request: Request, resp: Response, db: Session = Depends
     if not user or not user.active:
         raise generic
     now = datetime.now(UTC)
-    if user.locked_until and user.locked_until > now:
+    locked = user.locked_until.replace(tzinfo=UTC) if user.locked_until and user.locked_until.tzinfo is None else user.locked_until
+    if locked and locked > now:
         raise HTTPException(status.HTTP_423_LOCKED, "Cuenta bloqueada temporalmente por intentos fallidos")
     if not verify_password(data.password, user.password_hash):
         user.failed_logins += 1

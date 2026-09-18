@@ -15,6 +15,13 @@ export default function InvoiceDetail() {
   const [inv, setInv] = useState<Invoice | null>(null);
   const [pay, setPay] = useState(false);
   const [link, setLink] = useState<{ url: string; whatsapp_url: string; expires_at: string; opened_count: number } | null>(null);
+  const [xmls, setXmls] = useState<{ id: number; doc_type: string; consecutive: string; clave: string | null; status: string; message: string | null; provider: string; has_document: boolean; has_response: boolean }[] | null>(null);
+  const [nc, setNc] = useState<string | null>(null);
+  const [mail, setMail] = useState<{ to: string; message: string } | null>(null);
+  const emit = async () => { try { const r = await api<{ status: string; clave: string; message: string }>(`/invoices/${id}/emit`, { method: "POST" }); toast(`Hacienda: ${r.status} · ${r.message || ""}`); reload(); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } };
+  const loadXml = () => api(`/invoices/${id}/xml`).then((r) => setXmls(r as never)).catch((e) => toast(e.message, "bad"));
+  const sendNc = async () => { if (!nc) return; try { await api(`/invoices/${id}/credit-note`, { method: "POST", json: { reason: nc } }); toast("Nota de crédito aceptada; factura anulada"); setNc(null); reload(); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } };
+  const sendMail = async () => { if (!mail) return; try { const r = await api<{ status: string; note: string | null }>(`/invoices/${id}/email`, { method: "POST", json: { to: mail.to || null, message: mail.message || null } }); toast(r.note || `Correo ${r.status}`); setMail(null); reload(); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } };
   const [form, setForm] = useState({ method: "sinpe", kind: "captura", amount: "", external_ref: "", paid_at: new Date().toISOString().slice(0, 10), notify_customer: true });
   const reload = () => api<Invoice>(`/invoices/${id}`).then(setInv);
   useEffect(() => { reload(); }, [id]);
@@ -42,9 +49,13 @@ export default function InvoiceDetail() {
               </table>
             )}
           </Card>
-          <Card title="Documentos electrónicos">
-            <div className="status-line"><Badge status={inv.einvoice_status === "sin_emitir" ? "pendiente" : inv.einvoice_status} /><span>Hacienda · v4.4</span></div>
-            <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>La emisión a Hacienda (XML documento y respuesta) se activa en la Fase 2 con el proveedor fiscal. El consecutivo <span className="mono">{inv.consecutive}</span> ya está reservado.</p>
+          <Card title="Documentos electrónicos" extra={<div style={{ display: "flex", gap: 8 }}><button className="btn btn--ghost btn--sm" onClick={loadXml}>XMLs</button>{inv.einvoice_status !== "aceptada" && inv.status !== "anulada" && <button className="btn btn--crimson btn--sm" onClick={emit}><Icon d={I.check} />Emitir a Hacienda</button>}{inv.einvoice_status === "aceptada" && inv.status !== "anulada" && <button className="btn btn--danger btn--sm" onClick={() => setNc("")}>Anular con NC</button>}</div>}>
+            <div className="status-line"><Badge status={inv.einvoice_status === "sin_emitir" ? "pendiente" : inv.einvoice_status === "aceptada" ? "confirmado" : inv.einvoice_status === "rechazada" ? "fallido" : inv.einvoice_status} /><span>Hacienda · v4.4 · {inv.consecutive}</span></div>
+            {inv.clave && <p className="mono" style={{ fontSize: 11, marginTop: 8, wordBreak: "break-all", color: "var(--text-2)" }}>Clave {inv.clave}</p>}
+            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+              <a className="btn btn--soft btn--sm" href={`/api/invoices/${id}/pdf`} target="_blank" rel="noopener">PDF / Imprimir</a>
+              <button className="btn btn--soft btn--sm" onClick={() => setMail({ to: "", message: "" })}>Enviar por correo</button>
+            </div>
           </Card>
         </div>
       )}
@@ -63,6 +74,26 @@ export default function InvoiceDetail() {
         </Modal>
       )}
 
+      {xmls && (
+        <Modal title="Documentos electrónicos (XML)" onClose={() => setXmls(null)} foot={<button className="btn btn--ghost" onClick={() => setXmls(null)}>Cerrar</button>}>
+          {xmls.length === 0 ? <p className="muted">Aún no se ha emitido. Configurá el proveedor fiscal en Ajustes → Facturación y presioná “Emitir a Hacienda”.</p> : (
+            <table className="table"><thead><tr><th>Tipo</th><th>Consecutivo</th><th>Estado</th><th>Documento</th><th>Respuesta</th></tr></thead>
+              <tbody>{xmls.map((x) => <tr key={x.id}><td style={{ fontWeight: 600 }}>{x.doc_type}</td><td className="mono muted">{x.consecutive}</td><td><Badge status={x.status === "aceptada" ? "confirmado" : x.status === "rechazada" ? "fallido" : "pendiente"} />{x.message && <div className="meta" style={{ textTransform: "none" }}>{x.message}</div>}</td><td>{x.has_document && <a className="btn btn--ghost btn--sm" href={`/api/invoices/${id}/xml/${x.id}/document`}>Descargar</a>}</td><td>{x.has_response && <a className="btn btn--ghost btn--sm" href={`/api/invoices/${id}/xml/${x.id}/response`}>Descargar</a>}</td></tr>)}</tbody></table>
+          )}
+        </Modal>
+      )}
+      {nc !== null && (
+        <Modal title="Anular con nota de crédito" onClose={() => setNc(null)} foot={<><button className="btn btn--ghost" onClick={() => setNc(null)}>Cancelar</button><button className="btn btn--danger" onClick={sendNc}>Emitir NC y anular</button></>}>
+          <p className="muted" style={{ fontSize: 13 }}>La factura fue aceptada por Hacienda: se anula emitiendo una Nota de Crédito que referencia su clave. El inventario vendido se repone.</p>
+          <Field label="Motivo"><input className="input" value={nc} onChange={(e) => setNc(e.target.value)} placeholder="Error en cantidad, devolución…" /></Field>
+        </Modal>
+      )}
+      {mail && inv && (
+        <Modal title="Enviar factura por correo" onClose={() => setMail(null)} foot={<><button className="btn btn--ghost" onClick={() => setMail(null)}>Cancelar</button><button className="btn btn--crimson" onClick={sendMail}>Enviar</button></>}>
+          <Field label="Para" hint="Vacío = correo del cliente. Incluye PDF y enlace de pago si hay saldo."><input className="input" type="email" value={mail.to} onChange={(e) => setMail({ ...mail, to: e.target.value })} placeholder={inv.customer_name || ""} /></Field>
+          <Field label="Mensaje"><textarea className="textarea" value={mail.message} onChange={(e) => setMail({ ...mail, message: e.target.value })} /></Field>
+        </Modal>
+      )}
       {link && inv && (
         <Modal title="Enlace de pago para la factura" onClose={() => setLink(null)} foot={<button className="btn btn--ghost" onClick={() => setLink(null)}>Cerrar</button>}>
           <p className="muted" style={{ fontSize: 13 }}>URL única de {inv.number}. Vence {fmtDate(link.expires_at.slice(0, 10))} · abierta {link.opened_count} veces.</p>

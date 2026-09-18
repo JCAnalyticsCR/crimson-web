@@ -13,6 +13,12 @@ import Customers from "./modules/crm/Customers";
 import Products from "./modules/catalog/Products";
 import Settings from "./modules/Settings";
 import PayPage from "./modules/pay/PayPage";
+import Payments from "./modules/payments/Payments";
+import Inventory from "./modules/inventory/Inventory";
+import Accounting from "./modules/accounting/Accounting";
+import Reports from "./modules/reports/Reports";
+import Recurrences from "./modules/sales/Recurrences";
+import Invite from "./modules/auth/Invite";
 import { Empty } from "./ui/components";
 
 function Soon({ name }: { name: string }) {
@@ -29,6 +35,7 @@ function App() {
   return (
     <Routes>
       <Route path="/pagar/:token" element={<PayPage />} />
+      <Route path="/invitacion/:token" element={<Invite />} />
       <Route element={<Private />}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/cotizaciones" element={<DocList kind="quotes" />} />
@@ -36,13 +43,14 @@ function App() {
         <Route path="/facturas" element={<DocList kind="invoices" />} />
         <Route path="/facturas/nueva" element={<DocEditor kind="invoice" />} />
         <Route path="/facturas/:id" element={<InvoiceDetail />} />
-        <Route path="/pagos" element={<Soon name="Pagos" />} />
+        <Route path="/pagos" element={<Payments />} />
+        <Route path="/recurrencias" element={<Recurrences />} />
         <Route path="/clientes" element={<Customers />} />
         <Route path="/productos" element={<Products />} />
-        <Route path="/inventario" element={<Soon name="Inventarios" />} />
+        <Route path="/inventario" element={<Inventory />} />
         <Route path="/tienda" element={<Soon name="Mi Tienda" />} />
-        <Route path="/reportes" element={<Soon name="Reportes" />} />
-        <Route path="/contabilidad" element={<Soon name="Contabilidad" />} />
+        <Route path="/reportes" element={<Reports />} />
+        <Route path="/contabilidad" element={<Accounting />} />
         <Route path="/ajustes" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

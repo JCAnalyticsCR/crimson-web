@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { api, auth, type Me } from "../lib/api";
+import { api, auth, bootstrap, type Me } from "../lib/api";
 
 type Session = { me: Me | null; loading: boolean; login: (email: string, password: string, totp?: string) => Promise<void>; logout: () => Promise<void>; reload: () => Promise<void>; theme: string; toggleTheme: () => void; toast: (msg: string, tone?: "ok" | "bad") => void };
 const Ctx = createContext<Session>(null!);
@@ -18,8 +18,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Al abrir: intentar refresh por cookie -> /me
     (async () => {
-      try { await api<Me>("/auth/me"); } catch { /* sin token: api() ya intento refresh */ }
-      await reload();
+      if (await bootstrap()) await reload();
       setLoading(false);
     })();
     const off = auth.onChange(() => { if (!auth.token) setMe(null); });

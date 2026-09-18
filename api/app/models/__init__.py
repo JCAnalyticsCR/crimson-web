@@ -14,6 +14,17 @@ from .core import (
     User,
 )
 from .crm import Customer
+from .ops import (
+    EInvoiceDocument,
+    EmailOutbox,
+    Expense,
+    ExpenseCategory,
+    PaymentGatewayConfig,
+    Recurrence,
+    StockMovement,
+    Warehouse,
+    WebhookEvent,
+)
 from .payments import BankAccount, Payment, PaymentLink
 from .sales import BillingGroup, Invoice, InvoiceLine, Quote, QuoteLine
 
@@ -43,4 +54,13 @@ __all__ = [
     "BankAccount",
     "Payment",
     "PaymentLink",
+    "Warehouse",
+    "StockMovement",
+    "ExpenseCategory",
+    "Expense",
+    "Recurrence",
+    "EInvoiceDocument",
+    "EmailOutbox",
+    "WebhookEvent",
+    "PaymentGatewayConfig",
 ]

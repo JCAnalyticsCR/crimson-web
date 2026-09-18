@@ -18,7 +18,13 @@ dependencies = [
   "httpx",
   "celery",
   "redis",
+  "jinja2",
+  "openpyxl",
+  "cryptography",
 ]
+
+[project.optional-dependencies]
+pdf = ["weasyprint"]
 
 [dependency-groups]
 dev = ["pytest", "ruff", "pip-audit"]

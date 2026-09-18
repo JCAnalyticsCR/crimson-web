@@ -64,7 +64,7 @@ export default function Dashboard() {
               <div><b>{d.acciones_pendientes.cotizaciones_sin_respuesta}</b><span>Cotizaciones sin respuesta</span></div>
               <div><b>{d.acciones_pendientes.enlaces_abiertos}</b><span>Enlaces de pago abiertos</span></div>
               <div className={d.acciones_pendientes.documentos_rechazados ? "hot" : ""}><b>{d.acciones_pendientes.documentos_rechazados}</b><span>Rechazados por Hacienda</span></div>
-              <div><b>{d.acciones_pendientes.stock_bajo}</b><span>Productos con stock bajo</span></div>
+              <div className={d.acciones_pendientes.stock_bajo ? "hot" : ""}><b>{d.acciones_pendientes.stock_bajo}</b><span>Productos con stock bajo</span></div>
             </div>
           </Card>
 

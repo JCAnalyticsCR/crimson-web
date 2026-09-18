@@ -57,7 +57,34 @@ def mark_overdue() -> int:
     return n
 
 
+@celery.task(name="sales.run_recurrences")
+def run_recurrences() -> int:
+    from app.core.db import SessionLocal
+    from app.routers.ops import run_due_recurrences
+
+    with SessionLocal() as db:
+        return run_due_recurrences(db)
+
+
+@celery.task(name="mail.retry_outbox")
+def retry_outbox() -> int:
+    from app.core.db import SessionLocal
+    from app.models import EmailOutbox
+    from app.services.mail import deliver
+    from sqlalchemy import select
+
+    n = 0
+    with SessionLocal() as db:
+        for m in db.scalars(select(EmailOutbox).where(EmailOutbox.status.in_(("pendiente", "error"))).limit(50)):
+            deliver(m)
+            n += 1
+        db.commit()
+    return n
+
+
 celery.conf.beat_schedule = {
+    "run-recurrences": {"task": "sales.run_recurrences", "schedule": crontab(hour=5, minute=0)},
+    "retry-outbox": {"task": "mail.retry_outbox", "schedule": crontab(minute="*/15")},
     "fx-bccr-daily": {"task": "fx.bccr_daily", "schedule": crontab(hour=6, minute=15)},
     "mark-overdue": {"task": "sales.mark_overdue", "schedule": crontab(hour=0, minute=30)},
 }

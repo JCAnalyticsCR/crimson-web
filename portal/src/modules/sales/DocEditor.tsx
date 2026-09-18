@@ -52,7 +52,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     try {
       const path = isQ ? "quotes" : "invoices";
       const saved = isNew ? await api<Quote & Invoice>(`/${path}`, { method: "POST", json: payload }) : await api<Quote & Invoice>(`/${path}/${id}`, { method: "PUT", json: payload });
-      if (then === "send") await api(`/${path}/${saved.id}/send`, { method: "POST" });
+      if (then === "send") { const r = await api<{ status: string; note: string | null }>(`/${path}/${saved.id}/email`, { method: "POST", json: {} }); toast(r.note || `Correo ${r.status}`); }
       if (then === "convert") { const inv = await api<Invoice>(`/quotes/${saved.id}/convert`, { method: "POST" }); toast(`Factura ${inv.number} creada`); nav(`/facturas/${inv.id}`); return; }
       toast(`${isQ ? "Cotización" : "Factura"} ${saved.number} guardada`);
       nav(`/${isQ ? "cotizaciones" : "facturas"}/${saved.id}`, { replace: true });
@@ -81,7 +81,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
           <h1 className="h1" style={{ marginTop: 6 }}>{title}</h1>
         </div>
         <div className="page-head__actions">
-          {!isNew && <button className="btn btn--ghost btn--sm" onClick={() => window.print()}>Imprimir</button>}
+          {!isNew && <a className="btn btn--ghost btn--sm" href={`/api/${isQ ? "quotes" : "invoices"}/${id}/pdf`} target="_blank" rel="noopener">PDF / Imprimir</a>}
           {!isNew && isQ && <button className="btn btn--ghost btn--sm" onClick={() => act("duplicate")}>Duplicar</button>}
         </div>
       </div>

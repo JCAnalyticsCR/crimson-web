@@ -7,7 +7,7 @@ Nunca crear cuentas reales con contrasenas triviales; el script rechaza password
 from __future__ import annotations
 
 import argparse
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -17,17 +17,21 @@ from .core.db import Base, SessionLocal, engine
 from .core.deps import ROLE_PERMISSIONS
 from .core.security import hash_password, password_is_strong
 from .models import (
+    BankAccount,
     Category,
     Currency,
     Customer,
     ExchangeRate,
+    ExpenseCategory,
     Product,
     ProductTax,
     Role,
+    StockMovement,
     Tax,
     Tenant,
     TenantUser,
     User,
+    Warehouse,
 )
 from .services.sequences import DEFAULT_GROUPS, get_or_create_group
 
@@ -135,6 +139,30 @@ def seed(db: Session, admin_email: str, admin_password: str) -> None:
         for id_type, id_number, name, email, phone in DEMO_CUSTOMERS:
             db.add(Customer(tenant_id=t.id, id_type=id_type, id_number=id_number, name=name, email=email, phone=phone, whatsapp=phone))
 
+    if not db.scalar(select(Warehouse).where(Warehouse.tenant_id == t.id)):
+        w = Warehouse(tenant_id=t.id, name="Bodega principal", location="Alajuela", is_default=True)
+        db.add(w)
+        db.add(Warehouse(tenant_id=t.id, name="Vehiculo tecnico", location="Ruta", is_default=False))
+        db.add_all(
+            [
+                ExpenseCategory(tenant_id=t.id, name=n)
+                for n in ("Administracion", "Combustible", "Planilla", "Servicios y subcontratistas", "Equipos y materiales", "Alquiler")
+            ]
+        )
+        db.add(BankAccount(tenant_id=t.id, name="Cuenta principal CRC", bank="BAC", currency="CRC", number="CR00000000000000000000"))
+        db.flush()
+        for pr in db.scalars(select(Product).where(Product.tenant_id == t.id, Product.item_type == "producto")):
+            db.add(
+                StockMovement(
+                    tenant_id=t.id,
+                    product_id=pr.id,
+                    warehouse_id=w.id,
+                    kind="entrada",
+                    quantity=6 if "CAM" in pr.code else 3,
+                    reference="INV-INICIAL",
+                    at=datetime.now(UTC),
+                )
+            )
     if not db.scalar(select(ExchangeRate).where(ExchangeRate.date == date.today())):
         db.add(
             ExchangeRate(
