@@ -161,6 +161,18 @@ def logout(request: Request, resp: Response, db: Session = Depends(get_db)):
     resp.delete_cookie(COOKIE, path="/", domain=settings.cookie_domain)
 
 
+@router.post("/logout-all", status_code=204)
+def logout_all(request: Request, resp: Response, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    """Cierra la sesion en todos los dispositivos: revoca todos los refresh tokens del usuario.
+    Los access tokens ya emitidos vencen solos en pocos minutos."""
+    now = datetime.now(UTC)
+    for rt in db.scalars(select(RefreshToken).where(RefreshToken.user_id == p.user.id, RefreshToken.revoked_at.is_(None))):
+        rt.revoked_at = now
+    db.add(AuditLog(tenant_id=p.tenant.id, user_id=p.user.id, at=now, ip=request.client.host if request.client else None, action="logout_all", entity="user", entity_id=p.user.id))
+    db.commit()
+    resp.delete_cookie(COOKIE, path="/", domain=settings.cookie_domain)
+
+
 @router.get("/me", response_model=MeOut)
 def me(p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
     ms = db.scalars(select(TenantUser).join(Tenant).where(TenantUser.user_id == p.user.id, TenantUser.active, Tenant.active)).all()

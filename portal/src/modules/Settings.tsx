@@ -1,6 +1,6 @@
 /* Ajustes (plan 3.8): empresa, facturacion, pagos (metodos manuales, cuentas, pasarelas), usuarios, cuenta/2FA, correo saliente. */
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate } from "../lib/api";
 import { useSession } from "../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal } from "../ui/components";
@@ -178,6 +178,7 @@ export default function Settings() {
               <button className="btn btn--crimson" style={{ alignSelf: "flex-start" }} onClick={changePw}>Actualizar</button>
             </div>
           </Card>
+          <SessionCard />
         </div>
       )}
 
@@ -401,6 +402,31 @@ function FxCard() {
           <Field label="Compra ₡"><input className="input input--mono" value={manual.buy} onChange={(e) => setManual({ ...manual, buy: e.target.value })} /></Field>
         </div>
       </Modal>}
+    </Card>
+  );
+}
+
+/* ---------- Sesion: salir de este equipo o de todos ---------- */
+function SessionCard() {
+  const { me, logout, toast } = useSession();
+  const nav = useNavigate();
+  const [busy, setBusy] = useState<"" | "one" | "all">("");
+  const out = async (all: boolean) => {
+    if (all && !confirm("Se cerrará tu sesión en todos los equipos y celulares donde hayas entrado. ¿Continuar?")) return;
+    setBusy(all ? "all" : "one");
+    try {
+      if (all) await api("/auth/logout-all", { method: "POST" });
+      await logout();
+      nav("/login", { replace: true });
+    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); setBusy(""); }
+  };
+  return (
+    <Card title="Sesión">
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Conectado como <b>{me?.user.email}</b>. Si usaste una computadora compartida, cerrá la sesión al terminar.</p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button className="btn btn--crimson" onClick={() => out(false)} disabled={!!busy}><Icon d={I.logout} />{busy === "one" ? "Cerrando…" : "Cerrar sesión"}</button>
+        <button className="btn btn--ghost" onClick={() => out(true)} disabled={!!busy}>{busy === "all" ? "Cerrando…" : "Cerrar en todos los dispositivos"}</button>
+      </div>
     </Card>
   );
 }

@@ -5,6 +5,7 @@ import { useSession } from "./session";
 import GlobalSearch from "./GlobalSearch";
 import { ROLES, roleMeta } from "./roles";
 import RoleWelcome from "./RoleWelcome";
+import UserMenu from "./UserMenu";
 
 /* Cada entrada declara que permiso necesita ("modulo.accion", varias con |). El menu se arma con los permisos del rol. */
 type NavItem = { to: string; label: string; icon: string; end?: boolean; need?: string };
@@ -81,7 +82,7 @@ export default function AppShell() {
           <div className="nav__user">
             <span className="avatar" style={{ boxShadow: `0 0 0 2px ${rm.tone}` }}>{initials}</span>
             <div style={{ minWidth: 0 }}><b>{me?.user.full_name}</b><span>{me?.user.email}</span></div>
-            <button className="x" onClick={logout} title="Cerrar sesión" style={{ marginLeft: "auto", color: "var(--nav-muted)" }}><Icon d={I.logout} /></button>
+            <button className="x" onClick={async () => { await logout(); nav("/login", { replace: true }); }} title="Cerrar sesión" aria-label="Cerrar sesión" style={{ marginLeft: "auto", color: "var(--nav-muted)" }}><Icon d={I.logout} /></button>
           </div>
         </div>
       </aside>
@@ -108,6 +109,7 @@ export default function AppShell() {
             )}
             <button className="btn btn--ghost btn--icon" onClick={toggleTheme} title="Modo claro/oscuro"><Icon d={theme === "dark" ? I.sun : I.moon} /></button>
             {allows("sales.crear") && <button className="btn btn--crimson" onClick={() => nav("/cotizaciones/nueva")}><Icon d={I.plus} /><span className="hide-sm">Nueva cotización</span></button>}
+            <UserMenu />
           </div>
         </header>
         <main className="content">

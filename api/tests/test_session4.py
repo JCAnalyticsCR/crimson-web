@@ -514,3 +514,13 @@ def test_each_role_sees_only_what_it_needs(client, auth, db_session):
     assert client.get("/reports/facturacion", params={"format": "xlsx"}, headers=lec).status_code == 403
     assert client.get("/expenses", headers=lec).status_code == 403
     assert client.post("/customers", json={"name": "No"}, headers=lec).status_code == 403
+
+
+def test_logout_all_revokes_every_session(client, auth):
+    from app.models import RefreshToken
+
+    assert client.post("/auth/refresh").status_code == 200
+    assert client.post("/auth/logout-all").status_code == 204
+    assert client.post("/auth/refresh").status_code == 401  # la cookie de este equipo ya no sirve
+    db = client.app.dependency_overrides[next(iter(client.app.dependency_overrides))]()
+    assert all(rt.revoked_at for rt in db.query(RefreshToken).all())
