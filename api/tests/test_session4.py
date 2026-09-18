@@ -524,3 +524,51 @@ def test_logout_all_revokes_every_session(client, auth):
     assert client.post("/auth/refresh").status_code == 401  # la cookie de este equipo ya no sirve
     db = client.app.dependency_overrides[next(iter(client.app.dependency_overrides))]()
     assert all(rt.revoked_at for rt in db.query(RefreshToken).all())
+
+
+def test_discount_limit_and_approval(client, auth, db_session):
+    tid = auth["tenant"]["id"]
+    admin_h = dict(client.headers)
+    pw = _user_with_role(db_session, tid, "desc@ejemplo.com", "ventas")
+    client.headers.pop("Authorization", None)
+    v = {"Authorization": "Bearer " + client.post("/auth/login", json={"email": "desc@ejemplo.com", "password": pw}).json()["access_token"]}
+    client.headers.update(admin_h)
+    c = client.get("/customers").json()["items"][0]
+    prod = client.get("/products", params={"q": "NVR"}).json()["items"][0]
+
+    def quote(h, disc=0, price=None):
+        ln = {"product_id": prod["id"], "quantity": 1, "discount_value": disc}
+        if price is not None:
+            ln["unit_price"] = price
+        return client.post("/quotes", json={"customer_id": c["id"], "lines": [ln]}, headers=h).json()
+
+    assert client.get("/sales/discount-limit", headers=v).json() == {"limit": 10, "free": False}
+    assert quote(v, 5)["status"] == "creado"
+    big = quote(v, 15)
+    assert big["status"] == "por_aprobar"
+    assert client.post(f"/quotes/{big['id']}/send", headers=v).status_code == 409
+    assert client.post(f"/quotes/{big['id']}/convert", headers=v).status_code == 409
+    assert client.post(f"/quotes/{big['id']}/approve", headers=v).status_code == 403  # el vendedor no se aprueba solo
+    assert client.post(f"/quotes/{big['id']}/approve").json()["status"] == "creado"
+    assert client.post(f"/quotes/{big['id']}/convert", headers=v).status_code == 201
+    # bajar el precio de catalogo cuenta como descuento (189 000 -> 150 000 = 20.6 %)
+    assert quote(v, 0, 150000)["status"] == "por_aprobar"
+    # factura directa por encima del limite: rechazada con mensaje claro
+    r = client.post("/invoices", json={"customer_id": c["id"], "lines": [{"product_id": prod["id"], "quantity": 1, "discount_value": 15}]}, headers=v)
+    assert r.status_code == 422 and "límite es 10" in r.json()["detail"]
+    assert (
+        client.post(
+            "/pos/sale",
+            json={"lines": [{"product_id": prod["id"], "quantity": 1, "discount_value": 30}], "payments": [{"method": "efectivo", "amount": 999999}]},
+            headers=v,
+        ).status_code
+        == 422
+    )
+    # el administrador no tiene limite y puede subir el limite del resto
+    assert quote(admin_h, 50)["status"] == "creado"
+    client.put("/settings", json={"max_discount_pct": 20})
+    assert quote(v, 15)["status"] == "creado"
+    # inicio del vendedor: sin cobros, con sus facturas por cobrar
+    dash = client.get("/dashboard", headers=v).json()
+    assert dash["pagos"] is None and dash["pagos_recientes"] == [] and dash["por_cobrar"]
+    assert client.get("/dashboard").json()["acciones_pendientes"]["cotizaciones_por_aprobar"] == 1

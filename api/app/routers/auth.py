@@ -168,7 +168,17 @@ def logout_all(request: Request, resp: Response, p: Principal = Depends(get_prin
     now = datetime.now(UTC)
     for rt in db.scalars(select(RefreshToken).where(RefreshToken.user_id == p.user.id, RefreshToken.revoked_at.is_(None))):
         rt.revoked_at = now
-    db.add(AuditLog(tenant_id=p.tenant.id, user_id=p.user.id, at=now, ip=request.client.host if request.client else None, action="logout_all", entity="user", entity_id=p.user.id))
+    db.add(
+        AuditLog(
+            tenant_id=p.tenant.id,
+            user_id=p.user.id,
+            at=now,
+            ip=request.client.host if request.client else None,
+            action="logout_all",
+            entity="user",
+            entity_id=p.user.id,
+        )
+    )
     db.commit()
     resp.delete_cookie(COOKIE, path="/", domain=settings.cookie_domain)
 

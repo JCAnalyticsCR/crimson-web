@@ -40,6 +40,7 @@ DEFAULTS = {
     "addresses": [],
     "social": {},
     "legal": {"privacy": "", "terms": ""},
+    "max_discount_pct": 10,
 }
 
 
@@ -59,6 +60,7 @@ class SettingsIn(BaseModel):
     addresses: list[dict] | None = None
     social: dict | None = None
     legal: dict | None = None
+    max_discount_pct: float | None = Field(None, ge=0, le=100)
 
 
 @router.get("")

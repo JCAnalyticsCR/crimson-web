@@ -5,7 +5,7 @@ import { useSession } from "../../app/session";
 import { roleMeta } from "../../app/roles";
 import { Badge, Card, Empty, I, Icon, Spark } from "../../ui/components";
 
-function Kpi({ label, data, light, cur }: { label: string; data: D["pagos"]; light?: boolean; cur: string }) {
+function Kpi({ label, data, light, cur }: { label: string; data: NonNullable<D["pagos"]>; light?: boolean; cur: string }) {
   const v = data.variacion;
   return (
     <div className={`kpi__card ${light ? "kpi__card--light" : ""}`}>
@@ -75,7 +75,7 @@ export default function Dashboard() {
       {d && (
         <>
           <div className="kpi">
-            <Kpi label={d.scope === "mine" ? "Mis cobros" : "Pagos"} data={d.pagos} cur={cur} />
+            {d.pagos && <Kpi label={d.scope === "mine" ? "Mis cobros" : "Pagos"} data={d.pagos} cur={cur} />}
             <Kpi label={d.scope === "mine" ? "Mi facturación" : "Facturado"} data={d.facturado} cur={cur} light />
           </div>
 
@@ -87,11 +87,19 @@ export default function Dashboard() {
               <div><b>{d.acciones_pendientes.enlaces_abiertos}</b><span>Enlaces de pago abiertos</span></div>
               <div className={d.acciones_pendientes.documentos_rechazados ? "hot" : ""}><b>{d.acciones_pendientes.documentos_rechazados}</b><span>Rechazados por Hacienda</span></div>
               <div className={d.acciones_pendientes.stock_bajo ? "hot" : ""}><b>{d.acciones_pendientes.stock_bajo}</b><span>Productos con stock bajo</span></div>
+              {d.acciones_pendientes.cotizaciones_por_aprobar !== undefined && <div className={d.acciones_pendientes.cotizaciones_por_aprobar ? "hot" : ""}><b>{d.acciones_pendientes.cotizaciones_por_aprobar}</b><span>{allows("sales.aprobar") ? <Link to="/cotizaciones?estado=por_aprobar" className="row-link">Descuentos por aprobar</Link> : "Esperando aprobación"}</span></div>}
             </div>
           </Card>
 
+          {d.por_cobrar && d.por_cobrar.length > 0 && (
+            <Card title="Mis facturas por cobrar" flush extra={<span className="meta">para dar seguimiento</span>}>
+              <table className="table"><thead><tr><th>Factura</th><th>Cliente</th><th>Vence</th><th className="num">Saldo</th><th>Estado</th></tr></thead>
+                <tbody>{d.por_cobrar.map((f) => <tr key={f.id}><td><Link className="row-link mono" to={`/facturas/${f.id}`}>{f.number}</Link></td><td>{f.customer || "—"}</td><td className="muted">{fmtDate(f.due_date)}</td><td className="num money">{fmtMoney(f.balance, f.currency)}</td><td><Badge status={f.status} /></td></tr>)}</tbody></table>
+            </Card>
+          )}
+
           <div className="grid-2">
-            <Card title="Pagos recientes" flush extra={<Link className="btn btn--ghost btn--sm" to="/pagos">Ver todos</Link>}>
+            {d.pagos && <Card title="Pagos recientes" flush extra={<Link className="btn btn--ghost btn--sm" to="/pagos">Ver todos</Link>}>
               {d.pagos_recientes.length === 0 ? <Empty hint="Los pagos registrados en facturas aparecen aquí." /> : (
                 <table className="table">
                   <thead><tr><th>Referencia</th><th>Método</th><th>Fecha</th><th className="num">Monto</th><th>Estado</th></tr></thead>
@@ -100,7 +108,7 @@ export default function Dashboard() {
                   ))}</tbody>
                 </table>
               )}
-            </Card>
+            </Card>}
             <Card title="Facturas recientes" flush extra={<Link className="btn btn--ghost btn--sm" to="/facturas">Ver todas</Link>}>
               {d.facturas_recientes.length === 0 ? <Empty hint="Creá tu primera factura desde una cotización." action={<Link className="btn btn--crimson btn--sm" to="/cotizaciones/nueva">Nueva cotización</Link>} /> : (
                 <table className="table">

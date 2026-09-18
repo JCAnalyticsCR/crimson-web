@@ -5,7 +5,7 @@ import { Badge, Card, Empty, I, Icon } from "../../ui/components";
 import { useSession } from "../../app/session";
 
 const FILTERS: Record<string, { key: string; label: string }[]> = {
-  quotes: [{ key: "", label: "Todas" }, { key: "creado", label: "Creadas" }, { key: "enviada", label: "Enviadas" }, { key: "convertida", label: "Convertidas" }, { key: "anulada", label: "Anuladas" }],
+  quotes: [{ key: "", label: "Todas" }, { key: "creado", label: "Creadas" }, { key: "por_aprobar", label: "Por aprobar" }, { key: "enviada", label: "Enviadas" }, { key: "convertida", label: "Convertidas" }, { key: "anulada", label: "Anuladas" }],
   invoices: [{ key: "", label: "Todas" }, { key: "creado", label: "Creadas" }, { key: "parcial", label: "Parciales" }, { key: "pagada", label: "Pagadas" }, { key: "vencida", label: "Vencidas" }, { key: "anulada", label: "Anuladas" }],
 };
 
@@ -16,7 +16,7 @@ export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {
   const { allows } = useSession();
   const [items, setItems] = useState<DocListItem[]>([]);
   const [cursor, setCursor] = useState<number | null>(null);
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState(params.get("estado") || "");
   const [loading, setLoading] = useState(true);
   const q = params.get("q") || "";
 

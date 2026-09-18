@@ -119,7 +119,8 @@ export type Invoice = Doc & { doc_type: string; consecutive: string | null; clav
 export type DocListItem = { id: number; number: string; customer_name: string | null; currency: string; total: string; balance: string | null; status: string; issue_date: string; due_date: string | null };
 export type Dashboard = {
   scope?: "mine" | "company";
-  pagos: { hoy: string; mes: string; mes_anterior: string; variacion: number | null };
+  pagos: { hoy: string; mes: string; mes_anterior: string; variacion: number | null } | null;
+  por_cobrar?: { id: number; number: string; customer: string | null; balance: string; currency: string; due_date: string | null; status: string }[];
   facturado: { hoy: string; mes: string; mes_anterior: string; variacion: number | null };
   pagos_recientes: { id: number; invoice_id: number; ref: string | null; method: string; kind: string; amount: string; currency: string; date: string; status: string }[];
   facturas_recientes: { id: number; number: string; customer: string | null; total: string; balance: string; currency: string; status: string; date: string }[];
@@ -151,4 +152,5 @@ export const STATUS: Record<string, { label: string; tone: "ok" | "warn" | "bad"
   entregado: { label: "Entregado", tone: "ok" },
   cancelado: { label: "Cancelado", tone: "muted" },
   pagado: { label: "Pagado", tone: "ok" },
+  por_aprobar: { label: "Por aprobar", tone: "warn" },
 };

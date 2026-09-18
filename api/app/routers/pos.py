@@ -17,6 +17,7 @@ from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..models import Customer, Product, ProductVariant
 from ..schemas.sales import DocumentIn, LineInSchema, PaymentIn
+from ..services import discounts
 from ..services import documents as docsvc
 from ..services import einvoice as esvc
 from ..services import inventory as invsvc
@@ -115,6 +116,9 @@ def sale(data: SaleIn, p: Principal = Depends(require("sales", "crear")), db: Se
     payload = DocumentIn(
         customer_id=data.customer_id, currency=p.tenant.default_currency, lines=lines, internal_notes=data.notes, external_order="POS", payment_method="01"
     )
+    chk = discounts.check(db, p, payload)
+    if chk.exceeds:
+        raise HTTPException(422, f"{chk.message} Un administrador debe aprobar descuentos mayores.")
     inv = docsvc.create_invoice(db, p.tenant.id, p.user.id, payload, data.doc_type)
     total = d(inv.total)
     paid = sum((pay.amount for pay in data.payments), Decimal(0))

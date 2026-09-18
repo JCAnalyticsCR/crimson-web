@@ -21,6 +21,7 @@ from ..schemas.sales import (
     PaymentOut,
     QuoteOut,
 )
+from ..services import discounts
 from ..services import documents as svc
 from ..services import inventory as invsvc
 from ..services.documents import audit
@@ -123,7 +124,11 @@ def quotes(
 
 @router.post("/quotes", response_model=QuoteOut, status_code=201)
 def create_quote(data: DocumentIn, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
+    chk = discounts.check(db, p, data)
     q = svc.create_quote(db, p.tenant.id, p.user.id, data)
+    if chk.exceeds:
+        q.status = "por_aprobar"
+        audit(db, p.tenant.id, p.user.id, "discount_over_limit", "quote", q.id, {"pct": str(chk.worst), "limit": str(chk.limit)}, ip=p.ip)
     db.commit()
     return _quote_out(db, q)
 
@@ -140,8 +145,13 @@ def update_quote(qid: int, data: DocumentIn, p: Principal = Depends(require("sal
         raise HTTPException(409, f"La cotizacion esta {q.status} y no se puede editar")
     from ..models import QuoteLine
 
+    chk = discounts.check(db, p, data)
     svc.apply_document(db, q, data, QuoteLine, p.tenant.id)
-    audit(db, p.tenant.id, p.user.id, "update", "quote", q.id, ip=p.ip)
+    if chk.exceeds:
+        q.status = "por_aprobar"
+    elif q.status == "por_aprobar":
+        q.status = "creado"  # quedo dentro del limite (o la edito un administrador)
+    audit(db, p.tenant.id, p.user.id, "update", "quote", q.id, {"discount_pct": str(chk.worst)} if chk.worst else None, ip=p.ip)
     db.commit()
     return _quote_out(db, q)
 
@@ -149,6 +159,8 @@ def update_quote(qid: int, data: DocumentIn, p: Principal = Depends(require("sal
 @router.post("/quotes/{qid}/convert", response_model=InvoiceOut, status_code=201)
 def convert_quote(qid: int, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
     q = _own(db, Quote, qid, p.tenant.id, p)
+    if q.status == "por_aprobar":
+        raise HTTPException(409, "La cotización tiene un descuento pendiente de aprobación")
     inv = svc.convert_quote(db, p.tenant.id, p.user.id, q)
     invsvc.deduct_for_invoice(db, inv, p.user.id)
     db.commit()
@@ -158,7 +170,10 @@ def convert_quote(qid: int, p: Principal = Depends(require("sales", "crear")), d
 @router.post("/quotes/{qid}/duplicate", response_model=QuoteOut, status_code=201)
 def duplicate_quote(qid: int, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
     q = _own(db, Quote, qid, p.tenant.id, p)
-    nq = svc.create_quote(db, p.tenant.id, p.user.id, svc.quote_to_payload(q))
+    payload = svc.quote_to_payload(q)
+    nq = svc.create_quote(db, p.tenant.id, p.user.id, payload)
+    if discounts.check(db, p, payload).exceeds:
+        nq.status = "por_aprobar"
     db.commit()
     return _quote_out(db, nq)
 
@@ -178,11 +193,30 @@ def void_quote(qid: int, p: Principal = Depends(require("sales", "anular")), db:
 def send_quote(qid: int, p: Principal = Depends(require("sales", "enviar")), db: Session = Depends(get_db)):
     """Marca como enviada (el envio real por correo lo hace el worker en Fase 1.2)."""
     q = _own(db, Quote, qid, p.tenant.id, p)
+    if q.status == "por_aprobar":
+        raise HTTPException(409, "La cotización tiene un descuento pendiente de aprobación")
     if q.status == "creado":
         q.status = "enviada"
     audit(db, p.tenant.id, p.user.id, "send", "quote", q.id, ip=p.ip)
     db.commit()
     return _quote_out(db, q)
+
+
+@router.post("/quotes/{qid}/approve", response_model=QuoteOut)
+def approve_quote(qid: int, p: Principal = Depends(require("sales", "aprobar")), db: Session = Depends(get_db)):
+    """Un administrador aprueba el descuento que excede el limite del vendedor."""
+    q = _own(db, Quote, qid, p.tenant.id, p)
+    if q.status != "por_aprobar":
+        raise HTTPException(409, "La cotización no está pendiente de aprobación")
+    q.status = "creado"
+    audit(db, p.tenant.id, p.user.id, "approve_discount", "quote", q.id, ip=p.ip)
+    db.commit()
+    return _quote_out(db, q)
+
+
+@router.get("/sales/discount-limit")
+def discount_limit(p: Principal = Depends(require("sales", "ver"))):
+    return {"limit": discounts.max_discount(p.tenant), "free": p.can("sales", "descuento_libre")}
 
 
 # ---------- Facturas ----------
@@ -202,6 +236,9 @@ def invoices(
 def create_invoice(data: DocumentIn, doc_type: str = "FE", p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
     if doc_type not in ("FE", "TE", "FEE"):
         raise HTTPException(422, "doc_type debe ser FE, TE o FEE")
+    chk = discounts.check(db, p, data)
+    if chk.exceeds:
+        raise HTTPException(422, f"{chk.message} Hacé una cotización para que un administrador apruebe el descuento.")
     inv = svc.create_invoice(db, p.tenant.id, p.user.id, data, doc_type)
     invsvc.deduct_for_invoice(db, inv, p.user.id)
     db.commit()
@@ -222,6 +259,9 @@ def update_invoice(iid: int, data: DocumentIn, p: Principal = Depends(require("s
         raise HTTPException(409, "La factura tiene pagos registrados")
     from ..models import InvoiceLine
 
+    chk = discounts.check(db, p, data)
+    if chk.exceeds:
+        raise HTTPException(422, f"{chk.message} Hacé una cotización para que un administrador apruebe el descuento.")
     svc.apply_document(db, inv, data, InvoiceLine, p.tenant.id)
     audit(db, p.tenant.id, p.user.id, "update", "invoice", inv.id, ip=p.ip)
     db.commit()
@@ -330,6 +370,7 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
     def pct(cur: Decimal, prev: Decimal) -> float | None:
         return None if prev == 0 else float((cur - prev) / prev * 100)
 
+    show_cash = not mine or p.can("payments", "editar")  # vendedor: sin cobros; caja: sus cobros
     pagos = {"hoy": pay_sum(today, today), "mes": pay_sum(m0, today), "mes_anterior": pay_sum(pm0, pm_end)}
     fact = {"hoy": inv_sum(today, today), "mes": inv_sum(m0, today), "mes_anterior": inv_sum(pm0, pm_end)}
     pagos["variacion"] = pct(pagos["mes"], pagos["mes_anterior"])
@@ -351,9 +392,30 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
         .where(PaymentLink.tenant_id == tid, PaymentLink.paid_at.is_(None), PaymentLink.expires_at > datetime.now(UTC))
     )
 
+    to_approve = db.scalar(select(func.count()).select_from(Quote).where(Quote.tenant_id == tid, own_quote, Quote.status == "por_aprobar"))
+    receivable = []
+    if mine:
+        for x in db.scalars(
+            select(Invoice)
+            .where(Invoice.tenant_id == tid, own_inv, Invoice.status.in_(("creado", "parcial", "vencida")), Invoice.balance > 0)
+            .order_by(Invoice.due_date)
+            .limit(8)
+        ):
+            receivable.append(
+                {
+                    "id": x.id,
+                    "number": x.number,
+                    "customer": _cust_name(db, x.customer_id),
+                    "balance": x.balance,
+                    "currency": x.currency,
+                    "due_date": x.due_date,
+                    "status": x.status,
+                }
+            )
     return {
         "scope": "mine" if mine else "company",
-        "pagos": pagos,
+        "por_cobrar": receivable,
+        "pagos": pagos if show_cash else None,
         "facturado": fact,
         "pagos_recientes": [
             {
@@ -367,7 +429,7 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
                 "date": x.paid_at,
                 "status": x.status,
             }
-            for x in recent_pay
+            for x in (recent_pay if show_cash else [])
         ],
         "facturas_recientes": [
             {
@@ -389,5 +451,6 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
             "documentos_rechazados": rejected,
             "enlaces_abiertos": links_open,
             "stock_bajo": len(invsvc.low_stock(db, tid)),
+            "cotizaciones_por_aprobar": to_approve,
         },
     }

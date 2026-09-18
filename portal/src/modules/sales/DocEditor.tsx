@@ -26,11 +26,14 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const [pick, setPick] = useState(false);
   const [busy, setBusy] = useState(false);
   const [fx, setFx] = useState<{ sell: string; buy: string } | null>(null);
+  const [limit, setLimit] = useState<{ limit: number; free: boolean } | null>(null);
+  const pending = doc.status === "por_aprobar";
   const locked = !isNew && (doc.status === "convertida" || doc.status === "anulada" || (kind === "invoice" && ((doc as Invoice).payments?.length ?? 0) > 0));
 
   useEffect(() => {
     api<{ items: Customer[] }>("/customers?limit=100").then((r) => setCustomers(r.items));
     api<{ sell: string; buy: string } | null>("/fx/today").then((r) => r && setFx(r)).catch(() => {});
+    api<{ limit: number; free: boolean }>("/sales/discount-limit").then(setLimit).catch(() => {});
     if (!isNew) api<Quote & Invoice>(`/${isQ ? "quotes" : "invoices"}/${id}`).then((d) => { setDoc({ ...d, discount_value: num(d.discount_value) }); setLines(d.lines.map((l) => ({ ...l, quantity: num(l.quantity), unit_price: num(l.unit_price), discount_value: num(l.discount_value), tax_rate: num(l.tax_rate) }))); });
   }, [id, isNew, isQ]);
 
@@ -55,6 +58,12 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     try {
       const path = isQ ? "quotes" : "invoices";
       const saved = isNew ? await api<Quote & Invoice>(`/${path}`, { method: "POST", json: payload }) : await api<Quote & Invoice>(`/${path}/${id}`, { method: "PUT", json: payload });
+      if (saved.status === "por_aprobar") {
+        toast(`Cotización ${saved.number} guardada. El descuento supera tu límite: queda pendiente de aprobación de un administrador.`, "bad");
+        nav(`/cotizaciones/${saved.id}`, { replace: true });
+        if (!isNew) setDoc(saved);
+        return;
+      }
       if (then === "send") { const r = await api<{ status: string; note: string | null }>(`/${path}/${saved.id}/email`, { method: "POST", json: {} }); toast(r.note || `Correo ${r.status}`); }
       if (then === "convert") { const inv = await api<Invoice>(`/quotes/${saved.id}/convert`, { method: "POST" }); toast(`Factura ${inv.number} creada`); nav(`/facturas/${inv.id}`); return; }
       toast(`${isQ ? "Cotización" : "Factura"} ${saved.number} guardada`);
@@ -71,6 +80,11 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
       const r = await api<Quote>(`/${path}/${id}/${action}`, { method: "POST" });
       if (action === "duplicate") { toast(`Duplicada como ${r.number}`); nav(`/cotizaciones/${r.id}`); } else { setDoc(r); toast("Documento anulado"); }
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
+
+  const approve = async () => {
+    try { const r = await api<Quote>(`/quotes/${id}/approve`, { method: "POST" }); setDoc({ ...doc, status: r.status }); toast("Descuento aprobado: el vendedor ya puede enviarla o convertirla"); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
 
   const cur = doc.currency || "CRC";
@@ -161,11 +175,19 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
             </div>
           </div></div>
 
+          {pending && (
+            <div className="card" style={{ borderColor: "var(--warn)" }}><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div className="meta" style={{ color: "var(--warn)" }}>Descuento por aprobar</div>
+              <p style={{ fontSize: 13, margin: 0 }}>El descuento supera el límite del vendedor{limit ? ` (${Number(limit.limit)} %)` : ""}. No se puede enviar ni convertir hasta que un administrador lo apruebe.</p>
+              {allows("sales.aprobar") && <button className="btn btn--crimson" onClick={approve}><Icon d={I.check} />Aprobar descuento</button>}
+            </div></div>
+          )}
           {!locked && (
             <div className="card"><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {limit && !limit.free && <p className="muted" style={{ fontSize: 12, margin: 0 }}>Tu descuento máximo es {Number(limit.limit)} % (incluye rebajas al precio de catálogo). Más que eso requiere aprobación.</p>}
               <button className="btn btn--crimson" disabled={busy} onClick={() => save()}><Icon d={I.check} />Guardar</button>
-              <button className="btn" disabled={busy} onClick={() => save("send")}><Icon d={I.whatsapp} />Guardar & enviar al cliente</button>
-              {isQ && <button className="btn btn--soft" disabled={busy} onClick={() => save("convert")}><Icon d={I.invoice} />Convertir a factura</button>}
+              {!pending && <button className="btn" disabled={busy} onClick={() => save("send")}><Icon d={I.whatsapp} />Guardar & enviar al cliente</button>}
+              {isQ && !pending && <button className="btn btn--soft" disabled={busy} onClick={() => save("convert")}><Icon d={I.invoice} />Convertir a factura</button>}
               {!isNew && allows("sales.anular") && <button className="btn btn--danger" disabled={busy} onClick={() => act("void")}>Anular {isQ ? "cotización" : "factura"}</button>}
             </div></div>
           )}
