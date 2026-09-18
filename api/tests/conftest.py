@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
@@ -13,11 +15,16 @@ ADMIN = ("admin@crimsonapp.com", "Crimson-2026-seguro")
 
 @pytest.fixture
 def db_session():
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    pg = os.environ.get("TEST_DATABASE_URL")  # opcional: correr la suite contra Postgres real
+    if pg:
+        engine = create_engine(pg.replace("postgresql://", "postgresql+psycopg://", 1))
+        Base.metadata.drop_all(engine)
+    else:
+        engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 
-    @event.listens_for(engine, "connect")
-    def _fk(conn, _):
-        conn.execute("PRAGMA foreign_keys=ON")
+        @event.listens_for(engine, "connect")
+        def _fk(conn, _):
+            conn.execute("PRAGMA foreign_keys=ON")
 
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, expire_on_commit=False)
@@ -25,6 +32,7 @@ def db_session():
     seed(s, *ADMIN)
     yield s
     s.close()
+    engine.dispose()
 
 
 @pytest.fixture

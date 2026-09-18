@@ -32,88 +32,6 @@ def upgrade() -> None:
     with op.batch_alter_table('exchange_rate', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_exchange_rate_date'), ['date'], unique=False)
 
-    op.create_table('invoice',
-    sa.Column('doc_type', sa.String(length=4), nullable=False),
-    sa.Column('consecutive', sa.String(length=20), nullable=True),
-    sa.Column('clave', sa.String(length=50), nullable=True),
-    sa.Column('sale_condition', sa.String(length=4), nullable=False),
-    sa.Column('credit_days', sa.Integer(), nullable=False),
-    sa.Column('payment_method', sa.String(length=4), nullable=False),
-    sa.Column('balance', sa.Numeric(precision=16, scale=5), nullable=False),
-    sa.Column('quote_id', sa.Integer(), nullable=True),
-    sa.Column('einvoice_status', sa.String(length=20), nullable=False),
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('number', sa.String(length=40), nullable=False),
-    sa.Column('customer_id', sa.Integer(), nullable=True),
-    sa.Column('currency', sa.String(length=3), nullable=False),
-    sa.Column('fx_sell', sa.Numeric(precision=12, scale=5), nullable=False),
-    sa.Column('fx_buy', sa.Numeric(precision=12, scale=5), nullable=False),
-    sa.Column('issue_date', sa.Date(), nullable=False),
-    sa.Column('due_date', sa.Date(), nullable=True),
-    sa.Column('discount_type', sa.String(length=8), nullable=False),
-    sa.Column('discount_value', sa.Numeric(precision=14, scale=5), nullable=False),
-    sa.Column('subtotal', sa.Numeric(precision=16, scale=5), nullable=False),
-    sa.Column('discount_total', sa.Numeric(precision=16, scale=5), nullable=False),
-    sa.Column('tax_total', sa.Numeric(precision=16, scale=5), nullable=False),
-    sa.Column('total', sa.Numeric(precision=16, scale=5), nullable=False),
-    sa.Column('internal_notes', sa.Text(), nullable=True),
-    sa.Column('external_notes', sa.Text(), nullable=True),
-    sa.Column('external_order', sa.String(length=60), nullable=True),
-    sa.Column('activity_code', sa.String(length=10), nullable=True),
-    sa.Column('medical_exemption_card', sa.Boolean(), nullable=False),
-    sa.Column('status', sa.String(length=20), nullable=False),
-    sa.Column('created_by', sa.Integer(), nullable=True),
-    sa.Column('tenant_id', sa.Integer(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['created_by'], ['user.id'], ),
-    sa.ForeignKeyConstraint(['customer_id'], ['customer.id'], ondelete='RESTRICT'),
-    sa.ForeignKeyConstraint(['quote_id'], ['quote.id'], ),
-    sa.ForeignKeyConstraint(['tenant_id'], ['tenant.id'], ondelete='RESTRICT'),
-    sa.PrimaryKeyConstraint('id')
-    )
-    with op.batch_alter_table('invoice', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_invoice_number'), ['number'], unique=False)
-        batch_op.create_index(batch_op.f('ix_invoice_status'), ['status'], unique=False)
-        batch_op.create_index(batch_op.f('ix_invoice_tenant_id'), ['tenant_id'], unique=False)
-
-    op.create_table('quote',
-    sa.Column('converted_invoice_id', sa.Integer(), nullable=True),
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('number', sa.String(length=40), nullable=False),
-    sa.Column('customer_id', sa.Integer(), nullable=True),
-    sa.Column('currency', sa.String(length=3), nullable=False),
-    sa.Column('fx_sell', sa.Numeric(precision=12, scale=5), nullable=False),
-    sa.Column('fx_buy', sa.Numeric(precision=12, scale=5), nullable=False),
-    sa.Column('issue_date', sa.Date(), nullable=False),
-    sa.Column('due_date', sa.Date(), nullable=True),
-    sa.Column('discount_type', sa.String(length=8), nullable=False),
-    sa.Column('discount_value', sa.Numeric(precision=14, scale=5), nullable=False),
-    sa.Column('subtotal', sa.Numeric(precision=16, scale=5), nullable=False),
-    sa.Column('discount_total', sa.Numeric(precision=16, scale=5), nullable=False),
-    sa.Column('tax_total', sa.Numeric(precision=16, scale=5), nullable=False),
-    sa.Column('total', sa.Numeric(precision=16, scale=5), nullable=False),
-    sa.Column('internal_notes', sa.Text(), nullable=True),
-    sa.Column('external_notes', sa.Text(), nullable=True),
-    sa.Column('external_order', sa.String(length=60), nullable=True),
-    sa.Column('activity_code', sa.String(length=10), nullable=True),
-    sa.Column('medical_exemption_card', sa.Boolean(), nullable=False),
-    sa.Column('status', sa.String(length=20), nullable=False),
-    sa.Column('created_by', sa.Integer(), nullable=True),
-    sa.Column('tenant_id', sa.Integer(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['converted_invoice_id'], ['invoice.id'], ),
-    sa.ForeignKeyConstraint(['created_by'], ['user.id'], ),
-    sa.ForeignKeyConstraint(['customer_id'], ['customer.id'], ondelete='RESTRICT'),
-    sa.ForeignKeyConstraint(['tenant_id'], ['tenant.id'], ondelete='RESTRICT'),
-    sa.PrimaryKeyConstraint('id')
-    )
-    with op.batch_alter_table('quote', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_quote_number'), ['number'], unique=False)
-        batch_op.create_index(batch_op.f('ix_quote_status'), ['status'], unique=False)
-        batch_op.create_index(batch_op.f('ix_quote_tenant_id'), ['tenant_id'], unique=False)
-
     op.create_table('role',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('code', sa.String(length=40), nullable=False),
@@ -278,6 +196,90 @@ def upgrade() -> None:
     with op.batch_alter_table('invitation', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_invitation_email'), ['email'], unique=False)
         batch_op.create_index(batch_op.f('ix_invitation_tenant_id'), ['tenant_id'], unique=False)
+
+    op.create_table('invoice',
+    sa.Column('doc_type', sa.String(length=4), nullable=False),
+    sa.Column('consecutive', sa.String(length=20), nullable=True),
+    sa.Column('clave', sa.String(length=50), nullable=True),
+    sa.Column('sale_condition', sa.String(length=4), nullable=False),
+    sa.Column('credit_days', sa.Integer(), nullable=False),
+    sa.Column('payment_method', sa.String(length=4), nullable=False),
+    sa.Column('balance', sa.Numeric(precision=16, scale=5), nullable=False),
+    sa.Column('quote_id', sa.Integer(), nullable=True),
+    sa.Column('einvoice_status', sa.String(length=20), nullable=False),
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('number', sa.String(length=40), nullable=False),
+    sa.Column('customer_id', sa.Integer(), nullable=True),
+    sa.Column('currency', sa.String(length=3), nullable=False),
+    sa.Column('fx_sell', sa.Numeric(precision=12, scale=5), nullable=False),
+    sa.Column('fx_buy', sa.Numeric(precision=12, scale=5), nullable=False),
+    sa.Column('issue_date', sa.Date(), nullable=False),
+    sa.Column('due_date', sa.Date(), nullable=True),
+    sa.Column('discount_type', sa.String(length=8), nullable=False),
+    sa.Column('discount_value', sa.Numeric(precision=14, scale=5), nullable=False),
+    sa.Column('subtotal', sa.Numeric(precision=16, scale=5), nullable=False),
+    sa.Column('discount_total', sa.Numeric(precision=16, scale=5), nullable=False),
+    sa.Column('tax_total', sa.Numeric(precision=16, scale=5), nullable=False),
+    sa.Column('total', sa.Numeric(precision=16, scale=5), nullable=False),
+    sa.Column('internal_notes', sa.Text(), nullable=True),
+    sa.Column('external_notes', sa.Text(), nullable=True),
+    sa.Column('external_order', sa.String(length=60), nullable=True),
+    sa.Column('activity_code', sa.String(length=10), nullable=True),
+    sa.Column('medical_exemption_card', sa.Boolean(), nullable=False),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('created_by', sa.Integer(), nullable=True),
+    sa.Column('tenant_id', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['created_by'], ['user.id'], ),
+    sa.ForeignKeyConstraint(['customer_id'], ['customer.id'], ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['tenant_id'], ['tenant.id'], ondelete='RESTRICT'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('invoice', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_invoice_number'), ['number'], unique=False)
+        batch_op.create_index(batch_op.f('ix_invoice_status'), ['status'], unique=False)
+        batch_op.create_index(batch_op.f('ix_invoice_tenant_id'), ['tenant_id'], unique=False)
+
+    op.create_table('quote',
+    sa.Column('converted_invoice_id', sa.Integer(), nullable=True),
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('number', sa.String(length=40), nullable=False),
+    sa.Column('customer_id', sa.Integer(), nullable=True),
+    sa.Column('currency', sa.String(length=3), nullable=False),
+    sa.Column('fx_sell', sa.Numeric(precision=12, scale=5), nullable=False),
+    sa.Column('fx_buy', sa.Numeric(precision=12, scale=5), nullable=False),
+    sa.Column('issue_date', sa.Date(), nullable=False),
+    sa.Column('due_date', sa.Date(), nullable=True),
+    sa.Column('discount_type', sa.String(length=8), nullable=False),
+    sa.Column('discount_value', sa.Numeric(precision=14, scale=5), nullable=False),
+    sa.Column('subtotal', sa.Numeric(precision=16, scale=5), nullable=False),
+    sa.Column('discount_total', sa.Numeric(precision=16, scale=5), nullable=False),
+    sa.Column('tax_total', sa.Numeric(precision=16, scale=5), nullable=False),
+    sa.Column('total', sa.Numeric(precision=16, scale=5), nullable=False),
+    sa.Column('internal_notes', sa.Text(), nullable=True),
+    sa.Column('external_notes', sa.Text(), nullable=True),
+    sa.Column('external_order', sa.String(length=60), nullable=True),
+    sa.Column('activity_code', sa.String(length=10), nullable=True),
+    sa.Column('medical_exemption_card', sa.Boolean(), nullable=False),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('created_by', sa.Integer(), nullable=True),
+    sa.Column('tenant_id', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['converted_invoice_id'], ['invoice.id'], ),
+    sa.ForeignKeyConstraint(['created_by'], ['user.id'], ),
+    sa.ForeignKeyConstraint(['customer_id'], ['customer.id'], ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['tenant_id'], ['tenant.id'], ondelete='RESTRICT'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('quote', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_quote_number'), ['number'], unique=False)
+        batch_op.create_index(batch_op.f('ix_quote_status'), ['status'], unique=False)
+        batch_op.create_index(batch_op.f('ix_quote_tenant_id'), ['tenant_id'], unique=False)
+
+    # Ciclo invoice.quote_id <-> quote.converted_invoice_id: la FK de invoice se agrega al final (Postgres valida el orden)
+    op.create_foreign_key('fk_invoice_quote_id', 'invoice', 'quote', ['quote_id'], ['id'])
 
     op.create_table('payment_link',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -494,6 +496,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_constraint('fk_invoice_quote_id', 'invoice', type_='foreignkey')
     with op.batch_alter_table('quote_line', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_quote_line_quote_id'))
 
@@ -536,6 +539,18 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_payment_link_invoice_id'))
 
     op.drop_table('payment_link')
+    with op.batch_alter_table('quote', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_quote_tenant_id'))
+        batch_op.drop_index(batch_op.f('ix_quote_status'))
+        batch_op.drop_index(batch_op.f('ix_quote_number'))
+
+    op.drop_table('quote')
+    with op.batch_alter_table('invoice', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_invoice_tenant_id'))
+        batch_op.drop_index(batch_op.f('ix_invoice_status'))
+        batch_op.drop_index(batch_op.f('ix_invoice_number'))
+
+    op.drop_table('invoice')
     with op.batch_alter_table('invitation', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_invitation_tenant_id'))
         batch_op.drop_index(batch_op.f('ix_invitation_email'))
@@ -577,18 +592,6 @@ def downgrade() -> None:
 
     op.drop_table('tenant')
     op.drop_table('role')
-    with op.batch_alter_table('quote', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_quote_tenant_id'))
-        batch_op.drop_index(batch_op.f('ix_quote_status'))
-        batch_op.drop_index(batch_op.f('ix_quote_number'))
-
-    op.drop_table('quote')
-    with op.batch_alter_table('invoice', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_invoice_tenant_id'))
-        batch_op.drop_index(batch_op.f('ix_invoice_status'))
-        batch_op.drop_index(batch_op.f('ix_invoice_number'))
-
-    op.drop_table('invoice')
     with op.batch_alter_table('exchange_rate', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_exchange_rate_date'))
 

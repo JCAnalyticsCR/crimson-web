@@ -98,7 +98,7 @@ class Invoice(_DocBase, Base):
     credit_days: Mapped[int] = mapped_column(Integer, default=0)
     payment_method: Mapped[str] = mapped_column(String(4), default="01")  # 01 efectivo, 02 tarjeta, 04 transf, 06 SINPE
     balance: Mapped[float] = mapped_column(Numeric(16, 5), default=0)
-    quote_id: Mapped[int | None] = mapped_column(ForeignKey("quote.id"))
+    quote_id: Mapped[int | None] = mapped_column(ForeignKey("quote.id", use_alter=True, name="fk_invoice_quote_id"))
     einvoice_status: Mapped[str] = mapped_column(String(20), default="sin_emitir")  # sin_emitir | pendiente | aceptada | rechazada
 
     lines: Mapped[list["InvoiceLine"]] = relationship(cascade="all, delete-orphan", order_by="InvoiceLine.position", lazy="selectin")
