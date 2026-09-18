@@ -14,10 +14,23 @@ def _publish_store(client, kind="tienda"):
 def test_store_publish_pages_and_public_catalog(client, auth):
     st = _publish_store(client, "catalogo")
     assert st["published"] and st["slug"] == "crimson" and st["primary"] == "#e2233a"
-    pg = client.post("/store/pages", json={"slug": "inicio", "title": "Inicio", "published": True, "blocks": [
-        {"type": "hero", "title": "Tecnología que protege", "text": "Videovigilancia, redes y accesos", "cta": {"label": "Ver catálogo", "to": "/productos"}},
-        {"type": "products", "title": "Destacados", "limit": 4},
-    ]})
+    pg = client.post(
+        "/store/pages",
+        json={
+            "slug": "inicio",
+            "title": "Inicio",
+            "published": True,
+            "blocks": [
+                {
+                    "type": "hero",
+                    "title": "Tecnología que protege",
+                    "text": "Videovigilancia, redes y accesos",
+                    "cta": {"label": "Ver catálogo", "to": "/productos"},
+                },
+                {"type": "products", "title": "Destacados", "limit": 4},
+            ],
+        },
+    )
     assert pg.status_code == 201 and len(pg.json()["blocks"]) == 2
     assert client.post("/store/pages", json={"slug": "inicio", "title": "Otra"}).status_code == 409
     assert client.post("/store/pages", json={"slug": "mala", "title": "X", "blocks": [{"type": "no-existe"}]}).status_code == 422
@@ -31,14 +44,26 @@ def test_store_publish_pages_and_public_catalog(client, auth):
     one = client.get(f"/public/store/crimson/products/{prods[0]['id']}").json()
     assert one["id"] == prods[0]["id"] and "related" in one
     # catálogo no permite checkout
-    assert client.post("/public/store/crimson/checkout", json={"lines": [{"product_id": prods[0]["id"], "quantity": 1}], "contact": {"name": "X", "email": "x@crimsonapp.com"}}).status_code == 409
+    assert (
+        client.post(
+            "/public/store/crimson/checkout",
+            json={"lines": [{"product_id": prods[0]["id"], "quantity": 1}], "contact": {"name": "X", "email": "x@crimsonapp.com"}},
+        ).status_code
+        == 409
+    )
 
 
 def test_store_checkout_coupon_and_order_to_ticket(client, auth):
     _publish_store(client, "tienda")
     client.post("/coupons", json={"code": "bienvenida", "kind": "percent", "value": 10})
     prods = client.get("/public/store/crimson/products").json()
-    body = {"lines": [{"product_id": prods[0]["id"], "quantity": 2}], "contact": {"name": "Ana Vega", "email": "ana@crimsonapp.com", "phone": "+50688880000"}, "shipping_method": "Envío GAM", "payment_method": "SINPE Móvil", "coupon_code": "BIENVENIDA"}
+    body = {
+        "lines": [{"product_id": prods[0]["id"], "quantity": 2}],
+        "contact": {"name": "Ana Vega", "email": "ana@crimsonapp.com", "phone": "+50688880000"},
+        "shipping_method": "Envío GAM",
+        "payment_method": "SINPE Móvil",
+        "coupon_code": "BIENVENIDA",
+    }
     q = client.post("/public/store/crimson/quote", json=body).json()
     assert Decimal(q["shipping"]) == Decimal(3500) and Decimal(q["discount_total"]) > 0
     assert Decimal(q["total"]) == Decimal(q["subtotal"]) - Decimal(q["discount_total"]) + Decimal(q["tax_total"]) + Decimal(q["shipping"])
@@ -62,11 +87,13 @@ def test_store_checkout_coupon_and_order_to_ticket(client, auth):
 
 def test_reception_of_supplier_xml(client, auth):
     client.put("/settings", json={"einvoice_provider": "sandbox"})
-    xml = ('<?xml version="1.0"?><FacturaElectronica><Clave>50601012600310200000000100001010000000123456789012</Clave>'
-           "<NumeroConsecutivo>00100001010000000123</NumeroConsecutivo><FechaEmision>2026-09-10T10:00:00</FechaEmision>"
-           "<Emisor><Nombre>Distribuidora Tech SA</Nombre><Identificacion><Numero>3-101-999888</Numero></Identificacion></Emisor>"
-           "<ResumenFactura><CodigoMoneda>CRC</CodigoMoneda><TotalVenta>100000</TotalVenta><TotalImpuesto>13000</TotalImpuesto>"
-           "<TotalComprobante>113000</TotalComprobante></ResumenFactura></FacturaElectronica>")
+    xml = (
+        '<?xml version="1.0"?><FacturaElectronica><Clave>50601012600310200000000100001010000000123456789012</Clave>'
+        "<NumeroConsecutivo>00100001010000000123</NumeroConsecutivo><FechaEmision>2026-09-10T10:00:00</FechaEmision>"
+        "<Emisor><Nombre>Distribuidora Tech SA</Nombre><Identificacion><Numero>3-101-999888</Numero></Identificacion></Emisor>"
+        "<ResumenFactura><CodigoMoneda>CRC</CodigoMoneda><TotalVenta>100000</TotalVenta><TotalImpuesto>13000</TotalImpuesto>"
+        "<TotalComprobante>113000</TotalComprobante></ResumenFactura></FacturaElectronica>"
+    )
     r = client.post("/reception/upload", files={"file": ("factura.xml", xml, "application/xml")})
     assert r.status_code == 201, r.text
     d = r.json()
@@ -111,14 +138,23 @@ def test_public_api_credentials_and_checkout_jwt(client, auth):
     assert client.get("/v1/products", headers=h).json()
     assert isinstance(client.get("/v1/inventory", headers=h).json(), list)
 
-    c = client.post("/v1/customers", headers=h, json={"name": "Cliente API", "id_type": "juridica", "id_number": "3-101-555444", "email": "api@crimsonapp.com"}).json()
-    i = client.post("/v1/invoices", headers=h, json={"customer_id": c["id"], "lines": [{"name": "Servicio API", "quantity": 1, "unit_price": 50000, "tax_rate": 13}]})
+    c = client.post(
+        "/v1/customers", headers=h, json={"name": "Cliente API", "id_type": "juridica", "id_number": "3-101-555444", "email": "api@crimsonapp.com"}
+    ).json()
+    i = client.post(
+        "/v1/invoices", headers=h, json={"customer_id": c["id"], "lines": [{"name": "Servicio API", "quantity": 1, "unit_price": 50000, "tax_rate": 13}]}
+    )
     assert i.status_code == 201 and Decimal(i.json()["total"]) == Decimal("56500.00000")
     link = client.post(f"/v1/payment-links/{i.json()['id']}", headers=h)
     assert link.status_code == 200 and link.json()["url"].startswith("http")
 
     now = int(time.time())
-    token = jwt.encode({"amount": 25000, "currency": "CRC", "custom_reference": "PED-9001", "description": "Pedido web", "iat": now, "nbf": now - 5, "exp": now + 600}, secret, algorithm="HS256", headers={"kid": kid})
+    token = jwt.encode(
+        {"amount": 25000, "currency": "CRC", "custom_reference": "PED-9001", "description": "Pedido web", "iat": now, "nbf": now - 5, "exp": now + 600},
+        secret,
+        algorithm="HS256",
+        headers={"kid": kid},
+    )
     r = client.post("/v1/checkout", json={"token": token})
     assert r.status_code == 201 or r.status_code == 200
     assert r.json()["checkout_url"].startswith("http") and r.json()["number"].startswith("TE-")

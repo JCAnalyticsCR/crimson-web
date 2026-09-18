@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,6 +38,27 @@ class Settings(BaseSettings):
     onvo_public_key: str | None = None
     onvo_secret_key: str | None = None
     einvoice_provider: str = "none"  # none | alanube | gti
+
+    # Arranque inicial de entornos compartidos (ver app/bootstrap.py): invitacion de admin, nunca contrasena
+    bootstrap_admin_email: str | None = None
+    bootstrap_demo: bool = False
+
+    @field_validator("database_url")
+    @classmethod
+    def _psycopg3(cls, v: str) -> str:
+        # Railway/Heroku entregan postgres:// o postgresql://; SQLAlchemy necesita el driver psycopg 3 explicito
+        for prefix in ("postgres://", "postgresql://"):
+            if v.startswith(prefix):
+                return "postgresql+psycopg://" + v[len(prefix) :]
+        return v
+
+    @model_validator(mode="after")
+    def _no_dev_secret_outside_local(self):
+        if self.env != "local" and self.jwt_secret.startswith("solo-desarrollo"):
+            raise ValueError("JWT_SECRET de desarrollo en un entorno compartido: definir uno propio (>= 32 caracteres)")
+        if self.env != "local" and self.database_url.startswith("sqlite"):
+            raise ValueError("Entornos compartidos requieren Postgres (DATABASE_URL)")
+        return self
 
     @property
     def is_prod(self) -> bool:

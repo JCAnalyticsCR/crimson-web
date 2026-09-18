@@ -1,0 +1,10 @@
+# contexto raiz (worker): solo lo que el Dockerfile copia
+*
+!api/
+!worker/
+api/.venv
+api/**/__pycache__
+api/.pytest_cache
+api/.ruff_cache
+api/*.db
+api/tests

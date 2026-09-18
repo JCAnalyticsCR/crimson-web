@@ -56,9 +56,26 @@ DEMO_CUSTOMERS = [
 
 
 def seed(db: Session, admin_email: str, admin_password: str) -> None:
+    """Desarrollo local y tests: datos base + demo + admin con contrasena (solo SQLite local)."""
     if not password_is_strong(admin_password):
         raise SystemExit("La contrasena del admin debe tener >= 10 caracteres con letras y numeros")
+    t = seed_base(db, demo=True)
+    u = db.scalar(select(User).where(User.email == admin_email.lower()))
+    if not u:
+        u = User(email=admin_email.lower(), full_name="Administrador Crimson", password_hash=hash_password(admin_password))
+        db.add(u)
+        db.flush()
+    if not db.scalar(select(TenantUser).where(TenantUser.user_id == u.id, TenantUser.tenant_id == t.id)):
+        db.add(TenantUser(tenant_id=t.id, user_id=u.id, role_code="admin"))
+    db.commit()
 
+
+def seed_base(db: Session, demo: bool = False) -> Tenant:
+    """Roles, tenant Crimson, monedas, grupos, impuestos, bodegas y categorias de gasto. Idempotente.
+
+    demo=True agrega catalogo, clientes, cuenta bancaria ficticia y stock inicial de ejemplo.
+    No crea usuarios: en entornos compartidos el admin entra por invitacion (app.bootstrap).
+    """
     for code, perms in ROLE_PERMISSIONS.items():
         if not db.scalar(select(Role).where(Role.code == code)):
             db.add(Role(code=code, name=code.capitalize(), permissions=perms))
@@ -89,14 +106,6 @@ def seed(db: Session, admin_email: str, admin_password: str) -> None:
         for doc_type in DEFAULT_GROUPS:
             get_or_create_group(db, t.id, doc_type)
 
-    u = db.scalar(select(User).where(User.email == admin_email.lower()))
-    if not u:
-        u = User(email=admin_email.lower(), full_name="Administrador Crimson", password_hash=hash_password(admin_password))
-        db.add(u)
-        db.flush()
-    if not db.scalar(select(TenantUser).where(TenantUser.user_id == u.id, TenantUser.tenant_id == t.id)):
-        db.add(TenantUser(tenant_id=t.id, user_id=u.id, role_code="admin"))
-
     if not db.scalar(select(Tax).where(Tax.tenant_id == t.id)):
         iva13 = Tax(tenant_id=t.id, name="IVA - Tarifa general 13%", code="01", rate_code="08", rate=13)
         db.add_all(
@@ -109,6 +118,8 @@ def seed(db: Session, admin_email: str, admin_password: str) -> None:
             ]
         )
         db.flush()
+    iva13 = db.scalar(select(Tax).where(Tax.tenant_id == t.id, Tax.rate_code == "08"))
+    if demo and not db.scalar(select(Product).where(Product.tenant_id == t.id)):
         cats = {n: Category(tenant_id=t.id, name=n) for n in ("Videovigilancia", "Redes", "Seguridad y acceso", "Energia y respaldo", "Servicios")}
         db.add_all(cats.values())
         db.flush()
@@ -149,8 +160,10 @@ def seed(db: Session, admin_email: str, admin_password: str) -> None:
                 for n in ("Administracion", "Combustible", "Planilla", "Servicios y subcontratistas", "Equipos y materiales", "Alquiler")
             ]
         )
-        db.add(BankAccount(tenant_id=t.id, name="Cuenta principal CRC", bank="BAC", currency="CRC", number="CR00000000000000000000"))
         db.flush()
+    w = db.scalar(select(Warehouse).where(Warehouse.tenant_id == t.id, Warehouse.is_default.is_(True)))
+    if demo and not db.scalar(select(StockMovement).where(StockMovement.tenant_id == t.id)):
+        db.add(BankAccount(tenant_id=t.id, name="Cuenta principal CRC", bank="BAC", currency="CRC", number="CR00000000000000000000"))
         for pr in db.scalars(select(Product).where(Product.tenant_id == t.id, Product.item_type == "producto")):
             db.add(
                 StockMovement(
@@ -169,7 +182,8 @@ def seed(db: Session, admin_email: str, admin_password: str) -> None:
                 date=date.today(), currency="USD", sell=Decimal("512.35"), buy=Decimal("505.10"), source="manual", note="semilla; el worker BCCR lo reemplaza"
             )
         )
-    db.commit()
+    db.flush()
+    return t
 
 
 if __name__ == "__main__":

@@ -134,3 +134,37 @@ def test_onvo_webhook_signature_idempotency_and_payment(client, auth, db_session
     assert dup.json()["duplicate"] is True
     i = client.get(f"/invoices/{inv['id']}").json()
     assert i["status"] == "pagada" and len(i["payments"]) == 1 and i["payments"][0]["provider"] == "onvo"
+
+
+def test_bootstrap_invitation_once():
+    """Entorno vacio -> una invitacion de admin; con usuarios ya no emite nada."""
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app import bootstrap
+    from app.core.config import Settings
+    from app.core.db import Base
+    from app.models import Invitation, Product, Tenant, User
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    s = sessionmaker(bind=engine, expire_on_commit=False)()
+    assert bootstrap.run(s, None) is None
+    link1 = bootstrap.run(s, "Gerencia@Ejemplo.com", demo=False, base_url="https://portal.test")
+    link2 = bootstrap.run(s, "gerencia@ejemplo.com", demo=False, base_url="https://portal.test")
+    assert link1.startswith("https://portal.test/invitacion/") and link1 != link2
+    assert s.scalar(select(Tenant).where(Tenant.slug == "crimson"))
+    assert not s.scalar(select(Product))  # sin demo no hay catalogo ficticio
+    invs = s.scalars(select(Invitation)).all()
+    assert len(invs) == 2 and sum(1 for i in invs if i.expires_at.replace(tzinfo=None) > __import__("datetime").datetime.utcnow()) == 1
+    assert invs[0].email == "gerencia@ejemplo.com" and invs[0].role_code == "admin"
+    s.add(User(email="x@ejemplo.com", full_name="X", password_hash="x"))
+    s.commit()
+    assert bootstrap.run(s, "gerencia@ejemplo.com") is None
+    # normalizacion de URL de Railway y bloqueo del secreto de desarrollo
+    assert Settings(database_url="postgres://u:p@h:5432/d").database_url == "postgresql+psycopg://u:p@h:5432/d"
+    import pytest
+
+    with pytest.raises(ValueError):
+        Settings(env="staging", database_url="postgresql://u:p@h/d")
