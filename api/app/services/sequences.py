@@ -7,6 +7,7 @@ from ..models import BillingGroup
 
 DEFAULT_GROUPS = {
     "COT": ("COT", "Cotizaciones"),
+    "ORD": ("ORD", "Ordenes de tienda"),
     "FE": ("FEC", "Facturas electronicas"),
     "TE": ("TE", "Tiquetes electronicos"),
     "FEE": ("FEE", "Facturas de exportacion"),

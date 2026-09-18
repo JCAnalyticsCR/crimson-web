@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import settings
-from .routers import auth, catalog, core, ops, public, sales, webhooks
+from .routers import auth, catalog, core, ops, public, public_api, reception, sales, store, webhooks
 from .routers import settings as settings_router
 
 log = logging.getLogger("crimson")
@@ -49,6 +49,10 @@ def create_app() -> FastAPI:
     app.include_router(ops.router)
     app.include_router(settings_router.router)
     app.include_router(webhooks.router)
+    app.include_router(store.router)
+    app.include_router(reception.router)
+    app.include_router(public_api.admin)
+    app.include_router(public_api.v1)
     app.include_router(public.router)
     return app
 

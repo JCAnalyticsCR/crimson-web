@@ -19,11 +19,11 @@ import Accounting from "./modules/accounting/Accounting";
 import Reports from "./modules/reports/Reports";
 import Recurrences from "./modules/sales/Recurrences";
 import Invite from "./modules/auth/Invite";
-import { Empty } from "./ui/components";
-
-function Soon({ name }: { name: string }) {
-  return <><div className="page-head"><div><div className="meta">Próximamente</div><h1 className="h1">{name}</h1></div></div><Empty title={`${name} llega en la siguiente fase`} hint="Ya está en el plan maestro; el modelo de datos lo contempla." /></>;
-}
+import Store from "./modules/store/Store";
+import PublicStore from "./modules/store/PublicStore";
+import Orders from "./modules/store/Orders";
+import Reception from "./modules/accounting/Reception";
+import Coupons from "./modules/catalog/Coupons";
 
 function Private() {
   const { me, loading } = useSession();
@@ -36,6 +36,7 @@ function App() {
     <Routes>
       <Route path="/pagar/:token" element={<PayPage />} />
       <Route path="/invitacion/:token" element={<Invite />} />
+      <Route path="/tienda/:slug" element={<PublicStore />} />
       <Route element={<Private />}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/cotizaciones" element={<DocList kind="quotes" />} />
@@ -48,7 +49,10 @@ function App() {
         <Route path="/clientes" element={<Customers />} />
         <Route path="/productos" element={<Products />} />
         <Route path="/inventario" element={<Inventory />} />
-        <Route path="/tienda" element={<Soon name="Mi Tienda" />} />
+        <Route path="/mi-tienda" element={<Store />} />
+        <Route path="/ordenes" element={<Orders />} />
+        <Route path="/recepcion" element={<Reception />} />
+        <Route path="/cupones" element={<Coupons />} />
         <Route path="/reportes" element={<Reports />} />
         <Route path="/contabilidad" element={<Accounting />} />
         <Route path="/ajustes" element={<Settings />} />

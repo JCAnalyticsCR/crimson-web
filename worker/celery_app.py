@@ -82,7 +82,58 @@ def retry_outbox() -> int:
     return n
 
 
+@celery.task(name="sales.reminders")
+def reminders() -> int:
+    """Recordatorio N dias antes del vencimiento (ajuste remind_days_before) y aviso de vencidas, por correo al cliente."""
+    from datetime import timedelta
+    from app.core.db import SessionLocal
+    from app.models import Customer, Invoice, Tenant
+    from app.services.mail import doc_email_html, queue_email
+    from app.services.render import money
+    from sqlalchemy import select
+
+    n = 0
+    with SessionLocal() as db:
+        for t in db.scalars(select(Tenant).where(Tenant.active)):
+            st = t.settings or {}
+            if not st.get("notify_due", True):
+                continue
+            target = date.today() + timedelta(days=int(st.get("remind_days_before", 3)))
+            for inv in db.scalars(select(Invoice).where(Invoice.tenant_id == t.id, Invoice.status.in_(("creado", "enviada", "parcial")), Invoice.due_date == target)):
+                c = db.get(Customer, inv.customer_id) if inv.customer_id else None
+                if c and c.email:
+                    queue_email(db, t, c.email, f"Recordatorio: factura {inv.number} vence el {inv.due_date}", doc_email_html(t, "factura", inv.number, money(inv.balance, inv.currency), None, "Le recordamos que su factura vence pronto."), "invoice", inv.id)
+                    n += 1
+        db.commit()
+    return n
+
+
+@celery.task(name="sales.daily_close_email")
+def daily_close_email() -> int:
+    from app.core.db import SessionLocal
+    from app.models import Tenant, TenantUser
+    from app.services.mail import queue_email
+    from app.services.reports import cierre_diario
+    from sqlalchemy import select
+
+    n = 0
+    with SessionLocal() as db:
+        for t in db.scalars(select(Tenant).where(Tenant.active)):
+            if not (t.settings or {}).get("daily_close_email"):
+                continue
+            rep = cierre_diario(db, t.id, date.today(), date.today())
+            rows = "".join(f"<tr><td>{r[1]}</td><td>{r[2]}</td><td align=right>{r[3]}</td><td align=right>{r[4]}</td></tr>" for r in rep.rows) or "<tr><td colspan=4>Sin cobros hoy</td></tr>"
+            html = f"<h3>Cierre de caja {date.today()}</h3><table border=0 cellpadding=6><tr><th>Método</th><th>Divisa</th><th>Monto</th><th>Pagos</th></tr>{rows}</table><p><b>Total: {rep.totals['total'] if rep.totals else 0}</b></p>"
+            for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.role_code == "admin", TenantUser.active)):
+                queue_email(db, t, m.user.email, f"Cierre de caja · {t.name} · {date.today()}", html, "report", 0)
+                n += 1
+        db.commit()
+    return n
+
+
 celery.conf.beat_schedule = {
+    "reminders": {"task": "sales.reminders", "schedule": crontab(hour=8, minute=0)},
+    "daily-close": {"task": "sales.daily_close_email", "schedule": crontab(hour=21, minute=0)},
     "run-recurrences": {"task": "sales.run_recurrences", "schedule": crontab(hour=5, minute=0)},
     "retry-outbox": {"task": "mail.retry_outbox", "schedule": crontab(minute="*/15")},
     "fx-bccr-daily": {"task": "fx.bccr_daily", "schedule": crontab(hour=6, minute=15)},

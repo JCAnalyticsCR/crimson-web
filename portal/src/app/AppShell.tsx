@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { I, Icon } from "../ui/components";
 import { useSession } from "./session";
+import GlobalSearch from "./GlobalSearch";
 
 type NavItem = { to: string; label: string; icon: string; end?: boolean; soon?: boolean };
 const NAV: { group: string; items: NavItem[] }[] = [
@@ -11,16 +12,19 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { to: "/facturas", label: "Facturas", icon: I.invoice },
     { to: "/recurrencias", label: "Recurrencias", icon: I.refresh },
     { to: "/pagos", label: "Pagos", icon: I.pay },
+    { to: "/ordenes", label: "Órdenes", icon: I.box },
   ]},
   { group: "Catálogo", items: [
     { to: "/clientes", label: "Clientes", icon: I.customers },
     { to: "/productos", label: "Productos & Servicios", icon: I.products },
+    { to: "/cupones", label: "Cupones", icon: I.wallet },
     { to: "/inventario", label: "Inventarios", icon: I.inventory },
-    { to: "/tienda", label: "Mi Tienda", icon: I.store, soon: true },
+    { to: "/mi-tienda", label: "Mi Tienda", icon: I.store },
   ]},
   { group: "Control", items: [
     { to: "/reportes", label: "Reportes", icon: I.reports },
     { to: "/contabilidad", label: "Contabilidad", icon: I.accounting },
+    { to: "/recepcion", label: "Recepción XML", icon: I.bell },
     { to: "/ajustes", label: "Ajustes", icon: I.settings },
   ]},
 ];
@@ -28,17 +32,12 @@ const NAV: { group: string; items: NavItem[] }[] = [
 export default function AppShell() {
   const { me, logout, theme, toggleTheme } = useSession();
   const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
   const nav = useNavigate();
   const [clock, setClock] = useState("");
 
   useEffect(() => {
     const t = () => setClock(new Date().toLocaleTimeString("es-CR", { hour12: false, timeZone: "America/Costa_Rica" }));
     t(); const id = setInterval(t, 1000); return () => clearInterval(id);
-  }, []);
-  useEffect(() => {
-    const k = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key === "k") { e.preventDefault(); document.getElementById("gsearch")?.focus(); } };
-    window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k);
   }, []);
 
   const initials = (me?.user.full_name || "?").split(" ").map((s) => s[0]).slice(0, 2).join("").toUpperCase();
@@ -76,11 +75,7 @@ export default function AppShell() {
       <div className="main">
         <header className="topbar">
           <button className="btn btn--ghost btn--icon" onClick={() => setOpen((o) => !o)} aria-label="Menú" style={{ display: "none" }} id="burger"><Icon d={I.menu} /></button>
-          <form className="search" onSubmit={(e) => { e.preventDefault(); if (q.trim()) nav(`/facturas?q=${encodeURIComponent(q.trim())}`); }}>
-            <Icon d={I.search} size={16} />
-            <input id="gsearch" placeholder="Buscar facturas, cotizaciones, clientes…" value={q} onChange={(e) => setQ(e.target.value)} />
-            <kbd>Ctrl K</kbd>
-          </form>
+          <GlobalSearch />
           <div className="topbar__right">
             <button className="btn btn--ghost btn--icon" onClick={toggleTheme} title="Modo claro/oscuro"><Icon d={theme === "dark" ? I.sun : I.moon} /></button>
             <button className="btn btn--ghost btn--icon" title="Notificaciones"><Icon d={I.bell} /></button>

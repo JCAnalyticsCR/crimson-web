@@ -488,7 +488,7 @@ def recurrence_update(rid: int, data: RecurrenceIn, p: Principal = Depends(requi
 
 def run_recurrence(db: Session, r: Recurrence, user_id: int | None) -> Invoice:
     payload = DocumentIn(**{**r.template, "customer_id": r.customer_id})
-    invoice = docsvc.create_invoice(db, r.tenant_id, user_id or 0, payload)
+    invoice = docsvc.create_invoice(db, r.tenant_id, user_id, payload)
     inv.deduct_for_invoice(db, invoice, user_id)
     r.runs += 1
     r.last_invoice_id = invoice.id

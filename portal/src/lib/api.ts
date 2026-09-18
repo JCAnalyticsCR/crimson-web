@@ -90,4 +90,11 @@ export const STATUS: Record<string, { label: string; tone: "ok" | "warn" | "bad"
   confirmado: { label: "Confirmado", tone: "ok" },
   pendiente: { label: "Pendiente", tone: "warn" },
   fallido: { label: "Fallido", tone: "bad" },
+  // ordenes de tienda
+  nuevo: { label: "Nuevo", tone: "info" },
+  preparando: { label: "Preparando", tone: "warn" },
+  enviado: { label: "Enviado", tone: "info" },
+  entregado: { label: "Entregado", tone: "ok" },
+  cancelado: { label: "Cancelado", tone: "muted" },
+  pagado: { label: "Pagado", tone: "ok" },
 };

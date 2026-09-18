@@ -117,10 +117,10 @@ def recompute_balance(inv: Invoice) -> None:
             inv.status = "creado"
 
 
-def create_quote(db: Session, tenant_id: int, user_id: int, payload: DocumentIn) -> Quote:
+def create_quote(db: Session, tenant_id: int, user_id: int | None, payload: DocumentIn) -> Quote:
     number, _ = next_number(db, tenant_id, "COT")
     days = payload.valid_days or 15
-    q = Quote(tenant_id=tenant_id, number=number, created_by=user_id, status="creado")
+    q = Quote(tenant_id=tenant_id, number=number, created_by=user_id or None, status="creado")
     apply_document(db, q, payload, QuoteLine, tenant_id)
     q.due_date = q.due_date or q.issue_date + timedelta(days=days)
     db.add(q)
@@ -129,9 +129,9 @@ def create_quote(db: Session, tenant_id: int, user_id: int, payload: DocumentIn)
     return q
 
 
-def create_invoice(db: Session, tenant_id: int, user_id: int, payload: DocumentIn, doc_type: str = "FE", quote: Quote | None = None) -> Invoice:
+def create_invoice(db: Session, tenant_id: int, user_id: int | None, payload: DocumentIn, doc_type: str = "FE", quote: Quote | None = None) -> Invoice:
     number, consecutive = next_number(db, tenant_id, doc_type)
-    inv = Invoice(tenant_id=tenant_id, number=number, consecutive=consecutive, doc_type=doc_type, created_by=user_id, status="creado")
+    inv = Invoice(tenant_id=tenant_id, number=number, consecutive=consecutive, doc_type=doc_type, created_by=user_id or None, status="creado")
     inv.sale_condition = payload.sale_condition or "01"
     inv.credit_days = payload.credit_days or 0
     inv.payment_method = payload.payment_method or "01"
@@ -187,7 +187,7 @@ def convert_quote(db: Session, tenant_id: int, user_id: int, q: Quote) -> Invoic
     return inv
 
 
-def add_payment(db: Session, tenant_id: int, user_id: int, inv: Invoice, data) -> Payment:
+def add_payment(db: Session, tenant_id: int, user_id: int | None, inv: Invoice, data) -> Payment:
     if inv.status == "anulada":
         raise HTTPException(409, "La factura esta anulada")
     p = Payment(
@@ -203,7 +203,7 @@ def add_payment(db: Session, tenant_id: int, user_id: int, inv: Invoice, data) -
         paid_at=data.paid_at or date.today(),
         notify_customer=data.notify_customer,
         notes=data.notes,
-        created_by=user_id,
+        created_by=user_id or None,
     )
     db.add(p)
     db.flush()  # aplica defaults (status=confirmado) antes de recalcular el saldo

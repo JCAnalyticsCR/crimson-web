@@ -410,7 +410,7 @@ Núcleo
 - [~] Invitaciones (listo) · acceso de soporte auditado (pendiente)
 - [x] Ajustes de empresa (logo, razón social, cédula, divisa, actividad, teléfono, redes)
 - [~] Tipo de cambio BCCR diario + manual por documento — tarea worker + `/fx` (falta credencial BCCR)
-- [ ] Buscador global
+- [x] Buscador global (Ctrl+K: facturas, cotizaciones, clientes, productos, órdenes)
 - [x] Auditoría y logs — `audit_log` en crear/editar/anular/pagar/login
 
 Dashboard
@@ -421,7 +421,7 @@ CRM
 
 Catálogo
 - [~] Productos/servicios ficha (dos descripciones, CABYS, impuesto, mostrar web; galería/partida/proveedor en modelo, UI pendiente)
-- [~] Proveedores · Impuestos · Categorías (listos) · Opciones/variantes · Subcategorías · Cupones (pendientes)
+- [~] Proveedores · Impuestos · Categorías · Cupones (listos) · Opciones/variantes · Subcategorías (pendientes)
 - [ ] Página enriquecida de producto (editor + bloques)
 - [ ] "Crear Link para producto"
 
@@ -432,7 +432,7 @@ Ventas
 - [x] Cotizaciones completas · PDF/HTML · envío por correo · duplicar · anular · vigencia
 - [x] Conversión cotización → factura — conserva cliente, líneas, totales; marca `convertida`
 - [x] Facturas completas · saldo · pagos · enlace · XMLs · anular (NC)
-- [~] Recurrencias (listo) · Órdenes · Facturas de compra (pendientes)
+- [x] Recurrencias · Órdenes (tienda → tiquete/factura) · Facturas de compra (vía recepción XML)
 
 Cobros
 - [x] Modal Pago con método/tipo/cuenta/referencia/fecha/confirmación
@@ -445,13 +445,13 @@ Facturación electrónica
 - [x] Grupos y consecutivos (FE, TE, FEE, NC, ND, cotizaciones) — 20 dígitos v4.4, bloqueo por fila
 - [~] Emisión · estados · XML documento/respuesta con adapter sandbox (listo) · credenciales Hacienda y contingencia con proveedor real (pendiente)
 - [x] XMLs documento/respuesta, descarga individual
-- [ ] Recepción (emisor, clave, IVA acreditable, actividad, aceptar/parcial/rechazar) · Bandeja de entrada
+- [x] Recepción (emisor, clave, IVA acreditable, actividad, aceptar/parcial/rechazar) · Bandeja de entrada (carga de XML; IMAP pendiente)
 - [~] Notificaciones: ajustes y BCC (listos) · envío automático de recordatorios (pendiente)
 
 E-commerce
-- [ ] Personalización (dominio, logo, favicon, colores, fuentes, tipo, publicar) · Navegación · Multimedia · Formularios
-- [ ] Constructor de bloques · Catálogo público · Carrito · Checkout · Relacionados
-- [ ] Envíos (tarifas, Correos de CR, overhead) · Legal (privacidad, términos) · Inventario de tienda
+- [~] Personalización (logo, colores, fuentes, tipo, publicar, dominio declarado) · Navegación (listos) · Multimedia (subida de archivos) y SSL de dominio propio (pendientes)
+- [x] Constructor de bloques (8 tipos, mismo render en editor y sitio) · Catálogo público · Carrito · Checkout · Relacionados
+- [~] Envíos (tarifas propias) · Inventario de tienda (listos) · Correos de CR con overhead · textos legales en el sitio (pendientes)
 
 Contabilidad
 - [~] Gastos · categorías · cuentas · estado de resultados (listos) · recurrentes · empleados · planillas (pendientes)
@@ -460,7 +460,7 @@ Reportes (15)
 - [~] Facturación · Pendientes · Impuesto facturado · Estado de resultados · Cierre diario · Transacciones · Gastos · IVA/Prorrata · Inventario · Venta de productos · Movimientos (listos, con Excel) · Propina · Órdenes · Recepciones · D151 (pendientes)
 
 Eventos / POS / API
-- [ ] Eventos y tickets QR · POS web · API pública + credenciales + webhooks · Importador · Dispositivos (vPOS diferido)
+- [~] API pública + credenciales + checkout JWT + webhooks salientes (listos) · Eventos/tickets QR · POS web · Importador (pendientes) · vPOS (diferido)
 
 ---
 
@@ -494,7 +494,7 @@ Eventos / POS / API
 
 ## 15. Estado (2026-09-17)
 
-Sesiones 1-2 ejecutadas (2026-09-17): PDF/correo, inventario, contabilidad, reportes con Excel, recurrencias, ajustes completos (usuarios, invitaciones, pasarelas, métodos, consecutivos), factura electrónica con adapter sandbox + NC + XMLs, webhook ONVO firmado. Sesión 1: `api/` (FastAPI + SQLAlchemy 2 + Alembic, 13 tests verdes), `portal/` (React + Vite, sistema de diseño Crimson, login, dashboard, cotizaciones, facturas, pagos, enlace de pago, clientes, productos, ajustes, página pública de pago), `worker/` (Celery + beat: BCCR, vencimientos), `infra/docker-compose.yml`, Dockerfiles y `railway.toml`. Ver `api/README.md`.
+Sesiones 1-3 ejecutadas (2026-09-17): sesión 3 = Mi Tienda completa (bloques, catálogo, carrito, checkout, cupones, envíos), órdenes → tiquete, recepción de XML de compras, buscador global, API pública con credenciales y checkout JWT, recordatorios y cierre diario por correo. Sesiones 1-2: PDF/correo, inventario, contabilidad, reportes con Excel, recurrencias, ajustes completos (usuarios, invitaciones, pasarelas, métodos, consecutivos), factura electrónica con adapter sandbox + NC + XMLs, webhook ONVO firmado. Sesión 1: `api/` (FastAPI + SQLAlchemy 2 + Alembic, 13 tests verdes), `portal/` (React + Vite, sistema de diseño Crimson, login, dashboard, cotizaciones, facturas, pagos, enlace de pago, clientes, productos, ajustes, página pública de pago), `worker/` (Celery + beat: BCCR, vencimientos), `infra/docker-compose.yml`, Dockerfiles y `railway.toml`. Ver `api/README.md`.
 
 ## 16. Próximos pasos inmediatos
 

@@ -12,7 +12,7 @@ type Users = { users: { id: number; email: string; name: string; role: string; a
 type Gw = { id: number; provider: string; client_id: string | null; secret_mask: string | null; is_primary: boolean; active: boolean; mode: string };
 type Mail = { id: number; to: string; subject: string; status: string; entity: string | null; entity_id: number | null; created_at: string; error: string | null };
 
-const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["pagos", "Pagos y cobros"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"]];
+const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["pagos", "Pagos y cobros"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"], ["api", "API"]];
 
 export default function Settings() {
   const { me, reload, toast } = useSession();
@@ -182,6 +182,8 @@ export default function Settings() {
         </Card>
       )}
 
+      {tab === "api" && <ApiCreds />}
+
       {bank && <Modal title={bank.id ? "Cuenta bancaria" : "Nueva cuenta"} onClose={() => setBank(null)} foot={<><button className="btn btn--ghost" onClick={() => setBank(null)}>Cancelar</button><button className="btn btn--crimson" onClick={saveBank}>Guardar</button></>}>
         <div className="grid-2"><Field label="Nombre"><input className="input" value={bank.name} onChange={(e) => setBank({ ...bank, name: e.target.value })} /></Field><Field label="Banco"><input className="input" value={bank.bank} onChange={(e) => setBank({ ...bank, bank: e.target.value })} /></Field><Field label="Divisa"><select className="select" value={bank.currency} onChange={(e) => setBank({ ...bank, currency: e.target.value })}><option>CRC</option><option>USD</option></select></Field><Field label="Número / IBAN"><input className="input input--mono" style={{ textAlign: "left" }} value={bank.number} onChange={(e) => setBank({ ...bank, number: e.target.value })} /></Field></div>
       </Modal>}
@@ -199,5 +201,47 @@ export default function Settings() {
         <button className="btn btn--soft" style={{ alignSelf: "flex-start" }} onClick={() => { navigator.clipboard.writeText(inviteLink); toast("Enlace copiado"); }}><Icon d={I.copy} />Copiar</button>
       </Modal>}
     </>
+  );
+}
+
+type Cred = { id: number; kid: string; name: string; webhook_url: string | null; active: boolean; last_used_at: string | null; created_at: string };
+function ApiCreds() {
+  const { toast } = useSession();
+  const [items, setItems] = useState<Cred[]>([]);
+  const [form, setForm] = useState<{ name: string; webhook_url: string } | null>(null);
+  const [created, setCreated] = useState<{ kid: string; secret: string } | null>(null);
+  const load = () => api<Cred[]>("/settings/api-credentials").then(setItems);
+  useEffect(() => { load(); }, []);
+  const create = () => { if (!form) return; api<{ kid: string; secret: string }>("/settings/api-credentials", { method: "POST", json: { name: form.name, webhook_url: form.webhook_url || null } }).then((r) => { setCreated(r); setForm(null); load(); }).catch((e) => toast(e.message, "bad")); };
+  const revoke = (c: Cred) => { if (!confirm(`¿Revocar ${c.kid}? Las integraciones que la usen dejan de funcionar.`)) return; api(`/settings/api-credentials/${c.id}`, { method: "DELETE" }).then(() => { toast("Credencial revocada"); load(); }); };
+  return (
+    <div className="grid-2">
+      <Card title="Credenciales de API" flush extra={<button className="btn btn--crimson btn--sm" onClick={() => setForm({ name: "", webhook_url: "" })}><Icon d={I.plus} />Crear</button>}>
+        {items.length === 0 ? <Empty hint="Para integrar el sitio web, un ERP o Power BI con la plataforma." /> : (
+          <table className="table"><thead><tr><th>Nombre</th><th>Public key</th><th>Último uso</th><th>Estado</th><th /></tr></thead>
+            <tbody>{items.map((c) => <tr key={c.id}><td style={{ fontWeight: 600 }}>{c.name}{c.webhook_url && <div className="meta" style={{ textTransform: "none" }}>{c.webhook_url}</div>}</td><td className="mono muted">{c.kid}</td><td className="muted">{c.last_used_at ? fmtDate(c.last_used_at.slice(0, 10)) : "nunca"}</td><td><Badge status={c.active ? "confirmado" : "anulada"} /></td><td className="num">{c.active && <button className="btn btn--danger btn--sm" onClick={() => revoke(c)}>Revocar</button>}</td></tr>)}</tbody></table>
+        )}
+      </Card>
+      <Card title="Cómo usarla">
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13 }}>
+          <p className="muted">Encabezados <span className="mono">X-Api-Key</span> (public key) y <span className="mono">X-Api-Secret</span>. Endpoints:</p>
+          <code className="mono" style={{ padding: 12, background: "var(--bg-2)", borderRadius: 10, fontSize: 12, lineHeight: 1.7, whiteSpace: "pre" }}>{`GET  /api/v1/customers · POST /api/v1/customers
+GET  /api/v1/products  · GET  /api/v1/inventory
+GET  /api/v1/invoices  · POST /api/v1/invoices
+POST /api/v1/payment-links/{invoice_id}
+POST /api/v1/checkout   { token: JWT HS256, kid }`}</code>
+          <p className="muted">Checkout: firmá un JWT con el secreto (header <span className="mono">kid</span>) y los campos <span className="mono">amount, currency, custom_reference, exp</span>. Devuelve la URL de pago. Los webhooks salientes van firmados <span className="mono">X-Signature: t=…,v1=…</span>.</p>
+        </div>
+      </Card>
+      {form && <Modal title="Nueva credencial" onClose={() => setForm(null)} foot={<><button className="btn btn--ghost" onClick={() => setForm(null)}>Cancelar</button><button className="btn btn--crimson" onClick={create}>Crear</button></>}>
+        <Field label="Nombre"><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Sitio web, ERP…" /></Field>
+        <Field label="Webhook (opcional)" hint="Recibe eventos firmados."><input className="input" value={form.webhook_url} onChange={(e) => setForm({ ...form, webhook_url: e.target.value })} placeholder="https://…" /></Field>
+      </Modal>}
+      {created && <Modal title="Credencial creada" onClose={() => setCreated(null)} foot={<button className="btn btn--crimson" onClick={() => setCreated(null)}>Listo, la guardé</button>}>
+        <p style={{ color: "var(--bad)", fontSize: 13, fontWeight: 600 }}>El secreto se muestra una sola vez. Guardalo en un gestor de contraseñas; no se puede recuperar.</p>
+        <Field label="Public key"><input className="input input--mono" style={{ textAlign: "left" }} readOnly value={created.kid} /></Field>
+        <Field label="Secret"><input className="input input--mono" style={{ textAlign: "left" }} readOnly value={created.secret} onFocus={(e) => e.currentTarget.select()} /></Field>
+      </Modal>}
+    </div>
   );
 }

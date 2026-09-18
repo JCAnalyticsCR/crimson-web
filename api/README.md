@@ -11,7 +11,7 @@ cp ../.env.example ../.env               # ajustar JWT_SECRET; con SQLite no hac
 uv run alembic upgrade head              # migraciones
 uv run python -m app.seeds --admin-email tu@correo.com --admin-password '<fuerte>'
 uv run uvicorn app.main:app --reload     # http://127.0.0.1:8000/docs
-uv run pytest -q                         # 20 tests: totales v4.4, consecutivos, auth, flujo, roles, PDF/correo, inventario, e-invoice+NC, reportes/Excel, ajustes, recurrencias, webhook ONVO
+uv run pytest -q                         # 25 tests: totales v4.4, consecutivos, auth, flujo, roles, PDF/correo, inventario, e-invoice+NC, reportes/Excel, ajustes, recurrencias, webhook ONVO, tienda+checkout, órdenes→tiquete, recepción XML, búsqueda, API pública
 ```
 
 Portal: `cd portal && npm install && npm run dev` → http://localhost:5173 (proxy `/api` → `:8000`).
@@ -36,6 +36,12 @@ Todo junto con Docker: `docker compose -f infra/docker-compose.yml up --build`.
 | recurrencias | `/recurrences`, `/recurrences/{id}/run` | plantilla + frecuencia → factura (worker diario) |
 | ajustes | `/settings`, `/settings/bank-accounts`, `/billing-groups/{id}`, `/settings/users`, `/settings/invitations[/accept]`, `/settings/gateways`, `/settings/outbox` | vigencias, mensajes, BCC, métodos manuales, consecutivos, roles, invitaciones, pasarelas (secreto cifrado) |
 | webhooks | `/webhooks/onvo/{tenant_id}` | firma HMAC `t=..,v1=..` (300 s), idempotente por evento, aplica pago/reembolso |
+| Mi Tienda | `/store`, `/store/pages[/{id}]`, `/coupons` | personalización (colores, fuente, tipo catálogo/tienda, dominio, envíos), páginas por bloques JSON |
+| tienda pública | `/public/store/{slug}[/pages/{p}\|/products[/{id}]\|/quote\|/checkout]` | catálogo, ficha con relacionados, carrito, cupón, envío; total = factura al céntimo |
+| órdenes | `/orders`, `/orders/{id}` (estado), `/orders/{id}/invoice?doc_type=TE\|FE` | pedido → tiquete o factura (crea cliente si trae correo) y descuenta inventario |
+| recepción | `/reception`, `/reception/upload`, `/reception/{id}/respond`, `/reception/{id}/xml/{document\|response}` | XML de proveedor → aceptar/parcial/rechazar (MensajeReceptor) → gasto con IVA acreditable |
+| búsqueda | `/search?q=` | facturas, cotizaciones, clientes (+ sus facturas), productos, órdenes |
+| API pública | `/settings/api-credentials`, `/v1/{customers,products,inventory,invoices,payment-links,checkout}` | kid + secret (hash), checkout por JWT HS256 con `kid`, webhooks salientes HMAC |
 
 Roles: `admin`, `ventas`, `caja`, `inventario`, `contabilidad`, `lectura` — permisos por módulo × acción en `app/core/deps.py`.
 
@@ -50,5 +56,5 @@ Roles: `admin`, `ventas`, `caja`, `inventario`, `contabilidad`, `lectura` — pe
 ## Pendiente (requiere credenciales o es Fase 4-5)
 1. Adapter real Alanube/GTI (sandbox del proveedor) y recepción de XML de compras (bandeja IMAP).
 2. ONVO: llamadas reales de Payment Intent/checkout (el adapter y el webhook ya están; falta la clave secreta de ONVO).
-3. Mi Tienda (constructor de bloques, catálogo público, carrito, envíos) · eventos/tickets · POS · API pública con credenciales.
-4. Planillas/empleados, facturas de compra manuales, cupones, opciones de producto.
+3. Eventos/tickets con QR · POS web · dominio propio con SSL para la tienda (CNAME) · carga de imágenes (bucket).
+4. Planillas/empleados, opciones/variantes de producto, acceso de soporte auditado, D151, conciliación bancaria automática.
