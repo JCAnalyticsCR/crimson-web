@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtMoney } from "../../lib/api";
 import { Card, Empty, I, Icon } from "../../ui/components";
+import AuthLink from "../../ui/AuthLink";
 
 type Cat = { key: string; title: string; description: string };
 type Rep = { key: string; title: string; from: string; to: string; columns: string[]; rows: (string | number | null)[][]; totals: Record<string, string | number> | null };
@@ -15,7 +16,7 @@ export default function Reports() {
   const [loading, setLoading] = useState(false);
   useEffect(() => { api<Cat[]>("/reports").then(setCat); }, []);
   useEffect(() => { setLoading(true); api<Rep>(`/reports/${key}?from=${range.from}&to=${range.to}`).then(setRep).finally(() => setLoading(false)); }, [key, range.from, range.to]);
-  const xlsx = `/api/reports/${key}?from=${range.from}&to=${range.to}&format=xlsx`;
+  const xlsx = `/reports/${key}?from=${range.from}&to=${range.to}&format=xlsx`;
 
   return (
     <>
@@ -24,7 +25,7 @@ export default function Reports() {
         <div className="page-head__actions">
           <input className="input" type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} style={{ width: 150 }} />
           <input className="input" type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} style={{ width: 150 }} />
-          <a className="btn btn--crimson" href={xlsx} target="_blank" rel="noopener"><Icon d={I.reports} />Descargar Excel</a>
+          <AuthLink className="btn btn--crimson" path={xlsx} download={`${key}-${range.from}-${range.to}.xlsx`}><Icon d={I.reports} />Descargar Excel</AuthLink>
         </div>
       </div>
       <div className="actions-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>

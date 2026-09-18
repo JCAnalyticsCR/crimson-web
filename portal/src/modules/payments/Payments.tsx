@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtDate, fmtMoney, type Payment } from "../../lib/api";
 import { Badge, Card, Empty, I, Icon } from "../../ui/components";
+import AuthLink from "../../ui/AuthLink";
 
 type Cierre = { columns: string[]; rows: (string | number)[][]; totals: { total: string } | null; from: string; to: string };
 
@@ -20,7 +21,7 @@ export default function Payments() {
         <div className="page-head__actions">
           <input className="input" type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} style={{ width: 150 }} />
           <input className="input" type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} style={{ width: 150 }} />
-          <a className="btn btn--ghost btn--sm" href={`/api/reports/cierre?from=${range.from}&to=${range.to}&format=xlsx`} target="_blank" rel="noopener"><Icon d={I.reports} />Cierre en Excel</a>
+          <AuthLink path={`/reports/cierre?from=${range.from}&to=${range.to}&format=xlsx`} download={`cierre-${range.from}-${range.to}.xlsx`}><Icon d={I.reports} />Cierre en Excel</AuthLink>
           <button className="btn btn--ghost btn--sm" onClick={load}><Icon d={I.refresh} /></button>
         </div>
       </div>

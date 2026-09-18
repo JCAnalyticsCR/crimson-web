@@ -51,6 +51,17 @@ Proyecto `crimson-plataforma` (entorno `production` de Railway, datos de prueba)
 | recepción | `/reception`, `/reception/upload`, `/reception/{id}/respond`, `/reception/{id}/xml/{document\|response}` | XML de proveedor → aceptar/parcial/rechazar (MensajeReceptor) → gasto con IVA acreditable |
 | búsqueda | `/search?q=` | facturas, cotizaciones, clientes (+ sus facturas), productos, órdenes |
 | API pública | `/settings/api-credentials`, `/v1/{customers,products,inventory,invoices,payment-links,checkout}` | kid + secret (hash), checkout por JWT HS256 con `kid`, webhooks salientes HMAC |
+| multimedia | `/media` (subir, listar, borrar), `/media/f/{key}` (público) | tipo validado por firma de bytes, sin SVG, 5 MB imagen / 10 MB PDF, llave aleatoria en la URL |
+| ficha de cliente | `/customers/{id}/overview`, `/contacts`, `/notes`, `DELETE /customers/{id}` (archiva) | KPIs + línea de tiempo con cotizaciones, facturas, pagos, pedidos y notas |
+| variantes | `/products/{id}/variants` (lista completa), `/products/{id}/link` | código y precio propio; se usan en tienda, carrito y POS |
+| POS | `/pos/catalog`, `/pos/sale` | tiquete o factura + pagos mixtos + vuelto + inventario + emisión en un paso |
+| planillas | `/payroll/employees`, `/payroll/runs[/{id}/approve\|pay\|lines/{l}\|slip/{l}]`, `/payroll/settings` | CCSS obrero/patronal, renta por tramos con créditos, provisiones; al pagar crea el gasto |
+| conciliación | `/banking/accounts`, `/banking/{cuenta}/import\|auto\|lines`, `/banking/lines/{id}/candidates\|match\|unmatch\|ignore\|expense` | estado de cuenta CSV/Excel, casado automático sin ambigüedades, gasto desde débito |
+| eventos | `/events[/{id}[/tickets]]`, `/events/checkin`, `/tickets/{id}/void`, `/public/events/{slug}[/{evento}[/checkout]]`, `/public/tickets/{code}` | entradas con QR, se activan al marcar pagada la orden, una sola entrada por código |
+| importador | `/import/{customers\|products\|suppliers\|invoices}[?commit=true]`, `/import/{tipo}/template` | vista previa y aplicación; migración desde Fygaro |
+| soporte | `/settings/support[/{id}/revoke\|log]` | acceso temporal de solo lectura con bitácora por request |
+| bandeja XML | `/settings/inbox`, `/settings/inbox/run` | IMAP cada 15 min (worker); contraseña cifrada |
+| contacto | `/public/store/{slug}/contact` | formulario del sitio → nota en la ficha + correo a administradores |
 
 Roles: `admin`, `ventas`, `caja`, `inventario`, `contabilidad`, `lectura` — permisos por módulo × acción en `app/core/deps.py`.
 
@@ -62,8 +73,11 @@ Roles: `admin`, `ventas`, `caja`, `inventario`, `contabilidad`, `lectura` — pe
 - Pagos en línea se confirmarán solo por webhook (adapter ONVO, Fase 3). Nunca se guardan datos de tarjeta.
 - Logs sin Authorization ni cuerpos; CORS por lista; cookies httpOnly + SameSite.
 
-## Pendiente (requiere credenciales o es Fase 4-5)
-1. Adapter real Alanube/GTI (sandbox del proveedor) y recepción de XML de compras (bandeja IMAP).
-2. ONVO: llamadas reales de Payment Intent/checkout (el adapter y el webhook ya están; falta la clave secreta de ONVO).
-3. Eventos/tickets con QR · POS web · dominio propio con SSL para la tienda (CNAME) · carga de imágenes (bucket).
-4. Planillas/empleados, opciones/variantes de producto, acceso de soporte auditado, D151, conciliación bancaria automática.
+## Pendiente (requiere credenciales o decisiones del cliente)
+
+1. Proveedor fiscal real (Alanube o GTI): hoy emite el adapter `sandbox`, sin validez ante Hacienda.
+2. ONVO real (llaves de prueba y producción): cobro con tarjeta, tarjetas guardadas, reautorizaciones. PayPal igual.
+3. BCCR: correo + token del servicio de indicadores para el tipo de cambio automático.
+4. Resend: llave para que los correos salgan de verdad (hoy quedan en la bandeja de salida como `simulado`).
+5. Dominio propio (app.crimsoncr.com) y SSL: requiere el CNAME en el DNS del cliente.
+6. Tasas de planilla 2026: verificar tramos del impuesto al salario y cargas CCSS (valores por defecto: base 2025).

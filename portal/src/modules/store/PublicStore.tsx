@@ -1,14 +1,17 @@
 /* Sitio publico de la tienda: portada por bloques, catalogo, ficha de producto, carrito y checkout. Sin sesion. */
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
-import { Blocks, type Block, type PubProduct } from "./Blocks";
+import { useParams, useSearchParams } from "react-router-dom";
+import { Blocks, type Block, type PubProduct, type PubVariant } from "./Blocks";
 
-type Home = { store: { name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; kind: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string } }; nav: { slug: string; title: string }[]; categories: { id: number; name: string }[]; shipping_rates: { name: string; amount: number }[]; payment_methods: { name: string; instructions: string }[] };
-type Cart = Record<number, { p: PubProduct; qty: number }>;
+type Home = { store: { name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; kind: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string } }; nav: { slug: string; title: string }[]; categories: { id: number; name: string }[]; shipping_rates: { name: string; amount: number; per_kg?: number; overhead_pct?: number }[]; payment_methods: { name: string; instructions: string }[] };
+type Item = { p: PubProduct; v?: PubVariant; qty: number };
+type Cart = Record<string, Item>;
+const keyOf = (p: PubProduct, v?: PubVariant) => `${p.id}:${v?.id ?? 0}`;
 const money = (v: string | number, cur = "CRC") => new Intl.NumberFormat("es-CR", { style: "currency", currency: cur, maximumFractionDigits: 0 }).format(Number(v));
 
 export default function PublicStore() {
   const { slug } = useParams();
+  const [search, setSearch] = useSearchParams();
   const [home, setHome] = useState<Home | null>(null);
   const [products, setProducts] = useState<PubProduct[]>([]);
   const [page, setPage] = useState<{ title: string; blocks: Block[] } | null>(null);
@@ -21,25 +24,39 @@ export default function PublicStore() {
   const [quote, setQuote] = useState<{ subtotal: string; discount_total: string; tax_total: string; shipping: string; total: string } | null>(null);
   const [done, setDone] = useState<{ number: string; total: string; instructions: string | null; whatsapp: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [variant, setVariant] = useState<PubVariant | undefined>(undefined);
+  const [photo, setPhoto] = useState<string | null>(null);
+  const [legal, setLegal] = useState<"privacy" | "terms" | null>(null);
 
   const get = async <T,>(path: string): Promise<T> => { const r = await fetch(`/api/public/store/${slug}${path}`); if (!r.ok) throw new Error((await r.json()).detail || "Error"); return r.json(); };
   useEffect(() => {
     get<Home>("").then(async (h) => { setHome(h); if (h.nav[0]) setPage(await get(`/pages/${h.nav[0].slug}`)); }).catch((e) => setErr(e.message));
     get<PubProduct[]>("/products").then(setProducts).catch(() => {});
+    const deep = Number(search.get("p"));  // link directo de producto (Productos -> Copiar link)
+    if (deep) setView({ kind: "producto", id: deep });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
   useEffect(() => { if (view.kind === "catalogo") { const qs = new URLSearchParams(); if (q) qs.set("q", q); if (cat) qs.set("category_id", String(cat)); get<PubProduct[]>(`/products?${qs}`).then(setProducts); } }, [q, cat, view.kind]);
-  useEffect(() => { if (view.kind === "producto" && view.id) get<PubProduct & { related: PubProduct[] }>(`/products/${view.id}`).then(setDetail); }, [view]);
+  useEffect(() => {
+    if (view.kind === "producto" && view.id) {
+      get<PubProduct & { related: PubProduct[] }>(`/products/${view.id}`).then((d) => { setDetail(d); setVariant(d.variants?.[0]); setPhoto(null); }).catch(() => setView({ kind: "catalogo" }));
+      window.scrollTo({ top: 0 });
+    }
+    if (view.kind !== "producto" && search.get("p")) setSearch({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
 
   const items = Object.values(cart);
   const count = items.reduce((a, i) => a + i.qty, 0);
-  const cartLines = useMemo(() => items.map((i) => ({ product_id: i.p.id, quantity: String(i.qty) })), [items]);
+  const cartLines = useMemo(() => items.map((i) => ({ product_id: i.p.id, variant_id: i.v?.id ?? null, quantity: String(i.qty) })), [items]);
   useEffect(() => {
     if (view.kind !== "checkout" || !cartLines.length) return;
     fetch(`/api/public/store/${slug}/quote`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: cartLines, contact: { name: form.name || "x", email: form.email || "x@x.com" }, shipping_method: form.shipping_method || null, coupon_code: form.coupon_code || null }) })
       .then(async (r) => (r.ok ? setQuote(await r.json()) : setQuote(null)));
   }, [view.kind, cartLines, form.shipping_method, form.coupon_code, form.name, form.email, slug]);
 
-  const add = (p: PubProduct, qty = 1) => setCart((c) => ({ ...c, [p.id]: { p, qty: (c[p.id]?.qty || 0) + qty } }));
+  const add = (p: PubProduct, v?: PubVariant, qty = 1) => setCart((c) => { const k = keyOf(p, v); return { ...c, [k]: { p, v, qty: (c[k]?.qty || 0) + qty } }; });
+  const priceOf = (i: { p: PubProduct; v?: PubVariant }) => (i.v ? i.v.price : i.p.price);
   const checkout = async () => {
     setErr(null);
     const r = await fetch(`/api/public/store/${slug}/checkout`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: cartLines, contact: { name: form.name, email: form.email, phone: form.phone, id_number: form.id_number, address: form.address }, shipping_method: form.shipping_method || null, payment_method: form.payment_method || null, coupon_code: form.coupon_code || null, notes: form.notes }) });
@@ -55,11 +72,11 @@ export default function PublicStore() {
 
   return (
     <div style={{ minHeight: "100dvh", background: "var(--bg)", fontFamily: home.store.font === "Manrope" ? "var(--sans)" : `"${home.store.font}", var(--sans)` }}>
-      <header style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--surface)", borderBottom: "1px solid var(--hair)", padding: "12px 24px", display: "flex", gap: 18, alignItems: "center" }}>
+      <header style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--surface)", borderBottom: "1px solid var(--hair)", padding: "12px 16px", display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
         <button onClick={() => setView({ kind: "home" })} style={{ display: "flex", gap: 10, alignItems: "center", border: 0, background: "none", cursor: "pointer" }}>
           {home.store.logo_url ? <img src={home.store.logo_url} alt="" style={{ height: 28 }} /> : <b style={{ fontFamily: "var(--display)", fontSize: 18 }}>{home.store.name}</b>}
         </button>
-        <nav style={{ display: "flex", gap: 14, marginLeft: 8 }}>
+        <nav style={{ display: "flex", gap: 14, marginLeft: 8, overflowX: "auto", maxWidth: "100%" }}>
           {home.nav.map((n) => <button key={n.slug} onClick={async () => { setPage(await get(`/pages/${n.slug}`)); setView({ kind: "home" }); }} style={{ border: 0, background: "none", cursor: "pointer", fontWeight: 600, color: "var(--text-2)" }}>{n.title}</button>)}
           <button onClick={() => setView({ kind: "catalogo" })} style={{ border: 0, background: "none", cursor: "pointer", fontWeight: 600, color: "var(--text-2)" }}>Catálogo</button>
         </nav>
@@ -69,7 +86,7 @@ export default function PublicStore() {
         </div>
       </header>
 
-      {view.kind === "home" && page && <Blocks blocks={page.blocks} primary={primary} products={products} onCta={(to) => setView({ kind: to === "productos" ? "catalogo" : "home" })} onProduct={(id) => setView({ kind: "producto", id })} />}
+      {view.kind === "home" && page && <Blocks slug={slug} blocks={page.blocks} primary={primary} products={products} onCta={(to) => setView({ kind: to === "productos" ? "catalogo" : "home" })} onProduct={(id) => setView({ kind: "producto", id })} />}
 
       {view.kind === "catalogo" && (
         <section style={{ padding: "36px 24px", maxWidth: 1100, margin: "0 auto" }}>
@@ -88,7 +105,7 @@ export default function PublicStore() {
                   <b style={{ fontSize: 14, display: "block", minHeight: 38 }}>{p.name}</b>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
                     <span style={{ color: primary, fontWeight: 700, fontFamily: "var(--mono)" }}>{money(p.price, p.currency)}</span>
-                    {isShop && <button onClick={() => add(p)} style={{ background: "var(--ink)", color: "#fff", border: 0, borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Agregar</button>}
+                    {isShop && <button onClick={() => (p.variants?.length ? setView({ kind: "producto", id: p.id }) : add(p))} style={{ background: "var(--ink)", color: "#fff", border: 0, borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{p.variants?.length ? "Opciones" : "Agregar"}</button>}
                   </div>
                 </div>
               </div>
@@ -100,13 +117,28 @@ export default function PublicStore() {
       {view.kind === "producto" && detail && (
         <section style={{ padding: "36px 24px", maxWidth: 1000, margin: "0 auto" }}>
           <button onClick={() => setView({ kind: "catalogo" })} style={{ border: 0, background: "none", cursor: "pointer", color: "var(--text-2)", marginBottom: 14 }}>← Catálogo</button>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 30 }}>
-            <div style={{ aspectRatio: "1", background: "var(--bg-2)", borderRadius: 16, display: "grid", placeItems: "center", overflow: "hidden" }}>{detail.image ? <img src={detail.image} alt={detail.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ color: "var(--text-3)" }}>Sin imagen</span>}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 30 }}>
+            <div>
+              <div style={{ aspectRatio: "1", background: "var(--bg-2)", borderRadius: 16, display: "grid", placeItems: "center", overflow: "hidden" }}>{(photo || detail.image) ? <img src={photo || detail.image || ""} alt={detail.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ color: "var(--text-3)" }}>Sin imagen</span>}</div>
+              {(detail.images?.length ?? 0) > 1 && (
+                <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                  {detail.images!.map((u) => <button key={u} onClick={() => setPhoto(u)} aria-label="Ver imagen" style={{ width: 64, height: 64, borderRadius: 10, border: `2px solid ${(photo || detail.image) === u ? primary : "var(--hair)"}`, background: `center/cover no-repeat url("${u}")`, cursor: "pointer" }} />)}
+                </div>
+              )}
+            </div>
             <div>
               <h1 style={{ fontFamily: "var(--display)", fontSize: 30, letterSpacing: "-0.02em" }}>{detail.name}</h1>
-              <div style={{ color: primary, fontWeight: 700, fontSize: 26, fontFamily: "var(--mono)", margin: "10px 0 16px" }}>{money(detail.price, detail.currency)}</div>
+              <div style={{ color: primary, fontWeight: 700, fontSize: 26, fontFamily: "var(--mono)", margin: "10px 0 16px" }}>{money(variant ? variant.price : detail.price, detail.currency)}</div>
+              {(detail.variants?.length ?? 0) > 0 && (
+                <div style={{ margin: "0 0 18px" }}>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 11, letterSpacing: ".14em", color: "var(--text-3)", marginBottom: 8 }}>OPCIONES</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {detail.variants!.map((v) => <button key={v.id} onClick={() => setVariant(v)} style={{ border: `2px solid ${variant?.id === v.id ? primary : "var(--hair-2)"}`, background: variant?.id === v.id ? "var(--crimson-soft)" : "var(--surface)", color: "var(--text)", borderRadius: 10, padding: "8px 14px", fontWeight: 600, cursor: "pointer" }}>{v.name}</button>)}
+                  </div>
+                </div>
+              )}
               {detail.description && <p style={{ color: "var(--text-2)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{detail.description}</p>}
-              {isShop && <button onClick={() => { add(detail); setView({ kind: "checkout" }); }} style={{ marginTop: 20, background: primary, color: "#fff", border: 0, borderRadius: 10, padding: "13px 24px", fontWeight: 700, cursor: "pointer" }}>Agregar al carrito</button>}
+              {isShop && <button onClick={() => { add(detail, variant); setView({ kind: "checkout" }); }} style={{ marginTop: 20, background: primary, color: "#fff", border: 0, borderRadius: 10, padding: "13px 24px", fontWeight: 700, cursor: "pointer" }}>Agregar al carrito</button>}
               {!isShop && home.store.whatsapp && <a href={`https://wa.me/${home.store.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(`Hola, me interesa ${detail.name}`)}`} target="_blank" rel="noopener" style={{ display: "inline-block", marginTop: 20, background: primary, color: "#fff", borderRadius: 10, padding: "13px 24px", fontWeight: 700 }}>Consultar por WhatsApp</a>}
             </div>
           </div>
@@ -127,7 +159,7 @@ export default function PublicStore() {
           ) : items.length === 0 ? (
             <div style={{ textAlign: "center", padding: 50, color: "var(--text-2)" }}>Tu carrito está vacío. <button onClick={() => setView({ kind: "catalogo" })} style={{ border: 0, background: "none", color: primary, fontWeight: 700, cursor: "pointer" }}>Ver catálogo</button></div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 24, alignItems: "start" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 24, alignItems: "start" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <h1 style={{ fontFamily: "var(--display)", fontSize: 28 }}>Finalizar compra</h1>
                 <div className="grid-2">
@@ -138,7 +170,7 @@ export default function PublicStore() {
                 </div>
                 <input className="input" placeholder="Dirección de entrega" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
                 <div className="grid-2">
-                  <select className="select" value={form.shipping_method} onChange={(e) => setForm({ ...form, shipping_method: e.target.value })}><option value="">Método de envío…</option>{home.shipping_rates.map((r) => <option key={r.name} value={r.name}>{r.name} · {money(r.amount, home.store.currency)}</option>)}</select>
+                  <select className="select" value={form.shipping_method} onChange={(e) => setForm({ ...form, shipping_method: e.target.value })}><option value="">Método de envío…</option>{home.shipping_rates.map((r) => <option key={r.name} value={r.name}>{r.name} · {r.per_kg ? "según peso" : money(r.amount, home.store.currency)}</option>)}</select>
                   <select className="select" value={form.payment_method} onChange={(e) => setForm({ ...form, payment_method: e.target.value })}><option value="">Método de pago…</option>{home.payment_methods.map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}</select>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
@@ -148,13 +180,16 @@ export default function PublicStore() {
                 {err && <p style={{ color: "var(--bad)", fontSize: 13 }}>{err}</p>}
               </div>
               <div style={{ background: "var(--surface)", border: "1px solid var(--hair)", borderRadius: 16, padding: 18 }}>
-                {items.map((i) => (
-                  <div key={i.p.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--hair)" }}>
-                    <div style={{ flex: 1 }}><b style={{ fontSize: 13 }}>{i.p.name}</b><div style={{ fontSize: 12, color: "var(--text-2)" }}>{money(i.p.price, i.p.currency)}</div></div>
-                    <input className="input input--mono" style={{ width: 62, height: 30 }} value={i.qty} onChange={(e) => setCart({ ...cart, [i.p.id]: { p: i.p, qty: Math.max(1, Number(e.target.value) || 1) } })} />
-                    <button className="x" onClick={() => setCart(Object.fromEntries(Object.entries(cart).filter(([k]) => Number(k) !== i.p.id)))}>✕</button>
-                  </div>
-                ))}
+                {items.map((i) => {
+                  const k = keyOf(i.p, i.v);
+                  return (
+                    <div key={k} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--hair)" }}>
+                      <div style={{ flex: 1 }}><b style={{ fontSize: 13 }}>{i.p.name}{i.v ? ` · ${i.v.name}` : ""}</b><div style={{ fontSize: 12, color: "var(--text-2)" }}>{money(priceOf(i), i.p.currency)}</div></div>
+                      <input className="input input--mono" style={{ width: 62, height: 30 }} value={i.qty} onChange={(e) => setCart({ ...cart, [k]: { ...i, qty: Math.max(1, Number(e.target.value) || 1) } })} />
+                      <button className="x" aria-label="Quitar" onClick={() => setCart(Object.fromEntries(Object.entries(cart).filter(([kk]) => kk !== k)))}>✕</button>
+                    </div>
+                  );
+                })}
                 {quote && (
                   <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6, fontSize: 13, color: "var(--text-2)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between" }}><span>Subtotal</span><span>{money(quote.subtotal, home.store.currency)}</span></div>
@@ -171,9 +206,22 @@ export default function PublicStore() {
         </section>
       )}
 
-      <footer style={{ borderTop: "1px solid var(--hair)", padding: "26px 24px", marginTop: 40, color: "var(--text-3)", fontSize: 12.5, textAlign: "center" }}>
-        {home.store.name} · {home.store.tagline}
+      <footer style={{ borderTop: "1px solid var(--hair)", padding: "26px 24px", marginTop: 40, color: "var(--text-3)", fontSize: 12.5, textAlign: "center", display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap" }}>
+        <span>{home.store.name}{home.store.tagline ? ` · ${home.store.tagline}` : ""}</span>
+        {home.store.legal?.terms && <button onClick={() => setLegal("terms")} style={{ border: 0, background: "none", color: "var(--text-2)", cursor: "pointer", textDecoration: "underline" }}>Términos y condiciones</button>}
+        {home.store.legal?.privacy && <button onClick={() => setLegal("privacy")} style={{ border: 0, background: "none", color: "var(--text-2)", cursor: "pointer", textDecoration: "underline" }}>Política de privacidad</button>}
       </footer>
+      {legal && (
+        <div role="dialog" aria-modal="true" onClick={() => setLegal(null)} style={{ position: "fixed", inset: 0, background: "rgba(10,8,12,.55)", display: "grid", placeItems: "center", padding: 16, zIndex: 50 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 16, maxWidth: 680, width: "100%", maxHeight: "80dvh", overflow: "auto", padding: 26 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h2 style={{ fontFamily: "var(--display)", margin: 0 }}>{legal === "terms" ? "Términos y condiciones" : "Política de privacidad"}</h2>
+              <button className="x" aria-label="Cerrar" onClick={() => setLegal(null)}>✕</button>
+            </div>
+            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6, color: "var(--text-2)", fontSize: 14 }}>{home.store.legal[legal]}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

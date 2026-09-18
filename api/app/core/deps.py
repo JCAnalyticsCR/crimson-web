@@ -19,25 +19,50 @@ bearer = HTTPBearer(auto_error=False)
 # Roles predefinidos (plan 5.5). "*" = todo.
 ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
     "admin": {"*": ["*"]},
+    # Vendedor: cotiza, factura, cobra y atiende clientes. No anula, no ve contabilidad ni reportes de la empresa;
+    # su dashboard se limita a lo que el mismo creo (ver /dashboard).
     "ventas": {
         "dashboard": ["ver"],
         "crm": ["ver", "crear", "editar"],
         "catalog": ["ver"],
-        "sales": ["ver", "crear", "editar", "anular", "enviar"],
+        "sales": ["ver", "crear", "editar", "enviar"],
         "payments": ["ver", "crear"],
-        "reports": ["ver"],
+        "events": ["ver", "crear", "editar", "checkin"],
     },
-    "caja": {"dashboard": ["ver"], "sales": ["ver"], "payments": ["ver", "crear", "editar"], "reports": ["ver", "exportar"]},
+    "caja": {
+        "dashboard": ["ver"],
+        "crm": ["ver", "crear"],
+        "catalog": ["ver"],
+        "sales": ["ver", "crear"],
+        "payments": ["ver", "crear", "editar"],
+        "events": ["ver", "checkin"],
+        "reports": ["ver", "exportar"],
+    },
     "inventario": {"dashboard": ["ver"], "catalog": ["ver", "crear", "editar"], "inventory": ["ver", "crear", "editar", "exportar"]},
     "contabilidad": {
         "dashboard": ["ver"],
         "sales": ["ver", "exportar"],
         "payments": ["ver", "exportar"],
         "accounting": ["ver", "crear", "editar", "exportar"],
+        "payroll": ["ver", "crear", "editar", "aprobar", "configurar"],
         "reports": ["ver", "exportar"],
     },
-    "lectura": {"dashboard": ["ver"], "crm": ["ver"], "catalog": ["ver"], "sales": ["ver"], "payments": ["ver"], "reports": ["ver"]},
+    "lectura": {"dashboard": ["ver"], "crm": ["ver"], "catalog": ["ver"], "sales": ["ver"], "payments": ["ver"], "events": ["ver"], "reports": ["ver"]},
+    # Acceso temporal concedido por el admin (Ajustes -> Soporte): solo lectura, cada request queda auditado
+    "soporte": {
+        "dashboard": ["ver"],
+        "crm": ["ver"],
+        "catalog": ["ver"],
+        "sales": ["ver"],
+        "payments": ["ver"],
+        "inventory": ["ver"],
+        "accounting": ["ver"],
+        "events": ["ver"],
+        "reports": ["ver"],
+        "settings": ["ver"],
+    },
 }
+ASSIGNABLE_ROLES = [r for r in ROLE_PERMISSIONS if r != "soporte"]
 
 
 @dataclass
@@ -57,8 +82,12 @@ class Principal:
 
 
 def _role_permissions(db: Session, code: str) -> dict:
-    r = db.get(Role, code) if False else db.scalar(select(Role).where(Role.code == code))
-    return r.permissions if r and r.permissions else ROLE_PERMISSIONS.get(code, {})
+    """Roles predefinidos: manda el codigo (asi los permisos nuevos llegan a empresas ya creadas).
+    Roles personalizados: los permisos guardados en la tabla role."""
+    if code in ROLE_PERMISSIONS:
+        return ROLE_PERMISSIONS[code]
+    r = db.scalar(select(Role).where(Role.code == code))
+    return r.permissions if r and r.permissions else {}
 
 
 def get_principal(
@@ -84,7 +113,27 @@ def get_principal(
     if not m:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Sin acceso a esta empresa")
     ip = request.client.host if request.client else None
+    if m.role_code == "soporte":
+        _support_gate(db, user, tenant, request, ip)
     return Principal(user=user, tenant=tenant, role=m.role_code, permissions=_role_permissions(db, m.role_code), ip=ip)
+
+
+def _support_gate(db: Session, user: User, tenant: Tenant, request: Request, ip: str | None) -> None:
+    """Soporte: exige concesion vigente y deja constancia de cada request (tambien lecturas)."""
+    from datetime import UTC, datetime
+
+    from ..models import AuditLog, SupportGrant
+
+    now = datetime.now(UTC)
+    live = db.scalar(
+        select(SupportGrant).where(
+            SupportGrant.tenant_id == tenant.id, SupportGrant.email == user.email, SupportGrant.revoked_at.is_(None), SupportGrant.expires_at > now
+        )
+    )
+    if not live:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "El acceso de soporte vencio o fue revocado")
+    db.add(AuditLog(tenant_id=tenant.id, user_id=user.id, at=now, ip=ip, action=f"soporte {request.method}", entity=request.url.path[:40], entity_id=live.id))
+    db.commit()
 
 
 def require(module: str, action: str):

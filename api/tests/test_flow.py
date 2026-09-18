@@ -109,4 +109,6 @@ def test_role_permissions_enforced(client, auth, db_session):
     tok = r.json()["access_token"]
     h = {"Authorization": f"Bearer {tok}"}
     assert client.get("/invoices", headers=h).status_code == 200
-    assert client.post("/customers", json={"name": "X"}, headers=h).status_code == 403
+    # caja puede crear clientes (POS con factura) pero no tocar el catalogo ni la contabilidad
+    assert client.post("/products", json={"name": "X", "code": "X1"}, headers=h).status_code == 403
+    assert client.get("/expenses", headers=h).status_code == 403

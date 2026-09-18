@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from ..core.config import settings as cfg
 from ..core.crypto import encrypt, mask
 from ..core.db import get_db
-from ..core.deps import ROLE_PERMISSIONS, Principal, require
+from ..core.deps import ASSIGNABLE_ROLES, Principal, require
 from ..core.security import hash_password, hash_token, password_is_strong
 from ..models import BankAccount, BillingGroup, EmailOutbox, Invitation, PaymentGatewayConfig, Tenant, TenantUser, User
 from ..services.mail import queue_email
@@ -157,7 +157,7 @@ def users(p: Principal = Depends(require("settings", "ver")), db: Session = Depe
             for m in rows
         ],
         "invitations": [{"id": i.id, "email": i.email, "role": i.role_code, "expires_at": i.expires_at} for i in inv],
-        "roles": list(ROLE_PERMISSIONS.keys()),
+        "roles": ASSIGNABLE_ROLES,
     }
 
 
@@ -168,7 +168,7 @@ class InviteIn(BaseModel):
 
 @router.post("/invitations", status_code=201)
 def invite(data: InviteIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
-    if data.role not in ROLE_PERMISSIONS:
+    if data.role not in ASSIGNABLE_ROLES:
         raise HTTPException(422, "Rol invalido")
     raw = secrets.token_urlsafe(32)
     inv = Invitation(
@@ -233,7 +233,7 @@ def member_update(uid: int, data: MemberIn, p: Principal = Depends(require("sett
     if uid == p.user.id and (data.active is False or (data.role and data.role != "admin")):
         raise HTTPException(409, "No podés quitarte el acceso de administrador a vos mismo")
     if data.role:
-        if data.role not in ROLE_PERMISSIONS:
+        if data.role not in ASSIGNABLE_ROLES:
             raise HTTPException(422, "Rol invalido")
         m.role_code = data.role
     if data.active is not None:
@@ -299,3 +299,58 @@ def outbox(limit: int = 30, p: Principal = Depends(require("settings", "ver")), 
         }
         for m in rows
     ]
+
+
+# ---------- Bandeja IMAP de XML de proveedores ----------
+class InboxIn(BaseModel):
+    enabled: bool = False
+    host: str = Field("", max_length=200)
+    port: int = Field(993, ge=1, le=65535)
+    user: str = Field("", max_length=200)
+    password: str | None = Field(None, max_length=300)  # vacio = conservar la guardada
+    folder: str = Field("INBOX", max_length=120)
+
+
+def _inbox_out(t: Tenant) -> dict:
+    from ..services.inbox import config
+
+    c = config(t)
+    return {k: v for k, v in c.items() if k != "password_enc"} | {"has_password": bool(c.get("password_enc"))}
+
+
+@router.get("/inbox")
+def inbox_get(p: Principal = Depends(require("settings", "ver"))):
+    return _inbox_out(p.tenant)
+
+
+@router.put("/inbox")
+def inbox_put(data: InboxIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from ..services.inbox import config
+
+    cur = config(p.tenant)
+    new = {**cur, **data.model_dump(exclude={"password"})}
+    if data.password:
+        new["password_enc"] = encrypt(data.password)
+    st = dict(p.tenant.settings or {})
+    st["inbox"] = new
+    p.tenant.settings = st
+    flag_modified(p.tenant, "settings")
+    db.commit()
+    return _inbox_out(p.tenant)
+
+
+@router.post("/inbox/run")
+def inbox_run(p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
+    """Revisa la bandeja ahora (el worker lo hace cada 15 minutos si esta activa)."""
+    from ..services.inbox import poll
+
+    try:
+        return poll(db, p.tenant)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    except OSError as e:
+        raise HTTPException(502, f"No se pudo conectar al servidor de correo: {e}") from e
+    except Exception as e:  # noqa: BLE001 - imaplib.IMAP4.error (credenciales) y similares
+        raise HTTPException(502, f"El servidor de correo rechazó la conexión: {e}") from e

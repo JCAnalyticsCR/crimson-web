@@ -1,10 +1,11 @@
 /* Editor de documento (cotizacion o factura): contenido + columna derecha fija con totales/acciones/tipo de cambio.
    Los totales se recalculan en vivo contra /documents/preview (misma logica que el guardado). */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, type Customer, type Invoice, type Line, type Product, type Quote } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Field, I, Icon, Modal } from "../../ui/components";
+import AuthLink from "../../ui/AuthLink";
 
 type Preview = { subtotal: string; discount_total: string; tax_total: string; total: string; lines: { subtotal: string; tax_amount: string; total: string; unit_price: string; name: string; tax_rate: string }[] };
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? String(Number(n.toFixed(5))) : String(v ?? ""); };
@@ -13,10 +14,12 @@ const blankLine = (): Line => ({ product_id: null, code: null, name: "", descrip
 export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const { id } = useParams();
   const nav = useNavigate();
-  const { toast, me } = useSession();
+  const [search] = useSearchParams();
+  const { toast, me, allows } = useSession();
   const isNew = !id || id === "nueva";
   const isQ = kind === "quote";
-  const [doc, setDoc] = useState<Partial<Quote & Invoice>>({ currency: "CRC", discount_type: "percent", discount_value: "0", status: "creado", lines: [] });
+  const preCustomer = isNew && search.get("cliente") ? Number(search.get("cliente")) : undefined;
+  const [doc, setDoc] = useState<Partial<Quote & Invoice>>({ currency: "CRC", discount_type: "percent", discount_value: "0", status: "creado", lines: [], customer_id: preCustomer });
   const [lines, setLines] = useState<Line[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [prev, setPrev] = useState<Preview | null>(null);
@@ -81,7 +84,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
           <h1 className="h1" style={{ marginTop: 6 }}>{title}</h1>
         </div>
         <div className="page-head__actions">
-          {!isNew && <a className="btn btn--ghost btn--sm" href={`/api/${isQ ? "quotes" : "invoices"}/${id}/pdf`} target="_blank" rel="noopener">PDF / Imprimir</a>}
+          {!isNew && <AuthLink path={`/${isQ ? "quotes" : "invoices"}/${id}/pdf`}>PDF / Imprimir</AuthLink>}
           {!isNew && isQ && <button className="btn btn--ghost btn--sm" onClick={() => act("duplicate")}>Duplicar</button>}
         </div>
       </div>
@@ -163,7 +166,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               <button className="btn btn--crimson" disabled={busy} onClick={() => save()}><Icon d={I.check} />Guardar</button>
               <button className="btn" disabled={busy} onClick={() => save("send")}><Icon d={I.whatsapp} />Guardar & enviar al cliente</button>
               {isQ && <button className="btn btn--soft" disabled={busy} onClick={() => save("convert")}><Icon d={I.invoice} />Convertir a factura</button>}
-              {!isNew && <button className="btn btn--danger" disabled={busy} onClick={() => act("void")}>Anular {isQ ? "cotización" : "factura"}</button>}
+              {!isNew && allows("sales.anular") && <button className="btn btn--danger" disabled={busy} onClick={() => act("void")}>Anular {isQ ? "cotización" : "factura"}</button>}
             </div></div>
           )}
           {locked && doc.status === "convertida" && (doc as Quote).converted_invoice_id && (

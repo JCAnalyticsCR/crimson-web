@@ -5,13 +5,14 @@ import { api, fmtDate, fmtMoney, type Invoice } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Card, Field, I, Icon, Modal } from "../../ui/components";
 import DocEditor from "./DocEditor";
+import AuthLink from "../../ui/AuthLink";
 
 const METHODS = [["efectivo", "Efectivo"], ["sinpe", "SINPE Móvil"], ["transferencia", "Transferencia"], ["tarjeta", "Tarjeta"], ["onvo", "ONVO (en línea)"], ["paypal", "PayPal"]];
 const KINDS = [["captura", "Captura (recibido)"], ["autorizacion", "Autorización"], ["devolucion", "Devolución"], ["reembolso", "Reembolso"], ["reautorizacion", "Re-autorización"]];
 
 export default function InvoiceDetail() {
   const { id } = useParams();
-  const { toast } = useSession();
+  const { toast, allows } = useSession();
   const [inv, setInv] = useState<Invoice | null>(null);
   const [pay, setPay] = useState(false);
   const [link, setLink] = useState<{ url: string; whatsapp_url: string; expires_at: string; opened_count: number } | null>(null);
@@ -40,7 +41,7 @@ export default function InvoiceDetail() {
         <div className="doc" style={{ marginTop: -4 }}>
           <Card title="Pagos" flush extra={<div style={{ display: "flex", gap: 8 }}>
             <button className="btn btn--ghost btn--sm" onClick={getLink}><Icon d={I.link} />Enlace de pago</button>
-            <button className="btn btn--crimson btn--sm" disabled={inv.status === "anulada" || Number(inv.balance) <= 0} onClick={() => setPay(true)}><Icon d={I.plus} />Agregar pago</button>
+            {allows("payments.crear") && <button className="btn btn--crimson btn--sm" disabled={inv.status === "anulada" || Number(inv.balance) <= 0} onClick={() => setPay(true)}><Icon d={I.plus} />Agregar pago</button>}
           </div>}>
             {inv.payments.length === 0 ? <div className="empty" style={{ padding: 26 }}><span className="meta">Sin pagos</span><div className="h3">Saldo pendiente {fmtMoney(inv.balance, inv.currency)}</div><p className="muted">Registrá un pago manual o compartí el enlace de pago por WhatsApp.</p></div> : (
               <table className="table">
@@ -49,11 +50,11 @@ export default function InvoiceDetail() {
               </table>
             )}
           </Card>
-          <Card title="Documentos electrónicos" extra={<div style={{ display: "flex", gap: 8 }}><button className="btn btn--ghost btn--sm" onClick={loadXml}>XMLs</button>{inv.einvoice_status !== "aceptada" && inv.status !== "anulada" && <button className="btn btn--crimson btn--sm" onClick={emit}><Icon d={I.check} />Emitir a Hacienda</button>}{inv.einvoice_status === "aceptada" && inv.status !== "anulada" && <button className="btn btn--danger btn--sm" onClick={() => setNc("")}>Anular con NC</button>}</div>}>
+          <Card title="Documentos electrónicos" extra={<div style={{ display: "flex", gap: 8 }}><button className="btn btn--ghost btn--sm" onClick={loadXml}>XMLs</button>{allows("sales.enviar") && inv.einvoice_status !== "aceptada" && inv.status !== "anulada" && <button className="btn btn--crimson btn--sm" onClick={emit}><Icon d={I.check} />Emitir a Hacienda</button>}{allows("sales.anular") && inv.einvoice_status === "aceptada" && inv.status !== "anulada" && <button className="btn btn--danger btn--sm" onClick={() => setNc("")}>Anular con NC</button>}</div>}>
             <div className="status-line"><Badge status={inv.einvoice_status === "sin_emitir" ? "pendiente" : inv.einvoice_status === "aceptada" ? "confirmado" : inv.einvoice_status === "rechazada" ? "fallido" : inv.einvoice_status} /><span>Hacienda · v4.4 · {inv.consecutive}</span></div>
             {inv.clave && <p className="mono" style={{ fontSize: 11, marginTop: 8, wordBreak: "break-all", color: "var(--text-2)" }}>Clave {inv.clave}</p>}
             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-              <a className="btn btn--soft btn--sm" href={`/api/invoices/${id}/pdf`} target="_blank" rel="noopener">PDF / Imprimir</a>
+              <AuthLink className="btn btn--soft btn--sm" path={`/invoices/${id}/pdf`}>PDF / Imprimir</AuthLink>
               <button className="btn btn--soft btn--sm" onClick={() => setMail({ to: "", message: "" })}>Enviar por correo</button>
             </div>
           </Card>
@@ -78,7 +79,7 @@ export default function InvoiceDetail() {
         <Modal title="Documentos electrónicos (XML)" onClose={() => setXmls(null)} foot={<button className="btn btn--ghost" onClick={() => setXmls(null)}>Cerrar</button>}>
           {xmls.length === 0 ? <p className="muted">Aún no se ha emitido. Configurá el proveedor fiscal en Ajustes → Facturación y presioná “Emitir a Hacienda”.</p> : (
             <table className="table"><thead><tr><th>Tipo</th><th>Consecutivo</th><th>Estado</th><th>Documento</th><th>Respuesta</th></tr></thead>
-              <tbody>{xmls.map((x) => <tr key={x.id}><td style={{ fontWeight: 600 }}>{x.doc_type}</td><td className="mono muted">{x.consecutive}</td><td><Badge status={x.status === "aceptada" ? "confirmado" : x.status === "rechazada" ? "fallido" : "pendiente"} />{x.message && <div className="meta" style={{ textTransform: "none" }}>{x.message}</div>}</td><td>{x.has_document && <a className="btn btn--ghost btn--sm" href={`/api/invoices/${id}/xml/${x.id}/document`}>Descargar</a>}</td><td>{x.has_response && <a className="btn btn--ghost btn--sm" href={`/api/invoices/${id}/xml/${x.id}/response`}>Descargar</a>}</td></tr>)}</tbody></table>
+              <tbody>{xmls.map((x) => <tr key={x.id}><td style={{ fontWeight: 600 }}>{x.doc_type}</td><td className="mono muted">{x.consecutive}</td><td><Badge status={x.status === "aceptada" ? "confirmado" : x.status === "rechazada" ? "fallido" : "pendiente"} />{x.message && <div className="meta" style={{ textTransform: "none" }}>{x.message}</div>}</td><td>{x.has_document && <AuthLink path={`/invoices/${id}/xml/${x.id}/document`} download={`${x.doc_type}-${x.consecutive}.xml`}>Descargar</AuthLink>}</td><td>{x.has_response && <AuthLink path={`/invoices/${id}/xml/${x.id}/response`} download={`respuesta-${x.consecutive}.xml`}>Descargar</AuthLink>}</td></tr>)}</tbody></table>
           )}
         </Modal>
       )}

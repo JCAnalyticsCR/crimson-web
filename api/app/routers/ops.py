@@ -289,6 +289,7 @@ class ExpenseIn(BaseModel):
     bank_account_id: int | None = None
     reference: str | None = None
     status: str = Field("registrado", pattern="^(registrado|pagado|anulado)$")
+    attachment_url: str | None = Field(None, max_length=400)
 
 
 def _exp_out(e: Expense, db: Session):
@@ -309,6 +310,7 @@ def _exp_out(e: Expense, db: Session):
         "bank_account_id": e.bank_account_id,
         "reference": e.reference,
         "status": e.status,
+        "attachment_url": e.attachment_url,
     }
 
 
@@ -369,6 +371,17 @@ def supplier_create(data: SupplierIn, p: Principal = Depends(require("catalog", 
     return {"id": s.id}
 
 
+@router.put("/suppliers/{sid}")
+def supplier_update(sid: int, data: SupplierIn, p: Principal = Depends(require("catalog", "editar")), db: Session = Depends(get_db)):
+    s = db.get(Supplier, sid)
+    if not s or s.tenant_id != p.tenant.id:
+        raise HTTPException(404, "Proveedor no encontrado")
+    for k, v in data.model_dump().items():
+        setattr(s, k, v)
+    db.commit()
+    return {"id": s.id}
+
+
 # ---------- Reportes ----------
 @router.get("/reports")
 def report_catalog(_: Principal = Depends(require("reports", "ver"))):
@@ -405,8 +418,9 @@ def report(
 # ---------- Recurrencias ----------
 class RecurrenceIn(BaseModel):
     name: str
-    customer_id: int
-    template: DocumentIn
+    kind: str = Field("factura", pattern="^(factura|gasto)$")
+    customer_id: int | None = None
+    template: dict
     frequency: str = Field("mensual", pattern="^(semanal|quincenal|mensual|anual)$")
     next_date: date
     end_date: date | None = None
@@ -426,11 +440,22 @@ def _next(d: date, f: str) -> date:
     return d.replace(year=y, month=m, day=min(d.day, 28))
 
 
+def _rec_template(data: RecurrenceIn) -> dict:
+    """Valida la plantilla segun el tipo: factura -> DocumentIn, gasto -> ExpenseIn (la fecha se pone al correr)."""
+    if data.kind == "factura":
+        if not data.customer_id:
+            raise HTTPException(422, "La recurrencia de factura requiere cliente")
+        return DocumentIn(**data.template).model_dump(mode="json")
+    return ExpenseIn(**{**data.template, "date": data.next_date}).model_dump(mode="json", exclude={"date"})
+
+
 def _rec_out(r: Recurrence, db: Session):
-    c = db.get(Customer, r.customer_id)
+    c = db.get(Customer, r.customer_id) if r.customer_id else None
     return {
         "id": r.id,
         "name": r.name,
+        "kind": r.kind,
+        "last_expense_id": r.last_expense_id,
         "customer_id": r.customer_id,
         "customer": c.name if c else None,
         "frequency": r.frequency,
@@ -454,8 +479,9 @@ def recurrence_create(data: RecurrenceIn, p: Principal = Depends(require("sales"
     r = Recurrence(
         tenant_id=p.tenant.id,
         name=data.name,
-        customer_id=data.customer_id,
-        template=data.template.model_dump(mode="json"),
+        kind=data.kind,
+        customer_id=data.customer_id if data.kind == "factura" else None,
+        template=_rec_template(data),
         frequency=data.frequency,
         next_date=data.next_date,
         end_date=data.end_date,
@@ -472,10 +498,12 @@ def recurrence_update(rid: int, data: RecurrenceIn, p: Principal = Depends(requi
     r = db.get(Recurrence, rid)
     if not r or r.tenant_id != p.tenant.id:
         raise HTTPException(404, "Recurrencia no encontrada")
+    if data.kind != r.kind:
+        raise HTTPException(409, "No se puede cambiar el tipo de una recurrencia")
     r.name, r.customer_id, r.template, r.frequency, r.next_date, r.end_date, r.auto_send, r.active = (
         data.name,
-        data.customer_id,
-        data.template.model_dump(mode="json"),
+        data.customer_id if r.kind == "factura" else None,
+        _rec_template(data),
         data.frequency,
         data.next_date,
         data.end_date,
@@ -486,16 +514,24 @@ def recurrence_update(rid: int, data: RecurrenceIn, p: Principal = Depends(requi
     return _rec_out(r, db)
 
 
-def run_recurrence(db: Session, r: Recurrence, user_id: int | None) -> Invoice:
-    payload = DocumentIn(**{**r.template, "customer_id": r.customer_id})
-    invoice = docsvc.create_invoice(db, r.tenant_id, user_id, payload)
-    inv.deduct_for_invoice(db, invoice, user_id)
+def run_recurrence(db: Session, r: Recurrence, user_id: int | None) -> Invoice | Expense:
+    if r.kind == "gasto":
+        e = Expense(tenant_id=r.tenant_id, created_by=user_id or None)
+        _apply_expense(e, ExpenseIn(**{**r.template, "date": r.next_date}))
+        db.add(e)
+        db.flush()
+        r.last_expense_id = e.id
+        result: Invoice | Expense = e
+    else:
+        payload = DocumentIn(**{**r.template, "customer_id": r.customer_id})
+        result = docsvc.create_invoice(db, r.tenant_id, user_id, payload)
+        inv.deduct_for_invoice(db, result, user_id)
+        r.last_invoice_id = result.id
     r.runs += 1
-    r.last_invoice_id = invoice.id
     r.next_date = _next(r.next_date, r.frequency)
     if r.end_date and r.next_date > r.end_date:
         r.active = False
-    return invoice
+    return result
 
 
 @router.post("/recurrences/{rid}/run", status_code=201)
@@ -503,9 +539,11 @@ def recurrence_run(rid: int, p: Principal = Depends(require("sales", "crear")), 
     r = db.get(Recurrence, rid)
     if not r or r.tenant_id != p.tenant.id:
         raise HTTPException(404, "Recurrencia no encontrada")
-    invoice = run_recurrence(db, r, p.user.id)
+    doc = run_recurrence(db, r, p.user.id)
     db.commit()
-    return {"invoice_id": invoice.id, "number": invoice.number, "next_date": r.next_date}
+    if isinstance(doc, Expense):
+        return {"expense_id": doc.id, "total": doc.total, "next_date": r.next_date}
+    return {"invoice_id": doc.id, "number": doc.number, "next_date": r.next_date}
 
 
 def run_due_recurrences(db: Session) -> int:

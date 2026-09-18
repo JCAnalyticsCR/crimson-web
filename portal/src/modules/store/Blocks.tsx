@@ -1,20 +1,21 @@
 /* Render de bloques: el MISMO componente se usa en el editor (vista previa) y en el sitio publico. */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 export type Block = { type: string; [k: string]: unknown };
-export type PubProduct = { id: number; name: string; price: string | number; currency: string; image: string | null; description: string | null };
+export type PubVariant = { id: number; name: string; price: string | number; options?: Record<string, string> };
+export type PubProduct = { id: number; name: string; price: string | number; currency: string; image: string | null; description: string | null; images?: string[]; variants?: PubVariant[] };
 
 const money = (v: string | number, cur = "CRC") => new Intl.NumberFormat("es-CR", { style: "currency", currency: cur, maximumFractionDigits: 0 }).format(Number(v));
 
-export function Blocks({ blocks, primary, products, onCta, onProduct }: { blocks: Block[]; primary: string; products: PubProduct[]; onCta?: (to: string) => void; onProduct?: (id: number) => void }) {
-  return <>{blocks.map((b, i) => <BlockView key={i} b={b} primary={primary} products={products} onCta={onCta} onProduct={onProduct} />)}</>;
+export function Blocks({ blocks, primary, products, onCta, onProduct, slug }: { blocks: Block[]; primary: string; products: PubProduct[]; onCta?: (to: string) => void; onProduct?: (id: number) => void; slug?: string }) {
+  return <>{blocks.map((b, i) => <BlockView key={i} b={b} primary={primary} products={products} onCta={onCta} onProduct={onProduct} slug={slug} />)}</>;
 }
 
 function Section({ children, style }: { children: ReactNode; style?: React.CSSProperties }) {
   return <section style={{ padding: "48px 24px", maxWidth: 1100, margin: "0 auto", ...style }}>{children}</section>;
 }
 
-function BlockView({ b, primary, products, onCta, onProduct }: { b: Block; primary: string; products: PubProduct[]; onCta?: (to: string) => void; onProduct?: (id: number) => void }) {
+function BlockView({ b, primary, products, onCta, onProduct, slug }: { b: Block; primary: string; products: PubProduct[]; onCta?: (to: string) => void; onProduct?: (id: number) => void; slug?: string }) {
   const s = (k: string) => (b[k] as string) ?? "";
   switch (b.type) {
     case "hero": {
@@ -34,7 +35,7 @@ function BlockView({ b, primary, products, onCta, onProduct }: { b: Block; prima
       return <Section><h2 style={{ fontFamily: "var(--display)", fontSize: 30, letterSpacing: "-0.02em" }}>{s("title")}</h2><p style={{ marginTop: 12, color: "var(--text-2)", lineHeight: 1.6, maxWidth: "70ch", whiteSpace: "pre-wrap" }}>{s("text")}</p></Section>;
     case "image_text":
       return (
-        <Section style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32, alignItems: "center" }}>
+        <Section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 32, alignItems: "center" }}>
           <div style={{ order: b.reverse ? 2 : 1 }}>{s("image") ? <img src={s("image")} alt="" style={{ borderRadius: 14, width: "100%" }} /> : <div style={{ aspectRatio: "4/3", background: "var(--bg-2)", borderRadius: 14, display: "grid", placeItems: "center", color: "var(--text-3)" }}>Imagen</div>}</div>
           <div style={{ order: b.reverse ? 1 : 2 }}><h2 style={{ fontFamily: "var(--display)", fontSize: 28, letterSpacing: "-0.02em" }}>{s("title")}</h2><p style={{ marginTop: 10, color: "var(--text-2)", lineHeight: 1.6 }}>{s("text")}</p></div>
         </Section>
@@ -48,7 +49,7 @@ function BlockView({ b, primary, products, onCta, onProduct }: { b: Block; prima
       );
     case "columns":
       return (
-        <Section style={{ display: "grid", gridTemplateColumns: `repeat(${(b.cols as unknown[]).length}, 1fr)`, gap: 18 }}>
+        <Section style={{ display: "grid", gridTemplateColumns: `repeat(auto-fit, minmax(${(b.cols as unknown[]).length > 3 ? 200 : 240}px, 1fr))`, gap: 18 }}>
           {(b.cols as { title: string; text: string }[]).map((c, i) => (
             <div key={i} style={{ padding: 20, border: "1px solid var(--hair)", borderRadius: 14 }}>
               <div style={{ width: 34, height: 3, background: primary, marginBottom: 12 }} />
@@ -82,21 +83,43 @@ function BlockView({ b, primary, products, onCta, onProduct }: { b: Block; prima
           <h2 style={{ fontFamily: "var(--display)", fontSize: 28, letterSpacing: "-0.02em", marginBottom: 18 }}>{s("title")}</h2>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
             {((b.images as string[]) || []).map((src, i) => <img key={i} src={src} alt="" style={{ width: "100%", aspectRatio: "4/3", objectFit: "cover", borderRadius: 12 }} />)}
-            {((b.images as string[]) || []).length === 0 && <div style={{ aspectRatio: "4/3", background: "var(--bg-2)", borderRadius: 12, display: "grid", placeItems: "center", color: "var(--text-3)" }}>Agregá URLs de imágenes</div>}
+            {((b.images as string[]) || []).length === 0 && <div style={{ aspectRatio: "4/3", background: "var(--bg-2)", borderRadius: 12, display: "grid", placeItems: "center", color: "var(--text-3)" }}>Agregá imágenes a la galería</div>}
           </div>
         </Section>
       );
     case "form":
-      return (
-        <Section style={{ maxWidth: 620 }}>
-          <h2 style={{ fontFamily: "var(--display)", fontSize: 28, letterSpacing: "-0.02em" }}>{s("title") || "Contacto"}</h2>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
-            {((b.fields as string[]) || ["nombre", "correo", "mensaje"]).map((f) => f === "mensaje" ? <textarea key={f} className="textarea" placeholder="Mensaje" /> : <input key={f} className="input" placeholder={f[0].toUpperCase() + f.slice(1)} />)}
-            <button style={{ background: primary, color: "#fff", border: 0, borderRadius: 10, padding: "12px 20px", fontWeight: 700, alignSelf: "flex-start", cursor: "pointer" }}>Enviar</button>
-          </div>
-        </Section>
-      );
+      return <ContactForm b={b} primary={primary} slug={slug} />;
     default:
       return <Section><p className="muted">Bloque “{b.type}” no soportado.</p></Section>;
   }
+}
+
+/* Formulario de contacto: en el sitio publico envia a /public/store/{slug}/contact (queda como nota en la ficha
+   del cliente y llega por correo a los administradores). En el editor (sin slug) es solo vista previa. */
+function ContactForm({ b, primary, slug }: { b: Block; primary: string; slug?: string }) {
+  const fields = ((b.fields as string[]) || ["nombre", "correo", "mensaje"]);
+  const [v, setV] = useState<Record<string, string>>({});
+  const [state, setState] = useState<"idle" | "sending" | "ok" | "error">("idle");
+  const [msg, setMsg] = useState("");
+  const send = async () => {
+    if (!slug) return;
+    setState("sending");
+    const r = await fetch(`/api/public/store/${slug}/contact`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: v.nombre || "", email: v.correo || "", phone: v.telefono || null, message: v.mensaje || "" }) });
+    if (r.ok) { setState("ok"); setV({}); } else { setState("error"); try { setMsg((await r.json()).detail); } catch { setMsg("No se pudo enviar"); } }
+  };
+  const ready = (v.nombre || "").trim().length > 1 && /.+@.+\..+/.test(v.correo || "") && (v.mensaje || "").trim().length > 2;
+  return (
+    <Section style={{ maxWidth: 620 }}>
+      <h2 style={{ fontFamily: "var(--display)", fontSize: 28, letterSpacing: "-0.02em" }}>{(b.title as string) || "Contacto"}</h2>
+      {state === "ok" ? <p style={{ marginTop: 14, padding: 16, borderRadius: 12, background: "var(--ok-soft)", color: "var(--ok)", fontWeight: 600 }}>¡Gracias! Recibimos tu mensaje y te contactamos pronto.</p> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
+          {fields.map((f) => f === "mensaje"
+            ? <textarea key={f} className="textarea" placeholder="Mensaje" value={v[f] || ""} onChange={(e) => setV({ ...v, [f]: e.target.value })} />
+            : <input key={f} className="input" type={f === "correo" ? "email" : "text"} placeholder={f[0].toUpperCase() + f.slice(1)} value={v[f] || ""} onChange={(e) => setV({ ...v, [f]: e.target.value })} />)}
+          {state === "error" && <p style={{ color: "var(--bad)", fontSize: 13, margin: 0 }}>{msg}</p>}
+          <button onClick={send} disabled={!slug || !ready || state === "sending"} style={{ background: primary, color: "#fff", border: 0, borderRadius: 10, padding: "12px 20px", fontWeight: 700, alignSelf: "flex-start", cursor: "pointer", opacity: !slug || !ready ? 0.6 : 1 }}>{state === "sending" ? "Enviando…" : "Enviar"}</button>
+        </div>
+      )}
+    </Section>
+  );
 }

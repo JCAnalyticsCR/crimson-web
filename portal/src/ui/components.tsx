@@ -36,6 +36,10 @@ export const I = {
   bell: "M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3z|M10 20a2 2 0 0 0 4 0",
   box: "M3 7l9-4 9 4v10l-9 4-9-4z",
   wallet: "M3 7h16a2 2 0 0 1 2 2v10H3z|M3 7V5a2 2 0 0 1 2-2h11v4|M16 13h5v4h-5a2 2 0 0 1 0-4z",
+  ticket: "M3 8a2 2 0 0 0 2-2h14a2 2 0 0 0 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 0-2 2H5a2 2 0 0 0-2-2v-2a2 2 0 0 0 0-4z|M14 6v12",
+  bank: "M3 10l9-6 9 6|M5 10v8M9.5 10v8M14.5 10v8M19 10v8|M3 20h18",
+  team: "M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6z|M2 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5|M16.5 11a2.5 2.5 0 1 0 0-5|M18 14.5c2.3.4 4 2.3 4 5",
+  upload: "M12 16V4|M7 9l5-5 5 5|M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3",
 };
 
 export function Badge({ status }: { status: string }) {

@@ -72,7 +72,7 @@ def get_customer(cid: int, p: Principal = Depends(require("crm", "ver")), db: Se
 @router.put("/customers/{cid}", response_model=CustomerOut)
 def update_customer(cid: int, data: CustomerIn, p: Principal = Depends(require("crm", "editar")), db: Session = Depends(get_db)):
     c = _own(db, Customer, cid, p.tenant.id)
-    for k, v in data.model_dump().items():
+    for k, v in data.model_dump(exclude_unset=True).items():  # lo que no se envia no se borra
         setattr(c, k, v)
     db.commit()
     db.refresh(c)
@@ -154,12 +154,16 @@ def get_product(pid: int, p: Principal = Depends(require("catalog", "ver")), db:
 @router.put("/products/{pid}", response_model=ProductOut)
 def update_product(pid: int, data: ProductIn, p: Principal = Depends(require("catalog", "editar")), db: Session = Depends(get_db)):
     pr = _own(db, Product, pid, p.tenant.id)
-    for k, v in data.model_dump(exclude={"tax_ids"}).items():
+    if data.code != pr.code and db.scalar(select(func.count()).select_from(Product).where(Product.tenant_id == p.tenant.id, Product.code == data.code)):
+        raise HTTPException(409, "Ya existe un producto con ese codigo")
+    for k, v in data.model_dump(exclude={"tax_ids"}, exclude_unset=True).items():  # lo que no se envia no se borra
         setattr(pr, k, v)
-    pr.taxes.clear()
-    for tid in data.tax_ids:
-        _own(db, Tax, tid, p.tenant.id)
-        pr.taxes.append(ProductTax(tax_id=tid))
+    if "tax_ids" in data.model_fields_set:
+        pr.taxes.clear()
+        db.flush()
+        for tid in data.tax_ids:
+            _own(db, Tax, tid, p.tenant.id)
+            pr.taxes.append(ProductTax(tax_id=tid))
     db.commit()
     db.refresh(pr)
     return _product_out(pr)

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney, type DocListItem } from "../../lib/api";
 import { Badge, Card, Empty, I, Icon } from "../../ui/components";
+import { useSession } from "../../app/session";
 
 const FILTERS: Record<string, { key: string; label: string }[]> = {
   quotes: [{ key: "", label: "Todas" }, { key: "creado", label: "Creadas" }, { key: "enviada", label: "Enviadas" }, { key: "convertida", label: "Convertidas" }, { key: "anulada", label: "Anuladas" }],
@@ -12,6 +13,7 @@ export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {
   const isQ = kind === "quotes";
   const [params] = useSearchParams();
   const nav = useNavigate();
+  const { allows } = useSession();
   const [items, setItems] = useState<DocListItem[]>([]);
   const [cursor, setCursor] = useState<number | null>(null);
   const [status, setStatus] = useState("");
@@ -39,7 +41,7 @@ export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {
         <div><div className="meta">{idx} · Facturación</div><h1 className="h1">{isQ ? "Cotizaciones" : "Facturas"}</h1></div>
         <div className="page-head__actions">
           <button className="btn btn--ghost btn--sm" onClick={() => load()}><Icon d={I.refresh} />Refrescar</button>
-          <button className="btn btn--crimson" onClick={() => nav(`${base}/nueva`)}><Icon d={I.plus} />{isQ ? "Nueva cotización" : "Nueva factura"}</button>
+          {allows("sales.crear") && <button className="btn btn--crimson" onClick={() => nav(`${base}/nueva`)}><Icon d={I.plus} />{isQ ? "Nueva cotización" : "Nueva factura"}</button>}
         </div>
       </div>
       <Card flush>

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..core.config import settings
 from ..core.db import get_db
 from ..core.deps import ROLE_PERMISSIONS, Principal, get_principal
+from ..core.ratelimit import login_limiter
 from ..core.security import (
     create_access_token,
     hash_password,
@@ -78,6 +79,11 @@ def _issue(db: Session, request: Request, resp: Response, user: User, membership
     )
 
 
+def client_ip(request: Request) -> str:
+    """IP real detras del proxy de Railway/nginx (uvicorn corre con --proxy-headers)."""
+    return request.client.host if request.client else "?"
+
+
 def _pick_membership(db: Session, user: User, slug: str | None) -> TenantUser:
     q = select(TenantUser).join(Tenant).where(TenantUser.user_id == user.id, TenantUser.active, Tenant.active)
     if slug:
@@ -90,6 +96,7 @@ def _pick_membership(db: Session, user: User, slug: str | None) -> TenantUser:
 
 @router.post("/login", response_model=TokenOut)
 def login(data: LoginIn, request: Request, resp: Response, db: Session = Depends(get_db)):
+    login_limiter.hit(client_ip(request))
     user = db.scalar(select(User).where(User.email == data.email.lower()))
     generic = HTTPException(status.HTTP_401_UNAUTHORIZED, "Credenciales invalidas")
     if not user or not user.active:

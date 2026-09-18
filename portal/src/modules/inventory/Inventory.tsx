@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api, type Product } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import AuthLink from "../../ui/AuthLink";
 
 type Wh = { id: number; name: string; location: string | null; is_default: boolean; active: boolean };
 type Level = { product_id: number; warehouse_id: number; quantity: string; code: string; name: string; min_stock: number; warehouse: string };
@@ -55,7 +56,7 @@ export default function Inventory() {
       </div>
 
       <div className="grid-2">
-        <Card title="Existencias por ubicación" flush extra={<a className="btn btn--ghost btn--sm" href="/api/reports/inventario?format=xlsx" target="_blank" rel="noopener"><Icon d={I.reports} />Excel</a>}>
+        <Card title="Existencias por ubicación" flush extra={<AuthLink path="/reports/inventario?format=xlsx" download="inventario.xlsx"><Icon d={I.reports} />Excel</AuthLink>}>
           {levels.length === 0 ? <Empty hint="Registrá una entrada para empezar; las ventas descuentan solas de la ubicación predeterminada." /> : (
             <table className="table"><thead><tr><th>Código</th><th>Producto</th><th>Ubicación</th><th className="num">Cantidad</th><th className="num">Mínimo</th></tr></thead>
               <tbody>{levels.map((l, i) => <tr key={i}><td className="mono muted">{l.code}</td><td style={{ fontWeight: 600 }}>{l.name}</td><td className="muted">{l.warehouse}</td><td className="num mono" style={{ color: Number(l.quantity) <= l.min_stock ? "var(--bad)" : undefined, fontWeight: 700 }}>{Number(l.quantity)}</td><td className="num mono muted">{l.min_stock}</td></tr>)}</tbody></table>

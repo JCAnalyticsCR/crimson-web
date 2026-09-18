@@ -249,6 +249,201 @@ def movimientos(db: Session, tid: int, a: date, b: date) -> Report:
     )
 
 
+# ---------- Sesion 4: ordenes, recepciones, propinas, D-151, planilla, conciliacion ----------
+def _crc(amount, currency: str, fx) -> Decimal:
+    v = Decimal(str(amount or 0))
+    return v * Decimal(str(fx or 1)) if currency != "CRC" else v
+
+
+def ordenes(db: Session, tid: int, a: date, b: date) -> Report:
+    from datetime import datetime as dt
+
+    from ..models import Order
+
+    lo, hi = dt.combine(a, dt.min.time()), dt.combine(b, dt.max.time())
+    rows = db.scalars(select(Order).where(Order.tenant_id == tid, Order.created_at >= lo, Order.created_at <= hi).order_by(Order.id)).all()
+    return Report(
+        "ordenes",
+        "Órdenes",
+        ["Fecha", "Orden", "Canal", "Cliente", "Envío", "Pago", "Estado", "Total", "Comprobante"],
+        [
+            [
+                o.created_at.date().isoformat(),
+                o.number,
+                o.channel,
+                (o.contact or {}).get("name", ""),
+                o.shipping_method or "",
+                o.payment_method or "",
+                o.status,
+                o.total,
+                o.invoice_id or "",
+            ]
+            for o in rows
+        ],
+        {"Total": sum((Decimal(str(o.total)) for o in rows if o.status != "cancelado"), Decimal(0)), "Órdenes": len(rows)},
+    )
+
+
+def recepciones(db: Session, tid: int, a: date, b: date) -> Report:
+    from ..models import ReceivedDocument
+
+    rows = db.scalars(
+        select(ReceivedDocument)
+        .where(ReceivedDocument.tenant_id == tid, ReceivedDocument.issue_date >= a, ReceivedDocument.issue_date <= b)
+        .order_by(ReceivedDocument.issue_date)
+    ).all()
+    return Report(
+        "recepciones",
+        "Recepciones",
+        ["Fecha", "Emisor", "Cédula", "Consecutivo", "Moneda", "Subtotal", "IVA", "Total", "Condición IVA", "Respuesta", "Hacienda"],
+        [
+            [
+                r.issue_date.isoformat() if r.issue_date else "",
+                r.issuer_name or "",
+                r.issuer_id or "",
+                r.consecutive or "",
+                r.currency,
+                r.subtotal,
+                r.tax_total,
+                r.total,
+                r.iva_condition,
+                r.action or "pendiente",
+                r.hacienda_status,
+            ]
+            for r in rows
+        ],
+        {
+            "IVA": sum((Decimal(str(r.tax_total)) for r in rows if r.action != "rechazada"), Decimal(0)),
+            "Total": sum((Decimal(str(r.total)) for r in rows if r.action != "rechazada"), Decimal(0)),
+        },
+    )
+
+
+def propinas(db: Session, tid: int, a: date, b: date) -> Report:
+    rows = db.scalars(
+        select(Payment).where(Payment.tenant_id == tid, Payment.paid_at >= a, Payment.paid_at <= b, Payment.tip > 0).order_by(Payment.paid_at)
+    ).all()
+    invs = {i.id: i for i in db.scalars(select(Invoice).where(Invoice.id.in_({r.invoice_id for r in rows})))} if rows else {}
+    return Report(
+        "propinas",
+        "Propinas",
+        ["Fecha", "Factura", "Método", "Monto cobrado", "Propina"],
+        [[r.paid_at.isoformat(), invs[r.invoice_id].number if r.invoice_id in invs else "", r.method, r.amount, r.tip] for r in rows],
+        {"Propinas": sum((Decimal(str(r.tip)) for r in rows), Decimal(0))},
+    )
+
+
+D151_THRESHOLD = Decimal(2_500_000)
+D151_SPECIFIC = Decimal(50_000)
+SPECIFIC_WORDS = ("alquiler", "honorario", "comision", "servicios profesionales", "interes")
+
+
+def d151(db: Session, tid: int, a: date, b: date) -> Report:
+    """Borrador D-151 (resumen de clientes, proveedores y gastos especificos): montos anuales en colones por
+    contraparte que superan el umbral. Revisar con el contador antes de presentar en TRIBU-CR."""
+    from ..models import ExpenseCategory, ReceivedDocument, Supplier
+
+    rows: list[list] = []
+    sales: dict[tuple, Decimal] = {}
+    for inv in db.scalars(select(Invoice).where(Invoice.tenant_id == tid, Invoice.issue_date >= a, Invoice.issue_date <= b, Invoice.status != "anulada")):
+        if inv.doc_type not in ("FE", "FEE") or not inv.customer_id:
+            continue
+        c = db.get(Customer, inv.customer_id)
+        if not c or not c.id_number:
+            continue
+        k = (c.id_number, c.name)
+        sales[k] = sales.get(k, Decimal(0)) + _crc(inv.subtotal, inv.currency, inv.fx_sell)
+    for (idn, name), amt in sorted(sales.items(), key=lambda x: -x[1]):
+        if amt > D151_THRESHOLD:
+            rows.append(["Ventas (clientes)", idn, name, amt.quantize(Decimal("0.01"))])
+
+    buys: dict[tuple, Decimal] = {}
+    specific: dict[tuple, Decimal] = {}
+    cats = {c.id: c.name.lower() for c in db.scalars(select(ExpenseCategory).where(ExpenseCategory.tenant_id == tid))}
+    for e in db.scalars(
+        select(Expense).where(Expense.tenant_id == tid, Expense.date >= a, Expense.date <= b, Expense.status != "anulado", Expense.supplier_id.is_not(None))
+    ):
+        s = db.get(Supplier, e.supplier_id)
+        if not s or not s.tax_id:
+            continue
+        k = (s.tax_id, s.name)
+        amt = _crc(e.subtotal, e.currency, 1)
+        cname = cats.get(e.category_id, "") + " " + e.description.lower()
+        if any(w in cname for w in SPECIFIC_WORDS):
+            specific[k] = specific.get(k, Decimal(0)) + amt
+        else:
+            buys[k] = buys.get(k, Decimal(0)) + amt
+    for r in db.scalars(
+        select(ReceivedDocument).where(
+            ReceivedDocument.tenant_id == tid,
+            ReceivedDocument.issue_date >= a,
+            ReceivedDocument.issue_date <= b,
+            ReceivedDocument.action.in_(("aceptada", "parcial")),
+        )
+    ):
+        if r.expense_id or not r.issuer_id:  # si ya genero gasto con proveedor, se conto arriba
+            continue
+        k = (r.issuer_id, r.issuer_name or "")
+        buys[k] = buys.get(k, Decimal(0)) + _crc(r.subtotal, r.currency, 1)
+    for (idn, name), amt in sorted(buys.items(), key=lambda x: -x[1]):
+        if amt > D151_THRESHOLD:
+            rows.append(["Compras (proveedores)", idn, name, amt.quantize(Decimal("0.01"))])
+    for (idn, name), amt in sorted(specific.items(), key=lambda x: -x[1]):
+        if amt > D151_SPECIFIC:
+            rows.append(["Gastos específicos", idn, name, amt.quantize(Decimal("0.01"))])
+    return Report("d151", "D-151 (borrador)", ["Sección", "Identificación", "Nombre", "Monto anual ₡"], rows, {"Registros": len(rows)})
+
+
+def planilla(db: Session, tid: int, a: date, b: date) -> Report:
+    from ..models import PayrollRun
+
+    runs = db.scalars(
+        select(PayrollRun).where(PayrollRun.tenant_id == tid, PayrollRun.period_end >= a, PayrollRun.period_end <= b).order_by(PayrollRun.period_end)
+    ).all()
+    rows = []
+    for r in runs:
+        for ln in sorted(r.lines, key=lambda x: x.employee_name):
+            rows.append(
+                [
+                    f"{r.period_start.isoformat()} a {r.period_end.isoformat()}",
+                    r.status,
+                    ln.employee_name,
+                    ln.gross,
+                    ln.ccss_worker,
+                    ln.income_tax,
+                    ln.other_deductions,
+                    ln.net,
+                    ln.ccss_employer,
+                    ln.provisions,
+                ]
+            )
+    live = [r for r in runs if r.status != "borrador"]
+    return Report(
+        "planilla",
+        "Planilla",
+        ["Periodo", "Estado", "Colaborador", "Bruto", "CCSS obrero", "Impuesto renta", "Otras ded.", "Neto", "CCSS patronal", "Provisiones"],
+        rows,
+        {
+            "Bruto": sum((Decimal(str(r.gross)) for r in live), Decimal(0)),
+            "Neto": sum((Decimal(str(r.net)) for r in live), Decimal(0)),
+            "CCSS patronal": sum((Decimal(str(r.ccss_employer)) for r in live), Decimal(0)),
+        },
+    )
+
+
+def conciliacion(db: Session, tid: int, a: date, b: date) -> Report:
+    from ..routers.banking import summary
+
+    rows = summary(db, tid, a, b)
+    return Report(
+        "conciliacion",
+        "Conciliación bancaria",
+        ["Fecha", "Cuenta", "Descripción", "Referencia", "Monto", "Estado", "Casado con", "Cómo"],
+        rows,
+        {"Pendientes": sum(1 for r in rows if r[5] == "pendiente"), "Conciliados": sum(1 for r in rows if r[5] == "conciliado")},
+    )
+
+
 REPORTS = {
     "facturacion": facturacion,
     "pendientes": pendientes,
@@ -261,6 +456,12 @@ REPORTS = {
     "inventario": inventario,
     "productos": venta_productos,
     "movimientos": movimientos,
+    "ordenes": ordenes,
+    "recepciones": recepciones,
+    "propinas": propinas,
+    "d151": d151,
+    "planilla": planilla,
+    "conciliacion": conciliacion,
 }
 CATALOG = [
     ("facturacion", "Facturación", "Todas las facturas del periodo con totales y saldo"),
@@ -274,6 +475,12 @@ CATALOG = [
     ("inventario", "Inventario", "Existencias por ubicación y alertas"),
     ("productos", "Venta de productos", "Ranking de productos y servicios"),
     ("movimientos", "Movimientos", "Ledger de inventario"),
+    ("ordenes", "Órdenes", "Pedidos de tienda, POS y eventos"),
+    ("recepciones", "Recepciones", "Facturas de proveedores recibidas y su respuesta"),
+    ("propinas", "Propinas", "Propinas cobradas por pago"),
+    ("d151", "D-151", "Borrador anual: clientes, proveedores y gastos específicos sobre el umbral"),
+    ("planilla", "Planilla", "Salarios, cargas sociales e impuesto por colaborador"),
+    ("conciliacion", "Conciliación bancaria", "Movimientos del banco y con qué se casaron"),
 ]
 
 

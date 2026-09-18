@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { api, fmtDate } from "../lib/api";
 import { useSession } from "../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal } from "../ui/components";
+import { ImageField } from "../ui/MediaPicker";
 
 type Group = { id: number; doc_type: string; prefix: string; branch: string; terminal: string; current: number; is_default: boolean };
 type Cfg = { invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; notify_due: boolean; remind_days_before: number; daily_close_email: boolean; bcc: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
@@ -12,12 +13,14 @@ type Users = { users: { id: number; email: string; name: string; role: string; a
 type Gw = { id: number; provider: string; client_id: string | null; secret_mask: string | null; is_primary: boolean; active: boolean; mode: string };
 type Mail = { id: number; to: string; subject: string; status: string; entity: string | null; entity_id: number | null; created_at: string; error: string | null };
 
-const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["pagos", "Pagos y cobros"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"], ["api", "API"]];
+const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["pagos", "Pagos y cobros"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"], ["bandeja", "Bandeja XML"], ["soporte", "Soporte"], ["api", "API"]];
 
 export default function Settings() {
-  const { me, reload, toast } = useSession();
+  const { me, reload, toast, allows } = useSession();
   const [params, setParams] = useSearchParams();
-  const tab = params.get("tab") || "empresa";
+  const full = allows("settings.ver");
+  const tabs = full ? TABS : TABS.filter(([k]) => k === "cuenta");
+  const tab = full ? params.get("tab") || "empresa" : "cuenta";
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [groups, setGroups] = useState<Group[]>([]);
   const [banks, setBanks] = useState<Bank[]>([]);
@@ -34,6 +37,7 @@ export default function Settings() {
   const [pw, setPw] = useState({ current_password: "", new_password: "" });
 
   const load = () => {
+    if (!allows("settings.ver")) return;
     api<Cfg>("/settings").then(setCfg); api<Group[]>("/billing-groups").then(setGroups); api<Bank[]>("/settings/bank-accounts").then(setBanks);
     api<Users>("/settings/users").then(setUsers); api<Gw[]>("/settings/gateways").then(setGws); api<Mail[]>("/settings/outbox").then(setMails);
   };
@@ -57,7 +61,7 @@ export default function Settings() {
   return (
     <>
       <div className="page-head"><div><div className="meta">09 · Ajustes</div><h1 className="h1">Ajustes</h1></div></div>
-      <div className="tabs" style={{ alignSelf: "flex-start" }}>{TABS.map(([k, l]) => <button key={k} className={tab === k ? "is-active" : ""} onClick={() => setParams({ tab: k })}>{l}</button>)}</div>
+      <div className="tabs" style={{ alignSelf: "flex-start" }}>{tabs.map(([k, l]) => <button key={k} className={tab === k ? "is-active" : ""} onClick={() => setParams({ tab: k })}>{l}</button>)}</div>
 
       {tab === "empresa" && (
         <div className="grid-2">
@@ -69,7 +73,7 @@ export default function Settings() {
                 <Field label="Cédula jurídica"><input className="input input--mono" style={{ textAlign: "left" }} value={company.tax_id} onChange={(e) => setCompany({ ...company, tax_id: e.target.value })} /></Field>
                 <Field label="Divisa predeterminada"><select className="select" value={company.default_currency} onChange={(e) => setCompany({ ...company, default_currency: e.target.value })}><option>CRC</option><option>USD</option></select></Field>
               </div>
-              <Field label="Logo (URL)" hint="Aparece en cotizaciones, facturas y la página de pago."><input className="input" value={company.logo_url} onChange={(e) => setCompany({ ...company, logo_url: e.target.value })} /></Field>
+              <Field label="Logo" hint="Aparece en cotizaciones, facturas y la página de pago. Guardá para aplicarlo."><ImageField value={company.logo_url || null} label="Logo" onChange={(url) => setCompany({ ...company, logo_url: url || "" })} /></Field>
               <button className="btn btn--crimson" style={{ alignSelf: "flex-start" }} onClick={saveCompany}><Icon d={I.check} />Guardar</button>
             </div>
           </Card>
@@ -183,6 +187,8 @@ export default function Settings() {
       )}
 
       {tab === "api" && <ApiCreds />}
+      {tab === "bandeja" && <InboxSettings />}
+      {tab === "soporte" && <SupportAccess />}
 
       {bank && <Modal title={bank.id ? "Cuenta bancaria" : "Nueva cuenta"} onClose={() => setBank(null)} foot={<><button className="btn btn--ghost" onClick={() => setBank(null)}>Cancelar</button><button className="btn btn--crimson" onClick={saveBank}>Guardar</button></>}>
         <div className="grid-2"><Field label="Nombre"><input className="input" value={bank.name} onChange={(e) => setBank({ ...bank, name: e.target.value })} /></Field><Field label="Banco"><input className="input" value={bank.bank} onChange={(e) => setBank({ ...bank, bank: e.target.value })} /></Field><Field label="Divisa"><select className="select" value={bank.currency} onChange={(e) => setBank({ ...bank, currency: e.target.value })}><option>CRC</option><option>USD</option></select></Field><Field label="Número / IBAN"><input className="input input--mono" style={{ textAlign: "left" }} value={bank.number} onChange={(e) => setBank({ ...bank, number: e.target.value })} /></Field></div>
@@ -241,6 +247,117 @@ POST /api/v1/checkout   { token: JWT HS256, kid }`}</code>
         <p style={{ color: "var(--bad)", fontSize: 13, fontWeight: 600 }}>El secreto se muestra una sola vez. Guardalo en un gestor de contraseñas; no se puede recuperar.</p>
         <Field label="Public key"><input className="input input--mono" style={{ textAlign: "left" }} readOnly value={created.kid} /></Field>
         <Field label="Secret"><input className="input input--mono" style={{ textAlign: "left" }} readOnly value={created.secret} onFocus={(e) => e.currentTarget.select()} /></Field>
+      </Modal>}
+    </div>
+  );
+}
+
+/* ---------- Bandeja IMAP: XML de proveedores entran solos a Recepcion ---------- */
+type Inbox = { enabled: boolean; host: string; port: number; user: string; folder: string; has_password: boolean; last_run: string | null; last_result: { messages: number; nuevos: number; duplicados: number; ignorados: number; errores: string[] } | null };
+function InboxSettings() {
+  const { toast } = useSession();
+  const [cfg, setCfg] = useState<Inbox | null>(null);
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api<Inbox>("/settings/inbox").then(setCfg); }, []);
+  if (!cfg) return <span className="spinner" />;
+  const save = async () => {
+    try { setCfg(await api<Inbox>("/settings/inbox", { method: "PUT", json: { enabled: cfg.enabled, host: cfg.host, port: Number(cfg.port), user: cfg.user, folder: cfg.folder, password: password || null } })); setPassword(""); toast("Bandeja guardada"); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
+  const run = async () => {
+    setBusy(true);
+    try { const r = await api<{ messages: number; nuevos: number; duplicados: number; errores: string[] }>("/settings/inbox/run", { method: "POST" }); toast(`${r.messages} correos revisados · ${r.nuevos} comprobantes nuevos${r.errores.length ? ` · ${r.errores.length} con error` : ""}`); setCfg(await api<Inbox>("/settings/inbox")); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="grid-2">
+      <Card title="Buzón de facturas de proveedores">
+        <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13, marginBottom: 12 }}><input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} />Revisar automáticamente cada 15 minutos</label>
+        <div className="grid-2">
+          <Field label="Servidor IMAP"><input className="input" placeholder="imap.gmail.com" value={cfg.host} onChange={(e) => setCfg({ ...cfg, host: e.target.value })} /></Field>
+          <Field label="Puerto (SSL)"><input className="input input--mono" value={cfg.port} onChange={(e) => setCfg({ ...cfg, port: Number(e.target.value) || 993 })} /></Field>
+          <Field label="Usuario"><input className="input" placeholder="facturas@empresa.com" value={cfg.user} onChange={(e) => setCfg({ ...cfg, user: e.target.value })} /></Field>
+          <Field label="Contraseña de aplicación" hint={cfg.has_password ? "Guardada cifrada. Dejá vacío para conservarla." : "Se guarda cifrada."}><input className="input" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+          <Field label="Carpeta"><input className="input" value={cfg.folder} onChange={(e) => setCfg({ ...cfg, folder: e.target.value })} /></Field>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <button className="btn btn--crimson" onClick={save}>Guardar</button>
+          <button className="btn btn--soft" onClick={run} disabled={busy || !cfg.has_password}>{busy ? "Revisando…" : "Revisar ahora"}</button>
+        </div>
+      </Card>
+      <Card title="Cómo funciona">
+        <ol className="muted" style={{ fontSize: 13, lineHeight: 1.7, paddingLeft: 18, margin: 0 }}>
+          <li>Creá un buzón dedicado (p. ej. <span className="mono">facturas@tuempresa.com</span>) y pedile a tus proveedores que envíen ahí sus facturas electrónicas.</li>
+          <li>En Gmail o Microsoft 365 generá una <b>contraseña de aplicación</b>; no uses la contraseña principal.</li>
+          <li>Cada correo no leído con XML adjunto crea el comprobante en <b>Recepción XML</b>, listo para aceptar y convertir en gasto. Las respuestas de Hacienda se ignoran y los duplicados no se repiten.</li>
+        </ol>
+        {cfg.last_run && cfg.last_result && (
+          <div style={{ marginTop: 14, padding: 12, borderRadius: 10, background: "var(--bg-2)", fontSize: 13 }}>
+            <div className="meta">Última revisión · {new Date(cfg.last_run).toLocaleString("es-CR")}</div>
+            <div>{cfg.last_result.messages} correos · <b>{cfg.last_result.nuevos} nuevos</b> · {cfg.last_result.duplicados} duplicados · {cfg.last_result.ignorados} ignorados</div>
+            {cfg.last_result.errores.map((x, i) => <div key={i} style={{ color: "var(--bad)" }}>{x}</div>)}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ---------- Acceso de soporte auditado ---------- */
+type Grant = { id: number; email: string; reason: string; expires_at: string; revoked_at: string | null; created_at: string; status: "activo" | "vencido" | "revocado"; actions: number; invite_link?: string | null };
+type LogRow = { at: string; action: string; entity: string; entity_id: number | null; ip: string | null };
+function SupportAccess() {
+  const { toast } = useSession();
+  const [items, setItems] = useState<Grant[]>([]);
+  const [form, setForm] = useState<{ email: string; hours: number; reason: string } | null>(null);
+  const [link, setLink] = useState<string | null>(null);
+  const [log, setLog] = useState<{ g: Grant; rows: LogRow[] } | null>(null);
+  const load = () => api<Grant[]>("/settings/support").then(setItems);
+  useEffect(() => { load(); }, []);
+  const grant = async () => {
+    if (!form) return;
+    try { const g = await api<Grant>("/settings/support", { method: "POST", json: form }); setForm(null); load(); if (g.invite_link) setLink(g.invite_link); else toast("Acceso concedido"); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
+  const revoke = async (g: Grant) => { if (!confirm(`¿Revocar el acceso de ${g.email}?`)) return; await api(`/settings/support/${g.id}/revoke`, { method: "POST" }); toast("Acceso revocado"); load(); };
+  const tone = (s: string) => (s === "activo" ? "ok" : s === "revocado" ? "bad" : "muted");
+  return (
+    <div className="grid-2">
+      <Card title="Accesos de soporte" flush extra={<button className="btn btn--crimson btn--sm" onClick={() => setForm({ email: "", hours: 24, reason: "" })}><Icon d={I.plus} />Conceder</button>}>
+        {items.length === 0 ? <Empty title="Sin accesos" hint="Nadie externo puede ver tu información salvo que lo autorices aquí." /> : (
+          <table className="table"><thead><tr><th>Persona</th><th>Vence</th><th>Estado</th><th className="num">Acciones</th><th /></tr></thead>
+            <tbody>{items.map((g) => (
+              <tr key={g.id}>
+                <td><b>{g.email}</b><div className="meta" style={{ textTransform: "none" }}>{g.reason}</div></td>
+                <td className="muted">{new Date(g.expires_at).toLocaleString("es-CR", { dateStyle: "short", timeStyle: "short" })}</td>
+                <td><span className={`badge badge--${tone(g.status)}`}>{g.status}</span></td>
+                <td className="num mono">{g.actions}</td>
+                <td className="num" style={{ whiteSpace: "nowrap" }}><button className="btn btn--ghost btn--sm" onClick={async () => setLog({ g, rows: await api<LogRow[]>(`/settings/support/${g.id}/log`) })}>Bitácora</button>{g.status === "activo" && <button className="btn btn--danger btn--sm" onClick={() => revoke(g)}>Revocar</button>}</td>
+              </tr>
+            ))}</tbody></table>
+        )}
+      </Card>
+      <Card title="Cómo funciona">
+        <p className="muted" style={{ fontSize: 13, lineHeight: 1.7, margin: 0 }}>Concedé acceso de <b>solo lectura</b> por horas a una persona de soporte (por ejemplo, JC Analytics). Cada pantalla que abra queda registrada en la bitácora con fecha, ruta e IP. Al vencer o al revocarlo, su sesión se corta de inmediato. No puede crear, editar ni anular nada.</p>
+      </Card>
+      {form && <Modal title="Conceder acceso de soporte" onClose={() => setForm(null)} foot={<><button className="btn btn--ghost" onClick={() => setForm(null)}>Cancelar</button><button className="btn btn--crimson" onClick={grant} disabled={!form.email || form.reason.length < 5}>Conceder</button></>}>
+        <Field label="Correo de la persona"><input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
+        <div className="grid-2">
+          <Field label="Duración"><select className="select" value={form.hours} onChange={(e) => setForm({ ...form, hours: Number(e.target.value) })}>{[[2, "2 horas"], [8, "8 horas"], [24, "1 día"], [72, "3 días"], [168, "7 días"]].map(([h, l]) => <option key={h} value={h}>{l}</option>)}</select></Field>
+          <Field label="Motivo" hint="Queda en la bitácora."><input className="input" value={form.reason} placeholder="Revisar cierre de caja" onChange={(e) => setForm({ ...form, reason: e.target.value })} /></Field>
+        </div>
+      </Modal>}
+      {link && <Modal title="Invitación de soporte" onClose={() => setLink(null)} foot={<button className="btn btn--crimson" onClick={() => { navigator.clipboard.writeText(link); toast("Enlace copiado"); }}>Copiar enlace</button>}>
+        <p style={{ fontSize: 13 }}>La persona aún no tiene cuenta. Enviale este enlace de un solo uso; vence junto con el acceso.</p>
+        <input className="input input--mono" style={{ textAlign: "left" }} readOnly value={link} onFocus={(e) => e.currentTarget.select()} />
+      </Modal>}
+      {log && <Modal title={`Bitácora · ${log.g.email}`} wide onClose={() => setLog(null)}>
+        {log.rows.length === 0 ? <Empty title="Sin actividad" hint="Todavía no ha ingresado." /> : (
+          <table className="table"><thead><tr><th>Fecha</th><th>Acción</th><th>Ruta</th><th>IP</th></tr></thead>
+            <tbody>{log.rows.map((r, i) => <tr key={i}><td className="muted">{new Date(r.at).toLocaleString("es-CR")}</td><td>{r.action}</td><td className="mono muted">{r.entity}</td><td className="mono muted">{r.ip || "—"}</td></tr>)}</tbody></table>
+        )}
       </Modal>}
     </div>
   );

@@ -4,10 +4,12 @@ import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 import { Blocks } from "./Blocks";
+import { GalleryField, ImageField } from "../../ui/MediaPicker";
 
 export type Block = { type: string; [k: string]: unknown };
 type Page = { id: number; slug: string; title: string; blocks: Block[]; published: boolean; in_nav: boolean; position: number };
-type Cfg = { slug: string; name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; domain: string | null; published: boolean; kind: string; shipping_rates: { name: string; amount: number; active: boolean }[]; whatsapp: string; currency: string; legal: { privacy: string; terms: string } };
+type Rate = { name: string; amount: number; active: boolean; per_kg?: number; overhead_pct?: number };
+type Cfg = { slug: string; name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; domain: string | null; published: boolean; kind: string; shipping_rates: Rate[]; whatsapp: string; currency: string; legal: { privacy: string; terms: string } };
 
 const NEW_BLOCK: Record<string, Block> = {
   hero: { type: "hero", title: "Tecnología que protege", text: "Videovigilancia, redes y control de acceso", cta: { label: "Ver catálogo", to: "productos" } },
@@ -60,7 +62,7 @@ export default function Store() {
                 <Field label="Color secundario"><div style={{ display: "flex", gap: 8 }}><input type="color" value={cfg.secondary} onChange={(e) => saveCfg({ secondary: e.target.value })} style={{ width: 44, height: 38, border: 0, background: "none" }} /><input className="input input--mono" style={{ textAlign: "left" }} defaultValue={cfg.secondary} onBlur={(e) => saveCfg({ secondary: e.target.value })} /></div></Field>
                 <Field label="Tipo de tienda" hint="Catálogo muestra productos; Tienda agrega carrito y checkout."><select className="select" value={cfg.kind} onChange={(e) => saveCfg({ kind: e.target.value })}><option value="catalogo">Catálogo</option><option value="tienda">Tienda (carrito)</option></select></Field>
                 <Field label="Tipografía"><select className="select" value={cfg.font} onChange={(e) => saveCfg({ font: e.target.value })}>{["Manrope", "Bricolage Grotesque", "Sora", "Space Grotesk"].map((f) => <option key={f}>{f}</option>)}</select></Field>
-                <Field label="Logo (URL)"><input className="input" defaultValue={cfg.logo_url || ""} onBlur={(e) => saveCfg({ logo_url: e.target.value })} /></Field>
+                <Field label="Logo"><ImageField value={cfg.logo_url} label="Logo" onChange={(url) => saveCfg({ logo_url: url })} /></Field>
                 <Field label="WhatsApp"><input className="input" defaultValue={cfg.whatsapp} onBlur={(e) => saveCfg({ whatsapp: e.target.value })} /></Field>
               </div>
               <Field label="Dominio" hint={`Gratis: ${location.host}${publicUrl} · propio: apuntar un CNAME al portal`}><input className="input" defaultValue={cfg.domain || ""} placeholder="tienda.crimsoncr.com" onBlur={(e) => saveCfg({ domain: e.target.value })} /></Field>
@@ -68,15 +70,21 @@ export default function Store() {
           </Card>
           <Card title="Tarifas de envío" extra={<button className="btn btn--ghost btn--sm" onClick={() => saveCfg({ shipping_rates: [...cfg.shipping_rates, { name: "Nuevo envío", amount: 0, active: true }] })}><Icon d={I.plus} />Agregar</button>}>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {cfg.shipping_rates.map((r, i) => (
-                <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 120px auto auto", gap: 8, alignItems: "center" }}>
-                  <input className="input" defaultValue={r.name} onBlur={(e) => saveCfg({ shipping_rates: cfg.shipping_rates.map((x, k) => (k === i ? { ...x, name: e.target.value } : x)) })} />
-                  <input className="input input--mono" defaultValue={r.amount} onBlur={(e) => saveCfg({ shipping_rates: cfg.shipping_rates.map((x, k) => (k === i ? { ...x, amount: Number(e.target.value) } : x)) })} />
-                  <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={r.active} onChange={(e) => saveCfg({ shipping_rates: cfg.shipping_rates.map((x, k) => (k === i ? { ...x, active: e.target.checked } : x)) })} />Activo</label>
-                  <button className="x" onClick={() => saveCfg({ shipping_rates: cfg.shipping_rates.filter((_, k) => k !== i) })}><Icon d={I.x} size={14} /></button>
-                </div>
-              ))}
-              <p className="muted" style={{ fontSize: 12 }}>El envío se factura como una línea con IVA 13 %, igual que en el pedido.</p>
+              {cfg.shipping_rates.length > 0 && <div className="meta" style={{ display: "grid", gridTemplateColumns: "1fr 100px 90px 80px auto auto", gap: 8 }}><span>Nombre</span><span>Base ₡</span><span>₡ por kg</span><span>Recargo %</span><span /><span /></div>}
+              {cfg.shipping_rates.map((r, i) => {
+                const upd = (patch: Partial<Rate>) => saveCfg({ shipping_rates: cfg.shipping_rates.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
+                return (
+                  <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 100px 90px 80px auto auto", gap: 8, alignItems: "center" }}>
+                    <input className="input" defaultValue={r.name} onBlur={(e) => upd({ name: e.target.value })} />
+                    <input className="input input--mono" defaultValue={r.amount} onBlur={(e) => upd({ amount: Number(e.target.value) })} />
+                    <input className="input input--mono" defaultValue={r.per_kg ?? 0} onBlur={(e) => upd({ per_kg: Number(e.target.value) })} title="Correos de CR: monto por kilo (mínimo 1 kg)" />
+                    <input className="input input--mono" defaultValue={r.overhead_pct ?? 0} onBlur={(e) => upd({ overhead_pct: Number(e.target.value) })} title="Recargo porcentual (manejo, seguro)" />
+                    <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={r.active} onChange={(e) => upd({ active: e.target.checked })} />Activo</label>
+                    <button className="x" onClick={() => saveCfg({ shipping_rates: cfg.shipping_rates.filter((_, k) => k !== i) })}><Icon d={I.x} size={14} /></button>
+                  </div>
+                );
+              })}
+              <p className="muted" style={{ fontSize: 12 }}>Tarifa fija, o por peso estilo Correos de Costa Rica: (base + ₡/kg × peso del pedido, mínimo 1 kg) + recargo. El peso sale de cada producto. Se factura como una línea con IVA 13 %, igual que en el pedido.</p>
             </div>
           </Card>
         </div>
@@ -163,7 +171,7 @@ function BlockEditor({ block, onChange }: { block: Block; onChange: (b: Block) =
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {"title" in block && <Field label="Título"><input className="input" value={str("title")} onChange={(e) => set("title", e.target.value)} /></Field>}
       {"text" in block && <Field label="Texto"><textarea className="textarea" value={str("text")} onChange={(e) => set("text", e.target.value)} /></Field>}
-      {"image" in block && <Field label="Imagen (URL)"><input className="input" value={str("image")} onChange={(e) => set("image", e.target.value)} /></Field>}
+      {"image" in block && <Field label="Imagen"><ImageField value={str("image") || null} onChange={(url) => set("image", url || "")} /></Field>}
       {"label" in block && <Field label="Texto del botón"><input className="input" value={str("label")} onChange={(e) => set("label", e.target.value)} /></Field>}
       {"limit" in block && <Field label="Cantidad de productos"><input className="input input--mono" type="number" value={Number(block.limit)} onChange={(e) => set("limit", Number(e.target.value))} /></Field>}
       {"cta" in block && (
@@ -178,7 +186,7 @@ function BlockEditor({ block, onChange }: { block: Block; onChange: (b: Block) =
           <Field label="Texto"><input className="input" value={c.text} onChange={(e) => set("cols", (block.cols as { title: string; text: string }[]).map((x, k) => (k === i ? { ...x, text: e.target.value } : x)))} /></Field>
         </div>
       ))}
-      {"images" in block && <Field label="Imágenes (una URL por línea)"><textarea className="textarea" value={(block.images as string[]).join("\n")} onChange={(e) => set("images", e.target.value.split("\n").filter(Boolean))} /></Field>}
+      {"images" in block && <Field label="Imágenes"><GalleryField value={(block.images as string[]).map((url) => ({ url }))} onChange={(v) => set("images", v.map((x) => x.url))} /></Field>}
       {"reverse" in block && <label style={{ fontSize: 13, display: "flex", gap: 8 }}><input type="checkbox" checked={!!block.reverse} onChange={(e) => set("reverse", e.target.checked)} />Imagen a la derecha</label>}
     </div>
   );

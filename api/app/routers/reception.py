@@ -79,14 +79,29 @@ def inbox(p: Principal = Depends(require("accounting", "ver")), db: Session = De
 
 @router.post("/upload", status_code=201)
 async def upload(file: UploadFile = File(...), p: Principal = Depends(require("accounting", "crear")), db: Session = Depends(get_db)):
-    raw = (await file.read()).decode("utf-8", errors="replace")
-    info = parse_xml(raw)
-    if db.scalar(select(ReceivedDocument).where(ReceivedDocument.tenant_id == p.tenant.id, ReceivedDocument.clave == info["clave"])):
+    raw = (await file.read(2 * 1024 * 1024)).decode("utf-8", errors="replace")
+    status, r = receive_xml(db, p.tenant.id, raw)
+    if status == "duplicado":
         raise HTTPException(409, "Ese comprobante ya fue recibido")
-    r = ReceivedDocument(tenant_id=p.tenant.id, xml_document=raw, **info)
-    db.add(r)
+    if status == "respuesta":
+        raise HTTPException(422, "Ese XML es una respuesta de Hacienda, no un comprobante: suba el XML de la factura")
     db.commit()
     return _out(r)
+
+
+def receive_xml(db: Session, tenant_id: int, raw: str) -> tuple[str, ReceivedDocument | None]:
+    """Registra un XML recibido (subida manual o bandeja IMAP). Devuelve ("nuevo"|"duplicado"|"respuesta", doc).
+    Los MensajeHacienda que el proveedor adjunta (aceptacion de SU factura) no son comprobantes: se ignoran."""
+    if "<MensajeHacienda" in raw[:2000]:
+        return "respuesta", None
+    info = parse_xml(raw)
+    existing = db.scalar(select(ReceivedDocument).where(ReceivedDocument.tenant_id == tenant_id, ReceivedDocument.clave == info["clave"]))
+    if existing:
+        return "duplicado", existing
+    r = ReceivedDocument(tenant_id=tenant_id, xml_document=raw, **info)
+    db.add(r)
+    db.flush()
+    return "nuevo", r
 
 
 class RespondIn(BaseModel):

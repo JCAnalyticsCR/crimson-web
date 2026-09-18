@@ -3,12 +3,15 @@ import { useEffect, useState } from "react";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import AuthLink from "../../ui/AuthLink";
+import { Dropzone } from "../../ui/MediaPicker";
 
 type Cat = { id: number; name: string };
 type Bank = { id: number; name: string; bank: string | null; currency: string; number: string | null };
-type Exp = { id: number; category_id: number | null; category: string | null; description: string; date: string; currency: string; subtotal: string; tax_rate: string; tax_amount: string; total: string; iva_credit: string; bank_account_id: number | null; reference: string | null; status: string };
+type Sup = { id: number; name: string; tax_id: string | null; email: string | null; phone: string | null };
+type Exp = { id: number; category_id: number | null; category: string | null; supplier_id: number | null; attachment_url: string | null; description: string; date: string; currency: string; subtotal: string; tax_rate: string; tax_amount: string; total: string; iva_credit: string; bank_account_id: number | null; reference: string | null; status: string };
 type Res = { rows: (string | number)[][]; totals: { resultado: string } };
-const blank = { category_id: "", description: "", date: new Date().toISOString().slice(0, 10), currency: "CRC", subtotal: "", tax_rate: "13", iva_credit: "credito", bank_account_id: "", reference: "", status: "registrado" };
+const blank = { category_id: "", supplier_id: "", attachment_url: "", description: "", date: new Date().toISOString().slice(0, 10), currency: "CRC", subtotal: "", tax_rate: "13", iva_credit: "credito", bank_account_id: "", reference: "", status: "registrado" };
 
 export default function Accounting() {
   const { toast } = useSession();
@@ -18,15 +21,25 @@ export default function Accounting() {
   const [res, setRes] = useState<Res | null>(null);
   const [edit, setEdit] = useState<(typeof blank & { id?: number }) | null>(null);
   const [newCat, setNewCat] = useState("");
-  const load = () => { api<Cat[]>("/expense-categories").then(setCats); api<Bank[]>("/settings/bank-accounts").then(setBanks); api<Exp[]>("/expenses").then(setItems); api<Res>("/reports/resultados").then(setRes); };
+  const [sups, setSups] = useState<Sup[]>([]);
+  const [sup, setSup] = useState<(Omit<Sup, "id"> & { id?: number }) | null>(null);
+  const load = () => { api<Sup[]>("/suppliers").then(setSups).catch(() => setSups([])); api<Cat[]>("/expense-categories").then(setCats); api<Bank[]>("/settings/bank-accounts").then(setBanks); api<Exp[]>("/expenses").then(setItems); api<Res>("/reports/resultados").then(setRes); };
   useEffect(load, []);
 
   const save = async () => {
     if (!edit) return;
     try {
       const { id, ...b } = edit;
-      await api(id ? `/expenses/${id}` : "/expenses", { method: id ? "PUT" : "POST", json: { ...b, category_id: b.category_id ? Number(b.category_id) : null, bank_account_id: b.bank_account_id ? Number(b.bank_account_id) : null, subtotal: Number(b.subtotal || 0), tax_rate: Number(b.tax_rate) } });
+      await api(id ? `/expenses/${id}` : "/expenses", { method: id ? "PUT" : "POST", json: { ...b, supplier_id: b.supplier_id ? Number(b.supplier_id) : null, attachment_url: b.attachment_url || null, category_id: b.category_id ? Number(b.category_id) : null, bank_account_id: b.bank_account_id ? Number(b.bank_account_id) : null, subtotal: Number(b.subtotal || 0), tax_rate: Number(b.tax_rate) } });
       toast("Gasto guardado"); setEdit(null); load();
+    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
+  const saveSup = async () => {
+    if (!sup) return;
+    const { id, ...b } = sup;
+    try {
+      await api(id ? `/suppliers/${id}` : "/suppliers", { method: id ? "PUT" : "POST", json: { ...b, tax_id: b.tax_id || null, email: b.email || null, phone: b.phone || null } });
+      toast("Proveedor guardado"); setSup(null); load();
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
   const addCat = async () => { if (!newCat.trim()) return; await api("/expense-categories", { method: "POST", json: { name: newCat.trim() } }); setNewCat(""); load(); };
@@ -37,7 +50,7 @@ export default function Accounting() {
       <div className="page-head">
         <div><div className="meta">07 · Contabilidad</div><h1 className="h1">Gastos y control</h1></div>
         <div className="page-head__actions">
-          <a className="btn btn--ghost btn--sm" href="/api/reports/gastos?format=xlsx" target="_blank" rel="noopener"><Icon d={I.reports} />Excel</a>
+          <AuthLink path="/reports/gastos?format=xlsx" download="gastos.xlsx"><Icon d={I.reports} />Excel</AuthLink>
           <button className="btn btn--crimson" onClick={() => setEdit({ ...blank })}><Icon d={I.plus} />Registrar gasto</button>
         </div>
       </div>
@@ -52,9 +65,27 @@ export default function Accounting() {
       <Card title="Gastos recientes" flush>
         {items.length === 0 ? <Empty hint="Registrá compras y gastos; el IVA acreditable alimenta el reporte de IVA y la prorrata." /> : (
           <table className="table"><thead><tr><th>Fecha</th><th>Descripción</th><th>Categoría</th><th>Crédito IVA</th><th className="num">Subtotal</th><th className="num">IVA</th><th className="num">Total</th><th>Estado</th><th /></tr></thead>
-            <tbody>{items.map((e) => <tr key={e.id}><td className="muted">{fmtDate(e.date)}</td><td style={{ fontWeight: 600 }}>{e.description}{e.reference && <div className="meta">{e.reference}</div>}</td><td className="muted">{e.category || "—"}</td><td className="muted">{e.iva_credit}</td><td className="num money">{fmtMoney(e.subtotal, e.currency)}</td><td className="num money">{fmtMoney(e.tax_amount, e.currency)}</td><td className="num money" style={{ fontWeight: 700 }}>{fmtMoney(e.total, e.currency)}</td><td><Badge status={e.status === "registrado" ? "creado" : e.status === "pagado" ? "pagada" : "anulada"} /></td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setEdit({ id: e.id, category_id: e.category_id ? String(e.category_id) : "", description: e.description, date: e.date, currency: e.currency, subtotal: String(Number(e.subtotal)), tax_rate: String(Number(e.tax_rate)), iva_credit: e.iva_credit, bank_account_id: e.bank_account_id ? String(e.bank_account_id) : "", reference: e.reference || "", status: e.status })}>Ver</button></td></tr>)}</tbody></table>
+            <tbody>{items.map((e) => <tr key={e.id}><td className="muted">{fmtDate(e.date)}</td><td style={{ fontWeight: 600 }}>{e.description}{e.attachment_url && <a href={e.attachment_url} target="_blank" rel="noopener" className="badge badge--info" style={{ marginLeft: 6 }} title="Ver adjunto">Adjunto</a>}{e.reference && <div className="meta">{e.reference}</div>}</td><td className="muted">{e.category || "—"}</td><td className="muted">{e.iva_credit}</td><td className="num money">{fmtMoney(e.subtotal, e.currency)}</td><td className="num money">{fmtMoney(e.tax_amount, e.currency)}</td><td className="num money" style={{ fontWeight: 700 }}>{fmtMoney(e.total, e.currency)}</td><td><Badge status={e.status === "registrado" ? "creado" : e.status === "pagado" ? "pagada" : "anulada"} /></td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setEdit({ id: e.id, category_id: e.category_id ? String(e.category_id) : "", supplier_id: e.supplier_id ? String(e.supplier_id) : "", attachment_url: e.attachment_url || "", description: e.description, date: e.date, currency: e.currency, subtotal: String(Number(e.subtotal)), tax_rate: String(Number(e.tax_rate)), iva_credit: e.iva_credit, bank_account_id: e.bank_account_id ? String(e.bank_account_id) : "", reference: e.reference || "", status: e.status })}>Ver</button></td></tr>)}</tbody></table>
         )}
       </Card>
+
+      <Card title="Proveedores" flush className="" extra={<button className="btn btn--ghost btn--sm" onClick={() => setSup({ name: "", tax_id: "", email: "", phone: "" })}><Icon d={I.plus} />Proveedor</button>}>
+        {sups.length === 0 ? <Empty title="Sin proveedores" hint="Se crean al recibir XML o aquí; sirven para el D-151 y el control de compras." /> : (
+          <table className="table"><thead><tr><th>Nombre</th><th>Cédula</th><th>Correo</th><th>Teléfono</th><th /></tr></thead>
+            <tbody>{sups.map((x) => <tr key={x.id}><td style={{ fontWeight: 600 }}>{x.name}</td><td className="mono muted">{x.tax_id || "—"}</td><td className="muted">{x.email || "—"}</td><td className="muted">{x.phone || "—"}</td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setSup({ id: x.id, name: x.name, tax_id: x.tax_id || "", email: x.email || "", phone: x.phone || "" })}>Editar</button></td></tr>)}</tbody></table>
+        )}
+      </Card>
+
+      {sup && (
+        <Modal title={sup.id ? "Proveedor" : "Nuevo proveedor"} onClose={() => setSup(null)} foot={<><button className="btn btn--ghost" onClick={() => setSup(null)}>Cancelar</button><button className="btn btn--crimson" onClick={saveSup}>Guardar</button></>}>
+          <Field label="Nombre o razón social"><input className="input" autoFocus value={sup.name} onChange={(e) => setSup({ ...sup, name: e.target.value })} /></Field>
+          <div className="grid-3">
+            <Field label="Cédula"><input className="input input--mono" style={{ textAlign: "left" }} value={sup.tax_id || ""} onChange={(e) => setSup({ ...sup, tax_id: e.target.value })} /></Field>
+            <Field label="Correo"><input className="input" value={sup.email || ""} onChange={(e) => setSup({ ...sup, email: e.target.value })} /></Field>
+            <Field label="Teléfono"><input className="input" value={sup.phone || ""} onChange={(e) => setSup({ ...sup, phone: e.target.value })} /></Field>
+          </div>
+        </Modal>
+      )}
 
       {edit && (
         <Modal title={edit.id ? "Gasto" : "Registrar gasto"} onClose={() => setEdit(null)} foot={<><button className="btn btn--ghost" onClick={() => setEdit(null)}>Cancelar</button><button className="btn btn--crimson" onClick={save}>Guardar</button></>}>
@@ -69,7 +100,13 @@ export default function Accounting() {
             <Field label="Referencia" hint="Factura del proveedor, clave…"><input className="input" value={edit.reference} onChange={(e) => setEdit({ ...edit, reference: e.target.value })} /></Field>
             <Field label="Estado"><select className="select" value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })}><option value="registrado">Registrado</option><option value="pagado">Pagado</option><option value="anulado">Anulado</option></select></Field>
             <Field label="Total"><div className="input money" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", background: "var(--bg-2)", fontWeight: 700 }}>{fmtMoney(subtotal + iva, edit.currency)}</div></Field>
+            <Field label="Proveedor"><select className="select" value={edit.supplier_id} onChange={(e) => setEdit({ ...edit, supplier_id: e.target.value })}><option value="">—</option>{sups.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field>
           </div>
+          <Field label="Comprobante adjunto" hint="Foto o PDF de la factura del proveedor.">
+            {edit.attachment_url
+              ? <div style={{ display: "flex", gap: 8, alignItems: "center" }}><a className="btn btn--soft btn--sm" href={edit.attachment_url} target="_blank" rel="noopener">Ver adjunto</a><button className="btn btn--ghost btn--sm" onClick={() => setEdit({ ...edit, attachment_url: "" })}>Quitar</button></div>
+              : <Dropzone compact accept="image/*,application/pdf" label="Adjuntar foto o PDF" onDone={(m) => setEdit({ ...edit, attachment_url: m.url })} />}
+          </Field>
         </Modal>
       )}
     </>

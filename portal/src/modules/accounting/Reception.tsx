@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import AuthLink from "../../ui/AuthLink";
 
 type Rec = { id: number; clave: string; consecutive: string | null; issuer_name: string | null; issuer_id: string | null; issue_date: string | null; currency: string; subtotal: string; tax_total: string; total: string; iva_condition: string; action: string | null; hacienda_status: string; expense_id: number | null; created_at: string; has_response: boolean };
 type Cat = { id: number; name: string };
@@ -54,7 +55,7 @@ export default function Reception() {
                 <td>{r.action ? <Badge status={r.action === "rechazada" ? "fallido" : "confirmado"} /> : <Badge status="pendiente" />}</td>
                 <td className="num" style={{ whiteSpace: "nowrap" }}>
                   {!r.action && <button className="btn btn--crimson btn--sm" onClick={() => { setSel(r); setForm({ action: "aceptada", iva_condition: "credito", category_id: "", create_expense: true }); }}>Responder</button>}
-                  {r.has_response && <a className="btn btn--ghost btn--sm" href={`/api/reception/${r.id}/xml/response`}>XML</a>}
+                  {r.has_response && <AuthLink path={`/reception/${r.id}/xml/response`} download={`respuesta-${r.clave}.xml`}>XML</AuthLink>}
                 </td>
               </tr>
             ))}</tbody>

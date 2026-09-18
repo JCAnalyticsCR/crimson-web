@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, select, true
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
@@ -293,7 +293,12 @@ def _sum_between(db: Session, col_model, col, tenant_id: int, start: date, end: 
 
 @router.get("/dashboard")
 def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session = Depends(get_db)):
+    """Roles con reportes ven la empresa completa; el resto (p. ej. vendedor) solo lo que creo."""
     tid = p.tenant.id
+    mine = not p.can("reports", "ver")
+    own_inv = (Invoice.created_by == p.user.id) if mine else true()
+    own_quote = (Quote.created_by == p.user.id) if mine else true()
+    own_pay = (Payment.invoice_id.in_(select(Invoice.id).where(Invoice.tenant_id == tid, Invoice.created_by == p.user.id))) if mine else true()
     today = date.today()
     m0 = today.replace(day=1)
     pm_end = m0 - timedelta(days=1)
@@ -303,7 +308,7 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
         return d(
             db.scalar(
                 select(func.coalesce(func.sum(Payment.amount), 0)).where(
-                    Payment.tenant_id == tid, Payment.kind == "captura", Payment.status == "confirmado", Payment.paid_at >= a, Payment.paid_at <= b
+                    Payment.tenant_id == tid, Payment.kind == "captura", Payment.status == "confirmado", Payment.paid_at >= a, Payment.paid_at <= b, own_pay
                 )
             )
         )
@@ -312,7 +317,7 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
         return d(
             db.scalar(
                 select(func.coalesce(func.sum(Invoice.total), 0)).where(
-                    Invoice.tenant_id == tid, Invoice.status != "anulada", Invoice.issue_date >= a, Invoice.issue_date <= b
+                    Invoice.tenant_id == tid, Invoice.status != "anulada", Invoice.issue_date >= a, Invoice.issue_date <= b, own_inv
                 )
             )
         )
@@ -325,15 +330,15 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
     pagos["variacion"] = pct(pagos["mes"], pagos["mes_anterior"])
     fact["variacion"] = pct(fact["mes"], fact["mes_anterior"])
 
-    recent_pay = db.scalars(select(Payment).where(Payment.tenant_id == tid).order_by(Payment.id.desc()).limit(6)).all()
-    recent_inv = db.scalars(select(Invoice).where(Invoice.tenant_id == tid).order_by(Invoice.id.desc()).limit(6)).all()
-    pend_quotes = db.scalar(select(func.count()).select_from(Quote).where(Quote.tenant_id == tid, Quote.status.in_(("creado", "enviada"))))
+    recent_pay = db.scalars(select(Payment).where(Payment.tenant_id == tid, own_pay).order_by(Payment.id.desc()).limit(6)).all()
+    recent_inv = db.scalars(select(Invoice).where(Invoice.tenant_id == tid, own_inv).order_by(Invoice.id.desc()).limit(6)).all()
+    pend_quotes = db.scalar(select(func.count()).select_from(Quote).where(Quote.tenant_id == tid, own_quote, Quote.status.in_(("creado", "enviada"))))
     overdue = db.scalar(
         select(func.count())
         .select_from(Invoice)
-        .where(Invoice.tenant_id == tid, Invoice.status.in_(("creado", "parcial", "vencida")), Invoice.due_date < today)
+        .where(Invoice.tenant_id == tid, own_inv, Invoice.status.in_(("creado", "parcial", "vencida")), Invoice.due_date < today)
     )
-    unpaid = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.tenant_id == tid, Invoice.status.in_(("creado", "parcial"))))
+    unpaid = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.tenant_id == tid, own_inv, Invoice.status.in_(("creado", "parcial"))))
     rejected = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.tenant_id == tid, Invoice.einvoice_status == "rechazada"))
     links_open = db.scalar(
         select(func.count())
@@ -342,6 +347,7 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
     )
 
     return {
+        "scope": "mine" if mine else "company",
         "pagos": pagos,
         "facturado": fact,
         "pagos_recientes": [

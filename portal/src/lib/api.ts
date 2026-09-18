@@ -26,6 +26,46 @@ async function tryRefresh(): Promise<boolean> {
   return refreshing;
 }
 
+/* ---------- Descargas y vistas con sesion ----------
+   Los enlaces <a href="/api/..."> no llevan el token (vive en memoria), por eso se piden con fetch + Bearer
+   y se entregan como blob: descarga (Excel, XML) o pestana nueva (PDF/HTML imprimible). */
+async function fetchBlob(path: string, retry = true): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  const r = await fetch(`/api${path}`, { headers, credentials: "include" });
+  if (r.status === 401 && retry && (await tryRefresh())) return fetchBlob(path, false);
+  if (!r.ok) {
+    let msg = r.statusText;
+    try { const j = await r.json(); msg = typeof j.detail === "string" ? j.detail : msg; } catch { /* sin cuerpo */ }
+    throw new ApiError(r.status, msg);
+  }
+  return r.blob();
+}
+
+export async function downloadFile(path: string, filename: string) {
+  const blob = await fetchBlob(path);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
+export async function openFile(path: string) {
+  const win = window.open("about:blank", "_blank"); // abrir antes del await evita el bloqueador de ventanas
+  try {
+    const blob = await fetchBlob(path);
+    const url = URL.createObjectURL(blob);
+    if (win) win.location.href = url; else window.location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 120_000);
+  } catch (e) { win?.close(); throw e; }
+}
+
+export async function uploadFile<T = unknown>(path: string, file: File): Promise<T> {
+  const fd = new FormData();
+  fd.append("file", file);
+  return api<T>(path, { method: "POST", body: fd });
+}
+
 /** Al abrir el portal: renovar por cookie antes de pedir /me (evita un 401 ruidoso por recarga). */
 export const bootstrap = () => (accessToken ? Promise.resolve(true) : tryRefresh());
 
@@ -65,6 +105,7 @@ export type Payment = { id: number; method: string; kind: string; currency: stri
 export type Invoice = Doc & { doc_type: string; consecutive: string | null; clave: string | null; balance: string; quote_id: number | null; einvoice_status: string; payments: Payment[]; sale_condition: string; credit_days: number; payment_method: string };
 export type DocListItem = { id: number; number: string; customer_name: string | null; currency: string; total: string; balance: string | null; status: string; issue_date: string; due_date: string | null };
 export type Dashboard = {
+  scope?: "mine" | "company";
   pagos: { hoy: string; mes: string; mes_anterior: string; variacion: number | null };
   facturado: { hoy: string; mes: string; mes_anterior: string; variacion: number | null };
   pagos_recientes: { id: number; invoice_id: number; ref: string | null; method: string; kind: string; amount: string; currency: string; date: string; status: string }[];

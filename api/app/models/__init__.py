@@ -14,6 +14,20 @@ from .core import (
     User,
 )
 from .crm import Customer
+from .extra import (
+    BankStatementLine,
+    CustomerContact,
+    CustomerNote,
+    Employee,
+    Event,
+    Media,
+    PayrollLine,
+    PayrollRun,
+    ProductVariant,
+    SupportGrant,
+    Ticket,
+    TicketType,
+)
 from .ops import (
     EInvoiceDocument,
     EmailOutbox,
@@ -70,4 +84,16 @@ __all__ = [
     "OrderLine",
     "ReceivedDocument",
     "ApiCredential",
+    "Media",
+    "CustomerContact",
+    "CustomerNote",
+    "ProductVariant",
+    "Employee",
+    "PayrollRun",
+    "PayrollLine",
+    "BankStatementLine",
+    "Event",
+    "TicketType",
+    "Ticket",
+    "SupportGrant",
 ]

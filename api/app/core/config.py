@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     # Arranque inicial de entornos compartidos (ver app/bootstrap.py): invitacion de admin, nunca contrasena
     bootstrap_admin_email: str | None = None
     bootstrap_demo: bool = False
+    # Cuentas de prueba: "correo:rol,correo:rol" (p. ej. "vendedor@ejemplo.com:ventas"). Se invita una vez por correo.
+    bootstrap_invites: str | None = None
 
     @field_validator("database_url")
     @classmethod

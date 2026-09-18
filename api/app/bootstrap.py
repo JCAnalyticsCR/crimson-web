@@ -36,8 +36,9 @@ def run(db: Session, admin_email: str | None, demo: bool = False, base_url: str 
         return None
     t = seed_base(db, demo=demo)
     now = datetime.now(UTC)
-    for old in db.scalars(select(Invitation).where(Invitation.tenant_id == t.id, Invitation.accepted_at.is_(None))):
-        old.expires_at = now  # un solo enlace vivo a la vez
+    email = admin_email.strip().lower()
+    for old in db.scalars(select(Invitation).where(Invitation.tenant_id == t.id, Invitation.email == email, Invitation.accepted_at.is_(None))):
+        old.expires_at = now  # un solo enlace de admin vivo a la vez
     raw = secrets.token_urlsafe(32)
     db.add(
         Invitation(
@@ -53,9 +54,46 @@ def run(db: Session, admin_email: str | None, demo: bool = False, base_url: str 
     return f"{(base_url or settings.public_base_url).rstrip('/')}/invitacion/{raw}"
 
 
+def extra_invites(db: Session, spec: str | None, base_url: str | None = None) -> list[tuple[str, str, str]]:
+    """Invitaciones adicionales (cuentas de prueba por rol). Solo emite si el correo no tiene cuenta ni una
+    invitacion vigente, asi un reinicio no genera enlaces nuevos. Devuelve [(correo, rol, enlace)]."""
+    from .core.deps import ASSIGNABLE_ROLES
+    from .models import Tenant
+
+    out: list[tuple[str, str, str]] = []
+    if not spec:
+        return out
+    t = db.scalar(select(Tenant).where(Tenant.slug == "crimson"))
+    if not t:
+        return out
+    now = datetime.now(UTC)
+    for item in [x.strip() for x in spec.split(",") if x.strip()]:
+        email, _, role = item.partition(":")
+        email, role = email.strip().lower(), (role.strip() or "lectura")
+        if role not in ASSIGNABLE_ROLES or "@" not in email:
+            print(f"[bootstrap] Invitacion omitida (rol o correo invalido): {item}", flush=True)
+            continue
+        if db.scalar(select(User).where(User.email == email)):
+            continue
+        live = db.scalar(select(Invitation).where(Invitation.email == email, Invitation.accepted_at.is_(None), Invitation.expires_at > now))
+        if live:
+            continue
+        raw = secrets.token_urlsafe(32)
+        db.add(
+            Invitation(tenant_id=t.id, email=email, role_code=role, token_hash=hash_token(raw), expires_at=now + timedelta(hours=INVITE_HOURS), invited_by=None)
+        )
+        out.append((email, role, f"{(base_url or settings.public_base_url).rstrip('/')}/invitacion/{raw}"))
+    db.commit()
+    return out
+
+
 def main() -> None:
     with SessionLocal() as db:
         link = run(db, settings.bootstrap_admin_email, demo=settings.bootstrap_demo)
+        extras = extra_invites(db, settings.bootstrap_invites)
+    for email, role, url in extras:
+        print(f"[bootstrap] Invitacion de prueba · rol {role} · {email} (vence en {INVITE_HOURS} h, un solo uso):", flush=True)
+        print(f"[bootstrap] {url}", flush=True)
     if link:
         print(f"[bootstrap] Invitacion de administrador para {settings.bootstrap_admin_email} (vence en {INVITE_HOURS} h, un solo uso):", flush=True)
         print(f"[bootstrap] {link}", flush=True)

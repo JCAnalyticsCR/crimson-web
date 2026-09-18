@@ -5,14 +5,15 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
-from ..models import Category, Coupon, Customer, Invoice, Order, OrderLine, Product, StorePage, Tenant
+from ..core.ratelimit import public_limiter
+from ..models import Category, Coupon, Customer, Invoice, Order, OrderLine, Product, ProductVariant, StorePage, Tenant
 from ..schemas.sales import DocumentIn, LineInSchema
 from ..services import documents as docsvc
 from ..services import inventory as inv
@@ -277,7 +278,10 @@ def order_status(oid: int, data: OrderStatusIn, p: Principal = Depends(require("
     if not o or o.tenant_id != p.tenant.id:
         raise HTTPException(404, "Orden no encontrada")
     o.status = data.status
-    audit(db, p.tenant.id, p.user.id, "status", "order", o.id, {"status": data.status}, ip=p.ip)
+    from .events import on_order_status
+
+    tickets = on_order_status(db, o, data.status)  # entradas de evento: pagado activa y envia, cancelado anula
+    audit(db, p.tenant.id, p.user.id, "status", "order", o.id, {"status": data.status, "tickets": tickets}, ip=p.ip)
     db.commit()
     return _order_out(o)
 
@@ -345,7 +349,17 @@ def _tenant(db: Session, slug: str) -> Tenant:
     return t
 
 
-def _prod_pub(p: Product):
+def _variants(db: Session, product_ids: list[int]) -> dict[int, list[dict]]:
+    out: dict[int, list[dict]] = {}
+    if not product_ids:
+        return out
+    q = select(ProductVariant).where(ProductVariant.product_id.in_(product_ids), ProductVariant.active).order_by(ProductVariant.position, ProductVariant.id)
+    for v in db.scalars(q):
+        out.setdefault(v.product_id, []).append({"id": v.id, "name": v.name, "price": v.price, "options": v.options})
+    return out
+
+
+def _prod_pub(p: Product, variants: list[dict] | None = None):
     main = next((i.get("url") for i in (p.images or []) if i.get("main")), (p.images or [{}])[0].get("url") if p.images else None)
     return {
         "id": p.id,
@@ -359,6 +373,7 @@ def _prod_pub(p: Product):
         "category_id": p.category_id,
         "tax_rate": float(p.taxes[0].tax.rate) if p.taxes else 13,
         "item_type": p.item_type,
+        "variants": [{**v, "price": v["price"] if v["price"] is not None else p.price} for v in (variants or [])],
     }
 
 
@@ -394,7 +409,9 @@ def store_products(slug: str, q: str | None = None, category_id: int | None = No
         stmt = stmt.where(or_(Product.name.ilike(f"%{q}%"), Product.code.ilike(f"%{q}%")))
     if category_id:
         stmt = stmt.where(Product.category_id == category_id)
-    return [_prod_pub(p) for p in db.scalars(stmt.order_by(Product.name))]
+    rows = db.scalars(stmt.order_by(Product.name)).all()
+    vmap = _variants(db, [p.id for p in rows])
+    return [_prod_pub(p, vmap.get(p.id)) for p in rows]
 
 
 @router.get("/public/store/{slug}/products/{pid}")
@@ -406,11 +423,12 @@ def store_product(slug: str, pid: int, db: Session = Depends(get_db)):
     related = db.scalars(
         select(Product).where(Product.tenant_id == t.id, Product.show_on_web, Product.active, Product.category_id == p.category_id, Product.id != p.id).limit(4)
     ).all()
-    return {**_prod_pub(p), "related": [_prod_pub(r) for r in related]}
+    return {**_prod_pub(p, _variants(db, [p.id]).get(p.id)), "related": [_prod_pub(r) for r in related]}
 
 
 class CartLine(BaseModel):
     product_id: int
+    variant_id: int | None = None
     quantity: Decimal = Field(gt=0)
 
 
@@ -436,13 +454,25 @@ def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
     if len(prods) != len({ln.product_id for ln in data.lines}):
         raise HTTPException(422, "Producto no disponible")
     ship = next((r for r in cfg["shipping_rates"] if r.get("active") and r["name"] == data.shipping_method), None) if data.shipping_method else None
+    vids = [ln.variant_id for ln in data.lines if ln.variant_id]
+    variants = {v.id: v for v in db.scalars(select(ProductVariant).where(ProductVariant.id.in_(vids), ProductVariant.active))} if vids else {}
 
-    gross = sum((d(ln.quantity) * d(prods[ln.product_id].price) for ln in data.lines), Decimal(0))
+    def unit_of(ln: CartLine) -> tuple[Decimal, str]:
+        pr = prods[ln.product_id]
+        if ln.variant_id:
+            v = variants.get(ln.variant_id)
+            if not v or v.product_id != pr.id:
+                raise HTTPException(422, "Variante no disponible")
+            return (d(v.price) if v.price is not None else d(pr.price)), f"{pr.name} · {v.name}"
+        return d(pr.price), pr.name
+
+    gross = sum((d(ln.quantity) * unit_of(ln)[0] for ln in data.lines), Decimal(0))
     coupon = valid_coupon(db, t.id, data.coupon_code, gross)
     items = []
     for ln in data.lines:
         pr = prods[ln.product_id]
-        base = d(ln.quantity) * d(pr.price)
+        unit, name = unit_of(ln)
+        base = d(ln.quantity) * unit
         if not coupon:
             dt, dv = "percent", Decimal(0)
         elif coupon.kind == "percent":
@@ -452,21 +482,22 @@ def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
         items.append(
             {
                 "product": pr,
-                "name": pr.name,
+                "name": name,
                 "quantity": d(ln.quantity),
-                "unit_price": d(pr.price),
+                "unit_price": unit,
                 "discount_type": dt,
                 "discount_value": dv,
                 "tax_rate": lines_rate(pr),
             }
         )
-    if ship and d(ship["amount"]) > 0:
+    ship_amount = shipping_cost(ship, sum((d(ln.quantity) * d(prods[ln.product_id].weight_kg or 0) for ln in data.lines), Decimal(0))) if ship else Decimal(0)
+    if ship and ship_amount > 0:
         items.append(
             {
                 "product": None,
                 "name": f"Envio - {ship['name']}",
                 "quantity": Decimal(1),
-                "unit_price": d(ship["amount"]),
+                "unit_price": ship_amount,
                 "discount_type": "percent",
                 "discount_value": Decimal(0),
                 "tax_rate": Decimal(13),
@@ -474,7 +505,7 @@ def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
         )
 
     calc = compute_document([LineIn(i["quantity"], i["unit_price"], i["discount_type"], i["discount_value"], i["tax_rate"]) for i in items])
-    shipping = d(ship["amount"]) if ship else Decimal(0)
+    shipping = ship_amount
     discount_total = sum((i["quantity"] * i["unit_price"] for i in items), Decimal(0)) - calc.subtotal
     return items, calc, coupon, ship, shipping, discount_total
 
@@ -495,7 +526,8 @@ def store_quote(slug: str, data: CheckoutIn, db: Session = Depends(get_db)):
 
 
 @router.post("/public/store/{slug}/checkout", status_code=201)
-def store_checkout(slug: str, data: CheckoutIn, db: Session = Depends(get_db)):
+def store_checkout(slug: str, data: CheckoutIn, request: Request, db: Session = Depends(get_db)):
+    public_limiter.hit(f"checkout:{request.client.host if request.client else '?'}")
     t = _tenant(db, slug)
     if store_cfg(t)["kind"] != "tienda":
         raise HTTPException(409, "Esta tienda es solo catalogo")
@@ -549,6 +581,49 @@ def store_checkout(slug: str, data: CheckoutIn, db: Session = Depends(get_db)):
         "instructions": next((m.get("instructions") for m in manual_methods(t) if m.get("name") == data.payment_method), None),
         "whatsapp": store_cfg(t)["whatsapp"],
     }
+
+
+def shipping_cost(rate: dict, weight_kg: Decimal) -> Decimal:
+    """Tarifa fija, o por peso estilo Correos de Costa Rica: base + por_kg x kg (minimo 1 kg), mas un recargo %."""
+    base = d(rate.get("amount") or 0)
+    per_kg = d(rate.get("per_kg") or 0)
+    if per_kg > 0:
+        base += per_kg * max(weight_kg, Decimal(1)).quantize(Decimal("0.001"))
+    overhead = d(rate.get("overhead_pct") or 0)
+    return (base * (1 + overhead / 100)).quantize(Decimal("0.01"))
+
+
+class ContactIn(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    email: EmailStr
+    phone: str | None = Field(None, max_length=40)
+    message: str = Field(min_length=3, max_length=4000)
+
+
+@router.post("/public/store/{slug}/contact", status_code=201)
+def store_contact(slug: str, data: ContactIn, request: Request, db: Session = Depends(get_db)):
+    """Formulario de contacto del sitio: el mensaje queda como nota en la ficha del cliente (lo crea si es nuevo)
+    y se avisa por correo a los administradores."""
+    import html
+
+    from ..models import CustomerNote, TenantUser
+    from ..services.mail import queue_email
+
+    public_limiter.hit(f"contact:{request.client.host if request.client else '?'}")
+    t = _tenant(db, slug)
+    email = str(data.email).lower()
+    c = db.scalar(select(Customer).where(Customer.tenant_id == t.id, Customer.email == email))
+    if not c:
+        c = Customer(tenant_id=t.id, name=data.name, email=email, phone=data.phone, whatsapp=data.phone, id_type="fisica")
+        db.add(c)
+        db.flush()
+    db.add(CustomerNote(tenant_id=t.id, customer_id=c.id, body=f"Mensaje desde la tienda: {data.message}"))
+    body = f"<p><b>{html.escape(data.name)}</b> ({html.escape(email)}{' · ' + html.escape(data.phone) if data.phone else ''}) escribió desde la tienda:</p><blockquote>{html.escape(data.message)}</blockquote>"
+    for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.role_code == "admin", TenantUser.active)):
+        queue_email(db, t, m.user.email, f"Nuevo mensaje de {data.name} · {t.name}", body, "customer", c.id)
+    audit(db, t.id, None, "contact", "customer", c.id)
+    db.commit()
+    return {"ok": True}
 
 
 def lines_rate(p: Product) -> Decimal:

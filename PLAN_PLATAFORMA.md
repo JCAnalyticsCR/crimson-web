@@ -407,7 +407,8 @@ Cada sesión termina con: tests verdes, migración aplicada, `README` del módul
 Núcleo
 - [x] Multi-tenant, auth, refresh, 2FA, bloqueo por intentos — `api/app/routers/auth.py` (2026-09-17)
 - [x] Roles y permisos por módulo × acción; roles predefinidos — `api/app/core/deps.py`
-- [~] Invitaciones (listo) · acceso de soporte auditado (pendiente)
+- [x] Invitaciones · acceso de soporte auditado (solo lectura por horas, bitácora por request, revocable) — `routers/support.py`
+- [x] Límite de intentos de login por IP (429) además del bloqueo por cuenta
 - [x] Ajustes de empresa (logo, razón social, cédula, divisa, actividad, teléfono, redes)
 - [~] Tipo de cambio BCCR diario + manual por documento — tarea worker + `/fx` (falta credencial BCCR)
 - [x] Buscador global (Ctrl+K: facturas, cotizaciones, clientes, productos, órdenes)
@@ -417,13 +418,13 @@ Dashboard
 - [x] Accesos rápidos · KPIs Pagos/Facturado (hoy, mes, mes anterior, variación) · Pagos recientes · Facturas recientes · Acciones pendientes — `/dashboard` + portal
 
 CRM
-- [~] Clientes CRUD (contactos, timeline y tarjetas guardadas pendientes)
+- [x] Clientes: ficha con KPIs, contactos, notas y línea de tiempo (cotizaciones, facturas, pagos, pedidos) · archivar · tarjetas guardadas (requiere ONVO real)
 
 Catálogo
-- [~] Productos/servicios ficha (dos descripciones, CABYS, impuesto, mostrar web; galería/partida/proveedor en modelo, UI pendiente)
-- [~] Proveedores · Impuestos · Categorías · Cupones (listos) · Opciones/variantes · Subcategorías (pendientes)
-- [ ] Página enriquecida de producto (editor + bloques)
-- [ ] "Crear Link para producto"
+- [x] Productos/servicios ficha completa: galería con imagen principal, proveedor, categoría, peso, partida, registro
+- [x] Proveedores (editables) · Impuestos · Categorías · Cupones · Variantes con código y precio propio (tienda y POS) · Subcategorías (modelo con parent_id)
+- [x] Página de producto en la tienda: galería, variantes, relacionados, consulta por WhatsApp
+- [x] "Copiar link" de producto (abre la ficha en la tienda con `?p=`)
 
 Inventario
 - [x] Ubicaciones · stock por ubicación · ledger · descuento por venta · transferencias · alertas · reporte Excel
@@ -439,28 +440,28 @@ Cobros
 - [x] Enlace de pago por factura (WhatsApp, copiar, abrir, tracking de aperturas)
 - [~] ONVO: adapter + webhook firmado/idempotente + reembolso (falta credencial real) · métodos manuales (listo) · PayPal (pendiente)
 - [~] Pasarelas configurables con secreto cifrado (listo) · Reautorizaciones (pendiente) · Propinas (campo listo)
-- [~] Cuentas bancarias · Cierre de caja diario (listos) · Conciliación automática (pendiente)
+- [x] Cuentas bancarias · Cierre de caja diario · Conciliación bancaria (importa CSV/Excel del banco, casa automático por monto+fecha+referencia, manual, gasto desde débito)
 
 Facturación electrónica
 - [x] Grupos y consecutivos (FE, TE, FEE, NC, ND, cotizaciones) — 20 dígitos v4.4, bloqueo por fila
 - [~] Emisión · estados · XML documento/respuesta con adapter sandbox (listo) · credenciales Hacienda y contingencia con proveedor real (pendiente)
 - [x] XMLs documento/respuesta, descarga individual
-- [x] Recepción (emisor, clave, IVA acreditable, actividad, aceptar/parcial/rechazar) · Bandeja de entrada (carga de XML; IMAP pendiente)
-- [~] Notificaciones: ajustes y BCC (listos) · envío automático de recordatorios (pendiente)
+- [x] Recepción (emisor, clave, IVA acreditable, actividad, aceptar/parcial/rechazar) · Bandeja IMAP (cada 15 min, contraseña cifrada) + carga manual
+- [x] Notificaciones: ajustes, BCC, recordatorios automáticos de vencimiento y cierre diario por correo
 
 E-commerce
-- [~] Personalización (logo, colores, fuentes, tipo, publicar, dominio declarado) · Navegación (listos) · Multimedia (subida de archivos) y SSL de dominio propio (pendientes)
+- [~] Personalización · Navegación · Multimedia (subida de imágenes y PDF, biblioteca) (listos) · SSL de dominio propio (depende del DNS del cliente)
 - [x] Constructor de bloques (8 tipos, mismo render en editor y sitio) · Catálogo público · Carrito · Checkout · Relacionados
-- [~] Envíos (tarifas propias) · Inventario de tienda (listos) · Correos de CR con overhead · textos legales en el sitio (pendientes)
+- [x] Envíos: tarifa fija o por peso estilo Correos de CR con recargo · Inventario de tienda · Textos legales en el pie del sitio · Formulario de contacto (nota en la ficha + correo)
 
 Contabilidad
-- [~] Gastos · categorías · cuentas · estado de resultados (listos) · recurrentes · empleados · planillas (pendientes)
+- [x] Gastos con adjunto y proveedor · categorías · cuentas · estado de resultados · gastos recurrentes · colaboradores · planillas (CCSS, renta por tramos, provisiones, colillas, gasto automático)
 
 Reportes (15)
-- [~] Facturación · Pendientes · Impuesto facturado · Estado de resultados · Cierre diario · Transacciones · Gastos · IVA/Prorrata · Inventario · Venta de productos · Movimientos (listos, con Excel) · Propina · Órdenes · Recepciones · D151 (pendientes)
+- [x] Los 11 anteriores + Órdenes · Recepciones · Propinas · D-151 (borrador) · Planilla · Conciliación — 17 reportes, todos con Excel
 
 Eventos / POS / API
-- [~] API pública + credenciales + checkout JWT + webhooks salientes (listos) · Eventos/tickets QR · POS web · Importador (pendientes) · vPOS (diferido)
+- [x] API pública + credenciales + checkout JWT + webhooks salientes · Eventos con entradas QR (venta pública, activación al pagar, check-in con cámara) · POS web (vuelto, pagos mixtos, variantes) · Importador CSV/Excel (clientes, productos, proveedores, facturas históricas; migración desde Fygaro) · vPOS (diferido)
 
 ---
 
@@ -497,6 +498,8 @@ Eventos / POS / API
 Sesiones 1-3 ejecutadas (2026-09-17): sesión 3 = Mi Tienda completa (bloques, catálogo, carrito, checkout, cupones, envíos), órdenes → tiquete, recepción de XML de compras, buscador global, API pública con credenciales y checkout JWT, recordatorios y cierre diario por correo. Sesiones 1-2: PDF/correo, inventario, contabilidad, reportes con Excel, recurrencias, ajustes completos (usuarios, invitaciones, pasarelas, métodos, consecutivos), factura electrónica con adapter sandbox + NC + XMLs, webhook ONVO firmado. Sesión 1: `api/` (FastAPI + SQLAlchemy 2 + Alembic, 13 tests verdes), `portal/` (React + Vite, sistema de diseño Crimson, login, dashboard, cotizaciones, facturas, pagos, enlace de pago, clientes, productos, ajustes, página pública de pago), `worker/` (Celery + beat: BCCR, vencimientos), `infra/docker-compose.yml`, Dockerfiles y `railway.toml`. Ver `api/README.md`.
 
 Staging (2026-09-17): desplegado en Railway (`crimson-plataforma`: api, portal, worker, Postgres, Redis) con arranque por invitación; migraciones y los 26 tests verificados en Postgres. URL del portal en `api/README.md`.
+
+Sesión 4 (2026-09-17): cerró todo lo que no depende de credenciales externas (ver §12). 38 tests verdes en SQLite y Postgres.
 
 ## 16. Próximos pasos inmediatos
 

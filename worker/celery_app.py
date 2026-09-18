@@ -131,7 +131,42 @@ def daily_close_email() -> int:
     return n
 
 
+@celery.task(name="reception.poll_inboxes")
+def poll_inboxes() -> int:
+    """Bandejas IMAP activas: importa XML de proveedores. Un buzon con error no detiene a los demas."""
+    from app.core.db import SessionLocal
+    from app.models import Tenant
+    from app.services.inbox import config, poll
+    from sqlalchemy import select
+
+    n = 0
+    with SessionLocal() as db:
+        for t in db.scalars(select(Tenant).where(Tenant.active)):
+            if not config(t).get("enabled"):
+                continue
+            try:
+                res = poll(db, t)
+                n += res["nuevos"]
+            except Exception as e:  # noqa: BLE001
+                db.rollback()
+                log.warning("bandeja %s: %s", t.slug, e)
+    return n
+
+
+@celery.task(name="support.expire_grants")
+def expire_support_grants() -> int:
+    from app.core.db import SessionLocal
+    from app.routers.support import expire_grants
+
+    with SessionLocal() as db:
+        n = expire_grants(db)
+        db.commit()
+    return n
+
+
 celery.conf.beat_schedule = {
+    "poll-inboxes": {"task": "reception.poll_inboxes", "schedule": crontab(minute="*/15")},
+    "expire-support": {"task": "support.expire_grants", "schedule": crontab(minute=5)},
     "reminders": {"task": "sales.reminders", "schedule": crontab(hour=8, minute=0)},
     "daily-close": {"task": "sales.daily_close_email", "schedule": crontab(hour=21, minute=0)},
     "run-recurrences": {"task": "sales.run_recurrences", "schedule": crontab(hour=5, minute=0)},

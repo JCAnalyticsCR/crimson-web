@@ -76,8 +76,9 @@ class Recurrence(TenantMixin, TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(160))
-    customer_id: Mapped[int] = mapped_column(ForeignKey("customer.id"))
-    template: Mapped[dict] = mapped_column(JSON)  # DocumentIn serializado
+    kind: Mapped[str] = mapped_column(String(10), default="factura", server_default="factura")  # factura | gasto
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id"))  # solo facturas
+    template: Mapped[dict] = mapped_column(JSON)  # DocumentIn (factura) o ExpenseIn (gasto) serializado
     frequency: Mapped[str] = mapped_column(String(12), default="mensual")  # semanal | quincenal | mensual | anual
     next_date: Mapped[date] = mapped_column(Date, index=True)
     end_date: Mapped[date | None] = mapped_column(Date)
@@ -85,6 +86,7 @@ class Recurrence(TenantMixin, TimestampMixin, Base):
     auto_charge: Mapped[bool] = mapped_column(Boolean, default=False)  # con tarjeta tokenizada (Fase 3)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_invoice_id: Mapped[int | None] = mapped_column(ForeignKey("invoice.id"))
+    last_expense_id: Mapped[int | None] = mapped_column(ForeignKey("expense.id"))
     runs: Mapped[int] = mapped_column(Integer, default=0)
 
 
