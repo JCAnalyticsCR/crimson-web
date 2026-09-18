@@ -91,6 +91,7 @@ export default function Settings() {
         </div>
       )}
 
+      {tab === "facturacion" && <FxCard />}
       {tab === "facturacion" && cfg && (
         <div className="grid-2">
           <Card title="Vigencias y mensajes">
@@ -360,5 +361,46 @@ function SupportAccess() {
         )}
       </Modal>}
     </div>
+  );
+}
+
+/* ---------- Tipo de cambio: BCCR automatico (API SDDE) o manual ---------- */
+type Fx = { date: string; currency: string; sell: string; buy: string; source: string; note: string | null };
+function FxCard() {
+  const { toast } = useSession();
+  const [fx, setFx] = useState<Fx | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [manual, setManual] = useState<{ sell: string; buy: string } | null>(null);
+  const load = () => api<Fx | null>("/fx/today").then(setFx).catch(() => setFx(null));
+  useEffect(() => { load(); }, []);
+  const bccr = async () => {
+    setBusy(true);
+    try { const r = await api<Fx>("/fx/bccr", { method: "POST" }); setFx(r); toast(`BCCR: venta ₡${Number(r.sell).toFixed(2)} · compra ₡${Number(r.buy).toFixed(2)}`); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+    finally { setBusy(false); }
+  };
+  const saveManual = async () => {
+    if (!manual) return;
+    try { const r = await api<Fx>("/fx", { method: "PUT", json: { date: new Date().toISOString().slice(0, 10), currency: "USD", sell: Number(manual.sell), buy: Number(manual.buy), note: "manual" } }); setFx(r); setManual(null); toast("Tipo de cambio guardado"); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
+  return (
+    <Card title="Tipo de cambio del dólar" extra={<span className="meta">{fx ? `${fx.source === "bccr" ? "BCCR" : "Manual"} · ${fmtDate(fx.date)}` : "sin datos"}</span>}>
+      <div style={{ display: "flex", gap: 22, flexWrap: "wrap", alignItems: "center" }}>
+        <div><div className="meta">Venta</div><div className="money" style={{ fontSize: 26, fontWeight: 700 }}>{fx ? `₡${Number(fx.sell).toFixed(2)}` : "—"}</div></div>
+        <div><div className="meta">Compra</div><div className="money" style={{ fontSize: 26, fontWeight: 700 }}>{fx ? `₡${Number(fx.buy).toFixed(2)}` : "—"}</div></div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn btn--soft btn--sm" onClick={() => setManual({ sell: fx ? String(Number(fx.sell)) : "", buy: fx ? String(Number(fx.buy)) : "" })}>Fijar manual</button>
+          <button className="btn btn--crimson btn--sm" onClick={bccr} disabled={busy}>{busy ? "Consultando…" : "Actualizar desde el BCCR"}</button>
+        </div>
+      </div>
+      <p className="muted" style={{ fontSize: 12.5, marginBottom: 0 }}>Se actualiza solo cada día a las 6:15 a. m. con el token del BCCR (variable compartida <span className="mono">BCCR_TOKEN</span> en Railway). Las facturas en dólares guardan el tipo de cambio del día en que se emiten.</p>
+      {manual && <Modal title="Tipo de cambio manual (hoy)" onClose={() => setManual(null)} foot={<><button className="btn btn--ghost" onClick={() => setManual(null)}>Cancelar</button><button className="btn btn--crimson" onClick={saveManual}>Guardar</button></>}>
+        <div className="grid-2">
+          <Field label="Venta ₡"><input className="input input--mono" value={manual.sell} onChange={(e) => setManual({ ...manual, sell: e.target.value })} /></Field>
+          <Field label="Compra ₡"><input className="input input--mono" value={manual.buy} onChange={(e) => setManual({ ...manual, buy: e.target.value })} /></Field>
+        </div>
+      </Modal>}
+    </Card>
   );
 }

@@ -397,3 +397,48 @@ def test_vendedor_role_scope_and_test_invites(client, auth, db_session):
     assert client.get("/expenses", headers=h).status_code == 403
     client.headers.update(admin_h)
     assert client.get("/dashboard").json()["scope"] == "company"
+
+
+class FakeBccr:
+    """Imita la API SDDE: 318 venta, 317 compra; sin datos el fin de semana."""
+
+    def __init__(self, status=200):
+        self.status, self.calls = status, []
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        import httpx
+
+        self.calls.append((url, params, headers))
+        code = url.split("/indicadoresEconomicos/")[1].split("/")[0]
+        val = {"318": 512.34, "317": 505.1}[code]
+        body = {
+            "estado": True,
+            "mensaje": "Consulta exitosa",
+            "datos": [
+                {
+                    "codigoIndicador": code,
+                    "series": [{"fecha": "2026-09-11", "valorDatoPorPeriodo": val - 1}, {"fecha": "2026-09-12", "valorDatoPorPeriodo": val}],
+                }
+            ],
+        }
+        return httpx.Response(self.status, json=body, request=httpx.Request("GET", url))
+
+
+def test_bccr_sdde_connector(client, auth, monkeypatch):
+    from app.providers.fx import bccr
+
+    monkeypatch.delenv("BCCR_TOKEN", raising=False)
+    assert client.post("/fx/bccr").status_code == 422  # sin token: mensaje claro, nada se rompe
+    monkeypatch.setenv("BCCR_TOKEN", "eyJ-prueba")
+    fake = FakeBccr()
+    sell, buy = bccr.fetch_today(date(2026, 9, 13), client=fake)  # domingo: toma el ultimo publicado
+    assert (sell, buy) == (Decimal("512.34"), Decimal("505.1"))
+    url, params, headers = fake.calls[0]
+    assert url.endswith("/indicadoresEconomicos/318/series") and params["fechaFin"] == "2026/09/13" and headers["Authorization"] == "Bearer eyJ-prueba"
+    import pytest
+
+    with pytest.raises(bccr.BccrError, match="401"):
+        bccr.fetch_today(date(2026, 9, 13), client=FakeBccr(401))
+    monkeypatch.setattr(bccr.httpx, "get", FakeBccr().get)
+    r = client.post("/fx/bccr")
+    assert r.status_code == 200 and r.json()["source"] == "bccr"

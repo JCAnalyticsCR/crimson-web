@@ -60,3 +60,33 @@ def fx_upsert(data: ExchangeRateIn, _: Principal = Depends(require("settings", "
     db.commit()
     db.refresh(fx)
     return fx
+
+
+def save_bccr_today(db: Session) -> ExchangeRate:
+    """Consulta el BCCR (API SDDE) y guarda venta/compra de hoy. Compartido con el worker diario."""
+    from ..providers.fx.bccr import fetch_today
+
+    sell, buy = fetch_today()
+    fx = db.scalar(select(ExchangeRate).where(ExchangeRate.date == date.today(), ExchangeRate.currency == "USD"))
+    if fx is None:
+        fx = ExchangeRate(date=date.today(), currency="USD")
+        db.add(fx)
+    fx.sell, fx.buy, fx.source, fx.note = sell, buy, "bccr", "API SDDE del BCCR"
+    db.commit()
+    db.refresh(fx)
+    return fx
+
+
+@router.post("/fx/bccr", response_model=ExchangeRateOut)
+def fx_bccr(_: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
+    """Actualiza ya el tipo de cambio desde el BCCR (el worker lo hace solo cada dia a las 6:15)."""
+    from fastapi import HTTPException
+
+    from ..providers.fx.bccr import BccrError
+
+    try:
+        return save_bccr_today(db)
+    except BccrError as e:
+        raise HTTPException(422 if "Falta" in str(e) else 502, str(e)) from e
+    except Exception as e:  # noqa: BLE001 - red caida, BCCR fuera de servicio
+        raise HTTPException(502, f"No se pudo consultar el BCCR: {e}") from e

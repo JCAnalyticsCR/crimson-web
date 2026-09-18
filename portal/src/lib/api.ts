@@ -66,6 +66,19 @@ export async function uploadFile<T = unknown>(path: string, file: File): Promise
   return api<T>(path, { method: "POST", body: fd });
 }
 
+/* Errores de validacion (422 de FastAPI) en lenguaje humano, nunca el JSON crudo. */
+const FIELD: Record<string, string> = { email: "correo", password: "contraseña", name: "nombre", phone: "teléfono", amount: "monto", quantity: "cantidad", price: "precio", code: "código", date: "fecha" };
+function friendly(items: { loc?: (string | number)[]; msg?: string; type?: string }[]): string {
+  const it = items[0] || {};
+  const field = String(it.loc?.[it.loc.length - 1] ?? "");
+  const label = FIELD[field] || field.replace(/_/g, " ") || "dato";
+  if (field === "email" || /email/i.test(it.msg || "")) return "Escribí un correo válido (ejemplo: nombre@empresa.com).";
+  if (it.type === "missing") return `Falta el campo ${label}.`;
+  if (/at least|too_short/i.test(`${it.type} ${it.msg}`)) return `El campo ${label} es demasiado corto.`;
+  if (/greater than|less than|number/i.test(it.msg || "")) return `Revisá el valor de ${label}.`;
+  return `Revisá el campo ${label}.`;
+}
+
 /** Al abrir el portal: renovar por cookie antes de pedir /me (evita un 401 ruidoso por recarga). */
 export const bootstrap = () => (accessToken ? Promise.resolve(true) : tryRefresh());
 
@@ -81,7 +94,7 @@ export async function api<T = unknown>(path: string, init: RequestInit & { json?
   }
   if (!r.ok) {
     let msg = r.statusText;
-    try { const j = await r.json(); msg = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail ?? j); } catch { /* sin cuerpo */ }
+    try { const j = await r.json(); msg = typeof j.detail === "string" ? j.detail : Array.isArray(j.detail) ? friendly(j.detail) : "No se pudo completar la solicitud"; } catch { /* sin cuerpo */ }
     throw new ApiError(r.status, msg, r.headers);
   }
   if (r.status === 204) return undefined as T;

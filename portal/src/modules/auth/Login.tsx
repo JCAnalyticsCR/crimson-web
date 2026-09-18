@@ -78,7 +78,9 @@ export default function Login() {
   }, []);
 
   const submit = async (e: FormEvent) => {
-    e.preventDefault(); setErr(null); setBusy(true);
+    e.preventDefault(); setErr(null);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setErr("Escribí tu correo completo (ejemplo: nombre@empresa.com)."); setShake((n) => n + 1); return; }
+    setBusy(true);
     try { await login(email.trim(), password, totp || undefined); }
     catch (ex) {
       if (ex instanceof ApiError && ex.headers?.get("X-2FA") === "required") { setNeed2fa(true); setErr(null); }
