@@ -407,8 +407,8 @@ Cada sesión termina con: tests verdes, migración aplicada, `README` del módul
 Núcleo
 - [x] Multi-tenant, auth, refresh, 2FA, bloqueo por intentos — `api/app/routers/auth.py` (2026-09-17)
 - [x] Roles y permisos por módulo × acción; roles predefinidos — `api/app/core/deps.py`
-- [ ] Invitaciones; acceso de soporte auditado
-- [ ] Ajustes de empresa (logo, sector, idioma, razón social, cédula, divisas, teléfonos, direcciones, redes)
+- [~] Invitaciones (listo) · acceso de soporte auditado (pendiente)
+- [x] Ajustes de empresa (logo, razón social, cédula, divisa, actividad, teléfono, redes)
 - [~] Tipo de cambio BCCR diario + manual por documento — tarea worker + `/fx` (falta credencial BCCR)
 - [ ] Buscador global
 - [x] Auditoría y logs — `audit_log` en crear/editar/anular/pagar/login
@@ -421,32 +421,32 @@ CRM
 
 Catálogo
 - [~] Productos/servicios ficha (dos descripciones, CABYS, impuesto, mostrar web; galería/partida/proveedor en modelo, UI pendiente)
-- [ ] Opciones/variantes · Categorías/subcategorías · Proveedores · Impuestos · Cupones
+- [~] Proveedores · Impuestos · Categorías (listos) · Opciones/variantes · Subcategorías · Cupones (pendientes)
 - [ ] Página enriquecida de producto (editor + bloques)
 - [ ] "Crear Link para producto"
 
 Inventario
-- [ ] Ubicaciones · stock por ubicación · ledger · descuento por venta · transferencias · alertas · reporte Excel
+- [x] Ubicaciones · stock por ubicación · ledger · descuento por venta · transferencias · alertas · reporte Excel
 
 Ventas
-- [ ] Cotizaciones completas (secciones 8–13 del video) · PDF · envío · duplicar · anular · vigencia
+- [x] Cotizaciones completas · PDF/HTML · envío por correo · duplicar · anular · vigencia
 - [x] Conversión cotización → factura — conserva cliente, líneas, totales; marca `convertida`
-- [ ] Facturas completas (sección 14) · saldo · pagos · enlace · XMLs · duplicar · anular (NC)
-- [ ] Órdenes · Recurrencias · Facturas de compra
+- [x] Facturas completas · saldo · pagos · enlace · XMLs · anular (NC)
+- [~] Recurrencias (listo) · Órdenes · Facturas de compra (pendientes)
 
 Cobros
 - [x] Modal Pago con método/tipo/cuenta/referencia/fecha/confirmación
 - [x] Enlace de pago por factura (WhatsApp, copiar, abrir, tracking de aperturas)
-- [ ] ONVO: intent, checkout, webhook, refund, tokens · PayPal · métodos manuales
-- [ ] Pasarelas configurables (client id/secret, principal, activo) · Reautorizaciones · Propinas
-- [ ] Cuentas bancarias · Cierre de caja diario · Conciliación
+- [~] ONVO: adapter + webhook firmado/idempotente + reembolso (falta credencial real) · métodos manuales (listo) · PayPal (pendiente)
+- [~] Pasarelas configurables con secreto cifrado (listo) · Reautorizaciones (pendiente) · Propinas (campo listo)
+- [~] Cuentas bancarias · Cierre de caja diario (listos) · Conciliación automática (pendiente)
 
 Facturación electrónica
 - [x] Grupos y consecutivos (FE, TE, FEE, NC, ND, cotizaciones) — 20 dígitos v4.4, bloqueo por fila
-- [ ] Credenciales Hacienda por tenant · emisión · estados · contingencia
-- [ ] XMLs documento/respuesta, descarga individual y conjunta
+- [~] Emisión · estados · XML documento/respuesta con adapter sandbox (listo) · credenciales Hacienda y contingencia con proveedor real (pendiente)
+- [x] XMLs documento/respuesta, descarga individual
 - [ ] Recepción (emisor, clave, IVA acreditable, actividad, aceptar/parcial/rechazar) · Bandeja de entrada
-- [ ] Notificaciones (vencimiento, recordatorio N días, BCC, cierre diario)
+- [~] Notificaciones: ajustes y BCC (listos) · envío automático de recordatorios (pendiente)
 
 E-commerce
 - [ ] Personalización (dominio, logo, favicon, colores, fuentes, tipo, publicar) · Navegación · Multimedia · Formularios
@@ -454,10 +454,10 @@ E-commerce
 - [ ] Envíos (tarifas, Correos de CR, overhead) · Legal (privacidad, términos) · Inventario de tienda
 
 Contabilidad
-- [ ] Gastos · recurrentes · categorías · bancos · cuentas · empleados · planillas básicas · estado de resultados
+- [~] Gastos · categorías · cuentas · estado de resultados (listos) · recurrentes · empleados · planillas (pendientes)
 
 Reportes (15)
-- [ ] Facturación · Pendientes · Impuesto facturado · Estado de resultados · Cierre diario · Transacciones · Propina · Gastos · Órdenes · IVA · Prorrata · Recepciones · Inventario · Borrador D151 · Venta de productos — todos con exportación Excel
+- [~] Facturación · Pendientes · Impuesto facturado · Estado de resultados · Cierre diario · Transacciones · Gastos · IVA/Prorrata · Inventario · Venta de productos · Movimientos (listos, con Excel) · Propina · Órdenes · Recepciones · D151 (pendientes)
 
 Eventos / POS / API
 - [ ] Eventos y tickets QR · POS web · API pública + credenciales + webhooks · Importador · Dispositivos (vPOS diferido)
@@ -494,7 +494,7 @@ Eventos / POS / API
 
 ## 15. Estado (2026-09-17)
 
-Sesión 1 ejecutada: `api/` (FastAPI + SQLAlchemy 2 + Alembic, 13 tests verdes), `portal/` (React + Vite, sistema de diseño Crimson, login, dashboard, cotizaciones, facturas, pagos, enlace de pago, clientes, productos, ajustes, página pública de pago), `worker/` (Celery + beat: BCCR, vencimientos), `infra/docker-compose.yml`, Dockerfiles y `railway.toml`. Ver `api/README.md`.
+Sesiones 1-2 ejecutadas (2026-09-17): PDF/correo, inventario, contabilidad, reportes con Excel, recurrencias, ajustes completos (usuarios, invitaciones, pasarelas, métodos, consecutivos), factura electrónica con adapter sandbox + NC + XMLs, webhook ONVO firmado. Sesión 1: `api/` (FastAPI + SQLAlchemy 2 + Alembic, 13 tests verdes), `portal/` (React + Vite, sistema de diseño Crimson, login, dashboard, cotizaciones, facturas, pagos, enlace de pago, clientes, productos, ajustes, página pública de pago), `worker/` (Celery + beat: BCCR, vencimientos), `infra/docker-compose.yml`, Dockerfiles y `railway.toml`. Ver `api/README.md`.
 
 ## 16. Próximos pasos inmediatos
 
