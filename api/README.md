@@ -17,6 +17,15 @@ uv run pytest -q                         # 25 tests: totales v4.4, consecutivos,
 Portal: `cd portal && npm install && npm run dev` → http://localhost:5173 (proxy `/api` → `:8000`).
 Todo junto con Docker: `docker compose -f infra/docker-compose.yml up --build`.
 
+## Staging en Railway
+
+Proyecto `crimson-plataforma` (entorno `production` de Railway, datos de prueba): servicios `api` (raíz `/api`), `portal` (raíz `/portal`, nginx con proxy `/api` a la URL pública de la API), `worker` (raíz del repo, `RAILWAY_DOCKERFILE_PATH=worker/Dockerfile`), Postgres y Redis. Cada push a `main` redespliega.
+
+- Portal: https://portal-production-4312.up.railway.app · API: https://api-production-f07a.up.railway.app (`/health`, `/docs`).
+- Arranque sin contraseñas: con la base vacía y `BOOTSTRAP_ADMIN_EMAIL` definido, `python -m app.bootstrap` (corre en cada arranque) emite una invitación de admin de un solo uso y la escribe en el log de `api`. Cada reinicio sin usuarios la reemplaza; una vez aceptada, queda inerte.
+- `JWT_SECRET` se generó dentro del comando de la CLI y nunca se mostró. Rotarlo cierra todas las sesiones y vuelve ilegibles los secretos de pasarelas guardados (Fernet derivado).
+- Migraciones probadas en Postgres real: `uv run --with pgserver ...` o `TEST_DATABASE_URL=postgresql://... uv run pytest` corre la suite completa contra Postgres.
+
 ## Qué hay
 
 | Módulo | Endpoints | Notas |

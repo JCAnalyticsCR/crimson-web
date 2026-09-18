@@ -496,6 +496,8 @@ Eventos / POS / API
 
 Sesiones 1-3 ejecutadas (2026-09-17): sesión 3 = Mi Tienda completa (bloques, catálogo, carrito, checkout, cupones, envíos), órdenes → tiquete, recepción de XML de compras, buscador global, API pública con credenciales y checkout JWT, recordatorios y cierre diario por correo. Sesiones 1-2: PDF/correo, inventario, contabilidad, reportes con Excel, recurrencias, ajustes completos (usuarios, invitaciones, pasarelas, métodos, consecutivos), factura electrónica con adapter sandbox + NC + XMLs, webhook ONVO firmado. Sesión 1: `api/` (FastAPI + SQLAlchemy 2 + Alembic, 13 tests verdes), `portal/` (React + Vite, sistema de diseño Crimson, login, dashboard, cotizaciones, facturas, pagos, enlace de pago, clientes, productos, ajustes, página pública de pago), `worker/` (Celery + beat: BCCR, vencimientos), `infra/docker-compose.yml`, Dockerfiles y `railway.toml`. Ver `api/README.md`.
 
+Staging (2026-09-17): desplegado en Railway (`crimson-plataforma`: api, portal, worker, Postgres, Redis) con arranque por invitación; migraciones y los 26 tests verificados en Postgres. URL del portal en `api/README.md`.
+
 ## 16. Próximos pasos inmediatos
 
 1. Elegir proveedor fiscal (Alanube vs GTI) y abrir sandbox; solicitar credenciales de prueba ONVO.
