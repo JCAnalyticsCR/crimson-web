@@ -4,10 +4,12 @@ import { Link } from "react-router-dom";
 import { api, fmtDate, fmtMoney, type Payment } from "../../lib/api";
 import { Badge, Card, Empty, I, Icon } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
+import { useSession } from "../../app/session";
 
 type Cierre = { columns: string[]; rows: (string | number)[][]; totals: { total: string } | null; from: string; to: string };
 
 export default function Payments() {
+  const { allows } = useSession();
   const [items, setItems] = useState<(Payment & { invoice_id?: number })[]>([]);
   const [cierre, setCierre] = useState<Cierre | null>(null);
   const [range, setRange] = useState({ from: new Date(new Date().setDate(1)).toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) });
@@ -21,7 +23,7 @@ export default function Payments() {
         <div className="page-head__actions">
           <input className="input" type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} style={{ width: 150 }} />
           <input className="input" type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} style={{ width: 150 }} />
-          <AuthLink path={`/reports/cierre?from=${range.from}&to=${range.to}&format=xlsx`} download={`cierre-${range.from}-${range.to}.xlsx`}><Icon d={I.reports} />Cierre en Excel</AuthLink>
+          {allows("sales.ver_todo") && allows("reports.exportar") && <AuthLink path={`/reports/cierre?from=${range.from}&to=${range.to}&format=xlsx`} download={`cierre-${range.from}-${range.to}.xlsx`}><Icon d={I.reports} />Cierre en Excel</AuthLink>}
           <button className="btn btn--ghost btn--sm" onClick={load}><Icon d={I.refresh} /></button>
         </div>
       </div>

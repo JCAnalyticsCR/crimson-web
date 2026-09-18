@@ -10,6 +10,8 @@ const SHORTCUTS: { need: string; to: string; label: string; icon: string }[] = [
   { need: "sales.crear", to: "/cotizaciones/nueva", label: "Nueva cotización", icon: I.quote },
   { need: "sales.crear", to: "/pos", label: "Punto de venta", icon: I.wallet },
   { need: "crm.ver", to: "/clientes", label: "Clientes", icon: I.customers },
+  { need: "inventory.ver", to: "/inventario", label: "Inventarios", icon: I.inventory },
+  { need: "catalog.editar", to: "/productos", label: "Productos", icon: I.products },
   { need: "reports.ver", to: "/reportes", label: "Reportes", icon: I.reports },
   { need: "accounting.ver", to: "/contabilidad", label: "Contabilidad", icon: I.accounting },
   { need: "settings.configurar", to: "/ajustes", label: "Ajustes", icon: I.settings },

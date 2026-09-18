@@ -27,7 +27,12 @@ export default function Dashboard() {
   const rm = roleMeta(role);
   const [d, setD] = useState<D | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const load = () => api<D>("/dashboard").then(setD).catch((e) => setErr(e.message));
+  const [low, setLow] = useState<{ product_id: number; name: string; code: string; quantity: string; min_stock: number }[] | null>(null);
+  const salesHome = allows("sales.ver");
+  const load = () => {
+    if (salesHome) api<D>("/dashboard").then(setD).catch((e) => setErr(e.message));
+    else api<{ low_stock: typeof low }>("/alerts").then((r) => setLow(r.low_stock || [])).catch((e) => setErr(e.message));
+  };
   useEffect(() => { load(); }, []);
   const cur = me?.tenant.default_currency || "CRC";
   const hour = new Date().getHours();
@@ -54,10 +59,19 @@ export default function Dashboard() {
         {allows("catalog.crear") && <Link className="action" to="/productos?nuevo=1"><i><Icon d={I.products} /></i><div><b>Crear producto</b><span>Precio, CABYS e impuesto</span></div></Link>}
         {allows("sales.crear") && <Link className="action" to="/cotizaciones/nueva"><i><Icon d={I.quote} /></i><div><b>Crear cotización</b><span>Y convertirla a factura en un clic</span></div></Link>}
         {allows("sales.crear") && !allows("catalog.crear") && <Link className="action" to="/pos"><i><Icon d={I.wallet} /></i><div><b>Punto de venta</b><span>Cobro de mostrador con vuelto</span></div></Link>}
-        {allows("reports.ver") && <Link className="action" to="/reportes"><i><Icon d={I.reports} /></i><div><b>Reportes</b><span>17 reportes con Excel</span></div></Link>}
+        {allows("inventory.crear") && <Link className="action" to="/inventario"><i><Icon d={I.inventory} /></i><div><b>Movimiento de inventario</b><span>Entradas, salidas y transferencias</span></div></Link>}
+        {allows("reports.ver") && <Link className="action" to="/reportes"><i><Icon d={I.reports} /></i><div><b>Reportes</b><span>Los reportes de tu rol, con Excel</span></div></Link>}
       </div>
 
       {err && <p style={{ color: "var(--bad)" }}>{err}</p>}
+      {!salesHome && (
+        <Card title="Existencias bajo el mínimo" flush extra={<Link className="btn btn--ghost btn--sm" to="/inventario">Ir a inventarios</Link>}>
+          {low === null ? <div style={{ padding: 24, textAlign: "center" }}><span className="spinner" /></div> : low.length === 0 ? <Empty title="Todo en orden" hint="Ningún producto está por debajo de su stock mínimo." /> : (
+            <table className="table"><thead><tr><th>Código</th><th>Producto</th><th className="num">Existencia</th><th className="num">Mínimo</th></tr></thead>
+              <tbody>{low.map((x) => <tr key={x.product_id}><td className="mono muted">{x.code}</td><td style={{ fontWeight: 600 }}>{x.name}</td><td className="num mono" style={{ color: "var(--bad)" }}>{Number(x.quantity)}</td><td className="num mono">{x.min_stock}</td></tr>)}</tbody></table>
+          )}
+        </Card>
+      )}
       {d && (
         <>
           <div className="kpi">

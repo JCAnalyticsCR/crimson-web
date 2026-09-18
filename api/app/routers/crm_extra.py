@@ -129,8 +129,18 @@ def _ts(v) -> str:
 def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Session = Depends(get_db)):
     c = _customer(db, cid, p.tenant.id)
     tid = p.tenant.id
-    invs = db.scalars(select(Invoice).where(Invoice.tenant_id == tid, Invoice.customer_id == cid).order_by(Invoice.issue_date.desc())).all()
-    quotes = db.scalars(select(Quote).where(Quote.tenant_id == tid, Quote.customer_id == cid).order_by(Quote.issue_date.desc()).limit(50)).all()
+    own_i = [Invoice.created_by == p.user.id] if not p.sees_all_sales else []
+    own_q = [Quote.created_by == p.user.id] if not p.sees_all_sales else []
+    invs = (
+        db.scalars(select(Invoice).where(Invoice.tenant_id == tid, Invoice.customer_id == cid, *own_i).order_by(Invoice.issue_date.desc())).all()
+        if p.can("sales", "ver")
+        else []
+    )
+    quotes = (
+        db.scalars(select(Quote).where(Quote.tenant_id == tid, Quote.customer_id == cid, *own_q).order_by(Quote.issue_date.desc()).limit(50)).all()
+        if p.can("sales", "ver")
+        else []
+    )
     live = [i for i in invs if i.status != "anulada"]
     billed = sum((d(i.total) for i in live), Decimal(0))
     due = sum((d(i.balance) for i in live), Decimal(0))

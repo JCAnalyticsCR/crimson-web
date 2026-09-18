@@ -10,7 +10,7 @@ type Level = { product_id: number; warehouse_id: number; quantity: string; code:
 type Low = { product_id: number; code: string; name: string; quantity: string; min_stock: number };
 
 export default function Inventory() {
-  const { toast } = useSession();
+  const { toast, allows } = useSession();
   const [whs, setWhs] = useState<Wh[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [low, setLow] = useState<Low[]>([]);
@@ -56,7 +56,7 @@ export default function Inventory() {
       </div>
 
       <div className="grid-2">
-        <Card title="Existencias por ubicación" flush extra={<AuthLink path="/reports/inventario?format=xlsx" download="inventario.xlsx"><Icon d={I.reports} />Excel</AuthLink>}>
+        <Card title="Existencias por ubicación" flush extra={allows("reports.exportar") ? <AuthLink path="/reports/inventario?format=xlsx" download="inventario.xlsx"><Icon d={I.reports} />Excel</AuthLink> : undefined}>
           {levels.length === 0 ? <Empty hint="Registrá una entrada para empezar; las ventas descuentan solas de la ubicación predeterminada." /> : (
             <table className="table"><thead><tr><th>Código</th><th>Producto</th><th>Ubicación</th><th className="num">Cantidad</th><th className="num">Mínimo</th></tr></thead>
               <tbody>{levels.map((l, i) => <tr key={i}><td className="mono muted">{l.code}</td><td style={{ fontWeight: 600 }}>{l.name}</td><td className="muted">{l.warehouse}</td><td className="num mono" style={{ color: Number(l.quantity) <= l.min_stock ? "var(--bad)" : undefined, fontWeight: 700 }}>{Number(l.quantity)}</td><td className="num mono muted">{l.min_stock}</td></tr>)}</tbody></table>

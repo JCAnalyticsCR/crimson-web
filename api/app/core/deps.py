@@ -19,8 +19,8 @@ bearer = HTTPBearer(auto_error=False)
 # Roles predefinidos (plan 5.5). "*" = todo.
 ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
     "admin": {"*": ["*"]},
-    # Vendedor: cotiza, factura, cobra y atiende clientes. No anula, no ve contabilidad ni reportes de la empresa;
-    # su dashboard se limita a lo que el mismo creo (ver /dashboard).
+    # Vendedor: cotiza, factura y cobra lo SUYO. Sin "ver_todo" solo ve sus documentos y pagos; sin contabilidad,
+    # planillas ni reportes. Clientes y catalogo (solo lectura) son compartidos porque los necesita para vender.
     "ventas": {
         "dashboard": ["ver"],
         "crm": ["ver", "crear", "editar"],
@@ -29,31 +29,51 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "payments": ["ver", "crear"],
         "events": ["ver", "crear", "editar", "checkin"],
     },
+    # Caja: cobra en mostrador y busca cualquier factura para registrar su pago. Reportes solo de caja.
     "caja": {
         "dashboard": ["ver"],
         "crm": ["ver", "crear"],
         "catalog": ["ver"],
-        "sales": ["ver", "crear"],
+        "sales": ["ver", "ver_todo", "crear"],
         "payments": ["ver", "crear", "editar"],
         "events": ["ver", "checkin"],
         "reports": ["ver", "exportar"],
     },
-    "inventario": {"dashboard": ["ver"], "catalog": ["ver", "crear", "editar"], "inventory": ["ver", "crear", "editar", "exportar"]},
-    "contabilidad": {
+    # Bodega: catalogo y existencias. Ni ventas ni dinero; reportes solo de inventario.
+    "inventario": {
         "dashboard": ["ver"],
-        "sales": ["ver", "exportar"],
+        "catalog": ["ver", "crear", "editar"],
+        "inventory": ["ver", "crear", "editar", "exportar"],
+        "reports": ["ver", "exportar"],
+    },
+    # Contabilidad: todo el dinero de la empresa (gastos, conciliacion, planillas, reportes) sin configurar la empresa.
+    "contabilidad": {
+        "dashboard": ["ver", "empresa"],
+        "crm": ["ver"],
+        "catalog": ["ver"],
+        "sales": ["ver", "ver_todo", "exportar", "recurrencias"],
         "payments": ["ver", "exportar"],
         "accounting": ["ver", "crear", "editar", "exportar"],
+        "inventory": ["ver", "exportar"],
         "payroll": ["ver", "crear", "editar", "aprobar", "configurar"],
         "reports": ["ver", "exportar"],
     },
-    "lectura": {"dashboard": ["ver"], "crm": ["ver"], "catalog": ["ver"], "sales": ["ver"], "payments": ["ver"], "events": ["ver"], "reports": ["ver"]},
-    # Acceso temporal concedido por el admin (Ajustes -> Soporte): solo lectura, cada request queda auditado
-    "soporte": {
-        "dashboard": ["ver"],
+    # Solo lectura (socio, auditor): ve ventas y cobros de la empresa sin modificar nada. Sin gastos ni planillas.
+    "lectura": {
+        "dashboard": ["ver", "empresa"],
         "crm": ["ver"],
         "catalog": ["ver"],
-        "sales": ["ver"],
+        "sales": ["ver", "ver_todo", "exportar"],
+        "payments": ["ver"],
+        "events": ["ver"],
+        "reports": ["ver"],
+    },
+    # Acceso temporal concedido por el admin (Ajustes -> Soporte): solo lectura, cada request queda auditado
+    "soporte": {
+        "dashboard": ["ver", "empresa"],
+        "crm": ["ver"],
+        "catalog": ["ver"],
+        "sales": ["ver", "ver_todo"],
         "payments": ["ver"],
         "inventory": ["ver"],
         "accounting": ["ver"],
@@ -72,6 +92,11 @@ class Principal:
     role: str
     permissions: dict[str, list[str]]
     ip: str | None = None
+
+    @property
+    def sees_all_sales(self) -> bool:
+        """Sin "sales.ver_todo" (vendedor) solo ve los documentos y pagos que el mismo creo."""
+        return self.can("sales", "ver_todo")
 
     def can(self, module: str, action: str) -> bool:
         p = self.permissions

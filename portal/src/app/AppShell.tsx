@@ -14,7 +14,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
     { to: "/cotizaciones", label: "Cotizaciones", icon: I.quote, need: "sales.ver" },
     { to: "/facturas", label: "Facturas", icon: I.invoice, need: "sales.ver" },
     { to: "/pos", label: "Punto de venta", icon: I.wallet, need: "sales.crear" },
-    { to: "/recurrencias", label: "Recurrencias", icon: I.refresh, need: "sales.crear" },
+    { to: "/recurrencias", label: "Recurrencias", icon: I.refresh, need: "sales.recurrencias" },
     { to: "/pagos", label: "Pagos", icon: I.pay, need: "payments.ver" },
     { to: "/ordenes", label: "Órdenes", icon: I.box, need: "sales.ver" },
     { to: "/eventos", label: "Eventos", icon: I.ticket, need: "events.ver" },

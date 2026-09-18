@@ -71,7 +71,7 @@ function App() {
         <Route path="/facturas/nueva" element={g("sales.crear", <DocEditor kind="invoice" />)} />
         <Route path="/facturas/:id" element={g("sales.ver", <InvoiceDetail />)} />
         <Route path="/pagos" element={g("payments.ver", <Payments />)} />
-        <Route path="/recurrencias" element={g("sales.crear", <Recurrences />)} />
+        <Route path="/recurrencias" element={g("sales.recurrencias", <Recurrences />)} />
         <Route path="/clientes" element={g("crm.ver", <Customers />)} />
         <Route path="/clientes/:id" element={g("crm.ver", <CustomerDetail />)} />
         <Route path="/pos" element={g("sales.crear", <Pos />)} />

@@ -442,3 +442,75 @@ def test_bccr_sdde_connector(client, auth, monkeypatch):
     monkeypatch.setattr(bccr.httpx, "get", FakeBccr().get)
     r = client.post("/fx/bccr")
     assert r.status_code == 200 and r.json()["source"] == "bccr"
+
+
+def _user_with_role(db_session, tenant_id, email, role, pw="Rol-prueba-2026"):
+    from app.core.security import hash_password
+    from app.models import TenantUser, User
+
+    u = User(email=email, full_name=role.capitalize(), password_hash=hash_password(pw))
+    db_session.add(u)
+    db_session.flush()
+    db_session.add(TenantUser(tenant_id=tenant_id, user_id=u.id, role_code=role))
+    db_session.commit()
+    return pw
+
+
+def test_each_role_sees_only_what_it_needs(client, auth, db_session):
+    tid = auth["tenant"]["id"]
+    admin_h = dict(client.headers)
+    c = client.get("/customers").json()["items"][0]
+    admin_inv = client.post("/invoices", json={"customer_id": c["id"], "lines": [{"name": "Admin", "quantity": 1, "unit_price": 1000, "tax_rate": 13}]}).json()
+    client.post(f"/invoices/{admin_inv['id']}/payments", json={"method": "sinpe", "amount": 500})
+
+    def login(email, role):
+        pw = _user_with_role(db_session, tid, email, role)
+        client.headers.pop("Authorization", None)
+        tok = client.post("/auth/login", json={"email": email, "password": pw}).json()["access_token"]
+        client.headers.update(admin_h)
+        return {"Authorization": f"Bearer {tok}"}
+
+    def report_keys(h):
+        r = client.get("/reports", headers=h)
+        return set() if r.status_code == 403 else {x["key"] for x in r.json()}
+
+    # Vendedor: solo lo suyo
+    v = login("v@ejemplo.com", "ventas")
+    mine = client.post(
+        "/invoices", json={"customer_id": c["id"], "lines": [{"name": "Propia", "quantity": 1, "unit_price": 2000, "tax_rate": 13}]}, headers=v
+    ).json()
+    assert [i["id"] for i in client.get("/invoices", headers=v).json()["items"]] == [mine["id"]]
+    assert client.get(f"/invoices/{admin_inv['id']}", headers=v).status_code == 404
+    assert client.get(f"/invoices/{admin_inv['id']}/pdf", headers=v).status_code == 404
+    assert client.get("/payments", headers=v).json() == []
+    assert all(h["id"] != admin_inv["id"] for h in client.get("/search", params={"q": admin_inv["number"]}, headers=v).json())
+    assert client.get("/recurrences", headers=v).status_code == 403
+    assert report_keys(v) == set()
+    assert client.get("/payroll/employees", headers=v).status_code == 403
+
+    # Caja: cualquier factura para cobrar, reportes solo de caja
+    k = login("k@ejemplo.com", "caja")
+    assert client.get(f"/invoices/{admin_inv['id']}", headers=k).status_code == 200
+    assert report_keys(k) == {"cierre", "transacciones", "propinas"}
+    assert client.get("/reports/resultados", headers=k).status_code == 403
+    assert client.get("/dashboard", headers=k).json()["scope"] == "mine"
+    assert client.get("/expenses", headers=k).status_code == 403
+
+    # Bodega: inventario y nada de dinero
+    b = login("b@ejemplo.com", "inventario")
+    assert report_keys(b) == {"inventario", "movimientos"}
+    assert client.get("/invoices", headers=b).status_code == 403
+    assert client.get("/customers", headers=b).status_code == 403
+
+    # Contabilidad: todo el dinero de la empresa, sin ajustes
+    a = login("a@ejemplo.com", "contabilidad")
+    assert len(report_keys(a)) == 17
+    assert client.get("/dashboard", headers=a).json()["scope"] == "company"
+    assert client.get("/settings", headers=a).status_code == 403
+
+    # Solo lectura: ventas y cobros de la empresa, sin gastos, planillas ni exportar
+    lec = login("l@ejemplo.com", "lectura")
+    assert report_keys(lec) == {"facturacion", "pendientes", "productos", "ordenes", "cierre", "transacciones", "propinas"}
+    assert client.get("/reports/facturacion", params={"format": "xlsx"}, headers=lec).status_code == 403
+    assert client.get("/expenses", headers=lec).status_code == 403
+    assert client.post("/customers", json={"name": "No"}, headers=lec).status_code == 403

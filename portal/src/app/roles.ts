@@ -31,18 +31,28 @@ export const ROLES: Record<string, RoleMeta> = {
   },
   caja: {
     label: "Caja", tone: "#0e9f6e", glyph: "C",
-    summary: "Cobra en mostrador y registra pagos. Cierre de caja diario.",
-    can: ["Punto de venta y cobros", "Control de acceso de eventos", "Cierre de caja"], cannot: ["Configurar", "Contabilidad"],
+    summary: "Cobra en mostrador y registra pagos de cualquier factura. Ve el cierre de caja, no la contabilidad.",
+    can: ["Punto de venta y cobros de cualquier factura", "Cierre de caja, transacciones y propinas", "Control de acceso de eventos"],
+    cannot: ["Ver gastos, planillas o resultados", "Anular documentos", "Configurar la empresa"],
   },
   inventario: {
     label: "Bodega", tone: "#b7791f", glyph: "B",
-    summary: "Catálogo y existencias por ubicación.", can: ["Productos y variantes", "Movimientos y transferencias"], cannot: ["Ventas", "Contabilidad"],
+    summary: "Catálogo y existencias por ubicación. No ve ventas, clientes ni dinero.",
+    can: ["Productos, variantes e imágenes", "Entradas, salidas y transferencias", "Reportes de inventario y movimientos"],
+    cannot: ["Ver ventas, clientes o cobros", "Ver contabilidad o planillas"],
   },
   contabilidad: {
     label: "Contabilidad", tone: "#6b46c1", glyph: "K",
-    summary: "Gastos, recepción de XML, conciliación, planillas y reportes.", can: ["Gastos y recepción", "Conciliación y planillas", "Reportes y Excel"], cannot: ["Configurar la empresa"],
+    summary: "Todo el dinero de la empresa: gastos, recepción de XML, conciliación, planillas y reportes.",
+    can: ["Gastos, recepción y conciliación", "Planillas y colillas", "Los 17 reportes con Excel"],
+    cannot: ["Crear ventas o cobrar", "Configurar la empresa o los usuarios"],
   },
-  lectura: { label: "Solo lectura", tone: "#6b6570", glyph: "L", summary: "Consulta sin modificar nada.", can: ["Ver documentos y clientes"], cannot: ["Crear o modificar"] },
+  lectura: {
+    label: "Solo lectura", tone: "#6b6570", glyph: "L",
+    summary: "Para socios o auditores: ve ventas y cobros de la empresa sin modificar nada.",
+    can: ["Ver facturas, cotizaciones y clientes", "Reportes de ventas y de caja"],
+    cannot: ["Crear o modificar cualquier dato", "Ver gastos o planillas", "Exportar a Excel"],
+  },
   soporte: { label: "Soporte temporal", tone: "#6b6570", glyph: "S", summary: "Acceso de solo lectura concedido por el administrador; cada pantalla queda en la bitácora.", can: ["Ver para diagnosticar"], cannot: ["Modificar cualquier dato"] },
 };
 

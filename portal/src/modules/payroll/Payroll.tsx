@@ -82,7 +82,7 @@ export default function Payroll() {
 
 /* ========================= TAB: Planillas ========================= */
 function TabRuns() {
-  const { toast } = useSession();
+  const { toast, allows } = useSession();
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [newModal, setNewModal] = useState(false);
@@ -158,7 +158,7 @@ function TabRuns() {
                   <td><Badge status={statusTone(r.status)} /></td>
                   <td className="num" style={{ whiteSpace: "nowrap", display: "flex", gap: 4 }}>
                     <button className="btn btn--ghost btn--sm" onClick={() => loadDetail(r.id)}>Ver</button>
-                    <AuthLink path={`/reports/planilla?from=${r.period_start}&to=${r.period_end}&format=xlsx`} download={`planilla-${r.period_start}.xlsx`} className="btn btn--ghost btn--sm">Excel</AuthLink>
+                    {allows("reports.exportar") && <AuthLink path={`/reports/planilla?from=${r.period_start}&to=${r.period_end}&format=xlsx`} download={`planilla-${r.period_start}.xlsx`} className="btn btn--ghost btn--sm">Excel</AuthLink>}
                   </td>
                 </tr>
               ))}</tbody>

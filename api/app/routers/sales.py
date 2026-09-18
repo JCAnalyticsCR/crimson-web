@@ -48,8 +48,10 @@ def _inv_out(db: Session, i: Invoice) -> InvoiceOut:
     return o
 
 
-def _list(db: Session, model, tenant_id: int, status: str | None, cursor: int | None, limit: int, q: str | None):
+def _list(db: Session, model, tenant_id: int, status: str | None, cursor: int | None, limit: int, q: str | None, p: Principal | None = None):
     stmt = select(model).where(model.tenant_id == tenant_id)
+    if p is not None and not p.sees_all_sales:
+        stmt = stmt.where(model.created_by == p.user.id)
     if status:
         stmt = stmt.where(model.status == status)
     if q:
@@ -65,9 +67,9 @@ def _list(db: Session, model, tenant_id: int, status: str | None, cursor: int | 
     return {"items": items, "next_cursor": rows[limit].id if len(rows) > limit else None}
 
 
-def _own(db: Session, model, id_: int, tenant_id: int):
+def _own(db: Session, model, id_: int, tenant_id: int, p: Principal | None = None):
     obj = db.get(model, id_)
-    if not obj or obj.tenant_id != tenant_id:
+    if not obj or obj.tenant_id != tenant_id or (p is not None and not p.sees_all_sales and obj.created_by != p.user.id):
         raise HTTPException(404, "Documento no encontrado")
     return obj
 
@@ -116,7 +118,7 @@ def quotes(
     p: Principal = Depends(require("sales", "ver")),
     db: Session = Depends(get_db),
 ):
-    return _list(db, Quote, p.tenant.id, status, cursor, limit, q)
+    return _list(db, Quote, p.tenant.id, status, cursor, limit, q, p)
 
 
 @router.post("/quotes", response_model=QuoteOut, status_code=201)
@@ -128,12 +130,12 @@ def create_quote(data: DocumentIn, p: Principal = Depends(require("sales", "crea
 
 @router.get("/quotes/{qid}", response_model=QuoteOut)
 def get_quote(qid: int, p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
-    return _quote_out(db, _own(db, Quote, qid, p.tenant.id))
+    return _quote_out(db, _own(db, Quote, qid, p.tenant.id, p))
 
 
 @router.put("/quotes/{qid}", response_model=QuoteOut)
 def update_quote(qid: int, data: DocumentIn, p: Principal = Depends(require("sales", "editar")), db: Session = Depends(get_db)):
-    q = _own(db, Quote, qid, p.tenant.id)
+    q = _own(db, Quote, qid, p.tenant.id, p)
     if q.status in ("convertida", "anulada"):
         raise HTTPException(409, f"La cotizacion esta {q.status} y no se puede editar")
     from ..models import QuoteLine
@@ -146,7 +148,7 @@ def update_quote(qid: int, data: DocumentIn, p: Principal = Depends(require("sal
 
 @router.post("/quotes/{qid}/convert", response_model=InvoiceOut, status_code=201)
 def convert_quote(qid: int, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
-    q = _own(db, Quote, qid, p.tenant.id)
+    q = _own(db, Quote, qid, p.tenant.id, p)
     inv = svc.convert_quote(db, p.tenant.id, p.user.id, q)
     invsvc.deduct_for_invoice(db, inv, p.user.id)
     db.commit()
@@ -155,7 +157,7 @@ def convert_quote(qid: int, p: Principal = Depends(require("sales", "crear")), d
 
 @router.post("/quotes/{qid}/duplicate", response_model=QuoteOut, status_code=201)
 def duplicate_quote(qid: int, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
-    q = _own(db, Quote, qid, p.tenant.id)
+    q = _own(db, Quote, qid, p.tenant.id, p)
     nq = svc.create_quote(db, p.tenant.id, p.user.id, svc.quote_to_payload(q))
     db.commit()
     return _quote_out(db, nq)
@@ -163,7 +165,7 @@ def duplicate_quote(qid: int, p: Principal = Depends(require("sales", "crear")),
 
 @router.post("/quotes/{qid}/void", response_model=QuoteOut)
 def void_quote(qid: int, p: Principal = Depends(require("sales", "anular")), db: Session = Depends(get_db)):
-    q = _own(db, Quote, qid, p.tenant.id)
+    q = _own(db, Quote, qid, p.tenant.id, p)
     if q.status == "convertida":
         raise HTTPException(409, "Una cotizacion convertida no se anula; anule la factura")
     q.status = "anulada"
@@ -175,7 +177,7 @@ def void_quote(qid: int, p: Principal = Depends(require("sales", "anular")), db:
 @router.post("/quotes/{qid}/send", response_model=QuoteOut)
 def send_quote(qid: int, p: Principal = Depends(require("sales", "enviar")), db: Session = Depends(get_db)):
     """Marca como enviada (el envio real por correo lo hace el worker en Fase 1.2)."""
-    q = _own(db, Quote, qid, p.tenant.id)
+    q = _own(db, Quote, qid, p.tenant.id, p)
     if q.status == "creado":
         q.status = "enviada"
     audit(db, p.tenant.id, p.user.id, "send", "quote", q.id, ip=p.ip)
@@ -193,7 +195,7 @@ def invoices(
     p: Principal = Depends(require("sales", "ver")),
     db: Session = Depends(get_db),
 ):
-    return _list(db, Invoice, p.tenant.id, status, cursor, limit, q)
+    return _list(db, Invoice, p.tenant.id, status, cursor, limit, q, p)
 
 
 @router.post("/invoices", response_model=InvoiceOut, status_code=201)
@@ -208,12 +210,12 @@ def create_invoice(data: DocumentIn, doc_type: str = "FE", p: Principal = Depend
 
 @router.get("/invoices/{iid}", response_model=InvoiceOut)
 def get_invoice(iid: int, p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
-    return _inv_out(db, _own(db, Invoice, iid, p.tenant.id))
+    return _inv_out(db, _own(db, Invoice, iid, p.tenant.id, p))
 
 
 @router.put("/invoices/{iid}", response_model=InvoiceOut)
 def update_invoice(iid: int, data: DocumentIn, p: Principal = Depends(require("sales", "editar")), db: Session = Depends(get_db)):
-    inv = _own(db, Invoice, iid, p.tenant.id)
+    inv = _own(db, Invoice, iid, p.tenant.id, p)
     if inv.status == "anulada" or inv.einvoice_status in ("pendiente", "aceptada"):
         raise HTTPException(409, "La factura ya fue emitida o anulada; use nota de credito")
     if inv.payments:
@@ -228,7 +230,7 @@ def update_invoice(iid: int, data: DocumentIn, p: Principal = Depends(require("s
 
 @router.post("/invoices/{iid}/void", response_model=InvoiceOut)
 def void_invoice(iid: int, p: Principal = Depends(require("sales", "anular")), db: Session = Depends(get_db)):
-    inv = _own(db, Invoice, iid, p.tenant.id)
+    inv = _own(db, Invoice, iid, p.tenant.id, p)
     if inv.einvoice_status == "aceptada":
         raise HTTPException(409, "Factura aceptada por Hacienda: se anula emitiendo Nota de Credito (Fase 2)")
     inv.status = "anulada"
@@ -240,7 +242,7 @@ def void_invoice(iid: int, p: Principal = Depends(require("sales", "anular")), d
 
 @router.post("/invoices/{iid}/payments", response_model=InvoiceOut, status_code=201)
 def pay_invoice(iid: int, data: PaymentIn, p: Principal = Depends(require("payments", "crear")), db: Session = Depends(get_db)):
-    inv = _own(db, Invoice, iid, p.tenant.id)
+    inv = _own(db, Invoice, iid, p.tenant.id, p)
     svc.add_payment(db, p.tenant.id, p.user.id, inv, data)
     db.commit()
     db.refresh(inv)
@@ -249,7 +251,7 @@ def pay_invoice(iid: int, data: PaymentIn, p: Principal = Depends(require("payme
 
 @router.post("/invoices/{iid}/payment-link", response_model=PaymentLinkOut)
 def payment_link(iid: int, p: Principal = Depends(require("sales", "enviar")), db: Session = Depends(get_db)):
-    inv = _own(db, Invoice, iid, p.tenant.id)
+    inv = _own(db, Invoice, iid, p.tenant.id, p)
     link = svc.get_or_create_payment_link(db, p.tenant.id, inv)
     db.commit()
     return PaymentLinkOut(
@@ -263,7 +265,10 @@ def payment_link(iid: int, p: Principal = Depends(require("sales", "enviar")), d
 # ---------- Pagos (listado) ----------
 @router.get("/payments", response_model=list[PaymentOut])
 def payments(limit: int = Query(20, le=100), p: Principal = Depends(require("payments", "ver")), db: Session = Depends(get_db)):
-    return db.scalars(select(Payment).where(Payment.tenant_id == p.tenant.id).order_by(Payment.id.desc()).limit(limit)).all()
+    q = select(Payment).where(Payment.tenant_id == p.tenant.id)
+    if not p.sees_all_sales:
+        q = q.where(Payment.created_by == p.user.id)
+    return db.scalars(q.order_by(Payment.id.desc()).limit(limit)).all()
 
 
 # ---------- Grupos de facturacion ----------
@@ -295,10 +300,10 @@ def _sum_between(db: Session, col_model, col, tenant_id: int, start: date, end: 
 def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session = Depends(get_db)):
     """Roles con reportes ven la empresa completa; el resto (p. ej. vendedor) solo lo que creo."""
     tid = p.tenant.id
-    mine = not p.can("reports", "ver")
+    mine = not p.can("dashboard", "empresa")
     own_inv = (Invoice.created_by == p.user.id) if mine else true()
     own_quote = (Quote.created_by == p.user.id) if mine else true()
-    own_pay = (Payment.invoice_id.in_(select(Invoice.id).where(Invoice.tenant_id == tid, Invoice.created_by == p.user.id))) if mine else true()
+    own_pay = (Payment.created_by == p.user.id) if mine else true()
     today = date.today()
     m0 = today.replace(day=1)
     pm_end = m0 - timedelta(days=1)

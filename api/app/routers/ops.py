@@ -26,10 +26,10 @@ from ..services.render import money, render_html, render_pdf
 router = APIRouter(tags=["operacion"])
 
 
-def _doc(db: Session, kind: str, id_: int, tenant_id: int):
+def _doc(db: Session, kind: str, id_: int, tenant_id: int, p: Principal | None = None):
     model = Quote if kind == "quotes" else Invoice
     d = db.get(model, id_)
-    if not d or d.tenant_id != tenant_id:
+    if not d or d.tenant_id != tenant_id or (p is not None and not p.sees_all_sales and d.created_by != p.user.id):
         raise HTTPException(404, "Documento no encontrado")
     return d
 
@@ -39,14 +39,14 @@ def _doc(db: Session, kind: str, id_: int, tenant_id: int):
 def doc_html(kind: str, id_: int, p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
     if kind not in ("quotes", "invoices"):
         raise HTTPException(404)
-    return render_html(db, _doc(db, kind, id_, p.tenant.id), p.tenant)
+    return render_html(db, _doc(db, kind, id_, p.tenant.id, p), p.tenant)
 
 
 @router.get("/{kind}/{id_}/pdf")
 def doc_pdf(kind: str, id_: int, p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
     if kind not in ("quotes", "invoices"):
         raise HTTPException(404)
-    d = _doc(db, kind, id_, p.tenant.id)
+    d = _doc(db, kind, id_, p.tenant.id, p)
     html = render_html(db, d, p.tenant)
     pdf = render_pdf(html)
     if pdf is None:  # sin WeasyPrint (Windows local): el navegador imprime el HTML
@@ -64,7 +64,7 @@ class SendIn(BaseModel):
 def doc_send(kind: str, id_: int, data: SendIn, p: Principal = Depends(require("sales", "enviar")), db: Session = Depends(get_db)):
     if kind not in ("quotes", "invoices"):
         raise HTTPException(404)
-    d = _doc(db, kind, id_, p.tenant.id)
+    d = _doc(db, kind, id_, p.tenant.id, p)
     c = db.get(Customer, d.customer_id) if d.customer_id else None
     to = data.to or (c.email if c else None)
     if not to:
@@ -105,7 +105,7 @@ def doc_send(kind: str, id_: int, data: SendIn, p: Principal = Depends(require("
 # ---------- Factura electronica ----------
 @router.post("/invoices/{id_}/emit")
 def emit(id_: int, p: Principal = Depends(require("sales", "enviar")), db: Session = Depends(get_db)):
-    d = _doc(db, "invoices", id_, p.tenant.id)
+    d = _doc(db, "invoices", id_, p.tenant.id, p)
     doc = esvc.emit(db, p.tenant, p.user.id, d)
     db.commit()
     return {"status": doc.status, "clave": doc.clave, "message": doc.hacienda_message, "provider": doc.provider}
@@ -117,7 +117,7 @@ class VoidNcIn(BaseModel):
 
 @router.post("/invoices/{id_}/credit-note")
 def void_nc(id_: int, data: VoidNcIn, p: Principal = Depends(require("sales", "anular")), db: Session = Depends(get_db)):
-    d = _doc(db, "invoices", id_, p.tenant.id)
+    d = _doc(db, "invoices", id_, p.tenant.id, p)
     doc = esvc.credit_note(db, p.tenant, p.user.id, d, data.reason)
     inv.restock_for_void(db, d, p.user.id)
     db.commit()
@@ -126,7 +126,7 @@ def void_nc(id_: int, data: VoidNcIn, p: Principal = Depends(require("sales", "a
 
 @router.get("/invoices/{id_}/xml")
 def xml_list(id_: int, p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
-    d = _doc(db, "invoices", id_, p.tenant.id)
+    d = _doc(db, "invoices", id_, p.tenant.id, p)
     return [
         {
             "id": x.id,
@@ -146,7 +146,7 @@ def xml_list(id_: int, p: Principal = Depends(require("sales", "ver")), db: Sess
 
 @router.get("/invoices/{id_}/xml/{doc_id}/{which}")
 def xml_get(id_: int, doc_id: int, which: str, p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
-    _doc(db, "invoices", id_, p.tenant.id)
+    _doc(db, "invoices", id_, p.tenant.id, p)
     x = next((x for x in esvc.documents_for(db, db.get(Invoice, id_)) if x.id == doc_id), None)
     if not x:
         raise HTTPException(404, "Documento no encontrado")
@@ -383,9 +383,37 @@ def supplier_update(sid: int, data: SupplierIn, p: Principal = Depends(require("
 
 
 # ---------- Reportes ----------
+REPORT_NEEDS = {
+    "facturacion": ("sales", "exportar"),
+    "pendientes": ("sales", "exportar"),
+    "impuesto": ("accounting", "ver"),
+    "resultados": ("accounting", "ver"),
+    "cierre": ("payments", "ver"),
+    "transacciones": ("payments", "ver"),
+    "gastos": ("accounting", "ver"),
+    "iva": ("accounting", "ver"),
+    "inventario": ("inventory", "ver"),
+    "productos": ("sales", "exportar"),
+    "movimientos": ("inventory", "ver"),
+    "ordenes": ("sales", "exportar"),
+    "recepciones": ("accounting", "ver"),
+    "propinas": ("payments", "ver"),
+    "d151": ("accounting", "ver"),
+    "planilla": ("payroll", "ver"),
+    "conciliacion": ("accounting", "ver"),
+}
+
+
+def report_allowed(p: Principal, key: str) -> bool:
+    mod, act = REPORT_NEEDS.get(key, ("settings", "configurar"))
+    if mod == "payments" and not p.sees_all_sales:
+        return False  # cierres y transacciones son de toda la empresa
+    return p.can(mod, act)
+
+
 @router.get("/reports")
-def report_catalog(_: Principal = Depends(require("reports", "ver"))):
-    return [{"key": k, "title": t, "description": d} for k, t, d in rp.CATALOG]
+def report_catalog(p: Principal = Depends(require("reports", "ver"))):
+    return [{"key": k, "title": t, "description": d} for k, t, d in rp.CATALOG if report_allowed(p, k)]
 
 
 @router.get("/reports/{key}")
@@ -400,6 +428,10 @@ def report(
     fn = rp.REPORTS.get(key)
     if not fn:
         raise HTTPException(404, "Reporte no encontrado")
+    if not report_allowed(p, key):
+        raise HTTPException(403, "Este reporte no está disponible para tu rol")
+    if format == "xlsx" and not p.can("reports", "exportar"):
+        raise HTTPException(403, "Tu rol no puede exportar reportes")
     b = to or date.today()
     a = from_ or b.replace(day=1)
     rep = fn(db, p.tenant.id, a, b)
@@ -470,12 +502,12 @@ def _rec_out(r: Recurrence, db: Session):
 
 
 @router.get("/recurrences")
-def recurrences(p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
+def recurrences(p: Principal = Depends(require("sales", "recurrencias")), db: Session = Depends(get_db)):
     return [_rec_out(r, db) for r in db.scalars(select(Recurrence).where(Recurrence.tenant_id == p.tenant.id).order_by(Recurrence.next_date))]
 
 
 @router.post("/recurrences", status_code=201)
-def recurrence_create(data: RecurrenceIn, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
+def recurrence_create(data: RecurrenceIn, p: Principal = Depends(require("sales", "recurrencias")), db: Session = Depends(get_db)):
     r = Recurrence(
         tenant_id=p.tenant.id,
         name=data.name,
@@ -494,7 +526,7 @@ def recurrence_create(data: RecurrenceIn, p: Principal = Depends(require("sales"
 
 
 @router.put("/recurrences/{rid}")
-def recurrence_update(rid: int, data: RecurrenceIn, p: Principal = Depends(require("sales", "editar")), db: Session = Depends(get_db)):
+def recurrence_update(rid: int, data: RecurrenceIn, p: Principal = Depends(require("sales", "recurrencias")), db: Session = Depends(get_db)):
     r = db.get(Recurrence, rid)
     if not r or r.tenant_id != p.tenant.id:
         raise HTTPException(404, "Recurrencia no encontrada")
@@ -535,7 +567,7 @@ def run_recurrence(db: Session, r: Recurrence, user_id: int | None) -> Invoice |
 
 
 @router.post("/recurrences/{rid}/run", status_code=201)
-def recurrence_run(rid: int, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
+def recurrence_run(rid: int, p: Principal = Depends(require("sales", "recurrencias")), db: Session = Depends(get_db)):
     r = db.get(Recurrence, rid)
     if not r or r.tenant_id != p.tenant.id:
         raise HTTPException(404, "Recurrencia no encontrada")

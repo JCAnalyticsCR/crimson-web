@@ -638,19 +638,32 @@ def search(q: str = Query(min_length=1), p: Principal = Depends(require("dashboa
     like = f"%{q}%"
     tid = p.tenant.id
     out = []
-    for i in db.scalars(select(Invoice).where(Invoice.tenant_id == tid, Invoice.number.ilike(like)).limit(5)):
+    mine_inv = (Invoice.created_by == p.user.id) if not p.sees_all_sales else Invoice.id.is_not(None)
+    mine_q = (Quote.created_by == p.user.id) if not p.sees_all_sales else Quote.id.is_not(None)
+    can_sales, can_crm, can_cat = p.can("sales", "ver"), p.can("crm", "ver"), p.can("catalog", "ver")
+    for i in db.scalars(select(Invoice).where(Invoice.tenant_id == tid, mine_inv, Invoice.number.ilike(like)).limit(5)) if can_sales else []:
         out.append({"kind": "factura", "id": i.id, "title": i.number, "sub": f"{i.status} · {i.currency} {d(i.total):,.2f}", "to": f"/facturas/{i.id}"})
-    for qd in db.scalars(select(Quote).where(Quote.tenant_id == tid, Quote.number.ilike(like)).limit(5)):
+    for qd in db.scalars(select(Quote).where(Quote.tenant_id == tid, mine_q, Quote.number.ilike(like)).limit(5)) if can_sales else []:
         out.append({"kind": "cotización", "id": qd.id, "title": qd.number, "sub": qd.status, "to": f"/cotizaciones/{qd.id}"})
-    for c in db.scalars(
-        select(Customer).where(Customer.tenant_id == tid, or_(Customer.name.ilike(like), Customer.id_number.ilike(like), Customer.email.ilike(like))).limit(5)
+    for c in (
+        db.scalars(
+            select(Customer)
+            .where(Customer.tenant_id == tid, or_(Customer.name.ilike(like), Customer.id_number.ilike(like), Customer.email.ilike(like)))
+            .limit(5)
+        )
+        if can_crm
+        else []
     ):
-        out.append({"kind": "cliente", "id": c.id, "title": c.name, "sub": c.id_number or c.email or "", "to": f"/clientes?q={c.name}"})
-        for i in db.scalars(select(Invoice).where(Invoice.tenant_id == tid, Invoice.customer_id == c.id).order_by(Invoice.id.desc()).limit(3)):
+        out.append({"kind": "cliente", "id": c.id, "title": c.name, "sub": c.id_number or c.email or "", "to": f"/clientes/{c.id}"})
+        for i in (
+            db.scalars(select(Invoice).where(Invoice.tenant_id == tid, mine_inv, Invoice.customer_id == c.id).order_by(Invoice.id.desc()).limit(3))
+            if can_sales
+            else []
+        ):
             out.append({"kind": "factura", "id": i.id, "title": i.number, "sub": f"{c.name} · {i.status}", "to": f"/facturas/{i.id}"})
-    for pr in db.scalars(select(Product).where(Product.tenant_id == tid, or_(Product.name.ilike(like), Product.code.ilike(like))).limit(5)):
+    for pr in db.scalars(select(Product).where(Product.tenant_id == tid, or_(Product.name.ilike(like), Product.code.ilike(like))).limit(5)) if can_cat else []:
         out.append({"kind": "producto", "id": pr.id, "title": pr.name, "sub": f"{pr.code} · {pr.currency} {d(pr.price):,.2f}", "to": f"/productos?q={pr.code}"})
-    for o in db.scalars(select(Order).where(Order.tenant_id == tid, Order.number.ilike(like)).limit(5)):
+    for o in db.scalars(select(Order).where(Order.tenant_id == tid, Order.number.ilike(like)).limit(5)) if can_sales else []:
         out.append({"kind": "orden", "id": o.id, "title": o.number, "sub": o.status, "to": "/ordenes"})
     return out[:20]
 
