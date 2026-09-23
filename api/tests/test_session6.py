@@ -187,3 +187,44 @@ def test_proyecto_avisa_lo_que_hay_que_comprar(client, auth):
     assert pr["por_comprar"] and Decimal(str(pr["por_comprar"][0]["to_buy"])) > 0
     solicitudes = client.get("/purchase-requests").json()
     assert solicitudes and solicitudes[0]["reason"] == "proyecto" and solicitudes[0]["project"] == pr["number"]
+
+
+def test_2fa_con_codigos_de_recuperacion(client, auth, db_session):
+    """Perder el teléfono no puede significar perder la cuenta: los códigos de un solo uso y el botón
+    de desactivar son la salida. Antes solo se arreglaba entrando a la base de datos."""
+    import pyotp
+
+    from app.models import User
+
+    me = client.get("/auth/me").json()
+    setup = client.post("/auth/2fa/setup", json={}).json()
+    codigo = pyotp.TOTP(setup["secret"]).now()
+    codes = client.post("/auth/2fa/verify", json={"code": codigo}).json()["codes"]
+    assert len(codes) == 10 and all(len(c) == 9 and "-" in c for c in codes)
+    assert client.get("/auth/me").json()["user"]["totp_enabled"] is True
+
+    # sin código no entra; con el de la app sí
+    correo, pw = me["user"]["email"], "Crimson-2026-seguro"
+    client.headers.pop("Authorization", None)
+    sin = client.post("/auth/login", json={"email": correo, "password": pw})
+    assert sin.status_code == 401 and sin.headers.get("X-2FA") == "required"
+    con = client.post("/auth/login", json={"email": correo, "password": pw, "totp_code": pyotp.TOTP(setup["secret"]).now()})
+    assert con.status_code == 200
+
+    # el teléfono se perdió: entra con un código de recuperación, y ese código no sirve dos veces
+    entro = client.post("/auth/login", json={"email": correo, "password": pw, "totp_code": codes[0]})
+    assert entro.status_code == 200
+    repetido = client.post("/auth/login", json={"email": correo, "password": pw, "totp_code": codes[0]})
+    assert repetido.status_code == 401
+    assert len(db_session.get(User, me["user"]["id"]).totp_recovery) == 9
+
+    # minúsculas y sin guion también valen: se van a dictar por teléfono
+    assert client.post("/auth/login", json={"email": correo, "password": pw, "totp_code": codes[1].lower().replace("-", "")}).status_code == 200
+
+    # y se puede apagar con la contraseña
+    client.headers.update({"Authorization": "Bearer " + entro.json()["access_token"]})
+    assert client.post("/auth/2fa/disable", json={"password": "otra-cosa"}).status_code == 400
+    assert client.post("/auth/2fa/disable", json={"password": pw}).status_code == 204
+    u = db_session.get(User, me["user"]["id"])
+    assert u.totp_enabled is False and u.totp_secret is None and u.totp_recovery == []
+    assert client.post("/auth/login", json={"email": correo, "password": pw}).status_code == 200

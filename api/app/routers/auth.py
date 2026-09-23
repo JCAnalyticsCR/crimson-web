@@ -15,12 +15,15 @@ from ..core.ratelimit import login_limiter
 from ..core.security import (
     create_access_token,
     hash_password,
+    hash_recovery,
     hash_token,
+    new_recovery_codes,
     new_refresh_token,
     new_totp_secret,
     password_is_strong,
     refresh_expiry,
     totp_uri,
+    use_recovery_code,
     verify_password,
     verify_totp,
 )
@@ -30,10 +33,13 @@ from ..schemas.core import (
     MembershipOut,
     MeOut,
     PasswordChangeIn,
+    PasswordOnlyIn,
+    RecoveryCodesOut,
     TokenOut,
     TotpSetupOut,
     TotpVerifyIn,
 )
+from ..services.documents import audit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 COOKIE = "crimson_refresh"
@@ -116,7 +122,11 @@ def login(data: LoginIn, request: Request, resp: Response, db: Session = Depends
         if not data.totp_code:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Se requiere codigo 2FA", headers={"X-2FA": "required"})
         if not verify_totp(user.totp_secret or "", data.totp_code):
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Codigo 2FA invalido")
+            # Sin el telefono a mano queda el codigo de recuperacion; se consume al usarlo.
+            quedan = use_recovery_code(user.totp_recovery, data.totp_code)
+            if quedan is None:
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Codigo 2FA invalido")
+            user.totp_recovery = quedan
     user.failed_logins, user.locked_until = 0, None
     m = _pick_membership(db, user, data.tenant_slug)
     db.add(
@@ -214,11 +224,43 @@ def totp_setup(p: Principal = Depends(get_principal), db: Session = Depends(get_
     return TotpSetupOut(secret=secret, otpauth_uri=totp_uri(secret, p.user.email))
 
 
-@router.post("/2fa/verify", status_code=204)
+@router.post("/2fa/verify", response_model=RecoveryCodesOut)
 def totp_verify(data: TotpVerifyIn, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    """Activa el 2FA y entrega los codigos de recuperacion. Se muestran UNA vez: despues solo viven hasheados."""
     if not p.user.totp_secret or not verify_totp(p.user.totp_secret, data.code):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Codigo invalido")
     p.user.totp_enabled = True
+    codigos = new_recovery_codes()
+    p.user.totp_recovery = [hash_recovery(c) for c in codigos]
+    audit(db, p.tenant.id, p.user.id, "2fa_on", "user", p.user.id, ip=p.ip)
+    db.commit()
+    return RecoveryCodesOut(codes=codigos)
+
+
+@router.post("/2fa/recovery-codes", response_model=RecoveryCodesOut)
+def totp_recovery_codes(data: PasswordOnlyIn, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    """Genera codigos nuevos (los anteriores dejan de servir). Pide la contrasena: si alguien te deja
+    la sesion abierta, no deberia poder fabricarse una llave de entrada permanente."""
+    if not p.user.totp_enabled:
+        raise HTTPException(status.HTTP_409_CONFLICT, "El 2FA no esta activo")
+    if not verify_password(data.password, p.user.password_hash):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Contrasena incorrecta")
+    codigos = new_recovery_codes()
+    p.user.totp_recovery = [hash_recovery(c) for c in codigos]
+    audit(db, p.tenant.id, p.user.id, "2fa_recovery", "user", p.user.id, ip=p.ip)
+    db.commit()
+    return RecoveryCodesOut(codes=codigos)
+
+
+@router.post("/2fa/disable", status_code=204)
+def totp_disable(data: PasswordOnlyIn, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    """Apaga el 2FA con la contrasena. Sin esto, perder el telefono significaba entrar a la base de datos."""
+    if not verify_password(data.password, p.user.password_hash):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Contrasena incorrecta")
+    p.user.totp_enabled = False
+    p.user.totp_secret = None
+    p.user.totp_recovery = []
+    audit(db, p.tenant.id, p.user.id, "2fa_off", "user", p.user.id, ip=p.ip)
     db.commit()
 
 

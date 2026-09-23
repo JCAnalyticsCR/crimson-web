@@ -63,6 +63,7 @@ export default function Login() {
   const [show, setShow] = useState(false);
   const [totp, setTotp] = useState("");
   const [need2fa, setNeed2fa] = useState(false);
+  const [recuperacion, setRecuperacion] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [shake, setShake] = useState(0);
@@ -123,7 +124,7 @@ export default function Login() {
           <div className="lg-card__strip"><span><i className="rec-dot" />Pase de acceso</span><span>{need2fa ? "Paso 2 / 2" : "Panel · CR"}</span></div>
           <div>
             <h2 className="lg-card__title">{need2fa ? "Verificación en dos pasos" : "Iniciar sesión"}</h2>
-            <p className="lg-card__sub">{need2fa ? "Escribí el código de 6 dígitos de tu app de autenticación." : "Usá el correo con el que te invitaron."}</p>
+            <p className="lg-card__sub">{!need2fa ? "Usá el correo con el que te invitaron." : recuperacion ? "Escribí uno de los códigos que guardaste al activar el 2FA. Cada uno sirve una sola vez." : "Escribí el código de 6 dígitos de tu app de autenticación."}</p>
           </div>
 
           {!need2fa ? <>
@@ -140,17 +141,23 @@ export default function Login() {
             </label>
           </> : (
             <label className="lg-field">
-              <span>Código 2FA</span>
-              <input className="lg-otp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={totp} onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))} autoFocus />
+              <span>{recuperacion ? "Código de recuperación" : "Código 2FA"}</span>
+              {/* Sin el telefono a mano, uno de los codigos de un solo uso entra igual. */}
+              {recuperacion ? (
+                <input className="lg-otp" style={{ letterSpacing: ".18em", fontSize: 20 }} autoComplete="off" maxLength={9} placeholder="ABCD-2345" value={totp} onChange={(e) => setTotp(e.target.value.toUpperCase())} autoFocus />
+              ) : (
+                <input className="lg-otp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={totp} onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))} autoFocus />
+              )}
             </label>
           )}
 
           {err && <p className="lg-err" role="alert"><Icon d={I.x} size={14} />{err}</p>}
 
-          <button className="lg-go" disabled={busy || !email || !password || (need2fa && totp.length < 6)}>
+          <button className="lg-go" disabled={busy || !email || !password || (need2fa && totp.length < (recuperacion ? 8 : 6))}>
             {busy ? <span className="spinner" /> : <>{need2fa ? "Verificar" : "Entrar al panel"}<Icon d={I.arrow} size={18} /></>}
           </button>
-          {need2fa && <button type="button" className="lg-link" onClick={() => { setNeed2fa(false); setTotp(""); }}>← Usar otra cuenta</button>}
+          {need2fa && <button type="button" className="lg-link" onClick={() => { setRecuperacion(!recuperacion); setTotp(""); setErr(null); }}>{recuperacion ? "Usar el código de la app" : "Perdí el teléfono: usar un código de recuperación"}</button>}
+          {need2fa && <button type="button" className="lg-link" onClick={() => { setNeed2fa(false); setRecuperacion(false); setTotp(""); }}>← Usar otra cuenta</button>}
 
           <div className="lg-card__foot">
             <span>Sesión cifrada · 2FA · bloqueo por intentos</span>

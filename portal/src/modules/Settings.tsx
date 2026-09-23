@@ -35,6 +35,9 @@ export default function Settings() {
   const [bank, setBank] = useState<{ id?: number; name: string; bank: string; currency: string; number: string; active: boolean } | null>(null);
   const [gw, setGw] = useState<{ provider: string; client_id: string; secret: string; is_primary: boolean; active: boolean; mode: string } | null>(null);
   const [pw, setPw] = useState({ current_password: "", new_password: "" });
+  /* Los codigos se muestran UNA sola vez: despues solo existen hasheados en la base. */
+  const [recovery, setRecovery] = useState<string[] | null>(null);
+  const [apagar, setApagar] = useState<{ password: string; regenerar: boolean } | null>(null);
 
   const load = () => {
     if (!allows("settings.ver")) return;
@@ -55,7 +58,9 @@ export default function Settings() {
   const setRole = (uid: number, role: string) => api(`/settings/users/${uid}`, { method: "PATCH", json: { role } }).then(() => ok("Rol actualizado")).catch(err);
   const setActive = (uid: number, active: boolean) => api(`/settings/users/${uid}`, { method: "PATCH", json: { active } }).then(() => ok(active ? "Usuario activado" : "Usuario desactivado")).catch(err);
   const setup2fa = () => api<{ secret: string; otpauth_uri: string }>("/auth/2fa/setup", { method: "POST" }).then(setTotp).catch(err);
-  const verify2fa = () => api("/auth/2fa/verify", { method: "POST", json: { code } }).then(async () => { await reload(); setTotp(null); toast("2FA activado"); }).catch(() => toast("Código inválido", "bad"));
+  const verify2fa = () => api<{ codes: string[] }>("/auth/2fa/verify", { method: "POST", json: { code } }).then(async (r) => { await reload(); setTotp(null); setCode(""); setRecovery(r.codes); toast("2FA activado"); }).catch(() => toast("Código inválido", "bad"));
+  const disable2fa = () => { if (!apagar) return; api("/auth/2fa/disable", { method: "POST", json: { password: apagar.password } }).then(async () => { await reload(); setApagar(null); toast("2FA desactivado"); }).catch(err); };
+  const regen2fa = () => { if (!apagar) return; api<{ codes: string[] }>("/auth/2fa/recovery-codes", { method: "POST", json: { password: apagar.password } }).then((r) => { setApagar(null); setRecovery(r.codes); toast("Códigos nuevos generados; los anteriores ya no sirven"); }).catch(err); };
   const changePw = () => api("/auth/password", { method: "POST", json: pw }).then(() => { setPw({ current_password: "", new_password: "" }); toast("Contraseña actualizada"); }).catch(err);
 
   return (
@@ -164,7 +169,16 @@ export default function Settings() {
       {tab === "cuenta" && (
         <div className="grid-2">
           <Card title="Autenticación de dos factores">
-            {me?.user.totp_enabled ? <p className="muted">2FA <b style={{ color: "var(--ok)" }}>activo</b> para {me.user.email}.</p> : totp ? (
+            {me?.user.totp_enabled ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <p className="muted">2FA <b style={{ color: "var(--ok)" }}>activo</b> para {me.user.email}.</p>
+                <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Si perdés el teléfono, entrás con uno de tus códigos de recuperación en lugar del código de seis dígitos.</p>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="btn btn--ghost btn--sm" onClick={() => setApagar({ password: "", regenerar: true })}>Generar códigos nuevos</button>
+                  <button className="btn btn--danger btn--sm" onClick={() => setApagar({ password: "", regenerar: false })}>Desactivar 2FA</button>
+                </div>
+              </div>
+            ) : totp ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <p className="muted" style={{ fontSize: 13 }}>Agregá esta clave en tu app de autenticación y confirmá con el código.</p>
                 <code className="mono" style={{ padding: 10, background: "var(--bg-2)", borderRadius: 8, wordBreak: "break-all" }}>{totp.secret}</code>
@@ -192,6 +206,50 @@ export default function Settings() {
       {tab === "api" && <ApiCreds />}
       {tab === "bandeja" && <InboxSettings />}
       {tab === "soporte" && <SupportAccess />}
+
+      {recovery && (
+        <Modal
+          title="Guardá estos códigos ahora"
+          onClose={() => setRecovery(null)}
+          foot={<>
+            <button className="btn btn--ghost" onClick={() => { navigator.clipboard.writeText(recovery.join("\n")); toast("Códigos copiados"); }}><Icon d={I.copy} />Copiar</button>
+            <button className="btn btn--ghost" onClick={() => {
+              const texto = `Códigos de recuperación · Crimson · ${me?.user.email}\nGenerados el ${new Date().toLocaleString("es-CR")}\n\n${recovery.join("\n")}\n\nCada código sirve UNA sola vez.\n`;
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(new Blob([texto], { type: "text/plain" }));
+              a.download = "crimson-codigos-recuperacion.txt";
+              a.click();
+            }}>Descargar</button>
+            <button className="btn btn--crimson" onClick={() => setRecovery(null)}>Ya los guardé</button>
+          </>}
+        >
+          <p style={{ fontSize: 14, marginTop: 0 }}>Esta es la <b>única vez</b> que se muestran. Si perdés el teléfono, con uno de estos entrás al panel; después podés desactivar el 2FA desde esta misma pantalla.</p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8, margin: "14px 0" }}>
+            {recovery.map((c) => <code key={c} className="mono" style={{ padding: "10px 12px", background: "var(--bg-2)", borderRadius: 8, textAlign: "center", fontSize: 15, letterSpacing: ".05em" }}>{c}</code>)}
+          </div>
+          <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Cada uno sirve una sola vez. Guardalos en tu gestor de contraseñas o impresos, no en el mismo teléfono que tiene la app.</p>
+        </Modal>
+      )}
+
+      {apagar && (
+        <Modal
+          title={apagar.regenerar ? "Generar códigos nuevos" : "Desactivar 2FA"}
+          onClose={() => setApagar(null)}
+          foot={<>
+            <button className="btn btn--ghost" onClick={() => setApagar(null)}>Cancelar</button>
+            {apagar.regenerar
+              ? <button className="btn btn--crimson" onClick={regen2fa} disabled={!apagar.password}>Generar</button>
+              : <button className="btn btn--danger" onClick={disable2fa} disabled={!apagar.password}>Desactivar</button>}
+          </>}
+        >
+          <p className="muted" style={{ fontSize: 13.5, marginTop: 0 }}>
+            {apagar.regenerar
+              ? "Los códigos que tenías dejan de servir en el momento en que se generan los nuevos."
+              : "La cuenta vuelve a entrar solo con la contraseña. Si esa contraseña ya circuló por algún lado, mejor cambiala primero."}
+          </p>
+          <Field label="Confirmá con tu contraseña"><input className="input" type="password" autoFocus value={apagar.password} onChange={(e) => setApagar({ ...apagar, password: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter" && apagar.password) (apagar.regenerar ? regen2fa : disable2fa)(); }} /></Field>
+        </Modal>
+      )}
 
       {bank && <Modal title={bank.id ? "Cuenta bancaria" : "Nueva cuenta"} onClose={() => setBank(null)} foot={<><button className="btn btn--ghost" onClick={() => setBank(null)}>Cancelar</button><button className="btn btn--crimson" onClick={saveBank}>Guardar</button></>}>
         <div className="grid-2"><Field label="Nombre"><input className="input" value={bank.name} onChange={(e) => setBank({ ...bank, name: e.target.value })} /></Field><Field label="Banco"><input className="input" value={bank.bank} onChange={(e) => setBank({ ...bank, bank: e.target.value })} /></Field><Field label="Divisa"><select className="select" value={bank.currency} onChange={(e) => setBank({ ...bank, currency: e.target.value })}><option>CRC</option><option>USD</option></select></Field><Field label="Número / IBAN"><input className="input input--mono" style={{ textAlign: "left" }} value={bank.number} onChange={(e) => setBank({ ...bank, number: e.target.value })} /></Field></div>

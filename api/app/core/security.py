@@ -88,3 +88,31 @@ def read_purpose_token(purpose: str, token: str) -> dict:
     if payload.get("typ") != purpose:
         raise jwt.InvalidTokenError("proposito incorrecto")
     return payload
+
+
+def new_recovery_codes(n: int = 10) -> list[str]:
+    """Codigos de un solo uso para cuando se pierde el telefono. Se muestran UNA vez y se guardan hasheados.
+    Formato en dos bloques de cuatro para poder dictarlos por telefono sin equivocarse."""
+    alfabeto = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # sin I, O, 0 ni 1: se confunden al leerlos
+    codigos = []
+    for _ in range(n):
+        crudo = "".join(secrets.choice(alfabeto) for _ in range(8))
+        codigos.append(f"{crudo[:4]}-{crudo[4:]}")
+    return codigos
+
+
+def normalize_recovery(code: str) -> str:
+    return code.strip().upper().replace(" ", "").replace("-", "")
+
+
+def hash_recovery(code: str) -> str:
+    return hash_token(normalize_recovery(code))
+
+
+def use_recovery_code(stored: list, code: str) -> list | None:
+    """Si el codigo existe lo consume y devuelve la lista sin el. None = no era valido.
+    Un codigo sirve una sola vez: usarlo lo borra."""
+    objetivo = hash_recovery(code)
+    if objetivo not in (stored or []):
+        return None
+    return [h for h in stored if h != objetivo]

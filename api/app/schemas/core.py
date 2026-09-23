@@ -75,6 +75,14 @@ class TotpVerifyIn(BaseModel):
     code: str = Field(min_length=6, max_length=6)
 
 
+class RecoveryCodesOut(BaseModel):
+    codes: list[str]
+
+
+class PasswordOnlyIn(BaseModel):
+    password: str
+
+
 class PasswordChangeIn(BaseModel):
     current_password: str
     new_password: str = Field(min_length=10)
