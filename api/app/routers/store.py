@@ -359,7 +359,17 @@ def _variants(db: Session, product_ids: list[int]) -> dict[int, list[dict]]:
     return out
 
 
-def _prod_pub(p: Product, variants: list[dict] | None = None):
+def _stock_of(db: Session, tenant_id: int, product_ids: list[int]) -> dict[int, Decimal]:
+    from ..services import inventory as inv_svc
+
+    out: dict[int, Decimal] = {}
+    for lv in inv_svc.stock_levels(db, tenant_id):
+        if lv["product_id"] in product_ids:
+            out[lv["product_id"]] = out.get(lv["product_id"], Decimal(0)) + lv["quantity"]
+    return out
+
+
+def _prod_pub(p: Product, variants: list[dict] | None = None, stock: Decimal | None = None):
     main = next((i.get("url") for i in (p.images or []) if i.get("main")), (p.images or [{}])[0].get("url") if p.images else None)
     return {
         "id": p.id,
@@ -374,7 +384,14 @@ def _prod_pub(p: Product, variants: list[dict] | None = None):
         "tax_rate": float(p.taxes[0].tax.rate) if p.taxes else 13,
         "item_type": p.item_type,
         "variants": [{**v, "price": v["price"] if v["price"] is not None else p.price} for v in (variants or [])],
+        "availability": _availability(p, stock if stock is not None else Decimal(0)),
     }
+
+
+def _availability(p: Product, own: Decimal) -> dict:
+    from .catalog import store_availability
+
+    return store_availability(p, own)
 
 
 @router.get("/public/store/{slug}")
@@ -411,7 +428,8 @@ def store_products(slug: str, q: str | None = None, category_id: int | None = No
         stmt = stmt.where(Product.category_id == category_id)
     rows = db.scalars(stmt.order_by(Product.name)).all()
     vmap = _variants(db, [p.id for p in rows])
-    return [_prod_pub(p, vmap.get(p.id)) for p in rows]
+    stock = _stock_of(db, t.id, [p.id for p in rows])
+    return [_prod_pub(p, vmap.get(p.id), stock.get(p.id, Decimal(0))) for p in rows]
 
 
 @router.get("/public/store/{slug}/products/{pid}")
@@ -423,7 +441,11 @@ def store_product(slug: str, pid: int, db: Session = Depends(get_db)):
     related = db.scalars(
         select(Product).where(Product.tenant_id == t.id, Product.show_on_web, Product.active, Product.category_id == p.category_id, Product.id != p.id).limit(4)
     ).all()
-    return {**_prod_pub(p, _variants(db, [p.id]).get(p.id)), "related": [_prod_pub(r) for r in related]}
+    stock = _stock_of(db, t.id, [p.id] + [r.id for r in related])
+    return {
+        **_prod_pub(p, _variants(db, [p.id]).get(p.id), stock.get(p.id, Decimal(0))),
+        "related": [_prod_pub(r, None, stock.get(r.id, Decimal(0))) for r in related],
+    }
 
 
 class CartLine(BaseModel):

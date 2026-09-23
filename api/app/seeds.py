@@ -70,16 +70,29 @@ def seed(db: Session, admin_email: str, admin_password: str) -> None:
     db.commit()
 
 
+def sync_roles(db: Session) -> int:
+    """Alinea la tabla role con ROLE_PERMISSIONS. Se corre en cada arranque porque el resto de las semillas
+    no vuelve a correr cuando el entorno ya tiene usuarios: sin esto, un rol nuevo (supervisor, tecnico)
+    no se le puede asignar a nadie, la llave foranea lo rechaza."""
+    n = 0
+    for code, perms in ROLE_PERMISSIONS.items():
+        r = db.scalar(select(Role).where(Role.code == code))
+        if not r:
+            db.add(Role(code=code, name=code.capitalize(), permissions=perms))
+            n += 1
+        elif r.permissions != perms:
+            r.permissions = perms
+    db.flush()
+    return n
+
+
 def seed_base(db: Session, demo: bool = False) -> Tenant:
     """Roles, tenant Crimson, monedas, grupos, impuestos, bodegas y categorias de gasto. Idempotente.
 
     demo=True agrega catalogo, clientes, cuenta bancaria ficticia y stock inicial de ejemplo.
     No crea usuarios: en entornos compartidos el admin entra por invitacion (app.bootstrap).
     """
-    for code, perms in ROLE_PERMISSIONS.items():
-        if not db.scalar(select(Role).where(Role.code == code)):
-            db.add(Role(code=code, name=code.capitalize(), permissions=perms))
-    db.flush()
+    sync_roles(db)
 
     t = db.scalar(select(Tenant).where(Tenant.slug == "crimson"))
     if not t:

@@ -1,4 +1,6 @@
-from sqlalchemy import JSON, Boolean, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -46,8 +48,16 @@ class Product(TenantMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(200), index=True)
     code: Mapped[str] = mapped_column(String(60))
     item_type: Mapped[str] = mapped_column(String(10), default="producto")  # producto | servicio
-    price: Mapped[float] = mapped_column(Numeric(14, 5), default=0)
+    price: Mapped[float] = mapped_column(Numeric(14, 5), default=0)  # precio de venta (sin IVA)
     currency: Mapped[str] = mapped_column(String(3), default="CRC")
+    cost: Mapped[float | None] = mapped_column(Numeric(14, 4))  # costo del proveedor
+    cost_currency: Mapped[str] = mapped_column(String(3), default="USD")
+    margin_pct: Mapped[float | None] = mapped_column(Numeric(6, 2))  # margen con el que se calculo el precio
+    brand: Mapped[str | None] = mapped_column(String(60), index=True)
+    model: Mapped[str | None] = mapped_column(String(80))  # DS-2CD1047G3-LIU
+    supplier_sku: Mapped[str | None] = mapped_column(String(60))
+    supplier_stock: Mapped[int | None] = mapped_column(Integer)  # existencias del proveedor (bajo pedido)
+    supplier_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     weight_kg: Mapped[float | None] = mapped_column(Numeric(10, 3))
     show_on_web: Mapped[bool] = mapped_column(Boolean, default=False)
     description_invoice: Mapped[str | None] = mapped_column(Text)  # larga: va a documentos

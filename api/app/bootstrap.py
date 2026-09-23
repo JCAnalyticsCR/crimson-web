@@ -23,7 +23,7 @@ from .core.config import settings
 from .core.db import SessionLocal
 from .core.security import hash_token
 from .models import Invitation, User
-from .seeds import seed_base
+from .seeds import seed_base, sync_roles
 
 INVITE_HOURS = 72
 
@@ -89,6 +89,10 @@ def extra_invites(db: Session, spec: str | None, base_url: str | None = None) ->
 
 def main() -> None:
     with SessionLocal() as db:
+        nuevos = sync_roles(db)  # roles nuevos disponibles aunque el entorno ya tenga usuarios
+        db.commit()
+        if nuevos:
+            print(f"[bootstrap] {nuevos} rol(es) nuevo(s) disponibles para asignar.", flush=True)
         link = run(db, settings.bootstrap_admin_email, demo=settings.bootstrap_demo)
         extras = extra_invites(db, settings.bootstrap_invites)
     for email, role, url in extras:

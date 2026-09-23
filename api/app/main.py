@@ -16,11 +16,14 @@ from .routers import (
     core,
     crm_extra,
     events,
+    fieldwork,
     imports,
     media,
     ops,
     payroll,
+    pipeline,
     pos,
+    projects,
     public,
     public_api,
     reception,
@@ -81,6 +84,9 @@ def create_app() -> FastAPI:
     app.include_router(pos.router)
     app.include_router(imports.router)
     app.include_router(support.router)
+    app.include_router(pipeline.router)
+    app.include_router(fieldwork.router)
+    app.include_router(projects.router)
     app.include_router(public.router)
     return app
 

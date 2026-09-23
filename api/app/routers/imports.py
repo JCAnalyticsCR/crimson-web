@@ -8,6 +8,7 @@ luego `commit=true` aplica. Los encabezados se reconocen por sinonimos, asi que 
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from decimal import Decimal
 
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
-from ..models import Customer, Invoice, InvoiceLine, Product, ProductTax, Supplier, Tax
+from ..models import Category, Customer, Invoice, InvoiceLine, Product, ProductTax, Supplier, Tax
 from ..services import tabular as tb
 from ..services.documents import audit
 from ..services.totals import d
@@ -77,6 +78,7 @@ TEMPLATES = {
     "products": ["Codigo", "Nombre", "Precio", "Tipo", "CABYS", "IVA", "Unidad", "Moneda"],
     "suppliers": ["Nombre", "Identificacion", "Correo electronico", "Telefono"],
     "invoices": ["Numero", "Fecha", "Cliente", "Identificacion", "Subtotal", "Impuesto", "Total", "Saldo", "Moneda", "Clave"],
+    "catalogo": ["Categoria", "Codigo", "Descripcion", "Stock", "Precio"],
 }
 
 
@@ -298,8 +300,156 @@ def _invoices(db: Session, tid: int, rows: list[dict], commit: bool):
     return out
 
 
-PROCESSORS = {"customers": _customers, "products": _products, "suppliers": _suppliers, "invoices": _invoices}
-PERM = {"customers": ("crm", "crear"), "products": ("catalog", "crear"), "suppliers": ("catalog", "crear"), "invoices": ("sales", "crear")}
+# ---------- lista de precios de proveedor (Eurocomp / Hikvision y similares) ----------
+CATALOG_COLS = {
+    "code": ("codigo", "code", "sku", "parte", "referencia"),
+    "name": ("descripcion", "producto", "nombre", "detalle", "description"),
+    "cost": ("precio", "costo", "price", "cost", "precio_unitario", "precio_lista"),
+    "stock": ("stock", "existencia", "existencias", "disponible", "inventario"),
+    "section": ("fotografia", "categoria", "familia", "linea"),
+}
+GROUPS = (
+    "ACCESORIOS",
+    "AUDIO Y SONIDO",
+    "DISPOSITIVOS DE VISUALIZACION",
+    "REDES Y CONECTIVDAD",
+    "REDES Y CONECTIVIDAD",
+    "RESPALDO ELECTRICO",
+    "RESPALDO ELÉCTRICO",
+    "SEGURIDAD",
+    "CCTV",
+    "VIDEOVIGILANCIA",
+)
+MODEL_RE = re.compile(r"\b((?:i?DS|AE|HWI|HWT|DS)-[A-Z0-9][A-Z0-9\-/().]{2,})", re.I)
+
+
+def _split_section(raw: str) -> tuple[str, str]:
+    """ "SEGURIDAD Camaras" -> ("Seguridad", "Camaras"). Si no trae grupo conocido, todo es categoria."""
+    t = " ".join(str(raw or "").split())
+    up = tb.norm(t).replace("_", " ")
+    for g in GROUPS:
+        gn = tb.norm(g).replace("_", " ")
+        if up.startswith(gn):
+            sub = t[len(g) :].strip(" -·").strip()
+            return t[: len(g)].strip().title(), (sub.title() if sub else t.title())
+    return "", t.title()
+
+
+def _category(db: Session, tid: int, group: str, name: str, cache: dict, commit: bool):
+    if not name:
+        return None
+    key = (group, name)
+    if key in cache:
+        return cache[key]
+    parent = None
+    if group:
+        parent = db.scalar(select(Category).where(Category.tenant_id == tid, Category.name == group, Category.parent_id.is_(None)))
+        if not parent and commit:
+            parent = Category(tenant_id=tid, name=group, show_on_web=True)
+            db.add(parent)
+            db.flush()
+    cat = db.scalar(select(Category).where(Category.tenant_id == tid, Category.name == name))
+    if not cat and commit:
+        cat = Category(tenant_id=tid, name=name, parent_id=parent.id if parent else None, show_on_web=True)
+        db.add(cat)
+        db.flush()
+    cache[key] = cat
+    return cat
+
+
+def _catalog(db: Session, tid: int, rows: list[dict], commit: bool, opts: dict | None = None):
+    """Lista de precios de un proveedor: el costo entra tal cual y el precio de venta se calcula con el margen.
+    Las filas sin codigo son encabezados de categoria (asi vienen los listados de Eurocomp)."""
+    from datetime import UTC, datetime
+
+    from ..models import Supplier, Tenant
+    from ..services import pricing
+    from ..services.documents import today_fx
+
+    opts = opts or {}
+    tenant = db.get(Tenant, tid)
+    margin = d(opts.get("margin") if opts.get("margin") is not None else pricing.default_margin(tenant))
+    cost_currency = (opts.get("currency") or "USD").upper()
+    supplier_name = (opts.get("supplier") or "Proveedor").strip()
+    default_brand = (opts.get("brand") or "").strip() or None
+    fx = today_fx(db, "USD")[0] if cost_currency != "CRC" else Decimal(1)
+
+    supplier = db.scalar(select(Supplier).where(Supplier.tenant_id == tid, func.lower(Supplier.name) == supplier_name.lower()))
+    if not supplier and commit:
+        supplier = Supplier(tenant_id=tid, name=supplier_name)
+        db.add(supplier)
+        db.flush()
+    iva13 = db.scalar(select(Tax).where(Tax.tenant_id == tid, Tax.rate_code == "08"))
+    cats: dict = {}
+    section = ("", "")
+    out, seen = [], set()
+    for i, r in enumerate(rows, start=2):
+        v = {k: tb.pick(r, *aliases) for k, aliases in CATALOG_COLS.items()}
+        code = tb.text(v["code"], 60)
+        if not code:
+            if v["section"]:
+                section = _split_section(str(v["section"]))
+            continue
+        raw_name = str(v["name"] or "").strip()
+        if not raw_name:
+            out.append({"row": i, "action": "error", "detail": f"{code}: sin descripción"})
+            continue
+        cost = tb.num(v["cost"])
+        if cost is None or cost < 0:
+            out.append({"row": i, "action": "error", "detail": f"{code}: costo inválido"})
+            continue
+        if code in seen:
+            out.append({"row": i, "action": "omitir", "detail": f"Código repetido en el archivo: {code}"})
+            continue
+        seen.add(code)
+        parts = [x.strip() for x in raw_name.splitlines() if x.strip()]
+        headline = parts[0][:200]
+        specs = "\n".join(parts[1:])[:4000]
+        model = MODEL_RE.search(headline) or MODEL_RE.search(raw_name)
+        model = model.group(1).upper() if model else None
+        brand = "Hikvision" if "hikvision" in raw_name.lower() else default_brand
+        stock = tb.num(v["stock"])
+        price = pricing.sale_price(db, cost, cost_currency, "CRC", margin, fx)
+        pr = db.scalar(select(Product).where(Product.tenant_id == tid, Product.code == code))
+        action = "actualizar" if pr else "nuevo"
+        group, cat_name = section
+        if commit:
+            cat = _category(db, tid, group, cat_name, cats, commit)
+            if not pr:
+                pr = Product(tenant_id=tid, code=code, name=headline, item_type="producto", unit="Unid")
+                db.add(pr)
+                db.flush()
+                if iva13:
+                    pr.taxes.append(ProductTax(tax_id=iva13.id))
+            pr.name = headline
+            pr.description_invoice = headline
+            pr.description_store = specs or pr.description_store
+            pr.cost, pr.cost_currency, pr.margin_pct = cost, cost_currency, margin
+            pr.price, pr.currency = price, "CRC"
+            pr.brand, pr.model = brand, model or pr.model
+            pr.supplier_id = supplier.id if supplier else pr.supplier_id
+            pr.supplier_sku = code
+            pr.supplier_stock = int(stock) if stock is not None else None
+            pr.supplier_updated_at = datetime.now(UTC)
+            pr.category_id = cat.id if cat else pr.category_id
+        out.append(
+            {
+                "row": i,
+                "action": action,
+                "detail": f"{code} · {headline[:60]} · costo {cost_currency} {cost:,.2f} → venta ₡{price:,.0f}" + (f" · {cat_name}" if cat_name else ""),
+            }
+        )
+    return out
+
+
+PROCESSORS = {"customers": _customers, "products": _products, "suppliers": _suppliers, "invoices": _invoices, "catalogo": _catalog}
+PERM = {
+    "customers": ("crm", "crear"),
+    "products": ("catalog", "crear"),
+    "suppliers": ("catalog", "crear"),
+    "invoices": ("sales", "crear"),
+    "catalogo": ("catalog", "crear"),
+}
 
 
 @router.get("/{kind}/template")
@@ -330,10 +480,20 @@ def template(kind: str, p: Principal = Depends(require("dashboard", "ver"))):
 
 @router.post("/{kind}")
 async def run_import(
-    kind: str, commit: bool = False, file: UploadFile = File(...), p: Principal = Depends(require("dashboard", "ver")), db: Session = Depends(get_db)
+    kind: str,
+    commit: bool = False,
+    margin: Decimal | None = None,
+    supplier: str | None = None,
+    brand: str | None = None,
+    currency: str = "USD",
+    file: UploadFile = File(...),
+    p: Principal = Depends(require("dashboard", "ver")),
+    db: Session = Depends(get_db),
 ):
     if kind not in PROCESSORS:
         raise HTTPException(404, "Tipo no soportado")
+    if kind == "catalogo" and margin is not None and not (0 <= margin <= 95):
+        raise HTTPException(422, "El margen debe estar entre 0 y 95 %")
     mod, act = PERM[kind]
     if not p.can(mod, act):
         raise HTTPException(403, f"Sin permiso: {mod}.{act}")
@@ -349,8 +509,10 @@ async def run_import(
     if len(rows) > 5000:
         raise HTTPException(422, "Maximo 5000 filas por archivo; divídalo en partes")
     headers = sorted({h for r in rows for h in r})
-    recognized = {field: next((a for a in aliases if a in headers), None) for field, aliases in COLS[kind].items()}
-    result = PROCESSORS[kind](db, p.tenant.id, rows, commit)
+    cols = CATALOG_COLS if kind == "catalogo" else COLS[kind]
+    recognized = {field: next((a for a in aliases if a in headers), None) for field, aliases in cols.items()}
+    opts = {"margin": margin, "supplier": supplier, "brand": brand, "currency": currency}
+    result = PROCESSORS[kind](db, p.tenant.id, rows, commit, opts) if kind == "catalogo" else PROCESSORS[kind](db, p.tenant.id, rows, commit)
     summary = {a: sum(1 for r in result if r["action"] == a) for a in ("nuevo", "actualizar", "omitir", "error")}
     if commit:
         audit(db, p.tenant.id, p.user.id, "import", kind, None, {"file": file.filename, **summary}, ip=p.ip)

@@ -20,6 +20,14 @@ export const NAV: { group: string; items: NavItem[] }[] = [
     { to: "/ordenes", label: "Órdenes", icon: I.box, need: "sales.ver" },
     { to: "/eventos", label: "Eventos", icon: I.ticket, need: "events.ver" },
   ]},
+  { group: "Campo", items: [
+    { to: "/oportunidades", label: "Oportunidades", icon: I.trend, need: "crm_pipeline.ver" },
+    { to: "/levantamientos", label: "Levantamientos", icon: I.quote, need: "field.ver" },
+    { to: "/ordenes-trabajo", label: "Órdenes de trabajo", icon: I.check, need: "field.ver" },
+    { to: "/proyectos", label: "Proyectos", icon: I.box, need: "projects.ver" },
+    { to: "/activos", label: "Activos del cliente", icon: I.inventory, need: "assets.ver" },
+    { to: "/compras", label: "Solicitudes de compra", icon: I.upload, need: "purchases.ver" },
+  ]},
   { group: "Catálogo", items: [
     { to: "/clientes", label: "Clientes", icon: I.customers, need: "crm.ver" },
     { to: "/productos", label: "Productos & Servicios", icon: I.products, need: "catalog.ver" },

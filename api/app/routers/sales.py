@@ -393,6 +393,7 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
     )
 
     to_approve = db.scalar(select(func.count()).select_from(Quote).where(Quote.tenant_id == tid, own_quote, Quote.status == "por_aprobar"))
+    ceo = _ceo_row(db, p) if p.can("dashboard", "empresa") else None
     receivable = []
     if mine:
         for x in db.scalars(
@@ -414,6 +415,7 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
             )
     return {
         "scope": "mine" if mine else "company",
+        "gerencia": ceo,
         "por_cobrar": receivable,
         "pagos": pagos if show_cash else None,
         "facturado": fact,
@@ -453,4 +455,58 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
             "stock_bajo": len(invsvc.low_stock(db, tid)),
             "cotizaciones_por_aprobar": to_approve,
         },
+    }
+
+
+def _ceo_row(db: Session, p: Principal) -> dict:
+    """Fila de gerencia: en 30 segundos, cómo está Crimson. Pipeline, cobros, proyectos y trabajos de la semana."""
+    from datetime import timedelta
+
+    from ..models import CustomerAsset, Opportunity, Project, WorkOrder
+    from ..routers.pipeline import OPEN_STATES
+    from ..routers.projects import consumed_cost
+    from ..services import pricing
+
+    tid = p.tenant.id
+    today = date.today()
+    m0 = today.replace(day=1)
+    opps = db.scalars(select(Opportunity).where(Opportunity.tenant_id == tid, Opportunity.status.in_(OPEN_STATES))).all()
+    pipeline = sum((d(o.amount) for o in opps), Decimal(0))
+    weighted = sum((d(o.amount) * o.probability / 100 for o in opps), Decimal(0))
+    receivable = d(
+        db.scalar(select(func.coalesce(func.sum(Invoice.balance), 0)).where(Invoice.tenant_id == tid, Invoice.status.in_(("creado", "parcial", "vencida"))))
+    )
+    active = db.scalars(select(Project).where(Project.tenant_id == tid, Project.status.in_(("planificado", "en_curso", "pausado")))).all()
+    closed = db.scalars(
+        select(Project).where(Project.tenant_id == tid, Project.status.in_(("terminado", "entregado", "facturado")), Project.updated_at >= m0)
+    ).all()
+    profit = sum((d(x.price) - (consumed_cost(db, x) + d(x.cost_labor) + d(x.cost_travel) + d(x.cost_extra)) for x in closed), Decimal(0))
+    sold = d(
+        db.scalar(select(func.coalesce(func.sum(Invoice.total), 0)).where(Invoice.tenant_id == tid, Invoice.status != "anulada", Invoice.issue_date >= m0))
+    )
+    week = today + timedelta(days=7 - today.weekday())
+    jobs = db.scalars(select(WorkOrder).where(WorkOrder.tenant_id == tid, WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")))).all()
+    quotes_sent = db.scalar(select(func.count()).select_from(Quote).where(Quote.tenant_id == tid, Quote.status == "enviada"))
+    quotes_won = db.scalar(select(func.count()).select_from(Quote).where(Quote.tenant_id == tid, Quote.status == "convertida", Quote.updated_at >= m0))
+    warranties = [
+        a
+        for a in db.scalars(select(CustomerAsset).where(CustomerAsset.tenant_id == tid, CustomerAsset.warranty_until.is_not(None)))
+        if a.warranty_until and 0 <= (a.warranty_until - today).days <= 45
+    ]
+    return {
+        "pipeline": pipeline,
+        "pipeline_weighted": weighted.quantize(Decimal("0.01")),
+        "opportunities": len(opps),
+        "receivable": receivable,
+        "sold_month": sold,
+        "profit_month": profit.quantize(Decimal("0.01")),
+        "margin_month": pricing.margin_of(sum((d(x.price) for x in closed), Decimal(0)), sum((d(x.price) for x in closed), Decimal(0)) - profit),
+        "projects_active": len(active),
+        "projects_closed_month": len(closed),
+        "jobs_open": len(jobs),
+        "jobs_week": sum(1 for o in jobs if o.scheduled_at and o.scheduled_at.date() <= week),
+        "jobs_late": sum(1 for o in jobs if o.scheduled_at and o.scheduled_at.date() < today),
+        "quotes_sent": quotes_sent,
+        "quotes_won_month": quotes_won,
+        "warranties_soon": len(warranties),
     }

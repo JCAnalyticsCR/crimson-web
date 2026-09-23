@@ -106,7 +106,7 @@ export type Tenant = { id: number; slug: string; name: string; legal_name: strin
 export type User = { id: number; email: string; full_name: string; totp_enabled: boolean };
 export type Me = { user: User; tenant: Tenant; role: string; permissions: Record<string, string[]>; memberships: { tenant: Tenant; role: string }[] };
 export type Customer = { id: number; id_type: string; id_number: string | null; name: string; email: string | null; phone: string | null; whatsapp: string | null; currency: string; active: boolean };
-export type Product = { id: number; name: string; code: string; item_type: string; price: number; currency: string; cabys_code: string | null; unit: string; tax_rate: number | null; category_id: number | null; show_on_web: boolean };
+export type Product = { id: number; name: string; code: string; item_type: string; price: number; currency: string; cabys_code: string | null; unit: string; tax_rate: number | null; category_id: number | null; show_on_web: boolean; tax_ids?: number[]; brand?: string | null; supplier_stock?: number | null };
 export type Line = { id?: number; product_id: number | null; code: string | null; name: string; description: string | null; cabys_code?: string | null; unit: string; quantity: string; unit_price: string; discount_type: string; discount_value: string; tax_rate: string; subtotal?: string; tax_amount?: string; total?: string };
 export type Doc = {
   id: number; number: string; customer_id: number | null; customer_name: string | null; currency: string; fx_sell: string; fx_buy: string;
@@ -117,8 +117,14 @@ export type Quote = Doc & { converted_invoice_id: number | null };
 export type Payment = { id: number; method: string; kind: string; currency: string; amount: string; tip: string; external_ref: string | null; provider: string; paid_at: string; status: string };
 export type Invoice = Doc & { doc_type: string; consecutive: string | null; clave: string | null; balance: string; quote_id: number | null; einvoice_status: string; payments: Payment[]; sale_condition: string; credit_days: number; payment_method: string };
 export type DocListItem = { id: number; number: string; customer_name: string | null; currency: string; total: string; balance: string | null; status: string; issue_date: string; due_date: string | null };
+export type Ceo = {
+  pipeline: string; pipeline_weighted: string; opportunities: number; receivable: string; sold_month: string; profit_month: string; margin_month: number;
+  projects_active: number; projects_closed_month: number; jobs_open: number; jobs_week: number; jobs_late: number;
+  quotes_sent: number; quotes_won_month: number; warranties_soon: number;
+};
 export type Dashboard = {
   scope?: "mine" | "company";
+  gerencia?: Ceo | null;
   pagos: { hoy: string; mes: string; mes_anterior: string; variacion: number | null } | null;
   por_cobrar?: { id: number; number: string; customer: string | null; balance: string; currency: string; due_date: string | null; status: string }[];
   facturado: { hoy: string; mes: string; mes_anterior: string; variacion: number | null };
@@ -128,6 +134,11 @@ export type Dashboard = {
 };
 
 /* ---------- Helpers ---------- */
+/** Marca de tiempo del backend -> Date. Postgres las devuelve con "+00:00" y SQLite (desarrollo) sin zona:
+    si no se marcan como UTC, el navegador lee las de SQLite como hora local y el mismo dato se ve distinto
+    en cada entorno. Todo lo que guarda la API está en UTC. */
+export const parseTs = (s: string) => new Date(/([zZ]|[+-]\d{2}:?\d{2})$/.test(s) ? s : `${s}Z`);
+
 export const fmtMoney = (v: string | number | null | undefined, currency = "CRC") => {
   const n = Number(v ?? 0);
   return new Intl.NumberFormat("es-CR", { style: "currency", currency, maximumFractionDigits: 2 }).format(n);
@@ -153,4 +164,14 @@ export const STATUS: Record<string, { label: string; tone: "ok" | "warn" | "bad"
   cancelado: { label: "Cancelado", tone: "muted" },
   pagado: { label: "Pagado", tone: "ok" },
   por_aprobar: { label: "Por aprobar", tone: "warn" },
+  // campo y proyectos
+  borrador: { label: "Borrador", tone: "muted" },
+  asignada: { label: "Asignada", tone: "info" },
+  en_sitio: { label: "En sitio", tone: "warn" },
+  en_proceso: { label: "En proceso", tone: "warn" },
+  finalizada: { label: "Finalizada", tone: "ok" },
+  planificado: { label: "Planificado", tone: "info" },
+  en_curso: { label: "En curso", tone: "warn" },
+  terminado: { label: "Terminado", tone: "ok" },
+  facturado: { label: "Facturado", tone: "ok" },
 };

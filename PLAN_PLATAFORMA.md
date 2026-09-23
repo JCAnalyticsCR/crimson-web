@@ -398,6 +398,8 @@ Estimación total: 26–28 semanas con 2–3 desarrolladores. El cliente sale de
 7. Fase 1.3 — facturas, conversión, pagos manuales, enlace de pago + WhatsApp.
 8. Fase 1.4 — ajustes de facturación, grupos/consecutivos, notificaciones, reportes básicos, dashboard.
 
+9. Sesión 5 — la otra mitad del negocio: oportunidades, levantamientos técnicos, costeo, proyectos, órdenes de trabajo, activos, compras y rentabilidad real (2026-09-22).
+
 Cada sesión termina con: tests verdes, migración aplicada, `README` del módulo actualizado y épicas marcadas en este documento.
 
 ---
@@ -457,8 +459,23 @@ E-commerce
 Contabilidad
 - [x] Gastos con adjunto y proveedor · categorías · cuentas · estado de resultados · gastos recurrentes · colaboradores · planillas (CCSS, renta por tramos, provisiones, colillas, gasto automático)
 
-Reportes (15)
-- [x] Los 11 anteriores + Órdenes · Recepciones · Propinas · D-151 (borrador) · Planilla · Conciliación — 17 reportes, todos con Excel
+Reportes
+- [x] Los 11 anteriores + Órdenes · Recepciones · Propinas · D-151 (borrador) · Planilla · Conciliación · Rentabilidad por proyecto — 18 reportes, todos con Excel
+
+Comercial y campo (la otra mitad del negocio, sesión 5)
+- [x] Oportunidades: embudo por estado con monto ponderado, seguimiento con fecha y bitácora, aviso a los 5 días sin movimiento — `routers/pipeline.py`
+- [x] Levantamientos técnicos por tipo de solución (CCTV, cableado, acceso, asistencia, redes, UPS, ANPR): formulario dinámico desde `/field/specs`, puntos, sugerencia de materiales con 15 % de holgura — `routers/fieldwork.py`
+- [x] Costeo del levantamiento (costo por línea, mano de obra por técnico/día, viáticos, margen) y "aprobar y generar cotización" en un clic
+- [x] Cotización aprobada → proyecto con su primera orden de trabajo, materiales planificados y tareas — `routers/projects.py`
+- [x] Orden de trabajo en el celular del técnico: llegué / iniciar / avanzar / finalizar; al finalizar descuenta de inventario una sola vez
+- [x] Rentabilidad real por proyecto: venta contra equipos consumidos + mano de obra + viáticos + otros
+- [x] Informe técnico de entrega imprimible (tareas, materiales, equipos instalados, fotos, tiempos)
+- [x] Activos del cliente con serie, ubicación y garantía + aviso 45 días antes de vencer
+- [x] Solicitudes de compra: desde el proyecto (lo que falta), automáticas por stock bajo el mínimo, o a mano; al recibirlas entran a bodega con su costo
+- [x] Catálogo de proveedor: importa la lista de precios (costo + margen → precio de venta con el tipo de cambio del día), marca, modelo y existencias del proveedor
+- [x] Interruptor "Web" en la lista de productos y disponibilidad visible en la tienda (en bodega · bajo pedido · agotado)
+- [x] Fila de gerencia en el inicio: embudo, ponderado, por cobrar, utilidad del mes, proyectos, trabajos de la semana, garantías por vencer
+- [x] Roles nuevos: supervisor técnico (todo el campo, ve costos) y técnico instalador (solo lo asignado, nunca ve plata)
 
 Eventos / POS / API
 - [x] API pública + credenciales + checkout JWT + webhooks salientes · Eventos con entradas QR (venta pública, activación al pagar, check-in con cámara) · POS web (vuelto, pagos mixtos, variantes) · Importador CSV/Excel (clientes, productos, proveedores, facturas históricas; migración desde Fygaro) · vPOS (diferido)

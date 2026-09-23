@@ -28,6 +28,18 @@ from .extra import (
     Ticket,
     TicketType,
 )
+from .field import (
+    CustomerAsset,
+    Opportunity,
+    Project,
+    PurchaseRequest,
+    PurchaseRequestLine,
+    Survey,
+    SurveyItem,
+    SurveyPoint,
+    WorkOrder,
+    WorkOrderMaterial,
+)
 from .ops import (
     EInvoiceDocument,
     EmailOutbox,
@@ -96,4 +108,14 @@ __all__ = [
     "TicketType",
     "Ticket",
     "SupportGrant",
+    "Opportunity",
+    "Survey",
+    "SurveyPoint",
+    "SurveyItem",
+    "Project",
+    "WorkOrder",
+    "WorkOrderMaterial",
+    "CustomerAsset",
+    "PurchaseRequest",
+    "PurchaseRequestLine",
 ]

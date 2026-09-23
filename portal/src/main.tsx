@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import "./ui/base.css";
 import "./ui/access.css";
+import "./ui/field.css";
 import { SessionProvider, useSession } from "./app/session";
 import AppShell from "./app/AppShell";
 import Guard from "./app/Guard";
@@ -35,6 +36,12 @@ const TicketPage = lazy(() => import("./modules/events/TicketPage"));
 const Payroll = lazy(() => import("./modules/payroll/Payroll"));
 const Banking = lazy(() => import("./modules/accounting/Banking"));
 const Importer = lazy(() => import("./modules/tools/Importer"));
+const Opportunities = lazy(() => import("./modules/crm/Opportunities"));
+const Surveys = lazy(() => import("./modules/field/Surveys"));
+const WorkOrders = lazy(() => import("./modules/field/WorkOrders"));
+const Projects = lazy(() => import("./modules/projects/Projects"));
+const Assets = lazy(() => import("./modules/projects/Assets"));
+const Purchases = lazy(() => import("./modules/projects/Purchases"));
 
 function Private() {
   const { me, loading } = useSession();
@@ -80,6 +87,13 @@ function App() {
         <Route path="/planillas" element={g("payroll.ver", <Payroll />)} />
         <Route path="/conciliacion" element={g("accounting.ver", <Banking />)} />
         <Route path="/importar" element={g("settings.configurar", <Importer />)} />
+        <Route path="/oportunidades" element={g("crm_pipeline.ver", <Opportunities />)} />
+        <Route path="/levantamientos" element={g("field.ver", <Surveys />)} />
+        <Route path="/ordenes-trabajo" element={g("field.ver", <WorkOrders />)} />
+        <Route path="/proyectos" element={g("projects.ver", <Projects />)} />
+        <Route path="/proyectos/:id" element={g("projects.ver", <Projects />)} />
+        <Route path="/activos" element={g("assets.ver", <Assets />)} />
+        <Route path="/compras" element={g("purchases.ver", <Purchases />)} />
         <Route path="/productos" element={g("catalog.ver", <Products />)} />
         <Route path="/inventario" element={g("inventory.ver", <Inventory />)} />
         <Route path="/mi-tienda" element={g("settings.configurar", <Store />)} />

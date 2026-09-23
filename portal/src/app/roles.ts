@@ -44,8 +44,20 @@ export const ROLES: Record<string, RoleMeta> = {
   contabilidad: {
     label: "Contabilidad", tone: "#6b46c1", glyph: "K",
     summary: "Todo el dinero de la empresa: gastos, recepción de XML, conciliación, planillas y reportes.",
-    can: ["Gastos, recepción y conciliación", "Planillas y colillas", "Los 17 reportes con Excel"],
+    can: ["Gastos, recepción y conciliación", "Planillas y colillas", "Los reportes de la empresa con Excel, incluida la rentabilidad por proyecto"],
     cannot: ["Crear ventas o cobrar", "Configurar la empresa o los usuarios"],
+  },
+  supervisor: {
+    label: "Supervisor técnico", tone: "#0f766e", glyph: "S",
+    summary: "Manda el campo: levantamientos, proyectos, órdenes de trabajo y materiales. Ve costos, no la contabilidad.",
+    can: ["Asignar y programar órdenes de trabajo", "Revisar levantamientos y costear materiales", "Proyectos, activos del cliente y solicitudes de compra", "Movimientos de inventario"],
+    cannot: ["Facturar o cobrar", "Ver planillas, gastos ni conciliación", "Configurar la empresa"],
+  },
+  tecnico: {
+    label: "Técnico instalador", tone: "#b45309", glyph: "T",
+    summary: "Solo lo suyo, desde el celular: el trabajo del día, el levantamiento en sitio y la evidencia de la instalación.",
+    can: ["Ver sus órdenes de trabajo del día", "Llenar levantamientos técnicos en sitio", "Registrar material usado, fotos y firma del cliente", "Anotar los equipos que deja instalados"],
+    cannot: ["Ver precios, costos ni márgenes", "Ver trabajos de otros técnicos", "Ver facturas, cobros o reportes"],
   },
   lectura: {
     label: "Solo lectura", tone: "#6b6570", glyph: "L",

@@ -13,6 +13,11 @@ DEFAULT_GROUPS = {
     "FEE": ("FEE", "Facturas de exportacion"),
     "NC": ("NC", "Notas de credito"),
     "ND": ("ND", "Notas de debito"),
+    "OPO": ("OPO", "Oportunidades"),
+    "LEV": ("LEV", "Levantamientos tecnicos"),
+    "PRO": ("PRO", "Proyectos"),
+    "OT": ("OT", "Ordenes de trabajo"),
+    "SC": ("SC", "Solicitudes de compra"),
 }
 
 DOC_TYPE_CODE = {"FE": "01", "ND": "02", "NC": "03", "TE": "04", "FEE": "09", "COT": "00"}

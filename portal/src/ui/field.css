@@ -1,0 +1,65 @@
+/* Comercial y campo: embudo, levantamientos, ordenes de trabajo y proyectos.
+   El tecnico trabaja desde el celular con guantes: botones grandes, una columna y nada de tablas angostas. */
+
+/* ---------- Embudo de oportunidades ---------- */
+.board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(250px, 1fr); gap: 12px; overflow-x: auto; padding-bottom: 8px; }
+.board__col { background: var(--bg-2); border: 1px solid var(--hair); border-radius: 14px; padding: 10px; min-height: 140px; }
+.board__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 2px 4px 10px; }
+.board__head b { font-size: 13px; }
+.board__head span { font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+.opp { display: block; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--hair-2); border-left: 3px solid var(--crimson); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; }
+.opp:hover { border-color: var(--crimson); }
+.opp b { display: block; font-size: 13.5px; line-height: 1.35; }
+.opp .opp__meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; font-size: 12px; color: var(--text-3); }
+.opp--late { border-left-color: var(--bad); }
+.opp--soon { border-left-color: var(--warn); }
+
+/* ---------- Tarjetas de numeros (costeo, rentabilidad) ---------- */
+.eco { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.eco__box { background: var(--bg-2); border: 1px solid var(--hair); border-radius: 12px; padding: 12px 14px; }
+.eco__box .meta { display: block; margin-bottom: 4px; }
+a.eco__box { color: inherit; text-decoration: none; }
+a.eco__box:hover { border-color: var(--crimson); }
+.eco__box b { font-size: 19px; font-family: var(--mono); }
+.eco__box.is-good b { color: var(--ok); }
+.eco__box.is-bad b { color: var(--bad); }
+
+/* ---------- Levantamiento: puntos ---------- */
+.point { border: 1px solid var(--hair-2); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; background: var(--surface); }
+.point__head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.point__head .mono { font-weight: 700; color: var(--crimson); }
+.point__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--hair-2); background: var(--surface); border-radius: 999px; padding: 5px 12px; font-size: 12.5px; cursor: pointer; color: var(--text-2); }
+.chip.is-on { background: var(--crimson); border-color: var(--crimson); color: #fff; }
+
+/* ---------- Dia del tecnico ---------- */
+.job { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--hair-2); border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; cursor: pointer; }
+.job:hover { border-color: var(--crimson); }
+.job__when { font-family: var(--mono); font-size: 12px; color: var(--text-3); min-width: 54px; }
+.job b { display: block; font-size: 15px; }
+.job small { color: var(--text-3); font-size: 12.5px; }
+.bigbtn { display: flex; gap: 10px; }
+.bigbtn > .btn { flex: 1; justify-content: center; min-height: 52px; font-size: 15px; }
+.task { display: flex; align-items: center; gap: 10px; padding: 12px 4px; border-bottom: 1px solid var(--hair); font-size: 14.5px; }
+.task input { width: 20px; height: 20px; }
+.task.is-done span { text-decoration: line-through; color: var(--text-3); }
+
+@media (max-width: 720px) {
+  .board { grid-auto-flow: row; grid-auto-columns: auto; }
+  .point__grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* ---------- Interruptor de la columna "Web" ---------- */
+.switch { width: 40px; height: 22px; border-radius: 999px; border: 1px solid var(--hair-2); background: var(--bg-2); padding: 2px; cursor: pointer; display: inline-flex; }
+.switch i { width: 16px; height: 16px; border-radius: 50%; background: var(--text-3); transition: transform .15s, background .15s; }
+.switch.is-on { background: color-mix(in srgb, var(--ok) 22%, transparent); border-color: var(--ok); }
+.switch.is-on i { transform: translateX(18px); background: var(--ok); }
+.switch:disabled { opacity: .5; cursor: default; }
+
+/* ---------- Buscador de catalogo / clientes ---------- */
+.lookup { position: relative; }
+.lookup__list { position: absolute; z-index: 40; top: calc(100% + 4px); left: 0; right: 0; max-height: 260px; overflow: auto; margin: 0; padding: 4px; list-style: none; background: var(--surface); border: 1px solid var(--hair-2); border-radius: 10px; box-shadow: 0 14px 34px rgba(0,0,0,.18); }
+.lookup__list button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--text-1); font-size: 13.5px; }
+.lookup__list button:hover { background: var(--bg-2); }
+.lookup__list small { display: block; color: var(--text-3); font-family: var(--mono); font-size: 11.5px; }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, fmtDate, fmtMoney, type Dashboard as D } from "../../lib/api";
+import { api, fmtDate, fmtMoney, parseTs, type Dashboard as D } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { roleMeta } from "../../app/roles";
 import { Badge, Card, Empty, I, Icon, Spark } from "../../ui/components";
@@ -22,15 +22,28 @@ function Kpi({ label, data, light, cur }: { label: string; data: NonNullable<D["
   );
 }
 
+type Job = { id: number; number: string; title: string; status: string; customer: string | null; site: string | null; scheduled_at: string | null };
+
+const JobRow = ({ o }: { o: Job }) => (
+  <Link className="job" to={`/ordenes-trabajo?id=${o.id}`}>
+    <span className="job__when">{o.scheduled_at ? parseTs(o.scheduled_at).toLocaleTimeString("es-CR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Costa_Rica" }) : "—"}</span>
+    <span style={{ flex: 1, minWidth: 0 }}><b>{o.title}</b><small>{o.customer || "Sin cliente"}{o.site ? ` · ${o.site}` : ""}</small></span>
+    <Badge status={o.status} />
+  </Link>
+);
+
 export default function Dashboard() {
   const { me, allows, role } = useSession();
   const rm = roleMeta(role);
   const [d, setD] = useState<D | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [low, setLow] = useState<{ product_id: number; name: string; code: string; quantity: string; min_stock: number }[] | null>(null);
+  const [day, setDay] = useState<{ today: Job[]; next: Job[]; surveys: { id: number; number: string; kind_label: string; site: string | null }[] } | null>(null);
   const salesHome = allows("sales.ver");
+  const fieldHome = !salesHome && allows("field.ver"); // el técnico entra a ver su día, no el inventario
   const load = () => {
     if (salesHome) api<D>("/dashboard").then(setD).catch((e) => setErr(e.message));
+    else if (fieldHome) api<typeof day>("/work-orders/meta/today").then(setDay).catch((e) => setErr(e.message));
     else api<{ low_stock: typeof low }>("/alerts").then((r) => setLow(r.low_stock || [])).catch((e) => setErr(e.message));
   };
   useEffect(() => { load(); }, []);
@@ -64,7 +77,20 @@ export default function Dashboard() {
       </div>
 
       {err && <p style={{ color: "var(--bad)" }}>{err}</p>}
-      {!salesHome && (
+      {fieldHome && (
+        <>
+          <Card title={`Hoy · ${day?.today.length ?? 0}`} extra={<Link className="btn btn--ghost btn--sm" to="/ordenes-trabajo">Ver todas</Link>}>
+            {!day ? <span className="spinner" /> : day.today.length === 0 ? <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>No hay trabajos programados para hoy.</p> : day.today.map((o) => <JobRow key={o.id} o={o} />)}
+          </Card>
+          {!!day?.next.length && <Card title={`Próximos · ${day.next.length}`}>{day.next.map((o) => <JobRow key={o.id} o={o} />)}</Card>}
+          {!!day?.surveys.length && (
+            <Card title="Levantamientos sin enviar">
+              {day.surveys.map((s) => <Link className="job" key={s.id} to={`/levantamientos?id=${s.id}`}><span style={{ flex: 1 }}><b>{s.number} · {s.kind_label}</b><small>{s.site || "Sin sitio"}</small></span><span className="badge badge--warn">Borrador</span></Link>)}
+            </Card>
+          )}
+        </>
+      )}
+      {!salesHome && !fieldHome && (
         <Card title="Existencias bajo el mínimo" flush extra={<Link className="btn btn--ghost btn--sm" to="/inventario">Ir a inventarios</Link>}>
           {low === null ? <div style={{ padding: 24, textAlign: "center" }}><span className="spinner" /></div> : low.length === 0 ? <Empty title="Todo en orden" hint="Ningún producto está por debajo de su stock mínimo." /> : (
             <table className="table"><thead><tr><th>Código</th><th>Producto</th><th className="num">Existencia</th><th className="num">Mínimo</th></tr></thead>
@@ -78,6 +104,21 @@ export default function Dashboard() {
             {d.pagos && <Kpi label={d.scope === "mine" ? "Mis cobros" : "Pagos"} data={d.pagos} cur={cur} />}
             <Kpi label={d.scope === "mine" ? "Mi facturación" : "Facturado"} data={d.facturado} cur={cur} light />
           </div>
+
+          {d.gerencia && (
+            <Card title="Cómo va Crimson" extra={<span className="meta">pipeline, obra y utilidad</span>}>
+              <div className="eco">
+                <Link className="eco__box" to="/oportunidades"><span className="meta">Embudo · {d.gerencia.opportunities} oportunidades</span><b className="money">{fmtMoney(d.gerencia.pipeline, cur)}</b></Link>
+                <div className="eco__box"><span className="meta">Ponderado por probabilidad</span><b className="money">{fmtMoney(d.gerencia.pipeline_weighted, cur)}</b></div>
+                <div className="eco__box"><span className="meta">Por cobrar</span><b className="money">{fmtMoney(d.gerencia.receivable, cur)}</b></div>
+                <div className={`eco__box ${Number(d.gerencia.profit_month) >= 0 ? "is-good" : "is-bad"}`}><span className="meta">Utilidad del mes · margen {d.gerencia.margin_month.toFixed(1)}%</span><b className="money">{fmtMoney(d.gerencia.profit_month, cur)}</b></div>
+                <Link className="eco__box" to="/proyectos"><span className="meta">Proyectos activos · {d.gerencia.projects_closed_month} cerrados este mes</span><b>{d.gerencia.projects_active}</b></Link>
+                <Link className={`eco__box ${d.gerencia.jobs_late ? "is-bad" : ""}`} to="/ordenes-trabajo"><span className="meta">Trabajos de la semana{d.gerencia.jobs_late ? ` · ${d.gerencia.jobs_late} atrasados` : ""}</span><b>{d.gerencia.jobs_week}</b></Link>
+                <div className="eco__box"><span className="meta">Cotizaciones enviadas · {d.gerencia.quotes_won_month} ganadas</span><b>{d.gerencia.quotes_sent}</b></div>
+                <Link className={`eco__box ${d.gerencia.warranties_soon ? "is-bad" : ""}`} to="/activos?vencen=1"><span className="meta">Garantías por vencer (45 d)</span><b>{d.gerencia.warranties_soon}</b></Link>
+              </div>
+            </Card>
+          )}
 
           <Card title="Acciones pendientes" extra={<span className="meta">se actualiza en vivo</span>}>
             <div className="pending">

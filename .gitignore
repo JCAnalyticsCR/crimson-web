@@ -13,3 +13,4 @@ api/.pytest_cache/
 api/.ruff_cache/
 portal/dist/
 portal/node_modules/
+portal/tsconfig.tsbuildinfo

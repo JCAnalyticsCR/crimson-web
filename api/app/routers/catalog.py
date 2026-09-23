@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
@@ -110,10 +113,12 @@ def create_category(data: CategoryIn, p: Principal = Depends(require("catalog", 
 
 
 # ---------- Productos ----------
-def _product_out(pr: Product) -> ProductOut:
+def _product_out(pr: Product, p: Principal | None = None) -> ProductOut:
     o = ProductOut.model_validate(pr)
     o.tax_ids = [t.tax_id for t in pr.taxes]
     o.tax_rate = float(pr.taxes[0].tax.rate) if pr.taxes else None
+    if p is not None and not p.sees_prices:  # el tecnico ve el catalogo sin plata
+        o.price, o.cost, o.margin_pct = 0, None, None
     return o
 
 
@@ -129,7 +134,7 @@ def products(
     if q:
         like = f"%{q}%"
         stmt = stmt.where(or_(Product.name.ilike(like), Product.code.ilike(like), Product.cabys_code.ilike(like)))
-    return _page(db, stmt, cursor, limit, Product, _product_out)
+    return _page(db, stmt, cursor, limit, Product, lambda pr: _product_out(pr, p))
 
 
 @router.post("/products", response_model=ProductOut, status_code=201)
@@ -143,12 +148,55 @@ def create_product(data: ProductIn, p: Principal = Depends(require("catalog", "c
     db.add(pr)
     db.commit()
     db.refresh(pr)
-    return _product_out(pr)
+    return _product_out(pr, p)
 
 
 @router.get("/products/{pid}", response_model=ProductOut)
 def get_product(pid: int, p: Principal = Depends(require("catalog", "ver")), db: Session = Depends(get_db)):
-    return _product_out(_own(db, Product, pid, p.tenant.id))
+    return _product_out(_own(db, Product, pid, p.tenant.id), p)
+
+
+class WebIn(BaseModel):
+    show_on_web: bool
+
+
+@router.patch("/products/{pid}/web", response_model=ProductOut)
+def toggle_web(pid: int, data: WebIn, p: Principal = Depends(require("catalog", "editar")), db: Session = Depends(get_db)):
+    """Publica o quita el producto de la tienda desde la lista, sin abrir la ficha."""
+    pr = _own(db, Product, pid, p.tenant.id)
+    pr.show_on_web = data.show_on_web
+    db.commit()
+    db.refresh(pr)
+    return _product_out(pr, p)
+
+
+@router.get("/products/{pid}/availability")
+def availability(pid: int, p: Principal = Depends(require("catalog", "ver")), db: Session = Depends(get_db)):
+    """Existencias propias por bodega + disponibilidad del proveedor (lo que ve el cliente en la tienda)."""
+    from ..services import inventory as invsvc
+
+    pr = _own(db, Product, pid, p.tenant.id)
+    levels = [lv for lv in invsvc.stock_levels(db, p.tenant.id, product_id=pid)]
+    own = sum((lv["quantity"] for lv in levels), Decimal(0))
+    return {
+        "product_id": pid,
+        "own_stock": own,
+        "min_stock": pr.min_stock,
+        "supplier_stock": pr.supplier_stock,
+        "supplier_updated_at": pr.supplier_updated_at,
+        "label": store_availability(pr, own)["label"],
+    }
+
+
+def store_availability(pr: Product, own: Decimal) -> dict:
+    """Etiqueta de disponibilidad para la tienda: propio, bajo pedido o agotado."""
+    if pr.item_type != "producto":
+        return {"state": "servicio", "label": "Servicio", "own": 0}
+    if own > 0:
+        return {"state": "en_bodega", "label": f"Disponible ({own:g} en bodega)", "own": own}
+    if (pr.supplier_stock or 0) > 0:
+        return {"state": "bajo_pedido", "label": "Bajo pedido (3-5 días hábiles)", "own": 0}
+    return {"state": "agotado", "label": "Consultar disponibilidad", "own": 0}
 
 
 @router.put("/products/{pid}", response_model=ProductOut)
@@ -166,4 +214,4 @@ def update_product(pid: int, data: ProductIn, p: Principal = Depends(require("ca
             pr.taxes.append(ProductTax(tax_id=tid))
     db.commit()
     db.refresh(pr)
-    return _product_out(pr)
+    return _product_out(pr, p)

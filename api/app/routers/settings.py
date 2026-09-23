@@ -41,6 +41,9 @@ DEFAULTS = {
     "social": {},
     "legal": {"privacy": "", "terms": ""},
     "max_discount_pct": 10,
+    "default_margin_pct": 35,  # margen con el que se sugiere el precio de venta desde el costo
+    "labor_day_cost": 25000,  # costo interno por tecnico por dia
+    "travel_cost": 35000,  # transporte estimado por trabajo
 }
 
 
@@ -61,6 +64,9 @@ class SettingsIn(BaseModel):
     social: dict | None = None
     legal: dict | None = None
     max_discount_pct: float | None = Field(None, ge=0, le=100)
+    default_margin_pct: float | None = Field(None, ge=0, le=95)
+    labor_day_cost: float | None = Field(None, ge=0)
+    travel_cost: float | None = Field(None, ge=0)
 
 
 @router.get("")

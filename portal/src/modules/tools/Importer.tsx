@@ -6,7 +6,7 @@ import { useSession } from "../../app/session";
 import { Card, Empty, I, Icon } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
 
-type ImportKind = "customers" | "products" | "suppliers" | "invoices";
+type ImportKind = "customers" | "products" | "suppliers" | "invoices" | "catalogo";
 type ActionKind = "nuevo" | "actualizar" | "omitir" | "error";
 type PreviewRow = { row: number; action: ActionKind; detail: string | null };
 type PreviewResult = {
@@ -21,6 +21,7 @@ const KINDS: { id: ImportKind; label: string; desc: string; route: string }[] = 
   { id: "products", label: "Productos y servicios", desc: "Código, nombre, precio, CABYS, impuesto.", route: "/productos" },
   { id: "suppliers", label: "Proveedores", desc: "Nombre, cédula, contacto y condiciones de pago.", route: "/contabilidad" },
   { id: "invoices", label: "Facturas históricas", desc: "Documentos previos como referencia (no se reenvían a Hacienda).", route: "/facturas" },
+  { id: "catalogo", label: "Lista de precios de proveedor", desc: "El costo entra tal cual y el precio de venta se calcula con el margen.", route: "/productos" },
 ];
 
 const ACTION_LABELS: Record<ActionKind, string> = {
@@ -41,6 +42,9 @@ export default function Importer() {
   const [filterAction, setFilterAction] = useState<ActionKind | "">("");
   const [busy, setBusy] = useState(false);
   const [committed, setCommitted] = useState<PreviewResult | null>(null);
+  /* La lista del proveedor trae costos, no precios: el margen y la divisa definen a cuánto se vende. */
+  const [opts, setOpts] = useState({ margin: "35", supplier: "", brand: "", currency: "USD" });
+  const qs = () => (kind === "catalogo" ? `&margin=${encodeURIComponent(opts.margin)}&supplier=${encodeURIComponent(opts.supplier)}&brand=${encodeURIComponent(opts.brand)}&currency=${opts.currency}` : "");
 
   const chooseKind = (k: ImportKind) => { setKind(k); setStep(2); setFile(null); setPreview(null); setCommitted(null); };
 
@@ -53,7 +57,7 @@ export default function Importer() {
     if (!kind) return;
     setBusy(true);
     try {
-      const r = await uploadFile<PreviewResult>(`/import/${kind}`, f);
+      const r = await uploadFile<PreviewResult>(`/import/${kind}?commit=false${qs()}`, f);
       setPreview(r); setStep(3); setFilterAction("");
     } catch (e) { toast(e instanceof Error ? e.message : "Error al previsualizar", "bad"); }
     finally { setBusy(false); }
@@ -63,7 +67,7 @@ export default function Importer() {
     if (!kind || !file) return;
     setBusy(true);
     try {
-      const r = await uploadFile<PreviewResult>(`/import/${kind}?commit=true`, file);
+      const r = await uploadFile<PreviewResult>(`/import/${kind}?commit=true${qs()}`, file);
       setCommitted(r); toast(`Importación completa: ${r.summary.nuevo + r.summary.actualizar} registros procesados`);
     } catch (e) { toast(e instanceof Error ? e.message : "Error al importar", "bad"); }
     finally { setBusy(false); }
@@ -122,10 +126,20 @@ export default function Importer() {
       {step === 2 && kind && (
         <Card title={`Importar ${currentKindMeta?.label}`}>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <p className="muted" style={{ fontSize: 13 }}>{currentKindMeta?.desc} Descargá la plantilla, completala y subila aquí.</p>
-            <AuthLink path={`/import/${kind}/template`} download={`plantilla-${kind}.xlsx`} className="btn btn--ghost btn--sm">
-              <Icon d={I.reports} />Descargar plantilla
-            </AuthLink>
+            <p className="muted" style={{ fontSize: 13 }}>{currentKindMeta?.desc}{kind === "catalogo" ? " Subí el archivo tal como lo manda el proveedor: no hay plantilla que llenar." : " Descargá la plantilla, completala y subila aquí."}</p>
+            {kind !== "catalogo" && (
+              <AuthLink path={`/import/${kind}/template`} download={`plantilla-${kind}.xlsx`} className="btn btn--ghost btn--sm">
+                <Icon d={I.reports} />Descargar plantilla
+              </AuthLink>
+            )}
+            {kind === "catalogo" && (
+              <div className="grid-3">
+                <div className="field"><label>Proveedor</label><input className="input" value={opts.supplier} onChange={(e) => setOpts({ ...opts, supplier: e.target.value })} placeholder="Eurocomp Costa Rica" /><small>Se crea si no existe y queda ligado a cada producto.</small></div>
+                <div className="field"><label>Marca por defecto</label><input className="input" value={opts.brand} onChange={(e) => setOpts({ ...opts, brand: e.target.value })} placeholder="Hikvision" /></div>
+                <div className="field"><label>Divisa del costo</label><select className="select" value={opts.currency} onChange={(e) => setOpts({ ...opts, currency: e.target.value })}><option>USD</option><option>CRC</option></select></div>
+                <div className="field" style={{ gridColumn: "1 / -1" }}><label>Margen sobre venta · {opts.margin} %</label><input type="range" min={0} max={80} step={1} value={opts.margin} onChange={(e) => setOpts({ ...opts, margin: e.target.value })} /><small>El precio se calcula con el tipo de cambio del día y se redondea a la centena.</small></div>
+              </div>
+            )}
             <div
               role="button"
               tabIndex={0}

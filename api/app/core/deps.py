@@ -18,31 +18,58 @@ bearer = HTTPBearer(auto_error=False)
 
 # Roles predefinidos (plan 5.5). "*" = todo.
 ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
-    "admin": {"*": ["*"]},
+    "admin": {"*": ["*"]},  # CEO / superadministrador
     # Vendedor: cotiza, factura y cobra lo SUYO. Sin "ver_todo" solo ve sus documentos y pagos; sin contabilidad,
     # planillas ni reportes. Clientes y catalogo (solo lectura) son compartidos porque los necesita para vender.
     "ventas": {
         "dashboard": ["ver"],
         "crm": ["ver", "crear", "editar"],
-        "catalog": ["ver"],
+        "catalog": ["ver", "precios"],
         "sales": ["ver", "crear", "editar", "enviar"],
         "payments": ["ver", "crear"],
         "events": ["ver", "crear", "editar", "checkin"],
+        "crm_pipeline": ["ver", "crear", "editar"],  # oportunidades propias
+        "field": ["ver", "crear"],  # levantamientos propios (los pide para cotizar)
+        "projects": ["ver"],
     },
     # Caja: cobra en mostrador y busca cualquier factura para registrar su pago. Reportes solo de caja.
     "caja": {
         "dashboard": ["ver"],
         "crm": ["ver", "crear"],
-        "catalog": ["ver"],
+        "catalog": ["ver", "precios"],
         "sales": ["ver", "ver_todo", "crear"],
         "payments": ["ver", "crear", "editar"],
         "events": ["ver", "checkin"],
         "reports": ["ver", "exportar"],
     },
+    # Supervisor tecnico: todos los levantamientos, proyectos y ordenes de trabajo; materiales y activos.
+    "supervisor": {
+        "dashboard": ["ver"],
+        "crm": ["ver"],
+        "crm_pipeline": ["ver", "editar"],
+        "catalog": ["ver", "precios"],
+        "inventory": ["ver", "crear", "editar", "exportar"],
+        "field": ["ver", "ver_todo", "crear", "editar", "asignar"],
+        "projects": ["ver", "ver_todo", "crear", "editar"],
+        "assets": ["ver", "crear", "editar"],
+        "purchases": ["ver", "crear"],
+        "sales": ["ver"],
+        "reports": ["ver", "exportar"],
+    },
+    # Tecnico instalador: solo lo asignado, desde el celular. Nunca ve precios ni costos.
+    "tecnico": {
+        "dashboard": ["ver"],
+        "crm": ["ver"],
+        "catalog": ["ver"],
+        "inventory": ["ver"],
+        "field": ["ver", "crear", "editar"],
+        "projects": ["ver"],
+        "assets": ["ver", "crear", "editar"],
+    },
     # Bodega: catalogo y existencias. Ni ventas ni dinero; reportes solo de inventario.
     "inventario": {
         "dashboard": ["ver"],
-        "catalog": ["ver", "crear", "editar"],
+        "catalog": ["ver", "precios", "crear", "editar"],
         "inventory": ["ver", "crear", "editar", "exportar"],
         "reports": ["ver", "exportar"],
     },
@@ -50,11 +77,13 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
     "contabilidad": {
         "dashboard": ["ver", "empresa"],
         "crm": ["ver"],
-        "catalog": ["ver"],
+        "catalog": ["ver", "precios"],
         "sales": ["ver", "ver_todo", "exportar", "recurrencias"],
         "payments": ["ver", "exportar"],
         "accounting": ["ver", "crear", "editar", "exportar"],
         "inventory": ["ver", "exportar"],
+        "projects": ["ver", "ver_todo"],
+        "purchases": ["ver", "crear", "editar"],
         "payroll": ["ver", "crear", "editar", "aprobar", "configurar"],
         "reports": ["ver", "exportar"],
     },
@@ -62,7 +91,10 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
     "lectura": {
         "dashboard": ["ver", "empresa"],
         "crm": ["ver"],
-        "catalog": ["ver"],
+        "crm_pipeline": ["ver"],
+        "projects": ["ver", "ver_todo"],
+        "assets": ["ver"],
+        "catalog": ["ver", "precios"],
         "sales": ["ver", "ver_todo", "exportar"],
         "payments": ["ver"],
         "events": ["ver"],
@@ -78,6 +110,9 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "inventory": ["ver"],
         "accounting": ["ver"],
         "events": ["ver"],
+        "projects": ["ver", "ver_todo"],
+        "field": ["ver", "ver_todo"],
+        "assets": ["ver"],
         "reports": ["ver"],
         "settings": ["ver"],
     },
@@ -92,6 +127,16 @@ class Principal:
     role: str
     permissions: dict[str, list[str]]
     ip: str | None = None
+
+    @property
+    def sees_field_all(self) -> bool:
+        """Sin "field.ver_todo" (tecnico) solo ve sus levantamientos y sus ordenes de trabajo."""
+        return self.can("field", "ver_todo")
+
+    @property
+    def sees_prices(self) -> bool:
+        """El tecnico ve el catalogo sin precios ni costos."""
+        return self.can("catalog", "precios")
 
     @property
     def sees_all_sales(self) -> bool:

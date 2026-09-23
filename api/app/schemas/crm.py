@@ -53,6 +53,12 @@ class ProductIn(BaseModel):
     item_type: str = "producto"
     price: float = Field(0, ge=0)
     currency: str = "CRC"
+    cost: float | None = Field(None, ge=0)
+    cost_currency: str = "USD"
+    margin_pct: float | None = Field(None, ge=0, le=95)
+    brand: str | None = None
+    model: str | None = None
+    supplier_sku: str | None = None
     weight_kg: float | None = None
     show_on_web: bool = False
     description_invoice: str | None = None
@@ -78,6 +84,13 @@ class ProductOut(BaseModel):
     item_type: str
     price: float
     currency: str
+    cost: float | None = None
+    cost_currency: str = "USD"
+    margin_pct: float | None = None
+    brand: str | None = None
+    model: str | None = None
+    supplier_sku: str | None = None
+    supplier_stock: int | None = None
     weight_kg: float | None
     show_on_web: bool
     description_invoice: str | None

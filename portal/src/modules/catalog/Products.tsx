@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, fmtMoney, type Product } from "../../lib/api";
+import { api, fmtMoney, parseTs, type Product } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 import { GalleryField, type GalleryImage } from "../../ui/MediaPicker";
@@ -8,7 +8,9 @@ import { GalleryField, type GalleryImage } from "../../ui/MediaPicker";
 type Tax = { id: number; name: string; rate: number };
 type Named = { id: number; name: string };
 type Variant = { id?: number; name: string; code: string; price: string; active: boolean; options: Record<string, string> };
+type Availability = { own_stock: string; min_stock: number; supplier_stock: number | null; supplier_updated_at: string | null; label: string };
 type Full = Product & {
+  cost: number | null; cost_currency: string; margin_pct: number | null; brand: string | null; model: string | null; supplier_sku: string | null; supplier_stock: number | null;
   tax_ids: number[]; description_invoice: string | null; description_store: string | null; min_stock: number; images: GalleryImage[];
   supplier_id: number | null; weight_kg: number | null; registration_number: string | null; cabys_description: string | null; tariff_code: string | null; active: boolean;
 };
@@ -16,7 +18,7 @@ type Full = Product & {
 const blank = {
   name: "", code: "", item_type: "producto", price: "0", currency: "CRC", cabys_code: "", description_invoice: "", description_store: "", unit: "Unid",
   show_on_web: false, min_stock: 0, tax_ids: [] as number[], category_id: "" as string, supplier_id: "" as string, weight_kg: "", images: [] as GalleryImage[],
-  registration_number: "", tariff_code: "",
+  registration_number: "", tariff_code: "", cost: "", cost_currency: "USD", margin_pct: "", brand: "", model: "", supplier_sku: "",
 };
 type Edit = typeof blank & { id?: number };
 
@@ -34,6 +36,9 @@ export default function Products() {
   const [edit, setEdit] = useState<Edit | null>(params.get("nuevo") ? { ...blank } : null);
   const [variants, setVariants] = useState<Variant[]>([]);
   const [newCat, setNewCat] = useState<string | null>(null);
+  const [avail, setAvail] = useState<Availability | null>(null);
+  const [toggling, setToggling] = useState<number | null>(null);
+  const verCostos = allows("catalog.precios");
 
   const load = useCallback(() => api<{ items: Product[] }>(`/products?limit=50${q ? `&q=${encodeURIComponent(q)}` : ""}`).then((r) => setItems(r.items)), [q]);
   useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); }, [load]);
@@ -50,8 +55,12 @@ export default function Products() {
       description_invoice: f.description_invoice || "", description_store: f.description_store || "", unit: f.unit, show_on_web: f.show_on_web, min_stock: f.min_stock,
       tax_ids: f.tax_ids, category_id: f.category_id ? String(f.category_id) : "", supplier_id: f.supplier_id ? String(f.supplier_id) : "",
       weight_kg: f.weight_kg != null ? String(f.weight_kg) : "", images: f.images || [], registration_number: f.registration_number || "", tariff_code: f.tariff_code || "",
+      cost: f.cost != null ? String(f.cost) : "", cost_currency: f.cost_currency || "USD", margin_pct: f.margin_pct != null ? String(f.margin_pct) : "",
+      brand: f.brand || "", model: f.model || "", supplier_sku: f.supplier_sku || "",
     });
     setTab("general");
+    setAvail(null);
+    api<Availability>(`/products/${id}/availability`).then(setAvail).catch(() => setAvail(null));
     api<(Omit<Variant, "price"> & { price: string | number | null })[]>(`/products/${id}/variants`).then((vs) => setVariants(vs.filter((v) => v.active).map((v) => ({ ...v, price: v.price == null ? "" : String(v.price) }))));
   };
 
@@ -62,6 +71,8 @@ export default function Products() {
       const body = {
         ...b, price: Number(b.price), category_id: b.category_id ? Number(b.category_id) : null, supplier_id: b.supplier_id ? Number(b.supplier_id) : null,
         weight_kg: b.weight_kg ? Number(b.weight_kg) : null, cabys_code: b.cabys_code || null, registration_number: b.registration_number || null, tariff_code: b.tariff_code || null,
+        cost: b.cost === "" ? null : Number(b.cost), margin_pct: b.margin_pct === "" ? null : Number(b.margin_pct),
+        brand: b.brand || null, model: b.model || null, supplier_sku: b.supplier_sku || null,
       };
       const saved = await api<{ id: number }>(id ? `/products/${id}` : "/products", { method: id ? "PUT" : "POST", json: body });
       if (id || variants.length) {
@@ -90,6 +101,17 @@ export default function Products() {
   const setV = (i: number, patch: Partial<Variant>) => setVariants(variants.map((v, j) => (j === i ? { ...v, ...patch } : v)));
   const thumb = (p: { images?: GalleryImage[] }) => (p.images || []).find((x) => x.main)?.url || p.images?.[0]?.url;
 
+  /* El interruptor de la columna Web publica o quita el producto de la tienda sin abrir la ficha:
+     es lo que se hace todos los dias y no deberia costar cuatro clics. */
+  const toggleWeb = async (pr: Product) => {
+    if (!allows("catalog.editar")) return;
+    setToggling(pr.id);
+    setItems((xs) => xs.map((x) => (x.id === pr.id ? { ...x, show_on_web: !pr.show_on_web } : x)));
+    try { await api(`/products/${pr.id}/web`, { method: "PATCH", json: { show_on_web: !pr.show_on_web } }); toast(pr.show_on_web ? "Quitado de la tienda" : "Publicado en la tienda"); }
+    catch (e) { setItems((xs) => xs.map((x) => (x.id === pr.id ? { ...x, show_on_web: pr.show_on_web } : x))); toast(e instanceof Error ? e.message : "Error", "bad"); }
+    finally { setToggling(null); }
+  };
+
   return (
     <>
       <div className="page-head">
@@ -100,11 +122,11 @@ export default function Products() {
         <div className="list-head"><div className="search" style={{ maxWidth: 420 }}><Icon d={I.search} size={16} /><input placeholder="Nombre, código o CABYS…" value={q} onChange={(e) => setQ(e.target.value)} /></div><button className="btn btn--ghost btn--sm" onClick={load}><Icon d={I.refresh} /></button></div>
         {items.length === 0 ? <Empty hint="Creá productos y servicios con su código CABYS e impuesto." /> : (
           <table className="table">
-            <thead><tr><th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th className="num">Precio</th><th>IVA</th><th>Web</th><th /></tr></thead>
+            <thead><tr><th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th>{verCostos && <th className="num">Precio</th>}<th>IVA</th><th>Web</th><th /></tr></thead>
             <tbody>{items.map((p) => (
               <tr key={p.id}>
                 <td>{thumb(p) ? <span style={{ display: "block", width: 36, height: 36, borderRadius: 8, background: `center/cover no-repeat url("${thumb(p)}")`, border: "1px solid var(--hair)" }} /> : <span style={{ display: "grid", placeItems: "center", width: 36, height: 36, borderRadius: 8, background: "var(--bg-2)", color: "var(--text-3)" }}><Icon d={I.products} size={16} /></span>}</td>
-                <td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.item_type}</td><td className="mono muted">{p.cabys_code || "—"}</td><td className="num money">{fmtMoney(p.price, p.currency)}</td><td className="muted">{p.tax_rate ?? "—"}%</td><td>{p.show_on_web ? <span className="badge badge--ok">Sí</span> : <span className="badge badge--muted">No</span>}</td>
+                <td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.item_type}</td><td className="mono muted">{p.cabys_code || "—"}</td>{verCostos && <td className="num money">{fmtMoney(p.price, p.currency)}</td>}<td className="muted">{p.tax_rate ?? "—"}%</td><td><button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={!allows("catalog.editar") || toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-pressed={p.show_on_web}><i /></button></td>
                 <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => open(p.id)}>Ver</button></td>
               </tr>
             ))}</tbody>
@@ -124,7 +146,7 @@ export default function Products() {
               <Field label="Nombre"><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
               <Field label="Código"><input className="input" value={edit.code} onChange={(e) => setEdit({ ...edit, code: e.target.value })} /></Field>
               <Field label="Tipo de ítem"><select className="select" value={edit.item_type} onChange={(e) => setEdit({ ...edit, item_type: e.target.value })}><option value="producto">Producto</option><option value="servicio">Servicio</option></select></Field>
-              <Field label="Precio (sin IVA)"><input className="input input--mono" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} /></Field>
+              {verCostos && <Field label="Precio (sin IVA)"><input className="input input--mono" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} /></Field>}
               <Field label="Divisa"><select className="select" value={edit.currency} onChange={(e) => setEdit({ ...edit, currency: e.target.value })}><option>CRC</option><option>USD</option></select></Field>
               <Field label="Impuesto"><select className="select" value={edit.tax_ids[0] ?? ""} onChange={(e) => setEdit({ ...edit, tax_ids: e.target.value ? [Number(e.target.value)] : [] })}><option value="">Sin impuesto</option>{taxes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></Field>
               <Field label="Código CABYS" hint="13 dígitos (Hacienda)."><input className="input input--mono" style={{ textAlign: "left" }} maxLength={13} value={edit.cabys_code} onChange={(e) => setEdit({ ...edit, cabys_code: e.target.value })} /></Field>
@@ -135,6 +157,12 @@ export default function Products() {
                   ? <select className="select" value={edit.category_id} onChange={(e) => e.target.value === "__new" ? setNewCat("") : setEdit({ ...edit, category_id: e.target.value })}><option value="">Sin categoría</option>{cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}<option value="__new">+ Nueva categoría…</option></select>
                   : <div style={{ display: "flex", gap: 6 }}><input className="input" autoFocus placeholder="Nombre" value={newCat} onChange={(e) => setNewCat(e.target.value)} onKeyDown={(e) => e.key === "Enter" && createCat()} /><button className="btn btn--soft btn--sm" onClick={createCat}>Crear</button><button className="btn btn--ghost btn--sm" onClick={() => setNewCat(null)}><Icon d={I.x} size={14} /></button></div>}
               </Field>
+              {verCostos && <Field label="Costo del proveedor" hint="El precio de venta lo calcula el margen al importar la lista."><input className="input input--mono" inputMode="decimal" value={edit.cost} onChange={(e) => setEdit({ ...edit, cost: e.target.value })} /></Field>}
+              {verCostos && <Field label="Divisa del costo"><select className="select" value={edit.cost_currency} onChange={(e) => setEdit({ ...edit, cost_currency: e.target.value })}><option>USD</option><option>CRC</option></select></Field>}
+              {verCostos && <Field label="Margen %" hint="Con el que se calculó el precio al importar la lista del proveedor."><input className="input input--mono" inputMode="decimal" value={edit.margin_pct} onChange={(e) => setEdit({ ...edit, margin_pct: e.target.value })} /></Field>}
+              <Field label="Marca"><input className="input" value={edit.brand} onChange={(e) => setEdit({ ...edit, brand: e.target.value })} placeholder="Hikvision" /></Field>
+              <Field label="Modelo"><input className="input input--mono" style={{ textAlign: "left" }} value={edit.model} onChange={(e) => setEdit({ ...edit, model: e.target.value })} placeholder="DS-2CD1047G3-LIU" /></Field>
+              <Field label="Código del proveedor"><input className="input input--mono" style={{ textAlign: "left" }} value={edit.supplier_sku} onChange={(e) => setEdit({ ...edit, supplier_sku: e.target.value })} /></Field>
               <Field label="Proveedor"><select className="select" value={edit.supplier_id} onChange={(e) => setEdit({ ...edit, supplier_id: e.target.value })}><option value="">—</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
               <Field label="Peso (kg)" hint="Para envíos por peso."><input className="input input--mono" value={edit.weight_kg} onChange={(e) => setEdit({ ...edit, weight_kg: e.target.value })} /></Field>
               <Field label="Partida arancelaria"><input className="input input--mono" style={{ textAlign: "left" }} value={edit.tariff_code} onChange={(e) => setEdit({ ...edit, tariff_code: e.target.value })} /></Field>
@@ -143,6 +171,13 @@ export default function Products() {
             <Field label="Descripción · Facturación" hint="Larga; va a cotizaciones y facturas."><textarea className="textarea" value={edit.description_invoice} onChange={(e) => setEdit({ ...edit, description_invoice: e.target.value })} /></Field>
             <Field label="Descripción · Comercio electrónico" hint="Corta; va a Links y a la tienda."><textarea className="textarea" style={{ minHeight: 60 }} value={edit.description_store} onChange={(e) => setEdit({ ...edit, description_store: e.target.value })} /></Field>
             <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={edit.show_on_web} onChange={(e) => setEdit({ ...edit, show_on_web: e.target.checked })} />Mostrar en sitio web</label>
+            {avail && (
+              <p className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
+                Disponibilidad que ve el cliente: <b>{avail.label}</b>
+                {avail.supplier_stock != null && ` · el proveedor reporta ${avail.supplier_stock} unidades`}
+                {avail.supplier_updated_at && ` (lista del ${parseTs(avail.supplier_updated_at).toLocaleDateString("es-CR", { timeZone: "America/Costa_Rica" })})`}.
+              </p>
+            )}
           </>}
 
           {tab === "imagenes" && <>

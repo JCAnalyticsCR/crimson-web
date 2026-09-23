@@ -90,6 +90,16 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const cur = doc.currency || "CRC";
   const title = isNew ? (isQ ? "Nueva cotización" : "Nueva factura") : `${isQ ? "Cotización" : "Factura"}: ${doc.number}`;
 
+  /* Cotización aprobada -> proyecto: copia líneas, costo estimado y crea la primera orden de trabajo. */
+  const toProject = async () => {
+    if (!id) return;
+    try {
+      const pr = await api<{ id: number; number: string }>(`/quotes/${id}/project`, { method: "POST", json: {} });
+      toast(`Proyecto ${pr.number} creado con su primera orden de trabajo`);
+      nav(`/proyectos/${pr.id}`);
+    } catch (e) { toast(e instanceof Error ? e.message : "No se pudo crear el proyecto", "bad"); }
+  };
+
   return (
     <>
       <div className="page-head">
@@ -188,6 +198,10 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               <button className="btn btn--crimson" disabled={busy} onClick={() => save()}><Icon d={I.check} />Guardar</button>
               {!pending && <button className="btn" disabled={busy} onClick={() => save("send")}><Icon d={I.whatsapp} />Guardar & enviar al cliente</button>}
               {isQ && !pending && <button className="btn btn--soft" disabled={busy} onClick={() => save("convert")}><Icon d={I.invoice} />Convertir a factura</button>}
+              {isQ && !isNew && !pending && allows("projects.crear") && (
+                /* Instalaciones: la cotización aprobada arranca el proyecto con su primera orden de trabajo. */
+                <button className="btn btn--soft" disabled={busy} onClick={toProject}><Icon d={I.box} />Convertir a proyecto</button>
+              )}
               {!isNew && allows("sales.anular") && <button className="btn btn--danger" disabled={busy} onClick={() => act("void")}>Anular {isQ ? "cotización" : "factura"}</button>}
             </div></div>
           )}

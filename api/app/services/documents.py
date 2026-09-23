@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -29,6 +30,17 @@ from .totals import LineIn, balance, compute_document, d
 
 def audit(db: Session, tenant_id: int, user_id: int | None, action: str, entity: str, entity_id: int | None, diff=None, ip=None):
     db.add(AuditLog(tenant_id=tenant_id, user_id=user_id, at=datetime.now(UTC), ip=ip, action=action, entity=entity, entity_id=entity_id, diff=diff))
+
+
+CR = ZoneInfo("America/Costa_Rica")
+
+
+def local_date(dt: datetime | None) -> date | None:
+    """Fecha de calendario en Costa Rica. Las marcas de tiempo se guardan en UTC: una entrega de las 6 p. m.
+    en CR cae al dia siguiente en UTC y saldria del mes en los reportes si se leyera crudo."""
+    if dt is None:
+        return None
+    return (dt if dt.tzinfo else dt.replace(tzinfo=UTC)).astimezone(CR).date()
 
 
 def today_fx(db: Session, currency: str) -> tuple[Decimal, Decimal]:

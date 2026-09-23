@@ -174,9 +174,124 @@ def expire_support_grants() -> int:
     return n
 
 
+@celery.task(name="crm.stale_followups")
+def stale_followups() -> int:
+    """Oportunidad abierta sin seguimiento (5 dias o proxima accion vencida) -> correo a quien la lleva."""
+    from app.core.db import SessionLocal
+    from app.models import Tenant, User
+    from app.routers.pipeline import stale_followups as find
+    from app.services.mail import queue_email
+    from sqlalchemy import select
+
+    n = 0
+    with SessionLocal() as db:
+        for t in db.scalars(select(Tenant).where(Tenant.active)):
+            por_persona: dict[int, list] = {}
+            for o in find(db, t.id, days=5):
+                por_persona.setdefault(o.owner_id or 0, []).append(o)
+            for uid, items in por_persona.items():
+                u = db.get(User, uid) if uid else None
+                if not u or not u.email:
+                    continue
+                filas = "".join(
+                    f"<li><b>{o.number}</b> · {o.title} · {o.status}{' · vence ' + o.next_action_date.isoformat() if o.next_action_date else ''}</li>"
+                    for o in items[:20]
+                )
+                queue_email(
+                    db,
+                    t,
+                    u.email,
+                    f"{len(items)} oportunidades esperan seguimiento",
+                    f"<p>Estas oportunidades llevan días sin movimiento:</p><ul>{filas}</ul><p>Abrí el panel y registrá el siguiente paso.</p>",
+                    "opportunity",
+                    items[0].id,
+                )
+                n += len(items)
+        db.commit()
+    return n
+
+
+@celery.task(name="inventory.low_stock_requests")
+def low_stock_requests() -> int:
+    """Inventario bajo el minimo -> solicitud de compra en borrador (los proveedores no dan credito)."""
+    from app.core.db import SessionLocal
+    from app.models import PurchaseRequest, PurchaseRequestLine, Product, Tenant
+    from app.services.inventory import low_stock
+    from app.services.sequences import next_number
+    from sqlalchemy import select
+    from decimal import Decimal
+
+    n = 0
+    with SessionLocal() as db:
+        for t in db.scalars(select(Tenant).where(Tenant.active)):
+            faltantes = low_stock(db, t.id)
+            if not faltantes:
+                continue
+            abierta = db.scalar(
+                select(PurchaseRequest).where(PurchaseRequest.tenant_id == t.id, PurchaseRequest.reason == "stock_bajo", PurchaseRequest.status == "borrador")
+            )
+            if abierta:
+                continue
+            number, _ = next_number(db, t.id, "SC")
+            req = PurchaseRequest(
+                tenant_id=t.id, number=number, reason="stock_bajo", status="borrador", notes="Generada automáticamente por stock bajo el mínimo"
+            )
+            total = Decimal(0)
+            for f in faltantes:
+                prod = db.get(Product, f["product_id"])
+                falta = Decimal(str(max(prod.min_stock * 2 - float(f["quantity"]), 1)))
+                cost = Decimal(str(prod.cost or 0))
+                req.lines.append(PurchaseRequestLine(product_id=prod.id, name=prod.name, quantity=falta, unit_cost=cost))
+                total += cost * falta
+                if prod.supplier_id and not req.supplier_id:
+                    req.supplier_id = prod.supplier_id
+            req.total_cost = total
+            db.add(req)
+            n += len(faltantes)
+        db.commit()
+    return n
+
+
+@celery.task(name="assets.warranty_alerts")
+def warranty_alerts() -> int:
+    """Equipo instalado que cumple 11 meses -> aviso de garantia proxima a vencer."""
+    from datetime import date, timedelta
+
+    from app.core.db import SessionLocal
+    from app.models import Customer, CustomerAsset, Tenant, TenantUser
+    from app.services.mail import queue_email
+    from sqlalchemy import select
+
+    n = 0
+    with SessionLocal() as db:
+        for t in db.scalars(select(Tenant).where(Tenant.active)):
+            limite = date.today() + timedelta(days=45)
+            avisos = [
+                a
+                for a in db.scalars(
+                    select(CustomerAsset).where(CustomerAsset.tenant_id == t.id, CustomerAsset.warranty_until.is_not(None), CustomerAsset.status == "activo")
+                )
+                if a.warranty_until and date.today() <= a.warranty_until <= limite
+            ]
+            if not avisos:
+                continue
+            filas = "".join(
+                f"<li>{a.name} · {a.serial or 's/n'} · {db.get(Customer, a.customer_id).name if db.get(Customer, a.customer_id) else ''} · vence {a.warranty_until}</li>"
+                for a in avisos[:30]
+            )
+            for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.role_code.in_(("admin", "supervisor")), TenantUser.active)):
+                queue_email(db, t, m.user.email, f"{len(avisos)} garantías vencen en los próximos 45 días", f"<ul>{filas}</ul>", "asset", avisos[0].id)
+                n += 1
+        db.commit()
+    return n
+
+
 celery.conf.beat_schedule = {
     "poll-inboxes": {"task": "reception.poll_inboxes", "schedule": crontab(minute="*/15")},
     "expire-support": {"task": "support.expire_grants", "schedule": crontab(minute=5)},
+    "stale-followups": {"task": "crm.stale_followups", "schedule": crontab(hour=7, minute=30, day_of_week="mon-fri")},
+    "low-stock-requests": {"task": "inventory.low_stock_requests", "schedule": crontab(hour=6, minute=45)},
+    "warranty-alerts": {"task": "assets.warranty_alerts", "schedule": crontab(hour=7, minute=0, day_of_week="mon")},
     "reminders": {"task": "sales.reminders", "schedule": crontab(hour=8, minute=0)},
     "daily-close": {"task": "sales.daily_close_email", "schedule": crontab(hour=21, minute=0)},
     "run-recurrences": {"task": "sales.run_recurrences", "schedule": crontab(hour=5, minute=0)},

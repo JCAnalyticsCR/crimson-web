@@ -444,6 +444,67 @@ def conciliacion(db: Session, tid: int, a: date, b: date) -> Report:
     )
 
 
+def rentabilidad(db: Session, tid: int, a: date, b: date) -> Report:
+    """En qué tipo de trabajo gana Crimson: venta, costo real y margen por proyecto cerrado."""
+    from ..models import Project
+    from ..routers.projects import economics
+    from .documents import local_date, today_fx
+
+    fx = today_fx(db, "USD")[0]
+    rows, price_total, cost_total = [], Decimal(0), Decimal(0)
+    cerrados = db.scalars(
+        select(Project).where(Project.tenant_id == tid, Project.status.in_(("terminado", "entregado", "facturado"))).order_by(Project.id)
+    ).all()
+    for pr in cerrados:
+        cierre = pr.end_date or local_date(pr.delivered_at) or local_date(pr.created_at)
+        if not (a <= cierre <= b):
+            continue
+        e = economics(db, pr, fx)
+        rows.append(
+            [
+                pr.number,
+                pr.name,
+                pr.status,
+                cierre.isoformat(),
+                e["price"],
+                e["cost_materials"],
+                e["cost_labor"],
+                e["cost_travel"],
+                e["cost_extra"],
+                e["cost_real"],
+                e["profit"],
+                e["margin_real"],
+                e["margin_planned"],
+                e["hours"],
+            ]
+        )
+        price_total += Decimal(str(e["price"] or 0))
+        cost_total += Decimal(str(e["cost_real"]))
+    rows.sort(key=lambda r: r[11])  # primero los que menos dejaron: ahi esta lo que hay que corregir
+    return Report(
+        "rentabilidad",
+        "Rentabilidad por proyecto",
+        [
+            "Proyecto",
+            "Nombre",
+            "Estado",
+            "Cierre",
+            "Venta",
+            "Equipos",
+            "Mano de obra",
+            "Viáticos",
+            "Otros",
+            "Costo real",
+            "Utilidad",
+            "Margen real %",
+            "Margen cotizado %",
+            "Horas",
+        ],
+        rows,
+        {"Venta": price_total, "Costo real": cost_total, "Utilidad": price_total - cost_total},
+    )
+
+
 REPORTS = {
     "facturacion": facturacion,
     "pendientes": pendientes,
@@ -462,6 +523,7 @@ REPORTS = {
     "d151": d151,
     "planilla": planilla,
     "conciliacion": conciliacion,
+    "rentabilidad": rentabilidad,
 }
 CATALOG = [
     ("facturacion", "Facturación", "Todas las facturas del periodo con totales y saldo"),
@@ -481,6 +543,7 @@ CATALOG = [
     ("d151", "D-151", "Borrador anual: clientes, proveedores y gastos específicos sobre el umbral"),
     ("planilla", "Planilla", "Salarios, cargas sociales e impuesto por colaborador"),
     ("conciliacion", "Conciliación bancaria", "Movimientos del banco y con qué se casaron"),
+    ("rentabilidad", "Rentabilidad por proyecto", "Cuánto dejó cada instalación: venta contra costo real"),
 ]
 
 

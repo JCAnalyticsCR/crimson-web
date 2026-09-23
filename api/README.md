@@ -41,7 +41,7 @@ Proyecto `crimson-plataforma` (entorno `production` de Railway, datos de prueba)
 | factura electrónica | `/invoices/{id}/emit`, `/credit-note`, `/xml`, `/xml/{doc}/{document|response}` | adapter `sandbox` (clave 50 dígitos, XML v4.4 simulado); Alanube/GTI se enchufan en `app/providers/einvoice.py` |
 | inventario | `/warehouses`, `/stock`, `/stock/movements`, `/stock/transfer` | ledger por ubicación; venta descuenta, anulación repone, alertas de mínimo |
 | contabilidad | `/expenses`, `/expense-categories`, `/suppliers` | gastos con condición de IVA (crédito / no / prorrata) |
-| reportes | `/reports`, `/reports/{key}?format=xlsx` | facturación, pendientes, impuesto, resultados, cierre, transacciones, gastos, IVA, inventario, productos, movimientos |
+| reportes | `/reports`, `/reports/{key}?format=xlsx` | facturación, pendientes, impuesto, resultados, cierre, transacciones, gastos, IVA, inventario, productos, movimientos, órdenes, recepciones, propinas, D-151, planilla, conciliación, rentabilidad por proyecto |
 | recurrencias | `/recurrences`, `/recurrences/{id}/run` | plantilla + frecuencia → factura (worker diario) |
 | ajustes | `/settings`, `/settings/bank-accounts`, `/billing-groups/{id}`, `/settings/users`, `/settings/invitations[/accept]`, `/settings/gateways`, `/settings/outbox` | vigencias, mensajes, BCC, métodos manuales, consecutivos, roles, invitaciones, pasarelas (secreto cifrado) |
 | webhooks | `/webhooks/onvo/{tenant_id}` | firma HMAC `t=..,v1=..` (300 s), idempotente por evento, aplica pago/reembolso |
@@ -58,7 +58,14 @@ Proyecto `crimson-plataforma` (entorno `production` de Railway, datos de prueba)
 | planillas | `/payroll/employees`, `/payroll/runs[/{id}/approve\|pay\|lines/{l}\|slip/{l}]`, `/payroll/settings` | CCSS obrero/patronal, renta por tramos con créditos, provisiones; al pagar crea el gasto |
 | conciliación | `/banking/accounts`, `/banking/{cuenta}/import\|auto\|lines`, `/banking/lines/{id}/candidates\|match\|unmatch\|ignore\|expense` | estado de cuenta CSV/Excel, casado automático sin ambigüedades, gasto desde débito |
 | eventos | `/events[/{id}[/tickets]]`, `/events/checkin`, `/tickets/{id}/void`, `/public/events/{slug}[/{evento}[/checkout]]`, `/public/tickets/{code}` | entradas con QR, se activan al marcar pagada la orden, una sola entrada por código |
-| importador | `/import/{customers\|products\|suppliers\|invoices}[?commit=true]`, `/import/{tipo}/template` | vista previa y aplicación; migración desde Fygaro |
+| importador | `/import/{customers\|products\|suppliers\|invoices\|catalogo}[?commit=true]`, `/import/{tipo}/template` | vista previa y aplicación; migración desde Fygaro; `catalogo` = lista de precios de proveedor (costo + margen → precio) |
+| oportunidades | `/opportunities[/board\|/{id}[/touch]\|/meta/config]` | embudo por estado con monto ponderado, seguimiento con fecha, bitácora |
+| levantamientos | `/field/specs`, `/field/technicians`, `/surveys[/{id}[/suggest\|send\|costing\|quote]]` | formulario por tipo de solución, sugerencia de materiales, costeo (solo con `catalog.precios`) y cotización en un clic |
+| órdenes de trabajo | `/work-orders[/{id}[/{arrive\|start\|progress\|finish\|cancel}]]`, `/work-orders/meta/today` | pantalla del técnico; al finalizar descuenta el material usado una sola vez |
+| proyectos | `/projects[/{id}[/requirements\|purchase-request\|report\|invoice]]`, `/quotes/{id}/project` | cotización → proyecto con su primera orden; rentabilidad real e informe de entrega |
+| activos | `/assets[/{id}]?expiring=` | equipo instalado con serie, ubicación y garantía (aviso 45 días antes) |
+| compras | `/purchase-requests[/{id}]` | desde el proyecto, por stock bajo (worker) o a mano; al recibir entra a bodega con su costo |
+| disponibilidad | `PATCH /products/{id}/web`, `/products/{id}/availability` | interruptor de publicación en la tienda y existencias propias + del proveedor |
 | soporte | `/settings/support[/{id}/revoke\|log]` | acceso temporal de solo lectura con bitácora por request |
 | bandeja XML | `/settings/inbox`, `/settings/inbox/run` | IMAP cada 15 min (worker); contraseña cifrada |
 | contacto | `/public/store/{slug}/contact` | formulario del sitio → nota en la ficha + correo a administradores |
