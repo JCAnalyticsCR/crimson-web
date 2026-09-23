@@ -505,6 +505,48 @@ def rentabilidad(db: Session, tid: int, a: date, b: date) -> Report:
     )
 
 
+def rentabilidad_tipo(db: Session, tid: int, a: date, b: date) -> Report:
+    """La pregunta de Andres: en que tipo de trabajo gana Crimson. CCTV puede dejar 24 % y redes 31 %,
+    y hasta hoy eso solo se sabia por intuicion."""
+    from ..models import Project
+    from ..routers.projects import economics, project_solution
+    from .documents import local_date, today_fx
+
+    fx = today_fx(db, "USD")[0]
+    por_tipo: dict[str, dict] = {}
+    cerrados = db.scalars(select(Project).where(Project.tenant_id == tid, Project.status.in_(("terminado", "entregado", "facturado")))).all()
+    for pr in cerrados:
+        cierre = pr.end_date or local_date(pr.delivered_at) or local_date(pr.created_at)
+        if not (a <= cierre <= b):
+            continue
+        e = economics(db, pr, fx)
+        fila = por_tipo.setdefault(project_solution(db, pr), {"n": 0, "venta": Decimal(0), "costo": Decimal(0), "horas": 0.0})
+        fila["n"] += 1
+        fila["venta"] += Decimal(str(e["price"] or 0))
+        fila["costo"] += Decimal(str(e["cost_real"]))
+        fila["horas"] += e["hours"]
+    rows = []
+    for tipo, f in por_tipo.items():
+        utilidad = f["venta"] - f["costo"]
+        rows.append([tipo, f["n"], f["venta"], f["costo"], utilidad, _margen(f["venta"], f["costo"]), round(f["horas"], 1)])
+    rows.sort(key=lambda r: -r[5])  # primero donde mas se gana
+    venta = sum((Decimal(str(r[2])) for r in rows), Decimal(0))
+    costo = sum((Decimal(str(r[3])) for r in rows), Decimal(0))
+    return Report(
+        "rentabilidad_tipo",
+        "Rentabilidad por tipo de solución",
+        ["Solución", "Proyectos", "Venta", "Costo real", "Utilidad", "Margen %", "Horas"],
+        rows,
+        {"Venta": venta, "Costo real": costo, "Utilidad": venta - costo, "Margen %": _margen(venta, costo)},
+    )
+
+
+def _margen(venta: Decimal, costo: Decimal) -> float:
+    from ..services import pricing
+
+    return pricing.margin_of(venta, costo)
+
+
 REPORTS = {
     "facturacion": facturacion,
     "pendientes": pendientes,
@@ -524,6 +566,7 @@ REPORTS = {
     "planilla": planilla,
     "conciliacion": conciliacion,
     "rentabilidad": rentabilidad,
+    "rentabilidad_tipo": rentabilidad_tipo,
 }
 CATALOG = [
     ("facturacion", "Facturación", "Todas las facturas del periodo con totales y saldo"),
@@ -544,6 +587,7 @@ CATALOG = [
     ("planilla", "Planilla", "Salarios, cargas sociales e impuesto por colaborador"),
     ("conciliacion", "Conciliación bancaria", "Movimientos del banco y con qué se casaron"),
     ("rentabilidad", "Rentabilidad por proyecto", "Cuánto dejó cada instalación: venta contra costo real"),
+    ("rentabilidad_tipo", "Rentabilidad por tipo de solución", "En qué tipo de trabajo gana Crimson: CCTV, redes, acceso…"),
 ]
 
 

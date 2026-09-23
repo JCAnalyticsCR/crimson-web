@@ -1,6 +1,11 @@
 """Costo -> precio de venta. El costo del proveedor suele venir en dolares y el precio de lista se guarda en colones.
 
-precio = costo x tipo de cambio x (1 + margen)   ·   margen por defecto en Ajustes (default_margin_pct, 35 %).
+precio = (costo x tipo de cambio) / (1 - margen)   ·   margen por defecto en Ajustes (default_margin_pct, 35 %).
+
+OJO con la division: el margen es SOBRE LA VENTA, no un recargo sobre el costo. Asi lo calcula Andres a mano
+(103.51 / 0.65 = 159) y asi lo reporta margin_of(). Con la otra formula, costo x 1.35, pedir "35 % de margen"
+dejaba 25.9 % real: el sistema calculaba el precio de una manera y medía el margen de otra.
+El costo va sin impuesto: sobre el IVA no se margina, se traslada.
 El redondeo hacia arriba a la centena evita precios con colones sueltos en la cotizacion.
 """
 
@@ -28,7 +33,10 @@ def sale_price(db: Session, cost: Decimal, cost_currency: str, target_currency: 
     if cost_currency != target_currency:
         rate = fx if fx is not None else today_fx(db, cost_currency if cost_currency != "CRC" else target_currency)[0]
         cost = cost * d(rate) if cost_currency != "CRC" else cost / d(rate)
-    price = cost * (1 + d(margin_pct) / 100)
+    m = d(margin_pct)
+    if m >= 100:  # margen del 100 % seria precio infinito
+        raise ValueError("El margen debe ser menor a 100 %")
+    price = cost / (1 - m / 100)
     if target_currency == "CRC":
         return (price / ROUND_TO).quantize(Decimal(1), rounding=ROUND_CEILING) * ROUND_TO
     return price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)

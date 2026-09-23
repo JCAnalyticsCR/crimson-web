@@ -26,7 +26,7 @@ export default function Purchases() {
   const [open, setOpen] = useState<Req | null>(null);
   const [nuevo, setNuevo] = useState<{ supplier_id: string; notes: string; lines: Line[] } | null>(null);
   const [suppliers, setSuppliers] = useState<Named[]>([]);
-  const verCostos = allows("catalog.precios");
+  const verCostos = allows("catalog.costos");
 
   const load = useCallback(() => api<Req[]>("/purchase-requests").then(setRows), []);
   useEffect(() => { load(); }, [load]);

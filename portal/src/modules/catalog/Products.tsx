@@ -37,15 +37,30 @@ export default function Products() {
   const [variants, setVariants] = useState<Variant[]>([]);
   const [newCat, setNewCat] = useState<string | null>(null);
   const [avail, setAvail] = useState<Availability | null>(null);
+  /* "Aquí no puedo filtrar nada" fue el reclamo de Andrés con 200 productos del proveedor encima. */
+  const [f, setF] = useState({ item_type: "", category_id: "", brand: "", supplier_id: "", web: "", sin_cabys: false });
+  const [opts, setOpts] = useState<{ brands: string[]; categories: Named[]; suppliers: Named[]; sin_cabys: number } | null>(null);
   const [toggling, setToggling] = useState<number | null>(null);
-  const verCostos = allows("catalog.precios");
+  const verPrecios = allows("catalog.precios");
+  const verCostos = allows("catalog.costos"); // el costo del proveedor es solo de administración
 
-  const load = useCallback(() => api<{ items: Product[] }>(`/products?limit=50${q ? `&q=${encodeURIComponent(q)}` : ""}`).then((r) => setItems(r.items)), [q]);
+  const load = useCallback(() => {
+    const qs = new URLSearchParams({ limit: "50" });
+    if (q) qs.set("q", q);
+    if (f.item_type) qs.set("item_type", f.item_type);
+    if (f.category_id) qs.set("category_id", f.category_id);
+    if (f.brand) qs.set("brand", f.brand);
+    if (f.supplier_id) qs.set("supplier_id", f.supplier_id);
+    if (f.web) qs.set("web", f.web);
+    if (f.sin_cabys) qs.set("sin_cabys", "true");
+    return api<{ items: Product[] }>(`/products?${qs}`).then((r) => setItems(r.items));
+  }, [q, f]);
   useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); }, [load]);
   useEffect(() => {
     api<Tax[]>("/taxes").then(setTaxes);
     api<Named[]>("/categories").then(setCats).catch(() => setCats([]));
     api<Named[]>("/suppliers").then(setSuppliers).catch(() => setSuppliers([]));
+    api<typeof opts>("/products/meta/filters").then(setOpts).catch(() => setOpts(null));
   }, []);
 
   const open = async (id: number) => {
@@ -119,14 +134,24 @@ export default function Products() {
         <div className="page-head__actions">{allows("catalog.crear") && <button className="btn btn--crimson" onClick={() => { setEdit({ ...blank, tax_ids: taxes[0] ? [taxes[0].id] : [] }); setVariants([]); setTab("general"); }}><Icon d={I.plus} />Crear producto</button>}</div>
       </div>
       <Card flush>
-        <div className="list-head"><div className="search" style={{ maxWidth: 420 }}><Icon d={I.search} size={16} /><input placeholder="Nombre, código o CABYS…" value={q} onChange={(e) => setQ(e.target.value)} /></div><button className="btn btn--ghost btn--sm" onClick={load}><Icon d={I.refresh} /></button></div>
-        {items.length === 0 ? <Empty hint="Creá productos y servicios con su código CABYS e impuesto." /> : (
+        <div className="list-head" style={{ flexWrap: "wrap" }}>
+          <div className="search" style={{ maxWidth: 340 }}><Icon d={I.search} size={16} /><input placeholder="Nombre, código, CABYS o modelo…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+          <select className="select select--sm" value={f.item_type} onChange={(e) => setF({ ...f, item_type: e.target.value })}><option value="">Todo tipo</option><option value="producto">Productos</option><option value="servicio">Servicios</option></select>
+          <select className="select select--sm" value={f.category_id} onChange={(e) => setF({ ...f, category_id: e.target.value })}><option value="">Toda categoría</option>{(opts?.categories || cats).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+          {!!opts?.brands.length && <select className="select select--sm" value={f.brand} onChange={(e) => setF({ ...f, brand: e.target.value })}><option value="">Toda marca</option>{opts.brands.map((b) => <option key={b} value={b}>{b}</option>)}</select>}
+          <select className="select select--sm" value={f.supplier_id} onChange={(e) => setF({ ...f, supplier_id: e.target.value })}><option value="">Todo proveedor</option>{(opts?.suppliers || suppliers).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
+          <select className="select select--sm" value={f.web} onChange={(e) => setF({ ...f, web: e.target.value })}><option value="">En la tienda: todos</option><option value="true">Publicados</option><option value="false">Ocultos</option></select>
+          {!!opts?.sin_cabys && <button className={`btn btn--sm ${f.sin_cabys ? "btn--crimson" : "btn--ghost"}`} onClick={() => setF({ ...f, sin_cabys: !f.sin_cabys })} title="Sin CABYS no se puede facturar">Sin CABYS ({opts.sin_cabys})</button>}
+          {(q || f.item_type || f.category_id || f.brand || f.supplier_id || f.web || f.sin_cabys) && <button className="btn btn--ghost btn--sm" onClick={() => { setQ(""); setF({ item_type: "", category_id: "", brand: "", supplier_id: "", web: "", sin_cabys: false }); }}><Icon d={I.x} size={14} />Limpiar</button>}
+          <button className="btn btn--ghost btn--sm" onClick={load} style={{ marginLeft: "auto" }}><Icon d={I.refresh} /></button>
+        </div>
+        {items.length === 0 ? <Empty hint="Nada con esos filtros. Probá limpiarlos o creá el producto." /> : (
           <table className="table">
-            <thead><tr><th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th>{verCostos && <th className="num">Precio</th>}<th>IVA</th><th>Web</th><th /></tr></thead>
+            <thead><tr><th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th>{verPrecios && <th className="num">Precio</th>}<th>IVA</th><th>Web</th><th /></tr></thead>
             <tbody>{items.map((p) => (
               <tr key={p.id}>
                 <td>{thumb(p) ? <span style={{ display: "block", width: 36, height: 36, borderRadius: 8, background: `center/cover no-repeat url("${thumb(p)}")`, border: "1px solid var(--hair)" }} /> : <span style={{ display: "grid", placeItems: "center", width: 36, height: 36, borderRadius: 8, background: "var(--bg-2)", color: "var(--text-3)" }}><Icon d={I.products} size={16} /></span>}</td>
-                <td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.item_type}</td><td className="mono muted">{p.cabys_code || "—"}</td>{verCostos && <td className="num money">{fmtMoney(p.price, p.currency)}</td>}<td className="muted">{p.tax_rate ?? "—"}%</td><td><button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={!allows("catalog.editar") || toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-pressed={p.show_on_web}><i /></button></td>
+                <td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.item_type}</td><td className="mono muted">{p.cabys_code || "—"}</td>{verPrecios && <td className="num money">{fmtMoney(p.price, p.currency)}</td>}<td className="muted">{p.tax_rate ?? "—"}%</td><td><button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={!allows("catalog.editar") || toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-pressed={p.show_on_web}><i /></button></td>
                 <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => open(p.id)}>Ver</button></td>
               </tr>
             ))}</tbody>
@@ -146,7 +171,7 @@ export default function Products() {
               <Field label="Nombre"><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
               <Field label="Código"><input className="input" value={edit.code} onChange={(e) => setEdit({ ...edit, code: e.target.value })} /></Field>
               <Field label="Tipo de ítem"><select className="select" value={edit.item_type} onChange={(e) => setEdit({ ...edit, item_type: e.target.value })}><option value="producto">Producto</option><option value="servicio">Servicio</option></select></Field>
-              {verCostos && <Field label="Precio (sin IVA)"><input className="input input--mono" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} /></Field>}
+              {verPrecios && <Field label="Precio (sin IVA)"><input className="input input--mono" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} /></Field>}
               <Field label="Divisa"><select className="select" value={edit.currency} onChange={(e) => setEdit({ ...edit, currency: e.target.value })}><option>CRC</option><option>USD</option></select></Field>
               <Field label="Impuesto"><select className="select" value={edit.tax_ids[0] ?? ""} onChange={(e) => setEdit({ ...edit, tax_ids: e.target.value ? [Number(e.target.value)] : [] })}><option value="">Sin impuesto</option>{taxes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></Field>
               <Field label="Código CABYS" hint="13 dígitos (Hacienda)."><input className="input input--mono" style={{ textAlign: "left" }} maxLength={13} value={edit.cabys_code} onChange={(e) => setEdit({ ...edit, cabys_code: e.target.value })} /></Field>

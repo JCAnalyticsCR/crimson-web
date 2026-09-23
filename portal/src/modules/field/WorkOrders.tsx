@@ -7,6 +7,7 @@ import { api, parseTs } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 import { Lookup, searchCustomers, searchProducts } from "../../ui/Lookup";
+import { PhotoStrip } from "../../ui/MediaPicker";
 
 type Material = { id?: number; product_id: number | null; name: string; quantity: string; unit: string; planned: string };
 type Task = { text: string; done?: boolean };
@@ -100,6 +101,8 @@ export default function WorkOrders() {
   );
 
   const soyElTecnico = !!open && (open.technician_id === me?.user.id || !puedeAsignar);
+  /* Sin esto el trabajo se cierra con "instalé las cámaras" en una nota y no queda respaldo de nada. */
+  const faltaAnotar = (open?.materials || []).filter((m) => Number(m.planned) > 0 && !(Number(m.quantity) > 0)).map((m) => m.name);
 
   return (
     <>
@@ -167,7 +170,7 @@ export default function WorkOrders() {
               {open.status === "asignada" && <button className="btn btn--soft" onClick={() => act("arrive")} disabled={busy}><Icon d={I.check} />Llegué al sitio</button>}
               {open.status === "en_sitio" && <button className="btn btn--soft" onClick={() => act("start")} disabled={busy}><Icon d={I.check} />Iniciar trabajo</button>}
               {(open.status === "en_proceso" || open.status === "en_sitio") && <button className="btn btn--ghost" onClick={() => act("progress")} disabled={busy}>Guardar avance</button>}
-              {open.status === "en_proceso" && <button className="btn btn--crimson" onClick={() => { if (confirm("Al finalizar se descuenta de inventario el material usado. ¿Confirmás?")) act("finish"); }} disabled={busy}>Finalizar</button>}
+              {open.status === "en_proceso" && <button className="btn btn--crimson" onClick={() => { if (confirm("Al finalizar se descuenta de inventario el material usado. ¿Confirmás?")) act("finish"); }} disabled={busy || faltaAnotar.length > 0} title={faltaAnotar.length ? `Falta anotar: ${faltaAnotar.join(", ")}` : undefined}>Finalizar</button>}
             </div>
           )}
 
@@ -182,7 +185,7 @@ export default function WorkOrders() {
             </Card>
           )}
 
-          <Card title="Material usado" flush>
+          <Card title="Material usado" flush extra={faltaAnotar.length > 0 && open.status !== "finalizada" ? <span className="badge badge--warn">Falta anotar {faltaAnotar.length}</span> : undefined}>
             {(open.materials || []).length === 0 ? <p className="muted" style={{ fontSize: 13, padding: "0 18px 14px" }}>Sin materiales planificados.</p> : (
               <table className="table">
                 <thead><tr><th>Material</th><th className="num">Planificado</th><th className="num">Usado</th></tr></thead>
@@ -190,13 +193,21 @@ export default function WorkOrders() {
                   <tr key={m.id ?? i}>
                     <td style={{ fontWeight: 600 }}>{m.name}</td>
                     <td className="num mono muted">{Number(m.planned)} {m.unit}</td>
-                    <td className="num">{open.stock_applied ? <span className="mono">{Number(m.quantity)}</span> : <input className="input input--mono" style={{ maxWidth: 110 }} inputMode="decimal" value={m.quantity} onChange={(e) => setMat(i, { quantity: e.target.value })} />}</td>
+                    <td className="num">{open.stock_applied ? <span className="mono">{Number(m.quantity)}</span> : (
+                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
+                        <input className="input input--mono" style={{ maxWidth: 110, borderColor: Number(m.planned) > 0 && !(Number(m.quantity) > 0) ? "var(--warn)" : undefined }} inputMode="decimal" value={m.quantity} onChange={(e) => setMat(i, { quantity: e.target.value })} />
+                        <button className="btn btn--ghost btn--sm" title="No se usó en este trabajo" onClick={() => setOpen({ ...open, materials: (open.materials || []).filter((_, j) => j !== i) })}><Icon d={I.x} size={13} /></button>
+                      </div>
+                    )}</td>
                   </tr>
                 ))}</tbody>
               </table>
             )}
           </Card>
 
+          <Field label="Fotografías de la instalación" hint="Van al informe técnico de entrega que recibe el cliente.">
+            <PhotoStrip value={open.photos || []} onChange={(photos) => setOpen({ ...open, photos })} disabled={open.status === "finalizada"} />
+          </Field>
           <Field label="Notas del trabajo"><textarea className="textarea" value={open.notes || ""} disabled={open.status === "finalizada"} onChange={(e) => setOpen({ ...open, notes: e.target.value })} placeholder="Qué se hizo, qué quedó pendiente, qué encontró el técnico." /></Field>
           <Field label="Recibido por (nombre del cliente)" hint="Queda en el informe de entrega.">
             <input className="input" value={open.customer_signature || ""} disabled={open.status === "finalizada"} onChange={(e) => setOpen({ ...open, customer_signature: e.target.value })} />

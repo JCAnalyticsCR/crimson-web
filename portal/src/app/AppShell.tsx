@@ -10,41 +10,43 @@ import UserMenu from "./UserMenu";
 /* Cada entrada declara que permiso necesita ("modulo.accion", varias con |). El menu se arma con los permisos del rol. */
 type NavItem = { to: string; label: string; icon: string; end?: boolean; need?: string };
 export const NAV: { group: string; items: NavItem[] }[] = [
+  // Las cuatro secciones son las que Andres escribio en sus notas de la reunion del 22/09.
   { group: "Operación", items: [
     { to: "/", label: "Inicio", icon: I.home, end: true, need: "dashboard.ver" },
+    { to: "/oportunidades", label: "Oportunidades", icon: I.trend, need: "crm_pipeline.ver" },
     { to: "/cotizaciones", label: "Cotizaciones", icon: I.quote, need: "sales.ver" },
+    { to: "/proyectos", label: "Proyectos", icon: I.box, need: "projects.ver" },
+    { to: "/ordenes-trabajo", label: "Órdenes de trabajo", icon: I.check, need: "field.ver" },
     { to: "/facturas", label: "Facturas", icon: I.invoice, need: "sales.ver" },
+    { to: "/pagos", label: "Pagos", icon: I.pay, need: "payments.ver" },
     { to: "/pos", label: "Punto de venta", icon: I.wallet, need: "sales.crear" },
     { to: "/recurrencias", label: "Recurrencias", icon: I.refresh, need: "sales.recurrencias" },
-    { to: "/pagos", label: "Pagos", icon: I.pay, need: "payments.ver" },
-    { to: "/ordenes", label: "Órdenes", icon: I.box, need: "sales.ver" },
-    { to: "/eventos", label: "Eventos", icon: I.ticket, need: "events.ver" },
   ]},
-  { group: "Campo", items: [
-    { to: "/oportunidades", label: "Oportunidades", icon: I.trend, need: "crm_pipeline.ver" },
-    { to: "/levantamientos", label: "Levantamientos", icon: I.quote, need: "field.ver" },
-    { to: "/ordenes-trabajo", label: "Órdenes de trabajo", icon: I.check, need: "field.ver" },
-    { to: "/proyectos", label: "Proyectos", icon: I.box, need: "projects.ver" },
-    { to: "/activos", label: "Activos del cliente", icon: I.inventory, need: "assets.ver" },
-    { to: "/compras", label: "Solicitudes de compra", icon: I.upload, need: "purchases.ver" },
+  { group: "Técnico", items: [
+    { to: "/levantamientos", label: "Levantamientos", icon: I.ruler, need: "field.ver" },
+    { to: "/activos", label: "Activos del cliente", icon: I.shield, need: "assets.ver" },
   ]},
   { group: "Catálogo", items: [
     { to: "/clientes", label: "Clientes", icon: I.customers, need: "crm.ver" },
     { to: "/productos", label: "Productos & Servicios", icon: I.products, need: "catalog.ver" },
-    { to: "/cupones", label: "Cupones", icon: I.wallet, need: "catalog.editar" },
     { to: "/inventario", label: "Inventarios", icon: I.inventory, need: "inventory.ver" },
+    { to: "/cupones", label: "Cupones", icon: I.wallet, need: "catalog.editar" },
     { to: "/mi-tienda", label: "Mi Tienda", icon: I.store, need: "settings.configurar" },
+    { to: "/ordenes", label: "Pedidos de la tienda", icon: I.box, need: "sales.ver" },
+    { to: "/eventos", label: "Eventos", icon: I.ticket, need: "events.ver" },
   ]},
-  { group: "Control", items: [
-    { to: "/reportes", label: "Reportes", icon: I.reports, need: "reports.ver" },
+  { group: "Administración", items: [
+    { to: "/compras", label: "Compras", icon: I.upload, need: "purchases.ver" },
     { to: "/contabilidad", label: "Contabilidad", icon: I.accounting, need: "accounting.ver" },
     { to: "/recepcion", label: "Recepción XML", icon: I.bell, need: "accounting.ver" },
     { to: "/conciliacion", label: "Conciliación", icon: I.bank, need: "accounting.ver" },
     { to: "/planillas", label: "Planillas", icon: I.team, need: "payroll.ver" },
+    { to: "/reportes", label: "Reportes", icon: I.reports, need: "reports.ver" },
     { to: "/importar", label: "Importar datos", icon: I.upload, need: "settings.configurar" },
     { to: "/ajustes", label: "Ajustes", icon: I.settings },
   ]},
 ];
+
 
 export default function AppShell() {
   const { me, logout, theme, toggleTheme, allows, role, viewAs, setViewAs } = useSession();

@@ -6,6 +6,7 @@ import os
 from datetime import UTC, datetime
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import EmailOutbox, Tenant
@@ -18,6 +19,23 @@ def queue_email(db: Session, tenant: Tenant, to: str, subject: str, html: str, e
     db.flush()
     deliver(m)
     return m
+
+
+def notify_roles(db: Session, tenant: Tenant, roles: tuple[str, ...], subject: str, html: str, entity: str, entity_id: int) -> int:
+    """Avisa a todos los usuarios activos con esos roles. Lo que en las notas de Andres es
+    'Administracion recibe: nuevo levantamiento' o 'proyecto terminado, listo para facturacion'."""
+    from ..models import TenantUser
+
+    n = 0
+    vistos: set[str] = set()
+    for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.active, TenantUser.role_code.in_(roles))):
+        correo = (m.user.email or "").strip().lower()
+        if not correo or correo in vistos:
+            continue
+        vistos.add(correo)
+        queue_email(db, tenant, correo, subject, html, entity, entity_id)
+        n += 1
+    return n
 
 
 def deliver(m: EmailOutbox) -> None:

@@ -107,3 +107,36 @@ function Library({ onPick, onClose }: { onPick: (m: MediaItem) => void; onClose:
     </Modal>
   );
 }
+
+/** Tira de fotos para el trabajo de campo: el tecnico esta en una escalera con el celular,
+    asi que el boton es grande y en el telefono abre la camara directo (capture). Guarda URLs planas. */
+export function PhotoStrip({ value, onChange, label = "Agregar fotografía", disabled }: { value: string[]; onChange: (v: string[]) => void; label?: string; disabled?: boolean }) {
+  const { upload, busy } = useUpload();
+  const input = useRef<HTMLInputElement>(null);
+  const take = async (files: FileList | null) => {
+    if (!files?.length) return;
+    const subidas: string[] = [];
+    for (const f of Array.from(files)) {
+      const m = await upload(f);
+      if (m) subidas.push(m.url);
+    }
+    if (subidas.length) onChange([...value, ...subidas]);
+  };
+  return (
+    <div className="photos">
+      {value.map((url, i) => (
+        <div className="photos__it" key={`${url}-${i}`} style={{ background: `center/cover no-repeat url("${url}")` }}>
+          <a href={url} target="_blank" rel="noreferrer" aria-label={`Ver foto ${i + 1}`} />
+          {!disabled && <button type="button" onClick={() => onChange(value.filter((_, j) => j !== i))} aria-label="Quitar foto"><Icon d={I.x} size={13} /></button>}
+        </div>
+      ))}
+      {!disabled && (
+        <button type="button" className="photos__add" onClick={() => input.current?.click()} disabled={busy}>
+          <input ref={input} type="file" accept="image/*" capture="environment" multiple hidden onChange={(e) => { take(e.target.files); e.target.value = ""; }} />
+          {busy ? <span className="spinner" /> : <><Icon d={I.plus} size={18} /><span>{label}</span></>}
+        </button>
+      )}
+      {disabled && value.length === 0 && <span className="muted" style={{ fontSize: 13 }}>Sin fotografías.</span>}
+    </div>
+  );
+}

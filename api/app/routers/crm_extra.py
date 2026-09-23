@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,13 +15,16 @@ from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..models import (
     Customer,
+    CustomerAsset,
     CustomerContact,
     CustomerNote,
     Invoice,
+    Opportunity,
     Order,
     Payment,
     Product,
     ProductVariant,
+    Project,
     Quote,
     User,
 )
@@ -231,6 +234,40 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
             "overdue": sum(1 for i in live if i.status == "vencida"),
         },
         "timeline": events[:120],
+        # "Aqui solo veo esto y no tengo mas datos": que equipo le instalamos, si sigue en garantia,
+        # y en que anda el trabajo con el. Los activos y los proyectos ya existen; faltaba traerlos aqui.
+        "assets": [
+            {
+                "id": a.id,
+                "name": a.name,
+                "model": a.model,
+                "serial": a.serial,
+                "location": a.location,
+                "installed_at": a.installed_at,
+                "warranty_until": a.warranty_until,
+                "warranty_days": (a.warranty_until - date.today()).days if a.warranty_until else None,
+                "project_id": a.project_id,
+            }
+            for a in db.scalars(
+                select(CustomerAsset).where(CustomerAsset.tenant_id == tid, CustomerAsset.customer_id == cid).order_by(CustomerAsset.id.desc()).limit(60)
+            )
+        ]
+        if p.can("assets", "ver")
+        else [],
+        "projects": [
+            {"id": x.id, "number": x.number, "name": x.name, "status": x.status, "end_date": x.end_date}
+            for x in db.scalars(select(Project).where(Project.tenant_id == tid, Project.customer_id == cid).order_by(Project.id.desc()).limit(20))
+        ]
+        if p.can("projects", "ver")
+        else [],
+        "opportunities": [
+            {"id": x.id, "number": x.number, "title": x.title, "status": x.status, "amount": x.amount, "next_action_date": x.next_action_date}
+            for x in db.scalars(
+                select(Opportunity).where(Opportunity.tenant_id == tid, Opportunity.customer_id == cid).order_by(Opportunity.id.desc()).limit(20)
+            )
+        ]
+        if p.can("crm_pipeline", "ver")
+        else [],
     }
 
 

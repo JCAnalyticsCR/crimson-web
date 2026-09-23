@@ -402,6 +402,7 @@ REPORT_NEEDS = {
     "planilla": ("payroll", "ver"),
     "conciliacion": ("accounting", "ver"),
     "rentabilidad": ("projects", "ver_todo"),
+    "rentabilidad_tipo": ("projects", "ver_todo"),
 }
 
 
@@ -409,7 +410,7 @@ def report_allowed(p: Principal, key: str) -> bool:
     mod, act = REPORT_NEEDS.get(key, ("settings", "configurar"))
     if mod == "payments" and not p.sees_all_sales:
         return False  # cierres y transacciones son de toda la empresa
-    if key == "rentabilidad" and not p.sees_prices:
+    if key.startswith("rentabilidad") and not p.sees_costs:
         return False  # el margen por proyecto es informacion de costos
     return p.can(mod, act)
 

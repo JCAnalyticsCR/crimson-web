@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
-from ..models import Category, Customer, Product, ProductTax, Tax
+from ..models import Category, Customer, Product, ProductTax, Supplier, Tax
 from ..schemas.crm import (
     CategoryIn,
     CategoryOut,
@@ -118,23 +118,66 @@ def _product_out(pr: Product, p: Principal | None = None) -> ProductOut:
     o.tax_ids = [t.tax_id for t in pr.taxes]
     o.tax_rate = float(pr.taxes[0].tax.rate) if pr.taxes else None
     if p is not None and not p.sees_prices:  # el tecnico ve el catalogo sin plata
-        o.price, o.cost, o.margin_pct = 0, None, None
+        o.price = 0
+    if p is not None and not p.sees_costs:  # la vendedora cotiza con el precio, no con el costo
+        o.cost, o.margin_pct = None, None
     return o
 
 
 @router.get("/products", response_model=Page)
 def products(
     q: str | None = None,
+    item_type: str | None = None,
+    category_id: int | None = None,
+    brand: str | None = None,
+    supplier_id: int | None = None,
+    web: bool | None = None,
+    sin_cabys: bool = False,
     cursor: int | None = None,
     limit: int = Query(20, le=100),
     p: Principal = Depends(require("catalog", "ver")),
     db: Session = Depends(get_db),
 ):
+    """El buscador por texto no alcanza con 200 productos del proveedor: se filtra por tipo, categoria,
+    marca, proveedor, si esta en la tienda y si le falta el CABYS (lo que bloquea facturar)."""
     stmt = select(Product).where(Product.tenant_id == p.tenant.id, Product.active)
     if q:
         like = f"%{q}%"
-        stmt = stmt.where(or_(Product.name.ilike(like), Product.code.ilike(like), Product.cabys_code.ilike(like)))
+        stmt = stmt.where(
+            or_(Product.name.ilike(like), Product.code.ilike(like), Product.cabys_code.ilike(like), Product.model.ilike(like), Product.supplier_sku.ilike(like))
+        )
+    if item_type:
+        stmt = stmt.where(Product.item_type == item_type)
+    if category_id:
+        stmt = stmt.where(Product.category_id == category_id)
+    if brand:
+        stmt = stmt.where(Product.brand == brand)
+    if supplier_id:
+        stmt = stmt.where(Product.supplier_id == supplier_id)
+    if web is not None:
+        stmt = stmt.where(Product.show_on_web.is_(web))
+    if sin_cabys:
+        stmt = stmt.where(or_(Product.cabys_code.is_(None), Product.cabys_code == ""))
     return _page(db, stmt, cursor, limit, Product, lambda pr: _product_out(pr, p))
+
+
+@router.get("/products/meta/filters")
+def product_filters(p: Principal = Depends(require("catalog", "ver")), db: Session = Depends(get_db)):
+    """Las opciones que existen de verdad en el catalogo, no una lista fija."""
+    marcas = db.scalars(
+        select(Product.brand).where(Product.tenant_id == p.tenant.id, Product.active, Product.brand.is_not(None)).distinct().order_by(Product.brand)
+    ).all()
+    sin_cabys = db.scalar(
+        select(func.count())
+        .select_from(Product)
+        .where(Product.tenant_id == p.tenant.id, Product.active, or_(Product.cabys_code.is_(None), Product.cabys_code == ""))
+    )
+    return {
+        "brands": [b for b in marcas if b],
+        "categories": [{"id": c.id, "name": c.name} for c in db.scalars(select(Category).where(Category.tenant_id == p.tenant.id).order_by(Category.name))],
+        "suppliers": [{"id": s.id, "name": s.name} for s in db.scalars(select(Supplier).where(Supplier.tenant_id == p.tenant.id).order_by(Supplier.name))],
+        "sin_cabys": sin_cabys,
+    }
 
 
 @router.post("/products", response_model=ProductOut, status_code=201)

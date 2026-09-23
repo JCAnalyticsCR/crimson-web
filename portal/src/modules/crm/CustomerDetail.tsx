@@ -7,7 +7,13 @@ import { Badge, Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 
 type Cust = { id: number; name: string; id_type: string; id_number: string | null; email: string | null; phone: string | null; whatsapp: string | null; currency: string; notes: string | null; address: Record<string, string> | null; active: boolean; created_at: string };
 type Ev = { at: string; kind: string; title: string; amount?: string; currency?: string; status: string | null; to?: string; id?: number; author?: string | null };
-type Overview = { customer: Cust; kpis: { billed: string; due: string; invoices: number; quotes: number; last_purchase: string | null; overdue: number }; timeline: Ev[] };
+type Asset = { id: number; name: string; model: string | null; serial: string | null; location: string | null; installed_at: string | null; warranty_until: string | null; warranty_days: number | null };
+type Proj = { id: number; number: string; name: string; status: string; end_date: string | null };
+type Opp = { id: number; number: string; title: string; status: string; amount: string; next_action_date: string | null };
+type Overview = {
+  customer: Cust; kpis: { billed: string; due: string; invoices: number; quotes: number; last_purchase: string | null; overdue: number }; timeline: Ev[];
+  assets?: Asset[]; projects?: Proj[]; opportunities?: Opp[];
+};
 type Contact = { id?: number; name: string; role: string; email: string; phone: string; receives_invoices: boolean };
 
 const KIND: Record<string, { label: string; color: string; icon: string }> = {
@@ -87,6 +93,39 @@ export default function CustomerDetail() {
         <div className="kpi__card kpi__card--light"><div className="kpi__label">Cotizaciones</div><div className="kpi__value">{ov.kpis.quotes}</div><div className="kpi__sub">últimas 50</div></div>
         <div className="kpi__card kpi__card--light"><div className="kpi__label">Última compra</div><div className="kpi__value" style={{ fontSize: 22 }}>{ov.kpis.last_purchase ? fmtDate(ov.kpis.last_purchase) : "—"}</div><div className="kpi__sub">cliente desde {fmtDate(c.created_at.slice(0, 10))}</div></div>
       </div>
+
+      {(!!ov.opportunities?.length || !!ov.projects?.length) && (
+        <div className="grid-2">
+          {!!ov.opportunities?.length && (
+            <Card title={`Oportunidades · ${ov.opportunities.length}`} flush extra={<Link className="btn btn--ghost btn--sm" to="/oportunidades">Ver embudo</Link>}>
+              <table className="table"><thead><tr><th>Número</th><th>Título</th><th>Estado</th><th className="num">Monto</th></tr></thead>
+                <tbody>{ov.opportunities.map((o) => <tr key={o.id}><td className="mono muted">{o.number}</td><td style={{ fontWeight: 600 }}>{o.title}</td><td><Badge status={o.status} /></td><td className="num money">{fmtMoney(o.amount, c.currency)}</td></tr>)}</tbody></table>
+            </Card>
+          )}
+          {!!ov.projects?.length && (
+            <Card title={`Proyectos · ${ov.projects.length}`} flush>
+              <table className="table"><thead><tr><th>Número</th><th>Proyecto</th><th>Estado</th><th /></tr></thead>
+                <tbody>{ov.projects.map((x) => <tr key={x.id}><td className="mono muted">{x.number}</td><td style={{ fontWeight: 600 }}>{x.name}</td><td><Badge status={x.status} /></td><td className="num"><Link className="btn btn--ghost btn--sm" to={`/proyectos/${x.id}`}>Abrir</Link></td></tr>)}</tbody></table>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {!!ov.assets?.length && (
+        /* Lo que pidio Andres: que equipo le instalamos a este cliente y si sigue en garantia. */
+        <Card title={`Equipos instalados · ${ov.assets.length}`} flush extra={<Link className="btn btn--ghost btn--sm" to={`/activos?cliente=${c.id}`}>Ver todos</Link>}>
+          <table className="table">
+            <thead><tr><th>Equipo</th><th>Serie</th><th>Ubicación</th><th>Instalado</th><th>Garantía</th></tr></thead>
+            <tbody>{ov.assets.map((a) => (
+              <tr key={a.id}>
+                <td style={{ fontWeight: 600 }}>{a.name}{a.model ? <div className="meta">{a.model}</div> : null}</td>
+                <td className="mono muted">{a.serial || "—"}</td><td className="muted">{a.location || "—"}</td><td>{fmtDate(a.installed_at)}</td>
+                <td>{a.warranty_until == null ? <span className="muted">—</span> : (a.warranty_days ?? 0) < 0 ? <span className="badge badge--muted">Vencida</span> : (a.warranty_days ?? 0) <= 45 ? <span className="badge badge--warn">Vence en {a.warranty_days} d</span> : <span className="badge badge--ok">{fmtDate(a.warranty_until)}</span>}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </Card>
+      )}
 
       <div className="grid-2" style={{ gridTemplateColumns: "minmax(0, 1.6fr) minmax(0, 1fr)", alignItems: "start" }}>
         <Card title="Línea de tiempo" extra={<div className="tabs">{[["", "Todo"], ["factura", "Facturas"], ["pago", "Pagos"], ["cotizacion", "Cotizaciones"], ["nota", "Notas"]].map(([k, l]) => <button key={k} className={filter === k ? "is-active" : ""} onClick={() => setFilter(k)}>{l}</button>)}</div>}>

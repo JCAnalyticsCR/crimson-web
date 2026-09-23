@@ -14,3 +14,11 @@ api/.ruff_cache/
 portal/dist/
 portal/node_modules/
 portal/tsconfig.tsbuildinfo
+
+# Material del cliente y grabaciones que NO van al repositorio (este repo es publico).
+# Solo la raiz: los videos del sitio viven en docs/video y si estan versionados.
+/*.mp4
+/*.mov
+/*.xlsx
+/*.pdf
+/notas*.txt

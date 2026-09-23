@@ -117,11 +117,22 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div className="card"><div className="card__body grid-3">
             <Field label="Cliente">
-              <select className="select" value={doc.customer_id ?? ""} disabled={locked} onChange={(e) => setDoc({ ...doc, customer_id: e.target.value ? Number(e.target.value) : null })}>
+              <select
+                className="select"
+                value={doc.customer_id ?? ""}
+                disabled={locked}
+                onChange={(e) => {
+                  /* La divisa la manda el cliente: si prefiere dolares, el documento arranca en dolares
+                     (pedido de Andres en la revision del 22/09). Se puede cambiar a mano despues. */
+                  const id = e.target.value ? Number(e.target.value) : null;
+                  const c = customers.find((x) => x.id === id);
+                  setDoc({ ...doc, customer_id: id, currency: c?.currency || doc.currency || "CRC" });
+                }}
+              >
                 <option value="">Seleccione…</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </Field>
-            <Field label="Divisa" hint={fx ? `Tipo de cambio hoy: venta ${fx.sell} · compra ${fx.buy}` : undefined}>
+            <Field label="Divisa" hint={doc.customer_id && customers.find((c) => c.id === doc.customer_id)?.currency !== cur ? `El cliente prefiere ${customers.find((c) => c.id === doc.customer_id)?.currency}; esta cambiada a mano.` : fx ? `Tipo de cambio hoy: venta ${fx.sell} · compra ${fx.buy}` : undefined}>
               <select className="select" value={cur} disabled={locked} onChange={(e) => setDoc({ ...doc, currency: e.target.value })}><option>CRC</option><option>USD</option></select>
             </Field>
             <Field label="Grupo de facturación"><select className="select" disabled><option>{isQ ? "COT · Cotizaciones" : "FEC · Facturas electrónicas"}</option></select></Field>

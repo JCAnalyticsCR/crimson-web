@@ -25,9 +25,9 @@ export const ROLES: Record<string, RoleMeta> = {
   },
   ventas: {
     label: "Vendedor", tone: "#2f6fed", glyph: "V",
-    summary: "Cotiza y factura. Ve solo sus propios documentos, con un límite de descuento; el dinero de la empresa lo ven caja y contabilidad.",
+    summary: "Cotiza y factura con el precio de venta. Ve solo sus propios documentos y nunca el costo del proveedor; el dinero de la empresa lo ven caja y contabilidad.",
     can: ["Cotizar y convertir a factura", "Vender en el punto de venta", "Gestionar clientes, órdenes y eventos", "Ver su facturación del mes y sus facturas por cobrar"],
-    cannot: ["Descontar más del límite sin aprobación de un administrador", "Anular facturas", "Ver cobros, contabilidad, planillas o reportes de la empresa"],
+    cannot: ["Ver el costo del proveedor, el margen o la utilidad", "Descontar más del límite sin aprobación de un administrador", "Anular facturas", "Ver cobros, contabilidad, planillas o reportes de la empresa"],
   },
   caja: {
     label: "Caja", tone: "#0e9f6e", glyph: "C",

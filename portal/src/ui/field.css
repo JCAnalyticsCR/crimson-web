@@ -63,3 +63,14 @@ a.eco__box:hover { border-color: var(--crimson); }
 .lookup__list button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--text-1); font-size: 13.5px; }
 .lookup__list button:hover { background: var(--bg-2); }
 .lookup__list small { display: block; color: var(--text-3); font-family: var(--mono); font-size: 11.5px; }
+
+/* ---------- Tira de fotos del trabajo de campo ---------- */
+.photos { display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; }
+.photos__it { position: relative; width: 92px; height: 92px; border-radius: 12px; border: 1px solid var(--hair-2); overflow: hidden; }
+.photos__it a { position: absolute; inset: 0; }
+.photos__it button { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border: 0; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; display: grid; place-items: center; cursor: pointer; }
+.photos__add { min-width: 92px; min-height: 92px; padding: 8px; border: 1.5px dashed var(--hair-2); border-radius: 12px; background: transparent; color: var(--text-3); font-size: 12.5px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+.photos__add:hover { border-color: var(--crimson); color: var(--crimson); }
+
+/* Filtros compactos en las listas largas (catalogo de proveedor: 200+ productos) */
+.select--sm { height: 34px; padding: 0 28px 0 10px; font-size: 12.5px; max-width: 190px; }

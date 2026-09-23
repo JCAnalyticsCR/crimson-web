@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO
 
+import pytest
 from openpyxl import Workbook
 
 from tests.test_session4 import _user_with_role
@@ -47,9 +48,10 @@ def test_supplier_catalog_import_sets_cost_and_price(client, auth):
     assert done["summary"]["nuevo"] == 3
     cam = client.get("/products", params={"q": "SG2104"}).json()["items"][0]
     full = client.get(f"/products/{cam['id']}").json()
-    # 70.91 USD x 512.35 (tipo de cambio de la semilla) x 1.35 = 49 049 -> se redondea a la centena
+    # 70.91 USD x 512.35 (tipo de cambio de la semilla) = 36 330,7; / 0,65 (35 % de margen SOBRE LA VENTA)
+    # = 55 893 -> redondeado hacia arriba a la centena. No es costo x 1,35: eso dejaria 25,9 % real.
     assert Decimal(str(full["cost"])) == Decimal("70.91") and full["cost_currency"] == "USD"
-    assert Decimal(str(full["price"])) == Decimal("49100") and full["brand"] == "Hikvision"
+    assert Decimal(str(full["price"])) == Decimal("55900") and full["brand"] == "Hikvision"
     assert full["model"] == "DS-2CD1047G3-LIU(2.8MM)" and full["supplier_stock"] == 100
     cats = {c["name"] for c in client.get("/categories").json()}
     assert {"Seguridad", "Camaras", "Grabadoras"} <= cats
@@ -60,7 +62,7 @@ def test_supplier_catalog_import_sets_cost_and_price(client, auth):
         files={"file": ("lista.xlsx", data, "application/octet-stream")},
     ).json()
     assert again["summary"]["actualizar"] == 3
-    assert Decimal(str(client.get(f"/products/{cam['id']}").json()["price"])) == Decimal("52700")
+    assert Decimal(str(client.get(f"/products/{cam['id']}").json()["price"])) == Decimal("66100")  # / 0,55
 
 
 def test_web_toggle_and_store_availability(client, auth, db_session):
@@ -186,6 +188,13 @@ def test_opportunity_survey_quote_project_workorder_assets(client, auth, db_sess
     client.post(f"/work-orders/{oid}/arrive", headers=tk, json={})
     client.post(f"/work-orders/{oid}/start", headers=tk, json={})
     stock_antes = _stock(client, cam["id"])
+    # No se cierra sin anotar el material: el acuerdo con Andrés es que quede respaldo de lo que pasó.
+    flojo = client.post(
+        f"/work-orders/{oid}/finish",
+        headers=tk,
+        json={"materials": [{"product_id": cam["id"], "name": cam["name"], "quantity": 0, "planned": 4}], "notes": "instalé las cámaras"},
+    )
+    assert flojo.status_code == 422 and "Anotá cuánto usaste" in flojo.json()["detail"]
     fin = client.post(
         f"/work-orders/{oid}/finish",
         headers=tk,
@@ -221,6 +230,8 @@ def test_opportunity_survey_quote_project_workorder_assets(client, auth, db_sess
     eco = client.get(f"/projects/{pr['id']}").json()["economics"]
     assert Decimal(str(eco["cost_materials"])) > 0 and Decimal(str(eco["cost_real"])) > Decimal("185000")  # 4 cámaras + mano de obra + viáticos
     assert Decimal(str(eco["margin_real"])) < Decimal(str(eco["margin_planned"])) + 100
+    tipos = client.get("/reports/rentabilidad_tipo").json()
+    assert tipos["rows"][0][0] == "CCTV" and tipos["rows"][0][1] == 1  # la pregunta de Andrés: en qué tipo se gana
     rent = client.get("/reports/rentabilidad").json()
     assert rent["rows"][0][0] == pr["number"]  # el reporte vive en el catálogo: columnas + filas
     assert Decimal(str(rent["totals"]["Utilidad"])) == Decimal(str(eco["profit"]))
@@ -270,3 +281,48 @@ def test_ceo_dashboard_row(client, auth):
     assert Decimal(str(g["pipeline"])) == Decimal("2000000") and Decimal(str(g["pipeline_weighted"])) == Decimal("1000000.00")
     assert Decimal(str(g["receivable"])) >= Decimal("113000") and g["opportunities"] >= 1
     assert set(g) >= {"projects_active", "jobs_week", "quotes_sent", "warranties_soon", "margin_month"}
+
+
+def test_margen_es_sobre_la_venta_no_recargo_sobre_el_costo():
+    """La cuenta que Andrés hizo a mano en la reunión: 103,51 / 0,65 = 159,25, y el sistema
+    debe reportar 35 % de margen sobre ese precio. Con costo x 1,35 daban 139,74 y 25,9 %."""
+    from decimal import Decimal as D
+
+    from app.services import pricing
+
+    precio = pricing.sale_price(None, D("103.51"), "USD", "USD", D(35))
+    assert precio == D("159.25")
+    assert pricing.margin_of(precio, D("103.51")) == D("35.0")
+    with pytest.raises(ValueError):
+        pricing.sale_price(None, D(100), "USD", "USD", D(100))
+
+
+def test_la_vendedora_ve_precio_de_venta_pero_nunca_el_costo(client, auth, db_session):
+    """Andrés: 'ella va a poder ver el inventario, pero sin precio costo; solo existencias y precio de venta'."""
+    tid = auth["tenant"]["id"]
+    admin_h = dict(client.headers)
+    cam = client.get("/products", params={"q": "CAM-DOME"}).json()["items"][0]
+    from app.models import Product
+
+    db_session.get(Product, cam["id"]).cost = Decimal("80")
+    db_session.commit()
+
+    def entrar(email, rol):
+        pw = _user_with_role(db_session, tid, email, rol)
+        client.headers.pop("Authorization", None)
+        tok = client.post("/auth/login", json={"email": email, "password": pw}).json()["access_token"]
+        client.headers.update(admin_h)
+        return {"Authorization": f"Bearer {tok}"}
+
+    v = entrar("vendedora@ejemplo.com", "ventas")
+    prod = client.get(f"/products/{cam['id']}", headers=v).json()
+    assert Decimal(str(prod["price"])) > 0 and prod["cost"] is None and prod["margin_pct"] is None
+    assert client.get("/reports/rentabilidad", headers=v).status_code == 403
+
+    t = entrar("tec3@ejemplo.com", "tecnico")
+    prod_t = client.get(f"/products/{cam['id']}", headers=t).json()
+    assert Decimal(str(prod_t["price"])) == 0 and prod_t["cost"] is None
+
+    k = entrar("conta@ejemplo.com", "contabilidad")
+    prod_k = client.get(f"/products/{cam['id']}", headers=k).json()
+    assert Decimal(str(prod_k["price"])) > 0 and Decimal(str(prod_k["cost"])) == Decimal("80")

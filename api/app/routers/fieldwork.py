@@ -6,6 +6,7 @@ El tecnico levanta en sitio desde el celular (puntos, fotos, materiales) y envia
 
 from __future__ import annotations
 
+import html
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -22,6 +23,7 @@ from ..services import documents as docsvc
 from ..services import inventory as invsvc
 from ..services import pricing
 from ..services.documents import audit
+from ..services.mail import notify_roles
 from ..services.sequences import next_number
 from ..services.survey_specs import SPECS, suggest_materials
 from ..services.totals import d
@@ -199,6 +201,21 @@ def survey_send(sid: int, p: Principal = Depends(require("field", "crear")), db:
         raise HTTPException(422, "Agregá al menos un punto o material antes de enviar")
     s.status = "enviado"
     s.sent_at = datetime.now(UTC)
+    cliente = db.get(Customer, s.customer_id).name if s.customer_id else (s.contact or {}).get("name") or "sin cliente"
+    spec = SPECS.get(s.kind, SPECS["otro"])
+    filas = "".join(f"<li>{html.escape(x.code)} · {html.escape(x.label or '')}</li>" for x in s.points[:20])
+    notify_roles(
+        db,
+        p.tenant,
+        ("admin", "supervisor"),
+        f"Nuevo levantamiento {s.number} · {cliente}",
+        f"<p><b>{html.escape(spec['label'])}</b> levantado por {html.escape(p.user.full_name)}.</p>"
+        f"<p>Cliente: {html.escape(cliente)}<br>Sitio: {html.escape(s.site or '—')}<br>"
+        f"{len(s.points)} {html.escape(spec['point_label'].lower())}(s) · {len(s.items)} materiales · {s.techs} técnicos × {s.days} día(s)</p>"
+        f"<ul>{filas}</ul><p>Abrí el levantamiento para costearlo y generar la cotización.</p>",
+        "survey",
+        s.id,
+    )
     audit(db, p.tenant.id, p.user.id, "send", "survey", s.id, {"puntos": len(s.points), "materiales": len(s.items)}, ip=p.ip)
     db.commit()
     return _survey_out(db, s)
@@ -207,7 +224,7 @@ def survey_send(sid: int, p: Principal = Depends(require("field", "crear")), db:
 @router.get("/surveys/{sid}/costing")
 def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
     """Costeo para administración: costo por línea, mano de obra, transporte, precio sugerido y margen."""
-    if not p.sees_prices:
+    if not p.sees_costs:
         raise HTTPException(403, "Tu rol no ve costos")
     s = db.get(Survey, sid)
     if not s or s.tenant_id != p.tenant.id:
@@ -488,6 +505,15 @@ def order_action(oid: int, action: str, data: ProgressIn | None = None, p: Princ
     elif action == "progress":
         pass
     elif action == "finish":
+        # Acuerdo con Andres en la reunion del 22/09: no se cierra un trabajo con "instale 5 camaras" en una
+        # nota. Si un material estaba planificado hay que anotar cuanto se uso; si no se uso, se quita la linea.
+        # Sin eso no queda respaldo de lo que realmente paso en el sitio.
+        sin_anotar = [m.name for m in o.materials if d(m.planned) > 0 and d(m.quantity) <= 0]
+        if sin_anotar:
+            raise HTTPException(
+                422,
+                "Anotá cuánto usaste de: " + ", ".join(sin_anotar[:6]) + ("…" if len(sin_anotar) > 6 else "") + ". Si no se usó, quitá la línea.",
+            )
         if not o.started_at:
             o.started_at = now
         o.finished_at, o.status = now, "finalizada"
@@ -495,8 +521,20 @@ def order_action(oid: int, action: str, data: ProgressIn | None = None, p: Princ
         audit(db, p.tenant.id, p.user.id, "finish", "work_order", o.id, {"materiales": consumed}, ip=p.ip)
         if o.project_id:
             pr = db.get(Project, o.project_id)
-            if pr and all(x.status in ("finalizada", "cancelada") for x in pr.orders):
+            if pr and all(x.status in ("finalizada", "cancelada") for x in pr.orders) and pr.status != "terminado":
                 pr.status = "terminado"
+                horas = sum((_hours(x.started_at, x.finished_at) or 0 for x in pr.orders), 0.0)
+                notify_roles(
+                    db,
+                    p.tenant,
+                    ("admin", "contabilidad"),
+                    f"Proyecto {pr.number} terminado · listo para facturación",
+                    f"<p><b>{html.escape(pr.name)}</b> quedó terminado.</p>"
+                    f"<p>{len(pr.orders)} orden(es) de trabajo · {round(horas, 1)} horas de campo.</p>"
+                    "<p>El informe técnico de entrega ya se puede imprimir desde la ficha del proyecto.</p>",
+                    "project",
+                    pr.id,
+                )
     elif action == "cancel":
         o.status = "cancelada"
     else:

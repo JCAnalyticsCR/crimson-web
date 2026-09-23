@@ -25,13 +25,16 @@ export default function Assets() {
   const [draft, setDraft] = useState<Draft | null>(null);
 
   const proyecto = params.get("proyecto");
+  const cliente = params.get("cliente");
   const load = useCallback(() => {
     const qs = new URLSearchParams();
     if (q) qs.set("q", q);
+    if (cliente) qs.set("customer_id", cliente);
     if (expiring) qs.set("expiring", "true");
     api<Asset[]>(`/assets?${qs}`).then((r) => setRows(proyecto ? r.filter((a) => a.project_id === Number(proyecto)) : r));
-  }, [q, expiring, proyecto]);
+  }, [q, expiring, proyecto, cliente]);
   useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); }, [load]);
+  useEffect(() => { if (params.get("vencen")) setExpiring(true); }, [params]);
   const save = async () => {
     if (!draft) return;
     const body = {

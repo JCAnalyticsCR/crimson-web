@@ -6,6 +6,7 @@ import { api, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 import { Lookup, searchCustomers, searchProducts } from "../../ui/Lookup";
+import { PhotoStrip } from "../../ui/MediaPicker";
 
 type FieldSpec = { key: string; label: string; type: "text" | "number" | "select" | "multi" | "bool"; options?: string[]; unit?: string; placeholder?: string };
 type Spec = { label: string; point_prefix: string; point_label: string; fields: FieldSpec[]; materials: string[] };
@@ -28,7 +29,7 @@ const STATUS: Record<string, { label: string; tone: string }> = {
   cotizado: { label: "Cotizado", tone: "ok" }, cerrado: { label: "Cerrado", tone: "muted" },
 };
 
-const emptySurvey = (kind: string) => ({ kind, customer_id: "", customer_name: "", opportunity_id: "", site: "", visit_date: "", techs: 2, days: "1", notes: "", points: [] as Point[], items: [] as Item[] });
+const emptySurvey = (kind: string) => ({ kind, customer_id: "", customer_name: "", opportunity_id: "", site: "", visit_date: "", techs: 2, days: "1", notes: "", photos: [] as string[], points: [] as Point[], items: [] as Item[] });
 type Draft = ReturnType<typeof emptySurvey> & { id?: number; number?: string; status?: string; quote_id?: number | null };
 
 export default function Surveys() {
@@ -43,7 +44,7 @@ export default function Surveys() {
   const [busy, setBusy] = useState(false);
   const prefilled = useRef<string | null>(null); // no rearmar el borrador si el usuario ya empezó a escribir
 
-  const verCostos = allows("catalog.precios");
+  const verCostos = allows("catalog.costos");
   const spec = draft ? specs[draft.kind] : undefined;
 
   const load = useCallback(() => api<Survey[]>("/surveys").then(setRows), []);
@@ -78,7 +79,7 @@ export default function Surveys() {
     setDraft({
       id: s.id, number: s.number, status: s.status, quote_id: s.quote_id, kind: s.kind, customer_id: s.customer_id ? String(s.customer_id) : "", customer_name: s.customer || "",
       opportunity_id: s.opportunity_id ? String(s.opportunity_id) : "", site: s.site || "", visit_date: s.visit_date || "", techs: s.techs,
-      days: String(s.days), notes: s.notes || "", points: s.points || [], items: (s.items || []).map((i) => ({ ...i, quantity: String(i.quantity) })),
+      days: String(s.days), notes: s.notes || "", photos: s.photos || [], points: s.points || [], items: (s.items || []).map((i) => ({ ...i, quantity: String(i.quantity) })),
     });
   };
 
@@ -86,7 +87,7 @@ export default function Surveys() {
 
   const body = (d: Draft) => ({
     kind: d.kind, customer_id: d.customer_id ? Number(d.customer_id) : null, opportunity_id: d.opportunity_id ? Number(d.opportunity_id) : null,
-    site: d.site || null, visit_date: d.visit_date || null, techs: Number(d.techs), days: Number(d.days), notes: d.notes || null,
+    site: d.site || null, visit_date: d.visit_date || null, techs: Number(d.techs), days: Number(d.days), notes: d.notes || null, photos: d.photos,
     points: d.points.map((p) => ({ id: p.id, code: p.code, label: p.label || null, data: p.data, photos: p.photos || [], notes: p.notes })),
     items: d.items.filter((i) => i.name.trim()).map((i) => ({ id: i.id, product_id: i.product_id, name: i.name, quantity: Number(i.quantity || 0), unit: i.unit || "Unid", note: i.note })),
   });
@@ -144,6 +145,15 @@ export default function Surveys() {
     if (!d) return d;
     const pre = specs[d.kind]?.point_prefix || "PTO";
     return { ...d, points: [...d.points, { code: `${pre}-${String(d.points.length + 1).padStart(2, "0")}`, label: "", data: {}, photos: [], notes: null }] };
+  });
+  /* En sitio, las cámaras de un mismo tramo comparten casi todo: se copia la anterior y solo se
+     corrige lo que cambia (lo pidió Andrés: "que utilice la misma configuración para estas cámaras"). */
+  const dupPoint = (i: number) => setDraft((d) => {
+    if (!d) return d;
+    const base = d.points[i];
+    const pre = specs[d.kind]?.point_prefix || "PTO";
+    const copia: Point = { code: `${pre}-${String(d.points.length + 1).padStart(2, "0")}`, label: base.label, data: { ...base.data }, photos: [], notes: null };
+    return { ...d, points: [...d.points.slice(0, i + 1), copia, ...d.points.slice(i + 1)] };
   });
   const setPoint = (i: number, patch: Partial<Point>) => setDraft((d) => (d ? { ...d, points: d.points.map((p, j) => (j === i ? { ...p, ...patch } : p)) } : d));
   const setData = (i: number, key: string, v: unknown) => setPoint(i, { data: { ...draft!.points[i].data, [key]: v } });
@@ -222,10 +232,14 @@ export default function Surveys() {
                 <div className="point__head">
                   <input className="input input--mono" style={{ maxWidth: 110 }} value={pt.code} onChange={(e) => setPoint(i, { code: e.target.value })} />
                   <input className="input" value={pt.label} placeholder="Entrada principal" onChange={(e) => setPoint(i, { label: e.target.value })} />
+                  {!readOnly && <button className="btn btn--ghost btn--sm" title="Duplicar: mismas características, otro punto" onClick={() => dupPoint(i)}><Icon d={I.copy} size={14} /></button>}
                   {!readOnly && <button className="btn btn--ghost btn--sm" title="Quitar" onClick={() => setDraft({ ...draft, points: draft.points.filter((_, j) => j !== i) })}><Icon d={I.x} size={14} /></button>}
                 </div>
                 <div className="point__grid">{(spec?.fields || []).map((f) => <Field key={f.key} label={f.unit ? `${f.label}` : f.label}>{field(f, i)}</Field>)}</div>
                 <Field label="Observaciones"><input className="input" value={pt.notes || ""} onChange={(e) => setPoint(i, { notes: e.target.value })} placeholder="Hay que romper cielo raso…" /></Field>
+                <Field label="Fotografías del punto" hint="En el celular abre la cámara directo.">
+                  <PhotoStrip value={pt.photos || []} onChange={(photos) => setPoint(i, { photos })} disabled={readOnly} label="Foto" />
+                </Field>
               </div>
             ))}
           </Card>
@@ -247,6 +261,9 @@ export default function Surveys() {
             )}
           </Card>
 
+          <Field label="Fotografías generales del sitio" hint="Fachada, gabinete, ruta del cable: lo que ayude a cotizar sin volver.">
+            <PhotoStrip value={draft.photos} onChange={(photos) => setDraft({ ...draft, photos })} disabled={readOnly} />
+          </Field>
           <Field label="Notas del levantamiento"><textarea className="textarea" value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} placeholder="Acceso por el portón trasero; el cliente pide trabajar sábado." /></Field>
         </Modal>
       )}

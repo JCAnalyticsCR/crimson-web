@@ -47,8 +47,20 @@ def _out(m: Media) -> dict:
     return {"id": m.id, "key": m.key, "url": public_url(m), "filename": m.filename, "content_type": m.content_type, "size": m.size, "created_at": m.created_at}
 
 
+# El tecnico entra aqui con field.crear: su evidencia de instalacion es una foto desde el celular.
+UPLOADERS = (
+    ("catalog", "crear"),
+    ("catalog", "editar"),
+    ("accounting", "crear"),
+    ("settings", "configurar"),
+    ("field", "crear"),
+    ("field", "editar"),
+    ("assets", "crear"),
+)
+
+
 def _can_upload(p: Principal) -> None:
-    if not any(p.can(mod, act) for mod, act in (("catalog", "crear"), ("catalog", "editar"), ("accounting", "crear"), ("settings", "configurar"))):
+    if not any(p.can(mod, act) for mod, act in UPLOADERS):
         raise HTTPException(403, "Sin permiso para subir archivos")
 
 

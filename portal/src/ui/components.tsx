@@ -40,6 +40,8 @@ export const I = {
   bank: "M3 10l9-6 9 6|M5 10v8M9.5 10v8M14.5 10v8M19 10v8|M3 20h18",
   team: "M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6z|M2 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5|M16.5 11a2.5 2.5 0 1 0 0-5|M18 14.5c2.3.4 4 2.3 4 5",
   upload: "M12 16V4|M7 9l5-5 5 5|M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3",
+  ruler: "M3 15l12-12 6 6-12 12z|M7 11l2 2M10 8l2 2M13 5l2 2",
+  shield: "M12 3l8 3v6c0 4.4-3.2 8.1-8 9-4.8-.9-8-4.6-8-9V6z|M9 12l2 2 4-4",
 };
 
 export function Badge({ status }: { status: string }) {

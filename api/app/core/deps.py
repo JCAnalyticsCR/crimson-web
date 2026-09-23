@@ -47,7 +47,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "dashboard": ["ver"],
         "crm": ["ver"],
         "crm_pipeline": ["ver", "editar"],
-        "catalog": ["ver", "precios"],
+        "catalog": ["ver", "precios", "costos"],
         "inventory": ["ver", "crear", "editar", "exportar"],
         "field": ["ver", "ver_todo", "crear", "editar", "asignar"],
         "projects": ["ver", "ver_todo", "crear", "editar"],
@@ -69,7 +69,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
     # Bodega: catalogo y existencias. Ni ventas ni dinero; reportes solo de inventario.
     "inventario": {
         "dashboard": ["ver"],
-        "catalog": ["ver", "precios", "crear", "editar"],
+        "catalog": ["ver", "precios", "costos", "crear", "editar"],  # recibe las compras: necesita el costo
         "inventory": ["ver", "crear", "editar", "exportar"],
         "reports": ["ver", "exportar"],
     },
@@ -77,7 +77,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
     "contabilidad": {
         "dashboard": ["ver", "empresa"],
         "crm": ["ver"],
-        "catalog": ["ver", "precios"],
+        "catalog": ["ver", "precios", "costos"],
         "sales": ["ver", "ver_todo", "exportar", "recurrencias"],
         "payments": ["ver", "exportar"],
         "accounting": ["ver", "crear", "editar", "exportar"],
@@ -94,7 +94,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "crm_pipeline": ["ver"],
         "projects": ["ver", "ver_todo"],
         "assets": ["ver"],
-        "catalog": ["ver", "precios"],
+        "catalog": ["ver", "precios", "costos"],  # socio o auditor: ve la utilidad
         "sales": ["ver", "ver_todo", "exportar"],
         "payments": ["ver"],
         "events": ["ver"],
@@ -135,8 +135,14 @@ class Principal:
 
     @property
     def sees_prices(self) -> bool:
-        """El tecnico ve el catalogo sin precios ni costos."""
+        """Precio de venta. La vendedora lo necesita para cotizar; el tecnico no lo ve."""
         return self.can("catalog", "precios")
+
+    @property
+    def sees_costs(self) -> bool:
+        """Costo, margen y utilidad. Andres fue explicito: la vendedora ve el precio de venta y las
+        existencias, pero nunca el costo del proveedor."""
+        return self.can("catalog", "costos")
 
     @property
     def sees_all_sales(self) -> bool:

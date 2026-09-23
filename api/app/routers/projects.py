@@ -35,7 +35,7 @@ from ..models import (
 )
 from ..services import inventory as invsvc
 from ..services import pricing
-from ..services.documents import audit, today_fx
+from ..services.documents import audit, local_date, today_fx
 from ..services.sequences import next_number
 from ..services.totals import d
 
@@ -63,6 +63,30 @@ def consumed_cost(db: Session, pr: Project, fx: Decimal | None = None) -> Decima
             prod = db.get(Product, m.product_id) if m.product_id else None
             total += pricing.cost_in(db, prod, "CRC", fx) * d(m.quantity)
     return total
+
+
+SOLUCIONES = {
+    "cctv": "CCTV",
+    "redes": "Redes / WiFi",
+    "acceso": "Control de acceso",
+    "asistencia": "Tiempo y asistencia",
+    "ups": "Respaldo eléctrico",
+    "cableado": "Cableado estructurado",
+    "anpr": "ANPR / barreras",
+    "otro": "Otro",
+}
+
+
+def project_solution(db: Session, pr: Project) -> str:
+    """Tipo de solucion del proyecto: lo dice el levantamiento y, si no hubo, la oportunidad."""
+    if pr.survey_id:
+        s = db.get(Survey, pr.survey_id)
+        if s and s.kind:
+            return SOLUCIONES.get(s.kind, s.kind)
+    o = db.scalar(select(Opportunity).where(Opportunity.project_id == pr.id))
+    if o and o.solution:
+        return SOLUCIONES.get(o.solution, o.solution)
+    return "Sin clasificar"
 
 
 def economics(db: Session, pr: Project, fx: Decimal | None = None) -> dict:
@@ -113,7 +137,7 @@ def _out(db: Session, pr: Project, p: Principal, full: bool = True) -> dict:
         "orders_done": sum(1 for o in pr.orders if o.status == "finalizada"),
         "created_at": pr.created_at,
     }
-    if p.sees_prices:
+    if p.sees_costs:
         out["economics"] = economics(db, pr)
     if full:
         out["orders"] = [
@@ -503,6 +527,8 @@ def asset_update(aid: int, data: AssetIn, p: Principal = Depends(require("assets
 @router.get("/projects/{pid}/report", response_class=HTMLResponse)
 def delivery_report(pid: int, p: Principal = Depends(require("projects", "ver")), db: Session = Depends(get_db)):
     """Informe técnico de entrega con fotografías, equipos instalados y tiempos. Imprimible o a PDF."""
+    from ..routers.fieldwork import _hours  # import local: fieldwork ya importa de aqui
+
     pr = _project(db, pid, p)
     c = db.get(Customer, pr.customer_id) if pr.customer_id else None
     esc = html.escape
@@ -513,9 +539,10 @@ def delivery_report(pid: int, p: Principal = Depends(require("projects", "ver"))
         tasks = "".join(f"<li>{'☑' if x.get('done') else '☐'} {esc(str(x.get('text', '')))}</li>" for x in (o.tasks or []))
         mats = "".join(f"<tr><td>{esc(m.name)}</td><td class=n>{d(m.quantity):g} {esc(m.unit)}</td></tr>" for m in o.materials if d(m.quantity) > 0)
         photos += list(o.photos or [])
-        hrs = f"{round((o.finished_at - o.started_at).total_seconds() / 3600, 1)} h" if o.started_at and o.finished_at else "—"
+        h_ot = _hours(o.started_at, o.finished_at)
+        hrs = f"{h_ot} h" if h_ot is not None else "—"
         orders += f"""<section class=block><h3>{esc(o.number)} · {esc(o.title)}</h3>
-        <div class=m>{esc(t.full_name if t else "Sin técnico")} · {o.finished_at.astimezone().strftime("%d/%m/%Y") if o.finished_at else "en curso"} · {hrs}</div>
+        <div class=m>{esc(t.full_name if t else "Sin técnico")} · {local_date(o.finished_at).strftime("%d/%m/%Y") if o.finished_at else "en curso"} · {hrs}</div>
         {f"<ul class=tasks>{tasks}</ul>" if tasks else ""}
         {f"<table class=t><tr><th>Material utilizado</th><th class=n>Cantidad</th></tr>{mats}</table>" if mats else ""}
         {f"<p class=obs>{esc(o.notes)}</p>" if o.notes else ""}</section>"""

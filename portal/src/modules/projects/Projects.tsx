@@ -35,7 +35,7 @@ function List() {
   const { allows } = useSession();
   const [rows, setRows] = useState<Project[]>([]);
   const [status, setStatus] = useState("activos");
-  const verPlata = allows("catalog.precios");
+  const verPlata = allows("catalog.costos");
 
   useEffect(() => { api<Project[]>(`/projects${status ? `?status=${status}` : ""}`).then(setRows); }, [status]);
 
@@ -76,7 +76,7 @@ function Detail({ id }: { id: number }) {
   const [p, setP] = useState<Project | null>(null);
   const [req, setReq] = useState<Requirement[]>([]);
   const [edit, setEdit] = useState<{ status: string; cost_labor: string; cost_travel: string; cost_extra: string; end_date: string; notes: string } | null>(null);
-  const verPlata = allows("catalog.precios");
+  const verPlata = allows("catalog.costos");
 
   const load = useCallback(() => {
     api<Project>(`/projects/${id}`).then(setP);
