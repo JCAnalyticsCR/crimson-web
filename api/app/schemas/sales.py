@@ -89,6 +89,7 @@ class DocBaseOut(BaseModel):
 
 class QuoteOut(DocBaseOut):
     converted_invoice_id: int | None = None
+    approval_reason: str | None = None
 
 
 class PaymentIn(BaseModel):

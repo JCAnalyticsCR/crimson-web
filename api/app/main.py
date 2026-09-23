@@ -30,6 +30,7 @@ from .routers import (
     sales,
     store,
     support,
+    support_desk,
     webhooks,
 )
 from .routers import settings as settings_router
@@ -87,6 +88,7 @@ def create_app() -> FastAPI:
     app.include_router(pipeline.router)
     app.include_router(fieldwork.router)
     app.include_router(projects.router)
+    app.include_router(support_desk.router)
     app.include_router(public.router)
     return app
 

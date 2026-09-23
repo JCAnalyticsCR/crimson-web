@@ -120,7 +120,7 @@ export type DocListItem = { id: number; number: string; customer_name: string | 
 export type Ceo = {
   pipeline: string; pipeline_weighted: string; opportunities: number; receivable: string; sold_month: string; profit_month: string; margin_month: number;
   projects_active: number; projects_closed_month: number; jobs_open: number; jobs_week: number; jobs_late: number;
-  quotes_sent: number; quotes_won_month: number; warranties_soon: number;
+  quotes_sent: number; quotes_won_month: number; warranties_soon: number; tickets_open?: number; tickets_late?: number;
 };
 export type Dashboard = {
   scope?: "mine" | "company";
@@ -171,6 +171,10 @@ export const STATUS: Record<string, { label: string; tone: "ok" | "warn" | "bad"
   en_proceso: { label: "En proceso", tone: "warn" },
   finalizada: { label: "Finalizada", tone: "ok" },
   planificado: { label: "Planificado", tone: "info" },
+  asignado: { label: "Asignado", tone: "info" },
+  esperando_cliente: { label: "Esperando al cliente", tone: "muted" },
+  resuelto: { label: "Resuelto", tone: "ok" },
+  cerrado: { label: "Cerrado", tone: "muted" },
   en_curso: { label: "En curso", tone: "warn" },
   terminado: { label: "Terminado", tone: "ok" },
   facturado: { label: "Facturado", tone: "ok" },

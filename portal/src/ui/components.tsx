@@ -42,6 +42,7 @@ export const I = {
   upload: "M12 16V4|M7 9l5-5 5 5|M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3",
   ruler: "M3 15l12-12 6 6-12 12z|M7 11l2 2M10 8l2 2M13 5l2 2",
   shield: "M12 3l8 3v6c0 4.4-3.2 8.1-8 9-4.8-.9-8-4.6-8-9V6z|M9 12l2 2 4-4",
+  life: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z|M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z|M5.6 5.6l3.2 3.2M15.2 15.2l3.2 3.2M18.4 5.6l-3.2 3.2M8.8 15.2l-3.2 3.2",
 };
 
 export function Badge({ status }: { status: string }) {

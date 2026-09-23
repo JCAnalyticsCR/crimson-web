@@ -31,6 +31,8 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "crm_pipeline": ["ver", "crear", "editar"],  # oportunidades propias
         "field": ["ver", "crear"],  # levantamientos propios (los pide para cotizar)
         "projects": ["ver"],
+        "support_desk": ["ver", "crear"],  # abre el ticket del cliente que atiende
+        "commissions": ["ver"],  # solo las suyas: sin ver_todo
     },
     # Caja: cobra en mostrador y busca cualquier factura para registrar su pago. Reportes solo de caja.
     "caja": {
@@ -54,6 +56,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "assets": ["ver", "crear", "editar"],
         "purchases": ["ver", "crear"],
         "sales": ["ver"],
+        "support_desk": ["ver", "ver_todo", "crear", "editar"],
         "reports": ["ver", "exportar"],
     },
     # Tecnico instalador: solo lo asignado, desde el celular. Nunca ve precios ni costos.
@@ -65,6 +68,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "field": ["ver", "crear", "editar"],
         "projects": ["ver"],
         "assets": ["ver", "crear", "editar"],
+        "support_desk": ["ver", "crear", "editar"],  # solo los suyos: sin ver_todo
     },
     # Bodega: catalogo y existencias. Ni ventas ni dinero; reportes solo de inventario.
     "inventario": {
@@ -85,6 +89,8 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "projects": ["ver", "ver_todo"],
         "purchases": ["ver", "crear", "editar"],
         "payroll": ["ver", "crear", "editar", "aprobar", "configurar"],
+        "commissions": ["ver", "ver_todo", "aprobar"],
+        "support_desk": ["ver", "ver_todo"],
         "reports": ["ver", "exportar"],
     },
     # Solo lectura (socio, auditor): ve ventas y cobros de la empresa sin modificar nada. Sin gastos ni planillas.
@@ -98,6 +104,8 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "sales": ["ver", "ver_todo", "exportar"],
         "payments": ["ver"],
         "events": ["ver"],
+        "support_desk": ["ver", "ver_todo"],
+        "commissions": ["ver", "ver_todo"],
         "reports": ["ver"],
     },
     # Acceso temporal concedido por el admin (Ajustes -> Soporte): solo lectura, cada request queda auditado

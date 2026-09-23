@@ -26,7 +26,7 @@ export const ROLES: Record<string, RoleMeta> = {
   ventas: {
     label: "Vendedor", tone: "#2f6fed", glyph: "V",
     summary: "Cotiza y factura con el precio de venta. Ve solo sus propios documentos y nunca el costo del proveedor; el dinero de la empresa lo ven caja y contabilidad.",
-    can: ["Cotizar y convertir a factura", "Vender en el punto de venta", "Gestionar clientes, órdenes y eventos", "Ver su facturación del mes y sus facturas por cobrar"],
+    can: ["Cotizar y convertir a factura", "Vender en el punto de venta", "Gestionar clientes, órdenes y eventos", "Abrir tickets de soporte de sus clientes", "Ver su facturación del mes, sus cobros y sus comisiones"],
     cannot: ["Ver el costo del proveedor, el margen o la utilidad", "Descontar más del límite sin aprobación de un administrador", "Anular facturas", "Ver cobros, contabilidad, planillas o reportes de la empresa"],
   },
   caja: {
@@ -44,19 +44,19 @@ export const ROLES: Record<string, RoleMeta> = {
   contabilidad: {
     label: "Contabilidad", tone: "#6b46c1", glyph: "K",
     summary: "Todo el dinero de la empresa: gastos, recepción de XML, conciliación, planillas y reportes.",
-    can: ["Gastos, recepción y conciliación", "Planillas y colillas", "Los reportes de la empresa con Excel, incluida la rentabilidad por proyecto"],
+    can: ["Gastos, recepción y conciliación", "Planillas, colillas y comisiones", "Los reportes de la empresa con Excel, incluida la rentabilidad por proyecto"],
     cannot: ["Crear ventas o cobrar", "Configurar la empresa o los usuarios"],
   },
   supervisor: {
     label: "Supervisor técnico", tone: "#0f766e", glyph: "S",
     summary: "Manda el campo: levantamientos, proyectos, órdenes de trabajo y materiales. Ve costos, no la contabilidad.",
-    can: ["Asignar y programar órdenes de trabajo", "Revisar levantamientos y costear materiales", "Proyectos, activos del cliente y solicitudes de compra", "Movimientos de inventario"],
+    can: ["Asignar y programar órdenes de trabajo", "Revisar levantamientos y costear materiales", "Proyectos, activos del cliente y solicitudes de compra", "Toda la mesa de soporte y los mantenimientos", "Movimientos de inventario"],
     cannot: ["Facturar o cobrar", "Ver planillas, gastos ni conciliación", "Configurar la empresa"],
   },
   tecnico: {
     label: "Técnico instalador", tone: "#b45309", glyph: "T",
     summary: "Solo lo suyo, desde el celular: el trabajo del día, el levantamiento en sitio y la evidencia de la instalación.",
-    can: ["Ver sus órdenes de trabajo del día", "Llenar levantamientos técnicos en sitio", "Registrar material usado, fotos y firma del cliente", "Anotar los equipos que deja instalados"],
+    can: ["Ver sus órdenes de trabajo del día", "Llenar levantamientos técnicos en sitio", "Atender los tickets de soporte que le asignan", "Registrar material usado, fotos y firma del cliente", "Anotar los equipos que deja instalados"],
     cannot: ["Ver precios, costos ni márgenes", "Ver trabajos de otros técnicos", "Ver facturas, cobros o reportes"],
   },
   lectura: {

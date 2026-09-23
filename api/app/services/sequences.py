@@ -20,6 +20,8 @@ DEFAULT_GROUPS = {
     "PRO": ("PRO", "Proyectos"),
     "OT": ("OT", "Ordenes de trabajo"),
     "SC": ("SC", "Solicitudes de compra"),
+    "TCK": ("TCK", "Tickets de soporte"),
+    "CTR": ("CTR", "Contratos de mantenimiento"),
 }
 
 DOC_TYPE_CODE = {"FE": "01", "ND": "02", "NC": "03", "TE": "04", "FEE": "09", "COT": "00"}
@@ -27,7 +29,7 @@ DOC_TYPE_CODE = {"FE": "01", "ND": "02", "NC": "03", "TE": "04", "FEE": "09", "C
 # Los documentos de campo llevan el año a la vista (LEV-2026-0043), como los numera Crimson en sus notas.
 # El contador NO se reinicia en enero: el año es parte del nombre, no del consecutivo, y asi nunca se repite
 # un numero. Los documentos fiscales conservan su formato: ahi el consecutivo lo manda Hacienda.
-WITH_YEAR = ("OPO", "LEV", "PRO", "OT", "SC")
+WITH_YEAR = ("OPO", "LEV", "PRO", "OT", "SC", "TCK", "CTR")
 
 
 def get_or_create_group(db: Session, tenant_id: int, doc_type: str) -> BillingGroup:

@@ -7,6 +7,9 @@ configurado en Ajustes -> Facturacion (max_discount_pct, 10 % por defecto). Cuen
 - bajar el precio unitario por debajo del precio de catalogo (misma divisa).
 
 Cotizacion que excede -> queda "por_aprobar" (un administrador la aprueba). Factura o POS que excede -> se rechaza.
+
+Ademas del descuento hay otras dos razones para pedir aprobacion, que Andres pidio en la reunion del 22/09:
+una cotizacion por encima de cierto monto y una con margen por debajo del minimo. Viven en approval_reasons().
 """
 
 from __future__ import annotations
@@ -71,3 +74,57 @@ def check(db: Session, p: Principal, payload: DocumentIn) -> Check:
             worst, worst_line = eff, name
     worst = worst.quantize(Decimal("0.1"))
     return Check(worst > limit, limit, worst, worst_line)
+
+
+# ---------- Aprobacion de cotizaciones (monto y margen) ----------
+DEFAULT_APPROVAL_AMOUNT = Decimal(2_000_000)  # "cotizacion mayor de 2 millones requiere aprobacion del CEO"
+DEFAULT_MIN_MARGIN = Decimal(25)  # "margen menor a 25 % -> bloquear y solicitar autorizacion"
+
+
+def approval_amount(tenant) -> Decimal:
+    v = (tenant.settings or {}).get("quote_approval_amount")
+    return d(v) if v is not None else DEFAULT_APPROVAL_AMOUNT
+
+
+def min_margin(tenant) -> Decimal:
+    v = (tenant.settings or {}).get("min_margin_pct")
+    return d(v) if v is not None else DEFAULT_MIN_MARGIN
+
+
+def quote_margin(db: Session, tenant_id: int, quote) -> Decimal | None:
+    """Margen de la cotizacion sobre las lineas que SI tienen costo registrado.
+    Devuelve None cuando ninguna linea tiene costo: ahi el margen no se puede afirmar y la regla no aplica."""
+    from . import pricing
+
+    neto = cost = Decimal(0)
+    con_costo = False
+    fx = None
+    for ln in quote.lines:
+        prod = db.get(Product, ln.product_id) if ln.product_id else None
+        if prod is None or prod.tenant_id != tenant_id or prod.cost is None:
+            continue
+        if fx is None:
+            from .documents import today_fx
+
+            fx = today_fx(db, "USD")[0]
+        con_costo = True
+        neto += d(ln.subtotal)
+        cost += pricing.cost_in(db, prod, quote.currency, fx) * d(ln.quantity)
+    if not con_costo or neto <= 0:
+        return None
+    return pricing.margin_of(neto, cost)
+
+
+def approval_reasons(db: Session, p: Principal, quote) -> list[str]:
+    """Por que esta cotizacion necesita el visto bueno de un administrador. Vacia = sale sola."""
+    if p.can("sales", "aprobar"):
+        return []  # quien aprueba no se pide permiso a si mismo
+    razones = []
+    tope = approval_amount(p.tenant)
+    if tope > 0 and d(quote.total) > tope:
+        razones.append(f"El monto ({quote.currency} {d(quote.total):,.0f}) supera el tope de {tope:,.0f} para cotizar sin aprobación.")
+    minimo = min_margin(p.tenant)
+    m = quote_margin(db, p.tenant.id, quote)
+    if m is not None and minimo > 0 and m < minimo:
+        razones.append(f"El margen queda en {m:.1f} % y el mínimo es {minimo:.0f} %.")
+    return razones

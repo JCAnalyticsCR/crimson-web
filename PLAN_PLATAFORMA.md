@@ -477,6 +477,22 @@ Comercial y campo (la otra mitad del negocio, sesión 5)
 - [x] Fila de gerencia en el inicio: embudo, ponderado, por cobrar, utilidad del mes, proyectos, trabajos de la semana, garantías por vencer
 - [x] Roles nuevos: supervisor técnico (todo el campo, ve costos) y técnico instalador (solo lo asignado, nunca ve plata)
 
+Soporte, mantenimientos y comisiones (sesión 6, de la grabación de la reunión)
+- [x] Margen sobre la venta, no recargo sobre el costo: `precio = costo / (1 − margen)` — `services/pricing.py`
+- [x] `catalog.costos` separado de `catalog.precios`: la vendedora cotiza con el precio y nunca ve el costo del proveedor
+- [x] Mesa de soporte: tickets con SLA de primera respuesta, nivel 1-3, horas, si se cobra y bitácora con autor y hora
+- [x] El ticket genera la orden de trabajo cuando hay que ir al sitio (no se reescribe nada)
+- [x] Contratos de mantenimiento preventivo: el worker abre el ticket cuando toca y reprograma la próxima visita
+- [x] Comisiones: reglas por persona o generales, devengadas con el **cobro**, sobre lo cobrado o sobre la utilidad
+- [x] Aprobación de cotizaciones por monto (> ₡2 M) y por margen bajo (< 25 %), además del descuento
+- [x] Al abrir el proyecto se avisa qué hay que comprar (los proveedores no dan crédito)
+- [x] Fotografías en levantamientos y órdenes de trabajo; el técnico no cierra sin anotar el material usado
+- [x] Filtros en el catálogo, la divisa la define el cliente y rentabilidad por tipo de solución
+- [x] Avisos: levantamiento enviado, proyecto terminado, SLA vencido, cotización de 5 días sin respuesta
+- [ ] Portal del cliente (Andrés lo dejó explícitamente para después)
+- [ ] RMA con el proveedor (equipo → factura de compra → reemplazo)
+- [ ] Conexión en vivo con el inventario de Eurocomp
+
 Eventos / POS / API
 - [x] API pública + credenciales + checkout JWT + webhooks salientes · Eventos con entradas QR (venta pública, activación al pagar, check-in con cámara) · POS web (vuelto, pagos mixtos, variantes) · Importador CSV/Excel (clientes, productos, proveedores, facturas históricas; migración desde Fygaro) · vPOS (diferido)
 

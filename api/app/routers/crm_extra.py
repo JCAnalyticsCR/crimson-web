@@ -26,6 +26,7 @@ from ..models import (
     ProductVariant,
     Project,
     Quote,
+    SupportTicket,
     User,
 )
 from ..services.documents import audit
@@ -259,6 +260,25 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
             for x in db.scalars(select(Project).where(Project.tenant_id == tid, Project.customer_id == cid).order_by(Project.id.desc()).limit(20))
         ]
         if p.can("projects", "ver")
+        else [],
+        # "si se les ha hecho soporte tecnico a ellos... y el costo que tiene esos soportes"
+        "tickets": [
+            {
+                "id": t.id,
+                "number": t.number,
+                "subject": t.subject,
+                "kind": t.kind,
+                "status": t.status,
+                "hours": t.hours,
+                "billable": t.billable,
+                "amount": t.amount,
+                "created_at": t.created_at,
+            }
+            for t in db.scalars(
+                select(SupportTicket).where(SupportTicket.tenant_id == tid, SupportTicket.customer_id == cid).order_by(SupportTicket.id.desc()).limit(20)
+            )
+        ]
+        if p.can("support_desk", "ver")
         else [],
         "opportunities": [
             {"id": x.id, "number": x.number, "title": x.title, "status": x.status, "amount": x.amount, "next_action_date": x.next_action_date}

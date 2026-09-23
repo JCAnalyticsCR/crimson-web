@@ -542,7 +542,8 @@ def test_discount_limit_and_approval(client, auth, db_session):
             ln["unit_price"] = price
         return client.post("/quotes", json={"customer_id": c["id"], "lines": [ln]}, headers=h).json()
 
-    assert client.get("/sales/discount-limit", headers=v).json() == {"limit": 10, "free": False}
+    limites = client.get("/sales/discount-limit", headers=v).json()
+    assert limites["limit"] == 10 and limites["free"] is False and limites["approves"] is False
     assert quote(v, 5)["status"] == "creado"
     big = quote(v, 15)
     assert big["status"] == "por_aprobar"

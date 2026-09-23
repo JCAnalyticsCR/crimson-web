@@ -42,6 +42,9 @@ const WorkOrders = lazy(() => import("./modules/field/WorkOrders"));
 const Projects = lazy(() => import("./modules/projects/Projects"));
 const Assets = lazy(() => import("./modules/projects/Assets"));
 const Purchases = lazy(() => import("./modules/projects/Purchases"));
+const Tickets = lazy(() => import("./modules/support/Tickets"));
+const Contracts = lazy(() => import("./modules/support/Contracts"));
+const Commissions = lazy(() => import("./modules/support/Commissions"));
 
 function Private() {
   const { me, loading } = useSession();
@@ -94,6 +97,9 @@ function App() {
         <Route path="/proyectos/:id" element={g("projects.ver", <Projects />)} />
         <Route path="/activos" element={g("assets.ver", <Assets />)} />
         <Route path="/compras" element={g("purchases.ver", <Purchases />)} />
+        <Route path="/tickets" element={g("support_desk.ver", <Tickets />)} />
+        <Route path="/mantenimientos" element={g("support_desk.ver", <Contracts />)} />
+        <Route path="/comisiones" element={g("commissions.ver", <Commissions />)} />
         <Route path="/productos" element={g("catalog.ver", <Products />)} />
         <Route path="/inventario" element={g("inventory.ver", <Inventory />)} />
         <Route path="/mi-tienda" element={g("settings.configurar", <Store />)} />

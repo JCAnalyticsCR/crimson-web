@@ -126,11 +126,22 @@ def quotes(
 def create_quote(data: DocumentIn, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
     chk = discounts.check(db, p, data)
     q = svc.create_quote(db, p.tenant.id, p.user.id, data)
-    if chk.exceeds:
-        q.status = "por_aprobar"
-        audit(db, p.tenant.id, p.user.id, "discount_over_limit", "quote", q.id, {"pct": str(chk.worst), "limit": str(chk.limit)}, ip=p.ip)
+    _hold(db, p, q, chk)
     db.commit()
     return _quote_out(db, q)
+
+
+def _hold(db: Session, p: Principal, q, chk) -> list[str]:
+    """Deja la cotizacion en "por_aprobar" si excede el descuento, el monto o el margen minimo."""
+    razones = ([chk.message] if chk.exceeds else []) + discounts.approval_reasons(db, p, q)
+    if razones:
+        q.status = "por_aprobar"
+        q.approval_reason = " ".join(razones)[:400]
+        audit(db, p.tenant.id, p.user.id, "needs_approval", "quote", q.id, {"razones": razones}, ip=p.ip)
+    elif q.status == "por_aprobar":
+        q.status = "creado"  # quedo dentro de los limites (o lo edito quien aprueba)
+        q.approval_reason = None
+    return razones
 
 
 @router.get("/quotes/{qid}", response_model=QuoteOut)
@@ -147,10 +158,8 @@ def update_quote(qid: int, data: DocumentIn, p: Principal = Depends(require("sal
 
     chk = discounts.check(db, p, data)
     svc.apply_document(db, q, data, QuoteLine, p.tenant.id)
-    if chk.exceeds:
-        q.status = "por_aprobar"
-    elif q.status == "por_aprobar":
-        q.status = "creado"  # quedo dentro del limite (o la edito un administrador)
+    db.flush()  # los totales nuevos son los que miran las reglas de aprobacion
+    _hold(db, p, q, chk)
     audit(db, p.tenant.id, p.user.id, "update", "quote", q.id, {"discount_pct": str(chk.worst)} if chk.worst else None, ip=p.ip)
     db.commit()
     return _quote_out(db, q)
@@ -209,14 +218,21 @@ def approve_quote(qid: int, p: Principal = Depends(require("sales", "aprobar")),
     if q.status != "por_aprobar":
         raise HTTPException(409, "La cotización no está pendiente de aprobación")
     q.status = "creado"
-    audit(db, p.tenant.id, p.user.id, "approve_discount", "quote", q.id, ip=p.ip)
+    motivo, q.approval_reason = q.approval_reason, None
+    audit(db, p.tenant.id, p.user.id, "approve_quote", "quote", q.id, {"motivo": motivo}, ip=p.ip)
     db.commit()
     return _quote_out(db, q)
 
 
 @router.get("/sales/discount-limit")
 def discount_limit(p: Principal = Depends(require("sales", "ver"))):
-    return {"limit": discounts.max_discount(p.tenant), "free": p.can("sales", "descuento_libre")}
+    return {
+        "limit": discounts.max_discount(p.tenant),
+        "free": p.can("sales", "descuento_libre"),
+        "max_amount": discounts.approval_amount(p.tenant),
+        "min_margin": discounts.min_margin(p.tenant),
+        "approves": p.can("sales", "aprobar"),
+    }
 
 
 # ---------- Facturas ----------
@@ -462,7 +478,7 @@ def _ceo_row(db: Session, p: Principal) -> dict:
     """Fila de gerencia: en 30 segundos, cómo está Crimson. Pipeline, cobros, proyectos y trabajos de la semana."""
     from datetime import timedelta
 
-    from ..models import CustomerAsset, Opportunity, Project, WorkOrder
+    from ..models import CustomerAsset, Opportunity, Project, SupportTicket, WorkOrder
     from ..routers.pipeline import OPEN_STATES
     from ..routers.projects import consumed_cost
     from ..services import pricing
@@ -509,4 +525,16 @@ def _ceo_row(db: Session, p: Principal) -> dict:
         "quotes_sent": quotes_sent,
         "quotes_won_month": quotes_won,
         "warranties_soon": len(warranties),
+        "tickets_open": db.scalar(
+            select(func.count())
+            .select_from(SupportTicket)
+            .where(SupportTicket.tenant_id == tid, SupportTicket.status.in_(("nuevo", "asignado", "en_proceso", "esperando_cliente")))
+        ),
+        "tickets_late": sum(
+            1
+            for t in db.scalars(
+                select(SupportTicket).where(SupportTicket.tenant_id == tid, SupportTicket.status.in_(("nuevo", "asignado", "en_proceso", "esperando_cliente")))
+            )
+            if t.due_at and not t.first_reply_at and (t.due_at if t.due_at.tzinfo else t.due_at.replace(tzinfo=UTC)) < datetime.now(UTC)
+        ),
     }

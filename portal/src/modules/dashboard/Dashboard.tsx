@@ -115,6 +115,7 @@ export default function Dashboard() {
                 <Link className="eco__box" to="/proyectos"><span className="meta">Proyectos activos · {d.gerencia.projects_closed_month} cerrados este mes</span><b>{d.gerencia.projects_active}</b></Link>
                 <Link className={`eco__box ${d.gerencia.jobs_late ? "is-bad" : ""}`} to="/ordenes-trabajo"><span className="meta">Trabajos de la semana{d.gerencia.jobs_late ? ` · ${d.gerencia.jobs_late} atrasados` : ""}</span><b>{d.gerencia.jobs_week}</b></Link>
                 <div className="eco__box"><span className="meta">Cotizaciones enviadas · {d.gerencia.quotes_won_month} ganadas</span><b>{d.gerencia.quotes_sent}</b></div>
+                <Link className={`eco__box ${d.gerencia.tickets_late ? "is-bad" : ""}`} to="/tickets"><span className="meta">Soporte abierto{d.gerencia.tickets_late ? ` · ${d.gerencia.tickets_late} sin responder a tiempo` : ""}</span><b>{d.gerencia.tickets_open ?? 0}</b></Link>
                 <Link className={`eco__box ${d.gerencia.warranties_soon ? "is-bad" : ""}`} to="/activos?vencen=1"><span className="meta">Garantías por vencer (45 d)</span><b>{d.gerencia.warranties_soon}</b></Link>
               </div>
             </Card>

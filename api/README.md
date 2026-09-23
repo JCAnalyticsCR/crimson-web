@@ -41,7 +41,7 @@ Proyecto `crimson-plataforma` (entorno `production` de Railway, datos de prueba)
 | factura electrónica | `/invoices/{id}/emit`, `/credit-note`, `/xml`, `/xml/{doc}/{document|response}` | adapter `sandbox` (clave 50 dígitos, XML v4.4 simulado); Alanube/GTI se enchufan en `app/providers/einvoice.py` |
 | inventario | `/warehouses`, `/stock`, `/stock/movements`, `/stock/transfer` | ledger por ubicación; venta descuenta, anulación repone, alertas de mínimo |
 | contabilidad | `/expenses`, `/expense-categories`, `/suppliers` | gastos con condición de IVA (crédito / no / prorrata) |
-| reportes | `/reports`, `/reports/{key}?format=xlsx` | facturación, pendientes, impuesto, resultados, cierre, transacciones, gastos, IVA, inventario, productos, movimientos, órdenes, recepciones, propinas, D-151, planilla, conciliación, rentabilidad por proyecto |
+| reportes | `/reports`, `/reports/{key}?format=xlsx` | 19 reportes con Excel, incluidas rentabilidad por proyecto y por tipo de solución |
 | recurrencias | `/recurrences`, `/recurrences/{id}/run` | plantilla + frecuencia → factura (worker diario) |
 | ajustes | `/settings`, `/settings/bank-accounts`, `/billing-groups/{id}`, `/settings/users`, `/settings/invitations[/accept]`, `/settings/gateways`, `/settings/outbox` | vigencias, mensajes, BCC, métodos manuales, consecutivos, roles, invitaciones, pasarelas (secreto cifrado) |
 | webhooks | `/webhooks/onvo/{tenant_id}` | firma HMAC `t=..,v1=..` (300 s), idempotente por evento, aplica pago/reembolso |
@@ -65,7 +65,10 @@ Proyecto `crimson-plataforma` (entorno `production` de Railway, datos de prueba)
 | proyectos | `/projects[/{id}[/requirements\|purchase-request\|report\|invoice]]`, `/quotes/{id}/project` | cotización → proyecto con su primera orden; rentabilidad real e informe de entrega |
 | activos | `/assets[/{id}]?expiring=` | equipo instalado con serie, ubicación y garantía (aviso 45 días antes) |
 | compras | `/purchase-requests[/{id}]` | desde el proyecto, por stock bajo (worker) o a mano; al recibir entra a bodega con su costo |
-| disponibilidad | `PATCH /products/{id}/web`, `/products/{id}/availability` | interruptor de publicación en la tienda y existencias propias + del proveedor |
+| disponibilidad | `PATCH /products/{id}/web`, `/products/{id}/availability`, `/products/meta/filters` | interruptor de publicación en la tienda, existencias propias + del proveedor y los filtros del catálogo |
+| soporte al cliente | `/tickets[/{id}[/notes\|/work-order]]`, `/tickets/meta/config` | casos con SLA de primera respuesta, nivel 1-3, horas y si se cobra; el ticket genera la orden de trabajo |
+| mantenimientos | `/contracts[/{id}[/ticket]]` | cada cuántos meses toca; el worker abre el ticket y reprograma la próxima |
+| comisiones | `/commissions[/rules]`, `PATCH /commissions` | se devengan con el **cobro**, no con la factura; sobre lo cobrado o sobre la utilidad |
 | soporte | `/settings/support[/{id}/revoke\|log]` | acceso temporal de solo lectura con bitácora por request |
 | bandeja XML | `/settings/inbox`, `/settings/inbox/run` | IMAP cada 15 min (worker); contraseña cifrada |
 | contacto | `/public/store/{slug}/contact` | formulario del sitio → nota en la ficha + correo a administradores |

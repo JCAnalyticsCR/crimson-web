@@ -79,6 +79,7 @@ class Quote(_DocBase, Base):
     # status: creado | enviada | convertida | anulada | vencida
 
     converted_invoice_id: Mapped[int | None] = mapped_column(ForeignKey("invoice.id"))
+    approval_reason: Mapped[str | None] = mapped_column(String(400))  # por que quedo "por_aprobar"
     lines: Mapped[list["QuoteLine"]] = relationship(cascade="all, delete-orphan", order_by="QuoteLine.position", lazy="selectin")
 
 

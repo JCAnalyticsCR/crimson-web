@@ -36,6 +36,7 @@ from ..models import (
 from ..services import inventory as invsvc
 from ..services import pricing
 from ..services.documents import audit, local_date, today_fx
+from ..services.mail import notify_roles
 from ..services.sequences import next_number
 from ..services.totals import d
 
@@ -269,9 +270,60 @@ def project_from_quote(qid: int, data: FromQuoteIn, p: Principal = Depends(requi
         pr.opportunity_id = opp.id
     if survey:
         survey.status = "cerrado"
-    audit(db, p.tenant.id, p.user.id, "from_quote", "project", pr.id, {"quote": q.number}, ip=p.ip)
+    db.flush()
+    faltantes = _reservar(db, p, pr, order)
+    audit(db, p.tenant.id, p.user.id, "from_quote", "project", pr.id, {"quote": q.number, "por_comprar": len(faltantes)}, ip=p.ip)
     db.commit()
-    return _out(db, pr, p)
+    out = _out(db, pr, p)
+    out["por_comprar"] = faltantes
+    return out
+
+
+def _reservar(db: Session, p: Principal, pr: Project, order: WorkOrder) -> list[dict]:
+    """Al abrir el proyecto: lo que hay en bodega queda apartado para el y lo que falta se avisa YA.
+
+    Andres lo explico asi: "los proveedores no dan credito", o sea que el material no llega solo porque el
+    proyecto exista; hay que pedirlo y pagarlo. Enterarse el dia de la instalacion es tarde.
+    """
+    levels: dict[int, Decimal] = {}
+    for lv in invsvc.stock_levels(db, p.tenant.id):
+        levels[lv["product_id"]] = levels.get(lv["product_id"], Decimal(0)) + lv["quantity"]
+    apartados = db.scalars(
+        select(WorkOrder).where(WorkOrder.tenant_id == p.tenant.id, WorkOrder.project_id != pr.id, WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")))
+    ).all()
+    comprometido: dict[int, Decimal] = {}
+    for o in apartados:
+        for m in o.materials:
+            if m.product_id:
+                comprometido[m.product_id] = comprometido.get(m.product_id, Decimal(0)) + max(d(m.planned) - d(m.quantity), Decimal(0))
+    faltan = []
+    for m in order.materials:
+        if not m.product_id:
+            continue
+        libre = levels.get(m.product_id, Decimal(0)) - comprometido.get(m.product_id, Decimal(0))
+        falta = d(m.planned) - max(libre, Decimal(0))
+        if falta > 0:
+            prod = db.get(Product, m.product_id)
+            faltan.append({"product_id": m.product_id, "name": m.name, "to_buy": falta, "supplier_stock": prod.supplier_stock if prod else None})
+    if faltan:
+        req = _new_request(db, p, faltan, reason="proyecto", project_id=pr.id, note=f"Material que falta para arrancar {pr.number}")
+        filas = "".join(
+            f"<li>{html.escape(x['name'])} · faltan {x['to_buy']:g}"
+            + (f" · el proveedor reporta {x['supplier_stock']}" if x.get("supplier_stock") is not None else "")
+            + "</li>"
+            for x in faltan[:25]
+        )
+        notify_roles(
+            db,
+            p.tenant,
+            ("admin", "inventario"),
+            f"{pr.number}: hay que comprar {len(faltan)} material(es) antes de instalar",
+            f"<p>El proyecto <b>{html.escape(pr.name)}</b> arrancó y esto no está en bodega:</p><ul>{filas}</ul>"
+            f"<p>Quedó la solicitud de compra <b>{req['number']}</b>. Los proveedores no dan crédito, así que conviene pedirlo hoy.</p>",
+            "purchase_request",
+            req["id"],
+        )
+    return faltan
 
 
 @router.get("/projects/{pid}")

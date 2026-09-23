@@ -39,9 +39,10 @@ def fx_bccr_daily() -> dict:
 @celery.task(name="sales.mark_overdue")
 def mark_overdue() -> int:
     """Marca vencidas las cotizaciones/facturas cuya fecha paso (los recordatorios por correo llegan en Fase 1.4)."""
+    from sqlalchemy import select, update
+
     from app.core.db import SessionLocal
     from app.models import Invoice, Quote
-    from sqlalchemy import select, update
 
     n = 0
     with SessionLocal() as db:
@@ -65,10 +66,11 @@ def run_recurrences() -> int:
 
 @celery.task(name="mail.retry_outbox")
 def retry_outbox() -> int:
+    from sqlalchemy import select
+
     from app.core.db import SessionLocal
     from app.models import EmailOutbox
     from app.services.mail import deliver
-    from sqlalchemy import select
 
     n = 0
     with SessionLocal() as db:
@@ -83,11 +85,13 @@ def retry_outbox() -> int:
 def reminders() -> int:
     """Recordatorio N dias antes del vencimiento (ajuste remind_days_before) y aviso de vencidas, por correo al cliente."""
     from datetime import timedelta
+
+    from sqlalchemy import select
+
     from app.core.db import SessionLocal
     from app.models import Customer, Invoice, Tenant
     from app.services.mail import doc_email_html, queue_email
     from app.services.render import money
-    from sqlalchemy import select
 
     n = 0
     with SessionLocal() as db:
@@ -117,11 +121,12 @@ def reminders() -> int:
 
 @celery.task(name="sales.daily_close_email")
 def daily_close_email() -> int:
+    from sqlalchemy import select
+
     from app.core.db import SessionLocal
     from app.models import Tenant, TenantUser
     from app.services.mail import queue_email
     from app.services.reports import cierre_diario
-    from sqlalchemy import select
 
     n = 0
     with SessionLocal() as db:
@@ -144,10 +149,11 @@ def daily_close_email() -> int:
 @celery.task(name="reception.poll_inboxes")
 def poll_inboxes() -> int:
     """Bandejas IMAP activas: importa XML de proveedores. Un buzon con error no detiene a los demas."""
+    from sqlalchemy import select
+
     from app.core.db import SessionLocal
     from app.models import Tenant
     from app.services.inbox import config, poll
-    from sqlalchemy import select
 
     n = 0
     with SessionLocal() as db:
@@ -177,11 +183,12 @@ def expire_support_grants() -> int:
 @celery.task(name="crm.stale_followups")
 def stale_followups() -> int:
     """Oportunidad abierta sin seguimiento (5 dias o proxima accion vencida) -> correo a quien la lleva."""
+    from sqlalchemy import select
+
     from app.core.db import SessionLocal
     from app.models import Tenant, User
     from app.routers.pipeline import stale_followups as find
     from app.services.mail import queue_email
-    from sqlalchemy import select
 
     n = 0
     with SessionLocal() as db:
@@ -214,12 +221,14 @@ def stale_followups() -> int:
 @celery.task(name="inventory.low_stock_requests")
 def low_stock_requests() -> int:
     """Inventario bajo el minimo -> solicitud de compra en borrador (los proveedores no dan credito)."""
+    from decimal import Decimal
+
+    from sqlalchemy import select
+
     from app.core.db import SessionLocal
-    from app.models import PurchaseRequest, PurchaseRequestLine, Product, Tenant
+    from app.models import Product, PurchaseRequest, PurchaseRequestLine, Tenant
     from app.services.inventory import low_stock
     from app.services.sequences import next_number
-    from sqlalchemy import select
-    from decimal import Decimal
 
     n = 0
     with SessionLocal() as db:
@@ -257,10 +266,11 @@ def warranty_alerts() -> int:
     """Equipo instalado que cumple 11 meses -> aviso de garantia proxima a vencer."""
     from datetime import date, timedelta
 
+    from sqlalchemy import select
+
     from app.core.db import SessionLocal
     from app.models import Customer, CustomerAsset, Tenant, TenantUser
     from app.services.mail import queue_email
-    from sqlalchemy import select
 
     n = 0
     with SessionLocal() as db:
@@ -286,12 +296,119 @@ def warranty_alerts() -> int:
     return n
 
 
+@celery.task(name="support.maintenance_due")
+def maintenance_due() -> int:
+    """Mantenimiento preventivo: "este cliente requiere mantenimiento cada 6 meses". Cuando toca, el ticket
+    se abre solo y el contrato reprograma su proxima fecha. Nadie tiene que acordarse."""
+    from sqlalchemy import select
+
+    from app.core.db import SessionLocal
+    from app.models import Tenant
+    from app.routers.support_desk import due_contracts, open_maintenance
+    from app.services.mail import notify_roles
+
+    n = 0
+    with SessionLocal() as db:
+        for t in db.scalars(select(Tenant).where(Tenant.active)):
+            abiertos = []
+            for c in due_contracts(db, t.id):
+                ticket = open_maintenance(db, c)
+                db.flush()
+                abiertos.append((c, ticket))
+                n += 1
+            if abiertos:
+                filas = "".join(f"<li>{tk.number} · {c.name} · cada {c.every_months} meses</li>" for c, tk in abiertos)
+                notify_roles(
+                    db, t, ("admin", "supervisor"), f"{len(abiertos)} mantenimiento(s) para programar", f"<ul>{filas}</ul>", "support_ticket", abiertos[0][1].id
+                )
+        db.commit()
+    return n
+
+
+@celery.task(name="support.sla_breaches")
+def sla_breaches() -> int:
+    """Ticket sin primera respuesta dentro del plazo -> aviso. Es la promesa que Crimson le puede hacer
+    a Hikvision: sin medirla, "soporte nivel 1" no significa nada."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    from app.core.db import SessionLocal
+    from app.models import SupportTicket, Tenant
+    from app.routers.support_desk import OPEN_STATES
+    from app.services.mail import notify_roles
+
+    n = 0
+    ahora = datetime.now(UTC)
+    with SessionLocal() as db:
+        for t in db.scalars(select(Tenant).where(Tenant.active)):
+            vencidos = [
+                x
+                for x in db.scalars(select(SupportTicket).where(SupportTicket.tenant_id == t.id, SupportTicket.status.in_(OPEN_STATES)))
+                if x.due_at and not x.first_reply_at and (x.due_at if x.due_at.tzinfo else x.due_at.replace(tzinfo=UTC)) < ahora
+            ]
+            if not vencidos:
+                continue
+            filas = "".join(f"<li>{x.number} · {x.subject} · prioridad {x.priority}</li>" for x in vencidos[:20])
+            notify_roles(
+                db, t, ("admin", "supervisor"), f"{len(vencidos)} ticket(s) sin primera respuesta", f"<ul>{filas}</ul>", "support_ticket", vencidos[0].id
+            )
+            n += len(vencidos)
+        db.commit()
+    return n
+
+
+@celery.task(name="crm.stale_quotes")
+def stale_quotes() -> int:
+    """Cotizacion enviada hace 5 dias sin respuesta -> se le avisa a quien la hizo. Textual de Andres:
+    "cotizacion lleva cinco días sin seguimiento, que se le avise a la vendedora"."""
+    from datetime import date, timedelta
+
+    from sqlalchemy import select
+
+    from app.core.db import SessionLocal
+    from app.models import Customer, Quote, Tenant, User
+    from app.services.mail import queue_email
+
+    n = 0
+    corte = date.today() - timedelta(days=5)
+    with SessionLocal() as db:
+        for t in db.scalars(select(Tenant).where(Tenant.active)):
+            frias = db.scalars(select(Quote).where(Quote.tenant_id == t.id, Quote.status == "enviada", Quote.issue_date <= corte)).all()
+            por_persona: dict[int, list] = {}
+            for q in frias:
+                por_persona.setdefault(q.created_by or 0, []).append(q)
+            for uid, items in por_persona.items():
+                u = db.get(User, uid) if uid else None
+                if not u or not u.email:
+                    continue
+                filas = "".join(
+                    f"<li><b>{q.number}</b> · {(db.get(Customer, q.customer_id).name if q.customer_id else 'sin cliente')} · {q.currency} {q.total:,.0f} · enviada el {q.issue_date}</li>"
+                    for q in items[:20]
+                )
+                queue_email(
+                    db,
+                    t,
+                    u.email,
+                    f"{len(items)} cotizaciones sin respuesta",
+                    f"<p>Llevan más de 5 días enviadas:</p><ul>{filas}</ul><p>Una llamada a tiempo es la diferencia.</p>",
+                    "quote",
+                    items[0].id,
+                )
+                n += len(items)
+        db.commit()
+    return n
+
+
 celery.conf.beat_schedule = {
     "poll-inboxes": {"task": "reception.poll_inboxes", "schedule": crontab(minute="*/15")},
     "expire-support": {"task": "support.expire_grants", "schedule": crontab(minute=5)},
     "stale-followups": {"task": "crm.stale_followups", "schedule": crontab(hour=7, minute=30, day_of_week="mon-fri")},
     "low-stock-requests": {"task": "inventory.low_stock_requests", "schedule": crontab(hour=6, minute=45)},
     "warranty-alerts": {"task": "assets.warranty_alerts", "schedule": crontab(hour=7, minute=0, day_of_week="mon")},
+    "maintenance-due": {"task": "support.maintenance_due", "schedule": crontab(hour=6, minute=30)},
+    "sla-breaches": {"task": "support.sla_breaches", "schedule": crontab(minute=0)},
+    "stale-quotes": {"task": "crm.stale_quotes", "schedule": crontab(hour=7, minute=45, day_of_week="mon-fri")},
     "reminders": {"task": "sales.reminders", "schedule": crontab(hour=8, minute=0)},
     "daily-close": {"task": "sales.daily_close_email", "schedule": crontab(hour=21, minute=0)},
     "run-recurrences": {"task": "sales.run_recurrences", "schedule": crontab(hour=5, minute=0)},

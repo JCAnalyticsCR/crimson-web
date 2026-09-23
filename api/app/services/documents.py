@@ -224,6 +224,10 @@ def add_payment(db: Session, tenant_id: int, user_id: int | None, inv: Invoice, 
     recompute_balance(inv)
     db.flush()
     audit(db, tenant_id, user_id, "pay", "invoice", inv.id, {"payment_id": p.id, "amount": str(data.amount), "kind": data.kind})
+    if p.status == "confirmado" and p.kind != "reembolso":
+        from ..routers.support_desk import accrue_for_payment  # import local: el router ya importa de aqui
+
+        accrue_for_payment(db, p)  # "venta cobrada -> comision correspondiente"
     return p
 
 

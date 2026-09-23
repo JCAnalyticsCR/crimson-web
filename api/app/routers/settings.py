@@ -44,6 +44,9 @@ DEFAULTS = {
     "default_margin_pct": 35,  # margen con el que se sugiere el precio de venta desde el costo
     "labor_day_cost": 25000,  # costo interno por tecnico por dia
     "travel_cost": 35000,  # transporte estimado por trabajo
+    "fuel_cost_per_km": 0,  # si se cobra por kilometro, el transporte se calcula con esto
+    "quote_approval_amount": 2000000,  # cotizacion por encima -> aprobacion
+    "min_margin_pct": 25,  # margen por debajo -> aprobacion
 }
 
 
@@ -67,6 +70,9 @@ class SettingsIn(BaseModel):
     default_margin_pct: float | None = Field(None, ge=0, le=95)
     labor_day_cost: float | None = Field(None, ge=0)
     travel_cost: float | None = Field(None, ge=0)
+    fuel_cost_per_km: float | None = Field(None, ge=0)
+    quote_approval_amount: float | None = Field(None, ge=0)
+    min_margin_pct: float | None = Field(None, ge=0, le=95)
 
 
 @router.get("")

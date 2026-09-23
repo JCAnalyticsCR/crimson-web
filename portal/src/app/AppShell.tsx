@@ -24,6 +24,8 @@ export const NAV: { group: string; items: NavItem[] }[] = [
   ]},
   { group: "Técnico", items: [
     { to: "/levantamientos", label: "Levantamientos", icon: I.ruler, need: "field.ver" },
+    { to: "/tickets", label: "Soporte", icon: I.life, need: "support_desk.ver" },
+    { to: "/mantenimientos", label: "Mantenimientos", icon: I.refresh, need: "support_desk.ver" },
     { to: "/activos", label: "Activos del cliente", icon: I.shield, need: "assets.ver" },
   ]},
   { group: "Catálogo", items: [
@@ -37,6 +39,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
   ]},
   { group: "Administración", items: [
     { to: "/compras", label: "Compras", icon: I.upload, need: "purchases.ver" },
+    { to: "/comisiones", label: "Comisiones", icon: I.trend, need: "commissions.ver" },
     { to: "/contabilidad", label: "Contabilidad", icon: I.accounting, need: "accounting.ver" },
     { to: "/recepcion", label: "Recepción XML", icon: I.bell, need: "accounting.ver" },
     { to: "/conciliacion", label: "Conciliación", icon: I.bank, need: "accounting.ver" },

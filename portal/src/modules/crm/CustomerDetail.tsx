@@ -10,9 +10,10 @@ type Ev = { at: string; kind: string; title: string; amount?: string; currency?:
 type Asset = { id: number; name: string; model: string | null; serial: string | null; location: string | null; installed_at: string | null; warranty_until: string | null; warranty_days: number | null };
 type Proj = { id: number; number: string; name: string; status: string; end_date: string | null };
 type Opp = { id: number; number: string; title: string; status: string; amount: string; next_action_date: string | null };
+type Tick = { id: number; number: string; subject: string; kind: string; status: string; hours: string; billable: boolean; amount: string; created_at: string };
 type Overview = {
   customer: Cust; kpis: { billed: string; due: string; invoices: number; quotes: number; last_purchase: string | null; overdue: number }; timeline: Ev[];
-  assets?: Asset[]; projects?: Proj[]; opportunities?: Opp[];
+  assets?: Asset[]; projects?: Proj[]; opportunities?: Opp[]; tickets?: Tick[];
 };
 type Contact = { id?: number; name: string; role: string; email: string; phone: string; receives_invoices: boolean };
 
@@ -109,6 +110,24 @@ export default function CustomerDetail() {
             </Card>
           )}
         </div>
+      )}
+
+      {!!ov.tickets?.length && (
+        /* "Si se les ha hecho soporte técnico a ellos y el costo que tienen esos soportes." */
+        <Card title={`Soporte · ${ov.tickets.length}`} flush extra={<Link className="btn btn--ghost btn--sm" to={`/tickets?cliente=${c.id}`}>Ver tickets</Link>}>
+          <table className="table">
+            <thead><tr><th>Número</th><th>Asunto</th><th>Tipo</th><th className="num">Horas</th><th className="num">Cobrado</th><th>Estado</th></tr></thead>
+            <tbody>{ov.tickets.map((t) => (
+              <tr key={t.id}>
+                <td className="mono muted">{t.number}</td><td style={{ fontWeight: 600 }}>{t.subject}</td>
+                <td className="muted" style={{ textTransform: "capitalize" }}>{t.kind}</td>
+                <td className="num mono">{Number(t.hours || 0)}</td>
+                <td className="num money">{t.billable ? fmtMoney(t.amount, c.currency) : <span className="muted">garantía</span>}</td>
+                <td><Badge status={t.status} /></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </Card>
       )}
 
       {!!ov.assets?.length && (
