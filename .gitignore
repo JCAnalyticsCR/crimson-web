@@ -18,7 +18,17 @@ portal/tsconfig.tsbuildinfo
 # Material del cliente y grabaciones que NO van al repositorio (este repo es publico).
 # Solo la raiz: los videos del sitio viven en docs/video y si estan versionados.
 /*.mp4
+/*.jpg
+/*.jpeg
+/*.png
+/*.webp
+/WhatsApp*
 /*.mov
 /*.xlsx
 /*.pdf
 /notas*.txt
+
+# Material crudo del cliente (fotos/videos de WhatsApp). Algunos traen credenciales
+# visibles en pantalla de los equipos. Solo entran al repo las versiones ya procesadas
+# y revisadas que viven en docs/assets/.
+imagenes-videos/

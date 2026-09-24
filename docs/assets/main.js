@@ -549,4 +549,33 @@
   // Feedback antes del salto a WhatsApp (en iOS tarda ~1 s)
   const waBtn = $('#waBtn');
   waBtn?.addEventListener('click', () => { const s = waBtn.querySelector('span'); if (s) s.textContent = 'Abriendo WhatsApp…'; setTimeout(() => s && (s.textContent = 'Escribinos por WhatsApp'), 2500); });
+
+  /* ---------- Muro de obra ----------
+     Dos observers a proposito: uno decide CUANDO descargar (la ficha se acerca) y otro
+     CUANDO reproducir (la ficha de verdad se ve). Con uno solo o se descarga de mas, o
+     los clips corren fuera de cuadro gastando bateria. Bajo reduced-motion no se descarga
+     ni un byte de video: se queda el poster, que ya cuenta lo mismo. */
+  const clips = $$('.obra__media[data-src]');
+  if (clips.length && !reduced) {
+    const carga = new IntersectionObserver(entries => entries.forEach(en => {
+      if (!en.isIntersecting) return;
+      const v = en.target;
+      v.poster = v.dataset.poster; v.src = v.dataset.src; delete v.dataset.src; v.load();
+      carga.unobserve(v);
+    }), { rootMargin: '50%' });
+
+    // Quien esta a la vista se guarda aparte: al volver de otra pestana hay que reanudar
+    // justo a esos, porque el observer no vuelve a disparar si la interseccion no cambio.
+    const aLaVista = new Set();
+    const play = v => v.play?.().catch(() => {}); // iOS puede negar el autoplay: queda el poster y ya
+    const juega = new IntersectionObserver(entries => entries.forEach(en => {
+      const v = en.target;
+      if (en.isIntersecting) { aLaVista.add(v); play(v); } else { aLaVista.delete(v); v.pause?.(); }
+    }), { threshold: .45 });
+
+    clips.forEach(v => { carga.observe(v); juega.observe(v); });
+    document.addEventListener('visibilitychange', () => {
+      document.hidden ? clips.forEach(v => v.pause?.()) : aLaVista.forEach(play);
+    });
+  }
 })();
