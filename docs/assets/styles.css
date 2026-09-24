@@ -854,11 +854,11 @@ section{padding:var(--space) var(--pad)}
 .obra__kicker{display:inline-flex;align-items:center;gap:8px;color:var(--crimson-dark)}
 .obra__kicker i{width:6px;height:6px;border-radius:50%;background:var(--crimson);flex:none}
 .obra__lead{margin:0;font-size:15.5px;opacity:.72;max-width:52ch}
-.obra__wall{display:flex;gap:14px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;
+.obra__wall{display:flex;gap:14px;justify-content:safe center;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;
   scroll-padding-inline:2px;padding-bottom:4px;scrollbar-width:none;-webkit-overflow-scrolling:touch;
   overscroll-behavior-x:contain}
 .obra__wall::-webkit-scrollbar{display:none}
-.obra__tile{flex:0 0 clamp(210px,17.5vw,252px);aspect-ratio:9/16;min-height:0;scroll-snap-align:start}
+.obra__tile{flex:0 0 clamp(210px,19vw,272px);aspect-ratio:9/16;min-height:0;scroll-snap-align:start}
 .obra__media{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;
   filter:contrast(1.05) saturate(.88)}
 .obra__osd{position:absolute;top:0;left:0;right:0;z-index:3;padding:15px 17px 28px;
