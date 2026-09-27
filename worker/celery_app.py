@@ -327,33 +327,19 @@ def maintenance_due() -> int:
 
 @celery.task(name="support.sla_breaches")
 def sla_breaches() -> int:
-    """Ticket sin primera respuesta dentro del plazo -> aviso. Es la promesa que Crimson le puede hacer
-    a Hikvision: sin medirla, "soporte nivel 1" no significa nada."""
-    from datetime import UTC, datetime
-
+    """Atrasos de SLA (primera respuesta Y resolucion) -> aviso a admin/supervisor y al tecnico asignado.
+    Es la promesa que Crimson le puede hacer a Hikvision: sin medirla, "soporte nivel 1" no significa nada.
+    Cada ticket avisa una sola vez por plazo (ver app/services/sla.avisar_atrasos)."""
     from sqlalchemy import select
 
     from app.core.db import SessionLocal
-    from app.models import SupportTicket, Tenant
-    from app.routers.support_desk import OPEN_STATES
-    from app.services.mail import notify_roles
+    from app.models import Tenant
+    from app.services.sla import avisar_atrasos
 
     n = 0
-    ahora = datetime.now(UTC)
     with SessionLocal() as db:
         for t in db.scalars(select(Tenant).where(Tenant.active)):
-            vencidos = [
-                x
-                for x in db.scalars(select(SupportTicket).where(SupportTicket.tenant_id == t.id, SupportTicket.status.in_(OPEN_STATES)))
-                if x.due_at and not x.first_reply_at and (x.due_at if x.due_at.tzinfo else x.due_at.replace(tzinfo=UTC)) < ahora
-            ]
-            if not vencidos:
-                continue
-            filas = "".join(f"<li>{x.number} · {x.subject} · prioridad {x.priority}</li>" for x in vencidos[:20])
-            notify_roles(
-                db, t, ("admin", "supervisor"), f"{len(vencidos)} ticket(s) sin primera respuesta", f"<ul>{filas}</ul>", "support_ticket", vencidos[0].id
-            )
-            n += len(vencidos)
+            n += avisar_atrasos(db, t)
         db.commit()
     return n
 

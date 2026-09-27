@@ -13,7 +13,9 @@ type Ticket = {
   id: number; number: string; subject: string; kind: string; channel: string | null; level: number; priority: string; status: string;
   customer_id: number | null; customer: string | null; asset_id: number | null; asset: string | null; project_id: number | null;
   work_order_id: number | null; assigned_to: number | null; assigned: string | null; due_at: string | null; first_reply_at: string | null;
-  resolved_at: string | null; sla_vencido: boolean; hours: string; billable: boolean; amount: string; tags: string[]; created_at: string;
+  resolved_at: string | null; sla_vencido: boolean; resolve_due_at: string | null; resolucion_vencida: boolean;
+  contact?: Record<string, string | null>;
+  sla: { respuesta_h: number | null; resolucion_h: number | null; origen: string | null; origen_label: string; contrato: string | null } | null; hours: string; billable: boolean; amount: string; tags: string[]; created_at: string;
   description?: string | null; solution?: string | null; photos?: string[]; notes?: Note[];
 };
 type Meta = { kinds: string[]; states: string[]; priorities: string[]; channels: string[]; sla_horas: Record<string, number>; agents: { id: number; name: string }[]; abiertos: number; can_see_all: boolean };
@@ -148,6 +150,7 @@ export default function Tickets() {
           <div className="eco" style={{ marginBottom: 14 }}>
             <div className="eco__box"><span className="meta">Estado</span><b style={{ fontSize: 15 }}>{ESTADO[open.status]?.label || open.status}</b></div>
             <div className={`eco__box ${open.sla_vencido ? "is-bad" : ""}`}><span className="meta">Primera respuesta</span><b style={{ fontSize: 15 }}>{open.first_reply_at ? cuando(open.first_reply_at) : `antes de ${cuando(open.due_at)}`}</b></div>
+            <div className={`eco__box ${open.resolucion_vencida ? "is-bad" : ""}`}><span className="meta">Resolución</span><b style={{ fontSize: 15 }}>{open.resolved_at ? cuando(open.resolved_at) : open.resolve_due_at ? `antes de ${cuando(open.resolve_due_at)}` : "—"}</b></div>
             <div className="eco__box"><span className="meta">Horas</span><b>{Number(open.hours || 0)}</b></div>
             <div className="eco__box"><span className="meta">{open.billable ? "Se cobra" : "Sin costo"}</span><b className="money">{open.billable ? fmtMoney(open.amount) : "—"}</b></div>
           </div>
@@ -155,6 +158,17 @@ export default function Tickets() {
             {KIND[open.kind] || open.kind} · nivel {open.level} · {open.channel || "sin canal"} · {open.customer || "sin cliente"}
             {open.asset ? ` · equipo: ${open.asset}` : ""} · {open.assigned || "sin responsable"}
             {allows("support_desk.editar") && <button className="btn btn--ghost btn--sm" style={{ marginLeft: 8 }} onClick={() => setForm({ id: open.id, subject: open.subject, customer_id: open.customer_id ? String(open.customer_id) : "", customer_name: open.customer || "", kind: open.kind, channel: open.channel || "", level: open.level, priority: open.priority, description: open.description || "", assigned_to: open.assigned_to ? String(open.assigned_to) : "", billable: open.billable })}>Editar</button>}
+          </p>
+          {/* reportado desde la pagina web sin ficha de cliente: los datos de contacto viven en el ticket */}
+          {open.channel === "web" && open.contact && (
+            <p style={{ fontSize: 13.5, background: "var(--bg-2)", padding: "8px 14px", borderRadius: 10 }}>
+              <b>Reporte web</b> · {[open.contact.name, open.contact.company, open.contact.phone, open.contact.email, open.contact.location].filter(Boolean).join(" · ")}
+              {open.contact.severidad_percibida ? ` · severidad indicada: ${open.contact.severidad_percibida}` : ""}
+            </p>
+          )}
+          {/* que SLA aplico y de donde salio: si el cliente reclama, esto es lo que se le prometio */}
+          <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+            SLA: {open.sla ? <>{open.sla.respuesta_h ?? "—"} h respuesta · {open.sla.resolucion_h ?? "—"} h resolución · <b>{open.sla.origen_label}{open.sla.contrato ? ` ${open.sla.contrato}` : ""}</b></> : "sin SLA registrado (ticket anterior al cambio; se calcula al editarlo)"}
           </p>
           {open.description && <p style={{ fontSize: 14, background: "var(--bg-2)", padding: "10px 14px", borderRadius: 10 }}>{open.description}</p>}
           {open.solution && <p style={{ fontSize: 14, background: "var(--ok-soft, rgba(14,159,110,.08))", border: "1px solid var(--ok)", padding: "10px 14px", borderRadius: 10 }}><b>Solución:</b> {open.solution}</p>}

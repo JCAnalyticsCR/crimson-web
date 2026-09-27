@@ -37,10 +37,12 @@ def db_session():
 
 @pytest.fixture
 def client(db_session):
-    from app.core.ratelimit import login_limiter, public_limiter
+    from app.core.ratelimit import incident_global_limiter, incident_limiter, login_limiter, public_limiter
 
     login_limiter.reset()
     public_limiter.reset()
+    incident_limiter.reset()
+    incident_global_limiter.reset()
     app = create_app()
     app.dependency_overrides[get_db] = lambda: db_session
     return TestClient(app)

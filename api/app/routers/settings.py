@@ -6,7 +6,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,7 @@ from ..core.deps import ASSIGNABLE_ROLES, Principal, require
 from ..core.security import hash_password, hash_token, password_is_strong
 from ..models import BankAccount, BillingGroup, EmailOutbox, Invitation, PaymentGatewayConfig, Tenant, TenantUser, User
 from ..services.mail import queue_email
+from ..services.sla import SLA_DEFECTO, normalizar
 
 router = APIRouter(prefix="/settings", tags=["ajustes"])
 
@@ -47,6 +48,8 @@ DEFAULTS = {
     "fuel_cost_per_km": 0,  # si se cobra por kilometro, el transporte se calcula con esto
     "quote_approval_amount": 2000000,  # cotizacion por encima -> aprobacion
     "min_margin_pct": 25,  # margen por debajo -> aprobacion
+    # SLA de soporte por prioridad (horas). Un contrato con SLA propio lo reemplaza para ese cliente.
+    "sla": SLA_DEFECTO,
 }
 
 
@@ -73,6 +76,18 @@ class SettingsIn(BaseModel):
     fuel_cost_per_km: float | None = Field(None, ge=0)
     quote_approval_amount: float | None = Field(None, ge=0)
     min_margin_pct: float | None = Field(None, ge=0, le=95)
+    sla: dict | None = None
+
+    @field_validator("sla")
+    @classmethod
+    def _sla(cls, v):
+        if v is None:
+            return None
+        n = normalizar(v)
+        # se exige la tabla completa: un SLA a medias deja prioridades midiendose contra algo que nadie eligio
+        if not n or len(n) != len(SLA_DEFECTO):
+            raise ValueError("SLA invalido: las 4 prioridades con horas de respuesta y resolucion (1 a 2160)")
+        return n
 
 
 @router.get("")

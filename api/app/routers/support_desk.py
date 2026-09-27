@@ -15,7 +15,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
@@ -37,6 +37,7 @@ from ..models import (
     User,
     WorkOrder,
 )
+from ..services import sla as slasvc
 from ..services.documents import audit, local_date
 from ..services.mail import notify_roles, queue_email
 from ..services.sequences import next_number
@@ -45,9 +46,15 @@ from ..services.totals import d
 router = APIRouter(tags=["soporte"])
 
 OPEN_STATES = ("nuevo", "asignado", "en_proceso", "esperando_cliente")
-# Cuanto tiempo damos para la primera respuesta segun la prioridad. Es el compromiso que Crimson
-# le puede ofrecer a Hikvision por escrito; sin esto "soporte nivel 1" no significa nada medible.
-SLA_HORAS = {"critica": 2, "alta": 4, "media": 8, "baja": 24}
+# Los SLA ya no viven aqui: salen de services/sla.py (contrato > ajustes de la empresa > defecto).
+# SLA_HORAS queda como el defecto de primera respuesta por compatibilidad con quien lo lea.
+SLA_HORAS = {k: v["respuesta"] for k, v in slasvc.SLA_DEFECTO.items()}
+ORIGEN_SLA = {
+    "contrato": "Contrato",
+    "empresa": "Ajustes de la empresa",
+    "defecto": "Valores por defecto",
+    "preventivo": "Mantenimiento preventivo",
+}
 
 
 def _own(db: Session, tid: int, p: Principal) -> SupportTicket:
@@ -64,7 +71,10 @@ def _out(db: Session, t: SupportTicket, full: bool = True) -> dict:
     u = db.get(User, t.assigned_to) if t.assigned_to else None
     a = db.get(CustomerAsset, t.asset_id) if t.asset_id else None
     ahora = datetime.now(UTC)
-    vencido = bool(t.due_at and not t.first_reply_at and _aware(t.due_at) < ahora and t.status in OPEN_STATES)
+    abierto = t.status in OPEN_STATES
+    vencido = bool(t.due_at and not t.first_reply_at and _aware(t.due_at) < ahora and abierto)
+    resolucion_vencida = bool(t.resolve_due_at and not t.resolved_at and _aware(t.resolve_due_at) < ahora and abierto)
+    s = t.sla or {}
     out = {
         "id": t.id,
         "number": t.number,
@@ -87,7 +97,19 @@ def _out(db: Session, t: SupportTicket, full: bool = True) -> dict:
         "due_at": t.due_at,
         "first_reply_at": t.first_reply_at,
         "resolved_at": t.resolved_at,
+        "resolve_due_at": t.resolve_due_at,
         "sla_vencido": vencido,
+        "resolucion_vencida": resolucion_vencida,
+        # que SLA aplico y de donde salio, para mostrarlo en el ticket
+        "sla": {
+            "respuesta_h": s.get("respuesta"),
+            "resolucion_h": s.get("resolucion"),
+            "origen": s.get("origen"),
+            "origen_label": ORIGEN_SLA.get(s.get("origen"), "Sin SLA registrado"),
+            "contrato": s.get("contrato"),
+        }
+        if s
+        else None,
         "hours": t.hours,
         "billable": t.billable,
         "amount": t.amount,
@@ -96,6 +118,7 @@ def _out(db: Session, t: SupportTicket, full: bool = True) -> dict:
     }
     if full:
         out["description"] = t.description
+        out["contact"] = t.contact or {}
         out["solution"] = t.solution
         out["photos"] = t.photos
         out["notes"] = [
@@ -166,7 +189,7 @@ def ticket_create(data: TicketIn, p: Principal = Depends(require("support_desk",
     number, _ = next_number(db, p.tenant.id, "TCK")
     t = SupportTicket(tenant_id=p.tenant.id, number=number, opened_by=p.user.id, **data.model_dump())
     t.status = "asignado" if t.assigned_to else "nuevo"
-    t.due_at = datetime.now(UTC) + timedelta(hours=SLA_HORAS.get(t.priority, 8))
+    slasvc.aplicar(db, p.tenant, t, datetime.now(UTC))
     db.add(t)
     db.flush()
     audit(db, p.tenant.id, p.user.id, "create", "support_ticket", t.id, {"prioridad": t.priority}, ip=p.ip)
@@ -184,8 +207,14 @@ def ticket_get(tid: int, p: Principal = Depends(require("support_desk", "ver")),
 def ticket_update(tid: int, data: TicketIn, p: Principal = Depends(require("support_desk", "editar")), db: Session = Depends(get_db)):
     t = _own(db, tid, p)
     antes = t.assigned_to
+    clave_sla = (t.priority, t.customer_id)
     for k, v in data.model_dump().items():
+        if k in ("contact", "tags") and not v:
+            continue  # el portal manda {} / []: no borrar los datos de quien reporto desde la web
         setattr(t, k, v)
+    if (t.priority, t.customer_id) != clave_sla or not t.sla:
+        # cambio la prioridad o el cliente: el plazo se recalcula desde que entro el ticket, no desde ahora
+        slasvc.aplicar(db, p.tenant, t)
     if t.assigned_to and t.status == "nuevo":
         t.status = "asignado"
     if t.assigned_to and t.assigned_to != antes:
@@ -303,8 +332,9 @@ def ticket_meta(p: Principal = Depends(require("support_desk", "ver")), db: Sess
         "kinds": ["soporte", "garantia", "mantenimiento", "visita", "instalacion", "consulta"],
         "states": ["nuevo", "asignado", "en_proceso", "esperando_cliente", "resuelto", "cerrado"],
         "priorities": ["baja", "media", "alta", "critica"],
-        "channels": ["whatsapp", "correo", "llamada", "presencial", "portal"],
-        "sla_horas": SLA_HORAS,
+        "channels": ["whatsapp", "correo", "llamada", "presencial", "portal", "web"],
+        "sla_horas": {k: v["respuesta"] for k, v in slasvc.sla_tenant(p.tenant).items()},
+        "sla": slasvc.sla_tenant(p.tenant),
         "agents": agentes,
         "abiertos": abiertos,
         "can_see_all": p.can("support_desk", "ver_todo"),
@@ -317,7 +347,8 @@ def _avisar_asignado(db: Session, p: Principal, t: SupportTicket, nuevo: bool = 
         f"<p><b>{html.escape(t.subject)}</b> · prioridad {t.priority}</p>"
         f"<p>Cliente: {html.escape((db.get(Customer, t.customer_id).name if t.customer_id else '') or 'sin ficha')}</p>"
         f"{f'<p>{html.escape(t.description)}</p>' if t.description else ''}"
-        f"<p>Primera respuesta antes de {SLA_HORAS.get(t.priority, 8)} h.</p>"
+        f"<p>Primera respuesta antes de {(t.sla or {}).get('respuesta', SLA_HORAS.get(t.priority, 8))} h"
+        f" · resolucion antes de {(t.sla or {}).get('resolucion', '?')} h.</p>"
     )
     if u and u.email:
         queue_email(db, p.tenant, u.email, f"Ticket {t.number} · {t.subject[:60]}", cuerpo, "support_ticket", t.id)
@@ -340,6 +371,18 @@ class ContractIn(BaseModel):
     scope: str | None = None
     active: bool = True
     notes: str | None = None
+    # SLA propio: {"critica": {"respuesta": 2, "resolucion": 8}, ...}. Vacio/None = el de la empresa
+    sla: dict | None = None
+
+    @field_validator("sla")
+    @classmethod
+    def _sla(cls, v):
+        if v in (None, {}):
+            return None
+        n = slasvc.normalizar(v)
+        if not n:
+            raise ValueError("SLA invalido: horas de respuesta y resolucion entre 1 y 2160 por prioridad")
+        return n
 
 
 def _contract_out(db: Session, c: MaintenanceContract) -> dict:
@@ -364,6 +407,7 @@ def _contract_out(db: Session, c: MaintenanceContract) -> dict:
         "scope": c.scope,
         "active": c.active,
         "notes": c.notes,
+        "sla": c.sla,
         "dias_para_la_proxima": dias,
     }
 
@@ -425,7 +469,9 @@ def open_maintenance(db: Session, c: MaintenanceContract) -> SupportTicket:
         status="nuevo",
         billable=d(c.amount) > 0,
         amount=c.amount,
+        # preventivo programado: no es una emergencia, se agenda dentro de la semana (no usa el SLA de incidencias)
         due_at=datetime.now(UTC) + timedelta(days=7),
+        sla={"origen": "preventivo", "respuesta": 24 * 7, "resolucion": None, "contrato": c.number, "contrato_id": c.id},
     )
     db.add(t)
     base = c.next_date or date.today()
