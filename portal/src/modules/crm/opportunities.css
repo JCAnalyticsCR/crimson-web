@@ -1,0 +1,42 @@
+/* Oportunidades: arrastre en el embudo, detalle con bitacora lateral y alta rapida de cliente.
+   Archivo propio del modulo para no tocar field.css (levantamientos). */
+
+.opp-hint { font-size: 12.5px; margin: 0 0 8px; }
+.opp { position: relative; }
+.opp[draggable="true"] { cursor: grab; }
+.opp[draggable="true"]:active { cursor: grabbing; }
+.opp.is-dragging { opacity: .45; }
+.opp:focus-visible { outline: 2px solid var(--crimson); outline-offset: 2px; }
+.board__col { transition: background .15s, border-color .15s; }
+.board__col.is-over { border-color: var(--crimson); background: color-mix(in srgb, var(--crimson) 8%, var(--bg-2)); }
+
+/* Respaldo tactil del arrastre: solo en pantallas sin puntero fino */
+.opp__move { display: none; margin-top: 8px; height: 32px; font-size: 12.5px; }
+@media (hover: none), (pointer: coarse) {
+  .opp__move { display: block; width: 100%; }
+}
+
+button.opp-eco-link { text-align: left; font: inherit; color: inherit; cursor: pointer; }
+button.opp-eco-link:hover { border-color: var(--crimson); }
+
+/* Detalle: bitacora a la derecha en escritorio, arriba en el celular */
+.opp-detail { display: grid; grid-template-columns: minmax(0, 1fr) 290px; grid-template-areas: "main log"; gap: 16px; align-items: start; }
+.opp-main { grid-area: main; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.opp-log { grid-area: log; background: var(--bg-2); border: 1px solid var(--hair); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; max-height: 60dvh; overflow: auto; position: sticky; top: 0; }
+.opp-log__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.opp-log__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.opp-log__list li { border-left: 2px solid var(--hair-2); padding-left: 10px; }
+.opp-log__list li:first-child { border-left-color: var(--crimson); }
+.opp-log__list .meta { display: block; margin-bottom: 2px; }
+.opp-log__list p { margin: 0; font-size: 13px; color: var(--text-2); white-space: pre-wrap; }
+.opp-next { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 13.5px; }
+.opp-foot__links { display: flex; gap: 8px; flex-wrap: wrap; margin-right: auto; }
+
+.opp-newcust { border: 1px dashed var(--crimson); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.opp-newcust__head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
+.lookup__create b { color: var(--crimson); }
+
+@media (max-width: 760px) {
+  .opp-detail { grid-template-columns: 1fr; grid-template-areas: "log" "main"; }
+  .opp-log { position: static; max-height: 40dvh; }
+}

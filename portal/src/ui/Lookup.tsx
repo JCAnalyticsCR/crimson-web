@@ -5,12 +5,15 @@ import { api } from "../lib/api";
 
 export type LookupItem = { id: number; label: string; hint?: string };
 
-export function Lookup({ value, placeholder, onSelect, fetcher, disabled }: {
+export function Lookup({ value, placeholder, onSelect, fetcher, disabled, onCreate, createLabel }: {
   value: string;
   placeholder?: string;
   onSelect: (item: LookupItem | null, text: string) => void;
   fetcher: (q: string) => Promise<LookupItem[]>;
   disabled?: boolean;
+  /** Si viene, la lista ofrece "+ Crear «texto»" al final (crear sin salir del formulario). */
+  onCreate?: (text: string) => void;
+  createLabel?: string;
 }) {
   const [text, setText] = useState(value);
   const [items, setItems] = useState<LookupItem[]>([]);
@@ -41,7 +44,7 @@ export function Lookup({ value, placeholder, onSelect, fetcher, disabled }: {
         onFocus={() => setOpen(true)}
         onChange={(e) => { setText(e.target.value); setOpen(true); onSelect(null, e.target.value); }}
       />
-      {open && items.length > 0 && (
+      {open && (items.length > 0 || (onCreate && text.trim().length > 1)) && (
         <ul className="lookup__list">
           {items.slice(0, 12).map((it) => (
             <li key={it.id}>
@@ -50,6 +53,13 @@ export function Lookup({ value, placeholder, onSelect, fetcher, disabled }: {
               </button>
             </li>
           ))}
+          {onCreate && text.trim().length > 1 && !items.some((it) => it.label.toLowerCase() === text.trim().toLowerCase()) && (
+            <li>
+              <button type="button" className="lookup__create" onMouseDown={(e) => e.preventDefault()} onClick={() => { setOpen(false); onCreate(text.trim()); }}>
+                <b>+ {createLabel || "Crear"} «{text.trim()}»</b>
+              </button>
+            </li>
+          )}
         </ul>
       )}
     </div>

@@ -64,7 +64,21 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
         if (!isNew) setDoc(saved);
         return;
       }
-      if (then === "send") { const r = await api<{ status: string; note: string | null }>(`/${path}/${saved.id}/email`, { method: "POST", json: {} }); toast(r.note || `Correo ${r.status}`); }
+      if (then === "send") {
+        /* Solo queda "enviada" (y su oportunidad en "Cotización enviada") si el correo salió de verdad;
+           si quedó simulado o con error, se guarda el documento pero se avisa claro que el cliente no lo recibió. */
+        const r = await api<{ status: string; sent: boolean; to: string; note: string | null }>(`/${path}/${saved.id}/email`, { method: "POST", json: {} });
+        if (!r.sent) {
+          toast(`${isQ ? "Cotización" : "Factura"} ${saved.number} guardada. ${r.note || "El correo no salió."}`, "bad");
+          nav(`/${isQ ? "cotizaciones" : "facturas"}/${saved.id}`, { replace: true });
+          setDoc(saved);
+          return;
+        }
+        toast(`${isQ ? "Cotización" : "Factura"} ${saved.number} enviada a ${r.to}`);
+        nav(`/${isQ ? "cotizaciones" : "facturas"}/${saved.id}`, { replace: true });
+        setDoc({ ...saved, status: saved.status === "creado" ? "enviada" : saved.status });
+        return;
+      }
       if (then === "convert") { const inv = await api<Invoice>(`/quotes/${saved.id}/convert`, { method: "POST" }); toast(`Factura ${inv.number} creada`); nav(`/facturas/${inv.id}`); return; }
       toast(`${isQ ? "Cotización" : "Factura"} ${saved.number} guardada`);
       nav(`/${isQ ? "cotizaciones" : "facturas"}/${saved.id}`, { replace: true });
@@ -175,7 +189,8 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               <div className="meta">Otros ajustes</div>
               <Field label="Orden externa #"><input className="input" value={doc.external_order || ""} disabled={locked} onChange={(e) => setDoc({ ...doc, external_order: e.target.value })} /></Field>
               <Field label="Código de actividad"><select className="select" value={doc.activity_code || ""} disabled={locked} onChange={(e) => setDoc({ ...doc, activity_code: e.target.value })}><option value="">Seleccione…</option><option>6202.0</option><option>4322.0</option></select></Field>
-              <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={!!doc.medical_exemption_card} disabled={locked} onChange={(e) => setDoc({ ...doc, medical_exemption_card: e.target.checked })} />Exoneración médica IVA (tarjeta de crédito)</label>
+              {/* La exoneracion medica no aplica a las cotizaciones de Crimson (pedido de Andres); el campo es compartido y sigue en facturas. */}
+              {!isQ && <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={!!doc.medical_exemption_card} disabled={locked} onChange={(e) => setDoc({ ...doc, medical_exemption_card: e.target.checked })} />Exoneración médica IVA (tarjeta de crédito)</label>}
             </div></div>
           </div>
         </div>
