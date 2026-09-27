@@ -15,14 +15,20 @@ def _quote_to_invoice(client):
     return client.post(f"/quotes/{q['id']}/convert").json(), prods[0]
 
 
-def test_html_pdf_and_email(client, auth):
+def test_html_pdf_and_email(client, auth, monkeypatch):
+    from app.services import mail
+
+    def fake_deliver(m):  # el proveedor acepta el correo
+        m.status, m.provider_id = "enviado", "test-1"
+
+    monkeypatch.setattr(mail, "deliver", fake_deliver)
     inv, _ = _quote_to_invoice(client)
     html = client.get(f"/invoices/{inv['id']}/html")
     assert html.status_code == 200 and inv["number"] in html.text and "Crimson Consulting" in html.text
     pdf = client.get(f"/invoices/{inv['id']}/pdf")
     assert pdf.status_code == 200  # PDF real o HTML de respaldo segun WeasyPrint
     r = client.post(f"/invoices/{inv['id']}/email", json={"message": "Gracias por su compra"})
-    assert r.status_code == 200 and r.json()["status"] in ("simulado", "enviado")
+    assert r.status_code == 200 and r.json()["status"] == "enviado" and r.json()["sent"] is True
     assert client.get(f"/invoices/{inv['id']}").json()["status"] == "enviada"
     out = client.get("/settings/outbox").json()
     assert out and out[0]["entity"] == "invoice"

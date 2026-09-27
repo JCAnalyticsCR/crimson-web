@@ -91,15 +91,27 @@ def doc_send(kind: str, id_: int, data: SendIn, p: Principal = Depends(require("
         d.id,
         [{"name": f"{d.number}.pdf", "kind": kind, "ref": d.id}],
     )
-    if d.status == "creado":
+    # Solo se marca como enviada si el proveedor acepto el correo. Simulado (sin llave de Resend) o error
+    # no cuentan: marcarla enviada haria creer al vendedor que el cliente ya la tiene.
+    sent = m.status == "enviado"
+    if sent and d.status == "creado":
         d.status = "enviada"
+    if sent and not is_inv:
+        from ..models import Opportunity
+
+        for o in db.scalars(select(Opportunity).where(Opportunity.tenant_id == p.tenant.id, Opportunity.quote_id == d.id)):
+            if o.status in ("nuevo", "contactado", "requiere_visita", "levantamiento", "cotizando"):
+                audit(db, p.tenant.id, p.user.id, "status", "opportunity", o.id, {"de": o.status, "a": "enviada"}, ip=p.ip)
+                o.status = "enviada"
     audit(db, p.tenant.id, p.user.id, "send", kind[:-1], d.id, {"to": to, "mail": m.status}, ip=p.ip)
     db.commit()
-    return {
-        "status": m.status,
-        "to": to,
-        "note": "Sin RESEND_API_KEY el correo queda simulado (visible en Ajustes → Correo)." if m.status == "simulado" else None,
-    }
+    if m.status == "simulado":
+        note = "El correo NO salió: no hay servicio de correo configurado (falta la llave de Resend). El documento no se marcó como enviado."
+    elif m.status == "error":
+        note = f"El correo NO salió ({(m.error or 'error del proveedor')[:160]}). El documento no se marcó como enviado."
+    else:
+        note = None
+    return {"status": m.status, "sent": sent, "to": to, "note": note}
 
 
 # ---------- Factura electronica ----------

@@ -129,6 +129,32 @@ def board(p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = 
     }
 
 
+@router.get("/opportunities/pending")
+def pending(
+    everyone: bool = False,
+    p: Principal = Depends(require("crm_pipeline", "ver")),
+    db: Session = Depends(get_db),
+):
+    """Mis pendientes: proximas acciones de hoy y vencidas, de la mas atrasada a la de hoy.
+    Por defecto solo las propias; quien ve todo el embudo puede pedir las de todo el equipo (everyone=true)."""
+    today = date.today()
+    stmt = select(Opportunity).where(
+        Opportunity.tenant_id == p.tenant.id,
+        Opportunity.status.in_(OPEN_STATES),
+        Opportunity.next_action_date.is_not(None),
+        Opportunity.next_action_date <= today,
+    )
+    if not (everyone and p.can("crm_pipeline", "ver_todo")):
+        stmt = stmt.where(Opportunity.owner_id == p.user.id)
+    rows = db.scalars(stmt.order_by(Opportunity.next_action_date, Opportunity.id)).all()
+    out = []
+    for o in rows:
+        item = _out(db, o)
+        item["days_late"] = (today - o.next_action_date).days
+        out.append(item)
+    return out
+
+
 @router.post("/opportunities", status_code=201)
 def create(data: OpportunityIn, p: Principal = Depends(require("crm_pipeline", "crear")), db: Session = Depends(get_db)):
     from ..services.sequences import next_number
@@ -188,9 +214,13 @@ def touch(oid: int, data: TouchIn, p: Principal = Depends(require("crm_pipeline"
         o.next_action = data.next_action
     if data.next_action_date is not None:
         o.next_action_date = data.next_action_date
+    before = o.status
     if data.status:
         o.status = data.status
     audit(db, p.tenant.id, p.user.id, "touch", "opportunity", o.id, {"note": data.note[:120]}, ip=p.ip)
+    if o.status != before:
+        # El arrastre entre columnas del embudo llega por aqui: queda en bitacora (notes) y en auditoria como cambio de etapa
+        audit(db, p.tenant.id, p.user.id, "status", "opportunity", o.id, {"de": before, "a": o.status}, ip=p.ip)
     db.commit()
     return _out(db, o)
 
@@ -214,14 +244,29 @@ def meta(p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = D
     }
 
 
+def sync_amount_from_quote(db: Session, q: Quote) -> None:
+    """El monto de la oportunidad sigue a su cotizacion ligada (o.quote_id).
+
+    Mientras no hay cotizacion el monto es el que se escribio a mano. Cuando hay cotizacion, el monto es su TOTAL
+    (con IVA): es la cifra que el cliente ve y firma, y la misma que ya pone el paso levantamiento -> cotizacion
+    (fieldwork.survey_to_quote). Antes solo se copiaba al crear la cotizacion y al editarla quedaba el monto viejo.
+    Una cotizacion anulada no pisa el monto."""
+    if q.status == "anulada":
+        return
+    for o in db.scalars(select(Opportunity).where(Opportunity.tenant_id == q.tenant_id, Opportunity.quote_id == q.id)):
+        o.amount = d(q.total)
+        o.currency = q.currency or o.currency
+
+
 def stale_followups(db: Session, tenant_id: int, days: int = 5) -> list[Opportunity]:
-    """Oportunidades abiertas con la próxima acción vencida, o sin movimiento en N días (lo usa el worker)."""
+    """Oportunidades abiertas con la próxima acción de hoy o vencida, o sin movimiento en N días (lo usa el worker).
+    Incluye las de hoy para que el correo de la mañana sirva de alerta del día de la acción."""
     from datetime import timedelta
 
     cutoff = datetime.now(UTC) - timedelta(days=days)
     out = []
     for o in db.scalars(select(Opportunity).where(Opportunity.tenant_id == tenant_id, Opportunity.status.in_(OPEN_STATES))):
         last = o.updated_at if o.updated_at.tzinfo else o.updated_at.replace(tzinfo=UTC)
-        if (o.next_action_date and o.next_action_date < date.today()) or last < cutoff:
+        if (o.next_action_date and o.next_action_date <= date.today()) or last < cutoff:
             out.append(o)
     return out

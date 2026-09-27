@@ -209,7 +209,7 @@ def stale_followups() -> int:
                     t,
                     u.email,
                     f"{len(items)} oportunidades esperan seguimiento",
-                    f"<p>Estas oportunidades llevan días sin movimiento:</p><ul>{filas}</ul><p>Abrí el panel y registrá el siguiente paso.</p>",
+                    f"<p>Estas oportunidades tienen la próxima acción para hoy, vencida o llevan días sin movimiento:</p><ul>{filas}</ul><p>Abrí el panel y registrá el siguiente paso.</p>",
                     "opportunity",
                     items[0].id,
                 )

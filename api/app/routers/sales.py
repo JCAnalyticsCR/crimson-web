@@ -160,6 +160,9 @@ def update_quote(qid: int, data: DocumentIn, p: Principal = Depends(require("sal
     svc.apply_document(db, q, data, QuoteLine, p.tenant.id)
     db.flush()  # los totales nuevos son los que miran las reglas de aprobacion
     _hold(db, p, q, chk)
+    from .pipeline import sync_amount_from_quote
+
+    sync_amount_from_quote(db, q)  # la oportunidad ligada toma el total nuevo
     audit(db, p.tenant.id, p.user.id, "update", "quote", q.id, {"discount_pct": str(chk.worst)} if chk.worst else None, ip=p.ip)
     db.commit()
     return _quote_out(db, q)
