@@ -886,3 +886,54 @@ section{padding:var(--space) var(--pad)}
 .alianza__lista li{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
   color:rgba(244,241,238,.62);padding:5px 11px;border:1px solid var(--hair-dark);border-radius:999px}
 @media (max-width:767px){.alianza{flex-direction:column;align-items:flex-start;gap:14px;padding:16px 18px}}
+
+/* ---------- Aliados: logo cuadrado, marca en texto y "que aporta cada aliado" ----------
+   Nodo Latam es un isotipo casi cuadrado: a 30px de alto se leeria como un punto, sube a 38.
+   HAUSET va en texto mientras no haya logo oficial (no se usan logos de terceros). */
+.brands__item img.brands__img--sq{height:38px}
+.brands__name{font-family:var(--mono);font-weight:600;font-size:17px;letter-spacing:.28em;color:rgba(244,241,238,.92)}
+.aportes{flex-direction:column;align-items:stretch;gap:12px;width:100%}
+.aportes__label{color:#8a8a90}
+.aportes__lista{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.aportes__lista>li{display:grid;grid-template-columns:200px 1fr;gap:18px;align-items:baseline;padding:10px 0;border-top:1px solid var(--hair-dark);font-size:14px;line-height:1.5}
+.aportes__lista>li:first-child{border-top:0}
+.aportes__lista>li>b{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#fff}
+.aportes__lista>li>span{color:rgba(244,241,238,.72)}
+.aportes__lista>li.aportes__jc{align-items:center}
+.aportes__jc>img{height:26px;width:auto}
+@media (max-width:767px){
+  .brands__item img.brands__img--sq{height:24px}
+  .brands__name{font-size:11px;letter-spacing:.18em}
+  .aportes__lista>li{grid-template-columns:1fr;gap:4px}
+}
+
+/* ---------- CAM 09 · Soporte especializado ----------
+   Pantalla de decision/trabajo: nada se mueve salvo lo que el usuario toca (solo los reveal comunes). */
+.soporte{background:var(--ink);color:var(--white);border-top:1px solid var(--hair-dark)}
+.soporte__grid{display:grid;grid-template-columns:1.1fr 1fr;gap:64px;align-items:start}
+.soporte__text{display:flex;flex-direction:column;gap:22px}
+.sla{padding:18px 20px;border:1px solid rgba(255,255,255,.12);background:var(--ink-2)}
+.sla .feed__corners{inset:8px}
+.sla__head{display:flex;justify-content:space-between;color:rgba(244,241,238,.6);margin-bottom:8px}
+.sla__lista{list-style:none;margin:0;padding:0}
+.sla__lista li{display:grid;grid-template-columns:92px 1fr auto;gap:14px;align-items:center;padding:11px 0;border-top:1px solid var(--hair-dark);font-size:14px}
+.sla__lista li:first-child{border-top:0}
+.sla__p{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;padding:4px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.2);justify-self:start}
+.sla__p--critica{background:var(--crimson);border-color:var(--crimson);color:#fff}
+.sla__p--alta{border-color:var(--crimson);color:#fff}
+.sla__d{color:rgba(244,241,238,.72)}
+.sla__lista b{font-family:var(--mono);font-size:18px;font-variant-numeric:tabular-nums;color:#fff}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+#incidentForm{position:relative}
+.form__status{margin:0;min-height:1.4em;font-size:14px;line-height:1.5;text-align:center;color:rgba(244,241,238,.8)}
+.form__status.is-ok{color:#fff}
+.form__status.is-ok b{font-family:var(--mono);color:var(--crimson);letter-spacing:.06em}
+.form__status.is-bad{color:#ff8a98}
+.form__note a{color:#fff;border-bottom:1px solid rgba(226,35,58,.7)}
+#incidentForm button[disabled]{opacity:.6;cursor:progress}
+@media (max-width:900px){.soporte__grid{grid-template-columns:1fr;gap:32px}}
+@media (max-width:767px){
+  .sla__lista li{grid-template-columns:78px 1fr auto;gap:10px;font-size:13px}
+  #incidentForm .form__row{grid-template-columns:1fr}
+  #incidentForm{padding:22px 18px}
+}

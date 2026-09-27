@@ -579,3 +579,67 @@
     });
   }
 })();
+
+/* ---------- CAM 09 · Reporte de incidencias ----------
+   POST al API (URL en #site-config, un solo lugar). No descarga nada hasta que la persona envia.
+   El API valida todo de nuevo: esto solo evita un viaje inutil y da mensajes claros. */
+(() => {
+  const form = document.getElementById('incidentForm');
+  if (!form) return;
+  const status = document.getElementById('incidentStatus');
+  const btn = form.querySelector('button[type=submit]');
+  const label = btn.querySelector('span');
+  let cfg = {};
+  try { cfg = JSON.parse(document.getElementById('site-config').textContent); } catch { /* sin config: cae al error con WhatsApp */ }
+  const local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  // en localhost se puede apuntar a otro puerto con ?api=http://127.0.0.1:8010 (solo desarrollo)
+  const apiDev = local && new URLSearchParams(location.search).get('api');
+  const api = ((local && (apiDev || cfg.apiLocal)) || cfg.api || '').replace(/\/$/, '');
+  const wa = cfg.waLink || 'https://wa.me/message/5YQKXZFUPHWLA1';
+  const say = (html, cls) => { status.className = 'form__status' + (cls ? ' ' + cls : ''); status.innerHTML = html; };
+  const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const aviso = (msg) => say(esc(msg), 'is-bad'); // dato faltante: se corrige en el formulario
+  const falla = (msg) => say(`${esc(msg)} Podés reportarlo por <a href="${esc(wa)}" target="_blank" rel="noopener">WhatsApp</a>.`, 'is-bad');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(form);
+    const v = (k) => String(f.get(k) || '').trim();
+    const body = {
+      name: v('name'), company: v('company') || null, phone: v('phone') || null, email: v('email') || null,
+      kind: v('kind') || 'falla', severity: v('severity') || 'media', description: v('description'),
+      location: v('location') || null, website: v('website') || null,
+    };
+    if (body.name.length < 2) { form.elements.name.focus(); return aviso('Falta tu nombre.'); }
+    if (!body.phone && !body.email) { form.elements.phone.focus(); return aviso('Dejanos un teléfono o un correo para contactarte.'); }
+    if (body.email && !form.elements.email.checkValidity()) { form.elements.email.focus(); return aviso('El correo no parece válido.'); }
+    if (body.description.length < 10) { form.elements.description.focus(); return aviso('Contanos un poco más de lo que pasa (mínimo 10 caracteres).'); }
+    if (!api) return falla('El reporte en línea no está disponible en este momento.');
+
+    btn.disabled = true; label.textContent = 'Enviando…'; say('Enviando el reporte…');
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 15000);
+    try {
+      const r = await fetch(`${api}/public/incidents`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: ctrl.signal, credentials: 'omit',
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) {
+        form.reset();
+        say(data.number
+          ? `Recibimos tu reporte. Tu número de ticket es <b>${esc(data.number)}</b>. Te contactamos según el nivel de atención.`
+          : 'Recibimos tu reporte. Te contactamos pronto.', 'is-ok');
+      } else if (r.status === 429) {
+        falla('Recibimos varios reportes seguidos desde tu conexión. Esperá unos minutos.');
+      } else if (r.status === 422) {
+        const campos = (data.detail && data.detail.errors || []).map((x) => x.campo).filter(Boolean).join(', ');
+        falla(`Revisá los datos del formulario${campos ? ` (${campos})` : ''}.`);
+      } else {
+        falla('No pudimos registrar el reporte.');
+      }
+    } catch {
+      falla('No hay conexión con el sistema de soporte.');
+    } finally {
+      clearTimeout(t); btn.disabled = false; label.textContent = 'Enviar reporte';
+    }
+  });
+})();
