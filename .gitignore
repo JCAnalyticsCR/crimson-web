@@ -32,3 +32,6 @@ portal/tsconfig.tsbuildinfo
 # visibles en pantalla de los equipos. Solo entran al repo las versiones ya procesadas
 # y revisadas que viven en docs/assets/.
 imagenes-videos/
+
+# worktrees de agentes
+.claude/worktrees/

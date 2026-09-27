@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..models import Customer, Opportunity, Project, Quote, Survey, User
-from ..services.documents import audit
+from ..services.documents import CR, audit
 from ..services.totals import d
 
 router = APIRouter(tags=["oportunidades"])
@@ -208,7 +208,8 @@ class TouchIn(BaseModel):
 def touch(oid: int, data: TouchIn, p: Principal = Depends(require("crm_pipeline", "editar")), db: Session = Depends(get_db)):
     """Registra un seguimiento (llamada, visita, correo) y reprograma la próxima acción."""
     o = _own(db, oid, p)
-    stamp = datetime.now(UTC).strftime("%d/%m/%Y %H:%M")
+    # La bitacora es texto que lee una persona en Costa Rica: la hora va en hora local, no en UTC.
+    stamp = datetime.now(CR).strftime("%d/%m/%Y %H:%M")
     o.notes = f"{stamp} · {p.user.full_name}: {data.note}\n{o.notes or ''}".strip()
     if data.next_action is not None:
         o.next_action = data.next_action
