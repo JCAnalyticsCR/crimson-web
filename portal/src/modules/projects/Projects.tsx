@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney, openFile } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { ArchiveActions } from "../../ui/ArchiveActions";
 
 type Eco = {
   price: string; cost_planned: string; cost_materials: string; cost_labor: string; cost_travel: string; cost_extra: string;
@@ -14,7 +15,7 @@ type Project = {
   id: number; number: string; name: string; status: string; customer_id: number | null; customer: string | null; site: string | null;
   scope: string | null; supervisor: string | null; start_date: string | null; end_date: string | null; quote_id: number | null;
   survey_id: number | null; invoice_id: number | null; notes: string | null; delivered_at: string | null;
-  orders_total: number; orders_done: number; created_at: string; economics?: Eco;
+  orders_total: number; orders_done: number; created_at: string; economics?: Eco; archived_at?: string | null; trashed_at?: string | null;
   orders?: { id: number; number: string; title: string; status: string; scheduled_at: string | null; technician_id: number | null; materials: number }[];
   assets?: { id: number; name: string; serial: string | null; location: string | null; warranty_until: string | null }[];
 };
@@ -120,6 +121,7 @@ function Detail({ id }: { id: number }) {
           </p>
         </div>
         <div className="page-head__actions">
+          <ArchiveActions kind="project" id={p.id} number={p.number} archivedAt={p.archived_at} trashedAt={p.trashed_at} onDone={() => (p.archived_at || p.trashed_at ? load() : nav("/proyectos"))} />
           <button className="btn btn--ghost btn--sm" onClick={() => openFile(`/projects/${p.id}/report`)}><Icon d={I.reports} />Informe de entrega</button>
           {allows("projects.editar") && <button className="btn btn--ghost btn--sm" onClick={() => setEdit({ status: p.status, cost_labor: String(e?.cost_labor ?? 0), cost_travel: String(e?.cost_travel ?? 0), cost_extra: String(e?.cost_extra ?? 0), end_date: p.end_date || "", notes: p.notes || "" })}>Editar</button>}
           {allows("sales.crear") && !p.invoice_id && p.status !== "facturado" && <button className="btn btn--crimson btn--sm" onClick={facturar}>Facturar</button>}

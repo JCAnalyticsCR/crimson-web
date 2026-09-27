@@ -400,7 +400,21 @@ def stale_quotes() -> int:
     return n
 
 
+@celery.task(name="archive.purge_trash")
+def purge_trash() -> int:
+    """Borra definitivamente lo que cumplio los N dias en la papelera (archive_purge_days por empresa).
+    Cada purga queda en la auditoria con quien lo mando a la papelera y cuando."""
+    from app.core.db import SessionLocal
+    from app.services.archive import purge_expired
+
+    with SessionLocal() as db:
+        n = purge_expired(db)
+    log.info("Papelera: %s registro(s) purgado(s)", n)
+    return n
+
+
 celery.conf.beat_schedule = {
+    "purge-trash": {"task": "archive.purge_trash", "schedule": crontab(hour=3, minute=20)},
     "poll-inboxes": {"task": "reception.poll_inboxes", "schedule": crontab(minute="*/15")},
     "expire-support": {"task": "support.expire_grants", "schedule": crontab(minute=5)},
     "stale-followups": {"task": "crm.stale_followups", "schedule": crontab(hour=7, minute=30, day_of_week="mon-fri")},

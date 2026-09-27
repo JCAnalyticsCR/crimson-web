@@ -46,6 +46,8 @@ export const NAV: { group: string; items: NavItem[] }[] = [
     { to: "/planillas", label: "Planillas", icon: I.team, need: "payroll.ver" },
     { to: "/reportes", label: "Reportes", icon: I.reports, need: "reports.ver" },
     { to: "/importar", label: "Importar datos", icon: I.upload, need: "settings.configurar" },
+    // archivados y proximos a borrar: lo ve quien puede archivar algo (editar en campo, proyectos u oportunidades)
+    { to: "/archivo", label: "Archivo", icon: I.box, need: "field.editar|projects.editar|crm_pipeline.editar" },
     { to: "/ajustes", label: "Ajustes", icon: I.settings },
   ]},
 ];

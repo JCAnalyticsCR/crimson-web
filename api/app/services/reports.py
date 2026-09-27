@@ -448,12 +448,13 @@ def rentabilidad(db: Session, tid: int, a: date, b: date) -> Report:
     """En qué tipo de trabajo gana Crimson: venta, costo real y margen por proyecto cerrado."""
     from ..models import Project
     from ..routers.projects import economics
+    from .archive import live
     from .documents import local_date, today_fx
 
     fx = today_fx(db, "USD")[0]
     rows, price_total, cost_total = [], Decimal(0), Decimal(0)
     cerrados = db.scalars(
-        select(Project).where(Project.tenant_id == tid, Project.status.in_(("terminado", "entregado", "facturado"))).order_by(Project.id)
+        select(Project).where(Project.tenant_id == tid, Project.status.in_(("terminado", "entregado", "facturado")), live(Project)).order_by(Project.id)
     ).all()
     for pr in cerrados:
         cierre = pr.end_date or local_date(pr.delivered_at) or local_date(pr.created_at)
@@ -510,11 +511,12 @@ def rentabilidad_tipo(db: Session, tid: int, a: date, b: date) -> Report:
     y hasta hoy eso solo se sabia por intuicion."""
     from ..models import Project
     from ..routers.projects import economics, project_solution
+    from .archive import live
     from .documents import local_date, today_fx
 
     fx = today_fx(db, "USD")[0]
     por_tipo: dict[str, dict] = {}
-    cerrados = db.scalars(select(Project).where(Project.tenant_id == tid, Project.status.in_(("terminado", "entregado", "facturado")))).all()
+    cerrados = db.scalars(select(Project).where(Project.tenant_id == tid, Project.status.in_(("terminado", "entregado", "facturado")), live(Project))).all()
     for pr in cerrados:
         cierre = pr.end_date or local_date(pr.delivered_at) or local_date(pr.created_at)
         if not (a <= cierre <= b):

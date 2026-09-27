@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..models import Customer, Opportunity, Project, Quote, Survey, User
+from ..services.archive import live
 from ..services.documents import CR, audit
 from ..services.totals import d
 
@@ -41,6 +42,8 @@ def _out(db: Session, o: Opportunity) -> dict:
         "id": o.id,
         "number": o.number,
         "title": o.title,
+        "archived_at": o.archived_at,
+        "trashed_at": o.trashed_at,
         "customer_id": o.customer_id,
         "customer": c.name if c else (o.contact or {}).get("name"),
         "contact": o.contact,
@@ -89,7 +92,7 @@ def opportunities(
     p: Principal = Depends(require("crm_pipeline", "ver")),
     db: Session = Depends(get_db),
 ):
-    stmt = select(Opportunity).where(Opportunity.tenant_id == p.tenant.id)
+    stmt = select(Opportunity).where(Opportunity.tenant_id == p.tenant.id, live(Opportunity))
     if not p.can("crm_pipeline", "ver_todo") or mine:
         stmt = stmt.where(Opportunity.owner_id == p.user.id)
     if status == "abiertas":
@@ -106,7 +109,7 @@ def opportunities(
 @router.get("/opportunities/board")
 def board(p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = Depends(get_db)):
     """Embudo por estado: monto total y monto ponderado por probabilidad."""
-    stmt = select(Opportunity).where(Opportunity.tenant_id == p.tenant.id, Opportunity.status.in_(OPEN_STATES))
+    stmt = select(Opportunity).where(Opportunity.tenant_id == p.tenant.id, Opportunity.status.in_(OPEN_STATES), live(Opportunity))
     if not p.can("crm_pipeline", "ver_todo"):
         stmt = stmt.where(Opportunity.owner_id == p.user.id)
     rows = db.scalars(stmt).all()
@@ -141,6 +144,7 @@ def pending(
     stmt = select(Opportunity).where(
         Opportunity.tenant_id == p.tenant.id,
         Opportunity.status.in_(OPEN_STATES),
+        live(Opportunity),
         Opportunity.next_action_date.is_not(None),
         Opportunity.next_action_date <= today,
     )
@@ -174,7 +178,8 @@ def get_one(oid: int, p: Principal = Depends(require("crm_pipeline", "ver")), db
     o = _own(db, oid, p)
     out = _out(db, o)
     out["surveys"] = [
-        {"id": s.id, "number": s.number, "kind": s.kind, "status": s.status} for s in db.scalars(select(Survey).where(Survey.opportunity_id == o.id))
+        {"id": s.id, "number": s.number, "kind": s.kind, "status": s.status}
+        for s in db.scalars(select(Survey).where(Survey.opportunity_id == o.id, live(Survey)))
     ]
     if o.quote_id:
         q = db.get(Quote, o.quote_id)
@@ -266,7 +271,7 @@ def stale_followups(db: Session, tenant_id: int, days: int = 5) -> list[Opportun
 
     cutoff = datetime.now(UTC) - timedelta(days=days)
     out = []
-    for o in db.scalars(select(Opportunity).where(Opportunity.tenant_id == tenant_id, Opportunity.status.in_(OPEN_STATES))):
+    for o in db.scalars(select(Opportunity).where(Opportunity.tenant_id == tenant_id, Opportunity.status.in_(OPEN_STATES), live(Opportunity))):
         last = o.updated_at if o.updated_at.tzinfo else o.updated_at.replace(tzinfo=UTC)
         if (o.next_action_date and o.next_action_date <= date.today()) or last < cutoff:
             out.append(o)

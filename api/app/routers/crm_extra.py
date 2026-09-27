@@ -29,6 +29,7 @@ from ..models import (
     SupportTicket,
     User,
 )
+from ..services.archive import live as not_archived
 from ..services.documents import audit
 from ..services.totals import d
 
@@ -257,7 +258,9 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
         else [],
         "projects": [
             {"id": x.id, "number": x.number, "name": x.name, "status": x.status, "end_date": x.end_date}
-            for x in db.scalars(select(Project).where(Project.tenant_id == tid, Project.customer_id == cid).order_by(Project.id.desc()).limit(20))
+            for x in db.scalars(
+                select(Project).where(Project.tenant_id == tid, Project.customer_id == cid, not_archived(Project)).order_by(Project.id.desc()).limit(20)
+            )
         ]
         if p.can("projects", "ver")
         else [],
@@ -283,7 +286,10 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
         "opportunities": [
             {"id": x.id, "number": x.number, "title": x.title, "status": x.status, "amount": x.amount, "next_action_date": x.next_action_date}
             for x in db.scalars(
-                select(Opportunity).where(Opportunity.tenant_id == tid, Opportunity.customer_id == cid).order_by(Opportunity.id.desc()).limit(20)
+                select(Opportunity)
+                .where(Opportunity.tenant_id == tid, Opportunity.customer_id == cid, not_archived(Opportunity))
+                .order_by(Opportunity.id.desc())
+                .limit(20)
             )
         ]
         if p.can("crm_pipeline", "ver")

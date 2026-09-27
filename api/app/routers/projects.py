@@ -35,6 +35,7 @@ from ..models import (
 )
 from ..services import inventory as invsvc
 from ..services import pricing
+from ..services.archive import live
 from ..services.documents import audit, local_date, today_fx
 from ..services.mail import notify_roles
 from ..services.sequences import next_number
@@ -134,9 +135,11 @@ def _out(db: Session, pr: Project, p: Principal, full: bool = True) -> dict:
         "notes": pr.notes,
         "photos": pr.photos,
         "delivered_at": pr.delivered_at,
-        "orders_total": len(pr.orders),
-        "orders_done": sum(1 for o in pr.orders if o.status == "finalizada"),
+        "orders_total": sum(1 for o in pr.orders if o.trashed_at is None),
+        "orders_done": sum(1 for o in pr.orders if o.status == "finalizada" and o.trashed_at is None),
         "created_at": pr.created_at,
+        "archived_at": pr.archived_at,
+        "trashed_at": pr.trashed_at,
     }
     if p.sees_costs:
         out["economics"] = economics(db, pr)
@@ -154,6 +157,7 @@ def _out(db: Session, pr: Project, p: Principal, full: bool = True) -> dict:
                 "materials": len(o.materials),
             }
             for o in pr.orders
+            if o.trashed_at is None  # lo de la papelera se ve en Archivo, no en la ficha
         ]
         out["assets"] = [
             {"id": a.id, "name": a.name, "serial": a.serial, "location": a.location, "warranty_until": a.warranty_until}
@@ -180,7 +184,7 @@ class ProjectIn(BaseModel):
 
 @router.get("/projects")
 def projects(status: str | None = None, limit: int = Query(100, le=300), p: Principal = Depends(require("projects", "ver")), db: Session = Depends(get_db)):
-    stmt = select(Project).where(Project.tenant_id == p.tenant.id)
+    stmt = select(Project).where(Project.tenant_id == p.tenant.id, live(Project))
     if status == "activos":
         stmt = stmt.where(Project.status.in_(("planificado", "en_curso", "pausado")))
     elif status:
@@ -289,7 +293,9 @@ def _reservar(db: Session, p: Principal, pr: Project, order: WorkOrder) -> list[
     for lv in invsvc.stock_levels(db, p.tenant.id):
         levels[lv["product_id"]] = levels.get(lv["product_id"], Decimal(0)) + lv["quantity"]
     apartados = db.scalars(
-        select(WorkOrder).where(WorkOrder.tenant_id == p.tenant.id, WorkOrder.project_id != pr.id, WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")))
+        select(WorkOrder).where(
+            WorkOrder.tenant_id == p.tenant.id, WorkOrder.project_id != pr.id, WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")), live(WorkOrder)
+        )
     ).all()
     comprometido: dict[int, Decimal] = {}
     for o in apartados:

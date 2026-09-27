@@ -485,26 +485,27 @@ def _ceo_row(db: Session, p: Principal) -> dict:
     from ..routers.pipeline import OPEN_STATES
     from ..routers.projects import consumed_cost
     from ..services import pricing
+    from ..services.archive import live
 
     tid = p.tenant.id
     today = date.today()
     m0 = today.replace(day=1)
-    opps = db.scalars(select(Opportunity).where(Opportunity.tenant_id == tid, Opportunity.status.in_(OPEN_STATES))).all()
+    opps = db.scalars(select(Opportunity).where(Opportunity.tenant_id == tid, Opportunity.status.in_(OPEN_STATES), live(Opportunity))).all()
     pipeline = sum((d(o.amount) for o in opps), Decimal(0))
     weighted = sum((d(o.amount) * o.probability / 100 for o in opps), Decimal(0))
     receivable = d(
         db.scalar(select(func.coalesce(func.sum(Invoice.balance), 0)).where(Invoice.tenant_id == tid, Invoice.status.in_(("creado", "parcial", "vencida"))))
     )
-    active = db.scalars(select(Project).where(Project.tenant_id == tid, Project.status.in_(("planificado", "en_curso", "pausado")))).all()
+    active = db.scalars(select(Project).where(Project.tenant_id == tid, Project.status.in_(("planificado", "en_curso", "pausado")), live(Project))).all()
     closed = db.scalars(
-        select(Project).where(Project.tenant_id == tid, Project.status.in_(("terminado", "entregado", "facturado")), Project.updated_at >= m0)
+        select(Project).where(Project.tenant_id == tid, Project.status.in_(("terminado", "entregado", "facturado")), Project.updated_at >= m0, live(Project))
     ).all()
     profit = sum((d(x.price) - (consumed_cost(db, x) + d(x.cost_labor) + d(x.cost_travel) + d(x.cost_extra)) for x in closed), Decimal(0))
     sold = d(
         db.scalar(select(func.coalesce(func.sum(Invoice.total), 0)).where(Invoice.tenant_id == tid, Invoice.status != "anulada", Invoice.issue_date >= m0))
     )
     week = today + timedelta(days=7 - today.weekday())
-    jobs = db.scalars(select(WorkOrder).where(WorkOrder.tenant_id == tid, WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")))).all()
+    jobs = db.scalars(select(WorkOrder).where(WorkOrder.tenant_id == tid, WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")), live(WorkOrder))).all()
     quotes_sent = db.scalar(select(func.count()).select_from(Quote).where(Quote.tenant_id == tid, Quote.status == "enviada"))
     quotes_won = db.scalar(select(func.count()).select_from(Quote).where(Quote.tenant_id == tid, Quote.status == "convertida", Quote.updated_at >= m0))
     warranties = [

@@ -10,13 +10,13 @@ from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
-from .base import TenantMixin, TimestampMixin
+from .base import ArchiveMixin, TenantMixin, TimestampMixin
 
 # Tipos de levantamiento: cada uno pide datos distintos (ver services/survey_specs.py)
 SURVEY_KINDS = ("cctv", "redes", "acceso", "asistencia", "ups", "cableado", "anpr", "otro")
 
 
-class Opportunity(TenantMixin, TimestampMixin, Base):
+class Opportunity(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     """Antes de que exista una cotizacion: el prospecto y su seguimiento."""
 
     __tablename__ = "opportunity"
@@ -43,7 +43,7 @@ class Opportunity(TenantMixin, TimestampMixin, Base):
     created_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
 
 
-class Survey(TenantMixin, TimestampMixin, Base):
+class Survey(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     """Levantamiento tecnico hecho en sitio desde el celular. Alimenta la cotizacion sin volver a escribir nada."""
 
     __tablename__ = "survey"
@@ -107,7 +107,7 @@ class SurveyItem(Base):
     unit_cost: Mapped[float | None] = mapped_column(Numeric(14, 4))
 
 
-class Project(TenantMixin, TimestampMixin, Base):
+class Project(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     """Cotizacion aprobada -> proyecto. Guarda lo cotizado y lo realmente gastado para saber el margen real."""
 
     __tablename__ = "project"
@@ -139,7 +139,7 @@ class Project(TenantMixin, TimestampMixin, Base):
     orders: Mapped[list["WorkOrder"]] = relationship(cascade="all, delete-orphan", lazy="selectin", order_by="WorkOrder.id")
 
 
-class WorkOrder(TenantMixin, TimestampMixin, Base):
+class WorkOrder(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     """Trabajo de campo: instalacion, visita o mantenimiento. Es la pantalla del tecnico en el celular."""
 
     __tablename__ = "work_order"

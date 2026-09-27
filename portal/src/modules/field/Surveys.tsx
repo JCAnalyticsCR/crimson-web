@@ -2,12 +2,13 @@
    El formulario no esta escrito aqui: lo dibuja /field/specs, asi agregar un tipo de solucion es tocar solo la API. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api, fmtMoney, parseTs } from "../../lib/api";
+import { api, fmtMoney, openFile, parseTs } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 import { Lookup, searchCustomers, searchProducts } from "../../ui/Lookup";
 import { PhotoStrip } from "../../ui/MediaPicker";
 import { InviteTechButton } from "./InviteTech";
+import { ArchiveActions } from "../../ui/ArchiveActions";
 
 type FieldSpec = { key: string; label: string; type: "text" | "number" | "select" | "multi" | "bool"; options?: string[]; unit?: string; placeholder?: string };
 type Spec = { label: string; point_prefix: string; point_label: string; fields: FieldSpec[]; materials: string[] };
@@ -21,7 +22,7 @@ type Review = { roles: string[]; people: string[] };
 type Survey = {
   id: number; number: string; kind: string; kind_label: string; status: string; customer_id: number | null; customer: string | null;
   site: string | null; opportunity_id: number | null; technician: string | null; visit_date: string | null; techs: number; days: string;
-  notes: string | null; photos: string[]; quote_id: number | null; points_count: number; created_at: string;
+  notes: string | null; photos: string[]; quote_id: number | null; points_count: number; created_at: string; archived_at?: string | null; trashed_at?: string | null;
   sent_at: string | null; sent_by: string | null; pending_review?: Review; visit_tech_ids: number[]; visit_techs: string[];
   labor: Record<LaborKey, { label: string; people: number; days: string | number }>;
   points?: Point[]; items?: (Omit<Item, "quantity"> & { quantity: string | number })[];
@@ -63,6 +64,7 @@ const emptySurvey = (kind: string) => ({
 });
 type Draft = ReturnType<typeof emptySurvey> & {
   id?: number; number?: string; status?: string; quote_id?: number | null; sent_at?: string | null; sent_by?: string | null; pending_review?: Review;
+  archived_at?: string | null; trashed_at?: string | null;
 };
 
 const num = (v: string | number | null | undefined) => { const n = Number(String(v ?? "").replace(",", ".")); return Number.isFinite(n) ? n : 0; };
@@ -131,8 +133,18 @@ export default function Surveys() {
       opportunity_id: s.opportunity_id ? String(s.opportunity_id) : "", site: s.site || "", visit_date: s.visit_date || "", labor, visit_tech_ids: s.visit_tech_ids || [],
       notes: s.notes || "", photos: s.photos || [], points: s.points || [],
       items: (s.items || []).map((i) => ({ ...i, quantity: String(i.quantity), kind: i.kind === "equipo" ? "equipo" : "material" })),
-      sent_at: s.sent_at, sent_by: s.sent_by, pending_review: s.pending_review,
+      sent_at: s.sent_at, sent_by: s.sent_by, pending_review: s.pending_review, archived_at: s.archived_at, trashed_at: s.trashed_at,
     });
+  };
+
+  const sendReport = async () => {
+    if (!draft?.id) return;
+    const to = window.prompt("Correo del cliente (vacío = el de la ficha del cliente):", "");
+    if (to === null) return;
+    try {
+      const r = await api<{ sent: boolean; to: string; note: string | null }>(`/surveys/${draft.id}/report/email`, { method: "POST", json: { to: to.trim() || null } });
+      toast(r.sent ? `Informe enviado a ${r.to}` : r.note || "El correo no salió", r.sent ? "ok" : "bad");
+    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
 
   const close = () => { setDraft(null); setCosting(null); setCostEdits({}); if (params.get("id") || params.get("nuevo")) setParams({}); };
@@ -358,7 +370,10 @@ export default function Surveys() {
           onClose={close}
           wide
           foot={<>
-            {puedeCotizar && <button className="btn btn--soft" style={{ marginRight: "auto" }} onClick={() => cost()}><Icon d={I.trend} />Costear</button>}
+            {puedeCotizar && <button className="btn btn--soft" onClick={() => cost()}><Icon d={I.trend} />Costear</button>}
+            {draft.id && <button className="btn btn--ghost" title="PDF para el cliente, sin precios ni costos" onClick={() => openFile(`/surveys/${draft.id}/report.pdf`).catch((e) => toast(e.message, "bad"))}><Icon d={I.reports} />Informe preliminar</button>}
+            {draft.id && allows("sales.enviar") && <button className="btn btn--ghost" onClick={sendReport}>Enviar al cliente</button>}
+            {draft.id && <span style={{ marginRight: "auto", display: "inline-flex", gap: 6 }}><ArchiveActions kind="survey" id={draft.id} number={draft.number} archivedAt={draft.archived_at} trashedAt={draft.trashed_at} onDone={() => { close(); load(); }} /></span>}
             <button className="btn btn--ghost" onClick={close}>Cerrar</button>
             {!readOnly && <>
               <button className="btn btn--ghost" onClick={suggest} disabled={busy || !draft.points.length}>Sugerir materiales</button>

@@ -1,11 +1,12 @@
 /* Oportunidades: el embudo antes de la cotizacion.
    Lo que importa aqui no es el monto sino la proxima accion con fecha: es lo que evita que un negocio se enfrie. */
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 import { Lookup, searchCustomers } from "../../ui/Lookup";
+import { ArchiveActions } from "../../ui/ArchiveActions";
 import "./opportunities.css";
 
 export type Opp = {
@@ -13,6 +14,7 @@ export type Opp = {
   owner_id: number | null; owner: string | null; amount: string; currency: string; probability: number; status: string;
   next_action: string | null; next_action_date: string | null; lost_reason: string | null; notes: string | null;
   quote_id: number | null; project_id: number | null; weighted: string; created_at: string;
+  archived_at?: string | null; trashed_at?: string | null;
 };
 type Detail = Opp & {
   surveys: { id: number; number: string; kind: string; status: string }[];
@@ -78,6 +80,10 @@ export default function Opportunities() {
   }, []);
 
   const show = async (id: number) => { setOpen(await api<Detail>(`/opportunities/${id}`)); setTouch(blankTouch); setTouchOpen(false); };
+  // /oportunidades?id=<n>: se abre desde Archivo (o un enlace) sin buscarla en el embudo
+  const [params, setParams] = useSearchParams();
+  const linked = params.get("id");
+  useEffect(() => { if (linked) show(Number(linked)).catch(() => undefined); }, [linked]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
     if (!form) return;
@@ -274,8 +280,9 @@ export default function Opportunities() {
       )}
 
       {open && (
-        <Modal title={`${open.number} · ${open.title}`} onClose={() => setOpen(null)} wide foot={<>
+        <Modal title={`${open.number} · ${open.title}`} onClose={() => { setOpen(null); if (linked) setParams({}); }} wide foot={<>
           <div className="opp-foot__links">
+            <ArchiveActions kind="opportunity" id={open.id} number={open.number} archivedAt={open.archived_at} trashedAt={open.trashed_at} onDone={() => { setOpen(null); if (linked) setParams({}); load(); }} />
             {allows("field.crear") && !open.surveys.length && <button className="btn btn--soft" onClick={() => nav(`/levantamientos?nuevo=${open.id}`)}><Icon d={I.box} />Levantamiento técnico</button>}
             {open.quote && <button className="btn btn--soft" onClick={() => nav(`/cotizaciones/${open.quote!.id}`)}>Ver cotización</button>}
             {open.project && <button className="btn btn--soft" onClick={() => nav(`/proyectos/${open.project!.id}`)}>Ver proyecto</button>}

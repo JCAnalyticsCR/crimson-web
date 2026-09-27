@@ -47,6 +47,7 @@ DEFAULTS = {
     "fuel_cost_per_km": 0,  # si se cobra por kilometro, el transporte se calcula con esto
     "quote_approval_amount": 2000000,  # cotizacion por encima -> aprobacion
     "min_margin_pct": 25,  # margen por debajo -> aprobacion
+    "archive_purge_days": 30,  # dias en la papelera antes de que el worker lo borre definitivamente
 }
 
 
@@ -73,6 +74,7 @@ class SettingsIn(BaseModel):
     fuel_cost_per_km: float | None = Field(None, ge=0)
     quote_approval_amount: float | None = Field(None, ge=0)
     min_margin_pct: float | None = Field(None, ge=0, le=95)
+    archive_purge_days: int | None = Field(None, ge=1, le=365)
 
 
 @router.get("")

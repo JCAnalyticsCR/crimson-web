@@ -12,7 +12,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
@@ -22,6 +22,7 @@ from ..schemas.sales import DocumentIn, LineInSchema
 from ..services import documents as docsvc
 from ..services import inventory as invsvc
 from ..services import pricing
+from ..services.archive import live
 from ..services.documents import audit
 from ..services.mail import notify_roles
 from ..services.sequences import next_number
@@ -125,6 +126,8 @@ def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
         "quote_id": s.quote_id,
         "points_count": len(s.points),
         "created_at": s.created_at,
+        "archived_at": s.archived_at,
+        "trashed_at": s.trashed_at,
         "sent_at": s.sent_at,
         "sent_by": sender.full_name if sender else None,
         "visit_tech_ids": visit_ids,
@@ -235,7 +238,7 @@ def technicians(p: Principal = Depends(require("field", "ver")), db: Session = D
 
 @router.get("/surveys")
 def surveys(status: str | None = None, limit: int = Query(80, le=200), p: Principal = Depends(require("field", "ver")), db: Session = Depends(get_db)):
-    stmt = select(Survey).where(Survey.tenant_id == p.tenant.id)
+    stmt = select(Survey).where(Survey.tenant_id == p.tenant.id, live(Survey))
     if not p.sees_field_all:
         stmt = stmt.where(Survey.technician_id == p.user.id)
     if status:
@@ -602,6 +605,8 @@ def _order_out(db: Session, o: WorkOrder, full: bool = True) -> dict:
         "title": o.title,
         "kind": o.kind,
         "status": o.status,
+        "archived_at": o.archived_at,
+        "trashed_at": o.trashed_at,
         "site": o.site,
         "scheduled_at": o.scheduled_at,
         "customer_id": o.customer_id,
@@ -653,6 +658,11 @@ class WorkOrderIn(BaseModel):
     materials: list[MaterialIn] = Field(default_factory=list)
 
 
+def _live_orders():
+    """Ordenes activas: ni ellas ni su proyecto estan archivados o en la papelera."""
+    return (live(WorkOrder), or_(WorkOrder.project_id.is_(None), WorkOrder.project_id.in_(select(Project.id).where(live(Project)))))
+
+
 @router.get("/work-orders")
 def work_orders(
     status: str | None = None,
@@ -662,7 +672,7 @@ def work_orders(
     p: Principal = Depends(require("field", "ver")),
     db: Session = Depends(get_db),
 ):
-    stmt = select(WorkOrder).where(WorkOrder.tenant_id == p.tenant.id)
+    stmt = select(WorkOrder).where(WorkOrder.tenant_id == p.tenant.id, *_live_orders())
     if status == "pendientes":
         stmt = stmt.where(WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")))
     elif status:
@@ -764,7 +774,7 @@ def order_action(oid: int, action: str, data: ProgressIn | None = None, p: Princ
         audit(db, p.tenant.id, p.user.id, "finish", "work_order", o.id, {"materiales": consumed}, ip=p.ip)
         if o.project_id:
             pr = db.get(Project, o.project_id)
-            if pr and all(x.status in ("finalizada", "cancelada") for x in pr.orders) and pr.status != "terminado":
+            if pr and all(x.status in ("finalizada", "cancelada") for x in pr.orders if x.trashed_at is None) and pr.status != "terminado":
                 pr.status = "terminado"
                 horas = sum((_hours(x.started_at, x.finished_at) or 0 for x in pr.orders), 0.0)
                 notify_roles(
@@ -804,7 +814,7 @@ def _apply_materials(db: Session, o: WorkOrder, p: Principal) -> int:
 @router.get("/work-orders/meta/today")
 def my_day(p: Principal = Depends(require("field", "ver")), db: Session = Depends(get_db)):
     """Pantalla de inicio del técnico: lo de hoy y lo pendiente."""
-    stmt = select(WorkOrder).where(WorkOrder.tenant_id == p.tenant.id, WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")))
+    stmt = select(WorkOrder).where(WorkOrder.tenant_id == p.tenant.id, WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")), *_live_orders())
     rows = db.scalars(stmt.order_by(WorkOrder.scheduled_at.is_(None), WorkOrder.scheduled_at)).all()
     if not p.sees_field_all:
         rows = [o for o in rows if o.technician_id == p.user.id or p.user.id in (o.helpers or [])]
@@ -816,9 +826,66 @@ def my_day(p: Principal = Depends(require("field", "ver")), db: Session = Depend
             _survey_out(db, s, full=False)
             for s in db.scalars(
                 select(Survey)
-                .where(Survey.tenant_id == p.tenant.id, Survey.status == "borrador", Survey.technician_id == p.user.id)
+                .where(Survey.tenant_id == p.tenant.id, Survey.status == "borrador", Survey.technician_id == p.user.id, live(Survey))
                 .order_by(Survey.id.desc())
                 .limit(5)
             )
         ],
     }
+
+
+# ---------- Informe preliminar (para el cliente, antes de cotizar) ----------
+@router.get("/surveys/{sid}/report.pdf")
+def survey_report(sid: int, p: Principal = Depends(require("field", "ver")), db: Session = Depends(get_db)):
+    """PDF sin un solo monto (ver services/survey_report.py). Sin WeasyPrint (Windows local) devuelve el HTML
+    imprimible con X-PDF-Fallback, igual que las cotizaciones."""
+    from fastapi.responses import HTMLResponse, Response
+
+    from ..services.render import render_pdf
+    from ..services.survey_report import render_survey_html
+
+    s = _survey(db, sid, p)
+    page = render_survey_html(db, s, p.tenant)
+    pdf = render_pdf(page)
+    if pdf is None:
+        return HTMLResponse(page, headers={"X-PDF-Fallback": "html"})
+    return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="Informe-{s.number}.pdf"'})
+
+
+class ReportSendIn(BaseModel):
+    to: str | None = Field(None, max_length=200)
+    message: str | None = Field(None, max_length=2000)
+
+
+@router.post("/surveys/{sid}/report/email")
+def survey_report_send(sid: int, data: ReportSendIn, p: Principal = Depends(require("sales", "enviar")), db: Session = Depends(get_db)):
+    """Manda el informe preliminar al cliente (el informe va en el cuerpo del correo). Igual que las cotizaciones:
+    solo cuenta como enviado si el proveedor acepto el correo; simulado o error no."""
+    from ..services.mail import queue_email
+    from ..services.survey_report import render_survey_html
+
+    s = _survey(db, sid, p)
+    c = db.get(Customer, s.customer_id) if s.customer_id else None
+    to = (data.to or (c.email if c else None) or (s.contact or {}).get("email") or "").strip()
+    if not to or "@" not in to:
+        raise HTTPException(422, "El cliente no tiene correo; indicá uno")
+    page = render_survey_html(db, s, p.tenant)
+    if data.message:
+        page = page.replace("<body>", f'<body><p style="white-space:pre-wrap">{html.escape(data.message)}</p>', 1)
+    m = queue_email(db, p.tenant, to, f"Informe preliminar {s.number} · {p.tenant.name}", page, "survey", s.id)
+    sent = m.status == "enviado"
+    audit(db, p.tenant.id, p.user.id, "send_report", "survey", s.id, {"to": to, "mail": m.status}, ip=p.ip)
+    db.commit()
+    if m.status == "simulado":
+        note = "El correo NO salió: no hay servicio de correo configurado (falta la llave de Resend). No se registró como enviado."
+    elif m.status == "error":
+        note = f"El correo NO salió ({(m.error or 'error del proveedor')[:160]}). No se registró como enviado."
+    else:
+        note = None
+    return {"status": m.status, "sent": sent, "to": to, "note": note}
+
+
+# Archivo y papelera: se monta aqui para no tocar main.py (ver routers/archive.py)
+from .archive import router as _archive_router  # noqa: E402
+
+router.include_router(_archive_router)
