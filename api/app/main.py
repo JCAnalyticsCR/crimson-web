@@ -26,6 +26,7 @@ from .routers import (
     projects,
     public,
     public_api,
+    public_incidents,
     reception,
     sales,
     store,
@@ -48,7 +49,8 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        # el portal + la landing (esta solo usa /public/incidents y no manda cookies)
+        allow_origins=list(dict.fromkeys([*settings.cors_origins, *settings.landing_origins])),
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
@@ -90,6 +92,7 @@ def create_app() -> FastAPI:
     app.include_router(projects.router)
     app.include_router(support_desk.router)
     app.include_router(public.router)
+    app.include_router(public_incidents.router)
     return app
 
 

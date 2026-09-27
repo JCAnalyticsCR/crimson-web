@@ -5,15 +5,17 @@ import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 import { Lookup, searchCustomers } from "../../ui/Lookup";
+import { SlaTable, type Sla } from "./SlaTable";
 
 type Contract = {
   id: number; number: string; name: string; kind: string; customer_id: number; customer: string | null; project: string | null;
   every_months: number; next_date: string | null; last_done: string | null; start_date: string | null; end_date: string | null;
   amount: string; currency: string; scope: string | null; active: boolean; notes: string | null; dias_para_la_proxima: number | null;
+  sla: Sla | null;
 };
 
 const KIND: Record<string, string> = { mantenimiento: "Mantenimiento preventivo", soporte: "Soporte recurrente", renting: "Renting", licencia: "Licencia" };
-const blank = { customer_id: "", customer_name: "", name: "", kind: "mantenimiento", every_months: 6, next_date: "", start_date: "", end_date: "", amount: "0", scope: "", active: true, notes: "" };
+const blank = { customer_id: "", customer_name: "", name: "", kind: "mantenimiento", every_months: 6, next_date: "", start_date: "", end_date: "", amount: "0", scope: "", active: true, notes: "", sla: null as Sla | null };
 
 export default function Contracts() {
   const { toast, allows } = useSession();
@@ -29,7 +31,7 @@ export default function Contracts() {
     const body = {
       customer_id: Number(form.customer_id), name: form.name, kind: form.kind, every_months: Number(form.every_months),
       next_date: form.next_date || null, start_date: form.start_date || null, end_date: form.end_date || null,
-      amount: Number(form.amount || 0), currency: "CRC", scope: form.scope || null, active: form.active, notes: form.notes || null,
+      amount: Number(form.amount || 0), currency: "CRC", scope: form.scope || null, active: form.active, notes: form.notes || null, sla: form.sla,
     };
     try { await api(form.id ? `/contracts/${form.id}` : "/contracts", { method: form.id ? "PUT" : "POST", json: body }); toast("Contrato guardado"); setForm(null); load(); }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
@@ -79,7 +81,7 @@ export default function Contracts() {
                 {verCostos && <td className="num money">{fmtMoney(c.amount, c.currency)}</td>}
                 <td className="num" style={{ whiteSpace: "nowrap" }}>
                   {allows("support_desk.crear") && c.active && <button className="btn btn--soft btn--sm" onClick={() => hacerAhora(c)} title="Abre el ticket y reprograma la próxima">Programar</button>}
-                  {allows("support_desk.editar") && <button className="btn btn--ghost btn--sm" onClick={() => setForm({ id: c.id, customer_id: String(c.customer_id), customer_name: c.customer || "", name: c.name, kind: c.kind, every_months: c.every_months, next_date: c.next_date || "", start_date: c.start_date || "", end_date: c.end_date || "", amount: String(c.amount), scope: c.scope || "", active: c.active, notes: c.notes || "" })}>Editar</button>}
+                  {allows("support_desk.editar") && <button className="btn btn--ghost btn--sm" onClick={() => setForm({ id: c.id, customer_id: String(c.customer_id), customer_name: c.customer || "", name: c.name, kind: c.kind, every_months: c.every_months, next_date: c.next_date || "", start_date: c.start_date || "", end_date: c.end_date || "", amount: String(c.amount), scope: c.scope || "", active: c.active, notes: c.notes || "", sla: c.sla })}>Editar</button>}
                 </td>
               </tr>
             ))}</tbody>
@@ -104,6 +106,14 @@ export default function Contracts() {
             <Field label="Activo"><select className="select" value={form.active ? "1" : "0"} onChange={(e) => setForm({ ...form, active: e.target.value === "1" })}><option value="1">Sí</option><option value="0">No</option></select></Field>
           </div>
           <Field label="Qué incluye" hint="Se copia al ticket para que el técnico sepa qué hacer."><textarea className="textarea" value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value })} placeholder="Limpieza de lentes, revisión de grabación, respaldo de configuración y prueba de respaldo eléctrico." /></Field>
+          {/* SLA propio: lo que se le vendio a este cliente. Manda sobre el SLA de la empresa mientras el contrato este activo. */}
+          <Field label="SLA propio del contrato" hint="Si no se marca, los tickets de este cliente usan el SLA de la empresa (Ajustes → SLA).">
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
+              <input type="checkbox" checked={!!form.sla} onChange={(e) => setForm({ ...form, sla: e.target.checked ? { critica: { respuesta: 2, resolucion: 8 }, alta: { respuesta: 4, resolucion: 24 }, media: { respuesta: 8, resolucion: 72 }, baja: { respuesta: 24, resolucion: 120 } } : null })} />
+              Este contrato trae su propio SLA
+            </label>
+          </Field>
+          {form.sla && <SlaTable value={form.sla} onChange={(sla) => setForm({ ...form, sla })} />}
         </Modal>
       )}
     </>

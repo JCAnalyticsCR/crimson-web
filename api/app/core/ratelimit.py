@@ -37,3 +37,7 @@ class SlidingWindow:
 
 login_limiter = SlidingWindow(limit=20, seconds=600)  # 20 intentos / 10 min por IP
 public_limiter = SlidingWindow(limit=30, seconds=600)  # checkouts publicos por IP
+# Reporte de incidencias desde la pagina web: una persona real no manda mas de 5 por hora; el tope global
+# frena una inundacion desde muchas IPs sin tumbar el resto de la API.
+incident_limiter = SlidingWindow(limit=5, seconds=3600)
+incident_global_limiter = SlidingWindow(limit=120, seconds=3600)

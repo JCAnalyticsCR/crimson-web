@@ -50,7 +50,10 @@ class SupportTicket(TenantMixin, TimestampMixin, Base):
 
     assigned_to: Mapped[int | None] = mapped_column(ForeignKey("user.id"), index=True)
     opened_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
-    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # limite de primera respuesta
+    resolve_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # limite de resolucion
+    # foto del SLA que aplico al abrir: horas, origen (contrato/empresa/defecto) y avisos ya enviados
+    sla: Mapped[dict | None] = mapped_column(JSON)
     first_reply_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -99,6 +102,8 @@ class MaintenanceContract(TenantMixin, TimestampMixin, Base):
     scope: Mapped[str | None] = mapped_column(Text)  # que incluye
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     notes: Mapped[str | None] = mapped_column(Text)
+    # SLA propio del contrato {"critica": {"respuesta": h, "resolucion": h}, ...}; None = el de la empresa
+    sla: Mapped[dict | None] = mapped_column(JSON)
 
 
 class CommissionRule(TenantMixin, TimestampMixin, Base):

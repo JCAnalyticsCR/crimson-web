@@ -29,6 +29,12 @@ class Settings(BaseSettings):
 
     # CORS: origenes del portal (nunca "*")
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    # Sitios publicos (landing) que pueden llamar a /public/incidents. Aparte del portal para no tener que
+    # reescribir CORS_ORIGINS: en Railway LANDING_ORIGINS='["https://crimsoncr.com","https://www.crimsoncr.com"]'
+    landing_origins: list[str] = []
+    # Empresa que recibe los reportes de la pagina web (slug). Vacio = la unica empresa activa, si hay una sola.
+    # Nunca sale del cuerpo de la peticion: el que reporta no elige a que empresa le cae el ticket.
+    public_incident_tenant: str | None = None
 
     # Enlaces publicos de pago
     public_base_url: str = "http://localhost:5173"
