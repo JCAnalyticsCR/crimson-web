@@ -5,7 +5,7 @@ import { ApiError } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { I, Icon } from "../../ui/components";
 
-const LANDING = "https://jcanalyticscr.github.io/crimson-web/";
+const LANDING = "https://crimsoncr.com/"; // el sitio ya vive en el dominio; la URL de vista previa redirige
 const NODES = [[120, 140], [380, 90], [700, 160], [1050, 110], [1320, 190], [200, 420], [520, 470], [900, 430], [1250, 470], [80, 680], [420, 700], [760, 660], [1120, 690], [1380, 640]];
 const LINKS = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [1, 6], [2, 6], [3, 7], [4, 8], [5, 6], [6, 7], [7, 8], [5, 9], [6, 10], [7, 11], [8, 12], [8, 13], [10, 11], [11, 12]];
 const NODES_M = [[120, 160], [520, 110], [700, 340], [90, 520], [380, 600], [720, 760], [160, 980], [560, 1080], [300, 1330]];
