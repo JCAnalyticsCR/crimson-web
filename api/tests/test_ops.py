@@ -18,7 +18,7 @@ def _quote_to_invoice(client):
 def test_html_pdf_and_email(client, auth, monkeypatch):
     from app.services import mail
 
-    def fake_deliver(m):  # el proveedor acepta el correo
+    def fake_deliver(m, files=None):  # el proveedor acepta el correo
         m.status, m.provider_id = "enviado", "test-1"
 
     monkeypatch.setattr(mail, "deliver", fake_deliver)
@@ -32,6 +32,45 @@ def test_html_pdf_and_email(client, auth, monkeypatch):
     assert client.get(f"/invoices/{inv['id']}").json()["status"] == "enviada"
     out = client.get("/settings/outbox").json()
     assert out and out[0]["entity"] == "invoice"
+
+
+def test_email_lleva_el_pdf_adjunto_de_verdad(client, auth, monkeypatch):
+    """El correo decia "va adjunto en PDF" y no mandaba nada. Ahora el PDF viaja en el payload de Resend,
+    y si el servidor no puede generarlo el texto no promete un adjunto."""
+    import base64
+
+    from app.routers import ops
+    from app.services import mail
+
+    enviado = {}
+
+    class Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"id": "re_1"}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        enviado.update(json)
+        return Resp()
+
+    monkeypatch.setenv("RESEND_API_KEY", "prueba")
+    monkeypatch.setattr(mail.httpx, "post", fake_post)
+    monkeypatch.setattr(ops, "render_pdf", lambda html: b"%PDF-1.7 prueba")
+    inv, _ = _quote_to_invoice(client)
+    r = client.post(f"/invoices/{inv['id']}/email", json={})
+    assert r.status_code == 200 and r.json()["sent"] is True
+    adj = enviado.get("attachments")
+    assert adj and adj[0]["filename"] == f"{inv['number']}.pdf"
+    assert base64.b64decode(adj[0]["content"]) == b"%PDF-1.7 prueba"
+    assert "adjunto en PDF" in enviado["html"]
+
+    # sin WeasyPrint: sin adjunto y sin prometerlo
+    enviado.clear()
+    monkeypatch.setattr(ops, "render_pdf", lambda html: None)
+    r = client.post(f"/invoices/{inv['id']}/email", json={})
+    assert "attachments" not in enviado and "adjunto en PDF" not in enviado["html"]
 
 
 def test_inventory_deducts_on_sale_and_restocks_on_void(client, auth):

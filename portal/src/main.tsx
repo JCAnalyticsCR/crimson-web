@@ -45,6 +45,7 @@ const Purchases = lazy(() => import("./modules/projects/Purchases"));
 const Tickets = lazy(() => import("./modules/support/Tickets"));
 const Contracts = lazy(() => import("./modules/support/Contracts"));
 const Commissions = lazy(() => import("./modules/support/Commissions"));
+const Archive = lazy(() => import("./modules/tools/Archive"));
 
 function Private() {
   const { me, loading } = useSession();
@@ -90,6 +91,7 @@ function App() {
         <Route path="/planillas" element={g("payroll.ver", <Payroll />)} />
         <Route path="/conciliacion" element={g("accounting.ver", <Banking />)} />
         <Route path="/importar" element={g("settings.configurar", <Importer />)} />
+        <Route path="/archivo" element={g("field.editar|projects.editar|crm_pipeline.editar", <Archive />)} />
         <Route path="/oportunidades" element={g("crm_pipeline.ver", <Opportunities />)} />
         <Route path="/levantamientos" element={g("field.ver", <Surveys />)} />
         <Route path="/ordenes-trabajo" element={g("field.ver", <WorkOrders />)} />

@@ -75,7 +75,7 @@ def test_send_only_marks_when_mail_left(client, auth, db_session, monkeypatch):
     assert client.get(f"/opportunities/{opp['id']}").json()["status"] == "nuevo"
 
     # error del proveedor -> tampoco
-    def boom(m):
+    def boom(m, files=None):
         m.status, m.error = "error", "422 dominio no verificado"
 
     monkeypatch.setattr(mail, "deliver", boom)
@@ -83,7 +83,7 @@ def test_send_only_marks_when_mail_left(client, auth, db_session, monkeypatch):
     assert r["sent"] is False and client.get(f"/quotes/{q['id']}").json()["status"] == "creado"
 
     # el proveedor acepta -> cotizacion y oportunidad pasan a enviada
-    def ok(m):
+    def ok(m, files=None):
         m.status = "enviado"
 
     monkeypatch.setattr(mail, "deliver", ok)

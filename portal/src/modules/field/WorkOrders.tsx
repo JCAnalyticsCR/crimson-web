@@ -8,12 +8,14 @@ import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 import { Lookup, searchCustomers, searchProducts } from "../../ui/Lookup";
 import { PhotoStrip } from "../../ui/MediaPicker";
+import { ArchiveActions } from "../../ui/ArchiveActions";
 import { InviteTechButton } from "./InviteTech";
 
 type Material = { id?: number; product_id: number | null; name: string; quantity: string; unit: string; planned: string };
 type Task = { text: string; done?: boolean };
 export type Order = {
   id: number; number: string; title: string; kind: string; status: string; site: string | null; scheduled_at: string | null;
+  archived_at?: string | null; trashed_at?: string | null;
   customer_id: number | null; customer: string | null; project_id: number | null; project: string | null;
   technician_id: number | null; technician: string | null; helpers: number[]; arrived_at: string | null; started_at: string | null;
   finished_at: string | null; tasks: Task[]; photos: string[]; notes: string | null; customer_signature: string | null;
@@ -153,6 +155,7 @@ export default function WorkOrders() {
       {open && (
         <Modal title={`${open.number} · ${open.title}`} onClose={() => { setOpen(null); if (params.get("id")) setParams({}); }} wide foot={<>
           {puedeAsignar && open.status !== "finalizada" && <button className="btn btn--ghost" style={{ marginRight: "auto" }} onClick={() => { setForm({ id: open.id, title: open.title, kind: open.kind, project_id: open.project_id ? String(open.project_id) : "", customer_id: open.customer_id ? String(open.customer_id) : "", customer_name: open.customer || "", site: open.site || "", scheduled_at: toLocalInput(open.scheduled_at), technician_id: open.technician_id ? String(open.technician_id) : "", notes: open.notes || "", tasks: open.tasks || [], materials: (open.materials || []).map((m) => ({ ...m, quantity: String(m.quantity), planned: String(m.planned) })) }); setOpen(null); }}>Editar</button>}
+          <ArchiveActions kind="work_order" id={open.id} number={open.number} archivedAt={open.archived_at} trashedAt={open.trashed_at} onDone={() => { setOpen(null); if (params.get("id")) setParams({}); load(); }} />
           <button className="btn btn--ghost" onClick={() => setOpen(null)}>Cerrar</button>
         </>}>
           <div className="eco" style={{ marginBottom: 14 }}>

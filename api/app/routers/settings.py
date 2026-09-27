@@ -50,6 +50,7 @@ DEFAULTS = {
     "min_margin_pct": 25,  # margen por debajo -> aprobacion
     # SLA de soporte por prioridad (horas). Un contrato con SLA propio lo reemplaza para ese cliente.
     "sla": SLA_DEFECTO,
+    "archive_purge_days": 30,  # dias en la papelera antes de que el worker lo borre definitivamente
 }
 
 
@@ -88,6 +89,7 @@ class SettingsIn(BaseModel):
         if not n or len(n) != len(SLA_DEFECTO):
             raise ValueError("SLA invalido: las 4 prioridades con horas de respuesta y resolucion (1 a 2160)")
         return n
+    archive_purge_days: int | None = Field(None, ge=1, le=365)
 
 
 @router.get("")

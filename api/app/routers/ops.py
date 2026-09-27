@@ -74,6 +74,9 @@ def doc_send(kind: str, id_: int, data: SendIn, p: Principal = Depends(require("
     if is_inv and data.with_payment_link and Decimal(str(d.balance)) > 0:
         link = docsvc.get_or_create_payment_link(db, p.tenant.id, d).url
     subject = f"{'Factura' if is_inv else 'Cotización'} {d.number} · {p.tenant.name}"
+    # El PDF se genera aca y viaja adjunto. Si el servidor no puede generarlo (sin WeasyPrint), el correo no
+    # promete un adjunto que no lleva.
+    pdf = render_pdf(render_html(db, d, p.tenant))
     m = queue_email(
         db,
         p.tenant,
@@ -86,10 +89,12 @@ def doc_send(kind: str, id_: int, data: SendIn, p: Principal = Depends(require("
             money(d.total, d.currency),
             link,
             data.message or (p.tenant.settings or {}).get("invoice_footer" if is_inv else "quote_footer"),
+            attached=pdf is not None,
         ),
         kind[:-1],
         d.id,
-        [{"name": f"{d.number}.pdf", "kind": kind, "ref": d.id}],
+        [{"name": f"{d.number}.pdf", "kind": kind, "ref": d.id}] if pdf else [],
+        files=[(f"{d.number}.pdf", pdf)] if pdf else None,
     )
     # Solo se marca como enviada si el proveedor acepto el correo. Simulado (sin llave de Resend) o error
     # no cuentan: marcarla enviada haria creer al vendedor que el cliente ya la tiene.

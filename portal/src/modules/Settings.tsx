@@ -8,7 +8,7 @@ import { ImageField } from "../ui/MediaPicker";
 import { SlaSettings } from "./support/SlaTable";
 
 type Group = { id: number; doc_type: string; prefix: string; branch: string; terminal: string; current: number; is_default: boolean };
-type Cfg = { max_discount_pct?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; notify_due: boolean; remind_days_before: number; daily_close_email: boolean; bcc: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
+type Cfg = { max_discount_pct?: number; archive_purge_days?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; notify_due: boolean; remind_days_before: number; daily_close_email: boolean; bcc: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
 type Bank = { id: number; name: string; bank: string | null; currency: string; number: string | null; active: boolean };
 type Users = { users: { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null }[]; invitations: { id: number; email: string; role: string; expires_at: string }[]; roles: string[] };
 type Gw = { id: number; provider: string; client_id: string | null; secret_mask: string | null; is_primary: boolean; active: boolean; mode: string };
@@ -105,6 +105,7 @@ export default function Settings() {
               <div className="grid-2">
                 <Field label="Días de vigencia de factura"><input className="input input--mono" type="number" defaultValue={cfg.invoice_valid_days} onBlur={(e) => saveCfg({ invoice_valid_days: Number(e.target.value) })} /></Field>
                 <Field label="Descuento máximo sin aprobación (%)" hint="Aplica a vendedores y caja. Más que eso: la cotización queda por aprobar y la factura o el POS se rechazan."><input className="input input--mono" type="number" min={0} max={100} defaultValue={cfg.max_discount_pct ?? 10} onBlur={(e) => saveCfg({ max_discount_pct: Number(e.target.value) })} /></Field>
+                <Field label="Días en la papelera antes de borrar" hint="Levantamientos, proyectos, oportunidades y órdenes que se mandan a la papelera se borran solos después de estos días (Administración › Archivo)."><input className="input input--mono" type="number" min={1} max={365} defaultValue={cfg.archive_purge_days ?? 30} onBlur={(e) => saveCfg({ archive_purge_days: Number(e.target.value) })} /></Field>
                 <Field label="Días de vigencia de cotización"><input className="input input--mono" type="number" defaultValue={cfg.quote_valid_days} onBlur={(e) => saveCfg({ quote_valid_days: Number(e.target.value) })} /></Field>
               </div>
               <Field label="Mensaje al pie de toda factura"><textarea className="textarea" defaultValue={cfg.invoice_footer} onBlur={(e) => saveCfg({ invoice_footer: e.target.value })} /></Field>
