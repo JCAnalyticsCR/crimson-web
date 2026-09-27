@@ -56,7 +56,7 @@ td{padding:7px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-
     <br>{{ points|length }} {{ point_label|lower }}(s) · {{ equipos|length + materiales|length }} equipos y materiales</div>
 </div>
 
-{% if points %}<h2>{{ point_label }}s levantados</h2>
+{% if points %}<h2>Detalle por punto ({{ point_label|lower }})</h2>
 {% for p in points %}<div class="pt"><h3><span class="code">{{ p.code }}</span>{{ p.label or "" }}</h3>
   {% if p.data %}<div class="kv">{% for label, value in p.data %}<div><span class="muted">{{ label }}:</span> <b>{{ value }}</b></div>{% endfor %}</div>{% endif %}
   {% if p.notes %}<div class="obs">{{ p.notes }}</div>{% endif %}
@@ -112,8 +112,9 @@ def _point_data(kind: str, data: dict) -> list[tuple[str, str]]:
             v = ", ".join(str(x) for x in v)
         elif isinstance(v, (int, float, Decimal)):
             v = _num(v)
-        unit = f.get("unit")
-        out.append((f.get("label") or k.replace("_", " ").capitalize(), f"{v} {unit}" if unit else str(v)))
+        unit, label = f.get("unit"), f.get("label") or k.replace("_", " ").capitalize()
+        # la etiqueta a veces ya trae la unidad ("Distancia (m)"): no repetirla en el valor
+        out.append((label, f"{v} {unit}" if unit and f"({unit})" not in label else str(v)))
     return out
 
 
