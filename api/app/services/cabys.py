@@ -49,7 +49,7 @@ def _normalize(raw: object) -> list[dict]:
         except (TypeError, ValueError):
             tax = None
         cats = x.get("categorias") or []
-        out.append({"code": code, "description": str(x.get("descripcion") or "").strip(), "tax_rate": tax, "categories": [str(c) for c in cats][:8]})
+        out.append({"code": code, "description": str(x.get("descripcion") or "").strip(), "tax_rate": tax, "categories": [str(c) for c in cats][-2:]})
     return out
 
 

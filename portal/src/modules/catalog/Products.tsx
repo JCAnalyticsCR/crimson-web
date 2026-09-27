@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, fmtMoney, parseTs, type Product } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 import { GalleryField, type GalleryImage } from "../../ui/MediaPicker";
+import { Lookup, type LookupItem } from "../../ui/Lookup";
 
 type Tax = { id: number; name: string; rate: number };
 type Named = { id: number; name: string };
@@ -13,12 +14,15 @@ type Full = Product & {
   cost: number | null; cost_currency: string; margin_pct: number | null; brand: string | null; model: string | null; supplier_sku: string | null; supplier_stock: number | null;
   tax_ids: number[]; description_invoice: string | null; description_store: string | null; min_stock: number; images: GalleryImage[];
   supplier_id: number | null; weight_kg: number | null; registration_number: string | null; cabys_description: string | null; tariff_code: string | null; active: boolean;
+  warehouse_id: number | null;
 };
+type Cabys = { code: string; description: string; tax_rate: number | null; categories: string[] };
 
 const blank = {
   name: "", code: "", item_type: "producto", price: "0", currency: "CRC", cabys_code: "", description_invoice: "", description_store: "", unit: "Unid",
   show_on_web: false, min_stock: 0, tax_ids: [] as number[], category_id: "" as string, supplier_id: "" as string, weight_kg: "", images: [] as GalleryImage[],
   registration_number: "", tariff_code: "", cost: "", cost_currency: "USD", margin_pct: "", brand: "", model: "", supplier_sku: "",
+  cabys_description: "", warehouse_id: "" as string,
 };
 type Edit = typeof blank & { id?: number };
 
@@ -38,8 +42,8 @@ export default function Products() {
   const [newCat, setNewCat] = useState<string | null>(null);
   const [avail, setAvail] = useState<Availability | null>(null);
   /* "Aquí no puedo filtrar nada" fue el reclamo de Andrés con 200 productos del proveedor encima. */
-  const [f, setF] = useState({ item_type: "", category_id: "", brand: "", supplier_id: "", web: "", sin_cabys: false });
-  const [opts, setOpts] = useState<{ brands: string[]; categories: Named[]; suppliers: Named[]; sin_cabys: number } | null>(null);
+  const [f, setF] = useState({ item_type: "", category_id: "", brand: "", supplier_id: "", web: "", sin_cabys: false, warehouse_id: "" });
+  const [opts, setOpts] = useState<{ brands: string[]; categories: Named[]; suppliers: Named[]; sin_cabys: number; warehouses: Named[] } | null>(null);
   const [toggling, setToggling] = useState<number | null>(null);
   const verPrecios = allows("catalog.precios");
   const verCostos = allows("catalog.costos"); // el costo del proveedor es solo de administración
@@ -53,6 +57,7 @@ export default function Products() {
     if (f.supplier_id) qs.set("supplier_id", f.supplier_id);
     if (f.web) qs.set("web", f.web);
     if (f.sin_cabys) qs.set("sin_cabys", "true");
+    if (f.warehouse_id) qs.set("warehouse_id", f.warehouse_id);
     return api<{ items: Product[] }>(`/products?${qs}`).then((r) => setItems(r.items));
   }, [q, f]);
   useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); }, [load]);
@@ -72,6 +77,7 @@ export default function Products() {
       weight_kg: f.weight_kg != null ? String(f.weight_kg) : "", images: f.images || [], registration_number: f.registration_number || "", tariff_code: f.tariff_code || "",
       cost: f.cost != null ? String(f.cost) : "", cost_currency: f.cost_currency || "USD", margin_pct: f.margin_pct != null ? String(f.margin_pct) : "",
       brand: f.brand || "", model: f.model || "", supplier_sku: f.supplier_sku || "",
+      cabys_description: f.cabys_description || "", warehouse_id: f.warehouse_id ? String(f.warehouse_id) : "",
     });
     setTab("general");
     setAvail(null);
@@ -88,6 +94,7 @@ export default function Products() {
         weight_kg: b.weight_kg ? Number(b.weight_kg) : null, cabys_code: b.cabys_code || null, registration_number: b.registration_number || null, tariff_code: b.tariff_code || null,
         cost: b.cost === "" ? null : Number(b.cost), margin_pct: b.margin_pct === "" ? null : Number(b.margin_pct),
         brand: b.brand || null, model: b.model || null, supplier_sku: b.supplier_sku || null,
+        cabys_description: b.cabys_description || null, warehouse_id: b.warehouse_id ? Number(b.warehouse_id) : null,
       };
       const saved = await api<{ id: number }>(id ? `/products/${id}` : "/products", { method: id ? "PUT" : "POST", json: body });
       if (id || variants.length) {
@@ -111,6 +118,32 @@ export default function Products() {
     try { const c = await api<Named>("/categories", { method: "POST", json: { name: newCat.trim() } }); setCats([...cats, c]); setEdit({ ...edit, category_id: String(c.id) }); setNewCat(null); }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
+
+  /* Buscador CABYS por descripción: el API hace de proxy a Hacienda (con caché). Los 218 productos de la
+     lista del proveedor entraron sin CABYS y escribir 13 dígitos de memoria no es realista. */
+  const cabysHits = useRef<Record<string, Cabys>>({});
+  const searchCabys = useCallback(async (text: string): Promise<LookupItem[]> => {
+    const t = text.trim();
+    if (t.length < 3) return [];
+    const onlyDigits = /^\d{13}$/.test(t);
+    try {
+      const rows = await api<Cabys[]>(`/cabys?${onlyDigits ? `codigo=${t}` : `q=${encodeURIComponent(t)}&top=20`}`);
+      rows.forEach((r) => { cabysHits.current[r.code] = r; });
+      if (!rows.length) return [{ id: -1, label: "Sin resultados en el CABYS", hint: "Probá con otra palabra (cámara, cable, switch…)" }];
+      return rows.map((r) => ({ id: Number(r.code), label: r.description, hint: `${r.code} · IVA ${r.tax_rate ?? "?"}%` }));
+    } catch (e) {
+      return [{ id: -1, label: e instanceof Error ? e.message : "Hacienda no respondió", hint: "Podés escribir el código de 13 dígitos a mano" }];
+    }
+  }, []);
+  const pickCabys = (it: LookupItem) => {
+    if (it.id < 0 || !edit) return;
+    const code = String(it.id).padStart(13, "0");
+    const hit = cabysHits.current[code];
+    const tax = hit?.tax_rate != null ? taxes.find((t) => Number(t.rate) === Number(hit.tax_rate)) : undefined;
+    setEdit({ ...edit, cabys_code: code, cabys_description: hit?.description || it.label, tax_ids: tax ? [tax.id] : edit.tax_ids });
+    if (hit?.tax_rate != null) toast(tax ? `CABYS ${code} · impuesto sugerido ${hit.tax_rate}% aplicado` : `CABYS ${code} · Hacienda sugiere IVA ${hit.tax_rate}%, pero no está configurado`, tax ? "ok" : "bad");
+  };
+  const whName = (id: number | null | undefined) => (id ? opts?.warehouses?.find((w) => w.id === id)?.name || "—" : "—");
 
   const canEdit = edit?.id ? allows("catalog.editar") : allows("catalog.crear");
   const setV = (i: number, patch: Partial<Variant>) => setVariants(variants.map((v, j) => (j === i ? { ...v, ...patch } : v)));
@@ -141,17 +174,18 @@ export default function Products() {
           {!!opts?.brands.length && <select className="select select--sm" value={f.brand} onChange={(e) => setF({ ...f, brand: e.target.value })}><option value="">Toda marca</option>{opts.brands.map((b) => <option key={b} value={b}>{b}</option>)}</select>}
           <select className="select select--sm" value={f.supplier_id} onChange={(e) => setF({ ...f, supplier_id: e.target.value })}><option value="">Todo proveedor</option>{(opts?.suppliers || suppliers).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
           <select className="select select--sm" value={f.web} onChange={(e) => setF({ ...f, web: e.target.value })}><option value="">En la tienda: todos</option><option value="true">Publicados</option><option value="false">Ocultos</option></select>
+          {!!opts?.warehouses?.length && <select className="select select--sm" value={f.warehouse_id} onChange={(e) => setF({ ...f, warehouse_id: e.target.value })} title="Bodega o inventario de origen"><option value="">Toda bodega</option>{opts.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>}
           {!!opts?.sin_cabys && <button className={`btn btn--sm ${f.sin_cabys ? "btn--crimson" : "btn--ghost"}`} onClick={() => setF({ ...f, sin_cabys: !f.sin_cabys })} title="Sin CABYS no se puede facturar">Sin CABYS ({opts.sin_cabys})</button>}
-          {(q || f.item_type || f.category_id || f.brand || f.supplier_id || f.web || f.sin_cabys) && <button className="btn btn--ghost btn--sm" onClick={() => { setQ(""); setF({ item_type: "", category_id: "", brand: "", supplier_id: "", web: "", sin_cabys: false }); }}><Icon d={I.x} size={14} />Limpiar</button>}
+          {(q || f.item_type || f.category_id || f.brand || f.supplier_id || f.web || f.sin_cabys || f.warehouse_id) && <button className="btn btn--ghost btn--sm" onClick={() => { setQ(""); setF({ item_type: "", category_id: "", brand: "", supplier_id: "", web: "", sin_cabys: false, warehouse_id: "" }); }}><Icon d={I.x} size={14} />Limpiar</button>}
           <button className="btn btn--ghost btn--sm" onClick={load} style={{ marginLeft: "auto" }}><Icon d={I.refresh} /></button>
         </div>
         {items.length === 0 ? <Empty hint="Nada con esos filtros. Probá limpiarlos o creá el producto." /> : (
           <table className="table">
-            <thead><tr><th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th>{verPrecios && <th className="num">Precio</th>}<th>IVA</th><th>Web</th><th /></tr></thead>
+            <thead><tr><th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th>Bodega</th>{verPrecios && <th className="num">Precio</th>}<th>IVA</th><th>Web</th><th /></tr></thead>
             <tbody>{items.map((p) => (
               <tr key={p.id}>
                 <td>{thumb(p) ? <span style={{ display: "block", width: 36, height: 36, borderRadius: 8, background: `center/cover no-repeat url("${thumb(p)}")`, border: "1px solid var(--hair)" }} /> : <span style={{ display: "grid", placeItems: "center", width: 36, height: 36, borderRadius: 8, background: "var(--bg-2)", color: "var(--text-3)" }}><Icon d={I.products} size={16} /></span>}</td>
-                <td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.item_type}</td><td className="mono muted">{p.cabys_code || "—"}</td>{verPrecios && <td className="num money">{fmtMoney(p.price, p.currency)}</td>}<td className="muted">{p.tax_rate ?? "—"}%</td><td><button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={!allows("catalog.editar") || toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-pressed={p.show_on_web}><i /></button></td>
+                <td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.item_type}</td><td className="mono muted">{p.cabys_code || "—"}</td><td className="muted" style={{ fontSize: 13 }}>{whName((p as Product & { warehouse_id?: number | null }).warehouse_id)}</td>{verPrecios && <td className="num money">{fmtMoney(p.price, p.currency)}</td>}<td className="muted">{p.tax_rate ?? "—"}%</td><td><button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={!allows("catalog.editar") || toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-pressed={p.show_on_web}><i /></button></td>
                 <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => open(p.id)}>Ver</button></td>
               </tr>
             ))}</tbody>
@@ -174,7 +208,9 @@ export default function Products() {
               {verPrecios && <Field label="Precio (sin IVA)"><input className="input input--mono" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} /></Field>}
               <Field label="Divisa"><select className="select" value={edit.currency} onChange={(e) => setEdit({ ...edit, currency: e.target.value })}><option>CRC</option><option>USD</option></select></Field>
               <Field label="Impuesto"><select className="select" value={edit.tax_ids[0] ?? ""} onChange={(e) => setEdit({ ...edit, tax_ids: e.target.value ? [Number(e.target.value)] : [] })}><option value="">Sin impuesto</option>{taxes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></Field>
-              <Field label="Código CABYS" hint="13 dígitos (Hacienda)."><input className="input input--mono" style={{ textAlign: "left" }} maxLength={13} value={edit.cabys_code} onChange={(e) => setEdit({ ...edit, cabys_code: e.target.value })} /></Field>
+              <Field label="Buscar CABYS" hint="Por descripción (ej. cámara de video): trae el código y el impuesto sugerido."><Lookup value={edit.cabys_description} placeholder="Buscar en el catálogo de Hacienda…" fetcher={searchCabys} disabled={!canEdit} onSelect={(it, text) => { if (it) pickCabys(it); else setEdit({ ...edit, cabys_description: text }); }} /></Field>
+              <Field label="Código CABYS" hint="13 dígitos (Hacienda)."><input className="input input--mono" style={{ textAlign: "left" }} maxLength={13} value={edit.cabys_code} onChange={(e) => setEdit({ ...edit, cabys_code: e.target.value.replace(/\D/g, "") })} /></Field>
+              <Field label="Bodega de origen" hint="De qué inventario sale este producto."><select className="select" value={edit.warehouse_id} onChange={(e) => setEdit({ ...edit, warehouse_id: e.target.value })}><option value="">—</option>{(opts?.warehouses || []).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></Field>
               <Field label="Unidad"><input className="input" value={edit.unit} onChange={(e) => setEdit({ ...edit, unit: e.target.value })} /></Field>
               <Field label="Stock mínimo"><input className="input input--mono" type="number" value={edit.min_stock} onChange={(e) => setEdit({ ...edit, min_stock: Number(e.target.value) })} /></Field>
               <Field label="Categoría">
