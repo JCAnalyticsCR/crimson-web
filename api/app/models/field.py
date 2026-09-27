@@ -58,8 +58,14 @@ class Survey(TenantMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(16), default="borrador", index=True)  # borrador | enviado | cotizado | cerrado
     technician_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), index=True)
     visit_date: Mapped[date | None] = mapped_column(Date)
-    techs: Mapped[int] = mapped_column(Integer, default=2)  # tecnicos necesarios
-    days: Mapped[float] = mapped_column(Numeric(6, 2), default=1)  # dias estimados
+    # techs/days quedan por compatibilidad: siempre reflejan el "personal tecnico" de labor.
+    # Andres no sabia si "tecnicos" eran los que visitaron o los que hacen la obra; ahora son dos cosas:
+    # visit_tech_ids (informativo, quien fue al sitio) y labor (personal requerido por tipo, para costear).
+    techs: Mapped[int] = mapped_column(Integer, default=2)  # personal tecnico requerido para la obra
+    days: Mapped[float] = mapped_column(Numeric(6, 2), default=1)  # dias del personal tecnico
+    visit_tech_ids: Mapped[list | None] = mapped_column(JSON, default=list)  # usuarios que hicieron la visita
+    labor: Mapped[dict | None] = mapped_column(JSON, default=dict)  # {tecnico|civil|contratado: {people, days}}
+    sent_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))  # quien lo envio a oficina
     notes: Mapped[str | None] = mapped_column(Text)
     photos: Mapped[list] = mapped_column(JSON, default=list)
     quote_id: Mapped[int | None] = mapped_column(ForeignKey("quote.id"))
@@ -95,6 +101,10 @@ class SurveyItem(Base):
     quantity: Mapped[float] = mapped_column(Numeric(14, 3), default=1)
     unit: Mapped[str] = mapped_column(String(10), default="Unid")
     note: Mapped[str | None] = mapped_column(String(200))
+    # equipo (camara, UPS, antena, gabinete) o material (cable, tubo, placa): el costeo los agrupa aparte
+    kind: Mapped[str] = mapped_column(String(10), default="material", server_default="material")
+    # costo unitario en colones escrito en el costeo cuando el producto no tiene costo de proveedor
+    unit_cost: Mapped[float | None] = mapped_column(Numeric(14, 4))
 
 
 class Project(TenantMixin, TimestampMixin, Base):

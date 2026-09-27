@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
-from ..models import Category, Customer, Invoice, InvoiceLine, Product, ProductTax, Supplier, Tax
+from ..models import Category, Customer, Invoice, InvoiceLine, Product, ProductTax, Supplier, Tax, Warehouse
 from ..services import tabular as tb
 from ..services.documents import audit
 from ..services.totals import d
@@ -27,6 +27,9 @@ from ..services.totals import d
 router = APIRouter(prefix="/import", tags=["importador"])
 
 MAX = 5 * 1024 * 1024
+
+# Bodega / inventario de origen del producto, por nombre (Andres quiere ver de que inventario viene)
+WAREHOUSE_ALIASES = ("bodega", "bodega_origen", "inventario_origen", "almacen", "warehouse")
 
 COLS = {
     "customers": {
@@ -51,6 +54,7 @@ COLS = {
         "currency": ("moneda", "divisa", "currency"),
         "description_invoice": ("descripcion_larga", "descripcion_factura", "detalle_factura"),
         "stock_min": ("stock_minimo", "minimo", "min_stock"),
+        "warehouse": WAREHOUSE_ALIASES + ("inventario",),
     },
     "suppliers": {
         "name": ("nombre", "proveedor", "razon_social", "name"),
@@ -75,10 +79,10 @@ COLS = {
 
 TEMPLATES = {
     "customers": ["Nombre", "Tipo de identificacion", "Identificacion", "Correo electronico", "Telefono", "WhatsApp", "Moneda", "Notas"],
-    "products": ["Codigo", "Nombre", "Precio", "Tipo", "CABYS", "IVA", "Unidad", "Moneda"],
+    "products": ["Codigo", "Nombre", "Precio", "Tipo", "CABYS", "IVA", "Unidad", "Moneda", "Bodega"],
     "suppliers": ["Nombre", "Identificacion", "Correo electronico", "Telefono"],
     "invoices": ["Numero", "Fecha", "Cliente", "Identificacion", "Subtotal", "Impuesto", "Total", "Saldo", "Moneda", "Clave"],
-    "catalogo": ["Categoria", "Codigo", "Descripcion", "Stock", "Precio"],
+    "catalogo": ["Categoria", "Codigo", "Descripcion", "Stock", "Precio", "Bodega"],
 }
 
 
@@ -105,6 +109,25 @@ def _id_type(raw, number: str | None) -> str:
 def _currency(v) -> str:
     s = tb.norm(v)
     return "USD" if s in ("usd", "dolares", "dolar", "us") else "CRC"
+
+
+def _warehouse(db: Session, tid: int, name, cache: dict, commit: bool) -> tuple[Warehouse | None, bool]:
+    """Bodega por nombre (sin distinguir mayusculas). Igual que categorias y proveedores en este importador,
+    si no existe se crea al aplicar. Devuelve (bodega, es_nueva)."""
+    name = tb.text(name, 120)
+    if not name or re.fullmatch(r"[\d.,\s-]+", name):  # un numero es una existencia, no una bodega
+        return None, False
+    key = name.lower()
+    if key in cache:
+        return cache[key]
+    w = db.scalar(select(Warehouse).where(Warehouse.tenant_id == tid, func.lower(Warehouse.name) == key))
+    nueva = w is None
+    if nueva and commit:
+        w = Warehouse(tenant_id=tid, name=name, is_default=False, active=True)
+        db.add(w)
+        db.flush()
+    cache[key] = (w, nueva)
+    return w, nueva
 
 
 # ---------- procesadores: devuelven (accion, detalle) y aplican si commit ----------
@@ -153,6 +176,7 @@ def _products(db: Session, tid: int, rows: list[dict], commit: bool):
     taxes = {d(t.rate): t for t in db.scalars(select(Tax).where(Tax.tenant_id == tid, Tax.active))}
     out = []
     seen = set()
+    whs: dict = {}
     for i, r in enumerate(rows, start=2):
         v = _row("products", r)
         code = tb.text(v["code"], 60)
@@ -182,11 +206,15 @@ def _products(db: Session, tid: int, rows: list[dict], commit: bool):
         kind = "servicio" if "serv" in tb.norm(v["item_type"]) else "producto"
         p = db.scalar(select(Product).where(Product.tenant_id == tid, Product.code == code))
         action = "actualizar" if p else "nuevo"
+        wh, wh_new = _warehouse(db, tid, v["warehouse"], whs, commit)
+        wh_txt = f" · bodega {tb.text(v['warehouse'], 120)}{' (nueva)' if wh_new else ''}" if (wh is not None or wh_new) else ""
         if commit:
             if not p:
                 p = Product(tenant_id=tid, code=code, name=name)
                 db.add(p)
             p.name, p.price, p.item_type = name, price, kind
+            if wh is not None:
+                p.warehouse_id = wh.id
             p.cabys_code = cabys or p.cabys_code
             p.unit = tb.text(v["unit"], 10) or p.unit or ("Sp" if kind == "servicio" else "Unid")
             p.currency = _currency(v["currency"]) if v["currency"] else (p.currency or "CRC")
@@ -195,7 +223,7 @@ def _products(db: Session, tid: int, rows: list[dict], commit: bool):
             p.taxes.clear()
             db.flush()
             p.taxes.append(ProductTax(tax_id=taxes[rate].id))
-        out.append({"row": i, "action": action, "detail": f"{code} · {name} · {price:,.2f} · IVA {rate}%"})
+        out.append({"row": i, "action": action, "detail": f"{code} · {name} · {price:,.2f} · IVA {rate}%{wh_txt}"})
     return out
 
 
@@ -307,6 +335,7 @@ CATALOG_COLS = {
     "cost": ("precio", "costo", "price", "cost", "precio_unitario", "precio_lista"),
     "stock": ("stock", "existencia", "existencias", "disponible", "inventario"),
     "section": ("fotografia", "categoria", "familia", "linea"),
+    "warehouse": WAREHOUSE_ALIASES,
 }
 GROUPS = (
     "ACCESORIOS",
@@ -381,6 +410,7 @@ def _catalog(db: Session, tid: int, rows: list[dict], commit: bool, opts: dict |
         db.flush()
     iva13 = db.scalar(select(Tax).where(Tax.tenant_id == tid, Tax.rate_code == "08"))
     cats: dict = {}
+    whs: dict = {}
     section = ("", "")
     out, seen = [], set()
     for i, r in enumerate(rows, start=2):
@@ -409,6 +439,11 @@ def _catalog(db: Session, tid: int, rows: list[dict], commit: bool, opts: dict |
         model = model.group(1).upper() if model else None
         brand = "Hikvision" if "hikvision" in raw_name.lower() else default_brand
         stock = tb.num(v["stock"])
+        wh_name = v["warehouse"]
+        if not wh_name and v["stock"] not in (None, "") and stock is None:
+            # en las listas de proveedor "Inventario" suele ser la existencia (numero); si trae texto, es la bodega
+            wh_name = v["stock"]
+        wh, wh_new = _warehouse(db, tid, wh_name, whs, commit)
         price = pricing.sale_price(db, cost, cost_currency, "CRC", margin, fx)
         pr = db.scalar(select(Product).where(Product.tenant_id == tid, Product.code == code))
         action = "actualizar" if pr else "nuevo"
@@ -432,11 +467,15 @@ def _catalog(db: Session, tid: int, rows: list[dict], commit: bool, opts: dict |
             pr.supplier_stock = int(stock) if stock is not None else None
             pr.supplier_updated_at = datetime.now(UTC)
             pr.category_id = cat.id if cat else pr.category_id
+            if wh is not None:
+                pr.warehouse_id = wh.id
         out.append(
             {
                 "row": i,
                 "action": action,
-                "detail": f"{code} · {headline[:60]} · costo {cost_currency} {cost:,.2f} → venta ₡{price:,.0f}" + (f" · {cat_name}" if cat_name else ""),
+                "detail": f"{code} · {headline[:60]} · costo {cost_currency} {cost:,.2f} → venta ₡{price:,.0f}"
+                + (f" · {cat_name}" if cat_name else "")
+                + (f" · bodega {tb.text(wh_name, 120)}{' (nueva)' if wh_new else ''}" if (wh is not None or wh_new) else ""),
             }
         )
     return out

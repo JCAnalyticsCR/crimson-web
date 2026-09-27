@@ -72,6 +72,7 @@ class ProductIn(BaseModel):
     unit: str = "Unid"
     min_stock: int = 0
     category_id: int | None = None
+    warehouse_id: int | None = None  # bodega de origen por defecto
     tax_ids: list[int] = Field(default_factory=list)
     active: bool = True
 
@@ -104,6 +105,7 @@ class ProductOut(BaseModel):
     unit: str
     min_stock: int
     category_id: int | None
+    warehouse_id: int | None = None
     active: bool
     tax_ids: list[int] = []
     tax_rate: float | None = None

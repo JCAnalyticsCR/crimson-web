@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
-from ..models import Category, Customer, Product, ProductTax, Supplier, Tax
+from ..models import Category, Customer, Product, ProductTax, Supplier, Tax, Warehouse
 from ..schemas.crm import (
     CategoryIn,
     CategoryOut,
@@ -23,6 +23,7 @@ from ..schemas.crm import (
     TaxIn,
     TaxOut,
 )
+from ..services import cabys as cabys_svc
 
 router = APIRouter(tags=["catalogo"])
 
@@ -133,6 +134,7 @@ def products(
     supplier_id: int | None = None,
     web: bool | None = None,
     sin_cabys: bool = False,
+    warehouse_id: int | None = None,
     cursor: int | None = None,
     limit: int = Query(20, le=100),
     p: Principal = Depends(require("catalog", "ver")),
@@ -158,6 +160,8 @@ def products(
         stmt = stmt.where(Product.show_on_web.is_(web))
     if sin_cabys:
         stmt = stmt.where(or_(Product.cabys_code.is_(None), Product.cabys_code == ""))
+    if warehouse_id:
+        stmt = stmt.where(Product.warehouse_id == warehouse_id)
     return _page(db, stmt, cursor, limit, Product, lambda pr: _product_out(pr, p))
 
 
@@ -177,13 +181,38 @@ def product_filters(p: Principal = Depends(require("catalog", "ver")), db: Sessi
         "categories": [{"id": c.id, "name": c.name} for c in db.scalars(select(Category).where(Category.tenant_id == p.tenant.id).order_by(Category.name))],
         "suppliers": [{"id": s.id, "name": s.name} for s in db.scalars(select(Supplier).where(Supplier.tenant_id == p.tenant.id).order_by(Supplier.name))],
         "sin_cabys": sin_cabys,
+        # la bodega de origen se muestra en el catalogo aunque el rol no tenga inventario.ver
+        "warehouses": [
+            {"id": w.id, "name": w.name}
+            for w in db.scalars(
+                select(Warehouse).where(Warehouse.tenant_id == p.tenant.id, Warehouse.active).order_by(Warehouse.is_default.desc(), Warehouse.id)
+            )
+        ],
     }
+
+
+@router.get("/cabys")
+def cabys(
+    q: str | None = Query(None, max_length=120),
+    codigo: str | None = Query(None, max_length=20),
+    top: int = Query(20, ge=1, le=50),
+    _: Principal = Depends(require("catalog", "ver")),
+):
+    """Proxy al buscador CABYS de Hacienda (por descripcion o por codigo de 13 digitos)."""
+    if not codigo and len((q or "").strip()) < 3:
+        raise HTTPException(422, "Escribí al menos 3 letras para buscar en el CABYS")
+    try:
+        return cabys_svc.search(q=q, codigo=codigo, top=top)
+    except cabys_svc.CabysUnavailable as e:
+        raise HTTPException(502, "El buscador CABYS de Hacienda no respondió. Intentá de nuevo o escribí el código de 13 dígitos.") from e
 
 
 @router.post("/products", response_model=ProductOut, status_code=201)
 def create_product(data: ProductIn, p: Principal = Depends(require("catalog", "crear")), db: Session = Depends(get_db)):
     if db.scalar(select(func.count()).select_from(Product).where(Product.tenant_id == p.tenant.id, Product.code == data.code)):
         raise HTTPException(409, "Ya existe un producto con ese codigo")
+    if data.warehouse_id:
+        _own(db, Warehouse, data.warehouse_id, p.tenant.id)
     pr = Product(tenant_id=p.tenant.id, **data.model_dump(exclude={"tax_ids"}))
     for tid in data.tax_ids:
         _own(db, Tax, tid, p.tenant.id)
@@ -247,6 +276,8 @@ def update_product(pid: int, data: ProductIn, p: Principal = Depends(require("ca
     pr = _own(db, Product, pid, p.tenant.id)
     if data.code != pr.code and db.scalar(select(func.count()).select_from(Product).where(Product.tenant_id == p.tenant.id, Product.code == data.code)):
         raise HTTPException(409, "Ya existe un producto con ese codigo")
+    if data.warehouse_id:
+        _own(db, Warehouse, data.warehouse_id, p.tenant.id)
     for k, v in data.model_dump(exclude={"tax_ids"}, exclude_unset=True).items():  # lo que no se envia no se borra
         setattr(pr, k, v)
     if "tax_ids" in data.model_fields_set:
