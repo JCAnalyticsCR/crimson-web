@@ -8,6 +8,7 @@ import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 import { Lookup, searchCustomers, searchProducts } from "../../ui/Lookup";
 import { PhotoStrip } from "../../ui/MediaPicker";
+import { InviteTechButton } from "./InviteTech";
 
 type Material = { id?: number; product_id: number | null; name: string; quantity: string; unit: string; planned: string };
 type Task = { text: string; done?: boolean };
@@ -224,7 +225,7 @@ export default function WorkOrders() {
           <div className="grid-3">
             <Field label="Trabajo"><input className="input" autoFocus value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Instalación de 8 cámaras" /></Field>
             <Field label="Tipo"><select className="select" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>{Object.entries(KINDS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
-            <Field label="Técnico"><select className="select" value={form.technician_id} onChange={(e) => setForm({ ...form, technician_id: e.target.value })}><option value="">Sin asignar</option>{techs.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></Field>
+            <Field label="Técnico" hint={allows("settings.configurar") ? "¿No está en la lista? Invitalo con + Técnico." : undefined}><div style={{ display: "flex", gap: 6 }}><select className="select" value={form.technician_id} onChange={(e) => setForm({ ...form, technician_id: e.target.value })}><option value="">Sin asignar</option>{techs.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select><InviteTechButton /></div></Field>
             <Field label="Cliente"><Lookup value={form.customer_name} placeholder="Buscar cliente…" fetcher={searchCustomers} onSelect={(it, text) => setForm({ ...form, customer_id: it ? String(it.id) : "", customer_name: text })} /></Field>
             <Field label="Fecha y hora"><input className="input" type="datetime-local" value={form.scheduled_at} onChange={(e) => setForm({ ...form, scheduled_at: e.target.value })} /></Field>
             <Field label="Sitio"><input className="input" value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value })} /></Field>

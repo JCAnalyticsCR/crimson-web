@@ -71,6 +71,8 @@ class Product(TenantMixin, TimestampMixin, Base):
     unit: Mapped[str] = mapped_column(String(10), default="Unid")
     min_stock: Mapped[int] = mapped_column(Integer, default=0)
     category_id: Mapped[int | None] = mapped_column(ForeignKey("category.id"))
+    # bodega de origen por defecto: de que inventario sale el producto (Andres la pidio en el importador)
+    warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouse.id"), index=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     taxes: Mapped[list["ProductTax"]] = relationship(cascade="all, delete-orphan")

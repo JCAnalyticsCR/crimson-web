@@ -140,31 +140,237 @@ SPECS: dict[str, dict] = {
 }
 
 
-def suggest_materials(kind: str, points: list) -> list[dict]:
-    """Sugerencia simple a partir de los puntos: cantidad de puntos y metros sumados.
-    No pretende ser exacta; es el punto de partida que administracion ajusta."""
+# ---------- equipos vs materiales ----------
+# Un equipo es lo que se instala y tiene serie (camara, UPS, antena, gabinete); un material es consumible
+# (cable, tubo, placa). Andres los quiere en dos bloques y el costeo los agrupa igual.
+EQUIPMENT_WORDS = (
+    "camara",
+    "cámara",
+    "nvr",
+    "dvr",
+    "ups",
+    "antena",
+    "gabinete",
+    "rack",
+    "switch",
+    "access point",
+    "router",
+    "firewall",
+    "terminal",
+    "cerradura",
+    "barrera",
+    "lector",
+    "disco duro",
+    "monitor",
+    "fuente",
+    "bateria",
+    "batería",
+    "patch panel",
+    "controladora",
+    "ptz",
+    "domo",
+    "bullet",
+)
+
+
+def classify_kind(name: str) -> str:
+    n = (name or "").lower()
+    return "equipo" if any(w in n for w in EQUIPMENT_WORDS) else "material"
+
+
+# ---------- numeros escritos en el celular ----------
+def parse_number(v) -> Decimal | None:
+    """ "2,5", "2.5", 2.5 -> Decimal("2.5"). Vacio -> None. Lo que no es numero -> ValueError."""
+    if v is None or v == "" or isinstance(v, bool):
+        return None
+    try:
+        return Decimal(str(v).strip().replace(",", "."))
+    except Exception as e:  # noqa: BLE001
+        raise ValueError(str(v)) from e
+
+
+def normalize_point_data(kind: str, data: dict) -> dict:
+    """Los campos numericos (metros, altura) se guardan como numero con decimales, nunca truncados.
+    Se usa float en el JSON porque JSON no tiene Decimal; 2.5 m sigue siendo 2.5 m."""
+    spec = SPECS.get(kind, SPECS["otro"])
+    out = dict(data or {})
+    for f in spec["fields"]:
+        if f["type"] != "number" or f["key"] not in out:
+            continue
+        try:
+            n = parse_number(out[f["key"]])
+        except ValueError as e:
+            raise ValueError(f"{f['label']}: '{e}' no es un número") from e
+        if n is not None and n < 0:
+            raise ValueError(f"{f['label']}: no puede ser negativo")
+        out[f["key"]] = None if n is None else (int(n) if n == n.to_integral_value() else float(n))
+    return out
+
+
+# ---------- sugerencia de materiales ----------
+# Palabras en las observaciones de cada punto que piden algo que el formulario no pregunta.
+NOTE_RULES = (
+    (("cielo raso", "cielorraso", "cielo falso"), "Reparación de cielo raso (material)", "material", "m²"),
+    (("poste",), "Brazo / abrazadera para poste", "material", "Unid"),
+    (("concreto", "romper", "perforar", "pared de block", "bloque"), "Anclajes y tacos expansivos", "material", "Unid"),
+    (
+        ("sin energia", "sin energía", "no hay energia", "no hay energía", "tomacorriente", "no hay toma"),
+        "Tomacorriente y extensión eléctrica",
+        "material",
+        "Unid",
+    ),
+    (("andamio", "escalera", "muy alto", "altura"), "Alquiler de andamio / escalera extensible", "material", "Unid"),
+    (("lluvia", "intemperie", "sol directo"), "Caja estanca IP66", "material", "Unid"),
+    (("fibra",), "Convertidor de medios de fibra", "equipo", "Unid"),
+)
+
+
+def _data(p) -> dict:
+    return (p.data if hasattr(p, "data") else p.get("data")) or {}
+
+
+def _code(p) -> str:
+    return (p.code if hasattr(p, "code") else p.get("code")) or "?"
+
+
+def _notes(p) -> str:
+    return ((p.notes if hasattr(p, "notes") else p.get("notes")) or "").lower()
+
+
+def _num(data: dict, key: str) -> Decimal:
+    try:
+        return parse_number(data.get(key)) or Decimal(0)
+    except ValueError:  # dato escrito a mano en el celular
+        return Decimal(0)
+
+
+def _codes(codes: list[str]) -> str:
+    return ", ".join(codes[:6]) + (f" y {len(codes) - 6} más" if len(codes) > 6 else "")
+
+
+def _ceil(x: Decimal) -> int:
+    return int(x) + (1 if x % 1 else 0)
+
+
+def suggest_materials(kind: str, points: list, items: list | None = None) -> list[dict]:
+    """Sugerencia a partir de los puntos levantados, sus observaciones y lo que ya esta cargado.
+
+    No reemplaza nada: devuelve propuestas con el motivo; el usuario elige cuales agregar.
+    action: nuevo (no existe), sumar (ya existe y falta cantidad), cubierto (ya alcanza), revisar
+    (material habitual del tipo de solucion sin cantidad calculable)."""
     spec = SPECS.get(kind, SPECS["otro"])
     n = len(points)
     if not n:
         return []
-    out: list[dict] = [{"name": f"{spec['point_label']} ({spec['point_prefix']})", "quantity": n, "unit": "Unid"}]
+    out: list[dict] = []
+
+    def add(name: str, qty, unit: str, reason: str, kind_: str | None = None) -> None:
+        qty = Decimal(str(qty))
+        for o in out:
+            if o["name"] == name:
+                o["quantity"] += qty
+                o["reason"] += f"; {reason}"
+                return
+        out.append({"name": name, "quantity": qty, "unit": unit, "kind": kind_ or classify_kind(name), "reason": reason})
+
+    # 1) el equipo principal de cada punto, agrupado por sus caracteristicas
+    group_key = {"cctv": ("tipo", "resolucion"), "redes": ("equipo",), "acceso": ("cerradura",), "asistencia": ("metodo",), "anpr": ()}.get(kind, ())
+    groups: dict[str, list[str]] = {}
+    for p in points:
+        data = _data(p)
+        parts = []
+        for k in group_key:
+            v = data.get(k)
+            if isinstance(v, list):
+                v = "/".join(v)
+            if v:
+                parts.append(str(v))
+        label = f"{spec['point_label']} {' '.join(parts)}".strip() if parts else f"{spec['point_label']} ({spec['point_prefix']})"
+        groups.setdefault(label, []).append(_code(p))
+    for label, codes in groups.items():
+        add(label, len(codes), "Unid", f"{len(codes)} punto(s) levantado(s): {_codes(codes)}", "equipo")
+
+    # 2) metros: cable con 15 % de holgura por rutas reales
     meters = Decimal(0)
     for p in points:
-        data = p.data if hasattr(p, "data") else (p.get("data") or {})
+        data = _data(p)
         for key in ("metros", "distancia_m", "distancia_camara_m"):
-            try:
-                meters += Decimal(str(data.get(key) or 0))
-            except Exception:  # noqa: BLE001 - dato escrito a mano en el celular
-                continue
+            meters += _num(data, key)
     rules = spec.get("suggest", {})
     for name, qty in rules.get("per_point", []):
-        out.append({"name": name, "quantity": n * qty, "unit": "Unid"})
+        add(name, n * qty, "Unid", f"{qty} por cada uno de los {n} puntos")
     if meters > 0:
-        holgura = (meters * Decimal("1.15")).quantize(Decimal(1))  # 15 % de holgura por rutas reales
-        out.append({"name": "Cable (metros con 15 % de holgura)", "quantity": holgura, "unit": "m"})
+        holgura = (meters * Decimal("1.15")).quantize(Decimal(1))
+        add("Cable (metros con 15 % de holgura)", holgura, "m", f"{meters:g} m medidos entre los puntos + 15 %", "material")
         for name, per in rules.get("per_meters", []):
-            out.append({"name": name, "quantity": max(1, int(holgura / per) + (1 if holgura % per else 0)), "unit": "Unid"})
+            add(name, max(1, _ceil(holgura / per)), "Unid", f"{holgura} m de cable / {per} m por unidad")
+
+    # 3) reglas por campo del punto (CCTV es el grueso del negocio de Crimson)
+    if kind == "cctv":
+        poe, dc, ext, alto, emt, pvc = [], [], [], [], Decimal(0), Decimal(0)
+        for p in points:
+            data, code = _data(p), _code(p)
+            if data.get("alimentacion") == "PoE":
+                poe.append(code)
+            elif data.get("alimentacion") == "12 VDC":
+                dc.append(code)
+            if data.get("ambiente") == "Exterior":
+                ext.append(code)
+            if _num(data, "altura_m") > 4:
+                alto.append(f"{code} ({_num(data, 'altura_m'):g} m)")
+            dist = _num(data, "distancia_m")
+            if data.get("canalizacion") == "EMT":
+                emt += dist
+            elif data.get("canalizacion") == "PVC":
+                pvc += dist
+        add("Conectores RJ45", n * 2, "Unid", f"2 por cámara ({n} cámaras)", "material")
+        if poe:
+            puertos = 8 if len(poe) <= 7 else (16 if len(poe) <= 15 else 24)
+            add(f"Switch PoE {puertos} puertos", 1, "Unid", f"{len(poe)} cámara(s) PoE: {_codes(poe)}", "equipo")
+        if dc:
+            add("Fuente 12 VDC", len(dc), "Unid", f"cámaras a 12 VDC: {_codes(dc)}", "equipo")
+        if ext:
+            add("Caja de paso exterior", len(ext), "Unid", f"cámaras en exterior: {_codes(ext)}", "material")
+        canales = 4 if n <= 4 else (8 if n <= 8 else (16 if n <= 16 else 32))
+        add(f"NVR {canales} canales", 1, "Unid", f"{n} cámara(s) levantada(s)", "equipo")
+        if emt > 0:
+            add("Tubo EMT 3/4 (3 m)", _ceil(emt * Decimal("1.15") / 3), "Unid", f"{emt:g} m en EMT + 15 %, tubos de 3 m", "material")
+        if pvc > 0:
+            add("Tubo PVC 3/4 (3 m)", _ceil(pvc * Decimal("1.15") / 3), "Unid", f"{pvc:g} m en PVC + 15 %, tubos de 3 m", "material")
+        if alto:
+            add("Alquiler de andamio / escalera extensible", 1, "Unid", f"montaje sobre 4 m: {_codes(alto)}", "material")
+
+    # 4) observaciones de cada punto
+    for words, name, kind_, unit in NOTE_RULES:
+        hits = [_code(p) for p in points if any(w in _notes(p) for w in words)]
+        if hits and not any(o["name"] == name for o in out):
+            qty = 1 if "andamio" in name.lower() else len(hits)
+            add(name, qty, unit, f"observaciones de {_codes(hits)}", kind_)
+
+    # 5) materiales habituales del tipo de solucion: sin cantidad, para revisar
     for extra in spec.get("materials", []):
-        if not any(o["name"] == extra for o in out):
-            out.append({"name": extra, "quantity": 0, "unit": "Unid"})
+        if not any(extra.lower() in o["name"].lower() or o["name"].lower() in extra.lower() for o in out):
+            out.append(
+                {
+                    "name": extra,
+                    "quantity": Decimal(0),
+                    "unit": "Unid",
+                    "kind": classify_kind(extra),
+                    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+                }
+            )
+
+    # 6) cruce con lo ya cargado: no duplicar, proponer sumar
+    existing = list(items or [])
+    for o in out:
+        match = next((it for it in existing if (getattr(it, "name", None) or "").strip().lower() == o["name"].lower()), None)
+        o["item_id"] = getattr(match, "id", None) if match else None
+        o["existing_quantity"] = Decimal(str(match.quantity or 0)) if match else Decimal(0)
+        if o["quantity"] <= 0:
+            o["action"], o["add_quantity"] = ("cubierto" if match else "revisar"), Decimal(0)
+        elif match:
+            falta = o["quantity"] - o["existing_quantity"]
+            o["action"], o["add_quantity"] = ("sumar", falta) if falta > 0 else ("cubierto", Decimal(0))
+        else:
+            o["action"], o["add_quantity"] = "nuevo", o["quantity"]
     return out

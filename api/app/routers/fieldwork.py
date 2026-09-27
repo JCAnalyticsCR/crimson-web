@@ -25,7 +25,7 @@ from ..services import pricing
 from ..services.documents import audit
 from ..services.mail import notify_roles
 from ..services.sequences import next_number
-from ..services.survey_specs import SPECS, suggest_materials
+from ..services.survey_specs import SPECS, classify_kind, normalize_point_data, suggest_materials
 from ..services.totals import d
 
 router = APIRouter(tags=["campo"])
@@ -33,10 +33,49 @@ router = APIRouter(tags=["campo"])
 LABOR_DAY = Decimal(25000)  # costo interno por tecnico por dia (Ajustes: labor_day_cost)
 TRAVEL = Decimal(35000)  # transporte estimado por levantamiento (Ajustes: travel_cost)
 
+# Mano de obra por tipo (lo pidio Andres): cada tipo con su costo por persona por dia en Ajustes.
+# Mientras no se configuren, civil y contratado cuestan lo mismo que el tecnico (no se inventan tarifas).
+LABOR_TYPES: dict[str, tuple[str, str]] = {
+    "tecnico": ("Personal técnico", "labor_day_cost"),
+    "civil": ("Personal de obra civil", "labor_day_cost_civil"),
+    "contratado": ("Personal contratado", "labor_day_cost_contratado"),
+}
+# Quien revisa lo que el tecnico envia. Andres aun no definio quien aprueba: por defecto admin y
+# supervisor (lo que ya se notificaba); se cambia en Ajustes con survey_reviewer_roles sin tocar codigo.
+REVIEWER_ROLES = ("admin", "supervisor")
+
 
 def rates(tenant) -> tuple[Decimal, Decimal]:
     st = tenant.settings or {}
     return d(st.get("labor_day_cost", LABOR_DAY)), d(st.get("travel_cost", TRAVEL))
+
+
+def labor_rates(tenant) -> dict[str, Decimal]:
+    st = tenant.settings or {}
+    base = d(st.get("labor_day_cost", LABOR_DAY))
+    return {k: d(st.get(key, base)) for k, (_, key) in LABOR_TYPES.items()}
+
+
+def per_diem(tenant) -> Decimal:
+    """Viaticos (alimentacion) por persona por dia de obra. 0 si no esta configurado: antes no existia."""
+    return d((tenant.settings or {}).get("per_diem_cost", 0))
+
+
+def reviewer_roles(tenant) -> tuple[str, ...]:
+    roles = (tenant.settings or {}).get("survey_reviewer_roles")
+    return tuple(roles) if roles else REVIEWER_ROLES
+
+
+def survey_labor(s: Survey) -> dict[str, dict]:
+    """Personal requerido por tipo. Levantamientos viejos (sin labor) toman techs/days como personal tecnico."""
+    raw = s.labor or {}
+    out = {}
+    for k in LABOR_TYPES:
+        row = raw.get(k) or {}
+        if k == "tecnico" and not raw:
+            row = {"people": s.techs, "days": s.days}
+        out[k] = {"people": int(row.get("people") or 0), "days": d(row.get("days") or 0)}
+    return out
 
 
 # ---------- Levantamientos ----------
@@ -49,9 +88,22 @@ def _survey(db: Session, sid: int, p: Principal) -> Survey:
     return s
 
 
+def _reviewers(db: Session, tenant) -> list[dict]:
+    """Personas que reciben el aviso de "nuevo levantamiento": lo que el tecnico necesita ver al enviar."""
+    from ..models import TenantUser
+
+    roles = reviewer_roles(tenant)
+    rows = db.scalars(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.active, TenantUser.role_code.in_(roles)))
+    return [{"id": m.user.id, "name": m.user.full_name, "role": m.role_code} for m in rows]
+
+
 def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
     c = db.get(Customer, s.customer_id) if s.customer_id else None
     t = db.get(User, s.technician_id) if s.technician_id else None
+    sender = db.get(User, s.sent_by) if s.sent_by else None
+    visit_ids = [int(x) for x in (s.visit_tech_ids or []) if str(x).isdigit()]
+    visitors = [u.full_name for u in (db.get(User, i) for i in visit_ids) if u]
+    labor = survey_labor(s)
     out = {
         "id": s.id,
         "number": s.number,
@@ -74,10 +126,23 @@ def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
         "points_count": len(s.points),
         "created_at": s.created_at,
         "sent_at": s.sent_at,
+        "sent_by": sender.full_name if sender else None,
+        "visit_tech_ids": visit_ids,
+        "visit_techs": visitors,
+        "labor": {k: {"label": LABOR_TYPES[k][0], "people": v["people"], "days": v["days"]} for k, v in labor.items()},
     }
+    if s.status == "enviado":
+        # "pendiente de revision por": se calcula al leer, asi refleja los roles configurados hoy
+        from ..models import Tenant
+
+        tenant = db.get(Tenant, s.tenant_id)
+        out["pending_review"] = {"roles": list(reviewer_roles(tenant)), "people": [r["name"] for r in _reviewers(db, tenant)]}
     if full:
         out["points"] = [{"id": x.id, "code": x.code, "label": x.label, "data": x.data, "photos": x.photos, "notes": x.notes} for x in s.points]
-        out["items"] = [{"id": i.id, "product_id": i.product_id, "name": i.name, "quantity": i.quantity, "unit": i.unit, "note": i.note} for i in s.items]
+        out["items"] = [
+            {"id": i.id, "product_id": i.product_id, "name": i.name, "quantity": i.quantity, "unit": i.unit, "note": i.note, "kind": i.kind or "material"}
+            for i in s.items
+        ]
     return out
 
 
@@ -97,6 +162,12 @@ class ItemIn(BaseModel):
     quantity: Decimal = Field(Decimal(1), ge=0)
     unit: str = Field("Unid", max_length=10)
     note: str | None = Field(None, max_length=200)
+    kind: str | None = Field(None, pattern="^(equipo|material)$")  # sin dato se clasifica por el nombre
+
+
+class LaborIn(BaseModel):
+    people: int = Field(0, ge=0, le=200)
+    days: Decimal = Field(Decimal(0), ge=0, le=365)
 
 
 class SurveyIn(BaseModel):
@@ -106,12 +177,40 @@ class SurveyIn(BaseModel):
     contact: dict = Field(default_factory=dict)
     site: str | None = Field(None, max_length=300)
     visit_date: date | None = None
-    techs: int = Field(2, ge=1, le=20)
-    days: Decimal = Field(Decimal(1), gt=0, le=365)
+    # compatibilidad: clientes viejos mandan techs/days; si viene labor, manda labor
+    techs: int = Field(2, ge=0, le=200)
+    days: Decimal = Field(Decimal(1), ge=0, le=365)
+    labor: dict[str, LaborIn] | None = None  # tecnico | civil | contratado
+    visit_tech_ids: list[int] = Field(default_factory=list)  # quienes hicieron la visita (informativo)
     notes: str | None = None
     photos: list = Field(default_factory=list)
     points: list[PointIn] = Field(default_factory=list)
     items: list[ItemIn] = Field(default_factory=list)
+
+
+def _labor_payload(data: SurveyIn) -> dict:
+    """Guarda labor con todos los tipos; techs/days quedan espejados al personal tecnico."""
+    if data.labor is None:
+        src = {"tecnico": LaborIn(people=data.techs, days=data.days)}
+    else:
+        bad = set(data.labor) - set(LABOR_TYPES)
+        if bad:
+            raise HTTPException(422, f"Tipo de personal desconocido: {', '.join(sorted(bad))}")
+        src = data.labor
+    return {k: {"people": (src.get(k) or LaborIn()).people, "days": str((src.get(k) or LaborIn()).days)} for k in LABOR_TYPES}
+
+
+def _apply_fields(s: Survey, data: SurveyIn, db: Session, p: Principal) -> None:
+    labor = _labor_payload(data)
+    for k, v in data.model_dump(exclude={"points", "items", "labor", "techs", "days", "visit_tech_ids"}).items():
+        setattr(s, k, v)
+    s.labor = labor
+    s.techs, s.days = labor["tecnico"]["people"], d(labor["tecnico"]["days"])
+    # solo usuarios de esta empresa
+    from ..models import TenantUser
+
+    validos = set(db.scalars(select(TenantUser.user_id).where(TenantUser.tenant_id == p.tenant.id)))
+    s.visit_tech_ids = [i for i in dict.fromkeys(data.visit_tech_ids) if i in validos]
 
 
 @router.get("/field/specs")
@@ -147,7 +246,8 @@ def surveys(status: str | None = None, limit: int = Query(80, le=200), p: Princi
 @router.post("/surveys", status_code=201)
 def survey_create(data: SurveyIn, p: Principal = Depends(require("field", "crear")), db: Session = Depends(get_db)):
     number, _ = next_number(db, p.tenant.id, "LEV")
-    s = Survey(tenant_id=p.tenant.id, number=number, technician_id=p.user.id, **data.model_dump(exclude={"points", "items"}))
+    s = Survey(tenant_id=p.tenant.id, number=number, technician_id=p.user.id)
+    _apply_fields(s, data, db, p)
     _apply_children(s, data)
     db.add(s)
     db.flush()
@@ -161,12 +261,32 @@ def survey_create(data: SurveyIn, p: Principal = Depends(require("field", "crear
 
 
 def _apply_children(s: Survey, data: SurveyIn) -> None:
-    s.points.clear()
+    points = []
     for pt in data.points:
-        s.points.append(SurveyPoint(code=pt.code, label=pt.label, data=pt.data, photos=pt.photos, notes=pt.notes))
+        try:
+            clean = normalize_point_data(data.kind, pt.data)
+        except ValueError as e:
+            raise HTTPException(422, f"{pt.code}: {e}") from e
+        points.append(SurveyPoint(code=pt.code, label=pt.label, data=clean, photos=pt.photos, notes=pt.notes))
+    s.points.clear()
+    s.points.extend(points)
+    # el costo escrito en el costeo vive en la linea: el tecnico reescribe la lista al guardar y no debe borrarlo
+    prev = {i.id: i for i in s.items if i.id}
     s.items.clear()
     for it in data.items:
-        s.items.append(SurveyItem(product_id=it.product_id, name=it.name, quantity=it.quantity, unit=it.unit, note=it.note))
+        old = prev.get(it.id) if it.id else None
+        keep_cost = old.unit_cost if old is not None and old.product_id == it.product_id else None
+        s.items.append(
+            SurveyItem(
+                product_id=it.product_id,
+                name=it.name,
+                quantity=it.quantity,
+                unit=it.unit,
+                note=it.note,
+                kind=it.kind or (old.kind if old is not None else classify_kind(it.name)),
+                unit_cost=keep_cost,
+            )
+        )
 
 
 @router.get("/surveys/{sid}")
@@ -179,8 +299,7 @@ def survey_update(sid: int, data: SurveyIn, p: Principal = Depends(require("fiel
     s = _survey(db, sid, p)
     if s.status in ("cotizado", "cerrado") and not p.sees_field_all:
         raise HTTPException(409, "El levantamiento ya fue cotizado")
-    for k, v in data.model_dump(exclude={"points", "items"}).items():
-        setattr(s, k, v)
+    _apply_fields(s, data, db, p)
     _apply_children(s, data)
     db.commit()
     return _survey_out(db, s)
@@ -188,42 +307,94 @@ def survey_update(sid: int, data: SurveyIn, p: Principal = Depends(require("fiel
 
 @router.post("/surveys/{sid}/suggest")
 def survey_suggest(sid: int, p: Principal = Depends(require("field", "editar")), db: Session = Depends(get_db)):
-    """Sugiere materiales a partir de los puntos (cantidad de puntos y metros con 15 % de holgura)."""
+    """Propone materiales y equipos a partir de los puntos, sus observaciones y lo ya cargado. NO modifica
+    el levantamiento: el portal muestra la lista con el motivo de cada una y el usuario elige (ver /apply)."""
     s = _survey(db, sid, p)
-    return suggest_materials(s.kind, list(s.points))
+    return suggest_materials(s.kind, list(s.points), list(s.items))
+
+
+class SuggestionIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    quantity: Decimal = Field(gt=0)
+    unit: str = Field("Unid", max_length=10)
+    kind: str | None = Field(None, pattern="^(equipo|material)$")
+    product_id: int | None = None
+    note: str | None = Field(None, max_length=200)
+
+
+@router.post("/surveys/{sid}/suggest/apply")
+def survey_suggest_apply(sid: int, data: list[SuggestionIn], p: Principal = Depends(require("field", "editar")), db: Session = Depends(get_db)):
+    """Agrega las sugerencias elegidas a lo que ya estaba. Si el material ya existe (mismo producto o mismo
+    nombre) suma la cantidad en vez de duplicar la linea. Nunca borra nada."""
+    s = _survey(db, sid, p)
+    if s.status in ("cotizado", "cerrado"):
+        raise HTTPException(409, "El levantamiento ya fue cotizado")
+    added, summed = 0, 0
+    for sg in data:
+        match = next(
+            (it for it in s.items if (sg.product_id and it.product_id == sg.product_id) or (it.name or "").strip().lower() == sg.name.strip().lower()),
+            None,
+        )
+        if match:
+            match.quantity = d(match.quantity) + sg.quantity
+            summed += 1
+        else:
+            s.items.append(
+                SurveyItem(product_id=sg.product_id, name=sg.name, quantity=sg.quantity, unit=sg.unit, note=sg.note, kind=sg.kind or classify_kind(sg.name))
+            )
+            added += 1
+    audit(db, p.tenant.id, p.user.id, "suggest_apply", "survey", s.id, {"agregados": added, "sumados": summed}, ip=p.ip)
+    db.commit()
+    return {"added": added, "summed": summed, "survey": _survey_out(db, s)}
 
 
 @router.post("/surveys/{sid}/send")
 def survey_send(sid: int, p: Principal = Depends(require("field", "crear")), db: Session = Depends(get_db)):
-    """El técnico envía el levantamiento a administración."""
+    """El técnico envía el levantamiento a administración y ve a quién le llegó el aviso."""
     s = _survey(db, sid, p)
     if not s.points and not s.items:
         raise HTTPException(422, "Agregá al menos un punto o material antes de enviar")
     s.status = "enviado"
     s.sent_at = datetime.now(UTC)
+    s.sent_by = p.user.id
     cliente = db.get(Customer, s.customer_id).name if s.customer_id else (s.contact or {}).get("name") or "sin cliente"
     spec = SPECS.get(s.kind, SPECS["otro"])
     filas = "".join(f"<li>{html.escape(x.code)} · {html.escape(x.label or '')}</li>" for x in s.points[:20])
+    labor = survey_labor(s)
+    personal = " · ".join(f"{LABOR_TYPES[k][0]}: {v['people']} × {v['days']:g} día(s)" for k, v in labor.items() if v["people"])
+    roles = reviewer_roles(p.tenant)
     notify_roles(
         db,
         p.tenant,
-        ("admin", "supervisor"),
+        roles,
         f"Nuevo levantamiento {s.number} · {cliente}",
         f"<p><b>{html.escape(spec['label'])}</b> levantado por {html.escape(p.user.full_name)}.</p>"
         f"<p>Cliente: {html.escape(cliente)}<br>Sitio: {html.escape(s.site or '—')}<br>"
-        f"{len(s.points)} {html.escape(spec['point_label'].lower())}(s) · {len(s.items)} materiales · {s.techs} técnicos × {s.days} día(s)</p>"
+        f"{len(s.points)} {html.escape(spec['point_label'].lower())}(s) · {len(s.items)} materiales y equipos<br>{html.escape(personal or 'sin personal')}</p>"
         f"<ul>{filas}</ul><p>Abrí el levantamiento para costearlo y generar la cotización.</p>",
         "survey",
         s.id,
     )
-    audit(db, p.tenant.id, p.user.id, "send", "survey", s.id, {"puntos": len(s.points), "materiales": len(s.items)}, ip=p.ip)
+    notified = [r for r in _reviewers(db, p.tenant)]
+    audit(
+        db,
+        p.tenant.id,
+        p.user.id,
+        "send",
+        "survey",
+        s.id,
+        {"puntos": len(s.points), "materiales": len(s.items), "notificados": [r["name"] for r in notified]},
+        ip=p.ip,
+    )
     db.commit()
-    return _survey_out(db, s)
+    out = _survey_out(db, s)
+    out["notified"] = notified
+    return out
 
 
 @router.get("/surveys/{sid}/costing")
 def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
-    """Costeo para administración: costo por línea, mano de obra, transporte, precio sugerido y margen."""
+    """Costeo para administración: equipos, materiales, mano de obra por tipo, viáticos, precio sugerido y margen."""
     if not p.sees_costs:
         raise HTTPException(403, "Tu rol no ve costos")
     s = db.get(Survey, sid)
@@ -231,17 +402,26 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
         raise HTTPException(404, "Levantamiento no encontrado")
     fx = docsvc.today_fx(db, "USD")[0]
     margin_pct = d(margin) if margin is not None else pricing.default_margin(p.tenant)
-    labor_day, travel = rates(p.tenant)
+    labor_day, transport = rates(p.tenant)
     lines, cost_items, price_items = [], Decimal(0), Decimal(0)
+    groups = {"equipo": {"cost": Decimal(0), "price": Decimal(0)}, "material": {"cost": Decimal(0), "price": Decimal(0)}}
     for it in s.items:
         prod = db.get(Product, it.product_id) if it.product_id else None
         qty = d(it.quantity)
         unit_cost = pricing.cost_in(db, prod, "CRC", fx) if prod else Decimal(0)
-        unit_price = d(prod.price) if prod else pricing.sale_price(db, unit_cost, "CRC", "CRC", margin_pct)
+        source = "catalogo" if unit_cost > 0 else None
+        if unit_cost <= 0 and it.unit_cost is not None and d(it.unit_cost) > 0:
+            unit_cost, source = d(it.unit_cost), "levantamiento"  # escrito a mano en este costeo
+        # precio de lista si el producto lo tiene; si no, sale del costo con el margen objetivo
+        price_from_cost = not (prod and d(prod.price) > 0)
+        unit_price = pricing.sale_price(db, unit_cost, "CRC", "CRC", margin_pct) if price_from_cost else d(prod.price)
+        kind = it.kind or "material"
         lines.append(
             {
+                "item_id": it.id,
                 "product_id": it.product_id,
                 "name": it.name if not prod else prod.name,
+                "kind": kind,
                 "quantity": qty,
                 "unit": it.unit,
                 "unit_cost": unit_cost.quantize(Decimal("0.01")),
@@ -249,22 +429,45 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
                 "unit_price": d(unit_price).quantize(Decimal("0.01")),
                 "price": (d(unit_price) * qty).quantize(Decimal("0.01")),
                 "has_cost": unit_cost > 0,
+                "cost_source": source,  # catalogo | levantamiento | None
+                "price_from_cost": price_from_cost,
             }
         )
         cost_items += unit_cost * qty
         price_items += d(unit_price) * qty
-    labor_cost = labor_day * s.techs * d(s.days)
+        g = groups.setdefault(kind, {"cost": Decimal(0), "price": Decimal(0)})
+        g["cost"] += unit_cost * qty
+        g["price"] += d(unit_price) * qty
+    lines.sort(key=lambda x: 0 if x["kind"] == "equipo" else 1)  # equipos primero, como en el levantamiento
+
+    # mano de obra por tipo de personal
+    lrates = labor_rates(p.tenant)
+    types, labor_cost, person_days = [], Decimal(0), Decimal(0)
+    for k, v in survey_labor(s).items():
+        c = lrates[k] * v["people"] * v["days"]
+        labor_cost += c
+        person_days += v["people"] * v["days"]
+        types.append(
+            {"key": k, "label": LABOR_TYPES[k][0], "people": v["people"], "days": v["days"], "day_cost": lrates[k], "cost": c.quantize(Decimal("0.01"))}
+        )
+    viaticos = (per_diem(p.tenant) * person_days).quantize(Decimal("0.01"))
+    travel = transport + viaticos
     cost_total = cost_items + labor_cost + travel
     labor_price = pricing.sale_price(db, labor_cost + travel, "CRC", "CRC", margin_pct)
     suggested = price_items + labor_price
     return {
         "survey": _survey_out(db, s, full=False),
         "lines": lines,
+        "groups": {k: {"cost": v["cost"].quantize(Decimal("0.01")), "price": v["price"].quantize(Decimal("0.01"))} for k, v in groups.items()},
         "labor": {
             "techs": s.techs,
             "days": s.days,
             "day_cost": labor_day,
+            "types": types,
             "cost": labor_cost.quantize(Decimal("0.01")),
+            "transport": transport,
+            "per_diem": per_diem(p.tenant),
+            "viaticos": viaticos,
             "travel": travel,
             "price": labor_price,
         },
@@ -274,7 +477,46 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
         "margin_target": margin_pct,
         "fx": fx,
         "missing_cost": [line["name"] for line in lines if not line["has_cost"]],
+        "can_save_catalog": p.can("catalog", "editar"),
     }
+
+
+class CostIn(BaseModel):
+    item_id: int
+    unit_cost: Decimal = Field(ge=0)  # colones, sin IVA
+    save_to_catalog: bool = False
+
+
+@router.post("/surveys/{sid}/costs")
+def survey_costs(sid: int, data: list[CostIn], margin: Decimal | None = None, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
+    """Costo escrito a mano en el costeo para las lineas sin costo de proveedor. Opcionalmente se guarda en el
+    producto del catalogo (en colones) para no tener que escribirlo en el proximo levantamiento."""
+    if not p.sees_costs:
+        raise HTTPException(403, "Tu rol no ve costos")
+    s = db.get(Survey, sid)
+    if not s or s.tenant_id != p.tenant.id:
+        raise HTTPException(404, "Levantamiento no encontrado")
+    if s.quote_id:
+        raise HTTPException(409, "Este levantamiento ya generó una cotización")
+    items = {i.id: i for i in s.items}
+    saved = []
+    for c in data:
+        it = items.get(c.item_id)
+        if it is None:
+            raise HTTPException(404, f"Línea {c.item_id} no pertenece a este levantamiento")
+        it.unit_cost = c.unit_cost
+        if c.save_to_catalog:
+            if not p.can("catalog", "editar"):
+                raise HTTPException(403, "Sin permiso para editar el catálogo (catalog.editar)")
+            prod = db.get(Product, it.product_id) if it.product_id else None
+            if prod is None or prod.tenant_id != p.tenant.id:
+                raise HTTPException(422, f"{it.name}: la línea no está enlazada a un producto del catálogo")
+            # el costo del costeo esta en colones: se guarda asi, sin inventar un tipo de cambio
+            prod.cost, prod.cost_currency = c.unit_cost, "CRC"
+            saved.append(prod.id)
+    audit(db, p.tenant.id, p.user.id, "costs", "survey", s.id, {"lineas": len(data), "catalogo": saved}, ip=p.ip)
+    db.commit()
+    return survey_costing(sid, margin, p, db)
 
 
 class ToQuoteIn(BaseModel):
@@ -303,7 +545,8 @@ def survey_to_quote(sid: int, data: ToQuoteIn, p: Principal = Depends(require("s
     if data.include_labor:
         lines.append(
             LineInSchema(
-                name=f"{data.labor_label} · {s.techs} técnicos × {d(s.days):g} día(s)",
+                name=f"{data.labor_label} · "
+                + (" · ".join(f"{t['label']} {t['people']} × {d(t['days']):g} día(s)" for t in costing["labor"]["types"] if t["people"]) or "sin personal"),
                 quantity=Decimal(1),
                 unit_price=d(costing["labor"]["price"]),
                 unit="Sp",
