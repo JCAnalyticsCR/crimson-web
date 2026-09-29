@@ -323,6 +323,7 @@ class SuggestionIn(BaseModel):
     kind: str | None = Field(None, pattern="^(equipo|material)$")
     product_id: int | None = None
     note: str | None = Field(None, max_length=200)
+    item_id: int | None = None  # linea existente a la que se suma (la sugerencia la cruzo por familia de material)
 
 
 @router.post("/surveys/{sid}/suggest/apply")
@@ -334,7 +335,7 @@ def survey_suggest_apply(sid: int, data: list[SuggestionIn], p: Principal = Depe
         raise HTTPException(409, "El levantamiento ya fue cotizado")
     added, summed = 0, 0
     for sg in data:
-        match = next(
+        match = next((it for it in s.items if sg.item_id and it.id == sg.item_id), None) or next(
             (it for it in s.items if (sg.product_id and it.product_id == sg.product_id) or (it.name or "").strip().lower() == sg.name.strip().lower()),
             None,
         )

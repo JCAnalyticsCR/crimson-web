@@ -252,6 +252,38 @@ def _ceil(x: Decimal) -> int:
     return int(x) + (1 if x % 1 else 0)
 
 
+# Familias de material: el tecnico escribe "Cable UTP Cat6" y la sugerencia calcula "Cable (metros...)". Con
+# comparar solo el nombre exacto se proponia el cable como nuevo y se terminaba con el doble de metros.
+FAMILIAS = (
+    ("cable", ("cable", "utp", "cat5", "cat6", "cat 6", "cat 5")),
+    ("rj45", ("rj45", "rj-45", "conector")),
+    ("grabador", ("nvr", "dvr", "grabador")),
+    ("canalizacion", ("emt", "tubo", "canalizaci", "conduit")),
+)
+UNIDADES_METRO = {"m", "mts", "mt", "metro", "metros"}
+
+
+def _familia(nombre: str) -> str | None:
+    n = (nombre or "").lower()
+    for fam, palabras in FAMILIAS:
+        if any(w in n for w in palabras):
+            return fam
+    return None
+
+
+def _mismo_material(sugerido: dict, it) -> bool:
+    nombre = (getattr(it, "name", None) or "").strip().lower()
+    if nombre == sugerido["name"].lower():
+        return True
+    fam = _familia(sugerido["name"])
+    if not fam or fam != _familia(nombre):
+        return False
+    # el cable solo se compara metro contra metro; no se suma una bobina con metros
+    if fam == "cable":
+        return (getattr(it, "unit", "") or "").strip().lower() in UNIDADES_METRO and sugerido["unit"].lower() in UNIDADES_METRO
+    return True
+
+
 def suggest_materials(kind: str, points: list, items: list | None = None) -> list[dict]:
     """Sugerencia a partir de los puntos levantados, sus observaciones y lo que ya esta cargado.
 
@@ -349,7 +381,10 @@ def suggest_materials(kind: str, points: list, items: list | None = None) -> lis
 
     # 5) materiales habituales del tipo de solucion: sin cantidad, para revisar
     for extra in spec.get("materials", []):
-        if not any(extra.lower() in o["name"].lower() or o["name"].lower() in extra.lower() for o in out):
+        ya = any(extra.lower() in o["name"].lower() or o["name"].lower() in extra.lower() for o in out)
+        if not ya and _familia(extra) and any(_familia(o["name"]) == _familia(extra) for o in out):
+            ya = True  # "Cable UTP Cat6" habitual sobra si ya se calcularon los metros de cable
+        if not ya:
             out.append(
                 {
                     "name": extra,
@@ -363,12 +398,15 @@ def suggest_materials(kind: str, points: list, items: list | None = None) -> lis
     # 6) cruce con lo ya cargado: no duplicar, proponer sumar
     existing = list(items or [])
     for o in out:
-        match = next((it for it in existing if (getattr(it, "name", None) or "").strip().lower() == o["name"].lower()), None)
+        match = next((it for it in existing if _mismo_material(o, it)), None)
         o["item_id"] = getattr(match, "id", None) if match else None
         o["existing_quantity"] = Decimal(str(match.quantity or 0)) if match else Decimal(0)
         if o["quantity"] <= 0:
-            o["action"], o["add_quantity"] = ("cubierto" if match else "revisar"), Decimal(0)
+            # sin cantidad calculada no se puede afirmar que "ya alcanza": solo que hay que revisarla
+            o["action"], o["add_quantity"] = "revisar", Decimal(0)
         elif match:
+            if match and (getattr(match, "name", "") or "").strip().lower() != o["name"].lower():
+                o["matched_name"] = match.name  # se suma a la linea que ya existe, con su nombre
             falta = o["quantity"] - o["existing_quantity"]
             o["action"], o["add_quantity"] = ("sumar", falta) if falta > 0 else ("cubierto", Decimal(0))
         else:

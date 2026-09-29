@@ -156,7 +156,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
             <div className="card__head"><h3 className="h3">Productos & Servicios</h3><button className="btn btn--soft btn--sm" disabled={locked} onClick={() => setPick(true)}><Icon d={I.plus} />Agregar Productos & Servicios</button></div>
             <div className="card__body" style={{ padding: 0 }}>
               <table className="lines">
-                <thead><tr><th style={{ width: "42%" }}>Concepto</th><th style={{ width: 80 }}>Cant.</th><th style={{ width: 130 }}>Precio</th><th style={{ width: 90 }}>Desc. %</th><th style={{ width: 90 }}>IVA %</th><th className="num">Subtotal</th><th /></tr></thead>
+                <thead><tr><th style={{ width: "36%" }}>Concepto</th><th style={{ width: 80 }}>Cant.</th><th style={{ width: 130 }}>Precio</th><th style={{ width: 90 }}>Desc. %</th><th style={{ width: 90 }}>IVA %</th><th className="num">Subtotal</th><th /></tr></thead>
                 <tbody>
                   {lines.map((l, i) => (
                     <tr key={i}>
@@ -166,7 +166,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                         {l.code && <span className="meta">{l.code}</span>}
                       </td>
                       <td><input className="input input--mono" value={l.quantity} disabled={locked} onChange={(e) => setLine(i, { quantity: e.target.value })} /></td>
-                      <td><input className="input input--mono" value={l.unit_price} disabled={locked} onChange={(e) => setLine(i, { unit_price: e.target.value })} /></td>
+                      <td><input className="input input--mono line-price" value={l.unit_price} disabled={locked} onChange={(e) => setLine(i, { unit_price: e.target.value })} /></td>
                       <td><input className="input input--mono" value={l.discount_value} disabled={locked} onChange={(e) => setLine(i, { discount_value: e.target.value })} /></td>
                       <td><select className="select" value={l.tax_rate} disabled={locked} onChange={(e) => setLine(i, { tax_rate: e.target.value })} style={{ height: 34, padding: "0 8px" }}>{["13", "4", "2", "1", "0"].map((r) => <option key={r} value={r}>{r}%</option>)}</select></td>
                       <td className="num money" style={{ paddingTop: 14 }}>{prev?.lines[i] ? fmtMoney(prev.lines[i].subtotal, cur) : "—"}</td>

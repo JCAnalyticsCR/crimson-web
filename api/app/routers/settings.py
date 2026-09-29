@@ -213,7 +213,7 @@ def invite(data: InviteIn, p: Principal = Depends(require("settings", "configura
     db.add(inv)
     db.flush()
     link = f"{cfg.public_base_url}/invitacion/{raw}"
-    queue_email(
+    m = queue_email(
         db,
         p.tenant,
         data.email,
@@ -223,7 +223,9 @@ def invite(data: InviteIn, p: Principal = Depends(require("settings", "configura
         inv.id,
     )
     db.commit()
-    return {"id": inv.id, "link": link}  # el enlace tambien se devuelve para compartirlo por WhatsApp si el correo no esta configurado
+    # emailed dice si el correo salio de verdad: sin llave de Resend queda "simulado" y la pantalla no puede
+    # decir "le llego un correo". El enlace se devuelve siempre para mandarlo por WhatsApp.
+    return {"id": inv.id, "link": link, "emailed": m.status == "enviado"}
 
 
 class AcceptIn(BaseModel):

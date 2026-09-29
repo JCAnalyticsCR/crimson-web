@@ -16,7 +16,7 @@ import html
 import re
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, field_validator, model_validator
 from sqlalchemy import func, select
@@ -171,3 +171,13 @@ async def report_incident(request: Request, db: Session = Depends(get_db)):
         return {"ok": True, "number": None}  # honeypot: al bot se le dice que si, y no se crea nada
     number = await run_in_threadpool(_crear, db, data, ip)
     return {"ok": True, "number": number}
+
+
+@router.get("/sla")
+def public_sla(response: Response, db: Session = Depends(get_db)):
+    """Los tiempos de primera respuesta que la pagina le promete al publico. Salen de Ajustes, no de numeros
+    escritos a mano en el HTML: si Andres cambia el SLA, la promesa publica cambia con el. Solo horas de
+    respuesta por prioridad; nada de contratos ni de clientes."""
+    t = _tenant(db)
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return {pr: v["respuesta"] for pr, v in slasvc.sla_tenant(t).items()}

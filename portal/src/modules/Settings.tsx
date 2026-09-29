@@ -33,6 +33,7 @@ export default function Settings() {
   const [code, setCode] = useState("");
   const [invite, setInvite] = useState<{ email: string; role: string } | null>(null);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [inviteMailed, setInviteMailed] = useState(false);
   const [bank, setBank] = useState<{ id?: number; name: string; bank: string; currency: string; number: string; active: boolean } | null>(null);
   const [gw, setGw] = useState<{ provider: string; client_id: string; secret: string; is_primary: boolean; active: boolean; mode: string } | null>(null);
   const [pw, setPw] = useState({ current_password: "", new_password: "" });
@@ -55,7 +56,7 @@ export default function Settings() {
   const saveGroup = (g: Group) => api(`/settings/billing-groups/${g.id}`, { method: "PUT", json: { prefix: g.prefix, branch: g.branch, terminal: g.terminal, current: g.current, is_default: g.is_default } }).then(() => ok("Grupo actualizado")).catch(err);
   const saveBank = () => { if (!bank) return; const { id, ...b } = bank; api(id ? `/settings/bank-accounts/${id}` : "/settings/bank-accounts", { method: id ? "PUT" : "POST", json: b }).then(() => { setBank(null); ok("Cuenta guardada"); }).catch(err); };
   const saveGw = () => { if (!gw) return; api("/settings/gateways", { method: "PUT", json: { ...gw, secret: gw.secret || null } }).then(() => { setGw(null); ok("Pasarela guardada"); }).catch(err); };
-  const sendInvite = () => { if (!invite) return; api<{ link: string }>("/settings/invitations", { method: "POST", json: invite }).then((r) => { setInvite(null); setInviteLink(r.link); ok("Invitación creada"); }).catch(err); };
+  const sendInvite = () => { if (!invite) return; api<{ link: string; emailed: boolean }>("/settings/invitations", { method: "POST", json: invite }).then((r) => { setInvite(null); setInviteLink(r.link); setInviteMailed(r.emailed); ok("Invitación creada"); }).catch(err); };
   const setRole = (uid: number, role: string) => api(`/settings/users/${uid}`, { method: "PATCH", json: { role } }).then(() => ok("Rol actualizado")).catch(err);
   const setActive = (uid: number, active: boolean) => api(`/settings/users/${uid}`, { method: "PATCH", json: { active } }).then(() => ok(active ? "Usuario activado" : "Usuario desactivado")).catch(err);
   const setup2fa = () => api<{ secret: string; otpauth_uri: string }>("/auth/2fa/setup", { method: "POST" }).then(setTotp).catch(err);
@@ -266,7 +267,7 @@ export default function Settings() {
         <Field label="Rol"><select className="select" value={invite.role} onChange={(e) => setInvite({ ...invite, role: e.target.value })}>{users?.roles.map((r) => <option key={r}>{r}</option>)}</select></Field>
       </Modal>}
       {inviteLink && <Modal title="Invitación creada" onClose={() => setInviteLink(null)} foot={<button className="btn btn--ghost" onClick={() => setInviteLink(null)}>Cerrar</button>}>
-        <p className="muted" style={{ fontSize: 13 }}>Se envió por correo (si el correo está configurado). También podés compartir el enlace directamente; vence en 7 días.</p>
+        <p className="muted" style={{ fontSize: 13 }}>{inviteMailed ? "Se envió por correo. También podés compartir el enlace directamente; vence en 7 días." : "El correo no salió (el envío de correos todavía no está activo). Compartí este enlace directamente; vence en 7 días."}</p>
         <div className="search" style={{ maxWidth: "none" }}><Icon d={I.link} size={16} /><input readOnly value={inviteLink} onFocus={(e) => e.currentTarget.select()} /></div>
         <button className="btn btn--soft" style={{ alignSelf: "flex-start" }} onClick={() => { navigator.clipboard.writeText(inviteLink); toast("Enlace copiado"); }}><Icon d={I.copy} />Copiar</button>
       </Modal>}

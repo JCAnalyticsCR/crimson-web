@@ -204,3 +204,33 @@ def test_import_sets_product_warehouse_and_filter(client, auth):
     client.post("/import/catalogo", params={"commit": True, "supplier": "Prov"}, files={"file": ("c.xlsx", cat, "application/octet-stream")})
     sup = client.get("/products", params={"q": "SUP-1"}).json()["items"][0]
     assert sup["warehouse_id"] == whs[0]["id"]
+
+
+def test_sugerencia_de_cable_suma_al_cable_ya_cargado(client, auth):
+    """Con 'Cable UTP Cat6, 50 m' cargado y 85 m calculados, la sugerencia proponia 85 m de cable NUEVO
+    (quedaban 135 m) y marcaba el UTP como 'ya alcanza'. Tiene que proponer sumar 35 m al UTP."""
+    s = client.post(
+        "/surveys",
+        json={
+            "kind": "cctv",
+            "points": [
+                {"code": "CAM-01", "data": {"distancia_m": "60", "tipo": "bullet"}},
+                {"code": "CAM-02", "data": {"distancia_m": "14", "tipo": "domo"}},
+            ],
+            "items": [{"name": "Cable UTP Cat6", "quantity": 50, "unit": "m"}],
+        },
+    ).json()
+    sug = client.post(f"/surveys/{s['id']}/suggest").json()
+    sug = sug if isinstance(sug, list) else sug.get("suggestions", [])
+    cables = [x for x in sug if "cable" in x["name"].lower()]
+    assert len(cables) == 1, [x["name"] for x in cables]  # sin la linea habitual duplicada
+    c = cables[0]
+    assert c["action"] == "sumar" and Decimal(str(c["add_quantity"])) == Decimal(35)
+    assert c["matched_name"] == "Cable UTP Cat6"
+    r = client.post(
+        f"/surveys/{s['id']}/suggest/apply",
+        json=[{"name": c["name"], "quantity": "35", "unit": "m", "item_id": c["item_id"]}],
+    ).json()
+    assert r["summed"] == 1 and r["added"] == 0
+    lineas = [i for i in r["survey"]["items"] if "cable" in i["name"].lower()]
+    assert len(lineas) == 1 and Decimal(str(lineas[0]["quantity"])) == Decimal(85)

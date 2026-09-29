@@ -153,6 +153,8 @@ img { max-width: 100%; display: block; }
 .lines td { padding: 8px 10px; border-bottom: 1px solid var(--hair); vertical-align: top; }
 .lines .input { height: 34px; }
 .lines .line-name { font-weight: 600; }
+/* En colones un precio tiene 6 a 8 cifras: a 1366 px la columna se encogia y "230800" se leia "2308". */
+.lines .line-price { min-width: 108px; }
 .lines .line-desc { width: 100%; border: 0; background: transparent; color: var(--text-2); font-size: 12.5px; padding: 4px 0; outline: none; resize: none; }
 .lines .line-desc::placeholder { color: var(--text-3); font-style: italic; }
 .lines tr:hover .x { opacity: 1; }

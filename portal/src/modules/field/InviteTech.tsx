@@ -13,6 +13,7 @@ export function InviteTechButton({ label = "Técnico" }: { label?: string }) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [link, setLink] = useState<string | null>(null);
+  const [emailed, setEmailed] = useState(false);
 
   if (!allows("settings.configurar")) return null;
 
@@ -20,8 +21,9 @@ export function InviteTechButton({ label = "Técnico" }: { label?: string }) {
   const send = async () => {
     setBusy(true);
     try {
-      const r = await api<{ link: string }>("/settings/invitations", { method: "POST", json: { email: email.trim(), role: "tecnico" } });
+      const r = await api<{ link: string; emailed: boolean }>("/settings/invitations", { method: "POST", json: { email: email.trim(), role: "tecnico" } });
       setLink(r.link);
+      setEmailed(r.emailed);
       toast("Invitación enviada");
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
     finally { setBusy(false); }
@@ -36,7 +38,9 @@ export function InviteTechButton({ label = "Técnico" }: { label?: string }) {
           : <><button className="btn btn--ghost" onClick={close}>Cancelar</button><button className="btn btn--crimson" disabled={busy || !email.includes("@")} onClick={send}>Enviar invitación</button></>}>
           {link ? (
             <>
-              <p style={{ fontSize: 13.5, margin: 0 }}>Le llegó un correo a <b>{email}</b>. Cuando cree su contraseña aparece en la lista de técnicos. También podés mandarle el enlace por WhatsApp:</p>
+              {emailed
+                ? <p style={{ fontSize: 13.5, margin: 0 }}>Le llegó un correo a <b>{email}</b>. Cuando cree su contraseña aparece en la lista de técnicos. También podés mandarle el enlace por WhatsApp:</p>
+                : <p style={{ fontSize: 13.5, margin: 0 }}><b>El correo no salió</b>: el envío de correos todavía no está activo. Mandale este enlace a <b>{email}</b> por WhatsApp; cuando cree su contraseña aparece en la lista de técnicos.</p>}
               <div className="search" style={{ maxWidth: "none" }}><Icon d={I.link} size={16} /><input readOnly value={link} onFocus={(e) => e.currentTarget.select()} /></div>
               <button className="btn btn--soft" style={{ alignSelf: "flex-start" }} onClick={() => { navigator.clipboard.writeText(link); toast("Enlace copiado"); }}><Icon d={I.copy} />Copiar</button>
             </>

@@ -280,7 +280,7 @@
           <!-- VALIDAR CON ANDRES: texto de Nodo Latam segun su sitio oficial (nodolatam.net, "Nodo Condominios") -->
           <li><b>Nodo Latam</b><span>Plataforma de gestión para comunidades: visitantes, áreas comunes y residentes.</span></li>
           <!-- VALIDAR CON ANDRES: no se encontro sitio oficial de HAUSET; confirmar que aporta -->
-          <li><b>HAUSET</b><span>Aliado de Crimson. Detalle por confirmar.</span></li>
+          <!-- <li><b>HAUSET</b><span>(que aporta: pedirselo a Andres)</span></li> -->  <!-- oculto: un "detalle por confirmar" no puede quedar a la vista del publico -->
           <li class="aportes__jc">
             <img src="assets/img/marca-jcanalytics-color.png" alt="JC Analytics" loading="lazy" width="551" height="120">
             <div>
@@ -535,10 +535,10 @@
         <div class="sla feed reveal" style="--d:2" aria-label="Niveles de atención">
           <div class="sla__head meta"><span class="rec"><i></i>SLA</span><span>Primera respuesta</span></div>
           <ol class="sla__lista">
-            <li><span class="sla__p sla__p--critica">Crítica</span><span class="sla__d">Sistema detenido o sitio sin protección</span><b>2 h</b></li>
-            <li><span class="sla__p sla__p--alta">Alta</span><span class="sla__d">Falla parcial: cámaras o accesos fuera</span><b>4 h</b></li>
-            <li><span class="sla__p">Media</span><span class="sla__d">Funciona, pero con problemas</span><b>8 h</b></li>
-            <li><span class="sla__p">Baja</span><span class="sla__d">Consultas, cambios y mantenimiento</span><b>24 h</b></li>
+            <li data-pri="critica"><span class="sla__p sla__p--critica">Crítica</span><span class="sla__d">Sistema detenido o sitio sin protección</span><b>2 h</b></li>
+            <li data-pri="alta"><span class="sla__p sla__p--alta">Alta</span><span class="sla__d">Falla parcial: cámaras o accesos fuera</span><b>4 h</b></li>
+            <li data-pri="media"><span class="sla__p">Media</span><span class="sla__d">Funciona, pero con problemas</span><b>8 h</b></li>
+            <li data-pri="baja"><span class="sla__p">Baja</span><span class="sla__d">Consultas, cambios y mantenimiento</span><b>24 h</b></li>
           </ol>
           <span class="feed__corners"></span>
         </div>
@@ -598,6 +598,6 @@
     </div>
   </div>
 </footer>
-<script src="assets/main.js?v=37" defer></script>
+<script src="assets/main.js?v=38" defer></script>
 </body>
 </html>

@@ -188,3 +188,14 @@ def test_reporte_web_cors_para_la_landing(db_session, monkeypatch):
     assert pre.status_code == 200 and pre.headers["access-control-allow-origin"] == "https://crimsoncr.com"
     otro = c.options("/public/incidents", headers={"Origin": "https://malo.example", "Access-Control-Request-Method": "POST"})
     assert otro.headers.get("access-control-allow-origin") != "https://malo.example"
+
+
+def test_sla_publico_sigue_a_ajustes(client, auth):
+    """La pagina promete tiempos de respuesta. Si salian escritos a mano en el HTML, cambiar el SLA en Ajustes
+    dejaba a la pagina prometiendo otra cosa. /public/sla los lee de la configuracion, sin sesion."""
+    anon = client.get("/public/sla", headers={"Authorization": ""})
+    assert anon.status_code == 200 and anon.json() == {"critica": 2, "alta": 4, "media": 8, "baja": 24}
+    assert client.put("/settings", json={"sla": SLA_EMPRESA}).status_code == 200
+    nuevo = client.get("/public/sla").json()
+    assert nuevo == {pr: v["respuesta"] for pr, v in SLA_EMPRESA.items()}
+    assert set(nuevo) == {"critica", "alta", "media", "baja"}  # solo horas de respuesta, nada interno

@@ -39,7 +39,7 @@ type Costing = {
 };
 type Suggestion = {
   name: string; quantity: string | number; unit: string; kind: Kind; reason: string; action: "nuevo" | "sumar" | "cubierto" | "revisar";
-  existing_quantity: string | number; add_quantity: string | number; item_id: number | null;
+  existing_quantity: string | number; add_quantity: string | number; item_id: number | null; matched_name?: string;
 };
 type SugRow = Suggestion & { checked: boolean; qty: string };
 
@@ -194,7 +194,7 @@ export default function Surveys() {
     try {
       const r = await api<{ added: number; summed: number }>(`/surveys/${draft.id}/suggest/apply`, {
         method: "POST",
-        json: chosen.map((x) => ({ name: x.name, quantity: num(x.qty), unit: x.unit, kind: x.kind })),
+        json: chosen.map((x) => ({ name: x.name, quantity: num(x.qty), unit: x.unit, kind: x.kind, item_id: x.item_id })),
       });
       setSugs(null);
       await open(draft.id);
@@ -459,7 +459,7 @@ export default function Surveys() {
                 <td className="muted" style={{ textTransform: "capitalize" }}>{x.kind}</td>
                 <td className="num mono">{Number(x.existing_quantity) ? Number(x.existing_quantity) : "—"}</td>
                 <td className="num"><input className="input input--mono" inputMode="decimal" style={{ maxWidth: 90 }} value={x.qty} placeholder="0" onChange={(e) => setSugs(sugs.map((y, j) => (j === i ? { ...y, qty: e.target.value, checked: num(e.target.value) > 0 ? true : y.checked } : y)))} /> <span className="muted" style={{ fontSize: 12 }}>{x.unit}</span></td>
-                <td className="muted" style={{ fontSize: 12.5 }}>{x.reason}</td>
+                <td className="muted" style={{ fontSize: 12.5 }}>{x.reason}{x.matched_name && <div>Se suma a «{x.matched_name}», que ya está cargado.</div>}</td>
               </tr>
             ))}</tbody>
           </table>
