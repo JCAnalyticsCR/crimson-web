@@ -74,3 +74,27 @@ a.eco__box:hover { border-color: var(--crimson); }
 
 /* Filtros compactos en las listas largas (catalogo de proveedor: 200+ productos) */
 .select--sm { height: 34px; padding: 0 28px 0 10px; font-size: 12.5px; max-width: 190px; }
+
+/* La miniatura completa abre el visor (antes era un enlace a otra pestana). La X de quitar queda encima. */
+.photos__it .photos__open { inset: 0; top: 0; right: auto; width: 100%; height: 100%; border-radius: 0; background: transparent; cursor: zoom-in; z-index: 1; }
+.photos__it .photos__open:focus-visible { outline: 2px solid var(--crimson); outline-offset: -2px; }
+.photos__it button:not(.photos__open) { z-index: 2; }
+
+/* ---------- Visor de fotos ---------- */
+.lbox { position: fixed; inset: 0; z-index: 200; background: rgba(12,11,15,.97); backdrop-filter: blur(6px); display: flex; flex-direction: column; color: #fff; }
+.lbox__top { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; flex: none; }
+.lbox__top .meta { color: rgba(255,255,255,.7); }
+.lbox__btn { display: inline-flex; align-items: center; justify-content: center; min-width: 40px; height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.06); color: #fff; font-size: 13px; text-decoration: none; cursor: pointer; }
+.lbox__stage { flex: 1; min-height: 0; display: grid; place-items: center; padding: 0 56px; overflow: hidden; cursor: zoom-in; touch-action: pan-y; }
+.lbox__stage img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; user-select: none; }
+/* ampliada: la foto a tamano real (hasta 2.5x) y se recorre deslizando */
+.lbox__stage.is-zoom { display: block; overflow: auto; cursor: zoom-out; padding: 0; touch-action: auto; }
+.lbox__stage.is-zoom img { max-width: none; max-height: none; width: min(250%, 2400px); border-radius: 0; }
+.lbox__nav { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 64px; border: 0; border-radius: 12px; background: rgba(255,255,255,.08); color: #fff; font-size: 34px; line-height: 1; cursor: pointer; }
+.lbox__nav:hover { background: rgba(255,255,255,.16); }
+.lbox__nav--prev { left: 8px; } .lbox__nav--next { right: 8px; }
+.lbox__cap { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 16px calc(14px + env(safe-area-inset-bottom)); text-align: center; }
+.lbox__cap b { font-size: 15px; }
+.lbox__cap .meta { color: rgba(255,255,255,.55); }
+@media (max-width: 640px) { .lbox__stage { padding: 0 8px; } .lbox__nav { width: 36px; height: 52px; font-size: 28px; background: rgba(0,0,0,.35); } }
+

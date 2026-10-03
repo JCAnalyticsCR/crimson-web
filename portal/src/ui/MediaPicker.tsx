@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, uploadFile } from "../lib/api";
 import { useSession } from "../app/session";
 import { I, Icon, Modal } from "./components";
+import { Lightbox } from "./Lightbox";
 
 export type MediaItem = { id: number; key: string; url: string; filename: string; content_type: string; size: number };
 
@@ -110,8 +111,13 @@ function Library({ onPick, onClose }: { onPick: (m: MediaItem) => void; onClose:
 
 /** Tira de fotos para el trabajo de campo: el tecnico esta en una escalera con el celular,
     asi que el boton es grande y en el telefono abre la camara directo (capture). Guarda URLs planas. */
-export function PhotoStrip({ value, onChange, label = "Agregar fotografía", disabled }: { value: string[]; onChange: (v: string[]) => void; label?: string; disabled?: boolean }) {
+/** onOpen: si viene, quien la usa abre su propio visor (p. ej. el levantamiento, que recorre las fotos de
+ *  todos los puntos). Si no, la tira abre el visor con sus propias fotos y el rotulo `caption`. */
+export function PhotoStrip({ value, onChange, label = "Agregar fotografía", disabled, caption, onOpen }: {
+  value: string[]; onChange: (v: string[]) => void; label?: string; disabled?: boolean; caption?: string; onOpen?: (index: number) => void;
+}) {
   const { upload, busy } = useUpload();
+  const [ver, setVer] = useState<number | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const take = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -126,7 +132,7 @@ export function PhotoStrip({ value, onChange, label = "Agregar fotografía", dis
     <div className="photos">
       {value.map((url, i) => (
         <div className="photos__it" key={`${url}-${i}`} style={{ background: `center/cover no-repeat url("${url}")` }}>
-          <a href={url} target="_blank" rel="noreferrer" aria-label={`Ver foto ${i + 1}`} />
+          <button type="button" className="photos__open" onClick={() => (onOpen ? onOpen(i) : setVer(i))} aria-label={`Ver foto ${i + 1} en grande`} />
           {!disabled && <button type="button" onClick={() => onChange(value.filter((_, j) => j !== i))} aria-label="Quitar foto"><Icon d={I.x} size={13} /></button>}
         </div>
       ))}
@@ -137,6 +143,7 @@ export function PhotoStrip({ value, onChange, label = "Agregar fotografía", dis
         </button>
       )}
       {disabled && value.length === 0 && <span className="muted" style={{ fontSize: 13 }}>Sin fotografías.</span>}
+      {ver !== null && <Lightbox fotos={value.map((url) => ({ url, caption }))} start={ver} onClose={() => setVer(null)} />}
     </div>
   );
 }

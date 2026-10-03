@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, type ReactNode, useRef } from "react";
 import { STATUS } from "../lib/api";
 
 export const Icon = ({ d, size = 18 }: { d: string; size?: number }) => (
@@ -76,13 +76,22 @@ export function Empty({ title = "Nada que mostrar… ¡por ahora!", hint, action
 }
 
 export function Modal({ title, onClose, children, foot, wide }: { title: ReactNode; onClose: () => void; children: ReactNode; foot?: ReactNode; wide?: boolean }) {
+  const bg = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    // Escape cierra solo lo que esta encima. Antes cerraba todas las ventanas apiladas a la vez (y con el
+    // visor de fotos abierto, tambien el levantamiento de abajo, con lo que se perdia lo no guardado).
+    const k = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || document.querySelector(".lbox")) return;
+      const abiertas = document.querySelectorAll(".modal-bg");
+      if (abiertas[abiertas.length - 1] !== bg.current) return;
+      e.preventDefault();
+      onClose();
+    };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, [onClose]);
   return (
-    <div className="modal-bg" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div ref={bg} className="modal-bg" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={wide ? { width: "min(820px,100%)" } : undefined} role="dialog" aria-modal="true">
         <header className="modal__head">
           <h3 className="h2">{title}</h3>

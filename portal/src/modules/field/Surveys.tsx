@@ -7,6 +7,7 @@ import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 import { Lookup, searchCustomers, searchProducts } from "../../ui/Lookup";
 import { PhotoStrip } from "../../ui/MediaPicker";
+import { Lightbox, type Foto } from "../../ui/Lightbox";
 import { InviteTechButton } from "./InviteTech";
 import { ArchiveActions } from "../../ui/ArchiveActions";
 import { LinkOpportunity, type OppRef } from "./LinkOpportunity";
@@ -85,6 +86,7 @@ export default function Surveys() {
   const [costing, setCosting] = useState<Costing | null>(null);
   const [costEdits, setCostEdits] = useState<Record<number, { cost: string; save: boolean }>>({});
   const [sugs, setSugs] = useState<SugRow[] | null>(null);
+  const [verFoto, setVerFoto] = useState<number | null>(null);
   const [sent, setSent] = useState<{ number: string; notified: Tech[]; review?: Review } | null>(null);
   const [margin, setMargin] = useState(35);
   const [busy, setBusy] = useState(false);
@@ -121,6 +123,16 @@ export default function Surveys() {
         .catch(() => setDraft({ ...emptySurvey("cctv"), opportunity_id: nuevo }));
     }
   }, [params, specs]);
+
+  // Todas las fotos del levantamiento en un solo recorrido, cada una con su punto: para ensenarle a alguien
+  // "aqui va esto, aca va lo otro" pasando de una a otra sin cerrar el visor.
+  const galeria: Foto[] = draft
+    ? [
+        ...draft.points.flatMap((pt) => (pt.photos || []).map((url) => ({ url, caption: [pt.code, pt.label].filter(Boolean).join(" · ") }))),
+        ...draft.photos.map((url) => ({ url, caption: "Foto general del sitio" })),
+      ]
+    : [];
+  const inicioPunto = (i: number) => (draft ? draft.points.slice(0, i).reduce((n, pt) => n + (pt.photos?.length || 0), 0) : 0);
 
   const open = async (id: number) => {
     const s = await api<Survey>(`/surveys/${id}`);
@@ -436,7 +448,7 @@ export default function Surveys() {
                 <div className="point__grid">{(spec?.fields || []).map((f) => <Field key={f.key} label={f.label}>{field(f, i)}</Field>)}</div>
                 <Field label="Observaciones" hint="También se usan para sugerir materiales (cielo raso, poste, concreto…)."><input className="input" value={pt.notes || ""} onChange={(e) => setPoint(i, { notes: e.target.value })} placeholder="Hay que romper cielo raso…" /></Field>
                 <Field label="Fotografías del punto" hint="En el celular abre la cámara directo.">
-                  <PhotoStrip value={pt.photos || []} onChange={(photos) => setPoint(i, { photos })} disabled={readOnly} label="Foto" />
+                  <PhotoStrip value={pt.photos || []} onChange={(photos) => setPoint(i, { photos })} disabled={readOnly} label="Foto" onOpen={(j) => setVerFoto(inicioPunto(i) + j)} />
                 </Field>
               </div>
             ))}
@@ -445,9 +457,10 @@ export default function Surveys() {
           {KINDS.map(([k, title, hint]) => itemsBlock(k, title, draft.items.length === 0 ? `${hint} Sugerilos desde los puntos o agregalos a mano; administración pone los precios.` : hint))}
 
           <Field label="Fotografías generales del sitio" hint="Fachada, gabinete, ruta del cable: lo que ayude a cotizar sin volver.">
-            <PhotoStrip value={draft.photos} onChange={(photos) => setDraft({ ...draft, photos })} disabled={readOnly} />
+            <PhotoStrip value={draft.photos} onChange={(photos) => setDraft({ ...draft, photos })} disabled={readOnly} onOpen={(j) => setVerFoto(inicioPunto(draft.points.length) + j)} />
           </Field>
           <Field label="Notas del levantamiento"><textarea className="textarea" value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} placeholder="Acceso por el portón trasero; el cliente pide trabajar sábado." /></Field>
+          {verFoto !== null && galeria.length > 0 && <Lightbox fotos={galeria} start={Math.min(verFoto, galeria.length - 1)} onClose={() => setVerFoto(null)} />}
         </Modal>
       )}
 
