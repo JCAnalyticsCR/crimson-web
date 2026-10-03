@@ -321,6 +321,15 @@ export default function Surveys() {
     };
   }, [costing, costEdits, margin]);
 
+  // Distancias al gabinete ya anotadas en los puntos: Andres quiere usarlas para la tuberia o el cable sin
+  // volver a sumarlas a mano. Es una propuesta: la cantidad sigue siendo editable.
+  const distancias = (draft?.points || [])
+    .map((pt) => ({ code: pt.code, m: Number(String((pt.data as Record<string, unknown>)?.distancia_m ?? "").replace(",", ".")) || 0 }))
+    .filter((x) => x.m > 0);
+  const distTotal = Math.round(distancias.reduce((a, x) => a + x.m, 0) * 100) / 100;
+  const RUTA = /tuber|tubo|emt|pvc|canaliz|conduit|ducto|manguera|cable|utp/i;
+  const usarDist = (i: number, m: number) => setItem(i, { quantity: String(m), unit: "m" });
+
   const itemsBlock = (kind: Kind, title: string, hint: string) => {
     const idx = draft!.items.map((it, i) => ({ it, i })).filter(({ it }) => it.kind === kind);
     return (
@@ -332,7 +341,16 @@ export default function Surveys() {
               <tr key={it.id ?? `n${i}`}>
                 <td><Lookup value={it.name} placeholder="Buscar en el catálogo…" fetcher={searchProducts} disabled={readOnly} onSelect={(pr, text) => setItem(i, { product_id: pr ? pr.id : null, name: text })} /></td>
                 <td className="muted" style={{ fontSize: 12.5 }}>{it.product_id ? "Del catálogo" : "Texto libre"}</td>
-                <td className="num"><input className="input input--mono" inputMode="decimal" style={{ maxWidth: 110 }} value={it.quantity} disabled={readOnly} onChange={(e) => setItem(i, { quantity: e.target.value })} /></td>
+                <td className="num">
+                  <input className="input input--mono" inputMode="decimal" style={{ maxWidth: 110 }} value={it.quantity} disabled={readOnly} onChange={(e) => setItem(i, { quantity: e.target.value })} />
+                  {!readOnly && distTotal > 0 && RUTA.test(it.name) && (
+                    <div className="usar-dist" title={distancias.map((x) => `${x.code}: ${x.m} m`).join(" + ")}>
+                      <span>Distancias de las cámaras:</span>
+                      <button type="button" onClick={() => usarDist(i, distTotal)}>{distTotal} m</button>
+                      <button type="button" onClick={() => usarDist(i, Math.ceil(distTotal * 1.15))}>+15 %: {Math.ceil(distTotal * 1.15)} m</button>
+                    </div>
+                  )}
+                </td>
                 <td><input className="input" style={{ maxWidth: 90 }} value={it.unit} disabled={readOnly} onChange={(e) => setItem(i, { unit: e.target.value })} /></td>
                 <td><select className="select select--sm" value={it.kind} disabled={readOnly} onChange={(e) => setItem(i, { kind: e.target.value as Kind })} title="Mover a Equipos o Materiales"><option value="equipo">Equipo</option><option value="material">Material</option></select></td>
                 <td className="num">{!readOnly && <button className="btn btn--ghost btn--sm" onClick={() => setDraft({ ...draft!, items: draft!.items.filter((_, j) => j !== i) })}><Icon d={I.x} size={14} /></button>}</td>

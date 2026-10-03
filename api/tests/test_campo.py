@@ -270,3 +270,13 @@ def test_ligar_levantamiento_hecho_antes_de_la_oportunidad(client, auth):
     # desligar
     r = client.post(f"/surveys/{s['id']}/opportunity", json={"opportunity_id": None})
     assert r.status_code == 200 and r.json()["opportunity_id"] is None
+
+
+def test_tipos_de_camara_lente_dual_180_y_360(client, auth):
+    """Andres pidio estos dos tipos en el levantamiento."""
+    specs = client.get("/field/specs").json()
+    tipos = next(f for f in specs["cctv"]["fields"] if f["key"] == "tipo")["options"]
+    assert "Lente dual 180°" in tipos and "360°" in tipos
+    s = client.post("/surveys", json={"kind": "cctv", "points": [{"code": "CAM-01", "data": {"tipo": "360°"}}, {"code": "CAM-02", "data": {"tipo": "Lente dual 180°"}}]})
+    assert s.status_code == 201, s.text
+    assert [p["data"]["tipo"] for p in s.json()["points"]] == ["360°", "Lente dual 180°"]

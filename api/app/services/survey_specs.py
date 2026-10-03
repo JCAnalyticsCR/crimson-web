@@ -17,7 +17,7 @@ SPECS: dict[str, dict] = {
         "point_label": "Cámara",
         "fields": [
             {"key": "ubicacion", "label": "Ubicación", "type": "text", "placeholder": "Entrada principal"},
-            {"key": "tipo", "label": "Tipo", "type": "select", "options": ["Bullet", "Domo", "Turret", "PTZ", "Fisheye", "Ojo de pez dual"]},
+            {"key": "tipo", "label": "Tipo", "type": "select", "options": ["Bullet", "Domo", "Turret", "PTZ", "Fisheye", "Ojo de pez dual", "Lente dual 180°", "360°"]},
             {"key": "ambiente", "label": "Ambiente", "type": "select", "options": ["Exterior", "Interior"]},
             {"key": "resolucion", "label": "Resolución requerida", "type": "select", "options": ["2 MP", "4 MP", "6 MP", "8 MP (4K)"]},
             {"key": "distancia_m", "label": "Distancia al gabinete (m)", "type": "number", "unit": "m"},
