@@ -108,7 +108,9 @@ def test_reception_of_supplier_xml(client, auth):
     assert x.status_code == 200 and "MensajeReceptor" in x.text
     gastos = client.get("/expenses").json()
     assert any(g["reference"] == d["clave"] and g["iva_credit"] == "credito" for g in gastos)
-    iva = client.get("/reports/iva").json()
+    # el periodo va explicito: el XML trae fecha fija (10/09) y el reporte por defecto es el mes en curso,
+    # asi que el test dejaba de pasar el 1 de octubre sin que nada del sistema cambiara
+    iva = client.get("/reports/iva", params={"from": "2026-09-01", "to": "2026-09-30"}).json()
     assert Decimal(str(iva["totals"]["a_pagar"])) == Decimal(-13000)  # solo crédito, sin ventas
 
 
