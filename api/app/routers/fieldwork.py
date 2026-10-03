@@ -98,6 +98,12 @@ def _reviewers(db: Session, tenant) -> list[dict]:
     return [{"id": m.user.id, "name": m.user.full_name, "role": m.role_code} for m in rows]
 
 
+def _opp_ref(db: Session, oid: int | None) -> dict | None:
+    """Numero y titulo de la oportunidad ligada, para mostrarla sin otra consulta."""
+    o = db.get(Opportunity, oid) if oid else None
+    return {"id": o.id, "number": o.number, "title": o.title, "status": o.status} if o else None
+
+
 def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
     c = db.get(Customer, s.customer_id) if s.customer_id else None
     t = db.get(User, s.technician_id) if s.technician_id else None
@@ -116,6 +122,7 @@ def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
         "contact": s.contact,
         "site": s.site,
         "opportunity_id": s.opportunity_id,
+        "opportunity": _opp_ref(db, s.opportunity_id),
         "technician_id": s.technician_id,
         "technician": t.full_name if t else None,
         "visit_date": s.visit_date,
@@ -304,6 +311,77 @@ def survey_update(sid: int, data: SurveyIn, p: Principal = Depends(require("fiel
         raise HTTPException(409, "El levantamiento ya fue cotizado")
     _apply_fields(s, data, db, p)
     _apply_children(s, data)
+    db.commit()
+    return _survey_out(db, s)
+
+
+class LinkOppIn(BaseModel):
+    opportunity_id: int | None = None  # None = desligar
+
+
+@router.post("/surveys/{sid}/opportunity")
+def survey_link_opportunity(sid: int, data: LinkOppIn, p: Principal = Depends(require("field", "editar")), db: Session = Depends(get_db)):
+    """Liga un levantamiento ya hecho a una oportunidad (o lo desliga).
+
+    Andres: "hice el levantamiento en el sitio antes de registrar la oportunidad; quiero poder asignarlo
+    despues". Funciona aunque el levantamiento ya este cotizado, que es el caso normal: se visita, se cotiza
+    y recien ahi se registra la oportunidad. Al ligar, la oportunidad hereda lo que el levantamiento ya
+    avanzo (cliente, cotizacion, monto y etapa) y queda anotado en su bitacora."""
+    from ..services.archive import is_live
+    from ..services.documents import CR
+
+    s = _survey(db, sid, p)
+    stamp = datetime.now(CR).strftime("%d/%m/%Y %H:%M")
+    anterior = db.get(Opportunity, s.opportunity_id) if s.opportunity_id else None
+
+    if data.opportunity_id is None:
+        if anterior:
+            anterior.notes = f"{stamp} · {p.user.full_name}: se desligo el levantamiento {s.number}\n{anterior.notes or ''}".strip()
+        s.opportunity_id = None
+        audit(db, p.tenant.id, p.user.id, "unlink_opportunity", "survey", s.id, {"opportunity_id": anterior.id if anterior else None}, ip=p.ip)
+        db.commit()
+        return _survey_out(db, s)
+
+    o = db.get(Opportunity, data.opportunity_id)
+    if not o or o.tenant_id != p.tenant.id or not is_live(o):
+        raise HTTPException(404, "Oportunidad no encontrada")
+    if not p.can("crm_pipeline", "ver"):
+        raise HTTPException(403, "Sin permiso para ver oportunidades")
+    if o.status in ("ganada", "perdida"):
+        raise HTTPException(409, "La oportunidad ya está cerrada (ganada o perdida)")
+    if s.customer_id and o.customer_id and s.customer_id != o.customer_id:
+        raise HTTPException(409, "El levantamiento y la oportunidad son de clientes distintos")
+    if o.quote_id and s.quote_id and o.quote_id != s.quote_id:
+        raise HTTPException(409, "La oportunidad ya tiene otra cotización ligada")
+
+    # lo que uno tiene y el otro no, se completa
+    if not s.customer_id and o.customer_id:
+        s.customer_id = o.customer_id
+    elif s.customer_id and not o.customer_id:
+        o.customer_id = s.customer_id
+
+    antes = o.status
+    orden = ("nuevo", "contactado", "requiere_visita", "levantamiento", "cotizando", "enviada", "negociacion")
+    if s.quote_id:
+        from ..models import Quote
+
+        q = db.get(Quote, s.quote_id)
+        o.quote_id = s.quote_id
+        if q and q.status != "anulada":
+            o.amount = d(q.total)  # mismo criterio que el resto: el monto sigue a la cotizacion
+        destino = "enviada" if q and q.status in ("enviada", "aprobada") else "cotizando"
+    else:
+        destino = "levantamiento"
+    if o.status in orden and orden.index(o.status) < orden.index(destino):
+        o.status = destino  # solo avanza: nunca devuelve una oportunidad que ya estaba mas adelante
+
+    if anterior and anterior.id != o.id:
+        anterior.notes = f"{stamp} · {p.user.full_name}: el levantamiento {s.number} se movio a {o.number}\n{anterior.notes or ''}".strip()
+    s.opportunity_id = o.id
+    o.notes = f"{stamp} · {p.user.full_name}: se ligo el levantamiento {s.number}\n{o.notes or ''}".strip()
+    audit(db, p.tenant.id, p.user.id, "link_opportunity", "survey", s.id, {"opportunity_id": o.id}, ip=p.ip)
+    if o.status != antes:
+        audit(db, p.tenant.id, p.user.id, "status", "opportunity", o.id, {"de": antes, "a": o.status}, ip=p.ip)
     db.commit()
     return _survey_out(db, s)
 

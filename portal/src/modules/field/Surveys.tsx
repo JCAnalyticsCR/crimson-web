@@ -9,6 +9,7 @@ import { Lookup, searchCustomers, searchProducts } from "../../ui/Lookup";
 import { PhotoStrip } from "../../ui/MediaPicker";
 import { InviteTechButton } from "./InviteTech";
 import { ArchiveActions } from "../../ui/ArchiveActions";
+import { LinkOpportunity, type OppRef } from "./LinkOpportunity";
 
 type FieldSpec = { key: string; label: string; type: "text" | "number" | "select" | "multi" | "bool"; options?: string[]; unit?: string; placeholder?: string };
 type Spec = { label: string; point_prefix: string; point_label: string; fields: FieldSpec[]; materials: string[] };
@@ -21,7 +22,7 @@ type Tech = { id: number; name: string; role: string };
 type Review = { roles: string[]; people: string[] };
 type Survey = {
   id: number; number: string; kind: string; kind_label: string; status: string; customer_id: number | null; customer: string | null;
-  site: string | null; opportunity_id: number | null; technician: string | null; visit_date: string | null; techs: number; days: string;
+  site: string | null; opportunity_id: number | null; opportunity?: OppRef; technician: string | null; visit_date: string | null; techs: number; days: string;
   notes: string | null; photos: string[]; quote_id: number | null; points_count: number; created_at: string; archived_at?: string | null; trashed_at?: string | null;
   sent_at: string | null; sent_by: string | null; pending_review?: Review; visit_tech_ids: number[]; visit_techs: string[];
   labor: Record<LaborKey, { label: string; people: number; days: string | number }>;
@@ -63,7 +64,7 @@ const emptySurvey = (kind: string) => ({
   notes: "", photos: [] as string[], points: [] as Point[], items: [] as Item[],
 });
 type Draft = ReturnType<typeof emptySurvey> & {
-  id?: number; number?: string; status?: string; quote_id?: number | null; sent_at?: string | null; sent_by?: string | null; pending_review?: Review;
+  id?: number; number?: string; status?: string; quote_id?: number | null; opportunity?: OppRef; sent_at?: string | null; sent_by?: string | null; pending_review?: Review;
   archived_at?: string | null; trashed_at?: string | null;
 };
 
@@ -130,7 +131,7 @@ export default function Surveys() {
     }
     setDraft({
       id: s.id, number: s.number, status: s.status, quote_id: s.quote_id, kind: s.kind, customer_id: s.customer_id ? String(s.customer_id) : "", customer_name: s.customer || "",
-      opportunity_id: s.opportunity_id ? String(s.opportunity_id) : "", site: s.site || "", visit_date: s.visit_date || "", labor, visit_tech_ids: s.visit_tech_ids || [],
+      opportunity_id: s.opportunity_id ? String(s.opportunity_id) : "", opportunity: s.opportunity ?? null, site: s.site || "", visit_date: s.visit_date || "", labor, visit_tech_ids: s.visit_tech_ids || [],
       notes: s.notes || "", photos: s.photos || [], points: s.points || [],
       items: (s.items || []).map((i) => ({ ...i, quantity: String(i.quantity), kind: i.kind === "equipo" ? "equipo" : "material" })),
       sent_at: s.sent_at, sent_by: s.sent_by, pending_review: s.pending_review, archived_at: s.archived_at, trashed_at: s.trashed_at,
@@ -393,6 +394,13 @@ export default function Surveys() {
             <Field label="Fecha de visita"><input className="input" type="date" value={draft.visit_date} onChange={(e) => setDraft({ ...draft, visit_date: e.target.value })} /></Field>
           </div>
           <Field label="Sitio" hint="Dirección o referencia para llegar."><input className="input" value={draft.site} onChange={(e) => setDraft({ ...draft, site: e.target.value })} placeholder="Condominio Los Robles, Alajuela" /></Field>
+          {draft.id && (
+            <LinkOpportunity
+              surveyId={draft.id}
+              current={draft.opportunity ?? null}
+              onChange={() => open(draft.id!)}  // recarga: el cliente pudo venir de la oportunidad
+            />
+          )}
 
           <Field label="Técnicos que hicieron la visita" hint="Solo informativo: quién fue al sitio. No se usa para costear.">
             <div className="chips" style={{ alignItems: "center" }}>

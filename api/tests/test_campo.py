@@ -234,3 +234,39 @@ def test_sugerencia_de_cable_suma_al_cable_ya_cargado(client, auth):
     assert r["summed"] == 1 and r["added"] == 0
     lineas = [i for i in r["survey"]["items"] if "cable" in i["name"].lower()]
     assert len(lineas) == 1 and Decimal(str(lineas[0]["quantity"])) == Decimal(85)
+
+
+def test_ligar_levantamiento_hecho_antes_de_la_oportunidad(client, auth):
+    """Andres: 'hice el levantamiento en el sitio antes de registrar la oportunidad; quiero asignarlo despues'.
+    Caso real: se visita, se cotiza, y recien ahi se crea la oportunidad. Al ligar, la oportunidad hereda
+    cliente, cotizacion, monto y etapa, y queda anotado en su bitacora."""
+    cli = client.get("/customers", params={"limit": 1}).json()
+    cli = (cli if isinstance(cli, list) else cli.get("items", cli.get("rows", [])))[0]
+    s = client.post(
+        "/surveys",
+        json={"kind": "cctv", "customer_id": cli["id"], "points": [{"code": "CAM-01", "data": {"distancia_m": "20", "tipo": "bullet"}}],
+              "items": [{"name": "Gabinete 15U", "quantity": 1}]},
+    ).json()
+    gab = next(i for i in s["items"] if i["name"] == "Gabinete 15U")
+    client.post(f"/surveys/{s['id']}/costs", json=[{"item_id": gab["id"], "unit_cost": "50000"}])
+    q = client.post(f"/surveys/{s['id']}/quote", json={"margin": 35}).json()
+
+    o = client.post("/opportunities", json={"title": "Condominio creado despues", "amount": "1000", "probability": 40}).json()
+    assert o["status"] == "nuevo"
+    r = client.post(f"/surveys/{s['id']}/opportunity", json={"opportunity_id": o["id"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["opportunity_id"] == o["id"]
+    o2 = client.get(f"/opportunities/{o['id']}").json()
+    assert o2["customer_id"] == cli["id"]  # hereda el cliente del levantamiento
+    assert o2["quote_id"] == q["quote_id"] and Decimal(str(o2["amount"])) == Decimal(str(q["total"]))
+    assert o2["status"] == "cotizando"
+    assert f"se ligo el levantamiento {s['number']}" in (o2.get("notes") or "")
+
+    # no se liga a una oportunidad de otro cliente
+    otro = client.post("/customers", json={"name": "Otro Cliente SA", "id_type": "02", "id_number": "3101999888"}).json()
+    o3 = client.post("/opportunities", json={"title": "Ajena", "customer_id": otro["id"]}).json()
+    assert client.post(f"/surveys/{s['id']}/opportunity", json={"opportunity_id": o3["id"]}).status_code == 409
+
+    # desligar
+    r = client.post(f"/surveys/{s['id']}/opportunity", json={"opportunity_id": None})
+    assert r.status_code == 200 and r.json()["opportunity_id"] is None

@@ -265,4 +265,8 @@ img { max-width: 100%; display: block; }
   .ship-row > :first-child { grid-column: 1 / -1; }
   .ship-row--head { display: none; }
 }
+/* Oportunidad ligada al levantamiento */
+.link-opp { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px dashed var(--hair-2); border-radius: 10px; }
+.link-opp__row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; }
+.link-opp__row b { font-family: var(--mono); font-size: 12.5px; }
 
