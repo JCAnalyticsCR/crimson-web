@@ -5,6 +5,7 @@ import { useSession } from "../../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
 import { Dropzone } from "../../ui/MediaPicker";
+import { VerArchivo } from "../../ui/VerArchivo";
 
 type Cat = { id: number; name: string };
 type Bank = { id: number; name: string; bank: string | null; currency: string; number: string | null };
@@ -65,7 +66,7 @@ export default function Accounting() {
       <Card title="Gastos recientes" flush>
         {items.length === 0 ? <Empty hint="Registrá compras y gastos; el IVA acreditable alimenta el reporte de IVA y la prorrata." /> : (
           <table className="table"><thead><tr><th>Fecha</th><th>Descripción</th><th>Categoría</th><th>Crédito IVA</th><th className="num">Subtotal</th><th className="num">IVA</th><th className="num">Total</th><th>Estado</th><th /></tr></thead>
-            <tbody>{items.map((e) => <tr key={e.id}><td className="muted">{fmtDate(e.date)}</td><td style={{ fontWeight: 600 }}>{e.description}{e.attachment_url && <a href={e.attachment_url} target="_blank" rel="noopener" className="badge badge--info" style={{ marginLeft: 6 }} title="Ver adjunto">Adjunto</a>}{e.reference && <div className="meta">{e.reference}</div>}</td><td className="muted">{e.category || "—"}</td><td className="muted">{e.iva_credit}</td><td className="num money">{fmtMoney(e.subtotal, e.currency)}</td><td className="num money">{fmtMoney(e.tax_amount, e.currency)}</td><td className="num money" style={{ fontWeight: 700 }}>{fmtMoney(e.total, e.currency)}</td><td><Badge status={e.status === "registrado" ? "creado" : e.status === "pagado" ? "pagada" : "anulada"} /></td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setEdit({ id: e.id, category_id: e.category_id ? String(e.category_id) : "", supplier_id: e.supplier_id ? String(e.supplier_id) : "", attachment_url: e.attachment_url || "", description: e.description, date: e.date, currency: e.currency, subtotal: String(Number(e.subtotal)), tax_rate: String(Number(e.tax_rate)), iva_credit: e.iva_credit, bank_account_id: e.bank_account_id ? String(e.bank_account_id) : "", reference: e.reference || "", status: e.status })}>Ver</button></td></tr>)}</tbody></table>
+            <tbody>{items.map((e) => <tr key={e.id}><td className="muted">{fmtDate(e.date)}</td><td style={{ fontWeight: 600 }}>{e.description}{e.attachment_url && <VerArchivo url={e.attachment_url} caption={e.description} className="badge badge--info badge--btn">Adjunto</VerArchivo>}{e.reference && <div className="meta">{e.reference}</div>}</td><td className="muted">{e.category || "—"}</td><td className="muted">{e.iva_credit}</td><td className="num money">{fmtMoney(e.subtotal, e.currency)}</td><td className="num money">{fmtMoney(e.tax_amount, e.currency)}</td><td className="num money" style={{ fontWeight: 700 }}>{fmtMoney(e.total, e.currency)}</td><td><Badge status={e.status === "registrado" ? "creado" : e.status === "pagado" ? "pagada" : "anulada"} /></td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setEdit({ id: e.id, category_id: e.category_id ? String(e.category_id) : "", supplier_id: e.supplier_id ? String(e.supplier_id) : "", attachment_url: e.attachment_url || "", description: e.description, date: e.date, currency: e.currency, subtotal: String(Number(e.subtotal)), tax_rate: String(Number(e.tax_rate)), iva_credit: e.iva_credit, bank_account_id: e.bank_account_id ? String(e.bank_account_id) : "", reference: e.reference || "", status: e.status })}>Ver</button></td></tr>)}</tbody></table>
         )}
       </Card>
 
@@ -104,7 +105,7 @@ export default function Accounting() {
           </div>
           <Field label="Comprobante adjunto" hint="Foto o PDF de la factura del proveedor.">
             {edit.attachment_url
-              ? <div style={{ display: "flex", gap: 8, alignItems: "center" }}><a className="btn btn--soft btn--sm" href={edit.attachment_url} target="_blank" rel="noopener">Ver adjunto</a><button className="btn btn--ghost btn--sm" onClick={() => setEdit({ ...edit, attachment_url: "" })}>Quitar</button></div>
+              ? <div style={{ display: "flex", gap: 8, alignItems: "center" }}><VerArchivo url={edit.attachment_url} caption={edit.description} className="btn btn--soft btn--sm">Ver adjunto</VerArchivo><button className="btn btn--ghost btn--sm" onClick={() => setEdit({ ...edit, attachment_url: "" })}>Quitar</button></div>
               : <Dropzone compact accept="image/*,application/pdf" label="Adjuntar foto o PDF" onDone={(m) => setEdit({ ...edit, attachment_url: m.url })} />}
           </Field>
         </Modal>

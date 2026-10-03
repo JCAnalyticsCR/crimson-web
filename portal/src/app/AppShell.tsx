@@ -6,6 +6,7 @@ import GlobalSearch from "./GlobalSearch";
 import { ROLES, roleMeta } from "./roles";
 import RoleWelcome from "./RoleWelcome";
 import UserMenu from "./UserMenu";
+import { NuevaVersion } from "./NuevaVersion";
 
 /* Cada entrada declara que permiso necesita ("modulo.accion", varias con |). El menu se arma con los permisos del rol. */
 type NavItem = { to: string; label: string; icon: string; end?: boolean; need?: string };
@@ -108,6 +109,7 @@ export default function AppShell() {
         </div>
       </aside>
       {open && <div className="nav-scrim" onClick={() => setOpen(false)} />}
+      <NuevaVersion />
 
       <div className="main">
         {viewAs && (

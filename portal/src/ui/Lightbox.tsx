@@ -11,6 +11,7 @@ export type Foto = { url: string; caption?: string };
 export function Lightbox({ fotos, start, onClose }: { fotos: Foto[]; start: number; onClose: () => void }) {
   const [i, setI] = useState(start);
   const [zoom, setZoom] = useState(false);
+  const [noEsImagen, setNoEsImagen] = useState<Record<number, boolean>>({}); // PDF u otro: se muestra como documento
   const toque = useRef<number | null>(null);
   const n = fotos.length;
   const ir = (d: number) => { setZoom(false); setI((x) => (x + d + n) % n); };
@@ -36,13 +37,14 @@ export function Lightbox({ fotos, start, onClose }: { fotos: Foto[]; start: numb
       <div className="lbox__top" onClick={(e) => e.stopPropagation()}>
         <span className="meta">{n > 1 ? `${i + 1} / ${n}` : "Fotografía"}</span>
         <div style={{ display: "flex", gap: 6 }}>
-          <a className="lbox__btn" href={f.url} target="_blank" rel="noreferrer" title="Abrir original">Original</a>
+          {/* descargar, no abrir en otra pestana: nada saca al usuario del sistema */}
+          <a className="lbox__btn" href={f.url} download title="Descargar el archivo original">Descargar</a>
           <button type="button" className="lbox__btn" onClick={onClose} aria-label="Cerrar"><Icon d={I.x} size={18} /></button>
         </div>
       </div>
       <div
         className={`lbox__stage${zoom ? " is-zoom" : ""}`}
-        onClick={(e) => { e.stopPropagation(); setZoom((z) => !z); }}
+        onClick={(e) => { e.stopPropagation(); if (!noEsImagen[i]) setZoom((z) => !z); }}
         onTouchStart={(e) => { toque.current = e.touches[0].clientX; }}
         onTouchEnd={(e) => {
           if (zoom || toque.current === null) return;
@@ -51,13 +53,15 @@ export function Lightbox({ fotos, start, onClose }: { fotos: Foto[]; start: numb
           if (Math.abs(dx) > 50) ir(dx < 0 ? 1 : -1);
         }}
       >
-        <img src={f.url} alt={f.caption || `Fotografía ${i + 1}`} draggable={false} />
+        {noEsImagen[i]
+          ? <iframe className="lbox__doc" src={f.url} title={f.caption || "Documento"} onClick={(e) => e.stopPropagation()} />
+          : <img src={f.url} alt={f.caption || `Fotografía ${i + 1}`} draggable={false} onError={() => setNoEsImagen((m) => ({ ...m, [i]: true }))} />}
       </div>
       {n > 1 && <button type="button" className="lbox__nav lbox__nav--prev" onClick={(e) => { e.stopPropagation(); ir(-1); }} aria-label="Anterior">‹</button>}
       {n > 1 && <button type="button" className="lbox__nav lbox__nav--next" onClick={(e) => { e.stopPropagation(); ir(1); }} aria-label="Siguiente">›</button>}
       <div className="lbox__cap" onClick={(e) => e.stopPropagation()}>
         {f.caption && <b>{f.caption}</b>}
-        <span className="meta">{zoom ? "Tocá para ver completa" : "Tocá la foto para ampliar"}</span>
+        {!noEsImagen[i] && <span className="meta">{zoom ? "Tocá para ver completa" : "Tocá la foto para ampliar"}</span>}
       </div>
     </div>,
     document.body,

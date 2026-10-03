@@ -97,4 +97,5 @@ a.eco__box:hover { border-color: var(--crimson); }
 .lbox__cap b { font-size: 15px; }
 .lbox__cap .meta { color: rgba(255,255,255,.55); }
 @media (max-width: 640px) { .lbox__stage { padding: 0 8px; } .lbox__nav { width: 36px; height: 52px; font-size: 28px; background: rgba(0,0,0,.35); } }
-
+.lbox__doc { width: min(960px, 100%); height: 100%; border: 0; border-radius: 6px; background: #fff; }
+.badge--btn { border: 0; cursor: pointer; margin-left: 6px; font: inherit; }
