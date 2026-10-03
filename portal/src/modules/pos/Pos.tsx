@@ -198,7 +198,7 @@ export default function Pos() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 368px", gap: 16, alignItems: "start" }}>
+      <div className="pos-grid">
         {/* ===== Left — product catalog ===== */}
         <Card flush>
           <div className="list-head">

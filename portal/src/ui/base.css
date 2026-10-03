@@ -30,6 +30,22 @@ img { max-width: 100%; display: block; }
 .nav__tenant b { display: block; font-size: 13px; line-height: 1.2; }
 .nav__tenant span { color: var(--nav-muted); font-size: 11px; }
 .nav__group { padding: 12px 14px 0; }
+.nav__scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 12px;
+  scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent;
+  /* sombra suave arriba y abajo: avisa que hay mas opciones sin ocupar espacio */
+  mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 18px), transparent 100%); }
+.nav__scroll::-webkit-scrollbar { width: 6px; }
+.nav__scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 6px; }
+.nav__brand, .nav__tenant, .nav__foot { flex: none; }
+/* Pantallas bajas (laptop 768 px, zoom 125 %): menos aire para que quepa mas sin desplazar */
+@media (max-height: 820px) {
+  .nav__brand { padding: 12px 18px 10px; }
+  .nav__tenant { margin: 8px 12px 2px; padding: 8px 10px; }
+  .nav__group { padding-top: 8px; }
+  .nav__link { padding: 7px 10px; }
+  .nav__foot { padding: 10px 14px; gap: 6px; }
+}
+@media (max-height: 600px) { .nav__rec { display: none; } }
 .nav__label { padding: 0 8px 6px; color: var(--nav-muted); font-family: var(--mono); font-size: 9.5px; letter-spacing: .2em; text-transform: uppercase; }
 .nav__link { display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 10px; color: var(--nav-text); opacity: .78; transition: background .2s, opacity .2s; }
 .nav__link svg { width: 18px; height: 18px; }
@@ -217,3 +233,36 @@ img { max-width: 100%; display: block; }
   .topbar__right .btn--crimson svg + * { display: none; }
   .kpi__value { font-size: 28px; }
 }
+
+/* ---------- Celular: nada puede empujar la pagina hacia los lados ----------
+   La barra superior (busqueda + "Ver como" + tema + nueva + usuario) media ~600 px y en un telefono de
+   375 px el navegador alejaba toda la pantalla para que cupiera: todo se veia chico, menu incluido.
+   Tablas, pestanas y botones de encabezado se desplazan o bajan de linea dentro de su caja. */
+.content > *, .card, .card__body { min-width: 0; }
+@media (max-width: 640px) {
+  .topbar { gap: 6px; padding: 0 10px; }
+  .search { min-width: 0; padding: 0 10px; }
+  .search input { min-width: 0; }
+  .topbar__right { gap: 4px; flex: none; }
+  .viewas { padding: 0 4px 0 8px; }
+  .viewas select { max-width: 74px; font-size: 12px; }
+  .umenu__btn > svg { display: none; }
+  .page-head__actions { flex-wrap: wrap; }
+  .tabs { max-width: 100%; overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button { flex: none; }
+  /* la tabla se desliza dentro de su tarjeta en vez de ensanchar la pagina */
+  table.table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}
+@media (max-width: 380px) { .topbar .btn--ghost.btn--icon { display: none; } }
+/* Punto de venta: catalogo + carrito al lado; en el telefono el carrito va debajo y deja de ser fijo */
+.pos-grid { display: grid; grid-template-columns: 1fr 368px; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .pos-grid { grid-template-columns: 1fr; } .pos-grid > :last-child { position: static !important; } }
+/* Tarifas de envio de la tienda: en el telefono el nombre va arriba y los montos en una fila */
+.ship-row { display: grid; grid-template-columns: 1fr 100px 90px 80px auto auto; gap: 8px; align-items: center; }
+@media (max-width: 640px) {
+  .ship-row { grid-template-columns: repeat(3, minmax(0, 1fr)) auto auto; padding-bottom: 10px; border-bottom: 1px solid var(--hair); }
+  .ship-row > :first-child { grid-column: 1 / -1; }
+  .ship-row--head { display: none; }
+}
+

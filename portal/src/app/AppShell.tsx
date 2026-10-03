@@ -66,6 +66,8 @@ export default function AppShell() {
     t(); const id = setInterval(t, 1000); return () => clearInterval(id);
   }, []);
   useEffect(() => { setOpen(false); }, [loc.pathname]);
+  // la opcion activa siempre a la vista dentro de la lista desplazable
+  useEffect(() => { document.querySelector(".nav__link.is-active")?.scrollIntoView({ block: "nearest" }); }, [loc.pathname]);
 
   const initials = (me?.user.full_name || "?").split(" ").map((s) => s[0]).slice(0, 2).join("").toUpperCase();
   const rm = roleMeta(role);
@@ -82,6 +84,9 @@ export default function AppShell() {
           <div style={{ minWidth: 0 }}><b>{me?.tenant.name}</b><span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><i style={{ width: 7, height: 7, borderRadius: 99, background: rm.tone, display: "inline-block" }} />{rm.label}{viewAs ? " · vista previa" : ""}</span></div>
           <Icon d={I.arrow} size={14} />
         </button>
+        {/* Solo la lista se desplaza: logo, cuenta y usuario quedan fijos. En una laptop con poca altura
+            (o con zoom del navegador) las ultimas opciones quedaban cortadas y no habia forma de bajar. */}
+        <div className="nav__scroll">
         {groups.map((g) => (
           <div className="nav__group" key={g.group}>
             <div className="nav__label">{g.group}</div>
@@ -92,6 +97,7 @@ export default function AppShell() {
             ))}
           </div>
         ))}
+        </div>
         <div className="nav__foot">
           <span className="nav__rec"><i className="rec-dot" />EN VIVO · {clock}</span>
           <div className="nav__user">

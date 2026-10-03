@@ -70,11 +70,11 @@ export default function Store() {
           </Card>
           <Card title="Tarifas de envío" extra={<button className="btn btn--ghost btn--sm" onClick={() => saveCfg({ shipping_rates: [...cfg.shipping_rates, { name: "Nuevo envío", amount: 0, active: true }] })}><Icon d={I.plus} />Agregar</button>}>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {cfg.shipping_rates.length > 0 && <div className="meta" style={{ display: "grid", gridTemplateColumns: "1fr 100px 90px 80px auto auto", gap: 8 }}><span>Nombre</span><span>Base ₡</span><span>₡ por kg</span><span>Recargo %</span><span /><span /></div>}
+              {cfg.shipping_rates.length > 0 && <div className="meta ship-row ship-row--head"><span>Nombre</span><span>Base ₡</span><span>₡ por kg</span><span>Recargo %</span><span /><span /></div>}
               {cfg.shipping_rates.map((r, i) => {
                 const upd = (patch: Partial<Rate>) => saveCfg({ shipping_rates: cfg.shipping_rates.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
                 return (
-                  <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 100px 90px 80px auto auto", gap: 8, alignItems: "center" }}>
+                  <div key={i} className="ship-row">
                     <input className="input" defaultValue={r.name} onBlur={(e) => upd({ name: e.target.value })} />
                     <input className="input input--mono" defaultValue={r.amount} onBlur={(e) => upd({ amount: Number(e.target.value) })} />
                     <input className="input input--mono" defaultValue={r.per_kg ?? 0} onBlur={(e) => upd({ per_kg: Number(e.target.value) })} title="Correos de CR: monto por kilo (mínimo 1 kg)" />
