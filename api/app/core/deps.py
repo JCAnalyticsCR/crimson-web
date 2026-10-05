@@ -58,6 +58,8 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "sales": ["ver"],
         "support_desk": ["ver", "ver_todo", "crear", "editar"],
         "reports": ["ver", "exportar"],
+        # ve las solicitudes de acceso que le llegan por correo; aprobar (dar acceso a datos) queda para el admin
+        "portal_clientes": ["ver"],
     },
     # Tecnico instalador: solo lo asignado, desde el celular. Nunca ve precios ni costos.
     "tecnico": {
@@ -124,8 +126,19 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "reports": ["ver"],
         "settings": ["ver"],
     },
+    # --- Roles de CLIENTE (portal del cliente). Viven en otro mundo que los internos: solo el modulo "portal",
+    # y get_principal los rechaza en cualquier endpoint interno aunque algun dia alguien les sume un permiso.
+    # Todo lo que ven sale filtrado en el servidor por el customer_id de su membresia (routers/client_portal.py).
+    # cliente_admin: el encargado de la empresa cliente. Tickets de toda su empresa, documentos de dinero
+    # (cotizaciones y facturas, solo lectura) y los usuarios de SU empresa.
+    "cliente_admin": {"portal": ["ver", "tickets", "comentar_todo", "documentos", "usuarios"]},
+    # cliente_usuario: crea y sigue sus tickets; los de su empresa los ve sin poder escribir. Sin dinero.
+    "cliente_usuario": {"portal": ["ver", "tickets"]},
 }
-ASSIGNABLE_ROLES = [r for r in ROLE_PERMISSIONS if r != "soporte"]
+CLIENT_ROLES = ("cliente_admin", "cliente_usuario")
+# Lo que se asigna desde Ajustes -> Usuarios: solo roles internos. Un rol de cliente sin cliente ligado no
+# tiene sentido (y no veria nada); esos se asignan desde la bandeja de accesos del portal del cliente.
+ASSIGNABLE_ROLES = [r for r in ROLE_PERMISSIONS if r != "soporte" and r not in CLIENT_ROLES]
 
 
 @dataclass
@@ -135,6 +148,11 @@ class Principal:
     role: str
     permissions: dict[str, list[str]]
     ip: str | None = None
+    customer_id: int | None = None  # solo roles de cliente: la empresa cliente a la que pertenece
+
+    @property
+    def is_client(self) -> bool:
+        return self.role in CLIENT_ROLES
 
     @property
     def sees_field_all(self) -> bool:
@@ -174,7 +192,7 @@ def _role_permissions(db: Session, code: str) -> dict:
     return r.permissions if r and r.permissions else {}
 
 
-def get_principal(
+def get_session_principal(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(bearer),
     db: Session = Depends(get_db),
@@ -199,7 +217,16 @@ def get_principal(
     ip = request.client.host if request.client else None
     if m.role_code == "soporte":
         _support_gate(db, user, tenant, request, ip)
-    return Principal(user=user, tenant=tenant, role=m.role_code, permissions=_role_permissions(db, m.role_code), ip=ip)
+    return Principal(user=user, tenant=tenant, role=m.role_code, permissions=_role_permissions(db, m.role_code), ip=ip, customer_id=m.customer_id)
+
+
+def get_principal(p: Principal = Depends(get_session_principal)) -> Principal:
+    """Principal para TODO endpoint interno. Un usuario de cliente nunca pasa de aqui: asi ningun endpoint
+    interno (incluidos los que solo piden sesion, como archivo, multimedia o tipo de cambio) le queda abierto
+    por olvido. Lo unico que usa get_session_principal es /auth (su cuenta) y el portal del cliente."""
+    if p.is_client:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Esta seccion es solo para el equipo de Crimson")
+    return p
 
 
 def _support_gate(db: Session, user: User, tenant: Tenant, request: Request, ip: str | None) -> None:

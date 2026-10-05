@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { I, Icon } from "../ui/components";
 import { useSession } from "./session";
 import GlobalSearch from "./GlobalSearch";
-import { ROLES, roleMeta } from "./roles";
+import { ROLES, isClientRole, roleMeta } from "./roles";
 import RoleWelcome from "./RoleWelcome";
 import UserMenu from "./UserMenu";
 import { NuevaVersion } from "./NuevaVersion";
@@ -31,6 +31,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
   ]},
   { group: "Catálogo", items: [
     { to: "/clientes", label: "Clientes", icon: I.customers, need: "crm.ver" },
+    { to: "/accesos-clientes", label: "Accesos de clientes", icon: I.shield, need: "portal_clientes.ver" },
     { to: "/productos", label: "Productos & Servicios", icon: I.products, need: "catalog.ver" },
     { to: "/inventario", label: "Inventarios", icon: I.inventory, need: "inventory.ver" },
     { to: "/cupones", label: "Cupones", icon: I.wallet, need: "catalog.editar" },
@@ -126,7 +127,7 @@ export default function AppShell() {
               <label className="viewas" title="Previsualizar el panel con otro rol">
                 <span className="meta">Ver como</span>
                 <select value={viewAs || "admin"} onChange={(e) => setViewAs(e.target.value === "admin" ? null : e.target.value)}>
-                  {Object.entries(ROLES).filter(([k]) => k !== "soporte").map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
+                  {Object.entries(ROLES).filter(([k]) => k !== "soporte" && !isClientRole(k)).map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
                 </select>
               </label>
             )}

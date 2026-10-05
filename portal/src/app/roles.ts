@@ -65,7 +65,22 @@ export const ROLES: Record<string, RoleMeta> = {
     can: ["Ver facturas, cotizaciones y clientes", "Reportes de ventas y de caja"],
     cannot: ["Crear o modificar cualquier dato", "Ver gastos o planillas", "Exportar a Excel"],
   },
+  // Roles de cliente: no entran al panel interno, tienen su propio portal (modules/cliente)
+  cliente_admin: {
+    label: "Cliente · administrador", tone: "#0e7490", glyph: "C",
+    summary: "Encargado de una empresa cliente: tickets de toda su empresa, equipos, mantenimientos, cotizaciones y facturas, y los usuarios de su empresa.",
+    can: ["Reportar fallas y seguir los tickets de su empresa", "Ver sus equipos instalados y las próximas visitas", "Descargar sus cotizaciones y facturas", "Invitar o desactivar usuarios de su empresa"],
+    cannot: ["Ver nada de otros clientes", "Ver costos, notas internas o la operación de Crimson"],
+  },
+  cliente_usuario: {
+    label: "Cliente · usuario", tone: "#0891b2", glyph: "U",
+    summary: "Persona de una empresa cliente: reporta fallas y sigue sus tickets; ve los equipos instalados.",
+    can: ["Reportar fallas con fotos", "Seguir sus tickets y ver los de su empresa", "Ver los equipos instalados"],
+    cannot: ["Ver cotizaciones o facturas", "Invitar usuarios", "Ver nada de otros clientes"],
+  },
   soporte: { label: "Soporte temporal", tone: "#6b6570", glyph: "S", summary: "Acceso de solo lectura concedido por el administrador; cada pantalla queda en la bitácora.", can: ["Ver para diagnosticar"], cannot: ["Modificar cualquier dato"] },
 };
+
+export const isClientRole = (code: string | undefined) => code === "cliente_admin" || code === "cliente_usuario";
 
 export const roleMeta = (code: string | undefined): RoleMeta => ROLES[code || ""] ?? { label: code || "—", tone: "#6b6570", glyph: "?", summary: "", can: [], cannot: [] };

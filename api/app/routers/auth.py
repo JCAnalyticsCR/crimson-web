@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..core.config import settings
 from ..core.db import get_db
-from ..core.deps import ROLE_PERMISSIONS, Principal, get_principal
+from ..core.deps import CLIENT_ROLES, ROLE_PERMISSIONS, Principal, get_principal, get_session_principal
 from ..core.ratelimit import login_limiter
 from ..core.security import (
     create_access_token,
@@ -172,7 +172,7 @@ def logout(request: Request, resp: Response, db: Session = Depends(get_db)):
 
 
 @router.post("/logout-all", status_code=204)
-def logout_all(request: Request, resp: Response, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+def logout_all(request: Request, resp: Response, p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
     """Cierra la sesion en todos los dispositivos: revoca todos los refresh tokens del usuario.
     Los access tokens ya emitidos vencen solos en pocos minutos."""
     now = datetime.now(UTC)
@@ -194,7 +194,7 @@ def logout_all(request: Request, resp: Response, p: Principal = Depends(get_prin
 
 
 @router.get("/me", response_model=MeOut)
-def me(p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+def me(p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
     ms = db.scalars(select(TenantUser).join(Tenant).where(TenantUser.user_id == p.user.id, TenantUser.active, Tenant.active)).all()
     return MeOut(
         user=p.user,
@@ -206,7 +206,7 @@ def me(p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
 
 
 @router.post("/password", status_code=204)
-def change_password(data: PasswordChangeIn, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+def change_password(data: PasswordChangeIn, p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
     if not verify_password(data.current_password, p.user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Contrasena actual incorrecta")
     if not password_is_strong(data.new_password):
@@ -216,7 +216,7 @@ def change_password(data: PasswordChangeIn, p: Principal = Depends(get_principal
 
 
 @router.post("/2fa/setup", response_model=TotpSetupOut)
-def totp_setup(p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+def totp_setup(p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
     secret = new_totp_secret()
     p.user.totp_secret = secret
     p.user.totp_enabled = False
@@ -225,7 +225,7 @@ def totp_setup(p: Principal = Depends(get_principal), db: Session = Depends(get_
 
 
 @router.post("/2fa/verify", response_model=RecoveryCodesOut)
-def totp_verify(data: TotpVerifyIn, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+def totp_verify(data: TotpVerifyIn, p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
     """Activa el 2FA y entrega los codigos de recuperacion. Se muestran UNA vez: despues solo viven hasheados."""
     if not p.user.totp_secret or not verify_totp(p.user.totp_secret, data.code):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Codigo invalido")
@@ -238,7 +238,7 @@ def totp_verify(data: TotpVerifyIn, p: Principal = Depends(get_principal), db: S
 
 
 @router.post("/2fa/recovery-codes", response_model=RecoveryCodesOut)
-def totp_recovery_codes(data: PasswordOnlyIn, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+def totp_recovery_codes(data: PasswordOnlyIn, p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
     """Genera codigos nuevos (los anteriores dejan de servir). Pide la contrasena: si alguien te deja
     la sesion abierta, no deberia poder fabricarse una llave de entrada permanente."""
     if not p.user.totp_enabled:
@@ -253,7 +253,7 @@ def totp_recovery_codes(data: PasswordOnlyIn, p: Principal = Depends(get_princip
 
 
 @router.post("/2fa/disable", status_code=204)
-def totp_disable(data: PasswordOnlyIn, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+def totp_disable(data: PasswordOnlyIn, p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
     """Apaga el 2FA con la contrasena. Sin esto, perder el telefono significaba entrar a la base de datos."""
     if not verify_password(data.password, p.user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Contrasena incorrecta")
@@ -266,4 +266,6 @@ def totp_disable(data: PasswordOnlyIn, p: Principal = Depends(get_principal), db
 
 @router.get("/roles")
 def roles(_: Principal = Depends(get_principal)):
-    return {"roles": list(ROLE_PERMISSIONS.keys()), "matrix": ROLE_PERMISSIONS}
+    # matriz de roles internos (vista previa del admin); los de cliente tienen su propia interfaz
+    m = {k: v for k, v in ROLE_PERMISSIONS.items() if k not in CLIENT_ROLES}
+    return {"roles": list(m.keys()), "matrix": m}

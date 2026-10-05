@@ -8,6 +8,7 @@ import { SessionProvider, useSession } from "./app/session";
 import AppShell from "./app/AppShell";
 import Guard from "./app/Guard";
 import Login from "./modules/auth/Login";
+import { isClientRole } from "./app/roles";
 const Dashboard = lazy(() => import("./modules/dashboard/Dashboard"));
 const DocList = lazy(() => import("./modules/sales/DocList"));
 const DocEditor = lazy(() => import("./modules/sales/DocEditor"));
@@ -46,11 +47,24 @@ const Tickets = lazy(() => import("./modules/support/Tickets"));
 const Contracts = lazy(() => import("./modules/support/Contracts"));
 const Commissions = lazy(() => import("./modules/support/Commissions"));
 const Archive = lazy(() => import("./modules/tools/Archive"));
+const AccessRequests = lazy(() => import("./modules/clientaccess/AccessRequests"));
+const RequestAccess = lazy(() => import("./modules/auth/RequestAccess"));
+// Portal del cliente: su propio layout y su propio menu (nunca el panel interno)
+const ClientShell = lazy(() => import("./modules/cliente/ClientShell"));
+const ClientHome = lazy(() => import("./modules/cliente/ClientHome"));
+const ClientTickets = lazy(() => import("./modules/cliente/ClientTickets"));
+const ClientTicket = lazy(() => import("./modules/cliente/ClientTicket"));
+const ClientNewTicket = lazy(() => import("./modules/cliente/ClientNewTicket"));
+const ClientAssets = lazy(() => import("./modules/cliente/ClientAssets"));
+const ClientDocs = lazy(() => import("./modules/cliente/ClientDocs"));
+const ClientUsers = lazy(() => import("./modules/cliente/ClientUsers"));
+const ClientAccount = lazy(() => import("./modules/cliente/ClientAccount"));
 
 function Private() {
   const { me, loading } = useSession();
   if (loading) return <div style={{ minHeight: "100dvh", display: "grid", placeItems: "center" }}><span className="spinner" /></div>;
-  return me ? <AppShell /> : <Login />;
+  if (!me) return <Login />;
+  return isClientRole(me.role) ? <Suspense fallback={<Loading />}><ClientShell /></Suspense> : <AppShell />;
 }
 
 /** /login: pantalla de acceso (el boton "Ingresar" de la landing apunta aqui). Con sesion activa entra directo. */
@@ -65,6 +79,8 @@ const g = (need: string, el: ReactElement) => <Guard need={need}>{el}</Guard>;
 const Loading = () => <div style={{ minHeight: "60vh", display: "grid", placeItems: "center" }}><span className="spinner" /></div>;
 
 function App() {
+  const { me } = useSession();
+  const cliente = isClientRole(me?.role);
   return (
     <Suspense fallback={<Loading />}>
     <Routes>
@@ -74,6 +90,20 @@ function App() {
       <Route path="/tienda/:slug" element={<PublicStore />} />
       <Route path="/eventos/:slug/:event" element={<PublicEvent />} />
       <Route path="/entrada/:code" element={<TicketPage />} />
+      <Route path="/solicitar-acceso" element={<RequestAccess />} />
+      {cliente ? (
+        <Route element={<Private />}>
+          <Route path="/" element={<ClientHome />} />
+          <Route path="/mis-tickets" element={<ClientTickets />} />
+          <Route path="/mis-tickets/nuevo" element={<ClientNewTicket />} />
+          <Route path="/mis-tickets/:id" element={<ClientTicket />} />
+          <Route path="/mis-equipos" element={<ClientAssets />} />
+          <Route path="/documentos" element={g("portal.documentos", <ClientDocs />)} />
+          <Route path="/mi-empresa" element={g("portal.usuarios", <ClientUsers />)} />
+          <Route path="/mi-cuenta" element={<ClientAccount />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      ) : (
       <Route element={<Private />}>
         <Route path="/" element={g("dashboard.ver", <Dashboard />)} />
         <Route path="/cotizaciones" element={g("sales.ver", <DocList kind="quotes" />)} />
@@ -111,8 +141,10 @@ function App() {
         <Route path="/reportes" element={g("reports.ver", <Reports />)} />
         <Route path="/contabilidad" element={g("accounting.ver", <Accounting />)} />
         <Route path="/ajustes" element={<Settings />} />
+        <Route path="/accesos-clientes" element={g("portal_clientes.ver", <AccessRequests />)} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
+      )}
     </Routes>
     </Suspense>
   );

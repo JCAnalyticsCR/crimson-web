@@ -3,6 +3,7 @@
 from .base import TenantMixin, TimestampMixin
 from .catalog import Category, Product, ProductTax, Supplier, Tax
 from .core import (
+    AccessRequest,
     AuditLog,
     Currency,
     ExchangeRate,
@@ -70,6 +71,7 @@ __all__ = [
     "TenantUser",
     "Role",
     "Invitation",
+    "AccessRequest",
     "RefreshToken",
     "AuditLog",
     "Currency",

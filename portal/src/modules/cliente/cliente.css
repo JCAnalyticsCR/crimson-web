@@ -1,0 +1,54 @@
+/* Portal del cliente: movil primero (se valida a 375 px). Barra de pestanas abajo en el telefono,
+   menu arriba en pantallas grandes. Nada de anchos fijos: todo se acomoda sin desborde horizontal. */
+.cp { min-height: 100dvh; background: var(--bg); color: var(--text); overflow-x: hidden; }
+.cp-top { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--surface, var(--bg)); border-bottom: 1px solid var(--hair); }
+.cp-top img { height: 28px; width: auto; flex: none; }
+.cp-top__who { min-width: 0; flex: 1; line-height: 1.2; }
+.cp-top__who b { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cp-top__who span { font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.cp-nav { display: none; }
+.cp-main { width: 100%; max-width: 1080px; margin: 0 auto; padding: 16px 16px 96px; box-sizing: border-box; }
+.cp-tabs { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; background: var(--surface, var(--bg)); border-top: 1px solid var(--hair); padding-bottom: env(safe-area-inset-bottom); }
+.cp-tabs a { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 2px; font-size: 11px; color: var(--text-3); text-decoration: none; min-width: 0; }
+.cp-tabs a span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-tabs a.is-active { color: var(--crimson); font-weight: 600; }
+@media (min-width: 900px) {
+  .cp-tabs { display: none; }
+  .cp-nav { display: flex; gap: 4px; flex-wrap: wrap; }
+  .cp-nav a { padding: 8px 12px; border-radius: 10px; color: var(--text-2, var(--text)); text-decoration: none; font-size: 14px; display: inline-flex; gap: 6px; align-items: center; }
+  .cp-nav a.is-active { background: var(--crimson-soft); color: var(--crimson); font-weight: 600; }
+  .cp-main { padding: 24px 24px 48px; }
+}
+.cp-h { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.cp-h h1 { margin: 0; }
+.cp-grid { display: grid; gap: 12px; grid-template-columns: 1fr; }
+@media (min-width: 700px) { .cp-grid--2 { grid-template-columns: 1fr 1fr; } .cp-grid--3 { grid-template-columns: repeat(3, 1fr); } }
+.cp-stat { padding: 14px 16px; border: 1px solid var(--hair); border-radius: 14px; background: var(--surface, var(--bg)); }
+.cp-stat b { font-size: 26px; display: block; }
+.cp-list { display: flex; flex-direction: column; gap: 8px; }
+.cp-row { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--hair); border-radius: 12px; background: var(--surface, var(--bg)); text-decoration: none; color: inherit; min-width: 0; }
+.cp-row:hover { border-color: var(--hair-2); }
+.cp-row__main { flex: 1; min-width: 0; }
+.cp-row__main b { display: block; overflow-wrap: anywhere; }
+.cp-row__meta { font-size: 12px; color: var(--text-3); margin-top: 2px; overflow-wrap: anywhere; }
+.cp-row__side { flex: none; text-align: right; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+.cp-msgs { display: flex; flex-direction: column; gap: 10px; }
+.cp-msg { max-width: 92%; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--hair); background: var(--bg-2); overflow-wrap: anywhere; white-space: pre-wrap; }
+.cp-msg--me { align-self: flex-end; background: var(--crimson-soft); border-color: transparent; }
+.cp-msg small { display: block; font-size: 11px; color: var(--text-3); margin-bottom: 4px; white-space: normal; }
+.cp-seg { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.cp-seg button { border: 1px solid var(--hair-2); background: transparent; color: inherit; padding: 6px 12px; border-radius: 99px; font-size: 13px; cursor: pointer; }
+.cp-seg button.is-on { background: var(--crimson); border-color: var(--crimson); color: #fff; }
+.cp-choices { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.cp-choices button { border: 1.5px solid var(--hair-2); border-radius: 12px; background: transparent; color: inherit; padding: 12px 10px; text-align: left; cursor: pointer; font-size: 14px; }
+.cp-choices button.is-on { border-color: var(--crimson); background: var(--crimson-soft); }
+.cp-choices button small { display: block; color: var(--text-3); font-size: 12px; margin-top: 2px; }
+.cp-form { display: flex; flex-direction: column; gap: 14px; }
+.cp-form .input, .cp-form .textarea, .cp-form select { width: 100%; box-sizing: border-box; font-size: 16px; } /* 16px: iOS no hace zoom */
+.cp-card { padding: 16px; border: 1px solid var(--hair); border-radius: 14px; background: var(--surface, var(--bg)); min-width: 0; }
+.cp-link { word-break: break-all; font-family: var(--mono, monospace); font-size: 12px; padding: 8px; border-radius: 8px; background: var(--bg-2); }
+/* pagina publica: solicitar acceso */
+.ra { min-height: 100dvh; display: grid; grid-template-columns: minmax(0, 460px); justify-content: center; align-content: center; padding: 24px 16px; background: var(--bg); box-sizing: border-box; overflow-x: hidden; }
+.ra__box { width: 100%; max-width: 460px; display: flex; flex-direction: column; gap: 14px; }
+.ra__box img { height: 34px; width: auto; align-self: flex-start; }
+.ra__hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
