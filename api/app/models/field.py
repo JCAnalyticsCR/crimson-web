@@ -26,6 +26,8 @@ class Opportunity(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id"))
     contact: Mapped[dict] = mapped_column(JSON, default=dict)  # nombre, correo, telefono (prospecto sin ficha aun)
     title: Mapped[str] = mapped_column(String(200))
+    # venta: solo equipo, sin instalacion (no pide levantamiento ni proyecto) | proyecto: requiere levantamiento e instalacion
+    kind: Mapped[str] = mapped_column(String(12), default="proyecto", server_default="proyecto")
     source: Mapped[str | None] = mapped_column(String(60))  # referido, web, whatsapp, feria, cliente actual
     solution: Mapped[str | None] = mapped_column(String(20))  # cctv, redes, acceso...
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), index=True)  # vendedora asignada
@@ -83,6 +85,8 @@ class SurveyPoint(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     survey_id: Mapped[int] = mapped_column(ForeignKey("survey.id", ondelete="CASCADE"), index=True)
     code: Mapped[str] = mapped_column(String(20))
+    # tipo del punto cuando no es el del levantamiento (una puerta de acceso en uno de CCTV); None = el del levantamiento
+    kind: Mapped[str | None] = mapped_column(String(16))
     label: Mapped[str | None] = mapped_column(String(160))
     data: Mapped[dict] = mapped_column(JSON, default=dict)
     photos: Mapped[list] = mapped_column(JSON, default=list)

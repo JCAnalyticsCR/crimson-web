@@ -17,7 +17,12 @@ SPECS: dict[str, dict] = {
         "point_label": "Cámara",
         "fields": [
             {"key": "ubicacion", "label": "Ubicación", "type": "text", "placeholder": "Entrada principal"},
-            {"key": "tipo", "label": "Tipo", "type": "select", "options": ["Bullet", "Domo", "Turret", "PTZ", "Fisheye", "Ojo de pez dual", "Lente dual 180°", "360°"]},
+            {
+                "key": "tipo",
+                "label": "Tipo",
+                "type": "select",
+                "options": ["Bullet", "Domo", "Turret", "PTZ", "Fisheye", "Ojo de pez dual", "Lente dual 180°", "360°"],
+            },
             {"key": "ambiente", "label": "Ambiente", "type": "select", "options": ["Exterior", "Interior"]},
             {"key": "resolucion", "label": "Resolución requerida", "type": "select", "options": ["2 MP", "4 MP", "6 MP", "8 MP (4K)"]},
             {"key": "distancia_m", "label": "Distancia al gabinete (m)", "type": "number", "unit": "m"},
@@ -284,16 +289,166 @@ def _mismo_material(sugerido: dict, it) -> bool:
     return True
 
 
+def point_kind(p, default: str) -> str:
+    """Tipo de un punto: el suyo si lo tiene (una puerta en un levantamiento de CCTV), si no el del levantamiento."""
+    k = p.kind if hasattr(p, "kind") else (p.get("kind") if isinstance(p, dict) else None)
+    return k if k in SPECS else default
+
+
+# Agrupacion del equipo principal de cada punto segun sus caracteristicas
+GROUP_KEY = {"cctv": ("tipo", "resolucion"), "redes": ("equipo",), "acceso": ("cerradura",), "asistencia": ("metodo",), "anpr": ()}
+# Llaves de distancia que se convierten en metros de cable UTP (acceso lleva su propio cable 4x22)
+METER_KEYS = ("metros", "distancia_m", "distancia_camara_m")
+LECTORES = {
+    "Tarjeta": "Lector de tarjeta",
+    "Huella": "Lector biométrico de huella",
+    "Facial": "Terminal de reconocimiento facial",
+    "PIN": "Teclado PIN",
+    "App / QR": "Lector QR",
+}
+SALIDAS = {"Botón": "Botón de salida", "Sensor de movimiento": "Sensor de salida (PIR)", "Barra antipánico": "Barra antipánico", "Lector interior": None}
+
+
+def _main_equipment(kind: str, pts: list, add) -> None:
+    """1) el equipo principal de cada punto, agrupado por sus caracteristicas."""
+    spec = SPECS[kind]
+    if kind == "ups":
+        # el "punto" de un levantamiento de UPS es lo que se respalda; el equipo es la UPS que alcanza esa carga
+        for p in pts:
+            w = _num(_data(p), "carga_w")
+            if w > 0:
+                va = _ceil(w / Decimal("0.6") / 500) * 500  # factor de potencia 0.6 y escalones de 500 VA
+                add(f"UPS {va} VA", 1, "Unid", f"{_code(p)}: {w:g} W a respaldar", "equipo")
+            else:
+                add("UPS (capacidad por definir)", 1, "Unid", f"{_code(p)}: sin carga anotada", "equipo")
+        return
+    groups: dict[str, list[str]] = {}
+    for p in pts:
+        data = _data(p)
+        parts = []
+        for k in GROUP_KEY.get(kind, ()):
+            v = data.get(k)
+            if isinstance(v, list):
+                v = "/".join(v)
+            if v:
+                parts.append(str(v))
+        label = f"{spec['point_label']} {' '.join(parts)}".strip() if parts else f"{spec['point_label']} ({spec['point_prefix']})"
+        groups.setdefault(label, []).append(_code(p))
+    for label, codes in groups.items():
+        add(label, len(codes), "Unid", f"{len(codes)} punto(s) levantado(s): {_codes(codes)}", "equipo")
+
+
+def _rules_cctv(pts: list, add) -> None:
+    n = len(pts)
+    poe, dc, ext, alto, emt, pvc = [], [], [], [], Decimal(0), Decimal(0)
+    for p in pts:
+        data, code = _data(p), _code(p)
+        if data.get("alimentacion") == "PoE":
+            poe.append(code)
+        elif data.get("alimentacion") == "12 VDC":
+            dc.append(code)
+        if data.get("ambiente") == "Exterior":
+            ext.append(code)
+        if _num(data, "altura_m") > 4:
+            alto.append(f"{code} ({_num(data, 'altura_m'):g} m)")
+        dist = _num(data, "distancia_m")
+        if data.get("canalizacion") == "EMT":
+            emt += dist
+        elif data.get("canalizacion") == "PVC":
+            pvc += dist
+    add("Conectores RJ45", n * 2, "Unid", f"2 por cámara ({n} cámaras)", "material")
+    if poe:
+        puertos = 8 if len(poe) <= 7 else (16 if len(poe) <= 15 else 24)
+        add(f"Switch PoE {puertos} puertos", 1, "Unid", f"{len(poe)} cámara(s) PoE: {_codes(poe)}", "equipo")
+    if dc:
+        add("Fuente 12 VDC", len(dc), "Unid", f"cámaras a 12 VDC: {_codes(dc)}", "equipo")
+    if ext:
+        add("Caja de paso exterior", len(ext), "Unid", f"cámaras en exterior: {_codes(ext)}", "material")
+    canales = 4 if n <= 4 else (8 if n <= 8 else (16 if n <= 16 else 32))
+    add(f"NVR {canales} canales", 1, "Unid", f"{n} cámara(s) levantada(s)", "equipo")
+    if emt > 0:
+        add("Tubo EMT 3/4 (3 m)", _ceil(emt * Decimal("1.15") / 3), "Unid", f"{emt:g} m en EMT + 15 %, tubos de 3 m", "material")
+    if pvc > 0:
+        add("Tubo PVC 3/4 (3 m)", _ceil(pvc * Decimal("1.15") / 3), "Unid", f"{pvc:g} m en PVC + 15 %, tubos de 3 m", "material")
+    if alto:
+        add("Alquiler de andamio / escalera extensible", 1, "Unid", f"montaje sobre 4 m: {_codes(alto)}", "material")
+
+
+def _rules_acceso(pts: list, add) -> None:
+    """Por puerta: fuente con respaldo, lectores segun la identificacion, la salida y el cable 4x22 de la cerradura."""
+    n = len(pts)
+    codes = [_code(p) for p in pts]
+    add("Fuente 12 VDC con respaldo", n, "Unid", f"1 por puerta: {_codes(codes)}", "equipo")
+    add("Batería de respaldo 12 V 7 Ah", n, "Unid", f"1 por fuente ({n} puerta(s))", "equipo")
+    lectores: dict[str, list[str]] = {}
+    salidas: dict[str, list[str]] = {}
+    metros = Decimal(0)
+    for p in pts:
+        data, code = _data(p), _code(p)
+        for x in data.get("lectura") or []:
+            if LECTORES.get(x):
+                lectores.setdefault(LECTORES[x], []).append(code)
+        if SALIDAS.get(data.get("salida") or ""):
+            salidas.setdefault(SALIDAS[data["salida"]], []).append(code)
+        metros += _num(data, "distancia_m")
+    for name, cs in lectores.items():
+        add(name, len(cs), "Unid", f"identificación en {_codes(cs)}", "equipo")
+    for name, cs in salidas.items():
+        add(name, len(cs), "Unid", f"salida de {_codes(cs)}", None)
+    if n <= 2:
+        add("Controladora de acceso 2 puertas", 1, "Unid", f"{n} puerta(s)", "equipo")
+    else:
+        add("Controladora de acceso 4 puertas", _ceil(Decimal(n) / 4), "Unid", f"{n} puertas, 4 por controladora", "equipo")
+    if metros > 0:
+        add("Cable 4x22 (metros con 15 % de holgura)", (metros * Decimal("1.15")).quantize(Decimal(1)), "m", f"{metros:g} m a las puertas + 15 %", "material")
+
+
+def _rules_redes(pts: list, add) -> None:
+    sin_poe = [_code(p) for p in pts if _data(p).get("equipo") == "Access point" and _data(p).get("poe") is False]
+    if sin_poe:
+        add("Inyector PoE", len(sin_poe), "Unid", f"access point sin PoE disponible: {_codes(sin_poe)}", "equipo")
+    add("Patch cords", len(pts) * 2, "Unid", f"2 por equipo ({len(pts)} equipos)", "material")
+
+
+def _rules_asistencia(pts: list, add) -> None:
+    add("Soporte de pared para terminal", len(pts), "Unid", f"1 por terminal ({len(pts)})", "material")
+    cableada = [_code(p) for p in pts if _data(p).get("red") == "Cableada"]
+    if cableada:
+        add("Patch cords", len(cableada), "Unid", f"terminales en red cableada: {_codes(cableada)}", "material")
+    sin_red = [_code(p) for p in pts if _data(p).get("red") == "No hay"]
+    if sin_red:
+        add("Punto de red nuevo (cableado)", len(sin_red), "Unid", f"no hay red en {_codes(sin_red)}", "material")
+
+
+def _rules_anpr(pts: list, add) -> None:
+    codes = [_code(p) for p in pts]
+    add("Cámara ANPR", len(pts), "Unid", f"1 por carril: {_codes(codes)}", "equipo")
+    nuevas = [_code(p) for p in pts if _data(p).get("barrera") == "Nueva"]
+    if nuevas:
+        add("Barrera vehicular", len(nuevas), "Unid", f"barrera nueva en {_codes(nuevas)}", "equipo")
+        add("Lazo o sensor", len(nuevas), "Unid", f"1 por barrera ({_codes(nuevas)})", "material")
+
+
+def _rules_ups(pts: list, add) -> None:
+    tomas = [(_code(p), _num(_data(p), "tomas")) for p in pts if _num(_data(p), "tomas") > 6]
+    if tomas:
+        add("Regleta de tomas", len(tomas), "Unid", "más de 6 tomas en " + _codes([c for c, _ in tomas]), "material")
+
+
+KIND_RULES = {"cctv": _rules_cctv, "acceso": _rules_acceso, "redes": _rules_redes, "asistencia": _rules_asistencia, "anpr": _rules_anpr, "ups": _rules_ups}
+
+
 def suggest_materials(kind: str, points: list, items: list | None = None) -> list[dict]:
     """Sugerencia a partir de los puntos levantados, sus observaciones y lo que ya esta cargado.
+
+    Cada punto aporta segun SU tipo: en un levantamiento de CCTV una "Puerta" agregada suma las reglas de control de
+    acceso y un "Punto de red" las de cableado. Sin puntos no queda vacio: devuelve los materiales habituales del tipo
+    de solucion para revisar cantidad (Andres: "no siempre va a ser camaras").
 
     No reemplaza nada: devuelve propuestas con el motivo; el usuario elige cuales agregar.
     action: nuevo (no existe), sumar (ya existe y falta cantidad), cubierto (ya alcanza), revisar
     (material habitual del tipo de solucion sin cantidad calculable)."""
-    spec = SPECS.get(kind, SPECS["otro"])
-    n = len(points)
-    if not n:
-        return []
+    kind = kind if kind in SPECS else "otro"
     out: list[dict] = []
 
     def add(name: str, qty, unit: str, reason: str, kind_: str | None = None) -> None:
@@ -305,72 +460,38 @@ def suggest_materials(kind: str, points: list, items: list | None = None) -> lis
                 return
         out.append({"name": name, "quantity": qty, "unit": unit, "kind": kind_ or classify_kind(name), "reason": reason})
 
-    # 1) el equipo principal de cada punto, agrupado por sus caracteristicas
-    group_key = {"cctv": ("tipo", "resolucion"), "redes": ("equipo",), "acceso": ("cerradura",), "asistencia": ("metodo",), "anpr": ()}.get(kind, ())
-    groups: dict[str, list[str]] = {}
+    # puntos agrupados por su tipo, el del levantamiento primero
+    by_kind: dict[str, list] = {}
     for p in points:
-        data = _data(p)
-        parts = []
-        for k in group_key:
-            v = data.get(k)
-            if isinstance(v, list):
-                v = "/".join(v)
-            if v:
-                parts.append(str(v))
-        label = f"{spec['point_label']} {' '.join(parts)}".strip() if parts else f"{spec['point_label']} ({spec['point_prefix']})"
-        groups.setdefault(label, []).append(_code(p))
-    for label, codes in groups.items():
-        add(label, len(codes), "Unid", f"{len(codes)} punto(s) levantado(s): {_codes(codes)}", "equipo")
+        by_kind.setdefault(point_kind(p, kind), []).append(p)
+    kinds = sorted(by_kind, key=lambda k: (k != kind, list(SPECS).index(k)))
 
-    # 2) metros: cable con 15 % de holgura por rutas reales
-    meters = Decimal(0)
-    for p in points:
-        data = _data(p)
-        for key in ("metros", "distancia_m", "distancia_camara_m"):
-            meters += _num(data, key)
-    rules = spec.get("suggest", {})
-    for name, qty in rules.get("per_point", []):
-        add(name, n * qty, "Unid", f"{qty} por cada uno de los {n} puntos")
-    if meters > 0:
-        holgura = (meters * Decimal("1.15")).quantize(Decimal(1))
-        add("Cable (metros con 15 % de holgura)", holgura, "m", f"{meters:g} m medidos entre los puntos + 15 %", "material")
-        for name, per in rules.get("per_meters", []):
-            add(name, max(1, _ceil(holgura / per)), "Unid", f"{holgura} m de cable / {per} m por unidad")
+    utp_meters = Decimal(0)  # una sola linea de cable para todos los tipos, redondeada una vez
+    for k in kinds:
+        pts = by_kind[k]
+        # 1) el equipo principal de cada punto
+        _main_equipment(k, pts, add)
+        # 2) metros de cable UTP con 15 % de holgura (acceso lleva cable 4x22 en sus reglas)
+        rules = SPECS[k].get("suggest", {})
+        for name, qty in rules.get("per_point", []):
+            add(name, len(pts) * qty, "Unid", f"{qty} por cada uno de los {len(pts)} puntos")
+        meters = Decimal(0)
+        if k != "acceso":
+            for p in pts:
+                for key in METER_KEYS:
+                    meters += _num(_data(p), key)
+        if meters > 0:
+            utp_meters += meters
+            holgura = (meters * Decimal("1.15")).quantize(Decimal(1))
+            for name, per in rules.get("per_meters", []):
+                add(name, max(1, _ceil(holgura / per)), "Unid", f"{holgura} m de cable / {per} m por unidad")
+        # 3) reglas por campo segun el tipo del punto
+        if k in KIND_RULES:
+            KIND_RULES[k](pts, add)
 
-    # 3) reglas por campo del punto (CCTV es el grueso del negocio de Crimson)
-    if kind == "cctv":
-        poe, dc, ext, alto, emt, pvc = [], [], [], [], Decimal(0), Decimal(0)
-        for p in points:
-            data, code = _data(p), _code(p)
-            if data.get("alimentacion") == "PoE":
-                poe.append(code)
-            elif data.get("alimentacion") == "12 VDC":
-                dc.append(code)
-            if data.get("ambiente") == "Exterior":
-                ext.append(code)
-            if _num(data, "altura_m") > 4:
-                alto.append(f"{code} ({_num(data, 'altura_m'):g} m)")
-            dist = _num(data, "distancia_m")
-            if data.get("canalizacion") == "EMT":
-                emt += dist
-            elif data.get("canalizacion") == "PVC":
-                pvc += dist
-        add("Conectores RJ45", n * 2, "Unid", f"2 por cámara ({n} cámaras)", "material")
-        if poe:
-            puertos = 8 if len(poe) <= 7 else (16 if len(poe) <= 15 else 24)
-            add(f"Switch PoE {puertos} puertos", 1, "Unid", f"{len(poe)} cámara(s) PoE: {_codes(poe)}", "equipo")
-        if dc:
-            add("Fuente 12 VDC", len(dc), "Unid", f"cámaras a 12 VDC: {_codes(dc)}", "equipo")
-        if ext:
-            add("Caja de paso exterior", len(ext), "Unid", f"cámaras en exterior: {_codes(ext)}", "material")
-        canales = 4 if n <= 4 else (8 if n <= 8 else (16 if n <= 16 else 32))
-        add(f"NVR {canales} canales", 1, "Unid", f"{n} cámara(s) levantada(s)", "equipo")
-        if emt > 0:
-            add("Tubo EMT 3/4 (3 m)", _ceil(emt * Decimal("1.15") / 3), "Unid", f"{emt:g} m en EMT + 15 %, tubos de 3 m", "material")
-        if pvc > 0:
-            add("Tubo PVC 3/4 (3 m)", _ceil(pvc * Decimal("1.15") / 3), "Unid", f"{pvc:g} m en PVC + 15 %, tubos de 3 m", "material")
-        if alto:
-            add("Alquiler de andamio / escalera extensible", 1, "Unid", f"montaje sobre 4 m: {_codes(alto)}", "material")
+    if utp_meters > 0:
+        holgura = (utp_meters * Decimal("1.15")).quantize(Decimal(1))
+        add("Cable (metros con 15 % de holgura)", holgura, "m", f"{utp_meters:g} m medidos entre los puntos + 15 %", "material")
 
     # 4) observaciones de cada punto
     for words, name, kind_, unit in NOTE_RULES:
@@ -379,21 +500,20 @@ def suggest_materials(kind: str, points: list, items: list | None = None) -> lis
             qty = 1 if "andamio" in name.lower() else len(hits)
             add(name, qty, unit, f"observaciones de {_codes(hits)}", kind_)
 
-    # 5) materiales habituales del tipo de solucion: sin cantidad, para revisar
-    for extra in spec.get("materials", []):
-        ya = any(extra.lower() in o["name"].lower() or o["name"].lower() in extra.lower() for o in out)
-        if not ya and _familia(extra) and any(_familia(o["name"]) == _familia(extra) for o in out):
-            ya = True  # "Cable UTP Cat6" habitual sobra si ya se calcularon los metros de cable
-        if not ya:
-            out.append(
-                {
-                    "name": extra,
-                    "quantity": Decimal(0),
-                    "unit": "Unid",
-                    "kind": classify_kind(extra),
-                    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
-                }
-            )
+    # 5) materiales habituales de cada tipo presente (y del tipo del levantamiento aunque no haya puntos):
+    #    sin cantidad, para revisar
+    for k in [kind] + [x for x in kinds if x != kind]:
+        for extra in SPECS[k].get("materials", []):
+            ya = any(extra.lower() in o["name"].lower() or o["name"].lower() in extra.lower() for o in out)
+            if not ya and _familia(extra) and any(_familia(o["name"]) == _familia(extra) for o in out):
+                ya = True  # "Cable UTP Cat6" habitual sobra si ya se calcularon los metros de cable
+            if not ya:
+                reason = "Habitual en este tipo de solución: confirmá la cantidad"
+                if k != kind:
+                    reason = f"Habitual en {SPECS[k]['label'].lower()}: confirmá la cantidad"
+                elif not points:
+                    reason = "Todavía no hay puntos levantados: habitual en este tipo de solución, confirmá la cantidad"
+                out.append({"name": extra, "quantity": Decimal(0), "unit": "Unid", "kind": classify_kind(extra), "reason": reason})
 
     # 6) cruce con lo ya cargado: no duplicar, proponer sumar
     existing = list(items or [])

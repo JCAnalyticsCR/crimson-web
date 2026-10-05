@@ -38,8 +38,13 @@ def _cust_name(db: Session, cid: int | None) -> str | None:
 
 
 def _quote_out(db: Session, q: Quote) -> QuoteOut:
+    from ..models import Opportunity
+
     o = QuoteOut.model_validate(q)
     o.customer_name = _cust_name(db, q.customer_id)
+    # el editor necesita saber si la cotizacion es de una oportunidad de venta (no ofrece "convertir a proyecto")
+    opp = db.scalar(select(Opportunity).where(Opportunity.tenant_id == q.tenant_id, Opportunity.quote_id == q.id))
+    o.opportunity = {"id": opp.id, "number": opp.number, "kind": opp.kind or "proyecto", "status": opp.status} if opp else None
     return o
 
 
@@ -49,10 +54,73 @@ def _inv_out(db: Session, i: Invoice) -> InvoiceOut:
     return o
 
 
-def _list(db: Session, model, tenant_id: int, status: str | None, cursor: int | None, limit: int, q: str | None, p: Principal | None = None):
+# ---------- Acciones pendientes del inicio ----------
+# Cada tarjeta de "Acciones pendientes" lleva a la lista filtrada con ?pendiente=<clave>. El numero de la tarjeta y
+# las filas de la lista salen de ESTA misma definicion, asi no pueden decir cosas distintas.
+PENDIENTES = {
+    "facturas_vencidas": "invoices",
+    "facturas_por_cobrar": "invoices",
+    "documentos_rechazados": "invoices",
+    "enlaces_abiertos": "invoices",
+    "cotizaciones_sin_respuesta": "quotes",
+    "cotizaciones_por_aprobar": "quotes",
+}
+
+
+def _pend_mine(p: Principal) -> bool:
+    """Solo lo propio si el inicio es personal (sin dashboard.empresa) o si la lista lo es (sin sales.ver_todo):
+    la tarjeta nunca cuenta filas que la lista no puede mostrar."""
+    return not p.can("dashboard", "empresa") or not p.sees_all_sales
+
+
+def pending_where(key: str, p: Principal) -> list:
+    tid = p.tenant.id
+    model = Invoice if PENDIENTES[key] == "invoices" else Quote
+    out = [model.tenant_id == tid]
+    if _pend_mine(p):
+        out.append(model.created_by == p.user.id)
+    today = date.today()
+    if key == "facturas_vencidas":
+        out += [Invoice.status.in_(("creado", "parcial", "vencida")), Invoice.due_date < today]
+    elif key == "facturas_por_cobrar":
+        out.append(Invoice.status.in_(("creado", "parcial")))
+    elif key == "documentos_rechazados":
+        out.append(Invoice.einvoice_status == "rechazada")
+    elif key == "enlaces_abiertos":
+        # facturas con un enlace de pago vigente sin pagar (una factura con dos enlaces cuenta una vez)
+        abiertos = select(PaymentLink.invoice_id).where(PaymentLink.tenant_id == tid, PaymentLink.paid_at.is_(None), PaymentLink.expires_at > datetime.now(UTC))
+        out.append(Invoice.id.in_(abiertos))
+    elif key == "cotizaciones_sin_respuesta":
+        out.append(Quote.status.in_(("creado", "enviada")))
+    elif key == "cotizaciones_por_aprobar":
+        out.append(Quote.status == "por_aprobar")
+    return out
+
+
+def pending_count(db: Session, key: str, p: Principal) -> int:
+    model = Invoice if PENDIENTES[key] == "invoices" else Quote
+    return db.scalar(select(func.count()).select_from(model).where(*pending_where(key, p))) or 0
+
+
+def _list(
+    db: Session,
+    model,
+    tenant_id: int,
+    status: str | None,
+    cursor: int | None,
+    limit: int,
+    q: str | None,
+    p: Principal | None = None,
+    pendiente: str | None = None,
+):
     stmt = select(model).where(model.tenant_id == tenant_id)
     if p is not None and not p.sees_all_sales:
         stmt = stmt.where(model.created_by == p.user.id)
+    if pendiente:
+        kind = "invoices" if model is Invoice else "quotes"
+        if PENDIENTES.get(pendiente) != kind or p is None:
+            raise HTTPException(422, "Filtro de pendientes desconocido")
+        stmt = stmt.where(*pending_where(pendiente, p))
     if status:
         stmt = stmt.where(model.status == status)
     if q:
@@ -116,10 +184,11 @@ def quotes(
     q: str | None = None,
     cursor: int | None = None,
     limit: int = Query(20, le=100),
+    pendiente: str | None = None,
     p: Principal = Depends(require("sales", "ver")),
     db: Session = Depends(get_db),
 ):
-    return _list(db, Quote, p.tenant.id, status, cursor, limit, q, p)
+    return _list(db, Quote, p.tenant.id, status, cursor, limit, q, p, pendiente)
 
 
 @router.post("/quotes", response_model=QuoteOut, status_code=201)
@@ -175,6 +244,13 @@ def convert_quote(qid: int, p: Principal = Depends(require("sales", "crear")), d
         raise HTTPException(409, "La cotización tiene un descuento pendiente de aprobación")
     inv = svc.convert_quote(db, p.tenant.id, p.user.id, q)
     invsvc.deduct_for_invoice(db, inv, p.user.id)
+    from ..models import Opportunity
+
+    # venta de equipo: la factura es el cierre, la oportunidad queda ganada. En "proyecto" la gana el proyecto.
+    for o in db.scalars(select(Opportunity).where(Opportunity.tenant_id == p.tenant.id, Opportunity.quote_id == q.id, Opportunity.kind == "venta")):
+        if o.status not in ("ganada", "perdida"):
+            audit(db, p.tenant.id, p.user.id, "status", "opportunity", o.id, {"de": o.status, "a": "ganada"}, ip=p.ip)
+            o.status = "ganada"
     db.commit()
     return _inv_out(db, inv)
 
@@ -245,10 +321,11 @@ def invoices(
     q: str | None = None,
     cursor: int | None = None,
     limit: int = Query(20, le=100),
+    pendiente: str | None = None,
     p: Principal = Depends(require("sales", "ver")),
     db: Session = Depends(get_db),
 ):
-    return _list(db, Invoice, p.tenant.id, status, cursor, limit, q, p)
+    return _list(db, Invoice, p.tenant.id, status, cursor, limit, q, p, pendiente)
 
 
 @router.post("/invoices", response_model=InvoiceOut, status_code=201)
@@ -361,7 +438,6 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
     tid = p.tenant.id
     mine = not p.can("dashboard", "empresa")
     own_inv = (Invoice.created_by == p.user.id) if mine else true()
-    own_quote = (Quote.created_by == p.user.id) if mine else true()
     own_pay = (Payment.created_by == p.user.id) if mine else true()
     today = date.today()
     m0 = today.replace(day=1)
@@ -397,21 +473,8 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
 
     recent_pay = db.scalars(select(Payment).where(Payment.tenant_id == tid, own_pay).order_by(Payment.id.desc()).limit(6)).all()
     recent_inv = db.scalars(select(Invoice).where(Invoice.tenant_id == tid, own_inv).order_by(Invoice.id.desc()).limit(6)).all()
-    pend_quotes = db.scalar(select(func.count()).select_from(Quote).where(Quote.tenant_id == tid, own_quote, Quote.status.in_(("creado", "enviada"))))
-    overdue = db.scalar(
-        select(func.count())
-        .select_from(Invoice)
-        .where(Invoice.tenant_id == tid, own_inv, Invoice.status.in_(("creado", "parcial", "vencida")), Invoice.due_date < today)
-    )
-    unpaid = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.tenant_id == tid, own_inv, Invoice.status.in_(("creado", "parcial"))))
-    rejected = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.tenant_id == tid, Invoice.einvoice_status == "rechazada"))
-    links_open = db.scalar(
-        select(func.count())
-        .select_from(PaymentLink)
-        .where(PaymentLink.tenant_id == tid, PaymentLink.paid_at.is_(None), PaymentLink.expires_at > datetime.now(UTC))
-    )
-
-    to_approve = db.scalar(select(func.count()).select_from(Quote).where(Quote.tenant_id == tid, own_quote, Quote.status == "por_aprobar"))
+    # mismos filtros que la lista a la que lleva cada tarjeta (pending_where)
+    pend = {k: pending_count(db, k, p) for k in PENDIENTES}
     ceo = _ceo_row(db, p) if p.can("dashboard", "empresa") else None
     receivable = []
     if mine:
@@ -466,13 +529,8 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
             for x in recent_inv
         ],
         "acciones_pendientes": {
-            "cotizaciones_sin_respuesta": pend_quotes,
-            "facturas_vencidas": overdue,
-            "facturas_por_cobrar": unpaid,
-            "documentos_rechazados": rejected,
-            "enlaces_abiertos": links_open,
+            **pend,
             "stock_bajo": len(invsvc.low_stock(db, tid)),
-            "cotizaciones_por_aprobar": to_approve,
         },
     }
 

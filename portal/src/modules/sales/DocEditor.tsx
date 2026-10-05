@@ -105,10 +105,14 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const title = isNew ? (isQ ? "Nueva cotización" : "Nueva factura") : `${isQ ? "Cotización" : "Factura"}: ${doc.number}`;
 
   /* Cotización aprobada -> proyecto: copia líneas, costo estimado y crea la primera orden de trabajo. */
+  const opp = isQ ? (doc as Quote).opportunity : null;
   const toProject = async () => {
     if (!id) return;
+    // oportunidad de solo venta: el proyecto se crea solo si se confirma que si lleva instalacion
+    const force = opp?.kind === "venta";
+    if (force && !confirm(`La oportunidad ${opp!.number} es de solo venta (sin instalación). ¿Crear el proyecto de todas formas?`)) return;
     try {
-      const pr = await api<{ id: number; number: string }>(`/quotes/${id}/project`, { method: "POST", json: {} });
+      const pr = await api<{ id: number; number: string }>(`/quotes/${id}/project`, { method: "POST", json: force ? { force: true } : {} });
       toast(`Proyecto ${pr.number} creado con su primera orden de trabajo`);
       nav(`/proyectos/${pr.id}`);
     } catch (e) { toast(e instanceof Error ? e.message : "No se pudo crear el proyecto", "bad"); }
@@ -226,7 +230,9 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               {isQ && !pending && <button className="btn btn--soft" disabled={busy} onClick={() => save("convert")}><Icon d={I.invoice} />Convertir a factura</button>}
               {isQ && !isNew && !pending && allows("projects.crear") && (
                 /* Instalaciones: la cotización aprobada arranca el proyecto con su primera orden de trabajo. */
-                <button className="btn btn--soft" disabled={busy} onClick={toProject}><Icon d={I.box} />Convertir a proyecto</button>
+                opp?.kind === "venta"
+                  ? <button className="btn btn--ghost btn--sm" disabled={busy} onClick={toProject} title={`La oportunidad ${opp.number} es de solo venta`}>¿Lleva instalación? Crear proyecto</button>
+                  : <button className="btn btn--soft" disabled={busy} onClick={toProject}><Icon d={I.box} />Convertir a proyecto</button>
               )}
               {!isNew && allows("sales.anular") && <button className="btn btn--danger" disabled={busy} onClick={() => act("void")}>Anular {isQ ? "cotización" : "factura"}</button>}
             </div></div>

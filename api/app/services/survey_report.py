@@ -127,6 +127,8 @@ def context(db: Session, s: Survey, tenant: Tenant) -> dict:
     ids = [int(x) for x in (s.visit_tech_ids or []) if str(x).isdigit()] or ([s.technician_id] if s.technician_id else [])
     visitors = [u.full_name for u in (db.get(User, i) for i in ids) if u]
     spec = SPECS.get(s.kind, SPECS["otro"])
+    # puntos de otro tipo (una puerta en un levantamiento de CCTV): cada uno con sus campos y su nombre
+    mixed = any(p.kind and p.kind != s.kind for p in s.points)
     items = [{"name": i.name, "quantity": _num(i.quantity), "unit": i.unit, "note": i.note, "kind": i.kind or "material"} for i in s.items]
     labor = [
         {"label": LABOR_LABELS.get(k, k), "people": v["people"], "days": _num(v["days"])}
@@ -137,12 +139,21 @@ def context(db: Session, s: Survey, tenant: Tenant) -> dict:
         "s": {"number": s.number, "site": s.site, "notes": s.notes},
         "t": tenant,
         "kind_label": spec["label"],
-        "point_label": spec["point_label"],
+        "point_label": "Punto" if mixed else spec["point_label"],
         "customer": c.name if c else contact.get("name"),
         "contact_line": " · ".join(x for x in (contact.get("name") if c else None, contact.get("phone"), contact.get("email")) if x),
         "visit_date": s.visit_date.strftime("%d/%m/%Y") if s.visit_date else None,
         "visitors": visitors,
-        "points": [{"code": p.code, "label": p.label, "data": _point_data(s.kind, p.data), "notes": p.notes, "photos": _photos(p.photos)} for p in s.points],
+        "points": [
+            {
+                "code": p.code,
+                "label": " · ".join(x for x in (SPECS[p.kind]["point_label"] if mixed and p.kind in SPECS else None, p.label) if x),
+                "data": _point_data(p.kind or s.kind, p.data),
+                "notes": p.notes,
+                "photos": _photos(p.photos),
+            }
+            for p in s.points
+        ],
         "equipos": [i for i in items if i["kind"] == "equipo"],
         "materiales": [i for i in items if i["kind"] != "equipo"],
         "labor": labor,

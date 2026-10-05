@@ -113,7 +113,7 @@ export type Doc = {
   issue_date: string; due_date: string | null; discount_type: string; discount_value: string; subtotal: string; discount_total: string; tax_total: string; total: string;
   internal_notes: string | null; external_notes: string | null; external_order: string | null; activity_code: string | null; medical_exemption_card: boolean; status: string; lines: Line[];
 };
-export type Quote = Doc & { converted_invoice_id: number | null };
+export type Quote = Doc & { converted_invoice_id: number | null; opportunity?: { id: number; number: string; kind: "venta" | "proyecto"; status: string } | null };
 export type Payment = { id: number; method: string; kind: string; currency: string; amount: string; tip: string; external_ref: string | null; provider: string; paid_at: string; status: string };
 export type Invoice = Doc & { doc_type: string; consecutive: string | null; clave: string | null; balance: string; quote_id: number | null; einvoice_status: string; payments: Payment[]; sale_condition: string; credit_days: number; payment_method: string };
 export type DocListItem = { id: number; number: string; customer_name: string | null; currency: string; total: string; balance: string | null; status: string; issue_date: string; due_date: string | null };

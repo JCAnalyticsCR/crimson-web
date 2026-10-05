@@ -90,6 +90,7 @@ class DocBaseOut(BaseModel):
 class QuoteOut(DocBaseOut):
     converted_invoice_id: int | None = None
     approval_reason: str | None = None
+    opportunity: dict | None = None  # {id, number, kind, status} de la oportunidad ligada
 
 
 class PaymentIn(BaseModel):
