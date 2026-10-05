@@ -1,7 +1,7 @@
 """comercial: tipo de oportunidad (venta | proyecto) y puntos de otro tipo dentro de un levantamiento
 
 Revision ID: b3e8f1a0c2d4
-Revises: a7d2c9e41f60
+Revises: b3e8f1a2c9d4
 Create Date: 2026-10-05 09:00:00
 """
 
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "b3e8f1a0c2d4"
-down_revision: str | None = "a7d2c9e41f60"
+down_revision: str | None = "b3e8f1a2c9d4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
