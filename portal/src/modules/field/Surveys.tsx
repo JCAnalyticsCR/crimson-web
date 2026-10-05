@@ -33,10 +33,10 @@ type CostLine = {
   item_id: number; product_id: number | null; name: string; kind: Kind; quantity: string; unit: string; unit_cost: string; cost: string;
   unit_price: string; price: string; has_cost: boolean; cost_source: "catalogo" | "levantamiento" | null; price_from_cost: boolean;
 };
-type LaborType = { key: LaborKey; label: string; people: number; days: string; day_cost: string; cost: string };
+type LaborType = { key: LaborKey; label: string; people: number; days: string; day_cost: string; day_cost_default: string; custom: boolean; cost: string };
 type Costing = {
   lines: CostLine[];
-  labor: { techs: number; days: string; day_cost: string; types: LaborType[]; cost: string; transport: string; per_diem: string; viaticos: string; travel: string; price: string };
+  labor: { techs: number; days: string; day_cost: string; types: LaborType[]; cost: string; transport: string; transport_default: string; transport_custom: boolean; per_diem: string; per_diem_default: string; per_diem_custom: boolean; viaticos: string; travel: string; price: string };
   cost_total: string; price_suggested: string; margin_pct: number; margin_target: number; missing_cost: string[]; can_save_catalog: boolean;
 };
 type Suggestion = {
@@ -245,6 +245,39 @@ export default function Surveys() {
       return true;
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); return false; }
   };
+
+  // Precio de mano de obra de ESTE levantamiento (Andres: "que se pueda editar el precio de mano de obra").
+  // Se manda el juego completo de lo ajustado; null vuelve a la tarifa de Ajustes.
+  type TarifaKey = LaborKey | "transport" | "per_diem";
+  const tarifas = (c: Costing): Partial<Record<TarifaKey, number>> => {
+    const t: Partial<Record<TarifaKey, number>> = {};
+    for (const x of c.labor.types) if (x.custom) t[x.key] = num(x.day_cost);
+    if (c.labor.transport_custom) t.transport = num(c.labor.transport);
+    if (c.labor.per_diem_custom) t.per_diem = num(c.labor.per_diem);
+    return t;
+  };
+  const setTarifa = async (key: TarifaKey, value: number | null) => {
+    if (!draft?.id || !costing) return;
+    const t = tarifas(costing);
+    if (value === null) delete t[key]; else t[key] = value;
+    try {
+      setCosting(await api<Costing>(`/surveys/${draft.id}/labor-rates?margin=${margin}`, { method: "PUT", json: t }));
+      toast(value === null ? "Vuelve a la tarifa de Ajustes" : "Precio de mano de obra actualizado");
+    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
+  const tarifaEditable = verCostos && draft?.status !== "cotizado" && draft?.status !== "cerrado";
+  // funcion, no componente: un componente definido aqui adentro se recrea en cada render y el campo pierde
+  // el foco y lo escrito antes de guardarse
+  const tarifa = ({ k, value, def, custom }: { k: TarifaKey; value: string; def: string; custom: boolean }) =>
+    !tarifaEditable ? <>{fmtMoney(value)}</> : (
+      <span className="tarifa">
+        <input key={`${k}-${value}`} className="input input--mono" inputMode="decimal" defaultValue={String(num(value))}
+          title={`Tarifa de Ajustes: ${fmtMoney(def)}`}
+          onBlur={(e) => { const v = num(e.target.value); if (v !== num(value) && v >= 0) setTarifa(k, v); }}
+          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+        {custom && <button type="button" className="tarifa__reset" title={`Volver a la tarifa de Ajustes (${fmtMoney(def)})`} onClick={() => setTarifa(k, null)}>ajustada · ↺</button>}
+      </span>
+    );
 
   const toQuote = async () => {
     if (!draft?.id) return;
@@ -574,11 +607,11 @@ export default function Surveys() {
                 {costing.labor.types.filter((t) => t.people > 0).map((t) => (
                   <tr key={t.key}>
                     <td style={{ fontWeight: 600 }}>{t.label} · {t.people} {t.people === 1 ? "persona" : "personas"} × {Number(t.days)} {Number(t.days) === 1 ? "día" : "días"}</td>
-                    <td className="num mono">{t.people * Number(t.days)}</td><td className="num money">{fmtMoney(t.day_cost)}</td><td className="num money">{fmtMoney(t.cost)}</td><td className="num muted">—</td>
+                    <td className="num mono">{t.people * Number(t.days)}</td><td className="num money">{tarifa({ k: t.key, value: t.day_cost, def: t.day_cost_default, custom: t.custom })}</td><td className="num money">{fmtMoney(t.cost)}</td><td className="num muted">—</td>
                   </tr>
                 ))}
-                <tr><td style={{ fontWeight: 600 }}>Transporte</td><td className="num mono">1</td><td className="num money">{fmtMoney(costing.labor.transport)}</td><td className="num money">{fmtMoney(costing.labor.transport)}</td><td className="num muted">—</td></tr>
-                {num(costing.labor.viaticos) > 0 && <tr><td style={{ fontWeight: 600 }}>Viáticos (alimentación)</td><td className="num mono">—</td><td className="num money">{fmtMoney(costing.labor.per_diem)}</td><td className="num money">{fmtMoney(costing.labor.viaticos)}</td><td className="num muted">—</td></tr>}
+                <tr><td style={{ fontWeight: 600 }}>Transporte</td><td className="num mono">1</td><td className="num money">{tarifa({ k: "transport", value: costing.labor.transport, def: costing.labor.transport_default, custom: costing.labor.transport_custom })}</td><td className="num money">{fmtMoney(costing.labor.transport)}</td><td className="num muted">—</td></tr>
+                {(num(costing.labor.viaticos) > 0 || tarifaEditable) && <tr><td style={{ fontWeight: 600 }}>Viáticos (alimentación) <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>por persona por día</span></td><td className="num mono">—</td><td className="num money">{tarifa({ k: "per_diem", value: costing.labor.per_diem, def: costing.labor.per_diem_default, custom: costing.labor.per_diem_custom })}</td><td className="num money">{fmtMoney(costing.labor.viaticos)}</td><td className="num muted">—</td></tr>}
               </GroupRows>
             </tbody>
           </table>

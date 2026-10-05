@@ -57,6 +57,16 @@ def labor_rates(tenant) -> dict[str, Decimal]:
     return {k: d(st.get(key, base)) for k, (_, key) in LABOR_TYPES.items()}
 
 
+TARIFA_KEYS = ("tecnico", "civil", "contratado", "transport", "per_diem")
+
+
+def tarifas_survey(s: Survey) -> dict[str, Decimal]:
+    """Precio de mano de obra ajustado a mano para ESTE levantamiento (Andres: "que se pueda editar el precio
+    de mano de obra"). Solo lo que se cambio; lo demas sale de Ajustes."""
+    raw = (s.labor or {}).get("tarifas") or {}
+    return {k: d(v) for k, v in raw.items() if k in TARIFA_KEYS and v is not None}
+
+
 def per_diem(tenant) -> Decimal:
     """Viaticos (alimentacion) por persona por dia de obra. 0 si no esta configurado: antes no existia."""
     return d((tenant.settings or {}).get("per_diem_cost", 0))
@@ -214,7 +224,8 @@ def _apply_fields(s: Survey, data: SurveyIn, db: Session, p: Principal) -> None:
     labor = _labor_payload(data)
     for k, v in data.model_dump(exclude={"points", "items", "labor", "techs", "days", "visit_tech_ids"}).items():
         setattr(s, k, v)
-    s.labor = labor
+    tarifas = (s.labor or {}).get("tarifas")  # las pone el costeo; el tecnico al guardar no las ve ni las borra
+    s.labor = {**labor, "tarifas": tarifas} if tarifas else labor
     s.techs, s.days = labor["tecnico"]["people"], d(labor["tecnico"]["days"])
     # solo usuarios de esta empresa
     from ..models import TenantUser
@@ -485,6 +496,8 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
     fx = docsvc.today_fx(db, "USD")[0]
     margin_pct = d(margin) if margin is not None else pricing.default_margin(p.tenant)
     labor_day, transport = rates(p.tenant)
+    propias = tarifas_survey(s)
+    transport = propias.get("transport", transport)
     lines, cost_items, price_items = [], Decimal(0), Decimal(0)
     groups = {"equipo": {"cost": Decimal(0), "price": Decimal(0)}, "material": {"cost": Decimal(0), "price": Decimal(0)}}
     for it in s.items:
@@ -523,16 +536,27 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
     lines.sort(key=lambda x: 0 if x["kind"] == "equipo" else 1)  # equipos primero, como en el levantamiento
 
     # mano de obra por tipo de personal
-    lrates = labor_rates(p.tenant)
+    generales = labor_rates(p.tenant)
+    lrates = {k: propias.get(k, v) for k, v in generales.items()}
     types, labor_cost, person_days = [], Decimal(0), Decimal(0)
     for k, v in survey_labor(s).items():
         c = lrates[k] * v["people"] * v["days"]
         labor_cost += c
         person_days += v["people"] * v["days"]
         types.append(
-            {"key": k, "label": LABOR_TYPES[k][0], "people": v["people"], "days": v["days"], "day_cost": lrates[k], "cost": c.quantize(Decimal("0.01"))}
+            {
+                "key": k,
+                "label": LABOR_TYPES[k][0],
+                "people": v["people"],
+                "days": v["days"],
+                "day_cost": lrates[k],
+                "day_cost_default": generales[k],
+                "custom": k in propias,
+                "cost": c.quantize(Decimal("0.01")),
+            }
         )
-    viaticos = (per_diem(p.tenant) * person_days).quantize(Decimal("0.01"))
+    pd = propias.get("per_diem", per_diem(p.tenant))
+    viaticos = (pd * person_days).quantize(Decimal("0.01"))
     travel = transport + viaticos
     cost_total = cost_items + labor_cost + travel
     labor_price = pricing.sale_price(db, labor_cost + travel, "CRC", "CRC", margin_pct)
@@ -548,7 +572,11 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
             "types": types,
             "cost": labor_cost.quantize(Decimal("0.01")),
             "transport": transport,
-            "per_diem": per_diem(p.tenant),
+            "transport_default": rates(p.tenant)[1],
+            "transport_custom": "transport" in propias,
+            "per_diem": pd,
+            "per_diem_default": per_diem(p.tenant),
+            "per_diem_custom": "per_diem" in propias,
             "viaticos": viaticos,
             "travel": travel,
             "price": labor_price,
@@ -561,6 +589,41 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
         "missing_cost": [line["name"] for line in lines if not line["has_cost"]],
         "can_save_catalog": p.can("catalog", "editar"),
     }
+
+
+class TarifasIn(BaseModel):
+    """Colones sin IVA. null = volver a la tarifa de Ajustes."""
+
+    tecnico: Decimal | None = Field(None, ge=0, le=10_000_000)
+    civil: Decimal | None = Field(None, ge=0, le=10_000_000)
+    contratado: Decimal | None = Field(None, ge=0, le=10_000_000)
+    transport: Decimal | None = Field(None, ge=0, le=100_000_000)
+    per_diem: Decimal | None = Field(None, ge=0, le=10_000_000)
+
+
+@router.put("/surveys/{sid}/labor-rates")
+def survey_labor_rates(
+    sid: int, data: TarifasIn, margin: Decimal | None = None, p: Principal = Depends(require("field", "editar")), db: Session = Depends(get_db)
+):
+    """Ajusta el precio de la mano de obra solo para este levantamiento, sin tocar la tarifa general.
+    Es costo: solo quien ve costos."""
+    if not p.sees_costs:
+        raise HTTPException(403, "Tu rol no ve costos")
+    s = _survey(db, sid, p)
+    if s.status in ("cotizado", "cerrado"):
+        raise HTTPException(409, "El levantamiento ya fue cotizado")
+    tarifas = {k: str(v) for k, v in data.model_dump().items() if v is not None}
+    labor = dict(s.labor or {})
+    if not labor:
+        labor = {k: {"people": v["people"], "days": str(v["days"])} for k, v in survey_labor(s).items()}
+    if tarifas:
+        labor["tarifas"] = tarifas
+    else:
+        labor.pop("tarifas", None)
+    s.labor = labor  # se reasigna entero: el JSON no detecta cambios internos
+    audit(db, p.tenant.id, p.user.id, "labor_rates", "survey", s.id, tarifas, ip=p.ip)
+    db.commit()
+    return survey_costing(sid, margin, p, db)  # con el margen que el usuario tiene puesto en el costeo
 
 
 class CostIn(BaseModel):

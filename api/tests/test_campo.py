@@ -280,3 +280,36 @@ def test_tipos_de_camara_lente_dual_180_y_360(client, auth):
     s = client.post("/surveys", json={"kind": "cctv", "points": [{"code": "CAM-01", "data": {"tipo": "360°"}}, {"code": "CAM-02", "data": {"tipo": "Lente dual 180°"}}]})
     assert s.status_code == 201, s.text
     assert [p["data"]["tipo"] for p in s.json()["points"]] == ["360°", "Lente dual 180°"]
+
+
+def test_precio_de_mano_de_obra_editable(client, auth):
+    """Andres: 'que se pueda editar el precio de mano de obra'. Dos niveles: la tarifa general en Ajustes y el
+    precio de un levantamiento puntual en su costeo, sin tocar la general."""
+    assert client.put("/settings", json={"labor_day_cost": 30000, "labor_day_cost_civil": 20000, "per_diem_cost": 5000, "travel_cost": 10000}).status_code == 200
+    body = {"kind": "cctv", "labor": {"tecnico": {"people": 2, "days": "1"}, "civil": {"people": 1, "days": "2"}}, "points": [{"code": "CAM-01", "data": {}}]}
+    s = client.post("/surveys", json=body).json()
+    c = client.get(f"/surveys/{s['id']}/costing").json()
+    tipos = {t["key"]: t for t in c["labor"]["types"]}
+    assert Decimal(str(tipos["tecnico"]["day_cost"])) == 30000 and Decimal(str(tipos["civil"]["day_cost"])) == 20000
+    assert Decimal(str(c["labor"]["cost"])) == 30000 * 2 + 20000 * 2
+    assert Decimal(str(c["labor"]["viaticos"])) == 5000 * 4 and Decimal(str(c["labor"]["transport"])) == 10000
+
+    # solo para este levantamiento
+    c2 = client.put(f"/surveys/{s['id']}/labor-rates", json={"tecnico": 45000, "transport": 0}).json()
+    t2 = {t["key"]: t for t in c2["labor"]["types"]}
+    assert Decimal(str(t2["tecnico"]["day_cost"])) == 45000 and t2["tecnico"]["custom"] is True
+    assert Decimal(str(t2["tecnico"]["day_cost_default"])) == 30000 and t2["civil"]["custom"] is False
+    assert Decimal(str(c2["labor"]["cost"])) == 45000 * 2 + 20000 * 2 and Decimal(str(c2["labor"]["transport"])) == 0
+
+    # el tecnico vuelve a guardar el levantamiento: la tarifa ajustada sobrevive
+    client.put(f"/surveys/{s['id']}", json=body)
+    c3 = client.get(f"/surveys/{s['id']}/costing").json()
+    assert Decimal(str({t["key"]: t for t in c3["labor"]["types"]}["tecnico"]["day_cost"])) == 45000
+
+    # la tarifa general no cambio para otros levantamientos
+    otro = client.post("/surveys", json=body).json()
+    assert Decimal(str({t["key"]: t for t in client.get(f"/surveys/{otro['id']}/costing").json()["labor"]["types"]}["tecnico"]["day_cost"])) == 30000
+
+    # volver a Ajustes
+    c4 = client.put(f"/surveys/{s['id']}/labor-rates", json={}).json()
+    assert Decimal(str({t["key"]: t for t in c4["labor"]["types"]}["tecnico"]["day_cost"])) == 30000

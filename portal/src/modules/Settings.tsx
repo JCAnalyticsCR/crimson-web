@@ -8,7 +8,7 @@ import { ImageField } from "../ui/MediaPicker";
 import { SlaSettings } from "./support/SlaTable";
 
 type Group = { id: number; doc_type: string; prefix: string; branch: string; terminal: string; current: number; is_default: boolean };
-type Cfg = { max_discount_pct?: number; archive_purge_days?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; notify_due: boolean; remind_days_before: number; daily_close_email: boolean; bcc: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
+type Cfg = { labor_day_cost?: number; labor_day_cost_civil?: number; labor_day_cost_contratado?: number; per_diem_cost?: number; travel_cost?: number; max_discount_pct?: number; archive_purge_days?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; notify_due: boolean; remind_days_before: number; daily_close_email: boolean; bcc: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
 type Bank = { id: number; name: string; bank: string | null; currency: string; number: string | null; active: boolean };
 type Users = { users: { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null }[]; invitations: { id: number; email: string; role: string; expires_at: string }[]; roles: string[] };
 type Gw = { id: number; provider: string; client_id: string | null; secret_mask: string | null; is_primary: boolean; active: boolean; mode: string };
@@ -117,6 +117,19 @@ export default function Settings() {
             </div>
           </Card>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* Precio de mano de obra por defecto. Cada levantamiento lo puede ajustar en su costeo sin tocar esto. */}
+            <Card title="Mano de obra (costo por persona por día)">
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div className="grid-2">
+                  <Field label="Personal técnico (₡)"><input className="input input--mono" inputMode="decimal" defaultValue={cfg.labor_day_cost ?? 25000} onBlur={(e) => saveCfg({ labor_day_cost: Number(e.target.value) })} /></Field>
+                  <Field label="Personal de obra civil (₡)" hint="Vacío: igual que el técnico."><input className="input input--mono" inputMode="decimal" defaultValue={cfg.labor_day_cost_civil ?? ""} onBlur={(e) => e.target.value.trim() && saveCfg({ labor_day_cost_civil: Number(e.target.value) })} /></Field>
+                  <Field label="Personal contratado (₡)" hint="Vacío: igual que el técnico."><input className="input input--mono" inputMode="decimal" defaultValue={cfg.labor_day_cost_contratado ?? ""} onBlur={(e) => e.target.value.trim() && saveCfg({ labor_day_cost_contratado: Number(e.target.value) })} /></Field>
+                  <Field label="Viáticos por persona por día (₡)" hint="Alimentación."><input className="input input--mono" inputMode="decimal" defaultValue={cfg.per_diem_cost ?? 0} onBlur={(e) => saveCfg({ per_diem_cost: Number(e.target.value) })} /></Field>
+                  <Field label="Transporte por trabajo (₡)"><input className="input input--mono" inputMode="decimal" defaultValue={cfg.travel_cost ?? 35000} onBlur={(e) => saveCfg({ travel_cost: Number(e.target.value) })} /></Field>
+                </div>
+                <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Son costos internos, sin IVA. El precio al cliente sale con el margen del costeo. En cada levantamiento se pueden ajustar solo para ese trabajo.</p>
+              </div>
+            </Card>
             <Card title="Notificaciones">
               <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13 }}>
                 <label style={{ display: "flex", gap: 10 }}><input type="checkbox" checked={cfg.notify_due} onChange={(e) => saveCfg({ notify_due: e.target.checked })} />Notificar vencimiento al cliente</label>
