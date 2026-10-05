@@ -28,7 +28,7 @@
 <link rel="preload" href="assets/fonts/Manrope-500.woff2" as="font" type="font/woff2" crossorigin>
 <script>(function(){var f=new URLSearchParams(location.search).get("font");if(f)document.documentElement.dataset.font=f})()</script>
 <link rel="stylesheet" href="assets/fonts/fonts.css?v=5">
-<link rel="stylesheet" href="assets/styles.css?v=64">
+<link rel="stylesheet" href="assets/styles.css?v=65">
 <script>document.documentElement.classList.add('js')</script>
 <script type="application/json" id="site-config">{"tel":"+50688889892","wa":"50688889892","mail":"info@crimsoncr.com","waLink":"https://wa.me/message/5YQKXZFUPHWLA1","place":"Alajuela, Costa Rica","api":"https://api-production-f07a.up.railway.app","apiLocal":"http://127.0.0.1:8000"}</script>
 </head>
@@ -267,34 +267,12 @@
         <span class="brands__item"><img src="assets/img/marca-ubiquiti-mono.png" alt="Ubiquiti" loading="lazy" width="412" height="120"></span>
         <span class="brands__item"><img src="assets/img/marca-apc-mono.png" alt="APC by Schneider Electric" loading="lazy" width="505" height="120"></span>
         <span class="brands__item"><img class="brands__img--sq" src="assets/img/marca-nodolatam-mono.png" alt="Nodo Latam" loading="lazy" width="112" height="120"></span>
-        <!-- VALIDAR CON ANDRES: logo oficial de HAUSET pendiente; mientras tanto va el nombre en texto -->
-        <span class="brands__item"><span class="brands__name">HAUSET</span></span>
+        <span class="brands__item"><img src="assets/img/marca-hauset-mono.png" alt="HAUSET · automatización, seguridad y redes" loading="lazy" width="484" height="120"></span>
       </div>
-      <!-- Que aporta cada aliado: mismo lenguaje que la alianza con JC Analytics, una linea por marca -->
-      <div class="alianza aportes reveal">
-        <span class="meta aportes__label">Qué aporta cada aliado</span>
-        <ul class="aportes__lista">
-          <li><b>Hikvision</b><span>Distribuidor autorizado: videovigilancia, control de acceso e intrusión.</span></li>
-          <li><b>Ubiquiti</b><span>Redes, wifi y enlaces inalámbricos entre edificios y puntos remotos.</span></li>
-          <li><b>APC by Schneider Electric</b><span>Respaldo de energía (UPS) para que grabación y red no se caigan con un apagón.</span></li>
-          <!-- VALIDAR CON ANDRES: texto de Nodo Latam segun su sitio oficial (nodolatam.net, "Nodo Condominios") -->
-          <li><b>Nodo Latam</b><span>Plataforma de gestión para comunidades: visitantes, áreas comunes y residentes.</span></li>
-          <!-- VALIDAR CON ANDRES: no se encontro sitio oficial de HAUSET; confirmar que aporta -->
-          <!-- <li><b>HAUSET</b><span>(que aporta: pedirselo a Andres)</span></li> -->  <!-- oculto: un "detalle por confirmar" no puede quedar a la vista del publico -->
-          <li class="aportes__jc">
-            <img src="assets/img/marca-jcanalytics-color.png" alt="JC Analytics" loading="lazy" width="551" height="120">
-            <div>
-              <p class="alianza__txt"><b>Crimson Operations</b> se desarrolla en colaboración con JC Analytics.</p>
-              <ul class="alianza__lista">
-                <li>Tableros Power BI</li>
-                <li>Reportes ejecutivos automáticos</li>
-                <li>Automatización de procesos</li>
-                <li>Integración de datos</li>
-                <li>Software a la medida</li>
-              </ul>
-            </div>
-          </li>
-        </ul>
+      <!-- Andres: solo las marcas; JC Analytics aparte, abajo y al centro -->
+      <div class="brands__jc">
+        <img src="assets/img/marca-jcanalytics-mono.png" alt="JC Analytics" loading="lazy" width="551" height="120">
+        <span class="meta">Analítica y automatización</span>
       </div>
     </div>
   </div>
@@ -535,13 +513,15 @@
         <div class="sla feed reveal" style="--d:2" aria-label="Niveles de atención">
           <div class="sla__head meta"><span class="rec"><i></i>SLA</span><span>Primera respuesta</span></div>
           <ol class="sla__lista">
-            <li data-pri="critica"><span class="sla__p sla__p--critica">Crítica</span><span class="sla__d">Sistema detenido o sitio sin protección</span><b>2 h</b></li>
-            <li data-pri="alta"><span class="sla__p sla__p--alta">Alta</span><span class="sla__d">Falla parcial: cámaras o accesos fuera</span><b>4 h</b></li>
-            <li data-pri="media"><span class="sla__p">Media</span><span class="sla__d">Funciona, pero con problemas</span><b>8 h</b></li>
-            <li data-pri="baja"><span class="sla__p">Baja</span><span class="sla__d">Consultas, cambios y mantenimiento</span><b>24 h</b></li>
+            <li data-pri="critica"><span class="sla__p sla__p--critica">Crítica</span><span class="sla__d">Sistema detenido o sitio sin protección</span><span class="sla__reloj" style="--p:.15" role="img" aria-label="Respuesta inmediata" title="Respuesta inmediata"><i></i></span></li>
+            <li data-pri="alta"><span class="sla__p sla__p--alta">Alta</span><span class="sla__d">Falla parcial: cámaras o accesos fuera</span><span class="sla__reloj" style="--p:.35" role="img" aria-label="Respuesta prioritaria" title="Respuesta prioritaria"><i></i></span></li>
+            <li data-pri="media"><span class="sla__p">Media</span><span class="sla__d">Funciona, pero con problemas</span><span class="sla__reloj" style="--p:.6" role="img" aria-label="Respuesta programada" title="Respuesta programada"><i></i></span></li>
+            <li data-pri="baja"><span class="sla__p">Baja</span><span class="sla__d">Consultas, cambios y mantenimiento</span><span class="sla__reloj" style="--p:.85" role="img" aria-label="Respuesta planificada" title="Respuesta planificada"><i></i></span></li>
           </ol>
+          <p class="sla__nota meta">Mientras más crítico, más rápida la respuesta.</p>
           <span class="feed__corners"></span>
         </div>
+        <a class="ayuda-link" href="ayuda/"><span>¿Buscás manuales, firmware o programas de tus equipos?</span><b>Centro de ayuda →</b></a>
       </div>
 
       <form class="form reveal" id="incidentForm" style="--d:2" novalidate>
@@ -588,7 +568,7 @@
     </div>
     <div class="footer__grid">
       <div><span class="meta">Líneas</span><a href="#servicios">Crimson Security</a><a href="#servicios">Crimson Networks</a><a href="#servicios">Crimson Smart Communities</a><a href="#servicios">Crimson Operations</a><a href="#servicios">Crimson Supply</a></div>
-      <div><span class="meta">Enlaces</span><a href="#top">Inicio</a><a href="https://tienda.crimsoncr.com/products/" target="_blank" rel="noopener">Tienda</a><a href="https://tienda.crimsoncr.com/page/solicitud-de-asesoria-personalizada/" target="_blank" rel="noopener">Asesoría personalizada</a></div>
+      <div><span class="meta">Enlaces</span><a href="#top">Inicio</a><a href="ayuda/">Centro de ayuda</a><a href="https://tienda.crimsoncr.com/products/" target="_blank" rel="noopener">Tienda</a><a href="https://tienda.crimsoncr.com/page/solicitud-de-asesoria-personalizada/" target="_blank" rel="noopener">Asesoría personalizada</a></div>
       <div><span class="meta">Contacto</span><a href="mailto:info@crimsoncr.com">info@crimsoncr.com</a><a href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener">WhatsApp</a><a href="https://www.facebook.com/crimsonconcr" target="_blank" rel="noopener">Facebook</a><a href="https://www.instagram.com/cr.crimsoncr/" target="_blank" rel="noopener">Instagram</a></div>
       <div><span class="meta">Sede</span><span>Alajuela, Costa Rica</span><a href="tel:+50688889892">+506 8888 9892</a><span>Grupo Empresarial Crimson SRL</span></div>
     </div>
@@ -598,6 +578,6 @@
     </div>
   </div>
 </footer>
-<script src="assets/main.js?v=38" defer></script>
+<script src="assets/main.js?v=39" defer></script>
 </body>
 </html>

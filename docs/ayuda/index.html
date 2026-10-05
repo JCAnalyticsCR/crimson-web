@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="es-CR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Centro de ayuda · Crimson Consulting</title>
+<meta name="description" content="Manuales, firmware y programas oficiales de los equipos que instala Crimson: Hikvision, Ubiquiti, APC, HAUSET y Nodo Latam. Guías rápidas y soporte.">
+<link rel="canonical" href="https://crimsoncr.com/ayuda/">
+<meta name="theme-color" content="#f6f2ee">
+<link rel="icon" href="/assets/img/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="stylesheet" href="/assets/fonts/fonts.css?v=5">
+<!-- Pagina de trabajo: sin coreografia. Rutas absolutas: vive en /ayuda/.
+     Regla: el firmware SOLO se enlaza al sitio oficial del fabricante. Nunca se aloja aca: un firmware de
+     origen dudoso es una puerta de entrada clasica para tomar control de camaras y grabadores. -->
+<style>
+  :root{--bg:#f6f2ee;--bg-2:#ede7e1;--ink:#15131a;--crimson:#e2233a;--crimson-dark:#c41a2f;--hair:rgba(21,19,26,.12);--muted:rgba(21,19,26,.62)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.55}
+  a{color:inherit}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+  header.top{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--hair)}
+  header.top .wrap{display:flex;align-items:center;justify-content:space-between;gap:12px;height:62px}
+  header.top img{height:28px;width:auto;display:block}
+  .volver{font-size:14px;font-weight:600;text-decoration:none;padding:8px 14px;border:1px solid var(--hair);border-radius:999px}
+  .meta{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  h1{font-family:"Bricolage Grotesque",Manrope,sans-serif;font-weight:700;font-size:clamp(34px,6vw,58px);letter-spacing:-.03em;line-height:1;margin:14px 0 12px}
+  h1 em{font-style:normal;color:var(--crimson)}
+  .lead{max-width:60ch;color:var(--muted);font-size:16.5px;margin:0 0 22px}
+  .buscar{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--hair);border-radius:14px;padding:0 14px;height:52px;max-width:560px}
+  .buscar input{flex:1;border:0;outline:none;font:inherit;font-size:16px;background:transparent;min-width:0}
+  .aviso{display:flex;gap:12px;align-items:flex-start;margin:22px 0 6px;padding:14px 16px;border-radius:14px;background:#fff4e5;border:1px solid #f1c27d;font-size:14.5px}
+  .aviso b{display:block}
+  section.marca{margin:34px 0}
+  .marca__head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-bottom:1px solid var(--hair);padding-bottom:10px;margin-bottom:14px}
+  .marca__head h2{font-family:"Bricolage Grotesque",Manrope,sans-serif;font-size:24px;letter-spacing:-.02em;margin:0}
+  .tarjetas{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+  .tarjeta{display:flex;flex-direction:column;gap:6px;padding:16px;border-radius:14px;background:#fff;border:1px solid var(--hair);text-decoration:none;transition:border-color .2s,transform .2s}
+  .tarjeta:hover{border-color:var(--crimson);transform:translateY(-2px)}
+  .tarjeta b{font-size:15.5px}
+  .tarjeta span{font-size:13.5px;color:var(--muted)}
+  .tarjeta .meta{margin-top:auto;color:var(--crimson-dark)}
+  .guia{padding:18px;border-radius:14px;background:#fff;border:1px solid var(--hair)}
+  .guia h3{margin:0 0 8px;font-size:17px}
+  .guia ol,.guia ul{margin:0;padding-left:20px;font-size:14.5px}
+  .guia li{margin:4px 0}
+  .cta{margin:40px 0 60px;padding:22px;border-radius:18px;background:var(--ink);color:#fff;display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between}
+  .cta p{margin:0;max-width:52ch;color:rgba(255,255,255,.78)}
+  .cta b{color:#fff;display:block;font-size:18px;margin-bottom:4px}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 18px;border-radius:999px;font-weight:700;font-size:14.5px;text-decoration:none;border:0}
+  .btn--crimson{background:var(--crimson);color:#fff}
+  .btn--ghost{background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.2)}
+  .vacio{display:none;padding:24px;border:1px dashed var(--hair);border-radius:14px;text-align:center;color:var(--muted)}
+  [hidden]{display:none!important}
+  @media (prefers-reduced-motion:reduce){.tarjeta{transition:none}.tarjeta:hover{transform:none}}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <a href="/" aria-label="Crimson Consulting, inicio"><img src="/assets/img/logo.png" alt="Crimson Consulting" width="160" height="28"></a>
+  <a class="volver" href="/#soporte">Reportar una falla</a>
+</div></header>
+
+<main class="wrap">
+  <p class="meta" style="margin-top:34px">Centro de ayuda · autosoporte</p>
+  <h1>Manuales, firmware<br>y <em>programas</em>.</h1>
+  <p class="lead">Lo que necesitás de los equipos que instalamos, directo de cada fabricante. Si algo no funciona o no estás seguro, reportalo y lo vemos nosotros.</p>
+
+  <label class="buscar"><span aria-hidden="true">🔍</span><input id="q" type="search" placeholder="Buscar: firmware, cámara, Hik-Connect, UPS…" aria-label="Buscar en el centro de ayuda" autocomplete="off"></label>
+
+  <div class="aviso" role="note"><span aria-hidden="true">⚠️</span><div><b>Firmware: solo desde el sitio oficial, y con cuidado.</b>Una actualización equivocada o que se corta a la mitad puede dejar el equipo inservible. Si tu sistema tiene contrato de mantenimiento con Crimson, la actualización la hacemos nosotros: no la intentés por tu cuenta.</div></div>
+
+  <section class="marca" data-marca>
+    <div class="marca__head"><h2>Guías rápidas</h2><span class="meta">Crimson</span></div>
+    <div class="tarjetas">
+      <div class="guia" data-buscar="contraseña clave seguridad fabrica admin">
+        <h3>Cambiá la contraseña de fábrica</h3>
+        <ul>
+          <li>Ningún equipo debe quedar con la clave que trae de fábrica ni con una etiqueta pegada con la clave.</li>
+          <li>Usá una clave larga y distinta para cada grabador o cámara.</li>
+          <li>No mandés fotos de pantallas de configuración por chat: muestran claves.</li>
+        </ul>
+      </div>
+      <div class="guia" data-buscar="firmware actualizar actualización antes respaldo">
+        <h3>Antes de actualizar firmware</h3>
+        <ol>
+          <li>Anotá el modelo exacto (viene en la etiqueta del equipo).</li>
+          <li>Descargá solo la versión para ese modelo, del sitio oficial.</li>
+          <li>Respaldá la configuración del equipo.</li>
+          <li>No desconectés la corriente mientras actualiza.</li>
+        </ol>
+      </div>
+      <div class="guia" data-buscar="celular app ver camaras remoto hik-connect">
+        <h3>Ver tus cámaras en el celular</h3>
+        <ul>
+          <li>Los grabadores Hikvision se ven con la app oficial <b>Hik-Connect</b> (App Store o Google Play).</li>
+          <li>El acceso lo configuramos nosotros al instalar. Si cambiaste de celular, pedinos ayuda.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="marca" data-marca>
+    <div class="marca__head"><h2>Hikvision</h2><span class="meta">Cámaras · grabadores · control de acceso</span></div>
+    <div class="tarjetas">
+      <a class="tarjeta" href="https://www.hikvision.com/en/support/download/firmware/" target="_blank" rel="noopener" data-buscar="firmware actualizar camara nvr dvr grabador"><b>Firmware</b><span>Actualizaciones oficiales por modelo.</span><span class="meta">hikvision.com ↗</span></a>
+      <a class="tarjeta" href="https://www.hikvision.com/en/support/download/software/" target="_blank" rel="noopener" data-buscar="software programas sadp ivms herramientas pc"><b>Programas y herramientas</b><span>iVMS-4200, SADP y otras herramientas para computadora.</span><span class="meta">hikvision.com ↗</span></a>
+      <a class="tarjeta" href="https://www.hik-connect.com/" target="_blank" rel="noopener" data-buscar="hik-connect app celular remoto nube"><b>Hik-Connect</b><span>Ver cámaras desde el navegador o la app.</span><span class="meta">hik-connect.com ↗</span></a>
+      <a class="tarjeta" href="https://www.hikvision.com/en/support/cybersecurity/" target="_blank" rel="noopener" data-buscar="seguridad vulnerabilidad avisos ciberseguridad"><b>Avisos de seguridad</b><span>Vulnerabilidades publicadas y sus correcciones.</span><span class="meta">hikvision.com ↗</span></a>
+    </div>
+  </section>
+
+  <section class="marca" data-marca>
+    <div class="marca__head"><h2>Ubiquiti</h2><span class="meta">Redes · wifi · enlaces</span></div>
+    <div class="tarjetas">
+      <a class="tarjeta" href="https://www.ui.com/download/releases/firmware" target="_blank" rel="noopener" data-buscar="firmware unifi ubiquiti access point switch"><b>Firmware</b><span>Versiones oficiales de UniFi y demás líneas.</span><span class="meta">ui.com ↗</span></a>
+      <a class="tarjeta" href="https://ui.com/download" target="_blank" rel="noopener" data-buscar="descargas manuales hojas de datos unifi"><b>Descargas y documentación</b><span>Manuales, hojas de datos y aplicaciones.</span><span class="meta">ui.com ↗</span></a>
+      <a class="tarjeta" href="https://help.ui.com/" target="_blank" rel="noopener" data-buscar="ayuda soporte guias wifi red"><b>Centro de ayuda</b><span>Guías oficiales de configuración y problemas comunes.</span><span class="meta">help.ui.com ↗</span></a>
+    </div>
+  </section>
+
+  <section class="marca" data-marca>
+    <div class="marca__head"><h2>APC by Schneider Electric</h2><span class="meta">Respaldo de energía · UPS</span></div>
+    <div class="tarjetas">
+      <a class="tarjeta" href="https://www.apc.com/us/en/support/" target="_blank" rel="noopener" data-buscar="ups bateria respaldo energia soporte apc"><b>Soporte de UPS</b><span>Baterías de reemplazo, garantía y guías.</span><span class="meta">apc.com ↗</span></a>
+      <a class="tarjeta" href="https://www.se.com/ww/en/download/" target="_blank" rel="noopener" data-buscar="manuales documentos ups firmware descargas schneider"><b>Manuales y descargas</b><span>Documentación y firmware de Schneider Electric.</span><span class="meta">se.com ↗</span></a>
+    </div>
+  </section>
+
+  <section class="marca" data-marca>
+    <div class="marca__head"><h2>HAUSET y Nodo Latam</h2><span class="meta">Automatización · comunidades</span></div>
+    <div class="tarjetas">
+      <a class="tarjeta" href="https://hausetcr.com/" target="_blank" rel="noopener" data-buscar="hauset automatizacion seguridad redes"><b>HAUSET</b><span>Automatización, seguridad y redes.</span><span class="meta">hausetcr.com ↗</span></a>
+      <a class="tarjeta" href="https://nodolatam.net/" target="_blank" rel="noopener" data-buscar="nodo latam condominios comunidades visitantes"><b>Nodo Latam</b><span>Plataforma de gestión para comunidades y condominios.</span><span class="meta">nodolatam.net ↗</span></a>
+    </div>
+  </section>
+
+  <p class="vacio" id="vacio">No encontramos nada con esa búsqueda. <a href="/#soporte">Reportalo y te ayudamos.</a></p>
+
+  <div class="cta">
+    <div><b>¿No lo resolviste?</b><p>Reportá la falla y te atendemos según la criticidad. Si es urgente, escribinos por WhatsApp.</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <a class="btn btn--crimson" href="/#soporte">Reportar una falla</a>
+      <a class="btn btn--ghost" href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener">WhatsApp</a>
+    </div>
+  </div>
+</main>
+
+<script>
+  // Buscador local: filtra tarjetas y guias por texto (titulo, descripcion y palabras clave), sin tildes.
+  (() => {
+    const q = document.getElementById('q');
+    const vacio = document.getElementById('vacio');
+    const sin = (t) => t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const items = [...document.querySelectorAll('.tarjeta, .guia')];
+    q.addEventListener('input', () => {
+      const t = sin(q.value.trim());
+      let vistos = 0;
+      items.forEach((el) => {
+        const ok = !t || sin(el.textContent + ' ' + (el.dataset.buscar || '')).includes(t);
+        el.hidden = !ok; if (ok) vistos++;
+      });
+      document.querySelectorAll('[data-marca]').forEach((s) => { s.hidden = !!t && !s.querySelector('.tarjeta:not([hidden]), .guia:not([hidden])'); });
+      vacio.style.display = vistos ? 'none' : 'block';
+    });
+  })();
+</script>
+</body>
+</html>

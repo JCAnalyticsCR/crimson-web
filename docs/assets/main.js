@@ -601,28 +601,6 @@
   const aviso = (msg) => say(esc(msg), 'is-bad'); // dato faltante: se corrige en el formulario
   const falla = (msg) => say(`${esc(msg)} Podés reportarlo por <a href="${esc(wa)}" target="_blank" rel="noopener">WhatsApp</a>.`, 'is-bad');
 
-  // Los tiempos de la tabla salen de Ajustes -> SLA del sistema, no quedan escritos a mano: si Andres los
-  // cambia, la promesa publica cambia con ellos. Se piden solo cuando la seccion se acerca; si el API no
-  // responde se quedan los valores del HTML.
-  const lista = document.querySelector('.sla__lista');
-  if (lista && api && 'IntersectionObserver' in window) {
-    const io = new IntersectionObserver(async ([en]) => {
-      if (!en.isIntersecting) return;
-      io.disconnect();
-      try {
-        const r = await fetch(`${api}/public/sla`, { credentials: 'omit' });
-        if (!r.ok) return;
-        const h = await r.json();
-        lista.querySelectorAll('li[data-pri]').forEach((li) => {
-          const v = Number(h[li.dataset.pri]);
-          const b = li.querySelector('b');
-          if (b && v > 0) b.textContent = `${v} h`;
-        });
-      } catch { /* sin API: quedan los tiempos del HTML */ }
-    }, { rootMargin: '50%' });
-    io.observe(lista);
-  }
-
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = new FormData(form);

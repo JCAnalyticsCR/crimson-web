@@ -34,20 +34,10 @@ export default function RoleWelcome({ onClose }: { onClose: () => void }) {
           <div className="welcome__badge"><span>{rm.glyph}</span></div>
           <h2 className="welcome__title">Hola, {first}.</h2>
           <p className="welcome__role">Entraste como <b>{rm.label}</b> en {me?.tenant.name}.</p>
-          <p className="muted" style={{ fontSize: 13.5, maxWidth: "46ch", margin: "6px auto 0" }}>{rm.summary}</p>
         </div>
-        <div className="welcome__grid">
-          <div>
-            <div className="meta">Podés</div>
-            <ul>{rm.can.map((c) => <li key={c}><Icon d={I.check} size={14} />{c}</li>)}</ul>
-          </div>
-          {rm.cannot.length > 0 && (
-            <div>
-              <div className="meta">Reservado a otros roles</div>
-              <ul className="welcome__no">{rm.cannot.map((c) => <li key={c}><Icon d={I.x} size={14} />{c}</li>)}</ul>
-            </div>
-          )}
-        </div>
+        {/* Andres: "explica de mas". Solo lo que la persona puede hacer, en una lista corta; lo que no puede
+            lo descubre el sistema sin necesidad de leerlo aqui. */}
+        <ul className="welcome__can">{rm.can.slice(0, 4).map((c) => <li key={c}><Icon d={I.check} size={14} />{c}</li>)}</ul>
         <div className="welcome__actions">
           {shortcuts.map((s) => <button key={s.to} className="btn btn--soft btn--sm" onClick={() => { onClose(); nav(s.to); }}><Icon d={s.icon} size={15} />{s.label}</button>)}
           <button className="btn btn--crimson" onClick={onClose} style={{ marginLeft: "auto" }}>Empezar<Icon d={I.arrow} size={15} /></button>
