@@ -213,3 +213,27 @@ def test_bootstrap_invitation_once():
 
     with pytest.raises(ValueError):
         Settings(env="staging", database_url="postgresql://u:p@h/d")
+
+
+def test_correo_diagnostico_y_prueba(client, auth, monkeypatch):
+    # sin llave: dice que no esta saliendo y la prueba queda "simulado", nunca "enviado"
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    monkeypatch.delenv("MAIL_FROM", raising=False)
+    st = client.get("/settings/mail-status").json()
+    assert st["configured"] is False and "info@crimsoncr.com" in st["sender"]
+    r = client.post("/settings/mail-test").json()
+    assert r["status"] == "simulado"
+
+    enviados = []
+
+    class R:
+        status_code = 200
+        def raise_for_status(self): ...
+        def json(self): return {"id": "x1"}
+
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("MAIL_REPLY_TO", "info@crimsoncr.com")
+    monkeypatch.setattr("app.services.mail.httpx.post", lambda url, **k: enviados.append(k["json"]) or R())
+    r = client.post("/settings/mail-test").json()
+    assert r["status"] == "enviado"
+    assert enviados[0]["from"] == "Crimson Consulting <info@crimsoncr.com>" and enviados[0]["reply_to"] == ["info@crimsoncr.com"]

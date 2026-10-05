@@ -214,9 +214,10 @@ export default function Settings() {
       )}
 
       {tab === "correo" && (
-        <Card title="Correo saliente" flush extra={<span className="meta">Resend · {mails.some((m) => m.status === "simulado") ? "modo simulado (sin API key)" : "activo"}</span>}>
-          {mails.length === 0 ? <Empty hint="Cotizaciones, facturas, invitaciones y recordatorios enviados aparecen aquí." /> : <table className="table"><thead><tr><th>Fecha</th><th>Para</th><th>Asunto</th><th>Estado</th></tr></thead><tbody>{mails.map((m) => <tr key={m.id}><td className="muted">{fmtDate(m.created_at.slice(0, 10))}</td><td>{m.to}</td><td>{m.subject}{m.error && <div className="meta" style={{ color: "var(--bad)" }}>{m.error}</div>}</td><td><Badge status={m.status === "enviado" ? "confirmado" : m.status === "error" ? "fallido" : "pendiente"} /></td></tr>)}</tbody></table>}
-        </Card>
+        <><MailStatus onSent={() => api<Mail[]>("/settings/outbox").then(setMails)} />
+        <Card title="Correos enviados" flush>
+          {mails.length === 0 ? <Empty hint="Cotizaciones, facturas, invitaciones y recordatorios enviados aparecen aquí." /> : <table className="table"><thead><tr><th>Fecha</th><th>Para</th><th>Asunto</th><th>Estado</th></tr></thead><tbody>{mails.map((m) => <tr key={m.id}><td className="muted">{fmtDate(m.created_at.slice(0, 10))}</td><td>{m.to}</td><td>{m.subject}{m.error && <div className="meta" style={{ color: "var(--bad)" }}>{m.error}</div>}</td><td><Badge status={m.status === "enviado" ? "confirmado" : m.status === "error" ? "fallido" : "pendiente"} />{m.status === "simulado" && <div className="meta">no salió</div>}</td></tr>)}</tbody></table>}
+        </Card></>
       )}
 
       {tab === "api" && <ApiCreds />}
@@ -502,6 +503,42 @@ function SessionCard() {
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button className="btn btn--crimson" onClick={() => out(false)} disabled={!!busy}><Icon d={I.logout} />{busy === "one" ? "Cerrando…" : "Cerrar sesión"}</button>
         <button className="btn btn--ghost" onClick={() => out(true)} disabled={!!busy}>{busy === "all" ? "Cerrando…" : "Cerrar en todos los dispositivos"}</button>
+      </div>
+    </Card>
+  );
+}
+
+type MailSt = { configured: boolean; sender: string; reply_to: string | null; domain: string; domain_status: string | null };
+
+// Andres: "cree un usuario y no le llego ningun correo". Esta tarjeta dice por que, en palabras simples, y deja probar.
+function MailStatus({ onSent }: { onSent: () => void }) {
+  const { toast, allows } = useSession();
+  const [st, setSt] = useState<MailSt | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api<MailSt>("/settings/mail-status").then(setSt).catch(() => setSt(null)); }, []);
+  if (!st) return null;
+  const ok = st.configured && (st.domain_status === "verified" || st.domain_status === "desconocido");
+  const motivo = !st.configured
+    ? "Falta conectar el servicio de envío (Resend). Mientras tanto ningún correo sale: invitaciones, cotizaciones y facturas quedan como “no salió” y el sistema ofrece el enlace para mandarlo por WhatsApp."
+    : st.domain_status === "verified" ? "El dominio está verificado: los correos salen firmados y no caen en spam."
+    : st.domain_status === "no_agregado" ? `El dominio ${st.domain} no está agregado en Resend. Hay que agregarlo y cargar los registros DNS.`
+    : st.domain_status === "desconocido" ? "Servicio conectado. Use “Enviar prueba” para confirmar que llega."
+    : `El dominio ${st.domain} todavía no está verificado en Resend (${st.domain_status}). Hasta que lo esté, Gmail y Outlook rechazan los correos.`;
+  const probar = async () => {
+    setBusy(true);
+    try {
+      const r = await api<{ to: string; status: string; error: string | null }>("/settings/mail-test", { method: "POST" });
+      if (r.status === "enviado") toast(`Prueba enviada a ${r.to}. Revise la bandeja (y spam).`);
+      else toast(r.status === "simulado" ? "No salió: falta conectar Resend." : `No salió: ${r.error}`, "bad");
+      onSent();
+    } finally { setBusy(false); }
+  };
+  return (
+    <Card title="Correo saliente" extra={<span className="meta" style={{ color: ok ? "var(--ok)" : "var(--bad)" }}>{ok ? "● Activo" : "● No está saliendo"}</span>}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div><span className="meta">Sale desde</span> <b>{st.sender}</b>{st.reply_to && <> · <span className="meta">respuestas a</span> {st.reply_to}</>}</div>
+        <p className="muted" style={{ margin: 0 }}>{motivo}</p>
+        {allows("settings.configurar") && <button className="btn btn--soft" style={{ alignSelf: "flex-start" }} disabled={busy} onClick={probar}>Enviar prueba a mi correo</button>}
       </div>
     </Card>
   );

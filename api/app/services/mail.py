@@ -51,8 +51,35 @@ def notify_roles(db: Session, tenant: Tenant, roles: tuple[str, ...], subject: s
     return n
 
 
+DEFAULT_FROM = "Crimson Consulting <info@crimsoncr.com>"
+
+
+def _sender() -> str:
+    return os.getenv("MAIL_FROM") or DEFAULT_FROM
+
+
+def mail_status() -> dict:
+    """Diagnostico para Ajustes: por que un correo no llega. Sin llave todo queda 'simulado'; con llave pero el
+    dominio sin verificar en Resend, el DMARC p=reject de crimsoncr.com hace que Gmail/Outlook lo rechacen."""
+    key, sender = os.getenv("RESEND_API_KEY"), _sender()
+    dominio = sender.rsplit("@", 1)[-1].strip("> ").lower()
+    out = {"configured": bool(key), "sender": sender, "reply_to": os.getenv("MAIL_REPLY_TO"), "domain": dominio, "domain_status": None}
+    if not key:
+        return out
+    try:
+        r = httpx.get("https://api.resend.com/domains", headers={"Authorization": f"Bearer {key}"}, timeout=10)
+        if r.status_code == 200:
+            d = next((x for x in r.json().get("data", []) if x.get("name", "").lower() == dominio), None)
+            out["domain_status"] = d.get("status") if d else "no_agregado"
+        else:  # llave restringida a envio: no puede listar dominios, no es un error
+            out["domain_status"] = "desconocido"
+    except Exception:  # noqa: BLE001
+        out["domain_status"] = "desconocido"
+    return out
+
+
 def deliver(m: EmailOutbox, files: list[tuple[str, bytes]] | None = None) -> None:
-    key, sender = os.getenv("RESEND_API_KEY"), os.getenv("MAIL_FROM", "Crimson <no-reply@crimsoncr.com>")
+    key, sender = os.getenv("RESEND_API_KEY"), _sender()
     if not key:
         m.status, m.sent_at = "simulado", datetime.now(UTC)
         return
@@ -66,6 +93,8 @@ def deliver(m: EmailOutbox, files: list[tuple[str, bytes]] | None = None) -> Non
                 "bcc": [b for b in (m.bcc or "").split(",") if b],
                 "subject": m.subject,
                 "html": m.html,
+                # las respuestas del cliente llegan al buzon real de Crimson, no a una direccion que nadie lee
+                **({"reply_to": [os.getenv("MAIL_REPLY_TO")]} if os.getenv("MAIL_REPLY_TO") else {}),
                 # Antes el correo decia "va adjunto en PDF" y no se mandaba nada: el cliente no recibia el documento.
                 **({"attachments": [{"filename": n, "content": base64.b64encode(b).decode()} for n, b in files]} if files else {}),
             },

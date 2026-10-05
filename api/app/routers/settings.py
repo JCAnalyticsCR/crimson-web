@@ -16,7 +16,7 @@ from ..core.db import get_db
 from ..core.deps import ASSIGNABLE_ROLES, Principal, require
 from ..core.security import hash_password, hash_token, password_is_strong
 from ..models import BankAccount, BillingGroup, EmailOutbox, Invitation, PaymentGatewayConfig, Tenant, TenantUser, User
-from ..services.mail import queue_email
+from ..services.mail import mail_status, queue_email
 from ..services.sla import SLA_DEFECTO, normalizar
 
 router = APIRouter(prefix="/settings", tags=["ajustes"])
@@ -334,6 +334,20 @@ def gateway_upsert(data: GatewayIn, p: Principal = Depends(require("settings", "
 
 
 # ---------- Correo saliente ----------
+@router.get("/mail-status")
+def mail_status_get(p: Principal = Depends(require("settings", "ver"))):
+    return mail_status()
+
+
+@router.post("/mail-test")
+def mail_test(p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
+    """Manda un correo de prueba a quien lo pide y dice si salio de verdad (o el error exacto del proveedor)."""
+    m = queue_email(db, p.tenant, p.user.email, "Prueba de correo · Crimson",
+                    '<p>Si lee esto, el correo saliente de Crimson funciona.</p>', "mail_test", None)
+    db.commit()
+    return {"to": m.to, "status": m.status, "error": m.error}
+
+
 @router.get("/outbox")
 def outbox(limit: int = 30, p: Principal = Depends(require("settings", "ver")), db: Session = Depends(get_db)):
     rows = db.scalars(select(EmailOutbox).where(EmailOutbox.tenant_id == p.tenant.id).order_by(EmailOutbox.id.desc()).limit(limit)).all()
