@@ -24,6 +24,28 @@ router = APIRouter(tags=["oportunidades"])
 
 STATES = ("nuevo", "contactado", "requiere_visita", "levantamiento", "cotizando", "enviada", "negociacion", "ganada", "perdida")
 OPEN_STATES = STATES[:7]
+# venta: solo equipo, sin instalacion (camino: cotizacion -> factura) | proyecto: levantamiento -> cotizacion -> proyecto
+KINDS = ("venta", "proyecto")
+
+
+def advance_status(o: Opportunity, to: str) -> str | None:
+    """Mueve la oportunidad hacia adelante en el embudo y nunca hacia atras: si ya estaba "enviada" o en
+    "negociacion", crear o ligar una cotizacion no la devuelve a "cotizando". Devuelve el estado anterior si cambio."""
+    if o.status in ("ganada", "perdida") or o.status not in STATES or STATES.index(o.status) >= STATES.index(to):
+        return None
+    before, o.status = o.status, to
+    return before
+
+
+def _initials(name: str | None) -> str | None:
+    parts = [x for x in (name or "").split() if x]
+    return "".join(x[0] for x in parts[:2]).upper() if parts else None
+
+
+def _log(o: Opportunity, who: str, text: str) -> None:
+    """Una linea en la bitacora (notes), con la hora de Costa Rica, igual que los seguimientos."""
+    stamp = datetime.now(CR).strftime("%d/%m/%Y %H:%M")
+    o.notes = f"{stamp} · {who}: {text}\n{o.notes or ''}".strip()
 
 
 def _own(db: Session, oid: int, p: Principal) -> Opportunity:
@@ -51,6 +73,8 @@ def _out(db: Session, o: Opportunity) -> dict:
         "solution": o.solution,
         "owner_id": o.owner_id,
         "owner": owner.full_name if owner else None,
+        "owner_initials": _initials(owner.full_name) if owner else None,
+        "kind": o.kind or "proyecto",
         "amount": o.amount,
         "currency": o.currency,
         "probability": o.probability,
@@ -68,6 +92,7 @@ def _out(db: Session, o: Opportunity) -> dict:
 
 class OpportunityIn(BaseModel):
     title: str = Field(min_length=2, max_length=200)
+    kind: str = Field("proyecto", pattern="^(venta|proyecto)$")
     customer_id: int | None = None
     contact: dict = Field(default_factory=dict)
     source: str | None = Field(None, max_length=60)
@@ -88,13 +113,16 @@ def opportunities(
     status: str | None = None,
     q: str | None = None,
     mine: bool = False,
+    owner_id: int | None = None,
+    kind: str | None = Query(None, pattern="^(venta|proyecto)$"),
     limit: int = Query(100, le=300),
     p: Principal = Depends(require("crm_pipeline", "ver")),
     db: Session = Depends(get_db),
 ):
     stmt = select(Opportunity).where(Opportunity.tenant_id == p.tenant.id, live(Opportunity))
-    if not p.can("crm_pipeline", "ver_todo") or mine:
-        stmt = stmt.where(Opportunity.owner_id == p.user.id)
+    stmt = _scope(stmt, p, owner_id, mine)
+    if kind:
+        stmt = stmt.where(Opportunity.kind == kind)
     if status == "abiertas":
         stmt = stmt.where(Opportunity.status.in_(OPEN_STATES))
     elif status:
@@ -106,12 +134,28 @@ def opportunities(
     return [_out(db, o) for o in rows]
 
 
+def _scope(stmt, p: Principal, owner_id: int | None, mine: bool = False):
+    """El vendedor sin "ver_todo" solo ve lo suyo, pida el responsable que pida (el filtro no abre nada).
+    Quien ve todo puede filtrar por un responsable (owner_id) o por las suyas (mine)."""
+    if not p.can("crm_pipeline", "ver_todo") or mine:
+        return stmt.where(Opportunity.owner_id == p.user.id)
+    if owner_id is not None:
+        return stmt.where(Opportunity.owner_id == owner_id)
+    return stmt
+
+
 @router.get("/opportunities/board")
-def board(p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = Depends(get_db)):
+def board(
+    owner_id: int | None = None,
+    kind: str | None = Query(None, pattern="^(venta|proyecto)$"),
+    p: Principal = Depends(require("crm_pipeline", "ver")),
+    db: Session = Depends(get_db),
+):
     """Embudo por estado: monto total y monto ponderado por probabilidad."""
     stmt = select(Opportunity).where(Opportunity.tenant_id == p.tenant.id, Opportunity.status.in_(OPEN_STATES), live(Opportunity))
-    if not p.can("crm_pipeline", "ver_todo"):
-        stmt = stmt.where(Opportunity.owner_id == p.user.id)
+    stmt = _scope(stmt, p, owner_id)
+    if kind:
+        stmt = stmt.where(Opportunity.kind == kind)
     rows = db.scalars(stmt).all()
     cols = []
     for st in OPEN_STATES:
@@ -165,7 +209,10 @@ def create(data: OpportunityIn, p: Principal = Depends(require("crm_pipeline", "
 
     number, _ = next_number(db, p.tenant.id, "OPO")
     o = Opportunity(tenant_id=p.tenant.id, number=number, created_by=p.user.id, **data.model_dump())
-    o.owner_id = data.owner_id or p.user.id
+    # asignar a otra persona es de quien ve todo el embudo; el vendedor crea las suyas
+    o.owner_id = (data.owner_id if p.can("crm_pipeline", "ver_todo") else None) or p.user.id
+    if o.owner_id != p.user.id:
+        _check_owner(db, p, o.owner_id)
     db.add(o)
     db.flush()
     audit(db, p.tenant.id, p.user.id, "create", "opportunity", o.id, ip=p.ip)
@@ -194,12 +241,95 @@ def get_one(oid: int, p: Principal = Depends(require("crm_pipeline", "ver")), db
 def update(oid: int, data: OpportunityIn, p: Principal = Depends(require("crm_pipeline", "editar")), db: Session = Depends(get_db)):
     o = _own(db, oid, p)
     before = o.status
-    for k, v in data.model_dump().items():
+    # el responsable no se cambia por accidente al editar: sin dato queda el que estaba, y cambiarlo pasa por _reassign
+    new_owner = data.owner_id
+    for k, v in data.model_dump(exclude={"owner_id"}).items():
         setattr(o, k, v)
     if o.status != before:
         audit(db, p.tenant.id, p.user.id, "status", "opportunity", o.id, {"de": before, "a": o.status}, ip=p.ip)
+    if new_owner is not None and new_owner != o.owner_id:
+        _reassign(db, p, o, new_owner)
     db.commit()
     return _out(db, o)
+
+
+def _check_owner(db: Session, p: Principal, uid: int) -> User:
+    from ..models import TenantUser
+
+    m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.user_id == uid, TenantUser.active))
+    if not m:
+        raise HTTPException(422, "Ese responsable no es un usuario activo de la empresa")
+    return m.user
+
+
+def _reassign(db: Session, p: Principal, o: Opportunity, uid: int) -> None:
+    """Cambiar el responsable es de quien ve todo el embudo (gerencia/administracion); queda en bitacora y auditoria."""
+    if not p.can("crm_pipeline", "ver_todo"):
+        raise HTTPException(403, "Solo quien ve todo el embudo puede reasignar oportunidades")
+    nuevo = _check_owner(db, p, uid)
+    antes = db.get(User, o.owner_id) if o.owner_id else None
+    o.owner_id = uid
+    _log(o, p.user.full_name, f"Reasignada de {antes.full_name if antes else 'nadie'} a {nuevo.full_name}")
+    audit(db, p.tenant.id, p.user.id, "assign", "opportunity", o.id, {"de": antes.id if antes else None, "a": uid}, ip=p.ip)
+
+
+class AssignIn(BaseModel):
+    owner_id: int
+
+
+@router.post("/opportunities/{oid}/assign")
+def assign(oid: int, data: AssignIn, p: Principal = Depends(require("crm_pipeline", "editar")), db: Session = Depends(get_db)):
+    o = _own(db, oid, p)
+    if data.owner_id != o.owner_id:
+        _reassign(db, p, o, data.owner_id)
+        db.commit()
+    return _out(db, o)
+
+
+class OppQuoteIn(BaseModel):
+    customer_id: int | None = None  # obligatorio si la oportunidad todavia no tiene cliente
+
+
+@router.post("/opportunities/{oid}/quote", status_code=201)
+def create_quote(oid: int, data: OppQuoteIn, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
+    """Cotizacion directa desde la oportunidad, sin levantamiento (venta de equipo o instalacion que no lo necesita).
+
+    Nace vacia con el cliente de la oportunidad y se completa en el editor de cotizaciones. La oportunidad queda
+    ligada (quote_id) y pasa a "cotizando" solo si venia de una etapa anterior. El monto se queda con el estimado
+    hasta que la cotizacion se guarde: a partir de ahi lo pone sync_amount_from_quote (PUT /quotes)."""
+    from ..schemas.sales import DocumentIn
+    from ..services import documents as docsvc
+
+    if not p.can("crm_pipeline", "editar"):
+        raise HTTPException(403, "No tenés permiso para editar oportunidades")
+    o = _own(db, oid, p)
+    if o.status in ("ganada", "perdida"):
+        raise HTTPException(409, "La oportunidad ya está cerrada")
+    if o.quote_id:
+        q = db.get(Quote, o.quote_id)
+        if q and q.status != "anulada":
+            raise HTTPException(409, f"La oportunidad ya tiene la cotización {q.number}")
+    cid = o.customer_id or data.customer_id
+    if not cid:
+        raise HTTPException(422, "Elegí el cliente antes de cotizar")
+    c = db.get(Customer, cid)
+    if not c or c.tenant_id != p.tenant.id:
+        raise HTTPException(404, "Cliente no encontrado")
+    o.customer_id = cid
+    q = docsvc.create_quote(
+        db,
+        p.tenant.id,
+        p.user.id,
+        DocumentIn(customer_id=cid, currency=o.currency or "CRC", internal_notes=f"Oportunidad {o.number} · {o.title}"[:500]),
+    )
+    o.quote_id = q.id
+    antes = advance_status(o, "cotizando")
+    _log(o, p.user.full_name, f"Cotización {q.number} creada desde la oportunidad")
+    if antes:
+        audit(db, p.tenant.id, p.user.id, "status", "opportunity", o.id, {"de": antes, "a": o.status}, ip=p.ip)
+    audit(db, p.tenant.id, p.user.id, "quote", "opportunity", o.id, {"quote_id": q.id}, ip=p.ip)
+    db.commit()
+    return {"quote_id": q.id, "number": q.number, "opportunity": _out(db, o)}
 
 
 class TouchIn(BaseModel):
@@ -214,8 +344,7 @@ def touch(oid: int, data: TouchIn, p: Principal = Depends(require("crm_pipeline"
     """Registra un seguimiento (llamada, visita, correo) y reprograma la próxima acción."""
     o = _own(db, oid, p)
     # La bitacora es texto que lee una persona en Costa Rica: la hora va en hora local, no en UTC.
-    stamp = datetime.now(CR).strftime("%d/%m/%Y %H:%M")
-    o.notes = f"{stamp} · {p.user.full_name}: {data.note}\n{o.notes or ''}".strip()
+    _log(o, p.user.full_name, data.note)
     if data.next_action is not None:
         o.next_action = data.next_action
     if data.next_action_date is not None:
@@ -245,6 +374,7 @@ def meta(p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = D
         "states": list(STATES),
         "sources": ["Referido", "Sitio web", "WhatsApp", "Llamada", "Cliente actual", "Feria", "Alianza"],
         "solutions": ["cctv", "redes", "acceso", "asistencia", "ups", "cableado", "anpr", "otro"],
+        "kinds": list(KINDS),
         "sellers": sellers,
         "can_see_all": p.can("crm_pipeline", "ver_todo"),
     }

@@ -211,6 +211,8 @@ class FromQuoteIn(BaseModel):
     site: str | None = Field(None, max_length=300)
     supervisor_id: int | None = None
     start_date: date | None = None
+    # una oportunidad de "venta" no lleva proyecto; si al final si hay instalacion, se confirma a proposito
+    force: bool = False
 
 
 @router.post("/quotes/{qid}/project", status_code=201)
@@ -223,6 +225,9 @@ def project_from_quote(qid: int, data: FromQuoteIn, p: Principal = Depends(requi
         raise HTTPException(409, "La cotización tiene un descuento pendiente de aprobación")
     if db.scalar(select(Project).where(Project.quote_id == q.id)):
         raise HTTPException(409, "Esa cotización ya tiene proyecto")
+    ligada = db.scalar(select(Opportunity).where(Opportunity.tenant_id == p.tenant.id, Opportunity.quote_id == q.id))
+    if ligada and ligada.kind == "venta" and not data.force:
+        raise HTTPException(409, f"La oportunidad {ligada.number} es de solo venta (sin instalación). Si sí lleva instalación, confirmá crear el proyecto.")
     c = db.get(Customer, q.customer_id) if q.customer_id else None
     survey = db.scalar(select(Survey).where(Survey.quote_id == q.id))
     fx = today_fx(db, "USD")[0]

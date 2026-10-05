@@ -158,7 +158,9 @@ def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
         tenant = db.get(Tenant, s.tenant_id)
         out["pending_review"] = {"roles": list(reviewer_roles(tenant)), "people": [r["name"] for r in _reviewers(db, tenant)]}
     if full:
-        out["points"] = [{"id": x.id, "code": x.code, "label": x.label, "data": x.data, "photos": x.photos, "notes": x.notes} for x in s.points]
+        out["points"] = [
+            {"id": x.id, "code": x.code, "kind": x.kind or s.kind, "label": x.label, "data": x.data, "photos": x.photos, "notes": x.notes} for x in s.points
+        ]
         out["items"] = [
             {"id": i.id, "product_id": i.product_id, "name": i.name, "quantity": i.quantity, "unit": i.unit, "note": i.note, "kind": i.kind or "material"}
             for i in s.items
@@ -169,6 +171,8 @@ def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
 class PointIn(BaseModel):
     id: int | None = None
     code: str = Field(min_length=1, max_length=20)
+    # tipo del punto si es distinto del levantamiento (puerta de acceso en uno de CCTV); sin dato = el del levantamiento
+    kind: str | None = Field(None, pattern="^(cctv|redes|acceso|asistencia|ups|cableado|anpr|otro)$")
     label: str | None = Field(None, max_length=160)
     data: dict = Field(default_factory=dict)
     photos: list = Field(default_factory=list)
@@ -284,11 +288,13 @@ def survey_create(data: SurveyIn, p: Principal = Depends(require("field", "crear
 def _apply_children(s: Survey, data: SurveyIn) -> None:
     points = []
     for pt in data.points:
+        pk = pt.kind or data.kind
         try:
-            clean = normalize_point_data(data.kind, pt.data)
+            clean = normalize_point_data(pk, pt.data)
         except ValueError as e:
             raise HTTPException(422, f"{pt.code}: {e}") from e
-        points.append(SurveyPoint(code=pt.code, label=pt.label, data=clean, photos=pt.photos, notes=pt.notes))
+        # se guarda None cuando es el tipo del levantamiento: asi cambiar el tipo del levantamiento arrastra sus puntos
+        points.append(SurveyPoint(code=pt.code, kind=pk if pk != data.kind else None, label=pt.label, data=clean, photos=pt.photos, notes=pt.notes))
     s.points.clear()
     s.points.extend(points)
     # el costo escrito en el costeo vive en la linea: el tecnico reescribe la lista al guardar y no debe borrarlo
@@ -712,7 +718,11 @@ def survey_to_quote(sid: int, data: ToQuoteIn, p: Principal = Depends(require("s
     if s.opportunity_id:
         o = db.get(Opportunity, s.opportunity_id)
         if o:
-            o.quote_id, o.status, o.amount = q.id, "cotizando", d(q.total)
+            from .pipeline import advance_status
+
+            # solo avanza: una oportunidad ya "enviada" o en negociacion no vuelve a "cotizando"
+            o.quote_id, o.amount = q.id, d(q.total)
+            advance_status(o, "cotizando")
     audit(db, p.tenant.id, p.user.id, "quote", "survey", s.id, {"quote_id": q.id, "cost": str(costing["cost_total"])}, ip=p.ip)
     db.commit()
     return {"quote_id": q.id, "number": q.number, "total": q.total, "cost_total": costing["cost_total"], "margin_pct": costing["margin_pct"]}
