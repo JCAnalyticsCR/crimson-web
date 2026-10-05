@@ -103,6 +103,17 @@ def _autor(db: Session, user_id: int | None, p: Principal) -> tuple[str, bool]:
     return f"{nombre} · Crimson", True
 
 
+def _origen(db: Session, t: SupportTicket, p: Principal) -> str:
+    """Quien lo abrio, dicho para el cliente: "yo", "empresa" (un companero) o "crimson" (lo abrio el equipo)."""
+    if t.opened_by == p.user.id:
+        return "yo"
+    if t.opened_by:
+        m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.user_id == t.opened_by))
+        if m and m.customer_id == p.customer_id:
+            return "empresa"
+    return "crimson"
+
+
 def _ticket_out(db: Session, t: SupportTicket, p: Principal, full: bool = False) -> dict:
     a = db.get(CustomerAsset, t.asset_id) if t.asset_id else None
     out = {
@@ -115,6 +126,7 @@ def _ticket_out(db: Session, t: SupportTicket, p: Principal, full: bool = False)
         "abierto": t.status in OPEN_STATES,
         "asset": a.name if a and a.customer_id == p.customer_id else None,
         "mine": t.opened_by == p.user.id,
+        "origin": _origen(db, t, p),
         "created_at": t.created_at,
         "updated_at": t.updated_at,
         # la promesa de primera respuesta; nada del origen del SLA ni de contratos
@@ -122,11 +134,11 @@ def _ticket_out(db: Session, t: SupportTicket, p: Principal, full: bool = False)
         "resolved_at": t.resolved_at,
     }
     if full:
-        abre = db.get(User, t.opened_by) if t.opened_by else None
         out["description"] = t.description
         out["photos"] = list(t.photos or [])
         out["solution"] = t.solution if t.status in ("resuelto", "cerrado") else None
-        out["opened_by"] = abre.full_name if abre else ((t.contact or {}).get("name") or "Equipo Crimson")
+        # del equipo de Crimson solo el nombre de pila, igual que en la conversacion
+        out["opened_by"] = _autor(db, t.opened_by, p)[0] if t.opened_by else ((t.contact or {}).get("name") or "Equipo Crimson")
         out["can_comment"] = _puede_comentar(t, p) and t.status != "cerrado"
         notas = []
         for n in t.notes:

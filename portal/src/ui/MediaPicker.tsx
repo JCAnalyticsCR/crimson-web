@@ -7,12 +7,13 @@ import { Lightbox } from "./Lightbox";
 
 export type MediaItem = { id: number; key: string; url: string; filename: string; content_type: string; size: number };
 
-export function useUpload() {
+/** path: el portal del cliente sube a /cliente/media (solo fotos y solo suyas); el resto del sistema a /media. */
+export function useUpload(path = "/media") {
   const { toast } = useSession();
   const [busy, setBusy] = useState(false);
   const upload = async (file: File): Promise<MediaItem | null> => {
     setBusy(true);
-    try { return await uploadFile<MediaItem>("/media", file); }
+    try { return await uploadFile<MediaItem>(path, file); }
     catch (e) { toast(e instanceof Error ? e.message : "No se pudo subir", "bad"); return null; }
     finally { setBusy(false); }
   };
@@ -113,10 +114,10 @@ function Library({ onPick, onClose }: { onPick: (m: MediaItem) => void; onClose:
     asi que el boton es grande y en el telefono abre la camara directo (capture). Guarda URLs planas. */
 /** onOpen: si viene, quien la usa abre su propio visor (p. ej. el levantamiento, que recorre las fotos de
  *  todos los puntos). Si no, la tira abre el visor con sus propias fotos y el rotulo `caption`. */
-export function PhotoStrip({ value, onChange, label = "Agregar fotografía", disabled, caption, onOpen }: {
-  value: string[]; onChange: (v: string[]) => void; label?: string; disabled?: boolean; caption?: string; onOpen?: (index: number) => void;
+export function PhotoStrip({ value, onChange, label = "Agregar fotografía", disabled, caption, onOpen, uploadPath }: {
+  value: string[]; onChange: (v: string[]) => void; label?: string; disabled?: boolean; caption?: string; onOpen?: (index: number) => void; uploadPath?: string;
 }) {
-  const { upload, busy } = useUpload();
+  const { upload, busy } = useUpload(uploadPath);
   const [ver, setVer] = useState<number | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const take = async (files: FileList | null) => {

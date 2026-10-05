@@ -161,7 +161,7 @@ export default function Login() {
 
           <div className="lg-card__foot">
             <span>Sesión cifrada · 2FA · bloqueo por intentos</span>
-            <span>¿Sin acceso? Pedile una invitación a tu administrador.</span>
+            <span>¿Sin acceso? Pedile una invitación a tu administrador. ¿Es cliente de Crimson? <a href="/solicitar-acceso" className="lg-link" style={{ display: "inline" }}>Solicite acceso al portal de clientes</a>.</span>
           </div>
         </form>
       </main>
