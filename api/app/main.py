@@ -13,6 +13,8 @@ from .routers import (
     auth,
     banking,
     catalog,
+    client_access,
+    client_portal,
     core,
     crm_extra,
     events,
@@ -25,6 +27,7 @@ from .routers import (
     pos,
     projects,
     public,
+    public_access,
     public_api,
     public_incidents,
     reception,
@@ -93,6 +96,9 @@ def create_app() -> FastAPI:
     app.include_router(support_desk.router)
     app.include_router(public.router)
     app.include_router(public_incidents.router)
+    app.include_router(public_access.router)
+    app.include_router(client_access.router)
+    app.include_router(client_portal.router)
     return app
 
 

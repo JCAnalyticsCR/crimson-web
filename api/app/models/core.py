@@ -75,6 +75,8 @@ class TenantUser(TimestampMixin, Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
     role_code: Mapped[str] = mapped_column(ForeignKey("role.code"), default="lectura")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Solo usuarios del portal del cliente: la empresa cliente que representan. Interno = None.
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id", ondelete="RESTRICT"), index=True)
 
     tenant: Mapped[Tenant] = relationship(back_populates="users")
     user: Mapped[User] = relationship(back_populates="memberships")
@@ -91,6 +93,32 @@ class Invitation(TenantMixin, TimestampMixin, Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     invited_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
+    # invitacion al portal del cliente: al aceptarla la membresia queda ligada a este cliente
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id", ondelete="CASCADE"), index=True)
+
+
+class AccessRequest(TenantMixin, TimestampMixin, Base):
+    """Solicitud de acceso al portal del cliente, hecha desde la pagina publica. Es solo una SOLICITUD: nadie
+    obtiene acceso a los datos de una empresa por escribir su cedula o su correo. Un humano de Crimson la liga
+    a un cliente, elige el rol y aprueba; recien ahi sale una invitacion."""
+
+    __tablename__ = "access_request"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    email: Mapped[str] = mapped_column(String(200), index=True)
+    phone: Mapped[str | None] = mapped_column(String(25))
+    company: Mapped[str | None] = mapped_column(String(160))
+    id_number: Mapped[str | None] = mapped_column(String(30))  # cedula juridica o fisica que dice tener
+    message: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(12), default="pendiente", server_default="pendiente", index=True)  # pendiente | aprobada | rechazada
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id", ondelete="SET NULL"))
+    role_code: Mapped[str | None] = mapped_column(String(40))
+    reject_reason: Mapped[str | None] = mapped_column(Text)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    invitation_id: Mapped[int | None] = mapped_column(ForeignKey("invitation.id", ondelete="SET NULL"))
+    ip: Mapped[str | None] = mapped_column(String(64))
 
 
 class RefreshToken(Base):

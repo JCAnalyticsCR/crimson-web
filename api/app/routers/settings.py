@@ -173,9 +173,15 @@ def group_update(gid: int, data: GroupIn, p: Principal = Depends(require("settin
 # ---------- Usuarios e invitaciones ----------
 @router.get("/users")
 def users(p: Principal = Depends(require("settings", "ver")), db: Session = Depends(get_db)):
-    rows = db.scalars(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id)).all()
+    # los usuarios del portal del cliente se administran desde Accesos de clientes, no desde aqui
+    rows = db.scalars(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.customer_id.is_(None))).all()
     inv = db.scalars(
-        select(Invitation).where(Invitation.tenant_id == p.tenant.id, Invitation.accepted_at.is_(None), Invitation.expires_at > datetime.now(UTC))
+        select(Invitation).where(
+            Invitation.tenant_id == p.tenant.id,
+            Invitation.customer_id.is_(None),
+            Invitation.accepted_at.is_(None),
+            Invitation.expires_at > datetime.now(UTC),
+        )
     ).all()
     return {
         "users": [
@@ -249,7 +255,17 @@ def accept(data: AcceptIn, db: Session = Depends(get_db)):
         u = User(email=inv.email, full_name=data.full_name, password_hash=hash_password(data.password))
         db.add(u)
         db.flush()
-    if not db.scalar(select(TenantUser).where(TenantUser.user_id == u.id, TenantUser.tenant_id == inv.tenant_id)):
+    m = db.scalar(select(TenantUser).where(TenantUser.user_id == u.id, TenantUser.tenant_id == inv.tenant_id))
+    if inv.customer_id:
+        # invitacion al portal del cliente: la membresia queda atada a ESE cliente. Nunca se convierte una
+        # cuenta interna en cuenta de cliente (ni al reves) por aceptar un enlace.
+        if m and m.customer_id != inv.customer_id:
+            raise HTTPException(409, "Este correo ya tiene otro acceso en la empresa. Escríbanos para revisarlo.")
+        if m:
+            m.role_code, m.active = inv.role_code, True
+        else:
+            db.add(TenantUser(tenant_id=inv.tenant_id, user_id=u.id, role_code=inv.role_code, customer_id=inv.customer_id))
+    elif not m:
         db.add(TenantUser(tenant_id=inv.tenant_id, user_id=u.id, role_code=inv.role_code))
     inv.accepted_at = datetime.now(UTC)
     db.commit()
@@ -264,7 +280,7 @@ class MemberIn(BaseModel):
 @router.patch("/users/{uid}")
 def member_update(uid: int, data: MemberIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
     m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.user_id == uid))
-    if not m:
+    if not m or m.customer_id:  # usuario de cliente: se maneja desde Accesos de clientes
         raise HTTPException(404, "Usuario no encontrado")
     if uid == p.user.id and (data.active is False or (data.role and data.role != "admin")):
         raise HTTPException(409, "No podés quitarte el acceso de administrador a vos mismo")
