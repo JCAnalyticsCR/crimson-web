@@ -14,7 +14,8 @@ import { LinkOpportunity, type OppRef } from "./LinkOpportunity";
 
 type FieldSpec = { key: string; label: string; type: "text" | "number" | "select" | "multi" | "bool"; options?: string[]; unit?: string; placeholder?: string };
 type Spec = { label: string; point_prefix: string; point_label: string; fields: FieldSpec[]; materials: string[] };
-type Point = { id?: number; code: string; label: string; data: Record<string, unknown>; photos: string[]; notes: string | null };
+/* kind: tipo del punto si no es el del levantamiento (una puerta de acceso dentro de uno de CCTV). */
+type Point = { id?: number; code: string; kind?: string | null; label: string; data: Record<string, unknown>; photos: string[]; notes: string | null };
 type Kind = "equipo" | "material";
 type Item = { id?: number; product_id: number | null; name: string; quantity: string; unit: string; note: string | null; kind: Kind };
 type LaborKey = "tecnico" | "civil" | "contratado";
@@ -167,7 +168,7 @@ export default function Surveys() {
     site: d.site || null, visit_date: d.visit_date || null, notes: d.notes || null, photos: d.photos, visit_tech_ids: d.visit_tech_ids,
     labor: Object.fromEntries(LABOR.map(([k]) => [k, { people: Math.max(0, Math.round(num(d.labor[k].people))), days: num(d.labor[k].days) }])),
     // los numeros del punto van tal cual (2,5 o 2.5): la API los valida y los guarda con decimales
-    points: d.points.map((p) => ({ id: p.id, code: p.code, label: p.label || null, data: p.data, photos: p.photos || [], notes: p.notes })),
+    points: d.points.map((p) => ({ id: p.id, code: p.code, kind: p.kind && p.kind !== d.kind ? p.kind : null, label: p.label || null, data: p.data, photos: p.photos || [], notes: p.notes })),
     items: d.items.filter((i) => i.name.trim()).map((i) => ({ id: i.id, product_id: i.product_id, name: i.name, quantity: num(i.quantity), unit: i.unit || "Unid", note: i.note, kind: i.kind })),
   });
 
@@ -191,7 +192,7 @@ export default function Surveys() {
     if (!s) return;
     try {
       const list = await api<Suggestion[]>(`/surveys/${s.id}/suggest`, { method: "POST" });
-      if (!list.length) { toast("No hay nada que sugerir todavía: agregá puntos primero."); return; }
+      if (!list.length) { toast("No hay materiales habituales para este tipo de solución: agregá puntos o cargalos a mano.", "bad"); return; }
       setSugs(list.map((x) => ({
         ...x,
         checked: x.action === "nuevo",
@@ -289,18 +290,25 @@ export default function Surveys() {
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
 
-  const addPoint = () => setDraft((d) => {
+  /* Andrés: "no siempre va a ser cámaras". Un levantamiento puede tener puntos de otros tipos (una puerta, un punto
+     de red, una UPS); cada uno pide sus campos y sugiere sus materiales. El código se numera por prefijo. */
+  const kindOf = (pt: Point, d: Draft) => pt.kind || d.kind;
+  const nextCode = (d: Draft, kind: string) => {
+    const pre = specs[kind]?.point_prefix || "PTO";
+    const n = d.points.filter((p) => p.code.startsWith(`${pre}-`)).length + 1;
+    return `${pre}-${String(n).padStart(2, "0")}`;
+  };
+  const addPoint = (kind?: string) => setDraft((d) => {
     if (!d) return d;
-    const pre = specs[d.kind]?.point_prefix || "PTO";
-    return { ...d, points: [...d.points, { code: `${pre}-${String(d.points.length + 1).padStart(2, "0")}`, label: "", data: {}, photos: [], notes: null }] };
+    const k = kind || d.kind;
+    return { ...d, points: [...d.points, { code: nextCode(d, k), kind: k === d.kind ? null : k, label: "", data: {}, photos: [], notes: null }] };
   });
   /* En sitio, las cámaras de un mismo tramo comparten casi todo: se copia la anterior y solo se
      corrige lo que cambia (lo pidió Andrés: "que utilice la misma configuración para estas cámaras"). */
   const dupPoint = (i: number) => setDraft((d) => {
     if (!d) return d;
     const base = d.points[i];
-    const pre = specs[d.kind]?.point_prefix || "PTO";
-    const copia: Point = { code: `${pre}-${String(d.points.length + 1).padStart(2, "0")}`, label: base.label, data: { ...base.data }, photos: [], notes: null };
+    const copia: Point = { code: nextCode(d, kindOf(base, d)), kind: base.kind ?? null, label: base.label, data: { ...base.data }, photos: [], notes: null };
     return { ...d, points: [...d.points.slice(0, i + 1), copia, ...d.points.slice(i + 1)] };
   });
   const setPoint = (i: number, patch: Partial<Point>) => setDraft((d) => (d ? { ...d, points: d.points.map((p, j) => (j === i ? { ...p, ...patch } : p)) } : d));
@@ -310,6 +318,8 @@ export default function Surveys() {
   const toggleVisit = (id: number) => setDraft((d) => (d ? { ...d, visit_tech_ids: d.visit_tech_ids.includes(id) ? d.visit_tech_ids.filter((x) => x !== id) : [...d.visit_tech_ids, id] } : d));
 
   const readOnly = draft?.status === "cotizado" || draft?.status === "cerrado";
+  const mixed = !!draft && draft.points.some((p) => p.kind && p.kind !== draft.kind);
+  const pointTitle = mixed ? "Puntos" : spec?.point_label || "Puntos";
   const puedeCotizar = verCostos && allows("sales.crear") && draft?.id && !draft.quote_id;
 
   const field = (f: FieldSpec, i: number) => {
@@ -378,7 +388,7 @@ export default function Surveys() {
                   <input className="input input--mono" inputMode="decimal" style={{ maxWidth: 110 }} value={it.quantity} disabled={readOnly} onChange={(e) => setItem(i, { quantity: e.target.value })} />
                   {!readOnly && distTotal > 0 && RUTA.test(it.name) && (
                     <div className="usar-dist" title={distancias.map((x) => `${x.code}: ${x.m} m`).join(" + ")}>
-                      <span>Distancias de las cámaras:</span>
+                      <span>Distancias de los puntos:</span>
                       <button type="button" onClick={() => usarDist(i, distTotal)}>{distTotal} m</button>
                       <button type="button" onClick={() => usarDist(i, Math.ceil(distTotal * 1.15))}>+15 %: {Math.ceil(distTotal * 1.15)} m</button>
                     </div>
@@ -440,7 +450,7 @@ export default function Surveys() {
             {draft.id && <span style={{ marginRight: "auto", display: "inline-flex", gap: 6 }}><ArchiveActions kind="survey" id={draft.id} number={draft.number} archivedAt={draft.archived_at} trashedAt={draft.trashed_at} onDone={() => { close(); load(); }} /></span>}
             <button className="btn btn--ghost" onClick={close}>Cerrar</button>
             {!readOnly && <>
-              <button className="btn btn--ghost" onClick={suggest} disabled={busy || !draft.points.length}>Sugerir materiales</button>
+              <button className="btn btn--ghost" onClick={suggest} disabled={busy} title={draft.points.length ? "Según el tipo de cada punto" : "Sin puntos: los materiales habituales del tipo de solución"}>Sugerir materiales</button>
               <button className="btn btn--ghost" onClick={() => save()} disabled={busy}>Guardar</button>
               <button className="btn btn--crimson" onClick={send} disabled={busy || !draft.points.length}>{draft.status === "enviado" ? "Reenviar a oficina" : "Enviar a oficina"}</button>
             </>}
@@ -487,22 +497,35 @@ export default function Surveys() {
             </table>
           </Card>
 
-          <Card title={`${spec?.point_label || "Puntos"} · ${draft.points.length}`} extra={!readOnly && <button className="btn btn--soft btn--sm" onClick={addPoint}><Icon d={I.plus} />Agregar</button>}>
-            {draft.points.length === 0 ? <p className="muted" style={{ fontSize: 13, margin: 0 }}>Agregá un punto por cada cámara, puerta, terminal o salida de red que haya que instalar: de ahí salen los materiales y el precio.</p> : draft.points.map((pt, i) => (
-              <div className="point" key={pt.id ?? `n${i}`}>
+          <Card title={`${pointTitle} · ${draft.points.length}`} extra={!readOnly && (
+            <div className="point-add">
+              <button className="btn btn--soft btn--sm" onClick={() => addPoint()}><Icon d={I.plus} />{spec?.point_label || "Punto"}</button>
+              <select className="select select--sm" value="" aria-label="Agregar un punto de otro tipo" onChange={(e) => { if (e.target.value) addPoint(e.target.value); }}>
+                <option value="">+ Otro tipo…</option>
+                {Object.entries(specs).filter(([k]) => k !== draft.kind).map(([k, sp]) => <option key={k} value={k}>{sp.point_label} · {sp.label}</option>)}
+              </select>
+            </div>
+          )}>
+            {draft.points.length === 0 ? <p className="muted" style={{ fontSize: 13, margin: 0 }}>Agregá un punto por cada cámara, puerta, terminal o salida de red que haya que instalar: de ahí salen los materiales y el precio. Si en el sitio hay algo de otro tipo (una puerta, un punto de red, una UPS), elegilo en «+ Otro tipo…».</p> : draft.points.map((pt, i) => {
+              const ps = specs[kindOf(pt, draft)];
+              const other = !!pt.kind && pt.kind !== draft.kind;
+              return (
+              <div className={`point${other ? " point--other" : ""}`} key={pt.id ?? `n${i}`}>
+                {other && <div className="point__kind"><span className="badge badge--info">{ps?.point_label || pt.kind} · {ps?.label || pt.kind}</span></div>}
                 <div className="point__head">
                   <input className="input input--mono" style={{ maxWidth: 110 }} value={pt.code} onChange={(e) => setPoint(i, { code: e.target.value })} />
                   <input className="input" value={pt.label} placeholder="Entrada principal" onChange={(e) => setPoint(i, { label: e.target.value })} />
                   {!readOnly && <button className="btn btn--ghost btn--sm" title="Duplicar: mismas características, otro punto" onClick={() => dupPoint(i)}><Icon d={I.copy} size={14} /></button>}
                   {!readOnly && <button className="btn btn--ghost btn--sm" title="Quitar" onClick={() => setDraft({ ...draft, points: draft.points.filter((_, j) => j !== i) })}><Icon d={I.x} size={14} /></button>}
                 </div>
-                <div className="point__grid">{(spec?.fields || []).map((f) => <Field key={f.key} label={f.label}>{field(f, i)}</Field>)}</div>
+                <div className="point__grid">{(ps?.fields || []).map((f) => <Field key={f.key} label={f.label}>{field(f, i)}</Field>)}</div>
                 <Field label="Observaciones" hint="También se usan para sugerir materiales (cielo raso, poste, concreto…)."><input className="input" value={pt.notes || ""} onChange={(e) => setPoint(i, { notes: e.target.value })} placeholder="Hay que romper cielo raso…" /></Field>
                 <Field label="Fotografías del punto" hint="En el celular abre la cámara directo.">
                   <PhotoStrip value={pt.photos || []} onChange={(photos) => setPoint(i, { photos })} disabled={readOnly} label="Foto" onOpen={(j) => setVerFoto(inicioPunto(i) + j)} />
                 </Field>
               </div>
-            ))}
+              );
+            })}
           </Card>
 
           {KINDS.map(([k, title, hint]) => itemsBlock(k, title, draft.items.length === 0 ? `${hint} Sugerilos desde los puntos o agregalos a mano; administración pone los precios.` : hint))}
@@ -521,7 +544,9 @@ export default function Surveys() {
           <button className="btn btn--ghost" onClick={() => setSugs(null)}>Cancelar</button>
           <button className="btn btn--crimson" onClick={applySugs}>Agregar seleccionados</button>
         </>}>
-          <p className="muted" style={{ fontSize: 13, margin: 0 }}>Salen de los puntos levantados, sus observaciones y lo que ya está en la lista. Marcá lo que querés agregar y ajustá la cantidad; si el material ya existe se suma a esa línea.</p>
+          {draft.points.length === 0
+            ? <p style={{ fontSize: 13, margin: 0, background: "var(--warn-soft, rgba(230,160,40,.12))", border: "1px solid var(--warn)", borderRadius: 10, padding: "10px 14px" }}>Todavía no hay puntos levantados, así que no se puede calcular cantidades. Estos son los materiales habituales de <b>{spec?.label || draft.kind}</b>: escribí la cantidad de los que vayas a usar.</p>
+            : <p className="muted" style={{ fontSize: 13, margin: 0 }}>Salen de los puntos levantados (cada uno según su tipo: cámara, puerta, punto de red…), sus observaciones y lo que ya está en la lista. Marcá lo que querés agregar y ajustá la cantidad; si el material ya existe se suma a esa línea.</p>}
           <table className="table">
             <thead><tr><th style={{ width: 32 }} /><th>Sugerencia</th><th>Bloque</th><th className="num">Ya cargado</th><th className="num">Agregar</th><th>Por qué</th></tr></thead>
             <tbody>{sugs.map((x, i) => (

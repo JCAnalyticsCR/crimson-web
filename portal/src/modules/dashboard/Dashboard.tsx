@@ -22,6 +22,27 @@ function Kpi({ label, data, light, cur }: { label: string; data: NonNullable<D["
   );
 }
 
+/* Acciones pendientes: cada tarjeta lleva a la lista con exactamente esos registros. La clave es la misma que usa
+   el servidor para contar (sales.PENDIENTES), asi el numero y las filas no pueden diferir. "hot" = pide atencion. */
+const PENDING: { key: string; label: string; to: string; need: string; hot?: boolean }[] = [
+  { key: "facturas_vencidas", label: "Facturas vencidas", to: "/facturas?pendiente=facturas_vencidas", need: "sales.ver", hot: true },
+  { key: "facturas_por_cobrar", label: "Facturas por cobrar", to: "/facturas?pendiente=facturas_por_cobrar", need: "sales.ver" },
+  { key: "cotizaciones_sin_respuesta", label: "Cotizaciones sin respuesta", to: "/cotizaciones?pendiente=cotizaciones_sin_respuesta", need: "sales.ver" },
+  { key: "enlaces_abiertos", label: "Enlaces de pago abiertos", to: "/facturas?pendiente=enlaces_abiertos", need: "sales.ver" },
+  { key: "documentos_rechazados", label: "Rechazados por Hacienda", to: "/facturas?pendiente=documentos_rechazados", need: "sales.ver", hot: true },
+  { key: "stock_bajo", label: "Productos con stock bajo", to: "/inventario?stock=bajo", need: "inventory.ver", hot: true },
+  { key: "cotizaciones_por_aprobar", label: "Descuentos por aprobar", to: "/cotizaciones?pendiente=cotizaciones_por_aprobar", need: "sales.ver", hot: true },
+];
+
+/** Una tarjeta de pendientes: en 0 se ve apagada pero igual navega; sin permiso para la lista queda como dato. */
+function pendingCard(p: (typeof PENDING)[number], n: number, can: boolean) {
+  const cls = `${p.hot && n ? "hot" : ""}${n ? "" : " is-zero"}`.trim();
+  const body = <><b>{n}</b><span>{p.label}</span></>;
+  return can
+    ? <Link key={p.key} className={`pending__go ${cls}`} to={p.to} aria-label={`${p.label}: ${n}. Ver la lista`}>{body}<em aria-hidden>Ver →</em></Link>
+    : <div key={p.key} className={cls}>{body}</div>;
+}
+
 type Job = { id: number; number: string; title: string; status: string; customer: string | null; site: string | null; scheduled_at: string | null };
 
 const JobRow = ({ o }: { o: Job }) => (
@@ -121,15 +142,10 @@ export default function Dashboard() {
             </Card>
           )}
 
-          <Card title="Acciones pendientes" extra={<span className="meta">se actualiza en vivo</span>}>
+          <Card title="Acciones pendientes" extra={<span className="meta">tocá una para ver cuáles son</span>}>
             <div className="pending">
-              <div className={d.acciones_pendientes.facturas_vencidas ? "hot" : ""}><b>{d.acciones_pendientes.facturas_vencidas}</b><span>Facturas vencidas</span></div>
-              <div><b>{d.acciones_pendientes.facturas_por_cobrar}</b><span>Facturas por cobrar</span></div>
-              <div><b>{d.acciones_pendientes.cotizaciones_sin_respuesta}</b><span>Cotizaciones sin respuesta</span></div>
-              <div><b>{d.acciones_pendientes.enlaces_abiertos}</b><span>Enlaces de pago abiertos</span></div>
-              <div className={d.acciones_pendientes.documentos_rechazados ? "hot" : ""}><b>{d.acciones_pendientes.documentos_rechazados}</b><span>Rechazados por Hacienda</span></div>
-              <div className={d.acciones_pendientes.stock_bajo ? "hot" : ""}><b>{d.acciones_pendientes.stock_bajo}</b><span>Productos con stock bajo</span></div>
-              {d.acciones_pendientes.cotizaciones_por_aprobar !== undefined && <div className={d.acciones_pendientes.cotizaciones_por_aprobar ? "hot" : ""}><b>{d.acciones_pendientes.cotizaciones_por_aprobar}</b><span>{allows("sales.aprobar") ? <Link to="/cotizaciones?estado=por_aprobar" className="row-link">Descuentos por aprobar</Link> : "Esperando aprobación"}</span></div>}
+              {PENDING.filter((p) => d.acciones_pendientes[p.key] !== undefined).map((p) =>
+                pendingCard(p.key === "cotizaciones_por_aprobar" && !allows("sales.aprobar") ? { ...p, label: "Esperando aprobación" } : p, d.acciones_pendientes[p.key] ?? 0, allows(p.need)))}
             </div>
           </Card>
 

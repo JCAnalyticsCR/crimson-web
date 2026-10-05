@@ -1,5 +1,6 @@
 /* Inventarios por ubicacion: existencias (calculadas del ledger), movimientos, transferencias y alertas de stock minimo. */
 import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, type Product } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
@@ -20,6 +21,11 @@ export default function Inventory() {
   const [mv, setMv] = useState({ product_id: "", warehouse_id: "", kind: "entrada", quantity: "1", reference: "", note: "" });
   const [tr, setTr] = useState({ product_id: "", from_id: "", to_id: "", quantity: "1" });
   const [wh, setWh] = useState({ name: "", location: "", is_default: false });
+  // ?stock=bajo llega desde "Productos con stock bajo" del inicio: la tabla muestra solo esos productos
+  const [params] = useSearchParams();
+  const onlyLow = params.get("stock") === "bajo";
+  const lowIds = new Set(low.map((l) => l.product_id));
+  const shown = onlyLow ? levels.filter((l) => lowIds.has(l.product_id)) : levels;
 
   const load = () => {
     api<Wh[]>("/warehouses").then(setWhs);
@@ -55,11 +61,17 @@ export default function Inventory() {
         <div className={low.length ? "hot" : ""}><b>{low.length}</b><span>Productos bajo mínimo</span></div>
       </div>
 
+      {onlyLow && (
+        <div className="list-filter card" role="status" style={{ marginBottom: 12 }}>
+          <span>Desde el inicio: <b>Productos con stock bajo</b> · {low.length} {low.length === 1 ? "producto" : "productos"} en o bajo su mínimo</span>
+          <Link className="btn btn--ghost btn--sm" to="/inventario">Quitar filtro</Link>
+        </div>
+      )}
       <div className="grid-2">
-        <Card title="Existencias por ubicación" flush extra={allows("reports.exportar") ? <AuthLink path="/reports/inventario?format=xlsx" download="inventario.xlsx"><Icon d={I.reports} />Excel</AuthLink> : undefined}>
-          {levels.length === 0 ? <Empty hint="Registrá una entrada para empezar; las ventas descuentan solas de la ubicación predeterminada." /> : (
+        <Card title={onlyLow ? "Existencias de los productos bajo mínimo" : "Existencias por ubicación"} flush extra={allows("reports.exportar") ? <AuthLink path="/reports/inventario?format=xlsx" download="inventario.xlsx"><Icon d={I.reports} />Excel</AuthLink> : undefined}>
+          {shown.length === 0 ? <Empty hint={onlyLow ? "Ningún producto bajo mínimo tiene existencias registradas en bodega." : "Registrá una entrada para empezar; las ventas descuentan solas de la ubicación predeterminada."} /> : (
             <table className="table"><thead><tr><th>Código</th><th>Producto</th><th>Ubicación</th><th className="num">Cantidad</th><th className="num">Mínimo</th></tr></thead>
-              <tbody>{levels.map((l, i) => <tr key={i}><td className="mono muted">{l.code}</td><td style={{ fontWeight: 600 }}>{l.name}</td><td className="muted">{l.warehouse}</td><td className="num mono" style={{ color: Number(l.quantity) <= l.min_stock ? "var(--bad)" : undefined, fontWeight: 700 }}>{Number(l.quantity)}</td><td className="num mono muted">{l.min_stock}</td></tr>)}</tbody></table>
+              <tbody>{shown.map((l, i) => <tr key={i}><td className="mono muted">{l.code}</td><td style={{ fontWeight: 600 }}>{l.name}</td><td className="muted">{l.warehouse}</td><td className="num mono" style={{ color: Number(l.quantity) <= l.min_stock ? "var(--bad)" : undefined, fontWeight: 700 }}>{Number(l.quantity)}</td><td className="num mono muted">{l.min_stock}</td></tr>)}</tbody></table>
           )}
         </Card>
         <Card title="Alertas de stock mínimo" flush>
