@@ -58,7 +58,10 @@ def _own(db: Session, oid: int, p: Principal) -> Opportunity:
 
 
 def _out(db: Session, o: Opportunity) -> dict:
+    from ..services.allies import pending_count_for
+
     c = db.get(Customer, o.customer_id) if o.customer_id else None
+    fin = db.get(Customer, o.end_customer_id) if o.end_customer_id else None
     owner = db.get(User, o.owner_id) if o.owner_id else None
     return {
         "id": o.id,
@@ -67,7 +70,12 @@ def _out(db: Session, o: Opportunity) -> dict:
         "archived_at": o.archived_at,
         "trashed_at": o.trashed_at,
         "customer_id": o.customer_id,
+        # partes: customer = contratante (a quien se cotiza y factura); end_customer = quien recibe la solucion
         "customer": c.name if c else (o.contact or {}).get("name"),
+        "end_customer_id": o.end_customer_id,
+        "end_customer": fin.name if fin else None,
+        "site": o.site,
+        "ally_pending": pending_count_for(db, o.id),
         "contact": o.contact,
         "source": o.source,
         "solution": o.solution,
@@ -93,7 +101,9 @@ def _out(db: Session, o: Opportunity) -> dict:
 class OpportunityIn(BaseModel):
     title: str = Field(min_length=2, max_length=200)
     kind: str = Field("proyecto", pattern="^(venta|proyecto)$")
-    customer_id: int | None = None
+    customer_id: int | None = None  # contratante
+    end_customer_id: int | None = None  # cliente final (opcional)
+    site: str | None = Field(None, max_length=300)
     contact: dict = Field(default_factory=dict)
     source: str | None = Field(None, max_length=60)
     solution: str | None = Field(None, max_length=20)
@@ -207,6 +217,7 @@ def pending(
 def create(data: OpportunityIn, p: Principal = Depends(require("crm_pipeline", "crear")), db: Session = Depends(get_db)):
     from ..services.sequences import next_number
 
+    _check_parties(db, p, data)
     number, _ = next_number(db, p.tenant.id, "OPO")
     o = Opportunity(tenant_id=p.tenant.id, number=number, created_by=p.user.id, **data.model_dump())
     # asignar a otra persona es de quien ve todo el embudo; el vendedor crea las suyas
@@ -223,7 +234,12 @@ def create(data: OpportunityIn, p: Principal = Depends(require("crm_pipeline", "
 @router.get("/opportunities/{oid}")
 def get_one(oid: int, p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = Depends(get_db)):
     o = _own(db, oid, p)
+    from ..services import allies as allysvc
+
     out = _out(db, o)
+    out["allies"] = [allysvc.ally_out(db, a, p) for a in allysvc.allies_of(db, p.tenant.id, opportunity_id=o.id)]
+    out["parties"] = allysvc.party_names(db, o)
+    out["sees_costs"] = p.sees_costs
     out["surveys"] = [
         {"id": s.id, "number": s.number, "kind": s.kind, "status": s.status}
         for s in db.scalars(select(Survey).where(Survey.opportunity_id == o.id, live(Survey)))
@@ -240,17 +256,45 @@ def get_one(oid: int, p: Principal = Depends(require("crm_pipeline", "ver")), db
 @router.put("/opportunities/{oid}")
 def update(oid: int, data: OpportunityIn, p: Principal = Depends(require("crm_pipeline", "editar")), db: Session = Depends(get_db)):
     o = _own(db, oid, p)
+    _check_parties(db, p, data)
     before = o.status
+    partes = _parties_text(db, o)
     # el responsable no se cambia por accidente al editar: sin dato queda el que estaba, y cambiarlo pasa por _reassign
     new_owner = data.owner_id
     for k, v in data.model_dump(exclude={"owner_id"}).items():
         setattr(o, k, v)
+    if _parties_text(db, o) != partes:
+        _log(o, p.user.full_name, f"Partes: {_parties_text(db, o)}")
     if o.status != before:
         audit(db, p.tenant.id, p.user.id, "status", "opportunity", o.id, {"de": before, "a": o.status}, ip=p.ip)
     if new_owner is not None and new_owner != o.owner_id:
         _reassign(db, p, o, new_owner)
     db.commit()
     return _out(db, o)
+
+
+def _check_parties(db: Session, p: Principal, data: OpportunityIn) -> None:
+    """Contratante y cliente final deben ser clientes de la empresa; si son el mismo, no hay cliente final aparte."""
+    for cid in (data.customer_id, data.end_customer_id):
+        if cid:
+            c = db.get(Customer, cid)
+            if not c or c.tenant_id != p.tenant.id:
+                raise HTTPException(404, "Cliente no encontrado")
+    if data.end_customer_id and data.end_customer_id == data.customer_id:
+        data.end_customer_id = None
+    data.site = (data.site or "").strip() or None
+
+
+def _parties_text(db: Session, o: Opportunity) -> str:
+    """"Nodo Latam → para Yobel · Sitio X": la misma frase que la tarjeta del embudo."""
+    c = db.get(Customer, o.customer_id) if o.customer_id else None
+    fin = db.get(Customer, o.end_customer_id) if o.end_customer_id else None
+    txt = c.name if c else "sin contratante"
+    if fin:
+        txt += f" → para {fin.name}"
+    if o.site:
+        txt += f" · {o.site}"
+    return txt
 
 
 def _check_owner(db: Session, p: Principal, uid: int) -> User:

@@ -131,6 +131,7 @@ def economics(db: Session, pr: Project, fx: Decimal | None = None) -> dict:
 
 def _out(db: Session, pr: Project, p: Principal, full: bool = True) -> dict:
     c = db.get(Customer, pr.customer_id) if pr.customer_id else None
+    fin = db.get(Customer, pr.end_customer_id) if pr.end_customer_id else None
     sup = db.get(User, pr.supervisor_id) if pr.supervisor_id else None
     out = {
         "id": pr.id,
@@ -138,7 +139,10 @@ def _out(db: Session, pr: Project, p: Principal, full: bool = True) -> dict:
         "name": pr.name,
         "status": pr.status,
         "customer_id": pr.customer_id,
-        "customer": c.name if c else None,
+        "customer": c.name if c else None,  # contratante
+        "end_customer_id": pr.end_customer_id,
+        "end_customer": fin.name if fin else None,
+        "opportunity_id": pr.opportunity_id,
         "site": pr.site,
         "scope": pr.scope,
         "supervisor_id": pr.supervisor_id,
@@ -160,6 +164,10 @@ def _out(db: Session, pr: Project, p: Principal, full: bool = True) -> dict:
     if p.sees_costs:
         out["economics"] = economics(db, pr)
     if full:
+        from ..services import allies as allysvc
+
+        # aliados heredados de la oportunidad: quien participa y a quien llamar (las solicitudes de costo viven en la oportunidad)
+        out["allies"] = [allysvc.ally_out(db, a, p, with_requests=False) for a in allysvc.allies_of(db, p.tenant.id, project_id=pr.id)]
         out["orders"] = [
             {
                 "id": o.id,
@@ -249,6 +257,7 @@ def project_from_quote(qid: int, data: FromQuoteIn, p: Principal = Depends(requi
         raise HTTPException(409, f"La oportunidad {ligada.number} es de solo venta (sin instalación). Si sí lleva instalación, confirmá crear el proyecto.")
     c = db.get(Customer, q.customer_id) if q.customer_id else None
     survey = db.scalar(select(Survey).where(Survey.quote_id == q.id))
+    opp = db.scalar(select(Opportunity).where(Opportunity.tenant_id == p.tenant.id, Opportunity.quote_id == q.id))
     fx = today_fx(db, "USD")[0]
     cost_planned = Decimal(0)
     for ln in q.lines:
@@ -259,11 +268,14 @@ def project_from_quote(qid: int, data: FromQuoteIn, p: Principal = Depends(requi
         tenant_id=p.tenant.id,
         number=number,
         name=data.name or f"{c.name if c else 'Proyecto'} · {q.number}",
-        customer_id=q.customer_id,
+        customer_id=q.customer_id,  # contratante: a quien se cotizo
+        end_customer_id=opp.end_customer_id if opp else None,  # partes heredadas de la oportunidad
         quote_id=q.id,
         survey_id=survey.id if survey else None,
         opportunity_id=None,
-        site=data.site or (survey.site if survey else (c.address or {}).get("senas") if c and c.address else None),
+        site=data.site
+        or (opp.site if opp and opp.site else None)
+        or (survey.site if survey else (c.address or {}).get("senas") if c and c.address else None),
         scope=q.external_notes,
         supervisor_id=data.supervisor_id,
         start_date=data.start_date,
@@ -292,10 +304,14 @@ def project_from_quote(qid: int, data: FromQuoteIn, p: Principal = Depends(requi
         if ln.product_id:
             order.materials.append(WorkOrderMaterial(product_id=ln.product_id, name=ln.name, quantity=0, unit=ln.unit, planned=d(ln.quantity)))
     db.add(order)
-    opp = db.scalar(select(Opportunity).where(Opportunity.quote_id == q.id))
     if opp:
         opp.status, opp.project_id = "ganada", pr.id
         pr.opportunity_id = opp.id
+        from ..models import AllyParticipation
+
+        # los aliados de la oportunidad pasan al proyecto (la misma participacion, no una copia)
+        for a in db.scalars(select(AllyParticipation).where(AllyParticipation.opportunity_id == opp.id)):
+            a.project_id = pr.id
     if survey:
         survey.status = "cerrado"
     db.flush()

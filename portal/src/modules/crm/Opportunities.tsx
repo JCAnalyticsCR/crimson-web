@@ -7,10 +7,12 @@ import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { Lookup, searchCustomers } from "../../ui/Lookup";
 import { ArchiveActions } from "../../ui/ArchiveActions";
+import { AlliesPanel, PendingCosts, partyLine, type Ally, type PendingCost } from "./OpportunityAllies";
 import "./opportunities.css";
 
 export type Opp = {
   id: number; number: string; title: string; customer_id: number | null; customer: string | null; source: string | null; solution: string | null;
+  end_customer_id?: number | null; end_customer?: string | null; site?: string | null; ally_pending?: number;
   owner_id: number | null; owner: string | null; owner_initials?: string | null; kind: "venta" | "proyecto"; amount: string; currency: string; probability: number; status: string;
   next_action: string | null; next_action_date: string | null; lost_reason: string | null; notes: string | null;
   quote_id: number | null; project_id: number | null; weighted: string; created_at: string;
@@ -20,6 +22,7 @@ type Detail = Opp & {
   surveys: { id: number; number: string; kind: string; status: string }[];
   quote?: { id: number; number: string; status: string; total: string } | null;
   project?: { id: number; number: string; status: string } | null;
+  allies?: Ally[]; sees_costs?: boolean;
 };
 type Board = { columns: { status: string; count: number; amount: string; weighted: string; items: Opp[] }[]; total: string; weighted: string };
 type Pending = Opp & { days_late: number };
@@ -39,7 +42,7 @@ export const OPP_KINDS: Record<string, string> = { proyecto: "Proyecto con insta
 const KIND_SHORT: Record<string, string> = { proyecto: "Proyecto", venta: "Venta" };
 const ID_TYPES: Record<string, string> = { fisica: "Física", juridica: "Jurídica", dimex: "DIMEX", nite: "NITE", extranjero: "Extranjero" };
 
-const blank = { title: "", kind: "proyecto", customer_id: "", customer_name: "", source: "", solution: "", amount: "0", probability: 30, next_action: "", next_action_date: "", owner_id: "", notes: "" };
+const blank = { title: "", kind: "proyecto", customer_id: "", customer_name: "", end_customer_id: "", end_customer_name: "", site: "", source: "", solution: "", amount: "0", probability: 30, next_action: "", next_action_date: "", owner_id: "", notes: "" };
 const blankTouch = { note: "", next_action: "", next_action_date: "", status: "" };
 const blankCust = { name: "", id_type: "fisica", id_number: "", phone: "", email: "" };
 
@@ -56,7 +59,10 @@ const logLines = (notes: string | null) =>
 export default function Opportunities() {
   const { toast, allows } = useSession();
   const nav = useNavigate();
-  const [view, setView] = useState<"board" | "list" | "pending">("board");
+  const [params, setParams] = useSearchParams();
+  // ?pendiente=costos_aliados: la tarjeta del inicio abre Mis pendientes, donde están esas mismas solicitudes
+  const [view, setView] = useState<"board" | "list" | "pending">(params.get("pendiente") === "costos_aliados" ? "pending" : "board");
+  const [costs, setCosts] = useState<PendingCost[] | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
   const [listSt, setList] = useState<Opp[] | null>(null); // null = cargando
   const list = listSt ?? [];
@@ -84,6 +90,7 @@ export default function Opportunities() {
     api<Board>(`/opportunities/board${own ? `?${own}` : ""}`).then(setBoard).catch(() => setBoard(null));
     api<Opp[]>(`/opportunities?limit=200${mine ? "&mine=true" : ""}${own ? `&${own}` : ""}${q ? `&q=${encodeURIComponent(q)}` : ""}`).then(setList);
     api<Pending[]>(`/opportunities/pending${team ? "?everyone=true" : ""}`).then(setPending).catch(() => setPending([]));
+    api<PendingCost[]>("/opportunity-allies/pending").then(setCosts).catch(() => setCosts([]));
   }, [q, mine, team, owner]);
   useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); }, [load]);
   useEffect(() => {
@@ -92,7 +99,6 @@ export default function Opportunities() {
 
   const show = async (id: number) => { setOpen(await api<Detail>(`/opportunities/${id}`)); setTouch(blankTouch); setTouchOpen(false); setQuoteCust(null); };
   // /oportunidades?id=<n>: se abre desde Archivo (o un enlace) sin buscarla en el embudo
-  const [params, setParams] = useSearchParams();
   const linked = params.get("id");
   useEffect(() => { if (linked) show(Number(linked)).catch(() => undefined); }, [linked]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -100,6 +106,7 @@ export default function Opportunities() {
     if (!form) return;
     const body = {
       title: form.title, kind: form.kind, customer_id: form.customer_id ? Number(form.customer_id) : null, source: form.source || null, solution: form.solution || null,
+      end_customer_id: form.end_customer_id ? Number(form.end_customer_id) : null, site: form.site.trim() || null,
       owner_id: form.owner_id ? Number(form.owner_id) : null, amount: Number(form.amount || 0), probability: Number(form.probability),
       next_action: form.next_action || null, next_action_date: form.next_action_date || null, notes: form.notes || null,
       ...(form.id ? { status: open?.status } : {}),
@@ -203,7 +210,8 @@ export default function Opportunities() {
           <span className={`opp__kind opp__kind--${o.kind}`}>{KIND_SHORT[o.kind] || o.kind}</span>
           {o.owner && <span className="opp__owner" title={`Responsable: ${o.owner}`}><i aria-hidden>{o.owner_initials}</i>{o.owner.split(" ")[0]}</span>}
         </div>
-        <div className="opp__meta"><span>{o.customer || "Sin cliente"}</span><span className="money">{fmtMoney(o.amount, o.currency)}</span></div>
+        <div className="opp__meta"><span className="opp__parties" title={partyLine(o)}>{partyLine(o)}</span><span className="money">{fmtMoney(o.amount, o.currency)}</span></div>
+        {!!o.ally_pending && <div className="opp__ally-pend">{o.ally_pending === 1 ? "1 costo de aliado pendiente" : `${o.ally_pending} costos de aliados pendientes`}</div>}
         <div className="opp__meta">
           <span>{o.next_action ? `${o.next_action}${o.next_action_date ? ` · ${fmtDate(o.next_action_date)}` : ""}` : "Sin próxima acción"}</span>
           <span>{o.probability}%</span>
@@ -228,7 +236,7 @@ export default function Opportunities() {
           <div className="tabs">
             <button className={view === "board" ? "is-active" : ""} onClick={() => setView("board")}>Embudo</button>
             <button className={view === "list" ? "is-active" : ""} onClick={() => setView("list")}>Lista</button>
-            <button className={view === "pending" ? "is-active" : ""} onClick={() => setView("pending")}>Mis pendientes{pending.length ? ` (${pending.length})` : ""}</button>
+            <button className={view === "pending" ? "is-active" : ""} onClick={() => setView("pending")}>Mis pendientes{pending.length + (costs?.length || 0) ? ` (${pending.length + (costs?.length || 0)})` : ""}</button>
           </div>
           {meta?.can_see_all && view !== "pending" && (
             <select className="select opp-owner-filter" value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Filtrar por responsable">
@@ -277,7 +285,8 @@ export default function Opportunities() {
             <span className="muted" style={{ fontSize: 13 }}>Próximas acciones de hoy y vencidas, de la más atrasada a la de hoy. Cada mañana (lunes a viernes) llegan también por correo al responsable.</span>
             {meta?.can_see_all && <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, marginLeft: "auto", whiteSpace: "nowrap" }}><input type="checkbox" checked={team} onChange={(e) => setTeam(e.target.checked)} />Todo el equipo</label>}
           </div>
-          {pendingSt === null ? <Loading /> : pending.length === 0 ? <Empty hint="Nada pendiente para hoy. Las oportunidades con la próxima acción de hoy o vencida aparecen aquí." /> : (
+          <PendingCosts rows={costs} onOpen={(id) => show(id)} />
+          {pendingSt === null ? <Loading /> : pending.length === 0 ? (costs?.length ? null : <Empty hint="Nada pendiente para hoy. Las oportunidades con la próxima acción de hoy o vencida aparecen aquí." />) : (
             <table className="table">
               <thead><tr><th>Fecha</th><th>Próxima acción</th><th>Oportunidad</th><th>Cliente</th><th>Responsable</th><th /></tr></thead>
               <tbody>{pending.map((o) => (
@@ -302,7 +311,7 @@ export default function Opportunities() {
           </div>
           {listSt === null ? <Loading /> : list.length === 0 ? <Empty hint="Cada visita, llamada o referido entra aquí antes de convertirse en cotización." /> : (
             <table className="table">
-              <thead><tr><th>Número</th><th>Título</th><th>Tipo</th><th>Cliente</th><th>Estado</th><th className="num">Monto</th><th>Próxima acción</th><th>Responsable</th><th /></tr></thead>
+              <thead><tr><th>Número</th><th>Título</th><th>Tipo</th><th>Partes</th><th>Estado</th><th className="num">Monto</th><th>Próxima acción</th><th>Responsable</th><th /></tr></thead>
               <tbody>{list.map((o) => {
                 const dias = dueIn(o.next_action_date);
                 return (
@@ -310,7 +319,7 @@ export default function Opportunities() {
                     <td className="mono muted">{o.number}</td>
                     <td style={{ fontWeight: 600 }}>{o.title}</td>
                     <td><span className={`opp__kind opp__kind--${o.kind}`}>{KIND_SHORT[o.kind] || o.kind}</span></td>
-                    <td className="muted">{o.customer || "—"}</td>
+                    <td className="muted">{partyLine(o)}</td>
                     <td><span className="badge badge--info">{OPP_STATES[o.status] || o.status}</span></td>
                     <td className="num money">{fmtMoney(o.amount, o.currency)}</td>
                     <td style={{ fontSize: 13, color: dias !== null && dias < 0 ? "var(--bad)" : undefined }}>{o.next_action ? `${o.next_action}${o.next_action_date ? ` · ${fmtDate(o.next_action_date)}` : ""}` : "—"}</td>
@@ -334,7 +343,7 @@ export default function Opportunities() {
             {open.quote && <button className="btn btn--soft" onClick={() => nav(`/cotizaciones/${open.quote!.id}`)}>Ver cotización</button>}
             {open.project && <button className="btn btn--soft" onClick={() => nav(`/proyectos/${open.project!.id}`)}>Ver proyecto</button>}
           </div>
-          {canEdit && <button className="btn btn--ghost" onClick={() => setForm({ id: open.id, title: open.title, kind: open.kind || "proyecto", customer_id: open.customer_id ? String(open.customer_id) : "", customer_name: open.customer || "", source: open.source || "", solution: open.solution || "", amount: String(open.amount), probability: open.probability, next_action: open.next_action || "", next_action_date: open.next_action_date || "", owner_id: open.owner_id ? String(open.owner_id) : "", notes: open.notes || "" })}>Editar</button>}
+          {canEdit && <button className="btn btn--ghost" onClick={() => setForm({ id: open.id, title: open.title, kind: open.kind || "proyecto", customer_id: open.customer_id ? String(open.customer_id) : "", customer_name: open.customer || "", end_customer_id: open.end_customer_id ? String(open.end_customer_id) : "", end_customer_name: open.end_customer || "", site: open.site || "", source: open.source || "", solution: open.solution || "", amount: String(open.amount), probability: open.probability, next_action: open.next_action || "", next_action_date: open.next_action_date || "", owner_id: open.owner_id ? String(open.owner_id) : "", notes: open.notes || "" })}>Editar</button>}
           <button className="btn btn--crimson" onClick={() => setOpen(null)}>Cerrar</button>
         </>}>
           <div className="opp-detail">
@@ -374,6 +383,10 @@ export default function Opportunities() {
                 <div className="eco__box"><span className="meta">Estado</span><b style={{ fontSize: 15 }}>{OPP_STATES[open.status] || open.status}</b></div>
               </div>
               <div className="opp-next">
+                <span className="meta">Partes</span>
+                <b>{partyLine(open)}</b>
+              </div>
+              <div className="opp-next">
                 <span className="meta">Próxima acción</span>
                 <b>{open.next_action || "Sin próxima acción"}</b>
                 {open.next_action_date && <span style={{ color: (dueIn(open.next_action_date) ?? 1) < 0 ? "var(--bad)" : undefined }}>{fmtDate(open.next_action_date)}</span>}
@@ -399,10 +412,21 @@ export default function Opportunities() {
                     </select>
                   ) : <input className="input" readOnly value={open.owner || "—"} />}
                 </Field>
-                <Field label="Cliente"><input className="input" readOnly value={open.customer || "—"} /></Field>
+                <Field label="Contratante (paga)"><input className="input" readOnly value={open.customer || "—"} title="Quien contrata y paga: a quien se cotiza y factura" /></Field>
+                <Field label="Cliente final"><input className="input" readOnly value={open.end_customer || "El mismo contratante"} /></Field>
+                <Field label="Sitio"><input className="input" readOnly value={open.site || "—"} title={open.site || undefined} /></Field>
                 <Field label="Solución"><input className="input" readOnly value={SOLUTIONS[open.solution || ""] || "—"} /></Field>
                 <Field label="Origen"><input className="input" readOnly value={open.source || "—"} /></Field>
               </div>
+              <AlliesPanel
+                oppId={open.id}
+                allies={open.allies || []}
+                canEdit={canEdit}
+                seesCosts={!!open.sees_costs}
+                sellers={meta?.sellers || []}
+                quoteId={open.quote?.id ?? null}
+                onChange={(next) => { setOpen({ ...open, allies: next }); show(open.id).catch(() => undefined); load(); }}
+              />
               {open.surveys.length > 0 && (
                 <p style={{ fontSize: 13, margin: 0 }}>Levantamientos: {open.surveys.map((s) => <button key={s.id} className="btn btn--ghost btn--sm" style={{ marginRight: 6 }} onClick={() => nav(`/levantamientos?id=${s.id}`)}>{s.number} · {s.status}</button>)}</p>
               )}
@@ -423,7 +447,7 @@ export default function Opportunities() {
             </div>
           </Field>
           <div className="grid-3">
-            <Field label="Cliente" hint={allows("crm.crear") ? "Escribí para buscar; si no existe, crealo desde la lista. Puede quedar sin cliente si todavía es un prospecto." : "Escribí para buscar; puede quedar sin cliente si todavía es un prospecto."}>
+            <Field label="Contratante" hint={`Quien contrata y paga a Crimson: a quien se cotiza y factura. ${allows("crm.crear") ? "Si no existe, crealo desde la lista. " : ""}Puede quedar vacío si todavía es un prospecto.`}>
               <Lookup
                 value={form.customer_name}
                 placeholder="Buscar cliente…"
@@ -435,6 +459,12 @@ export default function Opportunities() {
             </Field>
             <Field label="Solución"><select className="select" value={form.solution} onChange={(e) => setForm({ ...form, solution: e.target.value })}><option value="">—</option>{(meta?.solutions || []).map((s) => <option key={s} value={s}>{SOLUTIONS[s] || s}</option>)}</select></Field>
             <Field label="Origen"><select className="select" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })}><option value="">—</option>{(meta?.sources || []).map((s) => <option key={s} value={s}>{s}</option>)}</select></Field>
+          </div>
+          <div className="grid-2">
+            <Field label="Cliente final (opcional)" hint="Quien recibe la solución, si no es el contratante. Ej.: Nodo Latam contrata, Yobel recibe.">
+              <Lookup value={form.end_customer_name} placeholder="Buscar cliente…" fetcher={searchCustomers} onSelect={(it, text) => setForm({ ...form, end_customer_id: it ? String(it.id) : "", end_customer_name: text })} />
+            </Field>
+            <Field label="Sitio (opcional)" hint="Dirección o sede donde se instala."><input className="input" value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value })} placeholder="CEDI Yobel, Heredia" /></Field>
           </div>
           {newCust && (
             <div className="opp-newcust">

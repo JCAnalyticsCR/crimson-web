@@ -122,6 +122,8 @@ def apply_document(db: Session, doc: Quote | Invoice, payload: DocumentIn, line_
                 tax_amount=lo.tax_amount,
                 total=lo.total,
                 treatment=ln.treatment or "normal",
+                # "Aportado por Nodo Latam": el nombre solo tiene sentido en una linea aportada
+                supplied_by=((ln.supplied_by or "").strip() or None) if ln.treatment == "aportado" else None,
             )
         )
     doc.subtotal, doc.discount_total, doc.tax_total, doc.total = calc.subtotal, calc.discount_total, calc.tax_total, calc.total
@@ -197,6 +199,7 @@ def quote_to_payload(q: Quote) -> DocumentIn:
                 discount_value=d(ln.discount_value),
                 tax_rate=d(ln.tax_rate),
                 treatment=ln.treatment or "normal",
+                supplied_by=ln.supplied_by,
             )
             for ln in q.lines
         ],

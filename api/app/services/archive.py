@@ -17,7 +17,7 @@ import math
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import and_, select, update
+from sqlalchemy import and_, delete, select, update
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -179,11 +179,19 @@ def _detach(db: Session, kind: str, obj) -> None:
     if kind == "survey":
         db.execute(update(Project).where(Project.survey_id == obj.id).values(survey_id=None))
     elif kind == "opportunity":
+        from ..models import AllyCostRequest, AllyParticipation
+
+        # aliados y solicitudes de costo son de la oportunidad: se van con ella (tambien en SQLite sin cascada)
+        db.execute(delete(AllyCostRequest).where(AllyCostRequest.opportunity_id == obj.id))
+        db.execute(delete(AllyParticipation).where(AllyParticipation.opportunity_id == obj.id))
         db.execute(update(Survey).where(Survey.opportunity_id == obj.id).values(opportunity_id=None))
         db.execute(update(Project).where(Project.opportunity_id == obj.id).values(opportunity_id=None))
     elif kind == "project":
         order_ids = [o.id for o in obj.orders]
         db.execute(update(Opportunity).where(Opportunity.project_id == obj.id).values(project_id=None))
+        from ..models import AllyParticipation
+
+        db.execute(update(AllyParticipation).where(AllyParticipation.project_id == obj.id).values(project_id=None))
         db.execute(update(CustomerAsset).where(CustomerAsset.project_id == obj.id).values(project_id=None))
         db.execute(update(PurchaseRequest).where(PurchaseRequest.project_id == obj.id).values(project_id=None))
         db.execute(update(SupportTicket).where(SupportTicket.project_id == obj.id).values(project_id=None))

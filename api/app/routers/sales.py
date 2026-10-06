@@ -46,6 +46,11 @@ def _quote_out(db: Session, q: Quote) -> QuoteOut:
     # el editor necesita saber si la cotizacion es de una oportunidad de venta (no ofrece "convertir a proyecto")
     opp = db.scalar(select(Opportunity).where(Opportunity.tenant_id == q.tenant_id, Opportunity.quote_id == q.id))
     o.opportunity = {"id": opp.id, "number": opp.number, "kind": opp.kind or "proyecto", "status": opp.status} if opp else None
+    if opp:
+        from ..services.allies import party_names
+
+        # empresas que pueden aportar equipo (selector "Aportado por" del editor); nunca sale al portal del cliente
+        o.opportunity["parties"] = party_names(db, opp)
     return o
 
 
@@ -493,6 +498,11 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
     recent_inv = db.scalars(select(Invoice).where(Invoice.tenant_id == tid, own_inv).order_by(Invoice.id.desc()).limit(6)).all()
     # mismos filtros que la lista a la que lleva cada tarjeta (pending_where)
     pend = {k: pending_count(db, k, p) for k in PENDIENTES}
+    if p.can("crm_pipeline", "ver"):
+        from ..services.allies import cost_pending_count
+
+        # misma definicion que Oportunidades -> Mis pendientes (services.allies.cost_pending_where)
+        pend["costos_aliados"] = cost_pending_count(db, p)
     ceo = _ceo_row(db, p) if p.can("dashboard", "empresa") else None
     receivable = []
     if mine:

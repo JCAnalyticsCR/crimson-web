@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import settings
 from .routers import (
+    allies,
     auth,
     banking,
     catalog,
@@ -91,6 +92,7 @@ def create_app() -> FastAPI:
     app.include_router(imports.router)
     app.include_router(support.router)
     app.include_router(pipeline.router)
+    app.include_router(allies.router)
     app.include_router(fieldwork.router)
     app.include_router(projects.router)
     app.include_router(support_desk.router)

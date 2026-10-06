@@ -74,6 +74,8 @@ class _LineBase:
     total: Mapped[float] = mapped_column(Numeric(16, 5), default=0)
     # normal | pendiente | aportado | cortesia | excluido (ver services/units.py)
     treatment: Mapped[str] = mapped_column(String(12), default="normal", server_default="normal")
+    # solo con treatment "aportado": nombre de la empresa que aporta (contratante o aliado), sale en el documento
+    supplied_by: Mapped[str | None] = mapped_column(String(160))
 
 
 class Quote(_DocBase, Base):

@@ -1,5 +1,6 @@
 """Importa todos los modelos para que Alembic y Base.metadata los vean."""
 
+from .allies import AllyCostRequest, AllyParticipation
 from .base import TenantMixin, TimestampMixin
 from .catalog import Category, Product, ProductTax, Supplier, Tax
 from .core import (
@@ -118,6 +119,8 @@ __all__ = [
     "Ticket",
     "SupportGrant",
     "Opportunity",
+    "AllyParticipation",
+    "AllyCostRequest",
     "Survey",
     "SurveyPoint",
     "SurveyItem",

@@ -32,6 +32,7 @@ const PENDING: { key: string; label: string; to: string; need: string; hot?: boo
   { key: "documentos_rechazados", label: "Rechazados por Hacienda", to: "/facturas?pendiente=documentos_rechazados", need: "sales.ver", hot: true },
   { key: "stock_bajo", label: "Productos con stock bajo", to: "/inventario?stock=bajo", need: "inventory.ver", hot: true },
   { key: "cotizaciones_por_aprobar", label: "Descuentos por aprobar", to: "/cotizaciones?pendiente=cotizaciones_por_aprobar", need: "sales.ver", hot: true },
+  { key: "costos_aliados", label: "Costos de aliados pendientes", to: "/oportunidades?pendiente=costos_aliados", need: "crm_pipeline.ver", hot: true },
 ];
 
 /** Una tarjeta de pendientes: en 0 se ve apagada pero igual navega; sin permiso para la lista queda como dato. */

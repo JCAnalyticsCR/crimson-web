@@ -19,6 +19,7 @@ class LineInSchema(BaseModel):
     discount_value: Decimal = Field(Decimal(0), ge=0)
     tax_rate: Decimal | None = None
     treatment: str = Field("normal", pattern="^(normal|pendiente|aportado|cortesia|excluido)$")
+    supplied_by: str | None = Field(None, max_length=160)  # quien aporta (solo con treatment "aportado")
 
 
 class DocumentIn(BaseModel):
@@ -61,6 +62,7 @@ class LineOut(BaseModel):
     tax_amount: Decimal
     total: Decimal
     treatment: str = "normal"
+    supplied_by: str | None = None
 
 
 class DocBaseOut(BaseModel):

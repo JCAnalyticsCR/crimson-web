@@ -6,6 +6,7 @@ import { api, fmtDate, fmtMoney, openFile } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { ArchiveActions } from "../../ui/ArchiveActions";
+import { ALLY_ROLES, CONTACT_FUNCS, partyLine, type Ally } from "../crm/OpportunityAllies";
 
 type Eco = {
   price: string; cost_planned: string; cost_materials: string; cost_labor: string; cost_travel: string; cost_extra: string;
@@ -19,6 +20,7 @@ type Project = {
   orders_total: number; orders_done: number; created_at: string; economics?: Eco; archived_at?: string | null; trashed_at?: string | null;
   orders?: { id: number; number: string; title: string; status: string; scheduled_at: string | null; technician_id: number | null; materials: number }[];
   assets?: { id: number; name: string; serial: string | null; location: string | null; warranty_until: string | null }[];
+  end_customer?: string | null; opportunity_id?: number | null; allies?: Ally[];
 };
 type Requirement = { product_id: number; name: string; planned: string; used: string; stock: string; pending: string; to_buy: string };
 
@@ -120,7 +122,7 @@ function Detail({ id }: { id: number }) {
           <div className="meta">09 · Operación · <Link to="/proyectos">Proyectos</Link></div>
           <h1 className="h1">{p.number} · {p.name}</h1>
           <p className="muted" style={{ fontSize: 13.5, margin: "6px 0 0" }}>
-            {p.customer || "Sin cliente"}{p.site ? ` · ${p.site}` : ""} · <span className={`badge badge--${PROJECT_STATUS[p.status]?.tone || "muted"}`}>{PROJECT_STATUS[p.status]?.label || p.status}</span>
+            {partyLine(p)} · <span className={`badge badge--${PROJECT_STATUS[p.status]?.tone || "muted"}`}>{PROJECT_STATUS[p.status]?.label || p.status}</span>
           </p>
         </div>
         <div className="page-head__actions">
@@ -167,6 +169,21 @@ function Detail({ id }: { id: number }) {
           )}
         </Card>
       </div>
+
+      {(p.allies || []).length > 0 && (
+        /* aliados heredados de la oportunidad: quién participa y a quién llamar (los costos viven en la oportunidad) */
+        <Card title="Aliados" extra={p.opportunity_id && allows("crm_pipeline.ver") ? <Link className="btn btn--ghost btn--sm" to={`/oportunidades?id=${p.opportunity_id}`}>Ver oportunidad</Link> : undefined}>
+          <div className="prj-allies">
+            {(p.allies || []).map((a) => (
+              <div key={a.id} className="prj-ally">
+                <b>{a.name}</b> <span className="badge badge--muted">{ALLY_ROLES[a.role] || a.role}</span>
+                {a.scope && <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>{a.scope}</p>}
+                {Object.entries(a.contacts || {}).map(([k, c]) => <div key={k} className="meta" style={{ overflowWrap: "anywhere" }}>{CONTACT_FUNCS[k] || k}: {[c.name, c.phone, c.email].filter(Boolean).join(" · ")}</div>)}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <Card
         title="Materiales: planificado contra bodega"

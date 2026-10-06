@@ -23,7 +23,11 @@ class Opportunity(ArchiveMixin, TenantMixin, TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     number: Mapped[str] = mapped_column(String(40), index=True)
+    # contratante: quien contrata y paga a Crimson; es a quien se cotiza y factura (no cambia de significado)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id"))
+    # cliente final: quien recibe la solucion cuando no es el contratante (Nodo Latam contrata, Yobel recibe)
+    end_customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id", name="fk_opportunity_end_customer"), index=True)
+    site: Mapped[str | None] = mapped_column(String(300))  # sitio o direccion de la obra
     contact: Mapped[dict] = mapped_column(JSON, default=dict)  # nombre, correo, telefono (prospecto sin ficha aun)
     title: Mapped[str] = mapped_column(String(200))
     # venta: solo equipo, sin instalacion (no pide levantamiento ni proyecto) | proyecto: requiere levantamiento e instalacion
@@ -119,7 +123,8 @@ class Project(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     number: Mapped[str] = mapped_column(String(40), index=True)
     name: Mapped[str] = mapped_column(String(200))
-    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id"), index=True)
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id"), index=True)  # contratante
+    end_customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id", name="fk_project_end_customer"), index=True)  # cliente final
     quote_id: Mapped[int | None] = mapped_column(ForeignKey("quote.id"))
     survey_id: Mapped[int | None] = mapped_column(ForeignKey("survey.id"))
     opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunity.id"))

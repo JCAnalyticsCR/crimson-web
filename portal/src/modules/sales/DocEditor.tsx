@@ -45,7 +45,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     customer_id: doc.customer_id ?? null, currency: doc.currency || "CRC", discount_type: doc.discount_type || "percent", discount_value: doc.discount_value || "0",
     internal_notes: doc.internal_notes || null, external_notes: doc.external_notes || null, external_order: doc.external_order || null, activity_code: doc.activity_code || null,
     medical_exemption_card: !!doc.medical_exemption_card, issue_date: doc.issue_date || null, due_date: doc.due_date || null,
-    lines: lines.filter((l) => l.name.trim()).map((l) => ({ product_id: l.product_id, code: l.code, name: l.name, description: l.description, unit: l.unit, quantity: l.quantity || "1", unit_price: l.unit_price || "0", discount_type: l.discount_type, discount_value: l.discount_value || "0", tax_rate: l.tax_rate || "13", treatment: l.treatment || "normal" })),
+    lines: lines.filter((l) => l.name.trim()).map((l) => ({ product_id: l.product_id, code: l.code, name: l.name, description: l.description, unit: l.unit, quantity: l.quantity || "1", unit_price: l.unit_price || "0", discount_type: l.discount_type, discount_value: l.discount_value || "0", tax_rate: l.tax_rate || "13", treatment: l.treatment || "normal", supplied_by: l.treatment === "aportado" ? l.supplied_by || null : null })),
   }), [doc, lines]);
 
   useEffect(() => {
@@ -117,6 +117,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
 
   /* Cotización aprobada -> proyecto: copia líneas, costo estimado y crea la primera orden de trabajo. */
   const opp = isQ ? (doc as Quote).opportunity : null;
+  const parties = opp?.parties ?? [];
   const toProject = async () => {
     if (!id) return;
     // oportunidad de solo venta: el proyecto se crea solo si se confirma que si lleva instalacion
@@ -189,6 +190,14 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                             <select className={`select select--sm line-treat${zero ? " is-warn" : ""}${t !== "normal" ? " is-set" : ""}`} value={t} disabled={locked} title={TREATMENTS.find((x) => x.value === t)?.hint} onChange={(e) => setLine(i, { treatment: e.target.value })} aria-label="Tratamiento de la línea">
                               {TREATMENTS.map((x) => <option key={x.value} value={x.value}>{x.value === "normal" ? "Tratamiento: normal" : x.label}</option>)}
                             </select>
+                            {/* grupo B: quién aporta la línea (empresas participantes de la oportunidad ligada) */}
+                            {t === "aportado" && (parties.length > 0 || l.supplied_by) && (
+                              <select className="select select--sm line-treat is-set" value={l.supplied_by || ""} disabled={locked} onChange={(e) => setLine(i, { supplied_by: e.target.value || null })} aria-label="Aportado por">
+                                <option value="">Aportado por: cliente/aliado</option>
+                                {l.supplied_by && !parties.some((x) => x.name === l.supplied_by) && <option value={l.supplied_by}>Aportado por {l.supplied_by}</option>}
+                                {parties.map((x) => <option key={x.name} value={x.name}>Aportado por {x.name}</option>)}
+                              </select>
+                            )}
                             {l.code && <span className="meta">{l.code}</span>}
                           </div>
                           {zero && <div className="line-warn">Línea en {fmtMoney(0, cur)}: elegí si es pendiente, aportada, cortesía o exclusión.</div>}
