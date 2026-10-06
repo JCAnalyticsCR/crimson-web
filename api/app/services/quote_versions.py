@@ -93,9 +93,11 @@ def get_version(db: Session, q: Quote, n: int) -> QuoteVersion | None:
 def state(db: Session, q: Quote) -> dict:
     """Lo que el editor necesita: version actual y si hay cambios sin enviar."""
     last = latest(db, q)
+    # aceptada: la referencia es la version aceptada (la viva quedo igual a esa), no la ultima enviada
+    ref = get_version(db, q, q.accepted_version) if q.acceptance_status == "aceptada" and q.accepted_version else last
     return {
         "current_version": last.version if last else None,
-        "has_unsent_changes": bool(last) and last.content_hash != live_hash(db, q),
+        "has_unsent_changes": bool(ref) and ref.content_hash != live_hash(db, q),
     }
 
 

@@ -1,13 +1,13 @@
 /* Completar CABYS: filas que en celular se apilan (nada de tabla con scroll horizontal) */
 .cabys-summary { display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; margin-bottom: 12px; }
-.cabys-summary > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--hair); min-width: 110px; }
+.cabys-summary > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--hair); flex: 1 1 90px; max-width: 160px; }
 .cabys-summary > div b { font-size: 22px; letter-spacing: -.02em; }
 .cabys-summary > div span { font-size: 12px; color: var(--text-3); }
 .cabys-summary p { flex: 1 1 260px; margin: 0; font-size: 12.5px; align-self: center; }
 .cabys-progress { margin: 0 0 10px; display: flex; gap: 8px; align-items: center; }
 .cabys-down { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 10px; padding: 10px 14px; border-radius: var(--r); border: 1px solid var(--bad); background: var(--bad-soft); color: var(--bad); font-size: 13px; }
 .cabys-tools { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 12px 14px; margin-bottom: 12px; }
-.cabys-tools .search { max-width: 420px; min-width: 0; }
+.cabys-tools .search { flex: 1 1 260px; max-width: 420px; min-width: 0; }
 .cabys-check { display: inline-flex; gap: 8px; align-items: center; font-size: 13px; cursor: pointer; }
 .cabys-group { margin-bottom: 12px; overflow: hidden; }
 .cabys-group__head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--hair); background: var(--surface-2); }

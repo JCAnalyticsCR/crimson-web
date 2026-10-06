@@ -93,7 +93,7 @@ export default function QuoteVersions({ quote, onQuote }: { quote: Quote; onQuot
 
       {!closedDoc && (
         <div className="qv-actions">
-          {allows("sales.editar") && !!last && <button className="btn btn--soft btn--sm" onClick={() => setResp({ status: "aceptada", version: String(info?.accepted_version || last.version), contact_name: "", channel: "correo", decided_on: today(), notes: "" })}><Icon d={I.check} size={14} />Registrar respuesta</button>}
+          {allows("sales.editar") && !!last && acc !== "aceptada" && <button className="btn btn--soft btn--sm" onClick={() => setResp({ status: "aceptada", version: String(info?.accepted_version || last.version), contact_name: "", channel: "correo", decided_on: today(), notes: "" })}><Icon d={I.check} size={14} />Registrar respuesta</button>}
           {allows("sales.editar") && acc !== "pendiente" && <button className="btn btn--ghost btn--sm" onClick={undo}>Deshacer respuesta</button>}
           {allows("sales.enviar") && quote.status !== "por_aprobar" && acc !== "aceptada" && <button className="btn btn--ghost btn--sm" onClick={() => setMark({ channel: "whatsapp", to: "" })} title="Si la mandaste por WhatsApp o la entregaste en mano">Marcar enviada…</button>}
         </div>

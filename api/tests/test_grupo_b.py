@@ -10,13 +10,18 @@ from app.models import AuditLog, EmailOutbox, Product
 from tests.test_campo import _login, _survey
 
 # ---------- 1. CABYS masivo ----------
+# como el de verdad: redaccion oficial y ruido (servicios, salud, camas) que el puntaje tiene que descartar
 CATALOGO = [
-    {"codigo": "4527100000100", "descripcion": "Cámaras de vigilancia de video", "impuesto": 13, "categorias": ["a", "b"]},
-    {"codigo": "4527100000200", "descripcion": "Cámaras fotográficas", "impuesto": 13},
-    {"codigo": "4631300000100", "descripcion": "Cable UTP para transmisión de datos", "impuesto": 13},
-    {"codigo": "4523300000300", "descripcion": "Discos duros para computadora", "impuesto": 13},
-    {"codigo": "4618100000100", "descripcion": "Fuentes de poder", "impuesto": 1},
-    {"codigo": "4618100000200", "descripcion": "Adaptadores de corriente", "impuesto": 0.5},
+    {"codigo": "8715300000300", "descripcion": "Servicios de mantenimiento de cámaras de televisión y de video de uso comercial", "impuesto": 13},
+    {"codigo": "3814001020101", "descripcion": "Cama de madera", "impuesto": 13},
+    {"codigo": "4721300000000", "descripcion": "Cámaras de televisión", "impuesto": 13, "categorias": ["a", "b"]},
+    {"codigo": "4721500000000", "descripcion": "Cámaras digitales", "impuesto": 13},
+    {"codigo": "4634001010100", "descripcion": "Conductores eléctricos con pieza de conexión, para una tensión inferior o igual a 80 V", "impuesto": 13},
+    {"codigo": "4634002010100", "descripcion": "Conductores eléctricos sin pieza de conexión, para una tensión inferior o igual a 80 V", "impuesto": 13},
+    {"codigo": "4632000000000", "descripcion": "Cable coaxial y otros conductores eléctricos coaxiales", "impuesto": 13},
+    {"codigo": "4527100000000", "descripcion": "Unidades de almacenamiento de medios fijos", "impuesto": 13},
+    {"codigo": "4612202990000", "descripcion": "Convertidores estáticos, n.c.p.", "impuesto": 1},
+    {"codigo": "4612202990100", "descripcion": "Adaptadores de corriente", "impuesto": 0.5},
 ]
 
 
@@ -33,9 +38,9 @@ def hacienda(monkeypatch):
         calls.append(params)
         if "codigo" in params:
             return [x for x in CATALOGO if x["codigo"] == params["codigo"]]
-        words = norm(params["q"]).split()
-        # como Hacienda: todas las palabras (sin la s final) dentro de la descripcion
-        rows = [x for x in CATALOGO if all(w.rstrip("s")[:6] in norm(x["descripcion"]) for w in words)]
+        words = [w for w in norm(params["q"]).split() if len(w) > 3]
+        # como Hacienda: basta CUALQUIER palabra (por eso trae ruido) y el orden es el del catalogo
+        rows = [x for x in CATALOGO if any(w.rstrip("s")[:6] in norm(x["descripcion"]) for w in words)]
         return {"total": len(rows), "cabys": rows}
 
     monkeypatch.setattr(svc, "_fetch", fake)
@@ -53,11 +58,13 @@ def test_terminos_genericos_quitan_marca_y_modelo():
     from app.services.cabys_suggest import terminos
 
     t = terminos("Cámara IP Bullet Hikvision DS-2CD1047G3-LIU 4MP 2.8mm", "Cámaras", "Hikvision", "DS-2CD1047G3-LIU")
-    assert t[0] == "camara de vigilancia" and not any("hikvision" in x or "ds" in x.split() for x in t)
-    assert terminos("Disco duro WD Purple 2TB", None, "WD")[0] == "disco duro"
-    assert terminos("Bobina cable UTP Cat6 305m")[0] == "cable utp"
-    assert terminos("Fuente de poder 12V 5A")[0] == "fuente de poder"
-    assert terminos("UPS 1000VA interactiva")[0] == "ups"
+    assert t[0] == "camaras de television" and not any("hikvision" in x or "ds" in x.split() for x in t)
+    assert terminos("Disco duro WD Purple 2TB", None, "WD")[0] == "unidades de almacenamiento de medios fijos"
+    assert terminos("Bobina cable UTP Cat6 305m")[0] == "conductores electricos sin pieza de conexion"
+    assert terminos("Patch cord Cat6 1m")[0] == "conductores electricos con pieza de conexion"
+    assert terminos("Fuente de poder 12V 5A")[0] == "convertidores estaticos"
+    assert terminos("UPS 1000VA interactiva")[0] == "fuente de alimentacion ininterrumpida"
+    assert terminos("Sensor de movimiento PIR inalámbrico")[0].startswith("alarmas antirrobo")  # no "equipo de red"
 
 
 def test_cabys_pendientes_sugerencia_y_asignacion(client, auth, db_session, hacienda):
@@ -77,9 +84,10 @@ def test_cabys_pendientes_sugerencia_y_asignacion(client, auth, db_session, haci
 
     sug = client.post("/cabys/suggest", json={"product_ids": [cam1["id"], cam2["id"], utp["id"], raro["id"]]}).json()["items"]
     by = {x["product_id"]: x for x in sug}
-    assert by[cam1["id"]]["suggestion"]["code"] == "4527100000100" and by[cam1["id"]]["term"] == "camara de vigilancia"
+    # el servicio de mantenimiento de camaras y la "cama de madera" salen antes en Hacienda: el puntaje los descarta
+    assert by[cam1["id"]]["suggestion"]["code"] == "4721300000000" and by[cam1["id"]]["term"] == "camaras de television"
     assert by[cam1["id"]]["suggestion"]["tax_rate"] == 13 and by[cam1["id"]]["suggestion"]["tax_configured"] is True
-    assert by[utp["id"]]["suggestion"]["code"] == "4631300000100"
+    assert by[utp["id"]]["suggestion"]["code"] == "4634002010100"  # sin pieza de conexion (bobina), no el coaxial
     assert by[raro["id"]]["suggestion"] is None and by[raro["id"]]["error"]
     n_calls = len(hacienda)
     client.post("/cabys/suggest", json={"product_ids": [cam1["id"], cam2["id"]]})
@@ -92,8 +100,8 @@ def test_cabys_pendientes_sugerencia_y_asignacion(client, auth, db_session, haci
         "/cabys/assign",
         json={
             "items": [
-                {"product_id": cam1["id"], "code": "4527100000100"},
-                {"product_id": cam2["id"], "code": "4527100000100"},
+                {"product_id": cam1["id"], "code": "4721300000000"},
+                {"product_id": cam2["id"], "code": "4721300000000"},
                 {"product_id": utp["id"], "code": "123456789012"},  # 12 digitos
                 {"product_id": raro["id"], "code": "9999999999999"},  # no existe
             ]
@@ -103,19 +111,19 @@ def test_cabys_pendientes_sugerencia_y_asignacion(client, auth, db_session, haci
     errs = {x["product_id"]: x["error"] for x in r["results"] if not x["ok"]}
     assert "13 dígitos" in errs[utp["id"]] and "no existe" in errs[raro["id"]]
     full = client.get(f"/products/{cam1['id']}").json()
-    assert full["cabys_code"] == "4527100000100" and full["cabys_description"] == "Cámaras de vigilancia de video"
+    assert full["cabys_code"] == "4721300000000" and full["cabys_description"] == "Cámaras de televisión"
     pr = db_session.get(Product, cam1["id"])
     assert pr.cabys_set_by == auth["user"]["id"] and pr.cabys_set_at is not None
     log = db_session.scalars(select(AuditLog).where(AuditLog.action == "cabys_assign", AuditLog.entity_id == cam1["id"])).all()
-    assert len(log) == 1 and log[0].diff["a"] == "4527100000100" and log[0].user_id == auth["user"]["id"]
+    assert len(log) == 1 and log[0].diff["a"] == "4721300000000" and log[0].user_id == auth["user"]["id"]
     assert cam1["id"] not in [x["id"] for x in client.get("/cabys/pending").json()["items"]]
 
     # IVA del CABYS: se aplica si existe en Ajustes (1%); si no (0,5%) se avisa y no se toca el impuesto
     fuente = _prod(client, "Fuente de poder 12V", "FP-12", tax_ids=[t["id"] for t in client.get("/taxes").json() if float(t["rate"]) == 13])
-    r = client.post("/cabys/assign", json={"items": [{"product_id": fuente["id"], "code": "4618100000100"}]}).json()
+    r = client.post("/cabys/assign", json={"items": [{"product_id": fuente["id"], "code": "4612202990000"}]}).json()
     assert r["saved"] == 1 and r["results"][0]["tax_applied"] is True and client.get(f"/products/{fuente['id']}").json()["tax_rate"] == 1
     adap = _prod(client, "Adaptador de corriente", "AD-1")
-    r = client.post("/cabys/assign", json={"items": [{"product_id": adap["id"], "code": "4618100000200"}]}).json()
+    r = client.post("/cabys/assign", json={"items": [{"product_id": adap["id"], "code": "4612202990100"}]}).json()
     assert r["saved"] == 1 and "no está configurado" in r["results"][0]["warning"]
 
 
@@ -124,7 +132,7 @@ def test_cabys_permisos_y_hacienda_caida(client, auth, db_session, monkeypatch, 
 
     p = _prod(client, "Disco duro WD Purple 2TB", "HDD-2")
     tk = _login(client, db_session, auth["tenant"]["id"], "tec-cabys@ejemplo.com", "tecnico")
-    assert client.post("/cabys/assign", json={"items": [{"product_id": p["id"], "code": "4523300000300"}]}, headers=tk).status_code == 403
+    assert client.post("/cabys/assign", json={"items": [{"product_id": p["id"], "code": "4527100000000"}]}, headers=tk).status_code == 403
     assert client.post("/cabys/suggest", json={"product_ids": [p["id"]]}, headers=tk).status_code == 403
 
     def down(params):
@@ -134,7 +142,7 @@ def test_cabys_permisos_y_hacienda_caida(client, auth, db_session, monkeypatch, 
     monkeypatch.setattr(svc, "_fetch", down)
     sug = client.post("/cabys/suggest", json={"product_ids": [p["id"]]}).json()["items"][0]
     assert "Hacienda" in sug["error"]
-    r = client.post("/cabys/assign", json={"items": [{"product_id": p["id"], "code": "4523300000300"}]}).json()
+    r = client.post("/cabys/assign", json={"items": [{"product_id": p["id"], "code": "4527100000000"}]}).json()
     assert r["saved"] == 0 and "validar" in r["results"][0]["error"]
     assert client.get(f"/products/{p['id']}").json()["cabys_code"] is None  # nunca se guarda sin validar
 
@@ -190,7 +198,8 @@ def test_aceptacion_registra_y_convertir_usa_la_version(client, auth, db_session
         client.post(f"/quotes/{q['id']}/acceptance", json={"status": "aceptada", "contact_name": "Ana", "channel": "correo"}).status_code == 409
     )  # sin versiones
     client.post(f"/quotes/{q['id']}/send")  # v1 a 1000
-    _edit(client, q, 1800)  # cambio sin enviar
+    _edit(client, q, 1800)
+    assert client.post(f"/quotes/{q['id']}/send").json()["current_version"] == 2  # v2 a 1800: el cliente igual acepta la v1
     assert client.post(f"/quotes/{q['id']}/acceptance", json={"status": "aceptada", "channel": "correo"}).status_code == 422  # falta quien
     r = client.post(
         f"/quotes/{q['id']}/acceptance",
@@ -203,7 +212,11 @@ def test_aceptacion_registra_y_convertir_usa_la_version(client, auth, db_session
     assert _edit(client, q, 2000).status_code == 409  # aceptada: no se edita
 
     hist = client.get(f"/quotes/{q['id']}/versions").json()
-    assert hist["acceptances"][0]["contact_name"] == "Ana Mora" and hist["acceptances"][0]["recorded_by"] and hist["versions"][0]["accepted"] is True
+    assert (
+        hist["acceptances"][0]["contact_name"] == "Ana Mora"
+        and hist["acceptances"][0]["recorded_by"]
+        and [v["version"] for v in hist["versions"] if v["accepted"]] == [1]
+    )
     inv = client.post(f"/quotes/{q['id']}/convert").json()
     assert Decimal(inv["total"]) == Decimal("2260")
 

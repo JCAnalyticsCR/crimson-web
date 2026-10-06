@@ -19,7 +19,7 @@ type Cab = { code: string; description: string; tax_rate: number | null; categor
 type Sug = { product_id: number; suggestion: Cab | null; alternatives: Cab[]; term: string | null; tried?: string[]; error: string | null };
 type Result = { product_id: number; ok: boolean; code: string; description?: string; tax_applied?: boolean; warning?: string; error?: string };
 
-const CHUNK = 20;
+const CHUNK = 10; // tandas chicas: las primeras sugerencias aparecen rapido aunque Hacienda tarde
 const gkey = (id: number | null) => String(id ?? 0);
 const iva = (c: Cab) => (c.tax_rate == null ? "IVA ?" : `IVA ${c.tax_rate}%`);
 
@@ -37,11 +37,14 @@ export default function CabysBulk() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [down, setDown] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const alive = useRef(true);
-  useEffect(() => () => { alive.current = false; }, []);
+  /* Una sola tanda viva a la vez: salir de la pantalla o pedir "Sugerir faltantes" corta la anterior. */
+  const run = useRef(0);
+  useEffect(() => () => { run.current += 1; }, []);
 
   /* Sugerencias por tandas, en el orden de la pantalla (lo que tiene existencias primero). */
   const suggestAll = useCallback(async (ids: number[]) => {
+    const me = ++run.current;
+    const alive = { get current() { return run.current === me; } };
     setDown(null);
     setProgress({ done: 0, total: ids.length });
     for (let i = 0; i < ids.length && alive.current; i += CHUNK) {
@@ -71,7 +74,13 @@ export default function CabysBulk() {
     setData(d);
     return d;
   }, []);
-  useEffect(() => { load().then((d) => suggestAll(d.items.map((x) => x.id))).catch((e) => toast(e instanceof Error ? e.message : "Error", "bad")); }, [load, suggestAll, toast]);
+  const toastRef = useRef(toast);
+  toastRef.current = toast; // toast cambia de identidad en cada render de la sesion: no debe relanzar la carga
+  useEffect(() => {
+    let off = false;
+    load().then((d) => { if (!off) suggestAll(d.items.map((x) => x.id)); }).catch((e) => toastRef.current(e instanceof Error ? e.message : "Error", "bad"));
+    return () => { off = true; };
+  }, [load, suggestAll]);
 
   const items = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -137,7 +146,7 @@ export default function CabysBulk() {
 
       <div className="cabys-summary">
         <div><b>{data.total}</b><span>sin CABYS</span></div>
-        <div><b>{data.with_stock}</b><span>con existencias</span></div>
+        <div><b>{data.items.filter((x) => Number(x.own_stock) > 0).length}</b><span>con existencias</span></div>
         <div><b>{conSug}</b><span>con sugerencia</span></div>
         <p className="muted">La sugerencia sale del nombre y la categoría (sin marca ni modelo) buscada en el CABYS de Hacienda. <b>Revisala antes de aceptar</b>: el código y el IVA van a la factura electrónica.</p>
       </div>
