@@ -70,6 +70,10 @@ def doc_send(kind: str, id_: int, data: SendIn, p: Principal = Depends(require("
     if not to:
         raise HTTPException(422, "El cliente no tiene correo; indique uno")
     is_inv = kind == "invoices"
+    if not is_inv:
+        from ..services.units import check_ready
+
+        check_ready(d, "enviar la cotización")
     link = None
     if is_inv and data.with_payment_link and Decimal(str(d.balance)) > 0:
         link = docsvc.get_or_create_payment_link(db, p.tenant.id, d).url

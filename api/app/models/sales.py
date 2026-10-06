@@ -72,6 +72,8 @@ class _LineBase:
     subtotal: Mapped[float] = mapped_column(Numeric(16, 5), default=0)  # cantidad x precio - descuento
     tax_amount: Mapped[float] = mapped_column(Numeric(16, 5), default=0)
     total: Mapped[float] = mapped_column(Numeric(16, 5), default=0)
+    # normal | pendiente | aportado | cortesia | excluido (ver services/units.py)
+    treatment: Mapped[str] = mapped_column(String(12), default="normal", server_default="normal")
 
 
 class Quote(_DocBase, Base):

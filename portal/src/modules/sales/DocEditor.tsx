@@ -6,10 +6,14 @@ import { api, fmtMoney, type Customer, type Invoice, type Line, type Product, ty
 import { useSession } from "../../app/session";
 import { Badge, Field, I, Icon, Loading, Modal } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
+import { NO_SUMA, TREATMENTS, unitOptions, type Treatment } from "../../lib/units";
 
 type Preview = { subtotal: string; discount_total: string; tax_total: string; total: string; lines: { subtotal: string; tax_amount: string; total: string; unit_price: string; name: string; tax_rate: string }[] };
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? String(Number(n.toFixed(5))) : String(v ?? ""); };
-const blankLine = (): Line => ({ product_id: null, code: null, name: "", description: "", unit: "Unid", quantity: "1", unit_price: "0", discount_type: "percent", discount_value: "0", tax_rate: "13" });
+const blankLine = (): Line => ({ product_id: null, code: null, name: "", description: "", unit: "Unid", quantity: "1", unit_price: "0", discount_type: "percent", discount_value: "0", tax_rate: "13", treatment: "normal" });
+/* Una linea en 0 sin tratamiento no explica nada: hay que decir si es pendiente, aportada, cortesia o exclusion. */
+const zeroUnexplained = (l: Line) => (l.treatment || "normal") === "normal" && !(Number(l.unit_price) > 0);
+const nameRows = (s: string) => Math.min(4, Math.max(1, Math.ceil((s || "").length / 44)));
 
 export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const { id } = useParams();
@@ -41,7 +45,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     customer_id: doc.customer_id ?? null, currency: doc.currency || "CRC", discount_type: doc.discount_type || "percent", discount_value: doc.discount_value || "0",
     internal_notes: doc.internal_notes || null, external_notes: doc.external_notes || null, external_order: doc.external_order || null, activity_code: doc.activity_code || null,
     medical_exemption_card: !!doc.medical_exemption_card, issue_date: doc.issue_date || null, due_date: doc.due_date || null,
-    lines: lines.filter((l) => l.name.trim()).map((l) => ({ product_id: l.product_id, code: l.code, name: l.name, description: l.description, unit: l.unit, quantity: l.quantity || "1", unit_price: l.unit_price || "0", discount_type: l.discount_type, discount_value: l.discount_value || "0", tax_rate: l.tax_rate || "13" })),
+    lines: lines.filter((l) => l.name.trim()).map((l) => ({ product_id: l.product_id, code: l.code, name: l.name, description: l.description, unit: l.unit, quantity: l.quantity || "1", unit_price: l.unit_price || "0", discount_type: l.discount_type, discount_value: l.discount_value || "0", tax_rate: l.tax_rate || "13", treatment: l.treatment || "normal" })),
   }), [doc, lines]);
 
   useEffect(() => {
@@ -101,6 +105,12 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     try { const r = await api<Quote>(`/quotes/${id}/approve`, { method: "POST" }); setDoc({ ...doc, status: r.status }); toast("Descuento aprobado: el vendedor ya puede enviarla o convertirla"); }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
+
+  /* Pendientes y lineas en 0 sin explicar: se guarda, pero no se envia ni se convierte (la API responde 409). */
+  const named = lines.filter((l) => l.name.trim());
+  const pendLines = named.filter((l) => l.treatment === "pendiente");
+  const zeroLines = named.filter(zeroUnexplained);
+  const blocked = isQ && (pendLines.length > 0 || zeroLines.length > 0);
 
   const cur = doc.currency || "CRC";
   const title = isNew ? (isQ ? "Nueva cotización" : "Nueva factura") : `${isQ ? "Cotización" : "Factura"}: ${doc.number}`;
@@ -164,23 +174,38 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
             <div className="card__head"><h3 className="h3">Productos & Servicios</h3><button className="btn btn--soft btn--sm" disabled={locked} onClick={() => setPick(true)}><Icon d={I.plus} />Agregar Productos & Servicios</button></div>
             <div className="card__body" style={{ padding: 0 }}>
               <table className="lines">
-                <thead><tr><th style={{ width: "36%" }}>Concepto</th><th style={{ width: 80 }}>Cant.</th><th style={{ width: 130 }}>Precio</th><th style={{ width: 90 }}>Desc. %</th><th style={{ width: 90 }}>IVA %</th><th className="num">Subtotal</th><th /></tr></thead>
+                <thead><tr><th>Concepto</th><th style={{ width: 118 }}>Cant. · unidad</th><th style={{ width: 128 }}>Precio</th><th style={{ width: 72 }}>Desc. %</th><th style={{ width: 82 }}>IVA</th><th className="num" style={{ width: 120 }}>Subtotal</th><th style={{ width: 34 }} /></tr></thead>
                 <tbody>
-                  {lines.map((l, i) => (
-                    <tr key={i}>
-                      <td>
-                        <input className="input line-name" placeholder="Nombre del producto o servicio" value={l.name} disabled={locked} onChange={(e) => setLine(i, { name: e.target.value })} style={{ height: 34, marginBottom: 4 }} />
-                        <textarea className="line-desc" rows={1} placeholder="Descripción (click para editar)" value={l.description || ""} disabled={locked} onChange={(e) => setLine(i, { description: e.target.value })} />
-                        {l.code && <span className="meta">{l.code}</span>}
-                      </td>
-                      <td><input className="input input--mono" value={l.quantity} disabled={locked} onChange={(e) => setLine(i, { quantity: e.target.value })} /></td>
-                      <td><input className="input input--mono line-price" value={l.unit_price} disabled={locked} onChange={(e) => setLine(i, { unit_price: e.target.value })} /></td>
-                      <td><input className="input input--mono" value={l.discount_value} disabled={locked} onChange={(e) => setLine(i, { discount_value: e.target.value })} /></td>
-                      <td><select className="select" value={l.tax_rate} disabled={locked} onChange={(e) => setLine(i, { tax_rate: e.target.value })} style={{ height: 34, padding: "0 8px" }}>{["13", "4", "2", "1", "0"].map((r) => <option key={r} value={r}>{r}%</option>)}</select></td>
-                      <td className="num money" style={{ paddingTop: 14 }}>{prev?.lines[i] ? fmtMoney(prev.lines[i].subtotal, cur) : "—"}</td>
-                      <td>{!locked && <button className="x" onClick={() => setLines((ls) => ls.filter((_, k) => k !== i))} aria-label="Eliminar"><Icon d={I.x} size={14} /></button>}</td>
-                    </tr>
-                  ))}
+                  {lines.map((l, i) => {
+                    const t = (l.treatment || "normal") as Treatment;
+                    const nosuma = NO_SUMA.includes(t);
+                    const zero = zeroUnexplained(l) && l.name.trim() !== "";
+                    return (
+                      <tr key={i} className="line">
+                        <td className="c-name">
+                          <textarea className="input line-name" rows={nameRows(l.name)} placeholder="Nombre del producto o servicio" value={l.name} disabled={locked} onChange={(e) => setLine(i, { name: e.target.value })} />
+                          <textarea className="line-desc" rows={1} placeholder="Descripción (click para editar)" value={l.description || ""} disabled={locked} onChange={(e) => setLine(i, { description: e.target.value })} />
+                          <div className="line-meta">
+                            <select className={`select select--sm line-treat${zero ? " is-warn" : ""}${t !== "normal" ? " is-set" : ""}`} value={t} disabled={locked} title={TREATMENTS.find((x) => x.value === t)?.hint} onChange={(e) => setLine(i, { treatment: e.target.value })} aria-label="Tratamiento de la línea">
+                              {TREATMENTS.map((x) => <option key={x.value} value={x.value}>{x.value === "normal" ? "Tratamiento: normal" : x.label}</option>)}
+                            </select>
+                            {l.code && <span className="meta">{l.code}</span>}
+                          </div>
+                          {zero && <div className="line-warn">Línea en {fmtMoney(0, cur)}: elegí si es pendiente, aportada, cortesía o exclusión.</div>}
+                          {t !== "normal" && <div className="line-note">{TREATMENTS.find((x) => x.value === t)?.hint}</div>}
+                        </td>
+                        <td className="c-qty" data-label="Cant. · unidad">
+                          <input className="input input--mono" inputMode="decimal" value={l.quantity} disabled={locked} onChange={(e) => setLine(i, { quantity: e.target.value })} />
+                          <select className="select select--sm line-unit" value={l.unit} disabled={locked} onChange={(e) => setLine(i, { unit: e.target.value })} aria-label="Unidad" title={unitOptions(l.unit).find((u) => u.value === l.unit)?.label}>{unitOptions(l.unit).map((u) => <option key={u.value} value={u.value}>{u.short}</option>)}</select>
+                        </td>
+                        <td className="c-price" data-label="Precio"><input className="input input--mono line-price" inputMode="decimal" value={l.unit_price} disabled={locked} onChange={(e) => setLine(i, { unit_price: e.target.value })} /></td>
+                        <td className="c-disc" data-label="Desc. %"><input className="input input--mono" inputMode="decimal" value={l.discount_value} disabled={locked} onChange={(e) => setLine(i, { discount_value: e.target.value })} /></td>
+                        <td className="c-tax" data-label="IVA"><select className="select" value={l.tax_rate} disabled={locked} onChange={(e) => setLine(i, { tax_rate: e.target.value })}>{["13", "4", "2", "1", "0"].map((r) => <option key={r} value={r}>{r}%</option>)}</select></td>
+                        <td className="c-sub num money" data-label="Subtotal">{nosuma ? <span className="muted">No suma</span> : prev?.lines[i] ? fmtMoney(prev.lines[i].subtotal, cur) : "—"}</td>
+                        <td className="c-x">{!locked && <button className="x" onClick={() => setLines((ls) => ls.filter((_, k) => k !== i))} aria-label="Eliminar"><Icon d={I.x} size={14} /></button>}</td>
+                      </tr>
+                    );
+                  })}
                   {lines.length === 0 && <tr><td colSpan={7}><div className="empty" style={{ padding: 28 }}><span className="meta">Sin líneas</span><div className="h3">Agregá productos o escribí una línea libre</div><button className="btn btn--ghost btn--sm" onClick={() => setLines([blankLine()])}>Línea libre</button></div></td></tr>}
                 </tbody>
               </table>
@@ -226,12 +251,20 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               {allows("sales.aprobar") && <button className="btn btn--crimson" onClick={approve}><Icon d={I.check} />Aprobar descuento</button>}
             </div></div>
           )}
+          {!locked && blocked && (
+            <div className="card" style={{ borderColor: "var(--warn)" }}><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div className="meta" style={{ color: "var(--warn)" }}>No se puede enviar ni convertir todavía</div>
+              {pendLines.length > 0 && <p style={{ fontSize: 13, margin: 0 }}>{pendLines.length} línea(s) pendientes de costo o precio del proveedor: {pendLines.slice(0, 4).map((l) => l.name).join(", ")}{pendLines.length > 4 ? "…" : ""}.</p>}
+              {zeroLines.length > 0 && <p style={{ fontSize: 13, margin: 0 }}>{zeroLines.length} línea(s) en {fmtMoney(0, cur)} sin tratamiento: {zeroLines.slice(0, 4).map((l) => l.name).join(", ")}{zeroLines.length > 4 ? "…" : ""}. Elegí si son pendientes, aportadas, cortesía o exclusiones.</p>}
+              <p className="muted" style={{ fontSize: 12, margin: 0 }}>Podés guardarla mientras tanto.</p>
+            </div></div>
+          )}
           {!locked && (
             <div className="card"><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {limit && !limit.free && <p className="muted" style={{ fontSize: 12, margin: 0 }}>Tu descuento máximo es {Number(limit.limit)} % (incluye rebajas al precio de catálogo). Más que eso requiere aprobación.</p>}
               <button className="btn btn--crimson" disabled={busy} onClick={() => save()}><Icon d={I.check} />Guardar</button>
-              {!pending && <button className="btn" disabled={busy} onClick={() => save("send")}><Icon d={I.whatsapp} />Guardar & enviar al cliente</button>}
-              {isQ && !pending && <button className="btn btn--soft" disabled={busy} onClick={() => save("convert")}><Icon d={I.invoice} />Convertir a factura</button>}
+              {!pending && <button className="btn" disabled={busy || blocked} onClick={() => save("send")}><Icon d={I.whatsapp} />Guardar & enviar al cliente</button>}
+              {isQ && !pending && <button className="btn btn--soft" disabled={busy || blocked} onClick={() => save("convert")}><Icon d={I.invoice} />Convertir a factura</button>}
               {isQ && !isNew && !pending && allows("projects.crear") && (
                 /* Instalaciones: la cotización aprobada arranca el proyecto con su primera orden de trabajo. */
                 opp?.kind === "venta"

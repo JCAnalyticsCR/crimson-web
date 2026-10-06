@@ -53,7 +53,7 @@ td{padding:7px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-
   <div class="box"><div class="k">Cliente</div><b>{{ customer or "—" }}</b>{% if contact_line %}<br><span class="muted">{{ contact_line }}</span>{% endif %}
     <br><span class="k">Sitio</span><br>{{ s.site or "—" }}</div>
   <div class="box"><div class="k">Visita</div>Fecha: <b>{{ visit_date or "—" }}</b><br>Técnicos que visitaron: <b>{{ visitors|join(", ") if visitors else "—" }}</b>
-    <br>{{ points|length }} {{ point_label|lower }}(s) · {{ equipos|length + materiales|length }} equipos y materiales</div>
+    <br>{{ points|length }} {{ point_label|lower }}(s) · {{ equipos|length + materiales|length + servicios|length }} equipos, materiales y servicios</div>
 </div>
 
 {% if points %}<h2>Detalle por punto ({{ point_label|lower }})</h2>
@@ -63,7 +63,7 @@ td{padding:7px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-
   {% if p.photos %}<div class="ph">{% for u in p.photos %}<img src="{{ u }}" alt="">{% endfor %}</div>{% endif %}
 </div>{% endfor %}{% endif %}
 
-{% for title, rows in [("Equipos requeridos", equipos), ("Materiales requeridos", materiales)] %}{% if rows %}<h2>{{ title }}</h2>
+{% for title, rows in [("Equipos requeridos", equipos), ("Materiales requeridos", materiales), ("Servicios y alquileres", servicios)] %}{% if rows %}<h2>{{ title }}</h2>
 <table><thead><tr><th>Descripción</th><th class="num">Cantidad</th><th>Observación</th></tr></thead><tbody>
 {% for r in rows %}<tr><td><b>{{ r.name }}</b></td><td class="num">{{ r.quantity }} {{ r.unit }}</td><td class="muted">{{ r.note or "" }}</td></tr>{% endfor %}
 </tbody></table>{% endif %}{% endfor %}
@@ -155,7 +155,8 @@ def context(db: Session, s: Survey, tenant: Tenant) -> dict:
             for p in s.points
         ],
         "equipos": [i for i in items if i["kind"] == "equipo"],
-        "materiales": [i for i in items if i["kind"] != "equipo"],
+        "materiales": [i for i in items if i["kind"] not in ("equipo", "servicio")],
+        "servicios": [i for i in items if i["kind"] == "servicio"],
         "labor": labor,
         "photos": _photos(s.photos),
     }

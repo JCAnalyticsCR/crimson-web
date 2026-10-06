@@ -37,6 +37,7 @@ class LineIn:
     discount_type: str = "percent"  # percent | amount
     discount_value: Decimal = Decimal(0)
     tax_rate: Decimal = Decimal(13)
+    counts: bool = True  # False: aportado, cortesia o excluido; sale en el documento pero no suma
 
 
 @dataclass
@@ -67,6 +68,9 @@ def _discount(base: Decimal, kind: str, value: Decimal) -> Decimal:
 
 
 def compute_line(line: LineIn, global_factor: Decimal = Decimal(1)) -> LineOut:
+    if not line.counts:
+        z = Decimal(0)
+        return LineOut(base=z, discount=z, subtotal=z, tax_amount=z, total=z)
     base = q5(d(line.quantity) * d(line.unit_price))
     disc = _discount(base, line.discount_type, line.discount_value)
     subtotal = q5((base - disc) * global_factor)

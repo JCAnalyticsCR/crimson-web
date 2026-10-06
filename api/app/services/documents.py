@@ -24,6 +24,7 @@ from ..models import (
     QuoteLine,
 )
 from ..schemas.sales import DocumentIn, LineInSchema
+from . import units
 from .sequences import next_number
 from .totals import LineIn, balance, compute_document, d
 
@@ -69,6 +70,17 @@ def _fill_line_from_product(db: Session, tenant_id: int, ln: LineInSchema) -> Li
     return ln
 
 
+def line_in(ln: LineInSchema) -> LineIn:
+    return LineIn(
+        d(ln.quantity),
+        d(ln.unit_price or 0),
+        ln.discount_type,
+        d(ln.discount_value),
+        d(ln.tax_rate if ln.tax_rate is not None else 13),
+        units.counts(ln.treatment),
+    )
+
+
 def apply_document(db: Session, doc: Quote | Invoice, payload: DocumentIn, line_cls, tenant_id: int) -> None:
     """Escribe cabecera + lineas y recalcula totales. Reutilizado por cotizacion y factura."""
     doc.customer_id = payload.customer_id
@@ -86,7 +98,7 @@ def apply_document(db: Session, doc: Quote | Invoice, payload: DocumentIn, line_
 
     lines = [_fill_line_from_product(db, tenant_id, ln) for ln in payload.lines]
     calc = compute_document(
-        [LineIn(d(ln.quantity), d(ln.unit_price), ln.discount_type, d(ln.discount_value), d(ln.tax_rate if ln.tax_rate is not None else 13)) for ln in lines],
+        [line_in(ln) for ln in lines],
         payload.discount_type,
         payload.discount_value,
     )
@@ -109,6 +121,7 @@ def apply_document(db: Session, doc: Quote | Invoice, payload: DocumentIn, line_
                 subtotal=lo.subtotal,
                 tax_amount=lo.tax_amount,
                 total=lo.total,
+                treatment=ln.treatment or "normal",
             )
         )
     doc.subtotal, doc.discount_total, doc.tax_total, doc.total = calc.subtotal, calc.discount_total, calc.tax_total, calc.total
@@ -183,6 +196,7 @@ def quote_to_payload(q: Quote) -> DocumentIn:
                 discount_type=ln.discount_type,
                 discount_value=d(ln.discount_value),
                 tax_rate=d(ln.tax_rate),
+                treatment=ln.treatment or "normal",
             )
             for ln in q.lines
         ],
@@ -192,6 +206,7 @@ def quote_to_payload(q: Quote) -> DocumentIn:
 def convert_quote(db: Session, tenant_id: int, user_id: int, q: Quote) -> Invoice:
     if q.status in ("convertida", "anulada"):
         raise HTTPException(409, f"La cotizacion esta {q.status}")
+    units.check_ready(q, "convertir la cotización")
     inv = create_invoice(db, tenant_id, user_id, quote_to_payload(q), quote=q)
     q.status = "convertida"
     q.converted_invoice_id = inv.id

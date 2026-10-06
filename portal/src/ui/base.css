@@ -168,7 +168,17 @@ img { max-width: 100%; display: block; }
 .lines th { text-align: left; padding: 8px 10px; font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-3); border-bottom: 1px solid var(--hair); font-weight: 500; }
 .lines td { padding: 8px 10px; border-bottom: 1px solid var(--hair); vertical-align: top; }
 .lines .input { height: 34px; }
-.lines .line-name { font-weight: 600; }
+.lines .line-name { font-weight: 600; width: 100%; min-height: 34px; height: auto; padding-top: 7px; padding-bottom: 7px; resize: none; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; display: block; }
+.lines .c-name { min-width: 220px; }
+.lines .c-qty .line-unit { margin-top: 4px; width: 100%; }
+.lines .c-tax .select { height: 34px; padding: 0 8px; }
+.lines .c-sub { padding-top: 14px; white-space: nowrap; }
+.line-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.line-treat { width: auto; max-width: 100%; font-size: 12px; }
+.line-treat.is-set { border-color: var(--info, #3c82f0); }
+.line-treat.is-warn { border-color: var(--warn); background: var(--warn-soft, rgba(230,160,40,.12)); }
+.line-warn { margin-top: 4px; font-size: 12px; color: var(--warn); }
+.line-note { margin-top: 4px; font-size: 12px; color: var(--text-3); }
 /* En colones un precio tiene 6 a 8 cifras: a 1366 px la columna se encogia y "230800" se leia "2308". */
 .lines .line-price { min-width: 108px; }
 .lines .line-desc { width: 100%; border: 0; background: transparent; color: var(--text-2); font-size: 12.5px; padding: 4px 0; outline: none; resize: none; }
@@ -231,7 +241,27 @@ img { max-width: 100%; display: block; }
 .pay__method b { font-size: 14px; }
 .pay__method span { color: var(--text-2); font-size: 13px; }
 
-@media (max-width: 1100px) { .doc { grid-template-columns: 1fr; } .doc__side { position: static; } .kpi { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) { .kpi { grid-template-columns: 1fr; } }
+/* Anchos medianos (laptop 1366 con menu): las lineas necesitan todo el ancho; los totales bajan debajo en 2 columnas */
+.doc > * { min-width: 0; }
+@media (max-width: 1440px) {
+  .doc { grid-template-columns: minmax(0, 1fr); }
+  .doc__side { position: static; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); align-items: start; }
+}
+/* Celular: cada linea es una tarjeta; el concepto ocupa todo el ancho y los numeros van en una grilla */
+@media (max-width: 760px) {
+  .lines thead { display: none; }
+  .lines, .lines tbody { display: block; width: 100%; }
+  .lines tr.line { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px; padding: 12px 14px; border-bottom: 1px solid var(--hair); }
+  .lines tr.line td { display: block; padding: 0; border: 0; min-width: 0; }
+  .lines tr.line td[data-label]::before { content: attr(data-label); display: block; font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-3); margin-bottom: 3px; }
+  .lines tr.line .c-name { grid-column: 1 / -1; padding-right: 30px; }
+  .lines tr.line .c-x { position: absolute; top: 10px; right: 8px; }
+  .lines .c-x .x { opacity: 1; }
+  .lines .c-sub { grid-column: 2 / -1; text-align: right; padding-top: 0; font-size: 15px; font-weight: 700; }
+  .lines .line-price { min-width: 0; }
+  .lines .input, .lines .select { width: 100%; min-width: 0; }
+}
 @media (max-width: 900px) {
   .shell { grid-template-columns: 1fr; }
   .nav { position: fixed; z-index: 40; width: min(84vw, 320px); transform: translateX(-100%); transition: transform .3s var(--ease); }
