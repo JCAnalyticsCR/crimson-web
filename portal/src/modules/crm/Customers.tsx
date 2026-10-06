@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, type Customer } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 
 const blank = { id_type: "juridica", id_number: "", name: "", email: "", phone: "", whatsapp: "", currency: "CRC", notes: "" };
 
@@ -10,7 +10,8 @@ export default function Customers() {
   const { toast, allows } = useSession();
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
-  const [items, setItems] = useState<Customer[]>([]);
+  const [itemsSt, setItems] = useState<Customer[] | null>(null); // null = cargando
+  const items = itemsSt ?? [];
   const [q, setQ] = useState("");
   const [edit, setEdit] = useState<typeof blank & { id?: number } | null>(params.get("nuevo") ? { ...blank } : null);
   const load = useCallback(() => api<{ items: Customer[] }>(`/customers?limit=50${q ? `&q=${encodeURIComponent(q)}` : ""}`).then((r) => setItems(r.items)), [q]);
@@ -34,7 +35,7 @@ export default function Customers() {
       </div>
       <Card flush>
         <div className="list-head"><div className="search" style={{ maxWidth: 420 }}><Icon d={I.search} size={16} /><input placeholder="Nombre, cédula o correo…" value={q} onChange={(e) => setQ(e.target.value)} /></div><button className="btn btn--ghost btn--sm" onClick={load}><Icon d={I.refresh} /></button></div>
-        {items.length === 0 ? <Empty hint="Creá el primer cliente para cotizar y facturar." /> : (
+        {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Creá el primer cliente para cotizar y facturar." /> : (
           <table className="table">
             <thead><tr><th>Nombre</th><th>Identificación</th><th>Correo</th><th>WhatsApp</th><th>Divisa</th><th /></tr></thead>
             <tbody>{items.map((c) => (

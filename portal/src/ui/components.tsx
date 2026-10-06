@@ -75,6 +75,16 @@ export function Empty({ title = "Nada que mostrar… ¡por ahora!", hint, action
   );
 }
 
+/* Mientras llegan los datos (estado null = cargando): nunca mostrar "sin datos" antes del fetch. */
+export function Loading({ label = "Cargando…" }: { label?: string }) {
+  return (
+    <div className="empty" role="status" aria-live="polite">
+      <span className="spinner" />
+      <span className="meta">{label}</span>
+    </div>
+  );
+}
+
 export function Modal({ title, onClose, children, foot, wide }: { title: ReactNode; onClose: () => void; children: ReactNode; foot?: ReactNode; wide?: boolean }) {
   const bg = useRef<HTMLDivElement>(null);
   useEffect(() => {

@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Badge, Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
 import { Dropzone } from "../../ui/MediaPicker";
 import { VerArchivo } from "../../ui/VerArchivo";
@@ -18,11 +18,13 @@ export default function Accounting() {
   const { toast } = useSession();
   const [cats, setCats] = useState<Cat[]>([]);
   const [banks, setBanks] = useState<Bank[]>([]);
-  const [items, setItems] = useState<Exp[]>([]);
+  const [itemsSt, setItems] = useState<Exp[] | null>(null); // null = cargando
+  const items = itemsSt ?? [];
   const [res, setRes] = useState<Res | null>(null);
   const [edit, setEdit] = useState<(typeof blank & { id?: number }) | null>(null);
   const [newCat, setNewCat] = useState("");
-  const [sups, setSups] = useState<Sup[]>([]);
+  const [supsSt, setSups] = useState<Sup[] | null>(null); // null = cargando
+  const sups = supsSt ?? [];
   const [sup, setSup] = useState<(Omit<Sup, "id"> & { id?: number }) | null>(null);
   const load = () => { api<Sup[]>("/suppliers").then(setSups).catch(() => setSups([])); api<Cat[]>("/expense-categories").then(setCats); api<Bank[]>("/settings/bank-accounts").then(setBanks); api<Exp[]>("/expenses").then(setItems); api<Res>("/reports/resultados").then(setRes); };
   useEffect(load, []);
@@ -64,14 +66,14 @@ export default function Accounting() {
       )}
 
       <Card title="Gastos recientes" flush>
-        {items.length === 0 ? <Empty hint="Registrá compras y gastos; el IVA acreditable alimenta el reporte de IVA y la prorrata." /> : (
+        {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Registrá compras y gastos; el IVA acreditable alimenta el reporte de IVA y la prorrata." /> : (
           <table className="table"><thead><tr><th>Fecha</th><th>Descripción</th><th>Categoría</th><th>Crédito IVA</th><th className="num">Subtotal</th><th className="num">IVA</th><th className="num">Total</th><th>Estado</th><th /></tr></thead>
             <tbody>{items.map((e) => <tr key={e.id}><td className="muted">{fmtDate(e.date)}</td><td style={{ fontWeight: 600 }}>{e.description}{e.attachment_url && <VerArchivo url={e.attachment_url} caption={e.description} className="badge badge--info badge--btn">Adjunto</VerArchivo>}{e.reference && <div className="meta">{e.reference}</div>}</td><td className="muted">{e.category || "—"}</td><td className="muted">{e.iva_credit}</td><td className="num money">{fmtMoney(e.subtotal, e.currency)}</td><td className="num money">{fmtMoney(e.tax_amount, e.currency)}</td><td className="num money" style={{ fontWeight: 700 }}>{fmtMoney(e.total, e.currency)}</td><td><Badge status={e.status === "registrado" ? "creado" : e.status === "pagado" ? "pagada" : "anulada"} /></td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setEdit({ id: e.id, category_id: e.category_id ? String(e.category_id) : "", supplier_id: e.supplier_id ? String(e.supplier_id) : "", attachment_url: e.attachment_url || "", description: e.description, date: e.date, currency: e.currency, subtotal: String(Number(e.subtotal)), tax_rate: String(Number(e.tax_rate)), iva_credit: e.iva_credit, bank_account_id: e.bank_account_id ? String(e.bank_account_id) : "", reference: e.reference || "", status: e.status })}>Ver</button></td></tr>)}</tbody></table>
         )}
       </Card>
 
       <Card title="Proveedores" flush className="" extra={<button className="btn btn--ghost btn--sm" onClick={() => setSup({ name: "", tax_id: "", email: "", phone: "" })}><Icon d={I.plus} />Proveedor</button>}>
-        {sups.length === 0 ? <Empty title="Sin proveedores" hint="Se crean al recibir XML o aquí; sirven para el D-151 y el control de compras." /> : (
+        {supsSt === null ? <Loading /> : sups.length === 0 ? <Empty title="Sin proveedores" hint="Se crean al recibir XML o aquí; sirven para el D-151 y el control de compras." /> : (
           <table className="table"><thead><tr><th>Nombre</th><th>Cédula</th><th>Correo</th><th>Teléfono</th><th /></tr></thead>
             <tbody>{sups.map((x) => <tr key={x.id}><td style={{ fontWeight: 600 }}>{x.name}</td><td className="mono muted">{x.tax_id || "—"}</td><td className="muted">{x.email || "—"}</td><td className="muted">{x.phone || "—"}</td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setSup({ id: x.id, name: x.name, tax_id: x.tax_id || "", email: x.email || "", phone: x.phone || "" })}>Editar</button></td></tr>)}</tbody></table>
         )}

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { Lookup, searchCustomers } from "../../ui/Lookup";
 import { SlaTable, type Sla } from "./SlaTable";
 
@@ -19,7 +19,8 @@ const blank = { customer_id: "", customer_name: "", name: "", kind: "mantenimien
 
 export default function Contracts() {
   const { toast, allows } = useSession();
-  const [rows, setRows] = useState<Contract[]>([]);
+  const [rowsSt, setRows] = useState<Contract[] | null>(null); // null = cargando
+  const rows = rowsSt ?? [];
   const [form, setForm] = useState<(typeof blank & { id?: number }) | null>(null);
   const verCostos = allows("catalog.costos");
 
@@ -67,7 +68,7 @@ export default function Contracts() {
       </div>
 
       <Card flush>
-        {rows.length === 0 ? <Empty title="Sin contratos" hint="Un mantenimiento cada seis meses es trabajo que vuelve solo; el sistema abre el ticket cuando toca." /> : (
+        {rowsSt === null ? <Loading /> : rows.length === 0 ? <Empty title="Sin contratos" hint="Un mantenimiento cada seis meses es trabajo que vuelve solo; el sistema abre el ticket cuando toca." /> : (
           <table className="table">
             <thead><tr><th>Número</th><th>Contrato</th><th>Cliente</th><th>Cada</th><th>Última</th><th>Próxima</th>{verCostos && <th className="num">Monto</th>}<th /></tr></thead>
             <tbody>{rows.map((c) => (

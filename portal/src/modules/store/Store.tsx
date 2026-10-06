@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { Blocks } from "./Blocks";
 import { GalleryField, ImageField } from "../../ui/MediaPicker";
 
@@ -26,7 +26,8 @@ const LABELS: Record<string, string> = { hero: "Portada (hero)", text: "Texto", 
 export default function Store() {
   const { toast } = useSession();
   const [cfg, setCfg] = useState<Cfg | null>(null);
-  const [pages, setPages] = useState<Page[]>([]);
+  const [pagesSt, setPages] = useState<Page[] | null>(null); // null = cargando
+  const pages = pagesSt ?? [];
   const [sel, setSel] = useState<Page | null>(null);
   const [newPage, setNewPage] = useState<{ slug: string; title: string } | null>(null);
   const [add, setAdd] = useState(false);
@@ -91,7 +92,7 @@ export default function Store() {
       )}
 
       <Card title="Páginas y bloques" flush extra={<button className="btn btn--crimson btn--sm" onClick={() => setNewPage({ slug: "", title: "" })}><Icon d={I.plus} />Nueva página</button>}>
-        {pages.length === 0 ? <Empty hint="Creá la página de inicio y armala con bloques." /> : (
+        {pagesSt === null ? <Loading /> : pages.length === 0 ? <Empty hint="Creá la página de inicio y armala con bloques." /> : (
           <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", minHeight: 420 }}>
             <div style={{ borderRight: "1px solid var(--hair)", padding: 10, display: "flex", flexDirection: "column", gap: 4 }}>
               {pages.map((p) => (

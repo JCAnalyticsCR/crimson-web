@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtDate, fmtMoney, parseTs } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { Lookup, searchProducts } from "../../ui/Lookup";
 
 type Line = { id?: number; product_id: number | null; name: string; quantity: string; unit_cost: string };
@@ -22,7 +22,8 @@ const REASON: Record<string, string> = { proyecto: "Materiales de proyecto", sto
 
 export default function Purchases() {
   const { toast, allows } = useSession();
-  const [rows, setRows] = useState<Req[]>([]);
+  const [rowsSt, setRows] = useState<Req[] | null>(null); // null = cargando
+  const rows = rowsSt ?? [];
   const [open, setOpen] = useState<Req | null>(null);
   const [nuevo, setNuevo] = useState<{ supplier_id: string; notes: string; lines: Line[] } | null>(null);
   const [suppliers, setSuppliers] = useState<Named[]>([]);
@@ -61,7 +62,7 @@ export default function Purchases() {
         </div>
       </div>
       <Card flush>
-        {rows.length === 0 ? <Empty title="Nada por comprar" hint="Cuando a un proyecto le falte material o el inventario baje del mínimo, la solicitud aparece aquí." /> : (
+        {rowsSt === null ? <Loading /> : rows.length === 0 ? <Empty title="Nada por comprar" hint="Cuando a un proyecto le falte material o el inventario baje del mínimo, la solicitud aparece aquí." /> : (
           <table className="table">
             <thead><tr><th>Número</th><th>Motivo</th><th>Proveedor</th><th>Proyecto</th><th className="num">Líneas</th>{verCostos && <th className="num">Costo</th>}<th>Estado</th><th>Creada</th><th /></tr></thead>
             <tbody>{rows.map((r) => (

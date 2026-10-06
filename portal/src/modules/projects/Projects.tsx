@@ -4,12 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney, openFile } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Badge, Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { ArchiveActions } from "../../ui/ArchiveActions";
 
 type Eco = {
   price: string; cost_planned: string; cost_materials: string; cost_labor: string; cost_travel: string; cost_extra: string;
-  cost_real: string; profit: string; margin_real: number; margin_planned: number; hours: number;
+  cost_real: string; profit: string | null; margin_real: number | null; margin_planned: number; hours: number;
+  sin_costos?: boolean; provisional?: boolean; aviso?: string | null;
 };
 type Project = {
   id: number; number: string; name: string; status: string; customer_id: number | null; customer: string | null; site: string | null;
@@ -34,7 +35,8 @@ export default function Projects() {
 
 function List() {
   const { allows } = useSession();
-  const [rows, setRows] = useState<Project[]>([]);
+  const [rowsSt, setRows] = useState<Project[] | null>(null); // null = cargando
+  const rows = rowsSt ?? [];
   const [status, setStatus] = useState("activos");
   const verPlata = allows("catalog.costos");
 
@@ -52,14 +54,14 @@ function List() {
         </div>
       </div>
       <Card flush>
-        {rows.length === 0 ? <Empty title="Sin proyectos" hint="Una cotización aprobada se convierte en proyecto con un clic, desde la cotización." /> : (
+        {rowsSt === null ? <Loading /> : rows.length === 0 ? <Empty title="Sin proyectos" hint="Una cotización aprobada se convierte en proyecto con un clic, desde la cotización." /> : (
           <table className="table">
             <thead><tr><th>Número</th><th>Proyecto</th><th>Cliente</th><th>Órdenes</th>{verPlata && <><th className="num">Venta</th><th className="num">Margen real</th></>}<th>Estado</th><th /></tr></thead>
             <tbody>{rows.map((p) => (
               <tr key={p.id}>
                 <td className="mono muted">{p.number}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted">{p.customer || "—"}</td>
                 <td className="mono muted">{p.orders_done}/{p.orders_total}</td>
-                {verPlata && <><td className="num money">{fmtMoney(p.economics?.price)}</td><td className="num mono" style={{ color: (p.economics?.margin_real ?? 0) < 15 ? "var(--bad)" : "var(--ok)" }}>{p.economics ? `${p.economics.margin_real.toFixed(1)}%` : "—"}</td></>}
+                {verPlata && <><td className="num money">{fmtMoney(p.economics?.price)}</td><td className="num mono" title={p.economics?.aviso || undefined} style={{ color: p.economics?.margin_real == null || p.economics.provisional ? "var(--text-3)" : p.economics.margin_real < 15 ? "var(--bad)" : "var(--ok)" }}>{!p.economics ? "—" : p.economics.margin_real == null ? `${p.economics.margin_planned.toFixed(1)}% cotizado` : `${p.economics.margin_real.toFixed(1)}%${p.economics.provisional ? " (provisional)" : ""}`}</td></>}
                 <td><span className={`badge badge--${PROJECT_STATUS[p.status]?.tone || "muted"}`}>{PROJECT_STATUS[p.status]?.label || p.status}</span></td>
                 <td className="num"><Link className="btn btn--ghost btn--sm" to={`/proyectos/${p.id}`}>Abrir</Link></td>
               </tr>
@@ -75,7 +77,8 @@ function Detail({ id }: { id: number }) {
   const { toast, allows } = useSession();
   const nav = useNavigate();
   const [p, setP] = useState<Project | null>(null);
-  const [req, setReq] = useState<Requirement[]>([]);
+  const [reqSt, setReq] = useState<Requirement[] | null>(null); // null = cargando
+  const req = reqSt ?? [];
   const [edit, setEdit] = useState<{ status: string; cost_labor: string; cost_travel: string; cost_extra: string; end_date: string; notes: string } | null>(null);
   const verPlata = allows("catalog.costos");
 
@@ -131,9 +134,11 @@ function Detail({ id }: { id: number }) {
       {e && verPlata && (
         <div className="eco">
           <div className="eco__box"><span className="meta">Venta</span><b className="money">{fmtMoney(e.price)}</b></div>
-          <div className="eco__box"><span className="meta">Costo real</span><b className="money">{fmtMoney(e.cost_real)}</b></div>
-          <div className={`eco__box ${Number(e.profit) >= 0 ? "is-good" : "is-bad"}`}><span className="meta">Utilidad</span><b className="money">{fmtMoney(e.profit)}</b></div>
-          <div className={`eco__box ${e.margin_real >= e.margin_planned - 5 ? "is-good" : "is-bad"}`}><span className="meta">Margen real · cotizado {e.margin_planned.toFixed(1)}%</span><b>{e.margin_real.toFixed(1)}%</b></div>
+          {/* sin costos o sin cerrar: el real es provisional y manda el cotizado (nunca 100 % como definitivo) */}
+          <div className="eco__box"><span className="meta">Costo real{e.provisional ? " · provisional" : ""}</span><b className="money">{fmtMoney(e.cost_real)}</b></div>
+          <div className={`eco__box ${e.profit == null || e.provisional ? "" : Number(e.profit) >= 0 ? "is-good" : "is-bad"}`}><span className="meta">Utilidad{e.provisional ? " · provisional" : ""}</span><b className="money">{e.profit == null ? "—" : fmtMoney(e.profit)}</b></div>
+          <div className="eco__box"><span className="meta">Margen presupuestado</span><b>{e.margin_planned.toFixed(1)}%</b></div>
+          <div className={`eco__box ${e.margin_real == null || e.provisional ? "" : e.margin_real >= e.margin_planned - 5 ? "is-good" : "is-bad"}`}><span className="meta">Margen real{e.provisional ? " · provisional" : ""}</span><b>{e.margin_real == null ? "—" : `${e.margin_real.toFixed(1)}%`}</b>{e.aviso && <small className="muted" style={{ display: "block", fontSize: 12 }}>{e.aviso}</small>}</div>
           <div className="eco__box"><span className="meta">Horas de campo</span><b>{e.hours}</b></div>
         </div>
       )}
@@ -168,7 +173,7 @@ function Detail({ id }: { id: number }) {
         flush
         extra={faltantes.length > 0 && allows("purchases.crear") ? <button className="btn btn--crimson btn--sm" onClick={pedirMateriales}><Icon d={I.box} />Solicitar {faltantes.length} faltante{faltantes.length !== 1 ? "s" : ""}</button> : undefined}
       >
-        {req.length === 0 ? <p className="muted" style={{ fontSize: 13, padding: "0 18px 14px" }}>Sin materiales planificados en las órdenes.</p> : (
+        {reqSt === null ? <Loading /> : req.length === 0 ? <p className="muted" style={{ fontSize: 13, padding: "0 18px 14px" }}>Sin materiales planificados en las órdenes.</p> : (
           <table className="table">
             <thead><tr><th>Material</th><th className="num">Planificado</th><th className="num">Usado</th><th className="num">En bodega</th><th className="num">Hay que comprar</th></tr></thead>
             <tbody>{req.map((r) => (

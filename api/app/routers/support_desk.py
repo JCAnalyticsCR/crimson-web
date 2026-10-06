@@ -16,7 +16,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
@@ -45,7 +45,7 @@ from ..services.totals import d
 
 router = APIRouter(tags=["soporte"])
 
-OPEN_STATES = ("nuevo", "asignado", "en_proceso", "esperando_cliente")
+OPEN_STATES = slasvc.ABIERTOS  # una sola definicion (services/sla.py)
 # Los SLA ya no viven aqui: salen de services/sla.py (contrato > ajustes de la empresa > defecto).
 # SLA_HORAS queda como el defecto de primera respuesta por compatibilidad con quien lo lea.
 SLA_HORAS = {k: v["respuesta"] for k, v in slasvc.SLA_DEFECTO.items()}
@@ -70,10 +70,8 @@ def _out(db: Session, t: SupportTicket, full: bool = True) -> dict:
     c = db.get(Customer, t.customer_id) if t.customer_id else None
     u = db.get(User, t.assigned_to) if t.assigned_to else None
     a = db.get(CustomerAsset, t.asset_id) if t.asset_id else None
-    ahora = datetime.now(UTC)
-    abierto = t.status in OPEN_STATES
-    vencido = bool(t.due_at and not t.first_reply_at and _aware(t.due_at) < ahora and abierto)
-    resolucion_vencida = bool(t.resolve_due_at and not t.resolved_at and _aware(t.resolve_due_at) < ahora and abierto)
+    venc = slasvc.vencimientos(t)
+    vencido, resolucion_vencida = venc["respuesta"], venc["resolucion"]
     s = t.sla or {}
     out = {
         "id": t.id,
@@ -100,6 +98,7 @@ def _out(db: Session, t: SupportTicket, full: bool = True) -> dict:
         "resolve_due_at": t.resolve_due_at,
         "sla_vencido": vencido,
         "resolucion_vencida": resolucion_vencida,
+        "fuera_de_tiempo": vencido or resolucion_vencida,
         # que SLA aplico y de donde salio, para mostrarlo en el ticket
         "sla": {
             "respuesta_h": s.get("respuesta"),
@@ -155,6 +154,23 @@ class TicketIn(BaseModel):
     tags: list = Field(default_factory=list)
 
 
+def ticket_scope(p: Principal, mine: bool = False) -> list:
+    """Tickets que esta persona puede ver: todos con support_desk.ver_todo, si no los suyos."""
+    out = [SupportTicket.tenant_id == p.tenant.id]
+    if mine or not p.can("support_desk", "ver_todo"):
+        out.append(or_(SupportTicket.assigned_to == p.user.id, SupportTicket.opened_by == p.user.id))
+    return out
+
+
+PENDIENTES_SOPORTE = ("abiertos", "fuera_de_tiempo")
+
+
+def soporte_resumen(db: Session, p: Principal) -> dict[str, int]:
+    """Lo que cuentan el inicio y la pantalla de tickets: mismo alcance, misma definicion (services/sla.py)."""
+    rows = db.scalars(select(SupportTicket).where(*ticket_scope(p), SupportTicket.status.in_(slasvc.ABIERTOS))).all()
+    return slasvc.resumen(rows)
+
+
 @router.get("/tickets")
 def tickets(
     status: str | None = None,
@@ -162,13 +178,16 @@ def tickets(
     customer_id: int | None = None,
     mine: bool = False,
     q: str | None = None,
+    pendiente: str | None = None,
     limit: int = Query(100, le=300),
     p: Principal = Depends(require("support_desk", "ver")),
     db: Session = Depends(get_db),
 ):
-    stmt = select(SupportTicket).where(SupportTicket.tenant_id == p.tenant.id)
-    if status == "abiertos":
-        stmt = stmt.where(SupportTicket.status.in_(OPEN_STATES))
+    if pendiente and pendiente not in PENDIENTES_SOPORTE:
+        raise HTTPException(422, "Filtro de pendientes desconocido")
+    stmt = select(SupportTicket).where(*ticket_scope(p, mine))
+    if status == "abiertos" or pendiente:
+        stmt = stmt.where(SupportTicket.status.in_(slasvc.ABIERTOS))
     elif status:
         stmt = stmt.where(SupportTicket.status == status)
     if kind:
@@ -178,9 +197,12 @@ def tickets(
     if q:
         like = f"%{q}%"
         stmt = stmt.where(or_(SupportTicket.subject.ilike(like), SupportTicket.number.ilike(like)))
-    rows = db.scalars(stmt.order_by(SupportTicket.id.desc()).limit(limit)).all()
-    if mine or not p.can("support_desk", "ver_todo"):
-        rows = [t for t in rows if t.assigned_to == p.user.id or t.opened_by == p.user.id]
+    stmt = stmt.order_by(SupportTicket.id.desc())
+    if pendiente == "fuera_de_tiempo":
+        # el vencimiento se calcula en Python (mismo criterio que el conteo); sin limite para no perder filas
+        rows = [t for t in db.scalars(stmt) if slasvc.fuera_de_tiempo(t)][:limit]
+    else:
+        rows = db.scalars(stmt.limit(limit)).all()
     return [_out(db, t, full=False) for t in rows]
 
 
@@ -327,7 +349,7 @@ def ticket_meta(p: Principal = Depends(require("support_desk", "ver")), db: Sess
             select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(("admin", "supervisor", "tecnico")))
         )
     ]
-    abiertos = db.scalar(select(func.count()).select_from(SupportTicket).where(SupportTicket.tenant_id == p.tenant.id, SupportTicket.status.in_(OPEN_STATES)))
+    res = soporte_resumen(db, p)
     return {
         "kinds": ["soporte", "garantia", "mantenimiento", "visita", "instalacion", "consulta"],
         "states": ["nuevo", "asignado", "en_proceso", "esperando_cliente", "resuelto", "cerrado"],
@@ -336,7 +358,8 @@ def ticket_meta(p: Principal = Depends(require("support_desk", "ver")), db: Sess
         "sla_horas": {k: v["respuesta"] for k, v in slasvc.sla_tenant(p.tenant).items()},
         "sla": slasvc.sla_tenant(p.tenant),
         "agents": agentes,
-        "abiertos": abiertos,
+        "abiertos": res["abiertos"],
+        "fuera_de_tiempo": res["fuera_de_tiempo"],
         "can_see_all": p.can("support_desk", "ver_todo"),
     }
 

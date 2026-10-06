@@ -1,8 +1,8 @@
 /* Pagos: listado de transacciones + cierre diario del periodo (plan 3.7/5.3). */
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtMoney, type Payment } from "../../lib/api";
-import { Badge, Card, Empty, I, Icon } from "../../ui/components";
+import { Badge, Card, Empty, I, Icon, Loading } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
 import { useSession } from "../../app/session";
 
@@ -10,7 +10,8 @@ type Cierre = { columns: string[]; rows: (string | number)[][]; totals: { total:
 
 export default function Payments() {
   const { allows } = useSession();
-  const [items, setItems] = useState<(Payment & { invoice_id?: number })[]>([]);
+  const nav = useNavigate();
+  const [items, setItems] = useState<Payment[] | null>(null);
   const [cierre, setCierre] = useState<Cierre | null>(null);
   const [range, setRange] = useState({ from: new Date(new Date().setDate(1)).toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) });
   const load = () => { api<Payment[]>("/payments?limit=100").then(setItems); api<Cierre>(`/reports/cierre?from=${range.from}&to=${range.to}`).then(setCierre); };
@@ -29,7 +30,7 @@ export default function Payments() {
       </div>
       <div className="grid-2">
         <Card title="Cierre del periodo por método" flush extra={cierre?.totals && <span className="money" style={{ fontWeight: 700 }}>{fmtMoney(cierre.totals.total)}</span>}>
-          {!cierre || cierre.rows.length === 0 ? <Empty hint="Los cobros confirmados del periodo se agrupan aquí por día y método." /> : (
+          {!cierre ? <Loading /> : cierre.rows.length === 0 ? <Empty hint="Los cobros confirmados del periodo se agrupan aquí por día y método." /> : (
             <table className="table"><thead><tr><th>Fecha</th><th>Método</th><th>Divisa</th><th className="num">Monto</th><th className="num">Pagos</th></tr></thead>
               <tbody>{cierre.rows.map((r, i) => <tr key={i}><td className="muted">{fmtDate(String(r[0]))}</td><td style={{ textTransform: "capitalize" }}>{r[1]}</td><td>{r[2]}</td><td className="num money">{fmtMoney(r[3], String(r[2]))}</td><td className="num mono">{r[4]}</td></tr>)}</tbody></table>
           )}
@@ -43,9 +44,22 @@ export default function Payments() {
         </Card>
       </div>
       <Card title="Transacciones recientes" flush>
-        {items.length === 0 ? <Empty hint="Registrá un pago desde una factura o compartí un enlace de pago." /> : (
-          <table className="table"><thead><tr><th>Fecha</th><th>Factura</th><th>Método</th><th>Tipo</th><th>Referencia</th><th>Proveedor</th><th className="num">Monto</th><th>Estado</th></tr></thead>
-            <tbody>{items.map((p) => <tr key={p.id}><td className="muted">{fmtDate(p.paid_at)}</td><td>{p.invoice_id ? <Link className="row-link mono" to={`/facturas/${p.invoice_id}`}>#{p.invoice_id}</Link> : "—"}</td><td style={{ textTransform: "capitalize" }}>{p.method}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.kind}</td><td className="mono muted">{p.external_ref || "—"}</td><td className="muted">{p.provider}</td><td className="num money">{fmtMoney(p.amount, p.currency)}</td><td><Badge status={p.status} /></td></tr>)}</tbody></table>
+        {items === null ? <Loading /> : items.length === 0 ? <Empty hint="Registrá un pago desde una factura o compartí un enlace de pago." /> : (
+          <table className="table"><thead><tr><th>Fecha</th><th>Factura</th><th>Cliente</th><th>Método</th><th>Tipo</th><th>Referencia</th><th>Proveedor</th><th className="num">Monto</th><th>Estado</th></tr></thead>
+            <tbody>{items.map((p) => {
+              // toda la fila abre la factura en la misma pestaña
+              const go = p.invoice_id ? () => nav(`/facturas/${p.invoice_id}`) : undefined;
+              return (
+                <tr key={p.id} onClick={go} style={go ? { cursor: "pointer" } : undefined}>
+                  <td className="muted">{fmtDate(p.paid_at)}</td>
+                  <td>{p.invoice_id ? <Link className="row-link mono" to={`/facturas/${p.invoice_id}`} onClick={(e) => e.stopPropagation()}>{p.invoice_number || `#${p.invoice_id}`}</Link> : "—"}</td>
+                  <td>{p.customer || "—"}</td>
+                  <td style={{ textTransform: "capitalize" }}>{p.method}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.kind}</td>
+                  <td className="mono muted">{p.external_ref || "—"}</td><td className="muted">{p.provider}</td>
+                  <td className="num money">{fmtMoney(p.amount, p.currency)}</td><td><Badge status={p.status} /></td>
+                </tr>
+              );
+            })}</tbody></table>
         )}
       </Card>
     </>

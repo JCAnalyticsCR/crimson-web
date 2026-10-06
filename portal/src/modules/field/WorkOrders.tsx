@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, parseTs } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { Lookup, searchCustomers, searchProducts } from "../../ui/Lookup";
 import { PhotoStrip } from "../../ui/MediaPicker";
 import { ArchiveActions } from "../../ui/ArchiveActions";
@@ -43,7 +43,8 @@ export default function WorkOrders() {
   const { toast, allows, me } = useSession();
   const [params, setParams] = useSearchParams();
   const [day, setDay] = useState<Today | null>(null);
-  const [all, setAll] = useState<Order[]>([]);
+  const [allSt, setAll] = useState<Order[] | null>(null); // null = cargando
+  const all = allSt ?? [];
   const [tab, setTab] = useState<"dia" | "todas">("dia");
   const [open, setOpen] = useState<Order | null>(null);
   const [form, setForm] = useState<(typeof blank & { id?: number }) | null>(null);
@@ -135,7 +136,7 @@ export default function WorkOrders() {
         )
       ) : (
         <Card flush>
-          {all.length === 0 ? <Empty hint="Cada visita e instalación se programa como orden de trabajo y deja su evidencia." /> : (
+          {allSt === null ? <Loading /> : all.length === 0 ? <Empty hint="Cada visita e instalación se programa como orden de trabajo y deja su evidencia." /> : (
             <table className="table">
               <thead><tr><th>Número</th><th>Trabajo</th><th>Cliente</th><th>Proyecto</th><th>Técnico</th><th>Programada</th><th>Estado</th><th /></tr></thead>
               <tbody>{all.map((o) => (

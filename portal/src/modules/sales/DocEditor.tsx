@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, type Customer, type Invoice, type Line, type Product, type Quote } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Badge, Field, I, Icon, Modal } from "../../ui/components";
+import { Badge, Field, I, Icon, Loading, Modal } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
 
 type Preview = { subtotal: string; discount_total: string; tax_total: string; total: string; lines: { subtotal: string; tax_amount: string; total: string; unit_price: string; name: string; tax_rate: string }[] };
@@ -45,9 +45,10 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   }), [doc, lines]);
 
   useEffect(() => {
+    if (!isNew && doc.id == null) return; // auditA: sin documento cargado no hay totales que calcular (evita ₡0)
     const t = setTimeout(() => { api<Preview>("/documents/preview", { method: "POST", json: payload }).then(setPrev).catch(() => {}); }, 250);
     return () => clearTimeout(t);
-  }, [payload]);
+  }, [payload, isNew, doc.id]);
 
   const setLine = (i: number, patch: Partial<Line>) => setLines((ls) => ls.map((l, k) => (k === i ? { ...l, ...patch } : l)));
   const addProducts = (ps: Product[]) => { setLines((ls) => [...ls, ...ps.map((p) => ({ ...blankLine(), product_id: p.id, code: p.code, name: p.name, unit: p.unit, unit_price: String(p.price), tax_rate: String(p.tax_rate ?? 13) }))]); setPick(false); };
@@ -117,6 +118,9 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
       nav(`/proyectos/${pr.id}`);
     } catch (e) { toast(e instanceof Error ? e.message : "No se pudo crear el proyecto", "bad"); }
   };
+
+  // auditA: mientras llega el documento y sus totales, "Cargando…" en vez de "undefined" y total ₡0
+  if (!isNew && (doc.id == null || !prev)) return <Loading />;
 
   return (
     <>

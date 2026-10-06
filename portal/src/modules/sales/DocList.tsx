@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney, type DocListItem } from "../../lib/api";
-import { Badge, Card, Empty, I, Icon } from "../../ui/components";
+import { Badge, Card, Empty, I, Icon, Loading } from "../../ui/components";
 import { useSession } from "../../app/session";
 
 /* Filtros que llegan desde "Acciones pendientes" del inicio (?pendiente=<clave>): misma definicion que el conteo. */
@@ -68,7 +68,7 @@ export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {
           <span className="muted" style={{ fontSize: 13 }}>{q ? `Resultados para “${q}”` : "Modificadas recientemente"}</span>
           {!pendiente && <div className="tabs">{FILTERS[kind].map((f) => <button key={f.key} className={status === f.key ? "is-active" : ""} onClick={() => setStatus(f.key)}>{f.label}</button>)}</div>}
         </div>
-        {items.length === 0 && !loading ? (
+        {items.length === 0 && loading ? <Loading /> : items.length === 0 ? (
           <Empty hint={isQ ? "Creá una cotización y enviala por WhatsApp o correo." : "Las facturas nacen de una cotización convertida o directo."} action={<Link className="btn btn--crimson btn--sm" to={`${base}/nueva`}>Crear</Link>} />
         ) : (
           <table className="table">

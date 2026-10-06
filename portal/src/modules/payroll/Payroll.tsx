@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Badge, Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
 
 /* ---------- tipos ---------- */
@@ -83,7 +83,8 @@ export default function Payroll() {
 /* ========================= TAB: Planillas ========================= */
 function TabRuns() {
   const { toast, allows } = useSession();
-  const [runs, setRuns] = useState<RunListItem[]>([]);
+  const [runsSt, setRuns] = useState<RunListItem[] | null>(null); // null = cargando
+  const runs = runsSt ?? [];
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [newModal, setNewModal] = useState(false);
   const [newForm, setNewForm] = useState<{ period_start: string; period_end: string; frequency: "mensual" | "quincenal"; notes: string }>(() => {
@@ -141,7 +142,7 @@ function TabRuns() {
       <Card title="Corridas de planilla" flush extra={
         <button className="btn btn--crimson btn--sm" onClick={() => setNewModal(true)}><Icon d={I.plus} />Nueva planilla</button>
       }>
-        {runs.length === 0
+        {runsSt === null ? <Loading /> : runs.length === 0
           ? <Empty hint="Generá la primera planilla para calcular salarios, deducciones CCSS e impuesto al salario." />
           : (
             <table className="table">
@@ -352,7 +353,8 @@ function RunDetailPanel({ detail, onClose, onApprove, onDelete, onPay, onLineUpd
 /* ========================= TAB: Colaboradores ========================= */
 function TabEmployees() {
   const { toast } = useSession();
-  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [employeesSt, setEmployees] = useState<Employee[] | null>(null); // null = cargando
+  const employees = employeesSt ?? [];
   const [edit, setEdit] = useState<(Omit<Employee, "id"> & { id?: number }) | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -378,7 +380,7 @@ function TabEmployees() {
       <Card title="Colaboradores" flush extra={
         <button className="btn btn--crimson btn--sm" onClick={() => setEdit({ ...blankEmp })}><Icon d={I.plus} />Agregar colaborador</button>
       }>
-        {employees.length === 0
+        {employeesSt === null ? <Loading /> : employees.length === 0
           ? <Empty hint="Agregá los colaboradores para poder calcular planillas." />
           : (
             <table className="table">

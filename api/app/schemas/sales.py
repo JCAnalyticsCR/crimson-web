@@ -109,6 +109,9 @@ class PaymentIn(BaseModel):
 class PaymentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    invoice_id: int | None = None
+    invoice_number: str | None = None
+    customer: str | None = None
     method: str
     kind: str
     currency: str

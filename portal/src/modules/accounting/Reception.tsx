@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Badge, Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
 
 type Rec = { id: number; clave: string; consecutive: string | null; issuer_name: string | null; issuer_id: string | null; issue_date: string | null; currency: string; subtotal: string; tax_total: string; total: string; iva_condition: string; action: string | null; hacienda_status: string; expense_id: number | null; created_at: string; has_response: boolean };
@@ -10,7 +10,8 @@ type Cat = { id: number; name: string };
 
 export default function Reception() {
   const { toast } = useSession();
-  const [items, setItems] = useState<Rec[]>([]);
+  const [itemsSt, setItems] = useState<Rec[] | null>(null); // null = cargando
+  const items = itemsSt ?? [];
   const [cats, setCats] = useState<Cat[]>([]);
   const [sel, setSel] = useState<Rec | null>(null);
   const [form, setForm] = useState({ action: "aceptada", iva_condition: "credito", category_id: "", create_expense: true });
@@ -40,7 +41,7 @@ export default function Reception() {
         </div>
       </div>
       <Card flush extra={<span className="meta">facturas electrónicas de proveedores</span>}>
-        {items.length === 0 ? <Empty hint="Cargá el XML que te envía el proveedor: se registra, se responde a Hacienda y se crea el gasto con su IVA acreditable." /> : (
+        {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Cargá el XML que te envía el proveedor: se registra, se responde a Hacienda y se crea el gasto con su IVA acreditable." /> : (
           <table className="table">
             <thead><tr><th>Emisor</th><th>Fecha</th><th>Consecutivo</th><th className="num">Subtotal</th><th className="num">IVA</th><th className="num">Total</th><th>IVA acreditable</th><th>Respuesta</th><th /></tr></thead>
             <tbody>{items.map((r) => (

@@ -452,9 +452,11 @@ def rentabilidad(db: Session, tid: int, a: date, b: date) -> Report:
 
     # Archivar un trabajo terminado es ordenar, no borrarlo: su margen sigue contando. Solo la papelera sale.
     fx = today_fx(db, "USD")[0]
-    rows, price_total, cost_total = [], Decimal(0), Decimal(0)
+    rows, price_total, cost_total, provisionales = [], Decimal(0), Decimal(0), 0
     cerrados = db.scalars(
-        select(Project).where(Project.tenant_id == tid, Project.status.in_(("terminado", "entregado", "facturado")), Project.trashed_at.is_(None)).order_by(Project.id)
+        select(Project)
+        .where(Project.tenant_id == tid, Project.status.in_(("terminado", "entregado", "facturado")), Project.trashed_at.is_(None))
+        .order_by(Project.id)
     ).all()
     for pr in cerrados:
         cierre = pr.end_date or local_date(pr.delivered_at) or local_date(pr.created_at)
@@ -477,11 +479,16 @@ def rentabilidad(db: Session, tid: int, a: date, b: date) -> Report:
                 e["margin_real"],
                 e["margin_planned"],
                 e["hours"],
+                e["aviso"] or "",
             ]
         )
+        if e["sin_costos"]:
+            provisionales += 1  # sin costos no es ganancia: fuera de los totales
+            continue
         price_total += Decimal(str(e["price"] or 0))
         cost_total += Decimal(str(e["cost_real"]))
-    rows.sort(key=lambda r: r[11])  # primero los que menos dejaron: ahi esta lo que hay que corregir
+    # primero los que menos dejaron (ahi esta lo que hay que corregir); los provisionales al final
+    rows.sort(key=lambda r: (r[11] is None, r[11] or 0))
     return Report(
         "rentabilidad",
         "Rentabilidad por proyecto",
@@ -500,9 +507,10 @@ def rentabilidad(db: Session, tid: int, a: date, b: date) -> Report:
             "Margen real %",
             "Margen cotizado %",
             "Horas",
+            "Provisional",
         ],
         rows,
-        {"Venta": price_total, "Costo real": cost_total, "Utilidad": price_total - cost_total},
+        {"Venta": price_total, "Costo real": cost_total, "Utilidad": price_total - cost_total, "Provisionales sin costos (fuera del total)": provisionales},
     )
 
 
@@ -515,12 +523,18 @@ def rentabilidad_tipo(db: Session, tid: int, a: date, b: date) -> Report:
 
     fx = today_fx(db, "USD")[0]
     por_tipo: dict[str, dict] = {}
-    cerrados = db.scalars(select(Project).where(Project.tenant_id == tid, Project.status.in_(("terminado", "entregado", "facturado")), Project.trashed_at.is_(None))).all()
+    provisionales = 0
+    cerrados = db.scalars(
+        select(Project).where(Project.tenant_id == tid, Project.status.in_(("terminado", "entregado", "facturado")), Project.trashed_at.is_(None))
+    ).all()
     for pr in cerrados:
         cierre = pr.end_date or local_date(pr.delivered_at) or local_date(pr.created_at)
         if not (a <= cierre <= b):
             continue
         e = economics(db, pr, fx)
+        if e["sin_costos"]:
+            provisionales += 1  # sin costos registrados no cuenta como ganancia
+            continue
         fila = por_tipo.setdefault(project_solution(db, pr), {"n": 0, "venta": Decimal(0), "costo": Decimal(0), "horas": 0.0})
         fila["n"] += 1
         fila["venta"] += Decimal(str(e["price"] or 0))
@@ -538,7 +552,13 @@ def rentabilidad_tipo(db: Session, tid: int, a: date, b: date) -> Report:
         "Rentabilidad por tipo de solución",
         ["Solución", "Proyectos", "Venta", "Costo real", "Utilidad", "Margen %", "Horas"],
         rows,
-        {"Venta": venta, "Costo real": costo, "Utilidad": venta - costo, "Margen %": _margen(venta, costo)},
+        {
+            "Venta": venta,
+            "Costo real": costo,
+            "Utilidad": venta - costo,
+            "Margen %": _margen(venta, costo),
+            "Provisionales sin costos (fuera del total)": provisionales,
+        },
     )
 
 

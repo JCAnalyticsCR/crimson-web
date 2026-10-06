@@ -57,6 +57,9 @@ def _project(db: Session, pid: int, p: Principal) -> Project:
     return pr
 
 
+CLOSED_STATES = ("terminado", "entregado", "facturado")
+
+
 def consumed_cost(db: Session, pr: Project, fx: Decimal | None = None) -> Decimal:
     """Costo de los equipos y materiales realmente usados en las órdenes de trabajo."""
     total = Decimal(0)
@@ -98,6 +101,16 @@ def economics(db: Session, pr: Project, fx: Decimal | None = None) -> dict:
     fx = fx if fx is not None else today_fx(db, "USD")[0]
     materials = consumed_cost(db, pr, fx)
     real = materials + d(pr.cost_labor) + d(pr.cost_travel) + d(pr.cost_extra)
+    # sin costos registrados el "margen real" daria 100 %: no es ganancia, es que falta registrar.
+    # Mientras falten costos o el proyecto no este cerrado, el real es provisional y manda el cotizado.
+    sin_costos = real <= 0
+    cerrado = pr.status in CLOSED_STATES
+    if sin_costos:
+        aviso = "Faltan costos por registrar"
+    elif not cerrado:
+        aviso = "Proyecto en curso: el margen real puede cambiar"
+    else:
+        aviso = None
     return {
         "price": pr.price,
         "cost_planned": pr.cost_planned,
@@ -106,9 +119,12 @@ def economics(db: Session, pr: Project, fx: Decimal | None = None) -> dict:
         "cost_travel": pr.cost_travel,
         "cost_extra": pr.cost_extra,
         "cost_real": real.quantize(Decimal("0.01")),
-        "profit": (d(pr.price) - real).quantize(Decimal("0.01")),
-        "margin_real": pricing.margin_of(d(pr.price), real),
+        "profit": None if sin_costos else (d(pr.price) - real).quantize(Decimal("0.01")),
+        "margin_real": None if sin_costos else pricing.margin_of(d(pr.price), real),
         "margin_planned": pricing.margin_of(d(pr.price), d(pr.cost_planned)),
+        "sin_costos": sin_costos,
+        "provisional": sin_costos or not cerrado,
+        "aviso": aviso,
         "hours": round(sum((_hours(o.started_at, o.finished_at) or 0 for o in pr.orders), 0.0), 2),
     }
 

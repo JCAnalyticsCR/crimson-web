@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, parseTs } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Card, Empty } from "../../ui/components";
+import { Card, Empty, Loading } from "../../ui/components";
 
 type Row = {
   kind: "survey" | "project" | "opportunity" | "work_order"; kind_label: string; id: number; number: string; title: string; status: string;
@@ -68,7 +68,7 @@ export default function Archive() {
         </p>
       )}
       <Card flush>
-        {rows.length === 0 ? (
+        {!data ? <Loading /> : rows.length === 0 ? (
           <Empty title={state === "papelera" ? "La papelera está vacía" : "No hay nada archivado"} hint="Desde el detalle de un levantamiento, proyecto, oportunidad u orden de trabajo: Archivar o Mover a papelera." />
         ) : (
           <table className="table">

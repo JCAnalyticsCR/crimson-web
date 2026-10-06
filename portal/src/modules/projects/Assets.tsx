@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, fmtDate } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { Lookup, searchCustomers, searchProducts } from "../../ui/Lookup";
 
 type Asset = {
@@ -19,7 +19,8 @@ type Draft = typeof blank & { id?: number };
 export default function Assets() {
   const { toast, allows } = useSession();
   const [params] = useSearchParams();
-  const [rows, setRows] = useState<Asset[]>([]);
+  const [rowsSt, setRows] = useState<Asset[] | null>(null); // null = cargando
+  const rows = rowsSt ?? [];
   const [q, setQ] = useState("");
   const [expiring, setExpiring] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -69,7 +70,7 @@ export default function Assets() {
           <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={expiring} onChange={(e) => setExpiring(e.target.checked)} />Garantía por vencer</label>
           <button className="btn btn--ghost btn--sm" onClick={load}><Icon d={I.refresh} /></button>
         </div>
-        {rows.length === 0 ? <Empty title="Sin equipos registrados" hint="Cada cámara, grabador o control de acceso instalado queda aquí con su serie y su garantía." /> : (
+        {rowsSt === null ? <Loading /> : rows.length === 0 ? <Empty title="Sin equipos registrados" hint="Cada cámara, grabador o control de acceso instalado queda aquí con su serie y su garantía." /> : (
           <table className="table">
             <thead><tr><th>Equipo</th><th>Serie</th><th>Cliente</th><th>Ubicación</th><th>Proyecto</th><th>Instalado</th><th>Garantía</th><th /></tr></thead>
             <tbody>{rows.map((a) => (

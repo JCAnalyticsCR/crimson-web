@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Badge, Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 
 type Cust = { id: number; name: string; id_type: string; id_number: string | null; email: string | null; phone: string | null; whatsapp: string | null; currency: string; notes: string | null; address: Record<string, string> | null; active: boolean; created_at: string };
 type Ev = { at: string; kind: string; title: string; amount?: string; currency?: string; status: string | null; to?: string; id?: number; author?: string | null };
@@ -30,7 +30,8 @@ export default function CustomerDetail() {
   const nav = useNavigate();
   const { toast } = useSession();
   const [ov, setOv] = useState<Overview | null>(null);
-  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [contactsSt, setContacts] = useState<Contact[] | null>(null); // null = cargando
+  const contacts = contactsSt ?? [];
   const [note, setNote] = useState("");
   const [filter, setFilter] = useState("");
   const [contact, setContact] = useState<Contact | null>(null);
@@ -178,7 +179,7 @@ export default function CustomerDetail() {
 
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           <Card title="Contactos" flush extra={<button className="btn btn--ghost btn--sm" onClick={() => setContact({ name: "", role: "", email: "", phone: "", receives_invoices: false })}><Icon d={I.plus} />Agregar</button>}>
-            {contacts.length === 0 ? <Empty title="Sin contactos" hint="Personas de la empresa: compras, contabilidad, junta…" /> : (
+            {contactsSt === null ? <Loading /> : contacts.length === 0 ? <Empty title="Sin contactos" hint="Personas de la empresa: compras, contabilidad, junta…" /> : (
               <table className="table"><tbody>{contacts.map((k) => (
                 <tr key={k.id}>
                   <td><b>{k.name}</b>{k.receives_invoices && <span className="badge badge--info" style={{ marginLeft: 6 }}>Facturas</span>}<div className="meta" style={{ textTransform: "none" }}>{[k.role, k.email, k.phone].filter(Boolean).join(" · ")}</div></td>

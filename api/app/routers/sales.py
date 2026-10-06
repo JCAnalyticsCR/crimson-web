@@ -404,7 +404,16 @@ def payments(limit: int = Query(20, le=100), p: Principal = Depends(require("pay
     q = select(Payment).where(Payment.tenant_id == p.tenant.id)
     if not p.sees_all_sales:
         q = q.where(Payment.created_by == p.user.id)
-    return db.scalars(q.order_by(Payment.id.desc()).limit(limit)).all()
+    rows = db.scalars(q.order_by(Payment.id.desc()).limit(limit)).all()
+    # el vinculo a la factura no venia en la respuesta (PaymentOut no traia invoice_id) y la columna Factura quedaba en "—"
+    out = []
+    for x in rows:
+        inv = db.get(Invoice, x.invoice_id) if x.invoice_id else None
+        item = PaymentOut.model_validate(x)
+        item.invoice_number = inv.number if inv else None
+        item.customer = _cust_name(db, inv.customer_id) if inv else None
+        out.append(item)
+    return out
 
 
 # ---------- Grupos de facturacion ----------
@@ -539,7 +548,7 @@ def _ceo_row(db: Session, p: Principal) -> dict:
     """Fila de gerencia: en 30 segundos, cómo está Crimson. Pipeline, cobros, proyectos y trabajos de la semana."""
     from datetime import timedelta
 
-    from ..models import CustomerAsset, Opportunity, Project, SupportTicket, WorkOrder
+    from ..models import CustomerAsset, Opportunity, Project, WorkOrder
     from ..routers.pipeline import OPEN_STATES
     from ..routers.projects import consumed_cost
     from ..services import pricing
@@ -558,7 +567,11 @@ def _ceo_row(db: Session, p: Principal) -> dict:
     closed = db.scalars(
         select(Project).where(Project.tenant_id == tid, Project.status.in_(("terminado", "entregado", "facturado")), Project.updated_at >= m0, live(Project))
     ).all()
-    profit = sum((d(x.price) - (consumed_cost(db, x) + d(x.cost_labor) + d(x.cost_travel) + d(x.cost_extra)) for x in closed), Decimal(0))
+    # un cerrado sin costos registrados no es ganancia: queda fuera de la utilidad del mes hasta que se registren
+    costos = {x.id: consumed_cost(db, x) + d(x.cost_labor) + d(x.cost_travel) + d(x.cost_extra) for x in closed}
+    sin_costos = [x for x in closed if costos[x.id] <= 0]
+    closed_cost = [x for x in closed if costos[x.id] > 0]
+    profit = sum((d(x.price) - costos[x.id] for x in closed_cost), Decimal(0))
     sold = d(
         db.scalar(select(func.coalesce(func.sum(Invoice.total), 0)).where(Invoice.tenant_id == tid, Invoice.status != "anulada", Invoice.issue_date >= m0))
     )
@@ -571,6 +584,11 @@ def _ceo_row(db: Session, p: Principal) -> dict:
         for a in db.scalars(select(CustomerAsset).where(CustomerAsset.tenant_id == tid, CustomerAsset.warranty_until.is_not(None)))
         if a.warranty_until and 0 <= (a.warranty_until - today).days <= 45
     ]
+    sop = None
+    if p.can("support_desk", "ver"):
+        from ..routers.support_desk import soporte_resumen
+
+        sop = soporte_resumen(db, p)
     return {
         "pipeline": pipeline,
         "pipeline_weighted": weighted.quantize(Decimal("0.01")),
@@ -578,7 +596,8 @@ def _ceo_row(db: Session, p: Principal) -> dict:
         "receivable": receivable,
         "sold_month": sold,
         "profit_month": profit.quantize(Decimal("0.01")),
-        "margin_month": pricing.margin_of(sum((d(x.price) for x in closed), Decimal(0)), sum((d(x.price) for x in closed), Decimal(0)) - profit),
+        "margin_month": pricing.margin_of(sum((d(x.price) for x in closed_cost), Decimal(0)), sum((d(x.price) for x in closed_cost), Decimal(0)) - profit),
+        "projects_without_costs": len(sin_costos),
         "projects_active": len(active),
         "projects_closed_month": len(closed),
         "jobs_open": len(jobs),
@@ -587,16 +606,6 @@ def _ceo_row(db: Session, p: Principal) -> dict:
         "quotes_sent": quotes_sent,
         "quotes_won_month": quotes_won,
         "warranties_soon": len(warranties),
-        "tickets_open": db.scalar(
-            select(func.count())
-            .select_from(SupportTicket)
-            .where(SupportTicket.tenant_id == tid, SupportTicket.status.in_(("nuevo", "asignado", "en_proceso", "esperando_cliente")))
-        ),
-        "tickets_late": sum(
-            1
-            for t in db.scalars(
-                select(SupportTicket).where(SupportTicket.tenant_id == tid, SupportTicket.status.in_(("nuevo", "asignado", "en_proceso", "esperando_cliente")))
-            )
-            if t.due_at and not t.first_reply_at and (t.due_at if t.due_at.tzinfo else t.due_at.replace(tzinfo=UTC)) < datetime.now(UTC)
-        ),
+        # misma definicion y alcance que la pantalla de tickets (support_desk.soporte_resumen)
+        **({"tickets_open": sop["abiertos"], "tickets_late": sop["fuera_de_tiempo"]} if sop else {"tickets_open": None, "tickets_late": None}),
     }

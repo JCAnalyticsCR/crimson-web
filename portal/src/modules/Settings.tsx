@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate } from "../lib/api";
 import { useSession } from "../app/session";
-import { Badge, Card, Empty, Field, I, Icon, Modal } from "../ui/components";
+import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../ui/components";
 import { ImageField } from "../ui/MediaPicker";
 import { SlaSettings } from "./support/SlaTable";
 
@@ -24,10 +24,13 @@ export default function Settings() {
   const tab = full ? params.get("tab") || "empresa" : "cuenta";
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [groups, setGroups] = useState<Group[]>([]);
-  const [banks, setBanks] = useState<Bank[]>([]);
+  const [banksSt, setBanks] = useState<Bank[] | null>(null); // null = cargando
+  const banks = banksSt ?? [];
   const [users, setUsers] = useState<Users | null>(null);
-  const [gws, setGws] = useState<Gw[]>([]);
-  const [mails, setMails] = useState<Mail[]>([]);
+  const [gwsSt, setGws] = useState<Gw[] | null>(null); // null = cargando
+  const gws = gwsSt ?? [];
+  const [mailsSt, setMails] = useState<Mail[] | null>(null); // null = cargando
+  const mails = mailsSt ?? [];
   const [company, setCompany] = useState({ name: "", legal_name: "", tax_id: "", default_currency: "CRC", sector: "", logo_url: "" });
   const [totp, setTotp] = useState<{ secret: string; otpauth_uri: string } | null>(null);
   const [code, setCode] = useState("");
@@ -161,10 +164,10 @@ export default function Settings() {
           </Card>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <Card title="Cuentas bancarias" flush extra={<button className="btn btn--ghost btn--sm" onClick={() => setBank({ name: "", bank: "", currency: "CRC", number: "", active: true })}><Icon d={I.plus} />Agregar</button>}>
-              {banks.length === 0 ? <Empty hint="Se vinculan a los pagos registrados." /> : <table className="table"><thead><tr><th>Nombre</th><th>Banco</th><th>Divisa</th><th>Número</th><th /></tr></thead><tbody>{banks.map((b) => <tr key={b.id}><td style={{ fontWeight: 600 }}>{b.name}</td><td className="muted">{b.bank || "—"}</td><td>{b.currency}</td><td className="mono muted">{b.number || "—"}</td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setBank({ id: b.id, name: b.name, bank: b.bank || "", currency: b.currency, number: b.number || "", active: b.active })}>Ver</button></td></tr>)}</tbody></table>}
+              {banksSt === null ? <Loading /> : banks.length === 0 ? <Empty hint="Se vinculan a los pagos registrados." /> : <table className="table"><thead><tr><th>Nombre</th><th>Banco</th><th>Divisa</th><th>Número</th><th /></tr></thead><tbody>{banks.map((b) => <tr key={b.id}><td style={{ fontWeight: 600 }}>{b.name}</td><td className="muted">{b.bank || "—"}</td><td>{b.currency}</td><td className="mono muted">{b.number || "—"}</td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setBank({ id: b.id, name: b.name, bank: b.bank || "", currency: b.currency, number: b.number || "", active: b.active })}>Ver</button></td></tr>)}</tbody></table>}
             </Card>
             <Card title="Pasarelas de pago" flush extra={<button className="btn btn--ghost btn--sm" onClick={() => setGw({ provider: "onvo", client_id: "", secret: "", is_primary: true, active: false, mode: "test" })}><Icon d={I.plus} />Agregar</button>}>
-              {gws.length === 0 ? <Empty hint="ONVO Pay (SINPE Móvil + tarjetas) y PayPal. El secreto se guarda cifrado y nunca vuelve al navegador." /> : <table className="table"><thead><tr><th>Pasarela</th><th>Client ID</th><th>Secreto</th><th>Modo</th><th>Estado</th><th /></tr></thead><tbody>{gws.map((g) => <tr key={g.id}><td style={{ fontWeight: 600, textTransform: "uppercase" }}>{g.provider}{g.is_primary && <span className="meta"> · principal</span>}</td><td className="mono muted">{g.client_id || "—"}</td><td className="mono muted">{g.secret_mask || "—"}</td><td className="muted">{g.mode}</td><td><Badge status={g.active ? "confirmado" : "pendiente"} /></td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setGw({ provider: g.provider, client_id: g.client_id || "", secret: "", is_primary: g.is_primary, active: g.active, mode: g.mode })}>Editar</button></td></tr>)}</tbody></table>}
+              {gwsSt === null ? <Loading /> : gws.length === 0 ? <Empty hint="ONVO Pay (SINPE Móvil + tarjetas) y PayPal. El secreto se guarda cifrado y nunca vuelve al navegador." /> : <table className="table"><thead><tr><th>Pasarela</th><th>Client ID</th><th>Secreto</th><th>Modo</th><th>Estado</th><th /></tr></thead><tbody>{gws.map((g) => <tr key={g.id}><td style={{ fontWeight: 600, textTransform: "uppercase" }}>{g.provider}{g.is_primary && <span className="meta"> · principal</span>}</td><td className="mono muted">{g.client_id || "—"}</td><td className="mono muted">{g.secret_mask || "—"}</td><td className="muted">{g.mode}</td><td><Badge status={g.active ? "confirmado" : "pendiente"} /></td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setGw({ provider: g.provider, client_id: g.client_id || "", secret: "", is_primary: g.is_primary, active: g.active, mode: g.mode })}>Editar</button></td></tr>)}</tbody></table>}
               <p className="muted" style={{ padding: "10px 18px", fontSize: 12 }}>Webhook: <span className="mono">/api/webhooks/onvo/{me?.tenant.id}</span> · firma HMAC, ventana 300 s, idempotente.</p>
             </Card>
           </div>
@@ -216,7 +219,7 @@ export default function Settings() {
       {tab === "correo" && (
         <><MailStatus onSent={() => api<Mail[]>("/settings/outbox").then(setMails)} />
         <Card title="Correos enviados" flush>
-          {mails.length === 0 ? <Empty hint="Cotizaciones, facturas, invitaciones y recordatorios enviados aparecen aquí." /> : <table className="table"><thead><tr><th>Fecha</th><th>Para</th><th>Asunto</th><th>Estado</th></tr></thead><tbody>{mails.map((m) => <tr key={m.id}><td className="muted">{fmtDate(m.created_at.slice(0, 10))}</td><td>{m.to}</td><td>{m.subject}{m.error && <div className="meta" style={{ color: "var(--bad)" }}>{m.error}</div>}</td><td><Badge status={m.status === "enviado" ? "confirmado" : m.status === "error" ? "fallido" : "pendiente"} />{m.status === "simulado" && <div className="meta">no salió</div>}</td></tr>)}</tbody></table>}
+          {mailsSt === null ? <Loading /> : mails.length === 0 ? <Empty hint="Cotizaciones, facturas, invitaciones y recordatorios enviados aparecen aquí." /> : <table className="table"><thead><tr><th>Fecha</th><th>Para</th><th>Asunto</th><th>Estado</th></tr></thead><tbody>{mails.map((m) => <tr key={m.id}><td className="muted">{fmtDate(m.created_at.slice(0, 10))}</td><td>{m.to}</td><td>{m.subject}{m.error && <div className="meta" style={{ color: "var(--bad)" }}>{m.error}</div>}</td><td><Badge status={m.status === "enviado" ? "confirmado" : m.status === "error" ? "fallido" : "pendiente"} />{m.status === "simulado" && <div className="meta">no salió</div>}</td></tr>)}</tbody></table>}
         </Card></>
       )}
 
@@ -292,7 +295,8 @@ export default function Settings() {
 type Cred = { id: number; kid: string; name: string; webhook_url: string | null; active: boolean; last_used_at: string | null; created_at: string };
 function ApiCreds() {
   const { toast } = useSession();
-  const [items, setItems] = useState<Cred[]>([]);
+  const [itemsSt, setItems] = useState<Cred[] | null>(null); // null = cargando
+  const items = itemsSt ?? [];
   const [form, setForm] = useState<{ name: string; webhook_url: string } | null>(null);
   const [created, setCreated] = useState<{ kid: string; secret: string } | null>(null);
   const load = () => api<Cred[]>("/settings/api-credentials").then(setItems);
@@ -302,7 +306,7 @@ function ApiCreds() {
   return (
     <div className="grid-2">
       <Card title="Credenciales de API" flush extra={<button className="btn btn--crimson btn--sm" onClick={() => setForm({ name: "", webhook_url: "" })}><Icon d={I.plus} />Crear</button>}>
-        {items.length === 0 ? <Empty hint="Para integrar el sitio web, un ERP o Power BI con la plataforma." /> : (
+        {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Para integrar el sitio web, un ERP o Power BI con la plataforma." /> : (
           <table className="table"><thead><tr><th>Nombre</th><th>Public key</th><th>Último uso</th><th>Estado</th><th /></tr></thead>
             <tbody>{items.map((c) => <tr key={c.id}><td style={{ fontWeight: 600 }}>{c.name}{c.webhook_url && <div className="meta" style={{ textTransform: "none" }}>{c.webhook_url}</div>}</td><td className="mono muted">{c.kid}</td><td className="muted">{c.last_used_at ? fmtDate(c.last_used_at.slice(0, 10)) : "nunca"}</td><td><Badge status={c.active ? "confirmado" : "anulada"} /></td><td className="num">{c.active && <button className="btn btn--danger btn--sm" onClick={() => revoke(c)}>Revocar</button>}</td></tr>)}</tbody></table>
         )}
@@ -389,7 +393,8 @@ type Grant = { id: number; email: string; reason: string; expires_at: string; re
 type LogRow = { at: string; action: string; entity: string; entity_id: number | null; ip: string | null };
 function SupportAccess() {
   const { toast } = useSession();
-  const [items, setItems] = useState<Grant[]>([]);
+  const [itemsSt, setItems] = useState<Grant[] | null>(null); // null = cargando
+  const items = itemsSt ?? [];
   const [form, setForm] = useState<{ email: string; hours: number; reason: string } | null>(null);
   const [link, setLink] = useState<string | null>(null);
   const [log, setLog] = useState<{ g: Grant; rows: LogRow[] } | null>(null);
@@ -405,7 +410,7 @@ function SupportAccess() {
   return (
     <div className="grid-2">
       <Card title="Accesos de soporte" flush extra={<button className="btn btn--crimson btn--sm" onClick={() => setForm({ email: "", hours: 24, reason: "" })}><Icon d={I.plus} />Conceder</button>}>
-        {items.length === 0 ? <Empty title="Sin accesos" hint="Nadie externo puede ver tu información salvo que lo autorices aquí." /> : (
+        {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty title="Sin accesos" hint="Nadie externo puede ver tu información salvo que lo autorices aquí." /> : (
           <table className="table"><thead><tr><th>Persona</th><th>Vence</th><th>Estado</th><th className="num">Acciones</th><th /></tr></thead>
             <tbody>{items.map((g) => (
               <tr key={g.id}>

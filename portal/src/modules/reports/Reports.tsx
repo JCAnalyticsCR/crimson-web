@@ -1,7 +1,7 @@
 /* Reportes: cuadricula de reportes -> vista en pantalla + descarga Excel (regla del plan 3.6). */
 import { useEffect, useState } from "react";
 import { api, fmtMoney } from "../../lib/api";
-import { Card, Empty, I, Icon } from "../../ui/components";
+import { Card, Empty, I, Icon, Loading } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
 
 type Cat = { key: string; title: string; description: string };
@@ -36,13 +36,13 @@ export default function Reports() {
         ))}
       </div>
       <Card title={rep?.title || "…"} flush extra={<span className="meta">{rep ? `${rep.from} → ${rep.to} · ${rep.rows.length} filas` : ""}{loading && <span className="spinner" style={{ display: "inline-block", marginLeft: 10, verticalAlign: "middle" }} />}</span>}>
-        {!rep || rep.rows.length === 0 ? <Empty hint="No hay datos en el periodo seleccionado." /> : (
+        {!rep && loading ? <Loading /> : !rep || rep.rows.length === 0 ? <Empty hint="No hay datos en el periodo seleccionado." /> : (
           <div style={{ overflowX: "auto" }}>
             <table className="table">
               <thead><tr>{rep.columns.map((c) => <th key={c} className={MONEY_COLS.test(c) ? "num" : ""}>{c}</th>)}</tr></thead>
               <tbody>{rep.rows.map((r, i) => <tr key={i}>{r.map((v, j) => <td key={j} className={MONEY_COLS.test(rep.columns[j]) && typeof v !== "string" ? "num money" : typeof v === "number" ? "num mono" : ""}>{v === null ? "—" : MONEY_COLS.test(rep.columns[j]) && (typeof v === "number" || /^-?\d+(\.\d+)?$/.test(String(v))) ? fmtMoney(v) : String(v)}</td>)}</tr>)}</tbody>
             </table>
-            {rep.totals && <div style={{ display: "flex", gap: 22, padding: "12px 18px", borderTop: "1px solid var(--hair)", justifyContent: "flex-end" }}>{Object.entries(rep.totals).map(([k, v]) => <span key={k} className="muted" style={{ fontSize: 13 }}>{k}: <b className="money" style={{ color: "var(--text)" }}>{k === "n" ? v : fmtMoney(v)}</b></span>)}</div>}
+            {rep.totals && <div style={{ display: "flex", gap: 22, padding: "12px 18px", borderTop: "1px solid var(--hair)", justifyContent: "flex-end" }}>{Object.entries(rep.totals).map(([k, v]) => <span key={k} className="muted" style={{ fontSize: 13 }}>{k}: <b className="money" style={{ color: "var(--text)" }}>{k === "n" || k.startsWith("Provisionales") ? v : k.includes("%") ? `${Number(v).toFixed(1)}%` : fmtMoney(v)}</b></span>)}</div>}
           </div>
         )}
       </Card>

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtDate, fmtMoney, type Customer, type Product } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Badge, Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 
 type Rec = {
   id: number; name: string; kind: "factura" | "gasto"; customer_id: number | null; customer: string | null; frequency: string; next_date: string; end_date: string | null;
@@ -22,7 +22,8 @@ const blankExpense = { description: "", subtotal: "", tax_rate: "13", category_i
 
 export default function Recurrences() {
   const { toast } = useSession();
-  const [items, setItems] = useState<Rec[]>([]);
+  const [itemsSt, setItems] = useState<Rec[] | null>(null); // null = cargando
+  const items = itemsSt ?? [];
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [cats, setCats] = useState<Named[]>([]);
@@ -82,7 +83,7 @@ export default function Recurrences() {
           <span className="muted" style={{ fontSize: 13 }}>Se generan solas cada madrugada en la fecha programada.</span>
           <div className="tabs">{[["", "Todas"], ["factura", "Facturas"], ["gasto", "Gastos"]].map(([k, l]) => <button key={k} className={kind === k ? "is-active" : ""} onClick={() => setKind(k as typeof kind)}>{l}</button>)}</div>
         </div>
-        {shown.length === 0 ? <Empty hint="Contratos de mantenimiento, monitoreo mensual, alquiler, internet… se registran solos en la fecha programada." /> : (
+        {itemsSt === null ? <Loading /> : shown.length === 0 ? <Empty hint="Contratos de mantenimiento, monitoreo mensual, alquiler, internet… se registran solos en la fecha programada." /> : (
           <table className="table"><thead><tr><th>Nombre</th><th>Tipo</th><th>Cliente / detalle</th><th>Frecuencia</th><th>Próxima</th><th className="num">Generadas</th><th>Última</th><th>Estado</th><th /></tr></thead>
             <tbody>{shown.map((r) => <tr key={r.id}>
               <td style={{ fontWeight: 600 }}>{r.name}</td>

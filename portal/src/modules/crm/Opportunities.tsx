@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { Lookup, searchCustomers } from "../../ui/Lookup";
 import { ArchiveActions } from "../../ui/ArchiveActions";
 import "./opportunities.css";
@@ -58,8 +58,10 @@ export default function Opportunities() {
   const nav = useNavigate();
   const [view, setView] = useState<"board" | "list" | "pending">("board");
   const [board, setBoard] = useState<Board | null>(null);
-  const [list, setList] = useState<Opp[]>([]);
-  const [pending, setPending] = useState<Pending[]>([]);
+  const [listSt, setList] = useState<Opp[] | null>(null); // null = cargando
+  const list = listSt ?? [];
+  const [pendingSt, setPending] = useState<Pending[] | null>(null); // null = cargando
+  const pending = pendingSt ?? [];
   const [team, setTeam] = useState(false);
   const [meta, setMeta] = useState<Meta | null>(null);
   const [q, setQ] = useState("");
@@ -275,7 +277,7 @@ export default function Opportunities() {
             <span className="muted" style={{ fontSize: 13 }}>Próximas acciones de hoy y vencidas, de la más atrasada a la de hoy. Cada mañana (lunes a viernes) llegan también por correo al responsable.</span>
             {meta?.can_see_all && <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, marginLeft: "auto", whiteSpace: "nowrap" }}><input type="checkbox" checked={team} onChange={(e) => setTeam(e.target.checked)} />Todo el equipo</label>}
           </div>
-          {pending.length === 0 ? <Empty hint="Nada pendiente para hoy. Las oportunidades con la próxima acción de hoy o vencida aparecen aquí." /> : (
+          {pendingSt === null ? <Loading /> : pending.length === 0 ? <Empty hint="Nada pendiente para hoy. Las oportunidades con la próxima acción de hoy o vencida aparecen aquí." /> : (
             <table className="table">
               <thead><tr><th>Fecha</th><th>Próxima acción</th><th>Oportunidad</th><th>Cliente</th><th>Responsable</th><th /></tr></thead>
               <tbody>{pending.map((o) => (
@@ -298,7 +300,7 @@ export default function Opportunities() {
             {meta?.can_see_all && <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} />Solo las mías</label>}
             <button className="btn btn--ghost btn--sm" onClick={load}><Icon d={I.refresh} /></button>
           </div>
-          {list.length === 0 ? <Empty hint="Cada visita, llamada o referido entra aquí antes de convertirse en cotización." /> : (
+          {listSt === null ? <Loading /> : list.length === 0 ? <Empty hint="Cada visita, llamada o referido entra aquí antes de convertirse en cotización." /> : (
             <table className="table">
               <thead><tr><th>Número</th><th>Título</th><th>Tipo</th><th>Cliente</th><th>Estado</th><th className="num">Monto</th><th>Próxima acción</th><th>Responsable</th><th /></tr></thead>
               <tbody>{list.map((o) => {

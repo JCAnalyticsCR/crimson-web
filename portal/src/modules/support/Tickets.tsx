@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, parseTs } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { Card, Empty, Field, I, Icon, Loading, Modal } from "../../ui/components";
 import { Lookup, searchCustomers } from "../../ui/Lookup";
 import { PhotoStrip } from "../../ui/MediaPicker";
 
@@ -13,12 +13,12 @@ type Ticket = {
   id: number; number: string; subject: string; kind: string; channel: string | null; level: number; priority: string; status: string;
   customer_id: number | null; customer: string | null; asset_id: number | null; asset: string | null; project_id: number | null;
   work_order_id: number | null; assigned_to: number | null; assigned: string | null; due_at: string | null; first_reply_at: string | null;
-  resolved_at: string | null; sla_vencido: boolean; resolve_due_at: string | null; resolucion_vencida: boolean;
+  resolved_at: string | null; sla_vencido: boolean; resolve_due_at: string | null; resolucion_vencida: boolean; fuera_de_tiempo: boolean;
   contact?: Record<string, string | null>;
   sla: { respuesta_h: number | null; resolucion_h: number | null; origen: string | null; origen_label: string; contrato: string | null } | null; hours: string; billable: boolean; amount: string; tags: string[]; created_at: string;
   description?: string | null; solution?: string | null; photos?: string[]; notes?: Note[];
 };
-type Meta = { kinds: string[]; states: string[]; priorities: string[]; channels: string[]; sla_horas: Record<string, number>; agents: { id: number; name: string }[]; abiertos: number; can_see_all: boolean };
+type Meta = { kinds: string[]; states: string[]; priorities: string[]; channels: string[]; sla_horas: Record<string, number>; agents: { id: number; name: string }[]; abiertos: number; fuera_de_tiempo: number; can_see_all: boolean };
 
 const KIND: Record<string, string> = { soporte: "Soporte", garantia: "Garantía", mantenimiento: "Mantenimiento", visita: "Visita", instalacion: "Instalación", consulta: "Consulta" };
 const ESTADO: Record<string, { label: string; tone: string }> = {
@@ -33,9 +33,10 @@ const cuando = (s: string | null) => (s ? parseTs(s).toLocaleString("es-CR", { d
 export default function Tickets() {
   const { toast, allows, me } = useSession();
   const [params, setParams] = useSearchParams();
-  const [rows, setRows] = useState<Ticket[]>([]);
+  const [rows, setRows] = useState<Ticket[] | null>(null);
   const [meta, setMeta] = useState<Meta | null>(null);
-  const [status, setStatus] = useState("abiertos");
+  // ?pendiente= viene del inicio: misma definicion que el conteo (services/sla.py)
+  const [status, setStatus] = useState(params.get("pendiente") === "fuera_de_tiempo" ? "fuera_de_tiempo" : "abiertos");
   const [kind, setKind] = useState("");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<Ticket | null>(null);
@@ -48,13 +49,14 @@ export default function Tickets() {
   const load = useCallback(() => {
     const qs = new URLSearchParams();
     if (cliente) { qs.set("customer_id", cliente); qs.set("status", ""); }
-    if (status && !cliente) qs.set("status", status);
+    if (status === "fuera_de_tiempo" && !cliente) qs.set("pendiente", "fuera_de_tiempo");
+    else if (status && !cliente) qs.set("status", status);
     if (kind) qs.set("kind", kind);
     if (q) qs.set("q", q);
     api<Ticket[]>(`/tickets?${qs}`).then(setRows);
+    api<Meta>("/tickets/meta/config").then(setMeta);
   }, [status, kind, q, cliente]);
   useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); }, [load]);
-  useEffect(() => { api<Meta>("/tickets/meta/config").then(setMeta); }, []);
 
   const show = useCallback(async (id: number) => { setOpen(await api<Ticket>(`/tickets/${id}`)); setNota({ body: "", internal: false, hours: "", photos: [] }); }, []);
   useEffect(() => { const id = params.get("id"); if (id) show(Number(id)); }, [params, show]);
@@ -96,7 +98,7 @@ export default function Tickets() {
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
 
-  const vencidos = rows.filter((t) => t.sla_vencido).length;
+  const lista = rows || [];
 
   return (
     <>
@@ -108,20 +110,21 @@ export default function Tickets() {
       </div>
 
       <div className="eco">
-        <div className="eco__box"><span className="meta">Abiertos</span><b>{rows.filter((t) => !["resuelto", "cerrado"].includes(t.status)).length}</b></div>
-        <div className={`eco__box ${vencidos ? "is-bad" : "is-good"}`}><span className="meta">Sin primera respuesta a tiempo</span><b>{vencidos}</b></div>
-        <div className="eco__box"><span className="meta">Críticos y altos</span><b>{rows.filter((t) => ["critica", "alta"].includes(t.priority) && !["resuelto", "cerrado"].includes(t.status)).length}</b></div>
-        <div className="eco__box"><span className="meta">Horas registradas</span><b>{rows.reduce((s, t) => s + Number(t.hours || 0), 0).toFixed(1)}</b></div>
+        {/* abiertos y fuera de tiempo salen del backend: los mismos numeros que el inicio */}
+        <button type="button" className="eco__box" onClick={() => setStatus("abiertos")}><span className="meta">Abiertos</span><b>{meta ? meta.abiertos : "…"}</b></button>
+        <button type="button" className={`eco__box ${meta?.fuera_de_tiempo ? "is-bad" : "is-good"}`} onClick={() => setStatus("fuera_de_tiempo")}><span className="meta">Fuera de tiempo (SLA vencido)</span><b>{meta ? meta.fuera_de_tiempo : "…"}</b></button>
+        <div className="eco__box"><span className="meta">Críticos y altos (en la lista)</span><b>{rows ? lista.filter((t) => ["critica", "alta"].includes(t.priority) && !["resuelto", "cerrado"].includes(t.status)).length : "…"}</b></div>
+        <div className="eco__box"><span className="meta">Horas registradas (en la lista)</span><b>{rows ? lista.reduce((s, t) => s + Number(t.hours || 0), 0).toFixed(1) : "…"}</b></div>
       </div>
 
       <Card flush>
         <div className="list-head" style={{ flexWrap: "wrap" }}>
           <div className="search" style={{ maxWidth: 320 }}><Icon d={I.search} size={16} /><input placeholder="Asunto o número…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-          <select className="select select--sm" value={status} onChange={(e) => setStatus(e.target.value)}><option value="abiertos">Abiertos</option><option value="">Todos</option>{(meta?.states || []).map((s) => <option key={s} value={s}>{ESTADO[s]?.label || s}</option>)}</select>
+          <select className="select select--sm" value={status} onChange={(e) => setStatus(e.target.value)}><option value="abiertos">Abiertos</option><option value="fuera_de_tiempo">Fuera de tiempo</option><option value="">Todos</option>{(meta?.states || []).map((s) => <option key={s} value={s}>{ESTADO[s]?.label || s}</option>)}</select>
           <select className="select select--sm" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">Todo tipo</option>{(meta?.kinds || []).map((k) => <option key={k} value={k}>{KIND[k] || k}</option>)}</select>
           <button className="btn btn--ghost btn--sm" onClick={load} style={{ marginLeft: "auto" }}><Icon d={I.refresh} /></button>
         </div>
-        {rows.length === 0 ? <Empty title="Sin tickets" hint="Cada llamada, garantía o mantenimiento queda aquí con su tiempo de respuesta." /> : (
+        {rows === null ? <Loading /> : rows.length === 0 ? <Empty title="Sin tickets" hint="Cada llamada, garantía o mantenimiento queda aquí con su tiempo de respuesta." /> : (
           <table className="table">
             <thead><tr><th>Número</th><th>Asunto</th><th>Cliente</th><th>Tipo</th><th>Prioridad</th><th>Responsable</th><th>Vence</th><th>Estado</th><th /></tr></thead>
             <tbody>{rows.map((t) => (
@@ -131,7 +134,7 @@ export default function Tickets() {
                 <td className="muted">{t.customer || "—"}</td><td>{KIND[t.kind] || t.kind}</td>
                 <td><span style={{ color: PRIO[t.priority], fontWeight: 600, textTransform: "capitalize" }}>{t.priority}</span></td>
                 <td className="muted">{t.assigned || "Sin asignar"}</td>
-                <td style={{ fontSize: 13, color: t.sla_vencido ? "var(--bad)" : undefined }}>{t.first_reply_at ? "respondido" : cuando(t.due_at)}</td>
+                <td style={{ fontSize: 13, color: t.fuera_de_tiempo ? "var(--bad)" : undefined }}>{t.first_reply_at ? "respondido" : cuando(t.due_at)}</td>
                 <td><span className={`badge badge--${ESTADO[t.status]?.tone || "muted"}`}>{ESTADO[t.status]?.label || t.status}</span></td>
                 <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => show(t.id)}>Abrir</button></td>
               </tr>

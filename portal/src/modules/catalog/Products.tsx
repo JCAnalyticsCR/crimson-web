@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, fmtMoney, parseTs, type Product } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { GalleryField, type GalleryImage } from "../../ui/MediaPicker";
 import { Lookup, type LookupItem } from "../../ui/Lookup";
 
@@ -31,7 +31,8 @@ const TABS = [["general", "General"], ["imagenes", "Imágenes"], ["variantes", "
 export default function Products() {
   const { toast, allows } = useSession();
   const [params, setParams] = useSearchParams();
-  const [items, setItems] = useState<(Product & { images?: GalleryImage[] })[]>([]);
+  const [itemsSt, setItems] = useState<(Product & { images?: GalleryImage[] })[] | null>(null); // null = cargando
+  const items = itemsSt ?? [];
   const [taxes, setTaxes] = useState<Tax[]>([]);
   const [cats, setCats] = useState<Named[]>([]);
   const [suppliers, setSuppliers] = useState<Named[]>([]);
@@ -154,9 +155,9 @@ export default function Products() {
   const toggleWeb = async (pr: Product) => {
     if (!allows("catalog.editar")) return;
     setToggling(pr.id);
-    setItems((xs) => xs.map((x) => (x.id === pr.id ? { ...x, show_on_web: !pr.show_on_web } : x)));
+    setItems((xs) => xs && xs.map((x) => (x.id === pr.id ? { ...x, show_on_web: !pr.show_on_web } : x)));
     try { await api(`/products/${pr.id}/web`, { method: "PATCH", json: { show_on_web: !pr.show_on_web } }); toast(pr.show_on_web ? "Quitado de la tienda" : "Publicado en la tienda"); }
-    catch (e) { setItems((xs) => xs.map((x) => (x.id === pr.id ? { ...x, show_on_web: pr.show_on_web } : x))); toast(e instanceof Error ? e.message : "Error", "bad"); }
+    catch (e) { setItems((xs) => xs && xs.map((x) => (x.id === pr.id ? { ...x, show_on_web: pr.show_on_web } : x))); toast(e instanceof Error ? e.message : "Error", "bad"); }
     finally { setToggling(null); }
   };
 
@@ -179,7 +180,7 @@ export default function Products() {
           {(q || f.item_type || f.category_id || f.brand || f.supplier_id || f.web || f.sin_cabys || f.warehouse_id) && <button className="btn btn--ghost btn--sm" onClick={() => { setQ(""); setF({ item_type: "", category_id: "", brand: "", supplier_id: "", web: "", sin_cabys: false, warehouse_id: "" }); }}><Icon d={I.x} size={14} />Limpiar</button>}
           <button className="btn btn--ghost btn--sm" onClick={load} style={{ marginLeft: "auto" }}><Icon d={I.refresh} /></button>
         </div>
-        {items.length === 0 ? <Empty hint="Nada con esos filtros. Probá limpiarlos o creá el producto." /> : (
+        {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Nada con esos filtros. Probá limpiarlos o creá el producto." /> : (
           <table className="table">
             <thead><tr><th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th>Bodega</th>{verPrecios && <th className="num">Precio</th>}<th>IVA</th><th>Web</th><th /></tr></thead>
             <tbody>{items.map((p) => (

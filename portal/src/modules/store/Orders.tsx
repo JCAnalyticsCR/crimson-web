@@ -3,14 +3,15 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Badge, Card, Empty, I, Icon, Modal } from "../../ui/components";
+import { Badge, Card, Empty, I, Icon, Modal, Loading } from "../../ui/components";
 
 type Order = { id: number; number: string; channel: string; contact: Record<string, string>; currency: string; subtotal: string; discount_total: string; shipping: string; tax_total: string; total: string; coupon_code: string | null; shipping_method: string | null; payment_method: string | null; status: string; invoice_id: number | null; notes: string | null; created_at: string; lines: { id: number; name: string; quantity: string; unit_price: string; total: string }[] };
 const STATES = ["nuevo", "pagado", "preparando", "enviado", "entregado", "cancelado"];
 
 export default function Orders() {
   const { toast } = useSession();
-  const [items, setItems] = useState<Order[]>([]);
+  const [itemsSt, setItems] = useState<Order[] | null>(null); // null = cargando
+  const items = itemsSt ?? [];
   const [filter, setFilter] = useState("");
   const [sel, setSel] = useState<Order | null>(null);
   const load = () => api<Order[]>(`/orders${filter ? `?status=${filter}` : ""}`).then(setItems);
@@ -33,7 +34,7 @@ export default function Orders() {
           <span className="muted" style={{ fontSize: 13 }}>Pedidos de la tienda en línea</span>
           <div className="tabs">{["", ...STATES].map((s) => <button key={s || "todas"} className={filter === s ? "is-active" : ""} onClick={() => setFilter(s)}>{s ? s[0].toUpperCase() + s.slice(1) : "Todas"}</button>)}</div>
         </div>
-        {items.length === 0 ? <Empty hint="Cuando alguien compre en la tienda, el pedido aparece aquí listo para facturar." /> : (
+        {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Cuando alguien compre en la tienda, el pedido aparece aquí listo para facturar." /> : (
           <table className="table">
             <thead><tr><th>Pedido</th><th>Cliente</th><th>Fecha</th><th>Envío</th><th>Pago</th><th className="num">Total</th><th>Estado</th><th>Comprobante</th><th /></tr></thead>
             <tbody>{items.map((o) => (

@@ -107,6 +107,35 @@ def _aware(dt: datetime | None) -> datetime | None:
 ABIERTOS = ("nuevo", "asignado", "en_proceso", "esperando_cliente")
 
 
+# ---- Definicion UNICA de "abierto" y "fuera de tiempo" (inicio, lista de tickets y avisos usan esto) ----
+def es_abierto(t: SupportTicket) -> bool:
+    """Abierto = no resuelto ni cerrado."""
+    return t.status in ABIERTOS
+
+
+def vencimientos(t: SupportTicket, ahora: datetime | None = None) -> dict[str, bool]:
+    """Que plazo del SLA se paso sin cumplirse. Solo cuenta en tickets abiertos."""
+    ahora = ahora or datetime.now(UTC)
+    if not es_abierto(t):
+        return {"respuesta": False, "resolucion": False}
+    return {
+        "respuesta": bool(t.due_at and not t.first_reply_at and _aware(t.due_at) < ahora),
+        "resolucion": bool(t.resolve_due_at and not t.resolved_at and _aware(t.resolve_due_at) < ahora),
+    }
+
+
+def fuera_de_tiempo(t: SupportTicket, ahora: datetime | None = None) -> bool:
+    """Abierto y con algun plazo del SLA (respuesta o resolucion) vencido sin cumplir."""
+    v = vencimientos(t, ahora)
+    return v["respuesta"] or v["resolucion"]
+
+
+def resumen(tickets, ahora: datetime | None = None) -> dict[str, int]:
+    ahora = ahora or datetime.now(UTC)
+    abiertos = [t for t in tickets if es_abierto(t)]
+    return {"abiertos": len(abiertos), "fuera_de_tiempo": sum(1 for t in abiertos if fuera_de_tiempo(t, ahora))}
+
+
 def revisar_atrasos(db: Session, tenant: Tenant, ahora: datetime | None = None) -> dict[str, list[SupportTicket]]:
     """Tickets que se acaban de pasar de su plazo de primera respuesta o de resolucion.
 

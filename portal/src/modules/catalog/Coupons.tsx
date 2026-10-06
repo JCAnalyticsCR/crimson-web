@@ -2,14 +2,15 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Badge, Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 
 type Coupon = { id: number; code: string; kind: string; value: string; min_total: string; valid_from: string | null; valid_to: string | null; max_uses: number | null; uses: number; active: boolean };
 const blank = { code: "", kind: "percent", value: "10", min_total: "0", valid_from: "", valid_to: "", max_uses: "", active: true };
 
 export default function Coupons() {
   const { toast } = useSession();
-  const [items, setItems] = useState<Coupon[]>([]);
+  const [itemsSt, setItems] = useState<Coupon[] | null>(null); // null = cargando
+  const items = itemsSt ?? [];
   const [edit, setEdit] = useState<(typeof blank & { id?: number }) | null>(null);
   const load = () => api<Coupon[]>("/coupons").then(setItems);
   useEffect(() => { load(); }, []);
@@ -28,7 +29,7 @@ export default function Coupons() {
         <div className="page-head__actions"><button className="btn btn--crimson" onClick={() => setEdit({ ...blank })}><Icon d={I.plus} />Crear cupón</button></div>
       </div>
       <Card flush>
-        {items.length === 0 ? <Empty hint="Descuentos por porcentaje o monto para la tienda en línea, con vigencia y límite de usos." /> : (
+        {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Descuentos por porcentaje o monto para la tienda en línea, con vigencia y límite de usos." /> : (
           <table className="table">
             <thead><tr><th>Código</th><th>Descuento</th><th>Mínimo</th><th>Vigencia</th><th className="num">Usos</th><th>Estado</th><th /></tr></thead>
             <tbody>{items.map((c) => (
