@@ -241,6 +241,9 @@ def project_from_quote(qid: int, data: FromQuoteIn, p: Principal = Depends(requi
         raise HTTPException(409, "La cotización tiene un descuento pendiente de aprobación")
     if db.scalar(select(Project).where(Project.quote_id == q.id)):
         raise HTTPException(409, "Esa cotización ya tiene proyecto")
+    from ..services.units import check_ready
+
+    check_ready(q, "convertir a proyecto")  # un costo pendiente no se ejecuta como si fuera cero
     ligada = db.scalar(select(Opportunity).where(Opportunity.tenant_id == p.tenant.id, Opportunity.quote_id == q.id))
     if ligada and ligada.kind == "venta" and not data.force:
         raise HTTPException(409, f"La oportunidad {ligada.number} es de solo venta (sin instalación). Si sí lleva instalación, confirmá crear el proyecto.")
