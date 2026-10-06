@@ -156,6 +156,8 @@ def test_opportunity_survey_quote_project_workorder_assets(client, auth, db_sess
     cost = client.get(f"/surveys/{lev['id']}/costing").json()
     assert cost["labor"]["cost"] == "150000.00" or Decimal(str(cost["labor"]["cost"])) == Decimal("150000")  # 2 técnicos x 3 días x 25 000
     assert Decimal(str(cost["cost_total"])) > 0 and Decimal(str(cost["price_suggested"])) > Decimal(str(cost["cost_total"]))
+    # 2b) el supervisor (aqui el admin) revisa y aprueba antes del costeo
+    assert client.post(f"/surveys/{lev['id']}/review", json={"action": "aprobar"}).json()["review_status"] == "aprobado"
     q = client.post(f"/surveys/{lev['id']}/quote", json={"include_labor": True}).json()
     assert q["number"].startswith("COT")
     quote = client.get(f"/quotes/{q['quote_id']}").json()

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, parseTs, type Product } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
@@ -165,7 +165,7 @@ export default function Products() {
     <>
       <div className="page-head">
         <div><div className="meta">05 · Catálogo</div><h1 className="h1">Productos & Servicios</h1></div>
-        <div className="page-head__actions">{allows("catalog.crear") && <button className="btn btn--crimson" onClick={() => { setEdit({ ...blank, tax_ids: taxes[0] ? [taxes[0].id] : [] }); setVariants([]); setTab("general"); }}><Icon d={I.plus} />Crear producto</button>}</div>
+        <div className="page-head__actions">{allows("catalog.editar") && !!opts?.sin_cabys && <Link className="btn btn--soft" to="/productos/cabys" title="Sugerencias de CABYS para confirmar en bloque">Completar CABYS ({opts.sin_cabys})</Link>}{allows("catalog.crear") && <button className="btn btn--crimson" onClick={() => { setEdit({ ...blank, tax_ids: taxes[0] ? [taxes[0].id] : [] }); setVariants([]); setTab("general"); }}><Icon d={I.plus} />Crear producto</button>}</div>
       </div>
       <Card flush>
         <div className="list-head" style={{ flexWrap: "wrap" }}>

@@ -1,0 +1,17 @@
+/* Panel de versiones de la cotizacion (columna derecha del editor) */
+.qv-states { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.qv-states > div { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; font-size: 12px; min-width: 0; }
+.qv-warn { margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--warn); background: var(--warn-soft); font-size: 12.5px; }
+.qv-note { margin: 10px 0 0; font-size: 12.5px; }
+.qv-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.qv-list li { padding: 8px 10px; border: 1px solid var(--hair); border-radius: 10px; background: var(--surface-2); min-width: 0; }
+.qv-list li.is-ok { border-color: var(--ok); }
+.qv-list__top { display: flex; gap: 8px; align-items: center; }
+.qv-list__top .money { margin-left: auto; font-size: 13px; }
+.qv-list__meta { font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+.qv-list__act { display: flex; gap: 6px; margin-top: 6px; }
+.qv-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.qv-hist { margin-top: 12px; font-size: 12.5px; }
+.qv-hist summary { cursor: pointer; color: var(--text-2); }
+.qv-hist ul { margin: 8px 0 0; padding-left: 16px; display: flex; flex-direction: column; gap: 6px; }
+.qv-hist li { overflow-wrap: anywhere; }

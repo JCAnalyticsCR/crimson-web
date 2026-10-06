@@ -12,6 +12,7 @@ from .core.config import settings
 from .routers import (
     auth,
     banking,
+    cabys_masivo,
     catalog,
     client_access,
     client_portal,
@@ -73,6 +74,7 @@ def create_app() -> FastAPI:
     app.include_router(core.router)
     app.include_router(auth.router)
     app.include_router(catalog.router)
+    app.include_router(cabys_masivo.router)
     app.include_router(sales.router)
     app.include_router(ops.router)
     app.include_router(settings_router.router)

@@ -67,6 +67,9 @@ class Product(TenantMixin, TimestampMixin, Base):
     registration_number: Mapped[str | None] = mapped_column(String(80))
     cabys_code: Mapped[str | None] = mapped_column(String(13))
     cabys_description: Mapped[str | None] = mapped_column(String(300))
+    # quien confirmo el CABYS y cuando (pantalla "Completar CABYS"; el detalle queda en audit_log)
+    cabys_set_by: Mapped[int | None] = mapped_column(ForeignKey("user.id", name="fk_product_cabys_set_by"))
+    cabys_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     tariff_code: Mapped[str | None] = mapped_column(String(20))  # partida arancelaria
     unit: Mapped[str] = mapped_column(String(10), default="Unid")
     min_stock: Mapped[int] = mapped_column(Integer, default=0)

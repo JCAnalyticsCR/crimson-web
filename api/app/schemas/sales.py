@@ -93,6 +93,11 @@ class QuoteOut(DocBaseOut):
     converted_invoice_id: int | None = None
     approval_reason: str | None = None
     opportunity: dict | None = None  # {id, number, kind, status} de la oportunidad ligada
+    # aceptacion del cliente (aparte de status, que es la emision) y versiones enviadas
+    acceptance_status: str = "pendiente"
+    accepted_version: int | None = None
+    current_version: int | None = None
+    has_unsent_changes: bool = False
 
 
 class PaymentIn(BaseModel):
@@ -157,3 +162,4 @@ class DocListItem(BaseModel):
     status: str
     issue_date: date
     due_date: date | None
+    acceptance_status: str | None = None  # solo cotizaciones

@@ -81,7 +81,7 @@ export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {
                 <td className="muted">{fmtDate(d.due_date)}</td>
                 <td className="num money">{fmtMoney(d.total, d.currency)}</td>
                 {!isQ && <td className="num money">{fmtMoney(d.balance, d.currency)}</td>}
-                <td><Badge status={d.status} /></td>
+                <td><span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}><Badge status={d.status} />{isQ && d.acceptance_status && d.acceptance_status !== "pendiente" && <Badge status={d.acceptance_status} />}</span></td>
                 <td className="num"><Link className="btn btn--ghost btn--sm" to={`${base}/${d.id}`}>Ver</Link></td>
               </tr>
             ))}</tbody>

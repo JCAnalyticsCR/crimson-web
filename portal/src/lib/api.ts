@@ -113,10 +113,14 @@ export type Doc = {
   issue_date: string; due_date: string | null; discount_type: string; discount_value: string; subtotal: string; discount_total: string; tax_total: string; total: string;
   internal_notes: string | null; external_notes: string | null; external_order: string | null; activity_code: string | null; medical_exemption_card: boolean; status: string; lines: Line[];
 };
-export type Quote = Doc & { converted_invoice_id: number | null; opportunity?: { id: number; number: string; kind: "venta" | "proyecto"; status: string } | null };
+export type Quote = Doc & {
+  converted_invoice_id: number | null; opportunity?: { id: number; number: string; kind: "venta" | "proyecto"; status: string } | null;
+  /* aceptacion del cliente (aparte de status = emision) y versiones enviadas */
+  acceptance_status?: "pendiente" | "aceptada" | "rechazada"; accepted_version?: number | null; current_version?: number | null; has_unsent_changes?: boolean;
+};
 export type Payment = { id: number; invoice_id?: number | null; invoice_number?: string | null; customer?: string | null; method: string; kind: string; currency: string; amount: string; tip: string; external_ref: string | null; provider: string; paid_at: string; status: string };
 export type Invoice = Doc & { doc_type: string; consecutive: string | null; clave: string | null; balance: string; quote_id: number | null; einvoice_status: string; payments: Payment[]; sale_condition: string; credit_days: number; payment_method: string };
-export type DocListItem = { id: number; number: string; customer_name: string | null; currency: string; total: string; balance: string | null; status: string; issue_date: string; due_date: string | null };
+export type DocListItem = { id: number; number: string; customer_name: string | null; currency: string; total: string; balance: string | null; status: string; issue_date: string; due_date: string | null; acceptance_status?: string | null };
 export type Ceo = {
   pipeline: string; pipeline_weighted: string; opportunities: number; receivable: string; sold_month: string; profit_month: string; margin_month: number;
   projects_active: number; projects_closed_month: number; projects_without_costs?: number; jobs_open: number; jobs_week: number; jobs_late: number;
@@ -178,4 +182,9 @@ export const STATUS: Record<string, { label: string; tone: "ok" | "warn" | "bad"
   en_curso: { label: "En curso", tone: "warn" },
   terminado: { label: "Terminado", tone: "ok" },
   facturado: { label: "Facturado", tone: "ok" },
+  // aceptacion del cliente (cotizaciones) y revision del supervisor (levantamientos)
+  aceptada: { label: "Aceptada", tone: "ok" },
+  rechazada: { label: "Rechazada", tone: "bad" },
+  aprobado: { label: "Revisión aprobada", tone: "ok" },
+  devuelto: { label: "Devuelto", tone: "warn" },
 };

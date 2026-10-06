@@ -7,6 +7,7 @@ import { useSession } from "../../app/session";
 import { Badge, Field, I, Icon, Loading, Modal } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
 import { NO_SUMA, TREATMENTS, unitOptions, type Treatment } from "../../lib/units";
+import QuoteVersions from "./QuoteVersions";
 
 type Preview = { subtotal: string; discount_total: string; tax_total: string; total: string; lines: { subtotal: string; tax_amount: string; total: string; unit_price: string; name: string; tax_rate: string }[] };
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? String(Number(n.toFixed(5))) : String(v ?? ""); };
@@ -32,14 +33,22 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const [fx, setFx] = useState<{ sell: string; buy: string } | null>(null);
   const [limit, setLimit] = useState<{ limit: number; free: boolean } | null>(null);
   const pending = doc.status === "por_aprobar";
-  const locked = !isNew && (doc.status === "convertida" || doc.status === "anulada" || (kind === "invoice" && ((doc as Invoice).payments?.length ?? 0) > 0));
+  // grupoB: aceptada por el cliente = bloqueada (se deshace la respuesta en el panel Versiones)
+  const accepted = isQ && (doc as Quote).acceptance_status === "aceptada";
+  const locked = !isNew && (doc.status === "convertida" || doc.status === "anulada" || accepted || (kind === "invoice" && ((doc as Invoice).payments?.length ?? 0) > 0));
 
   useEffect(() => {
     api<{ items: Customer[] }>("/customers?limit=100").then((r) => setCustomers(r.items));
     api<{ sell: string; buy: string } | null>("/fx/today").then((r) => r && setFx(r)).catch(() => {});
     api<{ limit: number; free: boolean }>("/sales/discount-limit").then(setLimit).catch(() => {});
-    if (!isNew) api<Quote & Invoice>(`/${isQ ? "quotes" : "invoices"}/${id}`).then((d) => { setDoc({ ...d, discount_value: num(d.discount_value) }); setLines(d.lines.map((l) => ({ ...l, quantity: num(l.quantity), unit_price: num(l.unit_price), discount_value: num(l.discount_value), tax_rate: num(l.tax_rate) }))); });
+    if (!isNew) api<Quote & Invoice>(`/${isQ ? "quotes" : "invoices"}/${id}`).then(hydrate);
   }, [id, isNew, isQ]);
+
+  /* Documento recibido de la API -> estado del editor (al abrir y cuando el panel Versiones lo cambia). */
+  function hydrate(d: Quote & Invoice) {
+    setDoc({ ...d, discount_value: num(d.discount_value) });
+    setLines(d.lines.map((l) => ({ ...l, quantity: num(l.quantity), unit_price: num(l.unit_price), discount_value: num(l.discount_value), tax_rate: num(l.tax_rate) })));
+  }
 
   const payload = useMemo(() => ({
     customer_id: doc.customer_id ?? null, currency: doc.currency || "CRC", discount_type: doc.discount_type || "percent", discount_value: doc.discount_value || "0",
@@ -72,16 +81,17 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
       if (then === "send") {
         /* Solo queda "enviada" (y su oportunidad en "Cotización enviada") si el correo salió de verdad;
            si quedó simulado o con error, se guarda el documento pero se avisa claro que el cliente no lo recibió. */
-        const r = await api<{ status: string; sent: boolean; to: string; note: string | null }>(`/${path}/${saved.id}/email`, { method: "POST", json: {} });
+        const r = await api<{ status: string; sent: boolean; to: string; note: string | null; version?: number | null }>(`/${path}/${saved.id}/email`, { method: "POST", json: {} });
         if (!r.sent) {
           toast(`${isQ ? "Cotización" : "Factura"} ${saved.number} guardada. ${r.note || "El correo no salió."}`, "bad");
           nav(`/${isQ ? "cotizaciones" : "facturas"}/${saved.id}`, { replace: true });
           setDoc(saved);
           return;
         }
-        toast(`${isQ ? "Cotización" : "Factura"} ${saved.number} enviada a ${r.to}`);
+        toast(`${isQ ? "Cotización" : "Factura"} ${saved.number} enviada a ${r.to}${r.version ? ` · v${r.version}` : ""}`);
         nav(`/${isQ ? "cotizaciones" : "facturas"}/${saved.id}`, { replace: true });
         setDoc({ ...saved, status: saved.status === "creado" ? "enviada" : saved.status });
+        if (isQ) api<Quote & Invoice>(`/quotes/${saved.id}`).then(hydrate).catch(() => {}); // version nueva en el panel
         return;
       }
       if (then === "convert") { const inv = await api<Invoice>(`/quotes/${saved.id}/convert`, { method: "POST" }); toast(`Factura ${inv.number} creada`); nav(`/facturas/${inv.id}`); return; }
@@ -91,6 +101,14 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     } catch (e) { toast(e instanceof Error ? e.message : "Error al guardar", "bad"); }
     finally { setBusy(false); }
   }, [payload, isQ, isNew, id, nav, toast]);
+
+  /* Aceptada: no se guarda nada antes (esta bloqueada); la API convierte la version aceptada. */
+  const convertAccepted = async () => {
+    setBusy(true);
+    try { const inv = await api<Invoice>(`/quotes/${id}/convert`, { method: "POST" }); toast(`Factura ${inv.number} creada con la v${(doc as Quote).accepted_version}`); nav(`/facturas/${inv.id}`); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+    finally { setBusy(false); }
+  };
 
   const act = async (action: "void" | "duplicate") => {
     const path = isQ ? "quotes" : "invoices";
@@ -244,6 +262,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
             </div>
           </div></div>
 
+          {isQ && !isNew && doc.id != null && <QuoteVersions quote={doc as Quote} onQuote={(q) => hydrate(q as Quote & Invoice)} />}
           {pending && (
             <div className="card" style={{ borderColor: "var(--warn)" }}><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <div className="meta" style={{ color: "var(--warn)" }}>Descuento por aprobar</div>
@@ -259,12 +278,12 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               <p className="muted" style={{ fontSize: 12, margin: 0 }}>Podés guardarla mientras tanto.</p>
             </div></div>
           )}
-          {!locked && (
+          {(!locked || (accepted && doc.status !== "convertida" && doc.status !== "anulada")) && (
             <div className="card"><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {limit && !limit.free && <p className="muted" style={{ fontSize: 12, margin: 0 }}>Tu descuento máximo es {Number(limit.limit)} % (incluye rebajas al precio de catálogo). Más que eso requiere aprobación.</p>}
-              <button className="btn btn--crimson" disabled={busy} onClick={() => save()}><Icon d={I.check} />Guardar</button>
-              {!pending && <button className="btn" disabled={busy || blocked} onClick={() => save("send")}><Icon d={I.whatsapp} />Guardar & enviar al cliente</button>}
-              {isQ && !pending && <button className="btn btn--soft" disabled={busy || blocked} onClick={() => save("convert")}><Icon d={I.invoice} />Convertir a factura</button>}
+              {limit && !limit.free && !accepted && <p className="muted" style={{ fontSize: 12, margin: 0 }}>Tu descuento máximo es {Number(limit.limit)} % (incluye rebajas al precio de catálogo). Más que eso requiere aprobación.</p>}
+              {!accepted && <button className="btn btn--crimson" disabled={busy} onClick={() => save()}><Icon d={I.check} />Guardar</button>}
+              {!pending && !accepted && <button className="btn" disabled={busy || blocked} onClick={() => save("send")}><Icon d={I.whatsapp} />Guardar & enviar al cliente</button>}
+              {isQ && !pending && <button className="btn btn--soft" disabled={busy || blocked} onClick={() => (accepted ? convertAccepted() : save("convert"))}><Icon d={I.invoice} />Convertir a factura</button>}
               {isQ && !isNew && !pending && allows("projects.crear") && (
                 /* Instalaciones: la cotización aprobada arranca el proyecto con su primera orden de trabajo. */
                 opp?.kind === "venta"

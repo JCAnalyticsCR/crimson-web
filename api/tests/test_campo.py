@@ -249,7 +249,7 @@ def test_ligar_levantamiento_hecho_antes_de_la_oportunidad(client, auth):
     ).json()
     gab = next(i for i in s["items"] if i["name"] == "Gabinete 15U")
     client.post(f"/surveys/{s['id']}/costs", json=[{"item_id": gab["id"], "unit_cost": "50000"}])
-    q = client.post(f"/surveys/{s['id']}/quote", json={"margin": 35}).json()
+    q = client.post(f"/surveys/{s['id']}/quote", json={"margin": 35, "skip_review": True}).json()
 
     o = client.post("/opportunities", json={"title": "Condominio creado despues", "amount": "1000", "probability": 40}).json()
     assert o["status"] == "nuevo"

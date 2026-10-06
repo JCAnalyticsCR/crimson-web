@@ -17,14 +17,14 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
-from ..models import Customer, Opportunity, Product, Project, Survey, SurveyItem, SurveyPoint, User, WorkOrder, WorkOrderMaterial
+from ..models import Customer, Opportunity, Product, Project, Survey, SurveyItem, SurveyObservation, SurveyPoint, User, WorkOrder, WorkOrderMaterial
 from ..schemas.sales import DocumentIn, LineInSchema
 from ..services import documents as docsvc
 from ..services import inventory as invsvc
 from ..services import pricing
 from ..services.archive import live
 from ..services.documents import audit
-from ..services.mail import notify_roles
+from ..services.mail import notify_roles, queue_email
 from ..services.sequences import next_number
 from ..services.survey_specs import SPECS, normalize_item, normalize_point_data, suggest_materials
 from ..services.totals import d
@@ -150,6 +150,7 @@ def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
         "visit_tech_ids": visit_ids,
         "visit_techs": visitors,
         "labor": {k: {"label": LABOR_TYPES[k][0], "people": v["people"], "days": v["days"]} for k, v in labor.items()},
+        **_review_out(db, s),
     }
     if s.status == "enviado":
         # "pendiente de revision por": se calcula al leer, asi refleja los roles configurados hoy
@@ -166,6 +167,48 @@ def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
             for i in s.items
         ]
     return out
+
+
+REVIEW_LABEL = {None: "Sin enviar", "pendiente": "En revisión", "aprobado": "Revisión aprobada", "devuelto": "Devuelto con observaciones"}
+
+
+def _review_out(db: Session, s: Survey) -> dict:
+    """Estado de la revision del supervisor y sus observaciones (las de todas las rondas, abiertas primero)."""
+    rev = db.get(User, s.reviewed_by) if s.reviewed_by else None
+    names: dict[int, str] = {}
+
+    def who(uid):
+        if not uid:
+            return None
+        if uid not in names:
+            u = db.get(User, uid)
+            names[uid] = u.full_name if u else "—"
+        return names[uid]
+
+    obs = sorted(s.observations, key=lambda o: (o.resolved_at is not None, -o.review_round, o.id))
+    return {
+        "review_status": s.review_status,
+        "review_label": REVIEW_LABEL.get(s.review_status, s.review_status),
+        "reviewed_by": rev.full_name if rev else None,
+        "reviewed_at": s.reviewed_at,
+        "review_round": s.review_round or 0,
+        "open_observations": sum(1 for o in s.observations if o.resolved_at is None),
+        "observations": [
+            {
+                "id": o.id,
+                "round": o.review_round,
+                "point_code": o.point_code,
+                "text": o.text,
+                "created_by": who(o.created_by),
+                "created_at": o.created_at,
+                "resolved": o.resolved_at is not None,
+                "resolved_at": o.resolved_at,
+                "resolved_by": who(o.resolved_by),
+                "resolution": o.resolution,
+            }
+            for o in obs
+        ],
+    }
 
 
 class PointIn(BaseModel):
@@ -259,12 +302,20 @@ def technicians(p: Principal = Depends(require("field", "ver")), db: Session = D
 
 
 @router.get("/surveys")
-def surveys(status: str | None = None, limit: int = Query(80, le=200), p: Principal = Depends(require("field", "ver")), db: Session = Depends(get_db)):
+def surveys(
+    status: str | None = None,
+    review: str | None = Query(None, pattern="^(pendiente|aprobado|devuelto)$"),
+    limit: int = Query(80, le=200),
+    p: Principal = Depends(require("field", "ver")),
+    db: Session = Depends(get_db),
+):
     stmt = select(Survey).where(Survey.tenant_id == p.tenant.id, live(Survey))
     if not p.sees_field_all:
         stmt = stmt.where(Survey.technician_id == p.user.id)
     if status:
         stmt = stmt.where(Survey.status == status)
+    if review:
+        stmt = stmt.where(Survey.review_status == review)
     return [_survey_out(db, s, full=False) for s in db.scalars(stmt.order_by(Survey.id.desc()).limit(limit))]
 
 
@@ -329,6 +380,10 @@ def survey_update(sid: int, data: SurveyIn, p: Principal = Depends(require("fiel
         raise HTTPException(409, "El levantamiento ya fue cotizado")
     _apply_fields(s, data, db, p)
     _apply_children(s, data)
+    if s.review_status == "aprobado" and not s.quote_id and not p.can("field", "revisar"):
+        # lo aprobado ya no es lo mismo: el supervisor tiene que volver a verlo antes del costeo
+        s.review_status = "pendiente"
+        audit(db, p.tenant.id, p.user.id, "review_reset", "survey", s.id, {"motivo": "editado despues de aprobado"}, ip=p.ip)
     db.commit()
     return _survey_out(db, s)
 
@@ -453,7 +508,19 @@ def survey_send(sid: int, p: Principal = Depends(require("field", "crear")), db:
     s = _survey(db, sid, p)
     if not s.points and not s.items:
         raise HTTPException(422, "Agregá al menos un punto o material antes de enviar")
+    if s.status in ("cotizado", "cerrado"):
+        raise HTTPException(409, "El levantamiento ya fue cotizado")
+    abiertas = [o for o in s.observations if o.resolved_at is None]
+    if abiertas:
+        raise HTTPException(
+            409,
+            f"Marcá como resueltas las {len(abiertas)} observación(es) del supervisor antes de reenviar."
+            if len(abiertas) > 1
+            else "Marcá como resuelta la observación del supervisor antes de reenviar.",
+        )
+    reenvio = s.review_status == "devuelto"
     s.status = "enviado"
+    s.review_status = "pendiente"  # todo envio (o reenvio tras observaciones) vuelve a la cola de revision
     s.sent_at = datetime.now(UTC)
     s.sent_by = p.user.id
     cliente = db.get(Customer, s.customer_id).name if s.customer_id else (s.contact or {}).get("name") or "sin cliente"
@@ -466,11 +533,11 @@ def survey_send(sid: int, p: Principal = Depends(require("field", "crear")), db:
         db,
         p.tenant,
         roles,
-        f"Nuevo levantamiento {s.number} · {cliente}",
+        f"{'Levantamiento corregido' if reenvio else 'Nuevo levantamiento'} {s.number} · {cliente}",
         f"<p><b>{html.escape(spec['label'])}</b> levantado por {html.escape(p.user.full_name)}.</p>"
         f"<p>Cliente: {html.escape(cliente)}<br>Sitio: {html.escape(s.site or '—')}<br>"
         f"{len(s.points)} {html.escape(spec['point_label'].lower())}(s) · {len(s.items)} materiales y equipos<br>{html.escape(personal or 'sin personal')}</p>"
-        f"<ul>{filas}</ul><p>Abrí el levantamiento para costearlo y generar la cotización.</p>",
+        f"<ul>{filas}</ul><p>{'El técnico resolvió las observaciones. ' if reenvio else ''}Abrí el levantamiento para revisarlo: aprobalo o devolvelo con observaciones antes del costeo.</p>",
         "survey",
         s.id,
     )
@@ -489,6 +556,92 @@ def survey_send(sid: int, p: Principal = Depends(require("field", "crear")), db:
     out = _survey_out(db, s)
     out["notified"] = notified
     return out
+
+
+class ObservationIn(BaseModel):
+    point_code: str | None = Field(None, max_length=20)  # sin dato = observacion general
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class ReviewIn(BaseModel):
+    action: str = Field(pattern="^(aprobar|devolver)$")
+    observations: list[ObservationIn] = Field(default_factory=list, max_length=60)
+    note: str | None = Field(None, max_length=2000)  # comentario general (al devolver cuenta como observacion)
+
+
+@router.post("/surveys/{sid}/review")
+def survey_review(sid: int, data: ReviewIn, p: Principal = Depends(require("field", "revisar")), db: Session = Depends(get_db)):
+    """Supervisor (o admin): aprueba lo que el tecnico envio o lo devuelve con observaciones por punto o generales."""
+    s = _survey(db, sid, p)
+    if s.status != "enviado" or s.review_status not in (None, "pendiente"):
+        raise HTTPException(409, f"El levantamiento no está esperando revisión ({REVIEW_LABEL.get(s.review_status, s.review_status)})")
+    now = datetime.now(UTC)
+    codes = {x.code for x in s.points}
+    obs = [o for o in data.observations if o.text.strip()]
+    if data.note and data.note.strip():
+        obs.append(ObservationIn(text=data.note.strip()))
+    bad = sorted({o.point_code for o in obs if o.point_code and o.point_code not in codes})
+    if bad:
+        raise HTTPException(422, f"Punto(s) que no existen en el levantamiento: {', '.join(bad)}")
+    if data.action == "devolver" and not obs:
+        raise HTTPException(422, "Para devolver el levantamiento escribí al menos una observación")
+    s.review_round = (s.review_round or 0) + 1
+    s.reviewed_by, s.reviewed_at = p.user.id, now
+    if data.action == "aprobar":
+        s.review_status = "aprobado"
+        audit(db, p.tenant.id, p.user.id, "review_approve", "survey", s.id, {"ronda": s.review_round, "nota": data.note}, ip=p.ip)
+        db.commit()
+        return _survey_out(db, s)
+    for o in obs:
+        s.observations.append(
+            SurveyObservation(review_round=s.review_round, point_code=o.point_code or None, text=o.text.strip(), created_by=p.user.id, created_at=now)
+        )
+    s.review_status, s.status = "devuelto", "borrador"  # vuelve a la mano del tecnico (aparece en su dia)
+    _notify_returned(db, p, s, obs)
+    audit(db, p.tenant.id, p.user.id, "review_return", "survey", s.id, {"ronda": s.review_round, "observaciones": len(obs)}, ip=p.ip)
+    db.commit()
+    return _survey_out(db, s)
+
+
+def _notify_returned(db: Session, p: Principal, s: Survey, obs: list[ObservationIn]) -> list[str]:
+    """Avisa al tecnico (y a quien lo envio, si es otro) que el levantamiento volvio con observaciones."""
+    destinos: list[str] = []
+    for uid in dict.fromkeys(x for x in (s.technician_id, s.sent_by) if x):
+        u = db.get(User, uid)
+        correo = (u.email or "").strip().lower() if u else ""
+        if correo and correo not in destinos:
+            destinos.append(correo)
+    filas = "".join(f"<li>{html.escape(o.point_code or 'General')}: {html.escape(o.text)}</li>" for o in obs[:30])
+    cuerpo = (
+        f"<p>{html.escape(p.user.full_name)} revisó el levantamiento <b>{html.escape(s.number)}</b> y lo devolvió con "
+        f"{len(obs)} observación(es):</p><ul>{filas}</ul><p>Corregí, marcá cada observación como resuelta y reenvialo a oficina.</p>"
+    )
+    for correo in destinos:
+        queue_email(db, p.tenant, correo, f"Levantamiento {s.number} devuelto con observaciones", cuerpo, "survey", s.id)
+    return destinos
+
+
+class ResolveIn(BaseModel):
+    resolved: bool = True
+    resolution: str | None = Field(None, max_length=400)  # que se corrigio (o por que no aplica)
+
+
+@router.post("/surveys/{sid}/observations/{oid}")
+def survey_observation_resolve(sid: int, oid: int, data: ResolveIn, p: Principal = Depends(require("field", "editar")), db: Session = Depends(get_db)):
+    """El tecnico marca una observacion como resuelta (o la reabre). Con todas resueltas puede reenviar."""
+    s = _survey(db, sid, p)
+    o = next((x for x in s.observations if x.id == oid), None)
+    if not o:
+        raise HTTPException(404, "Observación no encontrada")
+    if s.status in ("cotizado", "cerrado"):
+        raise HTTPException(409, "El levantamiento ya fue cotizado")
+    if data.resolved:
+        o.resolved_at, o.resolved_by, o.resolution = datetime.now(UTC), p.user.id, (data.resolution or "").strip() or None
+    else:
+        o.resolved_at, o.resolved_by, o.resolution = None, None, None
+    audit(db, p.tenant.id, p.user.id, "observation_resolve" if data.resolved else "observation_reopen", "survey", s.id, {"observacion": o.id}, ip=p.ip)
+    db.commit()
+    return _survey_out(db, s)
 
 
 @router.get("/surveys/{sid}/costing")
@@ -678,6 +831,8 @@ class ToQuoteIn(BaseModel):
     labor_label: str = Field("Instalación y configuración", max_length=200)
     include_labor: bool = True
     notes: str | None = None
+    # cotizar sin revision aprobada: solo con field.saltar_revision (admin) y confirmado a proposito en el portal
+    skip_review: bool = False
 
 
 @router.post("/surveys/{sid}/quote", status_code=201)
@@ -690,6 +845,14 @@ def survey_to_quote(sid: int, data: ToQuoteIn, p: Principal = Depends(require("s
         raise HTTPException(409, "Este levantamiento ya generó una cotización")
     if not s.customer_id:
         raise HTTPException(422, "Asigná un cliente al levantamiento antes de cotizar")
+    if s.review_status != "aprobado":
+        estado = REVIEW_LABEL.get(s.review_status, s.review_status).lower()
+        if not data.skip_review:
+            extra = " Como administrador podés cotizar sin revisión confirmándolo." if p.can("field", "saltar_revision") else ""
+            raise HTTPException(409, f"El levantamiento necesita la revisión aprobada del supervisor antes de cotizar (estado: {estado}).{extra}")
+        if not p.can("field", "saltar_revision"):
+            raise HTTPException(403, "Sin permiso: field.saltar_revision")
+        audit(db, p.tenant.id, p.user.id, "review_skip", "survey", s.id, {"estado": s.review_status}, ip=p.ip)
     costing = survey_costing(sid, data.margin, p, db)
     lines = [
         LineInSchema(

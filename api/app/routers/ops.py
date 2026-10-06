@@ -105,6 +105,12 @@ def doc_send(kind: str, id_: int, data: SendIn, p: Principal = Depends(require("
     sent = m.status == "enviado"
     if sent and d.status == "creado":
         d.status = "enviada"
+    version = None
+    if sent and not is_inv:
+        from ..services import quote_versions as qv
+
+        # lo que salio queda congelado como version (v1, v2... si se edito despues de enviarla)
+        version = qv.record_send(db, p.tenant, p.user.id, d, "correo", to, ip=p.ip)[0].version
     if sent and not is_inv:
         from ..models import Opportunity
 
@@ -120,7 +126,7 @@ def doc_send(kind: str, id_: int, data: SendIn, p: Principal = Depends(require("
         note = f"El correo NO salió ({(m.error or 'error del proveedor')[:160]}). El documento no se marcó como enviado."
     else:
         note = None
-    return {"status": m.status, "sent": sent, "to": to, "note": note}
+    return {"status": m.status, "sent": sent, "to": to, "note": note, "version": version}
 
 
 # ---------- Factura electronica ----------

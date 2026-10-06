@@ -214,7 +214,7 @@ def test_mixed_survey_report_costing_and_quote(client, auth, db_session):
 
     page = render_survey_html(db_session, db_session.get(Survey, s["id"]), db_session.get(Tenant, auth["tenant"]["id"]))
     assert "Puerta · Puerta principal" in page and "Cerradura" in page and "Carga a respaldar" in page
-    r = client.post(f"/surveys/{s['id']}/quote", json={})
+    r = client.post(f"/surveys/{s['id']}/quote", json={"skip_review": True})
     assert r.status_code == 201, r.text
 
 
@@ -226,5 +226,5 @@ def test_survey_quote_never_moves_opportunity_back(client, auth, db_session):
     ).json()
     db_session.get(Opportunity, o["id"]).status = "negociacion"
     db_session.commit()
-    assert client.post(f"/surveys/{s['id']}/quote", json={}).status_code == 201
+    assert client.post(f"/surveys/{s['id']}/quote", json={"skip_review": True}).status_code == 201
     assert client.get(f"/opportunities/{o['id']}").json()["status"] == "negociacion"

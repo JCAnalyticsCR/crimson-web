@@ -2,7 +2,7 @@
    El formulario no esta escrito aqui: lo dibuja /field/specs, asi agregar un tipo de solucion es tocar solo la API. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api, fmtMoney, openFile, parseTs } from "../../lib/api";
+import { api, ApiError, fmtMoney, openFile, parseTs } from "../../lib/api";
 import { unitOptions } from "../../lib/units";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
@@ -12,6 +12,7 @@ import { Lightbox, type Foto } from "../../ui/Lightbox";
 import { InviteTechButton } from "./InviteTech";
 import { ArchiveActions } from "../../ui/ArchiveActions";
 import { LinkOpportunity, type OppRef } from "./LinkOpportunity";
+import { pickReview, ReviewPanel, reviewTone, type ReviewInfo } from "./SurveyReview";
 
 type FieldSpec = { key: string; label: string; type: "text" | "number" | "select" | "multi" | "bool"; options?: string[]; unit?: string; placeholder?: string };
 type Spec = { label: string; point_prefix: string; point_label: string; fields: FieldSpec[]; materials: string[] };
@@ -30,7 +31,7 @@ type Survey = {
   sent_at: string | null; sent_by: string | null; pending_review?: Review; visit_tech_ids: number[]; visit_techs: string[];
   labor: Record<LaborKey, { label: string; people: number; days: string | number }>;
   points?: Point[]; items?: (Omit<Item, "quantity"> & { quantity: string | number })[];
-};
+} & Partial<ReviewInfo>;
 type CostLine = {
   item_id: number; product_id: number | null; name: string; kind: Kind; quantity: string; unit: string; unit_cost: string; cost: string;
   unit_price: string; price: string; has_cost: boolean; cost_source: "catalogo" | "levantamiento" | null; price_from_cost: boolean;
@@ -71,7 +72,7 @@ const emptySurvey = (kind: string) => ({
 });
 type Draft = ReturnType<typeof emptySurvey> & {
   id?: number; number?: string; status?: string; quote_id?: number | null; opportunity?: OppRef; sent_at?: string | null; sent_by?: string | null; pending_review?: Review;
-  archived_at?: string | null; trashed_at?: string | null;
+  archived_at?: string | null; trashed_at?: string | null; review?: ReviewInfo;
 };
 
 const num = (v: string | number | null | undefined) => { const n = Number(String(v ?? "").replace(",", ".")); return Number.isFinite(n) ? n : 0; };
@@ -152,6 +153,7 @@ export default function Surveys() {
       notes: s.notes || "", photos: s.photos || [], points: s.points || [],
       items: (s.items || []).map((i) => ({ ...i, quantity: String(i.quantity), kind: i.kind === "equipo" || i.kind === "servicio" ? i.kind : "material" })),
       sent_at: s.sent_at, sent_by: s.sent_by, pending_review: s.pending_review, archived_at: s.archived_at, trashed_at: s.trashed_at,
+      review: pickReview(s),
     });
   };
 
@@ -182,7 +184,7 @@ export default function Surveys() {
     try {
       const s = await api<Survey>(draft.id ? `/surveys/${draft.id}` : "/surveys", { method: draft.id ? "PUT" : "POST", json: body(draft) });
       if (!silent) toast(draft.id ? "Levantamiento guardado" : `Levantamiento ${s.number} creado`);
-      setDraft((d) => (d ? { ...d, id: s.id, number: s.number, status: s.status } : d));
+      setDraft((d) => (d ? { ...d, id: s.id, number: s.number, status: s.status, review: pickReview(s) } : d));
       load();
       return s;
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); return null; }
@@ -288,8 +290,16 @@ export default function Surveys() {
     if (!draft?.id) return;
     if (!(await saveCosts())) return;
     if (!(await save(true))) return;
+    const go = (skip_review: boolean) => api<{ quote_id: number; number: string }>(`/surveys/${draft.id}/quote`, { method: "POST", json: { margin, include_labor: true, skip_review } });
     try {
-      const q = await api<{ quote_id: number; number: string }>(`/surveys/${draft.id}/quote`, { method: "POST", json: { margin, include_labor: true } });
+      let q;
+      try { q = await go(false); }
+      catch (e) {
+        /* Sin revision aprobada la API responde 409. Solo quien puede saltarla (admin) lo hace, y a proposito. */
+        if (!(e instanceof ApiError && e.status === 409 && allows("field.saltar_revision") && /revisión/.test(e.message))) throw e;
+        if (!confirm(`${e.message}\n\n¿Generar la cotización de todas formas, sin la revisión del supervisor? Queda registrado.`)) return;
+        q = await go(true);
+      }
       toast(`Cotización ${q.number} creada`); nav(`/cotizaciones/${q.quote_id}`);
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
@@ -345,7 +355,14 @@ export default function Surveys() {
     return <input className="input" placeholder={f.placeholder} value={String(v ?? "")} onChange={(e) => setData(i, f.key, e.target.value)} />;
   };
 
-  const pendientes = useMemo(() => rows.filter((r) => r.status === "enviado").length, [rows]);
+  // grupoB: primero revisa el supervisor; el costeo espera la revision aprobada
+  const pendientes = useMemo(() => rows.filter((r) => r.status === "enviado" && r.review_status === "aprobado").length, [rows]);
+  const porRevisar = useMemo(() => rows.filter((r) => r.status === "enviado" && r.review_status !== "aprobado").length, [rows]);
+  const obsAbiertas = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const o of draft?.review?.observations || []) if (!o.resolved && o.point_code) m[o.point_code] = (m[o.point_code] || 0) + 1;
+    return m;
+  }, [draft?.review]);
 
   /* ---------- costeo en vivo: el costo escrito recalcula precio y margen antes de guardarlo ---------- */
   const live = useMemo(() => {
@@ -421,7 +438,8 @@ export default function Surveys() {
         </div>
       </div>
 
-      {verCostos && pendientes > 0 && <div className="status-line" style={{ color: "var(--warn)" }}><i className="rec-dot" />{pendientes} levantamiento{pendientes !== 1 ? "s" : ""} esperando costeo</div>}
+      {allows("field.revisar") && porRevisar > 0 && <div className="status-line" style={{ color: "var(--info, #3c82f0)" }}><i className="rec-dot" />{porRevisar} levantamiento{porRevisar !== 1 ? "s" : ""} esperando revisión del supervisor</div>}
+      {verCostos && pendientes > 0 && <div className="status-line" style={{ color: "var(--warn)" }}><i className="rec-dot" />{pendientes} levantamiento{pendientes !== 1 ? "s" : ""} con revisión aprobada, esperando costeo</div>}
 
       <Card flush>
         {rows.length === 0 ? <Empty title="Todavía no hay levantamientos" hint="El técnico llena el levantamiento en sitio y administración lo convierte en cotización sin volver a escribir nada." /> : (
@@ -432,7 +450,10 @@ export default function Surveys() {
                 <td className="mono muted">{s.number}</td><td>{s.kind_label}</td><td style={{ fontWeight: 600 }}>{s.customer || "—"}</td>
                 <td className="muted" style={{ fontSize: 13 }}>{s.site || "—"}</td><td className="num mono">{s.points_count}</td><td className="muted">{s.technician || "—"}</td>
                 <td>
-                  <span className={`badge badge--${STATUS[s.status]?.tone || "muted"}`}>{STATUS[s.status]?.label || s.status}</span>
+                  <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+                    <span className={`badge badge--${STATUS[s.status]?.tone || "muted"}`}>{STATUS[s.status]?.label || s.status}</span>
+                    {s.review_status && s.status !== "cotizado" && s.status !== "cerrado" && <span className={`badge badge--${reviewTone(s.review_status)}`} title="Revisión del supervisor">{s.review_label}{s.open_observations ? ` · ${s.open_observations}` : ""}</span>}
+                  </span>
                   {sentLine(s) && <div className="meta" style={{ marginTop: 4, textTransform: "none", letterSpacing: 0 }}>{sentLine(s)}</div>}
                 </td>
                 <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => open(s.id)}>Abrir</button></td>
@@ -464,6 +485,15 @@ export default function Surveys() {
             <p style={{ background: "var(--info-soft, rgba(60,130,240,.1))", border: "1px solid var(--info, #3c82f0)", borderRadius: 10, padding: "10px 14px", fontSize: 13, margin: 0 }}>
               <b>Enviado a oficina</b> · {sentLine(draft)}
             </p>
+          )}
+          {draft.id && draft.review && (draft.review.review_status || draft.review.observations.length > 0) && (
+            <ReviewPanel
+              surveyId={draft.id}
+              status={draft.status}
+              info={draft.review}
+              pointCodes={draft.points.map((p) => p.code)}
+              onChange={(s) => { setDraft((d) => (d ? { ...d, status: s.status, review: pickReview(s) } : d)); load(); }}
+            />
           )}
           <div className="grid-3">
             <Field label="Tipo de solución"><select className="select" value={draft.kind} disabled={!!draft.id} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>{Object.entries(specs).map(([k, s]) => <option key={k} value={k}>{s.label}</option>)}</select></Field>
@@ -518,6 +548,7 @@ export default function Surveys() {
                 {other && <div className="point__kind"><span className="badge badge--info">{ps?.point_label || pt.kind} · {ps?.label || pt.kind}</span></div>}
                 <div className="point__head">
                   <input className="input input--mono" style={{ maxWidth: 110 }} value={pt.code} onChange={(e) => setPoint(i, { code: e.target.value })} />
+                  {obsAbiertas[pt.code] > 0 && <span className="badge badge--warn point__obs" title="Observaciones del supervisor sin resolver">{obsAbiertas[pt.code]} obs.</span>}
                   <input className="input" value={pt.label} placeholder="Entrada principal" onChange={(e) => setPoint(i, { label: e.target.value })} />
                   {!readOnly && <button className="btn btn--ghost btn--sm" title="Duplicar: mismas características, otro punto" onClick={() => dupPoint(i)}><Icon d={I.copy} size={14} /></button>}
                   {!readOnly && <button className="btn btn--ghost btn--sm" title="Quitar" onClick={() => setDraft({ ...draft, points: draft.points.filter((_, j) => j !== i) })}><Icon d={I.x} size={14} /></button>}
@@ -585,6 +616,11 @@ export default function Surveys() {
           <button className="btn btn--ghost" onClick={() => { setCosting(null); setCostEdits({}); }}>Cerrar</button>
           <button className="btn btn--crimson" onClick={toQuote}>Aprobar y generar cotización</button>
         </>}>
+          {draft.review?.review_status !== "aprobado" && (
+            <p className="review__hint" style={{ background: "var(--warn-soft)", border: "1px solid var(--warn)", borderRadius: 10, padding: "10px 14px" }}>
+              Revisión del supervisor: <b>{draft.review?.review_label || "sin enviar"}</b>. La cotización se genera cuando el supervisor la apruebe{allows("field.saltar_revision") ? " (como administrador podés saltarla confirmándolo)" : ""}.
+            </p>
+          )}
           {live.missing.length > 0 && (
             <p style={{ background: "var(--bad-soft, rgba(226,35,58,.1))", border: "1px solid var(--bad)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "var(--bad)" }}>
               Sin costo de proveedor: {live.missing.slice(0, 4).join(", ")}{live.missing.length > 4 ? ` y ${live.missing.length - 4} más` : ""}. Escribí el costo en la línea; mientras tanto el margen real va a ser menor al que ves.

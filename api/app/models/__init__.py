@@ -37,6 +37,7 @@ from .field import (
     PurchaseRequestLine,
     Survey,
     SurveyItem,
+    SurveyObservation,
     SurveyPoint,
     WorkOrder,
     WorkOrderMaterial,
@@ -53,7 +54,7 @@ from .ops import (
     WebhookEvent,
 )
 from .payments import BankAccount, Payment, PaymentLink
-from .sales import BillingGroup, Invoice, InvoiceLine, Quote, QuoteLine
+from .sales import BillingGroup, Invoice, InvoiceLine, Quote, QuoteAcceptance, QuoteLine, QuoteVersion
 from .store import ApiCredential, Coupon, Order, OrderLine, ReceivedDocument, StorePage
 from .support import (
     Commission,
@@ -85,6 +86,8 @@ __all__ = [
     "BillingGroup",
     "Quote",
     "QuoteLine",
+    "QuoteVersion",
+    "QuoteAcceptance",
     "Invoice",
     "InvoiceLine",
     "BankAccount",
@@ -121,6 +124,7 @@ __all__ = [
     "Survey",
     "SurveyPoint",
     "SurveyItem",
+    "SurveyObservation",
     "Project",
     "WorkOrder",
     "WorkOrderMaterial",
