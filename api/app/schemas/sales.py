@@ -18,6 +18,7 @@ class LineInSchema(BaseModel):
     discount_type: str = "percent"
     discount_value: Decimal = Field(Decimal(0), ge=0)
     tax_rate: Decimal | None = None
+    treatment: str = Field("normal", pattern="^(normal|pendiente|aportado|cortesia|excluido)$")
 
 
 class DocumentIn(BaseModel):
@@ -59,6 +60,7 @@ class LineOut(BaseModel):
     subtotal: Decimal
     tax_amount: Decimal
     total: Decimal
+    treatment: str = "normal"
 
 
 class DocBaseOut(BaseModel):

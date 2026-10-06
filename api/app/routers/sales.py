@@ -25,7 +25,8 @@ from ..services import discounts
 from ..services import documents as svc
 from ..services import inventory as invsvc
 from ..services.documents import audit
-from ..services.totals import LineIn, compute_document, d
+from ..services import units
+from ..services.totals import compute_document, d
 
 router = APIRouter(tags=["ventas"])
 
@@ -149,10 +150,7 @@ def preview(data: DocumentIn, p: Principal = Depends(require("sales", "ver")), d
     """Totales en vivo para el editor (sin guardar). Completa precio/impuesto desde el producto si falta."""
     lines = [svc._fill_line_from_product(db, p.tenant.id, ln) for ln in data.lines]
     calc = compute_document(
-        [
-            LineIn(d(ln.quantity), d(ln.unit_price or 0), ln.discount_type, d(ln.discount_value), d(ln.tax_rate if ln.tax_rate is not None else 13))
-            for ln in lines
-        ],
+        [svc.line_in(ln) for ln in lines],
         data.discount_type,
         data.discount_value,
     )
@@ -171,6 +169,7 @@ def preview(data: DocumentIn, p: Principal = Depends(require("sales", "ver")), d
                 "subtotal": lo.subtotal,
                 "tax_amount": lo.tax_amount,
                 "total": lo.total,
+                "treatment": ln.treatment,
             }
             for ln, lo in zip(lines, calc.lines, strict=True)
         ],
@@ -283,6 +282,7 @@ def send_quote(qid: int, p: Principal = Depends(require("sales", "enviar")), db:
     q = _own(db, Quote, qid, p.tenant.id, p)
     if q.status == "por_aprobar":
         raise HTTPException(409, "La cotización tiene un descuento pendiente de aprobación")
+    units.check_ready(q, "enviar la cotización")
     if q.status == "creado":
         q.status = "enviada"
     audit(db, p.tenant.id, p.user.id, "send", "quote", q.id, ip=p.ip)
@@ -328,10 +328,18 @@ def invoices(
     return _list(db, Invoice, p.tenant.id, status, cursor, limit, q, p, pendiente)
 
 
+def _no_pending(data: DocumentIn) -> None:
+    """Una factura no lleva lineas con precio pendiente: eso se resuelve en la cotizacion."""
+    pend = [ln.name for ln in data.lines if ln.treatment == "pendiente"]
+    if pend:
+        raise HTTPException(422, f"La factura tiene líneas con precio pendiente ({', '.join(pend[:6])}). Completá el precio antes de facturar.")
+
+
 @router.post("/invoices", response_model=InvoiceOut, status_code=201)
 def create_invoice(data: DocumentIn, doc_type: str = "FE", p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
     if doc_type not in ("FE", "TE", "FEE"):
         raise HTTPException(422, "doc_type debe ser FE, TE o FEE")
+    _no_pending(data)
     chk = discounts.check(db, p, data)
     if chk.exceeds:
         raise HTTPException(422, f"{chk.message} Hacé una cotización para que un administrador apruebe el descuento.")
@@ -353,6 +361,7 @@ def update_invoice(iid: int, data: DocumentIn, p: Principal = Depends(require("s
         raise HTTPException(409, "La factura ya fue emitida o anulada; use nota de credito")
     if inv.payments:
         raise HTTPException(409, "La factura tiene pagos registrados")
+    _no_pending(data)
     from ..models import InvoiceLine
 
     chk = discounts.check(db, p, data)

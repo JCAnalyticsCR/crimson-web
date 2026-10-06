@@ -8,6 +8,7 @@ from jinja2 import Environment, select_autoescape
 from sqlalchemy.orm import Session
 
 from ..models import Customer, Invoice, Quote, Tenant
+from .units import LEYENDA, unit_label
 
 env = Environment(autoescape=select_autoescape(["html"]))
 
@@ -19,6 +20,7 @@ def money(v, cur="CRC") -> str:
 
 
 env.filters["money"] = money
+env.filters["unidad"] = unit_label
 
 TEMPLATE = env.from_string("""<!doctype html><html lang="es"><head><meta charset="utf-8"><title>{{ kind }} {{ d.number }}</title>
 <style>
@@ -36,6 +38,9 @@ td{padding:8px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-
 .notes{margin-top:18px;padding:10px 12px;background:#f6f2ee;border-radius:8px;color:#5a5560;font-size:11px;white-space:pre-wrap}
 .foot{margin-top:24px;padding-top:10px;border-top:1px solid #e6e1db;font-size:10px;color:#8a858f;display:flex;justify-content:space-between}
 .stamp{display:inline-block;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:#f6f2ee;color:#5a5560}
+.tag{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;font-size:9.5px;font-weight:700;letter-spacing:.04em;background:#f6f2ee;color:#5a5560;vertical-align:1px}
+.excl{margin-top:14px;border:1px dashed #d9d2ca;border-radius:8px;padding:10px 12px;font-size:11.5px;color:#5a5560}.excl .k{font-family:Consolas,monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:#8a858f;margin-bottom:4px}.excl ul{margin:0;padding-left:18px}
+@media (max-width:640px){.meta{grid-template-columns:1fr}.tot{width:100%}.top{flex-direction:column;gap:10px}.docid{text-align:left}th,td{padding:6px 2px}}
 .stamp.paid{background:#e4f6ea;color:#1f9d55}.stamp.void{background:#fde3e6;color:#e2233a}
 </style></head><body>
 <div class="top">
@@ -50,9 +55,10 @@ td{padding:8px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-
   <div class="box"><div class="k">Detalle</div>Fecha: <b>{{ d.issue_date }}</b><br>{% if d.due_date %}Vence: <b>{{ d.due_date }}</b><br>{% endif %}Divisa: <b>{{ d.currency }}</b>{% if d.currency != 'CRC' %} · TC {{ d.fx_sell }}{% endif %}{% if d.external_order %}<br>Orden externa: {{ d.external_order }}{% endif %}{% if d.activity_code %}<br>Actividad: {{ d.activity_code }}{% endif %}</div>
 </div>
 <table><thead><tr><th>Concepto</th><th class="num">Cant.</th><th class="num">Precio</th><th class="num">Desc.</th><th class="num">IVA</th><th class="num">Subtotal</th></tr></thead><tbody>
-{% for l in d.lines %}<tr><td><b>{{ l.name }}</b>{% if l.description %}<div class="desc">{{ l.description }}</div>{% endif %}{% if l.cabys_code %}<div class="desc">CABYS {{ l.cabys_code }}</div>{% endif %}</td>
-<td class="num">{{ "%g"|format(l.quantity|float) }} {{ l.unit }}</td><td class="num">{{ l.unit_price|money(d.currency) }}</td><td class="num">{% if l.discount_value|float > 0 %}{{ "%g"|format(l.discount_value|float) }}{{ "%" if l.discount_type == "percent" else "" }}{% else %}—{% endif %}</td><td class="num">{{ "%g"|format(l.tax_rate|float) }}%</td><td class="num">{{ l.subtotal|money(d.currency) }}</td></tr>{% endfor %}
+{% for l in d.lines if (l.treatment or "normal") != "excluido" %}{% set nosuma = l.treatment in ("aportado", "cortesia") %}<tr><td><b>{{ l.name }}</b>{% if nosuma %} <span class="tag">{{ leyenda[l.treatment] }}</span>{% endif %}{% if l.description %}<div class="desc">{{ l.description }}</div>{% endif %}{% if l.cabys_code %}<div class="desc">CABYS {{ l.cabys_code }}</div>{% endif %}</td>
+<td class="num">{{ "%g"|format(l.quantity|float) }} {{ l.unit|unidad }}</td>{% if nosuma %}<td class="num" colspan="3">—</td><td class="num">No suma</td>{% else %}<td class="num">{{ l.unit_price|money(d.currency) }}</td><td class="num">{% if l.discount_value|float > 0 %}{{ "%g"|format(l.discount_value|float) }}{{ "%" if l.discount_type == "percent" else "" }}{% else %}—{% endif %}</td><td class="num">{{ "%g"|format(l.tax_rate|float) }}%</td><td class="num">{{ l.subtotal|money(d.currency) }}</td>{% endif %}</tr>{% endfor %}
 </tbody></table>
+{% set excl = d.lines|selectattr("treatment", "equalto", "excluido")|list %}{% if excl %}<div class="excl"><div class="k">Exclusiones · no incluidas en esta oferta</div><ul>{% for l in excl %}<li><b>{{ l.name }}</b>{% if l.quantity|float > 0 %} · {{ "%g"|format(l.quantity|float) }} {{ l.unit|unidad }}{% endif %}{% if l.description %} — {{ l.description }}{% endif %}</li>{% endfor %}</ul></div>{% endif %}
 <table class="tot"><tr><td>Subtotal</td><td class="num">{{ d.subtotal|money(d.currency) }}</td></tr>
 {% if d.discount_total|float > 0 %}<tr><td>Descuento</td><td class="num">−{{ d.discount_total|money(d.currency) }}</td></tr>{% endif %}
 <tr><td>Impuestos</td><td class="num">{{ d.tax_total|money(d.currency) }}</td></tr>
@@ -73,6 +79,7 @@ def render_html(db: Session, doc: Quote | Invoice, tenant: Tenant) -> str:
         t=tenant,
         c=c,
         kind="Factura" if is_inv else "Cotización",
+        leyenda=LEYENDA,
         balance=doc.balance if is_inv else None,
         footer=st.get("invoice_footer" if is_inv else "quote_footer"),
     )

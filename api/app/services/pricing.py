@@ -42,6 +42,52 @@ def sale_price(db: Session, cost: Decimal, cost_currency: str, target_currency: 
     return price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+# ---------- margen vs recargo: las dos formulas, con nombre ----------
+# margen sobre venta:  precio = costo / (1 - margen)   -> politica vigente (sale_price)
+# recargo sobre costo: precio = costo x (1 + recargo)  -> solo como equivalencia informativa
+def price_from_margin(cost, margin_pct) -> Decimal:
+    m = d(margin_pct)
+    if m >= 100:
+        raise ValueError("El margen debe ser menor a 100 %")
+    return (d(cost) / (1 - m / 100)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def price_from_markup(cost, markup_pct) -> Decimal:
+    return (d(cost) * (1 + d(markup_pct) / 100)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def markup_from_margin(margin_pct) -> Decimal:
+    """Recargo sobre costo que da el mismo precio que ese margen sobre venta: m / (1 - m)."""
+    m = d(margin_pct) / 100
+    if m >= 1:
+        raise ValueError("El margen debe ser menor a 100 %")
+    return (m / (1 - m) * 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def margin_from_markup(markup_pct) -> Decimal:
+    """Margen sobre venta que deja un recargo sobre costo: r / (1 + r)."""
+    r = d(markup_pct) / 100
+    return (r / (1 + r) * 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def policy(margin_pct, price=None, cost=None) -> dict:
+    """La politica vigente nombrada sin ambiguedad, para mostrarla en el costeo."""
+    m = d(margin_pct)
+    out = {
+        "mode": "margen_sobre_venta",
+        "label": "Margen sobre venta",
+        "formula": "precio = costo ÷ (1 − margen)",
+        "alt_formula": "recargo sobre costo: precio = costo × (1 + recargo)",
+        "target_margin_pct": m,
+        "target_markup_pct": markup_from_margin(m) if m < 100 else None,
+        "rounding": "precio en colones redondeado hacia arriba a la centena",
+    }
+    if price is not None and cost is not None and d(cost) > 0:
+        out["real_margin_pct"] = ((d(price) - d(cost)) / d(price) * 100).quantize(Decimal("0.01")) if d(price) > 0 else Decimal(0)
+        out["real_markup_pct"] = ((d(price) - d(cost)) / d(cost) * 100).quantize(Decimal("0.01"))
+    return out
+
+
 def margin_of(price: Decimal, cost_crc: Decimal) -> Decimal:
     """Margen sobre la venta (lo que se usa para hablar de "margen 35 %" en una cotizacion)."""
     price, cost_crc = d(price), d(cost_crc)

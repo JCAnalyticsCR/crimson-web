@@ -26,7 +26,7 @@ from ..services.archive import live
 from ..services.documents import audit
 from ..services.mail import notify_roles
 from ..services.sequences import next_number
-from ..services.survey_specs import SPECS, classify_kind, normalize_point_data, suggest_materials
+from ..services.survey_specs import SPECS, normalize_item, normalize_point_data, suggest_materials
 from ..services.totals import d
 
 router = APIRouter(tags=["campo"])
@@ -186,7 +186,7 @@ class ItemIn(BaseModel):
     quantity: Decimal = Field(Decimal(1), ge=0)
     unit: str = Field("Unid", max_length=10)
     note: str | None = Field(None, max_length=200)
-    kind: str | None = Field(None, pattern="^(equipo|material)$")  # sin dato se clasifica por el nombre
+    kind: str | None = Field(None, pattern="^(equipo|material|servicio)$")  # sin dato se clasifica por el nombre
 
 
 class LaborIn(BaseModel):
@@ -303,14 +303,15 @@ def _apply_children(s: Survey, data: SurveyIn) -> None:
     for it in data.items:
         old = prev.get(it.id) if it.id else None
         keep_cost = old.unit_cost if old is not None and old.product_id == it.product_id else None
+        kind, unit = normalize_item(it.name, it.kind or (old.kind if old is not None else None), it.unit)
         s.items.append(
             SurveyItem(
                 product_id=it.product_id,
                 name=it.name,
                 quantity=it.quantity,
-                unit=it.unit,
+                unit=unit,
                 note=it.note,
-                kind=it.kind or (old.kind if old is not None else classify_kind(it.name)),
+                kind=kind,
                 unit_cost=keep_cost,
             )
         )
@@ -415,7 +416,7 @@ class SuggestionIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     quantity: Decimal = Field(gt=0)
     unit: str = Field("Unid", max_length=10)
-    kind: str | None = Field(None, pattern="^(equipo|material)$")
+    kind: str | None = Field(None, pattern="^(equipo|material|servicio)$")
     product_id: int | None = None
     note: str | None = Field(None, max_length=200)
     item_id: int | None = None  # linea existente a la que se suma (la sugerencia la cruzo por familia de material)
@@ -438,9 +439,8 @@ def survey_suggest_apply(sid: int, data: list[SuggestionIn], p: Principal = Depe
             match.quantity = d(match.quantity) + sg.quantity
             summed += 1
         else:
-            s.items.append(
-                SurveyItem(product_id=sg.product_id, name=sg.name, quantity=sg.quantity, unit=sg.unit, note=sg.note, kind=sg.kind or classify_kind(sg.name))
-            )
+            kind, unit = normalize_item(sg.name, sg.kind, sg.unit)
+            s.items.append(SurveyItem(product_id=sg.product_id, name=sg.name, quantity=sg.quantity, unit=unit, note=sg.note, kind=kind))
             added += 1
     audit(db, p.tenant.id, p.user.id, "suggest_apply", "survey", s.id, {"agregados": added, "sumados": summed}, ip=p.ip)
     db.commit()
@@ -505,7 +505,7 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
     propias = tarifas_survey(s)
     transport = propias.get("transport", transport)
     lines, cost_items, price_items = [], Decimal(0), Decimal(0)
-    groups = {"equipo": {"cost": Decimal(0), "price": Decimal(0)}, "material": {"cost": Decimal(0), "price": Decimal(0)}}
+    groups = {k: {"cost": Decimal(0), "price": Decimal(0)} for k in ("equipo", "material", "servicio")}
     for it in s.items:
         prod = db.get(Product, it.product_id) if it.product_id else None
         qty = d(it.quantity)
@@ -539,7 +539,8 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
         g = groups.setdefault(kind, {"cost": Decimal(0), "price": Decimal(0)})
         g["cost"] += unit_cost * qty
         g["price"] += d(unit_price) * qty
-    lines.sort(key=lambda x: 0 if x["kind"] == "equipo" else 1)  # equipos primero, como en el levantamiento
+    orden = {"equipo": 0, "material": 1, "servicio": 2}
+    lines.sort(key=lambda x: orden.get(x["kind"], 1))  # equipos, materiales y servicios, como en el levantamiento
 
     # mano de obra por tipo de personal
     generales = labor_rates(p.tenant)
@@ -591,6 +592,8 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
         "price_suggested": suggested.quantize(Decimal("0.01")),
         "margin_pct": pricing.margin_of(suggested, cost_total),
         "margin_target": margin_pct,
+        # la politica vigente nombrada sin ambiguedad: margen sobre la venta, con su recargo equivalente
+        "pricing_policy": pricing.policy(margin_pct, suggested, cost_total),
         "fx": fx,
         "missing_cost": [line["name"] for line in lines if not line["has_cost"]],
         "can_save_catalog": p.can("catalog", "editar"),
@@ -689,7 +692,15 @@ def survey_to_quote(sid: int, data: ToQuoteIn, p: Principal = Depends(require("s
         raise HTTPException(422, "Asigná un cliente al levantamiento antes de cotizar")
     costing = survey_costing(sid, data.margin, p, db)
     lines = [
-        LineInSchema(product_id=x["product_id"], name=x["name"], quantity=d(x["quantity"]), unit_price=d(x["unit_price"]), unit=x["unit"])
+        LineInSchema(
+            product_id=x["product_id"],
+            name=x["name"],
+            quantity=d(x["quantity"]),
+            unit_price=d(x["unit_price"]),
+            unit=x["unit"],
+            # sin costo ni precio de lista no se cotiza en 0 callado: queda pendiente y bloquea enviar/convertir
+            treatment="pendiente" if d(x["unit_price"]) <= 0 else "normal",
+        )
         for x in costing["lines"]
         if d(x["quantity"]) > 0
     ]
@@ -701,6 +712,7 @@ def survey_to_quote(sid: int, data: ToQuoteIn, p: Principal = Depends(require("s
                 quantity=Decimal(1),
                 unit_price=d(costing["labor"]["price"]),
                 unit="Sp",
+                treatment="pendiente" if d(costing["labor"]["price"]) <= 0 else "normal",
             )
         )
     if not lines:

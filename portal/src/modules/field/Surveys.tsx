@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, openFile, parseTs } from "../../lib/api";
+import { unitOptions } from "../../lib/units";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 import { Lookup, searchCustomers, searchProducts } from "../../ui/Lookup";
@@ -16,7 +17,7 @@ type FieldSpec = { key: string; label: string; type: "text" | "number" | "select
 type Spec = { label: string; point_prefix: string; point_label: string; fields: FieldSpec[]; materials: string[] };
 /* kind: tipo del punto si no es el del levantamiento (una puerta de acceso dentro de uno de CCTV). */
 type Point = { id?: number; code: string; kind?: string | null; label: string; data: Record<string, unknown>; photos: string[]; notes: string | null };
-type Kind = "equipo" | "material";
+type Kind = "equipo" | "material" | "servicio";
 type Item = { id?: number; product_id: number | null; name: string; quantity: string; unit: string; note: string | null; kind: Kind };
 type LaborKey = "tecnico" | "civil" | "contratado";
 type Labor = Record<LaborKey, { people: string; days: string }>;
@@ -54,7 +55,10 @@ const LABOR: [LaborKey, string][] = [["tecnico", "Personal técnico"], ["civil",
 const KINDS: [Kind, string, string][] = [
   ["equipo", "Equipos", "Cámaras, grabadores, UPS, antenas, gabinetes: lo que se instala y tiene serie."],
   ["material", "Materiales", "Cable, tubo, placas, conectores: lo que se consume en la instalación."],
+  ["servicio", "Servicios y alquileres", "Elevador, andamio, grúa, transporte: se cotizan por día, jornada, hora o servicio, no por metro."],
 ];
+/* Margen sobre venta m -> recargo sobre costo equivalente: m / (1 - m). */
+const markupOf = (m: number) => (m >= 100 ? 0 : (m / (100 - m)) * 100);
 const ACTION: Record<Suggestion["action"], { label: string; tone: string }> = {
   nuevo: { label: "Nuevo", tone: "ok" }, sumar: { label: "Ya está: sumar", tone: "info" },
   cubierto: { label: "Ya alcanza", tone: "muted" }, revisar: { label: "Revisar cantidad", tone: "warn" },
@@ -146,7 +150,7 @@ export default function Surveys() {
       id: s.id, number: s.number, status: s.status, quote_id: s.quote_id, kind: s.kind, customer_id: s.customer_id ? String(s.customer_id) : "", customer_name: s.customer || "",
       opportunity_id: s.opportunity_id ? String(s.opportunity_id) : "", opportunity: s.opportunity ?? null, site: s.site || "", visit_date: s.visit_date || "", labor, visit_tech_ids: s.visit_tech_ids || [],
       notes: s.notes || "", photos: s.photos || [], points: s.points || [],
-      items: (s.items || []).map((i) => ({ ...i, quantity: String(i.quantity), kind: i.kind === "equipo" ? "equipo" : "material" })),
+      items: (s.items || []).map((i) => ({ ...i, quantity: String(i.quantity), kind: i.kind === "equipo" || i.kind === "servicio" ? i.kind : "material" })),
       sent_at: s.sent_at, sent_by: s.sent_by, pending_review: s.pending_review, archived_at: s.archived_at, trashed_at: s.trashed_at,
     });
   };
@@ -376,10 +380,10 @@ export default function Surveys() {
   const itemsBlock = (kind: Kind, title: string, hint: string) => {
     const idx = draft!.items.map((it, i) => ({ it, i })).filter(({ it }) => it.kind === kind);
     return (
-      <Card key={kind} title={`${title} · ${idx.length}`} extra={!readOnly && <button className="btn btn--soft btn--sm" onClick={() => setDraft({ ...draft!, items: [...draft!.items, { product_id: null, name: "", quantity: "1", unit: kind === "material" ? "m" : "Unid", note: null, kind }] })}><Icon d={I.plus} />Agregar</button>} flush>
+      <Card key={kind} title={`${title} · ${idx.length}`} extra={!readOnly && <button className="btn btn--soft btn--sm" onClick={() => setDraft({ ...draft!, items: [...draft!.items, { product_id: null, name: "", quantity: "1", unit: kind === "material" ? "m" : kind === "servicio" ? "servicio" : "Unid", note: null, kind }] })}><Icon d={I.plus} />Agregar</button>} flush>
         {idx.length === 0 ? <p className="muted" style={{ fontSize: 13, padding: "0 18px 14px" }}>{hint}</p> : (
           <table className="table">
-            <thead><tr><th>{kind === "equipo" ? "Equipo" : "Material"}</th><th>Origen</th><th className="num">Cantidad</th><th>Unidad</th><th>Bloque</th><th /></tr></thead>
+            <thead><tr><th>{kind === "equipo" ? "Equipo" : kind === "servicio" ? "Servicio" : "Material"}</th><th>Origen</th><th className="num">Cantidad</th><th>Unidad</th><th>Bloque</th><th /></tr></thead>
             <tbody>{idx.map(({ it, i }) => (
               <tr key={it.id ?? `n${i}`}>
                 <td><Lookup value={it.name} placeholder="Buscar en el catálogo…" fetcher={searchProducts} disabled={readOnly} onSelect={(pr, text) => setItem(i, { product_id: pr ? pr.id : null, name: text })} /></td>
@@ -394,8 +398,8 @@ export default function Surveys() {
                     </div>
                   )}
                 </td>
-                <td><input className="input" style={{ maxWidth: 90 }} value={it.unit} disabled={readOnly} onChange={(e) => setItem(i, { unit: e.target.value })} /></td>
-                <td><select className="select select--sm" value={it.kind} disabled={readOnly} onChange={(e) => setItem(i, { kind: e.target.value as Kind })} title="Mover a Equipos o Materiales"><option value="equipo">Equipo</option><option value="material">Material</option></select></td>
+                <td><select className="select select--sm" style={{ maxWidth: 170 }} value={it.unit} disabled={readOnly} onChange={(e) => setItem(i, { unit: e.target.value })}>{unitOptions(it.unit).map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}</select></td>
+                <td><select className="select select--sm" value={it.kind} disabled={readOnly} onChange={(e) => setItem(i, { kind: e.target.value as Kind })} title="Mover a Equipos, Materiales o Servicios"><option value="equipo">Equipo</option><option value="material">Material</option><option value="servicio">Servicio</option></select></td>
                 <td className="num">{!readOnly && <button className="btn btn--ghost btn--sm" onClick={() => setDraft({ ...draft!, items: draft!.items.filter((_, j) => j !== i) })}><Icon d={I.x} size={14} /></button>}</td>
               </tr>
             ))}</tbody>
@@ -586,13 +590,13 @@ export default function Surveys() {
               Sin costo de proveedor: {live.missing.slice(0, 4).join(", ")}{live.missing.length > 4 ? ` y ${live.missing.length - 4} más` : ""}. Escribí el costo en la línea; mientras tanto el margen real va a ser menor al que ves.
             </p>
           )}
-          <Field label={`Margen objetivo · ${margin}%`} hint="Solo cambia el precio sugerido; el costo es el del proveedor.">
+          <Field label={`Margen sobre venta (objetivo) · ${margin} % = recargo de ${markupOf(margin).toFixed(2)} % sobre el costo`} hint="Precio = costo ÷ (1 − margen). No es un recargo: con recargo sería costo × (1 + recargo). Solo cambia el precio sugerido; el costo es el del proveedor. Los precios en colones se redondean hacia arriba a la centena.">
             <input type="range" min={0} max={80} step={1} value={margin} onChange={(e) => setMargin(Number(e.target.value))} onMouseUp={() => cost()} onTouchEnd={() => cost()} style={{ width: "100%" }} />
           </Field>
           <div className="eco" style={{ margin: "12px 0" }}>
             <div className="eco__box"><span className="meta">Costo total</span><b className="money">{fmtMoney(live.costTotal)}</b></div>
             <div className="eco__box"><span className="meta">Precio sugerido</span><b className="money">{fmtMoney(live.price)}</b></div>
-            <div className="eco__box is-good"><span className="meta">Margen resultante</span><b>{live.margin.toFixed(1)}%</b></div>
+            <div className="eco__box is-good"><span className="meta">Margen sobre venta</span><b>{live.margin.toFixed(1)}%</b><span className="muted" style={{ fontSize: 12, display: "block" }}>Recargo sobre costo: {live.costTotal > 0 ? `${(((live.price - live.costTotal) / live.costTotal) * 100).toFixed(1)} %` : "—"}</span></div>
             <div className="eco__box"><span className="meta">Mano de obra + viáticos</span><b className="money">{fmtMoney(num(costing.labor.cost) + num(costing.labor.travel))}</b></div>
           </div>
           <table className="table">

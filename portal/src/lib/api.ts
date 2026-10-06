@@ -107,7 +107,7 @@ export type User = { id: number; email: string; full_name: string; totp_enabled:
 export type Me = { user: User; tenant: Tenant; role: string; permissions: Record<string, string[]>; memberships: { tenant: Tenant; role: string }[] };
 export type Customer = { id: number; id_type: string; id_number: string | null; name: string; email: string | null; phone: string | null; whatsapp: string | null; currency: string; active: boolean };
 export type Product = { id: number; name: string; code: string; item_type: string; price: number; currency: string; cabys_code: string | null; unit: string; tax_rate: number | null; category_id: number | null; show_on_web: boolean; tax_ids?: number[]; brand?: string | null; supplier_stock?: number | null };
-export type Line = { id?: number; product_id: number | null; code: string | null; name: string; description: string | null; cabys_code?: string | null; unit: string; quantity: string; unit_price: string; discount_type: string; discount_value: string; tax_rate: string; subtotal?: string; tax_amount?: string; total?: string };
+export type Line = { id?: number; product_id: number | null; code: string | null; name: string; description: string | null; cabys_code?: string | null; unit: string; quantity: string; unit_price: string; discount_type: string; discount_value: string; tax_rate: string; subtotal?: string; tax_amount?: string; total?: string; treatment?: string };
 export type Doc = {
   id: number; number: string; customer_id: number | null; customer_name: string | null; currency: string; fx_sell: string; fx_buy: string;
   issue_date: string; due_date: string | null; discount_type: string; discount_value: string; subtotal: string; discount_total: string; tax_total: string; total: string;

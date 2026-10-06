@@ -178,9 +178,40 @@ EQUIPMENT_WORDS = (
 )
 
 
+# Alquileres y servicios de terceros: no son material por metro ni equipo instalado. Se cotizan por dia,
+# jornada o servicio (un elevador salia como material en "m").
+SERVICE_WORDS = (
+    "alquiler",
+    "elevador",
+    "plataforma elevadora",
+    "manlift",
+    "montacargas",
+    "andamio",
+    "grua",
+    "grúa",
+    "transporte",
+    "flete",
+    "acarreo",
+)
+
+
 def classify_kind(name: str) -> str:
     n = (name or "").lower()
+    if any(w in n for w in SERVICE_WORDS):
+        return "servicio"  # va primero: "alquiler de UPS" es un servicio, no el equipo
     return "equipo" if any(w in n for w in EQUIPMENT_WORDS) else "material"
+
+
+def normalize_item(name: str, kind: str | None, unit: str | None) -> tuple[str, str]:
+    """Tipo y unidad finales de una linea del levantamiento. Un alquiler/servicio cargado en el bloque de
+    materiales pasa a servicio, y un servicio nunca queda medido en metros."""
+    k = kind or classify_kind(name)
+    if k == "material" and classify_kind(name) == "servicio":
+        k = "servicio"
+    u = (unit or "").strip() or "Unid"
+    if k == "servicio" and (u.lower() in UNIDADES_METRO or u == "Unid"):
+        u = "servicio"
+    return k, u
 
 
 # ---------- numeros escritos en el celular ----------
@@ -224,7 +255,7 @@ NOTE_RULES = (
         "material",
         "Unid",
     ),
-    (("andamio", "escalera", "muy alto", "altura"), "Alquiler de andamio / escalera extensible", "material", "Unid"),
+    (("andamio", "escalera", "muy alto", "altura"), "Alquiler de andamio / escalera extensible", "servicio", "dia"),
     (("lluvia", "intemperie", "sol directo"), "Caja estanca IP66", "material", "Unid"),
     (("fibra",), "Convertidor de medios de fibra", "equipo", "Unid"),
 )
@@ -260,6 +291,8 @@ def _ceil(x: Decimal) -> int:
 # Familias de material: el tecnico escribe "Cable UTP Cat6" y la sugerencia calcula "Cable (metros...)". Con
 # comparar solo el nombre exacto se proponia el cable como nuevo y se terminaba con el doble de metros.
 FAMILIAS = (
+    ("alquiler", ("alquiler", "elevador", "andamio", "grua", "grúa", "montacargas", "plataforma elevadora")),
+    ("transporte", ("transporte", "flete", "acarreo")),
     ("cable", ("cable", "utp", "cat5", "cat6", "cat 6", "cat 5")),
     ("rj45", ("rj45", "rj-45", "conector")),
     ("grabador", ("nvr", "dvr", "grabador")),
@@ -371,7 +404,7 @@ def _rules_cctv(pts: list, add) -> None:
     if pvc > 0:
         add("Tubo PVC 3/4 (3 m)", _ceil(pvc * Decimal("1.15") / 3), "Unid", f"{pvc:g} m en PVC + 15 %, tubos de 3 m", "material")
     if alto:
-        add("Alquiler de andamio / escalera extensible", 1, "Unid", f"montaje sobre 4 m: {_codes(alto)}", "material")
+        add("Alquiler de andamio / escalera extensible", 1, "dia", f"montaje sobre 4 m: {_codes(alto)}", "servicio")
 
 
 def _rules_acceso(pts: list, add) -> None:

@@ -13,6 +13,7 @@ from ..models import Customer, EInvoiceDocument, Invoice, Tenant
 from ..providers.einvoice import get_provider
 from .documents import audit
 from .sequences import next_number
+from .units import hacienda_unit
 
 ROOT = {
     "FE": "FacturaElectronica",
@@ -41,7 +42,7 @@ def _payload(db: Session, inv: Invoice, tenant: Tenant, doc_type: str, consecuti
             {
                 "name": ln.name,
                 "cabys_code": ln.cabys_code,
-                "unit": ln.unit,
+                "unit": hacienda_unit(ln.unit),
                 "quantity": str(ln.quantity),
                 "unit_price": str(ln.unit_price),
                 "subtotal": str(ln.subtotal),
@@ -50,6 +51,8 @@ def _payload(db: Session, inv: Invoice, tenant: Tenant, doc_type: str, consecuti
                 "total": str(ln.total),
             }
             for ln in inv.lines
+            # aportado por el cliente y exclusiones no son parte de la venta: no viajan a Hacienda
+            if (ln.treatment or "normal") not in ("aportado", "excluido")
         ],
         "subtotal": str(inv.subtotal),
         "discount_total": str(inv.discount_total),
