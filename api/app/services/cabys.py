@@ -80,3 +80,21 @@ def search(q: str | None = None, codigo: str | None = None, top: int = 20) -> li
 def clear_cache() -> None:
     with _lock:
         _cache.clear()
+
+
+def find_code(code: str) -> dict | None:
+    """Confirma que un codigo de 13 digitos existe en el CABYS. Primero mira lo ya consultado (una busqueda
+    por descripcion que lo trajo cuenta como prueba) y si no, le pregunta a Hacienda por codigo.
+    None = Hacienda respondio y el codigo no existe. CabysUnavailable = no se pudo validar."""
+    code = "".join(ch for ch in (code or "") if ch.isdigit())
+    if len(code) != 13:
+        return None
+    now = time.monotonic()
+    with _lock:
+        for ts, rows in _cache.values():
+            if now - ts >= TTL:
+                continue
+            for r in rows:
+                if r["code"] == code:
+                    return r
+    return next((r for r in search(codigo=code) if r["code"] == code), None)

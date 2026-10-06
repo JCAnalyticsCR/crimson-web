@@ -10,7 +10,7 @@ from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
-from .base import ArchiveMixin, TenantMixin, TimestampMixin
+from .base import ArchiveMixin, TenantMixin, TimestampMixin, utcnow
 
 # Tipos de levantamiento: cada uno pide datos distintos (ver services/survey_specs.py)
 SURVEY_KINDS = ("cctv", "redes", "acceso", "asistencia", "ups", "cableado", "anpr", "otro")
@@ -76,9 +76,33 @@ class Survey(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     photos: Mapped[list] = mapped_column(JSON, default=list)
     quote_id: Mapped[int | None] = mapped_column(ForeignKey("quote.id"))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # revision del supervisor entre "enviado a oficina" y el costeo: None (sin enviar) | pendiente | aprobado | devuelto
+    review_status: Mapped[str | None] = mapped_column(String(12), index=True)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("user.id", name="fk_survey_reviewed_by"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    review_round: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # cuantas veces se reviso
 
     points: Mapped[list["SurveyPoint"]] = relationship(cascade="all, delete-orphan", lazy="selectin", order_by="SurveyPoint.id")
     items: Mapped[list["SurveyItem"]] = relationship(cascade="all, delete-orphan", lazy="selectin", order_by="SurveyItem.id")
+    observations: Mapped[list["SurveyObservation"]] = relationship(cascade="all, delete-orphan", lazy="selectin", order_by="SurveyObservation.id")
+
+
+class SurveyObservation(Base):
+    """Observacion del supervisor al devolver un levantamiento. Por punto (point_code; los ids de punto cambian
+    en cada guardado, el codigo no) o general (point_code None). El tecnico la marca resuelta antes de reenviar."""
+
+    __tablename__ = "survey_observation"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    survey_id: Mapped[int] = mapped_column(ForeignKey("survey.id", ondelete="CASCADE", name="fk_survey_observation_survey"), index=True)
+    review_round: Mapped[int] = mapped_column(Integer, default=1)
+    point_code: Mapped[str | None] = mapped_column(String(20))
+    text: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("user.id", name="fk_survey_observation_created_by"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_by: Mapped[int | None] = mapped_column(ForeignKey("user.id", name="fk_survey_observation_resolved_by"))
+    resolution: Mapped[str | None] = mapped_column(String(400))
 
 
 class SurveyPoint(Base):

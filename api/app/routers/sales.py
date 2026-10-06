@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select, true
 from sqlalchemy.orm import Session
 
@@ -21,11 +23,11 @@ from ..schemas.sales import (
     PaymentOut,
     QuoteOut,
 )
-from ..services import discounts
+from ..services import discounts, units
 from ..services import documents as svc
 from ..services import inventory as invsvc
+from ..services import quote_versions as qv
 from ..services.documents import audit
-from ..services import units
 from ..services.totals import compute_document, d
 
 router = APIRouter(tags=["ventas"])
@@ -51,6 +53,8 @@ def _quote_out(db: Session, q: Quote) -> QuoteOut:
 
         # empresas que pueden aportar equipo (selector "Aportado por" del editor); nunca sale al portal del cliente
         o.opportunity["parties"] = party_names(db, opp)
+    st = qv.state(db, q)
+    o.current_version, o.has_unsent_changes = st["current_version"], st["has_unsent_changes"]
     return o
 
 
@@ -227,6 +231,11 @@ def update_quote(qid: int, data: DocumentIn, p: Principal = Depends(require("sal
     q = _own(db, Quote, qid, p.tenant.id, p)
     if q.status in ("convertida", "anulada"):
         raise HTTPException(409, f"La cotizacion esta {q.status} y no se puede editar")
+    if q.acceptance_status == "aceptada":
+        raise HTTPException(
+            409,
+            f"El cliente ya aceptó la versión {q.accepted_version} de esta cotización. Para cambiarla, deshacé la aceptación en Versiones o duplicala.",
+        )
     from ..models import QuoteLine
 
     chk = discounts.check(db, p, data)
@@ -246,6 +255,7 @@ def convert_quote(qid: int, p: Principal = Depends(require("sales", "crear")), d
     q = _own(db, Quote, qid, p.tenant.id, p)
     if q.status == "por_aprobar":
         raise HTTPException(409, "La cotización tiene un descuento pendiente de aprobación")
+    _use_accepted(db, p, q)
     inv = svc.convert_quote(db, p.tenant.id, p.user.id, q)
     invsvc.deduct_for_invoice(db, inv, p.user.id)
     from ..models import Opportunity
@@ -257,6 +267,17 @@ def convert_quote(qid: int, p: Principal = Depends(require("sales", "crear")), d
             o.status = "ganada"
     db.commit()
     return _inv_out(db, inv)
+
+
+def _use_accepted(db: Session, p: Principal, q: Quote) -> None:
+    """Convertir usa lo que el cliente acepto. Rechazada no se convierte; aceptada con diferencias se restaura."""
+    if q.acceptance_status == "rechazada":
+        raise HTTPException(409, "El cliente rechazó esta cotización. Registrá la aceptación (o enviá una versión nueva) antes de convertirla.")
+    if q.acceptance_status == "aceptada" and q.accepted_version:
+        v = qv.get_version(db, q, q.accepted_version)
+        if v and v.content_hash != qv.live_hash(db, q):
+            qv.restore(db, q, v)
+            audit(db, p.tenant.id, p.user.id, "restore_version", "quote", q.id, {"version": v.version}, ip=p.ip)
 
 
 @router.post("/quotes/{qid}/duplicate", response_model=QuoteOut, status_code=201)
@@ -281,17 +302,155 @@ def void_quote(qid: int, p: Principal = Depends(require("sales", "anular")), db:
     return _quote_out(db, q)
 
 
+class MarkSentIn(BaseModel):
+    channel: str = Field("manual", pattern="^(manual|whatsapp|correo|presencial)$")
+    to: str | None = Field(None, max_length=200)  # a quien se le entrego (telefono, nombre, correo)
+
+
 @router.post("/quotes/{qid}/send", response_model=QuoteOut)
-def send_quote(qid: int, p: Principal = Depends(require("sales", "enviar")), db: Session = Depends(get_db)):
-    """Marca como enviada (el envio real por correo lo hace el worker en Fase 1.2)."""
+def send_quote(qid: int, data: MarkSentIn | None = None, p: Principal = Depends(require("sales", "enviar")), db: Session = Depends(get_db)):
+    """Marca como enviada por fuera del correo (WhatsApp, en mano). Igual que el correo, guarda la version enviada."""
+    data = data or MarkSentIn()
     q = _own(db, Quote, qid, p.tenant.id, p)
     if q.status == "por_aprobar":
         raise HTTPException(409, "La cotización tiene un descuento pendiente de aprobación")
+    if q.status in ("convertida", "anulada"):
+        raise HTTPException(409, f"La cotización está {q.status}")
     units.check_ready(q, "enviar la cotización")
     if q.status == "creado":
         q.status = "enviada"
-    audit(db, p.tenant.id, p.user.id, "send", "quote", q.id, ip=p.ip)
+    v, _ = qv.record_send(db, p.tenant, p.user.id, q, data.channel, data.to or _cust_name(db, q.customer_id), ip=p.ip)
+    audit(db, p.tenant.id, p.user.id, "send", "quote", q.id, {"version": v.version, "canal": data.channel}, ip=p.ip)
     db.commit()
+    return _quote_out(db, q)
+
+
+# ---------- Versiones y aceptacion ----------
+@router.get("/quotes/{qid}/versions")
+def quote_versions(qid: int, p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
+    from ..models import QuoteAcceptance, User
+
+    q = _own(db, Quote, qid, p.tenant.id, p)
+    hist = db.scalars(select(QuoteAcceptance).where(QuoteAcceptance.quote_id == q.id).order_by(QuoteAcceptance.id.desc())).all()
+
+    def _who(uid):
+        u = db.get(User, uid) if uid else None
+        return u.full_name if u else None
+
+    return {
+        "acceptance_status": q.acceptance_status,
+        "accepted_version": q.accepted_version,
+        "status": q.status,
+        **qv.state(db, q),
+        "versions": [qv.version_out(db, v, q) for v in reversed(qv.versions(db, q))],
+        "acceptances": [
+            {
+                "id": a.id,
+                "status": a.status,
+                "version": a.version,
+                "contact_name": a.contact_name,
+                "channel": a.channel,
+                "decided_on": a.decided_on,
+                "notes": a.notes,
+                "recorded_by": _who(a.recorded_by),
+                "recorded_at": a.recorded_at,
+            }
+            for a in hist
+        ],
+    }
+
+
+def _version_or_404(db: Session, q: Quote, n: int):
+    v = qv.get_version(db, q, n)
+    if not v:
+        raise HTTPException(404, "Versión no encontrada")
+    return v
+
+
+@router.get("/quotes/{qid}/versions/{n}/html", response_class=HTMLResponse)
+def quote_version_html(qid: int, n: int, p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
+    from ..services.render import render_snapshot_html
+
+    q = _own(db, Quote, qid, p.tenant.id, p)
+    return render_snapshot_html(_version_or_404(db, q, n).snapshot, p.tenant, n)
+
+
+@router.get("/quotes/{qid}/versions/{n}/pdf")
+def quote_version_pdf(qid: int, n: int, p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
+    from ..services.render import render_pdf, render_snapshot_html
+
+    q = _own(db, Quote, qid, p.tenant.id, p)
+    html = render_snapshot_html(_version_or_404(db, q, n).snapshot, p.tenant, n)
+    pdf = render_pdf(html)
+    if pdf is None:  # sin WeasyPrint (Windows local): el navegador imprime el HTML
+        return HTMLResponse(html, headers={"X-PDF-Fallback": "html"})
+    return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{q.number}-v{n}.pdf"'})
+
+
+class AcceptanceIn(BaseModel):
+    status: str = Field(pattern="^(aceptada|rechazada|pendiente)$")  # pendiente = deshacer la ultima respuesta
+    version: int | None = None  # sin dato: la ultima enviada
+    contact_name: str | None = Field(None, max_length=160)
+    channel: str | None = Field(None, pattern="^(correo|whatsapp|firma|portal|telefono|presencial)$")
+    decided_on: date | None = None
+    notes: str | None = Field(None, max_length=2000)
+
+
+@router.post("/quotes/{qid}/acceptance", response_model=QuoteOut)
+def quote_acceptance(qid: int, data: AcceptanceIn, p: Principal = Depends(require("sales", "editar")), db: Session = Depends(get_db)):
+    """Registra la respuesta del cliente: quien, por que medio, cuando y sobre que version. Queda en bitacora."""
+    from ..models import QuoteAcceptance
+
+    q = _own(db, Quote, qid, p.tenant.id, p)
+    if q.status in ("convertida", "anulada"):
+        raise HTTPException(409, f"La cotización está {q.status}; su aceptación ya no se cambia")
+    v = None
+    if data.status != "pendiente":
+        if not (data.contact_name or "").strip():
+            raise HTTPException(422, "Indicá quién respondió del lado del cliente")
+        if not data.channel:
+            raise HTTPException(422, "Indicá el medio: correo, WhatsApp, firma, portal, teléfono o en persona")
+        if data.decided_on and data.decided_on > date.today():
+            raise HTTPException(422, "La fecha de respuesta no puede ser futura")
+        v = qv.get_version(db, q, data.version) if data.version else qv.latest(db, q)
+        if not v:
+            raise HTTPException(409, "La cotización no tiene versiones enviadas: enviala al cliente antes de registrar su respuesta")
+    elif q.acceptance_status == "pendiente":
+        raise HTTPException(409, "No hay una respuesta del cliente que deshacer")
+    restored = False
+    if data.status == "aceptada" and v.content_hash != qv.live_hash(db, q):
+        # lo que se acepto manda: la cotizacion viva vuelve a esa version (los cambios sin enviar se descartan)
+        qv.restore(db, q, v)
+        restored = True
+    db.add(
+        QuoteAcceptance(
+            tenant_id=p.tenant.id,
+            quote_id=q.id,
+            version_id=v.id if v else None,
+            version=v.version if v else None,
+            status=data.status,
+            contact_name=(data.contact_name or "").strip() or None,
+            channel=data.channel,
+            decided_on=data.decided_on or (date.today() if v else None),
+            notes=data.notes,
+            recorded_by=p.user.id,
+        )
+    )
+    antes = q.acceptance_status
+    q.acceptance_status = data.status
+    q.accepted_version = v.version if data.status == "aceptada" else None
+    audit(
+        db,
+        p.tenant.id,
+        p.user.id,
+        "acceptance",
+        "quote",
+        q.id,
+        {"de": antes, "a": data.status, "version": v.version if v else None, "quien": data.contact_name, "medio": data.channel, "restaurada": restored},
+        ip=p.ip,
+    )
+    db.commit()
+    db.refresh(q)
     return _quote_out(db, q)
 
 

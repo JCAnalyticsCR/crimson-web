@@ -85,6 +85,20 @@ def render_html(db: Session, doc: Quote | Invoice, tenant: Tenant) -> str:
     )
 
 
+def render_snapshot_html(snap: dict, tenant: Tenant, version: int) -> str:
+    """Una version enviada de la cotizacion, tal como salio (cliente, lineas y totales de ese momento)."""
+    d = {**snap, "status": f"versión {version}", "consecutive": None, "clave": None}
+    return TEMPLATE.render(
+        d=d,
+        t=tenant,
+        c=snap.get("customer"),
+        kind=f"Cotización · v{version}",
+        leyenda=LEYENDA,
+        balance=None,
+        footer=snap.get("footer"),
+    )
+
+
 def render_pdf(html: str) -> bytes | None:
     """Devuelve None si WeasyPrint no esta disponible (Windows sin GTK); la API entonces sirve HTML imprimible."""
     try:

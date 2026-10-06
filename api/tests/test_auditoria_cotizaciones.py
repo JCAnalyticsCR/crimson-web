@@ -65,7 +65,7 @@ def test_levantamiento_sin_costo_cotiza_pendiente(client, auth):
         "/surveys",
         json={"kind": "cctv", "customer_id": _cust(client)["id"], "items": [{"name": "Sensor sin costo", "quantity": 2}]},
     ).json()
-    q = client.post(f"/surveys/{s['id']}/quote", json={"margin": 35}).json()
+    q = client.post(f"/surveys/{s['id']}/quote", json={"margin": 35, "skip_review": True}).json()
     quote = client.get(f"/quotes/{q['quote_id']}").json()
     sensor = next(ln for ln in quote["lines"] if ln["name"] == "Sensor sin costo")
     assert sensor["treatment"] == "pendiente"  # no un 0 callado

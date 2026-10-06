@@ -114,3 +114,28 @@ a.eco__box:hover, button.eco__box:hover { border-color: var(--crimson); }
 .point-add .select { width: auto; max-width: 220px; }
 .point--other { border-left: 3px solid var(--info, #3c82f0); }
 .point__kind { margin-bottom: 6px; }
+
+/* Revision del supervisor (grupo B) */
+.review { border: 1px solid var(--hair); border-left: 3px solid var(--text-3); border-radius: 10px; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; background: var(--surface-2); }
+.review--ok { border-left-color: var(--ok); }
+.review--warn { border-left-color: var(--warn); }
+.review--info { border-left-color: var(--info, #3c82f0); }
+.review__head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12.5px; }
+.review__hint { margin: 0; font-size: 13px; }
+.review__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.review__list li { padding: 8px 10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--hair); font-size: 13.5px; overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 4px; }
+.review__list li.is-done { opacity: .75; }
+.review__pt { display: inline-block; margin-right: 8px; padding: 1px 8px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-family: var(--mono); font-size: 11px; font-weight: 700; }
+.review__meta { font-size: 12px; }
+.review__resolve { display: flex; gap: 6px; flex-wrap: wrap; }
+.review__resolve .input { flex: 1 1 180px; min-width: 0; height: 32px; }
+.review__done summary { cursor: pointer; font-size: 12.5px; color: var(--text-2); margin-bottom: 6px; }
+.review__act { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.review__form { display: flex; flex-direction: column; gap: 8px; }
+.review__row { display: grid; grid-template-columns: 120px 1fr auto; gap: 6px; align-items: start; }
+.review__row .textarea { min-height: 38px; height: auto; padding: 8px 10px; }
+.point__obs { font-size: 11px; }
+@media (max-width: 640px) {
+  .review__row { grid-template-columns: 1fr auto; }
+  .review__row .textarea { grid-column: 1 / -1; grid-row: 2; }
+}

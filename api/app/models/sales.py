@@ -1,10 +1,10 @@
-from datetime import date
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
-from .base import TenantMixin, TimestampMixin
+from .base import TenantMixin, TimestampMixin, utcnow
 
 
 class BillingGroup(TenantMixin, Base):
@@ -84,6 +84,9 @@ class Quote(_DocBase, Base):
 
     converted_invoice_id: Mapped[int | None] = mapped_column(ForeignKey("invoice.id"))
     approval_reason: Mapped[str | None] = mapped_column(String(400))  # por que quedo "por_aprobar"
+    # aceptacion del cliente, aparte de la emision (status): pendiente | aceptada | rechazada
+    acceptance_status: Mapped[str] = mapped_column(String(12), default="pendiente", server_default="pendiente", index=True)
+    accepted_version: Mapped[int | None] = mapped_column(Integer)  # numero de version aceptada (ver QuoteVersion)
     lines: Mapped[list["QuoteLine"]] = relationship(cascade="all, delete-orphan", order_by="QuoteLine.position", lazy="selectin")
 
 
@@ -113,3 +116,41 @@ class Invoice(_DocBase, Base):
 class InvoiceLine(_LineBase, Base):
     __tablename__ = "invoice_line"
     invoice_id: Mapped[int] = mapped_column(ForeignKey("invoice.id", ondelete="CASCADE"), index=True)
+
+
+class QuoteVersion(TenantMixin, Base):
+    """Instantanea inmutable de lo que se le envio al cliente (v1, v2...). Nunca se edita ni se borra:
+    si la cotizacion cambia despues de enviada, el proximo envio crea la version siguiente."""
+
+    __tablename__ = "quote_version"
+    __table_args__ = (UniqueConstraint("quote_id", "version", name="uq_quote_version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    quote_id: Mapped[int] = mapped_column(ForeignKey("quote.id", ondelete="CASCADE", name="fk_quote_version_quote"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    content_hash: Mapped[str] = mapped_column(String(64))  # huella de lo que ve el cliente (lineas, totales, notas externas)
+    snapshot: Mapped[dict] = mapped_column(JSON)  # cabecera + lineas + cliente tal como salieron
+    currency: Mapped[str] = mapped_column(String(3), default="CRC")
+    total: Mapped[float] = mapped_column(Numeric(16, 5), default=0)
+    channel: Mapped[str] = mapped_column(String(16), default="correo")  # correo | whatsapp | manual
+    recipient: Mapped[str | None] = mapped_column(String(200))
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    sent_by: Mapped[int | None] = mapped_column(ForeignKey("user.id", name="fk_quote_version_user"))
+
+
+class QuoteAcceptance(TenantMixin, Base):
+    """Bitacora de la respuesta del cliente: quien acepto o rechazo, por que medio, que version y quien lo anoto."""
+
+    __tablename__ = "quote_acceptance"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    quote_id: Mapped[int] = mapped_column(ForeignKey("quote.id", ondelete="CASCADE", name="fk_quote_acceptance_quote"), index=True)
+    version_id: Mapped[int | None] = mapped_column(ForeignKey("quote_version.id", name="fk_quote_acceptance_version"))
+    version: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(12))  # aceptada | rechazada | pendiente (deshacer)
+    contact_name: Mapped[str | None] = mapped_column(String(160))  # quien respondio del lado del cliente
+    channel: Mapped[str | None] = mapped_column(String(16))  # correo | whatsapp | firma | portal | telefono | presencial
+    decided_on: Mapped[date | None] = mapped_column(Date)  # fecha en que el cliente respondio
+    notes: Mapped[str | None] = mapped_column(Text)
+    recorded_by: Mapped[int | None] = mapped_column(ForeignKey("user.id", name="fk_quote_acceptance_user"))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
