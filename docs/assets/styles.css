@@ -972,3 +972,7 @@ section{padding:var(--space) var(--pad)}
   .footer__jc-lbl::before,.footer__jc-lbl::after{width:22px}
   .footer__jc img{height:26px}
 }
+/* enlace a jcanalytic.com: el logo invita a tocar sin parecer boton */
+.footer__jc-link,.brands__jc a{display:inline-block;border-radius:6px;transition:opacity .2s}
+.footer__jc-link:hover img,.brands__jc a:hover img{opacity:1}
+.footer__jc-link:focus-visible,.brands__jc a:focus-visible{outline:2px solid currentColor;outline-offset:4px}
