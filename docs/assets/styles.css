@@ -203,13 +203,9 @@ img[data-lqip].is-loaded{}
 section{padding:var(--space) var(--pad)}
 .wall,.proceso,.tienda{padding-top:calc(var(--space) + 16px)}
 
-/* ---------- MURO DE MONITORES · CAM 02 ---------- */
+/* ---------- MONITOREO · CAM 02 (la galería vive en el bloque GALERÍA, más abajo) ---------- */
 .wall .wrap{display:flex;flex-direction:column;gap:40px}
 .wall__head{display:grid;grid-template-columns:1.5fr 1fr;gap:48px;align-items:end}
-.wall__grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
-.wall__grid .feed{aspect-ratio:3/2}
-.wall__grid .feed>img{position:absolute;inset:0;transition:filter 140ms steps(2),transform var(--dur-scene) var(--ease-enter)}
-.feed.is-switch>img{filter:brightness(0)}
 .feed.is-active::after{content:"";position:absolute;left:0;right:0;height:1px;z-index:2;background:rgba(255,255,255,.28);animation:scan 3.4s linear infinite;pointer-events:none}
 @keyframes scan{from{transform:translateY(0)}to{transform:translateY(400px)}}
 
@@ -621,9 +617,6 @@ section{padding:var(--space) var(--pad)}
   .wall .wrap,.servicios .wrap,.proceso .wrap,.casos .wrap,.tienda .wrap,.contacto .wrap{gap:28px}
   .wall__head,.servicios__head,.casos__head,.proceso__head{display:flex;flex-direction:column;align-items:stretch;gap:16px}
   .contacto__net{-webkit-mask-image:none;mask-image:none;opacity:.35}
-  .wall__grid{grid-template-columns:1fr 1fr;gap:8px}
-  .wall__grid .feed{aspect-ratio:4/5}
-  .wall__grid .feed:nth-child(1){grid-column:span 2;aspect-ratio:3/2}
   .feed__meta{left:12px;right:12px;bottom:10px;font-size:9px}
   .feed__corners{inset:9px}
 
@@ -840,19 +833,81 @@ section{padding:var(--space) var(--pad)}
 }
 @media (min-width:768px) and (max-width:1180px){.nav__login{padding:10px 12px}.nav__login-txt{display:none}}
 
-/* ---------- Muro de obra (dentro de CAM 06) ----------
+/* =====================================================================
+   GALERÍA (CAM 02) + MURO DE OBRA (CAM 06) + VISOR — bloque propio
+   Datos de la galería: index.html #galeria-data. Lógica: main.js, bloque GALERÍA.
+   Tres versiones: móvil (<768) 2 columnas y chips deslizables; tablet 3; escritorio 4.
+   ===================================================================== */
+
+/* ---------- Galería · filtros ---------- */
+.gal__bar{display:flex;align-items:center;justify-content:space-between;gap:14px 24px;flex-wrap:wrap;margin-bottom:-14px}
+.gal__filtros{display:flex;gap:8px;flex-wrap:wrap;min-width:0}
+.gal__chip{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:0 16px;border-radius:999px;
+  border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.03);color:rgba(244,241,238,.78);
+  font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:500;cursor:pointer;
+  transition:background var(--dur-micro),border-color var(--dur-micro),color var(--dur-micro)}
+.gal__chip-n{font-size:9.5px;color:rgba(244,241,238,.42);letter-spacing:.04em}
+.gal__chip[aria-pressed=true]{background:var(--crimson);border-color:var(--crimson);color:#fff}
+.gal__chip[aria-pressed=true] .gal__chip-n{color:rgba(255,255,255,.72)}
+@media (hover:hover){.gal__chip:hover{border-color:rgba(255,255,255,.42);color:#fff}}
+.gal__cuenta{color:var(--muted-dark)}
+
+/* ---------- Galería · muro ----------
+   Filas de alto fijo (container query): el monitor grande ocupa 2x2 y una ficha de relleno
+   cierra la última fila, así nunca quedan huecos aunque lleguen 7 fotos o 23. */
+.gal__wall{container-type:inline-size}
+.gal__grid{--cols:4;--gap:14px;--ar:.6667;display:grid;gap:var(--gap);grid-auto-flow:dense;
+  grid-template-columns:repeat(var(--cols),minmax(0,1fr));
+  grid-auto-rows:calc((100cqw - (var(--cols) - 1) * var(--gap)) / var(--cols) * var(--ar))}
+.gal__item{position:relative;min-width:0}
+.gal__item.is-main{grid-column:span 2;grid-row:span 2}
+.gal__tile{width:100%;height:100%;padding:0;border:0;font:inherit;color:#fff;text-align:left;cursor:zoom-in}
+.gal__tile>img{position:absolute;inset:0;object-position:var(--foco,50% 50%);background:var(--ink-2)}
+.gal__osd{position:absolute;top:0;left:0;right:0;z-index:3;display:flex;justify-content:space-between;gap:10px;
+  padding:15px 18px 28px;font-size:9.5px;color:#fff;pointer-events:none;background:linear-gradient(180deg,rgba(21,19,26,.62),transparent)}
+.gal__cap{position:absolute;left:0;right:0;bottom:0;z-index:2;display:flex;flex-direction:column;gap:4px;
+  padding:52px 22px 28px;pointer-events:none;background:linear-gradient(0deg,rgba(21,19,26,.9) 0%,rgba(21,19,26,.45) 58%,transparent)}
+.gal__cat{color:#ff7d8c;font-size:9.5px}
+.gal__txt{font-weight:600;font-size:14px;line-height:1.3;text-wrap:balance}
+.gal__item.is-main .gal__cap{padding:90px 26px 32px}
+.gal__item.is-main .gal__txt{font-family:var(--serif);font-weight:var(--dw);font-size:clamp(20px,1.9vw,28px);line-height:1.1;letter-spacing:-.01em;max-width:24ch}
+.gal__tile:focus-visible{outline:2px solid var(--crimson);outline-offset:3px}
+/* Entrada: escalonada al entrar el muro en cuadro; al filtrar, las fichas nuevas vuelven a entrar */
+.js .gal__item{opacity:0;transform:translateY(16px)}
+.gal__grid.is-in .gal__item{animation:galIn var(--dur-section) var(--ease-enter) forwards;animation-delay:calc(var(--i,0) * 55ms)}
+@keyframes galIn{to{opacity:1;transform:none}}
+.gal__pie{display:flex;justify-content:center;margin-top:-10px}
+.gal__mas[hidden],.gal__pie:has(.gal__mas[hidden]){display:none}
+
+@media (max-width:1023px){.gal__grid{--cols:3}.gal__item:not(.is-main) .gal__cat{display:none}.gal__cap{padding-top:40px}}
+@media (max-width:767px){
+  .gal__grid{--cols:2;--gap:8px;--ar:.92}
+  .gal__bar{margin-bottom:-8px}
+  .gal__filtros{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain;
+    margin:0 calc(var(--pad)*-1);padding:2px var(--pad);scroll-padding-inline:var(--pad)}
+  .gal__filtros::-webkit-scrollbar{display:none}
+  .gal__chip{flex:none;min-height:44px}
+  .gal__item:not(.is-main) .gal__osd,.gal__item:not(.is-main) .gal__cat{display:none}
+  .gal__cap{padding:40px 14px 27px}
+  .gal__txt{font-size:12px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .gal__item.is-main .gal__cap{padding:64px 18px 22px}
+  .gal__item.is-main .gal__osd{padding:12px 14px 24px}
+  .gal__tile .feed__corners{inset:8px}
+  .gal__mas{width:100%}
+}
+
+/* ---------- Muro de obra (CAM 06) ----------
    Fichas verticales 9:16: el material llega del celular del tecnico, asi que el formato
-   del telefono ES el formato. Cada ficha se lee como un monitor: OSD arriba, rotulo abajo.
-   El muro se desplaza en horizontal en TODOS los tamanos, no es rejilla: asi aguanta que
-   manden 3 fichas o 12 sin que el layout se rompa ni queden huerfanas en otra fila. */
+   del telefono ES el formato. El muro se desplaza en horizontal en TODOS los tamanos, no es
+   rejilla: aguanta 3 fichas o 12. Sin filter CSS sobre el <video>: obligaba a recomponer
+   cada fotograma y, sumado a clips de 120 fps, botaba cuadros en compus normales. */
 .obra{margin-top:clamp(26px,3vw,40px)}
 .obra__wall{display:flex;gap:14px;justify-content:safe center;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;
   scroll-padding-inline:2px;padding-bottom:4px;scrollbar-width:none;-webkit-overflow-scrolling:touch;
   overscroll-behavior-x:contain}
 .obra__wall::-webkit-scrollbar{display:none}
 .obra__tile{flex:0 0 clamp(210px,19vw,272px);aspect-ratio:9/16;min-height:0;scroll-snap-align:start}
-.obra__media{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;
-  filter:contrast(1.05) saturate(.88)}
+.obra__media{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;background:var(--ink-2)}
 .obra__osd{position:absolute;top:0;left:0;right:0;z-index:3;padding:15px 17px 28px;
   display:flex;justify-content:space-between;gap:10px;font-size:9.5px;color:#fff;pointer-events:none;
   background:linear-gradient(180deg,rgba(21,19,26,.7),transparent)}
@@ -863,6 +918,15 @@ section{padding:var(--space) var(--pad)}
 .obra__tag{color:#ff7d8c;font-size:9.5px}
 .obra__info strong{font-family:var(--serif);font-weight:var(--dw);font-size:17px;line-height:1.18;letter-spacing:-.01em}
 .obra__nota{color:#d6d2cd;font-size:12px;line-height:1.35}
+/* Toda la ficha es el boton "ver en grande"; el triangulo solo aparece si el clip esta quieto
+   (reduced-motion, ahorro de datos, o en movil la ficha que no esta al centro). */
+.obra__abrir{position:absolute;inset:0;z-index:4;padding:0;border:0;background:transparent;cursor:zoom-in;border-radius:inherit}
+.obra__abrir:focus-visible{outline:2px solid var(--crimson);outline-offset:-3px}
+.obra__play{position:absolute;left:50%;top:45%;width:58px;height:58px;margin:-29px 0 0 -29px;border-radius:50%;
+  background:rgba(21,19,26,.55);box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.6);opacity:0;transform:scale(.9);
+  transition:opacity var(--dur-micro),transform var(--dur-micro) var(--ease-button)}
+.obra__play::before{content:"";position:absolute;left:23px;top:19px;border-style:solid;border-width:10px 0 10px 16px;border-color:transparent transparent transparent #fff}
+.obra__tile.is-quieta .obra__play{opacity:1;transform:none}
 @media (hover:hover){.obra__media{transition:transform var(--dur-scene) var(--ease-enter)}
   .obra__tile:hover .obra__media{transform:scale(1.04)}}
 @media (max-width:767px){
@@ -871,7 +935,59 @@ section{padding:var(--space) var(--pad)}
   .obra__tile{flex:0 0 62vw;scroll-snap-align:center}
   .obra__tile:first-child{scroll-snap-align:start}.obra__tile:last-child{scroll-snap-align:end}
 }
-@media (prefers-reduced-motion:reduce){.obra__media{transition:none}.obra__tile:hover .obra__media{transform:none}}
+
+/* ---------- Visor ampliado (fotos y videos) ----------
+   <dialog> nativo: Esc, foco atrapado y capa superior gratis. Vive dentro de #casos, por eso
+   se exime de la pausa .is-offscreen (si no, se abriria congelado en opacidad 0). */
+html.visor-abierto{overflow:hidden}
+.visor{position:fixed;inset:0;width:100%;height:100%;max-width:none;max-height:none;margin:0;padding:0;border:0;
+  background:#0d0c11;color:var(--white);overscroll-behavior:contain}
+.visor[open]{display:grid;grid-template-rows:minmax(0,1fr) auto}
+.visor::backdrop{background:rgba(13,12,17,.6)}
+.visor__stage{position:relative;display:flex;align-items:center;justify-content:center;min-height:0;
+  padding:clamp(64px,8vh,88px) clamp(16px,8vw,120px) 10px;touch-action:pan-y pinch-zoom}
+.visor__media{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;border-radius:var(--r);
+  background:var(--ink-2) center/cover no-repeat;box-shadow:0 40px 120px -30px rgba(0,0,0,.9)}
+video.visor__media{height:100%;aspect-ratio:9/16;object-fit:cover}
+.visor__bar{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
+  padding:14px clamp(16px,8vw,120px) max(22px,env(safe-area-inset-bottom))}
+.visor__cap{display:flex;flex-direction:column;gap:6px;min-width:0}
+.visor__cat{color:#ff7d8c}
+.visor__cap strong{font-family:var(--serif);font-weight:var(--dw);font-size:clamp(19px,1.8vw,26px);line-height:1.15;letter-spacing:-.01em;text-wrap:balance}
+.visor__n{color:var(--muted-dark);flex:none}
+.visor__btn,.visor__close{position:absolute;display:grid;place-items:center;width:52px;height:52px;padding:0;border-radius:50%;
+  border:1px solid rgba(255,255,255,.18);background:rgba(21,19,26,.6);color:#fff;cursor:pointer;
+  transition:background var(--dur-micro),border-color var(--dur-micro)}
+.visor svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.visor__prev{left:clamp(12px,2.6vw,40px);top:50%;margin-top:-26px}
+.visor__next{right:clamp(12px,2.6vw,40px);top:50%;margin-top:-26px}
+.visor__close{top:clamp(12px,2.2vh,24px);right:clamp(12px,2.6vw,40px)}
+.visor[data-solo] .visor__btn{display:none}
+@media (hover:hover){.visor__btn:hover,.visor__close:hover{background:var(--crimson);border-color:var(--crimson)}}
+body.has-cursor .visor,body.has-cursor .visor button{cursor:pointer}
+body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
+.is-offscreen .visor,.is-offscreen .visor *{animation-play-state:running!important}
+@media (prefers-reduced-motion:no-preference){
+  .visor[open]{animation:visorIn var(--dur-drawer) var(--ease-enter)}
+  .visor__media{animation:visorMedia var(--dur-drawer) var(--ease-enter)}
+}
+@keyframes visorIn{from{opacity:0}}
+@keyframes visorMedia{from{opacity:0;transform:scale(.975)}}
+@media (max-width:767px){
+  .visor__stage{padding:64px 10px 8px}
+  .visor__bar{padding:12px 132px max(18px,env(safe-area-inset-bottom)) 16px;min-height:84px;align-items:center}
+  .visor__n{position:absolute;top:28px;left:16px}
+  .visor__btn{top:auto;bottom:max(16px,env(safe-area-inset-bottom));margin:0;width:48px;height:48px}
+  .visor__prev{left:auto;right:72px}.visor__next{right:16px}
+  .visor__cap strong{font-size:17px}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .js .gal__item{opacity:1;transform:none}
+  .gal__grid.is-in .gal__item{animation:none}
+  .obra__media{transition:none}.obra__tile:hover .obra__media{transform:none}
+}
+/* ===================== fin bloque GALERÍA / OBRA / VISOR ===================== */
 
 /* ---------- Alianza JC Analytics ----------
    Sale de la fila de marcas a proposito: Hikvision, Ubiquiti, APC y Nodo son
