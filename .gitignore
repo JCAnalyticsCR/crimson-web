@@ -41,3 +41,6 @@ imagenes-videos/
 fygaro-export/
 infra/fygaro/raw/
 infra/fygaro/images/
+
+# material crudo del cliente (fotos con EXIF/GPS): nunca al repo publico
+imagenes seleccionadas/

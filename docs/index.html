@@ -28,7 +28,7 @@
 <link rel="preload" href="assets/fonts/Manrope-500.woff2" as="font" type="font/woff2" crossorigin>
 <script>(function(){var f=new URLSearchParams(location.search).get("font");if(f)document.documentElement.dataset.font=f})()</script>
 <link rel="stylesheet" href="assets/fonts/fonts.css?v=5">
-<link rel="stylesheet" href="assets/styles.css?v=66">
+<link rel="stylesheet" href="assets/styles.css?v=67">
 <script>document.documentElement.classList.add('js')</script>
 <!-- Telefonos: "tel" = linea 1, "tel2" = linea 2 (formato libre: "+506 8888 9892", "88889892"...). Mientras "tel2" este vacio la linea 2 no se muestra.
      main.js los aplica a todo [data-tel]/[data-wa] (contacto y pie). "waLink" es el enlace de WhatsApp Business de la linea 1. -->
@@ -195,17 +195,20 @@
        Quitar una foto: borrar su línea (y sus archivos en img/galeria/). -->
   <script type="application/json" id="galeria-data">
   [
-    {"archivo": "comunidad-camara-enlace",  "rotulo": "Videovigilancia comunitaria con enlace inalámbrico", "categoria": "Comunidades",         "ancho": 1600, "alto": 900,  "foco": "50% 70%"},
-    {"archivo": "residencia-camara-exterior", "rotulo": "Cámara exterior en residencia de lujo",            "categoria": "Residencias",         "ancho": 1125, "alto": 2000, "foco": "50% 42%"},
-    {"archivo": "red-rack-datos",            "rotulo": "Rack de datos con cableado estructurado",          "categoria": "Redes y cableado",    "ancho": 1125, "alto": 2000, "foco": "50% 38%"},
-    {"archivo": "perimetro-camaras-poste",   "rotulo": "Doble cámara bala en poste perimetral",            "categoria": "Perímetro y enlaces", "ancho": 1126, "alto": 2000, "foco": "50% 40%"},
-    {"archivo": "red-gabinete-montaje",      "rotulo": "Montaje de gabinete de red en sitio",              "categoria": "Redes y cableado",    "ancho": 1125, "alto": 2000, "foco": "50% 35%"},
-    {"archivo": "perimetro-montaje-altura",  "rotulo": "Montaje de cámaras en altura",                     "categoria": "Perímetro y enlaces", "ancho": 1600, "alto": 900,  "foco": "40% 40%"},
-    {"archivo": "comunidad-tendido-poste",   "rotulo": "Tendido externo para red comunitaria",             "categoria": "Comunidades",         "ancho": 1126, "alto": 2000, "foco": "50% 22%"},
-    {"archivo": "red-patch-panel",           "rotulo": "Patch panel y cableado ordenado",                  "categoria": "Redes y cableado",    "ancho": 1600, "alto": 900},
-    {"archivo": "perimetro-enlace-camaras",  "rotulo": "Enlace punto a punto con cámaras de perímetro",    "categoria": "Perímetro y enlaces", "ancho": 1126, "alto": 2000, "foco": "50% 52%"},
-    {"archivo": "perimetro-camara-solar",    "rotulo": "Cámara con alimentación solar",                    "categoria": "Perímetro y enlaces", "ancho": 720,  "alto": 540},
-    {"archivo": "red-punto-acceso",          "rotulo": "Punto de acceso Wi-Fi en cielo raso",              "categoria": "Redes y cableado",    "ancho": 899,  "alto": 690}
+    {"archivo": "comunidad-rotulo-noche",        "rotulo": "Videovigilancia comunitaria con rótulo de zona protegida", "categoria": "Comunidades",         "ancho": 1600, "alto": 2133, "foco": "50% 60%"},
+    {"archivo": "residencia-camara-exterior",    "rotulo": "Cámara exterior en residencia de lujo",                    "categoria": "Residencias",         "ancho": 1125, "alto": 2000, "foco": "50% 42%"},
+    {"archivo": "red-switch-unifi-pro",          "rotulo": "Switch UniFi Pro en rack de comunicaciones",               "categoria": "Redes y cableado",    "ancho": 1280, "alto": 720},
+    {"archivo": "comunidad-gabinete-poste",      "rotulo": "Gabinete y enlace inalámbrico instalados en poste",        "categoria": "Comunidades",         "ancho": 1600, "alto": 2842, "foco": "50% 35%"},
+    {"archivo": "residencia-camara-perimetro",   "rotulo": "Cámara domo en poste perimetral de residencia",            "categoria": "Residencias",         "ancho": 1600, "alto": 1200, "foco": "40% 40%"},
+    {"archivo": "red-rack-datos",                "rotulo": "Rack de datos con cableado estructurado",                  "categoria": "Redes y cableado",    "ancho": 1125, "alto": 2000, "foco": "50% 38%"},
+    {"archivo": "comunidad-vecindario-vigilado", "rotulo": "Vecindario con cámaras de vigilancia comunitaria",          "categoria": "Comunidades",         "ancho": 1600, "alto": 1200, "foco": "60% 45%"},
+    {"archivo": "perimetro-enlace-camaras",      "rotulo": "Enlace punto a punto con cámaras de perímetro",            "categoria": "Perímetro y enlaces", "ancho": 1126, "alto": 2000, "foco": "50% 52%"},
+    {"archivo": "red-gateway-unifi",             "rotulo": "Gateway UniFi en gabinete de red",                         "categoria": "Redes y cableado",    "ancho": 1280, "alto": 720},
+    {"archivo": "comunidad-camara-enlace",       "rotulo": "Videovigilancia comunitaria con enlace inalámbrico",       "categoria": "Comunidades",         "ancho": 1600, "alto": 900,  "foco": "50% 70%"},
+    {"archivo": "perimetro-antena-enlace",       "rotulo": "Antena de enlace punto a punto en techo",                  "categoria": "Perímetro y enlaces", "ancho": 900,  "alto": 1600, "foco": "50% 35%"},
+    {"archivo": "red-patch-panel",               "rotulo": "Patch panel y cableado ordenado",                          "categoria": "Redes y cableado",    "ancho": 1600, "alto": 900},
+    {"archivo": "red-punto-acceso",              "rotulo": "Punto de acceso Wi-Fi en cielo raso",                      "categoria": "Redes y cableado",    "ancho": 899,  "alto": 690},
+    {"archivo": "perimetro-camara-solar",        "rotulo": "Cámara con alimentación solar",                            "categoria": "Perímetro y enlaces", "ancho": 720,  "alto": 540}
   ]
   </script>
 </section>
@@ -651,6 +654,6 @@
     </div>
   </div>
 </footer>
-<script src="assets/main.js?v=40" defer></script>
+<script src="assets/main.js?v=41" defer></script>
 </body>
 </html>
