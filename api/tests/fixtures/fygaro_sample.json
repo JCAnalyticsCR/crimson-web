@@ -1,0 +1,114 @@
+{
+ "source": "https://tienda.crimsoncr.com",
+ "extracted_at": "2026-10-08T10:00:00",
+ "legal": {"terms": "Devoluciones dentro de 3 dias calendario.", "privacy": "Sus datos se usan solo para el pedido."},
+ "categories": [
+  {"fygaro_id": "12836", "name": "Seguridad y Acceso", "subcategories": []},
+  {"fygaro_id": "14090", "name": "Redes", "subcategories": []},
+  {"fygaro_id": "12755", "name": "Videovigilancia", "subcategories": []}
+ ],
+ "products": [
+  {
+   "fygaro_id": "0ca92781-ac3e-47a0-8039-7afcb92509a0",
+   "url": "https://tienda.crimsoncr.com/products/0ca92781-ac3e-47a0-8039-7afcb92509a0/",
+   "sku": "DS-K1T344EBFWX-E1",
+   "name": "CONTROL DE ACCESO RECONOCIMIENTO FACIAL / LECTOR DE HUELLAS / PIN HIKVISION",
+   "description": "Reconocimiento facial, lector de huellas, lector de tarjeta EM, PIN y codigo QR.",
+   "price": 236.3,
+   "price_with_tax": 267.02,
+   "currency": "USD",
+   "tax_rate": 13.0,
+   "categories": ["Seguridad y Acceso"],
+   "images": [
+    "https://fygaro-subscribers.s3.amazonaws.com/0a90e18b/products/529716/a344d64b-0483-46ff-a9a7-5bfe776b13c0.jpg",
+    "https://fygaro-subscribers.s3.amazonaws.com/0a90e18b/products/529716/b111d64b-0483-46ff-a9a7-5bfe776b13c0.png"
+   ],
+   "variants": [],
+   "availability": "disponible"
+  },
+  {
+   "fygaro_id": "1a2adbb7-bc6f-41e7-8842-bd6ac7be741b",
+   "sku": null,
+   "name": "Canaletas",
+   "description": "Canaleta plastica 2 m.",
+   "price": 5.47,
+   "price_with_tax": 6.18,
+   "currency": "USD",
+   "tax_rate": 13.0,
+   "categories": ["Redes"],
+   "images": ["https://fygaro-subscribers.s3.amazonaws.com/0a90e18b/products/1/c222.jpg"],
+   "variants": [],
+   "availability": "disponible"
+  },
+  {
+   "fygaro_id": "4238a3c7-bbc4-44c0-a374-9be667e0a4ca",
+   "sku": "KIT-SIN-PRECIO",
+   "name": "Kit de prueba sin precio",
+   "description": "",
+   "price": null,
+   "price_with_tax": null,
+   "currency": "USD",
+   "tax_rate": null,
+   "categories": ["Redes"],
+   "images": [],
+   "variants": [],
+   "availability": "disponible"
+  },
+  {
+   "fygaro_id": "48fa795d-5af8-4720-a679-98205d2ec149",
+   "sku": null,
+   "name": "CÁMARA DOMO IP 4MP  COLORVU",
+   "description": "Domo 4MP a color de noche.",
+   "price": 120.0,
+   "price_with_tax": 135.6,
+   "currency": "USD",
+   "tax_rate": 13.0,
+   "categories": ["Videovigilancia"],
+   "images": ["https://fygaro-subscribers.s3.amazonaws.com/0a90e18b/products/2/d333.jpg"],
+   "variants": [],
+   "availability": "disponible"
+  },
+  {
+   "fygaro_id": "522fda9a-b09d-4c7a-9a06-40c1e2f8e0d8",
+   "sku": "NVR-8CH",
+   "name": "NVR 8 canales 4K PoE Hikvision",
+   "description": "Grabador 8 canales.",
+   "price": 350.0,
+   "price_with_tax": 395.5,
+   "currency": "USD",
+   "tax_rate": 13.0,
+   "categories": ["Videovigilancia", "Redes"],
+   "images": [],
+   "variants": [],
+   "availability": "disponible"
+  },
+  {
+   "fygaro_id": "53aab128-d1c2-4c0d-8dbd-feec8fcc950e",
+   "sku": "DS-K1T344EBFWX-E1",
+   "name": "Control de acceso facial (publicacion repetida)",
+   "description": "Mismo SKU que otro articulo.",
+   "price": 236.3,
+   "price_with_tax": 267.02,
+   "currency": "USD",
+   "tax_rate": 13.0,
+   "categories": ["Seguridad y Acceso"],
+   "images": [],
+   "variants": [],
+   "availability": "disponible"
+  },
+  {
+   "fygaro_id": "682f7979-a3c0-49e8-8b5d-6cb11bbb1855",
+   "sku": "SRV-FY-INST",
+   "name": "Instalación de cámara adicional",
+   "description": "Mano de obra por punto.",
+   "price": 40.0,
+   "price_with_tax": 45.2,
+   "currency": "USD",
+   "tax_rate": 13.0,
+   "categories": ["Videovigilancia"],
+   "images": [],
+   "variants": [],
+   "availability": "disponible"
+  }
+ ]
+}

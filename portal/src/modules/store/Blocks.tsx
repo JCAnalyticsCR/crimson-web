@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 
 export type Block = { type: string; [k: string]: unknown };
 export type PubVariant = { id: number; name: string; price: string | number; options?: Record<string, string> };
-export type PubProduct = { id: number; name: string; price: string | number; currency: string; image: string | null; description: string | null; images?: string[]; variants?: PubVariant[] };
+export type PubProduct = { id: number; name: string; price: string | number; currency: string; image: string | null; description: string | null; images?: string[]; variants?: PubVariant[]; display_price?: string | number; display_currency?: string };
 
 const money = (v: string | number, cur = "CRC") => new Intl.NumberFormat("es-CR", { style: "currency", currency: cur, maximumFractionDigits: 0 }).format(Number(v));
 
@@ -69,7 +69,7 @@ function BlockView({ b, primary, products, onCta, onProduct, slug }: { b: Block;
               {list.map((p) => (
                 <button key={p.id} onClick={() => onProduct?.(p.id)} style={{ textAlign: "left", border: "1px solid var(--hair)", borderRadius: 14, overflow: "hidden", background: "var(--surface)", cursor: "pointer", padding: 0 }}>
                   <div style={{ aspectRatio: "4/3", background: "var(--bg-2)", display: "grid", placeItems: "center" }}>{p.image ? <img src={p.image} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ color: "var(--text-3)", fontSize: 12 }}>Sin imagen</span>}</div>
-                  <div style={{ padding: 12 }}><b style={{ fontSize: 14, display: "block" }}>{p.name}</b><span style={{ color: primary, fontWeight: 700, fontFamily: "var(--mono)" }}>{money(p.price, p.currency)}</span></div>
+                  <div style={{ padding: 12 }}><b style={{ fontSize: 14, display: "block" }}>{p.name}</b><span style={{ color: primary, fontWeight: 700, fontFamily: "var(--mono)" }}>{p.display_price !== undefined ? money(p.display_price, p.display_currency) : money(p.price, p.currency)}</span></div>
                 </button>
               ))}
             </div>

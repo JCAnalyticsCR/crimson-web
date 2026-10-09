@@ -65,6 +65,7 @@ export default function Store() {
                 <Field label="Tipografía"><select className="select" value={cfg.font} onChange={(e) => saveCfg({ font: e.target.value })}>{["Manrope", "Bricolage Grotesque", "Sora", "Space Grotesk"].map((f) => <option key={f}>{f}</option>)}</select></Field>
                 <Field label="Logo"><ImageField value={cfg.logo_url} label="Logo" onChange={(url) => saveCfg({ logo_url: url })} /></Field>
                 <Field label="WhatsApp"><input className="input" defaultValue={cfg.whatsapp} onBlur={(e) => saveCfg({ whatsapp: e.target.value })} /></Field>
+                <Field label="Moneda de la tienda" hint="Precios exhibidos y pedidos. Lo que esté en otra moneda se convierte con el tipo de cambio del día."><select className="select" value={cfg.currency || "CRC"} onChange={(e) => saveCfg({ currency: e.target.value })}><option value="CRC">Colones (₡)</option><option value="USD">Dólares ($)</option></select></Field>
               </div>
               <Field label="Dominio" hint={`Gratis: ${location.host}${publicUrl} · propio: apuntar un CNAME al portal`}><input className="input" defaultValue={cfg.domain || ""} placeholder="tienda.crimsoncr.com" onBlur={(e) => saveCfg({ domain: e.target.value })} /></Field>
             </div>

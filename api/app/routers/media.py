@@ -64,10 +64,9 @@ def _can_upload(p: Principal) -> None:
         raise HTTPException(403, "Sin permiso para subir archivos")
 
 
-@router.post("/media", status_code=201)
-async def upload(file: UploadFile = File(...), p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
-    _can_upload(p)
-    data = await file.read(MAX_PDF + 1)
+def save_media(db: Session, tenant_id: int, data: bytes, filename: str | None, user_id: int | None, ip: str | None = None) -> tuple[Media, bool]:
+    """Guarda bytes con las mismas reglas que la subida (firma, tope, dedupe por sha256). Devuelve (media, nuevo).
+    Lo usan la subida del portal y los importadores (p. ej. fotos del catalogo de Fygaro). No hace commit."""
     kind = sniff(data)
     if not kind:
         raise HTTPException(415, "Formato no permitido: use PNG, JPG, WEBP, GIF o PDF")
@@ -75,17 +74,26 @@ async def upload(file: UploadFile = File(...), p: Principal = Depends(get_princi
     if len(data) > limit:
         raise HTTPException(413, f"Archivo muy grande (maximo {limit // (1024 * 1024)} MB)")
     digest = hashlib.sha256(data).hexdigest()
-    same = db.scalar(select(Media).where(Media.tenant_id == p.tenant.id, Media.sha256 == digest))
+    same = db.scalar(select(Media).where(Media.tenant_id == tenant_id, Media.sha256 == digest))
     if same:  # la misma imagen subida dos veces reutiliza el registro
-        return _out(same)
-    name = "".join(ch if (ch.isascii() and ch.isalnum()) or ch in "._- " else "_" for ch in (file.filename or "archivo"))[:120] or "archivo"
+        return same, False
+    name = "".join(ch if (ch.isascii() and ch.isalnum()) or ch in "._- " else "_" for ch in (filename or "archivo"))[:120] or "archivo"
     m = Media(
-        tenant_id=p.tenant.id, key=secrets.token_urlsafe(18), filename=name, content_type=kind, size=len(data), sha256=digest, data=data, created_by=p.user.id
+        tenant_id=tenant_id, key=secrets.token_urlsafe(18), filename=name, content_type=kind, size=len(data), sha256=digest, data=data, created_by=user_id
     )
     db.add(m)
     db.flush()
-    audit(db, p.tenant.id, p.user.id, "upload", "media", m.id, {"type": kind, "size": len(data)}, ip=p.ip)
-    db.commit()
+    audit(db, tenant_id, user_id, "upload", "media", m.id, {"type": kind, "size": len(data)}, ip=ip)
+    return m, True
+
+
+@router.post("/media", status_code=201)
+async def upload(file: UploadFile = File(...), p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    _can_upload(p)
+    data = await file.read(MAX_PDF + 1)
+    m, new = save_media(db, p.tenant.id, data, file.filename, p.user.id, ip=p.ip)
+    if new:
+        db.commit()
     return _out(m)
 
 
