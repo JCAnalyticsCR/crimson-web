@@ -35,3 +35,9 @@ imagenes-videos/
 
 # worktrees de agentes
 .claude/worktrees/
+
+# Relevamiento de Fygaro (app.tools.fygaro_crawl): HTML crudo y fotos de terceros, nunca al repo.
+# El catalogo JSON de referencia vive en infra/fygaro/.
+fygaro-export/
+infra/fygaro/raw/
+infra/fygaro/images/

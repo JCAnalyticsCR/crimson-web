@@ -9,6 +9,7 @@ import AppShell from "./app/AppShell";
 import Guard from "./app/Guard";
 import Login from "./modules/auth/Login";
 import { isClientRole } from "./app/roles";
+import StoreHost, { isStoreHost } from "./modules/store/StoreHost";
 const Dashboard = lazy(() => import("./modules/dashboard/Dashboard"));
 const DocList = lazy(() => import("./modules/sales/DocList"));
 const DocEditor = lazy(() => import("./modules/sales/DocEditor"));
@@ -152,12 +153,25 @@ function App() {
   );
 }
 
+if (!isStoreHost()) {
+  // el panel nunca se indexa (la cabecera X-Robots-Tag de nginx dice lo mismo; esto cubre el servidor de desarrollo)
+  const m = document.createElement("meta");
+  m.name = "robots";
+  m.content = "noindex";
+  document.head.appendChild(m);
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
-      <SessionProvider>
-        <App />
-      </SessionProvider>
+      {/* Dominio de la tienda (tienda.crimsoncr.com): solo la vitrina, sin sesion ni panel */}
+      {isStoreHost() ? (
+        <StoreHost />
+      ) : (
+        <SessionProvider>
+          <App />
+        </SessionProvider>
+      )}
     </BrowserRouter>
   </StrictMode>,
 );

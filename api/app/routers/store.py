@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
@@ -369,23 +369,66 @@ def _stock_of(db: Session, tenant_id: int, product_ids: list[int]) -> dict[int, 
     return out
 
 
-def _prod_pub(p: Product, variants: list[dict] | None = None, stock: Decimal | None = None):
+class Pricer:
+    """Lleva cualquier precio a la moneda de la tienda con el tipo de cambio del dia (venta BCCR).
+    El catalogo puede mezclar monedas (Fygaro publicaba en dolares, la lista de proveedor queda en colones):
+    el cliente ve y paga TODO en una sola moneda, la de Mi Tienda."""
+
+    def __init__(self, db: Session, t: Tenant):
+        from ..services.documents import today_fx
+
+        self.currency = (store_cfg(t).get("currency") or t.default_currency or "CRC").upper()
+        self.usd = d(today_fx(db, "USD")[0]) or Decimal(1)
+
+    def __call__(self, amount, currency: str | None) -> Decimal:
+        a, cur = d(amount or 0), (currency or "CRC").upper()
+        if cur == self.currency:
+            return a
+        crc = a * self.usd if cur == "USD" else a  # solo CRC y USD en el sistema
+        return crc if self.currency == "CRC" else (crc / self.usd).quantize(Decimal("0.00001"))
+
+
+def _gross(net: Decimal, rate) -> Decimal:
+    return (net * (1 + d(rate) / 100)).quantize(Decimal("0.01"))
+
+
+def _prod_pub(
+    p: Product,
+    variants: list[dict] | None = None,
+    stock: Decimal | None = None,
+    pricer: Pricer | None = None,
+    cats: dict | None = None,
+    compact: bool = False,
+):
     main = next((i.get("url") for i in (p.images or []) if i.get("main")), (p.images or [{}])[0].get("url") if p.images else None)
-    return {
+    rate = float(p.taxes[0].tax.rate) if p.taxes else 13
+    desc = p.description_store or p.description_invoice
+    if compact and desc and len(desc) > 180:
+        desc = desc[:177].rstrip() + "…"
+    out = {
         "id": p.id,
         "code": p.code,
         "name": p.name,
         "price": p.price,
         "currency": p.currency,
-        "description": p.description_store or p.description_invoice,
+        "description": desc,
         "image": main,
         "images": [i.get("url") for i in (p.images or [])],
         "category_id": p.category_id,
-        "tax_rate": float(p.taxes[0].tax.rate) if p.taxes else 13,
+        "category": (cats or {}).get(p.category_id),
+        "brand": p.brand,
+        "tax_rate": rate,
         "item_type": p.item_type,
         "variants": [{**v, "price": v["price"] if v["price"] is not None else p.price} for v in (variants or [])],
         "availability": _availability(p, stock if stock is not None else Decimal(0)),
     }
+    if pricer is not None:
+        # precio final al consumidor: en la moneda de la tienda y CON IVA (asi se exhibe en Costa Rica)
+        out["display_currency"] = pricer.currency
+        out["display_price"] = _gross(pricer(p.price, p.currency), rate)
+        for v in out["variants"]:
+            v["display_price"] = _gross(pricer(v["price"], p.currency), rate)
+    return out
 
 
 def _availability(p: Product, own: Decimal) -> dict:
@@ -394,17 +437,38 @@ def _availability(p: Product, own: Decimal) -> dict:
     return store_availability(p, own)
 
 
+@router.get("/public/store-domain")
+def store_by_domain(host: str = Query(min_length=3, max_length=200), db: Session = Depends(get_db)):
+    """Dominio propio de una tienda (Mi Tienda -> Dominio, p. ej. tienda.crimsoncr.com) -> slug publico."""
+    h = host.strip().lower().split(":")[0]
+    for t in db.scalars(select(Tenant).where(Tenant.active)):
+        cfg = store_cfg(t)
+        dom = (cfg.get("domain") or "").strip().lower().removeprefix("https://").removeprefix("http://").rstrip("/")
+        if cfg["published"] and dom == h:
+            return {"slug": t.slug}
+    raise HTTPException(404, "Tienda no disponible")
+
+
 @router.get("/public/store/{slug}")
 def store_home(slug: str, db: Session = Depends(get_db)):
     t = _tenant(db, slug)
     cfg = store_cfg(t)
+    pricer = Pricer(db, t)
     pages = db.scalars(select(StorePage).where(StorePage.tenant_id == t.id, StorePage.published).order_by(StorePage.position)).all()
-    cats = db.scalars(select(Category).where(Category.tenant_id == t.id, Category.show_on_web)).all()
+    cats = db.scalars(select(Category).where(Category.tenant_id == t.id, Category.show_on_web).order_by(Category.name)).all()
+    counts = dict(
+        db.execute(
+            select(Product.category_id, func.count()).where(Product.tenant_id == t.id, Product.active, Product.show_on_web).group_by(Product.category_id)
+        ).all()
+    )
     return {
         "store": {k: cfg[k] for k in ("name", "tagline", "logo_url", "primary", "secondary", "font", "kind", "whatsapp", "currency", "legal")},
         "nav": [{"slug": pg.slug, "title": pg.title} for pg in pages if pg.in_nav],
-        "categories": [{"id": c.id, "name": c.name} for c in cats],
-        "shipping_rates": [r for r in cfg["shipping_rates"] if r.get("active")],
+        # solo categorias con productos publicados (una categoria vacia en el menu es un callejon sin salida)
+        "categories": [{"id": c.id, "name": c.name, "count": counts.get(c.id, 0)} for c in cats if counts.get(c.id)],
+        "product_count": sum(counts.values()),
+        # las tarifas se configuran en colones (Mi Tienda -> "Base ₡"); display_amount = en la moneda de la tienda, con IVA
+        "shipping_rates": [{**r, "display_amount": _gross(pricer(r.get("amount") or 0, "CRC"), 13)} for r in cfg["shipping_rates"] if r.get("active")],
         "payment_methods": manual_methods(t),
     }
 
@@ -418,18 +482,47 @@ def store_page(slug: str, page_slug: str, db: Session = Depends(get_db)):
     return _page_out(pg)
 
 
+def _cat_names(db: Session, tenant_id: int) -> dict[int, str]:
+    return dict(db.execute(select(Category.id, Category.name).where(Category.tenant_id == tenant_id)).all())
+
+
 @router.get("/public/store/{slug}/products")
-def store_products(slug: str, q: str | None = None, category_id: int | None = None, db: Session = Depends(get_db)):
+def store_products(
+    slug: str,
+    response: Response,
+    q: str | None = Query(None, max_length=120),
+    category_id: int | None = None,
+    sort: str = Query("name", pattern="^(name|price_asc|price_desc|recent)$"),
+    limit: int | None = Query(None, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    compact: bool = False,
+    db: Session = Depends(get_db),
+):
+    """Catalogo publico. Sin `limit` devuelve todo (compatibilidad con los bloques); con `limit` pagina y deja el
+    total en X-Total-Count. La busqueda ignora tildes y mayusculas y exige todas las palabras (camara 4mp hik)."""
+    from ..services.tabular import norm
+
     t = _tenant(db, slug)
     stmt = select(Product).where(Product.tenant_id == t.id, Product.active, Product.show_on_web)
-    if q:
-        stmt = stmt.where(or_(Product.name.ilike(f"%{q}%"), Product.code.ilike(f"%{q}%")))
     if category_id:
         stmt = stmt.where(Product.category_id == category_id)
-    rows = db.scalars(stmt.order_by(Product.name)).all()
+    rows = list(db.scalars(stmt.order_by(Product.name)).all())
+    cats = _cat_names(db, t.id)
+    if q and q.strip():
+        words = [w for w in norm(q).split("_") if w]
+        hay = {p.id: "_" + norm(" ".join(x or "" for x in (p.name, p.code, p.brand, p.model, cats.get(p.category_id)))) + "_" for p in rows}
+        rows = [p for p in rows if all(w in hay[p.id] for w in words)]
+    pricer = Pricer(db, t)
+    if sort in ("price_asc", "price_desc"):
+        rows.sort(key=lambda p: pricer(p.price, p.currency), reverse=sort == "price_desc")
+    elif sort == "recent":
+        rows.sort(key=lambda p: p.id, reverse=True)
+    response.headers["X-Total-Count"] = str(len(rows))
+    if limit is not None:
+        rows = rows[offset : offset + limit]
     vmap = _variants(db, [p.id for p in rows])
     stock = _stock_of(db, t.id, [p.id for p in rows])
-    return [_prod_pub(p, vmap.get(p.id), stock.get(p.id, Decimal(0))) for p in rows]
+    return [_prod_pub(p, vmap.get(p.id), stock.get(p.id, Decimal(0)), pricer, cats, compact) for p in rows]
 
 
 @router.get("/public/store/{slug}/products/{pid}")
@@ -442,10 +535,29 @@ def store_product(slug: str, pid: int, db: Session = Depends(get_db)):
         select(Product).where(Product.tenant_id == t.id, Product.show_on_web, Product.active, Product.category_id == p.category_id, Product.id != p.id).limit(4)
     ).all()
     stock = _stock_of(db, t.id, [p.id] + [r.id for r in related])
+    pricer, cats = Pricer(db, t), _cat_names(db, t.id)
     return {
-        **_prod_pub(p, _variants(db, [p.id]).get(p.id), stock.get(p.id, Decimal(0))),
-        "related": [_prod_pub(r, None, stock.get(r.id, Decimal(0))) for r in related],
+        **_prod_pub(p, _variants(db, [p.id]).get(p.id), stock.get(p.id, Decimal(0)), pricer, cats),
+        "related": [_prod_pub(r, None, stock.get(r.id, Decimal(0)), pricer, cats, True) for r in related],
     }
+
+
+@router.get("/public/store/{slug}/legacy/{kind}/{ref}")
+def store_legacy(slug: str, kind: str, ref: str, db: Session = Depends(get_db)):
+    """Direcciones viejas de Fygaro (tienda.crimsoncr.com/products/<uuid>/, /products/category/<id>/) -> ids propios.
+    Asi los enlaces ya compartidos en redes, WhatsApp y Google no mueren al cambiar de plataforma."""
+    t = _tenant(db, slug)
+    fy = (t.settings or {}).get("fygaro") or {}
+    if kind == "product":
+        e = (fy.get("products") or {}).get(ref)
+        p = db.get(Product, e["id"]) if e else None
+        if p and p.tenant_id == t.id and p.show_on_web and p.active:
+            return {"product_id": p.id}
+    elif kind == "category":
+        cid = (fy.get("categories") or {}).get(ref)
+        if cid:
+            return {"category_id": cid}
+    raise HTTPException(404, "Sin equivalente")
 
 
 class CartLine(BaseModel):
@@ -479,14 +591,17 @@ def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
     vids = [ln.variant_id for ln in data.lines if ln.variant_id]
     variants = {v.id: v for v in db.scalars(select(ProductVariant).where(ProductVariant.id.in_(vids), ProductVariant.active))} if vids else {}
 
+    pricer = Pricer(db, t)
+
     def unit_of(ln: CartLine) -> tuple[Decimal, str]:
+        """Precio sin IVA en la moneda de la tienda (el motor de totales suma el IVA despues)."""
         pr = prods[ln.product_id]
         if ln.variant_id:
             v = variants.get(ln.variant_id)
             if not v or v.product_id != pr.id:
                 raise HTTPException(422, "Variante no disponible")
-            return (d(v.price) if v.price is not None else d(pr.price)), f"{pr.name} · {v.name}"
-        return d(pr.price), pr.name
+            return pricer(v.price if v.price is not None else pr.price, pr.currency), f"{pr.name} · {v.name}"
+        return pricer(pr.price, pr.currency), pr.name
 
     gross = sum((d(ln.quantity) * unit_of(ln)[0] for ln in data.lines), Decimal(0))
     coupon = valid_coupon(db, t.id, data.coupon_code, gross)
@@ -513,6 +628,8 @@ def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
             }
         )
     ship_amount = shipping_cost(ship, sum((d(ln.quantity) * d(prods[ln.product_id].weight_kg or 0) for ln in data.lines), Decimal(0))) if ship else Decimal(0)
+    if ship_amount and pricer.currency != "CRC":  # las tarifas de envio se configuran en colones
+        ship_amount = pricer(ship_amount, "CRC").quantize(Decimal("0.01"))
     if ship and ship_amount > 0:
         items.append(
             {
@@ -544,6 +661,7 @@ def store_quote(slug: str, data: CheckoutIn, db: Session = Depends(get_db)):
         "total": calc.total,
         "coupon": coupon.code if coupon else None,
         "shipping_method": ship["name"] if ship else None,
+        "currency": Pricer(db, t).currency,
     }
 
 
@@ -562,7 +680,7 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, db: Session = 
         number=number,
         channel="tienda",
         contact=data.contact,
-        currency=t.default_currency,
+        currency=Pricer(db, t).currency,
         subtotal=calc.subtotal + discount_total - shipping,
         discount_total=discount_total,
         shipping=shipping,
@@ -598,6 +716,7 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, db: Session = 
         "number": o.number,
         "total": o.total,
         "currency": o.currency,
+        "lines": [{"name": ln.name, "quantity": ln.quantity, "total": ln.total} for ln in o.lines],
         "payment_method": o.payment_method,
         "shipping_method": o.shipping_method,
         "instructions": next((m.get("instructions") for m in manual_methods(t) if m.get("name") == data.payment_method), None),
