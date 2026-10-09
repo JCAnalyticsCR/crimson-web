@@ -481,54 +481,261 @@
     }, { passive: true });
   });
 
-  /* ---------- Muro de monitores: rota la camara y su rotulo, sin parpadeo ---------- */
-  const wall = $('#wall');
-  if (wall && !reduced) {
-    const feeds = $$('.feed', wall);
-    // Cada entrada es foto + lugar: al rotar cambian juntos, el rotulo nunca miente
-    const POOL = [
-      { n: 'foto-camaras-comunidad', l: 'La Julieta Sur' },
-      { n: 'foto-rack-h', l: 'Rack de datos' },
-      { n: 'foto-camara-residencia-h', l: 'Hacienda Pinilla' },
-      { n: 'foto-antena-camara-h', l: 'Enlace inalámbrico' },
-      { n: 'foto-patch-panel', l: 'Cableado' },
-      { n: 'foto-camaras-poste-h', l: 'Perímetro' },
-      { n: 'foto-tecnico-rack-h', l: 'Gabinete de red' },
-      { n: 'foto-instalacion-torre', l: 'Montaje en altura' },
-      { n: 'foto-tecnico-poste-h', l: 'Tendido externo' },
-    ];
-    const nameOf = f => (f.querySelector('img').getAttribute('src').match(/img\/(.+?)-\d+\.webp/) || [])[1];
-    let k = 0, timer = 0;
-    const swap = async () => {
-      feeds.forEach(f => f.classList.remove('is-active'));
-      const f = feeds[k % feeds.length];
-      f.classList.add('is-active');
-      k++;
-      if (isMobile.matches) return;
-      const shown = feeds.map(nameOf);
-      const free = POOL.filter(o => !shown.includes(o.n));
-      if (!free.length) return;
-      const pick = free[k % free.length];
-      // Precargar antes del corte: sin esto el marco queda en negro mientras descarga
-      const pre = new Image();
-      pre.src = `assets/img/${pick.n}-800.webp`;
-      try { await pre.decode(); } catch { return; }
-      f.classList.add('is-switch');
-      setTimeout(() => {
-        const img = f.querySelector('img');
-        img.srcset = `assets/img/${pick.n}-480.webp 480w, assets/img/${pick.n}-800.webp 800w`;
-        img.src = `assets/img/${pick.n}-800.webp`;
-        img.alt = pick.l;
-        const label = f.querySelector('.feed__meta span');
-        if (label) label.textContent = `${label.textContent.split(' \u00b7 ')[0]} \u00b7 ${pick.l}`;
-        f.classList.remove('is-switch');
-      }, 140);
+  /* ======================================================================
+     GALERÍA (CAM 02) + MURO DE OBRA (CAM 06) + VISOR — bloque propio
+     Las fotos salen de index.html #galeria-data (ver el comentario de esa lista);
+     aquí no hay nombres de archivos ni rótulos escritos a mano.
+     ====================================================================== */
+  const pad2 = n => String(n).padStart(2, '0');
+
+  /* ---------- Visor ampliado: un solo <dialog> para fotos y videos ---------- */
+  const visor = (() => {
+    const dlg = $('#visor');
+    if (!dlg || typeof dlg.showModal !== 'function') return null;
+    const stage = $('#visorStage'), cat = $('#visorCat'), txt = $('#visorTxt'), num = $('#visorN');
+    let lista = [], i = 0, alCerrar = null;
+    const pintar = () => {
+      const it = lista[i];
+      stage.textContent = '';
+      let m;
+      if (it.video) {
+        m = document.createElement('video');
+        m.muted = true; m.loop = true; m.playsInline = true; m.controls = true; m.disablePictureInPicture = true;
+        m.setAttribute('playsinline', ''); m.setAttribute('muted', '');
+        m.poster = it.poster || '';
+        m.preload = 'auto';
+        m.autoplay = !reduced; // reduced-motion: arranca solo cuando la persona le da play
+        m.src = it.video;
+      } else {
+        m = new Image();
+        m.alt = it.alt; m.decoding = 'async'; m.width = it.w; m.height = it.h;
+        // La miniatura que ya se ve en el muro hace de respaldo mientras baja la grande
+        if (it.prev) m.style.backgroundImage = `url("${it.prev}")`;
+        m.sizes = '100vw'; m.srcset = it.srcset; m.src = it.src;
+        m.decode().then(() => { m.style.backgroundImage = ''; }).catch(() => {});
+      }
+      m.className = 'visor__media';
+      stage.append(m);
+      cat.textContent = it.cat || '';
+      txt.textContent = it.txt || '';
+      num.textContent = lista.length > 1 ? `${pad2(i + 1)} / ${pad2(lista.length)}` : '';
+      // Precarga de la siguiente foto: el salto se siente inmediato
+      const sig = lista.length > 1 && lista[(i + 1) % lista.length];
+      if (sig && !sig.video) { const p = new Image(); p.sizes = '100vw'; p.srcset = sig.srcset; }
     };
-    new IntersectionObserver(([en]) => {
-      clearInterval(timer);
-      if (en.isIntersecting) timer = setInterval(swap, 5200);
-    }, { rootMargin: '10%' }).observe(wall);
+    const ir = d => { if (lista.length < 2) return; i = (i + d + lista.length) % lista.length; pintar(); };
+    const abrir = (l, k, onClose) => {
+      lista = l; i = k; alCerrar = onClose || null;
+      dlg.toggleAttribute('data-solo', l.length < 2);
+      pintar();
+      document.documentElement.classList.add('visor-abierto');
+      dlg.showModal();
+      $('#visorClose').focus({ preventScroll: true });
+      // "Atrás" del teléfono cierra el visor en vez de salir de la página
+      if (!history.state?.visor) history.pushState({ visor: true }, '');
+    };
+    dlg.addEventListener('close', () => {
+      stage.textContent = ''; // corta la descarga/reproducción del video
+      document.documentElement.classList.remove('visor-abierto');
+      if (history.state?.visor) history.back();
+      const cb = alCerrar; alCerrar = null; cb?.();
+    });
+    addEventListener('popstate', () => { if (dlg.open) dlg.close(); });
+    $('#visorClose').addEventListener('click', () => dlg.close());
+    $('#visorPrev').addEventListener('click', () => ir(-1));
+    $('#visorNext').addEventListener('click', () => ir(1));
+    dlg.addEventListener('keydown', e => {
+      if (e.key === 'ArrowLeft') { e.preventDefault(); ir(-1); } else if (e.key === 'ArrowRight') { e.preventDefault(); ir(1); }
+    });
+    stage.addEventListener('click', e => { if (e.target === stage) dlg.close(); }); // clic fuera de la foto
+    // Deslizar con el dedo (touch-action: pan-y en CSS deja el gesto horizontal para nosotros)
+    let x0 = null, y0 = 0;
+    stage.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') { x0 = e.clientX; y0 = e.clientY; } });
+    stage.addEventListener('pointerup', e => {
+      if (x0 === null) return;
+      const dx = e.clientX - x0, dy = e.clientY - y0; x0 = null;
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4) ir(dx < 0 ? 1 : -1);
+    });
+    stage.addEventListener('pointercancel', () => { x0 = null; });
+    return { abrir };
+  })();
+
+  /* ---------- Galería de instalaciones (CAM 02) ---------- */
+  const galGrid = $('#galGrid');
+  if (galGrid) {
+    let fotos = [];
+    try { fotos = JSON.parse($('#galeria-data').textContent).filter(f => f && f.archivo && f.rotulo); }
+    catch (err) { console.warn('#galeria-data no es JSON válido (¿falta o sobra una coma?)', err); }
+    const DIR = 'assets/img/galeria/';
+    // MISMA regla que scripts/medios/optimizar-foto.py (anchos_para): 480/960/1600 que quepan + el ancho mayor
+    const anchosDe = w => { const tope = Math.min(w || 1600, 1600); return [...new Set([480, 960, 1600].filter(a => a < tope).concat(tope))]; };
+    const srcsetDe = f => anchosDe(f.ancho).map(a => `${DIR}${f.archivo}-${a}.webp ${a}w`).join(', ');
+    const urlDe = (f, k) => { const a = anchosDe(f.ancho); return `${DIR}${f.archivo}-${a[Math.min(k, a.length - 1)]}.webp`; };
+    const mqTablet = matchMedia('(max-width:1023px)');
+    const cols = () => isMobile.matches ? 2 : mqTablet.matches ? 3 : 4;
+    const limite = () => isMobile.matches ? 7 : 9;
+    const filtros = $('#galFiltros'), cuenta = $('#galCuenta'), mas = $('#galMas');
+    let filtro = '', todas = false;
+    const visibles = () => fotos.filter(f => !filtro || f.categoria === filtro);
+
+    // Filtros: salen solos de las categorías de la lista (con una sola categoría no se muestran)
+    const cats = [...new Set(fotos.map(f => f.categoria).filter(Boolean))];
+    if (cats.length > 1) {
+      [['', 'Todas', fotos.length], ...cats.map(c => [c, c, fotos.filter(f => f.categoria === c).length])].forEach(([valor, texto, n]) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'gal__chip'; b.dataset.cat = valor;
+        b.setAttribute('aria-pressed', String(valor === filtro));
+        b.append(texto);
+        const s = document.createElement('span'); s.className = 'gal__chip-n'; s.textContent = pad2(n);
+        b.append(s);
+        filtros.append(b);
+      });
+      filtros.addEventListener('click', e => {
+        const b = e.target.closest('.gal__chip'); if (!b) return;
+        filtro = b.dataset.cat;
+        $$('.gal__chip', filtros).forEach(c => c.setAttribute('aria-pressed', String(c === b)));
+        render();
+      });
+    }
+
+    const render = () => {
+      const lista = visibles();
+      const n = (filtro || todas) ? lista.length : Math.min(lista.length, limite());
+      const C = cols(), frag = document.createDocumentFragment(), items = [];
+      lista.slice(0, n).forEach((f, k) => {
+        const li = document.createElement('li');
+        li.className = 'gal__item' + (k === 0 ? ' is-main' : '');
+        li.style.setProperty('--i', Math.min(k, 10));
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'feed gal__tile' + (k === 0 ? ' is-rec is-active' : '');
+        b.dataset.k = k; b.dataset.cursor = 'Ampliar';
+        b.setAttribute('aria-label', `Ver en grande: ${f.rotulo}`);
+        if (f.foco) b.style.setProperty('--foco', f.foco);
+        const img = new Image();
+        img.alt = f.rotulo; img.loading = 'lazy'; img.decoding = 'async';
+        if (f.ancho && f.alto) { img.width = f.ancho; img.height = f.alto; }
+        img.sizes = k === 0 ? '(max-width:767px) 92vw, (max-width:1023px) 62vw, 640px' : '(max-width:767px) 46vw, (max-width:1023px) 31vw, 320px';
+        img.srcset = srcsetDe(f); img.src = urlDe(f, 1);
+        b.append(img);
+        b.insertAdjacentHTML('beforeend', '<span class="feed__corners"></span><span class="gal__osd meta"><span class="rec"><i></i></span></span><span class="gal__cap"><span class="meta gal__cat"></span><span class="gal__txt"></span></span>');
+        b.querySelector('.rec').append(`CAM ${pad2(k + 1)}`);
+        if (k === 0) { const c = document.createElement('span'); c.className = 'feed__clock'; c.textContent = new Date().toLocaleTimeString('es-CR', { hour12: false, timeZone: 'America/Costa_Rica' }); b.querySelector('.gal__osd').append(c); clocks.push(c); }
+        b.querySelector('.gal__cat').textContent = f.categoria || '';
+        b.querySelector('.gal__txt').textContent = f.rotulo;
+        li.append(b); frag.append(li); items.push(li);
+      });
+      // Sin huecos: el monitor grande ocupa 2x2 y la última ficha estira hasta cerrar su fila.
+      if (items.length) {
+        const lado = 2 * (C - 2); // celdas libres junto al monitor grande
+        let resto = items.length - 1;
+        if (C > 2 && resto < lado) items[0].style.gridColumn = '1 / -1'; // pocas fotos: el grande va a lo ancho
+        else resto = (resto - Math.max(lado, 0));
+        const r = resto % C;
+        if (r && items.length > 1) items[items.length - 1].style.gridColumn = `span ${C - r + 1}`;
+      }
+      galGrid.replaceChildren(frag);
+      for (let j = clocks.length - 1; j >= 0; j--) if (!clocks[j].isConnected) clocks.splice(j, 1);
+      cuenta.textContent = filtro ? `${pad2(lista.length)} / ${pad2(fotos.length)} · ${filtro}` : `${pad2(fotos.length)} fotos de obra`;
+      const faltan = lista.length - n;
+      mas.hidden = faltan <= 0;
+      if (faltan > 0) mas.textContent = `Ver todas las instalaciones (${lista.length})`;
+    };
+    mas.addEventListener('click', () => {
+      const antes = galGrid.children.length;
+      todas = true; render();
+      galGrid.children[antes]?.querySelector('button')?.focus({ preventScroll: true });
+    });
+    // Reacomodar solo cuando cambia el número de columnas
+    [isMobile, mqTablet].forEach(m => m.addEventListener('change', render));
+    galGrid.addEventListener('click', e => {
+      const b = e.target.closest('.gal__tile'); if (!b || !visor) return;
+      const lista = visibles();
+      visor.abrir(lista.map((f, k) => {
+        const a = anchosDe(f.ancho);
+        const t = galGrid.children[k]?.querySelector('img');
+        return { src: urlDe(f, a.length - 1), srcset: srcsetDe(f), w: f.ancho, h: f.alto, alt: f.rotulo,
+          cat: f.categoria, txt: f.rotulo, prev: t?.currentSrc || '' };
+      }), +b.dataset.k);
+    });
+    render();
+
+    // Entrada escalonada al aparecer; en escritorio la línea de barrido salta de monitor en monitor
+    if (reduced) galGrid.classList.add('is-in');
+    else {
+      let timer = 0, k = 0;
+      new IntersectionObserver(([en]) => {
+        if (en.isIntersecting) galGrid.classList.add('is-in');
+        clearInterval(timer);
+        if (en.isIntersecting && !isMobile.matches) timer = setInterval(() => {
+          const t = $$('.gal__tile', galGrid); if (t.length < 2) return;
+          t.forEach(x => x.classList.remove('is-active'));
+          t[++k % t.length].classList.add('is-active');
+        }, 5200);
+      }, { rootMargin: '0px 0px -10% 0px' }).observe(galGrid);
+    }
   }
+
+  /* ---------- Muro de obra en video (CAM 06) ----------
+     Diagnóstico (oct 2026, "en la compu se ven pixelados, no reproducen"):
+     1) Bajo prefers-reduced-motion (Windows con "Efectos de animación" apagado) este bloque no
+        hacía NADA: el póster vivía en data-poster y nunca se asignaba, así que quedaba la
+        miniatura de 18x32 px estirada a 260x462. Ahora el póster se pone siempre.
+     2) Clips de 60 y 120 fps (WhatsApp) con un filter CSS encima, tres a la vez: botaban
+        fotogramas. Ahora son 30 fps, H.264 High, sin filtro.
+     Escritorio: reproduce lo que está a la vista (≥45 %). Móvil: SOLO la ficha centrada, y no
+     descarga ni un byte de video hasta que una ficha queda al centro. Ahorro de datos o
+     reduced-motion: póster + triángulo; el clip corre solo si la persona lo abre. */
+  const clips = $$('.obra__media[data-clip]');
+  if (clips.length) {
+    const cx = navigator.connection || {};
+    const ahorro = !!cx.saveData || /(^|-)2g|3g/.test(cx.effectiveType || '') || matchMedia('(prefers-reduced-data: reduce)').matches;
+    const autoplay = !reduced && !ahorro;
+    const tiles = clips.map(v => v.closest('.obra__tile'));
+    const quieta = (v, on) => v.closest('.obra__tile').classList.toggle('is-quieta', on);
+    const play = v => {
+      if (!v.getAttribute('src')) { v.preload = 'auto'; v.src = `${v.dataset.clip}-${isMobile.matches ? 640 : 960}.mp4`; }
+      quieta(v, false);
+      v.play()?.catch(() => quieta(v, true)); // iOS puede negar el autoplay: queda el póster con su triángulo
+    };
+    const pausa = v => { v.pause(); quieta(v, true); };
+    clips.forEach(v => quieta(v, true));
+
+    const carga = new IntersectionObserver(entries => entries.forEach(en => {
+      if (!en.isIntersecting) return;
+      const v = en.target; carga.unobserve(v);
+      v.poster = v.dataset.poster;
+      // Escritorio precarga el clip al acercarse; móvil espera a que la ficha quede al centro
+      if (autoplay && !isMobile.matches && !v.getAttribute('src')) { v.preload = 'auto'; v.src = `${v.dataset.clip}-960.mp4`; }
+    }), { rootMargin: '50%' });
+
+    const ratios = new Map();
+    let enVisor = false;
+    const actualizar = () => {
+      if (!autoplay || enVisor || document.hidden) return;
+      let elegido = null;
+      if (isMobile.matches) { let r = .6; ratios.forEach((x, v) => { if (x >= r) { r = x; elegido = v; } }); }
+      clips.forEach(v => {
+        const toca = isMobile.matches ? v === elegido : (ratios.get(v) || 0) >= .45;
+        if (toca && v.paused) play(v); else if (!toca && !v.paused) pausa(v);
+      });
+    };
+    const juega = new IntersectionObserver(es => { es.forEach(en => ratios.set(en.target, en.intersectionRatio)); actualizar(); },
+      { threshold: [0, .45, .6, .8, 1] });
+    clips.forEach(v => { carga.observe(v); juega.observe(v); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) clips.forEach(v => v.pause()); else actualizar(); });
+
+    const lista = tiles.map(t => {
+      const v = t.querySelector('video');
+      return { video: `${v.dataset.clip}-960.mp4`, poster: v.dataset.poster,
+        cat: t.querySelector('.obra__tag')?.textContent, txt: t.querySelector('.obra__info strong')?.textContent };
+    });
+    $('#obraWall')?.addEventListener('click', e => {
+      const b = e.target.closest('.obra__abrir'); if (!b || !visor) return;
+      enVisor = true; clips.forEach(v => v.pause()); // un solo video decodificando a la vez
+      visor.abrir(lista, tiles.indexOf(b.closest('.obra__tile')), () => { enVisor = false; clips.forEach(v => v.paused && quieta(v, true)); actualizar(); });
+    });
+  }
+  /* ===================== fin bloque GALERÍA / OBRA / VISOR ===================== */
 
   /* ---------- Formulario → WhatsApp ---------- */
   const form = $('#form');
@@ -549,35 +756,6 @@
   // Feedback antes del salto a WhatsApp (en iOS tarda ~1 s)
   const waBtn = $('#waBtn');
   waBtn?.addEventListener('click', () => { const s = waBtn.querySelector('span'); if (s) s.textContent = 'Abriendo WhatsApp…'; setTimeout(() => s && (s.textContent = 'Escribinos por WhatsApp'), 2500); });
-
-  /* ---------- Muro de obra ----------
-     Dos observers a proposito: uno decide CUANDO descargar (la ficha se acerca) y otro
-     CUANDO reproducir (la ficha de verdad se ve). Con uno solo o se descarga de mas, o
-     los clips corren fuera de cuadro gastando bateria. Bajo reduced-motion no se descarga
-     ni un byte de video: se queda el poster, que ya cuenta lo mismo. */
-  const clips = $$('.obra__media[data-src]');
-  if (clips.length && !reduced) {
-    const carga = new IntersectionObserver(entries => entries.forEach(en => {
-      if (!en.isIntersecting) return;
-      const v = en.target;
-      v.poster = v.dataset.poster; v.src = v.dataset.src; delete v.dataset.src; v.load();
-      carga.unobserve(v);
-    }), { rootMargin: '50%' });
-
-    // Quien esta a la vista se guarda aparte: al volver de otra pestana hay que reanudar
-    // justo a esos, porque el observer no vuelve a disparar si la interseccion no cambio.
-    const aLaVista = new Set();
-    const play = v => v.play?.().catch(() => {}); // iOS puede negar el autoplay: queda el poster y ya
-    const juega = new IntersectionObserver(entries => entries.forEach(en => {
-      const v = en.target;
-      if (en.isIntersecting) { aLaVista.add(v); play(v); } else { aLaVista.delete(v); v.pause?.(); }
-    }), { threshold: .45 });
-
-    clips.forEach(v => { carga.observe(v); juega.observe(v); });
-    document.addEventListener('visibilitychange', () => {
-      document.hidden ? clips.forEach(v => v.pause?.()) : aLaVista.forEach(play);
-    });
-  }
 })();
 
 /* ---------- CAM 09 · Reporte de incidencias ----------
