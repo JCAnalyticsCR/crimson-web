@@ -937,3 +937,38 @@ section{padding:var(--space) var(--pad)}
 .ayuda-link { display: flex; flex-direction: column; gap: 2px; margin-top: 16px; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--hair-dark); text-decoration: none; color: rgba(244,241,238,.7); font-size: 14px; transition: border-color .2s; }
 .ayuda-link b { color: #fff; }
 .ayuda-link:hover { border-color: var(--crimson); }
+
+/* ==========================================================================
+   PIE + CONTACTO (pedidos de Andres): lineas de telefono y cierre con JC Analytics.
+   Bloque propio: no toca reglas de arriba. Sin animacion: el pie es pantalla de
+   decision, no de deseo; solo se mueve lo que el usuario toca (hover de botones).
+   ========================================================================== */
+/* el atributo hidden manda aunque la fila/enlace tenga display propio (flex, inline-block en movil) */
+[data-tel-row][hidden]{display:none!important}
+
+/* Lineas de telefono. Con UNA linea: identico a antes (solo botones; el numero esta en la tarjeta). */
+.tels{flex-direction:column;align-items:stretch;gap:12px}
+.tels__row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.tels__num{display:none}
+/* Con DOS lineas: cada fila es una tira con su numero a la izquierda y los botones a la derecha */
+.tels.is-multi .tels__row{max-width:540px;display:grid;grid-template-columns:1fr auto auto;gap:10px;padding:10px 10px 10px 18px;border:1px solid var(--hair-dark);border-radius:14px;background:rgba(255,255,255,.025)}
+.tels.is-multi .tels__num{display:block;font-family:var(--serif);font-size:clamp(20px,1.7vw,24px);font-variant-numeric:tabular-nums;letter-spacing:-.01em;color:#fff;white-space:nowrap}
+.tels.is-multi .btn--lg{padding:13px 22px;font-size:15px}
+
+/* Cierre del pie: "Desarrollado en alianza con JC Analytics" + eslogan */
+.footer__jc{display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;padding-top:8px}
+.footer__jc-lbl{display:flex;align-items:center;gap:14px;color:#8a8a90;letter-spacing:.24em}
+.footer__jc-lbl::before,.footer__jc-lbl::after{content:"";flex:none;width:clamp(28px,5vw,72px);height:1px;background:linear-gradient(90deg,transparent,rgba(244,241,238,.28))}
+.footer__jc-lbl::after{transform:scaleX(-1)}
+.footer__jc img{display:block;height:30px;width:auto;opacity:.9}
+.footer__jc-claim{margin:0;font-family:var(--serif);font-weight:500;font-size:clamp(15px,1.15vw,18px);line-height:1.3;letter-spacing:-.005em;color:rgba(244,241,238,.68)}
+
+@media (max-width:767px){
+  .tels.is-multi .tels__row{max-width:none;grid-template-columns:1fr 1fr;padding:14px}
+  .tels.is-multi .tels__num{grid-column:1/-1;font-size:22px}
+  .tels.is-multi .tels__row .btn{width:100%;padding:12px 14px}
+  .footer__jc{gap:12px}
+  .footer__jc-lbl{gap:10px;letter-spacing:.18em;font-size:10px}
+  .footer__jc-lbl::before,.footer__jc-lbl::after{width:22px}
+  .footer__jc img{height:26px}
+}

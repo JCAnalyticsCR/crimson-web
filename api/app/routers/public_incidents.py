@@ -45,7 +45,7 @@ class IncidentIn(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     name: str = Field(min_length=2, max_length=120)
-    company: str | None = Field(None, max_length=160)  # empresa o residencial
+    company: str | None = Field(None, max_length=160)  # empresa o particular (texto libre; antes decia "residencial", no hay enum que migrar)
     phone: str | None = Field(None, max_length=25, pattern=r"^[0-9+()\s.-]{7,25}$")
     email: EmailStr | None = Field(None, max_length=200)
     kind: str = Field(pattern="^(falla|garantia|mantenimiento|otro)$")

@@ -30,7 +30,9 @@
 <link rel="stylesheet" href="assets/fonts/fonts.css?v=5">
 <link rel="stylesheet" href="assets/styles.css?v=65">
 <script>document.documentElement.classList.add('js')</script>
-<script type="application/json" id="site-config">{"tel":"+50688889892","wa":"50688889892","mail":"info@crimsoncr.com","waLink":"https://wa.me/message/5YQKXZFUPHWLA1","place":"Alajuela, Costa Rica","api":"https://api-production-f07a.up.railway.app","apiLocal":"http://127.0.0.1:8000"}</script>
+<!-- Telefonos: "tel" = linea 1, "tel2" = linea 2 (formato libre: "+506 8888 9892", "88889892"...). Mientras "tel2" este vacio la linea 2 no se muestra.
+     main.js los aplica a todo [data-tel]/[data-wa] (contacto y pie). "waLink" es el enlace de WhatsApp Business de la linea 1. -->
+<script type="application/json" id="site-config">{"tel":"+50688889892","tel2":"","wa":"50688889892","mail":"info@crimsoncr.com","waLink":"https://wa.me/message/5YQKXZFUPHWLA1","place":"Alajuela, Costa Rica","api":"https://api-production-f07a.up.railway.app","apiLocal":"http://127.0.0.1:8000"}</script>
 </head>
 <body data-tone="cream">
 <a class="skip" href="#top">Saltar al contenido</a>
@@ -457,14 +459,24 @@
 
         <div class="pass reveal" style="--d:2" aria-label="Tarjeta de contacto">
           <div class="pass__top"><img src="assets/img/logo.png" alt="" width="1024" height="237"><span class="meta">Pase de acceso · 07</span></div>
-          <a class="pass__tel" href="tel:+50688889892">+506 8888 9892</a>
+          <a class="pass__tel" href="tel:+50688889892" data-tel="1" data-tel-text>+506 8888 9892</a>
           <div class="pass__bottom"><span class="meta">WhatsApp Business</span><span class="meta">Alajuela · CR</span></div>
           <img class="pass__qr" src="assets/img/qr-whatsapp.webp" alt="" aria-hidden="true" loading="lazy" width="430" height="482">
         </div>
 
-        <div class="contacto__actions reveal" style="--d:3">
-          <a class="btn btn--crimson btn--lg" id="waBtn" href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener" data-cursor="Ir"><span>Escribinos por WhatsApp</span><i class="btn__arrow" aria-hidden="true"></i></a>
-          <a class="btn btn--ghost btn--ghost-light btn--lg" href="tel:+50688889892">Llamar</a>
+        <!-- Una fila por numero (salen de #site-config). Con un solo numero se ve igual que siempre;
+             cuando "tel2" tenga valor aparece la segunda fila y cada fila muestra su numero. -->
+        <div class="contacto__actions tels reveal" style="--d:3" data-tels>
+          <div class="tels__row" data-tel-row="1">
+            <a class="tels__num" href="tel:+50688889892" data-tel="1" data-tel-text tabindex="-1" aria-hidden="true">+506 8888 9892</a>
+            <a class="btn btn--crimson btn--lg" id="waBtn" href="https://wa.me/message/5YQKXZFUPHWLA1" data-wa="1" target="_blank" rel="noopener" data-cursor="Ir"><span>Escribinos por WhatsApp</span><i class="btn__arrow" aria-hidden="true"></i></a>
+            <a class="btn btn--ghost btn--ghost-light btn--lg" href="tel:+50688889892" data-tel="1">Llamar</a>
+          </div>
+          <div class="tels__row" data-tel-row="2" hidden>
+            <a class="tels__num" href="#" data-tel="2" data-tel-text tabindex="-1" aria-hidden="true"></a>
+            <a class="btn btn--crimson btn--lg" href="#" data-wa="2" target="_blank" rel="noopener" data-cursor="Ir"><span>WhatsApp</span><i class="btn__arrow" aria-hidden="true"></i></a>
+            <a class="btn btn--ghost btn--ghost-light btn--lg" href="#" data-tel="2">Llamar</a>
+          </div>
         </div>
         <p class="contacto__mail reveal" style="--d:4"><span class="meta">o escribinos a</span> <a href="mailto:info@crimsoncr.com">info@crimsoncr.com</a></p>
       </div>
@@ -536,7 +548,7 @@
         </fieldset>
         <div class="form__row">
           <label class="field"><span>Nombre</span><input name="name" type="text" autocomplete="name" autocapitalize="words" required minlength="2" maxlength="120" placeholder="Tu nombre"></label>
-          <label class="field"><span>Empresa o residencial</span><input name="company" type="text" autocomplete="organization" maxlength="160" placeholder="Opcional"></label>
+          <label class="field"><span>Empresa o particular</span><input name="company" type="text" autocomplete="organization" maxlength="160" placeholder="Opcional"></label>
         </div>
         <div class="form__row">
           <label class="field"><span>Teléfono</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="25" placeholder="+506 0000 0000"></label>
@@ -571,11 +583,20 @@
       <div><span class="meta">Líneas</span><a href="#servicios">Crimson Security</a><a href="#servicios">Crimson Networks</a><a href="#servicios">Crimson Smart Communities</a><a href="#servicios">Crimson Operations</a><a href="#servicios">Crimson Supply</a></div>
       <div><span class="meta">Enlaces</span><a href="#top">Inicio</a><a href="ayuda/">Centro de ayuda</a><a href="https://portal-production-4312.up.railway.app/solicitar-acceso" rel="noopener">Portal de clientes: solicitar acceso</a><a href="https://tienda.crimsoncr.com/products/" target="_blank" rel="noopener">Tienda</a><a href="https://tienda.crimsoncr.com/page/solicitud-de-asesoria-personalizada/" target="_blank" rel="noopener">Asesoría personalizada</a></div>
       <div><span class="meta">Contacto</span><a href="mailto:info@crimsoncr.com">info@crimsoncr.com</a><a href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener">WhatsApp</a><a href="https://www.facebook.com/crimsonconcr" target="_blank" rel="noopener">Facebook</a><a href="https://www.instagram.com/cr.crimsoncr/" target="_blank" rel="noopener">Instagram</a></div>
-      <div><span class="meta">Sede</span><span>Alajuela, Costa Rica</span><a href="tel:+50688889892">+506 8888 9892</a><span>Grupo Empresarial Crimson SRL</span></div>
+      <div><span class="meta">Sede</span><span>Alajuela, Costa Rica</span><a href="tel:+50688889892" data-tel="1" data-tel-text>+506 8888 9892</a><a href="#" data-tel="2" data-tel-text data-tel-row="2" hidden></a><span>Grupo Empresarial Crimson SRL</span></div>
     </div>
     <div class="footer__bottom meta">
       <span>© 2026 Crimson Consulting · Todos los derechos reservados</span>
       <div><a href="https://tienda.crimsoncr.com/terms" target="_blank" rel="noopener">Términos y condiciones</a><a href="https://tienda.crimsoncr.com/policies" target="_blank" rel="noopener">Política de privacidad</a></div>
+    </div>
+    <!-- Cierre: lo pidio Andres ("ustedes se merecen eso"). Discreto, centrado, sin competir con la marca Crimson.
+         Eslogan elegido: "Del dato a la decisión."
+         Alternativas: "Datos que se convierten en decisiones." · "Analítica que se traduce en resultados."
+         Sin enlace: el repo no tiene la web de JC Analytics. Si se agrega, envolver el logo en <a>. -->
+    <div class="footer__jc">
+      <span class="meta footer__jc-lbl">Desarrollado en alianza con</span>
+      <img src="assets/img/marca-jcanalytics-mono.png" alt="JC Analytics" width="551" height="120" loading="lazy" decoding="async">
+      <p class="footer__jc-claim">Del dato a la decisión.</p>
     </div>
   </div>
 </footer>

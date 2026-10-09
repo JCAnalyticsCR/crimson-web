@@ -548,7 +548,39 @@
   });
   // Feedback antes del salto a WhatsApp (en iOS tarda ~1 s)
   const waBtn = $('#waBtn');
-  waBtn?.addEventListener('click', () => { const s = waBtn.querySelector('span'); if (s) s.textContent = 'Abriendo WhatsApp…'; setTimeout(() => s && (s.textContent = 'Escribinos por WhatsApp'), 2500); });
+  waBtn?.addEventListener('click', () => { const s = waBtn.querySelector('span'); if (!s || s.dataset.busy) return; const t = s.textContent; s.dataset.busy = '1'; s.textContent = 'Abriendo WhatsApp…'; setTimeout(() => { s.textContent = t; delete s.dataset.busy; }, 2500); });
+
+  /* ---------- Telefonos: un solo lugar (#site-config "tel" y "tel2") ----------
+     El HTML trae la linea 1 escrita (funciona sin JS); aca se reescribe desde la config para que
+     cambiar el numero sea tocar una sola linea. La linea 2 queda oculta mientras "tel2" este vacio
+     o no sea un numero de Costa Rica valido (8 digitos, con o sin 506). */
+  const telParse = raw => {
+    let d = String(raw || '').replace(/\D/g, '');
+    if (d.length === 8) d = '506' + d;
+    if (!/^506\d{8}$/.test(d)) return null;
+    return { href: `tel:+${d}`, wa: `https://wa.me/${d}`, label: `+506 ${d.slice(3, 7)} ${d.slice(7)}` };
+  };
+  const TELS = { 1: telParse(CFG.tel), 2: telParse(CFG.tel2) };
+  if (CFG.tel2 && !TELS[2]) console.warn('[crimson] "tel2" en #site-config no es un número de CR válido:', CFG.tel2);
+  for (const n of [1, 2]) {
+    const t = TELS[n];
+    $$(`[data-tel-row="${n}"]`).forEach(r => { r.hidden = !t; });
+    if (!t) continue;
+    $$(`[data-tel="${n}"]`).forEach(a => { a.href = t.href; if (a.hasAttribute('data-tel-text')) a.textContent = t.label; });
+    // linea 1: se respeta el enlace de WhatsApp Business (waLink) si existe; las demas van por wa.me/<numero>
+    $$(`[data-wa="${n}"]`).forEach(a => { a.href = (n === 1 && CFG.waLink) || t.wa; });
+  }
+  const tels = $('[data-tels]');
+  if (tels && TELS[1] && TELS[2]) {
+    tels.classList.add('is-multi');
+    // con dos lineas cada boton dice a que numero va (texto corto + etiqueta completa para lectores de pantalla)
+    $$('.tels__row', tels).forEach(r => {
+      const t = TELS[r.dataset.telRow];
+      const w = $('[data-wa]', r), c = $('[data-tel]:not(.tels__num)', r);
+      if (w) { const s = $('span', w); if (s) s.textContent = 'WhatsApp'; w.setAttribute('aria-label', `WhatsApp al ${t.label}`); }
+      if (c) c.setAttribute('aria-label', `Llamar al ${t.label}`);
+    });
+  }
 
   /* ---------- Muro de obra ----------
      Dos observers a proposito: uno decide CUANDO descargar (la ficha se acerca) y otro

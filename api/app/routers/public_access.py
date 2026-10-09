@@ -44,7 +44,7 @@ class AccessRequestIn(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     email: EmailStr = Field(max_length=200)  # obligatorio: la invitacion sale a este correo
     phone: str | None = Field(None, max_length=25, pattern=r"^[0-9+()\s.-]{7,25}$")
-    company: str = Field(min_length=2, max_length=160)  # empresa o residencial
+    company: str = Field(min_length=2, max_length=160)  # empresa o particular (texto libre; antes decia "residencial", no hay enum que migrar)
     id_number: str | None = Field(None, max_length=30, pattern=r"^[0-9A-Za-z\s.-]{5,30}$")  # cedula opcional
     message: str | None = Field(None, max_length=1000)
     website: str | None = Field(None, max_length=200)  # honeypot
