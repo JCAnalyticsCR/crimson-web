@@ -41,6 +41,7 @@ from ..services import sla as slasvc
 from ..services.client_access import invite_client
 from ..services.documents import audit
 from ..services.mail import notify_roles, queue_email
+from ..services.media_access import sign_urls
 from ..services.render import render_html, render_pdf
 from ..services.sequences import next_number
 from .media import MAX_IMAGE, public_url, sniff
@@ -135,7 +136,8 @@ def _ticket_out(db: Session, t: SupportTicket, p: Principal, full: bool = False)
     }
     if full:
         out["description"] = t.description
-        out["photos"] = list(t.photos or [])
+        # fotos privadas del equipo (si las hay) salen con enlace firmado de vida corta; las del cliente, igual
+        out["photos"] = sign_urls(db, p.tenant.id, list(t.photos or []))
         out["solution"] = t.solution if t.status in ("resuelto", "cerrado") else None
         # del equipo de Crimson solo el nombre de pila, igual que en la conversacion
         out["opened_by"] = _autor(db, t.opened_by, p)[0] if t.opened_by else ((t.contact or {}).get("name") or "Equipo Crimson")
@@ -145,7 +147,8 @@ def _ticket_out(db: Session, t: SupportTicket, p: Principal, full: bool = False)
             if n.internal:
                 continue  # las notas internas del equipo NUNCA salen al portal
             nombre, equipo = _autor(db, n.user_id, p)
-            notas.append({"id": n.id, "body": n.body, "photos": list(n.photos or []), "author": nombre, "team": equipo, "created_at": n.created_at})
+            fotos = sign_urls(db, p.tenant.id, list(n.photos or []))
+            notas.append({"id": n.id, "body": n.body, "photos": fotos, "author": nombre, "team": equipo, "created_at": n.created_at})
         out["messages"] = notas
     return out
 
@@ -356,7 +359,7 @@ def equipos(p: Principal = Depends(get_client), db: Session = Depends(get_db)):
             "warranty_until": a.warranty_until,
             "in_warranty": bool(a.warranty_until and a.warranty_until >= hoy),
             "status": a.status,
-            "photos": list(a.photos or []),
+            "photos": sign_urls(db, p.tenant.id, list(a.photos or [])),
         }
         for a in rows
     ]

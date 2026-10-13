@@ -23,6 +23,10 @@ class Media(TenantMixin, TimestampMixin, Base):
     sha256: Mapped[str] = mapped_column(String(64), index=True)
     data: Mapped[bytes] = deferred(mapped_column(LargeBinary))
     created_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
+    # public: tienda, logo, eventos (URL abierta, como siempre). private: evidencia interna (levantamientos, OT,
+    # proyectos, contabilidad, tickets); solo se sirve con enlace firmado de vida corta (services/media_access.py)
+    visibility: Mapped[str] = mapped_column(String(10), default="public", server_default="public", index=True)
+    module: Mapped[str | None] = mapped_column(String(40))  # modulo de origen: decide quien puede pedir la firma
 
 
 # ---------- CRM: contactos y notas del cliente (la linea de tiempo se arma con documentos + notas) ----------

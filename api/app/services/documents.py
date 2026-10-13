@@ -29,8 +29,41 @@ from .sequences import next_number
 from .totals import LineIn, balance, compute_document, d
 
 
-def audit(db: Session, tenant_id: int, user_id: int | None, action: str, entity: str, entity_id: int | None, diff=None, ip=None):
-    db.add(AuditLog(tenant_id=tenant_id, user_id=user_id, at=datetime.now(UTC), ip=ip, action=action, entity=entity, entity_id=entity_id, diff=diff))
+def audit(
+    db: Session,
+    tenant_id: int,
+    user_id: int | None,
+    action: str,
+    entity: str,
+    entity_id: int | None,
+    diff=None,
+    ip=None,
+    *,
+    before: dict | None = None,
+    after: dict | None = None,
+    reason: str | None = None,
+    version=None,
+    company: str | None = None,
+):
+    """Bitacora. Las llamadas de siempre solo pasan diff; before/after/reason/version/company son opcionales
+    (ver services/bitacora.py para armar before/after solo con lo que cambio)."""
+    db.add(
+        AuditLog(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            at=datetime.now(UTC),
+            ip=ip,
+            action=action,
+            entity=entity,
+            entity_id=entity_id,
+            diff=diff,
+            before=before,
+            after=after,
+            reason=(reason or None) and reason[:2000],
+            version=None if version is None else str(version)[:40],
+            company=(company or None) and company[:160],
+        )
+    )
 
 
 CR = ZoneInfo("America/Costa_Rica")

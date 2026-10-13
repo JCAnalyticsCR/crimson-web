@@ -380,10 +380,14 @@ def project_get(pid: int, p: Principal = Depends(require("projects", "ver")), db
 @router.put("/projects/{pid}")
 def project_update(pid: int, data: ProjectIn, p: Principal = Depends(require("projects", "editar")), db: Session = Depends(get_db)):
     pr = _project(db, pid, p)
+    from ..services import bitacora  # solo bitacora: antes/despues de lo que cambio (incluye costos)
+
+    antes = bitacora.snapshot(pr)
     for k, v in data.model_dump().items():
         setattr(pr, k, v)
     if pr.status == "entregado" and not pr.delivered_at:
         pr.delivered_at = datetime.now(UTC)
+    bitacora.audit_change(db, p, "update", "project", pr.id, antes, bitacora.snapshot(pr), version=bitacora.next_version(db, p.tenant.id, "project", pr.id))
     db.commit()
     return _out(db, pr, p)
 
@@ -649,7 +653,9 @@ def delivery_report(pid: int, p: Principal = Depends(require("projects", "ver"))
         f"<tr><td>{esc(a.name)}</td><td class=mono>{esc(a.serial or '—')}</td><td>{esc(a.location or '—')}</td><td>{a.warranty_until or '—'}</td></tr>"
         for a in assets
     )
-    gal = "".join(f'<img src="{esc(u)}" alt="">' for u in photos[:24])
+    from ..services.media_access import sign_urls  # evidencias privadas: enlace firmado al armar el informe
+
+    gal = "".join(f'<img src="{esc(u)}" alt="">' for u in sign_urls(db, p.tenant.id, photos[:24]) if isinstance(u, str))
     return f"""<!doctype html><html lang=es><head><meta charset=utf-8><title>Informe {esc(pr.number)}</title>
 <style>body{{font-family:Manrope,system-ui,sans-serif;color:#15131a;max-width:820px;margin:28px auto;padding:0 18px}}
 h1{{font-size:26px;margin:0}}h3{{font-size:16px;margin:0 0 4px}}.m{{color:#6b6570;font-size:12.5px}}

@@ -16,6 +16,8 @@ from ..core.db import get_db
 from ..core.deps import ASSIGNABLE_ROLES, Principal, require
 from ..core.security import hash_password, hash_token, password_is_strong
 from ..models import BankAccount, BillingGroup, EmailOutbox, Invitation, PaymentGatewayConfig, Tenant, TenantUser, User
+from ..services.bitacora import audit_change
+from ..services.documents import audit
 from ..services.mail import mail_status, queue_email
 from ..services.sla import SLA_DEFECTO, normalizar
 
@@ -231,6 +233,7 @@ def invite(data: InviteIn, p: Principal = Depends(require("settings", "configura
         "invitation",
         inv.id,
     )
+    audit(db, p.tenant.id, p.user.id, "invite", "invitation", inv.id, {"email": inv.email, "role": inv.role_code}, ip=p.ip, after={"email": inv.email, "role": inv.role_code})
     db.commit()
     # emailed dice si el correo salio de verdad: sin llave de Resend queda "simulado" y la pantalla no puede
     # decir "le llego un correo". El enlace se devuelve siempre para mandarlo por WhatsApp.
@@ -275,6 +278,7 @@ def accept(data: AcceptIn, db: Session = Depends(get_db)):
 class MemberIn(BaseModel):
     role: str | None = None
     active: bool | None = None
+    reason: str | None = Field(None, max_length=500)  # opcional: queda en la bitacora
 
 
 @router.patch("/users/{uid}")
@@ -284,12 +288,14 @@ def member_update(uid: int, data: MemberIn, p: Principal = Depends(require("sett
         raise HTTPException(404, "Usuario no encontrado")
     if uid == p.user.id and (data.active is False or (data.role and data.role != "admin")):
         raise HTTPException(409, "No podés quitarte el acceso de administrador a vos mismo")
+    antes = {"role": m.role_code, "active": m.active}
     if data.role:
         if data.role not in ASSIGNABLE_ROLES:
             raise HTTPException(422, "Rol invalido")
         m.role_code = data.role
     if data.active is not None:
         m.active = data.active
+    audit_change(db, p, "permissions", "user", uid, antes, {"role": m.role_code, "active": m.active}, reason=data.reason)
     db.commit()
     return {"ok": True}
 

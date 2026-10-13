@@ -19,6 +19,7 @@ from ..services import documents as docsvc
 from ..services import einvoice as esvc
 from ..services import inventory as inv
 from ..services import reports as rp
+from ..services.bitacora import audit_change, next_version, snapshot
 from ..services.documents import audit
 from ..services.mail import doc_email_html, queue_email
 from ..services.render import money, render_html, render_pdf
@@ -317,6 +318,7 @@ class ExpenseIn(BaseModel):
     reference: str | None = None
     status: str = Field("registrado", pattern="^(registrado|pagado|anulado)$")
     attachment_url: str | None = Field(None, max_length=400)
+    reason: str | None = Field(None, max_length=500)  # opcional: motivo del cambio, va a la bitacora
 
 
 def _exp_out(e: Expense, db: Session):
@@ -350,7 +352,7 @@ def expenses(limit: int = Query(50, le=200), p: Principal = Depends(require("acc
 
 
 def _apply_expense(e: Expense, data: ExpenseIn):
-    for k, v in data.model_dump().items():
+    for k, v in data.model_dump(exclude={"reason"}).items():
         setattr(e, k, v)
     e.tax_amount = (data.subtotal * data.tax_rate / Decimal(100)).quantize(Decimal("0.00001"))
     e.total = data.subtotal + e.tax_amount
@@ -361,6 +363,8 @@ def expense_create(data: ExpenseIn, p: Principal = Depends(require("accounting",
     e = Expense(tenant_id=p.tenant.id, created_by=p.user.id)
     _apply_expense(e, data)
     db.add(e)
+    db.flush()
+    _audit_expense(db, p, e, {}, "create", data.reason)
     db.commit()
     return _exp_out(e, db)
 
@@ -370,9 +374,20 @@ def expense_update(eid: int, data: ExpenseIn, p: Principal = Depends(require("ac
     e = db.get(Expense, eid)
     if not e or e.tenant_id != p.tenant.id:
         raise HTTPException(404, "Gasto no encontrado")
+    antes = snapshot(e)
     _apply_expense(e, data)
+    _audit_expense(db, p, e, antes, "update", data.reason)
     db.commit()
     return _exp_out(e, db)
+
+
+def _audit_expense(db: Session, p: Principal, e: Expense, antes: dict, action: str, reason: str | None) -> None:
+    """Gasto: antes/despues de los campos que cambiaron; company = el proveedor."""
+    sup = db.get(Supplier, e.supplier_id) if e.supplier_id else None
+    version = next_version(db, p.tenant.id, "expense", e.id) if action == "update" else 1
+    audit_change(
+        db, p, action, "expense", e.id, antes, snapshot(e), reason=reason, version=version, company=sup.name if sup else None, always=action == "create"
+    )
 
 
 class SupplierIn(BaseModel):
@@ -470,6 +485,9 @@ def report(
         if not p.can("reports", "exportar"):
             raise HTTPException(403, "Sin permiso para exportar")
         data = rp.to_xlsx(rep, a, b, p.tenant.name)
+        # exportacion: el archivo sale del sistema, queda quien, que reporte, que rango y cuantas filas
+        audit(db, p.tenant.id, p.user.id, "export", "report", None, {"report": key, "format": "xlsx", "from": str(a), "to": str(b), "rows": len(rep.rows)}, ip=p.ip)
+        db.commit()
         return Response(
             data,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

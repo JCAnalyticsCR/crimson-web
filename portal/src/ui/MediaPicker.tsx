@@ -2,18 +2,24 @@
 import { useEffect, useRef, useState } from "react";
 import { api, uploadFile } from "../lib/api";
 import { useSession } from "../app/session";
+import { useMediaUrls } from "../lib/media";
 import { I, Icon, Modal } from "./components";
 import { Lightbox } from "./Lightbox";
 
-export type MediaItem = { id: number; key: string; url: string; filename: string; content_type: string; size: number };
+export type MediaItem = { id: number; key: string; url: string; filename: string; content_type: string; size: number; visibility?: "public" | "private"; signed_url?: string };
 
-/** path: el portal del cliente sube a /cliente/media (solo fotos y solo suyas); el resto del sistema a /media. */
-export function useUpload(path = "/media") {
+/** Modulo de origen de la evidencia privada: decide quien la puede ver (permiso "<modulo>.ver"). */
+export type PrivateModule = "field" | "projects" | "accounting" | "support_desk" | "assets" | "purchases";
+
+/** path: el portal del cliente sube a /cliente/media (solo fotos y solo suyas); el resto del sistema a /media.
+ *  privado: la foto nace privada (solo se ve con enlace firmado) y queda ligada a ese modulo. Sin el, publica
+ *  (tienda, logo, eventos), como siempre. */
+export function useUpload(path = "/media", privado?: PrivateModule) {
   const { toast } = useSession();
   const [busy, setBusy] = useState(false);
   const upload = async (file: File): Promise<MediaItem | null> => {
     setBusy(true);
-    try { return await uploadFile<MediaItem>(path, file); }
+    try { return await uploadFile<MediaItem>(privado && path === "/media" ? `${path}?visibility=private&module=${privado}` : path, file); }
     catch (e) { toast(e instanceof Error ? e.message : "No se pudo subir", "bad"); return null; }
     finally { setBusy(false); }
   };
@@ -21,8 +27,8 @@ export function useUpload(path = "/media") {
 }
 
 /** Zona de subida: devuelve el archivo ya guardado. */
-export function Dropzone({ onDone, accept = "image/*", label = "Arrastrá una imagen o hacé clic", compact }: { onDone: (m: MediaItem) => void; accept?: string; label?: string; compact?: boolean }) {
-  const { upload, busy } = useUpload();
+export function Dropzone({ onDone, accept = "image/*", label = "Arrastrá una imagen o hacé clic", compact, privado }: { onDone: (m: MediaItem) => void; accept?: string; label?: string; compact?: boolean; privado?: PrivateModule }) {
+  const { upload, busy } = useUpload("/media", privado);
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const take = async (f?: File | null) => { if (!f) return; const m = await upload(f); if (m) onDone(m); };
@@ -97,7 +103,8 @@ export function GalleryField({ value, onChange }: { value: GalleryImage[]; onCha
 
 function Library({ onPick, onClose }: { onPick: (m: MediaItem) => void; onClose: () => void }) {
   const [items, setItems] = useState<MediaItem[] | null>(null);
-  useEffect(() => { api<MediaItem[]>("/media?kind=image").then(setItems).catch(() => setItems([])); }, []);
+  // solo lo publico: una foto privada elegida como imagen de producto o logo quedaria rota en la tienda
+  useEffect(() => { api<MediaItem[]>("/media?kind=image&visibility=public").then(setItems).catch(() => setItems([])); }, []);
   return (
     <Modal title="Biblioteca de imágenes" onClose={onClose} wide>
       <Dropzone onDone={onPick} />
@@ -113,12 +120,16 @@ function Library({ onPick, onClose }: { onPick: (m: MediaItem) => void; onClose:
 /** Tira de fotos para el trabajo de campo: el tecnico esta en una escalera con el celular,
     asi que el boton es grande y en el telefono abre la camara directo (capture). Guarda URLs planas. */
 /** onOpen: si viene, quien la usa abre su propio visor (p. ej. el levantamiento, que recorre las fotos de
- *  todos los puntos). Si no, la tira abre el visor con sus propias fotos y el rotulo `caption`. */
-export function PhotoStrip({ value, onChange, label = "Agregar fotografía", disabled, caption, onOpen, uploadPath }: {
-  value: string[]; onChange: (v: string[]) => void; label?: string; disabled?: boolean; caption?: string; onOpen?: (index: number) => void; uploadPath?: string;
+ *  todos los puntos). Si no, la tira abre el visor con sus propias fotos y el rotulo `caption`.
+ *  privado: modulo de origen. Por defecto "field" (levantamientos y OT): la evidencia de campo nace privada.
+ *  En el portal del cliente (uploadPath /cliente/...) no aplica: sus fotos son publicas o ya vienen firmadas. */
+export function PhotoStrip({ value, onChange, label = "Agregar fotografía", disabled, caption, onOpen, uploadPath, privado = "field" }: {
+  value: string[]; onChange: (v: string[]) => void; label?: string; disabled?: boolean; caption?: string; onOpen?: (index: number) => void; uploadPath?: string; privado?: PrivateModule;
 }) {
-  const { upload, busy } = useUpload(uploadPath);
-  const [ver, setVer] = useState<number | null>(null);
+  const interno = !uploadPath || uploadPath === "/media";
+  const { upload, busy } = useUpload(uploadPath, interno ? privado : undefined);
+  const ver = useMediaUrls(value, interno); // URL para mostrar (firmada si es privada)
+  const [abierta, setAbierta] = useState<number | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const take = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -132,8 +143,8 @@ export function PhotoStrip({ value, onChange, label = "Agregar fotografía", dis
   return (
     <div className="photos">
       {value.map((url, i) => (
-        <div className="photos__it" key={`${url}-${i}`} style={{ background: `center/cover no-repeat url("${url}")` }}>
-          <button type="button" className="photos__open" onClick={() => (onOpen ? onOpen(i) : setVer(i))} aria-label={`Ver foto ${i + 1} en grande`} />
+        <div className="photos__it" key={`${url}-${i}`} style={{ background: ver[i] ? `center/cover no-repeat url("${ver[i]}")` : "var(--bg-2)" }}>
+          <button type="button" className="photos__open" onClick={() => (onOpen ? onOpen(i) : setAbierta(i))} aria-label={`Ver foto ${i + 1} en grande`} />
           {!disabled && <button type="button" onClick={() => onChange(value.filter((_, j) => j !== i))} aria-label="Quitar foto"><Icon d={I.x} size={13} /></button>}
         </div>
       ))}
@@ -144,7 +155,7 @@ export function PhotoStrip({ value, onChange, label = "Agregar fotografía", dis
         </button>
       )}
       {disabled && value.length === 0 && <span className="muted" style={{ fontSize: 13 }}>Sin fotografías.</span>}
-      {ver !== null && <Lightbox fotos={value.map((url) => ({ url, caption }))} start={ver} onClose={() => setVer(null)} />}
+      {abierta !== null && <Lightbox fotos={value.map((url) => ({ url, caption }))} start={abierta} onClose={() => setAbierta(null)} sign={interno} />}
     </div>
   );
 }

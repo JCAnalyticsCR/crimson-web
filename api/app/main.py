@@ -39,6 +39,7 @@ from .routers import (
     support_desk,
     webhooks,
 )
+from .routers import bitacora as bitacora_router
 from .routers import settings as settings_router
 
 log = logging.getLogger("crimson")
@@ -78,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(cabys_masivo.router)
     app.include_router(sales.router)
     app.include_router(ops.router)
+    app.include_router(bitacora_router.router)  # antes que ajustes: /settings/audit
     app.include_router(settings_router.router)
     app.include_router(webhooks.router)
     app.include_router(store.router)

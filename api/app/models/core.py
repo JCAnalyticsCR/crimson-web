@@ -147,9 +147,17 @@ class AuditLog(Base):
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     ip: Mapped[str | None] = mapped_column(String(64))
     action: Mapped[str] = mapped_column(String(40))  # create | update | void | pay | send | login ...
-    entity: Mapped[str] = mapped_column(String(40))  # quote | invoice | payment | customer ...
+    entity: Mapped[str] = mapped_column(String(40), index=True)  # quote | invoice | payment | customer ...
     entity_id: Mapped[int | None] = mapped_column(Integer)
     diff: Mapped[dict | None] = mapped_column(JSON)
+    # Bitacora completa (todo opcional: las llamadas viejas solo llenan diff). before/after llevan SOLO los campos
+    # que cambiaron; reason es el motivo que escribio el usuario; version la del registro editado; company el
+    # contexto (cliente o empresa a la que pertenece lo editado). En Postgres la tabla no admite UPDATE ni DELETE.
+    before: Mapped[dict | None] = mapped_column(JSON)
+    after: Mapped[dict | None] = mapped_column(JSON)
+    reason: Mapped[str | None] = mapped_column(Text)
+    version: Mapped[str | None] = mapped_column(String(40))
+    company: Mapped[str | None] = mapped_column(String(160))
 
 
 class Currency(TenantMixin, Base):

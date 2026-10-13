@@ -108,7 +108,7 @@ export default function Accounting() {
           <Field label="Comprobante adjunto" hint="Foto o PDF de la factura del proveedor.">
             {edit.attachment_url
               ? <div style={{ display: "flex", gap: 8, alignItems: "center" }}><VerArchivo url={edit.attachment_url} caption={edit.description} className="btn btn--soft btn--sm">Ver adjunto</VerArchivo><button className="btn btn--ghost btn--sm" onClick={() => setEdit({ ...edit, attachment_url: "" })}>Quitar</button></div>
-              : <Dropzone compact accept="image/*,application/pdf" label="Adjuntar foto o PDF" onDone={(m) => setEdit({ ...edit, attachment_url: m.url })} />}
+              : <Dropzone compact accept="image/*,application/pdf" label="Adjuntar foto o PDF" privado="accounting" onDone={(m) => setEdit({ ...edit, attachment_url: m.url })} />}
           </Field>
         </Modal>
       )}
