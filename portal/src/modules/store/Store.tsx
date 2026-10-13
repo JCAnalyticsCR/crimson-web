@@ -5,6 +5,7 @@ import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { Blocks } from "./Blocks";
 import { GalleryField, ImageField } from "../../ui/MediaPicker";
+import CheckoutSettings from "./CheckoutSettings";
 
 export type Block = { type: string; [k: string]: unknown };
 type Page = { id: number; slug: string; title: string; blocks: Block[]; published: boolean; in_nav: boolean; position: number };
@@ -91,6 +92,8 @@ export default function Store() {
           </Card>
         </div>
       )}
+
+      {cfg && cfg.kind === "tienda" && <CheckoutSettings rates={cfg.shipping_rates} onRates={(r) => saveCfg({ shipping_rates: r })} />}
 
       <Card title="Páginas y bloques" flush extra={<button className="btn btn--crimson btn--sm" onClick={() => setNewPage({ slug: "", title: "" })}><Icon d={I.plus} />Nueva página</button>}>
         {pagesSt === null ? <Loading /> : pages.length === 0 ? <Empty hint="Creá la página de inicio y armala con bloques." /> : (

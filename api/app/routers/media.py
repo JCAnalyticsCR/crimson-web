@@ -171,6 +171,8 @@ def list_media(
     db: Session = Depends(get_db),
 ):
     q = select(Media).where(Media.tenant_id == p.tenant.id, _visible(p))
+    # los comprobantes de pago de la tienda se ven solo desde su pedido, nunca en la galeria
+    q = q.where(or_(Media.module.is_(None), Media.module != "sales"))
     q = q.where(Media.content_type.like("image/%")) if kind == "image" else q.where(Media.content_type == "application/pdf")
     if visibility:
         q = q.where(Media.visibility == visibility)

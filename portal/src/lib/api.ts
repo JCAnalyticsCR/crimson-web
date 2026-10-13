@@ -167,6 +167,9 @@ export const STATUS: Record<string, { label: string; tone: "ok" | "warn" | "bad"
   entregado: { label: "Entregado", tone: "ok" },
   cancelado: { label: "Cancelado", tone: "muted" },
   pagado: { label: "Pagado", tone: "ok" },
+  en_revision: { label: "Comprobante en revisión", tone: "warn" },
+  listo: { label: "Listo para retiro", tone: "ok" },
+  reembolsado: { label: "Reembolsado", tone: "muted" },
   por_aprobar: { label: "Por aprobar", tone: "warn" },
   // campo y proyectos
   borrador: { label: "Borrador", tone: "muted" },

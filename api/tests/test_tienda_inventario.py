@@ -72,7 +72,8 @@ def _avail(client, *ids):
 
 def _buy(client, lines, payment="SINPE Móvil"):
     body = {"lines": lines, "contact": {"name": "Ana Vega", "email": "ana@ejemplo.com"}, "payment_method": payment}
-    return client.post("/public/store/crimson/checkout", json=body)
+    r = client.post("/public/store/crimson/checkout", json=body)
+    return r
 
 
 def _order(db, number):
@@ -236,8 +237,11 @@ def test_vencimiento_libera_y_pagar_fija(client, auth, db_session):
     p = _prod(client, "VEN-1", "Disco duro")
     _in(client, p["id"], main["id"], 2)
     _cfg(client, enforce_stock=True, hold_hours_manual=48, hold_minutes_card=30)
+    # el checkout nuevo solo acepta tarjeta si esta activada en Mi Tienda -> Pagos y entrega
+    ck = {"methods": {"sinpe": {"active": True, "phone": "8888-7777", "holder": "Crimson SA"}, "tarjeta": {"active": True, "installments": False, "max_installments": 0}}}
+    assert client.put("/store/checkout", json=ck).status_code == 200
     sinpe = _order(db_session, _buy(client, [{"product_id": p["id"], "quantity": 1}], "SINPE Móvil").json()["number"])
-    card = _order(db_session, _buy(client, [{"product_id": p["id"], "quantity": 1}], "Tarjeta de crédito").json()["number"])
+    card = _order(db_session, _buy(client, [{"product_id": p["id"], "quantity": 1}], "Tarjeta (ONVO)").json()["number"])
     r1 = db_session.scalar(select(StockReservation).where(StockReservation.order_id == sinpe.id))
     r2 = db_session.scalar(select(StockReservation).where(StockReservation.order_id == card.id))
     now = datetime.now(UTC)

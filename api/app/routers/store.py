@@ -6,19 +6,17 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..core.ratelimit import public_limiter
-from ..models import Category, Coupon, Customer, Invoice, Order, OrderLine, Product, ProductVariant, StorePage, Tenant
-from ..schemas.sales import DocumentIn, LineInSchema
-from ..services import documents as docsvc
+from ..models import Category, Coupon, Customer, Invoice, Order, Product, ProductVariant, StorePage, Tenant
 from ..services import store_inventory as sinv
 from ..services.documents import audit
-from ..services.sequences import next_number
+from ..services.store_orders import STATUS_LABEL, aware
 from ..services.totals import LineIn, compute_document, d
 
 router = APIRouter(tags=["tienda"])
@@ -242,7 +240,20 @@ def _order_out(o: Order):
         "status": o.status,
         "invoice_id": o.invoice_id,
         "notes": o.notes,
-        "created_at": o.created_at,
+        "created_at": aware(o.created_at),
+        "status_label": STATUS_LABEL.get(o.status, o.status),
+        "payment_kind": o.payment_kind,
+        "delivery": o.delivery,
+        "paid_at": aware(o.paid_at),
+        "payment_ref": o.payment_ref,
+        "tracking_number": o.tracking_number,
+        "carrier": o.carrier,
+        "cancel_reason": o.cancel_reason,
+        "refund": o.refund,
+        "history": o.history or [],
+        "proofs": o.proofs or [],
+        "expires_at": aware(o.expires_at),
+        "inventory_state": o.inventory_state,
         "lines": [
             {
                 "id": ln.id,
@@ -274,70 +285,43 @@ class OrderStatusIn(BaseModel):
 
 @router.patch("/orders/{oid}")
 def order_status(oid: int, data: OrderStatusIn, p: Principal = Depends(require("sales", "editar")), db: Session = Depends(get_db)):
+    """Endpoint de siempre (eventos, POS, integraciones): sin reglas de transicion. La gestion de pedidos web usa
+    /store-orders/{id}/status, que valida saltos y avisa al cliente."""
+    from ..services import store_orders as so
+
     o = db.get(Order, oid)
     if not o or o.tenant_id != p.tenant.id:
         raise HTTPException(404, "Orden no encontrada")
-    antes = o.status
+    old = o.status
     o.status = data.status
+    if data.status == "pagado":
+        o.paid_at = o.paid_at or datetime.now(UTC)
+    so._inventory(db, o, old, data.status, p.user.id)
+    so._hist(o, data.status, p.user.id)
     from .events import on_order_status
 
     tickets = on_order_status(db, o, data.status)  # entradas de evento: pagado activa y envia, cancelado anula
-    # inventario de la tienda: pagado fija la reserva, enviado/entregado descuenta (una vez), cancelado libera
-    stock = sinv.on_order_status(db, o, antes, data.status, p.user.id)
-    audit(db, p.tenant.id, p.user.id, "status", "order", o.id, {"status": data.status, "tickets": tickets, "inventario": str(stock or "")}, ip=p.ip)
+    audit(db, p.tenant.id, p.user.id, "status", "order", o.id, {"status": data.status, "tickets": tickets}, ip=p.ip)
     db.commit()
     return _order_out(o)
 
 
 @router.post("/orders/{oid}/invoice", status_code=201)
-def order_to_invoice(oid: int, doc_type: str = "TE", p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
-    """Convierte la orden en tiquete (TE, consumidor final) o factura (FE, requiere cliente con identificacion)."""
+def order_to_invoice(
+    oid: int,
+    doc_type: str = "TE",
+    register_payment: bool = False,
+    p: Principal = Depends(require("sales", "crear")),
+    db: Session = Depends(get_db),
+):
+    """Convierte la orden en tiquete (TE, consumidor final) o factura (FE, requiere cliente con identificacion).
+    register_payment: si el pedido ya se pago, deja el cobro aplicado a la factura (asi no queda "por cobrar")."""
+    from ..services.store_orders import invoice_order
+
     o = db.get(Order, oid)
     if not o or o.tenant_id != p.tenant.id:
         raise HTTPException(404, "Orden no encontrada")
-    if o.invoice_id:
-        raise HTTPException(409, "La orden ya tiene comprobante")
-    if doc_type not in ("TE", "FE"):
-        raise HTTPException(422, "doc_type debe ser TE o FE")
-    customer_id = o.customer_id
-    if not customer_id and o.contact.get("email"):
-        c = Customer(
-            tenant_id=p.tenant.id,
-            id_type=o.contact.get("id_type") or "fisica",
-            id_number=o.contact.get("id_number"),
-            name=o.contact.get("name") or "Cliente tienda",
-            email=o.contact.get("email"),
-            phone=o.contact.get("phone"),
-            whatsapp=o.contact.get("phone"),
-        )
-        db.add(c)
-        db.flush()
-        customer_id = c.id
-    payload = DocumentIn(
-        customer_id=customer_id,
-        currency=o.currency,
-        external_order=o.number,
-        external_notes=f"Pedido {o.number}" + (f" - {o.shipping_method}" if o.shipping_method else ""),
-        lines=[
-            LineInSchema(
-                product_id=ln.product_id,
-                name=ln.name,
-                quantity=d(ln.quantity),
-                unit_price=d(ln.unit_price),
-                discount_type=ln.discount_type,
-                discount_value=d(ln.discount_value),
-                tax_rate=d(ln.tax_rate),
-            )
-            for ln in o.lines
-        ],
-    )
-    invoice = docsvc.create_invoice(db, p.tenant.id, p.user.id, payload, doc_type)
-    # pedido viejo: como siempre; con reservas o ya despachado: desde la bodega reservada y sin doble descuento
-    sinv.deduct_for_order_invoice(db, o, invoice, p.user.id)
-    o.invoice_id = invoice.id
-    if o.status == "nuevo":
-        o.status = "preparando"
-    audit(db, p.tenant.id, p.user.id, "invoice", "order", o.id, {"invoice_id": invoice.id, "doc_type": doc_type}, ip=p.ip)
+    invoice = invoice_order(db, p.tenant, o, p.user.id, doc_type, register_payment, ip=p.ip)
     db.commit()
     return {"invoice_id": invoice.id, "number": invoice.number}
 
@@ -594,18 +578,77 @@ def store_legacy(slug: str, kind: str, ref: str, db: Session = Depends(get_db)):
 
 
 class CartLine(BaseModel):
+    # sin precios: si el navegador manda unit_price o total, se rechaza (el monto lo calcula el servidor)
+    model_config = ConfigDict(extra="forbid")
+
     product_id: int
     variant_id: int | None = None
-    quantity: Decimal = Field(gt=0)
+    quantity: Decimal = Field(gt=0, le=999)
+
+
+class DeliveryIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    type: str = Field(pattern="^(retiro|envio)$")
+    province: str | None = Field(None, max_length=40)
+    canton: str | None = Field(None, max_length=60)
+    district: str | None = Field(None, max_length=80)
+    address: str | None = Field(None, max_length=400)
 
 
 class CheckoutIn(BaseModel):
-    lines: list[CartLine] = Field(min_length=1)
-    contact: dict
-    shipping_method: str | None = None
-    payment_method: str | None = None
-    coupon_code: str | None = None
-    notes: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    lines: list[CartLine] = Field(min_length=1, max_length=100)
+    contact: dict = Field(default_factory=dict)
+    delivery: DeliveryIn | None = None
+    shipping_method: str | None = Field(None, max_length=80)
+    payment_method: str | None = Field(None, max_length=60)
+    coupon_code: str | None = Field(None, max_length=40)
+    notes: str | None = Field(None, max_length=1000)
+    accept_terms: bool = False
+    # misma clave = mismo pedido (doble clic, reintento por red lenta)
+    idempotency_key: str | None = Field(None, min_length=8, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    # el total que el comprador vio: si el servidor calcula otro, no se crea el pedido
+    expected_total: Decimal | None = Field(None, ge=0)
+    website: str | None = Field(None, max_length=200)  # honeypot
+
+
+def rate_zone(r: dict) -> str | None:
+    """retiro | gam | fuera_gam | None (cualquiera). Si la tarifa no lo dice, se deduce del nombre."""
+    z = r.get("zone")
+    if z in ("retiro", "gam", "fuera_gam"):
+        return z
+    n = (r.get("name") or "").lower()
+    if "retiro" in n or "recoger" in n:
+        return "retiro"
+    if "fuera" in n:
+        return "fuera_gam"
+    if "gam" in n:
+        return "gam"
+    return None
+
+
+def _check_delivery(ship: dict | None, delivery: DeliveryIn | None, rates_active: bool) -> None:
+    from ..services import cr_geo
+
+    if delivery is None:
+        return
+    if delivery.type == "envio":
+        if not cr_geo.valid(delivery.province, delivery.canton):
+            raise HTTPException(422, "Elegí provincia y cantón de entrega")
+        if not delivery.address or len(delivery.address) < 5:
+            raise HTTPException(422, "Escribí la dirección exacta (otras señas)")
+        if rates_active and not ship:
+            raise HTTPException(422, "Elegí una tarifa de envío")
+        if ship:
+            z = rate_zone(ship)
+            if z == "retiro":
+                raise HTTPException(422, "Esa opción es de retiro, no de envío")
+            if z == "gam" and cr_geo.fuera_gam(delivery.province, delivery.canton):
+                raise HTTPException(422, "Esa dirección queda fuera de la GAM: elegí la tarifa fuera de GAM")
+    elif ship and rate_zone(ship) not in ("retiro", None):
+        raise HTTPException(422, "Para retirar elegí la opción de retiro")
 
 
 def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
@@ -621,6 +664,9 @@ def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
     if len(prods) != len({ln.product_id for ln in data.lines}):
         raise HTTPException(422, "Producto no disponible")
     ship = next((r for r in cfg["shipping_rates"] if r.get("active") and r["name"] == data.shipping_method), None) if data.shipping_method else None
+    if data.shipping_method and not ship:
+        raise HTTPException(422, "Esa tarifa de envío no está disponible")
+    _check_delivery(ship, data.delivery, any(r.get("active") for r in cfg["shipping_rates"]))
     vids = [ln.variant_id for ln in data.lines if ln.variant_id]
     variants = {v.id: v for v in db.scalars(select(ProductVariant).where(ProductVariant.id.in_(vids), ProductVariant.active))} if vids else {}
 
@@ -663,6 +709,8 @@ def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
     ship_amount = shipping_cost(ship, sum((d(ln.quantity) * d(prods[ln.product_id].weight_kg or 0) for ln in data.lines), Decimal(0))) if ship else Decimal(0)
     if ship_amount and pricer.currency != "CRC":  # las tarifas de envio se configuran en colones
         ship_amount = pricer(ship_amount, "CRC").quantize(Decimal("0.01"))
+    if ship_amount > 0 and rate_zone(ship) != "retiro" and free_shipping_ok(t, pricer, items):
+        ship_amount = Decimal(0)  # envio gratis desde el monto de Mi Tienda -> Pagos y entrega
     if ship and ship_amount > 0:
         items.append(
             {
@@ -683,10 +731,14 @@ def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
 
 
 @router.post("/public/store/{slug}/quote")
-def store_quote(slug: str, data: CheckoutIn, db: Session = Depends(get_db)):
+def store_quote(slug: str, data: CheckoutIn, request: Request, db: Session = Depends(get_db)):
+    from ..core.ratelimit import quote_limiter
+
+    quote_limiter.hit(f"quote:{request.client.host if request.client else '?'}")
     t = _tenant(db, slug)
-    _, calc, coupon, ship, shipping, discount_total = _quote_cart(db, t, data)
+    items, calc, coupon, ship, shipping, discount_total = _quote_cart(db, t, data)
     return {
+        **quote_detail(items, calc),
         "subtotal": calc.subtotal + discount_total - shipping,
         "discount_total": discount_total,
         "tax_total": calc.tax_total,
@@ -695,71 +747,38 @@ def store_quote(slug: str, data: CheckoutIn, db: Session = Depends(get_db)):
         "coupon": coupon.code if coupon else None,
         "shipping_method": ship["name"] if ship else None,
         "currency": Pricer(db, t).currency,
+        "free_shipping": bool(
+            ship and rate_zone(ship) != "retiro" and shipping == 0 and free_shipping_ok(t, Pricer(db, t), [i for i in items if i["product"]])
+        ),
+        "free_shipping_from": free_shipping_threshold(t, Pricer(db, t)),
     }
 
 
-@router.post("/public/store/{slug}/checkout", status_code=201)
-def store_checkout(slug: str, data: CheckoutIn, request: Request, db: Session = Depends(get_db)):
-    public_limiter.hit(f"checkout:{request.client.host if request.client else '?'}")
-    t = _tenant(db, slug)
-    if store_cfg(t)["kind"] != "tienda":
-        raise HTTPException(409, "Esta tienda es solo catalogo")
-    if not data.contact.get("name") or not (data.contact.get("email") or data.contact.get("phone")):
-        raise HTTPException(422, "Indique nombre y correo o telefono")
-    items, calc, coupon, ship, shipping, discount_total = _quote_cart(db, t, data)
-    number, _ = next_number(db, t.id, "ORD")
-    o = Order(
-        tenant_id=t.id,
-        number=number,
-        channel="tienda",
-        contact=data.contact,
-        currency=Pricer(db, t).currency,
-        subtotal=calc.subtotal + discount_total - shipping,
-        discount_total=discount_total,
-        shipping=shipping,
-        tax_total=calc.tax_total,
-        total=calc.total,
-        coupon_code=coupon.code if coupon else None,
-        shipping_method=ship["name"] if ship else None,
-        payment_method=data.payment_method,
-        notes=data.notes,
-    )
+def free_shipping_threshold(t: Tenant, pricer: Pricer) -> Decimal | None:
+    """Monto (con IVA, en la moneda de la tienda) desde el que el envio es gratis. Se configura en colones."""
+    from ..services.store_orders import checkout_cfg
+
+    raw = d(checkout_cfg(t).get("free_shipping_from") or 0)
+    return pricer(raw, "CRC").quantize(Decimal("0.01")) if raw > 0 else None
+
+
+def free_shipping_ok(t: Tenant, pricer: Pricer, items: list[dict]) -> bool:
+    limit = free_shipping_threshold(t, pricer)
+    if limit is None:
+        return False
+    products = compute_document([LineIn(i["quantity"], i["unit_price"], i["discount_type"], i["discount_value"], i["tax_rate"]) for i in items])
+    return products.total >= limit  # productos con descuento e IVA, sin el envio
+
+
+def quote_detail(items: list[dict], calc) -> dict:
+    """IVA desglosado por tarifa y lineas con el precio que calculo el servidor (lo que el comprador ve)."""
+    taxes: dict[str, Decimal] = {}
+    lines = []
     for i, lo in zip(items, calc.lines, strict=True):
-        o.lines.append(
-            OrderLine(
-                product_id=i["product"].id if i["product"] else None,
-                name=i["name"],
-                quantity=i["quantity"],
-                unit_price=i["unit_price"],
-                discount_type=i["discount_type"],
-                discount_value=i["discount_value"],
-                tax_rate=i["tax_rate"],
-                subtotal=lo.subtotal,
-                tax_amount=lo.tax_amount,
-                total=lo.total,
-            )
-        )
-    if coupon:
-        coupon.uses += 1
-    db.add(o)
-    db.flush()
-    audit(db, t.id, None, "create", "order", o.id, {"channel": "tienda", "total": str(o.total)})
-    # reserva atomica del inventario (hace commit; 409 "ya no hay suficiente" si Ajustes bloquea sin existencia)
-    hold = sinv.hold_for_order(db, o)
-    return {
-        "number": o.number,
-        "total": o.total,
-        "currency": o.currency,
-        "lines": [{"name": ln.name, "quantity": ln.quantity, "total": ln.total} for ln in o.lines],
-        "payment_method": o.payment_method,
-        "shipping_method": o.shipping_method,
-        "instructions": next((m.get("instructions") for m in manual_methods(t) if m.get("name") == data.payment_method), None),
-        "whatsapp": store_cfg(t)["whatsapp"],
-        "stock": {
-            "reserva_vence": hold["vence"],
-            "bajo_pedido": [{"name": b["name"], "quantity": b["quantity"], "plazo": b["plazo"]} for b in hold["bajo_pedido"]],
-        },
-    }
+        k = f"{d(i['tax_rate']).normalize():f}"
+        taxes[k] = taxes.get(k, Decimal(0)) + d(lo.tax_amount)
+        lines.append({"name": i["name"], "quantity": i["quantity"], "total": lo.total, "shipping": i["product"] is None})
+    return {"taxes": [{"rate": k, "amount": v} for k, v in sorted(taxes.items(), key=lambda x: -Decimal(x[0])) if v], "lines": lines}
 
 
 def shipping_cost(rate: dict, weight_kg: Decimal) -> Decimal:

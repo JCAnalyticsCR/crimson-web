@@ -5,9 +5,11 @@
    Estado en la URL (?p= producto, ?c= categoria, ?q= busqueda, ?orden=, ?v=pagar|cotizar, ?pg= pagina, ?legal=):
    el boton atras funciona, los enlaces se comparten y Google ve cada ficha. Precios: los entrega el API ya en la
    moneda de la tienda y CON IVA (display_price); el pedido lo cotiza el API con el mismo motor que la factura. */
-import { cloneElement, isValidElement, useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Blocks, type Block, type PubProduct } from "./Blocks";
+import Checkout from "./Checkout";
+import OrderStatus, { OrderLookup } from "./OrderStatus";
 import "./shop.css";
 
 type Cat = { id: number; name: string; count: number };
@@ -24,8 +26,6 @@ type Variant = { id: number; name: string; price: string | number; display_price
 type Prod = Omit<PubProduct, "variants"> & { code: string; category: string | null; category_id: number | null; brand: string | null; tax_rate: number; item_type: string; display_price: string | number; display_currency: string; availability: Avail; variants: Variant[] };
 type Detail = Prod & { related: Prod[] };
 type Line = { key: string; id: number; variant_id: number | null; name: string; image: string | null; price: number; currency: string; qty: number };
-type Quote = { subtotal: number; discount_total: number; tax_total: number; shipping: number; total: number; currency: string };
-type Done = { number: string; total: number; currency: string; instructions: string | null; whatsapp: string; lines?: { name: string; quantity: number; total: number }[] };
 
 const PAGE = 24;
 const money = (v: string | number, cur = "CRC") =>
@@ -61,6 +61,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
   const v = sp.get("v");
   const pg = sp.get("pg");
   const legal = sp.get("legal") as "terms" | "privacy" | null;
+  const pedido = sp.get("pedido"); // seguimiento del pedido (enlace firmado del correo)
 
   const api = useCallback(async <T,>(path: string, init?: RequestInit): Promise<{ data: T; total: number | null }> => {
     const r = await fetch(`/api/public/store/${slug}${path}`, init);
@@ -119,7 +120,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
   }, [drawer]);
 
   // ---------- catalogo ----------
-  const listing = !pid && !v;
+  const listing = !pid && !v && !pedido;
   const [qInput, setQInput] = useState(q);
   useEffect(() => setQInput(q), [q]);
   useEffect(() => {
@@ -161,13 +162,13 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
     if (!home) return;
     const name = home.store.name;
     const catName = home.categories.find((c) => c.id === cat)?.name;
-    document.title = detail ? `${detail.name} · ${name}` : v === "pagar" ? `Finalizar pedido · ${name}` : catName ? `${catName} · ${name}` : `Tienda · ${name}`;
+    document.title = detail ? `${detail.name} · ${name}` : pedido || v === "mi-pedido" ? `Mi pedido · ${name}` : v === "pagar" ? `Finalizar pedido · ${name}` : catName ? `${catName} · ${name}` : `Tienda · ${name}`;
     const desc = detail?.description?.slice(0, 160) || home.store.tagline || `Catálogo en línea de ${name}`;
     const meta = (n: string, val: string) => { let m = document.querySelector<HTMLMetaElement>(`meta[name="${n}"]`); if (!m) { m = document.createElement("meta"); m.name = n; document.head.appendChild(m); } m.content = val; };
     meta("description", desc);
-    meta("robots", hostMode ? "index,follow" : "noindex");
+    meta("robots", hostMode && !pedido && v !== "pagar" && v !== "mi-pedido" ? "index,follow" : "noindex");
     document.documentElement.lang = "es-CR";
-  }, [home, detail, cat, v, hostMode]);
+  }, [home, detail, cat, v, hostMode, pedido]);
 
   if (fatal && !home) return <div className="shop"><div className="sh-empty"><b>{fatal}</b><span>La tienda no está disponible en este momento.</span></div></div>;
   if (!home) return <div className="shop" style={{ display: "grid", placeItems: "center" }}><span className="spinner" /></div>;
@@ -207,11 +208,15 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
       <main id="contenido" tabIndex={-1} style={{ outline: "none" }}>
         {pg && page ? (
           <Blocks slug={slug} blocks={page.blocks} primary={S.primary} products={(items || []) as unknown as PubProduct[]} onCta={(to) => go(to === "productos" ? {} : { pg: to })} onProduct={(id) => go({ p: id })} />
+        ) : pedido ? (
+          <OrderStatus key={pedido} api={api} token={pedido} store={S} onBack={() => go({})} />
+        ) : v === "mi-pedido" ? (
+          <OrderLookup api={api} onFound={(t) => go({ pedido: t })} onBack={() => go({})} />
         ) : pid ? (
           <ProductView d={detail} missing={missing} cur={cur} isShop={isShop} store={S} photo={photo} setPhoto={setPhoto} variant={variant} setVariant={setVariant} qty={qty} setQty={setQtyD}
             onAdd={(p, vv, n) => add(p, vv, n)} onBuy={(p, vv, n) => { add(p, vv, n); go({ v: "pagar" }); }} onCat={toCatalog} onOpen={(id) => go({ p: id })} catName={catName} />
         ) : v === "pagar" || v === "cotizar" ? (
-          <Checkout api={api} home={home} cart={cart} mode={v === "pagar" && isShop ? "pedido" : "cotizacion"} onDone={() => setCart([])} onBack={() => go({})} setQty={setQty} remove={remove} quoteText={quoteText} />
+          <Checkout api={api} store={S} cart={cart} mode={v === "pagar" && isShop ? "pedido" : "cotizacion"} onPlaced={(o) => { setCart([]); go({ pedido: o.track_token }); }} onBack={() => go({})} setQty={setQty} remove={remove} quoteText={quoteText} onTerms={() => go({ legal: "terms" }, { keep: true, replace: true })} />
         ) : (
           <>
             {page && homeSlug ? (
@@ -280,6 +285,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
             <div><span className="sh-meta">Ayuda</span>
               <div style={{ display: "grid" }}>
                 {hasWa && <a href={wa(S.whatsapp, `Hola ${S.name}, tengo una consulta.`)} target="_blank" rel="noopener noreferrer">WhatsApp {S.whatsapp}</a>}
+                {isShop && <button onClick={() => go({ v: "mi-pedido" })}>Mi pedido</button>}
                 {S.legal?.terms && <button onClick={() => go({ legal: "terms" }, { keep: true })}>Términos y condiciones</button>}
                 {S.legal?.privacy && <button onClick={() => go({ legal: "privacy" }, { keep: true })}>Política de privacidad</button>}
               </div>
@@ -455,136 +461,4 @@ function ProductView(props: {
       )}
     </div>
   );
-}
-
-type ApiFn = <T>(path: string, init?: RequestInit) => Promise<{ data: T; total: number | null }>;
-
-function Checkout({ api, home, cart, mode, onDone, onBack, setQty, remove, quoteText }: {
-  api: ApiFn; home: Home; cart: Line[]; mode: "pedido" | "cotizacion"; onDone: () => void; onBack: () => void;
-  setQty: (k: string, n: number) => void; remove: (k: string) => void; quoteText: (l: Line[]) => string;
-}) {
-  const S = home.store;
-  const [f, setF] = useState({ name: "", email: "", phone: "", id_number: "", address: "", shipping_method: home.shipping_rates[0]?.name || "", payment_method: home.payment_methods[0]?.name || "", coupon_code: "", notes: "" });
-  const [quote, setQuote] = useState<Quote | null>(null);
-  const [qErr, setQErr] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<Done | null>(null);
-  const [sent, setSent] = useState(false);
-  const lines = useMemo(() => cart.map((l) => ({ product_id: l.id, variant_id: l.variant_id, quantity: String(l.qty) })), [cart]);
-  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
-
-  useEffect(() => {
-    if (mode !== "pedido" || !lines.length) return;
-    const t = window.setTimeout(() => {
-      api<Quote>("/quote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines, contact: {}, shipping_method: f.shipping_method || null, coupon_code: f.coupon_code || null }) })
-        .then(({ data }) => { setQuote(data); setQErr(null); }).catch((e) => { setQuote(null); setQErr(e.message); });
-    }, 250);
-    return () => window.clearTimeout(t);
-  }, [api, lines, f.shipping_method, f.coupon_code, mode]);
-
-  const okContact = f.name.trim().length > 1 && (/.+@.+\..+/.test(f.email) || f.phone.replace(/\D/g, "").length >= 8);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!okContact || busy) return;
-    setBusy(true); setErr(null);
-    try {
-      if (mode === "pedido") {
-        const { data } = await api<Done>("/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines, contact: { name: f.name, email: f.email || null, phone: f.phone || null, id_number: f.id_number || null, address: f.address || null }, shipping_method: f.shipping_method || null, payment_method: f.payment_method || null, coupon_code: f.coupon_code || null, notes: f.notes || null }) });
-        setDone(data); onDone();
-      } else {
-        if (!/.+@.+\..+/.test(f.email)) throw new Error("Indicá un correo para enviarte la cotización");
-        const msg = `${quoteText(cart)}${f.notes ? `\n\nNotas: ${f.notes}` : ""}`;
-        await api("/contact", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: f.name, email: f.email, phone: f.phone || null, message: msg.slice(0, 3900) }) });
-        setSent(true); onDone();
-      }
-    } catch (x) { setErr((x as Error).message); } finally { setBusy(false); }
-  };
-
-  if (done) {
-    const instr = done.instructions;
-    return (
-      <div className="sh-wrap"><div className="sh-done" role="status">
-        <span className="sh-eyebrow">Pedido recibido</span>
-        <h1>{done.number}</h1>
-        <Price value={done.total} cur={done.currency} />
-        {instr && <div className="sh-done__instr"><b style={{ display: "block", marginBottom: 6, color: "var(--text)" }}>Cómo pagar · {f.payment_method}</b>{instr}</div>}
-        <p className="sh-note" style={{ margin: 0 }}>Te contactamos para coordinar la entrega. Con tu pago emitimos la factura electrónica.</p>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-          {done.whatsapp && <a className="sh-btn sh-btn--wa" href={wa(done.whatsapp, `Hola ${S.name}, hice el pedido ${done.number}. Adjunto el comprobante de pago.`)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Enviar comprobante</a>}
-          <button className="sh-btn sh-btn--ghost" onClick={onBack}>Seguir comprando</button>
-        </div>
-      </div></div>
-    );
-  }
-  if (sent) {
-    return <div className="sh-wrap"><div className="sh-done" role="status"><span className="sh-eyebrow">Solicitud enviada</span><h1>¡Gracias, {f.name.split(" ")[0]}!</h1><p className="sh-note" style={{ margin: 0, fontSize: 15 }}>Recibimos tu lista y te enviamos la cotización a {f.email}.</p><button className="sh-btn sh-btn--ghost" onClick={onBack}>Volver a la tienda</button></div></div>;
-  }
-  if (!cart.length) return <div className="sh-wrap sh-empty"><b>Tu {mode === "pedido" ? "carrito" : "cotización"} está vacío.</b><button className="sh-btn sh-btn--ghost" onClick={onBack}>Ver catálogo</button></div>;
-
-  const cur = quote?.currency || cart[0].currency;
-  return (
-    <div className="sh-wrap">
-      <nav className="sh-crumbs" aria-label="Ruta"><button onClick={onBack}><span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Ico d={IC.back} size={14} />Seguir comprando</span></button></nav>
-      <form className="sh-checkout" onSubmit={submit} noValidate>
-        <div className="sh-form">
-          <h1>{mode === "pedido" ? "Finalizar pedido" : "Solicitar cotización"}</h1>
-          <fieldset className="sh-fieldset"><legend>Tus datos</legend>
-            <div className="sh-2">
-              <Field label="Nombre completo"><input autoComplete="name" value={f.name} onChange={set("name")} required /></Field>
-              <Field label="Correo"><input type="email" autoComplete="email" value={f.email} onChange={set("email")} /></Field>
-              <Field label="Teléfono / WhatsApp"><input type="tel" autoComplete="tel" value={f.phone} onChange={set("phone")} /></Field>
-              {mode === "pedido" && <Field label="Cédula (para la factura)"><input value={f.id_number} onChange={set("id_number")} inputMode="numeric" /></Field>}
-            </div>
-            {mode === "pedido" && <Field label="Dirección de entrega"><input autoComplete="street-address" value={f.address} onChange={set("address")} /></Field>}
-          </fieldset>
-          {mode === "pedido" && home.shipping_rates.length > 0 && (
-            <fieldset className="sh-fieldset"><legend>Entrega</legend>
-              <div className="sh-choice">{home.shipping_rates.map((r) => (
-                <label key={r.name} className="sh-opt"><input type="radio" name="ship" aria-label={r.name} checked={f.shipping_method === r.name} onChange={() => setF({ ...f, shipping_method: r.name })} /><span>{r.name}</span><span className="sh-meta">{r.per_kg ? "según peso" : Number(r.display_amount ?? r.amount) ? money(r.display_amount ?? r.amount, S.currency) : "gratis"}</span></label>
-              ))}</div>
-            </fieldset>
-          )}
-          {mode === "pedido" && home.payment_methods.length > 0 && (
-            <fieldset className="sh-fieldset"><legend>Pago</legend>
-              <div className="sh-choice">{home.payment_methods.map((m) => (
-                <label key={m.name} className="sh-opt"><input type="radio" name="pay" aria-label={m.name} checked={f.payment_method === m.name} onChange={() => setF({ ...f, payment_method: m.name })} /><span>{m.name}<small>{m.instructions}</small></span><span /></label>
-              ))}</div>
-              <p className="sh-note" style={{ margin: 0 }}>Al confirmar te mostramos los datos para pagar. Despachamos al recibir el comprobante.</p>
-            </fieldset>
-          )}
-          <fieldset className="sh-fieldset"><legend>Notas</legend>
-            {mode === "pedido" && <Field label="Cupón"><input value={f.coupon_code} onChange={(e) => setF({ ...f, coupon_code: e.target.value.toUpperCase() })} autoCapitalize="characters" /></Field>}
-            <Field label={mode === "pedido" ? "Notas del pedido" : "¿Algo más que debamos saber? (instalación, plazos…)"}><textarea value={f.notes} onChange={set("notes")} /></Field>
-          </fieldset>
-        </div>
-        <aside className="sh-summary sh-panel" aria-label="Resumen">
-          <span className="sh-meta">Resumen · {cart.reduce((a, l) => a + l.qty, 0)} artículo(s)</span>
-          <div>{cart.map((l) => <CartLine key={l.key} l={l} setQty={setQty} remove={remove} />)}</div>
-          {mode === "pedido" ? (
-            quote ? (
-              <div style={{ display: "grid", gap: 6 }}>
-                <div className="sh-totrow"><span>Subtotal (sin IVA)</span><b>{money(quote.subtotal, cur)}</b></div>
-                {Number(quote.discount_total) > 0 && <div className="sh-totrow"><span>Descuento</span><b>−{money(quote.discount_total, cur)}</b></div>}
-                <div className="sh-totrow"><span>Envío</span><b>{money(quote.shipping, cur)}</b></div>
-                <div className="sh-totrow"><span>IVA</span><b>{money(quote.tax_total, cur)}</b></div>
-                <div className="sh-totrow sh-totrow--big"><span>Total</span><b>{money(quote.total, cur)}</b></div>
-              </div>
-            ) : <p className="sh-note">{qErr || "Calculando total…"}</p>
-          ) : <p className="sh-note" style={{ margin: 0 }}>Te respondemos con precio final, disponibilidad y tiempos de entrega.</p>}
-          {err && <p className="sh-err" role="alert" style={{ margin: 0 }}>{err}</p>}
-          {!okContact && <p className="sh-note" style={{ margin: 0 }}>Completá tu nombre y un correo o teléfono para continuar.</p>}
-          <button className="sh-btn sh-btn--crimson sh-btn--block" type="submit" disabled={!okContact || busy || (mode === "pedido" && !quote)}>{busy ? "Enviando…" : mode === "pedido" ? "Confirmar pedido" : "Enviar solicitud"}</button>
-          {S.whatsapp && mode === "cotizacion" && <a className="sh-btn sh-btn--wa sh-btn--block" href={wa(S.whatsapp, quoteText(cart))} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Mejor por WhatsApp</a>}
-        </aside>
-      </form>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  // etiqueta asociada por id (lectores de pantalla y autocompletar del navegador)
-  const id = useId();
-  const el = isValidElement(children) ? cloneElement(children as ReactElement<{ id?: string }>, { id }) : children;
-  return <div className="sh-field"><label htmlFor={id}>{label}</label>{el}</div>;
 }
