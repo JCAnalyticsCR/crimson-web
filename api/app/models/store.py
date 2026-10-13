@@ -120,3 +120,16 @@ class ApiCredential(TenantMixin, TimestampMixin, Base):
     webhook_url: Mapped[str | None] = mapped_column(String(400))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class StoreStockAlert(TenantMixin, Base):
+    """"Avisarme cuando haya": el cliente deja correo o telefono en un producto agotado; el worker avisa al volver."""
+
+    __tablename__ = "store_stock_alert"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("product.id", name="fk_store_stock_alert_product", ondelete="CASCADE"), index=True)
+    email: Mapped[str | None] = mapped_column(String(200))
+    phone: Mapped[str | None] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)

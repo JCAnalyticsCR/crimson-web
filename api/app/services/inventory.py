@@ -16,7 +16,7 @@ def default_warehouse(db: Session, tenant_id: int) -> Warehouse | None:
     return db.scalar(select(Warehouse).where(Warehouse.tenant_id == tenant_id, Warehouse.active).order_by(Warehouse.is_default.desc(), Warehouse.id))
 
 
-EXTRA_FIELDS = {"project_id", "serial", "movement_type", "voucher_media", "transfer_price", "owner", "custodian", "location"}
+EXTRA_FIELDS = {"project_id", "serial", "movement_type", "voucher_media", "transfer_price", "owner", "custodian", "location", "order_id"}
 
 
 def prevent_negative(db: Session, tenant_id: int) -> bool:
@@ -59,7 +59,7 @@ def move(
     invoice_id: int | None = None,
     **extra,
 ) -> StockMovement:
-    """extra (opcional): project_id, serial, movement_type, voucher_media, transfer_price, owner, custodian, location."""
+    """extra (opcional): project_id, serial, movement_type, voucher_media, transfer_price, owner, custodian, location, order_id."""
     p = db.get(Product, product_id)
     w = db.get(Warehouse, warehouse_id)
     if not p or p.tenant_id != tenant_id or not w or w.tenant_id != tenant_id:

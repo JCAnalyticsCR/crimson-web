@@ -44,3 +44,7 @@ incident_global_limiter = SlidingWindow(limit=120, seconds=3600)
 # Solicitudes de acceso al portal del cliente (pagina publica): mismo criterio que las incidencias.
 access_request_limiter = SlidingWindow(limit=5, seconds=3600)
 access_request_global_limiter = SlidingWindow(limit=120, seconds=3600)
+# Disponibilidad de la vitrina: liviana y cacheable, pero se consulta en cada pagina del catalogo
+catalog_limiter = SlidingWindow(limit=240, seconds=60)
+# "Avisarme cuando haya" (tienda): como un formulario publico
+stock_alert_limiter = SlidingWindow(limit=10, seconds=3600)

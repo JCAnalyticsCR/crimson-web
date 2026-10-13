@@ -79,6 +79,9 @@ class Product(TenantMixin, TimestampMixin, Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     # unidades con numero de serie (camaras, NVR): cada una se sigue en stock_unit. Opcional.
     serialized: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # tienda: precio propio de la web (sin IVA, moneda del producto; vacio = el precio de siempre) y destacado
+    web_price: Mapped[float | None] = mapped_column(Numeric(14, 5))
+    web_featured: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     taxes: Mapped[list["ProductTax"]] = relationship(cascade="all, delete-orphan")
 

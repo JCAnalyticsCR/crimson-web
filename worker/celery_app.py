@@ -263,15 +263,28 @@ def low_stock_requests() -> int:
 
 @celery.task(name="inventory.expire_reservations")
 def expire_reservations() -> int:
-    """Reservas de material vencidas (pendientes o confirmadas) -> vencida: liberan lo comprometido."""
+    """Reservas de material vencidas (pendientes o confirmadas) -> vencida: liberan lo comprometido.
+    Primero las de pedidos web sin pagar (dejan nota en el pedido y, si Ajustes lo pide, lo cancelan)."""
     from app.core.db import SessionLocal
     from app.services.reservations import expire_due
+    from app.services.store_inventory import expire_holds
 
     with SessionLocal() as db:
-        n = expire_due(db)
+        n = expire_holds(db)
+        n += expire_due(db)
     if n:
         log.info("Reservas: %s vencida(s)", n)
     return n
+
+
+@celery.task(name="store.back_in_stock")
+def back_in_stock() -> int:
+    """Tienda: "Avisarme cuando haya" -> correo cuando el producto vuelve a estar disponible."""
+    from app.core.db import SessionLocal
+    from app.services.store_inventory import back_in_stock as notify
+
+    with SessionLocal() as db:
+        return notify(db)
 
 
 @celery.task(name="assets.warranty_alerts")
@@ -418,7 +431,9 @@ celery.conf.beat_schedule = {
     "expire-support": {"task": "support.expire_grants", "schedule": crontab(minute=5)},
     "stale-followups": {"task": "crm.stale_followups", "schedule": crontab(hour=7, minute=30, day_of_week="mon-fri")},
     "low-stock-requests": {"task": "inventory.low_stock_requests", "schedule": crontab(hour=6, minute=45)},
-    "expire-reservations": {"task": "inventory.expire_reservations", "schedule": crontab(minute=10)},
+    # cada 5 min: las reservas de pago con tarjeta duran 30 min
+    "expire-reservations": {"task": "inventory.expire_reservations", "schedule": crontab(minute="*/5")},
+    "back-in-stock": {"task": "store.back_in_stock", "schedule": crontab(minute=25)},
     "warranty-alerts": {"task": "assets.warranty_alerts", "schedule": crontab(hour=7, minute=0, day_of_week="mon")},
     "maintenance-due": {"task": "support.maintenance_due", "schedule": crontab(hour=6, minute=30)},
     "sla-breaches": {"task": "support.sla_breaches", "schedule": crontab(minute=0)},

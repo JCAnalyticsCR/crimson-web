@@ -62,6 +62,8 @@ def _res_out(db: Session, r: StockReservation, names: dict | None = None) -> dic
         "reason": r.reason,
         "closed_note": r.closed_note,
         "created_at": r.created_at,
+        "origin": r.origin or "interna",  # web = pedido de la tienda (automatica)
+        "order_id": r.order_id,
     }
 
 
@@ -169,7 +171,10 @@ def reservation_cancel(rid: int, data: CancelIn | None = None, p: Principal = De
 @router.post("/stock/reservations/expire")
 def reservations_expire(p: Principal = Depends(require("inventory", "aprobar_reserva")), db: Session = Depends(get_db)):
     """Lo mismo que hace el worker cada hora (util sin worker o para probar)."""
-    return {"expired": rsv.expire_due(db)}
+    from ..services.store_inventory import expire_holds
+
+    web = expire_holds(db)  # primero las de pedidos web: dejan nota en el pedido
+    return {"expired": web + rsv.expire_due(db)}
 
 
 # ---------- Reservas desde el proyecto ----------

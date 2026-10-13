@@ -47,6 +47,8 @@ class StockMovement(TenantMixin, Base):
     owner: Mapped[str | None] = mapped_column(String(160))  # vacio = la empresa
     custodian: Mapped[str | None] = mapped_column(String(160))  # vacio = la empresa
     location: Mapped[str | None] = mapped_column(String(160))  # sub-ubicacion: estante, rack, vehiculo
+    # salida por un pedido (tienda): evita descontar dos veces entre despacho y factura
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("order.id", name="fk_stock_movement_order"), index=True)
 
 
 MOVEMENT_TYPES = (
@@ -121,6 +123,9 @@ class StockReservation(TenantMixin, TimestampMixin, Base):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reason: Mapped[str | None] = mapped_column(Text)  # motivo de la reserva
     closed_note: Mapped[str | None] = mapped_column(String(300))  # por que se cancelo / vencio / consumio
+    # interna (bodega/proyectos, requiere aprobacion) | web (pedido de la tienda, automatica)
+    origin: Mapped[str] = mapped_column(String(12), default="interna", server_default="interna")
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("order.id", name="fk_stock_reservation_order"), index=True)
 
 
 class StockLock(TenantMixin, Base):
