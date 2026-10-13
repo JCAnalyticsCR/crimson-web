@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#15131a" />
+    <title>VIP · banco de pruebas</title>
+    <style>body { margin: 0; background: #15131a; }</style>
+  </head>
+  <body>
+    <!-- Banco de pruebas local de la capa VIP (no entra al build de produccion: vite build solo toma index.html).
+         cd portal && npx vite --port 5233   ->   http://localhost:5233/src/demo/vip/preview.html
+         ?afuera=1 monta VipGate FUERA del router (prueba la navegacion de respaldo por popstate). -->
+    <div id="root"></div>
+    <script type="module" src="./preview/main.tsx"></script>
+  </body>
+</html>
