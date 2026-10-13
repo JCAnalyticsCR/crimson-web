@@ -35,11 +35,12 @@ body{font-family:Manrope,"Segoe UI",Arial,sans-serif;color:#15131a;font-size:12p
 .meta{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
 .box{border:1px solid #e6e1db;border-radius:8px;padding:10px 12px}
 h2{font-size:14px;margin:18px 0 8px;letter-spacing:-.01em}
-.pt{border:1px solid #e6e1db;border-radius:8px;padding:10px 12px;margin-bottom:10px;page-break-inside:avoid}
+.pt{border:1px solid #e6e1db;border-radius:8px;padding:10px 12px;margin-bottom:10px}.pt h3{break-after:avoid;page-break-after:avoid}
 .pt h3{margin:0 0 4px;font-size:13px}.pt .code{font-family:Consolas,monospace;color:#e2233a;margin-right:6px}
 .kv{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 14px;margin:6px 0}.kv div{font-size:11px}.kv b{font-weight:600}
 .obs{background:#f6f2ee;border-radius:6px;padding:6px 9px;color:#5a5560;font-size:11px;white-space:pre-wrap;margin-top:6px}
-.ph{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.ph img{width:110px;height:82px;object-fit:cover;border-radius:6px;border:1px solid #e6e1db}
+/* fotos grandes: dos por fila a lo ancho de la hoja (una sola, a todo el ancho), enteras y sin recorte; una foto nunca se parte entre dos paginas */
+.ph{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}.ph figure{margin:0;width:calc(50% - 5px);break-inside:avoid;page-break-inside:avoid}.ph.n1 figure{width:100%}.ph img{display:block;width:100%;height:250px;object-fit:contain;background:#f6f2ee;border-radius:6px;border:1px solid #e6e1db}.ph.n1 img{height:380px}.ph figcaption{font-family:Consolas,monospace;font-size:9px;letter-spacing:.08em;color:#8a858f;margin-top:3px}
 table{width:100%;border-collapse:collapse}th{text-align:left;font-family:Consolas,monospace;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#8a858f;border-bottom:1px solid #e6e1db;padding:6px 4px}
 td{padding:7px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-align:right;font-family:Consolas,monospace;white-space:nowrap}
 .muted{color:#5a5560}.notes{padding:10px 12px;background:#f6f2ee;border-radius:8px;color:#3d3942;white-space:pre-wrap}
@@ -60,7 +61,7 @@ td{padding:7px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-
 {% for p in points %}<div class="pt"><h3><span class="code">{{ p.code }}</span>{{ p.label or "" }}</h3>
   {% if p.data %}<div class="kv">{% for label, value in p.data %}<div><span class="muted">{{ label }}:</span> <b>{{ value }}</b></div>{% endfor %}</div>{% endif %}
   {% if p.notes %}<div class="obs">{{ p.notes }}</div>{% endif %}
-  {% if p.photos %}<div class="ph">{% for u in p.photos %}<img src="{{ u }}" alt="">{% endfor %}</div>{% endif %}
+  {% if p.photos %}<div class="ph{% if p.photos|length == 1 %} n1{% endif %}">{% for u in p.photos %}<figure><img src="{{ u }}" alt="Foto {{ loop.index }} de {{ p.code }}"><figcaption>{{ p.code }} · foto {{ loop.index }}</figcaption></figure>{% endfor %}</div>{% endif %}
 </div>{% endfor %}{% endif %}
 
 {% for title, rows in [("Equipos requeridos", equipos), ("Materiales requeridos", materiales), ("Servicios y alquileres", servicios)] %}{% if rows %}<h2>{{ title }}</h2>
@@ -74,7 +75,7 @@ td{padding:7px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-
 </tbody></table>{% endif %}
 
 {% if s.notes %}<h2>Notas del levantamiento</h2><div class="notes">{{ s.notes }}</div>{% endif %}
-{% if photos %}<h2>Fotos generales</h2><div class="ph">{% for u in photos %}<img src="{{ u }}" alt="">{% endfor %}</div>{% endif %}
+{% if photos %}<h2>Fotos generales</h2><div class="ph{% if photos|length == 1 %} n1{% endif %}">{% for u in photos %}<figure><img src="{{ u }}" alt="Foto general {{ loop.index }}"><figcaption>General · foto {{ loop.index }}</figcaption></figure>{% endfor %}</div>{% endif %}
 
 <div class="foot"><b>Documento preliminar, no constituye cotización.</b> Resume lo observado en la visita y lo que se estima
 necesario para la obra; cantidades sujetas a confirmación. Las condiciones económicas se envían aparte, en la cotización formal.</div>
