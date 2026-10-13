@@ -187,7 +187,7 @@ export default function Tickets() {
             {allows("support_desk.editar") && !["cerrado"].includes(open.status) && (
               <>
                 <Field label="Responder o anotar"><textarea className="textarea" value={nota.body} onChange={(e) => setNota({ ...nota, body: e.target.value })} placeholder="Qué se le dijo al cliente o qué se encontró." /></Field>
-                <PhotoStrip value={nota.photos} onChange={(photos) => setNota({ ...nota, photos })} label="Foto" />
+                <PhotoStrip value={nota.photos} onChange={(photos) => setNota({ ...nota, photos })} label="Foto" privado="support_desk" />
                 <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={nota.internal} onChange={(e) => setNota({ ...nota, internal: e.target.checked })} />Nota interna (no cuenta como respuesta al cliente)</label>
                   <input className="input input--mono" style={{ maxWidth: 110 }} inputMode="decimal" placeholder="horas" value={nota.hours} onChange={(e) => setNota({ ...nota, hours: e.target.value })} />

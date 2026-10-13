@@ -407,8 +407,13 @@ def survey_update(sid: int, data: SurveyIn, p: Principal = Depends(require("fiel
     s = _survey(db, sid, p)
     if s.status in ("cotizado", "cerrado") and not p.sees_field_all:
         raise HTTPException(409, "El levantamiento ya fue cotizado")
+    from ..services import bitacora  # bitacora con antes/despues; no cambia como se guardan los puntos
+
+    antes = bitacora.survey_state(s)
     _apply_fields(s, data, db, p)
     _apply_children(s, data)
+    c = db.get(Customer, s.customer_id) if s.customer_id else None
+    bitacora.audit_survey_update(db, p, s, antes, company=c.name if c else (s.contact or {}).get("name"))
     if s.review_status == "aprobado" and not s.quote_id and not p.can("field", "revisar"):
         # lo aprobado ya no es lo mismo: el supervisor tiene que volver a verlo antes del costeo
         s.review_status = "pendiente"
@@ -1209,7 +1214,9 @@ def survey_report_send(sid: int, data: ReportSendIn, p: Principal = Depends(requ
     to = (data.to or (c.email if c else None) or (s.contact or {}).get("email") or "").strip()
     if not to or "@" not in to:
         raise HTTPException(422, "El cliente no tiene correo; indicá uno")
-    page = render_survey_html(db, s, p.tenant)
+    from ..services.media_access import email_ttl  # fotos privadas: el cliente abre el correo dias despues
+
+    page = render_survey_html(db, s, p.tenant, ttl=email_ttl())
     if data.message:
         page = page.replace("<body>", f'<body><p style="white-space:pre-wrap">{html.escape(data.message)}</p>', 1)
     m = queue_email(db, p.tenant, to, f"Informe preliminar {s.number} · {p.tenant.name}", page, "survey", s.id)

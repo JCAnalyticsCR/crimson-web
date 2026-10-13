@@ -118,8 +118,14 @@ def _point_data(kind: str, data: dict) -> list[tuple[str, str]]:
     return out
 
 
-def context(db: Session, s: Survey, tenant: Tenant) -> dict:
-    """Todo lo que ve el cliente, y nada mas. La prueba de no-montos se hace sobre esto y sobre el HTML."""
+def context(db: Session, s: Survey, tenant: Tenant, ttl: int | None = None) -> dict:
+    """Todo lo que ve el cliente, y nada mas. La prueba de no-montos se hace sobre esto y sobre el HTML.
+    Las fotos privadas salen con enlace firmado (ttl en segundos; None = el corto del portal)."""
+    from .media_access import sign_urls
+
+    def fotos(v) -> list[str]:
+        return sign_urls(db, tenant.id, _photos(v), ttl)
+
     from ..routers.fieldwork import survey_labor  # misma lectura de personal que el portal
 
     c = db.get(Customer, s.customer_id) if s.customer_id else None
@@ -150,7 +156,7 @@ def context(db: Session, s: Survey, tenant: Tenant) -> dict:
                 "label": " · ".join(x for x in (SPECS[p.kind]["point_label"] if mixed and p.kind in SPECS else None, p.label) if x),
                 "data": _point_data(p.kind or s.kind, p.data),
                 "notes": p.notes,
-                "photos": _photos(p.photos),
+                "photos": fotos(p.photos),
             }
             for p in s.points
         ],
@@ -158,9 +164,10 @@ def context(db: Session, s: Survey, tenant: Tenant) -> dict:
         "materiales": [i for i in items if i["kind"] not in ("equipo", "servicio")],
         "servicios": [i for i in items if i["kind"] == "servicio"],
         "labor": labor,
-        "photos": _photos(s.photos),
+        "photos": fotos(s.photos),
     }
 
 
-def render_survey_html(db: Session, s: Survey, tenant: Tenant) -> str:
-    return TEMPLATE.render(**context(db, s, tenant))
+def render_survey_html(db: Session, s: Survey, tenant: Tenant, ttl: int | None = None) -> str:
+    """ttl: vida de los enlaces de fotos privadas. El PDF se arma al instante (corto); el correo, largo."""
+    return TEMPLATE.render(**context(db, s, tenant, ttl))

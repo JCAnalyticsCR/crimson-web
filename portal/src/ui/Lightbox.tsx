@@ -4,11 +4,14 @@
 // se pasa de una a otra con flechas, teclado o deslizando el dedo, y un toque amplia para ver el detalle.
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useMediaUrls } from "../lib/media";
 import { I, Icon } from "./components";
 
 export type Foto = { url: string; caption?: string };
 
-export function Lightbox({ fotos, start, onClose }: { fotos: Foto[]; start: number; onClose: () => void }) {
+/** sign=false: el portal del cliente, donde las fotos ya vienen firmadas o son publicas. */
+export function Lightbox({ fotos, start, onClose, sign = true }: { fotos: Foto[]; start: number; onClose: () => void; sign?: boolean }) {
+  const ver = useMediaUrls(fotos.map((x) => x.url), sign); // privadas: con firma de vida corta
   const [i, setI] = useState(start);
   const [zoom, setZoom] = useState(false);
   const [noEsImagen, setNoEsImagen] = useState<Record<number, boolean>>({}); // PDF u otro: se muestra como documento
@@ -31,14 +34,14 @@ export function Lightbox({ fotos, start, onClose }: { fotos: Foto[]; start: numb
   }, [n]);
 
   if (!n) return null;
-  const f = fotos[i];
+  const f = { ...fotos[i], url: ver[i] || "" };
   return createPortal(
     <div className="lbox" role="dialog" aria-modal="true" aria-label="Fotografía ampliada" onClick={onClose}>
       <div className="lbox__top" onClick={(e) => e.stopPropagation()}>
         <span className="meta">{n > 1 ? `${i + 1} / ${n}` : "Fotografía"}</span>
         <div style={{ display: "flex", gap: 6 }}>
           {/* descargar, no abrir en otra pestana: nada saca al usuario del sistema */}
-          <a className="lbox__btn" href={f.url} download title="Descargar el archivo original">Descargar</a>
+          {f.url && <a className="lbox__btn" href={f.url} download title="Descargar el archivo original">Descargar</a>}
           <button type="button" className="lbox__btn" onClick={onClose} aria-label="Cerrar"><Icon d={I.x} size={18} /></button>
         </div>
       </div>
@@ -53,7 +56,9 @@ export function Lightbox({ fotos, start, onClose }: { fotos: Foto[]; start: numb
           if (Math.abs(dx) > 50) ir(dx < 0 ? 1 : -1);
         }}
       >
-        {noEsImagen[i]
+        {!f.url
+          ? <span className="spinner" />
+          : noEsImagen[i]
           ? <iframe className="lbox__doc" src={f.url} title={f.caption || "Documento"} onClick={(e) => e.stopPropagation()} />
           : <img src={f.url} alt={f.caption || `Fotografía ${i + 1}`} draggable={false} onError={() => setNoEsImagen((m) => ({ ...m, [i]: true }))} />}
       </div>

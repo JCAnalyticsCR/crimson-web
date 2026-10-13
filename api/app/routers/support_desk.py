@@ -550,6 +550,10 @@ def rules(p: Principal = Depends(require("commissions", "ver")), db: Session = D
 def rule_create(data: RuleIn, p: Principal = Depends(require("commissions", "configurar")), db: Session = Depends(get_db)):
     r = CommissionRule(tenant_id=p.tenant.id, **data.model_dump())
     db.add(r)
+    db.flush()
+    from ..services import bitacora  # solo bitacora
+
+    bitacora.audit_change(db, p, "create", "commission_rule", r.id, {}, bitacora.snapshot(r), version=1, always=True)
     db.commit()
     return {"id": r.id}
 
@@ -559,8 +563,12 @@ def rule_update(rid: int, data: RuleIn, p: Principal = Depends(require("commissi
     r = db.get(CommissionRule, rid)
     if not r or r.tenant_id != p.tenant.id:
         raise HTTPException(404, "Regla no encontrada")
+    from ..services import bitacora  # solo bitacora: antes/despues del porcentaje, base, vendedor...
+
+    antes = bitacora.snapshot(r)
     for k, v in data.model_dump().items():
         setattr(r, k, v)
+    bitacora.audit_change(db, p, "update", "commission_rule", r.id, antes, bitacora.snapshot(r), version=bitacora.next_version(db, p.tenant.id, "commission_rule", r.id))
     db.commit()
     return {"id": r.id}
 

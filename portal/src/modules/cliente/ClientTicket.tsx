@@ -20,7 +20,8 @@ function Fotos({ urls, caption }: { urls: string[]; caption: string }) {
           <button type="button" className="photos__open" onClick={() => setVer(i)} aria-label={`Ver foto ${i + 1} en grande`} />
         </div>
       ))}
-      {ver !== null && <Lightbox fotos={urls.map((url) => ({ url, caption }))} start={ver} onClose={() => setVer(null)} />}
+      {/* el servidor ya las manda firmadas (o son publicas): el cliente no pide firmas */}
+      {ver !== null && <Lightbox fotos={urls.map((url) => ({ url, caption }))} start={ver} onClose={() => setVer(null)} sign={false} />}
     </div>
   );
 }

@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     public_base_url: str = "http://localhost:5173"
     payment_link_days: int = 30
 
+    # Archivos privados (fotos de levantamientos, OT, proyectos, adjuntos contables, tickets): se sirven solo con
+    # enlace firmado HMAC que vence. Sin MEDIA_URL_SECRET se deriva del JWT_SECRET (nunca se usa el JWT tal cual).
+    media_url_secret: str | None = Field(None, min_length=32)
+    media_url_minutes: int = 30  # vida del enlace que pide el portal para mostrar una foto
+    media_email_url_days: int = 30  # informes que viajan por correo: el cliente abre el correo dias despues
+
     # Integraciones (vacias = adaptadores en modo manual/sandbox)
     onvo_public_key: str | None = None
     onvo_secret_key: str | None = None
