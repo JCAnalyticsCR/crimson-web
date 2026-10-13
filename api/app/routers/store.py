@@ -463,11 +463,32 @@ def store_home(slug: str, db: Session = Depends(get_db)):
             select(Product.category_id, func.count()).where(Product.tenant_id == t.id, Product.active, Product.show_on_web).group_by(Product.category_id)
         ).all()
     )
+    # subcategorias (Fygaro: categoria > subcategoria): el conteo de la madre suma el de sus hijas
+    kids: dict[int | None, list] = {}
+    for c in cats:
+        kids.setdefault(c.parent_id, []).append(c)
+    rolled: dict[int, int] = {}
+
+    def total(c) -> int:
+        if c.id not in rolled:
+            rolled[c.id] = counts.get(c.id, 0) + sum(total(k) for k in kids.get(c.id, []))
+        return rolled[c.id]
+
+    shown = {c.id for c in cats}
     return {
         "store": {k: cfg[k] for k in ("name", "tagline", "logo_url", "primary", "secondary", "font", "kind", "whatsapp", "currency", "legal")},
         "nav": [{"slug": pg.slug, "title": pg.title} for pg in pages if pg.in_nav],
         # solo categorias con productos publicados (una categoria vacia en el menu es un callejon sin salida)
-        "categories": [{"id": c.id, "name": c.name, "count": counts.get(c.id, 0)} for c in cats if counts.get(c.id)],
+        "categories": [
+            {
+                "id": c.id,
+                "name": c.name,
+                "count": total(c),
+                "subcategories": [{"id": k.id, "name": k.name, "count": total(k)} for k in kids.get(c.id, []) if total(k)],
+            }
+            for c in cats
+            if (c.parent_id is None or c.parent_id not in shown) and total(c)
+        ],
         "product_count": sum(counts.values()),
         # las tarifas se configuran en colones (Mi Tienda -> "Base ₡"); display_amount = en la moneda de la tienda, con IVA
         "shipping_rates": [{**r, "display_amount": _gross(pricer(r.get("amount") or 0, "CRC"), 13)} for r in cfg["shipping_rates"] if r.get("active")],
@@ -482,6 +503,15 @@ def store_page(slug: str, page_slug: str, db: Session = Depends(get_db)):
     if not pg:
         raise HTTPException(404, "Página no encontrada")
     return _page_out(pg)
+
+
+def _category_and_children(db: Session, tenant_id: int, category_id: int) -> set[int]:
+    pairs = db.execute(select(Category.id, Category.parent_id).where(Category.tenant_id == tenant_id)).all()
+    out, frontier = {category_id}, {category_id}
+    while frontier:
+        frontier = {cid for cid, parent in pairs if parent in frontier and cid not in out}
+        out |= frontier
+    return out
 
 
 def _cat_names(db: Session, tenant_id: int) -> dict[int, str]:
@@ -506,8 +536,8 @@ def store_products(
 
     t = _tenant(db, slug)
     stmt = select(Product).where(Product.tenant_id == t.id, Product.active, Product.show_on_web)
-    if category_id:
-        stmt = stmt.where(Product.category_id == category_id)
+    if category_id:  # la categoria y sus subcategorias
+        stmt = stmt.where(Product.category_id.in_(_category_and_children(db, t.id, category_id)))
     rows = list(db.scalars(stmt.order_by(Product.name)).all())
     cats = _cat_names(db, t.id)
     if q and q.strip():

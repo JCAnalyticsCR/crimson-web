@@ -17,6 +17,14 @@ Reglas (idempotente; el modo por defecto NO escribe nada):
 - Fotos: se suben al mecanismo de multimedia propio (tabla media, dedupe por sha256). Se toman de una carpeta
   local (`images_dir`, lo que dejo el relevamiento) o se descargan SOLO del bucket de Fygaro (lista blanca de host).
 - CABYS: Fygaro no lo publica. Los productos nuevos quedan sin CABYS -> Productos -> Completar CABYS.
+- Subcategorias (categories[].subcategories y products[].subcategories del relevamiento): se crean como Category
+  con parent_id bajo su categoria y el producto queda en la mas especifica. Idempotente: se reconocen por
+  (padre, nombre) y el id de Fygaro queda en el mapa de categorias (enlaces viejos /products/category/<id>/).
+- IVA: 0 %, tarifa rara (13.2, 12.8...) o sin dato -> "Revisar IVA" en la vista previa. Con tarifa rara o sin
+  dato NO se publica (lo que ya estaba publicado no se oculta).
+- Disponibilidad: la de Fygaro NO se importa (marcaba todo "disponible"); la tienda la calcula del inventario real.
+- Fotos: todas pasan a multimedia propia; las que fallan salen en summary["fotos_fallidas"] y, si el producto
+  ya tenia fotos, no se reemplazan por una lista incompleta.
 """
 
 from __future__ import annotations
@@ -55,6 +63,7 @@ class Row:
     price: str | None = None
     currency: str | None = None
     tax_rate: str | None = None
+    iva_review: str | None = None  # cero | rara | desconocida
     category: str | None = None
     images: int = 0
     published: bool = False
@@ -76,6 +85,20 @@ def _dec(v) -> Decimal | None:
         return Decimal(str(v))
     except InvalidOperation:
         return None
+
+
+def _rate_review(item: dict) -> tuple[Decimal, str | None, str | None]:
+    """(tarifa, aviso, revision) con revision: None | 'cero' | 'rara' | 'desconocida'."""
+    raw = _dec(item.get("tax_rate"))
+    rate, warn = _rate(item)
+    if raw is None:
+        return rate, f"Revisar IVA: {warn or 'Fygaro no trae la tarifa'}", "desconocida"
+    if raw not in KNOWN_RATES:
+        why = warn or f"Fygaro mostraba {raw} % (se asume {rate} % por redondeo del precio)"
+        return rate, f"Revisar IVA: {why}; no se publica hasta revisarlo", "rara"
+    if rate == 0:
+        return rate, f"Revisar IVA: {warn}", "cero"
+    return rate, warn, None
 
 
 def _rate(item: dict) -> tuple[Decimal, str | None]:
@@ -155,8 +178,19 @@ def run(
     cmap: dict[str, int] = dict(state.get("categories") or {})
     index = _Index(list(db.scalars(select(Product).where(Product.tenant_id == tid))))
     taxes = {Decimal(str(t.rate)).quantize(Decimal(1)): t for t in db.scalars(select(Tax).where(Tax.tenant_id == tid, Tax.active))}
-    cats = {norm(c.name): c for c in db.scalars(select(Category).where(Category.tenant_id == tid))}
+    all_cats = list(db.scalars(select(Category).where(Category.tenant_id == tid)))
+    # por nombre; si se repite, manda la de primer nivel (una subcategoria "Redes" no se roba a la categoria)
+    cats = {norm(c.name): c for c in sorted(all_cats, key=lambda c: c.parent_id is None)}
+    subs = {(c.parent_id, norm(c.name)): c for c in all_cats if c.parent_id}
     fy_cats = {str(c.get("fygaro_id")): c.get("name") for c in catalog.get("categories") or []}
+    # subcategorias de Fygaro: {categoria normalizada: {subcategoria normalizada: (id de Fygaro, nombre)}}
+    fy_subs: dict[str, dict[str, tuple[str, str]]] = {}
+    for c in catalog.get("categories") or []:
+        for sc in c.get("subcategories") or []:
+            if sc.get("name"):
+                fy_subs.setdefault(norm(c.get("name") or ""), {})[norm(sc["name"])] = (str(sc.get("fygaro_id") or ""), sc["name"])
+    sub_cmap: dict[str, int] = {}
+    failed_images: list[dict] = []
 
     rows: list[Row] = []
     claimed: dict[int, str] = {}  # product_id -> fygaro_id (dos productos de Fygaro no pueden caer en el mismo)
@@ -179,6 +213,32 @@ def run(
                 db.flush()
                 cats[key] = c
         return c
+
+    def subcategory_for(parent: Category | None, parent_name: str, name: str, fy_id: str | None, row: Row) -> Category | None:
+        key = (parent.id if parent is not None else None, norm(name))
+        c = subs.get(key) if parent is not None else None
+        if not c:
+            row.changes.append(f"subcategoria nueva: {parent_name} > {name}")
+            if apply and parent is not None:
+                c = Category(tenant_id=tid, name=name[:120], parent_id=parent.id, show_on_web=True)
+                db.add(c)
+                db.flush()
+                subs[key] = c
+        if c is not None and fy_id:
+            sub_cmap[fy_id] = c.id
+        return c
+
+    def pick_sub(cat_names: list[str], sub_names: list[str]) -> tuple[str | None, str | None, str | None]:
+        """(categoria, subcategoria, id Fygaro) mas especifica: la subcategoria que cuelga de una de sus categorias."""
+        for cn in cat_names:
+            known = fy_subs.get(norm(cn)) or {}
+            for sn in sub_names:
+                if norm(sn) in known:
+                    fid_, real = known[norm(sn)]
+                    return cn, real, fid_
+        if cat_names and sub_names:
+            return cat_names[0], sub_names[0], None
+        return (cat_names[0] if cat_names else None), None, None
 
     try:
         for item in catalog.get("products") or []:
@@ -206,7 +266,8 @@ def run(
 
             price = _dec(item.get("price"))
             currency = (item.get("currency") or tenant.default_currency or "CRC").upper()[:3]
-            rate, rate_warn = _rate(item)
+            rate, rate_warn, iva_review = _rate_review(item)
+            row.iva_review = iva_review
             if rate_warn:
                 row.warnings.append(rate_warn)
             if rate not in taxes:
@@ -221,8 +282,12 @@ def run(
             if kind == "servicio":
                 row.warnings.append("Parece un servicio por el nombre: se importa como servicio")
             cat_names = [c for c in item.get("categories") or [] if c]
+            sub_names = [c for c in item.get("subcategories") or [] if c]
+            main_cat, sub_name, sub_fid = pick_sub(cat_names, sub_names)
             if len(cat_names) > 1:
-                row.warnings.append(f"En {len(cat_names)} categorias de Fygaro: se usa {cat_names[0]}")
+                row.warnings.append(f"En {len(cat_names)} categorias de Fygaro: se usa {main_cat}")
+            if len(sub_names) > 1:
+                row.warnings.append(f"En {len(sub_names)} subcategorias de Fygaro: se usa {sub_name}")
             images = [u for u in (item.get("images") or []) if isinstance(u, str) and u.startswith("http")][:MAX_IMAGES]
             description = str(item.get("description") or "").strip()[:4000] or None
 
@@ -251,8 +316,11 @@ def run(
             owned = bool(prod is not None and entry and entry.get("created") and entry.get("id") == prod.id) or (
                 prod is not None and prod.code == f"FY-{fid[:8].upper()}"
             )
-            cat = category_for(cat_names[0] if cat_names else None, row)
-            publish = price is not None and price > 0
+            cat = category_for(main_cat, row)
+            sub = subcategory_for(cat, main_cat or "", sub_name, sub_fid, row) if sub_name and main_cat else None
+            priced = price is not None and price > 0
+            # con IVA raro o desconocido no se publica solo (lo ya publicado se respeta)
+            publish = priced and iva_review not in ("rara", "desconocida")
 
             if prod is None:
                 row.action, row.code = "nuevo", code
@@ -301,14 +369,20 @@ def run(
                     row.warnings.append(f"Precio distinto: sistema {cur_cur} {cur_price:.2f} vs Fygaro {currency} {price:.2f} (no se cambia)")
             row.price, row.currency, row.tax_rate = (str(price) if price is not None else None), currency, str(rate)
 
-            if cat is not None and (owned or prod is None or prod.category_id is None):
-                row.category = cat.name
-                if prod is None or prod.category_id != cat.id:
-                    note(f"categoria {cat.name}")
+            target = sub or cat  # la mas especifica
+            # en la vista previa la subcategoria puede no existir todavia: el reporte igual la nombra
+            cat_label = cat.name if cat is not None else main_cat
+            label = f"{cat_label} > {sub.name if sub is not None else sub_name}" if sub_name else (target.name if target is not None else None)
+            # un producto ajeno que ya esta en la categoria de Fygaro tambien baja a su subcategoria
+            refine = prod is not None and cat is not None and prod.category_id == cat.id
+            if target is not None and (owned or prod is None or prod.category_id is None or refine):
+                row.category = label
+                if prod is None or prod.category_id != target.id:
+                    note(f"categoria {label}")
                     if apply and prod is not None:
-                        prod.category_id = cat.id
-            elif cat_names:
-                row.category = cat_names[0]
+                        prod.category_id = target.id
+            elif main_cat:
+                row.category = f"{main_cat} > {sub_name}" if sub_name else main_cat
 
             if rate in taxes and (owned or prod is None or not prod.taxes):
                 has = prod is not None and len(prod.taxes) == 1 and prod.taxes[0].tax_id == taxes[rate].id
@@ -323,34 +397,42 @@ def run(
                 note("publicar en tienda")
                 if apply and prod is not None:
                     prod.show_on_web = True
-            if not publish and owned and prod is not None and prod.show_on_web:
+            if not priced and owned and prod is not None and prod.show_on_web:
                 row.changes.append("ocultar de la tienda (sin precio)")
                 if apply:
                     prod.show_on_web = False
-            row.published = publish or bool(prod is not None and prod.show_on_web and not owned)
+            row.published = publish or bool(prod is not None and prod.show_on_web and (not owned or priced))
 
             # --- fotos ---
             row.images = len(images)
             if images and (owned or prod is None or not prod.images):
                 if apply and prod is not None:
                     out = []
+                    fails = 0
                     for i, url in enumerate(images):
+                        why = "no está en la carpeta y la descarga está apagada"
                         try:
                             data = _image_bytes(url, images_dir, download_images, client)
                         except (httpx.HTTPError, OSError) as e:
                             row.warnings.append(f"Foto {i + 1} no se pudo leer: {e.__class__.__name__}")
-                            data = None
+                            why, data = e.__class__.__name__, None
                         if not data:
                             stats["images_missing"] += 1
+                            fails += 1
+                            failed_images.append({"fygaro_id": fid, "code": prod.code, "name": name, "url": url, "motivo": why})
                             continue
                         try:
                             m, new = save_media(db, tid, data, Path(urlparse(url).path).name, user_id)
                         except HTTPException as e:
                             row.warnings.append(f"Foto {i + 1} rechazada: {e.detail}")
+                            fails += 1
+                            failed_images.append({"fygaro_id": fid, "code": prod.code, "name": name, "url": url, "motivo": str(e.detail)})
                             continue
                         stats["images_uploaded" if new else "images_reused"] += 1
                         out.append({"url": public_url(m), "main": not out})
-                    if [x["url"] for x in out] != [x.get("url") for x in (prod.images or [])]:
+                    if fails and prod.images:
+                        row.warnings.append(f"{fails} foto(s) fallaron: se conservan las fotos que ya tenía")
+                    elif [x["url"] for x in out] != [x.get("url") for x in (prod.images or [])]:
                         note(f"{len(out)} foto(s)")
                         prod.images = out
                 elif not apply and (prod is None or not prod.images):
@@ -391,6 +473,7 @@ def run(
             c = cats.get(norm(fname or ""))
             if c is not None:
                 cmap[fcid] = c.id
+        cmap.update(sub_cmap)  # subcategorias: /products/category/<id>/ de Fygaro -> la subcategoria propia
         settings = dict(tenant.settings or {})
         settings["fygaro"] = {"products": pmap, "categories": cmap, "imported_at": datetime.now(UTC).isoformat(timespec="seconds")}
         tenant.settings = settings  # reasignar: SQLAlchemy no detecta cambios dentro del JSON
@@ -407,11 +490,16 @@ def run(
         "sin_precio": sum(1 for r in rows if any(w.startswith("Precio vacio") for w in r.warnings)),
         "precio_distinto": sum(1 for r in rows if any(w.startswith("Precio distinto") for w in r.warnings)),
         "sin_cabys": cabys_missing,
+        "revisar_iva": sum(1 for r in rows if r.iva_review),
+        "iva_cero": sum(1 for r in rows if r.iva_review == "cero"),
+        "iva_raro": sum(1 for r in rows if r.iva_review in ("rara", "desconocida")),
+        "subcategorias": len({r.category for r in rows if r.category and " > " in r.category}),
         "fotos": sum(r.images for r in rows),
         "monedas": sorted({r.currency for r in rows if r.currency}),
         "legal": legal_note,
         "aplicado": apply,
         **(stats if apply else {}),
+        **({"fotos_fallidas": failed_images} if apply else {}),
     }
     redirects = {r.fygaro_id: r.product_id for r in rows if r.product_id}
     return {"summary": summary, "rows": [r.as_dict() for r in rows], "redirects": redirects}
