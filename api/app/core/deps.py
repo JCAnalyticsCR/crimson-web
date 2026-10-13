@@ -50,7 +50,8 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "crm": ["ver"],
         "crm_pipeline": ["ver", "editar"],
         "catalog": ["ver", "precios", "costos"],
-        "inventory": ["ver", "crear", "editar", "exportar"],
+        # aprobar_reserva: confirma reservas de material (AC25: ver existencia no es retirar)
+        "inventory": ["ver", "crear", "editar", "exportar", "aprobar_reserva"],
         # revisar: aprueba o devuelve con observaciones lo que el tecnico envia, antes del costeo.
         # saltar_revision (cotizar sin revision aprobada) queda solo para admin ("*").
         "field": ["ver", "ver_todo", "crear", "editar", "asignar", "revisar"],

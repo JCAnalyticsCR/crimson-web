@@ -37,6 +37,103 @@ class StockMovement(TenantMixin, Base):
     note: Mapped[str | None] = mapped_column(Text)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
+    # existencias enriquecidas (AC06/AC25): todo opcional; sin estos datos el movimiento es el de siempre
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("project.id", name="fk_stock_movement_project"), index=True)
+    serial: Mapped[str | None] = mapped_column(String(80))
+    # compra | venta | consumo_proyecto | prestamo | consignacion | asignacion_interna | devolucion | ajuste | traslado
+    movement_type: Mapped[str | None] = mapped_column(String(24))
+    voucher_media: Mapped[str | None] = mapped_column(String(400))  # comprobante adjunto (url de multimedia)
+    transfer_price: Mapped[float | None] = mapped_column(Numeric(14, 5))
+    owner: Mapped[str | None] = mapped_column(String(160))  # vacio = la empresa
+    custodian: Mapped[str | None] = mapped_column(String(160))  # vacio = la empresa
+    location: Mapped[str | None] = mapped_column(String(160))  # sub-ubicacion: estante, rack, vehiculo
+
+
+MOVEMENT_TYPES = (
+    "compra",
+    "venta",
+    "consumo_proyecto",
+    "prestamo",
+    "consignacion",
+    "asignacion_interna",
+    "devolucion",
+    "ajuste",
+    "traslado",
+)
+
+
+class StockUnit(TenantMixin, TimestampMixin, Base):
+    """Unidad serializada (solo productos con serialized=True). El saldo sigue saliendo del ledger;
+    esto dice DONDE esta cada serie y en que estado."""
+
+    __tablename__ = "stock_unit"
+    __table_args__ = (UniqueConstraint("tenant_id", "serial", name="uq_stock_unit_serial"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("product.id", name="fk_stock_unit_product"), index=True)
+    serial: Mapped[str] = mapped_column(String(80))
+    warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouse.id", name="fk_stock_unit_warehouse"))
+    # disponible | reservado | solicitado | en_transito | entregado_proyecto | instalado | devuelto | averiado | garantia
+    status: Mapped[str] = mapped_column(String(24), default="disponible", index=True)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("project.id", name="fk_stock_unit_project"), index=True)
+    condition: Mapped[str] = mapped_column(String(24), default="nuevo")  # nuevo | usado | reacondicionado | danado
+    location: Mapped[str | None] = mapped_column(String(160))
+    owner: Mapped[str | None] = mapped_column(String(160))
+    custodian: Mapped[str | None] = mapped_column(String(160))
+    customer_asset_id: Mapped[int | None] = mapped_column(ForeignKey("customer_asset.id", name="fk_stock_unit_asset"))
+    notes: Mapped[str | None] = mapped_column(Text)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("user.id", name="fk_stock_unit_created_by"))
+
+
+UNIT_STATUSES = (
+    "disponible",
+    "reservado",
+    "solicitado",
+    "en_transito",
+    "entregado_proyecto",
+    "instalado",
+    "devuelto",
+    "averiado",
+    "garantia",
+)
+
+
+class StockReservation(TenantMixin, TimestampMixin, Base):
+    """Reserva formal (AC25 "ver existencia no es retirar"). Solo las confirmadas y vigentes comprometen
+    existencia; confirmar valida disponibilidad bajo candado (AC06)."""
+
+    __tablename__ = "stock_reservation"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("product.id", name="fk_stock_reservation_product"), index=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouse.id", name="fk_stock_reservation_warehouse"), index=True)
+    quantity: Mapped[float] = mapped_column(Numeric(14, 3))
+    consumed_quantity: Mapped[float] = mapped_column(Numeric(14, 3), default=0)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("project.id", name="fk_stock_reservation_project"), index=True)
+    survey_id: Mapped[int | None] = mapped_column(ForeignKey("survey.id", name="fk_stock_reservation_survey"))
+    quote_id: Mapped[int | None] = mapped_column(ForeignKey("quote.id", name="fk_stock_reservation_quote"))
+    # pendiente | confirmada | cancelada | vencida | consumida
+    status: Mapped[str] = mapped_column(String(16), default="pendiente", index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    requested_by: Mapped[int | None] = mapped_column(ForeignKey("user.id", name="fk_stock_reservation_requested_by"))
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("user.id", name="fk_stock_reservation_approved_by"))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reason: Mapped[str | None] = mapped_column(Text)  # motivo de la reserva
+    closed_note: Mapped[str | None] = mapped_column(String(300))  # por que se cancelo / vencio / consumio
+
+
+class StockLock(TenantMixin, Base):
+    """Fila de control por (empresa, producto, bodega): confirmar una reserva la bloquea (SELECT ... FOR
+    UPDATE en Postgres) para que dos confirmaciones simultaneas no se lleven la misma ultima unidad."""
+
+    __tablename__ = "stock_lock"
+    __table_args__ = (UniqueConstraint("tenant_id", "product_id", "warehouse_id", name="uq_stock_lock"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("product.id", name="fk_stock_lock_product"))
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouse.id", name="fk_stock_lock_warehouse"))
+    version: Mapped[int] = mapped_column(Integer, default=0)
 
 
 # ---------- Contabilidad (plan 3.7) ----------

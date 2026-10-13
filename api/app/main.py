@@ -34,6 +34,7 @@ from .routers import (
     public_incidents,
     reception,
     sales,
+    stock,
     store,
     support,
     support_desk,
@@ -99,6 +100,7 @@ def create_app() -> FastAPI:
     app.include_router(allies.router)
     app.include_router(fieldwork.router)
     app.include_router(projects.router)
+    app.include_router(stock.router)
     app.include_router(support_desk.router)
     app.include_router(public.router)
     app.include_router(public_incidents.router)

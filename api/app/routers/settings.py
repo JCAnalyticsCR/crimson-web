@@ -53,6 +53,11 @@ DEFAULTS = {
     # SLA de soporte por prioridad (horas). Un contrato con SLA propio lo reemplaza para ese cliente.
     "sla": SLA_DEFECTO,
     "archive_purge_days": 30,  # dias en la papelera antes de que el worker lo borre definitivamente
+    # inventario: apagado = todo como siempre (ventas, POS, OT y ajustes pueden dejar stock negativo)
+    "prevent_negative_stock": False,
+    # reservas: 0 = toda reserva requiere aprobacion; X = las de proyectos hasta X unidades se confirman solas
+    "reservation_auto_approve_units": 0,
+    "reservation_days": 15,  # vigencia por defecto de una reserva
 }
 
 
@@ -95,6 +100,9 @@ class SettingsIn(BaseModel):
             raise ValueError("SLA invalido: las 4 prioridades con horas de respuesta y resolucion (1 a 2160)")
         return n
     archive_purge_days: int | None = Field(None, ge=1, le=365)
+    prevent_negative_stock: bool | None = None
+    reservation_auto_approve_units: float | None = Field(None, ge=0, le=100000)
+    reservation_days: int | None = Field(None, ge=1, le=365)
 
 
 @router.get("")

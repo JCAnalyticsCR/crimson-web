@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -77,6 +77,8 @@ class Product(TenantMixin, TimestampMixin, Base):
     # bodega de origen por defecto: de que inventario sale el producto (Andres la pidio en el importador)
     warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouse.id"), index=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # unidades con numero de serie (camaras, NVR): cada una se sigue en stock_unit. Opcional.
+    serialized: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     taxes: Mapped[list["ProductTax"]] = relationship(cascade="all, delete-orphan")
 

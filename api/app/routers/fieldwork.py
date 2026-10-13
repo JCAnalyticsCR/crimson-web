@@ -1153,6 +1153,10 @@ def _apply_materials(db: Session, o: WorkOrder, p: Principal) -> int:
         invsvc.move(db, o.tenant_id, p.user.id, m.product_id, wh, "salida", -d(m.quantity), reference=o.number, note=f"Orden {o.number}")
         n += 1
     o.stock_applied = True
+    # reservas formales del proyecto: lo usado las consume (no cambia el descuento de arriba)
+    from ..services.reservations import consume_for_order
+
+    consume_for_order(db, o)
     return n
 
 

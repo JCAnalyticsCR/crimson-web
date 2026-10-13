@@ -9,13 +9,13 @@ import { SlaSettings } from "./support/SlaTable";
 import { Bitacora } from "./Bitacora";
 
 type Group = { id: number; doc_type: string; prefix: string; branch: string; terminal: string; current: number; is_default: boolean };
-type Cfg = { labor_day_cost?: number; labor_day_cost_civil?: number; labor_day_cost_contratado?: number; per_diem_cost?: number; travel_cost?: number; max_discount_pct?: number; archive_purge_days?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; notify_due: boolean; remind_days_before: number; daily_close_email: boolean; bcc: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
+type Cfg = { prevent_negative_stock?: boolean; reservation_auto_approve_units?: number; reservation_days?: number; labor_day_cost?: number; labor_day_cost_civil?: number; labor_day_cost_contratado?: number; per_diem_cost?: number; travel_cost?: number; max_discount_pct?: number; archive_purge_days?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; notify_due: boolean; remind_days_before: number; daily_close_email: boolean; bcc: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
 type Bank = { id: number; name: string; bank: string | null; currency: string; number: string | null; active: boolean };
 type Users = { users: { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null }[]; invitations: { id: number; email: string; role: string; expires_at: string }[]; roles: string[] };
 type Gw = { id: number; provider: string; client_id: string | null; secret_mask: string | null; is_primary: boolean; active: boolean; mode: string };
 type Mail = { id: number; to: string; subject: string; status: string; entity: string | null; entity_id: number | null; created_at: string; error: string | null };
 
-const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["pagos", "Pagos y cobros"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"], ["bandeja", "Bandeja XML"], ["sla", "SLA"], ["soporte", "Soporte"], ["api", "API"], ["bitacora", "Bitácora"]];
+const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["pagos", "Pagos y cobros"], ["inventario", "Inventario"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"], ["bandeja", "Bandeja XML"], ["sla", "SLA"], ["soporte", "Soporte"], ["api", "API"], ["bitacora", "Bitácora"]];
 
 export default function Settings() {
   const { me, reload, toast, allows } = useSession();
@@ -149,6 +149,28 @@ export default function Settings() {
               <p className="muted" style={{ padding: "10px 18px", fontSize: 12 }}>Consecutivo v4.4 = sucursal (3) + terminal (5) + tipo (2) + secuencia (10). El valor actual nunca retrocede.</p>
             </Card>
           </div>
+        </div>
+      )}
+
+      {tab === "inventario" && cfg && (
+        <div className="grid-2">
+          <Card title="Existencias">
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13 }}>
+              <label style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <input type="checkbox" checked={!!cfg.prevent_negative_stock} onChange={(e) => saveCfg({ prevent_negative_stock: e.target.checked })} style={{ marginTop: 3 }} />
+                <span><b>Impedir stock negativo en salidas</b><br /><span className="muted">Apagado (recomendado mientras se cuadra el inventario): ventas, punto de venta, órdenes de trabajo y ajustes descuentan aunque no haya existencia, como hasta hoy. Encendido: cualquier salida sin existencia suficiente en esa bodega se rechaza.</span></span>
+              </label>
+            </div>
+          </Card>
+          <Card title="Reservas de material">
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <p className="muted" style={{ fontSize: 13, margin: 0 }}>Ver existencia no es retirar: una reserva compromete material solo cuando la aprueba un administrador o supervisor. Al confirmar se valida que haya existencia libre.</p>
+              <div className="grid-2">
+                <Field label="Aprobar solas las reservas de proyectos hasta (unidades)" hint="0 = toda reserva requiere aprobación."><input className="input input--mono" type="number" min={0} defaultValue={cfg.reservation_auto_approve_units ?? 0} onBlur={(e) => saveCfg({ reservation_auto_approve_units: Number(e.target.value || 0) })} /></Field>
+                <Field label="Vigencia de una reserva (días)" hint="Al vencer se libera sola."><input className="input input--mono" type="number" min={1} max={365} defaultValue={cfg.reservation_days ?? 15} onBlur={(e) => saveCfg({ reservation_days: Number(e.target.value || 15) })} /></Field>
+              </div>
+            </div>
+          </Card>
         </div>
       )}
 

@@ -344,11 +344,19 @@ def _reservar(db: Session, p: Principal, pr: Project, order: WorkOrder) -> list[
             WorkOrder.tenant_id == p.tenant.id, WorkOrder.project_id != pr.id, WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")), live(WorkOrder)
         )
     ).all()
+    # Reservas formales confirmadas (AC25) mandan donde existen; si un proyecto no tiene reserva de un
+    # material se sigue usando el calculo virtual de antes (planificado - usado de sus OT abiertas).
+    from ..services.reservations import committed_by_project
+
+    reservado = committed_by_project(db, p.tenant.id)
     comprometido: dict[int, Decimal] = {}
     for o in apartados:
         for m in o.materials:
-            if m.product_id:
+            if m.product_id and (o.project_id, m.product_id) not in reservado:
                 comprometido[m.product_id] = comprometido.get(m.product_id, Decimal(0)) + max(d(m.planned) - d(m.quantity), Decimal(0))
+    for (proj, prod_id), qty in reservado.items():
+        if proj != pr.id:
+            comprometido[prod_id] = comprometido.get(prod_id, Decimal(0)) + qty
     faltan = []
     for m in order.materials:
         if not m.product_id:

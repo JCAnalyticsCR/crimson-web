@@ -261,6 +261,19 @@ def low_stock_requests() -> int:
     return n
 
 
+@celery.task(name="inventory.expire_reservations")
+def expire_reservations() -> int:
+    """Reservas de material vencidas (pendientes o confirmadas) -> vencida: liberan lo comprometido."""
+    from app.core.db import SessionLocal
+    from app.services.reservations import expire_due
+
+    with SessionLocal() as db:
+        n = expire_due(db)
+    if n:
+        log.info("Reservas: %s vencida(s)", n)
+    return n
+
+
 @celery.task(name="assets.warranty_alerts")
 def warranty_alerts() -> int:
     """Equipo instalado que cumple 11 meses -> aviso de garantia proxima a vencer."""
@@ -405,6 +418,7 @@ celery.conf.beat_schedule = {
     "expire-support": {"task": "support.expire_grants", "schedule": crontab(minute=5)},
     "stale-followups": {"task": "crm.stale_followups", "schedule": crontab(hour=7, minute=30, day_of_week="mon-fri")},
     "low-stock-requests": {"task": "inventory.low_stock_requests", "schedule": crontab(hour=6, minute=45)},
+    "expire-reservations": {"task": "inventory.expire_reservations", "schedule": crontab(minute=10)},
     "warranty-alerts": {"task": "assets.warranty_alerts", "schedule": crontab(hour=7, minute=0, day_of_week="mon")},
     "maintenance-due": {"task": "support.maintenance_due", "schedule": crontab(hour=6, minute=30)},
     "sla-breaches": {"task": "support.sla_breaches", "schedule": crontab(minute=0)},
