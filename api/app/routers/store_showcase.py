@@ -222,15 +222,23 @@ def _categories(db: Session, tid: int) -> list[Category]:
     return list(db.scalars(select(Category).where(Category.tenant_id == tid, Category.show_on_web).order_by(Category.name)))
 
 
-def _avail(base: dict, p: Product, own: Decimal) -> dict:
+def _avail(base: dict, p: Product, own: Decimal | dict) -> dict:
     """Disponible / Ultimas unidades / Bajo pedido / Consultar. Es el respaldo: si existe el endpoint de inventario
-    (/availability), el navegador lo usa y este dato solo cubre mientras carga."""
+    (/availability), el navegador lo usa y este dato solo cubre mientras carga.
+    `own` es la existencia propia (Decimal) o, desde la integracion con el inventario, la fila ya calculada por
+    services/store_inventory (dict con "cantidad" solo si Ajustes publica la cantidad exacta y "ultimas")."""
     st = base.get("state")
     if st == "servicio":
         return {"state": "servicio", "label": "Servicio", "max_qty": None}
     if st == "en_bodega":
-        limit = int(own) if not (p.supplier_stock or 0) else None  # sin respaldo del proveedor: no vender mas de lo que hay
-        if own <= 2:
+        if isinstance(own, dict):
+            qty = own.get("cantidad")
+            limit = int(qty) if qty is not None and not (p.supplier_stock or 0) else None
+            last = bool(own.get("ultimas")) or (qty is not None and qty <= 2)
+        else:
+            limit = int(own) if not (p.supplier_stock or 0) else None  # sin respaldo del proveedor: no vender mas de lo que hay
+            last = own <= 2
+        if last:
             return {"state": "ultimas", "label": "Últimas unidades", "max_qty": limit}
         return {"state": "disponible", "label": "Disponible", "max_qty": limit}
     if st == "bajo_pedido":
