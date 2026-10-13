@@ -1,7 +1,7 @@
 """inventario propio: movimientos enriquecidos, unidades serializadas, reservas formales y fila de control
 
 Revision ID: f3a9c1d2b4e7
-Revises: c41b7e9d2a60
+Revises: e4b8d2a7c913
 Create Date: 2026-10-12 10:00:00
 """
 
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "f3a9c1d2b4e7"
-down_revision: str | None = "c41b7e9d2a60"
+down_revision: str | None = "e4b8d2a7c913"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

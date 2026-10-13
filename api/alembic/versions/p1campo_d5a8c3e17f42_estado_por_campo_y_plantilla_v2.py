@@ -1,7 +1,7 @@
 """campo: estado por campo del punto, seccion comun del levantamiento y version de plantilla
 
 Revision ID: d5a8c3e17f42
-Revises: c41b7e9d2a60
+Revises: f3a9c1d2b4e7
 Create Date: 2026-10-12 09:00:00
 """
 
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "d5a8c3e17f42"
-down_revision: str | None = "c41b7e9d2a60"
+down_revision: str | None = "f3a9c1d2b4e7"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

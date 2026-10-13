@@ -6,7 +6,7 @@
 - Postgres: trigger que rechaza UPDATE, DELETE y TRUNCATE sobre audit_log (solo se inserta). En SQLite no hay trigger.
 
 Revision ID: e4b8d2a7c913
-Revises: c41b7e9d2a60
+Revises: d0cb4e92f968
 Create Date: 2026-10-12 09:00:00
 """
 
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "e4b8d2a7c913"
-down_revision: str | None = "c41b7e9d2a60"
+down_revision: str | None = "d0cb4e92f968"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
