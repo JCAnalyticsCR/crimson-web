@@ -1,13 +1,25 @@
-/* DEMOSTRACION ESTATICA: marco alrededor de la vitrina real.
-   - Franja fija "VISTA PREVIA" (las piezas fijas/pegajosas de la tienda se corren su alto: demo.css).
+/* DEMOSTRACION ESTATICA: marco alrededor de la vitrina real y de las pantallas de propuestas.
+   - Franja fija de 40 px: «Vista previa» con el texto de cada zona (tienda, propuestas, maquetas, Detrás de escena,
+     rentabilidad), el interruptor «Ver propuestas» con sus chips (capa sobre la tienda real) y «Lo que viene».
+   - Capa de propuestas (marcadores + fichas), control del pedido de ejemplo y parche del aviso de correo.
    - Aviso de demostracion cuando algo "escribiria" (lo dispara mockApi con DEMO_EVENT).
-   - WhatsApp y enlaces externos de compra NO se abren: se muestra el aviso (nunca se manda nada al numero real).
+   - WhatsApp y enlaces externos NO se abren: se muestra el aviso (nunca se manda nada al numero real).
    - Anclas internas (#comprar, #mi-kit, #contenido) funcionan con HashRouter: se desplaza sin tocar la ruta.
    - Guardia de <head>: noindex,nofollow siempre, sin canonica ni JSON-LD (la vitrina en modo dominio los pondria).
-   - Pie discreto con el credito de diseno y desarrollo. */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+   - Pie discreto con el credito de diseno y desarrollo y los enlaces «Más allá de la vitrina». */
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { DEMO_EVENT, DEMO_TEXT, notifyDemo, type DemoNotice } from "./mockApi";
+import { CLAVES, ETIQUETAS, type Etiqueta } from "./propuestas/registro";
+import { almacen } from "./propuestas/_comun/pedidos";
+import CapaPropuestas, { ControlesCapa } from "./propuestas/_capa/CapaPropuestas";
+import { esRutaDeTienda } from "./propuestas/_capa/rutas";
+import { useCapa } from "./propuestas/_capa/estado";
+import { instalarParcheCorreo } from "./propuestas/_capa/parcheCorreo";
 
+const ControlDemo = lazy(() => import("./propuestas/_capa/ControlDemo"));
+
+const SIN_ETIQUETAS: Etiqueta[] = [];
 const ALLOWED_HOSTS = ["jcanalytic.com", "www.jcanalytic.com", "crimsoncr.com", "www.crimsoncr.com"];
 
 function useHeadGuard() {
@@ -92,21 +104,48 @@ function Notice() {
   );
 }
 
-export default function DemoShell({ fx, children }: { fx: number; children: ReactNode }) {
+/** Texto de la franja segun la zona. */
+function textoFranja(pathname: string): string {
+  if (pathname === "/propuestas") return "propuestas: nada de esto está incluido aún";
+  if (pathname.startsWith("/propuestas/")) return "maqueta de propuesta, no incluida aún";
+  if (pathname.startsWith("/detras-de-escena")) return "pantallas que ya existen, con datos de ejemplo";
+  if (pathname.startsWith("/rentabilidad")) return "modelo con supuestos de ejemplo";
+  return "demostración sin pedidos reales";
+}
+
+export default function DemoShell({ fx, etiquetasExtra = SIN_ETIQUETAS, children }: { fx: number; etiquetasExtra?: Etiqueta[]; children: ReactNode }) {
   useHeadGuard();
   useLinkGuard();
+  const loc = useLocation();
+  const etiquetas = useMemo(() => [...ETIQUETAS, ...etiquetasExtra], [etiquetasExtra]);
+  const tienda = esRutaDeTienda(loc.pathname);
+  const capa = useCapa();
+  const conChips = capa.activa && (tienda || loc.pathname.startsWith("/detras-de-escena"));
+  const sp = new URLSearchParams(loc.search);
+  const conControl = sp.has("pedido") || sp.get("v") === "mi-pedido";
+
   useEffect(() => {
     document.documentElement.classList.add("demo-on");
-    return () => document.documentElement.classList.remove("demo-on");
+    const quitar = instalarParcheCorreo();
+    return () => { document.documentElement.classList.remove("demo-on"); quitar(); };
   }, []);
+  // «← Tienda» de las maquetas vuelve a la ultima pantalla de tienda visitada
+  useEffect(() => { if (tienda) almacen.sesion.set(CLAVES.ultimaRuta, `${loc.pathname}${loc.search}`); }, [tienda, loc.pathname, loc.search]);
+
   return (
     <>
-      <div className="demo-ribbon" role="note"><b>Vista previa</b><span aria-hidden="true"> · </span><span>demostración sin pedidos reales</span></div>
+      <div className="demo-ribbon" data-zona={tienda ? "tienda" : "propuestas"} data-chips={conChips ? "" : undefined}>
+        <span className="demo-ribbon__txt" role="note"><b>Vista previa</b><span className="demo-ribbon__largo"><span aria-hidden="true"> · </span>{textoFranja(loc.pathname)}</span></span>
+        <span className="demo-ribbon__ctl"><ControlesCapa /></span>
+      </div>
       {children}
       <footer className="demo-credit">
         <span>Vista previa no funcional: catálogo público de referencia, precios en colones con IVA a un tipo de cambio fijo de ₡{fx} por dólar. No se procesan pedidos, pagos ni solicitudes.</span>
+        <span className="demo-credit__mas">Más allá de la vitrina: <Link to="/detras-de-escena">Detrás de escena</Link><span aria-hidden="true"> · </span><Link to="/propuestas">Lo que viene</Link><span aria-hidden="true"> · </span><Link to="/rentabilidad">¿Es rentable?</Link></span>
         <span>Diseño y desarrollo: <a href="https://jcanalytic.com" target="_blank" rel="noopener">JC Analytics</a></span>
       </footer>
+      <CapaPropuestas etiquetas={etiquetas} />
+      {tienda && conControl && <Suspense fallback={null}><ControlDemo /></Suspense>}
       <Notice />
     </>
   );
