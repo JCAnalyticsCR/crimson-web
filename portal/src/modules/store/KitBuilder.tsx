@@ -9,11 +9,11 @@ type Line = { role: string; reason: string; quantity: number; subtotal: string |
 type Kit = { answers: Answers; place_label: string; cameras: number; storage_tb: string | number; lines: Line[]; missing: { name: string; quantity: number; reason: string; role: string }[]; notes: string[]; total: string | number; currency: string };
 type Answers = { place: string; indoor: number; outdoor: number; days: number; remote: boolean };
 
-const PLACES: [string, string, string][] = [
-  ["casa", "Casa", "Entradas, patio y cochera"],
-  ["negocio", "Negocio u oficina", "Caja, mostrador y bodega"],
-  ["condominio", "Condominio", "Accesos, parqueo y perímetro"],
-  ["bodega", "Bodega o planta", "Perímetro, andenes y patio"],
+const PLACES: [string, string, string, string][] = [
+  ["casa", "Casa", "Entradas, patio y cochera", IC.home],
+  ["negocio", "Negocio u oficina", "Caja, mostrador y bodega", IC.shop],
+  ["condominio", "Condominio", "Accesos, parqueo y perímetro", IC.building],
+  ["bodega", "Bodega o planta", "Perímetro, andenes y patio", IC.factory],
 ];
 const DAYS = [7, 15, 30, 60];
 export const KIT_STORAGE = "crimson-shop:kit"; // la asesoria lo lee para adjuntar el kit
@@ -57,6 +57,20 @@ export default function KitBuilder() {
 
   const set = <K extends keyof Answers>(k: K, v: Answers[K]) => setAns((a) => ({ ...a, [k]: v }));
   const priced = useMemo(() => (kit?.lines || []).filter((l) => !l.product.price_on_request && Number(l.product.display_price) > 0), [kit]);
+  // desglose del panel: articulos con precio, IVA contenido (por la tarifa de cada producto) y lo que queda por cotizar
+  const sums = useMemo(() => {
+    const units = priced.reduce((n, l) => n + l.quantity, 0);
+    const iva = priced.reduce((t, l) => { const s = Number(l.subtotal) || 0; const r = Number(l.product.tax_rate) || 0; return t + (s - s / (1 + r / 100)); }, 0);
+    const pending = (kit?.lines.length || 0) - priced.length + (kit?.missing.length || 0);
+    return { units, iva, pending };
+  }, [priced, kit]);
+  const placeName = PLACES.find(([k]) => k === ans.place)?.[1] || "";
+  const steps: [string, string, string][] = [
+    ["q1", "Lugar", placeName],
+    ["q2", "Cámaras", `${total} en total`],
+    ["q3", "Grabación", `${ans.days} días`],
+    ["q4", "Celular", ans.remote ? "Sí" : "No"],
+  ];
   const kitText = kit ? [
     `Hola ${ctx.store.name}, armé este kit en la tienda (${kit.place_label}, ${kit.cameras} cámaras, ${kit.answers.days} días de grabación):`,
     ...kit.lines.map((l) => `• ${l.quantity} × ${l.product.name} (${l.product.code})`),
@@ -91,18 +105,24 @@ export default function KitBuilder() {
       </header>
       <div className="vt-kitb__grid">
         <form className="vt-q" onSubmit={(e) => e.preventDefault()} aria-label="Preguntas del configurador">
-          <fieldset className="vt-q__step">
+          {/* progreso: cada paso ya tiene respuesta (valores sugeridos); el resumen dice que se eligio y lleva a la pregunta */}
+          <ol className="vt-steps" aria-label="Tus respuestas">
+            {steps.map(([id, l, v], i) => (
+              <li key={id}><a href={`#${id}`}><i aria-hidden="true">{total === 0 && i === 1 ? String(i + 1).padStart(2, "0") : <Ico d={IC.check} size={13} />}</i><span><small>{l}</small><b>{v}</b></span></a></li>
+            ))}
+          </ol>
+          <fieldset className="vt-q__step" id="q1">
             <legend><i>01</i>¿Qué querés proteger?</legend>
             <div className="vt-q__places">
-              {PLACES.map(([k, l, s]) => (
+              {PLACES.map(([k, l, s, ic]) => (
                 <label key={k} className="vt-opt">
                   <input type="radio" name="place" checked={ans.place === k} onChange={() => set("place", k)} />
-                  <span><b>{l}</b><small>{s}</small></span>
+                  <span><Ico d={ic} size={22} /><b>{l}</b><small>{s}</small></span>
                 </label>
               ))}
             </div>
           </fieldset>
-          <fieldset className="vt-q__step">
+          <fieldset className="vt-q__step" id="q2">
             <legend><i>02</i>¿Cuántas cámaras y dónde?</legend>
             <p className="vt-q__hint">Una por acceso o área que quieras ver. Afuera van cámaras tipo bullet resistentes al agua; adentro, domos discretos.</p>
             <div className="vt-q__counts">
@@ -110,13 +130,13 @@ export default function KitBuilder() {
               <Stepper label="Afuera" value={ans.outdoor} onChange={(n) => set("outdoor", n)} />
             </div>
           </fieldset>
-          <fieldset className="vt-q__step">
+          <fieldset className="vt-q__step" id="q3">
             <legend><i>03</i>¿Cuántos días de grabación?</legend>
             <div className="vt-seg" role="radiogroup" aria-label="Días de grabación">
               {DAYS.map((n) => <label key={n} className="vt-seg__opt"><input type="radio" name="days" checked={ans.days === n} onChange={() => set("days", n)} /><span>{n} días</span></label>)}
             </div>
           </fieldset>
-          <fieldset className="vt-q__step">
+          <fieldset className="vt-q__step" id="q4">
             <legend><i>04</i>¿Querés verlas desde el celular?</legend>
             <div className="vt-seg" role="radiogroup" aria-label="Ver desde el celular">
               <label className="vt-seg__opt"><input type="radio" name="remote" checked={ans.remote} onChange={() => set("remote", true)} /><span>Sí</span></label>
@@ -154,6 +174,12 @@ export default function KitBuilder() {
                   </li>
                 ))}
               </ul>
+              <dl className="vt-kitres__sum">
+                <div><dt>Equipo con precio</dt><dd>{sums.units} artículo{sums.units === 1 ? "" : "s"}</dd></div>
+                {sums.iva > 0 && <div><dt>IVA incluido en el total</dt><dd>{money(sums.iva, kit.currency)}</dd></div>}
+                {sums.pending > 0 && <div><dt>Materiales por cotizar</dt><dd>{sums.pending} ítem{sums.pending === 1 ? "" : "s"}</dd></div>}
+                <div><dt>Instalación</dt><dd>Se cotiza aparte</dd></div>
+              </dl>
               <div className="vt-kitres__total"><span>Total de referencia del equipo</span><PriceTag p={{ display_price: kit.total, display_currency: kit.currency }} big /></div>
               <ul className="vt-kitres__notes">{kit.notes.map((n) => <li key={n}>{n}</li>)}</ul>
               <div className="vt-kitres__cta">

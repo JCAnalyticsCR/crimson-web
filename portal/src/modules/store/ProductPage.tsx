@@ -4,7 +4,7 @@
    ficha tecnica PDF, "¿Que necesito ademas?", relacionados y compartir. En movil la barra de compra queda fija. */
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AvailBadge, Crumbs, EmptyHelp, Grid, IC, Ico, PriceTag, ProductCard, Viewfinder, money, useAvailability, useHead, usePath, useStore, waLink, type Variant, type VProd } from "./storeKit";
+import { AvailBadge, Crumbs, EmptyHelp, Grid, IC, Ico, PriceTag, ProductCard, Viewfinder, cannotBuy, money, useAvailability, useHead, usePath, useStore, waLink, type Variant, type VProd } from "./storeKit";
 
 type Detail = VProd & {
   description: string | null; specs: Record<string, string>; datasheet_url: string | null; net_price: string | number; tax_amount: string | number;
@@ -58,7 +58,8 @@ export default function ProductPage() {
   const price = variant?.display_price ?? d.display_price;
   const shown = { ...d, display_price: price };
   const ask = d.price_on_request || !Number(price);
-  const soldOut = a?.state === "agotado";
+  const soldOut = cannotBuy(a);
+  const soldLabel = a?.state === "agotado" ? "Agotado" : "Sin existencias confirmadas";
   const net = variant ? Number(price) / (1 + d.tax_rate / 100) : Number(d.net_price);
   const iva = Number(price) - net;
   const save = d.compare_display_price && Number(d.compare_display_price) > Number(price) ? Number(d.compare_display_price) - Number(price) : 0;
@@ -118,7 +119,7 @@ export default function ProductPage() {
                 <div className="vt-buy">
                   <Qty value={qty} max={maxQty} onChange={setQty} />
                   <button className="sh-btn sh-btn--crimson vt-buy__add" data-done={added} onClick={add} disabled={soldOut}>
-                    <Ico d={added ? IC.check : IC.bag} />{soldOut ? "Agotado" : added ? "Agregado" : ctx.isShop ? "Agregar al carrito" : "Agregar a la cotización"}
+                    <Ico d={added ? IC.check : IC.bag} />{soldOut ? soldLabel : added ? "Agregado" : ctx.isShop ? "Agregar al carrito" : "Agregar a la cotización"}
                   </button>
                 </div>
                 {a?.max_qty && a.max_qty > 0 && a.max_qty < 999 ? <p className="vt-buybox__note">Quedan {a.max_qty} en bodega.</p> : null}
@@ -126,7 +127,7 @@ export default function ProductPage() {
                 <Link className="vt-install" to={installHref}>
                   <Ico d={IC.tool} /><span><b>¿Lo instalamos nosotros?</b><small>Técnicos de Crimson · te cotizamos la instalación sin compromiso</small></span><Ico d={IC.next} />
                 </Link>
-                {S.whatsapp && <a className="sh-btn sh-btn--ghost sh-btn--block" href={waLink(S.whatsapp, waText)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Consultar por WhatsApp</a>}
+                {S.whatsapp && <a className={`sh-btn ${soldOut ? "sh-btn--wa" : "sh-btn--ghost"} sh-btn--block`} href={waLink(S.whatsapp, waText)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />{soldOut ? "Consultar disponibilidad por WhatsApp" : "Consultar por WhatsApp"}</a>}
               </>
             )}
             <div className="vt-buybox__tools">
@@ -177,7 +178,7 @@ export default function ProductPage() {
       {d.related.length > 0 && (
         <section className="vt-sec" aria-labelledby="vt-rel">
           <div className="vt-sec__head"><h2 id="vt-rel">También te puede servir</h2>{d.category_path && <Link className="vt-more" to={to(d.category_path)}>Ver {d.category} →</Link>}</div>
-          <Grid items={d.related} avail={avail} />
+          <Grid items={d.related} avail={avail} rail />
         </section>
       )}
 
@@ -185,7 +186,7 @@ export default function ProductPage() {
       <div className="vt-stickybuy" aria-hidden={false}>
         <div><PriceTag p={shown} /></div>
         {ask ? <a className="sh-btn sh-btn--crimson" href="#comprar">Pedir precio</a>
-          : <button className="sh-btn sh-btn--crimson" data-done={added} onClick={add} disabled={soldOut}><Ico d={added ? IC.check : IC.bag} />{added ? "Agregado" : "Agregar"}</button>}
+          : <button className="sh-btn sh-btn--crimson" data-done={added} onClick={add} disabled={soldOut}><Ico d={added ? IC.check : IC.bag} />{soldOut ? (a?.state === "agotado" ? "Agotado" : "Sin existencias") : added ? "Agregado" : "Agregar"}</button>}
       </div>
 
       {zoom && <Lightbox imgs={imgs} start={photo} name={d.name} onClose={(i) => { setPhoto(i); setZoom(false); }} />}

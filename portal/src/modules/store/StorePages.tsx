@@ -233,7 +233,7 @@ export function ComparePage() {
   return (
     <div className="sh-wrap vt-compare">
       <Crumbs items={[{ name: "Tienda", path: "/" }, { name: "Comparar" }]} />
-      <h1 className="vt-h1">Comparar productos</h1>
+      <header className="vt-cathead"><h1>Comparar productos</h1>{d && d.length > 1 && <p>Lo que cambia entre ellos va resaltado; lo que tienen en común queda atenuado.</p>}</header>
       {!d ? <div className="sh-skel" style={{ height: 300 }} /> : d.length === 0 ? (
         <EmptyHelp title="No hay productos para comparar." text="Marcá “Comparar” en hasta 3 productos del catálogo."><Link className="sh-btn" to={to("/catalogo")}>Ir al catálogo</Link></EmptyHelp>
       ) : (
@@ -253,7 +253,11 @@ export function ComparePage() {
             <tbody>
               <tr><th scope="row">Precio</th>{d.map((p) => <td key={p.id}><PriceTag p={p} /></td>)}</tr>
               <tr><th scope="row">Disponibilidad</th>{d.map((p) => <td key={p.id}><AvailBadge a={avail[p.id] || p.availability} /></td>)}</tr>
-              {rows.map((k) => <tr key={k}><th scope="row">{k}</th>{d.map((p) => <td key={p.id}>{p.specs[k] || "—"}</td>)}</tr>)}
+              {rows.map((k) => {
+                // lo que es igual en todos se atenua: el ojo va directo a lo que cambia
+                const same = d.length > 1 && d.every((p) => (p.specs[k] || "") === (d[0].specs[k] || ""));
+                return <tr key={k} data-same={same || undefined}><th scope="row">{k}</th>{d.map((p) => <td key={p.id}>{p.specs[k] || "—"}</td>)}</tr>;
+              })}
               <tr><th scope="row"><span className="sh-sr">Acciones</span></th>{d.map((p) => (
                 <td key={p.id}>
                   {p.price_on_request || !Number(p.display_price) ? <Link className="sh-btn sh-btn--sm sh-btn--ghost" to={to(p.path)}>Consultar</Link>

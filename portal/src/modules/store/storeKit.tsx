@@ -4,7 +4,8 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
-export type Avail = { state: string; label: string; max_qty?: number | null };
+/** blocked: el inventario dice que no se puede vender todavia (disponible === false), aunque el estado no sea "agotado" */
+export type Avail = { state: string; label: string; max_qty?: number | null; blocked?: boolean };
 export type Variant = { id: number; name: string; price: string | number; display_price?: string | number };
 export type VProd = {
   id: number; code: string; name: string; brand: string | null; model?: string | null; image: string | null; images: string[];
@@ -81,7 +82,32 @@ export const IC = {
   zoom: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3M11 8v6M8 11h6",
   cam: "M3 7h4l2-2h6l2 2h4v12H3zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
   install: "M12 2v6M12 22v-6M4.9 4.9l4.2 4.2M14.9 14.9l4.2 4.2M2 12h6M22 12h-6",
+  // iconografia de categorias y del configurador (mismo trazo 2px)
+  cctv: "M3 4h18M5 7h14v2a7 7 0 0 1-14 0zM12 14a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM12 4v3",
+  lock: "M6 11h12v10H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3M12 15v2",
+  net: "M3 14h18v6H3zM7 17h.01M10.5 17h.01M15 17h3M8.5 10.5a5 5 0 0 1 7 0M5.8 7.8a9 9 0 0 1 12.4 0M12 14v-1",
+  bolt: "M13 2L4 14h7l-1 8 9-12h-7z",
+  disk: "M4 5h16v14H4zM4 13h16M8 16.5h.01M12 16.5h4",
+  people: "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.5a3.5 3.5 0 0 1 0 6.5M21 20c0-2.6-1.6-4.8-4-5.6",
+  grid: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
+  home: "M4 11l8-7 8 7M6 9.5V20h12V9.5M10 20v-5h4v5",
+  shop: "M4 9l1.5-5h13L20 9M4 9h16v2a3 3 0 0 1-5.3 1.9A3 3 0 0 1 12 14a3 3 0 0 1-2.7-1.1A3 3 0 0 1 4 11zM5 13.5V20h14v-6.5M10 20v-4h4v4",
+  building: "M5 21V4h9v17M14 9h5v12M8 8h3M8 12h3M8 16h3M3 21h18",
+  factory: "M3 21V10l5 3V10l5 3V7l8 4v10zM7 17h2M12 17h2M17 17h2",
+  phone: "M8 2h8v20H8zM11 18h2",
 };
+
+/** icono por nombre de categoria (los nombres los pone Crimson; si no calza ninguno, la camara de la marca) */
+const CAT_IC: [RegExp, string][] = [
+  [/vigil|c[aá]mara|cctv|video/i, IC.cctv],
+  [/acceso|seguridad|alarma|cerradura/i, IC.lock],
+  [/red|wifi|switch|cable/i, IC.net],
+  [/energ|ups|respaldo|el[eé]ctric/i, IC.bolt],
+  [/almacen|disco|memoria/i, IC.disk],
+  [/colabor|audio|reuni|confer/i, IC.people],
+  [/herramient|accesorio|instala/i, IC.tool],
+];
+export const catIcon = (name: string) => CAT_IC.find(([re]) => re.test(name))?.[1] || IC.cam;
 export const Ico = ({ d, size = 18 }: { d: string; size?: number }) => (
   <svg className="sh-icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>
 );
@@ -109,13 +135,17 @@ const NORM: Record<string, string> = {
   servicio: "servicio", consultar: "consultar",
 };
 const LABEL: Record<string, string> = { disponible: "Disponible", ultimas: "Últimas unidades", bajo_pedido: "Bajo pedido", agotado: "Agotado", consultar: "Consultar disponibilidad", servicio: "Servicio" };
-type InvEntry = { state?: string; status?: string; label?: string; available?: number; quantity?: number; max_qty?: number | null };
+const SHORT: Record<string, string> = { ...LABEL, consultar: "Consultar stock" };
+type InvEntry = { estado?: string; state?: string; status?: string; label?: string; available?: number; quantity?: number; cantidad?: number | string | null; ultimas?: boolean; disponible?: boolean; max_qty?: number | null };
 function normInv(e: InvEntry | undefined): Avail | null {
   if (!e) return null;
-  const s = NORM[String(e.state || e.status || "").toLowerCase()];
+  // "estado" es el dato real del inventario; "state" es el nombre viejo (consultar -> agotado) que se conserva por compatibilidad
+  let s = NORM[String(e.estado || e.state || e.status || "").toLowerCase()];
   if (!s) return null;
-  const max = e.max_qty ?? (s === "disponible" || s === "ultimas" ? (e.available ?? e.quantity ?? null) : null);
-  return { state: s, label: e.label || LABEL[s], max_qty: max ?? null };
+  if (s === "disponible" && e.ultimas) s = "ultimas";
+  const qty = e.cantidad != null && e.cantidad !== "" ? Number(e.cantidad) : null;
+  const max = e.max_qty ?? (s === "disponible" || s === "ultimas" ? (e.available ?? e.quantity ?? qty ?? null) : null);
+  return { state: s, label: e.label || LABEL[s], max_qty: max ?? null, blocked: e.disponible === false };
 }
 /** Disponibilidad en vivo por id. Acepta {items:[...]}, [...] o {"<id>": {...}} para no atarse al formato del otro modulo. */
 export function useAvailability(ids: number[]): Record<number, Avail> {
@@ -141,8 +171,10 @@ export function useAvailability(ids: number[]): Record<number, Avail> {
 }
 export function AvailBadge({ a, compact = false }: { a?: Avail | null; compact?: boolean }) {
   if (!a || a.state === "servicio") return null;
-  return <span className="vt-avail" data-s={a.state}>{compact ? LABEL[a.state] || a.label : a.label}</span>;
+  return <span className="vt-avail" data-s={a.state}>{compact ? SHORT[a.state] || a.label : a.label}</span>;
 }
+/** no se puede agregar: agotado, o el inventario dice que todavia no es vendible (antes ambos llegaban como "agotado") */
+export const cannotBuy = (a?: Avail | null) => !!a && (a.state === "agotado" || (a.state === "consultar" && !!a.blocked));
 
 // ---------- marco de visor (esquinas tipo camara, como la landing) ----------
 export function Viewfinder({ children, label, right, live = false, className = "" }: { children: ReactNode; label?: string; right?: string; live?: boolean; className?: string }) {
@@ -209,16 +241,36 @@ export function ProductCard({ p, avail, n, eager = false }: { p: VProd; avail?: 
   );
 }
 
-export function Grid({ items, avail, eager = 0, numbered = false }: { items: VProd[]; avail?: Record<number, Avail>; eager?: number; numbered?: boolean }) {
+/** rail: en movil y tableta la fila se desliza de lado (scroll nativo con snap, cero JS); en escritorio es grilla de 4 */
+export function Grid({ items, avail, eager = 0, numbered = false, rail = false }: { items: VProd[]; avail?: Record<number, Avail>; eager?: number; numbered?: boolean; rail?: boolean }) {
   return (
-    <ul className="vt-grid">
+    <ul className={`vt-grid${rail ? " vt-grid--rail" : ""}`}>
       {items.map((p, i) => <li key={p.id}><ProductCard p={p} avail={avail?.[p.id]} eager={i < eager} n={numbered ? i + 1 : undefined} /></li>)}
     </ul>
   );
 }
 
-export function Skeleton({ n = 8 }: { n?: number }) {
-  return <ul className="vt-grid" aria-hidden="true">{Array.from({ length: n }, (_, i) => <li key={i}><div className="sh-skel" style={{ aspectRatio: "3/4.4" }} /></li>)}</ul>;
+/** esqueleto con la misma geometria que la tarjeta real: cuando llegan los productos nada salta */
+export function Skeleton({ n = 8, rail = false }: { n?: number; rail?: boolean }) {
+  return (
+    <ul className={`vt-grid${rail ? " vt-grid--rail" : ""}`} aria-hidden="true">
+      {Array.from({ length: n }, (_, i) => (
+        <li key={i}>
+          <div className="vt-card vt-card--skel">
+            <div className="vt-card__media"><div className="vt-vf sh-skel" /></div>
+            <div className="vt-card__body">
+              <span className="sh-skel" style={{ height: 10, width: "45%" }} />
+              <span className="sh-skel" style={{ height: 14, width: "92%" }} />
+              <span className="sh-skel" style={{ height: 14, width: "70%" }} />
+              <span className="sh-skel" style={{ height: 12, width: "38%" }} />
+              <div className="vt-card__foot"><span className="sh-skel" style={{ height: 22, width: "48%" }} /><span className="sh-skel" style={{ height: 44, width: 44, borderRadius: "50%" }} /></div>
+              <span className="sh-skel" style={{ height: 16, width: "34%", margin: "8px 0" }} />
+            </div>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 export function Crumbs({ items }: { items: { name: string; path?: string }[] }) {
