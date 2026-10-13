@@ -50,6 +50,7 @@ const Contracts = lazy(() => import("./modules/support/Contracts"));
 const Commissions = lazy(() => import("./modules/support/Commissions"));
 const Archive = lazy(() => import("./modules/tools/Archive"));
 const AccessRequests = lazy(() => import("./modules/clientaccess/AccessRequests"));
+const Vehicles = lazy(() => import("./modules/vehicles/Vehicles"));
 const RequestAccess = lazy(() => import("./modules/auth/RequestAccess"));
 // Portal del cliente: su propio layout y su propio menu (nunca el panel interno)
 const ClientShell = lazy(() => import("./modules/cliente/ClientShell"));
@@ -145,6 +146,7 @@ function App() {
         <Route path="/contabilidad" element={g("accounting.ver", <Accounting />)} />
         <Route path="/ajustes" element={<Settings />} />
         <Route path="/accesos-clientes" element={g("portal_clientes.ver", <AccessRequests />)} />
+        <Route path="/vehiculos" element={g("vehicles.ver", <Vehicles />)} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
       )}

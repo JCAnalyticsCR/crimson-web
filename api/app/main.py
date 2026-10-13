@@ -19,6 +19,7 @@ from .routers import (
     client_portal,
     core,
     crm_extra,
+    data_export,
     events,
     fieldwork,
     imports,
@@ -37,6 +38,7 @@ from .routers import (
     store,
     support,
     support_desk,
+    vehicles,
     webhooks,
 )
 from .routers import settings as settings_router
@@ -103,6 +105,8 @@ def create_app() -> FastAPI:
     app.include_router(public_access.router)
     app.include_router(client_access.router)
     app.include_router(client_portal.router)
+    app.include_router(vehicles.router)
+    app.include_router(data_export.router)
     return app
 
 

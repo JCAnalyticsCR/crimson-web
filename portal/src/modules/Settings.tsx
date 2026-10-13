@@ -6,6 +6,7 @@ import { useSession } from "../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../ui/components";
 import { ImageField } from "../ui/MediaPicker";
 import { SlaSettings } from "./support/SlaTable";
+import DataExport from "./tools/DataExport";
 
 type Group = { id: number; doc_type: string; prefix: string; branch: string; terminal: string; current: number; is_default: boolean };
 type Cfg = { labor_day_cost?: number; labor_day_cost_civil?: number; labor_day_cost_contratado?: number; per_diem_cost?: number; travel_cost?: number; max_discount_pct?: number; archive_purge_days?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; notify_due: boolean; remind_days_before: number; daily_close_email: boolean; bcc: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
@@ -14,7 +15,7 @@ type Users = { users: { id: number; email: string; name: string; role: string; a
 type Gw = { id: number; provider: string; client_id: string | null; secret_mask: string | null; is_primary: boolean; active: boolean; mode: string };
 type Mail = { id: number; to: string; subject: string; status: string; entity: string | null; entity_id: number | null; created_at: string; error: string | null };
 
-const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["pagos", "Pagos y cobros"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"], ["bandeja", "Bandeja XML"], ["sla", "SLA"], ["soporte", "Soporte"], ["api", "API"]];
+const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["pagos", "Pagos y cobros"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"], ["bandeja", "Bandeja XML"], ["sla", "SLA"], ["soporte", "Soporte"], ["api", "API"], ["respaldo", "Respaldo"]];
 
 export default function Settings() {
   const { me, reload, toast, allows } = useSession();
@@ -227,6 +228,7 @@ export default function Settings() {
       {tab === "bandeja" && <InboxSettings />}
       {tab === "sla" && <SlaSettings />}
       {tab === "soporte" && <SupportAccess />}
+      {tab === "respaldo" && <DataExport />}
 
       {recovery && (
         <Modal

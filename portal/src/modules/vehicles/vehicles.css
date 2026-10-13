@@ -1,0 +1,45 @@
+/* Vehiculos y combustible: estilos propios del modulo (nada global). */
+.veh-note { display: flex; gap: 10px; align-items: flex-start; background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); border-radius: var(--r); padding: 10px 14px; font-size: 13px; color: var(--text-2); line-height: 1.5; }
+.veh-note b { color: var(--text); }
+.veh-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.veh-filters .field { margin: 0; min-width: 0; flex: 1 1 140px; max-width: 220px; }
+.veh-filters .field--grow { max-width: none; flex: 2 1 200px; }
+.veh-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+.veh-kpi { background: var(--surface); border: 1px solid var(--hair); border-radius: var(--r-lg); padding: 14px 16px; min-width: 0; }
+.veh-kpi span { display: block; font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--text-3); }
+.veh-kpi b { display: block; font-family: var(--display); font-size: 22px; letter-spacing: -.02em; margin-top: 6px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.veh-kpi small { display: block; color: var(--text-3); font-size: 11.5px; margin-top: 4px; }
+.veh-kpi--ref { border-style: dashed; }
+.veh-chart { width: 100%; height: auto; display: block; }
+.veh-chart text { font-family: var(--mono); font-size: 10px; fill: var(--text-3); }
+.veh-chart .bar { fill: var(--crimson); }
+.veh-chart .bar--partial { fill: url(#veh-hatch); stroke: var(--crimson); stroke-width: 1; }
+.veh-chart .ref { stroke: var(--info); stroke-dasharray: 5 4; stroke-width: 1.5; }
+.veh-chart .ref-label { fill: var(--info); }
+.veh-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-3); padding: 0 4px 6px; }
+.veh-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; }
+.veh-scroll { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
+.veh-scroll .table { min-width: 720px; }
+.veh-scroll .table th, .veh-scroll .table td { padding: 10px 12px; }
+.veh-nowrap { white-space: nowrap; }
+.veh-row--off td { opacity: .55; }
+.veh-row--off td.veh-why { opacity: 1; }
+.veh-tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.veh-tag--off { background: var(--bad-soft); color: var(--bad); }
+.veh-tag--ok { background: var(--ok-soft); color: var(--ok); }
+.veh-tag--warn { background: var(--warn-soft); color: var(--warn); }
+.veh-tag--muted { background: var(--surface-2); color: var(--text-3); border: 1px solid var(--hair); }
+.veh-share { display: flex; align-items: center; gap: 8px; min-width: 120px; }
+.veh-share i { display: block; height: 6px; border-radius: 3px; background: var(--crimson); }
+.veh-why { font-size: 12px; color: var(--text-3); min-width: 150px; max-width: 280px; }
+.veh-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.veh-tabs button { border: 1px solid var(--hair-2); background: var(--surface); color: var(--text-2); border-radius: 999px; padding: 7px 14px; font-weight: 600; font-size: 13px; cursor: pointer; }
+.veh-tabs button.is-active { background: var(--ink); color: #fff; border-color: var(--ink); }
+.veh-warn { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text-2); line-height: 1.6; }
+.veh-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.veh-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+@media (max-width: 640px) {
+  .veh-filters .field { max-width: none; flex: 1 1 45%; }
+  .veh-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .veh-kpi b { font-size: 18px; }
+}

@@ -47,3 +47,9 @@ imagenes seleccionadas/
 # requerimientos y material de negocio del cliente: nunca al repo publico
 Requerimientos_para_JC_Analytics.md
 *.local.md
+
+# respaldos de la base (app.tools.backup / Ajustes -> Respaldo): datos personales, nunca al repo
+respaldos/
+crimson-respaldo-*.zip
+crimson-datos-*.zip
+*.pgdump

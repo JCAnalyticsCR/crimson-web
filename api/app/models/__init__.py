@@ -64,6 +64,7 @@ from .support import (
     SupportNote,
     SupportTicket,
 )
+from .vehicles import FuelLoad, Vehicle, VehicleCost
 
 __all__ = [
     "TenantMixin",
@@ -139,4 +140,7 @@ __all__ = [
     "MaintenanceContract",
     "CommissionRule",
     "Commission",
+    "Vehicle",
+    "FuelLoad",
+    "VehicleCost",
 ]

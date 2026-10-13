@@ -62,6 +62,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "reports": ["ver", "exportar"],
         # ve las solicitudes de acceso que le llegan por correo; aprobar (dar acceso a datos) queda para el admin
         "portal_clientes": ["ver"],
+        "vehicles": ["ver"],
     },
     # Tecnico instalador: solo lo asignado, desde el celular. Nunca ve precios ni costos.
     "tecnico": {
@@ -96,6 +97,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "commissions": ["ver", "ver_todo", "aprobar"],
         "support_desk": ["ver", "ver_todo"],
         "reports": ["ver", "exportar"],
+        "vehicles": ["ver", "crear", "editar", "exportar"],
     },
     # Solo lectura (socio, auditor): ve ventas y cobros de la empresa sin modificar nada. Sin gastos ni planillas.
     "lectura": {
