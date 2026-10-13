@@ -35,7 +35,8 @@ export default function LoQueViene() {
   useEffect(() => {
     document.title = "Lo que viene · Propuestas · Tienda Crimson (vista previa)";
     window.scrollTo(0, 0);
-    h1.current?.focus({ preventScroll: true });
+    // con ?resumen=1 el dialogo ya tomo el foco (los efectos del hijo corren antes): no se lo quitamos
+    if (sp.get("resumen") !== "1") h1.current?.focus({ preventScroll: true });
     if (sp.get("ver") === "base") {
       setTodasH(true);
       window.setTimeout(() => document.getElementById("lqv-base")?.scrollIntoView({ block: "start" }), 60);
@@ -44,7 +45,10 @@ export default function LoQueViene() {
 
   const poner = (k: string, v: string | null) => setSp((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
   const abrirResumen = () => { abridor.current = document.activeElement as HTMLElement | null; poner("resumen", "1"); };
-  const cerrarResumen = () => { poner("resumen", null); window.setTimeout(() => abridor.current?.focus({ preventScroll: true }), 0); };
+  const cerrarResumen = () => {
+    poner("resumen", null);
+    window.setTimeout(() => { const a = abridor.current; (a && a.isConnected ? a : h1.current)?.focus({ preventScroll: true }); }, 0);
+  };
 
   const pasa = (p: Propuesta) => (filtro === "maqueta" ? conMaquetaPropia(p) : filtro === "interes" ? interes.tiene(p.id) : true);
   const grupos = useMemo(() => {
@@ -242,10 +246,13 @@ function DialogoResumen({ onCerrar }: { onCerrar: () => void }) {
   const texto = construirResumen(interes.ids, notas, rent);
 
   useEffect(() => { almacen.local.set(CLAVES.notas, notas.slice(0, 1000)); }, [notas]);
+  // onCerrar cambia en cada pintada del padre: se lee de una ref para no repetir el foco inicial
+  const cerrarRef = useRef(onCerrar);
+  useEffect(() => { cerrarRef.current = onCerrar; });
   useEffect(() => {
     titulo.current?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.preventDefault(); onCerrar(); return; }
+      if (e.key === "Escape") { e.preventDefault(); cerrarRef.current(); return; }
       if (e.key !== "Tab" || !caja.current) return;
       const f = Array.from(caja.current.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), textarea, input"));
       if (!f.length) return;
@@ -258,7 +265,7 @@ function DialogoResumen({ onCerrar }: { onCerrar: () => void }) {
     const prev = html.style.overflow;
     html.style.overflow = "hidden";
     return () => { document.removeEventListener("keydown", onKey); html.style.overflow = prev; };
-  }, [onCerrar]);
+  }, []);
 
   const copiar = async () => {
     setMsg(null);

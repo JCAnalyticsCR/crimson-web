@@ -51,7 +51,8 @@ export type PedidoDemo = {
 
 /** Aviso interno (capa) de que un pedido de prueba cambio: lo escucha el control de «Mi pedido». */
 export const EVENTO_PEDIDOS = "crimson-demo:pedidos-cambio";
-export const avisarCambioPedidos = () => { try { window.dispatchEvent(new CustomEvent(EVENTO_PEDIDOS)); } catch { /* sin ventana */ } };
+export type CambioPedido = { token?: string; estado?: string };
+export const avisarCambioPedidos = (detail: CambioPedido = {}) => { try { window.dispatchEvent(new CustomEvent<CambioPedido>(EVENTO_PEDIDOS, { detail })); } catch { /* sin ventana */ } };
 
 /** Etiquetas reales de estado (api/app/services/store_orders.py, STATUS_LABEL). */
 export const ETIQUETA_ESTADO: Record<string, string> = {
@@ -68,7 +69,7 @@ export function borrarEstado(token: string) {
   if (!(token in all)) return;
   delete all[token];
   almacen.sesion.set(CLAVES.estados, JSON.stringify(all));
-  avisarCambioPedidos();
+  avisarCambioPedidos({ token });
 }
 
 /** Superpone el estado escrito por «Detrás de escena» sobre el pedido guardado (lo usa mockApi y leerPedidosDemo). */
@@ -123,5 +124,5 @@ export function escribirEstadoDemo(token: string, e: EstadoDemo): void {
   const all = leerEstados();
   all[token] = e;
   almacen.sesion.set(CLAVES.estados, JSON.stringify(all));
-  avisarCambioPedidos();
+  avisarCambioPedidos({ token, estado: e.status });
 }

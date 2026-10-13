@@ -7,8 +7,9 @@
    Pantalla de trabajo: nada se anima. */
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { EVENTOS } from "../registro";
 import { HiloCarmesi } from "../_comun/componentes";
-import { ETIQUETA_ESTADO, EVENTO_PEDIDOS, leerPedidosDemo } from "../_comun/pedidos";
+import { ETIQUETA_ESTADO, EVENTO_PEDIDOS, leerPedidosDemo, type CambioPedido } from "../_comun/pedidos";
 
 export const ESTADOS_EJEMPLO = ["nuevo", "en_revision", "pagado", "preparando", "enviado", "entregado"] as const;
 type EstadoEjemplo = (typeof ESTADOS_EJEMPLO)[number];
@@ -69,25 +70,47 @@ function Tarjeta({ titulo, resumen, children }: { titulo: string; resumen: strin
   );
 }
 
-function ControlEjemplo({ estado }: { estado: EstadoEjemplo }) {
+function ControlEjemplo({ estado: enRuta }: { estado: EstadoEjemplo }) {
   const navigate = useNavigate();
+  // subir un comprobante sobre el ejemplo «Pendiente de pago» lo deja en revision sin cambiar la ruta
+  const [visto, setVisto] = useState<EstadoEjemplo | null>(null);
+  useEffect(() => { setVisto(null); }, [enRuta]);
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<CambioPedido>).detail || {};
+      if (d.token === `ejemplo-${enRuta}` && (ESTADOS_EJEMPLO as readonly string[]).includes(d.estado || "")) setVisto(d.estado as EstadoEjemplo);
+    };
+    window.addEventListener(EVENTO_PEDIDOS, on);
+    return () => window.removeEventListener(EVENTO_PEDIDOS, on);
+  }, [enRuta]);
+  const estado = visto ?? enRuta;
   const i = ESTADOS_EJEMPLO.indexOf(estado);
+  // misma ruta, otro estado en pantalla: se vuelve a montar la tienda para releer el pedido. Solo si el carrito vive en
+  // localStorage (con el almacenamiento bloqueado, volver a montar vaciaria el carrito en memoria).
+  const volverAlEstado = () => {
+    let ok = false;
+    try { localStorage.setItem("crimson-demo:prueba", "1"); localStorage.removeItem("crimson-demo:prueba"); ok = true; } catch { ok = false; }
+    if (!ok) return;
+    setVisto(null);
+    window.dispatchEvent(new CustomEvent(EVENTOS.recargarTienda));
+  };
   const ir = (k: EstadoEjemplo) => navigate(`/?pedido=ejemplo-${k}`, { replace: true });
+  const irA = (k: EstadoEjemplo) => (k !== enRuta ? ir(k) : visto ? volverAlEstado() : undefined);
   return (
     <Tarjeta titulo="Pedido de ejemplo · ORD-000128" resumen={ETIQUETA_ESTADO[estado]}>
       <p className="cap-control__sub">Así lo ve María, la clienta. Recorré cada estado:</p>
       <ol className="cap-estados" aria-label="Estados del pedido de ejemplo">
         {ESTADOS_EJEMPLO.map((k, n) => (
           <li key={k}>
-            <button type="button" aria-current={k === estado ? "step" : undefined} data-hecho={n < i ? "" : undefined} onClick={() => ir(k)}>
+            <button type="button" aria-current={k === estado ? "step" : undefined} data-hecho={n < i ? "" : undefined} onClick={() => irA(k)}>
               <span aria-hidden="true">{n + 1}</span>{ETIQUETA_ESTADO[k]}
             </button>
           </li>
         ))}
       </ol>
       <div className="cap-control__nav">
-        <button type="button" className="cap-btn cap-btn--fantasma" disabled={i === 0} onClick={() => ir(ESTADOS_EJEMPLO[i - 1])}>← Estado anterior</button>
-        <button type="button" className="cap-btn cap-btn--claro" disabled={i === ESTADOS_EJEMPLO.length - 1} onClick={() => ir(ESTADOS_EJEMPLO[i + 1])}>Estado siguiente →</button>
+        <button type="button" className="cap-btn cap-btn--fantasma" disabled={i === 0} onClick={() => irA(ESTADOS_EJEMPLO[i - 1])}>← Estado anterior</button>
+        <button type="button" className="cap-btn cap-btn--claro" disabled={i === ESTADOS_EJEMPLO.length - 1} onClick={() => irA(ESTADOS_EJEMPLO[i + 1])}>Estado siguiente →</button>
       </div>
       <p className="cap-control__pie" aria-live="polite">{PIE[estado]}{estado === "entregado" && <> <Link to="/propuestas/b1">Ver la maqueta B1 →</Link></>}</p>
       <Link className="cap-control__crimson" to={`/detras-de-escena/pedidos?pedido=ORD-000128&estado=${estado}`}>Ver este pedido como lo ve Crimson →</Link>

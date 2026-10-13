@@ -63,7 +63,7 @@ const orders = {
 };
 const memOrders = new Map<string, DemoOrder>();
 const pedidoDemo = (t: string): DemoOrder | null => memOrders.get(t) || orders.get(t);
-const guardar = (o: DemoOrder) => { memOrders.set(o.token, o); orders.put(o); avisarCambioPedidos(); };
+const guardar = (o: DemoOrder) => { memOrders.set(o.token, o); orders.put(o); avisarCambioPedidos({ token: o.token, estado: String(o.status) }); };
 const crc = (n: number) => new Intl.NumberFormat("es-CR", { style: "currency", currency: "CRC", currencyDisplay: "narrowSymbol", maximumFractionDigits: 0 }).format(n);
 
 function quote(c: Catalog, body: Record<string, unknown>) {
@@ -272,6 +272,7 @@ async function route(path: string, sp: URLSearchParams, method: string, init?: R
       if (!ej) return fail(404, "No encontramos ese pedido.");
       if (t === "ejemplo-nuevo") ej.proofs = [comprobante];
       aviso();
+      avisarCambioPedidos({ token: t, estado: "en_revision" }); // el control del pedido de ejemplo pasa a «Comprobante en revisión»
       return json(ej);
     }
     const o = t.startsWith("demo-") ? pedidoDemoVigente(t) : null;

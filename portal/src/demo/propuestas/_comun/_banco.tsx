@@ -1,6 +1,6 @@
 // _banco.tsx — SOLO desarrollo (vite build de la demo toma unicamente src/demo/index.html).
 // Muestra las piezas de _comun con datos de ejemplo, como referencia para los equipos:
-//   cd portal && npx vite --port 5240  →  http://localhost:5240/src/demo/propuestas/_comun/_banco.html
+//   cd portal && npx vite --port 5240  y abrir localhost:5240/src/demo/propuestas/_comun/_banco.html
 import { StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter, Link, Navigate, Route, Routes } from "react-router-dom";

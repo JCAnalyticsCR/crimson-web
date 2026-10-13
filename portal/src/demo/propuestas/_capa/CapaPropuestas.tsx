@@ -81,8 +81,12 @@ export default function CapaPropuestas({ etiquetas }: { etiquetas: Etiqueta[] })
     return () => { mo.disconnect(); cancelAnimationFrame(raf); window.clearTimeout(tm); window.clearTimeout(respaldo); window.clearTimeout(fin); };
   }, [candidatas, st.activa]);
 
-  // ---------- cambiar de ruta cierra la ficha
+  // ---------- cambiar de ruta cierra la ficha; tambien si su objetivo desaparece (p. ej. otro paso del pago)
   useEffect(() => { if (getCapa().abierta) cerrarFicha(); }, [loc.pathname, loc.search]);
+  useEffect(() => {
+    const ab = getCapa().abierta;
+    if (ab && !st.marcas.some((m) => m.e.id === ab)) cerrarFicha();
+  }, [st.marcas]);
 
   // ---------- contorno de los objetivos
   useEffect(() => {
@@ -246,7 +250,8 @@ export function ControlesCapa() {
         </nav>
       )}
       {conInterruptor && (
-        <button type="button" role="switch" aria-checked={st.activa} className="cap-switch" onClick={() => setActiva(!st.activa)}>
+        <button type="button" role="switch" aria-checked={st.activa} className="cap-switch" onClick={() => setActiva(!st.activa)}
+          aria-label={`Ver propuestas${!st.activa && nProp > 0 ? `, ${nProp} en esta pantalla` : ""}`}>
           {st.activa ? (
             <><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>Ocultar<span className="cap-sr"> propuestas</span></>
           ) : (
