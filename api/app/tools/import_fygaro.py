@@ -52,10 +52,18 @@ def _print(report: dict) -> None:
         f" · sin CABYS {s['sin_cabys']} · fotos {s['fotos']} · monedas {', '.join(s['monedas']) or '-'}"
     )
     print(f"terminos y privacidad de la tienda: {s['legal']}")
+    print(
+        f"revisar IVA {s.get('revisar_iva', 0)} (0 %: {s.get('iva_cero', 0)} · tarifa rara o sin dato, NO se publican: {s.get('iva_raro', 0)})"
+        f" · subcategorias usadas {s.get('subcategorias', 0)}"
+    )
+    print("disponibilidad: NO se importa de Fygaro; la tienda la calcula del inventario propio")
     if s["aplicado"]:
         print(f"fotos subidas {s.get('images_uploaded', 0)} · reutilizadas {s.get('images_reused', 0)} · no encontradas {s.get('images_missing', 0)}")
+        for f in (s.get("fotos_fallidas") or [])[:200]:
+            print(f"  foto fallida · {f['code']:<24} {f['name'][:50]:<50} · {f['motivo']} · {f['url']}")
     rows = report["rows"]
     for title, pick in (
+        ("Revisar IVA", lambda r: r.get("iva_review")),
         ("Errores y omitidos", lambda r: r["action"] in ("error", "omitir")),
         ("Dudosos (revisar antes de aplicar)", lambda r: r["doubtful"] and r["action"] not in ("error", "omitir")),
     ):

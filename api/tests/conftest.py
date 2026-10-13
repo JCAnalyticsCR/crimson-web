@@ -40,10 +40,12 @@ def client(db_session):
     from app.core.ratelimit import (
         access_request_global_limiter,
         access_request_limiter,
+        catalog_limiter,
         incident_global_limiter,
         incident_limiter,
         login_limiter,
         public_limiter,
+        stock_alert_limiter,
     )
 
     login_limiter.reset()
@@ -52,6 +54,8 @@ def client(db_session):
     incident_global_limiter.reset()
     access_request_limiter.reset()
     access_request_global_limiter.reset()
+    catalog_limiter.reset()
+    stock_alert_limiter.reset()
     app = create_app()
     app.dependency_overrides[get_db] = lambda: db_session
     return TestClient(app)

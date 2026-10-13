@@ -59,7 +59,7 @@ from .ops import (
 )
 from .payments import BankAccount, Payment, PaymentLink
 from .sales import BillingGroup, Invoice, InvoiceLine, Quote, QuoteAcceptance, QuoteLine, QuoteVersion
-from .store import ApiCredential, Coupon, Order, OrderLine, ReceivedDocument, StorePage
+from .store import ApiCredential, Coupon, Order, OrderLine, ReceivedDocument, StorePage, StoreStockAlert
 from .support import (
     Commission,
     CommissionRule,
@@ -111,6 +111,7 @@ __all__ = [
     "WebhookEvent",
     "PaymentGatewayConfig",
     "StorePage",
+    "StoreStockAlert",
     "Coupon",
     "Order",
     "OrderLine",

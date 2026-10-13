@@ -44,6 +44,7 @@ from .routers import (
 )
 from .routers import bitacora as bitacora_router
 from .routers import settings as settings_router
+from .routers import store_inventory as store_inventory_router
 
 log = logging.getLogger("crimson")
 
@@ -86,6 +87,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_router.router)
     app.include_router(webhooks.router)
     app.include_router(store.router)
+    app.include_router(store_inventory_router.router)
     app.include_router(reception.router)
     app.include_router(public_api.admin)
     app.include_router(public_api.v1)

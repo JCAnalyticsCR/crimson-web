@@ -7,6 +7,7 @@ import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { Dropzone } from "../../ui/MediaPicker";
 import AuthLink from "../../ui/AuthLink";
+import WebInventory from "./WebInventory";
 
 type Wh = { id: number; name: string; location: string | null; is_default: boolean; active: boolean };
 type Level = { product_id: number; warehouse_id: number; quantity: string; code: string; name: string; min_stock: number; warehouse: string; committed?: string; available?: string; serialized?: boolean };
@@ -99,7 +100,7 @@ export default function Inventory() {
       </div>
 
       <div className="tabs" style={{ alignSelf: "flex-start" }} role="tablist">
-        {[["existencias", "Existencias"], ["reservas", "Reservas"], ["seriales", "Seriales"]].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "is-active" : ""} onClick={() => setTab(k)}>{l}</button>)}
+        {[["existencias", "Existencias"], ["reservas", "Reservas"], ["seriales", "Seriales"], ["web", "Inventario web"]].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "is-active" : ""} onClick={() => setTab(k)}>{l}</button>)}
       </div>
 
       {tab === "existencias" && <>
@@ -135,6 +136,7 @@ export default function Inventory() {
 
       {tab === "reservas" && <Reservations products={products} whs={whs} projects={projects} onChange={load} />}
       {tab === "seriales" && <Units products={products} whs={whs} projects={projects} onChange={load} />}
+      {tab === "web" && <WebInventory />}
 
       {modal === "move" && (
         <Modal title="Movimiento de inventario" onClose={() => setModal(null)} foot={<><button className="btn btn--ghost" onClick={() => setModal(null)}>Cancelar</button><button className="btn btn--crimson" onClick={submit}>Registrar</button></>}>

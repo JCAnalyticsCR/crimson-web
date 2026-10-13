@@ -258,7 +258,8 @@ class PurchaseRequest(TenantMixin, TimestampMixin, Base):
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("supplier.id"))
     project_id: Mapped[int | None] = mapped_column(ForeignKey("project.id"))
     status: Mapped[str] = mapped_column(String(16), default="borrador", index=True)  # borrador | solicitada | recibida | cancelada
-    reason: Mapped[str] = mapped_column(String(200), default="stock_bajo")  # stock_bajo | proyecto | manual
+    reason: Mapped[str] = mapped_column(String(200), default="stock_bajo")  # stock_bajo | proyecto | manual | pedido_web
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("order.id", name="fk_purchase_request_order"), index=True)  # pedido web bajo pedido
     total_cost: Mapped[float] = mapped_column(Numeric(16, 2), default=0)
     currency: Mapped[str] = mapped_column(String(3), default="USD")
     notes: Mapped[str | None] = mapped_column(Text)

@@ -16,7 +16,7 @@ from ..core.ratelimit import public_limiter
 from ..models import Category, Coupon, Customer, Invoice, Order, OrderLine, Product, ProductVariant, StorePage, Tenant
 from ..schemas.sales import DocumentIn, LineInSchema
 from ..services import documents as docsvc
-from ..services import inventory as inv
+from ..services import store_inventory as sinv
 from ..services.documents import audit
 from ..services.sequences import next_number
 from ..services.totals import LineIn, compute_document, d
@@ -277,11 +277,14 @@ def order_status(oid: int, data: OrderStatusIn, p: Principal = Depends(require("
     o = db.get(Order, oid)
     if not o or o.tenant_id != p.tenant.id:
         raise HTTPException(404, "Orden no encontrada")
+    antes = o.status
     o.status = data.status
     from .events import on_order_status
 
     tickets = on_order_status(db, o, data.status)  # entradas de evento: pagado activa y envia, cancelado anula
-    audit(db, p.tenant.id, p.user.id, "status", "order", o.id, {"status": data.status, "tickets": tickets}, ip=p.ip)
+    # inventario de la tienda: pagado fija la reserva, enviado/entregado descuenta (una vez), cancelado libera
+    stock = sinv.on_order_status(db, o, antes, data.status, p.user.id)
+    audit(db, p.tenant.id, p.user.id, "status", "order", o.id, {"status": data.status, "tickets": tickets, "inventario": str(stock or "")}, ip=p.ip)
     db.commit()
     return _order_out(o)
 
@@ -329,7 +332,8 @@ def order_to_invoice(oid: int, doc_type: str = "TE", p: Principal = Depends(requ
         ],
     )
     invoice = docsvc.create_invoice(db, p.tenant.id, p.user.id, payload, doc_type)
-    inv.deduct_for_invoice(db, invoice, p.user.id)
+    # pedido viejo: como siempre; con reservas o ya despachado: desde la bodega reservada y sin doble descuento
+    sinv.deduct_for_order_invoice(db, o, invoice, p.user.id)
     o.invoice_id = invoice.id
     if o.status == "nuevo":
         o.status = "preparando"
@@ -359,14 +363,9 @@ def _variants(db: Session, product_ids: list[int]) -> dict[int, list[dict]]:
     return out
 
 
-def _stock_of(db: Session, tenant_id: int, product_ids: list[int]) -> dict[int, Decimal]:
-    from ..services import inventory as inv_svc
-
-    out: dict[int, Decimal] = {}
-    for lv in inv_svc.stock_levels(db, tenant_id):
-        if lv["product_id"] in product_ids:
-            out[lv["product_id"]] = out.get(lv["product_id"], Decimal(0)) + lv["quantity"]
-    return out
+def _stock_of(db: Session, tenant_id: int, product_ids: list[int]) -> dict[int, dict]:
+    """Disponibilidad web real por producto (bodegas web - reservas; ver services/store_inventory)."""
+    return sinv.availability(db, tenant_id, product_ids)
 
 
 class Pricer:
@@ -409,8 +408,9 @@ def _prod_pub(
         "id": p.id,
         "code": p.code,
         "name": p.name,
-        "price": p.price,
+        "price": sinv.web_price(p),
         "currency": p.currency,
+        "featured": bool(p.web_featured),
         "description": desc,
         "image": main,
         "images": [i.get("url") for i in (p.images or [])],
@@ -419,19 +419,21 @@ def _prod_pub(
         "brand": p.brand,
         "tax_rate": rate,
         "item_type": p.item_type,
-        "variants": [{**v, "price": v["price"] if v["price"] is not None else p.price} for v in (variants or [])],
+        "variants": [{**v, "price": v["price"] if v["price"] is not None else sinv.web_price(p)} for v in (variants or [])],
         "availability": _availability(p, stock if stock is not None else Decimal(0)),
     }
     if pricer is not None:
         # precio final al consumidor: en la moneda de la tienda y CON IVA (asi se exhibe en Costa Rica)
         out["display_currency"] = pricer.currency
-        out["display_price"] = _gross(pricer(p.price, p.currency), rate)
+        out["display_price"] = _gross(pricer(sinv.web_price(p), p.currency), rate)
         for v in out["variants"]:
             v["display_price"] = _gross(pricer(v["price"], p.currency), rate)
     return out
 
 
-def _availability(p: Product, own: Decimal) -> dict:
+def _availability(p: Product, own) -> dict:
+    if isinstance(own, dict):  # ya viene calculada por store_inventory
+        return own
     from .catalog import store_availability
 
     return store_availability(p, own)
@@ -461,11 +463,32 @@ def store_home(slug: str, db: Session = Depends(get_db)):
             select(Product.category_id, func.count()).where(Product.tenant_id == t.id, Product.active, Product.show_on_web).group_by(Product.category_id)
         ).all()
     )
+    # subcategorias (Fygaro: categoria > subcategoria): el conteo de la madre suma el de sus hijas
+    kids: dict[int | None, list] = {}
+    for c in cats:
+        kids.setdefault(c.parent_id, []).append(c)
+    rolled: dict[int, int] = {}
+
+    def total(c) -> int:
+        if c.id not in rolled:
+            rolled[c.id] = counts.get(c.id, 0) + sum(total(k) for k in kids.get(c.id, []))
+        return rolled[c.id]
+
+    shown = {c.id for c in cats}
     return {
         "store": {k: cfg[k] for k in ("name", "tagline", "logo_url", "primary", "secondary", "font", "kind", "whatsapp", "currency", "legal")},
         "nav": [{"slug": pg.slug, "title": pg.title} for pg in pages if pg.in_nav],
         # solo categorias con productos publicados (una categoria vacia en el menu es un callejon sin salida)
-        "categories": [{"id": c.id, "name": c.name, "count": counts.get(c.id, 0)} for c in cats if counts.get(c.id)],
+        "categories": [
+            {
+                "id": c.id,
+                "name": c.name,
+                "count": total(c),
+                "subcategories": [{"id": k.id, "name": k.name, "count": total(k)} for k in kids.get(c.id, []) if total(k)],
+            }
+            for c in cats
+            if (c.parent_id is None or c.parent_id not in shown) and total(c)
+        ],
         "product_count": sum(counts.values()),
         # las tarifas se configuran en colones (Mi Tienda -> "Base ₡"); display_amount = en la moneda de la tienda, con IVA
         "shipping_rates": [{**r, "display_amount": _gross(pricer(r.get("amount") or 0, "CRC"), 13)} for r in cfg["shipping_rates"] if r.get("active")],
@@ -480,6 +503,15 @@ def store_page(slug: str, page_slug: str, db: Session = Depends(get_db)):
     if not pg:
         raise HTTPException(404, "Página no encontrada")
     return _page_out(pg)
+
+
+def _category_and_children(db: Session, tenant_id: int, category_id: int) -> set[int]:
+    pairs = db.execute(select(Category.id, Category.parent_id).where(Category.tenant_id == tenant_id)).all()
+    out, frontier = {category_id}, {category_id}
+    while frontier:
+        frontier = {cid for cid, parent in pairs if parent in frontier and cid not in out}
+        out |= frontier
+    return out
 
 
 def _cat_names(db: Session, tenant_id: int) -> dict[int, str]:
@@ -504,17 +536,18 @@ def store_products(
 
     t = _tenant(db, slug)
     stmt = select(Product).where(Product.tenant_id == t.id, Product.active, Product.show_on_web)
-    if category_id:
-        stmt = stmt.where(Product.category_id == category_id)
+    if category_id:  # la categoria y sus subcategorias
+        stmt = stmt.where(Product.category_id.in_(_category_and_children(db, t.id, category_id)))
     rows = list(db.scalars(stmt.order_by(Product.name)).all())
     cats = _cat_names(db, t.id)
     if q and q.strip():
         words = [w for w in norm(q).split("_") if w]
         hay = {p.id: "_" + norm(" ".join(x or "" for x in (p.name, p.code, p.brand, p.model, cats.get(p.category_id)))) + "_" for p in rows}
         rows = [p for p in rows if all(w in hay[p.id] for w in words)]
+    rows = sinv.visible(db, t, rows)  # Ajustes de la tienda: agotados ocultos si asi se eligio
     pricer = Pricer(db, t)
     if sort in ("price_asc", "price_desc"):
-        rows.sort(key=lambda p: pricer(p.price, p.currency), reverse=sort == "price_desc")
+        rows.sort(key=lambda p: pricer(sinv.web_price(p), p.currency), reverse=sort == "price_desc")
     elif sort == "recent":
         rows.sort(key=lambda p: p.id, reverse=True)
     response.headers["X-Total-Count"] = str(len(rows))
@@ -600,8 +633,8 @@ def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
             v = variants.get(ln.variant_id)
             if not v or v.product_id != pr.id:
                 raise HTTPException(422, "Variante no disponible")
-            return pricer(v.price if v.price is not None else pr.price, pr.currency), f"{pr.name} · {v.name}"
-        return pricer(pr.price, pr.currency), pr.name
+            return pricer(v.price if v.price is not None else sinv.web_price(pr), pr.currency), f"{pr.name} · {v.name}"
+        return pricer(sinv.web_price(pr), pr.currency), pr.name
 
     gross = sum((d(ln.quantity) * unit_of(ln)[0] for ln in data.lines), Decimal(0))
     coupon = valid_coupon(db, t.id, data.coupon_code, gross)
@@ -711,7 +744,8 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, db: Session = 
     db.add(o)
     db.flush()
     audit(db, t.id, None, "create", "order", o.id, {"channel": "tienda", "total": str(o.total)})
-    db.commit()
+    # reserva atomica del inventario (hace commit; 409 "ya no hay suficiente" si Ajustes bloquea sin existencia)
+    hold = sinv.hold_for_order(db, o)
     return {
         "number": o.number,
         "total": o.total,
@@ -721,6 +755,10 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, db: Session = 
         "shipping_method": o.shipping_method,
         "instructions": next((m.get("instructions") for m in manual_methods(t) if m.get("name") == data.payment_method), None),
         "whatsapp": store_cfg(t)["whatsapp"],
+        "stock": {
+            "reserva_vence": hold["vence"],
+            "bajo_pedido": [{"name": b["name"], "quantity": b["quantity"], "plazo": b["plazo"]} for b in hold["bajo_pedido"]],
+        },
     }
 
 
