@@ -17,20 +17,22 @@ import { installMockApi } from "./mockApi";
 
 installMockApi();
 
-const PublicStore = lazy(() => import("../modules/store/PublicStore"));
+const PublicStore = lazy(() => loadStore());
 const FX_REF = 512; // el mismo de portal/scripts/demo_snapshot.py
 
 // Candado + bienvenida VIP (portal/src/demo/vip, otro frente de trabajo). Si ese modulo existe se usa VipGate;
 // si no, queda el candado simple de DemoGate. glob en vez de import fijo: el build no se rompe si falta.
-type GateMod = { VipGate?: ComponentType<{ children: ReactNode }>; default?: ComponentType<{ children: ReactNode }> };
+type GateProps = { children: ReactNode; guestName?: string; productPath?: string; router?: "hash" | "browser"; preload?: () => Promise<unknown> };
+type GateMod = { VipGate?: ComponentType<GateProps>; default?: ComponentType<GateProps> };
 const vip = Object.values(import.meta.glob<GateMod>("./vip/index.{ts,tsx}", { eager: true }))[0];
-const Gate: ComponentType<{ children: ReactNode }> = vip?.VipGate || vip?.default || DemoGate;
+const Gate: ComponentType<GateProps> = vip?.VipGate || vip?.default || DemoGate;
+const loadStore = () => import("../modules/store/PublicStore");
 
 const Spin = () => <div style={{ minHeight: "100dvh", display: "grid", placeItems: "center", background: "#f6f2ee" }}><span className="spinner" /></div>;
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Gate>
+    <Gate guestName="Andrés" productPath="/p/camara-bullet-easy-link-4mp-40" router="hash" preload={loadStore}>
       <HashRouter>
         <DemoShell fx={FX_REF}>
           <Suspense fallback={<Spin />}>
