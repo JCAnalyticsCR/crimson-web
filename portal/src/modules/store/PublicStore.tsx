@@ -1,14 +1,30 @@
-/* Vitrina publica: catalogo con categorias y buscador, ficha con fotos, carrito y pedido (o cotizacion por WhatsApp
-   cuando la tienda es solo catalogo). Sin sesion. Vive en /tienda/:slug del portal y, con dominio propio
+/* Vitrina publica: enrutador delgado. Vive en /tienda/:slug/* del portal y, con dominio propio
    (tienda.crimsoncr.com), en la raiz: ver StoreHost.tsx.
 
-   Estado en la URL (?p= producto, ?c= categoria, ?q= busqueda, ?orden=, ?v=pagar|cotizar, ?pg= pagina, ?legal=):
-   el boton atras funciona, los enlaces se comparten y Google ve cada ficha. Precios: los entrega el API ya en la
-   moneda de la tienda y CON IVA (display_price); el pedido lo cotiza el API con el mismo motor que la factura. */
-import { cloneElement, isValidElement, useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactElement, type ReactNode } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
-import { Blocks, type Block, type PubProduct } from "./Blocks";
+   Direcciones amigables: /  /catalogo  /c/<categoria>  /p/<nombre>-<id>  /buscar?q=  /arma-tu-sistema  /comparar
+   /asesoria  /info/<terminos|privacidad|envios|garantias|preguntas-frecuentes>  /pg/<pagina de bloques>.
+   Las de la version anterior (?p= ?c= ?q= ?legal= ?pg=) se redirigen a las nuevas.
+
+   Esta pieza solo arma la cabecera, el pie y las rutas. La vitrina vive en StoreHome / CategoryPage / ProductPage /
+   KitBuilder / StorePages; el carrito y el checkout (cajon, ?v=pagar|cotizar) siguen aqui abajo sin cambios y son
+   del modulo de pedidos. Precios: los entrega el API ya en la moneda de la tienda y CON IVA (display_price). */
+import { cloneElement, isValidElement, lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactElement, type ReactNode } from "react";
+import { Link, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { type PubProduct } from "./Blocks";
+import CategoryPage from "./CategoryPage";
+import Consent from "./Consent";
+import ProductPage from "./ProductPage";
+import StoreHome from "./StoreHome";
+import { catSlugs, safeStore, StoreProvider, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
 import "./shop.css";
+import "./vitrina.css";
+
+const KitBuilder = lazy(() => import("./KitBuilder"));
+const AdvisoryPage = lazy(() => import("./StorePages").then((m) => ({ default: m.AdvisoryPage })));
+const InfoPage = lazy(() => import("./StorePages").then((m) => ({ default: m.InfoPage })));
+const ComparePage = lazy(() => import("./StorePages").then((m) => ({ default: m.ComparePage })));
+const BlockPage = lazy(() => import("./StorePages").then((m) => ({ default: m.BlockPage })));
+const NotFound = lazy(() => import("./StorePages").then((m) => ({ default: m.NotFound })));
 
 type Cat = { id: number; name: string; count: number };
 type Home = {
@@ -22,12 +38,10 @@ type Home = {
 type Avail = { state: string; label: string };
 type Variant = { id: number; name: string; price: string | number; display_price?: string | number };
 type Prod = Omit<PubProduct, "variants"> & { code: string; category: string | null; category_id: number | null; brand: string | null; tax_rate: number; item_type: string; display_price: string | number; display_currency: string; availability: Avail; variants: Variant[] };
-type Detail = Prod & { related: Prod[] };
 type Line = { key: string; id: number; variant_id: number | null; name: string; image: string | null; price: number; currency: string; qty: number };
 type Quote = { subtotal: number; discount_total: number; tax_total: number; shipping: number; total: number; currency: string };
 type Done = { number: string; total: number; currency: string; instructions: string | null; whatsapp: string; lines?: { name: string; quantity: number; total: number }[] };
 
-const PAGE = 24;
 const money = (v: string | number, cur = "CRC") =>
   new Intl.NumberFormat("es-CR", { style: "currency", currency: cur, currencyDisplay: "narrowSymbol", minimumFractionDigits: cur === "CRC" ? 0 : 2, maximumFractionDigits: cur === "CRC" ? 0 : 2 }).format(Number(v) || 0);
 const wa = (phone: string, text: string) => `https://wa.me/${phone.replace(/\D/g, "")}?text=${encodeURIComponent(text)}`;
@@ -48,23 +62,25 @@ const IC = {
   x: "M6 6l12 12M18 6L6 18",
   back: "M15 18l-6-6 6-6",
   wa: "M3 21l1.6-4.7A8.5 8.5 0 1 1 7.7 19.4L3 21zM9 8.5c0 3.5 3 6.5 6.5 6.5l1-1.6-2-1-1 1c-1.2-.5-2.4-1.7-2.9-2.9l1-1-1-2L9 8.5z",
+  compare: "M4 6h7v14H4zM13 4h7v14h-7z",
+  cam: "M3 7h4l2-2h6l2 2h4v12H3zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
 };
+
+const Spin = () => <div className="vt-spin"><span className="spinner" /></div>;
 
 export default function PublicStore({ slug: slugProp, hostMode = false }: { slug?: string; hostMode?: boolean }) {
   const params = useParams();
   const slug = slugProp || params.slug || "";
+  const base = hostMode ? "" : `/tienda/${slug}`;
   const [sp, setSp] = useSearchParams();
-  const pid = Number(sp.get("p")) || null;
-  const cat = Number(sp.get("c")) || null;
-  const q = sp.get("q") || "";
-  const sort = sp.get("orden") || "name";
+  const navigate = useNavigate();
+  const loc = useLocation();
   const v = sp.get("v");
-  const pg = sp.get("pg");
-  const legal = sp.get("legal") as "terms" | "privacy" | null;
+  const rel = loc.pathname.slice(base.length) || "/";
 
   const api = useCallback(async <T,>(path: string, init?: RequestInit): Promise<{ data: T; total: number | null }> => {
     const r = await fetch(`/api/public/store/${slug}${path}`, init);
-    if (!r.ok) { let m = "No se pudo cargar"; try { m = (await r.json()).detail || m; } catch { /* sin cuerpo */ } throw new Error(m); }
+    if (!r.ok) { let m = "No se pudo cargar"; try { m = (await r.json()).detail || m; } catch { /* sin cuerpo */ } throw new Error(typeof m === "string" ? m : "No se pudo cargar"); }
     const t = r.headers.get("X-Total-Count");
     return { data: (await r.json()) as T, total: t ? Number(t) : null };
   }, [slug]);
@@ -76,17 +92,25 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
     if (!opts?.replace) window.scrollTo({ top: 0, behavior: calm() ? "auto" : "smooth" });
   }, [sp, setSp]);
 
-  // ---------- portada ----------
+  // ---------- datos de la tienda (nombre, menu, envios y pagos para el checkout) ----------
   const [home, setHome] = useState<Home | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
-  const [page, setPage] = useState<{ title: string; blocks: Block[] } | null>(null);
   useEffect(() => { api<Home>("").then(({ data }) => setHome(data)).catch((e) => setFatal(e.message)); }, [api]);
-  const homeSlug = home?.nav.find((n) => n.slug === "inicio")?.slug;
+
+  // ---------- direcciones de la version anterior (?p= ?c= ?q= ?legal= ?pg=) -> nuevas ----------
   useEffect(() => {
-    const want = pg || homeSlug;
-    if (!want) { setPage(null); return; }
-    api<{ title: string; blocks: Block[] }>(`/pages/${want}`).then(({ data }) => setPage(data)).catch(() => setPage(null));
-  }, [api, pg, homeSlug]);
+    if (rel !== "/" || v) return;
+    const p = sp.get("p"), c = sp.get("c"), q = sp.get("q"), legal = sp.get("legal"), pg = sp.get("pg");
+    const to = p ? `/p/producto-${encodeURIComponent(p)}` : c ? `/c/${encodeURIComponent(c)}` : q ? `/buscar?q=${encodeURIComponent(q)}` : legal ? `/info/${legal === "terms" ? "terminos" : "privacidad"}` : pg ? `/pg/${encodeURIComponent(pg)}` : null;
+    if (to) navigate(`${base}${to}`, { replace: true });
+  }, [rel, v]); // eslint-disable-line react-hooks/exhaustive-deps
+  // cada vista nueva arranca arriba (salvo atras/adelante, que el navegador restaura)
+  const firstNav = useRef(true);
+  useEffect(() => {
+    if (firstNav.current) { firstNav.current = false; return; }
+    window.scrollTo({ top: 0 });
+    document.getElementById("contenido")?.focus({ preventScroll: true });
+  }, [loc.pathname]);
 
   // ---------- carrito (persistido por visitante; el precio real lo recalcula el API) ----------
   const cartKey = `crimson-shop:${slug}`;
@@ -94,6 +118,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
   useEffect(() => { store.set(cartKey, JSON.stringify(cart)); }, [cart, cartKey]);
   const [drawer, setDrawer] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [bump, setBump] = useState(0);
   const toastT = useRef<number | undefined>(undefined);
   const count = cart.reduce((a, l) => a + l.qty, 0);
   const estimate = cart.reduce((a, l) => a + l.qty * l.price, 0);
@@ -107,6 +132,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
     if (!calm() && navigator.userActivation?.isActive) navigator.vibrate?.(10);
     window.clearTimeout(toastT.current);
     setToast(p.name);
+    setBump((b) => b + 1);
     toastT.current = window.setTimeout(() => setToast(null), 2600);
   };
   const setQty = (key: string, qty: number) => setCart((c) => c.map((l) => (l.key === key ? { ...l, qty: Math.max(1, Math.min(999, qty || 1)) } : l)));
@@ -118,170 +144,141 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
     return () => document.removeEventListener("keydown", onKey);
   }, [drawer]);
 
-  // ---------- catalogo ----------
-  const listing = !pid && !v;
-  const [qInput, setQInput] = useState(q);
-  useEffect(() => setQInput(q), [q]);
+  // ---------- comparador (hasta 3, por visitante) ----------
+  const cmpKey = `crimson-shop:cmp:${slug}`;
+  const [compare, setCompare] = useState<number[]>(() => { try { return (JSON.parse(safeStore.get(cmpKey) || "[]") as number[]).slice(0, 3); } catch { return []; } });
+  useEffect(() => { safeStore.set(cmpKey, JSON.stringify(compare)); }, [compare, cmpKey]);
+
+  // ---------- buscador de la cabecera: en /buscar filtra mientras se escribe; en otra vista, al confirmar ----------
+  const onSearch = rel === "/buscar";
+  const [qInput, setQInput] = useState(onSearch ? sp.get("q") || "" : "");
+  useEffect(() => { if (onSearch) setQInput(sp.get("q") || ""); }, [onSearch, sp]);
   useEffect(() => {
-    if (qInput === q) return;
-    const t = window.setTimeout(() => go({ q: qInput.trim() || null, p: null, v: null, pg: null }, { keep: true, replace: true }), 300);
+    if (!onSearch || qInput === (sp.get("q") || "")) return;
+    const t = window.setTimeout(() => { const n = new URLSearchParams(sp); if (qInput.trim()) n.set("q", qInput.trim()); else n.delete("q"); setSp(n, { replace: true }); }, 300);
     return () => window.clearTimeout(t);
   }, [qInput]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [items, setItems] = useState<Prod[] | null>(null);
-  const [total, setTotal] = useState(0);
-  const [more, setMore] = useState(false);
-  const listQs = useMemo(() => { const s = new URLSearchParams({ limit: String(PAGE), compact: "true", sort }); if (q) s.set("q", q); if (cat) s.set("category_id", String(cat)); return s; }, [q, cat, sort]);
-  useEffect(() => {
-    if (!listing || !home) return;
-    let alive = true;
-    setItems(null);
-    api<Prod[]>(`/products?${listQs}&offset=0`).then(({ data, total }) => { if (alive) { setItems(data); setTotal(total ?? data.length); } }).catch(() => alive && setItems([]));
-    return () => { alive = false; };
-  }, [listing, home, listQs, api]);
-  const loadMore = () => {
-    if (!items) return;
-    setMore(true);
-    api<Prod[]>(`/products?${listQs}&offset=${items.length}`).then(({ data }) => setItems([...items, ...data])).finally(() => setMore(false));
+  const submitSearch = (e: FormEvent) => {
+    e.preventDefault();
+    (e.currentTarget.querySelector("input") as HTMLInputElement | null)?.blur();
+    if (qInput.trim()) navigate(`${base}/buscar?q=${encodeURIComponent(qInput.trim())}`);
   };
 
-  // ---------- ficha ----------
-  const [detail, setDetail] = useState<Detail | null>(null);
-  const [photo, setPhoto] = useState(0);
-  const [variant, setVariant] = useState<Variant | undefined>();
-  const [qty, setQtyD] = useState(1);
-  const [missing, setMissing] = useState(false);
-  useEffect(() => {
-    if (!pid) { setDetail(null); return; }
-    setDetail(null); setMissing(false); setPhoto(0); setQtyD(1);
-    api<Detail>(`/products/${pid}`).then(({ data }) => { setDetail(data); setVariant(data.variants?.[0]); }).catch(() => setMissing(true));
-  }, [pid, api]);
+  const S = home?.store;
+  const isShop = S?.kind === "tienda";
+  const ctx = useMemo<StoreCtx | null>(() => (S ? {
+    slug, base, hostMode, store: S, isShop: !!isShop,
+    api: async <T,>(path: string, init?: RequestInit) => (await api<T>(path, init)).data,
+    addToCart: (p: VProd, qty = 1, variant?: VVariant) => { if (!Number(variant?.display_price ?? p.display_price)) return; add(p as unknown as Prod, variant as Variant | undefined, qty); },
+    openCart: () => setDrawer(true),
+    compare,
+    toggleCompare: (id: number) => setCompare((c) => (c.includes(id) ? c.filter((x) => x !== id) : c.length >= 3 ? c : [...c, id])),
+  } : null), [S, slug, base, hostMode, isShop, api, compare]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---------- SEO (titulo y descripcion por vista; indexable solo en el dominio de la tienda) ----------
   useEffect(() => {
-    if (!home) return;
-    const name = home.store.name;
-    const catName = home.categories.find((c) => c.id === cat)?.name;
-    document.title = detail ? `${detail.name} · ${name}` : v === "pagar" ? `Finalizar pedido · ${name}` : catName ? `${catName} · ${name}` : `Tienda · ${name}`;
-    const desc = detail?.description?.slice(0, 160) || home.store.tagline || `Catálogo en línea de ${name}`;
-    const meta = (n: string, val: string) => { let m = document.querySelector<HTMLMetaElement>(`meta[name="${n}"]`); if (!m) { m = document.createElement("meta"); m.name = n; document.head.appendChild(m); } m.content = val; };
-    meta("description", desc);
-    meta("robots", hostMode ? "index,follow" : "noindex");
-    document.documentElement.lang = "es-CR";
-  }, [home, detail, cat, v, hostMode]);
+    if (!hostMode) {
+      let m = document.querySelector<HTMLMetaElement>('meta[name="robots"]');
+      if (!m) { m = document.createElement("meta"); m.name = "robots"; document.head.appendChild(m); }
+      m.content = "noindex"; // dentro del portal no se indexa: la tienda indexable es la del dominio propio
+    }
+    if (v === "pagar" && S) document.title = `Finalizar pedido · ${S.name}`;
+  }, [hostMode, v, S]);
 
   if (fatal && !home) return <div className="shop"><div className="sh-empty"><b>{fatal}</b><span>La tienda no está disponible en este momento.</span></div></div>;
-  if (!home) return <div className="shop" style={{ display: "grid", placeItems: "center" }}><span className="spinner" /></div>;
+  if (!home || !S || !ctx) return <div className="shop" style={{ display: "grid", placeItems: "center" }}><span className="spinner" /></div>;
 
-  const S = home.store;
-  const isShop = S.kind === "tienda";
-  const cur = items?.[0]?.display_currency || S.currency || "CRC";
-  const catName = (id: number | null) => home.categories.find((c) => c.id === id)?.name;
-  const toCatalog = (c?: number | null) => go({ c: c || null });
   const hasWa = !!S.whatsapp;
   const quoteText = (lines: Line[]) => `Hola ${S.name}, quiero cotizar:\n${lines.map((l) => `• ${l.qty} × ${l.name}`).join("\n")}`;
+  const slugs = catSlugs(home.categories);
+  const L = (p: string) => `${base}${p}` || "/";
+  const legalOn = (k: "terms" | "privacy") => !!S.legal?.[k];
 
   return (
+    <StoreProvider value={ctx}>
     <div className="shop" style={{ fontFamily: S.font && S.font !== "Manrope" ? `"${S.font}", var(--sans)` : undefined }}>
       <a className="sh-skip" href="#contenido">Saltar al contenido</a>
-      <header className="sh-head">
+      <header className="sh-head vt-head">
         <div className="sh-wrap">
           <div className="sh-head__row">
-            <button className="sh-logo" onClick={() => go({})} aria-label={`${S.name}, inicio de la tienda`}>
+            <Link className="sh-logo" to={L("/")} aria-label={`${S.name}, inicio de la tienda`}>
               {S.logo_url ? <img src={S.logo_url} alt="" height={30} /> : <b>{S.name}</b>}
               <span className="sh-meta">Tienda</span>
-            </button>
-            <SearchBox value={qInput} onChange={setQInput} />
+            </Link>
+            <nav className="vt-mainnav" aria-label="Principal">
+              <Link to={L("/catalogo")} aria-current={rel === "/catalogo" ? "page" : undefined}>Catálogo</Link>
+              <Link to={L("/arma-tu-sistema")} aria-current={rel === "/arma-tu-sistema" ? "page" : undefined}>Arma tu sistema</Link>
+              <Link to={L("/asesoria")} aria-current={rel === "/asesoria" ? "page" : undefined}>Asesoría</Link>
+            </nav>
+            <SearchBox value={qInput} onChange={setQInput} onSubmit={submitSearch} />
             <div className="sh-head__actions">
-              {home.nav.filter((n) => n.slug !== "inicio").slice(0, 3).map((n) => <button key={n.slug} className="sh-btn sh-btn--ghost sh-btn--sm sh-hide-m" onClick={() => go({ pg: n.slug })}>{n.title}</button>)}
-              {hasWa && <a className="sh-btn sh-btn--ghost sh-btn--sm sh-hide-m" href={wa(S.whatsapp, `Hola ${S.name}, tengo una consulta.`)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />WhatsApp</a>}
-              <button className="sh-btn sh-btn--sm sh-cartbtn" onClick={() => setDrawer(true)} aria-label={`${isShop ? "Carrito" : "Cotización"}: ${count} artículo(s)`}>
+              {hasWa && <a className="sh-btn sh-btn--ghost sh-btn--sm sh-hide-m" href={wa(S.whatsapp, `Hola ${S.name}, tengo una consulta.`)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} /><span className="vt-hide-l">WhatsApp</span></a>}
+              {compare.length > 0 && <Link className="sh-btn sh-btn--ghost sh-btn--sm vt-cmpbtn" to={L("/comparar")} aria-label={`Comparar ${compare.length} producto(s)`}><Ico d={IC.compare} /><span className="sh-badge sh-badge--ink">{compare.length}</span></Link>}
+              <button className="sh-btn sh-btn--sm sh-cartbtn" data-bump={bump % 2} onClick={() => setDrawer(true)} aria-label={`${isShop ? "Carrito" : "Cotización"}: ${count} artículo(s)`}>
                 <Ico d={IC.bag} /><span className="sh-hide-m">{isShop ? "Carrito" : "Cotización"}</span>
-                {count > 0 && <span className="sh-badge">{count > 99 ? "99+" : count}</span>}
+                {count > 0 && <span className="sh-badge" key={bump}>{count > 99 ? "99+" : count}</span>}
               </button>
             </div>
           </div>
-          <div className="sh-head__search-m"><SearchBox value={qInput} onChange={setQInput} /></div>
+          <div className="sh-head__search-m"><SearchBox value={qInput} onChange={setQInput} onSubmit={submitSearch} /></div>
+          <nav className="vt-quick" aria-label="Accesos rápidos">
+            <Link to={L("/arma-tu-sistema")} className="vt-quick__hot"><Ico d={IC.cam} size={16} />Arma tu sistema</Link>
+            <Link to={L("/catalogo")}>Catálogo</Link>
+            {home.categories.map((c) => <Link key={c.id} to={L(`/c/${slugs[c.id]}`)}>{c.name}</Link>)}
+            <Link to={L("/asesoria")}>Asesoría</Link>
+          </nav>
         </div>
       </header>
 
       <main id="contenido" tabIndex={-1} style={{ outline: "none" }}>
-        {pg && page ? (
-          <Blocks slug={slug} blocks={page.blocks} primary={S.primary} products={(items || []) as unknown as PubProduct[]} onCta={(to) => go(to === "productos" ? {} : { pg: to })} onProduct={(id) => go({ p: id })} />
-        ) : pid ? (
-          <ProductView d={detail} missing={missing} cur={cur} isShop={isShop} store={S} photo={photo} setPhoto={setPhoto} variant={variant} setVariant={setVariant} qty={qty} setQty={setQtyD}
-            onAdd={(p, vv, n) => add(p, vv, n)} onBuy={(p, vv, n) => { add(p, vv, n); go({ v: "pagar" }); }} onCat={toCatalog} onOpen={(id) => go({ p: id })} catName={catName} />
-        ) : v === "pagar" || v === "cotizar" ? (
+        {v === "pagar" || v === "cotizar" ? (
           <Checkout api={api} home={home} cart={cart} mode={v === "pagar" && isShop ? "pedido" : "cotizacion"} onDone={() => setCart([])} onBack={() => go({})} setQty={setQty} remove={remove} quoteText={quoteText} />
         ) : (
-          <>
-            {page && homeSlug ? (
-              <Blocks slug={slug} blocks={page.blocks} primary={S.primary} products={(items || []) as unknown as PubProduct[]} onCta={(to) => (to === "productos" ? document.getElementById("catalogo")?.scrollIntoView() : go({ pg: to }))} onProduct={(id) => go({ p: id })} />
-            ) : (
-              <section className="sh-hero" aria-labelledby="sh-title">
-                <div className="sh-wrap">
-                  <span className="sh-eyebrow">Tienda en línea · {S.name}</span>
-                  <h1 id="sh-title">{S.tagline || <>Equipo profesional, <em>listo para instalar</em>.</>}</h1>
-                  <div className="sh-hero__facts sh-meta">
-                    <span><i className="sh-live" />{home.product_count ?? "—"} productos</span>
-                    <span>Precios con IVA incluido</span>
-                    <span>{isShop ? "Compra directa · factura electrónica" : "Cotización sin compromiso"}</span>
-                  </div>
-                </div>
-              </section>
-            )}
-            <section id="catalogo" className="sh-wrap" aria-label="Catálogo">
-              <div className="sh-cats" role="toolbar" aria-label="Categorías">
-                <button className="sh-chip" aria-pressed={!cat} onClick={() => toCatalog(null)}>Todo <i>{home.product_count ?? ""}</i></button>
-                {home.categories.map((c) => <button key={c.id} className="sh-chip" aria-pressed={cat === c.id} onClick={() => toCatalog(c.id)}>{c.name} <i>{c.count}</i></button>)}
-              </div>
-              <div className="sh-bar">
-                <span className="sh-meta" aria-live="polite">{items ? `${total} resultado${total === 1 ? "" : "s"}${q ? ` para “${q}”` : ""}${cat ? ` · ${catName(cat) || ""}` : ""}` : "Cargando…"}</span>
-                <label className="sh-meta" style={{ display: "flex", alignItems: "center", gap: 8 }}>Ordenar
-                  <select className="sh-select" value={sort} onChange={(e) => go({ orden: e.target.value === "name" ? null : e.target.value }, { keep: true, replace: true })}>
-                    <option value="name">Nombre</option><option value="price_asc">Precio: menor a mayor</option><option value="price_desc">Precio: mayor a menor</option><option value="recent">Recientes</option>
-                  </select>
-                </label>
-              </div>
-              {items === null ? (
-                <div className="sh-grid" aria-hidden="true">{Array.from({ length: 8 }, (_, i) => <div key={i} className="sh-skel" style={{ aspectRatio: "3/4" }} />)}</div>
-              ) : items.length === 0 ? (
-                <div className="sh-empty"><b>No encontramos productos{q ? ` para “${q}”` : ""}.</b><span>Probá con otra palabra o escribinos y lo conseguimos.</span>
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-                    {(q || cat) && <button className="sh-btn sh-btn--ghost" onClick={() => { setQInput(""); go({}); }}>Ver todo el catálogo</button>}
-                    {hasWa && <a className="sh-btn sh-btn--wa" href={wa(S.whatsapp, `Hola ${S.name}, busco: ${q || "un producto"}`)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Preguntar por WhatsApp</a>}
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <ul className="sh-grid" style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                    {items.map((p) => <li key={p.id} style={{ display: "flex" }}><Card p={p} isShop={isShop} onOpen={() => go({ p: p.id })} onAdd={() => (p.variants?.length ? go({ p: p.id }) : add(p))} /></li>)}
-                  </ul>
-                  <div className="sh-more">
-                    <span className="sh-meta">{items.length} de {total}</span>
-                    {items.length < total && <button className="sh-btn sh-btn--ghost" onClick={loadMore} disabled={more}>{more ? "Cargando…" : "Ver más productos"}</button>}
-                  </div>
-                </>
-              )}
-            </section>
-          </>
+          <Suspense fallback={<Spin />}>
+            <Routes>
+              <Route index element={<StoreHome />} />
+              <Route path="catalogo" element={<CategoryPage key="all" mode="all" />} />
+              <Route path="c/:cat" element={<CategoryPage key="cat" mode="category" />} />
+              <Route path="buscar" element={<CategoryPage key="search" mode="search" />} />
+              <Route path="p/:ref" element={<ProductPage />} />
+              <Route path="arma-tu-sistema" element={<KitBuilder />} />
+              <Route path="comparar" element={<ComparePage />} />
+              <Route path="asesoria" element={<AdvisoryPage />} />
+              <Route path="info/:kind" element={<InfoPage />} />
+              <Route path="pg/:page" element={<BlockPage primary={S.primary} />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </Suspense>
         )}
       </main>
 
       <footer className="sh-foot">
         <div className="sh-wrap">
           <div className="sh-foot__grid">
-            <div><b>{S.name}</b><span>{S.tagline || "Tienda en línea"}</span></div>
+            <div><b>{S.name}</b><span>{S.tagline || "Seguridad electrónica, redes y soporte técnico en Costa Rica."}</span>
+              <span className="vt-foot__seal sh-meta">Factura electrónica · Soporte local · Garantía</span>
+            </div>
             <div><span className="sh-meta">Comprar</span>
-              <div style={{ display: "grid" }}>
-                <button onClick={() => go({})}>Catálogo completo</button>
-                {home.categories.slice(0, 4).map((c) => <button key={c.id} onClick={() => toCatalog(c.id)}>{c.name}</button>)}
+              <div className="vt-foot__col">
+                <Link to={L("/catalogo")}>Catálogo completo</Link>
+                {home.categories.slice(0, 5).map((c) => <Link key={c.id} to={L(`/c/${slugs[c.id]}`)}>{c.name}</Link>)}
+                <Link to={L("/arma-tu-sistema")}>Arma tu sistema</Link>
               </div>
             </div>
             <div><span className="sh-meta">Ayuda</span>
-              <div style={{ display: "grid" }}>
+              <div className="vt-foot__col">
+                <Link to={L("/asesoria")}>Asesoría personalizada</Link>
+                <Link to={L("/info/preguntas-frecuentes")}>Preguntas frecuentes</Link>
+                <Link to={L("/info/envios")}>Envíos y devoluciones</Link>
+                <Link to={L("/info/garantias")}>Garantías</Link>
                 {hasWa && <a href={wa(S.whatsapp, `Hola ${S.name}, tengo una consulta.`)} target="_blank" rel="noopener noreferrer">WhatsApp {S.whatsapp}</a>}
-                {S.legal?.terms && <button onClick={() => go({ legal: "terms" }, { keep: true })}>Términos y condiciones</button>}
-                {S.legal?.privacy && <button onClick={() => go({ legal: "privacy" }, { keep: true })}>Política de privacidad</button>}
+              </div>
+            </div>
+            <div><span className="sh-meta">Crimson</span>
+              <div className="vt-foot__col">
+                <a href="https://crimsoncr.com" rel="noopener">crimsoncr.com</a>
+                <a href="https://crimsoncr.com/#soporte" rel="noopener">Reportar una falla</a>
+                {legalOn("terms") && <Link to={L("/info/terminos")}>Términos y condiciones</Link>}
+                {legalOn("privacy") && <Link to={L("/info/privacidad")}>Política de privacidad</Link>}
               </div>
             </div>
           </div>
@@ -293,7 +290,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
       <aside className="sh-drawer" data-open={drawer} role="dialog" aria-modal="true" aria-label={isShop ? "Carrito" : "Cotización"} aria-hidden={!drawer}>
         <div className="sh-drawer__head"><h2>{isShop ? "Tu carrito" : "Tu cotización"}</h2><button className="sh-x" onClick={() => setDrawer(false)} aria-label="Cerrar"><Ico d={IC.x} /></button></div>
         <div className="sh-drawer__body">
-          {cart.length === 0 ? <div className="sh-empty" style={{ padding: "40px 0" }}><b>Todavía no agregaste nada.</b><button className="sh-btn sh-btn--ghost" onClick={() => { setDrawer(false); go({}); }}>Ver catálogo</button></div>
+          {cart.length === 0 ? <div className="sh-empty" style={{ padding: "40px 0" }}><b>Todavía no agregaste nada.</b><button className="sh-btn sh-btn--ghost" onClick={() => { setDrawer(false); navigate(L("/catalogo")); }}>Ver catálogo</button></div>
             : cart.map((l) => <CartLine key={l.key} l={l} setQty={setQty} remove={remove} />)}
         </div>
         {cart.length > 0 && (
@@ -309,26 +306,25 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
 
       {toast && <div className="sh-toast" role="status"><Ico d={IC.check} /><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "38vw" }}>Agregado: {toast}</span><button onClick={() => { setToast(null); setDrawer(true); }}>Ver {isShop ? "carrito" : "cotización"}</button></div>}
 
-      {legal && S.legal?.[legal] && (
-        <div className="sh-modal" role="dialog" aria-modal="true" aria-label={legal === "terms" ? "Términos y condiciones" : "Política de privacidad"} onClick={() => go({ legal: null }, { keep: true, replace: true })}>
-          <div className="sh-modal__box" onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 }}>
-              <h2>{legal === "terms" ? "Términos y condiciones" : "Política de privacidad"}</h2>
-              <button className="sh-x" onClick={() => go({ legal: null }, { keep: true, replace: true })} aria-label="Cerrar"><Ico d={IC.x} /></button>
-            </div>
-            <div className="sh-desc">{S.legal[legal]}</div>
-          </div>
+      <Consent />
+
+      {compare.length > 0 && rel !== "/comparar" && !v && (rel.startsWith("/c/") || rel === "/catalogo" || rel === "/buscar") && (
+        <div className="vt-cmptray" role="region" aria-label="Comparador">
+          <span><Ico d={IC.compare} />{compare.length} de 3 para comparar</span>
+          <button className="vt-link vt-link--light" onClick={() => setCompare([])}>Vaciar</button>
+          <Link className="sh-btn sh-btn--sm sh-btn--crimson" to={L("/comparar")}>Comparar</Link>
         </div>
       )}
     </div>
+    </StoreProvider>
   );
 }
 
-function SearchBox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function SearchBox({ value, onChange, onSubmit }: { value: string; onChange: (v: string) => void; onSubmit: (e: FormEvent<HTMLFormElement>) => void }) {
   return (
-    <form className="sh-search" role="search" onSubmit={(e) => { e.preventDefault(); (e.currentTarget.querySelector("input") as HTMLInputElement)?.blur(); }}>
+    <form className="sh-search" role="search" onSubmit={onSubmit}>
       <Ico d={IC.search} />
-      <input type="search" value={value} onChange={(e) => onChange(e.target.value)} placeholder="Buscar cámaras, switches, UPS…" aria-label="Buscar productos" enterKeyHint="search" />
+      <input type="search" value={value} onChange={(e) => onChange(e.target.value)} placeholder="Buscar producto, marca o modelo" aria-label="Buscar productos" enterKeyHint="search" />
       {value && <button type="button" className="sh-search__clear" onClick={() => onChange("")} aria-label="Borrar búsqueda"><Ico d={IC.x} size={16} /></button>}
     </form>
   );
@@ -336,29 +332,6 @@ function SearchBox({ value, onChange }: { value: string; onChange: (v: string) =
 
 function Price({ value, cur, note = true }: { value: string | number; cur: string; note?: boolean }) {
   return <span className="sh-price">{money(value, cur)}{note && <small>IVA incluido</small>}</span>;
-}
-
-function Card({ p, isShop, onOpen, onAdd }: { p: Prod; isShop: boolean; onOpen: () => void; onAdd: () => void }) {
-  const [done, setDone] = useState(false);
-  const href = `?p=${p.id}`;
-  return (
-    <article className="sh-card" style={{ width: "100%" }}>
-      <a className="sh-card__link" href={href} onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); onOpen(); }}>
-        <div className="sh-card__img">{p.image ? <img src={p.image} alt="" loading="lazy" decoding="async" width={400} height={400} /> : <span className="sh-noimg">Sin foto</span>}</div>
-      </a>
-      <div className="sh-card__body">
-        {p.category && <span className="sh-meta" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.category}</span>}
-        <a className="sh-card__name" href={href} onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); onOpen(); }}>{p.name}</a>
-        <div className="sh-card__foot">
-          <Price value={p.display_price} cur={p.display_currency} />
-          <button className="sh-add" data-done={done} onClick={() => { onAdd(); if (!p.variants?.length) { setDone(true); window.setTimeout(() => setDone(false), 1200); } }}
-            aria-label={p.variants?.length ? `Ver opciones de ${p.name}` : `${isShop ? "Agregar al carrito" : "Agregar a la cotización"}: ${p.name}`}>
-            <Ico d={done ? IC.check : IC.plus} />
-          </button>
-        </div>
-      </div>
-    </article>
-  );
 }
 
 function CartLine({ l, setQty, remove }: { l: Line; setQty: (k: string, n: number) => void; remove: (k: string) => void }) {
@@ -384,76 +357,6 @@ function Qty({ value, onChange, small }: { value: number; onChange: (n: number) 
       <input inputMode="numeric" value={value} onChange={(e) => onChange(Math.max(1, Math.min(999, Number(e.target.value.replace(/\D/g, "")) || 1)))} aria-label="Cantidad" />
       <button type="button" onClick={() => onChange(Math.min(999, value + 1))} aria-label="Agregar uno">+</button>
     </span>
-  );
-}
-
-function ProductView(props: {
-  d: Detail | null; missing: boolean; cur: string; isShop: boolean; store: Home["store"]; photo: number; setPhoto: (n: number) => void;
-  variant?: Variant; setVariant: (v?: Variant) => void; qty: number; setQty: (n: number) => void;
-  onAdd: (p: Prod, v: Variant | undefined, n: number) => void; onBuy: (p: Prod, v: Variant | undefined, n: number) => void;
-  onCat: (c: number | null) => void; onOpen: (id: number) => void; catName: (id: number | null) => string | undefined;
-}) {
-  const { d, store: S } = props;
-  if (props.missing) return <div className="sh-wrap sh-empty"><b>Este producto ya no está disponible.</b><button className="sh-btn sh-btn--ghost" onClick={() => props.onCat(null)}>Ver catálogo</button></div>;
-  if (!d) return <div className="sh-wrap" style={{ paddingTop: 24 }}><div className="sh-pdp"><div className="sh-skel" style={{ aspectRatio: "1" }} /><div style={{ display: "grid", gap: 12 }}><div className="sh-skel" style={{ height: 40 }} /><div className="sh-skel" style={{ height: 120 }} /></div></div></div>;
-  const imgs = d.images?.length ? d.images : d.image ? [d.image] : [];
-  const price = props.variant?.display_price ?? d.display_price;
-  const avail = d.availability;
-  const waText = `Hola ${S.name}, me interesa: ${d.name}${d.code ? ` (${d.code})` : ""}`;
-  return (
-    <div className="sh-wrap">
-      <nav className="sh-crumbs" aria-label="Ruta">
-        <button onClick={() => props.onCat(null)}><span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Ico d={IC.back} size={14} />Catálogo</span></button>
-        {d.category_id && <><span aria-hidden="true">/</span><button onClick={() => props.onCat(d.category_id)}>{d.category || props.catName(d.category_id)}</button></>}
-      </nav>
-      <div className="sh-pdp">
-        <div className="sh-gallery">
-          <div className="sh-gallery__main">{imgs.length ? <img src={imgs[Math.min(props.photo, imgs.length - 1)]} alt={d.name} fetchPriority="high" decoding="async" width={800} height={800} /> : <span className="sh-noimg">Sin foto</span>}</div>
-          {imgs.length > 1 && (
-            <div className="sh-thumbs" role="list">
-              {imgs.map((u, i) => <button key={u + i} className="sh-thumb" role="listitem" aria-current={i === props.photo} aria-label={`Foto ${i + 1} de ${imgs.length}`} onClick={() => props.setPhoto(i)}><img src={u} alt="" loading="lazy" decoding="async" /></button>)}
-            </div>
-          )}
-        </div>
-        <div className="sh-info">
-          {d.category && <span className="sh-eyebrow">{d.category}</span>}
-          <h1>{d.name}</h1>
-          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <Price value={price} cur={d.display_currency} />
-            {avail && avail.state !== "servicio" && <span className="sh-avail" data-s={avail.state}>{avail.label}</span>}
-          </div>
-          {(d.variants?.length ?? 0) > 0 && (
-            <div><div className="sh-meta" style={{ marginBottom: 8 }}>Opciones</div>
-              <div className="sh-variants">{d.variants.map((vv) => <button key={vv.id} className="sh-chip" aria-pressed={props.variant?.id === vv.id} onClick={() => props.setVariant(vv)}>{vv.name}</button>)}</div>
-            </div>
-          )}
-          <div className="sh-panel">
-            <div className="sh-buy">
-              <Qty value={props.qty} onChange={props.setQty} />
-              {props.isShop
-                ? <button className="sh-btn sh-btn--crimson" onClick={() => props.onAdd(d, props.variant, props.qty)}><Ico d={IC.bag} />Agregar al carrito</button>
-                : <button className="sh-btn sh-btn--crimson" onClick={() => props.onAdd(d, props.variant, props.qty)}><Ico d={IC.plus} />Agregar a cotización</button>}
-            </div>
-            {props.isShop && <button className="sh-btn sh-btn--block" onClick={() => props.onBuy(d, props.variant, props.qty)}>Comprar ahora</button>}
-            {S.whatsapp && <a className="sh-btn sh-btn--ghost sh-btn--block" href={wa(S.whatsapp, waText)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Consultar por WhatsApp</a>}
-          </div>
-          {d.description && <div><h2 className="sh-meta" style={{ margin: "0 0 8px" }}>Descripción</h2><p className="sh-desc" style={{ margin: 0 }}>{d.description}</p></div>}
-          <dl className="sh-specs">
-            {d.code && <><dt>Código</dt><dd>{d.code}</dd></>}
-            {d.brand && <><dt>Marca</dt><dd>{d.brand}</dd></>}
-            <dt>Impuesto</dt><dd>IVA {d.tax_rate} % incluido en el precio</dd>
-          </dl>
-        </div>
-      </div>
-      {d.related?.length > 0 && (
-        <section aria-label="Relacionados" style={{ paddingBottom: 20 }}>
-          <h2 className="sh-section-title">También te puede servir</h2>
-          <ul className="sh-grid" style={{ listStyle: "none", margin: 0, padding: 0 }}>
-            {d.related.map((r) => <li key={r.id} style={{ display: "flex" }}><Card p={r} isShop={props.isShop} onOpen={() => props.onOpen(r.id)} onAdd={() => (r.variants?.length ? props.onOpen(r.id) : props.onAdd(r, undefined, 1))} /></li>)}
-          </ul>
-        </section>
-      )}
-    </div>
   );
 }
 
