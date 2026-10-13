@@ -8,8 +8,9 @@ pedidos (1.5 s por defecto) y guarda el HTML crudo en ./fygaro/raw, asi una segu
 nada (borrar raw/ para refrescar precios). La carpeta de salida NO va a git (fotos y HTML de terceros).
 
 De cada producto sale: id de Fygaro, SKU, nombre, descripcion, precio sin IVA (offers.price del JSON-LD) y con IVA
-(el exhibido), moneda, IVA deducido, categoria (de los listados por categoria), fotos, variantes y disponibilidad.
-Tambien los textos de terminos y privacidad de la tienda.
+(el exhibido), moneda, IVA deducido, categoria y subcategoria (de los listados), fotos, variantes y disponibilidad.
+Tambien los textos de terminos y privacidad, y del sitio: paginas propias, redes, analitica y opciones de orden
+(para redirigir y replicar; ver infra/fygaro/PARIDAD_TIENDA.md).
 """
 
 from __future__ import annotations
@@ -101,6 +102,14 @@ def parse_product(pid: str, s: str, base: str) -> dict:
         for name, body in re.findall(r'<select[^>]*name="([^"]+)"[^>]*>(.*?)</select>', form.group(0), re.S):
             opts = [{"value": v, "label": text(t)} for v, t in re.findall(r'<option[^>]*value="([^"]*)"[^>]*>(.*?)</option>', body, re.S) if v]
             variants.append({"field": name, "options": opts})
+    # Plantillas nuevas de Fygaro: las versiones (variantes con precio y existencia propios) vienen en un JSON embebido
+    cfg = re.search(r"<script[^>]*data-fy-product-version-config[^>]*>(.*?)</script>", s, re.S)
+    if cfg:
+        try:
+            vc = json.loads(H.unescape(cfg.group(1)))
+            variants.append({"field": "versions", "option_types": vc.get("optionTypes") or [], "versions": vc.get("versions") or []})
+        except json.JSONDecodeError:
+            pass
     avail = str(offers.get("availability") or ld.get("availability") or "")
     sold_out = "OutOfStock" in avail or bool(re.search(r"\bagotad[oa]\b", s, re.I))
     return {
@@ -126,7 +135,7 @@ def crawl(c: Crawler) -> dict:
     lastmod = dict(re.findall(r"/products/([0-9a-f-]{36})/</loc>\s*<priority>[^<]*</priority>\s*<lastmod>([^<]+)</lastmod>", sitemap))
     print(f"sitemap: {len(cat_ids)} categorias, {len(prod_ids)} productos", flush=True)
 
-    categories, prod_cat = [], {}
+    categories, prod_cat, prod_sub = [], {}, {}
     for cid in cat_ids:
         page, name = 1, None
         while True:
@@ -134,22 +143,41 @@ def crawl(c: Crawler) -> dict:
             if name is None:
                 m = re.search(rf'category={cid}&amp;subcategory=[^"]*"\s*aria-current="page">([^<]+)</a>', s) or re.search(r"<title>(.*?) products</title>", s)
                 name = H.unescape(m.group(1)).strip() if m else f"Categoria {cid}"
-            ids = list(dict.fromkeys(re.findall(r'href="/products/([0-9a-f-]{36})/"', s)))
+            ids = _ids(s)
             for pid in ids:
                 prod_cat.setdefault(pid, [])
                 if name not in prod_cat[pid]:
                     prod_cat[pid].append(name)
-            total = re.search(r"P\S+gina \d+ de (\d+)", s)
-            if page >= (int(total.group(1)) if total else 1) or not ids:
+            if page >= _pages(s) or not ids:
                 break
             page += 1
-        categories.append({"fygaro_id": cid, "name": name})
-        print(f"  {name}: {page} pagina(s)", flush=True)
+        # Subcategorias: /products/category/<id>/ no las lista; el buscador con ?category=<id> si (barra lateral)
+        s = c.get(f"{c.base}/products/search/?category={cid}&subcategory=&page=1", c.raw / "categories" / f"{cid}_subs.html")
+        subs = []
+        for sid, sname in re.findall(rf'category={cid}&amp;subcategory=(\d+)&amp;page=1">([^<]+)</a>', s):
+            sname, spage, count = H.unescape(sname).strip(), 1, 0
+            while True:
+                ss = c.get(
+                    f"{c.base}/products/search/?category={cid}&subcategory={sid}&page={spage}", c.raw / "categories" / f"{cid}_sub{sid}_{spage}.html"
+                )
+                ids = _ids(ss)
+                count += len(ids)
+                for pid in ids:
+                    prod_sub.setdefault(pid, [])
+                    if sname not in prod_sub[pid]:
+                        prod_sub[pid].append(sname)
+                if spage >= _pages(ss) or not ids:
+                    break
+                spage += 1
+            subs.append({"fygaro_id": sid, "name": sname, "products": count})
+        categories.append({"fygaro_id": cid, "name": name, "subcategories": subs})
+        print(f"  {name}: {page} pagina(s), {len(subs)} subcategoria(s)", flush=True)
 
     products = []
     for i, pid in enumerate(prod_ids, 1):
         p = parse_product(pid, c.get(f"{c.base}/products/{pid}/", c.raw / "products" / f"{pid}.html"), c.base)
         p["categories"] = prod_cat.get(pid, [])
+        p["subcategories"] = prod_sub.get(pid, [])
         p["lastmod"] = lastmod.get(pid)
         products.append(p)
         if i % 50 == 0:
@@ -162,7 +190,40 @@ def crawl(c: Crawler) -> dict:
         # el titulo viene repetido (encabezado de la pagina + del documento): fuera todas las copias del inicio
         legal[key] = re.sub(r"^(\s*(T\S+rminos y Condiciones|Pol\S+ticas? de Privacidad)\s*\n)+", "", text(m.group(0)) if m else "").strip()
 
-    return {"source": c.base, "extracted_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "legal": legal, "categories": categories, "products": products}
+    return {
+        "source": c.base,
+        "extracted_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "site": site_info(c.get(f"{c.base}/", c.raw / "pages" / "home.html")),
+        "legal": legal,
+        "categories": categories,
+        "products": products,
+    }
+
+
+def _ids(s: str) -> list[str]:
+    """Ids de producto de un listado (sin repetir, en orden)."""
+    return list(dict.fromkeys(re.findall(r'href="/products/([0-9a-f-]{36})/"', s)))
+
+
+def _pages(s: str) -> int:
+    total = re.search(r"P\S+gina \d+ de (\d+)", s)
+    return int(total.group(1)) if total else 1
+
+
+def site_info(s: str) -> dict:
+    """Lo que hay que replicar o redirigir del sitio: menu, paginas propias (/page/<slug>/), redes, analitica, orden."""
+    sort = re.search(r'<select class="[^"]*sort-select"[^>]*>(.*?)</select>', s, re.S)
+    return {
+        "title": text(m.group(1)) if (m := re.search(r"<title>(.*?)</title>", s, re.S)) else None,
+        "favicon": m.group(1) if (m := re.search(r'<link rel="icon" href="([^"]+)"', s)) else None,
+        "colors": dict(re.findall(r"--(primary-color|secondary-color):\s*(#[0-9a-fA-F]{3,8})", s)),
+        "fonts": dict(re.findall(r"--(primary-font|secondary-font):\s*'([^']+)'", s)),
+        "pages": sorted(set(re.findall(r'href="(/page/[^"]+)"', s))),
+        "social": sorted(set(re.findall(r'href="(https://(?:www\.)?(?:facebook|instagram|tiktok|twitter|x|youtube|linkedin)\.com/[^"]+)"', s))),
+        "whatsapp": sorted(set(re.findall(r'href="(https://(?:wa\.me|api\.whatsapp\.com)/[^"]+)"', s))),
+        "analytics": sorted(set(re.findall(r"\b(G-[A-Z0-9]{6,}|GTM-[A-Z0-9]+|UA-\d+-\d+)\b", s)) | ({"facebook-pixel"} if "fbq(" in s else set())),
+        "sort_options": [text(o) for o in re.findall(r"<option[^>]*>(.*?)</option>", sort.group(1))] if sort else [],
+    }
 
 
 def download_images(catalog: dict, out: Path, pause: float) -> None:
