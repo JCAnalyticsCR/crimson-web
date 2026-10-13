@@ -8,7 +8,7 @@ import "./checkout.css";
 type Pub = {
   number: string; status: string; status_label: string; created_at: string; paid_at: string | null; expires_at: string | null; currency: string;
   subtotal: number; discount_total: number; shipping: number; tax_total: number; total: number; coupon_code: string | null;
-  lines: { name: string; quantity: number; unit_price: number; tax_rate: number; total: number }[];
+  lines: { name: string; quantity: number; unit_price: number; tax_rate: number; total: number; shipping?: boolean }[];
   contact: { name: string | null; email: string | null }; shipping_method: string | null;
   delivery: { type: "envio" | "retiro"; province?: string; canton?: string; district?: string } | null; pickup: { address?: string; hours?: string } | null;
   payment_method: string | null; payment_kind: string | null; instructions: string | null; needs_proof: boolean; proofs: { filename: string; at: string }[];
@@ -130,7 +130,7 @@ export default function OrderStatus({ api, token, store, onBack }: { api: ApiFn;
                 <button type="button" className="sh-btn sh-btn--ghost sh-btn--sm" onClick={() => copy(o.number, "num")}><Ico d={IC.copy} size={16} />{copied === "num" ? "Copiado" : "Copiar n.º de pedido"}</button>
                 <button type="button" className="sh-btn sh-btn--ghost sh-btn--sm" onClick={() => copy(String(Number(o.total).toFixed(cur === "CRC" ? 0 : 2)), "amt")}><Ico d={IC.copy} size={16} />{copied === "amt" ? "Copiado" : `Copiar monto`}</button>
               </div>
-              {o.expires_at && o.status === "nuevo" && <p className="sh-note" style={{ margin: 0 }}>Reservamos tu pedido hasta el {fmtWhen(o.expires_at)}.</p>}
+              {o.expires_at && o.status === "nuevo" && <p className="sh-note" style={{ margin: 0 }}>Apartamos los productos hasta el {fmtWhen(o.expires_at)}</p>}
               {(o.needs_proof || o.status === "en_revision") && o.payment_kind !== "tarjeta" && o.payment_kind !== "efectivo" && (
                 <div className="ck-proof">
                   <input ref={fileRef} id="ck-proof" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(e) => upload(e.target.files?.[0])} hidden />
@@ -165,11 +165,11 @@ export default function OrderStatus({ api, token, store, onBack }: { api: ApiFn;
 
         <aside className="sh-panel ck-ocol" aria-label="Productos y totales">
           <span className="sh-meta">Productos</span>
-          <ul className="ck-olines">{o.lines.map((l, i) => <li key={i}><span>{Number(l.quantity)} × {l.name}</span><b>{money(l.total, cur)}</b></li>)}</ul>
+          <ul className="ck-olines">{o.lines.filter((l) => !l.shipping).map((l, i) => <li key={i}><span>{Number(l.quantity)} × {l.name}</span><b>{money(l.total, cur)}</b></li>)}</ul>
           <div className="ck-totals">
             <div className="sh-totrow"><span>Subtotal (sin IVA)</span><b>{money(o.subtotal, cur)}</b></div>
             {Number(o.discount_total) > 0 && <div className="sh-totrow"><span>Descuento{o.coupon_code ? ` (${o.coupon_code})` : ""}</span><b>−{money(o.discount_total, cur)}</b></div>}
-            <div className="sh-totrow"><span>Envío</span><b>{Number(o.shipping) > 0 ? money(o.shipping, cur) : "—"}</b></div>
+            <div className="sh-totrow"><span>Envío (sin IVA)</span><b>{Number(o.shipping) > 0 ? money(o.shipping, cur) : o.delivery?.type === "envio" ? "Gratis" : "—"}</b></div>
             <div className="sh-totrow"><span>IVA</span><b>{money(o.tax_total, cur)}</b></div>
             <div className="sh-totrow sh-totrow--big"><span>Total</span><b>{money(o.total, cur)}</b></div>
           </div>

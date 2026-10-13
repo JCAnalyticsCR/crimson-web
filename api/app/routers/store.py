@@ -15,7 +15,7 @@ from ..core.deps import Principal, require
 from ..core.ratelimit import public_limiter
 from ..models import Category, Coupon, Customer, Invoice, Order, Product, ProductVariant, StorePage, Tenant
 from ..services.documents import audit
-from ..services.store_orders import STATUS_LABEL
+from ..services.store_orders import STATUS_LABEL, aware
 from ..services.totals import LineIn, compute_document, d
 
 router = APIRouter(tags=["tienda"])
@@ -239,11 +239,11 @@ def _order_out(o: Order):
         "status": o.status,
         "invoice_id": o.invoice_id,
         "notes": o.notes,
-        "created_at": o.created_at,
+        "created_at": aware(o.created_at),
         "status_label": STATUS_LABEL.get(o.status, o.status),
         "payment_kind": o.payment_kind,
         "delivery": o.delivery,
-        "paid_at": o.paid_at,
+        "paid_at": aware(o.paid_at),
         "payment_ref": o.payment_ref,
         "tracking_number": o.tracking_number,
         "carrier": o.carrier,
@@ -251,7 +251,7 @@ def _order_out(o: Order):
         "refund": o.refund,
         "history": o.history or [],
         "proofs": o.proofs or [],
-        "expires_at": o.expires_at,
+        "expires_at": aware(o.expires_at),
         "inventory_state": o.inventory_state,
         "lines": [
             {
@@ -291,10 +291,11 @@ def order_status(oid: int, data: OrderStatusIn, p: Principal = Depends(require("
     o = db.get(Order, oid)
     if not o or o.tenant_id != p.tenant.id:
         raise HTTPException(404, "Orden no encontrada")
+    old = o.status
     o.status = data.status
     if data.status == "pagado":
         o.paid_at = o.paid_at or datetime.now(UTC)
-    so._inventory(db, o, data.status)
+    so._inventory(db, o, old, data.status, p.user.id)
     so._hist(o, data.status, p.user.id)
     from .events import on_order_status
 
@@ -744,7 +745,7 @@ def quote_detail(items: list[dict], calc) -> dict:
     taxes: dict[str, Decimal] = {}
     lines = []
     for i, lo in zip(items, calc.lines, strict=True):
-        k = f"{d(i['tax_rate']):g}"
+        k = f"{d(i['tax_rate']).normalize():f}"
         taxes[k] = taxes.get(k, Decimal(0)) + d(lo.tax_amount)
         lines.append({"name": i["name"], "quantity": i["quantity"], "total": lo.total, "shipping": i["product"] is None})
     return {"taxes": [{"rate": k, "amount": v} for k, v in sorted(taxes.items(), key=lambda x: -Decimal(x[0])) if v], "lines": lines}

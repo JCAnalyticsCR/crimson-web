@@ -12,7 +12,7 @@ type Methods = {
   tarjeta: { active: boolean; installments?: boolean; max_installments?: number };
   efectivo: { active: boolean; note?: string };
 };
-type Ck = { methods: Methods; hold_hours: number; pickup: { address?: string; hours?: string }; notify_roles: string[]; free_shipping_from: number | string; auto_invoice: boolean };
+type Ck = { methods: Methods; pickup: { address?: string; hours?: string }; notify_roles: string[]; free_shipping_from: number | string; auto_invoice: boolean };
 type Resp = { checkout: Ck; onvo: { configured: boolean; simulation: boolean } };
 export type ZoneRate = { name: string; amount: number; active: boolean; zone?: string | null; [k: string]: unknown };
 
@@ -37,7 +37,6 @@ export default function CheckoutSettings({ rates, onRates }: { rates: ZoneRate[]
           tarjeta: { active: m.tarjeta.active, installments: !!m.tarjeta.installments, max_installments: Number(m.tarjeta.max_installments || 0) },
           efectivo: { active: m.efectivo.active, note: m.efectivo.note || null },
         },
-        hold_hours: Number(ck.hold_hours) || 48,
         pickup: { address: ck.pickup?.address || null, hours: ck.pickup?.hours || null },
         notify_roles: ck.notify_roles,
         free_shipping_from: String(Number(ck.free_shipping_from) || 0),
@@ -85,7 +84,6 @@ export default function CheckoutSettings({ rates, onRates }: { rates: ZoneRate[]
           <Field label="Texto para el cliente"><input className="input" value={m.efectivo.note || ""} onChange={(e) => setM("efectivo", { note: e.target.value })} /></Field>
         </div>
         <div className="grid-2">
-          <Field label="Horas para pagar" hint="SINPE, transferencia y tarjeta: pasado el plazo el pedido se cancela y libera la reserva."><input className="input input--mono" type="number" min={1} max={336} value={ck.hold_hours} onChange={(e) => setCk({ ...ck, hold_hours: Number(e.target.value) })} /></Field>
           <Field label="Envío gratis desde (₡, con IVA)" hint="0 = nunca. Se convierte si la tienda vende en dólares."><input className="input input--mono" type="number" min={0} value={ck.free_shipping_from} onChange={(e) => setCk({ ...ck, free_shipping_from: e.target.value })} /></Field>
           <Field label="Dirección de retiro"><input className="input" value={ck.pickup?.address || ""} onChange={(e) => setCk({ ...ck, pickup: { ...ck.pickup, address: e.target.value } })} placeholder="Oficinas, Escazú" /></Field>
           <Field label="Horario de retiro"><input className="input" value={ck.pickup?.hours || ""} onChange={(e) => setCk({ ...ck, pickup: { ...ck.pickup, hours: e.target.value } })} placeholder="L-V 8 a. m. a 5 p. m." /></Field>

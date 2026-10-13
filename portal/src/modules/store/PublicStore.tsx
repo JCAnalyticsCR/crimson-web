@@ -216,7 +216,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
           <ProductView d={detail} missing={missing} cur={cur} isShop={isShop} store={S} photo={photo} setPhoto={setPhoto} variant={variant} setVariant={setVariant} qty={qty} setQty={setQtyD}
             onAdd={(p, vv, n) => add(p, vv, n)} onBuy={(p, vv, n) => { add(p, vv, n); go({ v: "pagar" }); }} onCat={toCatalog} onOpen={(id) => go({ p: id })} catName={catName} />
         ) : v === "pagar" || v === "cotizar" ? (
-          <Checkout api={api} store={S} cart={cart} mode={v === "pagar" && isShop ? "pedido" : "cotizacion"} onPlaced={(o) => { setCart([]); go({ pedido: o.track_token }); }} onBack={() => go({})} setQty={setQty} remove={remove} quoteText={quoteText} onTerms={() => go({ legal: "terms" }, { keep: true })} />
+          <Checkout api={api} store={S} cart={cart} mode={v === "pagar" && isShop ? "pedido" : "cotizacion"} onPlaced={(o) => { setCart([]); go({ pedido: o.track_token }); }} onBack={() => go({})} setQty={setQty} remove={remove} quoteText={quoteText} onTerms={() => go({ legal: "terms" }, { keep: true, replace: true })} />
         ) : (
           <>
             {page && homeSlug ? (

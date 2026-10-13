@@ -11,7 +11,7 @@ Publico (sin sesion, todo lo que entra se trata como hostil):
 from __future__ import annotations
 
 import html
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
@@ -77,7 +77,6 @@ def checkout_config(slug: str, db: Session = Depends(get_db)):
         "outside_gam": {"provinces": sorted(cr_geo.PROVINCIAS_FUERA_GAM), "cantons": sorted(cr_geo.CANTONES_FUERA_GAM)},
         "terms_required": bool((cfg.get("legal") or {}).get("terms")),
         "pickup": ck.get("pickup") or {},
-        "hold_hours": ck.get("hold_hours") or 48,
         "free_shipping_from": free_shipping_threshold(t, pricer),
         "auto_invoice": bool(ck.get("auto_invoice", True)),
         "whatsapp": cfg.get("whatsapp") or "",
@@ -104,7 +103,7 @@ def _checkout_out(db: Session, t: Tenant, o: Order, pay: dict | None = None, dup
         # honestidad: solo se dice "te enviamos un correo" si salio de verdad
         "email": {"to": so._mask_email(first["to"]), "status": first["status"]} if first else None,
         "pay": pay,
-        "expires_at": o.expires_at,
+        "expires_at": so.aware(o.expires_at),
         "duplicate": duplicate,
     }
 
@@ -147,12 +146,12 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
     wanted: dict[int, Decimal] = {}
     for ln in data.lines:
         wanted[ln.product_id] = wanted.get(ln.product_id, Decimal(0)) + Decimal(ln.quantity)
-    stock = store_inventory.availability(db, t.id, list(wanted))
-    for pid, qty in wanted.items():
-        left = stock.get(pid)
-        if left is not None and qty > Decimal(left):
+    stock = store_inventory.availability(db, t, list(wanted))
+    for pid in wanted:
+        row = stock.get(pid) or {}
+        if row and not row.get("disponible", True):
             name = next((i["name"] for i in items if i["product"] is not None and i["product"].id == pid), "un producto")
-            raise HTTPException(409, f"De {name} quedan {max(int(left), 0)} unidad(es). Ajustá la cantidad.")
+            raise HTTPException(409, f"{name}: {row.get('mensaje') or 'no está disponible para compra en línea'}.")
     if data.expected_total is not None and abs(Decimal(data.expected_total) - calc.total) > Decimal("0.01"):
         raise HTTPException(409, "El total cambió mientras comprabas. Revisá el resumen y confirmá de nuevo.")
 
@@ -194,7 +193,6 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
         notes=data.notes,
         idempotency_key=data.idempotency_key,
         terms_accepted_at=now if data.accept_terms else None,
-        expires_at=None if kind in (None, "efectivo") else now + timedelta(hours=int(so.checkout_cfg(t).get("hold_hours") or 48)),
         history=[{"status": "nuevo", "at": now.isoformat(), "by": "cliente"}],
     )
     for i, lo in zip(items, calc.lines, strict=True):
@@ -224,8 +222,11 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
             raise
         response.status_code = 200
         return _checkout_out(db, t, prev, duplicate=True)
-    store_inventory.hold_for_order(db, o)
     o.inventory_state = "held"
+    # reserva atomica: hace commit (o rollback de TODO el pedido y 409 si ya no alcanza); el vencimiento lo fija ella
+    hold = store_inventory.hold_for_order(db, o)
+    if hold.get("vence") and kind not in (None, "efectivo"):
+        o.expires_at = hold["vence"]
     audit(db, t.id, None, "create", "order", o.id, {"channel": "tienda", "total": str(o.total), "metodo": kind, "cliente": customer.id}, ip=ip)
     pay = None
     if kind == "tarjeta":
@@ -269,9 +270,6 @@ def _public_order(db: Session, slug: str, token: str) -> tuple[Tenant, Order]:
 @router.get("/public/store/{slug}/orders/{token}")
 def order_status(slug: str, token: str, response: Response, db: Session = Depends(get_db)):
     t, o = _public_order(db, slug, token)
-    if o.status == "nuevo" and o.expires_at and o.channel == "tienda":
-        if so.expire_pending(db, t.id):  # vencio mientras nadie miraba
-            db.commit()
     response.headers["Cache-Control"] = "no-store"
     return so.order_public(db, t, o)
 
@@ -362,7 +360,6 @@ class PickupCfg(_Cfg):
 
 class CheckoutCfgIn(_Cfg):
     methods: MethodsCfg
-    hold_hours: int = Field(48, ge=1, le=336)
     free_shipping_from: Decimal = Field(Decimal(0), ge=0)
     auto_invoice: bool = True
     pickup: PickupCfg = PickupCfg()
@@ -406,6 +403,7 @@ def _staff_out(db: Session, o: Order) -> dict:
     out["emails"] = so.email_status(db, o)
     out["needs_proof"] = o.payment_kind in so.NEEDS_PROOF
     out["next"] = so.next_states(o)
+    out["track_url"] = so.track_url(db.get(Tenant, o.tenant_id), o) if o.channel == "tienda" else None
     out["customer_name"] = None
     if o.customer_id:
         from ..models import Customer
@@ -447,8 +445,6 @@ def list_orders(
     p: Principal = Depends(require("sales", "ver")),
     db: Session = Depends(get_db),
 ):
-    if so.expire_pending(db, p.tenant.id):  # los vencidos se cancelan al mirar la lista (y cada hora en el worker)
-        db.commit()
     w = _filters(p.tenant.id, status, method, date_from, date_to, q, pendiente)
     rows = db.scalars(select(Order).where(*w).order_by(Order.id.desc()).limit(limit)).all()
     counts = dict(db.execute(select(Order.status, func.count()).where(Order.tenant_id == p.tenant.id, Order.channel == "tienda").group_by(Order.status)).all())
@@ -467,7 +463,6 @@ def _get(db: Session, p: Principal, oid: int) -> Order:
 def get_order(oid: int, p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
     o = _get(db, p, oid)
     out = _staff_out(db, o)
-    out["track_url"] = so.track_url(p.tenant, o) if o.channel == "tienda" else None
     return out
 
 
@@ -542,13 +537,6 @@ def proof_file(oid: int, mid: int, p: Principal = Depends(require("sales", "ver"
             "X-Content-Type-Options": "nosniff",
         },
     )
-
-
-@router.post("/store-orders/expire")
-def expire(p: Principal = Depends(require("sales", "editar")), db: Session = Depends(get_db)):
-    n = so.expire_pending(db, p.tenant.id)
-    db.commit()
-    return {"expired": n}
 
 
 @router.get("/store-orders/{oid}/print")

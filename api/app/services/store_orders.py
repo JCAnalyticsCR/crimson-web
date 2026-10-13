@@ -15,7 +15,7 @@ import hashlib
 import html
 import re
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import jwt
@@ -68,12 +68,16 @@ CHECKOUT_DEFAULTS: dict = {
         "tarjeta": {"active": False, "installments": False, "max_installments": 0},
         "efectivo": {"active": False, "note": "Pago en efectivo al recibir o al retirar el pedido."},
     },
-    "hold_hours": 48,  # plazo para pagar antes de liberar la reserva
     "free_shipping_from": 0,  # envio gratis desde este monto (en colones, con IVA); 0 = nunca
     "auto_invoice": True,  # comprobante electronico automatico al confirmarse el pago
     "pickup": {"address": "", "hours": ""},
     "notify_roles": ["admin", "ventas"],
 }
+
+
+def aware(dt: datetime | None) -> datetime | None:
+    """SQLite devuelve fechas sin zona aunque se guarden en UTC: sin esto el navegador las lee como hora local."""
+    return dt.replace(tzinfo=UTC) if dt is not None and dt.tzinfo is None else dt
 
 
 def _legacy_names(t: Tenant) -> dict[str, dict]:
@@ -187,7 +191,7 @@ def normalize_method(db: Session, t: Tenant, raw: str | None) -> tuple[str | Non
 def fmt_money(v, cur: str) -> str:
     sym = "₡" if cur == "CRC" else "$"
     n = d(v)
-    return f"{sym}{n:,.0f}" if cur == "CRC" else f"{sym}{n:,.2f}"
+    return f"{sym}{n:,.0f}".replace(",", " ") if cur == "CRC" else f"{sym}{n:,.2f}"  # CR: 542 965
 
 
 def pay_instructions(t: Tenant, o: Order) -> str | None:
@@ -327,9 +331,9 @@ def order_public(db: Session, t: Tenant, o: Order) -> dict:
         "number": o.number,
         "status": o.status,
         "status_label": STATUS_LABEL.get(o.status, o.status),
-        "created_at": o.created_at,
-        "paid_at": o.paid_at,
-        "expires_at": o.expires_at if o.status == "nuevo" else None,
+        "created_at": aware(o.created_at),
+        "paid_at": aware(o.paid_at),
+        "expires_at": aware(o.expires_at) if o.status == "nuevo" else None,
         "currency": o.currency,
         "subtotal": o.subtotal,
         "discount_total": o.discount_total,
@@ -337,7 +341,10 @@ def order_public(db: Session, t: Tenant, o: Order) -> dict:
         "tax_total": o.tax_total,
         "total": o.total,
         "coupon_code": o.coupon_code,
-        "lines": [{"name": ln.name, "quantity": ln.quantity, "unit_price": ln.unit_price, "tax_rate": ln.tax_rate, "total": ln.total} for ln in o.lines],
+        "lines": [
+            {"name": ln.name, "quantity": ln.quantity, "unit_price": ln.unit_price, "tax_rate": ln.tax_rate, "total": ln.total, "shipping": _is_ship(ln)}
+            for ln in o.lines
+        ],
         "contact": {"name": (o.contact or {}).get("name"), "email": _mask_email((o.contact or {}).get("email"))},
         "shipping_method": o.shipping_method,
         "delivery": {k: (o.delivery or {}).get(k) for k in ("type", "province", "canton", "district")} if o.delivery else None,
@@ -353,10 +360,19 @@ def order_public(db: Session, t: Tenant, o: Order) -> dict:
         "tracking_number": o.tracking_number,
         "carrier": o.carrier,
         "cancel_reason": o.cancel_reason if o.status == "cancelado" else None,
-        "history": [{"status": h.get("status"), "label": STATUS_LABEL.get(h.get("status"), h.get("status")), "at": h.get("at")} for h in (o.history or []) if h.get("kind") != "nota"],
+        "history": [
+            {"status": h.get("status"), "label": STATUS_LABEL.get(h.get("status"), h.get("status")), "at": h.get("at")}
+            for h in (o.history or [])
+            if h.get("kind") != "nota"
+        ],
         "whatsapp": cfg.get("whatsapp") or "",
         "store_name": cfg.get("name"),
     }
+
+
+def _is_ship(ln) -> bool:
+    """La linea de envio del pedido (el motor de totales la factura como una linea mas con IVA)."""
+    return ln.product_id is None and (ln.name or "").startswith("Envio - ")
 
 
 def _mask_email(e: str | None) -> str | None:
@@ -398,6 +414,7 @@ def _email_html(t: Tenant, o: Order, kind: str, extra: str = "") -> str:
     rows = "".join(
         f"<tr><td style='padding:6px 0'>{e(ln.name)} × {d(ln.quantity):g}</td><td style='padding:6px 0;text-align:right'>{fmt_money(ln.total, o.currency)}</td></tr>"
         for ln in o.lines
+        if not _is_ship(ln)
     )
     instr = pay_instructions(t, o) if kind == "recibido" and o.status in ("nuevo", "en_revision") else None
     url = track_url(t, o)
@@ -407,7 +424,7 @@ def _email_html(t: Tenant, o: Order, kind: str, extra: str = "") -> str:
 <p style="font-size:13px;color:#5a5560">Pedido <b>{e(o.number)}</b> · Estado: <b>{e(STATUS_LABEL.get(o.status, o.status))}</b></p>
 {extra}
 <table style="width:100%;border-collapse:collapse;font-size:14px;border-top:1px solid #eee;border-bottom:1px solid #eee">{rows}</table>
-<p style="text-align:right;font-size:13px;color:#5a5560;margin:8px 0 0">IVA {fmt_money(o.tax_total, o.currency)} · Envío {fmt_money(o.shipping, o.currency)}</p>
+<p style="text-align:right;font-size:13px;color:#5a5560;margin:8px 0 0">Envío (sin IVA) {fmt_money(o.shipping, o.currency)} · IVA {fmt_money(o.tax_total, o.currency)}</p>
 <p style="text-align:right;font-size:18px;font-weight:700;margin:4px 0 16px">Total {fmt_money(o.total, o.currency)}</p>
 {f'<div style="background:#f6f2ee;border-radius:8px;padding:12px 14px;white-space:pre-wrap;font-size:14px"><b>Cómo pagar · {e(o.payment_method or "")}</b><br>{e(instr)}</div>' if instr else ""}
 <p><a href="{e(url)}" style="display:inline-block;background:{primary};color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700">Ver mi pedido</a></p>
@@ -459,15 +476,14 @@ def _note(o: Order, by, note: str) -> None:
     o.history = [*(o.history or []), {"status": o.status, "at": datetime.now(UTC).isoformat(), "by": by, "note": note, "kind": "nota"}]
 
 
-def _inventory(db: Session, o: Order, new: str) -> None:
-    """Reserva -> libera (cancelado) o -> descuenta (enviado/entregado). Solo pedidos que reservaron al crearse."""
-    if o.inventory_state != "held":
-        return
+def _inventory(db: Session, o: Order, old: str, new: str, user_id: int | None = None) -> None:
+    """Delega en la capa de inventario (store_inventory.on_order_status): pagado/preparando fija la reserva,
+    enviado/entregado descuenta una sola vez, cancelado libera. "Comprobante en revision" sigue siendo un pedido
+    sin pagar: para el inventario cuenta como "nuevo" (asi el pago confirmado tambien fija la reserva)."""
+    store_inventory.on_order_status(db, o, "nuevo" if old in ("nuevo", "en_revision") else old, new, user_id)
     if new == "cancelado":
-        store_inventory.release_for_order(db, o)
         o.inventory_state = "released"
     elif new in ("enviado", "entregado"):
-        store_inventory.fulfill_for_order(db, o)
         o.inventory_state = "fulfilled"
 
 
@@ -502,8 +518,6 @@ def transition(
         if amt <= 0 or amt > d(o.total):
             raise HTTPException(422, "Monto de reembolso inválido")
         o.refund = {"amount": str(amt), "note": note, "at": datetime.now(UTC).isoformat(), "by": by}
-    if new == "nuevo" and old == "en_revision":
-        o.expires_at = datetime.now(UTC) + timedelta(hours=int(checkout_cfg(t).get("hold_hours") or 48))
     o.status = new
     if new == "pagado" or (new == "entregado" and o.payment_kind == "efectivo" and not o.paid_at):
         o.paid_at = o.paid_at or datetime.now(UTC)
@@ -513,7 +527,7 @@ def transition(
         o.tracking_number = tracking_number.strip()[:80] or None
     if carrier is not None:
         o.carrier = carrier.strip()[:80] or None
-    _inventory(db, o, new)
+    _inventory(db, o, old, new, by if isinstance(by, int) else None)
     _hist(o, new, by, note)
     if new == "pagado":
         auto_invoice(db, t, o)
@@ -554,6 +568,11 @@ def next_states(o: Order) -> list[str]:
         nxt -= set(FULFILL)
     if o.status == "cancelado" and not o.paid_at:
         nxt.discard("reembolsado")
+    kind = (o.delivery or {}).get("type")
+    if kind == "envio":
+        nxt.discard("listo")  # "listo para retiro" no aplica a un envio
+    elif kind == "retiro":
+        nxt.discard("enviado")
     order = ["nuevo", "pagado", "preparando", "listo", "enviado", "entregado", "cancelado", "reembolsado"]
     return [s for s in order if s in nxt]
 
@@ -566,25 +585,6 @@ def mark_paid(db: Session, t: Tenant, o: Order, *, by, ref: str | None, note: st
         o.payment_ref = ref[:120]
     transition(db, t, o, "pagado", by=by, note=note)
     return True
-
-
-def expire_pending(db: Session, tenant_id: int | None = None) -> int:
-    """Pedidos sin pagar con el plazo vencido -> cancelados (libera la reserva). Efectivo no vence."""
-    now = datetime.now(UTC)
-    q = select(Order).where(
-        Order.channel == "tienda", Order.status == "nuevo", Order.expires_at.is_not(None), Order.payment_kind.in_(("sinpe", "transferencia", "tarjeta"))
-    )
-    if tenant_id:
-        q = q.where(Order.tenant_id == tenant_id)
-    n = 0
-    for o in db.scalars(q):
-        exp = o.expires_at if o.expires_at.tzinfo else o.expires_at.replace(tzinfo=UTC)
-        if exp > now:
-            continue
-        t = db.get(Tenant, o.tenant_id)
-        transition(db, t, o, "cancelado", by="sistema", note="Venció el plazo para pagar")
-        n += 1
-    return n
 
 
 def attention_where(tid: int) -> list:
@@ -658,7 +658,6 @@ def invoice_order(db: Session, t: Tenant, o: Order, user_id: int | None, doc_typ
     register_payment: si el pedido ya se pago, el cobro queda aplicado (la factura no aparece "por cobrar")."""
     from ..schemas.sales import DocumentIn, LineInSchema, PaymentIn
     from . import documents as docsvc
-    from . import inventory as invsvc
 
     if o.invoice_id:
         raise HTTPException(409, "La orden ya tiene comprobante")
@@ -698,9 +697,8 @@ def invoice_order(db: Session, t: Tenant, o: Order, user_id: int | None, doc_typ
         ],
     )
     invoice = docsvc.create_invoice(db, t.id, user_id, payload, doc_type)
-    # el inventario de la tienda ya reservo/desconto este pedido: facturar no puede descontar otra vez
-    if not (store_inventory.MANAGES_STOCK and o.inventory_state in ("held", "fulfilled")):
-        invsvc.deduct_for_invoice(db, invoice, user_id)
+    # la capa de inventario de la tienda descuenta solo lo que falte (nunca dos veces si ya se despacho)
+    store_inventory.deduct_for_order_invoice(db, o, invoice, user_id)
     o.invoice_id = invoice.id
     if o.status == "nuevo" and not o.payment_kind:  # pedidos de antes del checkout nuevo: comportamiento de siempre
         o.status = "preparando"

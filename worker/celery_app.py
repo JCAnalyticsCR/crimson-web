@@ -36,18 +36,6 @@ def fx_bccr_daily() -> dict:
     return {"sell": str(fx.sell), "buy": str(fx.buy)}
 
 
-@celery.task(name="store.expire_orders")
-def expire_store_orders() -> int:
-    """Pedidos de la tienda sin pagar con el plazo vencido -> cancelados (libera la reserva y avisa al cliente)."""
-    from app.core.db import SessionLocal
-    from app.services.store_orders import expire_pending
-
-    with SessionLocal() as db:
-        n = expire_pending(db)
-        db.commit()
-    return n
-
-
 @celery.task(name="sales.mark_overdue")
 def mark_overdue() -> int:
     """Marca vencidas las cotizaciones/facturas cuya fecha paso (los recordatorios por correo llegan en Fase 1.4)."""
@@ -427,5 +415,4 @@ celery.conf.beat_schedule = {
     "retry-outbox": {"task": "mail.retry_outbox", "schedule": crontab(minute="*/15")},
     "fx-bccr-daily": {"task": "fx.bccr_daily", "schedule": crontab(hour=6, minute=15)},
     "mark-overdue": {"task": "sales.mark_overdue", "schedule": crontab(hour=0, minute=30)},
-    "store-expire-orders": {"task": "store.expire_orders", "schedule": crontab(minute=10)},
 }

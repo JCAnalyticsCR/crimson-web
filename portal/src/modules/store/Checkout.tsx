@@ -12,7 +12,7 @@ type Method = { code: string; label: string; needs_proof: boolean; simulated: bo
 type Rate = { name: string; zone: "retiro" | "gam" | "fuera_gam" | null; per_kg: boolean; display_amount: string | number };
 type Cfg = {
   currency: string; methods: Method[]; shipping_rates: Rate[]; provinces: Record<string, string[]>;
-  outside_gam: { provinces: string[]; cantons: string[] }; terms_required: boolean; pickup: { address?: string; hours?: string }; hold_hours: number; whatsapp: string;
+  outside_gam: { provinces: string[]; cantons: string[] }; terms_required: boolean; pickup: { address?: string; hours?: string }; whatsapp: string;
   free_shipping_from: string | number | null; auto_invoice: boolean;
 };
 type Quote = {
@@ -64,6 +64,7 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
   const [busy, setBusy] = useState(false);
   const [touched, setTouched] = useState(false);
   const keyRef = useRef<string | null>(null);
+  const errRef = useRef<HTMLUListElement>(null);
   const formTop = useRef<HTMLHeadingElement>(null);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((x) => ({ ...x, [k]: v }));
 
@@ -138,7 +139,7 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
   };
   const errs = stepErrors(step);
   const goStep = (n: number) => { setStep(n); setTouched(false); setErr(null); window.setTimeout(() => formTop.current?.focus({ preventScroll: false }), 0); window.scrollTo({ top: 0 }); };
-  const next = () => { if (errs.length) { setTouched(true); return; } goStep(Math.min(3, step + 1)); };
+  const next = () => { if (errs.length) { setTouched(true); window.setTimeout(() => errRef.current?.scrollIntoView({ block: "center" }), 0); return; } goStep(Math.min(3, step + 1)); };
 
   const applyCoupon = async () => {
     const code = f.coupon.trim().toUpperCase();
@@ -152,7 +153,13 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
   const submit = async (e?: FormEvent) => {
     e?.preventDefault();
     if (step < 3) { next(); return; }
-    for (let s = 0; s < 4; s++) if (stepErrors(s).length) { goStep(s); setTouched(true); return; }
+    for (let s = 0; s < 4; s++) {
+      if (!stepErrors(s).length) continue;
+      if (s !== step) goStep(s);
+      setTouched(true);
+      window.setTimeout(() => errRef.current?.scrollIntoView({ block: "center" }), 0);
+      return;
+    }
     if (!quote || busy) return;
     setBusy(true); setErr(null);
     keyRef.current = keyRef.current || newKey();
@@ -275,7 +282,7 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
                   <label key={m.code} className="sh-opt"><input type="radio" name="pay" checked={f.method === m.code} onChange={() => set("method", m.code)} />
                     <span>{m.label}{m.simulated && <em className="ck-tag">Modo de prueba</em>}<small>{m.hint}</small></span><span /></label>
                 ))}</div>
-                {method?.needs_proof && <p className="sh-note" style={{ margin: 0 }}>Al confirmar te mostramos los datos para pagar. Tenés {cfg.hold_hours} h para subir el comprobante; luego el pedido se libera.</p>}
+                {method?.needs_proof && <p className="sh-note" style={{ margin: 0 }}>Al confirmar te mostramos los datos para pagar. Apartamos los productos mientras pagás: subí el comprobante cuanto antes.</p>}
                 {method?.code === "tarjeta" && (method.simulated
                   ? <p className="ck-sim" role="note"><b>Pago simulado.</b> Esta tienda todavía no tiene ONVO conectado: el pago con tarjeta es solo de prueba y no se cobra nada.</p>
                   : <p className="sh-note" style={{ margin: 0 }}><Ico d={IC.lock} size={14} /> Te llevamos a la página segura de ONVO. Nunca vemos los datos de tu tarjeta.</p>)}
@@ -308,7 +315,7 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
             </>
           )}
 
-          {(touched && errs.length > 0) && <ul className="sh-err ck-errs" role="alert">{errs.map((x) => <li key={x}>{x}</li>)}</ul>}
+          {(touched && errs.length > 0) && <ul ref={errRef} className="sh-err ck-errs" role="alert">{errs.map((x) => <li key={x}>{x}</li>)}</ul>}
           {err && <p className="sh-err" role="alert" style={{ margin: 0 }}>{err}</p>}
           <div className="ck-actions">
             {step > 0 && <button type="button" className="sh-btn sh-btn--ghost" onClick={() => goStep(step - 1)}><Ico d={IC.back} size={16} />Atrás</button>}
@@ -348,7 +355,7 @@ function Summary({ quote, qErr, cart, cur, setQty, remove }: { quote: Quote | nu
         <div className="ck-totals">
           <div className="sh-totrow"><span>Subtotal (sin IVA)</span><b>{money(quote.subtotal, cur)}</b></div>
           {Number(quote.discount_total) > 0 && <div className="sh-totrow"><span>Descuento{quote.coupon ? ` (${quote.coupon})` : ""}</span><b>−{money(quote.discount_total, cur)}</b></div>}
-          <div className="sh-totrow"><span>Envío</span><b>{quote.free_shipping ? "Gratis" : Number(quote.shipping) > 0 ? money(quote.shipping, cur) : "—"}</b></div>
+          <div className="sh-totrow"><span>Envío (sin IVA)</span><b>{quote.free_shipping ? "Gratis" : Number(quote.shipping) > 0 ? money(quote.shipping, cur) : "—"}</b></div>
           {!quote.free_shipping && Number(quote.free_shipping_from) > 0 && <p className="sh-note" style={{ margin: 0 }}>Envío gratis en compras desde {money(quote.free_shipping_from as number, cur)}.</p>}
           {(quote.taxes?.length ? quote.taxes : [{ rate: "13", amount: quote.tax_total }]).map((t) => <div key={t.rate} className="sh-totrow"><span>IVA {t.rate} %</span><b>{money(t.amount, cur)}</b></div>)}
           <div className="sh-totrow sh-totrow--big"><span>Total</span><b>{money(quote.total, cur)}</b></div>

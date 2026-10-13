@@ -20,8 +20,15 @@ def inv_calls(monkeypatch):
     from app.services import store_inventory
 
     calls = []
-    for fn in ("hold_for_order", "release_for_order", "fulfill_for_order"):
-        monkeypatch.setattr(store_inventory, fn, lambda db, o, _fn=fn: calls.append((_fn, o.number)))
+
+    def hold(db, o, **kw):
+        calls.append(("hold_for_order", o.number))
+        db.commit()  # la real hace commit (o rollback + 409)
+        return {"vence": None}
+
+    for fn in ("release_for_order", "fulfill_for_order", "mark_paid"):
+        monkeypatch.setattr(store_inventory, fn, lambda db, o, *a, _fn=fn, **k: calls.append((_fn, o.number)) or 0)
+    monkeypatch.setattr(store_inventory, "hold_for_order", hold)
     return calls
 
 
@@ -34,7 +41,6 @@ def _shop(client, **checkout):
             "tarjeta": {"active": checkout.get("tarjeta", False), "installments": checkout.get("cuotas", 0) > 0, "max_installments": checkout.get("cuotas", 0)},
             "efectivo": {"active": checkout.get("efectivo", True)},
         },
-        "hold_hours": 48,
         "auto_invoice": checkout.get("auto_invoice", False),
         "free_shipping_from": checkout.get("free_shipping_from", 0),
         "pickup": {"address": "Oficinas Crimson, Escazú", "hours": "L-V 8-17"},
@@ -165,6 +171,7 @@ def test_sinpe_full_flow_idempotency_proof_and_tracking(client, auth, inv_calls,
     assert st("enviado").status_code == 409
     paid = st("pagado", payment_ref="SINPE 123456")
     assert paid.status_code == 200 and paid.json()["paid_at"] and paid.json()["email_result"]["status"] == "simulado"
+    assert ("mark_paid", o["number"]) in inv_calls  # desde "comprobante en revision" tambien fija la reserva
     assert st("pagado").status_code == 409  # ya esta
     assert st("preparando").status_code == 200
     sent = st("enviado", tracking_number="CR123456789", carrier="Correos de Costa Rica")
@@ -231,28 +238,17 @@ def test_cancel_requires_reason_and_releases(client, auth, inv_calls):
     assert pub["status"] == "cancelado" and pub["cancel_reason"] == "Cliente desistió" and pub["instructions"] is None
 
 
-def test_expire_unpaid_orders(client, auth, inv_calls, db_session):
-    from datetime import UTC, datetime, timedelta
-
-    from app.models import Order
-
+def test_cash_on_delivery_advances_without_payment(client, auth, inv_calls):
     prods = _shop(client)
-    o = client.post(f"{SLUG}/checkout", json=_body(prods[0]["id"])).json()
     cash = client.post(
         f"{SLUG}/checkout", json=_body(prods[0]["id"], payment_method="efectivo", delivery={"type": "retiro"}, shipping_method="Retiro en tienda")
     ).json()
-    assert cash["status"] == "nuevo" and cash["expires_at"] is None
-    for row in db_session.query(Order).all():
-        row.expires_at = datetime.now(UTC) - timedelta(hours=1) if row.number == o["number"] else row.expires_at
-    db_session.commit()
-    items = client.get("/store-orders").json()["items"]  # la lista vence lo atrasado
-    by = {x["number"]: x for x in items}
-    assert by[o["number"]]["status"] == "cancelado" and "plazo" in by[o["number"]]["cancel_reason"]
-    assert by[cash["number"]]["status"] == "nuevo"  # efectivo no vence
-    assert ("release_for_order", o["number"]) in inv_calls
+    assert cash["status"] == "nuevo" and cash["expires_at"] is None and cash["instructions"]
+    by = {x["number"]: x for x in client.get("/store-orders").json()["items"]}
     # efectivo contra entrega avanza sin pago y se marca pagado al entregar
     cid = by[cash["number"]]["id"]
     assert client.post(f"/store-orders/{cid}/status", json={"status": "preparando"}).status_code == 200
+    assert ("mark_paid", cash["number"]) in inv_calls  # contra entrega: la reserva deja de vencer al prepararlo
     assert client.post(f"/store-orders/{cid}/status", json={"status": "listo"}).status_code == 200
     done = client.post(f"/store-orders/{cid}/status", json={"status": "entregado"}).json()
     assert done["paid_at"] and done["status"] == "entregado"
@@ -364,11 +360,12 @@ def test_auto_invoice_on_payment_sandbox_and_no_double_stock(client, auth, db_se
     o = client.post(f"{SLUG}/checkout", json=_body(prods[0]["id"])).json()
     oid = client.get("/store-orders").json()["items"][0]["id"]
     # el inventario de la tienda ya reservo: facturar no descuenta otra vez
-    monkeypatch.setattr(store_inventory, "MANAGES_STOCK", True)
-    deducted = []
-    monkeypatch.setattr(invsvc, "deduct_for_invoice", lambda *a, **k: deducted.append(a))
+    deducted, legacy = [], []
+    monkeypatch.setattr(store_inventory, "deduct_for_order_invoice", lambda db, o, inv, uid=None: deducted.append((o.number, inv.number)))
+    monkeypatch.setattr(invsvc, "deduct_for_invoice", lambda *a, **k: legacy.append(a))
     paid = client.post(f"/store-orders/{oid}/status", json={"status": "pagado", "payment_ref": "SINPE 999"}).json()
-    assert paid["invoice_id"] and deducted == []
+    # facturar el pedido pasa por la capa de la tienda (descuenta solo lo que falte), nunca por el descuento viejo
+    assert paid["invoice_id"] and len(deducted) == 1 and deducted[0][0] == o["number"] and legacy == []
     inv = db_session.get(Invoice, paid["invoice_id"])
     assert inv.doc_type == "FE" and inv.einvoice_status == "aceptada" and inv.created_by is None  # venta web: sin vendedor ni comision
     assert inv.balance == 0 and abs(float(inv.total) - float(o["total"])) < 0.01
@@ -406,9 +403,23 @@ def test_free_shipping_usd_coherence_and_stock(client, auth, monkeypatch):
     ou = client.post(f"{SLUG}/checkout", json=_body(pid, expected_total=str(u["total"]))).json()
     assert ou["currency"] == "USD" and "$" in ou["instructions"]
     # existencias: si el inventario de la tienda dice que queda 1, no se venden 2
-    monkeypatch.setattr(store_inventory, "availability", lambda db, tid, ids: {i: Decimal(1) for i in ids})
+    # disponibilidad del inventario real (nunca la del catalogo importado): agotado -> no se vende
+    monkeypatch.setattr(store_inventory, "availability", lambda db, t, ids, public=True: {i: {"disponible": False, "mensaje": "Agotado"} for i in ids})
     no = client.post(f"{SLUG}/checkout", json=_body(pid))
-    assert no.status_code == 409 and "quedan 1" in no.json()["detail"]
+    assert no.status_code == 409 and "Agotado" in no.json()["detail"]
+
+    # si la reserva atomica ya no alcanza (409 de la capa de inventario), no queda pedido a medias
+    from fastapi import HTTPException
+
+    def no_stock(db, o, **kw):
+        db.rollback()
+        raise HTTPException(409, "Ya no hay suficiente: quedan 0")
+
+    monkeypatch.setattr(store_inventory, "availability", lambda db, t, ids, public=True: {})
+    monkeypatch.setattr(store_inventory, "hold_for_order", no_stock)
+    antes = len(client.get("/store-orders").json()["items"])
+    r = client.post(f"{SLUG}/checkout", json=_body(pid, idempotency_key="ck-sin-stock-01"))
+    assert r.status_code == 409 and len(client.get("/store-orders").json()["items"]) == antes
 
 
 def test_card_installments_preference_sent_to_onvo(client, auth, db_session, monkeypatch):
