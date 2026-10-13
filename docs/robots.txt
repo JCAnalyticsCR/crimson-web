@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
+Disallow: /demo-tienda/
 
 Sitemap: https://crimsoncr.com/sitemap.xml
