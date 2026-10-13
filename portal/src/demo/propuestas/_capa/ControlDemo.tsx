@@ -1,0 +1,129 @@
+/* Control de la demo sobre «Mi pedido» (mejora 1):
+   - ?pedido=ejemplo-<estado>: tarjeta «Pedido de ejemplo · ORD-000128» para recorrer los 6 estados reales; cada uno
+     navega con replace y OrderStatus (key={pedido}) se vuelve a cargar solo. Escritorio: tarjeta abajo a la derecha
+     (se puede minimizar). Movil: barra plegada abajo que se despliega en hoja.
+   - ?v=mi-pedido: pista para abrir el pedido de ejemplo.
+   - ?pedido=demo-*: el pedido de prueba de esta sesion, con el enlace a «Detrás de escena» y el hilo carmesi.
+   Pantalla de trabajo: nada se anima. */
+import { useEffect, useId, useState, type ReactNode } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { HiloCarmesi } from "../_comun/componentes";
+import { ETIQUETA_ESTADO, leerPedidosDemo } from "../_comun/pedidos";
+
+export const ESTADOS_EJEMPLO = ["nuevo", "en_revision", "pagado", "preparando", "enviado", "entregado"] as const;
+type EstadoEjemplo = (typeof ESTADOS_EJEMPLO)[number];
+
+const PIE: Record<EstadoEjemplo, string> = {
+  nuevo: "María eligió SINPE Móvil. Los productos quedan apartados mientras paga; si no paga a tiempo, la reserva vence sola.",
+  en_revision: "María subió el comprobante. Solo lo ve el equipo de Crimson, que confirma el pago desde su panel.",
+  pagado: "Crimson confirmó el pago y la factura electrónica salió sola.",
+  preparando: "El equipo arma el paquete; María ve el avance sin tener que escribir.",
+  enviado: "Salió con guía de Correos de Costa Rica (guía de ejemplo): María la tiene aquí mismo.",
+  entregado: "Entregado. Con la propuesta B1, este pedido quedaría en su cuenta con sus equipos y su garantía.",
+};
+
+const esMovil = () => typeof matchMedia === "function" && matchMedia("(max-width: 767px)").matches;
+
+export default function ControlDemo() {
+  const loc = useLocation();
+  const sp = new URLSearchParams(loc.search);
+  const pedido = sp.get("pedido");
+  if (pedido && pedido.startsWith("ejemplo-")) {
+    const k = pedido.slice(8) as EstadoEjemplo;
+    if ((ESTADOS_EJEMPLO as readonly string[]).includes(k)) return <ControlEjemplo estado={k} />;
+  }
+  if (pedido && pedido.startsWith("demo-")) return <ControlPrueba token={pedido} />;
+  if (!pedido && sp.get("v") === "mi-pedido") return <PistaBuscar />;
+  return null;
+}
+
+function Tarjeta({ titulo, resumen, children }: { titulo: string; resumen: string; children: ReactNode }) {
+  const [movil, setMovil] = useState(esMovil);
+  const [abierta, setAbierta] = useState(() => !esMovil());
+  const cuerpoId = useId();
+  // en movil la barra plegada ocupa el pie: el credito de la demo deja espacio para no quedar tapado
+  useEffect(() => {
+    document.documentElement.classList.add("cap-con-control");
+    return () => document.documentElement.classList.remove("cap-con-control");
+  }, []);
+  useEffect(() => {
+    const mq = matchMedia("(max-width: 767px)");
+    const on = () => { setMovil(mq.matches); setAbierta(!mq.matches); };
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  useEffect(() => {
+    if (!abierta || !movil) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setAbierta(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [abierta, movil]);
+  return (
+    <aside className="cap cap-control" data-abierta={abierta ? "" : undefined} aria-label={titulo}>
+      <button type="button" className="cap-control__head" aria-expanded={abierta} aria-controls={cuerpoId} onClick={() => setAbierta((v) => !v)}>
+        <span className="cap-control__t"><i aria-hidden="true" />{titulo}</span>
+        <span className="cap-control__r">{!abierta && <span className="cap-control__res">{resumen}</span>}<span aria-hidden="true">{abierta ? "▾" : "▴"}</span><span className="cap-sr">{abierta ? " (minimizar)" : " (abrir)"}</span></span>
+      </button>
+      <div id={cuerpoId} className="cap-control__body" hidden={!abierta}>{children}</div>
+    </aside>
+  );
+}
+
+function ControlEjemplo({ estado }: { estado: EstadoEjemplo }) {
+  const navigate = useNavigate();
+  const i = ESTADOS_EJEMPLO.indexOf(estado);
+  const ir = (k: EstadoEjemplo) => navigate(`/?pedido=ejemplo-${k}`, { replace: true });
+  return (
+    <Tarjeta titulo="Pedido de ejemplo · ORD-000128" resumen={ETIQUETA_ESTADO[estado]}>
+      <p className="cap-control__sub">Así lo ve María, la clienta. Recorré cada estado:</p>
+      <ol className="cap-estados" aria-label="Estados del pedido de ejemplo">
+        {ESTADOS_EJEMPLO.map((k, n) => (
+          <li key={k}>
+            <button type="button" aria-current={k === estado ? "step" : undefined} data-hecho={n < i ? "" : undefined} onClick={() => ir(k)}>
+              <span aria-hidden="true">{n + 1}</span>{ETIQUETA_ESTADO[k]}
+            </button>
+          </li>
+        ))}
+      </ol>
+      <div className="cap-control__nav">
+        <button type="button" className="cap-btn cap-btn--fantasma" disabled={i === 0} onClick={() => ir(ESTADOS_EJEMPLO[i - 1])}>← Estado anterior</button>
+        <button type="button" className="cap-btn cap-btn--claro" disabled={i === ESTADOS_EJEMPLO.length - 1} onClick={() => ir(ESTADOS_EJEMPLO[i + 1])}>Estado siguiente →</button>
+      </div>
+      <p className="cap-control__pie" aria-live="polite">{PIE[estado]}{estado === "entregado" && <> <Link to="/propuestas/b1">Ver la maqueta B1 →</Link></>}</p>
+      <Link className="cap-control__crimson" to={`/detras-de-escena/pedidos?pedido=ORD-000128&estado=${estado}`}>Ver este pedido como lo ve Crimson →</Link>
+      <Hilo><HiloCarmesi aqui="mi-pedido" numero="ORD-000128" token={`ejemplo-${estado}`} /></Hilo>
+    </Tarjeta>
+  );
+}
+
+function ControlPrueba({ token }: { token: string }) {
+  const p = leerPedidosDemo().find((x) => x.token === token);
+  const numero = p?.number || `DEMO-${token.split("-")[1] || ""}`;
+  return (
+    <Tarjeta titulo={`Tu pedido de prueba · ${numero}`} resumen={p?.status_label || "Pedido de prueba"}>
+      <p className="cap-control__sub">Este es tu pedido de prueba. Nada se cobró ni se envió.</p>
+      <Link className="cap-control__crimson" to={`/detras-de-escena/pedidos?pedido=${encodeURIComponent(numero)}`}>Seguilo del lado de Crimson →</Link>
+      <Hilo><HiloCarmesi aqui="mi-pedido" numero={numero} token={token} /></Hilo>
+    </Tarjeta>
+  );
+}
+
+/** El hilo carmesi plegado: la tarjeta no tapa el pedido y el recorrido queda a un toque. */
+function Hilo({ children }: { children: ReactNode }) {
+  return (
+    <details className="cap-control__hilo">
+      <summary>Seguí esta compra por el hilo carmesí</summary>
+      {children}
+    </details>
+  );
+}
+
+function PistaBuscar() {
+  const navigate = useNavigate();
+  return (
+    <aside className="cap cap-control cap-control--pista" aria-label="Pedido de ejemplo">
+      <p>¿No tenés un pedido a mano? Abrí el pedido de ejemplo ORD-000128.</p>
+      <button type="button" className="cap-btn cap-btn--claro" onClick={() => navigate("/?pedido=ejemplo-enviado")}>Abrir el pedido de ejemplo</button>
+    </aside>
+  );
+}

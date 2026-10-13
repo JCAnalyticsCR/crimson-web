@@ -1,19 +1,23 @@
 /* DEMOSTRACION ESTATICA: estilos del marco (franja, aviso, candado, credito). Solo los carga main-demo.tsx.
    La tienda real no cambia: aqui solo se corre el alto de la franja en lo que es fijo o pegajoso. */
-:root { --demo-h: 26px; --demo-ink: #15131a; --demo-cream: #f6f2ee; --demo-crimson: #e2233a; }
+:root { --demo-h: 40px; --demo-ink: #15131a; --demo-cream: #f6f2ee; --demo-crimson: #e2233a; }
 html.demo-on body { padding-top: var(--demo-h); background: var(--demo-cream); }
 
-/* ---------- franja fija ---------- */
+/* ---------- franja fija (40 px): texto a la izquierda, controles de la capa a la derecha ---------- */
 .demo-ribbon {
   position: fixed; top: 0; left: 0; right: 0; height: var(--demo-h); z-index: 100;
-  display: flex; align-items: center; justify-content: center; gap: 4px; padding: 0 12px;
-  background: var(--demo-ink); color: rgba(244, 241, 238, .82);
+  display: flex; align-items: center; gap: 10px; padding: 0 max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left));
+  background: var(--demo-ink); color: rgba(244, 241, 238, .82); border-bottom: 1px solid rgba(255, 255, 255, .08);
   font: 500 10px/1 "JetBrains Mono", ui-monospace, Consolas, monospace; letter-spacing: .12em; text-transform: uppercase;
-  white-space: nowrap; overflow: hidden;
+  white-space: nowrap;
 }
-.demo-ribbon b { color: #fff; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
-.demo-ribbon b::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--demo-crimson); }
-@media (max-width: 380px) { .demo-ribbon { letter-spacing: .06em; font-size: 9.5px; } }
+.demo-ribbon__txt { flex: 0 1 auto; min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.demo-ribbon__txt b { flex: none; color: #fff; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
+.demo-ribbon__txt b::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--demo-crimson); }
+.demo-ribbon__largo { display: none; }
+.demo-ribbon__ctl { flex: 1 1 auto; min-width: 0; height: 100%; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+@media (min-width: 640px) { .demo-ribbon__largo { display: inline; } }
+@media (max-width: 380px) { .demo-ribbon { letter-spacing: .06em; font-size: 9.5px; gap: 8px; } }
 
 /* lo fijo o pegajoso de la vitrina, corrido el alto de la franja */
 html.demo-on .shop .sh-head { top: var(--demo-h); }
@@ -31,6 +35,9 @@ html.demo-on .shop { min-height: calc(100dvh - var(--demo-h)); }
   font: 400 12px/1.5 Manrope, system-ui, sans-serif; border-top: 1px solid rgba(255, 255, 255, .08);
 }
 .demo-credit span:first-child { max-width: 72ch; }
+.demo-credit__mas a { margin: 0 2px; }
+/* con el control del pedido de ejemplo plegado abajo (movil), el credito deja espacio para no quedar tapado */
+@media (max-width: 767px) { html.demo-on.cap-con-control .demo-credit { padding-bottom: calc(76px + env(safe-area-inset-bottom)); } }
 .demo-credit a { color: rgba(244, 241, 238, .9); text-decoration: underline; text-underline-offset: 3px; }
 .demo-credit a:hover { color: #fff; }
 
@@ -87,3 +94,16 @@ html:not(.demo-on) body:has(.demo-gate) { padding-top: 0; }
 .demo-gate__btn:focus-visible { outline: 2px solid var(--demo-ink); outline-offset: 3px; }
 .demo-gate__sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .demo-gate__dots i { transition: none; } }
+
+/* ---------- seccion aun no integrada en esta vista previa ---------- */
+.demo-pendiente {
+  min-height: calc(100dvh - var(--demo-h)); display: grid; place-content: center; justify-items: center; gap: 12px; padding: 32px 16px; text-align: center;
+  background: var(--demo-cream); color: var(--demo-ink); font-family: Manrope, system-ui, sans-serif; outline: none;
+}
+.demo-pendiente__ceja { font: 500 11px/1 "JetBrains Mono", ui-monospace, monospace; letter-spacing: .2em; text-transform: uppercase; color: #c41a2f; }
+.demo-pendiente h1 { margin: 0; max-width: 22ch; font: 700 clamp(26px, 5vw, 40px)/1.08 "Bricolage Grotesque", Manrope, sans-serif; letter-spacing: -.02em; text-wrap: balance; }
+.demo-pendiente p { margin: 0; color: #5a5560; font-size: 15px; }
+.demo-pendiente__acc { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 6px; }
+.demo-pendiente__acc a { min-height: 44px; display: inline-flex; align-items: center; padding: 0 18px; border-radius: 999px; background: var(--demo-ink); color: #fff; font-weight: 700; font-size: 14.5px; }
+.demo-pendiente__acc a + a { background: transparent; color: var(--demo-ink); box-shadow: inset 0 0 0 1.5px rgba(21, 19, 26, .2); }
+.demo-pendiente__acc a:focus-visible { outline: 3px solid #c41a2f; outline-offset: 3px; }
