@@ -218,6 +218,33 @@ def test_ficha_por_direccion_amigable(client, auth, db_session):
     assert client.put(f"/store/showcase/products/{cam.id}", json={"datasheet_url": "javascript:x"}).status_code == 422
 
 
+def test_catalogo_y_ficha_con_existencias_reales(client, auth, db_session):
+    """Regresion: con inventario integrado, la disponibilidad llega como fila de store_inventory (dict) y el
+    catalogo/ficha/portada respondian 500 en cuanto un producto tenia existencias propias."""
+    _publicar(client)
+    prods = _catalogo(db_session)
+    main = next(w for w in client.get("/warehouses").json() if w["is_default"])
+    for code, qty in (("DS-2CD1043G2-LIU", 9), ("WD44PURZ", 1)):
+        r = client.post("/stock/movements", json={"product_id": prods[code].id, "warehouse_id": main["id"], "kind": "entrada", "quantity": qty})
+        assert r.status_code == 201, r.text
+
+    r = client.get("/public/store/crimson/catalog", params={"limit": 60})
+    assert r.status_code == 200, r.text
+    av = {p["code"]: p["availability"] for p in r.json()["items"]}
+    assert av["DS-2CD1043G2-LIU"]["state"] == "disponible"
+    assert av["WD44PURZ"]["state"] == "ultimas"
+    # el filtro de entrega inmediata usa la misma disponibilidad
+    inm = {p["code"] for p in client.get("/public/store/crimson/catalog", params={"avail": "inmediata", "limit": 60}).json()["items"]}
+    assert inm == {"DS-2CD1043G2-LIU", "WD44PURZ"}
+    # con cantidad exacta publicada, la ficha limita la cantidad a lo que hay en bodega
+    assert client.put("/store/inventory/settings", json={"quantity_display": "exacta"}).status_code == 200
+    d = client.get(f"/public/store/crimson/item/x-{prods['DS-2CD1043G2-LIU'].id}")
+    assert d.status_code == 200, d.text
+    assert d.json()["availability"]["state"] == "disponible" and d.json()["availability"]["max_qty"] == 9
+    assert client.get("/public/store/crimson/showcase").status_code == 200
+    assert client.get("/public/store/crimson/catalog", params={"ids": str(prods["WD44PURZ"].id)}).status_code == 200
+
+
 def test_arma_tu_sistema_con_productos_reales(client, auth, db_session):
     _publicar(client)
     prods = _catalogo(db_session)
