@@ -3,6 +3,7 @@
 from datetime import date, datetime
 
 from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, deferred, mapped_column, relationship
 
 from ..core.db import Base
@@ -23,6 +24,8 @@ class Media(TenantMixin, TimestampMixin, Base):
     sha256: Mapped[str] = mapped_column(String(64), index=True)
     data: Mapped[bytes] = deferred(mapped_column(LargeBinary))
     created_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
+    # privado = nunca se sirve por /media/f/{key} (p. ej. comprobantes de pago); solo por endpoints con permiso
+    private: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
 
 
 # ---------- CRM: contactos y notas del cliente (la linea de tiempo se arma con documentos + notas) ----------

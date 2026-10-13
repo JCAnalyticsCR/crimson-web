@@ -44,6 +44,8 @@ class Order(TenantMixin, TimestampMixin, Base):
     """Pedido de tienda/POS/link previo a factura o tiquete (plan 3.9)."""
 
     __tablename__ = "order"
+    # doble clic / reintento del navegador: la misma clave devuelve el mismo pedido
+    __table_args__ = (UniqueConstraint("tenant_id", "idempotency_key", name="uq_order_idempotency"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     number: Mapped[str] = mapped_column(String(40), index=True)
@@ -59,9 +61,25 @@ class Order(TenantMixin, TimestampMixin, Base):
     coupon_code: Mapped[str | None] = mapped_column(String(40))
     shipping_method: Mapped[str | None] = mapped_column(String(80))
     payment_method: Mapped[str | None] = mapped_column(String(40))
-    status: Mapped[str] = mapped_column(String(20), default="nuevo", index=True)  # nuevo | pagado | preparando | enviado | entregado | cancelado
+    # nuevo (pendiente de pago) | en_revision (comprobante) | pagado | preparando | listo | enviado | entregado | cancelado | reembolsado
+    status: Mapped[str] = mapped_column(String(20), default="nuevo", index=True)
     invoice_id: Mapped[int | None] = mapped_column(ForeignKey("invoice.id"))
     notes: Mapped[str | None] = mapped_column(Text)
+    # checkout de la tienda (tienda_ck)
+    payment_kind: Mapped[str | None] = mapped_column(String(16))  # sinpe | transferencia | tarjeta | efectivo
+    delivery: Mapped[dict | None] = mapped_column(JSON)  # tipo, provincia, canton, distrito, senas, zona
+    idempotency_key: Mapped[str | None] = mapped_column(String(80))
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    payment_ref: Mapped[str | None] = mapped_column(String(120))  # intento ONVO, referencia SINPE
+    tracking_number: Mapped[str | None] = mapped_column(String(80))
+    carrier: Mapped[str | None] = mapped_column(String(80))
+    cancel_reason: Mapped[str | None] = mapped_column(Text)
+    refund: Mapped[dict | None] = mapped_column(JSON)  # registro del reembolso (no mueve dinero)
+    history: Mapped[list | None] = mapped_column(JSON)  # [{status, at, by, note}]
+    proofs: Mapped[list | None] = mapped_column(JSON)  # comprobantes subidos: [{media_id, filename, size, at}]
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # plazo para pagar
+    inventory_state: Mapped[str | None] = mapped_column(String(12))  # held | released | fulfilled
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     lines: Mapped[list["OrderLine"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 

@@ -52,6 +52,11 @@ def client(db_session):
     incident_global_limiter.reset()
     access_request_limiter.reset()
     access_request_global_limiter.reset()
+    from app.core import ratelimit as rl
+
+    for lim in vars(rl).values():  # cualquier limitador nuevo tambien arranca limpio en cada prueba
+        if isinstance(lim, rl.SlidingWindow):
+            lim.reset()
     app = create_app()
     app.dependency_overrides[get_db] = lambda: db_session
     return TestClient(app)

@@ -74,7 +74,8 @@ def save_media(db: Session, tenant_id: int, data: bytes, filename: str | None, u
     if len(data) > limit:
         raise HTTPException(413, f"Archivo muy grande (maximo {limit // (1024 * 1024)} MB)")
     digest = hashlib.sha256(data).hexdigest()
-    same = db.scalar(select(Media).where(Media.tenant_id == tenant_id, Media.sha256 == digest))
+    # nunca se reutiliza un archivo privado (comprobante) como publico
+    same = db.scalar(select(Media).where(Media.tenant_id == tenant_id, Media.sha256 == digest, Media.private.is_(False)))
     if same:  # la misma imagen subida dos veces reutiliza el registro
         return same, False
     name = "".join(ch if (ch.isascii() and ch.isalnum()) or ch in "._- " else "_" for ch in (filename or "archivo"))[:120] or "archivo"
@@ -99,7 +100,7 @@ async def upload(file: UploadFile = File(...), p: Principal = Depends(get_princi
 
 @router.get("/media")
 def list_media(kind: str = "image", p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
-    q = select(Media).where(Media.tenant_id == p.tenant.id)
+    q = select(Media).where(Media.tenant_id == p.tenant.id, Media.private.is_(False))
     q = q.where(Media.content_type.like("image/%")) if kind == "image" else q.where(Media.content_type == "application/pdf")
     return [_out(m) for m in db.scalars(q.order_by(Media.id.desc()).limit(60))]
 
@@ -108,7 +109,7 @@ def list_media(kind: str = "image", p: Principal = Depends(get_principal), db: S
 def delete_media(mid: int, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
     _can_upload(p)
     m = db.get(Media, mid)
-    if not m or m.tenant_id != p.tenant.id:
+    if not m or m.tenant_id != p.tenant.id or m.private:  # los comprobantes no se borran desde la galeria
         raise HTTPException(404, "Archivo no encontrado")
     db.delete(m)
     audit(db, p.tenant.id, p.user.id, "delete", "media", mid, ip=p.ip)
@@ -117,8 +118,8 @@ def delete_media(mid: int, p: Principal = Depends(get_principal), db: Session = 
 
 @router.get("/media/f/{key}", tags=["publico"])
 def serve(key: str, db: Session = Depends(get_db)):
-    m = db.scalar(select(Media).where(Media.key == key))
-    if not m:
+    m = db.scalar(select(Media).where(Media.key == key, Media.private.is_(False)))
+    if not m:  # privado o inexistente: misma respuesta
         raise HTTPException(404, "Archivo no encontrado")
     disp = "inline" if m.content_type.startswith("image/") else "attachment"
     return Response(

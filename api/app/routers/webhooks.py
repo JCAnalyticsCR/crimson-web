@@ -58,6 +58,8 @@ def _apply(db: Session, tenant_id: int, payload: dict) -> str:
     t = payload.get("type", "")
     data = payload.get("data") or {}
     meta = data.get("metadata") or {}
+    if meta.get("order_id") and not meta.get("invoice_id"):
+        return _apply_order(db, tenant_id, t, data, meta)
     inv_id = meta.get("invoice_id")
     if not inv_id:
         return "sin invoice_id en metadata"
@@ -76,4 +78,29 @@ def _apply(db: Session, tenant_id: int, payload: dict) -> str:
         p = add_payment(db, tenant_id, None, inv, PaymentIn(method="onvo", kind="reembolso", amount=amount, external_ref=str(data.get("id") or "")))
         p.provider, p.provider_event = "onvo", payload
         return f"reembolso {p.id} aplicado"
+    return f"evento {t} ignorado"
+
+
+def _apply_order(db: Session, tenant_id: int, t: str, data: dict, meta: dict) -> str:
+    """Pedido de la tienda pagado con tarjeta. Idempotente: un pedido ya pagado no cambia; el monto debe cubrir el total."""
+    from ..models import Order, Tenant
+    from ..services import store_orders as so
+
+    o = db.get(Order, int(meta["order_id"]))
+    if not o or o.tenant_id != tenant_id or (meta.get("tenant_id") and int(meta["tenant_id"]) != tenant_id):
+        return "pedido no encontrado"
+    tenant = db.get(Tenant, tenant_id)
+    amount = Decimal(str(data.get("amount", 0))) / Decimal(100)
+    ref = str(data.get("id") or "")
+    if t.endswith("succeeded"):
+        if amount + Decimal("0.01") < Decimal(str(o.total)):
+            so._note(o, "onvo", f"Pago ONVO por {amount} no cubre el total {o.total}: no se aplica")
+            return f"monto {amount} menor al total del pedido {o.number}"
+        if not so.mark_paid(db, tenant, o, by="onvo", ref=ref, note="Pago con tarjeta confirmado por ONVO"):
+            return f"pedido {o.number} ya estaba pagado"
+        so.notify_team(db, tenant, o, "pagado")
+        return f"pedido {o.number} pagado"
+    if t.endswith("refunded"):
+        so._note(o, "onvo", f"ONVO reporta reembolso por {amount}")
+        return f"reembolso registrado en historial de {o.number}"
     return f"evento {t} ignorado"

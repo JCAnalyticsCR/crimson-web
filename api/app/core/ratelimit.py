@@ -41,6 +41,12 @@ public_limiter = SlidingWindow(limit=30, seconds=600)  # checkouts publicos por 
 # frena una inundacion desde muchas IPs sin tumbar el resto de la API.
 incident_limiter = SlidingWindow(limit=5, seconds=3600)
 incident_global_limiter = SlidingWindow(limit=120, seconds=3600)
+# Tienda en linea: cotizar el carrito se llama en cada cambio (generoso); el pedido y la busqueda de "Mi pedido"
+# son los que se abusan (adivinar numeros de pedido, inundar con pedidos falsos).
+quote_limiter = SlidingWindow(limit=300, seconds=600)
+checkout_global_limiter = SlidingWindow(limit=300, seconds=3600)
+order_lookup_limiter = SlidingWindow(limit=10, seconds=600)
+order_proof_limiter = SlidingWindow(limit=10, seconds=3600)
 # Solicitudes de acceso al portal del cliente (pagina publica): mismo criterio que las incidencias.
 access_request_limiter = SlidingWindow(limit=5, seconds=3600)
 access_request_global_limiter = SlidingWindow(limit=120, seconds=3600)

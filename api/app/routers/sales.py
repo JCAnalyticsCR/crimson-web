@@ -662,6 +662,11 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
 
         # misma definicion que Oportunidades -> Mis pendientes (services.allies.cost_pending_where)
         pend["costos_aliados"] = cost_pending_count(db, p)
+    if p.can("sales", "ver"):
+        from .store_checkout import pending_count as web_orders_pending
+
+        # misma definicion que Pedidos de la tienda -> Por atender (services.store_orders.attention_where)
+        pend["pedidos_web"] = web_orders_pending(db, p)
     ceo = _ceo_row(db, p) if p.can("dashboard", "empresa") else None
     receivable = []
     if mine:
