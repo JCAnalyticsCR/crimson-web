@@ -1,0 +1,61 @@
+/* Levantamiento v2: estado por campo, secciones del punto, datos generales del sitio y calculos del sistema.
+   Pensado para el celular: el selector de estado va en la misma linea de la etiqueta y no roba ancho al campo. */
+
+/* ---------- estado por campo ---------- */
+.pf__head { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; }
+.pf__head > label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dstatus { flex: none; appearance: none; -webkit-appearance: none; border: 1px solid var(--hair-2); border-radius: 999px; background: var(--surface); color: var(--text-2); font-size: 11px; line-height: 1; padding: 4px 9px; min-height: 26px; max-width: 112px; cursor: pointer; font-family: inherit; }
+.dstatus:focus-visible { outline: 2px solid var(--crimson); outline-offset: 1px; }
+.dstatus-tag { flex: none; border-radius: 999px; font-size: 11px; padding: 3px 9px; border: 1px solid var(--hair-2); }
+.dstatus--estimado { border-color: var(--info, #3c82f0); color: var(--info, #3c82f0); background: var(--info-soft, rgba(60, 130, 240, .1)); }
+.dstatus--pendiente { border-color: var(--warn); color: var(--warn); background: var(--warn-soft, rgba(230, 160, 40, .12)); }
+.dstatus--no_aplica { color: var(--text-3); background: var(--bg-2); text-decoration: line-through; }
+.pf--pendiente .input, .pf--pendiente .select { border-color: var(--warn); }
+.pf--no_aplica > :not(.pf__head) { opacity: .55; }
+.pf { min-width: 0; }
+.pf .input, .pf .select { min-width: 0; width: 100%; }
+.pf-bool { display: flex; gap: 8px; align-items: center; font-size: 13px; min-height: 38px; }
+
+/* ---------- secciones del punto ---------- */
+.pf-sec + .pf-sec { margin-top: 12px; }
+.pf-sec__title { font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--text-3); margin: 2px 0 8px; }
+.pf-adv { margin-top: 12px; border-top: 1px dashed var(--hair-2); padding-top: 8px; }
+.pf-adv > summary, .common > summary { cursor: pointer; list-style: none; }
+.pf-adv > summary { font-size: 13px; color: var(--text-2); padding: 6px 0; }
+.pf-adv > summary::before, .common > summary::before { content: "▸"; display: inline-block; margin-right: 8px; transition: transform .15s; color: var(--text-3); }
+.pf-adv[open] > summary::before, .common[open] > summary::before { transform: rotate(90deg); }
+.pf-adv > summary::-webkit-details-marker, .common > summary::-webkit-details-marker { display: none; }
+.pf-adv[open] > .point__grid { margin-top: 8px; }
+
+/* ---------- datos generales del sitio ---------- */
+.common > summary { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; padding: 14px 18px; }
+.common__count { font-size: 12.5px; }
+.common__body { padding: 0 18px 16px; border-top: 1px solid var(--hair); }
+.common__body > .field:first-child { margin-top: 14px; }
+.common__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 10px; }
+.common__text { min-height: 38px; max-height: 160px; resize: vertical; field-sizing: content; }
+.common__block { margin-top: 16px; }
+
+/* ---------- calculos del sistema ---------- */
+.sys__hint { font-size: 12.5px; margin: 0 0 10px; }
+.sys__sec { margin-top: 12px; }
+.sys__sub { display: block; font-size: 11.5px; margin-top: 4px; line-height: 1.4; overflow-wrap: anywhere; }
+.sys__alert { background: var(--warn-soft, rgba(230, 160, 40, .12)); border: 1px solid var(--warn); border-radius: 10px; padding: 10px 14px; font-size: 13px; margin: 0 0 10px; }
+.sys__alert--bad { background: var(--bad-soft, rgba(226, 35, 58, .1)); border-color: var(--bad); }
+.sys__alert ul { margin: 4px 0 0; padding-left: 18px; }
+.sys__alts { margin-top: 12px; overflow-x: auto; }
+.sys__alts .table td, .sys__alts .table th { padding: 8px 12px; }
+
+/* ---------- sugerencias: avisos de la v2 ---------- */
+.sug__warn { color: var(--warn); margin-top: 4px; }
+.sug__alts { margin: 4px 0 0; padding-left: 16px; font-family: var(--mono); font-size: 11.5px; }
+
+@media (max-width: 720px) {
+  .common > summary, .common__body { padding-left: 14px; padding-right: 14px; }
+  .common__grid { grid-template-columns: 1fr; }
+  .dstatus { max-width: 104px; font-size: 11px; padding: 4px 8px; min-height: 30px; }
+}
+/* en el telefono una columna: etiqueta y estado en la misma linea, el campo a todo el ancho */
+@media (max-width: 480px) {
+  .pf-sec .point__grid, .pf-adv .point__grid, .common__block .point__grid { grid-template-columns: minmax(0, 1fr); }
+}

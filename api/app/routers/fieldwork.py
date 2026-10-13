@@ -26,7 +26,17 @@ from ..services.archive import live
 from ..services.documents import audit
 from ..services.mail import notify_roles, queue_email
 from ..services.sequences import next_number
-from ..services.survey_specs import SPECS, normalize_item, normalize_point_data, suggest_materials
+from ..services.survey_specs import (
+    SPECS,
+    TEMPLATE_VERSION,
+    common_spec,
+    normalize_common,
+    normalize_data_status,
+    normalize_item,
+    normalize_point_data,
+    suggest_materials,
+    system_calcs,
+)
 from ..services.totals import d
 
 router = APIRouter(tags=["campo"])
@@ -179,6 +189,8 @@ def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
         "visit_tech_ids": visit_ids,
         "visit_techs": visitors,
         "labor": {k: {"label": LABOR_TYPES[k][0], "people": v["people"], "days": v["days"]} for k, v in labor.items()},
+        "template_version": s.template_version or 1,
+        "received_by": s.received_by,
         **_review_out(db, s),
     }
     if s.status == "enviado":
@@ -188,8 +200,19 @@ def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
         tenant = db.get(Tenant, s.tenant_id)
         out["pending_review"] = {"roles": list(reviewer_roles(tenant)), "people": [r["name"] for r in _reviewers(db, tenant)]}
     if full:
+        out["common"] = s.common  # seccion comun y bloques de sistema (None en los levantamientos de antes)
         out["points"] = [
-            {"id": x.id, "code": x.code, "kind": x.kind or s.kind, "label": x.label, "data": x.data, "photos": x.photos, "notes": x.notes} for x in s.points
+            {
+                "id": x.id,
+                "code": x.code,
+                "kind": x.kind or s.kind,
+                "label": x.label,
+                "data": x.data,
+                "data_status": x.data_status,
+                "photos": x.photos,
+                "notes": x.notes,
+            }
+            for x in s.points
         ]
         out["items"] = [
             {"id": i.id, "product_id": i.product_id, "name": i.name, "quantity": i.quantity, "unit": i.unit, "note": i.note, "kind": i.kind or "material"}
@@ -247,6 +270,8 @@ class PointIn(BaseModel):
     kind: str | None = Field(None, pattern="^(cctv|redes|acceso|asistencia|ups|cableado|anpr|otro)$")
     label: str | None = Field(None, max_length=160)
     data: dict = Field(default_factory=dict)
+    # estado de cada campo de data (confirmado|estimado|no_aplica|pendiente); sin dato = como siempre
+    data_status: dict | None = None
     photos: list = Field(default_factory=list)
     notes: str | None = None
 
@@ -282,6 +307,9 @@ class SurveyIn(BaseModel):
     photos: list = Field(default_factory=list)
     points: list[PointIn] = Field(default_factory=list)
     items: list[ItemIn] = Field(default_factory=list)
+    # seccion comun (§4) y bloques de sistema; si el cliente no los manda no se tocan (portal viejo)
+    common: dict | None = None
+    received_by: str | None = Field(None, max_length=160)
 
 
 def _labor_payload(data: SurveyIn) -> dict:
@@ -298,8 +326,16 @@ def _labor_payload(data: SurveyIn) -> dict:
 
 def _apply_fields(s: Survey, data: SurveyIn, db: Session, p: Principal) -> None:
     labor = _labor_payload(data)
-    for k, v in data.model_dump(exclude={"points", "items", "labor", "techs", "days", "visit_tech_ids"}).items():
+    for k, v in data.model_dump(exclude={"points", "items", "labor", "techs", "days", "visit_tech_ids", "common", "received_by"}).items():
         setattr(s, k, v)
+    # solo si vienen: un cliente que no los conoce no borra lo que otro guardo
+    if "common" in data.model_fields_set:
+        try:
+            s.common = normalize_common(data.common)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+    if "received_by" in data.model_fields_set:
+        s.received_by = (data.received_by or "").strip() or None
     tarifas = (s.labor or {}).get("tarifas")  # las pone el costeo; el tecnico al guardar no las ve ni las borra
     s.labor = {**labor, "tarifas": tarifas} if tarifas else labor
     s.techs, s.days = labor["tecnico"]["people"], d(labor["tecnico"]["days"])
@@ -314,9 +350,22 @@ def _apply_fields(s: Survey, data: SurveyIn, db: Session, p: Principal) -> None:
 def specs(_: Principal = Depends(require("field", "ver"))):
     """Formularios por tipo de levantamiento: el portal los dibuja desde aquí."""
     return {
-        k: {"label": v["label"], "point_prefix": v["point_prefix"], "point_label": v["point_label"], "fields": v["fields"], "materials": v["materials"]}
+        k: {
+            "label": v["label"],
+            "point_prefix": v["point_prefix"],
+            "point_label": v["point_label"],
+            "fields": v["fields"],
+            "materials": v["materials"],
+            "template_version": TEMPLATE_VERSION,
+        }
         for k, v in SPECS.items()
     }
+
+
+@router.get("/field/specs/common")
+def specs_common(_: Principal = Depends(require("field", "ver"))):
+    """Seccion comun del levantamiento, bloques de sistema, estados por campo y version de la plantilla."""
+    return common_spec()
 
 
 @router.get("/field/technicians")
@@ -351,7 +400,7 @@ def surveys(
 @router.post("/surveys", status_code=201)
 def survey_create(data: SurveyIn, p: Principal = Depends(require("field", "crear")), db: Session = Depends(get_db)):
     number, _ = next_number(db, p.tenant.id, "LEV")
-    s = Survey(tenant_id=p.tenant.id, number=number, technician_id=p.user.id)
+    s = Survey(tenant_id=p.tenant.id, number=number, technician_id=p.user.id, template_version=TEMPLATE_VERSION)
     _apply_fields(s, data, db, p)
     _apply_children(s, data)
     db.add(s)
@@ -371,10 +420,13 @@ def _apply_children(s: Survey, data: SurveyIn) -> None:
         pk = pt.kind or data.kind
         try:
             clean = normalize_point_data(pk, pt.data)
+            status = normalize_data_status(pt.data_status)
         except ValueError as e:
             raise HTTPException(422, f"{pt.code}: {e}") from e
         # se guarda None cuando es el tipo del levantamiento: asi cambiar el tipo del levantamiento arrastra sus puntos
-        points.append(SurveyPoint(code=pt.code, kind=pk if pk != data.kind else None, label=pt.label, data=clean, photos=pt.photos, notes=pt.notes))
+        points.append(
+            SurveyPoint(code=pt.code, kind=pk if pk != data.kind else None, label=pt.label, data=clean, data_status=status, photos=pt.photos, notes=pt.notes)
+        )
     s.points.clear()
     s.points.extend(points)
     # el costo escrito en el costeo vive en la linea: el tecnico reescribe la lista al guardar y no debe borrarlo
@@ -498,7 +550,17 @@ def survey_suggest(sid: int, p: Principal = Depends(require("field", "editar")),
     """Propone materiales y equipos a partir de los puntos, sus observaciones y lo ya cargado. NO modifica
     el levantamiento: el portal muestra la lista con el motivo de cada una y el usuario elige (ver /apply)."""
     s = _survey(db, sid, p)
-    return suggest_materials(s.kind, list(s.points), list(s.items))
+    return suggest_materials(s.kind, list(s.points), list(s.items), common=s.common)
+
+
+@router.get("/surveys/{sid}/system")
+def survey_system(sid: int, p: Principal = Depends(require("field", "ver")), db: Session = Depends(get_db)):
+    """Calculos del sistema (lectores, controladoras, credenciales, almacenamiento, PoE) con su formula. Son
+    estimaciones para revisar: no cambian la sugerencia ni el levantamiento. Sin costos ni precios."""
+    s = _survey(db, sid, p)
+    out = system_calcs(s.kind, list(s.points), s.common)
+    out["survey_template_version"] = s.template_version or 1
+    return out
 
 
 class SuggestionIn(BaseModel):
