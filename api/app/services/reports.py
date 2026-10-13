@@ -497,7 +497,7 @@ def rentabilidad(db: Session, tid: int, a: date, b: date) -> Report:
             "Nombre",
             "Estado",
             "Cierre",
-            "Venta",
+            "Venta sin IVA",
             "Equipos",
             "Mano de obra",
             "Viáticos",
@@ -510,7 +510,12 @@ def rentabilidad(db: Session, tid: int, a: date, b: date) -> Report:
             "Provisional",
         ],
         rows,
-        {"Venta": price_total, "Costo real": cost_total, "Utilidad": price_total - cost_total, "Provisionales sin costos (fuera del total)": provisionales},
+        {
+            "Venta sin IVA": price_total,
+            "Costo real": cost_total,
+            "Utilidad": price_total - cost_total,
+            "Provisionales sin costos (fuera del total)": provisionales,
+        },
     )
 
 
@@ -550,10 +555,10 @@ def rentabilidad_tipo(db: Session, tid: int, a: date, b: date) -> Report:
     return Report(
         "rentabilidad_tipo",
         "Rentabilidad por tipo de solución",
-        ["Solución", "Proyectos", "Venta", "Costo real", "Utilidad", "Margen %", "Horas"],
+        ["Solución", "Proyectos", "Venta sin IVA", "Costo real", "Utilidad", "Margen %", "Horas"],
         rows,
         {
-            "Venta": venta,
+            "Venta sin IVA": venta,
             "Costo real": costo,
             "Utilidad": venta - costo,
             "Margen %": _margen(venta, costo),

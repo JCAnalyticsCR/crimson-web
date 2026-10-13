@@ -40,7 +40,7 @@ type LaborType = { key: LaborKey; label: string; people: number; days: string; d
 type Costing = {
   lines: CostLine[];
   labor: { techs: number; days: string; day_cost: string; types: LaborType[]; cost: string; transport: string; transport_default: string; transport_custom: boolean; per_diem: string; per_diem_default: string; per_diem_custom: boolean; viaticos: string; travel: string; price: string };
-  cost_total: string; price_suggested: string; margin_pct: number; margin_target: number; missing_cost: string[]; can_save_catalog: boolean;
+  cost_total: string; price_suggested: string; margin_pct: number; margin_target: number; missing_cost: string[]; cost_complete?: boolean; margin_provisional?: boolean; can_save_catalog: boolean;
 };
 type Suggestion = {
   name: string; quantity: string | number; unit: string; kind: Kind; reason: string; action: "nuevo" | "sumar" | "cubierto" | "revisar";
@@ -632,7 +632,7 @@ export default function Surveys() {
           <div className="eco" style={{ margin: "12px 0" }}>
             <div className="eco__box"><span className="meta">Costo total</span><b className="money">{fmtMoney(live.costTotal)}</b></div>
             <div className="eco__box"><span className="meta">Precio sugerido</span><b className="money">{fmtMoney(live.price)}</b></div>
-            <div className="eco__box is-good"><span className="meta">Margen sobre venta</span><b>{live.margin.toFixed(1)}%</b><span className="muted" style={{ fontSize: 12, display: "block" }}>Recargo sobre costo: {live.costTotal > 0 ? `${(((live.price - live.costTotal) / live.costTotal) * 100).toFixed(1)} %` : "—"}</span></div>
+            <div className={live.missing.length ? "eco__box" : "eco__box is-good"}><span className="meta">Margen sobre venta</span><b>{live.margin.toFixed(1)}%</b><span className="muted" style={{ fontSize: 12, display: "block" }}>Recargo sobre costo: {live.costTotal > 0 ? `${(((live.price - live.costTotal) / live.costTotal) * 100).toFixed(1)} %` : "—"}</span>{live.missing.length > 0 && <span style={{ fontSize: 12, display: "block", color: "var(--bad)" }}>Margen provisional: faltan costos de {live.missing.length} {live.missing.length === 1 ? "línea" : "líneas"}</span>}</div>
             <div className="eco__box"><span className="meta">Mano de obra + viáticos</span><b className="money">{fmtMoney(num(costing.labor.cost) + num(costing.labor.travel))}</b></div>
           </div>
           <table className="table">

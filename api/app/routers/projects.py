@@ -39,7 +39,7 @@ from ..services.archive import live
 from ..services.documents import audit, local_date, today_fx
 from ..services.mail import notify_roles
 from ..services.sequences import next_number
-from ..services.totals import d
+from ..services.totals import d, net_sale
 
 router = APIRouter(tags=["proyectos"])
 
@@ -263,6 +263,13 @@ def project_from_quote(qid: int, data: FromQuoteIn, p: Principal = Depends(requi
     for ln in q.lines:
         prod = db.get(Product, ln.product_id) if ln.product_id else None
         cost_planned += pricing.cost_in(db, prod, "CRC", fx) * d(ln.quantity)
+    if survey:
+        from .fieldwork import labor_costing
+
+        # cotizacion que nacio de un levantamiento: la mano de obra, el transporte y los viaticos del costeo
+        # tambien son costo (interno, no el precio que se le cobro al cliente)
+        lab = labor_costing(survey, p.tenant)
+        cost_planned += lab["labor_cost"] + lab["travel"]
     number, _ = next_number(db, p.tenant.id, "PRO")
     pr = Project(
         tenant_id=p.tenant.id,
@@ -280,7 +287,7 @@ def project_from_quote(qid: int, data: FromQuoteIn, p: Principal = Depends(requi
         supervisor_id=data.supervisor_id,
         start_date=data.start_date,
         status="planificado",
-        price=d(q.total),
+        price=net_sale(q),  # venta sin IVA: todo margen se calcula sin impuesto
         cost_planned=cost_planned.quantize(Decimal("0.01")),
     )
     db.add(pr)

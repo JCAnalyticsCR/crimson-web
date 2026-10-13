@@ -160,7 +160,7 @@ class Project(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     supervisor_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
     start_date: Mapped[date | None] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date)
-    price: Mapped[float] = mapped_column(Numeric(16, 2), default=0)  # venta (de la cotizacion)
+    price: Mapped[float] = mapped_column(Numeric(16, 2), default=0)  # venta sin IVA (subtotal - descuento de la cotizacion)
     cost_planned: Mapped[float] = mapped_column(Numeric(16, 2), default=0)  # costo estimado al cotizar
     cost_labor: Mapped[float] = mapped_column(Numeric(16, 2), default=0)  # costo real: mano de obra
     cost_travel: Mapped[float] = mapped_column(Numeric(16, 2), default=0)  # viaticos y transporte

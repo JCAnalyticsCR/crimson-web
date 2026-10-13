@@ -98,6 +98,11 @@ def compute_document(lines: list[LineIn], discount_type: str = "percent", discou
     return out
 
 
+def net_sale(doc) -> Decimal:
+    """Venta sin IVA de un documento guardado: subtotal - descuento global. Base de todo margen y comision."""
+    return q5(d(doc.subtotal) - d(doc.discount_total))
+
+
 def balance(total: Decimal | float, payments: list[tuple[str, Decimal | float]]) -> Decimal:
     """Saldo = total - capturas + devoluciones/reembolsos. Autorizaciones y voids no afectan."""
     paid = Decimal(0)

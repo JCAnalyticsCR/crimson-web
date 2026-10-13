@@ -18,6 +18,8 @@ from decimal import Decimal
 
 from fastapi import HTTPException
 
+from .totals import net_sale
+
 # clave guardada -> (etiqueta, unidad oficial de Hacienda, es servicio)
 UNITS: dict[str, tuple[str, str, bool]] = {
     "Unid": ("Unidad", "Unid", False),
@@ -81,4 +83,10 @@ def check_ready(doc, accion: str) -> None:
             409,
             f"No se puede {accion}: {len(ceros)} línea(s) en 0 sin explicar ({_names(ceros)}). "
             "Elegí si son pendientes, aportadas por el cliente/aliado, cortesía o exclusiones.",
+        )
+    # P = 0: todo cortesia/aportado/excluido. Sin precio de venta no hay margen que defender
+    if net_sale(doc) <= 0:
+        raise HTTPException(
+            409,
+            f"La propuesta no tiene precio de venta: el total sin IVA es 0. No se puede {accion} así; revisá los precios o el tratamiento de las líneas.",
         )

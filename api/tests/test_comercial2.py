@@ -26,17 +26,19 @@ def test_kind_default_and_venta_skips_project(client, auth, db_session):
     q = client.post(f"/opportunities/{venta['id']}/quote", json={}).json()
     qq = client.get(f"/quotes/{q['quote_id']}").json()
     assert qq["opportunity"]["kind"] == "venta"  # el editor no ofrece "convertir a proyecto"
+    # sin precio de venta (P = 0) no sale ni se convierte: primero las lineas
+    client.put(f"/quotes/{q['quote_id']}", json={"customer_id": cust["id"], "lines": [{"name": "Cámara", "quantity": 4, "unit_price": 10000, "tax_rate": 13}]})
     # proyecto desde una cotizacion de venta: solo si se confirma a proposito
     r = client.post(f"/quotes/{q['quote_id']}/project", json={})
     assert r.status_code == 409 and "solo venta" in r.text
     # la factura cierra la venta: oportunidad ganada
-    client.put(f"/quotes/{q['quote_id']}", json={"customer_id": cust["id"], "lines": [{"name": "Cámara", "quantity": 4, "unit_price": 10000, "tax_rate": 13}]})
     assert client.post(f"/quotes/{q['quote_id']}/convert").status_code == 201
     assert client.get(f"/opportunities/{venta['id']}").json()["status"] == "ganada"
 
     # en "proyecto" el proyecto se crea como siempre y la oportunidad no se gana al facturar
     pro = client.post("/opportunities", json={"title": "Instalación", "customer_id": cust["id"]}).json()
     q2 = client.post(f"/opportunities/{pro['id']}/quote", json={}).json()
+    client.put(f"/quotes/{q2['quote_id']}", json={"customer_id": cust["id"], "lines": [{"name": "Cámara", "quantity": 4, "unit_price": 10000, "tax_rate": 13}]})
     assert client.post(f"/quotes/{q2['quote_id']}/project", json={}).status_code == 201
     assert client.get(f"/opportunities/{pro['id']}").json()["status"] == "ganada"
 
@@ -45,6 +47,7 @@ def test_venta_project_with_force(client, auth):
     cust = _cust(client)
     venta = client.post("/opportunities", json={"title": "Venta", "kind": "venta", "customer_id": cust["id"]}).json()
     q = client.post(f"/opportunities/{venta['id']}/quote", json={}).json()
+    client.put(f"/quotes/{q['quote_id']}", json={"customer_id": cust["id"], "lines": [{"name": "Cámara", "quantity": 4, "unit_price": 10000, "tax_rate": 13}]})
     assert client.post(f"/quotes/{q['quote_id']}/project", json={"force": True}).status_code == 201
 
 

@@ -58,7 +58,7 @@ function List() {
       <Card flush>
         {rowsSt === null ? <Loading /> : rows.length === 0 ? <Empty title="Sin proyectos" hint="Una cotización aprobada se convierte en proyecto con un clic, desde la cotización." /> : (
           <table className="table">
-            <thead><tr><th>Número</th><th>Proyecto</th><th>Cliente</th><th>Órdenes</th>{verPlata && <><th className="num">Venta</th><th className="num">Margen real</th></>}<th>Estado</th><th /></tr></thead>
+            <thead><tr><th>Número</th><th>Proyecto</th><th>Cliente</th><th>Órdenes</th>{verPlata && <><th className="num">Venta sin IVA</th><th className="num">Margen real</th></>}<th>Estado</th><th /></tr></thead>
             <tbody>{rows.map((p) => (
               <tr key={p.id}>
                 <td className="mono muted">{p.number}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted">{p.customer || "—"}</td>
@@ -135,7 +135,7 @@ function Detail({ id }: { id: number }) {
 
       {e && verPlata && (
         <div className="eco">
-          <div className="eco__box"><span className="meta">Venta</span><b className="money">{fmtMoney(e.price)}</b></div>
+          <div className="eco__box"><span className="meta">Venta sin IVA</span><b className="money">{fmtMoney(e.price)}</b></div>
           {/* sin costos o sin cerrar: el real es provisional y manda el cotizado (nunca 100 % como definitivo) */}
           <div className="eco__box"><span className="meta">Costo real{e.provisional ? " · provisional" : ""}</span><b className="money">{fmtMoney(e.cost_real)}</b></div>
           <div className={`eco__box ${e.profit == null || e.provisional ? "" : Number(e.profit) >= 0 ? "is-good" : "is-bad"}`}><span className="meta">Utilidad{e.provisional ? " · provisional" : ""}</span><b className="money">{e.profit == null ? "—" : fmtMoney(e.profit)}</b></div>

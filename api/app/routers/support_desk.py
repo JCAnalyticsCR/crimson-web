@@ -41,7 +41,7 @@ from ..services import sla as slasvc
 from ..services.documents import audit, local_date
 from ..services.mail import notify_roles, queue_email
 from ..services.sequences import next_number
-from ..services.totals import d
+from ..services.totals import d, net_sale
 
 router = APIRouter(tags=["soporte"])
 
@@ -609,7 +609,10 @@ def accrue_for_payment(db: Session, payment: Payment) -> Commission | None:
         proporcion = cobrado / d(inv.total) if d(inv.total) > 0 else Decimal(0)
         base_amount = (neto - costo) * proporcion
     else:
-        base_amount = cobrado
+        # Andres: los calculos van sin IVA. El pago trae IVA adentro: se toma solo su parte de venta sin IVA.
+        # Solo hacia adelante: las comisiones ya devengadas no se recalculan.
+        total = d(inv.total)
+        base_amount = cobrado * (net_sale(inv) / total) if total > 0 else Decimal(0)
     if base_amount <= 0:
         return None
     c = Commission(

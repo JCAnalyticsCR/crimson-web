@@ -89,6 +89,35 @@ def survey_labor(s: Survey) -> dict[str, dict]:
     return out
 
 
+def labor_costing(s: Survey, tenant) -> dict:
+    """Costo interno de mano de obra, transporte y viaticos del levantamiento (tarifas propias o de Ajustes).
+    Unica fuente: la usan el costeo y el costo planificado del proyecto."""
+    propias = tarifas_survey(s)
+    transport = propias.get("transport", rates(tenant)[1])
+    generales = labor_rates(tenant)
+    lrates = {k: propias.get(k, v) for k, v in generales.items()}
+    types, labor_cost, person_days = [], Decimal(0), Decimal(0)
+    for k, v in survey_labor(s).items():
+        c = lrates[k] * v["people"] * v["days"]
+        labor_cost += c
+        person_days += v["people"] * v["days"]
+        types.append(
+            {
+                "key": k,
+                "label": LABOR_TYPES[k][0],
+                "people": v["people"],
+                "days": v["days"],
+                "day_cost": lrates[k],
+                "day_cost_default": generales[k],
+                "custom": k in propias,
+                "cost": c.quantize(Decimal("0.01")),
+            }
+        )
+    pd = propias.get("per_diem", per_diem(tenant))
+    viaticos = (pd * person_days).quantize(Decimal("0.01"))
+    return {"types": types, "labor_cost": labor_cost, "transport": transport, "per_diem": pd, "viaticos": viaticos, "travel": transport + viaticos}
+
+
 # ---------- Levantamientos ----------
 def _survey(db: Session, sid: int, p: Principal) -> Survey:
     s = db.get(Survey, sid)
@@ -696,29 +725,11 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
     lines.sort(key=lambda x: orden.get(x["kind"], 1))  # equipos, materiales y servicios, como en el levantamiento
 
     # mano de obra por tipo de personal
-    generales = labor_rates(p.tenant)
-    lrates = {k: propias.get(k, v) for k, v in generales.items()}
-    types, labor_cost, person_days = [], Decimal(0), Decimal(0)
-    for k, v in survey_labor(s).items():
-        c = lrates[k] * v["people"] * v["days"]
-        labor_cost += c
-        person_days += v["people"] * v["days"]
-        types.append(
-            {
-                "key": k,
-                "label": LABOR_TYPES[k][0],
-                "people": v["people"],
-                "days": v["days"],
-                "day_cost": lrates[k],
-                "day_cost_default": generales[k],
-                "custom": k in propias,
-                "cost": c.quantize(Decimal("0.01")),
-            }
-        )
-    pd = propias.get("per_diem", per_diem(p.tenant))
-    viaticos = (pd * person_days).quantize(Decimal("0.01"))
-    travel = transport + viaticos
+    lab = labor_costing(s, p.tenant)
+    types, labor_cost, pd, viaticos, travel = lab["types"], lab["labor_cost"], lab["per_diem"], lab["viaticos"], lab["travel"]
     cost_total = cost_items + labor_cost + travel
+    # C desconocido no es 0: con lineas sin costo el costo total y el margen son provisionales
+    missing = [line["name"] for line in lines if not line["has_cost"]]
     labor_price = pricing.sale_price(db, labor_cost + travel, "CRC", "CRC", margin_pct)
     suggested = price_items + labor_price
     return {
@@ -748,7 +759,9 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
         # la politica vigente nombrada sin ambiguedad: margen sobre la venta, con su recargo equivalente
         "pricing_policy": pricing.policy(margin_pct, suggested, cost_total),
         "fx": fx,
-        "missing_cost": [line["name"] for line in lines if not line["has_cost"]],
+        "missing_cost": missing,
+        "cost_complete": not missing,
+        "margin_provisional": bool(missing),
         "can_save_catalog": p.can("catalog", "editar"),
     }
 

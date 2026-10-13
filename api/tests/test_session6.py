@@ -114,11 +114,11 @@ def test_comision_nace_con_el_cobro_no_con_la_factura(client, auth, db_session):
 
     assert client.get("/commissions").json()["rows"] == []  # facturar no comisiona: hay que cobrar
 
-    client.post(f"/invoices/{inv['id']}/payments", json={"method": "transferencia", "amount": 500000})
+    client.post(f"/invoices/{inv['id']}/payments", json={"method": "transferencia", "amount": 565000})
     com = client.get("/commissions").json()
     assert len(com["rows"]) == 1
     fila = com["rows"][0]
-    assert fila["user_id"] == uid and Decimal(str(fila["amount"])) == Decimal("25000.00")  # 5 % de lo cobrado
+    assert fila["user_id"] == uid and Decimal(str(fila["amount"])) == Decimal("25000.00")  # 5 % de lo cobrado sin IVA (565 000 / 1,13)
     assert Decimal(str(com["totals"]["pendiente"])) == Decimal("25000.00")
 
     # cada quien ve la suya y no puede aprobarla
@@ -128,7 +128,7 @@ def test_comision_nace_con_el_cobro_no_con_la_factura(client, auth, db_session):
     assert client.get("/commissions").json()["rows"][0]["status"] == "pagada"
 
     # el resto del cobro comisiona aparte; el mismo pago no comisiona dos veces
-    client.post(f"/invoices/{inv['id']}/payments", json={"method": "transferencia", "amount": 630000})
+    client.post(f"/invoices/{inv['id']}/payments", json={"method": "transferencia", "amount": 565000})
     assert len(client.get("/commissions").json()["rows"]) == 2
 
 
