@@ -2,7 +2,7 @@
    - El viewBox se mide con el ancho real del contenedor (1 unidad = 1 px): el texto nunca se encoge ni se infla.
    - Pantalla de decisión: cero coreografía. La única respuesta es la retícula al pasar el cursor o tocar.
    - Cada gráfico tiene role="img", título, descripción generada y su tabla equivalente. */
-import { useEffect, useId, useRef, useState, type PointerEvent as PE, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent as PE, type RefObject } from "react";
 import { crc, crcGrande, ejeColones, numero } from "./cifras";
 import type { EscenarioId, Mes } from "./modelo";
 
@@ -93,7 +93,21 @@ export function GraficoAcumulado(p: { series: Serie[]; inversion: number | null;
   }, [k, ref]);
 
   const lectura = k === null ? null : [...p.series].sort((a, b) => b.valores[k] - a.valores[k]);
-  const tipIzq = k !== null && x(k) > W * 0.55;
+
+  // La lectura se ubica junto a la retícula sin salirse del gráfico: a la derecha si cabe, si no a la izquierda, y en
+  // pantallas angostas (donde no cabe de ningún lado) centrada sobre la retícula y recortada a los bordes. Se mide su
+  // ancho real antes de pintar (useLayoutEffect), así nunca aparece cortada ni salta.
+  const tipRef = useRef<HTMLDivElement>(null);
+  const xk = k === null ? 0 : x(k);
+  useLayoutEffect(() => {
+    const t = tipRef.current;
+    if (!t) return;
+    const tw = t.offsetWidth;
+    let left = xk + 12;
+    if (left + tw > W) left = xk - 12 - tw;
+    if (left < 0) left = Math.max(0, Math.min(W - tw, xk - tw / 2));
+    t.style.left = `${Math.round(left)}px`;
+  });
 
   return (
     <div className="rnt-graf" ref={ref}>
@@ -146,7 +160,7 @@ export function GraficoAcumulado(p: { series: Serie[]; inversion: number | null;
           onPointerLeave={(e) => { if (e.pointerType === "mouse") setK(null); }} />
       </svg>
       {k !== null && lectura && (
-        <div className="rnt-graf__tip" aria-hidden="true" style={tipIzq ? { right: W - x(k) + 12 } : { left: x(k) + 12 }}>
+        <div ref={tipRef} className="rnt-graf__tip" aria-hidden="true">
           <p className="rnt-graf__tip-t">{k === 0 ? "Mes 0" : `Mes ${k}`}</p>
           <ul>
             {lectura.map((s) => (

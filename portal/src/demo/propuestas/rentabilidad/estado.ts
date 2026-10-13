@@ -125,7 +125,7 @@ export type ResumenRentabilidad = {
 export function textoEquilibrio(r: Resultado): string {
   if (r.equilibrio.tipo === "mes") return `mes ${r.equilibrio.mes}`;
   if (r.equilibrio.tipo === "mas36") return "más de 36 meses con estos supuestos";
-  return "sin calcular: falta la inversión";
+  return "sin calcular (falta escribir la inversión)";
 }
 
 export function escribirResumen(s: Estado, r: Resultado): boolean {
