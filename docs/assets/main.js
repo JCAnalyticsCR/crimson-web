@@ -25,7 +25,7 @@
   const LINKS_M = [[0,1],[1,2],[0,3],[2,4],[3,4],[4,5],[3,6],[5,7],[6,8],[7,8],[4,7]];
   const PULSE = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--pulse')) || 6;
 
-  function buildNet({ dark = false, seed = 0, portrait = false, converge = false, density = 1 } = {}) {
+  function buildNet({ dark = false, seed = 0, portrait = false, converge = false, density = 1, still = false } = {}) {
     const N = portrait ? NODES_M : NODES;
     let L = portrait ? LINKS_M : LINKS;
     if (converge) { const c = portrait ? 4 : 6; L = L.map(([a, b]) => (a === c || b === c) ? [a, b] : [a, c]); }
@@ -36,12 +36,12 @@
       const [x1, y1] = N[a], [x2, y2] = N[b];
       const d = `M${x1} ${y1} L${x2} ${y2}`;
       svg.appendChild(el('path', { d, class: 'net-line', stroke: line }));
-      if (i % Math.round(1 / density) === 0) {
+      if (!still && i % Math.round(1 / density) === 0) {
         const dash = el('path', { d, class: 'net-dash' });
         dash.style.animationDelay = `${-i * 0.7}s`;
         svg.appendChild(dash);
       }
-      if (!reduced && i % 2 === seed && (density === 1 || i % 4 === seed)) {
+      if (!reduced && !still && i % 2 === seed && (density === 1 || i % 4 === seed)) {
         const c = el('circle', { r: 4, fill: '#e2233a' });
         c.appendChild(el('animateMotion', { dur: `${converge ? 4 : PULSE + (i % 3)}s`, repeatCount: 'indefinite', path: d, begin: `${-i * 1.3}s` }));
         svg.appendChild(c);
@@ -51,7 +51,7 @@
       const g = el('circle', { cx: x, cy: y, r: 14, class: 'net-glow' });
       g.style.animationDuration = `${3 + (i % 4)}s`;
       g.style.animationDelay = `${i * 0.4}s`;
-      if (density < 1 && i % 3) g.style.animation = 'none';
+      if (still || (density < 1 && i % 3)) g.style.animation = 'none';
       svg.appendChild(g);
       svg.appendChild(el('circle', { cx: x, cy: y, r: 5, fill: node, class: 'net-node' }));
     });
@@ -72,7 +72,9 @@
     hosts.forEach(([sel, dark], i) => {
       const host = $(sel); if (!host) return;
       const wrap = document.createElement('div'); wrap.className = 'sec-net'; wrap.setAttribute('aria-hidden', 'true'); // el() crea en el namespace SVG
-      wrap.appendChild(buildNet({ dark, seed: i % 2, density: .5, portrait: isMobile.matches }));
+      // Hero de escritorio: red QUIETA (lineas y nodos, sin trazos ni pulsos). Animada detras del canvas
+      // le costaba al scrub ~20 fps (medido con CPU 6x: 24-37 fps con ella, ~50 sin sus animaciones).
+      wrap.appendChild(buildNet({ dark, seed: i % 2, density: .5, portrait: isMobile.matches, still: sel.startsWith('#hero') }));
       host.prepend(wrap); netIO.observe(wrap);
     });
   }
@@ -248,8 +250,12 @@
       actx.drawImage(img, (aw - w) / 2, (ah - hh) / 2, w, hh);
     };
     const draw = frac => {
-      const dpr = Math.min(devicePixelRatio || 1, 2), w = canvas.clientWidth, hh = canvas.clientHeight;
+      const w = canvas.clientWidth, hh = canvas.clientHeight;
       if (!w || !hh) return;
+      // Tope DPR 2 y ademas nunca mas resolucion que la del fotograma: en movil (768 px) a DPR 2 el
+      // canvas pintaba 1.5x los pixeles para ampliar la foto, sin una gota de detalle extra.
+      const ref = imgs[0] || imgs[nearestLoaded(0)], fit = ref ? 1 / Math.max(w / ref.naturalWidth, hh / ref.naturalHeight) : 2;
+      const dpr = Math.max(1, Math.min(devicePixelRatio || 1, 2, fit));
       const W = Math.round(w * dpr), H = Math.round(hh * dpr);
       if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; lastLow = -1; }
       const fy = .5; // al final sube para que el encabezado del telefono no quede bajo la barra

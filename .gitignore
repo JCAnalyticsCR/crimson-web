@@ -44,3 +44,6 @@ infra/fygaro/images/
 
 # material crudo del cliente (fotos con EXIF/GPS): nunca al repo publico
 imagenes seleccionadas/
+# requerimientos y material de negocio del cliente: nunca al repo publico
+Requerimientos_para_JC_Analytics.md
+*.local.md
