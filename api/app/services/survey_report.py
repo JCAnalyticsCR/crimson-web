@@ -23,6 +23,12 @@ from .survey_specs import SPECS
 _MONEY_KEY = re.compile(r"(cost|costo|precio|price|tarifa|margen|margin|monto|amount)", re.I)
 LABOR_LABELS = {"tecnico": "Personal técnico", "civil": "Personal de obra civil", "contratado": "Personal contratado"}
 
+# Fotos (macro `fotos`): antes eran miniaturas de 110x82 recortadas y en el informe "no se notaban". Ahora una sola
+# foto va a todo el ancho (320 px de alto) y varias van de dos en dos (240 px), enteras y sin recorte sobre fondo
+# claro. Es una tabla y no grid/flex porque el mismo HTML va en el cuerpo del correo, donde solo las tablas son
+# fiables; en pantallas chicas de correo las fotos se apilan. Un punto con mas de 4 fotos puede partirse entre
+# paginas (fila por fila) para no dejar media hoja en blanco.
+
 TEMPLATE = env.from_string("""<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Informe preliminar {{ s.number }}</title>
 <style>
 @page { size: Letter; margin: 16mm 14mm 18mm; @bottom-center { content: "Documento preliminar, no constituye cotización · pág. " counter(page) " de " counter(pages); font-size: 9px; color: #8a858f; } }
@@ -34,18 +40,29 @@ body{font-family:Manrope,"Segoe UI",Arial,sans-serif;color:#15131a;font-size:12p
 .stamp{display:inline-block;margin-top:4px;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:#fde3e6;color:#e2233a}
 .meta{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
 .box{border:1px solid #e6e1db;border-radius:8px;padding:10px 12px}
-h2{font-size:14px;margin:18px 0 8px;letter-spacing:-.01em}
-.pt{border:1px solid #e6e1db;border-radius:8px;padding:10px 12px;margin-bottom:10px}.pt h3{break-after:avoid;page-break-after:avoid}
+h2{font-size:14px;margin:18px 0 8px;letter-spacing:-.01em;page-break-after:avoid}
+.pt{border:1px solid #e6e1db;border-radius:8px;padding:10px 12px;margin-bottom:10px;page-break-inside:avoid}
+.pt.largo{page-break-inside:auto}
 .pt h3{margin:0 0 4px;font-size:13px}.pt .code{font-family:Consolas,monospace;color:#e2233a;margin-right:6px}
 .kv{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 14px;margin:6px 0}.kv div{font-size:11px}.kv b{font-weight:600}
 .obs{background:#f6f2ee;border-radius:6px;padding:6px 9px;color:#5a5560;font-size:11px;white-space:pre-wrap;margin-top:6px}
-/* fotos grandes: dos por fila a lo ancho de la hoja (una sola, a todo el ancho), enteras y sin recorte; una foto nunca se parte entre dos paginas */
-.ph{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}.ph figure{margin:0;width:calc(50% - 5px);break-inside:avoid;page-break-inside:avoid}.ph.n1 figure{width:100%}.ph img{display:block;width:100%;height:250px;object-fit:contain;background:#f6f2ee;border-radius:6px;border:1px solid #e6e1db}.ph.n1 img{height:380px}.ph figcaption{font-family:Consolas,monospace;font-size:9px;letter-spacing:.08em;color:#8a858f;margin-top:3px}
 table{width:100%;border-collapse:collapse}th{text-align:left;font-family:Consolas,monospace;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#8a858f;border-bottom:1px solid #e6e1db;padding:6px 4px}
 td{padding:7px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-align:right;font-family:Consolas,monospace;white-space:nowrap}
 .muted{color:#5a5560}.notes{padding:10px 12px;background:#f6f2ee;border-radius:8px;color:#3d3942;white-space:pre-wrap}
 .foot{margin-top:22px;padding:10px 12px;border:1px dashed #e2233a;border-radius:8px;font-size:11px;color:#5a5560}
+.ph1{margin-top:8px;height:320px;line-height:320px;text-align:center;background:#f6f2ee;border:1px solid #e6e1db;border-radius:8px;color:#5a5560;font-size:11px}
+.ph1 img{max-width:100%;max-height:316px;vertical-align:middle}
+table.ph{table-layout:fixed;margin-top:8px}
+.ph td{padding:0 4px 8px 0;border:0;vertical-align:top}.ph td+td{padding:0 0 8px 4px}
+.ph tr{page-break-inside:avoid}
+.ph .f{height:240px;line-height:240px;text-align:center;background:#f6f2ee;border:1px solid #e6e1db;border-radius:8px;color:#5a5560;font-size:11px}
+.ph .f img{max-width:100%;max-height:236px;vertical-align:middle}
+.cap{font-family:Consolas,monospace;font-size:9px;letter-spacing:.08em;color:#8a858f;margin-top:3px}
+@media screen and (max-width:520px){.ph td,.ph td+td{display:block;padding:0 0 8px}.ph1,.ph .f{height:auto;line-height:normal}.ph1 img,.ph .f img{max-height:420px}}
 </style></head><body>
+{% macro fotos(urls, ref) %}{% if urls|length == 1 %}<div class="ph1"><img src="{{ urls[0] }}" alt="Foto · {{ ref }}"></div><div class="cap">{{ ref|capitalize if ref == "general" else ref }} · foto 1</div>
+{% else %}<table class="ph" role="presentation">{% for fila in urls|batch(2) %}{% set n = loop.index0 * 2 %}<tr>{% for u in fila %}<td><div class="f"><img src="{{ u }}" alt="Foto {{ n + loop.index }} · {{ ref }}"></div><div class="cap">{{ ref|capitalize if ref == "general" else ref }} · foto {{ n + loop.index }}</div></td>{% endfor %}</tr>{% endfor %}</table>
+{% endif %}{% endmacro %}
 <div class="top">
   <div class="brand">{% if t.logo_url %}<img src="{{ t.logo_url }}" style="height:34px;margin-bottom:6px">{% endif %}<b>{{ t.name }}</b><span>{{ t.legal_name or "" }}{% if t.tax_id %} · Cédula {{ t.tax_id }}{% endif %}</span></div>
   <div class="docid"><div class="k">Informe preliminar · {{ kind_label }}</div><div class="n">{{ s.number }}</div><span class="stamp">Preliminar</span></div>
@@ -58,10 +75,10 @@ td{padding:7px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-
 </div>
 
 {% if points %}<h2>Detalle por punto ({{ point_label|lower }})</h2>
-{% for p in points %}<div class="pt"><h3><span class="code">{{ p.code }}</span>{{ p.label or "" }}</h3>
+{% for p in points %}<div class="pt{% if p.photos|length > 4 %} largo{% endif %}"><h3><span class="code">{{ p.code }}</span>{{ p.label or "" }}</h3>
   {% if p.data %}<div class="kv">{% for label, value in p.data %}<div><span class="muted">{{ label }}:</span> <b>{{ value }}</b></div>{% endfor %}</div>{% endif %}
   {% if p.notes %}<div class="obs">{{ p.notes }}</div>{% endif %}
-  {% if p.photos %}<div class="ph{% if p.photos|length == 1 %} n1{% endif %}">{% for u in p.photos %}<figure><img src="{{ u }}" alt="Foto {{ loop.index }} de {{ p.code }}"><figcaption>{{ p.code }} · foto {{ loop.index }}</figcaption></figure>{% endfor %}</div>{% endif %}
+  {% if p.photos %}{{ fotos(p.photos, p.code) }}{% endif %}
 </div>{% endfor %}{% endif %}
 
 {% for title, rows in [("Equipos requeridos", equipos), ("Materiales requeridos", materiales), ("Servicios y alquileres", servicios)] %}{% if rows %}<h2>{{ title }}</h2>
@@ -75,7 +92,7 @@ td{padding:7px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-
 </tbody></table>{% endif %}
 
 {% if s.notes %}<h2>Notas del levantamiento</h2><div class="notes">{{ s.notes }}</div>{% endif %}
-{% if photos %}<h2>Fotos generales</h2><div class="ph{% if photos|length == 1 %} n1{% endif %}">{% for u in photos %}<figure><img src="{{ u }}" alt="Foto general {{ loop.index }}"><figcaption>General · foto {{ loop.index }}</figcaption></figure>{% endfor %}</div>{% endif %}
+{% if photos %}<h2>Fotos generales</h2>{{ fotos(photos, "general") }}{% endif %}
 
 <div class="foot"><b>Documento preliminar, no constituye cotización.</b> Resume lo observado en la visita y lo que se estima
 necesario para la obra; cantidades sujetas a confirmación. Las condiciones económicas se envían aparte, en la cotización formal.</div>

@@ -89,6 +89,43 @@ def test_informe_sin_costos_ni_precios(client, auth, db_session):
     assert not re.search(r"\d{1,3}(,\d{3})+\.\d{2}", page)  # nada con formato de dinero
 
 
+def test_informe_fotos_grandes(client, auth, db_session):
+    """Las fotos del informe se tienen que notar: nada de miniaturas de 110x82. Una sola va a todo el ancho;
+    varias, de dos en dos y numeradas; un punto con muchas fotos puede partirse entre paginas."""
+    from app.models import Survey, Tenant
+    from app.services.survey_report import render_survey_html
+
+    url = "https://cdn.ejemplo.com/f/{}.jpg".format
+    s = client.post(
+        "/surveys",
+        json={
+            "kind": "cctv",
+            "site": "Bodega central",
+            "photos": [url(f"g{i}") for i in range(3)],
+            "points": [
+                {"code": "CAM-01", "label": "Entrada", "photos": [url("a")]},
+                {"code": "CAM-02", "label": "Patio", "photos": [url(f"b{i}") for i in range(3)]},
+                {"code": "CAM-03", "label": "Pasillo", "photos": [url(f"c{i}") for i in range(6)]},
+            ],
+        },
+    ).json()
+    page = render_survey_html(db_session, db_session.get(Survey, s["id"]), db_session.get(Tenant, auth["tenant"]["id"]))
+
+    assert "110px" not in page and "object-fit:cover" not in page  # la miniatura vieja ya no existe
+    # una sola foto: bloque a todo el ancho
+    assert f'<div class="ph1"><img src="{url("a")}" alt="Foto · CAM-01">' in page
+    # tres fotos: dos filas (2 + 1), numeradas con su punto
+    ini = page.index('alt="Foto 1 · CAM-02"')
+    tabla_b = page[page.rindex('<table class="ph"', 0, ini) : page.index("</table>", ini)]
+    assert tabla_b.count("<tr>") == 2 and 'alt="Foto 3 · CAM-02"' in tabla_b
+    # seis fotos: el punto puede partirse entre paginas; con 3 o menos se mantiene entero
+    assert page.count('class="pt largo"') == 1 and 'alt="Foto 6 · CAM-03"' in page
+    # fotos generales: misma grilla
+    assert 'alt="Foto 3 · general"' in page
+    for i in range(3):
+        assert url(f"g{i}") in page
+
+
 def test_informe_permisos(client, auth, db_session):
     tid = auth["tenant"]["id"]
     admin_h = dict(client.headers)
