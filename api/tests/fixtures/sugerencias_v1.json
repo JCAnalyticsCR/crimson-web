@@ -1,0 +1,2650 @@
+[
+ {
+  "case": "cctv_completo",
+  "kind": "cctv",
+  "points": [
+   {
+    "code": "CAM-01",
+    "kind": null,
+    "data": {
+     "tipo": "Bullet",
+     "resolucion": "4 MP",
+     "ambiente": "Exterior",
+     "alimentacion": "PoE",
+     "distancia_m": 35,
+     "altura_m": 5,
+     "canalizacion": "EMT"
+    },
+    "notes": "Hay que romper cielo raso"
+   },
+   {
+    "code": "CAM-02",
+    "kind": null,
+    "data": {
+     "tipo": "Domo",
+     "resolucion": "2 MP",
+     "ambiente": "Interior",
+     "alimentacion": "12 VDC",
+     "distancia_m": 12.5,
+     "altura_m": 3,
+     "canalizacion": "PVC"
+    },
+    "notes": "poste en el parqueo"
+   },
+   {
+    "code": "CAM-03",
+    "kind": null,
+    "data": {
+     "tipo": "Bullet",
+     "resolucion": "4 MP",
+     "alimentacion": "PoE",
+     "distancia_m": "",
+     "canalizacion": "EMT"
+    },
+    "notes": null
+   },
+   {
+    "code": "CAM-04",
+    "kind": null,
+    "data": {
+     "tipo": "PTZ",
+     "analiticas": [
+      "AcuSense"
+     ],
+     "alimentacion": "PoE",
+     "distancia_m": 80,
+     "altura_m": 6
+    },
+    "notes": "lluvia directa"
+   }
+  ],
+  "items": [
+   {
+    "id": 1,
+    "name": "Conectores RJ45",
+    "quantity": 1,
+    "unit": "Unid"
+   },
+   {
+    "id": 2,
+    "name": "Cable UTP Cat6",
+    "quantity": 50,
+    "unit": "m"
+   }
+  ],
+  "expected": [
+   {
+    "name": "Cámara Bullet 4 MP",
+    "quantity": "2",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "2 punto(s) levantado(s): CAM-01, CAM-03",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "2"
+   },
+   {
+    "name": "Cámara Domo 2 MP",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 punto(s) levantado(s): CAM-02",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Cámara PTZ",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 punto(s) levantado(s): CAM-04",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Conectores RJ45",
+    "quantity": "8",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "2 por cámara (4 cámaras)",
+    "item_id": 1,
+    "existing_quantity": "1",
+    "action": "sumar",
+    "add_quantity": "7"
+   },
+   {
+    "name": "Switch PoE 8 puertos",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "3 cámara(s) PoE: CAM-01, CAM-03, CAM-04",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Fuente 12 VDC",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "cámaras a 12 VDC: CAM-02",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Caja de paso exterior",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "cámaras en exterior: CAM-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "NVR 4 canales",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "4 cámara(s) levantada(s)",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Tubo EMT 3/4 (3 m)",
+    "quantity": "14",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "35 m en EMT + 15 %, tubos de 3 m",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "14"
+   },
+   {
+    "name": "Tubo PVC 3/4 (3 m)",
+    "quantity": "5",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "12.5 m en PVC + 15 %, tubos de 3 m",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "5"
+   },
+   {
+    "name": "Alquiler de andamio / escalera extensible",
+    "quantity": "1",
+    "unit": "dia",
+    "kind": "servicio",
+    "reason": "montaje sobre 4 m: CAM-01 (5 m), CAM-04 (6 m)",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Cable (metros con 15 % de holgura)",
+    "quantity": "147",
+    "unit": "m",
+    "kind": "material",
+    "reason": "127.5 m medidos entre los puntos + 15 %",
+    "item_id": 2,
+    "existing_quantity": "50",
+    "matched_name": "Cable UTP Cat6",
+    "action": "sumar",
+    "add_quantity": "97"
+   },
+   {
+    "name": "Reparación de cielo raso (material)",
+    "quantity": "1",
+    "unit": "m²",
+    "kind": "material",
+    "reason": "observaciones de CAM-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Brazo / abrazadera para poste",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "observaciones de CAM-02",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Anclajes y tacos expansivos",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "observaciones de CAM-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Caja estanca IP66",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "observaciones de CAM-04",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Cajas",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Abrazaderas",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Patch cords",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Gabinete",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "UPS",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   }
+  ]
+ },
+ {
+  "case": "cctv_8_camaras",
+  "kind": "cctv",
+  "points": [
+   {
+    "code": "CAM-01",
+    "kind": null,
+    "data": {
+     "tipo": "Domo",
+     "resolucion": "4 MP",
+     "alimentacion": "PoE",
+     "distancia_m": 20
+    },
+    "notes": null
+   },
+   {
+    "code": "CAM-02",
+    "kind": null,
+    "data": {
+     "tipo": "Domo",
+     "resolucion": "4 MP",
+     "alimentacion": "PoE",
+     "distancia_m": 20
+    },
+    "notes": null
+   },
+   {
+    "code": "CAM-03",
+    "kind": null,
+    "data": {
+     "tipo": "Domo",
+     "resolucion": "4 MP",
+     "alimentacion": "PoE",
+     "distancia_m": 20
+    },
+    "notes": null
+   },
+   {
+    "code": "CAM-04",
+    "kind": null,
+    "data": {
+     "tipo": "Domo",
+     "resolucion": "4 MP",
+     "alimentacion": "PoE",
+     "distancia_m": 20
+    },
+    "notes": null
+   },
+   {
+    "code": "CAM-05",
+    "kind": null,
+    "data": {
+     "tipo": "Domo",
+     "resolucion": "4 MP",
+     "alimentacion": "PoE",
+     "distancia_m": 20
+    },
+    "notes": null
+   },
+   {
+    "code": "CAM-06",
+    "kind": null,
+    "data": {
+     "tipo": "Domo",
+     "resolucion": "4 MP",
+     "alimentacion": "PoE",
+     "distancia_m": 20
+    },
+    "notes": null
+   },
+   {
+    "code": "CAM-07",
+    "kind": null,
+    "data": {
+     "tipo": "Domo",
+     "resolucion": "4 MP",
+     "alimentacion": "PoE",
+     "distancia_m": 20
+    },
+    "notes": null
+   },
+   {
+    "code": "CAM-08",
+    "kind": null,
+    "data": {
+     "tipo": "Domo",
+     "resolucion": "4 MP",
+     "alimentacion": "PoE",
+     "distancia_m": 20
+    },
+    "notes": null
+   }
+  ],
+  "items": [],
+  "expected": [
+   {
+    "name": "Cámara Domo 4 MP",
+    "quantity": "8",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "8 punto(s) levantado(s): CAM-01, CAM-02, CAM-03, CAM-04, CAM-05, CAM-06 y 2 más",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "8"
+   },
+   {
+    "name": "Conectores RJ45",
+    "quantity": "16",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "2 por cámara (8 cámaras)",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "16"
+   },
+   {
+    "name": "Switch PoE 16 puertos",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "8 cámara(s) PoE: CAM-01, CAM-02, CAM-03, CAM-04, CAM-05, CAM-06 y 2 más",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "NVR 8 canales",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "8 cámara(s) levantada(s)",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Cable (metros con 15 % de holgura)",
+    "quantity": "184",
+    "unit": "m",
+    "kind": "material",
+    "reason": "160 m medidos entre los puntos + 15 %",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "184"
+   },
+   {
+    "name": "Canalización EMT",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Cajas",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Abrazaderas",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Patch cords",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Gabinete",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "UPS",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   }
+  ]
+ },
+ {
+  "case": "acceso_3_puertas",
+  "kind": "acceso",
+  "points": [
+   {
+    "code": "ACC-01",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta",
+      "PIN"
+     ],
+     "salida": "Botón",
+     "distancia_m": 12
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-02",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 600 kg",
+     "lectura": [
+      "Huella"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": "8,5"
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-03",
+    "kind": null,
+    "data": {
+     "cerradura": "Pestillo eléctrico",
+     "lectura": [
+      "Facial",
+      "App / QR"
+     ],
+     "salida": "Barra antipánico"
+    },
+    "notes": null
+   }
+  ],
+  "items": [],
+  "expected": [
+   {
+    "name": "Puerta Magnética 280 kg",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 punto(s) levantado(s): ACC-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Puerta Magnética 600 kg",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 punto(s) levantado(s): ACC-02",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Puerta Pestillo eléctrico",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 punto(s) levantado(s): ACC-03",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Fuente 12 VDC con respaldo",
+    "quantity": "3",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 por puerta: ACC-01, ACC-02, ACC-03",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "3"
+   },
+   {
+    "name": "Batería de respaldo 12 V 7 Ah",
+    "quantity": "3",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 por fuente (3 puerta(s))",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "3"
+   },
+   {
+    "name": "Lector de tarjeta",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "identificación en ACC-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Teclado PIN",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "identificación en ACC-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Lector biométrico de huella",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "identificación en ACC-02",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Terminal de reconocimiento facial",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "identificación en ACC-03",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Lector QR",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "identificación en ACC-03",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Botón de salida",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "salida de ACC-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Barra antipánico",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "salida de ACC-03",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Controladora de acceso 4 puertas",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "3 puertas, 4 por controladora",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Cable 4x22 (metros con 15 % de holgura)",
+    "quantity": "24",
+    "unit": "m",
+    "kind": "material",
+    "reason": "20.5 m a las puertas + 15 %",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "24"
+   },
+   {
+    "name": "Cerradura",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Canalización",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   }
+  ]
+ },
+ {
+  "case": "acceso_2_puertas",
+  "kind": "acceso",
+  "points": [
+   {
+    "code": "ACC-01",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Sensor de movimiento",
+     "distancia_m": 10
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-02",
+    "kind": null,
+    "data": {
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón"
+    },
+    "notes": null
+   }
+  ],
+  "items": [
+   {
+    "id": 7,
+    "name": "Botón de salida",
+    "quantity": 1,
+    "unit": "Unid"
+   }
+  ],
+  "expected": [
+   {
+    "name": "Puerta Magnética 280 kg",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 punto(s) levantado(s): ACC-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Puerta (ACC)",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 punto(s) levantado(s): ACC-02",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Fuente 12 VDC con respaldo",
+    "quantity": "2",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 por puerta: ACC-01, ACC-02",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "2"
+   },
+   {
+    "name": "Batería de respaldo 12 V 7 Ah",
+    "quantity": "2",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 por fuente (2 puerta(s))",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "2"
+   },
+   {
+    "name": "Lector de tarjeta",
+    "quantity": "2",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "identificación en ACC-01, ACC-02",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "2"
+   },
+   {
+    "name": "Sensor de salida (PIR)",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "salida de ACC-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Botón de salida",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "salida de ACC-02",
+    "item_id": 7,
+    "existing_quantity": "1",
+    "action": "cubierto",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Controladora de acceso 2 puertas",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "2 puerta(s)",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Cable 4x22 (metros con 15 % de holgura)",
+    "quantity": "12",
+    "unit": "m",
+    "kind": "material",
+    "reason": "10 m a las puertas + 15 %",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "12"
+   },
+   {
+    "name": "Cerradura",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Canalización",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   }
+  ]
+ },
+ {
+  "case": "acceso_17_tarjeta_boton",
+  "kind": "acceso",
+  "points": [
+   {
+    "code": "ACC-01",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-02",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-03",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-04",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-05",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-06",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-07",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-08",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-09",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-10",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-11",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-12",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-13",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-14",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-15",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-16",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-17",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Botón",
+     "distancia_m": 15
+    },
+    "notes": null
+   }
+  ],
+  "items": [],
+  "expected": [
+   {
+    "name": "Puerta Magnética 280 kg",
+    "quantity": "17",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "17 punto(s) levantado(s): ACC-01, ACC-02, ACC-03, ACC-04, ACC-05, ACC-06 y 11 más",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "17"
+   },
+   {
+    "name": "Fuente 12 VDC con respaldo",
+    "quantity": "17",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 por puerta: ACC-01, ACC-02, ACC-03, ACC-04, ACC-05, ACC-06 y 11 más",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "17"
+   },
+   {
+    "name": "Batería de respaldo 12 V 7 Ah",
+    "quantity": "17",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 por fuente (17 puerta(s))",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "17"
+   },
+   {
+    "name": "Lector de tarjeta",
+    "quantity": "17",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "identificación en ACC-01, ACC-02, ACC-03, ACC-04, ACC-05, ACC-06 y 11 más",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "17"
+   },
+   {
+    "name": "Botón de salida",
+    "quantity": "17",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "salida de ACC-01, ACC-02, ACC-03, ACC-04, ACC-05, ACC-06 y 11 más",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "17"
+   },
+   {
+    "name": "Controladora de acceso 4 puertas",
+    "quantity": "5",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "17 puertas, 4 por controladora",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "5"
+   },
+   {
+    "name": "Cable 4x22 (metros con 15 % de holgura)",
+    "quantity": "293",
+    "unit": "m",
+    "kind": "material",
+    "reason": "255 m a las puertas + 15 %",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "293"
+   },
+   {
+    "name": "Cerradura",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Canalización",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   }
+  ]
+ },
+ {
+  "case": "acceso_17_lector_interior",
+  "kind": "acceso",
+  "points": [
+   {
+    "code": "ACC-01",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-02",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-03",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-04",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-05",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-06",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-07",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-08",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-09",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-10",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-11",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-12",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-13",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-14",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-15",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-16",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-17",
+    "kind": null,
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta"
+     ],
+     "salida": "Lector interior",
+     "distancia_m": 15
+    },
+    "notes": null
+   }
+  ],
+  "items": [],
+  "expected": [
+   {
+    "name": "Puerta Magnética 280 kg",
+    "quantity": "17",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "17 punto(s) levantado(s): ACC-01, ACC-02, ACC-03, ACC-04, ACC-05, ACC-06 y 11 más",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "17"
+   },
+   {
+    "name": "Fuente 12 VDC con respaldo",
+    "quantity": "17",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 por puerta: ACC-01, ACC-02, ACC-03, ACC-04, ACC-05, ACC-06 y 11 más",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "17"
+   },
+   {
+    "name": "Batería de respaldo 12 V 7 Ah",
+    "quantity": "17",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 por fuente (17 puerta(s))",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "17"
+   },
+   {
+    "name": "Lector de tarjeta",
+    "quantity": "17",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "identificación en ACC-01, ACC-02, ACC-03, ACC-04, ACC-05, ACC-06 y 11 más",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "17"
+   },
+   {
+    "name": "Controladora de acceso 4 puertas",
+    "quantity": "5",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "17 puertas, 4 por controladora",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "5"
+   },
+   {
+    "name": "Cable 4x22 (metros con 15 % de holgura)",
+    "quantity": "293",
+    "unit": "m",
+    "kind": "material",
+    "reason": "255 m a las puertas + 15 %",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "293"
+   },
+   {
+    "name": "Cerradura",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Botón de salida",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Canalización",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   }
+  ]
+ },
+ {
+  "case": "acceso_sin_puntos",
+  "kind": "acceso",
+  "points": [],
+  "items": [],
+  "expected": [
+   {
+    "name": "Cerradura",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Todavía no hay puntos levantados: habitual en este tipo de solución, confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Fuente",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Todavía no hay puntos levantados: habitual en este tipo de solución, confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Botón de salida",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Todavía no hay puntos levantados: habitual en este tipo de solución, confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Cable 4x22",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Todavía no hay puntos levantados: habitual en este tipo de solución, confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Canalización",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Todavía no hay puntos levantados: habitual en este tipo de solución, confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Batería de respaldo",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Todavía no hay puntos levantados: habitual en este tipo de solución, confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   }
+  ]
+ },
+ {
+  "case": "cableado",
+  "kind": "cableado",
+  "points": [
+   {
+    "code": "DAT-01",
+    "kind": null,
+    "data": {
+     "metros": 41,
+     "categoria": "Cat6"
+    },
+    "notes": null
+   },
+   {
+    "code": "DAT-02",
+    "kind": null,
+    "data": {
+     "metros": 42,
+     "categoria": "Cat6"
+    },
+    "notes": null
+   },
+   {
+    "code": "DAT-03",
+    "kind": null,
+    "data": {
+     "metros": 43,
+     "categoria": "Cat6"
+    },
+    "notes": null
+   },
+   {
+    "code": "DAT-04",
+    "kind": null,
+    "data": {
+     "metros": 44,
+     "categoria": "Cat6"
+    },
+    "notes": null
+   }
+  ],
+  "items": [
+   {
+    "id": 3,
+    "name": "Jacks",
+    "quantity": 2,
+    "unit": "Unid"
+   }
+  ],
+  "expected": [
+   {
+    "name": "Punto de red (DAT)",
+    "quantity": "4",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "4 punto(s) levantado(s): DAT-01, DAT-02, DAT-03, DAT-04",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "4"
+   },
+   {
+    "name": "Jacks",
+    "quantity": "4",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "1 por cada uno de los 4 puntos",
+    "item_id": 3,
+    "existing_quantity": "2",
+    "action": "sumar",
+    "add_quantity": "2"
+   },
+   {
+    "name": "Placas",
+    "quantity": "4",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "1 por cada uno de los 4 puntos",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "4"
+   },
+   {
+    "name": "Patch cords",
+    "quantity": "8",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "2 por cada uno de los 4 puntos",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "8"
+   },
+   {
+    "name": "Cable Cat6 (305 m)",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "196 m de cable / 305 m por unidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Cable (metros con 15 % de holgura)",
+    "quantity": "196",
+    "unit": "m",
+    "kind": "material",
+    "reason": "170 m medidos entre los puntos + 15 %",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "196"
+   },
+   {
+    "name": "Patch panel",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Organizadores",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Etiquetas",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   }
+  ]
+ },
+ {
+  "case": "mixto",
+  "kind": "cctv",
+  "points": [
+   {
+    "code": "CAM-01",
+    "kind": null,
+    "data": {
+     "tipo": "Domo",
+     "resolucion": "4 MP",
+     "distancia_m": 20,
+     "alimentacion": "PoE"
+    },
+    "notes": null
+   },
+   {
+    "code": "ACC-01",
+    "kind": "acceso",
+    "data": {
+     "cerradura": "Magnética 280 kg",
+     "lectura": [
+      "Tarjeta",
+      "PIN"
+     ],
+     "salida": "Botón",
+     "distancia_m": 12.5
+    },
+    "notes": null
+   },
+   {
+    "code": "DAT-01",
+    "kind": "cableado",
+    "data": {
+     "metros": 30,
+     "categoria": "Cat6"
+    },
+    "notes": null
+   },
+   {
+    "code": "UPS-01",
+    "kind": "ups",
+    "data": {
+     "carga_w": 400
+    },
+    "notes": null
+   }
+  ],
+  "items": [],
+  "expected": [
+   {
+    "name": "Cámara Domo 4 MP",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 punto(s) levantado(s): CAM-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Conectores RJ45",
+    "quantity": "2",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "2 por cámara (1 cámaras)",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "2"
+   },
+   {
+    "name": "Switch PoE 8 puertos",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 cámara(s) PoE: CAM-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "NVR 4 canales",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 cámara(s) levantada(s)",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Punto de red (DAT)",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 punto(s) levantado(s): DAT-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Jacks",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "1 por cada uno de los 1 puntos",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Placas",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "1 por cada uno de los 1 puntos",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Patch cords",
+    "quantity": "2",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "2 por cada uno de los 1 puntos",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "2"
+   },
+   {
+    "name": "Cable Cat6 (305 m)",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "34 m de cable / 305 m por unidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Puerta Magnética 280 kg",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 punto(s) levantado(s): ACC-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Fuente 12 VDC con respaldo",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 por puerta: ACC-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Batería de respaldo 12 V 7 Ah",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 por fuente (1 puerta(s))",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Lector de tarjeta",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "identificación en ACC-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Teclado PIN",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "identificación en ACC-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Botón de salida",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "salida de ACC-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Controladora de acceso 2 puertas",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 puerta(s)",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Cable 4x22 (metros con 15 % de holgura)",
+    "quantity": "14",
+    "unit": "m",
+    "kind": "material",
+    "reason": "12.5 m a las puertas + 15 %",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "14"
+   },
+   {
+    "name": "UPS 1000 VA",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "UPS-01: 400 W a respaldar",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Cable (metros con 15 % de holgura)",
+    "quantity": "58",
+    "unit": "m",
+    "kind": "material",
+    "reason": "50 m medidos entre los puntos + 15 %",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "58"
+   },
+   {
+    "name": "Canalización EMT",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Cajas",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Abrazaderas",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Gabinete",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Patch panel",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en cableado estructurado: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Organizadores",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en cableado estructurado: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Etiquetas",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en cableado estructurado: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Cerradura",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en control de acceso: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Baterías",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en respaldo eléctrico (ups): confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Regleta",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en respaldo eléctrico (ups): confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   }
+  ]
+ },
+ {
+  "case": "ups",
+  "kind": "ups",
+  "points": [
+   {
+    "code": "UPS-01",
+    "kind": null,
+    "data": {
+     "carga_w": 900,
+     "tomas": 8
+    },
+    "notes": null
+   },
+   {
+    "code": "UPS-02",
+    "kind": null,
+    "data": {
+     "carga_w": ""
+    },
+    "notes": "no hay toma cerca"
+   }
+  ],
+  "items": [],
+  "expected": [
+   {
+    "name": "UPS 1500 VA",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "UPS-01: 900 W a respaldar",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "UPS (capacidad por definir)",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "UPS-02: sin carga anotada",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Regleta de tomas",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "más de 6 tomas en UPS-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Tomacorriente y extensión eléctrica",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "observaciones de UPS-02",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Baterías",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Gabinete",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   }
+  ]
+ },
+ {
+  "case": "redes",
+  "kind": "redes",
+  "points": [
+   {
+    "code": "AP-01",
+    "kind": null,
+    "data": {
+     "equipo": "Access point",
+     "poe": false,
+     "area_m2": 200
+    },
+    "notes": null
+   },
+   {
+    "code": "AP-02",
+    "kind": null,
+    "data": {
+     "equipo": "Switch",
+     "poe": true
+    },
+    "notes": null
+   }
+  ],
+  "items": [],
+  "expected": [
+   {
+    "name": "Equipo Access point",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 punto(s) levantado(s): AP-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Equipo Switch",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 punto(s) levantado(s): AP-02",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Inyector PoE",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "access point sin PoE disponible: AP-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Patch cords",
+    "quantity": "4",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "2 por equipo (2 equipos)",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "4"
+   },
+   {
+    "name": "Switch PoE",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Cable Cat6",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Soportes",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "UPS",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   }
+  ]
+ },
+ {
+  "case": "asistencia",
+  "kind": "asistencia",
+  "points": [
+   {
+    "code": "TA-01",
+    "kind": null,
+    "data": {
+     "metodo": [
+      "Huella",
+      "Facial"
+     ],
+     "red": "Cableada"
+    },
+    "notes": null
+   },
+   {
+    "code": "TA-02",
+    "kind": null,
+    "data": {
+     "metodo": [
+      "Tarjeta"
+     ],
+     "red": "No hay"
+    },
+    "notes": null
+   }
+  ],
+  "items": [],
+  "expected": [
+   {
+    "name": "Terminal Huella/Facial",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 punto(s) levantado(s): TA-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Terminal Tarjeta",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 punto(s) levantado(s): TA-02",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Soporte de pared para terminal",
+    "quantity": "2",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "1 por terminal (2)",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "2"
+   },
+   {
+    "name": "Patch cords",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "terminales en red cableada: TA-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Punto de red nuevo (cableado)",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "no hay red en TA-02",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Fuente",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   }
+  ]
+ },
+ {
+  "case": "anpr",
+  "kind": "anpr",
+  "points": [
+   {
+    "code": "ANP-01",
+    "kind": null,
+    "data": {
+     "barrera": "Nueva",
+     "distancia_camara_m": 25
+    },
+    "notes": null
+   },
+   {
+    "code": "ANP-02",
+    "kind": null,
+    "data": {
+     "barrera": "Existente",
+     "distancia_camara_m": 10
+    },
+    "notes": "fibra hasta caseta"
+   }
+  ],
+  "items": [],
+  "expected": [
+   {
+    "name": "Carril (ANP)",
+    "quantity": "2",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "2 punto(s) levantado(s): ANP-01, ANP-02",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "2"
+   },
+   {
+    "name": "Cámara ANPR",
+    "quantity": "2",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 por carril: ANP-01, ANP-02",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "2"
+   },
+   {
+    "name": "Barrera vehicular",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "barrera nueva en ANP-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Lazo o sensor",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "1 por barrera (ANP-01)",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Cable (metros con 15 % de holgura)",
+    "quantity": "40",
+    "unit": "m",
+    "kind": "material",
+    "reason": "35 m medidos entre los puntos + 15 %",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "40"
+   },
+   {
+    "name": "Convertidor de medios de fibra",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "observaciones de ANP-02",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Gabinete",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "Canalización",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   },
+   {
+    "name": "UPS",
+    "quantity": "0",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "Habitual en este tipo de solución: confirmá la cantidad",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "revisar",
+    "add_quantity": "0"
+   }
+  ]
+ },
+ {
+  "case": "otro",
+  "kind": "otro",
+  "points": [
+   {
+    "code": "PTO-01",
+    "kind": null,
+    "data": {
+     "detalle": "Intercomunicador",
+     "distancia_m": 30
+    },
+    "notes": "pared de block"
+   }
+  ],
+  "items": [],
+  "expected": [
+   {
+    "name": "Punto (PTO)",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "equipo",
+    "reason": "1 punto(s) levantado(s): PTO-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   },
+   {
+    "name": "Cable (metros con 15 % de holgura)",
+    "quantity": "34",
+    "unit": "m",
+    "kind": "material",
+    "reason": "30 m medidos entre los puntos + 15 %",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "34"
+   },
+   {
+    "name": "Anclajes y tacos expansivos",
+    "quantity": "1",
+    "unit": "Unid",
+    "kind": "material",
+    "reason": "observaciones de PTO-01",
+    "item_id": null,
+    "existing_quantity": "0",
+    "action": "nuevo",
+    "add_quantity": "1"
+   }
+  ]
+ }
+]

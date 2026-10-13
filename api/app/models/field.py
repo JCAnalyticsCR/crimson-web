@@ -81,6 +81,12 @@ class Survey(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("user.id", name="fk_survey_reviewed_by"))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     review_round: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # cuantas veces se reviso
+    # seccion comun del §4 (objetivo, areas, energia, red...) y bloques de sistema (acceso_sistema, cctv_sistema,
+    # parametros). None = levantamiento de antes: todo se calcula como siempre
+    common: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    received_by: Mapped[str | None] = mapped_column(String(160))  # quien recibio al tecnico en el sitio
+    # version de la plantilla (survey_specs.TEMPLATE_VERSION) con que se lleno; los existentes quedan en 1
+    template_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
     points: Mapped[list["SurveyPoint"]] = relationship(cascade="all, delete-orphan", lazy="selectin", order_by="SurveyPoint.id")
     items: Mapped[list["SurveyItem"]] = relationship(cascade="all, delete-orphan", lazy="selectin", order_by="SurveyItem.id")
@@ -117,6 +123,8 @@ class SurveyPoint(Base):
     kind: Mapped[str | None] = mapped_column(String(16))
     label: Mapped[str | None] = mapped_column(String(160))
     data: Mapped[dict] = mapped_column(JSON, default=dict)
+    # estado de cada campo, paralelo a data: {campo: confirmado|estimado|no_aplica|pendiente}. None = como siempre
+    data_status: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     photos: Mapped[list] = mapped_column(JSON, default=list)
     notes: Mapped[str | None] = mapped_column(Text)
 

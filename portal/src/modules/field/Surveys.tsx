@@ -13,11 +13,12 @@ import { InviteTechButton } from "./InviteTech";
 import { ArchiveActions } from "../../ui/ArchiveActions";
 import { LinkOpportunity, type OppRef } from "./LinkOpportunity";
 import { pickReview, ReviewPanel, reviewTone, type ReviewInfo } from "./SurveyReview";
+import { CommonSection, initialStatus, PointFields, SystemCalcs, useCommonSpec, type Common, type V2Field } from "./SurveyV2";
 
-type FieldSpec = { key: string; label: string; type: "text" | "number" | "select" | "multi" | "bool"; options?: string[]; unit?: string; placeholder?: string };
+type FieldSpec = V2Field; // + hint, section, advanced, legacy (plantilla v2)
 type Spec = { label: string; point_prefix: string; point_label: string; fields: FieldSpec[]; materials: string[] };
 /* kind: tipo del punto si no es el del levantamiento (una puerta de acceso dentro de uno de CCTV). */
-type Point = { id?: number; code: string; kind?: string | null; label: string; data: Record<string, unknown>; photos: string[]; notes: string | null };
+type Point = { id?: number; code: string; kind?: string | null; label: string; data: Record<string, unknown>; data_status?: Record<string, string> | null; photos: string[]; notes: string | null };
 type Kind = "equipo" | "material" | "servicio";
 type Item = { id?: number; product_id: number | null; name: string; quantity: string; unit: string; note: string | null; kind: Kind };
 type LaborKey = "tecnico" | "civil" | "contratado";
@@ -31,6 +32,7 @@ type Survey = {
   sent_at: string | null; sent_by: string | null; pending_review?: Review; visit_tech_ids: number[]; visit_techs: string[];
   labor: Record<LaborKey, { label: string; people: number; days: string | number }>;
   points?: Point[]; items?: (Omit<Item, "quantity"> & { quantity: string | number })[];
+  common?: Common | null; received_by?: string | null; template_version?: number;
 } & Partial<ReviewInfo>;
 type CostLine = {
   item_id: number; product_id: number | null; name: string; kind: Kind; quantity: string; unit: string; unit_cost: string; cost: string;
@@ -45,6 +47,9 @@ type Costing = {
 type Suggestion = {
   name: string; quantity: string | number; unit: string; kind: Kind; reason: string; action: "nuevo" | "sumar" | "cubierto" | "revisar";
   existing_quantity: string | number; add_quantity: string | number; item_id: number | null; matched_name?: string;
+  /* v2: datos faltantes o estimados, advertencias tecnicas, controladoras alternativas, modelo del curso */
+  missing?: string[]; estimated?: string[]; warnings?: string[]; reference?: boolean;
+  alternatives?: { label: string; reserva: number; actual: boolean }[];
 };
 type SugRow = Suggestion & { checked: boolean; qty: string };
 
@@ -68,11 +73,11 @@ const ACTION: Record<Suggestion["action"], { label: string; tone: string }> = {
 const emptyLabor = (): Labor => ({ tecnico: { people: "2", days: "1" }, civil: { people: "0", days: "0" }, contratado: { people: "0", days: "0" } });
 const emptySurvey = (kind: string) => ({
   kind, customer_id: "", customer_name: "", opportunity_id: "", site: "", visit_date: "", labor: emptyLabor(), visit_tech_ids: [] as number[],
-  notes: "", photos: [] as string[], points: [] as Point[], items: [] as Item[],
+  notes: "", photos: [] as string[], points: [] as Point[], items: [] as Item[], common: null as Common | null, received_by: "",
 });
 type Draft = ReturnType<typeof emptySurvey> & {
   id?: number; number?: string; status?: string; quote_id?: number | null; opportunity?: OppRef; sent_at?: string | null; sent_by?: string | null; pending_review?: Review;
-  archived_at?: string | null; trashed_at?: string | null; review?: ReviewInfo;
+  archived_at?: string | null; trashed_at?: string | null; review?: ReviewInfo; template_version?: number;
 };
 
 const num = (v: string | number | null | undefined) => { const n = Number(String(v ?? "").replace(",", ".")); return Number.isFinite(n) ? n : 0; };
@@ -96,6 +101,8 @@ export default function Surveys() {
   const [sent, setSent] = useState<{ number: string; notified: Tech[]; review?: Review } | null>(null);
   const [margin, setMargin] = useState(35);
   const [busy, setBusy] = useState(false);
+  const [calcTick, setCalcTick] = useState(0); // recalcula la tarjeta "Calculos del sistema" despues de guardar
+  const commonSpec = useCommonSpec();
   const prefilled = useRef<string | null>(null); // no rearmar el borrador si el usuario ya empezó a escribir
 
   const verCostos = allows("catalog.costos");
@@ -153,7 +160,7 @@ export default function Surveys() {
       notes: s.notes || "", photos: s.photos || [], points: s.points || [],
       items: (s.items || []).map((i) => ({ ...i, quantity: String(i.quantity), kind: i.kind === "equipo" || i.kind === "servicio" ? i.kind : "material" })),
       sent_at: s.sent_at, sent_by: s.sent_by, pending_review: s.pending_review, archived_at: s.archived_at, trashed_at: s.trashed_at,
-      review: pickReview(s),
+      review: pickReview(s), common: s.common ?? null, received_by: s.received_by || "", template_version: s.template_version,
     });
   };
 
@@ -174,8 +181,9 @@ export default function Surveys() {
     site: d.site || null, visit_date: d.visit_date || null, notes: d.notes || null, photos: d.photos, visit_tech_ids: d.visit_tech_ids,
     labor: Object.fromEntries(LABOR.map(([k]) => [k, { people: Math.max(0, Math.round(num(d.labor[k].people))), days: num(d.labor[k].days) }])),
     // los numeros del punto van tal cual (2,5 o 2.5): la API los valida y los guarda con decimales
-    points: d.points.map((p) => ({ id: p.id, code: p.code, kind: p.kind && p.kind !== d.kind ? p.kind : null, label: p.label || null, data: p.data, photos: p.photos || [], notes: p.notes })),
+    points: d.points.map((p) => ({ id: p.id, code: p.code, kind: p.kind && p.kind !== d.kind ? p.kind : null, label: p.label || null, data: p.data, data_status: p.data_status ?? null, photos: p.photos || [], notes: p.notes })),
     items: d.items.filter((i) => i.name.trim()).map((i) => ({ id: i.id, product_id: i.product_id, name: i.name, quantity: num(i.quantity), unit: i.unit || "Unid", note: i.note, kind: i.kind })),
+    common: d.common, received_by: d.received_by.trim() || null,
   });
 
   const save = async (silent = false) => {
@@ -184,7 +192,8 @@ export default function Surveys() {
     try {
       const s = await api<Survey>(draft.id ? `/surveys/${draft.id}` : "/surveys", { method: draft.id ? "PUT" : "POST", json: body(draft) });
       if (!silent) toast(draft.id ? "Levantamiento guardado" : `Levantamiento ${s.number} creado`);
-      setDraft((d) => (d ? { ...d, id: s.id, number: s.number, status: s.status, review: pickReview(s) } : d));
+      setDraft((d) => (d ? { ...d, id: s.id, number: s.number, status: s.status, review: pickReview(s), template_version: s.template_version } : d));
+      setCalcTick((t) => t + 1);
       load();
       return s;
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); return null; }
@@ -315,18 +324,20 @@ export default function Surveys() {
   const addPoint = (kind?: string) => setDraft((d) => {
     if (!d) return d;
     const k = kind || d.kind;
-    return { ...d, points: [...d.points, { code: nextCode(d, k), kind: k === d.kind ? null : k, label: "", data: {}, photos: [], notes: null }] };
+    // punto nuevo: todos sus campos "confirmado"; un dato vacio o pendiente queda para revisar, nunca como 0
+    return { ...d, points: [...d.points, { code: nextCode(d, k), kind: k === d.kind ? null : k, label: "", data: {}, data_status: initialStatus(specs[k]?.fields), photos: [], notes: null }] };
   });
   /* En sitio, las cámaras de un mismo tramo comparten casi todo: se copia la anterior y solo se
      corrige lo que cambia (lo pidió Andrés: "que utilice la misma configuración para estas cámaras"). */
   const dupPoint = (i: number) => setDraft((d) => {
     if (!d) return d;
     const base = d.points[i];
-    const copia: Point = { code: nextCode(d, kindOf(base, d)), kind: base.kind ?? null, label: base.label, data: { ...base.data }, photos: [], notes: null };
+    const copia: Point = { code: nextCode(d, kindOf(base, d)), kind: base.kind ?? null, label: base.label, data: { ...base.data }, data_status: base.data_status ? { ...base.data_status } : base.data_status, photos: [], notes: null };
     return { ...d, points: [...d.points.slice(0, i + 1), copia, ...d.points.slice(i + 1)] };
   });
   const setPoint = (i: number, patch: Partial<Point>) => setDraft((d) => (d ? { ...d, points: d.points.map((p, j) => (j === i ? { ...p, ...patch } : p)) } : d));
   const setData = (i: number, key: string, v: unknown) => setPoint(i, { data: { ...draft!.points[i].data, [key]: v } });
+  const setStatus = (i: number, key: string, v: string) => setPoint(i, { data_status: { ...(draft!.points[i].data_status || {}), [key]: v } });
   const setItem = (i: number, patch: Partial<Item>) => setDraft((d) => (d ? { ...d, items: d.items.map((x, j) => (j === i ? { ...x, ...patch } : x)) } : d));
   const setLabor = (k: LaborKey, patch: Partial<Labor[LaborKey]>) => setDraft((d) => (d ? { ...d, labor: { ...d.labor, [k]: { ...d.labor[k], ...patch } } } : d));
   const toggleVisit = (id: number) => setDraft((d) => (d ? { ...d, visit_tech_ids: d.visit_tech_ids.includes(id) ? d.visit_tech_ids.filter((x) => x !== id) : [...d.visit_tech_ids, id] } : d));
@@ -509,6 +520,9 @@ export default function Surveys() {
             />
           )}
 
+          <CommonSection spec={commonSpec} value={draft.common} readOnly={readOnly} kinds={[draft.kind, ...draft.points.map((p) => kindOf(p, draft))]}
+            onChange={(c) => setDraft({ ...draft, common: c })} receivedBy={draft.received_by} onReceivedBy={(v) => setDraft({ ...draft, received_by: v })} />
+
           <Field label="Técnicos que hicieron la visita" hint="Solo informativo: quién fue al sitio. No se usa para costear.">
             <div className="chips" style={{ alignItems: "center" }}>
               {techs.length === 0 && <span className="muted" style={{ fontSize: 13 }}>No hay técnicos registrados.</span>}
@@ -553,7 +567,7 @@ export default function Surveys() {
                   {!readOnly && <button className="btn btn--ghost btn--sm" title="Duplicar: mismas características, otro punto" onClick={() => dupPoint(i)}><Icon d={I.copy} size={14} /></button>}
                   {!readOnly && <button className="btn btn--ghost btn--sm" title="Quitar" onClick={() => setDraft({ ...draft, points: draft.points.filter((_, j) => j !== i) })}><Icon d={I.x} size={14} /></button>}
                 </div>
-                <div className="point__grid">{(ps?.fields || []).map((f) => <Field key={f.key} label={f.label}>{field(f, i)}</Field>)}</div>
+                <PointFields fields={ps?.fields || []} data={pt.data} status={pt.data_status} readOnly={readOnly} onStatus={(k, v) => setStatus(i, k, v)} render={(f) => field(f, i)} />
                 <Field label="Observaciones" hint="También se usan para sugerir materiales (cielo raso, poste, concreto…)."><input className="input" value={pt.notes || ""} onChange={(e) => setPoint(i, { notes: e.target.value })} placeholder="Hay que romper cielo raso…" /></Field>
                 <Field label="Fotografías del punto" hint="En el celular abre la cámara directo.">
                   <PhotoStrip value={pt.photos || []} onChange={(photos) => setPoint(i, { photos })} disabled={readOnly} label="Foto" onOpen={(j) => setVerFoto(inicioPunto(i) + j)} />
@@ -562,6 +576,8 @@ export default function Surveys() {
               );
             })}
           </Card>
+
+          <SystemCalcs surveyId={draft.id} refresh={calcTick} />
 
           {KINDS.map(([k, title, hint]) => itemsBlock(k, title, draft.items.length === 0 ? `${hint} Sugerilos desde los puntos o agregalos a mano; administración pone los precios.` : hint))}
 
@@ -591,7 +607,16 @@ export default function Surveys() {
                 <td className="muted" style={{ textTransform: "capitalize" }}>{x.kind}</td>
                 <td className="num mono">{Number(x.existing_quantity) ? Number(x.existing_quantity) : "—"}</td>
                 <td className="num"><input className="input input--mono" inputMode="decimal" style={{ maxWidth: 90 }} value={x.qty} placeholder="0" onChange={(e) => setSugs(sugs.map((y, j) => (j === i ? { ...y, qty: e.target.value, checked: num(e.target.value) > 0 ? true : y.checked } : y)))} /> <span className="muted" style={{ fontSize: 12 }}>{x.unit}</span></td>
-                <td className="muted" style={{ fontSize: 12.5 }}>{x.reason}{x.matched_name && <div>Se suma a «{x.matched_name}», que ya está cargado.</div>}</td>
+                <td className="muted" style={{ fontSize: 12.5 }}>
+                  {x.reference && <span className="badge badge--warn" style={{ marginRight: 6 }}>referencia del curso</span>}
+                  {x.reason}{x.matched_name && <div>Se suma a «{x.matched_name}», que ya está cargado.</div>}
+                  {x.warnings?.map((w) => <div key={w} className="sug__warn">⚠ {w}</div>)}
+                  {x.alternatives && x.alternatives.length > 1 && (
+                    <ul className="sug__alts" title="Elegí la combinación y ajustá la cantidad">
+                      {x.alternatives.map((o) => <li key={o.label}>{o.label} · reserva {o.reserva}{o.actual ? " (sugerida)" : ""}</li>)}
+                    </ul>
+                  )}
+                </td>
               </tr>
             ))}</tbody>
           </table>
