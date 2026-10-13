@@ -59,6 +59,7 @@
 .cli-pp-pasos li[data-hecho="true"] .cli-pp-pasos__n { background: var(--pp-ink); color: #fff; border-color: var(--pp-ink); }
 .cli-pp-pasos li[aria-current="step"] a { background: var(--pp-ink); color: #fff; border-color: var(--pp-ink); }
 .cli-pp-pasos li[aria-current="step"] small { color: var(--pp-muted-dark); }
+@media (min-width: 1024px) { .cli-pp-pasos { flex-wrap: wrap; overflow: visible; } }
 
 .cli-pp-marco__grid { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); align-items: start; }
 .cli-pp-marco__grid > * { min-width: 0; }

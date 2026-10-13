@@ -62,8 +62,10 @@ const volverAComprar = () => notifyDemo({ title: "Volver a comprar", text: "En l
 
 export default function B1Portal() {
   const [i, irA] = usePaso(IDS);
+  const paso = IDS[i];
   const m = useMemo(momentos, []);
-  const demos = useMemo(() => leerPedidosDemo(), []);
+  // los pedidos de prueba de la sesion se releen en cada paso (y su estado, que cambia desde Detras de escena)
+  const demos = useMemo(() => leerPedidosDemo(), [paso]);
   const [st, setSt] = useState<EstadoB1>(leerB1);
   useEffect(() => { almacen.sesion.set(CLAVE, JSON.stringify(st)); }, [st]);
 
@@ -83,7 +85,6 @@ export default function B1Portal() {
     if (serie !== st.equipo) ponerFoto(null);
     irA(N.falla);
   };
-  const paso = IDS[i];
   const demo = demos[0];
 
   return (

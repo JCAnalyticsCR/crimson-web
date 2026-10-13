@@ -117,6 +117,15 @@
 .cli-portal__tabs a { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; border-radius: 10px; font-size: 14px; font-weight: 600; color: var(--cli-text-2); text-decoration: none; }
 .cli-portal__tabs a[aria-current="page"] { background: #fdecee; color: var(--cli-crimson-dark); }
 @media (hover: hover) { .cli-portal__tabs a:hover:not([aria-current="page"]) { background: var(--cli-bg); color: var(--cli-ink); } }
+.cli-portal__tc { display: none; }
+/* en una columna angosta (telefono) las cuatro secciones caben siempre: icono arriba y rotulo corto, como la barra
+   de abajo del portal real; la seccion actual nunca queda fuera de la vista */
+@container (max-width: 479px) {
+  .cli-portal__tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 6px; overflow: visible; }
+  .cli-portal__tabs a { flex-direction: column; justify-content: center; gap: 3px; min-height: 52px; padding: 4px 2px; font-size: 12.5px; min-width: 0; }
+  .cli-portal__tl { display: none; }
+  .cli-portal__tc { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
 .cli-portal__body { display: grid; gap: 14px; padding: 16px 14px 18px; min-width: 0; }
 @container (min-width: 640px) { .cli-portal__body { padding: 20px 22px 24px; } }
 

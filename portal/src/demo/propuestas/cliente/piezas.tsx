@@ -16,11 +16,12 @@ export { IC };
 export const LOGO = `${import.meta.env.BASE_URL}logo.png`;
 
 export type SeccionPortal = "compras" | "equipos" | "soporte" | "plan";
-const TABS: { k: SeccionPortal; t: string; to: string; ico: string }[] = [
-  { k: "compras", t: "Mis compras", to: "/propuestas/b1?paso=compras", ico: IC.bag },
-  { k: "equipos", t: "Mis equipos", to: "/propuestas/b1?paso=equipos", ico: IC.cctv },
-  { k: "soporte", t: "Soporte", to: "/propuestas/b1?paso=falla", ico: IC.chat },
-  { k: "plan", t: "Mi plan", to: "/propuestas/b2?paso=plan", ico: IC.shield },
+// t: rotulo completo; corto: el del telefono (como la barra de abajo del portal real, ClientShell)
+const TABS: { k: SeccionPortal; t: string; corto: string; to: string; ico: string }[] = [
+  { k: "compras", t: "Mis compras", corto: "Compras", to: "/propuestas/b1?paso=compras", ico: IC.bag },
+  { k: "equipos", t: "Mis equipos", corto: "Equipos", to: "/propuestas/b1?paso=equipos", ico: IC.cctv },
+  { k: "soporte", t: "Soporte", corto: "Soporte", to: "/propuestas/b1?paso=falla", ico: IC.chat },
+  { k: "plan", t: "Mi plan", corto: "Mi plan", to: "/propuestas/b2?paso=plan", ico: IC.shield },
 ];
 
 /** Portal del cliente (maqueta): cabecera con la cuenta de Maria y las cuatro secciones de la propuesta. */
@@ -35,7 +36,7 @@ export function PortalCliente({ actual, children }: { actual: SeccionPortal; chi
       <nav className="cli-portal__tabs" aria-label="Secciones del portal de María (maqueta)">
         {TABS.map((t) => (
           <Link key={t.k} to={t.to} aria-current={t.k === actual ? "page" : undefined}>
-            <Ico d={t.ico} size={16} /><span>{t.t}</span>
+            <Ico d={t.ico} size={18} /><span className="cli-portal__tl">{t.t}</span><span className="cli-portal__tc">{t.corto}</span>
           </Link>
         ))}
       </nav>

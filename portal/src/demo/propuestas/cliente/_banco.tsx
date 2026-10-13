@@ -4,17 +4,20 @@ import { StrictMode, Suspense, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import "../../../ui/base.css"; import "../../../ui/access.css"; import "../../../ui/field.css"; import "../../demo.css";
-import { DEMO_EVENT, installMockApi, type DemoNotice } from "../../mockApi";
+import { installMockApi } from "../../mockApi";
+import { EVENTOS } from "./comun";
 import { rutas } from "./index";
 
 installMockApi();
 
+// lo que dispara notifyDemo (EVENTOS.aviso); en la demo lo pinta DemoShell, aqui un aviso minimo
+type AvisoDemo = { title: string; text: string };
 function Aviso() {
-  const [n, setN] = useState<DemoNotice | null>(null);
+  const [n, setN] = useState<AvisoDemo | null>(null);
   useEffect(() => {
-    const on = (e: Event) => setN((e as CustomEvent<DemoNotice>).detail);
-    window.addEventListener(DEMO_EVENT, on);
-    return () => window.removeEventListener(DEMO_EVENT, on);
+    const on = (e: Event) => setN((e as CustomEvent<AvisoDemo>).detail);
+    window.addEventListener(EVENTOS.aviso, on);
+    return () => window.removeEventListener(EVENTOS.aviso, on);
   }, []);
   if (!n) return null;
   return (
