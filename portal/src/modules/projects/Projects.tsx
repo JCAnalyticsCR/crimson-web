@@ -7,6 +7,7 @@ import { useSession } from "../../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { ArchiveActions } from "../../ui/ArchiveActions";
 import { ALLY_ROLES, CONTACT_FUNCS, partyLine, type Ally } from "../crm/OpportunityAllies";
+import { ReservationRow, type Reservation } from "../inventory/Inventory";
 
 type Eco = {
   price: string; cost_planned: string; cost_materials: string; cost_labor: string; cost_travel: string; cost_extra: string;
@@ -81,12 +82,17 @@ function Detail({ id }: { id: number }) {
   const [p, setP] = useState<Project | null>(null);
   const [reqSt, setReq] = useState<Requirement[] | null>(null); // null = cargando
   const req = reqSt ?? [];
+  const [resv, setResv] = useState<Reservation[]>([]);
+  const canApprove = allows("inventory.aprobar_reserva");
+  const verReservas = allows("inventory.ver");
+  const puedeReservar = allows("inventory.crear|projects.editar");
   const [edit, setEdit] = useState<{ status: string; cost_labor: string; cost_travel: string; cost_extra: string; end_date: string; notes: string } | null>(null);
   const verPlata = allows("catalog.costos");
 
   const load = useCallback(() => {
     api<Project>(`/projects/${id}`).then(setP);
     api<Requirement[]>(`/projects/${id}/requirements`).then(setReq).catch(() => setReq([]));
+    api<Reservation[]>(`/projects/${id}/reservations`).then(setResv).catch(() => setResv([]));
   }, [id]);
   useEffect(() => { load(); }, [load]);
 
@@ -106,6 +112,21 @@ function Detail({ id }: { id: number }) {
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
 
+  // AC25: lo planificado se pide como reserva; compromete existencia solo cuando inventario la aprueba
+  const reservar = async () => {
+    try {
+      const r = await api<{ created: Reservation[]; skipped: { name: string }[] }>(`/projects/${id}/reserve`, { method: "POST", json: {} });
+      const conf = r.created.filter((x) => x.status === "confirmada").length;
+      if (!r.created.length) toast("Todo lo planificado ya está reservado");
+      else toast(`${r.created.length} reserva${r.created.length !== 1 ? "s" : ""} pedida${r.created.length !== 1 ? "s" : ""}${conf ? ` · ${conf} confirmada${conf !== 1 ? "s" : ""} por la regla automática` : " · quedan por aprobar en Inventario"}`);
+      load();
+    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
+  const actuar = async (r: Reservation, a: "confirm" | "cancel") => {
+    try { await api(`/stock/reservations/${r.id}/${a}`, { method: "POST", json: {} }); toast(a === "confirm" ? "Reserva aprobada" : "Reserva cancelada"); load(); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); load(); }
+  };
+
   const facturar = async () => {
     try { const inv = await api<{ invoice_id: number; number: string }>(`/projects/${id}/invoice`, { method: "POST" }); toast(`Factura ${inv.number} creada`); nav(`/facturas/${inv.invoice_id}`); }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
@@ -114,6 +135,9 @@ function Detail({ id }: { id: number }) {
   if (!p) return <div style={{ padding: 60, textAlign: "center" }}><span className="spinner" /></div>;
   const e = p.economics;
   const faltantes = req.filter((r) => Number(r.to_buy) > 0);
+  // lo planificado pendiente que todavia no tiene reserva abierta (pedida o confirmada)
+  const reservado = (pid: number) => resv.filter((x) => x.product_id === pid && (x.status === "pendiente" || x.status === "confirmada")).reduce((a, x) => a + Number(x.quantity) - Number(x.consumed_quantity), 0);
+  const porReservar = puedeReservar && req.some((r) => Number(r.pending) > reservado(r.product_id));
 
   return (
     <>
@@ -188,7 +212,12 @@ function Detail({ id }: { id: number }) {
       <Card
         title="Materiales: planificado contra bodega"
         flush
-        extra={faltantes.length > 0 && allows("purchases.crear") ? <button className="btn btn--crimson btn--sm" onClick={pedirMateriales}><Icon d={I.box} />Solicitar {faltantes.length} faltante{faltantes.length !== 1 ? "s" : ""}</button> : undefined}
+        extra={porReservar || (faltantes.length > 0 && allows("purchases.crear")) ? (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {porReservar && <button className="btn btn--soft btn--sm" onClick={reservar}><Icon d={I.inventory} />Reservar materiales</button>}
+            {faltantes.length > 0 && allows("purchases.crear") && <button className="btn btn--crimson btn--sm" onClick={pedirMateriales}><Icon d={I.box} />Solicitar {faltantes.length} faltante{faltantes.length !== 1 ? "s" : ""}</button>}
+          </div>
+        ) : undefined}
       >
         {reqSt === null ? <Loading /> : req.length === 0 ? <p className="muted" style={{ fontSize: 13, padding: "0 18px 14px" }}>Sin materiales planificados en las órdenes.</p> : (
           <table className="table">
@@ -203,6 +232,15 @@ function Detail({ id }: { id: number }) {
           </table>
         )}
       </Card>
+
+      {resv.length > 0 && (
+        <Card title="Reservas de material" flush extra={verReservas ? <Link className="btn btn--ghost btn--sm" to="/inventario?tab=reservas">Ver en inventario</Link> : undefined}>
+          <table className="table">
+            <thead><tr><th>Material</th><th className="num">Cantidad</th><th>Estado</th><th>Vence</th><th /></tr></thead>
+            <tbody>{resv.map((r) => <ReservationRow key={r.id} r={r} canApprove={canApprove} onAct={actuar} showProject={false} />)}</tbody>
+          </table>
+        </Card>
+      )}
 
       {p.notes && <Card title="Notas"><pre style={{ whiteSpace: "pre-wrap", fontSize: 13, margin: 0, fontFamily: "inherit", color: "var(--text-2)" }}>{p.notes}</pre></Card>}
 

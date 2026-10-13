@@ -9,11 +9,27 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import Invoice, Product, StockMovement, Warehouse
+from ..models import Invoice, Product, StockMovement, Tenant, Warehouse
 
 
 def default_warehouse(db: Session, tenant_id: int) -> Warehouse | None:
     return db.scalar(select(Warehouse).where(Warehouse.tenant_id == tenant_id, Warehouse.active).order_by(Warehouse.is_default.desc(), Warehouse.id))
+
+
+EXTRA_FIELDS = {"project_id", "serial", "movement_type", "voucher_media", "transfer_price", "owner", "custodian", "location"}
+
+
+def prevent_negative(db: Session, tenant_id: int) -> bool:
+    """Ajustes › "Impedir stock negativo en salidas". Apagado (defecto): todo sigue como siempre."""
+    t = db.get(Tenant, tenant_id)
+    return bool(t and (t.settings or {}).get("prevent_negative_stock"))
+
+
+def on_hand(db: Session, tenant_id: int, product_id: int, warehouse_id: int) -> Decimal:
+    q = select(func.coalesce(func.sum(StockMovement.quantity), 0)).where(
+        StockMovement.tenant_id == tenant_id, StockMovement.product_id == product_id, StockMovement.warehouse_id == warehouse_id
+    )
+    return Decimal(str(db.scalar(q) or 0))
 
 
 def stock_levels(db: Session, tenant_id: int, product_id: int | None = None, warehouse_id: int | None = None) -> list[dict]:
@@ -41,13 +57,26 @@ def move(
     note: str | None = None,
     unit_cost=None,
     invoice_id: int | None = None,
+    **extra,
 ) -> StockMovement:
+    """extra (opcional): project_id, serial, movement_type, voucher_media, transfer_price, owner, custodian, location."""
     p = db.get(Product, product_id)
     w = db.get(Warehouse, warehouse_id)
     if not p or p.tenant_id != tenant_id or not w or w.tenant_id != tenant_id:
         raise HTTPException(404, "Producto o inventario no encontrado")
     if p.item_type != "producto":
         raise HTTPException(422, "Los servicios no llevan inventario")
+    bad = set(extra) - EXTRA_FIELDS
+    if bad:
+        raise TypeError(f"campos de movimiento desconocidos: {sorted(bad)}")
+    if Decimal(str(quantity)) < 0 and prevent_negative(db, tenant_id):
+        saldo = on_hand(db, tenant_id, product_id, warehouse_id)
+        if saldo + Decimal(str(quantity)) < 0:
+            raise HTTPException(
+                409,
+                f"No hay existencia suficiente de {p.name} en {w.name}: hay {saldo.normalize():f} y salen {abs(Decimal(str(quantity))).normalize():f}. "
+                "Ajustes tiene activado «Impedir stock negativo en salidas».",
+            )
     m = StockMovement(
         tenant_id=tenant_id,
         product_id=product_id,
@@ -60,6 +89,7 @@ def move(
         invoice_id=invoice_id,
         at=datetime.now(UTC),
         created_by=user_id,
+        **{k: v for k, v in extra.items() if v is not None},
     )
     db.add(m)
     db.flush()

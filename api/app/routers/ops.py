@@ -228,10 +228,13 @@ def warehouse_update(wid: int, data: WarehouseIn, p: Principal = Depends(require
 @router.get("/stock")
 def stock(warehouse_id: int | None = None, p: Principal = Depends(require("inventory", "ver")), db: Session = Depends(get_db)):
     from ..models import Product
+    from ..services.reservations import committed
 
     levels = inv.stock_levels(db, p.tenant.id, warehouse_id=warehouse_id)
     prods = {pr.id: pr for pr in db.scalars(select(Product).where(Product.tenant_id == p.tenant.id))}
     whs = {w.id: w.name for w in db.scalars(select(Warehouse).where(Warehouse.tenant_id == p.tenant.id))}
+    # comprometido = reservas confirmadas y vigentes (AC25). Sin reservas es 0 y disponible = cantidad.
+    comp = committed(db, p.tenant.id, warehouse_id=warehouse_id)
     return {
         "levels": [
             {
@@ -239,7 +242,10 @@ def stock(warehouse_id: int | None = None, p: Principal = Depends(require("inven
                 "code": prods[lv["product_id"]].code,
                 "name": prods[lv["product_id"]].name,
                 "min_stock": prods[lv["product_id"]].min_stock,
+                "serialized": bool(prods[lv["product_id"]].serialized),
                 "warehouse": whs.get(lv["warehouse_id"]),
+                "committed": comp.get((lv["product_id"], lv["warehouse_id"]), Decimal(0)),
+                "available": lv["quantity"] - comp.get((lv["product_id"], lv["warehouse_id"]), Decimal(0)),
             }
             for lv in levels
             if lv["product_id"] in prods
@@ -256,12 +262,30 @@ class MoveIn(BaseModel):
     unit_cost: Decimal | None = None
     reference: str | None = None
     note: str | None = None
+    # opcionales (existencias enriquecidas): sin ellos el movimiento es el de siempre
+    project_id: int | None = None
+    serial: str | None = Field(None, max_length=80)
+    movement_type: str | None = Field(None, pattern="^(compra|venta|consumo_proyecto|prestamo|consignacion|asignacion_interna|devolucion|ajuste|traslado)$")
+    voucher_media: str | None = Field(None, max_length=400)
+    transfer_price: Decimal | None = None
+    owner: str | None = Field(None, max_length=160)
+    custodian: str | None = Field(None, max_length=160)
+    location: str | None = Field(None, max_length=160)
 
 
 @router.post("/stock/movements", status_code=201)
 def stock_move(data: MoveIn, p: Principal = Depends(require("inventory", "crear")), db: Session = Depends(get_db)):
     qty = abs(data.quantity) if data.kind == "entrada" else -abs(data.quantity) if data.kind == "salida" else data.quantity
-    m = inv.move(db, p.tenant.id, p.user.id, data.product_id, data.warehouse_id, data.kind, qty, data.reference, data.note, data.unit_cost)
+    if data.project_id:
+        from ..models import Project
+
+        pr = db.get(Project, data.project_id)
+        if not pr or pr.tenant_id != p.tenant.id:
+            raise HTTPException(404, "Proyecto no encontrado")
+    extra = data.model_dump(include=inv.EXTRA_FIELDS, exclude_none=True)
+    if "transfer_price" in extra and not p.sees_costs:
+        extra.pop("transfer_price")  # el precio de traslado es informacion de costos
+    m = inv.move(db, p.tenant.id, p.user.id, data.product_id, data.warehouse_id, data.kind, qty, data.reference, data.note, data.unit_cost, **extra)
     audit(db, p.tenant.id, p.user.id, "stock", "product", data.product_id, {"kind": data.kind, "qty": str(qty)}, ip=p.ip)
     db.commit()
     return {"id": m.id}
