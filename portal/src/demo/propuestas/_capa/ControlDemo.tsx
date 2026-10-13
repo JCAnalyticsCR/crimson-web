@@ -8,7 +8,7 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { HiloCarmesi } from "../_comun/componentes";
-import { ETIQUETA_ESTADO, leerPedidosDemo } from "../_comun/pedidos";
+import { ETIQUETA_ESTADO, EVENTO_PEDIDOS, leerPedidosDemo } from "../_comun/pedidos";
 
 export const ESTADOS_EJEMPLO = ["nuevo", "en_revision", "pagado", "preparando", "enviado", "entregado"] as const;
 type EstadoEjemplo = (typeof ESTADOS_EJEMPLO)[number];
@@ -97,6 +97,13 @@ function ControlEjemplo({ estado }: { estado: EstadoEjemplo }) {
 }
 
 function ControlPrueba({ token }: { token: string }) {
+  // el estado cambia sin cambiar la ruta (comprobante subido, pago simulado): se relee con el aviso de mockApi
+  const [, setVuelta] = useState(0);
+  useEffect(() => {
+    const on = () => setVuelta((n) => n + 1);
+    window.addEventListener(EVENTO_PEDIDOS, on);
+    return () => window.removeEventListener(EVENTO_PEDIDOS, on);
+  }, []);
   const p = leerPedidosDemo().find((x) => x.token === token);
   const numero = p?.number || `DEMO-${token.split("-")[1] || ""}`;
   return (

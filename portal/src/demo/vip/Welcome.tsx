@@ -3,7 +3,7 @@
    - en escritorio las tarjetas entran con un stagger corto por CSS (DUR.drawer), nada bloquea;
    - con reduced-motion todo aparece quieto. */
 import { useEffect, useRef } from "react";
-import { SelloPropuesta } from "../propuestas/_comun/componentes";
+import { SelloPropuesta } from "../propuestas/_comun/sello";
 import { PROPUESTAS } from "../propuestas/registro";
 import { Corners, MonitorBar, Wordmark } from "./chrome";
 import { tourSteps } from "./Tour";

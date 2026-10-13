@@ -121,6 +121,11 @@
 .cap-pista__c { color: #ff5a6e; }
 .cap-pista__v { color: #8fe3b4; }
 
+/* ---------- reduced-motion: rama propia (los marcadores aparecen quietos y no laten) ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .cap, .cap *, .cap-marca[data-pulso] { animation: none !important; transition: none !important; }
+}
+
 /* ---------- control del pedido de ejemplo ---------- */
 .cap-control {
   position: fixed; z-index: 52; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); width: 360px; max-width: calc(100% - 32px);

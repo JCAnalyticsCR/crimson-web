@@ -215,7 +215,7 @@ export const ETIQUETAS: Etiqueta[] = [
   { id: "A4-pago", propuesta: "A4", rutas: ["?v=pagar"], selector: [".ck-seg"], irA: PAGO, preparar: "carrito",
     aqui: "Con cédula jurídica, la empresa podría pagar con su cuenta de crédito a 30 días." },
   // ---------- mi pedido
-  { id: "B1-pedido", propuesta: "B1", rutas: ["?pedido=*"], selector: [".ck-thanks", ".ck-ohead"], lado: "abajo-der", irA: "/?pedido=ejemplo-entregado",
+  { id: "B1-pedido", propuesta: "B1", rutas: ["?pedido=*"], selector: [".ck-thanks", ".ck-ohead"], irA: "/?pedido=ejemplo-entregado", // arriba: abajo taparia el estado del pedido
     aqui: "Con la compra se crearía la cuenta del cliente: este pedido quedaría en «Mis compras», con su factura, XML y equipos con garantía." },
   { id: "H6-pedido", propuesta: "H6", rutas: ["?pedido=*"], selector: [".ck-track"], irA: "/?pedido=ejemplo-enviado",
     aqui: "Ya funciona: el cliente sigue su pedido con un enlace firmado, sin cuenta ni contraseña." },

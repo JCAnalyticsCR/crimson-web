@@ -14,7 +14,7 @@
 import { Catalog, DEFAULT_FAQ, DEFAULT_PAGES, INFO_KINDS, type Snapshot } from "./catalog";
 import snapshotUrl from "./snapshot.json?url";
 import { CLAVES } from "./propuestas/registro";
-import { ETIQUETA_ESTADO, almacen, aplicarEstado, borrarEstado, leerEstados, leerPedidosCrudos } from "./propuestas/_comun/pedidos";
+import { ETIQUETA_ESTADO, almacen, aplicarEstado, avisarCambioPedidos, borrarEstado, leerEstados, leerPedidosCrudos } from "./propuestas/_comun/pedidos";
 
 export const DEMO_EVENT = "crimson-demo:aviso";
 export const DEMO_TEXT = "Esto es una demostración: no se procesan pedidos, pagos ni solicitudes.";
@@ -63,7 +63,7 @@ const orders = {
 };
 const memOrders = new Map<string, DemoOrder>();
 const pedidoDemo = (t: string): DemoOrder | null => memOrders.get(t) || orders.get(t);
-const guardar = (o: DemoOrder) => { memOrders.set(o.token, o); orders.put(o); };
+const guardar = (o: DemoOrder) => { memOrders.set(o.token, o); orders.put(o); avisarCambioPedidos(); };
 const crc = (n: number) => new Intl.NumberFormat("es-CR", { style: "currency", currency: "CRC", currencyDisplay: "narrowSymbol", maximumFractionDigits: 0 }).format(n);
 
 function quote(c: Catalog, body: Record<string, unknown>) {

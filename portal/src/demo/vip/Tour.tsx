@@ -209,7 +209,7 @@ export default function Tour({ productPath, autoStart }: { productPath: string; 
       let lift = 0;
       for (const bar of Array.from(document.querySelectorAll(".vt-stickybuy, .ck-actions, .vt-cmptray, .vt-consent, [data-pp-barra], .cap-control"))) {
         const r = bar.getBoundingClientRect();
-        if (r.height && r.bottom >= innerHeight - 4 && r.top < innerHeight) lift = Math.max(lift, Math.round(innerHeight - r.top));
+        if (r.height && r.bottom >= innerHeight - 24 && r.top < innerHeight) lift = Math.max(lift, Math.round(innerHeight - r.top));
       }
       el.style.setProperty("--vip-bottom", `${lift}px`);
       el.setAttribute("data-dock", "bottom");
@@ -225,7 +225,10 @@ export default function Tour({ productPath, autoStart }: { productPath: string; 
     window.addEventListener("scroll", req, { passive: true });
     window.addEventListener("resize", req);
     const late = window.setTimeout(req, 400); // la cabecera nace cuando carga la tienda
-    return () => { placeRef.current = () => {}; cancelAnimationFrame(raf); window.clearTimeout(tm); ro.disconnect(); window.removeEventListener("scroll", req); window.removeEventListener("resize", req); window.clearTimeout(late); };
+    // barras que nacen despues (control del pedido de ejemplo, barra de una maqueta): agrupado en el mismo rAF
+    const mo = new MutationObserver(req);
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => { placeRef.current = () => {}; cancelAnimationFrame(raf); window.clearTimeout(tm); ro.disconnect(); mo.disconnect(); window.removeEventListener("scroll", req); window.removeEventListener("resize", req); window.clearTimeout(late); };
   }, [st.open, st.step]);
 
   const close = useCallback(() => setSt((s) => ({ ...s, open: false })), []);

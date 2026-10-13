@@ -14,6 +14,7 @@ import { CLAVES, ETIQUETAS, type Etiqueta } from "./propuestas/registro";
 import { almacen } from "./propuestas/_comun/pedidos";
 import CapaPropuestas, { ControlesCapa } from "./propuestas/_capa/CapaPropuestas";
 import { esRutaDeTienda } from "./propuestas/_capa/rutas";
+import { useCapa } from "./propuestas/_capa/estado";
 import { instalarParcheCorreo } from "./propuestas/_capa/parcheCorreo";
 
 const ControlDemo = lazy(() => import("./propuestas/_capa/ControlDemo"));
@@ -118,6 +119,8 @@ export default function DemoShell({ fx, etiquetasExtra = SIN_ETIQUETAS, children
   const loc = useLocation();
   const etiquetas = useMemo(() => [...ETIQUETAS, ...etiquetasExtra], [etiquetasExtra]);
   const tienda = esRutaDeTienda(loc.pathname);
+  const capa = useCapa();
+  const conChips = capa.activa && (tienda || loc.pathname.startsWith("/detras-de-escena"));
   const sp = new URLSearchParams(loc.search);
   const conControl = sp.has("pedido") || sp.get("v") === "mi-pedido";
 
@@ -131,7 +134,7 @@ export default function DemoShell({ fx, etiquetasExtra = SIN_ETIQUETAS, children
 
   return (
     <>
-      <div className="demo-ribbon" data-zona={tienda ? "tienda" : "propuestas"}>
+      <div className="demo-ribbon" data-zona={tienda ? "tienda" : "propuestas"} data-chips={conChips ? "" : undefined}>
         <span className="demo-ribbon__txt" role="note"><b>Vista previa</b><span className="demo-ribbon__largo"><span aria-hidden="true"> · </span>{textoFranja(loc.pathname)}</span></span>
         <span className="demo-ribbon__ctl"><ControlesCapa /></span>
       </div>

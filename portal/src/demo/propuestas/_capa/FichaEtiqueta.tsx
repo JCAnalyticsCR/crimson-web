@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, useState, type MutableRefObject } from "react
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { ETAPAS, porId, type Etiqueta, type Propuesta } from "../registro";
-import { BotonMeInteresa, SelloPropuesta } from "../_comun/componentes";
+import { BotonMeInteresa, SelloPropuesta } from "../_comun/sello";
 import { cerrarFicha } from "./estado";
 
 // escritorio: nace fuera de la pantalla (no oculta: asi el titulo puede recibir el foco) y el motor la ancla al marcador
@@ -71,7 +71,7 @@ export default function FichaEtiqueta({ etiqueta, refFicha }: { etiqueta: Etique
     <div ref={refFicha} id="cap-ficha" className="cap cap-ficha" data-modo={movil ? "hoja" : "flota"} data-tipo={prop ? "propuesta" : "existente"}
       role="dialog" aria-labelledby={tId} aria-modal={movil ? true : undefined} style={movil ? undefined : FUERA}>
       <div className="cap-ficha__top">
-        {prop ? <SelloPropuesta id={prop.id} tamano="chico" /> : <SelloPropuesta estado="existente" tamano="chico" />}
+        {prop ? <SelloPropuesta id={prop.id} /> : <SelloPropuesta estado="existente" />}
         {etapa && <span className="cap-ficha__etapa">Etapa {etapa.n} · {etapa.titulo}</span>}
         <button type="button" className="cap-ficha__x" onClick={cerrarFicha} aria-label="Cerrar la ficha">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>

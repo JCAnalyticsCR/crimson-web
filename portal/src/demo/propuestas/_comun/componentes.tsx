@@ -4,10 +4,13 @@
    Pantallas de decision y trabajo: nada se mueve solo; solo responde lo que el usuario toca. */
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { CLAVES, ETAPAS, ORDEN_MAQUETAS, esPropuestaId, infoMaqueta, type Etapa, type MaquetaId, type PropuestaId } from "../registro";
-import { usePaso, useInteres } from "./hooks";
+import { CLAVES, ETAPAS, ORDEN_MAQUETAS, esPropuestaId, infoMaqueta, type Etapa, type MaquetaId } from "../registro";
+import { usePaso } from "./hooks";
 import { almacen } from "./pedidos";
+import { BotonMeInteresa, SelloPropuesta, Visto } from "./sello";
 import "./comun.css";
+
+export { BotonMeInteresa, SelloPropuesta };
 
 // ---------------------------------------------------------------- utilidades
 function useMedia(q: string): boolean {
@@ -34,24 +37,6 @@ function useReloj(): string {
 const Flecha = ({ izq }: { izq?: boolean }) => (
   <svg className="pp-flecha" viewBox="0 0 24 24" aria-hidden="true">{izq ? <path d="M19 12H5M11 6l-6 6 6 6" /> : <path d="M5 12h14M13 6l6 6-6 6" />}</svg>
 );
-const Visto = () => <svg className="pp-visto" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7" /></svg>;
-
-// ---------------------------------------------------------------- sello
-export function SelloPropuesta({ estado = "propuesta", id, tamano = "normal", tono = "claro", className }: {
-  estado?: "propuesta" | "existente" | "ejemplo"; id?: string; tamano?: "normal" | "chico"; tono?: "claro" | "oscuro"; className?: string;
-}) {
-  const chico = tamano === "chico";
-  return (
-    <span className={`pp-sello${className ? ` ${className}` : ""}`} data-estado={estado} data-tamano={tamano} data-tono={tono}>
-      {id && <b className="pp-sello__id">{id}</b>}
-      <span className="pp-sello__t">
-        {estado === "propuesta" ? (chico ? <>Propuesta<span className="pp-sr"> · no incluida aún</span></> : "Propuesta · no incluida aún")
-          : estado === "existente" ? <><Visto />{chico ? <>Ya está<span className="pp-sr"> en la plataforma</span></> : "Ya está en la plataforma"}</>
-            : "Datos de ejemplo"}
-      </span>
-    </span>
-  );
-}
 
 // ---------------------------------------------------------------- barra de monitor
 export function BarraMonitor({ cam, rotulo, derecha }: { cam: string; rotulo: string; derecha?: ReactNode }) {
@@ -61,19 +46,6 @@ export function BarraMonitor({ cam, rotulo, derecha }: { cam: string; rotulo: st
       <span className="pp-monitor__l" aria-hidden="true"><i className="pp-rec" />CAM {cam}<span className="pp-monitor__sep">·</span>{rotulo}</span>
       <span className="pp-monitor__r"><span className="pp-monitor__t" aria-hidden="true">{t}</span>{derecha}</span>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------- «Me interesa»
-export function BotonMeInteresa({ id, variante = "boton", tono = "claro", className }: {
-  id: PropuestaId; variante?: "boton" | "chip"; tono?: "claro" | "oscuro"; className?: string;
-}) {
-  const { tiene, alternar } = useInteres();
-  const on = tiene(id);
-  return (
-    <button type="button" className={`pp-interes${className ? ` ${className}` : ""}`} data-variante={variante} data-tono={tono} aria-pressed={on} onClick={() => alternar(id)}>
-      {on ? <>Te interesa <span aria-hidden="true">✓</span><span className="pp-sr"> (marcada)</span></> : <>Me interesa<span className="pp-sr">: {id}</span></>}
-    </button>
   );
 }
 

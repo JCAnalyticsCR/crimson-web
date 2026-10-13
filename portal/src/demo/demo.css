@@ -11,12 +11,15 @@ html.demo-on body { padding-top: var(--demo-h); background: var(--demo-cream); }
   font: 500 10px/1 "JetBrains Mono", ui-monospace, Consolas, monospace; letter-spacing: .12em; text-transform: uppercase;
   white-space: nowrap;
 }
-.demo-ribbon__txt { flex: 0 1 auto; min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* el texto nunca se corta a media palabra: «● Vista previa» siempre entero; con los chips de la capa abiertos, el texto
+   largo solo se ve desde 1280 px (debajo, los chips necesitan el espacio y ya dicen que son propuestas) */
+.demo-ribbon__txt { flex: 0 0 auto; max-width: 100%; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .demo-ribbon__txt b { flex: none; color: #fff; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
 .demo-ribbon__txt b::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--demo-crimson); }
 .demo-ribbon__largo { display: none; }
 .demo-ribbon__ctl { flex: 1 1 auto; min-width: 0; height: 100%; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 @media (min-width: 640px) { .demo-ribbon__largo { display: inline; } }
+@media (max-width: 1279px) { .demo-ribbon[data-chips] .demo-ribbon__largo { display: none; } }
 @media (max-width: 380px) { .demo-ribbon { letter-spacing: .06em; font-size: 9.5px; gap: 8px; } }
 
 /* lo fijo o pegajoso de la vitrina, corrido el alto de la franja */
