@@ -38,6 +38,7 @@ from .routers import (
     stock,
     store,
     store_checkout,
+    store_showcase,
     support,
     support_desk,
     vehicles,
@@ -90,6 +91,9 @@ def create_app() -> FastAPI:
     app.include_router(store.router)
     app.include_router(store_inventory_router.router)
     app.include_router(store_checkout.router)
+    app.include_router(store_showcase.router)
+    app.include_router(store_showcase.pub)
+    app.include_router(store_showcase.seo)
     app.include_router(reception.router)
     app.include_router(public_api.admin)
     app.include_router(public_api.v1)

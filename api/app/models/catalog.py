@@ -82,6 +82,10 @@ class Product(TenantMixin, TimestampMixin, Base):
     # tienda: precio propio de la web (sin IVA, moneda del producto; vacio = el precio de siempre) y destacado
     web_price: Mapped[float | None] = mapped_column(Numeric(14, 5))
     web_featured: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # vitrina (tienda propia): precio anterior sin IVA (tachado si es mayor), ficha tecnica PDF y especificaciones a mano
+    compare_price: Mapped[float | None] = mapped_column(Numeric(14, 5))
+    datasheet_url: Mapped[str | None] = mapped_column(String(500))
+    specs: Mapped[dict | None] = mapped_column(JSON)
 
     taxes: Mapped[list["ProductTax"]] = relationship(cascade="all, delete-orphan")
 

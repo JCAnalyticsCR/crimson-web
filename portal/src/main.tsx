@@ -90,7 +90,7 @@ function App() {
       <Route path="/login" element={<LoginRoute />} />
       <Route path="/pagar/:token" element={<PayPage />} />
       <Route path="/invitacion/:token" element={<Invite />} />
-      <Route path="/tienda/:slug" element={<PublicStore />} />
+      <Route path="/tienda/:slug/*" element={<PublicStore />} />
       <Route path="/eventos/:slug/:event" element={<PublicEvent />} />
       <Route path="/entrada/:code" element={<TicketPage />} />
       <Route path="/solicitar-acceso" element={<RequestAccess />} />

@@ -1,11 +1,14 @@
 /* Tienda en dominio propio (p. ej. tienda.crimsoncr.com con CNAME al portal). El dominio se resuelve contra
    Mi Tienda -> Dominio, y las direcciones viejas de Fygaro se traducen a las nuevas para que los enlaces ya
    compartidos (redes, WhatsApp, Google) sigan llevando al mismo producto:
-     /products/<uuid>/            -> ?p=<id>     (mapa que deja el importador)
-     /products/category/<id>/     -> ?c=<id>
-     /products/search/?keywords=x -> ?q=x
-     /terms  /policies            -> ?legal=terms|privacy
-     /products/, /page/..., resto -> portada */
+     /products/<uuid>/            -> /p/<nombre>-<id>  (mapa que deja el importador)
+     /products/category/<id>/     -> /c/<categoria>
+     /products/search/?keywords=x -> /buscar?q=x
+     /products/                   -> /catalogo
+     /terms  /policies            -> /info/terminos  /info/privacidad
+     /page/solicitud-de-asesoria… -> /asesoria
+   En produccion nginx ya responde estas con un 301 del API (/public/seo/legacy) antes de llegar aqui; esto
+   cubre el servidor de desarrollo y cualquier enlace que se escape. */
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 
@@ -26,8 +29,8 @@ function Legacy({ slug, kind }: { slug: string; kind: "product" | "category" }) 
   useEffect(() => {
     fetch(`/api/public/store/${slug}/legacy/${kind}/${encodeURIComponent(ref || "")}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((j) => setTo(j?.product_id ? `/?p=${j.product_id}` : j?.category_id ? `/?c=${j.category_id}` : "/"))
-      .catch(() => setTo("/"));
+      .then((j) => setTo(j?.product_id ? `/p/producto-${j.product_id}` : j?.category_id ? `/c/${j.category_id}` : "/catalogo"))
+      .catch(() => setTo("/catalogo"));
   }, [slug, kind, ref]);
   return to ? <Navigate to={to} replace /> : <Spin />;
 }
@@ -35,9 +38,14 @@ function Legacy({ slug, kind }: { slug: string; kind: "product" | "category" }) 
 function Search() {
   const s = new URLSearchParams(useLocation().search);
   const kw = s.get("keywords");
-  if (kw) return <Navigate to={`/?q=${encodeURIComponent(kw)}`} replace />;
+  if (kw) return <Navigate to={`/buscar?q=${encodeURIComponent(kw)}`} replace />;
   const c = s.get("category");
-  return c ? <Navigate to={`/products/category/${encodeURIComponent(c)}/`} replace /> : <Navigate to="/" replace />;
+  return c ? <Navigate to={`/products/category/${encodeURIComponent(c)}/`} replace /> : <Navigate to="/catalogo" replace />;
+}
+
+function Page() {
+  const { ref = "" } = useParams();
+  return <Navigate to={ref.includes("asesoria") ? "/asesoria" : "/"} replace />;
 }
 
 export default function StoreHost() {
@@ -54,13 +62,14 @@ export default function StoreHost() {
   return (
     <Suspense fallback={<Spin />}>
       <Routes>
-        <Route path="/" element={<PublicStore slug={slug} hostMode />} />
         <Route path="/products/search/*" element={<Search />} />
         <Route path="/products/category/:ref/*" element={<Legacy slug={slug} kind="category" />} />
+        <Route path="/products" element={<Navigate to="/catalogo" replace />} />
         <Route path="/products/:ref/*" element={<Legacy slug={slug} kind="product" />} />
-        <Route path="/terms/*" element={<Navigate to="/?legal=terms" replace />} />
-        <Route path="/policies/*" element={<Navigate to="/?legal=privacy" replace />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="/terms/*" element={<Navigate to="/info/terminos" replace />} />
+        <Route path="/policies/*" element={<Navigate to="/info/privacidad" replace />} />
+        <Route path="/page/:ref/*" element={<Page />} />
+        <Route path="/*" element={<PublicStore slug={slug} hostMode />} />
       </Routes>
     </Suspense>
   );
