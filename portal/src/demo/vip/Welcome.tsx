@@ -16,7 +16,7 @@ export type Feature = { cam: string; tag: string; title: string; body: string; c
 export const features = (productPath: string): Feature[] => [
   {
     cam: "01", tag: "Inventario", title: "Inventario real, con disponibilidad",
-    body: "Cada producto muestra si hay en bodega y cuántas unidades quedan. Sale del mismo inventario que usa Crimson, sin cargar existencias a mano en otra plataforma.",
+    body: "Cada producto muestra si hay en bodega y cuántas unidades quedan. Sale del mismo inventario que usa Crimson, sin cargar existencias a mano en otra plataforma. En esta vista previa, la disponibilidad es simulada.",
     cta: "Ver el catálogo", path: "/catalogo",
   },
   {
@@ -31,7 +31,7 @@ export const features = (productPath: string): Feature[] => [
   },
   {
     cam: "04", tag: "Pago", title: "SINPE con comprobante, tarjeta y factura electrónica",
-    body: "El cliente paga por SINPE Móvil y sube el comprobante, o con tarjeta por ONVO, al contratarlo (ya está integrado). La factura electrónica sale sola, sin pasos manuales.",
+    body: "El cliente paga por SINPE Móvil y sube el comprobante, o con tarjeta por ONVO (ya integrado; falta contratarlo). La factura electrónica sale sola al confirmarse el pago, en cuanto se contrate el proveedor de factura electrónica.",
     cta: "Probar una compra", path: "/catalogo",
   },
   {
@@ -80,12 +80,13 @@ export default function Welcome({ guestName, productPath, onEnter }: {
           </p>
           <p className="vip-note" role="note">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7.5v.5" /></svg>
-            <span><b>Vista previa con productos de ejemplo:</b> nada de lo que hagás aquí genera pedidos ni pagos.</span>
+            <span><b>Vista previa con el catálogo público de referencia:</b> nada de lo que hagás aquí genera pedidos ni pagos.</span>
           </p>
           <dl className="vip-readout" aria-label="Estado de la vista previa">
             <div><dt>Invitado</dt><dd>{guestName}</dd></div>
             <div><dt>Modo</dt><dd>Vista previa</dd></div>
-            <div><dt>Catálogo</dt><dd>Productos de ejemplo</dd></div>
+            <div><dt>Catálogo</dt><dd>Público, de referencia</dd></div>
+            <div><dt>Disponibilidad</dt><dd>Simulada</dd></div>
             <div><dt>Pedidos y pagos</dt><dd>Simulados</dd></div>
             <div><dt>Factura electrónica</dt><dd>Simulada</dd></div>
             <div><dt>Propuestas</dt><dd>{PROPUESTAS.length}, no incluidas aún</dd></div>

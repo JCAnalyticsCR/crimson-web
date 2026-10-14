@@ -84,7 +84,7 @@
   .pp-nav__links { display: flex; flex: 1; justify-content: flex-end; align-items: center; gap: 2px; min-width: 0; }
   .pp-nav__links a { min-height: 40px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 999px; font-size: 14px; font-weight: 600; color: #e4e0dc; white-space: nowrap; }
   .pp-nav__links a[aria-current="page"] { background: rgba(255, 255, 255, .12); color: #fff; }
-  .pp-nav__paso { font-family: var(--pp-mono) !important; font-size: 12px !important; letter-spacing: .04em; color: var(--pp-muted-dark) !important; }
+  .pp-nav__paso { font-family: var(--pp-mono) !important; font-size: 12px !important; letter-spacing: .04em; color: var(--pp-muted-dark) !important; gap: .45em; } /* flex recorta el espacio de «‹ »: el gap lo devuelve */
 }
 @media (min-width: 768px) and (max-width: 1023px) { .pp-nav__paso { display: none !important; } }
 @media (hover: hover) and (min-width: 768px) { .pp-nav__links a:hover { background: rgba(255, 255, 255, .08); color: #fff; } }

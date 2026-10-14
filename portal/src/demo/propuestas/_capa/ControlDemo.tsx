@@ -19,7 +19,7 @@ type EstadoEjemplo = (typeof ESTADOS_EJEMPLO)[number];
 const PIE: Record<EstadoEjemplo, string> = {
   nuevo: "María eligió SINPE Móvil. Los productos quedan apartados mientras paga; si no paga a tiempo, la reserva vence sola.",
   en_revision: "María subió el comprobante. Solo lo ve el equipo de Crimson, que confirma el pago desde su panel.",
-  pagado: "Crimson confirmó el pago y la factura electrónica salió sola.",
+  pagado: "Crimson confirmó el pago y la factura electrónica salió sola (simulada en la vista previa).",
   preparando: "El equipo arma el paquete; María ve el avance sin tener que escribir.",
   enviado: "Salió con guía de Correos de Costa Rica (guía de ejemplo): María la tiene aquí mismo.",
   entregado: "Entregado. Con la propuesta B1, este pedido quedaría en su cuenta con sus equipos y su garantía.",
