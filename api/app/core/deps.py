@@ -141,7 +141,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "commissions": ["ver", "ver_todo"],
         "reports": ["ver"],
     },
-    # Acceso temporal concedido por el admin (Ajustes -> Soporte): solo lectura, cada request queda auditado
+    # Acceso temporal concedido por el admin (Ajustes -> Acceso de soporte): solo lectura, cada request queda auditado
     "soporte": {
         "dashboard": ["ver", "empresa"],
         "crm": ["ver"],
@@ -267,6 +267,12 @@ def get_session_principal(
     tenant = db.get(Tenant, int(payload["tid"]))
     if not user or not user.active or not tenant or not tenant.active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Cuenta inactiva")
+    # Cerrar sesiones / restablecer contrasena sube session_version: los access tokens emitidos antes mueren aqui.
+    # Los tokens de antes del despliegue no traen "sv" y valen como 0 (nadie pierde su sesion por desplegar).
+    if int(payload.get("sv", 0) or 0) != int(user.session_version or 0):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sesion cerrada: vuelva a iniciar sesion")
+    if user.must_change_password:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Debe crear una contrasena nueva")
     m = db.scalar(select(TenantUser).where(TenantUser.user_id == user.id, TenantUser.tenant_id == tenant.id, TenantUser.active))
     if not m:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Sin acceso a esta empresa")

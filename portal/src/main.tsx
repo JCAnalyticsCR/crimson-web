@@ -50,6 +50,8 @@ const Archive = lazy(() => import("./modules/tools/Archive"));
 const AccessRequests = lazy(() => import("./modules/clientaccess/AccessRequests"));
 const Vehicles = lazy(() => import("./modules/vehicles/Vehicles"));
 const RequestAccess = lazy(() => import("./modules/auth/RequestAccess"));
+const ResetPassword = lazy(() => import("./modules/auth/ResetPassword"));
+const ForgotPassword = lazy(() => import("./modules/auth/ForgotPassword"));
 // Portal del cliente: su propio layout y su propio menu (nunca el panel interno)
 const ClientShell = lazy(() => import("./modules/cliente/ClientShell"));
 const ClientHome = lazy(() => import("./modules/cliente/ClientHome"));
@@ -88,6 +90,8 @@ function App() {
       <Route path="/login" element={<LoginRoute />} />
       <Route path="/pagar/:token" element={<PayPage />} />
       <Route path="/invitacion/:token" element={<Invite />} />
+      <Route path="/restablecer/:token" element={<ResetPassword />} />
+      <Route path="/recuperar" element={<ForgotPassword />} />
       <Route path="/tienda/:slug/*" element={<PublicStore />} />
       {/* Eventos salio del panel (13/10, 02:26); la pagina publica del evento y las entradas vendidas siguen */}
       <Route path="/eventos/:slug/:event" element={<PublicEvent />} />

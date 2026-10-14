@@ -1,9 +1,7 @@
-"""Ajustes (plan 3.8): facturacion, notificaciones, metodos manuales, cuentas bancarias, grupos, usuarios e invitaciones, pasarelas, correo."""
+"""Ajustes (plan 3.8): facturacion, notificaciones, metodos manuales, cuentas bancarias, grupos, pasarelas, correo.
+Usuarios e invitaciones viven en routers/users_admin.py."""
 
 from __future__ import annotations
-
-import secrets
-from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -13,9 +11,8 @@ from sqlalchemy.orm import Session
 from ..core.config import settings as cfg
 from ..core.crypto import encrypt, mask
 from ..core.db import get_db
-from ..core.deps import ASSIGNABLE_ROLES, COST_ROLE_CHOICES, Principal, cost_roles, require
-from ..core.security import hash_password, hash_token, password_is_strong
-from ..models import BankAccount, BillingGroup, EmailOutbox, Invitation, PaymentGatewayConfig, Tenant, TenantUser, User
+from ..core.deps import COST_ROLE_CHOICES, Principal, require
+from ..models import BankAccount, BillingGroup, EmailOutbox, PaymentGatewayConfig, Tenant
 from ..providers.payments import OnvoAdapter, OnvoError, key_mode, key_problem, webhook_secret_problem
 from ..services import onvo
 from ..services.bitacora import audit_change
@@ -202,135 +199,7 @@ def group_update(gid: int, data: GroupIn, p: Principal = Depends(require("settin
     return {"ok": True}
 
 
-# ---------- Usuarios e invitaciones ----------
-@router.get("/users")
-def users(p: Principal = Depends(require("settings", "ver")), db: Session = Depends(get_db)):
-    # los usuarios del portal del cliente se administran desde Accesos de clientes, no desde aqui
-    rows = db.scalars(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.customer_id.is_(None))).all()
-    inv = db.scalars(
-        select(Invitation).where(
-            Invitation.tenant_id == p.tenant.id,
-            Invitation.customer_id.is_(None),
-            Invitation.accepted_at.is_(None),
-            Invitation.expires_at > datetime.now(UTC),
-        )
-    ).all()
-    return {
-        "users": [
-            {
-                "id": m.user.id,
-                "email": m.user.email,
-                "name": m.user.full_name,
-                "role": m.role_code,
-                "active": m.active,
-                "totp": m.user.totp_enabled,
-                "last_login": m.user.last_login_at,
-            }
-            for m in rows
-        ],
-        "invitations": [{"id": i.id, "email": i.email, "role": i.role_code, "expires_at": i.expires_at} for i in inv],
-        "roles": ASSIGNABLE_ROLES,
-        # "Quien ve costos": lo habilitado hoy y los roles que se pueden habilitar (el resto nunca)
-        "cost_roles": list(cost_roles(p.tenant)),
-        "cost_role_choices": list(COST_ROLE_CHOICES),
-    }
-
-
-class InviteIn(BaseModel):
-    email: EmailStr
-    role: str = "lectura"
-
-
-@router.post("/invitations", status_code=201)
-def invite(data: InviteIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
-    if data.role not in ASSIGNABLE_ROLES:
-        raise HTTPException(422, "Rol invalido")
-    raw = secrets.token_urlsafe(32)
-    inv = Invitation(
-        tenant_id=p.tenant.id,
-        email=data.email.lower(),
-        role_code=data.role,
-        token_hash=hash_token(raw),
-        expires_at=datetime.now(UTC) + timedelta(days=7),
-        invited_by=p.user.id,
-    )
-    db.add(inv)
-    db.flush()
-    link = f"{cfg.public_base_url}/invitacion/{raw}"
-    m = queue_email(
-        db,
-        p.tenant,
-        data.email,
-        f"Invitación a {p.tenant.name} en Crimson",
-        f'<p>Te invitaron a <b>{p.tenant.name}</b> con rol <b>{data.role}</b>.</p><p><a href="{link}">Aceptar invitación</a> (vence en 7 días)</p>',
-        "invitation",
-        inv.id,
-    )
-    audit(db, p.tenant.id, p.user.id, "invite", "invitation", inv.id, {"email": inv.email, "role": inv.role_code}, ip=p.ip, after={"email": inv.email, "role": inv.role_code})
-    db.commit()
-    # emailed dice si el correo salio de verdad: sin llave de Resend queda "simulado" y la pantalla no puede
-    # decir "le llego un correo". El enlace se devuelve siempre para mandarlo por WhatsApp.
-    return {"id": inv.id, "link": link, "emailed": m.status == "enviado"}
-
-
-class AcceptIn(BaseModel):
-    token: str
-    full_name: str = Field(min_length=2)
-    password: str
-
-
-@router.post("/invitations/accept", tags=["publico"])
-def accept(data: AcceptIn, db: Session = Depends(get_db)):
-    inv = db.scalar(select(Invitation).where(Invitation.token_hash == hash_token(data.token)))
-    if not inv or inv.accepted_at or inv.expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
-        raise HTTPException(404, "Invitación inválida o vencida")
-    if not password_is_strong(data.password):
-        raise HTTPException(422, "Mínimo 10 caracteres con letras y números")
-    u = db.scalar(select(User).where(User.email == inv.email))
-    if not u:
-        u = User(email=inv.email, full_name=data.full_name, password_hash=hash_password(data.password))
-        db.add(u)
-        db.flush()
-    m = db.scalar(select(TenantUser).where(TenantUser.user_id == u.id, TenantUser.tenant_id == inv.tenant_id))
-    if inv.customer_id:
-        # invitacion al portal del cliente: la membresia queda atada a ESE cliente. Nunca se convierte una
-        # cuenta interna en cuenta de cliente (ni al reves) por aceptar un enlace.
-        if m and m.customer_id != inv.customer_id:
-            raise HTTPException(409, "Este correo ya tiene otro acceso en la empresa. Escríbanos para revisarlo.")
-        if m:
-            m.role_code, m.active = inv.role_code, True
-        else:
-            db.add(TenantUser(tenant_id=inv.tenant_id, user_id=u.id, role_code=inv.role_code, customer_id=inv.customer_id))
-    elif not m:
-        db.add(TenantUser(tenant_id=inv.tenant_id, user_id=u.id, role_code=inv.role_code))
-    inv.accepted_at = datetime.now(UTC)
-    db.commit()
-    return {"ok": True, "email": u.email}
-
-
-class MemberIn(BaseModel):
-    role: str | None = None
-    active: bool | None = None
-    reason: str | None = Field(None, max_length=500)  # opcional: queda en la bitacora
-
-
-@router.patch("/users/{uid}")
-def member_update(uid: int, data: MemberIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
-    m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.user_id == uid))
-    if not m or m.customer_id:  # usuario de cliente: se maneja desde Accesos de clientes
-        raise HTTPException(404, "Usuario no encontrado")
-    if uid == p.user.id and (data.active is False or (data.role and data.role != "admin")):
-        raise HTTPException(409, "No podés quitarte el acceso de administrador a vos mismo")
-    antes = {"role": m.role_code, "active": m.active}
-    if data.role:
-        if data.role not in ASSIGNABLE_ROLES:
-            raise HTTPException(422, "Rol invalido")
-        m.role_code = data.role
-    if data.active is not None:
-        m.active = data.active
-    audit_change(db, p, "permissions", "user", uid, antes, {"role": m.role_code, "active": m.active}, reason=data.reason)
-    db.commit()
-    return {"ok": True}
+# ---------- Usuarios e invitaciones: routers/users_admin.py (mismas rutas /settings/users e /settings/invitations) ----------
 
 
 # ---------- Pasarelas ----------

@@ -8,9 +8,11 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 class LoginIn(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(max_length=200)
     totp_code: str | None = None
     tenant_slug: str | None = None
+    # entro con una contrasena temporal (Ajustes -> Usuarios -> Restablecer): la nueva va en el mismo login
+    new_password: str | None = Field(None, max_length=200)
 
 
 class TokenOut(BaseModel):
@@ -80,12 +82,27 @@ class RecoveryCodesOut(BaseModel):
 
 
 class PasswordOnlyIn(BaseModel):
-    password: str
+    password: str = Field(max_length=200)
 
 
 class PasswordChangeIn(BaseModel):
-    current_password: str
-    new_password: str = Field(min_length=10)
+    current_password: str = Field(max_length=200)
+    new_password: str = Field(min_length=10, max_length=200)
+
+
+class ResetTokenIn(BaseModel):
+    """El token viaja en el cuerpo (POST), nunca en la URL de la API: asi no queda en ningun log."""
+
+    token: str = Field(max_length=200)
+
+
+class ResetConfirmIn(BaseModel):
+    token: str = Field(max_length=200)
+    new_password: str = Field(max_length=200)
+
+
+class ResetRequestIn(BaseModel):
+    email: EmailStr
 
 
 class ExchangeRateOut(BaseModel):
