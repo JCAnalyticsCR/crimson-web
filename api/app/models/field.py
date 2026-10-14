@@ -4,9 +4,9 @@ Oportunidad -> Levantamiento tecnico -> Cotizacion -> Proyecto -> Orden de traba
 El tecnico nunca ve costos ni margenes: eso vive en el levantamiento del lado de administracion.
 """
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -40,6 +40,7 @@ class Opportunity(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     probability: Mapped[int] = mapped_column(Integer, default=30)
     status: Mapped[str] = mapped_column(String(24), default="nuevo", index=True)
     # nuevo | contactado | requiere_visita | levantamiento | cotizando | enviada | negociacion | ganada | perdida
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # cuando paso a ganada o perdida
     next_action: Mapped[str | None] = mapped_column(String(200))
     next_action_date: Mapped[date | None] = mapped_column(Date, index=True)
     lost_reason: Mapped[str | None] = mapped_column(String(200))
@@ -47,6 +48,17 @@ class Opportunity(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     quote_id: Mapped[int | None] = mapped_column(ForeignKey("quote.id"))
     project_id: Mapped[int | None] = mapped_column(ForeignKey("project.id", use_alter=True, name="fk_opportunity_project"))
     created_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
+
+
+@event.listens_for(Opportunity.status, "set", active_history=True)
+def _opportunity_closed_at(target, value, oldvalue, _initiator):
+    """Fecha de cierre ("Ganado este mes"): la pone cualquier camino que cambie el estado (editar, seguimiento,
+    convertir una venta, crear el proyecto). Reabrir la borra."""
+    cerradas = ("ganada", "perdida")
+    if value in cerradas and oldvalue not in cerradas:
+        target.closed_at = datetime.now(UTC)
+    elif value not in cerradas:
+        target.closed_at = None
 
 
 class Survey(ArchiveMixin, TenantMixin, TimestampMixin, Base):

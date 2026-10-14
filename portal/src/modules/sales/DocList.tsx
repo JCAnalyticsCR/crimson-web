@@ -5,6 +5,7 @@ import { Badge, Card, Empty, I, Icon, Loading } from "../../ui/components";
 import { useSession } from "../../app/session";
 import { TrashLocked } from "../../ui/TrashButton";
 import { LOCKED } from "../../ui/trash";
+import "./doc-list.css";
 
 /* Filtros que llegan desde "Acciones pendientes" del inicio (?pendiente=<clave>): misma definicion que el conteo. */
 const PENDIENTES: Record<string, string> = {
@@ -23,15 +24,35 @@ const FILTERS: Record<string, { key: string; label: string }[]> = {
 
 export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {
   const isQ = kind === "quotes";
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const nav = useNavigate();
   const { allows } = useSession();
+  const todo = allows("sales.ver_todo"); // sin ver_todo (el vendedor) la API solo devuelve lo suyo, también al buscar
   const [items, setItems] = useState<DocListItem[]>([]);
   const [cursor, setCursor] = useState<number | null>(null);
   const [status, setStatus] = useState(params.get("estado") || "");
   const [loading, setLoading] = useState(true);
   const q = params.get("q") || "";
   const pendiente = params.get("pendiente") || "";
+  const [text, setText] = useState(q);
+  useEffect(() => { setText(q); }, [q]); // atrás/adelante del navegador
+
+  /* El buscador vive en ?q= (se puede compartir o volver con "atrás"). Buscar quita los filtros del inicio y de estado:
+     "la 004" se busca entre todas. */
+  const search = useCallback((v: string) => {
+    const next = new URLSearchParams(params);
+    const t = v.trim();
+    if (t) next.set("q", t); else next.delete("q");
+    next.delete("pendiente"); next.delete("estado");
+    if (next.toString() === params.toString()) return;
+    setStatus("");
+    setParams(next, { replace: true });
+  }, [params, setParams]);
+  useEffect(() => {
+    if (text.trim() === q) return;
+    const t = setTimeout(() => search(text), 300);
+    return () => clearTimeout(t);
+  }, [text, q, search]);
 
   const load = useCallback(async (append = false, c: number | null = null) => {
     setLoading(true);
@@ -66,19 +87,31 @@ export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {
             <Link className="btn btn--ghost btn--sm" to={base}>Quitar filtro</Link>
           </div>
         )}
-        <div className="list-head">
+        <div className="doc-search">
+          <div className="search">
+            <Icon d={I.search} size={16} />
+            <input type="search" aria-label="Buscar" placeholder={isQ ? "Buscar por número o cliente…" : "Buscar por número, cliente o clave…"} value={text}
+              onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") search(text); }} />
+          </div>
+          {!todo && <p className="muted doc-search__scope">Solo ves tus {isQ ? "cotizaciones" : "facturas"}.</p>}
+        </div>
+        <div className="list-head doc-list__head">
           <span className="muted" style={{ fontSize: 13 }}>{q ? `Resultados para “${q}”` : "Modificadas recientemente"}</span>
           {!pendiente && <div className="tabs">{FILTERS[kind].map((f) => <button key={f.key} className={status === f.key ? "is-active" : ""} onClick={() => setStatus(f.key)}>{f.label}</button>)}</div>}
         </div>
         {items.length === 0 && loading ? <Loading /> : items.length === 0 ? (
-          <Empty hint={isQ ? "Creá una cotización y enviala por WhatsApp o correo." : "Las facturas nacen de una cotización convertida o directo."} action={<Link className="btn btn--crimson btn--sm" to={`${base}/nueva`}>Crear</Link>} />
+          q
+            /* sin sugerir que exista en otro lado: lo ajeno no existe para el vendedor (13/10 35:50) */
+            ? <Empty title={`No encontramos «${q}» entre ${todo ? "las" : "tus"} ${isQ ? "cotizaciones" : "facturas"}.`} hint="Probá con otro número, el nombre del cliente o parte de él." />
+            : <Empty hint={isQ ? "Creá una cotización y enviala por WhatsApp o correo." : "Las facturas nacen de una cotización convertida o directo."} action={<Link className="btn btn--crimson btn--sm" to={`${base}/nueva`}>Crear</Link>} />
         ) : (
           <table className="table">
-            <thead><tr><th>Código</th><th>Cliente</th><th>Fecha</th><th>Vence</th><th className="num">Monto</th>{!isQ && <th className="num">Saldo</th>}<th>Estado</th><th /></tr></thead>
+            <thead><tr><th>Código</th><th>Cliente</th>{todo && <th>Vendedor</th>}<th>Fecha</th><th>Vence</th><th className="num">Monto</th>{!isQ && <th className="num">Saldo</th>}<th>Estado</th><th /></tr></thead>
             <tbody>{items.map((d) => (
               <tr key={d.id}>
                 <td><Link className="row-link mono" to={`${base}/${d.id}`}>{d.number}</Link></td>
                 <td>{d.customer_name || <span className="muted">Sin cliente</span>}</td>
+                {todo && <td className="muted">{d.seller_name || "—"}</td>}
                 <td className="muted">{fmtDate(d.issue_date)}</td>
                 <td className="muted">{fmtDate(d.due_date)}</td>
                 <td className="num money">{fmtMoney(d.total, d.currency)}</td>

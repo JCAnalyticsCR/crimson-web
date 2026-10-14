@@ -53,8 +53,9 @@ def _load(db: Session, p: Principal, kind: str, oid: int, action: str):
         own = obj.technician_id == p.user.id or p.user.id in (getattr(obj, "helpers", None) or [])
         if not own:
             raise HTTPException(404, f"{label} no encontrado")
-    # el vendedor (sin crm_pipeline.ver_todo) solo toca sus oportunidades, igual que en el embudo
-    if kind == "opportunity" and not p.can("crm_pipeline", "ver_todo") and obj.owner_id not in (None, p.user.id):
+    # el vendedor (sin crm_pipeline.ver_todo) solo toca sus oportunidades, igual que en el embudo (pipeline._own:
+    # las que no tienen responsable son de quien ve todo el embudo)
+    if kind == "opportunity" and not p.can("crm_pipeline", "ver_todo") and obj.owner_id != p.user.id:
         raise HTTPException(404, f"{label} no encontrado")
     return obj
 
@@ -93,7 +94,7 @@ def archive_list(
             o = db.get(WorkOrder, r["id"])
             return o.technician_id == p.user.id or p.user.id in (o.helpers or [])
         if r["kind"] == "opportunity" and not embudo_todo:
-            return db.get(Opportunity, r["id"]).owner_id in (None, p.user.id)
+            return db.get(Opportunity, r["id"]).owner_id == p.user.id
         return True
 
     rows = [r for r in rows if mine(r)]

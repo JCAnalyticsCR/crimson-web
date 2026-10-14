@@ -51,6 +51,10 @@ class _DocBase(TenantMixin, TimestampMixin):
     medical_exemption_card: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(20), default="creado", index=True)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
+    # Vendedor responsable: de quien es la venta (lo que ve el vendedor y a quien se le comisiona). created_by sigue
+    # siendo quien tecleo el documento. NULL = venta sin vendedor (tienda en linea, API, recurrencias).
+    # Ver services/ownership.py: es la unica definicion de "lo mio".
+    seller_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), index=True)
 
 
 class _LineBase:

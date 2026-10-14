@@ -9,7 +9,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, true
+from sqlalchemy import case, func, or_, select, true
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
@@ -29,6 +29,7 @@ from ..services import documents as svc
 from ..services import inventory as invsvc
 from ..services import quote_versions as qv
 from ..services.documents import audit
+from ..services.ownership import doc_mine, doc_scope, eligible_seller, owns_doc, payment_scope
 from ..services.totals import compute_document, d
 
 router = APIRouter(tags=["ventas"])
@@ -39,6 +40,43 @@ def _cust_name(db: Session, cid: int | None) -> str | None:
         return None
     c = db.get(Customer, cid)
     return c.name if c else None
+
+
+def _user_name(db: Session, uid: int | None) -> str | None:
+    from ..models import User
+
+    u = db.get(User, uid) if uid else None
+    return u.full_name if u else None
+
+
+_SIN_DOC = object()  # _seller_from_body al crear: todavia no hay vendedor con que comparar
+
+
+def _check_seller(db: Session, p: Principal, uid: int) -> int:
+    """Vendedor elegible: usuario ACTIVO del equipo de esta empresa (ni de un cliente ni de un aliado)."""
+    if not eligible_seller(db, p.tenant.id, uid):
+        raise HTTPException(422, "Ese vendedor no es un usuario activo de la empresa")
+    return uid
+
+
+def _seller_from_body(db: Session, p: Principal, data: DocumentIn, current=_SIN_DOC):
+    """(cambia, vendedor). Elegir el vendedor es de quien tiene sales.asignar (admin); al resto se le ignora en
+    silencio (el portal viejo manda el campo vacio). None = venta sin vendedor.
+    Con `current` (el vendedor que ya tiene el documento) solo se valida si cambia: el editor manda el vendedor en
+    cada guardado y uno que ya no esta activo no impide corregir una linea (se reasigna aparte, caso borde 7.4)."""
+    if "seller_id" not in data.model_fields_set or not p.can("sales", "asignar"):
+        return False, None
+    if current is not _SIN_DOC and data.seller_id == current:
+        return False, None
+    return True, (_check_seller(db, p, data.seller_id) if data.seller_id is not None else None)
+
+
+def _set_seller(db: Session, p: Principal, doc, data: DocumentIn, entity: str) -> None:
+    """Cambiar el vendedor de un documento ya creado (solo admin); queda en la auditoria."""
+    cambia, nuevo = _seller_from_body(db, p, data, current=doc.seller_id)
+    if cambia:
+        antes, doc.seller_id = doc.seller_id, nuevo
+        audit(db, p.tenant.id, p.user.id, "assign_seller", entity, doc.id, {"de": antes, "a": nuevo}, ip=p.ip)
 
 
 # Las cotizaciones hechas desde un levantamiento antes de la matriz de roles (13/10) guardaban en las notas internas
@@ -58,7 +96,10 @@ def _quote_out(db: Session, q: Quote, p: Principal) -> QuoteOut:
 
     o = QuoteOut.model_validate(q)
     o.customer_name = _cust_name(db, q.customer_id)
+    o.seller_name = _user_name(db, q.seller_id)
     o.internal_notes = _notes_for(p, q.internal_notes)
+    # el margen deja deducir el costo: quien no ve costos lee el motivo sin cifras (el texto guardado no cambia)
+    o.approval_reason = discounts.public_reason(q.approval_reason, p.sees_costs)
     # el editor necesita saber si la cotizacion es de una oportunidad de venta (no ofrece "convertir a proyecto")
     opp = db.scalar(select(Opportunity).where(Opportunity.tenant_id == q.tenant_id, Opportunity.quote_id == q.id))
     o.opportunity = {"id": opp.id, "number": opp.number, "kind": opp.kind or "proyecto", "status": opp.status} if opp else None
@@ -75,6 +116,7 @@ def _quote_out(db: Session, q: Quote, p: Principal) -> QuoteOut:
 def _inv_out(db: Session, i: Invoice, p: Principal) -> InvoiceOut:
     o = InvoiceOut.model_validate(i)
     o.customer_name = _cust_name(db, i.customer_id)
+    o.seller_name = _user_name(db, i.seller_id)
     o.internal_notes = _notes_for(p, i.internal_notes)
     return o
 
@@ -103,7 +145,7 @@ def pending_where(key: str, p: Principal) -> list:
     model = Invoice if PENDIENTES[key] == "invoices" else Quote
     out = [model.tenant_id == tid]
     if _pend_mine(p):
-        out.append(model.created_by == p.user.id)
+        out.append(doc_mine(model, p.user.id))
     today = date.today()
     if key == "facturas_vencidas":
         out += [Invoice.status.in_(("creado", "parcial", "vencida")), Invoice.due_date < today]
@@ -139,8 +181,8 @@ def _list(
     pendiente: str | None = None,
 ):
     stmt = select(model).where(model.tenant_id == tenant_id)
-    if p is not None and not p.sees_all_sales:
-        stmt = stmt.where(model.created_by == p.user.id)
+    if p is not None:
+        stmt = stmt.where(doc_scope(model, p))  # primero lo mio: la busqueda nunca sale de ahi
     if pendiente:
         kind = "invoices" if model is Invoice else "quotes"
         if PENDIENTES.get(pendiente) != kind or p is None:
@@ -148,22 +190,49 @@ def _list(
         stmt = stmt.where(*pending_where(pendiente, p))
     if status:
         stmt = stmt.where(model.status == status)
-    if q:
-        stmt = stmt.where(model.number.ilike(f"%{q}%"))
+    txt = (q or "").strip()[:60]
+    if txt:
+        # numero, consecutivo o clave de Hacienda (facturas) y nombre del cliente. % y _ se buscan literales.
+        like = f"%{_esc_like(txt)}%"
+        conds = [model.number.ilike(like, escape="\\")]
+        if model is Invoice:
+            conds += [Invoice.consecutive.ilike(like, escape="\\"), Invoice.clave.ilike(like, escape="\\")]
+        clientes = select(Customer.id).where(Customer.tenant_id == tenant_id, Customer.name.ilike(like, escape="\\"))
+        conds.append(model.customer_id.in_(clientes))
+        stmt = stmt.where(or_(*conds))
     if cursor:
         stmt = stmt.where(model.id < cursor)
     rows = db.scalars(stmt.order_by(model.updated_at.desc(), model.id.desc()).limit(limit + 1)).all()
+    page = list(rows[:limit])
+    if txt.isdigit():
+        # "4" o "004": primero el documento cuyo numero termina exactamente en ese consecutivo (...-000004); el resto
+        # (...-000040, ...-000400) sigue en su orden. Solo reordena la pagina: el cursor no cambia.
+        n = int(txt)
+        page.sort(key=lambda r: 0 if _seq_of(r.number) == n else 1)
     items = []
-    for r in rows[:limit]:
+    for r in page:
         it = DocListItem.model_validate(r)
         it.customer_name = _cust_name(db, r.customer_id)
+        it.seller_name = _user_name(db, r.seller_id)
         items.append(it)
     return {"items": items, "next_cursor": rows[limit].id if len(rows) > limit else None}
 
 
+def _esc_like(txt: str) -> str:
+    """Comodines de LIKE como texto: buscar "%" no devuelve todo."""
+    return txt.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _seq_of(number: str | None) -> int | None:
+    """COT-000008 -> 8. Sin sufijo numerico, None."""
+    m = re.search(r"(\d+)$", number or "")
+    return int(m.group(1)) if m else None
+
+
 def _own(db: Session, model, id_: int, tenant_id: int, p: Principal | None = None):
     obj = db.get(model, id_)
-    if not obj or obj.tenant_id != tenant_id or (p is not None and not p.sees_all_sales and obj.created_by != p.user.id):
+    # lo ajeno no existe (404, nunca 403): ni siquiera se confirma que el numero exista
+    if not obj or obj.tenant_id != tenant_id or (p is not None and not owns_doc(obj, p)):
         raise HTTPException(404, "Documento no encontrado")
     return obj
 
@@ -217,7 +286,8 @@ def quotes(
 @router.post("/quotes", response_model=QuoteOut, status_code=201)
 def create_quote(data: DocumentIn, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
     chk = discounts.check(db, p, data)
-    q = svc.create_quote(db, p.tenant.id, p.user.id, data)
+    cambia, vendedor = _seller_from_body(db, p, data)
+    q = svc.create_quote(db, p.tenant.id, p.user.id, data, **({"seller_id": vendedor} if cambia else {}))
     _hold(db, p, q, chk)
     db.commit()
     return _quote_out(db, q, p)
@@ -226,6 +296,36 @@ def create_quote(data: DocumentIn, p: Principal = Depends(require("sales", "crea
 def _hold(db: Session, p: Principal, q, chk) -> list[str]:
     """Deja la cotizacion en "por_aprobar" si excede el descuento, el monto o el margen minimo."""
     razones = ([chk.message] if chk.exceeds else []) + discounts.approval_reasons(db, p, q)
+    if p.can("sales", "aprobar"):
+        # quien aprueba no se pide permiso: lo que guarda con el margen bajo el minimo queda aprobado a esos precios (la
+        # vendedora la abre y la envia sin que vuelva a quedar retenida; discounts.margin_covered)
+        ok = discounts.margin_approval(db, p.tenant, q)
+        if ok and not discounts.margin_covered(db, p.tenant.id, q):
+            audit(db, p.tenant.id, p.user.id, "approve_margin", "quote", q.id, {"margen_aprobado": ok}, ip=p.ip)
+    else:
+        m = discounts.quote_margin(db, p.tenant.id, q)
+        cerca = not p.sees_costs and discounts.near_min(p.tenant, m)
+        por_margen = any(discounts.margin_sentence(r) for r in razones)
+        # aprobada con margen bajo y ningun precio por debajo de lo aprobado: no se vuelve a retener por el margen ni
+        # cuenta como sondeo (antes «Guardar & enviar» la volvia a retener y alimentaba el freno de abajo)
+        cubierta = (por_margen or cerca) and discounts.margin_covered(db, p.tenant.id, q)
+        if cubierta:
+            razones = [r for r in razones if not discounts.margin_sentence(r)]
+            por_margen = False
+        if not p.sees_costs:
+            # Retenida por margen, quien no ve costos no la suelta subiendo el precio: si se soltara, unos cuantos
+            # guardados (subir, bajar, ver si queda retenida) darian el precio exacto donde el margen llega al minimo, y
+            # de ahi el costo. La retencion por margen la suelta quien aprueba (o volver a los precios que aprobo); la de
+            # descuento sigue soltandose sola.
+            previa = discounts.margin_sentence(q.approval_reason) if q.status == "por_aprobar" and not cubierta else None
+            if previa and not por_margen:
+                razones.append(previa)
+            # Y no se sondea guardando precios distintos: cada margen distinto cerca del minimo (retenga o no) cuenta, y
+            # pasado el tope todo lo suyo queda retenido sin decir si fue el margen (discounts.margin_probe). Va primero:
+            # el recorte a 400 caracteres no lo pierde.
+            informa = cerca and not cubierta and not previa
+            if discounts.margin_probe(db, p, q, m if informa else None, held=por_margen):
+                razones.insert(0, discounts.PROBE_REASON)
     if razones:
         q.status = "por_aprobar"
         q.approval_reason = " ".join(razones)[:400]
@@ -255,6 +355,7 @@ def update_quote(qid: int, data: DocumentIn, p: Principal = Depends(require("sal
 
     chk = discounts.check(db, p, data)
     svc.apply_document(db, q, data, QuoteLine, p.tenant.id)
+    _set_seller(db, p, q, data, "quote")
     db.flush()  # los totales nuevos son los que miran las reglas de aprobacion
     _hold(db, p, q, chk)
     from .pipeline import sync_amount_from_quote
@@ -299,9 +400,11 @@ def _use_accepted(db: Session, p: Principal, q: Quote) -> None:
 def duplicate_quote(qid: int, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
     q = _own(db, Quote, qid, p.tenant.id, p)
     payload = svc.quote_to_payload(q)
-    nq = svc.create_quote(db, p.tenant.id, p.user.id, payload)
-    if discounts.check(db, p, payload).exceeds:
-        nq.status = "por_aprobar"
+    # la copia es del mismo vendedor (la duplica la oficina para la vendedora y le sigue apareciendo a ella)
+    nq = svc.create_quote(db, p.tenant.id, p.user.id, payload, seller_id=q.seller_id if q.seller_id is not None else p.user.id)
+    # la copia pasa por las mismas reglas que una nueva (descuento, monto y margen): antes solo miraba el descuento y
+    # duplicar una retenida por margen o por monto daba una copia lista para enviar sin aprobacion
+    _hold(db, p, nq, discounts.check(db, p, payload))
     db.commit()
     return _quote_out(db, nq, p)
 
@@ -477,7 +580,12 @@ def approve_quote(qid: int, p: Principal = Depends(require("sales", "aprobar")),
         raise HTTPException(409, "La cotización no está pendiente de aprobación")
     q.status = "creado"
     motivo, q.approval_reason = q.approval_reason, None
-    audit(db, p.tenant.id, p.user.id, "approve_quote", "quote", q.id, {"motivo": motivo}, ip=p.ip)
+    diff = {"motivo": motivo}
+    # con el margen bajo el minimo: queda aprobado a estos precios (volver a guardarla sin bajarlos no la retiene otra vez)
+    ok = discounts.margin_approval(db, p.tenant, q)
+    if ok:
+        diff["margen_aprobado"] = ok
+    audit(db, p.tenant.id, p.user.id, "approve_quote", "quote", q.id, diff, ip=p.ip)
     db.commit()
     return _quote_out(db, q, p)
 
@@ -488,7 +596,9 @@ def discount_limit(p: Principal = Depends(require("sales", "ver"))):
         "limit": discounts.max_discount(p.tenant),
         "free": p.can("sales", "descuento_libre"),
         "max_amount": discounts.approval_amount(p.tenant),
-        "min_margin": discounts.min_margin(p.tenant),
+        # el margen minimo solo a quien ve costos: con el y el precio donde una cotizacion empieza a quedar retenida
+        # por margen se saca el costo (precio x (1 - minimo))
+        "min_margin": discounts.min_margin(p.tenant) if p.sees_costs else None,
         "approves": p.can("sales", "aprobar"),
     }
 
@@ -522,7 +632,8 @@ def create_invoice(data: DocumentIn, doc_type: str = "FE", p: Principal = Depend
     chk = discounts.check(db, p, data)
     if chk.exceeds:
         raise HTTPException(422, f"{chk.message} Hacé una cotización para que un administrador apruebe el descuento.")
-    inv = svc.create_invoice(db, p.tenant.id, p.user.id, data, doc_type)
+    cambia, vendedor = _seller_from_body(db, p, data)
+    inv = svc.create_invoice(db, p.tenant.id, p.user.id, data, doc_type, **({"seller_id": vendedor} if cambia else {}))
     invsvc.deduct_for_invoice(db, inv, p.user.id)
     db.commit()
     return _inv_out(db, inv, p)
@@ -547,6 +658,8 @@ def update_invoice(iid: int, data: DocumentIn, p: Principal = Depends(require("s
     if chk.exceeds:
         raise HTTPException(422, f"{chk.message} Hacé una cotización para que un administrador apruebe el descuento.")
     svc.apply_document(db, inv, data, InvoiceLine, p.tenant.id)
+    # con pagos o emitida ya respondio 409 arriba: el vendedor (y su comision) no se mueve en una factura cobrada
+    _set_seller(db, p, inv, data, "invoice")
     audit(db, p.tenant.id, p.user.id, "update", "invoice", inv.id, ip=p.ip)
     db.commit()
     return _inv_out(db, inv, p)
@@ -589,9 +702,8 @@ def payment_link(iid: int, p: Principal = Depends(require("sales", "enviar")), d
 # ---------- Pagos (listado) ----------
 @router.get("/payments", response_model=list[PaymentOut])
 def payments(limit: int = Query(20, le=100), p: Principal = Depends(require("payments", "ver")), db: Session = Depends(get_db)):
-    q = select(Payment).where(Payment.tenant_id == p.tenant.id)
-    if not p.sees_all_sales:
-        q = q.where(Payment.created_by == p.user.id)
+    # mis cobros: los que registre y los que caja aplico a mis facturas (services/ownership.payment_scope)
+    q = select(Payment).where(Payment.tenant_id == p.tenant.id, payment_scope(p))
     rows = db.scalars(q.order_by(Payment.id.desc()).limit(limit)).all()
     # el vinculo a la factura no venia en la respuesta (PaymentOut no traia invoice_id) y la columna Factura quedaba en "—"
     out = []
@@ -634,7 +746,7 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
     """Roles con reportes ven la empresa completa; el resto (p. ej. vendedor) solo lo que creo."""
     tid = p.tenant.id
     mine = not p.can("dashboard", "empresa")
-    own_inv = (Invoice.created_by == p.user.id) if mine else true()
+    own_inv = doc_mine(Invoice, p.user.id) if mine else true()
     own_pay = (Payment.created_by == p.user.id) if mine else true()
     today = date.today()
     m0 = today.replace(day=1)
@@ -650,10 +762,15 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
             )
         )
 
+    # facturas en la moneda de la empresa (cada una con el tipo de cambio que guardo): antes sumaba dolares y colones
+    # como si fueran lo mismo. Igual que los reportes (services/reports._crc).
+    base = p.tenant.default_currency or "CRC"
+    en_moneda_empresa = case((Invoice.currency == base, Invoice.total), else_=Invoice.total * Invoice.fx_sell)
+
     def inv_sum(a: date, b: date) -> Decimal:
         return d(
             db.scalar(
-                select(func.coalesce(func.sum(Invoice.total), 0)).where(
+                select(func.coalesce(func.sum(en_moneda_empresa), 0)).where(
                     Invoice.tenant_id == tid, Invoice.status != "anulada", Invoice.issue_date >= a, Invoice.issue_date <= b, own_inv
                 )
             )
@@ -683,6 +800,11 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
         # misma definicion que Pedidos de la tienda -> Por atender (services.store_orders.attention_where)
         pend["pedidos_web"] = web_orders_pending(db, p)
     ceo = _ceo_row(db, p) if p.can("dashboard", "empresa") else None
+    mi_embudo = None
+    if mine and p.can("crm_pipeline", "ver"):
+        from .pipeline import pipeline_summary  # la misma cuenta que el embudo: no pueden diferir
+
+        mi_embudo = pipeline_summary(db, p)
     receivable = []
     if mine:
         for x in db.scalars(
@@ -705,6 +827,7 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
     return {
         "scope": "mine" if mine else "company",
         "gerencia": ceo,
+        "mi_embudo": mi_embudo,
         "por_cobrar": receivable,
         "pagos": pagos if show_cash else None,
         "facturado": fact,

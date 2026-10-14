@@ -1,0 +1,41 @@
+/* Levantamiento en resumen (vendedora): solo lectura, sin costos. */
+.ssum { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.ssum section { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ssum__head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 13.5px; }
+.ssum__h { margin: 0; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-2); }
+.ssum__now { margin: 0; font-size: 13.5px; }
+.ssum__notes { margin: 0; font-size: 13.5px; white-space: pre-wrap; }
+.ssum__list { margin: 0; padding-left: 18px; font-size: 13.5px; }
+
+/* Linea de pasos: Levantamiento -> Revision -> Costeo -> Cotizacion */
+.ssum-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ssum-steps li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--bg-2); color: var(--text-3); font-size: 12.5px; font-weight: 600; min-width: 0; }
+.ssum-steps li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ssum-steps i { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--hair-2); font-style: normal; font-size: 11.5px; }
+.ssum-steps li.is-done { color: var(--ok); background: var(--ok-soft); }
+.ssum-steps li.is-done i { border-color: var(--ok); }
+.ssum-steps li.is-now { color: var(--info); background: var(--info-soft); }
+.ssum-steps li.is-now i { border-color: var(--info); }
+.ssum-steps li.is-warn { color: var(--warn); background: var(--warn-soft); }
+.ssum-steps li.is-warn i { border-color: var(--warn); }
+
+.ssum-help { padding: 10px 14px; border: 1px solid var(--info); border-radius: 10px; background: var(--info-soft); font-size: 13px; }
+.ssum-help ol { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
+
+.ssum-points { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.ssum-point { padding: 10px 12px; border: 1px solid var(--hair); border-radius: 10px; font-size: 13px; min-width: 0; }
+.ssum-thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ssum-thumbs button { padding: 0; border: 1px solid var(--hair); border-radius: 8px; overflow: hidden; width: 64px; height: 64px; cursor: zoom-in; background: var(--bg-2); }
+.ssum-thumbs img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.ssum-sug { border: 1px dashed var(--hair-2); border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+.ssum-sug summary { cursor: pointer; font-weight: 600; }
+
+@media (max-width: 640px) {
+  .ssum-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Ayuda de "Sugerir materiales" (tecnico, supervisor, admin): proponer -> agregar al levantamiento -> cotizacion */
+.sug-flow { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.sug-flow li { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px; background: var(--bg-2); color: var(--text-2); }
+.sug-flow b { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--surface); color: var(--text); font-size: 11.5px; }

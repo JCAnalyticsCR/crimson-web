@@ -128,6 +128,9 @@ def test_opportunity_survey_quote_project_workorder_assets(client, auth, db_sess
     catalogo_tecnico = client.get("/products", params={"q": "CAM-DOME"}, headers=tk).json()["items"][0]
     assert Decimal(str(catalogo_tecnico["price"])) == 0  # el técnico no ve plata
 
+    # el técnico no ve el embudo: liga su levantamiento a una oportunidad cuya visita se pidió («Solicitar
+    # levantamiento»); sin solicitud pendiente sería 404 (no recorre oportunidades ajenas)
+    assert client.post(f"/opportunities/{opp['id']}/request-survey", json={}).status_code == 200
     lev = client.post(
         "/surveys",
         headers=tk,

@@ -22,6 +22,7 @@ from ..services import reports as rp
 from ..services.bitacora import audit_change, next_version, snapshot
 from ..services.documents import audit
 from ..services.mail import doc_email_html, queue_email
+from ..services.ownership import owns_doc
 from ..services.render import money, render_html, render_pdf
 
 router = APIRouter(tags=["operacion"])
@@ -30,7 +31,8 @@ router = APIRouter(tags=["operacion"])
 def _doc(db: Session, kind: str, id_: int, tenant_id: int, p: Principal | None = None):
     model = Quote if kind == "quotes" else Invoice
     d = db.get(model, id_)
-    if not d or d.tenant_id != tenant_id or (p is not None and not p.sees_all_sales and d.created_by != p.user.id):
+    # mismo alcance que la lista y el detalle (vendedor responsable): lo ajeno es 404
+    if not d or d.tenant_id != tenant_id or (p is not None and not owns_doc(d, p)):
         raise HTTPException(404, "Documento no encontrado")
     return d
 
@@ -630,7 +632,7 @@ def run_recurrence(db: Session, r: Recurrence, user_id: int | None) -> Invoice |
         result: Invoice | Expense = e
     else:
         payload = DocumentIn(**{**r.template, "customer_id": r.customer_id})
-        result = docsvc.create_invoice(db, r.tenant_id, user_id, payload)
+        result = docsvc.create_invoice(db, r.tenant_id, user_id, payload, seller_id=None)  # recurrencia: sin vendedor
         inv.deduct_for_invoice(db, result, user_id)
         r.last_invoice_id = result.id
     r.runs += 1

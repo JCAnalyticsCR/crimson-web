@@ -33,8 +33,8 @@ export const ROLES: Record<string, RoleMeta> = {
   ventas: {
     label: "Vendedor", tone: "#2f6fed", glyph: "V",
     summary: "Cotiza y factura con el precio de venta. Ve solo sus oportunidades, cotizaciones, facturas y comisiones; nunca el costo.",
-    can: ["Sus oportunidades y cotizaciones (el consecutivo es el de la empresa)", "Facturar y buscar sus facturas", "Ver los levantamientos de sus oportunidades como resumen", "Productos y servicios con el precio de venta", "Pedidos de la tienda", "Sus comisiones en tiempo real"],
-    cannot: ["Ver el costo del proveedor, el margen o la utilidad", "Ver lo que venden los demás o el total de la empresa", "Descontar más del límite sin aprobación", "Anular facturas"],
+    can: ["Sus oportunidades y cotizaciones (el consecutivo es el de la empresa)", "Facturar y buscar sus facturas", "Ver en resumen los levantamientos de sus oportunidades y pedir uno nuevo", "Productos y servicios con el precio de venta", "Pedidos de la tienda", "Sus comisiones en tiempo real"],
+    cannot: ["Ver el costo del proveedor, el margen o la utilidad", "Ver lo que venden los demás o el total de la empresa", "Llenar o editar levantamientos", "Descontar más del límite sin aprobación", "Anular facturas"],
     menu: ["/", "/oportunidades", "/cotizaciones", "/facturas", "/pagos", "/levantamientos", "/clientes", "/productos", "/ordenes", "/comisiones", "/archivo", "/ajustes"],
   },
   contabilidad: {

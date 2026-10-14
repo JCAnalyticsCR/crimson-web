@@ -12,11 +12,12 @@ import { Lightbox, type Foto } from "../../ui/Lightbox";
 import { InviteTechButton } from "./InviteTech";
 import { ArchiveActions } from "../../ui/ArchiveActions";
 import { TrashButton } from "../../ui/TrashButton";
-import { useSurveyAutosave } from "./useSurveyAutosave";
+import { createSurvey, unlinkedNotice, useSurveyAutosave } from "./useSurveyAutosave";
 import { LinkOpportunity, type OppRef } from "./LinkOpportunity";
 import { pickReview, ReviewPanel, reviewTone, type ReviewInfo } from "./SurveyReview";
 import { CommonSection, initialStatus, PointFields, SystemCalcs, useCommonSpec, type Common, type V2Field } from "./SurveyV2";
 import { RecommendModal, RecoSummary, type RecoFields, type RecoLine } from "./Recommend";
+import SurveySummary from "./SurveySummary";
 
 type FieldSpec = V2Field; // + hint, section, advanced, legacy (plantilla v2)
 type Spec = { label: string; point_prefix: string; point_label: string; fields: FieldSpec[]; materials: string[] };
@@ -119,6 +120,10 @@ export default function Surveys() {
   const [calcTick, setCalcTick] = useState(0); // recalcula la tarjeta "Calculos del sistema" despues de guardar
   const commonSpec = useCommonSpec();
   const prefilled = useRef<string | null>(null); // no rearmar el borrador si el usuario ya empezó a escribir
+  /* La vendedora (field.resumen sin field.editar) no llena levantamientos: los de sus oportunidades se abren en
+     resumen de solo lectura, nunca el editor ni el autoguardado (13/10 33:30). */
+  const resumen = allows("field.resumen") && !allows("field.editar");
+  const [summaryId, setSummaryId] = useState<number | null>(null);
 
   const verCostos = allows("catalog.costos");
   const spec = draft ? specs[draft.kind] : undefined;
@@ -137,18 +142,30 @@ export default function Surveys() {
     const nuevo = params.get("nuevo");
     if (id && prefilled.current !== `s${id}`) {
       prefilled.current = `s${id}`;
-      open(Number(id));
+      if (resumen) setSummaryId(Number(id)); else open(Number(id));
+    } else if (nuevo && resumen) {
+      setParams({}); // la vendedora no crea levantamientos: los solicita desde la oportunidad
     } else if (nuevo && prefilled.current !== `n${nuevo}`) {
       prefilled.current = `n${nuevo}`;
-      // Viene de una oportunidad: el cliente, el sitio y la solución ya se escribieron una vez.
-      api<{ customer_id: number | null; customer: string | null; solution: string | null; title: string }>(`/opportunities/${nuevo}`)
+      // Viene de una oportunidad: el cliente, el sitio y la solución ya se escribieron una vez. Se piden a
+      // /surveys/from-opportunity (no a /opportunities): el supervisor que recibe «Solicitar levantamiento» llena
+      // levantamientos aunque esa oportunidad no le salga en el embudo.
+      api<{ customer_id: number | null; customer: string | null; solution: string | null; site: string | null; title: string }>(`/surveys/from-opportunity/${nuevo}`)
         .then((o) => setDraft({
           ...emptySurvey(o.solution && o.solution in specs ? o.solution : "cctv"),
           opportunity_id: nuevo,
           customer_id: o.customer_id ? String(o.customer_id) : "",
           customer_name: o.customer || "",
+          site: o.site || "",
         }))
-        .catch(() => setDraft({ ...emptySurvey("cctv"), opportunity_id: nuevo }));
+        // Si no se puede ligar (cerrada, ya tiene levantamiento, la solicitud ya se atendió...), POST /surveys
+        // rechazaría cada guardado por lo mismo y en un borrador nuevo no hay cómo quitar la oportunidad: se abre sin
+        // ella y se dice por qué.
+        .catch((e) => {
+          toast(`${e instanceof Error ? e.message : "No se pudo abrir la oportunidad"}. El levantamiento queda sin oportunidad ligada.`, "bad");
+          setParams({});
+          setDraft(emptySurvey("cctv"));
+        });
     }
   }, [params, specs]);
 
@@ -209,12 +226,16 @@ export default function Surveys() {
     if (!draft) return null;
     setBusy(true);
     const sent = draft.items;
+    const link = { lost: "" }; // nuevo con una oportunidad que ya no se puede ligar: se crea sin ella (createSurvey)
     try {
-      const s = await auto.exclusive(draft, (id) => api<Survey>(id ? `/surveys/${id}` : "/surveys", { method: id ? "PUT" : "POST", json: body(draft) }));
-      if (!silent) toast(draft.id ? "Levantamiento guardado" : `Levantamiento ${s.number} creado`);
+      const s = await auto.exclusive(draft, (id) => id
+        ? api<Survey>(`/surveys/${id}`, { method: "PUT", json: body(draft) })
+        : createSurvey(body(draft), (json) => api<Survey>("/surveys", { method: "POST", json }), (why) => { link.lost = why; }));
+      if (link.lost) toast(unlinkedNotice(link.lost, s.number), "bad");
+      else if (!silent) toast(draft.id ? "Levantamiento guardado" : `Levantamiento ${s.number} creado`);
       setDraft((d) => {
         if (!d) return d;
-        const next = { ...d, id: s.id, number: s.number, status: s.status, review: pickReview(s), template_version: s.template_version };
+        const next = { ...d, id: s.id, number: s.number, status: s.status, review: pickReview(s), template_version: s.template_version, ...(link.lost ? { opportunity_id: "" } : {}) };
         // cada guardado renumera las lineas: se toman los ids nuevos (mismo orden) para que el siguiente guardado
         // no las tome por nuevas y pierda el costo escrito o el equipo elegido. Solo si no se edito mientras tanto.
         if (d.items !== sent || !s.items) return next;
@@ -503,7 +524,9 @@ export default function Surveys() {
       {verCostos && pendientes > 0 && <div className="status-line" style={{ color: "var(--warn)" }}><i className="rec-dot" />{pendientes} levantamiento{pendientes !== 1 ? "s" : ""} con revisión aprobada, esperando costeo</div>}
 
       <Card flush>
-        {rows.length === 0 ? <Empty title="Todavía no hay levantamientos" hint="El técnico llena el levantamiento en sitio y administración lo convierte en cotización sin volver a escribir nada." /> : (
+        {rows.length === 0 ? (resumen
+          ? <Empty title="Todavía no hay levantamientos" hint="Acá ves los levantamientos de tus oportunidades. Para pedir uno, abrí la oportunidad y tocá «Solicitar levantamiento»." />
+          : <Empty title="Todavía no hay levantamientos" hint="El técnico llena el levantamiento en sitio y administración lo convierte en cotización sin volver a escribir nada." />) : (
           <table className="table">
             <thead><tr><th>Número</th><th>Tipo</th><th>Cliente</th><th>Sitio</th><th className="num">Puntos</th><th>Técnico</th><th>Estado</th><th /></tr></thead>
             <tbody>{rows.map((s) => (
@@ -517,7 +540,9 @@ export default function Surveys() {
                   </span>
                   {sentLine(s) && <div className="meta" style={{ marginTop: 4, textTransform: "none", letterSpacing: 0 }}>{sentLine(s)}</div>}
                 </td>
-                <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => open(s.id)}>Abrir</button><TrashButton kind="survey" id={s.id} number={s.number} onDone={load} /></span></td>
+                <td className="num row-actions"><span className="row-actions__in">{resumen
+                  ? <button className="btn btn--ghost btn--sm" onClick={() => setSummaryId(s.id)}>Ver resumen</button>
+                  : <><button className="btn btn--ghost btn--sm" onClick={() => open(s.id)}>Abrir</button><TrashButton kind="survey" id={s.id} number={s.number} onDone={load} /></>}</span></td>
               </tr>
             ))}</tbody>
           </table>
@@ -538,7 +563,7 @@ export default function Surveys() {
             <button className="btn btn--ghost" onClick={close}>Cerrar</button>
             {!readOnly && <>
               <button className="btn btn--ghost" onClick={recommend} disabled={busy || !draft.points.length} title="Equipos reales del catálogo para lo levantado: cámaras, grabador, discos, switch…">Recomendar equipos</button>
-              <button className="btn btn--ghost" onClick={suggest} disabled={busy} title={draft.points.length ? "Según el tipo de cada punto" : "Sin puntos: los materiales habituales del tipo de solución"}>Sugerir materiales</button>
+              <button className="btn btn--ghost" onClick={suggest} disabled={busy} title={draft.points.length ? "Propone equipos y materiales según los puntos; vos elegís cuáles agregar al levantamiento." : "Sin puntos: los materiales habituales del tipo de solución; vos elegís cuáles agregar al levantamiento."}>Sugerir materiales</button>
               <button className="btn btn--ghost" onClick={() => save()} disabled={busy}>Guardar</button>
               <button className="btn btn--crimson" onClick={send} disabled={busy || !draft.points.length}>{draft.status === "enviado" ? "Reenviar a oficina" : "Enviar a oficina"}</button>
             </>}
@@ -645,8 +670,15 @@ export default function Surveys() {
         <Modal title="Materiales y equipos sugeridos" onClose={() => setSugs(null)} wide foot={<>
           <span className="muted" style={{ marginRight: "auto", fontSize: 13 }}>{sugs.filter((x) => x.checked && num(x.qty) > 0).length} para agregar · lo que ya cargaste no se borra</span>
           <button className="btn btn--ghost" onClick={() => setSugs(null)}>Cancelar</button>
-          <button className="btn btn--crimson" onClick={applySugs}>Agregar seleccionados</button>
+          <button className="btn btn--crimson" onClick={applySugs}>Agregar al levantamiento</button>
         </>}>
+          {/* 13/10 33:45-34:10: sugerir propone; agregar lo pasa al levantamiento; la cotización sale después */}
+          <ol className="sug-flow" aria-label="Cómo llegan los materiales a la cotización">
+            <li><b>1</b> Sugerir: el sistema propone según los puntos (no cambia nada)</li>
+            <li><b>2</b> Agregar al levantamiento: pasa a «Equipos y materiales»</li>
+            <li><b>3</b> Revisión, costeo y cotización: la cotización sale con esas líneas</li>
+          </ol>
+          <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Elegir el tipo de cámara en un punto no agrega materiales solo: tocá «Sugerir materiales» cuando termines los puntos.</p>
           {draft.points.length === 0
             ? <p style={{ fontSize: 13, margin: 0, background: "var(--warn-soft, rgba(230,160,40,.12))", border: "1px solid var(--warn)", borderRadius: 10, padding: "10px 14px" }}>Todavía no hay puntos levantados, así que no se puede calcular cantidades. Estos son los materiales habituales de <b>{spec?.label || draft.kind}</b>: escribí la cantidad de los que vayas a usar.</p>
             : <p className="muted" style={{ fontSize: 13, margin: 0 }}>Salen de los puntos levantados (cada uno según su tipo: cámara, puerta, punto de red…), sus observaciones y lo que ya está en la lista. Marcá lo que querés agregar y ajustá la cantidad; si el material ya existe se suma a esa línea.</p>}
@@ -677,6 +709,8 @@ export default function Surveys() {
           </table>
         </Modal>
       )}
+
+      {summaryId !== null && <SurveySummary id={summaryId} onClose={() => { setSummaryId(null); if (params.get("id")) setParams({}); }} />}
 
       {reco && draft?.id && (
         <RecommendModal surveyId={draft.id} lines={reco.lines} focus={reco.focus} onClose={() => setReco(null)} onApplied={afterReco} />

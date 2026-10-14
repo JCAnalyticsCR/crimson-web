@@ -112,6 +112,8 @@ export type Doc = {
   id: number; number: string; customer_id: number | null; customer_name: string | null; currency: string; fx_sell: string; fx_buy: string;
   issue_date: string; due_date: string | null; discount_type: string; discount_value: string; subtotal: string; discount_total: string; tax_total: string; total: string;
   internal_notes: string | null; external_notes: string | null; external_order: string | null; activity_code: string | null; medical_exemption_card: boolean; status: string; lines: Line[];
+  /* vendedor responsable (de quien es la venta y su comision); lo elige solo quien tiene sales.asignar */
+  seller_id?: number | null; seller_name?: string | null;
 };
 export type Quote = Doc & {
   converted_invoice_id: number | null; opportunity?: { id: number; number: string; kind: "venta" | "proyecto"; status: string; parties?: { name: string; role: string }[] } | null;
@@ -120,7 +122,7 @@ export type Quote = Doc & {
 };
 export type Payment = { id: number; invoice_id?: number | null; invoice_number?: string | null; customer?: string | null; method: string; kind: string; currency: string; amount: string; tip: string; external_ref: string | null; provider: string; paid_at: string; status: string };
 export type Invoice = Doc & { doc_type: string; consecutive: string | null; clave: string | null; balance: string; quote_id: number | null; einvoice_status: string; payments: Payment[]; sale_condition: string; credit_days: number; payment_method: string };
-export type DocListItem = { id: number; number: string; customer_name: string | null; currency: string; total: string; balance: string | null; status: string; issue_date: string; due_date: string | null; acceptance_status?: string | null };
+export type DocListItem = { id: number; number: string; customer_name: string | null; currency: string; total: string; balance: string | null; status: string; issue_date: string; due_date: string | null; acceptance_status?: string | null; seller_name?: string | null };
 export type Ceo = {
   pipeline: string; pipeline_weighted: string; opportunities: number; receivable: string; sold_month: string;
   /* utilidad del mes: null para quien no ve costos (solo el admin, salvo Ajustes -> Quien ve costos) */
@@ -137,6 +139,23 @@ export type Dashboard = {
   pagos_recientes: { id: number; invoice_id: number; ref: string | null; method: string; kind: string; amount: string; currency: string; date: string; status: string }[];
   facturas_recientes: { id: number; number: string; customer: string | null; total: string; balance: string; currency: string; status: string; date: string }[];
   acciones_pendientes: Record<string, number>;
+  /* inicio del vendedor: su embudo con la misma cuenta que Oportunidades, en la moneda de la empresa */
+  mi_embudo?: { abiertas: number; monto: string; ponderado: string; ganadas_mes: number; ganado_mes: string; perdidas_mes: number; moneda: string; convertido: boolean } | null;
+};
+
+/* Levantamiento en resumen para la vendedora (GET /surveys/{id}/summary): solo lectura y sin un solo costo. */
+export type SurveySummary = {
+  id: number; number: string; kind: string; kind_label: string; customer: string | null; site: string | null; visit_date: string | null;
+  technician: string | null; opportunity: { id: number; number: string; title: string } | null;
+  status: string; review_label: string | null;
+  paso: "borrador" | "revision" | "devuelto" | "costeo" | "cotizado" | "cerrado"; paso_texto: string;
+  notes: string | null;
+  equipos: { name: string; quantity: string; unit: string; kind: string; note: string | null }[];
+  personal: { label: string; people: number; days: string }[];
+  puntos: { code: string; label: string | null; kind_label: string; notes: string | null; photos: string[] }[];
+  fotos: string[];
+  sugerencias_pendientes: { name: string; quantity: string; unit: string | null; kind: string | null; reason: string | null }[];
+  cotizacion: { id?: number; number: string; status: string } | null;
 };
 
 /* ---------- Helpers ---------- */

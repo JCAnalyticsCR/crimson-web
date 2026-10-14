@@ -22,6 +22,8 @@ type Order = {
   proofs: Proof[]; expires_at: string | null; lines: { id: number; name: string; quantity: string; unit_price: string; total: string }[];
   emails?: Mail[]; next?: string[]; track_url?: string | null; email_result?: { to: string; status: string; error: string | null } | null;
   onvo_refundable?: boolean;
+  /* la factura del pedido es del que mira (services/ownership.py); si no, se muestra el numero sin enlace */
+  invoice_visible?: boolean | null;
 };
 type List = { items: Order[]; counts: Record<string, number>; por_atender: number; labels: Record<string, string> };
 
@@ -179,7 +181,9 @@ function Detail({ o, labels, onClose, onChange }: { o: Order; labels: Record<str
         {o.track_url && <button className="btn btn--ghost btn--sm" onClick={copyLink}><Icon d={I.link} />Enlace del cliente</button>}
         {waUrl && <a className="btn btn--ghost btn--sm" href={waUrl} target="_blank" rel="noopener noreferrer"><Icon d={I.whatsapp} />WhatsApp</a>}
         {c.email && <button className="btn btn--ghost btn--sm" onClick={resend}><Icon d={I.refresh} />Reenviar correo</button>}
-        {o.invoice_id ? <Link className="btn btn--crimson btn--sm" to={`/facturas/${o.invoice_id}`}>Ver comprobante #{o.invoice_id}</Link> : (
+        {o.invoice_id ? (o.invoice_visible === false
+          ? <span className="muted" style={{ fontSize: 13 }} title="La facturó otra persona del equipo">Facturado · comprobante #{o.invoice_id}</span>
+          : <Link className="btn btn--crimson btn--sm" to={`/facturas/${o.invoice_id}`}>Ver comprobante #{o.invoice_id}</Link>) : (
           <>
             {o.paid_at && <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={withPay} onChange={(e) => setWithPay(e.target.checked)} />Aplicar el cobro</label>}
             <button className="btn btn--soft btn--sm" onClick={() => invoice("TE")}>Emitir tiquete</button>
@@ -257,7 +261,7 @@ function Detail({ o, labels, onClose, onChange }: { o: Order; labels: Record<str
 }
 
 /* Otros canales (POS, enlaces): el flujo de siempre. */
-type Legacy = { id: number; number: string; channel: string; contact: Record<string, string>; currency: string; total: string; shipping_method: string | null; payment_method: string | null; status: string; invoice_id: number | null; created_at: string };
+type Legacy = { id: number; number: string; channel: string; contact: Record<string, string>; currency: string; total: string; shipping_method: string | null; payment_method: string | null; status: string; invoice_id: number | null; invoice_visible?: boolean | null; created_at: string };
 const STATES = ["nuevo", "pagado", "preparando", "enviado", "entregado", "cancelado"];
 function LegacyOrders() {
   const { toast } = useSession();
@@ -279,7 +283,9 @@ function LegacyOrders() {
               <td className="muted">{o.payment_method || "—"}</td>
               <td className="num money">{fmtMoney(o.total, o.currency)}</td>
               <td><select className="select" style={{ maxWidth: 150 }} value={o.status} onChange={(e) => setStatus(o, e.target.value)} aria-label={`Estado de ${o.number}`}>{STATES.map((s) => <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)}</option>)}</select></td>
-              <td>{o.invoice_id ? <Link className="row-link mono" to={`/facturas/${o.invoice_id}`}>#{o.invoice_id}</Link> : <Badge status={o.status} />}</td>
+              <td>{o.invoice_id ? (o.invoice_visible === false
+                ? <span className="mono muted" title="La facturó otra persona del equipo">#{o.invoice_id}</span>
+                : <Link className="row-link mono" to={`/facturas/${o.invoice_id}`}>#{o.invoice_id}</Link>) : <Badge status={o.status} />}</td>
             </tr>
           ))}</tbody>
         </table>

@@ -601,7 +601,8 @@ def rules(p: Principal = Depends(require("commissions", "ver")), db: Session = D
                 "user": u.full_name if u else "Todos",
                 "name": r.name,
                 "base": r.base,
-                "percent": r.percent,
+                # sobre la utilidad, el % con lo que gana deja sacar la utilidad (y el costo): solo quien ve costos
+                "percent": None if r.base == "margen" and not p.sees_costs else r.percent,
                 "active": r.active,
                 "notes": r.notes,
             }
@@ -659,11 +660,13 @@ def accrue_for_payment(db: Session, payment: Payment) -> Commission | None:
     from ..services.documents import today_fx
 
     inv = db.get(Invoice, payment.invoice_id) if payment.invoice_id else None
-    if inv is None or inv.status == "anulada" or not inv.created_by:
+    # la comision es del vendedor responsable (services/ownership.py), no de quien tecleo la factura: la cotizacion
+    # que la oficina genero desde el levantamiento sigue siendo de la vendedora. Sin vendedor (tienda) no comisiona.
+    if inv is None or inv.status == "anulada" or not inv.seller_id:
         return None
     if db.scalar(select(Commission).where(Commission.payment_id == payment.id)):
         return None  # ya se devengo: un webhook reintentado no comisiona dos veces
-    regla = rule_for(db, inv.tenant_id, inv.created_by)
+    regla = rule_for(db, inv.tenant_id, inv.seller_id)
     if not regla or d(regla.percent) <= 0:
         return None
     cobrado = d(payment.amount)
@@ -688,7 +691,7 @@ def accrue_for_payment(db: Session, payment: Payment) -> Commission | None:
         return None
     c = Commission(
         tenant_id=inv.tenant_id,
-        user_id=inv.created_by,
+        user_id=inv.seller_id,
         invoice_id=inv.id,
         payment_id=payment.id,
         rule_id=regla.id,
@@ -738,7 +741,8 @@ def commissions(
                 "base": c.base,
                 # sobre margen, la base es la utilidad de la venta: informacion de costos (catalog.costos)
                 "base_amount": None if c.base == "margen" and not p.sees_costs else c.base_amount,
-                "percent": c.percent,
+                # y el % tampoco: comision / % x 100 = utilidad (D3: el costo no se deduce)
+                "percent": None if c.base == "margen" and not p.sees_costs else c.percent,
                 "amount": c.amount,
                 "currency": c.currency,
                 "earned_on": c.earned_on,

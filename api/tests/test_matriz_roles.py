@@ -245,7 +245,8 @@ def test_vendedor_matriz(client, auth, db_session):
     from app.models import Commission
 
     ventas = ROLE_PERMISSIONS["ventas"]
-    assert not {"events", "projects", "support_desk"} & set(ventas) and ventas["field"] == ["ver"]
+    # field.resumen: los levantamientos de sus oportunidades en solo lectura (frente vendedor); sin crear ni editar
+    assert not {"events", "projects", "support_desk"} & set(ventas) and ventas["field"] == ["ver", "resumen"]
     tid = auth["tenant"]["id"]
     cust = _cliente(client)
     v = _entrar(client, db_session, tid, "vend-matriz@ejemplo.com", "ventas")

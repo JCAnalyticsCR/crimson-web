@@ -42,6 +42,8 @@ webhook_limiter = SlidingWindow(limit=240, seconds=60)  # webhooks de ONVO por e
 # frena una inundacion desde muchas IPs sin tumbar el resto de la API.
 incident_limiter = SlidingWindow(limit=5, seconds=3600)
 incident_global_limiter = SlidingWindow(limit=120, seconds=3600)
+# "Solicitar levantamiento" (vendedor): cada una es un correo a la oficina. Por empresa y usuario.
+survey_request_limiter = SlidingWindow(limit=10, seconds=3600)
 # Tienda en linea: cotizar el carrito se llama en cada cambio (generoso); el pedido y la busqueda de "Mi pedido"
 # son los que se abusan (adivinar numeros de pedido, inundar con pedidos falsos).
 quote_limiter = SlidingWindow(limit=300, seconds=600)

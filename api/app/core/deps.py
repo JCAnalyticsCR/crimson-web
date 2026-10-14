@@ -24,6 +24,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
     # Vendedor (32:25-35:57): sus oportunidades, sus cotizaciones y facturas (buscar solo las suyas), productos con
     # precio de venta, levantamientos como resumen (solo lectura), pedidos de la tienda y sus comisiones.
     # Sin "ver_todo": nunca el total de la empresa. Nunca el costo. El consecutivo es global (services/sequences).
+    # "Lo suyo" en cotizaciones, facturas y cobros = vendedor responsable (services/ownership.py), no quien tecleo.
     "ventas": {
         "dashboard": ["ver"],
         "crm": ["ver", "crear", "editar"],  # clientes compartidos: los necesita para cotizar
@@ -31,7 +32,9 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "catalog": ["ver", "precios"],
         "sales": ["ver", "crear", "editar", "enviar"],
         "payments": ["ver", "crear"],  # registra el cobro de SUS facturas (la comision nace del cobro)
-        "field": ["ver"],  # resumen de los levantamientos de sus oportunidades; no los llena
+        # resumen: los levantamientos de SUS oportunidades en solo lectura (13/10 33:30). No los llena: los solicita
+        # desde la oportunidad (POST /opportunities/{id}/request-survey). Sin crear ni editar.
+        "field": ["ver", "resumen"],
         "commissions": ["ver"],  # solo las suyas: sin ver_todo
     },
     # Contador: todo el dinero de la empresa (gastos, conciliacion, planillas, reportes) sin configurar la empresa.
@@ -228,7 +231,8 @@ class Principal:
 
     @property
     def sees_all_sales(self) -> bool:
-        """Sin "sales.ver_todo" (vendedor) solo ve los documentos y pagos que el mismo creo."""
+        """Sin "sales.ver_todo" (vendedor) solo ve sus documentos (vendedor responsable, services/ownership.py) y
+        sus cobros. "sales.asignar" (elegir el vendedor de un documento) no lo tiene ningun rol: solo el admin ("*")."""
         return self.can("sales", "ver_todo")
 
     def can(self, module: str, action: str) -> bool:

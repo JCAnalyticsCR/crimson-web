@@ -277,10 +277,15 @@ def _order_out(o: Order):
 
 @router.get("/orders")
 def orders(status: str | None = None, limit: int = Query(50, le=200), p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
+    from ..services.ownership import visible_invoice_ids
+
     q = select(Order).where(Order.tenant_id == p.tenant.id)
     if status:
         q = q.where(Order.status == status)
-    return [_order_out(o) for o in db.scalars(q.order_by(Order.id.desc()).limit(limit))]
+    rows = db.scalars(q.order_by(Order.id.desc()).limit(limit)).all()
+    # la factura del pedido se enlaza solo si es del que mira (services/ownership.py): la de otro es un numero sin enlace
+    mias = visible_invoice_ids(db, p, [o.invoice_id for o in rows])
+    return [{**_order_out(o), "invoice_visible": (o.invoice_id in mias) if o.invoice_id else None} for o in rows]
 
 
 class OrderStatusIn(BaseModel):
@@ -840,8 +845,11 @@ def search(q: str = Query(min_length=1), p: Principal = Depends(require("dashboa
     like = f"%{q}%"
     tid = p.tenant.id
     out = []
-    mine_inv = (Invoice.created_by == p.user.id) if not p.sees_all_sales else Invoice.id.is_not(None)
-    mine_q = (Quote.created_by == p.user.id) if not p.sees_all_sales else Quote.id.is_not(None)
+    from ..services.ownership import doc_scope
+
+    # mismo alcance que Facturas y Cotizaciones (vendedor responsable): lo ajeno no aparece
+    mine_inv = doc_scope(Invoice, p)
+    mine_q = doc_scope(Quote, p)
     can_sales, can_crm, can_cat = p.can("sales", "ver"), p.can("crm", "ver"), p.can("catalog", "ver")
     for i in db.scalars(select(Invoice).where(Invoice.tenant_id == tid, mine_inv, Invoice.number.ilike(like)).limit(5)) if can_sales else []:
         out.append({"kind": "factura", "id": i.id, "title": i.number, "sub": f"{i.status} · {i.currency} {d(i.total):,.2f}", "to": f"/facturas/{i.id}"})

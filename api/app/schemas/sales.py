@@ -40,6 +40,8 @@ class DocumentIn(BaseModel):
     sale_condition: str | None = None
     credit_days: int | None = None
     payment_method: str | None = None
+    # vendedor responsable: solo lo toma en cuenta quien tiene sales.asignar (admin); a los demas se les ignora
+    seller_id: int | None = None
     lines: list[LineInSchema] = Field(default_factory=list)
 
 
@@ -88,6 +90,8 @@ class DocBaseOut(BaseModel):
     activity_code: str | None
     medical_exemption_card: bool
     status: str
+    seller_id: int | None = None  # vendedor responsable (services/ownership.py)
+    seller_name: str | None = None
     lines: list[LineOut] = []
 
 
@@ -165,3 +169,5 @@ class DocListItem(BaseModel):
     issue_date: date
     due_date: date | None
     acceptance_status: str | None = None  # solo cotizaciones
+    seller_id: int | None = None
+    seller_name: str | None = None
