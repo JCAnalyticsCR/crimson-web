@@ -39,6 +39,7 @@ from .routers import (
     store,
     store_checkout,
     store_showcase,
+    supplier_catalog,
     support,
     support_desk,
     vehicles,
@@ -105,6 +106,7 @@ def create_app() -> FastAPI:
     app.include_router(events.pub)
     app.include_router(pos.router)
     app.include_router(imports.router)
+    app.include_router(supplier_catalog.router)
     app.include_router(support.router)
     app.include_router(pipeline.router)
     app.include_router(allies.router)

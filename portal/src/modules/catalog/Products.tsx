@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, fmtMoney, parseTs, type Product } from "../../lib/api";
+import { api, fmtDate, fmtMoney, parseTs, type Product } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { GalleryField, type GalleryImage } from "../../ui/MediaPicker";
 import { Lookup, type LookupItem } from "../../ui/Lookup";
 import { TrashButton } from "../../ui/TrashButton";
+import "./productos.css";
 
 type Tax = { id: number; name: string; rate: number };
 type Named = { id: number; name: string };
@@ -18,6 +19,17 @@ type Full = Product & {
   warehouse_id: number | null;
 };
 type Cabys = { code: string; description: string; tax_rate: number | null; categories: string[] };
+/* Costo y margen (solo roles que ven costos): de dónde sale el costo y el margen real sobre la venta. */
+type CostInfo = {
+  cost?: number | null; cost_currency?: string; cost_source?: "proveedor" | "propio" | null; cost_supplier?: string | null; cost_date?: string | null;
+  cost_active?: boolean | null; cost_crc?: number | null; margin_real_pct?: number | null; margin_provisional?: boolean | null; supplier_offers?: number | null;
+};
+type Row = Product & CostInfo & { images?: GalleryImage[]; warehouse_id?: number | null };
+type Offer = {
+  supplier_item_id: number; supplier: string | null; code: string; name: string; model: string | null; cost?: number | null; currency?: string; cost_crc?: number | null;
+  stock_proveedor: number | null; updated_at: string | null; active: boolean; best: boolean;
+};
+const marginTone = (m: number) => (m < 20 ? "var(--bad)" : m < 30 ? "var(--warn)" : "var(--ok)");
 
 const blank = {
   name: "", code: "", item_type: "producto", price: "0", currency: "CRC", cabys_code: "", description_invoice: "", description_store: "", unit: "Unid",
@@ -32,7 +44,7 @@ const TABS = [["general", "General"], ["imagenes", "Imágenes"], ["variantes", "
 export default function Products() {
   const { toast, allows } = useSession();
   const [params, setParams] = useSearchParams();
-  const [itemsSt, setItems] = useState<(Product & { images?: GalleryImage[] })[] | null>(null); // null = cargando
+  const [itemsSt, setItems] = useState<Row[] | null>(null); // null = cargando
   const items = itemsSt ?? [];
   const [taxes, setTaxes] = useState<Tax[]>([]);
   const [cats, setCats] = useState<Named[]>([]);
@@ -44,7 +56,9 @@ export default function Products() {
   const [newCat, setNewCat] = useState<string | null>(null);
   const [avail, setAvail] = useState<Availability | null>(null);
   /* "Aquí no puedo filtrar nada" fue el reclamo de Andrés con 200 productos del proveedor encima. */
-  const [f, setF] = useState({ item_type: "", category_id: "", brand: "", supplier_id: "", web: "", sin_cabys: false, warehouse_id: "" });
+  const [f, setF] = useState({ item_type: "", category_id: "", brand: "", supplier_id: "", web: "", sin_cabys: false, warehouse_id: "", proveedor: "" });
+  const [offers, setOffers] = useState<Offer[] | null>(null);
+  const [costOf, setCostOf] = useState<CostInfo | null>(null);
   const [opts, setOpts] = useState<{ brands: string[]; categories: Named[]; suppliers: Named[]; sin_cabys: number; warehouses: Named[] } | null>(null);
   const [toggling, setToggling] = useState<number | null>(null);
   const verPrecios = allows("catalog.precios");
@@ -60,7 +74,8 @@ export default function Products() {
     if (f.web) qs.set("web", f.web);
     if (f.sin_cabys) qs.set("sin_cabys", "true");
     if (f.warehouse_id) qs.set("warehouse_id", f.warehouse_id);
-    return api<{ items: Product[] }>(`/products?${qs}`).then((r) => setItems(r.items));
+    if (f.proveedor) qs.set("proveedor", f.proveedor);
+    return api<{ items: Row[] }>(`/products?${qs}`).then((r) => setItems(r.items));
   }, [q, f]);
   useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); }, [load]);
   useEffect(() => {
@@ -71,7 +86,10 @@ export default function Products() {
   }, []);
 
   const open = async (id: number) => {
-    const f = await api<Full>(`/products/${id}`);
+    const f = await api<Full & CostInfo>(`/products/${id}`);
+    setCostOf(verCostos ? f : null);
+    setOffers(null);
+    if (verCostos) api<{ offers: Offer[] }>(`/supplier-catalog/offers?product_id=${id}`).then((r) => setOffers(r.offers)).catch(() => setOffers([]));
     setEdit({
       id: f.id, name: f.name, code: f.code, item_type: f.item_type, price: String(f.price), currency: f.currency, cabys_code: f.cabys_code || "",
       description_invoice: f.description_invoice || "", description_store: f.description_store || "", unit: f.unit, show_on_web: f.show_on_web, min_stock: f.min_stock,
@@ -177,21 +195,24 @@ export default function Products() {
           <select className="select select--sm" value={f.supplier_id} onChange={(e) => setF({ ...f, supplier_id: e.target.value })}><option value="">Todo proveedor</option>{(opts?.suppliers || suppliers).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
           <select className="select select--sm" value={f.web} onChange={(e) => setF({ ...f, web: e.target.value })}><option value="">En la tienda: todos</option><option value="true">Publicados</option><option value="false">Ocultos</option></select>
           {!!opts?.warehouses?.length && <select className="select select--sm" value={f.warehouse_id} onChange={(e) => setF({ ...f, warehouse_id: e.target.value })} title="Bodega o inventario de origen"><option value="">Toda bodega</option>{opts.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>}
+          <select className="select select--sm" value={f.proveedor} onChange={(e) => setF({ ...f, proveedor: e.target.value })} title="Vinculado a la lista de un proveedor (Inventarios → Proveedores) o con proveedor asignado"><option value="">Con y sin proveedor</option><option value="con">Con proveedor</option><option value="sin">Sin proveedor</option></select>
           {!!opts?.sin_cabys && <button className={`btn btn--sm ${f.sin_cabys ? "btn--crimson" : "btn--ghost"}`} onClick={() => setF({ ...f, sin_cabys: !f.sin_cabys })} title="Sin CABYS no se puede facturar">Sin CABYS ({opts.sin_cabys})</button>}
-          {(q || f.item_type || f.category_id || f.brand || f.supplier_id || f.web || f.sin_cabys || f.warehouse_id) && <button className="btn btn--ghost btn--sm" onClick={() => { setQ(""); setF({ item_type: "", category_id: "", brand: "", supplier_id: "", web: "", sin_cabys: false, warehouse_id: "" }); }}><Icon d={I.x} size={14} />Limpiar</button>}
+          {(q || f.item_type || f.category_id || f.brand || f.supplier_id || f.web || f.sin_cabys || f.warehouse_id || f.proveedor) && <button className="btn btn--ghost btn--sm" onClick={() => { setQ(""); setF({ item_type: "", category_id: "", brand: "", supplier_id: "", web: "", sin_cabys: false, warehouse_id: "", proveedor: "" }); }}><Icon d={I.x} size={14} />Limpiar</button>}
           <button className="btn btn--ghost btn--sm" onClick={load} style={{ marginLeft: "auto" }}><Icon d={I.refresh} /></button>
         </div>
         {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Nada con esos filtros. Probá limpiarlos o creá el producto." /> : (
+          <div className={verCostos ? "prd-dense" : undefined} style={{ overflowX: "auto" }}>
           <table className="table">
-            <thead><tr><th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th>Bodega</th>{verPrecios && <th className="num">Precio</th>}<th>IVA</th><th>Web</th><th /></tr></thead>
+            <thead><tr><th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th>Bodega</th>{verCostos && <th className="num" title="Costo sin IVA: del proveedor vinculado (con la fecha de su lista) o propio">Costo</th>}{verPrecios && <th className="num" title="Sin IVA">Precio de venta</th>}{verCostos && <th className="num" title="Margen sobre la venta: (precio − costo) ÷ precio">Margen</th>}<th>IVA</th><th>Web</th><th /></tr></thead>
             <tbody>{items.map((p) => (
               <tr key={p.id}>
                 <td>{thumb(p) ? <span style={{ display: "block", width: 36, height: 36, borderRadius: 8, background: `center/cover no-repeat url("${thumb(p)}")`, border: "1px solid var(--hair)" }} /> : <span style={{ display: "grid", placeItems: "center", width: 36, height: 36, borderRadius: 8, background: "var(--bg-2)", color: "var(--text-3)" }}><Icon d={I.products} size={16} /></span>}</td>
-                <td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.item_type}</td><td className="mono muted">{p.cabys_code || "—"}</td><td className="muted" style={{ fontSize: 13 }}>{whName((p as Product & { warehouse_id?: number | null }).warehouse_id)}</td>{verPrecios && <td className="num money">{fmtMoney(p.price, p.currency)}</td>}<td className="muted">{p.tax_rate ?? "—"}%</td><td><button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={!allows("catalog.editar") || toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-pressed={p.show_on_web}><i /></button></td>
+                <td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.item_type}</td><td className="mono muted">{p.cabys_code || "—"}</td><td className="muted" style={{ fontSize: 13 }}>{whName(p.warehouse_id)}</td>{verCostos && <td className="num"><CostCell p={p} /></td>}{verPrecios && <td className="num money">{fmtMoney(p.price, p.currency)}</td>}{verCostos && <td className="num" style={{ whiteSpace: "nowrap" }}><MarginCell p={p} /></td>}<td className="muted">{p.tax_rate ?? "—"}%</td><td><button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={!allows("catalog.editar") || toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-pressed={p.show_on_web}><i /></button></td>
                 <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => open(p.id)}>Ver</button><TrashButton kind="product" id={p.id} number={p.code || p.name} onDone={load} /></span></td>
               </tr>
             ))}</tbody>
           </table>
+          </div>
         )}
       </Card>
       {edit && (
@@ -234,6 +255,7 @@ export default function Products() {
             <Field label="Descripción · Facturación" hint="Larga; va a cotizaciones y facturas."><textarea className="textarea" value={edit.description_invoice} onChange={(e) => setEdit({ ...edit, description_invoice: e.target.value })} /></Field>
             <Field label="Descripción · Comercio electrónico" hint="Corta; va a Links y a la tienda."><textarea className="textarea" style={{ minHeight: 60 }} value={edit.description_store} onChange={(e) => setEdit({ ...edit, description_store: e.target.value })} /></Field>
             <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={edit.show_on_web} onChange={(e) => setEdit({ ...edit, show_on_web: e.target.checked })} />Mostrar en sitio web</label>
+            {verCostos && edit.id && <SupplierOffers offers={offers} info={costOf} />}
             {avail && (
               <p className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
                 Disponibilidad que ve el cliente: <b>{avail.label}</b>
@@ -269,5 +291,53 @@ export default function Products() {
         </Modal>
       )}
     </>
+  );
+}
+
+/* Costo con su origen: "Eurocomp · 13 oct" (lista del proveedor vinculado) o "Propio". */
+function CostCell({ p }: { p: Row }) {
+  if (p.cost == null) return <span className="muted" title="Sin costo registrado">—</span>;
+  const src = p.cost_source === "proveedor" ? `${p.cost_supplier || "Proveedor"}${p.cost_date ? ` · ${fmtDate(p.cost_date)}` : ""}` : `Propio${p.cost_date ? ` · ${fmtDate(p.cost_date)}` : ""}`;
+  return (
+    <span className="prd-cost">
+      <span className="mono" style={{ whiteSpace: "nowrap" }}>{fmtMoney(p.cost, p.cost_currency || "USD")}</span>
+      <small style={{ color: p.cost_source === "proveedor" && p.cost_active === false ? "var(--bad)" : undefined }} title={p.cost_active === false ? "El proveedor ya no lo trae en su lista vigente" : undefined}>{src}{p.cost_active === false ? " · ya no viene" : ""}</small>
+    </span>
+  );
+}
+
+function MarginCell({ p }: { p: Row }) {
+  if (p.margin_real_pct == null) return <span className="muted">—</span>;
+  const m = Number(p.margin_real_pct);
+  if (p.margin_provisional) return <span className="mono muted" title="Sin costo: es el margen objetivo, no el real. Cargá el costo o vinculalo a un proveedor.">{m.toFixed(1)} % <span className="badge badge--muted">prov.</span></span>;
+  return <span className="mono" style={{ fontWeight: 700, color: marginTone(m) }}>{m.toFixed(1)} %</span>;
+}
+
+/* Ficha: las ofertas de proveedores vinculadas (Inventarios → Proveedores). La mejor alimenta costo y "Bajo pedido". */
+function SupplierOffers({ offers, info }: { offers: Offer[] | null; info: CostInfo | null }) {
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+        <b style={{ fontSize: 13 }}>Ofertas de proveedores</b>
+        {info?.margin_real_pct != null && <span className="muted" style={{ fontSize: 12.5 }}>Margen sobre venta {info.margin_provisional ? "objetivo (sin costo)" : "real"}: {Number(info.margin_real_pct).toFixed(1)} %{info.cost_source ? ` · costo ${info.cost_source === "proveedor" ? `de ${info.cost_supplier || "proveedor"}` : "propio"}${info.cost_date ? ` del ${fmtDate(info.cost_date)}` : ""}` : ""}</span>}
+      </div>
+      {offers === null ? <p className="meta">Cargando…</p> : offers.length === 0 ? (
+        <p className="muted" style={{ fontSize: 12.5, margin: "6px 0 0" }}>Sin ofertas vinculadas. En <Link to="/inventario?tab=proveedores">Inventarios → Proveedores</Link> podés vincular este producto con el ítem de la lista del proveedor: el costo y la existencia del proveedor se actualizan solos con cada lista.</p>
+      ) : (
+        <table className="table" style={{ marginTop: 6 }}>
+          <thead><tr><th>Proveedor</th><th>Código</th><th className="num">Existencia</th><th className="num">Costo</th><th className="num">Costo ₡</th><th>Lista</th></tr></thead>
+          <tbody>{offers.map((o) => (
+            <tr key={o.supplier_item_id} style={o.active ? undefined : { opacity: 0.55 }}>
+              <td>{o.supplier}{o.best && <span className="badge badge--ok" style={{ marginLeft: 6 }}>Mejor oferta</span>}{!o.active && <span className="badge badge--muted" style={{ marginLeft: 6 }}>Ya no viene</span>}</td>
+              <td className="mono">{o.code}</td>
+              <td className="num mono">{o.stock_proveedor ?? "—"}</td>
+              <td className="num mono">{o.cost != null ? fmtMoney(o.cost, o.currency || "USD") : "—"}</td>
+              <td className="num mono">{o.cost_crc != null ? fmtMoney(Math.round(Number(o.cost_crc)), "CRC") : "—"}</td>
+              <td className="muted">{fmtDate(o.updated_at)}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      )}
+    </div>
   );
 }
