@@ -555,7 +555,35 @@ def _familia(nombre: str) -> str | None:
     return None
 
 
+def covered_line(it) -> str | None:
+    """Linea generica de la sugerencia que cubre un equipo elegido con la recomendacion ("Cámara Bullet 4 MP" ->
+    el producto real). Las lineas de siempre no la tienen."""
+    rec = getattr(it, "recommendation", None)
+    line = rec.get("line") if isinstance(rec, dict) else None
+    return line.strip().lower() if isinstance(line, str) and line.strip() else None
+
+
+def per_unit(it) -> Decimal:
+    """Unidades de la linea generica que cubre cada unidad del producto elegido (1 bobina = 305 m; 1 disco = 6 TB).
+    1 para todo lo demas."""
+    rec = getattr(it, "recommendation", None)
+    try:
+        n = parse_number(rec.get("per_unit")) if isinstance(rec, dict) else None
+    except ValueError:
+        n = None
+    return n if n is not None and n > 0 else Decimal(1)
+
+
+def quantity_in_line(it, line_name: str) -> Decimal:
+    """Cantidad ya cargada expresada en las unidades de la linea sugerida."""
+    q = Decimal(str(getattr(it, "quantity", 0) or 0))
+    return q * per_unit(it) if covered_line(it) == line_name.strip().lower() else q
+
+
 def _mismo_material(sugerido: dict, it) -> bool:
+    cubre = covered_line(it)
+    if cubre:  # equipo real elegido con la recomendacion: cubre solo su linea generica
+        return cubre == sugerido["name"].strip().lower()
     nombre = (getattr(it, "name", None) or "").strip().lower()
     if nombre == sugerido["name"].lower():
         return True
@@ -1170,7 +1198,7 @@ def suggest_materials(kind: str, points: list, items: list | None = None, common
             o["reason"] += "; referencia del curso, por verificar"
         match = next((it for it in existing if _mismo_material(o, it)), None)
         o["item_id"] = getattr(match, "id", None) if match else None
-        o["existing_quantity"] = Decimal(str(match.quantity or 0)) if match else Decimal(0)
+        o["existing_quantity"] = quantity_in_line(match, o["name"]) if match else Decimal(0)
         if o["quantity"] <= 0 or falta or o.get("reference"):
             # sin cantidad calculada (o con datos faltantes) no se puede afirmar nada: solo que hay que revisarla
             o["action"], o["add_quantity"] = "revisar", Decimal(0)

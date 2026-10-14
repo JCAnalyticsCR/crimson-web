@@ -145,6 +145,14 @@ class SurveyItem(Base):
     kind: Mapped[str] = mapped_column(String(10), default="material", server_default="material")
     # costo unitario en colones escrito en el costeo cuando el producto no tiene costo de proveedor
     unit_cost: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    # recomendacion de equipos: oferta de proveedor elegida cuando no hay producto propio. Costo en su moneda;
+    # el costeo lo pasa a colones con el tipo de cambio del dia. Sin FK: el catalogo de proveedor vive aparte.
+    supplier_item_id: Mapped[int | None] = mapped_column(Integer)
+    supplier_cost: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    supplier_currency: Mapped[str | None] = mapped_column(String(3))
+    # que linea generica de la sugerencia cubre este equipo y como se eligio:
+    # {line, line_unit, per_unit, source, supplier, code, model, brand, reason, chosen_by, chosen_at}
+    recommendation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class Project(ArchiveMixin, TenantMixin, TimestampMixin, Base):

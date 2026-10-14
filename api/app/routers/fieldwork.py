@@ -7,8 +7,9 @@ El tecnico levanta en sitio desde el celular (puntos, fotos, materiales) y envia
 from __future__ import annotations
 
 import html
+import logging
 from datetime import UTC, date, datetime
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -20,8 +21,8 @@ from ..core.deps import Principal, require
 from ..models import Customer, Opportunity, Product, Project, Survey, SurveyItem, SurveyObservation, SurveyPoint, User, WorkOrder, WorkOrderMaterial
 from ..schemas.sales import DocumentIn, LineInSchema
 from ..services import documents as docsvc
+from ..services import equipment_reco, pricing, supplier_catalog
 from ..services import inventory as invsvc
-from ..services import pricing
 from ..services.archive import live
 from ..services.documents import audit
 from ..services.mail import notify_roles, queue_email
@@ -34,12 +35,14 @@ from ..services.survey_specs import (
     normalize_data_status,
     normalize_item,
     normalize_point_data,
+    per_unit,
     suggest_materials,
     system_calcs,
 )
 from ..services.totals import d
 
 router = APIRouter(tags=["campo"])
+log = logging.getLogger(__name__)
 
 LABOR_DAY = Decimal(25000)  # costo interno por tecnico por dia (Ajustes: labor_day_cost)
 TRAVEL = Decimal(35000)  # transporte estimado por levantamiento (Ajustes: travel_cost)
@@ -215,10 +218,33 @@ def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
             for x in s.points
         ]
         out["items"] = [
-            {"id": i.id, "product_id": i.product_id, "name": i.name, "quantity": i.quantity, "unit": i.unit, "note": i.note, "kind": i.kind or "material"}
+            {
+                "id": i.id,
+                "product_id": i.product_id,
+                "name": i.name,
+                "quantity": i.quantity,
+                "unit": i.unit,
+                "note": i.note,
+                "kind": i.kind or "material",
+                **_item_reco_out(i),
+            }
             for i in s.items
         ]
     return out
+
+
+def _item_reco_out(i: SurveyItem) -> dict:
+    """Equipo elegido con la recomendacion: que linea generica cubre y de donde sale. Sin costos (lo ve el tecnico)."""
+    rec = i.recommendation if isinstance(i.recommendation, dict) else None
+    if not rec and not i.supplier_item_id:
+        return {}
+    rec = rec or {}
+    return {
+        "recommended_for": rec.get("line"),
+        "supplier_item_id": i.supplier_item_id,
+        "supplier": rec.get("supplier"),
+        "offer_source": rec.get("source") or ("proveedor" if i.supplier_item_id else "propio"),
+    }
 
 
 REVIEW_LABEL = {None: "Sin enviar", "pendiente": "En revisión", "aprobado": "Revisión aprobada", "devuelto": "Devuelto con observaciones"}
@@ -432,10 +458,19 @@ def _apply_children(s: Survey, data: SurveyIn) -> None:
     # el costo escrito en el costeo vive en la linea: el tecnico reescribe la lista al guardar y no debe borrarlo
     prev = {i.id: i for i in s.items if i.id}
     s.items.clear()
+    usados: set[int] = set()
     for it in data.items:
         old = prev.get(it.id) if it.id else None
+        if it.id and old is None:
+            # id que ya no existe: cada guardado renumera las lineas y el portal guardaba dos veces sin recargar
+            # (Costear y mover el margen). La misma linea se reconoce por producto y nombre: no pierde su costo.
+            old = next((o for o in prev.values() if o.id not in usados and o.product_id == it.product_id and (o.name or "").strip() == it.name.strip()), None)
+        if old is not None:
+            usados.add(old.id)
         keep_cost = old.unit_cost if old is not None and old.product_id == it.product_id else None
         kind, unit = normalize_item(it.name, it.kind or (old.kind if old is not None else None), it.unit)
+        # el equipo elegido con la recomendacion (y su oferta de proveedor) sigue mientras la linea sea la misma
+        same = old is not None and old.product_id == it.product_id and (it.product_id is not None or (old.name or "").strip() == it.name.strip())
         s.items.append(
             SurveyItem(
                 product_id=it.product_id,
@@ -445,6 +480,10 @@ def _apply_children(s: Survey, data: SurveyIn) -> None:
                 note=it.note,
                 kind=kind,
                 unit_cost=keep_cost,
+                supplier_item_id=old.supplier_item_id if same else None,
+                supplier_cost=old.supplier_cost if same else None,
+                supplier_currency=old.supplier_currency if same else None,
+                recommendation=old.recommendation if same else None,
             )
         )
 
@@ -546,11 +585,30 @@ def survey_link_opportunity(sid: int, data: LinkOppIn, p: Principal = Depends(re
 
 
 @router.post("/surveys/{sid}/suggest")
-def survey_suggest(sid: int, p: Principal = Depends(require("field", "editar")), db: Session = Depends(get_db)):
+def survey_suggest(
+    sid: int,
+    candidates: bool = False,
+    margin: Decimal | None = Query(None, ge=0, lt=100),
+    p: Principal = Depends(require("field", "editar")),
+    db: Session = Depends(get_db),
+):
     """Propone materiales y equipos a partir de los puntos, sus observaciones y lo ya cargado. NO modifica
-    el levantamiento: el portal muestra la lista con el motivo de cada una y el usuario elige (ver /apply)."""
+    el levantamiento: el portal muestra la lista con el motivo de cada una y el usuario elige (ver /apply).
+
+    candidates=true ("Recomendar equipos"): cada linea trae ademas `candidates` (hasta 3 productos reales del
+    catalogo propio o de proveedor, el primero "recommended" si cumple) y `recommend` (requisitos, equipo en uso),
+    y se suma la linea de discos calculada con el almacenamiento. Sin el parametro la respuesta es la de siempre.
+    Costos solo para quien los ve; el tecnico ve que equipo es y si hay existencias."""
     s = _survey(db, sid, p)
-    return suggest_materials(s.kind, list(s.points), list(s.items), common=s.common)
+    lines = suggest_materials(s.kind, list(s.points), list(s.items), common=s.common)
+    if not candidates:
+        return lines
+    try:
+        return equipment_reco.recommend(db, p.tenant, s, lines, sees_costs=p.sees_costs, sees_prices=p.sees_prices, margin_pct=margin)
+    except Exception:  # noqa: BLE001 - la sugerencia de siempre nunca se cae por la recomendacion
+        log.exception("recomendacion de equipos fallo (levantamiento %s)", s.id)
+        db.rollback()
+        return lines
 
 
 @router.get("/surveys/{sid}/system")
@@ -587,7 +645,11 @@ def survey_suggest_apply(sid: int, data: list[SuggestionIn], p: Principal = Depe
             None,
         )
         if match:
-            match.quantity = d(match.quantity) + sg.quantity
+            add = sg.quantity
+            per = per_unit(match)
+            if per != 1 and ((match.recommendation or {}).get("line") or "").strip().lower() == sg.name.strip().lower():
+                add = (sg.quantity / per).to_integral_value(rounding=ROUND_CEILING)  # la sugerencia va en metros/TB; el equipo en bobinas/discos
+            match.quantity = d(match.quantity) + add
             summed += 1
         else:
             kind, unit = normalize_item(sg.name, sg.kind, sg.unit)
@@ -596,6 +658,105 @@ def survey_suggest_apply(sid: int, data: list[SuggestionIn], p: Principal = Depe
     audit(db, p.tenant.id, p.user.id, "suggest_apply", "survey", s.id, {"agregados": added, "sumados": summed}, ip=p.ip)
     db.commit()
     return {"added": added, "summed": summed, "survey": _survey_out(db, s)}
+
+
+class ApplyProductIn(BaseModel):
+    """ "Usar este": la linea generica de la sugerencia y el producto (propio o de proveedor) elegido para cubrirla.
+    El costo y los datos de la oferta se recalculan en el servidor; del navegador solo viene la eleccion."""
+
+    line: str = Field(min_length=1, max_length=200)  # nombre de la linea generica ("Cámara Bullet 4 MP")
+    quantity: Decimal = Field(gt=0, le=100000)  # unidades del producto elegido
+    item_id: int | None = None  # linea ya cargada que se reemplaza (la sugerencia la cruzo)
+    product_id: int | None = None
+    supplier_item_id: int | None = None
+    code: str | None = Field(None, max_length=80)  # para volver a encontrar la oferta del proveedor
+    note: str | None = Field(None, max_length=200)
+
+
+@router.post("/surveys/{sid}/suggest/apply-product")
+def survey_apply_product(sid: int, data: ApplyProductIn, p: Principal = Depends(require("field", "editar")), db: Session = Depends(get_db)):
+    """Crea o actualiza la linea del levantamiento con el equipo real elegido. Si ya habia una linea para esa
+    sugerencia (generica o con otro equipo) se reemplaza ahi mismo; nunca se duplica ni se borra otra cosa."""
+    s = _survey(db, sid, p)
+    if s.status in ("cotizado", "cerrado"):
+        raise HTTPException(409, "El levantamiento ya fue cotizado")
+    if not data.product_id and not data.supplier_item_id:
+        raise HTTPException(422, "Elegí un producto del catálogo o una oferta del proveedor")
+    it = next((x for x in s.items if data.item_id and x.id == data.item_id), None)
+    if data.item_id and it is None:
+        raise HTTPException(404, "Esa línea no pertenece a este levantamiento")
+    lines = suggest_materials(s.kind, list(s.points), list(s.items), common=s.common)
+    try:
+        line, c = equipment_reco.resolve_choice(
+            db,
+            p.tenant,
+            s,
+            lines,
+            data.line,
+            product_id=data.product_id,
+            supplier_item_id=None if data.product_id else data.supplier_item_id,
+            code=data.code,
+        )
+    except LookupError as e:
+        raise HTTPException(409, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    if it is None:
+        it = next((x for x in s.items if ((x.recommendation or {}).get("line") or "").strip().lower() == line["name"].strip().lower()), None)
+    proveedor = c["source"] == "proveedor" and not c["product_id"]
+    rec = {
+        "line": line["name"],
+        "line_unit": line.get("unit"),
+        "per_unit": str(c["per_unit"]),
+        "source": c["source"],
+        "supplier": c.get("supplier"),
+        "code": c.get("code"),
+        "model": c.get("model"),
+        "brand": c.get("brand"),
+        "reason": c.get("reason_plain"),
+        "score": c.get("score"),
+        "recommended": bool(c.get("meets")),
+        "chosen_by": p.user.id,
+        "chosen_at": datetime.now(UTC).isoformat(),
+    }
+    kind = line.get("kind") if line.get("kind") in ("equipo", "material") else None
+    kind, unit = normalize_item(c["name"] or line["name"], kind, c.get("unit") or "Unid")
+    nuevo = it is None
+    if nuevo:
+        it = SurveyItem(name=(c["name"] or line["name"])[:200], quantity=data.quantity)
+        s.items.append(it)
+    elif it.product_id != c["product_id"] or it.supplier_item_id != (c["supplier_item_id"] if proveedor else None):
+        it.unit_cost = None  # el costo escrito a mano era del equipo anterior
+    it.product_id = c["product_id"]
+    it.name = (c["name"] or line["name"])[:200]
+    it.quantity = data.quantity
+    it.unit = unit
+    it.kind = kind
+    if data.note is not None:
+        it.note = data.note or None
+    it.supplier_item_id = c["supplier_item_id"] if proveedor else None
+    it.supplier_cost = c.get("cost") if proveedor else None
+    it.supplier_currency = (c.get("currency") or "USD") if proveedor else None
+    it.recommendation = rec
+    audit(
+        db,
+        p.tenant.id,
+        p.user.id,
+        "recommend_apply",
+        "survey",
+        s.id,
+        {
+            "linea": line["name"],
+            "producto": c["product_id"],
+            "oferta_proveedor": c["supplier_item_id"] if proveedor else None,
+            "cantidad": str(data.quantity),
+            "nuevo": nuevo,
+        },
+        ip=p.ip,
+    )
+    db.commit()
+    full = _survey_out(db, s)
+    return {"item": next(x for x in full["items"] if x["id"] == it.id), "created": nuevo, "survey": full}
 
 
 @router.post("/surveys/{sid}/send")
@@ -760,8 +921,17 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
         qty = d(it.quantity)
         unit_cost = pricing.cost_in(db, prod, "CRC", fx) if prod else Decimal(0)
         source = "catalogo" if unit_cost > 0 else None
+        supplier = None
         if unit_cost <= 0 and it.unit_cost is not None and d(it.unit_cost) > 0:
             unit_cost, source = d(it.unit_cost), "levantamiento"  # escrito a mano en este costeo
+        if unit_cost <= 0 and it.supplier_cost is not None and d(it.supplier_cost) > 0:
+            # oferta de proveedor elegida con la recomendacion: su costo en colones con el tipo de cambio del dia
+            cur = it.supplier_currency or "USD"
+            rate = Decimal(1) if cur == "CRC" else (fx if cur == "USD" else docsvc.today_fx(db, cur)[0])
+            unit_cost, source = d(it.supplier_cost) * d(rate), "proveedor"
+            supplier = (it.recommendation or {}).get("supplier")
+        if unit_cost <= 0 and prod is not None:
+            unit_cost, supplier, source = _best_offer_cost(db, prod, unit_cost, source)
         # precio de lista si el producto lo tiene; si no, sale del costo con el margen objetivo
         price_from_cost = not (prod and d(prod.price) > 0)
         unit_price = pricing.sale_price(db, unit_cost, "CRC", "CRC", margin_pct) if price_from_cost else d(prod.price)
@@ -779,8 +949,10 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
                 "unit_price": d(unit_price).quantize(Decimal("0.01")),
                 "price": (d(unit_price) * qty).quantize(Decimal("0.01")),
                 "has_cost": unit_cost > 0,
-                "cost_source": source,  # catalogo | levantamiento | None
+                "cost_source": source,  # catalogo | levantamiento | proveedor | None
                 "price_from_cost": price_from_cost,
+                "supplier": supplier,
+                "recommended_for": (it.recommendation or {}).get("line") if isinstance(it.recommendation, dict) else None,
             }
         )
         cost_items += unit_cost * qty
@@ -831,6 +1003,20 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
         "margin_provisional": bool(missing),
         "can_save_catalog": p.can("catalog", "editar"),
     }
+
+
+def _best_offer_cost(db: Session, prod: Product, unit_cost: Decimal, source: str | None) -> tuple[Decimal, str | None, str | None]:
+    """Producto sin costo propio: la mejor oferta del catalogo de proveedores para ese producto (si la hay).
+    Si no hay o falla, todo sigue como antes (sin costo y margen provisional)."""
+    try:
+        off = supplier_catalog.best_offer_for_product(db, prod)
+    except Exception:  # noqa: BLE001 - el costeo nunca se cae por el catalogo de proveedores
+        log.exception("best_offer_for_product fallo (producto %s)", prod.id)
+        return unit_cost, None, source
+    c = d(off.get("cost_crc")) if off and off.get("cost_crc") is not None else Decimal(0)
+    if c > 0:
+        return c, off.get("supplier"), "proveedor"
+    return unit_cost, None, source
 
 
 class TarifasIn(BaseModel):

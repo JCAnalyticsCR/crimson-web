@@ -14,13 +14,18 @@ import { ArchiveActions } from "../../ui/ArchiveActions";
 import { LinkOpportunity, type OppRef } from "./LinkOpportunity";
 import { pickReview, ReviewPanel, reviewTone, type ReviewInfo } from "./SurveyReview";
 import { CommonSection, initialStatus, PointFields, SystemCalcs, useCommonSpec, type Common, type V2Field } from "./SurveyV2";
+import { RecommendModal, RecoSummary, type RecoFields, type RecoLine } from "./Recommend";
 
 type FieldSpec = V2Field; // + hint, section, advanced, legacy (plantilla v2)
 type Spec = { label: string; point_prefix: string; point_label: string; fields: FieldSpec[]; materials: string[] };
 /* kind: tipo del punto si no es el del levantamiento (una puerta de acceso dentro de uno de CCTV). */
 type Point = { id?: number; code: string; kind?: string | null; label: string; data: Record<string, unknown>; data_status?: Record<string, string> | null; photos: string[]; notes: string | null };
 type Kind = "equipo" | "material" | "servicio";
-type Item = { id?: number; product_id: number | null; name: string; quantity: string; unit: string; note: string | null; kind: Kind };
+/* recommended_for...: equipo elegido con "Recomendar equipos" (que linea generica cubre y de donde sale); la API los guarda sola */
+type Item = {
+  id?: number; product_id: number | null; name: string; quantity: string; unit: string; note: string | null; kind: Kind;
+  recommended_for?: string | null; supplier_item_id?: number | null; supplier?: string | null; offer_source?: string;
+};
 type LaborKey = "tecnico" | "civil" | "contratado";
 type Labor = Record<LaborKey, { people: string; days: string }>;
 type Tech = { id: number; name: string; role: string };
@@ -36,7 +41,8 @@ type Survey = {
 } & Partial<ReviewInfo>;
 type CostLine = {
   item_id: number; product_id: number | null; name: string; kind: Kind; quantity: string; unit: string; unit_cost: string; cost: string;
-  unit_price: string; price: string; has_cost: boolean; cost_source: "catalogo" | "levantamiento" | null; price_from_cost: boolean;
+  unit_price: string; price: string; has_cost: boolean; cost_source: "catalogo" | "levantamiento" | "proveedor" | null; price_from_cost: boolean;
+  supplier?: string | null; recommended_for?: string | null;
 };
 type LaborType = { key: LaborKey; label: string; people: number; days: string; day_cost: string; day_cost_default: string; custom: boolean; cost: string };
 type Costing = {
@@ -50,8 +56,14 @@ type Suggestion = {
   /* v2: datos faltantes o estimados, advertencias tecnicas, controladoras alternativas, modelo del curso */
   missing?: string[]; estimated?: string[]; warnings?: string[]; reference?: boolean;
   alternatives?: { label: string; reserva: number; actual: boolean }[];
-};
+} & RecoFields; // candidatos reales (Recomendar equipos), solo con ?candidates=true
 type SugRow = Suggestion & { checked: boolean; qty: string };
+/* fila de la tabla de sugerencias: lo nuevo marcado; la linea de discos (TB) se agrega solo eligiendo un disco real */
+const toRow = (x: Suggestion): SugRow => ({
+  ...x,
+  checked: x.action === "nuevo" && x.apply_generic !== false,
+  qty: x.action === "revisar" || x.apply_generic === false ? "" : String(Number(x.action === "sumar" ? x.add_quantity : x.quantity) || ""),
+});
 
 const STATUS: Record<string, { label: string; tone: string }> = {
   borrador: { label: "Borrador", tone: "warn" }, enviado: { label: "Enviado a oficina", tone: "info" },
@@ -97,6 +109,7 @@ export default function Surveys() {
   const [costing, setCosting] = useState<Costing | null>(null);
   const [costEdits, setCostEdits] = useState<Record<number, { cost: string; save: boolean }>>({});
   const [sugs, setSugs] = useState<SugRow[] | null>(null);
+  const [reco, setReco] = useState<{ lines: RecoLine[]; focus?: string | null } | null>(null);
   const [verFoto, setVerFoto] = useState<number | null>(null);
   const [sent, setSent] = useState<{ number: string; notified: Tech[]; review?: Review } | null>(null);
   const [margin, setMargin] = useState(35);
@@ -189,10 +202,20 @@ export default function Surveys() {
   const save = async (silent = false) => {
     if (!draft) return null;
     setBusy(true);
+    const sent = draft.items;
     try {
       const s = await api<Survey>(draft.id ? `/surveys/${draft.id}` : "/surveys", { method: draft.id ? "PUT" : "POST", json: body(draft) });
       if (!silent) toast(draft.id ? "Levantamiento guardado" : `Levantamiento ${s.number} creado`);
-      setDraft((d) => (d ? { ...d, id: s.id, number: s.number, status: s.status, review: pickReview(s), template_version: s.template_version } : d));
+      setDraft((d) => {
+        if (!d) return d;
+        const next = { ...d, id: s.id, number: s.number, status: s.status, review: pickReview(s), template_version: s.template_version };
+        // cada guardado renumera las lineas: se toman los ids nuevos (mismo orden) para que el siguiente guardado
+        // no las tome por nuevas y pierda el costo escrito o el equipo elegido. Solo si no se edito mientras tanto.
+        if (d.items !== sent || !s.items) return next;
+        const ids = s.items.map((x) => x.id);
+        let k = 0;
+        return { ...next, items: d.items.map((it) => (it.name.trim() ? { ...it, id: ids[k++] ?? it.id } : it)) };
+      });
       setCalcTick((t) => t + 1);
       load();
       return s;
@@ -202,18 +225,36 @@ export default function Surveys() {
 
   /* Antes "Sugerir" reemplazaba la lista sin preguntar. Ahora la API solo propone (con el porqué) y aquí
      se elige qué agregar; lo que ya existe se suma en vez de duplicarse. */
+  /* Cada linea trae ademas sus equipos reales recomendados (?candidates=true): la linea generica se puede agregar
+     como siempre o con «Ver equipos» elegir el producto del catalogo que la cubre. */
   const suggest = async () => {
     const s = await save(true);
     if (!s) return;
     try {
-      const list = await api<Suggestion[]>(`/surveys/${s.id}/suggest`, { method: "POST" });
+      const list = await api<Suggestion[]>(`/surveys/${s.id}/suggest?candidates=true`, { method: "POST" });
       if (!list.length) { toast("No hay materiales habituales para este tipo de solución: agregá puntos o cargalos a mano.", "bad"); return; }
-      setSugs(list.map((x) => ({
-        ...x,
-        checked: x.action === "nuevo",
-        qty: x.action === "revisar" ? "" : String(Number(x.action === "sumar" ? x.add_quantity : x.quantity) || ""),
-      })));
+      setSugs(list.map(toRow));
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
+
+  /* Andres (LEV-2026-0008): "deberia recomendar cuales camaras podria utilizar con base en los requerimientos". */
+  const recommend = async () => {
+    const s = await save(true); // la recomendacion lee los puntos guardados
+    if (!s) return;
+    try { setReco({ lines: await api<RecoLine[]>(`/surveys/${s.id}/suggest?candidates=true`, { method: "POST" }) }); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
+  /* Despues de "Usar este": la linea quedo con su producto. Se recalcula la sugerencia (esa linea pasa a "ya
+     alcanza") conservando lo que el usuario ya marco en las demas, y se recarga el levantamiento. */
+  const afterReco = async () => {
+    if (!draft?.id) return;
+    const list = await api<Suggestion[]>(`/surveys/${draft.id}/suggest?candidates=true`, { method: "POST" });
+    setReco((r) => (r ? { ...r, lines: list } : r));
+    setSugs((prev) => prev && list.map((x) => {
+      const old = prev.find((y) => y.name === x.name);
+      return old && old.action === x.action ? { ...x, checked: old.checked, qty: old.qty } : toRow(x);
+    }));
+    await open(draft.id);
   };
 
   const applySugs = async () => {
@@ -414,8 +455,11 @@ export default function Surveys() {
             <thead><tr><th>{kind === "equipo" ? "Equipo" : kind === "servicio" ? "Servicio" : "Material"}</th><th>Origen</th><th className="num">Cantidad</th><th>Unidad</th><th>Bloque</th><th /></tr></thead>
             <tbody>{idx.map(({ it, i }) => (
               <tr key={it.id ?? `n${i}`}>
-                <td><Lookup value={it.name} placeholder="Buscar en el catálogo…" fetcher={searchProducts} disabled={readOnly} onSelect={(pr, text) => setItem(i, { product_id: pr ? pr.id : null, name: text })} /></td>
-                <td className="muted" style={{ fontSize: 12.5 }}>{it.product_id ? "Del catálogo" : "Texto libre"}</td>
+                <td><Lookup value={it.name} placeholder="Buscar en el catálogo…" fetcher={searchProducts} disabled={readOnly} onSelect={(pr, text) => setItem(i, { product_id: pr ? pr.id : null, name: text, recommended_for: null, supplier_item_id: null, supplier: null })} /></td>
+                <td className="muted" style={{ fontSize: 12.5 }}>
+                  {it.product_id ? "Del catálogo" : it.supplier_item_id ? `Proveedor${it.supplier ? ` ${it.supplier}` : ""}` : "Texto libre"}
+                  {it.recommended_for && <div title="Elegido con «Recomendar equipos»">cubre: {it.recommended_for}</div>}
+                </td>
                 <td className="num">
                   <input className="input input--mono" inputMode="decimal" style={{ maxWidth: 110 }} value={it.quantity} disabled={readOnly} onChange={(e) => setItem(i, { quantity: e.target.value })} />
                   {!readOnly && distTotal > 0 && RUTA.test(it.name) && (
@@ -486,6 +530,7 @@ export default function Surveys() {
             {draft.id && <span style={{ marginRight: "auto", display: "inline-flex", gap: 6 }}><ArchiveActions kind="survey" id={draft.id} number={draft.number} archivedAt={draft.archived_at} trashedAt={draft.trashed_at} onDone={() => { close(); load(); }} /></span>}
             <button className="btn btn--ghost" onClick={close}>Cerrar</button>
             {!readOnly && <>
+              <button className="btn btn--ghost" onClick={recommend} disabled={busy || !draft.points.length} title="Equipos reales del catálogo para lo levantado: cámaras, grabador, discos, switch…">Recomendar equipos</button>
               <button className="btn btn--ghost" onClick={suggest} disabled={busy} title={draft.points.length ? "Según el tipo de cada punto" : "Sin puntos: los materiales habituales del tipo de solución"}>Sugerir materiales</button>
               <button className="btn btn--ghost" onClick={() => save()} disabled={busy}>Guardar</button>
               <button className="btn btn--crimson" onClick={send} disabled={busy || !draft.points.length}>{draft.status === "enviado" ? "Reenviar a oficina" : "Enviar a oficina"}</button>
@@ -602,11 +647,14 @@ export default function Surveys() {
             <thead><tr><th style={{ width: 32 }} /><th>Sugerencia</th><th>Bloque</th><th className="num">Ya cargado</th><th className="num">Agregar</th><th>Por qué</th></tr></thead>
             <tbody>{sugs.map((x, i) => (
               <tr key={x.name} style={{ opacity: x.action === "cubierto" && !x.checked ? 0.6 : 1 }}>
-                <td><input type="checkbox" checked={x.checked} onChange={(e) => setSugs(sugs.map((y, j) => (j === i ? { ...y, checked: e.target.checked } : y)))} /></td>
-                <td><b>{x.name}</b> <span className={`badge badge--${ACTION[x.action].tone}`} style={{ marginLeft: 6 }}>{ACTION[x.action].label}</span></td>
+                <td><input type="checkbox" checked={x.checked} disabled={x.apply_generic === false} title={x.apply_generic === false ? "Se agrega eligiendo un equipo real: «Ver equipos»" : undefined} onChange={(e) => setSugs(sugs.map((y, j) => (j === i ? { ...y, checked: e.target.checked } : y)))} /></td>
+                <td>
+                  <b>{x.name}</b> <span className={`badge badge--${ACTION[x.action].tone}`} style={{ marginLeft: 6 }}>{ACTION[x.action].label}</span>
+                  <RecoSummary line={x} onOpen={() => setReco({ lines: sugs, focus: x.name })} />
+                </td>
                 <td className="muted" style={{ textTransform: "capitalize" }}>{x.kind}</td>
                 <td className="num mono">{Number(x.existing_quantity) ? Number(x.existing_quantity) : "—"}</td>
-                <td className="num"><input className="input input--mono" inputMode="decimal" style={{ maxWidth: 90 }} value={x.qty} placeholder="0" onChange={(e) => setSugs(sugs.map((y, j) => (j === i ? { ...y, qty: e.target.value, checked: num(e.target.value) > 0 ? true : y.checked } : y)))} /> <span className="muted" style={{ fontSize: 12 }}>{x.unit}</span></td>
+                <td className="num"><input className="input input--mono" inputMode="decimal" style={{ maxWidth: 90 }} value={x.qty} placeholder="0" disabled={x.apply_generic === false} onChange={(e) => setSugs(sugs.map((y, j) => (j === i ? { ...y, qty: e.target.value, checked: num(e.target.value) > 0 ? true : y.checked } : y)))} /> <span className="muted" style={{ fontSize: 12 }}>{x.unit}</span></td>
                 <td className="muted" style={{ fontSize: 12.5 }}>
                   {x.reference && <span className="badge badge--warn" style={{ marginRight: 6 }}>referencia del curso</span>}
                   {x.reason}{x.matched_name && <div>Se suma a «{x.matched_name}», que ya está cargado.</div>}
@@ -621,6 +669,10 @@ export default function Surveys() {
             ))}</tbody>
           </table>
         </Modal>
+      )}
+
+      {reco && draft?.id && (
+        <RecommendModal surveyId={draft.id} lines={reco.lines} focus={reco.focus} onClose={() => setReco(null)} onApplied={afterReco} />
       )}
 
       {sent && (
@@ -666,7 +718,8 @@ export default function Surveys() {
               {live.groups.filter((g) => g.lines.length).map((g) => (
                 <GroupRows key={g.k} label={g.label} cost={g.lines.reduce((a, l) => a + l.c, 0)} price={g.lines.reduce((a, l) => a + l.p, 0)}>
                   {g.lines.map((l) => {
-                    const editable = !costing.lines.find((x) => x.item_id === l.item_id)?.has_cost || l.cost_source === "levantamiento";
+                    // el costo de proveedor se puede corregir a mano (el escrito aqui manda sobre la oferta)
+                    const editable = !costing.lines.find((x) => x.item_id === l.item_id)?.has_cost || l.cost_source === "levantamiento" || l.cost_source === "proveedor";
                     const ed = costEdits[l.item_id];
                     return (
                       <tr key={l.item_id}>
@@ -674,6 +727,8 @@ export default function Surveys() {
                           {l.name}
                           {!l.has_cost && <span className="badge badge--warn" style={{ marginLeft: 6 }}>sin costo</span>}
                           {l.cost_source === "levantamiento" && !l.edited && <span className="badge badge--muted" style={{ marginLeft: 6 }}>costo escrito aquí</span>}
+                          {l.cost_source === "proveedor" && !l.edited && <span className="badge badge--info" style={{ marginLeft: 6 }} title="Oferta del proveedor al tipo de cambio del día">costo de proveedor{l.supplier ? ` · ${l.supplier}` : ""}</span>}
+                          {l.recommended_for && <div className="muted" style={{ fontSize: 12, fontWeight: 400 }}>Equipo elegido para «{l.recommended_for}»</div>}
                           {editable && l.product_id && costing.can_save_catalog && (
                             <label className="muted" style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, fontWeight: 400, marginTop: 4 }}>
                               <input type="checkbox" checked={!!ed?.save} onChange={(e) => setCostEdits({ ...costEdits, [l.item_id]: { cost: ed?.cost ?? (l.has_cost ? String(l.uc) : ""), save: e.target.checked } })} />
