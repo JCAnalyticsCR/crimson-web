@@ -33,6 +33,12 @@ check("rampa: R = 0 no divide entre cero", rampa(3, 1, 0) === 1);
   check("la inversión de una etapa apagada no cuenta", calcular(e2).inversion === 1_000_000);
   check("inversión 0 = sin inversión", calcular(entradasEjemplo("medio", { inversion: [0, null, null, null, null, null] })).equilibrio.tipo === "sin-inversion");
   check("los planes nunca son negativos", sin.meses.every((m) => m.A >= 0 && m.MRR >= 0));
+  const e3 = entradasEjemplo("medio", { base: { Fm: 30_000, Cop: 10_000 } });
+  e3.inicio = [3, 3, 4, 6, 9, 12];
+  const tarde = calcular(e3);
+  check("Fygaro y el costo de operar corren desde que arranca la Etapa 0", tarde.meses[1].S7 === 0 && tarde.meses[1].costos === 0 && tarde.meses[2].S7 === 30_000 && tarde.meses[2].costos === 10_000);
+  const maxN = Math.max(...sin.meses.map((m) => m.N));
+  check("los compradores con cuenta (B) no pasan de 12 meses de pedidos", sin.meses.every((m) => m.B <= 12 * maxN + 1e-6));
 }
 for (const p of props) console.log(`${p.ok ? "pasa   " : "NO PASA"}  propiedad   ${p.nombre}`);
 

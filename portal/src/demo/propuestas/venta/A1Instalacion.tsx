@@ -66,7 +66,7 @@ export default function A1Instalacion() {
         {paso === "ficha" && <Ficha cantidad={st.camaras} setCantidad={(n) => set((p) => ({ ...p, camaras: clampCamaras(n) }))} onCalcular={() => irA(1)} />}
         {paso === "instalacion" && <Instalacion st={st} set={set} est={est} dias={dias} elegida={elegida} onApartar={() => irA(2)} />}
         {paso === "listo" && <Listo est={est} elegida={elegida ?? primeraLibre(dias)} ejemplo={!elegida} onElegir={() => irA(1)} onCrimson={() => irA(3)} />}
-        {paso === "crimson" && <Crimson est={est} elegida={elegida} />}
+        {paso === "crimson" && <Crimson est={est} elegida={elegida ?? primeraLibre(dias)} ejemplo={!elegida} />}
         {paso === "paquete" && <Paquete />}
       </div>
     </MarcoMaqueta>
@@ -310,7 +310,7 @@ function Listo({ est, elegida, ejemplo, onElegir, onCrimson }: {
 }
 
 // ---------- 4 · el levantamiento que le llega a Crimson, con el costeo hecho ----------
-function Crimson({ est, elegida }: { est: Estimado; elegida: { dia: Dia; turno: Turno } | null }) {
+function Crimson({ est, elegida, ejemplo }: { est: Estimado; elegida: { dia: Dia; turno: Turno } | null; ejemplo: boolean }) {
   const p = PRODUCTOS[FICHA_A1.id];
   return (
     <Pantalla superficie="admin" seccion="Levantamientos" estado="existente">
@@ -327,7 +327,7 @@ function Crimson({ est, elegida }: { est: Estimado; elegida: { dia: Dia; turno: 
                 <div><dt>Origen</dt><dd>Tienda en línea · ficha del producto</dd></div>
                 <div><dt>Cliente</dt><dd>{CLIENTE.completo} (ejemplo)</dd></div>
                 <div><dt>Zona y lugar</dt><dd>{est.provincia.nombre} · {est.fueraGam ? "fuera de la GAM" : "GAM"} · {est.lugar.titulo}</dd></div>
-                <div><dt>Fecha tentativa</dt><dd>{elegida ? `${mayus(diaLargo(elegida.dia.fecha))}, ${turnoTexto(elegida.turno)}` : "Por elegir"}</dd></div>
+                <div><dt>Fecha tentativa</dt><dd>{elegida ? `${mayus(diaLargo(elegida.dia.fecha))}, ${turnoTexto(elegida.turno)}${ejemplo ? " (primera libre, de ejemplo)" : ""}` : "Por elegir"}</dd></div>
                 <div><dt>Equipo</dt><dd>{est.camaras} × {p.nombre}</dd></div>
                 <div><dt>Cableado</dt><dd>{mayus(est.cable.corto)}</dd></div>
                 <div><dt>Estado</dt><dd>Por confirmar</dd></div>

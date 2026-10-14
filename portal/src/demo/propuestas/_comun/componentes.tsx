@@ -65,7 +65,7 @@ export function NavPropuestas({ actual }: { actual?: MaquetaId | "LQV" }) {
 
   useEffect(() => {
     if (!abierta) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setAbierta(false); boton.current?.focus(); } };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); setAbierta(false); boton.current?.focus(); } };
     const onDown = (e: PointerEvent) => {
       const t = e.target as Node;
       if (!lista.current?.contains(t) && !boton.current?.contains(t)) setAbierta(false);
@@ -86,7 +86,7 @@ export function NavPropuestas({ actual }: { actual?: MaquetaId | "LQV" }) {
         <div className="pp-nav__links">
           <Link to="/propuestas" aria-current={cur("LQV")}>Lo que viene</Link>
           {prev && <Link to={infoMaqueta(prev).ruta} className="pp-nav__paso"><span aria-hidden="true">‹ </span><span className="pp-sr">Maqueta anterior: </span>{infoMaqueta(prev).corto}</Link>}
-          {next && <Link to={infoMaqueta(next).ruta} className="pp-nav__paso"><span className="pp-sr">{i >= 0 ? "Maqueta siguiente: " : "Primera maqueta: "}</span>{infoMaqueta(next).corto}<span aria-hidden="true"> ›</span></Link>}
+          {next && next !== "RT" && <Link to={infoMaqueta(next).ruta} className="pp-nav__paso"><span className="pp-sr">{i >= 0 ? "Maqueta siguiente: " : "Primera maqueta: "}</span>{infoMaqueta(next).corto}<span aria-hidden="true"> ›</span></Link>}
           <Link to="/rentabilidad" aria-current={cur("RT")}>¿Es rentable?</Link>
           <Link to="/detras-de-escena" aria-current={cur("DE")}>Detrás de escena</Link>
         </div>
@@ -148,10 +148,13 @@ export function MarcoMaqueta({ id, titulo, bajada, estado: est, etapa, hoy, conP
 
   useEffect(() => {
     window.scrollTo(0, 0);
-    document.title = id === "DE" ? `${titulo} — Detrás de escena · Tienda Crimson (vista previa)`
+    const previo = document.title;
+    document.title = id === "DE" ? (titulo === "Detrás de escena" ? "Detrás de escena · Tienda Crimson (vista previa)" : `${titulo} — Detrás de escena · Tienda Crimson (vista previa)`)
       : id === "RT" ? `${titulo} · Tienda Crimson (vista previa)`
         : `${id} · ${titulo} — Propuesta · Tienda Crimson (vista previa)`;
     h1.current?.focus({ preventScroll: true });
+    // al salir se devuelve el titulo anterior: la pantalla siguiente (p. ej. «Mi pedido») no hereda el de la maqueta
+    return () => { document.title = previo; };
   }, [id, titulo]);
 
   // movil: la lista horizontal de pasos muestra el actual (sin mover la pagina)
@@ -202,7 +205,9 @@ export function MarcoMaqueta({ id, titulo, bajada, estado: est, etapa, hoy, conP
             )}
             <div className="pp-cab__acc">
               {esPropuestaId(id) && <BotonMeInteresa id={id} />}
-              <p className="pp-aviso" role="note">Maqueta con datos de ejemplo: no funciona ni guarda nada real.</p>
+              <p className="pp-aviso" role="note">{estado === "existente"
+                ? "Réplica con datos de ejemplo: la pantalla real ya funciona en la plataforma; aquí nada se guarda."
+                : "Maqueta con datos de ejemplo: no funciona ni guarda nada real."}</p>
             </div>
           </header>
 
@@ -321,7 +326,7 @@ export function HiloCarmesi({ aqui, numero = "ORD-000128", token = "ejemplo-envi
   const TIPO = { existe: "Ya existe", propuesta: "Propuesta", modelo: "Modelo" } as const;
   return (
     <nav className="pp-hilo" aria-label={`El hilo carmesí: el pedido ${numero}, visto desde cada lado`}>
-      <p className="pp-hilo__t"><span className="pp-hilo__ceja">El hilo carmesí</span><span>La misma compra, <b>{numero}</b>, vista desde cada lado.</span></p>
+      <p className="pp-hilo__t"><span className="pp-hilo__ceja">El hilo carmesí</span><span>La misma compra, <b>{numero}</b>, vista desde cada lado (cada pantalla la muestra en su momento).</span></p>
       <ol className="pp-hilo__lista">
         {est.map((e, n) => (
           <li key={e.k} data-tipo={e.tipo} aria-current={e.k === aqui ? "step" : undefined}>

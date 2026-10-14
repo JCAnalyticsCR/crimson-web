@@ -10,7 +10,7 @@ import { useInteres } from "../_comun/hooks";
 import { almacen } from "../_comun/pedidos";
 import { setActiva, verDondeVa } from "../_capa/estado";
 import { sembrarCarritoSiVacio } from "../_capa/carrito";
-import { construirResumen, leerResumenRentabilidad } from "./resumen";
+import { construirResumen, leerEtapa0, leerResumenRentabilidad } from "./resumen";
 import "./lqv.css";
 
 const conMaquetaPropia = (p: Propuesta) => !!p.maqueta && !p.maqueta.includes("?");
@@ -243,7 +243,8 @@ function DialogoResumen({ onCerrar }: { onCerrar: () => void }) {
   const tId = useId();
   const nId = useId();
   const rent = useMemo(leerResumenRentabilidad, []);
-  const texto = construirResumen(interes.ids, notas, rent);
+  const etapa0 = useMemo(leerEtapa0, []);
+  const texto = construirResumen(interes.ids, notas, rent, new Date(), etapa0);
 
   useEffect(() => { almacen.local.set(CLAVES.notas, notas.slice(0, 1000)); }, [notas]);
   // onCerrar cambia en cada pintada del padre: se lee de una ref para no repetir el foco inicial
@@ -290,7 +291,7 @@ function DialogoResumen({ onCerrar }: { onCerrar: () => void }) {
           </button>
         </div>
         <p className="lqv-dialogo__baj">Copiá este texto y mandáselo a JC Analytics por correo o WhatsApp. Desde aquí no se envía nada.</p>
-        {interes.ids.length === 0 && (
+        {interes.ids.length === 0 && !etapa0 && (
           <p className="lqv-dialogo__vacio">Todavía no marcaste ninguna propuesta. <button type="button" className="lqv-link lqv-link--btn" onClick={onCerrar}>Ver lo que viene</button></p>
         )}
         <label className="lqv-campo">

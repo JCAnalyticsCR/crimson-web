@@ -1,11 +1,13 @@
 /* Control de la demo sobre «Mi pedido» (mejora 1):
    - ?pedido=ejemplo-<estado>: tarjeta «Pedido de ejemplo · ORD-000128» para recorrer los 6 estados reales; cada uno
-     navega con replace y OrderStatus (key={pedido}) se vuelve a cargar solo. Escritorio: tarjeta abajo a la derecha
-     (se puede minimizar). Movil: barra plegada abajo que se despliega en hoja.
+     navega con replace y OrderStatus (key={pedido}) se vuelve a cargar solo. Arranca PLEGADO (barra «Pedido de ejemplo ·
+     {estado} ▴») salvo en pantallas muy anchas y altas, donde la tarjeta cabe al costado sin tapar los productos ni el
+     total del pedido. En escritorio, si en su esquina quedaria encima del pedido (p. ej. el total a 1280×720), pasa a la
+     otra esquina de abajo. Debajo de 1024 px la barra va a todo lo ancho y se despliega en hoja.
    - ?v=mi-pedido: pista para abrir el pedido de ejemplo.
    - ?pedido=demo-*: el pedido de prueba de esta sesion, con el enlace a «Detrás de escena» y el hilo carmesi.
    Pantalla de trabajo: nada se anima. */
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { EVENTOS } from "../registro";
 import { HiloCarmesi } from "../_comun/componentes";
@@ -23,7 +25,52 @@ const PIE: Record<EstadoEjemplo, string> = {
   entregado: "Entregado. Con la propuesta B1, este pedido quedaría en su cuenta con sus equipos y su garantía.",
 };
 
-const esMovil = () => typeof matchMedia === "function" && matchMedia("(max-width: 767px)").matches;
+/** Barra a todo lo ancho que se despliega en hoja (movil y tableta). */
+const Q_HOJA = "(max-width: 1023px)";
+/** Solo aqui la tarjeta abierta (360 px) cabe al costado del pedido (1152 px de ancho, centrado) sin taparlo. */
+const Q_ABIERTA = "(min-width: 1920px) and (min-height: 860px)";
+const mq = (q: string) => typeof matchMedia === "function" && matchMedia(q).matches;
+const esMovil = () => mq(Q_HOJA);
+
+/** Lo que el control nunca tapa al quedarse quieto en escritorio: el pedido (cabecera, avance, columnas, total), la
+    busqueda de «Mi pedido» y el panel de la guia. */
+const CONTENIDO = ".ck-thanks, .ck-ohead, .ck-closed, .ck-track, .ck-ogrid > div > *, .ck-ogrid > aside, .ck-lookup, .vip-tour";
+type Caja = { left: number; right: number; top: number; bottom: number };
+
+/** Escritorio: el control vive abajo a la derecha; si ahi queda encima del pedido y en la esquina de abajo a la
+    izquierda no, se pasa a esa (y vuelve cuando la derecha se libera). Si las dos chocan, no se mueve: el usuario ya
+    desplazo la pagina y lo que pasa por debajo de una barra fija se ve al seguir bajando. Lecturas en un rAF. */
+function useEsquiva(ref: RefObject<HTMLElement | null>, activo: boolean): "der" | "izq" {
+  const [lado, setLado] = useState<"der" | "izq">("der");
+  useEffect(() => {
+    if (!activo) { setLado("der"); return; }
+    let raf = 0;
+    const medir = () => {
+      raf = 0;
+      const el = ref.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (!r.height || !r.width) return;
+      const W = document.documentElement.clientWidth;
+      const espejo: Caja = { left: W - r.right, right: W - r.left, top: r.top, bottom: r.bottom };
+      const bloques = Array.from(document.querySelectorAll(CONTENIDO)).map((x) => x.getBoundingClientRect()).filter((b) => b.width > 0 && b.height > 0);
+      const choca = (a: Caja) => bloques.some((b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top);
+      if (choca(r) && !choca(espejo)) setLado((l) => (l === "der" ? "izq" : "der"));
+    };
+    const pedir = () => { if (!raf) raf = requestAnimationFrame(medir); };
+    pedir();
+    const t = window.setTimeout(pedir, 400); // el pedido llega despues (fetch al mock)
+    const mo = new MutationObserver(pedir);
+    mo.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener("scroll", pedir, { passive: true });
+    window.addEventListener("resize", pedir, { passive: true });
+    return () => {
+      cancelAnimationFrame(raf); window.clearTimeout(t); mo.disconnect();
+      window.removeEventListener("scroll", pedir); window.removeEventListener("resize", pedir);
+    };
+  }, [activo, ref]);
+  return lado;
+}
 
 export default function ControlDemo() {
   const loc = useLocation();
@@ -40,27 +87,31 @@ export default function ControlDemo() {
 
 function Tarjeta({ titulo, resumen, children }: { titulo: string; resumen: string; children: ReactNode }) {
   const [movil, setMovil] = useState(esMovil);
-  const [abierta, setAbierta] = useState(() => !esMovil());
+  const [abierta, setAbierta] = useState(() => mq(Q_ABIERTA));
   const cuerpoId = useId();
+  const caja = useRef<HTMLElement>(null);
+  const lado = useEsquiva(caja, !movil);
   // en movil la barra plegada ocupa el pie: el credito de la demo deja espacio para no quedar tapado
   useEffect(() => {
     document.documentElement.classList.add("cap-con-control");
     return () => document.documentElement.classList.remove("cap-con-control");
   }, []);
   useEffect(() => {
-    const mq = matchMedia("(max-width: 767px)");
-    const on = () => { setMovil(mq.matches); setAbierta(!mq.matches); };
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
+    const hoja = matchMedia(Q_HOJA);
+    const ancha = matchMedia(Q_ABIERTA);
+    const on = () => { setMovil(hoja.matches); setAbierta(ancha.matches); };
+    hoja.addEventListener("change", on);
+    ancha.addEventListener("change", on);
+    return () => { hoja.removeEventListener("change", on); ancha.removeEventListener("change", on); };
   }, []);
   useEffect(() => {
     if (!abierta || !movil) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setAbierta(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); setAbierta(false); } };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [abierta, movil]);
   return (
-    <aside className="cap cap-control" data-abierta={abierta ? "" : undefined} aria-label={titulo}>
+    <aside ref={caja} className="cap cap-control" data-abierta={abierta ? "" : undefined} data-lado={lado} aria-label={titulo}>
       <button type="button" className="cap-control__head" aria-expanded={abierta} aria-controls={cuerpoId} onClick={() => setAbierta((v) => !v)}>
         <span className="cap-control__t"><i aria-hidden="true" />{titulo}</span>
         <span className="cap-control__r">{!abierta && <span className="cap-control__res">{resumen}</span>}<span aria-hidden="true">{abierta ? "▾" : "▴"}</span><span className="cap-sr">{abierta ? " (minimizar)" : " (abrir)"}</span></span>
@@ -150,8 +201,11 @@ function Hilo({ children }: { children: ReactNode }) {
 
 function PistaBuscar() {
   const navigate = useNavigate();
+  const caja = useRef<HTMLElement>(null);
+  const [movil] = useState(esMovil);
+  const lado = useEsquiva(caja, !movil);
   return (
-    <aside className="cap cap-control cap-control--pista" aria-label="Pedido de ejemplo">
+    <aside ref={caja} className="cap cap-control cap-control--pista" data-lado={lado} aria-label="Pedido de ejemplo">
       <p>¿No tenés un pedido a mano? Abrí el pedido de ejemplo ORD-000128.</p>
       <button type="button" className="cap-btn cap-btn--claro" onClick={() => navigate("/?pedido=ejemplo-enviado")}>Abrir el pedido de ejemplo</button>
     </aside>

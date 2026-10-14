@@ -54,12 +54,13 @@ export function reducir(s: Estado, a: Accion): Estado {
     case "inversion": return { ...s, inversion: s.inversion.map((x, i) => (i === a.s ? a.v : x)) };
     case "sumarHoras": return { ...s, sumarHoras: a.v };
     case "volverEjemplos": {
-      // borra los ajustes del escenario actual, la base editada y el calendario; NO borra los TU DATO ni la inversión
+      // borra los ajustes del escenario actual, la base editada, el calendario, las etapas apagadas y «sumar horas»;
+      // NO borra los TU DATO ni la inversión
       const ajustes = { ...s.ajustes };
       delete ajustes[s.escenario];
       const base = { ...BASE_EJEMPLO };
       for (const k of TU_DATO) (base as Record<ClaveBase, number | null>)[k] = s.base[k];
-      return { ...s, ajustes, base, inicio: [...INICIO_EJEMPLO] };
+      return { ...s, ajustes, base, inicio: [...INICIO_EJEMPLO], incluida: [...INCLUIDA_EJEMPLO], sumarHoras: false };
     }
   }
 }
@@ -73,9 +74,11 @@ export const entradasDe = (s: Estado, e: EscenarioId): Entradas => ({
 export const baseEditada = (s: Estado): boolean =>
   (Object.keys(BASE_EJEMPLO) as ClaveBase[]).some((k) => !TU_DATO.includes(k) && !cerca(s.base[k], BASE_EJEMPLO[k]));
 export const calendarioEditado = (s: Estado): boolean => s.inicio.some((x, i) => x !== INICIO_EJEMPLO[i]);
-/** «(con tus cambios)»: el escenario tiene ajustes propios, o se cambió la base de ejemplo o el calendario. */
+export const etapasEditadas = (s: Estado): boolean => s.incluida.some((x, i) => x !== INCLUIDA_EJEMPLO[i]);
+/** «(con tus cambios)»: el escenario tiene ajustes propios, o se cambió la base de ejemplo, el calendario, las etapas
+    incluidas o se encendió «sumar horas». */
 export const ajustado = (s: Estado, e: EscenarioId): boolean =>
-  Object.keys(s.ajustes[e] || {}).length > 0 || baseEditada(s) || calendarioEditado(s);
+  Object.keys(s.ajustes[e] || {}).length > 0 || baseEditada(s) || calendarioEditado(s) || etapasEditadas(s) || s.sumarHoras;
 
 // ---------- guardar y leer
 const dentro = (v: unknown, min: number, max: number): v is number => typeof v === "number" && Number.isFinite(v) && v >= min && v <= max;
@@ -120,11 +123,13 @@ export type ResumenRentabilidad = {
   v: 1; escenario: EscenarioId; ajustado: boolean; etapas: number[];
   utilidadMes12: number; utilidadAcum12: number; utilidadAcum24: number; recurrenteAcum12: number; recurrenteAcum24: number;
   equilibrioMes: number | null; equilibrioTexto: string; inversionTotal: number | null; actualizado: string;
+  // agregados para que el resumen diga con qué se hizo la cuenta (opcionales: resúmenes viejos no los traen)
+  inversionPorEtapa?: (number | null)[]; sumarHoras?: boolean; sinInversion?: number[]; equilibrioTiendaTexto?: string;
 };
 
-export function textoEquilibrio(r: Resultado): string {
-  if (r.equilibrio.tipo === "mes") return `mes ${r.equilibrio.mes}`;
-  if (r.equilibrio.tipo === "mas36") return "más de 36 meses con estos supuestos";
+export function textoEquilibrio(r: Resultado, q: Resultado["equilibrio"] = r.equilibrio): string {
+  if (q.tipo === "mes") return `mes ${q.mes}`;
+  if (q.tipo === "mas36") return "más de 36 meses con estos supuestos";
   return "sin calcular (falta escribir la inversión)";
 }
 
@@ -137,6 +142,8 @@ export function escribirResumen(s: Estado, r: Resultado): boolean {
     recurrenteAcum12: Math.round(m12.recAcum), recurrenteAcum24: Math.round(m24.recAcum),
     equilibrioMes: r.equilibrio.tipo === "mes" ? r.equilibrio.mes : null, equilibrioTexto: textoEquilibrio(r),
     inversionTotal: r.inversion, actualizado: new Date().toISOString(),
+    inversionPorEtapa: s.inversion.map((x, i) => (i === 0 || s.incluida[i]) && x !== null && x > 0 ? x : null),
+    sumarHoras: s.sumarHoras, sinInversion: r.sinInversion, equilibrioTiendaTexto: textoEquilibrio(r, r.equilibrioTienda),
   };
   return almacen.local.set(CLAVES.rentabilidadResumen, JSON.stringify(resumen));
 }

@@ -1,5 +1,5 @@
 /* Recorrido guiado opcional, encima de la tienda ya montada.
-   - Boton flotante "Guia" (se puede ocultar con su x) que abre un panel de 9 pasos: de la vitrina a los numeros
+   - Boton "Guia" en la franja de la demo (o flotante, con su x, si la franja no existe) que abre un panel de 9 pasos: de la vitrina a los numeros
      (tienda real, «Mi pedido» de ejemplo, Detrás de escena, Lo que viene y ¿Es rentable?).
    - Un paso puede preparar algo ANTES de navegar (`antes`): el de pago siembra 2 camaras de ejemplo si el carrito
      esta vacio, para que el pago se vea completo (y lo avisa con una nota).
@@ -9,6 +9,7 @@
      principales (barra "Agregar al carrito" de la ficha, acciones del checkout, bandeja del comparador).
    - Pantalla de trabajo: el panel no se anima; solo se mueve lo que el usuario toca. */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { EVENTOS } from "../propuestas/registro";
 import { sembrarCarritoSiVacio } from "../propuestas/_capa/carrito";
 import { goTo, toRouterPath } from "./nav";
@@ -39,7 +40,7 @@ export const tourSteps = (productPath: string): Step[] => [
   },
   {
     id: "ficha", title: "La ficha de producto",
-    body: "Fotos, especificaciones y existencias. Y el acceso que vende servicio: “¿Lo instalamos nosotros?” cotiza la instalación con este producto. Tocá «Ver propuestas» en la franja de arriba para ver qué más se podría sumar aquí.",
+    body: "Fotos, especificaciones y existencias. Y el acceso que vende servicio: “¿Lo instalamos nosotros?” cotiza la instalación con este producto. Tocá «Propuestas» en la franja de arriba para ver qué más se podría sumar aquí.",
     path: () => firstProductPath() || productPath, target: [".vt-install"],
     missing: "Abrí cualquier producto: “¿Lo instalamos nosotros?” está junto al botón de compra.",
   },
@@ -62,17 +63,17 @@ export const tourSteps = (productPath: string): Step[] => [
   {
     id: "detras", title: "Detrás de escena",
     body: "Así llega cada pedido a Crimson: comprobante privado, confirmar pago, factura y despacho. Ya existe; aquí con datos de ejemplo. Si hiciste un pedido de prueba, aparece de primero.",
-    path: "/detras-de-escena/pedidos", target: ["#ges-pedidos", "main h1"],
+    path: "/detras-de-escena/pedidos", target: ["#ges-pedidos .ges-card", "#ges-pedidos", "main h1"],
   },
   {
     id: "viene", title: "Lo que viene",
     body: "Diecisiete propuestas en cinco etapas, ninguna incluida todavía. Seis tienen maqueta para tocar; marcá «Me interesa» en las que querás.",
-    path: "/propuestas", target: ["#lqv-etapas", "main h1"],
+    path: "/propuestas", target: ["#lqv-etapas .lqv-grupo__cab", "#lqv-etapas", "main h1"],
   },
   {
     id: "numeros", title: "¿Es rentable?",
     body: "Un modelo a la vista: cada número es un ejemplo que podés cambiar por el tuyo. Arranca en el escenario conservador.",
-    path: "/rentabilidad", target: ["#rnt-resultado", "main h1"],
+    path: "/rentabilidad", target: ["#rnt-resultado .rnt-res__heroe", "#rnt-resultado", "main h1"],
   },
 ];
 
@@ -92,6 +93,26 @@ const findTarget = (sel: string[]) => {
   return null;
 };
 const calm = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+/** Borde inferior de lo que tapa arriba: la franja, la cabecera de la tienda y la barra de propuestas. */
+const topeArriba = () => {
+  let tope = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--demo-h")) || 0;
+  for (const sel of [".sh-head", "[data-pp-nav]"]) {
+    const b = document.querySelector(sel)?.getBoundingClientRect().bottom || 0;
+    if (b > tope) tope = b;
+  }
+  return tope;
+};
+/** Lleva el elemento a la vista: centrado si cabe; si es mas alto que la pantalla, su comienzo justo bajo la cabecera
+    (centrar un bloque alto deja a la vista el medio y se salta el principio, que es lo que importa). */
+const llevar = (el: HTMLElement) => {
+  const r = el.getBoundingClientRect();
+  const tope = topeArriba();
+  const behavior: ScrollBehavior = calm() ? "auto" : "smooth";
+  if (r.height > (innerHeight - tope) * 0.7) window.scrollTo({ top: Math.max(0, r.top + scrollY - tope - 12), behavior });
+  else el.scrollIntoView({ block: "center", behavior });
+};
+/** Hay un aviso, dialogo o ficha abiertos: su Esc es suyo, no de la guia. */
+const hayDialogo = () => !!document.querySelector('.demo-notice, .ges-dlg, #cap-ficha, .lqv-dialogo, [aria-modal="true"]');
 
 type TourState = { step: number; open: boolean };
 const load = (): TourState => {
@@ -138,7 +159,7 @@ export default function Tour({ productPath, autoStart }: { productPath: string; 
       el.classList.add("vip-spot");
       placeRef.current();
       // la tienda hace scrollTo(0) al cambiar de ruta; el nuestro va despues (timeout y no rAF: corre aunque la pestana no pinte)
-      scrollT = window.setTimeout(() => el.scrollIntoView({ block: "center", behavior: calm() ? "auto" : "smooth" }), 40);
+      scrollT = window.setTimeout(() => llevar(el), 40);
     };
     // El objetivo principal gana; los de respaldo ("main h1") solo despues de 700 ms, porque al cambiar de ruta la
     // pantalla anterior sigue en el DOM unos instantes y su h1 se marcaria por error. Si el elemento senalado
@@ -195,12 +216,7 @@ export default function Tour({ productPath, autoStart }: { productPath: string; 
       if (!el) return;
       if (!narrow.matches) { el.removeAttribute("data-dock"); return; }
       // tope: lo mas bajo entre la franja de la demo, la cabecera de la tienda y la barra de propuestas
-      let tope = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--demo-h")) || 0;
-      for (const sel of [".sh-head", "[data-pp-nav]"]) {
-        const b = document.querySelector(sel)?.getBoundingClientRect().bottom || 0;
-        if (b > tope) tope = b;
-      }
-      const top = Math.max(0, Math.min(220, Math.round(tope)));
+      const top = Math.max(0, Math.min(220, Math.round(topeArriba())));
       el.style.setProperty("--vip-top", `${top}px`);
       const spot = spotRef.current?.getBoundingClientRect();
       const panelBottom = top + 8 + el.offsetHeight + 8;
@@ -209,7 +225,9 @@ export default function Tour({ productPath, autoStart }: { productPath: string; 
       let lift = 0;
       for (const bar of Array.from(document.querySelectorAll(".vt-stickybuy, .ck-actions, .vt-cmptray, .vt-consent, [data-pp-barra], .cap-control"))) {
         const r = bar.getBoundingClientRect();
-        if (r.height && r.bottom >= innerHeight - 24 && r.top < innerHeight) lift = Math.max(lift, Math.round(innerHeight - r.top));
+        // solo barras bajas: una tarjeta abierta (el control del pedido de ejemplo desplegado) no es una barra, y
+        // levantar el panel por encima de ella lo dejaria flotando a media pantalla
+        if (r.height && r.height <= 160 && r.bottom >= innerHeight - 24 && r.top < innerHeight) lift = Math.max(lift, Math.round(innerHeight - r.top));
       }
       el.style.setProperty("--vip-bottom", `${lift}px`);
       el.setAttribute("data-dock", "bottom");
@@ -232,20 +250,42 @@ export default function Tour({ productPath, autoStart }: { productPath: string; 
   }, [st.open, st.step]);
 
   const close = useCallback(() => setSt((s) => ({ ...s, open: false })), []);
+
+  // Hueco para el boton «Guía» en la franja de la demo (DemoShell lo pinta dentro del router; la guia vive fuera).
+  const [slot, setSlot] = useState<HTMLElement | null>(() => document.getElementById("demo-guia"));
+  useEffect(() => {
+    if (slot?.isConnected) return;
+    const buscar = () => { const el = document.getElementById("demo-guia"); if (el) setSlot(el); return !!el; };
+    if (buscar()) return;
+    const mo = new MutationObserver(() => { if (buscar()) mo.disconnect(); });
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => mo.disconnect();
+  }, [slot]);
   useEffect(() => {
     if (!st.open) return;
-    const k = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented && !hayDialogo()) close(); };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, [st.open, close]);
 
   if (!st.open) {
-    if (off) return null;
     const inProgress = st.step > 0;
+    const abrirGuia = () => setSt((s) => ({ ...s, open: true }));
+    const etiqueta = inProgress ? `Retomar la guía, paso ${st.step + 1} de ${steps.length}` : "Abrir la guía de la tienda";
+    // Con la franja de la demo montada, el boton vive en ella: nunca tapa texto ni botones de ninguna pantalla.
+    if (slot) {
+      return createPortal(
+        <button type="button" className="demo-guia" onClick={abrirGuia} aria-label={etiqueta}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3 2" /></svg>
+          <span aria-hidden="true">Guía{inProgress ? <small> {st.step + 1}/{steps.length}</small> : null}</span>
+        </button>,
+        slot,
+      );
+    }
+    if (off) return null;
     return (
       <div className="vip vip-guide">
-        <button type="button" className="vip-guide__open" onClick={() => setSt((s) => ({ ...s, open: true }))}
-          aria-label={inProgress ? `Retomar la guía, paso ${st.step + 1} de ${steps.length}` : "Abrir la guía de la tienda"}>
+        <button type="button" className="vip-guide__open" onClick={abrirGuia} aria-label={etiqueta}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3 2" /></svg>
           <span>Guía{inProgress ? <small> {st.step + 1}/{steps.length}</small> : null}</span>
         </button>

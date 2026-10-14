@@ -146,6 +146,7 @@
 .rnt-chispa i { flex: 1; min-height: 2px; border-radius: 2px 2px 0 0; background: #8a1424; }
 .rnt-res__chispa-pie { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font: 500 10px/1.2 var(--rnt-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--rnt-text-3); }
 .rnt-res__falta { margin-top: 6px; font-weight: 700; font-size: 15px; }
+.rnt-res__alerta { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--rnt-warn-soft); color: var(--rnt-warn); font-size: 13.5px; line-height: 1.45; font-weight: 600; }
 .rnt-res__horas { margin: 4px 0 2px; font-size: 15px; font-variant-numeric: tabular-nums; }
 .rnt-avisos { display: grid; gap: 6px; margin: 4px 18px 0; padding: 12px 14px; border-radius: 8px; list-style: none; background: var(--rnt-warn-soft); color: var(--rnt-warn); font-size: 13.5px; line-height: 1.45; }
 .rnt-avisos li { display: flex; gap: 8px; }

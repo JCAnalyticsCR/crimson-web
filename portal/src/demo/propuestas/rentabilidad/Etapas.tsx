@@ -1,8 +1,9 @@
 /* Cierre «Aceptar por etapas» (6.8): seis tarjetas en línea de tiempo, sin cifras inventadas. */
+import { useState } from "react";
 import { Link } from "react-router-dom";
-import { SelloPropuesta, useInteres } from "./comun";
-import { crc, crcSigno } from "./cifras";
-import type { Estado } from "./estado";
+import { almacen, CLAVES, SelloPropuesta, useInteres } from "./comun";
+import { crc, crcSigno, pct } from "./cifras";
+import { paramDe, type Estado } from "./estado";
 import type { Resultado } from "./modelo";
 import { ENFOQUES, ESCENARIO_INFO, ETAPAS_RNT, PROPUESTAS_RNT } from "./supuestos";
 
@@ -10,6 +11,14 @@ export function AceptarPorEtapas(p: { s: Estado; r: Resultado; enfoque: string |
   const { s, r } = p;
   const interes = useInteres();
   const esc = ESCENARIO_INFO[s.escenario].nombre.toLowerCase();
+  // Etapa 0 (la tienda propia): no tiene propuestas, así que su «Me interesa» se guarda aparte para el resumen
+  const [etapa0, setEtapa0] = useState(() => almacen.local.get(CLAVES.etapa0) === "1");
+  const alternarEtapa0 = () => { const v = !etapa0; setEtapa0(v); almacen.local.set(CLAVES.etapa0, v ? "1" : "0"); };
+  // qué cuenta de verdad la Etapa 0 con los datos de hoy (no se promete lo que está apagado o vacío)
+  const conFygaro = s.base.Fm !== null || s.base.cF !== null;
+  const modela0 = `${!s.sumarHoras && !conFygaro ? "Hoy solo cuenta" : "Cuenta"} el aumento de ventas supuesto (${pct(paramDe(s, s.escenario).u)})`
+    + `${s.sumarHoras ? "; también las horas liberadas (las sumaste)" : "; las horas no se suman"}`
+    + `${conFygaro ? " y lo que se deja de pagar a Fygaro." : " y Fygaro no tiene dato."}`;
   return (
     <section id="rnt-etapas" className="rnt-cierre" aria-labelledby="rnt-etapas-t">
       <div className="rnt-wrap">
@@ -25,7 +34,7 @@ export function AceptarPorEtapas(p: { s: Estado; r: Resultado; enfoque: string |
             const inv = s.inversion[et.n];
             return (
               <li key={et.n} id={`rnt-etapa-${et.n}`} className="rnt-etapa" tabIndex={-1} data-enfocado={foco ? "" : undefined}
-                data-interes={todas || undefined} data-construida={et.n === 0 || undefined} aria-labelledby={`rnt-etapa-${et.n}-t`}>
+                data-interes={(et.n === 0 ? etapa0 : todas) || undefined} data-construida={et.n === 0 || undefined} aria-labelledby={`rnt-etapa-${et.n}-t`}>
                 {foco && <p className="rnt-enfoque"><span aria-hidden="true">◆ </span>Resaltado: {foco.texto}</p>}
                 <p className="rnt-etapa__ceja">
                   <span className="rnt-etapa__n">Etapa {et.n}</span>
@@ -48,7 +57,7 @@ export function AceptarPorEtapas(p: { s: Estado; r: Resultado; enfoque: string |
                     })}
                   </ul>
                 )}
-                <p className="rnt-etapa__modela"><b>Qué cuenta en el modelo:</b> {et.modela}{et.nota ? ` ${et.nota}` : ""}</p>
+                <p className="rnt-etapa__modela"><b>Qué cuenta en el modelo:</b> {et.n === 0 ? modela0 : et.modela}{et.nota ? ` ${et.nota}` : ""}</p>
                 <dl className="rnt-etapa__datos">
                   <div>
                     <dt>Aporte a la utilidad acumulada de 24 meses ({esc}, supuestos de ejemplo)</dt>
@@ -61,7 +70,12 @@ export function AceptarPorEtapas(p: { s: Estado; r: Resultado; enfoque: string |
                   {et.depende && <div><dt>Depende de</dt><dd>{et.depende}</dd></div>}
                 </dl>
                 {apagada && <p className="rnt-etapa__off">Apagada en el modelo: no suma ni cuenta su inversión. <button type="button" className="rnt-link" onClick={() => p.irACampo(`inicio-${et.n}`)}>Cambiarlo en el calendario</button></p>}
-                {et.ids.length > 0 && (
+                {et.n === 0 ? (
+                  <button type="button" className="rnt-interes" aria-pressed={etapa0} onClick={alternarEtapa0}>
+                    <span className="rnt-interes__caja" aria-hidden="true">{etapa0 ? "✓" : ""}</span>
+                    {etapa0 ? "Te interesa esta etapa" : "Me interesa esta etapa"}
+                  </button>
+                ) : et.ids.length > 0 && (
                   <button type="button" className="rnt-interes" aria-pressed={todas} onClick={() => (todas ? interes.quitar(et.ids) : interes.agregar(et.ids))}>
                     <span className="rnt-interes__caja" aria-hidden="true">{todas ? "✓" : ""}</span>
                     {todas ? "Te interesa esta etapa" : "Me interesa esta etapa"}

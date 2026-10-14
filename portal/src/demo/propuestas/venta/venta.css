@@ -198,9 +198,10 @@
 .ven-res__como b { color: #fff; }
 .ven-res__rotulo { margin: 0; padding-left: 10px; border-left: 2px solid var(--ven-warn-dark); color: var(--ven-warn-dark); font-size: 12.5px; line-height: 1.45; }
 .ven-res__pista { margin: -4px 0 0; text-align: center; font-size: 13px; color: var(--ven-muted-dark); }
-/* movil: barra pegada abajo con el rango y el CTA (fuera de la pantalla de maqueta: el marco no la recorta) */
-.ven-barra { display: none; }
-@media (max-width: 767px) {
+/* barra pegada abajo con el rango y el CTA (fuera de la pantalla de maqueta: el marco no la recorta). En todas las
+   anchuras: se esconde sola cuando el CTA real esta en pantalla (en una columna, el resultado queda debajo del formulario
+   y elegir la franja, la ultima pregunta, no dejaba ver el boton) */
+@media all {
   .ven-barra { position: sticky; bottom: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); border-radius: 14px 14px 0 0; background: var(--ven-ink); color: #fff; box-shadow: 0 -14px 30px -20px rgba(21, 19, 26, .7); transition: opacity var(--ven-micro), visibility var(--ven-micro); }
   .ven-barra[data-oculta="true"] { opacity: 0; visibility: hidden; }
   .ven-barra :focus-visible { outline-color: var(--ven-crimson-hi); }

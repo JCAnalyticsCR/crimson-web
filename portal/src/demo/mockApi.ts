@@ -240,7 +240,7 @@ async function route(path: string, sp: URLSearchParams, method: string, init?: R
       history: [{ status: "nuevo", label: ETIQUETA_ESTADO.nuevo, at: now }], whatsapp: WHATSAPP, store_name: "Crimson",
     };
     guardar(order);
-    notifyDemo({ title: `Pedido de demostración ${number}`, text: `${DEMO_TEXT} No se creó ningún pedido, no se cobró nada y no se envió ningún correo. En la tienda real, aquí el cliente ve su número de pedido, cómo pagar y el avance.` });
+    notifyDemo({ title: `Pedido de demostración ${number}`, text: "Esto es una demostración: no se creó ningún pedido real, no se cobró nada y no se envió ningún correo; lo vas a ver como pedido de prueba en Detrás de escena. En la tienda real, aquí el cliente ve su número de pedido, cómo pagar y el avance." });
     return json({
       number, status: "nuevo", total: q.total, currency: "CRC", payment_kind: meth.code, payment_method: meth.label, instructions: order.instructions,
       needs_proof: meth.needs_proof, whatsapp: WHATSAPP, track_token: token, track_url: "", lines: q.lines,

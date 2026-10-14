@@ -67,10 +67,7 @@
 .lqv-hs:not([data-todas]) .lqv-h:nth-child(n+7) { display: none; }
 .lqv-hs__mas { margin-top: 10px; }
 @media (min-width: 640px) { .lqv-hs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (min-width: 768px) {
-  .lqv-hs:not([data-todas]) .lqv-h:nth-child(n+7) { display: grid; }
-  .lqv-hs__mas { display: none; }
-}
+/* tambien en escritorio se ven 6 y «Ver las 16»: la primera propuesta tiene que aparecer pronto (pantalla de deseo) */
 @media (min-width: 1024px) { .lqv-hs { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
 /* controles */

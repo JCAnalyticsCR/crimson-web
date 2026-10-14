@@ -74,7 +74,7 @@ function NoDisponible() {
   );
 }
 
-const Spin = () => <div style={{ minHeight: "100dvh", display: "grid", placeItems: "center", background: "#f6f2ee" }}><span className="spinner" /></div>;
+const Spin = () => <div className="demo-spin" role="status" aria-label="Cargando"><span className="spinner" /></div>;
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

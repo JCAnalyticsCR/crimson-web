@@ -35,9 +35,9 @@ export const FAMILIAS: Record<Familia, string> = {
 
 export const ETAPAS: { n: Etapa; titulo: string; ids: PropuestaId[]; porque: string; depende?: string }[] = [
   { n: 1, titulo: "Cada venta abre la siguiente", ids: ["B1", "A1", "A3"],
-    porque: "B1 crea la cuenta y el registro de equipos que usan el plan, los recordatorios y las reseñas. A1 y A3 venden servicio y proyectos desde la misma tienda." },
+    porque: "B1 crea la cuenta y el registro de equipos que usan el plan, los recordatorios y las reseñas. A1 y A3 venden servicio y proyectos desde la misma tienda.", depende: "Tarifas de instalación que defina Crimson" },
   { n: 2, titulo: "Ingreso que se repite", ids: ["B2", "C1", "E1"],
-    porque: "El plan suma ingreso cada mes; el tablero confirma con datos reales si los supuestos se cumplen.", depende: "ONVO para cobrar con tarjeta" },
+    porque: "El plan suma ingreso cada mes; el tablero confirma con datos reales si los supuestos se cumplen.", depende: "ONVO para cobrar con tarjeta · servicio del asistente (E1) con costo por uso" },
   { n: 3, titulo: "Recuperar y fidelizar", ids: ["A2", "B3", "B4", "C2"],
     porque: "Con la cuenta y el tablero listos, se automatiza lo que trae ventas de vuelta.", depende: "Canal de mensajería" },
   { n: 4, titulo: "Empresas y paquetes", ids: ["A4", "A5", "E2", "E3"],
@@ -103,8 +103,8 @@ export const PROPUESTAS: Propuesta[] = [
     hoy: "Inventario web ya muestra la columna «Proveedor» con la fecha del dato.", depende: "Llave de API de Eurocomp, que gestiona Andrés.",
     etapa: 5, seApoyaEn: ["H8"] }),
   P({ id: "D2", titulo: "Orden de compra automática", corto: "Compra automática",
-    beneficio: "Si un pedido queda «requiere compra», la orden al proveedor se arma sola para revisar y enviar.",
-    hoy: "Los pedidos ya quedan «requiere compra» cuando falta existencia.", depende: "D1 (sin D1, la orden sale por correo).",
+    beneficio: "Si un pedido queda «requiere compra», la orden al proveedor se arma sola con los costos de Eurocomp y se envía con un clic.",
+    hoy: "Cuando falta existencia, el pedido ya queda «requiere compra» y se crea una solicitud interna de compra en borrador; la orden al proveedor se arma y se envía a mano.", depende: "D1 (sin D1, la orden sale por correo).",
     etapa: 5, seApoyaEn: ["H1", "H7"] }),
   P({ id: "E1", titulo: "Asistente técnico", corto: "Asistente técnico",
     beneficio: "Responde dudas con el catálogo real y pasa la conversación a WhatsApp con una persona de Crimson.",
@@ -257,6 +257,7 @@ export const CLAVES = {
   planB2: "crimson-demo:b2:plan",
   rentabilidad: "crimson-demo:rentabilidad",
   rentabilidadResumen: "crimson-demo:rentabilidad-resumen",
+  etapa0: "crimson-demo:etapa0", // «Me interesa esta etapa» de la Etapa 0 (la tienda propia): "1"/"0"
   carrito: "crimson-shop:crimson",
 } as const;
 

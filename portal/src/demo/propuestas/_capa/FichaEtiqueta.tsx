@@ -42,7 +42,7 @@ export default function FichaEtiqueta({ etiqueta, refFicha }: { etiqueta: Etique
   // Esc, tocar afuera (escritorio) y foco contenido (movil)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.stopPropagation(); cerrarFicha(); return; }
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cerrarFicha(); return; }
       if (e.key !== "Tab" || !movil) return;
       const f = refFicha.current;
       if (!f) return;

@@ -71,7 +71,11 @@ export default function Rentabilidad() {
 
   // título, foco al h1 o al bloque pedido con ?enfoque=
   const h1 = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { document.title = "¿Es rentable? · Tienda Crimson (vista previa)"; }, []);
+  useEffect(() => {
+    const previo = document.title;
+    document.title = "¿Es rentable? · Tienda Crimson (vista previa)";
+    return () => { document.title = previo; };
+  }, []);
   useEffect(() => {
     const destino = enfoque ? ENFOQUES[enfoque]?.destino : undefined;
     if (!destino) {
@@ -194,7 +198,8 @@ export default function Rentabilidad() {
               <div className="rnt-cab__aviso">
                 <p>
                   Cada valor marcado <b>EJEMPLO</b> es un supuesto para mostrar la cuenta: no es un dato de mercado ni una promesa.
-                  El margen sobre venta de 35 % es el dato de Crimson. Lo que no sabemos (lo que pagás a Fygaro, lo que cuesta operar la
+                  El margen sobre venta de 35 % es el dato de Crimson para sus levantamientos: aquí se usa como dato en la instalación; en el
+                  equipo de tienda es un ejemplo, escribí el tuyo. Lo que no sabemos (lo que pagás a Fygaro, lo que cuesta operar la
                   tienda y la inversión) queda vacío hasta que lo escribás.
                 </p>
                 <ul className="rnt-leyenda" aria-label="Qué significa cada insignia">
@@ -229,7 +234,7 @@ export default function Rentabilidad() {
               {ajustado(s, s.escenario) && (
                 <div className="rnt-volver">
                   <button type="button" className="rnt-btn rnt-btn--fantasma rnt-btn--sm" onClick={() => d({ t: "volverEjemplos" })}>Volver a los ejemplos</button>
-                  <p>Vuelve a los ejemplos del escenario {nombre.toLowerCase()}, la base y el calendario. Tus datos (Fygaro, costo de operar e inversión) se conservan.</p>
+                  <p>Vuelve a los ejemplos del escenario {nombre.toLowerCase()}, la base, el calendario y las etapas incluidas, y deja las horas sin sumar. Tus datos (Fygaro, costo de operar e inversión) se conservan.</p>
                 </div>
               )}
             </section>
@@ -330,11 +335,17 @@ function Resultados(p: {
   const mrr = r.meses.slice(0, 24).map((m) => m.MRR);
   const mrrMax = Math.max(1, ...mrr);
   const b = s.base;
+  const sinInv = r.sinInversion;
+  const avisoSinInv = sinInv.length > 0
+    ? `${sinInv.length > 1 ? `Las etapas ${sinInv.slice(0, -1).join(", ")} y ${sinInv[sinInv.length - 1]} suman` : `La etapa ${sinInv[0]} suma`} utilidad pero no ${sinInv.length > 1 ? "tienen" : "tiene"} inversión escrita: el equilibrio sale más corto de lo real.`
+    : null;
   const avisos = [
     b.Fm === null && "Sin la mensualidad de Fygaro: no se cuenta ese ahorro.",
     b.Cop === null && "Sin el costo de operar la tienda propia: el resultado es antes de ese costo.",
     r.inversion === null && "Sin inversión: no hay punto de equilibrio.",
+    avisoSinInv,
   ].filter((x): x is string => !!x);
+  const inv0 = s.inversion[0];
 
   return (
     <section id="rnt-resultado" ref={p.refSec} className="rnt-res" aria-labelledby="rnt-res-t">
@@ -392,11 +403,18 @@ function Resultados(p: {
           </p>
         )}
         {r.inversion !== null && <p className="rnt-res__nota">Inversión de las etapas incluidas: {crc(r.inversion)}.</p>}
+        {avisoSinInv && <p className="rnt-res__alerta" role="note"><span aria-hidden="true">⚠ </span>{avisoSinInv}</p>}
+        {r.inversion !== null && inv0 !== null && inv0 > 0 && (
+          <p className="rnt-res__nota">
+            Solo la tienda propia (Etapa 0) contra su inversión de {crc(inv0)}:{" "}
+            <b>{r.equilibrioTienda.tipo === "mes" ? `mes ${r.equilibrioTienda.mes}` : "más de 36 meses con estos supuestos"}</b>.
+          </p>
+        )}
         <p className="rnt-res__nota">
           {m12.acum > 0
-            ? <>Con estos supuestos, una inversión de hasta <b>{crc(m12.acum)}</b> se recupera en 12 meses{m24.acum > 0 ? <>, y de hasta <b>{crc(m24.acum)}</b> en 24.</> : "."}</>
+            ? <>Con estos supuestos, una inversión total de las etapas incluidas de hasta <b>{crc(m12.acum)}</b> se recupera en 12 meses{m24.acum > 0 ? <>, y de hasta <b>{crc(m24.acum)}</b> en 24.</> : "."}</>
             : m24.acum > 0
-              ? <>Con estos supuestos, a 12 meses la utilidad acumulada todavía no es positiva; una inversión de hasta <b>{crc(m24.acum)}</b> se recupera en 24.</>
+              ? <>Con estos supuestos, a 12 meses la utilidad acumulada todavía no es positiva; una inversión total de las etapas incluidas de hasta <b>{crc(m24.acum)}</b> se recupera en 24.</>
               : <>Con estos supuestos, la utilidad acumulada a 24 meses no es positiva: no alcanza para recuperar una inversión.</>}
         </p>
       </div>
@@ -415,11 +433,11 @@ function Resultados(p: {
       {avisos.length > 0 && (
         <ul className="rnt-avisos" aria-label="Datos que faltan">
           {avisos.map((a) => <li key={a}><span aria-hidden="true">⚠</span>{a}</li>)}
-          <li className="rnt-avisos__accion"><button type="button" className="rnt-link" onClick={() => p.irACampo(b.Fm === null ? "Fm" : b.Cop === null ? "Cop" : "inv-0")}>Escribir lo que falta</button></li>
+          <li className="rnt-avisos__accion"><button type="button" className="rnt-link" onClick={() => p.irACampo(b.Fm === null ? "Fm" : b.Cop === null ? "Cop" : r.inversion === null ? "inv-0" : `inv-${sinInv[0] ?? 0}`)}>Escribir lo que falta</button></li>
         </ul>
       )}
 
-      <p className="rnt-res__pie">Utilidad bruta incremental: antes de impuesto sobre la renta y de gastos fijos que no cambian con la tienda. No incluye comisiones de tarjeta.</p>
+      <p className="rnt-res__pie">Utilidad bruta incremental: antes de impuesto sobre la renta y de gastos fijos que no cambian con la tienda. No incluye las comisiones de tarjeta de las ventas nuevas ni del plan, ni el costo de la mensajería o del asistente: sumalos en «Costo de operar».</p>
     </section>
   );
 }

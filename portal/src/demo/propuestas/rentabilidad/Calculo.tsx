@@ -95,11 +95,11 @@ export function ComoSeCalcula({ s, r, esc, enfoque, irACampo }: Props) {
 
       <Tarjeta id="rnt-fuente-S5" eyebrow="S5 · Etapa 1" titulo={fuente("S5").nombre} sello={<SelloPropuesta id="B1" tamano="chico" />} enfoque={enfoque}>
         <F>S5 = B(mes anterior) × ra ÷ 12 × Tr × m</F>
-        <F>B = compradores con cuenta, acumulados: B(mes) = B(mes anterior) + N × r₁</F>
+        <F>B = compradores con cuenta de los últimos 12 meses: B(mes) = suma de N × r₁ de los últimos 12 meses</F>
         {inc(1) ? (
           <>
             <Sust total={crc(m12.S5)}>{numero(m11.B, 1)} compradores × {pct(esc.ra)} ÷ 12 × {crc(b.Tr)} × {pct(b.m)}</Sust>
-            <p className="rnt-calc__s">Cada compra deja al cliente con cuenta (B1): la base de quienes pueden volver crece mes a mes.</p>
+            <p className="rnt-calc__s">Cada compra deja al cliente con cuenta (B1). Solo cuentan los que compraron en el último año, y «ra» es solo la recompra que se suma a la que ya vuelve hoy: así la cifra no crece sin límite.</p>
           </>
         ) : apagada(1)}
         {pie("S5")}
@@ -155,7 +155,17 @@ export function ComoSeCalcula({ s, r, esc, enfoque, irACampo }: Props) {
         <p className="rnt-calc__s">
           {r.inversion === null ? "Sin inversión escrita: no hay punto de equilibrio que calcular."
             : `Inversión ${crc(r.inversion)} → ${r.equilibrio.tipo === "mes" ? `mes ${r.equilibrio.mes}` : "más de 36 meses con estos supuestos"}.`}
+          {r.sinInversion.length > 0 && ` Ojo: ${r.sinInversion.length > 1 ? `las etapas ${r.sinInversion.join(", ")} suman` : `la etapa ${r.sinInversion[0]} suma`} utilidad pero no ${r.sinInversion.length > 1 ? "tienen" : "tiene"} inversión escrita, así que este equilibrio sale más corto de lo real.`}
         </p>
+        {r.inversion !== null && (
+          <>
+            <F>Equilibrio de la tienda propia sola = primer mes en que el Acumulado de la Etapa 0 ≥ Inversión de la Etapa 0</F>
+            <p className="rnt-calc__s">
+              {r.equilibrioTienda.tipo === "sin-inversion" ? "Sin inversión escrita para la Etapa 0."
+                : r.equilibrioTienda.tipo === "mes" ? `Solo la tienda propia → mes ${r.equilibrioTienda.mes}.` : "Solo la tienda propia → más de 36 meses con estos supuestos."}
+            </p>
+          </>
+        )}
         <F>Aporte(etapa s) = Acumulado 24(etapas 0…s) − Acumulado 24(etapas 0…s−1)</F>
         <p className="rnt-calc__s">
           Escenario {nombreEsc}: Etapa 0 {crcSigno(r.aportes[0])} · Etapa 1 {crcSigno(r.aportes[1])} · Etapa 2 {crcSigno(r.aportes[2])} · Etapa 3 {crcSigno(r.aportes[3])}.
@@ -171,8 +181,8 @@ const GLOSARIO: [string, string][] = [
   ["P0", "pedidos en línea por mes, hoy"], ["T", "monto promedio por pedido (sin IVA)"], ["V0", "ventas en línea de hoy por mes"],
   ["N", "pedidos del mes con tienda propia"], ["u", "aumento de ventas en línea"], ["r₀ … r₃", "rampa de cada etapa: de 0 a 1"],
   ["R", "meses hasta que una etapa rinde completo"], ["m", "margen sobre venta de equipo"], ["pc", "pedidos que llevan cámaras"],
-  ["ti", "pedidos con cámaras que agregan instalación"], ["I", "precio promedio de una instalación"], ["mi", "margen sobre venta de instalación"],
-  ["B", "compradores con cuenta (acumulados)"], ["ra", "compradores que vuelven a comprar en un año"], ["Tr", "monto de una recompra"],
+  ["ti", "pedidos con cámaras que agregan una instalación que hoy no entra"], ["I", "precio promedio de una instalación"], ["mi", "margen sobre venta de instalación"],
+  ["B", "compradores con cuenta de los últimos 12 meses"], ["ra", "recompra extra al año gracias a B1, por encima de la de hoy"], ["Tr", "monto de una recompra"],
   ["A", "planes de mantenimiento activos"], ["tp", "pedidos con cámaras que toman el plan"], ["b", "bajas del plan por mes"],
   ["c", "cuota mensual del plan"], ["MRR", "ingreso del plan en el mes"], ["mp", "margen del plan"],
   ["K", "carritos abandonados con contacto por mes"], ["rr", "carritos que vuelven con el recordatorio"],
@@ -186,7 +196,7 @@ export function QueNoIncluye() {
     <ul className="rnt-noincluye">
       <li>No le pone número a A3, A4, A5, B3, B4, C1, C2, C3, D1, D2, E1, E2 ni E3: no las sumamos para no inflar.</li>
       <li>No incluye impuesto sobre la renta ni gastos fijos que no cambian con la tienda.</li>
-      <li>No incluye comisiones de tarjeta: se pagan igual con o sin tienda propia.</li>
+      <li>No incluye las comisiones de tarjeta de las ventas nuevas ni del plan, ni el costo del canal de mensajería (A2, B2, B3) ni del servicio del asistente (E1): sumalos en «Costo de operar» cuando los tengás.</li>
       <li>No promete resultados: es una forma ordenada de hacer la cuenta.</li>
     </ul>
   );

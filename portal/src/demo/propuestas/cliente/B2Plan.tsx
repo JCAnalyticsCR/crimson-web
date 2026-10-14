@@ -97,7 +97,7 @@ const QUE_PASA: Record<string, { t: string; p: string; ya?: string }> = {
   oferta: {
     t: "Se ofrece en el último paso del pago",
     p: "Cuando el carrito trae cámaras, el pago ofrece el plan. El total de hoy no cambia: la cuota se cobra aparte cada mes, con tarjeta guardada en ONVO o con factura mensual.",
-    ya: "El pago en 4 pasos con SINPE Móvil, transferencia, tarjeta (ONVO) y efectivo ya funciona.",
+    ya: "El pago en 4 pasos con SINPE Móvil, transferencia, tarjeta (ONVO integrada; falta contratar) y efectivo ya funciona.",
   },
   plan: {
     t: "El contrato se crea solo",
@@ -118,7 +118,6 @@ function Aparte({ paso }: { paso: string }) {
   const q = QUE_PASA[paso] ?? QUE_PASA.diseno;
   return (
     <div className="cli cli-aparte">
-      <p className="cli-meta">Qué pasa aquí</p>
       <h3 className="cli-aparte__h">{q.t}</h3>
       <p>{q.p}</p>
       {q.ya && <p className="cli-aparte__ya"><span aria-hidden="true">✓ </span>{q.ya}</p>}

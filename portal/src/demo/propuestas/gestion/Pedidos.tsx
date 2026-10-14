@@ -142,7 +142,7 @@ export default function Pedidos() {
                   {lista.map((o) => (
                     <li key={o.numero}>
                       <button type="button" className="wo-card ges-wocard" onClick={() => setSelNum(o.numero)} aria-label={`Ver pedido ${o.numero} de ${quien(o)}, ${ETIQUETA[o.status]}, ${colones(o.total)}`}>
-                        <b>{o.numero}</b><span className="wo-badge" data-s={o.status}>{ETIQUETA[o.status]}</span>
+                        <span className="ges-wocard__top"><b>{o.numero}</b><span className="wo-badge" data-s={o.status}>{ETIQUETA[o.status]}</span></span>
                         <span>{quien(o)}</span><span className="money">{colones(o.total)}</span>
                         <span className="muted">{cuando(o.created_at)} · {METODO[o.pago.kind] || o.pago.label}</span><span className="muted">{o.entrega.type === "retiro" ? "Retiro" : "Envío"}</span>
                       </button>
@@ -281,7 +281,7 @@ function Detalle({ o, onCerrar, onAplicar, aviso }: { o: PedidoGes; onCerrar: ()
           </div>
         </div>
         {o.cancel_reason && <div className="wo-box"><span className="meta">Motivo de cancelación</span>{o.cancel_reason}</div>}
-        {o.requiereCompra && <div className="wo-box ges-box-compra"><span className="meta">Inventario</span><span>Requiere compra: {o.requiereCompra}. Se creó la solicitud de compra en borrador.</span><span className="ges-compra-d2"><SelloPropuesta id="D2" tamano="chico" /> Con D2, la orden al proveedor se armaría sola para revisar y enviar.</span></div>}
+        {o.requiereCompra && <div className="wo-box ges-box-compra"><span className="meta">Inventario</span><span>Requiere compra: {o.requiereCompra}. Hoy se crea una solicitud interna de compra en borrador (ya funciona).</span><span className="ges-compra-d2"><SelloPropuesta id="D2" tamano="chico" /> Con D2 (y D1), la orden se armaría con los costos de Eurocomp y se enviaría al proveedor con un clic.</span></div>}
         {o.proofs.length > 0 && (
           <div className="wo-box"><span className="meta">Comprobantes (privados)</span>
             <div className="wo-proofs">

@@ -30,6 +30,7 @@ const rtf = new Intl.RelativeTimeFormat("es-CR", { numeric: "always" });
 /** «hace 5 días», «hace 4 meses» */
 export function haceTanto(d: Date, ahora = Date.now()): string {
   const dias = Math.round((d.getTime() - ahora) / DIA);
+  if (dias === 0) return "hoy";
   if (Math.abs(dias) < 45) return rtf.format(dias, "day");
   return rtf.format(Math.round(dias / 30.44), "month");
 }
@@ -38,11 +39,12 @@ export const diasEntre = (a: Date, b: Date) => Math.round((b.getTime() - a.getTi
 export type Momentos = {
   ahora: Date; compra128: Date; entrega128: Date; garantia128: Date; compra097: Date; entrega097: Date; garantia097: Date;
 };
-/** La escena de B1: la compra fue hace 5 dias y la entrega hace 2; la compra anterior, hace 4 meses. */
+/** La escena de B1, alineada con «Mi pedido» de ejemplo en «Entregado» (mockApi): la compra fue hace 70 h 15 min y la
+    entrega hace 15 min; la compra anterior, hace 4 meses. Asi el hilo carmesi cuenta la misma historia en cada pantalla. */
 export function momentos(): Momentos {
   const ahora = new Date();
-  const compra128 = desdeAhora(-5, 10, 42);
-  const entrega128 = desdeAhora(-2, 15, 10);
+  const compra128 = new Date(ahora.getTime() - (70 * 60 + 15) * 60000);
+  const entrega128 = new Date(ahora.getTime() - 15 * 60000);
   const compra097 = sumarMeses(desdeAhora(0, 11, 5), -4);
   const entrega097 = sumarDias(compra097, 2);
   entrega097.setHours(14, 30, 0, 0);

@@ -174,7 +174,7 @@ export function pedidosEjemplo(ahora = Date.now()): PedidoGes[] {
   return [
     pedido128("en_revision", ahora),
     construir({ numero: "ORD-000127", cliente: { name: "Jorge Vargas", email: "jorge@example.com" }, entrega: RETIRO, pago: "tarjeta", items: [[118, 1]],
-      haceMin: 3 * H, flujo: [{ s: "nuevo", min: 0, by: null }, { s: "pagado", min: 2, by: "ONVO (pago en línea)" }], factura: "FE-000230", margen: 0.30 }, ahora),
+      haceMin: 3 * H, flujo: [{ s: "nuevo", min: 0, by: null }, { s: "pagado", min: 2, by: "ONVO (pago en línea; ejemplo para cuando se contrate)" }], factura: "FE-000230", margen: 0.30 }, ahora),
     construir({ numero: "ORD-000126", cliente: { name: "Laura Méndez", company: "Comercial Ejemplo S.A.", id_number: "3-101-000000 (ejemplo)", email: "compras@example.com" },
       entrega: { type: "envio", method: "Envío GAM", province: "San José", canton: "San José", district: "Catedral" }, pago: "transferencia",
       items: [[53, 4], [118, 4], [93, 1], [12, 1], [92, 1], [318, 4]], haceMin: 5 * H, flujo: [{ s: "nuevo", min: 0, by: null }],
@@ -187,7 +187,7 @@ export function pedidosEjemplo(ahora = Date.now()): PedidoGes[] {
         { s: "preparando", min: 20 * H, by: "Andrés" }, { s: "enviado", min: 46 * H, by: "Andrés" }], factura: "FE-000227", tracking: "EJ012790115CR", margen: 0.37 }, ahora),
     construir({ numero: "ORD-000123", cliente: { name: "Sofía Mora", email: "sofia@example.com" },
       entrega: { type: "envio", method: "Envío GAM", province: "Heredia", canton: "Heredia", district: "Mercedes" }, pago: "tarjeta", items: [[177, 1]],
-      haceMin: 96 * H, flujo: [{ s: "nuevo", min: 0, by: null }, { s: "pagado", min: 2, by: "ONVO (pago en línea)" }, { s: "preparando", min: 18 * H, by: "Andrés" },
+      haceMin: 96 * H, flujo: [{ s: "nuevo", min: 0, by: null }, { s: "pagado", min: 2, by: "ONVO (pago en línea; ejemplo para cuando se contrate)" }, { s: "preparando", min: 18 * H, by: "Andrés" },
         { s: "enviado", min: 26 * H, by: "Andrés" }, { s: "entregado", min: 50 * H, by: "Andrés" }], factura: "FE-000226", tracking: "EJ012733904CR", margen: 0.34 }, ahora),
     construir({ numero: "ORD-000122", cliente: { name: "Diego Castro", email: "diego@example.com" },
       entrega: { type: "envio", method: "Envío GAM", province: "San José", canton: "Desamparados", district: "San Miguel" }, pago: "sinpe", items: [[39, 2]],

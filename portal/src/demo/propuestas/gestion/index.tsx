@@ -26,7 +26,7 @@ export const etiquetas: Etiqueta[] = [
   { id: "C2-dde", propuesta: "C2", rutas: ["/detras-de-escena/pedidos"], selector: ["#ges-por-atender"], irA: "/detras-de-escena/pedidos",
     aqui: "Cada pedido nuevo o comprobante subido avisaría al celular de quien atiende." },
   { id: "D2-dde", propuesta: "D2", rutas: ["/detras-de-escena/pedidos"], selector: ["#ges-requiere-compra"], irA: "/detras-de-escena/pedidos",
-    aqui: "Con D2, este «requiere compra» armaría solo la orden al proveedor para revisar y enviar." },
+    aqui: "Hoy este «requiere compra» crea una solicitud interna en borrador. Con D2 (y D1), la orden se armaría con los costos de Eurocomp y se enviaría al proveedor con un clic." },
   { id: "D1-dde", propuesta: "D1", rutas: ["/detras-de-escena/inventario"], selector: ["#ges-inv-proveedor"], irA: "/detras-de-escena/inventario",
     aqui: "Esta columna se llenaría sola desde Eurocomp, sin cargar a mano." },
   { id: "C3-dde", propuesta: "C3", rutas: ["/detras-de-escena/inventario"], selector: ["#ges-inv-precio"], irA: "/detras-de-escena/inventario",

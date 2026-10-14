@@ -25,18 +25,34 @@
 }
 .cap-switch::before { content: ""; position: absolute; inset: -4px 0; } /* zona tactil de 40 px */
 .cap-switch:focus-visible { outline: 2px solid #ff5a6e; outline-offset: 2px; }
-.cap-switch[aria-checked="true"] { padding-left: 10px; background: rgba(255, 255, 255, .14); }
-.cap-switch svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+.cap-switch[aria-checked="true"] { background: rgba(255, 255, 255, .14); }
 .cap-switch__pista { position: relative; width: 26px; height: 16px; border-radius: 999px; background: rgba(255, 255, 255, .38); flex: none; }
-.cap-switch__pista::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; }
+.cap-switch__pista::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform 200ms cubic-bezier(.25, .46, .45, .94); }
+/* encendido: la perilla a la derecha sobre verde (el estado no depende solo del color: tambien la posicion) */
+.cap-switch[aria-checked="true"] .cap-switch__pista { background: #157a41; }
+.cap-switch[aria-checked="true"] .cap-switch__pista::after { transform: translateX(10px); }
 .cap-switch__n { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: #fff; color: #c41a2f; display: inline-grid; place-items: center; font: 500 11px/1 "JetBrains Mono", ui-monospace, monospace; }
 .cap-switch__c { display: none; }
 @media (max-width: 399px) { .cap-switch__l { display: none; } .cap-switch__c { display: inline; } }
 @media (hover: hover) { .cap-switch:hover { background: #c41a2f; } .cap-switch[aria-checked="true"]:hover { background: rgba(255, 255, 255, .22); } }
 
-.cap-chips { display: flex; align-items: center; gap: 6px; min-width: 0; height: 100%; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent); -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent); padding-right: 16px; }
-.cap-chips::-webkit-scrollbar { display: none; }
-.cap-chips ul { display: flex; gap: 6px; list-style: none; margin: 0; padding: 0; flex: none; }
+.cap-chips { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; height: 100%; }
+.cap-chips__lista {
+  display: flex; align-items: center; gap: 6px; list-style: none; margin: 0; padding: 0 2px; min-width: 0; height: 100%; overflow-x: auto; overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.cap-chips__lista::-webkit-scrollbar { display: none; }
+.cap-chips__lista > li { flex: none; }
+/* degradado del lado que tiene mas chips: senal de que la tira sigue */
+.cap-chips[data-der] .cap-chips__lista { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+.cap-chips[data-izq] .cap-chips__lista { -webkit-mask-image: linear-gradient(90deg, transparent, #000 28px); mask-image: linear-gradient(90deg, transparent, #000 28px); }
+.cap-chips[data-izq][data-der] .cap-chips__lista { -webkit-mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
+.cap-chips__flecha {
+  flex: none; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; cursor: pointer;
+  background: rgba(255, 255, 255, .14); color: #fff; font: 700 17px/1 Manrope, system-ui, sans-serif;
+}
+@media (hover: hover) { .cap-chips__flecha:hover { background: rgba(255, 255, 255, .26); } }
+@media (hover: none) { .cap-chips__flecha { display: none; } }
 .cap-chip {
   height: 28px; padding: 0 10px; border-radius: 999px; border: 1.5px solid #e2233a; background: transparent; color: #fff; cursor: pointer; white-space: nowrap; flex: none;
   font: 500 11px/1 "JetBrains Mono", ui-monospace, monospace; letter-spacing: .06em; text-transform: none;
@@ -77,7 +93,7 @@
 .cap-marca[data-tipo="existente"][aria-expanded="true"] { box-shadow: 0 0 0 2px #157a41, 0 6px 16px -6px rgba(21, 19, 26, .6); }
 .cap-marca:focus-visible { outline: 3px solid #15131a; outline-offset: 2px; box-shadow: 0 0 0 2px #fff; }
 .cap-marca__corto { display: none; }
-@media (min-width: 768px) { .cap-marca__corto { display: inline; } }
+@media (min-width: 768px) { .cap-marca__corto { display: inline; } .cap-marca[data-angosto="1"] .cap-marca__corto { display: none; } }
 .cap-marca[data-pulso] { animation: cap-in 200ms cubic-bezier(.25, .46, .45, .94) both, cap-pulso 1.4s ease-out 3; }
 @keyframes cap-in { from { opacity: 0; scale: .9; } }
 @keyframes cap-pulso { from { box-shadow: 0 0 0 0 rgba(226, 35, 58, .6); } to { box-shadow: 0 0 0 16px rgba(226, 35, 58, 0); } }
@@ -123,7 +139,7 @@
 
 /* ---------- reduced-motion: rama propia (los marcadores aparecen quietos y no laten) ---------- */
 @media (prefers-reduced-motion: reduce) {
-  .cap, .cap *, .cap-marca[data-pulso] { animation: none !important; transition: none !important; }
+  .cap, .cap *, .cap-marca[data-pulso], .cap-switch__pista::after { animation: none !important; transition: none !important; }
 }
 
 /* ---------- control del pedido de ejemplo ---------- */
@@ -166,6 +182,14 @@
 .cap-control--pista { padding: 14px; display: grid; gap: 10px; }
 .cap-control--pista p { margin: 0; font-size: 14px; line-height: 1.45; }
 @media (hover: hover) { .cap-estados button:not([aria-current]):hover { background: rgba(255, 255, 255, .06); } }
-@media (max-width: 767px) {
+/* escritorio: pasa a la esquina izquierda cuando en la derecha taparia el pedido (useEsquiva) */
+@media (min-width: 1024px) {
+  .cap-control[data-lado="izq"] { right: auto; left: 16px; }
+  /* plegado: una sola linea («Pedido de ejemplo · ORD-000128 · Entregado ▴»), sin partir el numero */
+  .cap-control:not([data-abierta]):not(.cap-control--pista) { width: auto; }
+  .cap-control:not([data-abierta]) .cap-control__t { white-space: nowrap; }
+}
+@media (max-width: 1023px) {
   .cap-control { left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); width: auto; max-width: none; max-height: 72svh; }
 }
+

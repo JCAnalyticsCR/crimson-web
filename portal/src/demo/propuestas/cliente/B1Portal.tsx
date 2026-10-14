@@ -162,7 +162,6 @@ function Aparte({ paso }: { paso: string }) {
   const q = QUE_PASA[paso] ?? QUE_PASA.correo;
   return (
     <div className="cli cli-aparte">
-      <p className="cli-meta">Qué pasa aquí</p>
       <h3 className="cli-aparte__h">{q.t}</h3>
       <p>{q.p}</p>
       {q.ya && <p className="cli-aparte__ya"><span aria-hidden="true">✓ </span>{q.ya}</p>}

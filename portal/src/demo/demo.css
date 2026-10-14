@@ -12,15 +12,30 @@ html.demo-on body { padding-top: var(--demo-h); background: var(--demo-cream); }
   white-space: nowrap;
 }
 /* el texto nunca se corta a media palabra: «● Vista previa» siempre entero; con los chips de la capa abiertos, el texto
-   largo solo se ve desde 1280 px (debajo, los chips necesitan el espacio y ya dicen que son propuestas) */
-.demo-ribbon__txt { flex: 0 0 auto; max-width: 100%; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+   largo solo se ve desde 1440 px (debajo, los chips necesitan el espacio y ya dicen que son propuestas).
+   line-height 1.6: con 10px/1 y overflow hidden, las tildes de las mayusculas (DEMOSTRACIÓN, AÚN) quedaban recortadas. */
+.demo-ribbon__txt { flex: 0 0 auto; max-width: 100%; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.6; padding-block: 1px; }
 .demo-ribbon__txt b { flex: none; color: #fff; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
 .demo-ribbon__txt b::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--demo-crimson); }
 .demo-ribbon__largo { display: none; }
 .demo-ribbon__ctl { flex: 1 1 auto; min-width: 0; height: 100%; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 @media (min-width: 640px) { .demo-ribbon__largo { display: inline; } }
-@media (max-width: 1279px) { .demo-ribbon[data-chips] .demo-ribbon__largo { display: none; } }
+@media (max-width: 1439px) { .demo-ribbon[data-chips] .demo-ribbon__largo { display: none; } }
 @media (max-width: 380px) { .demo-ribbon { letter-spacing: .06em; font-size: 9.5px; gap: 8px; } }
+
+/* boton «Guía» (la guia lo pinta aqui con un portal): vive en la franja para no tapar nada de ninguna pantalla */
+.demo-ribbon__guia { display: contents; }
+.demo-guia {
+  position: relative; flex: none; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px 0 9px; border: 0; border-radius: 999px;
+  cursor: pointer; background: transparent; color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .25);
+  font: 700 12.5px/1 Manrope, system-ui, sans-serif; letter-spacing: 0; text-transform: none; white-space: nowrap;
+}
+.demo-guia::before { content: ""; position: absolute; inset: -4px 0; } /* zona tactil de 40 px */
+.demo-guia svg { width: 15px; height: 15px; flex: none; fill: none; stroke: #ff5a6e; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.demo-guia small { font: 500 10.5px/1 "JetBrains Mono", ui-monospace, monospace; color: #b9b5b0; }
+.demo-guia:focus-visible { outline: 2px solid #ff5a6e; outline-offset: 2px; }
+@media (hover: hover) { .demo-guia:hover { box-shadow: inset 0 0 0 1px #fff; } }
+@media (max-width: 399px) { .demo-guia small { display: none; } .demo-guia { padding: 0 10px 0 8px; } }
 
 /* lo fijo o pegajoso de la vitrina, corrido el alto de la franja */
 html.demo-on .shop .sh-head { top: var(--demo-h); }
@@ -39,8 +54,10 @@ html.demo-on .shop { min-height: calc(100dvh - var(--demo-h)); }
 }
 .demo-credit span:first-child { max-width: 72ch; }
 .demo-credit__mas a { margin: 0 2px; }
-/* con el control del pedido de ejemplo plegado abajo (movil), el credito deja espacio para no quedar tapado */
-@media (max-width: 767px) { html.demo-on.cap-con-control .demo-credit { padding-bottom: calc(76px + env(safe-area-inset-bottom)); } }
+/* barras fijas abajo (control del pedido de ejemplo, «Te interesan», resultados de ¿Es rentable? en movil): el credito
+   deja espacio para que sus enlaces nunca queden tapados */
+html.demo-on.cap-con-control .demo-credit, html.demo-on:has(.lqv-barra) .demo-credit { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
+@media (max-width: 1023px) { html.demo-on:has(.rnt-barra) .demo-credit { padding-bottom: calc(88px + env(safe-area-inset-bottom)); } }
 .demo-credit a { color: rgba(244, 241, 238, .9); text-decoration: underline; text-underline-offset: 3px; }
 .demo-credit a:hover { color: #fff; }
 
@@ -97,6 +114,10 @@ html:not(.demo-on) body:has(.demo-gate) { padding-top: 0; }
 .demo-gate__btn:focus-visible { outline: 2px solid var(--demo-ink); outline-offset: 3px; }
 .demo-gate__sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .demo-gate__dots i { transition: none; } }
+
+/* ---------- carga de una pantalla (Suspense) ---------- */
+.demo-spin { min-height: 100dvh; display: grid; place-items: center; background: var(--demo-cream); }
+@media (prefers-reduced-motion: reduce) { .demo-spin .spinner { animation: none; } }
 
 /* ---------- seccion aun no integrada en esta vista previa ---------- */
 .demo-pendiente {

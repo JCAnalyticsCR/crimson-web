@@ -256,7 +256,7 @@ export default function Inventario() {
         <section ref={simS} className="ges ges-ultima" aria-labelledby="ges-ultima-t">
           <div className="ges-ultima__cab">
             <span className="ges-ultima__rot">Simulación · la última unidad</span>
-            <h3 id="ges-ultima-t" ref={simT} tabIndex={-1}>Ana y Jorge tocaron «Agregar al carrito» en el mismo instante</h3>
+            <h3 id="ges-ultima-t" ref={simT} tabIndex={-1}>Ana y Jorge confirmaron su pedido en el mismo instante</h3>
             <p>Quedaba 1 Grabador IP NVR Hikvision 4CH PoE libre. La reserva se hace en una sola operación: la gana quien llega primero por milésimas y la otra persona lo sabe en ese momento.</p>
           </div>
           <div className="ges-ultima__tel">
@@ -272,8 +272,8 @@ export default function Inventario() {
               <div className="ges-tel" data-res="no">
                 <span className="ges-tel__top">tienda.crimsoncr.com</span>
                 <span className="ges-tel__est"><Ico d={IC.alert} size={14} />Ya no queda</span>
-                <p><b>Ya no queda:</b> otra persona lo apartó hace un instante. ¿Te avisamos cuando llegue?</p>
-                <span className="ges-tel__btn ges-tel__btn--g">Avisarme cuando llegue</span>
+                <p><b>Ya no queda:</b> otra persona lo apartó hace un instante. Escribinos por WhatsApp o elegí otro modelo.</p>
+                <span className="ges-tel__btn ges-tel__btn--g">Escribir por WhatsApp</span>
               </div>
             </Pantalla>
           </div>

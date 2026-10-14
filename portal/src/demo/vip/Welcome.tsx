@@ -31,7 +31,7 @@ export const features = (productPath: string): Feature[] => [
   },
   {
     cam: "04", tag: "Pago", title: "SINPE con comprobante, tarjeta y factura electrónica",
-    body: "El cliente paga por SINPE Móvil y sube el comprobante, o paga con tarjeta. La factura electrónica sale sola, sin pasos manuales.",
+    body: "El cliente paga por SINPE Móvil y sube el comprobante, o con tarjeta por ONVO, al contratarlo (ya está integrado). La factura electrónica sale sola, sin pasos manuales.",
     cta: "Probar una compra", path: "/catalogo",
   },
   {
@@ -129,7 +129,7 @@ export default function Welcome({ guestName, productPath, onEnter }: {
                 <span className="vip-next__bar" aria-hidden="true"><span><i className="vip-rec vip-rec--still" />CAM 09</span><span>Números</span></span>
                 <span className="vip-next__body">
                   <b className="vip-next__title">Hacé las cuentas con tus números</b>
-                  <span className="vip-next__text">Un modelo transparente: cada supuesto es un ejemplo que podés cambiar, las fórmulas están a la vista y el margen sobre venta de 35 % es el de Crimson.</span>
+                  <span className="vip-next__text">Un modelo transparente: cada supuesto es un ejemplo que podés cambiar, las fórmulas están a la vista y el margen sobre venta de 35 % es el de los levantamientos de Crimson (en el equipo de tienda, un ejemplo que podés cambiar).</span>
                   <span className="vip-next__cta">Hacer las cuentas <Arrow /></span>
                 </span>
               </button>
