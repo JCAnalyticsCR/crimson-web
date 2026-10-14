@@ -6,6 +6,7 @@ import "./autosave.css";
 
 const ago = (t: number, now: number) => {
   const s = Math.max(0, Math.round((now - t) / 1000));
+  if (s < 3) return "hace un momento";
   if (s < 60) return `hace ${s} s`;
   if (s < 3600) return `hace ${Math.floor(s / 60)} min`;
   return `a las ${new Date(t).toLocaleTimeString("es-CR", { hour: "2-digit", minute: "2-digit" })}`;

@@ -72,7 +72,7 @@ export function useSurveyAutosave<D extends DraftLike>({ draft, setDraft, body, 
   /** Despues de guardar (recalcula y refresca la lista). Se llama al crear, al cerrar y como mucho cada 15 s. */
   onSaved?: () => void;
 }) {
-  const { me, allows } = useSession();
+  const { me, allows, toast } = useSession();
   const canEdit = allows("field.editar");
   const lastNotice = useRef(0);
   const readOnly = draft?.status === "cotizado" || draft?.status === "cerrado";
@@ -130,6 +130,14 @@ export function useSurveyAutosave<D extends DraftLike>({ draft, setDraft, body, 
     enabled,
     createEarly: canEdit,
     storage: me ? `lev:${me.tenant.id}:${me.user.id}` : null,
+    // el formulario ya se cerro: la linea de estado no se ve, se avisa con un toast
+    notify: (state, d, msg) => {
+      const ref = d.number || "El levantamiento nuevo";
+      if (state === "local") toast(`Sin conexión: ${ref} quedó guardado en este dispositivo y se sube solo al volver la conexión.`, "bad");
+      else if (state === "error") toast(`${ref} no se pudo guardar: ${msg}. Lo escrito quedó en este dispositivo; al abrirlo se puede recuperar.`, "bad");
+      else if (state === "warn") toast(`${ref} se guardó salvo esto: ${msg}. Al abrirlo se puede corregir.`, "bad");
+      else toast(`${ref}: se subió lo que había quedado en este dispositivo.`);
+    },
   });
 
   /* La copia del dispositivo vuelve al formulario; lo que es del servidor (estado, revision, numero) no se pisa. */

@@ -65,8 +65,8 @@ export function TrashButton({ kind, id, number, onDone, onRestored, className = 
       setCheck(null);
       onDone();
       if (action === "trash") toast(`${ref} en la papelera`, "ok", { label: "Deshacer", run: restore });
-      else if (action === "archive") toast(`${ref} archivado`, "ok", { label: "Deshacer", run: restore });
-      else toast(`${ref}: ${check?.alt?.label.toLowerCase() || "listo"}`);
+      else if (action === "archive") toast(`${ref} ${check?.alt?.label === "Desactivar" ? "desactivado" : "archivado"}: se conserva en Archivo`, "ok", { label: "Deshacer", run: restore });
+      else toast(`${ref}: listo`);
     } catch (err) { toast(err instanceof Error ? err.message : "No se pudo", "bad"); }
     finally { setBusy(false); }
   };

@@ -28,7 +28,7 @@ type Local<T> = { v: 1; at: number; id: Id | null; data: T; warn?: string | null
 type Session<T> = {
   id: Id | undefined; open: boolean; enabled: boolean;
   last: T | null; lastSer: string | null; baseline: string | null;
-  takeBaseline: boolean; localKey: string | null; created: number; failed: boolean;
+  takeBaseline: boolean; localKey: string | null; created: number; failed: boolean; notified: boolean;
 };
 
 const PREFIX = "crimson:autosave:";
@@ -67,12 +67,14 @@ export function useAutosave<T>(opts: {
   delay?: number;
   /** false: un registro nuevo no se crea por tiempo, solo al cerrar (quien puede crear pero no editar despues). */
   createEarly?: boolean;
+  /** Que paso con un formulario ya cerrado (su linea de estado ya no se ve): para avisar con un toast. */
+  notify?: (state: "local" | "error" | "warn" | "saved", value: T, message: string | null) => void;
 }) {
   const o = useRef(opts);
   o.current = opts;
   const delay = opts.delay ?? 1800;
 
-  const blank = (): Session<T> => ({ id: undefined, open: false, enabled: false, last: null, lastSer: null, baseline: null, takeBaseline: false, localKey: null, created: Date.now(), failed: false });
+  const blank = (): Session<T> => ({ id: undefined, open: false, enabled: false, last: null, lastSer: null, baseline: null, takeBaseline: false, localKey: null, created: Date.now(), failed: false, notified: false });
   const sess = useRef<Session<T>>(blank());
   const timer = useRef<number | undefined>(undefined);
   const localTimer = useRef<number | undefined>(undefined);
@@ -122,10 +124,12 @@ export function useAutosave<T>(opts: {
         const r = await o.current.save(v, { id: s.id, keepalive: reason === "unload" || reason === "hidden", reason, isCurrent: () => sess.current === s && s.open });
         if (r && r.id !== undefined && s.id === undefined) { s.id = r.id; migrateLocal(s); }
         s.baseline = ser;
+        if (s.notified) { s.notified = false; o.current.notify?.("saved", v, null); } // subio lo que habia quedado en el dispositivo
         s.failed = false;
         pending.current.delete(s);
         if (r && r.warning) {
           writeLocal(s, r.warning); // lo que el servidor no acepto queda aqui, completo
+          if (sess.current !== s || !s.open) o.current.notify?.("warn", v, r.warning);
           setStatus(s, { state: "warn", at: Date.now(), message: r.warning });
           return false;
         }
@@ -133,14 +137,18 @@ export function useAutosave<T>(opts: {
         setStatus(s, dirty(s) ? { state: "pending", at: null, message: null } : { state: "saved", at: Date.now(), message: null });
         return true;
       } catch (e) {
-        writeLocal(s, e instanceof Error ? e.message : null);
+        const offline = isOffline(e);
+        const msg = e instanceof Error ? e.message : "No se pudo guardar";
+        writeLocal(s, offline ? null : msg);
+        // el formulario ya se cerro: nadie ve la linea de estado, se avisa aparte (una vez, no en cada reintento)
+        if (!s.notified && (sess.current !== s || !s.open)) { s.notified = true; o.current.notify?.(offline ? "local" : "error", s.last as T, offline ? null : msg); }
         s.failed = true;
-        if (isOffline(e)) {
+        if (offline) {
           pending.current.add(s);
           armRetry();
           setStatus(s, { state: "local", at: Date.now(), message: null });
         } else {
-          setStatus(s, { state: "error", at: Date.now(), message: e instanceof Error ? e.message : "No se pudo guardar" });
+          setStatus(s, { state: "error", at: Date.now(), message: msg });
         }
         return false;
       }
