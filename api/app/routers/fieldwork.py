@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import ROUND_CEILING, Decimal
 from typing import Annotated
@@ -136,37 +137,36 @@ def labor_costing(s: Survey, tenant) -> dict:
 
 
 # ---------- Levantamientos ----------
-def _sees_opportunity_surveys(p: Principal) -> bool:
-    """Resumen de solo lectura (13/10 33:30): quien tiene oportunidades y ve campo sin llenarlo (el vendedor) ve
-    los levantamientos de SUS oportunidades. Con field.editar (tecnicos) sigue siendo solo lo suyo."""
-    return p.can("crm_pipeline", "ver") and not p.can("field", "editar")
+# Las cotizaciones hechas desde un levantamiento antes de la matriz de roles (13/10) guardaban el costo y el margen en
+# las notas internas. La migracion vendedor_b4e8c2d61f37 los limpia con ESTE patron (y una prueba lo fija contra el
+# texto viejo): si alguien cambia el texto, cambia el patron aqui.
+COST_NOTE_RE = re.compile(r" ?Costo estimado ₡[\d.,]+ · margen (?:-?[\d.,]+|None) %\.")
 
 
 def survey_scope(p: Principal):
-    """Quien no ve todo el campo: el tecnico, lo suyo; el vendedor, ademas lo de sus oportunidades.
-    None = sin filtro (field.ver_todo)."""
+    """Quien no ve todo el campo: el tecnico, lo suyo; el vendedor (field.resumen), ademas lo de sus oportunidades
+    (13/10 33:30). None = sin filtro (field.ver_todo)."""
     if p.sees_field_all:
         return None
     own = Survey.technician_id == p.user.id
-    if _sees_opportunity_surveys(p):
+    if p.can("field", "resumen"):
         mias = select(Opportunity.id).where(Opportunity.tenant_id == p.tenant.id, Opportunity.owner_id == p.user.id)
         return or_(own, Survey.opportunity_id.in_(mias))
     return own
 
 
 def can_see_survey(db: Session, s: Survey, p: Principal) -> bool:
-    """El mismo criterio que survey_scope para un levantamiento suelto (ficha, informe, correo del informe)."""
+    """El mismo criterio que survey_scope para un levantamiento suelto (ficha, resumen, informe, correo del informe).
+    Un levantamiento que se desliga de la oportunidad deja de verse para la vendedora; uno que se liga, aparece."""
     if p.sees_field_all or s.technician_id == p.user.id:
         return True
-    if _sees_opportunity_surveys(p):
-        # el vendedor: solo los de SUS oportunidades, tengan o no tecnico (uno sin tecnico de otra oportunidad no
-        # le sale en la lista y tampoco se abre por id)
-        if not s.opportunity_id:
-            return False
+    if s.technician_id is None and p.can("field", "editar"):
+        return True  # el tecnico, como siempre: los que quedaron sin tecnico (datos viejos o importados)
+    if p.can("field", "resumen") and s.opportunity_id:
+        # el vendedor: solo los de SUS oportunidades, tengan o no tecnico
         o = db.get(Opportunity, s.opportunity_id)
         return bool(o and o.tenant_id == p.tenant.id and o.owner_id == p.user.id)
-    # el tecnico: como antes, tambien los que quedaron sin tecnico (datos viejos o importados)
-    return s.technician_id is None
+    return False
 
 
 def _survey(db: Session, sid: int, p: Principal) -> Survey:
@@ -178,6 +178,84 @@ def _survey(db: Session, sid: int, p: Principal) -> Survey:
     return s
 
 
+def solo_resumen(p: Principal) -> bool:
+    """La vendedora (field.resumen sin field.editar): ve los levantamientos en resumen, nunca el registro completo
+    (data tecnico de cada punto, seccion comun ni de que proveedor sale cada equipo). D6: la API filtra."""
+    return p.can("field", "resumen") and not p.can("field", "editar") and not p.sees_field_all
+
+
+# Etapas en que una oportunidad todavia espera su levantamiento (antes de "levantamiento" y de cotizar): crear uno
+# ligado la pasa a "levantamiento"; en una etapa posterior se queda donde esta (el embudo solo avanza).
+ESPERA_LEVANTAMIENTO = ("nuevo", "contactado", "requiere_visita")
+
+
+def _utc(dt: datetime) -> datetime:
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt  # SQLite devuelve la hora sin zona (es UTC)
+
+
+def pending_survey_request(db: Session, o: Opportunity, skip_sid: int | None = None):
+    """La solicitud de levantamiento (POST /opportunities/{id}/request-survey) que nadie atendio todavia: la ultima,
+    posterior al ultimo levantamiento de la oportunidad (vivo o no), sin uno vivo y con la oportunidad abierta.
+    Devuelve su registro de auditoria, o None. Vale en cualquier etapa abierta: pedirlo no devuelve la oportunidad a
+    "requiere visita" (advance_status solo avanza) y aun asi alguien la tiene que poder atender."""
+    from ..models import AuditLog
+    from ..services.archive import is_live
+
+    if o.status in ("ganada", "perdida"):
+        return None
+    req = db.scalar(
+        select(AuditLog)
+        .where(AuditLog.tenant_id == o.tenant_id, AuditLog.action == "request_survey", AuditLog.entity == "opportunity", AuditLog.entity_id == o.id)
+        .order_by(AuditLog.at.desc(), AuditLog.id.desc())
+        .limit(1)
+    )
+    if req is None:
+        return None
+    stmt = select(Survey).where(Survey.tenant_id == o.tenant_id, Survey.opportunity_id == o.id)
+    if skip_sid:
+        stmt = stmt.where(Survey.id != skip_sid)
+    pedido = _utc(req.at)
+    for s in db.scalars(stmt):
+        if is_live(s) or _utc(s.created_at) >= pedido:
+            return None  # ya la atendieron (aunque despues ese levantamiento se haya archivado)
+    return req
+
+
+def attends_survey_requests(p: Principal) -> bool:
+    """Quien atiende las solicitudes de levantamiento de cualquier vendedor: el equipo de campo INTERNO que llena
+    levantamientos (supervisor, que recibe el aviso, y el tecnico al que se lo pasa: no hay asignacion de oportunidades
+    a tecnicos, la solicitud pendiente es su orden de visita). Nunca un aliado: el embudo de Crimson no se abre a otra
+    empresa. Solo vale para oportunidades con solicitud pendiente (pending_survey_request): no recorre el embudo."""
+    return not p.is_ally and p.can("field", "crear")
+
+
+def _sees_in_pipeline(p: Principal, o: Opportunity) -> bool:
+    """La misma regla que pipeline._own: sin ver_todo, solo las suyas."""
+    return p.can("crm_pipeline", "ver") and (p.can("crm_pipeline", "ver_todo") or o.owner_id == p.user.id)
+
+
+def _linkable_opportunity(db: Session, p: Principal, oid: int, customer_id: int | None = None, skip_sid: int | None = None) -> Opportunity:
+    """La oportunidad a la que se liga un levantamiento: de esta empresa, viva y abierta, del mismo cliente, y que
+    quien liga la vea en el embudo (pipeline._own: sin ver_todo, solo las suyas) o, para el equipo de campo interno
+    (attends_survey_requests), que tenga una solicitud de levantamiento pendiente. Cualquier otra: 404, sin decir si
+    existe.
+    Ligar decide quien ve el levantamiento (la vendedora de la oportunidad) y de quien es la cotizacion que salga de
+    el: no se acepta un id cualquiera (antes POST/PUT /surveys lo guardaban sin mirar: ni empresa, ni cliente, ni si
+    ya tenia levantamiento o cotizacion)."""
+    from ..services.archive import is_live
+
+    o = db.get(Opportunity, oid)
+    if not o or o.tenant_id != p.tenant.id or not is_live(o):
+        raise HTTPException(404, "Oportunidad no encontrada")
+    if not _sees_in_pipeline(p, o) and not (attends_survey_requests(p) and pending_survey_request(db, o, skip_sid)):
+        raise HTTPException(404, "Oportunidad no encontrada")
+    if o.status in ("ganada", "perdida"):
+        raise HTTPException(409, "La oportunidad ya está cerrada (ganada o perdida)")
+    if customer_id and o.customer_id and customer_id != o.customer_id:
+        raise HTTPException(409, "El levantamiento y la oportunidad son de clientes distintos")
+    return o
+
+
 def _reviewers(db: Session, tenant) -> list[dict]:
     """Personas que reciben el aviso de "nuevo levantamiento": lo que el tecnico necesita ver al enviar."""
     from ..models import TenantUser
@@ -187,14 +265,19 @@ def _reviewers(db: Session, tenant) -> list[dict]:
     return [{"id": m.user.id, "name": m.user.full_name, "role": m.role_code} for m in rows]
 
 
-def _opp_ref(db: Session, oid: int | None) -> dict | None:
-    """Numero y titulo de la oportunidad ligada, para mostrarla sin otra consulta."""
+def _opp_ref(db: Session, oid: int | None, tenant_id: int) -> dict | None:
+    """Numero y titulo de la oportunidad ligada, para mostrarla sin otra consulta. Solo de esta empresa."""
     o = db.get(Opportunity, oid) if oid else None
-    return {"id": o.id, "number": o.number, "title": o.title, "status": o.status} if o else None
+    return {"id": o.id, "number": o.number, "title": o.title, "status": o.status} if o and o.tenant_id == tenant_id else None
+
+
+def _customer_of(db: Session, s: Survey) -> Customer | None:
+    c = db.get(Customer, s.customer_id) if s.customer_id else None
+    return c if c is not None and c.tenant_id == s.tenant_id else None
 
 
 def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
-    c = db.get(Customer, s.customer_id) if s.customer_id else None
+    c = _customer_of(db, s)
     t = db.get(User, s.technician_id) if s.technician_id else None
     sender = db.get(User, s.sent_by) if s.sent_by else None
     visit_ids = [int(x) for x in (s.visit_tech_ids or []) if str(x).isdigit()]
@@ -211,7 +294,7 @@ def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
         "contact": s.contact,
         "site": s.site,
         "opportunity_id": s.opportunity_id,
-        "opportunity": _opp_ref(db, s.opportunity_id),
+        "opportunity": _opp_ref(db, s.opportunity_id, s.tenant_id),
         "technician_id": s.technician_id,
         "technician": t.full_name if t else None,
         "visit_date": s.visit_date,
@@ -357,6 +440,8 @@ class LaborIn(BaseModel):
 class SurveyIn(BaseModel):
     kind: str = Field("cctv", pattern="^(cctv|redes|acceso|asistencia|ups|cableado|anpr|otro)$")
     customer_id: int | None = None
+    # solo al crear (validada con _linkable_opportunity). Despues se liga o desliga con POST /surveys/{id}/opportunity:
+    # PUT la ignora (el autoguardado manda la que tenia al abrir y no debe deshacer un ligado reciente)
     opportunity_id: int | None = None
     contact: dict = Field(default_factory=dict)
     site: str | None = Field(None, max_length=300)
@@ -387,10 +472,21 @@ def _labor_payload(data: SurveyIn) -> dict:
     return {k: {"people": (src.get(k) or LaborIn()).people, "days": str((src.get(k) or LaborIn()).days)} for k in LABOR_TYPES}
 
 
+def _check_customer(db: Session, p: Principal, data: SurveyIn, s: Survey | None = None) -> None:
+    """El cliente del levantamiento es de esta empresa (si no, la ficha diria el nombre de un cliente ajeno)."""
+    from ..services.refs import check_refs
+
+    check_refs(db, p.tenant.id, {"customer_id": data.customer_id}, refs={"customer_id": (Customer, "Cliente no encontrado")}, current=s)
+
+
 def _apply_fields(s: Survey, data: SurveyIn, db: Session, p: Principal) -> None:
     labor = _labor_payload(data)
-    for k, v in data.model_dump(exclude={"points", "items", "labor", "techs", "days", "visit_tech_ids", "common", "received_by"}).items():
+    # la oportunidad no se toca aqui (ver SurveyIn.opportunity_id) y el cliente tiene que ser de esta empresa
+    exclude = {"points", "items", "labor", "techs", "days", "visit_tech_ids", "common", "received_by", "opportunity_id", "customer_id"}
+    for k, v in data.model_dump(exclude=exclude).items():
         setattr(s, k, v)
+    _check_customer(db, p, data, s)
+    s.customer_id = data.customer_id
     # solo si vienen: un cliente que no los conoce no borra lo que otro guardo
     if "common" in data.model_fields_set:
         try:
@@ -469,16 +565,22 @@ def surveys(
 
 @router.post("/surveys", status_code=201)
 def survey_create(data: SurveyIn, p: Principal = Depends(require("field", "crear")), db: Session = Depends(get_db)):
+    # antes de gastar un consecutivo: el cliente, y la oportunidad (decide quien ve el levantamiento y de quien es su
+    # cotizacion)
+    _check_customer(db, p, data)
+    o = _linkable_opportunity(db, p, data.opportunity_id, customer_id=data.customer_id) if data.opportunity_id else None
     number, _ = next_number(db, p.tenant.id, "LEV")
     s = Survey(tenant_id=p.tenant.id, number=number, technician_id=p.user.id, template_version=TEMPLATE_VERSION)
     _apply_fields(s, data, db, p)
     _apply_children(s, data)
+    if o:
+        s.opportunity_id = o.id
+        if not s.customer_id and o.customer_id:
+            s.customer_id = o.customer_id  # el de la oportunidad: sin el, cotizar despues falla con "asigná un cliente"
     db.add(s)
     db.flush()
-    if s.opportunity_id:
-        o = db.get(Opportunity, s.opportunity_id)
-        if o and o.tenant_id == p.tenant.id and o.status in ("nuevo", "contactado", "requiere_visita"):
-            o.status = "levantamiento"
+    if o and o.status in ESPERA_LEVANTAMIENTO:
+        o.status = "levantamiento"
     audit(db, p.tenant.id, p.user.id, "create", "survey", s.id, ip=p.ip)
     db.commit()
     return _survey_out(db, s)
@@ -532,9 +634,33 @@ def _apply_children(s: Survey, data: SurveyIn) -> None:
         )
 
 
+@router.get("/surveys/from-opportunity/{oid}")
+def survey_from_opportunity(oid: int, p: Principal = Depends(require("field", "crear")), db: Session = Depends(get_db)):
+    """Lo que el borrador de un levantamiento toma de su oportunidad (enlace del aviso «Solicitar levantamiento»):
+    cliente, sitio y solucion. Para quien la ve en el embudo o, sin verla (supervisor sin ver_todo, tecnico), si tiene
+    una solicitud pendiente (_linkable_opportunity); un aliado nunca. Sin montos."""
+    o = _linkable_opportunity(db, p, oid)
+    c = db.get(Customer, o.customer_id) if o.customer_id else None
+    c = c if c is not None and c.tenant_id == p.tenant.id else None
+    # un lead sin cliente: el nombre del contacto solo a quien ve la oportunidad (es un dato del lead, no del cliente)
+    contacto = (o.contact or {}).get("name") if _sees_in_pipeline(p, o) else None
+    return {
+        "id": o.id,
+        "number": o.number,
+        "title": o.title,
+        "customer_id": c.id if c else None,
+        "customer": c.name if c else contacto,
+        "site": o.site,
+        "solution": o.solution,
+    }
+
+
 @router.get("/surveys/{sid}")
 def survey_get(sid: int, p: Principal = Depends(require("field", "ver")), db: Session = Depends(get_db)):
-    return _survey_out(db, _survey(db, sid, p))
+    s = _survey(db, sid, p)
+    if solo_resumen(p):
+        return _summary_out(db, s, p)  # la vendedora: el mismo resumen que /summary, nunca el registro completo
+    return _survey_out(db, s)
 
 
 @router.put("/surveys/{sid}")
@@ -569,8 +695,10 @@ def survey_link_opportunity(sid: int, data: LinkOppIn, p: Principal = Depends(re
     despues". Funciona aunque el levantamiento ya este cotizado, que es el caso normal: se visita, se cotiza
     y recien ahi se registra la oportunidad. Al ligar, la oportunidad hereda lo que el levantamiento ya
     avanzo (cliente, cotizacion, monto y etapa) y queda anotado en su bitacora."""
-    from ..services.archive import is_live
+    from ..models import Quote
     from ..services.documents import CR
+    from ..services.ownership import opportunity_seller
+    from .pipeline import sync_seller_from_opportunity
 
     s = _survey(db, sid, p)
     stamp = datetime.now(CR).strftime("%d/%m/%Y %H:%M")
@@ -584,17 +712,17 @@ def survey_link_opportunity(sid: int, data: LinkOppIn, p: Principal = Depends(re
         db.commit()
         return _survey_out(db, s)
 
-    o = db.get(Opportunity, data.opportunity_id)
-    if not o or o.tenant_id != p.tenant.id or not is_live(o):
-        raise HTTPException(404, "Oportunidad no encontrada")
-    if not p.can("crm_pipeline", "ver"):
-        raise HTTPException(403, "Sin permiso para ver oportunidades")
-    if o.status in ("ganada", "perdida"):
-        raise HTTPException(409, "La oportunidad ya está cerrada (ganada o perdida)")
-    if s.customer_id and o.customer_id and s.customer_id != o.customer_id:
-        raise HTTPException(409, "El levantamiento y la oportunidad son de clientes distintos")
+    # sin ver_todo, solo una oportunidad propia (como en el embudo) o una que espera levantamiento
+    o = _linkable_opportunity(db, p, data.opportunity_id, customer_id=s.customer_id, skip_sid=s.id)
     if o.quote_id and s.quote_id and o.quote_id != s.quote_id:
         raise HTTPException(409, "La oportunidad ya tiene otra cotización ligada")
+    if s.quote_id:
+        # ligar le pasa la cotizacion abierta al responsable de la oportunidad (y su comision): si es de otro vendedor,
+        # eso es reasignar la venta, que es de quien ve todo el embudo o asigna vendedores (no del supervisor)
+        cq, nuevo = db.get(Quote, s.quote_id), opportunity_seller(db, o)
+        mueve = cq is not None and cq.status not in ("convertida", "anulada") and nuevo is not None and cq.seller_id != nuevo
+        if mueve and not (p.can("crm_pipeline", "ver_todo") or p.can("sales", "asignar")):
+            raise HTTPException(409, f"La cotización {cq.number} es de otro vendedor: ligarla a {o.number} la reasigna y eso lo hace administración.")
 
     # lo que uno tiene y el otro no, se completa
     if not s.customer_id and o.customer_id:
@@ -605,10 +733,9 @@ def survey_link_opportunity(sid: int, data: LinkOppIn, p: Principal = Depends(re
     antes = o.status
     orden = ("nuevo", "contactado", "requiere_visita", "levantamiento", "cotizando", "enviada", "negociacion")
     if s.quote_id:
-        from ..models import Quote
-
         q = db.get(Quote, s.quote_id)
         o.quote_id = s.quote_id
+        sync_seller_from_opportunity(db, o)  # la cotizacion (si no esta convertida) pasa al responsable de la oportunidad
         if q and q.status != "anulada":
             o.amount = d(q.total)  # mismo criterio que el resto: el monto sigue a la cotizacion
         destino = "enviada" if q and q.status in ("enviada", "aprobada") else "cotizando"
@@ -1162,6 +1289,11 @@ def survey_to_quote(sid: int, data: ToQuoteIn, p: Principal = Depends(require("s
         raise HTTPException(409, "Este levantamiento ya generó una cotización")
     if not s.customer_id:
         raise HTTPException(422, "Asigná un cliente al levantamiento antes de cotizar")
+    o = db.get(Opportunity, s.opportunity_id) if s.opportunity_id else None
+    o = o if o is not None and o.tenant_id == p.tenant.id else None
+    if o and o.customer_id and o.customer_id != s.customer_id:
+        # la cotizacion seria de la vendedora de esa oportunidad y pisaria su monto: tienen que ser del mismo cliente
+        raise HTTPException(409, f"El levantamiento es de otro cliente que la oportunidad {o.number}: corregí el cliente o desligalo antes de cotizar")
     if s.review_status != "aprobado":
         estado = REVIEW_LABEL.get(s.review_status, s.review_status).lower()
         if not data.skip_review:
@@ -1207,19 +1339,168 @@ def survey_to_quote(sid: int, data: ToQuoteIn, p: Principal = Depends(require("s
         internal_notes=f"Levantamiento {s.number}.",
         lines=lines,
     )
-    q = docsvc.create_quote(db, p.tenant.id, p.user.id, payload)
-    s.quote_id, s.status = q.id, "cotizado"
-    if s.opportunity_id:
-        o = db.get(Opportunity, s.opportunity_id)
-        if o:
-            from .pipeline import advance_status
+    from ..services.ownership import opportunity_seller
 
-            # solo avanza: una oportunidad ya "enviada" o en negociacion no vuelve a "cotizando"
-            o.quote_id, o.amount = q.id, d(q.total)
-            advance_status(o, "cotizando")
-    audit(db, p.tenant.id, p.user.id, "quote", "survey", s.id, {"quote_id": q.id, "cost": str(costing["cost_total"])}, ip=p.ip)
+    # la cotizacion es de la vendedora de la oportunidad (la costea la oficina, pero la venta es de ella)
+    q = docsvc.create_quote(db, p.tenant.id, p.user.id, payload, seller_id=opportunity_seller(db, o) or p.user.id)
+    s.quote_id, s.status = q.id, "cotizado"
+    if o:
+        from .pipeline import advance_status, sync_seller_from_opportunity
+
+        # solo avanza: una oportunidad ya "enviada" o en negociacion no vuelve a "cotizando"
+        o.quote_id, o.amount = q.id, d(q.total)
+        sync_seller_from_opportunity(db, o)
+        advance_status(o, "cotizando")
+    audit(
+        db,
+        p.tenant.id,
+        p.user.id,
+        "quote",
+        "survey",
+        s.id,
+        {"quote_id": q.id, "cost": str(costing["cost_total"]), "margin_pct": str(costing["margin_pct"])},
+        ip=p.ip,
+    )
+    if o and q.seller_id == o.owner_id and q.seller_id != p.user.id:
+        _notify_quote_ready(db, p, o, q)
     db.commit()
     return {"quote_id": q.id, "number": q.number, "total": q.total, "cost_total": costing["cost_total"], "margin_pct": costing["margin_pct"]}
+
+
+def _notify_quote_ready(db: Session, p: Principal, o: Opportunity, q) -> None:
+    """Le avisa a la vendedora que su cotizacion salio (sin montos: el correo no es lugar para cifras internas).
+    Sin servicio de correo queda "simulado" como el resto; nunca frena la cotizacion."""
+    from ..core.config import settings
+
+    u = db.get(User, o.owner_id)
+    correo = (u.email or "").strip() if u and u.active else ""
+    if not correo:
+        return
+    enlace = f"{settings.public_base_url}/cotizaciones/{q.id}"
+    cuerpo = (
+        f"<p>La cotización <b>{html.escape(q.number)}</b> de tu oportunidad <b>{html.escape(o.number)}</b> · {html.escape(o.title)} "
+        f"ya está lista, con las líneas del levantamiento.</p>"
+        f'<p><a href="{html.escape(enlace)}">Abrir la cotización</a> para revisarla y enviarla al cliente.</p>'
+    )
+    queue_email(db, p.tenant, correo, f"Tu cotización {q.number} está lista · {o.number}", cuerpo, "quote", q.id)
+
+
+# ---------- Resumen para la vendedora (solo lectura, sin un solo costo) ----------
+_PASOS = {
+    "borrador": "El técnico todavía lo está llenando.",
+    "devuelto": "El supervisor lo devolvió con observaciones al técnico.",
+    "revision": "El supervisor lo está revisando. Después administración lo costea y sale tu cotización.",
+    "costeo": "Aprobado. Administración lo está costeando.",
+    "cotizado": "Ya tiene cotización.",
+    "cerrado": "El levantamiento está cerrado.",
+}
+_ORDEN_ITEMS = {"equipo": 0, "material": 1, "servicio": 2}
+
+
+def _paso(s: Survey) -> str:
+    if s.status == "cerrado":
+        return "cerrado"
+    if s.status == "cotizado" or s.quote_id:
+        return "cotizado"
+    if s.review_status == "devuelto":
+        return "devuelto"
+    if s.status == "enviado":
+        return "costeo" if s.review_status == "aprobado" else "revision"
+    return "borrador"
+
+
+def _photo_urls(v) -> list[str]:
+    """Solo URLs http(s) o rutas del sitio (nada de data: ni esquemas raros), como el informe preliminar."""
+    out = []
+    for x in v or []:
+        u = x.get("url") if isinstance(x, dict) else x
+        if isinstance(u, str) and (u.startswith(("http://", "https://", "/"))):
+            out.append(u)
+    return out
+
+
+@router.get("/surveys/{sid}/summary")
+def survey_summary(sid: int, p: Principal = Depends(require("field", "ver")), db: Session = Depends(get_db)):
+    """Levantamiento en resumen (13/10 33:16-33:40): lo que la vendedora necesita para hablar con su cliente.
+    Mismo orden que el informe preliminar: notas, equipos y materiales, personal y puntos con fotos. NUNCA costos,
+    precios, tarifas, transporte, viaticos ni el proveedor (D3): la prueba recorre esta respuesta buscandolos."""
+    return _summary_out(db, _survey(db, sid, p), p)
+
+
+def _summary_out(db: Session, s: Survey, p: Principal) -> dict:
+    """El resumen de un levantamiento que ya paso el control del registro (_survey). Tambien es lo que GET
+    /surveys/{id} le responde a la vendedora (solo_resumen)."""
+    from ..models import Quote
+    from ..services.media_access import sign_urls
+    from ..services.ownership import owns_doc
+
+    c = _customer_of(db, s)
+    t = db.get(User, s.technician_id) if s.technician_id else None
+    o = db.get(Opportunity, s.opportunity_id) if s.opportunity_id else None
+    spec = SPECS.get(s.kind, SPECS["otro"])
+    paso = _paso(s)
+
+    def fotos(v) -> list[str]:
+        return sign_urls(db, p.tenant.id, _photo_urls(v))  # ya paso el control del registro (_survey)
+
+    def num(v) -> str:
+        n = d(v)
+        return str(int(n)) if n == n.to_integral_value() else f"{n.normalize():f}"
+
+    items = sorted(s.items, key=lambda i: (_ORDEN_ITEMS.get(i.kind or "material", 1), i.id or 0))
+    puntos = [
+        {
+            "code": x.code,
+            "label": x.label,
+            "kind_label": SPECS.get(x.kind or s.kind, spec)["point_label"],
+            "notes": x.notes,
+            "photos": fotos(x.photos),
+        }
+        for x in s.points
+    ]
+    pendientes = []
+    if s.status not in ("cotizado", "cerrado"):
+        pendientes = [
+            {
+                "name": x["name"],
+                "quantity": num(x.get("add_quantity") if x.get("action") == "sumar" else x["quantity"]),
+                "unit": x.get("unit"),
+                "kind": x.get("kind"),
+                "reason": x.get("reason"),
+            }
+            for x in suggest_materials(s.kind, list(s.points), list(s.items), common=s.common)
+            if x.get("action") in ("nuevo", "sumar")
+        ]
+    cot = None
+    if s.quote_id:
+        q = db.get(Quote, s.quote_id)
+        if q and q.tenant_id == p.tenant.id:
+            # la de otro vendedor solo se nombra: sin id no se abre (y el detalle igual responde 404)
+            cot = {"id": q.id, "number": q.number, "status": q.status} if owns_doc(q, p) else {"number": q.number, "status": q.status}
+    return {
+        "id": s.id,
+        "number": s.number,
+        "kind": s.kind,
+        "kind_label": spec["label"],
+        "customer": c.name if c else (s.contact or {}).get("name"),
+        "site": s.site,
+        "visit_date": s.visit_date,
+        "technician": t.full_name if t else None,
+        "opportunity": {"id": o.id, "number": o.number, "title": o.title} if o and o.tenant_id == p.tenant.id else None,
+        "status": s.status,
+        "review_label": REVIEW_LABEL.get(s.review_status, s.review_status),
+        "paso": paso,
+        "paso_texto": _PASOS[paso],
+        "notes": s.notes,
+        "equipos": [{"name": i.name, "quantity": num(i.quantity), "unit": i.unit, "kind": i.kind or "material", "note": i.note} for i in items],
+        "personal": [
+            {"label": LABOR_TYPES[k][0], "people": v["people"], "days": num(v["days"])} for k, v in survey_labor(s).items() if v["people"] and d(v["days"]) > 0
+        ],
+        "puntos": puntos,
+        "fotos": fotos(s.photos),
+        "sugerencias_pendientes": pendientes,
+        "cotizacion": cot,
+    }
 
 
 # ---------- Ordenes de trabajo ----------

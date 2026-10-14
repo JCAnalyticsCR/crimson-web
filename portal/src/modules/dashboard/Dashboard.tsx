@@ -84,7 +84,7 @@ export default function Dashboard() {
           <h1 className="h1">{saludo}, {me?.user.full_name.split(" ")[0]}.</h1>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
             <span className="badge" style={{ background: `color-mix(in srgb, ${rm.tone} 14%, transparent)`, color: rm.tone, fontWeight: 700 }}>{rm.label}</span>
-            {d?.scope === "mine" && <span className="muted" style={{ fontSize: 13 }}>Estás viendo tus propias ventas y cobros.</span>}
+            {d?.scope === "mine" && <span className="muted" style={{ fontSize: 13 }}>Estás viendo solo lo tuyo: tus oportunidades, tus ventas y tus cobros.</span>}
           </div>
         </div>
         <div className="page-head__actions">
@@ -129,6 +129,17 @@ export default function Dashboard() {
             {d.pagos && <Kpi label={d.scope === "mine" ? "Mis cobros" : "Pagos"} data={d.pagos} cur={cur} />}
             <Kpi label={d.scope === "mine" ? "Mi facturación" : "Facturado"} data={d.facturado} cur={cur} light />
           </div>
+
+          {d.mi_embudo && (
+            /* misma cuenta que Oportunidades (pipeline_summary): el número del inicio y el del embudo no pueden diferir */
+            <Card title="Mi embudo" extra={<span className="meta">{d.mi_embudo.convertido ? "≈ al tipo de cambio de hoy" : "lo que llevás vendido"}</span>}>
+              <div className="eco">
+                <Link className="eco__box" to="/oportunidades"><span className="meta">Abiertas · {d.mi_embudo.abiertas}</span><b className="money">{fmtMoney(d.mi_embudo.monto, d.mi_embudo.moneda)}</b></Link>
+                <Link className="eco__box" to="/oportunidades"><span className="meta">Ponderado por probabilidad</span><b className="money">{fmtMoney(d.mi_embudo.ponderado, d.mi_embudo.moneda)}</b></Link>
+                <Link className="eco__box is-good" to="/oportunidades"><span className="meta">Ganado este mes · {d.mi_embudo.ganadas_mes}</span><b className="money">{fmtMoney(d.mi_embudo.ganado_mes, d.mi_embudo.moneda)}</b></Link>
+              </div>
+            </Card>
+          )}
 
           {d.gerencia && (
             <Card title="Cómo va Crimson" extra={<span className="meta">{verUtilidad ? "pipeline, obra y utilidad" : "pipeline y obra"}</span>}>

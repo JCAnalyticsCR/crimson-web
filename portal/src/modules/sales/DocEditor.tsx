@@ -18,11 +18,13 @@ const zeroUnexplained = (l: Line) => (l.treatment || "normal") === "normal" && !
 const nameRows = (s: string) => Math.min(4, Math.max(1, Math.ceil((s || "").length / 44)));
 type DocState = Partial<Quote & Invoice>;
 /* Lo que se manda al guardar (y lo que compara el borrador local). */
-const toPayload = (doc: DocState, lines: Line[]) => ({
+const toPayload = (doc: DocState, lines: Line[], asigna = false) => ({
   customer_id: doc.customer_id ?? null, currency: doc.currency || "CRC", discount_type: doc.discount_type || "percent", discount_value: doc.discount_value || "0",
   internal_notes: doc.internal_notes || null, external_notes: doc.external_notes || null, external_order: doc.external_order || null, activity_code: doc.activity_code || null,
   medical_exemption_card: !!doc.medical_exemption_card, issue_date: doc.issue_date || null, due_date: doc.due_date || null,
   lines: lines.filter((l) => l.name.trim()).map((l) => ({ product_id: l.product_id, code: l.code, name: l.name, description: l.description, unit: l.unit, quantity: l.quantity || "1", unit_price: l.unit_price || "0", discount_type: l.discount_type, discount_value: l.discount_value || "0", tax_rate: l.tax_rate || "13", treatment: l.treatment || "normal", supplied_by: l.treatment === "aportado" ? l.supplied_by || null : null })),
+  // sin dato (documento nuevo sin elegir) = quien lo crea; la API ignora el campo a quien no puede asignar
+  ...(asigna && doc.seller_id !== undefined ? { seller_id: doc.seller_id } : {}),
 });
 /* Al recuperar un borrador solo vuelve lo que el usuario escribe; numero, estado y versiones son del servidor. */
 const EDITABLE = ["customer_id", "currency", "discount_type", "discount_value", "internal_notes", "external_notes", "external_order", "activity_code", "medical_exemption_card", "issue_date", "due_date"] as const;
@@ -44,6 +46,9 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const [fx, setFx] = useState<{ sell: string; buy: string } | null>(null);
   const [limit, setLimit] = useState<{ limit: number; free: boolean } | null>(null);
   const [cargado, setCargado] = useState(isNew); // un documento existente no tiene borrador hasta que llega del servidor
+  /* vendedor responsable: lo elige solo quien tiene sales.asignar (el admin); los demas lo ven */
+  const asigna = allows("sales.asignar");
+  const [sellers, setSellers] = useState<{ id: number; name: string }[]>([]);
   const pending = doc.status === "por_aprobar";
   // grupoB: aceptada por el cliente = bloqueada (se deshace la respuesta en el panel Versiones)
   const accepted = isQ && (doc as Quote).acceptance_status === "aceptada";
@@ -55,6 +60,9 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     api<{ limit: number; free: boolean }>("/sales/discount-limit").then(setLimit).catch(() => {});
     if (!isNew) api<Quote & Invoice>(`/${isQ ? "quotes" : "invoices"}/${id}`).then(hydrate);
   }, [id, isNew, isQ]);
+  useEffect(() => {
+    if (asigna) api<{ sellers: { id: number; name: string }[] }>("/opportunities/meta/config").then((r) => setSellers(r.sellers)).catch(() => {});
+  }, [asigna]);
 
   /* Documento recibido de la API -> estado del editor (al abrir y cuando el panel Versiones lo cambia). */
   function hydrate(d: Quote & Invoice) {
@@ -64,7 +72,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     setLines(d.lines.map((l) => ({ ...l, quantity: num(l.quantity), unit_price: num(l.unit_price), discount_value: num(l.discount_value), tax_rate: num(l.tax_rate) })));
   }
 
-  const payload = useMemo(() => toPayload(doc, lines), [doc, lines]);
+  const payload = useMemo(() => toPayload(doc, lines, asigna), [doc, lines, asigna]);
 
   /* Borrador en este dispositivo (D1/D2): una cotizacion o factura nunca se autoguarda en el servidor (el PUT puede
      dejarla "por aprobar" y queda en la bitacora; la factura es un documento fiscal). Salir de la pagina deja la
@@ -74,7 +82,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     mode: "never",
     value: cargado ? { doc, lines } : null,
     idOf: (v) => (v.doc.id as number | undefined) ?? undefined,
-    body: (v) => toPayload(v.doc, v.lines),
+    body: (v) => toPayload(v.doc, v.lines, asigna),
     enabled: !locked && (allows("sales.editar") || (isNew && allows("sales.crear"))),
     label: (v) => v.doc.number || (isQ ? "La cotización nueva" : "La factura nueva"),
     apply: (v) => {
@@ -298,6 +306,20 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
             </div>
           </div></div>
 
+          {(!isNew || asigna) && (
+            <div className="card"><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div className="meta">Vendedor</div>
+              {asigna && !locked ? (
+                <select className="select" aria-label="Vendedor responsable" value={doc.seller_id == null ? "" : String(doc.seller_id)}
+                  onChange={(e) => setDoc({ ...doc, seller_id: e.target.value ? Number(e.target.value) : isNew ? undefined : null })}>
+                  <option value="">{isNew ? "Yo (quien la crea)" : "Sin vendedor (no comisiona)"}</option>
+                  {doc.seller_id != null && !sellers.some((s) => s.id === doc.seller_id) && <option value={doc.seller_id}>{doc.seller_name || `Usuario ${doc.seller_id}`}</option>}
+                  {sellers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              ) : <b style={{ fontSize: 14 }}>{doc.seller_name || "—"}</b>}
+              <p className="muted" style={{ fontSize: 12, margin: 0 }}>De quién es la venta: quién la ve y a quién se le comisiona.{asigna && !locked ? " «Sin vendedor» no le comisiona a nadie; quien la tecleó la sigue viendo." : ""}{asigna && !isQ && !locked ? " En una factura con pagos ya no cambia." : ""}</p>
+            </div></div>
+          )}
           {isQ && !isNew && doc.id != null && <QuoteVersions quote={doc as Quote} onQuote={(q) => hydrate(q as Quote & Invoice)} />}
           {pending && (
             <div className="card" style={{ borderColor: "var(--warn)" }}><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>

@@ -25,10 +25,17 @@ type Detail = Opp & {
   quote?: { id: number; number: string; status: string; total: string } | null;
   project?: { id: number; number: string; status: string } | null;
   allies?: Ally[]; sees_costs?: boolean;
+  /* «Solicitar levantamiento» pedido y sin atender todavía (lo decide la API, en cualquier etapa abierta) */
+  survey_request?: { at: string } | null;
 };
-type Board = { columns: { status: string; count: number; amount: string; weighted: string; items: Opp[] }[]; total: string; weighted: string };
+/* Totales en la moneda de la empresa (converted: alguna oportunidad estaba en otra moneda, al tipo de cambio de hoy). */
+type Board = {
+  columns: { status: string; count: number; amount: string; weighted: string; items: Opp[] }[]; total: string; weighted: string;
+  won_month?: { count: number; amount: string }; currency?: string; converted?: boolean;
+};
 type Pending = Opp & { days_late: number };
-type Meta = { states: string[]; sources: string[]; solutions: string[]; kinds?: string[]; sellers: { id: number; name: string }[]; can_see_all: boolean };
+/* sellers: responsables que se eligen al reasignar (solo quien ve todo el embudo); assignees: el equipo, para tareas como la solicitud de costo a un aliado. */
+type Meta = { states: string[]; sources: string[]; solutions: string[]; kinds?: string[]; sellers: { id: number; name: string }[]; assignees?: { id: number; name: string }[]; can_see_all: boolean };
 
 export const OPP_STATES: Record<string, string> = {
   nuevo: "Nuevo", contactado: "Contactado", requiere_visita: "Requiere visita", levantamiento: "En levantamiento",
@@ -94,10 +101,13 @@ export default function Opportunities() {
   const [owner, setOwner] = useState("");
   const [quoteCust, setQuoteCust] = useState<{ id: string; name: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [askSurvey, setAskSurvey] = useState<{ date: string; note: string } | null>(null);
   const canEdit = allows("crm_pipeline.editar");
   const openId = useRef<number | null>(null);
   openId.current = open?.id ?? null;
   const guardando = useRef<Promise<unknown> | null>(null); // autoguardado al cerrar (PUT + recarga del detalle), en vuelo
+  /* El vendedor no llena levantamientos: los pide (13/10 33:16) y los ve en resumen. Quien los llena los crea directo. */
+  const pideLevantamiento = allows("field.resumen") && !allows("field.crear");
 
   const load = useCallback(() => {
     // filtro por responsable: solo lo usa quien ve todo el embudo (el servidor igual limita al vendedor a lo suyo)
@@ -223,6 +233,20 @@ export default function Opportunities() {
     finally { setBusy(false); }
   };
 
+  /* "Solicitar levantamiento": avisa a quien revisa levantamientos y deja la oportunidad en "Requiere visita". */
+  const requestSurvey = async () => {
+    if (!open || !askSurvey || busy) return;
+    setBusy(true);
+    try {
+      const r = await api<Detail & { notified: number }>(`/opportunities/${open.id}/request-survey`, {
+        method: "POST", json: { preferred_date: askSurvey.date || null, note: askSurvey.note.trim() || null },
+      });
+      toast(r.notified ? `Listo: le avisamos a ${r.notified} ${r.notified === 1 ? "persona" : "personas"} de la oficina.` : "No hay supervisor ni administrador activo para avisar; avisá por otro medio.", r.notified ? "ok" : "bad");
+      setAskSurvey(null); await show(open.id); load();
+    } catch (e) { toast(e instanceof Error ? e.message : "No se pudo solicitar", "bad"); }
+    finally { setBusy(false); }
+  };
+
   /* Cliente nuevo sin salir de la oportunidad: el mismo POST /customers de la ficha de clientes, y queda elegido. */
   const createCustomer = async () => {
     if (!newCust || !form || newCust.name.trim().length < 2) return;
@@ -298,9 +322,13 @@ export default function Opportunities() {
 
       {board && (
         <div className="eco">
-          <div className="eco__box"><span className="meta">Embudo abierto</span><b className="money">{fmtMoney(board.total)}</b></div>
-          <div className="eco__box"><span className="meta">Ponderado por probabilidad</span><b className="money">{fmtMoney(board.weighted)}</b></div>
+          <div className="eco__box">
+            <span className="meta">{meta && !meta.can_see_all ? "Mi embudo abierto" : "Embudo abierto"}</span><b className="money">{fmtMoney(board.total, board.currency)}</b>
+            {board.converted && <span className="meta" title="Hay oportunidades en otra moneda">≈ al tipo de cambio de hoy</span>}
+          </div>
+          <div className="eco__box"><span className="meta">Ponderado por probabilidad</span><b className="money">{fmtMoney(board.weighted, board.currency)}</b></div>
           <div className="eco__box"><span className="meta">Oportunidades</span><b>{board.columns.reduce((s, c) => s + c.count, 0)}</b></div>
+          {board.won_month && <div className="eco__box is-good"><span className="meta">Ganado este mes · {board.won_month.count}</span><b className="money">{fmtMoney(board.won_month.amount, board.currency)}</b></div>}
           <button type="button" className="eco__box is-bad opp-eco-link" onClick={() => setView("pending")} title="Ver mis pendientes">
             <span className="meta">Con seguimiento vencido</span><b>{list.filter((o) => (dueIn(o.next_action_date) ?? 1) < 0 && !["ganada", "perdida"].includes(o.status)).length}</b>
           </button>
@@ -320,7 +348,7 @@ export default function Opportunities() {
                   onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver(null); }}
                   onDrop={(e) => { e.preventDefault(); const id = Number(e.dataTransfer.getData("text/plain")) || drag; setOver(null); setDrag(null); if (id) move(id, c.status); }}
                 >
-                  <div className="board__head"><b>{OPP_STATES[c.status] || c.status}</b><span>{c.count} · {fmtMoney(c.amount)}</span></div>
+                  <div className="board__head"><b>{OPP_STATES[c.status] || c.status}</b><span>{c.count} · {fmtMoney(c.amount, board.currency)}</span></div>
                   {c.items.length === 0 ? <p className="muted" style={{ fontSize: 12.5, padding: "0 4px" }}>Nada aquí.</p> : c.items.map(card)}
                 </div>
               ))}
@@ -386,7 +414,13 @@ export default function Opportunities() {
           <div className="opp-foot__links">
             <ArchiveActions kind="opportunity" id={open.id} number={open.number} archivedAt={open.archived_at} trashedAt={open.trashed_at} onDone={() => { setOpen(null); if (linked) setParams({}); load(); }} />
             {/* proyecto: levantamiento técnico; venta (o instalación que no lo necesita): cotización directa */}
-            {allows("field.crear") && open.kind !== "venta" && !open.surveys.length && <button className="btn btn--soft" onClick={() => nav(`/levantamientos?nuevo=${open.id}`)}><Icon d={I.box} />Levantamiento técnico</button>}
+            {/* cerrada (ganada o perdida) no se le liga un levantamiento: la API respondería 409 */}
+            {allows("field.crear") && open.kind !== "venta" && !open.surveys.length && !["ganada", "perdida"].includes(open.status) && <button className="btn btn--soft" onClick={() => nav(`/levantamientos?nuevo=${open.id}`)}><Icon d={I.box} />Levantamiento técnico</button>}
+            {pideLevantamiento && canEdit && open.kind !== "venta" && !open.surveys.length && !["ganada", "perdida"].includes(open.status) && (
+              open.survey_request
+                ? <span className="muted" style={{ fontSize: 13, alignSelf: "center" }}>Levantamiento solicitado · {fmtDate(open.survey_request.at)}</span>
+                : <button className="btn btn--soft" disabled={busy} onClick={() => setAskSurvey({ date: "", note: "" })}><Icon d={I.box} />Solicitar levantamiento</button>
+            )}
             {allows("sales.crear") && canEdit && !open.quote && !["ganada", "perdida"].includes(open.status) && <button className={`btn ${open.kind === "venta" ? "btn--crimson" : "btn--soft"}`} disabled={busy} onClick={makeQuote}><Icon d={I.quote} />Crear cotización</button>}
             {open.quote && <button className="btn btn--soft" onClick={() => nav(`/cotizaciones/${open.quote!.id}`)}>Ver cotización</button>}
             {open.project && <button className="btn btn--soft" onClick={() => nav(`/proyectos/${open.project!.id}`)}>Ver proyecto</button>}
@@ -472,7 +506,7 @@ export default function Opportunities() {
                 allies={open.allies || []}
                 canEdit={canEdit}
                 seesCosts={!!open.sees_costs}
-                sellers={meta?.sellers || []}
+                sellers={meta?.assignees || meta?.sellers || []}
                 quoteId={open.quote?.id ?? null}
                 onChange={(next) => { setOpen({ ...open, allies: next }); show(open.id).catch(() => undefined); load(); }}
               />
@@ -481,6 +515,19 @@ export default function Opportunities() {
               )}
             </div>
           </div>
+        </Modal>
+      )}
+
+      {askSurvey && open && (
+        <Modal title={`Solicitar levantamiento · ${open.number}`} onClose={() => setAskSurvey(null)} foot={<>
+          <button className="btn btn--ghost" onClick={() => setAskSurvey(null)}>Cancelar</button>
+          <button className="btn btn--crimson" disabled={busy} onClick={requestSurvey}>Solicitar</button>
+        </>}>
+          <p className="muted" style={{ fontSize: 13, margin: 0 }}>Le avisamos por correo a quien revisa los levantamientos. Cuando el técnico lo haga, lo ves en resumen desde esta oportunidad.</p>
+          <Field label="Fecha preferida (opcional)"><input className="input" type="date" value={askSurvey.date} onChange={(e) => setAskSurvey({ ...askSurvey, date: e.target.value })} /></Field>
+          <Field label="Nota para el técnico (opcional)" hint={`${askSurvey.note.length}/500`}>
+            <textarea className="textarea" maxLength={500} value={askSurvey.note} onChange={(e) => setAskSurvey({ ...askSurvey, note: e.target.value })} placeholder="Acceso por el portón trasero; el cliente prefiere en la mañana." />
+          </Field>
         </Modal>
       )}
 

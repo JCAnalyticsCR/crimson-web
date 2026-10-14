@@ -4,7 +4,7 @@ Columnas nuevas y nulas en support_ticket; tabla nueva work_order_time. Nada exi
 sin registro siguen calculando horas de inicio a fin.
 
 Revision ID: a4f7c2e9d613
-Revises: c5d18e3f7a2b
+Revises: b9e4d27c5a13
 Create Date: 2026-10-14 09:00:00
 """
 
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "a4f7c2e9d613"
-down_revision: str | None = "c5d18e3f7a2b"  # otros frentes tambien encadenan aqui: quien integre ultimo reencadena
+down_revision: str | None = "b9e4d27c5a13"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

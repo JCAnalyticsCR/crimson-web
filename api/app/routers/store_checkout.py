@@ -408,8 +408,19 @@ def put_checkout_cfg(data: CheckoutCfgIn, p: Principal = Depends(require("settin
 
 
 # ---------- Portal: pedidos web ----------
-def _staff_out(db: Session, o: Order) -> dict:
+def _invoice_visible(db: Session, o: Order, p: Principal | None) -> bool | None:
+    """La factura de un pedido se enlaza solo si es del que mira (services/ownership.py): el vendedor ve todos los
+    pedidos de la tienda, pero la factura que hizo otro le sale como numero sin enlace (abrirla seria un 404)."""
+    if not o.invoice_id or p is None:
+        return None
+    from ..services.ownership import visible_invoice_ids
+
+    return o.invoice_id in visible_invoice_ids(db, p, [o.invoice_id])
+
+
+def _staff_out(db: Session, o: Order, p: Principal | None = None) -> dict:
     out = _order_out(o)
+    out["invoice_visible"] = _invoice_visible(db, o, p)
     out["emails"] = so.email_status(db, o)
     out["needs_proof"] = o.payment_kind in so.NEEDS_PROOF
     out["next"] = so.next_states(o)
@@ -460,7 +471,11 @@ def list_orders(
     rows = db.scalars(select(Order).where(*w).order_by(Order.id.desc()).limit(limit)).all()
     counts = dict(db.execute(select(Order.status, func.count()).where(Order.tenant_id == p.tenant.id, Order.channel == "tienda").group_by(Order.status)).all())
     attention = db.scalar(select(func.count()).select_from(Order).where(*so.attention_where(p.tenant.id))) or 0
-    return {"items": [_order_out(o) for o in rows], "counts": counts, "por_atender": attention, "labels": so.STATUS_LABEL}
+    from ..services.ownership import visible_invoice_ids
+
+    mias = visible_invoice_ids(db, p, [o.invoice_id for o in rows])  # una consulta para toda la pagina
+    items = [{**_order_out(o), "invoice_visible": (o.invoice_id in mias) if o.invoice_id else None} for o in rows]
+    return {"items": items, "counts": counts, "por_atender": attention, "labels": so.STATUS_LABEL}
 
 
 def _get(db: Session, p: Principal, oid: int) -> Order:
@@ -473,7 +488,7 @@ def _get(db: Session, p: Principal, oid: int) -> Order:
 @router.get("/store-orders/{oid}")
 def get_order(oid: int, p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
     o = _get(db, p, oid)
-    out = _staff_out(db, o)
+    out = _staff_out(db, o, p)
     return out
 
 
@@ -529,7 +544,7 @@ def set_status(oid: int, data: StatusIn, p: Principal = Depends(require("sales",
         notify=data.notify,
     )
     db.commit()
-    out = _staff_out(db, o)
+    out = _staff_out(db, o, p)
     out["email_result"] = {"to": mail.to, "status": mail.status, "error": mail.error} if mail else None
     return out
 

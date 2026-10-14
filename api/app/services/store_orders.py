@@ -703,7 +703,8 @@ def invoice_order(db: Session, t: Tenant, o: Order, user_id: int | None, doc_typ
             for ln in o.lines
         ],
     )
-    invoice = docsvc.create_invoice(db, t.id, user_id, payload, doc_type)
+    # venta de la tienda en linea: sin vendedor (no comisiona). Si la factura la vendedora, la ve por created_by.
+    invoice = docsvc.create_invoice(db, t.id, user_id, payload, doc_type, seller_id=None)
     # la capa de inventario de la tienda descuenta solo lo que falte (nunca dos veces si ya se despacho)
     store_inventory.deduct_for_order_invoice(db, o, invoice, user_id)
     o.invoice_id = invoice.id

@@ -177,10 +177,15 @@ def recompute_balance(inv: Invoice) -> None:
             inv.status = "creado"
 
 
-def create_quote(db: Session, tenant_id: int, user_id: int | None, payload: DocumentIn) -> Quote:
+# "sin dato": el vendedor responsable es quien teclea. None es un valor valido (venta sin vendedor: tienda, API).
+_SELF = object()
+
+
+def create_quote(db: Session, tenant_id: int, user_id: int | None, payload: DocumentIn, *, seller_id=_SELF) -> Quote:
     number, _ = next_number(db, tenant_id, "COT")
     days = payload.valid_days or 15
     q = Quote(tenant_id=tenant_id, number=number, created_by=user_id or None, status="creado")
+    q.seller_id = (user_id or None) if seller_id is _SELF else seller_id  # services/ownership.py
     apply_document(db, q, payload, QuoteLine, tenant_id)
     q.due_date = q.due_date or q.issue_date + timedelta(days=days)
     db.add(q)
@@ -189,9 +194,12 @@ def create_quote(db: Session, tenant_id: int, user_id: int | None, payload: Docu
     return q
 
 
-def create_invoice(db: Session, tenant_id: int, user_id: int | None, payload: DocumentIn, doc_type: str = "FE", quote: Quote | None = None) -> Invoice:
+def create_invoice(
+    db: Session, tenant_id: int, user_id: int | None, payload: DocumentIn, doc_type: str = "FE", quote: Quote | None = None, *, seller_id=_SELF
+) -> Invoice:
     number, consecutive = next_number(db, tenant_id, doc_type)
     inv = Invoice(tenant_id=tenant_id, number=number, consecutive=consecutive, doc_type=doc_type, created_by=user_id or None, status="creado")
+    inv.seller_id = (user_id or None) if seller_id is _SELF else seller_id  # services/ownership.py
     inv.sale_condition = payload.sale_condition or "01"
     inv.credit_days = payload.credit_days or 0
     inv.payment_method = payload.payment_method or "01"
@@ -243,7 +251,10 @@ def convert_quote(db: Session, tenant_id: int, user_id: int, q: Quote) -> Invoic
     if q.status in ("convertida", "anulada"):
         raise HTTPException(409, f"La cotizacion esta {q.status}")
     units.check_ready(q, "convertir la cotización")
-    inv = create_invoice(db, tenant_id, user_id, quote_to_payload(q), quote=q)
+    # la factura hereda el vendedor de su cotizacion (y con el, la comision), la convierta quien la convierta. Tal cual:
+    # "Sin vendedor" (lo eligio el admin) sigue sin vendedor; no vuelve a quien la tecleo. Las cotizaciones de antes
+    # de la migracion ya tienen vendedor (el relleno puso created_by o el responsable de la oportunidad).
+    inv = create_invoice(db, tenant_id, user_id, quote_to_payload(q), quote=q, seller_id=q.seller_id)
     q.status = "convertida"
     q.converted_invoice_id = inv.id
     audit(db, tenant_id, user_id, "convert", "quote", q.id, {"invoice_id": inv.id})

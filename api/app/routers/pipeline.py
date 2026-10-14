@@ -5,7 +5,8 @@ que es lo que evita que una cotizacion se enfrie sin que nadie la note (el worke
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+import html
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -17,7 +18,9 @@ from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..models import Customer, Opportunity, Project, Quote, Survey, User
 from ..services.archive import live
-from ..services.documents import CR, audit
+from ..services.documents import CR, audit, today_fx
+from ..services.mail import notify_roles
+from ..services.ownership import opportunity_seller
 from ..services.totals import d
 
 router = APIRouter(tags=["oportunidades"])
@@ -52,7 +55,9 @@ def _own(db: Session, oid: int, p: Principal) -> Opportunity:
     o = db.get(Opportunity, oid)
     if not o or o.tenant_id != p.tenant.id:
         raise HTTPException(404, "Oportunidad no encontrada")
-    if not p.can("crm_pipeline", "ver_todo") and o.owner_id not in (None, p.user.id):
+    # Sin "ver_todo" (el vendedor) solo las suyas. Las que no tienen responsable (las solicitudes que entran por la
+    # tienda) las ve y las asigna quien ve todo el embudo: antes cualquier vendedor las abria, editaba y cotizaba.
+    if not p.can("crm_pipeline", "ver_todo") and o.owner_id != p.user.id:
         raise HTTPException(404, "Oportunidad no encontrada")
     return o
 
@@ -87,6 +92,7 @@ def _out(db: Session, o: Opportunity) -> dict:
         "currency": o.currency,
         "probability": o.probability,
         "status": o.status,
+        "closed_at": o.closed_at,
         "next_action": o.next_action,
         "next_action_date": o.next_action_date,
         "lost_reason": o.lost_reason,
@@ -154,6 +160,75 @@ def _scope(stmt, p: Principal, owner_id: int | None, mine: bool = False):
     return stmt
 
 
+class _ToCompany:
+    """Montos de oportunidades a la moneda de la empresa con el tipo de cambio del dia (las oportunidades no guardan
+    tipo de cambio). Cachea el tipo por moneda dentro de una misma respuesta. Sin tipo de cambio cargado today_fx da
+    1: igual se marca convertido (el portal muestra "≈") y no se inventa un tipo."""
+
+    def __init__(self, db: Session, tenant) -> None:
+        self.db, self.base, self.rates, self.converted = db, tenant.default_currency or "CRC", {}, False
+
+    def _rate(self, cur: str) -> Decimal:  # colones por unidad de esa moneda
+        if cur not in self.rates:
+            self.rates[cur] = d(today_fx(self.db, cur)[0])
+        return self.rates[cur]
+
+    def __call__(self, amount, currency: str | None) -> Decimal:
+        cur = currency or self.base
+        if cur == self.base:
+            return d(amount)
+        self.converted = True
+        v = d(amount) * self._rate(cur)
+        if self.base != "CRC" and self._rate(self.base):
+            v = v / self._rate(self.base)
+        return v
+
+
+def _open_rows(db: Session, p: Principal, owner_id: int | None = None, kind: str | None = None) -> list[Opportunity]:
+    """Oportunidades abiertas con el MISMO alcance que la lista (_scope): el embudo y el inicio cuentan esto."""
+    stmt = select(Opportunity).where(Opportunity.tenant_id == p.tenant.id, Opportunity.status.in_(OPEN_STATES), live(Opportunity))
+    stmt = _scope(stmt, p, owner_id)
+    if kind:
+        stmt = stmt.where(Opportunity.kind == kind)
+    return list(db.scalars(stmt).all())
+
+
+def _closed_this_month(db: Session, p: Principal, status: str, owner_id: int | None = None, kind: str | None = None) -> list[Opportunity]:
+    """Ganadas (o perdidas) desde el primer dia del mes en hora de Costa Rica, con el mismo alcance."""
+    hoy = datetime.now(CR)
+    m0 = datetime(hoy.year, hoy.month, 1, tzinfo=CR).astimezone(UTC)
+    stmt = select(Opportunity).where(Opportunity.tenant_id == p.tenant.id, Opportunity.status == status, Opportunity.closed_at >= m0, live(Opportunity))
+    stmt = _scope(stmt, p, owner_id)
+    if kind:
+        stmt = stmt.where(Opportunity.kind == kind)
+    return list(db.scalars(stmt).all())
+
+
+def _money(v: Decimal) -> Decimal:
+    return d(v).quantize(Decimal("0.01"))
+
+
+def pipeline_summary(db: Session, p: Principal, owner_id: int | None = None, kind: str | None = None) -> dict:
+    """Totales del embudo con el MISMO alcance que la lista (_scope) y lo vendido este mes. Montos a la moneda de la
+    empresa con el tipo de cambio del dia. Lo usan el inicio del vendedor (mi_embudo) y, con las mismas piezas, el
+    tablero: un numero y el otro no pueden diferir."""
+    conv = _ToCompany(db, p.tenant)
+    rows = _open_rows(db, p, owner_id, kind)
+    ganadas = _closed_this_month(db, p, "ganada", owner_id, kind)
+    perdidas = _closed_this_month(db, p, "perdida", owner_id, kind)
+    montos = [(conv(o.amount, o.currency), o.probability) for o in rows]
+    return {
+        "abiertas": len(rows),
+        "monto": _money(sum((v for v, _ in montos), Decimal(0))),
+        "ponderado": _money(sum((v * pr / 100 for v, pr in montos), Decimal(0))),
+        "ganadas_mes": len(ganadas),
+        "ganado_mes": _money(sum((conv(o.amount, o.currency) for o in ganadas), Decimal(0))),
+        "perdidas_mes": len(perdidas),
+        "moneda": conv.base,
+        "convertido": conv.converted,
+    }
+
+
 @router.get("/opportunities/board")
 def board(
     owner_id: int | None = None,
@@ -161,12 +236,11 @@ def board(
     p: Principal = Depends(require("crm_pipeline", "ver")),
     db: Session = Depends(get_db),
 ):
-    """Embudo por estado: monto total y monto ponderado por probabilidad."""
-    stmt = select(Opportunity).where(Opportunity.tenant_id == p.tenant.id, Opportunity.status.in_(OPEN_STATES), live(Opportunity))
-    stmt = _scope(stmt, p, owner_id)
-    if kind:
-        stmt = stmt.where(Opportunity.kind == kind)
-    rows = db.scalars(stmt).all()
+    """Embudo por estado: monto total y monto ponderado por probabilidad (en la moneda de la empresa), y lo ganado
+    este mes. El vendedor solo suma lo suyo: filas y totales salen del mismo alcance (_scope)."""
+    conv = _ToCompany(db, p.tenant)
+    rows = _open_rows(db, p, owner_id, kind)
+    en_base = {o.id: conv(o.amount, o.currency) for o in rows}
     cols = []
     for st in OPEN_STATES:
         items = [o for o in rows if o.status == st]
@@ -174,15 +248,19 @@ def board(
             {
                 "status": st,
                 "count": len(items),
-                "amount": sum((d(o.amount) for o in items), Decimal(0)),
-                "weighted": sum((d(o.amount) * o.probability / 100 for o in items), Decimal(0)).quantize(Decimal("0.01")),
+                "amount": _money(sum((en_base[o.id] for o in items), Decimal(0))),
+                "weighted": _money(sum((en_base[o.id] * o.probability / 100 for o in items), Decimal(0))),
                 "items": [_out(db, o) for o in items][:25],
             }
         )
+    ganadas = _closed_this_month(db, p, "ganada", owner_id, kind)
     return {
         "columns": cols,
-        "total": sum((d(o.amount) for o in rows), Decimal(0)),
-        "weighted": sum((d(o.amount) * o.probability / 100 for o in rows), Decimal(0)).quantize(Decimal("0.01")),
+        "total": _money(sum(en_base.values(), Decimal(0))),
+        "weighted": _money(sum((en_base[o.id] * o.probability / 100 for o in rows), Decimal(0))),
+        "won_month": {"count": len(ganadas), "amount": _money(sum((conv(o.amount, o.currency) for o in ganadas), Decimal(0)))},
+        "currency": conv.base,
+        "converted": conv.converted,
     }
 
 
@@ -244,6 +322,11 @@ def get_one(oid: int, p: Principal = Depends(require("crm_pipeline", "ver")), db
         {"id": s.id, "number": s.number, "kind": s.kind, "status": s.status}
         for s in db.scalars(select(Survey).where(Survey.opportunity_id == o.id, live(Survey)))
     ]
+    from .fieldwork import pending_survey_request  # import local: fieldwork ya importa de aqui
+
+    # «Solicitar levantamiento» ya pedido y sin atender (en cualquier etapa abierta: el portal no lo infiere del estado)
+    req = pending_survey_request(db, o)
+    out["survey_request"] = {"at": req.at} if req else None
     if o.quote_id:
         q = db.get(Quote, o.quote_id)
         out["quote"] = {"id": q.id, "number": q.number, "status": q.status, "total": q.total} if q else None
@@ -313,6 +396,7 @@ def _reassign(db: Session, p: Principal, o: Opportunity, uid: int) -> None:
     nuevo = _check_owner(db, p, uid)
     antes = db.get(User, o.owner_id) if o.owner_id else None
     o.owner_id = uid
+    sync_seller_from_opportunity(db, o)  # la cotizacion abierta pasa al nuevo responsable; lo facturado no
     _log(o, p.user.full_name, f"Reasignada de {antes.full_name if antes else 'nadie'} a {nuevo.full_name}")
     audit(db, p.tenant.id, p.user.id, "assign", "opportunity", o.id, {"de": antes.id if antes else None, "a": uid}, ip=p.ip)
 
@@ -365,8 +449,11 @@ def create_quote(oid: int, data: OppQuoteIn, p: Principal = Depends(require("sal
         p.tenant.id,
         p.user.id,
         DocumentIn(customer_id=cid, currency=o.currency or "CRC", internal_notes=f"Oportunidad {o.number} · {o.title}"[:500]),
+        # la cotizacion de una oportunidad es de su responsable (si puede ser vendedor; si no, de quien la crea)
+        seller_id=opportunity_seller(db, o) or p.user.id,
     )
     o.quote_id = q.id
+    sync_seller_from_opportunity(db, o)
     antes = advance_status(o, "cotizando")
     _log(o, p.user.full_name, f"Cotización {q.number} creada desde la oportunidad")
     if antes:
@@ -408,7 +495,7 @@ def touch(oid: int, data: TouchIn, p: Principal = Depends(require("crm_pipeline"
 def meta(p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = Depends(get_db)):
     from ..models import TenantUser
 
-    sellers = [
+    equipo = [
         {"id": m.user.id, "name": m.user.full_name}
         for m in db.scalars(
             select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(("admin", "ventas", "supervisor")))
@@ -419,9 +506,110 @@ def meta(p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = D
         "sources": ["Referido", "Sitio web", "WhatsApp", "Llamada", "Cliente actual", "Feria", "Alianza"],
         "solutions": ["cctv", "redes", "acceso", "asistencia", "ups", "cableado", "anpr", "otro"],
         "kinds": list(KINDS),
-        "sellers": sellers,
+        # responsable de la oportunidad: lo elige solo quien reasigna (ve todo el embudo); el vendedor no elige
+        "sellers": equipo if p.can("crm_pipeline", "ver_todo") else [],
+        # a quien se le asigna una tarea de la oportunidad (p. ej. la solicitud de costo a un aliado): el equipo, para
+        # todos. Solo nombres: no dice nada de las oportunidades de nadie.
+        "assignees": equipo,
         "can_see_all": p.can("crm_pipeline", "ver_todo"),
     }
+
+
+def sync_seller_from_opportunity(db: Session, o: Opportunity) -> None:
+    """La cotizacion ligada a una oportunidad es del responsable de la oportunidad (13/10 32:38). Lo ya facturado no
+    se mueve: la factura conserva su vendedor (y su comision). Un responsable que no puede ser vendedor (desactivado,
+    de un cliente o de un aliado: _check_owner solo pide miembro activo) no se lleva la cotizacion ni la comision."""
+    nuevo = opportunity_seller(db, o)
+    if not o.quote_id or not nuevo:
+        return
+    q = db.get(Quote, o.quote_id)
+    if q and q.status not in ("convertida", "anulada"):
+        q.seller_id = nuevo
+
+
+class SurveyRequestIn(BaseModel):
+    note: str | None = Field(None, max_length=500)
+    preferred_date: date | None = None
+
+
+@router.post("/opportunities/{oid}/request-survey")
+def request_survey(oid: int, data: SurveyRequestIn, p: Principal = Depends(require("crm_pipeline", "editar")), db: Session = Depends(get_db)):
+    """La vendedora no llena levantamientos: los pide desde su oportunidad (13/10 33:16). Avisa por correo a quien
+    revisa levantamientos (los mismos roles que reciben "nuevo levantamiento") y deja la oportunidad en
+    "requiere visita" (si ya iba mas adelante, p. ej. cotizando, se queda ahi). Sin montos en el aviso. Hasta que
+    alguien la atienda (fieldwork.pending_survey_request) el equipo de campo interno (supervisor, tecnico) puede crear
+    y ligar ese levantamiento aunque la oportunidad no le salga en el embudo, en cualquier etapa abierta: la regla es
+    la misma en los dos lados."""
+    from ..core.config import settings
+    from ..core.ratelimit import survey_request_limiter
+    from ..models import AuditLog
+    from .fieldwork import reviewer_roles  # import local: fieldwork ya importa de aqui
+    from .projects import SOLUCIONES
+
+    o = _own(db, oid, p)
+    # dos clics (o dos pestanas) a la vez: el segundo espera al primero y ve su registro de "ya se pidio"
+    db.execute(select(Opportunity.id).where(Opportunity.id == o.id).with_for_update())
+    if (o.kind or "proyecto") == "venta":
+        raise HTTPException(409, "Una oportunidad de solo venta no lleva levantamiento: cotizala directo.")
+    if o.status in ("ganada", "perdida"):
+        raise HTTPException(409, "La oportunidad ya está cerrada.")
+    vivo = db.scalar(select(Survey).where(Survey.tenant_id == p.tenant.id, Survey.opportunity_id == o.id, live(Survey)).limit(1))
+    if vivo:
+        raise HTTPException(409, f"Ya tiene el levantamiento {vivo.number}.")
+    desde = datetime.now(UTC) - timedelta(hours=24)
+    reciente = db.scalar(
+        select(AuditLog.id)
+        .where(
+            AuditLog.tenant_id == p.tenant.id,
+            AuditLog.action == "request_survey",
+            AuditLog.entity == "opportunity",
+            AuditLog.entity_id == o.id,
+            AuditLog.at >= desde,
+        )
+        .limit(1)
+    )
+    if reciente:
+        raise HTTPException(409, "Ya se pidió en las últimas 24 horas; la oficina ya recibió el aviso.")
+    # cada solicitud es un correo a supervisores y administradores con texto del vendedor: tope por persona (crear
+    # oportunidades para pedir en cada una no inunda la bandeja de la oficina)
+    survey_request_limiter.hit(f"{p.tenant.id}:{p.user.id}")
+
+    antes = advance_status(o, "requiere_visita")  # solo avanza
+    nota = (data.note or "").strip()
+    texto = "Solicitó levantamiento técnico"
+    if data.preferred_date:
+        texto += f" para el {data.preferred_date:%d/%m/%Y}"
+    if nota:
+        texto += f": {nota}"
+    _log(o, p.user.full_name, texto)
+
+    c = db.get(Customer, o.customer_id) if o.customer_id else None
+    cliente = c.name if c else (o.contact or {}).get("name") or "sin cliente"
+    solucion = SOLUCIONES.get(o.solution or "", o.solution or "—")
+    enlace = f"{settings.public_base_url}/levantamientos?nuevo={o.id}"
+    cuerpo = (
+        f"<p>{html.escape(p.user.full_name)} pide un levantamiento técnico para la oportunidad <b>{html.escape(o.number)}</b> "
+        f"· {html.escape(o.title)}.</p>"
+        f"<p>Cliente: {html.escape(cliente)}<br>Sitio: {html.escape(o.site or '—')}<br>Solución: {html.escape(solucion)}<br>"
+        f"Fecha preferida: {html.escape(data.preferred_date.strftime('%d/%m/%Y') if data.preferred_date else 'sin preferencia')}</p>"
+        + (f"<p>Nota: {html.escape(nota)}</p>" if nota else "")
+        + f'<p><a href="{html.escape(enlace)}">Crear el levantamiento</a> (ya viene con el cliente de la oportunidad).</p>'
+    )
+    n = notify_roles(db, p.tenant, reviewer_roles(p.tenant), f"Solicitud de levantamiento {o.number} · {cliente}", cuerpo, "opportunity", o.id)
+    audit(
+        db,
+        p.tenant.id,
+        p.user.id,
+        "request_survey",
+        "opportunity",
+        o.id,
+        {"preferred_date": data.preferred_date.isoformat() if data.preferred_date else None, "notified": n},
+        ip=p.ip,
+    )
+    if antes:
+        audit(db, p.tenant.id, p.user.id, "status", "opportunity", o.id, {"de": antes, "a": o.status}, ip=p.ip)
+    db.commit()
+    return {**_out(db, o), "notified": n}
 
 
 def sync_amount_from_quote(db: Session, q: Quote) -> None:

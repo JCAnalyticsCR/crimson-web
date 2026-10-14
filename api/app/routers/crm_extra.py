@@ -137,8 +137,10 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
 
     c = _customer(db, cid, p.tenant.id)
     tid = p.tenant.id
-    own_i = [Invoice.created_by == p.user.id] if not p.sees_all_sales else []
-    own_q = [Quote.created_by == p.user.id] if not p.sees_all_sales else []
+    from ..services.ownership import doc_scope
+
+    own_i = [doc_scope(Invoice, p)]  # vendedor responsable, igual que Facturas y Cotizaciones
+    own_q = [doc_scope(Quote, p)]
     # el vendedor (sin crm_pipeline.ver_todo) solo ve sus oportunidades, igual que en el embudo
     own_o = [Opportunity.owner_id == p.user.id] if not p.can("crm_pipeline", "ver_todo") else []
     invs = (

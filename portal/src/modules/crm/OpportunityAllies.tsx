@@ -40,7 +40,7 @@ const searchCompanies = async (q: string): Promise<LookupItem[]> => {
 
 type AllyForm = { id?: number; company: number; company_name: string; role: string; scope: string; scope_lines: string[]; contacts: Record<string, Contact> };
 type ReqForm = {
-  id?: number; ally_id: number; ally: string; what: string; responsible_id: string; due_date: string; status: string;
+  id?: number; ally_id: number; ally: string; what: string; responsible_id: string; responsible?: string | null; due_date: string; status: string;
   amount: string; currency: string; valid_until: string; exclusions: string; attachments: { id: number; url: string; filename: string }[];
 };
 
@@ -95,7 +95,7 @@ export function AlliesPanel({ oppId, allies, canEdit, seesCosts, sellers, quoteI
   const openReq = (a: Ally, r?: CostRequest) => {
     setForm(null);
     setReq(r
-      ? { id: r.id, ally_id: a.id, ally: a.name, what: r.what, responsible_id: r.responsible_id ? String(r.responsible_id) : "", due_date: r.due_date || "", status: r.status,
+      ? { id: r.id, ally_id: a.id, ally: a.name, what: r.what, responsible_id: r.responsible_id ? String(r.responsible_id) : "", responsible: r.responsible, due_date: r.due_date || "", status: r.status,
           amount: r.amount != null ? String(Number(r.amount)) : "", currency: r.currency || "USD", valid_until: r.valid_until || "", exclusions: r.exclusions || "", attachments: r.attachments || [] }
       : { ally_id: a.id, ally: a.name, what: "", responsible_id: me ? String(me.user.id) : "", due_date: "", status: "solicitado", amount: "", currency: "USD", valid_until: "", exclusions: "", attachments: [] });
   };
@@ -231,6 +231,8 @@ export function AlliesPanel({ oppId, allies, canEdit, seesCosts, sellers, quoteI
               <select className="select" value={req.responsible_id} onChange={(e) => setReq({ ...req, responsible_id: e.target.value })}>
                 <option value="">Sin asignar</option>
                 {me && !sellers.some((s) => s.id === me.user.id) && <option value={me.user.id}>{me.user.full_name}</option>}
+                {/* el responsable actual aunque ya no este en la lista (inactivo): si no, el select diria "Sin asignar" */}
+                {req.responsible_id && req.responsible_id !== String(me?.user.id) && !sellers.some((s) => String(s.id) === req.responsible_id) && <option value={req.responsible_id}>{req.responsible || `Usuario ${req.responsible_id}`}</option>}
                 {sellers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </Field>

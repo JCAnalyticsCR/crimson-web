@@ -4,7 +4,9 @@
    - no se autoguarda lo que el flujo no deja editar (cotizado o cerrado), lo que esta en la papelera ni lo que el
      usuario no puede editar despues de crearlo (vendedor: lo crea una sola vez, al cerrar);
    - si la API rechaza un dato (422: un numero mal escrito, un codigo vacio), se guarda todo lo demas y se avisa
-     que dato quedo afuera; lo escrito completo sigue en el formulario y en la copia del dispositivo. */
+     que dato quedo afuera; lo escrito completo sigue en el formulario y en la copia del dispositivo;
+   - si al crearlo la oportunidad ya no se puede ligar (cerrada, la solicitud la atendio otro), se crea sin ella y
+     se avisa (createSurvey): lo hecho en sitio no se pierde por el enlace. */
 import { useCallback, useRef } from "react";
 import { api, ApiError } from "../../lib/api";
 import { useSession } from "../../app/session";
@@ -65,6 +67,27 @@ function blankBad(b: Body, msg: string): boolean {
   return done;
 }
 
+/* Crear un levantamiento ligado a una oportunidad. La API valida la oportunidad al crear: 404 si quien guarda ya no
+   la puede ligar (otro levantamiento atendió la solicitud) y 409 si se cerró (ganada o perdida) o es de otro cliente.
+   El portal la revisa una sola vez, al abrir el borrador, y en un borrador nuevo no hay cómo quitarla: sin esto cada
+   guardado fallaría igual y lo hecho en sitio no llegaría al servidor. Se crea sin ligar (json queda sin la
+   oportunidad, para lo que se reintente después) y onUnlink recibe el motivo para avisar. Cualquier otro error sigue
+   su curso (si el 404 era del cliente, el segundo intento lo vuelve a dar). */
+export async function createSurvey<R>(json: Body, send: (json: Body) => Promise<R>, onUnlink: (why: string) => void): Promise<R> {
+  try {
+    return await send(json);
+  } catch (e) {
+    if (!json.opportunity_id || !(e instanceof ApiError && (e.status === 404 || e.status === 409))) throw e;
+    json.opportunity_id = null;
+    onUnlink(e.message);
+    return send(json);
+  }
+}
+
+/* El aviso de arriba, igual desde el autoguardado y desde el botón Guardar. */
+export const unlinkedNotice = (why: string, number: string) =>
+  `No se pudo ligar a la oportunidad (${why}). ${number} quedó guardado sin ella; si corresponde, ligalo desde el levantamiento.`;
+
 export function useSurveyAutosave<D extends DraftLike>({ draft, setDraft, body, onSaved }: {
   draft: D | null;
   setDraft: (fn: (d: D | null) => D | null) => void;
@@ -89,10 +112,13 @@ export function useSurveyAutosave<D extends DraftLike>({ draft, setDraft, body, 
       });
     };
     const full = body(d);
+    // nuevo: si la oportunidad ya no se puede ligar, se crea sin ella y se avisa (createSurvey)
+    const link = { lost: "" };
+    const put = (json: Body) => (id ? send(json) : createSurvey(json, send, (why) => { link.lost = why; }));
     let s: SurveyResp;
     let warning: string | null = null;
     try {
-      s = await send(full);
+      s = await put(full);
     } catch (e) {
       if (!(e instanceof ApiError && e.status === 422)) throw e;
       // se guarda lo valido; lo que la API rechaza queda afuera y se avisa
@@ -101,7 +127,7 @@ export function useSurveyAutosave<D extends DraftLike>({ draft, setDraft, body, 
       let last: unknown = e;
       let ok: SurveyResp | null = null;
       for (let i = 0; i < 8 && !ok; i++) {
-        try { ok = await send(part); }
+        try { ok = await put(part); }
         catch (e2) {
           if (!(e2 instanceof ApiError && e2.status === 422)) throw e2;
           last = e2;
@@ -114,13 +140,14 @@ export function useSurveyAutosave<D extends DraftLike>({ draft, setDraft, body, 
       warning = notes.join(" · ");
     }
     const created = !id;
+    if (link.lost) toast(unlinkedNotice(link.lost, s.number), "bad");
     if (ctx.isCurrent()) {
-      setDraft((cur) => (cur ? ({ ...cur, id: s.id, number: s.number, status: s.status, review: pickReview(s), template_version: s.template_version } as D) : cur));
+      setDraft((cur) => (cur ? ({ ...cur, id: s.id, number: s.number, status: s.status, review: pickReview(s), template_version: s.template_version, ...(link.lost ? { opportunity_id: "" } : {}) } as D) : cur));
     }
     const now = Date.now();
     if (onSaved && (created || ctx.reason === "close" || now - lastNotice.current > 15_000)) { lastNotice.current = now; onSaved(); }
     return { id: s.id, warning };
-  }, [body, onSaved, setDraft]);
+  }, [body, onSaved, setDraft, toast]);
 
   const auto = useAutosave<D>({
     value: draft,

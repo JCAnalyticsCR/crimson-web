@@ -9,9 +9,11 @@ import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 
 type Row = {
   id: number; user_id: number; user: string | null; invoice: string | null; invoice_id: number | null;
-  base: string; base_amount: string | null; percent: string; amount: string; currency: string; earned_on: string; status: string; paid_on: string | null;
+  base: string; base_amount: string | null; percent: string | null; amount: string; currency: string; earned_on: string; status: string; paid_on: string | null;
 };
-type Rule = { id: number; user_id: number | null; user: string; name: string; base: string; percent: string; active: boolean; notes: string | null };
+/* percent null: regla o comision sobre la utilidad vista por quien no ve costos (con el % se deduce la utilidad) */
+type Rule = { id: number; user_id: number | null; user: string; name: string; base: string; percent: string | null; active: boolean; notes: string | null };
+const Pct = ({ v }: { v: string | null }) => (v == null ? <span className="muted" title="Sobre la utilidad (confidencial)">—</span> : <>{Number(v)} %</>);
 type Agent = { id: number; name: string };
 
 const ESTADO: Record<string, { label: string; tone: string }> = {
@@ -85,9 +87,9 @@ export default function Commissions() {
                 <tr key={r.id}>
                   <td style={{ fontWeight: 600 }}>{r.user}</td><td>{r.name}</td>
                   <td className="muted">{r.base === "margen" ? "Sobre la utilidad" : "Sobre lo cobrado"}</td>
-                  <td className="num mono">{Number(r.percent)} %</td>
+                  <td className="num mono"><Pct v={r.percent} /></td>
                   <td>{r.active ? <span className="badge badge--ok">Sí</span> : <span className="badge badge--muted">No</span>}</td>
-                  <td className="num">{configura && <button className="btn btn--ghost btn--sm" onClick={() => setRule({ id: r.id, user_id: r.user_id ? String(r.user_id) : "", name: r.name, base: r.base, percent: String(r.percent), active: r.active, notes: r.notes || "" })}>Editar</button>}</td>
+                  <td className="num">{configura && <button className="btn btn--ghost btn--sm" onClick={() => setRule({ id: r.id, user_id: r.user_id ? String(r.user_id) : "", name: r.name, base: r.base, percent: String(r.percent ?? ""), active: r.active, notes: r.notes || "" })}>Editar</button>}</td>
                 </tr>
               ))}</tbody>
             </table>
@@ -119,7 +121,7 @@ export default function Commissions() {
                 <td className="muted">{r.base === "margen" ? "Utilidad" : "Cobrado"}</td>
                 {/* base "utilidad" a quien no ve costos: la API la manda vacia (no es 0) */}
                 <td className="num money">{r.base_amount == null ? <span className="muted" title="La utilidad la ve solo quien ve costos">—</span> : fmtMoney(r.base_amount, r.currency)}</td>
-                <td className="num mono">{Number(r.percent)} %</td>
+                <td className="num mono"><Pct v={r.percent} /></td>
                 <td className="num money" style={{ fontWeight: 700 }}>{fmtMoney(r.amount, r.currency)}</td>
                 <td><span className={`badge badge--${ESTADO[r.status]?.tone || "muted"}`}>{ESTADO[r.status]?.label || r.status}</span></td>
               </tr>

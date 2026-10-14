@@ -1,0 +1,11 @@
+/* Buscador de Cotizaciones y Facturas (13/10 35:37: "si pongo la 004"). La API busca solo dentro de lo del vendedor. */
+.doc-search { display: flex; flex-direction: column; gap: 4px; padding: 12px 18px 0; }
+.doc-search .search { max-width: 460px; }
+.doc-search__scope { font-size: 12px; margin: 0; }
+
+@media (max-width: 640px) {
+  /* el buscador ocupa el ancho completo encima de las pestanas */
+  .doc-search { padding: 10px 12px 0; }
+  .doc-search .search { max-width: none; }
+  .doc-list__head { flex-direction: column; align-items: stretch; }
+}
