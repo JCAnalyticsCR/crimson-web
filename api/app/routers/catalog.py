@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
-from ..models import Category, Customer, Product, ProductTax, Supplier, Tax, Warehouse
+from ..models import Category, Customer, Product, ProductTax, Supplier, SupplierItem, Tax, Warehouse
 from ..schemas.crm import (
     CategoryIn,
     CategoryOut,
@@ -24,6 +24,7 @@ from ..schemas.crm import (
     TaxOut,
 )
 from ..services import cabys as cabys_svc
+from ..services import supplier_catalog as supcat
 
 router = APIRouter(tags=["catalogo"])
 
@@ -125,6 +126,19 @@ def _product_out(pr: Product, p: Principal | None = None) -> ProductOut:
     return o
 
 
+def _with_costs(db: Session, p: Principal, prods: list[Product]) -> list[ProductOut]:
+    """Lista/ficha con el origen del costo (proveedor vinculado o propio, con fecha) y el margen real sobre la
+    venta. Solo para quien ve costos: a los demas no les llega ni el campo."""
+    info = supcat.cost_info(db, p.tenant, prods) if p.sees_costs and prods else {}
+    out = []
+    for pr in prods:
+        o = _product_out(pr, p)
+        for k, v in (info.get(pr.id) or {}).items():
+            setattr(o, k, v)
+        out.append(o)
+    return out
+
+
 @router.get("/products", response_model=Page)
 def products(
     q: str | None = None,
@@ -135,13 +149,15 @@ def products(
     web: bool | None = None,
     sin_cabys: bool = False,
     warehouse_id: int | None = None,
+    proveedor: str | None = Query(None, pattern="^(con|sin)$"),
     cursor: int | None = None,
     limit: int = Query(20, le=100),
     p: Principal = Depends(require("catalog", "ver")),
     db: Session = Depends(get_db),
 ):
     """El buscador por texto no alcanza con 200 productos del proveedor: se filtra por tipo, categoria,
-    marca, proveedor, si esta en la tienda y si le falta el CABYS (lo que bloquea facturar)."""
+    marca, proveedor, si esta en la tienda y si le falta el CABYS (lo que bloquea facturar).
+    proveedor=con|sin: con proveedor = vinculado a un item de un catalogo de proveedor o con proveedor asignado."""
     stmt = select(Product).where(Product.tenant_id == p.tenant.id, Product.active)
     if q:
         like = f"%{q}%"
@@ -162,7 +178,12 @@ def products(
         stmt = stmt.where(or_(Product.cabys_code.is_(None), Product.cabys_code == ""))
     if warehouse_id:
         stmt = stmt.where(Product.warehouse_id == warehouse_id)
-    return _page(db, stmt, cursor, limit, Product, lambda pr: _product_out(pr, p))
+    if proveedor:
+        con = or_(Product.supplier_id.is_not(None), select(SupplierItem.id).where(SupplierItem.product_id == Product.id).exists())
+        stmt = stmt.where(con if proveedor == "con" else ~con)
+    page = _page(db, stmt, cursor, limit, Product, lambda pr: pr)
+    page.items = _with_costs(db, p, page.items)
+    return page
 
 
 @router.get("/products/meta/filters")
@@ -225,7 +246,7 @@ def create_product(data: ProductIn, p: Principal = Depends(require("catalog", "c
 
 @router.get("/products/{pid}", response_model=ProductOut)
 def get_product(pid: int, p: Principal = Depends(require("catalog", "ver")), db: Session = Depends(get_db)):
-    return _product_out(_own(db, Product, pid, p.tenant.id), p)
+    return _with_costs(db, p, [_own(db, Product, pid, p.tenant.id)])[0]
 
 
 class WebIn(BaseModel):

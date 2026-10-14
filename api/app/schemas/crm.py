@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -109,6 +111,15 @@ class ProductOut(BaseModel):
     active: bool
     tax_ids: list[int] = []
     tax_rate: float | None = None
+    # de donde sale el costo y el margen real (solo roles que ven costos; ver supplier_catalog.cost_info)
+    cost_source: str | None = None  # proveedor | propio
+    cost_supplier: str | None = None
+    cost_date: date | None = None
+    cost_active: bool | None = None  # False = el proveedor ya no lo trae en la lista vigente
+    cost_crc: float | None = None
+    margin_real_pct: float | None = None
+    margin_provisional: bool | None = None  # sin costo: es el margen objetivo, no el real
+    supplier_offers: int | None = None  # ofertas de proveedor vigentes vinculadas
 
 
 class Page(BaseModel):

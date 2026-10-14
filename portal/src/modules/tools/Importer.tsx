@@ -21,7 +21,7 @@ const KINDS: { id: ImportKind; label: string; desc: string; route: string }[] = 
   { id: "products", label: "Productos y servicios", desc: "Código, nombre, precio, CABYS, impuesto.", route: "/productos" },
   { id: "suppliers", label: "Proveedores", desc: "Nombre, cédula, contacto y condiciones de pago.", route: "/contabilidad" },
   { id: "invoices", label: "Facturas históricas", desc: "Documentos previos como referencia (no se reenvían a Hacienda).", route: "/facturas" },
-  { id: "catalogo", label: "Lista de precios de proveedor", desc: "El costo entra tal cual y el precio de venta se calcula con el margen.", route: "/productos" },
+  { id: "catalogo", label: "Lista de precios de proveedor", desc: "Crea productos propios directo desde la lista: el costo entra tal cual y el precio sale del margen. Para tener el catálogo del proveedor aparte y vincular solo lo que vendés, usá Inventarios → Proveedores.", route: "/productos" },
 ];
 
 const ACTION_LABELS: Record<ActionKind, string> = {

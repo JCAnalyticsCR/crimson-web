@@ -60,6 +60,7 @@ from .ops import (
 from .payments import BankAccount, Payment, PaymentLink
 from .sales import BillingGroup, Invoice, InvoiceLine, Quote, QuoteAcceptance, QuoteLine, QuoteVersion
 from .store import ApiCredential, Coupon, Order, OrderLine, ReceivedDocument, StorePage, StoreStockAlert
+from .supplier_catalog import SupplierItem, SupplierListImport
 from .support import (
     Commission,
     CommissionRule,
@@ -88,6 +89,8 @@ __all__ = [
     "Tax",
     "ProductTax",
     "Supplier",
+    "SupplierItem",
+    "SupplierListImport",
     "BillingGroup",
     "Quote",
     "QuoteLine",

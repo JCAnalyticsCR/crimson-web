@@ -37,6 +37,21 @@ def _delimiter(text: str) -> str:
 
 def read_table(data: bytes, filename: str) -> list[dict]:
     """Devuelve filas como dict {encabezado_normalizado: valor}. Salta filas vacias y titulos antes del encabezado."""
+    grid = [r for _, r in read_grid(data, filename)]
+    if not grid:
+        return []
+    # el encabezado es la primera fila con al menos 2 celdas de texto (los bancos ponen titulos arriba)
+    hi = next((i for i, r in enumerate(grid[:15]) if sum(1 for c in r if isinstance(c, str) and c.strip()) >= 2), 0)
+    headers = [norm(h) or f"col_{i}" for i, h in enumerate(grid[hi])]
+    rows = []
+    for r in grid[hi + 1 :]:
+        rows.append({headers[i]: (r[i] if i < len(r) else None) for i in range(len(headers))})
+    return rows
+
+
+def read_grid(data: bytes, filename: str) -> list[tuple[int, list]]:
+    """Celdas crudas sin filas vacias, con el numero de fila del archivo (1 = primera). Para formatos con
+    encabezado mas abajo o filas de categoria (listas de proveedor), donde hay que mirar la grilla entera."""
     name = (filename or "").lower()
     if name.endswith((".xlsx", ".xlsm")) or data[:2] == b"PK":
         from openpyxl import load_workbook
@@ -53,16 +68,7 @@ def read_table(data: bytes, filename: str) -> list[dict]:
             except UnicodeDecodeError:
                 continue
         grid = [r for r in csv.reader(io.StringIO(text), delimiter=_delimiter(text))]
-    grid = [r for r in grid if any(c not in (None, "") and str(c).strip() for c in r)]
-    if not grid:
-        return []
-    # el encabezado es la primera fila con al menos 2 celdas de texto (los bancos ponen titulos arriba)
-    hi = next((i for i, r in enumerate(grid[:15]) if sum(1 for c in r if isinstance(c, str) and c.strip()) >= 2), 0)
-    headers = [norm(h) or f"col_{i}" for i, h in enumerate(grid[hi])]
-    rows = []
-    for r in grid[hi + 1 :]:
-        rows.append({headers[i]: (r[i] if i < len(r) else None) for i in range(len(headers))})
-    return rows
+    return [(i, r) for i, r in enumerate(grid, start=1) if any(c not in (None, "") and str(c).strip() for c in r)]
 
 
 def pick(row: dict, *aliases: str):
