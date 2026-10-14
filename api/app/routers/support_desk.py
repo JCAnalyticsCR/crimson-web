@@ -11,6 +11,8 @@ el soporte que Crimson le da a SUS clientes.
 from __future__ import annotations
 
 import html
+import re
+import unicodedata
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -20,12 +22,15 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
-from ..core.deps import Principal, require
+from ..core.deps import CLIENT_ROLES, Principal, require, require_any
 from ..models import (
+    AllyParticipation,
+    AuditLog,
     Commission,
     CommissionRule,
     Customer,
     CustomerAsset,
+    EmailOutbox,
     Invoice,
     MaintenanceContract,
     Payment,
@@ -63,19 +68,218 @@ def _own(db: Session, tid: int, p: Principal) -> SupportTicket:
     t = db.get(SupportTicket, tid)
     if not t or t.tenant_id != p.tenant.id:
         raise HTTPException(404, "Ticket no encontrado")
-    if not p.can("support_desk", "ver_todo") and t.assigned_to not in (None, p.user.id) and t.opened_by != p.user.id:
+    # mismo alcance que la lista (ticket_scope): sin ver_todo, solo los asignados a mi o abiertos por mi. Un ticket
+    # sin responsable NO es de todos: si no, con ids seguidos se lee (notas internas incluidas) y se "toma"
+    if not p.can("support_desk", "ver_todo") and p.user.id not in (t.assigned_to, t.opened_by):
         raise HTTPException(404, "Ticket no encontrado")
     return t
 
 
-def _out(db: Session, t: SupportTicket, full: bool = True, p: Principal | None = None) -> dict:
-    """Ticket. El monto (lo que se le cobra al cliente) es precio: el tecnico no lo ve (Andres 22:07-22:23)."""
+def _writable(t: SupportTicket) -> None:
+    """Lo que esta en la papelera o el archivo se lee (el detalle se abre desde Papelera) pero no se modifica."""
+    if t.trashed_at:
+        raise HTTPException(409, "El ticket está en la papelera: restauralo para modificarlo")
+    if t.archived_at:
+        raise HTTPException(409, "El ticket está archivado: restauralo para modificarlo")
+
+
+# Quien atiende soporte: los mismos que salen en meta.agents (el responsable de un ticket)
+AGENT_ROLES = ("admin", "supervisor", "tecnico")
+ESTADO_LABEL = {
+    "nuevo": "Nuevo",
+    "asignado": "Asignado",
+    "en_proceso": "En proceso",
+    "esperando_cliente": "Esperando al cliente",
+    "resuelto": "Resuelto",
+    "cerrado": "Cerrado",
+}
+CAMPO_LABEL = {
+    "subject": "asunto",
+    "customer_id": "cliente",
+    "contact": "contacto",
+    "asset_id": "equipo",
+    "project_id": "proyecto",
+    "kind": "tipo",
+    "channel": "canal",
+    "level": "nivel",
+    "priority": "prioridad",
+    "description": "descripción",
+    "billable": "cobro",
+    "tags": "etiquetas",
+}
+_MESES = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "set", "oct", "nov", "dic")
+
+
+def _fecha_cr(dt: datetime | None) -> str:
+    """15 oct 9:00 a. m. (hora de Costa Rica)."""
+    if not dt:
+        return ""
+    x = _aware(dt).astimezone(slasvc.CR)
+    h = x.hour % 12 or 12
+    return f"{x.day} {_MESES[x.month - 1]} {h}:{x.minute:02d} {'a. m.' if x.hour < 12 else 'p. m.'}"
+
+
+def _norm(txt: str) -> str:
+    """Nombre en minusculas, sin tildes ni espacios de mas (clave n: de un aliado sin ficha)."""
+    base = unicodedata.normalize("NFKD", txt or "")
+    return " ".join("".join(c for c in base if not unicodedata.combining(c)).lower().split())
+
+
+def _ally_key(a: AllyParticipation) -> str:
+    if a.customer_id:
+        return f"c:{a.customer_id}"
+    if a.supplier_id:
+        return f"s:{a.supplier_id}"
+    return f"n:{_norm(a.name)}"
+
+
+def _ally_map(db: Session, tenant_id: int, project_ids: set[int] | None = None) -> dict[int, list[dict]]:
+    """project_id -> [{key, name, role}] en UNA consulta.
+
+    Hoy la "empresa aliada" de un ticket se DERIVA: el ticket es del aliado si su proyecto tiene una participacion
+    de esa empresa (AllyParticipation). Cuando el frente de aliados agregue la asignacion explicita del ticket a una
+    empresa aliada (clave a:<id>), solo cambia esta fuente: el parametro ?ally= y la pantalla no cambian."""
+    if project_ids is not None and not project_ids:
+        return {}
+    stmt = select(AllyParticipation).where(AllyParticipation.tenant_id == tenant_id, AllyParticipation.project_id.is_not(None))
+    if project_ids is not None:
+        stmt = stmt.where(AllyParticipation.project_id.in_(project_ids))
+    out: dict[int, list[dict]] = {}
+    for a in db.scalars(stmt.order_by(AllyParticipation.id)):
+        lst = out.setdefault(a.project_id, [])
+        key = _ally_key(a)
+        if all(x["key"] != key for x in lst):
+            lst.append({"key": key, "name": a.name, "role": a.role})
+    return out
+
+
+ALLY_KEY = re.compile(r"^(?:[csa]:\d+|n:.{1,160})$")
+
+
+def _client_user_ids(db: Session, tenant_id: int, user_ids) -> set[int]:
+    """De esos usuarios, los que son del portal del cliente (su nota es "Cliente respondió"). Una consulta."""
+    ids = {i for i in user_ids if i}
+    if not ids:
+        return set()
+    return set(
+        db.scalars(select(TenantUser.user_id).where(TenantUser.tenant_id == tenant_id, TenantUser.user_id.in_(ids), TenantUser.role_code.in_(CLIENT_ROLES)))
+    )
+
+
+def _ctx(db: Session, p: Principal, rows: list[SupportTicket], ahora: datetime | None = None) -> dict:
+    """Todo lo que _out necesita de otras tablas, precalculado para la lista (una consulta por mapa: nada de N+1)."""
+    uids: set[int] = set()
+    pids: set[int] = set()
+    for t in rows:
+        uids.update(x for x in (t.opened_by, t.assigned_to) if x)
+        uids.update(n.user_id for n in t.notes if n.user_id)
+        if t.project_id:
+            pids.add(t.project_id)
+    users = dict(db.execute(select(User.id, User.full_name).where(User.id.in_(uids))).all()) if uids else {}
+    projects = dict(db.execute(select(Project.id, Project.number).where(Project.tenant_id == p.tenant.id, Project.id.in_(pids))).all()) if pids else {}
+    return {
+        "ahora": ahora or datetime.now(UTC),
+        "users": users,
+        "projects": projects,
+        "clientes": _client_user_ids(db, p.tenant.id, uids),
+        "aliados": _ally_map(db, p.tenant.id, _ally_projects(db, p, pids)),
+    }
+
+
+def _ally_projects(db: Session, p: Principal, pids: set[int]) -> set[int]:
+    """De esos proyectos, de cuales puede ver las empresas aliadas: con support_desk.ver_todo (como meta.allies) o
+    projects.ver_todo, todos; si no, solo los de su alcance de proyectos (sees_project). Dos consultas, sin N+1."""
+    if not pids or p.can("support_desk", "ver_todo") or p.can("projects", "ver_todo"):
+        return pids
+    from .projects import sees_project
+
+    return {pr.id for pr in db.scalars(select(Project).where(Project.tenant_id == p.tenant.id, Project.id.in_(pids))) if sees_project(p, pr)}
+
+
+def _check_project(db: Session, p: Principal, project_id: int | None) -> None:
+    """El proyecto de un ticket tiene que ser uno que esta persona ve (si no, con un id ajeno leeria su numero y sus
+    empresas aliadas en la respuesta). check_refs ya garantizo que es de esta empresa."""
+    if not project_id or p.can("projects", "ver_todo"):
+        return
+    from .projects import sees_project
+
+    pr = db.get(Project, project_id)
+    if not pr or pr.tenant_id != p.tenant.id or not sees_project(p, pr):
+        raise HTTPException(404, "Proyecto no encontrado")
+
+
+def _history(db: Session, t: SupportTicket) -> list[dict]:
+    """Lo que paso con el ticket (estado, responsable, proximo paso, ediciones) desde la bitacora, mas viejo primero."""
+    rows = list(
+        db.scalars(
+            select(AuditLog)
+            .where(AuditLog.tenant_id == t.tenant_id, AuditLog.entity == "support_ticket", AuditLog.entity_id == t.id)
+            .order_by(AuditLog.id.desc())
+            .limit(100)
+        )
+    )[::-1]
+    ids = {r.user_id for r in rows if r.user_id}
+    for r in rows:  # "Asigno a ..." nombra a la persona: tambien en la misma consulta
+        if r.action == "assign" and (r.diff or {}).get("a"):
+            ids.add((r.diff or {})["a"])
+    names = dict(db.execute(select(User.id, User.full_name).where(User.id.in_(ids))).all()) if ids else {}
+    out = []
+    for r in rows:
+        dd = r.diff or {}
+        if r.action == "create":
+            label = "Abrió el ticket"
+        elif r.action == "create_portal":
+            label = "Abrió el ticket desde el portal del cliente"
+        elif r.action == "status":
+            label = f"Cambió el estado a {ESTADO_LABEL.get(dd.get('status'), dd.get('status') or '?')}"
+        elif r.action == "assign":
+            label = f"Asignó a {names.get(dd.get('a'), 'otra persona')}" if dd.get("a") else "Quitó el responsable"
+        elif r.action == "next_step":
+            if dd.get("next_step") or dd.get("next_step_at"):
+                cuando = _fecha_cr(datetime.fromisoformat(dd["next_step_at"])) if dd.get("next_step_at") else ""
+                label = f"Próximo paso: {dd.get('next_step') or 'Seguimiento'}" + (f" · {cuando}" if cuando else "")
+            else:
+                label = "Quitó el próximo paso"
+        elif r.action == "update":
+            campos = [CAMPO_LABEL.get(c, c) for c in dd.get("campos") or []]
+            label = f"Editó: {', '.join(campos)}" if campos else "Editó el ticket"
+        elif r.action == "work_order":
+            label = f"Creó la orden {dd.get('work_order') or ''}".strip()
+        else:
+            continue  # montos, mantenimientos y demas no son seguimiento
+        out.append({"at": r.at, "user": names.get(r.user_id) if r.user_id else "Sistema", "action": r.action, "label": label})
+    return out
+
+
+def _out(db: Session, t: SupportTicket, full: bool = True, p: Principal | None = None, ctx: dict | None = None) -> dict:
+    """Ticket para el EQUIPO interno. El portal del cliente tiene su propio serializador (client_portal.py) y nunca
+    usa este: aqui viajan notas internas (last_follow, notes) y la bitacora.
+    El monto (lo que se le cobra al cliente) es precio: el tecnico no lo ve (Andres 22:07-22:23)."""
+    if ctx is None:
+        ctx = _ctx(db, p, [t]) if p is not None else {"ahora": datetime.now(UTC), "users": {}, "projects": {}, "clientes": set(), "aliados": {}}
+    ahora = ctx["ahora"]
+    users = ctx["users"]
+
+    def nombre(uid: int | None) -> str | None:
+        if not uid:
+            return None
+        if uid not in users:
+            u = db.get(User, uid)
+            users[uid] = u.full_name if u else None
+        return users[uid]
+
     c = db.get(Customer, t.customer_id) if t.customer_id else None
-    u = db.get(User, t.assigned_to) if t.assigned_to else None
     a = db.get(CustomerAsset, t.asset_id) if t.asset_id else None
-    venc = slasvc.vencimientos(t)
+    venc = slasvc.vencimientos(t, ahora)
     vencido, resolucion_vencida = venc["respuesta"], venc["resolucion"]
     s = t.sla or {}
+    sem = slasvc.semaforo(t, ahora)
+    abierto = slasvc.es_abierto(t)
+    humanas = [n for n in t.notes if n.user_id]
+    ult = humanas[-1] if humanas else None
+    if t.project_id and t.project_id not in ctx["projects"]:
+        pr = db.get(Project, t.project_id)
+        ctx["projects"][t.project_id] = pr.number if pr else None
     out = {
         "id": t.id,
         "number": t.number,
@@ -90,18 +294,39 @@ def _out(db: Session, t: SupportTicket, full: bool = True, p: Principal | None =
         "asset_id": t.asset_id,
         "asset": a.name if a else None,
         "project_id": t.project_id,
+        "project": ctx["projects"].get(t.project_id) if t.project_id else None,
         "contract_id": t.contract_id,
         "work_order_id": t.work_order_id,
         "invoice_id": t.invoice_id,
         "assigned_to": t.assigned_to,
-        "assigned": u.full_name if u else None,
+        "assigned": nombre(t.assigned_to),
+        "opened_by": t.opened_by,
+        "opened_by_name": nombre(t.opened_by),
         "due_at": t.due_at,
         "first_reply_at": t.first_reply_at,
         "resolved_at": t.resolved_at,
+        "closed_at": t.closed_at,
         "resolve_due_at": t.resolve_due_at,
         "sla_vencido": vencido,
         "resolucion_vencida": resolucion_vencida,
         "fuera_de_tiempo": vencido or resolucion_vencida,
+        # semaforo de la bandeja (services/sla.py): el portal recalcula color y texto cada 30 s con vence_at/ventana_min
+        "semaforo": sem,
+        "grupo": slasvc.grupo(t, ahora, sem),
+        "next_step": t.next_step,
+        "next_step_at": t.next_step_at,
+        "next_step_vencido": bool(abierto and t.next_step_at and _aware(t.next_step_at) < ahora),
+        "last_follow": {
+            "at": ult.created_at,
+            "user": nombre(ult.user_id),
+            "body": ult.body[:140],
+            "internal": ult.internal,
+            "from_client": ult.user_id in ctx["clientes"],
+        }
+        if ult
+        else None,
+        "last_activity_at": slasvc.ultimo_movimiento(t),
+        "allies": ctx["aliados"].get(t.project_id, []) if t.project_id else [],
         # que SLA aplico y de donde salio, para mostrarlo en el ticket
         "sla": {
             "respuesta_h": s.get("respuesta"),
@@ -117,6 +342,8 @@ def _out(db: Session, t: SupportTicket, full: bool = True, p: Principal | None =
         "amount": t.amount if p is None or p.sees_prices else None,
         "tags": t.tags,
         "created_at": t.created_at,
+        "archived_at": t.archived_at,
+        "trashed_at": t.trashed_at,
     }
     if full:
         out["description"] = t.description
@@ -129,11 +356,13 @@ def _out(db: Session, t: SupportTicket, full: bool = True, p: Principal | None =
                 "body": n.body,
                 "internal": n.internal,
                 "photos": n.photos,
-                "user": db.get(User, n.user_id).full_name if n.user_id else "Sistema",
+                "user": nombre(n.user_id) if n.user_id else "Sistema",
+                "from_client": n.user_id in ctx["clientes"],
                 "created_at": n.created_at,
             }
             for n in t.notes
         ]
+        out["history"] = _history(db, t)
     return out
 
 
@@ -175,12 +404,35 @@ def ticket_scope(p: Principal, mine: bool = False) -> list:
 
 
 PENDIENTES_SOPORTE = ("abiertos", "fuera_de_tiempo")
+ORDENES = ("recientes", "urgencia")
+MAX_URGENCIA = 1000  # tope duro de filas que se ordenan en Python
+PRIO_RANGO = {"critica": 0, "alta": 1, "media": 2, "baja": 3}
 
 
 def soporte_resumen(db: Session, p: Principal) -> dict[str, int]:
     """Lo que cuentan el inicio y la pantalla de tickets: mismo alcance, misma definicion (services/sla.py)."""
     rows = db.scalars(select(SupportTicket).where(*ticket_scope(p), SupportTicket.status.in_(slasvc.ABIERTOS))).all()
     return slasvc.resumen(rows)
+
+
+def _ts(dt: datetime | None) -> float:
+    return _aware(dt).timestamp() if dt else float("inf")
+
+
+def _urgencia(t: SupportTicket, ahora: datetime) -> tuple:
+    """Orden de la bandeja: por grupo y, dentro del grupo, lo mas urgente primero."""
+    sem = slasvc.semaforo(t, ahora)
+    g = slasvc.grupo(t, ahora, sem)
+    rango = slasvc.GRUPOS.index(g)
+    if g in ("vencidos", "por_vencer"):
+        clave: tuple = (sem["restante_min"] if sem["restante_min"] is not None else float("inf"),)
+    elif g == "seguimiento_hoy":
+        clave = (_ts(t.next_step_at),)
+    elif g in ("esperando", "en_tiempo"):
+        clave = (_ts(sem["vence_at"]), PRIO_RANGO.get(t.priority, 9))
+    else:
+        clave = (-t.id,)
+    return (rango, *clave, -t.id)
 
 
 @router.get("/tickets")
@@ -191,36 +443,81 @@ def tickets(
     mine: bool = False,
     q: str | None = None,
     pendiente: str | None = None,
+    filtro: str | None = None,
+    assigned: str | None = None,
+    priority: str | None = Query(None, pattern="^(baja|media|alta|critica)$"),
+    ally: str | None = None,
+    orden: str = "recientes",
     limit: int = Query(100, le=300),
     p: Principal = Depends(require("support_desk", "ver")),
     db: Session = Depends(get_db),
 ):
     if pendiente and pendiente not in PENDIENTES_SOPORTE:
         raise HTTPException(422, "Filtro de pendientes desconocido")
+    if filtro and filtro not in slasvc.FILTROS:
+        raise HTTPException(422, "Filtro desconocido")
+    if orden not in ORDENES:
+        raise HTTPException(422, "Orden desconocido")
+    if ally and not ALLY_KEY.match(ally):
+        raise HTTPException(422, "Empresa aliada inválida")
+    ahora = datetime.now(UTC)
     stmt = select(SupportTicket).where(*ticket_scope(p, mine))
-    if status == "abiertos" or pendiente:
+    tablero = status == "tablero"
+    if tablero:
+        # vista Tablero: abiertos + resueltos de la ultima semana (la fecha se mira abajo, en Python)
+        stmt = stmt.where(SupportTicket.status.in_((*slasvc.ABIERTOS, "resuelto")))
+    elif status == "abiertos" or pendiente or filtro:
         stmt = stmt.where(SupportTicket.status.in_(slasvc.ABIERTOS))
+        if status and status != "abiertos":
+            # los contadores son siempre sobre abiertos, pero un estado elegido se respeta ("Esperando al cliente" +
+            # "Vencidos" = los vencidos que esperan al cliente; un estado cerrado no trae nada)
+            stmt = stmt.where(SupportTicket.status == status)
     elif status:
         stmt = stmt.where(SupportTicket.status == status)
     if kind:
         stmt = stmt.where(SupportTicket.kind == kind)
     if customer_id:
         stmt = stmt.where(SupportTicket.customer_id == customer_id)
+    if priority:
+        stmt = stmt.where(SupportTicket.priority == priority)
+    if assigned == "me":
+        stmt = stmt.where(SupportTicket.assigned_to == p.user.id)
+    elif assigned == "none":
+        stmt = stmt.where(SupportTicket.assigned_to.is_(None))
+    elif assigned:
+        if not assigned.isdigit():
+            raise HTTPException(422, "Responsable inválido")
+        stmt = stmt.where(SupportTicket.assigned_to == int(assigned))
+    if ally:
+        pids = [pid for pid, lst in _ally_map(db, p.tenant.id).items() if any(x["key"] == ally for x in lst)]
+        stmt = stmt.where(SupportTicket.project_id.in_(pids))
     if q:
         like = f"%{q}%"
         stmt = stmt.where(or_(SupportTicket.subject.ilike(like), SupportTicket.number.ilike(like)))
     stmt = stmt.order_by(SupportTicket.id.desc())
-    if pendiente == "fuera_de_tiempo":
-        # el vencimiento se calcula en Python (mismo criterio que el conteo); sin limite para no perder filas
-        rows = [t for t in db.scalars(stmt) if slasvc.fuera_de_tiempo(t)][:limit]
+    if pendiente == "fuera_de_tiempo" or filtro or tablero or orden == "urgencia":
+        # el vencimiento y el semaforo se calculan en Python (mismo criterio que el conteo): sin limite en SQL
+        rows = list(db.scalars(stmt.limit(MAX_URGENCIA)))
+        if pendiente == "fuera_de_tiempo":
+            rows = [t for t in rows if slasvc.fuera_de_tiempo(t, ahora)]
+        if filtro:
+            rows = [t for t in rows if slasvc.cumple(t, filtro, ahora)]
+        if tablero:
+            semana = ahora - timedelta(days=7)
+            rows = [t for t in rows if t.status != "resuelto" or (t.resolved_at and _aware(t.resolved_at) >= semana)]
+        if orden == "urgencia":
+            rows.sort(key=lambda t: _urgencia(t, ahora))
+        rows = rows[:limit]
     else:
-        rows = db.scalars(stmt.limit(limit)).all()
-    return [_out(db, t, full=False, p=p) for t in rows]
+        rows = list(db.scalars(stmt.limit(limit)))
+    ctx = _ctx(db, p, rows, ahora)
+    return [_out(db, t, full=False, p=p, ctx=ctx) for t in rows]
 
 
 @router.post("/tickets", status_code=201)
 def ticket_create(data: TicketIn, p: Principal = Depends(require("support_desk", "crear")), db: Session = Depends(get_db)):
     check_refs(db, p.tenant.id, data.model_dump(), TICKET_REFS, TICKET_USERS)
+    _check_project(db, p, data.project_id)
     number, _ = next_number(db, p.tenant.id, "TCK")
     t = SupportTicket(tenant_id=p.tenant.id, number=number, opened_by=p.user.id, **data.model_dump())
     t.status = "asignado" if t.assigned_to else "nuevo"
@@ -241,22 +538,61 @@ def ticket_get(tid: int, p: Principal = Depends(require("support_desk", "ver")),
 @router.put("/tickets/{tid}")
 def ticket_update(tid: int, data: TicketIn, p: Principal = Depends(require("support_desk", "editar")), db: Session = Depends(get_db)):
     t = _own(db, tid, p)
+    _writable(t)
     check_refs(db, p.tenant.id, data.model_dump(), TICKET_REFS, TICKET_USERS, current=t)
+    if data.project_id != t.project_id:
+        _check_project(db, p, data.project_id)
     antes = t.assigned_to
+    estado_antes = t.status
     clave_sla = (t.priority, t.customer_id)
+    campos = []
     for k, v in data.model_dump().items():
         if k in ("contact", "tags") and not v:
             continue  # el portal manda {} / []: no borrar los datos de quien reporto desde la web
+        if k == "asset_id" and k not in data.model_fields_set:
+            continue  # el formulario no lleva el equipo: editar (o el autoguardado al cerrar) no lo quita
+        if getattr(t, k) != v and k != "assigned_to":
+            campos.append(k)
         setattr(t, k, v)
     if (t.priority, t.customer_id) != clave_sla or not t.sla:
         # cambio la prioridad o el cliente: el plazo se recalcula desde que entro el ticket, no desde ahora
         slasvc.aplicar(db, p.tenant, t)
     if t.assigned_to and t.status == "nuevo":
         t.status = "asignado"
+    if campos:
+        audit(db, p.tenant.id, p.user.id, "update", "support_ticket", t.id, {"campos": campos}, ip=p.ip)
+    if t.assigned_to != antes:
+        audit(db, p.tenant.id, p.user.id, "assign", "support_ticket", t.id, {"de": antes, "a": t.assigned_to}, ip=p.ip)
+    if t.status != estado_antes:
+        audit(db, p.tenant.id, p.user.id, "status", "support_ticket", t.id, {"status": t.status}, ip=p.ip)
     if t.assigned_to and t.assigned_to != antes:
         _avisar_asignado(db, p, t)
     db.commit()
     return _out(db, t, p=p)
+
+
+def _aplicar_paso(db: Session, p: Principal, t: SupportTicket, texto: str | None, cuando: datetime | None, quitar: bool = False) -> None:
+    """Proximo paso del seguimiento (reglas de la bandeja). Cada cambio queda en la bitacora (historial del ticket)."""
+    if quitar:
+        texto, cuando = None, None
+    texto = (texto or "").strip() or None
+    if texto is None and cuando is not None:
+        texto = "Seguimiento"
+    # la fecha que el ticket ya tiene no se vuelve a validar: si el paso esta atrasado y solo se cambia el texto (el
+    # compositor manda la fecha de siempre), la nota no se rechaza por una fecha que nadie toco
+    misma_fecha = cuando is not None and t.next_step_at is not None and _aware(cuando).timestamp() == _aware(t.next_step_at).timestamp()
+    if texto is not None or cuando is not None:
+        if not slasvc.es_abierto(t):
+            raise HTTPException(409, "El ticket está resuelto o cerrado: reabrilo para planificar un seguimiento")
+        if cuando is not None and not misma_fecha and _aware(cuando) < datetime.now(UTC) - timedelta(minutes=10):
+            raise HTTPException(422, "La fecha del próximo paso ya pasó")
+    cuando = _aware(cuando).astimezone(UTC) if cuando else None  # en UTC: SQLite guarda la hora sin zona
+    if texto == t.next_step and (cuando.timestamp() if cuando else None) == (_aware(t.next_step_at).timestamp() if t.next_step_at else None):
+        return
+    t.next_step, t.next_step_at = texto, cuando
+    audit(
+        db, p.tenant.id, p.user.id, "next_step", "support_ticket", t.id, {"next_step": texto, "next_step_at": cuando.isoformat() if cuando else None}, ip=p.ip
+    )
 
 
 class NoteIn(BaseModel):
@@ -265,19 +601,79 @@ class NoteIn(BaseModel):
     photos: list = Field(default_factory=list)
     hours: Decimal | None = Field(None, ge=0)
     status: str | None = Field(None, pattern="^(nuevo|asignado|en_proceso|esperando_cliente|resuelto|cerrado)$")
+    # proximo paso en la misma transaccion; sin estos campos el actual se conserva
+    next_step: str | None = Field(None, max_length=200)
+    next_step_at: datetime | None = None
+    clear_next_step: bool = False
 
 
 @router.post("/tickets/{tid}/notes", status_code=201)
-def ticket_note(tid: int, data: NoteIn, p: Principal = Depends(require("support_desk", "editar")), db: Session = Depends(get_db)):
-    """Cada respuesta queda con hora y autor: eso es lo que después se le enseña al cliente."""
+def ticket_note(tid: int, data: NoteIn, p: Principal = Depends(require_any("support_desk", "editar", "seguir")), db: Session = Depends(get_db)):
+    """Cada respuesta queda con hora y autor: eso es lo que después se le enseña al cliente.
+    Con support_desk.seguir (sin editar) se anota y se planifica el proximo paso, pero no se cambia el estado."""
     t = _own(db, tid, p)
+    if data.status and not p.can("support_desk", "editar"):
+        raise HTTPException(403, "Sin permiso para cambiar el estado")
+    _writable(t)
+    if data.clear_next_step or data.next_step or data.next_step_at:
+        _aplicar_paso(db, p, t, data.next_step, data.next_step_at, data.clear_next_step)
     t.notes.append(SupportNote(tenant_id=t.tenant_id, user_id=p.user.id, body=data.body, internal=data.internal, photos=data.photos))
     if not data.internal and not t.first_reply_at:
         t.first_reply_at = datetime.now(UTC)  # el reloj del SLA para la primera respuesta
     if data.hours is not None:
         t.hours = d(t.hours) + d(data.hours)
-    if data.status:
-        _mover(t, data.status)
+    if data.status and data.status != t.status:
+        _mover(db, p, t, data.status)
+    db.commit()
+    return _out(db, t, p=p)
+
+
+class NextStepIn(BaseModel):
+    next_step: str | None = Field(None, max_length=200)
+    next_step_at: datetime | None = None
+
+
+@router.put("/tickets/{tid}/next-step")
+def ticket_next_step(tid: int, data: NextStepIn, p: Principal = Depends(require_any("support_desk", "editar", "seguir")), db: Session = Depends(get_db)):
+    """Proximo paso sin nota (ambos nulos = quitarlo)."""
+    t = _own(db, tid, p)
+    _writable(t)
+    _aplicar_paso(db, p, t, data.next_step, data.next_step_at, quitar=not (data.next_step or data.next_step_at))
+    db.commit()
+    return _out(db, t, p=p)
+
+
+class AssignIn(BaseModel):
+    assigned_to: int | None = None
+
+
+@router.post("/tickets/{tid}/assign")
+def ticket_assign(tid: int, data: AssignIn, p: Principal = Depends(require("support_desk", "editar")), db: Session = Depends(get_db)):
+    """Responsable del ticket ("Tomar" = asignarmelo). Gana el ultimo; el historial guarda cada cambio."""
+    t = _own(db, tid, p)
+    _writable(t)
+    if data.assigned_to is not None:
+        m = db.scalar(
+            select(TenantUser).where(
+                TenantUser.tenant_id == p.tenant.id, TenantUser.user_id == data.assigned_to, TenantUser.active, TenantUser.role_code.in_(AGENT_ROLES)
+            )
+        )
+        u = db.get(User, data.assigned_to) if m else None
+        if not m or not u or not u.active:
+            raise HTTPException(422, "Esa persona no atiende soporte")
+    antes = t.assigned_to
+    if antes != data.assigned_to:
+        t.assigned_to = data.assigned_to
+        estado = t.status
+        if data.assigned_to and t.status == "nuevo":
+            t.status = "asignado"
+        elif not data.assigned_to and t.status == "asignado":
+            t.status = "nuevo"
+        audit(db, p.tenant.id, p.user.id, "assign", "support_ticket", t.id, {"de": antes, "a": data.assigned_to}, ip=p.ip)
+        if t.status != estado:
+            audit(db, p.tenant.id, p.user.id, "status", "support_ticket", t.id, {"status": t.status}, ip=p.ip)
+        if data.assigned_to and data.assigned_to != p.user.id:
+            _avisar_asignado(db, p, t)
     db.commit()
     return _out(db, t, p=p)
 
@@ -290,19 +686,29 @@ class StatusIn(BaseModel):
     amount: Decimal | None = Field(None, ge=0)
 
 
-def _mover(t: SupportTicket, status: str) -> None:
+def _mover(db: Session, p: Principal, t: SupportTicket, status: str) -> None:
+    """Cambio de estado. Volver a un estado abierto es Reabrir (se limpian resuelto y cerrado: el SLA vuelve a
+    medirse contra lo prometido). Resolver o cerrar limpia el proximo paso (reabrir no lo restaura)."""
     ahora = datetime.now(UTC)
     t.status = status
+    if status in slasvc.ABIERTOS:
+        t.resolved_at = None
+        t.closed_at = None
     if status == "resuelto" and not t.resolved_at:
         t.resolved_at = ahora
     if status == "cerrado":
         t.resolved_at = t.resolved_at or ahora
         t.closed_at = ahora
+    if status in ("resuelto", "cerrado") and (t.next_step or t.next_step_at):
+        t.next_step, t.next_step_at = None, None
+        audit(db, p.tenant.id, p.user.id, "next_step", "support_ticket", t.id, {"next_step": None, "next_step_at": None}, ip=p.ip)
+    audit(db, p.tenant.id, p.user.id, "status", "support_ticket", t.id, {"status": status}, ip=p.ip)
 
 
 @router.patch("/tickets/{tid}")
 def ticket_status(tid: int, data: StatusIn, p: Principal = Depends(require("support_desk", "editar")), db: Session = Depends(get_db)):
     t = _own(db, tid, p)
+    _writable(t)
     if data.status in ("resuelto", "cerrado") and not (data.solution or t.solution):
         raise HTTPException(422, "Escribí qué se hizo antes de cerrar el ticket")
     if data.solution is not None:
@@ -314,8 +720,7 @@ def ticket_status(tid: int, data: StatusIn, p: Principal = Depends(require("supp
     if data.amount is not None and p.sees_prices:
         # el tecnico no ve el monto: el portal le mandaria 0 al resolver y lo borraria. El monto lo pone quien ve precios
         t.amount = data.amount
-    _mover(t, data.status)
-    audit(db, p.tenant.id, p.user.id, "status", "support_ticket", t.id, {"status": data.status}, ip=p.ip)
+    _mover(db, p, t, data.status)
     db.commit()
     return _out(db, t, p=p)
 
@@ -356,9 +761,16 @@ class VisitIn(BaseModel):
 @router.post("/tickets/{tid}/work-order", status_code=201)
 def ticket_to_work_order(tid: int, data: VisitIn, p: Principal = Depends(require("field", "asignar")), db: Session = Depends(get_db)):
     """Hay que ir al sitio: el ticket se convierte en orden de trabajo y no se escribe nada de nuevo."""
+    from .fieldwork import _eligible  # import local: el router de campo es pesado y solo se usa aqui
+
     t = _own(db, tid, p)
+    _writable(t)
     if t.work_order_id:
         raise HTTPException(409, "Este ticket ya tiene una orden de trabajo")
+    # el tecnico es del equipo de la empresa (mismo criterio que asignar en Ordenes de trabajo): un id ajeno, un
+    # cliente del portal o alguien de ventas no recibe la orden ni su nombre sale en el informe de entrega
+    if data.technician_id is not None and not _eligible(db, p.tenant.id, data.technician_id):
+        raise HTTPException(422, "Esa persona no puede recibir órdenes")
     number, _ = next_number(db, p.tenant.id, "OT")
     o = WorkOrder(
         tenant_id=p.tenant.id,
@@ -386,11 +798,25 @@ def ticket_to_work_order(tid: int, data: VisitIn, p: Principal = Depends(require
 def ticket_meta(p: Principal = Depends(require("support_desk", "ver")), db: Session = Depends(get_db)):
     agentes = [
         {"id": m.user.id, "name": m.user.full_name, "role": m.role_code}
-        for m in db.scalars(
-            select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(("admin", "supervisor", "tecnico")))
-        )
+        for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(AGENT_ROLES)))
     ]
-    res = soporte_resumen(db, p)
+    ahora = datetime.now(UTC)
+    # mismo alcance que la lista y la misma funcion que cada filtro (services/sla.py): el contador = las tarjetas
+    abiertos = db.scalars(select(SupportTicket).where(*ticket_scope(p), SupportTicket.status.in_(slasvc.ABIERTOS))).all()
+    res = slasvc.resumen(abiertos, ahora)
+    resumen = {"abiertos": res["abiertos"], **{f: sum(1 for t in abiertos if slasvc.cumple(t, f, ahora)) for f in slasvc.FILTROS}}
+    resumen["asignados_a_mi"] = sum(1 for t in abiertos if t.assigned_to == p.user.id)
+    allies: list[dict] = []
+    if p.can("support_desk", "ver_todo"):
+        # aliados con tickets (de cualquier estado) para el selector; "abiertos" cuenta solo los abiertos
+        filas = db.execute(select(SupportTicket.project_id, SupportTicket.status).where(*ticket_scope(p), SupportTicket.project_id.is_not(None))).all()
+        amap = _ally_map(db, p.tenant.id, {pid for pid, _ in filas})
+        cuenta: dict[str, dict] = {}
+        for pid, st in filas:
+            for x in amap.get(pid, []):
+                row = cuenta.setdefault(x["key"], {"key": x["key"], "name": x["name"], "abiertos": 0})
+                row["abiertos"] += 1 if st in slasvc.ABIERTOS else 0
+        allies = sorted(cuenta.values(), key=lambda r: _norm(r["name"]))
     return {
         "kinds": ["soporte", "garantia", "mantenimiento", "visita", "instalacion", "consulta"],
         "states": ["nuevo", "asignado", "en_proceso", "esperando_cliente", "resuelto", "cerrado"],
@@ -401,9 +827,35 @@ def ticket_meta(p: Principal = Depends(require("support_desk", "ver")), db: Sess
         "agents": agentes,
         "abiertos": res["abiertos"],
         "fuera_de_tiempo": res["fuera_de_tiempo"],
+        "resumen": resumen,
+        "allies": allies,
+        "umbral_ambar": slasvc.UMBRAL_AMBAR,
+        "sin_movimiento_h": slasvc.SIN_MOVIMIENTO_H,
         "can_see_all": p.can("support_desk", "ver_todo"),
         "can_charge": can_charge(p),  # pone el monto de un ticket cobrable (PATCH /tickets/{id}/amount)
     }
+
+
+AVISO_ASIGNADO_MIN = 30  # no se repite el correo de asignacion al mismo responsable del mismo ticket antes de esto
+
+
+def _ya_avisado(db: Session, t: SupportTicket, correo: str) -> bool:
+    """Ya se le aviso a esa persona de este ticket hace poco: alternar el responsable no encola correos sin tope."""
+    desde = datetime.now(UTC) - timedelta(minutes=AVISO_ASIGNADO_MIN)
+    return (
+        db.scalar(
+            select(EmailOutbox.id)
+            .where(
+                EmailOutbox.tenant_id == t.tenant_id,
+                EmailOutbox.entity == "support_ticket",
+                EmailOutbox.entity_id == t.id,
+                EmailOutbox.to == correo,
+                EmailOutbox.created_at >= desde,
+            )
+            .limit(1)
+        )
+        is not None
+    )
 
 
 def _avisar_asignado(db: Session, p: Principal, t: SupportTicket, nuevo: bool = False) -> None:
@@ -416,6 +868,8 @@ def _avisar_asignado(db: Session, p: Principal, t: SupportTicket, nuevo: bool = 
         f" · resolucion antes de {(t.sla or {}).get('resolucion', '?')} h.</p>"
     )
     if u and u.email:
+        if not nuevo and _ya_avisado(db, t, u.email):
+            return  # el responsable va y vuelve (Tomar, selector, autoguardado del PUT): un aviso basta
         queue_email(db, p.tenant, u.email, f"Ticket {t.number} · {t.subject[:60]}", cuerpo, "support_ticket", t.id)
     elif nuevo:
         notify_roles(db, p.tenant, ("admin", "supervisor"), f"Ticket {t.number} sin asignar · {t.subject[:50]}", cuerpo, "support_ticket", t.id)
@@ -631,7 +1085,9 @@ def rule_update(rid: int, data: RuleIn, p: Principal = Depends(require("commissi
     antes = bitacora.snapshot(r)
     for k, v in data.model_dump().items():
         setattr(r, k, v)
-    bitacora.audit_change(db, p, "update", "commission_rule", r.id, antes, bitacora.snapshot(r), version=bitacora.next_version(db, p.tenant.id, "commission_rule", r.id))
+    bitacora.audit_change(
+        db, p, "update", "commission_rule", r.id, antes, bitacora.snapshot(r), version=bitacora.next_version(db, p.tenant.id, "commission_rule", r.id)
+    )
     db.commit()
     return {"id": r.id}
 

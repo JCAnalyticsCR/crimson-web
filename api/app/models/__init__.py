@@ -42,6 +42,7 @@ from .field import (
     SurveyPoint,
     WorkOrder,
     WorkOrderMaterial,
+    WorkOrderTime,
 )
 from .ops import (
     EInvoiceDocument,
@@ -142,6 +143,7 @@ __all__ = [
     "Project",
     "WorkOrder",
     "WorkOrderMaterial",
+    "WorkOrderTime",
     "CustomerAsset",
     "PurchaseRequest",
     "PurchaseRequestLine",

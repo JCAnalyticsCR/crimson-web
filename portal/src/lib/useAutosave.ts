@@ -11,11 +11,18 @@
 
    Sesion = un registro abierto. Empieza cuando el valor pasa de null a algo o cuando cambia el id (otro registro);
    pasar de "sin id" a "con id" es el mismo registro recien creado. Todo guardado lleva su sesion: lo que vuelve
-   tarde de un registro ya cerrado nunca se mezcla con el que esta abierto. */
+   tarde de un registro ya cerrado nunca se mezcla con el que esta abierto.
+
+   Modos (opcion `server`, aditiva: sin ella todo es como el levantamiento):
+   - "pause" (defecto): servidor tras cada pausa y al cerrar.
+   - "close": copia local continua; servidor solo al cerrar, al ocultar la pagina o al salir (una escritura por sesion).
+   - "never": solo copia local; el servidor recibe datos unicamente por exclusive() (boton Guardar).
+   Con `createOnClose: false` un registro nuevo queda como borrador local hasta que el usuario toque Guardar. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "./api";
 
-export type AutosaveState = "idle" | "pending" | "saving" | "saved" | "local" | "error" | "warn";
+export type AutosaveState = "idle" | "pending" | "saving" | "saved" | "local" | "error" | "warn" | "draft";
+export type AutosaveMode = "pause" | "close" | "never";
 export type AutosaveStatus = { state: AutosaveState; at: number | null; message: string | null };
 export type AutosaveReason = "debounce" | "close" | "hidden" | "unload" | "online" | "retry";
 type Id = number | string;
@@ -68,7 +75,16 @@ export function useAutosave<T>(opts: {
   /** false: un registro nuevo no se crea por tiempo, solo al cerrar (quien puede crear pero no editar despues). */
   createEarly?: boolean;
   /** Que paso con un formulario ya cerrado (su linea de estado ya no se ve): para avisar con un toast. */
-  notify?: (state: "local" | "error" | "warn" | "saved", value: T, message: string | null) => void;
+  notify?: (state: "local" | "error" | "warn" | "saved" | "draft", value: T, message: string | null) => void;
+  /** "pause" (defecto): servidor tras cada pausa. "close": copia local continua, servidor solo al cerrar/ocultar/salir.
+      "never": solo copia local; el servidor recibe datos unicamente por exclusive() (boton Guardar). */
+  server?: AutosaveMode;
+  /** true (defecto): un registro nuevo se crea al cerrar (levantamiento). false: un registro nuevo solo queda como
+      borrador local hasta que el usuario toque Guardar. */
+  createOnClose?: boolean;
+  /** Copias locales mas viejas que esto se borran al montar. Sin la opcion no se borra nada (el levantamiento queda
+      como siempre: un levantamiento nuevo que nunca llego al servidor no se pierde); useRecordAutosave pasa 30. */
+  maxAgeDays?: number;
 }) {
   const o = useRef(opts);
   o.current = opts;
@@ -115,6 +131,15 @@ export function useAutosave<T>(opts: {
     const job = async (): Promise<boolean> => {
       if (!s.enabled || !dirty(s)) return true;
       const v = s.last as T, ser = s.lastSer as string;
+      // borrador: queda en este dispositivo y el servidor no se entera (modo "never", la pausa en modo "close" y
+      // el registro nuevo que solo se crea con Guardar). No es un fallo: no se reintenta.
+      const mode = o.current.server ?? "pause";
+      if (mode === "never" || (mode === "close" && reason === "debounce") || (s.id === undefined && o.current.createOnClose === false)) {
+        writeLocal(s);
+        setStatus(s, { state: "draft", at: Date.now(), message: null });
+        if (reason === "close") o.current.notify?.("draft", v, null);
+        return false;
+      }
       // un registro nuevo al salir no se crea a ciegas (si la respuesta no llega, recuperarlo lo duplicaria)
       // y quien no puede editar despues de crear lo crea una sola vez, al cerrar, con todo lo escrito
       const early = o.current.createEarly !== false;
@@ -249,6 +274,15 @@ export function useAutosave<T>(opts: {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* ---------- copias viejas: se borran al montar (y si cambia el prefijo), solo si se pidio ---------- */
+  useEffect(() => {
+    const st = opts.storage;
+    const dias = o.current.maxAgeDays;
+    if (!st || dias == null) return;
+    const max = dias * 86_400_000;
+    for (const k of ls.keys(`${PREFIX}${st}:`)) { const c = ls.get<unknown>(k); if (c && typeof c.at === "number" && Date.now() - c.at > max) ls.del(k); }
+  }, [opts.storage]);
+
   /* ---------- recuperar una copia local al abrir ---------- */
   const offerRecovery = (s: Session<T>, ser: string) => {
     const st = o.current.storage;
@@ -307,6 +341,21 @@ export function useAutosave<T>(opts: {
   /** Guarda ya lo pendiente del registro abierto (true = el servidor lo tiene todo). */
   const flush = useCallback(() => { clearTimer(); const s = sess.current; return s.open && dirty(s) ? persist(s, "close") : Promise.resolve(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { status, recovery, takeRecovery, discardRecovery, fromServer, exclusive, flush };
+  /** "Cancelar": lo escrito en esta sesion se descarta (copia local incluida) y cerrar despues ya no guarda. */
+  const discard = useCallback(() => {
+    clearTimer();
+    window.clearTimeout(localTimer.current);
+    const s = sess.current;
+    dropLocal(s);
+    s.baseline = s.lastSer;
+    s.failed = false;
+    pending.current.delete(s);
+    setStatusState({ state: "idle", at: null, message: null });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Hay cambios de esta sesion que el servidor no tiene. */
+  const isDirty = useCallback(() => sess.current.open && dirty(sess.current), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return { status, recovery, takeRecovery, discardRecovery, fromServer, exclusive, flush, discard, isDirty };
 }
 export type Autosave<T> = ReturnType<typeof useAutosave<T>>;

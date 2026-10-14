@@ -5,6 +5,7 @@
 .autosave__acts { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 .autosave--pending .autosave__dot, .autosave--saving .autosave__dot { background: var(--info, #3c82f0); opacity: 1; animation: autosave-pulse 1s ease-in-out infinite; }
 .autosave--saved .autosave__dot { background: var(--ok); opacity: 1; }
+.autosave--draft .autosave__dot { background: var(--info); opacity: 1; }
 .autosave--local, .autosave--warn { color: var(--warn); }
 .autosave--local .autosave__dot, .autosave--warn .autosave__dot { background: var(--warn); opacity: 1; }
 .autosave--error { color: var(--bad); }

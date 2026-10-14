@@ -216,6 +216,24 @@ class WorkOrder(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     stock_applied: Mapped[bool] = mapped_column(Boolean, default=False)  # el consumo ya descontó inventario
 
     materials: Mapped[list["WorkOrderMaterial"]] = relationship(cascade="all, delete-orphan", lazy="selectin", order_by="WorkOrderMaterial.id")
+    time_entries: Mapped[list["WorkOrderTime"]] = relationship(cascade="all, delete-orphan", lazy="selectin", order_by="WorkOrderTime.started_at")
+
+
+class WorkOrderTime(TenantMixin, TimestampMixin, Base):
+    """Tiempo trabajado en una orden, por persona y por jornada. Las horas de la orden son la suma (persona-horas):
+    una instalacion de dos dias no cuenta la noche y dos tecnicos cuentan doble."""
+
+    __tablename__ = "work_order_time"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_order_id: Mapped[int] = mapped_column(ForeignKey("work_order.id", ondelete="CASCADE", name="fk_work_order_time_order"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", name="fk_work_order_time_user"), index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # None = corriendo
+    minutes: Mapped[int | None] = mapped_column(Integer)  # se fija al cerrar
+    kind: Mapped[str] = mapped_column(String(10), default="reloj")  # reloj | manual
+    note: Mapped[str | None] = mapped_column(String(200))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("user.id", name="fk_work_order_time_created_by"))
 
 
 class WorkOrderMaterial(Base):

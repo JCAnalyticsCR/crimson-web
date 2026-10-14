@@ -47,7 +47,7 @@ export const ROLES: Record<string, RoleMeta> = {
   tecnico: {
     label: "Técnico instalador", tone: "#b45309", glyph: "T",
     summary: "Solo lo suyo, desde el celular: el trabajo del día, el levantamiento en sitio y la evidencia de la instalación.",
-    can: ["Ver sus órdenes de trabajo del día", "Llenar levantamientos técnicos en sitio", "Atender los tickets de soporte que le asignan", "Registrar material usado, horas, fotos y firma del cliente", "Anotar los equipos que deja instalados"],
+    can: ["Ver sus órdenes de trabajo del día", "Llenar levantamientos técnicos en sitio", "Atender los tickets de soporte que le asignan", "Registrar material usado, horas, fotos y firma del cliente", "Registrar su tiempo por jornada en la orden", "Anotar los equipos que deja instalados"],
     cannot: ["Ver precios, costos ni montos", "Ver trabajos de otros técnicos", "Ver facturas, cobros o reportes"],
     menu: ["/", "/ordenes-trabajo", "/levantamientos", "/tickets", "/mantenimientos", "/activos", "/inventario", "/ajustes"],
   },

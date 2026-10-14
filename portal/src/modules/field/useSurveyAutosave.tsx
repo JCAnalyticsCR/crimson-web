@@ -132,6 +132,7 @@ export function useSurveyAutosave<D extends DraftLike>({ draft, setDraft, body, 
     storage: me ? `lev:${me.tenant.id}:${me.user.id}` : null,
     // el formulario ya se cerro: la linea de estado no se ve, se avisa con un toast
     notify: (state, d, msg) => {
+      if (state === "draft") return;
       const ref = d.number || "El levantamiento nuevo";
       if (state === "local") toast(`Sin conexión: ${ref} quedó guardado en este dispositivo y se sube solo al volver la conexión.`, "bad");
       else if (state === "error") toast(`${ref} no se pudo guardar: ${msg}. Lo escrito quedó en este dispositivo; al abrirlo se puede recuperar.`, "bad");

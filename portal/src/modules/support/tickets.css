@@ -1,0 +1,112 @@
+/* Mesa de soporte: bandeja con semaforo de SLA, tarjetas con seguimiento en 1 clic, detalle con bitacora lateral y
+   tablero por estado. Archivo propio del modulo (como crm/opportunities.css). Solo tokens de ui/tokens.css: el modo
+   oscuro sale solo. */
+
+/* Color del semaforo: rojo (vencido) · ambar (queda <= 25 %) · verde · gris (esperando al cliente) · neutro */
+[data-color] { --tk-color: var(--hair-2); }
+[data-color="rojo"] { --tk-color: var(--bad); }
+[data-color="ambar"] { --tk-color: var(--warn); }
+[data-color="verde"] { --tk-color: var(--ok); }
+[data-color="gris"] { --tk-color: var(--text-3); }
+
+/* Contadores-filtro */
+.tk-eco { margin-bottom: 14px; }
+.tk-eco .eco__box.is-active { border-color: var(--crimson); box-shadow: 0 0 0 1px var(--crimson) inset; }
+.eco__box.is-warn b { color: var(--warn); }
+
+/* Barra de filtros */
+.tk-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+.tk-filters .search { flex: 1 1 220px; max-width: 320px; }
+.tk-filters__end { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+.tk-chip { border: 1px solid var(--hair-2); background: var(--surface); border-radius: 999px; padding: 0 14px; height: 34px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--text-2); }
+.tk-chip.is-on { background: var(--crimson); border-color: var(--crimson); color: #fff; }
+
+/* Grupos de la bandeja */
+.tk-group__head { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 13px; font-weight: 700; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; }
+.tk-group__head i { width: 9px; height: 9px; border-radius: 50%; background: var(--tk-color); flex: none; }
+.tk-group__head span { font-family: var(--mono); color: var(--text-3); font-weight: 500; }
+/* Bandeja: cabeceras y tarjetas en una sola lista (la tarjeta no se desmonta al cambiar de grupo) */
+.tk-inbox { display: grid; gap: 10px; }
+.tk-inbox > .tk-group__head { margin: 0; }
+.tk-inbox > .tk-group__head:not(:first-child) { margin-top: 8px; }
+
+/* Tarjeta */
+.tk-card { position: relative; background: var(--surface); border: 1px solid var(--hair-2); border-left: 5px solid var(--tk-color); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tk-card[data-color="rojo"] { background: color-mix(in srgb, var(--bad) 5%, var(--surface)); }
+.tk-card__top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-3); }
+.tk-card__num { font-family: var(--mono); color: var(--text-2); background: none; border: 0; padding: 0; cursor: pointer; font-size: 12.5px; }
+.tk-card__num:hover, .tk-card__subject:hover { color: var(--crimson); }
+.tk-card__subject { display: block; background: none; border: 0; padding: 0; text-align: left; font: inherit; font-weight: 700; font-size: 15px; color: var(--text); cursor: pointer; line-height: 1.35; overflow-wrap: anywhere; }
+.tk-card__who { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--text-2); min-width: 0; }
+.tk-card__next { font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+.tk-card__next.is-late { color: var(--bad); font-weight: 600; }
+.tk-card__next button { background: none; border: 0; padding: 0; color: var(--crimson); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; }
+.tk-card__last { font-size: 12.5px; color: var(--text-3); overflow-wrap: anywhere; }
+.tk-card__last q { color: var(--text-2); }
+.tk-card__acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 2px; }
+.tk-card__acts .row-end { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.tk-card__compose { border-top: 1px dashed var(--hair-2); margin-top: 6px; padding-top: 10px; }
+
+/* Chip de plazo: punto + texto (el texto dice el estado; el color no es la unica señal) */
+.tk-plazo { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--tk-color); background: color-mix(in srgb, var(--tk-color) 12%, transparent); white-space: nowrap; margin-left: auto; }
+.tk-plazo[data-color="neutro"] { color: var(--text-3); background: var(--bg-2); }
+.tk-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tk-color); flex: none; }
+[data-color="rojo"] > .tk-dot, .tk-plazo[data-color="rojo"] .tk-dot { animation: tk-pulse 1.6s ease-in-out infinite; }
+@keyframes tk-pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--bad) 25%, transparent); } }
+@media (prefers-reduced-motion: reduce) { [data-color="rojo"] > .tk-dot, .tk-plazo[data-color="rojo"] .tk-dot { animation: none; } }
+
+@media (pointer: coarse) {
+  .tk-card__acts .btn--sm, .tk-chip { min-height: 44px; }
+}
+
+/* Compositor de seguimiento */
+.tk-compose { display: flex; flex-direction: column; gap: 10px; }
+.tk-compose .textarea { min-height: 84px; }
+.tk-compose__row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.tk-compose__next { border: 1px solid var(--hair); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--surface-2); }
+.tk-compose__hint { font-size: 12.5px; color: var(--text-3); margin: 0; }
+.tk-compose .autosave { order: 0; }
+
+/* Detalle: columna principal + "Seguimiento" de 320 px (arriba en el celular) */
+.tk-detail { display: grid; grid-template-columns: minmax(0, 1fr) 320px; grid-template-areas: "main log"; gap: 16px; align-items: start; }
+.tk-main { grid-area: main; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.tk-log { grid-area: log; background: var(--bg-2); border: 1px solid var(--hair); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.tk-hero { border: 1px solid var(--tk-color); border-left: 5px solid var(--tk-color); border-radius: 12px; padding: 12px 14px; background: color-mix(in srgb, var(--tk-color) 8%, var(--surface)); }
+.tk-hero b { display: block; font-family: var(--mono); font-size: 18px; color: var(--tk-color); line-height: 1.3; }
+.tk-hero[data-color="neutro"] b { color: var(--text-2); }
+.tk-hero small { display: block; margin-top: 4px; font-size: 12.5px; color: var(--text-2); }
+.tk-data { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 14px; margin: 0; }
+.tk-data > div { min-width: 0; }
+.tk-data dt { font-size: 11.5px; color: var(--text-3); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+.tk-data dd { margin: 0; font-size: 13.5px; overflow-wrap: anywhere; }
+.tk-data .select { height: 32px; font-size: 13px; }
+.tk-box { font-size: 14px; background: var(--bg-2); padding: 10px 14px; border-radius: 10px; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tk-next { border: 1px solid var(--hair-2); border-radius: 10px; padding: 10px 12px; background: var(--surface); font-size: 13.5px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.tk-next.is-late { border-color: var(--bad); color: var(--bad); }
+.tk-next b { flex: 1 1 160px; }
+.tk-timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.tk-timeline li { border-left: 3px solid var(--crimson); padding-left: 10px; min-width: 0; }
+.tk-timeline li.is-internal { border-left-color: var(--hair-2); }
+.tk-timeline li.is-client { border-left-color: var(--info); }
+.tk-timeline li.is-event { border-left: 0; padding-left: 0; font-size: 12px; color: var(--text-3); }
+.tk-timeline p { margin: 4px 0 0; font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tk-timeline .meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+@media (max-width: 1100px) { .tk-data { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) {
+  .tk-detail { grid-template-columns: 1fr; grid-template-areas: "log" "main"; }
+  .tk-data { grid-template-columns: 1fr; }
+  .tk-filters .search { max-width: none; }
+  .tk-filters__end { margin-left: 0; }
+}
+
+/* Tablero por estado (reusa .board/.board__col de ui/field.css) */
+.tk-board .board__col.is-over { border-color: var(--crimson); background: color-mix(in srgb, var(--crimson) 8%, var(--bg-2)); }
+.tk-mini { display: block; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--hair-2); border-left: 4px solid var(--tk-color); border-radius: 10px; padding: 9px 11px; margin-bottom: 8px; cursor: pointer; font: inherit; color: inherit; }
+.tk-mini[draggable="true"] { cursor: grab; }
+.tk-mini.is-dragging { opacity: .45; }
+.tk-mini b { display: block; font-size: 13.5px; line-height: 1.35; overflow-wrap: anywhere; }
+.tk-mini small { display: flex; justify-content: space-between; gap: 6px; margin-top: 4px; font-size: 11.5px; color: var(--text-3); }
+.tk-mini .tk-plazo { margin: 6px 0 0; white-space: normal; }
+.tk-mini__move { display: none; margin-top: 8px; height: 32px; font-size: 12.5px; width: 100%; }
+@media (hover: none), (pointer: coarse) { .tk-mini__move { display: block; } }

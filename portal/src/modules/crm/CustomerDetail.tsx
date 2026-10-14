@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
+import { useRecordAutosave } from "../../lib/useRecordAutosave";
 
 type Cust = { id: number; name: string; id_type: string; id_number: string | null; email: string | null; phone: string | null; whatsapp: string | null; currency: string; notes: string | null; address: Record<string, string> | null; active: boolean; created_at: string };
 type Ev = { at: string; kind: string; title: string; amount?: string; currency?: string; status: string | null; to?: string; id?: number; author?: string | null };
@@ -16,6 +17,8 @@ type Overview = {
   assets?: Asset[]; projects?: Proj[]; opportunities?: Opp[]; tickets?: Tick[];
 };
 type Contact = { id?: number; name: string; role: string; email: string; phone: string; receives_invoices: boolean };
+const custBody = (e: Cust) => ({ id_type: e.id_type, id_number: e.id_number || null, name: e.name, email: e.email || null, phone: e.phone || null, whatsapp: e.whatsapp || null, currency: e.currency, notes: e.notes || null, address: e.address });
+const contactBody = (k: Contact) => ({ name: k.name, receives_invoices: k.receives_invoices, email: k.email || null, role: k.role || null, phone: k.phone || null });
 
 const KIND: Record<string, { label: string; color: string; icon: string }> = {
   cotizacion: { label: "Cotización", color: "var(--info)", icon: I.quote },
@@ -28,7 +31,7 @@ const KIND: Record<string, { label: string; color: string; icon: string }> = {
 export default function CustomerDetail() {
   const { id } = useParams();
   const nav = useNavigate();
-  const { toast } = useSession();
+  const { toast, allows } = useSession();
   const [ov, setOv] = useState<Overview | null>(null);
   const [contactsSt, setContacts] = useState<Contact[] | null>(null); // null = cargando
   const contacts = contactsSt ?? [];
@@ -43,6 +46,21 @@ export default function CustomerDetail() {
   }, [id, toast]);
   useEffect(() => { load(); }, [load]);
 
+  /* Autoguardado: los datos del cliente (C2) y un contacto existente (C3) se guardan al cerrar; un contacto nuevo
+     queda de borrador en este dispositivo hasta Guardar. */
+  const datAuto = useRecordAutosave<Cust>({
+    ns: "cli-dat", mode: "close", value: edit, idOf: (e) => e.id, body: custBody,
+    save: async (b, cid, ctx) => { await api(`/customers/${cid}`, { method: "PUT", json: b, headers: ctx.headers, keepalive: ctx.keepalive }); load(); },
+    enabled: !!edit && allows("crm.editar"), label: (e) => e.name || "El cliente", apply: (d) => setEdit((cur) => (cur ? { ...cur, ...d } : cur)),
+  });
+  const conAuto = useRecordAutosave<Contact>({
+    ns: `cli-contacto-${id}`, mode: "close", newRecords: "local", value: contact, idOf: (k) => k.id, body: contactBody,
+    save: async (b, kid, ctx) => { await api(`/customers/${id}/contacts/${kid}`, { method: "PUT", json: b, headers: ctx.headers, keepalive: ctx.keepalive }); load(); },
+    enabled: !!contact && allows("crm.editar"), label: (k) => (k.id ? k.name || "El contacto" : "El contacto nuevo"), apply: (d) => setContact((cur) => (cur ? { ...d, id: cur.id } : cur)),
+  });
+  const cancelarDatos = () => { if (datAuto.isDirty() && !confirm("¿Descartar los cambios?")) return; datAuto.discard(); setEdit(null); };
+  const cancelarContacto = () => { if (conAuto.isDirty() && !confirm("¿Descartar los cambios?")) return; conAuto.discard(); setContact(null); };
+
   if (!ov) return <div style={{ display: "grid", placeItems: "center", minHeight: 300 }}><span className="spinner" /></div>;
   const c = ov.customer;
   const events = ov.timeline.filter((e) => !filter || e.kind === filter);
@@ -55,9 +73,9 @@ export default function CustomerDetail() {
   const delNote = async (nid?: number) => { if (!nid || !confirm("¿Borrar la nota?")) return; await api(`/customers/${id}/notes/${nid}`, { method: "DELETE" }); load(); };
   const saveContact = async () => {
     if (!contact) return;
-    const { id: kid, ...body } = contact;
+    const kid = contact.id;
     try {
-      await api(kid ? `/customers/${id}/contacts/${kid}` : `/customers/${id}/contacts`, { method: kid ? "PUT" : "POST", json: { ...body, email: body.email || null, role: body.role || null, phone: body.phone || null } });
+      await conAuto.exclusive(contact, () => api(kid ? `/customers/${id}/contacts/${kid}` : `/customers/${id}/contacts`, { method: kid ? "PUT" : "POST", json: contactBody(contact) }));
       setContact(null); load(); toast("Contacto guardado");
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
@@ -65,7 +83,7 @@ export default function CustomerDetail() {
   const saveCustomer = async () => {
     if (!edit) return;
     try {
-      await api(`/customers/${id}`, { method: "PUT", json: { id_type: edit.id_type, id_number: edit.id_number || null, name: edit.name, email: edit.email || null, phone: edit.phone || null, whatsapp: edit.whatsapp || null, currency: edit.currency, notes: edit.notes || null, address: edit.address } });
+      await datAuto.exclusive(edit, () => api(`/customers/${id}`, { method: "PUT", json: custBody(edit) }));
       setEdit(null); load(); toast("Cliente actualizado");
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
@@ -203,7 +221,7 @@ export default function CustomerDetail() {
       </div>
 
       {contact && (
-        <Modal title={contact.id ? "Contacto" : "Nuevo contacto"} onClose={() => setContact(null)} foot={<><button className="btn btn--ghost" onClick={() => setContact(null)}>Cancelar</button><button className="btn btn--crimson" onClick={saveContact}>Guardar</button></>}>
+        <Modal title={contact.id ? "Contacto" : "Nuevo contacto"} onClose={() => setContact(null)} foot={<>{conAuto.bar}<button className="btn btn--ghost" onClick={cancelarContacto}>Cancelar</button><button className="btn btn--crimson" onClick={saveContact}>Guardar</button></>}>
           <div className="grid-2">
             <Field label="Nombre"><input className="input" autoFocus value={contact.name} onChange={(e) => setContact({ ...contact, name: e.target.value })} /></Field>
             <Field label="Cargo"><input className="input" value={contact.role} onChange={(e) => setContact({ ...contact, role: e.target.value })} /></Field>
@@ -214,7 +232,7 @@ export default function CustomerDetail() {
         </Modal>
       )}
       {edit && (
-        <Modal title="Datos del cliente" onClose={() => setEdit(null)} foot={<><button className="btn btn--ghost" onClick={() => setEdit(null)}>Cancelar</button><button className="btn btn--crimson" onClick={saveCustomer}>Guardar</button></>}>
+        <Modal title="Datos del cliente" onClose={() => setEdit(null)} foot={<>{datAuto.bar}<button className="btn btn--ghost" onClick={cancelarDatos}>Cancelar</button><button className="btn btn--crimson" onClick={saveCustomer}>Guardar</button></>}>
           <div className="grid-2">
             <Field label="Tipo de identificación"><select className="select" value={edit.id_type} onChange={(e) => setEdit({ ...edit, id_type: e.target.value })}>{["fisica", "juridica", "dimex", "nite", "extranjero"].map((t) => <option key={t} value={t}>{t}</option>)}</select></Field>
             <Field label="Número"><input className="input input--mono" style={{ textAlign: "left" }} value={edit.id_number || ""} onChange={(e) => setEdit({ ...edit, id_number: e.target.value })} /></Field>

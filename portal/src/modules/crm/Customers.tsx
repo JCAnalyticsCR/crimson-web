@@ -4,8 +4,11 @@ import { api, type Customer } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { TrashButton } from "../../ui/TrashButton";
+import { useRecordAutosave } from "../../lib/useRecordAutosave";
 
 const blank = { id_type: "juridica", id_number: "", name: "", email: "", phone: "", whatsapp: "", currency: "CRC", notes: "" };
+type Edit = typeof blank & { id?: number };
+const custBody = (e: Edit) => { const b: Record<string, unknown> = { ...e }; delete b.id; return b; };
 
 export default function Customers() {
   const { toast, allows } = useSession();
@@ -18,11 +21,21 @@ export default function Customers() {
   const load = useCallback(() => api<{ items: Customer[] }>(`/customers?limit=50${q ? `&q=${encodeURIComponent(q)}` : ""}`).then((r) => setItems(r.items)), [q]);
   useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); }, [load]);
 
+  /* Autoguardado (C1): un cliente existente se guarda al cerrar; uno nuevo queda de borrador hasta Guardar. */
+  const auto = useRecordAutosave<Edit>({
+    ns: "cli", mode: "close", newRecords: "local", value: edit, idOf: (e) => e.id, body: custBody,
+    save: async (b, id, ctx) => { await api(`/customers/${id}`, { method: "PUT", json: b, headers: ctx.headers, keepalive: ctx.keepalive }); load(); },
+    enabled: !!edit && (edit.id ? allows("crm.editar") : allows("crm.crear")),
+    label: (e) => (e.id ? e.name || "El cliente" : "El cliente nuevo"),
+    apply: (d) => setEdit((cur) => (cur ? { ...d, id: cur.id } : cur)),
+  });
+  const cancelar = () => { if (auto.isDirty() && !confirm("¿Descartar los cambios?")) return; auto.discard(); setEdit(null); setParams({}); };
+
   const save = async () => {
     if (!edit) return;
     try {
-      const { id, ...body } = edit;
-      const saved = await api<{ id: number }>(id ? `/customers/${id}` : "/customers", { method: id ? "PUT" : "POST", json: body });
+      const { id } = edit;
+      const saved = await auto.exclusive(edit, () => api<{ id: number }>(id ? `/customers/${id}` : "/customers", { method: id ? "PUT" : "POST", json: custBody(edit) }));
       toast("Cliente guardado"); setEdit(null); setParams({});
       if (!id && !params.get("volver")) nav(`/clientes/${saved.id}`); else load();
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
@@ -46,7 +59,7 @@ export default function Customers() {
         )}
       </Card>
       {edit && (
-        <Modal title={edit.id ? "Cliente" : "Nuevo cliente"} onClose={() => { setEdit(null); setParams({}); }} foot={<><button className="btn btn--ghost" onClick={() => setEdit(null)}>Cancelar</button><button className="btn btn--crimson" onClick={save}>Guardar</button></>}>
+        <Modal title={edit.id ? "Cliente" : "Nuevo cliente"} onClose={() => { setEdit(null); setParams({}); }} foot={<>{auto.bar}<button className="btn btn--ghost" onClick={cancelar}>Cancelar</button><button className="btn btn--crimson" onClick={save}>Guardar</button></>}>
           <div className="grid-2">
             <Field label="Tipo de identificación"><select className="select" value={edit.id_type} onChange={(e) => setEdit({ ...edit, id_type: e.target.value })}>{["fisica", "juridica", "dimex", "nite", "extranjero"].map((t) => <option key={t} value={t}>{t}</option>)}</select></Field>
             <Field label="Número"><input className="input input--mono" style={{ textAlign: "left" }} value={edit.id_number} onChange={(e) => setEdit({ ...edit, id_number: e.target.value })} /></Field>

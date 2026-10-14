@@ -8,6 +8,7 @@ import { Badge, Field, I, Icon, Loading, Modal } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
 import { NO_SUMA, TREATMENTS, unitOptions, type Treatment } from "../../lib/units";
 import QuoteVersions from "./QuoteVersions";
+import { useRecordAutosave } from "../../lib/useRecordAutosave";
 
 type Preview = { subtotal: string; discount_total: string; tax_total: string; total: string; lines: { subtotal: string; tax_amount: string; total: string; unit_price: string; name: string; tax_rate: string }[] };
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? String(Number(n.toFixed(5))) : String(v ?? ""); };
@@ -15,6 +16,16 @@ const blankLine = (): Line => ({ product_id: null, code: null, name: "", descrip
 /* Una linea en 0 sin tratamiento no explica nada: hay que decir si es pendiente, aportada, cortesia o exclusion. */
 const zeroUnexplained = (l: Line) => (l.treatment || "normal") === "normal" && !(Number(l.unit_price) > 0);
 const nameRows = (s: string) => Math.min(4, Math.max(1, Math.ceil((s || "").length / 44)));
+type DocState = Partial<Quote & Invoice>;
+/* Lo que se manda al guardar (y lo que compara el borrador local). */
+const toPayload = (doc: DocState, lines: Line[]) => ({
+  customer_id: doc.customer_id ?? null, currency: doc.currency || "CRC", discount_type: doc.discount_type || "percent", discount_value: doc.discount_value || "0",
+  internal_notes: doc.internal_notes || null, external_notes: doc.external_notes || null, external_order: doc.external_order || null, activity_code: doc.activity_code || null,
+  medical_exemption_card: !!doc.medical_exemption_card, issue_date: doc.issue_date || null, due_date: doc.due_date || null,
+  lines: lines.filter((l) => l.name.trim()).map((l) => ({ product_id: l.product_id, code: l.code, name: l.name, description: l.description, unit: l.unit, quantity: l.quantity || "1", unit_price: l.unit_price || "0", discount_type: l.discount_type, discount_value: l.discount_value || "0", tax_rate: l.tax_rate || "13", treatment: l.treatment || "normal", supplied_by: l.treatment === "aportado" ? l.supplied_by || null : null })),
+});
+/* Al recuperar un borrador solo vuelve lo que el usuario escribe; numero, estado y versiones son del servidor. */
+const EDITABLE = ["customer_id", "currency", "discount_type", "discount_value", "internal_notes", "external_notes", "external_order", "activity_code", "medical_exemption_card", "issue_date", "due_date"] as const;
 
 export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const { id } = useParams();
@@ -32,6 +43,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const [busy, setBusy] = useState(false);
   const [fx, setFx] = useState<{ sell: string; buy: string } | null>(null);
   const [limit, setLimit] = useState<{ limit: number; free: boolean } | null>(null);
+  const [cargado, setCargado] = useState(isNew); // un documento existente no tiene borrador hasta que llega del servidor
   const pending = doc.status === "por_aprobar";
   // grupoB: aceptada por el cliente = bloqueada (se deshace la respuesta en el panel Versiones)
   const accepted = isQ && (doc as Quote).acceptance_status === "aceptada";
@@ -46,16 +58,30 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
 
   /* Documento recibido de la API -> estado del editor (al abrir y cuando el panel Versiones lo cambia). */
   function hydrate(d: Quote & Invoice) {
+    auto.fromServer(); // lo que llega del servidor es la referencia, no un cambio del usuario
+    setCargado(true);
     setDoc({ ...d, discount_value: num(d.discount_value) });
     setLines(d.lines.map((l) => ({ ...l, quantity: num(l.quantity), unit_price: num(l.unit_price), discount_value: num(l.discount_value), tax_rate: num(l.tax_rate) })));
   }
 
-  const payload = useMemo(() => ({
-    customer_id: doc.customer_id ?? null, currency: doc.currency || "CRC", discount_type: doc.discount_type || "percent", discount_value: doc.discount_value || "0",
-    internal_notes: doc.internal_notes || null, external_notes: doc.external_notes || null, external_order: doc.external_order || null, activity_code: doc.activity_code || null,
-    medical_exemption_card: !!doc.medical_exemption_card, issue_date: doc.issue_date || null, due_date: doc.due_date || null,
-    lines: lines.filter((l) => l.name.trim()).map((l) => ({ product_id: l.product_id, code: l.code, name: l.name, description: l.description, unit: l.unit, quantity: l.quantity || "1", unit_price: l.unit_price || "0", discount_type: l.discount_type, discount_value: l.discount_value || "0", tax_rate: l.tax_rate || "13", treatment: l.treatment || "normal", supplied_by: l.treatment === "aportado" ? l.supplied_by || null : null })),
-  }), [doc, lines]);
+  const payload = useMemo(() => toPayload(doc, lines), [doc, lines]);
+
+  /* Borrador en este dispositivo (D1/D2): una cotizacion o factura nunca se autoguarda en el servidor (el PUT puede
+     dejarla "por aprobar" y queda en la bitacora; la factura es un documento fiscal). Salir de la pagina deja la
+     copia y al volver se ofrece recuperarla. Guardar y "Guardar & enviar" pasan por exclusive. */
+  const auto = useRecordAutosave<{ doc: DocState; lines: Line[] }>({
+    ns: isQ ? "doc-q" : "doc-i",
+    mode: "never",
+    value: cargado ? { doc, lines } : null,
+    idOf: (v) => (v.doc.id as number | undefined) ?? undefined,
+    body: (v) => toPayload(v.doc, v.lines),
+    enabled: !locked && (allows("sales.editar") || (isNew && allows("sales.crear"))),
+    label: (v) => v.doc.number || (isQ ? "La cotización nueva" : "La factura nueva"),
+    apply: (v) => {
+      setDoc((cur) => { const next = { ...cur } as Record<string, unknown>; for (const k of EDITABLE) next[k] = (v.doc as Record<string, unknown>)[k]; return next as DocState; });
+      setLines(v.lines);
+    },
+  });
 
   useEffect(() => {
     if (!isNew && doc.id == null) return; // auditA: sin documento cargado no hay totales que calcular (evita ₡0)
@@ -71,7 +97,8 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     setBusy(true);
     try {
       const path = isQ ? "quotes" : "invoices";
-      const saved = isNew ? await api<Quote & Invoice>(`/${path}`, { method: "POST", json: payload }) : await api<Quote & Invoice>(`/${path}/${id}`, { method: "PUT", json: payload });
+      const saved = await auto.exclusive({ doc, lines }, () => (isNew ? api<Quote & Invoice>(`/${path}`, { method: "POST", json: payload }) : api<Quote & Invoice>(`/${path}/${id}`, { method: "PUT", json: payload })));
+      auto.fromServer();
       if (saved.status === "por_aprobar") {
         toast(`Cotización ${saved.number} guardada. El descuento supera tu límite: queda pendiente de aprobación de un administrador.`, "bad");
         nav(`/cotizaciones/${saved.id}`, { replace: true });
@@ -100,7 +127,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
       if (!isNew) setDoc(saved);
     } catch (e) { toast(e instanceof Error ? e.message : "Error al guardar", "bad"); }
     finally { setBusy(false); }
-  }, [payload, isQ, isNew, id, nav, toast]);
+  }, [payload, isQ, isNew, id, nav, toast, auto, doc, lines]);
 
   /* Aceptada: no se guarda nada antes (esta bloqueada); la API convierte la version aceptada. */
   const convertAccepted = async () => {
@@ -290,6 +317,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
           {(!locked || (accepted && doc.status !== "convertida" && doc.status !== "anulada")) && (
             <div className="card"><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {limit && !limit.free && !accepted && <p className="muted" style={{ fontSize: 12, margin: 0 }}>Tu descuento máximo es {Number(limit.limit)} % (incluye rebajas al precio de catálogo). Más que eso requiere aprobación.</p>}
+              <div>{auto.bar}</div>
               {!accepted && <button className="btn btn--crimson" disabled={busy} onClick={() => save()}><Icon d={I.check} />Guardar</button>}
               {!pending && !accepted && <button className="btn" disabled={busy || blocked} onClick={() => save("send")}><Icon d={I.whatsapp} />Guardar & enviar al cliente</button>}
               {isQ && !pending && <button className="btn btn--soft" disabled={busy || blocked} onClick={() => (accepted ? convertAccepted() : save("convert"))}><Icon d={I.invoice} />Convertir a factura</button>}

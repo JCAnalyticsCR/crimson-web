@@ -64,6 +64,9 @@ class SupportTicket(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     solution: Mapped[str | None] = mapped_column(Text)
     photos: Mapped[list] = mapped_column(JSON, default=list)
     tags: Mapped[list] = mapped_column(JSON, default=list)
+    # proximo paso del seguimiento: que hay que hacer y para cuando (lo que Andres llama "dar los seguimientos")
+    next_step: Mapped[str | None] = mapped_column(String(200))
+    next_step_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     notes: Mapped[list["SupportNote"]] = relationship(cascade="all, delete-orphan", order_by="SupportNote.id", lazy="selectin")
 

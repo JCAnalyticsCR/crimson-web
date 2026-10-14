@@ -12,7 +12,7 @@ import { ReservationRow, type Reservation } from "../inventory/Inventory";
 
 type Eco = {
   price: string; cost_planned: string; cost_materials: string; cost_labor: string; cost_travel: string; cost_extra: string;
-  cost_real: string; profit: string | null; margin_real: number | null; margin_planned: number; hours: number;
+  cost_real: string; profit: string | null; margin_real: number | null; margin_planned: number; hours: number; hours_estimated?: number | null;
   sin_costos?: boolean; provisional?: boolean; aviso?: string | null;
 };
 type Project = {
@@ -169,7 +169,7 @@ function Detail({ id }: { id: number }) {
           <div className={`eco__box ${e.profit == null || e.provisional ? "" : Number(e.profit) >= 0 ? "is-good" : "is-bad"}`}><span className="meta">Utilidad{e.provisional ? " · provisional" : ""}</span><b className="money">{e.profit == null ? "—" : fmtMoney(e.profit)}</b></div>
           <div className="eco__box"><span className="meta">Margen presupuestado</span><b>{e.margin_planned.toFixed(1)}%</b></div>
           <div className={`eco__box ${e.margin_real == null || e.provisional ? "" : e.margin_real >= e.margin_planned - 5 ? "is-good" : "is-bad"}`}><span className="meta">Margen real{e.provisional ? " · provisional" : ""}</span><b>{e.margin_real == null ? "—" : `${e.margin_real.toFixed(1)}%`}</b>{e.aviso && <small className="muted" style={{ display: "block", fontSize: 12 }}>{e.aviso}</small>}</div>
-          <div className="eco__box"><span className="meta">Horas de campo</span><b>{e.hours}</b></div>
+          <div className="eco__box"><span className="meta">Horas de campo (h·persona)</span><b>{e.hours}</b>{e.hours_estimated ? <small className="muted" style={{ display: "block", fontSize: 12 }}>de {e.hours_estimated} estimadas</small> : null}</div>
         </div>
       )}
 
