@@ -380,7 +380,8 @@ export function ControlesCapa() {
           {!st.activa && nProp > 0 && <b className="cap-switch__n"><span className="cap-sr">, </span>{nProp}<span className="cap-sr"> en esta pantalla</span></b>}
         </button>
       )}
-      {loc.pathname !== "/propuestas" && <Link className="cap-lqv" to="/propuestas">Lo que viene</Link>}
+      {/* solo sobre la tienda: en maquetas, Detrás de escena y ¿Es rentable? la barra de propuestas ya lo trae (no duplicar) */}
+      {esRutaDeTienda(loc.pathname) && <Link className="cap-lqv" to="/propuestas">Lo que viene</Link>}
     </>
   );
 }

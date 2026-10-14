@@ -273,6 +273,7 @@ function Pagos({ d, set, guardar }: { d: Datos; set: <K extends keyof Datos>(k: 
             <Campo label="Dirección de retiro"><input className="input" value={p.retiro} onChange={(e) => up({ retiro: e.target.value })} /></Campo>
           </div>
           <label className="ges-check ges-check--top"><input type="checkbox" checked={p.auto} onChange={(e) => up({ auto: e.target.checked })} />Emitir la factura electrónica automáticamente al confirmarse el pago (con cédula: FE; sin cédula: tiquete) y enviarla al cliente</label>
+          <p className="muted ges-sm">Sin proveedor de factura electrónica contratado, la emisión ante Hacienda queda en modo de prueba.</p>
         </div>
       </div>
     </section>

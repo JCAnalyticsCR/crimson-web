@@ -30,7 +30,7 @@ type Step = {
 export const tourSteps = (productPath: string): Step[] => [
   {
     id: "portada", title: "La portada de Crimson",
-    body: "Vitrina con la marca de Crimson: categorías, kits listos y lo más pedido, con precios y existencias del inventario real.",
+    body: "Vitrina con la marca de Crimson: categorías, kits listos y lo más pedido, con precios y existencias del inventario (en esta vista previa, la disponibilidad es simulada).",
     path: "/", target: ["#vt-title", ".vt-hero", ".sh-hero", "main h1"],
   },
   {
@@ -51,7 +51,7 @@ export const tourSteps = (productPath: string): Step[] => [
   },
   {
     id: "pago", title: "Carrito y pago",
-    body: "SINPE Móvil con comprobante, tarjeta y factura electrónica automática. Es una vista previa: nada se cobra.",
+    body: "SINPE Móvil con comprobante, tarjeta y factura electrónica automática (las dos últimas, al contratar ONVO y el proveedor de facturación). Vista previa: nada se cobra.",
     path: "/?v=pagar", target: [".ck-steps"], antes: sembrarCarritoSiVacio,
     missing: "Tu navegador no deja guardar el carrito en esta vista: agregá un producto y volvé a este paso.",
   },
@@ -111,8 +111,10 @@ const llevar = (el: HTMLElement) => {
   if (r.height > (innerHeight - tope) * 0.7) window.scrollTo({ top: Math.max(0, r.top + scrollY - tope - 12), behavior });
   else el.scrollIntoView({ block: "center", behavior });
 };
-/** Hay un aviso, dialogo o ficha abiertos: su Esc es suyo, no de la guia. */
-const hayDialogo = () => !!document.querySelector('.demo-notice, .ges-dlg, #cap-ficha, .lqv-dialogo, [aria-modal="true"]');
+/** Hay un aviso, dialogo o ficha ABIERTOS: su Esc es suyo, no de la guia. Los dialogos de la tienda (carrito,
+    filtros) viven siempre en el DOM: cerrados llevan aria-hidden="true" / data-open="false" y no cuentan. */
+const hayDialogo = () => Array.from(document.querySelectorAll<HTMLElement>('.demo-notice, .ges-dlg, #cap-ficha, .lqv-dialogo, [aria-modal="true"]'))
+  .some((el) => el.getAttribute("aria-hidden") !== "true" && el.dataset.open !== "false" && !el.hidden && el.getClientRects().length > 0);
 
 type TourState = { step: number; open: boolean };
 const load = (): TourState => {

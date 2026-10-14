@@ -30,5 +30,5 @@ export const etiquetas: Etiqueta[] = [
   { id: "D1-dde", propuesta: "D1", rutas: ["/detras-de-escena/inventario"], selector: ["#ges-inv-proveedor"], irA: "/detras-de-escena/inventario",
     aqui: "Esta columna se llenaría sola desde Eurocomp, sin cargar a mano." },
   { id: "C3-dde", propuesta: "C3", rutas: ["/detras-de-escena/inventario"], selector: ["#ges-inv-precio"], irA: "/detras-de-escena/inventario",
-    aqui: "Cuando sube el costo, aquí aparecería el precio sugerido que mantiene el 35 %." },
+    aqui: "Cuando sube el costo, aquí aparecería el precio sugerido que mantiene el margen sobre venta que defina Crimson (35 % en el ejemplo)." },
 ];
