@@ -1,0 +1,195 @@
+/* Capa de propuestas sobre la tienda real (prefijo cap-). Nunca toca la tienda: solo marcadores fijos en un portal,
+   un contorno por clase y los controles de la franja. Capas: marcadores 50 · pista y control 52 · guia 55 (ya existe)
+   · velo 57 · ficha 58 · cajon/hoja de la tienda 60-61 (los marcadores quedan debajo) · franja 100. */
+
+.cap { font-family: Manrope, system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-tap-highlight-color: transparent; }
+.cap *, .cap *::before, .cap *::after { box-sizing: border-box; }
+.cap :focus-visible { outline: 3px solid #ff5a6e; outline-offset: 2px; }
+.cap :is(h1, h2)[tabindex="-1"]:focus { outline: none; }
+.cap-sr { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* ---------- botones ---------- */
+.cap-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 16px; border-radius: 999px; border: 0; cursor: pointer; font: 700 14px/1.2 Manrope, system-ui, sans-serif; text-decoration: none; white-space: nowrap; transition: transform 200ms cubic-bezier(.25, .46, .45, .94), background-color 200ms; }
+.cap-btn--crimson { background: #e2233a; color: #fff; }
+.cap-btn--claro { background: #fff; color: #15131a; }
+.cap-btn--fantasma { background: transparent; color: #fff; box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .3); }
+.cap-btn:active:not(:disabled) { transform: scale(.97); }
+.cap-btn:disabled { opacity: .45; cursor: not-allowed; }
+@media (hover: hover) { .cap-btn--crimson:hover { background: #c41a2f; } .cap-btn--fantasma:hover:not(:disabled) { box-shadow: inset 0 0 0 1.5px #fff; } }
+.cap-link { display: inline-flex; align-items: center; min-height: 40px; color: #c41a2f; font-weight: 700; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
+
+/* ---------- franja: interruptor, chips y «Lo que viene» ---------- */
+.cap-switch {
+  position: relative; display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px 0 8px; border-radius: 999px; border: 0;
+  cursor: pointer; background: #e2233a; color: #fff; font: 700 12.5px/1 Manrope, system-ui, sans-serif; letter-spacing: 0; text-transform: none; white-space: nowrap; flex: none;
+}
+.cap-switch::before { content: ""; position: absolute; inset: -4px 0; } /* zona tactil de 40 px */
+.cap-switch:focus-visible { outline: 2px solid #ff5a6e; outline-offset: 2px; }
+.cap-switch[aria-checked="true"] { background: rgba(255, 255, 255, .14); }
+.cap-switch__pista { position: relative; width: 26px; height: 16px; border-radius: 999px; background: rgba(255, 255, 255, .38); flex: none; }
+.cap-switch__pista::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform 200ms cubic-bezier(.25, .46, .45, .94); }
+/* encendido: la perilla a la derecha sobre verde (el estado no depende solo del color: tambien la posicion) */
+.cap-switch[aria-checked="true"] .cap-switch__pista { background: #157a41; }
+.cap-switch[aria-checked="true"] .cap-switch__pista::after { transform: translateX(10px); }
+.cap-switch__n { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: #fff; color: #c41a2f; display: inline-grid; place-items: center; font: 500 11px/1 "JetBrains Mono", ui-monospace, monospace; }
+.cap-switch__c { display: none; }
+@media (max-width: 399px) { .cap-switch__l { display: none; } .cap-switch__c { display: inline; } }
+@media (hover: hover) { .cap-switch:hover { background: #c41a2f; } .cap-switch[aria-checked="true"]:hover { background: rgba(255, 255, 255, .22); } }
+
+.cap-chips { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; height: 100%; }
+.cap-chips__lista {
+  display: flex; align-items: center; gap: 6px; list-style: none; margin: 0; padding: 0 2px; min-width: 0; height: 100%; overflow-x: auto; overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.cap-chips__lista::-webkit-scrollbar { display: none; }
+.cap-chips__lista > li { flex: none; }
+/* degradado del lado que tiene mas chips: senal de que la tira sigue */
+.cap-chips[data-der] .cap-chips__lista { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+.cap-chips[data-izq] .cap-chips__lista { -webkit-mask-image: linear-gradient(90deg, transparent, #000 28px); mask-image: linear-gradient(90deg, transparent, #000 28px); }
+.cap-chips[data-izq][data-der] .cap-chips__lista { -webkit-mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
+.cap-chips__flecha {
+  flex: none; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; cursor: pointer;
+  background: rgba(255, 255, 255, .14); color: #fff; font: 700 17px/1 Manrope, system-ui, sans-serif;
+}
+@media (hover: hover) { .cap-chips__flecha:hover { background: rgba(255, 255, 255, .26); } }
+@media (hover: none) { .cap-chips__flecha { display: none; } }
+.cap-chip {
+  height: 28px; padding: 0 10px; border-radius: 999px; border: 1.5px solid #e2233a; background: transparent; color: #fff; cursor: pointer; white-space: nowrap; flex: none;
+  font: 500 11px/1 "JetBrains Mono", ui-monospace, monospace; letter-spacing: .06em; text-transform: none;
+}
+.cap-chip b { font-weight: 500; color: #ff5a6e; }
+.cap-chip[data-tipo="existente"] { border-color: #3fbf7f; color: #8fe3b4; }
+.cap-chip[aria-expanded="true"] { background: #fff; color: #15131a; }
+.cap-chip[aria-expanded="true"] b { color: #c41a2f; }
+.cap-chip--ya { border-color: rgba(255, 255, 255, .3); color: #d9d5d1; font-family: Manrope, system-ui, sans-serif; font-weight: 600; letter-spacing: 0; }
+.cap-chip--ya[aria-pressed="true"] { border-color: #8fe3b4; color: #8fe3b4; background: rgba(143, 227, 180, .1); }
+.cap-chip--ya[aria-pressed="true"]::before { content: "✓ "; }
+.cap-chip__largo { display: none; }
+.cap-chip__corto { display: inline; }
+.cap-chips__vacio { font: 500 11px/1 "JetBrains Mono", ui-monospace, monospace; color: #d9d5d1; white-space: nowrap; letter-spacing: .04em; text-transform: none; }
+.cap-chips__vacio a { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
+.cap-lqv { display: none; }
+@media (min-width: 768px) {
+  .cap-chip__largo { display: inline; }
+  .cap-chip__corto { display: none; }
+  .cap-lqv { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border-radius: 999px; flex: none; color: #fff; text-decoration: none; font: 700 12.5px/1 Manrope, system-ui, sans-serif; letter-spacing: 0; text-transform: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .25); }
+  .cap-lqv:focus-visible { outline: 2px solid #ff5a6e; outline-offset: 2px; }
+}
+@media (hover: hover) { .cap-chip:not([aria-expanded="true"]):hover { background: rgba(255, 255, 255, .08); } .cap-lqv:hover { box-shadow: inset 0 0 0 1px #fff; } }
+
+/* ---------- marcadores ---------- */
+.cap-marcas { position: fixed; top: 0; left: 0; width: 0; height: 0; z-index: 50; }
+.cap-marca {
+  position: fixed; top: 0; left: 0; height: 28px; padding: 0 10px; display: inline-flex; align-items: center; border-radius: 999px; border: 2px solid #fff;
+  background: #e2233a; color: #fff; font: 500 11px/1 "JetBrains Mono", ui-monospace, monospace; letter-spacing: .06em; white-space: nowrap; cursor: pointer;
+  box-shadow: 0 6px 16px -6px rgba(21, 19, 26, .6); will-change: transform; transform: translate3d(-200px, -200px, 0);
+  animation: cap-in 200ms cubic-bezier(.25, .46, .45, .94) both;
+}
+.cap-marca::before { content: ""; position: absolute; inset: -8px -4px; } /* zona tactil de 44 px */
+.cap-marca b { font-weight: 500; }
+.cap-marca[data-tipo="existente"] { background: #157a41; }
+.cap-marca[data-oculta="1"] { visibility: hidden; pointer-events: none; }
+.cap-marca[aria-expanded="true"] { background: #15131a; box-shadow: 0 0 0 2px #e2233a, 0 6px 16px -6px rgba(21, 19, 26, .6); }
+.cap-marca[data-tipo="existente"][aria-expanded="true"] { box-shadow: 0 0 0 2px #157a41, 0 6px 16px -6px rgba(21, 19, 26, .6); }
+.cap-marca:focus-visible { outline: 3px solid #15131a; outline-offset: 2px; box-shadow: 0 0 0 2px #fff; }
+.cap-marca__corto { display: none; }
+@media (min-width: 768px) { .cap-marca__corto { display: inline; } .cap-marca[data-angosto="1"] .cap-marca__corto { display: none; } }
+.cap-marca[data-pulso] { animation: cap-in 200ms cubic-bezier(.25, .46, .45, .94) both, cap-pulso 1.4s ease-out 3; }
+@keyframes cap-in { from { opacity: 0; scale: .9; } }
+@keyframes cap-pulso { from { box-shadow: 0 0 0 0 rgba(226, 35, 58, .6); } to { box-shadow: 0 0 0 16px rgba(226, 35, 58, 0); } }
+
+/* contorno del objetivo (vive en la tienda: por eso es global). Si la guia lo senala, gana la guia. */
+.cap-objetivo { outline: 2px dashed #c41a2f !important; outline-offset: 4px !important; }
+.cap-objetivo--ya { outline: 2px solid rgba(21, 122, 65, .6) !important; outline-offset: 4px !important; }
+.vip-spot.cap-objetivo, .vip-spot.cap-objetivo--ya { outline: 3px solid #e2233a !important; }
+
+/* ---------- ficha ---------- */
+.cap-ficha {
+  position: fixed; top: 0; left: 0; z-index: 58; width: min(340px, calc(100vw - 16px)); max-height: calc(100svh - 120px); overflow: auto; overscroll-behavior: contain;
+  display: grid; gap: 10px; padding: 12px 16px 16px; border-radius: 12px; background: #fff; color: #15131a; font-size: 14.5px; line-height: 1.5;
+  border: 1px solid rgba(21, 19, 26, .14); border-top: 3px dashed #e2233a; box-shadow: 0 24px 60px -24px rgba(21, 19, 26, .6);
+}
+.cap-ficha[data-tipo="existente"] { border-top: 3px solid #157a41; }
+.cap-ficha :focus-visible { outline-color: #c41a2f; }
+.cap-ficha[data-modo="hoja"] { top: auto; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); width: auto; max-height: 60svh; transform: none; }
+.cap-ficha__top { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding-right: 40px; min-height: 32px; }
+.cap-ficha__etapa { font: 500 10px/1.3 "JetBrains Mono", ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; color: #6f6a74; }
+.cap-ficha__x { position: absolute; top: -6px; right: -10px; width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 50%; background: none; color: #15131a; cursor: pointer; }
+.cap-ficha__x svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.cap-ficha__t { margin: 0; font: 700 19px/1.15 "Bricolage Grotesque", Manrope, sans-serif; letter-spacing: -.01em; outline: none; text-wrap: balance; }
+.cap-ficha p { margin: 0; }
+.cap-ficha__b { color: #5a5560; }
+.cap-ficha__aqui { padding: 10px 12px; border-radius: 8px; background: #f6f2ee; border-left: 3px solid #e2233a; }
+.cap-ficha[data-tipo="existente"] .cap-ficha__aqui { border-left-color: #157a41; }
+.cap-ficha__hoy b { color: #157a41; }
+.cap-ficha__dep { font-size: 13.5px; color: #5a5560; }
+.cap-ficha__acc { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 2px; }
+.cap-velo { position: fixed; inset: 0; z-index: 57; background: rgba(10, 8, 12, .45); }
+@media (hover: hover) { .cap-ficha__x:hover { background: #f6f2ee; } }
+
+/* ---------- pista de la primera vez (no se va sola) ---------- */
+.cap-pista {
+  position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 52; width: min(480px, calc(100% - 16px));
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 16px; border-radius: 12px; background: #15131a; color: #f4f1ee;
+  border: 1px solid rgba(255, 255, 255, .1); box-shadow: 0 22px 50px -24px rgba(0, 0, 0, .7);
+}
+.cap-pista p { margin: 0; flex: 1 1 240px; font-size: 14px; line-height: 1.45; }
+.cap-pista__c { color: #ff5a6e; }
+.cap-pista__v { color: #8fe3b4; }
+
+/* ---------- reduced-motion: rama propia (los marcadores aparecen quietos y no laten) ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .cap, .cap *, .cap-marca[data-pulso], .cap-switch__pista::after { animation: none !important; transition: none !important; }
+}
+
+/* ---------- control del pedido de ejemplo ---------- */
+.cap-control {
+  position: fixed; z-index: 52; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); width: 360px; max-width: calc(100% - 32px);
+  max-height: calc(100svh - var(--demo-h, 40px) - 120px); overflow: auto; overscroll-behavior: contain;
+  background: #15131a; color: #f4f1ee; border-radius: 12px; border: 1px solid rgba(255, 255, 255, .08); box-shadow: 0 22px 50px -24px rgba(0, 0, 0, .7); font-size: 14px;
+}
+.cap-control__head {
+  position: sticky; top: 0; z-index: 1; width: 100%; min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 14px;
+  border: 0; background: #15131a; color: inherit; cursor: pointer; text-align: left; font: 500 11px/1.2 "JetBrains Mono", ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase;
+}
+.cap-control__t { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.cap-control__t i { width: 7px; height: 7px; border-radius: 50%; background: #e2233a; flex: none; }
+.cap-control__r { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.cap-control__res { font: 700 13px/1.2 Manrope, system-ui, sans-serif; letter-spacing: 0; text-transform: none; color: #fff; }
+.cap-control__body { padding: 0 14px 14px; display: grid; gap: 10px; }
+.cap-control__body[hidden] { display: none; }
+.cap-control__sub { margin: 0; color: #b9b5b0; font-size: 13.5px; line-height: 1.4; }
+.cap-estados { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.cap-estados button {
+  width: 100%; min-height: 40px; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .16);
+  background: transparent; color: #e4e0dc; font: 600 13px/1.2 Manrope, system-ui, sans-serif; text-align: left; cursor: pointer;
+}
+.cap-estados button > span { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; flex: none; background: rgba(255, 255, 255, .12); font: 500 10px/1 "JetBrains Mono", ui-monospace, monospace; }
+.cap-estados button[data-hecho] > span { background: #157a41; color: #fff; }
+.cap-estados button[aria-current="step"] { background: #fff; color: #15131a; border-color: #fff; }
+.cap-estados button[aria-current="step"] > span { background: #e2233a; color: #fff; }
+.cap-estados button:focus-visible { outline-offset: 1px; }
+.cap-control__nav { display: flex; flex-wrap: wrap; gap: 8px; }
+.cap-control__nav .cap-btn { flex: 1 1 140px; }
+.cap-control__pie { margin: 0; padding-left: 10px; border-left: 2px solid #e2233a; font-size: 13.5px; line-height: 1.45; color: #e4e0dc; }
+.cap-control__pie a, .cap-control__crimson { color: #ff8e9c; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.cap-control__crimson { min-height: 40px; display: inline-flex; align-items: center; justify-self: start; }
+.cap-control .pp-hilo { padding: 10px; margin-top: 8px; }
+.cap-control__hilo > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px; cursor: pointer; list-style: none; font-weight: 700; font-size: 13.5px; color: #fff; border-top: 1px solid rgba(255, 255, 255, .1); padding-top: 6px; }
+.cap-control__hilo > summary::-webkit-details-marker { display: none; }
+.cap-control__hilo > summary::after { content: "+"; font: 500 16px/1 "JetBrains Mono", ui-monospace, monospace; color: #b9b5b0; }
+.cap-control__hilo[open] > summary::after { content: "−"; }
+.cap-control--pista { padding: 14px; display: grid; gap: 10px; }
+.cap-control--pista p { margin: 0; font-size: 14px; line-height: 1.45; }
+@media (hover: hover) { .cap-estados button:not([aria-current]):hover { background: rgba(255, 255, 255, .06); } }
+/* escritorio: pasa a la esquina izquierda cuando en la derecha taparia el pedido (useEsquiva) */
+@media (min-width: 1024px) {
+  .cap-control[data-lado="izq"] { right: auto; left: 16px; }
+  /* plegado: una sola linea («Pedido de ejemplo · ORD-000128 · Entregado ▴»), sin partir el numero */
+  .cap-control:not([data-abierta]):not(.cap-control--pista) { width: auto; }
+  .cap-control:not([data-abierta]) .cap-control__t { white-space: nowrap; }
+}
+@media (max-width: 1023px) {
+  .cap-control { left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); width: auto; max-width: none; max-height: 72svh; }
+}
+
