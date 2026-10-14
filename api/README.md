@@ -35,7 +35,7 @@ Proyecto `crimson-plataforma` (entorno `production` de Railway, datos de prueba)
 | catálogo | `/customers`, `/products`, `/taxes`, `/categories` | búsqueda + cursor ("Más resultados"), CABYS, impuestos por producto |
 | ventas | `/documents/preview`, `/quotes[...]`, `/invoices[...]`, `/billing-groups` | totales v4.4 (5 decimales, prorrateo), consecutivo 20 dígitos, convertir/duplicar/anular/enviar |
 | cobros | `/invoices/{id}/payments`, `/invoices/{id}/payment-link`, `/payments` | método ≠ tipo de transacción, saldo, enlace firmado + WhatsApp |
-| público | `/public/pay/{token}` | página de pago sin sesión (ONVO en Fase 3) |
+| público | `/public/pay/{token}` · `/onvo` · `/onvo/sync` | página de pago sin sesión; abre el Checkout de ONVO por el saldo y, al volver, confirma consultando a ONVO |
 | dashboard | `/dashboard`, `/alerts` | KPIs hoy/mes/mes anterior + variación, recientes, acciones pendientes (incl. stock bajo) |
 | documentos | `/{quotes|invoices}/{id}/html`, `/pdf`, `/email` | plantilla propia; PDF con WeasyPrint (Docker) o HTML imprimible; correo por Resend con outbox y BCC |
 | factura electrónica | `/invoices/{id}/emit`, `/credit-note`, `/xml`, `/xml/{doc}/{document|response}` | adapter `sandbox` (clave 50 dígitos, XML v4.4 simulado); Alanube/GTI se enchufan en `app/providers/einvoice.py` |
@@ -44,7 +44,7 @@ Proyecto `crimson-plataforma` (entorno `production` de Railway, datos de prueba)
 | reportes | `/reports`, `/reports/{key}?format=xlsx` | 19 reportes con Excel, incluidas rentabilidad por proyecto y por tipo de solución |
 | recurrencias | `/recurrences`, `/recurrences/{id}/run` | plantilla + frecuencia → factura (worker diario) |
 | ajustes | `/settings`, `/settings/bank-accounts`, `/billing-groups/{id}`, `/settings/users`, `/settings/invitations[/accept]`, `/settings/gateways`, `/settings/outbox` | vigencias, mensajes, BCC, métodos manuales, consecutivos, roles, invitaciones, pasarelas (secreto cifrado) |
-| webhooks | `/webhooks/onvo/{tenant_id}` | firma HMAC `t=..,v1=..` (300 s), idempotente por evento, aplica pago/reembolso |
+| webhooks | `/webhooks/onvo/{tenant_id}` | header `X-Webhook-Secret`; cada pago se vuelve a consultar a la API de ONVO antes de aplicarse; idempotente por `<type>:<data.id>` y por intención de pago; lo no confirmado responde 503 sin consumirse |
 | Mi Tienda | `/store`, `/store/pages[/{id}]`, `/coupons` | personalización (colores, fuente, tipo catálogo/tienda, dominio, envíos), páginas por bloques JSON |
 | tienda pública | `/public/store/{slug}[/pages/{p}\|/products[/{id}]\|/quote\|/checkout]` | catálogo, ficha con relacionados, carrito, cupón, envío; total = factura al céntimo |
 | órdenes | `/orders`, `/orders/{id}` (estado), `/orders/{id}/invoice?doc_type=TE\|FE` | pedido → tiquete o factura (crea cliente si trae correo) y descuenta inventario |
@@ -80,13 +80,13 @@ Roles: `admin`, `ventas`, `caja`, `inventario`, `contabilidad`, `lectura` — pe
 - Consecutivos bajo `SELECT … FOR UPDATE` (Postgres); nunca se saltan ni reutilizan.
 - Notas internas nunca salen del sistema; externas van al PDF/correo.
 - Factura con pagos o emitida no se edita; anular emitida = nota de crédito (Fase 2).
-- Pagos en línea se confirmarán solo por webhook (adapter ONVO, Fase 3). Nunca se guardan datos de tarjeta.
+- Pagos en línea (ONVO: Checkout alojado) se aplican solo si la API de ONVO confirma el pago, por webhook o al volver el comprador; nunca por el regreso del navegador solo. Nunca se guardan datos de tarjeta. Llaves en Ajustes → Pagos → Pasarelas (cifradas por empresa); en producción solo `onvo_live_`.
 - Logs sin Authorization ni cuerpos; CORS por lista; cookies httpOnly + SameSite.
 
 ## Pendiente (requiere credenciales o decisiones del cliente)
 
 1. Proveedor fiscal real (Alanube o GTI): hoy emite el adapter `sandbox`, sin validez ante Hacienda.
-2. ONVO real (llaves de prueba y producción): cobro con tarjeta, tarjetas guardadas, reautorizaciones. PayPal igual.
+2. ONVO: cobro con tarjeta (tienda), enlace de pago de facturas y reembolso desde el pedido ya están; falta probar de punta a punta con la llave de pruebas en staging y, después, tarjetas guardadas y reautorizaciones. PayPal pendiente.
 3. BCCR: correo + token del servicio de indicadores para el tipo de cambio automático.
 4. Resend: llave para que los correos salgan de verdad (hoy quedan en la bandeja de salida como `simulado`).
 5. Dominio propio (app.crimsoncr.com) y SSL: requiere el CNAME en el DNS del cliente.

@@ -13,7 +13,8 @@ type Group = { id: number; doc_type: string; prefix: string; branch: string; ter
 type Cfg = { prevent_negative_stock?: boolean; reservation_auto_approve_units?: number; reservation_days?: number; labor_day_cost?: number; labor_day_cost_civil?: number; labor_day_cost_contratado?: number; per_diem_cost?: number; travel_cost?: number; max_discount_pct?: number; archive_purge_days?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; notify_due: boolean; remind_days_before: number; daily_close_email: boolean; bcc: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
 type Bank = { id: number; name: string; bank: string | null; currency: string; number: string | null; active: boolean };
 type Users = { users: { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null }[]; invitations: { id: number; email: string; role: string; expires_at: string }[]; roles: string[] };
-type Gw = { id: number; provider: string; client_id: string | null; secret_mask: string | null; is_primary: boolean; active: boolean; mode: string };
+type Gw = { id: number; provider: string; client_id: string | null; secret_mask: string | null; is_primary: boolean; active: boolean; mode: string; webhook_secret_set: boolean };
+type OnvoStatus = { configured: boolean; source: "ajustes" | "entorno" | null; mode: "test" | "live" | null; webhook_secret: boolean; webhook_url: string; active: boolean; problems: string[] };
 type Mail = { id: number; to: string; subject: string; status: string; entity: string | null; entity_id: number | null; created_at: string; error: string | null };
 
 const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["pagos", "Pagos y cobros"], ["inventario", "Inventario"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"], ["bandeja", "Bandeja XML"], ["sla", "SLA"], ["soporte", "Soporte"], ["api", "API"], ["bitacora", "Bitácora"], ["respaldo", "Respaldo"]];
@@ -41,7 +42,10 @@ export default function Settings() {
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [inviteMailed, setInviteMailed] = useState(false);
   const [bank, setBank] = useState<{ id?: number; name: string; bank: string; currency: string; number: string; active: boolean } | null>(null);
-  const [gw, setGw] = useState<{ provider: string; client_id: string; secret: string; is_primary: boolean; active: boolean; mode: string } | null>(null);
+  const [gw, setGw] = useState<{ provider: string; client_id: string; secret: string; webhook_secret: string; is_primary: boolean; active: boolean; mode: string } | null>(null);
+  const [onvoSt, setOnvoSt] = useState<OnvoStatus | null>(null);
+  const [testResult, setTestResult] = useState<{ ok: boolean; mode: string | null; detail: string } | null>(null);
+  const [testBusy, setTestBusy] = useState(false);
   const [pw, setPw] = useState({ current_password: "", new_password: "" });
   /* Los codigos se muestran UNA sola vez: despues solo existen hasheados en la base. */
   const [recovery, setRecovery] = useState<string[] | null>(null);
@@ -51,6 +55,13 @@ export default function Settings() {
     if (!allows("settings.ver")) return;
     api<Cfg>("/settings").then(setCfg); api<Group[]>("/billing-groups").then(setGroups); api<Bank[]>("/settings/bank-accounts").then(setBanks);
     api<Users>("/settings/users").then(setUsers); api<Gw[]>("/settings/gateways").then(setGws); api<Mail[]>("/settings/outbox").then(setMails);
+    api<OnvoStatus>("/settings/gateways/onvo/status").then(setOnvoSt).catch(() => {});
+  };
+  const testOnvo = async () => {
+    setTestBusy(true); setTestResult(null);
+    try { const r = await api<{ ok: boolean; mode: "test" | "live" | null; detail: string }>("/settings/gateways/onvo/test", { method: "POST" }); setTestResult(r); }
+    catch (e) { setTestResult({ ok: false, mode: null, detail: e instanceof Error ? e.message : "Error" }); }
+    finally { setTestBusy(false); }
   };
   useEffect(load, []);
   useEffect(() => { if (me) setCompany({ name: me.tenant.name, legal_name: me.tenant.legal_name || "", tax_id: me.tenant.tax_id || "", default_currency: me.tenant.default_currency, sector: "", logo_url: me.tenant.logo_url || "" }); }, [me]);
@@ -61,7 +72,7 @@ export default function Settings() {
   const saveCfg = (patch: Partial<Cfg>) => api<Cfg>("/settings", { method: "PUT", json: patch }).then((c) => { setCfg(c); toast("Ajustes guardados"); }).catch(err);
   const saveGroup = (g: Group) => api(`/settings/billing-groups/${g.id}`, { method: "PUT", json: { prefix: g.prefix, branch: g.branch, terminal: g.terminal, current: g.current, is_default: g.is_default } }).then(() => ok("Grupo actualizado")).catch(err);
   const saveBank = () => { if (!bank) return; const { id, ...b } = bank; api(id ? `/settings/bank-accounts/${id}` : "/settings/bank-accounts", { method: id ? "PUT" : "POST", json: b }).then(() => { setBank(null); ok("Cuenta guardada"); }).catch(err); };
-  const saveGw = () => { if (!gw) return; api("/settings/gateways", { method: "PUT", json: { ...gw, secret: gw.secret || null } }).then(() => { setGw(null); ok("Pasarela guardada"); }).catch(err); };
+  const saveGw = () => { if (!gw) return; api("/settings/gateways", { method: "PUT", json: { ...gw, secret: gw.secret || null, webhook_secret: gw.webhook_secret || null } }).then(() => { setGw(null); ok("Pasarela guardada"); }).catch(err); };
   const sendInvite = () => { if (!invite) return; api<{ link: string; emailed: boolean }>("/settings/invitations", { method: "POST", json: invite }).then((r) => { setInvite(null); setInviteLink(r.link); setInviteMailed(r.emailed); ok("Invitación creada"); }).catch(err); };
   const setRole = (uid: number, role: string) => api(`/settings/users/${uid}`, { method: "PATCH", json: { role } }).then(() => ok("Rol actualizado")).catch(err);
   const setActive = (uid: number, active: boolean) => api(`/settings/users/${uid}`, { method: "PATCH", json: { active } }).then(() => ok(active ? "Usuario activado" : "Usuario desactivado")).catch(err);
@@ -191,9 +202,15 @@ export default function Settings() {
             <Card title="Cuentas bancarias" flush extra={<button className="btn btn--ghost btn--sm" onClick={() => setBank({ name: "", bank: "", currency: "CRC", number: "", active: true })}><Icon d={I.plus} />Agregar</button>}>
               {banksSt === null ? <Loading /> : banks.length === 0 ? <Empty hint="Se vinculan a los pagos registrados." /> : <table className="table"><thead><tr><th>Nombre</th><th>Banco</th><th>Divisa</th><th>Número</th><th /></tr></thead><tbody>{banks.map((b) => <tr key={b.id}><td style={{ fontWeight: 600 }}>{b.name}</td><td className="muted">{b.bank || "—"}</td><td>{b.currency}</td><td className="mono muted">{b.number || "—"}</td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setBank({ id: b.id, name: b.name, bank: b.bank || "", currency: b.currency, number: b.number || "", active: b.active })}>Ver</button></td></tr>)}</tbody></table>}
             </Card>
-            <Card title="Pasarelas de pago" flush extra={<button className="btn btn--ghost btn--sm" onClick={() => setGw({ provider: "onvo", client_id: "", secret: "", is_primary: true, active: false, mode: "test" })}><Icon d={I.plus} />Agregar</button>}>
-              {gwsSt === null ? <Loading /> : gws.length === 0 ? <Empty hint="ONVO Pay (SINPE Móvil + tarjetas) y PayPal. El secreto se guarda cifrado y nunca vuelve al navegador." /> : <table className="table"><thead><tr><th>Pasarela</th><th>Client ID</th><th>Secreto</th><th>Modo</th><th>Estado</th><th /></tr></thead><tbody>{gws.map((g) => <tr key={g.id}><td style={{ fontWeight: 600, textTransform: "uppercase" }}>{g.provider}{g.is_primary && <span className="meta"> · principal</span>}</td><td className="mono muted">{g.client_id || "—"}</td><td className="mono muted">{g.secret_mask || "—"}</td><td className="muted">{g.mode}</td><td><Badge status={g.active ? "confirmado" : "pendiente"} /></td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setGw({ provider: g.provider, client_id: g.client_id || "", secret: "", is_primary: g.is_primary, active: g.active, mode: g.mode })}>Editar</button></td></tr>)}</tbody></table>}
-              <p className="muted" style={{ padding: "10px 18px", fontSize: 12 }}>Webhook: <span className="mono">/api/webhooks/onvo/{me?.tenant.id}</span> · firma HMAC, ventana 300 s, idempotente.</p>
+            <Card title="Pasarelas de pago" flush extra={<button className="btn btn--ghost btn--sm" onClick={() => setGw({ provider: "onvo", client_id: "", secret: "", webhook_secret: "", is_primary: true, active: false, mode: "test" })}><Icon d={I.plus} />Agregar</button>}>
+              {gwsSt === null ? <Loading /> : gws.length === 0 ? <Empty hint="ONVO Pay (SINPE Móvil + tarjetas) y PayPal. El secreto se guarda cifrado y nunca vuelve al navegador." /> : <table className="table"><thead><tr><th>Pasarela</th><th>Client ID</th><th>Secreto</th><th>Modo</th><th>Webhook</th><th>Estado</th><th /></tr></thead><tbody>{gws.map((g) => <tr key={g.id}><td style={{ fontWeight: 600, textTransform: "uppercase" }}>{g.provider}{g.is_primary && <span className="meta"> · principal</span>}</td><td className="mono muted">{g.client_id || "—"}</td><td className="mono muted">{g.secret_mask || "—"}</td><td className="muted">{g.mode === "live" ? "Producción" : "Pruebas"}</td><td className="muted">{g.webhook_secret_set ? "Webhook ✓" : "sin secreto"}</td><td><Badge status={g.active ? "confirmado" : "pendiente"} /></td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setGw({ provider: g.provider, client_id: g.client_id || "", secret: "", webhook_secret: "", is_primary: g.is_primary, active: g.active, mode: g.mode })}>Editar</button></td></tr>)}</tbody></table>}
+              <div style={{ padding: "12px 18px", display: "flex", flexDirection: "column", gap: 8, fontSize: 12.5 }}>
+                <div><span className="meta">Estado ONVO · </span>{onvoSt?.configured ? <span style={{ color: "var(--ok)" }}>Conectado en modo {onvoSt.mode === "live" ? "Producción" : "Pruebas"} · desde {onvoSt.source === "ajustes" ? "Ajustes" : "variable de entorno"}</span> : <span className="muted">Sin conectar</span>}</div>
+                {onvoSt?.webhook_url && <div style={{ display: "flex", gap: 8, alignItems: "center" }}><input className="input input--mono" style={{ textAlign: "left", height: 32, fontSize: 12 }} readOnly value={onvoSt.webhook_url} /><button className="btn btn--ghost btn--sm" onClick={() => { navigator.clipboard.writeText(onvoSt!.webhook_url); toast("URL copiada"); }}>Copiar</button></div>}
+                <p className="muted" style={{ margin: 0 }}>Registrala en ONVO → Desarrolladores → Webhooks y pegá aquí su secreto (<span className="mono">webhook_secret_…</span>).</p>
+                {onvoSt?.problems.map((p, i) => <p key={i} style={{ color: "var(--warn)", margin: 0 }}>{p}</p>)}
+                {onvoSt?.configured && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}><button className="btn btn--soft btn--sm" onClick={testOnvo} disabled={testBusy}>{testBusy ? "Probando…" : "Probar conexión"}</button>{testResult && <span style={{ color: testResult.ok ? "var(--ok)" : "var(--bad)", fontSize: 12.5 }}>{testResult.ok ? `Conectado (modo ${testResult.mode === "live" ? "Producción" : "Pruebas"})` : testResult.detail}</span>}</div>}
+              </div>
             </Card>
           </div>
         </div>
@@ -303,7 +320,18 @@ export default function Settings() {
         <div className="grid-2"><Field label="Nombre"><input className="input" value={bank.name} onChange={(e) => setBank({ ...bank, name: e.target.value })} /></Field><Field label="Banco"><input className="input" value={bank.bank} onChange={(e) => setBank({ ...bank, bank: e.target.value })} /></Field><Field label="Divisa"><select className="select" value={bank.currency} onChange={(e) => setBank({ ...bank, currency: e.target.value })}><option>CRC</option><option>USD</option></select></Field><Field label="Número / IBAN"><input className="input input--mono" style={{ textAlign: "left" }} value={bank.number} onChange={(e) => setBank({ ...bank, number: e.target.value })} /></Field></div>
       </Modal>}
       {gw && <Modal title="Pasarela de pago" onClose={() => setGw(null)} foot={<><button className="btn btn--ghost" onClick={() => setGw(null)}>Cancelar</button><button className="btn btn--crimson" onClick={saveGw}>Guardar</button></>}>
-        <div className="grid-2"><Field label="Pasarela"><select className="select" value={gw.provider} onChange={(e) => setGw({ ...gw, provider: e.target.value })}><option value="onvo">ONVO Pay</option><option value="paypal">PayPal</option></select></Field><Field label="Modo"><select className="select" value={gw.mode} onChange={(e) => setGw({ ...gw, mode: e.target.value })}><option value="test">Pruebas</option><option value="live">Producción</option></select></Field><Field label="Client ID / clave pública"><input className="input" value={gw.client_id} onChange={(e) => setGw({ ...gw, client_id: e.target.value })} /></Field><Field label="Client Secret" hint="Se cifra en el servidor. Dejar vacío para no cambiarlo."><input className="input" type="password" value={gw.secret} onChange={(e) => setGw({ ...gw, secret: e.target.value })} /></Field></div>
+        <div className="grid-2">
+          <Field label="Pasarela"><select className="select" value={gw.provider} onChange={(e) => setGw({ ...gw, provider: e.target.value })}><option value="onvo">ONVO Pay</option><option value="paypal">PayPal</option></select></Field>
+          {gw.provider === "onvo" ? (<>
+            <Field label="Llave secreta" hint="Se cifra en el servidor y nunca vuelve al navegador. Vacío = no cambiar."><input className="input" type="password" placeholder="onvo_test_secret_key_…" value={gw.secret} onChange={(e) => setGw({ ...gw, secret: e.target.value })} /></Field>
+            <Field label="Llave publicable (opcional)"><input className="input" placeholder="onvo_test_publishable_key_…" value={gw.client_id} onChange={(e) => setGw({ ...gw, client_id: e.target.value })} /></Field>
+            <Field label="Secreto del webhook" hint="Vacío = no cambiar."><input className="input" type="password" placeholder="webhook_secret_…" value={gw.webhook_secret} onChange={(e) => setGw({ ...gw, webhook_secret: e.target.value })} /></Field>
+          </>) : (<>
+            <Field label="Client ID"><input className="input" value={gw.client_id} onChange={(e) => setGw({ ...gw, client_id: e.target.value })} /></Field>
+            <Field label="Client Secret" hint="Se cifra en el servidor. Dejar vacío para no cambiarlo."><input className="input" type="password" value={gw.secret} onChange={(e) => setGw({ ...gw, secret: e.target.value })} /></Field>
+            <Field label="Modo"><select className="select" value={gw.mode} onChange={(e) => setGw({ ...gw, mode: e.target.value })}><option value="test">Pruebas</option><option value="live">Producción</option></select></Field>
+          </>)}
+        </div>
         <div style={{ display: "flex", gap: 16, fontSize: 13 }}><label style={{ display: "flex", gap: 8 }}><input type="checkbox" checked={gw.is_primary} onChange={(e) => setGw({ ...gw, is_primary: e.target.checked })} />Principal</label><label style={{ display: "flex", gap: 8 }}><input type="checkbox" checked={gw.active} onChange={(e) => setGw({ ...gw, active: e.target.checked })} />Activa</label></div>
       </Modal>}
       {invite && <Modal title="Invitar usuario" onClose={() => setInvite(null)} foot={<><button className="btn btn--ghost" onClick={() => setInvite(null)}>Cancelar</button><button className="btn btn--crimson" onClick={sendInvite}>Enviar invitación</button></>}>

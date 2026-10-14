@@ -24,7 +24,8 @@ from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..core.ratelimit import checkout_global_limiter, order_lookup_limiter, order_proof_limiter, public_limiter
 from ..models import Media, Order, OrderLine, Tenant
-from ..services import cr_geo, store_inventory
+from ..providers.payments import key_mode
+from ..services import cr_geo, onvo, store_inventory
 from ..services import store_orders as so
 from ..services.documents import audit
 from ..services.sequences import next_number
@@ -296,6 +297,17 @@ def order_card(slug: str, token: str, request: Request, db: Session = Depends(ge
     return out
 
 
+@router.post("/public/store/{slug}/orders/{token}/card/sync")
+def order_card_sync(slug: str, token: str, request: Request, db: Session = Depends(get_db)):
+    """Al volver de ONVO: le pregunta a ONVO por la sesion del pedido y, si esta pagada, la aplica (sin esperar el
+    webhook). El regreso del navegador por si solo no confirma nada."""
+    public_limiter.hit(f"cardsync:{client_ip(request)}")
+    t, o = _public_order(db, slug, token)
+    onvo.sync_order(db, t, o)
+    db.commit()
+    return so.order_public(db, t, o)
+
+
 @router.post("/public/store/{slug}/orders/{token}/simulate-payment")
 def order_simulate(slug: str, token: str, request: Request, db: Session = Depends(get_db)):
     """Pago de PRUEBA sin ONVO. No existe en produccion ni cuando hay credenciales reales."""
@@ -366,7 +378,7 @@ class CheckoutCfgIn(_Cfg):
 def _cfg_out(db: Session, t: Tenant) -> dict:
     return {
         "checkout": so.checkout_cfg(t),
-        "onvo": {"configured": bool(so.onvo_secret(db, t)), "simulation": so.simulation_allowed()},
+        "onvo": {"configured": bool(key := so.onvo_secret(db, t)), "simulation": so.simulation_allowed(), "mode": key_mode(key)},
     }
 
 
@@ -401,6 +413,7 @@ def _staff_out(db: Session, o: Order) -> dict:
     out["needs_proof"] = o.payment_kind in so.NEEDS_PROOF
     out["next"] = so.next_states(o)
     out["track_url"] = so.track_url(db.get(Tenant, o.tenant_id), o) if o.channel == "tienda" else None
+    out["onvo_refundable"] = onvo.order_refundable(o)
     out["customer_name"] = None
     if o.customer_id:
         from ..models import Customer
@@ -473,6 +486,7 @@ class StatusIn(BaseModel):
     refund_amount: Decimal | None = Field(None, gt=0)
     payment_ref: str | None = Field(None, max_length=120)
     notify: bool = True
+    refund_via_onvo: bool = False  # devuelve el dinero a la tarjeta por la API de ONVO (requiere sales.anular)
 
 
 @router.post("/store-orders/{oid}/status")
@@ -482,13 +496,31 @@ def set_status(oid: int, data: StatusIn, p: Principal = Depends(require("sales",
         raise HTTPException(409, "Solo pedidos de la tienda en línea")
     if data.payment_ref and data.status == "pagado":
         o.payment_ref = data.payment_ref
+    note = data.note
+    if data.refund_via_onvo:
+        if data.status != "reembolsado":
+            raise HTTPException(422, "refund_via_onvo solo aplica al reembolsar")
+        if not p.can("sales", "anular"):
+            raise HTTPException(403, "Devolver dinero por ONVO requiere permiso para anular ventas")
+        if "reembolsado" not in so.TRANSITIONS.get(o.status, set()) or (o.status == "cancelado" and not o.paid_at):
+            raise HTTPException(409, "Este pedido no se puede reembolsar en su estado actual")
+        if data.refund_amount is not None and data.refund_amount > Decimal(str(o.total)):
+            raise HTTPException(422, "Monto de reembolso inválido")
+        r = onvo.refund_order(db, p.tenant, o, data.refund_amount)
+        ref = f"Reembolso ONVO {r.get('id')} ({r.get('status')}) por {data.refund_amount or o.total}"
+        info = {"refund": r.get("id"), "status": r.get("status"), "monto": str(data.refund_amount or o.total)}
+        # el dinero ya salio: queda anotado y guardado aunque el cambio de estado de abajo falle (y no se repite)
+        so._note(o, p.user.id, ref)
+        audit(db, p.tenant.id, p.user.id, "onvo_refund", "order", o.id, info, ip=p.ip)
+        db.commit()
+        note = f"{note.strip() + ' · ' if (note or '').strip() else ''}{ref}"
     mail = so.transition(
         db,
         p.tenant,
         o,
         data.status,
         by=p.user.id,
-        note=data.note,
+        note=note,
         ip=p.ip,
         tracking_number=data.tracking_number,
         carrier=data.carrier,

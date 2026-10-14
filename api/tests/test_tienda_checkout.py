@@ -7,9 +7,6 @@ from decimal import Decimal
 
 import pytest
 
-from app.core.crypto import encrypt
-from app.providers.payments import Intent, OnvoAdapter
-
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 SLUG = "/public/store/crimson"
 
@@ -274,50 +271,40 @@ def test_card_simulated_flow_and_not_in_production(client, auth, monkeypatch):
     assert client.post(f"{SLUG}/orders/{o['track_token']}/simulate-payment").status_code == 409
 
 
-def test_onvo_webhook_marks_order_paid_idempotently(client, auth, db_session, monkeypatch):
-    from app.models import PaymentGatewayConfig
-
+def test_onvo_webhook_marks_order_paid_idempotently(client, auth, fake_onvo):
     tid = auth["tenant"]["id"]
-    db_session.add(PaymentGatewayConfig(tenant_id=tid, provider="onvo", client_id="pk", secret_encrypted=encrypt("whsec_test"), active=True))
-    db_session.commit()
-    monkeypatch.setattr(
-        OnvoAdapter,
-        "create_intent",
-        lambda self, *a, **k: Intent(id="pi_order_1", checkout_url="https://checkout.onvopay.com/x", status="requires_payment", raw={}),
-    )
+    fake_onvo.connect(client)
     prods = _shop(client, tarjeta=True)
     o = client.post(f"{SLUG}/checkout", json=_body(prods[0]["id"], payment_method="tarjeta")).json()
-    assert o["pay"] == {"checkout_url": "https://checkout.onvopay.com/x", "simulated": False}
+    assert o["pay"] == {"checkout_url": "https://checkout.onvopay.com/pay/cs_1", "simulated": False}
     oid = client.get("/store-orders").json()["items"][0]["id"]
     # con credenciales reales no hay pago simulado
     assert client.post(f"{SLUG}/orders/{o['track_token']}/simulate-payment").status_code == 404
-
-    def send(ev):
-        body = json.dumps(ev).encode()
-        return client.post(
-            f"/webhooks/onvo/{tid}", content=body, headers={"Content-Type": "application/json", "Onvo-Signature": OnvoAdapter.sign("whsec_test", body)}
-        )
-
     cents = int((Decimal(str(o["total"])) * 100).quantize(Decimal(1)))
-    short = {
-        "id": "evt_o0",
-        "type": "payment_intent.succeeded",
-        "data": {"id": "pi_order_1", "amount": cents - 500, "metadata": {"order_id": oid, "tenant_id": tid}},
-    }
-    assert send(short).status_code == 200
-    assert client.get(f"/store-orders/{oid}").json()["status"] == "nuevo"  # monto menor: no se marca pagado
-    ev = {"id": "evt_o1", "type": "payment_intent.succeeded", "data": {"id": "pi_order_1", "amount": cents, "metadata": {"order_id": oid, "tenant_id": tid}}}
-    assert send(ev).json() == {"ok": True}
-    assert send(ev).json() == {"ok": True, "duplicate": True}  # mismo evento reintentado
-    ev2 = {**ev, "id": "evt_o2"}  # otro evento para el mismo pago
-    assert send(ev2).status_code == 200
+    assert fake_onvo.created[0]["amount_cents"] == cents and fake_onvo.created[0]["customer"]["email"] == "ana@correo.com"
+
+    fake_onvo.pay("cs_1", amount=cents - 500)  # ONVO cobro menos que el total
+    assert fake_onvo.send(client, tid, "checkout-session.succeeded", {"id": "cs_1"}).status_code == 200
     det = client.get(f"/store-orders/{oid}").json()
-    assert det["status"] == "pagado" and det["payment_ref"] == "pi_order_1"
+    assert det["status"] == "nuevo" and "no cubre el total" in det["history"][-1]["note"]
+
+    o2 = client.post(f"{SLUG}/checkout", json=_body(prods[0]["id"], payment_method="tarjeta", idempotency_key="ck-onvo-2")).json()
+    oid2 = client.get("/store-orders").json()["items"][0]["id"]
+    fake_onvo.pay("cs_2")
+    ev = {"id": "cs_2", "metadata": {"order_id": str(oid2), "tenant_id": str(tid)}}
+    assert fake_onvo.send(client, tid, "checkout-session.succeeded", ev).json() == {"ok": True}
+    assert fake_onvo.send(client, tid, "checkout-session.succeeded", ev).json() == {"ok": True, "duplicate": True}  # reintento
+    # el otro evento del mismo pago (si ONVO copia la metadata a la intencion) no paga dos veces
+    fake_onvo.intents["pi_cs_2"]["metadata"] = {"order_id": str(oid2), "tenant_id": str(tid)}
+    assert fake_onvo.send(client, tid, "payment-intent.succeeded", {"id": "pi_cs_2"}).status_code == 200
+    det = client.get(f"/store-orders/{oid2}").json()
+    assert det["status"] == "pagado" and det["payment_ref"] == "pi_cs_2" and o2["number"] == det["number"]
     assert [h["status"] for h in det["history"] if h.get("kind") != "nota"].count("pagado") == 1
     # pedido de otra empresa en metadata: no se toca
-    evx = {"id": "evt_o3", "type": "payment_intent.succeeded", "data": {"id": "pi_x", "amount": cents, "metadata": {"order_id": oid, "tenant_id": tid + 99}}}
-    assert send(evx).status_code == 200
-
+    fake_onvo.sessions["cs_1"]["metadata"]["tenant_id"] = str(tid + 99)
+    fake_onvo.pay("cs_1")
+    assert fake_onvo.send(client, tid, "checkout-session.succeeded", {"id": "cs_1", "x": 1} | {"id": "cs_1"}).status_code == 200
+    assert client.get(f"/store-orders/{oid}").json()["status"] == "nuevo"
 
 def test_honeypot_terms_dashboard_and_invoice_with_payment(client, auth):
     prods = _shop(client)
@@ -416,20 +403,10 @@ def test_free_shipping_usd_coherence_and_stock(client, auth, monkeypatch):
     assert r.status_code == 409 and len(client.get("/store-orders").json()["items"]) == antes
 
 
-def test_card_installments_preference_sent_to_onvo(client, auth, db_session, monkeypatch):
-    from app.models import PaymentGatewayConfig
-
-    tid = auth["tenant"]["id"]
-    db_session.add(PaymentGatewayConfig(tenant_id=tid, provider="onvo", client_id="pk", secret_encrypted=encrypt("sk_test"), active=True))
-    db_session.commit()
-    seen = {}
-
-    def fake(self, cents, currency, desc, meta, ret):
-        seen.update(meta=meta, cents=cents, currency=currency, ret=ret)
-        return Intent(id="pi_9", checkout_url="https://checkout.onvopay.com/9", status="requires_payment", raw={})
-
-    monkeypatch.setattr(OnvoAdapter, "create_intent", fake)
+def test_card_installments_preference_sent_to_onvo(client, auth, fake_onvo):
+    fake_onvo.connect(client)
     prods = _shop(client, tarjeta=True, cuotas=6)
     o = client.post(f"{SLUG}/checkout", json=_body(prods[0]["id"], payment_method="tarjeta")).json()
-    assert seen["meta"]["installments"] == 6 and seen["meta"]["order_number"] == o["number"]
-    assert seen["cents"] == int((Decimal(str(o["total"])) * 100).quantize(Decimal(1))) and "pedido=" in seen["ret"]
+    seen = fake_onvo.created[0]
+    assert seen["metadata"]["installments"] == 6 and seen["metadata"]["order_number"] == o["number"]
+    assert seen["amount_cents"] == int((Decimal(str(o["total"])) * 100).quantize(Decimal(1))) and "pedido=" in seen["redirect_url"]

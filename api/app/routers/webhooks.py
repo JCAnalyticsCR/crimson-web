@@ -1,106 +1,101 @@
-"""Ingreso de webhooks (plan 5.3): se verifica firma, se guarda el evento crudo (idempotente) y se aplica el pago."""
+"""Ingreso de webhooks de ONVO (plan 5.3).
+
+ONVO manda {"type", "data"} y autentica con el header X-Webhook-Secret (el secreto del webhook, tal cual). No trae id
+de evento: la clave de idempotencia es "<type>:<data.id>". Cada evento autenticado queda guardado; un pago solo se
+aplica despues de confirmarlo con la API de ONVO (services/onvo.handle_event).
+
+Respuestas: 2xx solo si el evento quedo procesado (ONVO cuenta cualquier otro estado como entrega fallida). Lo que no
+se pudo confirmar se registra con otro id, sin consumir la clave, para que el reintento se aplique. Sin el secreto
+correcto no se escribe nada (cualquiera puede llamar a esta URL) y la respuesta es 401 exista o no la empresa.
+"""
 
 from __future__ import annotations
 
+import json
+import logging
 from datetime import UTC, datetime
-from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
-from ..core.crypto import decrypt
 from ..core.db import get_db
-from ..models import Invoice, PaymentGatewayConfig, PaymentLink, WebhookEvent
-from ..providers.payments import OnvoAdapter
-from ..schemas.sales import PaymentIn
-from ..services.documents import add_payment
+from ..core.ratelimit import webhook_limiter
+from ..models import Tenant, WebhookEvent
+from ..providers.payments import OnvoAdapter, OnvoError
+from ..services import onvo as onvo_svc
+from ..services.onvo import slim
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+log = logging.getLogger("crimson.onvo")
+MAX_BODY = 64 * 1024  # un evento de ONVO pesa ~1-3 KB
+
+
+def _keep(db: Session, ext_id: str, typ: str, payload: dict, result: str) -> None:
+    """Registra un evento autenticado NO aplicado con un id propio: la clave real queda libre para el reintento."""
+    db.add(
+        WebhookEvent(
+            provider="onvo",
+            external_id=f"{ext_id}#{int(datetime.now(UTC).timestamp() * 1000)}"[:160],
+            event_type=typ[:80],
+            signature_ok=True,
+            payload=payload,
+            received_at=datetime.now(UTC),
+            result=result,
+        )
+    )
+    db.commit()
 
 
 @router.post("/onvo/{tenant_id}")
-async def onvo(tenant_id: int, request: Request, db: Session = Depends(get_db), signature: str | None = Header(None, alias="Onvo-Signature")):
+async def onvo(tenant_id: int, request: Request, db: Session = Depends(get_db), secret: str | None = Header(None, alias="X-Webhook-Secret")):
+    webhook_limiter.hit(f"onvo:{tenant_id}")
+    if int(request.headers.get("content-length") or 0) > MAX_BODY:
+        raise HTTPException(413, "Evento demasiado grande")
     body = await request.body()
-    cfg = db.scalar(
-        select(PaymentGatewayConfig).where(PaymentGatewayConfig.tenant_id == tenant_id, PaymentGatewayConfig.provider == "onvo", PaymentGatewayConfig.active)
-    )
-    secret = decrypt(cfg.secret_encrypted) if cfg and cfg.secret_encrypted else None
-    ok = OnvoAdapter.verify_signature(secret or "", signature, body)
+    if len(body) > MAX_BODY:
+        raise HTTPException(413, "Evento demasiado grande")
+    # lo demas usa la base y llama a ONVO (HTTP sincrono): fuera del loop de eventos
+    return await run_in_threadpool(_process, db, tenant_id, secret, body)
+
+
+def _process(db: Session, tenant_id: int, secret: str | None, body: bytes) -> dict:
+    t = db.get(Tenant, tenant_id)
+    if not t or not OnvoAdapter.verify_webhook(onvo_svc.webhook_secret(db, tenant_id), secret):
+        log.warning("webhook ONVO rechazado: secreto invalido o empresa inexistente (%s)", tenant_id)
+        raise HTTPException(401, "Secreto de webhook invalido")
     try:
-        payload = await request.json()
-    except Exception as e:  # noqa: BLE001
+        payload = json.loads(body)
+    except ValueError as e:
         raise HTTPException(400, "JSON invalido") from e
-    ext_id = str(payload.get("id") or payload.get("event_id") or "")
-    if not ext_id:
-        raise HTTPException(400, "Evento sin id")
-    existing = db.scalar(select(WebhookEvent).where(WebhookEvent.provider == "onvo", WebhookEvent.external_id == ext_id, WebhookEvent.signature_ok))
-    if existing:
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "JSON invalido")
+    typ = str(payload.get("type") or "")
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    obj_id = str(data.get("id") or "")
+    if not typ or not obj_id:
+        raise HTTPException(400, "Evento sin type o sin data.id")
+    ext_id = f"{typ}:{obj_id}"[:160]
+    stored = {"type": typ[:80], "data": slim(data)}  # sin datos personales del comprador
+    seen = db.scalar(select(WebhookEvent.id).where(WebhookEvent.provider == "onvo", WebhookEvent.external_id == ext_id, WebhookEvent.signature_ok))
+    if seen:
         return {"ok": True, "duplicate": True}  # idempotente: siempre 200
-    ev = WebhookEvent(
-        provider="onvo", external_id=ext_id, event_type=str(payload.get("type", "")), signature_ok=ok, payload=payload, received_at=datetime.now(UTC)
-    )
+    ev = WebhookEvent(provider="onvo", external_id=ext_id, event_type=typ[:80], signature_ok=True, payload=stored, received_at=datetime.now(UTC))
     db.add(ev)
-    db.flush()
-    if not ok:
-        # se registra para auditoria sin consumir la clave de idempotencia (un reintento firmado debe aplicarse)
-        ev.external_id = f"{ext_id}#invalid-{int(datetime.now(UTC).timestamp() * 1000)}"
-        ev.result = "firma invalida: no se aplica"
-        db.commit()
-        raise HTTPException(401, "Firma invalida")
-    ev.result = _apply(db, tenant_id, payload)
+    try:
+        db.flush()
+    except IntegrityError:  # el mismo evento entro dos veces a la vez: el otro lo procesa
+        db.rollback()
+        return {"ok": True, "duplicate": True}
+    try:
+        ev.result = onvo_svc.handle_event(db, t, payload)[:2000]
+    except OnvoError as e:
+        db.rollback()  # nada a medias: ni el evento ni cambios en pedidos/facturas
+        _keep(db, ext_id, typ, stored, f"no se pudo confirmar con ONVO: {e.message}")
+        log.warning("webhook ONVO %s sin confirmar: %s", ext_id, e.message)
+        raise HTTPException(503, "No se pudo confirmar el evento con ONVO; reintentar") from None
     ev.processed_at = datetime.now(UTC)
     db.commit()
     return {"ok": True}
-
-
-def _apply(db: Session, tenant_id: int, payload: dict) -> str:
-    t = payload.get("type", "")
-    data = payload.get("data") or {}
-    meta = data.get("metadata") or {}
-    if meta.get("order_id") and not meta.get("invoice_id"):
-        return _apply_order(db, tenant_id, t, data, meta)
-    inv_id = meta.get("invoice_id")
-    if not inv_id:
-        return "sin invoice_id en metadata"
-    inv = db.get(Invoice, int(inv_id))
-    if not inv or inv.tenant_id != tenant_id:
-        return "factura no encontrada"
-    amount = Decimal(str(data.get("amount", 0))) / Decimal(100)
-    if t.endswith("succeeded"):
-        p = add_payment(db, tenant_id, None, inv, PaymentIn(method="onvo", kind="captura", amount=amount, external_ref=str(data.get("id") or "")))
-        p.provider, p.provider_event = "onvo", payload
-        link = db.scalar(select(PaymentLink).where(PaymentLink.invoice_id == inv.id).order_by(PaymentLink.id.desc()))
-        if link:
-            link.paid_at = datetime.now(UTC)
-        return f"pago {p.id} aplicado"
-    if t.endswith("refunded"):
-        p = add_payment(db, tenant_id, None, inv, PaymentIn(method="onvo", kind="reembolso", amount=amount, external_ref=str(data.get("id") or "")))
-        p.provider, p.provider_event = "onvo", payload
-        return f"reembolso {p.id} aplicado"
-    return f"evento {t} ignorado"
-
-
-def _apply_order(db: Session, tenant_id: int, t: str, data: dict, meta: dict) -> str:
-    """Pedido de la tienda pagado con tarjeta. Idempotente: un pedido ya pagado no cambia; el monto debe cubrir el total."""
-    from ..models import Order, Tenant
-    from ..services import store_orders as so
-
-    o = db.get(Order, int(meta["order_id"]))
-    if not o or o.tenant_id != tenant_id or (meta.get("tenant_id") and int(meta["tenant_id"]) != tenant_id):
-        return "pedido no encontrado"
-    tenant = db.get(Tenant, tenant_id)
-    amount = Decimal(str(data.get("amount", 0))) / Decimal(100)
-    ref = str(data.get("id") or "")
-    if t.endswith("succeeded"):
-        if amount + Decimal("0.01") < Decimal(str(o.total)):
-            so._note(o, "onvo", f"Pago ONVO por {amount} no cubre el total {o.total}: no se aplica")
-            return f"monto {amount} menor al total del pedido {o.number}"
-        if not so.mark_paid(db, tenant, o, by="onvo", ref=ref, note="Pago con tarjeta confirmado por ONVO"):
-            return f"pedido {o.number} ya estaba pagado"
-        so.notify_team(db, tenant, o, "pagado")
-        return f"pedido {o.number} pagado"
-    if t.endswith("refunded"):
-        so._note(o, "onvo", f"ONVO reporta reembolso por {amount}")
-        return f"reembolso registrado en historial de {o.number}"
-    return f"evento {t} ignorado"

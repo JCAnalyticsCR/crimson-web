@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import logging
 import re
 import secrets
 from datetime import UTC, datetime
@@ -25,10 +26,12 @@ from sqlalchemy.orm import Session
 
 from ..core.config import settings
 from ..core.security import read_purpose_token, sign_purpose_token
-from ..models import Customer, EmailOutbox, Media, Order, PaymentGatewayConfig, Tenant
+from ..models import Customer, EmailOutbox, Media, Order, Tenant
 from . import store_inventory
 from .documents import audit
 from .totals import d
+
+log = logging.getLogger("crimson.onvo")
 
 STATUS_LABEL = {
     "nuevo": "Pendiente de pago",
@@ -128,17 +131,10 @@ def checkout_cfg(t: Tenant) -> dict:
 
 
 def onvo_secret(db: Session, t: Tenant) -> str | None:
-    from ..core.crypto import decrypt
+    """Llave ONVO para cobrar (Ajustes -> Pasarelas o variable de entorno). Reglas en services/onvo.secret_key."""
+    from . import onvo
 
-    cfg = db.scalar(
-        select(PaymentGatewayConfig).where(PaymentGatewayConfig.tenant_id == t.id, PaymentGatewayConfig.provider == "onvo", PaymentGatewayConfig.active)
-    )
-    if cfg and cfg.secret_encrypted:
-        try:
-            return decrypt(cfg.secret_encrypted)
-        except Exception:  # noqa: BLE001
-            return None
-    return settings.onvo_secret_key or None
+    return onvo.secret_key(db, t.id)
 
 
 def simulation_allowed() -> bool:
@@ -440,7 +436,7 @@ def notify_customer(db: Session, t: Tenant, o: Order, kind: str, extra: str = ""
     return queue_email(db, t, to, CUSTOMER_SUBJECT[kind].format(n=o.number), _email_html(t, o, kind, extra), "order", o.id)
 
 
-def notify_team(db: Session, t: Tenant, o: Order, kind: str) -> int:
+def notify_team(db: Session, t: Tenant, o: Order, kind: str, detail: str | None = None) -> int:
     from .mail import notify_roles
 
     e = html.escape
@@ -449,9 +445,10 @@ def notify_team(db: Session, t: Tenant, o: Order, kind: str) -> int:
         "nuevo": f"Pedido web {o.number} · {fmt_money(o.total, o.currency)}",
         "comprobante": f"Comprobante subido · pedido {o.number}",
         "pagado": f"Pago con tarjeta confirmado · pedido {o.number}",
+        "revisar": f"Revisar pago ONVO · pedido {o.number}",
     }[kind]
     cuerpo = (
-        f"<p><b>{e(titulo)}</b></p><p>{e(c.get('name') or '')} · {e(c.get('email') or '')} · {e(c.get('phone') or '')}</p>"
+        f"<p><b>{e(titulo)}</b></p>{f'<p>{e(detail)}</p>' if detail else ''}<p>{e(c.get('name') or '')} · {e(c.get('email') or '')} · {e(c.get('phone') or '')}</p>"
         f"<p>Pago: {e(o.payment_method or '—')} · Entrega: {e(o.shipping_method or '—')}</p>"
         f"<p>Estado: {e(STATUS_LABEL.get(o.status, o.status))}. Revisalo en Pedidos de la tienda.</p>"
     )
@@ -597,7 +594,8 @@ def attention_where(tid: int) -> list:
 
 # ---------- tarjeta (ONVO) ----------
 def card_intent(db: Session, t: Tenant, o: Order) -> dict:
-    from ..providers.payments import OnvoAdapter
+    """Abre una sesion de Checkout de ONVO por el total del pedido (o el modo simulado sin credenciales)."""
+    from ..providers.payments import OnvoAdapter, OnvoError
 
     if o.payment_kind != "tarjeta" or o.status != "nuevo":
         raise HTTPException(409, "Este pedido no tiene un pago con tarjeta pendiente")
@@ -605,11 +603,19 @@ def card_intent(db: Session, t: Tenant, o: Order) -> dict:
     if not secret and not simulation_allowed():
         raise HTTPException(503, "El pago con tarjeta no está disponible en este momento")
     cents = int((d(o.total) * 100).quantize(Decimal(1)))
+    c = o.contact or {}
     try:
-        it = OnvoAdapter(secret).create_intent(
-            cents, o.currency, f"Pedido {o.number}", {"order_id": o.id, "tenant_id": t.id, "order_number": o.number, **_installments(t)}, track_url(t, o)
+        it = OnvoAdapter(secret).create_checkout(
+            amount_cents=cents,
+            currency=o.currency,
+            description=f"Pedido {o.number} · {t.name}",
+            metadata={"order_id": o.id, "tenant_id": t.id, "order_number": o.number, **_installments(t)},
+            redirect_url=track_url(t, o),
+            cancel_url=track_url(t, o),
+            customer={"name": c.get("name"), "email": c.get("email"), "phone": c.get("phone")},
         )
-    except Exception:  # noqa: BLE001
+    except OnvoError as e:
+        log.warning("ONVO no abrió el checkout del pedido %s: %s", o.number, e.message)
         raise HTTPException(502, "No pudimos abrir la página de pago. Probá de nuevo en un momento.") from None
     o.payment_ref = it.id[:120]
     audit(db, t.id, None, "card_intent", "order", o.id, {"intent": it.id, "simulated": it.status == "simulated"})
@@ -617,7 +623,8 @@ def card_intent(db: Session, t: Tenant, o: Order) -> dict:
 
 
 def _installments(t: Tenant) -> dict:
-    """Cuotas con tarjeta: preferencia que viaja con el intento (ONVO la aplica segun el contrato del comercio)."""
+    """Cuotas con tarjeta: solo una referencia en la metadata. El Checkout de ONVO no recibe cuotas: se habilitan en la
+    cuenta ONVO (Credix / tasa cero segun el contrato del comercio)."""
     c = checkout_cfg(t)["methods"]["tarjeta"]
     return {"installments": int(c.get("max_installments") or 0)} if c.get("installments") and c.get("max_installments") else {}
 

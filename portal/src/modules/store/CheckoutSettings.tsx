@@ -13,7 +13,7 @@ type Methods = {
   efectivo: { active: boolean; note?: string };
 };
 type Ck = { methods: Methods; pickup: { address?: string; hours?: string }; notify_roles: string[]; free_shipping_from: number | string; auto_invoice: boolean };
-type Resp = { checkout: Ck; onvo: { configured: boolean; simulation: boolean } };
+type Resp = { checkout: Ck; onvo: { configured: boolean; simulation: boolean; mode: "test" | "live" | null } };
 export type ZoneRate = { name: string; amount: number; active: boolean; zone?: string | null; [k: string]: unknown };
 
 const ZONES: [string, string][] = [["", "Según el nombre"], ["retiro", "Retiro en sitio"], ["gam", "Solo GAM"], ["fuera_gam", "Fuera de GAM"]];
@@ -70,13 +70,14 @@ export default function CheckoutSettings({ rates, onRates }: { rates: ZoneRate[]
         <div className="ck-cfg__m" data-on={on(m.tarjeta.active)}>
           <label><input type="checkbox" checked={m.tarjeta.active} onChange={(e) => setM("tarjeta", { active: e.target.checked })} />Tarjeta (ONVO)</label>
           <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
-            {d.onvo.configured ? "ONVO conectado: el pago se confirma por webhook, nunca por el regreso del navegador."
+            {d.onvo.configured ? `ONVO conectado (modo ${d.onvo.mode === "live" ? "Producción" : "Pruebas"}): cada pago se confirma consultando a ONVO (webhook o al volver el comprador), nunca por el regreso del navegador solo.`
               : d.onvo.simulation ? "ONVO sin credenciales: en este entorno el pago con tarjeta es SIMULADO (de prueba) y la tienda lo dice."
               : "ONVO sin credenciales: en producción la tarjeta no se ofrece hasta conectarlo (Ajustes → Pasarelas)."}
           </p>
+          {d.onvo.configured && d.onvo.mode === "test" && <p className="muted" style={{ fontSize: 12, margin: 0, color: "var(--warn)" }}>Modo Pruebas: los pagos no cobran tarjetas reales.</p>}
           <div className="grid-2">
             <label style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={!!m.tarjeta.installments} onChange={(e) => setM("tarjeta", { installments: e.target.checked })} />Ofrecer cuotas</label>
-            <Field label="Máximo de cuotas" hint="Depende del contrato con ONVO (tasa cero)."><input className="input input--mono" type="number" min={0} max={36} value={m.tarjeta.max_installments || 0} onChange={(e) => setM("tarjeta", { max_installments: Number(e.target.value) })} /></Field>
+            <Field label="Máximo de cuotas" hint="ONVO Checkout no acepta un parámetro de cuotas; se habilitan en la cuenta ONVO (p. ej. Credix/tasa cero según contrato). Este campo es solo de referencia para el comprador."><input className="input input--mono" type="number" min={0} max={36} value={m.tarjeta.max_installments || 0} onChange={(e) => setM("tarjeta", { max_installments: Number(e.target.value) })} /></Field>
           </div>
         </div>
         <div className="ck-cfg__m" data-on={on(m.efectivo.active)}>

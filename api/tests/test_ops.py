@@ -1,10 +1,8 @@
-"""Fase 1.2-3: impresion, envio, inventario, factura electronica sandbox + NC, reportes/Excel, ajustes, recurrencias, webhook ONVO."""
+"""Fase 1.2-3: impresion, envio, inventario, factura electronica sandbox + NC, reportes/Excel, ajustes, recurrencias.
+El webhook de ONVO se prueba en test_onvo.py."""
 
 import json
 from decimal import Decimal
-
-from app.core.crypto import encrypt
-from app.providers.payments import OnvoAdapter
 
 
 def _quote_to_invoice(client):
@@ -136,9 +134,10 @@ def test_settings_users_invitations(client, auth):
     assert any(u["email"] == "ventas@crimsonapp.com" and u["role"] == "ventas" for u in users)
     r = client.post("/auth/login", json={"email": "ventas@crimsonapp.com", "password": "Ventas-2026-ok"})
     assert r.status_code == 200 and r.json()["role"] == "ventas"
-    assert client.put("/settings/gateways", json={"provider": "onvo", "client_id": "pk_test", "secret": "sk_test_123", "active": True}).status_code == 200
+    key = "onvo_test_secret_key_" + "s3cr3t" * 4
+    assert client.put("/settings/gateways", json={"provider": "onvo", "secret": key, "active": True}).status_code == 200
     g = client.get("/settings/gateways").json()
-    assert g[0]["provider"] == "onvo" and "sk_test" not in json.dumps(g)
+    assert g[0]["provider"] == "onvo" and g[0]["mode"] == "test" and key not in json.dumps(g)
 
 
 def test_recurrence_generates_invoice(client, auth):
@@ -158,27 +157,6 @@ def test_recurrence_generates_invoice(client, auth):
     run = client.post(f"/recurrences/{r.json()['id']}/run")
     assert run.status_code == 201 and run.json()["number"].startswith("FEC-") and run.json()["next_date"] == "2026-10-01"
     assert client.get(f"/invoices/{run.json()['invoice_id']}").json()["customer_name"] == cust["name"]
-
-
-def test_onvo_webhook_signature_idempotency_and_payment(client, auth, db_session):
-    from app.models import PaymentGatewayConfig
-
-    inv, _ = _quote_to_invoice(client)
-    tid = auth["tenant"]["id"]
-    db_session.add(PaymentGatewayConfig(tenant_id=tid, provider="onvo", client_id="pk", secret_encrypted=encrypt("whsec_test"), active=True))
-    db_session.commit()
-    cents = int(Decimal(inv["total"]) * 100)
-    ev = {"id": "evt_1", "type": "payment_intent.succeeded", "data": {"id": "pi_1", "amount": cents, "metadata": {"invoice_id": inv["id"]}}}
-    body = json.dumps(ev).encode()
-    bad = client.post(f"/webhooks/onvo/{tid}", content=body, headers={"Content-Type": "application/json", "Onvo-Signature": "t=1,v1=deadbeef"})
-    assert bad.status_code == 401
-    sig = OnvoAdapter.sign("whsec_test", body)
-    ok = client.post(f"/webhooks/onvo/{tid}", content=body, headers={"Content-Type": "application/json", "Onvo-Signature": sig})
-    assert ok.status_code == 200
-    dup = client.post(f"/webhooks/onvo/{tid}", content=body, headers={"Content-Type": "application/json", "Onvo-Signature": sig})
-    assert dup.json()["duplicate"] is True
-    i = client.get(f"/invoices/{inv['id']}").json()
-    assert i["status"] == "pagada" and len(i["payments"]) == 1 and i["payments"][0]["provider"] == "onvo"
 
 
 def test_bootstrap_invitation_once():

@@ -30,13 +30,20 @@ export default function OrderStatus({ api, token, store, onBack }: { api: ApiFn;
   const path = `/orders/${encodeURIComponent(token)}`;
   const load = useCallback(() => api<Pub>(path).then(({ data }) => { setO(data); setMissing(null); }).catch((e) => setMissing((e as Error).message)), [api, path]);
   useEffect(() => { load(); }, [load]);
-  // al volver de ONVO el webhook puede tardar unos segundos: se consulta un rato mientras siga pendiente
+  // al volver de ONVO el webhook puede tardar: se llama card/sync de inmediato y cada 10 s hasta 12 veces.
+  // Depende de un booleano (no de `o`): cada respuesta hace setO y, atado a `o`, el efecto se relanzaria sin fin.
+  const cardPending = !!o && o.payment_kind === "tarjeta" && o.status === "nuevo" && !o.card?.simulated;
   useEffect(() => {
-    if (!o || o.payment_kind !== "tarjeta" || o.status !== "nuevo" || o.card?.simulated) return;
+    if (!cardPending) return;
     let n = 0;
-    const t = window.setInterval(() => { if (++n > 12) window.clearInterval(t); else load(); }, 10_000);
+    const syncOrFallback = () =>
+      api<Pub>(`${path}/card/sync`, { method: "POST" })
+        .then(({ data }) => setO(data))
+        .catch(() => load()); // red o 429: recaer en load silenciosamente
+    syncOrFallback(); // llamada inmediata al montar con pago pendiente
+    const t = window.setInterval(() => { if (++n > 12) window.clearInterval(t); else syncOrFallback(); }, 10_000);
     return () => window.clearInterval(t);
-  }, [o, load]);
+  }, [cardPending, api, path, load]);
 
   const placed: Placed | null = o ? (() => { try { return JSON.parse(session.get(`crimson-shop:placed:${o.number}`) || "null"); } catch { return null; } })() : null;
 

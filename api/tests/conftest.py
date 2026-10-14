@@ -73,3 +73,85 @@ def auth(client):
     token = r.json()["access_token"]
     client.headers.update({"Authorization": f"Bearer {token}"})
     return r.json()
+
+
+class FakeOnvo:
+    """ONVO en memoria con la forma de la API real (sesiones de Checkout, intenciones, reembolsos). Sin red."""
+
+    key = "onvo_test_secret_key_" + "k" * 24
+    public = "onvo_test_publishable_key_" + "p" * 24
+    wh = "webhook_secret_" + "w" * 24
+
+    def __init__(self):
+        self.sessions: dict[str, dict] = {}
+        self.intents: dict[str, dict] = {}
+        self.created: list[dict] = []
+        self.refunds: list[dict] = []
+        self.fail_get = 0  # cuantas consultas siguientes fallan (ONVO caido)
+
+    def install(self, monkeypatch):
+        from app.providers.payments import Intent, OnvoAdapter, OnvoError
+
+        fake = self
+
+        def create_checkout(self, **kw):
+            sid = f"cs_{len(fake.sessions) + 1}"
+            fake.created.append(kw)
+            s = {"id": sid, "url": f"https://checkout.onvopay.com/pay/{sid}", "mode": "test", "status": "open", "paymentStatus": "unpaid",
+                 "amountTotal": kw["amount_cents"], "currency": kw["currency"], "paymentIntentId": None,
+                 "metadata": {k: str(v) for k, v in kw["metadata"].items()}}
+            fake.sessions[sid] = s
+            return Intent(id=sid, checkout_url=s["url"], status="unpaid", raw=s)
+
+        def _get(store, oid):
+            if fake.fail_get:
+                fake.fail_get -= 1
+                raise OnvoError(0, "sin respuesta de ONVO (ConnectTimeout)")
+            if oid not in store:
+                raise OnvoError(404, "not found")
+            return dict(store[oid])
+
+        def refund(self, intent_id, amount_cents=None, reason="requested_by_customer", description=None):
+            r = {"id": f"rf_{len(fake.refunds) + 1}", "paymentIntentId": intent_id, "amount": amount_cents, "status": "succeeded"}
+            fake.refunds.append(r)
+            return r
+
+        monkeypatch.setattr(OnvoAdapter, "create_checkout", create_checkout)
+        monkeypatch.setattr(OnvoAdapter, "get_checkout", lambda self, sid: _get(fake.sessions, sid))
+        monkeypatch.setattr(OnvoAdapter, "get_intent", lambda self, pid: _get(fake.intents, pid))
+        monkeypatch.setattr(OnvoAdapter, "refund", refund)
+        monkeypatch.setattr(OnvoAdapter, "ping", lambda self: {"data": []})
+        return self
+
+    def pay(self, sid: str, amount: int | None = None, intent_meta: dict | None = None) -> dict:
+        """El comprador paga en ONVO: la sesion queda paid y nace su intencion succeeded."""
+        s = self.sessions[sid]
+        pid = f"pi_{sid}"
+        s.update(paymentStatus="paid", status="complete", paymentIntentId=pid)
+        if amount is not None:
+            s["amountTotal"] = amount
+        self.intents[pid] = {"id": pid, "status": "succeeded", "amount": s["amountTotal"], "currency": s["currency"], "metadata": intent_meta or {}}
+        return s
+
+    def connect(self, client, **extra):
+        body = {"provider": "onvo", "client_id": self.public, "secret": self.key, "webhook_secret": self.wh, "active": True, "is_primary": True, **extra}
+        r = client.put("/settings/gateways", json=body)
+        assert r.status_code == 200, r.text
+
+    def send(self, client, tid: int, typ: str, data: dict, secret: str | None = None):
+        import json
+
+        return client.post(
+            f"/webhooks/onvo/{tid}",
+            content=json.dumps({"type": typ, "data": data}).encode(),
+            headers={"Content-Type": "application/json", "X-Webhook-Secret": self.wh if secret is None else secret},
+        )
+
+
+@pytest.fixture
+def fake_onvo(monkeypatch):
+    from app.services import onvo
+
+    onvo._last_sync.clear()
+    monkeypatch.setattr(onvo, "SYNC_EVERY", 0.0)  # el freno por sesion se prueba aparte (test_sync_throttle)
+    return FakeOnvo().install(monkeypatch)

@@ -60,3 +60,4 @@ class PaymentLink(TenantMixin, TimestampMixin, Base):
     opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     opened_count: Mapped[int] = mapped_column(default=0)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    provider_ref: Mapped[str | None] = mapped_column(String(120))  # ultima sesion de Checkout ONVO abierta desde el enlace

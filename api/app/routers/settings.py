@@ -16,6 +16,8 @@ from ..core.db import get_db
 from ..core.deps import ASSIGNABLE_ROLES, Principal, require
 from ..core.security import hash_password, hash_token, password_is_strong
 from ..models import BankAccount, BillingGroup, EmailOutbox, Invitation, PaymentGatewayConfig, Tenant, TenantUser, User
+from ..providers.payments import OnvoAdapter, OnvoError, key_mode, key_problem, webhook_secret_problem
+from ..services import onvo
 from ..services.bitacora import audit_change
 from ..services.documents import audit
 from ..services.mail import mail_status, queue_email
@@ -311,11 +313,27 @@ def member_update(uid: int, data: MemberIn, p: Principal = Depends(require("sett
 # ---------- Pasarelas ----------
 class GatewayIn(BaseModel):
     provider: str = Field(pattern="^(onvo|paypal)$")
-    client_id: str | None = None
-    secret: str | None = None  # se cifra; nunca se devuelve
+    client_id: str | None = Field(None, max_length=200)  # ONVO: llave publicable (opcional; el Checkout alojado no la usa)
+    secret: str | None = Field(None, max_length=300)  # se cifra; nunca se devuelve. Vacio = no cambiar
+    webhook_secret: str | None = Field(None, max_length=300)  # ONVO: X-Webhook-Secret. Vacio = no cambiar
     is_primary: bool = False
     active: bool = False
-    mode: str = Field("test", pattern="^(test|live)$")
+    mode: str = Field("test", pattern="^(test|live)$")  # ONVO lo ignora: el modo sale de la llave
+
+    @field_validator("client_id", "secret", "webhook_secret")
+    @classmethod
+    def _strip(cls, v: str | None) -> str | None:
+        return (v or "").strip() or None
+
+
+def _key_mask(g: PaymentGatewayConfig) -> str | None:
+    """ONVO: prefijo + ultimos 4 (identifica la llave sin exponerla). Otras pasarelas: solo "configurado"."""
+    if not g.secret_encrypted:
+        return None
+    raw = onvo._dec(g.secret_encrypted) if g.provider == "onvo" else None
+    if raw and key_mode(raw):
+        return f"{raw[: raw.index('_key_') + 5]}••••{raw[-4:]}"
+    return mask("configurado00")
 
 
 @router.get("/gateways")
@@ -325,7 +343,8 @@ def gateways(p: Principal = Depends(require("settings", "ver")), db: Session = D
             "id": g.id,
             "provider": g.provider,
             "client_id": g.client_id,
-            "secret_mask": mask(g.secret_encrypted and "configurado00"),
+            "secret_mask": _key_mask(g),
+            "webhook_secret_set": bool(g.webhook_secret_encrypted),
             "is_primary": g.is_primary,
             "active": g.active,
             "mode": g.mode,
@@ -336,15 +355,59 @@ def gateways(p: Principal = Depends(require("settings", "ver")), db: Session = D
 
 @router.put("/gateways")
 def gateway_upsert(data: GatewayIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
+    if data.provider == "onvo":
+        for val, problem in (
+            (data.secret, data.secret and key_problem(data.secret, "secret")),
+            (data.client_id, data.client_id and key_problem(data.client_id, "publishable")),
+            (data.webhook_secret, data.webhook_secret and webhook_secret_problem(data.webhook_secret)),
+        ):
+            if val and problem:
+                raise HTTPException(422, problem)
+        if data.secret and data.client_id and key_mode(data.secret) != key_mode(data.client_id):
+            raise HTTPException(422, "La llave secreta y la publicable son de modos distintos (una de pruebas y otra de producción)")
+        if data.secret and cfg.is_prod and key_mode(data.secret) == "test":
+            raise HTTPException(422, "En producción va la llave de producción (onvo_live_secret_key_…): con la de pruebas nadie pagaría de verdad")
     g = db.scalar(select(PaymentGatewayConfig).where(PaymentGatewayConfig.tenant_id == p.tenant.id, PaymentGatewayConfig.provider == data.provider))
     if not g:
         g = PaymentGatewayConfig(tenant_id=p.tenant.id, provider=data.provider)
         db.add(g)
+    antes = {"active": g.active, "mode": g.mode, "secret": bool(g.secret_encrypted), "webhook": bool(g.webhook_secret_encrypted)}
     g.client_id, g.is_primary, g.active, g.mode = data.client_id, data.is_primary, data.active, data.mode
     if data.secret:
         g.secret_encrypted = encrypt(data.secret)
+    if data.webhook_secret:
+        g.webhook_secret_encrypted = encrypt(data.webhook_secret)
+    if data.provider == "onvo":
+        g.mode = key_mode(onvo._dec(g.secret_encrypted)) or g.mode
+        if g.active and not g.secret_encrypted:
+            raise HTTPException(422, "Para activar ONVO falta la llave secreta")
+    db.flush()
+    despues = {"active": g.active, "mode": g.mode, "secret_nuevo": bool(data.secret), "webhook_nuevo": bool(data.webhook_secret)}
+    audit(db, p.tenant.id, p.user.id, "gateway_update", "gateway", g.id, {"provider": g.provider, "antes": antes, "despues": despues})
     db.commit()
     return {"ok": True}
+
+
+@router.get("/gateways/onvo/status")
+def gateway_onvo_status(p: Principal = Depends(require("settings", "ver")), db: Session = Depends(get_db)):
+    return onvo.status(db, p.tenant)
+
+
+@router.post("/gateways/onvo/test")
+def gateway_onvo_test(p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
+    """Prueba la llave guardada (aunque la pasarela este inactiva) con una lectura que no crea nada en ONVO."""
+    g = onvo.gateway(db, p.tenant.id)
+    key = (onvo._dec(g.secret_encrypted) if g and g.secret_encrypted else None) or cfg.onvo_secret_key
+    if not key:
+        return {"ok": False, "mode": None, "detail": "No hay llave secreta de ONVO guardada"}
+    if not key_mode(key):
+        return {"ok": False, "mode": None, "detail": "La llave guardada no tiene el formato de ONVO"}
+    try:
+        OnvoAdapter(key).ping()
+    except OnvoError as e:
+        hint = " (revisá que sea la llave secreta y que esté vigente)" if e.status in (401, 403) else ""
+        return {"ok": False, "mode": key_mode(key), "detail": f"ONVO respondió {e.status or 'sin conexión'}: {e.message}{hint}"}
+    return {"ok": True, "mode": key_mode(key), "detail": f"Conectado a ONVO en modo {'pruebas' if key_mode(key) == 'test' else 'producción'}"}
 
 
 # ---------- Correo saliente ----------

@@ -21,6 +21,7 @@ type Order = {
   tracking_number: string | null; carrier: string | null; cancel_reason: string | null; refund: { amount: string; note?: string } | null; history: Hist[];
   proofs: Proof[]; expires_at: string | null; lines: { id: number; name: string; quantity: string; unit_price: string; total: string }[];
   emails?: Mail[]; next?: string[]; track_url?: string | null; email_result?: { to: string; status: string; error: string | null } | null;
+  onvo_refundable?: boolean;
 };
 type List = { items: Order[]; counts: Record<string, number>; por_atender: number; labels: Record<string, string> };
 
@@ -127,8 +128,7 @@ function WebOrders() {
 }
 
 function Detail({ o, labels, onClose, onChange }: { o: Order; labels: Record<string, string>; onClose: () => void; onChange: (o: Order) => void }) {
-  const { toast, me } = useSession() as ReturnType<typeof useSession> & { me?: { permissions?: Record<string, string[]> } };
-  void me;
+  const { toast, allows } = useSession();
   const [act, setAct] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [guide, setGuide] = useState(o.tracking_number || "");
@@ -138,6 +138,8 @@ function Detail({ o, labels, onClose, onChange }: { o: Order; labels: Record<str
   const [notify, setNotify] = useState(true);
   const [busy, setBusy] = useState(false);
   const [withPay, setWithPay] = useState(true);
+  const canOnvoRefund = !!(o.onvo_refundable && allows("sales.anular"));
+  const [refundViaOnvo, setRefundViaOnvo] = useState(canOnvoRefund);
   const c = o.contact || {};
   const dv = o.delivery || {};
   const needNote = act === "cancelado" || (act === "nuevo" && o.status === "en_revision");
@@ -149,7 +151,7 @@ function Detail({ o, labels, onClose, onChange }: { o: Order; labels: Record<str
     try {
       const r = await api<Order>(`/store-orders/${o.id}/status`, {
         method: "POST",
-        json: { status: act, note: note.trim() || null, notify, ...(act === "enviado" ? { tracking_number: guide, carrier } : {}), ...(act === "pagado" && ref ? { payment_ref: ref } : {}), ...(act === "reembolsado" ? { refund_amount: refund } : {}) },
+        json: { status: act, note: note.trim() || null, notify, ...(act === "enviado" ? { tracking_number: guide, carrier } : {}), ...(act === "pagado" && ref ? { payment_ref: ref } : {}), ...(act === "reembolsado" ? { refund_amount: refund.trim() || null, ...(canOnvoRefund ? { refund_via_onvo: refundViaOnvo } : {}) } : {}) },
       });
       const m = r.email_result;
       toast(`${labels[act] || act}${m ? ` · correo al cliente ${MAIL[m.status] || m.status}` : notify ? " · sin correo del cliente" : ""}`, m && m.status !== "enviado" ? "bad" : undefined);
@@ -217,7 +219,7 @@ function Detail({ o, labels, onClose, onChange }: { o: Order; labels: Record<str
                 <div className="wo-act__row">
                   {act === "pagado" && <Field label="Referencia del pago (opcional)"><input className="input" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="N.º de comprobante SINPE / transferencia" /></Field>}
                   {act === "enviado" && <><Field label="Número de guía (opcional)"><input className="input input--mono" style={{ textAlign: "left" }} value={guide} onChange={(e) => setGuide(e.target.value)} /></Field><Field label="Transportista"><input className="input" value={carrier} onChange={(e) => setCarrier(e.target.value)} /></Field></>}
-                  {act === "reembolsado" && <Field label={`Monto (${o.currency})`} hint="Solo registro: el dinero se devuelve por el banco o por ONVO."><input className="input input--mono" value={refund} onChange={(e) => setRefund(e.target.value)} /></Field>}
+                  {act === "reembolsado" && <><Field label={`Monto (${o.currency})`} hint={canOnvoRefund && refundViaOnvo ? "Monto a devolver por ONVO (vacío = total)." : "Solo registro: el dinero se devuelve por el banco o por ONVO."}><input className="input input--mono" value={refund} onChange={(e) => setRefund(e.target.value)} /></Field>{canOnvoRefund && <label style={{ fontSize: 12.5, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={refundViaOnvo} onChange={(e) => setRefundViaOnvo(e.target.checked)} />Devolver el dinero por ONVO a la tarjeta del cliente</label>}</>}
                   <Field label={needNote ? (act === "cancelado" ? "Motivo (lo ve el cliente)" : "Qué falló (lo ve el cliente)") : "Nota (opcional)"}><input className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} /></Field>
                 </div>
                 <div className="wo-act__row" style={{ justifyContent: "space-between" }}>

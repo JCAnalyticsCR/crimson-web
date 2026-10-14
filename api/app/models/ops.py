@@ -259,7 +259,8 @@ class PaymentGatewayConfig(TenantMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     provider: Mapped[str] = mapped_column(String(20))  # onvo | paypal
     client_id: Mapped[str | None] = mapped_column(String(200))
-    secret_encrypted: Mapped[str | None] = mapped_column(Text)
+    secret_encrypted: Mapped[str | None] = mapped_column(Text)  # ONVO: llave secreta de API (onvo_*_secret_key_)
+    webhook_secret_encrypted: Mapped[str | None] = mapped_column(Text)  # ONVO: X-Webhook-Secret (otro valor que la llave)
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
     active: Mapped[bool] = mapped_column(Boolean, default=False)
     mode: Mapped[str] = mapped_column(String(10), default="test")  # test | live

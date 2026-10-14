@@ -47,8 +47,15 @@ class Settings(BaseSettings):
     media_email_url_days: int = 30  # informes que viajan por correo: el cliente abre el correo dias despues
 
     # Integraciones (vacias = adaptadores en modo manual/sandbox)
+    # ONVO por variable de entorno = respaldo de una sola empresa; lo normal es Ajustes -> Pasarelas (cifrado por empresa)
     onvo_public_key: str | None = None
     onvo_secret_key: str | None = None
+    onvo_webhook_secret: str | None = None
+    # Empresa (slug) a la que aplican las llaves ONVO de entorno. Vacio = la unica empresa activa, si hay una sola.
+    onvo_env_tenant: str | None = None
+    # URL publica de la API para armar la URL del webhook que se registra en ONVO. Vacio = PUBLIC_BASE_URL + "/api"
+    # (el nginx del portal pasa /api a la API sin tocar cuerpo ni headers).
+    api_public_url: str | None = None
     einvoice_provider: str = "none"  # none | alanube | gti
 
     # Arranque inicial de entornos compartidos (ver app/bootstrap.py): invitacion de admin, nunca contrasena
