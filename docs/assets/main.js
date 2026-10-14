@@ -60,23 +60,32 @@
   const netHero = $('#netHero'), netContact = $('#netContact');
   const heroSvg = buildNet({ portrait: isMobile.matches, density: isMobile.matches ? .5 : 1 });
   netHero && netHero.appendChild(heroSvg);
-  netContact && netContact.appendChild(buildNet({ dark: true, seed: 1, converge: true, portrait: isMobile.matches, density: isMobile.matches ? .5 : 1 }));
 
   // Escritorio: la misma red detras de cada seccion (hero de video + 02..06), en el tono de la seccion.
   // Fuera de vista se pausan las animaciones SMIL (las CSS se pausan solas por visibilidad del compositor).
   {
     // Movil: las mismas redes en las secciones (variante vertical), sin tocar el hero movil
-    const hosts = [['#hero-d .scene__pin', true], ['#monitoreo', true], ['#servicios', true], ['#porque', false], ['#proceso', false], ['#casos', false], ['#tienda', true]];
+    const hosts = [['#hero-d .scene__pin', true], ['#monitoreo', true], ['#servicios', true], ['#porque', false], ['#proceso', false], ['#casos', false], ['#tienda', true], ['#portada', true]];
     if (isMobile.matches) hosts.shift();
-    const netIO = new IntersectionObserver(entries => entries.forEach(en => { const s = en.target.firstElementChild; if (!s) return; en.isIntersecting ? s.unpauseAnimations() : s.pauseAnimations(); }), { rootMargin: '25% 0px' });
-    hosts.forEach(([sel, dark], i) => {
+    const netIO = new IntersectionObserver(entries => entries.forEach(en => { const s = en.target.firstElementChild; if (!s) return; en.isIntersecting && !s.closest('.is-paused') ? s.unpauseAnimations() : s.pauseAnimations(); }), { rootMargin: '25% 0px' });
+    const armar = ([sel, dark], i) => {
       const host = $(sel); if (!host) return;
       const wrap = document.createElement('div'); wrap.className = 'sec-net'; wrap.setAttribute('aria-hidden', 'true'); // el() crea en el namespace SVG
       // Hero de escritorio: red QUIETA (lineas y nodos, sin trazos ni pulsos). Animada detras del canvas
       // le costaba al scrub ~20 fps (medido con CPU 6x: 24-37 fps con ella, ~50 sin sus animaciones).
-      wrap.appendChild(buildNet({ dark, seed: i % 2, density: .5, portrait: isMobile.matches, still: sel.startsWith('#hero') }));
+      // Portada en movil: red quieta (primer pantallazo sin animaciones pesadas; el movimiento lo llevan las puertas)
+      wrap.appendChild(buildNet({ dark, seed: i % 2, density: .5, portrait: isMobile.matches, still: sel.startsWith('#hero') || (sel === '#portada' && isMobile.matches) }));
       host.prepend(wrap); netIO.observe(wrap);
-    });
+    };
+    // La red de la portada (primer pantallazo) se arma ya. El resto es decoracion bajo el pliegue: se arma en
+    // reposo para no alargar las tareas del arranque (medido en movil con CPU 4x: ~1.5 s de tareas largas
+    // despues del primer pintado, que retrasaban la entrada del titular).
+    hosts.forEach((h, i) => h[0] === '#portada' && armar(h, i));
+    const resto = () => {
+      hosts.forEach((h, i) => h[0] !== '#portada' && armar(h, i));
+      netContact && netContact.appendChild(buildNet({ dark: true, seed: 1, converge: true, portrait: isMobile.matches, density: isMobile.matches ? .5 : 1 }));
+    };
+    'requestIdleCallback' in window ? requestIdleCallback(resto, { timeout: 2500 }) : setTimeout(resto, 600);
   }
 
   // Toque sobre la red (móvil): los nodos cercanos al dedo se encienden
@@ -95,9 +104,33 @@
   if (!reduced) {
     const io = new IntersectionObserver(entries => entries.forEach(en => {
       en.target.classList.toggle('is-offscreen', !en.isIntersecting);
-      en.target.querySelectorAll('svg').forEach(s => en.isIntersecting ? s.unpauseAnimations() : s.pauseAnimations());
+      en.target.querySelectorAll('svg').forEach(s => en.isIntersecting && !en.target.classList.contains('is-paused') ? s.unpauseAnimations() : s.pauseAnimations());
     }), { rootMargin: '20%' });
     $$('section, footer').forEach(s => io.observe(s));
+  }
+
+  /* ---------- CAM 01 · PORTADA: las dos puertas (tienda y soporte) ----------
+     Un solo reloj: la barra de la vitrina es una animacion CSS de --dur-scene (2.2 s, compositor).
+     Cada vuelta ("animationiteration") avanza el producto y la fila de prioridad del monitor. Sin
+     setInterval: la rotacion se detiene sola fuera de cuadro (.is-offscreen pausa la animacion), con
+     la pestana oculta, con "Pausar movimiento" y bajo reduced-motion (sin animacion no hay vueltas). */
+  const portada = $('#portada');
+  if (portada) {
+    const items = $$('.vitrina__item', portada), filas = $$('.monitor__sla li', portada), reloj = $('.vitrina__bar i', portada);
+    let k = 0;
+    reloj?.addEventListener('animationiteration', () => {
+      if (items.length < 2) return;
+      const prev = k; k = (k + 1) % items.length;
+      items.forEach((it, j) => { it.classList.toggle('is-on', j === k); it.classList.toggle('is-off', j === prev); });
+      filas.forEach((f, j) => f.classList.toggle('is-on', j === k % filas.length));
+    });
+    const pausa = $('#portadaPausa'), pausaTxt = pausa && $('.portada__pausa-txt', pausa);
+    pausa?.addEventListener('click', () => {
+      const on = !portada.classList.contains('is-paused');
+      portada.classList.toggle('is-paused', on);
+      if (pausaTxt) pausaTxt.textContent = on ? 'Reanudar movimiento' : 'Pausar movimiento';
+      $$('svg', portada).forEach(s => on ? s.pauseAnimations?.() : s.unpauseAnimations?.());
+    });
   }
 
   /* ---------- Consola: cámara activa, tono ambiente, theme-color ---------- */
@@ -206,25 +239,28 @@
   // Video 16:9 (banda reencuadrada del vertical que sigue al sujeto) en el lado derecho, sin zoom de mas
   // Casilla 16:9 a la derecha; adentro el plano VERTICAL completo (sin recorte ni ampliacion), como un monitor
   const wideSet = { path: 'assets/frames/wide', ratio: '1.7778', w: 1280, h: 720, frames: 90, ver: '?v=2' }; // clip 16:9 editado por el cliente (se congela del 9 s en adelante)
+  // La escena panoramica la decide el CSS (>=768px) desde el primer pintado; antes la decidia esta linea y el
+  // cambio de #hero a .hero--d al llegar el JS era un layout shift de 1.0 en 1920x1080. ?hero=net compara con la red.
+  if (q.get('hero') === 'net') document.body.classList.add('net-hero');
   const useWide = !isMobile.matches && q.get('hero') !== 'net' && !!$('#hero-d.scene');
   if (useWide) {
     document.body.classList.add('has-wide');
     document.documentElement.style.setProperty('--ratio', wideSet.ratio);
-    const po = $('#hero-d .scene__poster'); if (po) { po.src = `${wideSet.path}/f001.webp${wideSet.ver}`; po.width = wideSet.w; po.height = wideSet.h; }
+    const po = $('#hero-d .scene__poster'), pSrc = `${wideSet.path}/f001.webp${wideSet.ver}`; if (po && po.getAttribute('src') !== pSrc) { po.src = pSrc; po.width = wideSet.w; po.height = wideSet.h; }
   }
   const mountScene = (scene, PATH, FRAMES, VER = '') => {
     document.body.dataset.tone = 'ink'; const tm = $('#themeColor'); if (tm) tm.content = '#15131a';
     const ANIM_FIN = 0.78, FPS = 10;
     const LERP = isMobile.matches ? 0.08 : 0.09;
     const pin = $('.scene__pin', scene), stage = $('.scene__stage', scene), canvas = $('.scene__canvas', scene);
-    const poster = $('.scene__poster', scene), ambient = $('.scene__ambient', scene);
+    const ambient = $('.scene__ambient', scene);
     const actx = ambient && ambient.getContext ? ambient.getContext('2d', { alpha: false }) : null;
     const copyA = $('.scene__copy--a', scene), copyB = $('.scene__copy--b', scene);
     const tc = $('.scene__tc', scene), loadEl = $('.scene__load', scene), hint = $('.hero__hint', scene);
     const ctx = canvas.getContext('2d', { alpha: false });
     const imgs = new Array(FRAMES), ok = new Uint8Array(FRAMES);
     const pad = n => String(n).padStart(3, '0');
-    let target = 0, current = 0, raf = 0, running = false, cancelled = false, settled = 0;
+    let target = 0, current = 0, raf = 0, running = false, cancelled = false, settled = 0, drawn = false;
     let lastLow = -1, lastHigh = -1, lastBlend = -1, lastP = -1;
     const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
     const nearestLoaded = i => { for (let d = 0; d < FRAMES; d++) { if (ok[i - d]) return i - d; if (ok[i + d]) return i + d; } return -1; };
@@ -267,6 +303,7 @@
       if (low === lastLow && high === lastHigh && Math.abs(blend - lastBlend) < 0.015) return;
       lastLow = low; lastHigh = high; lastBlend = blend;
       coverDraw(imgs[low], 1);
+      if (!drawn) { drawn = true; canvas.classList.add('is-drawn'); }
       if (high !== low && blend > 0.008) coverDraw(imgs[high], blend);
       ctx.globalAlpha = 1;
       drawAmbient(imgs[blend > .5 ? high : low], blend > .5 ? high : low);
@@ -320,13 +357,17 @@
       await Promise.all(Array.from({ length: 5 }, worker));
     };
 
+    // La escena ya no es lo primero que se ve (la portada con tienda y soporte manda el LCP). Precarga ARMADA:
+    // nada descarga hasta que la escena se acerca (IO rootMargin 50%) Y la pagina termino de cargar (load), asi
+    // los ~3 MB de fotogramas nunca compiten con el primer pantallazo.
+    const cargada = document.readyState === 'complete' ? Promise.resolve() : new Promise(r => addEventListener('load', r, { once: true }));
+    const cerca = new Promise(r => { const io = new IntersectionObserver(([en]) => { if (en.isIntersecting) { io.disconnect(); r(); } }, { rootMargin: '50% 0px' }); io.observe(scene); });
+    const armada = Promise.all([cargada, cerca]);
     if (reduced) {
       // Un fotograma: el telefono con el panel en pantalla, la version estatica mas informativa
-      fetchFrame(59).then(() => { current = target = 59 / (FRAMES - 1); lastP = -1; draw(current); applyCopy(1); });
+      armada.then(() => fetchFrame(59)).then(() => { current = target = 59 / (FRAMES - 1); lastP = -1; draw(current); applyCopy(1); if (loadEl) loadEl.textContent = 'CUADRO FIJO'; });
     } else {
-      // El poster (f001) es el LCP: la secuencia arranca cuando el ya esta en pantalla
-      const posterReady = poster && !poster.complete ? new Promise(r => { poster.onload = r; poster.onerror = r; }) : Promise.resolve();
-      posterReady.then(preload);
+      armada.then(preload);
       new IntersectionObserver(([en]) => en.isIntersecting ? start() : stop(), { rootMargin: '35% 0px' }).observe(scene);
       addEventListener('resize', () => { lastLow = -1; lastP = -1; progress(); draw(current); applyCopy(current); }, { passive: true });
     }
@@ -334,6 +375,12 @@
   };
   if (isMobile.matches && $('#hero-m.scene')) mountScene($('#hero-m.scene'), 'assets/frames/hero', 88);
   else if (useWide) mountScene($('#hero-d.scene'), wideSet.path, wideSet.frames, wideSet.ver);
+  // Titular de la escena (ya no esta arriba): la entrada por lineas corre cuando el borde superior de la escena
+  // cruza el 20 % superior de la pantalla, no al cargar la pagina (si no, terminaria sin que nadie la viera)
+  {
+    const io = new IntersectionObserver(es => es.forEach(en => { if (en.isIntersecting) { en.target.classList.add('is-in'); io.unobserve(en.target); } }), { rootMargin: '0px 0px -80% 0px' });
+    $$('section.hero').forEach(s => io.observe(s));
+  }
 
   /* ---------- Consola de lineas de solucion: pestanas, avance automatico (hasta que el usuario toca), swipe ---------- */
   $$('[data-consola]').forEach(con => {

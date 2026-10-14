@@ -62,11 +62,11 @@ h3 em{font-style:normal;color:inherit}
 .lines .ln{display:block;overflow:hidden;padding-block:.08em;margin-block:-.08em}
 .lines .ln>span{display:block}
 .js .lines .ln>span{transform:translateY(112%) rotate(.8deg);transform-origin:left bottom;opacity:0}
-.js .lines.in .ln>span,.js .hero .lines .ln>span{animation:lineUp 950ms var(--ease-enter) forwards}
+.js .lines.in .ln>span,.js .hero.is-in .lines .ln>span{animation:lineUp 950ms var(--ease-enter) forwards}
 .js .lines .ln:nth-child(2)>span{animation-delay:90ms}
 .js .lines .ln:nth-child(3)>span{animation-delay:180ms}
 .js .lines em{color:inherit}
-.js .lines.in em,.js .hero .lines em{animation:inkIn 600ms 520ms both}
+.js .lines.in em,.js .hero.is-in .lines em{animation:inkIn 600ms 520ms both}
 @keyframes lineUp{to{transform:none;opacity:1}}
 @keyframes inkIn{to{color:var(--crimson)}}
 
@@ -607,7 +607,7 @@ section{padding:var(--space) var(--pad)}
   .hero__hint{display:flex;position:absolute;left:50%;bottom:calc(22px + env(safe-area-inset-bottom));transform:translateX(-50%);flex-direction:column;align-items:center;gap:10px;font-size:10px;letter-spacing:.3em;color:var(--muted);transition:opacity .4s;z-index:1}
   .hero__hint::before{content:"";width:1px;height:40px;background:linear-gradient(var(--crimson) 0 100%) no-repeat 0 -12px/1px 12px,rgba(21,19,26,.14);animation:drip 2.2s var(--ease-scene) infinite}
   @keyframes drip{from{background-position:0 -12px}to{background-position:0 40px}}
-  .nav.is-scrolled~main .hero__hint{opacity:0}
+  .nav.is-scrolled~main #hero .hero__hint{opacity:0}
 
   /* Costuras más cortas */
   .wall,.proceso,.tienda{padding-top:calc(var(--space) + 12px)}
@@ -718,8 +718,8 @@ section{padding:var(--space) var(--pad)}
 :root{--navh:74px;--ratio:1.7778}
 .hero--d{display:none}
 @media (min-width:768px){
-  body.has-wide #hero{display:none!important}
-  body.has-wide .hero--d{display:block;position:relative;overflow:visible;height:calc(100svh + 260vh);margin-top:calc(-1 * var(--navh));padding:0;background:#000;color:var(--white);min-height:0}
+  body:not(.net-hero) #hero{display:none!important}
+  body:not(.net-hero) .hero--d{display:block;position:relative;overflow:visible;height:calc(100svh + 260vh);padding:0;background:#000;color:var(--white);min-height:0}
   .hero--d .scene__pin{position:sticky;top:0;height:100svh;overflow:hidden;background:#000}
   .hero--d .scene__grid{background:transparent;position:absolute;inset:0;top:var(--navh);aspect-ratio:auto;max-height:none;max-width:none;padding:0;margin:0}
   /* El video vertical va CENTRADO en el cuadro a su tamano real: alto = alto del cuadro, sin zoom */
@@ -746,13 +746,13 @@ section{padding:var(--space) var(--pad)}
   .hero--d .hero__hint{display:flex;position:absolute;right:var(--pad);bottom:22px;flex-direction:row;align-items:center;gap:12px;z-index:4;color:rgba(244,241,238,.6);transition:opacity .4s}
   .hero--d .hero__hint::before{content:"";width:40px;height:1px;background:linear-gradient(90deg,var(--crimson) 0 100%) no-repeat -12px 0/12px 1px,rgba(255,255,255,.22);animation:dripX 2.2s var(--ease-scene) infinite}
   @keyframes dripX{from{background-position:-12px 0}to{background-position:40px 0}}
-  .js .hero--d .lines .ln>span{animation:lineUp 950ms var(--ease-enter) forwards}
-  .js .hero--d .lines em{animation:inkIn 600ms 520ms both}
-  body.has-wide .wall{background:var(--ink)}
+  .js .hero--d.is-in .lines .ln>span{animation:lineUp 950ms var(--ease-enter) forwards}
+  .js .hero--d.is-in .lines em{animation:inkIn 600ms 520ms both}
+  body:not(.net-hero) .wall{background:var(--ink)}
   /* Red de nodos detras de cada seccion (solo escritorio). z-index:-1 dentro de un contexto aislado:
      queda sobre el fondo de la seccion y debajo de todo su contenido, sin tocar el flujo. */
   .hero--d .scene__pin .sec-net{z-index:0;opacity:.7;-webkit-mask-image:linear-gradient(90deg,#000 0,#000 45%,rgba(0,0,0,.35) 100%);mask-image:linear-gradient(90deg,#000 0,#000 45%,rgba(0,0,0,.35) 100%)}
-  body.has-wide .hud--tr{display:none!important}
+  body:not(.net-hero) .hud--tr{display:none!important}
 }
 @media (min-width:768px) and (max-height:640px){.hero--d .scene__copy{gap:12px}.hero--d .scene__copy .lead{font-size:15px}}
 @media (prefers-reduced-motion:reduce){.hero--d{height:100svh!important}}
@@ -763,7 +763,7 @@ section{padding:var(--space) var(--pad)}
 @media (max-width:767px){
   :root{--navh:69px}
   #hero,.hero--d{display:none!important}
-  .hero--m{display:block;position:relative;overflow:visible;margin-top:calc(-1 * var(--navh));padding:0;background:var(--ink);color:var(--white);min-height:0}
+  .hero--m{display:block;position:relative;overflow:visible;padding:0;background:var(--ink);color:var(--white);min-height:0}
   .scene__pin{position:sticky;top:0;height:100svh;overflow:hidden;background:#000}
   .scene__ambient,.scene__veil{display:none}
   .scene__grid{position:static;max-width:none;padding:0}
@@ -779,8 +779,8 @@ section{padding:var(--space) var(--pad)}
   .scene__copy .lead{color:rgba(244,241,238,.8)}
   .hero--m .hero__cta{display:flex!important;width:100%}
   .hero--m .hero__cta .btn{width:100%}
-  .js .hero--m .lines .ln>span{animation:lineUp 950ms var(--ease-enter) forwards}
-  .js .hero--m .lines em{animation:inkIn 600ms 520ms both}
+  .js .hero--m.is-in .lines .ln>span{animation:lineUp 950ms var(--ease-enter) forwards}
+  .js .hero--m.is-in .lines em{animation:inkIn 600ms 520ms both}
   .hero--m{height:calc(100svh + 190vh)}
   .scene__ambient,.scene__veil{display:none}
   .scene__stage{position:absolute;inset:0;top:0;bottom:0;left:0;height:auto;width:auto;aspect-ratio:auto;transform:none;border-radius:0;box-shadow:none;-webkit-mask-image:none;mask-image:none;background:#000}
@@ -801,7 +801,7 @@ section{padding:var(--space) var(--pad)}
   .hero__hint{left:50%;right:auto;transform:translateX(-50%);flex-direction:column;gap:10px;bottom:calc(22px + env(safe-area-inset-bottom));font-size:10px;letter-spacing:.3em}
   .hero__hint::before{width:1px;height:40px;background:linear-gradient(var(--crimson) 0 100%) no-repeat 0 -12px/1px 12px,rgba(255,255,255,.2);animation:drip 2.2s var(--ease-scene) infinite}
   @keyframes drip{from{background-position:0 -12px}to{background-position:0 40px}}
-  .nav.is-scrolled~main .hero__hint{opacity:0}
+  .nav.is-scrolled~main #hero .hero__hint{opacity:0}
 }
 @media (prefers-reduced-motion:reduce){
   .hero--m{height:100svh!important}
@@ -1092,3 +1092,188 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
 .footer__jc-link,.brands__jc a{display:inline-block;border-radius:6px;transition:opacity .2s}
 .footer__jc-link:hover img,.brands__jc a:hover img{opacity:1}
 .footer__jc-link:focus-visible,.brands__jc a:focus-visible{outline:2px solid currentColor;outline-offset:4px}
+
+/* =====================================================================
+   CAM 01 · PORTADA: que es Crimson + las dos puertas (TIENDA y SOPORTE).
+   Pedido de Andres (oct 2026): "esto no dice nada en los primeros 12 segundos".
+   Todo cabe en el primer pantallazo sin scroll (390x844, 1366x768, 1920x1080).
+   Movimiento SOLO de compositor (transform/opacity), con las duraciones del sistema:
+   titular --dur-section (listo en < 1 s); vitrina y prioridad rotan cada --dur-scene.
+   La escena de video (CAM 01) va despues; sus fotogramas esperan a que se acerque.
+   ===================================================================== */
+#portada{position:relative;isolation:isolate}
+.portada{display:flex;flex-direction:column;justify-content:center;min-height:calc(100svh - var(--navh));padding:clamp(24px,4.5vh,64px) var(--pad) clamp(40px,6vh,72px);overflow:hidden;color:var(--white);background:linear-gradient(180deg,var(--ink) 0,var(--ink) 74%,#000 100%)}
+.portada__grid{width:100%;max-width:1440px;display:grid;grid-template-columns:minmax(0,4.6fr) minmax(0,7.4fr);gap:clamp(32px,4vw,72px);align-items:center}
+.portada__copy{display:flex;flex-direction:column;gap:20px;align-items:flex-start}
+.portada__eyebrow{display:flex;align-items:center;gap:10px;color:rgba(244,241,238,.62)}
+.portada__dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--crimson);box-shadow:0 0 0 3px rgba(226,35,58,.2);animation:blink 1.6s infinite}
+.portada .display{font-size:clamp(40px,3.35vw,60px);line-height:.98;color:var(--white)}
+.portada__lead{max-width:31ch}
+.portada__mas a{display:inline-flex;flex-wrap:wrap;gap:6px;font-size:15px;color:rgba(244,241,238,.66)}
+.portada__mas b{color:#fff;font-weight:700;border-bottom:1px solid rgba(226,35,58,.7);transition:color var(--dur-micro)}
+@media (hover:hover){.portada__mas a:hover b{color:var(--crimson)}}
+/* Entrada: SOLO el titular, con el primer pintado (sin esperar JS ni scroll): 750 ms + 90 ms la 2a linea.
+   Lead, eyebrow y puertas NO llevan entrada con opacidad: se pintan ya en su lugar (LCP y lectura inmediata;
+   con 4G lenta + CPU 4x las tareas largas del arranque retrasaban cualquier entrada y la portada salia en blanco). */
+.js .portada .lines .ln>span{animation:lineUp var(--dur-section) var(--ease-enter) forwards}
+.js .portada .lines em{animation:inkIn var(--dur-drawer) .3s both}
+
+/* ---------- Las dos puertas ---------- */
+.puertas{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:stretch}
+.puerta{position:relative;display:flex;flex-direction:column;min-width:0;border-radius:var(--r);overflow:hidden;background:var(--ink-2);border:1px solid rgba(255,255,255,.1);box-shadow:0 30px 60px -40px rgba(0,0,0,.9);transition:transform var(--dur-drawer) var(--ease-enter),border-color var(--dur-drawer)}
+.puerta__media{position:relative;aspect-ratio:16/11;border-radius:0;flex:none}
+.puerta__hit{position:absolute;inset:0;z-index:6}
+.puerta__tag{position:absolute;left:16px;top:13px;z-index:4;color:rgba(21,19,26,.62);font-size:10px}
+.puerta__body{display:flex;flex-direction:column;gap:12px;padding:18px;flex:1}
+.puerta__title{font-family:var(--serif);font-weight:var(--dw);font-size:clamp(22px,1.75vw,30px);line-height:1.04;letter-spacing:-.01em;color:#fff;text-wrap:balance}
+.puerta__txt{font-size:14px;line-height:1.5;color:rgba(244,241,238,.68);text-wrap:pretty}
+.puerta__lista{display:flex;flex-direction:column;gap:7px;font-size:14px;font-weight:600;color:rgba(244,241,238,.92)}
+.puerta__lista li{display:flex;align-items:center;gap:9px}
+.puerta__lista svg{width:16px;height:16px;flex:none;fill:none;stroke:var(--crimson);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.puerta__ctas{margin-top:auto;padding-top:4px;display:flex;flex-direction:column;align-items:center;gap:10px}
+.puerta__cta{width:100%}
+.puerta__nota{color:rgba(244,241,238,.6);font-size:9.5px;letter-spacing:.12em;text-align:center;padding:6px 0}
+.puerta__link{position:relative;font-size:14px;font-weight:600;color:rgba(244,241,238,.8);padding:4px 2px;border-bottom:1px solid rgba(226,35,58,.7);transition:color var(--dur-micro)}
+@media (hover:hover){
+  .puerta:hover{transform:translate3d(0,-4px,0);border-color:rgba(226,35,58,.5)}
+  .puerta__link:hover{color:#fff}
+}
+
+/* Puerta 1 · vitrina: productos reales que rotan (fundido + desplazamiento corto; nada repinta) */
+.vitrina{background:linear-gradient(180deg,#fff 0,#fff 74%,#f1eeea 100%)}
+.vitrina::before{display:none}
+.vitrina.is-active::after{background:rgba(226,35,58,.18)}
+.puerta__media .feed__corners{inset:6px}
+.vitrina .feed__corners{opacity:.5;background-image:linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink)),linear-gradient(var(--ink),var(--ink))}
+.vitrina__lista{position:absolute;inset:0;margin:0;padding:0;list-style:none}
+.vitrina__item{position:absolute;inset:0}
+.vitrina__item img{position:absolute;left:4%;top:6%;width:92%;height:70%;object-fit:contain;opacity:0;transform:translate3d(26px,0,0) scale(.94);transition:opacity var(--dur-drawer) var(--ease-button),transform var(--dur-section) var(--ease-enter)}
+.vitrina__item.is-on img{opacity:1;transform:none;transition:opacity var(--dur-section) var(--ease-enter),transform var(--dur-section) var(--ease-enter)}
+.vitrina__item.is-off img{transform:translate3d(-26px,0,0) scale(1.03)}
+.vitrina__cap,.vitrina__n{opacity:0;transform:translate3d(0,6px,0);transition:opacity var(--dur-micro) var(--ease-button),transform 0s var(--dur-micro)}
+.vitrina__item.is-on .vitrina__cap,.vitrina__item.is-on .vitrina__n{opacity:1;transform:none;transition:opacity var(--dur-drawer) var(--ease-enter) var(--dur-micro),transform var(--dur-drawer) var(--ease-enter) var(--dur-micro)}
+.vitrina__cap{position:absolute;left:16px;right:16px;bottom:16px;display:flex;flex-direction:column;gap:3px;color:var(--ink)}
+.vitrina__cap .meta{font-size:9.5px;color:rgba(21,19,26,.68)}
+.vitrina__cap b{font-family:var(--serif);font-weight:var(--dw);font-size:clamp(16px,1.25vw,20px);line-height:1.1;letter-spacing:-.01em}
+.vitrina__n{position:absolute;right:16px;top:13px;font-size:9.5px;color:rgba(21,19,26,.64)}
+.vitrina__bar{position:absolute;left:0;right:0;bottom:0;height:3px;z-index:4;background:rgba(21,19,26,.08);overflow:hidden}
+.vitrina__bar i{position:absolute;inset:0;background:var(--crimson);transform-origin:left center;transform:scaleX(0)}
+.js .vitrina__bar i{animation:vitrinaReloj var(--dur-scene) linear infinite}
+@keyframes vitrinaReloj{to{transform:scaleX(1)}}
+
+/* Puerta 2 · monitor de soporte: hora de CR, ticker y relojes por prioridad (sin publicar horas) */
+.monitor{display:flex;flex-direction:column;gap:8px;padding:13px 16px 14px;background:#0d0c11}
+.monitor__top,.monitor__ticker{flex:none}
+.monitor__top{position:relative;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:10px;color:rgba(244,241,238,.7);font-size:10px}
+.monitor__top .rec{color:#fff;white-space:nowrap}
+.monitor__top .feed__clock{color:rgba(244,241,238,.55);font-variant-numeric:tabular-nums;white-space:nowrap}
+.monitor__ticker{position:relative;z-index:2;overflow:hidden;white-space:nowrap;padding:6px 0;border-block:1px solid rgba(255,255,255,.08);color:rgba(244,241,238,.62);font-size:10px;-webkit-mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent);mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
+.monitor__track{display:inline-flex}
+.monitor__track span{flex:none}
+.js .monitor__track{animation:ticker 32s linear infinite}
+@keyframes ticker{to{transform:translate3d(-50%,0,0)}}
+.monitor__sla{position:relative;z-index:2;flex:1;display:flex;flex-direction:column;justify-content:space-between;margin:0;padding:0;list-style:none}
+.monitor__sla li{position:relative;isolation:isolate;display:grid;grid-template-columns:76px 1fr auto;align-items:center;gap:10px;padding:5px 8px;font-size:13px;color:rgba(244,241,238,.66);transition:color var(--dur-drawer)}
+.monitor__sla li::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:4px;background:rgba(226,35,58,.13);box-shadow:inset 2px 0 0 var(--crimson);opacity:0;transition:opacity var(--dur-drawer) var(--ease-enter)}
+.monitor__sla li.is-on{color:#fff}
+.monitor__sla li.is-on::before{opacity:1}
+.monitor__sla .sla__p{font-size:9.5px;padding:3px 8px;justify-self:start}
+.monitor__sla .sla__reloj{width:26px;height:26px}
+.monitor__sla .sla__reloj i{height:9px;animation:relojIn var(--dur-scene) var(--ease-enter) .35s backwards}
+.monitor__sla li:nth-child(2) .sla__reloj i{animation-delay:.47s}
+.monitor__sla li:nth-child(3) .sla__reloj i{animation-delay:.59s}
+.monitor__sla li:nth-child(4) .sla__reloj i{animation-delay:.71s}
+@keyframes relojIn{from{transform:rotate(.5turn)}}
+@keyframes asentar{to{transform:none}}
+.monitor__sla li.is-on .sla__reloj::before{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid var(--crimson);animation:relojPing 1.1s var(--ease-enter) both}
+@keyframes relojPing{from{opacity:1;transform:scale(.75)}to{opacity:0;transform:scale(1.6)}}
+
+/* Pausar: control para quien lo necesite (WCAG 2.2.2). Pausa todo lo que se mueve en la portada. */
+.portada__pausa{position:absolute;right:var(--pad);bottom:14px;z-index:3;display:inline-flex;align-items:center;gap:9px;min-height:36px;padding:6px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(13,12,17,.6);color:rgba(244,241,238,.62);font-size:9.5px;cursor:pointer;transition:color var(--dur-micro),border-color var(--dur-micro)}
+.puerta__link::after,.portada__pausa::after{content:"";position:absolute;left:-8px;right:-8px;top:50%;height:40px;transform:translateY(-50%)}
+.portada__pausa-ico{width:8px;height:9px;flex:none;border-left:2.5px solid currentColor;border-right:2.5px solid currentColor}
+.portada.is-paused .portada__pausa-ico{width:0;height:0;border:0;border-left:8px solid currentColor;border-top:5px solid transparent;border-bottom:5px solid transparent}
+@media (hover:hover){.portada__pausa:hover{color:#fff;border-color:rgba(255,255,255,.4)}}
+.portada.is-paused *,.portada.is-paused *::before,.portada.is-paused *::after{animation-play-state:paused!important}
+
+/* Escritorio con poca altura (portatil 1366x768 con barras del navegador ~ 650 px utiles) */
+@media (min-width:1024px) and (max-height:760px){
+  .portada .display{font-size:clamp(38px,3.2vw,52px)}
+  .portada__copy{gap:16px}
+  .puerta__media{aspect-ratio:16/10}
+  .puerta__body{gap:10px;padding:14px 16px 16px}
+  .puerta__txt{display:none}
+}
+@media (min-width:1024px) and (max-height:620px){.puerta__lista{display:none}}
+
+/* Tablet: texto arriba a todo el ancho, las dos puertas lado a lado debajo */
+@media (min-width:768px) and (max-width:1023px){
+  .portada__grid{grid-template-columns:1fr;gap:28px}
+  .portada .display{font-size:clamp(44px,7vw,64px)}
+  .portada__lead{max-width:44ch}
+}
+
+/* Movil: las dos puertas lado a lado, completas (con su boton) en el primer pantallazo de 390x844.
+   Sin animaciones pesadas: la red queda quieta; ticker y vitrina son una capa de compositor cada uno. */
+@media (max-width:767px){
+  .portada{justify-content:flex-start;gap:14px;padding:22px var(--pad) 16px;background:linear-gradient(180deg,var(--ink) 0,var(--ink) 82%,#000 100%)}
+  .portada__grid{grid-template-columns:1fr;gap:18px}
+  .portada__copy{gap:11px}
+  .portada__eyebrow{font-size:9.5px;letter-spacing:.12em}
+  .portada .display{font-size:clamp(33px,9.4vw,40px);line-height:.98}
+  /* Movil: titular visible de entrada (nada que esperar), con un asentamiento corto que no lo oculta.
+     Con CPU lenta el arranque de main.js retrasa cualquier animacion: aqui eso solo atrasa el asentamiento. */
+  .js .portada .lines .ln>span{opacity:1;transform:translate3d(0,.1em,0);animation:asentar var(--dur-drawer) var(--ease-enter) forwards}
+  .portada__lead{font-size:15px;line-height:1.5;max-width:none}
+  .puertas{gap:10px}
+  .puerta__media{aspect-ratio:1}
+  .puerta__tag{left:10px;top:9px;font-size:8.5px;letter-spacing:.1em}
+  .puerta__body{gap:9px;padding:12px 10px}
+  .puerta__title{font-size:18px;line-height:1.08}
+  .puerta__txt{display:none}
+  .puerta__lista{gap:6px;font-size:12px;line-height:1.25}
+  .puerta__lista li{gap:6px;align-items:flex-start}
+  .puerta__lista svg{width:14px;height:14px}
+  .puerta__ctas{gap:6px;padding-top:2px}
+  .puerta__cta.btn{min-height:44px;padding:10px;font-size:14px;gap:6px}
+  .puerta__cta .btn__arrow{display:none}
+  .puerta__nota{font-size:8px;letter-spacing:.08em;padding:4px 0;line-height:1.3}
+  .puerta__link{font-size:13px;padding:3px 2px}
+  .vitrina__item img{left:3%;top:12%;width:94%;height:60%}
+  .vitrina__cap{left:10px;right:10px;bottom:11px;gap:1px}
+  .vitrina__cap .meta{font-size:8px}
+  .vitrina__cap b{font-size:13px}
+  .vitrina__n{right:10px;top:9px;font-size:8.5px}
+  .puerta__media .feed__corners{inset:4px}
+  .monitor{padding:10px 10px 10px;gap:6px}
+  .monitor__tag{display:none}
+  .monitor__top{font-size:8.5px;letter-spacing:.1em}
+  .monitor__ticker{font-size:8.5px;padding:4px 0}
+  .monitor__r{display:none}
+  .monitor__sla li{grid-template-columns:1fr auto;gap:6px;padding:3px 5px}
+  .monitor__sla .sla__p{font-size:8px;padding:2px 6px}
+  .monitor__sla .sla__reloj{width:20px;height:20px}
+  .monitor__sla .sla__reloj i{height:7px;width:1.5px}
+  .portada__pausa{position:relative;right:auto;bottom:auto;align-self:flex-end;margin-top:auto;min-height:34px;font-size:8.5px}
+}
+@media (max-width:767px) and (max-height:700px){.portada__lead{display:none}}
+@media (max-width:380px){
+  .monitor__top .feed__clock{display:none}
+  .monitor__sla li{padding:2px 4px}
+  .monitor__sla .sla__reloj{width:18px;height:18px}
+}
+
+/* Reduced motion: rama propia. Nada rota ni se desplaza: el primer producto queda fijo, el ticker es
+   texto quieto, los relojes ya estan en su lugar y el boton de pausa sobra. */
+@media (prefers-reduced-motion:reduce){
+  .portada__pausa,.vitrina__bar,.vitrina.is-active::after{display:none}
+  .js .portada .lines .ln>span{opacity:1;transform:none}
+  .vitrina__item img,.vitrina__cap,.vitrina__n{transition:none}
+  .monitor__ticker{-webkit-mask-image:linear-gradient(90deg,#000 80%,transparent);mask-image:linear-gradient(90deg,#000 80%,transparent)}
+  .monitor__track span+span{display:none}
+}
+
+/* Escena CAM 01: el canvas (opaco) no tapa el poster mientras no haya dibujado su primer fotograma.
+   Antes, en 4G lenta se veia un cuadro negro varios segundos aunque el poster ya estaba cargado. */
+.scene__canvas{opacity:0;transition:opacity var(--dur-drawer)}
+.scene__canvas.is-drawn{opacity:1}
