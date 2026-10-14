@@ -52,6 +52,8 @@ img { max-width: 100%; display: block; }
 .nav__link:hover { background: rgba(255,255,255,.06); opacity: 1; }
 .nav__link.is-active { background: rgba(226,35,58,.16); opacity: 1; box-shadow: inset 2px 0 0 var(--crimson); }
 .nav__link .pill { font-family: var(--mono); font-size: 10px; padding: 2px 7px; border-radius: 999px; background: var(--crimson); color: #fff; }
+/* numero de pendientes junto a "Aprobaciones" (tercera columna de .nav__link) */
+.nav__badge { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--crimson); color: #fff; font: 700 11px/20px var(--mono); text-align: center; }
 .nav__foot { margin-top: auto; padding: 14px; border-top: 1px solid rgba(255,255,255,.08); display: flex; flex-direction: column; gap: 10px; }
 .nav__user { display: flex; align-items: center; gap: 10px; }
 .avatar { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--crimson); color: #fff; font-weight: 700; font-size: 13px; flex: none; }

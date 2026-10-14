@@ -2,7 +2,7 @@
    para yo comisionar sobre proyectos de otras personas". Se devengan con el COBRO, no con la factura:
    es la unica plata que existe de verdad. */
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
@@ -25,14 +25,16 @@ export default function Commissions() {
   const [data, setData] = useState<{ rows: Row[]; totals: Record<string, string> } | null>(null);
   const [rules, setRules] = useState<Rule[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [status, setStatus] = useState("");
+  // filtro inicial desde la URL (la bandeja de Aprobaciones abre ?estado=pendiente): solo un estado conocido
+  const [params] = useSearchParams();
+  const [status, setStatus] = useState(() => { const e = params.get("estado"); return e && Object.keys(ESTADO).includes(e) ? e : ""; });
   const [sel, setSel] = useState<Record<number, boolean>>({});
   const [rule, setRule] = useState<(typeof blankRule & { id?: number }) | null>(null);
   const puedeAprobar = allows("commissions.aprobar");
   const configura = allows("commissions.configurar");
 
   const load = useCallback(() => {
-    api<{ rows: Row[]; totals: Record<string, string> }>(`/commissions${status ? `?status=${status}` : ""}`).then((r) => { setData(r); setSel({}); });
+    api<{ rows: Row[]; totals: Record<string, string> }>(`/commissions${status ? `?status=${encodeURIComponent(status)}` : ""}`).then((r) => { setData(r); setSel({}); });
   }, [status]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {

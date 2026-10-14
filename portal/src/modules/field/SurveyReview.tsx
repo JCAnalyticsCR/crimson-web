@@ -1,9 +1,10 @@
-/* Revision del supervisor: entre "enviado a oficina" y el costeo. El supervisor (o admin) aprueba o devuelve con
+/* Revision del supervisor: entre "enviado a revisión" y el costeo. El supervisor (o admin) aprueba o devuelve con
    observaciones por punto o generales; el tecnico las ve, las marca resueltas y reenvia (vuelve a revision). */
 import { useState } from "react";
 import { api, parseTs } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { I, Icon } from "../../ui/components";
+import { PreviewHidden } from "../../ui/PreviewHidden";
 
 export type Observation = {
   id: number; round: number; point_code: string | null; text: string; created_by: string | null; created_at: string;
@@ -30,7 +31,7 @@ export function ReviewPanel({ surveyId, status, info, pointCodes, onChange }: {
   /** respuesta completa del levantamiento: el editor toma de ahi solo la revision y el estado (no pisa lo no guardado) */
   onChange: (s: Partial<ReviewInfo> & { status: string }) => void;
 }) {
-  const { toast, allows } = useSession();
+  const { toast, allows, viewAs } = useSession();
   const [rows, setRows] = useState<Row[] | null>(null);
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
@@ -68,8 +69,8 @@ export function ReviewPanel({ surveyId, status, info, pointCodes, onChange }: {
           {info.review_round > 1 ? ` · ronda ${info.review_round}` : ""}
         </span>
       </div>
-      {info.review_status === "devuelto" && open.length > 0 && <p className="review__hint">Corregí lo que pide el supervisor, marcá cada observación como resuelta y reenviá a oficina.</p>}
-      {info.review_status === "devuelto" && open.length === 0 && <p className="review__hint">Todas las observaciones están resueltas: ya podés reenviar a oficina.</p>}
+      {info.review_status === "devuelto" && open.length > 0 && <p className="review__hint">Corregí lo que pide el supervisor, marcá cada observación como resuelta y reenviá a revisión.</p>}
+      {info.review_status === "devuelto" && open.length === 0 && <p className="review__hint">Todas las observaciones están resueltas: ya podés reenviar a revisión.</p>}
 
       {open.length > 0 && <ul className="review__list">{open.map((o) => (
         <li key={o.id}>
@@ -96,6 +97,8 @@ export function ReviewPanel({ surveyId, status, info, pointCodes, onChange }: {
         </details>
       )}
 
+      {/* en vista previa como un rol que no revisa: hueco rotulado en vez de botones que "desaparecen" */}
+      {!canReview && waiting && viewAs && <div className="review__act"><PreviewHidden needs={["field.revisar"]} label="Aprobar revisión" /></div>}
       {canReview && waiting && (rows === null ? (
         <div className="review__act">
           <button className="btn btn--crimson btn--sm" disabled={busy} onClick={() => review("aprobar")}><Icon d={I.check} size={14} />Aprobar revisión</button>

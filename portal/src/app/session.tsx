@@ -8,6 +8,8 @@ type Session = {
   theme: string; toggleTheme: () => void; toast: (msg: string, tone?: "ok" | "bad", action?: ToastAction) => void;
   /** Rol con el que se dibuja la interfaz (el real, o el que el admin esta previsualizando). */
   role: string; perms: Perms; allows: (need?: string) => boolean;
+  /** Lo que la cuenta REALMENTE puede (sin vista previa): numero de Aprobaciones y huecos "oculto en vista previa". */
+  realAllows: (need?: string) => boolean;
   /** La seccion (ruta) esta en el menu explicito del rol (roles.ts); sin lista, si. No es seguridad: la API manda. */
   inMenu: (to: string) => boolean;
   viewAs: string | null; setViewAs: (role: string | null) => void; matrix: Record<string, Perms>;
@@ -75,11 +77,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const role = previewing || me?.role || "";
   const perms: Perms = useMemo(() => (previewing ? matrix[previewing] : me?.permissions) || {}, [previewing, matrix, me?.permissions]);
   const allows = useCallback((need?: string) => canAny(perms, need), [perms]);
+  const realAllows = useCallback((need?: string) => canAny(me?.permissions, need), [me?.permissions]);
   // en vista previa `role` ya es el previsualizado: el menu es el de ese rol
   const inMenu = useCallback((to: string) => inRoleMenu(role, to), [role]);
 
   return (
-    <Ctx.Provider value={{ me, loading, login, logout, reload, theme, toggleTheme: () => setTheme((t) => (t === "dark" ? "light" : "dark")), toast, role, perms, allows, inMenu, viewAs: previewing, setViewAs, matrix, reloadMatrix }}>
+    <Ctx.Provider value={{ me, loading, login, logout, reload, theme, toggleTheme: () => setTheme((t) => (t === "dark" ? "light" : "dark")), toast, role, perms, allows, realAllows, inMenu, viewAs: previewing, setViewAs, matrix, reloadMatrix }}>
       {children}
       {toastState && (
         <div className={`toast toast--${toastState.tone}`} role="status">

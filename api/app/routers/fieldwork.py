@@ -16,10 +16,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from ..core.config import settings as cfg
 from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..models import Customer, Opportunity, Product, Project, Survey, SurveyItem, SurveyObservation, SurveyPoint, User, WorkOrder, WorkOrderMaterial
 from ..schemas.sales import DocumentIn, LineInSchema
+from ..services import approvals as aprob
 from ..services import documents as docsvc
 from ..services import equipment_reco, pricing, supplier_catalog
 from ..services import inventory as invsvc
@@ -442,6 +444,8 @@ def technicians(p: Principal = Depends(require("field", "ver")), db: Session = D
 def surveys(
     status: str | None = None,
     review: str | None = Query(None, pattern="^(pendiente|aprobado|devuelto)$"),
+    # filtro de la bandeja de Aprobaciones: la MISMA definicion que cuenta la bandeja (services/approvals.py)
+    bandeja: str | None = Query(None, pattern="^(por_revisar|por_costear)$"),
     limit: int = Query(80, le=200),
     p: Principal = Depends(require("field", "ver")),
     db: Session = Depends(get_db),
@@ -454,6 +458,10 @@ def surveys(
         stmt = stmt.where(Survey.status == status)
     if review:
         stmt = stmt.where(Survey.review_status == review)
+    if bandeja == "por_revisar":
+        stmt = stmt.where(*aprob.survey_review_where(p))
+    elif bandeja == "por_costear":
+        stmt = stmt.where(*aprob.survey_costing_where(p))
     return [_survey_out(db, s, full=False) for s in db.scalars(stmt.order_by(Survey.id.desc()).limit(limit))]
 
 
@@ -795,7 +803,7 @@ def survey_apply_product(sid: int, data: ApplyProductIn, p: Principal = Depends(
 
 @router.post("/surveys/{sid}/send")
 def survey_send(sid: int, p: Principal = Depends(require("field", "crear")), db: Session = Depends(get_db)):
-    """El técnico envía el levantamiento a administración y ve a quién le llegó el aviso."""
+    """El técnico envía el levantamiento a revisión (supervisor o administrador) y ve a quién le llegó el aviso."""
     s = _survey(db, sid, p)
     if not s.points and not s.items:
         raise HTTPException(422, "Agregá al menos un punto o material antes de enviar")
@@ -820,6 +828,9 @@ def survey_send(sid: int, p: Principal = Depends(require("field", "crear")), db:
     labor = survey_labor(s)
     personal = " · ".join(f"{LABOR_TYPES[k][0]}: {v['people']} × {v['days']:g} día(s)" for k, v in labor.items() if v["people"])
     roles = reviewer_roles(p.tenant)
+    # Andres (13/10, 21:05) no sabia quien recibia lo enviado ni donde: el aviso lleva directo al levantamiento
+    # y a la bandeja de Aprobaciones. s.id es entero: no necesita escape.
+    base = cfg.public_base_url.rstrip("/")
     notify_roles(
         db,
         p.tenant,
@@ -828,7 +839,9 @@ def survey_send(sid: int, p: Principal = Depends(require("field", "crear")), db:
         f"<p><b>{html.escape(spec['label'])}</b> levantado por {html.escape(p.user.full_name)}.</p>"
         f"<p>Cliente: {html.escape(cliente)}<br>Sitio: {html.escape(s.site or '—')}<br>"
         f"{len(s.points)} {html.escape(spec['point_label'].lower())}(s) · {len(s.items)} materiales y equipos<br>{html.escape(personal or 'sin personal')}</p>"
-        f"<ul>{filas}</ul><p>{'El técnico resolvió las observaciones. ' if reenvio else ''}Abrí el levantamiento para revisarlo: aprobalo o devolvelo con observaciones antes del costeo.</p>",
+        f"<ul>{filas}</ul><p>{'El técnico resolvió las observaciones. ' if reenvio else ''}Abrí el levantamiento para revisarlo: aprobalo o devolvelo con observaciones antes del costeo.</p>"
+        f'<p><a href="{base}/levantamientos?id={s.id}">Abrir el levantamiento</a> · '
+        f'<a href="{base}/aprobaciones">Ver todo lo pendiente en Aprobaciones</a></p>',
         "survey",
         s.id,
     )
@@ -903,9 +916,11 @@ def _notify_returned(db: Session, p: Principal, s: Survey, obs: list[Observation
         if correo and correo not in destinos:
             destinos.append(correo)
     filas = "".join(f"<li>{html.escape(o.point_code or 'General')}: {html.escape(o.text)}</li>" for o in obs[:30])
+    base = cfg.public_base_url.rstrip("/")
     cuerpo = (
         f"<p>{html.escape(p.user.full_name)} revisó el levantamiento <b>{html.escape(s.number)}</b> y lo devolvió con "
-        f"{len(obs)} observación(es):</p><ul>{filas}</ul><p>Corregí, marcá cada observación como resuelta y reenvialo a oficina.</p>"
+        f"{len(obs)} observación(es):</p><ul>{filas}</ul><p>Corregí, marcá cada observación como resuelta y reenvialo a revisión.</p>"
+        f'<p><a href="{base}/levantamientos?id={s.id}">Abrir el levantamiento</a></p>'
     )
     for correo in destinos:
         queue_email(db, p.tenant, correo, f"Levantamiento {s.number} devuelto con observaciones", cuerpo, "survey", s.id)

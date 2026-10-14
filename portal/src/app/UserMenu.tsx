@@ -6,7 +6,7 @@ import { useSession } from "./session";
 import { roleMeta } from "./roles";
 
 export default function UserMenu() {
-  const { me, role, viewAs, logout } = useSession();
+  const { me, role, viewAs, setViewAs, logout } = useSession();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -41,6 +41,7 @@ export default function UserMenu() {
             <span className="umenu__role" style={{ color: rm.tone }}><i style={{ background: rm.tone }} />{rm.label}{viewAs ? " · vista previa" : ""}</span>
           </div>
           <button role="menuitem" onClick={() => { setOpen(false); nav("/ajustes?tab=cuenta"); }}><Icon d={I.settings} size={16} />Mi cuenta</button>
+          {viewAs && <button role="menuitem" onClick={() => { setViewAs(null); setOpen(false); }}><Icon d={I.x} size={16} />Salir de la vista previa</button>}
           <button role="menuitem" className="umenu__out" onClick={exit} disabled={busy}><Icon d={I.logout} size={16} />{busy ? "Cerrando…" : "Cerrar sesión"}</button>
         </div>
       )}

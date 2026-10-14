@@ -71,12 +71,12 @@ class Survey(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     days: Mapped[float] = mapped_column(Numeric(6, 2), default=1)  # dias del personal tecnico
     visit_tech_ids: Mapped[list | None] = mapped_column(JSON, default=list)  # usuarios que hicieron la visita
     labor: Mapped[dict | None] = mapped_column(JSON, default=dict)  # {tecnico|civil|contratado: {people, days}}
-    sent_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))  # quien lo envio a oficina
+    sent_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))  # quien lo envio a revisión
     notes: Mapped[str | None] = mapped_column(Text)
     photos: Mapped[list] = mapped_column(JSON, default=list)
     quote_id: Mapped[int | None] = mapped_column(ForeignKey("quote.id"))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # revision del supervisor entre "enviado a oficina" y el costeo: None (sin enviar) | pendiente | aprobado | devuelto
+    # revision del supervisor entre "enviado a revisión" y el costeo: None (sin enviar) | pendiente | aprobado | devuelto
     review_status: Mapped[str | None] = mapped_column(String(12), index=True)
     reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("user.id", name="fk_survey_reviewed_by"))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
