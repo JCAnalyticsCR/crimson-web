@@ -84,6 +84,11 @@ export default function Inventario() {
   const sinSim = useMemo(() => calcular(pedidos, false), [pedidos]);
   const { filas, reservas } = useMemo(() => calcular(pedidos, sim), [pedidos, sim]);
   const libreGrabador = sinSim.filas.find((f) => f.id === 177)?.libre ?? 0;
+  // si el grabador quedo sin unidad libre por un pedido de prueba de la visita, la pista lo dice (restablecer
+  // los ejemplos no lo devuelve: hay que cancelar ese pedido en Pedidos)
+  const demoGrabador = libreGrabador === 0
+    ? sinSim.reservas.find((h) => h.id === 177 && pedidos.some((o) => o.demo && o.numero === h.pedido))?.pedido
+    : undefined;
   const totalReservado = filas.reduce((a, f) => a + f.reservado, 0);
 
   const visibles = filas.filter((f) => {
@@ -199,7 +204,9 @@ export default function Inventario() {
                 </table>
               </Region>
             )}
-            {libreGrabador !== 1 && !sim && <p id="ges-sim-pista" className="ges-sm muted ges-pad">La simulación necesita que quede 1 unidad libre del grabador: restablecé los pedidos de ejemplo en Pedidos.</p>}
+            {libreGrabador !== 1 && !sim && <p id="ges-sim-pista" className="ges-sm muted ges-pad">{demoGrabador
+              ? `Tu pedido de prueba ${demoGrabador} apartó la última unidad libre del grabador: es la reserva funcionando. Para ver la simulación, cancelá ese pedido en Pedidos.`
+              : "La simulación necesita que quede 1 unidad libre del grabador: restablecé los pedidos de ejemplo en Pedidos."}</p>}
             <p className="ges-sm muted ges-pad">Se muestran {INVENTARIO.length} de {RESUMEN_INV.publicados} productos publicados (datos de ejemplo). Precio web sin IVA.</p>
           </div>
 

@@ -1,1 +1,1 @@
-export * from "./_local/comun";
+export * from "../_comun";
