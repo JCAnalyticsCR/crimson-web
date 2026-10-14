@@ -1,0 +1,70 @@
+/* Recomendar equipos: tarjetas de candidatos por linea. Primero el celular (390 px, una columna, botones de
+   44 px para usar con guantes); en escritorio las opciones de una linea quedan lado a lado. */
+
+.reco-intro { margin: 0; font-size: 13px; color: var(--text-2); line-height: 1.45; }
+.reco-group { display: flex; flex-direction: column; gap: 12px; }
+.reco-group__title { font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--text-3); margin-top: 4px; }
+
+.reco-line { border: 1px solid var(--hair-2); border-radius: 14px; padding: 12px; background: var(--surface-2); display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.reco-line__head { display: flex; flex-direction: column; gap: 6px; }
+.reco-line__title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.reco-line__title b { font-size: 15px; }
+.reco-line__need { font-family: var(--mono); font-size: 12px; color: var(--text-3); }
+.reco-needs { display: flex; flex-wrap: wrap; gap: 4px; }
+.reco-line__current, .reco-line__hint, .reco-line__note { margin: 0; font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.reco-line__current { color: var(--ok); }
+.reco-line__current svg { vertical-align: -2px; margin-right: 4px; }
+.reco-line__hint { color: var(--text-2); }
+.reco-line__note { color: var(--warn); }
+.reco-line__note.is-empty { color: var(--text-3); }
+
+.reco-chip { display: inline-flex; align-items: center; border: 1px solid var(--hair-2); border-radius: 999px; padding: 2px 8px; font-size: 11.5px; line-height: 1.5; color: var(--text-2); background: var(--surface); }
+.reco-chip.is-ok { border-color: color-mix(in srgb, var(--ok) 40%, transparent); color: var(--ok); background: var(--ok-soft); }
+.reco-chip.is-bad { border-color: color-mix(in srgb, var(--bad) 40%, transparent); color: var(--bad); background: var(--bad-soft); }
+.reco-chip.is-warn { border-color: color-mix(in srgb, var(--warn) 40%, transparent); color: var(--warn); background: var(--warn-soft); }
+.reco-chip.is-unk { border-style: dashed; color: var(--text-3); }
+
+/* celular: una columna */
+.reco-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.reco-card { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 12px; border-radius: 12px; border: 1px solid var(--hair-2); background: var(--surface); }
+.reco-card.is-rec { border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok) inset; }
+.reco-card.is-sel { border-color: var(--info, #3c82f0); }
+.reco-card.is-off { opacity: .92; border-style: dashed; }
+.reco-card__top { display: flex; gap: 10px; align-items: flex-start; }
+.reco-card__img { flex: none; width: 56px; height: 56px; border-radius: 10px; background: var(--bg-2); display: grid; place-items: center; color: var(--text-3); overflow: hidden; }
+.reco-card__img img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+.reco-card__badges { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.reco-card__badges .badge { white-space: normal; }
+.reco-card__name { font-size: 14px; line-height: 1.3; overflow-wrap: anywhere; }
+.reco-card__meta { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); overflow-wrap: anywhere; }
+.reco-card__chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.reco-card__money { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--text-2); }
+.reco-card__money b { color: var(--text); font-family: var(--mono); }
+.reco-card__score { font-size: 12px; color: var(--text-2); }
+.reco-card__score summary { cursor: pointer; padding: 4px 0; }
+.reco-card__score p { margin: 2px 0 6px; overflow-wrap: anywhere; }
+.reco-card__score ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.reco-card__score li { display: flex; justify-content: space-between; gap: 8px; font-family: var(--mono); font-size: 11px; }
+.reco-card__score li.is-bad { color: var(--bad); }
+.reco-card__score li.is-unk { color: var(--text-3); }
+.reco-card__use { display: flex; flex-direction: column; gap: 6px; margin-top: auto; padding-top: 4px; }
+.reco-card__qty { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); }
+.reco-card__qty .input { width: 92px; height: 44px; text-align: right; }
+.reco-card__use .btn { width: 100%; min-height: 44px; font-size: 14.5px; }
+
+/* escritorio: las opciones de una linea lado a lado */
+@media (min-width: 720px) {
+  .reco-line { padding: 14px 16px; }
+  .reco-line__head { flex-direction: row; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .reco-needs { justify-content: flex-end; }
+  .reco-cards { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+  .reco-card__qty .input { height: 36px; }
+  .reco-card__use .btn { min-height: 38px; }
+}
+
+/* resumen dentro de la tabla de sugerencias */
+.reco-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 6px; font-size: 12px; color: var(--text-2); font-weight: 400; }
+.reco-sum b { font-weight: 600; color: var(--text); }
+.reco-sum__cur { color: var(--ok); }
+.reco-sum__btn { border: 1px solid var(--hair-2); background: var(--surface); border-radius: 999px; padding: 4px 10px; min-height: 30px; font: inherit; font-weight: 600; color: var(--crimson); cursor: pointer; }
+.reco-sum__btn:hover { border-color: var(--crimson); }
