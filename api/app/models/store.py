@@ -6,7 +6,7 @@ from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
-from .base import TenantMixin, TimestampMixin
+from .base import ArchiveMixin, TenantMixin, TimestampMixin
 
 
 class StorePage(TenantMixin, TimestampMixin, Base):
@@ -24,7 +24,7 @@ class StorePage(TenantMixin, TimestampMixin, Base):
     position: Mapped[int] = mapped_column(Integer, default=0)
 
 
-class Coupon(TenantMixin, Base):
+class Coupon(ArchiveMixin, TenantMixin, Base):
     __tablename__ = "coupon"
     __table_args__ = (UniqueConstraint("tenant_id", "code", name="uq_coupon_code"),)
 

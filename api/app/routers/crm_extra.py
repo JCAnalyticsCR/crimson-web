@@ -251,7 +251,7 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
                 "project_id": a.project_id,
             }
             for a in db.scalars(
-                select(CustomerAsset).where(CustomerAsset.tenant_id == tid, CustomerAsset.customer_id == cid).order_by(CustomerAsset.id.desc()).limit(60)
+                select(CustomerAsset).where(CustomerAsset.tenant_id == tid, CustomerAsset.customer_id == cid, not_archived(CustomerAsset)).order_by(CustomerAsset.id.desc()).limit(60)
             )
         ]
         if p.can("assets", "ver")
@@ -278,7 +278,7 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
                 "created_at": t.created_at,
             }
             for t in db.scalars(
-                select(SupportTicket).where(SupportTicket.tenant_id == tid, SupportTicket.customer_id == cid).order_by(SupportTicket.id.desc()).limit(20)
+                select(SupportTicket).where(SupportTicket.tenant_id == tid, SupportTicket.customer_id == cid, not_archived(SupportTicket)).order_by(SupportTicket.id.desc()).limit(20)
             )
         ]
         if p.can("support_desk", "ver")

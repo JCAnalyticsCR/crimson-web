@@ -124,7 +124,7 @@ function App() {
         <Route path="/planillas" element={g("payroll.ver", <Payroll />)} />
         <Route path="/conciliacion" element={g("accounting.ver", <Banking />)} />
         <Route path="/importar" element={g("settings.configurar", <Importer />)} />
-        <Route path="/archivo" element={g("field.editar|projects.editar|crm_pipeline.editar", <Archive />)} />
+        <Route path="/archivo" element={g("field.editar|projects.editar|crm_pipeline.editar|crm.editar|catalog.editar|support_desk.editar|assets.editar|purchases.crear", <Archive />)} />
         <Route path="/oportunidades" element={g("crm_pipeline.ver", <Opportunities />)} />
         <Route path="/levantamientos" element={g("field.ver", <Surveys />)} />
         <Route path="/ordenes-trabajo" element={g("field.ver", <WorkOrders />)} />

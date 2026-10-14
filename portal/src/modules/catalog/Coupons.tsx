@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
+import { TrashButton } from "../../ui/TrashButton";
 
 type Coupon = { id: number; code: string; kind: string; value: string; min_total: string; valid_from: string | null; valid_to: string | null; max_uses: number | null; uses: number; active: boolean };
 const blank = { code: "", kind: "percent", value: "10", min_total: "0", valid_from: "", valid_to: "", max_uses: "", active: true };
@@ -40,7 +41,7 @@ export default function Coupons() {
                 <td className="muted">{c.valid_from || c.valid_to ? `${fmtDate(c.valid_from)} → ${fmtDate(c.valid_to)}` : "Sin vencimiento"}</td>
                 <td className="num mono">{c.uses}{c.max_uses ? ` / ${c.max_uses}` : ""}</td>
                 <td><Badge status={c.active ? "confirmado" : "anulada"} /></td>
-                <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setEdit({ id: c.id, code: c.code, kind: c.kind, value: String(Number(c.value)), min_total: String(Number(c.min_total)), valid_from: c.valid_from || "", valid_to: c.valid_to || "", max_uses: c.max_uses ? String(c.max_uses) : "", active: c.active })}>Ver</button></td>
+                <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => setEdit({ id: c.id, code: c.code, kind: c.kind, value: String(Number(c.value)), min_total: String(Number(c.min_total)), valid_from: c.valid_from || "", valid_to: c.valid_to || "", max_uses: c.max_uses ? String(c.max_uses) : "", active: c.active })}>Ver</button><TrashButton kind="coupon" id={c.id} number={c.code} onDone={load} /></span></td>
               </tr>
             ))}</tbody>
           </table>

@@ -764,7 +764,7 @@ def _ceo_row(db: Session, p: Principal) -> dict:
     quotes_won = db.scalar(select(func.count()).select_from(Quote).where(Quote.tenant_id == tid, Quote.status == "convertida", Quote.updated_at >= m0))
     warranties = [
         a
-        for a in db.scalars(select(CustomerAsset).where(CustomerAsset.tenant_id == tid, CustomerAsset.warranty_until.is_not(None)))
+        for a in db.scalars(select(CustomerAsset).where(CustomerAsset.tenant_id == tid, CustomerAsset.warranty_until.is_not(None), live(CustomerAsset)))
         if a.warranty_until and 0 <= (a.warranty_until - today).days <= 45
     ]
     sop = None

@@ -6,6 +6,7 @@ import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { Lookup, searchCustomers } from "../../ui/Lookup";
 import { SlaTable, type Sla } from "./SlaTable";
+import { TrashButton } from "../../ui/TrashButton";
 
 type Contract = {
   id: number; number: string; name: string; kind: string; customer_id: number; customer: string | null; project: string | null;
@@ -80,9 +81,10 @@ export default function Contracts() {
                 <td className="muted">{fmtDate(c.last_done)}</td>
                 <td>{cuando(c)}</td>
                 {verCostos && <td className="num money">{fmtMoney(c.amount, c.currency)}</td>}
-                <td className="num" style={{ whiteSpace: "nowrap" }}>
+                <td className="num row-actions" style={{ whiteSpace: "nowrap" }}>
                   {allows("support_desk.crear") && c.active && <button className="btn btn--soft btn--sm" onClick={() => hacerAhora(c)} title="Abre el ticket y reprograma la próxima">Programar</button>}
                   {allows("support_desk.editar") && <button className="btn btn--ghost btn--sm" onClick={() => setForm({ id: c.id, customer_id: String(c.customer_id), customer_name: c.customer || "", name: c.name, kind: c.kind, every_months: c.every_months, next_date: c.next_date || "", start_date: c.start_date || "", end_date: c.end_date || "", amount: String(c.amount), scope: c.scope || "", active: c.active, notes: c.notes || "", sla: c.sla })}>Editar</button>}
+                  <TrashButton kind="contract" id={c.id} number={c.number} onDone={load} />
                 </td>
               </tr>
             ))}</tbody>

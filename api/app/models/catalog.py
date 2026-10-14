@@ -4,7 +4,7 @@ from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, Numeric, St
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
-from .base import TenantMixin, TimestampMixin
+from .base import ArchiveMixin, TenantMixin, TimestampMixin
 
 
 class Tax(TenantMixin, Base):
@@ -30,7 +30,7 @@ class Category(TenantMixin, Base):
     show_on_web: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
-class Supplier(TenantMixin, Base):
+class Supplier(ArchiveMixin, TenantMixin, Base):
     __tablename__ = "supplier"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -40,7 +40,7 @@ class Supplier(TenantMixin, Base):
     phone: Mapped[str | None] = mapped_column(String(40))
 
 
-class Product(TenantMixin, TimestampMixin, Base):
+class Product(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "product"
     __table_args__ = (UniqueConstraint("tenant_id", "code", name="uq_product_code"),)
 

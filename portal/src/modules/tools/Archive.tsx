@@ -5,20 +5,15 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, parseTs } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Loading } from "../../ui/components";
+import { TRASH, type TrashKind } from "../../ui/trash";
 
 type Row = {
-  kind: "survey" | "project" | "opportunity" | "work_order"; kind_label: string; id: number; number: string; title: string; status: string;
+  kind: TrashKind; kind_label: string; id: number; number: string; title: string; status: string;
   archived_at: string | null; archived_by: string | null; trashed_at: string | null; trashed_by: string | null; purge_at: string | null; days_left: number | null;
 };
 type Resp = { purge_days: number; rows: Row[]; is_admin: boolean };
 
-const KINDS: [string, string][] = [["", "Todo"], ["survey", "Levantamientos"], ["project", "Proyectos"], ["opportunity", "Oportunidades"], ["work_order", "Órdenes de trabajo"]];
-const LINK: Record<Row["kind"], (id: number) => string> = {
-  survey: (id) => `/levantamientos?id=${id}`,
-  project: (id) => `/proyectos/${id}`,
-  opportunity: (id) => `/oportunidades?id=${id}`,
-  work_order: (id) => `/ordenes-trabajo?id=${id}`,
-};
+const KINDS: [string, string][] = [["", "Todo"], ...(Object.entries(TRASH) as [TrashKind, { label: string }][]).map(([k, c]): [string, string] => [k, c.label])];
 const when = (s: string | null) => (s ? parseTs(s).toLocaleDateString("es-CR", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 
 export default function Archive() {
@@ -56,7 +51,7 @@ export default function Archive() {
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <div className="tabs">
           <button className={state === "archivado" ? "is-active" : ""} onClick={() => set("tab", "")}>Archivados</button>
-          <button className={state === "papelera" ? "is-active" : ""} onClick={() => set("tab", "papelera")}>Próximos a borrar</button>
+          <button className={state === "papelera" ? "is-active" : ""} onClick={() => set("tab", "papelera")}>Papelera · próximos a borrar</button>
         </div>
         <select className="select" style={{ width: "auto" }} value={kind} onChange={(e) => set("tipo", e.target.value)} aria-label="Tipo">
           {KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
@@ -69,14 +64,14 @@ export default function Archive() {
       )}
       <Card flush>
         {!data ? <Loading /> : rows.length === 0 ? (
-          <Empty title={state === "papelera" ? "La papelera está vacía" : "No hay nada archivado"} hint="Desde el detalle de un levantamiento, proyecto, oportunidad u orden de trabajo: Archivar o Mover a papelera." />
+          <Empty title={state === "papelera" ? "La papelera está vacía" : "No hay nada archivado"} hint="Con el basurero de cada lista (levantamientos, oportunidades, clientes, productos, tickets...) o desde el detalle: Archivar o Enviar a la papelera." />
         ) : (
           <table className="table">
             <thead><tr><th>Tipo</th><th>Número</th><th>Descripción</th><th>{state === "papelera" ? "A la papelera" : "Archivado"}</th>{state === "papelera" && <th className="num">Se borra en</th>}<th /></tr></thead>
             <tbody>{rows.map((r) => (
               <tr key={`${r.kind}-${r.id}`}>
                 <td className="muted">{r.kind_label}</td>
-                <td className="mono"><Link to={LINK[r.kind](r.id)}>{r.number}</Link></td>
+                <td className="mono">{TRASH[r.kind] ? <Link to={TRASH[r.kind].link(r.id)}>{r.number}</Link> : r.number}</td>
                 <td style={{ fontWeight: 600 }}>{r.title || "—"} <span className="meta">· {r.status}</span></td>
                 <td className="muted" style={{ fontSize: 13 }}>
                   {state === "papelera" ? `${when(r.trashed_at)}${r.trashed_by ? ` · ${r.trashed_by}` : ""}` : `${when(r.archived_at)}${r.archived_by ? ` · ${r.archived_by}` : ""}`}

@@ -1,0 +1,15 @@
+/* Estado del autoguardado: una linea a todo el ancho del pie del modal, encima de los botones */
+.autosave { flex: 1 0 100%; order: -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 20px; font-size: 12.5px; color: var(--text-3); line-height: 1.35; }
+.autosave__dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); opacity: .6; }
+.autosave__text { flex: 1 1 220px; min-width: 0; }
+.autosave__acts { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.autosave--pending .autosave__dot, .autosave--saving .autosave__dot { background: var(--info, #3c82f0); opacity: 1; animation: autosave-pulse 1s ease-in-out infinite; }
+.autosave--saved .autosave__dot { background: var(--ok); opacity: 1; }
+.autosave--local, .autosave--warn { color: var(--warn); }
+.autosave--local .autosave__dot, .autosave--warn .autosave__dot { background: var(--warn); opacity: 1; }
+.autosave--error { color: var(--bad); }
+.autosave--error .autosave__dot { background: var(--bad); opacity: 1; }
+.autosave--recover { color: var(--text); padding: 8px 10px; border-radius: 10px; border: 1px solid var(--warn); background: var(--warn-soft, rgba(230,160,40,.12)); }
+.autosave--recover .autosave__dot { background: var(--warn); opacity: 1; }
+@keyframes autosave-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .autosave--pending .autosave__dot, .autosave--saving .autosave__dot { animation: none; } }

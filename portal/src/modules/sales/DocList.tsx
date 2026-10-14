@@ -3,6 +3,8 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney, type DocListItem } from "../../lib/api";
 import { Badge, Card, Empty, I, Icon, Loading } from "../../ui/components";
 import { useSession } from "../../app/session";
+import { TrashLocked } from "../../ui/TrashButton";
+import { LOCKED } from "../../ui/trash";
 
 /* Filtros que llegan desde "Acciones pendientes" del inicio (?pendiente=<clave>): misma definicion que el conteo. */
 const PENDIENTES: Record<string, string> = {
@@ -82,7 +84,7 @@ export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {
                 <td className="num money">{fmtMoney(d.total, d.currency)}</td>
                 {!isQ && <td className="num money">{fmtMoney(d.balance, d.currency)}</td>}
                 <td><span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}><Badge status={d.status} />{isQ && d.acceptance_status && d.acceptance_status !== "pendiente" && <Badge status={d.acceptance_status} />}</span></td>
-                <td className="num"><Link className="btn btn--ghost btn--sm" to={`${base}/${d.id}`}>Ver</Link></td>
+                <td className="num row-actions"><span className="row-actions__in"><Link className="btn btn--ghost btn--sm" to={`${base}/${d.id}`}>Ver</Link><TrashLocked reason={isQ ? LOCKED.quote : LOCKED.invoice} /></span></td>
               </tr>
             ))}</tbody>
           </table>

@@ -4,6 +4,8 @@ import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, Loading, Modal } from "../../ui/components";
 import { Dropzone } from "../../ui/MediaPicker";
+import { TrashLocked } from "../../ui/TrashButton";
+import { LOCKED } from "../../ui/trash";
 import { type Load, type Lookups, fmtNum, n, today } from "./types";
 
 type Form = {
@@ -104,7 +106,7 @@ export default function LoadsView({ lookups, refresh, onEdit }: { lookups: Looku
                 <td className="num mono veh-nowrap">{x.odometer != null ? fmtNum(x.odometer) : "—"}<div className="meta">{x.full_tank ? "lleno" : "parcial"}</div></td>
                 <td className="veh-why">{x.usage || "—"}{x.project && <div>{x.project}</div>}{x.receipt_url && <div><a href={x.receipt_url} target="_blank" rel="noreferrer">comprobante</a></div>}{x.source === "importacion" && <div className="meta">importada</div>}</td>
                 <td className="veh-why">{x.excluded_effective ? <><span className="veh-tag veh-tag--off">Excluida</span><div>{x.exclusion_effective}</div></> : <span className="veh-tag veh-tag--ok">incluida</span>}</td>
-                <td className="num">{allows("vehicles.editar") && <button className="btn btn--ghost btn--sm" onClick={() => onEdit(formFrom(x))}>Editar</button>}</td>
+                <td className="num row-actions"><span className="row-actions__in">{allows("vehicles.editar") && <button className="btn btn--ghost btn--sm" onClick={() => onEdit(formFrom(x))}>Editar</button>}<TrashLocked reason={LOCKED.fuel} /></span></td>
               </tr>
             ))}</tbody>
           </table></div>

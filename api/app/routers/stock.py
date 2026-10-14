@@ -434,7 +434,9 @@ def _link_asset(db: Session, p: Principal, u: StockUnit, data: UnitPatch) -> Non
     if not customer_id:
         raise HTTPException(422, "El proyecto no tiene cliente; no se puede registrar el equipo instalado")
     a = db.scalar(
-        select(CustomerAsset).where(CustomerAsset.tenant_id == p.tenant.id, CustomerAsset.customer_id == customer_id, CustomerAsset.serial == u.serial)
+        select(CustomerAsset).where(
+            CustomerAsset.tenant_id == p.tenant.id, CustomerAsset.customer_id == customer_id, CustomerAsset.serial == u.serial, CustomerAsset.trashed_at.is_(None)
+        )
     )
     if not a:
         prod = db.get(Product, u.product_id)

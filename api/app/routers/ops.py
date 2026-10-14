@@ -425,7 +425,8 @@ class SupplierIn(BaseModel):
 def suppliers(p: Principal = Depends(require("catalog", "ver")), db: Session = Depends(get_db)):
     return [
         {"id": s.id, "name": s.name, "tax_id": s.tax_id, "email": s.email, "phone": s.phone}
-        for s in db.scalars(select(Supplier).where(Supplier.tenant_id == p.tenant.id).order_by(Supplier.name))
+        # lo archivado o en la papelera no se ofrece (se restaura desde Archivo)
+        for s in db.scalars(select(Supplier).where(Supplier.tenant_id == p.tenant.id, Supplier.archived_at.is_(None), Supplier.trashed_at.is_(None)).order_by(Supplier.name))
     ]
 
 

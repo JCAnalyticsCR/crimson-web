@@ -185,7 +185,7 @@ def _out(db: Session, pr: Project, p: Principal, full: bool = True) -> dict:
         ]
         out["assets"] = [
             {"id": a.id, "name": a.name, "serial": a.serial, "location": a.location, "warranty_until": a.warranty_until}
-            for a in db.scalars(select(CustomerAsset).where(CustomerAsset.project_id == pr.id))
+            for a in db.scalars(select(CustomerAsset).where(CustomerAsset.project_id == pr.id, live(CustomerAsset)))
         ]
     return out
 
@@ -485,7 +485,7 @@ def _req_out(db: Session, r: PurchaseRequest) -> dict:
 
 @router.get("/purchase-requests")
 def purchase_requests(status: str | None = None, p: Principal = Depends(require("purchases", "ver")), db: Session = Depends(get_db)):
-    stmt = select(PurchaseRequest).where(PurchaseRequest.tenant_id == p.tenant.id)
+    stmt = select(PurchaseRequest).where(PurchaseRequest.tenant_id == p.tenant.id, live(PurchaseRequest))
     if status:
         stmt = stmt.where(PurchaseRequest.status == status)
     return [_req_out(db, r) for r in db.scalars(stmt.order_by(PurchaseRequest.id.desc()).limit(100))]
@@ -607,7 +607,7 @@ def assets(
     p: Principal = Depends(require("assets", "ver")),
     db: Session = Depends(get_db),
 ):
-    stmt = select(CustomerAsset).where(CustomerAsset.tenant_id == p.tenant.id)
+    stmt = select(CustomerAsset).where(CustomerAsset.tenant_id == p.tenant.id, live(CustomerAsset))
     if customer_id:
         stmt = stmt.where(CustomerAsset.customer_id == customer_id)
     if q:
@@ -663,7 +663,7 @@ def delivery_report(pid: int, p: Principal = Depends(require("projects", "ver"))
         {f"<ul class=tasks>{tasks}</ul>" if tasks else ""}
         {f"<table class=t><tr><th>Material utilizado</th><th class=n>Cantidad</th></tr>{mats}</table>" if mats else ""}
         {f"<p class=obs>{esc(o.notes)}</p>" if o.notes else ""}</section>"""
-    assets = db.scalars(select(CustomerAsset).where(CustomerAsset.project_id == pr.id)).all()
+    assets = db.scalars(select(CustomerAsset).where(CustomerAsset.project_id == pr.id, live(CustomerAsset))).all()
     assets_html = "".join(
         f"<tr><td>{esc(a.name)}</td><td class=mono>{esc(a.serial or '—')}</td><td>{esc(a.location or '—')}</td><td>{a.warranty_until or '—'}</td></tr>"
         for a in assets

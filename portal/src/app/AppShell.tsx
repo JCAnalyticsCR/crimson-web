@@ -49,8 +49,8 @@ export const NAV: { group: string; items: NavItem[] }[] = [
     { to: "/vehiculos", label: "Vehículos", icon: "M3 13l2-5a2 2 0 0 1 1.9-1.4h10.2A2 2 0 0 1 19 8l2 5v4a1 1 0 0 1-1 1h-1|M3 13v4a1 1 0 0 0 1 1h1|M3 13h18|M9 18h6|M7 18a2 2 0 1 0 0 .1|M17 18a2 2 0 1 0 0 .1", need: "vehicles.ver" },
     { to: "/reportes", label: "Reportes", icon: I.reports, need: "reports.ver" },
     { to: "/importar", label: "Importar datos", icon: I.upload, need: "settings.configurar" },
-    // archivados y proximos a borrar: lo ve quien puede archivar algo (editar en campo, proyectos u oportunidades)
-    { to: "/archivo", label: "Archivo", icon: I.box, need: "field.editar|projects.editar|crm_pipeline.editar" },
+    // archivados y papelera: lo ve quien puede archivar o mandar algo a la papelera (misma lista que la API)
+    { to: "/archivo", label: "Archivo", icon: I.box, need: "field.editar|projects.editar|crm_pipeline.editar|crm.editar|catalog.editar|support_desk.editar|assets.editar|purchases.crear" },
     { to: "/ajustes", label: "Ajustes", icon: I.settings },
   ]},
 ];
