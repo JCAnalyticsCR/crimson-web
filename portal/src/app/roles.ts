@@ -27,7 +27,7 @@ export const ROLES: Record<string, RoleMeta> = {
   admin: {
     label: "Administrador", tone: "#e2233a", glyph: "A",
     summary: "Control total de la empresa. Es el único que ve costos, márgenes y utilidad (salvo que habilite otro rol en Ajustes).",
-    can: ["Ver todos los números de la empresa, incluido el costo", "Costear levantamientos y aprobar cotizaciones", "Configurar facturación, usuarios y pasarelas", "Planillas, conciliación y reportes fiscales"],
+    can: ["Ver todos los números de la empresa, incluido el costo", "Aprobaciones: todo lo que espera tu visto bueno en un solo lugar", "Costear levantamientos y aprobar cotizaciones", "Configurar facturación, usuarios y pasarelas", "Planillas, conciliación y reportes fiscales"],
     cannot: [],
   },
   ventas: {
@@ -40,9 +40,9 @@ export const ROLES: Record<string, RoleMeta> = {
   contabilidad: {
     label: "Contador", tone: "#6b46c1", glyph: "K",
     summary: "Todo el dinero de la empresa: facturas, cobros, gastos, recepción de XML, conciliación, planillas y reportes.",
-    can: ["Facturas y cobros de toda la empresa", "Gastos, recepción y conciliación", "Planillas, colillas y comisiones", "Los reportes de la empresa con Excel"],
+    can: ["Facturas y cobros de toda la empresa", "Gastos, recepción y conciliación", "Planillas, colillas y comisiones", "Aprobaciones de planillas y comisiones", "Los reportes de la empresa con Excel"],
     cannot: ["Crear ventas o cobrar", "Ver costos de productos ni márgenes (salvo que el administrador lo habilite)", "Configurar la empresa o los usuarios"],
-    menu: ["/", "/facturas", "/pagos", "/recurrencias", "/clientes", "/productos", "/inventario", "/compras", "/comisiones", "/contabilidad", "/recepcion", "/conciliacion", "/planillas", "/vehiculos", "/reportes", "/archivo", "/ajustes"],
+    menu: ["/", "/aprobaciones", "/facturas", "/pagos", "/recurrencias", "/clientes", "/productos", "/inventario", "/compras", "/comisiones", "/contabilidad", "/recepcion", "/conciliacion", "/planillas", "/vehiculos", "/reportes", "/archivo", "/ajustes"],
   },
   tecnico: {
     label: "Técnico instalador", tone: "#b45309", glyph: "T",
@@ -68,7 +68,7 @@ export const ROLES: Record<string, RoleMeta> = {
   supervisor: {
     label: "Supervisor técnico", tone: "#0f766e", glyph: "S",
     summary: "Manda el campo: revisa levantamientos, asigna órdenes de trabajo, proyectos y materiales. El costeo es del administrador.",
-    can: ["Asignar y programar órdenes de trabajo", "Revisar y aprobar levantamientos antes del costeo", "Proyectos, activos del cliente y solicitudes de compra", "Toda la mesa de soporte y los mantenimientos", "Movimientos de inventario"],
+    can: ["Asignar y programar órdenes de trabajo", "Revisar y aprobar levantamientos antes del costeo", "Bandeja de Aprobaciones: levantamientos por revisar y reservas de material", "Proyectos, activos del cliente y solicitudes de compra", "Toda la mesa de soporte y los mantenimientos", "Movimientos de inventario"],
     cannot: ["Ver costos o márgenes (salvo que el administrador lo habilite)", "Facturar o cobrar", "Ver planillas, gastos ni conciliación", "Configurar la empresa"],
     menu: ["/", "/oportunidades", "/proyectos", "/ordenes-trabajo", "/levantamientos", "/aprobaciones", "/tickets", "/mantenimientos", "/activos", "/clientes", "/accesos-clientes", "/productos", "/inventario", "/compras", "/vehiculos", "/reportes", "/archivo", "/ajustes"],
   },

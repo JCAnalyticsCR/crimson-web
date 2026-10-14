@@ -156,7 +156,7 @@ def test_aislamiento_entre_clientes_y_endpoints_internos(client, auth, db_sessio
     assert client.post("/cliente/tickets", json={"kind": "falla", "subject": "x", "description": "intento de cambiar cliente", "customer_id": b.id}, headers=ha).status_code == 422
 
     # --- nada interno: 403 en endpoints internos, tambien en los que solo pedian sesion ---
-    for path in ("/tickets", f"/tickets/{tb['id']}", "/customers", "/quotes", "/invoices", "/settings/users", "/access-requests", "/media", "/fx", "/tenant", "/auth/roles", f"/customers/{a.id}/portal"):
+    for path in ("/tickets", f"/tickets/{tb['id']}", "/customers", "/quotes", "/invoices", "/settings/users", "/access-requests", "/media", "/fx", "/tenant", "/auth/roles", f"/customers/{a.id}/portal", "/approvals", "/approvals/summary"):
         for h in (ha, hu):
             r = client.get(path, headers=h)
             assert r.status_code == 403, (path, r.status_code)

@@ -51,6 +51,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "support_desk": ["ver", "ver_todo"],
         "reports": ["ver", "exportar"],
         "vehicles": ["ver", "crear", "editar", "exportar"],
+        "approvals": ["ver"],  # aprueba planillas y comisiones
     },
     # Tecnico instalador de Crimson: solo lo asignado, desde el celular. Nunca ve precios ni costos (22:07-22:23).
     "tecnico": {
@@ -108,6 +109,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         # ve las solicitudes de acceso que le llegan por correo; aprobar (dar acceso a datos) queda para el admin
         "portal_clientes": ["ver"],
         "vehicles": ["ver"],
+        "approvals": ["ver"],  # bandeja Aprobaciones: ve las secciones de lo que el ya puede aprobar
     },
     # Caja: cobra en mostrador y busca cualquier factura para registrar su pago. Reportes solo de caja.
     "caja": {

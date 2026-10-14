@@ -1,7 +1,7 @@
 /* Levantamientos tecnicos: lo que el tecnico llena en sitio desde el celular y lo que administracion cotiza despues.
    El formulario no esta escrito aqui: lo dibuja /field/specs, asi agregar un tipo de solucion es tocar solo la API. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError, fmtMoney, openFile, parseTs } from "../../lib/api";
 import { unitOptions } from "../../lib/units";
 import { useSession } from "../../app/session";
@@ -12,6 +12,7 @@ import { Lightbox, type Foto } from "../../ui/Lightbox";
 import { InviteTechButton } from "./InviteTech";
 import { ArchiveActions } from "../../ui/ArchiveActions";
 import { TrashButton } from "../../ui/TrashButton";
+import { PreviewHidden } from "../../ui/PreviewHidden";
 import { useSurveyAutosave } from "./useSurveyAutosave";
 import { LinkOpportunity, type OppRef } from "./LinkOpportunity";
 import { pickReview, ReviewPanel, reviewTone, type ReviewInfo } from "./SurveyReview";
@@ -68,7 +69,7 @@ const toRow = (x: Suggestion): SugRow => ({
 });
 
 const STATUS: Record<string, { label: string; tone: string }> = {
-  borrador: { label: "Borrador", tone: "warn" }, enviado: { label: "Enviado a oficina", tone: "info" },
+  borrador: { label: "Borrador", tone: "warn" }, enviado: { label: "Enviado a revisión", tone: "info" },
   cotizado: { label: "Cotizado", tone: "ok" }, cerrado: { label: "Cerrado", tone: "muted" },
 };
 const LABOR: [LaborKey, string][] = [["tecnico", "Personal técnico"], ["civil", "Personal de obra civil"], ["contratado", "Personal contratado"]];
@@ -99,6 +100,8 @@ const when = (s: string | null | undefined) => (s ? parseTs(s).toLocaleString("e
 const reviewText = (r?: Review) => (r ? (r.people.length ? r.people.join(", ") : r.roles.join(" / ")) : "");
 /* misma formula que services/pricing.sale_price: margen sobre la venta y redondeo hacia arriba a la centena */
 const priceFrom = (cost: number, margin: number) => (margin >= 100 ? 0 : Math.ceil(cost / (1 - margin / 100) / 100) * 100);
+/* ?bandeja= (lo abre Aprobaciones): la API filtra con la MISMA definicion que cuenta la bandeja */
+const BANDEJAS: Record<string, string> = { por_revisar: "por revisar", por_costear: "aprobados por costear" };
 
 export default function Surveys() {
   const { toast, allows } = useSession();
@@ -119,11 +122,16 @@ export default function Surveys() {
   const [calcTick, setCalcTick] = useState(0); // recalcula la tarjeta "Calculos del sistema" despues de guardar
   const commonSpec = useCommonSpec();
   const prefilled = useRef<string | null>(null); // no rearmar el borrador si el usuario ya empezó a escribir
+  // ?costear=1 (desde Aprobaciones): abre el costeo apenas carga ESE levantamiento (guarda su id, no un si/no:
+  // si la apertura falla, otro levantamiento que se abra despues no se costea solo)
+  const autoCost = useRef<number | null>(null);
+  const bandejaRaw = params.get("bandeja");
+  const bandeja = bandejaRaw === "por_revisar" || bandejaRaw === "por_costear" ? bandejaRaw : null;
 
   const verCostos = allows("catalog.costos");
   const spec = draft ? specs[draft.kind] : undefined;
 
-  const load = useCallback(() => api<Survey[]>("/surveys").then(setRows), []);
+  const load = useCallback(() => api<Survey[]>(`/surveys${bandeja ? `?bandeja=${bandeja}` : ""}`).then(setRows), [bandeja]);
   const loadTechs = useCallback(() => api<Tech[]>("/field/technicians").then(setTechs).catch(() => setTechs([])), []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -137,7 +145,9 @@ export default function Surveys() {
     const nuevo = params.get("nuevo");
     if (id && prefilled.current !== `s${id}`) {
       prefilled.current = `s${id}`;
-      open(Number(id));
+      autoCost.current = params.get("costear") === "1" ? Number(id) : null;
+      // p. ej. se mando a la papelera entre que cargo la bandeja y el clic
+      open(Number(id)).catch((e) => { autoCost.current = null; toast(e instanceof Error ? e.message : "No se pudo abrir el levantamiento", "bad"); });
     } else if (nuevo && prefilled.current !== `n${nuevo}`) {
       prefilled.current = `n${nuevo}`;
       // Viene de una oportunidad: el cliente, el sitio y la solución ya se escribieron una vez.
@@ -190,7 +200,16 @@ export default function Surveys() {
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
 
-  const close = () => { setDraft(null); setCosting(null); setCostEdits({}); if (params.get("id") || params.get("nuevo")) setParams({}); };
+  // borra solo lo que abre la ventana: ?bandeja= (filtro de la lista) se queda
+  const close = () => {
+    setDraft(null); setCosting(null); setCostEdits({});
+    if (["id", "nuevo", "costear"].some((k) => params.has(k))) {
+      const next = new URLSearchParams(params);
+      for (const k of ["id", "nuevo", "costear"]) next.delete(k);
+      setParams(next);
+    }
+  };
+  const clearBandeja = () => { const next = new URLSearchParams(params); next.delete("bandeja"); setParams(next); };
 
   const body = (d: Draft) => ({
     kind: d.kind, customer_id: d.customer_id ? Number(d.customer_id) : null, opportunity_id: d.opportunity_id ? Number(d.opportunity_id) : null,
@@ -393,6 +412,15 @@ export default function Surveys() {
   const mixed = !!draft && draft.points.some((p) => p.kind && p.kind !== draft.kind);
   const pointTitle = mixed ? "Puntos" : spec?.point_label || "Puntos";
   const puedeCotizar = verCostos && allows("sales.crear") && draft?.id && !draft.quote_id;
+  // ?costear=1: se usa una sola vez al cargar. Sin permiso (p. ej. en vista previa) no hace nada y queda el
+  // levantamiento abierto (salir despues de la vista previa no abre el costeo por sorpresa)
+  useEffect(() => {
+    if (autoCost.current === null || !draft?.id) return;
+    const want = autoCost.current;
+    autoCost.current = null;
+    if (draft.id === want && puedeCotizar) cost();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft?.id]);
 
   const field = (f: FieldSpec, i: number) => {
     const v = draft!.points[i].data[f.key];
@@ -499,11 +527,20 @@ export default function Surveys() {
         </div>
       </div>
 
-      {allows("field.revisar") && porRevisar > 0 && <div className="status-line" style={{ color: "var(--info, #3c82f0)" }}><i className="rec-dot" />{porRevisar} levantamiento{porRevisar !== 1 ? "s" : ""} esperando revisión del supervisor</div>}
-      {verCostos && pendientes > 0 && <div className="status-line" style={{ color: "var(--warn)" }}><i className="rec-dot" />{pendientes} levantamiento{pendientes !== 1 ? "s" : ""} con revisión aprobada, esperando costeo</div>}
+      {allows("field.revisar") && porRevisar > 0 && <Link to="?bandeja=por_revisar" className="status-line" style={{ color: "var(--info, #3c82f0)" }}><i className="rec-dot" />{porRevisar} levantamiento{porRevisar !== 1 ? "s" : ""} esperando revisión del supervisor</Link>}
+      {verCostos && pendientes > 0 && <Link to="?bandeja=por_costear" className="status-line" style={{ color: "var(--warn)" }}><i className="rec-dot" />{pendientes} levantamiento{pendientes !== 1 ? "s" : ""} con revisión aprobada, esperando costeo</Link>}
+      {bandeja && (
+        <div className="chips" role="status">
+          <span className="chip is-on">Mostrando: {BANDEJAS[bandeja]}</span>
+          <button type="button" className="chip" onClick={clearBandeja}>Ver todos ✕</button>
+        </div>
+      )}
 
       <Card flush>
-        {rows.length === 0 ? <Empty title="Todavía no hay levantamientos" hint="El técnico llena el levantamiento en sitio y administración lo convierte en cotización sin volver a escribir nada." /> : (
+        {rows.length === 0 ? (bandeja
+          // vacio del filtro (p. ej. se aprobo o cotizo el ultimo pendiente), no de la lista
+          ? <Empty title={`No hay levantamientos ${BANDEJAS[bandeja]}`} hint="Con este filtro no queda ninguno pendiente." action={<button type="button" className="btn btn--soft btn--sm" onClick={clearBandeja}>Ver todos</button>} />
+          : <Empty title="Todavía no hay levantamientos" hint="El técnico llena el levantamiento en sitio y administración lo convierte en cotización sin volver a escribir nada." />) : (
           <table className="table">
             <thead><tr><th>Número</th><th>Tipo</th><th>Cliente</th><th>Sitio</th><th className="num">Puntos</th><th>Técnico</th><th>Estado</th><th /></tr></thead>
             <tbody>{rows.map((s) => (
@@ -532,6 +569,7 @@ export default function Surveys() {
           foot={<>
             {auto.bar}
             {puedeCotizar && <button className="btn btn--soft" onClick={() => cost()}><Icon d={I.trend} />Costear</button>}
+            {draft.id && !draft.quote_id && <PreviewHidden needs={["catalog.costos", "sales.crear"]} label="Costear" />}
             {draft.id && <button className="btn btn--ghost" title="PDF para el cliente, sin precios ni costos" onClick={() => openFile(`/surveys/${draft.id}/report.pdf`).catch((e) => toast(e.message, "bad"))}><Icon d={I.reports} />Informe preliminar</button>}
             {draft.id && allows("sales.enviar") && <button className="btn btn--ghost" onClick={sendReport}>Enviar al cliente</button>}
             {draft.id && <span style={{ marginRight: "auto", display: "inline-flex", gap: 6 }}><ArchiveActions kind="survey" id={draft.id} number={draft.number} archivedAt={draft.archived_at} trashedAt={draft.trashed_at} onDone={() => { close(); load(); }} /></span>}
@@ -540,13 +578,13 @@ export default function Surveys() {
               <button className="btn btn--ghost" onClick={recommend} disabled={busy || !draft.points.length} title="Equipos reales del catálogo para lo levantado: cámaras, grabador, discos, switch…">Recomendar equipos</button>
               <button className="btn btn--ghost" onClick={suggest} disabled={busy} title={draft.points.length ? "Según el tipo de cada punto" : "Sin puntos: los materiales habituales del tipo de solución"}>Sugerir materiales</button>
               <button className="btn btn--ghost" onClick={() => save()} disabled={busy}>Guardar</button>
-              <button className="btn btn--crimson" onClick={send} disabled={busy || !draft.points.length}>{draft.status === "enviado" ? "Reenviar a oficina" : "Enviar a oficina"}</button>
+              <button className="btn btn--crimson" onClick={send} disabled={busy || !draft.points.length} title="Lo revisa el supervisor (o el administrador) en Aprobaciones antes del costeo">{draft.status === "enviado" ? "Reenviar a revisión" : "Enviar a revisión"}</button>
             </>}
           </>}
         >
           {draft.status === "enviado" && (
             <p style={{ background: "var(--info-soft, rgba(60,130,240,.1))", border: "1px solid var(--info, #3c82f0)", borderRadius: 10, padding: "10px 14px", fontSize: 13, margin: 0 }}>
-              <b>Enviado a oficina</b> · {sentLine(draft)}
+              <b>Enviado a revisión</b> · {sentLine(draft)}
             </p>
           )}
           {draft.id && draft.review && (draft.review.review_status || draft.review.observations.length > 0) && (
@@ -683,14 +721,14 @@ export default function Surveys() {
       )}
 
       {sent && (
-        <Modal title={`${sent.number} enviado a oficina`} onClose={() => setSent(null)} foot={<button className="btn btn--crimson" onClick={() => setSent(null)}>Entendido</button>}>
+        <Modal title={`${sent.number} enviado a revisión`} onClose={() => setSent(null)} foot={<button className="btn btn--crimson" onClick={() => setSent(null)}>Entendido</button>}>
           {sent.notified.length ? (
             <>
               <p style={{ margin: 0, fontSize: 14 }}>Le avisamos por correo a:</p>
               <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14 }}>{sent.notified.map((n) => <li key={n.id}><b>{n.name}</b> <span className="muted">· {n.role}</span></li>)}</ul>
             </>
-          ) : <p style={{ margin: 0, fontSize: 14, color: "var(--warn)" }}>No hay usuarios activos con rol {sent.review?.roles.join(" / ") || "revisor"} para avisar. Avisale a la oficina por otro medio.</p>}
-          <p className="muted" style={{ margin: 0, fontSize: 13 }}>Queda pendiente de revisión por {sent.review ? sent.review.roles.join(" / ") : "administración"}. Lo ves en la lista con el estado "Enviado a oficina".</p>
+          ) : <p style={{ margin: 0, fontSize: 14, color: "var(--warn)" }}>No hay usuarios activos con rol {sent.review?.roles.join(" / ") || "revisor"} para avisar. Avisale a quien revisa por otro medio.</p>}
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>Queda pendiente de revisión por {sent.review ? sent.review.roles.join(" / ") : "administración"}. Lo encuentran en Aprobaciones → Levantamientos por revisar; en esta lista aparece como «Enviado a revisión».</p>
         </Modal>
       )}
 

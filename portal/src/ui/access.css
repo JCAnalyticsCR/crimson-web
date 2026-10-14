@@ -91,8 +91,38 @@
 .welcome__no li { color: var(--text-3); }
 .welcome__no li svg { color: var(--text-3) !important; }
 .welcome__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.preview-bar { position: sticky; top: 0; z-index: 25; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 9px clamp(12px, 3vw, 28px); background: repeating-linear-gradient(-45deg, #15131a 0 14px, #1e1c24 14px 28px); color: #f4f1ee; font-size: 13px; }
-.preview-bar .btn { background: #e2233a; color: #fff; }
+/* ---------- Vista previa por rol (reunion 13/10, 08:47): banda ambar fija sobre TODO, ventanas incluidas.
+   Ambar y no rojo: el rojo es la marca y los errores; el ambar dice "modo especial" en claro y en oscuro.
+   Capas: topbar 20 < nav movil 40 < ventanas 50 < avisos/menu 60 < marco 69 < banda 70 < bienvenida 80. ---------- */
+:root { --preview-h: 0px; --preview: #ffb020; }
+html[data-preview] { --preview-h: 44px; }
+.preview-band { position: fixed; top: 0; left: 0; right: 0; z-index: 70; height: var(--preview-h); display: flex; align-items: center; gap: 10px; padding: 0 clamp(10px, 3vw, 24px); background: var(--preview); color: #15131a; font-size: 13.5px; box-shadow: 0 2px 0 rgba(21, 19, 26, .85); }
+.preview-band__txt { margin: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.preview-band__role { flex: none; width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: #15131a; color: #fff; font: 800 12px/1 var(--display); box-shadow: inset 0 0 0 2px var(--tone); }
+.preview-band__exit { flex: none; height: 30px; padding: 0 14px; border: 0; border-radius: 999px; background: #15131a; color: #fff; font: 700 13px var(--sans); cursor: pointer; }
+.preview-band__exit:hover { background: #2a2731; }
+.preview-band__exit:focus-visible { outline: 2px solid #15131a; outline-offset: 2px; }
+.preview-band__short { display: none; }
+/* marco ambar alrededor de toda la pantalla: se nota aunque haya una ventana abierta */
+html[data-preview] body::after { content: ""; position: fixed; inset: 0; border: 3px solid var(--preview); pointer-events: none; z-index: 69; }
+/* todo lo fijo o pegajoso arranca debajo de la banda */
+html[data-preview] .shell { padding-top: var(--preview-h); }
+html[data-preview] .nav { top: var(--preview-h); height: calc(100dvh - var(--preview-h)); }
+html[data-preview] .topbar { top: var(--preview-h); }
+html[data-preview] .modal-bg, html[data-preview] .nav-scrim { top: var(--preview-h); }
+html[data-preview] .modal { max-height: calc(90dvh - var(--preview-h)); }
+html[data-preview] .doc__side { top: calc(var(--top-h) + var(--preview-h) + 20px); }
+/* categorias de Proveedores: pegajosas solo en ancho (<=1100px son estaticas con su propio max-height) */
+@media (min-width: 1101px) { html[data-preview] .prv-cats { top: calc(var(--top-h) + var(--preview-h) + 12px); max-height: calc(100dvh - var(--top-h) - var(--preview-h) - 40px); } }
+html[data-preview] .viewas { border-color: var(--preview); box-shadow: 0 0 0 2px var(--preview); }
+.preview-hidden { display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 14px; border-radius: 999px; border: 1.5px dashed var(--preview); background: color-mix(in srgb, var(--preview) 12%, transparent); color: var(--text-2); font: 600 13px var(--sans); cursor: pointer; }
+/* celular: dos lineas (rol / "Datos de tu cuenta"): el title no se ve en pantallas tactiles */
+@media (max-width: 640px) {
+  .preview-band { font-size: 12px; gap: 8px; }
+  .preview-band__long { display: none; }
+  .preview-band__txt { line-height: 1.25; }
+  .preview-band__txt > b, .preview-band__short { display: block; overflow: hidden; text-overflow: ellipsis; }
+}
 .viewas { display: inline-flex; align-items: center; gap: 8px; padding: 0 6px 0 12px; height: 38px; border-radius: 999px; border: 1px solid var(--hair-2); background: var(--surface); }
 .viewas .meta { font-size: 9.5px; }
 .viewas select { border: 0; background: transparent; color: var(--text); font: inherit; font-size: 13px; font-weight: 600; height: 34px; cursor: pointer; outline: none; }

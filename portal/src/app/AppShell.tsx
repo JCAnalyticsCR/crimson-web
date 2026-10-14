@@ -8,6 +8,8 @@ import RoleWelcome from "./RoleWelcome";
 import UserMenu from "./UserMenu";
 import { NuevaVersion } from "./NuevaVersion";
 import { NAV } from "./nav";
+import PreviewBand from "./PreviewBand";
+import { useApprovalCount } from "../modules/approvals/useApprovalCount";
 
 /* El menu vive en nav.ts (lo extienden otros frentes sin tocar este archivo). Se reexporta por compatibilidad. */
 export { NAV } from "./nav";
@@ -18,6 +20,7 @@ export default function AppShell() {
   const [open, setOpen] = useState(false);
   const nav = useNavigate();
   const loc = useLocation();
+  const aprob = useApprovalCount(); // numero junto a "Aprobaciones"
   const [clock, setClock] = useState("");
   const [welcome, setWelcome] = useState(() => { try { return sessionStorage.getItem("crimson-welcome") === "1"; } catch { return false; } });
 
@@ -54,6 +57,7 @@ export default function AppShell() {
             {g.items.map((it) => (
               <NavLink key={it.to} to={it.to} end={it.end} className={({ isActive }) => `nav__link ${isActive ? "is-active" : ""}`}>
                 <Icon d={it.icon} /><span>{it.label}</span>
+                {it.badge === "approvals" && aprob ? <span className="nav__badge" aria-label={`${aprob} pendientes`}>{aprob > 99 ? "99+" : aprob}</span> : null}
               </NavLink>
             ))}
           </div>
@@ -70,21 +74,17 @@ export default function AppShell() {
       </aside>
       {open && <div className="nav-scrim" onClick={() => setOpen(false)} />}
       <NuevaVersion />
+      {/* vista previa por rol: banda fija sobre todo (ventanas incluidas), fuera de .main */}
+      <PreviewBand />
 
       <div className="main">
-        {viewAs && (
-          <div className="preview-bar">
-            <span><b>Vista previa como {roleMeta(viewAs).label}.</b> Así ve el panel esa persona; tus permisos reales no cambian.</span>
-            <button className="btn btn--sm" onClick={() => setViewAs(null)}>Salir de la vista previa</button>
-          </div>
-        )}
         <header className="topbar">
           <button className="btn btn--ghost btn--icon" onClick={() => setOpen((o) => !o)} aria-label="Menú" style={{ display: "none" }} id="burger"><Icon d={I.menu} /></button>
           <GlobalSearch />
           <div className="topbar__right">
             {me?.role === "admin" && (
               <label className="viewas" title="Previsualizar el panel con otro rol">
-                <span className="meta">Ver como</span>
+                <span className="meta">{viewAs ? "Viendo como" : "Ver como"}</span>
                 <select value={viewAs || "admin"} onChange={(e) => setViewAs(e.target.value === "admin" ? null : e.target.value)}>
                   {Object.entries(ROLES).filter(([k]) => k !== "soporte" && !isClientRole(k)).map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
                 </select>

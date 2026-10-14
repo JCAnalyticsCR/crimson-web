@@ -4,13 +4,16 @@
    sumar la ruta a su `menu` en roles.ts. La API sigue siendo la frontera de seguridad. */
 import { I } from "../ui/components";
 
-export type NavItem = { to: string; label: string; icon: string; end?: boolean; need?: string };
+/* badge: numero junto a la entrada (hoy solo "approvals": pendientes de la bandeja de Aprobaciones) */
+export type NavItem = { to: string; label: string; icon: string; end?: boolean; need?: string; badge?: "approvals" };
 export type NavGroup = { group: string; items: NavItem[] };
 
 export const NAV: NavGroup[] = [
   // Las cuatro secciones son las que Andres escribio en sus notas de la reunion del 22/09.
   { group: "Operación", items: [
     { to: "/", label: "Inicio", icon: I.home, end: true, need: "dashboard.ver" },
+    // Andres 13/10 (21:37): "otra categoria aqui… aprobaciones". Arriba: el menu "es un monton" y no se puede perder
+    { to: "/aprobaciones", label: "Aprobaciones", icon: I.approve, need: "approvals.ver", badge: "approvals" },
     { to: "/oportunidades", label: "Oportunidades", icon: I.trend, need: "crm_pipeline.ver" },
     { to: "/cotizaciones", label: "Cotizaciones", icon: I.quote, need: "sales.ver" },
     { to: "/proyectos", label: "Proyectos", icon: I.box, need: "projects.ver" },

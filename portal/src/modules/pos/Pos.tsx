@@ -284,7 +284,7 @@ export default function Pos() {
         </Card>
 
         {/* ===== Right — cart + payments ===== */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, position: "sticky", top: "calc(var(--top-h) + 20px)" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, position: "sticky", top: "calc(var(--top-h) + var(--preview-h, 0px) + 20px)" }}>
 
           {/* Doc type + customer */}
           <Card>
