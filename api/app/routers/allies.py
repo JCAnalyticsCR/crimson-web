@@ -112,8 +112,15 @@ def _contacts(data: AllyIn) -> dict:
 def companies(q: str = "", p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = Depends(get_db)):
     """Buscador de empresas para ligar un aliado: clientes y proveedores existentes (solo nombre)."""
     like = f"%{q.strip()}%"
-    custs = db.scalars(select(Customer).where(Customer.tenant_id == p.tenant.id, Customer.name.ilike(like)).order_by(Customer.name).limit(10))
-    sups = db.scalars(select(Supplier).where(Supplier.tenant_id == p.tenant.id, Supplier.name.ilike(like)).order_by(Supplier.name).limit(10))
+    custs = db.scalars(
+        select(Customer).where(Customer.tenant_id == p.tenant.id, Customer.name.ilike(like), Customer.trashed_at.is_(None)).order_by(Customer.name).limit(10)
+    )
+    sups = db.scalars(
+        select(Supplier)
+        .where(Supplier.tenant_id == p.tenant.id, Supplier.name.ilike(like), Supplier.archived_at.is_(None), Supplier.trashed_at.is_(None))
+        .order_by(Supplier.name)
+        .limit(10)
+    )
     return [{"kind": "customer", "id": c.id, "name": c.name, "hint": "Cliente"} for c in custs] + [
         {"kind": "supplier", "id": s.id, "name": s.name, "hint": "Proveedor"} for s in sups
     ]

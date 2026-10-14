@@ -1,0 +1,32 @@
+/* Basurero de cada fila: 44 px de zona tactil, discreto hasta que se apunta */
+.trash-btn { flex: none; display: inline-grid; place-items: center; width: 44px; height: 44px; margin: -6px 0; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--text-3); cursor: pointer; transition: background .15s, color .15s; vertical-align: middle; }
+.trash-btn:hover, .trash-btn:focus-visible { background: var(--bad-soft); color: var(--bad); outline: none; }
+.trash-btn:focus-visible { box-shadow: 0 0 0 2px var(--crimson); }
+.trash-btn:disabled { opacity: .5; cursor: progress; }
+.trash-btn.is-locked { opacity: .35; cursor: help; }
+.trash-btn.is-locked:hover, .trash-btn.is-locked:focus-visible { background: var(--bg-2); color: var(--text-2); opacity: .7; }
+.icon-btn { flex: none; display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--hair-2); border-radius: 10px; background: transparent; color: var(--text-2); cursor: pointer; }
+.icon-btn:hover, .icon-btn:focus-visible { background: var(--surface); color: var(--text); outline: none; }
+.icon-btn:disabled { opacity: .5; cursor: progress; }
+.modal__foot .trash-btn { margin: 0; height: 38px; width: 44px; border: 1px solid var(--hair-2); }
+.modal__foot .icon-btn { height: 38px; }
+
+/* Celda de acciones (Abrir + basurero): en el telefono la tabla se desliza de lado y esta columna queda fija
+   a la derecha, asi el basurero se ve sin tener que desplazar la fila */
+.table td.row-actions { white-space: nowrap; }
+.row-actions__in { display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; }
+@media (max-width: 640px) {
+  .table td.row-actions, .table th.row-actions { position: sticky; right: 0; z-index: 1; background: var(--surface); box-shadow: -10px 0 12px -10px rgba(21, 19, 26, .35); }
+  .table tbody tr:hover td.row-actions { background: var(--surface-2); }
+}
+
+/* Tarjeta del embudo: el basurero va en la esquina, sin tapar el titulo */
+.opp .trash-btn { position: absolute; top: 2px; right: 2px; margin: 0; width: 40px; height: 40px; opacity: .55; }
+.opp:hover .trash-btn, .opp .trash-btn:focus-visible { opacity: 1; }
+.opp:has(.trash-btn) > b { display: block; padding-right: 34px; }
+@media (hover: none) { .opp .trash-btn { opacity: .8; width: 44px; height: 44px; top: 0; right: 0; } }
+
+/* Dialogo de confirmacion */
+.trash-dlg__what { margin: 0; font-weight: 600; }
+.trash-dlg__text { margin: 0; font-size: 14px; }
+.trash-dlg__why { margin: 0; padding-left: 18px; font-size: 14px; display: flex; flex-direction: column; gap: 4px; }

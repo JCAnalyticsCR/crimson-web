@@ -6,6 +6,7 @@ import { api, fmtDate } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { Lookup, searchCustomers, searchProducts } from "../../ui/Lookup";
+import { TrashButton } from "../../ui/TrashButton";
 
 type Asset = {
   id: number; customer_id: number; customer: string | null; project_id: number | null; project: string | null; product_id: number | null;
@@ -78,7 +79,7 @@ export default function Assets() {
                 <td style={{ fontWeight: 600 }}>{a.name}<br /><small className="muted">{a.model || ""}</small></td>
                 <td className="mono muted">{a.serial || "—"}</td><td className="muted">{a.customer || "—"}</td><td className="muted">{a.location || "—"}</td>
                 <td className="mono muted">{a.project || "—"}</td><td>{fmtDate(a.installed_at)}</td><td>{garantia(a)}</td>
-                <td className="num">{allows("assets.editar") && <button className="btn btn--ghost btn--sm" onClick={() => setDraft({ id: a.id, customer_id: String(a.customer_id), customer_name: a.customer || "", project_id: a.project_id ? String(a.project_id) : "", product_id: a.product_id ? String(a.product_id) : "", product_name: "", name: a.name, model: a.model || "", serial: a.serial || "", location: a.location || "", ip: a.ip || "", mac: a.mac || "", firmware: a.firmware || "", installed_at: a.installed_at || "", warranty_until: a.warranty_until || "", notes: a.notes || "" })}>Editar</button>}</td>
+                <td className="num row-actions"><span className="row-actions__in">{allows("assets.editar") && <button className="btn btn--ghost btn--sm" onClick={() => setDraft({ id: a.id, customer_id: String(a.customer_id), customer_name: a.customer || "", project_id: a.project_id ? String(a.project_id) : "", product_id: a.product_id ? String(a.product_id) : "", product_name: "", name: a.name, model: a.model || "", serial: a.serial || "", location: a.location || "", ip: a.ip || "", mac: a.mac || "", firmware: a.firmware || "", installed_at: a.installed_at || "", warranty_until: a.warranty_until || "", notes: a.notes || "" })}>Editar</button>}<TrashButton kind="asset" id={a.id} number={a.serial ? `${a.name} (${a.serial})` : a.name} onDone={load} /></span></td>
               </tr>
             ))}</tbody>
           </table>

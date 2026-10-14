@@ -179,7 +179,10 @@ def product_filters(p: Principal = Depends(require("catalog", "ver")), db: Sessi
     return {
         "brands": [b for b in marcas if b],
         "categories": [{"id": c.id, "name": c.name} for c in db.scalars(select(Category).where(Category.tenant_id == p.tenant.id).order_by(Category.name))],
-        "suppliers": [{"id": s.id, "name": s.name} for s in db.scalars(select(Supplier).where(Supplier.tenant_id == p.tenant.id).order_by(Supplier.name))],
+        "suppliers": [
+            {"id": s.id, "name": s.name}
+            for s in db.scalars(select(Supplier).where(Supplier.tenant_id == p.tenant.id, Supplier.archived_at.is_(None), Supplier.trashed_at.is_(None)).order_by(Supplier.name))
+        ],
         "sin_cabys": sin_cabys,
         # la bodega de origen se muestra en el catalogo aunque el rol no tenga inventario.ver
         "warehouses": [

@@ -38,6 +38,7 @@ from ..models import (
     WorkOrder,
 )
 from ..services import sla as slasvc
+from ..services.archive import live
 from ..services.documents import audit, local_date
 from ..services.mail import notify_roles, queue_email
 from ..services.sequences import next_number
@@ -156,7 +157,7 @@ class TicketIn(BaseModel):
 
 def ticket_scope(p: Principal, mine: bool = False) -> list:
     """Tickets que esta persona puede ver: todos con support_desk.ver_todo, si no los suyos."""
-    out = [SupportTicket.tenant_id == p.tenant.id]
+    out = [SupportTicket.tenant_id == p.tenant.id, live(SupportTicket)]  # lo archivado o en la papelera no cuenta
     if mine or not p.can("support_desk", "ver_todo"):
         out.append(or_(SupportTicket.assigned_to == p.user.id, SupportTicket.opened_by == p.user.id))
     return out
@@ -437,7 +438,7 @@ def _contract_out(db: Session, c: MaintenanceContract) -> dict:
 
 @router.get("/contracts")
 def contracts(active: bool | None = None, p: Principal = Depends(require("support_desk", "ver")), db: Session = Depends(get_db)):
-    stmt = select(MaintenanceContract).where(MaintenanceContract.tenant_id == p.tenant.id)
+    stmt = select(MaintenanceContract).where(MaintenanceContract.tenant_id == p.tenant.id, live(MaintenanceContract))
     if active is not None:
         stmt = stmt.where(MaintenanceContract.active.is_(active))
     return [_contract_out(db, c) for c in db.scalars(stmt.order_by(MaintenanceContract.next_date.is_(None), MaintenanceContract.next_date))]

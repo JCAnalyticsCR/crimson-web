@@ -7,6 +7,7 @@ import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Loading, Modal } from "../../ui/components";
 import { Lookup, searchCustomers } from "../../ui/Lookup";
 import { PhotoStrip } from "../../ui/MediaPicker";
+import { TrashButton } from "../../ui/TrashButton";
 
 type Note = { id: number; body: string; internal: boolean; photos: string[]; user: string; created_at: string };
 type Ticket = {
@@ -136,7 +137,7 @@ export default function Tickets() {
                 <td className="muted">{t.assigned || "Sin asignar"}</td>
                 <td style={{ fontSize: 13, color: t.fuera_de_tiempo ? "var(--bad)" : undefined }}>{t.first_reply_at ? "respondido" : cuando(t.due_at)}</td>
                 <td><span className={`badge badge--${ESTADO[t.status]?.tone || "muted"}`}>{ESTADO[t.status]?.label || t.status}</span></td>
-                <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => show(t.id)}>Abrir</button></td>
+                <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => show(t.id)}>Abrir</button><TrashButton kind="ticket" id={t.id} number={t.number} onDone={load} /></span></td>
               </tr>
             ))}</tbody>
           </table>

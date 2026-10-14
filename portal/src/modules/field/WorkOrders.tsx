@@ -9,6 +9,7 @@ import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components
 import { Lookup, searchCustomers, searchProducts } from "../../ui/Lookup";
 import { PhotoStrip } from "../../ui/MediaPicker";
 import { ArchiveActions } from "../../ui/ArchiveActions";
+import { TrashButton } from "../../ui/TrashButton";
 import { InviteTechButton } from "./InviteTech";
 
 type Material = { id?: number; product_id: number | null; name: string; quantity: string; unit: string; planned: string };
@@ -145,7 +146,7 @@ export default function WorkOrders() {
                   <td className="mono muted">{o.project || "—"}</td><td className="muted">{o.technician || "Sin asignar"}</td>
                   <td style={{ fontSize: 13 }}>{o.scheduled_at ? `${dayLabel(o.scheduled_at)} ${hhmm(o.scheduled_at)}` : "—"}</td>
                   <td><span className={`badge badge--${STATUS[o.status]?.tone || "muted"}`}>{STATUS[o.status]?.label || o.status}</span></td>
-                  <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => show(o.id)}>Abrir</button></td>
+                  <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => show(o.id)}>Abrir</button><TrashButton kind="work_order" id={o.id} number={o.number} onDone={load} /></span></td>
                 </tr>
               ))}</tbody>
             </table>

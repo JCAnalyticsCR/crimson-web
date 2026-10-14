@@ -143,7 +143,9 @@ def revisar_atrasos(db: Session, tenant: Tenant, ahora: datetime | None = None) 
     correo cada hora y eso termina en que nadie lo lee."""
     ahora = ahora or datetime.now(UTC)
     out: dict[str, list[SupportTicket]] = {"respuesta": [], "resolucion": []}
-    for t in db.scalars(select(SupportTicket).where(SupportTicket.tenant_id == tenant.id, SupportTicket.status.in_(ABIERTOS))):
+    # lo archivado o en la papelera no avisa
+    vivos = (SupportTicket.archived_at.is_(None), SupportTicket.trashed_at.is_(None))
+    for t in db.scalars(select(SupportTicket).where(SupportTicket.tenant_id == tenant.id, SupportTicket.status.in_(ABIERTOS), *vivos)):
         avisos = list((t.sla or {}).get("avisos") or [])
         nuevos = []
         if t.due_at and not t.first_reply_at and _aware(t.due_at) < ahora and "respuesta" not in avisos:

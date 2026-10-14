@@ -222,7 +222,7 @@ class WorkOrderMaterial(Base):
     planned: Mapped[float] = mapped_column(Numeric(14, 3), default=0)  # lo que decia la cotizacion
 
 
-class CustomerAsset(TenantMixin, TimestampMixin, Base):
+class CustomerAsset(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     """Que quedo instalado donde: serie, IP, firmware, garantia. Historial tecnico del cliente."""
 
     __tablename__ = "customer_asset"
@@ -248,7 +248,7 @@ class CustomerAsset(TenantMixin, TimestampMixin, Base):
     photos: Mapped[list] = mapped_column(JSON, default=list)
 
 
-class PurchaseRequest(TenantMixin, TimestampMixin, Base):
+class PurchaseRequest(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     """Solicitud de compra: nace del stock bajo o de un proyecto. Los proveedores no dan credito: avisa temprano."""
 
     __tablename__ = "purchase_request"

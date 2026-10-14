@@ -1,15 +1,17 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, auth, bootstrap, type Me } from "../lib/api";
 import { canAny, type Perms } from "./roles";
 
 type Session = {
   me: Me | null; loading: boolean;
   login: (email: string, password: string, totp?: string) => Promise<void>; logout: () => Promise<void>; reload: () => Promise<void>;
-  theme: string; toggleTheme: () => void; toast: (msg: string, tone?: "ok" | "bad") => void;
+  theme: string; toggleTheme: () => void; toast: (msg: string, tone?: "ok" | "bad", action?: ToastAction) => void;
   /** Rol con el que se dibuja la interfaz (el real, o el que el admin esta previsualizando). */
   role: string; perms: Perms; allows: (need?: string) => boolean;
   viewAs: string | null; setViewAs: (role: string | null) => void; matrix: Record<string, Perms>;
 };
+/** Boton dentro del aviso (p. ej. "Deshacer" despues de mandar algo a la papelera). */
+export type ToastAction = { label: string; run: () => void };
 const Ctx = createContext<Session>(null!);
 export const useSession = () => useContext(Ctx);
 
@@ -17,7 +19,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [theme, setTheme] = useState(() => { try { return localStorage.getItem("crimson-theme") || "light"; } catch { return "light"; } });
-  const [toastState, setToast] = useState<{ msg: string; tone: "ok" | "bad" } | null>(null);
+  const [toastState, setToast] = useState<{ msg: string; tone: "ok" | "bad"; action?: ToastAction } | null>(null);
+  const toastTimer = useRef<number | undefined>(undefined);
   const [viewAs, setViewAsState] = useState<string | null>(() => { try { return sessionStorage.getItem("crimson-view-as"); } catch { return null; } });
   const [matrix, setMatrix] = useState<Record<string, Perms>>({});
 
@@ -53,7 +56,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await reload();
   };
   const logout = async () => { try { await api("/auth/logout", { method: "POST" }); } finally { auth.set(null); setMe(null); setViewAs(null); } };
-  const toast = (msg: string, tone: "ok" | "bad" = "ok") => { setToast({ msg, tone }); setTimeout(() => setToast(null), 3200); };
+  // Un aviso nuevo reemplaza al anterior y reinicia su tiempo (antes el temporizador viejo cerraba el nuevo).
+  // Con boton (Deshacer) dura mas: hay que alcanzar a leerlo y tocarlo.
+  const toast = useCallback((msg: string, tone: "ok" | "bad" = "ok", action?: ToastAction) => {
+    window.clearTimeout(toastTimer.current);
+    setToast({ msg, tone, action });
+    toastTimer.current = window.setTimeout(() => setToast(null), action ? 8000 : 3200);
+  }, []);
 
   // La vista previa solo existe para administradores y solo reduce permisos (nunca amplia lo que la API permite).
   const previewing = me?.role === "admin" && viewAs && matrix[viewAs] ? viewAs : null;
@@ -64,7 +73,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{ me, loading, login, logout, reload, theme, toggleTheme: () => setTheme((t) => (t === "dark" ? "light" : "dark")), toast, role, perms, allows, viewAs: previewing, setViewAs, matrix }}>
       {children}
-      {toastState && <div className={`toast toast--${toastState.tone}`} role="status">{toastState.msg}</div>}
+      {toastState && (
+        <div className={`toast toast--${toastState.tone}`} role="status">
+          <span>{toastState.msg}</span>
+          {toastState.action && (
+            <button type="button" className="toast__action" onClick={() => { const a = toastState.action!; window.clearTimeout(toastTimer.current); setToast(null); a.run(); }}>{toastState.action.label}</button>
+          )}
+        </div>
+      )}
     </Ctx.Provider>
   );
 }

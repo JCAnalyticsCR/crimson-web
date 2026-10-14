@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, type Customer } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
+import { TrashButton } from "../../ui/TrashButton";
 
 const blank = { id_type: "juridica", id_number: "", name: "", email: "", phone: "", whatsapp: "", currency: "CRC", notes: "" };
 
@@ -39,7 +40,7 @@ export default function Customers() {
           <table className="table">
             <thead><tr><th>Nombre</th><th>Identificación</th><th>Correo</th><th>WhatsApp</th><th>Divisa</th><th /></tr></thead>
             <tbody>{items.map((c) => (
-              <tr key={c.id}><td><Link className="row-link" to={`/clientes/${c.id}`}>{c.name}</Link></td><td className="mono muted">{c.id_type} · {c.id_number || "—"}</td><td className="muted">{c.email || "—"}</td><td className="muted">{c.whatsapp || c.phone || "—"}</td><td>{c.currency}</td><td className="num"><Link className="btn btn--ghost btn--sm" to={`/clientes/${c.id}`}>Ver ficha</Link></td></tr>
+              <tr key={c.id}><td><Link className="row-link" to={`/clientes/${c.id}`}>{c.name}</Link></td><td className="mono muted">{c.id_type} · {c.id_number || "—"}</td><td className="muted">{c.email || "—"}</td><td className="muted">{c.whatsapp || c.phone || "—"}</td><td>{c.currency}</td><td className="num row-actions"><span className="row-actions__in"><Link className="btn btn--ghost btn--sm" to={`/clientes/${c.id}`}>Ver ficha</Link><TrashButton kind="customer" id={c.id} number={c.name} onDone={load} /></span></td></tr>
             ))}</tbody>
           </table>
         )}

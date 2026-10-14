@@ -16,7 +16,7 @@ from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
-from .base import TenantMixin, TimestampMixin
+from .base import ArchiveMixin, TenantMixin, TimestampMixin
 
 TICKET_KINDS = ("soporte", "garantia", "mantenimiento", "visita", "instalacion", "consulta")
 TICKET_STATES = ("nuevo", "asignado", "en_proceso", "esperando_cliente", "resuelto", "cerrado")
@@ -25,7 +25,7 @@ PRIORITIES = ("baja", "media", "alta", "critica")
 LEVELS = (1, 2, 3)
 
 
-class SupportTicket(TenantMixin, TimestampMixin, Base):
+class SupportTicket(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     """Un caso de un cliente: falla, garantia, mantenimiento o consulta."""
 
     __tablename__ = "support_ticket"
@@ -81,7 +81,7 @@ class SupportNote(TenantMixin, TimestampMixin, Base):
     photos: Mapped[list] = mapped_column(JSON, default=list)
 
 
-class MaintenanceContract(TenantMixin, TimestampMixin, Base):
+class MaintenanceContract(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     """Mantenimiento preventivo o soporte recurrente: cada cuantos meses toca y cuando es la proxima."""
 
     __tablename__ = "maintenance_contract"

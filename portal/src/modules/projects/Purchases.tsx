@@ -6,6 +6,7 @@ import { api, fmtDate, fmtMoney, parseTs } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { Lookup, searchProducts } from "../../ui/Lookup";
+import { TrashButton } from "../../ui/TrashButton";
 
 type Line = { id?: number; product_id: number | null; name: string; quantity: string; unit_cost: string };
 type Req = {
@@ -72,7 +73,7 @@ export default function Purchases() {
                 {verCostos && <td className="num money">{fmtMoney(r.total_cost, r.currency)}</td>}
                 <td><span className={`badge badge--${STATUS[r.status]?.tone || "muted"}`}>{STATUS[r.status]?.label || r.status}</span></td>
                 <td className="muted">{fmtDate(parseTs(r.created_at).toISOString().slice(0, 10))}</td>
-                <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setOpen(r)}>Abrir</button></td>
+                <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => setOpen(r)}>Abrir</button><TrashButton kind="purchase" id={r.id} number={r.number} onDone={load} /></span></td>
               </tr>
             ))}</tbody>
           </table>

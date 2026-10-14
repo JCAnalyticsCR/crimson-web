@@ -83,7 +83,7 @@ def _aware(dt: datetime | None) -> datetime | None:
 
 def _ticket(db: Session, tid: int, p: Principal) -> SupportTicket:
     t = db.get(SupportTicket, tid)
-    if not t or t.tenant_id != p.tenant.id or t.customer_id != p.customer_id:
+    if not t or t.tenant_id != p.tenant.id or t.customer_id != p.customer_id or t.trashed_at:
         raise HTTPException(404, "Ticket no encontrado")
     return t
 
@@ -174,7 +174,7 @@ def inicio(p: Principal = Depends(get_client), db: Session = Depends(get_db)):
     c = db.get(Customer, p.customer_id)
     abiertos = db.scalars(
         select(SupportTicket)
-        .where(SupportTicket.tenant_id == p.tenant.id, SupportTicket.customer_id == p.customer_id, SupportTicket.status.in_(OPEN_STATES))
+        .where(SupportTicket.tenant_id == p.tenant.id, SupportTicket.customer_id == p.customer_id, SupportTicket.status.in_(OPEN_STATES), SupportTicket.trashed_at.is_(None))
         .order_by(SupportTicket.id.desc())
     ).all()
     visitas = db.scalars(
@@ -188,7 +188,7 @@ def inicio(p: Principal = Depends(get_client), db: Session = Depends(get_db)):
         .order_by(MaintenanceContract.next_date)
     ).all()
     equipos = db.scalar(
-        select(func.count()).select_from(CustomerAsset).where(CustomerAsset.tenant_id == p.tenant.id, CustomerAsset.customer_id == p.customer_id)
+        select(func.count()).select_from(CustomerAsset).where(CustomerAsset.tenant_id == p.tenant.id, CustomerAsset.customer_id == p.customer_id, CustomerAsset.trashed_at.is_(None))
     )
     return {
         "customer": {"name": c.name},
@@ -204,7 +204,7 @@ def inicio(p: Principal = Depends(get_client), db: Session = Depends(get_db)):
 # ---------- Tickets ----------
 @router.get("/tickets")
 def tickets(estado: str = "todos", p: Principal = Depends(need("tickets")), db: Session = Depends(get_db)):
-    q = select(SupportTicket).where(SupportTicket.tenant_id == p.tenant.id, SupportTicket.customer_id == p.customer_id)
+    q = select(SupportTicket).where(SupportTicket.tenant_id == p.tenant.id, SupportTicket.customer_id == p.customer_id, SupportTicket.trashed_at.is_(None))
     if estado == "abiertos":
         q = q.where(SupportTicket.status.in_(OPEN_STATES))
     elif estado == "cerrados":
@@ -344,7 +344,7 @@ def equipos(p: Principal = Depends(get_client), db: Session = Depends(get_db)):
     hoy = date.today()
     rows = db.scalars(
         select(CustomerAsset)
-        .where(CustomerAsset.tenant_id == p.tenant.id, CustomerAsset.customer_id == p.customer_id)
+        .where(CustomerAsset.tenant_id == p.tenant.id, CustomerAsset.customer_id == p.customer_id, CustomerAsset.trashed_at.is_(None))
         .order_by(CustomerAsset.location, CustomerAsset.name)
     ).all()
     # sin IP, MAC, firmware, proveedor ni factura de compra: datos tecnicos/internos de Crimson

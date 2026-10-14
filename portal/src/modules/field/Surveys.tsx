@@ -11,6 +11,8 @@ import { PhotoStrip } from "../../ui/MediaPicker";
 import { Lightbox, type Foto } from "../../ui/Lightbox";
 import { InviteTechButton } from "./InviteTech";
 import { ArchiveActions } from "../../ui/ArchiveActions";
+import { TrashButton } from "../../ui/TrashButton";
+import { useSurveyAutosave } from "./useSurveyAutosave";
 import { LinkOpportunity, type OppRef } from "./LinkOpportunity";
 import { pickReview, ReviewPanel, reviewTone, type ReviewInfo } from "./SurveyReview";
 import { CommonSection, initialStatus, PointFields, SystemCalcs, useCommonSpec, type Common, type V2Field } from "./SurveyV2";
@@ -149,6 +151,7 @@ export default function Surveys() {
 
   const open = async (id: number) => {
     const s = await api<Survey>(`/surveys/${id}`);
+    auto.fromServer(); // lo que sigue viene de la base: no es un cambio por autoguardar
     const labor = emptyLabor();
     for (const [k] of LABOR) {
       const l = s.labor?.[k];
@@ -186,11 +189,14 @@ export default function Surveys() {
     common: d.common, received_by: d.received_by.trim() || null,
   });
 
+  // Autoguardado: unos segundos despues de cada cambio, al cerrar (clic fuera, Escape, X), al ocultar la pagina y al salir
+  const auto = useSurveyAutosave({ draft, setDraft, body, onSaved: () => { setCalcTick((t) => t + 1); load(); } });
+
   const save = async (silent = false) => {
     if (!draft) return null;
     setBusy(true);
     try {
-      const s = await api<Survey>(draft.id ? `/surveys/${draft.id}` : "/surveys", { method: draft.id ? "PUT" : "POST", json: body(draft) });
+      const s = await auto.exclusive(draft, (id) => api<Survey>(id ? `/surveys/${id}` : "/surveys", { method: id ? "PUT" : "POST", json: body(draft) }));
       if (!silent) toast(draft.id ? "Levantamiento guardado" : `Levantamiento ${s.number} creado`);
       setDraft((d) => (d ? { ...d, id: s.id, number: s.number, status: s.status, review: pickReview(s), template_version: s.template_version } : d));
       setCalcTick((t) => t + 1);
@@ -467,7 +473,7 @@ export default function Surveys() {
                   </span>
                   {sentLine(s) && <div className="meta" style={{ marginTop: 4, textTransform: "none", letterSpacing: 0 }}>{sentLine(s)}</div>}
                 </td>
-                <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => open(s.id)}>Abrir</button></td>
+                <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => open(s.id)}>Abrir</button><TrashButton kind="survey" id={s.id} number={s.number} onDone={load} /></span></td>
               </tr>
             ))}</tbody>
           </table>
@@ -480,6 +486,7 @@ export default function Surveys() {
           onClose={close}
           wide
           foot={<>
+            {auto.bar}
             {puedeCotizar && <button className="btn btn--soft" onClick={() => cost()}><Icon d={I.trend} />Costear</button>}
             {draft.id && <button className="btn btn--ghost" title="PDF para el cliente, sin precios ni costos" onClick={() => openFile(`/surveys/${draft.id}/report.pdf`).catch((e) => toast(e.message, "bad"))}><Icon d={I.reports} />Informe preliminar</button>}
             {draft.id && allows("sales.enviar") && <button className="btn btn--ghost" onClick={sendReport}>Enviar al cliente</button>}

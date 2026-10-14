@@ -5,6 +5,7 @@ import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { GalleryField, type GalleryImage } from "../../ui/MediaPicker";
 import { Lookup, type LookupItem } from "../../ui/Lookup";
+import { TrashButton } from "../../ui/TrashButton";
 
 type Tax = { id: number; name: string; rate: number };
 type Named = { id: number; name: string };
@@ -187,7 +188,7 @@ export default function Products() {
               <tr key={p.id}>
                 <td>{thumb(p) ? <span style={{ display: "block", width: 36, height: 36, borderRadius: 8, background: `center/cover no-repeat url("${thumb(p)}")`, border: "1px solid var(--hair)" }} /> : <span style={{ display: "grid", placeItems: "center", width: 36, height: 36, borderRadius: 8, background: "var(--bg-2)", color: "var(--text-3)" }}><Icon d={I.products} size={16} /></span>}</td>
                 <td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.item_type}</td><td className="mono muted">{p.cabys_code || "—"}</td><td className="muted" style={{ fontSize: 13 }}>{whName((p as Product & { warehouse_id?: number | null }).warehouse_id)}</td>{verPrecios && <td className="num money">{fmtMoney(p.price, p.currency)}</td>}<td className="muted">{p.tax_rate ?? "—"}%</td><td><button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={!allows("catalog.editar") || toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-pressed={p.show_on_web}><i /></button></td>
-                <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => open(p.id)}>Ver</button></td>
+                <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => open(p.id)}>Ver</button><TrashButton kind="product" id={p.id} number={p.code || p.name} onDone={load} /></span></td>
               </tr>
             ))}</tbody>
           </table>

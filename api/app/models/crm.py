@@ -2,10 +2,10 @@ from sqlalchemy import JSON, Boolean, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..core.db import Base
-from .base import TenantMixin, TimestampMixin
+from .base import ArchiveMixin, TenantMixin, TimestampMixin
 
 
-class Customer(TenantMixin, TimestampMixin, Base):
+class Customer(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     """Cliente reutilizado en cotizaciones, facturas, pagos y XML (receptor v4.4)."""
 
     __tablename__ = "customer"

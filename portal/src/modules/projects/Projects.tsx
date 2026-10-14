@@ -6,6 +6,7 @@ import { api, fmtDate, fmtMoney, openFile } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { ArchiveActions } from "../../ui/ArchiveActions";
+import { TrashButton } from "../../ui/TrashButton";
 import { ALLY_ROLES, CONTACT_FUNCS, partyLine, type Ally } from "../crm/OpportunityAllies";
 import { ReservationRow, type Reservation } from "../inventory/Inventory";
 
@@ -43,7 +44,8 @@ function List() {
   const [status, setStatus] = useState("activos");
   const verPlata = allows("catalog.costos");
 
-  useEffect(() => { api<Project[]>(`/projects${status ? `?status=${status}` : ""}`).then(setRows); }, [status]);
+  const reload = useCallback(() => { api<Project[]>(`/projects${status ? `?status=${status}` : ""}`).then(setRows); }, [status]);
+  useEffect(() => { reload(); }, [reload]);
 
   return (
     <>
@@ -66,7 +68,7 @@ function List() {
                 <td className="mono muted">{p.orders_done}/{p.orders_total}</td>
                 {verPlata && <><td className="num money">{fmtMoney(p.economics?.price)}</td><td className="num mono" title={p.economics?.aviso || undefined} style={{ color: p.economics?.margin_real == null || p.economics.provisional ? "var(--text-3)" : p.economics.margin_real < 15 ? "var(--bad)" : "var(--ok)" }}>{!p.economics ? "—" : p.economics.margin_real == null ? `${p.economics.margin_planned.toFixed(1)}% cotizado` : `${p.economics.margin_real.toFixed(1)}%${p.economics.provisional ? " (provisional)" : ""}`}</td></>}
                 <td><span className={`badge badge--${PROJECT_STATUS[p.status]?.tone || "muted"}`}>{PROJECT_STATUS[p.status]?.label || p.status}</span></td>
-                <td className="num"><Link className="btn btn--ghost btn--sm" to={`/proyectos/${p.id}`}>Abrir</Link></td>
+                <td className="num row-actions"><span className="row-actions__in"><Link className="btn btn--ghost btn--sm" to={`/proyectos/${p.id}`}>Abrir</Link><TrashButton kind="project" id={p.id} number={p.number} onDone={reload} /></span></td>
               </tr>
             ))}</tbody>
           </table>

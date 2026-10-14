@@ -7,6 +7,7 @@ import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { Lookup, searchCustomers } from "../../ui/Lookup";
 import { ArchiveActions } from "../../ui/ArchiveActions";
+import { TrashButton } from "../../ui/TrashButton";
 import { AlliesPanel, PendingCosts, partyLine, type Ally, type PendingCost } from "./OpportunityAllies";
 import "./opportunities.css";
 
@@ -206,6 +207,7 @@ export default function Opportunities() {
         onKeyDown={(e) => { if (e.key === "Enter") show(o.id); }}
       >
         <b>{o.title}</b>
+        <TrashButton kind="opportunity" id={o.id} number={o.number} onDone={load} />
         <div className="opp__tags">
           <span className={`opp__kind opp__kind--${o.kind}`}>{KIND_SHORT[o.kind] || o.kind}</span>
           {o.owner && <span className="opp__owner" title={`Responsable: ${o.owner}`}><i aria-hidden>{o.owner_initials}</i>{o.owner.split(" ")[0]}</span>}
@@ -324,7 +326,7 @@ export default function Opportunities() {
                     <td className="num money">{fmtMoney(o.amount, o.currency)}</td>
                     <td style={{ fontSize: 13, color: dias !== null && dias < 0 ? "var(--bad)" : undefined }}>{o.next_action ? `${o.next_action}${o.next_action_date ? ` · ${fmtDate(o.next_action_date)}` : ""}` : "—"}</td>
                     <td className="muted">{o.owner || "—"}</td>
-                    <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => show(o.id)}>Ver</button></td>
+                    <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => show(o.id)}>Ver</button><TrashButton kind="opportunity" id={o.id} number={o.number} onDone={load} /></span></td>
                   </tr>
                 );
               })}</tbody>

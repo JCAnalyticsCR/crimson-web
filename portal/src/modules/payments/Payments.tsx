@@ -5,6 +5,8 @@ import { api, fmtDate, fmtMoney, type Payment } from "../../lib/api";
 import { Badge, Card, Empty, I, Icon, Loading } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
 import { useSession } from "../../app/session";
+import { TrashLocked } from "../../ui/TrashButton";
+import { LOCKED } from "../../ui/trash";
 
 type Cierre = { columns: string[]; rows: (string | number)[][]; totals: { total: string } | null; from: string; to: string };
 
@@ -45,7 +47,7 @@ export default function Payments() {
       </div>
       <Card title="Transacciones recientes" flush>
         {items === null ? <Loading /> : items.length === 0 ? <Empty hint="Registrá un pago desde una factura o compartí un enlace de pago." /> : (
-          <table className="table"><thead><tr><th>Fecha</th><th>Factura</th><th>Cliente</th><th>Método</th><th>Tipo</th><th>Referencia</th><th>Proveedor</th><th className="num">Monto</th><th>Estado</th></tr></thead>
+          <table className="table"><thead><tr><th>Fecha</th><th>Factura</th><th>Cliente</th><th>Método</th><th>Tipo</th><th>Referencia</th><th>Proveedor</th><th className="num">Monto</th><th>Estado</th><th /></tr></thead>
             <tbody>{items.map((p) => {
               // toda la fila abre la factura en la misma pestaña
               const go = p.invoice_id ? () => nav(`/facturas/${p.invoice_id}`) : undefined;
@@ -57,6 +59,7 @@ export default function Payments() {
                   <td style={{ textTransform: "capitalize" }}>{p.method}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.kind}</td>
                   <td className="mono muted">{p.external_ref || "—"}</td><td className="muted">{p.provider}</td>
                   <td className="num money">{fmtMoney(p.amount, p.currency)}</td><td><Badge status={p.status} /></td>
+                  <td className="num row-actions"><TrashLocked reason={LOCKED.payment} /></td>
                 </tr>
               );
             })}</tbody></table>

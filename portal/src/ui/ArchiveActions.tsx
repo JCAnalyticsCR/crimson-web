@@ -1,31 +1,36 @@
-/* Archivar / Mover a papelera: mismos dos botones en el detalle de levantamientos, proyectos, oportunidades y
-   ordenes de trabajo. Las reglas (dependencias vivas -> 409) viven en la API; aqui solo se muestra su mensaje. */
+/* Archivar / Enviar a la papelera dentro del detalle (levantamientos, proyectos, oportunidades, ordenes de trabajo...).
+   Andres: "que haya un icono de basurero para que no tenga tanta info ahi": dos iconos en vez de dos botones con
+   texto. Las reglas (dependencias vivas -> 409) viven en la API; aqui solo se muestra su mensaje. */
 import { useState } from "react";
 import { api } from "../lib/api";
 import { useSession } from "../app/session";
+import { Icon } from "./components";
+import { ARCHIVE_ICON, TrashButton, useCanTrash } from "./TrashButton";
+import type { TrashKind } from "./trash";
+import "./trash.css";
 
-export type ArchiveKind = "survey" | "project" | "opportunity" | "work_order";
-
-const MODULE: Record<ArchiveKind, string> = { survey: "field", project: "projects", opportunity: "crm_pipeline", work_order: "field" };
+export type ArchiveKind = TrashKind;
 
 export function ArchiveActions({ kind, id, number, archivedAt, trashedAt, onDone }: {
   kind: ArchiveKind; id: number; number?: string; archivedAt?: string | null; trashedAt?: string | null; onDone: () => void;
 }) {
-  const { allows, toast } = useSession();
+  const { toast } = useSession();
+  const can = useCanTrash(kind);
   const [busy, setBusy] = useState(false);
-  if (!allows(`${MODULE[kind]}.editar`)) return null;
+  if (!can) return null;
+  const what = number || "este registro";
 
-  const run = async (action: "archive" | "trash" | "restore") => {
-    const what = number || "este registro";
-    const ok = action === "restore" ? true : action === "archive"
-      ? window.confirm(`¿Archivar ${what}? Sale de las listas activas y se puede restaurar desde Administración › Archivo.`)
-      : window.confirm(`¿Mover ${what} a la papelera? Se borra definitivamente cuando cumpla los días de la papelera; mientras tanto se puede restaurar.`);
-    if (!ok) return;
+  const run = async (action: "archive" | "restore") => {
     setBusy(true);
     try {
       await api(`/archive/${kind}/${id}/${action}`, { method: "POST" });
-      toast(action === "archive" ? `${what} archivado` : action === "trash" ? `${what} en la papelera` : `${what} restaurado`);
       onDone();
+      if (action === "archive") {
+        toast(`${what} archivado: sale de las listas y se conserva`, "ok", {
+          label: "Deshacer",
+          run: () => { api(`/archive/${kind}/${id}/restore`, { method: "POST" }).then(() => { toast(`${what} restaurado`); onDone(); }, (e) => toast(e instanceof Error ? e.message : "No se pudo", "bad")); },
+        });
+      } else toast(`${what} restaurado`);
     } catch (e) {
       toast(e instanceof Error ? e.message : "No se pudo", "bad");
     } finally { setBusy(false); }
@@ -43,8 +48,10 @@ export function ArchiveActions({ kind, id, number, archivedAt, trashedAt, onDone
 
   return (
     <>
-      <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => run("archive")} title="Sale de las listas; se conserva y se restaura">Archivar</button>
-      <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => run("trash")} title="Próximo a borrar: se restaura mientras esté en la papelera" style={{ color: "var(--crimson, #e2233a)" }}>Mover a papelera</button>
+      <button type="button" className="icon-btn" disabled={busy} onClick={() => run("archive")} aria-label="Archivar" title="Archivar: sale de las listas, se conserva y se restaura desde Archivo">
+        <Icon d={ARCHIVE_ICON} size={18} />
+      </button>
+      <TrashButton kind={kind} id={id} number={number} onDone={onDone} />
     </>
   );
 }

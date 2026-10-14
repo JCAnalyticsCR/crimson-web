@@ -180,7 +180,9 @@ def _coupon_out(c: Coupon):
 
 @router.get("/coupons")
 def coupons(p: Principal = Depends(require("catalog", "ver")), db: Session = Depends(get_db)):
-    return [_coupon_out(c) for c in db.scalars(select(Coupon).where(Coupon.tenant_id == p.tenant.id).order_by(Coupon.id.desc()))]
+    # los desactivados se siguen viendo (se reactivan aqui); lo archivado o en la papelera se ve en Archivo
+    stmt = select(Coupon).where(Coupon.tenant_id == p.tenant.id, Coupon.archived_at.is_(None), Coupon.trashed_at.is_(None))
+    return [_coupon_out(c) for c in db.scalars(stmt.order_by(Coupon.id.desc()))]
 
 
 @router.post("/coupons", status_code=201)

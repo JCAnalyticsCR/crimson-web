@@ -6,6 +6,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney, openFile } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Loading, Modal } from "../../ui/components";
+import { TrashLocked } from "../../ui/TrashButton";
+import { LOCKED } from "../../ui/trash";
 import "./orders.css";
 
 type Hist = { status: string; at: string; by: number | string | null; note?: string };
@@ -105,7 +107,7 @@ function WebOrders() {
                   <td className="muted">{o.payment_kind ? METHODS[o.payment_kind] : o.payment_method || "—"}{o.proofs.length > 0 && <div className="meta" style={{ textTransform: "none" }}>{o.proofs.length} comprobante(s)</div>}</td>
                   <td className="num money">{fmtMoney(o.total, o.currency)}</td>
                   <td><span className="wo-badge" data-s={o.status}>{o.status_label}</span></td>
-                  <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => open(o)}>Ver</button></td>
+                  <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => open(o)}>Ver</button><TrashLocked reason={LOCKED.order} /></span></td>
                 </tr>
               ))}</tbody>
             </table>
