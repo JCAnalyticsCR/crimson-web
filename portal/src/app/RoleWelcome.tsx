@@ -18,11 +18,12 @@ const SHORTCUTS: { need: string; to: string; label: string; icon: string }[] = [
 ];
 
 export default function RoleWelcome({ onClose }: { onClose: () => void }) {
-  const { me, role, allows } = useSession();
+  const { me, role, allows, inMenu } = useSession();
   const nav = useNavigate();
   const rm = roleMeta(role);
   const first = (me?.user.full_name || "").split(" ")[0];
-  const shortcuts = SHORTCUTS.filter((s) => allows(s.need)).slice(0, 4);
+  // mismo criterio que el menu: permiso del rol y seccion en su menu (el vendedor ya no ve Punto de venta)
+  const shortcuts = SHORTCUTS.filter((s) => allows(s.need) && inMenu(s.to)).slice(0, 4);
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && onClose(); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
 
   return (

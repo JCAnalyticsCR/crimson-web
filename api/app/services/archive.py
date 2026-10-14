@@ -89,6 +89,9 @@ KINDS: dict[str, tuple[type, str, str]] = {
 ACTION = {"purchase": "crear"}
 # Ademas, ver todo el modulo: un tecnico atiende sus tickets pero no borra tickets ni contratos.
 NEEDS_ALL = {"ticket", "contract"}
+# Accion del modulo para VERLO en el Archivo (por defecto "ver"). Los cupones son de quien administra la tienda:
+# con catalog.ver (tecnico, aliado) no se listan sus codigos, igual que GET /coupons.
+VIEW_ACTION = {"coupon": "editar"}
 # Modelos con "active": archivar/papelera lo apagan y restaurar lo prende (ver docstring).
 ACTIVE_FLAG = {"customer", "product", "contract", "coupon"}
 # Orden de la purga del worker: primero lo que cuelga de otros, al final lo maestro.

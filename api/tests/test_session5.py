@@ -325,6 +325,10 @@ def test_la_vendedora_ve_precio_de_venta_pero_nunca_el_costo(client, auth, db_se
     prod_t = client.get(f"/products/{cam['id']}", headers=t).json()
     assert Decimal(str(prod_t["price"])) == 0 and prod_t["cost"] is None
 
+    # el contador ve el precio, pero el costo es solo del admin (13/10, 08:07)... salvo que el admin lo habilite
     k = entrar("conta@ejemplo.com", "contabilidad")
     prod_k = client.get(f"/products/{cam['id']}", headers=k).json()
-    assert Decimal(str(prod_k["price"])) > 0 and Decimal(str(prod_k["cost"])) == Decimal("80")
+    assert Decimal(str(prod_k["price"])) > 0 and prod_k["cost"] is None
+    assert client.put("/settings", json={"cost_roles": ["contabilidad"]}).status_code == 200
+    prod_k = client.get(f"/products/{cam['id']}", headers=k).json()
+    assert Decimal(str(prod_k["cost"])) == Decimal("80")

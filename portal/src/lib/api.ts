@@ -122,8 +122,10 @@ export type Payment = { id: number; invoice_id?: number | null; invoice_number?:
 export type Invoice = Doc & { doc_type: string; consecutive: string | null; clave: string | null; balance: string; quote_id: number | null; einvoice_status: string; payments: Payment[]; sale_condition: string; credit_days: number; payment_method: string };
 export type DocListItem = { id: number; number: string; customer_name: string | null; currency: string; total: string; balance: string | null; status: string; issue_date: string; due_date: string | null; acceptance_status?: string | null };
 export type Ceo = {
-  pipeline: string; pipeline_weighted: string; opportunities: number; receivable: string; sold_month: string; profit_month: string; margin_month: number;
-  projects_active: number; projects_closed_month: number; projects_without_costs?: number; jobs_open: number; jobs_week: number; jobs_late: number;
+  pipeline: string; pipeline_weighted: string; opportunities: number; receivable: string; sold_month: string;
+  /* utilidad del mes: null para quien no ve costos (solo el admin, salvo Ajustes -> Quien ve costos) */
+  profit_month: string | null; margin_month: number | null;
+  projects_active: number; projects_closed_month: number; projects_without_costs?: number | null; jobs_open: number; jobs_week: number; jobs_late: number;
   quotes_sent: number; quotes_won_month: number; warranties_soon: number; tickets_open?: number | null; tickets_late?: number | null;
 };
 export type Dashboard = {

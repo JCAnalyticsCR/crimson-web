@@ -126,5 +126,8 @@ def approval_reasons(db: Session, p: Principal, quote) -> list[str]:
     minimo = min_margin(p.tenant)
     m = quote_margin(db, p.tenant.id, quote)
     if m is not None and minimo > 0 and m < minimo:
-        razones.append(f"El margen queda en {m:.1f} % y el mínimo es {minimo:.0f} %.")
+        # el margen exacto deja deducir el costo: quien no ve costos (el vendedor) solo sabe que quedo por debajo
+        razones.append(
+            f"El margen queda en {m:.1f} % y el mínimo es {minimo:.0f} %." if p.sees_costs else f"El margen queda por debajo del mínimo ({minimo:.0f} %)."
+        )
     return razones

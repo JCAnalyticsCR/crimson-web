@@ -32,7 +32,9 @@ const ACTION_COLORS: Record<ActionKind, string> = {
 };
 
 export default function Importer() {
-  const { toast } = useSession();
+  const { toast, allows } = useSession();
+  // la lista de proveedor escribe costo y margen: solo quien ve costos (la API responde 403 a los demas)
+  const kinds = KINDS.filter((k) => k.id !== "catalogo" || allows("catalog.costos"));
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -98,7 +100,7 @@ export default function Importer() {
       {/* paso 1: elegir tipo */}
       {step === 1 && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 14, marginTop: 4 }}>
-          {KINDS.map((k) => (
+          {kinds.map((k) => (
             <button
               key={k.id}
               onClick={() => chooseKind(k.id)}

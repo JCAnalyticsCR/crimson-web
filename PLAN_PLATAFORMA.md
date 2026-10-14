@@ -475,7 +475,7 @@ Comercial y campo (la otra mitad del negocio, sesión 5)
 - [x] Catálogo de proveedor: importa la lista de precios (costo + margen → precio de venta con el tipo de cambio del día), marca, modelo y existencias del proveedor
 - [x] Interruptor "Web" en la lista de productos y disponibilidad visible en la tienda (en bodega · bajo pedido · agotado)
 - [x] Fila de gerencia en el inicio: embudo, ponderado, por cobrar, utilidad del mes, proyectos, trabajos de la semana, garantías por vencer
-- [x] Roles nuevos: supervisor técnico (todo el campo, ve costos) y técnico instalador (solo lo asignado, nunca ve plata)
+- [x] Roles nuevos: supervisor técnico (todo el campo; el costo es solo del administrador desde 13/10) y técnico instalador (solo lo asignado, nunca ve plata)
 
 Soporte, mantenimientos y comisiones (sesión 6, de la grabación de la reunión)
 - [x] Margen sobre la venta, no recargo sobre el costo: `precio = costo / (1 − margen)` — `services/pricing.py`

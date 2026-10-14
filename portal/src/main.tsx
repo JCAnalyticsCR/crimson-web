@@ -32,8 +32,6 @@ const Reception = lazy(() => import("./modules/accounting/Reception"));
 const Coupons = lazy(() => import("./modules/catalog/Coupons"));
 const CustomerDetail = lazy(() => import("./modules/crm/CustomerDetail"));
 const Pos = lazy(() => import("./modules/pos/Pos"));
-const Events = lazy(() => import("./modules/events/Events"));
-const EventDetail = lazy(() => import("./modules/events/EventDetail"));
 const PublicEvent = lazy(() => import("./modules/events/PublicEvent"));
 const TicketPage = lazy(() => import("./modules/events/TicketPage"));
 const Payroll = lazy(() => import("./modules/payroll/Payroll"));
@@ -91,6 +89,7 @@ function App() {
       <Route path="/pagar/:token" element={<PayPage />} />
       <Route path="/invitacion/:token" element={<Invite />} />
       <Route path="/tienda/:slug/*" element={<PublicStore />} />
+      {/* Eventos salio del panel (13/10, 02:26); la pagina publica del evento y las entradas vendidas siguen */}
       <Route path="/eventos/:slug/:event" element={<PublicEvent />} />
       <Route path="/entrada/:code" element={<TicketPage />} />
       <Route path="/solicitar-acceso" element={<RequestAccess />} />
@@ -119,8 +118,6 @@ function App() {
         <Route path="/clientes" element={g("crm.ver", <Customers />)} />
         <Route path="/clientes/:id" element={g("crm.ver", <CustomerDetail />)} />
         <Route path="/pos" element={g("sales.crear", <Pos />)} />
-        <Route path="/eventos" element={g("events.ver", <Events />)} />
-        <Route path="/eventos/:id" element={g("events.ver", <EventDetail />)} />
         <Route path="/planillas" element={g("payroll.ver", <Payroll />)} />
         <Route path="/conciliacion" element={g("accounting.ver", <Banking />)} />
         <Route path="/importar" element={g("settings.configurar", <Importer />)} />

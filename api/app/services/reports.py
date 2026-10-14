@@ -606,7 +606,7 @@ CATALOG = [
     ("inventario", "Inventario", "Existencias por ubicación y alertas"),
     ("productos", "Venta de productos", "Ranking de productos y servicios"),
     ("movimientos", "Movimientos", "Ledger de inventario"),
-    ("ordenes", "Órdenes", "Pedidos de tienda, POS y eventos"),
+    ("ordenes", "Órdenes", "Pedidos de la tienda y del punto de venta"),
     ("recepciones", "Recepciones", "Facturas de proveedores recibidas y su respuesta"),
     ("propinas", "Propinas", "Propinas cobradas por pago"),
     ("d151", "D-151", "Borrador anual: clientes, proveedores y gastos específicos sobre el umbral"),

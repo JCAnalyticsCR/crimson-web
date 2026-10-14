@@ -9,7 +9,7 @@ import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 
 type Row = {
   id: number; user_id: number; user: string | null; invoice: string | null; invoice_id: number | null;
-  base: string; base_amount: string; percent: string; amount: string; currency: string; earned_on: string; status: string; paid_on: string | null;
+  base: string; base_amount: string | null; percent: string; amount: string; currency: string; earned_on: string; status: string; paid_on: string | null;
 };
 type Rule = { id: number; user_id: number | null; user: string; name: string; base: string; percent: string; active: boolean; notes: string | null };
 type Agent = { id: number; name: string };
@@ -115,7 +115,8 @@ export default function Commissions() {
                 <td style={{ fontWeight: 600 }}>{r.user || "—"}</td>
                 <td className="mono muted">{r.invoice_id ? <Link className="row-link" to={`/facturas/${r.invoice_id}`}>{r.invoice}</Link> : "—"}</td>
                 <td className="muted">{r.base === "margen" ? "Utilidad" : "Cobrado"}</td>
-                <td className="num money">{fmtMoney(r.base_amount, r.currency)}</td>
+                {/* base "utilidad" a quien no ve costos: la API la manda vacia (no es 0) */}
+                <td className="num money">{r.base_amount == null ? <span className="muted" title="La utilidad la ve solo quien ve costos">—</span> : fmtMoney(r.base_amount, r.currency)}</td>
                 <td className="num mono">{Number(r.percent)} %</td>
                 <td className="num money" style={{ fontWeight: 700 }}>{fmtMoney(r.amount, r.currency)}</td>
                 <td><span className={`badge badge--${ESTADO[r.status]?.tone || "muted"}`}>{ESTADO[r.status]?.label || r.status}</span></td>

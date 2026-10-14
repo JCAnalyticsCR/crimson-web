@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, auth, bootstrap, type Me } from "../lib/api";
-import { canAny, type Perms } from "./roles";
+import { canAny, inRoleMenu, type Perms } from "./roles";
 
 type Session = {
   me: Me | null; loading: boolean;
@@ -8,7 +8,11 @@ type Session = {
   theme: string; toggleTheme: () => void; toast: (msg: string, tone?: "ok" | "bad", action?: ToastAction) => void;
   /** Rol con el que se dibuja la interfaz (el real, o el que el admin esta previsualizando). */
   role: string; perms: Perms; allows: (need?: string) => boolean;
+  /** La seccion (ruta) esta en el menu explicito del rol (roles.ts); sin lista, si. No es seguridad: la API manda. */
+  inMenu: (to: string) => boolean;
   viewAs: string | null; setViewAs: (role: string | null) => void; matrix: Record<string, Perms>;
+  /** Vuelve a pedir la matriz de roles (p. ej. despues de cambiar "Quien ve costos" en Ajustes). */
+  reloadMatrix: () => void;
 };
 /** Boton dentro del aviso (p. ej. "Deshacer" despues de mandar algo a la papelera). */
 export type ToastAction = { label: string; run: () => void };
@@ -37,9 +41,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => { off(); };
   }, [reload]);
 
-  useEffect(() => {
-    if (me?.role === "admin") api<{ matrix: Record<string, Perms> }>("/auth/roles").then((r) => setMatrix(r.matrix)).catch(() => {});
-  }, [me?.role]);
+  const isAdmin = me?.role === "admin";
+  const reloadMatrix = useCallback(() => {
+    if (isAdmin) api<{ matrix: Record<string, Perms> }>("/auth/roles").then((r) => setMatrix(r.matrix)).catch(() => {});
+  }, [isAdmin]);
+  useEffect(() => { reloadMatrix(); }, [reloadMatrix]);
 
   useEffect(() => { document.documentElement.dataset.theme = theme; try { localStorage.setItem("crimson-theme", theme); } catch { /* privado */ } }, [theme]);
 
@@ -69,9 +75,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const role = previewing || me?.role || "";
   const perms: Perms = useMemo(() => (previewing ? matrix[previewing] : me?.permissions) || {}, [previewing, matrix, me?.permissions]);
   const allows = useCallback((need?: string) => canAny(perms, need), [perms]);
+  // en vista previa `role` ya es el previsualizado: el menu es el de ese rol
+  const inMenu = useCallback((to: string) => inRoleMenu(role, to), [role]);
 
   return (
-    <Ctx.Provider value={{ me, loading, login, logout, reload, theme, toggleTheme: () => setTheme((t) => (t === "dark" ? "light" : "dark")), toast, role, perms, allows, viewAs: previewing, setViewAs, matrix }}>
+    <Ctx.Provider value={{ me, loading, login, logout, reload, theme, toggleTheme: () => setTheme((t) => (t === "dark" ? "light" : "dark")), toast, role, perms, allows, inMenu, viewAs: previewing, setViewAs, matrix, reloadMatrix }}>
       {children}
       {toastState && (
         <div className={`toast toast--${toastState.tone}`} role="status">

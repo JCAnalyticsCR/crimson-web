@@ -174,13 +174,15 @@ def _own_product(db: Session, tid: int, pid: int) -> Product:
 @router.get("/store/showcase/products/{pid}")
 def showcase_product_get(pid: int, p: Principal = Depends(require("catalog", "ver")), db: Session = Depends(get_db)):
     pr = _own_product(db, p.tenant.id, pid)
+    # catalog.ver lo tienen el tecnico y el aliado, que nunca ven precios (D5): sin catalog.precios van en None
+    precios = p.sees_prices
     return {
         "id": pr.id,
         "name": pr.name,
         "code": pr.code,
-        "price": pr.price,
+        "price": pr.price if precios else None,
         "currency": pr.currency,
-        "compare_price": pr.compare_price,
+        "compare_price": pr.compare_price if precios else None,
         "datasheet_url": pr.datasheet_url,
         "specs": pr.specs or {},
         "derived_specs": sv.derive_specs(pr),

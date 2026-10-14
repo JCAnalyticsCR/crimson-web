@@ -15,7 +15,7 @@ type Showcase = {
   headline: string; subline: string; seo_description: string; ga4_id: string; banners: Banner[]; featured: number[]; kits: Kit[]; trust: Trust[];
   faq: Faq[]; pages: { envios: string; garantias: string }; legal: { terms?: string; privacy?: string }; featured_products: { id: number; name: string; code: string; show_on_web: boolean }[]; slug: string; domain: string | null;
 };
-type PShow = { id: number; name: string; code: string; price: number; currency: string; compare_price: number | null; datasheet_url: string | null; specs: Record<string, string>; derived_specs: Record<string, string>; path: string };
+type PShow = { id: number; name: string; code: string; price: number | null; currency: string; compare_price: number | null; datasheet_url: string | null; specs: Record<string, string>; derived_specs: Record<string, string>; path: string };
 
 const TABS = ["Portada", "Destacados y kits", "Páginas", "Por producto", "Medición"] as const;
 
@@ -250,7 +250,8 @@ function ProductShowcase() {
         <div style={{ ...row, gap: 12 }}>
           <div><b>{p.name}</b> <span className="meta">{p.code} · {p.path}</span></div>
           <div className="grid-2">
-            <Field label={`Precio anterior SIN IVA (${p.currency})`} hint={`Precio actual sin IVA: ${p.price}. Si el anterior es mayor, la tienda lo muestra tachado.`}><input key={`c${p.id}`} className="input input--mono" defaultValue={p.compare_price ?? ""} onBlur={(e) => save({ compare_price: e.target.value.trim() ? Number(e.target.value) : null })} /></Field>
+            {/* sin catalog.precios el API manda price y compare_price en null: no se muestra (ni se borra al salir del campo) */}
+            {p.price !== null && <Field label={`Precio anterior SIN IVA (${p.currency})`} hint={`Precio actual sin IVA: ${p.price}. Si el anterior es mayor, la tienda lo muestra tachado.`}><input key={`c${p.id}`} className="input input--mono" defaultValue={p.compare_price ?? ""} onBlur={(e) => save({ compare_price: e.target.value.trim() ? Number(e.target.value) : null })} /></Field>}
             <Field label="Ficha técnica (PDF)" hint="Enlace https:// al PDF del fabricante."><input key={`d${p.id}`} className="input" defaultValue={p.datasheet_url || ""} onBlur={(e) => save({ datasheet_url: e.target.value.trim() })} /></Field>
           </div>
           <div style={{ display: "grid", gap: 6 }}>

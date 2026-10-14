@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..core.config import settings
 from ..core.db import get_db
-from ..core.deps import CLIENT_ROLES, ROLE_PERMISSIONS, Principal, get_principal, get_session_principal
+from ..core.deps import CLIENT_ROLES, ROLE_PERMISSIONS, Principal, effective_permissions, get_principal, get_session_principal
 from ..core.ratelimit import login_limiter
 from ..core.security import (
     create_access_token,
@@ -265,7 +265,8 @@ def totp_disable(data: PasswordOnlyIn, p: Principal = Depends(get_session_princi
 
 
 @router.get("/roles")
-def roles(_: Principal = Depends(get_principal)):
-    # matriz de roles internos (vista previa del admin); los de cliente tienen su propia interfaz
-    m = {k: v for k, v in ROLE_PERMISSIONS.items() if k not in CLIENT_ROLES}
+def roles(p: Principal = Depends(get_principal)):
+    # matriz de roles internos (vista previa del admin) con lo que la empresa habilito (Ajustes -> Quien ve costos);
+    # los de cliente tienen su propia interfaz. Aliado y tecnico de aliado salen aqui: aparecen en "Ver como".
+    m = {k: effective_permissions(p.tenant, k, v) for k, v in ROLE_PERMISSIONS.items() if k not in CLIENT_ROLES}
     return {"roles": list(m.keys()), "matrix": m}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -40,11 +41,24 @@ def _cust_name(db: Session, cid: int | None) -> str | None:
     return c.name if c else None
 
 
-def _quote_out(db: Session, q: Quote) -> QuoteOut:
+# Las cotizaciones hechas desde un levantamiento antes de la matriz de roles (13/10) guardaban en las notas internas
+# "Costo estimado ₡X · margen Y %". Las notas las lee todo el que ve el documento (contador, caja, solo lectura) y
+# pasan a la factura al convertir: a quien no ve costos se le quitan esas cifras al salir (ver tambien fieldwork).
+_COSTO_EN_NOTAS = re.compile(r"\s*Costo estimado\s*₡[^·\n]*·\s*margen[^%\n]*%\.?", re.IGNORECASE)
+
+
+def _notes_for(p: Principal, notes: str | None) -> str | None:
+    if not notes or p.sees_costs:
+        return notes
+    return _COSTO_EN_NOTAS.sub("", notes).strip() or None
+
+
+def _quote_out(db: Session, q: Quote, p: Principal) -> QuoteOut:
     from ..models import Opportunity
 
     o = QuoteOut.model_validate(q)
     o.customer_name = _cust_name(db, q.customer_id)
+    o.internal_notes = _notes_for(p, q.internal_notes)
     # el editor necesita saber si la cotizacion es de una oportunidad de venta (no ofrece "convertir a proyecto")
     opp = db.scalar(select(Opportunity).where(Opportunity.tenant_id == q.tenant_id, Opportunity.quote_id == q.id))
     o.opportunity = {"id": opp.id, "number": opp.number, "kind": opp.kind or "proyecto", "status": opp.status} if opp else None
@@ -58,9 +72,10 @@ def _quote_out(db: Session, q: Quote) -> QuoteOut:
     return o
 
 
-def _inv_out(db: Session, i: Invoice) -> InvoiceOut:
+def _inv_out(db: Session, i: Invoice, p: Principal) -> InvoiceOut:
     o = InvoiceOut.model_validate(i)
     o.customer_name = _cust_name(db, i.customer_id)
+    o.internal_notes = _notes_for(p, i.internal_notes)
     return o
 
 
@@ -205,7 +220,7 @@ def create_quote(data: DocumentIn, p: Principal = Depends(require("sales", "crea
     q = svc.create_quote(db, p.tenant.id, p.user.id, data)
     _hold(db, p, q, chk)
     db.commit()
-    return _quote_out(db, q)
+    return _quote_out(db, q, p)
 
 
 def _hold(db: Session, p: Principal, q, chk) -> list[str]:
@@ -223,7 +238,7 @@ def _hold(db: Session, p: Principal, q, chk) -> list[str]:
 
 @router.get("/quotes/{qid}", response_model=QuoteOut)
 def get_quote(qid: int, p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
-    return _quote_out(db, _own(db, Quote, qid, p.tenant.id, p))
+    return _quote_out(db, _own(db, Quote, qid, p.tenant.id, p), p)
 
 
 @router.put("/quotes/{qid}", response_model=QuoteOut)
@@ -247,7 +262,7 @@ def update_quote(qid: int, data: DocumentIn, p: Principal = Depends(require("sal
     sync_amount_from_quote(db, q)  # la oportunidad ligada toma el total nuevo
     audit(db, p.tenant.id, p.user.id, "update", "quote", q.id, {"discount_pct": str(chk.worst)} if chk.worst else None, ip=p.ip)
     db.commit()
-    return _quote_out(db, q)
+    return _quote_out(db, q, p)
 
 
 @router.post("/quotes/{qid}/convert", response_model=InvoiceOut, status_code=201)
@@ -266,7 +281,7 @@ def convert_quote(qid: int, p: Principal = Depends(require("sales", "crear")), d
             audit(db, p.tenant.id, p.user.id, "status", "opportunity", o.id, {"de": o.status, "a": "ganada"}, ip=p.ip)
             o.status = "ganada"
     db.commit()
-    return _inv_out(db, inv)
+    return _inv_out(db, inv, p)
 
 
 def _use_accepted(db: Session, p: Principal, q: Quote) -> None:
@@ -288,7 +303,7 @@ def duplicate_quote(qid: int, p: Principal = Depends(require("sales", "crear")),
     if discounts.check(db, p, payload).exceeds:
         nq.status = "por_aprobar"
     db.commit()
-    return _quote_out(db, nq)
+    return _quote_out(db, nq, p)
 
 
 @router.post("/quotes/{qid}/void", response_model=QuoteOut)
@@ -299,7 +314,7 @@ def void_quote(qid: int, p: Principal = Depends(require("sales", "anular")), db:
     q.status = "anulada"
     audit(db, p.tenant.id, p.user.id, "void", "quote", q.id, ip=p.ip)
     db.commit()
-    return _quote_out(db, q)
+    return _quote_out(db, q, p)
 
 
 class MarkSentIn(BaseModel):
@@ -322,7 +337,7 @@ def send_quote(qid: int, data: MarkSentIn | None = None, p: Principal = Depends(
     v, _ = qv.record_send(db, p.tenant, p.user.id, q, data.channel, data.to or _cust_name(db, q.customer_id), ip=p.ip)
     audit(db, p.tenant.id, p.user.id, "send", "quote", q.id, {"version": v.version, "canal": data.channel}, ip=p.ip)
     db.commit()
-    return _quote_out(db, q)
+    return _quote_out(db, q, p)
 
 
 # ---------- Versiones y aceptacion ----------
@@ -451,7 +466,7 @@ def quote_acceptance(qid: int, data: AcceptanceIn, p: Principal = Depends(requir
     )
     db.commit()
     db.refresh(q)
-    return _quote_out(db, q)
+    return _quote_out(db, q, p)
 
 
 @router.post("/quotes/{qid}/approve", response_model=QuoteOut)
@@ -464,7 +479,7 @@ def approve_quote(qid: int, p: Principal = Depends(require("sales", "aprobar")),
     motivo, q.approval_reason = q.approval_reason, None
     audit(db, p.tenant.id, p.user.id, "approve_quote", "quote", q.id, {"motivo": motivo}, ip=p.ip)
     db.commit()
-    return _quote_out(db, q)
+    return _quote_out(db, q, p)
 
 
 @router.get("/sales/discount-limit")
@@ -510,12 +525,12 @@ def create_invoice(data: DocumentIn, doc_type: str = "FE", p: Principal = Depend
     inv = svc.create_invoice(db, p.tenant.id, p.user.id, data, doc_type)
     invsvc.deduct_for_invoice(db, inv, p.user.id)
     db.commit()
-    return _inv_out(db, inv)
+    return _inv_out(db, inv, p)
 
 
 @router.get("/invoices/{iid}", response_model=InvoiceOut)
 def get_invoice(iid: int, p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
-    return _inv_out(db, _own(db, Invoice, iid, p.tenant.id, p))
+    return _inv_out(db, _own(db, Invoice, iid, p.tenant.id, p), p)
 
 
 @router.put("/invoices/{iid}", response_model=InvoiceOut)
@@ -534,7 +549,7 @@ def update_invoice(iid: int, data: DocumentIn, p: Principal = Depends(require("s
     svc.apply_document(db, inv, data, InvoiceLine, p.tenant.id)
     audit(db, p.tenant.id, p.user.id, "update", "invoice", inv.id, ip=p.ip)
     db.commit()
-    return _inv_out(db, inv)
+    return _inv_out(db, inv, p)
 
 
 @router.post("/invoices/{iid}/void", response_model=InvoiceOut)
@@ -546,7 +561,7 @@ def void_invoice(iid: int, p: Principal = Depends(require("sales", "anular")), d
     invsvc.restock_for_void(db, inv, p.user.id)
     audit(db, p.tenant.id, p.user.id, "void", "invoice", inv.id, ip=p.ip)
     db.commit()
-    return _inv_out(db, inv)
+    return _inv_out(db, inv, p)
 
 
 @router.post("/invoices/{iid}/payments", response_model=InvoiceOut, status_code=201)
@@ -555,7 +570,7 @@ def pay_invoice(iid: int, data: PaymentIn, p: Principal = Depends(require("payme
     svc.add_payment(db, p.tenant.id, p.user.id, inv, data)
     db.commit()
     db.refresh(inv)
-    return _inv_out(db, inv)
+    return _inv_out(db, inv, p)
 
 
 @router.post("/invoices/{iid}/payment-link", response_model=PaymentLinkOut)
@@ -750,11 +765,21 @@ def _ceo_row(db: Session, p: Principal) -> dict:
     closed = db.scalars(
         select(Project).where(Project.tenant_id == tid, Project.status.in_(("terminado", "entregado", "facturado")), Project.updated_at >= m0, live(Project))
     ).all()
-    # un cerrado sin costos registrados no es ganancia: queda fuera de la utilidad del mes hasta que se registren
-    costos = {x.id: consumed_cost(db, x) + d(x.cost_labor) + d(x.cost_travel) + d(x.cost_extra) for x in closed}
-    sin_costos = [x for x in closed if costos[x.id] <= 0]
-    closed_cost = [x for x in closed if costos[x.id] > 0]
-    profit = sum((d(x.price) - costos[x.id] for x in closed_cost), Decimal(0))
+    # Utilidad y margen del mes son informacion de costos (Andres 08:07: solo el admin y lo que habilite en Ajustes):
+    # sin catalog.costos ni se calculan y salen en None (el contador y solo lectura ven la fila sin utilidad).
+    utilidad = None
+    if p.sees_costs:
+        # un cerrado sin costos registrados no es ganancia: queda fuera de la utilidad del mes hasta que se registren
+        costos = {x.id: consumed_cost(db, x) + d(x.cost_labor) + d(x.cost_travel) + d(x.cost_extra) for x in closed}
+        sin_costos = [x for x in closed if costos[x.id] <= 0]
+        closed_cost = [x for x in closed if costos[x.id] > 0]
+        profit = sum((d(x.price) - costos[x.id] for x in closed_cost), Decimal(0))
+        venta = sum((d(x.price) for x in closed_cost), Decimal(0))
+        utilidad = {
+            "profit_month": profit.quantize(Decimal("0.01")),
+            "margin_month": pricing.margin_of(venta, venta - profit),
+            "projects_without_costs": len(sin_costos),
+        }
     sold = d(
         db.scalar(select(func.coalesce(func.sum(Invoice.total), 0)).where(Invoice.tenant_id == tid, Invoice.status != "anulada", Invoice.issue_date >= m0))
     )
@@ -778,9 +803,7 @@ def _ceo_row(db: Session, p: Principal) -> dict:
         "opportunities": len(opps),
         "receivable": receivable,
         "sold_month": sold,
-        "profit_month": profit.quantize(Decimal("0.01")),
-        "margin_month": pricing.margin_of(sum((d(x.price) for x in closed_cost), Decimal(0)), sum((d(x.price) for x in closed_cost), Decimal(0)) - profit),
-        "projects_without_costs": len(sin_costos),
+        **(utilidad or {"profit_month": None, "margin_month": None, "projects_without_costs": None}),
         "projects_active": len(active),
         "projects_closed_month": len(closed),
         "jobs_open": len(jobs),

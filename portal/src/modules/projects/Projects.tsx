@@ -103,7 +103,9 @@ function Detail({ id }: { id: number }) {
     try {
       await api(`/projects/${p.id}`, { method: "PUT", json: {
         name: p.name, customer_id: p.customer_id, site: p.site, scope: p.scope, start_date: p.start_date, end_date: edit.end_date || null,
-        status: edit.status, cost_labor: Number(edit.cost_labor || 0), cost_travel: Number(edit.cost_travel || 0), cost_extra: Number(edit.cost_extra || 0), notes: edit.notes || null,
+        status: edit.status, notes: edit.notes || null,
+        // la economia solo la manda quien la ve (si no, iria en 0); la API igual la ignora sin catalog.costos
+        ...(verPlata ? { cost_labor: Number(edit.cost_labor || 0), cost_travel: Number(edit.cost_travel || 0), cost_extra: Number(edit.cost_extra || 0) } : {}),
       } });
       toast("Proyecto actualizado"); setEdit(null); load();
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }

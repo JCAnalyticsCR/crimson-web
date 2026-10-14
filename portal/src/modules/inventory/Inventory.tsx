@@ -101,7 +101,7 @@ export default function Inventory() {
       </div>
 
       <div className="tabs" style={{ alignSelf: "flex-start" }} role="tablist">
-        {[["existencias", "Existencias"], ["reservas", "Reservas"], ["seriales", "Seriales"], ["web", "Inventario web"], ...(allows("catalog.ver") ? [["proveedores", "Proveedores"]] : [])].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "is-active" : ""} onClick={() => setTab(k)}>{l}</button>)}
+        {[["existencias", "Existencias"], ["reservas", "Reservas"], ["seriales", "Seriales"], ...(allows("catalog.precios") ? [["web", "Inventario web"]] : []), ...(allows("catalog.ver") ? [["proveedores", "Proveedores"]] : [])].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "is-active" : ""} onClick={() => setTab(k)}>{l}</button>)}
       </div>
 
       {tab === "existencias" && <>
@@ -137,7 +137,8 @@ export default function Inventory() {
 
       {tab === "reservas" && <Reservations products={products} whs={whs} projects={projects} onChange={load} />}
       {tab === "seriales" && <Units products={products} whs={whs} projects={projects} onChange={load} />}
-      {tab === "web" && <WebInventory />}
+      {/* la tienda es precio: el tecnico (inventory.ver sin precios) no tiene esta pestaña */}
+      {tab === "web" && allows("catalog.precios") && <WebInventory />}
       {tab === "proveedores" && allows("catalog.ver") && <SupplierCatalog />}
 
       {modal === "move" && (

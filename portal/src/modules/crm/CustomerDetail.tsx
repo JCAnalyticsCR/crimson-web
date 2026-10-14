@@ -10,7 +10,7 @@ type Ev = { at: string; kind: string; title: string; amount?: string; currency?:
 type Asset = { id: number; name: string; model: string | null; serial: string | null; location: string | null; installed_at: string | null; warranty_until: string | null; warranty_days: number | null };
 type Proj = { id: number; number: string; name: string; status: string; end_date: string | null };
 type Opp = { id: number; number: string; title: string; status: string; amount: string; next_action_date: string | null };
-type Tick = { id: number; number: string; subject: string; kind: string; status: string; hours: string; billable: boolean; amount: string; created_at: string };
+type Tick = { id: number; number: string; subject: string; kind: string; status: string; hours: string; billable: boolean; amount: string | null; created_at: string };
 type Overview = {
   customer: Cust; kpis: { billed: string; due: string; invoices: number; quotes: number; last_purchase: string | null; overdue: number }; timeline: Ev[];
   assets?: Asset[]; projects?: Proj[]; opportunities?: Opp[]; tickets?: Tick[];
@@ -123,7 +123,7 @@ export default function CustomerDetail() {
                 <td className="mono muted">{t.number}</td><td style={{ fontWeight: 600 }}>{t.subject}</td>
                 <td className="muted" style={{ textTransform: "capitalize" }}>{t.kind}</td>
                 <td className="num mono">{Number(t.hours || 0)}</td>
-                <td className="num money">{t.billable ? fmtMoney(t.amount, c.currency) : <span className="muted">garantía</span>}</td>
+                <td className="num money">{!t.billable ? <span className="muted">garantía</span> : t.amount == null ? <span className="muted">se cobra</span> : fmtMoney(t.amount, c.currency)}</td>
                 <td><Badge status={t.status} /></td>
               </tr>
             ))}</tbody>

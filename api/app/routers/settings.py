@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from ..core.config import settings as cfg
 from ..core.crypto import encrypt, mask
 from ..core.db import get_db
-from ..core.deps import ASSIGNABLE_ROLES, Principal, require
+from ..core.deps import ASSIGNABLE_ROLES, COST_ROLE_CHOICES, Principal, cost_roles, require
 from ..core.security import hash_password, hash_token, password_is_strong
 from ..models import BankAccount, BillingGroup, EmailOutbox, Invitation, PaymentGatewayConfig, Tenant, TenantUser, User
 from ..providers.payments import OnvoAdapter, OnvoError, key_mode, key_problem, webhook_secret_problem
@@ -60,6 +60,7 @@ DEFAULTS = {
     # reservas: 0 = toda reserva requiere aprobacion; X = las de proyectos hasta X unidades se confirman solas
     "reservation_auto_approve_units": 0,
     "reservation_days": 15,  # vigencia por defecto de una reserva
+    "cost_roles": [],  # roles que, ademas del admin, ven costos (Andres 08:07: por defecto nadie)
 }
 
 
@@ -105,6 +106,19 @@ class SettingsIn(BaseModel):
     prevent_negative_stock: bool | None = None
     reservation_auto_approve_units: float | None = Field(None, ge=0, le=100000)
     reservation_days: int | None = Field(None, ge=1, le=365)
+    # Ajustes -> Usuarios -> "Quien ve costos": roles que, ademas del admin, ven costo, margen y utilidad
+    cost_roles: list[str] | None = None
+
+    @field_validator("cost_roles")
+    @classmethod
+    def _cost_roles(cls, v):
+        if v is None:
+            return None
+        malos = [r for r in v if r not in COST_ROLE_CHOICES]
+        if malos:
+            # ventas, caja, tecnicos, aliados y clientes nunca ven costos, ni por ajuste (Andres 08:07)
+            raise ValueError(f"Estos roles no pueden ver costos: {', '.join(malos)}")
+        return list(dict.fromkeys(v))
 
 
 @router.get("")
@@ -115,7 +129,13 @@ def get_settings(p: Principal = Depends(require("settings", "ver"))):
 @router.put("")
 def put_settings(data: SettingsIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
     t = db.get(Tenant, p.tenant.id)
+    antes = list((t.settings or {}).get("cost_roles") or [])
     t.settings = {**DEFAULTS, **(t.settings or {}), **data.model_dump(exclude_unset=True, mode="json")}
+    if "cost_roles" in data.model_fields_set:
+        # quien ve costos es un permiso: queda en la bitacora con antes/despues (solo si cambio). Aplica en la
+        # siguiente peticion: los permisos se calculan en cada request, no hace falta cerrar sesiones.
+        despues = list(t.settings.get("cost_roles") or [])
+        audit_change(db, p, "permissions", "tenant", t.id, {"cost_roles": antes}, {"cost_roles": despues}, reason="Quien ve costos")
     db.commit()
     return t.settings
 
@@ -210,6 +230,9 @@ def users(p: Principal = Depends(require("settings", "ver")), db: Session = Depe
         ],
         "invitations": [{"id": i.id, "email": i.email, "role": i.role_code, "expires_at": i.expires_at} for i in inv],
         "roles": ASSIGNABLE_ROLES,
+        # "Quien ve costos": lo habilitado hoy y los roles que se pueden habilitar (el resto nunca)
+        "cost_roles": list(cost_roles(p.tenant)),
+        "cost_role_choices": list(COST_ROLE_CHOICES),
     }
 
 

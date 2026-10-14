@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate } from "../lib/api";
 import { useSession } from "../app/session";
+import { roleMeta } from "../app/roles";
+import RoleMatrix from "../app/RoleMatrix";
 import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../ui/components";
 import { ImageField } from "../ui/MediaPicker";
 import { SlaSettings } from "./support/SlaTable";
@@ -12,7 +14,7 @@ import DataExport from "./tools/DataExport";
 type Group = { id: number; doc_type: string; prefix: string; branch: string; terminal: string; current: number; is_default: boolean };
 type Cfg = { prevent_negative_stock?: boolean; reservation_auto_approve_units?: number; reservation_days?: number; labor_day_cost?: number; labor_day_cost_civil?: number; labor_day_cost_contratado?: number; per_diem_cost?: number; travel_cost?: number; max_discount_pct?: number; archive_purge_days?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; notify_due: boolean; remind_days_before: number; daily_close_email: boolean; bcc: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
 type Bank = { id: number; name: string; bank: string | null; currency: string; number: string | null; active: boolean };
-type Users = { users: { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null }[]; invitations: { id: number; email: string; role: string; expires_at: string }[]; roles: string[] };
+type Users = { users: { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null }[]; invitations: { id: number; email: string; role: string; expires_at: string }[]; roles: string[]; cost_roles: string[]; cost_role_choices: string[] };
 type Gw = { id: number; provider: string; client_id: string | null; secret_mask: string | null; is_primary: boolean; active: boolean; mode: string; webhook_secret_set: boolean };
 type OnvoStatus = { configured: boolean; source: "ajustes" | "entorno" | null; mode: "test" | "live" | null; webhook_secret: boolean; webhook_url: string; active: boolean; problems: string[] };
 /* Llaves largas (onvo_test_publishable_key_…) rompian la tabla: prefijo + ultimos 4; la completa queda en el title. */
@@ -221,14 +223,23 @@ export default function Settings() {
       )}
 
       {tab === "usuarios" && users && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
         <Card title="Usuarios y roles" flush extra={<button className="btn btn--crimson btn--sm" onClick={() => setInvite({ email: "", role: "ventas" })}><Icon d={I.plus} />Invitar</button>}>
           <table className="table"><thead><tr><th>Usuario</th><th>Rol</th><th>2FA</th><th>Último acceso</th><th>Estado</th><th /></tr></thead>
             <tbody>
-              {users.users.map((u) => <tr key={u.id}><td><b>{u.name}</b><div className="meta" style={{ textTransform: "none" }}>{u.email}</div></td><td><select className="select" style={{ height: 32, width: 150 }} value={u.role} onChange={(e) => setRole(u.id, e.target.value)}>{users.roles.map((r) => <option key={r}>{r}</option>)}</select></td><td>{u.totp ? <Badge status="confirmado" /> : <span className="muted">—</span>}</td><td className="muted">{u.last_login ? fmtDate(u.last_login.slice(0, 10)) : "nunca"}</td><td><Badge status={u.active ? "confirmado" : "anulada"} /></td><td className="num">{u.id !== me?.user.id && <button className="btn btn--ghost btn--sm" onClick={() => setActive(u.id, !u.active)}>{u.active ? "Desactivar" : "Activar"}</button>}</td></tr>)}
-              {users.invitations.map((i) => <tr key={`i${i.id}`}><td><b>{i.email}</b><div className="meta">invitación pendiente</div></td><td className="muted">{i.role}</td><td>—</td><td className="muted">vence {fmtDate(i.expires_at.slice(0, 10))}</td><td><Badge status="pendiente" /></td><td /></tr>)}
+              {users.users.map((u) => <tr key={u.id}><td><b>{u.name}</b><div className="meta" style={{ textTransform: "none" }}>{u.email}</div></td><td><select className="select" style={{ height: 32, width: 170 }} value={u.role} onChange={(e) => setRole(u.id, e.target.value)}>{!users.roles.includes(u.role) && <option value={u.role} disabled>{roleMeta(u.role).label}</option>}{users.roles.map((r) => <option key={r} value={r}>{roleMeta(r).label}</option>)}</select></td><td>{u.totp ? <Badge status="confirmado" /> : <span className="muted">—</span>}</td><td className="muted">{u.last_login ? fmtDate(u.last_login.slice(0, 10)) : "nunca"}</td><td><Badge status={u.active ? "confirmado" : "anulada"} /></td><td className="num">{u.id !== me?.user.id && <button className="btn btn--ghost btn--sm" onClick={() => setActive(u.id, !u.active)}>{u.active ? "Desactivar" : "Activar"}</button>}</td></tr>)}
+              {users.invitations.map((i) => <tr key={`i${i.id}`}><td><b>{i.email}</b><div className="meta">invitación pendiente</div></td><td className="muted">{roleMeta(i.role).label}</td><td>—</td><td className="muted">vence {fmtDate(i.expires_at.slice(0, 10))}</td><td><Badge status="pendiente" /></td><td /></tr>)}
             </tbody></table>
-          <p className="muted" style={{ padding: "10px 18px", fontSize: 12 }}>Roles: admin (todo), ventas, caja, inventario, contabilidad, lectura. Los permisos se aplican en el menú y en la API.</p>
+          <p className="muted" style={{ padding: "10px 18px", fontSize: 12 }}>Cada rol ve solo sus secciones del menú y la API aplica los mismos permisos. Roles: {users.roles.map((r) => roleMeta(r).label).join(" · ")}. Los usuarios de aliados y de clientes no se invitan desde aquí: se dan de alta desde la empresa aliada o desde Accesos de clientes.</p>
         </Card>
+        {allows("settings.configurar") && <CostRoles key={users.cost_roles.join(",")} current={users.cost_roles} choices={users.cost_role_choices} onSaved={() => api<Users>("/settings/users").then(setUsers)} />}
+        {me?.role === "admin" && (
+          <Card title="Qué ve cada rol" extra={<span className="meta">sale del código: menú y permisos</span>}>
+            <p className="muted" style={{ fontSize: 12.5, marginTop: 0 }}>Operación, Técnico, Catálogo y Administración son grupos del menú, no roles. Para ver el panel exactamente como lo ve una persona, usá «Ver como» arriba a la derecha.</p>
+            <RoleMatrix />
+          </Card>
+        )}
+        </div>
       )}
 
       {tab === "cuenta" && (
@@ -340,7 +351,7 @@ export default function Settings() {
       </Modal>}
       {invite && <Modal title="Invitar usuario" onClose={() => setInvite(null)} foot={<><button className="btn btn--ghost" onClick={() => setInvite(null)}>Cancelar</button><button className="btn btn--crimson" onClick={sendInvite}>Enviar invitación</button></>}>
         <Field label="Correo"><input className="input" type="email" value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} /></Field>
-        <Field label="Rol"><select className="select" value={invite.role} onChange={(e) => setInvite({ ...invite, role: e.target.value })}>{users?.roles.map((r) => <option key={r}>{r}</option>)}</select></Field>
+        <Field label="Rol" hint={roleMeta(invite.role).summary}><select className="select" value={invite.role} onChange={(e) => setInvite({ ...invite, role: e.target.value })}>{users?.roles.map((r) => <option key={r} value={r}>{roleMeta(r).label}</option>)}</select></Field>
       </Modal>}
       {inviteLink && <Modal title="Invitación creada" onClose={() => setInviteLink(null)} foot={<button className="btn btn--ghost" onClick={() => setInviteLink(null)}>Cerrar</button>}>
         <p className="muted" style={{ fontSize: 13 }}>{inviteMailed ? "Se envió por correo. También podés compartir el enlace directamente; vence en 7 días." : "El correo no salió (el envío de correos todavía no está activo). Compartí este enlace directamente; vence en 7 días."}</p>
@@ -348,6 +359,39 @@ export default function Settings() {
         <button className="btn btn--soft" style={{ alignSelf: "flex-start" }} onClick={() => { navigator.clipboard.writeText(inviteLink); toast("Enlace copiado"); }}><Icon d={I.copy} />Copiar</button>
       </Modal>}
     </>
+  );
+}
+
+/* "Quién ve costos" (13/10, 08:07: "eso solo lo puede ver el administrador"). Por defecto nadie más; el admin puede
+   habilitar a supervisor, contador, bodega o solo lectura sin desplegar. Ventas, caja, técnicos y aliados: nunca. */
+function CostRoles({ current, choices, onSaved }: { current: string[]; choices: string[]; onSaved: () => void }) {
+  const { toast, reloadMatrix } = useSession();
+  const [sel, setSel] = useState<string[]>(current);
+  const [busy, setBusy] = useState(false);
+  const changed = sel.length !== current.length || sel.some((r) => !current.includes(r));
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api("/settings", { method: "PUT", json: { cost_roles: sel } });
+      toast(sel.length ? `Listo: además del administrador, ven costos: ${sel.map((r) => roleMeta(r).label).join(", ")}` : "Listo: los costos los ve solo el administrador");
+      onSaved(); reloadMatrix();
+    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Card title="Quién ve costos y márgenes">
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>El costo del proveedor, el margen y la utilidad los ve solo el administrador. Si querés que otro rol también los vea, marcalo. Gastos, facturas de proveedor y planillas no cuentan aquí: son de Contabilidad.</p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 18px", marginBottom: 12 }}>
+        {choices.map((r) => (
+          <label key={r} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13.5 }}>
+            <input type="checkbox" checked={sel.includes(r)} onChange={(e) => setSel(e.target.checked ? [...sel, r] : sel.filter((x) => x !== r))} />
+            {roleMeta(r).label}
+          </label>
+        ))}
+      </div>
+      <p className="muted" style={{ fontSize: 12, margin: "0 0 12px" }}>Aplica en la siguiente acción de cada persona (al recargar la página); no hace falta que cierre sesión.</p>
+      <button className="btn btn--crimson btn--sm" onClick={save} disabled={busy || !changed}>{busy ? "Guardando…" : "Guardar"}</button>
+    </Card>
   );
 }
 

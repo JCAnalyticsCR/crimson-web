@@ -536,6 +536,10 @@ async def run_import(
     mod, act = PERM[kind]
     if not p.can(mod, act):
         raise HTTPException(403, f"Sin permiso: {mod}.{act}")
+    if kind == "catalogo" and not p.sees_costs:
+        # la lista del proveedor escribe costo y margen (y la vista previa deja deducir el margen por defecto):
+        # quien no ve costos tampoco los escribe (Andres 08:07). Igual que supplier_catalog.import_list.
+        raise HTTPException(403, "Sin permiso: catalog.costos")
     data = await file.read(MAX + 1)
     if len(data) > MAX:
         raise HTTPException(413, "Archivo muy grande (maximo 5 MB)")

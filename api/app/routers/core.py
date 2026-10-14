@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
@@ -32,6 +32,12 @@ def get_tenant(p: Principal = Depends(get_principal)):
 def update_tenant(data: TenantUpdate, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
     for k, v in data.model_dump(exclude_unset=True).items():
         if k == "settings" and v is not None:
+            v = dict(v)
+            if "cost_roles" in v:
+                # "Quien ve costos" es un permiso: solo por PUT /settings, que lo valida y lo deja en la bitacora.
+                # Si viene igual a lo guardado (alguien reenvia el dict completo) se ignora; si cambia, se rechaza.
+                if list(v.pop("cost_roles") or []) != list((p.tenant.settings or {}).get("cost_roles") or []):
+                    raise HTTPException(422, "Quién ve costos se cambia en Ajustes → Usuarios (queda en la bitácora)")
             p.tenant.settings = {**(p.tenant.settings or {}), **v}
         else:
             setattr(p.tenant, k, v)

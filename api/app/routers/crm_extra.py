@@ -132,10 +132,15 @@ def _ts(v) -> str:
 
 @router.get("/customers/{cid}/overview")
 def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Session = Depends(get_db)):
+    from .projects import sees_project  # una sola definicion del alcance de proyectos
+    from .support_desk import ticket_scope  # una sola definicion del alcance de tickets (la de la pantalla de soporte)
+
     c = _customer(db, cid, p.tenant.id)
     tid = p.tenant.id
     own_i = [Invoice.created_by == p.user.id] if not p.sees_all_sales else []
     own_q = [Quote.created_by == p.user.id] if not p.sees_all_sales else []
+    # el vendedor (sin crm_pipeline.ver_todo) solo ve sus oportunidades, igual que en el embudo
+    own_o = [Opportunity.owner_id == p.user.id] if not p.can("crm_pipeline", "ver_todo") else []
     invs = (
         db.scalars(select(Invoice).where(Invoice.tenant_id == tid, Invoice.customer_id == cid, *own_i).order_by(Invoice.issue_date.desc())).all()
         if p.can("sales", "ver")
@@ -155,7 +160,12 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
         if inv_ids
         else []
     )
-    orders = db.scalars(select(Order).where(Order.tenant_id == tid, Order.customer_id == cid).order_by(Order.id.desc()).limit(30)).all()
+    # los pedidos web traen montos: solo quien ve ventas (antes los veia cualquiera con crm.ver, incluido el tecnico)
+    orders = (
+        db.scalars(select(Order).where(Order.tenant_id == tid, Order.customer_id == cid).order_by(Order.id.desc()).limit(30)).all()
+        if p.can("sales", "ver")
+        else []
+    )
     notes = db.scalars(select(CustomerNote).where(CustomerNote.customer_id == cid).order_by(CustomerNote.id.desc())).all()
     authors = {u.id: u.full_name for u in db.scalars(select(User).where(User.id.in_({n.created_by for n in notes if n.created_by})))} if notes else {}
 
@@ -256,15 +266,24 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
         ]
         if p.can("assets", "ver")
         else [],
+        # mismo alcance que la pantalla de proyectos (el tecnico: los que supervisa o donde tiene una OT)
         "projects": [
             {"id": x.id, "number": x.number, "name": x.name, "status": x.status, "end_date": x.end_date}
-            for x in db.scalars(
-                select(Project).where(Project.tenant_id == tid, Project.customer_id == cid, not_archived(Project)).order_by(Project.id.desc()).limit(20)
-            )
+            for x in [
+                pr
+                for pr in db.scalars(
+                    select(Project)
+                    .where(Project.tenant_id == tid, Project.customer_id == cid, not_archived(Project))
+                    .order_by(Project.id.desc())
+                    .limit(20 if p.can("projects", "ver_todo") else 300)
+                )
+                if sees_project(p, pr)
+            ][:20]
         ]
         if p.can("projects", "ver")
         else [],
-        # "si se les ha hecho soporte tecnico a ellos... y el costo que tiene esos soportes"
+        # "si se les ha hecho soporte tecnico a ellos... y el costo que tiene esos soportes". Mismo alcance que la
+        # pantalla de tickets (el tecnico, los suyos) y el monto solo para quien ve precios.
         "tickets": [
             {
                 "id": t.id,
@@ -274,12 +293,10 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
                 "status": t.status,
                 "hours": t.hours,
                 "billable": t.billable,
-                "amount": t.amount,
+                "amount": t.amount if p.sees_prices else None,
                 "created_at": t.created_at,
             }
-            for t in db.scalars(
-                select(SupportTicket).where(SupportTicket.tenant_id == tid, SupportTicket.customer_id == cid, not_archived(SupportTicket)).order_by(SupportTicket.id.desc()).limit(20)
-            )
+            for t in db.scalars(select(SupportTicket).where(*ticket_scope(p), SupportTicket.customer_id == cid).order_by(SupportTicket.id.desc()).limit(20))
         ]
         if p.can("support_desk", "ver")
         else [],
@@ -287,7 +304,7 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
             {"id": x.id, "number": x.number, "title": x.title, "status": x.status, "amount": x.amount, "next_action_date": x.next_action_date}
             for x in db.scalars(
                 select(Opportunity)
-                .where(Opportunity.tenant_id == tid, Opportunity.customer_id == cid, not_archived(Opportunity))
+                .where(Opportunity.tenant_id == tid, Opportunity.customer_id == cid, not_archived(Opportunity), *own_o)
                 .order_by(Opportunity.id.desc())
                 .limit(20)
             )
@@ -314,13 +331,14 @@ def _product(db: Session, pid: int, tid: int) -> Product:
     return pr
 
 
-def variant_out(v: ProductVariant, base_price) -> dict:
+def variant_out(v: ProductVariant, base_price, precios: bool = True) -> dict:
+    """precios=False (el tecnico: catalog.ver sin precios) no devuelve el precio de la variante ni el del producto."""
     return {
         "id": v.id,
         "name": v.name,
         "code": v.code,
-        "price": v.price,
-        "effective_price": v.price if v.price is not None else base_price,
+        "price": v.price if precios else None,
+        "effective_price": (v.price if v.price is not None else base_price) if precios else None,
         "options": v.options,
         "active": v.active,
     }
@@ -330,7 +348,7 @@ def variant_out(v: ProductVariant, base_price) -> dict:
 def variants(pid: int, p: Principal = Depends(require("catalog", "ver")), db: Session = Depends(get_db)):
     pr = _product(db, pid, p.tenant.id)
     rows = db.scalars(select(ProductVariant).where(ProductVariant.product_id == pid).order_by(ProductVariant.position, ProductVariant.id)).all()
-    return [variant_out(v, pr.price) for v in rows]
+    return [variant_out(v, pr.price, p.sees_prices) for v in rows]
 
 
 @router.put("/products/{pid}/variants")
@@ -355,7 +373,10 @@ def variants_replace(pid: int, data: list[VariantIn], p: Principal = Depends(req
         if not row:
             row = ProductVariant(tenant_id=p.tenant.id, product_id=pid)
             db.add(row)
-        row.name, row.code, row.price, row.options, row.active, row.position = v.name, v.code.strip(), v.price, v.options, v.active, pos
+        row.name, row.code, row.options, row.active, row.position = v.name, v.code.strip(), v.options, v.active, pos
+        if p.sees_prices:
+            # quien no ve precios los recibe vacios y los mandaria vacios: sin esto borraba el precio de la variante
+            row.price = v.price
         db.flush()
         keep.add(row.id)
     for vid, row in current.items():
@@ -364,7 +385,7 @@ def variants_replace(pid: int, data: list[VariantIn], p: Principal = Depends(req
     audit(db, p.tenant.id, p.user.id, "variants", "product", pid, {"count": len(data)}, ip=p.ip)
     db.commit()
     rows = db.scalars(select(ProductVariant).where(ProductVariant.product_id == pid).order_by(ProductVariant.position, ProductVariant.id)).all()
-    return [variant_out(v, pr.price) for v in rows]
+    return [variant_out(v, pr.price, p.sees_prices) for v in rows]
 
 
 @router.get("/products/{pid}/link")

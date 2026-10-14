@@ -11,7 +11,7 @@ import { TrashButton } from "../../ui/TrashButton";
 type Line = { id?: number; product_id: number | null; name: string; quantity: string; unit_cost: string };
 type Req = {
   id: number; number: string; status: string; reason: string; supplier_id: number | null; supplier: string | null;
-  project_id: number | null; project: string | null; total_cost: string; currency: string; notes: string | null; created_at: string; lines: Line[];
+  project_id: number | null; project: string | null; total_cost: string | null; currency: string; notes: string | null; created_at: string; lines: Line[];
 };
 type Named = { id: number; name: string };
 
@@ -112,13 +112,14 @@ export default function Purchases() {
             <Field label="Notas"><input className="input" value={nuevo.notes} onChange={(e) => setNuevo({ ...nuevo, notes: e.target.value })} placeholder="Para la obra de Los Robles, urge el jueves" /></Field>
           </div>
           <table className="table">
-            <thead><tr><th>Material</th><th>Inventario</th><th className="num">Cantidad</th><th className="num">Costo unit.</th><th /></tr></thead>
+            <thead><tr><th>Material</th><th>Inventario</th><th className="num">Cantidad</th>{verCostos && <th className="num">Costo unit.</th>}<th /></tr></thead>
             <tbody>{nuevo.lines.map((l, i) => (
               <tr key={i}>
                 <td><Lookup value={l.name} placeholder="Buscar en el catálogo…" fetcher={searchProducts} onSelect={(pr, text) => setLine(i, { product_id: pr ? pr.id : null, name: text })} /></td>
                 <td className="muted" style={{ fontSize: 12.5 }}>{l.product_id ? "Entra a bodega" : "Sin código"}</td>
                 <td className="num"><input className="input input--mono" style={{ maxWidth: 100 }} inputMode="decimal" value={l.quantity} onChange={(e) => setLine(i, { quantity: e.target.value })} /></td>
-                <td className="num"><input className="input input--mono" style={{ maxWidth: 120 }} inputMode="decimal" value={l.unit_cost} onChange={(e) => setLine(i, { unit_cost: e.target.value })} /></td>
+                {/* el costo es del administrador (13/10, 08:07): la API lo toma del producto y no lo devuelve a quien no lo ve */}
+                {verCostos && <td className="num"><input className="input input--mono" style={{ maxWidth: 120 }} inputMode="decimal" value={l.unit_cost} onChange={(e) => setLine(i, { unit_cost: e.target.value })} /></td>}
                 <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setNuevo({ ...nuevo, lines: nuevo.lines.filter((_, j) => j !== i) })}><Icon d={I.x} size={14} /></button></td>
               </tr>
             ))}</tbody>

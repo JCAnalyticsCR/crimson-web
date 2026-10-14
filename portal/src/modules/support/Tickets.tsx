@@ -16,10 +16,10 @@ type Ticket = {
   work_order_id: number | null; assigned_to: number | null; assigned: string | null; due_at: string | null; first_reply_at: string | null;
   resolved_at: string | null; sla_vencido: boolean; resolve_due_at: string | null; resolucion_vencida: boolean; fuera_de_tiempo: boolean;
   contact?: Record<string, string | null>;
-  sla: { respuesta_h: number | null; resolucion_h: number | null; origen: string | null; origen_label: string; contrato: string | null } | null; hours: string; billable: boolean; amount: string; tags: string[]; created_at: string;
+  sla: { respuesta_h: number | null; resolucion_h: number | null; origen: string | null; origen_label: string; contrato: string | null } | null; hours: string; billable: boolean; amount: string | null; tags: string[]; created_at: string;
   description?: string | null; solution?: string | null; photos?: string[]; notes?: Note[];
 };
-type Meta = { kinds: string[]; states: string[]; priorities: string[]; channels: string[]; sla_horas: Record<string, number>; agents: { id: number; name: string }[]; abiertos: number; fuera_de_tiempo: number; can_see_all: boolean };
+type Meta = { kinds: string[]; states: string[]; priorities: string[]; channels: string[]; sla_horas: Record<string, number>; agents: { id: number; name: string }[]; abiertos: number; fuera_de_tiempo: number; can_see_all: boolean; can_charge?: boolean };
 
 const KIND: Record<string, string> = { soporte: "Soporte", garantia: "Garantía", mantenimiento: "Mantenimiento", visita: "Visita", instalacion: "Instalación", consulta: "Consulta" };
 const ESTADO: Record<string, { label: string; tone: string }> = {
@@ -33,6 +33,8 @@ const cuando = (s: string | null) => (s ? parseTs(s).toLocaleString("es-CR", { d
 
 export default function Tickets() {
   const { toast, allows, me } = useSession();
+  // el monto que se cobra es precio: el tecnico no lo ve ni lo escribe (13/10, 22:07); lo pone admin o contabilidad
+  const verMonto = allows("catalog.precios");
   const [params, setParams] = useSearchParams();
   const [rows, setRows] = useState<Ticket[] | null>(null);
   const [meta, setMeta] = useState<Meta | null>(null);
@@ -45,6 +47,8 @@ export default function Tickets() {
   const [nota, setNota] = useState({ body: "", internal: false, hours: "", photos: [] as string[] });
   const [cerrar, setCerrar] = useState<{ solution: string; hours: string; billable: boolean; amount: string } | null>(null);
   const [visita, setVisita] = useState<{ technician_id: string; scheduled_at: string; site: string } | null>(null);
+  // monto de un ticket cobrable ya resuelto (el tecnico no lo escribe): admin, supervisor o contador (meta.can_charge)
+  const [monto, setMonto] = useState<string | null>(null);
 
   const cliente = params.get("cliente");
   const load = useCallback(() => {
@@ -59,7 +63,7 @@ export default function Tickets() {
   }, [status, kind, q, cliente]);
   useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); }, [load]);
 
-  const show = useCallback(async (id: number) => { setOpen(await api<Ticket>(`/tickets/${id}`)); setNota({ body: "", internal: false, hours: "", photos: [] }); }, []);
+  const show = useCallback(async (id: number) => { setOpen(await api<Ticket>(`/tickets/${id}`)); setNota({ body: "", internal: false, hours: "", photos: [] }); setMonto(null); }, []);
   useEffect(() => { const id = params.get("id"); if (id) show(Number(id)); }, [params, show]);
 
   const body = (f: typeof blank) => ({
@@ -88,6 +92,12 @@ export default function Tickets() {
   const mover = async (st: string, extra: Record<string, unknown> = {}) => {
     if (!open) return;
     try { const t = await api<Ticket>(`/tickets/${open.id}`, { method: "PATCH", json: { status: st, ...extra } }); setOpen(t); setCerrar(null); load(); toast("Ticket actualizado"); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
+
+  const guardarMonto = async () => {
+    if (!open || monto === null) return;
+    try { const t = await api<Ticket>(`/tickets/${open.id}/amount`, { method: "PATCH", json: { amount: Number(monto || 0) } }); setOpen(t); setMonto(null); load(); toast("Monto guardado"); }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
 
@@ -156,8 +166,22 @@ export default function Tickets() {
             <div className={`eco__box ${open.sla_vencido ? "is-bad" : ""}`}><span className="meta">Primera respuesta</span><b style={{ fontSize: 15 }}>{open.first_reply_at ? cuando(open.first_reply_at) : `antes de ${cuando(open.due_at)}`}</b></div>
             <div className={`eco__box ${open.resolucion_vencida ? "is-bad" : ""}`}><span className="meta">Resolución</span><b style={{ fontSize: 15 }}>{open.resolved_at ? cuando(open.resolved_at) : open.resolve_due_at ? `antes de ${cuando(open.resolve_due_at)}` : "—"}</b></div>
             <div className="eco__box"><span className="meta">Horas</span><b>{Number(open.hours || 0)}</b></div>
-            <div className="eco__box"><span className="meta">{open.billable ? "Se cobra" : "Sin costo"}</span><b className="money">{open.billable ? fmtMoney(open.amount) : "—"}</b></div>
+            <div className="eco__box"><span className="meta">{open.billable ? "Se cobra" : "Sin costo"}</span><b className="money">{open.billable && verMonto ? fmtMoney(open.amount) : "—"}</b></div>
           </div>
+          {/* el tecnico marca "se cobra" sin cifra: el monto lo pone administracion o contabilidad, tambien ya resuelto */}
+          {verMonto && meta?.can_charge && open.billable && (
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+              {monto === null ? (
+                <button className="btn btn--ghost btn--sm" onClick={() => setMonto(Number(open.amount || 0) > 0 ? String(open.amount) : "")}>{Number(open.amount || 0) > 0 ? "Cambiar el monto cobrado" : "Poner el monto que se cobra"}</button>
+              ) : (
+                <>
+                  <input className="input input--mono" style={{ maxWidth: 160 }} inputMode="decimal" autoFocus placeholder="Monto cobrado" value={monto} onChange={(e) => setMonto(e.target.value)} />
+                  <button className="btn btn--crimson btn--sm" onClick={guardarMonto}>Guardar monto</button>
+                  <button className="btn btn--ghost btn--sm" onClick={() => setMonto(null)}>Cancelar</button>
+                </>
+              )}
+            </div>
+          )}
           <p className="muted" style={{ fontSize: 13.5, marginTop: 0 }}>
             {KIND[open.kind] || open.kind} · nivel {open.level} · {open.channel || "sin canal"} · {open.customer || "sin cliente"}
             {open.asset ? ` · equipo: ${open.asset}` : ""} · {open.assigned || "sin responsable"}
@@ -204,13 +228,13 @@ export default function Tickets() {
       {cerrar && open && (
         <Modal title={`Resolver ${open.number}`} onClose={() => setCerrar(null)} foot={<>
           <button className="btn btn--ghost" onClick={() => setCerrar(null)}>Cancelar</button>
-          <button className="btn btn--crimson" onClick={() => mover("resuelto", { solution: cerrar.solution, hours: Number(cerrar.hours || 0), billable: cerrar.billable, amount: Number(cerrar.amount || 0) })} disabled={cerrar.solution.trim().length < 3}>Marcar resuelto</button>
+          <button className="btn btn--crimson" onClick={() => mover("resuelto", { solution: cerrar.solution, hours: Number(cerrar.hours || 0), billable: cerrar.billable, amount: verMonto ? Number(cerrar.amount || 0) : undefined })} disabled={cerrar.solution.trim().length < 3}>Marcar resuelto</button>
         </>}>
           <Field label="¿Qué se hizo?" hint="Queda en el historial del equipo y del cliente."><textarea className="textarea" autoFocus value={cerrar.solution} onChange={(e) => setCerrar({ ...cerrar, solution: e.target.value })} placeholder="Se cambió la fuente de 12 V, quedó grabando y se probó con el cliente." /></Field>
           <div className="grid-3">
             <Field label="Horas"><input className="input input--mono" inputMode="decimal" value={cerrar.hours} onChange={(e) => setCerrar({ ...cerrar, hours: e.target.value })} /></Field>
             <Field label="¿Se cobra?"><select className="select" value={cerrar.billable ? "1" : "0"} onChange={(e) => setCerrar({ ...cerrar, billable: e.target.value === "1" })}><option value="0">No (garantía o contrato)</option><option value="1">Sí</option></select></Field>
-            {cerrar.billable && <Field label="Monto"><input className="input input--mono" inputMode="decimal" value={cerrar.amount} onChange={(e) => setCerrar({ ...cerrar, amount: e.target.value })} /></Field>}
+            {cerrar.billable && verMonto && <Field label="Monto"><input className="input input--mono" inputMode="decimal" value={cerrar.amount} onChange={(e) => setCerrar({ ...cerrar, amount: e.target.value })} /></Field>}
           </div>
         </Modal>
       )}

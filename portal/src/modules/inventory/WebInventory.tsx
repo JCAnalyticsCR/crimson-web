@@ -6,7 +6,7 @@ import { useSession } from "../../app/session";
 import { Card, Empty, Field, Loading, Modal } from "../../ui/components";
 
 type Row = {
-  id: number; code: string; name: string; show_on_web: boolean; web_featured: boolean; web_price: string | null; price: string; currency: string; serialized: boolean;
+  id: number; code: string; name: string; show_on_web: boolean; web_featured: boolean; web_price: string | null; price: string | null; currency: string; serialized: boolean;
   estado: string; mensaje: string; propio: string; reservado: string; reservado_pedidos: string; libre: string;
   proveedor: number | null; proveedor_al: string | null; proveedor_viejo: boolean; alerta: boolean; avisos: number;
 };
@@ -35,6 +35,8 @@ export default function WebInventory() {
   const [edit, setEdit] = useState<{ row: Row; web_price: string; web_featured: boolean; show_on_web: boolean } | null>(null);
   const [cfg, setCfg] = useState<Settings | null>(null);
   const canEdit = allows("catalog.editar");
+  // el tecnico y el aliado ven cantidades, nunca precios (13/10, 22:07): la API los manda vacios y la columna no sale
+  const verPrecio = allows("catalog.precios");
   const canConfig = allows("settings.configurar");
 
   const load = () => {
@@ -109,7 +111,7 @@ export default function WebInventory() {
         {data.items.length === 0 ? <Empty hint={estado === "alertas" ? "Todo lo publicado tiene existencia o proveedor que lo respalde." : "No hay productos con ese filtro."} /> : (
           <div style={{ overflowX: "auto" }}>
             <table className="table">
-              <thead><tr><th>Producto</th><th>Estado en la tienda</th><th className="num">En bodegas web</th><th className="num" title="Reservado por pedidos web (y total reservado)">Reservado</th><th className="num">Libre</th><th>Proveedor</th><th className="num">Precio web</th><th /></tr></thead>
+              <thead><tr><th>Producto</th><th>Estado en la tienda</th><th className="num">En bodegas web</th><th className="num" title="Reservado por pedidos web (y total reservado)">Reservado</th><th className="num">Libre</th><th>Proveedor</th>{verPrecio && <th className="num">Precio web</th>}<th /></tr></thead>
               <tbody>
                 {data.items.map((r) => {
                   const st = ESTADO[r.estado] || { label: r.estado, tone: "muted" };
@@ -127,7 +129,7 @@ export default function WebInventory() {
                       <td className="num mono" style={{ color: n(r.reservado_pedidos) > 0 ? "var(--warn)" : "var(--text-3)" }}>{n(r.reservado_pedidos) || "—"}{n(r.reservado) > n(r.reservado_pedidos) && <div className="meta">total {n(r.reservado)}</div>}</td>
                       <td className="num mono" style={{ fontWeight: 700 }}>{n(r.libre)}</td>
                       <td className="muted" style={{ whiteSpace: "nowrap" }}>{r.proveedor != null ? <>{r.proveedor} u.<div className="meta" style={{ color: r.proveedor_viejo ? "var(--bad)" : undefined }}>{r.proveedor_al ? fmtDate(r.proveedor_al.slice(0, 10)) : "sin fecha"}{r.proveedor_viejo ? " · viejo" : ""}</div></> : "—"}</td>
-                      <td className="num mono">{r.web_price != null ? fmtMoney(r.web_price, r.currency) : <span className="muted">{fmtMoney(r.price, r.currency)}</span>}</td>
+                      {verPrecio && <td className="num mono">{r.web_price != null ? fmtMoney(r.web_price, r.currency) : <span className="muted">{r.price != null ? fmtMoney(r.price, r.currency) : "—"}</span>}</td>}
                       <td className="num">{canEdit && <button className="btn btn--ghost btn--sm" onClick={() => setEdit({ row: r, web_price: r.web_price != null ? String(n(r.web_price)) : "", web_featured: r.web_featured, show_on_web: r.show_on_web })}>Publicación</button>}</td>
                     </tr>
                   );

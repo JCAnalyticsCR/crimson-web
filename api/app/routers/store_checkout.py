@@ -389,9 +389,10 @@ def get_checkout_cfg(p: Principal = Depends(require("settings", "ver")), db: Ses
 
 @router.put("/store/checkout")
 def put_checkout_cfg(data: CheckoutCfgIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
-    from ..core.deps import ROLE_PERMISSIONS
+    from ..core.deps import ASSIGNABLE_ROLES
 
-    if any(r not in ROLE_PERMISSIONS for r in data.notify_roles):
+    # los avisos de pedidos web son para el equipo de Crimson: ni clientes ni aliados ni el acceso de soporte
+    if any(r not in ASSIGNABLE_ROLES for r in data.notify_roles):
         raise HTTPException(422, "Rol desconocido en avisos")
     if data.methods.sinpe.phone and len(so.digits(data.methods.sinpe.phone)) < 8:
         raise HTTPException(422, "El número de SINPE Móvil debe tener 8 dígitos")

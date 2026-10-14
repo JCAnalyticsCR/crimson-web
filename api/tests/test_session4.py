@@ -502,15 +502,15 @@ def test_each_role_sees_only_what_it_needs(client, auth, db_session):
     assert client.get("/invoices", headers=b).status_code == 403
     assert client.get("/customers", headers=b).status_code == 403
 
-    # Contabilidad: todo el dinero de la empresa, sin ajustes
+    # Contabilidad: todo el dinero de la empresa, sin ajustes. Sin rentabilidad: el costo es solo del admin (13/10, 08:07)
     a = login("a@ejemplo.com", "contabilidad")
-    assert len(report_keys(a)) == 19
+    assert len(report_keys(a)) == 17 and not report_keys(a) & {"rentabilidad", "rentabilidad_tipo"}
     assert client.get("/dashboard", headers=a).json()["scope"] == "company"
     assert client.get("/settings", headers=a).status_code == 403
 
     # Solo lectura: ventas y cobros de la empresa, sin gastos, planillas ni exportar
     lec = login("l@ejemplo.com", "lectura")
-    assert report_keys(lec) == {"facturacion", "pendientes", "productos", "ordenes", "cierre", "transacciones", "propinas", "rentabilidad", "rentabilidad_tipo"}
+    assert report_keys(lec) == {"facturacion", "pendientes", "productos", "ordenes", "cierre", "transacciones", "propinas"}
     assert client.get("/reports/facturacion", params={"format": "xlsx"}, headers=lec).status_code == 403
     assert client.get("/expenses", headers=lec).status_code == 403
     assert client.post("/customers", json={"name": "No"}, headers=lec).status_code == 403

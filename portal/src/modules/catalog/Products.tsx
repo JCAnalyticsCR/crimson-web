@@ -109,13 +109,15 @@ export default function Products() {
     if (!edit) return;
     try {
       const { id, ...b } = edit;
-      const body = {
+      const body: Record<string, unknown> = {
         ...b, price: Number(b.price), category_id: b.category_id ? Number(b.category_id) : null, supplier_id: b.supplier_id ? Number(b.supplier_id) : null,
         weight_kg: b.weight_kg ? Number(b.weight_kg) : null, cabys_code: b.cabys_code || null, registration_number: b.registration_number || null, tariff_code: b.tariff_code || null,
         cost: b.cost === "" ? null : Number(b.cost), margin_pct: b.margin_pct === "" ? null : Number(b.margin_pct),
         brand: b.brand || null, model: b.model || null, supplier_sku: b.supplier_sku || null,
         cabys_description: b.cabys_description || null, warehouse_id: b.warehouse_id ? Number(b.warehouse_id) : null,
       };
+      // quien no ve costos no los manda (la API tampoco los aceptaria): asi guardar nunca borra el costo
+      if (!verCostos) { delete body.cost; delete body.cost_currency; delete body.margin_pct; }
       const saved = await api<{ id: number }>(id ? `/products/${id}` : "/products", { method: id ? "PUT" : "POST", json: body });
       if (id || variants.length) {
         await api(`/products/${saved.id}/variants`, { method: "PUT", json: variants.map((v) => ({ id: v.id, name: v.name, code: v.code, price: v.price === "" ? null : Number(v.price), options: v.options, active: v.active })) });

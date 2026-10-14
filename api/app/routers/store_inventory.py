@@ -102,6 +102,8 @@ def web_inventory(
         ).all()
     )
     items = []
+    # el tecnico (y el aliado) tienen inventory.ver para las cantidades, pero nunca ven precios (13/10, 22:07)
+    precios = p.sees_prices
     summary = {"publicados": 0, "disponible": 0, "bajo_pedido": 0, "consultar": 0, "agotado": 0, "alertas": 0, "reservado_pedidos": Decimal(0), "avisos": 0}
     for x in prods:
         a = av.get(x.id) or {}
@@ -112,8 +114,8 @@ def web_inventory(
             "name": x.name,
             "show_on_web": x.show_on_web,
             "web_featured": bool(x.web_featured),
-            "web_price": x.web_price,
-            "price": x.price,
+            "web_price": x.web_price if precios else None,
+            "price": x.price if precios else None,
             "currency": x.currency,
             "serialized": bool(x.serialized),
             "estado": a.get("estado"),

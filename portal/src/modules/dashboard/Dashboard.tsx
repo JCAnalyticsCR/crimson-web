@@ -56,7 +56,7 @@ const JobRow = ({ o }: { o: Job }) => (
 );
 
 export default function Dashboard() {
-  const { me, allows, role } = useSession();
+  const { me, allows, inMenu, role } = useSession();
   const rm = roleMeta(role);
   const [d, setD] = useState<D | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -64,6 +64,8 @@ export default function Dashboard() {
   const [day, setDay] = useState<{ today: Job[]; next: Job[]; surveys: { id: number; number: string; kind_label: string; site: string | null }[] } | null>(null);
   const salesHome = allows("sales.ver");
   const fieldHome = !salesHome && allows("field.ver"); // el técnico entra a ver su día, no el inventario
+  // utilidad del mes: dato de costos (13/10, 08:07). La API la manda en null a quien no los ve
+  const verUtilidad = d?.gerencia?.profit_month != null && allows("catalog.costos");
   const load = () => {
     if (salesHome) api<D>("/dashboard").then(setD).catch((e) => setErr(e.message));
     else if (fieldHome) api<typeof day>("/work-orders/meta/today").then(setDay).catch((e) => setErr(e.message));
@@ -94,7 +96,7 @@ export default function Dashboard() {
         {allows("crm.crear") && <Link className="action" to="/clientes?nuevo=1"><i><Icon d={I.customers} /></i><div><b>Crear cliente</b><span>Ficha con cédula, correo y WhatsApp</span></div></Link>}
         {allows("catalog.crear") && <Link className="action" to="/productos?nuevo=1"><i><Icon d={I.products} /></i><div><b>Crear producto</b><span>Precio, CABYS e impuesto</span></div></Link>}
         {allows("sales.crear") && <Link className="action" to="/cotizaciones/nueva"><i><Icon d={I.quote} /></i><div><b>Crear cotización</b><span>Y convertirla a factura en un clic</span></div></Link>}
-        {allows("sales.crear") && !allows("catalog.crear") && <Link className="action" to="/pos"><i><Icon d={I.wallet} /></i><div><b>Punto de venta</b><span>Cobro de mostrador con vuelto</span></div></Link>}
+        {allows("sales.crear") && !allows("catalog.crear") && inMenu("/pos") && <Link className="action" to="/pos"><i><Icon d={I.wallet} /></i><div><b>Punto de venta</b><span>Cobro de mostrador con vuelto</span></div></Link>}
         {allows("inventory.crear") && <Link className="action" to="/inventario"><i><Icon d={I.inventory} /></i><div><b>Movimiento de inventario</b><span>Entradas, salidas y transferencias</span></div></Link>}
         {allows("reports.ver") && <Link className="action" to="/reportes"><i><Icon d={I.reports} /></i><div><b>Reportes</b><span>Los reportes de tu rol, con Excel</span></div></Link>}
       </div>
@@ -129,12 +131,13 @@ export default function Dashboard() {
           </div>
 
           {d.gerencia && (
-            <Card title="Cómo va Crimson" extra={<span className="meta">pipeline, obra y utilidad</span>}>
+            <Card title="Cómo va Crimson" extra={<span className="meta">{verUtilidad ? "pipeline, obra y utilidad" : "pipeline y obra"}</span>}>
               <div className="eco">
                 <Link className="eco__box" to="/oportunidades"><span className="meta">Embudo · {d.gerencia.opportunities} oportunidades</span><b className="money">{fmtMoney(d.gerencia.pipeline, cur)}</b></Link>
                 <div className="eco__box"><span className="meta">Ponderado por probabilidad</span><b className="money">{fmtMoney(d.gerencia.pipeline_weighted, cur)}</b></div>
                 <div className="eco__box"><span className="meta">Por cobrar</span><b className="money">{fmtMoney(d.gerencia.receivable, cur)}</b></div>
-                <div className={`eco__box ${Number(d.gerencia.profit_month) >= 0 ? "is-good" : "is-bad"}`}><span className="meta">Utilidad del mes · margen {d.gerencia.margin_month.toFixed(1)}%{d.gerencia.projects_without_costs ? ` · ${d.gerencia.projects_without_costs} sin costos (fuera)` : ""}</span><b className="money">{fmtMoney(d.gerencia.profit_month, cur)}</b></div>
+                {/* utilidad y margen: solo quien ve costos (la API los manda en null al resto; en vista previa, el permiso) */}
+                {verUtilidad && <div className={`eco__box ${Number(d.gerencia.profit_month) >= 0 ? "is-good" : "is-bad"}`}><span className="meta">Utilidad del mes · margen {(d.gerencia.margin_month ?? 0).toFixed(1)}%{d.gerencia.projects_without_costs ? ` · ${d.gerencia.projects_without_costs} sin costos (fuera)` : ""}</span><b className="money">{fmtMoney(d.gerencia.profit_month, cur)}</b></div>}
                 <Link className="eco__box" to="/proyectos"><span className="meta">Proyectos activos · {d.gerencia.projects_closed_month} cerrados este mes</span><b>{d.gerencia.projects_active}</b></Link>
                 <Link className={`eco__box ${d.gerencia.jobs_late ? "is-bad" : ""}`} to="/ordenes-trabajo"><span className="meta">Trabajos de la semana{d.gerencia.jobs_late ? ` · ${d.gerencia.jobs_late} atrasados` : ""}</span><b>{d.gerencia.jobs_week}</b></Link>
                 <div className="eco__box"><span className="meta">Cotizaciones enviadas · {d.gerencia.quotes_won_month} ganadas</span><b>{d.gerencia.quotes_sent}</b></div>

@@ -132,11 +132,44 @@ def labor_costing(s: Survey, tenant) -> dict:
 
 
 # ---------- Levantamientos ----------
+def _sees_opportunity_surveys(p: Principal) -> bool:
+    """Resumen de solo lectura (13/10 33:30): quien tiene oportunidades y ve campo sin llenarlo (el vendedor) ve
+    los levantamientos de SUS oportunidades. Con field.editar (tecnicos) sigue siendo solo lo suyo."""
+    return p.can("crm_pipeline", "ver") and not p.can("field", "editar")
+
+
+def survey_scope(p: Principal):
+    """Quien no ve todo el campo: el tecnico, lo suyo; el vendedor, ademas lo de sus oportunidades.
+    None = sin filtro (field.ver_todo)."""
+    if p.sees_field_all:
+        return None
+    own = Survey.technician_id == p.user.id
+    if _sees_opportunity_surveys(p):
+        mias = select(Opportunity.id).where(Opportunity.tenant_id == p.tenant.id, Opportunity.owner_id == p.user.id)
+        return or_(own, Survey.opportunity_id.in_(mias))
+    return own
+
+
+def can_see_survey(db: Session, s: Survey, p: Principal) -> bool:
+    """El mismo criterio que survey_scope para un levantamiento suelto (ficha, informe, correo del informe)."""
+    if p.sees_field_all or s.technician_id == p.user.id:
+        return True
+    if _sees_opportunity_surveys(p):
+        # el vendedor: solo los de SUS oportunidades, tengan o no tecnico (uno sin tecnico de otra oportunidad no
+        # le sale en la lista y tampoco se abre por id)
+        if not s.opportunity_id:
+            return False
+        o = db.get(Opportunity, s.opportunity_id)
+        return bool(o and o.tenant_id == p.tenant.id and o.owner_id == p.user.id)
+    # el tecnico: como antes, tambien los que quedaron sin tecnico (datos viejos o importados)
+    return s.technician_id is None
+
+
 def _survey(db: Session, sid: int, p: Principal) -> Survey:
     s = db.get(Survey, sid)
     if not s or s.tenant_id != p.tenant.id:
         raise HTTPException(404, "Levantamiento no encontrado")
-    if not p.sees_field_all and s.technician_id not in (None, p.user.id):
+    if not can_see_survey(db, s, p):
         raise HTTPException(404, "Levantamiento no encontrado")
     return s
 
@@ -414,8 +447,9 @@ def surveys(
     db: Session = Depends(get_db),
 ):
     stmt = select(Survey).where(Survey.tenant_id == p.tenant.id, live(Survey))
-    if not p.sees_field_all:
-        stmt = stmt.where(Survey.technician_id == p.user.id)
+    sc = survey_scope(p)
+    if sc is not None:
+        stmt = stmt.where(sc)
     if status:
         stmt = stmt.where(Survey.status == status)
     if review:
@@ -1151,7 +1185,9 @@ def survey_to_quote(sid: int, data: ToQuoteIn, p: Principal = Depends(require("s
         currency="CRC",
         external_notes=data.notes
         or f"Según levantamiento técnico {s.number} ({SPECS.get(s.kind, SPECS['otro'])['label']}) en {s.site or 'sitio del cliente'}.",
-        internal_notes=f"Levantamiento {s.number}. Costo estimado ₡{costing['cost_total']:,.0f} · margen {costing['margin_pct']} %.",
+        # sin cifras de costo ni margen: las notas internas las lee todo el que ve la cotizacion o la factura
+        # (contador, caja, solo lectura). El costo queda en la bitacora (audit de abajo).
+        internal_notes=f"Levantamiento {s.number}.",
         lines=lines,
     )
     q = docsvc.create_quote(db, p.tenant.id, p.user.id, payload)

@@ -1,5 +1,5 @@
 /* Pedidos de la tienda en linea: filtros, detalle, comprobante privado, confirmar pago, estados con aviso al cliente,
-   cancelar con motivo, reembolso (registro), factura electronica e impresion. "Otros canales" (eventos, POS) queda
+   cancelar con motivo, reembolso (registro), factura electronica e impresion. "Otros canales" (POS, enlaces) queda
    con el flujo de siempre. Los saltos de estado los valida el API; aqui solo se ofrecen los que acepta. */
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -256,7 +256,7 @@ function Detail({ o, labels, onClose, onChange }: { o: Order; labels: Record<str
   );
 }
 
-/* Otros canales (eventos, POS, enlaces): el flujo de siempre. */
+/* Otros canales (POS, enlaces): el flujo de siempre. */
 type Legacy = { id: number; number: string; channel: string; contact: Record<string, string>; currency: string; total: string; shipping_method: string | null; payment_method: string | null; status: string; invoice_id: number | null; created_at: string };
 const STATES = ["nuevo", "pagado", "preparando", "enviado", "entregado", "cancelado"];
 function LegacyOrders() {
@@ -267,7 +267,7 @@ function LegacyOrders() {
   const setStatus = async (o: Legacy, status: string) => { try { await api(`/orders/${o.id}`, { method: "PATCH", json: { status } }); toast("Estado actualizado"); load(); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } };
   return (
     <Card flush>
-      {items === null ? <Loading /> : items.length === 0 ? <Empty hint="Pedidos de eventos y del punto de venta aparecen aquí." /> : (
+      {items === null ? <Loading /> : items.length === 0 ? <Empty hint="Pedidos del punto de venta y enlaces de pago aparecen aquí." /> : (
         <table className="table">
           <thead><tr><th>Pedido</th><th>Canal</th><th>Cliente</th><th>Fecha</th><th>Pago</th><th className="num">Total</th><th>Estado</th><th>Comprobante</th></tr></thead>
           <tbody>{items.map((o) => (

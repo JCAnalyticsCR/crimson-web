@@ -41,6 +41,7 @@ from ..services import sla as slasvc
 from ..services.archive import live
 from ..services.documents import audit, local_date
 from ..services.mail import notify_roles, queue_email
+from ..services.refs import check_refs
 from ..services.sequences import next_number
 from ..services.totals import d, net_sale
 
@@ -67,7 +68,8 @@ def _own(db: Session, tid: int, p: Principal) -> SupportTicket:
     return t
 
 
-def _out(db: Session, t: SupportTicket, full: bool = True) -> dict:
+def _out(db: Session, t: SupportTicket, full: bool = True, p: Principal | None = None) -> dict:
+    """Ticket. El monto (lo que se le cobra al cliente) es precio: el tecnico no lo ve (Andres 22:07-22:23)."""
     c = db.get(Customer, t.customer_id) if t.customer_id else None
     u = db.get(User, t.assigned_to) if t.assigned_to else None
     a = db.get(CustomerAsset, t.asset_id) if t.asset_id else None
@@ -112,7 +114,7 @@ def _out(db: Session, t: SupportTicket, full: bool = True) -> dict:
         else None,
         "hours": t.hours,
         "billable": t.billable,
-        "amount": t.amount,
+        "amount": t.amount if p is None or p.sees_prices else None,
         "tags": t.tags,
         "created_at": t.created_at,
     }
@@ -153,6 +155,15 @@ class TicketIn(BaseModel):
     assigned_to: int | None = None
     billable: bool = False
     tags: list = Field(default_factory=list)
+
+
+# Lo que el ticket enlaza es de ESTA empresa: la ficha responde sus nombres y el aviso va al correo del asignado
+TICKET_REFS = {
+    "customer_id": (Customer, "Cliente no encontrado"),
+    "asset_id": (CustomerAsset, "Activo no encontrado"),
+    "project_id": (Project, "Proyecto no encontrado"),
+}
+TICKET_USERS = {"assigned_to": "Ese responsable no es un usuario activo de la empresa"}
 
 
 def ticket_scope(p: Principal, mine: bool = False) -> list:
@@ -204,11 +215,12 @@ def tickets(
         rows = [t for t in db.scalars(stmt) if slasvc.fuera_de_tiempo(t)][:limit]
     else:
         rows = db.scalars(stmt.limit(limit)).all()
-    return [_out(db, t, full=False) for t in rows]
+    return [_out(db, t, full=False, p=p) for t in rows]
 
 
 @router.post("/tickets", status_code=201)
 def ticket_create(data: TicketIn, p: Principal = Depends(require("support_desk", "crear")), db: Session = Depends(get_db)):
+    check_refs(db, p.tenant.id, data.model_dump(), TICKET_REFS, TICKET_USERS)
     number, _ = next_number(db, p.tenant.id, "TCK")
     t = SupportTicket(tenant_id=p.tenant.id, number=number, opened_by=p.user.id, **data.model_dump())
     t.status = "asignado" if t.assigned_to else "nuevo"
@@ -218,17 +230,18 @@ def ticket_create(data: TicketIn, p: Principal = Depends(require("support_desk",
     audit(db, p.tenant.id, p.user.id, "create", "support_ticket", t.id, {"prioridad": t.priority}, ip=p.ip)
     _avisar_asignado(db, p, t, nuevo=True)
     db.commit()
-    return _out(db, t)
+    return _out(db, t, p=p)
 
 
 @router.get("/tickets/{tid}")
 def ticket_get(tid: int, p: Principal = Depends(require("support_desk", "ver")), db: Session = Depends(get_db)):
-    return _out(db, _own(db, tid, p))
+    return _out(db, _own(db, tid, p), p=p)
 
 
 @router.put("/tickets/{tid}")
 def ticket_update(tid: int, data: TicketIn, p: Principal = Depends(require("support_desk", "editar")), db: Session = Depends(get_db)):
     t = _own(db, tid, p)
+    check_refs(db, p.tenant.id, data.model_dump(), TICKET_REFS, TICKET_USERS, current=t)
     antes = t.assigned_to
     clave_sla = (t.priority, t.customer_id)
     for k, v in data.model_dump().items():
@@ -243,7 +256,7 @@ def ticket_update(tid: int, data: TicketIn, p: Principal = Depends(require("supp
     if t.assigned_to and t.assigned_to != antes:
         _avisar_asignado(db, p, t)
     db.commit()
-    return _out(db, t)
+    return _out(db, t, p=p)
 
 
 class NoteIn(BaseModel):
@@ -266,7 +279,7 @@ def ticket_note(tid: int, data: NoteIn, p: Principal = Depends(require("support_
     if data.status:
         _mover(t, data.status)
     db.commit()
-    return _out(db, t)
+    return _out(db, t, p=p)
 
 
 class StatusIn(BaseModel):
@@ -298,12 +311,39 @@ def ticket_status(tid: int, data: StatusIn, p: Principal = Depends(require("supp
         t.hours = data.hours
     if data.billable is not None:
         t.billable = data.billable
-    if data.amount is not None:
+    if data.amount is not None and p.sees_prices:
+        # el tecnico no ve el monto: el portal le mandaria 0 al resolver y lo borraria. El monto lo pone quien ve precios
         t.amount = data.amount
     _mover(t, data.status)
     audit(db, p.tenant.id, p.user.id, "status", "support_ticket", t.id, {"status": data.status}, ip=p.ip)
     db.commit()
-    return _out(db, t)
+    return _out(db, t, p=p)
+
+
+def can_charge(p: Principal) -> bool:
+    """Quien pone el monto de un ticket cobrable (13/10, casos borde): el tecnico marca horas y "se cobra", la cifra
+    la pone quien ve precios y todo el soporte y lleva el soporte o el dinero: admin, supervisor y contador.
+    Solo lectura ve el monto pero no lo escribe."""
+    return p.sees_prices and p.can("support_desk", "ver_todo") and (p.can("support_desk", "editar") or p.can("accounting", "editar"))
+
+
+class AmountIn(BaseModel):
+    amount: Decimal = Field(ge=0)
+
+
+@router.patch("/tickets/{tid}/amount")
+def ticket_amount(tid: int, data: AmountIn, p: Principal = Depends(require("support_desk", "ver")), db: Session = Depends(get_db)):
+    """Monto de un ticket cobrable, en cualquier estado: el que resolvio el tecnico queda en 0 hasta que se cargue aqui."""
+    if not can_charge(p):
+        raise HTTPException(403, "El monto de un ticket lo pone administración o contabilidad")
+    t = _own(db, tid, p)
+    if not t.billable:
+        raise HTTPException(409, "Este ticket no se cobra (garantía o contrato): no lleva monto")
+    antes = str(t.amount) if t.amount is not None else None
+    t.amount = data.amount
+    audit(db, p.tenant.id, p.user.id, "amount", "support_ticket", t.id, {"antes": antes, "despues": str(data.amount)}, ip=p.ip)
+    db.commit()
+    return _out(db, t, p=p)
 
 
 class VisitIn(BaseModel):
@@ -362,6 +402,7 @@ def ticket_meta(p: Principal = Depends(require("support_desk", "ver")), db: Sess
         "abiertos": res["abiertos"],
         "fuera_de_tiempo": res["fuera_de_tiempo"],
         "can_see_all": p.can("support_desk", "ver_todo"),
+        "can_charge": can_charge(p),  # pone el monto de un ticket cobrable (PATCH /tickets/{id}/amount)
     }
 
 
@@ -409,7 +450,9 @@ class ContractIn(BaseModel):
         return n
 
 
-def _contract_out(db: Session, c: MaintenanceContract) -> dict:
+def _contract_out(db: Session, c: MaintenanceContract, p: Principal | None = None) -> dict:
+    """Contrato. El tecnico lo ve (fechas, alcance) sin el monto ni la divisa: es precio, no lo ve (D5)."""
+    precio = p is None or p.sees_prices
     cl = db.get(Customer, c.customer_id)
     pr = db.get(Project, c.project_id) if c.project_id else None
     dias = (c.next_date - date.today()).days if c.next_date else None
@@ -426,8 +469,8 @@ def _contract_out(db: Session, c: MaintenanceContract) -> dict:
         "last_done": c.last_done,
         "start_date": c.start_date,
         "end_date": c.end_date,
-        "amount": c.amount,
-        "currency": c.currency,
+        "amount": c.amount if precio else None,
+        "currency": c.currency if precio else None,
         "scope": c.scope,
         "active": c.active,
         "notes": c.notes,
@@ -436,16 +479,28 @@ def _contract_out(db: Session, c: MaintenanceContract) -> dict:
     }
 
 
+CONTRACT_REFS = {"customer_id": (Customer, "Cliente no encontrado"), "project_id": (Project, "Proyecto no encontrado")}
+
+
+def _contract_admin(p: Principal) -> None:
+    """Crear, editar o programar un contrato pide ver toda la mesa (mismo criterio que el Archivo: un tecnico atiende
+    sus tickets pero no maneja contratos). Su formulario lleva el monto, que el tecnico no ve."""
+    if not p.can("support_desk", "ver_todo"):
+        raise HTTPException(403, "Los contratos los maneja administracion o el supervisor")
+
+
 @router.get("/contracts")
 def contracts(active: bool | None = None, p: Principal = Depends(require("support_desk", "ver")), db: Session = Depends(get_db)):
     stmt = select(MaintenanceContract).where(MaintenanceContract.tenant_id == p.tenant.id, live(MaintenanceContract))
     if active is not None:
         stmt = stmt.where(MaintenanceContract.active.is_(active))
-    return [_contract_out(db, c) for c in db.scalars(stmt.order_by(MaintenanceContract.next_date.is_(None), MaintenanceContract.next_date))]
+    return [_contract_out(db, c, p) for c in db.scalars(stmt.order_by(MaintenanceContract.next_date.is_(None), MaintenanceContract.next_date))]
 
 
 @router.post("/contracts", status_code=201)
 def contract_create(data: ContractIn, p: Principal = Depends(require("support_desk", "crear")), db: Session = Depends(get_db)):
+    _contract_admin(p)
+    check_refs(db, p.tenant.id, data.model_dump(), CONTRACT_REFS)
     number, _ = next_number(db, p.tenant.id, "CTR")
     c = MaintenanceContract(tenant_id=p.tenant.id, number=number, **data.model_dump())
     c.next_date = c.next_date or c.start_date or date.today()
@@ -453,18 +508,20 @@ def contract_create(data: ContractIn, p: Principal = Depends(require("support_de
     db.flush()
     audit(db, p.tenant.id, p.user.id, "create", "maintenance_contract", c.id, ip=p.ip)
     db.commit()
-    return _contract_out(db, c)
+    return _contract_out(db, c, p)
 
 
 @router.put("/contracts/{cid}")
 def contract_update(cid: int, data: ContractIn, p: Principal = Depends(require("support_desk", "editar")), db: Session = Depends(get_db)):
+    _contract_admin(p)
     c = db.get(MaintenanceContract, cid)
     if not c or c.tenant_id != p.tenant.id:
         raise HTTPException(404, "Contrato no encontrado")
+    check_refs(db, p.tenant.id, data.model_dump(), CONTRACT_REFS, current=c)
     for k, v in data.model_dump().items():
         setattr(c, k, v)
     db.commit()
-    return _contract_out(db, c)
+    return _contract_out(db, c, p)
 
 
 def due_contracts(db: Session, tenant_id: int, dias: int = 0) -> list[MaintenanceContract]:
@@ -507,6 +564,7 @@ def open_maintenance(db: Session, c: MaintenanceContract) -> SupportTicket:
 
 @router.post("/contracts/{cid}/ticket", status_code=201)
 def contract_ticket(cid: int, p: Principal = Depends(require("support_desk", "crear")), db: Session = Depends(get_db)):
+    _contract_admin(p)
     c = db.get(MaintenanceContract, cid)
     if not c or c.tenant_id != p.tenant.id:
         raise HTTPException(404, "Contrato no encontrado")
@@ -514,7 +572,7 @@ def contract_ticket(cid: int, p: Principal = Depends(require("support_desk", "cr
     db.flush()
     audit(db, p.tenant.id, p.user.id, "maintenance", "support_ticket", t.id, {"contrato": c.number}, ip=p.ip)
     db.commit()
-    return _out(db, t)
+    return _out(db, t, p=p)
 
 
 # ---------- Comisiones ----------
@@ -529,8 +587,12 @@ class RuleIn(BaseModel):
 
 @router.get("/commissions/rules")
 def rules(p: Principal = Depends(require("commissions", "ver")), db: Session = Depends(get_db)):
+    stmt = select(CommissionRule).where(CommissionRule.tenant_id == p.tenant.id)
+    if not p.can("commissions", "ver_todo"):
+        # el vendedor ve su regla y la general, no los porcentajes de los demas
+        stmt = stmt.where(or_(CommissionRule.user_id == p.user.id, CommissionRule.user_id.is_(None)))
     out = []
-    for r in db.scalars(select(CommissionRule).where(CommissionRule.tenant_id == p.tenant.id).order_by(CommissionRule.id)):
+    for r in db.scalars(stmt.order_by(CommissionRule.id)):
         u = db.get(User, r.user_id) if r.user_id else None
         out.append(
             {
@@ -674,7 +736,8 @@ def commissions(
                 "invoice": inv.number if inv else None,
                 "invoice_id": c.invoice_id,
                 "base": c.base,
-                "base_amount": c.base_amount,
+                # sobre margen, la base es la utilidad de la venta: informacion de costos (catalog.costos)
+                "base_amount": None if c.base == "margen" and not p.sees_costs else c.base_amount,
                 "percent": c.percent,
                 "amount": c.amount,
                 "currency": c.currency,

@@ -38,21 +38,24 @@ from ..services import pricing
 from ..services.archive import live
 from ..services.documents import audit, local_date, today_fx
 from ..services.mail import notify_roles
+from ..services.refs import check_refs
 from ..services.sequences import next_number
 from ..services.totals import d, net_sale
 
 router = APIRouter(tags=["proyectos"])
 
 
+def sees_project(p: Principal, pr: Project) -> bool:
+    """Alcance de proyectos (lista, ficha y ficha 360 del cliente): con projects.ver_todo, todos; si no (el tecnico),
+    los que supervisa o donde tiene una orden de trabajo, como responsable o como ayudante."""
+    if p.can("projects", "ver_todo") or pr.supervisor_id == p.user.id:
+        return True
+    return any(o.technician_id == p.user.id or p.user.id in (o.helpers or []) for o in pr.orders)
+
+
 def _project(db: Session, pid: int, p: Principal) -> Project:
     pr = db.get(Project, pid)
-    if not pr or pr.tenant_id != p.tenant.id:
-        raise HTTPException(404, "Proyecto no encontrado")
-    if (
-        not p.can("projects", "ver_todo")
-        and pr.supervisor_id != p.user.id
-        and not any(o.technician_id == p.user.id or p.user.id in (o.helpers or []) for o in pr.orders)
-    ):
+    if not pr or pr.tenant_id != p.tenant.id or not sees_project(p, pr):
         raise HTTPException(404, "Proyecto no encontrado")
     return pr
 
@@ -206,6 +209,13 @@ class ProjectIn(BaseModel):
     photos: list = Field(default_factory=list)
 
 
+# Economia del proyecto que se escribe a mano: solo la toca quien ve costos (catalog.costos)
+PROJECT_COST_FIELDS = ("cost_labor", "cost_travel", "cost_extra")
+# Cliente y supervisor de ESTA empresa: la ficha responde su nombre (services/refs.py)
+PROJECT_REFS = {"customer_id": (Customer, "Cliente no encontrado")}
+PROJECT_USERS = {"supervisor_id": "Ese supervisor no es un usuario activo de la empresa"}
+
+
 @router.get("/projects")
 def projects(status: str | None = None, limit: int = Query(100, le=300), p: Principal = Depends(require("projects", "ver")), db: Session = Depends(get_db)):
     stmt = select(Project).where(Project.tenant_id == p.tenant.id, live(Project))
@@ -215,14 +225,20 @@ def projects(status: str | None = None, limit: int = Query(100, le=300), p: Prin
         stmt = stmt.where(Project.status == status)
     rows = db.scalars(stmt.order_by(Project.id.desc()).limit(limit)).all()
     if not p.can("projects", "ver_todo"):
-        rows = [pr for pr in rows if pr.supervisor_id == p.user.id or any(o.technician_id == p.user.id or p.user.id in (o.helpers or []) for o in pr.orders)]
+        rows = [pr for pr in rows if sees_project(p, pr)]
     return [_out(db, pr, p, full=False) for pr in rows]
 
 
 @router.post("/projects", status_code=201)
 def project_create(data: ProjectIn, p: Principal = Depends(require("projects", "crear")), db: Session = Depends(get_db)):
+    fields = data.model_dump()
+    check_refs(db, p.tenant.id, fields, PROJECT_REFS, PROJECT_USERS)
     number, _ = next_number(db, p.tenant.id, "PRO")
-    pr = Project(tenant_id=p.tenant.id, number=number, **data.model_dump())
+    if not p.sees_costs:
+        # la economia del proyecto es del admin (Andres 08:07): quien no la ve no la escribe (quedan en 0)
+        for k in PROJECT_COST_FIELDS:
+            fields.pop(k, None)
+    pr = Project(tenant_id=p.tenant.id, number=number, **fields)
     db.add(pr)
     db.flush()
     audit(db, p.tenant.id, p.user.id, "create", "project", pr.id, ip=p.ip)
@@ -247,6 +263,7 @@ def project_from_quote(qid: int, data: FromQuoteIn, p: Principal = Depends(requi
         raise HTTPException(404, "Cotización no encontrada")
     if q.status == "por_aprobar":
         raise HTTPException(409, "La cotización tiene un descuento pendiente de aprobación")
+    check_refs(db, p.tenant.id, data.model_dump(), users=PROJECT_USERS)
     if db.scalar(select(Project).where(Project.quote_id == q.id)):
         raise HTTPException(409, "Esa cotización ya tiene proyecto")
     from ..services.units import check_ready
@@ -398,7 +415,14 @@ def project_update(pid: int, data: ProjectIn, p: Principal = Depends(require("pr
     from ..services import bitacora  # solo bitacora: antes/despues de lo que cambio (incluye costos)
 
     antes = bitacora.snapshot(pr)
-    for k, v in data.model_dump().items():
+    # solo lo que se envia: el portal no manda supervisor_id ni photos y antes cada edicion los borraba
+    cambios = data.model_dump(exclude_unset=True)
+    check_refs(db, p.tenant.id, cambios, PROJECT_REFS, PROJECT_USERS, current=pr)
+    if not p.sees_costs:
+        # quien no ve la economia recibe los costos ocultos y mandaria 0: sin esto borraba los costos del proyecto
+        for k in PROJECT_COST_FIELDS:
+            cambios.pop(k, None)
+    for k, v in cambios.items():
         setattr(pr, k, v)
     if pr.status == "entregado" and not pr.delivered_at:
         pr.delivered_at = datetime.now(UTC)
@@ -442,6 +466,11 @@ def purchase_from_project(pid: int, p: Principal = Depends(require("purchases", 
 
 
 def _new_request(db: Session, p: Principal, rows: list[dict], reason: str, project_id: int | None = None, note: str | None = None) -> dict:
+    for r in rows:
+        prod = db.get(Product, r["product_id"]) if r.get("product_id") else None
+        if r.get("product_id") and (not prod or prod.tenant_id != p.tenant.id):
+            # nunca el producto (ni el costo) de otra empresa; se valida antes de gastar un consecutivo
+            raise HTTPException(404, "Producto no encontrado")
     number, _ = next_number(db, p.tenant.id, "SC")
     req = PurchaseRequest(tenant_id=p.tenant.id, number=number, status="borrador", reason=reason, project_id=project_id, notes=note, created_by=p.user.id)
     total = Decimal(0)
@@ -460,12 +489,15 @@ def _new_request(db: Session, p: Principal, rows: list[dict], reason: str, proje
     db.flush()
     audit(db, p.tenant.id, p.user.id, "create", "purchase_request", req.id, {"reason": reason, "lineas": len(req.lines)}, ip=p.ip)
     db.commit()
-    return _req_out(db, req)
+    return _req_out(db, req, p)
 
 
-def _req_out(db: Session, r: PurchaseRequest) -> dict:
+def _req_out(db: Session, r: PurchaseRequest, p: Principal) -> dict:
+    """Solicitud de compra. El costo (unitario y total) es informacion de costos: sin catalog.costos sale vacio
+    (Andres 08:07); el supervisor y el contador ven que pedir y cuanto, no a que precio."""
     s = db.get(Supplier, r.supplier_id) if r.supplier_id else None
     pr = db.get(Project, r.project_id) if r.project_id else None
+    costos = p.sees_costs
     return {
         "id": r.id,
         "number": r.number,
@@ -475,11 +507,13 @@ def _req_out(db: Session, r: PurchaseRequest) -> dict:
         "supplier": s.name if s else None,
         "project_id": r.project_id,
         "project": pr.number if pr else None,
-        "total_cost": r.total_cost,
+        "total_cost": r.total_cost if costos else None,
         "currency": r.currency,
         "notes": r.notes,
         "created_at": r.created_at,
-        "lines": [{"id": x.id, "product_id": x.product_id, "name": x.name, "quantity": x.quantity, "unit_cost": x.unit_cost} for x in r.lines],
+        "lines": [
+            {"id": x.id, "product_id": x.product_id, "name": x.name, "quantity": x.quantity, "unit_cost": x.unit_cost if costos else None} for x in r.lines
+        ],
     }
 
 
@@ -488,7 +522,7 @@ def purchase_requests(status: str | None = None, p: Principal = Depends(require(
     stmt = select(PurchaseRequest).where(PurchaseRequest.tenant_id == p.tenant.id, live(PurchaseRequest))
     if status:
         stmt = stmt.where(PurchaseRequest.status == status)
-    return [_req_out(db, r) for r in db.scalars(stmt.order_by(PurchaseRequest.id.desc()).limit(100))]
+    return [_req_out(db, r, p) for r in db.scalars(stmt.order_by(PurchaseRequest.id.desc()).limit(100))]
 
 
 class ReqLineIn(BaseModel):
@@ -507,13 +541,22 @@ class ReqIn(BaseModel):
 
 @router.post("/purchase-requests", status_code=201)
 def purchase_create(data: ReqIn, p: Principal = Depends(require("purchases", "crear")), db: Session = Depends(get_db)):
+    # proveedor y proyecto de ESTA empresa: si no, la solicitud mostraria el nombre y el numero de otra
+    if data.supplier_id:
+        sup = db.get(Supplier, data.supplier_id)
+        if not sup or sup.tenant_id != p.tenant.id:
+            raise HTTPException(404, "Proveedor no encontrado")
+    if data.project_id:
+        pr = db.get(Project, data.project_id)
+        if not pr or pr.tenant_id != p.tenant.id:
+            raise HTTPException(404, "Proyecto no encontrado")
     rows = [{"product_id": x.product_id, "name": x.name, "quantity": x.quantity, "to_buy": x.quantity} for x in data.lines]
     out = _new_request(db, p, rows, reason="manual", project_id=data.project_id, note=data.notes)
     if data.supplier_id:
         r = db.get(PurchaseRequest, out["id"])
         r.supplier_id = data.supplier_id
         db.commit()
-        return _req_out(db, r)
+        return _req_out(db, r, p)
     return out
 
 
@@ -540,7 +583,7 @@ def purchase_status(rid: int, data: ReqStatusIn, p: Principal = Depends(require(
     r.status = data.status
     audit(db, p.tenant.id, p.user.id, "status", "purchase_request", r.id, {"status": data.status}, ip=p.ip)
     db.commit()
-    return _req_out(db, r)
+    return _req_out(db, r, p)
 
 
 # ---------- Activos del cliente ----------
@@ -563,6 +606,16 @@ class AssetIn(BaseModel):
     status: str = Field("activo", pattern="^(activo|retirado|garantia|reemplazado)$")
     notes: str | None = None
     photos: list = Field(default_factory=list)
+
+
+# lo que el activo enlaza tiene que ser de esta empresa: la ficha responde el nombre del cliente y el proyecto
+ASSET_REFS = {
+    "customer_id": (Customer, "Cliente no encontrado"),
+    "project_id": (Project, "Proyecto no encontrado"),
+    "work_order_id": (WorkOrder, "Orden de trabajo no encontrada"),
+    "product_id": (Product, "Producto no encontrado"),
+    "supplier_id": (Supplier, "Proveedor no encontrado"),
+}
 
 
 def _asset_out(db: Session, a: CustomerAsset) -> dict:
@@ -621,6 +674,7 @@ def assets(
 
 @router.post("/assets", status_code=201)
 def asset_create(data: AssetIn, p: Principal = Depends(require("assets", "crear")), db: Session = Depends(get_db)):
+    check_refs(db, p.tenant.id, data.model_dump(), ASSET_REFS)
     a = CustomerAsset(tenant_id=p.tenant.id, **data.model_dump())
     db.add(a)
     db.flush()
@@ -634,6 +688,7 @@ def asset_update(aid: int, data: AssetIn, p: Principal = Depends(require("assets
     a = db.get(CustomerAsset, aid)
     if not a or a.tenant_id != p.tenant.id:
         raise HTTPException(404, "Activo no encontrado")
+    check_refs(db, p.tenant.id, data.model_dump(), ASSET_REFS, current=a)
     for k, v in data.model_dump().items():
         setattr(a, k, v)
     db.commit()

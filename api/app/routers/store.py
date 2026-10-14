@@ -179,7 +179,9 @@ def _coupon_out(c: Coupon):
 
 
 @router.get("/coupons")
-def coupons(p: Principal = Depends(require("catalog", "ver")), db: Session = Depends(get_db)):
+def coupons(p: Principal = Depends(require("catalog", "editar")), db: Session = Depends(get_db)):
+    # los codigos y montos de descuento vigentes son de quien administra la tienda (la seccion pide catalog.editar):
+    # con catalog.ver (el tecnico, el aliado) los repartiria o los usaria en la tienda publica
     # los desactivados se siguen viendo (se reactivan aqui); lo archivado o en la papelera se ve en Archivo
     stmt = select(Coupon).where(Coupon.tenant_id == p.tenant.id, Coupon.archived_at.is_(None), Coupon.trashed_at.is_(None))
     return [_coupon_out(c) for c in db.scalars(stmt.order_by(Coupon.id.desc()))]
@@ -862,7 +864,9 @@ def search(q: str = Query(min_length=1), p: Principal = Depends(require("dashboa
         ):
             out.append({"kind": "factura", "id": i.id, "title": i.number, "sub": f"{c.name} · {i.status}", "to": f"/facturas/{i.id}"})
     for pr in db.scalars(select(Product).where(Product.tenant_id == tid, or_(Product.name.ilike(like), Product.code.ilike(like))).limit(5)) if can_cat else []:
-        out.append({"kind": "producto", "id": pr.id, "title": pr.name, "sub": f"{pr.code} · {pr.currency} {d(pr.price):,.2f}", "to": f"/productos?q={pr.code}"})
+        # el tecnico busca equipos sin ver precios (Andres 22:07): sin catalog.precios solo el codigo
+        sub = f"{pr.code} · {pr.currency} {d(pr.price):,.2f}" if p.sees_prices else pr.code
+        out.append({"kind": "producto", "id": pr.id, "title": pr.name, "sub": sub, "to": f"/productos?q={pr.code}"})
     for o in db.scalars(select(Order).where(Order.tenant_id == tid, Order.number.ilike(like)).limit(5)) if can_sales else []:
         out.append({"kind": "orden", "id": o.id, "title": o.number, "sub": o.status, "to": "/ordenes"})
     return out[:20]

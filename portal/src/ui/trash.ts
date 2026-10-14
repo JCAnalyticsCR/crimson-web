@@ -1,5 +1,5 @@
 /* Que se puede mandar a la papelera, con que permiso y donde se abre. Las reglas de verdad (dependencias, motivos)
-   viven en la API (services/archive.py: KINDS, ACTION, NEEDS_ALL); aqui solo lo necesario para dibujar el icono y
+   viven en la API (services/archive.py: KINDS, ACTION, NEEDS_ALL, VIEW_ACTION); aqui solo lo necesario para dibujar el icono y
    los enlaces. */
 
 export type TrashKind =

@@ -28,6 +28,9 @@ from ..services import supplier_catalog as supcat
 
 router = APIRouter(tags=["catalogo"])
 
+# Campos de costo del producto: solo los escribe quien los ve (catalog.costos)
+COST_FIELDS = {"cost", "cost_currency", "margin_pct"}
+
 
 def _page(db: Session, stmt, cursor: int | None, limit: int, model, out):
     if cursor:
@@ -237,7 +240,12 @@ def create_product(data: ProductIn, p: Principal = Depends(require("catalog", "c
         raise HTTPException(409, "Ya existe un producto con ese codigo")
     if data.warehouse_id:
         _own(db, Warehouse, data.warehouse_id, p.tenant.id)
-    pr = Product(tenant_id=p.tenant.id, **data.model_dump(exclude={"tax_ids"}))
+    fields = data.model_dump(exclude={"tax_ids"})
+    if not p.sees_costs:
+        # quien no ve costos tampoco los escribe: el producto nace sin costo y el admin lo carga o lo vincula
+        for k in COST_FIELDS:
+            fields.pop(k, None)
+    pr = Product(tenant_id=p.tenant.id, **fields)
     for tid in data.tax_ids:
         _own(db, Tax, tid, p.tenant.id)
         pr.taxes.append(ProductTax(tax_id=tid))
@@ -302,7 +310,10 @@ def update_product(pid: int, data: ProductIn, p: Principal = Depends(require("ca
         raise HTTPException(409, "Ya existe un producto con ese codigo")
     if data.warehouse_id:
         _own(db, Warehouse, data.warehouse_id, p.tenant.id)
-    for k, v in data.model_dump(exclude={"tax_ids"}, exclude_unset=True).items():  # lo que no se envia no se borra
+    # lo que no se envia no se borra. Quien no ve costos recibe cost=None en la ficha y lo devolveria asi: sin este
+    # filtro, cada guardado de bodega borraba el costo del producto (Andres 08:07: el costo es solo del admin)
+    exclude = {"tax_ids"} | (set() if p.sees_costs else COST_FIELDS)
+    for k, v in data.model_dump(exclude=exclude, exclude_unset=True).items():
         setattr(pr, k, v)
     if "tax_ids" in data.model_fields_set:
         pr.taxes.clear()
