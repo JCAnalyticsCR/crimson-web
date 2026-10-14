@@ -325,3 +325,14 @@ def require(module: str, action: str):
         return p
 
     return _dep
+
+
+def require_any(module: str, *actions: str):
+    """Basta una de las acciones (p. ej. seguir o editar): support_desk.editar implica support_desk.seguir."""
+
+    def _dep(p: Principal = Depends(get_principal)) -> Principal:
+        if not any(p.can(module, a) for a in actions):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, f"Sin permiso: {module}.{'|'.join(actions)}")
+        return p
+
+    return _dep

@@ -1,115 +1,200 @@
-/* Mesa de soporte. Es la pieza que Andres necesita para la propuesta a Hikvision: cada caso con su
-   reloj de primera respuesta, su nivel (1 a 3) y todo lo que se hizo escrito con hora y autor. */
-import { useCallback, useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { api, fmtMoney, parseTs } from "../../lib/api";
+/* Mesa de soporte. Es la pieza que Andres necesita para la propuesta a Hikvision: cada caso con su reloj, su nivel
+   (1 a 3) y todo lo que se hizo escrito con hora y autor. Reunion del 13/10 (16:56): "un diseño diferente… que llame
+   más la atención y que de verdad yo pueda dar los seguimientos". De ahi la bandeja con semaforo de SLA (el servidor
+   decide el grupo; aqui el reloj baja cada 30 s), el proximo paso, el ultimo seguimiento y el seguimiento en 1 clic.
+   Los filtros viven en la URL (se comparten y sobreviven al refrescar). */
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Card, Empty, Field, I, Icon, Loading, Modal } from "../../ui/components";
+import { useRecordAutosave } from "../../lib/useRecordAutosave";
+import { Empty, Field, I, Icon, Loading, Modal } from "../../ui/components";
 import { Lookup, searchCustomers } from "../../ui/Lookup";
-import { PhotoStrip } from "../../ui/MediaPicker";
-import { TrashButton } from "../../ui/TrashButton";
+import { TicketBoard } from "./TicketBoard";
+import { TicketCard } from "./TicketCard";
+import { TicketDetail } from "./TicketDetail";
+import { ESTADO, KIND, PRIO_LABEL, esAbierto, type Meta, type Ticket } from "./ticketTypes";
+import "./tickets.css";
 
-type Note = { id: number; body: string; internal: boolean; photos: string[]; user: string; created_at: string };
-type Ticket = {
-  id: number; number: string; subject: string; kind: string; channel: string | null; level: number; priority: string; status: string;
-  customer_id: number | null; customer: string | null; asset_id: number | null; asset: string | null; project_id: number | null;
-  work_order_id: number | null; assigned_to: number | null; assigned: string | null; due_at: string | null; first_reply_at: string | null;
-  resolved_at: string | null; sla_vencido: boolean; resolve_due_at: string | null; resolucion_vencida: boolean; fuera_de_tiempo: boolean;
-  contact?: Record<string, string | null>;
-  sla: { respuesta_h: number | null; resolucion_h: number | null; origen: string | null; origen_label: string; contrato: string | null } | null; hours: string; billable: boolean; amount: string | null; tags: string[]; created_at: string;
-  description?: string | null; solution?: string | null; photos?: string[]; notes?: Note[];
-};
-type Meta = { kinds: string[]; states: string[]; priorities: string[]; channels: string[]; sla_horas: Record<string, number>; agents: { id: number; name: string }[]; abiertos: number; fuera_de_tiempo: number; can_see_all: boolean; can_charge?: boolean };
+const GRUPOS: { key: string; label: string; color: string }[] = [
+  { key: "vencidos", label: "Vencidos", color: "rojo" },
+  { key: "por_vencer", label: "Por vencer", color: "ambar" },
+  { key: "seguimiento_hoy", label: "Seguimiento para hoy", color: "info" },
+  { key: "esperando", label: "Esperando al cliente", color: "gris" },
+  { key: "en_tiempo", label: "En tiempo", color: "verde" },
+  { key: "cerrados", label: "Resueltos y cerrados", color: "neutro" },
+];
+const FILTROS: { key: string; label: string; tone?: (n: number) => string }[] = [
+  { key: "vencidos", label: "Vencidos", tone: (n) => (n > 0 ? "is-bad" : "is-good") },
+  { key: "por_vencer", label: "Por vencer", tone: (n) => (n > 0 ? "is-warn" : "") },
+  { key: "sin_responsable", label: "Sin responsable", tone: (n) => (n > 0 ? "is-warn" : "") },
+  { key: "seguimiento_hoy", label: "Seguimiento hoy" },
+  { key: "sin_movimiento", label: "Sin movimiento +48 h" },
+];
+const VISTA_KEY = "crimson:tickets:vista";
+const leerVista = () => { try { return localStorage.getItem(VISTA_KEY) || ""; } catch { return ""; } };
+const guardarVista = (v: string) => { try { localStorage.setItem(VISTA_KEY, v); } catch { /* sin almacenamiento */ } };
 
-const KIND: Record<string, string> = { soporte: "Soporte", garantia: "Garantía", mantenimiento: "Mantenimiento", visita: "Visita", instalacion: "Instalación", consulta: "Consulta" };
-const ESTADO: Record<string, { label: string; tone: string }> = {
-  nuevo: { label: "Nuevo", tone: "info" }, asignado: { label: "Asignado", tone: "info" }, en_proceso: { label: "En proceso", tone: "warn" },
-  esperando_cliente: { label: "Esperando al cliente", tone: "muted" }, resuelto: { label: "Resuelto", tone: "ok" }, cerrado: { label: "Cerrado", tone: "muted" },
-};
-const PRIO: Record<string, string> = { baja: "var(--text-3)", media: "var(--info)", alta: "var(--warn)", critica: "var(--bad)" };
-const blank = { subject: "", customer_id: "", customer_name: "", kind: "soporte", channel: "whatsapp", level: 1, priority: "media", description: "", assigned_to: "", billable: false };
-
-const cuando = (s: string | null) => (s ? parseTs(s).toLocaleString("es-CR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "America/Costa_Rica" }) : "—");
+const blank = { subject: "", customer_id: "", customer_name: "", project_id: "", kind: "soporte", channel: "whatsapp", level: 1, priority: "media", description: "", assigned_to: "", billable: false };
+type Form = typeof blank & { id?: number; number?: string };
+type Proyecto = { id: number; number: string; name: string };
 
 export default function Tickets() {
   const { toast, allows, me } = useSession();
-  // el monto que se cobra es precio: el tecnico no lo ve ni lo escribe (13/10, 22:07); lo pone admin o contabilidad
-  const verMonto = allows("catalog.precios");
   const [params, setParams] = useSearchParams();
   const [rows, setRows] = useState<Ticket[] | null>(null);
   const [meta, setMeta] = useState<Meta | null>(null);
-  // ?pendiente= viene del inicio: misma definicion que el conteo (services/sla.py)
-  const [status, setStatus] = useState(params.get("pendiente") === "fuera_de_tiempo" ? "fuera_de_tiempo" : "abiertos");
-  const [kind, setKind] = useState("");
-  const [q, setQ] = useState("");
   const [open, setOpen] = useState<Ticket | null>(null);
-  const [form, setForm] = useState<(typeof blank & { id?: number }) | null>(null);
-  const [nota, setNota] = useState({ body: "", internal: false, hours: "", photos: [] as string[] });
-  const [cerrar, setCerrar] = useState<{ solution: string; hours: string; billable: boolean; amount: string } | null>(null);
-  const [visita, setVisita] = useState<{ technician_id: string; scheduled_at: string; site: string } | null>(null);
-  // monto de un ticket cobrable ya resuelto (el tecnico no lo escribe): admin, supervisor o contador (meta.can_charge)
-  const [monto, setMonto] = useState<string | null>(null);
+  const [resolverAlAbrir, setResolverAlAbrir] = useState(false);
+  const [form, setForm] = useState<Form | null>(null);
+  const [proyectos, setProyectos] = useState<Proyecto[]>([]);
+  const [now, setNow] = useState(() => Date.now());
+  const openId = useRef<number | null>(null);
+  openId.current = open?.id ?? null;
 
+  /* ---------- filtros en la URL (compatibles con los enlaces de antes) ---------- */
   const cliente = params.get("cliente");
-  const load = useCallback(() => {
-    const qs = new URLSearchParams();
-    if (cliente) { qs.set("customer_id", cliente); qs.set("status", ""); }
-    if (status === "fuera_de_tiempo" && !cliente) qs.set("pendiente", "fuera_de_tiempo");
-    else if (status && !cliente) qs.set("status", status);
-    if (kind) qs.set("kind", kind);
+  // ?pendiente=fuera_de_tiempo viene del inicio: misma definicion que "Vencidos" (services/sla.py)
+  const f = params.get("f") || (params.get("pendiente") === "fuera_de_tiempo" ? "vencidos" : "");
+  const asig = params.get("asig") || "";
+  const estadoUrl = params.get("estado");
+  const estado = estadoUrl || (cliente ? "todos" : "abiertos");
+  const tipo = params.get("tipo") || "";
+  const prio = params.get("prio") || "";
+  const aliado = params.get("aliado") || "";
+  const q = params.get("q") || "";
+  const vista = params.get("vista") || leerVista() || "bandeja";
+  const [qText, setQText] = useState(q);
+  const setP = useCallback((patch: Record<string, string | null>) => {
+    setParams((cur) => {
+      const n = new URLSearchParams(cur);
+      // el enlace viejo pasa a ser f=vencidos en el primer cambio (abrir un ticket, buscar, Míos...): sin esto el
+      // filtro se perdia y detras del detalle quedaban todos los abiertos
+      if (n.get("pendiente") === "fuera_de_tiempo" && !n.has("f") && !("f" in patch)) n.set("f", "vencidos");
+      n.delete("pendiente");
+      for (const [k, v] of Object.entries(patch)) { if (v) n.set(k, v); else n.delete(k); }
+      return n;
+    }, { replace: true });
+  }, [setParams]);
+  useEffect(() => { const t = setTimeout(() => { if (qText !== q) setP({ q: qText.trim() || null }); }, 300); return () => clearTimeout(t); }, [qText]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hayFiltros = !!(f || asig || tipo || prio || aliado || q || (estado !== "abiertos" && !cliente));
+
+  const query = useMemo(() => {
+    const qs = new URLSearchParams({ orden: "urgencia", limit: "300" });
+    if (vista === "tablero") qs.set("status", "tablero");
+    else if (cliente && !estadoUrl) qs.set("status", "");
+    else if (estado === "abiertos") qs.set("status", "abiertos");
+    else if (estado !== "todos") qs.set("status", estado);
+    if (cliente) qs.set("customer_id", cliente);
+    if (f) qs.set("filtro", f);
+    if (asig === "me") qs.set("assigned", "me");
+    if (tipo) qs.set("kind", tipo);
+    if (prio) qs.set("priority", prio);
+    if (aliado) qs.set("ally", aliado);
     if (q) qs.set("q", q);
-    api<Ticket[]>(`/tickets?${qs}`).then(setRows);
-    api<Meta>("/tickets/meta/config").then(setMeta);
-  }, [status, kind, q, cliente]);
-  useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); }, [load]);
+    return qs.toString();
+  }, [vista, cliente, estado, estadoUrl, f, asig, tipo, prio, aliado, q]);
 
-  const show = useCallback(async (id: number) => { setOpen(await api<Ticket>(`/tickets/${id}`)); setNota({ body: "", internal: false, hours: "", photos: [] }); setMonto(null); }, []);
-  useEffect(() => { const id = params.get("id"); if (id) show(Number(id)); }, [params, show]);
+  /* ---------- datos: lista + contadores; refresco cada 120 s sin parpadear ---------- */
+  const pedido = useRef(0);
+  const load = useCallback(async () => {
+    const n = ++pedido.current;
+    try {
+      const [r, m] = await Promise.all([api<Ticket[]>(`/tickets?${query}`), api<Meta>("/tickets/meta/config")]);
+      if (n !== pedido.current) return; // llego tarde: ya se pidio con otros filtros
+      setRows(r); setMeta(m);
+    } catch (e) { if (n === pedido.current) { setRows((x) => x ?? []); toast(e instanceof Error ? e.message : "Error", "bad"); } }
+  }, [query, toast]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const t = window.setInterval(() => { if (document.visibilityState === "visible") load(); }, 120_000);
+    return () => window.clearInterval(t);
+  }, [load]);
+  useEffect(() => { const t = window.setInterval(() => setNow(Date.now()), 30_000); return () => window.clearInterval(t); }, []);
 
-  const body = (f: typeof blank) => ({
-    subject: f.subject, customer_id: f.customer_id ? Number(f.customer_id) : null, kind: f.kind, channel: f.channel || null,
-    level: Number(f.level), priority: f.priority, description: f.description || null,
-    assigned_to: f.assigned_to ? Number(f.assigned_to) : null, billable: f.billable, contact: {}, tags: [],
+  /* ---------- detalle (?id=N: busqueda global, notificaciones, enlaces) ---------- */
+  const idParam = params.get("id");
+  useEffect(() => {
+    if (!idParam) { setOpen(null); return; }
+    api<Ticket>(`/tickets/${idParam}`).then(setOpen).catch((e) => toast(e instanceof Error ? e.message : "Error", "bad"));
+  }, [idParam, toast]);
+  const abrir = (t: Ticket, resolver = false) => { setResolverAlAbrir(resolver); setP({ id: String(t.id) }); };
+  const cerrarDetalle = () => { setResolverAlAbrir(false); setP({ id: null }); };
+  const cambio = (t: Ticket) => {
+    setOpen((o) => (o && o.id === t.id ? t : o));
+    setRows((rs) => (rs ? rs.map((x) => (x.id === t.id ? { ...x, ...t } : x)) : rs));
+    load();
+  };
+
+  const tomar = async (t: Ticket) => {
+    if (!me) return;
+    try { const r = await api<Ticket>(`/tickets/${t.id}/assign`, { method: "POST", json: { assigned_to: me.user.id } }); toast(`${r.number} es tuyo`); cambio(r); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
+  const mover = async (t: Ticket, status: string) => {
+    try { const r = await api<Ticket>(`/tickets/${t.id}`, { method: "PATCH", json: { status } }); toast(`${r.number}: ${ESTADO[status]?.label || status}`); cambio(r); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
+
+  /* ---------- formulario Nuevo / Editar (autoguardado T1/T2) ---------- */
+  const body = (x: Form) => ({
+    subject: x.subject, customer_id: x.customer_id ? Number(x.customer_id) : null, project_id: x.project_id ? Number(x.project_id) : null,
+    kind: x.kind, channel: x.channel || null, level: Number(x.level), priority: x.priority, description: x.description || null,
+    assigned_to: x.assigned_to ? Number(x.assigned_to) : null, billable: x.billable, contact: {}, tags: [],
   });
+  const formAuto = useRecordAutosave<Form>({
+    ns: "tck",
+    value: form,
+    idOf: (x) => x.id,
+    body,
+    // editar: se guarda al cerrar (PUT recalcula el SLA y avisa al responsable una sola vez); nuevo: borrador local
+    // hasta Guardar (crear gasta el consecutivo TCK, arranca el SLA y avisa)
+    save: async (b, id, ctx) => {
+      await api<Ticket>(`/tickets/${id}`, { method: "PUT", json: b, headers: ctx.headers, keepalive: ctx.keepalive });
+      load();
+      if (openId.current === id) api<Ticket>(`/tickets/${id}`).then(setOpen).catch(() => {});
+    },
+    mode: "close",
+    newRecords: "local",
+    enabled: !!form && (form.id ? allows("support_desk.editar") : allows("support_desk.crear")),
+    label: (x) => (x.id ? x.number || "El ticket" : "El ticket nuevo"),
+    apply: (data) => setForm((cur) => (cur ? { ...data, id: cur.id, number: cur.number } : cur)),
+  });
+  const verProyectos = allows("projects.ver");
+  useEffect(() => {
+    const cid = form?.customer_id;
+    if (!cid || !verProyectos) { setProyectos([]); return; }
+    api<Proyecto[]>(`/projects?customer_id=${cid}&limit=100`).then(setProyectos).catch(() => setProyectos([]));
+  }, [form?.customer_id, verProyectos]);
 
-  const save = async () => {
+  const guardarForm = async () => {
     if (!form) return;
     try {
-      const t = await api<Ticket>(form.id ? `/tickets/${form.id}` : "/tickets", { method: form.id ? "PUT" : "POST", json: body(form) });
+      const t = await formAuto.exclusive(form, (id) => api<Ticket>(id ? `/tickets/${id}` : "/tickets", { method: id ? "PUT" : "POST", json: body(form) }));
       toast(form.id ? "Ticket actualizado" : `Ticket ${t.number} abierto`);
-      setForm(null); load(); if (form.id) show(form.id);
+      setForm(null);
+      if (form.id) cambio(t); else load();
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
-
-  const responder = async () => {
-    if (!open || nota.body.trim().length < 1) return;
-    try {
-      const t = await api<Ticket>(`/tickets/${open.id}/notes`, { method: "POST", json: { body: nota.body.trim(), internal: nota.internal, photos: nota.photos, hours: nota.hours ? Number(nota.hours) : null, status: open.status === "nuevo" || open.status === "asignado" ? "en_proceso" : null } });
-      setOpen(t); setNota({ body: "", internal: false, hours: "", photos: [] }); load();
-    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  const cancelarForm = () => {
+    if (formAuto.isDirty() && !confirm("¿Descartar los cambios?")) return;
+    formAuto.discard();
+    setForm(null);
   };
+  const editar = (t: Ticket) => setForm({
+    id: t.id, number: t.number, subject: t.subject, customer_id: t.customer_id ? String(t.customer_id) : "", customer_name: t.customer_id ? t.customer || "" : "",
+    project_id: t.project_id ? String(t.project_id) : "", kind: t.kind, channel: t.channel || "", level: t.level, priority: t.priority,
+    description: t.description || "", assigned_to: t.assigned_to ? String(t.assigned_to) : "", billable: t.billable,
+  });
 
-  const mover = async (st: string, extra: Record<string, unknown> = {}) => {
-    if (!open) return;
-    try { const t = await api<Ticket>(`/tickets/${open.id}`, { method: "PATCH", json: { status: st, ...extra } }); setOpen(t); setCerrar(null); load(); toast("Ticket actualizado"); }
-    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
-  };
-
-  const guardarMonto = async () => {
-    if (!open || monto === null) return;
-    try { const t = await api<Ticket>(`/tickets/${open.id}/amount`, { method: "PATCH", json: { amount: Number(monto || 0) } }); setOpen(t); setMonto(null); load(); toast("Monto guardado"); }
-    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
-  };
-
-  const mandarTecnico = async () => {
-    if (!open || !visita) return;
-    try {
-      const r = await api<{ number: string }>(`/tickets/${open.id}/work-order`, { method: "POST", json: { technician_id: visita.technician_id ? Number(visita.technician_id) : null, scheduled_at: visita.scheduled_at ? new Date(`${visita.scheduled_at}:00-06:00`).toISOString() : null, site: visita.site || null } });
-      toast(`Orden ${r.number} creada`); setVisita(null); show(open.id);
-    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
-  };
-
+  /* ---------- vista ---------- */
   const lista = rows || [];
+  const canFollow = allows("support_desk.seguir|support_desk.editar");
+  const canTakeAll = allows("support_desk.editar") && !!meta?.can_see_all;
+  const res = meta?.resumen;
+  const grupos = useMemo(() => GRUPOS.map((g) => ({ ...g, rows: lista.filter((t) => t.grupo === g.key) })).filter((g) => g.rows.length), [lista]);
+  const setVista = (v: string) => { guardarVista(v); setP({ vista: v === "bandeja" ? null : v }); };
+  const quitarFiltros = () => { setQText(""); setP({ f: null, asig: null, estado: null, tipo: null, prio: null, aliado: null, q: null }); };
 
   return (
     <>
@@ -120,152 +205,95 @@ export default function Tickets() {
         </div>
       </div>
 
-      <div className="eco">
-        {/* abiertos y fuera de tiempo salen del backend: los mismos numeros que el inicio */}
-        <button type="button" className="eco__box" onClick={() => setStatus("abiertos")}><span className="meta">Abiertos</span><b>{meta ? meta.abiertos : "…"}</b></button>
-        <button type="button" className={`eco__box ${meta?.fuera_de_tiempo ? "is-bad" : "is-good"}`} onClick={() => setStatus("fuera_de_tiempo")}><span className="meta">Fuera de tiempo (SLA vencido)</span><b>{meta ? meta.fuera_de_tiempo : "…"}</b></button>
-        <div className="eco__box"><span className="meta">Críticos y altos (en la lista)</span><b>{rows ? lista.filter((t) => ["critica", "alta"].includes(t.priority) && !["resuelto", "cerrado"].includes(t.status)).length : "…"}</b></div>
-        <div className="eco__box"><span className="meta">Horas registradas (en la lista)</span><b>{rows ? lista.reduce((s, t) => s + Number(t.hours || 0), 0).toFixed(1) : "…"}</b></div>
+      {/* contadores = filtros: un clic aplica, otro clic quita. Salen del servidor con la misma regla que la lista */}
+      <div className="eco tk-eco">
+        <button type="button" className={`eco__box${!f && estado === "abiertos" ? " is-active" : ""}`} onClick={() => setP({ f: null, estado: null })}>
+          <span className="meta">Abiertos</span><b>{res ? res.abiertos : "…"}</b>
+        </button>
+        {FILTROS.map((x) => {
+          const n = res ? (res as unknown as Record<string, number>)[x.key] : null;
+          return (
+            <button type="button" key={x.key} className={`eco__box ${n !== null && x.tone ? x.tone(n) : ""}${f === x.key ? " is-active" : ""}`} aria-pressed={f === x.key} onClick={() => setP({ f: f === x.key ? null : x.key })}>
+              <span className="meta">{x.label}</span><b>{n ?? "…"}</b>
+            </button>
+          );
+        })}
       </div>
 
-      <Card flush>
-        <div className="list-head" style={{ flexWrap: "wrap" }}>
-          <div className="search" style={{ maxWidth: 320 }}><Icon d={I.search} size={16} /><input placeholder="Asunto o número…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-          <select className="select select--sm" value={status} onChange={(e) => setStatus(e.target.value)}><option value="abiertos">Abiertos</option><option value="fuera_de_tiempo">Fuera de tiempo</option><option value="">Todos</option>{(meta?.states || []).map((s) => <option key={s} value={s}>{ESTADO[s]?.label || s}</option>)}</select>
-          <select className="select select--sm" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">Todo tipo</option>{(meta?.kinds || []).map((k) => <option key={k} value={k}>{KIND[k] || k}</option>)}</select>
-          <button className="btn btn--ghost btn--sm" onClick={load} style={{ marginLeft: "auto" }}><Icon d={I.refresh} /></button>
-        </div>
-        {rows === null ? <Loading /> : rows.length === 0 ? <Empty title="Sin tickets" hint="Cada llamada, garantía o mantenimiento queda aquí con su tiempo de respuesta." /> : (
-          <table className="table">
-            <thead><tr><th>Número</th><th>Asunto</th><th>Cliente</th><th>Tipo</th><th>Prioridad</th><th>Responsable</th><th>Vence</th><th>Estado</th><th /></tr></thead>
-            <tbody>{rows.map((t) => (
-              <tr key={t.id}>
-                <td className="mono muted">{t.number}</td>
-                <td style={{ fontWeight: 600 }}>{t.subject}{t.level > 1 && <span className="badge badge--muted" style={{ marginLeft: 6 }}>N{t.level}</span>}</td>
-                <td className="muted">{t.customer || "—"}</td><td>{KIND[t.kind] || t.kind}</td>
-                <td><span style={{ color: PRIO[t.priority], fontWeight: 600, textTransform: "capitalize" }}>{t.priority}</span></td>
-                <td className="muted">{t.assigned || "Sin asignar"}</td>
-                <td style={{ fontSize: 13, color: t.fuera_de_tiempo ? "var(--bad)" : undefined }}>{t.first_reply_at ? "respondido" : cuando(t.due_at)}</td>
-                <td><span className={`badge badge--${ESTADO[t.status]?.tone || "muted"}`}>{ESTADO[t.status]?.label || t.status}</span></td>
-                <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => show(t.id)}>Abrir</button><TrashButton kind="ticket" id={t.id} number={t.number} onDone={load} /></span></td>
-              </tr>
-            ))}</tbody>
-          </table>
+      <div className="tk-filters">
+        <div className="search"><Icon d={I.search} size={16} /><input placeholder="Asunto o número…" aria-label="Buscar" value={qText} onChange={(e) => setQText(e.target.value)} /></div>
+        <button type="button" className={`tk-chip${asig === "me" ? " is-on" : ""}`} aria-pressed={asig === "me"} onClick={() => setP({ asig: asig === "me" ? null : "me" })}>Míos{res ? ` · ${res.asignados_a_mi}` : ""}</button>
+        {vista !== "tablero" && (
+          <select className="select select--sm" aria-label="Estado" value={estado} onChange={(e) => setP({ estado: e.target.value === "abiertos" && !cliente ? null : e.target.value })}>
+            <option value="abiertos">Abiertos</option><option value="todos">Todos</option>
+            {(meta?.states || []).map((s) => <option key={s} value={s}>{ESTADO[s]?.label || s}</option>)}
+          </select>
         )}
-      </Card>
+        <select className="select select--sm" aria-label="Tipo" value={tipo} onChange={(e) => setP({ tipo: e.target.value || null })}><option value="">Todo tipo</option>{(meta?.kinds || []).map((k) => <option key={k} value={k}>{KIND[k] || k}</option>)}</select>
+        <select className="select select--sm" aria-label="Prioridad" value={prio} onChange={(e) => setP({ prio: e.target.value || null })}><option value="">Toda prioridad</option>{(meta?.priorities || []).map((p) => <option key={p} value={p}>{PRIO_LABEL[p] || p}</option>)}</select>
+        {!!meta?.allies?.length && (
+          <select className="select select--sm" aria-label="Empresa aliada" title="Tickets de proyectos donde participa ese aliado" value={aliado} onChange={(e) => setP({ aliado: e.target.value || null })}>
+            <option value="">Toda empresa aliada</option>
+            {meta.allies.map((a) => <option key={a.key} value={a.key}>{a.name} · {a.abiertos}</option>)}
+          </select>
+        )}
+        <div className="tk-filters__end">
+          <div className="tabs" role="tablist" aria-label="Vista">
+            <button role="tab" aria-selected={vista !== "tablero"} className={vista !== "tablero" ? "is-active" : ""} onClick={() => setVista("bandeja")}>Bandeja</button>
+            <button role="tab" aria-selected={vista === "tablero"} className={vista === "tablero" ? "is-active" : ""} onClick={() => setVista("tablero")}>Tablero</button>
+          </div>
+          <button className="btn btn--ghost btn--sm" onClick={load} aria-label="Refrescar" title="Refrescar"><Icon d={I.refresh} /></button>
+        </div>
+      </div>
+
+      {rows === null ? <Loading /> : lista.length === 0 ? (
+        hayFiltros ? (
+          <Empty title="Nada por aquí con estos filtros." action={<button className="btn btn--soft btn--sm" onClick={quitarFiltros}>Quitar filtros</button>} />
+        ) : <Empty title="Sin tickets" hint="Cada llamada, garantía o mantenimiento queda aquí con su tiempo de respuesta." />
+      ) : vista === "tablero" ? (
+        <TicketBoard rows={lista} now={now} onOpen={abrir} onMove={mover} onVerCerrados={() => { guardarVista("bandeja"); setP({ vista: null, estado: "cerrado", f: null }); }} />
+      ) : (
+        /* Una sola lista con las cabeceras de grupo intercaladas (no una seccion por grupo): cuando el refresco mueve un
+           ticket de grupo (por vencer -> vencidos), React mueve la MISMA tarjeta en vez de desmontarla, y el
+           seguimiento que se esta escribiendo en ella no se pierde. */
+        <div className="tk-inbox">
+          {grupos.flatMap((g) => [
+            <h2 className="tk-group__head" key={`g-${g.key}`} id={`tk-g-${g.key}`} data-color={g.color}><i style={g.color === "info" ? { background: "var(--info)" } : undefined} />{g.label}<span>· {g.rows.length}</span></h2>,
+            ...g.rows.map((t) => (
+              <TicketCard key={t.id} t={t} now={now} canFollow={canFollow} canTake={canTakeAll && !t.assigned_to && esAbierto(t)} detailOpen={open?.id === t.id}
+                onOpen={() => abrir(t)} onTake={() => tomar(t)} onChanged={cambio} onTrashed={load} />
+            )),
+          ])}
+        </div>
+      )}
 
       {open && (
-        <Modal title={`${open.number} · ${open.subject}`} onClose={() => { setOpen(null); if (params.get("id")) setParams({}); }} wide foot={<>
-          {allows("field.asignar") && !open.work_order_id && <button className="btn btn--soft" style={{ marginRight: "auto" }} onClick={() => setVisita({ technician_id: "", scheduled_at: "", site: "" })}><Icon d={I.check} />Mandar un técnico</button>}
-          {open.work_order_id && <Link className="btn btn--ghost" style={{ marginRight: "auto" }} to={`/ordenes-trabajo?id=${open.work_order_id}`}>Ver la orden</Link>}
-          {allows("support_desk.editar") && !["resuelto", "cerrado"].includes(open.status) && <button className="btn btn--crimson" onClick={() => setCerrar({ solution: open.solution || "", hours: String(open.hours || ""), billable: open.billable, amount: String(open.amount || "") })}>Resolver</button>}
-          <button className="btn btn--ghost" onClick={() => setOpen(null)}>Cerrar</button>
-        </>}>
-          <div className="eco" style={{ marginBottom: 14 }}>
-            <div className="eco__box"><span className="meta">Estado</span><b style={{ fontSize: 15 }}>{ESTADO[open.status]?.label || open.status}</b></div>
-            <div className={`eco__box ${open.sla_vencido ? "is-bad" : ""}`}><span className="meta">Primera respuesta</span><b style={{ fontSize: 15 }}>{open.first_reply_at ? cuando(open.first_reply_at) : `antes de ${cuando(open.due_at)}`}</b></div>
-            <div className={`eco__box ${open.resolucion_vencida ? "is-bad" : ""}`}><span className="meta">Resolución</span><b style={{ fontSize: 15 }}>{open.resolved_at ? cuando(open.resolved_at) : open.resolve_due_at ? `antes de ${cuando(open.resolve_due_at)}` : "—"}</b></div>
-            <div className="eco__box"><span className="meta">Horas</span><b>{Number(open.hours || 0)}</b></div>
-            <div className="eco__box"><span className="meta">{open.billable ? "Se cobra" : "Sin costo"}</span><b className="money">{open.billable && verMonto ? fmtMoney(open.amount) : "—"}</b></div>
-          </div>
-          {/* el tecnico marca "se cobra" sin cifra: el monto lo pone administracion o contabilidad, tambien ya resuelto */}
-          {verMonto && meta?.can_charge && open.billable && (
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
-              {monto === null ? (
-                <button className="btn btn--ghost btn--sm" onClick={() => setMonto(Number(open.amount || 0) > 0 ? String(open.amount) : "")}>{Number(open.amount || 0) > 0 ? "Cambiar el monto cobrado" : "Poner el monto que se cobra"}</button>
-              ) : (
-                <>
-                  <input className="input input--mono" style={{ maxWidth: 160 }} inputMode="decimal" autoFocus placeholder="Monto cobrado" value={monto} onChange={(e) => setMonto(e.target.value)} />
-                  <button className="btn btn--crimson btn--sm" onClick={guardarMonto}>Guardar monto</button>
-                  <button className="btn btn--ghost btn--sm" onClick={() => setMonto(null)}>Cancelar</button>
-                </>
-              )}
-            </div>
-          )}
-          <p className="muted" style={{ fontSize: 13.5, marginTop: 0 }}>
-            {KIND[open.kind] || open.kind} · nivel {open.level} · {open.channel || "sin canal"} · {open.customer || "sin cliente"}
-            {open.asset ? ` · equipo: ${open.asset}` : ""} · {open.assigned || "sin responsable"}
-            {allows("support_desk.editar") && <button className="btn btn--ghost btn--sm" style={{ marginLeft: 8 }} onClick={() => setForm({ id: open.id, subject: open.subject, customer_id: open.customer_id ? String(open.customer_id) : "", customer_name: open.customer || "", kind: open.kind, channel: open.channel || "", level: open.level, priority: open.priority, description: open.description || "", assigned_to: open.assigned_to ? String(open.assigned_to) : "", billable: open.billable })}>Editar</button>}
-          </p>
-          {/* reportado desde la pagina web sin ficha de cliente: los datos de contacto viven en el ticket */}
-          {open.channel === "web" && open.contact && (
-            <p style={{ fontSize: 13.5, background: "var(--bg-2)", padding: "8px 14px", borderRadius: 10 }}>
-              <b>Reporte web</b> · {[open.contact.name, open.contact.company, open.contact.phone, open.contact.email, open.contact.location].filter(Boolean).join(" · ")}
-              {open.contact.severidad_percibida ? ` · severidad indicada: ${open.contact.severidad_percibida}` : ""}
-            </p>
-          )}
-          {/* que SLA aplico y de donde salio: si el cliente reclama, esto es lo que se le prometio */}
-          <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
-            SLA: {open.sla ? <>{open.sla.respuesta_h ?? "—"} h respuesta · {open.sla.resolucion_h ?? "—"} h resolución · <b>{open.sla.origen_label}{open.sla.contrato ? ` ${open.sla.contrato}` : ""}</b></> : "sin SLA registrado (ticket anterior al cambio; se calcula al editarlo)"}
-          </p>
-          {open.description && <p style={{ fontSize: 14, background: "var(--bg-2)", padding: "10px 14px", borderRadius: 10 }}>{open.description}</p>}
-          {open.solution && <p style={{ fontSize: 14, background: "var(--ok-soft, rgba(14,159,110,.08))", border: "1px solid var(--ok)", padding: "10px 14px", borderRadius: 10 }}><b>Solución:</b> {open.solution}</p>}
-
-          <Card title={`Seguimiento · ${open.notes?.length || 0}`}>
-            {(open.notes || []).map((n) => (
-              <div key={n.id} style={{ borderLeft: `3px solid ${n.internal ? "var(--hair-2)" : "var(--crimson)"}`, paddingLeft: 12, marginBottom: 14 }}>
-                <div className="meta">{n.user} · {cuando(n.created_at)}{n.internal ? " · nota interna" : ""}</div>
-                <p style={{ margin: "4px 0", fontSize: 14, whiteSpace: "pre-wrap" }}>{n.body}</p>
-                {!!n.photos?.length && <PhotoStrip value={n.photos} onChange={() => {}} disabled />}
-              </div>
-            ))}
-            {allows("support_desk.editar") && !["cerrado"].includes(open.status) && (
-              <>
-                <Field label="Responder o anotar"><textarea className="textarea" value={nota.body} onChange={(e) => setNota({ ...nota, body: e.target.value })} placeholder="Qué se le dijo al cliente o qué se encontró." /></Field>
-                <PhotoStrip value={nota.photos} onChange={(photos) => setNota({ ...nota, photos })} label="Foto" privado="support_desk" />
-                <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
-                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={nota.internal} onChange={(e) => setNota({ ...nota, internal: e.target.checked })} />Nota interna (no cuenta como respuesta al cliente)</label>
-                  <input className="input input--mono" style={{ maxWidth: 110 }} inputMode="decimal" placeholder="horas" value={nota.hours} onChange={(e) => setNota({ ...nota, hours: e.target.value })} />
-                  <button className="btn btn--crimson btn--sm" onClick={responder} disabled={!nota.body.trim()}>Guardar</button>
-                  {open.status !== "esperando_cliente" && <button className="btn btn--ghost btn--sm" onClick={() => mover("esperando_cliente")}>Esperando al cliente</button>}
-                </div>
-              </>
-            )}
-          </Card>
-        </Modal>
-      )}
-
-      {cerrar && open && (
-        <Modal title={`Resolver ${open.number}`} onClose={() => setCerrar(null)} foot={<>
-          <button className="btn btn--ghost" onClick={() => setCerrar(null)}>Cancelar</button>
-          <button className="btn btn--crimson" onClick={() => mover("resuelto", { solution: cerrar.solution, hours: Number(cerrar.hours || 0), billable: cerrar.billable, amount: verMonto ? Number(cerrar.amount || 0) : undefined })} disabled={cerrar.solution.trim().length < 3}>Marcar resuelto</button>
-        </>}>
-          <Field label="¿Qué se hizo?" hint="Queda en el historial del equipo y del cliente."><textarea className="textarea" autoFocus value={cerrar.solution} onChange={(e) => setCerrar({ ...cerrar, solution: e.target.value })} placeholder="Se cambió la fuente de 12 V, quedó grabando y se probó con el cliente." /></Field>
-          <div className="grid-3">
-            <Field label="Horas"><input className="input input--mono" inputMode="decimal" value={cerrar.hours} onChange={(e) => setCerrar({ ...cerrar, hours: e.target.value })} /></Field>
-            <Field label="¿Se cobra?"><select className="select" value={cerrar.billable ? "1" : "0"} onChange={(e) => setCerrar({ ...cerrar, billable: e.target.value === "1" })}><option value="0">No (garantía o contrato)</option><option value="1">Sí</option></select></Field>
-            {cerrar.billable && verMonto && <Field label="Monto"><input className="input input--mono" inputMode="decimal" value={cerrar.amount} onChange={(e) => setCerrar({ ...cerrar, amount: e.target.value })} /></Field>}
-          </div>
-        </Modal>
-      )}
-
-      {visita && open && (
-        <Modal title="Mandar un técnico al sitio" onClose={() => setVisita(null)} foot={<>
-          <button className="btn btn--ghost" onClick={() => setVisita(null)}>Cancelar</button>
-          <button className="btn btn--crimson" onClick={mandarTecnico}>Crear orden de trabajo</button>
-        </>}>
-          <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Se crea con el cliente, el sitio y la descripción de este ticket. El técnico la ve en «Mi día».</p>
-          <div className="grid-2">
-            <Field label="Técnico"><select className="select" value={visita.technician_id} onChange={(e) => setVisita({ ...visita, technician_id: e.target.value })}><option value="">Sin asignar</option>{(meta?.agents || []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
-            <Field label="Fecha y hora"><input className="input" type="datetime-local" value={visita.scheduled_at} onChange={(e) => setVisita({ ...visita, scheduled_at: e.target.value })} /></Field>
-          </div>
-          <Field label="Sitio"><input className="input" value={visita.site} onChange={(e) => setVisita({ ...visita, site: e.target.value })} /></Field>
-        </Modal>
+        <TicketDetail ticket={open} meta={meta} now={now} onClose={cerrarDetalle} onChanged={cambio} onEdit={editar} resolveOnOpen={resolverAlAbrir} />
       )}
 
       {form && (
-        <Modal title={form.id ? "Editar ticket" : "Nuevo ticket"} onClose={() => setForm(null)} wide foot={<>
-          <button className="btn btn--ghost" onClick={() => setForm(null)}>Cancelar</button>
-          <button className="btn btn--crimson" onClick={save} disabled={form.subject.trim().length < 3}>Guardar</button>
+        <Modal title={form.id ? `Editar ${form.number || "ticket"}` : "Nuevo ticket"} onClose={() => setForm(null)} wide foot={<>
+          {formAuto.bar}
+          <button className="btn btn--ghost" onClick={cancelarForm}>Cancelar</button>
+          <button className="btn btn--crimson" onClick={guardarForm} disabled={form.subject.trim().length < 3}>Guardar</button>
         </>}>
           <Field label="Asunto"><input className="input" autoFocus value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="No graba la cámara del portón" /></Field>
           <div className="grid-3">
-            <Field label="Cliente"><Lookup value={form.customer_name} placeholder="Buscar cliente…" fetcher={searchCustomers} onSelect={(it, text) => setForm({ ...form, customer_id: it ? String(it.id) : "", customer_name: text })} /></Field>
+            <Field label="Cliente"><Lookup value={form.customer_name} placeholder="Buscar cliente…" fetcher={searchCustomers} onSelect={(it, text) => setForm({ ...form, customer_id: it ? String(it.id) : "", customer_name: text, project_id: it && String(it.id) === form.customer_id ? form.project_id : "" })} /></Field>
             <Field label="Tipo"><select className="select" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>{(meta?.kinds || []).map((k) => <option key={k} value={k}>{KIND[k] || k}</option>)}</select></Field>
             <Field label="Canal"><select className="select" value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value })}>{(meta?.channels || []).map((c) => <option key={c} value={c}>{c}</option>)}</select></Field>
-            <Field label="Prioridad" hint={meta ? `Primera respuesta: ${meta.sla_horas[form.priority]} h` : undefined}><select className="select" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>{(meta?.priorities || []).map((x) => <option key={x} value={x}>{x}</option>)}</select></Field>
+            <Field label="Prioridad" hint={meta ? `Primera respuesta: ${meta.sla_horas[form.priority]} h` : undefined}><select className="select" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>{(meta?.priorities || []).map((x) => <option key={x} value={x}>{PRIO_LABEL[x] || x}</option>)}</select></Field>
             <Field label="Nivel" hint="1 atiende · 2 diagnostica · 3 escala al fabricante"><select className="select" value={form.level} onChange={(e) => setForm({ ...form, level: Number(e.target.value) })}><option value={1}>Nivel 1</option><option value={2}>Nivel 2</option><option value={3}>Nivel 3</option></select></Field>
             <Field label="Responsable"><select className="select" value={form.assigned_to} onChange={(e) => setForm({ ...form, assigned_to: e.target.value })}><option value="">Sin asignar</option>{(meta?.agents || []).map((a) => <option key={a.id} value={a.id}>{a.name}{a.id === me?.user.id ? " (yo)" : ""}</option>)}</select></Field>
+            {verProyectos && (
+              <Field label="Proyecto (opcional)" hint={form.customer_id ? "Liga el ticket a la obra (y a sus empresas aliadas)." : "Elegí primero el cliente."}>
+                <select className="select" value={form.project_id} disabled={!form.customer_id} onChange={(e) => setForm({ ...form, project_id: e.target.value })}>
+                  <option value="">Sin proyecto</option>
+                  {form.project_id && !proyectos.some((p) => String(p.id) === form.project_id) && <option value={form.project_id}>Proyecto actual</option>}
+                  {proyectos.map((p) => <option key={p.id} value={p.id}>{p.number} · {p.name}</option>)}
+                </select>
+              </Field>
+            )}
           </div>
           <Field label="Qué reporta el cliente"><textarea className="textarea" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
         </Modal>

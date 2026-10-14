@@ -99,7 +99,7 @@ def project_solution(db: Session, pr: Project) -> str:
 
 def economics(db: Session, pr: Project, fx: Decimal | None = None) -> dict:
     """Lo que costo de verdad el proyecto contra lo que se vendio. Unica fuente: la usan la ficha y el reporte."""
-    from ..routers.fieldwork import _hours
+    from ..routers.fieldwork import order_hours, survey_estimate
 
     fx = fx if fx is not None else today_fx(db, "USD")[0]
     materials = consumed_cost(db, pr, fx)
@@ -128,8 +128,17 @@ def economics(db: Session, pr: Project, fx: Decimal | None = None) -> dict:
         "sin_costos": sin_costos,
         "provisional": sin_costos or not cerrado,
         "aviso": aviso,
-        "hours": round(sum((_hours(o.started_at, o.finished_at) or 0 for o in pr.orders), 0.0), 2),
+        # persona-horas del registro por jornada de cada OT (las viejas, de inicio a fin)
+        "hours": round(sum((order_hours(o)[0] or 0 for o in pr.orders), 0.0), 2),
+        # lo que el levantamiento dijo que llevaba la obra: una vez por proyecto, no por OT
+        "hours_estimated": survey_estimate(db.get(Survey, pr.survey_id), _tenant_of(db, pr))[0] if pr.survey_id else None,
     }
+
+
+def _tenant_of(db: Session, pr: Project):
+    from ..models import Tenant
+
+    return db.get(Tenant, pr.tenant_id)
 
 
 def _out(db: Session, pr: Project, p: Principal, full: bool = True) -> dict:
@@ -217,8 +226,17 @@ PROJECT_USERS = {"supervisor_id": "Ese supervisor no es un usuario activo de la 
 
 
 @router.get("/projects")
-def projects(status: str | None = None, limit: int = Query(100, le=300), p: Principal = Depends(require("projects", "ver")), db: Session = Depends(get_db)):
+def projects(
+    status: str | None = None,
+    customer_id: int | None = None,
+    limit: int = Query(100, le=300),
+    p: Principal = Depends(require("projects", "ver")),
+    db: Session = Depends(get_db),
+):
     stmt = select(Project).where(Project.tenant_id == p.tenant.id, live(Project))
+    if customer_id:
+        # el formulario del ticket elige el proyecto del cliente (Proyecto opcional)
+        stmt = stmt.where(Project.customer_id == customer_id)
     if status == "activos":
         stmt = stmt.where(Project.status.in_(("planificado", "en_curso", "pausado")))
     elif status:
@@ -699,22 +717,24 @@ def asset_update(aid: int, data: AssetIn, p: Principal = Depends(require("assets
 @router.get("/projects/{pid}/report", response_class=HTMLResponse)
 def delivery_report(pid: int, p: Principal = Depends(require("projects", "ver")), db: Session = Depends(get_db)):
     """Informe técnico de entrega con fotografías, equipos instalados y tiempos. Imprimible o a PDF."""
-    from ..routers.fieldwork import _hours  # import local: fieldwork ya importa de aqui
+    from ..routers.fieldwork import _names, order_hours  # import local: fieldwork ya importa de aqui
 
     pr = _project(db, pid, p)
     c = db.get(Customer, pr.customer_id) if pr.customer_id else None
     esc = html.escape
     orders = ""
     photos: list[str] = list(pr.photos or [])
+    # nombres solo de gente de la empresa del proyecto (un id ajeno en una orden no devuelve el nombre de otra empresa)
+    nombres = _names(db, list(pr.orders), pr.tenant_id) if pr.orders else {}
     for o in pr.orders:
-        t = db.get(User, o.technician_id) if o.technician_id else None
+        tecnico = nombres.get(o.technician_id) if o.technician_id else None
         tasks = "".join(f"<li>{'☑' if x.get('done') else '☐'} {esc(str(x.get('text', '')))}</li>" for x in (o.tasks or []))
         mats = "".join(f"<tr><td>{esc(m.name)}</td><td class=n>{d(m.quantity):g} {esc(m.unit)}</td></tr>" for m in o.materials if d(m.quantity) > 0)
         photos += list(o.photos or [])
-        h_ot = _hours(o.started_at, o.finished_at)
-        hrs = f"{h_ot} h" if h_ot is not None else "—"
+        h_ot, fuente = order_hours(o)
+        hrs = "—" if h_ot is None else f"{h_ot} h·persona" if fuente == "registro" else f"{h_ot} h"
         orders += f"""<section class=block><h3>{esc(o.number)} · {esc(o.title)}</h3>
-        <div class=m>{esc(t.full_name if t else "Sin técnico")} · {local_date(o.finished_at).strftime("%d/%m/%Y") if o.finished_at else "en curso"} · {hrs}</div>
+        <div class=m>{esc(tecnico or "Sin técnico")} · {local_date(o.finished_at).strftime("%d/%m/%Y") if o.finished_at else "en curso"} · {hrs}</div>
         {f"<ul class=tasks>{tasks}</ul>" if tasks else ""}
         {f"<table class=t><tr><th>Material utilizado</th><th class=n>Cantidad</th></tr>{mats}</table>" if mats else ""}
         {f"<p class=obs>{esc(o.notes)}</p>" if o.notes else ""}</section>"""

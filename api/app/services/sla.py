@@ -11,7 +11,8 @@ el ticket siga midiendose contra lo que se prometio el dia que entro.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+import math
+from datetime import UTC, date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -128,6 +129,113 @@ def fuera_de_tiempo(t: SupportTicket, ahora: datetime | None = None) -> bool:
     """Abierto y con algun plazo del SLA (respuesta o resolucion) vencido sin cumplir."""
     v = vencimientos(t, ahora)
     return v["respuesta"] or v["resolucion"]
+
+
+# ---- Semaforo de la bandeja (una sola definicion: la lista, los filtros, el conteo y el orden usan esto) ----
+UMBRAL_AMBAR = 0.25  # queda <= 25 % de la ventana del plazo -> "por vencer"
+SIN_MOVIMIENTO_H = 48  # abierto y sin notas en 48 h -> "sin movimiento"
+CR = timezone(timedelta(hours=-6))  # Costa Rica, sin horario de verano
+FILTROS = ("vencidos", "por_vencer", "sin_responsable", "seguimiento_hoy", "sin_movimiento")
+GRUPOS = ("vencidos", "por_vencer", "seguimiento_hoy", "esperando", "en_tiempo", "cerrados")  # orden de la bandeja
+
+
+def fin_del_dia_cr(ahora: datetime) -> datetime:
+    """23:59:59 de hoy en Costa Rica, en UTC."""
+    local = (_aware(ahora) or datetime.now(UTC)).astimezone(CR)
+    return local.replace(hour=23, minute=59, second=59, microsecond=0).astimezone(UTC)
+
+
+def _minutos(delta: timedelta) -> int:
+    """Minutos enteros redondeados hacia abajo (negativo si ya vencio)."""
+    return math.floor(delta.total_seconds() / 60)
+
+
+def semaforo(t: SupportTicket, ahora: datetime | None = None) -> dict:
+    """{color, plazo, vence_at, ventana_min, restante_min}
+    color: rojo | ambar | verde | gris | neutro
+    - no abierto (resuelto/cerrado) -> neutro, todo None
+    - plazo activo: "respuesta" (due_at) si no hay first_reply_at; si ya hubo respuesta, "resolucion" (resolve_due_at)
+      si no hay resolved_at; si no hay plazo (ticket viejo o preventivo ya respondido) -> neutro con plazo None
+    - fuera_de_tiempo(t) -> rojo (misma definicion que el inicio y el filtro "vencidos"); plazo = el vencido
+    - status == esperando_cliente -> gris (el reloj NO se pausa: si vence pasa a rojo)
+    - restante <= ventana * UMBRAL_AMBAR -> ambar   (ventana = vence_at - created_at)
+    - si no -> verde"""
+    ahora = _aware(ahora) or datetime.now(UTC)
+    vacio = {"color": "neutro", "plazo": None, "vence_at": None, "ventana_min": None, "restante_min": None}
+    if not es_abierto(t):
+        return vacio
+    venc = vencimientos(t, ahora)
+    if venc["respuesta"]:
+        plazo, vence = "respuesta", t.due_at
+    elif venc["resolucion"]:
+        plazo, vence = "resolucion", t.resolve_due_at
+    elif t.due_at and not t.first_reply_at:
+        plazo, vence = "respuesta", t.due_at
+    elif t.resolve_due_at and not t.resolved_at:
+        plazo, vence = "resolucion", t.resolve_due_at
+    else:
+        return vacio
+    vence = _aware(vence)
+    creado = _aware(t.created_at) or ahora
+    ventana = max(_minutos(vence - creado), 0)
+    restante = _minutos(vence - ahora)
+    if venc["respuesta"] or venc["resolucion"]:
+        color = "rojo"
+    elif t.status == "esperando_cliente":
+        color = "gris"
+    elif restante <= ventana * UMBRAL_AMBAR:
+        color = "ambar"
+    else:
+        color = "verde"
+    return {"color": color, "plazo": plazo, "vence_at": vence, "ventana_min": ventana, "restante_min": restante}
+
+
+def seguimiento_hoy(t: SupportTicket, ahora: datetime | None = None) -> bool:
+    """Proximo paso para hoy (dia de Costa Rica) o ya atrasado."""
+    ahora = _aware(ahora) or datetime.now(UTC)
+    return bool(t.next_step_at) and _aware(t.next_step_at) <= fin_del_dia_cr(ahora)
+
+
+def grupo(t: SupportTicket, ahora: datetime | None = None, sem: dict | None = None) -> str:
+    """Grupo de la bandeja, uno solo por ticket, en este orden de precedencia:
+    vencidos (rojo) > por_vencer (ambar) > seguimiento_hoy (next_step_at <= fin del dia CR, incluye atrasados)
+    > esperando (gris) > en_tiempo (verde/neutro abiertos) > cerrados (resuelto/cerrado)."""
+    if not es_abierto(t):
+        return "cerrados"
+    color = (sem or semaforo(t, ahora))["color"]
+    if color == "rojo":
+        return "vencidos"
+    if color == "ambar":
+        return "por_vencer"
+    if seguimiento_hoy(t, ahora):
+        return "seguimiento_hoy"
+    if color == "gris":
+        return "esperando"
+    return "en_tiempo"
+
+
+def ultimo_movimiento(t: SupportTicket) -> datetime:
+    """created_at de la ultima nota (cualquier tipo) o, si no hay, created_at del ticket."""
+    fechas = [_aware(n.created_at) for n in (t.notes or []) if n.created_at]
+    return max(fechas) if fechas else (_aware(t.created_at) or datetime.now(UTC))
+
+
+def cumple(t: SupportTicket, filtro: str, ahora: datetime | None = None) -> bool:
+    """Filtros rapidos de la bandeja. Siempre sobre abiertos. La lista (?filtro=) y el conteo (meta.resumen) usan esto."""
+    ahora = _aware(ahora) or datetime.now(UTC)
+    if not es_abierto(t):
+        return False
+    if filtro == "vencidos":
+        return fuera_de_tiempo(t, ahora)
+    if filtro == "por_vencer":
+        return semaforo(t, ahora)["color"] == "ambar"
+    if filtro == "sin_responsable":
+        return t.assigned_to is None
+    if filtro == "seguimiento_hoy":
+        return seguimiento_hoy(t, ahora)
+    if filtro == "sin_movimiento":
+        return ultimo_movimiento(t) < ahora - timedelta(hours=SIN_MOVIMIENTO_H)
+    raise ValueError(filtro)
 
 
 def resumen(tickets, ahora: datetime | None = None) -> dict[str, int]:

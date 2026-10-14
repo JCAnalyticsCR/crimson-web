@@ -1,6 +1,6 @@
 /* Oportunidades: el embudo antes de la cotizacion.
    Lo que importa aqui no es el monto sino la proxima accion con fecha: es lo que evita que un negocio se enfrie. */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
@@ -9,6 +9,7 @@ import { Lookup, searchCustomers } from "../../ui/Lookup";
 import { ArchiveActions } from "../../ui/ArchiveActions";
 import { TrashButton } from "../../ui/TrashButton";
 import { AlliesPanel, PendingCosts, partyLine, type Ally, type PendingCost } from "./OpportunityAllies";
+import { useRecordAutosave } from "../../lib/useRecordAutosave";
 import "./opportunities.css";
 
 export type Opp = {
@@ -46,6 +47,16 @@ const ID_TYPES: Record<string, string> = { fisica: "Física", juridica: "Jurídi
 const blank = { title: "", kind: "proyecto", customer_id: "", customer_name: "", end_customer_id: "", end_customer_name: "", site: "", source: "", solution: "", amount: "0", probability: 30, next_action: "", next_action_date: "", owner_id: "", notes: "" };
 const blankTouch = { note: "", next_action: "", next_action_date: "", status: "" };
 const blankCust = { name: "", id_type: "fisica", id_number: "", phone: "", email: "" };
+type OppForm = typeof blank & { id?: number; status?: string };
+type Touch = typeof blankTouch & { opp: number; num: string };
+/* Lo que se manda al guardar (y lo que compara el autoguardado). El alta rapida de cliente no entra. */
+const oppBody = (f: OppForm) => ({
+  title: f.title, kind: f.kind, customer_id: f.customer_id ? Number(f.customer_id) : null, source: f.source || null, solution: f.solution || null,
+  end_customer_id: f.end_customer_id ? Number(f.end_customer_id) : null, site: f.site.trim() || null,
+  owner_id: f.owner_id ? Number(f.owner_id) : null, amount: Number(f.amount || 0), probability: Number(f.probability),
+  next_action: f.next_action || null, next_action_date: f.next_action_date || null, notes: f.notes || null,
+  ...(f.id ? { status: f.status } : {}),
+});
 
 /** Días que faltan para la próxima acción (negativo = ya venció). */
 const dueIn = (s: string | null) => (s ? Math.round((new Date(s + "T12:00:00").getTime() - Date.now()) / 86400000) : null);
@@ -74,7 +85,7 @@ export default function Opportunities() {
   const [q, setQ] = useState("");
   const [mine, setMine] = useState(false);
   const [open, setOpen] = useState<Detail | null>(null);
-  const [form, setForm] = useState<(typeof blank & { id?: number }) | null>(null);
+  const [form, setForm] = useState<OppForm | null>(null);
   const [touch, setTouch] = useState(blankTouch);
   const [touchOpen, setTouchOpen] = useState(false);
   const [drag, setDrag] = useState<number | null>(null);
@@ -84,6 +95,9 @@ export default function Opportunities() {
   const [quoteCust, setQuoteCust] = useState<{ id: string; name: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const canEdit = allows("crm_pipeline.editar");
+  const openId = useRef<number | null>(null);
+  openId.current = open?.id ?? null;
+  const guardando = useRef<Promise<unknown> | null>(null); // autoguardado al cerrar (PUT + recarga del detalle), en vuelo
 
   const load = useCallback(() => {
     // filtro por responsable: solo lo usa quien ve todo el embudo (el servidor igual limita al vendedor a lo suyo)
@@ -99,21 +113,52 @@ export default function Opportunities() {
   }, []);
 
   const show = async (id: number) => { setOpen(await api<Detail>(`/opportunities/${id}`)); setTouch(blankTouch); setTouchOpen(false); setQuoteCust(null); };
+  /** Recarga los datos del detalle abierto sin tocar el seguimiento que se este escribiendo en el. */
+  const refrescarDetalle = (id: number) =>
+    api<Detail>(`/opportunities/${id}`).then((d) => { setOpen((cur) => (cur && cur.id === d.id ? d : cur)); return d; }).catch(() => null);
   // /oportunidades?id=<n>: se abre desde Archivo (o un enlace) sin buscarla en el embudo
   const linked = params.get("id");
   useEffect(() => { if (linked) show(Number(linked)).catch(() => undefined); }, [linked]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* Autoguardado (P1/P2): una oportunidad existente se guarda al cerrar (el PUT deja "Partes" en la bitacora y
+     puede reasignar: una vez por sesion); una nueva queda de borrador en este dispositivo hasta Guardar. */
+  const oppAuto = useRecordAutosave<OppForm>({
+    ns: "opp", mode: "close", newRecords: "local", value: form, idOf: (f) => f.id, body: oppBody,
+    save: async (b, id, ctx) => {
+      const job = (async () => {
+        await api(`/opportunities/${id}`, { method: "PUT", json: b, headers: ctx.headers, keepalive: ctx.keepalive });
+        load();
+        // el detalle sigue abierto detras del formulario: se recarga, si no "Editar" armaria el formulario con los
+        // datos de antes y el proximo guardado revertiria en silencio lo que se acaba de guardar
+        if (id !== undefined && openId.current === id) await refrescarDetalle(id);
+      })();
+      guardando.current = job;
+      try { await job; } finally { if (guardando.current === job) guardando.current = null; }
+    },
+    enabled: !!form && (form.id ? canEdit : allows("crm_pipeline.crear")),
+    label: (f) => (f.id ? f.title || "La oportunidad" : "La oportunidad nueva"),
+    apply: (d) => setForm((cur) => (cur ? { ...d, id: cur.id, status: cur.status } : cur)),
+  });
+  /* Editar arma el formulario desde el detalle; si el autoguardado del formulario anterior todavia esta subiendo,
+     primero lo espera y relee la oportunidad (si no, el formulario nace con los datos de antes de ese guardado). */
+  const editar = async () => {
+    if (!open) return;
+    let o: Detail = open;
+    if (guardando.current) { await guardando.current.catch(() => undefined); o = (await refrescarDetalle(open.id)) || open; }
+    setForm({ id: o.id, status: o.status, title: o.title, kind: o.kind || "proyecto", customer_id: o.customer_id ? String(o.customer_id) : "", customer_name: o.customer || "", end_customer_id: o.end_customer_id ? String(o.end_customer_id) : "", end_customer_name: o.end_customer || "", site: o.site || "", source: o.source || "", solution: o.solution || "", amount: String(o.amount), probability: o.probability, next_action: o.next_action || "", next_action_date: o.next_action_date || "", owner_id: o.owner_id ? String(o.owner_id) : "", notes: o.notes || "" });
+  };
+  const cancelarForm = () => { if (oppAuto.isDirty() && !confirm("¿Descartar los cambios?")) return; oppAuto.discard(); setForm(null); setNewCust(null); };
+  /* Seguimiento (P3): borrador por oportunidad en este dispositivo; se publica solo con "Guardar seguimiento". */
+  const segAuto = useRecordAutosave<Touch>({
+    ns: "opp-seg", mode: "never", value: open && touchOpen && canEdit ? { ...touch, opp: open.id, num: open.number } : null,
+    idOf: (t) => t.opp, body: (t) => ({ note: t.note, next_action: t.next_action, next_action_date: t.next_action_date, status: t.status }),
+    enabled: canEdit, label: (t) => t.num, apply: (t) => setTouch({ note: t.note, next_action: t.next_action, next_action_date: t.next_action_date, status: t.status }),
+  });
+
   const save = async () => {
     if (!form) return;
-    const body = {
-      title: form.title, kind: form.kind, customer_id: form.customer_id ? Number(form.customer_id) : null, source: form.source || null, solution: form.solution || null,
-      end_customer_id: form.end_customer_id ? Number(form.end_customer_id) : null, site: form.site.trim() || null,
-      owner_id: form.owner_id ? Number(form.owner_id) : null, amount: Number(form.amount || 0), probability: Number(form.probability),
-      next_action: form.next_action || null, next_action_date: form.next_action_date || null, notes: form.notes || null,
-      ...(form.id ? { status: open?.status } : {}),
-    };
     try {
-      const saved = await api<Opp>(form.id ? `/opportunities/${form.id}` : "/opportunities", { method: form.id ? "PUT" : "POST", json: body });
+      const saved = await oppAuto.exclusive(form, () => api<Opp>(form.id ? `/opportunities/${form.id}` : "/opportunities", { method: form.id ? "PUT" : "POST", json: oppBody({ ...form, status: form.status ?? open?.status }) }));
       toast(form.id ? "Oportunidad actualizada" : `Oportunidad ${saved.number} creada`);
       setForm(null); setNewCust(null); load(); if (form.id) show(form.id);
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
@@ -122,7 +167,8 @@ export default function Opportunities() {
   const sendTouch = async () => {
     if (!open || touch.note.trim().length < 2) return;
     try {
-      await api(`/opportunities/${open.id}/touch`, { method: "POST", json: { note: touch.note.trim(), next_action: touch.next_action || null, next_action_date: touch.next_action_date || null, status: touch.status || null } });
+      await segAuto.exclusive({ ...touch, opp: open.id, num: open.number }, () => api(`/opportunities/${open.id}/touch`, { method: "POST", json: { note: touch.note.trim(), next_action: touch.next_action || null, next_action_date: touch.next_action_date || null, status: touch.status || null } }));
+      segAuto.fromServer();
       toast("Seguimiento registrado"); await show(open.id); load();
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
@@ -345,7 +391,7 @@ export default function Opportunities() {
             {open.quote && <button className="btn btn--soft" onClick={() => nav(`/cotizaciones/${open.quote!.id}`)}>Ver cotización</button>}
             {open.project && <button className="btn btn--soft" onClick={() => nav(`/proyectos/${open.project!.id}`)}>Ver proyecto</button>}
           </div>
-          {canEdit && <button className="btn btn--ghost" onClick={() => setForm({ id: open.id, title: open.title, kind: open.kind || "proyecto", customer_id: open.customer_id ? String(open.customer_id) : "", customer_name: open.customer || "", end_customer_id: open.end_customer_id ? String(open.end_customer_id) : "", end_customer_name: open.end_customer || "", site: open.site || "", source: open.source || "", solution: open.solution || "", amount: String(open.amount), probability: open.probability, next_action: open.next_action || "", next_action_date: open.next_action_date || "", owner_id: open.owner_id ? String(open.owner_id) : "", notes: open.notes || "" })}>Editar</button>}
+          {canEdit && <button className="btn btn--ghost" onClick={editar}>Editar</button>}
           <button className="btn btn--crimson" onClick={() => setOpen(null)}>Cerrar</button>
         </>}>
           <div className="opp-detail">
@@ -366,7 +412,7 @@ export default function Opportunities() {
 
             <div className="opp-main">
               {canEdit && touchOpen && (
-                <Card title="Registrar seguimiento" extra={<button className="btn btn--ghost btn--sm" onClick={() => { setTouchOpen(false); setTouch(blankTouch); }}>Cancelar</button>}>
+                <Card title="Registrar seguimiento" extra={<button className="btn btn--ghost btn--sm" onClick={() => { if (segAuto.isDirty() && !confirm("¿Descartar lo escrito?")) return; segAuto.discard(); setTouchOpen(false); setTouch(blankTouch); }}>Cancelar</button>}>
                   <Field label="¿Qué pasó?" hint="Llamada, visita, correo… Queda con fecha y tu nombre en la bitácora.">
                     <textarea className="textarea" autoFocus style={{ minHeight: 64 }} value={touch.note} onChange={(e) => setTouch({ ...touch, note: e.target.value })} placeholder="Llamé a don Andrés; pide propuesta con 8 cámaras…" />
                   </Field>
@@ -376,6 +422,7 @@ export default function Opportunities() {
                     <Field label="Mover a"><select className="select" value={touch.status} onChange={(e) => setTouch({ ...touch, status: e.target.value })}><option value="">Dejar igual</option>{(meta?.states || []).map((s) => <option key={s} value={s}>{OPP_STATES[s] || s}</option>)}</select></Field>
                   </div>
                   <div><button className="btn btn--crimson btn--sm" onClick={sendTouch} disabled={touch.note.trim().length < 2}>Guardar seguimiento</button></div>
+                  {segAuto.bar}
                 </Card>
               )}
               <div className="eco">
@@ -439,7 +486,8 @@ export default function Opportunities() {
 
       {form && (
         <Modal title={form.id ? "Editar oportunidad" : "Nueva oportunidad"} onClose={() => { setForm(null); setNewCust(null); }} wide foot={<>
-          <button className="btn btn--ghost" onClick={() => { setForm(null); setNewCust(null); }}>Cancelar</button>
+          {oppAuto.bar}
+          <button className="btn btn--ghost" onClick={cancelarForm}>Cancelar</button>
           <button className="btn btn--crimson" onClick={save} disabled={form.title.trim().length < 2 || !!newCust}>Guardar</button>
         </>}>
           <Field label="Título" hint="Cómo lo reconoce el equipo: obra, condominio, empresa."><input className="input" autoFocus value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Condominio Los Robles · CCTV" /></Field>

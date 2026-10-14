@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode, useRef } from "react";
+import { useEffect, type ReactNode, useRef, useState } from "react";
 import { STATUS } from "../lib/api";
 
 export const Icon = ({ d, size = 18 }: { d: string; size?: number }) => (
@@ -44,6 +44,8 @@ export const I = {
   shield: "M12 3l8 3v6c0 4.4-3.2 8.1-8 9-4.8-.9-8-4.6-8-9V6z|M9 12l2 2 4-4",
   approve: "M9 4h6v3H9z|M7 5H5v16h14V5h-2|M9 14l2 2 4-4",
   life: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z|M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z|M5.6 5.6l3.2 3.2M15.2 15.2l3.2 3.2M18.4 5.6l-3.2 3.2M8.8 15.2l-3.2 3.2",
+  lock: "M6 11h12v10H6z|M8 11V7a4 4 0 0 1 8 0v4",
+  clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z|M12 7v5l3 2",
 };
 
 export function Badge({ status }: { status: string }) {
@@ -86,8 +88,16 @@ export function Loading({ label = "Cargando…" }: { label?: string }) {
   );
 }
 
-export function Modal({ title, onClose, children, foot, wide }: { title: ReactNode; onClose: () => void; children: ReactNode; foot?: ReactNode; wide?: boolean }) {
+/* dirty (opcional): hay cambios sin guardar y el formulario no tiene autoguardado. El clic en el fondo, Escape y la X
+   no cierran: preguntan "Seguir editando / Descartar y cerrar". Sin dirty todo es como siempre. */
+export function Modal({ title, onClose, children, foot, wide, dirty, onDiscard }: {
+  title: ReactNode; onClose: () => void; children: ReactNode; foot?: ReactNode; wide?: boolean; dirty?: boolean; onDiscard?: () => void;
+}) {
   const bg = useRef<HTMLDivElement>(null);
+  const [ask, setAsk] = useState(false);
+  const guard = useRef({ dirty, onClose });
+  guard.current = { dirty, onClose };
+  const tryClose = () => { if (guard.current.dirty) setAsk(true); else guard.current.onClose(); };
   useEffect(() => {
     // Escape cierra solo lo que esta encima. Antes cerraba todas las ventanas apiladas a la vez (y con el
     // visor de fotos abierto, tambien el levantamiento de abajo, con lo que se perdia lo no guardado).
@@ -96,20 +106,28 @@ export function Modal({ title, onClose, children, foot, wide }: { title: ReactNo
       const abiertas = document.querySelectorAll(".modal-bg");
       if (abiertas[abiertas.length - 1] !== bg.current) return;
       e.preventDefault();
-      onClose();
+      if (guard.current.dirty) setAsk(true);
+      else guard.current.onClose();
     };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
-  }, [onClose]);
+  }, []);
+  const pregunta = ask && dirty && (
+    <div role="alert" style={{ flex: "1 0 100%", order: -1, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 13, padding: "8px 10px", borderRadius: 10, border: "1px solid var(--warn)", background: "var(--warn-soft)" }}>
+      <span style={{ flex: "1 1 180px" }}>Tenés cambios sin guardar.</span>
+      <button type="button" className="btn btn--soft btn--sm" onClick={() => setAsk(false)}>Seguir editando</button>
+      <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setAsk(false); (onDiscard ?? onClose)(); }}>Descartar y cerrar</button>
+    </div>
+  );
   return (
-    <div ref={bg} className="modal-bg" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div ref={bg} className="modal-bg" onMouseDown={(e) => e.target === e.currentTarget && tryClose()}>
       <div className="modal" style={wide ? { width: "min(820px,100%)" } : undefined} role="dialog" aria-modal="true">
         <header className="modal__head">
           <h3 className="h2">{title}</h3>
-          <button className="x" onClick={onClose} aria-label="Cerrar"><Icon d={I.x} /></button>
+          <button className="x" onClick={tryClose} aria-label="Cerrar"><Icon d={I.x} /></button>
         </header>
         <div className="modal__body">{children}</div>
-        {foot && <footer className="modal__foot">{foot}</footer>}
+        {(foot || pregunta) && <footer className="modal__foot">{pregunta}{foot}</footer>}
       </div>
     </div>
   );

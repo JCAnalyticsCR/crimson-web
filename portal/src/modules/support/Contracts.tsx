@@ -7,6 +7,7 @@ import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components
 import { Lookup, searchCustomers } from "../../ui/Lookup";
 import { SlaTable, type Sla } from "./SlaTable";
 import { TrashButton } from "../../ui/TrashButton";
+import { useRecordAutosave } from "../../lib/useRecordAutosave";
 
 type Contract = {
   id: number; number: string; name: string; kind: string; customer_id: number; customer: string | null; project: string | null;
@@ -17,12 +18,18 @@ type Contract = {
 
 const KIND: Record<string, string> = { mantenimiento: "Mantenimiento preventivo", soporte: "Soporte recurrente", renting: "Renting", licencia: "Licencia" };
 const blank = { customer_id: "", customer_name: "", name: "", kind: "mantenimiento", every_months: 6, next_date: "", start_date: "", end_date: "", amount: "0", scope: "", active: true, notes: "", sla: null as Sla | null };
+type Form = typeof blank & { id?: number };
+const ctrBody = (f: Form) => ({
+  customer_id: Number(f.customer_id), name: f.name, kind: f.kind, every_months: Number(f.every_months),
+  next_date: f.next_date || null, start_date: f.start_date || null, end_date: f.end_date || null,
+  amount: Number(f.amount || 0), currency: "CRC", scope: f.scope || null, active: f.active, notes: f.notes || null, sla: f.sla,
+});
 
 export default function Contracts() {
   const { toast, allows } = useSession();
   const [rowsSt, setRows] = useState<Contract[] | null>(null); // null = cargando
   const rows = rowsSt ?? [];
-  const [form, setForm] = useState<(typeof blank & { id?: number }) | null>(null);
+  const [form, setForm] = useState<Form | null>(null);
   // el monto es lo que se le cobra al cliente (precio, no costo): lo ve quien ve precios; el tecnico no (13/10, 22:07)
   const verMonto = allows("catalog.precios");
   // crear, editar y programar contratos: administracion o supervisor (la API exige support_desk.ver_todo)
@@ -31,16 +38,21 @@ export default function Contracts() {
   const load = useCallback(() => api<Contract[]>("/contracts").then(setRows), []);
   useEffect(() => { load(); }, [load]);
 
+  /* Autoguardado (M1): un contrato existente se guarda al cerrar; uno nuevo (gasta el consecutivo CTR) queda de
+     borrador en este dispositivo hasta Guardar. */
+  const auto = useRecordAutosave<Form>({
+    ns: "ctr", mode: "close", newRecords: "local", value: form, idOf: (f) => f.id, body: ctrBody,
+    save: async (b, id, ctx) => { await api(`/contracts/${id}`, { method: "PUT", json: b, headers: ctx.headers, keepalive: ctx.keepalive }); load(); },
+    enabled: !!form && maneja && (form.id ? allows("support_desk.editar") : allows("support_desk.crear")) && !!form.customer_id,
+    label: (f) => (f.id ? f.name || "El contrato" : "El contrato nuevo"),
+    apply: (d) => setForm((cur) => (cur ? { ...d, id: cur.id } : cur)),
+  });
   const save = async () => {
     if (!form) return;
-    const body = {
-      customer_id: Number(form.customer_id), name: form.name, kind: form.kind, every_months: Number(form.every_months),
-      next_date: form.next_date || null, start_date: form.start_date || null, end_date: form.end_date || null,
-      amount: Number(form.amount || 0), currency: "CRC", scope: form.scope || null, active: form.active, notes: form.notes || null, sla: form.sla,
-    };
-    try { await api(form.id ? `/contracts/${form.id}` : "/contracts", { method: form.id ? "PUT" : "POST", json: body }); toast("Contrato guardado"); setForm(null); load(); }
+    try { await auto.exclusive(form, (id) => api(id ? `/contracts/${id}` : "/contracts", { method: id ? "PUT" : "POST", json: ctrBody(form) })); toast("Contrato guardado"); setForm(null); load(); }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
+  const cancelar = () => { if (auto.isDirty() && !confirm("¿Descartar los cambios?")) return; auto.discard(); setForm(null); };
 
   const hacerAhora = async (c: Contract) => {
     try { const t = await api<{ number: string }>(`/contracts/${c.id}/ticket`, { method: "POST" }); toast(`Ticket ${t.number} abierto; la próxima visita quedó reprogramada`); load(); }
@@ -97,7 +109,8 @@ export default function Contracts() {
 
       {form && (
         <Modal title={form.id ? "Editar contrato" : "Nuevo contrato de mantenimiento"} onClose={() => setForm(null)} wide foot={<>
-          <button className="btn btn--ghost" onClick={() => setForm(null)}>Cancelar</button>
+          {auto.bar}
+          <button className="btn btn--ghost" onClick={cancelar}>Cancelar</button>
           <button className="btn btn--crimson" onClick={save} disabled={!form.customer_id || form.name.trim().length < 2}>Guardar</button>
         </>}>
           <div className="grid-3">

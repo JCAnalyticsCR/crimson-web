@@ -14,6 +14,7 @@ import { ArchiveActions } from "../../ui/ArchiveActions";
 import { TrashButton } from "../../ui/TrashButton";
 import { PreviewHidden } from "../../ui/PreviewHidden";
 import { useSurveyAutosave } from "./useSurveyAutosave";
+import { useRecordAutosave } from "../../lib/useRecordAutosave";
 import { LinkOpportunity, type OppRef } from "./LinkOpportunity";
 import { pickReview, ReviewPanel, reviewTone, type ReviewInfo } from "./SurveyReview";
 import { CommonSection, initialStatus, PointFields, SystemCalcs, useCommonSpec, type Common, type V2Field } from "./SurveyV2";
@@ -318,10 +319,12 @@ export default function Surveys() {
   const saveCosts = async () => {
     if (!draft?.id || !pendingCosts.length) return true;
     try {
-      const r = await api<Costing>(`/surveys/${draft.id}/costs?margin=${margin}`, {
+      // nunca a la par del autoguardado del costeo (K1)
+      const r = await costAuto.exclusive({ surveyId: draft.id, edits: costEdits }, () => api<Costing>(`/surveys/${draft.id}/costs?margin=${margin}`, {
         method: "POST",
         json: pendingCosts.map(([id, v]) => ({ item_id: Number(id), unit_cost: num(v.cost), save_to_catalog: v.save })),
-      });
+      }));
+      costAuto.fromServer();
       setCosting(r); setCostEdits({});
       toast(pendingCosts.some(([, v]) => v.save) ? "Costos guardados (y en el catálogo)" : "Costos guardados en este levantamiento");
       return true;
@@ -421,6 +424,25 @@ export default function Surveys() {
     if (draft.id === want && puedeCotizar) cost();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft?.id]);
+  /* Costeo (K1): cerrar ya no descarta los costos escritos; se guardan al cerrar (con la casilla "guardar en
+     catalogo" tal como quedo). Copia en el dispositivo solo para quien ve costos. */
+  const costAuto = useRecordAutosave<{ surveyId: number; edits: Record<number, { cost: string; save: boolean }> }>({
+    ns: "costeo",
+    mode: "close",
+    value: costing && draft?.id ? { surveyId: draft.id, edits: costEdits } : null,
+    idOf: (v) => v.surveyId,
+    body: (v) => ({ lines: Object.entries(v.edits).filter(([, x]) => x.cost.trim() !== "").map(([id, x]) => ({ item_id: Number(id), unit_cost: num(x.cost), save_to_catalog: x.save })) }),
+    save: async (b, id, ctx) => {
+      const lines = b.lines as unknown[];
+      if (!id || !lines.length) return;
+      const r = await api<Costing>(`/surveys/${id}/costs?margin=${margin}`, { method: "POST", json: lines, headers: ctx.headers, keepalive: ctx.keepalive });
+      if (ctx.isCurrent()) { costAuto.fromServer(); setCosting(r); setCostEdits({}); }
+    },
+    enabled: !!puedeCotizar && !readOnly,
+    label: () => `El costeo de ${draft?.number || "el levantamiento"}`,
+    apply: (v) => setCostEdits(v.edits),
+    localCopy: verCostos,
+  });
 
   const field = (f: FieldSpec, i: number) => {
     const v = draft!.points[i].data[f.key];
@@ -734,6 +756,7 @@ export default function Surveys() {
 
       {costing && live && draft && (
         <Modal title={`Costeo · ${draft.number}`} onClose={() => { setCosting(null); setCostEdits({}); }} wide foot={<>
+          {costAuto.bar}
           {pendingCosts.length > 0 && <button className="btn btn--soft" style={{ marginRight: "auto" }} onClick={saveCosts}>Guardar costos ({pendingCosts.length})</button>}
           <button className="btn btn--ghost" onClick={() => { setCosting(null); setCostEdits({}); }}>Cerrar</button>
           <button className="btn btn--crimson" onClick={toQuote}>Aprobar y generar cotización</button>

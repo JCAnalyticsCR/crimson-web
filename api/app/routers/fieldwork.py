@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import html
 import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import ROUND_CEILING, Decimal
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -18,8 +19,8 @@ from sqlalchemy.orm import Session
 
 from ..core.config import settings as cfg
 from ..core.db import get_db
-from ..core.deps import Principal, require
-from ..models import Customer, Opportunity, Product, Project, Survey, SurveyItem, SurveyObservation, SurveyPoint, User, WorkOrder, WorkOrderMaterial
+from ..core.deps import CLIENT_ROLES, Principal, require
+from ..models import Customer, Opportunity, Product, Project, Survey, SurveyItem, SurveyObservation, SurveyPoint, User, Warehouse, WorkOrder, WorkOrderMaterial
 from ..schemas.sales import DocumentIn, LineInSchema
 from ..services import approvals as aprob
 from ..services import documents as docsvc
@@ -28,6 +29,7 @@ from ..services import inventory as invsvc
 from ..services.archive import live
 from ..services.documents import audit
 from ..services.mail import notify_roles, queue_email
+from ..services.refs import check_refs
 from ..services.sequences import next_number
 from ..services.survey_specs import (
     SPECS,
@@ -1221,6 +1223,13 @@ def survey_to_quote(sid: int, data: ToQuoteIn, p: Principal = Depends(require("s
 
 
 # ---------- Ordenes de trabajo ----------
+HORAS_JORNADA = 8  # horas por jornada para el estimado (Ajustes: tenant.settings["horas_jornada"])
+MAX_CORRIENDO_H = 16  # una entrada abierta mas de esto es un olvido: hay que corregirla
+CREW_ROLES = ("tecnico", "supervisor", "admin")  # quien puede recibir una orden (los de /field/technicians)
+CERRADAS = ("finalizada", "cancelada")
+_MESES = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "set", "oct", "nov", "dic")
+
+
 def _order(db: Session, oid: int, p: Principal) -> WorkOrder:
     o = db.get(WorkOrder, oid)
     if not o or o.tenant_id != p.tenant.id:
@@ -1239,10 +1248,155 @@ def _hours(start: datetime | None, end: datetime | None) -> float | None:
     return round((end - start).total_seconds() / 3600, 2)
 
 
-def _order_out(db: Session, o: WorkOrder, full: bool = True) -> dict:
-    c = db.get(Customer, o.customer_id) if o.customer_id else None
-    t = db.get(User, o.technician_id) if o.technician_id else None
-    pr = db.get(Project, o.project_id) if o.project_id else None
+def _utc(dt: datetime | None) -> datetime | None:
+    """Todo en UTC: lo que llega con otra zona (-06:00 del portal) se convierte antes de guardarlo (SQLite guarda la
+    hora sin zona) y lo que SQLite devuelve sin zona ya es UTC."""
+    if dt is None:
+        return None
+    return dt.astimezone(UTC) if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+def _fecha_cr(dt: datetime | None) -> str:
+    """13 oct 8:05 a. m. (hora de Costa Rica, UTC-6 todo el ano)."""
+    if not dt:
+        return ""
+    x = _utc(dt).astimezone(timezone(timedelta(hours=-6)))
+    h = x.hour % 12 or 12
+    return f"{x.day} {_MESES[x.month - 1]} {h}:{x.minute:02d} {'a. m.' if x.hour < 12 else 'p. m.'}"
+
+
+def _mins(start: datetime, end: datetime) -> int:
+    return max(int((_utc(end) - _utc(start)).total_seconds() // 60), 0)
+
+
+def order_hours(o: WorkOrder) -> tuple[float | None, str | None]:
+    """(persona-horas, fuente). Con entradas: suma de minutos cerrados / 60, fuente "registro".
+    Sin entradas: _hours(started_at, finished_at), fuente "legado" (o (None, None))."""
+    if o.time_entries:
+        return round(sum(e.minutes or 0 for e in o.time_entries if e.ended_at is not None) / 60, 2), "registro"
+    h = _hours(o.started_at, o.finished_at)
+    return (h, "legado") if h is not None else (None, None)
+
+
+def horas_jornada(tenant) -> Decimal:
+    return d((getattr(tenant, "settings", None) or {}).get("horas_jornada") or HORAS_JORNADA)
+
+
+def survey_estimate(s: Survey | None, tenant) -> tuple[float | None, str | None]:
+    """Persona-horas que el levantamiento dijo que lleva la obra: sum(personas x dias) x horas de jornada."""
+    if s is None:
+        return None, None
+    partes, persona_dias = [], Decimal(0)
+    for k, v in survey_labor(s).items():
+        if v["people"] and v["days"]:
+            persona_dias += v["people"] * v["days"]
+            partes.append(f"{LABOR_TYPES[k][0]} {v['people']} × {float(v['days']):g} día(s)")
+    if persona_dias <= 0:
+        return None, None
+    return float(persona_dias * horas_jornada(tenant)), " · ".join(partes)
+
+
+def order_estimate(db: Session, o: WorkOrder, tenant) -> tuple[float | None, str | None]:
+    """Si la OT es de un proyecto con levantamiento: el estimado del levantamiento y su etiqueta
+    ("Personal técnico 2 × 2 día(s) · ..."). Si no, (None, None)."""
+    pr = _ref(db, Project, o.project_id, o.tenant_id)
+    if not pr or not pr.survey_id:
+        return None, None
+    s = db.get(Survey, pr.survey_id)
+    return survey_estimate(s if s and s.tenant_id == o.tenant_id else None, tenant)
+
+
+def _ref(db: Session, model, rid: int | None, tenant_id: int):
+    """Ficha enlazada a la orden (cliente, proyecto), solo si es de la misma empresa: un id ajeno que haya quedado en
+    una orden vieja no devuelve nombres ni el levantamiento de otra empresa, ni se le escribe."""
+    obj = db.get(model, rid) if rid else None
+    return obj if obj is not None and obj.tenant_id == tenant_id else None
+
+
+# Lo que la orden enlaza es de ESTA empresa (como TICKET_REFS): sin esto un proyecto ajeno se terminaria al finalizar
+WORK_ORDER_REFS = {
+    "customer_id": (Customer, "Cliente no encontrado"),
+    "project_id": (Project, "Proyecto no encontrado"),
+    "warehouse_id": (Warehouse, "Bodega no encontrada"),
+}
+
+
+def _crew(o: WorkOrder) -> set[int]:
+    """Equipo de la orden: tecnico y ayudantes."""
+    return {i for i in [o.technician_id, *(o.helpers or [])] if i}
+
+
+def _eligible(db: Session, tenant_id: int, user_id: int | None) -> bool:
+    """Usuario activo de la empresa con rol tecnico, supervisor o admin."""
+    from ..models import TenantUser
+
+    if not user_id:
+        return False
+    m = db.scalar(
+        select(TenantUser).where(TenantUser.tenant_id == tenant_id, TenantUser.user_id == user_id, TenantUser.active, TenantUser.role_code.in_(CREW_ROLES))
+    )
+    u = db.get(User, user_id) if m else None
+    return bool(m and u and u.active)
+
+
+def _check_crew(db: Session, tenant_id: int, ids) -> None:
+    """Quien recibe la orden (tecnico o ayudante) es del equipo de la empresa: sin esto un id ajeno quedaria en la
+    orden, su nombre saldria en la respuesta y se le podria abrir tiempo."""
+    for uid in ids:
+        if uid and not _eligible(db, tenant_id, uid):
+            raise HTTPException(422, "Esa persona no puede recibir órdenes")
+
+
+def _activos(db: Session, tenant_id: int, ids) -> set[int]:
+    """De estos, quienes hoy pueden recibir ordenes (lo mismo que _eligible, en una sola consulta)."""
+    from ..models import TenantUser
+
+    ids = {i for i in ids if i}
+    if not ids:
+        return set()
+    stmt = (
+        select(TenantUser.user_id)
+        .join(User, User.id == TenantUser.user_id)
+        .where(TenantUser.tenant_id == tenant_id, TenantUser.user_id.in_(ids), TenantUser.active, TenantUser.role_code.in_(CREW_ROLES), User.active)
+    )
+    return set(db.scalars(stmt))
+
+
+def _member(db: Session, tenant_id: int, user_id: int) -> bool:
+    """Es (o fue) del equipo interno de la empresa: alguien que ya esta en la orden aunque hoy este inactivo."""
+    from ..models import TenantUser
+
+    return (
+        db.scalar(select(TenantUser.id).where(TenantUser.tenant_id == tenant_id, TenantUser.user_id == user_id, TenantUser.role_code.not_in(CLIENT_ROLES)))
+        is not None
+    )
+
+
+def _names(db: Session, orders: list[WorkOrder], tenant_id: int | None = None) -> dict[int, str]:
+    """Nombres de todo el que aparece en estas ordenes (tecnico, ayudantes, tiempo): una consulta y solo de gente de
+    la empresa (un id ajeno que haya quedado en una orden vieja no devuelve el nombre de otra empresa)."""
+    from ..models import TenantUser
+
+    ids: set[int] = set()
+    for o in orders:
+        ids |= _crew(o)
+        for e in o.time_entries:
+            ids.update(x for x in (e.user_id, e.created_by) if x)
+    if not ids:
+        return {}
+    tid = tenant_id if tenant_id is not None else orders[0].tenant_id
+    stmt = select(User.id, User.full_name).join(TenantUser, TenantUser.user_id == User.id).where(TenantUser.tenant_id == tid, User.id.in_(ids))
+    return dict(db.execute(stmt).all())
+
+
+def _order_out(db: Session, o: WorkOrder, full: bool = True, names: dict[int, str] | None = None, tenant=None) -> dict:
+    """Orden de trabajo. Sin dinero en ningun lado: el tecnico no ve precios ni costos (Andres 22:07)."""
+    c = _ref(db, Customer, o.customer_id, o.tenant_id)
+    pr = _ref(db, Project, o.project_id, o.tenant_id)
+    names = names if names is not None else _names(db, [o])
+    now = datetime.now(UTC)
+    hours, source = order_hours(o)
+    abiertas = [e for e in o.time_entries if e.ended_at is None]
     out = {
         "id": o.id,
         "number": o.number,
@@ -1258,7 +1412,7 @@ def _order_out(db: Session, o: WorkOrder, full: bool = True) -> dict:
         "project_id": o.project_id,
         "project": pr.number if pr else None,
         "technician_id": o.technician_id,
-        "technician": t.full_name if t else None,
+        "technician": names.get(o.technician_id) if o.technician_id else None,
         "helpers": o.helpers,
         "arrived_at": o.arrived_at,
         "started_at": o.started_at,
@@ -1269,12 +1423,48 @@ def _order_out(db: Session, o: WorkOrder, full: bool = True) -> dict:
         "customer_signature": o.customer_signature,
         "warehouse_id": o.warehouse_id,
         "stock_applied": o.stock_applied,
-        "hours": _hours(o.started_at, o.finished_at),
+        # persona-horas del registro por jornada; sin registro, de inicio a fin como antes ("legado")
+        "hours": hours,
+        "hours_source": source,
+        "running": [{"id": e.id, "user_id": e.user_id, "user": names.get(e.user_id), "started_at": e.started_at} for e in abiertas],
+        "stale": any(_utc(e.started_at) < now - timedelta(hours=MAX_CORRIENDO_H) for e in abiertas),
+        "crew": [
+            {"id": i, "name": names.get(i), "role": "tecnico" if i == o.technician_id else "ayudante"}
+            for i in dict.fromkeys([o.technician_id, *(o.helpers or [])])
+            if i
+        ],
     }
     if full:
         out["materials"] = [
             {"id": m.id, "product_id": m.product_id, "name": m.name, "quantity": m.quantity, "unit": m.unit, "planned": m.planned} for m in o.materials
         ]
+        if tenant is None:
+            from ..models import Tenant
+
+            tenant = db.get(Tenant, o.tenant_id)
+        est, label = order_estimate(db, o, tenant)
+        out["hours_estimated"] = est
+        out["hours_estimated_label"] = label
+        out["time_entries"] = [
+            {
+                "id": e.id,
+                "user_id": e.user_id,
+                "user": names.get(e.user_id),
+                "started_at": e.started_at,
+                "ended_at": e.ended_at,
+                "minutes": e.minutes if e.ended_at is not None else _mins(e.started_at, now),
+                "kind": e.kind,
+                "note": e.note,
+                "created_by": e.created_by,
+                "created_by_name": names.get(e.created_by) if e.created_by else None,
+            }
+            for e in sorted(o.time_entries, key=lambda x: _utc(x.started_at))
+        ]
+        # solo en el detalle (una consulta): el portal no preselecciona para "Iniciar jornada" a quien ya no puede
+        # recibir ordenes y deja quitarlo de la asignacion aunque ya no salga en /field/technicians
+        activos = _activos(db, o.tenant_id, _crew(o))
+        for c in out["crew"]:
+            c["active"] = c["id"] in activos
     return out
 
 
@@ -1300,6 +1490,12 @@ class WorkOrderIn(BaseModel):
     notes: str | None = None
     warehouse_id: int | None = None
     materials: list[MaterialIn] = Field(default_factory=list)
+
+
+class WorkOrderEditIn(WorkOrderIn):
+    """PUT: solo lo que se cambio (el formulario manda la diferencia con lo que abrio; lo que no viene no se toca)."""
+
+    title: str | None = Field(None, min_length=2, max_length=200)
 
 
 def _live_orders():
@@ -1328,60 +1524,289 @@ def work_orders(
         rows = [o for o in rows if o.technician_id == p.user.id or p.user.id in (o.helpers or [])]
     if day:
         rows = [o for o in rows if o.scheduled_at and o.scheduled_at.date() == day]
-    return [_order_out(db, o, full=False) for o in rows]
+    names = _names(db, rows)
+    return [_order_out(db, o, full=False, names=names) for o in rows]
 
 
 @router.post("/work-orders", status_code=201)
 def order_create(data: WorkOrderIn, p: Principal = Depends(require("field", "asignar")), db: Session = Depends(get_db)):
+    check_refs(db, p.tenant.id, data.model_dump(), WORK_ORDER_REFS)  # antes de gastar el consecutivo
+    _check_crew(db, p.tenant.id, [data.technician_id, *data.helpers])
     number, _ = next_number(db, p.tenant.id, "OT")
     o = WorkOrder(tenant_id=p.tenant.id, number=number, **data.model_dump(exclude={"materials"}))
     for m in data.materials:
         o.materials.append(WorkOrderMaterial(product_id=m.product_id, name=m.name, quantity=m.quantity, unit=m.unit, planned=m.planned))
     if o.project_id:
-        pr = db.get(Project, o.project_id)
-        if pr and pr.tenant_id == p.tenant.id:
+        pr = _ref(db, Project, o.project_id, p.tenant.id)
+        if pr:
             o.customer_id = o.customer_id or pr.customer_id
             o.site = o.site or pr.site
     db.add(o)
     db.flush()
     audit(db, p.tenant.id, p.user.id, "create", "work_order", o.id, ip=p.ip)
     db.commit()
-    return _order_out(db, o)
+    return _order_out(db, o, tenant=p.tenant)
 
 
 @router.get("/work-orders/{oid}")
 def order_get(oid: int, p: Principal = Depends(require("field", "ver")), db: Session = Depends(get_db)):
-    return _order_out(db, _order(db, oid, p))
+    return _order_out(db, _order(db, oid, p), tenant=p.tenant)
 
 
 @router.put("/work-orders/{oid}")
-def order_update(oid: int, data: WorkOrderIn, p: Principal = Depends(require("field", "asignar")), db: Session = Depends(get_db)):
+def order_update(oid: int, data: WorkOrderEditIn, p: Principal = Depends(require("field", "asignar")), db: Session = Depends(get_db)):
+    """El formulario solo PLANIFICA: lo que el tecnico ya anoto como usado se conserva (filas por id) y lo que el
+    cuerpo no trae no se toca (el portal manda solo lo que cambio: si el tecnico marco una tarea mientras el
+    supervisor cambiaba el sitio, no se pisa)."""
     o = _order(db, oid, p)
     if o.stock_applied:
         raise HTTPException(409, "La orden ya descontó inventario; no se puede reescribir")
-    for k, v in data.model_dump(exclude={"materials"}).items():
+    cambios = data.model_dump(exclude_unset=True, exclude={"materials"})
+    if cambios.get("title", "") is None:
+        cambios.pop("title")  # el titulo no se borra
+    check_refs(db, p.tenant.id, cambios, WORK_ORDER_REFS, current=o)
+    # solo se valida a quien entra (un ayudante que ya estaba y hoy esta inactivo no frena la edicion)
+    nuevos = [cambios["technician_id"]] if cambios.get("technician_id") and cambios["technician_id"] != o.technician_id else []
+    nuevos += [h for h in cambios.get("helpers") or [] if h not in (o.helpers or [])]
+    _check_crew(db, p.tenant.id, nuevos)
+    for k, v in cambios.items():
         setattr(o, k, v)
-    o.materials.clear()
-    for m in data.materials:
-        o.materials.append(WorkOrderMaterial(product_id=m.product_id, name=m.name, quantity=m.quantity, unit=m.unit, planned=m.planned))
+    if "materials" in data.model_fields_set:
+        actuales = {m.id: m for m in o.materials}
+        vistos: set[int] = set()
+        for m in data.materials:
+            if m.id is not None and (m.id not in actuales or m.id in vistos):
+                # la fila ya no esta (el tecnico la quito mientras el formulario seguia abierto) o vino repetida: no
+                # se recrea con el "usado" viejo de este formulario
+                continue
+            fila = actuales.get(m.id) if m.id is not None else None
+            if fila is not None:
+                # misma fila: cambia lo planificado; el "usado" es del tecnico y se conserva
+                fila.product_id, fila.name, fila.unit, fila.planned = m.product_id, m.name, m.unit, m.planned
+                vistos.add(m.id)
+            else:
+                o.materials.append(WorkOrderMaterial(product_id=m.product_id, name=m.name, quantity=m.quantity, unit=m.unit, planned=m.planned))
+        for mid, fila in actuales.items():
+            if mid not in vistos:
+                o.materials.remove(fila)
     db.commit()
-    return _order_out(db, o)
+    return _order_out(db, o, tenant=p.tenant)
+
+
+class OrderAssignIn(BaseModel):
+    technician_id: int | None = None
+    helpers: list[int] | None = None
+    scheduled_at: datetime | None = None
+
+
+@router.patch("/work-orders/{oid}/assign")
+def order_assign(oid: int, data: OrderAssignIn, p: Principal = Depends(require("field", "asignar")), db: Session = Depends(get_db)):
+    """Asignacion rapida desde el detalle: tecnico, ayudantes y fecha (solo lo enviado). Sin tecnico la orden no le
+    aparece a nadie en "Mi dia"."""
+    o = _order(db, oid, p)
+    if o.status in CERRADAS:
+        raise HTTPException(409, f"La orden está {o.status}; ya no se modifica")
+    cambios = data.model_dump(exclude_unset=True)
+    # como en el PUT, solo se valida a quien entra: un ayudante que ya estaba y hoy esta inactivo (el portal lo manda
+    # de vuelta en "helpers") no traba la asignacion; quitarlo tambien vale
+    nuevos = [cambios["technician_id"]] if cambios.get("technician_id") and cambios["technician_id"] != o.technician_id else []
+    nuevos += [h for h in cambios.get("helpers") or [] if h not in (o.helpers or [])]
+    _check_crew(db, p.tenant.id, nuevos)
+    if "technician_id" in cambios:
+        o.technician_id = cambios["technician_id"]
+    if "helpers" in cambios:
+        o.helpers = [i for i in dict.fromkeys(cambios["helpers"] or []) if i != o.technician_id]
+    elif "technician_id" in cambios and o.technician_id in (o.helpers or []):
+        o.helpers = [i for i in o.helpers if i != o.technician_id]
+    if "scheduled_at" in cambios:
+        o.scheduled_at = _utc(cambios["scheduled_at"])
+    diff = {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in cambios.items()}
+    audit(db, p.tenant.id, p.user.id, "assign", "work_order", o.id, diff, ip=p.ip)
+    db.commit()
+    return _order_out(db, o, tenant=p.tenant)
+
+
+# ---------- Tiempo por jornada y por persona ----------
+class TimeIn(BaseModel):
+    user_id: int | None = None
+    started_at: datetime
+    ended_at: datetime | None = None
+    minutes: int | None = Field(None, ge=1, le=1440)
+    note: str | None = Field(None, max_length=200)
+
+
+def _time_rules(db: Session, o: WorkOrder, p: Principal, data: TimeIn, entry=None) -> tuple[int, datetime, datetime | None]:
+    """Valida una entrada manual (nueva o corregida). Devuelve (persona, inicio, fin). Un fin None solo vale para
+    corregir el inicio de una entrada que sigue corriendo."""
+    supervisa = p.can("field", "asignar")
+    uid = data.user_id or (entry.user_id if entry is not None else p.user.id)
+    if uid != p.user.id and not supervisa:
+        raise HTTPException(403, "El tiempo de otra persona lo registra el supervisor")
+    # quien entra al equipo tiene que poder recibir ordenes; quien ya esta, al menos ser de la empresa (una orden
+    # vieja con un id ajeno no sirve para abrirle tiempo a nadie de afuera)
+    if not (_member(db, p.tenant.id, uid) if uid in _crew(o) else _eligible(db, p.tenant.id, uid)):
+        raise HTTPException(422, "Esa persona no puede recibir órdenes")
+    inicio = _utc(data.started_at)
+    if data.ended_at is not None:
+        fin = _utc(data.ended_at)
+    elif data.minutes is not None:
+        fin = inicio + timedelta(minutes=data.minutes)
+    elif entry is not None and entry.ended_at is None:
+        fin = None  # sigue corriendo: solo se corrige la hora de inicio
+    else:
+        raise HTTPException(422, "Indicá hasta qué hora o cuántos minutos")
+    now = datetime.now(UTC)
+    if fin is not None and fin <= inicio:
+        raise HTTPException(422, "La hora de fin tiene que ser después del inicio")
+    if fin is not None and fin - inicio > timedelta(hours=24):
+        raise HTTPException(422, "Una entrada no puede pasar de 24 horas: registrá cada jornada aparte")
+    if inicio > now + timedelta(minutes=5) or (fin is not None and fin > now + timedelta(minutes=5)):
+        raise HTTPException(422, "No se registra tiempo a futuro")
+    hasta = fin or now
+    for e in o.time_entries:
+        if e is entry or e.user_id != uid:
+            continue
+        e_fin = _utc(e.ended_at) if e.ended_at is not None else now
+        if inicio < e_fin and _utc(e.started_at) < hasta:
+            nombre = db.get(User, uid)
+            raise HTTPException(409, f"Ya hay tiempo de {nombre.full_name if nombre else 'esa persona'} en ese rango")
+    if uid not in _crew(o):
+        o.helpers = [*(o.helpers or []), uid]  # el supervisor le registra tiempo: queda como ayudante
+    return uid, inicio, fin
+
+
+def _time_entry(db: Session, o: WorkOrder, eid: int, p: Principal):
+    e = next((x for x in o.time_entries if x.id == eid), None)
+    if e is None:
+        raise HTTPException(404, "Entrada de tiempo no encontrada")
+    if not p.can("field", "asignar"):
+        if e.user_id != p.user.id:
+            raise HTTPException(403, "Solo podés corregir tu propio tiempo")
+        if o.status in CERRADAS:
+            raise HTTPException(409, f"La orden está {o.status}; el tiempo lo corrige el supervisor")
+    return e
+
+
+def _entry_snap(e) -> dict:
+    return {
+        "user_id": e.user_id,
+        "started_at": _utc(e.started_at).isoformat(),
+        "ended_at": _utc(e.ended_at).isoformat() if e.ended_at else None,
+        "minutes": e.minutes,
+        "note": e.note,
+    }
+
+
+# Antes que POST /work-orders/{oid}/{action}: si no, Starlette la toma como action="time" ("Acción no soportada")
+@router.post("/work-orders/{oid}/time", status_code=201)
+def order_time_add(oid: int, data: TimeIn, p: Principal = Depends(require("field", "editar")), db: Session = Depends(get_db)):
+    """Tiempo manual: un olvido o una correccion. El tecnico solo el suyo; el supervisor el de cualquiera del equipo.
+    Queda marcado "manual" y en la bitacora."""
+    o = _order(db, oid, p)
+    if o.status in CERRADAS and not p.can("field", "asignar"):
+        raise HTTPException(409, f"La orden está {o.status}; el tiempo lo corrige el supervisor")
+    uid, inicio, fin = _time_rules(db, o, p, data)
+    from ..models import WorkOrderTime
+
+    e = WorkOrderTime(
+        tenant_id=o.tenant_id, user_id=uid, started_at=inicio, ended_at=fin, minutes=_mins(inicio, fin), kind="manual", note=data.note, created_by=p.user.id
+    )
+    o.time_entries.append(e)
+    db.flush()
+    audit(db, p.tenant.id, p.user.id, "time_add", "work_order", o.id, {"entry": e.id, **_entry_snap(e)}, ip=p.ip)
+    db.commit()
+    out = _order_out(db, o, tenant=p.tenant)
+    out["entry_id"] = e.id
+    return out
+
+
+@router.put("/work-orders/{oid}/time/{eid}")
+def order_time_edit(oid: int, eid: int, data: TimeIn, p: Principal = Depends(require("field", "editar")), db: Session = Depends(get_db)):
+    o = _order(db, oid, p)
+    e = _time_entry(db, o, eid, p)
+    antes = _entry_snap(e)
+    uid, inicio, fin = _time_rules(db, o, p, data, entry=e)
+    e.user_id, e.started_at, e.ended_at, e.note = uid, inicio, fin, data.note if data.note is not None else e.note
+    e.minutes = _mins(inicio, fin) if fin is not None else None
+    audit(db, p.tenant.id, p.user.id, "time_edit", "work_order", o.id, {"entry": e.id}, ip=p.ip, before=antes, after=_entry_snap(e))
+    db.commit()
+    return _order_out(db, o, tenant=p.tenant)
+
+
+@router.delete("/work-orders/{oid}/time/{eid}", status_code=204)
+def order_time_delete(oid: int, eid: int, p: Principal = Depends(require("field", "editar")), db: Session = Depends(get_db)):
+    o = _order(db, oid, p)
+    e = _time_entry(db, o, eid, p)
+    audit(db, p.tenant.id, p.user.id, "time_delete", "work_order", o.id, {"entry": e.id}, ip=p.ip, before=_entry_snap(e))
+    o.time_entries.remove(e)
+    db.commit()
 
 
 class ProgressIn(BaseModel):
     tasks: list[dict] | None = None
     photos: list | None = None
     notes: str | None = None
+    # lista completa (compatibilidad): reemplaza las filas. El detalle manda quantities/removed (ids estables)
     materials: list[MaterialIn] | None = None
     customer_signature: str | None = Field(None, max_length=160)
+    workers: list[int] | None = None  # start/pause: quienes trabajan (por defecto todo el equipo)
+    quantities: dict[int, Annotated[Decimal, Field(ge=0)]] | None = None  # id de material -> usado
+    removed: list[int] | None = None  # ids de material que no se usaron
+
+
+ACTIONS = ("arrive", "start", "pause", "progress", "finish", "cancel")
+
+
+def _close_running(o: WorkOrder, now: datetime, workers: set[int] | None = None) -> int:
+    n = 0
+    for e in o.time_entries:
+        if e.ended_at is None and (workers is None or e.user_id in workers):
+            e.ended_at = now
+            e.minutes = _mins(e.started_at, now)
+            n += 1
+    return n
 
 
 @router.post("/work-orders/{oid}/{action}")
 def order_action(oid: int, action: str, data: ProgressIn | None = None, p: Principal = Depends(require("field", "editar")), db: Session = Depends(get_db)):
-    """Pantalla del técnico: llegué / iniciar / avanzar / finalizar. Al finalizar descuenta el material usado."""
+    """Pantalla del técnico: llegué / iniciar jornada / terminar jornada / avanzar / finalizar. Al finalizar descuenta
+    el material usado. Iniciar abre una entrada de tiempo por persona; terminar y finalizar las cierran."""
     o = _order(db, oid, p)
+    if action not in ACTIONS:
+        raise HTTPException(404, "Acción no soportada")
+    if o.status in CERRADAS:
+        raise HTTPException(409, f"La orden está {o.status}; ya no se modifica")
     now = datetime.now(UTC)
     data = data or ProgressIn()
+    quienes = set(data.workers) if data.workers else None
+
+    # validaciones antes de tocar nada (un 409/403 no deja la orden a medias)
+    if action in ("pause", "finish", "cancel"):
+        corriendo = [e for e in o.time_entries if e.ended_at is None and (action != "pause" or quienes is None or e.user_id in quienes)]
+        viejas = [e for e in corriendo if _utc(e.started_at) < now - timedelta(hours=MAX_CORRIENDO_H)]
+        if viejas:
+            raise HTTPException(409, f"Hay tiempo corriendo desde {_fecha_cr(min(e.started_at for e in viejas))}: corregí la hora real antes de seguir")
+        if action == "pause" and not corriendo:
+            raise HTTPException(409, "No hay tiempo corriendo")
+    if action == "start":
+        equipo = _crew(o)
+        # sin "workers" trabaja el equipo que hoy puede recibir ordenes (un ayudante dado de baja no abre jornada)
+        trabajan = quienes if quienes is not None else {uid for uid in equipo if _eligible(db, p.tenant.id, uid)}
+        if not trabajan:
+            raise HTTPException(409, "Asigná un técnico antes de iniciar")
+        fuera = trabajan - equipo
+        if fuera and not p.can("field", "asignar"):
+            raise HTTPException(403, "Solo quien asigna puede sumar gente a la orden")
+        bajas = sorted(uid for uid in trabajan if not _eligible(db, p.tenant.id, uid))
+        if bajas:
+            # del equipo pero dado de baja (inactivo o cambio de rol): se dice quien. El nombre sale de _names, que solo
+            # devuelve gente de esta empresa
+            nombres = _names(db, [o])
+            nombre = next((nombres[u] for u in bajas if u in equipo and nombres.get(u)), None)
+            raise HTTPException(
+                422, f"{nombre} ya no puede recibir órdenes: quitalo de quienes trabajan hoy" if nombre else "Esa persona no puede recibir órdenes"
+            )
+
     if data.tasks is not None:
         o.tasks = data.tasks
     if data.photos is not None:
@@ -1390,15 +1815,32 @@ def order_action(oid: int, action: str, data: ProgressIn | None = None, p: Princ
         o.notes = data.notes
     if data.customer_signature is not None:
         o.customer_signature = data.customer_signature
-    if data.materials is not None and not o.stock_applied:
-        o.materials.clear()
-        for m in data.materials:
-            o.materials.append(WorkOrderMaterial(product_id=m.product_id, name=m.name, quantity=m.quantity, unit=m.unit, planned=m.planned))
+    if not o.stock_applied:
+        if data.materials is not None:
+            o.materials.clear()
+            for m in data.materials:
+                o.materials.append(WorkOrderMaterial(product_id=m.product_id, name=m.name, quantity=m.quantity, unit=m.unit, planned=m.planned))
+        if data.quantities:
+            for m in o.materials:
+                if m.id in data.quantities:
+                    m.quantity = data.quantities[m.id]
+        if data.removed:
+            for m in [x for x in o.materials if x.id in set(data.removed)]:
+                o.materials.remove(m)
 
     if action == "arrive":
         o.arrived_at, o.status = o.arrived_at or now, "en_sitio"
     elif action == "start":
+        if fuera:
+            o.helpers = [*(o.helpers or []), *sorted(fuera)]
+        from ..models import WorkOrderTime
+
+        ya = {e.user_id for e in o.time_entries if e.ended_at is None}
+        for uid in sorted(trabajan - ya):
+            o.time_entries.append(WorkOrderTime(tenant_id=o.tenant_id, user_id=uid, started_at=now, kind="reloj", created_by=p.user.id))
         o.started_at, o.status = o.started_at or now, "en_proceso"
+    elif action == "pause":
+        _close_running(o, now, quienes)
     elif action == "progress":
         pass
     elif action == "finish":
@@ -1411,16 +1853,17 @@ def order_action(oid: int, action: str, data: ProgressIn | None = None, p: Princ
                 422,
                 "Anotá cuánto usaste de: " + ", ".join(sin_anotar[:6]) + ("…" if len(sin_anotar) > 6 else "") + ". Si no se usó, quitá la línea.",
             )
+        _close_running(o, now)  # despues de validar: un 422 no deja nada cerrado
         if not o.started_at:
             o.started_at = now
         o.finished_at, o.status = now, "finalizada"
         consumed = _apply_materials(db, o, p)
         audit(db, p.tenant.id, p.user.id, "finish", "work_order", o.id, {"materiales": consumed}, ip=p.ip)
         if o.project_id:
-            pr = db.get(Project, o.project_id)
-            if pr and all(x.status in ("finalizada", "cancelada") for x in pr.orders if x.trashed_at is None) and pr.status != "terminado":
+            pr = _ref(db, Project, o.project_id, o.tenant_id)  # nunca se termina el proyecto de otra empresa
+            if pr and all(x.status in CERRADAS for x in pr.orders if x.trashed_at is None) and pr.status != "terminado":
                 pr.status = "terminado"
-                horas = sum((_hours(x.started_at, x.finished_at) or 0 for x in pr.orders), 0.0)
+                horas = sum((order_hours(x)[0] or 0 for x in pr.orders), 0.0)
                 notify_roles(
                     db,
                     p.tenant,
@@ -1433,11 +1876,10 @@ def order_action(oid: int, action: str, data: ProgressIn | None = None, p: Princ
                     pr.id,
                 )
     elif action == "cancel":
+        _close_running(o, now)
         o.status = "cancelada"
-    else:
-        raise HTTPException(404, "Acción no soportada")
     db.commit()
-    return _order_out(db, o)
+    return _order_out(db, o, tenant=p.tenant)
 
 
 def _apply_materials(db: Session, o: WorkOrder, p: Principal) -> int:
@@ -1467,9 +1909,10 @@ def my_day(p: Principal = Depends(require("field", "ver")), db: Session = Depend
     if not p.sees_field_all:
         rows = [o for o in rows if o.technician_id == p.user.id or p.user.id in (o.helpers or [])]
     today = date.today()
+    names = _names(db, rows)
     return {
-        "today": [_order_out(db, o, full=False) for o in rows if o.scheduled_at and o.scheduled_at.date() == today],
-        "next": [_order_out(db, o, full=False) for o in rows if not o.scheduled_at or o.scheduled_at.date() != today][:10],
+        "today": [_order_out(db, o, full=False, names=names) for o in rows if o.scheduled_at and o.scheduled_at.date() == today],
+        "next": [_order_out(db, o, full=False, names=names) for o in rows if not o.scheduled_at or o.scheduled_at.date() != today][:10],
         "surveys": [
             _survey_out(db, s, full=False)
             for s in db.scalars(
