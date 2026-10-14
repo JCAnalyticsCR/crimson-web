@@ -32,7 +32,12 @@ def password_is_strong(raw: str) -> bool:
     return len(raw) >= 10 and any(c.isdigit() for c in raw) and any(c.isalpha() for c in raw)
 
 
-def create_access_token(user_id: int, tenant_id: int, role: str) -> str:
+# Largo maximo de cualquier contrasena que entra por la API: Argon2 sobre una cadena de 1 MB es CPU regalada.
+MAX_PASSWORD = 200
+
+
+def create_access_token(user_id: int, tenant_id: int, role: str, sv: int = 0) -> str:
+    """sv = user.session_version al emitirlo: cerrar las sesiones de alguien sube la version y este token muere."""
     now = datetime.now(UTC)
     payload = {
         "sub": str(user_id),
@@ -41,6 +46,7 @@ def create_access_token(user_id: int, tenant_id: int, role: str) -> str:
         "iat": now,
         "exp": now + timedelta(minutes=settings.access_token_minutes),
         "typ": "access",
+        "sv": sv,
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
@@ -88,6 +94,18 @@ def read_purpose_token(purpose: str, token: str) -> dict:
     if payload.get("typ") != purpose:
         raise jwt.InvalidTokenError("proposito incorrecto")
     return payload
+
+
+_TEMP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"  # sin I, O, l, o, 0, 1
+
+
+def new_temp_password() -> str:
+    """12 caracteres al azar (~69 bits) en tres bloques para dictarla o pegarla. Siempre letras y numeros.
+    La genera el servidor (el admin nunca elige la contrasena de otro), se muestra una vez y obliga a cambiarla."""
+    while True:
+        raw = "".join(secrets.choice(_TEMP_ALPHABET) for _ in range(12))
+        if any(c.isdigit() for c in raw) and any(c.isalpha() for c in raw):
+            return f"{raw[:4]}-{raw[4:8]}-{raw[8:]}"
 
 
 def new_recovery_codes(n: int = 10) -> list[str]:

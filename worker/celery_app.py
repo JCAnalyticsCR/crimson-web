@@ -66,15 +66,21 @@ def run_recurrences() -> int:
 
 @celery.task(name="mail.retry_outbox")
 def retry_outbox() -> int:
-    from sqlalchemy import select
+    from sqlalchemy import or_, select
 
     from app.core.db import SessionLocal
     from app.models import EmailOutbox
-    from app.services.mail import deliver
+    from app.services.mail import SENSITIVE_ENTITIES, deliver
 
     n = 0
     with SessionLocal() as db:
-        for m in db.scalars(select(EmailOutbox).where(EmailOutbox.status.in_(("pendiente", "error"))).limit(50)):
+        # invitaciones y enlaces de contrasena no se reintentan: su HTML guardado ya no tiene el enlace (el admin
+        # usa "Reenviar", que rota el token)
+        q = select(EmailOutbox).where(
+            EmailOutbox.status.in_(("pendiente", "error")),
+            or_(EmailOutbox.entity.is_(None), EmailOutbox.entity.not_in(list(SENSITIVE_ENTITIES))),
+        )
+        for m in db.scalars(q.limit(50)):
             deliver(m)
             n += 1
         db.commit()

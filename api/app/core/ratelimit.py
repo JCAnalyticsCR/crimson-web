@@ -55,3 +55,13 @@ access_request_global_limiter = SlidingWindow(limit=120, seconds=3600)
 catalog_limiter = SlidingWindow(limit=240, seconds=60)
 # "Avisarme cuando haya" (tienda): como un formulario publico
 stock_alert_limiter = SlidingWindow(limit=10, seconds=3600)
+# Gestion de usuarios: acciones que mandan correo o generan credenciales, por admin
+admin_users_limiter = SlidingWindow(limit=30, seconds=3600)
+# Reautenticacion con la contrasena del admin (se cuenta cada intento, antes de verificar)
+reauth_limiter = SlidingWindow(limit=10, seconds=900)
+# Enlaces publicos con token (invitacion, restablecer): revisar y confirmar
+token_limiter = SlidingWindow(limit=20, seconds=600)
+# "Olvide mi contrasena" (autoservicio)
+pwreset_ip_limiter = SlidingWindow(limit=5, seconds=3600)
+pwreset_email_limiter = SlidingWindow(limit=3, seconds=3600)  # clave: sha256 del correo; al pasarse se ignora en silencio
+pwreset_global_limiter = SlidingWindow(limit=100, seconds=3600)

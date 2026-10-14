@@ -21,12 +21,17 @@ const ENTIDAD: Record<string, string> = {
 const ACCION: Record<string, string> = {
   create: "Creó", update: "Editó", permissions: "Permisos / estado", export: "Exportó", upload: "Subió", delete: "Borró", void: "Anuló", pay: "Pagó",
   send: "Envió", login: "Ingresó", purge: "Borró definitivamente", invite: "Invitó", review_reset: "Revisión reiniciada",
+  invite_resend: "Reenvió invitación", invite_revoke: "Revocó invitación", invite_superseded: "Invitación reemplazada", invite_accept: "Aceptó invitación",
+  user_profile: "Editó datos del usuario", password_reset: "Restableció contraseña (temporal)", password_reset_link: "Envió enlace de contraseña",
+  password_reset_done: "Cambió contraseña con enlace", password_temp_changed: "Cambió la contraseña temporal", password_reset_request: "Pidió restablecer contraseña",
+  sessions_revoke: "Cerró sesiones", "2fa_reset": "Quitó la verificación en dos pasos", password_reset_invalidated: "Anuló enlaces o contraseñas temporales",
 };
 const CAMPO: Record<string, string> = {
   role: "Rol", active: "Activo", site: "Sitio", notes: "Notas", photos: "Fotos", label: "Rótulo", data: "Datos", kind: "Tipo", status: "Estado",
   subtotal: "Subtotal", total: "Total", tax_amount: "Impuesto", tax_rate: "Tarifa IVA", description: "Descripción", date: "Fecha", reference: "Referencia",
   cost_labor: "Costo de mano de obra", cost_travel: "Costo de viáticos", cost_extra: "Costos extra", percent: "Porcentaje", base: "Base", name: "Nombre",
   quantity: "Cantidad", unit: "Unidad", note: "Observación", product_id: "Producto", attachment_url: "Adjunto", visit_date: "Fecha de visita",
+  full_name: "Nombre", email: "Correo",
 };
 const etiqueta = (m: Record<string, string>, k: string) => m[k] || k.replace(/_/g, " ");
 

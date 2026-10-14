@@ -1,6 +1,7 @@
 /* Acceso al panel. Mismo lenguaje que la landing: fondo crema, red de nodos con pulsos carmesi, HUD de camara
    y una tarjeta oscura tipo "pase de acceso". Los nodos cercanos al puntero se encienden. */
 import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent } from "react";
+import { useLocation } from "react-router-dom";
 import { ApiError } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { I, Icon } from "../../ui/components";
@@ -56,13 +57,22 @@ function Net({ portrait }: { portrait: boolean }) {
   );
 }
 
+/** Misma regla que la API: minimo 10 caracteres con letras y numeros. */
+const strongEnough = (pw: string) => pw.length >= 10 && /\d/.test(pw) && /\p{L}/u.test(pw);
+
 export default function Login() {
   const { login } = useSession();
+  const notice = (useLocation().state as { notice?: string } | null)?.notice;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [totp, setTotp] = useState("");
   const [need2fa, setNeed2fa] = useState(false);
+  /* Entró con una contraseña temporal (Ajustes → Usuarios → Restablecer): crea la suya antes de entrar. */
+  const [needNew, setNeedNew] = useState(false);
+  const [newPw, setNewPw] = useState("");
+  const [newPw2, setNewPw2] = useState("");
+  const [showNew, setShowNew] = useState(false);
   const [recuperacion, setRecuperacion] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -81,10 +91,16 @@ export default function Login() {
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setErr(null);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setErr("Escribí tu correo completo (ejemplo: nombre@empresa.com)."); setShake((n) => n + 1); return; }
+    if (needNew && !need2fa) {
+      const local = !strongEnough(newPw) ? "Mínimo 10 caracteres con letras y números." : newPw !== newPw2 ? "Las dos contraseñas no coinciden." : newPw === password ? "La contraseña nueva no puede ser la temporal." : null;
+      if (local) { setErr(local); setShake((n) => n + 1); return; }
+    }
     setBusy(true);
-    try { await login(email.trim(), password, totp || undefined); }
+    try { await login(email.trim(), password, totp || undefined, needNew ? newPw : undefined); }
     catch (ex) {
-      if (ex instanceof ApiError && ex.headers?.get("X-2FA") === "required") { setNeed2fa(true); setErr(null); }
+      if (ex instanceof ApiError && ex.headers?.get("X-Password-Change") === "required") { setNeedNew(true); setErr(null); }
+      // con 2FA, la contrasena nueva se conserva y viaja junto con el codigo
+      else if (ex instanceof ApiError && ex.headers?.get("X-2FA") === "required") { setNeed2fa(true); setErr(null); }
       else { setErr(ex instanceof Error ? ex.message : "No se pudo iniciar sesión"); setShake((n) => n + 1); }
     } finally { setBusy(false); }
   };
@@ -121,13 +137,27 @@ export default function Login() {
 
         <form ref={card} className={`lg-card ${busy ? "is-busy" : ""}`} onSubmit={submit} onPointerMove={glow} key={shake} data-shake={shake > 0 || undefined} noValidate>
           <span className="lg-corners" aria-hidden="true" />
-          <div className="lg-card__strip"><span><i className="rec-dot" />Pase de acceso</span><span>{need2fa ? "Paso 2 / 2" : "Panel · CR"}</span></div>
+          <div className="lg-card__strip"><span><i className="rec-dot" />Pase de acceso</span><span>{need2fa ? "Paso 2 / 2" : needNew ? "Paso de seguridad" : "Panel · CR"}</span></div>
           <div>
-            <h2 className="lg-card__title">{need2fa ? "Verificación en dos pasos" : "Iniciar sesión"}</h2>
-            <p className="lg-card__sub">{!need2fa ? "Usá el correo con el que te invitaron." : recuperacion ? "Escribí uno de los códigos que guardaste al activar el 2FA. Cada uno sirve una sola vez." : "Escribí el código de 6 dígitos de tu app de autenticación."}</p>
+            <h2 className="lg-card__title">{need2fa ? "Verificación en dos pasos" : needNew ? "Creá tu contraseña nueva" : "Iniciar sesión"}</h2>
+            <p className="lg-card__sub">{needNew && !need2fa ? "Entraste con una contraseña temporal. Creá una propia para continuar." : !need2fa ? "Usá el correo con el que te invitaron." : recuperacion ? "Escribí uno de los códigos que guardaste al activar el 2FA. Cada uno sirve una sola vez." : "Escribí el código de 6 dígitos de tu app de autenticación."}</p>
           </div>
+          {notice && !needNew && !need2fa && <p className="lg-card__sub" role="status" style={{ color: "#7ee2b8", margin: 0 }}>{notice}</p>}
 
-          {!need2fa ? <>
+          {needNew && !need2fa ? <>
+            <label className="lg-field">
+              <span>Contraseña nueva</span>
+              <div className="lg-pass">
+                <input type={showNew ? "text" : "password"} autoComplete="new-password" value={newPw} onChange={(e) => setNewPw(e.target.value)} required autoFocus />
+                <button type="button" onClick={() => setShowNew((s) => !s)} aria-label={showNew ? "Ocultar contraseña" : "Mostrar contraseña"}>{showNew ? "Ocultar" : "Ver"}</button>
+              </div>
+            </label>
+            <label className="lg-field">
+              <span>Repetila</span>
+              <input type={showNew ? "text" : "password"} autoComplete="new-password" value={newPw2} onChange={(e) => setNewPw2(e.target.value)} required />
+            </label>
+            <p className="lg-card__sub" style={{ margin: 0 }}>Mínimo 10 caracteres con letras y números. Distinta de la temporal.</p>
+          </> : !need2fa ? <>
             <label className="lg-field">
               <span>Correo</span>
               <input type="email" autoComplete="username" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nombre@empresa.com" required autoFocus />
@@ -153,14 +183,15 @@ export default function Login() {
 
           {err && <p className="lg-err" role="alert"><Icon d={I.x} size={14} />{err}</p>}
 
-          <button className="lg-go" disabled={busy || !email || !password || (need2fa && totp.length < (recuperacion ? 8 : 6))}>
-            {busy ? <span className="spinner" /> : <>{need2fa ? "Verificar" : "Entrar al panel"}<Icon d={I.arrow} size={18} /></>}
+          <button className="lg-go" disabled={busy || !email || !password || (need2fa && totp.length < (recuperacion ? 8 : 6)) || (needNew && !need2fa && (!newPw || !newPw2))}>
+            {busy ? <span className="spinner" /> : <>{need2fa ? "Verificar" : needNew ? "Guardar y entrar" : "Entrar al panel"}<Icon d={I.arrow} size={18} /></>}
           </button>
           {need2fa && <button type="button" className="lg-link" onClick={() => { setRecuperacion(!recuperacion); setTotp(""); setErr(null); }}>{recuperacion ? "Usar el código de la app" : "Perdí el teléfono: usar un código de recuperación"}</button>}
-          {need2fa && <button type="button" className="lg-link" onClick={() => { setNeed2fa(false); setRecuperacion(false); setTotp(""); }}>← Usar otra cuenta</button>}
+          {(need2fa || needNew) && <button type="button" className="lg-link" onClick={() => { setNeed2fa(false); setRecuperacion(false); setTotp(""); setNeedNew(false); setNewPw(""); setNewPw2(""); setPassword(""); setErr(null); }}>← Usar otra cuenta</button>}
 
           <div className="lg-card__foot">
             <span>Sesión cifrada · 2FA · bloqueo por intentos</span>
+            <span><a href="/recuperar" className="lg-link" style={{ display: "inline" }}>¿Olvidaste tu contraseña?</a></span>
             <span>¿Sin acceso? Pedile una invitación a tu administrador. ¿Es cliente de Crimson? <a href="/solicitar-acceso" className="lg-link" style={{ display: "inline" }}>Solicite acceso al portal de clientes</a>.</span>
           </div>
         </form>

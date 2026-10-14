@@ -43,6 +43,7 @@ from .routers import (
     supplier_catalog,
     support,
     support_desk,
+    users_admin,
     vehicles,
     webhooks,
 )
@@ -89,6 +90,7 @@ def create_app() -> FastAPI:
     app.include_router(ops.router)
     app.include_router(bitacora_router.router)  # antes que ajustes: /settings/audit
     app.include_router(settings_router.router)
+    app.include_router(users_admin.router)  # Ajustes -> Usuarios (/settings/users, /settings/invitations)
     app.include_router(webhooks.router)
     app.include_router(store.router)
     app.include_router(store_inventory_router.router)

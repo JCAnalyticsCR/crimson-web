@@ -12,6 +12,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -51,6 +52,17 @@ class User(TimestampMixin, Base):
     failed_logins: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Ajustes -> Usuarios -> Restablecer contrasena. La temporal la genera el servidor y obliga a crear una propia
+    # antes de emitir la sesion; vence sola. session_version sube al cerrar sesiones: los access tokens con otra
+    # version se rechazan en el siguiente request (los viejos sin "sv" valen como 0).
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    temp_password_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # quien genero la temporal y desde que empresa (sin FK, como revoked_by): el login la rechaza si esa persona ya no
+    # podria generarla hoy (la desactivaron, le bajaron el rol, o a esta cuenta la ascendieron a admin)
+    temp_password_by: Mapped[int | None] = mapped_column(Integer)
+    temp_password_tenant_id: Mapped[int | None] = mapped_column(Integer)
+    session_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     memberships: Mapped[list["TenantUser"]] = relationship(back_populates="user")
 
@@ -95,6 +107,12 @@ class Invitation(TenantMixin, TimestampMixin, Base):
     invited_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
     # invitacion al portal del cliente: al aceptarla la membresia queda ligada a este cliente
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id", ondelete="CASCADE"), index=True)
+    # Reenviar y revocar (Ajustes -> Usuarios). Revocar tambien pone expires_at=ahora: lo que solo mire el
+    # vencimiento la rechaza igual. revoked_by sin FK, como los *_by de ArchiveMixin.
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[int | None] = mapped_column(Integer)
+    sent_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AccessRequest(TenantMixin, TimestampMixin, Base):
@@ -134,6 +152,24 @@ class RefreshToken(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     user_agent: Mapped[str | None] = mapped_column(String(300))
     ip: Mapped[str | None] = mapped_column(String(64))
+
+
+class PasswordReset(TenantMixin, TimestampMixin, Base):
+    """Enlace de un solo uso para crear una contrasena nueva. Solo se guarda el SHA-256 del token."""
+
+    __tablename__ = "password_reset"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    kind: Mapped[str] = mapped_column(String(12), default="admin", server_default="admin")  # admin (lo pidio un admin) | auto (olvide mi contrasena)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # usado o invalidado
+    created_by: Mapped[int | None] = mapped_column(Integer)  # admin que lo pidio; None = autoservicio
+    ip: Mapped[str | None] = mapped_column(String(64))
+    # el admin pidio quitar el 2FA (perdio el telefono): se quita al USAR el enlace, no al pedirlo (mientras tanto
+    # la contrasena vieja sigue sirviendo y la cuenta no debe quedar con un solo factor)
+    reset_2fa: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
 
 
 class AuditLog(Base):

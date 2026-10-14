@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 from datetime import UTC, datetime
 
 import httpx
@@ -11,6 +12,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import EmailOutbox, Tenant
+
+# Correos que llevan una llave de entrada (invitaciones, enlaces de contrasena) o avisan de un cambio de credenciales.
+# Nunca van en copia al BCC de la empresa (seria robo de cuenta: el enlace le llegaria tambien a contabilidad), el
+# enlace se borra del HTML guardado despues de enviarlo (el respaldo exporta email_outbox) y el worker no los
+# reintenta (su HTML ya no sirve): el admin usa "Reenviar".
+SENSITIVE_ENTITIES = frozenset({"invitation", "password_reset", "user_security"})
+_LINK_TOKEN = re.compile(r"(/(?:invitacion|restablecer)/)[A-Za-z0-9_\-]{16,}")
+
+
+def redact_links(html: str) -> str:
+    return _LINK_TOKEN.sub(r"\1[oculto]", html or "")
+
+
+def mail_configured() -> bool:
+    return bool(os.getenv("RESEND_API_KEY"))
 
 
 def queue_email(
@@ -26,11 +42,14 @@ def queue_email(
 ) -> EmailOutbox:
     """files son los adjuntos reales (nombre, bytes); no se guardan en la BD, solo viajan con el envio.
     attachments es la descripcion que queda en la bitacora de salida."""
-    bcc = ",".join((tenant.settings or {}).get("bcc") or []) or None
+    sensitive = entity in SENSITIVE_ENTITIES
+    bcc = None if sensitive else (",".join((tenant.settings or {}).get("bcc") or []) or None)
     m = EmailOutbox(tenant_id=tenant.id, to=to, bcc=bcc, subject=subject, html=html, attachments=attachments or [], entity=entity, entity_id=entity_id)
     db.add(m)
     db.flush()
     deliver(m, files)
+    if sensitive:
+        m.html = redact_links(m.html)  # el correo real ya salio con el enlace; lo guardado no lo tiene
     return m
 
 

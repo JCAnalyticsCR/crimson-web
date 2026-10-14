@@ -47,7 +47,7 @@ def _seed_mas(client, db_session):
 
 
 def _counts(conn) -> dict[str, int]:
-    return {t.name: conn.execute(sa.select(sa.func.count()).select_from(t)).scalar_one() for t in Base.metadata.sorted_tables if t.name != "refresh_token"}
+    return {t.name: conn.execute(sa.select(sa.func.count()).select_from(t)).scalar_one() for t in Base.metadata.sorted_tables if t.name not in bk.SKIP_TABLES}
 
 
 def test_ida_y_vuelta_toda_la_base(client, auth, db_session, tmp_path):

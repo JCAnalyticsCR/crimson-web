@@ -1,40 +1,40 @@
-/* Ajustes (plan 3.8): empresa, facturacion, pagos (metodos manuales, cuentas, pasarelas), usuarios, cuenta/2FA, correo saliente. */
+/* Ajustes (plan 3.8): empresa, facturacion, pagos (metodos manuales, cuentas, pasarelas), usuarios (settings/UsersTab.tsx), cuenta/2FA, correo saliente. */
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate } from "../lib/api";
 import { useSession } from "../app/session";
-import { roleMeta } from "../app/roles";
-import RoleMatrix from "../app/RoleMatrix";
 import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../ui/components";
 import { ImageField } from "../ui/MediaPicker";
 import { SlaSettings } from "./support/SlaTable";
 import { Bitacora } from "./Bitacora";
 import DataExport from "./tools/DataExport";
+import UsersTab from "./settings/UsersTab";
 
 type Group = { id: number; doc_type: string; prefix: string; branch: string; terminal: string; current: number; is_default: boolean };
 type Cfg = { prevent_negative_stock?: boolean; reservation_auto_approve_units?: number; reservation_days?: number; labor_day_cost?: number; labor_day_cost_civil?: number; labor_day_cost_contratado?: number; per_diem_cost?: number; travel_cost?: number; max_discount_pct?: number; archive_purge_days?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; notify_due: boolean; remind_days_before: number; daily_close_email: boolean; bcc: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
 type Bank = { id: number; name: string; bank: string | null; currency: string; number: string | null; active: boolean };
-type Users = { users: { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null }[]; invitations: { id: number; email: string; role: string; expires_at: string }[]; roles: string[]; cost_roles: string[]; cost_role_choices: string[] };
 type Gw = { id: number; provider: string; client_id: string | null; secret_mask: string | null; is_primary: boolean; active: boolean; mode: string; webhook_secret_set: boolean };
 type OnvoStatus = { configured: boolean; source: "ajustes" | "entorno" | null; mode: "test" | "live" | null; webhook_secret: boolean; webhook_url: string; active: boolean; problems: string[] };
 /* Llaves largas (onvo_test_publishable_key_…) rompian la tabla: prefijo + ultimos 4; la completa queda en el title. */
 const shortKey = (k: string | null) => (!k ? "—" : k.length <= 24 ? k : `${k.slice(0, k.includes("_key_") ? k.indexOf("_key_") + 5 : 12)}…${k.slice(-4)}`);
 type Mail = { id: number; to: string; subject: string; status: string; entity: string | null; entity_id: number | null; created_at: string; error: string | null };
 
-const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["pagos", "Pagos y cobros"], ["inventario", "Inventario"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"], ["bandeja", "Bandeja XML"], ["sla", "SLA"], ["soporte", "Soporte"], ["api", "API"], ["bitacora", "Bitácora"], ["respaldo", "Respaldo"]];
+/* Las claves no cambian (los enlaces ?tab= siguen sirviendo). "Soporte" chocaba con el menú Soporte (tickets) y
+   Andrés creyó que era una conexión con Fygaro (03:31); la Bandeja XML la mezcló con el correo que sale (03:46). */
+const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["pagos", "Pagos y cobros"], ["inventario", "Inventario"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"], ["bandeja", "XML de proveedores"], ["sla", "SLA"], ["soporte", "Acceso de soporte"], ["api", "API"], ["bitacora", "Bitácora"], ["respaldo", "Respaldo"]];
 
 export default function Settings() {
   const { me, reload, toast, allows } = useSession();
   const [params, setParams] = useSearchParams();
   const full = allows("settings.ver");
-  // la bitacora es solo de administracion (settings.configurar); el resto de Ajustes con settings.ver
-  const tabs = full ? TABS.filter(([k]) => k !== "bitacora" || allows("settings.configurar")) : TABS.filter(([k]) => k === "cuenta");
+  // la bitacora y el acceso de soporte son solo de administracion (settings.configurar: sus endpoints lo exigen);
+  // el resto de Ajustes con settings.ver
+  const tabs = full ? TABS.filter(([k]) => (k !== "bitacora" && k !== "soporte") || allows("settings.configurar")) : TABS.filter(([k]) => k === "cuenta");
   const tab = full ? params.get("tab") || "empresa" : "cuenta";
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [groups, setGroups] = useState<Group[]>([]);
   const [banksSt, setBanks] = useState<Bank[] | null>(null); // null = cargando
   const banks = banksSt ?? [];
-  const [users, setUsers] = useState<Users | null>(null);
   const [gwsSt, setGws] = useState<Gw[] | null>(null); // null = cargando
   const gws = gwsSt ?? [];
   const [mailsSt, setMails] = useState<Mail[] | null>(null); // null = cargando
@@ -42,9 +42,6 @@ export default function Settings() {
   const [company, setCompany] = useState({ name: "", legal_name: "", tax_id: "", default_currency: "CRC", sector: "", logo_url: "" });
   const [totp, setTotp] = useState<{ secret: string; otpauth_uri: string } | null>(null);
   const [code, setCode] = useState("");
-  const [invite, setInvite] = useState<{ email: string; role: string } | null>(null);
-  const [inviteLink, setInviteLink] = useState<string | null>(null);
-  const [inviteMailed, setInviteMailed] = useState(false);
   const [bank, setBank] = useState<{ id?: number; name: string; bank: string; currency: string; number: string; active: boolean } | null>(null);
   const [gw, setGw] = useState<{ provider: string; client_id: string; secret: string; webhook_secret: string; is_primary: boolean; active: boolean; mode: string } | null>(null);
   const [onvoSt, setOnvoSt] = useState<OnvoStatus | null>(null);
@@ -58,7 +55,7 @@ export default function Settings() {
   const load = () => {
     if (!allows("settings.ver")) return;
     api<Cfg>("/settings").then(setCfg); api<Group[]>("/billing-groups").then(setGroups); api<Bank[]>("/settings/bank-accounts").then(setBanks);
-    api<Users>("/settings/users").then(setUsers); api<Gw[]>("/settings/gateways").then(setGws); api<Mail[]>("/settings/outbox").then(setMails);
+    api<Gw[]>("/settings/gateways").then(setGws); api<Mail[]>("/settings/outbox").then(setMails);
     api<OnvoStatus>("/settings/gateways/onvo/status").then(setOnvoSt).catch(() => {});
   };
   const testOnvo = async () => {
@@ -77,9 +74,6 @@ export default function Settings() {
   const saveGroup = (g: Group) => api(`/settings/billing-groups/${g.id}`, { method: "PUT", json: { prefix: g.prefix, branch: g.branch, terminal: g.terminal, current: g.current, is_default: g.is_default } }).then(() => ok("Grupo actualizado")).catch(err);
   const saveBank = () => { if (!bank) return; const { id, ...b } = bank; api(id ? `/settings/bank-accounts/${id}` : "/settings/bank-accounts", { method: id ? "PUT" : "POST", json: b }).then(() => { setBank(null); ok("Cuenta guardada"); }).catch(err); };
   const saveGw = () => { if (!gw) return; api("/settings/gateways", { method: "PUT", json: { ...gw, secret: gw.secret || null, webhook_secret: gw.webhook_secret || null } }).then(() => { setGw(null); ok("Pasarela guardada"); }).catch(err); };
-  const sendInvite = () => { if (!invite) return; api<{ link: string; emailed: boolean }>("/settings/invitations", { method: "POST", json: invite }).then((r) => { setInvite(null); setInviteLink(r.link); setInviteMailed(r.emailed); ok("Invitación creada"); }).catch(err); };
-  const setRole = (uid: number, role: string) => api(`/settings/users/${uid}`, { method: "PATCH", json: { role } }).then(() => ok("Rol actualizado")).catch(err);
-  const setActive = (uid: number, active: boolean) => api(`/settings/users/${uid}`, { method: "PATCH", json: { active } }).then(() => ok(active ? "Usuario activado" : "Usuario desactivado")).catch(err);
   const setup2fa = () => api<{ secret: string; otpauth_uri: string }>("/auth/2fa/setup", { method: "POST" }).then(setTotp).catch(err);
   const verify2fa = () => api<{ codes: string[] }>("/auth/2fa/verify", { method: "POST", json: { code } }).then(async (r) => { await reload(); setTotp(null); setCode(""); setRecovery(r.codes); toast("2FA activado"); }).catch(() => toast("Código inválido", "bad"));
   const disable2fa = () => { if (!apagar) return; api("/auth/2fa/disable", { method: "POST", json: { password: apagar.password } }).then(async () => { await reload(); setApagar(null); toast("2FA desactivado"); }).catch(err); };
@@ -222,25 +216,7 @@ export default function Settings() {
         </div>
       )}
 
-      {tab === "usuarios" && users && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
-        <Card title="Usuarios y roles" flush extra={<button className="btn btn--crimson btn--sm" onClick={() => setInvite({ email: "", role: "ventas" })}><Icon d={I.plus} />Invitar</button>}>
-          <table className="table"><thead><tr><th>Usuario</th><th>Rol</th><th>2FA</th><th>Último acceso</th><th>Estado</th><th /></tr></thead>
-            <tbody>
-              {users.users.map((u) => <tr key={u.id}><td><b>{u.name}</b><div className="meta" style={{ textTransform: "none" }}>{u.email}</div></td><td><select className="select" style={{ height: 32, width: 170 }} value={u.role} onChange={(e) => setRole(u.id, e.target.value)}>{!users.roles.includes(u.role) && <option value={u.role} disabled>{roleMeta(u.role).label}</option>}{users.roles.map((r) => <option key={r} value={r}>{roleMeta(r).label}</option>)}</select></td><td>{u.totp ? <Badge status="confirmado" /> : <span className="muted">—</span>}</td><td className="muted">{u.last_login ? fmtDate(u.last_login.slice(0, 10)) : "nunca"}</td><td><Badge status={u.active ? "confirmado" : "anulada"} /></td><td className="num">{u.id !== me?.user.id && <button className="btn btn--ghost btn--sm" onClick={() => setActive(u.id, !u.active)}>{u.active ? "Desactivar" : "Activar"}</button>}</td></tr>)}
-              {users.invitations.map((i) => <tr key={`i${i.id}`}><td><b>{i.email}</b><div className="meta">invitación pendiente</div></td><td className="muted">{roleMeta(i.role).label}</td><td>—</td><td className="muted">vence {fmtDate(i.expires_at.slice(0, 10))}</td><td><Badge status="pendiente" /></td><td /></tr>)}
-            </tbody></table>
-          <p className="muted" style={{ padding: "10px 18px", fontSize: 12 }}>Cada rol ve solo sus secciones del menú y la API aplica los mismos permisos. Roles: {users.roles.map((r) => roleMeta(r).label).join(" · ")}. Los usuarios de aliados y de clientes no se invitan desde aquí: se dan de alta desde la empresa aliada o desde Accesos de clientes.</p>
-        </Card>
-        {allows("settings.configurar") && <CostRoles key={users.cost_roles.join(",")} current={users.cost_roles} choices={users.cost_role_choices} onSaved={() => api<Users>("/settings/users").then(setUsers)} />}
-        {me?.role === "admin" && (
-          <Card title="Qué ve cada rol" extra={<span className="meta">sale del código: menú y permisos</span>}>
-            <p className="muted" style={{ fontSize: 12.5, marginTop: 0 }}>Operación, Técnico, Catálogo y Administración son grupos del menú, no roles. Para ver el panel exactamente como lo ve una persona, usá «Ver como» arriba a la derecha.</p>
-            <RoleMatrix />
-          </Card>
-        )}
-        </div>
-      )}
+      {tab === "usuarios" && <UsersTab />}
 
       {tab === "cuenta" && (
         <div className="grid-2">
@@ -283,7 +259,7 @@ export default function Settings() {
       {tab === "api" && <ApiCreds />}
       {tab === "bandeja" && <InboxSettings />}
       {tab === "sla" && <SlaSettings />}
-      {tab === "soporte" && <SupportAccess />}
+      {tab === "soporte" && allows("settings.configurar") && <SupportAccess />}
       {tab === "bitacora" && allows("settings.configurar") && <Bitacora />}
       {tab === "respaldo" && <DataExport />}
 
@@ -349,49 +325,7 @@ export default function Settings() {
         </div>
         <div style={{ display: "flex", gap: 16, fontSize: 13 }}><label style={{ display: "flex", gap: 8 }}><input type="checkbox" checked={gw.is_primary} onChange={(e) => setGw({ ...gw, is_primary: e.target.checked })} />Principal</label><label style={{ display: "flex", gap: 8 }}><input type="checkbox" checked={gw.active} onChange={(e) => setGw({ ...gw, active: e.target.checked })} />Activa</label></div>
       </Modal>}
-      {invite && <Modal title="Invitar usuario" onClose={() => setInvite(null)} foot={<><button className="btn btn--ghost" onClick={() => setInvite(null)}>Cancelar</button><button className="btn btn--crimson" onClick={sendInvite}>Enviar invitación</button></>}>
-        <Field label="Correo"><input className="input" type="email" value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} /></Field>
-        <Field label="Rol" hint={roleMeta(invite.role).summary}><select className="select" value={invite.role} onChange={(e) => setInvite({ ...invite, role: e.target.value })}>{users?.roles.map((r) => <option key={r} value={r}>{roleMeta(r).label}</option>)}</select></Field>
-      </Modal>}
-      {inviteLink && <Modal title="Invitación creada" onClose={() => setInviteLink(null)} foot={<button className="btn btn--ghost" onClick={() => setInviteLink(null)}>Cerrar</button>}>
-        <p className="muted" style={{ fontSize: 13 }}>{inviteMailed ? "Se envió por correo. También podés compartir el enlace directamente; vence en 7 días." : "El correo no salió (el envío de correos todavía no está activo). Compartí este enlace directamente; vence en 7 días."}</p>
-        <div className="search" style={{ maxWidth: "none" }}><Icon d={I.link} size={16} /><input readOnly value={inviteLink} onFocus={(e) => e.currentTarget.select()} /></div>
-        <button className="btn btn--soft" style={{ alignSelf: "flex-start" }} onClick={() => { navigator.clipboard.writeText(inviteLink); toast("Enlace copiado"); }}><Icon d={I.copy} />Copiar</button>
-      </Modal>}
     </>
-  );
-}
-
-/* "Quién ve costos" (13/10, 08:07: "eso solo lo puede ver el administrador"). Por defecto nadie más; el admin puede
-   habilitar a supervisor, contador, bodega o solo lectura sin desplegar. Ventas, caja, técnicos y aliados: nunca. */
-function CostRoles({ current, choices, onSaved }: { current: string[]; choices: string[]; onSaved: () => void }) {
-  const { toast, reloadMatrix } = useSession();
-  const [sel, setSel] = useState<string[]>(current);
-  const [busy, setBusy] = useState(false);
-  const changed = sel.length !== current.length || sel.some((r) => !current.includes(r));
-  const save = async () => {
-    setBusy(true);
-    try {
-      await api("/settings", { method: "PUT", json: { cost_roles: sel } });
-      toast(sel.length ? `Listo: además del administrador, ven costos: ${sel.map((r) => roleMeta(r).label).join(", ")}` : "Listo: los costos los ve solo el administrador");
-      onSaved(); reloadMatrix();
-    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
-    finally { setBusy(false); }
-  };
-  return (
-    <Card title="Quién ve costos y márgenes">
-      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>El costo del proveedor, el margen y la utilidad los ve solo el administrador. Si querés que otro rol también los vea, marcalo. Gastos, facturas de proveedor y planillas no cuentan aquí: son de Contabilidad.</p>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 18px", marginBottom: 12 }}>
-        {choices.map((r) => (
-          <label key={r} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13.5 }}>
-            <input type="checkbox" checked={sel.includes(r)} onChange={(e) => setSel(e.target.checked ? [...sel, r] : sel.filter((x) => x !== r))} />
-            {roleMeta(r).label}
-          </label>
-        ))}
-      </div>
-      <p className="muted" style={{ fontSize: 12, margin: "0 0 12px" }}>Aplica en la siguiente acción de cada persona (al recargar la página); no hace falta que cierre sesión.</p>
-      <button className="btn btn--crimson btn--sm" onClick={save} disabled={busy || !changed}>{busy ? "Guardando…" : "Guardar"}</button>
-    </Card>
   );
 }
 
@@ -409,6 +343,7 @@ function ApiCreds() {
   return (
     <div className="grid-2">
       <Card title="Credenciales de API" flush extra={<button className="btn btn--crimson btn--sm" onClick={() => setForm({ name: "", webhook_url: "" })}><Icon d={I.plus} />Crear</button>}>
+        <p className="muted" style={{ fontSize: 12.5, margin: 0, padding: "10px 18px 0" }}>Solo sirve para conectar otros sistemas (la página web, un ERP, Power BI). Si no estás conectando nada, no hace falta tocarla.</p>
         {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Para integrar el sitio web, un ERP o Power BI con la plataforma." /> : (
           <table className="table"><thead><tr><th>Nombre</th><th>Public key</th><th>Último uso</th><th>Estado</th><th /></tr></thead>
             <tbody>{items.map((c) => <tr key={c.id}><td style={{ fontWeight: 600 }}>{c.name}{c.webhook_url && <div className="meta" style={{ textTransform: "none" }}>{c.webhook_url}</div>}</td><td className="mono muted">{c.kid}</td><td className="muted">{c.last_used_at ? fmtDate(c.last_used_at.slice(0, 10)) : "nunca"}</td><td><Badge status={c.active ? "confirmado" : "anulada"} /></td><td className="num">{c.active && <button className="btn btn--danger btn--sm" onClick={() => revoke(c)}>Revocar</button>}</td></tr>)}</tbody></table>
@@ -441,7 +376,8 @@ POST /api/v1/checkout   { token: JWT HS256, kid }`}</code>
 /* ---------- Bandeja IMAP: XML de proveedores entran solos a Recepcion ---------- */
 type Inbox = { enabled: boolean; host: string; port: number; user: string; folder: string; has_password: boolean; last_run: string | null; last_result: { messages: number; nuevos: number; duplicados: number; ignorados: number; errores: string[] } | null };
 function InboxSettings() {
-  const { toast } = useSession();
+  const { toast, allows } = useSession();
+  const navigate = useNavigate();
   const [cfg, setCfg] = useState<Inbox | null>(null);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -457,12 +393,23 @@ function InboxSettings() {
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
     finally { setBusy(false); }
   };
+  const activo = cfg.enabled && cfg.has_password;
   return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+    <Card title="¿Para qué sirve esta pestaña?">
+      <ol className="muted" style={{ fontSize: 13, lineHeight: 1.7, paddingLeft: 18, margin: 0 }}>
+        <li>Para <b>recibir</b> solas las facturas electrónicas (XML) que te mandan tus <b>proveedores</b>: lo que Crimson compra (equipos, materiales, servicios).</li>
+        <li>La plataforma revisa cada 15 minutos un buzón de correo dedicado; cada XML que llega aparece en <b>Administración → Recepción XML</b>, listo para revisarlo y registrarlo como gasto.</li>
+        <li><b>No envía correos ni tiene que ver con Resend.</b> El correo que sale de la plataforma (invitaciones, cotizaciones, facturas) se configura en la pestaña <b>Correo</b>.</li>
+        <li><b>Es opcional.</b> Mientras no lo configurés, podés subir los XML a mano en Recepción XML.</li>
+      </ol>
+      {allows("accounting.ver") && <button className="btn btn--soft btn--sm" style={{ marginTop: 12 }} onClick={() => navigate("/recepcion")}>Abrir Recepción XML</button>}
+    </Card>
     <div className="grid-2">
-      <Card title="Buzón de facturas de proveedores">
+      <Card title="Buzón de facturas de proveedores" extra={<span className="meta" style={{ color: activo ? "var(--ok)" : "var(--text-3)" }}>{activo ? "● Activo · revisa cada 15 min" : "● Apagado"}</span>}>
         <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13, marginBottom: 12 }}><input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} />Revisar automáticamente cada 15 minutos</label>
         <div className="grid-2">
-          <Field label="Servidor IMAP"><input className="input" placeholder="imap.gmail.com" value={cfg.host} onChange={(e) => setCfg({ ...cfg, host: e.target.value })} /></Field>
+          <Field label="Servidor IMAP"><input className="input" placeholder="mail.tudominio.com o imap.gmail.com" value={cfg.host} onChange={(e) => setCfg({ ...cfg, host: e.target.value })} /></Field>
           <Field label="Puerto (SSL)"><input className="input input--mono" value={cfg.port} onChange={(e) => setCfg({ ...cfg, port: Number(e.target.value) || 993 })} /></Field>
           <Field label="Usuario"><input className="input" placeholder="facturas@empresa.com" value={cfg.user} onChange={(e) => setCfg({ ...cfg, user: e.target.value })} /></Field>
           <Field label="Contraseña de aplicación" hint={cfg.has_password ? "Guardada cifrada. Dejá vacío para conservarla." : "Se guarda cifrada."}><input className="input" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
@@ -488,6 +435,7 @@ function InboxSettings() {
         )}
       </Card>
     </div>
+    </div>
   );
 }
 
@@ -512,8 +460,8 @@ function SupportAccess() {
   const tone = (s: string) => (s === "activo" ? "ok" : s === "revocado" ? "bad" : "muted");
   return (
     <div className="grid-2">
-      <Card title="Accesos de soporte" flush extra={<button className="btn btn--crimson btn--sm" onClick={() => setForm({ email: "", hours: 24, reason: "" })}><Icon d={I.plus} />Conceder</button>}>
-        {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty title="Sin accesos" hint="Nadie externo puede ver tu información salvo que lo autorices aquí." /> : (
+      <Card title="Acceso de soporte técnico" flush extra={<button className="btn btn--crimson btn--sm" onClick={() => setForm({ email: "", hours: 24, reason: "" })}><Icon d={I.plus} />Dar acceso temporal</button>}>
+        {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty title="Sin accesos" hint="Nadie externo tiene acceso. Concedé uno solo cuando soporte te lo pida para revisar un problema." /> : (
           <table className="table"><thead><tr><th>Persona</th><th>Vence</th><th>Estado</th><th className="num">Acciones</th><th /></tr></thead>
             <tbody>{items.map((g) => (
               <tr key={g.id}>
@@ -526,10 +474,16 @@ function SupportAccess() {
             ))}</tbody></table>
         )}
       </Card>
-      <Card title="Cómo funciona">
-        <p className="muted" style={{ fontSize: 13, lineHeight: 1.7, margin: 0 }}>Concedé acceso de <b>solo lectura</b> por horas a una persona de soporte (por ejemplo, JC Analytics). Cada pantalla que abra queda registrada en la bitácora con fecha, ruta e IP. Al vencer o al revocarlo, su sesión se corta de inmediato. No puede crear, editar ni anular nada.</p>
+      <Card title="¿Qué es esto?">
+        <ol className="muted" style={{ fontSize: 13, lineHeight: 1.7, paddingLeft: 18, margin: 0 }}>
+          <li><b>No es una conexión con Fygaro ni con ningún otro sistema.</b> Desde aquí no se conecta nada.</li>
+          <li>Sirve para que, cuando reportés un problema, una persona del equipo técnico que mantiene la plataforma (por ejemplo, JC Analytics) entre a revisarlo <b>sin que le prestés tu contraseña</b>.</li>
+          <li>Es de <b>solo lectura</b>, dura las horas que elijas y lo podés revocar cuando quieras. Cada pantalla que abra queda en la bitácora con fecha, ruta e IP.</li>
+          <li><b>Si no lo necesitás, no tenés que hacer nada</b>: mientras no concedas un acceso aquí, nadie externo puede entrar a tu información.</li>
+          <li>No es la mesa de ayuda de tus clientes: los tickets de tus clientes están en el menú <b>Soporte</b>.</li>
+        </ol>
       </Card>
-      {form && <Modal title="Conceder acceso de soporte" onClose={() => setForm(null)} foot={<><button className="btn btn--ghost" onClick={() => setForm(null)}>Cancelar</button><button className="btn btn--crimson" onClick={grant} disabled={!form.email || form.reason.length < 5}>Conceder</button></>}>
+      {form && <Modal title="Dar acceso temporal de soporte técnico" onClose={() => setForm(null)} foot={<><button className="btn btn--ghost" onClick={() => setForm(null)}>Cancelar</button><button className="btn btn--crimson" onClick={grant} disabled={!form.email || form.reason.length < 5}>Dar acceso temporal</button></>}>
         <Field label="Correo de la persona"><input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
         <div className="grid-2">
           <Field label="Duración"><select className="select" value={form.hours} onChange={(e) => setForm({ ...form, hours: Number(e.target.value) })}>{[[2, "2 horas"], [8, "8 horas"], [24, "1 día"], [72, "3 días"], [168, "7 días"]].map(([h, l]) => <option key={h} value={h}>{l}</option>)}</select></Field>
@@ -646,6 +600,7 @@ function MailStatus({ onSent }: { onSent: () => void }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <div><span className="meta">Sale desde</span> <b>{st.sender}</b>{st.reply_to && <> · <span className="meta">respuestas a</span> {st.reply_to}</>}</div>
         <p className="muted" style={{ margin: 0 }}>{motivo}</p>
+        <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>Este es el correo que <b>sale</b> de la plataforma. Para <b>recibir</b> facturas de proveedores, mirá la pestaña XML de proveedores.</p>
         {allows("settings.configurar") && <button className="btn btn--soft" style={{ alignSelf: "flex-start" }} disabled={busy} onClick={probar}>Enviar prueba a mi correo</button>}
       </div>
     </Card>

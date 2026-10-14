@@ -31,8 +31,9 @@ from sqlalchemy.sql.ddl import sort_tables_and_constraints
 
 FORMAT = "crimson-backup"
 FORMAT_VERSION = 1
-# sesiones: no se respaldan nunca (tras restaurar todos vuelven a iniciar sesion)
-SKIP_TABLES = {"refresh_token", "alembic_version"}
+# sesiones y enlaces de contrasena: credenciales efimeras, no se respaldan nunca (tras restaurar todos vuelven a
+# iniciar sesion y los enlaces de restablecer pendientes se piden de nuevo)
+SKIP_TABLES = {"refresh_token", "password_reset", "alembic_version"}
 # tablas sin dueno: en un respaldo de UNA empresa entran completas (son datos de referencia)
 GLOBAL_FULL = {"role", "exchange_rate"}
 # tablas sin dueno que en un respaldo de empresa solo entran si algo de la empresa las referencia

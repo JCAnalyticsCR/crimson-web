@@ -4,7 +4,8 @@ import { canAny, inRoleMenu, type Perms } from "./roles";
 
 type Session = {
   me: Me | null; loading: boolean;
-  login: (email: string, password: string, totp?: string) => Promise<void>; logout: () => Promise<void>; reload: () => Promise<void>;
+  /** newPassword: entró con una contraseña temporal (Ajustes → Usuarios → Restablecer) y crea la suya en el mismo login. */
+  login: (email: string, password: string, totp?: string, newPassword?: string) => Promise<void>; logout: () => Promise<void>; reload: () => Promise<void>;
   theme: string; toggleTheme: () => void; toast: (msg: string, tone?: "ok" | "bad", action?: ToastAction) => void;
   /** Rol con el que se dibuja la interfaz (el real, o el que el admin esta previsualizando). */
   role: string; perms: Perms; allows: (need?: string) => boolean;
@@ -56,8 +57,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     try { if (r) sessionStorage.setItem("crimson-view-as", r); else sessionStorage.removeItem("crimson-view-as"); } catch { /* privado */ }
   };
 
-  const login = async (email: string, password: string, totp?: string) => {
-    const r = await api<{ access_token: string }>("/auth/login", { method: "POST", json: { email, password, totp_code: totp || null } });
+  const login = async (email: string, password: string, totp?: string, newPassword?: string) => {
+    const r = await api<{ access_token: string }>("/auth/login", { method: "POST", json: { email, password, totp_code: totp || null, new_password: newPassword || null } });
     auth.set(r.access_token);
     setViewAs(null);
     try { sessionStorage.setItem("crimson-welcome", "1"); } catch { /* privado */ }
