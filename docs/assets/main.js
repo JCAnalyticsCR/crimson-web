@@ -238,7 +238,7 @@
   // Cuadro 1.85:1 con el video VERTICAL centrado a tamano real (sin zoom): mismos fotogramas que movil
   // Video 16:9 (banda reencuadrada del vertical que sigue al sujeto) en el lado derecho, sin zoom de mas
   // Casilla 16:9 a la derecha; adentro el plano VERTICAL completo (sin recorte ni ampliacion), como un monitor
-  const wideSet = { path: 'assets/frames/wide', ratio: '1.7778', w: 1280, h: 720, frames: 90, ver: '?v=2' }; // clip 16:9 editado por el cliente (se congela del 9 s en adelante)
+  const wideSet = { path: 'assets/frames/wide', ratio: '1.7778', w: 1280, h: 720, frames: 90, ver: '?v=3' }; // clip 16:9 editado por el cliente (v3: etiquetas con el nombre del lugar difuminadas) (se congela del 9 s en adelante)
   // La escena panoramica la decide el CSS (>=768px) desde el primer pintado; antes la decidia esta linea y el
   // cambio de #hero a .hero--d al llegar el JS era un layout shift de 1.0 en 1920x1080. ?hero=net compara con la red.
   if (q.get('hero') === 'net') document.body.classList.add('net-hero');
@@ -373,7 +373,7 @@
     }
     window.__scene = { go: p => { stop(); target = current = p; lastLow = -1; lastP = -1; draw(p); applyCopy(p); }, loaded: () => settled };
   };
-  if (isMobile.matches && $('#hero-m.scene')) mountScene($('#hero-m.scene'), 'assets/frames/hero', 88);
+  if (isMobile.matches && $('#hero-m.scene')) mountScene($('#hero-m.scene'), 'assets/frames/hero', 88, '?v=2'); // v2: etiquetas con el nombre del lugar difuminadas
   else if (useWide) mountScene($('#hero-d.scene'), wideSet.path, wideSet.frames, wideSet.ver);
   // Titular de la escena (ya no esta arriba): la entrada por lineas corre cuando el borde superior de la escena
   // cruza el 20 % superior de la pantalla, no al cargar la pagina (si no, terminaria sin que nadie la viera)
