@@ -351,6 +351,11 @@ def convert_to_ally(aid: int, data: ToAllyIn | None = None, p: Principal = Depen
 @router.delete("/opportunity-allies/{aid}")
 def remove_ally(aid: int, p: Principal = Depends(require("crm_pipeline", "editar")), db: Session = Depends(get_db)):
     a, o = _ally(db, aid, p)
+    from ..services import commissions as comsvc
+
+    if comsvc.has_live_movements(db, participation=a):
+        raise HTTPException(409, "Tiene movimientos de comisión: anulalos primero en Comisiones")
+    comsvc.drop_participation_rules(db, a)  # su acuerdo economico (reglas por proyecto) se va con la participacion
     n = len(a.requests)
     _log(o, p.user.full_name, f"Aliado {a.name} quitado" + (f" (con {n} solicitud(es) de costo)" if n else ""))
     audit(db, p.tenant.id, p.user.id, "ally_remove", "opportunity", o.id, {"ally_id": a.id, "name": a.name, "requests": n}, ip=p.ip)
@@ -459,6 +464,7 @@ def update_request(rid: int, data: CostRequestIn, p: Principal = Depends(require
         _check_status(p, data.status)
     if r.status in ("aprobado", "rechazado") and not p.sees_costs:
         raise HTTPException(403, "Esa solicitud ya fue resuelta por quien ve costos")
+    antes_status, antes_amount = r.status, r.amount
     cambios = []
     if data.status != r.status:
         cambios.append(f"{STATE_LABEL[r.status]} → {STATE_LABEL[data.status]}")
@@ -475,6 +481,10 @@ def update_request(rid: int, data: CostRequestIn, p: Principal = Depends(require
     if cambios:
         _log(o, p.user.full_name, f"Solicitud de costo «{r.what}» de {r.participation.name}: {', '.join(cambios)}")
         audit(db, p.tenant.id, p.user.id, "cost_request_update", "opportunity", o.id, {"request_id": r.id, "cambios": cambios}, ip=p.ip)
+    from ..services import commissions as comsvc
+
+    # el precio aprobado es el pago acordado del aliado: aprobarlo, cambiarlo o desaprobarlo mueve su libro
+    comsvc.on_cost_request_change(db, r, antes_status, antes_amount)
     db.commit()
     return _list(db, o, p)
 
@@ -484,6 +494,10 @@ def remove_request(rid: int, p: Principal = Depends(require("crm_pipeline", "edi
     r, o = _request(db, rid, p)
     if r.status in ("aprobado", "rechazado") and not p.sees_costs:
         raise HTTPException(403, "Esa solicitud ya fue resuelta por quien ve costos")
+    from ..services import commissions as comsvc
+
+    if comsvc.has_live_movements(db, request=r):
+        raise HTTPException(409, "Tiene movimientos de comisión: anulalos primero en Comisiones")
     _log(o, p.user.full_name, f"Solicitud de costo «{r.what}» de {r.participation.name} eliminada")
     audit(db, p.tenant.id, p.user.id, "cost_request_remove", "opportunity", o.id, {"request_id": r.id}, ip=p.ip)
     db.delete(r)

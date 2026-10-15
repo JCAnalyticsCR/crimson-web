@@ -415,6 +415,9 @@ def void_quote(qid: int, p: Principal = Depends(require("sales", "anular")), db:
     if q.status == "convertida":
         raise HTTPException(409, "Una cotizacion convertida no se anula; anule la factura")
     q.status = "anulada"
+    from ..services import commissions as comsvc
+
+    comsvc.on_quote_void(db, q, p.user.id)
     audit(db, p.tenant.id, p.user.id, "void", "quote", q.id, ip=p.ip)
     db.commit()
     return _quote_out(db, q, p)
@@ -557,6 +560,9 @@ def quote_acceptance(qid: int, data: AcceptanceIn, p: Principal = Depends(requir
     antes = q.acceptance_status
     q.acceptance_status = data.status
     q.accepted_version = v.version if data.status == "aceptada" else None
+    from ..services import commissions as comsvc
+
+    comsvc.on_quote_acceptance(db, q, antes, data.status, data.decided_on)
     audit(
         db,
         p.tenant.id,
@@ -672,6 +678,9 @@ def void_invoice(iid: int, p: Principal = Depends(require("sales", "anular")), d
         raise HTTPException(409, "Factura aceptada por Hacienda: se anula emitiendo Nota de Credito (Fase 2)")
     inv.status = "anulada"
     invsvc.restock_for_void(db, inv, p.user.id)
+    from ..services import commissions as comsvc
+
+    comsvc.on_invoice_void(db, inv, p.user.id)  # lo devengado de una factura anulada se anula o se revierte (falla E)
     audit(db, p.tenant.id, p.user.id, "void", "invoice", inv.id, ip=p.ip)
     db.commit()
     return _inv_out(db, inv, p)
@@ -799,6 +808,17 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
 
         # misma definicion que Pedidos de la tienda -> Por atender (services.store_orders.attention_where)
         pend["pedidos_web"] = web_orders_pending(db, p)
+    if p.can("commissions", "aprobar"):
+        from ..services.commissions import approvals_count
+
+        pend["comisiones_por_aprobar"] = approvals_count(db, p)
+    comisiones = None
+    if p.can("commissions", "ver") and not p.can("commissions", "ver_todo") and p.ally_company_id is None:
+        from ..services.commissions import summary_for_user
+
+        # "va a poder ver cuanto esta ganando en tiempo real" (13/10 34:35): la misma cuenta que Mis comisiones
+        r = summary_for_user(db, p.tenant, p.user.id, m0, today, p)
+        comisiones = {"ganado_mes": r["ganado"]["total"], "pagado_mes": r["pagado"], "por_cobrar": r["por_cobrar"]["total"], "moneda": "CRC"}
     ceo = _ceo_row(db, p) if p.can("dashboard", "empresa") else None
     mi_embudo = None
     if mine and p.can("crm_pipeline", "ver"):
@@ -862,6 +882,7 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
             **pend,
             "stock_bajo": len(invsvc.low_stock(db, tid)),
         },
+        "comisiones": comisiones,
     }
 
 
@@ -871,7 +892,7 @@ def _ceo_row(db: Session, p: Principal) -> dict:
 
     from ..models import CustomerAsset, Opportunity, Project, WorkOrder
     from ..routers.pipeline import OPEN_STATES
-    from ..routers.projects import consumed_cost
+    from ..routers.projects import direct_cost, price_crc
     from ..services import pricing
     from ..services.archive import live
 
@@ -893,11 +914,13 @@ def _ceo_row(db: Session, p: Principal) -> dict:
     utilidad = None
     if p.sees_costs:
         # un cerrado sin costos registrados no es ganancia: queda fuera de la utilidad del mes hasta que se registren
-        costos = {x.id: consumed_cost(db, x) + d(x.cost_labor) + d(x.cost_travel) + d(x.cost_extra) for x in closed}
+        # misma cuenta que la ficha del proyecto (projects.economics): incluye aliados y la venta en colones
+        costos = {x.id: direct_cost(db, x) for x in closed}
         sin_costos = [x for x in closed if costos[x.id] <= 0]
         closed_cost = [x for x in closed if costos[x.id] > 0]
-        profit = sum((d(x.price) - costos[x.id] for x in closed_cost), Decimal(0))
-        venta = sum((d(x.price) for x in closed_cost), Decimal(0))
+        ventas = {x.id: price_crc(db, x) for x in closed_cost}
+        profit = sum((ventas[x.id] - costos[x.id] for x in closed_cost), Decimal(0))
+        venta = sum(ventas.values(), Decimal(0))
         utilidad = {
             "profit_month": profit.quantize(Decimal("0.01")),
             "margin_month": pricing.margin_of(venta, venta - profit),

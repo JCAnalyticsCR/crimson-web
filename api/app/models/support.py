@@ -149,9 +149,7 @@ class CommissionRule(TenantMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
     beneficiary: Mapped[str] = mapped_column(String(10), default="vendedor", server_default="vendedor")  # vendedor | aliado
     ally_company_id: Mapped[int | None] = mapped_column(ForeignKey("ally_company.id", name="fk_crule_ally_company"), index=True)
-    participation_id: Mapped[int | None] = mapped_column(
-        ForeignKey("ally_participation.id", ondelete="CASCADE", name="fk_crule_participation"), index=True
-    )
+    participation_id: Mapped[int | None] = mapped_column(ForeignKey("ally_participation.id", ondelete="CASCADE", name="fk_crule_participation"), index=True)
     kind: Mapped[str] = mapped_column(String(14), default="comision", server_default="comision")  # comision | bono_fin | bono_anticipo
     trigger: Mapped[str] = mapped_column(String(20), default="cobro", server_default="cobro")  # cuando se devenga
     deal_kind: Mapped[str | None] = mapped_column(String(12))  # venta | proyecto | None = cualquiera
@@ -189,9 +187,7 @@ class Commission(TenantMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
     beneficiary: Mapped[str] = mapped_column(String(10), default="vendedor", server_default="vendedor")
     ally_company_id: Mapped[int | None] = mapped_column(ForeignKey("ally_company.id", name="fk_comm_ally_company"), index=True)
-    participation_id: Mapped[int | None] = mapped_column(
-        ForeignKey("ally_participation.id", ondelete="SET NULL", name="fk_comm_participation"), index=True
-    )
+    participation_id: Mapped[int | None] = mapped_column(ForeignKey("ally_participation.id", ondelete="SET NULL", name="fk_comm_participation"), index=True)
     kind: Mapped[str] = mapped_column(String(14), default="comision", server_default="comision")  # ENTRY_KINDS
     trigger: Mapped[str] = mapped_column(String(20), default="cobro", server_default="cobro")  # TRIGGERS + manual
     quote_id: Mapped[int | None] = mapped_column(ForeignKey("quote.id", ondelete="SET NULL", name="fk_comm_quote"), index=True)

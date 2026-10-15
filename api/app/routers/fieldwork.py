@@ -2314,7 +2314,12 @@ def apply_order_progress(db: Session, o: WorkOrder, data: ProgressIn, action: st
         if o.project_id:
             pr = _ref(db, Project, o.project_id, o.tenant_id)  # nunca se termina el proyecto de otra empresa
             if pr and all(x.status in CERRADAS for x in pr.orders if x.trashed_at is None) and pr.status != "terminado":
+                antes_pr = pr.status
                 pr.status = "terminado"
+                from ..services import commissions as comsvc
+
+                # completar el proyecto devenga lo "al completar" (lo puede disparar un tecnico: el motor no usa permisos)
+                comsvc.on_project_status(db, pr, antes_pr)
                 horas = sum((order_hours(x)[0] or 0 for x in pr.orders), 0.0)
                 notify_roles(
                     db,
