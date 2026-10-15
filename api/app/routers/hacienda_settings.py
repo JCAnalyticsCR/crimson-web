@@ -228,9 +228,21 @@ def _apply_default(db: Session, p: Principal, a: FiscalActivity) -> None:
 
 @router.post("/settings/hacienda/activities", status_code=201)
 def activity_create(data: ActivityIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
-    if db.scalar(select(FiscalActivity).where(FiscalActivity.tenant_id == p.tenant.id, FiscalActivity.code == data.code)):
+    old = db.scalar(select(FiscalActivity).where(FiscalActivity.tenant_id == p.tenant.id, FiscalActivity.code == data.code))
+    if old is not None and old.active:
         raise HTTPException(409, "Esa actividad ya está en la lista")
     first = not db.scalar(select(FiscalActivity.id).where(FiscalActivity.tenant_id == p.tenant.id, FiscalActivity.active, FiscalActivity.is_default))
+    if old is not None:
+        # "Quitar" solo la desactiva (las respuestas viejas la referencian): agregarla de nuevo la reactiva, misma fila
+        antes = snapshot(old)
+        old.active, old.is_default = True, data.is_default or first
+        if data.description is not None:
+            old.description = data.description
+        _apply_default(db, p, old)
+        _sync_legacy_codes(db, p)
+        audit_change(db, p, "reactivate", "fiscal_activity", old.id, antes, snapshot(old))
+        db.commit()
+        return _activity_out(old)
     a = FiscalActivity(tenant_id=p.tenant.id, code=data.code, description=data.description, is_default=data.is_default or first, active=True)
     db.add(a)
     db.flush()

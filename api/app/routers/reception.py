@@ -625,7 +625,7 @@ def link_expense(rid: int, data: LinkExpenseIn, p: Principal = Depends(require("
 @router.post("/{rid}/attach")
 async def attach(rid: int, file: UploadFile = File(...), p: Principal = Depends(require("accounting", "crear")), db: Session = Depends(get_db)):
     from ..routers.media import save_media
-    from ..services.reception_intake import apply_supplier_response, sniff
+    from ..services.reception_intake import apply_supplier_response, sniff, supplier_response_problem
 
     doc = rsvc.get_doc(db, p.tenant.id, rid)
     data = await _read(file)
@@ -642,8 +642,15 @@ async def attach(rid: int, file: UploadFile = File(...), p: Principal = Depends(
             raise HTTPException(422, "Suba el PDF o la respuesta de Hacienda (MensajeHacienda) de este comprobante")
         if xml44.text(root, "Clave") != doc.clave:
             raise HTTPException(422, "La respuesta de Hacienda es de otra clave")
+        problem = supplier_response_problem(doc, root)
+        if problem:
+            raise HTTPException(422, problem[:1].upper() + problem[1:])
+        antes = (doc.status, doc.supplier_hacienda_status)
+        # reemplaza la que hubiera (p. ej. una llegada por correo) y recalcula el estado: invalido <-> por_revisar
         doc.xml_supplier_response = None
         apply_supplier_response(db, doc, root, xml44.to_utf8_text(data, root))
+        if antes != (doc.status, doc.supplier_hacienda_status):
+            audit(db, p.tenant.id, p.user.id, "supplier_response_replaced", "received_document", doc.id, {"antes": list(antes), "despues": [doc.status, doc.supplier_hacienda_status]}, ip=p.ip)
     else:
         raise HTTPException(422, "Suba un PDF o un XML de respuesta de Hacienda")
     audit(db, p.tenant.id, p.user.id, "reception_attach", "received_document", doc.id, {"tipo": kind}, ip=p.ip)

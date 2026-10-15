@@ -1,23 +1,31 @@
 """Entrega al cliente de lo emitido (Decreto 44739-H art. 18): el XML firmado + el PDF al emitir y, cuando llegue, la
 respuesta de Hacienda. Idempotente por delivered_at / hacienda_delivered_at (el worker puede llamarlo dos veces).
 
+Las marcas se ponen solo cuando TODOS los correos salieron (enviado o simulado). Los adjuntos no se guardan en la base y
+mail.retry_outbox reintenta sin ellos: un correo de entrega que fallo queda "fallido" (fuera del reintento generico) y
+sin la marca, para que hacienda.send_pending vuelva a entregar CON el XML y el PDF (solo a quien no lo recibio, y no
+antes de RETRY_WAIT desde el ultimo fallo, para no llenar la bitacora de salida mientras el proveedor de correo esta caido).
+
 Solo en pruebas y produccion. En pruebas NO va al cliente sino a los administradores, con "AMBIENTE DE PRUEBAS · sin
 validez fiscal" (los clientes reales no deben recibir comprobantes de prueba). En simulado sigue el correo de siempre
 (solo PDF con la franja)."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Customer, EInvoiceDocument, Invoice, Order, Tenant, TenantUser
+from ..models import Customer, EInvoiceDocument, EmailOutbox, Invoice, Order, Tenant, TenantUser
 from .documents import audit
 from .mail import queue_email
 
 KIND = {"FE": "factura electrónica", "TE": "tiquete electrónico", "NC": "nota de crédito", "ND": "nota de débito"}
 TEST_TAG = "AMBIENTE DE PRUEBAS · sin validez fiscal"
+SENT = ("enviado", "simulado")
+FAILED = "fallido"  # mail.retry_outbox solo toma pendiente|error: este no sale de nuevo sin sus adjuntos
+RETRY_WAIT = timedelta(minutes=15)
 
 
 def _customer_email(db: Session, inv: Invoice) -> str | None:
@@ -62,8 +70,39 @@ def _html(t: Tenant, title: str, lines: list[str], test: bool) -> str:
 <p style="color:#8a858f;font-size:12px">Cualquier consulta, responda a este correo.</p></div>"""
 
 
+def _aware(dt: datetime | None) -> datetime | None:
+    return dt if dt is None or dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+def _previous(db: Session, doc: EInvoiceDocument, inv: Invoice, stage: str) -> list[EmailOutbox]:
+    """Correos de entrega anteriores de ESTE comprobante y etapa (por la descripcion de adjuntos de la bitacora)."""
+    rows = db.scalars(select(EmailOutbox).where(EmailOutbox.tenant_id == doc.tenant_id, EmailOutbox.entity == "invoice", EmailOutbox.entity_id == inv.id))
+    return [m for m in rows if any(a.get("kind") == "einvoice" and a.get("ref") == doc.id and a.get("stage") == stage for a in (m.attachments or []))]
+
+
+def _send(db: Session, t: Tenant, doc: EInvoiceDocument, inv: Invoice, stage: str, subject: str, html: str, files: list[tuple[str, bytes]]) -> tuple[int, bool]:
+    """(correos que salieron a la cola, todos entregados). Reintento: solo a quien no lo recibio y no antes de RETRY_WAIT."""
+    prev = _previous(db, doc, inv, stage)
+    last_fail = max((_aware(m.created_at) for m in prev if m.status == FAILED), default=None)
+    if last_fail and datetime.now(UTC) - last_fail < RETRY_WAIT:
+        return 0, False
+    done = {m.to.strip().lower() for m in prev if m.status in SENT}
+    desc = [{"name": n_, "kind": "einvoice", "ref": doc.id, "stage": stage} for n_, _ in files]
+    n, ok = 0, True
+    for addr in recipients(db, doc, inv):
+        if addr.strip().lower() in done:
+            continue
+        m = queue_email(db, t, addr, subject, html, "invoice", inv.id, desc, files=files)
+        n += 1
+        if m.status not in SENT:
+            m.status = FAILED
+            ok = False
+    return n, ok
+
+
 def deliver(db: Session, doc_id: int, stage: str) -> int:
-    """stage: "emitido" (XML firmado + PDF) | "hacienda" (respuesta de Hacienda). Devuelve cuantos correos salieron a la cola."""
+    """stage: "emitido" (XML firmado + PDF) | "hacienda" (respuesta de Hacienda). Devuelve cuantos correos salieron a la cola.
+    La marca (delivered_at / hacienda_delivered_at) queda solo si todos salieron; si alguno fallo, se reintenta despues."""
     doc = db.get(EInvoiceDocument, doc_id)
     if not doc or doc.mode not in ("pruebas", "produccion"):
         return 0
@@ -77,40 +116,32 @@ def deliver(db: Session, doc_id: int, stage: str) -> int:
     if stage == "emitido":
         if doc.delivered_at or not doc.xml_document:
             return 0
-        to = recipients(db, doc, inv)
         files = [(f"{doc.clave}.xml", doc.xml_document.encode("utf-8"))]  # los bytes firmados exactos
         pdf = _pdf(db, inv, t)
         if pdf:
             files.append((f"{inv.number}.pdf", pdf))
         lines = [f"Le compartimos la <b>{kind} {inv.number}</b> (clave {doc.clave}).", "Adjuntamos el comprobante electrónico (XML) y su representación gráfica (PDF). Cuando Hacienda lo confirme le enviaremos su respuesta."]
-        n = 0
-        for addr in to:
-            queue_email(
-                db, t, addr, f"{kind.capitalize()} {inv.number}{tag}", _html(t, f"{kind.capitalize()} {inv.number}", lines, test), "invoice", inv.id,
-                [{"name": n_, "kind": "einvoice", "ref": doc.id} for n_, _ in files], files=files,
-            )
-            n += 1
-        doc.delivered_at = datetime.now(UTC)
-        audit(db, t.id, None, "einvoice_delivery", "invoice", inv.id, {"etapa": "emitido", "correos": n, "modo": doc.mode})
+        subject = f"{kind.capitalize()} {inv.number}{tag}"
+        n, ok = _send(db, t, doc, inv, stage, subject, _html(t, f"{kind.capitalize()} {inv.number}", lines, test), files)
+        if ok:
+            doc.delivered_at = datetime.now(UTC)
+        if n or ok:
+            audit(db, t.id, None, "einvoice_delivery", "invoice", inv.id, {"etapa": "emitido", "correos": n, "modo": doc.mode, "entregado": ok})
         return n
     if stage == "hacienda":
         if doc.hacienda_delivered_at or doc.status not in ("aceptada", "rechazada") or not doc.xml_response:
             return 0
-        to = recipients(db, doc, inv)
         files = [(f"{doc.clave}-respuesta-hacienda.xml", doc.xml_response.encode("utf-8"))]
         if doc.status == "aceptada":
             lines = [f"Hacienda aceptó la <b>{kind} {inv.number}</b>. Adjuntamos su respuesta (MensajeHacienda)."]
         else:
             lines = [f"Hacienda rechazó la <b>{kind} {inv.number}</b>: ese comprobante no tiene validez.", "Emitiremos uno nuevo y se lo enviaremos. Adjuntamos la respuesta de Hacienda."]
-        n = 0
-        for addr in to:
-            queue_email(
-                db, t, addr, f"Respuesta de Hacienda · {kind} {inv.number}{tag}", _html(t, f"Respuesta de Hacienda · {inv.number}", lines, test), "invoice", inv.id,
-                [{"name": n_, "kind": "einvoice", "ref": doc.id} for n_, _ in files], files=files,
-            )
-            n += 1
-        doc.hacienda_delivered_at = datetime.now(UTC)
-        audit(db, t.id, None, "einvoice_delivery", "invoice", inv.id, {"etapa": "hacienda", "correos": n, "modo": doc.mode})
+        subject = f"Respuesta de Hacienda · {kind} {inv.number}{tag}"
+        n, ok = _send(db, t, doc, inv, stage, subject, _html(t, f"Respuesta de Hacienda · {inv.number}", lines, test), files)
+        if ok:
+            doc.hacienda_delivered_at = datetime.now(UTC)
+        if n or ok:
+            audit(db, t.id, None, "einvoice_delivery", "invoice", inv.id, {"etapa": "hacienda", "correos": n, "modo": doc.mode, "entregado": ok})
         return n
     return 0
 

@@ -29,7 +29,7 @@ from . import reception as rsvc
 from . import tabular as tb
 from .bitacora import audit_change, snapshot
 from .reception_calc import ACTION_OF_CODE, IVA_NAMES, deadline, name_of
-from .reception_intake import CLAVE_RE, CONSEC_RE, ZipRejected, apply_supplier_response, expand_zip, initial_status, sniff
+from .reception_intake import CLAVE_RE, CONSEC_RE, ZipRejected, apply_supplier_response, expand_zip, initial_status, sniff, supplier_response_problem
 from .sequences import ensure_fiscal_groups
 
 MAX_IMPORT = 50 * 1024 * 1024
@@ -293,7 +293,7 @@ def import_zip(db: Session, p: Principal, data: bytes, commit: bool, create_expe
             with db.begin_nested():
                 if existing is not None:
                     changed = []
-                    if supplier and not existing.xml_supplier_response:
+                    if supplier and not existing.xml_supplier_response and not supplier_response_problem(existing, supplier[2]):
                         if commit:
                             apply_supplier_response(db, existing, supplier[2], xml44.to_utf8_text(supplier[1], supplier[2]))
                         changed.append("respuesta del proveedor")

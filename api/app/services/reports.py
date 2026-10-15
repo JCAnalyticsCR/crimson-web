@@ -910,6 +910,9 @@ CATALOG = [
 ]
 
 
+FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
 def to_xlsx(rep: Report, a: date, b: date, tenant_name: str) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -930,6 +933,13 @@ def to_xlsx(rep: Report, a: date, b: date, tenant_name: str) -> bytes:
         c.alignment = Alignment(vertical="center")
     for r in rep.rows:
         ws.append([float(v) if isinstance(v, Decimal) else v for v in r])
+        # Inyeccion de formulas: nombres y descripciones vienen de XML recibidos por correo sin autenticar (un "proveedor"
+        # llamado =HYPERLINK(...) o una formula DDE). openpyxl convierte en formula todo texto que empiece por "=": cualquier
+        # texto con un prefijo peligroso se escribe como texto literal (y con quotePrefix, para que Excel no lo evalue al editar).
+        for c in ws[ws.max_row]:
+            if isinstance(c.value, str) and c.value[:1] in FORMULA_PREFIXES:
+                c.data_type = "s"
+                c.quotePrefix = True
     for i, col in enumerate(rep.columns, 1):
         width = max(len(str(col)), *(len(str(r[i - 1])) for r in rep.rows[:200])) if rep.rows else len(col)
         ws.column_dimensions[get_column_letter(i)].width = min(48, width + 3)

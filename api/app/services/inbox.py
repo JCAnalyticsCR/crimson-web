@@ -3,6 +3,9 @@
 - Nunca marca nada en el servidor: UIDVALIDITY + UID con BODY.PEEK[] (abrir el buzon en Outlook ya no esconde correos).
 - Un commit por correo: un correo malo no detiene la corrida y nunca se pierde (queda en "error" con su .eml para
   "Reprocesar").
+- Antes de procesar un correo queda registrado como "procesando" (commit): si el proceso muere a mitad (sin memoria: un
+  SIGKILL no llega como excepcion), la corrida siguiente lo encuentra asi, lo deja en "error" con su .eml y sigue, en vez
+  de volver a caer en el mismo correo para siempre.
 - Arriendo (locked_until) en reception_mailbox: dos lectores (worker y "Revisar ahora") no se pisan. Un SELECT FOR
   UPDATE no sirve: se soltaria en el primer commit por correo.
 - Privacidad: el buzon tambien recibe boletines y correos personales. El .eml crudo solo se guarda si algo fallo; de un
@@ -46,6 +49,8 @@ LEASE = timedelta(minutes=10)
 CANDIDATE_EXT = (".xml", ".pdf", ".zip")
 CANDIDATE_TYPES = ("text/xml", "application/xml", "application/pdf", "application/zip", "application/x-zip-compressed", "application/octet-stream")
 IMAP_AAD = "imap:password"
+PROCESSING = "procesando"
+INTERRUPTED = "La revisión anterior se cortó procesando este correo: revíselo y use Reprocesar"
 
 
 class MailboxBusy(Exception):
@@ -289,12 +294,9 @@ def _connect(cfg: MailboxConfig):
     return imaplib.IMAP4_SSL(cfg.host, cfg.port, ssl_context=ssl.create_default_context(), timeout=25)
 
 
-def process_raw(db: Session, tenant: Tenant, raw: bytes, *, mailbox_id: int | None, uid: int | None, uidvalidity: int | None, user_id: int | None = None, message: ReceptionMessage | None = None) -> tuple[ReceptionMessage, dict]:
-    """Procesa un .eml (del buzon o de "Reprocesar"). No hace commit."""
-    from .reception_intake import ingest_files, new_result, status_of
-
-    msg = email.message_from_bytes(raw)
-    rm = message or ReceptionMessage(
+def new_message(tenant: Tenant, raw: bytes, *, mailbox_id: int | None, uid: int | None, uidvalidity: int | None, user_id: int | None = None, msg: Message | None = None, status: str = "procesado") -> ReceptionMessage:
+    msg = msg if msg is not None else email.message_from_bytes(raw)
+    return ReceptionMessage(
         tenant_id=tenant.id,
         mailbox_id=mailbox_id,
         source="imap",
@@ -307,7 +309,16 @@ def process_raw(db: Session, tenant: Tenant, raw: bytes, *, mailbox_id: int | No
         size=len(raw),
         sha256=hashlib.sha256(raw).hexdigest(),
         created_by=user_id,
+        status=status,
     )
+
+
+def process_raw(db: Session, tenant: Tenant, raw: bytes, *, mailbox_id: int | None, uid: int | None, uidvalidity: int | None, user_id: int | None = None, message: ReceptionMessage | None = None) -> tuple[ReceptionMessage, dict]:
+    """Procesa un .eml (del buzon o de "Reprocesar"). No hace commit."""
+    from .reception_intake import ingest_files, new_result, status_of
+
+    msg = email.message_from_bytes(raw)
+    rm = message or new_message(tenant, raw, mailbox_id=mailbox_id, uid=uid, uidvalidity=uidvalidity, user_id=user_id, msg=msg)
     if message is None:
         db.add(rm)
         db.flush()
@@ -375,13 +386,24 @@ def poll(db: Session, t: Tenant, connect=None) -> dict:
             # §6.4 paso 4: el mismo correo (mismo sha256) ya registrado en CUALQUIER buzon de la empresa -> solo avanzar.
             # Cubre la UIDVALIDITY nueva y el paso del buzon de Ajustes a variables de entorno (otra fila de
             # reception_mailbox con last_uid = 0 que vuelve a bajar los ultimos N dias).
-            seen = db.scalar(select(ReceptionMessage.id).where(ReceptionMessage.tenant_id == t.id, ReceptionMessage.sha256 == sha).limit(1))
-            if seen:
+            seen = db.scalar(select(ReceptionMessage).where(ReceptionMessage.tenant_id == t.id, ReceptionMessage.sha256 == sha).limit(1))
+            if seen is not None:
+                if seen.status == PROCESSING:  # una corrida anterior murio con este correo: error con su .eml, y se sigue
+                    seen.status, seen.error, seen.summary = "error", INTERRUPTED, []
+                    seen.raw_eml = raw if len(raw) <= MAX_EML else None
+                    totals["messages"] += 1
+                    totals["errores"].append(f"UID {uid}: {INTERRUPTED}")
+                    log.warning("buzon %s: el UID %s quedo a medias en la corrida anterior; queda en error", t.slug, uid)
                 mbox.last_uid = uid
                 db.commit()
                 continue
+            marker_id = None
             try:
-                rm, res = process_raw(db, t, raw, mailbox_id=mbox_id, uid=uid, uidvalidity=mbox.uidvalidity)
+                rm = new_message(t, raw, mailbox_id=mbox_id, uid=uid, uidvalidity=mbox.uidvalidity, status=PROCESSING)
+                db.add(rm)
+                db.commit()  # constancia ANTES de procesar (ver el encabezado)
+                marker_id = rm.id
+                rm, res = process_raw(db, t, raw, mailbox_id=mbox_id, uid=uid, uidvalidity=mbox.uidvalidity, message=rm)
                 mbox.last_uid = uid
                 db.commit()
                 totals["messages"] += 1
@@ -392,18 +414,19 @@ def poll(db: Session, t: Tenant, connect=None) -> dict:
                 totals["errores"] += [f"{(rm.subject or '')[:60]}: {e['error']}" for e in res["errores"]]
             except Exception as e:  # noqa: BLE001 - un correo malo no detiene la corrida
                 db.rollback()
-                if isinstance(e, IntegrityError) and "uq_reception_message_uid" in str(e.orig if hasattr(e, "orig") else e) or _uid_taken(db, t.id, mbox_id, mbox.uidvalidity, uid):
+                taken = isinstance(e, IntegrityError) and "uq_reception_message_uid" in str(e.orig if hasattr(e, "orig") else e)
+                if marker_id is None and (taken or _uid_taken(db, t.id, mbox_id, mbox.uidvalidity, uid)):
                     db.execute(update(ReceptionMailbox).where(ReceptionMailbox.id == mbox_id).values(last_uid=uid))
                     db.commit()
                     db.refresh(mbox)
                     continue
                 try:
-                    db.add(
-                        ReceptionMessage(
-                            tenant_id=t.id, mailbox_id=mbox_id, source="imap", uid=uid, uidvalidity=mbox.uidvalidity, size=len(raw), sha256=sha,
-                            raw_eml=raw if len(raw) <= MAX_EML else None, status="error", error=f"{type(e).__name__}: {e}"[:500], summary=[],
-                        )
-                    )
+                    row = db.get(ReceptionMessage, marker_id) if marker_id else None
+                    if row is None:
+                        row = ReceptionMessage(tenant_id=t.id, mailbox_id=mbox_id, source="imap", uid=uid, uidvalidity=mbox.uidvalidity, size=len(raw), sha256=sha)
+                        db.add(row)
+                    row.raw_eml = raw if len(raw) <= MAX_EML else None
+                    row.status, row.error, row.summary = "error", f"{type(e).__name__}: {e}"[:500], []
                     db.execute(update(ReceptionMailbox).where(ReceptionMailbox.id == mbox_id).values(last_uid=uid))
                     db.commit()
                     db.refresh(mbox)

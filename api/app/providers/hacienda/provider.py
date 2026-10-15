@@ -106,6 +106,11 @@ class HaciendaDirectProvider(EInvoiceProvider):
         return validated("mensaje_receptor", xades.sign(root, self.creds.p12, self.creds.pin))
 
     # ---------- enviar / consultar
+    def authenticate(self) -> None:
+        """Pide (o reusa) el token ANTES de contar el intento: un fallo del IdP no es un POST (attempts = POST reales).
+        Lanza HaciendaAuthError (credenciales) o HaciendaUnavailable (IdP caido)."""
+        self.client.token()
+
     def post(self, body: dict) -> PostResult:
         return self.client.post_recepcion(body)
 

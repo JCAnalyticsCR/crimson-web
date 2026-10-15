@@ -187,3 +187,36 @@ def test_ratelimit_en_cero_frena_el_resto_del_lote(client, auth, db_session, mon
     send_pending(db_session)
     assert len(fake2.posts) == 1  # el segundo espera al siguiente ciclo
     assert {db_session.get(RR, rid).status, db_session.get(RR, rid2).status} == {"enviado", "por_enviar"}
+
+
+def test_token_que_falla_no_cuenta_como_post(client, auth, db_session, monkeypatch, p12_empresa):
+    """§5.7: attempts = POST reales. Contrasena ATV mala (o IdP caido) no manda nada: al corregirla, el primer POST real
+    lleva attempts=1 y un "ya fue recibido" sigue siendo error (Fygaro), no exito."""
+    from app.providers.hacienda.client import HaciendaClient, HaciendaUnavailable
+    from app.services.hacienda_sync import send_response
+
+    fake, d, rid, RR = _por_enviar(client, monkeypatch, p12_empresa, n=9)  # noqa: N806
+    fake.fail_token = 1  # el IdP rechaza el usuario/contrasena
+    send_response(db_session, rid)
+    r = db_session.get(RR, rid)
+    assert r.status == "por_enviar" and r.attempts == 0 and fake.posts == [] and "incorrectos" in r.last_error
+    # IdP caido: tampoco cuenta
+    real = HaciendaClient.token
+
+    def caido(self, force=False):
+        raise HaciendaUnavailable("Sin conexión con el servicio de autenticación de Hacienda")
+
+    monkeypatch.setattr(HaciendaClient, "token", caido)
+    r.next_attempt_at = None
+    db_session.commit()
+    send_response(db_session, rid)
+    db_session.refresh(r)
+    assert r.status == "por_enviar" and r.attempts == 0 and fake.posts == []
+    # credenciales corregidas: primer POST real y Hacienda ya lo tiene (respondido desde Fygaro) -> error, no enviado
+    monkeypatch.setattr(HaciendaClient, "token", real)
+    fake.post_plan = [(400, {"X-Error-Cause": "El comprobante ya fue recibido anteriormente"})]
+    r.next_attempt_at = None
+    db_session.commit()
+    send_response(db_session, rid)
+    db_session.refresh(r)
+    assert r.status == "error" and r.attempts == 1 and "Fygaro" in r.last_error and len(fake.posts) == 1

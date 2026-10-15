@@ -256,7 +256,7 @@ export default function Settings() {
       {tab === "correo" && (
         <><MailStatus onSent={() => api<Mail[]>("/settings/outbox").then(setMails)} />
         <Card title="Correos enviados" flush>
-          {mailsSt === null ? <Loading /> : mails.length === 0 ? <Empty hint="Cotizaciones, facturas, invitaciones y recordatorios enviados aparecen aquí." /> : <table className="table"><thead><tr><th>Fecha</th><th>Para</th><th>Asunto</th><th>Estado</th></tr></thead><tbody>{mails.map((m) => <tr key={m.id}><td className="muted">{fmtDate(m.created_at.slice(0, 10))}</td><td>{m.to}</td><td>{m.subject}{m.error && <div className="meta" style={{ color: "var(--bad)" }}>{m.error}</div>}</td><td><Badge status={m.status === "enviado" ? "confirmado" : m.status === "error" ? "fallido" : "pendiente"} />{m.status === "simulado" && <div className="meta">no salió</div>}</td></tr>)}</tbody></table>}
+          {mailsSt === null ? <Loading /> : mails.length === 0 ? <Empty hint="Cotizaciones, facturas, invitaciones y recordatorios enviados aparecen aquí." /> : <table className="table"><thead><tr><th>Fecha</th><th>Para</th><th>Asunto</th><th>Estado</th></tr></thead><tbody>{mails.map((m) => <tr key={m.id}><td className="muted">{fmtDate(m.created_at.slice(0, 10))}</td><td>{m.to}</td><td>{m.subject}{m.error && <div className="meta" style={{ color: "var(--bad)" }}>{m.error}</div>}</td><td><Badge status={m.status === "enviado" ? "confirmado" : m.status === "error" || m.status === "fallido" ? "fallido" : "pendiente"} />{m.status === "simulado" && <div className="meta">no salió</div>}</td></tr>)}</tbody></table>}
         </Card></>
       )}
 

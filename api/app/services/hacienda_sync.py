@@ -4,7 +4,8 @@
    dos veces (un SELECT FOR UPDATE no sirve: el POST dura hasta 20 s y no puede ir dentro de la transaccion).
 2. Rechazos previos al POST: simulado nunca sale; modo cambiado -> error; produccion sin las tres llaves -> error;
    credenciales faltantes, ilegibles o certificado vencido -> vuelve a por_enviar con last_error.
-3. Se firma UNA vez y se guarda; attempts += 1 y commit ANTES del POST (D6): un reintento manda los mismos bytes.
+3. Se firma UNA vez y se guarda; con el token ya en mano (un fallo del IdP no cuenta como POST), attempts += 1 y
+   commit ANTES del POST (D6): un reintento manda los mismos bytes.
 4. "ya fue recibido" solo cuenta como enviado si hubo un POST nuestro anterior (attempts > 1).
 5. Consulta a 1, 2, 5, 10, 20, 30 min y luego cada hora; 72 h sin respuesta final -> error.
 """
@@ -19,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from ..models import EInvoiceDocument, FiscalCredential, Invoice, ReceivedDocument, ReceptionResponse, Tenant
 from ..providers.hacienda import xml44
-from ..providers.hacienda.client import HaciendaAuthError, ProductionBlocked, production_keys, rate_limited
+from ..providers.hacienda.client import HaciendaAuthError, HaciendaUnavailable, ProductionBlocked, production_keys, rate_limited
 from ..providers.hacienda.provider import HaciendaDirectProvider, InvalidXml, comprobante_body, receptor_body, receptor_ref
 from ..providers.hacienda.xades import CertError
 from . import hacienda_config as hc
@@ -117,6 +118,26 @@ def _fail(r, msg: str) -> None:
     r.resolved_at = now()  # estado final: la alerta diaria toma los errores de las ultimas 24 h
 
 
+def _auth_retry(prov, row) -> bool:
+    """Token ANTES de contar el intento (§5.7: attempts = POST reales). Un IdP caido o una contrasena ATV mala no
+    mandan nada a Hacienda: la fila vuelve a por_enviar SIN sumar attempts (si no, al corregir las credenciales el
+    primer POST real ya llevaria attempts=2 y un "ya fue recibido" de Fygaro pasaria por exito). True = no se envia."""
+    try:
+        prov.authenticate()
+    except HaciendaAuthError as e:
+        _retry_later(row, str(e))
+        return True
+    except HaciendaUnavailable as e:
+        _retry_later(row, str(e), minutes=int(_backoff(max(row.attempts or 0, 1)).total_seconds() // 60))
+        return True
+    return False
+
+
+def _undo_attempt(row) -> None:
+    """Hacienda rechazo la autenticacion del POST (401 aun con token renovado): el documento no llego."""
+    row.attempts = max((row.attempts or 1) - 1, 0)
+
+
 def send_response(db: Session, response_id: int) -> str | None:
     r = db.get(ReceptionResponse, response_id)
     if r is None:
@@ -159,6 +180,10 @@ def send_response(db: Session, response_id: int) -> str | None:
             db.commit()
             return r.status
         r.xml_signed = signed.decode("utf-8")
+    if _auth_retry(prov, r):
+        _copy_response_status(db, r)
+        db.commit()
+        return r.status
     r.attempts = (r.attempts or 0) + 1
     r.sent_at = now()
     db.commit()  # constancia ANTES del POST: si el proceso muere durante el POST, sabemos que pudo haber llegado
@@ -166,6 +191,7 @@ def send_response(db: Session, response_id: int) -> str | None:
     try:
         res = prov.post(body)
     except HaciendaAuthError as e:
+        _undo_attempt(r)
         _retry_later(r, str(e))
         _copy_response_status(db, r)
         db.commit()
@@ -338,6 +364,11 @@ def send_einvoice(db: Session, doc_id: int) -> str | None:
         _copy_invoice_status(db, doc)
         db.commit()
         return doc.status
+    if _auth_retry(prov, doc):
+        doc.hacienda_message = doc.last_error
+        _copy_invoice_status(db, doc)
+        db.commit()
+        return doc.status
     doc.attempts = (doc.attempts or 0) + 1
     doc.sent_at = now()
     db.commit()
@@ -346,6 +377,7 @@ def send_einvoice(db: Session, doc_id: int) -> str | None:
     try:
         res = prov.post(comprobante_body(payload, doc.xml_document.encode("utf-8")))
     except HaciendaAuthError as e:
+        _undo_attempt(doc)
         _retry_later(doc, str(e))
         doc.hacienda_message = doc.last_error
         _copy_invoice_status(db, doc)
@@ -357,7 +389,11 @@ def send_einvoice(db: Session, doc_id: int) -> str | None:
     doc.hacienda_message = doc.last_error if doc.status in ("error", "por_enviar") else "Enviado a Hacienda"
     _copy_invoice_status(db, doc)
     db.commit()
-    _deliver_safe(db, doc.id, "emitido")
+    if doc.status in ("enviado", "procesando"):
+        # art. 18: al cliente "aun sin confirmacion", pero solo lo que Hacienda RECIBIO. Un 400/403 o un "ya fue
+        # recibido" en el primer intento dejan el comprobante en error (se reemite con otra clave): mandarlo dejaria al
+        # cliente con dos XML para la misma factura. Lo que quedo por_enviar lo entrega send_pending al salir.
+        _deliver_safe(db, doc.id, "emitido")
     return doc.status
 
 

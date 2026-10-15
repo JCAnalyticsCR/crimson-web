@@ -257,3 +257,69 @@ def test_paso_de_ajustes_a_entorno_no_duplica(client, auth, db_session, monkeypa
     assert res["messages"] == 0 and res["nuevos"] == 0 and db_session.query(ReceptionMessage).count() == 2
     env_box = db_session.query(ReceptionMailbox).filter(ReceptionMailbox.key.startswith("env:")).one()
     assert env_box.last_uid == 2  # avanzo sin registrar de nuevo
+
+
+def test_tope_de_zips_por_correo(client, auth, db_session, monkeypatch):
+    """ZIP_MAX_TOTAL es por zip: un correo con muchos zips chicos sumaba GB en memoria. Hay un tope por correo o lote."""
+    import os
+
+    from app.services import reception_intake
+    from app.services.reception_intake import ZIP_ERROR, ingest_files
+
+    monkeypatch.setattr(reception_intake, "INTAKE_MAX_EXPANDED", 300 * 1024)  # 300 KB en la prueba (50 MB de verdad)
+
+    def zip_de(n: int) -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr(f"relleno-{n}.bin", os.urandom(120 * 1024))  # cada zip pasa sus propios limites
+        return buf.getvalue()
+
+    files = [(f"z{i}.zip", zip_de(i)) for i in range(4)] + [("f.zip", _zip_con(factura(71)))]
+    res = ingest_files(db_session, _tenant(db_session, auth), files, source="manual", message=None, user_id=None)
+    errores = [e["name"] for e in res["errores"]]
+    assert errores == ["z2.zip", "z3.zip"] and all(e["error"] == ZIP_ERROR for e in res["errores"])
+    assert len(res["nuevos"]) == 1  # lo que cabe en lo que queda del tope se sigue registrando
+    db_session.rollback()
+
+
+def _zip_con(data: bytes) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("factura.xml", data)
+    return buf.getvalue()
+
+
+def test_correo_que_tumba_el_proceso_no_frena_el_buzon(client, auth, db_session, monkeypatch):
+    """Si el proceso muere a mitad de un correo (sin memoria: un SIGKILL no llega como excepcion), la corrida siguiente lo
+    encuentra "procesando", lo deja en error con su .eml para Reprocesar y sigue con el resto en vez de repetirlo."""
+    from app.models import ReceptionMailbox, ReceptionMessage
+    from app.services import reception_intake
+    from app.services.inbox import INTERRUPTED, poll
+
+    _ajustes(client)
+    t = _tenant(db_session, auth)
+    real = reception_intake.ingest_files
+
+    class Muerte(BaseException):  # no la atrapa el "except Exception" del buzon, como un SIGKILL
+        pass
+
+    def muere(db, tenant, files, **kw):
+        if any(b"0000000082" in data for _, data in files):
+            raise Muerte()
+        return real(db, tenant, files, **kw)
+
+    monkeypatch.setattr(reception_intake, "ingest_files", muere)
+    fake = FakeImapUid([correo(81), correo(82), correo(83)], password="clave-app-123")
+    with pytest.raises(Muerte):
+        poll(db_session, t, connect=lambda: fake)
+    db_session.rollback()
+    marca = db_session.query(ReceptionMessage).filter(ReceptionMessage.uid == 2).one()
+    assert marca.status == "procesando" and db_session.query(ReceptionMailbox).one().last_uid == 1
+    # siguiente corrida (el mismo correo seguiria tumbando el proceso): no se vuelve a procesar, queda en error y sigue
+    res = poll(db_session, t, connect=lambda: fake)
+    db_session.refresh(marca)
+    assert marca.status == "error" and marca.error == INTERRUPTED and marca.raw_eml
+    assert res["nuevos"] == 1 and db_session.query(ReceptionMailbox).one().last_uid == 3
+    monkeypatch.setattr(reception_intake, "ingest_files", real)
+    r = client.post(f"/reception/messages/{marca.id}/reprocess")
+    assert r.status_code == 200 and r.json()["message"]["status"] == "procesado" and len(r.json()["nuevos"]) == 1

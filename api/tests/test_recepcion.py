@@ -633,3 +633,32 @@ def test_alerta_diaria_escapa_lo_del_xml_y_avisa_el_ultimo_dia(client, auth, db_
     assert hacienda_tasks.daily_alerts(db_session) >= 1
     nuevos = db_session.query(EmailOutbox).order_by(EmailOutbox.id).all()[antes:]
     assert nuevos and all("<a href" not in m.html for m in nuevos) and any("&lt;a href=" in m.html for m in nuevos)
+
+
+def test_respuesta_del_proveedor_de_otras_cedulas_se_ignora_y_adjuntar_la_buena_corrige(client, auth, db_session):
+    """El MensajeHacienda llega por correo sin firma verificada: si las cedulas no son las del comprobante no cambia nada.
+    Si una respuesta "rechazado" lo dejo invalido, adjuntar a mano la buena (aceptada) lo devuelve a por revisar."""
+    from app.models import AuditLog
+
+    d = up(client, xml_hoy(71)).json()
+    otro_emisor = up(client, mensaje_hacienda(cl(71), emisor="3101777777", mensaje="3", detalle="Rechazado"))
+    assert otro_emisor.status_code == 422 and "cédulas" in otro_emisor.json()["detail"]
+    res = batch(client, [("r.xml", mensaje_hacienda(cl(71), receptor="3101999999", mensaje="1").encode())]).json()
+    assert not res["adjuntos"] and res["ignorados"] and "cédulas" in res["ignorados"][0]["reason"]
+    det = client.get(f"/reception/{d['id']}").json()
+    assert det["status"] == "por_revisar" and not det["has_supplier_response"] and det["supplier_hacienda_status"] == "desconocido"
+    assert db_session.query(AuditLog).filter(AuditLog.action == "supplier_response_ignored").count() == 1
+    # una respuesta rechazada (con las cedulas correctas) -> invalido; adjuntar a mano la aceptada lo corrige
+    up(client, mensaje_hacienda(cl(71), mensaje="3", detalle="Rechazado"))
+    assert client.get(f"/reception/{d['id']}").json()["status"] == "invalido"
+    malo = client.post(f"/reception/{d['id']}/attach", files={"file": ("r.xml", mensaje_hacienda(cl(71), emisor="3101777777").encode(), "application/xml")})
+    assert malo.status_code == 422
+    r = client.post(f"/reception/{d['id']}/attach", files={"file": ("r.xml", mensaje_hacienda(cl(71)).encode(), "application/xml")})
+    assert r.status_code == 200 and r.json()["status"] == "por_revisar" and r.json()["supplier_hacienda_status"] == "aceptado"
+    assert respond(client, d["id"]).status_code == 200
+    # descartado desde invalido: la respuesta buena tambien corrige a donde vuelve al restaurar
+    d2 = up(client, xml_hoy(72)).json()
+    up(client, mensaje_hacienda(cl(72), mensaje="3", detalle="Rechazado"))
+    assert client.post(f"/reception/{d2['id']}/discard", json={"reason": "Rechazado al proveedor"}).status_code == 200
+    client.post(f"/reception/{d2['id']}/attach", files={"file": ("r.xml", mensaje_hacienda(cl(72)).encode(), "application/xml")})
+    assert client.post(f"/reception/{d2['id']}/restore").json()["status"] == "por_revisar"

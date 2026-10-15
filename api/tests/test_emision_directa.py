@@ -250,3 +250,54 @@ def test_error_tras_un_post_no_es_rechazo_y_sigue_en_el_iva(client, auth, db_ses
     # siguen en la lista de pendientes de atencion (junto con las rechazadas)
     ids = {x["id"] for x in client.get("/invoices", params={"pendiente": "documentos_rechazados"}).json()["items"]}
     assert {inv["id"], inv2["id"]} <= ids
+
+
+def test_entrega_que_falla_no_se_marca_y_se_reintenta_con_adjuntos(client, auth, db_session, pruebas, monkeypatch):
+    """Art. 18: si el correo con el XML falla (proveedor de correo caido), la entrega no queda marcada y el correo fallido
+    no lo toma mail.retry_outbox (que lo mandaria SIN adjuntos): lo reintenta hacienda.send_pending con el XML y el PDF."""
+    from datetime import UTC, datetime
+
+    from app.models import EInvoiceDocument, EmailOutbox
+    from app.services import mail
+    from app.services.hacienda_sync import send_pending
+
+    salidas, caido = [], {"v": True}
+
+    def deliver(m, files=None):
+        salidas.append({"to": m.to, "files": dict(files or [])})
+        m.status, m.error = ("error", "Resend caído") if caido["v"] else ("enviado", None)
+
+    monkeypatch.setattr(mail, "deliver", deliver)
+    inv = _factura(client)
+    assert client.post(f"/invoices/{inv['id']}/emit").status_code == 200
+    doc = db_session.query(EInvoiceDocument).filter(EInvoiceDocument.invoice_id == inv["id"]).one()
+    assert doc.status == "enviado" and doc.delivered_at is None and salidas
+    fallidos = db_session.query(EmailOutbox).filter(EmailOutbox.entity == "invoice", EmailOutbox.entity_id == inv["id"]).all()
+    assert fallidos and all(m.status == "fallido" for m in fallidos)  # fuera de retry_outbox (pendiente|error)
+    caido["v"] = False
+    n = len(salidas)
+    send_pending(db_session)  # recien fallo: espera RETRY_WAIT (no llena la bitacora cada 2 min)
+    assert len(salidas) == n
+    for m in fallidos:
+        m.created_at = datetime.now(UTC) - timedelta(minutes=20)
+    db_session.commit()
+    send_pending(db_session)
+    db_session.refresh(doc)
+    assert doc.delivered_at is not None
+    otra = salidas[n]
+    assert otra["files"][f"{doc.clave}.xml"] == doc.xml_document.encode("utf-8")  # los bytes firmados, no un correo vacio
+    k = len(salidas)
+    send_pending(db_session)  # ya entregado: no sale otra vez
+    assert len([s for s in salidas[k:] if f"{doc.clave}.xml" in s["files"]]) == 0
+
+
+def test_lo_que_hacienda_no_recibio_no_se_entrega_al_cliente(client, auth, db_session, pruebas, correos):
+    """Un 400 en el primer POST deja el comprobante en error (se reemite con otra clave): su XML no sale al cliente."""
+    from app.models import EInvoiceDocument
+
+    pruebas.post_plan = [(400, {"X-Error-Cause": "Firma invalida"})]
+    inv = _factura(client)
+    assert client.post(f"/invoices/{inv['id']}/emit").status_code == 200
+    doc = db_session.query(EInvoiceDocument).filter(EInvoiceDocument.invoice_id == inv["id"]).one()
+    assert doc.status == "error" and doc.delivered_at is None
+    assert not [c for c in correos if f"{doc.clave}.xml" in c["files"]]

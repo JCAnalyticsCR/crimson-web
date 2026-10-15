@@ -108,6 +108,23 @@ export default function ReceptionDetail() {
   const canLink = !d.can_respond && !d.expense_id && (d.action === "aceptada" || d.action === "parcial") && d.expense_candidates.length > 0 && allows("accounting.editar");
   const file = (which: string, name: string) => (which === "pdf" ? openFile(`/reception/${d.id}/file/pdf`) : downloadFile(`/reception/${d.id}/file/${which}`, name.replace("{c}", d.clave))).catch((e) => toast(e.message, "bad"));
   const available: Record<string, boolean> = { document: true, pdf: d.has_pdf, supplier_response: d.has_supplier_response, mr: d.has_response, hacienda: d.has_hacienda_answer };
+  // §8.3: ya respondido (aunque el ultimo mensaje quedara rechazado o con error) se ve primero la linea de tiempo con el
+  // motivo de Hacienda; el formulario aparece despues de "Responder de nuevo" (retry -> por_revisar), con los intentos
+  // anteriores arriba para no responder sin saber por que se rechazo.
+  const showForm = d.can_respond && d.status !== "respondido" && allows("accounting.editar");
+  const timeline = (
+    <ol className="acc-timeline">
+      {d.responses.map((r) => (
+        <li key={r.id}>
+          <b>Intento {r.attempt}</b> · {ACTION_LABEL[{ "1": "aceptada", "2": "parcial", "3": "rechazada" }[r.message_code] || ""]} · {ivaLabel(r.iva_condition)} · <span className="mono">{r.consecutive}</span> · <span className="badge badge--muted">{r.mode}</span>
+          <div className="muted">Respondido · {when(r.created_at)}{r.sent_at ? ` → Enviado · ${when(r.sent_at)}` : ""}</div>
+          <div>Hacienda: <Badge status={r.status} />{r.hacienda_detail ? ` ${r.hacienda_detail}` : ""}{r.last_error ? <span style={{ color: "var(--bad)" }}> · {r.last_error}</span> : null}</div>
+          {r.credit_amount !== null && <div className="muted">IVA acreditable {fmtMoney(r.credit_amount, cur)} · gasto aplicable {fmtMoney(r.applicable_amount, cur)}</div>}
+          {r.detail && <div className="muted">“{r.detail}”</div>}
+        </li>
+      ))}
+    </ol>
+  );
 
   return (
     <>
@@ -174,7 +191,8 @@ export default function ReceptionDetail() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
-          {d.can_respond && allows("accounting.editar") ? (
+          {showForm && d.responses.length > 0 && <Card title="Intentos anteriores">{timeline}</Card>}
+          {showForm ? (
             <Card title="Respuesta">
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <div className="acc-seg" role="radiogroup" aria-label="Acción">{ACTIONS.map((a) => <button key={a.key} type="button" className={f.action === a.key ? "is-active" : ""} aria-pressed={f.action === a.key} onClick={() => setF({ ...f, action: a.key })}>{a.label}</button>)}</div>
@@ -227,19 +245,7 @@ export default function ReceptionDetail() {
             </Card>
           ) : (
             <Card title="Respuesta ante Hacienda">
-              {d.responses.length === 0 ? <p className="muted" style={{ margin: 0 }}>{d.status === "sin_respuesta" ? "Este comprobante no lleva mensaje receptor." : d.status === "ajeno" ? "No es para la empresa: no se responde." : "Sin respuesta."}</p> : (
-                <ol className="acc-timeline">
-                  {d.responses.map((r) => (
-                    <li key={r.id}>
-                      <b>Intento {r.attempt}</b> · {ACTION_LABEL[{ "1": "aceptada", "2": "parcial", "3": "rechazada" }[r.message_code] || ""]} · {ivaLabel(r.iva_condition)} · <span className="mono">{r.consecutive}</span> · <span className="badge badge--muted">{r.mode}</span>
-                      <div className="muted">Respondido · {when(r.created_at)}{r.sent_at ? ` → Enviado · ${when(r.sent_at)}` : ""}</div>
-                      <div>Hacienda: <Badge status={r.status} />{r.hacienda_detail ? ` ${r.hacienda_detail}` : ""}{r.last_error ? <span style={{ color: "var(--bad)" }}> · {r.last_error}</span> : null}</div>
-                      {r.credit_amount !== null && <div className="muted">IVA acreditable {fmtMoney(r.credit_amount, cur)} · gasto aplicable {fmtMoney(r.applicable_amount, cur)}</div>}
-                      {r.detail && <div className="muted">“{r.detail}”</div>}
-                    </li>
-                  ))}
-                </ol>
-              )}
+              {d.responses.length === 0 ? <p className="muted" style={{ margin: 0 }}>{d.status === "sin_respuesta" ? "Este comprobante no lleva mensaje receptor." : d.status === "ajeno" ? "No es para la empresa: no se responde." : "Sin respuesta."}</p> : timeline}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
                 {d.can_refresh && allows("accounting.editar") && <button className="btn btn--soft btn--sm" disabled={busy} onClick={() => act("refresh", {}, "Estado consultado")}>Consultar estado</button>}
                 {d.can_send && allows("accounting.editar") && <button className="btn btn--soft btn--sm" disabled={busy} onClick={() => act("send", {}, "Enviado")}>Enviar ahora</button>}

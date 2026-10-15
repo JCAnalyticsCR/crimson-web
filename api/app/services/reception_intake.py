@@ -27,6 +27,9 @@ ZIP_MAX_ENTRIES = 200
 ZIP_MAX_ENTRY = 10 * 1024 * 1024
 ZIP_MAX_TOTAL = 50 * 1024 * 1024
 ZIP_MAX_RATIO = 100
+# Tope de lo descomprimido entre TODOS los zip de un correo o lote (ZIP_MAX_TOTAL es por zip): sin el, un correo de 25 MB
+# con decenas de zips chicos de relacion ~100 expandia GB en memoria y el contenedor moria por falta de memoria.
+INTAKE_MAX_EXPANDED = 50 * 1024 * 1024
 ZIP_ERROR = "zip demasiado grande o sospechoso"
 CLAVE_RE = re.compile(r"(?<!\d)(\d{50})(?!\d)")
 CONSEC_RE = re.compile(r"(?<!\d)(\d{20})(?!\d)")
@@ -196,16 +199,45 @@ def _classify(name: str, data: bytes) -> Item:
     return Item(name, data, kind)
 
 
+SUPPLIER_MISMATCH = "la respuesta de Hacienda no es de este comprobante: las cédulas del emisor o del receptor no coinciden"
+
+
+def supplier_response_problem(doc: ReceivedDocument, root) -> str | None:
+    """El MensajeHacienda llega por correo sin autenticar y su firma no se verifica (fase 1): ademas de la clave, el
+    emisor tiene que ser el del comprobante y el receptor (si el comprobante lo trae) el mismo. None = coincide."""
+    mh = xml44.parse_mensaje_hacienda(root)
+    if not xml44.same_id(mh["issuer_id"], doc.issuer_id):
+        return SUPPLIER_MISMATCH
+    if doc.receiver_id and not xml44.same_id(mh["receiver_id"], doc.receiver_id):
+        return SUPPLIER_MISMATCH
+    return None
+
+
+def _status_from_supplier(doc: ReceivedDocument) -> None:
+    """por_revisar <-> invalido segun la respuesta al proveedor (§6.3.1). Reversible: si se adjunta a mano la respuesta
+    correcta (aceptada) de un comprobante que quedo invalido por otra, vuelve a por_revisar."""
+    rejected = doc.supplier_hacienda_status == "rechazado"
+    if doc.status == "descartado":
+        if rejected and doc.status_before_discard == "por_revisar":
+            doc.status_before_discard = "invalido"
+        elif not rejected and doc.status_before_discard == "invalido":
+            doc.status_before_discard = "por_revisar"
+    elif rejected and doc.status == "por_revisar":
+        doc.status = "invalido"
+    elif not rejected and doc.status == "invalido":
+        doc.status = "por_revisar"
+
+
 def apply_supplier_response(db: Session, doc: ReceivedDocument, root, raw_text: str) -> bool:
-    """Guarda la respuesta de Hacienda al proveedor. Devuelve False si ya tenia una."""
-    if doc.xml_supplier_response:
+    """Guarda la respuesta de Hacienda al proveedor. Devuelve False si ya tenia una o si no es de este comprobante
+    (supplier_response_problem)."""
+    if doc.xml_supplier_response or supplier_response_problem(doc, root):
         return False
     mh = xml44.parse_mensaje_hacienda(root)
     doc.xml_supplier_response = raw_text
     doc.supplier_hacienda_status = {"1": "aceptado", "3": "rechazado"}.get(mh["mensaje"] or "", "desconocido")
     doc.supplier_hacienda_detail = mh["detalle"]
-    if doc.supplier_hacienda_status == "rechazado" and doc.status == "por_revisar":
-        doc.status = "invalido"
+    _status_from_supplier(doc)
     return True
 
 
@@ -329,14 +361,18 @@ def ingest_files(
     res = new_result()
     origin = {"imap": "correo", "manual": "manual", "historico": "historico"}.get(source, "manual")
     items: list[Item] = []
+    budget = INTAKE_MAX_EXPANDED
     for name, data in files:
         if sniff(data) == "zip":
             try:
-                inner = expand_zip(data)
+                if budget <= 0:
+                    raise ZipRejected(ZIP_ERROR)
+                inner = expand_zip(data, max_total=min(ZIP_MAX_TOTAL, budget))
             except ZipRejected as e:
                 res["errores"].append({"name": name, "error": str(e)})
                 res["summary"].append({"name": name, "kind": "zip", "result": "error", "error": str(e)})
                 continue
+            budget -= sum(len(b) for _, b in inner)
             items += [_classify(f"{name}/{n}", b) for n, b in inner]
         else:
             items.append(_classify(name, data))
@@ -376,9 +412,14 @@ def ingest_files(
                 mh = xml44.parse_mensaje_hacienda(it.root)
                 entry["clave"] = mh["clave"]
                 doc = db.scalar(select(ReceivedDocument).where(ReceivedDocument.tenant_id == tenant.id, ReceivedDocument.clave == mh["clave"])) if mh["clave"] else None
+                problem = supplier_response_problem(doc, it.root) if doc is not None and not doc.xml_supplier_response else None
                 if doc is None:
                     res["ignorados"].append({"name": it.name, "reason": "respuesta sin comprobante; llegará con él"})
                     entry.update(result="ignorado", error="respuesta sin comprobante; llegará con él")
+                elif problem:
+                    res["ignorados"].append({"name": it.name, "reason": problem})
+                    entry.update(result="ignorado", received_document_id=doc.id, error=problem)
+                    audit(db, tenant.id, user_id, "supplier_response_ignored", "received_document", doc.id, {"motivo": problem, "origen": origin})
                 elif apply_supplier_response(db, doc, it.root, xml44.to_utf8_text(it.data, it.root)):
                     res["adjuntos"].append({"kind": "respuesta", "id": doc.id})
                     entry.update(result="respuesta", received_document_id=doc.id)
