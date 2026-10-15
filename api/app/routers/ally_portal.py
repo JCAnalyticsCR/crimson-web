@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from ..core.ally import AllyCtx, get_ally, need
 from ..core.config import settings as cfg
 from ..core.db import get_db
-from ..core.ratelimit import ally_invite_limiter, ally_media_limiter, ally_notify_limiter, ally_ticket_limiter
+from ..core.ratelimit import ally_assign_limiter, ally_invite_limiter, ally_media_limiter, ally_notify_limiter, ally_ticket_limiter
 from ..models import (
     AllyCostRequest,
     AllyParticipation,
@@ -75,7 +75,6 @@ router = APIRouter(prefix="/aliado", tags=["portal de aliados"], dependencies=[D
 
 OPEN_TICKET = slasvc.ABIERTOS
 OPP_CLOSED = ("ganada", "perdida")
-INVOICE_VISIBLE = ("enviada", "pagada", "parcial", "vencida")  # mismo criterio que el portal del cliente
 MAX_PHOTOS = 8
 TICKET_KINDS = ("soporte", "garantia", "mantenimiento", "visita", "consulta")
 # cancelar es de Crimson. pause = "Terminar jornada" (cierra el tiempo corriendo de SU equipo)
@@ -709,6 +708,12 @@ def _tope_avisos(ctx: AllyCtx) -> None:
     ally_notify_limiter.hit(f"{ctx.p.tenant.id}:{ctx.p.user.id}")
 
 
+def _tope_asignar(ctx: AllyCtx) -> None:
+    """Cada reasignacion puede escribirle a su tecnico ("Tiene un trabajo nuevo"): tope por persona. Ademas
+    notify_ally_work no repite el aviso del mismo trabajo a la misma persona (alternar A -> B -> A no inunda)."""
+    ally_assign_limiter.hit(f"{ctx.p.tenant.id}:{ctx.p.user.id}")
+
+
 @router.put("/solicitudes/{rid}")
 def responder(rid: int, data: AllyQuoteIn, ctx: AllyCtx = Depends(need("precios")), db: Session = Depends(get_db)):
     _tope_avisos(ctx)
@@ -962,20 +967,27 @@ def levantamiento_guardar(sid: int, data: AllySurveyEditIn, ctx: AllyCtx = Depen
         raise HTTPException(409, "El levantamiento ya fue cotizado")
     if s.status == "enviado" and s.review_status == "pendiente":
         raise HTTPException(409, "Está en revisión de Crimson")
-    if data.technician_id is not None and data.technician_id != s.technician_id:
+    nuevo_tec = data.technician_id if data.technician_id is not None and data.technician_id != s.technician_id else None
+    if nuevo_tec is not None:
         if not ctx.p.can("aliado", "asignar"):
             raise HTTPException(403, "Reasignar el levantamiento lo hace el aliado")
-        _team_member(ctx, data.technician_id)
-        s.technician_id = data.technician_id
+        _tope_asignar(ctx)
+        _team_member(ctx, nuevo_tec)
     _survey_photos_check(db, ctx, data, s)
     from ..services import bitacora
 
-    antes = bitacora.survey_state(s)
+    antes = bitacora.survey_state(s)  # antes de cambiar el tecnico: la bitacora registra tambien la reasignacion
+    antes_tec = s.technician_id
+    if nuevo_tec is not None:
+        s.technician_id = nuevo_tec
     team = ctx.scope.team_user_ids()
     # validos: su equipo y los de Crimson que ya estaban en la visita (se conservan; uno nuevo de afuera no entra)
     validos = team | {int(i) for i in (s.visit_tech_ids or []) if str(i).isdigit()}
     fw.apply_survey_payload(db, s, _to_survey_in(data, s.customer_id, s, team), ctx.p.tenant.id, valid_user_ids=validos)
     bitacora.audit_survey_update(db, ctx.p, s, antes, company=ctx.company.name)
+    if nuevo_tec is not None:
+        # el formulario reasigna por aqui (AllySurvey.tsx): lo mismo que PATCH /asignar (auditoria y aviso al tecnico)
+        _avisar_reasignacion(db, ctx, s, antes_tec)
     if s.review_status == "aprobado" and not s.quote_id:
         s.review_status = "pendiente"  # lo aprobado ya no es lo mismo: Crimson lo vuelve a revisar
         audit(db, ctx.p.tenant.id, ctx.p.user.id, "review_reset", "survey", s.id, {"motivo": "editado por el aliado despues de aprobado"}, ip=ctx.p.ip)
@@ -1029,19 +1041,27 @@ class AssignTechIn(BaseModel):
     technician_id: int
 
 
-@router.patch("/levantamientos/{sid}/asignar")
-def levantamiento_asignar(sid: int, data: AssignTechIn, ctx: AllyCtx = Depends(need("asignar")), db: Session = Depends(get_db)):
+def _avisar_reasignacion(db: Session, ctx: AllyCtx, s: Survey, antes: int | None) -> None:
+    """Tecnico del levantamiento cambiado desde el portal (PATCH /asignar y el PUT del formulario): queda en la
+    auditoria y el tecnico nuevo recibe "Tiene un trabajo nuevo" (spec 7.5). Se llama despues de validar todo: el
+    correo sale al encolarlo."""
     from ..services.ally_scope import notify_ally_work
 
+    audit(db, ctx.p.tenant.id, ctx.p.user.id, "assign", "survey", s.id, {"de": antes, "a": s.technician_id}, ip=ctx.p.ip)
+    if antes != s.technician_id:
+        notify_ally_work(db, ctx.p.tenant, {s.technician_id}, s.number, f"Levantamiento {s.site or ''}".strip(), s.visit_date, entity_id=s.id)
+
+
+@router.patch("/levantamientos/{sid}/asignar")
+def levantamiento_asignar(sid: int, data: AssignTechIn, ctx: AllyCtx = Depends(need("asignar")), db: Session = Depends(get_db)):
+    _tope_asignar(ctx)
     s = _my_survey(db, ctx, sid)
     if s.status in ("cotizado", "cerrado"):
         raise HTTPException(409, "El levantamiento ya fue cotizado")
     _team_member(ctx, data.technician_id)
     antes = s.technician_id
     s.technician_id = data.technician_id
-    audit(db, ctx.p.tenant.id, ctx.p.user.id, "assign", "survey", s.id, {"de": antes, "a": data.technician_id}, ip=ctx.p.ip)
-    if antes != data.technician_id:
-        notify_ally_work(db, ctx.p.tenant, {data.technician_id}, s.number, f"Levantamiento {s.site or ''}".strip(), s.visit_date)
+    _avisar_reasignacion(db, ctx, s, antes)
     db.commit()
     return _survey_ally_out(db, ctx, s)
 
@@ -1125,6 +1145,7 @@ def orden_asignar(oid: int, body: OrderAssignIn, ctx: AllyCtx = Depends(need("as
     se conservan tal cual y, si el tecnico principal es de Crimson, la reasignacion la hace Crimson."""
     from ..services.ally_scope import notify_ally_work
 
+    _tope_asignar(ctx)  # cada cambio puede escribirle a su tecnico (y notify_ally_work no repite el mismo aviso)
     o = _my_order(db, ctx, oid)
     if o.status in fw.CERRADAS:
         raise HTTPException(409, f"La orden está {o.status}; ya no se modifica")
@@ -1143,7 +1164,7 @@ def orden_asignar(oid: int, body: OrderAssignIn, ctx: AllyCtx = Depends(need("as
     o.technician_id = body.technician_id
     o.helpers = [i for i in dict.fromkeys([*de_crimson, *propios]) if i != o.technician_id]
     audit(db, ctx.p.tenant.id, ctx.p.user.id, "assign", "work_order", o.id, {"technician_id": o.technician_id, "helpers": o.helpers}, ip=ctx.p.ip)
-    notify_ally_work(db, ctx.p.tenant, fw._crew(o) - antes, o.number, o.title, o.scheduled_at)
+    notify_ally_work(db, ctx.p.tenant, fw._crew(o) - antes, o.number, o.title, o.scheduled_at, entity_id=o.id)
     db.commit()
     return _order_ally_out(db, ctx, o, full=True)
 
@@ -1622,9 +1643,9 @@ def ganancias_proyecto(pid: int, ctx: AllyCtx = Depends(need("ganancias")), db: 
 
 
 def _emitida(inv: Invoice) -> bool:
-    """La factura ya le llego al aliado: mismo criterio que el portal del cliente (un borrador "creado", como el que
-    deja la recurrencia de la mensualidad antes de enviarse, no se ve ni se descarga)."""
-    return inv.status != "anulada" and (inv.status in INVOICE_VISIBLE or inv.einvoice_status == "aceptada")
+    """La factura ya le llego al aliado (services/ally_access.is_emitted): el mismo criterio para facturas, suscripcion
+    y el descuento de la mensualidad en /aliado/ganancias. Un borrador "creado" no se ve ni se descarga."""
+    return ally_access.is_emitted(inv)
 
 
 def _factura_visible(c, inv: Invoice) -> bool:

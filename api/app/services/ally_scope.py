@@ -172,13 +172,16 @@ def check_ally_assignment(
     project_id: int | None = None,
     opportunity_id: int | None = None,
     current: int | None = None,
+    existing=(),
 ) -> int | None:
     """Escrituras INTERNAS (OT, levantamiento, ticket, contrato): la empresa aliada a la que queda asignado el trabajo.
 
     Los tecnicos aliados de la lista tienen que ser de una sola empresa, la misma que la explicita si viene; si no viene,
     se toma la de los tecnicos. Con proyecto u oportunidad, la empresa tiene que participar ahi. La empresa tiene que
     estar activa y sin suspender (salvo que sea la que el trabajo YA tenia, current: editar una orden o un ticket de un
-    aliado suspendido no se traba; asignarle trabajo nuevo si), y sus usuarios activos. Devuelve el id final o None
+    aliado suspendido no se traba; asignarle trabajo nuevo si). Solo se exige activo a quien ENTRA: los de existing (el
+    equipo o el responsable que el trabajo ya tenia) se conservan aunque hoy esten desactivados, como en
+    fieldwork._check_crew; la empresa unica y la participacion se validan para todos. Devuelve el id final o None
     (trabajo de Crimson)."""
     ids = [u for u in dict.fromkeys(user_ids) if u]
     externos = (
@@ -199,20 +202,53 @@ def check_ally_assignment(
         raise HTTPException(404, "Empresa aliada no encontrada")
     if (not company.active or company.suspended_at) and cid != current:
         raise HTTPException(422, "Esa empresa aliada está suspendida o inactiva")
+    ya_estaban = {i for i in existing or () if i}
     for m in externos:
-        if not m.active or not m.user.active:
+        if m.user_id not in ya_estaban and (not m.active or not m.user.active):
             raise HTTPException(422, "Ese técnico está desactivado")
     if project_id is not None or opportunity_id is not None:
         q = select(AllyParticipation.id).where(AllyParticipation.tenant_id == tenant_id, AllyParticipation.ally_company_id == cid)
         q = q.where(AllyParticipation.project_id == project_id) if project_id is not None else q.where(AllyParticipation.opportunity_id == opportunity_id)
         if db.scalar(q.limit(1)) is None:
-            raise HTTPException(422, f"{company.name} no participa en este proyecto")
+            raise HTTPException(422, f"{company.name} no participa en {'este proyecto' if project_id is not None else 'esta oportunidad'}")
     return cid
 
 
-def notify_ally_work(db: Session, tenant, user_ids, number: str, title: str, when=None) -> int:
+AVISO_TRABAJO_MIN = 30  # no se repite el aviso del mismo trabajo a la misma persona antes de esto
+
+
+def _ya_avisado(db: Session, tenant_id: int, correo: str, number: str) -> bool:
+    """Ya se le aviso a esa persona de ESE trabajo hace poco: alternar el tecnico (A -> B -> A) o quitar y volver a poner
+    un ayudante no encola correos sin tope (como support_desk._ya_avisado)."""
+    from datetime import timedelta
+
+    from ..models import EmailOutbox
+
+    desde = datetime.now(UTC) - timedelta(minutes=AVISO_TRABAJO_MIN)
+    return (
+        db.scalar(
+            select(EmailOutbox.id)
+            .where(
+                EmailOutbox.tenant_id == tenant_id,
+                EmailOutbox.entity == "ally_work",
+                EmailOutbox.to == correo,
+                EmailOutbox.subject.startswith(_asunto_prefijo(number), autoescape=True),
+                EmailOutbox.created_at >= desde,
+            )
+            .limit(1)
+        )
+        is not None
+    )
+
+
+def _asunto_prefijo(number: str) -> str:
+    return f"Tiene un trabajo nuevo: {number} · "
+
+
+def notify_ally_work(db: Session, tenant, user_ids, number: str, title: str, when=None, entity_id: int | None = None) -> int:
     """Aviso al usuario de una empresa aliada al que se le asigna un trabajo (OT, ticket, levantamiento). Sin montos.
-    A los internos no se les escribe desde aqui (tienen sus propios avisos)."""
+    A los internos no se les escribe desde aqui (tienen sus propios avisos). Un aviso por persona y trabajo cada
+    AVISO_TRABAJO_MIN minutos (_ya_avisado); entity_id es el id del trabajo (el numero lo distingue entre tipos)."""
     import html as _html
     from datetime import date as _date
 
@@ -237,15 +273,17 @@ def notify_ally_work(db: Session, tenant, user_ids, number: str, title: str, whe
         u = m.user
         if not u or not u.active or not u.email:
             continue
+        if _ya_avisado(db, tenant.id, u.email, number):
+            continue
         queue_email(
             db,
             tenant,
             u.email,
-            f"Tiene un trabajo nuevo: {number} · {title[:80]} · {fecha}",
+            f"{_asunto_prefijo(number)}{title[:80]} · {fecha}",
             f"<p>{_html.escape(tenant.name)} le asignó <b>{_html.escape(number)}</b> · {_html.escape(title)} · {fecha}.</p>"
             f'<p><a href="{base}/">Abrir el portal de aliados</a></p>',
             "ally_work",
-            None,
+            entity_id,
         )
         n += 1
     return n

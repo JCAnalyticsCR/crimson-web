@@ -30,6 +30,14 @@ INVITE_DAYS = 7
 ROLE_LABEL = {"aliado": "Aliado comercial", "tecnico_aliado": "Técnico de aliado"}
 # marca de las facturas de mensualidad (DocumentIn.external_order de la recurrencia): asi se distinguen de las demas
 PLAN_ORDER = "MENSUALIDAD-PLATAFORMA"
+# factura que ya le llego al aliado: mismo criterio que el portal del cliente (routers/client_portal.INVOICE_VISIBLE)
+INVOICE_VISIBLE = ("enviada", "pagada", "parcial", "vencida")
+
+
+def is_emitted(inv: Invoice) -> bool:
+    """La factura ya le llego al aliado. Un borrador "creado", como el que deja la recurrencia de la mensualidad antes
+    de enviarse, no se ve, no se descarga, no cuenta como atraso y no se descuenta de lo que recibe."""
+    return inv.status != "anulada" and (inv.status in INVOICE_VISIBLE or inv.einvoice_status == "aceptada")
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -239,9 +247,13 @@ def plan_status(db: Session, company: AllyCompany, today: date | None = None, vi
 
 
 def fee_by_month(db: Session, company: AllyCompany, desde: date | None = None, hasta: date | None = None) -> dict[str, Decimal]:
-    """Mensualidad facturada por mes ("YYYY-MM"), sin IVA y en colones con el tipo de cambio de cada factura."""
+    """Mensualidad facturada por mes ("YYYY-MM"), sin IVA y en colones con el tipo de cambio de cada factura. Solo las
+    emitidas (is_emitted): el mismo criterio que /aliado/suscripcion y /aliado/facturas, para que el "neto" de
+    /aliado/ganancias nunca descuente un borrador que el aliado no ve."""
     out: dict[str, Decimal] = {}
     for inv in plan_invoices(db, company, limit=1000):
+        if not is_emitted(inv):
+            continue
         if (desde and inv.issue_date < desde) or (hasta and inv.issue_date > hasta):
             continue
         monto = net_sale(inv) * (d(inv.fx_sell) if inv.currency != "CRC" else Decimal(1))

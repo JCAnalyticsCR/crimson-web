@@ -781,7 +781,7 @@ def survey_assign(sid: int, data: SurveyAssignIn, p: Principal = Depends(require
                 "survey",
                 s.id,
             )
-        notify_ally_work(db, p.tenant, {data.technician_id}, s.number, f"Levantamiento {s.site or ''}".strip(), s.visit_date)
+        notify_ally_work(db, p.tenant, {data.technician_id}, s.number, f"Levantamiento {s.site or ''}".strip(), s.visit_date, entity_id=s.id)
     db.commit()
     return _survey_out(db, s)
 
@@ -808,6 +808,10 @@ def survey_link_opportunity(sid: int, data: LinkOppIn, p: Principal = Depends(re
     anterior = db.get(Opportunity, s.opportunity_id) if s.opportunity_id else None
 
     if data.opportunity_id is None:
+        if s.ally_company_id is not None:
+            # el levantamiento de un aliado vive en la oportunidad en comun (survey_assign lo exige): sin ella el aliado
+            # lo seguiria viendo con datos que ya no tiene en comun. Primero se le pasa a Crimson
+            raise HTTPException(422, "Este levantamiento está a cargo de una empresa aliada: asignalo a Crimson antes de desligarlo")
         if anterior:
             anterior.notes = f"{stamp} · {p.user.full_name}: se desligo el levantamiento {s.number}\n{anterior.notes or ''}".strip()
         s.opportunity_id = None
@@ -817,6 +821,21 @@ def survey_link_opportunity(sid: int, data: LinkOppIn, p: Principal = Depends(re
 
     # sin ver_todo, solo una oportunidad propia (como en el embudo) o una que espera levantamiento
     o = _linkable_opportunity(db, p, data.opportunity_id, customer_id=s.customer_id, skip_sid=s.id)
+    if s.ally_company_id is not None:
+        # el alcance del aliado en levantamientos es ally_company_id: moverlo a una oportunidad donde su empresa no
+        # participa le dejaria ver (y editar) el numero, titulo y estado de esa oportunidad y su cliente. Como al cambiar
+        # el proyecto de una OT o de un ticket, la empresa tiene que participar en la nueva (si no, 422)
+        from ..services.ally_scope import check_ally_assignment
+
+        check_ally_assignment(
+            db,
+            p.tenant.id,
+            ally_company_id=s.ally_company_id,
+            user_ids=[s.technician_id],
+            opportunity_id=o.id,
+            current=s.ally_company_id,
+            existing={s.technician_id},
+        )
     if o.quote_id and s.quote_id and o.quote_id != s.quote_id:
         raise HTTPException(409, "La oportunidad ya tiene otra cotización ligada")
     if s.quote_id:
@@ -1960,7 +1979,7 @@ def order_create(data: WorkOrderIn, p: Principal = Depends(require("field", "asi
     db.add(o)
     db.flush()
     audit(db, p.tenant.id, p.user.id, "create", "work_order", o.id, ip=p.ip)
-    notify_ally_work(db, p.tenant, _crew(o), o.number, o.title, o.scheduled_at)
+    notify_ally_work(db, p.tenant, _crew(o), o.number, o.title, o.scheduled_at, entity_id=o.id)
     db.commit()
     return _order_out(db, o, tenant=p.tenant)
 
@@ -2040,10 +2059,13 @@ def _reassign_ally(db: Session, p: Principal, o: WorkOrder, cambios: dict, *, ex
         )
         if aliados is None:
             cid = None  # equipo nuevo solo de Crimson: la orden vuelve a Crimson
-    o.ally_company_id = check_ally_assignment(db, p.tenant.id, ally_company_id=cid, user_ids=[tec, *ayu], project_id=pid, current=o.ally_company_id)
+    # solo se exige activo a quien entra: un ayudante aliado que ya estaba y hoy esta desactivado no traba la edicion
+    o.ally_company_id = check_ally_assignment(
+        db, p.tenant.id, ally_company_id=cid, user_ids=[tec, *ayu], project_id=pid, current=o.ally_company_id, existing=antes
+    )
     nuevos = despues - antes
     if nuevos:
-        notify_ally_work(db, p.tenant, nuevos, o.number, cambios.get("title") or o.title, cambios.get("scheduled_at", o.scheduled_at))
+        notify_ally_work(db, p.tenant, nuevos, o.number, cambios.get("title") or o.title, cambios.get("scheduled_at", o.scheduled_at), entity_id=o.id)
 
 
 class OrderAssignIn(BaseModel):

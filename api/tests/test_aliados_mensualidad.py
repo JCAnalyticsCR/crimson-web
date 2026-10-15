@@ -128,15 +128,23 @@ def test_factura_de_mensualidad_y_suscripcion(client, auth, db_session):
 
 
 def test_ganancias_con_mensualidad(client, auth, db_session):
-    from app.models import AllyCompany
+    from app.models import AllyCompany, Invoice
 
     s = escenario(client, dict(client.headers), db_session)
     pid = _servicio(client)
     assert _plan(client, s.A, pid).status_code == 200
     comp = db_session.get(AllyCompany, s.A)
-    assert client.post(f"/recurrences/{comp.recurrence_id}/run").status_code == 201
-    g = client.get("/aliado/ganancias", headers=s.a_jefe).json()
+    r = client.post(f"/recurrences/{comp.recurrence_id}/run")
+    assert r.status_code == 201
     mes = date.today().strftime("%Y-%m")
+    # el borrador "creado" que deja la recurrencia no se ve en suscripcion ni en facturas: tampoco se descuenta del neto
+    g = client.get("/aliado/ganancias", headers=s.a_jefe).json()
+    assert Decimal(str(g["totales"]["mensualidad"])) == 0
+    assert all(Decimal(str(m["mensualidad"])) == 0 for m in g["por_mes"])
+    inv = db_session.get(Invoice, r.json()["invoice_id"])
+    inv.status = "enviada"
+    db_session.commit()
+    g = client.get("/aliado/ganancias", headers=s.a_jefe).json()
     fila = next(m for m in g["por_mes"] if m["mes"] == mes)
     assert Decimal(str(fila["mensualidad"])) == 50000 and Decimal(str(fila["neto"])) == Decimal(str(fila["devengado"])) - 50000
     assert Decimal(str(g["totales"]["mensualidad"])) == 50000 and "Neto" in g["nota"]

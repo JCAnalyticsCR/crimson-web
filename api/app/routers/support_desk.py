@@ -585,8 +585,16 @@ def ticket_update(tid: int, data: TicketIn, p: Principal = Depends(require("supp
         from ..services.ally_scope import check_ally_assignment
 
         explicita = data.ally_company_id if "ally_company_id" in data.model_fields_set else t.ally_company_id
+        # solo se exige activo a quien entra: cambiarle el proyecto a un ticket cuyo tecnico aliado ya estaba (y hoy esta
+        # desactivado) no se traba
         t.ally_company_id = check_ally_assignment(
-            db, p.tenant.id, ally_company_id=explicita, user_ids=[data.assigned_to], project_id=data.project_id, current=t.ally_company_id
+            db,
+            p.tenant.id,
+            ally_company_id=explicita,
+            user_ids=[data.assigned_to],
+            project_id=data.project_id,
+            current=t.ally_company_id,
+            existing={t.assigned_to},
         )
     campos = []
     for k, v in data.model_dump(exclude={"ally_company_id"}).items():

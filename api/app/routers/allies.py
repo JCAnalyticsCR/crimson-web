@@ -319,9 +319,17 @@ class ToAllyIn(BaseModel):
 
 @router.post("/opportunity-allies/{aid}/to-ally")
 def convert_to_ally(aid: int, data: ToAllyIn | None = None, p: Principal = Depends(require("crm_pipeline", "editar")), db: Session = Depends(get_db)):
-    """Participacion vieja (un cliente o un proveedor) -> empresa aliada. Con id usa esa empresa; sin id busca la
-    empresa aliada ligada a ese cliente/proveedor o con su cedula o nombre, y si no existe la crea copiando sus datos."""
-    from .ally_admin import clean_tax, find_duplicate
+    """Participacion vieja (un cliente o un proveedor) -> empresa aliada. Con id usa esa empresa. Sin id liga SOLO por
+    vinculo exacto (la empresa aliada ya ligada a ese cliente/proveedor) o por la misma cedula (no vacia); si no hay
+    ninguna, la crea copiando sus datos y ligada a ese cliente/proveedor (es esa misma empresa). Nunca por nombre: una
+    empresa aliada con el mismo nombre y otra cedula responde 409 con ella en "existing" para elegirla a mano.
+
+    Este endpoint es del embudo (crm_pipeline): a una empresa aliada que YA existe no le cambia el cliente de facturacion
+    ni el proveedor de pagos (customer_id/supplier_id). Eso decide que facturas ve en su portal y se liga en
+    Administracion -> Aliados (aliados.editar)."""
+    from fastapi.responses import JSONResponse
+
+    from .ally_admin import clean_tax, norm_name
 
     a, o = _ally(db, aid, p)
     if a.ally_company_id:
@@ -333,35 +341,46 @@ def convert_to_ally(aid: int, data: ToAllyIn | None = None, p: Principal = Depen
             raise HTTPException(404, "Empresa aliada no encontrada")
     else:
         src = db.get(Customer, a.customer_id) if a.customer_id else db.get(Supplier, a.supplier_id) if a.supplier_id else None
+        if src is not None and src.tenant_id != p.tenant.id:
+            src = None
         tax = clean_tax(src.id_number if isinstance(src, Customer) else getattr(src, "tax_id", None)) if src else None
-        link = AllyCompany.customer_id == a.customer_id if a.customer_id else AllyCompany.supplier_id == a.supplier_id
-        comp = db.scalar(select(AllyCompany).where(AllyCompany.tenant_id == p.tenant.id, link).limit(1)) if src else None
-        comp = comp or find_duplicate(db, p.tenant.id, src.name if src else a.name, tax)
+        if src is not None:
+            link = AllyCompany.customer_id == src.id if isinstance(src, Customer) else AllyCompany.supplier_id == src.id
+            comp = db.scalar(select(AllyCompany).where(AllyCompany.tenant_id == p.tenant.id, link).order_by(AllyCompany.id).limit(1))
+        if comp is None and tax:
+            comp = db.scalar(select(AllyCompany).where(AllyCompany.tenant_id == p.tenant.id, AllyCompany.tax_id == tax).limit(1))
         if comp is None:
+            nombre = src.name if src else a.name
+            n = norm_name(nombre)
+            parecida = next((c for c in db.scalars(select(AllyCompany).where(AllyCompany.tenant_id == p.tenant.id)) if n and norm_name(c.name) == n), None)
+            if parecida is not None:
+                # mismo nombre, otra cedula (o sin cedula): puede ser otra empresa. Que la elija una persona
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": f"Ya existe la empresa aliada «{parecida.name}» con ese nombre pero no con la misma cédula: elegila a mano si es la misma",
+                        "existing": {"id": parecida.id, "name": parecida.name, "kind": "ally"},
+                    },
+                )
             comp = AllyCompany(
                 tenant_id=p.tenant.id,
-                name=(src.name if src else a.name)[:160],
+                name=nombre[:160],
                 tax_id=tax,
                 email=(getattr(src, "email", None) or "").lower() or None,
                 phone=getattr(src, "phone", None),
                 contacts=dict(a.contacts or {}),
-                customer_id=a.customer_id,
-                supplier_id=a.supplier_id,
+                # la empresa nueva ES ese cliente/proveedor (sus mismos datos): queda ligada para facturarle o pagarle
+                customer_id=src.id if isinstance(src, Customer) else None,
+                supplier_id=src.id if isinstance(src, Supplier) else None,
                 active=True,
                 created_by=p.user.id,
             )
             db.add(comp)
             db.flush()
             audit(db, p.tenant.id, p.user.id, "create", "ally_company", comp.id, {"name": comp.name, "desde": "participación"}, ip=p.ip)
-        else:
-            # la empresa aliada recuerda de que cliente/proveedor salio (para facturarle o pagarle)
-            if a.customer_id and not comp.customer_id:
-                comp.customer_id = a.customer_id
-            if a.supplier_id and not comp.supplier_id:
-                comp.supplier_id = a.supplier_id
     if not comp.active:
         raise HTTPException(422, "Esa empresa aliada está inactiva")
-    if data and data.ally_company_id and a.requests and not _misma_empresa(db, a, comp):
+    if a.requests and not _misma_empresa(db, a, comp):
         # con solicitudes, solo la empresa aliada que ES ese cliente/proveedor (si no, veria en su portal el precio
         # que mando otra)
         raise HTTPException(409, "Esta participación tiene solicitudes de precio de otra empresa: quítela y cree otra para la empresa aliada")

@@ -108,9 +108,23 @@ export function AlliesPanel({ oppId, allies, canEdit, seesCosts, sellers, quoteI
     setForm({ ...form, company: { kind: "ally", id: quick.existing.id }, company_name: quick.existing.name });
     setQuick(null);
   };
+  /* Sin elegir empresa, la API solo liga por vinculo exacto o por la misma cedula. Si hay una empresa aliada con el
+     mismo nombre y otra cedula responde 409 con ella: se usa solo si la persona confirma que es la misma. */
   const convertir = (a: Ally) => {
     if (!confirm(`¿Convertir a ${a.name} en empresa aliada? Así podrá ver esta oportunidad en su portal.`)) return;
-    run(() => api<Ally[]>(`/opportunity-allies/${a.id}/to-ally`, { method: "POST", json: {} }), `${a.name} ahora es empresa aliada`);
+    const url = `/opportunity-allies/${a.id}/to-ally`;
+    run(async () => {
+      try {
+        return await api<Ally[]>(url, { method: "POST", json: {} });
+      } catch (e) {
+        const ex = e instanceof ApiError && e.status === 409 ? (e.data as { existing?: { id: number; name: string } })?.existing : null;
+        if (!ex) throw e;
+        if (!confirm(`Ya existe la empresa aliada «${ex.name}» con ese nombre, pero no con la misma cédula. ¿Es la misma empresa? Aceptar la usa.`)) {
+          throw new Error("No se convirtió: elegí la empresa aliada en «Editar» si es otra");
+        }
+        return await api<Ally[]>(url, { method: "POST", json: { ally_company_id: ex.id } });
+      }
+    }, `${a.name} ahora es empresa aliada`);
   };
   const run = async (fn: () => Promise<Ally[]>, ok: string) => {
     if (busy) return;
