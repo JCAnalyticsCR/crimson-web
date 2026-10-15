@@ -66,6 +66,12 @@ export function Lookup({ value, placeholder, onSelect, fetcher, disabled, onCrea
   );
 }
 
+/** Empresas aliadas activas y sin suspender (selectores de OT, ticket y contrato: /allies/options). */
+export const searchAllies = async (q: string): Promise<LookupItem[]> => {
+  const r = await api<{ id: number; name: string; tax_id: string | null }[]>(`/allies/options?q=${encodeURIComponent(q)}`);
+  return r.map((a) => ({ id: a.id, label: a.name, hint: a.tax_id || undefined }));
+};
+
 export const searchProducts = async (q: string): Promise<LookupItem[]> => {
   const r = await api<{ items: { id: number; name: string; code: string; unit: string }[] }>(`/products?limit=20${q ? `&q=${encodeURIComponent(q)}` : ""}`);
   return r.items.map((p) => ({ id: p.id, label: p.name, hint: p.code }));

@@ -3,7 +3,10 @@
    - El supervisor asigna, programa y revisa. Al finalizar, el material usado sale de inventario una sola vez.
    Reunion del 13/10 (30:48-31:13): el panel "Tiempo" ya no depende de ser el tecnico (el admin no veia los botones),
    el tiempo va por jornada y por persona, y el detalle se guarda solo (antes el admin perdia todo al hacer clic
-   fuera y "Recibido por" no se guardaba nunca). */
+   fuera y "Recibido por" no se guardaba nunca).
+   Empresa aliada (aliado_final §10.6): con proyecto, los técnicos salen agrupados (Crimson / cada aliado que participa) y
+   la orden se puede asignar a la EMPRESA aliada aunque no tenga técnico todavía (su gerente la reparte en su portal).
+   Al cambiar el equipo se manda también la empresa elegida: sin ella la API la deduce de los técnicos. */
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, parseTs } from "../../lib/api";
@@ -36,7 +39,7 @@ export type Order = {
 };
 type Today = { today: Order[]; next: Order[]; surveys: { id: number; number: string; kind_label: string; site: string | null }[] };
 /* company: tecnicos de empresas aliadas que participan en el proyecto (/field/technicians?project_id=) */
-type Tech = { id: number; name: string; role: string; company?: string | null };
+type Tech = { id: number; name: string; role: string; company?: string | null; ally_company_id?: number | null };
 
 const STATUS: Record<string, { label: string; tone: string }> = {
   asignada: { label: "Asignada", tone: "info" }, en_sitio: { label: "En sitio", tone: "warn" }, en_proceso: { label: "En proceso", tone: "warn" },
@@ -52,8 +55,32 @@ const toISO = (local: string) => (local ? new Date(`${local}:00${CR_OFFSET}`).to
 const toLocalInput = (iso: string | null) => (iso ? new Date(parseTs(iso).getTime() - 6 * 3600_000).toISOString().slice(0, 16) : "");
 const hhmm = (s: string | null) => (s ? parseTs(s).toLocaleTimeString("es-CR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Costa_Rica" }) : "—");
 const dayLabel = (s: string | null) => (s ? parseTs(s).toLocaleDateString("es-CR", { weekday: "short", day: "2-digit", month: "short", timeZone: "America/Costa_Rica" }) : "Sin fecha");
-const blank = { title: "", kind: "instalacion", project_id: "", customer_id: "", customer_name: "", site: "", scheduled_at: "", technician_id: "", helpers: [] as number[], warehouse_id: null as number | null, notes: "", tasks: [] as Task[], materials: [] as Material[] };
-type Form = typeof blank & { id?: number; number?: string; /** solo del portal: nombres del equipo (ayudantes dados de baja) */ crew?: Crew[] };
+const blank = { title: "", kind: "instalacion", project_id: "", customer_id: "", customer_name: "", site: "", scheduled_at: "", technician_id: "", helpers: [] as number[], warehouse_id: null as number | null, notes: "", tasks: [] as Task[], materials: [] as Material[], ally_company_id: "" };
+type Form = typeof blank & {
+  id?: number; number?: string; /** solo del portal: nombres del equipo (ayudantes dados de baja) */ crew?: Crew[];
+  /** solo del portal: nombre de la empresa aliada que ya tenia la orden (aunque hoy no tenga tecnicos en la lista) */ ally_company?: string | null;
+};
+/** Empresas aliadas que se pueden elegir: las de los tecnicos del proyecto (participan en el) y la que ya tenia. */
+const empresasDe = (techs: Tech[], actual?: { id: string; name?: string | null }) => {
+  const m = new Map<string, string>();
+  for (const t of techs) if (t.ally_company_id && t.company) m.set(String(t.ally_company_id), t.company);
+  if (actual?.id && !m.has(actual.id)) m.set(actual.id, actual.name || "Empresa aliada actual");
+  return [...m.entries()].map(([id, name]) => ({ id, name }));
+};
+/** Opciones de tecnico agrupadas: Crimson y cada empresa aliada del proyecto. */
+const opcionesTecnicos = (techs: Tech[]) => {
+  const grupos = new Map<string, Tech[]>();
+  for (const t of techs) {
+    const k = t.company || "Crimson";
+    grupos.set(k, [...(grupos.get(k) || []), t]);
+  }
+  return [...grupos.entries()]
+    .sort(([a], [b]) => (a === "Crimson" ? -1 : b === "Crimson" ? 1 : a.localeCompare(b)))
+    .map(([g, ts]) => <optgroup key={g} label={g}>{ts.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>);
+};
+/** Si cambio el equipo, va tambien la empresa elegida (sin ella la API la deduce de los tecnicos). */
+const conEmpresa = (diff: Record<string, unknown>, b: Record<string, unknown>) =>
+  ("technician_id" in diff || "helpers" in diff) && !("ally_company_id" in diff) ? { ...diff, ally_company_id: b.ally_company_id } : diff;
 const num = (v: string | number | null | undefined) => Number(String(v ?? "").replace(",", ".")) || 0;
 
 /** Lo que trae el servidor, con los ids de material de referencia (para mandar "removed"). */
@@ -199,6 +226,7 @@ export default function WorkOrders() {
     title: f.title, kind: f.kind, project_id: f.project_id ? Number(f.project_id) : null, customer_id: f.customer_id ? Number(f.customer_id) : null,
     site: f.site || null, scheduled_at: toISO(f.scheduled_at),
     technician_id: f.technician_id ? Number(f.technician_id) : null, helpers: f.helpers, warehouse_id: f.warehouse_id, tasks: f.tasks, notes: f.notes || null,
+    ally_company_id: f.ally_company_id ? Number(f.ally_company_id) : null,
     materials: f.materials.filter((m) => m.name.trim()).map((m) => ({ id: m.id, product_id: m.product_id, name: m.name, quantity: num(m.quantity), unit: m.unit || "Unid", planned: num(m.planned) })),
   });
   const formAuto = useRecordAutosave<Form>({
@@ -210,7 +238,7 @@ export default function WorkOrders() {
     body: formBody,
     // solo lo que cambio; el PUT conserva lo que el tecnico ya anoto como usado (filas por id)
     save: async (b, id, ctx) => {
-      const diff = formDiff(b, ctx.prev);
+      const diff = conEmpresa(formDiff(b, ctx.prev), b);
       if (!Object.keys(diff).length) return; // nada distinto: no se llama
       await api(`/work-orders/${id}`, { method: "PUT", json: diff, headers: ctx.headers, keepalive: ctx.keepalive });
       load();
@@ -226,7 +254,7 @@ export default function WorkOrders() {
       // (ya termino cualquier autoguardado en curso)
       await formAuto.exclusive(form, async (id) => {
         if (!id) return api<Order>("/work-orders", { method: "POST", json: formBody(form) });
-        const diff = formDiff(formBody(form), formAuto.accepted());
+        const diff = conEmpresa(formDiff(formBody(form), formAuto.accepted()), formBody(form));
         return Object.keys(diff).length ? api<Order>(`/work-orders/${id}`, { method: "PUT", json: diff }) : undefined;
       });
       toast("Orden guardada"); setForm(null); load();
@@ -245,6 +273,7 @@ export default function WorkOrders() {
       customer_name: open.customer || "", site: open.site || "", scheduled_at: toLocalInput(open.scheduled_at), technician_id: open.technician_id ? String(open.technician_id) : "",
       helpers: open.helpers || [], crew: open.crew, warehouse_id: open.warehouse_id ?? null, notes: open.notes || "", tasks: open.tasks || [],
       materials: (open.materials || []).map((m) => ({ ...m, quantity: String(m.quantity), planned: String(m.planned) })),
+      ally_company_id: open.ally_company_id ? String(open.ally_company_id) : "", ally_company: open.ally_company ?? null,
     });
     setOpen(null);
   };
@@ -369,7 +398,7 @@ export default function WorkOrders() {
             <Card title="Asignación rápida">
               {!open.technician_id && <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--warn)" }}>Sin técnico, esta orden no le aparece a nadie en «Mi día».</p>}
               <div className="grid-2">
-                <Field label="Técnico"><select className="select" value={asgVal.technician_id} onChange={(e) => setAsg({ ...asgVal, technician_id: e.target.value, helpers: asgVal.helpers.filter((x) => String(x) !== e.target.value) })}><option value="">Sin asignar</option>{techs.map((t) => <option key={t.id} value={t.id}>{t.company ? `${t.name} · ${t.company}` : t.name}</option>)}</select></Field>
+                <Field label="Técnico"><select className="select" value={asgVal.technician_id} onChange={(e) => setAsg({ ...asgVal, technician_id: e.target.value, helpers: asgVal.helpers.filter((x) => String(x) !== e.target.value) })}><option value="">Sin asignar</option>{opcionesTecnicos(techs)}</select></Field>
                 <Field label="Fecha y hora"><input className="input" type="datetime-local" value={asgVal.scheduled_at} onChange={(e) => setAsg({ ...asgVal, scheduled_at: e.target.value })} /></Field>
               </div>
               <Field label="Ayudantes">{chipsAyudantes(asgVal.helpers, asgVal.technician_id, (helpers) => setAsg({ ...asgVal, helpers }), open.crew)}</Field>
@@ -431,11 +460,28 @@ export default function WorkOrders() {
           <div className="grid-3">
             <Field label="Trabajo"><input className="input" autoFocus value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Instalación de 8 cámaras" /></Field>
             <Field label="Tipo"><select className="select" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>{Object.entries(KINDS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
-            <Field label="Técnico" hint={allows("settings.configurar") ? "¿No está en la lista? Invitalo con + Técnico." : undefined}><div style={{ display: "flex", gap: 6 }}><select className="select" value={form.technician_id} onChange={(e) => setForm({ ...form, technician_id: e.target.value, helpers: form.helpers.filter((x) => String(x) !== e.target.value) })}><option value="">Sin asignar</option>{techs.map((t) => <option key={t.id} value={t.id}>{t.company ? `${t.name} · ${t.company}` : t.name}</option>)}</select><InviteTechButton /></div></Field>
+            <Field label="Técnico" hint={allows("settings.configurar") ? "¿No está en la lista? Invitalo con + Técnico." : undefined}><div style={{ display: "flex", gap: 6 }}><select className="select" value={form.technician_id} onChange={(e) => {
+              // un tecnico de una empresa aliada deja la orden en esa empresa
+              const t = techs.find((x) => String(x.id) === e.target.value);
+              setForm({ ...form, technician_id: e.target.value, helpers: form.helpers.filter((x) => String(x) !== e.target.value), ally_company_id: t?.ally_company_id ? String(t.ally_company_id) : form.ally_company_id });
+            }}><option value="">Sin asignar</option>{opcionesTecnicos(techs)}</select><InviteTechButton /></div></Field>
             <Field label="Cliente"><Lookup value={form.customer_name} placeholder="Buscar cliente…" fetcher={searchCustomers} onSelect={(it, text) => setForm({ ...form, customer_id: it ? String(it.id) : "", customer_name: text })} /></Field>
             <Field label="Fecha y hora"><input className="input" type="datetime-local" value={form.scheduled_at} onChange={(e) => setForm({ ...form, scheduled_at: e.target.value })} /></Field>
             <Field label="Sitio"><input className="input" value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value })} /></Field>
           </div>
+          {(form.ally_company_id || (form.project_id && empresasDe(techs).length > 0)) && (
+            <Field label="Empresa aliada" hint="La ejecuta un aliado que participa en el proyecto: la ve en su portal y su gerente la reparte si no tiene técnico.">
+              <select className="select" value={form.ally_company_id} onChange={(e) => {
+                const id = e.target.value;
+                // un tecnico aliado de OTRA empresa no queda en la orden (la API no deja dos empresas en un trabajo)
+                const deOtra = (uid: string | number) => { const t = techs.find((x) => String(x.id) === String(uid)); return !!t?.ally_company_id && String(t.ally_company_id) !== id; };
+                setForm({ ...form, ally_company_id: id, technician_id: form.technician_id && deOtra(form.technician_id) ? "" : form.technician_id, helpers: form.helpers.filter((h) => !deOtra(h)) });
+              }}>
+                <option value="">Crimson (sin aliado)</option>
+                {empresasDe(techs, { id: form.ally_company_id, name: form.ally_company }).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </Field>
+          )}
           <Field label="Ayudantes">{chipsAyudantes(form.helpers, form.technician_id, (helpers) => setForm({ ...form, helpers }), form.crew)}</Field>
           <Field label="Tareas" hint="Una por línea; el técnico las va marcando (las ya marcadas se conservan).">
             <textarea className="textarea" value={form.tasks.map((t) => t.text).join("\n")} onChange={(e) => setForm({ ...form, tasks: tareasDesde(e.target.value, form.tasks) })} placeholder={"Montar cámaras\nCorrer cable\nConfigurar grabador"} />

@@ -1,6 +1,11 @@
 /* Órdenes de trabajo del aliado (14:35-14:48): las de su empresa ("sus chiguines" las ejecutan con la app). Flujo del
-   técnico desde el celular: Llegué · Iniciar · Guardar avance · Finalizar, con tareas, material usado, fotos y firma.
-   El aliado además reasigna entre su equipo. Crear, editar o cancelar órdenes es de Crimson. Sin precios. */
+   técnico desde el celular: Llegué · Iniciar jornada · Terminar jornada · Guardar avance · Finalizar, con tareas,
+   material usado, fotos y firma. El aliado además reasigna entre su equipo. Crear, editar o cancelar órdenes es de
+   Crimson. Sin precios.
+   Cada botón manda SOLO lo que cambió desde la última respuesta del servidor (como el panel interno): el material que
+   ya existe va por id (quantities / removed) y el nuevo en "agregados". Mandar todo pisaría lo que Crimson u otro
+   técnico anotaron mientras tanto. Si quedó tiempo corriendo de más (se olvidaron de terminar la jornada), se indica
+   la hora real en que terminaron. */
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../../lib/api";
@@ -10,6 +15,10 @@ import { Lookup, type LookupItem } from "../../ui/Lookup";
 import { PhotoStrip } from "../../ui/MediaPicker";
 import { ALLY_FIELD_API } from "../field/fieldApi";
 import { errorText, fmtWhen, useAlly, type Material, type OrderRow, type Tech } from "./shared";
+
+const num = (v: string | number | null | undefined) => Number(String(v ?? "").replace(",", ".")) || 0;
+/* Costa Rica es UTC-6 todo el año: la hora se escribe en hora de aquí aunque el teléfono tenga mal la zona. */
+const toISO = (local: string) => new Date(`${local}:00-06:00`).toISOString();
 
 function OrderList() {
   const [estado, setEstado] = useState<"pendientes" | "finalizadas" | "todas">("pendientes");
@@ -53,10 +62,12 @@ function OrderDetail({ id }: { id: number }) {
   const [firma, setFirma] = useState("");
   const [techs, setTechs] = useState<Tech[]>([]);
   const [busy, setBusy] = useState(false);
-  const take = (x: OrderRow) => { setO(x); setMats(x.materials || []); setTasks(x.tasks || []); setPhotos(x.photos || []); setNotes(x.notes || ""); setFirma(x.customer_signature || ""); };
+  const [finJornada, setFinJornada] = useState("");
+  const take = (x: OrderRow) => { setO(x); setMats(x.materials || []); setTasks(x.tasks || []); setPhotos(x.photos || []); setNotes(x.notes || ""); setFirma(x.customer_signature || ""); setFinJornada(""); };
   const load = useCallback(() => { api<OrderRow>(ALLY_FIELD_API.order(id)).then(take).catch((e) => setErr(errorText(e))); }, [id]);
   useEffect(load, [load]);
-  useEffect(() => { if (can("asignar")) api<Tech[]>(ALLY_FIELD_API.technicians).then(setTechs).catch(() => setTechs([])); }, [can]);
+  // su equipo activo (el técnico: solo él): para saber si el tiempo que corre es de su gente y para reasignar
+  useEffect(() => { api<Tech[]>(ALLY_FIELD_API.technicians).then(setTechs).catch(() => setTechs([])); }, []);
   const productos = useCallback(async (q: string): Promise<LookupItem[]> => {
     const r = await api<{ id: number; code: string; name: string }[]>(`${ALLY_FIELD_API.productSearch}?q=${encodeURIComponent(q)}`);
     return r.map((p) => ({ id: p.id, label: p.name, hint: p.code }));
@@ -64,12 +75,31 @@ function OrderDetail({ id }: { id: number }) {
   if (err) return <p className="muted">{err}</p>;
   if (!o) return <div style={{ minHeight: "40vh", display: "grid", placeItems: "center" }}><span className="spinner" /></div>;
   const act = o.can_act && !readOnly;
-  const accion = async (a: "arrive" | "start" | "progress" | "finish") => {
+  const equipo = new Set(techs.map((t) => t.id));
+  const corriendo = o.running.filter((r) => equipo.has(r.user_id));
+  /** Solo lo distinto de la última respuesta del servidor. */
+  const cambios = () => {
+    const b: Record<string, unknown> = {};
+    if (JSON.stringify(tasks) !== JSON.stringify(o.tasks || [])) b.tasks = tasks;
+    if (JSON.stringify(photos) !== JSON.stringify(o.photos || [])) b.photos = photos;
+    if (notes !== (o.notes || "")) b.notes = notes;
+    if (firma !== (o.customer_signature || "")) b.customer_signature = firma;
+    const antes = new Map((o.materials || []).map((m) => [m.id, m]));
+    const quantities = Object.fromEntries(mats.filter((m) => m.id && antes.has(m.id) && num(m.quantity) !== num(antes.get(m.id)!.quantity)).map((m) => [String(m.id), num(m.quantity)]));
+    if (Object.keys(quantities).length) b.quantities = quantities;
+    const removed = [...antes.keys()].filter((mid) => !mats.some((m) => m.id === mid));
+    if (removed.length) b.removed = removed;
+    const agregados = mats.filter((m) => !m.id && m.name.trim()).map((m) => ({ product_id: m.product_id, name: m.name, quantity: num(m.quantity), unit: m.unit || "Unid", planned: 0 }));
+    if (agregados.length) b.agregados = agregados;
+    return b;
+  };
+  const accion = async (a: "arrive" | "start" | "pause" | "progress" | "finish") => {
+    if ((a === "pause" || a === "finish") && o.stale && !finJornada) { toast("Indicá a qué hora terminaron ese día", "bad"); return; }
     setBusy(true);
     try {
-      const body = { tasks, photos, notes, customer_signature: firma || null, materials: mats.map((m) => ({ id: m.id || undefined, product_id: m.product_id, name: m.name, quantity: m.quantity || 0, unit: m.unit || "Unid", planned: m.planned || 0 })) };
+      const body = { ...cambios(), ...((a === "pause" || a === "finish") && o.stale && finJornada ? { fin_jornada: toISO(finJornada) } : {}) };
       take(await api<OrderRow>(ALLY_FIELD_API.orderAction(id, a), { method: "POST", json: body }));
-      toast(a === "finish" ? "Orden finalizada" : "Guardado");
+      toast(a === "finish" ? "Orden finalizada" : a === "start" ? "Jornada iniciada" : a === "pause" ? "Jornada terminada" : "Guardado");
     } catch (e) { toast(e instanceof Error ? e.message : "No se pudo guardar", "bad"); }
     finally { setBusy(false); }
   };
@@ -100,10 +130,18 @@ function OrderDetail({ id }: { id: number }) {
           </Field>
         )}
       </div>
+      {act && o.stale && (
+        <div className="al-stale" role="alert">
+          <span>Quedó tiempo corriendo desde el {fmtWhen(corriendo.map((r) => r.started_at).sort()[0] || null)}. ¿A qué hora terminaron ese día?</span>
+          <input className="input" type="datetime-local" aria-label="Hora en que terminaron" value={finJornada} onChange={(e) => setFinJornada(e.target.value)} style={{ maxWidth: 240 }} />
+          <span className="meta">Se usa al terminar la jornada o al finalizar. Una jornada no pasa de 16 horas.</span>
+        </div>
+      )}
       {act && (
         <div className="al-actions" style={{ margin: "12px 0" }}>
           {o.status === "asignada" && <button className="btn btn--soft" disabled={busy} onClick={() => accion("arrive")}><Icon d={I.check} />Llegué</button>}
-          {o.status !== "en_proceso" && <button className="btn btn--soft" disabled={busy} onClick={() => accion("start")}><Icon d={I.clock} />Iniciar</button>}
+          {corriendo.length === 0 && <button className="btn btn--soft" disabled={busy} onClick={() => accion("start")}><Icon d={I.clock} />Iniciar jornada</button>}
+          {corriendo.length > 0 && <button className="btn btn--soft" disabled={busy} onClick={() => accion("pause")}><Icon d={I.clock} />Terminar jornada</button>}
           <button className="btn btn--soft" disabled={busy} onClick={() => accion("progress")}><Icon d={I.check} />Guardar avance</button>
           <button className="btn btn--crimson" disabled={busy} onClick={() => accion("finish")}><Icon d={I.check} />Finalizar</button>
         </div>

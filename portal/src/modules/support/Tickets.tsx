@@ -2,14 +2,16 @@
    (1 a 3) y todo lo que se hizo escrito con hora y autor. Reunion del 13/10 (16:56): "un diseño diferente… que llame
    más la atención y que de verdad yo pueda dar los seguimientos". De ahi la bandeja con semaforo de SLA (el servidor
    decide el grupo; aqui el reloj baja cada 30 s), el proximo paso, el ultimo seguimiento y el seguimiento en 1 clic.
-   Los filtros viven en la URL (se comparten y sobreviven al refrescar). */
+   Los filtros viven en la URL (se comparten y sobreviven al refrescar).
+   Empresa aliada (aliado_final §10.6): el ticket se puede asignar a la EMPRESA (su gerente lo reparte en su portal) o
+   a una persona de ella; el Responsable lista al equipo de Crimson y, con empresa elegida, a su gente. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
 import { Empty, Field, I, Icon, Loading, Modal } from "../../ui/components";
-import { Lookup, searchCustomers } from "../../ui/Lookup";
+import { Lookup, searchAllies, searchCustomers } from "../../ui/Lookup";
 import { TicketBoard } from "./TicketBoard";
 import { TicketCard } from "./TicketCard";
 import { TicketDetail } from "./TicketDetail";
@@ -35,8 +37,14 @@ const VISTA_KEY = "crimson:tickets:vista";
 const leerVista = () => { try { return localStorage.getItem(VISTA_KEY) || ""; } catch { return ""; } };
 const guardarVista = (v: string) => { try { localStorage.setItem(VISTA_KEY, v); } catch { /* sin almacenamiento */ } };
 
-const blank = { subject: "", customer_id: "", customer_name: "", project_id: "", kind: "soporte", channel: "whatsapp", level: 1, priority: "media", description: "", assigned_to: "", billable: false };
-type Form = typeof blank & { id?: number; number?: string };
+const blank = {
+  subject: "", customer_id: "", customer_name: "", project_id: "", kind: "soporte", channel: "whatsapp", level: 1, priority: "media", description: "", assigned_to: "", billable: false,
+  ally_company_id: "", ally_company: "",
+};
+/** ally_orig: la empresa con que se abrió (al editar, la empresa solo se manda si cambió: un ticket de un aliado
+    suspendido se sigue editando sin tocarla). */
+type Form = typeof blank & { id?: number; number?: string; ally_orig?: string };
+type AgenteAliado = { id: number; name: string; role: string; company: string | null };
 type Proyecto = { id: number; number: string; name: string };
 
 export default function Tickets() {
@@ -48,6 +56,7 @@ export default function Tickets() {
   const [resolverAlAbrir, setResolverAlAbrir] = useState(false);
   const [form, setForm] = useState<Form | null>(null);
   const [proyectos, setProyectos] = useState<Proyecto[]>([]);
+  const [agentesAliado, setAgentesAliado] = useState<AgenteAliado[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const openId = useRef<number | null>(null);
   openId.current = open?.id ?? null;
@@ -141,6 +150,7 @@ export default function Tickets() {
     subject: x.subject, customer_id: x.customer_id ? Number(x.customer_id) : null, project_id: x.project_id ? Number(x.project_id) : null,
     kind: x.kind, channel: x.channel || null, level: Number(x.level), priority: x.priority, description: x.description || null,
     assigned_to: x.assigned_to ? Number(x.assigned_to) : null, billable: x.billable, contact: {}, tags: [],
+    ...(x.id ? (x.ally_company_id !== (x.ally_orig ?? "") ? { ally_company_id: x.ally_company_id ? Number(x.ally_company_id) : null } : {}) : x.ally_company_id ? { ally_company_id: Number(x.ally_company_id) } : {}),
   });
   const formAuto = useRecordAutosave<Form>({
     ns: "tck",
@@ -161,6 +171,19 @@ export default function Tickets() {
     apply: (data) => setForm((cur) => (cur ? { ...data, id: cur.id, number: cur.number } : cur)),
   });
   const verProyectos = allows("projects.ver");
+  // con empresa aliada elegida, el Responsable suma a su gente (agrupada aparte del equipo de Crimson)
+  const aliadaForm = form?.ally_company_id || "";
+  useEffect(() => {
+    if (!aliadaForm) { setAgentesAliado([]); return; }
+    api<AgenteAliado[]>(`/tickets/meta/agents?ally_company_id=${aliadaForm}`).then((r) => setAgentesAliado(r.filter((x) => x.company))).catch(() => setAgentesAliado([]));
+  }, [aliadaForm]);
+  const elegirAliada = (it: { id: number } | null, text: string) => {
+    if (!form) return;
+    const id = it ? String(it.id) : "";
+    // quien atendia de otra empresa aliada deja de ser responsable (Crimson sigue pudiendo atenderlo)
+    const deOtra = !!form.assigned_to && agentesAliado.some((a) => String(a.id) === form.assigned_to) && id !== form.ally_company_id;
+    setForm({ ...form, ally_company_id: id, ally_company: text, assigned_to: deOtra ? "" : form.assigned_to });
+  };
   useEffect(() => {
     const cid = form?.customer_id;
     if (!cid || !verProyectos) { setProyectos([]); return; }
@@ -185,6 +208,7 @@ export default function Tickets() {
     id: t.id, number: t.number, subject: t.subject, customer_id: t.customer_id ? String(t.customer_id) : "", customer_name: t.customer_id ? t.customer || "" : "",
     project_id: t.project_id ? String(t.project_id) : "", kind: t.kind, channel: t.channel || "", level: t.level, priority: t.priority,
     description: t.description || "", assigned_to: t.assigned_to ? String(t.assigned_to) : "", billable: t.billable,
+    ally_company_id: t.ally_company_id ? String(t.ally_company_id) : "", ally_company: t.ally_company || "", ally_orig: t.ally_company_id ? String(t.ally_company_id) : "",
   });
 
   /* ---------- vista ---------- */
@@ -284,7 +308,18 @@ export default function Tickets() {
             <Field label="Canal"><select className="select" value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value })}>{(meta?.channels || []).map((c) => <option key={c} value={c}>{c}</option>)}</select></Field>
             <Field label="Prioridad" hint={meta ? `Primera respuesta: ${meta.sla_horas[form.priority]} h` : undefined}><select className="select" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>{(meta?.priorities || []).map((x) => <option key={x} value={x}>{PRIO_LABEL[x] || x}</option>)}</select></Field>
             <Field label="Nivel" hint="1 atiende · 2 diagnostica · 3 escala al fabricante"><select className="select" value={form.level} onChange={(e) => setForm({ ...form, level: Number(e.target.value) })}><option value={1}>Nivel 1</option><option value={2}>Nivel 2</option><option value={3}>Nivel 3</option></select></Field>
-            <Field label="Responsable"><select className="select" value={form.assigned_to} onChange={(e) => setForm({ ...form, assigned_to: e.target.value })}><option value="">Sin asignar</option>{(meta?.agents || []).map((a) => <option key={a.id} value={a.id}>{a.name}{a.id === me?.user.id ? " (yo)" : ""}</option>)}</select></Field>
+            {meta?.can_see_all && (
+              <Field label="Empresa aliada" hint="Opcional. Su gerente lo ve en el portal de aliados y lo reparte.">
+                <Lookup value={form.ally_company} placeholder="Crimson (sin aliado)" fetcher={searchAllies} onSelect={elegirAliada} />
+              </Field>
+            )}
+            <Field label="Responsable">
+              <select className="select" value={form.assigned_to} onChange={(e) => setForm({ ...form, assigned_to: e.target.value })}>
+                <option value="">{form.ally_company_id ? "Sin asignar (lo reparte la empresa aliada)" : "Sin asignar"}</option>
+                <optgroup label="Crimson">{(meta?.agents || []).map((a) => <option key={a.id} value={a.id}>{a.name}{a.id === me?.user.id ? " (yo)" : ""}</option>)}</optgroup>
+                {agentesAliado.length > 0 && <optgroup label={form.ally_company || "Empresa aliada"}>{agentesAliado.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>}
+              </select>
+            </Field>
             {verProyectos && (
               <Field label="Proyecto (opcional)" hint={form.customer_id ? "Liga el ticket a la obra (y a sus empresas aliadas)." : "Elegí primero el cliente."}>
                 <select className="select" value={form.project_id} disabled={!form.customer_id} onChange={(e) => setForm({ ...form, project_id: e.target.value })}>

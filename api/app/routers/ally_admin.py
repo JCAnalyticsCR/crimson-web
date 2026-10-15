@@ -688,8 +688,16 @@ def ally_preview(cid: int, data: PreviewIn | None = None, p: Principal = Depends
     )
     db.commit()
     users = db.scalars(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.ally_company_id == c.id)).all()
+    from .ally_portal import ganancias_disponibles
+
     return {
-        "company": {"id": c.id, "name": c.name, "state": c.state, "suspended_reason": c.suspended_reason},
+        "company": {
+            "id": c.id,
+            "name": c.name,
+            "state": c.state,
+            "suspended_reason": c.suspended_reason if c.suspended_at else None,
+            "features": {"ganancias": ganancias_disponibles()},
+        },
         "users": [{"id": m.user.id, "name": m.user.full_name, "role": m.role_code, "active": m.active} for m in users],
     }
 

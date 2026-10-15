@@ -10,7 +10,11 @@ export class ApiError extends Error {
 /* "Ver como este aliado" (solo admin): el portal de aliados se dibuja con los datos REALES de esa empresa. La API lo
    aplica solo a /aliado/* y solo para lectura (core/ally.py); el navegador manda la empresa elegida en cabeceras. */
 export const ALLY_PREVIEW_KEY = "crimson-view-ally";
-export type AllyPreview = { company_id: number; user_id?: number | null; role: "aliado" | "tecnico_aliado"; name?: string; user_name?: string | null };
+export type AllyPreview = {
+  company_id: number; user_id?: number | null; role: "aliado" | "tecnico_aliado"; name?: string; user_name?: string | null;
+  /** como estaba la empresa al activar la vista previa (POST /allies/{id}/preview): la franja de suspendida y el menú */
+  state?: "activo" | "suspendido" | "inactivo"; suspended_reason?: string | null; features?: { ganancias: boolean };
+};
 export function readAllyPreview(): AllyPreview | null {
   try { const raw = sessionStorage.getItem(ALLY_PREVIEW_KEY); return raw ? (JSON.parse(raw) as AllyPreview) : null; } catch { return null; }
 }

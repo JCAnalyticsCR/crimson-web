@@ -1,10 +1,11 @@
 /* Mi equipo: el aliado invita a sus técnicos (siempre como Técnico de aliado), revoca invitaciones y activa o
-   desactiva técnicos. Cupos usados contra el tope del plan; si la mensualidad es por usuario, lo avisa. */
+   desactiva técnicos. Cupos usados contra el tope del plan; si la mensualidad es por usuario, lo avisa.
+   La invitación le llega a la persona por correo: el portal no muestra el enlace (con él, cualquiera aceptaría por
+   ella) ni confirma si el correo ya tiene otro acceso. Si no le llega, el enlace lo entrega Crimson. */
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtDate } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Field, I, Icon } from "../../ui/components";
-import { InviteLink, type InviteOut } from "../cliente/InviteLink";
 import { errorText, useAlly } from "./shared";
 
 type U = { id: number; name: string; email: string; role: string; active: boolean; last_login: string | null; me?: boolean };
@@ -16,8 +17,7 @@ export default function AllyUsers() {
   const [d, setD] = useState<Data | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
-  const [inv, setInv] = useState<InviteOut | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const load = useCallback(() => { api<Data>("/aliado/usuarios").then(setD).catch((e) => setErr(errorText(e))); }, []);
   useEffect(load, [load]);
@@ -25,7 +25,7 @@ export default function AllyUsers() {
   if (!d) return <div style={{ minHeight: "40vh", display: "grid", placeItems: "center" }}><span className="spinner" /></div>;
   const invitar = async () => {
     setBusy(true);
-    try { setInv(await api<InviteOut>("/aliado/usuarios", { method: "POST", json: { email, name: name || null } })); load(); }
+    try { const r = await api<{ detail: string }>("/aliado/usuarios", { method: "POST", json: { email } }); setAviso(r.detail); setEmail(""); load(); }
     catch (e) { toast(e instanceof Error ? e.message : "No se pudo invitar", "bad"); }
     finally { setBusy(false); }
   };
@@ -57,10 +57,9 @@ export default function AllyUsers() {
         <div className="cp-card cp-form" style={{ marginTop: 16, maxWidth: 520 }}>
           <b>Invitar a un técnico</b>
           {lleno && <span className="badge badge--warn">Su plan permite {d.seats.max} usuarios. Desactive a alguien o escríbale a Crimson.</span>}
-          <Field label="Correo"><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-          <Field label="Nombre (opcional)"><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+          <Field label="Correo"><input className="input" type="email" value={email} onChange={(e) => { setEmail(e.target.value); setAviso(null); }} /></Field>
           <button className="btn btn--crimson" style={{ alignSelf: "flex-start" }} disabled={busy || lleno || !email.includes("@")} onClick={invitar}><Icon d={I.plus} />Invitar</button>
-          {inv && <InviteLink inv={inv} email={email} portal="aliados" />}
+          {aviso && <p className="muted" role="status" style={{ margin: 0 }}>{aviso}</p>}
         </div>
       )}
     </>

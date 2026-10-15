@@ -8,7 +8,10 @@ export function useAlly() {
   const { me, allyPreview, role, allows } = useSession();
   const preview = !!allyPreview;
   const company: AllyCompanyMe | null = preview
-    ? { id: allyPreview!.company_id, name: allyPreview!.name || "Aliado", state: "activo", suspended_reason: null, features: { ganancias: true } }
+    ? {
+        id: allyPreview!.company_id, name: allyPreview!.name || "Aliado", state: allyPreview!.state || "activo",
+        suspended_reason: allyPreview!.suspended_reason ?? null, features: allyPreview!.features || { ganancias: true },
+      }
     : me?.ally_company ?? null;
   return { preview, readOnly: preview, isTech: role === "tecnico_aliado", role, company, can: (a: string) => allows(`aliado.${a}`), personName: allyPreview?.user_name ?? null };
 }
@@ -47,6 +50,8 @@ export type SurveyRow = {
   technician_id: number | null; technician: string | null; visit_date: string | null; points_count: number; created_at: string; sent_at: string | null;
   review_status: string | null; review_label: string | null; open_observations: number; observations: Obs[]; pending_review: { label: string } | null; can_edit: boolean;
   photos: string[]; notes: string | null; contact: Record<string, string> | null; received_by: string | null; labor: Record<string, { label: string; people: number; days: string }>;
+  /** solo los de su equipo (los técnicos de Crimson de la visita no salen al portal; la API los conserva) */
+  visit_tech_ids: number[]; visit_techs: string[];
 };
 export type SurveyFull = SurveyRow & { common: Record<string, unknown> | null; points: Point[]; items: Item[] };
 export type Material = { id: number; product_id: number | null; name: string; quantity: string; unit: string; planned: string };
@@ -55,6 +60,8 @@ export type OrderRow = {
   technician_id: number | null; technician: string | null; helpers: number[]; arrived_at: string | null; started_at: string | null; finished_at: string | null; hours: number | null;
   tasks: { text: string; done: boolean }[]; photos: string[]; notes: string | null; customer_signature: string | null;
   crew: { id: number; name: string | null; role: string }[]; running: { user_id: number; user: string | null; started_at: string }[]; can_act: boolean; materials?: Material[];
+  /** tiempo de su equipo corriendo de más (se olvidaron de terminar la jornada) */
+  stale?: boolean;
 };
 export type TicketRow = {
   id: number; number: string; subject: string; kind: string; priority: string; status: string; level: number; customer: string | null; project: string | null;

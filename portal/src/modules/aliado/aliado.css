@@ -42,3 +42,7 @@
 .al-chart__bar { width: 100%; border-radius: 4px 4px 0 0; background: var(--crimson); }
 .al-chart__bar--fee { background: var(--text-3); }
 .al-chart__lbl { font-size: 10px; color: var(--text-3); }
+.al-labor { display: flex; flex-direction: column; gap: 6px; }
+.al-labor__row { display: grid; grid-template-columns: minmax(84px, 1fr) 64px auto 64px auto; gap: 6px; align-items: center; }
+.al-labor__row .input { min-width: 0; }
+.al-stale { padding: 10px 12px; border-radius: 12px; border: 1px solid var(--warn); background: var(--warn-soft); display: flex; flex-direction: column; gap: 8px; }

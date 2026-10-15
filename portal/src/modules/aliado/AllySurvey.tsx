@@ -1,9 +1,11 @@
 /* Levantamiento del aliado: el mismo contenido que el del técnico de Crimson (puntos con los campos de la plantilla,
    materiales, fotos y la sección común), con las rutas del portal de aliados (fieldApi.ALLY_FIELD_API). Sin costeo,
    márgenes, recomendación de equipos ni informe: eso lo hace Crimson. Lo que el aliado guarda conserva lo que Crimson
-   ya costeó (la API no lo toca). Al terminar: "Enviar a revisión". Si vuelve con observaciones, se marcan resueltas. */
+   ya costeó (la API no lo toca). Al terminar: "Enviar a revisión". Si vuelve con observaciones, se marcan resueltas.
+   El personal requerido y quienes hicieron la visita solo se mandan si el aliado los cambió (la API conserva lo demás,
+   incluidos los técnicos de Crimson de la visita, que aquí no se ven). */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Field, I, Icon } from "../../ui/components";
@@ -14,12 +16,21 @@ import { CommonSection, PointFields, initialStatus, type Common, type CommonSpec
 import { errorText, useAlly, type Item, type Point, type SurveyFull, type Tech } from "./shared";
 
 type KindSpec = { label: string; point_prefix: string; point_label: string; fields: V2Field[]; materials: string[] };
-type Draft = { kind: string; site: string; contact: Record<string, string>; visit_date: string; notes: string; photos: string[]; points: Point[]; items: Item[]; common: Common | null; received_by: string; technician_id: number | null };
+type Labor = Record<string, { people: string; days: string }>;
+type Draft = {
+  kind: string; site: string; contact: Record<string, string>; visit_date: string; notes: string; photos: string[]; points: Point[]; items: Item[];
+  common: Common | null; received_by: string; technician_id: number | null; labor: Labor; visit_tech_ids: number[];
+};
+const LABOR_ORDEN: [string, string][] = [["tecnico", "Técnicos"], ["civil", "Obra civil"], ["contratado", "Contratados"]];
 
+const laborDe = (s: SurveyFull): Labor =>
+  Object.fromEntries(LABOR_ORDEN.map(([k]) => [k, { people: String(s.labor?.[k]?.people ?? 0), days: String(Number(s.labor?.[k]?.days ?? 0)) }]));
 const toDraft = (s: SurveyFull): Draft => ({
   kind: s.kind, site: s.site || "", contact: (s.contact as Record<string, string>) || {}, visit_date: s.visit_date || "", notes: s.notes || "",
   photos: s.photos || [], points: s.points || [], items: s.items || [], common: (s.common as Common) || null, received_by: s.received_by || "", technician_id: s.technician_id,
+  labor: laborDe(s), visit_tech_ids: s.visit_tech_ids || [],
 });
+const n = (v: string) => Number(String(v).replace(",", ".")) || 0;
 
 function Input({ f, value, onChange, disabled }: { f: V2Field; value: unknown; onChange: (v: unknown) => void; disabled?: boolean }) {
   if (f.type === "bool") return <label className="pf-bool"><input type="checkbox" disabled={disabled} checked={value === true} onChange={(e) => onChange(e.target.checked)} />Sí</label>;
@@ -35,7 +46,8 @@ export default function AllySurvey() {
   const { id } = useParams();
   const sid = Number(id);
   const { toast } = useSession();
-  const { readOnly, can } = useAlly();
+  const { readOnly, can, isTech } = useAlly();
+  const nav = useNavigate();
   const [s, setS] = useState<SurveyFull | null>(null);
   const [d, setD] = useState<Draft | null>(null);
   const [specs, setSpecs] = useState<Record<string, KindSpec> | null>(null);
@@ -72,13 +84,25 @@ export default function AllySurvey() {
     up({ points: [...d.points, { code: `${pre}-${String(n).padStart(2, "0")}`, label: null, data: {}, data_status: initialStatus(spec?.fields), photos: [], notes: null }] });
   };
 
+  const original = toDraft(s);
+  const laborCambio = JSON.stringify(d.labor) !== JSON.stringify(original.labor);
+  const visitaCambio = JSON.stringify(d.visit_tech_ids) !== JSON.stringify(original.visit_tech_ids);
   const body = () => ({
     kind: d.kind, site: d.site || null, contact: d.contact, visit_date: d.visit_date || null, notes: d.notes || null, photos: d.photos,
     points: d.points.map((p) => ({ id: p.id, code: p.code, kind: p.kind && p.kind !== d.kind ? p.kind : null, label: p.label, data: p.data, data_status: p.data_status, photos: p.photos, notes: p.notes })),
     items: d.items.filter((it) => it.name.trim()).map((it) => ({ id: it.id, product_id: it.product_id, name: it.name, quantity: it.quantity || 0, unit: it.unit || "Unid", note: it.note, kind: it.kind })),
     common: d.common, received_by: d.received_by || null,
     ...(d.technician_id && d.technician_id !== s.technician_id ? { technician_id: d.technician_id } : {}),
+    // solo si los cambió: la API conserva el personal que Crimson costea y los técnicos de Crimson de la visita
+    ...(laborCambio ? { labor: Object.fromEntries(Object.entries(d.labor).map(([k, v]) => [k, { people: Math.round(n(v.people)), days: n(v.days) }])) } : {}),
+    ...(visitaCambio ? { visit_tech_ids: d.visit_tech_ids } : {}),
   });
+  // quienes hicieron la visita: su equipo (/aliado/tecnicos) y los de su equipo que ya estaban anotados
+  const visitantes = [
+    ...techs.map((t) => ({ id: t.id, name: t.name })),
+    ...(s.visit_tech_ids || []).map((id, i) => ({ id, name: s.visit_techs?.[i] || "Técnico" })).filter((v) => !techs.some((t) => t.id === v.id)),
+  ];
+  const setLabor = (k: string, patch: Partial<{ people: string; days: string }>) => up({ labor: { ...d.labor, [k]: { ...d.labor[k], ...patch } } });
   const guardar = async (silencioso = false) => {
     setBusy(true);
     try { const x = await api<SurveyFull>(ALLY_FIELD_API.saveSurvey(sid), { method: "PUT", json: body() }); setS(x); setD(toDraft(x)); setDirty(false); if (!silencioso) toast("Levantamiento guardado"); return true; }
@@ -88,7 +112,13 @@ export default function AllySurvey() {
   const enviar = async () => {
     if (dirty && !(await guardar(true))) return;
     setBusy(true);
-    try { await api(ALLY_FIELD_API.sendSurvey(sid), { method: "POST" }); toast("Enviado a revisión de Crimson"); load(); }
+    try {
+      const x = await api<SurveyFull>(ALLY_FIELD_API.sendSurvey(sid), { method: "POST" });
+      toast("Enviado a revisión de Crimson");
+      // el técnico solo ve sus borradores y los devueltos: el enviado sale de su lista y vuelve a "Hoy"
+      if (isTech) { nav("/", { replace: true }); return; }
+      setS(x); setD(toDraft(x)); setDirty(false);
+    }
     catch (e) { toast(e instanceof Error ? e.message : "No se pudo enviar", "bad"); }
     finally { setBusy(false); }
   };
@@ -133,6 +163,29 @@ export default function AllySurvey() {
           )}
         </div>
         <Field label="Notas generales"><textarea className="textarea" rows={3} disabled={ro} value={d.notes} onChange={(e) => up({ notes: e.target.value })} /></Field>
+        <Field label="Personal requerido para el trabajo" hint="Cuántas personas y cuántos días. Crimson lo usa para estimar la mano de obra.">
+          <div className="al-labor">
+            {LABOR_ORDEN.map(([k, label]) => (
+              <div key={k} className="al-labor__row">
+                <span>{label}</span>
+                <input className="input input--mono" inputMode="numeric" aria-label={`${label}: personas`} disabled={ro} value={d.labor[k]?.people ?? "0"} onChange={(e) => setLabor(k, { people: e.target.value })} />
+                <span className="meta">personas ×</span>
+                <input className="input input--mono" inputMode="decimal" aria-label={`${label}: días`} disabled={ro} value={d.labor[k]?.days ?? "0"} onChange={(e) => setLabor(k, { days: e.target.value })} />
+                <span className="meta">días</span>
+              </div>
+            ))}
+          </div>
+        </Field>
+        {visitantes.length > 0 && (
+          <Field label="Quiénes hicieron la visita">
+            <div className="chips">
+              {visitantes.map((v) => {
+                const on = d.visit_tech_ids.includes(v.id);
+                return <button type="button" key={v.id} className={`chip${on ? " is-on" : ""}`} aria-pressed={on} disabled={ro} onClick={() => up({ visit_tech_ids: on ? d.visit_tech_ids.filter((x) => x !== v.id) : [...d.visit_tech_ids, v.id] })}>{v.name}</button>;
+              })}
+            </div>
+          </Field>
+        )}
         <Field label="Fotos generales"><PhotoStrip value={d.photos} disabled={ro} uploadPath={ALLY_FIELD_API.mediaUpload} onChange={(v) => up({ photos: v })} /></Field>
       </div>
       <div style={{ margin: "12px 0" }}>
