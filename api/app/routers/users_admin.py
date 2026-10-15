@@ -208,9 +208,7 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
     tid, now = p.tenant.id, datetime.now(UTC)
     # los usuarios del portal del cliente se administran desde Accesos de clientes, los de soporte en su pestana y
     # los de empresas aliadas desde su empresa aliada
-    internos = db.scalars(
-        select(TenantUser).where(TenantUser.tenant_id == tid, TenantUser.customer_id.is_(None), TenantUser.ally_company_id.is_(None))
-    ).all()
+    internos = db.scalars(select(TenantUser).where(TenantUser.tenant_id == tid, TenantUser.customer_id.is_(None), TenantUser.ally_company_id.is_(None))).all()
     rows = [m for m in internos if m.role_code not in NOT_HERE]
     support_members = sum(1 for m in internos if m.role_code == "soporte" and m.active)
     ids = [m.user_id for m in rows]

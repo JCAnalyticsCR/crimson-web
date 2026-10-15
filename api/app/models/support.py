@@ -69,9 +69,7 @@ class SupportTicket(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     next_step: Mapped[str | None] = mapped_column(String(200))
     next_step_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # ticket asignado a una empresa aliada (lo atiende desde su portal); NULL = de Crimson
-    ally_company_id: Mapped[int | None] = mapped_column(
-        ForeignKey("ally_company.id", ondelete="RESTRICT", name="fk_support_ticket_ally_company"), index=True
-    )
+    ally_company_id: Mapped[int | None] = mapped_column(ForeignKey("ally_company.id", ondelete="RESTRICT", name="fk_support_ticket_ally_company"), index=True)
 
     notes: Mapped[list["SupportNote"]] = relationship(cascade="all, delete-orphan", order_by="SupportNote.id", lazy="selectin")
 

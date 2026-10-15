@@ -63,12 +63,7 @@ def eligible_seller(db, tenant_id: int, uid: int | None) -> bool:
         return False
     m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == tenant_id, TenantUser.user_id == uid, TenantUser.active))
     return bool(
-        m
-        and m.customer_id is None
-        and m.ally_company_id is None
-        and m.role_code not in CLIENT_ROLES
-        and m.role_code not in ALLY_USER_ROLES
-        and m.user.active
+        m and m.customer_id is None and m.ally_company_id is None and m.role_code not in CLIENT_ROLES and m.role_code not in ALLY_USER_ROLES and m.user.active
     )
 
 

@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from ..core.db import get_db
 from ..core.deps import CLIENT_ROLES, Principal, require, require_any
 from ..models import (
+    AllyCompany,
     AllyParticipation,
     AuditLog,
     Commission,
@@ -126,6 +127,8 @@ def _norm(txt: str) -> str:
 
 
 def _ally_key(a: AllyParticipation) -> str:
+    if a.ally_company_id:
+        return f"a:{a.ally_company_id}"
     if a.customer_id:
         return f"c:{a.customer_id}"
     if a.supplier_id:
@@ -136,9 +139,8 @@ def _ally_key(a: AllyParticipation) -> str:
 def _ally_map(db: Session, tenant_id: int, project_ids: set[int] | None = None) -> dict[int, list[dict]]:
     """project_id -> [{key, name, role}] en UNA consulta.
 
-    Hoy la "empresa aliada" de un ticket se DERIVA: el ticket es del aliado si su proyecto tiene una participacion
-    de esa empresa (AllyParticipation). Cuando el frente de aliados agregue la asignacion explicita del ticket a una
-    empresa aliada (clave a:<id>), solo cambia esta fuente: el parametro ?ally= y la pantalla no cambian."""
+    La "empresa aliada" de un ticket se DERIVA de su proyecto (participacion de esa empresa) o, con la clave a:<id>,
+    ademas de la asignacion explicita del ticket a la empresa aliada (SupportTicket.ally_company_id)."""
     if project_ids is not None and not project_ids:
         return {}
     stmt = select(AllyParticipation).where(AllyParticipation.tenant_id == tenant_id, AllyParticipation.project_id.is_not(None))
@@ -183,7 +185,14 @@ def _ctx(db: Session, p: Principal, rows: list[SupportTicket], ahora: datetime |
         "projects": projects,
         "clientes": _client_user_ids(db, p.tenant.id, uids),
         "aliados": _ally_map(db, p.tenant.id, _ally_projects(db, p, pids)),
+        "empresas": _ally_names(db, p.tenant.id, {t.ally_company_id for t in rows if t.ally_company_id}),
     }
+
+
+def _ally_names(db: Session, tenant_id: int, ids: set[int]) -> dict[int, str]:
+    if not ids:
+        return {}
+    return dict(db.execute(select(AllyCompany.id, AllyCompany.name).where(AllyCompany.tenant_id == tenant_id, AllyCompany.id.in_(ids))).all())
 
 
 def _ally_projects(db: Session, p: Principal, pids: set[int]) -> set[int]:
@@ -256,7 +265,18 @@ def _out(db: Session, t: SupportTicket, full: bool = True, p: Principal | None =
     usa este: aqui viajan notas internas (last_follow, notes) y la bitacora.
     El monto (lo que se le cobra al cliente) es precio: el tecnico no lo ve (Andres 22:07-22:23)."""
     if ctx is None:
-        ctx = _ctx(db, p, [t]) if p is not None else {"ahora": datetime.now(UTC), "users": {}, "projects": {}, "clientes": set(), "aliados": {}}
+        ctx = (
+            _ctx(db, p, [t])
+            if p is not None
+            else {
+                "ahora": datetime.now(UTC),
+                "users": {},
+                "projects": {},
+                "clientes": set(),
+                "aliados": {},
+                "empresas": _ally_names(db, t.tenant_id, {t.ally_company_id} - {None}),
+            }
+        )
     ahora = ctx["ahora"]
     users = ctx["users"]
 
@@ -327,6 +347,8 @@ def _out(db: Session, t: SupportTicket, full: bool = True, p: Principal | None =
         else None,
         "last_activity_at": slasvc.ultimo_movimiento(t),
         "allies": ctx["aliados"].get(t.project_id, []) if t.project_id else [],
+        "ally_company_id": t.ally_company_id,
+        "ally_company": ctx.get("empresas", {}).get(t.ally_company_id) if t.ally_company_id else None,
         # que SLA aplico y de donde salio, para mostrarlo en el ticket
         "sla": {
             "respuesta_h": s.get("respuesta"),
@@ -355,6 +377,7 @@ def _out(db: Session, t: SupportTicket, full: bool = True, p: Principal | None =
                 "id": n.id,
                 "body": n.body,
                 "internal": n.internal,
+                "share_ally": bool(n.share_ally),
                 "photos": n.photos,
                 "user": nombre(n.user_id) if n.user_id else "Sistema",
                 "from_client": n.user_id in ctx["clientes"],
@@ -384,6 +407,8 @@ class TicketIn(BaseModel):
     assigned_to: int | None = None
     billable: bool = False
     tags: list = Field(default_factory=list)
+    # empresa aliada que lo atiende. Sin dato: la del responsable si es de un aliado; PUT solo la cambia si viene
+    ally_company_id: int | None = None
 
 
 # Lo que el ticket enlaza es de ESTA empresa: la ficha responde sus nombres y el aviso va al correo del asignado
@@ -490,7 +515,11 @@ def tickets(
         stmt = stmt.where(SupportTicket.assigned_to == int(assigned))
     if ally:
         pids = [pid for pid, lst in _ally_map(db, p.tenant.id).items() if any(x["key"] == ally for x in lst)]
-        stmt = stmt.where(SupportTicket.project_id.in_(pids))
+        if ally.startswith("a:"):
+            # empresa aliada: los asignados a ella o de un proyecto en el que participa
+            stmt = stmt.where(or_(SupportTicket.ally_company_id == int(ally[2:]), SupportTicket.project_id.in_(pids)))
+        else:
+            stmt = stmt.where(SupportTicket.project_id.in_(pids))
     if q:
         like = f"%{q}%"
         stmt = stmt.where(or_(SupportTicket.subject.ilike(like), SupportTicket.number.ilike(like)))
@@ -518,8 +547,11 @@ def tickets(
 def ticket_create(data: TicketIn, p: Principal = Depends(require("support_desk", "crear")), db: Session = Depends(get_db)):
     check_refs(db, p.tenant.id, data.model_dump(), TICKET_REFS, TICKET_USERS)
     _check_project(db, p, data.project_id)
+    from ..services.ally_scope import check_ally_assignment
+
+    aliada = check_ally_assignment(db, p.tenant.id, ally_company_id=data.ally_company_id, user_ids=[data.assigned_to], project_id=data.project_id)
     number, _ = next_number(db, p.tenant.id, "TCK")
-    t = SupportTicket(tenant_id=p.tenant.id, number=number, opened_by=p.user.id, **data.model_dump())
+    t = SupportTicket(tenant_id=p.tenant.id, number=number, opened_by=p.user.id, ally_company_id=aliada, **data.model_dump(exclude={"ally_company_id"}))
     t.status = "asignado" if t.assigned_to else "nuevo"
     slasvc.aplicar(db, p.tenant, t, datetime.now(UTC))
     db.add(t)
@@ -545,8 +577,14 @@ def ticket_update(tid: int, data: TicketIn, p: Principal = Depends(require("supp
     antes = t.assigned_to
     estado_antes = t.status
     clave_sla = (t.priority, t.customer_id)
+    if "ally_company_id" in data.model_fields_set or data.assigned_to != t.assigned_to or data.project_id != t.project_id:
+        # la empresa aliada solo cambia si viene o si cambio el responsable (un portal viejo no la borra)
+        from ..services.ally_scope import check_ally_assignment
+
+        explicita = data.ally_company_id if "ally_company_id" in data.model_fields_set else (t.ally_company_id if data.assigned_to == t.assigned_to else None)
+        t.ally_company_id = check_ally_assignment(db, p.tenant.id, ally_company_id=explicita, user_ids=[data.assigned_to], project_id=data.project_id)
     campos = []
-    for k, v in data.model_dump().items():
+    for k, v in data.model_dump(exclude={"ally_company_id"}).items():
         if k in ("contact", "tags") and not v:
             continue  # el portal manda {} / []: no borrar los datos de quien reporto desde la web
         if k == "asset_id" and k not in data.model_fields_set:
@@ -598,6 +636,7 @@ def _aplicar_paso(db: Session, p: Principal, t: SupportTicket, texto: str | None
 class NoteIn(BaseModel):
     body: str = Field(min_length=1, max_length=4000)
     internal: bool = False
+    share_ally: bool = False  # nota interna compartida con la empresa aliada del ticket (el cliente no la ve)
     photos: list = Field(default_factory=list)
     hours: Decimal | None = Field(None, ge=0)
     status: str | None = Field(None, pattern="^(nuevo|asignado|en_proceso|esperando_cliente|resuelto|cerrado)$")
@@ -617,7 +656,8 @@ def ticket_note(tid: int, data: NoteIn, p: Principal = Depends(require_any("supp
     _writable(t)
     if data.clear_next_step or data.next_step or data.next_step_at:
         _aplicar_paso(db, p, t, data.next_step, data.next_step_at, data.clear_next_step)
-    t.notes.append(SupportNote(tenant_id=t.tenant_id, user_id=p.user.id, body=data.body, internal=data.internal, photos=data.photos))
+    compartir = bool(data.share_ally and data.internal and t.ally_company_id)
+    t.notes.append(SupportNote(tenant_id=t.tenant_id, user_id=p.user.id, body=data.body, internal=data.internal, photos=data.photos, share_ally=compartir))
     if not data.internal and not t.first_reply_at:
         t.first_reply_at = datetime.now(UTC)  # el reloj del SLA para la primera respuesta
     if data.hours is not None:
@@ -771,10 +811,15 @@ def ticket_to_work_order(tid: int, data: VisitIn, p: Principal = Depends(require
     # cliente del portal o alguien de ventas no recibe la orden ni su nombre sale en el informe de entrega
     if data.technician_id is not None and not _eligible(db, p.tenant.id, data.technician_id):
         raise HTTPException(422, "Esa persona no puede recibir órdenes")
+    from ..services.ally_scope import check_ally_assignment
+
+    # la OT hereda la empresa aliada del ticket (y un tecnico aliado tiene que ser de esa empresa)
+    aliada = check_ally_assignment(db, p.tenant.id, ally_company_id=t.ally_company_id, user_ids=[data.technician_id], project_id=t.project_id)
     number, _ = next_number(db, p.tenant.id, "OT")
     o = WorkOrder(
         tenant_id=p.tenant.id,
         number=number,
+        ally_company_id=aliada,
         title=data.title or f"{t.number} · {t.subject}",
         kind="soporte" if t.kind in ("soporte", "garantia", "consulta") else "mantenimiento",
         customer_id=t.customer_id,
@@ -808,13 +853,22 @@ def ticket_meta(p: Principal = Depends(require("support_desk", "ver")), db: Sess
     resumen["asignados_a_mi"] = sum(1 for t in abiertos if t.assigned_to == p.user.id)
     allies: list[dict] = []
     if p.can("support_desk", "ver_todo"):
-        # aliados con tickets (de cualquier estado) para el selector; "abiertos" cuenta solo los abiertos
-        filas = db.execute(select(SupportTicket.project_id, SupportTicket.status).where(*ticket_scope(p), SupportTicket.project_id.is_not(None))).all()
-        amap = _ally_map(db, p.tenant.id, {pid for pid, _ in filas})
+        # aliados con tickets (de cualquier estado) para el selector; "abiertos" cuenta solo los abiertos. Un ticket
+        # cuenta una vez por empresa aunque este asignado a ella y ademas sea de un proyecto donde participa
+        filas = db.execute(
+            select(SupportTicket.project_id, SupportTicket.ally_company_id, SupportTicket.status).where(
+                *ticket_scope(p), or_(SupportTicket.project_id.is_not(None), SupportTicket.ally_company_id.is_not(None))
+            )
+        ).all()
+        amap = _ally_map(db, p.tenant.id, {pid for pid, _, _ in filas if pid})
+        nombres = _ally_names(db, p.tenant.id, {cid for _, cid, _ in filas if cid})
         cuenta: dict[str, dict] = {}
-        for pid, st in filas:
-            for x in amap.get(pid, []):
-                row = cuenta.setdefault(x["key"], {"key": x["key"], "name": x["name"], "abiertos": 0})
+        for pid, cid, st in filas:
+            llaves = {x["key"]: x["name"] for x in amap.get(pid, [])} if pid else {}
+            if cid and nombres.get(cid):
+                llaves[f"a:{cid}"] = nombres[cid]
+            for key, name in llaves.items():
+                row = cuenta.setdefault(key, {"key": key, "name": name, "abiertos": 0})
                 row["abiertos"] += 1 if st in slasvc.ABIERTOS else 0
         allies = sorted(cuenta.values(), key=lambda r: _norm(r["name"]))
     return {
@@ -834,6 +888,29 @@ def ticket_meta(p: Principal = Depends(require("support_desk", "ver")), db: Sess
         "can_see_all": p.can("support_desk", "ver_todo"),
         "can_charge": can_charge(p),  # pone el monto de un ticket cobrable (PATCH /tickets/{id}/amount)
     }
+
+
+@router.get("/tickets/meta/agents")
+def ticket_agents(ally_company_id: int | None = None, p: Principal = Depends(require("support_desk", "ver")), db: Session = Depends(get_db)):
+    """Responsables posibles: el equipo interno que atiende soporte y, con ally_company_id, los usuarios activos de esa
+    empresa aliada."""
+    out = [
+        {"id": m.user.id, "name": m.user.full_name, "role": m.role_code, "company": None}
+        for m in db.scalars(
+            select(TenantUser).where(
+                TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(AGENT_ROLES), TenantUser.ally_company_id.is_(None)
+            )
+        )
+        if m.user.active
+    ]
+    if ally_company_id:
+        c = db.get(AllyCompany, ally_company_id)
+        if not c or c.tenant_id != p.tenant.id:
+            raise HTTPException(404, "Empresa aliada no encontrada")
+        for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.ally_company_id == c.id)):
+            if m.user.active:
+                out.append({"id": m.user.id, "name": m.user.full_name, "role": m.role_code, "company": c.name})
+    return out
 
 
 AVISO_ASIGNADO_MIN = 30  # no se repite el correo de asignacion al mismo responsable del mismo ticket antes de esto
@@ -892,6 +969,8 @@ class ContractIn(BaseModel):
     notes: str | None = None
     # SLA propio: {"critica": {"respuesta": 2, "resolucion": 8}, ...}. Vacio/None = el de la empresa
     sla: dict | None = None
+    # lo ejecuta una empresa aliada (opcional); PUT solo la cambia si viene
+    ally_company_id: int | None = None
 
     @field_validator("sla")
     @classmethod
@@ -930,6 +1009,8 @@ def _contract_out(db: Session, c: MaintenanceContract, p: Principal | None = Non
         "notes": c.notes,
         "sla": c.sla,
         "dias_para_la_proxima": dias,
+        "ally_company_id": c.ally_company_id,
+        "ally_company": _ally_names(db, c.tenant_id, {c.ally_company_id}).get(c.ally_company_id) if c.ally_company_id else None,
     }
 
 
@@ -955,8 +1036,13 @@ def contracts(active: bool | None = None, p: Principal = Depends(require("suppor
 def contract_create(data: ContractIn, p: Principal = Depends(require("support_desk", "crear")), db: Session = Depends(get_db)):
     _contract_admin(p)
     check_refs(db, p.tenant.id, data.model_dump(), CONTRACT_REFS)
+    from ..services.ally_scope import check_ally_assignment
+
+    aliada = (
+        check_ally_assignment(db, p.tenant.id, ally_company_id=data.ally_company_id, user_ids=[], project_id=data.project_id) if data.ally_company_id else None
+    )
     number, _ = next_number(db, p.tenant.id, "CTR")
-    c = MaintenanceContract(tenant_id=p.tenant.id, number=number, **data.model_dump())
+    c = MaintenanceContract(tenant_id=p.tenant.id, number=number, ally_company_id=aliada, **data.model_dump(exclude={"ally_company_id"}))
     c.next_date = c.next_date or c.start_date or date.today()
     db.add(c)
     db.flush()
@@ -972,7 +1058,15 @@ def contract_update(cid: int, data: ContractIn, p: Principal = Depends(require("
     if not c or c.tenant_id != p.tenant.id:
         raise HTTPException(404, "Contrato no encontrado")
     check_refs(db, p.tenant.id, data.model_dump(), CONTRACT_REFS, current=c)
-    for k, v in data.model_dump().items():
+    if "ally_company_id" in data.model_fields_set:
+        from ..services.ally_scope import check_ally_assignment
+
+        c.ally_company_id = (
+            check_ally_assignment(db, p.tenant.id, ally_company_id=data.ally_company_id, user_ids=[], project_id=data.project_id)
+            if data.ally_company_id
+            else None
+        )
+    for k, v in data.model_dump(exclude={"ally_company_id"}).items():
         setattr(c, k, v)
     db.commit()
     return _contract_out(db, c, p)
@@ -997,6 +1091,7 @@ def open_maintenance(db: Session, c: MaintenanceContract) -> SupportTicket:
         customer_id=c.customer_id,
         project_id=c.project_id,
         contract_id=c.id,
+        ally_company_id=c.ally_company_id,  # lo ejecuta la empresa aliada del contrato
         kind="mantenimiento",
         subject=f"Mantenimiento preventivo · {c.name}",
         description=c.scope,

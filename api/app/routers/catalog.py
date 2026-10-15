@@ -74,7 +74,14 @@ def create_customer(data: CustomerIn, p: Principal = Depends(require("crm", "cre
 
 @router.get("/customers/{cid}", response_model=CustomerOut)
 def get_customer(cid: int, p: Principal = Depends(require("crm", "ver")), db: Session = Depends(get_db)):
-    return _own(db, Customer, cid, p.tenant.id)
+    c = _own(db, Customer, cid, p.tenant.id)
+    out = CustomerOut.model_validate(c)
+    if p.can("aliados", "ver"):
+        from ..models import AllyCompany
+
+        a = db.scalar(select(AllyCompany).where(AllyCompany.tenant_id == p.tenant.id, AllyCompany.customer_id == c.id).limit(1))
+        out.ally_company = {"id": a.id, "name": a.name} if a else None
+    return out
 
 
 @router.put("/customers/{cid}", response_model=CustomerOut)
@@ -133,11 +140,20 @@ def _with_costs(db: Session, p: Principal, prods: list[Product]) -> list[Product
     """Lista/ficha con el origen del costo (proveedor vinculado o propio, con fecha) y el margen real sobre la
     venta. Solo para quien ve costos: a los demas no les llega ni el campo."""
     info = supcat.cost_info(db, p.tenant, prods) if p.sees_costs and prods else {}
+    if p.sees_costs and prods:
+        from ..services import ally_pricing
+        from ..services.documents import today_fx
+
+        fx = today_fx(db, "USD")[0]
+        fijos = ally_pricing.fixed_prices(db, p.tenant.id, [x.id for x in prods], None)
     out = []
     for pr in prods:
         o = _product_out(pr, p)
         for k, v in (info.get(pr.id) or {}).items():
             setattr(o, k, v)
+        if p.sees_costs:
+            precio, fuente, _estado = ally_pricing.ally_price(db, p.tenant, pr, None, fx=fx, fixed=fijos)
+            o.ally_price, o.ally_price_source = (float(precio) if precio is not None else None), fuente
         out.append(o)
     return out
 

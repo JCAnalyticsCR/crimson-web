@@ -66,6 +66,8 @@ class MeOut(BaseModel):
     role: str
     permissions: dict
     memberships: list[MembershipOut]
+    # solo usuarios de una empresa aliada: {id, name, state, suspended_reason, features: {ganancias}}
+    ally_company: dict | None = None
 
 
 class TotpSetupOut(BaseModel):

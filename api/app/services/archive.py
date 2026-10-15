@@ -29,6 +29,7 @@ from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.orm import Session
 
 from ..models import (
+    AllyCompany,
     AllyParticipation,
     Coupon,
     Customer,
@@ -242,6 +243,8 @@ def _refs(kind: str) -> list[tuple]:
             (CustomerAsset.customer_id, "equipo instalado", "equipos instalados", False),
             (AllyParticipation.customer_id, "participación como aliado", "participaciones como aliado", False),
             (TenantUser.customer_id, "usuario del portal de clientes", "usuarios del portal de clientes", False),
+            # la empresa aliada que se factura a este cliente (la empresa aliada no va a la papelera: se desactiva)
+            (AllyCompany.customer_id, "empresa aliada (facturación)", "empresas aliadas (facturación)", False),
         ],
         "product": [
             (QuoteLine.product_id, "línea de cotización", "líneas de cotizaciones", False),
@@ -262,6 +265,7 @@ def _refs(kind: str) -> list[tuple]:
             (CustomerAsset.supplier_id, "equipo instalado", "equipos instalados", False),
             (PurchaseRequest.supplier_id, "solicitud de compra", "solicitudes de compra", False),
             (AllyParticipation.supplier_id, "participación como aliado", "participaciones como aliado", False),
+            (AllyCompany.supplier_id, "empresa aliada (pagos)", "empresas aliadas (pagos)", False),
         ],
         "asset": [
             (SupportTicket.asset_id, "ticket de soporte", "tickets de soporte", True),

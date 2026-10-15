@@ -100,9 +100,7 @@ class AllyParticipation(TenantMixin, TimestampMixin, Base):
     project_id: Mapped[int | None] = mapped_column(ForeignKey("project.id", ondelete="SET NULL", name="fk_ally_project"), index=True)
     # la empresa es una empresa aliada, un cliente o un proveedor existente (una sola); name es la foto del nombre.
     # Las de cliente/proveedor son de antes: no dan acceso al portal de aliados hasta "Convertir en aliado"
-    ally_company_id: Mapped[int | None] = mapped_column(
-        ForeignKey("ally_company.id", ondelete="RESTRICT", name="fk_ally_participation_company"), index=True
-    )
+    ally_company_id: Mapped[int | None] = mapped_column(ForeignKey("ally_company.id", ondelete="RESTRICT", name="fk_ally_participation_company"), index=True)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id", name="fk_ally_customer"))
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("supplier.id", name="fk_ally_supplier"))
     # el aliado la ve en su portal; apagarla le quita el acceso a la oportunidad (y su proyecto) al instante

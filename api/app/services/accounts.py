@@ -87,7 +87,14 @@ def active_admins(db: Session, tenant_id: int) -> int:
         db.scalar(
             select(func.count(TenantUser.id))
             .join(User, User.id == TenantUser.user_id)
-            .where(TenantUser.tenant_id == tenant_id, TenantUser.role_code == "admin", TenantUser.active, TenantUser.customer_id.is_(None), TenantUser.ally_company_id.is_(None), User.active)
+            .where(
+                TenantUser.tenant_id == tenant_id,
+                TenantUser.role_code == "admin",
+                TenantUser.active,
+                TenantUser.customer_id.is_(None),
+                TenantUser.ally_company_id.is_(None),
+                User.active,
+            )
         )
         or 0
     )

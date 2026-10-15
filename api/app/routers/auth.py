@@ -235,12 +235,27 @@ def logout_all(request: Request, resp: Response, p: Principal = Depends(get_sess
 @router.get("/me", response_model=MeOut)
 def me(p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
     ms = db.scalars(select(TenantUser).join(Tenant).where(TenantUser.user_id == p.user.id, TenantUser.active, Tenant.active)).all()
+    ally = None
+    if p.ally_company_id:
+        from ..models import AllyCompany
+        from .ally_portal import ganancias_disponibles
+
+        c = db.get(AllyCompany, p.ally_company_id)
+        if c is not None and c.tenant_id == p.tenant.id:
+            ally = {
+                "id": c.id,
+                "name": c.name,
+                "state": c.state,
+                "suspended_reason": c.suspended_reason if c.suspended_at else None,
+                "features": {"ganancias": ganancias_disponibles()},
+            }
     return MeOut(
         user=p.user,
         tenant=p.tenant,
         role=p.role,
         permissions=p.permissions,
         memberships=[MembershipOut(tenant=m.tenant, role=m.role_code) for m in ms],
+        ally_company=ally,
     )
 
 

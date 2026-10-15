@@ -314,6 +314,8 @@ def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
         "labor": {k: {"label": LABOR_TYPES[k][0], "people": v["people"], "days": v["days"]} for k, v in labor.items()},
         "template_version": s.template_version or 1,
         "received_by": s.received_by,
+        "ally_company_id": s.ally_company_id,
+        "ally_company": _ally_name(db, s.ally_company_id),
         **_review_out(db, s),
     }
     if s.status == "enviado":
@@ -537,14 +539,65 @@ def specs_common(_: Principal = Depends(require("field", "ver"))):
 
 
 @router.get("/field/technicians")
-def technicians(p: Principal = Depends(require("field", "ver")), db: Session = Depends(get_db)):
-    """A quien se le puede asignar una orden. El supervisor no entra a Ajustes, asi que la lista vive aqui."""
-    from ..models import TenantUser
+def technicians(
+    project_id: int | None = None,
+    ally_company_id: int | None = None,
+    p: Principal = Depends(require("field", "ver")),
+    db: Session = Depends(get_db),
+):
+    """A quien se le puede asignar una orden. El supervisor no entra a Ajustes, asi que la lista vive aqui.
+    Sin parametros: solo el equipo interno (como siempre). Con project_id: ademas los usuarios activos de las empresas
+    aliadas que participan en ese proyecto; con ally_company_id: solo los de esa empresa (si participa)."""
+    from ..models import AllyCompany, AllyParticipation, TenantUser
 
     rows = db.scalars(
-        select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(("tecnico", "supervisor", "admin")))
+        select(TenantUser).where(
+            TenantUser.tenant_id == p.tenant.id,
+            TenantUser.active,
+            TenantUser.role_code.in_(("tecnico", "supervisor", "admin")),
+            TenantUser.ally_company_id.is_(None),
+            TenantUser.customer_id.is_(None),
+        )
     )
-    return [{"id": m.user.id, "name": m.user.full_name, "role": m.role_code} for m in rows]
+    internos = [{"id": m.user.id, "name": m.user.full_name, "role": m.role_code, "ally_company_id": None, "company": None} for m in rows if m.user.active]
+    if project_id is None and ally_company_id is None:
+        return [{k: v for k, v in x.items() if k in ("id", "name", "role")} for x in internos]
+    q = select(AllyParticipation.ally_company_id).where(AllyParticipation.tenant_id == p.tenant.id, AllyParticipation.ally_company_id.is_not(None))
+    if project_id is not None:
+        q = q.where(AllyParticipation.project_id == project_id)
+    empresas = set(db.scalars(q))
+    if ally_company_id is not None:
+        empresas &= {ally_company_id}
+    comps = {
+        c.id: c for c in db.scalars(select(AllyCompany).where(AllyCompany.tenant_id == p.tenant.id, AllyCompany.id.in_(empresas), AllyCompany.active.is_(True)))
+    }
+    aliados = []
+    if comps:
+        for m in db.scalars(
+            select(TenantUser).where(
+                TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.ally_company_id.in_(comps), TenantUser.role_code.in_(ALLY_USER_ROLES)
+            )
+        ):
+            if m.user.active:
+                aliados.append(
+                    {
+                        "id": m.user.id,
+                        "name": m.user.full_name,
+                        "role": m.role_code,
+                        "ally_company_id": m.ally_company_id,
+                        "company": comps[m.ally_company_id].name,
+                    }
+                )
+    return ([] if ally_company_id is not None else internos) + sorted(aliados, key=lambda x: (x["company"], x["name"]))
+
+
+def _ally_name(db: Session, cid: int | None) -> str | None:
+    if not cid:
+        return None
+    from ..models import AllyCompany
+
+    c = db.get(AllyCompany, cid)
+    return c.name if c else None
 
 
 @router.get("/surveys")
@@ -686,6 +739,46 @@ def survey_update(sid: int, data: SurveyIn, p: Principal = Depends(require("fiel
         # lo aprobado ya no es lo mismo: el supervisor tiene que volver a verlo antes del costeo
         s.review_status = "pendiente"
         audit(db, p.tenant.id, p.user.id, "review_reset", "survey", s.id, {"motivo": "editado despues de aprobado"}, ip=p.ip)
+    db.commit()
+    return _survey_out(db, s)
+
+
+class SurveyAssignIn(BaseModel):
+    technician_id: int
+    ally_company_id: int | None = None
+
+
+@router.post("/surveys/{sid}/assign")
+def survey_assign(sid: int, data: SurveyAssignIn, p: Principal = Depends(require("field", "asignar")), db: Session = Depends(get_db)):
+    """Asigna el levantamiento a un tecnico (interno o de una empresa aliada que participa en la oportunidad). Con un
+    tecnico aliado el levantamiento queda a cargo de su empresa (lo ve en su portal); con uno interno vuelve a Crimson."""
+    from ..services.ally_scope import check_ally_assignment, notify_ally_work
+
+    s = _survey(db, sid, p)
+    if s.status in ("cotizado", "cerrado"):
+        raise HTTPException(409, "El levantamiento ya fue cotizado")
+    _check_crew(db, p.tenant.id, [data.technician_id])
+    aliada = check_ally_assignment(
+        db, p.tenant.id, ally_company_id=data.ally_company_id, user_ids=[data.technician_id], opportunity_id=s.opportunity_id if s.opportunity_id else None
+    )
+    if aliada is not None and not s.opportunity_id:
+        raise HTTPException(422, "Ligá el levantamiento a la oportunidad en común antes de asignarlo a un aliado")
+    antes = {"technician_id": s.technician_id, "ally_company_id": s.ally_company_id}
+    s.technician_id, s.ally_company_id = data.technician_id, aliada
+    audit(db, p.tenant.id, p.user.id, "assign", "survey", s.id, {"de": antes, "a": {"technician_id": s.technician_id, "ally_company_id": aliada}}, ip=p.ip)
+    if data.technician_id != antes["technician_id"]:
+        u = db.get(User, data.technician_id)
+        if u and u.email and aliada is None:
+            queue_email(
+                db,
+                p.tenant,
+                u.email,
+                f"Tiene un levantamiento nuevo: {s.number}",
+                f"<p>Se le asignó el levantamiento <b>{html.escape(s.number)}</b> ({html.escape(s.site or 'sin sitio')}).</p>",
+                "survey",
+                s.id,
+            )
+        notify_ally_work(db, p.tenant, {data.technician_id}, s.number, f"Levantamiento {s.site or ''}".strip(), s.visit_date)
     db.commit()
     return _survey_out(db, s)
 
@@ -1734,6 +1827,8 @@ def _order_out(db: Session, o: WorkOrder, full: bool = True, names: dict[int, st
         "customer_signature": o.customer_signature,
         "warehouse_id": o.warehouse_id,
         "stock_applied": o.stock_applied,
+        "ally_company_id": o.ally_company_id,
+        "ally_company": _ally_name(db, o.ally_company_id),
         # persona-horas del registro por jornada; sin registro, de inicio a fin como antes ("legado")
         "hours": hours,
         "hours_source": source,
@@ -1801,6 +1896,8 @@ class WorkOrderIn(BaseModel):
     notes: str | None = None
     warehouse_id: int | None = None
     materials: list[MaterialIn] = Field(default_factory=list)
+    # empresa aliada que ejecuta la orden. Sin dato: la de sus tecnicos aliados (si hay); PUT solo la cambia si viene
+    ally_company_id: int | None = None
 
 
 class WorkOrderEditIn(WorkOrderIn):
@@ -1843,8 +1940,13 @@ def work_orders(
 def order_create(data: WorkOrderIn, p: Principal = Depends(require("field", "asignar")), db: Session = Depends(get_db)):
     check_refs(db, p.tenant.id, data.model_dump(), WORK_ORDER_REFS)  # antes de gastar el consecutivo
     _check_crew(db, p.tenant.id, [data.technician_id, *data.helpers])
+    from ..services.ally_scope import check_ally_assignment, notify_ally_work
+
+    aliada = check_ally_assignment(
+        db, p.tenant.id, ally_company_id=data.ally_company_id, user_ids=[data.technician_id, *data.helpers], project_id=data.project_id
+    )
     number, _ = next_number(db, p.tenant.id, "OT")
-    o = WorkOrder(tenant_id=p.tenant.id, number=number, **data.model_dump(exclude={"materials"}))
+    o = WorkOrder(tenant_id=p.tenant.id, number=number, ally_company_id=aliada, **data.model_dump(exclude={"materials", "ally_company_id"}))
     for m in data.materials:
         o.materials.append(WorkOrderMaterial(product_id=m.product_id, name=m.name, quantity=m.quantity, unit=m.unit, planned=m.planned))
     if o.project_id:
@@ -1855,6 +1957,7 @@ def order_create(data: WorkOrderIn, p: Principal = Depends(require("field", "asi
     db.add(o)
     db.flush()
     audit(db, p.tenant.id, p.user.id, "create", "work_order", o.id, ip=p.ip)
+    notify_ally_work(db, p.tenant, _crew(o), o.number, o.title, o.scheduled_at)
     db.commit()
     return _order_out(db, o, tenant=p.tenant)
 
@@ -1872,7 +1975,8 @@ def order_update(oid: int, data: WorkOrderEditIn, p: Principal = Depends(require
     o = _order(db, oid, p)
     if o.stock_applied:
         raise HTTPException(409, "La orden ya descontó inventario; no se puede reescribir")
-    cambios = data.model_dump(exclude_unset=True, exclude={"materials"})
+    # ally_company_id fuera del setattr masivo: un portal viejo que no lo manda no lo borra
+    cambios = data.model_dump(exclude_unset=True, exclude={"materials", "ally_company_id"})
     if cambios.get("title", "") is None:
         cambios.pop("title")  # el titulo no se borra
     check_refs(db, p.tenant.id, cambios, WORK_ORDER_REFS, current=o)
@@ -1880,6 +1984,14 @@ def order_update(oid: int, data: WorkOrderEditIn, p: Principal = Depends(require
     nuevos = [cambios["technician_id"]] if cambios.get("technician_id") and cambios["technician_id"] != o.technician_id else []
     nuevos += [h for h in cambios.get("helpers") or [] if h not in (o.helpers or [])]
     _check_crew(db, p.tenant.id, nuevos)
+    _reassign_ally(
+        db,
+        p,
+        o,
+        data.ally_company_id if "ally_company_id" in data.model_fields_set else o.ally_company_id,
+        cambios,
+        force="ally_company_id" in data.model_fields_set,
+    )
     for k, v in cambios.items():
         setattr(o, k, v)
     if "materials" in data.model_fields_set:
@@ -1904,6 +2016,22 @@ def order_update(oid: int, data: WorkOrderEditIn, p: Principal = Depends(require
     return _order_out(db, o, tenant=p.tenant)
 
 
+def _reassign_ally(db: Session, p: Principal, o: WorkOrder, ally_company_id: int | None, cambios: dict, force: bool = False) -> None:
+    """Recalcula la empresa aliada de la orden si cambio el equipo (o si la mandaron explicita). Avisa al aliado nuevo."""
+    from ..services.ally_scope import check_ally_assignment, notify_ally_work
+
+    if not force and not ({"technician_id", "helpers", "project_id"} & set(cambios)):
+        return
+    tec = cambios.get("technician_id", o.technician_id)
+    ayu = cambios.get("helpers", o.helpers) or []
+    pid = cambios.get("project_id", o.project_id)
+    antes = _crew(o)
+    o.ally_company_id = check_ally_assignment(db, p.tenant.id, ally_company_id=ally_company_id, user_ids=[tec, *ayu], project_id=pid)
+    nuevos = {i for i in [tec, *ayu] if i} - antes
+    if nuevos:
+        notify_ally_work(db, p.tenant, nuevos, o.number, cambios.get("title") or o.title, cambios.get("scheduled_at", o.scheduled_at))
+
+
 class OrderAssignIn(BaseModel):
     technician_id: int | None = None
     helpers: list[int] | None = None
@@ -1923,6 +2051,7 @@ def order_assign(oid: int, data: OrderAssignIn, p: Principal = Depends(require("
     nuevos = [cambios["technician_id"]] if cambios.get("technician_id") and cambios["technician_id"] != o.technician_id else []
     nuevos += [h for h in cambios.get("helpers") or [] if h not in (o.helpers or [])]
     _check_crew(db, p.tenant.id, nuevos)
+    _reassign_ally(db, p, o, o.ally_company_id if not ({"technician_id", "helpers"} & set(cambios)) else None, cambios)
     if "technician_id" in cambios:
         o.technician_id = cambios["technician_id"]
     if "helpers" in cambios:

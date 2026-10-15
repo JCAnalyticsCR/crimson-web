@@ -11,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from .core.config import settings
 from .routers import (
     allies,
+    ally_admin,
+    ally_portal,
     approvals,
     auth,
     banking,
@@ -68,7 +70,8 @@ def create_app() -> FastAPI:
         allow_origins=list(dict.fromkeys([*settings.cors_origins, *settings.landing_origins])),
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+        # X-View-As-Ally / X-View-As-User: "Ver como este aliado" del admin (solo lectura, core/ally.py)
+        allow_headers=["Authorization", "Content-Type", "X-Requested-With", "X-View-As-Ally", "X-View-As-User"],
     )
 
     @app.middleware("http")
@@ -123,6 +126,8 @@ def create_app() -> FastAPI:
     app.include_router(public_access.router)
     app.include_router(client_access.router)
     app.include_router(client_portal.router)
+    app.include_router(ally_admin.router)  # Administracion -> Aliados (/allies)
+    app.include_router(ally_portal.router)  # portal de aliados (/aliado): solo get_ally
     app.include_router(vehicles.router)
     app.include_router(data_export.router)
     return app

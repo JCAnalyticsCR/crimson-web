@@ -22,6 +22,8 @@ class CustomerIn(BaseModel):
 class CustomerOut(CustomerIn):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    # insignia "Empresa aliada": la empresa aliada que se factura a este cliente (solo con aliados.ver)
+    ally_company: dict | None = None
 
 
 class TaxIn(BaseModel):
@@ -120,6 +122,9 @@ class ProductOut(BaseModel):
     margin_real_pct: float | None = None
     margin_provisional: bool | None = None  # sin costo: es el margen objetivo, no el real
     supplier_offers: int | None = None  # ofertas de proveedor vigentes vinculadas
+    # precio GENERAL de aliado (services/ally_pricing.py): solo quien ve costos (deja deducir el costo: 105 / 1,05)
+    ally_price: float | None = None
+    ally_price_source: str | None = None
 
 
 class Page(BaseModel):

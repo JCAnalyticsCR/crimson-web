@@ -95,9 +95,7 @@ class TenantUser(TimestampMixin, Base):
     # Solo usuarios del portal del cliente: la empresa cliente que representan. Interno = None.
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id", ondelete="RESTRICT"), index=True)
     # Solo usuarios de una empresa aliada (roles aliado/tecnico_aliado): su portal (/aliado). Interno = None.
-    ally_company_id: Mapped[int | None] = mapped_column(
-        ForeignKey("ally_company.id", ondelete="RESTRICT", name="fk_tenant_user_ally_company"), index=True
-    )
+    ally_company_id: Mapped[int | None] = mapped_column(ForeignKey("ally_company.id", ondelete="RESTRICT", name="fk_tenant_user_ally_company"), index=True)
 
     tenant: Mapped[Tenant] = relationship(back_populates="users")
     user: Mapped[User] = relationship(back_populates="memberships")
@@ -117,9 +115,7 @@ class Invitation(TenantMixin, TimestampMixin, Base):
     # invitacion al portal del cliente: al aceptarla la membresia queda ligada a este cliente
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id", ondelete="CASCADE"), index=True)
     # invitacion al portal de aliados: al aceptarla la membresia queda ligada a esta empresa aliada
-    ally_company_id: Mapped[int | None] = mapped_column(
-        ForeignKey("ally_company.id", ondelete="CASCADE", name="fk_invitation_ally_company"), index=True
-    )
+    ally_company_id: Mapped[int | None] = mapped_column(ForeignKey("ally_company.id", ondelete="CASCADE", name="fk_invitation_ally_company"), index=True)
     # Reenviar y revocar (Ajustes -> Usuarios). Revocar tambien pone expires_at=ahora: lo que solo mire el
     # vencimiento la rechaza igual. revoked_by sin FK, como los *_by de ArchiveMixin.
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

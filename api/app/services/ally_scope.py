@@ -205,3 +205,44 @@ def check_ally_assignment(
         if db.scalar(q.limit(1)) is None:
             raise HTTPException(422, f"{company.name} no participa en este proyecto")
     return cid
+
+
+def notify_ally_work(db: Session, tenant, user_ids, number: str, title: str, when=None) -> int:
+    """Aviso al usuario de una empresa aliada al que se le asigna un trabajo (OT, ticket, levantamiento). Sin montos.
+    A los internos no se les escribe desde aqui (tienen sus propios avisos)."""
+    import html as _html
+    from datetime import date as _date
+
+    from ..core.config import settings as cfg
+    from .mail import queue_email
+
+    ids = {i for i in user_ids or [] if i}
+    if not ids:
+        return 0
+    rows = db.scalars(
+        select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.user_id.in_(ids), TenantUser.ally_company_id.is_not(None), TenantUser.active)
+    ).all()
+    if isinstance(when, datetime):
+        fecha = local_date(when).strftime("%d/%m/%Y")
+    elif isinstance(when, _date):
+        fecha = when.strftime("%d/%m/%Y")
+    else:
+        fecha = "sin fecha"
+    base = cfg.public_base_url.rstrip("/")
+    n = 0
+    for m in rows:
+        u = m.user
+        if not u or not u.active or not u.email:
+            continue
+        queue_email(
+            db,
+            tenant,
+            u.email,
+            f"Tiene un trabajo nuevo: {number} · {title[:80]} · {fecha}",
+            f"<p>{_html.escape(tenant.name)} le asignó <b>{_html.escape(number)}</b> · {_html.escape(title)} · {fecha}.</p>"
+            f'<p><a href="{base}/">Abrir el portal de aliados</a></p>',
+            "ally_work",
+            None,
+        )
+        n += 1
+    return n
