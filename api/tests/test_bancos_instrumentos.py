@@ -41,3 +41,37 @@ def test_cuentas_saldo_chequera_y_tarjeta(client, auth, db_session):
     assert len(next(x for x in client.get("/banking/accounts", headers=conta).json() if x["id"] == acc["id"])["instruments"]) == 2
     ventas = role_headers(client, db_session, auth["tenant"]["id"], "ventas.banco@ejemplo.com", "ventas")
     assert client.post("/banking/accounts", headers=ventas, json={"name": "X"}).status_code == 403
+
+
+def test_gasto_desde_linea_en_dolares_lleva_tipo_de_cambio(client, auth, db_session):
+    """Los reportes pasan a colones con expense.fx_rate: un cargo de una cuenta en USD no puede quedar 1:1."""
+    from app.models import BankStatementLine, ExchangeRate, Expense
+
+    tid = auth["tenant"]["id"]
+    acc = client.post("/banking/accounts", json={"name": "BCR USD", "bank": "BCR", "currency": "USD"}).json()
+    hoy = date.today()
+    venta = db_session.query(ExchangeRate).filter(ExchangeRate.currency == "USD", ExchangeRate.date <= hoy).order_by(ExchangeRate.date.desc()).first()
+    lineas = []
+    for i, dt in enumerate((hoy, date(2001, 1, 2))):
+        ln = BankStatementLine(
+            tenant_id=tid,
+            bank_account_id=acc["id"],
+            date=dt,
+            description=f"Comision {i}",
+            amount=-20,
+            status="pendiente",
+            batch="b2",
+            fingerprint=f"fp-usd-{i}",
+            imported_at=datetime.now(UTC),
+        )
+        db_session.add(ln)
+        lineas.append(ln)
+    db_session.commit()
+    r = client.post(f"/banking/lines/{lineas[0].id}/expense", json={})
+    assert r.status_code == 201, r.text
+    e = db_session.get(Expense, r.json()["match"]["id"])
+    assert e.currency == "USD" and Decimal(str(e.fx_rate)) == Decimal(str(venta.sell)) and not r.json()["warnings"]
+    r = client.post(f"/banking/lines/{lineas[1].id}/expense", json={})  # sin tipo de cambio para esa fecha: 1 con aviso
+    assert r.status_code == 201 and r.json()["warnings"]
+    e2 = db_session.get(Expense, r.json()["match"]["id"])
+    assert Decimal(str(e2.fx_rate)) == Decimal(1)

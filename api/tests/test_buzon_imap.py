@@ -234,3 +234,26 @@ def test_password_del_buzon_con_secretbox_y_sin_fuga(client, auth, db_session):
     assert enc.startswith("v1.") and "clave-app-123" not in enc
     s = client.get("/settings").json()
     assert "password_enc" not in str(s) and "password_enc" not in str(client.put("/settings", json={"quote_valid_days": 16}).json())
+
+
+def test_paso_de_ajustes_a_entorno_no_duplica(client, auth, db_session, monkeypatch):
+    """§6.4 paso 4 (runbook §15 paso 6): al pasar el buzon a variables de entorno hay otra fila de buzon que empieza en 0
+    y vuelve a bajar los ultimos N dias; el sha256 se busca en TODA la empresa y no se duplica nada."""
+    from app.core.config import settings
+    from app.models import ReceptionMailbox, ReceptionMessage
+    from app.services import inbox
+
+    _ajustes(client)
+    t = _tenant(db_session, auth)
+    msgs = [correo(81), correo(82)]
+    inbox.poll(db_session, t, connect=lambda: FakeImapUid(msgs, password="clave-app-123"))
+    assert db_session.query(ReceptionMessage).count() == 2
+    monkeypatch.setattr(settings, "reception_imap_host", "imap.ejemplo.com")
+    monkeypatch.setattr(settings, "reception_imap_user", "facturas@ejemplo.com")
+    monkeypatch.setattr(settings, "reception_imap_password", SecretStr("clave-app-123"))
+    assert inbox.mailbox_config(db_session, t).source == "env"
+    res = inbox.poll(db_session, t, connect=lambda: FakeImapUid(msgs, password="clave-app-123"))
+    assert db_session.query(ReceptionMailbox).count() == 2  # otra llave (env:), empezo en 0
+    assert res["messages"] == 0 and res["nuevos"] == 0 and db_session.query(ReceptionMessage).count() == 2
+    env_box = db_session.query(ReceptionMailbox).filter(ReceptionMailbox.key.startswith("env:")).one()
+    assert env_box.last_uid == 2  # avanzo sin registrar de nuevo

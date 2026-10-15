@@ -77,6 +77,7 @@ export default function InvoiceDetail() {
                 {client && (
                   <div className={client.receiver_message === "1" ? "" : "acc-warn"} style={{ marginTop: 8, fontSize: 13, padding: client.receiver_message === "1" ? 0 : undefined, borderRadius: 10, border: client.receiver_message === "1" ? undefined : "1px solid var(--warn)", background: client.receiver_message === "1" ? undefined : "var(--warn-soft)" }}>
                     <b>{CLIENT_MSG[client.receiver_message!]}</b>{client.receiver_detail ? ` · ${client.receiver_detail}` : ""}{client.receiver_at ? ` · ${when(client.receiver_at)}` : ""}
+                    <div className="muted" style={{ fontSize: 12 }}>Según el archivo recibido por correo (firma no verificada).</div>
                     {client.receiver_message !== "1" && allows("sales.anular") && inv.einvoice_status === "aceptada" && inv.status !== "anulada" && <div style={{ marginTop: 6 }}><button className="btn btn--danger btn--sm" onClick={() => setNc("")}>Emitir nota de crédito</button></div>}
                   </div>
                 )}

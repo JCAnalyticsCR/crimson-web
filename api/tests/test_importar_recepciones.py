@@ -116,3 +116,37 @@ def test_limites_y_permisos(client, auth, db_session):
     assert importar(client, zip_fygaro(paquete(5)), headers=conta).status_code == 200
     assert client.get("/import/recepciones/template").status_code == 200
     assert date.today()
+
+
+def test_consecutivo_de_simulado_no_choca_con_fygaro_y_un_choque_no_tumba_la_importacion(client, auth, db_session, monkeypatch):
+    """T05 copia sucursal y terminal de F05: T05 n.o 1 es el mismo texto que la MR n.o 1 de Fygaro. El unico es por modo.
+    En produccion el choque es real (F05 sin ajustar): 409 que lo explica. En la importacion, error de ESA fila."""
+    from app.models import ReceivedDocument
+    from app.services import hacienda_config
+
+    hoy = date.today()
+    r = importar(client, zip_fygaro(paquete(11, "00100001050000000001")), commit=True).json()
+    assert r["summary"]["nuevo"] == 1
+
+    def subir(n: int) -> int:
+        c = clave(fecha=hoy.strftime("%d%m%y"), consecutivo=f"0010000101{n:010d}")
+        xml = fe_xml(c, fecha=f"{hoy.isoformat()}T10:00:00-06:00", consecutivo=f"0010000101{n:010d}").encode()
+        up = client.post("/reception/upload", files={"file": ("f.xml", xml, "application/xml")})
+        assert up.status_code == 201, up.text
+        return up.json()["id"]
+
+    rid = subir(412)
+    r = client.post(f"/reception/{rid}/respond", json={"action": "aceptada"})
+    assert r.status_code == 200, r.text
+    assert r.json()["responses"][0]["consecutive"] == "00100001050000000001" and r.json()["responses"][0]["mode"] == "simulado"
+    monkeypatch.setattr(hacienda_config, "reception_mode", lambda db, t: "produccion")
+    rid2 = subir(413)
+    r = client.post(f"/reception/{rid2}/respond", json={"action": "aceptada", "send_now": False})
+    assert r.status_code == 409 and "Consecutivos" in r.json()["detail"] and "otra persona" not in r.json()["detail"]
+    # importar: la fila cuyo mensaje choca con uno de produccion ya registrado queda como error; las demas entran
+    r = importar(client, zip_fygaro(paquete(12, "00100001050000000001") + paquete(13, "00100001050000000002")), commit=True)
+    assert r.status_code == 200, r.text
+    res = r.json()
+    assert res["summary"]["error"] == 1 and res["summary"]["nuevo"] == 1, res["result"]
+    assert db_session.query(ReceivedDocument).filter(ReceivedDocument.clave == cl(13)).count() == 1
+    assert db_session.query(ReceivedDocument).filter(ReceivedDocument.clave == cl(12)).count() == 0

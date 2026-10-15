@@ -142,3 +142,22 @@ def test_categorias_renombrar_desactivar_y_d151(client, auth):
     assert all(x["id"] != c["id"] for x in client.get("/expense-categories", params={"active": 1}).json())
     assert any(x["id"] == c["id"] and x["d151_kind"] == "servicios_profesionales" for x in client.get("/expense-categories").json())
     assert client.put(f"/expense-categories/{c['id']}", json={"name": "X", "d151_kind": "otra_cosa"}).status_code == 422
+
+
+def test_mover_la_proxima_fecha_recalcula_el_ancla(client, auth):
+    """El portal reenvia el ancla guardada (o la deja vacia): si solo cambio la proxima fecha, el ancla es el dia nuevo,
+    salvo que la fecha nueva sea el ancla recortada al fin del mes (31 -> 28 de febrero). Un ancla distinta manda."""
+    body = {"name": "Alquiler", "kind": "gasto", "template": {"description": "Alquiler bodega", "subtotal": 1000, "tax_rate": 0}, "frequency": "mensual"}
+    r = client.post("/recurrences", json={**body, "next_date": "2026-11-15"}).json()
+    assert r["anchor_day"] == 15
+    r = client.put(f"/recurrences/{r['id']}", json={**body, "next_date": "2026-11-30", "anchor_day": 15}).json()
+    assert r["anchor_day"] == 30
+    run = client.post(f"/recurrences/{r['id']}/run").json()
+    assert run["next_date"] == "2026-12-30"  # antes volvia al 15
+    r = client.put(f"/recurrences/{r['id']}", json={**body, "next_date": "2027-01-10", "anchor_day": None}).json()
+    assert r["anchor_day"] == 10
+    r = client.put(f"/recurrences/{r['id']}", json={**body, "next_date": "2027-01-12", "anchor_day": 20}).json()
+    assert r["anchor_day"] == 20  # explicita
+    fin = client.post("/recurrences", json={**body, "next_date": "2027-01-31"}).json()
+    fin = client.put(f"/recurrences/{fin['id']}", json={**body, "next_date": "2027-02-28", "anchor_day": 31}).json()
+    assert fin["anchor_day"] == 31  # 28 de febrero es el 31 recortado

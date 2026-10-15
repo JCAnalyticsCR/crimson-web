@@ -441,3 +441,195 @@ def test_reabrir_solo_en_produccion(client, auth, monkeypatch):
     monkeypatch.setattr(hacienda_config, "reception_mode", lambda db, t: "produccion")
     if viejo["deadline"] < HOY.isoformat():
         assert client.post(f"/reception/{viejo['id']}/reopen", json={"confirm_not_in_fygaro": True}).status_code == 409  # plazo vencido
+
+
+# ---------------------------------------------------------------- correcciones de la revision
+def test_gasto_de_nc_se_edita_y_los_manuales_no_aceptan_negativos(client, auth, db_session):
+    """El gasto de una NC recibida guarda montos negativos: igual se categoriza, se marca pagado o se anula (§6.6.2)."""
+    from app.models import Expense, Supplier, Tenant
+
+    nc_clave = clave(fecha=DDMMAA, consecutivo="00100001030000000078")
+    nc_xml = fe_xml(nc_clave, tipo="NotaCreditoElectronica", referencia=cl(60), total=1130, iva=130, fecha=FECHA_HOY)
+    nc = up(client, nc_xml).json()
+    eid = respond(client, nc["id"]).json()["expense_id"]
+    g = next(x for x in client.get("/expenses").json() if x["id"] == eid)
+    assert Decimal(str(g["subtotal"])) < 0 and g["locked"]
+    cat = client.get("/expense-categories").json()[0]
+    body = {k: g[k] for k in ("description", "date", "currency", "subtotal", "tax_rate", "iva_credit", "tax_credit_amount")}
+    r = client.put(f"/expenses/{eid}", json={**body, "category_id": cat["id"], "payment_method": "transferencia", "status": "pagado"})
+    assert r.status_code == 200, r.text
+    assert r.json()["category_id"] == cat["id"] and r.json()["status"] == "pagado" and Decimal(str(r.json()["total"])) == Decimal("-1130")
+    r = client.put(f"/expenses/{eid}", json={**body, "category_id": cat["id"], "status": "anulado"})
+    assert r.status_code == 200 and r.json()["status"] == "anulado"
+    # un gasto a mano sigue sin montos negativos
+    assert client.post("/expenses", json={"description": "x", "date": HOY.isoformat(), "subtotal": -5}).status_code == 422
+    assert client.post("/expenses", json={"description": "x", "date": HOY.isoformat(), "subtotal": 5, "tax_credit_amount": -1}).status_code == 422
+    # proveedor de otra empresa: 404, y su nombre nunca sale en la respuesta
+    otra = Tenant(slug="otra-gastos", name="Otra empresa de prueba", default_currency="CRC")
+    db_session.add(otra)
+    db_session.flush()
+    ajeno = Supplier(tenant_id=otra.id, name="Proveedor de otra empresa SA", tax_id="3101555555")
+    db_session.add(ajeno)
+    db_session.commit()
+    nuevo = {"description": "Compra", "date": HOY.isoformat(), "subtotal": 5}
+    assert client.post("/expenses", json={**nuevo, "supplier_id": ajeno.id}).status_code == 404
+    rec = {"name": "R", "kind": "gasto", "template": {**nuevo, "supplier_id": ajeno.id}, "frequency": "mensual", "next_date": HOY.isoformat()}
+    assert client.post("/recurrences", json=rec).status_code == 404
+    mio = client.post("/expenses", json=nuevo).json()
+    assert client.put(f"/expenses/{mio['id']}", json={**nuevo, "supplier_id": ajeno.id}).status_code == 404
+    e = db_session.get(Expense, mio["id"])
+    e.supplier_id = ajeno.id  # dato viejo cruzado: no se filtra el nombre
+    db_session.commit()
+    assert next(x for x in client.get("/expenses").json() if x["id"] == mio["id"])["supplier_name"] is None
+
+
+def test_parcial_con_05_guarda_lo_aceptado_vincular_despues_y_adjuntar(client, auth, db_session):
+    """Parcial con condicion 05: no hay credito ni gasto aplicable; lo aceptado se guarda y el gasto que se vincula o se
+    registra despues lleva ese monto (nunca cero). Vincular un respondido (R13) y adjuntar PDF / respuesta de Hacienda."""
+    from app.models import Expense, ReceivedDocument
+
+    parcial = {
+        "action": "parcial",
+        "iva_condition": "proporcional",
+        "detail": "Faltó un equipo",
+        "accepted_total": 56500,
+        "accepted_tax": 6500,
+        "create_expense": False,
+    }
+    previo = client.post("/expenses", json={"description": "Servicio mensual", "date": HOY.isoformat(), "subtotal": 100000, "tax_rate": 13}).json()
+    d = up(client, xml_hoy(61)).json()
+    r = respond(client, d["id"], **parcial)
+    assert r.status_code == 200, r.text
+    det = r.json()
+    assert det["credit_amount"] is None and det["applicable_amount"] is None and det["expense_id"] is None
+    assert any(c["id"] == previo["id"] for c in det["expense_candidates"])  # respondido sin gasto: se ofrece vincular
+    r = client.post(f"/reception/{d['id']}/link-expense", json={"expense_id": previo["id"]})
+    assert r.status_code == 200, r.text
+    e = db_session.get(Expense, previo["id"])
+    assert e.received_document_id == d["id"] and Decimal(str(e.total)) == Decimal("56500") and Decimal(str(e.tax_amount)) == Decimal("6500")
+    assert client.post(f"/reception/{d['id']}/link-expense", json={"expense_id": previo["id"]}).status_code == 409  # ya ligado
+    # "Registrar gasto" de otra parcial 05: lo aceptado
+    d2 = up(client, xml_hoy(62)).json()
+    respond(client, d2["id"], **parcial)
+    r = client.post(f"/reception/{d2['id']}/expense", json={})
+    assert r.status_code == 201, r.text
+    e2 = db_session.get(Expense, r.json()["expense_id"])
+    assert Decimal(str(e2.total)) == Decimal("56500") and Decimal(str(e2.tax_amount)) == Decimal("6500")
+    # si no se conoce lo aceptado: 409, nunca un gasto en cero
+    d3 = up(client, xml_hoy(63)).json()
+    respond(client, d3["id"], **parcial)
+    doc3 = db_session.get(ReceivedDocument, d3["id"])
+    doc3.accepted_total = doc3.accepted_tax = None
+    db_session.commit()
+    assert client.post(f"/reception/{d3['id']}/expense", json={}).status_code == 409
+    # adjuntar el PDF y la respuesta de Hacienda de esa clave (otra clave -> 422)
+    assert client.post(f"/reception/{d['id']}/attach", files={"file": ("f.pdf", PDF + b"61", "application/pdf")}).json()["has_pdf"]
+    otra = client.post(f"/reception/{d['id']}/attach", files={"file": ("r.xml", mensaje_hacienda(cl(99)).encode(), "application/xml")})
+    assert otra.status_code == 422
+    r = client.post(f"/reception/{d['id']}/attach", files={"file": ("r.xml", mensaje_hacienda(cl(61)).encode(), "application/xml")})
+    assert r.status_code == 200 and r.json()["has_supplier_response"] and r.json()["supplier_hacienda_status"] == "aceptado"
+
+
+def test_aceptar_tras_un_rechazo_devuelve_el_gasto(client, auth, db_session):
+    """aceptada -> (Hacienda rechaza) -> rechazada (gasto anulado) -> (Hacienda rechaza) -> aceptada: el gasto vuelve."""
+    from app.models import Expense, ReceptionResponse
+
+    d = up(client, xml_hoy(64)).json()
+    eid = respond(client, d["id"]).json()["expense_id"]
+
+    def hacienda_rechaza():
+        q = db_session.query(ReceptionResponse).filter(ReceptionResponse.received_document_id == d["id"])
+        last = q.order_by(ReceptionResponse.attempt.desc()).first()
+        last.status = "rechazado"
+        db_session.commit()
+        assert client.post(f"/reception/{d['id']}/retry").status_code == 200
+
+    hacienda_rechaza()
+    assert respond(client, d["id"], action="rechazada", detail="Precio distinto al pactado").status_code == 200
+    e = db_session.get(Expense, eid)
+    db_session.refresh(e)
+    assert e.status == "anulado"
+    hacienda_rechaza()
+    r = respond(client, d["id"])
+    assert r.status_code == 200 and r.json()["expense_id"] == eid
+    db_session.refresh(e)
+    assert e.status == "registrado" and Decimal(str(e.total)) == Decimal("113000")
+
+
+def test_reabrir_un_respondido_heredado_sin_mensajes(client, auth, db_session, monkeypatch):
+    """Respondido antes de la migracion: sin reception_response, mensaje heredado en xml_response, hacienda_status
+    simulado (nunca se envio). En produccion y en plazo se reabre como cualquier simulado."""
+    from app.models import ReceivedDocument
+    from app.services import hacienda_config
+
+    d = up(client, xml_hoy(65)).json()
+    doc = db_session.get(ReceivedDocument, d["id"])
+    doc.status, doc.action, doc.hacienda_status = "respondido", "aceptada", "simulado"
+    doc.xml_response = "<MensajeReceptor/>"
+    db_session.commit()
+    assert not client.get(f"/reception/{d['id']}").json()["can_reopen"]  # en simulado no
+    monkeypatch.setattr(hacienda_config, "reception_mode", lambda db, t: "produccion")
+    det = client.get(f"/reception/{d['id']}").json()
+    assert det["can_reopen"] and det["responses"] == []
+    assert client.post(f"/reception/{d['id']}/reopen", json={}).status_code == 422  # sin la casilla
+    r = client.post(f"/reception/{d['id']}/reopen", json={"confirm_not_in_fygaro": True})
+    assert r.status_code == 200 and r.json()["status"] == "por_revisar" and r.json()["can_respond"]
+
+
+def test_asignar_pdf_solo_los_sin_asignar_de_ese_correo(client, auth, db_session):
+    """assign-pdf no acepta cualquier Media por id: solo un PDF "sin asignar" de ese correo, privado de contabilidad."""
+    import hashlib
+
+    from app.models import Media, ReceivedDocument
+
+    tid = auth["tenant"]["id"]
+    conta = role_headers(client, db_session, tid, "conta.pdf@ejemplo.com", "contabilidad")
+    d = up(client, xml_hoy(66)).json()
+    res = batch(client, [("adjunto-sin-clave.pdf", PDF + b"66")]).json()
+    mid, pend = res["message_id"], res["sin_asignar"][0]["media_id"]
+    privado = Media(
+        tenant_id=tid,
+        key="prueba-campo-privado",
+        filename="levantamiento.pdf",
+        content_type="application/pdf",
+        size=len(PDF),
+        sha256=hashlib.sha256(PDF).hexdigest(),
+        data=PDF,
+        visibility="private",
+        module="field",
+    )
+    db_session.add(privado)
+    db_session.commit()
+    url = f"/reception/messages/{mid}/assign-pdf"
+    assert client.post(url, json={"media_id": privado.id, "received_document_id": d["id"]}, headers=conta).status_code == 404
+    assert client.get(f"/reception/{d['id']}/file/pdf", headers=conta).status_code == 404
+    r = client.post(url, json={"media_id": pend, "received_document_id": d["id"]}, headers=conta)
+    assert r.status_code == 200, r.text
+    db_session.expire_all()
+    assert db_session.get(ReceivedDocument, d["id"]).pdf_media_id == pend
+    assert any(x.get("result") == "pdf" and x.get("received_document_id") == d["id"] for x in r.json()["summary"])
+    # ya asignado: deja de estar "sin asignar"
+    assert client.post(url, json={"media_id": pend, "received_document_id": d["id"]}, headers=conta).status_code == 404
+
+
+def test_alerta_diaria_escapa_lo_del_xml_y_avisa_el_ultimo_dia(client, auth, db_session):
+    from app.models import EmailOutbox, ReceivedDocument, ReceptionResponse, Tenant
+    from app.services import hacienda_tasks
+
+    t = db_session.get(Tenant, auth["tenant"]["id"])
+    d = up(client, xml_hoy(67)).json()
+    respond(client, d["id"])
+    resp = db_session.query(ReceptionResponse).filter(ReceptionResponse.received_document_id == d["id"]).one()
+    resp.status, resp.mode, resp.last_error = "por_enviar", "pruebas", "Cargue las credenciales"
+    db_session.get(ReceivedDocument, d["id"]).deadline = HOY  # ultimo dia del plazo: 0 dias habiles
+    db_session.commit()
+    assert any("Mensaje receptor sin enviar" in a for a in hacienda_tasks.alerts_for(db_session, t, today=HOY))
+    # el nombre del emisor lo controla quien manda el XML: va escapado en el correo
+    d2 = up(client, xml_hoy(68, nombre='Proveedor &lt;a href="https://phish.example"&gt;clic&lt;/a&gt;')).json()
+    assert d2["issuer_name"].startswith("Proveedor <a href")
+    db_session.get(ReceivedDocument, d2["id"]).deadline = HOY
+    db_session.commit()
+    antes = db_session.query(EmailOutbox).count()
+    assert hacienda_tasks.daily_alerts(db_session) >= 1
+    nuevos = db_session.query(EmailOutbox).order_by(EmailOutbox.id).all()[antes:]
+    assert nuevos and all("<a href" not in m.html for m in nuevos) and any("&lt;a href=" in m.html for m in nuevos)

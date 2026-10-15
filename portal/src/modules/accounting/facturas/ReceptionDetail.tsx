@@ -1,9 +1,10 @@
 /* Detalle de un comprobante recibido: datos, archivos y la respuesta ante Hacienda (aceptar / parcial / rechazar con
    actividad y condicion del IVA), con el calculo en vivo del IVA acreditable y el gasto aplicable. Despues de responder:
-   linea de tiempo por intento y acciones (consultar, enviar, responder de nuevo, reabrir, gasto, descartar). */
-import { useEffect, useMemo, useState } from "react";
+   linea de tiempo por intento y acciones (consultar, enviar, responder de nuevo, reabrir, gasto, vincular un gasto que
+   ya existia, descartar). Se puede adjuntar el PDF o la respuesta de Hacienda de esa clave cuando llegan aparte. */
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, downloadFile, fmtDate, fmtMoney, openFile, parseTs } from "../../../lib/api";
+import { api, downloadFile, fmtDate, fmtMoney, openFile, parseTs, uploadFile } from "../../../lib/api";
 import { useSession } from "../../../app/session";
 import { Badge, Card, Field, I, Icon, Loading, Modal } from "../../../ui/components";
 import { ACTIONS, ACTION_LABEL, DOC_TYPES, IVA_CONDITIONS, calcLive, ivaLabel, plazo, type IvaCondition, type ReceptionDetail as Detail } from "../hacienda";
@@ -33,6 +34,7 @@ export default function ReceptionDetail() {
   const [discard, setDiscard] = useState<string | null>(null);
   const [reopen, setReopen] = useState(false);
   const [confirmFygaro, setConfirmFygaro] = useState(false);
+  const attachRef = useRef<HTMLInputElement>(null);
   const [f, setF] = useState({ action: "aceptada", cond: "credito" as IvaCondition, activity: "", detail: "", accepted_total: "", accepted_tax: "", credit: "", expense: "create" as "create" | "link" | "none", link: "", category: "" });
 
   const load = () => api<Detail>(`/reception/${id}`).then(setD).catch((e) => toast(e.message, "bad"));
@@ -95,6 +97,15 @@ export default function ReceptionDetail() {
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
     finally { setBusy(false); }
   };
+  const attach = async (fl: File | undefined) => {
+    if (!fl) return;
+    setBusy(true);
+    try { setD(await uploadFile<Detail>(`/reception/${d.id}/attach`, fl)); toast("Archivo adjuntado"); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+    finally { setBusy(false); if (attachRef.current) attachRef.current.value = ""; }
+  };
+  // respondido (o historico) aceptado sin gasto: un recurrente o manual que ya existia se vincula en vez de duplicarse (R13)
+  const canLink = !d.can_respond && !d.expense_id && (d.action === "aceptada" || d.action === "parcial") && d.expense_candidates.length > 0 && allows("accounting.editar");
   const file = (which: string, name: string) => (which === "pdf" ? openFile(`/reception/${d.id}/file/pdf`) : downloadFile(`/reception/${d.id}/file/${which}`, name.replace("{c}", d.clave))).catch((e) => toast(e.message, "bad"));
   const available: Record<string, boolean> = { document: true, pdf: d.has_pdf, supplier_response: d.has_supplier_response, mr: d.has_response, hacienda: d.has_hacienda_answer };
 
@@ -151,6 +162,12 @@ export default function ReceptionDetail() {
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {FILES.map(([w, label, name]) => <button key={w} className="btn btn--soft btn--sm" disabled={!available[w]} onClick={() => file(w, name)}>{label}</button>)}
               <button className="btn btn--ghost btn--sm" onClick={() => downloadFile(`/reception/${d.id}/file/todo`, `${d.clave}.zip`).catch((e) => toast(e.message, "bad"))}><Icon d={I.upload} />Descargar todo (.zip)</button>
+              {allows("accounting.crear") && (
+                <>
+                  <input ref={attachRef} type="file" accept=".pdf,.xml,application/pdf,application/xml,text/xml" hidden onChange={(e) => attach(e.target.files?.[0])} />
+                  <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => attachRef.current?.click()}>Adjuntar PDF o respuesta de Hacienda</button>
+                </>
+              )}
             </div>
             {d.supplier_hacienda_detail && <p className="muted" style={{ fontSize: 12.5, marginBottom: 0 }}>Respuesta al proveedor (según el archivo del proveedor): {d.supplier_hacienda_detail}</p>}
           </Card>
@@ -231,6 +248,15 @@ export default function ReceptionDetail() {
                 {d.expense_id && <Link className="btn btn--ghost btn--sm" to={`/contabilidad/contable?expense=${d.expense_id}`}>Ver gasto</Link>}
                 {d.can_expense && allows("accounting.crear") && <button className="btn btn--soft btn--sm" disabled={busy} onClick={addExpense}>Registrar gasto</button>}
               </div>
+              {canLink && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--hair)" }}>
+                  <span className="meta" style={{ textTransform: "none" }}>Hay un gasto registrado que parece ser este comprobante: vincúlelo en vez de registrar otro.</span>
+                  {d.expense_candidates.map((c) => (
+                    <label key={c.id} className="acc-check"><input type="radio" name="cand-link" checked={f.link === String(c.id)} onChange={() => setF({ ...f, link: String(c.id) })} /><span>{fmtDate(c.date)} · {c.description} · <b>{fmtMoney(c.total, c.currency)}</b>{c.recurrence_id ? " · recurrente" : ""}</span></label>
+                  ))}
+                  <div><button className="btn btn--crimson btn--sm" disabled={busy || !f.link} onClick={() => act("link-expense", { expense_id: Number(f.link) }, "Gasto vinculado")}>Vincular al gasto existente</button></div>
+                </div>
+              )}
             </Card>
           )}
           {allows("accounting.editar") && (["por_revisar", "ajeno", "invalido", "sin_respuesta"].includes(d.status) || d.status === "descartado") && (

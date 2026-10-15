@@ -1,5 +1,6 @@
 /* Reportes: cuadricula de reportes -> vista en pantalla + descarga Excel (regla del plan 3.6). */
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, fmtMoney } from "../../lib/api";
 import { Card, Empty, I, Icon, Loading } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
@@ -8,11 +9,21 @@ type Cat = { key: string; title: string; description: string };
 type Rep = { key: string; title: string; from: string; to: string; columns: string[]; rows: (string | number | null)[][]; totals: Record<string, string | number> | null };
 const MONEY_COLS = /subtotal|descuento|impuesto|total|saldo|monto|iva|base|venta|precio/i;
 
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
 export default function Reports() {
+  // ?r=<clave>&from=&to= (enlaces "en pantalla" del panel Tributario): reporte y rango iniciales
+  const [params] = useSearchParams();
   const [cat, setCat] = useState<Cat[]>([]);
-  const [key, setKey] = useState("facturacion");
+  const [key, setKey] = useState(() => params.get("r") || "facturacion");
   const [rep, setRep] = useState<Rep | null>(null);
-  const [range, setRange] = useState({ from: new Date(new Date().setDate(1)).toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) });
+  const [range, setRange] = useState(() => {
+    const from = params.get("from") || "", to = params.get("to") || "";
+    return {
+      from: ISO_DAY.test(from) ? from : new Date(new Date().setDate(1)).toISOString().slice(0, 10),
+      to: ISO_DAY.test(to) ? to : new Date().toISOString().slice(0, 10),
+    };
+  });
   const [loading, setLoading] = useState(false);
   useEffect(() => { api<Cat[]>("/reports").then(setCat); }, []);
   useEffect(() => { setLoading(true); api<Rep>(`/reports/${key}?from=${range.from}&to=${range.to}`).then(setRep).finally(() => setLoading(false)); }, [key, range.from, range.to]);

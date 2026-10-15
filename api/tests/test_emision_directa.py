@@ -207,3 +207,46 @@ def test_simulado_sigue_igual_con_franja(client, auth):
     assert got["consecutive"] == "00100001010000000001" and got["einvoice_status"] == "aceptada"
     html = client.get(f"/invoices/{inv['id']}/html").text
     assert "Comprobante simulado · sin validez fiscal" in html and "Clave (simulada)" in html
+
+
+def test_error_tras_un_post_no_es_rechazo_y_sigue_en_el_iva(client, auth, db_session, pruebas):
+    """§6.5.4 paso 5: un 403 o 72 h sin respuesta NO son un rechazo de Hacienda (pudo haberlo aceptado): la factura queda
+    "error", sigue en el IVA debito y la alerta diaria lo avisa. "rechazada" queda solo para el rechazo real."""
+    from datetime import UTC, datetime
+
+    from app.models import EInvoiceDocument, Invoice, Tenant
+    from app.services.hacienda_sync import refresh_einvoice
+    from app.services.hacienda_tasks import alerts_for
+    from app.services.reports import iva_breakdown
+
+    tid = auth["tenant"]["id"]
+    pruebas.post_plan = [(403, {})]  # credenciales de otro ambiente
+    inv = _factura(client)
+    assert client.post(f"/invoices/{inv['id']}/emit").status_code == 200
+    doc = db_session.query(EInvoiceDocument).filter(EInvoiceDocument.invoice_id == inv["id"]).one()
+    assert doc.status == "error" and doc.attempts == 1 and "credenciales" in doc.last_error
+    assert client.get(f"/invoices/{inv['id']}").json()["einvoice_status"] == "error"
+    i = db_session.get(Invoice, inv["id"])
+    tax, day = Decimal(str(i.tax_total)), i.issue_date
+    con_error = Decimal(str(iva_breakdown(db_session, tid, day, day)["debito_crc"]))
+    i.einvoice_status = "rechazada"  # comparacion: una rechazada de verdad SI sale del debito
+    rechazada = Decimal(str(iva_breakdown(db_session, tid, day, day)["debito_crc"]))
+    db_session.rollback()
+    assert con_error - rechazada == tax.quantize(Decimal("0.01")) and tax > 0
+    # 72 h sin respuesta final: error (no rechazada) y sale en la alerta diaria
+    inv2 = _factura(client)
+    client.post(f"/invoices/{inv2['id']}/emit")
+    doc2 = db_session.query(EInvoiceDocument).filter(EInvoiceDocument.invoice_id == inv2["id"]).one()
+    assert doc2.status == "enviado"
+    pruebas.get_plan[doc2.clave] = ["procesando"]
+    doc2.sent_at = datetime.now(UTC) - timedelta(hours=73)
+    db_session.commit()
+    refresh_einvoice(db_session, doc2.id)
+    db_session.refresh(doc2)
+    assert doc2.status == "error" and "72 h" in doc2.last_error and doc2.resolved_at is not None
+    assert client.get(f"/invoices/{inv2['id']}").json()["einvoice_status"] == "error"
+    alertas = alerts_for(db_session, db_session.get(Tenant, tid))
+    assert any(doc2.consecutive in a and "72 h" in a for a in alertas), alertas
+    # siguen en la lista de pendientes de atencion (junto con las rechazadas)
+    ids = {x["id"] for x in client.get("/invoices", params={"pendiente": "documentos_rechazados"}).json()["items"]}
+    assert {inv["id"], inv2["id"]} <= ids
