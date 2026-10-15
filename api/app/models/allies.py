@@ -42,7 +42,7 @@ class AllyCompany(TenantMixin, TimestampMixin, Base):
     tax_id: Mapped[str | None] = mapped_column(String(30), index=True)  # cedula juridica (los NULL no chocan)
     email: Mapped[str | None] = mapped_column(String(200))
     phone: Mapped[str | None] = mapped_column(String(40))
-    contacts: Mapped[dict] = mapped_column(JSON, default=dict)  # {comercial|tecnico|aprobador|pagos: {name, email, phone}}
+    contacts: Mapped[dict | None] = mapped_column(JSON, default=dict)  # {comercial|tecnico|aprobador|pagos: {name, email, phone}}
     active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true(), index=True)
     suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     suspended_reason: Mapped[str | None] = mapped_column(String(240))  # se le muestra al aliado

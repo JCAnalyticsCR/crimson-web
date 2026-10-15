@@ -75,6 +75,10 @@ Proyecto `crimson-plataforma` (entorno `production` de Railway, datos de prueba)
 
 Roles: `admin`, `ventas`, `caja`, `inventario`, `contabilidad`, `lectura` — permisos por módulo × acción en `app/core/deps.py`.
 
+Roles externos (nunca entran a un endpoint interno: `get_principal` los rechaza):
+- Portal del cliente (`/cliente/*`, `routers/client_portal.py`): `cliente_admin`, `cliente_usuario`, ligados a un cliente (`tenant_user.customer_id`).
+- Portal de aliados (`/aliado/*`, `routers/ally_portal.py`, puerta única `core/ally.py`): `aliado`, `tecnico_aliado`, ligados a una empresa aliada (`tenant_user.ally_company_id`). Solo ven lo que tienen EN COMÚN con la empresa (`services/ally_scope.py`, deny by default; lo ajeno responde 404) y salidas por lista blanca. Se invitan desde Administración → Aliados (`/allies/{id}/invitations`), no desde Ajustes. "Ver como este aliado" (solo admin): cabecera `X-View-As-Ally` (+ `X-View-As-User`), datos reales en solo lectura y con constancia en la bitácora. Precio de aliado: `services/ally_pricing.py` (recargo sobre el costo, precios fijos por producto). Mensualidad: recurrencia de factura (`/allies/{id}/plan`).
+
 ## Reglas que el código ya respeta (plan §5 y §14)
 - `tenant_id` en toda tabla de negocio; documentos con `ON DELETE RESTRICT`.
 - Consecutivos bajo `SELECT … FOR UPDATE` (Postgres); nunca se saltan ni reutilizan.
