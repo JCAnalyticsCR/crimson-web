@@ -198,6 +198,8 @@ class Project(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
     photos: Mapped[list] = mapped_column(JSON, default=list)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # la primera vez que entra a terminado | entregado | facturado; no se vuelve a tocar (devengos y bonos, economia)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     orders: Mapped[list["WorkOrder"]] = relationship(cascade="all, delete-orphan", lazy="selectin", order_by="WorkOrder.id")
 

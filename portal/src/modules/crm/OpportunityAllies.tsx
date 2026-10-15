@@ -7,6 +7,7 @@ import { ApiError, api, fmtDate, fmtMoney, uploadFile } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Field, I, Icon } from "../../ui/components";
 import { Lookup, type LookupItem } from "../../ui/Lookup";
+import DealTerms from "../commissions/DealTerms";
 import "./opportunities.css";
 
 export type Contact = { name?: string | null; email?: string | null; phone?: string | null };
@@ -21,6 +22,8 @@ export type Ally = {
   id: number; opportunity_id: number; project_id: number | null; ally_company_id?: number | null; customer_id: number | null; supplier_id: number | null;
   company_kind: "ally" | "customer" | "supplier" | null; ally_state?: string | null; visible_to_ally?: boolean;
   name: string; role: string; scope: string | null; scope_lines: string[]; contacts: Record<string, Contact>; requests?: CostRequest[];
+  /* economia (solo en la ficha del proyecto y para quien ve costos): que recibe el aliado en este negocio */
+  deal?: { pago_acordado_crc: string; commission_summary: string | null; commission_general?: boolean; bonus_summary: string | null; committed_date: string | null } | null;
 };
 export type PendingCost = CostRequest & { ally: string; opportunity_number: string; opportunity_title: string };
 
@@ -70,6 +73,7 @@ export function AlliesPanel({ oppId, allies, canEdit, seesCosts, sellers, quoteI
   const [busy, setBusy] = useState(false);
   const [todos, setTodos] = useState(false);
   const [quick, setQuick] = useState<QuickAlly | null>(null);
+  const [deal, setDeal] = useState<{ id: number; name: string } | null>(null); // acuerdo economico (economia)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const fetcher = useCallback(searchCompanies(todos), [todos]);
   const reqs = allies.flatMap((a) => a.requests || []);
@@ -207,6 +211,7 @@ export function AlliesPanel({ oppId, allies, canEdit, seesCosts, sellers, quoteI
               <div className="ally__actions">
                 {a.company_kind !== "ally" && <button className="btn btn--ghost btn--sm" onClick={() => convertir(a)}>Convertir en aliado</button>}
                 <button className="btn btn--ghost btn--sm" onClick={() => openReq(a)}>Solicitar costo</button>
+                {allows("commissions.configurar") && <button className="btn btn--ghost btn--sm" onClick={() => setDeal({ id: a.id, name: a.name })}>Acuerdo económico</button>}
                 <button className="btn btn--ghost btn--sm" onClick={() => openAlly(a)}>Editar</button>
                 <button className="btn btn--ghost btn--sm" onClick={() => removeAlly(a)} aria-label={`Quitar ${a.name}`}><Icon d={I.x} size={14} /></button>
               </div>
@@ -381,6 +386,7 @@ export function AlliesPanel({ oppId, allies, canEdit, seesCosts, sellers, quoteI
           </div>
         </div>
       )}
+      {deal && <DealTerms participationId={deal.id} name={deal.name} onClose={() => setDeal(null)} />}
     </section>
   );
 }

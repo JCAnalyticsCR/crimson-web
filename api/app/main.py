@@ -20,6 +20,7 @@ from .routers import (
     catalog,
     client_access,
     client_portal,
+    commissions,
     core,
     crm_extra,
     data_export,
@@ -120,6 +121,7 @@ def create_app() -> FastAPI:
     app.include_router(fieldwork.router)
     app.include_router(projects.router)
     app.include_router(stock.router)
+    app.include_router(commissions.router)  # comisiones, ganancias de aliados y Mis numeros (economia)
     app.include_router(support_desk.router)
     app.include_router(public.router)
     app.include_router(public_incidents.router)

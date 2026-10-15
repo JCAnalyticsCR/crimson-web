@@ -235,7 +235,8 @@ def _payroll_item(db: Session, p: Principal, r: PayrollRun) -> dict:
 
 
 def _commission_where(p: Principal) -> list:
-    w = [Commission.tenant_id == p.tenant.id, Commission.status == "pendiente"]
+    """Misma cuenta que Inicio (services/commissions.approvals_count): pendientes + en espera."""
+    w = [Commission.tenant_id == p.tenant.id, Commission.status.in_(("pendiente", "en_espera"))]
     if not p.can("commissions", "ver_todo"):
         w.append(Commission.user_id == p.user.id)  # misma regla que la lista de comisiones
     return w
@@ -245,21 +246,38 @@ _COMMISSION_BASE = {"venta": "Sobre venta", "margen": "Sobre margen"}
 
 
 def _commission_item(db: Session, p: Principal, c: Commission) -> dict:
-    sub = _COMMISSION_BASE.get(c.base, c.base)
-    # Sobre margen, el % junto al monto deja despejar la utilidad (monto / %), y con el total de la factura el costo:
-    # sin catalog.costos no se muestra, igual que base_amount en /commissions. Pregunta abierta para Andres:
-    # /commissions y /commissions/rules todavia devuelven el % a quien ve todo (contabilidad).
-    if c.base != "margen" or p.sees_costs:
-        sub = f"{sub} · {Decimal(str(c.percent or 0)).normalize():f} %"
+    from .commissions import KIND_LABEL, hides_payout, is_payout
+
+    kind = c.kind or "comision"
+    if kind == "comision":
+        sub = _COMMISSION_BASE.get(c.base, c.base)
+        # Sobre margen, el % junto al monto deja despejar la utilidad (monto / %), y con el total de la factura el costo:
+        # sin catalog.costos no se muestra, igual que base_amount en /commissions.
+        if c.base != "margen" or p.sees_costs:
+            sub = f"{sub} · {Decimal(str(c.percent or 0)).normalize():f} %"
+    else:
+        # bono, pago acordado o ajuste: no tienen base ni %; el concepto dice de que es
+        sub = KIND_LABEL.get(kind, kind) + (f" · {c.description}" if c.description else "")
+    if c.status == "en_espera":
+        sub = f"En espera · {c.hold_reason}" if c.hold_reason else "En espera de un dato"
+    if c.beneficiary == "aliado":
+        from ..models import AllyCompany, AllyParticipation
+
+        comp = db.get(AllyCompany, c.ally_company_id) if c.ally_company_id else None
+        part = db.get(AllyParticipation, c.participation_id) if comp is None and c.participation_id else None
+        quien = comp.name if comp else (part.name if part else "Aliado")
+    else:
+        quien = _name(db, c.user_id) or "Usuario"
+    oculto = is_payout(c) and hides_payout(p)
     return _row(
         c.id,
         f"COM-{c.id}",
-        _name(db, c.user_id) or "Usuario",
-        sub,
+        quien,
+        sub[:200],
         since=c.earned_on,
-        amount=c.amount,
-        currency=c.currency,
-        to="/comisiones?estado=pendiente",
+        amount=None if oculto else c.amount,
+        currency=None if oculto else c.currency,
+        to="/comisiones?tab=bandeja",
     )
 
 
@@ -344,9 +362,9 @@ SECTIONS: tuple[Section, ...] = (
     Section(
         "comisiones_por_aprobar",
         "Comisiones por aprobar",
-        "Devengadas por pagos cobrados; esperan aprobación antes de pagarse.",
+        "Comisiones, bonos y pagos acordados a aliados que esperan aprobación (o un dato, si están en espera) antes de pagarse.",
         ("commissions.aprobar",),
-        "/comisiones?estado=pendiente",
+        "/comisiones?tab=bandeja",
         Commission,
         _commission_where,
         lambda: [Commission.earned_on, Commission.id],

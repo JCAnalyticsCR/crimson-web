@@ -45,7 +45,7 @@ const Assets = lazy(() => import("./modules/projects/Assets"));
 const Purchases = lazy(() => import("./modules/projects/Purchases"));
 const Tickets = lazy(() => import("./modules/support/Tickets"));
 const Contracts = lazy(() => import("./modules/support/Contracts"));
-const Commissions = lazy(() => import("./modules/support/Commissions"));
+const Commissions = lazy(() => import("./modules/commissions/Commissions"));
 const Archive = lazy(() => import("./modules/tools/Archive"));
 const AccessRequests = lazy(() => import("./modules/clientaccess/AccessRequests"));
 const Vehicles = lazy(() => import("./modules/vehicles/Vehicles"));

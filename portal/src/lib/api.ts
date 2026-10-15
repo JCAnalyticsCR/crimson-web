@@ -165,6 +165,8 @@ export type Dashboard = {
   acciones_pendientes: Record<string, number>;
   /* inicio del vendedor: su embudo con la misma cuenta que Oportunidades, en la moneda de la empresa */
   mi_embudo?: { abiertas: number; monto: string; ponderado: string; ganadas_mes: number; ganado_mes: string; perdidas_mes: number; moneda: string; convertido: boolean } | null;
+  /* Mis comisiones (vendedor, sin ver_todo): la misma cuenta que /commissions/summary, en colones y sin IVA */
+  comisiones?: { ganado_mes: string; pagado_mes: string; por_cobrar: string; moneda: string } | null;
 };
 
 /* Levantamiento en resumen para la vendedora (GET /surveys/{id}/summary): solo lectura y sin un solo costo. */

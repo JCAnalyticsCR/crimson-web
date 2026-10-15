@@ -27,15 +27,10 @@ from ..models import (
     AllyCompany,
     AllyParticipation,
     AuditLog,
-    Commission,
-    CommissionRule,
     Customer,
     CustomerAsset,
     EmailOutbox,
-    Invoice,
     MaintenanceContract,
-    Payment,
-    Product,
     Project,
     SupportNote,
     SupportTicket,
@@ -45,11 +40,11 @@ from ..models import (
 )
 from ..services import sla as slasvc
 from ..services.archive import live
-from ..services.documents import audit, local_date
+from ..services.documents import audit
 from ..services.mail import notify_roles, queue_email
 from ..services.refs import check_refs
 from ..services.sequences import next_number
-from ..services.totals import d, net_sale
+from ..services.totals import d
 
 router = APIRouter(tags=["soporte"])
 
@@ -1161,204 +1156,5 @@ def contract_ticket(cid: int, p: Principal = Depends(require("support_desk", "cr
 
 
 # ---------- Comisiones ----------
-class RuleIn(BaseModel):
-    user_id: int | None = None
-    name: str = Field("Comisión", max_length=120)
-    base: str = Field("venta", pattern="^(venta|margen)$")
-    percent: Decimal = Field(Decimal(0), ge=0, le=100)
-    active: bool = True
-    notes: str | None = None
-
-
-@router.get("/commissions/rules")
-def rules(p: Principal = Depends(require("commissions", "ver")), db: Session = Depends(get_db)):
-    stmt = select(CommissionRule).where(CommissionRule.tenant_id == p.tenant.id)
-    if not p.can("commissions", "ver_todo"):
-        # el vendedor ve su regla y la general, no los porcentajes de los demas
-        stmt = stmt.where(or_(CommissionRule.user_id == p.user.id, CommissionRule.user_id.is_(None)))
-    out = []
-    for r in db.scalars(stmt.order_by(CommissionRule.id)):
-        u = db.get(User, r.user_id) if r.user_id else None
-        out.append(
-            {
-                "id": r.id,
-                "user_id": r.user_id,
-                "user": u.full_name if u else "Todos",
-                "name": r.name,
-                "base": r.base,
-                # sobre la utilidad, el % con lo que gana deja sacar la utilidad (y el costo): solo quien ve costos
-                "percent": None if r.base == "margen" and not p.sees_costs else r.percent,
-                "active": r.active,
-                "notes": r.notes,
-            }
-        )
-    return out
-
-
-@router.post("/commissions/rules", status_code=201)
-def rule_create(data: RuleIn, p: Principal = Depends(require("commissions", "configurar")), db: Session = Depends(get_db)):
-    r = CommissionRule(tenant_id=p.tenant.id, **data.model_dump())
-    db.add(r)
-    db.flush()
-    from ..services import bitacora  # solo bitacora
-
-    bitacora.audit_change(db, p, "create", "commission_rule", r.id, {}, bitacora.snapshot(r), version=1, always=True)
-    db.commit()
-    return {"id": r.id}
-
-
-@router.put("/commissions/rules/{rid}")
-def rule_update(rid: int, data: RuleIn, p: Principal = Depends(require("commissions", "configurar")), db: Session = Depends(get_db)):
-    r = db.get(CommissionRule, rid)
-    if not r or r.tenant_id != p.tenant.id:
-        raise HTTPException(404, "Regla no encontrada")
-    from ..services import bitacora  # solo bitacora: antes/despues del porcentaje, base, vendedor...
-
-    antes = bitacora.snapshot(r)
-    for k, v in data.model_dump().items():
-        setattr(r, k, v)
-    bitacora.audit_change(
-        db, p, "update", "commission_rule", r.id, antes, bitacora.snapshot(r), version=bitacora.next_version(db, p.tenant.id, "commission_rule", r.id)
-    )
-    db.commit()
-    return {"id": r.id}
-
-
-def _fecha(v) -> date:
-    """paid_at es date en un pago manual y datetime cuando viene de la pasarela."""
-    if isinstance(v, datetime):
-        return local_date(v) or date.today()
-    return v or date.today()
-
-
-def rule_for(db: Session, tenant_id: int, user_id: int | None) -> CommissionRule | None:
-    """La regla del vendedor manda sobre la general."""
-    if user_id:
-        propia = db.scalar(select(CommissionRule).where(CommissionRule.tenant_id == tenant_id, CommissionRule.user_id == user_id, CommissionRule.active))
-        if propia:
-            return propia
-    return db.scalar(select(CommissionRule).where(CommissionRule.tenant_id == tenant_id, CommissionRule.user_id.is_(None), CommissionRule.active))
-
-
-def accrue_for_payment(db: Session, payment: Payment) -> Commission | None:
-    """Comision de un pago confirmado. Andres: "venta cobrada -> comision correspondiente", asi que la
-    comision nace con la plata en la cuenta y en proporcion a lo cobrado, no al facturar."""
-    from ..services import pricing
-    from ..services.documents import today_fx
-
-    inv = db.get(Invoice, payment.invoice_id) if payment.invoice_id else None
-    # la comision es del vendedor responsable (services/ownership.py), no de quien tecleo la factura: la cotizacion
-    # que la oficina genero desde el levantamiento sigue siendo de la vendedora. Sin vendedor (tienda) no comisiona.
-    if inv is None or inv.status == "anulada" or not inv.seller_id:
-        return None
-    if db.scalar(select(Commission).where(Commission.payment_id == payment.id)):
-        return None  # ya se devengo: un webhook reintentado no comisiona dos veces
-    regla = rule_for(db, inv.tenant_id, inv.seller_id)
-    if not regla or d(regla.percent) <= 0:
-        return None
-    cobrado = d(payment.amount)
-    if regla.base == "margen":
-        fx = today_fx(db, "USD")[0]
-        costo = Decimal(0)
-        for ln in inv.lines:
-            prod = db.get(Product, ln.product_id) if ln.product_id else None
-            if prod is not None and prod.cost is not None:
-                costo += pricing.cost_in(db, prod, inv.currency, fx) * d(ln.quantity)
-        neto = d(inv.subtotal) - d(inv.discount_total)
-        if neto <= 0:
-            return None
-        proporcion = cobrado / d(inv.total) if d(inv.total) > 0 else Decimal(0)
-        base_amount = (neto - costo) * proporcion
-    else:
-        # Andres: los calculos van sin IVA. El pago trae IVA adentro: se toma solo su parte de venta sin IVA.
-        # Solo hacia adelante: las comisiones ya devengadas no se recalculan.
-        total = d(inv.total)
-        base_amount = cobrado * (net_sale(inv) / total) if total > 0 else Decimal(0)
-    if base_amount <= 0:
-        return None
-    c = Commission(
-        tenant_id=inv.tenant_id,
-        user_id=inv.seller_id,
-        invoice_id=inv.id,
-        payment_id=payment.id,
-        rule_id=regla.id,
-        base=regla.base,
-        base_amount=base_amount.quantize(Decimal("0.01")),
-        percent=regla.percent,
-        amount=(base_amount * d(regla.percent) / 100).quantize(Decimal("0.01")),
-        currency=inv.currency,
-        earned_on=_fecha(payment.paid_at),
-    )
-    db.add(c)
-    return c
-
-
-@router.get("/commissions")
-def commissions(
-    status: str | None = None,
-    user_id: int | None = None,
-    from_: date | None = Query(None, alias="from"),
-    to: date | None = None,
-    p: Principal = Depends(require("commissions", "ver")),
-    db: Session = Depends(get_db),
-):
-    stmt = select(Commission).where(Commission.tenant_id == p.tenant.id)
-    if not p.can("commissions", "ver_todo"):
-        stmt = stmt.where(Commission.user_id == p.user.id)  # cada quien ve la suya
-    elif user_id:
-        stmt = stmt.where(Commission.user_id == user_id)
-    if status:
-        stmt = stmt.where(Commission.status == status)
-    if from_:
-        stmt = stmt.where(Commission.earned_on >= from_)
-    if to:
-        stmt = stmt.where(Commission.earned_on <= to)
-    rows = db.scalars(stmt.order_by(Commission.earned_on.desc(), Commission.id.desc()).limit(300)).all()
-    out = []
-    for c in rows:
-        u = db.get(User, c.user_id)
-        inv = db.get(Invoice, c.invoice_id) if c.invoice_id else None
-        out.append(
-            {
-                "id": c.id,
-                "user_id": c.user_id,
-                "user": u.full_name if u else None,
-                "invoice": inv.number if inv else None,
-                "invoice_id": c.invoice_id,
-                "base": c.base,
-                # sobre margen, la base es la utilidad de la venta: informacion de costos (catalog.costos)
-                "base_amount": None if c.base == "margen" and not p.sees_costs else c.base_amount,
-                # y el % tampoco: comision / % x 100 = utilidad (D3: el costo no se deduce)
-                "percent": None if c.base == "margen" and not p.sees_costs else c.percent,
-                "amount": c.amount,
-                "currency": c.currency,
-                "earned_on": c.earned_on,
-                "status": c.status,
-                "paid_on": c.paid_on,
-            }
-        )
-    return {
-        "rows": out,
-        "totals": {
-            "pendiente": sum((d(c.amount) for c in rows if c.status == "pendiente"), Decimal(0)),
-            "aprobada": sum((d(c.amount) for c in rows if c.status == "aprobada"), Decimal(0)),
-            "pagada": sum((d(c.amount) for c in rows if c.status == "pagada"), Decimal(0)),
-        },
-    }
-
-
-class CommissionStatusIn(BaseModel):
-    ids: list[int] = Field(min_length=1)
-    status: str = Field(pattern="^(pendiente|aprobada|pagada|anulada)$")
-
-
-@router.patch("/commissions")
-def commission_status(data: CommissionStatusIn, p: Principal = Depends(require("commissions", "aprobar")), db: Session = Depends(get_db)):
-    n = 0
-    for c in db.scalars(select(Commission).where(Commission.tenant_id == p.tenant.id, Commission.id.in_(data.ids))):
-        c.status = data.status
-        c.paid_on = date.today() if data.status == "pagada" else None
-        n += 1
-    audit(db, p.tenant.id, p.user.id, "status", "commission", data.ids[0], {"status": data.status, "n": n}, ip=p.ip)
-    db.commit()
-    return {"actualizadas": n}
+# Se mudaron a routers/commissions.py (motor en services/commissions.py). Alias por si otro codigo lo importa.
+from ..services.commissions import on_payment as accrue_for_payment  # noqa: E402,F401

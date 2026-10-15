@@ -56,7 +56,9 @@ def test_proyecto_sin_costos_es_provisional(client, auth, db_session):
     client.put(f"/projects/{pr['id']}", json={"name": "Sin costos", "status": "terminado", "customer_id": cust["id"]})
     rent = client.get("/reports/rentabilidad").json()
     fila = next(r for r in rent["rows"] if r[0] == pr["number"])
-    assert fila[-1] == "Faltan costos por registrar" and fila[11] is None
+    # economia (spec 8.7): Aliados, Comisiones y Utilidad neta van al final; "Provisional" conserva su posicion (14)
+    assert rent["columns"].index("Provisional") == 14
+    assert fila[14] == "Faltan costos por registrar" and fila[11] is None
     assert Decimal(str(rent["totals"]["Utilidad"])) == 0 and rent["totals"]["Provisionales sin costos (fuera del total)"] == 1
     tipos = client.get("/reports/rentabilidad_tipo").json()
     assert tipos["rows"] == [] and tipos["totals"]["Provisionales sin costos (fuera del total)"] == 1

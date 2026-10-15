@@ -68,7 +68,7 @@ Proyecto `crimson-plataforma` (entorno `production` de Railway, datos de prueba)
 | disponibilidad | `PATCH /products/{id}/web`, `/products/{id}/availability`, `/products/meta/filters` | interruptor de publicación en la tienda, existencias propias + del proveedor y los filtros del catálogo |
 | soporte al cliente | `/tickets[/{id}[/notes\|/work-order]]`, `/tickets/meta/config` | casos con SLA de primera respuesta, nivel 1-3, horas y si se cobra; el ticket genera la orden de trabajo |
 | mantenimientos | `/contracts[/{id}[/ticket]]` | cada cuántos meses toca; el worker abre el ticket y reprograma la próxima |
-| comisiones | `/commissions[/rules]`, `PATCH /commissions` | se devengan con el **cobro**, no con la factura; sobre lo cobrado o sobre la utilidad |
+| comisiones | `/commissions*` (ver «Comisiones v2») | libro único de comisiones, bonos y pagos acordados a aliados; reglas por persona, aliado o proyecto; bandeja de aprobación |
 | soporte | `/settings/support[/{id}/revoke\|log]` | acceso temporal de solo lectura con bitácora por request |
 | bandeja XML | `/settings/inbox`, `/settings/inbox/run` | IMAP cada 15 min (worker); contraseña cifrada |
 | contacto | `/public/store/{slug}/contact` | formulario del sitio → nota en la ficha + correo a administradores |
@@ -78,6 +78,13 @@ Roles: `admin`, `ventas`, `caja`, `inventario`, `contabilidad`, `lectura` — pe
 Roles externos (nunca entran a un endpoint interno: `get_principal` los rechaza):
 - Portal del cliente (`/cliente/*`, `routers/client_portal.py`): `cliente_admin`, `cliente_usuario`, ligados a un cliente (`tenant_user.customer_id`).
 - Portal de aliados (`/aliado/*`, `routers/ally_portal.py`, puerta única `core/ally.py`): `aliado`, `tecnico_aliado`, ligados a una empresa aliada (`tenant_user.ally_company_id`). Solo ven lo que tienen EN COMÚN con la empresa (`services/ally_scope.py`, deny by default; lo ajeno responde 404) y salidas por lista blanca. Se invitan desde Administración → Aliados (`/allies/{id}/invitations`), no desde Ajustes. "Ver como este aliado" (solo admin): cabecera `X-View-As-Ally` (+ `X-View-As-User`), datos reales en solo lectura y con constancia en la bitácora. Precio de aliado: `services/ally_pricing.py` (recargo sobre el costo, precios fijos por producto). Mensualidad: recurrencia de factura (`/allies/{id}/plan`).
+
+## Comisiones v2 (economía)
+Motor en `services/commissions.py`, endpoints en `routers/commissions.py`. Libro único `commission` (comisión, bono, pago acordado, ajuste) para vendedores (`user_id`) y empresas aliadas (`ally_company_id`); reglas en `commission_rule` (gana la más específica: proyecto > persona/empresa > solución > tipo de negocio).
+- **Eventos** (idempotentes por `source_key`): cobro confirmado (`captura` devenga proporcional sin IVA con tope por factura; `devolucion`/`reembolso` crean un ajuste negativo; autorizaciones y voids no hacen nada), cotización aceptada o convertida, proyecto completado (primera vez terminado/entregado/facturado: comisiones, bonos y pago acordado; cancelado revierte), cambio del precio aprobado del aliado y factura anulada. Una pagada nunca se toca: se corrige con un ajuste.
+- **Defaults** (Comisiones → Configuración, `tenant.settings.commissions`): comisión sobre la venta sin IVA al cobrar; pago acordado del aliado (su precio aprobado) al completar el proyecto; aprobación manual; regla general de vendedores solo para el rol `ventas`. No se crean reglas con % solas.
+- **Visibilidad**: el vendedor ve lo suyo (`/commissions/summary`, tarjeta en Inicio); base y % sobre utilidad solo para quien ve costos (el concepto tampoco lleva el %); "Mis números", el acuerdo económico y las ganancias de aliados (`/commissions/earnings*`, `/commissions/allies`: traen sus precios) exigen ver costos. El monto del pago acordado al aliado lo ven quien ve costos y quien lo aprueba y paga (contabilidad); lectura ve el libro sin esos montos. Nadie aprueba ni paga lo suyo salvo el admin. El aliado ve su dinero solo en su portal (`/aliado/ganancias*`, 24 meses), y solo de las participaciones que Crimson le comparte (`visible_to_ally`).
+- **Aplicar reglas a ventas anteriores**: `POST /commissions/backfill {"from": "2026-10-01", "dry_run": true}` simula; con `dry_run: false` crea (repetirlo no duplica).
 
 ## Reglas que el código ya respeta (plan §5 y §14)
 - `tenant_id` en toda tabla de negocio; documentos con `ON DELETE RESTRICT`.

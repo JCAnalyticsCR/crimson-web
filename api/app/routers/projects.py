@@ -97,13 +97,74 @@ def project_solution(db: Session, pr: Project) -> str:
     return "Sin clasificar"
 
 
+def price_crc(db: Session, pr: Project) -> Decimal:
+    """Venta sin IVA en colones: Project.price esta en la moneda de su cotizacion (falla J: en USD se comparaba
+    dolares contra costos en colones). Con el tipo de cambio guardado en la cotizacion."""
+    q = db.get(Quote, pr.quote_id) if pr.quote_id else None
+    if q is None or (q.currency or "CRC") == "CRC":
+        return d(pr.price)
+    fx = d(q.fx_sell)
+    return d(pr.price) * (fx if fx > 0 else today_fx(db, q.currency)[0])
+
+
+def ally_cost_of_project(db: Session, pr: Project, fx: Decimal | None = None) -> Decimal:
+    """Lo que Crimson le paga a sus aliados en este proyecto: sus precios APROBADOS (sin IVA), en colones. Cuenta
+    como costo directo desde que esta aprobado, aunque el pago acordado todavia no se haya devengado."""
+    from ..models import AllyCostRequest, AllyParticipation
+
+    total = Decimal(0)
+    rows = db.scalars(
+        select(AllyCostRequest)
+        .join(AllyParticipation, AllyParticipation.id == AllyCostRequest.participation_id)
+        .where(AllyParticipation.tenant_id == pr.tenant_id, AllyParticipation.project_id == pr.id, AllyCostRequest.status == "aprobado")
+    ).all()
+    for r in rows:
+        if r.amount is None:
+            continue
+        if (r.currency or "CRC") == "CRC":
+            total += d(r.amount)
+        else:
+            rate = fx if fx is not None and r.currency == "USD" else today_fx(db, r.currency)[0]
+            total += d(r.amount) * d(rate)
+    return total
+
+
+def direct_cost(db: Session, pr: Project, fx: Decimal | None = None) -> Decimal:
+    """Costo directo real: materiales consumidos + mano de obra propia + viaticos + otros + aliados (falla K: la
+    fila de gerencia lo recalculaba a mano y sin aliados)."""
+    fx = fx if fx is not None else today_fx(db, "USD")[0]
+    return consumed_cost(db, pr, fx) + d(pr.cost_labor) + d(pr.cost_travel) + d(pr.cost_extra) + ally_cost_of_project(db, pr, fx)
+
+
+def project_commissions(db: Session, pr: Project) -> Decimal:
+    """Comisiones, bonos y ajustes devengados del proyecto (no anulados), en colones. El pago acordado y SUS ajustes
+    (diferencia de precio, reverso, devolucion: llevan cost_request_id) ya estan en el costo de aliados, que usa el
+    precio aprobado vigente: contarlos aqui los restaria dos veces de la utilidad neta."""
+    from ..models import Commission
+    from ..services.commissions import crc_of
+
+    rows = db.scalars(
+        select(Commission).where(
+            Commission.tenant_id == pr.tenant_id,
+            Commission.project_id == pr.id,
+            Commission.status != "anulada",
+            Commission.kind.in_(("comision", "bono", "ajuste")),
+            Commission.cost_request_id.is_(None),
+        )
+    ).all()
+    return sum((crc_of(db, c) for c in rows), Decimal(0))
+
+
 def economics(db: Session, pr: Project, fx: Decimal | None = None) -> dict:
     """Lo que costo de verdad el proyecto contra lo que se vendio. Unica fuente: la usan la ficha y el reporte."""
     from ..routers.fieldwork import order_hours, survey_estimate
 
     fx = fx if fx is not None else today_fx(db, "USD")[0]
     materials = consumed_cost(db, pr, fx)
-    real = materials + d(pr.cost_labor) + d(pr.cost_travel) + d(pr.cost_extra)
+    allies = ally_cost_of_project(db, pr, fx)
+    real = materials + d(pr.cost_labor) + d(pr.cost_travel) + d(pr.cost_extra) + allies
+    venta = price_crc(db, pr)
+    comisiones = project_commissions(db, pr)
     # sin costos registrados el "margen real" daria 100 %: no es ganancia, es que falta registrar.
     # Mientras falten costos o el proyecto no este cerrado, el real es provisional y manda el cotizado.
     sin_costos = real <= 0
@@ -114,17 +175,24 @@ def economics(db: Session, pr: Project, fx: Decimal | None = None) -> dict:
         aviso = "Proyecto en curso: el margen real puede cambiar"
     else:
         aviso = None
+    profit = None if sin_costos else (venta - real).quantize(Decimal("0.01"))
+    profit_net = None if profit is None else (profit - comisiones).quantize(Decimal("0.01"))
     return {
         "price": pr.price,
+        "price_crc": venta.quantize(Decimal("0.01")),
         "cost_planned": pr.cost_planned,
         "cost_materials": materials.quantize(Decimal("0.01")),
         "cost_labor": pr.cost_labor,
         "cost_travel": pr.cost_travel,
         "cost_extra": pr.cost_extra,
+        "cost_allies": allies.quantize(Decimal("0.01")),
         "cost_real": real.quantize(Decimal("0.01")),
-        "profit": None if sin_costos else (d(pr.price) - real).quantize(Decimal("0.01")),
-        "margin_real": None if sin_costos else pricing.margin_of(d(pr.price), real),
-        "margin_planned": pricing.margin_of(d(pr.price), d(pr.cost_planned)),
+        "profit": profit,
+        "margin_real": None if sin_costos else pricing.margin_of(venta, real),
+        "margin_planned": pricing.margin_of(venta, d(pr.cost_planned)),
+        "commissions": comisiones.quantize(Decimal("0.01")),
+        "profit_net": profit_net,
+        "margin_net": None if profit_net is None or venta <= 0 else float((profit_net / venta * 100).quantize(Decimal("0.1"))),
         "sin_costos": sin_costos,
         "provisional": sin_costos or not cerrado,
         "aviso": aviso,
@@ -180,6 +248,14 @@ def _out(db: Session, pr: Project, p: Principal, full: bool = True) -> dict:
 
         # aliados heredados de la oportunidad: quien participa y a quien llamar (las solicitudes de costo viven en la oportunidad)
         out["allies"] = [allysvc.ally_out(db, a, p, with_requests=False) for a in allysvc.allies_of(db, p.tenant.id, project_id=pr.id)]
+        if p.sees_costs:
+            from ..models import AllyParticipation
+            from ..services import commissions as comsvc
+
+            # que recibe cada aliado aqui (pago acordado, comision, bonos): informacion de costos
+            for a in out["allies"]:
+                part = db.get(AllyParticipation, a["id"])
+                a["deal"] = comsvc.deal_summary(db, part) if part is not None else None
         out["orders"] = [
             {
                 "id": o.id,
@@ -315,9 +391,7 @@ def project_from_quote(qid: int, data: FromQuoteIn, p: Principal = Depends(requi
         quote_id=q.id,
         survey_id=survey.id if survey else None,
         opportunity_id=None,
-        site=data.site
-        or (opp.site if opp and opp.site else None)
-        or (survey.site if survey else (c.address or {}).get("senas") if c and c.address else None),
+        site=data.site or (opp.site if opp and opp.site else None) or (survey.site if survey else (c.address or {}).get("senas") if c and c.address else None),
         scope=q.external_notes,
         supervisor_id=data.supervisor_id,
         start_date=data.start_date,
@@ -357,6 +431,9 @@ def project_from_quote(qid: int, data: FromQuoteIn, p: Principal = Depends(requi
     if survey:
         survey.status = "cerrado"
     db.flush()
+    from ..services import commissions as comsvc
+
+    comsvc.on_quote_won(db, q)  # crear el proyecto es aceptacion implicita (reglas "al aceptar la cotizacion")
     faltantes = _reservar(db, p, pr, order)
     audit(db, p.tenant.id, p.user.id, "from_quote", "project", pr.id, {"quote": q.number, "por_comprar": len(faltantes)}, ip=p.ip)
     db.commit()
@@ -433,6 +510,8 @@ def project_update(pid: int, data: ProjectIn, p: Principal = Depends(require("pr
     from ..services import bitacora  # solo bitacora: antes/despues de lo que cambio (incluye costos)
 
     antes = bitacora.snapshot(pr)
+    estado_antes = pr.status
+    costos_antes = tuple(d(getattr(pr, k)) for k in PROJECT_COST_FIELDS)
     # solo lo que se envia: el portal no manda supervisor_id ni photos y antes cada edicion los borraba
     cambios = data.model_dump(exclude_unset=True)
     check_refs(db, p.tenant.id, cambios, PROJECT_REFS, PROJECT_USERS, current=pr)
@@ -440,11 +519,27 @@ def project_update(pid: int, data: ProjectIn, p: Principal = Depends(require("pr
         # quien no ve la economia recibe los costos ocultos y mandaria 0: sin esto borraba los costos del proyecto
         for k in PROJECT_COST_FIELDS:
             cambios.pop(k, None)
+    from ..services import commissions as comsvc
+
+    if cambios.get("status") == "cancelado" and estado_antes != "cancelado" and not p.can("commissions", "aprobar") and comsvc.project_earned(db, pr):
+        # cancelar anula o revierte lo devengado al completarlo (incluso aprobado o pagado): no se salta la aprobacion
+        raise HTTPException(
+            409,
+            "Este proyecto ya devengó comisiones, bonos o pagos acordados al completarse y cancelarlo los anula o revierte. "
+            "Lo puede cancelar quien aprueba comisiones.",
+        )
     for k, v in cambios.items():
         setattr(pr, k, v)
     if pr.status == "entregado" and not pr.delivered_at:
         pr.delivered_at = datetime.now(UTC)
-    bitacora.audit_change(db, p, "update", "project", pr.id, antes, bitacora.snapshot(pr), version=bitacora.next_version(db, p.tenant.id, "project", pr.id))
+
+    # completar devenga (comisiones al completar, bonos, pago acordado); cancelar revierte; costos nuevos recalculan
+    # lo que espera la utilidad del proyecto
+    snap = bitacora.snapshot(pr)
+    comsvc.on_project_status(db, pr, estado_antes)
+    if estado_antes != pr.status or costos_antes != tuple(d(getattr(pr, k)) for k in PROJECT_COST_FIELDS):
+        comsvc.on_project_costs(db, pr)
+    bitacora.audit_change(db, p, "update", "project", pr.id, antes, snap, version=bitacora.next_version(db, p.tenant.id, "project", pr.id))
     db.commit()
     return _out(db, pr, p)
 
@@ -784,7 +879,11 @@ def project_invoice(pid: int, p: Principal = Depends(require("sales", "crear")),
     # Si las ordenes ya sacaron el material de bodega, la factura no vuelve a descontarlo: seria contarlo dos veces.
     if not ya_convertida and not any(o.stock_applied for o in pr.orders):
         invsvc.deduct_for_invoice(db, inv, p.user.id)
+    antes = pr.status
     pr.invoice_id, pr.status = inv.id, "facturado"
+    from ..services import commissions as comsvc
+
+    comsvc.on_project_status(db, pr, antes)
     audit(db, p.tenant.id, p.user.id, "invoice", "project", pr.id, {"invoice_id": inv.id}, ip=p.ip)
     db.commit()
     return {"invoice_id": inv.id, "number": inv.number}

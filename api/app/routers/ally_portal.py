@@ -294,7 +294,7 @@ def _project_out(db: Session, ctx: AllyCtx, pr: Project, full: bool = False) -> 
         ]
         out["requests"] = _requests_of(db, ctx, parts)
         econ = _economia()
-        out["lo_que_recibo"] = econ.ally_project_earnings(db, ctx.p.tenant, ctx.company.id, pr.id) if econ else None
+        out["lo_que_recibo"] = econ.ally_project_earnings(db, ctx.p.tenant, ctx.company.id, pr.id, for_ally=True) if econ else None
         out["assets_count"] = db.scalar(select(func.count()).select_from(CustomerAsset).where(CustomerAsset.project_id == pr.id, *ctx.scope.assets())) or 0
     return out
 
@@ -570,7 +570,7 @@ def inicio(ctx: AllyCtx = Depends(need("ver")), db: Session = Depends(get_db)):
     }
     econ = _economia()
     if econ:
-        t = econ.ally_earnings(db, ctx.p.tenant, c.id, None, None).get("totales") or {}
+        t = econ.ally_earnings(db, ctx.p.tenant, c.id, None, None, for_ally=True).get("totales") or {}
         out["dinero"] = {"recibido": t.get("recibido"), "por_recibir": t.get("por_recibir"), "proyectado": t.get("proyectado"), "moneda": "CRC"}
     return out
 
@@ -1614,8 +1614,11 @@ def ganancias(desde: date | None = None, hasta: date | None = None, ctx: AllyCtx
     if econ is None:
         raise HTTPException(503, "Disponible pronto")
     hasta = hasta or date.today()
-    desde = desde or date(hasta.year - 1, hasta.month, 1)
-    out = econ.ally_earnings(db, ctx.p.tenant, ctx.company.id, desde, hasta)
+    if desde is None:  # 24 meses con el actual (spec economia 9.8)
+        y, m = divmod(hasta.year * 12 + hasta.month - 1 - 23, 12)
+        desde = date(y, m + 1, 1)
+    # solo lo que Crimson le comparte (visible_to_ally y proyectos vivos), como el resto de /aliado/*
+    out = econ.ally_earnings(db, ctx.p.tenant, ctx.company.id, desde, hasta, for_ally=True)
     fee = ally_access.fee_by_month(db, ctx.company, desde, hasta)
     meses = out.get("por_mes") or []
     vistos = {m.get("mes") for m in meses}
@@ -1639,7 +1642,7 @@ def ganancias_proyecto(pid: int, ctx: AllyCtx = Depends(need("ganancias")), db: 
     econ = _economia()
     if econ is None:
         raise HTTPException(503, "Disponible pronto")
-    return econ.ally_project_earnings(db, ctx.p.tenant, ctx.company.id, pr.id)
+    return econ.ally_project_earnings(db, ctx.p.tenant, ctx.company.id, pr.id, for_ally=True)
 
 
 def _emitida(inv: Invoice) -> bool:

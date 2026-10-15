@@ -258,6 +258,9 @@ def convert_quote(db: Session, tenant_id: int, user_id: int, q: Quote) -> Invoic
     q.status = "convertida"
     q.converted_invoice_id = inv.id
     audit(db, tenant_id, user_id, "convert", "quote", q.id, {"invoice_id": inv.id})
+    from . import commissions  # import local: evita ciclo
+
+    commissions.on_quote_won(db, q)  # convertir es aceptacion implicita (reglas "al aceptar la cotizacion")
     return inv
 
 
@@ -286,10 +289,11 @@ def add_payment(db: Session, tenant_id: int, user_id: int | None, inv: Invoice, 
     recompute_balance(inv)
     db.flush()
     audit(db, tenant_id, user_id, "pay", "invoice", inv.id, {"payment_id": p.id, "amount": str(data.amount), "kind": data.kind})
-    if p.status == "confirmado" and p.kind != "reembolso":
-        from ..routers.support_desk import accrue_for_payment  # import local: el router ya importa de aqui
+    if p.status == "confirmado":
+        from . import commissions  # import local: evita ciclo
 
-        accrue_for_payment(db, p)  # "venta cobrada -> comision correspondiente"
+        # captura devenga ("venta cobrada -> comision"); devolucion/reembolso revierten; el resto no hace nada
+        commissions.on_payment(db, p)
     return p
 
 

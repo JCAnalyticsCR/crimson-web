@@ -452,7 +452,7 @@ def rentabilidad(db: Session, tid: int, a: date, b: date) -> Report:
 
     # Archivar un trabajo terminado es ordenar, no borrarlo: su margen sigue contando. Solo la papelera sale.
     fx = today_fx(db, "USD")[0]
-    rows, price_total, cost_total, provisionales = [], Decimal(0), Decimal(0), 0
+    rows, price_total, cost_total, comm_total, provisionales = [], Decimal(0), Decimal(0), Decimal(0), 0
     cerrados = db.scalars(
         select(Project)
         .where(Project.tenant_id == tid, Project.status.in_(("terminado", "entregado", "facturado")), Project.trashed_at.is_(None))
@@ -469,7 +469,7 @@ def rentabilidad(db: Session, tid: int, a: date, b: date) -> Report:
                 pr.name,
                 pr.status,
                 cierre.isoformat(),
-                e["price"],
+                e["price_crc"],  # en colones: un proyecto cotizado en USD ya no se compara contra costos en CRC
                 e["cost_materials"],
                 e["cost_labor"],
                 e["cost_travel"],
@@ -480,13 +480,19 @@ def rentabilidad(db: Session, tid: int, a: date, b: date) -> Report:
                 e["margin_planned"],
                 e["hours"],
                 e["aviso"] or "",
+                # economia (spec 8.7): aliados (ya dentro del costo real), comisiones y utilidad neta se agregan AL
+                # FINAL; ninguna columna existente cambia de posicion (exportes y lecturas por indice)
+                e["cost_allies"],
+                e["commissions"],
+                e["profit_net"],
             ]
         )
         if e["sin_costos"]:
             provisionales += 1  # sin costos no es ganancia: fuera de los totales
             continue
-        price_total += Decimal(str(e["price"] or 0))
+        price_total += Decimal(str(e["price_crc"] or 0))
         cost_total += Decimal(str(e["cost_real"]))
+        comm_total += Decimal(str(e["commissions"] or 0))
     # primero los que menos dejaron (ahi esta lo que hay que corregir); los provisionales al final
     rows.sort(key=lambda r: (r[11] is None, r[11] or 0))
     return Report(
@@ -508,12 +514,17 @@ def rentabilidad(db: Session, tid: int, a: date, b: date) -> Report:
             "Margen cotizado %",
             "Horas",
             "Provisional",
+            "Aliados",
+            "Comisiones",
+            "Utilidad neta",
         ],
         rows,
         {
             "Venta sin IVA": price_total,
             "Costo real": cost_total,
             "Utilidad": price_total - cost_total,
+            "Comisiones": comm_total,
+            "Utilidad neta": price_total - cost_total - comm_total,
             "Provisionales sin costos (fuera del total)": provisionales,
         },
     )
@@ -540,22 +551,39 @@ def rentabilidad_tipo(db: Session, tid: int, a: date, b: date) -> Report:
         if e["sin_costos"]:
             provisionales += 1  # sin costos registrados no cuenta como ganancia
             continue
-        fila = por_tipo.setdefault(project_solution(db, pr), {"n": 0, "venta": Decimal(0), "costo": Decimal(0), "horas": 0.0})
+        fila = por_tipo.setdefault(
+            project_solution(db, pr), {"n": 0, "venta": Decimal(0), "costo": Decimal(0), "horas": 0.0, "aliados": Decimal(0), "comisiones": Decimal(0)}
+        )
         fila["n"] += 1
-        fila["venta"] += Decimal(str(e["price"] or 0))
+        fila["venta"] += Decimal(str(e["price_crc"] or 0))
         fila["costo"] += Decimal(str(e["cost_real"]))
         fila["horas"] += e["hours"]
+        fila["aliados"] += Decimal(str(e["cost_allies"] or 0))
+        fila["comisiones"] += Decimal(str(e["commissions"] or 0))
     rows = []
     for tipo, f in por_tipo.items():
         utilidad = f["venta"] - f["costo"]
-        rows.append([tipo, f["n"], f["venta"], f["costo"], utilidad, _margen(f["venta"], f["costo"]), round(f["horas"], 1)])
+        rows.append(
+            [
+                tipo,
+                f["n"],
+                f["venta"],
+                f["costo"],
+                utilidad,
+                _margen(f["venta"], f["costo"]),
+                round(f["horas"], 1),
+                f["aliados"],
+                f["comisiones"],
+                utilidad - f["comisiones"],
+            ]
+        )
     rows.sort(key=lambda r: -r[5])  # primero donde mas se gana
     venta = sum((Decimal(str(r[2])) for r in rows), Decimal(0))
     costo = sum((Decimal(str(r[3])) for r in rows), Decimal(0))
     return Report(
         "rentabilidad_tipo",
         "Rentabilidad por tipo de solución",
-        ["Solución", "Proyectos", "Venta sin IVA", "Costo real", "Utilidad", "Margen %", "Horas"],
+        ["Solución", "Proyectos", "Venta sin IVA", "Costo real", "Utilidad", "Margen %", "Horas", "Aliados", "Comisiones", "Utilidad neta"],
         rows,
         {
             "Venta sin IVA": venta,
@@ -571,6 +599,75 @@ def _margen(venta: Decimal, costo: Decimal) -> float:
     from ..services import pricing
 
     return pricing.margin_of(venta, costo)
+
+
+def comisiones(db: Session, tid: int, a: date, b: date, hide_payouts: bool = False) -> Report:
+    """Comisiones del periodo (contabilidad lo baja a Excel para la planilla): cada movimiento no anulado devengado
+    en el periodo, con su beneficiario, concepto, estado y referencia de pago. `hide_payouts`: sin el pago acordado
+    a los aliados ni sus ajustes (su precio es costo de Crimson) para quien no ve costos ni los paga."""
+    from ..models import AllyCompany, Commission, Project, Quote, User
+    from .commissions import KIND_LABEL, crc_of, is_payout
+
+    rows, tot = [], {"pendiente": Decimal(0), "aprobada": Decimal(0), "pagada": Decimal(0)}
+    nombres: dict = {}
+
+    def nombre(model, oid, attr):
+        if not oid:
+            return None
+        k = (model, oid)
+        if k not in nombres:
+            o = db.get(model, oid)
+            nombres[k] = getattr(o, attr, None) if o is not None else None
+        return nombres[k]
+
+    for c in db.scalars(
+        select(Commission)
+        .where(Commission.tenant_id == tid, Commission.status != "anulada", Commission.earned_on >= a, Commission.earned_on <= b)
+        .order_by(Commission.earned_on, Commission.id)
+    ):
+        if hide_payouts and is_payout(c):
+            continue
+        quien = nombre(User, c.user_id, "full_name") if c.beneficiary != "aliado" else nombre(AllyCompany, c.ally_company_id, "name")
+        doc = nombre(Invoice, c.invoice_id, "number") or nombre(Quote, c.quote_id, "number")
+        crc = crc_of(db, c).quantize(Decimal("0.01"))
+        rows.append(
+            [
+                c.earned_on.isoformat(),
+                quien or "—",
+                "Aliado" if c.beneficiary == "aliado" else "Vendedor",
+                KIND_LABEL.get(c.kind or "comision", c.kind),
+                c.description or "",
+                doc or "",
+                nombre(Project, c.project_id, "number") or "",
+                c.status,
+                c.amount,
+                c.currency,
+                crc,
+                c.paid_ref or "",
+            ]
+        )
+        if c.status in tot:
+            tot[c.status] += crc
+    return Report(
+        "comisiones",
+        "Comisiones del periodo",
+        [
+            "Fecha",
+            "Beneficiario",
+            "Tipo de beneficiario",
+            "Tipo",
+            "Concepto",
+            "Documento",
+            "Proyecto",
+            "Estado",
+            "Monto",
+            "Moneda",
+            "Monto CRC",
+            "Referencia de pago",
+        ],
+        rows,
+        {"Pendiente (CRC)": tot["pendiente"], "Aprobada (CRC)": tot["aprobada"], "Pagada (CRC)": tot["pagada"]},
+    )
 
 
 REPORTS = {
@@ -593,6 +690,7 @@ REPORTS = {
     "conciliacion": conciliacion,
     "rentabilidad": rentabilidad,
     "rentabilidad_tipo": rentabilidad_tipo,
+    "comisiones": comisiones,
 }
 CATALOG = [
     ("facturacion", "Facturación", "Todas las facturas del periodo con totales y saldo"),
@@ -614,6 +712,7 @@ CATALOG = [
     ("conciliacion", "Conciliación bancaria", "Movimientos del banco y con qué se casaron"),
     ("rentabilidad", "Rentabilidad por proyecto", "Cuánto dejó cada instalación: venta contra costo real"),
     ("rentabilidad_tipo", "Rentabilidad por tipo de solución", "En qué tipo de trabajo gana Crimson: CCTV, redes, acceso…"),
+    ("comisiones", "Comisiones del periodo", "Comisiones, bonos y pagos a aliados devengados, con su estado y referencia de pago"),
 ]
 
 
