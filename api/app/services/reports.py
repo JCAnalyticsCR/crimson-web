@@ -200,7 +200,7 @@ def iva_breakdown(db: Session, tid: int, a: date, b: date, prorrata_pct=None) ->
             continue
         deb += _to_crc(inv.tax_total, inv.currency, inv.fx_sell)
     for inv_id, nc in nc_inv.items():
-        when = local_date(nc.emitted_at or nc.resolved_at or nc.created_at)
+        when = local_date(nc.created_at)  # en UTC en cualquier motor; la NC resta en el mes en que se emitio
         if when and a <= when <= b:
             inv = db.get(Invoice, inv_id)
             if inv:

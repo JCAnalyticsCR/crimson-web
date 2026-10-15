@@ -79,13 +79,90 @@ Roles: `admin`, `ventas`, `caja`, `inventario`, `contabilidad`, `lectura` — pe
 - `tenant_id` en toda tabla de negocio; documentos con `ON DELETE RESTRICT`.
 - Consecutivos bajo `SELECT … FOR UPDATE` (Postgres); nunca se saltan ni reutilizan.
 - Notas internas nunca salen del sistema; externas van al PDF/correo.
-- Factura con pagos o emitida no se edita; anular emitida = nota de crédito (Fase 2).
+- Factura con pagos o emitida no se edita; anular emitida = nota de crédito (en emisión directa la factura se anula cuando Hacienda acepta la NC).
 - Pagos en línea (ONVO: Checkout alojado) se aplican solo si la API de ONVO confirma el pago, por webhook o al volver el comprador; nunca por el regreso del navegador solo. Nunca se guardan datos de tarjeta. Llaves en Ajustes → Pagos → Pasarelas (cifradas por empresa); en producción solo `onvo_live_`.
 - Logs sin Authorization ni cuerpos; CORS por lista; cookies httpOnly + SameSite.
 
+## Hacienda y recepción de comprobantes
+
+Emisión directa con Hacienda (FE, TE y NC v4.4, firma XAdES-EPES) y recepción de los comprobantes de proveedores
+(buzón IMAP o carga manual, mensaje receptor v4.4 firmado, gasto ligado). Código en `app/providers/hacienda/`,
+`app/services/reception*.py`, `app/services/hacienda_*.py` y `app/routers/{reception,hacienda_settings,accounting}.py`.
+
+**Nada sale a Hacienda por defecto.** Modos (Ajustes → Hacienda): *Desactivada* (no se emite; las respuestas a
+proveedores se simulan), *Simulado* (todo se simula, con la marca "sin validez fiscal"), *Pruebas de Hacienda*
+(ambiente de pruebas real) y *Producción*, que solo se activa con el interruptor del administrador (contraseña +
+escribir PRODUCCIÓN + lista de verificación en verde) **y** solo envía si, en el momento de cada envío, el servidor
+tiene `HACIENDA_PRODUCTION_ALLOWED=true`, `ENV=production` y la misma huella de instancia que cuando se activó
+(Railway copia las variables al duplicar un ambiente; la huella no). Cualquier cambio de modo apaga producción.
+
+### Regla de credenciales
+
+El usuario y la contraseña de ATV, el certificado `.p12` y su PIN **solo** se cargan en Ajustes → Hacienda (o como
+variables de Railway). Nunca por chat, correo ni repositorio, tampoco al equipo de desarrollo. Se guardan cifrados con
+AES-256-GCM (llave `FISCAL_KEYS`) y nunca se vuelven a mostrar: la API devuelve "cargado · vence el …".
+
+### Variables de entorno (todas opcionales)
+
+| Variable | Uso |
+|---|---|
+| `FISCAL_KEYS` | `kid:llave` separadas por coma (llave = base64url de 32 bytes). La primera cifra; todas descifran (rotación). **La misma en `api` y `worker`** (variable compartida del proyecto). Sin ella, fuera de `ENV=local` con SQLite, guardar credenciales responde 503. |
+| `HACIENDA_PRODUCTION_ALLOWED` | `true` solo en el servicio de producción, el día del cambio. |
+| `HACIENDA_PROVEEDOR_SISTEMAS` | Cédula para `ProveedorSistemas`; vacío = la de la empresa (desarrollo propio). |
+| `HACIENDA_ENV_TENANT` / `HACIENDA_ENVIRONMENT` | Empresa (slug) y ambiente (`pruebas`/`produccion`) de las credenciales de entorno. |
+| `HACIENDA_USERNAME`, `HACIENDA_PASSWORD`, `HACIENDA_P12_B64`, `HACIENDA_P12_PIN` | Respaldo por entorno para una sola empresa (las de Ajustes mandan). |
+| `RECEPTION_IMAP_HOST`, `RECEPTION_IMAP_PORT` (993), `RECEPTION_IMAP_USER`, `RECEPTION_IMAP_PASSWORD`, `RECEPTION_IMAP_FOLDER` (INBOX), `RECEPTION_IMAP_TENANT`, `RECEPTION_IMAP_SINCE_DAYS` (30) | Buzón de recepción. Sin host, usuario o contraseña: apagado (queda la configuración de Ajustes → XML de proveedores). |
+
+Generar `FISCAL_KEYS` **en la consola del servicio en Railway** (sin copiarla a ningún chat):
+
+```bash
+python -c "import os,base64;print('k'+__import__('datetime').date.today().strftime('%Y%m')+':'+base64.urlsafe_b64encode(os.urandom(32)).decode())"
+```
+
+Rotar: poner la llave nueva **al principio** de `FISCAL_KEYS` (dejando la vieja detrás), desplegar `api` y `worker`,
+correr `python -m app.tools.rotate_fiscal_keys` (o `--dry-run`) y recién entonces quitar la vieja. El servicio cron
+`respaldo` no recibe `FISCAL_KEYS` ni `HACIENDA_*` (`infra/RESPALDO.md`): el respaldo y la llave nunca están juntos.
+
+Antes de desplegar la migración `f1c7a9d3e520`: `python -m app.tools.check_reception_dupes` (solo lectura) lista las
+recepciones duplicadas por clave; las copias exactas sin respuesta se fusionan solas, el resto hay que resolverlo a mano.
+
+### Puesta en marcha (runbook)
+
+1. En Railway: generar `FISCAL_KEYS` en la consola del servicio, sin copiarla a ningún chat, y definirla como
+   **variable compartida** referenciada por `api` y `worker` (los dos registran al arrancar la misma huella de llave).
+   Confirmar que `ENV=production` está definido en ambos (si falta, la API queda en `local` y producción nunca se
+   habilita: falla segura, pero hay que saberlo). Dejar `HACIENDA_PRODUCTION_ALLOWED` sin definir. Si alguna vez se
+   crea staging **duplicando** el ambiente de producción, borrar ahí `HACIENDA_PRODUCTION_ALLOWED` y poner `ENV=staging`.
+2. El administrador entra a **Ajustes → Hacienda**: completa identificación, ubicación y actividades; en
+   **Credenciales → Pruebas** carga el usuario y la contraseña **de pruebas** de ATV (son distintas a las de
+   producción) y la llave criptográfica de pruebas con su PIN; "Probar conexión".
+3. Modo **Pruebas**. Correr `python -m app.tools.hacienda_smoke --tenant <slug> --cabys <código> --confirmo-pruebas`
+   para confirmar con el validador real: firma, ruta de estado del mensaje receptor (`{clave}-{consecutivo}`),
+   clasificación servicio/mercancía y si hace falta la cadena del certificado.
+4. Antes de producción: volver a bajar los XSD v4.4 (actualización del 1-nov-2026) a
+   `app/providers/hacienda/xsd/esquemas/2024/v4.4/` y comparar; si cambiaron, ajustar y volver a correr las pruebas.
+5. Con contabilidad: importar el histórico de recepciones de Fygaro (Importar datos → Recepciones de Fygaro, el zip de
+   "Download All"); el importador muestra el último consecutivo de aceptación/parcial/rechazo de Fygaro (no lo aplica).
+6. Crear el buzón `facturas@…` en el hosting de correo y cargar `RECEPTION_IMAP_*` en Railway (`worker` y `api`).
+7. Día del cambio, **en este orden y el mismo día**: (a) en Fygaro se deja de emitir y de responder; (b) se importa de
+   nuevo el histórico de recepciones de los últimos días y se baja de Fygaro el último FE/NC/TE emitido; (c) el
+   administrador pone en **Consecutivos** el último número de Fygaro de cada tipo 01–07 y **Confirma consecutivos**
+   (vale 24 h); (d) se cargan las credenciales y el `.p12` **de producción**; (e) se define
+   `HACIENDA_PRODUCTION_ALLOWED=true` en Railway; (f) "Probar conexión" de producción; (g) **Activar producción**
+   (contraseña + PRODUCCIÓN). Lo que llegó al buzón durante la convivencia y **no** se respondió en Fygaro se reabre
+   uno por uno con "Reabrir para producción" dentro del plazo.
+8. Primera semana: revisar a diario Contabilidad → Tributario (rechazos, plazos, crédito por confirmar) y los correos
+   de alerta; confirmar con un cliente empresa que recibió el XML y la respuesta de Hacienda de su factura.
+
+**Puntos a confirmar con el validador de pruebas** (marcados en el código): ruta de consulta del mensaje receptor,
+clasificación servicio/mercancía por unidad de medida, totales gravados/exentos con tarifas 0 %, si hace falta la
+cadena del certificado en la firma. **Fase 2**: ND, FEE, FEC, REP, exoneraciones, otros cargos en la emisión,
+contingencia, callback, verificación de la firma del proveedor, catálogo de distritos y cédulas alfanuméricas en la
+emisión.
+
 ## Pendiente (requiere credenciales o decisiones del cliente)
 
-1. Proveedor fiscal real (Alanube o GTI): hoy emite el adapter `sandbox`, sin validez ante Hacienda.
+1. Hacienda: la conexión directa está lista (ver «Hacienda y recepción»); falta cargar las credenciales y el `.p12` de **pruebas**, correr `hacienda_smoke` contra el validador real y, el día del cambio, el runbook de arriba. Mientras tanto el modo por defecto no emite (o simula, sin validez fiscal).
 2. ONVO: cobro con tarjeta (tienda), enlace de pago de facturas y reembolso desde el pedido ya están; falta probar de punta a punta con la llave de pruebas en staging y, después, tarjetas guardadas y reautorizaciones. PayPal pendiente.
 3. BCCR: correo + token del servicio de indicadores para el tipo de cambio automático.
 4. Resend: llave para que los correos salgan de verdad (hoy quedan en la bandeja de salida como `simulado`).

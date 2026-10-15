@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from ..models import EInvoiceDocument, FiscalCredential, Invoice, ReceivedDocument, ReceptionResponse, Tenant
 from ..providers.hacienda import xml44
-from ..providers.hacienda.client import HaciendaAuthError, ProductionBlocked, production_keys
+from ..providers.hacienda.client import HaciendaAuthError, ProductionBlocked, production_keys, rate_limited
 from ..providers.hacienda.provider import HaciendaDirectProvider, InvalidXml, comprobante_body, receptor_body, receptor_ref
 from ..providers.hacienda.xades import CertError
 from . import hacienda_config as hc
@@ -426,6 +426,8 @@ def send_pending(db: Session, limit: int = 20) -> dict:
     out = {"respuestas": 0, "comprobantes": 0, "entregas": 0}
     cond = lambda m: (m.status == "por_enviar") & or_(m.next_attempt_at.is_(None), m.next_attempt_at <= t)  # noqa: E731
     for rid in db.scalars(select(ReceptionResponse.id).where(cond(ReceptionResponse)).order_by(ReceptionResponse.id).limit(limit)).all():
+        if rate_limited():
+            break  # Hacienda dijo X-Ratelimit-Remaining: 0 -> el resto espera al siguiente ciclo
         try:
             send_response(db, rid)
             out["respuestas"] += 1
@@ -433,6 +435,8 @@ def send_pending(db: Session, limit: int = 20) -> dict:
             db.rollback()
             log.warning("envio de mensaje receptor %s: %s", rid, type(e).__name__)
     for did in db.scalars(select(EInvoiceDocument.id).where(cond(EInvoiceDocument)).order_by(EInvoiceDocument.id).limit(limit)).all():
+        if rate_limited():
+            break
         try:
             send_einvoice(db, did)
             out["comprobantes"] += 1
@@ -475,6 +479,8 @@ def poll_status(db: Session, limit: int = 50) -> dict:
         ).all()
         stuck = db.scalars(select(model.id).where(model.status == "enviando", model.claimed_at <= t - STUCK).limit(limit)).all()
         for rid in due:
+            if rate_limited():
+                break
             try:
                 refresh(db, rid)
                 out[key] += 1

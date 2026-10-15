@@ -175,3 +175,15 @@ def test_simulado_nunca_llega_al_transporte_y_logs_sin_secretos(client, auth, db
     p12, pin = p12_empresa
     text = caplog.text
     assert PASS not in text and pin not in text and "tok-1" not in text and USER not in text
+
+
+def test_ratelimit_en_cero_frena_el_resto_del_lote(client, auth, db_session, monkeypatch, p12_empresa):
+    from app.services.hacienda_sync import send_pending
+
+    fake, d, rid, RR = _por_enviar(client, monkeypatch, p12_empresa, n=7)  # noqa: N806
+    _, d2, rid2, _ = _por_enviar(client, monkeypatch, p12_empresa, n=8)
+    fake2 = FakeHacienda(sequence=["aceptado"]).install(monkeypatch)
+    fake2.post_plan = [(201, {"Location": "https://x/1", "X-Ratelimit-Remaining": "0"})]
+    send_pending(db_session)
+    assert len(fake2.posts) == 1  # el segundo espera al siguiente ciclo
+    assert {db_session.get(RR, rid).status, db_session.get(RR, rid2).status} == {"enviado", "por_enviar"}

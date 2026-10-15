@@ -77,7 +77,8 @@ Railway corre un servicio con "Cron Schedule": arranca a la hora indicada, ejecu
 2. Settings → Root Directory: `api`. Mismo builder que el servicio de la API.
 3. Variables: `DATABASE_URL` como referencia a la del Postgres (`${{Postgres.DATABASE_URL}}`), `ENV=production`,
    `JWT_SECRET` (la misma de la API; la valida la configuración) y las credenciales del almacenamiento externo
-   (ver abajo). Nada más.
+   (ver abajo). Nada más: en particular **no** `FISCAL_KEYS` ni ninguna `HACIENDA_*` (el respaldo solo lleva el
+   texto cifrado de las credenciales de Hacienda; la llave y el respaldo nunca están en el mismo servicio).
 4. Settings → Cron Schedule: `15 9 * * *` (09:15 UTC = 03:15 hora de Costa Rica, todos los días).
 5. Start command (ejemplo con rclone hacia un bucket S3 compatible; `RCLONE_CONFIG_*` en variables):
 

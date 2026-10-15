@@ -79,11 +79,18 @@ class StatusResult:
 
 _cache: dict[tuple, dict] = {}
 _cache_lock = threading.Lock()
+# X-Ratelimit-Remaining en 0: el resto del lote del worker espera al siguiente ciclo
+_rate = {"until": 0.0}
+
+
+def rate_limited() -> bool:
+    return time.monotonic() < _rate["until"]
 
 
 def reset_cache() -> None:
     with _cache_lock:
         _cache.clear()
+    _rate["until"] = 0.0
 
 
 def _detail_from(xml: str | None) -> str | None:
@@ -180,6 +187,8 @@ class HaciendaClient:
         rem = r.headers.get("X-Ratelimit-Remaining")
         if rem is not None and str(rem).strip().lstrip("-").isdigit():
             self.remaining = int(rem)
+            if self.remaining <= 0:
+                _rate["until"] = time.monotonic() + 60
 
     # ---------- envio
     def post_recepcion(self, body: dict) -> PostResult:
