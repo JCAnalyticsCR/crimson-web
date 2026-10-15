@@ -197,3 +197,11 @@ def fake_onvo(monkeypatch):
     onvo._last_sync.clear()
     monkeypatch.setattr(onvo, "SYNC_EVERY", 0.0)  # el freno por sesion se prueba aparte (test_sync_throttle)
     return FakeOnvo().install(monkeypatch)
+
+
+@pytest.fixture(scope="session")
+def p12_empresa():
+    """(.p12, PIN) autofirmado con la cedula ficticia de la empresa semilla. Una vez por corrida (RSA es lento)."""
+    from tests.hacienda_utils import EMPRESA, make_p12
+
+    return make_p12(EMPRESA)

@@ -311,3 +311,37 @@ def email_with(attachments: list[tuple[str, bytes, str]], subject: str = "Factur
 
 def digits(s: str) -> str:
     return re.sub(r"\D", "", s)
+
+
+ADMIN_PASSWORD = "Crimson-2026-seguro"  # el de conftest.ADMIN (cuenta de prueba local)
+PDF = b"%PDF-1.4\n% factura de prueba\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
+
+
+def role_headers(client, db_session, tenant_id: int, email: str, role: str) -> dict:
+    """Crea un usuario con ese rol y devuelve su encabezado de autorizacion (sin tocar el del admin)."""
+    from app.core.security import hash_password
+    from app.models import TenantUser, User
+
+    pw = "Rol-prueba-2026"
+    u = User(email=email, full_name=role.capitalize(), password_hash=hash_password(pw))
+    db_session.add(u)
+    db_session.flush()
+    db_session.add(TenantUser(tenant_id=tenant_id, user_id=u.id, role_code=role))
+    db_session.commit()
+    admin = client.headers.pop("Authorization", None)
+    tok = client.post("/auth/login", json={"email": email, "password": pw}).json()["access_token"]
+    if admin:
+        client.headers["Authorization"] = admin
+    return {"Authorization": f"Bearer {tok}"}
+
+
+def load_credentials(client, p12: bytes, pin: str, env: str = "pruebas", user: str = "usuario-pruebas@ejemplo", password: str = "Clave-ATV-de-prueba!", **extra):
+    data = {"admin_password": ADMIN_PASSWORD, "atv_user": user, "atv_password": password, "pin": pin, **extra}
+    return client.put(f"/settings/hacienda/credentials/{env}", data=data, files={"p12": ("llave.p12", p12, "application/x-pkcs12")})
+
+
+def modo_pruebas(client, p12: bytes, pin: str):
+    r = load_credentials(client, p12, pin)
+    assert r.status_code == 200, r.text
+    r = client.put("/settings/hacienda/mode", json={"mode": "pruebas"})
+    assert r.status_code == 200 and r.json()["mode"] == "pruebas", r.text

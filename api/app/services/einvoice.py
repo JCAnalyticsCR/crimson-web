@@ -73,10 +73,10 @@ def _rate_code(db: Session, ln, tenant_id: int, lenient: bool) -> str:
                     break
     try:
         return xml44.rate_code_for(Decimal(str(ln.tax_rate)), preferred)
-    except xml44.BuildError:
+    except xml44.BuildError as e:
         if lenient:
             return "10"
-        raise
+        raise HTTPException(422, f"Línea «{ln.name}»: {e}") from e
 
 
 def _unit(ln, lenient: bool) -> str:
