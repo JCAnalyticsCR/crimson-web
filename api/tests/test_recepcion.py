@@ -701,3 +701,35 @@ def test_reabrir_cierra_el_mensaje_de_pruebas_y_un_intento_viejo_no_pisa_al_nuev
     db_session.refresh(doc)
     assert doc.hacienda_status == "por_enviar"
     assert not [a for a in hacienda_tasks.alerts_for(db_session, t) if "error ante Hacienda" in a]
+
+
+def test_lista_pagina_en_sql_y_no_trae_los_xml(client, auth, db_session):
+    """GET /reception/documents pagina y cuenta en la base y nunca trae los XML completos (con el historico de Fygaro
+    son miles): solo si existen. Las banderas y el "vence pronto" siguen iguales."""
+    from sqlalchemy import event
+
+    ids = [up(client, xml_hoy(n)).json()["id"] for n in (74, 75, 76)]
+    up(client, mensaje_hacienda(cl(75)))  # respuesta del proveedor de uno de ellos
+    sqls: list[str] = []
+
+    def spy(conn, cursor, statement, params, context, executemany):
+        sqls.append(statement)
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", spy)
+    try:
+        r1 = client.get("/reception/documents", params={"limit": 2}).json()
+        r2 = client.get("/reception/documents", params={"limit": 2, "offset": 2}).json()
+        todos = client.get("/reception").json()
+    finally:
+        event.remove(engine, "before_cursor_execute", spy)
+    assert r1["total"] == r2["total"] == 3 and len(r1["items"]) == 2 and len(r2["items"]) == 1
+    vistos = [x["id"] for x in r1["items"] + r2["items"]]
+    assert sorted(vistos) == sorted(ids)
+    por_id = {x["id"]: x for x in r1["items"] + r2["items"]}
+    assert por_id[ids[1]]["has_supplier_response"] and not por_id[ids[0]]["has_supplier_response"]
+    assert len(todos) == 3 and sum(1 for x in todos if x["has_supplier_response"]) == 1
+    listas = [s for s in sqls if "FROM received_document" in s and "LIMIT" in s.upper()]
+    assert listas and not [s for s in listas if "received_document.xml_document" in s or "received_document.xml_supplier_response," in s]
+    pronto = client.get("/reception/documents", params={"due": "pronto"}).json()
+    assert pronto["total"] == len(pronto["items"])

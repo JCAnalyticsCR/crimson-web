@@ -17,7 +17,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
@@ -53,9 +53,20 @@ def _responses_by_doc(db: Session, ids: list[int]) -> dict[int, list[ReceptionRe
     return out
 
 
-def item(doc: ReceivedDocument, rs: list[ReceptionResponse] | None = None, today: date | None = None) -> dict:
+# Listas: los XML completos (comprobante, respuesta del proveedor, mensaje heredado) no se traen; solo si existen.
+LIST_OPTIONS = (defer(ReceivedDocument.xml_document), defer(ReceivedDocument.xml_supplier_response), defer(ReceivedDocument.xml_response))
+LIST_FLAGS = (ReceivedDocument.xml_supplier_response.is_not(None).label("has_sr"), ReceivedDocument.xml_response.is_not(None).label("has_xr"))
+
+
+def _list_rows(db: Session, stmt) -> list[tuple[ReceivedDocument, tuple[bool, bool]]]:
+    return [(d, (bool(a), bool(b))) for d, a, b in db.execute(stmt.add_columns(*LIST_FLAGS).options(*LIST_OPTIONS)).all()]
+
+
+def item(doc: ReceivedDocument, rs: list[ReceptionResponse] | None = None, today: date | None = None, flags: tuple[bool, bool] | None = None) -> dict:
+    """flags: (tiene respuesta del proveedor, tiene mensaje heredado) ya calculados en SQL por las listas."""
     rs = rs or []
     last = rs[-1] if rs else None
+    has_sr, has_xr = flags if flags is not None else (bool(doc.xml_supplier_response), bool(doc.xml_response))
     return {
         "id": doc.id,
         "clave": doc.clave,
@@ -85,8 +96,8 @@ def item(doc: ReceivedDocument, rs: list[ReceptionResponse] | None = None, today
         "deadline": doc.deadline,
         "business_days_left": business_days_left(today or date.today(), doc.deadline),
         "has_pdf": bool(doc.pdf_media_id),
-        "has_supplier_response": bool(doc.xml_supplier_response),
-        "has_response": bool(doc.xml_response) or any(r.xml_signed for r in rs),
+        "has_supplier_response": has_sr,
+        "has_response": has_xr or any(r.xml_signed for r in rs),
         "has_hacienda_answer": bool(last and last.hacienda_xml),
         "expense_id": doc.expense_id,
         "receiver_ok": doc.receiver_ok,
@@ -182,9 +193,9 @@ def detail(db: Session, p: Principal, doc: ReceivedDocument, extra_warnings: lis
 
 @router.get("")
 def inbox(p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):
-    docs = db.scalars(select(ReceivedDocument).where(ReceivedDocument.tenant_id == p.tenant.id).order_by(ReceivedDocument.id.desc()).limit(100)).all()
-    rs = _responses_by_doc(db, [d.id for d in docs])
-    return [item(d, rs.get(d.id)) for d in docs]
+    rows = _list_rows(db, select(ReceivedDocument).where(ReceivedDocument.tenant_id == p.tenant.id).order_by(ReceivedDocument.id.desc()).limit(100))
+    rs = _responses_by_doc(db, [d.id for d, _ in rows])
+    return [item(d, rs.get(d.id), flags=f) for d, f in rows]
 
 
 def _like(q: str) -> str:
@@ -235,13 +246,16 @@ def documents(
         query = query.order_by(ReceivedDocument.deadline.asc().nulls_last(), ReceivedDocument.id)
     else:
         query = query.order_by(ReceivedDocument.issue_date.desc().nulls_last(), ReceivedDocument.id.desc())
-    rows = db.scalars(query).all()
     if due == "pronto":
-        rows = [d for d in rows if (business_days_left(date.today(), d.deadline) or 0) <= 2]
-    total = len(rows)
-    page = rows[offset : offset + limit]
-    rs = _responses_by_doc(db, [d.id for d in page])
-    return {"items": [item(d, rs.get(d.id)) for d in page], "total": total, "counts": {s: counts.get(s, 0) for s in STATUSES}}
+        # el filtro grueso ya lo acota a lo por revisar que vence en <= 4 dias: el fino (dias habiles) va en Python
+        rows = [x for x in _list_rows(db, query) if (business_days_left(date.today(), x[0].deadline) or 0) <= 2]
+        total, page = len(rows), rows[offset : offset + limit]
+    else:
+        # conteo y pagina en SQL: con el historico de Fygaro son miles de filas (y nunca se traen sus XML)
+        total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery()))
+        page = _list_rows(db, query.offset(offset).limit(limit))
+    rs = _responses_by_doc(db, [d.id for d, _ in page])
+    return {"items": [item(d, rs.get(d.id), flags=f) for d, f in page], "total": total, "counts": {s: counts.get(s, 0) for s in STATUSES}}
 
 
 @router.get("/summary")
