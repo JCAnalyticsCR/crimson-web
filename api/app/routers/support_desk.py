@@ -578,10 +578,13 @@ def ticket_update(tid: int, data: TicketIn, p: Principal = Depends(require("supp
     estado_antes = t.status
     clave_sla = (t.priority, t.customer_id)
     if "ally_company_id" in data.model_fields_set or data.assigned_to != t.assigned_to or data.project_id != t.project_id:
-        # la empresa aliada solo cambia si viene o si cambio el responsable (un portal viejo no la borra)
+        # la empresa aliada solo cambia si viene (spec 7.5 y 14.18: un portal viejo, o el formulario que solo la manda si
+        # cambio, no la borra). Si no viene se valida la que tenia contra el responsable nuevo, como en /assign: dejarlo
+        # "Sin asignar (lo reparte la empresa aliada)" o pasarselo a alguien de Crimson la conserva; uno de otra
+        # empresa aliada da 422; un ticket sin empresa toma la de su tecnico aliado
         from ..services.ally_scope import check_ally_assignment
 
-        explicita = data.ally_company_id if "ally_company_id" in data.model_fields_set else (t.ally_company_id if data.assigned_to == t.assigned_to else None)
+        explicita = data.ally_company_id if "ally_company_id" in data.model_fields_set else t.ally_company_id
         t.ally_company_id = check_ally_assignment(
             db, p.tenant.id, ally_company_id=explicita, user_ids=[data.assigned_to], project_id=data.project_id, current=t.ally_company_id
         )

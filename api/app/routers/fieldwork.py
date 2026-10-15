@@ -1987,11 +1987,8 @@ def order_update(oid: int, data: WorkOrderEditIn, p: Principal = Depends(require
     nuevos = [cambios["technician_id"]] if cambios.get("technician_id") and cambios["technician_id"] != o.technician_id else []
     nuevos += [h for h in cambios.get("helpers") or [] if h not in (o.helpers or [])]
     _check_crew(db, p.tenant.id, nuevos)
-    # empresa aliada: la que venga; si no viene y cambio el equipo, la de los tecnicos (como en /assign: un equipo solo de
-    # Crimson devuelve la orden a Crimson); si no, la que tenia (cambiar el proyecto la revalida)
-    explicita = "ally_company_id" in data.model_fields_set
-    equipo = bool({"technician_id", "helpers"} & set(cambios))
-    _reassign_ally(db, p, o, data.ally_company_id if explicita else (None if equipo else o.ally_company_id), cambios, force=explicita)
+    # empresa aliada: la que venga; si no viene, la que tenia (ver _reassign_ally; cambiar el proyecto la revalida)
+    _reassign_ally(db, p, o, cambios, explicita="ally_company_id" in data.model_fields_set, ally_company_id=data.ally_company_id)
     for k, v in cambios.items():
         setattr(o, k, v)
     if "materials" in data.model_fields_set:
@@ -2016,18 +2013,35 @@ def order_update(oid: int, data: WorkOrderEditIn, p: Principal = Depends(require
     return _order_out(db, o, tenant=p.tenant)
 
 
-def _reassign_ally(db: Session, p: Principal, o: WorkOrder, ally_company_id: int | None, cambios: dict, force: bool = False) -> None:
-    """Recalcula la empresa aliada de la orden si cambio el equipo (o si la mandaron explicita). Avisa al aliado nuevo."""
+def _reassign_ally(db: Session, p: Principal, o: WorkOrder, cambios: dict, *, explicita: bool = False, ally_company_id: int | None = None) -> None:
+    """Empresa aliada de la orden al editarla o asignarla (spec 7.4). Avisa a quien entra de un aliado.
+
+    - Si la mandan (explicita), esa: se valida contra el equipo y el proyecto.
+    - Si no viene, se pasa la que ya tenia: un PUT o una asignacion rapida que no la trae no la borra. La OT asignada solo
+      a la EMPRESA (sin tecnico: la reparte su gerente) sigue en su portal aunque se reprograme o se le mande el mismo
+      equipo; un tecnico de otra empresa aliada da 422 (cambiar de empresa se hace mandandola).
+    - Unica excepcion: un cambio REAL del equipo hacia uno solo de Crimson (al menos una persona y ninguna de una
+      empresa aliada) devuelve la orden a Crimson. Quitar a todos no: la orden sigue siendo de la empresa.
+    Sin empresa explicita, sin cambio real de equipo y sin cambio de proyecto no hay nada que recalcular."""
+    from ..models import TenantUser
     from ..services.ally_scope import check_ally_assignment, notify_ally_work
 
-    if not force and not ({"technician_id", "helpers", "project_id"} & set(cambios)):
-        return
     tec = cambios.get("technician_id", o.technician_id)
     ayu = cambios.get("helpers", o.helpers) or []
     pid = cambios.get("project_id", o.project_id)
     antes = _crew(o)
-    o.ally_company_id = check_ally_assignment(db, p.tenant.id, ally_company_id=ally_company_id, user_ids=[tec, *ayu], project_id=pid, current=o.ally_company_id)
-    nuevos = {i for i in [tec, *ayu] if i} - antes
+    despues = {i for i in [tec, *ayu] if i}
+    if not explicita and despues == antes and pid == o.project_id:
+        return
+    cid = ally_company_id if explicita else o.ally_company_id
+    if not explicita and despues != antes and despues and cid is not None:
+        aliados = db.scalar(
+            select(TenantUser.id).where(TenantUser.tenant_id == p.tenant.id, TenantUser.user_id.in_(despues), TenantUser.ally_company_id.is_not(None)).limit(1)
+        )
+        if aliados is None:
+            cid = None  # equipo nuevo solo de Crimson: la orden vuelve a Crimson
+    o.ally_company_id = check_ally_assignment(db, p.tenant.id, ally_company_id=cid, user_ids=[tec, *ayu], project_id=pid, current=o.ally_company_id)
+    nuevos = despues - antes
     if nuevos:
         notify_ally_work(db, p.tenant, nuevos, o.number, cambios.get("title") or o.title, cambios.get("scheduled_at", o.scheduled_at))
 
@@ -2051,7 +2065,8 @@ def order_assign(oid: int, data: OrderAssignIn, p: Principal = Depends(require("
     nuevos = [cambios["technician_id"]] if cambios.get("technician_id") and cambios["technician_id"] != o.technician_id else []
     nuevos += [h for h in cambios.get("helpers") or [] if h not in (o.helpers or [])]
     _check_crew(db, p.tenant.id, nuevos)
-    _reassign_ally(db, p, o, o.ally_company_id if not ({"technician_id", "helpers"} & set(cambios)) else None, cambios)
+    # sin empresa en el cuerpo: la orden conserva la suya (la tarjeta manda tecnico y ayudantes aunque solo cambie la fecha)
+    _reassign_ally(db, p, o, cambios)
     if "technician_id" in cambios:
         o.technician_id = cambios["technician_id"]
     if "helpers" in cambios:

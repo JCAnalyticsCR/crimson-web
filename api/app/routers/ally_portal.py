@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from ..core.ally import AllyCtx, get_ally, need
 from ..core.config import settings as cfg
 from ..core.db import get_db
-from ..core.ratelimit import ally_invite_limiter, ally_media_limiter, ally_ticket_limiter
+from ..core.ratelimit import ally_invite_limiter, ally_media_limiter, ally_notify_limiter, ally_ticket_limiter
 from ..models import (
     AllyCostRequest,
     AllyParticipation,
@@ -704,8 +704,14 @@ def _notify_offer(db: Session, ctx: AllyCtx, o: Opportunity, r: AllyCostRequest,
         notify_roles(db, ctx.p.tenant, ("admin",), asunto, cuerpo, "opportunity", o.id)
 
 
+def _tope_avisos(ctx: AllyCtx) -> None:
+    """Cada precio, respuesta o envio de levantamiento avisa por correo a la oficina: tope por persona (como los tickets)."""
+    ally_notify_limiter.hit(f"{ctx.p.tenant.id}:{ctx.p.user.id}")
+
+
 @router.put("/solicitudes/{rid}")
 def responder(rid: int, data: AllyQuoteIn, ctx: AllyCtx = Depends(need("precios")), db: Session = Depends(get_db)):
+    _tope_avisos(ctx)
     r = db.scalar(
         select(AllyCostRequest).where(
             AllyCostRequest.id == rid,
@@ -754,6 +760,7 @@ def _offer(db: Session, ctx: AllyCtx, o: Opportunity, parts: list[AllyParticipat
 
 @router.post("/oportunidades/{oid}/precios", status_code=201)
 def oportunidad_precios(oid: int, data: AllyOfferIn, ctx: AllyCtx = Depends(need("precios")), db: Session = Depends(get_db)):
+    _tope_avisos(ctx)
     o = ctx.scope.one(Opportunity, oid, ctx.scope.opportunities(), "Oportunidad")
     return _offer(db, ctx, o, _my_parts(db, ctx, opportunity_id=o.id), data)
 
@@ -774,6 +781,7 @@ def proyecto(pid: int, ctx: AllyCtx = Depends(need("proyectos")), db: Session = 
 
 @router.post("/proyectos/{pid}/precios", status_code=201)
 def proyecto_precios(pid: int, data: AllyOfferIn, ctx: AllyCtx = Depends(need("precios")), db: Session = Depends(get_db)):
+    _tope_avisos(ctx)
     pr = ctx.scope.one(Project, pid, ctx.scope.projects(), "Proyecto")
     parts = _my_parts(db, ctx, project_id=pr.id)
     o = db.scalar(select(Opportunity).where(Opportunity.id == parts[0].opportunity_id, *ctx.scope.opportunities())) if parts else None
@@ -985,7 +993,11 @@ def levantamiento_sistema(sid: int, ctx: AllyCtx = Depends(need("levantamientos"
 
 @router.post("/levantamientos/{sid}/enviar")
 def levantamiento_enviar(sid: int, ctx: AllyCtx = Depends(need("levantamientos")), db: Session = Depends(get_db)):
+    _tope_avisos(ctx)
     s = _my_survey(db, ctx, sid)
+    if s.status == "enviado" and s.review_status == "pendiente":
+        # ya esta en la cola de revision: reenviarlo solo volveria a escribirles a los revisores
+        raise HTTPException(409, "Ya está en revisión de Crimson")
     fw.send_survey(db, ctx.p.tenant, s, ctx.p.user, ctx.p.ip, sender_label=f"{ctx.p.user.full_name} ({ctx.company.name})")
     db.commit()
     out = _survey_ally_out(db, ctx, s, full=True)

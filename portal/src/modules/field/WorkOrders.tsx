@@ -78,7 +78,7 @@ const opcionesTecnicos = (techs: Tech[]) => {
     .sort(([a], [b]) => (a === "Crimson" ? -1 : b === "Crimson" ? 1 : a.localeCompare(b)))
     .map(([g, ts]) => <optgroup key={g} label={g}>{ts.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>);
 };
-/** Si cambio el equipo, va tambien la empresa elegida (sin ella la API la deduce de los tecnicos). */
+/** Si cambio el equipo, va tambien la empresa elegida (sin ella la API conserva la que tenia la orden). */
 const conEmpresa = (diff: Record<string, unknown>, b: Record<string, unknown>) =>
   ("technician_id" in diff || "helpers" in diff) && !("ally_company_id" in diff) ? { ...diff, ally_company_id: b.ally_company_id } : diff;
 const num = (v: string | number | null | undefined) => Number(String(v ?? "").replace(",", ".")) || 0;
@@ -312,18 +312,21 @@ export default function WorkOrders() {
     ? (open.technician ? `Esta orden es de ${open.technician}: solo el equipo de la orden registra tiempo y avance.` : "Esta orden todavía no tiene técnico: solo el equipo de la orden registra tiempo y avance, y la asigna un supervisor.")
     : null;
   const asgVal = asg ?? (open ? { technician_id: open.technician_id ? String(open.technician_id) : "", helpers: open.helpers || [], scheduled_at: toLocalInput(open.scheduled_at) } : null);
-  const chipsAyudantes = (sel: number[], tecnico: string, onChange: (v: number[]) => void, crew?: Crew[]) => (
+  // asignacion rapida: sin campo de empresa, la API conserva la de la orden; de otra empresa aliada no se ofrece a nadie
+  // (cambiar de empresa se hace en Editar)
+  const techsAsg = open?.ally_company_id ? techs.filter((t) => !t.ally_company_id || t.ally_company_id === open.ally_company_id) : techs;
+  const chipsAyudantes = (sel: number[], tecnico: string, onChange: (v: number[]) => void, crew?: Crew[], lista: Tech[] = techs) => (
     <div className="chips">
-      {techs.filter((t) => String(t.id) !== tecnico).map((t) => {
+      {lista.filter((t) => String(t.id) !== tecnico).map((t) => {
         const on = sel.includes(t.id);
         return <button type="button" key={t.id} className={`chip${on ? " is-on" : ""}`} aria-pressed={on} onClick={() => onChange(on ? sel.filter((x) => x !== t.id) : [...sel, t.id])}>{t.name}</button>;
       })}
       {/* ya estaba en la orden pero no sale en /field/technicians (dado de baja o cambio de rol): se ve y se puede quitar */}
-      {sel.filter((id) => String(id) !== tecnico && !techs.some((t) => t.id === id)).map((id) => {
+      {sel.filter((id) => String(id) !== tecnico && !lista.some((t) => t.id === id)).map((id) => {
         const c = crew?.find((x) => x.id === id);
         return <button type="button" key={id} className="chip is-on" aria-pressed title="Ya no puede recibir órdenes: tocá para quitarlo" onClick={() => onChange(sel.filter((x) => x !== id))}>{c?.name || "Ayudante"}{c?.active === false ? " · inactivo" : ""}</button>;
       })}
-      {techs.length === 0 && <span className="muted" style={{ fontSize: 12.5 }}>Sin técnicos en la empresa.</span>}
+      {lista.length === 0 && <span className="muted" style={{ fontSize: 12.5 }}>Sin técnicos en la empresa.</span>}
     </div>
   );
 
@@ -396,12 +399,12 @@ export default function WorkOrders() {
           {/* asignacion rapida: sin tecnico la orden no le aparece a nadie en "Mi dia" (la OT que nace del proyecto viene asi) */}
           {faltaAsignar && asgVal && (
             <Card title="Asignación rápida">
-              {!open.technician_id && <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--warn)" }}>Sin técnico, esta orden no le aparece a nadie en «Mi día».</p>}
+              {!open.technician_id && <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--warn)" }}>{open.ally_company_id ? `Asignada a ${open.ally_company || "la empresa aliada"}: sin técnico, la reparte su gerente en el portal de aliados.` : "Sin técnico, esta orden no le aparece a nadie en «Mi día»."}</p>}
               <div className="grid-2">
-                <Field label="Técnico"><select className="select" value={asgVal.technician_id} onChange={(e) => setAsg({ ...asgVal, technician_id: e.target.value, helpers: asgVal.helpers.filter((x) => String(x) !== e.target.value) })}><option value="">Sin asignar</option>{opcionesTecnicos(techs)}</select></Field>
+                <Field label="Técnico"><select className="select" value={asgVal.technician_id} onChange={(e) => setAsg({ ...asgVal, technician_id: e.target.value, helpers: asgVal.helpers.filter((x) => String(x) !== e.target.value) })}><option value="">{open.ally_company_id ? "Sin asignar (la reparte la empresa aliada)" : "Sin asignar"}</option>{opcionesTecnicos(techsAsg)}</select></Field>
                 <Field label="Fecha y hora"><input className="input" type="datetime-local" value={asgVal.scheduled_at} onChange={(e) => setAsg({ ...asgVal, scheduled_at: e.target.value })} /></Field>
               </div>
-              <Field label="Ayudantes">{chipsAyudantes(asgVal.helpers, asgVal.technician_id, (helpers) => setAsg({ ...asgVal, helpers }), open.crew)}</Field>
+              <Field label="Ayudantes">{chipsAyudantes(asgVal.helpers, asgVal.technician_id, (helpers) => setAsg({ ...asgVal, helpers }), open.crew, techsAsg)}</Field>
               <div style={{ display: "flex", justifyContent: "flex-end" }}><button className="btn btn--crimson btn--sm" disabled={busy || !asg} onClick={guardarAsignacion}>Guardar asignación</button></div>
             </Card>
           )}

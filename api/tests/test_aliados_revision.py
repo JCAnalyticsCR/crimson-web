@@ -382,3 +382,114 @@ def test_migracion_downgrade_respeta_la_tabla_de_economia(tmp_path):
         _correr(conn, mod._drop_ally_company)
         assert not sa.inspect(conn).has_table("ally_company")
     eng.dispose()
+
+
+# ---------- la empresa aliada no se pierde al reprogramar o reasignar sin mandarla ----------
+def test_ot_de_la_empresa_sin_tecnico_conserva_la_empresa(client, auth, db_session):
+    from app.models import WorkOrder
+
+    s = escenario(client, dict(client.headers), db_session)
+    manana = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    r = client.post("/work-orders", json={"title": "La reparte su gerente", "project_id": s.P1, "ally_company_id": s.A})
+    assert r.status_code == 201 and r.json()["ally_company_id"] == s.A and r.json()["technician_id"] is None, r.text
+    oid = r.json()["id"]
+
+    def empresa():
+        db_session.expire_all()
+        return db_session.get(WorkOrder, oid).ally_company_id
+
+    # "Asignacion rapida" que solo cambia la fecha (la tarjeta manda tecnico y ayudantes vacios igual)
+    r = client.patch(f"/work-orders/{oid}/assign", json={"technician_id": None, "helpers": [], "scheduled_at": manana})
+    assert r.status_code == 200 and r.json()["ally_company_id"] == s.A, r.text
+    assert oid in {o["id"] for o in client.get("/aliado/ordenes?estado=todas", headers=s.a_jefe).json()}
+    # PUT de un portal viejo con el equipo vacio y sin la empresa: tampoco la borra
+    r = client.put(f"/work-orders/{oid}", json={"technician_id": None, "helpers": [], "site": "Bodega 2"})
+    assert r.status_code == 200 and empresa() == s.A, r.text
+    # un tecnico de otra empresa aliada sin mandar la empresa: 422 (no se la lleva en silencio)
+    assert client.patch(f"/work-orders/{oid}/assign", json={"technician_id": s.uid_b_tec, "helpers": []}).status_code == 422
+    assert empresa() == s.A
+    # su propio tecnico: sigue siendo de la empresa
+    r = client.patch(f"/work-orders/{oid}/assign", json={"technician_id": s.uid_a_tec, "helpers": [], "scheduled_at": manana})
+    assert r.status_code == 200 and r.json()["ally_company_id"] == s.A, r.text
+    # quitarle el tecnico la deja otra vez en manos de la empresa (no vuelve a Crimson)
+    r = client.patch(f"/work-orders/{oid}/assign", json={"technician_id": None, "helpers": []})
+    assert r.status_code == 200 and r.json()["ally_company_id"] == s.A, r.text
+    # unica excepcion: un equipo NUEVO solo de Crimson devuelve la orden a Crimson
+    r = client.patch(f"/work-orders/{oid}/assign", json={"technician_id": s.admin_id, "helpers": []})
+    assert r.status_code == 200 and r.json()["ally_company_id"] is None, r.text
+    assert oid not in {o["id"] for o in client.get("/aliado/ordenes?estado=todas", headers=s.a_jefe).json()}
+
+
+def test_ot_mismo_equipo_sin_empresa_no_la_toca(client, auth, db_session):
+    """El PUT que manda el mismo equipo (o solo lo reordena) no recalcula: la cuadrilla mixta de la empresa sigue."""
+    s = escenario(client, dict(client.headers), db_session)
+    r = client.put(f"/work-orders/{s.W_hoy}", json={"technician_id": s.uid_a_tec, "helpers": [s.admin_id]})
+    assert r.status_code == 200 and r.json()["ally_company_id"] == s.A, r.text
+    r = client.put(f"/work-orders/{s.W_hoy}", json={"technician_id": s.admin_id, "helpers": [s.uid_a_tec]})
+    assert r.status_code == 200 and r.json()["ally_company_id"] == s.A, r.text
+    r = client.patch(f"/work-orders/{s.W_hoy}/assign", json={"technician_id": s.admin_id, "helpers": [s.uid_a_tec], "scheduled_at": None})
+    assert r.status_code == 200 and r.json()["ally_company_id"] == s.A, r.text
+
+
+def test_ticket_put_sin_empresa_la_conserva(client, auth, db_session):
+    from app.models import SupportTicket
+
+    s = escenario(client, dict(client.headers), db_session)
+    body = {"subject": "Falla TK-A", "customer_id": s.c1, "project_id": s.P1, "priority": "media"}
+
+    def empresa():
+        db_session.expire_all()
+        return db_session.get(SupportTicket, s.T_A).ally_company_id
+
+    # "Sin asignar (lo reparte la empresa aliada)": el ticket sigue en el portal de la empresa
+    r = client.put(f"/tickets/{s.T_A}", json={**body, "assigned_to": None})
+    assert r.status_code == 200 and r.json()["ally_company_id"] == s.A, r.text
+    assert s.T_A in {t["id"] for t in client.get("/aliado/tickets", headers=s.a_jefe).json()}
+    # a un agente de Crimson: tambien la conserva (igual que POST /tickets/{id}/assign)
+    r = client.put(f"/tickets/{s.T_A}", json={**body, "assigned_to": s.admin_id})
+    assert r.status_code == 200 and empresa() == s.A, r.text
+    assert s.T_A in {t["id"] for t in client.get("/aliado/tickets", headers=s.a_jefe).json()}
+    # de vuelta a su tecnico: misma empresa; uno de otra empresa aliada sin mandarla: 422
+    assert client.put(f"/tickets/{s.T_A}", json={**body, "assigned_to": s.uid_a_tec}).status_code == 200
+    assert client.put(f"/tickets/{s.T_A}", json={**body, "assigned_to": s.uid_b_tec}).status_code == 422
+    assert empresa() == s.A
+    # quitarle la empresa se hace mandandola en null
+    r = client.put(f"/tickets/{s.T_A}", json={**body, "assigned_to": s.admin_id, "ally_company_id": None})
+    assert r.status_code == 200 and empresa() is None, r.text
+
+
+# ---------- topes de lo que avisa por correo a la oficina ----------
+def test_tope_de_precios_y_respuestas_del_aliado(client, auth, db_session, monkeypatch):
+    from app.core import ratelimit
+    from app.models import AllyCostRequest, EmailOutbox
+
+    s = escenario(client, dict(client.headers), db_session)
+    monkeypatch.setattr(ratelimit.ally_notify_limiter, "limit", 2)
+    r = client.post(f"/aliado/proyectos/{s.P1}/precios", json={"what": "Ampliación de 2 cámaras", "amount": 5000, "currency": "CRC"}, headers=s.a_jefe)
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+    assert client.put(f"/aliado/solicitudes/{rid}", json={"amount": 5500, "currency": "CRC"}, headers=s.a_jefe).status_code == 200
+    solicitudes = db_session.scalar(select(func.count()).select_from(AllyCostRequest))
+    correos = db_session.scalar(select(func.count()).select_from(EmailOutbox))
+    r = client.post(f"/aliado/oportunidades/{s.O1}/precios", json={"what": "Otra oferta", "amount": 100, "currency": "CRC"}, headers=s.a_jefe)
+    assert r.status_code == 429, r.text
+    assert client.put(f"/aliado/solicitudes/{rid}", json={"amount": 6000, "currency": "CRC"}, headers=s.a_jefe).status_code == 429
+    assert client.post(f"/aliado/proyectos/{s.P1}/precios", json={"what": "Otra más", "amount": 1, "currency": "CRC"}, headers=s.a_jefe).status_code == 429
+    db_session.expire_all()
+    assert db_session.scalar(select(func.count()).select_from(AllyCostRequest)) == solicitudes
+    assert db_session.scalar(select(func.count()).select_from(EmailOutbox)) == correos
+
+
+def test_levantamiento_en_revision_no_se_reenvia(client, auth, db_session):
+    from app.models import EmailOutbox
+
+    s = escenario(client, dict(client.headers), db_session)
+    r = client.put(f"/aliado/levantamientos/{s.S_A}", json={"kind": "cctv", "items": [{"name": "Cable UTP", "quantity": 20, "unit": "m"}]}, headers=s.a_jefe)
+    assert r.status_code == 200, r.text
+    r = client.post(f"/aliado/levantamientos/{s.S_A}/enviar", headers=s.a_jefe)
+    assert r.status_code == 200 and r.json()["review_status"] == "pendiente", r.text
+    correos = db_session.scalar(select(func.count()).select_from(EmailOutbox))
+    r = client.post(f"/aliado/levantamientos/{s.S_A}/enviar", headers=s.a_jefe)
+    assert r.status_code == 409 and "revisión" in r.json()["detail"], r.text
+    db_session.expire_all()
+    assert db_session.scalar(select(func.count()).select_from(EmailOutbox)) == correos

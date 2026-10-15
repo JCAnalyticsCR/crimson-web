@@ -65,6 +65,9 @@ admin_users_limiter = SlidingWindow(limit=30, seconds=3600)
 ally_invite_limiter = SlidingWindow(limit=20, seconds=86400)
 ally_media_limiter = SlidingWindow(limit=120, seconds=3600)
 ally_ticket_limiter = SlidingWindow(limit=20, seconds=3600)
+# Precios que envia el aliado, respuestas a solicitudes y envios de levantamientos: cada uno avisa por correo a la
+# vendedora, a administracion o a los revisores (y llena Aprobaciones). Por persona.
+ally_notify_limiter = SlidingWindow(limit=30, seconds=3600)
 # Reautenticacion con la contrasena del admin (se cuenta cada intento, antes de verificar)
 reauth_limiter = SlidingWindow(limit=10, seconds=900)
 # Enlaces publicos con token (invitacion, restablecer): revisar y confirmar
