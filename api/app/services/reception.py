@@ -482,8 +482,14 @@ def reopen(db: Session, p: Principal, doc: ReceivedDocument, confirm: bool) -> N
     why = reopen_blocker(db, p.tenant, doc)
     if why:
         raise HTTPException(409, why)
+    from .hacienda_sync import close_superseded
+
+    # el mensaje de pruebas que siga por enviar o en consulta se cierra: si no, el worker lo terminaria despues y su
+    # resultado ("Cambió el modo" o la respuesta del ambiente de pruebas) pisaria el estado del mensaje de produccion
+    cerrados = close_superseded(db, doc.id, "Reemplazado: se reabrió para responder en producción")
     doc.status = "por_revisar"
-    audit(db, p.tenant.id, p.user.id, "reception_reopen", "received_document", doc.id, {"confirmo_no_en_fygaro": True}, ip=p.ip)
+    doc.hacienda_status = "sin_respuesta"  # aun no tiene mensaje de produccion
+    audit(db, p.tenant.id, p.user.id, "reception_reopen", "received_document", doc.id, {"confirmo_no_en_fygaro": True, "mensajes_cerrados": cerrados}, ip=p.ip)
 
 
 def discard(db: Session, p: Principal, doc: ReceivedDocument, reason: str) -> None:

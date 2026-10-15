@@ -134,8 +134,12 @@ def _mh_is_for_our_mr(name: str, root) -> bool:
 
 
 def _historic_response(db: Session, tenant: Tenant, doc: ReceivedDocument, mr: dict, xml_text: str | None, hacienda: tuple | None, user_id: int) -> ReceptionResponse:
+    from .hacienda_sync import close_superseded
     from .reception_calc import IVA_CODES
 
+    # gana Fygaro: lo de simulado/pruebas queda en la historia, pero lo que seguia por enviar o en consulta se cierra (si
+    # no, el worker lo mandaria o lo consultaria despues y su resultado pisaria el estado "historico" y daria alertas)
+    close_superseded(db, doc.id, "Reemplazado por el mensaje de Fygaro (histórico)")
     attempt = (db.scalar(select(func.max(ReceptionResponse.attempt)).where(ReceptionResponse.received_document_id == doc.id)) or 0) + 1
     action = ACTION_OF_CODE.get(mr["mensaje"] or "1", "aceptada")
     cond = IVA_NAMES.get(mr["condition"] or "", None) if action != "rechazada" else None

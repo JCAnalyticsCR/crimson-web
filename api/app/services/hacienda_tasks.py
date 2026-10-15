@@ -7,7 +7,7 @@ import logging
 from datetime import UTC, date, datetime, timedelta
 from html import escape
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..models import EInvoiceDocument, FiscalCredential, Invoice, ReceivedDocument, ReceptionResponse, Tenant, TenantUser
@@ -57,9 +57,25 @@ def alerts_for(db: Session, t: Tenant, today: date | None = None) -> list[str]:
         return bool(_aware(dt) and now - _aware(dt) <= timedelta(hours=24))
 
     watched = ("por_enviar", "rechazado", "enviado", "procesando", "error")
-    for r in db.scalars(select(ReceptionResponse).where(ReceptionResponse.tenant_id == t.id, ReceptionResponse.status.in_(watched))):
+    # solo el ULTIMO mensaje de cada recepcion y solo si sigue respondida: un intento viejo (el de pruebas antes de
+    # reabrir, uno que reemplazo el historico de Fygaro) o una recepcion que ya se reabrio o se respondio de nuevo no
+    # piden nada a nadie
+    last = (
+        select(ReceptionResponse.received_document_id.label("did"), func.max(ReceptionResponse.attempt).label("att"))
+        .where(ReceptionResponse.tenant_id == t.id)
+        .group_by(ReceptionResponse.received_document_id)
+        .subquery()
+    )
+    q = (
+        select(ReceptionResponse)
+        .join(last, (ReceptionResponse.received_document_id == last.c.did) & (ReceptionResponse.attempt == last.c.att))
+        .where(ReceptionResponse.tenant_id == t.id, ReceptionResponse.status.in_(watched))
+    )
+    for r in db.scalars(q):
         d = db.get(ReceivedDocument, r.received_document_id)
-        left = business_days_left(today, d.deadline) if d is not None else None
+        if d is None or d.status != "respondido":
+            continue
+        left = business_days_left(today, d.deadline)
         if r.status == "por_enviar" and left is not None and left <= 2:  # 0 = vence hoy: tambien se avisa
             out.append(f"Mensaje receptor sin enviar con plazo a punto de vencer ({d.issuer_name}): {r.last_error or 'revise las credenciales'}")
         elif r.status == "rechazado" and recent(r.resolved_at):

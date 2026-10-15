@@ -8,6 +8,8 @@
    commit ANTES del POST (D6): un reintento manda los mismos bytes.
 4. "ya fue recibido" solo cuenta como enviado si hubo un POST nuestro anterior (attempts > 1).
 5. Consulta a 1, 2, 5, 10, 20, 30 min y luego cada hora; 72 h sin respuesta final -> error.
+6. Mensajes receptor: solo el ultimo intento de cada recepcion se envia, se consulta y pone el estado de la recepcion;
+   los anteriores sin estado final se cierran al reabrir o al importar el de Fygaro (close_superseded).
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from ..models import EInvoiceDocument, FiscalCredential, Invoice, ReceivedDocument, ReceptionResponse, Tenant
@@ -98,7 +100,34 @@ def _provider(db: Session, tenant: Tenant, mode: str):
 
 
 # ================================================================ mensajes receptor
+OPEN_RESPONSE = ("por_enviar", "enviando", "enviado", "procesando")
+SUPERSEDED = "Reemplazado por un mensaje posterior"
+
+
+def _superseded(db: Session, r: ReceptionResponse) -> bool:
+    """Hay un intento posterior de la misma recepcion (respondida de nuevo tras reabrir, o el historico de Fygaro)."""
+    last = db.scalar(select(func.max(ReceptionResponse.attempt)).where(ReceptionResponse.received_document_id == r.received_document_id))
+    return (r.attempt or 0) < (last or 0)
+
+
+def close_superseded(db: Session, received_document_id: int, why: str) -> int:
+    """Cierra (error, con el motivo) los mensajes de esa recepcion que aun no tienen estado final, para que el worker deje
+    de enviarlos y de consultarlos: al reabrir para produccion (lo de pruebas no sigue vivo junto al mensaje nuevo) y al
+    importar el mensaje de Fygaro (gana Fygaro, §6.9). Devuelve cuantos cerro."""
+    rows = db.scalars(
+        select(ReceptionResponse).where(ReceptionResponse.received_document_id == received_document_id, ReceptionResponse.status.in_(OPEN_RESPONSE))
+    ).all()
+    for r in rows:
+        _fail(r, why)
+        r.next_attempt_at = None
+    return len(rows)
+
+
 def _copy_response_status(db: Session, r: ReceptionResponse) -> None:
+    """Solo el ULTIMO intento manda en el estado de la recepcion: uno viejo que el worker cierra o consulta despues (el de
+    pruebas tras reabrir, o uno que reemplazo el historico de Fygaro) no pisa el del mensaje vigente."""
+    if _superseded(db, r):
+        return
     doc = db.get(ReceivedDocument, r.received_document_id)
     if doc is not None:
         doc.hacienda_status = r.status
@@ -148,6 +177,10 @@ def send_response(db: Session, response_id: int) -> str | None:
     db.refresh(r)
     doc = db.get(ReceivedDocument, r.received_document_id)
     tenant = db.get(Tenant, r.tenant_id)
+    if _superseded(db, r):
+        _fail(r, SUPERSEDED)  # ya hay otro mensaje para esta recepcion: este no sale
+        db.commit()
+        return r.status
     if r.mode == "simulado":
         _fail(r, "Un mensaje simulado nunca se envía a Hacienda")
     elif r.mode != hc.reception_mode(db, tenant):
@@ -224,6 +257,10 @@ def refresh_response(db: Session, response_id: int) -> str | None:
     r = db.get(ReceptionResponse, response_id)
     if r is None or r.status not in ("enviado", "procesando", "enviando"):
         return r.status if r else None
+    if _superseded(db, r):
+        _fail(r, SUPERSEDED)  # su resultado ya no cuenta: se deja de consultar
+        db.commit()
+        return r.status
     doc = db.get(ReceivedDocument, r.received_document_id)
     tenant = db.get(Tenant, r.tenant_id)
     prov, retry_err, final_err = _provider(db, tenant, r.mode)

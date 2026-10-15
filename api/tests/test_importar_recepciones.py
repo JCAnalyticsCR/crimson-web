@@ -150,3 +150,43 @@ def test_consecutivo_de_simulado_no_choca_con_fygaro_y_un_choque_no_tumba_la_imp
     assert res["summary"]["error"] == 1 and res["summary"]["nuevo"] == 1, res["result"]
     assert db_session.query(ReceivedDocument).filter(ReceivedDocument.clave == cl(13)).count() == 1
     assert db_session.query(ReceivedDocument).filter(ReceivedDocument.clave == cl(12)).count() == 0
+
+
+def test_gana_fygaro_cierra_el_mensaje_de_pruebas_pendiente(client, auth, db_session, monkeypatch, p12_empresa):
+    """Dia del cambio (§15.7b): un mensaje de pruebas aun por enviar o en consulta cuando se importa el de Fygaro se cierra.
+    El worker no lo manda ni lo consulta, la recepcion sigue "historico" y no da alertas."""
+    from app.models import ReceivedDocument, ReceptionResponse, Tenant
+    from app.services import hacienda_tasks
+    from app.services.hacienda_sync import poll_status, send_pending
+    from tests.hacienda_utils import FakeHacienda, modo_pruebas
+
+    fake = FakeHacienda(sequence=["procesando"]).install(monkeypatch)
+    modo_pruebas(client, *p12_empresa)
+    ids = []
+    for n, enviar in ((21, False), (22, True)):
+        xml = fe_xml(cl(n), fecha=FECHA, consecutivo=f"0010000101{n:010d}").encode()
+        d = client.post("/reception/upload", files={"file": ("f.xml", xml, "application/xml")}).json()
+        r = client.post(f"/reception/{d['id']}/respond", json={"action": "aceptada", "iva_condition": "credito", "send_now": enviar}).json()
+        assert r["hacienda_status"] == ("enviado" if enviar else "por_enviar"), r
+        ids.append(d["id"])
+    pruebas = db_session.query(ReceptionResponse).filter(ReceptionResponse.mode == "pruebas").all()
+    for x in pruebas:
+        x.next_attempt_at = None  # sin el cierre, el worker los tomaria en esta misma vuelta
+    db_session.commit()
+    posts, gets = len(fake.posts), len(fake.gets)
+    r = importar(client, zip_fygaro(paquete(21) + paquete(22, "00100001050000000360")), commit=True).json()
+    assert r["summary"]["actualizar"] == 2, r
+    for x in pruebas:
+        db_session.refresh(x)
+        assert x.status == "error" and "Fygaro" in x.last_error and x.next_attempt_at is None
+    send_pending(db_session)
+    poll_status(db_session)
+    assert len(fake.posts) == posts and len(fake.gets) == gets
+    for rid in ids:
+        doc = db_session.get(ReceivedDocument, rid)
+        db_session.refresh(doc)
+        assert doc.status == "historico" and doc.hacienda_status == "historico"
+        det = client.get(f"/reception/{rid}").json()
+        assert [x["status"] for x in det["responses"]] == ["error", "historico"] and not det["can_retry"] and not det["can_send"]
+    t = db_session.get(Tenant, auth["tenant"]["id"])
+    assert not [a for a in hacienda_tasks.alerts_for(db_session, t) if "ensaje receptor" in a]

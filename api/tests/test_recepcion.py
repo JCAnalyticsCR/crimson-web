@@ -662,3 +662,42 @@ def test_respuesta_del_proveedor_de_otras_cedulas_se_ignora_y_adjuntar_la_buena_
     assert client.post(f"/reception/{d2['id']}/discard", json={"reason": "Rechazado al proveedor"}).status_code == 200
     client.post(f"/reception/{d2['id']}/attach", files={"file": ("r.xml", mensaje_hacienda(cl(72)).encode(), "application/xml")})
     assert client.post(f"/reception/{d2['id']}/restore").json()["status"] == "por_revisar"
+
+
+def test_reabrir_cierra_el_mensaje_de_pruebas_y_un_intento_viejo_no_pisa_al_nuevo(client, auth, db_session, monkeypatch, p12_empresa):
+    """Reabrir con el mensaje de pruebas aun en consulta: se cierra (el worker no lo consulta ni da alerta) y, aunque un
+    intento viejo quedara vivo, ni se manda, ni se consulta, ni pisa el estado del mensaje de produccion."""
+    from app.models import ReceivedDocument, ReceptionResponse, Tenant
+    from app.services import hacienda_config, hacienda_tasks
+    from app.services.hacienda_sync import SUPERSEDED, poll_status, refresh_response, send_response
+
+    fake = FakeHacienda(sequence=["procesando"]).install(monkeypatch)
+    modo_pruebas(client, *p12_empresa)
+    d = up(client, xml_hoy(73)).json()
+    assert respond(client, d["id"]).json()["hacienda_status"] == "enviado"  # send_now: en pruebas y en consulta
+    monkeypatch.setattr(hacienda_config, "reception_mode", lambda db, t: "produccion")
+    r = client.post(f"/reception/{d['id']}/reopen", json={"confirm_not_in_fygaro": True}).json()
+    assert r["status"] == "por_revisar" and r["hacienda_status"] == "sin_respuesta" and r["can_respond"]
+    assert r["responses"][0]["status"] == "error" and "reabrió" in r["responses"][0]["last_error"]
+    t = db_session.get(Tenant, auth["tenant"]["id"])
+    assert not [a for a in hacienda_tasks.alerts_for(db_session, t) if "ensaje receptor" in a]
+    r = respond(client, d["id"], send_now=False).json()
+    assert r["hacienda_status"] == "por_enviar" and [x["mode"] for x in r["responses"]] == ["pruebas", "produccion"]
+    viejo = db_session.query(ReceptionResponse).filter(ReceptionResponse.received_document_id == d["id"], ReceptionResponse.attempt == 1).one()
+    viejo.next_attempt_at = None
+    db_session.commit()
+    gets = len(fake.gets)
+    poll_status(db_session)
+    assert len(fake.gets) == gets  # cerrado: no se consulta
+    # carrera con el worker: el intento viejo sigue vivo -> se cierra sin red y no toca la recepcion
+    for st, fn in (("enviado", refresh_response), ("por_enviar", send_response)):
+        viejo.status, viejo.next_attempt_at = st, None
+        db_session.commit()
+        fn(db_session, viejo.id)
+        db_session.refresh(viejo)
+        assert viejo.status == "error" and viejo.last_error == SUPERSEDED
+    assert len(fake.gets) == gets and len(fake.posts) == 1
+    doc = db_session.get(ReceivedDocument, d["id"])
+    db_session.refresh(doc)
+    assert doc.hacienda_status == "por_enviar"
+    assert not [a for a in hacienda_tasks.alerts_for(db_session, t) if "error ante Hacienda" in a]
