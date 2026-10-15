@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import settings
 from .routers import (
+    accounting,
     allies,
     approvals,
     auth,
@@ -23,6 +24,7 @@ from .routers import (
     data_export,
     events,
     fieldwork,
+    hacienda_settings,
     imports,
     media,
     ops,
@@ -89,6 +91,7 @@ def create_app() -> FastAPI:
     app.include_router(sales.router)
     app.include_router(ops.router)
     app.include_router(bitacora_router.router)  # antes que ajustes: /settings/audit
+    app.include_router(hacienda_settings.router)  # antes que ajustes: /settings/hacienda
     app.include_router(settings_router.router)
     app.include_router(users_admin.router)  # Ajustes -> Usuarios (/settings/users, /settings/invitations)
     app.include_router(webhooks.router)
@@ -99,6 +102,7 @@ def create_app() -> FastAPI:
     app.include_router(store_showcase.pub)
     app.include_router(store_showcase.seo)
     app.include_router(reception.router)
+    app.include_router(accounting.router)
     app.include_router(public_api.admin)
     app.include_router(public_api.v1)
     app.include_router(media.router)

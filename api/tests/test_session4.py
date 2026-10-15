@@ -483,7 +483,8 @@ def test_each_role_sees_only_what_it_needs(client, auth, db_session):
 
     # Contabilidad: todo el dinero de la empresa, sin ajustes. Sin rentabilidad: el costo es solo del admin (13/10, 08:07)
     a = login("a@ejemplo.com", "contabilidad")
-    assert len(report_keys(a)) == 17 and not report_keys(a) & {"rentabilidad", "rentabilidad_tipo"}
+    # 18: el libro de compras (facturacion) tambien es de contabilidad
+    assert len(report_keys(a)) == 18 and not report_keys(a) & {"rentabilidad", "rentabilidad_tipo"}
     assert client.get("/dashboard", headers=a).json()["scope"] == "company"
     assert client.get("/settings", headers=a).status_code == 403
 

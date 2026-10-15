@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -135,67 +136,214 @@ def impuesto_facturado(db: Session, tid: int, a: date, b: date) -> Report:
     )
 
 
+# ---------- Contabilidad y tributario (facturacion): todo en colones ----------
+def _to_crc(amount, currency: str | None, fx) -> Decimal:
+    return _crc(amount, currency or "CRC", fx)
+
+
+def _q2(x: Decimal) -> Decimal:
+    return Decimal(str(x)).quantize(Decimal("0.01"))
+
+
+def _last_responses(db: Session, ids: list[int]) -> dict:
+    from ..models import ReceptionResponse
+
+    out = {}
+    if not ids:
+        return out
+    for r in db.scalars(select(ReceptionResponse).where(ReceptionResponse.received_document_id.in_(ids)).order_by(ReceptionResponse.attempt)):
+        out[r.received_document_id] = r
+    return out
+
+
+def _sign(doc) -> Decimal:
+    return Decimal(-1) if doc.doc_type == "NC" else Decimal(1)
+
+
+def _reception_credit(doc) -> Decimal | None:
+    """IVA acreditable de una recepcion respondida (divisa del documento, positivo). None = proporcional."""
+    if (doc.iva_condition or "credito") == "proporcional":
+        return None
+    if doc.credit_amount is not None:
+        return Decimal(str(doc.credit_amount))
+    if (doc.iva_condition or "credito") in ("credito", "bienes_capital"):
+        return Decimal(str(doc.iva_total if doc.iva_total is not None else doc.tax_total or 0))
+    return Decimal(0)
+
+
+def _expense_credit(e) -> Decimal | None:
+    """Credito de un gasto sin comprobante ligado (filas viejas "credito" sin tax_credit_amount -> el IVA)."""
+    if e.iva_credit == "proporcional":
+        return None
+    if e.tax_credit_amount is not None:
+        return Decimal(str(e.tax_credit_amount))
+    return Decimal(str(e.tax_amount or 0)) if e.iva_credit in ("credito", "bienes_capital") else Decimal(0)
+
+
+def iva_breakdown(db: Session, tid: int, a: date, b: date, prorrata_pct=None) -> dict:
+    """D13: el credito de IVA sale de las recepciones respondidas (el mensaje receptor es el respaldo legal), no de los
+    gastos. Los gastos ligados a una recepcion no aportan credito propio (sin doble conteo); los gastos manuales sin
+    comprobante van en su propia linea con aviso (art. 11). Todo en colones."""
+    from ..models import EInvoiceDocument, ReceivedDocument
+    from .documents import local_date
+
+    # ---- debito: facturas del periodo (las anuladas por NC siguen en su mes; la NC resta en el suyo)
+    deb = Decimal(0)
+    nc_inv = {
+        d.invoice_id: d
+        for d in db.scalars(select(EInvoiceDocument).where(EInvoiceDocument.tenant_id == tid, EInvoiceDocument.doc_type == "NC", EInvoiceDocument.status == "aceptada"))
+    }
+    for inv in db.scalars(select(Invoice).where(Invoice.tenant_id == tid, Invoice.issue_date >= a, Invoice.issue_date <= b)):
+        if inv.einvoice_status == "rechazada":
+            continue
+        if inv.status == "anulada" and inv.id not in nc_inv:
+            continue
+        deb += _to_crc(inv.tax_total, inv.currency, inv.fx_sell)
+    for inv_id, nc in nc_inv.items():
+        when = local_date(nc.emitted_at or nc.resolved_at or nc.created_at)
+        if when and a <= when <= b:
+            inv = db.get(Invoice, inv_id)
+            if inv:
+                deb -= _to_crc(inv.tax_total, inv.currency, inv.fx_sell)
+
+    # ---- credito de comprobantes electronicos respondidos
+    docs = db.scalars(
+        select(ReceivedDocument).where(
+            ReceivedDocument.tenant_id == tid,
+            ReceivedDocument.issue_date >= a,
+            ReceivedDocument.issue_date <= b,
+            ReceivedDocument.action.in_(("aceptada", "parcial")),
+            ReceivedDocument.status.in_(("respondido", "historico")),
+        )
+    ).all()
+    last = _last_responses(db, [d.id for d in docs])
+    xml_c = por_confirmar = sin_respaldo = prop = Decimal(0)
+    sin_confirmar: list[dict] = []
+    for d in docs:
+        r = last.get(d.id)
+        if r is not None and r.status in ("rechazado", "error"):
+            continue
+        fx = d.fx_rate or 1
+        credit = _reception_credit(d)
+        if credit is None:  # proporcional
+            if d.supplier_hacienda_status != "rechazado":
+                prop += _sign(d) * _to_crc(d.iva_total if d.iva_total is not None else d.tax_total, d.currency, fx)
+            continue
+        amount = _sign(d) * _to_crc(credit, d.currency, fx)
+        if d.supplier_hacienda_status == "rechazado":
+            sin_respaldo += amount  # Hacienda se lo rechazo al proveedor: sin validez, no entra al "a pagar"
+            continue
+        xml_c += amount
+        confirmed = d.supplier_hacienda_status == "aceptado" or (r is not None and r.status in ("aceptado", "historico") and r.mode == "produccion")
+        if not confirmed:
+            por_confirmar += amount
+            sin_confirmar.append({"id": d.id, "issuer_name": d.issuer_name, "clave": d.clave, "credit_crc": _q2(amount)})
+
+    # ---- gastos manuales (sin comprobante electronico vinculado)
+    manual = Decimal(0)
+    for e in db.scalars(
+        select(Expense).where(
+            Expense.tenant_id == tid, Expense.date >= a, Expense.date <= b, Expense.status != "anulado", Expense.received_document_id.is_(None)
+        )
+    ):
+        c = _expense_credit(e)
+        if c is None:
+            prop += _to_crc(e.tax_amount, e.currency, e.fx_rate)
+        else:
+            manual += _to_crc(c, e.currency, e.fx_rate)
+    pct = Decimal(str(prorrata_pct)) if prorrata_pct not in (None, "") else None
+    cred_prorrata = (prop * pct / Decimal(100)) if pct is not None else Decimal(0)
+    credito = xml_c + manual
+    return {
+        "debito_crc": _q2(deb),
+        "credito_xml_crc": _q2(xml_c),
+        "credito_por_confirmar_crc": _q2(por_confirmar),
+        "credito_sin_respaldo_crc": _q2(sin_respaldo),
+        "credito_manual_crc": _q2(manual),
+        "credito_crc": _q2(credito),
+        "proporcional_crc": _q2(prop),
+        "prorrata_pct": pct,
+        "credito_prorrata_crc": _q2(cred_prorrata),
+        "a_pagar_crc": _q2(deb - credito - cred_prorrata),
+        "sin_confirmar": sin_confirmar[:50],
+    }
+
+
 def iva(db: Session, tid: int, a: date, b: date) -> Report:
-    deb = db.scalar(
-        select(func.coalesce(func.sum(Invoice.tax_total), 0)).where(
-            Invoice.tenant_id == tid, Invoice.issue_date >= a, Invoice.issue_date <= b, Invoice.status != "anulada"
-        )
-    )
-    cred = db.scalar(
-        select(func.coalesce(func.sum(Expense.tax_amount), 0)).where(
-            Expense.tenant_id == tid, Expense.date >= a, Expense.date <= b, Expense.status != "anulado", Expense.iva_credit == "credito"
-        )
-    )
-    prop = db.scalar(
-        select(func.coalesce(func.sum(Expense.tax_amount), 0)).where(
-            Expense.tenant_id == tid, Expense.date >= a, Expense.date <= b, Expense.status != "anulado", Expense.iva_credit == "proporcional"
-        )
-    )
-    d, c, p = Decimal(str(deb)), Decimal(str(cred)), Decimal(str(prop))
+    from ..models import Tenant
+
+    t = db.get(Tenant, tid)
+    x = iva_breakdown(db, tid, a, b, (t.settings or {}).get("iva_prorrata_pct") if t else None)
     rows = [
-        ["IVA débito (ventas)", d],
-        ["IVA crédito (compras, genera crédito)", c],
-        ["IVA compras proporcional (prorrata)", p],
-        ["IVA a pagar (débito − crédito)", d - c],
+        ["IVA débito (ventas)", x["debito_crc"]],
+        ["IVA crédito de facturas electrónicas aceptadas", x["credito_xml_crc"]],
+        ["   · de ellas, sin respuesta de Hacienda al proveedor (por confirmar)", x["credito_por_confirmar_crc"]],
+        ["IVA crédito de gastos sin factura electrónica vinculada (sin comprobante aceptado no hay crédito)", x["credito_manual_crc"]],
+        ["IVA crédito (compras, genera crédito)", x["credito_crc"]],
+        ["Excluido: comprobantes rechazados por Hacienda al proveedor", x["credito_sin_respaldo_crc"]],
+        ["IVA compras proporcional (prorrata)", x["proporcional_crc"]],
+        [f"Crédito por prorrata ({x['prorrata_pct']} %)" if x["prorrata_pct"] is not None else "Crédito por prorrata (sin porcentaje)", x["credito_prorrata_crc"]],
+        ["IVA a pagar (débito − crédito)", x["a_pagar_crc"]],
     ]
-    return Report("iva", "IVA · borrador D-104", ["Concepto", "Monto"], rows, {"a_pagar": d - c})
+    return Report("iva", "IVA · borrador D-104 (en colones)", ["Concepto", "Monto ₡"], rows, {"a_pagar": x["a_pagar_crc"]})
 
 
 def gastos(db: Session, tid: int, a: date, b: date) -> Report:
+    from ..models import Supplier
+
     rows = db.scalars(
         select(Expense).where(Expense.tenant_id == tid, Expense.date >= a, Expense.date <= b, Expense.status != "anulado").order_by(Expense.date)
     ).all()
+    sups = {s.id: s.name for s in db.scalars(select(Supplier).where(Supplier.tenant_id == tid))}
+    out = []
+    for e in rows:
+        c = _expense_credit(e)
+        out.append(
+            [
+                e.date.isoformat(),
+                sups.get(e.supplier_id, ""),
+                e.description,
+                e.currency,
+                e.fx_rate,
+                e.subtotal,
+                e.tax_amount,
+                e.total,
+                _q2(_to_crc(e.total, e.currency, e.fx_rate)),
+                c if c is not None else "prorrata",
+                e.iva_credit,
+                e.reference or "",
+                e.status,
+            ]
+        )
     return Report(
         "gastos",
         "Gastos",
-        ["Fecha", "Descripción", "Divisa", "Subtotal", "IVA", "Total", "Crédito IVA", "Referencia", "Estado"],
-        [[e.date.isoformat(), e.description, e.currency, e.subtotal, e.tax_amount, e.total, e.iva_credit, e.reference or "", e.status] for e in rows],
-        {"total": sum((Decimal(str(e.total)) for e in rows), Decimal(0)), "n": len(rows)},
+        ["Fecha", "Proveedor", "Descripción", "Divisa", "TC", "Subtotal", "IVA", "Total", "Total ₡", "IVA acreditable", "Crédito IVA", "Referencia", "Estado"],
+        out,
+        {"total": sum((_to_crc(e.total, e.currency, e.fx_rate) for e in rows), Decimal(0)).quantize(Decimal("0.01")), "n": len(rows)},
     )
 
 
 def estado_resultados(db: Session, tid: int, a: date, b: date) -> Report:
-    ventas = Decimal(
-        str(
-            db.scalar(
-                select(func.coalesce(func.sum(Invoice.subtotal - Invoice.discount_total), 0)).where(
-                    Invoice.tenant_id == tid, Invoice.issue_date >= a, Invoice.issue_date <= b, Invoice.status != "anulada"
-                )
-            )
-        )
-    )
-    gastos_ = Decimal(
-        str(
-            db.scalar(
-                select(func.coalesce(func.sum(Expense.subtotal), 0)).where(
-                    Expense.tenant_id == tid, Expense.date >= a, Expense.date <= b, Expense.status != "anulado"
-                )
-            )
-        )
-    )
+    """Ventas y gastos en colones. Gasto = gasto aplicable (total - IVA acreditable): con condicion 04 el IVA no
+    acreditable ES gasto, y los impuestos que no son IVA tambien (subtotal lo subestimaba)."""
+    from ..models import Tenant
+
+    ventas = Decimal(0)
+    for inv in db.scalars(select(Invoice).where(Invoice.tenant_id == tid, Invoice.issue_date >= a, Invoice.issue_date <= b, Invoice.status != "anulada")):
+        ventas += _to_crc(Decimal(str(inv.subtotal or 0)) - Decimal(str(inv.discount_total or 0)), inv.currency, inv.fx_sell)
+    t = db.get(Tenant, tid)
+    pct = (t.settings or {}).get("iva_prorrata_pct") if t else None
+    gastos_ = Decimal(0)
+    for e in db.scalars(select(Expense).where(Expense.tenant_id == tid, Expense.date >= a, Expense.date <= b, Expense.status != "anulado")):
+        c = _expense_credit(e)
+        if c is None:
+            c = Decimal(str(e.tax_amount or 0)) * Decimal(str(pct or 0)) / Decimal(100)
+        gastos_ += _to_crc(Decimal(str(e.total or 0)) - c, e.currency, e.fx_rate)
+    ventas, gastos_ = _q2(ventas), _q2(gastos_)
     return Report(
         "resultados",
-        "Estado de resultados (sin IVA)",
+        "Estado de resultados (sin IVA acreditable, en colones)",
         ["Concepto", "Monto"],
         [["Ventas netas", ventas], ["Gastos", gastos_], ["Resultado", ventas - gastos_]],
         {"resultado": ventas - gastos_},
@@ -284,41 +432,6 @@ def ordenes(db: Session, tid: int, a: date, b: date) -> Report:
     )
 
 
-def recepciones(db: Session, tid: int, a: date, b: date) -> Report:
-    from ..models import ReceivedDocument
-
-    rows = db.scalars(
-        select(ReceivedDocument)
-        .where(ReceivedDocument.tenant_id == tid, ReceivedDocument.issue_date >= a, ReceivedDocument.issue_date <= b)
-        .order_by(ReceivedDocument.issue_date)
-    ).all()
-    return Report(
-        "recepciones",
-        "Recepciones",
-        ["Fecha", "Emisor", "Cédula", "Consecutivo", "Moneda", "Subtotal", "IVA", "Total", "Condición IVA", "Respuesta", "Hacienda"],
-        [
-            [
-                r.issue_date.isoformat() if r.issue_date else "",
-                r.issuer_name or "",
-                r.issuer_id or "",
-                r.consecutive or "",
-                r.currency,
-                r.subtotal,
-                r.tax_total,
-                r.total,
-                r.iva_condition,
-                r.action or "pendiente",
-                r.hacienda_status,
-            ]
-            for r in rows
-        ],
-        {
-            "IVA": sum((Decimal(str(r.tax_total)) for r in rows if r.action != "rechazada"), Decimal(0)),
-            "Total": sum((Decimal(str(r.total)) for r in rows if r.action != "rechazada"), Decimal(0)),
-        },
-    )
-
-
 def propinas(db: Session, tid: int, a: date, b: date) -> Report:
     rows = db.scalars(
         select(Payment).where(Payment.tenant_id == tid, Payment.paid_at >= a, Payment.paid_at <= b, Payment.tip > 0).order_by(Payment.paid_at)
@@ -333,65 +446,243 @@ def propinas(db: Session, tid: int, a: date, b: date) -> Report:
     )
 
 
+def recepciones(db: Session, tid: int, a: date, b: date) -> Report:
+    from ..models import ReceivedDocument
+
+    rows = db.scalars(
+        select(ReceivedDocument)
+        .where(ReceivedDocument.tenant_id == tid, ReceivedDocument.issue_date >= a, ReceivedDocument.issue_date <= b)
+        .order_by(ReceivedDocument.issue_date)
+    ).all()
+    out_ = ("rechazada",)
+    vivas = [r for r in rows if r.action not in out_ and r.status not in ("descartado", "ajeno", "invalido")]
+    return Report(
+        "recepciones",
+        "Recepciones",
+        [
+            "Fecha",
+            "Tipo",
+            "Emisor",
+            "Cédula",
+            "Consecutivo",
+            "Moneda",
+            "Subtotal",
+            "IVA",
+            "Total",
+            "Actividad",
+            "Condición IVA",
+            "IVA acreditable",
+            "Gasto aplicable",
+            "Respuesta",
+            "Estado",
+            "Hacienda",
+            "Respuesta del proveedor",
+        ],
+        [
+            [
+                r.issue_date.isoformat() if r.issue_date else "",
+                r.doc_type,
+                r.issuer_name or "",
+                r.issuer_id or "",
+                r.consecutive or "",
+                r.currency,
+                r.subtotal,
+                r.tax_total,
+                r.total,
+                r.activity_code or "",
+                r.iva_condition if r.action else "",
+                r.credit_amount if r.credit_amount is not None else "",
+                r.applicable_amount if r.applicable_amount is not None else "",
+                r.action or "pendiente",
+                r.status,
+                r.hacienda_status,
+                r.supplier_hacienda_status,
+            ]
+            for r in rows
+        ],
+        {
+            "IVA ₡": sum((_sign(r) * _to_crc(r.tax_total, r.currency, r.fx_rate) for r in vivas), Decimal(0)).quantize(Decimal("0.01")),
+            "Total ₡": sum((_sign(r) * _to_crc(r.total, r.currency, r.fx_rate) for r in vivas), Decimal(0)).quantize(Decimal("0.01")),
+        },
+    )
+
+
 D151_THRESHOLD = Decimal(2_500_000)
 D151_SPECIFIC = Decimal(50_000)
 SPECIFIC_WORDS = ("alquiler", "honorario", "comision", "servicios profesionales", "interes")
 
 
 def d151(db: Session, tid: int, a: date, b: date) -> Report:
-    """Borrador D-151 (resumen de clientes, proveedores y gastos especificos): montos anuales en colones por
-    contraparte que superan el umbral. Revisar con el contador antes de presentar en TRIBU-CR."""
-    from ..models import ExpenseCategory, ReceivedDocument, Supplier
+    """D-270 / D-151: operaciones SIN comprobante electronico (borrador). Desde DGT-R-071-2019 lo respaldado por
+    comprobantes electronicos no se informa, y el D-270 (MH-DGT-RES-0055-2025) reporta justo lo no respaldado. Por eso
+    quedan fuera las compras recibidas por XML y los gastos ligados a ellas. Umbrales y periodicidad: a confirmar con
+    contabilidad; se muestran los montos sin filtrar, con la columna "Supera umbral D-151"."""
+    from ..models import ExpenseCategory, Supplier
 
     rows: list[list] = []
-    sales: dict[tuple, Decimal] = {}
-    for inv in db.scalars(select(Invoice).where(Invoice.tenant_id == tid, Invoice.issue_date >= a, Invoice.issue_date <= b, Invoice.status != "anulada")):
-        if inv.doc_type not in ("FE", "FEE") or not inv.customer_id:
-            continue
-        c = db.get(Customer, inv.customer_id)
-        if not c or not c.id_number:
-            continue
-        k = (c.id_number, c.name)
-        sales[k] = sales.get(k, Decimal(0)) + _crc(inv.subtotal, inv.currency, inv.fx_sell)
-    for (idn, name), amt in sorted(sales.items(), key=lambda x: -x[1]):
-        if amt > D151_THRESHOLD:
-            rows.append(["Ventas (clientes)", idn, name, amt.quantize(Decimal("0.01"))])
-
     buys: dict[tuple, Decimal] = {}
-    specific: dict[tuple, Decimal] = {}
-    cats = {c.id: c.name.lower() for c in db.scalars(select(ExpenseCategory).where(ExpenseCategory.tenant_id == tid))}
+    specific: dict[tuple, tuple[Decimal, str]] = {}
+    cats = {c.id: c for c in db.scalars(select(ExpenseCategory).where(ExpenseCategory.tenant_id == tid))}
     for e in db.scalars(
-        select(Expense).where(Expense.tenant_id == tid, Expense.date >= a, Expense.date <= b, Expense.status != "anulado", Expense.supplier_id.is_not(None))
+        select(Expense).where(
+            Expense.tenant_id == tid,
+            Expense.date >= a,
+            Expense.date <= b,
+            Expense.status != "anulado",
+            Expense.supplier_id.is_not(None),
+            Expense.received_document_id.is_(None),
+            Expense.received_clave.is_(None),
+        )
     ):
         s = db.get(Supplier, e.supplier_id)
         if not s or not s.tax_id:
             continue
         k = (s.tax_id, s.name)
-        amt = _crc(e.subtotal, e.currency, 1)
-        cname = cats.get(e.category_id, "") + " " + e.description.lower()
-        if any(w in cname for w in SPECIFIC_WORDS):
-            specific[k] = specific.get(k, Decimal(0)) + amt
+        amt = _to_crc(e.subtotal, e.currency, e.fx_rate)
+        cat = cats.get(e.category_id)
+        kind = cat.d151_kind if cat and cat.d151_kind else None
+        if kind is None:
+            text = ((cat.name if cat else "") + " " + e.description).lower()
+            kind = next((w for w in SPECIFIC_WORDS if w in text), None)
+        if kind:
+            prev = specific.get(k, (Decimal(0), kind))
+            specific[k] = (prev[0] + amt, prev[1])
         else:
             buys[k] = buys.get(k, Decimal(0)) + amt
-    for r in db.scalars(
-        select(ReceivedDocument).where(
+    for (idn, name), amt in sorted(buys.items(), key=lambda x: -x[1]):
+        rows.append(["Compras (proveedores) sin comprobante electrónico", idn, name, "", amt.quantize(Decimal("0.01")), "Sí" if amt > D151_THRESHOLD else "No"])
+    for (idn, name), (amt, kind) in sorted(specific.items(), key=lambda x: -x[1][0]):
+        rows.append(["Gastos específicos", idn, name, kind.replace("_", " "), amt.quantize(Decimal("0.01")), "Sí" if amt > D151_SPECIFIC else "No"])
+    return Report(
+        "d151",
+        "D-270 / D-151: operaciones sin comprobante electrónico (borrador)",
+        ["Sección", "Identificación", "Nombre", "Tipo de gasto", "Monto ₡", "Supera umbral D-151"],
+        rows,
+        {"Registros": len(rows)},
+    )
+
+
+def compras(db: Session, tid: int, a: date, b: date) -> Report:
+    """Libro de compras: comprobantes aceptados o parciales + gastos manuales con proveedor, con su respaldo."""
+    from ..models import ReceivedDocument, Supplier
+
+    docs = db.scalars(
+        select(ReceivedDocument)
+        .where(
             ReceivedDocument.tenant_id == tid,
             ReceivedDocument.issue_date >= a,
             ReceivedDocument.issue_date <= b,
             ReceivedDocument.action.in_(("aceptada", "parcial")),
+            ReceivedDocument.status.in_(("respondido", "historico")),
         )
+        .order_by(ReceivedDocument.issue_date)
+    ).all()
+    last = _last_responses(db, [d.id for d in docs])
+    rows = []
+    tot = {"base": Decimal(0), "iva": Decimal(0), "cred": Decimal(0), "apl": Decimal(0)}
+    for d in docs:
+        r = last.get(d.id)
+        fx, s = d.fx_rate or 1, _sign(d)
+        aceptado = d.supplier_hacienda_status == "aceptado" or (r is not None and r.mode == "produccion" and r.status in ("aceptado", "historico"))
+        respaldo = "XML aceptado" if aceptado else ("XML rechazado al proveedor" if d.supplier_hacienda_status == "rechazado" else "XML sin respuesta de Hacienda")
+        base = s * _to_crc(Decimal(str(d.total or 0)) - Decimal(str(d.tax_total or 0)), d.currency, fx)
+        ivac = s * _to_crc(d.tax_total, d.currency, fx)
+        cred = s * _to_crc(d.credit_amount or 0, d.currency, fx)
+        apl = s * _to_crc(d.applicable_amount or 0, d.currency, fx)
+        rows.append([d.issue_date.isoformat() if d.issue_date else "", d.issuer_name or "", d.issuer_id or "", d.consecutive or d.clave, d.doc_type, d.currency, fx, _q2(base), _q2(ivac), _q2(cred), _q2(apl), d.iva_condition, d.activity_code or "", respaldo])
+        tot["base"] += base
+        tot["iva"] += ivac
+        tot["cred"] += cred
+        tot["apl"] += apl
+    sups = {x.id: x for x in db.scalars(select(Supplier).where(Supplier.tenant_id == tid))}
+    for e in db.scalars(
+        select(Expense)
+        .where(Expense.tenant_id == tid, Expense.date >= a, Expense.date <= b, Expense.status != "anulado", Expense.supplier_id.is_not(None), Expense.received_document_id.is_(None))
+        .order_by(Expense.date)
     ):
-        if r.expense_id or not r.issuer_id:  # si ya genero gasto con proveedor, se conto arriba
-            continue
-        k = (r.issuer_id, r.issuer_name or "")
-        buys[k] = buys.get(k, Decimal(0)) + _crc(r.subtotal, r.currency, 1)
-    for (idn, name), amt in sorted(buys.items(), key=lambda x: -x[1]):
-        if amt > D151_THRESHOLD:
-            rows.append(["Compras (proveedores)", idn, name, amt.quantize(Decimal("0.01"))])
-    for (idn, name), amt in sorted(specific.items(), key=lambda x: -x[1]):
-        if amt > D151_SPECIFIC:
-            rows.append(["Gastos específicos", idn, name, amt.quantize(Decimal("0.01"))])
-    return Report("d151", "D-151 (borrador)", ["Sección", "Identificación", "Nombre", "Monto anual ₡"], rows, {"Registros": len(rows)})
+        sup = sups.get(e.supplier_id)
+        c = _expense_credit(e) or Decimal(0)
+        base = _to_crc(e.subtotal, e.currency, e.fx_rate)
+        ivac = _to_crc(e.tax_amount, e.currency, e.fx_rate)
+        cred = _to_crc(c, e.currency, e.fx_rate)
+        apl = _to_crc(Decimal(str(e.total or 0)) - c, e.currency, e.fx_rate)
+        rows.append([e.date.isoformat(), sup.name if sup else "", sup.tax_id if sup else "", e.reference or e.description[:40], "Gasto", e.currency, e.fx_rate, _q2(base), _q2(ivac), _q2(cred), _q2(apl), e.iva_credit, "", "Sin XML"])
+        tot["base"] += base
+        tot["iva"] += ivac
+        tot["cred"] += cred
+        tot["apl"] += apl
+    return Report(
+        "compras",
+        "Libro de compras",
+        ["Fecha", "Proveedor", "Cédula", "Documento", "Tipo", "Moneda", "TC", "Base ₡", "IVA ₡", "IVA acreditable ₡", "Gasto aplicable ₡", "Condición", "Actividad", "Respaldo"],
+        rows,
+        {"Base ₡": _q2(tot["base"]), "IVA ₡": _q2(tot["iva"]), "IVA acreditable ₡": _q2(tot["cred"]), "Gasto aplicable ₡": _q2(tot["apl"])},
+    )
+
+
+def tax_summary(db: Session, tenant, month: str) -> dict:
+    """Panel tributario del mes (GET /accounting/tax-summary). Sin costos ni margenes (D10)."""
+    from datetime import timedelta
+
+    from ..models import EInvoiceDocument, FiscalCredential, ReceivedDocument, ReceptionMailbox, ReceptionResponse
+    from . import hacienda_config as hc
+    from .reception_calc import business_days_left
+
+    y, m = (int(x) for x in month.split("-"))
+    a = date(y, m, 1)
+    b = (a.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    tid = tenant.id
+    x = iva_breakdown(db, tid, a, b, (tenant.settings or {}).get("iva_prorrata_pct"))
+    sin_confirmar = x.pop("sin_confirmar")
+    today = date.today()
+    del_mes = db.scalars(select(ReceivedDocument).where(ReceivedDocument.tenant_id == tid, ReceivedDocument.issue_date >= a, ReceivedDocument.issue_date <= b)).all()
+    pend = db.scalars(select(ReceivedDocument).where(ReceivedDocument.tenant_id == tid, ReceivedDocument.status == "por_revisar")).all()
+    pronto, vencidas = [], 0
+    for d in sorted(pend, key=lambda d: (d.deadline or date.max)):
+        left = business_days_left(today, d.deadline)
+        if left is not None and left < 0:
+            vencidas += 1
+        if left is not None and left <= 2:
+            pronto.append({"id": d.id, "issuer_name": d.issuer_name, "total": d.total, "currency": d.currency, "deadline": d.deadline, "business_days_left": left})
+    last_ids = select(func.max(ReceptionResponse.id)).where(ReceptionResponse.tenant_id == tid).group_by(ReceptionResponse.received_document_id)
+    last = db.scalars(select(ReceptionResponse).where(ReceptionResponse.id.in_(last_ids))).all()
+    docs_by_id = {d.id: d for d in db.scalars(select(ReceivedDocument).where(ReceivedDocument.id.in_([r.received_document_id for r in last] or [0])))}
+    rech = [
+        {"id": r.received_document_id, "issuer_name": docs_by_id[r.received_document_id].issuer_name if r.received_document_id in docs_by_id else None, "detail": r.hacienda_detail or r.last_error}
+        for r in last
+        if r.status == "rechazado"
+    ]
+    emit_docs = db.scalars(select(EInvoiceDocument).where(EInvoiceDocument.tenant_id == tid, EInvoiceDocument.mode.in_(("pruebas", "produccion")))).all()
+    prof = hc.profile(db, tenant)
+    env = prof.environment if prof.environment in ("pruebas", "produccion") else "pruebas"
+    cred = db.scalar(select(FiscalCredential).where(FiscalCredential.tenant_id == tid, FiscalCredential.environment == env))
+    mbox = db.scalar(select(ReceptionMailbox).where(ReceptionMailbox.tenant_id == tid).order_by(ReceptionMailbox.last_run_at.desc().nulls_last()))
+    return {
+        "month": f"{y:04d}-{m:02d}",
+        "iva": x,
+        "credito_por_confirmar": sin_confirmar,
+        "recepciones": {
+            "recibidas": len(del_mes),
+            "por_revisar": len(pend),
+            "vencen_pronto": pronto[:30],
+            "vencidas": vencidas,
+            "respondidas": sum(1 for d in del_mes if d.status in ("respondido", "historico")),
+            "total_crc": _q2(sum((_sign(d) * _to_crc(d.total, d.currency, d.fx_rate) for d in del_mes if d.status not in ("descartado", "ajeno", "invalido") and d.action != "rechazada"), Decimal(0))),
+        },
+        "mensajes": {"rechazados": rech[:30], "errores": sum(1 for r in last if r.status == "error"), "por_enviar": sum(1 for r in last if r.status == "por_enviar")},
+        "emision": {
+            "pendientes": sum(1 for d in emit_docs if d.status in ("por_enviar", "enviando", "enviado", "procesando")),
+            "rechazadas": sum(1 for d in emit_docs if d.status == "rechazada"),
+            "aceptadas": sum(1 for d in emit_docs if d.status == "aceptada"),
+        },
+        "hacienda": {
+            "mode": hc.hacienda_mode(db, tenant),
+            "environment": prof.environment,
+            "cert_not_after": cred.cert_not_after if cred else None,
+            "cert_days_left": hc.cert_days_left(cred),
+            "imap_last_run_at": mbox.last_run_at if mbox else None,
+        },
+    }
 
 
 def planilla(db: Session, tid: int, a: date, b: date) -> Report:
@@ -589,6 +880,7 @@ REPORTS = {
     "recepciones": recepciones,
     "propinas": propinas,
     "d151": d151,
+    "compras": compras,
     "planilla": planilla,
     "conciliacion": conciliacion,
     "rentabilidad": rentabilidad,
@@ -602,14 +894,15 @@ CATALOG = [
     ("cierre", "Cierre diario", "Cobros por día y método"),
     ("transacciones", "Transacciones", "Cada pago con método, tipo y referencia"),
     ("gastos", "Gastos", "Egresos registrados en contabilidad"),
-    ("iva", "IVA", "Débito, crédito y prorrata · borrador D-104"),
+    ("iva", "IVA", "Débito, crédito (de facturas electrónicas y de gastos sin XML) y prorrata · borrador D-104 en colones"),
     ("inventario", "Inventario", "Existencias por ubicación y alertas"),
     ("productos", "Venta de productos", "Ranking de productos y servicios"),
     ("movimientos", "Movimientos", "Ledger de inventario"),
     ("ordenes", "Órdenes", "Pedidos de la tienda y del punto de venta"),
-    ("recepciones", "Recepciones", "Facturas de proveedores recibidas y su respuesta"),
+    ("recepciones", "Recepciones", "Comprobantes de proveedores recibidos, su respuesta y el estado ante Hacienda"),
     ("propinas", "Propinas", "Propinas cobradas por pago"),
-    ("d151", "D-151", "Borrador anual: clientes, proveedores y gastos específicos sobre el umbral"),
+    ("d151", "D-270 / D-151", "Operaciones sin comprobante electrónico (borrador): compras y gastos específicos"),
+    ("compras", "Libro de compras", "Comprobantes aceptados y gastos con proveedor, con su respaldo"),
     ("planilla", "Planilla", "Salarios, cargas sociales e impuesto por colaborador"),
     ("conciliacion", "Conciliación bancaria", "Movimientos del banco y con qué se casaron"),
     ("rentabilidad", "Rentabilidad por proyecto", "Cuánto dejó cada instalación: venta contra costo real"),
@@ -624,7 +917,7 @@ def to_xlsx(rep: Report, a: date, b: date, tenant_name: str) -> bytes:
 
     wb = Workbook()
     ws = wb.active
-    ws.title = rep.title[:30]
+    ws.title = re.sub(r"[\[\]:*?/\\]", "-", rep.title)[:30]  # Excel no admite []:*?/\ en el nombre de la hoja
     ws["A1"] = f"{tenant_name} · {rep.title}"
     ws["A1"].font = Font(bold=True, size=14)
     ws["A2"] = f"Periodo {a.isoformat()} a {b.isoformat()}"

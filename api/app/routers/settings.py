@@ -400,43 +400,50 @@ class InboxIn(BaseModel):
     folder: str = Field("INBOX", max_length=120)
 
 
-def _inbox_out(t: Tenant) -> dict:
-    from ..services.inbox import config
+def _inbox_out(t: Tenant, db: Session | None = None) -> dict:
+    from ..services.inbox import config, env_applies
 
     c = config(t)
-    return {k: v for k, v in c.items() if k != "password_enc"} | {"has_password": bool(c.get("password_enc"))}
+    out = {k: v for k, v in c.items() if k != "password_enc"} | {"has_password": bool(c.get("password_enc"))}
+    src = "env" if db is not None and env_applies(db, t) else "ajustes"
+    out["source"] = src
+    if src == "env":  # configurado en el servidor (RECEPTION_IMAP_*): la pantalla lo muestra en solo lectura
+        out["env_mailbox"] = f"{cfg.reception_imap_user}@{cfg.reception_imap_host}/{cfg.reception_imap_folder or 'INBOX'}"
+    return out
 
 
 @router.get("/inbox")
-def inbox_get(p: Principal = Depends(require("settings", "ver"))):
-    return _inbox_out(p.tenant)
+def inbox_get(p: Principal = Depends(require("settings", "ver")), db: Session = Depends(get_db)):
+    return _inbox_out(p.tenant, db)
 
 
 @router.put("/inbox")
 def inbox_put(data: InboxIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
     from sqlalchemy.orm.attributes import flag_modified
 
-    from ..services.inbox import config
+    from ..services.inbox import config, encrypt_password
 
     cur = config(p.tenant)
     new = {**cur, **data.model_dump(exclude={"password"})}
     if data.password:
-        new["password_enc"] = encrypt(data.password)
+        new["password_enc"] = encrypt_password(p.tenant.id, data.password)  # FISCAL_KEYS (AES-GCM) si esta disponible
     st = dict(p.tenant.settings or {})
     st["inbox"] = new
     p.tenant.settings = st
     flag_modified(p.tenant, "settings")
     db.commit()
-    return _inbox_out(p.tenant)
+    return _inbox_out(p.tenant, db)
 
 
 @router.post("/inbox/run")
 def inbox_run(p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
     """Revisa la bandeja ahora (el worker lo hace cada 15 minutos si esta activa)."""
-    from ..services.inbox import poll
+    from ..services.inbox import MailboxBusy, poll
 
     try:
         return poll(db, p.tenant)
+    except MailboxBusy as e:
+        raise HTTPException(409, "Ya se está revisando el buzón") from e
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     except OSError as e:
