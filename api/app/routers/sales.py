@@ -664,6 +664,8 @@ def update_invoice(iid: int, data: DocumentIn, p: Principal = Depends(require("s
     if chk.exceeds:
         raise HTTPException(422, f"{chk.message} Hacé una cotización para que un administrador apruebe el descuento.")
     svc.apply_document(db, inv, data, InvoiceLine, p.tenant.id)
+    # las lineas cambiaron: el inventario sigue a la factura (antes se quedaba con las lineas viejas)
+    invsvc.reconcile_invoice(db, inv, p.user.id, reason="factura editada")
     # con pagos o emitida ya respondio 409 arriba: el vendedor (y su comision) no se mueve en una factura cobrada
     _set_seller(db, p, inv, data, "invoice")
     audit(db, p.tenant.id, p.user.id, "update", "invoice", inv.id, ip=p.ip)

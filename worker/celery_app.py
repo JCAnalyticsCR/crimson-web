@@ -261,6 +261,47 @@ def stale_followups() -> int:
     return n
 
 
+@celery.task(name="inventory.health_check")
+def inventory_health_check() -> dict:
+    """Cada manana: documentos contra kardex. Si algo descuadra, correo a los administradores con la lista."""
+    import html
+
+    from sqlalchemy import select
+
+    from app.core.db import SessionLocal
+    from app.models import Tenant
+    from app.services import inventory_health
+    from app.services.mail import notify_roles
+
+    out = {}
+    with SessionLocal() as db:
+        for t in db.scalars(select(Tenant).where(Tenant.active)):
+            try:
+                r = inventory_health.check(db, t.id)
+            except Exception:  # noqa: BLE001  una empresa con datos raros no frena a las demas
+                log.exception("salud del inventario (empresa %s)", t.id)
+                continue
+            out[t.id] = r["total"]
+            if not r["total"]:
+                continue
+            filas = "".join(
+                f"<li><b>{html.escape(i['doc'])}</b> · {html.escape(i['product'])}: {html.escape(i['detail'])}</li>" for i in r["issues"][:25]
+            )
+            mas = f"<p>… y {r['total'] - 25} más.</p>" if r["total"] > 25 else ""
+            notify_roles(
+                db,
+                t,
+                ("admin",),
+                f"Inventario: {r['total']} descuadre(s) para revisar",
+                f"<p>La revisión de esta mañana encontró diferencias entre los documentos y el kardex:</p><ul>{filas}</ul>{mas}"
+                "<p>Se corrigen desde Inventarios → Salud del inventario.</p>",
+                "inventory",
+                0,
+            )
+            db.commit()
+    return out
+
+
 @celery.task(name="inventory.low_stock_requests")
 def low_stock_requests() -> int:
     """Inventario bajo el minimo -> solicitud de compra en borrador (los proveedores no dan credito)."""
@@ -477,6 +518,7 @@ celery.conf.beat_schedule = {
     "expire-support": {"task": "support.expire_grants", "schedule": crontab(minute=5)},
     "stale-followups": {"task": "crm.stale_followups", "schedule": crontab(hour=7, minute=30, day_of_week="mon-fri")},
     "low-stock-requests": {"task": "inventory.low_stock_requests", "schedule": crontab(hour=6, minute=45)},
+    "inventory-health": {"task": "inventory.health_check", "schedule": crontab(hour=6, minute=50)},
     # cada 5 min: las reservas de pago con tarjeta duran 30 min
     "expire-reservations": {"task": "inventory.expire_reservations", "schedule": crontab(minute="*/5")},
     "back-in-stock": {"task": "store.back_in_stock", "schedule": crontab(minute=25)},

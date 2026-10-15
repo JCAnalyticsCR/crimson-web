@@ -1,0 +1,81 @@
+/* Salud del inventario: compara cada documento contra el kardex y lista discrepancias corregibles. */
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api } from "../../lib/api";
+import { useSession } from "../../app/session";
+import { Card, Empty, I, Icon, Loading } from "../../ui/components";
+
+type Issue = { kind: "negativo" | "factura" | "proyecto" | "pedido" | "pedido_sin_decidir"; ref_id: number; doc: string; product: string; detail: string; fixable: boolean };
+type HealthData = { checked_at: string; days: number; total: number; counts: Record<string, number>; issues: Issue[] };
+
+const KIND_LABEL: Record<Issue["kind"], string> = {
+  negativo: "Existencias negativas", factura: "Facturas", proyecto: "Proyectos", pedido: "Pedidos web", pedido_sin_decidir: "Devoluciones sin decidir",
+};
+const KIND_ORDER: Issue["kind"][] = ["negativo", "factura", "proyecto", "pedido", "pedido_sin_decidir"];
+
+export default function Health() {
+  const { toast, allows } = useSession();
+  const [data, setData] = useState<HealthData | null>(null);
+  const [busy, setBusy] = useState<number | null>(null);
+
+  /* toast cambia de identidad cada vez que se muestra un aviso: como dependencia, un error al cargar volveria a
+     disparar la carga sin fin (mismo cuidado que SupplierCatalog). */
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+  const load = useCallback(() => {
+    setData(null);
+    api<HealthData>("/stock/health").then(setData).catch((e) => toastRef.current(e instanceof Error ? e.message : "Error", "bad"));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const fix = async (issue: Issue) => {
+    setBusy(issue.ref_id);
+    try {
+      const r = await api<{ movimientos: number }>("/stock/health/fix", { method: "POST", json: { kind: issue.kind, ref_id: issue.ref_id } });
+      toast(`Corregido: ${r.movimientos} movimiento${r.movimientos !== 1 ? "s" : ""} en el kardex`);
+      setBusy(null);
+      load();
+    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); setBusy(null); }
+  };
+
+  const fmtChecked = (s: string) => new Date(s).toLocaleString("es-CR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  if (data === null) return <Loading />;
+
+  const sorted = [...data.issues].sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
+
+  return (
+    <Card flush>
+      <div style={{ padding: "16px 20px 4px", display: "flex", gap: 12, flexWrap: "wrap", alignItems: "baseline" }}>
+        <span className="muted" style={{ fontSize: 13 }}>Revisado {fmtChecked(data.checked_at)} · últimos {data.days} días</span>
+        <button className="btn btn--ghost btn--sm" onClick={load}><Icon d={I.refresh} />Revisar de nuevo</button>
+      </div>
+      <p className="muted" style={{ fontSize: 12.5, margin: "0 20px 8px" }}>Compara lo que cada documento debió mover con lo que registró el kardex; corregir escribe solo la diferencia, con documento y usuario.</p>
+      {data.total === 0
+        ? <Empty title="Todo cuadra" hint="Cada factura, proyecto y pedido web coincide con el kardex y no hay existencias negativas." />
+        : <>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "0 20px 12px" }}>
+              {KIND_ORDER.filter((k) => (data.counts[k] ?? 0) > 0).map((k) => <span key={k} className="badge badge--warn">{KIND_LABEL[k]} · {data.counts[k]}</span>)}
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table className="table">
+                <thead><tr><th>Documento</th><th>Producto</th><th>Qué pasa</th><th /></tr></thead>
+                <tbody>{sorted.map((iss, i) => (
+                  <tr key={i}>
+                    <td className="mono" style={{ whiteSpace: "nowrap" }}>{iss.doc}</td>
+                    <td>{iss.product}</td>
+                    <td>{iss.detail}</td>
+                    <td className="num" style={{ whiteSpace: "nowrap" }}>
+                      {iss.fixable && allows("inventory.editar")
+                        ? <button className="btn btn--soft btn--sm" disabled={busy === iss.ref_id} onClick={() => fix(iss)}>{busy === iss.ref_id ? "Corrigiendo…" : "Corregir"}</button>
+                        : <span className="muted" style={{ fontSize: 12.5 }}>{iss.kind === "negativo" ? "Revisá con un conteo o un ajuste" : iss.kind === "pedido_sin_decidir" ? "Decidí en el pedido si volvió" : null}</span>}
+                    </td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </>
+      }
+    </Card>
+  );
+}

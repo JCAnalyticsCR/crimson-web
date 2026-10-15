@@ -104,51 +104,84 @@ def transfer(db: Session, tenant_id: int, user_id: int | None, product_id: int, 
     move(db, tenant_id, user_id, product_id, to_id, "transferencia_in", abs(quantity), ref, note)
 
 
-def deduct_for_invoice(db: Session, inv: Invoice, user_id: int | None) -> int:
-    """Descuenta cada linea de producto del inventario predeterminado. Sin inventario configurado: no hace nada.
-    Factura de un PROYECTO: no descuenta a ciegas, concilia (lo que las ordenes ya sacaron no vuelve a salir)."""
-    from . import project_stock
-
-    pr = project_stock.project_for_invoice(db, inv)
-    if pr is not None:
-        ids = {ln.product_id for ln in inv.lines if ln.product_id}
-        return len(project_stock.reconcile(db, pr, ids, user_id, reason="factura", invoice=inv))
-    w = default_warehouse(db, inv.tenant_id)
-    if not w:
-        return 0
-    n = 0
-    for ln in inv.lines:
-        if not ln.product_id:
-            continue
-        p = db.get(Product, ln.product_id)
-        if p and p.item_type == "producto":
-            move(db, inv.tenant_id, user_id, p.id, w.id, "venta", -Decimal(str(ln.quantity)), inv.number, None, None, inv.id)
-            n += 1
-    return n
-
-
-def restock_for_void(db: Session, inv: Invoice, user_id: int | None) -> int:
-    """Devuelve a bodega lo que la factura saco y todavia no volvio. Idempotente: anular dos veces (o la NC de Hacienda
-    despues de una anulacion) no devuelve dos veces. Factura de un proyecto: concilia, porque lo ya INSTALADO esta en
-    el cliente y no vuelve a bodega aunque se anule la factura."""
-    from . import project_stock
-
-    pr = project_stock.project_for_invoice(db, inv)
-    if pr is not None:
-        ids = {ln.product_id for ln in inv.lines if ln.product_id}
-        return len(project_stock.reconcile(db, pr, ids, user_id, reason="factura anulada", invoice=inv))
-    net = db.execute(
-        select(StockMovement.product_id, StockMovement.warehouse_id, func.sum(StockMovement.quantity))
+def _invoice_net(db: Session, inv: Invoice) -> dict[tuple[int, int], Decimal]:
+    """Lo que el kardex ya movio por esta factura, por (producto, bodega). Negativo = salio."""
+    rows = db.execute(
+        select(StockMovement.product_id, StockMovement.warehouse_id, func.coalesce(func.sum(StockMovement.quantity), 0))
         .where(StockMovement.tenant_id == inv.tenant_id, StockMovement.invoice_id == inv.id)
         .group_by(StockMovement.product_id, StockMovement.warehouse_id)
     ).all()
+    return {(pid, wid): Decimal(str(q or 0)) for pid, wid, q in rows}
+
+
+def _home_warehouse(db: Session, p: Product) -> Warehouse | None:
+    """Bodega de origen del producto si esta activa; si no, la predeterminada (igual que la tienda)."""
+    if p.warehouse_id:
+        w = db.get(Warehouse, p.warehouse_id)
+        if w and w.active and w.tenant_id == p.tenant_id:
+            return w
+    return default_warehouse(db, p.tenant_id)
+
+
+def reconcile_invoice(db: Session, inv: Invoice, user_id: int | None, *, reason: str = "factura") -> int:
+    """Lleva el kardex de una factura a lo que dicen sus lineas HOY: crearla saca, editarla saca o devuelve la
+    diferencia, anularla devuelve lo que falte. Idempotente: llamarla dos veces no mueve nada la segunda.
+
+    - Factura de un PROYECTO: concilia el proyecto (lo ya instalado no vuelve a bodega aunque se anule).
+    - Factura de un PEDIDO WEB: el pedido manda (store_inventory); aca solo se devuelve si se anula.
+    """
+    from ..models import Order
+    from . import project_stock
+
+    net = _invoice_net(db, inv)
+    pr = project_stock.project_for_invoice(db, inv)
+    if pr is not None:
+        ids = {ln.product_id for ln in inv.lines if ln.product_id} | {pid for pid, _ in net}
+        return len(project_stock.reconcile(db, pr, ids, user_id, reason=reason, invoice=inv))
+    voided = inv.status == "anulada"
+    if db.scalar(select(Order.id).where(Order.tenant_id == inv.tenant_id, Order.invoice_id == inv.id)) is not None and not voided:
+        return 0
+    target: dict[int, Decimal] = {}
+    if not voided:
+        for ln in inv.lines:
+            if ln.product_id:
+                target[ln.product_id] = target.get(ln.product_id, Decimal(0)) + Decimal(str(ln.quantity))
+    out: dict[int, Decimal] = {}
+    for (pid, _wid), q in net.items():
+        out[pid] = out.get(pid, Decimal(0)) - q
     n = 0
-    for product_id, warehouse_id, qty in net:
-        q = Decimal(str(qty or 0))
-        if q < 0:
-            move(db, inv.tenant_id, user_id, product_id, warehouse_id, "devolucion", -q, inv.number, "anulacion", None, inv.id)
+    for pid in sorted(set(target) | set(out)):
+        p = db.get(Product, pid)
+        if p is None or p.tenant_id != inv.tenant_id or p.item_type != "producto":
+            continue
+        delta = target.get(pid, Decimal(0)) - out.get(pid, Decimal(0))  # > 0 falta sacar; < 0 sobra afuera
+        if delta > 0:
+            w = _home_warehouse(db, p)
+            if w is None:
+                continue  # sin bodega configurada: no hace nada (como siempre)
+            move(db, inv.tenant_id, user_id, pid, w.id, "venta", -delta, inv.number, None if reason == "factura" else reason, None, inv.id)
             n += 1
+        elif delta < 0:
+            back = -delta
+            # vuelve a la bodega de donde salio (la que mas saco primero)
+            for (q_pid, wid), q in sorted(net.items(), key=lambda kv: kv[1]):
+                if q_pid != pid or q >= 0 or back <= 0:
+                    continue
+                take = min(back, -q)
+                move(db, inv.tenant_id, user_id, pid, wid, "devolucion", take, inv.number, "anulacion" if voided else reason, None, inv.id)
+                back -= take
+                n += 1
     return n
+
+
+def deduct_for_invoice(db: Session, inv: Invoice, user_id: int | None) -> int:
+    """Al crear una factura (ventas, POS, recurrencias, API publica): concilia su inventario."""
+    return reconcile_invoice(db, inv, user_id)
+
+
+def restock_for_void(db: Session, inv: Invoice, user_id: int | None) -> int:
+    """Al anular (o al aceptarse la NC): devuelve lo que la factura saco y todavia no volvio. Idempotente."""
+    return reconcile_invoice(db, inv, user_id, reason="factura anulada")
 
 
 def low_stock(db: Session, tenant_id: int) -> list[dict]:

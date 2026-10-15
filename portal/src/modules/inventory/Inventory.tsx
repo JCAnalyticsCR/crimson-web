@@ -10,6 +10,7 @@ import AuthLink from "../../ui/AuthLink";
 import WebInventory from "./WebInventory";
 import SupplierCatalog from "./SupplierCatalog";
 import Kardex, { type KardexProduct } from "./Kardex";
+import Health from "./Health";
 
 type Wh = { id: number; name: string; location: string | null; is_default: boolean; active: boolean };
 type Level = { product_id: number; warehouse_id: number; quantity: string; code: string; name: string; min_stock: number; warehouse: string; committed?: string; available?: string; serialized?: boolean };
@@ -55,6 +56,7 @@ export default function Inventory() {
   const [filter, setFilter] = useState<number | "">("");
   const [kardexProduct, setKardexProduct] = useState<KardexProduct | null>(null);
   const [modal, setModal] = useState<"move" | "transfer" | "wh" | null>(null);
+  const [healthCount, setHealthCount] = useState(0);
   const emptyMv = { product_id: "", warehouse_id: "", kind: "entrada", quantity: "1", reference: "", note: "", movement_type: "", project_id: "", serial: "", location: "", custodian: "", owner: "", voucher_media: "" };
   const [mv, setMv] = useState(emptyMv);
   const [mvMore, setMvMore] = useState(false);
@@ -73,6 +75,7 @@ export default function Inventory() {
   useEffect(load, [filter]);
   // proyectos para ligar reservas y movimientos (bodega puede no tener acceso a proyectos: queda vacio)
   useEffect(() => { if (allows("projects.ver")) api<ProjectLite[]>("/projects?status=activos").then(setProjects).catch(() => setProjects([])); }, [allows]);
+  useEffect(() => { api<{ total: number }>("/stock/health").then((r) => setHealthCount(r.total)).catch(() => {}); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async () => {
     try {
@@ -103,7 +106,7 @@ export default function Inventory() {
       </div>
 
       <div className="tabs" style={{ alignSelf: "flex-start" }} role="tablist">
-        {[["existencias", "Existencias"], ["movimientos", "Movimientos"], ["reservas", "Reservas"], ["seriales", "Seriales"], ...(allows("catalog.precios") ? [["web", "Inventario web"]] : []), ...(allows("catalog.ver") ? [["proveedores", "Proveedores"]] : [])].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "is-active" : ""} onClick={() => setTab(k)}>{l}</button>)}
+        {[["existencias", "Existencias"], ["movimientos", "Movimientos"], ["salud", healthCount > 0 ? `Salud · ${healthCount}` : "Salud"], ["reservas", "Reservas"], ["seriales", "Seriales"], ...(allows("catalog.precios") ? [["web", "Inventario web"]] : []), ...(allows("catalog.ver") ? [["proveedores", "Proveedores"]] : [])].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "is-active" : ""} onClick={() => setTab(k)}>{l}</button>)}
       </div>
 
       {tab === "existencias" && <>
@@ -138,6 +141,7 @@ export default function Inventory() {
       </>}
 
       {tab === "movimientos" && <Kardex initProduct={kardexProduct} whs={whs} />}
+      {tab === "salud" && <Health />}
       {tab === "reservas" && <Reservations products={products} whs={whs} projects={projects} onChange={load} />}
       {tab === "seriales" && <Units products={products} whs={whs} projects={projects} onChange={load} />}
       {/* la tienda es precio: el tecnico (inventory.ver sin precios) no tiene esta pestaña */}

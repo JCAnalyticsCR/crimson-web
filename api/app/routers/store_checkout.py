@@ -26,6 +26,7 @@ from ..core.ratelimit import checkout_global_limiter, order_lookup_limiter, orde
 from ..models import Media, Order, OrderLine, Tenant
 from ..providers.payments import key_mode
 from ..services import cr_geo, onvo, store_inventory
+from ..services import inventory as invsvc
 from ..services import store_orders as so
 from ..services.documents import audit
 from ..services.sequences import next_number
@@ -426,6 +427,7 @@ def _staff_out(db: Session, o: Order, p: Principal | None = None) -> dict:
     out["next"] = so.next_states(o)
     out["track_url"] = so.track_url(db.get(Tenant, o.tenant_id), o) if o.channel == "tienda" else None
     out["onvo_refundable"] = onvo.order_refundable(o)
+    out["stock_out"] = sum(store_inventory.out_for_order(db, o).values(), Decimal(0))  # >0: cancelar/reembolsar pregunta si volvio
     out["customer_name"] = None
     if o.customer_id:
         from ..models import Customer
@@ -503,6 +505,9 @@ class StatusIn(BaseModel):
     payment_ref: str | None = Field(None, max_length=120)
     notify: bool = True
     refund_via_onvo: bool = False  # devuelve el dinero a la tarjeta por la API de ONVO (requiere sales.anular)
+    # cancelar o reembolsar un pedido que YA saco mercaderia: ¿volvio el producto? (obligatorio en ese caso)
+    restock: bool | None = None
+    restock_warehouse_id: int | None = None
 
 
 @router.post("/store-orders/{oid}/status")
@@ -513,6 +518,14 @@ def set_status(oid: int, data: StatusIn, p: Principal = Depends(require("sales",
     if data.payment_ref and data.status == "pagado":
         o.payment_ref = data.payment_ref
     note = data.note
+    afuera = store_inventory.out_for_order(db, o) if data.status in ("cancelado", "reembolsado") else {}
+    if afuera and data.restock is None:
+        raise HTTPException(422, "Este pedido ya sacó mercadería de bodega: indicá si el producto volvió (restock) y a qué bodega")
+    wh = None
+    if afuera and data.restock:
+        wh = data.restock_warehouse_id or (w.id if (w := invsvc.default_warehouse(db, p.tenant.id)) else None)
+        if not wh:
+            raise HTTPException(422, "No hay bodega configurada para recibir la devolución")
     if data.refund_via_onvo:
         if data.status != "reembolsado":
             raise HTTPException(422, "refund_via_onvo solo aplica al reembolsar")
@@ -543,6 +556,12 @@ def set_status(oid: int, data: StatusIn, p: Principal = Depends(require("sales",
         refund_amount=data.refund_amount,
         notify=data.notify,
     )
+    if afuera:
+        if data.restock:
+            store_inventory.return_for_order(db, o, wh, p.user.id)
+        else:
+            unidades = sum(afuera.values())
+            so._note(o, p.user.id, f"Producto no devuelto: {unidades.normalize():f} unidad(es) quedan fuera de bodega (decidido al pasar a «{so.STATUS_LABEL.get(o.status, o.status)}»)")
     db.commit()
     out = _staff_out(db, o, p)
     out["email_result"] = {"to": mail.to, "status": mail.status, "error": mail.error} if mail else None

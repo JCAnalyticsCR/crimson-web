@@ -504,6 +504,43 @@ def release_for_order(db: Session, o: Order, note: str | None = None, user_id: i
     return n
 
 
+def out_for_order(db: Session, o: Order) -> dict[int, Decimal]:
+    """Lo que salio de bodega por este pedido y no ha vuelto (por producto, solo lo positivo)."""
+    return {pid: q for pid, q in _moved(db, o).items() if q > 0}
+
+
+def return_for_order(db: Session, o: Order, warehouse_id: int, user_id: int | None = None, note: str | None = None) -> int:
+    """Cancelado o reembolsado DESPUES de despachar, con el producto devuelto: entra a la bodega elegida lo que el
+    pedido saco y no ha vuelto. Lleva el pedido y su factura, asi anular la factura despues no devuelve otra vez.
+    Idempotente."""
+    w = db.get(Warehouse, warehouse_id)
+    if not w or w.tenant_id != o.tenant_id or not w.active:
+        from fastapi import HTTPException
+
+        raise HTTPException(422, "Bodega no encontrada")
+    n = 0
+    for pid, q in out_for_order(db, o).items():
+        invsvc.move(
+            db,
+            o.tenant_id,
+            user_id,
+            pid,
+            w.id,
+            "devolucion",
+            q,
+            o.number,
+            note or f"Pedido {o.number}: producto devuelto por el cliente",
+            None,
+            o.invoice_id,
+            movement_type="devolucion_cliente",
+            order_id=o.id,
+        )
+        n += 1
+    if n:
+        audit(db, o.tenant_id, user_id, "return", "order", o.id, {"movimientos": n, "bodega": w.id})
+    return n
+
+
 def _fallback_wh(db: Session, p: Product) -> int | None:
     if p.warehouse_id:
         w = db.get(Warehouse, p.warehouse_id)

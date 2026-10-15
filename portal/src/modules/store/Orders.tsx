@@ -22,6 +22,7 @@ type Order = {
   proofs: Proof[]; expires_at: string | null; lines: { id: number; name: string; quantity: string; unit_price: string; total: string }[];
   emails?: Mail[]; next?: string[]; track_url?: string | null; email_result?: { to: string; status: string; error: string | null } | null;
   onvo_refundable?: boolean;
+  stock_out?: string | number;
   /* la factura del pedido es del que mira (services/ownership.py); si no, se muestra el numero sin enlace */
   invoice_visible?: boolean | null;
 };
@@ -145,15 +146,30 @@ function Detail({ o, labels, onClose, onChange }: { o: Order; labels: Record<str
   const c = o.contact || {};
   const dv = o.delivery || {};
   const needNote = act === "cancelado" || (act === "nuevo" && o.status === "en_revision");
+  const needRestock = (act === "cancelado" || act === "reembolsado") && Number(o.stock_out) > 0;
+  const [restock, setRestock] = useState<boolean | null>(null);
+  const [restockWhId, setRestockWhId] = useState<number | "">("");
+  const [restockWhs, setRestockWhs] = useState<{ id: number; name: string; is_default: boolean }[]>([]);
+  useEffect(() => { setRestock(null); }, [act]);
+  useEffect(() => {
+    if (Number(o.stock_out) <= 0) return;
+    api<{ id: number; name: string; is_default: boolean; active: boolean }[]>("/warehouses").then((ws) => {
+      const active = ws.filter((w) => w.active);
+      setRestockWhs(active);
+      const def = active.find((w) => w.is_default);
+      if (def) setRestockWhId(def.id);
+    }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const run = async () => {
     if (!act) return;
     if (needNote && !note.trim()) { toast(act === "cancelado" ? "Escribí el motivo de la cancelación" : "Escribí qué falló en el comprobante", "bad"); return; }
+    if (needRestock && restock === null) { toast("Indicá si el producto volvió a bodega", "bad"); return; }
     setBusy(true);
     try {
       const r = await api<Order>(`/store-orders/${o.id}/status`, {
         method: "POST",
-        json: { status: act, note: note.trim() || null, notify, ...(act === "enviado" ? { tracking_number: guide, carrier } : {}), ...(act === "pagado" && ref ? { payment_ref: ref } : {}), ...(act === "reembolsado" ? { refund_amount: refund.trim() || null, ...(canOnvoRefund ? { refund_via_onvo: refundViaOnvo } : {}) } : {}) },
+        json: { status: act, note: note.trim() || null, notify, ...(act === "enviado" ? { tracking_number: guide, carrier } : {}), ...(act === "pagado" && ref ? { payment_ref: ref } : {}), ...(act === "reembolsado" ? { refund_amount: refund.trim() || null, ...(canOnvoRefund ? { refund_via_onvo: refundViaOnvo } : {}) } : {}), ...(needRestock ? { restock: restock as boolean, ...(restock && restockWhId !== "" ? { restock_warehouse_id: restockWhId } : {}) } : {}) },
       });
       const m = r.email_result;
       toast(`${labels[act] || act}${m ? ` · correo al cliente ${MAIL[m.status] || m.status}` : notify ? " · sin correo del cliente" : ""}`, m && m.status !== "enviado" ? "bad" : undefined);
@@ -226,9 +242,17 @@ function Detail({ o, labels, onClose, onChange }: { o: Order; labels: Record<str
                   {act === "reembolsado" && <><Field label={`Monto (${o.currency})`} hint={canOnvoRefund && refundViaOnvo ? "Monto a devolver por ONVO (vacío = total)." : "Solo registro: el dinero se devuelve por el banco o por ONVO."}><input className="input input--mono" value={refund} onChange={(e) => setRefund(e.target.value)} /></Field>{canOnvoRefund && <label style={{ fontSize: 12.5, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={refundViaOnvo} onChange={(e) => setRefundViaOnvo(e.target.checked)} />Devolver el dinero por ONVO a la tarjeta del cliente</label>}</>}
                   <Field label={needNote ? (act === "cancelado" ? "Motivo (lo ve el cliente)" : "Qué falló (lo ve el cliente)") : "Nota (opcional)"}><input className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} /></Field>
                 </div>
+                {needRestock && (
+                  <div className="wo-act__row" style={{ flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+                    <span className="meta">¿Volvió el producto a bodega? (salieron {Number(o.stock_out)} unidades)</span>
+                    <label style={{ fontSize: 12.5, display: "flex", gap: 6, alignItems: "center" }}><input type="radio" name={`restock-${o.id}`} checked={restock === true} onChange={() => setRestock(true)} />Sí, entra a bodega</label>
+                    {restock === true && <select className="select" style={{ marginLeft: 20 }} value={restockWhId} onChange={(e) => setRestockWhId(Number(e.target.value))}>{restockWhs.map((w) => <option key={w.id} value={w.id}>{w.name}{w.is_default ? " · predeterminada" : ""}</option>)}</select>}
+                    <label style={{ fontSize: 12.5, display: "flex", gap: 6, alignItems: "center" }}><input type="radio" name={`restock-${o.id}`} checked={restock === false} onChange={() => setRestock(false)} />No, queda fuera (se registra en el historial)</label>
+                  </div>
+                )}
                 <div className="wo-act__row" style={{ justifyContent: "space-between" }}>
                   <label style={{ fontSize: 12.5, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />Avisar al cliente por correo</label>
-                  <button className="btn btn--crimson btn--sm" onClick={run} disabled={busy}><Icon d={I.check} />{busy ? "Guardando…" : ACTION[act] || "Aplicar"}</button>
+                  <button className="btn btn--crimson btn--sm" onClick={run} disabled={busy || (needRestock && restock === null)}><Icon d={I.check} />{busy ? "Guardando…" : ACTION[act] || "Aplicar"}</button>
                 </div>
               </>
             )}
