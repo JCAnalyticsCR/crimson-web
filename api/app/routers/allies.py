@@ -355,7 +355,7 @@ def remove_ally(aid: int, p: Principal = Depends(require("crm_pipeline", "editar
 
     if comsvc.has_live_movements(db, participation=a):
         raise HTTPException(409, "Tiene movimientos de comisión: anulalos primero en Comisiones")
-    comsvc.drop_participation_rules(db, a)  # su acuerdo economico (reglas por proyecto) se va con la participacion
+    comsvc.drop_participation_rules(db, a, p)  # su acuerdo economico (reglas por proyecto) se va con la participacion, en la bitacora
     n = len(a.requests)
     _log(o, p.user.full_name, f"Aliado {a.name} quitado" + (f" (con {n} solicitud(es) de costo)" if n else ""))
     audit(db, p.tenant.id, p.user.id, "ally_remove", "opportunity", o.id, {"ally_id": a.id, "name": a.name, "requests": n}, ip=p.ip)
@@ -418,6 +418,10 @@ def add_request(aid: int, data: CostRequestIn, p: Principal = Depends(require("c
     _apply_costs(db, p, r, data)
     a.requests.append(r)
     db.flush()
+    from ..services import commissions as comsvc
+
+    # nacer ya aprobado es aprobarlo (E5): con el proyecto completado se devenga su pago acordado
+    comsvc.on_cost_request_change(db, r, None, None)
     _log(o, p.user.full_name, f"Solicitud de costo a {a.name}: {r.what} · responsable {who.full_name if who else 'sin asignar'} · para {_fecha(r.due_date)}")
     audit(db, p.tenant.id, p.user.id, "cost_request", "opportunity", o.id, {"request_id": r.id, "ally": a.name}, ip=p.ip)
     if a.ally_company_id and a.visible_to_ally:

@@ -207,7 +207,7 @@ def test_aprobaciones_cotizacion_reserva_acceso_planilla_comision(client, auth, 
     pl = now["planillas_por_aprobar"]["items"][-1]
     assert pl["title"].startswith("Planilla mensual 01/10") and pl["to"] == "/planillas?tab=planillas"
     com = now["comisiones_por_aprobar"]["items"][-1]
-    assert com["to"] == "/comisiones?estado=pendiente" and com["amount"] is not None
+    assert com["to"] == "/comisiones?tab=bandeja" and com["amount"] is not None  # contrato economia 3: la bandeja agrupada
     # nada de montos en levantamientos, reservas ni accesos
     for k in ("levantamientos_por_revisar", "levantamientos_por_costear", "reservas_material", "accesos_portal"):
         assert all(i["amount"] is None for i in now[k]["items"]), k

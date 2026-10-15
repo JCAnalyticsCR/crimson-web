@@ -468,3 +468,142 @@ def test_economics_usd_y_aliados(client, auth, db_session):
     assert D(str(eco["commissions"])) == D("20000.00") and D(str(eco["profit_net"])) == D(str(eco["profit"])) - 20000
     deal = client.get(f"/projects/{pr['id']}").json()["allies"][0]["deal"]
     assert D(str(deal["pago_acordado_crc"])) == D("100000.00")
+
+
+# ---------- 20. revision: la NC tambien anula (falla E por el camino de Hacienda) ----------
+def test_factura_anulada_por_nota_de_credito(client, auth, db_session):
+    client.put("/settings", json={"einvoice_provider": "sandbox"})
+    vh, vid = _vendedora(client, db_session, auth)
+    _rule(client, user_id=vid, name="Vendedora", percent=5)
+    inv = _inv(client, vh)
+    _pay(client, inv["id"], 565000)
+    assert client.post(f"/invoices/{inv['id']}/emit").json()["status"] == "aceptada"
+    assert client.post(f"/invoices/{inv['id']}/void").status_code == 409  # aceptada: solo NC
+    assert client.post(f"/invoices/{inv['id']}/credit-note", json={"reason": "Error en cantidad"}).status_code == 200
+    f = next(x for x in _rows(client) if x["invoice_id"] == inv["id"])
+    assert f["status"] == "anulada" and "anulada" in f["void_reason"]
+    inv2 = _inv(client, vh)
+    _pay(client, inv2["id"], 565000)
+    pagada = next(x for x in _rows(client) if x["invoice_id"] == inv2["id"])
+    assert client.patch("/commissions", json={"ids": [pagada["id"]], "status": "pagada", "paid_ref": "Planilla oct-2026"}).status_code == 200
+    client.post(f"/invoices/{inv2['id']}/emit")
+    assert client.post(f"/invoices/{inv2['id']}/credit-note", json={"reason": "Devolución total"}).status_code == 200
+    rev = [x for x in _rows(client) if x["invoice_id"] == inv2["id"] and x["kind"] == "ajuste"]
+    assert len(rev) == 1 and rev[0]["reverses_id"] == pagada["id"] and D(str(rev[0]["amount"])) == D("-25000.00")
+
+
+# ---------- 21. revision: el concepto sobre utilidad no lleva el % (falla F por la descripcion) ----------
+def test_concepto_sobre_utilidad_sin_porcentaje(client, auth, db_session):
+    vh, vid = _vendedora(client, db_session, auth)
+    _rule(client, user_id=vid, name="Sobre utilidad", base="margen", percent=10)
+    prod = client.post("/products", json={"name": "Switch prueba", "code": "SW-UT", "price": 0}).json()
+    obj = db_session.get(Product, prod["id"])
+    obj.cost, obj.cost_currency = D("60000"), "CRC"
+    db_session.commit()
+    inv = _inv(client, lines=[{"product_id": prod["id"], "name": "Switch prueba", "quantity": 1, "unit_price": 100000, "tax_rate": 13}], seller_id=vid)
+    _pay(client, inv["id"], inv["total"])
+    mia = _rows(client, vh)[0]
+    assert mia["status"] == "pendiente" and D(str(mia["amount"])) == D("4000.00")
+    assert mia["percent"] is None and mia["base_amount"] is None and "%" not in mia["description"]
+    assert "%" not in str(client.get("/reports/comisiones").json()["rows"])
+    admin = _rows(client)[0]
+    assert D(str(admin["percent"])) == D("10.00")  # quien ve costos sigue viendo el % en su columna
+
+
+# ---------- 22. revision: aceptar dos veces, o aceptar, deshacer y convertir ----------
+def test_aceptacion_repetida_y_conversion_tras_deshacer(client, auth, db_session):
+    vh, vid = _vendedora(client, db_session, auth)
+    _rule(client, user_id=vid, name="Al aceptar", percent=5, trigger="cotizacion_aceptada")
+    q = _quote(client, [{"name": "Kit", "quantity": 1, "unit_price": 200000, "tax_rate": 13}], seller_id=vid)
+    client.post(f"/quotes/{q['id']}/send")
+    _acepta(client, q["id"])
+    _acepta(client, q["id"])  # doble envio o aceptacion de otra version: no duplica
+    assert len([f for f in _rows(client) if f["status"] != "anulada"]) == 1
+    q3 = _quote(client, [{"name": "Kit 3", "quantity": 1, "unit_price": 200000, "tax_rate": 13}], seller_id=vid)
+    client.post(f"/quotes/{q3['id']}/send")
+    _acepta(client, q3["id"])
+    _acepta(client, q3["id"], "pendiente")
+    assert client.post(f"/quotes/{q3['id']}/convert").status_code in (200, 201)
+    vivas = [f for f in _rows(client) if f["quote_id"] == q3["id"] and f["status"] != "anulada"]
+    assert len(vivas) == 1 and D(str(vivas[0]["amount"])) == D("10000.00")  # convertir es aceptacion implicita
+
+
+# ---------- 23. revision: la regla de alguien desactivado se puede apagar ----------
+def test_regla_de_vendedor_desactivado(client, auth, db_session):
+    from app.models import TenantUser
+
+    vh, vid = _vendedora(client, db_session, auth)
+    rid = _rule(client, user_id=vid, name="Vendedora", percent=5)
+    inv = _inv(client, vh)
+    _pay(client, inv["id"], 565000)
+    m = db_session.scalar(select(TenantUser).where(TenantUser.tenant_id == auth["tenant"]["id"], TenantUser.user_id == vid))
+    m.active = False
+    db_session.commit()
+    r = client.put(f"/commissions/rules/{rid}", json={"user_id": vid, "name": "Vendedora", "percent": 5, "active": False})
+    assert r.status_code == 200, r.text
+    db_session.expire_all()
+    assert db_session.get(CommissionRule, rid).active is False
+    # elegir a alguien inactivo para una regla nueva sigue sin poderse
+    assert client.post("/commissions/rules", json={"user_id": vid, "name": "Otra", "percent": 5}).status_code == 422
+
+
+# ---------- 24. revision: cerrar el proyecto facturandolo recalcula lo que espera la utilidad ----------
+def test_cierre_por_factura_recalcula_utilidad(client, auth, db_session):
+    vh, vid = _vendedora(client, db_session, auth)
+    _rule(client, user_id=vid, name="Utilidad", base="margen", percent=10)
+    q = _quote(client, [{"name": "Instalación", "quantity": 1, "unit_price": 1000000, "tax_rate": 13}], seller_id=vid)
+    pr = client.post(f"/quotes/{q['id']}/project", json={}).json()
+    inv = client.post(f"/quotes/{q['id']}/convert").json()
+    _pay(client, inv["id"], 1130000)
+    client.put(f"/projects/{pr['id']}", json={"name": pr["name"], "status": "en_curso", "cost_labor": 400000})
+    assert _rows(client)[0]["status"] == "en_espera"  # abierto: espera el cierre
+    r = client.post(f"/projects/{pr['id']}/invoice")
+    assert r.status_code == 201, r.text
+    f = _rows(client)[0]
+    assert f["status"] == "pendiente" and D(str(f["amount"])) == D("60000.00")
+
+
+# ---------- 25. revision: lectura no ve el precio del aliado; Aprobaciones con el libro v2 ----------
+def test_lectura_sin_precio_del_aliado_y_aprobaciones(client, auth, db_session):
+    tid = auth["tenant"]["id"]
+    ally = client.post("/allies", json={"name": "Aliado Uno S.A.", "tax_id": "3-101-000111"}).json()["id"]
+    o = client.post("/opportunities", json={"title": "Fibra norte", "customer_id": _cust(client)["id"], "amount": 200000}).json()
+    aid = client.post(f"/opportunities/{o['id']}/allies", json={"ally_company_id": ally, "role": "subcontratista"}).json()[0]["id"]
+    body = {"what": "Mano de obra de fibra", "status": "aprobado", "amount": 100000, "currency": "CRC"}
+    assert client.post(f"/opportunity-allies/{aid}/requests", json=body).status_code == 201
+    q = client.post(f"/opportunities/{o['id']}/quote", json={}).json()
+    lines = [{"name": "Fibra", "quantity": 1, "unit_price": 200000, "tax_rate": 13}]
+    assert client.put(f"/quotes/{q['quote_id']}", json={"customer_id": _cust(client)["id"], "lines": lines}).status_code == 200
+    pr = client.post(f"/quotes/{q['quote_id']}/project", json={}).json()
+    assert client.put(f"/projects/{pr['id']}", json={"name": pr["name"], "status": "terminado"}).status_code == 200
+    lh = interno(client, db_session, tid, "socio@ejemplo.com", "lectura")
+    ch = interno(client, db_session, tid, "contadora@ejemplo.com", "contabilidad")
+    pago_l = next(f for f in _rows(client, lh) if f["kind"] == "pago_acordado")
+    assert pago_l["amount"] is None and pago_l["base_amount"] is None and pago_l["amount_crc"] is None
+    assert D(str(client.get("/commissions", headers=lh).json()["totals"]["pendiente"])) == 0
+    pago_c = next(f for f in _rows(client, ch) if f["kind"] == "pago_acordado")
+    assert D(str(pago_c["amount"])) == D("100000.00") and pago_c["base_amount"] is None  # contabilidad lo paga
+    for path in ("/commissions/earnings", "/commissions/allies"):
+        assert client.get(path, params={"ally_company_id": ally}, headers=lh).status_code == 403, path
+        assert client.get(path, params={"ally_company_id": ally}, headers=ch).status_code == 403, path
+    assert not [r for r in client.get("/reports/comisiones", headers=lh).json()["rows"] if r[3] == "Pago acordado"]
+    assert [r for r in client.get("/reports/comisiones", headers=ch).json()["rows"] if r[3] == "Pago acordado"]
+    # Aprobaciones: el aliado por su nombre, el tipo del movimiento y la misma cuenta que Inicio
+    espera = Commission(tenant_id=tid, user_id=auth["user"]["id"], amount=0, earned_on=HOY, status="en_espera", base="margen", hold_reason="Falta el costo de: Algo")
+    db_session.add(espera)
+    db_session.commit()
+    sec = next(s for s in client.get("/approvals").json()["sections"] if s["key"] == "comisiones_por_aprobar")
+    item = next(i for i in sec["items"] if i["title"] == "Aliado Uno S.A.")
+    assert item["subtitle"].startswith("Pago acordado") and item["to"] == "/comisiones?tab=bandeja"
+    assert sec["count"] == client.get("/dashboard").json()["acciones_pendientes"]["comisiones_por_aprobar"]
+
+
+# ---------- 26. revision: listado paginado en SQL ----------
+def test_movimientos_paginados(client, auth, db_session):
+    tid = auth["tenant"]["id"]
+    for i in range(5):
+        db_session.add(Commission(tenant_id=tid, user_id=auth["user"]["id"], amount=1000, amount_crc=1000, fx=1, currency="CRC", earned_on=HOY - timedelta(days=i)))
+    db_session.commit()
+    r = client.get("/commissions", params={"limit": 2, "offset": 1}).json()
+    assert len(r["rows"]) == 2 and r["total_rows"] == 5 and D(str(r["totals"]["pendiente"])) == D("5000.00")
+    assert r["rows"][0]["earned_on"] == str(HOY - timedelta(days=1))

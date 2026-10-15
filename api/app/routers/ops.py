@@ -150,6 +150,10 @@ def void_nc(id_: int, data: VoidNcIn, p: Principal = Depends(require("sales", "a
     d = _doc(db, "invoices", id_, p.tenant.id, p)
     doc = esvc.credit_note(db, p.tenant, p.user.id, d, data.reason)
     inv.restock_for_void(db, d, p.user.id)
+    from ..services import commissions as comsvc
+
+    # la NC es el unico camino para anular una factura aceptada: lo devengado se anula o se revierte (falla E)
+    comsvc.on_invoice_void(db, d, p.user.id)
     db.commit()
     return {"status": doc.status, "clave": doc.clave, "consecutive": doc.consecutive}
 
@@ -508,7 +512,13 @@ def report(
         raise HTTPException(403, "Tu rol no puede exportar reportes")
     b = to or date.today()
     a = from_ or b.replace(day=1)
-    rep = fn(db, p.tenant.id, a, b)
+    if key == "comisiones":
+        from ..services.commissions import hides_payout
+
+        # el pago acordado al aliado es su precio (costo de Crimson): solo quien ve costos o quien lo aprueba y paga
+        rep = rp.comisiones(db, p.tenant.id, a, b, hide_payouts=hides_payout(p))
+    else:
+        rep = fn(db, p.tenant.id, a, b)
     if format == "xlsx":
         if not p.can("reports", "exportar"):
             raise HTTPException(403, "Sin permiso para exportar")

@@ -331,15 +331,20 @@ def _rule_amount(db: Session, rule, base_amount: Decimal, share: Decimal, curren
     return _amount_for(db, rule.fixed_amount, rule.fixed_currency, rule.percent, base_amount, share, currency)
 
 
+MARGIN_CONCEPT = "Comisión sobre la utilidad"
+
+
 def describe(rule, trigger: str, doc: str) -> str:
-    """Concepto legible del movimiento. Nunca lleva montos de base."""
+    """Concepto legible del movimiento. Nunca lleva montos de base. Sobre la utilidad tampoco lleva el %: con el monto
+    deja despejar la utilidad (monto / %) y el costo, y el concepto lo ven la vendedora, contabilidad y el aliado
+    (spec 6, falla F). El % queda en `percent`, que entry_out solo muestra a quien ve costos."""
     if _is_fixed(rule):
         que = "Monto fijo"
         sobre = {"cobro": " según lo cobrado", "cotizacion_aceptada": " al aceptar", "proyecto_completado": " al completar"}.get(trigger, "")
         return f"{que}{sobre} · {doc}"
     pct = _num(rule.percent)
     if rule.base == "margen":
-        return f"{pct} % de la utilidad · {doc}"
+        return f"{MARGIN_CONCEPT} · {doc}"
     if trigger == "cobro":
         return f"{pct} % de lo cobrado sin IVA · {doc}"
     if trigger == "cotizacion_aceptada":
@@ -482,7 +487,12 @@ def _sold_base(db: Session, inv: Invoice, beneficiary: str, uid, part) -> Decima
             *_ben_filter(beneficiary, uid, part),
         )
     ).all()
-    return sum((_base_sale_of(c) for c in rows if c.kind == "comision" or (c.source_key or "").startswith("dev:")), Decimal(0))
+    # las devoluciones del pago acordado (grupo pago:{rid}) llevan participation_id pero no son de esta comision: si
+    # contaran, una devolucion bajaria dos veces el tope y el siguiente cobro comisionaria de mas (falla B)
+    return sum(
+        (_base_sale_of(c) for c in rows if not c.cost_request_id and (c.kind == "comision" or (c.source_key or "").startswith("dev:"))),
+        Decimal(0),
+    )
 
 
 # ---------- 5.7 Base utilidad ----------
@@ -809,10 +819,15 @@ def _accrue_quote(db: Session, q: Quote, n: int, on: date, only_missing: bool) -
                 continue
         else:
             base_amount = base_sale
+        sk = f"cot:{q.id}:{key}:{n}"
+        if only_missing and _exists(db, q.tenant_id, sk):
+            # aceptar, deshacer (anulada) y convertir: la conversion es aceptacion implicita y devenga con clave nueva
+            m = db.scalar(select(func.count()).select_from(Commission).where(Commission.tenant_id == q.tenant_id, Commission.source_key.like(f"{sk}%")))
+            sk = f"{sk}:re{m}"
         c = _accrue(
             db,
             deal=deal,
-            source_key=f"cot:{q.id}:{key}:{n}",
+            source_key=sk,
             beneficiary=beneficiary,
             user_id=uid,
             participation=part,
@@ -835,10 +850,11 @@ def _accrue_quote(db: Session, q: Quote, n: int, on: date, only_missing: bool) -
 
 
 def on_quote_acceptance(db: Session, q: Quote, antes: str | None, despues: str, decided_on: date | None = None) -> list[Commission]:
-    """Desde sales.quote_acceptance. Cada aceptacion nueva (tras deshacer) tiene su propia clave."""
+    """Desde sales.quote_acceptance. Cada aceptacion nueva (tras deshacer) tiene su propia clave. Una "aceptada" sobre
+    otra ya aceptada (otra version, doble envio desde dos pestanas) solo completa lo que falte: nunca duplica."""
     if despues == "aceptada":
         db.flush()
-        return _accrue_quote(db, q, _accepted_count(db, q), decided_on or date.today(), only_missing=False)
+        return _accrue_quote(db, q, _accepted_count(db, q), decided_on or date.today(), only_missing=antes == "aceptada")
     if antes == "aceptada":
         motivo = "El cliente deshizo la aceptación" if despues == "pendiente" else "El cliente rechazó la cotización"
         reverse_or_void(db, _live(db, q.tenant_id, Commission.quote_id == q.id, Commission.trigger == "cotizacion_aceptada"), f"{motivo} · {q.number}")
@@ -1002,15 +1018,20 @@ def _accrue_project(db: Session, pr: Project) -> list[Commission]:
 def on_project_status(db: Session, pr: Project, antes: str | None) -> list[Commission]:
     """Desde projects.project_update, project_invoice y fieldwork (ultima OT). No usa permisos del que dispara:
     un tecnico que cierra la ultima OT tambien completa el proyecto."""
+    out: list[Commission] = []
     if pr.status in CLOSED and pr.completed_at is None:
         pr.completed_at = datetime.now(UTC)
         db.flush()
-        return _accrue_project(db, pr)
-    if pr.status == "cancelado" and antes != "cancelado":
+        out = _accrue_project(db, pr)
+    elif pr.status == "cancelado" and antes != "cancelado":
         reverse_or_void(
             db, _live(db, pr.tenant_id, Commission.project_id == pr.id, Commission.trigger == "proyecto_completado"), f"Proyecto {pr.number} cancelado"
         )
-    return []
+    if pr.status in CLOSED and antes not in CLOSED:
+        # lo cobrado con el proyecto abierto quedo en espera de su utilidad (HOLD_PROJECT): al cerrar se recalcula, lo
+        # cierre quien lo cierre (ultima OT, facturar el proyecto o editarlo)
+        on_project_costs(db, pr)
+    return out
 
 
 def on_project_costs(db: Session, pr: Project) -> int:
@@ -1107,14 +1128,23 @@ def on_cost_request_change(db: Session, r: AllyCostRequest, antes_status: str | 
         return []
     if not movs:
         return []
-    diff = d(r.amount) - sum((d(c.amount) for c in movs), Decimal(0))
-    if q2(diff) == 0:
-        return []
-    n = sum(1 for c in movs if (c.source_key or "").startswith(f"pago:{r.id}:dif:")) + 1
     base = movs[0]
     deal = _deal_of_entry(db, base) or (deal_of(db, project=pr) if pr is not None else None)
     if deal is None:
         return []
+    objetivo = d(r.amount)
+    if base.trigger == "cobro" and deal.invoice is not None:
+        # devengado al cobrar ("pago contra pago"): la diferencia solo cubre la parte ya cobrada; el resto sale en los
+        # cobros siguientes (_on_capture con el precio nuevo)
+        inv = deal.invoice
+        venta = convert(db, d(deal.project.price), deal.price_currency, inv.currency) if deal.project is not None else net_sale(inv)
+        cobrado = sum((_base_sale_of(c) for c in movs if c.kind == "pago_acordado" or (c.source_key or "").startswith("dev:")), Decimal(0))
+        if venta > 0:
+            objetivo = min(objetivo, objetivo * max(cobrado, Decimal(0)) / venta)
+    diff = objetivo - sum((d(c.amount) for c in movs), Decimal(0))
+    if q2(diff) == 0:
+        return []
+    n = sum(1 for c in movs if (c.source_key or "").startswith(f"pago:{r.id}:dif:")) + 1
     c = _accrue(
         db,
         deal=deal,
@@ -1149,15 +1179,23 @@ def has_live_movements(db: Session, *, request: AllyCostRequest | None = None, p
     return db.scalar(select(Commission.id).where(Commission.tenant_id == tid, Commission.status != "anulada", *w).limit(1)) is not None
 
 
-def drop_participation_rules(db: Session, part: AllyParticipation) -> None:
+def drop_participation_rules(db: Session, part: AllyParticipation, p=None) -> None:
     """Antes de quitar la participacion: sus reglas por proyecto se van con ella. Los movimientos anulados que las
-    usaron conservan la foto de la regla (terms) y sueltan el enlace."""
+    usaron conservan la foto de la regla (terms) y sueltan el enlace. Cada regla borrada queda en la bitacora (como
+    rule_delete): el acuerdo economico lo pacto administracion y quien quita al aliado puede ser la vendedora."""
+    from . import bitacora
+
     ids = list(db.scalars(select(CommissionRule.id).where(CommissionRule.tenant_id == part.tenant_id, CommissionRule.participation_id == part.id)))
     if not ids:
         return
     for c in db.scalars(select(Commission).where(Commission.tenant_id == part.tenant_id, Commission.rule_id.in_(ids))):
         c.rule_id = None
+    motivo = f"Se quitó el aliado {part.name} del negocio"
     for r in db.scalars(select(CommissionRule).where(CommissionRule.id.in_(ids))):
+        if p is not None:
+            bitacora.audit_change(db, p, "delete", "commission_rule", r.id, bitacora.snapshot(r), {}, reason=motivo, always=True)
+        else:
+            audit(db, r.tenant_id, None, "delete", "commission_rule", r.id, {"motivo": motivo})
         db.delete(r)
     db.flush()
 
@@ -1173,6 +1211,27 @@ def approvals_count(db: Session, p) -> int:
 
 def hides_margin(p, cfg: dict) -> bool:
     return not p.sees_costs and not cfg.get("show_margin_base")
+
+
+def is_payout(c: Commission) -> bool:
+    """Pago acordado al aliado o su ajuste (diferencia de precio, reverso, devolucion): su monto es el precio del
+    aliado, que para Crimson es costo directo."""
+    return c.kind == "pago_acordado" or bool(c.cost_request_id)
+
+
+def hides_payout(p) -> bool:
+    """El precio del aliado solo sale con catalog.costos (spec 0.9 y 08:07) o a quien lo aprueba y paga en la bandeja
+    (contabilidad). Lectura (socio, auditor) ve el resto del libro sin esos montos."""
+    return not p.sees_costs and not p.can("commissions", "aprobar")
+
+
+def safe_description(c: Commission, hide_margin: bool) -> str | None:
+    """Concepto sin el % de una comision sobre la utilidad (filas devengadas antes de que describe() lo quitara)."""
+    txt = c.description
+    if hide_margin and c.base == "margen" and (c.kind or "comision") == "comision" and txt and "%" in txt:
+        doc = (c.terms or {}).get("doc")
+        return f"{MARGIN_CONCEPT} · {doc}" if doc else MARGIN_CONCEPT
+    return txt
 
 
 class Names:
@@ -1206,6 +1265,10 @@ def can_touch(p, c: Commission) -> bool:
 def entry_out(db: Session, c: Commission, p, cfg: dict, names: Names | None = None) -> dict:
     names = names or Names(db)
     hide = c.base == "margen" and hides_margin(p, cfg)
+    payout = is_payout(c)
+    # en el pago acordado la base es el precio completo del aliado (costo de Crimson); el monto lo ve quien lo paga
+    hide_base = hide or (payout and not p.sees_costs)
+    hide_amount = payout and hides_payout(p)
     ben_name = names.user(c.user_id) if c.beneficiary == "vendedor" else names.ally(c.ally_company_id)
     return {
         "id": c.id,
@@ -1215,9 +1278,9 @@ def entry_out(db: Session, c: Commission, p, cfg: dict, names: Names | None = No
         "invoice_id": c.invoice_id,
         "base": c.base,
         # sobre margen, la base es la utilidad y el % la deja deducir: solo quien ve costos (o si la empresa lo habilita)
-        "base_amount": None if hide else c.base_amount,
+        "base_amount": None if hide_base else c.base_amount,
         "percent": None if hide else c.percent,
-        "amount": c.amount,
+        "amount": None if hide_amount else c.amount,
         "currency": c.currency,
         "earned_on": c.earned_on,
         "status": c.status,
@@ -1227,13 +1290,13 @@ def entry_out(db: Session, c: Commission, p, cfg: dict, names: Names | None = No
         "ally_company_id": c.ally_company_id,
         "kind": c.kind or "comision",
         "trigger": c.trigger or "cobro",
-        "description": c.description,
+        "description": safe_description(c, hide),
         "project_id": c.project_id,
         "project": names.get(Project, c.project_id, "number"),
         "quote_id": c.quote_id,
         "quote": names.get(Quote, c.quote_id, "number"),
         "participation_id": c.participation_id,
-        "amount_crc": q2(crc_of(db, c)),
+        "amount_crc": None if hide_amount else q2(crc_of(db, c)),
         "hold_reason": c.hold_reason,
         "approved_at": c.approved_at,
         "approved_by": names.user(c.approved_by),
@@ -1270,8 +1333,9 @@ def ally_entry_out(c: Commission, names: Names) -> dict:
 
 
 def _ally_description(c: Commission, names: Names) -> str:
-    """El concepto sin el numero de factura de Crimson: el aliado ve el proyecto (o nada)."""
-    txt = c.description or KIND_LABEL.get(c.kind or "", "")
+    """El concepto sin el numero de factura de Crimson: el aliado ve el proyecto (o nada). Sobre la utilidad, nunca
+    el % (con su monto deduciria la utilidad de Crimson)."""
+    txt = safe_description(c, True) or KIND_LABEL.get(c.kind or "", "")
     inv = names.get(Invoice, c.invoice_id, "number")
     if inv and inv in txt:
         pr = names.get(Project, c.project_id, "number")
@@ -1349,7 +1413,11 @@ def _estimate_margin_pct(db: Session, deal: Deal, tenant) -> Decimal:
 
     pr = deal.project
     if pr is not None and d(pr.price) > 0 and d(pr.cost_planned) > 0:
-        return (d(pr.price) - d(pr.cost_planned)) / d(pr.price)
+        from ..routers.projects import price_crc
+
+        venta = price_crc(db, pr)  # pr.price va en la moneda de la cotizacion; cost_planned en colones (falla J)
+        if venta > 0:
+            return (venta - d(pr.cost_planned)) / venta
     doc = deal.invoice or deal.quote
     if doc is not None:
         cost, faltan = _doc_cost(db, doc)
@@ -1513,12 +1581,13 @@ def _sentence(r: CommissionRule, hide: bool) -> str:
 
 
 # ---------- 5.10 Ganancias del aliado ----------
-def _company_parts(db: Session, tenant_id: int, cid: int) -> list[AllyParticipation]:
-    return list(
-        db.scalars(
-            select(AllyParticipation).where(AllyParticipation.tenant_id == tenant_id, AllyParticipation.ally_company_id == cid).order_by(AllyParticipation.id)
-        )
-    )
+def _company_parts(db: Session, tenant_id: int, cid: int, for_ally: bool = False) -> list[AllyParticipation]:
+    """Participaciones de la empresa. Para el portal del aliado (for_ally) solo las que Crimson le comparte
+    (visible_to_ally), igual que services/ally_scope.py (aliado_final R5, deny by default)."""
+    w = [AllyParticipation.tenant_id == tenant_id, AllyParticipation.ally_company_id == cid]
+    if for_ally:
+        w.append(AllyParticipation.visible_to_ally.is_(True))
+    return list(db.scalars(select(AllyParticipation).where(*w).order_by(AllyParticipation.id)))
 
 
 def _client_name(db: Session, pr: Project) -> str | None:
@@ -1572,9 +1641,10 @@ def _what_you_put(parts: list[AllyParticipation]) -> list[dict]:
     ]
 
 
-def ally_earnings(db: Session, tenant, ally_company_id: int, desde: date | None = None, hasta: date | None = None) -> dict:
+def ally_earnings(db: Session, tenant, ally_company_id: int, desde: date | None = None, hasta: date | None = None, for_ally: bool = False) -> dict:
     """Lo que recibe la empresa aliada: totales, 24 meses y cada proyecto en comun. Nunca el precio de venta de
-    Crimson, sus costos ni nada de otros aliados. Montos sin IVA, en colones."""
+    Crimson, sus costos ni nada de otros aliados. Montos sin IVA, en colones. for_ally (portal /aliado/ganancias):
+    solo proyectos compartidos y vivos; lo ya devengado de una participacion oculta sigue en los totales, sin fila."""
     cfg = settings_of(tenant)
     rules = _rules(db, tenant.id)
     names = Names(db)
@@ -1593,16 +1663,17 @@ def ally_earnings(db: Session, tenant, ally_company_id: int, desde: date | None 
     recibido = sum((crc_of(db, c) for c in movs if c.status == "pagada" and en_periodo(c.paid_on)), Decimal(0))
     por_recibir = sum((crc_of(db, c) for c in movs if c.status in ("pendiente", "aprobada")), Decimal(0))
     en_revision = sum(1 for c in movs if c.status == "en_espera")
-    parts = _company_parts(db, tenant.id, ally_company_id)
+    parts = _company_parts(db, tenant.id, ally_company_id, for_ally)
     by_project: dict[int, list[AllyParticipation]] = {}
     for part in parts:
         if part.project_id:
+            pr = db.get(Project, part.project_id)
+            if pr is None or pr.trashed_at is not None or (for_ally and pr.archived_at is not None):
+                continue
             by_project.setdefault(part.project_id, []).append(part)
     proyectos, proyectado = [], Decimal(0)
     for pid, pparts in by_project.items():
         pr = db.get(Project, pid)
-        if pr is None or pr.trashed_at is not None:
-            continue
         pm = [c for c in movs if c.project_id == pid]
         proj = _project_projection(db, tenant, pr, pparts, pm, rules, cfg)
         proyectado += proj["total"]
@@ -1690,12 +1761,12 @@ def ally_earnings(db: Session, tenant, ally_company_id: int, desde: date | None 
     }
 
 
-def ally_project_earnings(db: Session, tenant, ally_company_id: int, project_id: int) -> dict:
+def ally_project_earnings(db: Session, tenant, ally_company_id: int, project_id: int, for_ally: bool = False) -> dict:
     """ "Lo que recibo en este proyecto": sus precios, sus movimientos, lo proyectado y el bono por anticipo."""
     cfg = settings_of(tenant)
     names = Names(db)
     pr = db.get(Project, project_id)
-    parts = [x for x in _company_parts(db, tenant.id, ally_company_id) if x.project_id == project_id]
+    parts = [x for x in _company_parts(db, tenant.id, ally_company_id, for_ally) if x.project_id == project_id]
     movs = list(
         db.scalars(
             select(Commission)
@@ -1854,7 +1925,8 @@ def numbers(db: Session, tenant, a: date, b: date) -> dict:
         if k not in M:
             continue
         v = crc_of(db, c)
-        if c.kind == "pago_acordado":
+        if is_payout(c):
+            # pago acordado y sus ajustes: ya estan en el costo directo (precio aprobado del aliado), no se restan otra vez
             M[k]["pagos_aliados"] += v
             if c.ally_company_id:
                 A(c.ally_company_id)["pagado_al_aliado"] += v

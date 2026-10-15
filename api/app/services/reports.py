@@ -479,12 +479,12 @@ def rentabilidad(db: Session, tid: int, a: date, b: date) -> Report:
                 e["margin_real"],
                 e["margin_planned"],
                 e["hours"],
-                # economia: aliados (ya dentro del costo real), comisiones y utilidad neta. Van antes de "Provisional",
-                # que sigue siendo la ultima columna (las lecturas por posicion de antes no cambian)
+                e["aviso"] or "",
+                # economia (spec 8.7): aliados (ya dentro del costo real), comisiones y utilidad neta se agregan AL
+                # FINAL; ninguna columna existente cambia de posicion (exportes y lecturas por indice)
                 e["cost_allies"],
                 e["commissions"],
                 e["profit_net"],
-                e["aviso"] or "",
             ]
         )
         if e["sin_costos"]:
@@ -513,10 +513,10 @@ def rentabilidad(db: Session, tid: int, a: date, b: date) -> Report:
             "Margen real %",
             "Margen cotizado %",
             "Horas",
+            "Provisional",
             "Aliados",
             "Comisiones",
             "Utilidad neta",
-            "Provisional",
         ],
         rows,
         {
@@ -601,11 +601,12 @@ def _margen(venta: Decimal, costo: Decimal) -> float:
     return pricing.margin_of(venta, costo)
 
 
-def comisiones(db: Session, tid: int, a: date, b: date) -> Report:
+def comisiones(db: Session, tid: int, a: date, b: date, hide_payouts: bool = False) -> Report:
     """Comisiones del periodo (contabilidad lo baja a Excel para la planilla): cada movimiento no anulado devengado
-    en el periodo, con su beneficiario, concepto, estado y referencia de pago."""
+    en el periodo, con su beneficiario, concepto, estado y referencia de pago. `hide_payouts`: sin el pago acordado
+    a los aliados ni sus ajustes (su precio es costo de Crimson) para quien no ve costos ni los paga."""
     from ..models import AllyCompany, Commission, Project, Quote, User
-    from .commissions import KIND_LABEL, crc_of
+    from .commissions import KIND_LABEL, crc_of, is_payout
 
     rows, tot = [], {"pendiente": Decimal(0), "aprobada": Decimal(0), "pagada": Decimal(0)}
     nombres: dict = {}
@@ -624,6 +625,8 @@ def comisiones(db: Session, tid: int, a: date, b: date) -> Report:
         .where(Commission.tenant_id == tid, Commission.status != "anulada", Commission.earned_on >= a, Commission.earned_on <= b)
         .order_by(Commission.earned_on, Commission.id)
     ):
+        if hide_payouts and is_payout(c):
+            continue
         quien = nombre(User, c.user_id, "full_name") if c.beneficiary != "aliado" else nombre(AllyCompany, c.ally_company_id, "name")
         doc = nombre(Invoice, c.invoice_id, "number") or nombre(Quote, c.quote_id, "number")
         crc = crc_of(db, c).quantize(Decimal("0.01"))

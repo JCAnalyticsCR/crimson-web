@@ -137,8 +137,9 @@ def direct_cost(db: Session, pr: Project, fx: Decimal | None = None) -> Decimal:
 
 
 def project_commissions(db: Session, pr: Project) -> Decimal:
-    """Comisiones, bonos y ajustes devengados del proyecto (no anulados), en colones. El pago acordado ya esta en
-    el costo de aliados."""
+    """Comisiones, bonos y ajustes devengados del proyecto (no anulados), en colones. El pago acordado y SUS ajustes
+    (diferencia de precio, reverso, devolucion: llevan cost_request_id) ya estan en el costo de aliados, que usa el
+    precio aprobado vigente: contarlos aqui los restaria dos veces de la utilidad neta."""
     from ..models import Commission
     from ..services.commissions import crc_of
 
@@ -148,6 +149,7 @@ def project_commissions(db: Session, pr: Project) -> Decimal:
             Commission.project_id == pr.id,
             Commission.status != "anulada",
             Commission.kind.in_(("comision", "bono", "ajuste")),
+            Commission.cost_request_id.is_(None),
         )
     ).all()
     return sum((crc_of(db, c) for c in rows), Decimal(0))

@@ -12,7 +12,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
@@ -108,27 +108,46 @@ def commissions(
                 Commission.description.ilike(like),
             )
         )
-    todas = db.scalars(select(Commission).where(*w).order_by(Commission.earned_on.desc(), Commission.id.desc())).all()
+    # la pagina y los totales salen de SQL (OWASP API4): nunca se carga el libro entero del tenant en memoria
+    total_rows = db.scalar(select(func.count()).select_from(Commission).where(*w)) or 0
+    pagina = db.scalars(select(Commission).where(*w).order_by(Commission.earned_on.desc(), Commission.id.desc()).limit(limit).offset(offset)).all()
     cfg = svc.settings_of(p.tenant)
     names = svc.Names(db)
-    rows = [svc.entry_out(db, c, p, cfg, names) for c in todas[offset : offset + limit]]
-    # totales en colones (falla H: antes sumaba dolares y colones como si fueran lo mismo); en_espera es una cantidad
+    rows = [svc.entry_out(db, c, p, cfg, names) for c in pagina]
+    # totales en colones (falla H: antes sumaba dolares y colones como si fueran lo mismo); en_espera es una cantidad.
+    # Sin costos ni aprobar, el pago acordado al aliado (su precio) no suma: tampoco se ve fila por fila
+    tw = list(w)
+    if svc.hides_payout(p):
+        tw += [Commission.cost_request_id.is_(None), or_(Commission.kind.is_(None), Commission.kind != "pago_acordado")]
+    agg = db.execute(
+        select(
+            Commission.status,
+            Commission.currency,
+            func.count(),
+            func.coalesce(func.sum(Commission.amount), 0),
+            func.coalesce(func.sum(Commission.amount_crc), 0),
+            func.coalesce(func.sum(case((Commission.amount_crc.is_(None), Commission.amount), else_=0)), 0),
+        )
+        .where(*tw)
+        .group_by(Commission.status, Commission.currency)
+    ).all()
     totals = {"en_espera": 0, "pendiente": Decimal(0), "aprobada": Decimal(0), "pagada": Decimal(0)}
     by_cur: dict[str, dict] = {}
-    for c in todas:
-        if c.status == "en_espera":
-            totals["en_espera"] += 1
+    for st, cur_code, n, monto, monto_crc, sin_crc in agg:
+        if st == "en_espera":
+            totals["en_espera"] += n
             continue
-        if c.status not in ("pendiente", "aprobada", "pagada"):
+        if st not in ("pendiente", "aprobada", "pagada"):
             continue
-        totals[c.status] += svc.crc_of(db, c)
-        cur = by_cur.setdefault(c.currency, {"pendiente": Decimal(0), "aprobada": Decimal(0), "pagada": Decimal(0)})
-        cur[c.status] += d(c.amount)
+        # filas viejas sin amount_crc: al cambio de hoy (como crc_of)
+        totals[st] += d(monto_crc) + d(sin_crc) * svc._rate(db, cur_code)
+        cur = by_cur.setdefault(cur_code, {"pendiente": Decimal(0), "aprobada": Decimal(0), "pagada": Decimal(0)})
+        cur[st] += d(monto)
     return {
         "rows": rows,
         "totals": {k: (svc.q2(v) if isinstance(v, Decimal) else v) for k, v in totals.items()},
         "by_currency": {k: {s: svc.q2(v) for s, v in x.items()} for k, x in by_cur.items()},
-        "total_rows": len(todas),
+        "total_rows": total_rows,
     }
 
 
@@ -234,13 +253,16 @@ def internal_member(db: Session, tenant_id: int, uid: int) -> TenantUser | None:
     return m
 
 
-def _rule_values(db: Session, p: Principal, data: RuleIn) -> dict:
-    """Validaciones de 4.2 y normalizacion identica al crear y al editar (la bitacora compara campo por campo)."""
+def _rule_values(db: Session, p: Principal, data: RuleIn, existing: CommissionRule | None = None) -> dict:
+    """Validaciones de 4.2 y normalizacion identica al crear y al editar (la bitacora compara campo por campo).
+    La persona se valida solo al elegirla: la regla de alguien que ya se desactivo se puede apagar, cerrar su vigencia
+    o anotar sin que el 422 la deje viva."""
     v = data.model_dump()
     if data.beneficiary == "vendedor":
         if data.ally_company_id or data.participation_id:
             raise HTTPException(422, "Una regla de vendedor no lleva empresa aliada ni proyecto de aliado")
-        if data.user_id and internal_member(db, p.tenant.id, data.user_id) is None:
+        nueva = existing is None or existing.user_id != data.user_id
+        if data.user_id and nueva and internal_member(db, p.tenant.id, data.user_id) is None:
             raise HTTPException(422, "Esa persona no es un usuario activo del equipo")
     else:
         if data.user_id:
@@ -352,7 +374,7 @@ def rule_update(rid: int, data: RuleIn, p: Principal = Depends(require("commissi
     if not r or r.tenant_id != p.tenant.id:
         raise HTTPException(404, "Regla no encontrada")
     antes = bitacora.snapshot(r)
-    for k, v in _rule_values(db, p, data).items():
+    for k, v in _rule_values(db, p, data, r).items():
         setattr(r, k, v)
     # no es retroactiva: los movimientos ya devengados guardan la foto de la regla (terms)
     bitacora.audit_change(
@@ -659,6 +681,9 @@ def _company(db: Session, p: Principal, ally_company_id: int | None) -> AllyComp
         ally_company_id = cid
     elif not p.can("commissions", "ver_todo"):
         raise HTTPException(403, "Sin permiso: commissions.ver_todo")
+    elif not p.sees_costs:
+        # "lo que pusiste" y el pago acordado son los precios del aliado: costo de Crimson (spec 0.9 y 08:07)
+        raise HTTPException(403, "Las ganancias de los aliados traen sus precios: información de costos")
     if not ally_company_id:
         raise HTTPException(422, "Elegí la empresa aliada")
     comp = db.get(AllyCompany, ally_company_id)
@@ -694,6 +719,8 @@ def earnings_project(project_id: int, ally_company_id: int | None = None, p: Pri
 
 @router.get("/commissions/allies")
 def allies(p: Principal = Depends(require("commissions", "ver_todo")), db: Session = Depends(get_db)):
+    if not p.sees_costs:
+        raise HTTPException(403, "Las ganancias de los aliados traen sus precios: información de costos")
     out = []
     for comp in db.scalars(select(AllyCompany).where(AllyCompany.tenant_id == p.tenant.id).order_by(AllyCompany.name)):
         e = svc.ally_earnings(db, p.tenant, comp.id)

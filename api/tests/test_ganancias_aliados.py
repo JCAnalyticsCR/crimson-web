@@ -205,3 +205,79 @@ def test_tecnico_aliado_sin_comisiones(client, auth, db_session):
         assert client.get(path, headers=h).status_code == 403, path
     assert client.get("/aliado/ganancias", headers=h).status_code == 403
     assert db_session.query(Commission).count() == 0
+
+
+# ---------- revision (economia) ----------
+def test_participacion_oculta_no_sale_en_ganancias(client, auth, db_session):
+    from app.models import AllyParticipation
+
+    admin_h = dict(client.headers)
+    a = client.post("/allies", json={"name": "Aliado Uno S.A.", "tax_id": "3-101-000209"}).json()["id"]
+    ha = usuario(client, admin_h, a, "jefe@aliado-uno.ejemplo.com", "aliado")
+    n = _negocio(client, a)
+    _acuerdo(client, n["aid"], HOY + timedelta(days=3))
+    assert [x["project_id"] for x in client.get("/aliado/ganancias", headers=ha).json()["proyectos"]] == [n["pr"]["id"]]
+    db_session.get(AllyParticipation, n["aid"]).visible_to_ally = False  # Crimson deja de compartirle el negocio
+    db_session.commit()
+    g = client.get("/aliado/ganancias", headers=ha).json()
+    assert g["proyectos"] == [] and n["pr"]["name"] not in str(g) and "Mano de obra de fibra" not in str(g)
+    assert client.get(f"/aliado/ganancias/proyectos/{n['pr']['id']}", headers=ha).status_code == 404
+    assert client.get(f"/aliado/proyectos/{n['pr']['id']}", headers=ha).status_code == 404
+    assert len(g["por_mes"]) == 24  # dos anos con el mes en curso (spec 9.8)
+
+
+def test_precio_aprobado_al_crearlo_con_proyecto_completado(client, auth, db_session):
+    ally = client.post("/allies", json={"name": "Aliado Uno S.A.", "tax_id": "3-101-000210"}).json()["id"]
+    n = _negocio(client, ally, estado="recibido")
+    _completar(client, n["pr"])
+    assert not [f for f in _mov(client) if f["kind"] == "pago_acordado"]  # en revision: no se devenga
+    r = client.post(f"/opportunity-allies/{n['aid']}/requests", json={"what": "Fusiones extra", "status": "aprobado", "amount": 30000, "currency": "CRC"})
+    assert r.status_code == 201, r.text
+    pagos = [f for f in _mov(client) if f["kind"] == "pago_acordado"]
+    assert len(pagos) == 1 and D(str(pagos[0]["amount"])) == D("30000.00") and pagos[0]["status"] == "pendiente"
+    assert db_session.get(Commission, pagos[0]["id"]).source_key.startswith("pago:")
+
+
+def test_ajuste_del_pago_acordado_no_resta_dos_veces(client, auth, db_session):
+    ally = client.post("/allies", json={"name": "Aliado Uno S.A.", "tax_id": "3-101-000211"}).json()["id"]
+    n = _negocio(client, ally)
+    _completar(client, n["pr"])
+    pago = next(f for f in _mov(client) if f["kind"] == "pago_acordado")
+    assert client.patch("/commissions", json={"ids": [pago["id"]], "status": "pagada", "paid_ref": "Transferencia 1"}).status_code == 200
+    body = {"what": "Mano de obra de fibra", "status": "aprobado", "amount": 120000, "currency": "CRC"}
+    assert client.put(f"/opportunity-allies/requests/{n['rid']}", json=body).status_code == 200
+    assert [D(str(f["amount"])) for f in _mov(client) if f["kind"] == "ajuste"] == [D("20000.00")]
+    eco = client.get(f"/projects/{n['pr']['id']}").json()["economics"]
+    assert D(str(eco["cost_allies"])) == D("120000.00") and D(str(eco["profit"])) == D("80000.00")
+    assert D(str(eco["commissions"])) == 0 and D(str(eco["profit_net"])) == D("80000.00")  # el ajuste ya esta en el costo
+    mes = next(m for m in client.get("/commissions/numbers").json()["meses"] if m["mes"] == HOY.strftime("%Y-%m"))
+    assert D(str(mes["comisiones_aliados"])) == 0 and D(str(mes["pagos_aliados"])) == D("120000.00")
+
+
+def test_cambio_de_precio_al_cobrar_es_proporcional(client, auth, db_session):
+    ally = client.post("/allies", json={"name": "Aliado Uno S.A.", "tax_id": "3-101-000212"}).json()["id"]
+    assert client.put("/commissions/config", json={"ally_payout_trigger": "cobro"}).status_code == 200
+    n = _negocio(client, ally)
+    inv = client.post(f"/quotes/{n['qid']}/convert").json()
+    client.post(f"/invoices/{inv['id']}/payments", json={"method": "transferencia", "amount": 113000})  # 50 %
+    body = {"what": "Mano de obra de fibra", "status": "aprobado", "amount": 120000, "currency": "CRC"}
+    assert client.put(f"/opportunity-allies/requests/{n['rid']}", json=body).status_code == 200
+    assert [D(str(f["amount"])) for f in _mov(client) if f["kind"] == "ajuste"] == [D("10000.00")]  # 50 % de 120 000 - 50 000
+    client.post(f"/invoices/{inv['id']}/payments", json={"method": "transferencia", "amount": 113000})  # el otro 50 %
+    assert sum(D(str(f["amount"])) for f in _mov(client) if f["kind"] in ("pago_acordado", "ajuste")) == D("120000.00")
+
+
+def test_devolucion_con_comision_y_pago_acordado_al_cobrar(client, auth, db_session):
+    ally = client.post("/allies", json={"name": "Aliado Uno S.A.", "tax_id": "3-101-000213"}).json()["id"]
+    assert client.put("/commissions/config", json={"ally_payout_trigger": "cobro"}).status_code == 200
+    client.post("/commissions/rules", json={"beneficiary": "aliado", "name": "Todos los aliados", "percent": 10})
+    n = _negocio(client, ally)
+    inv = client.post(f"/quotes/{n['qid']}/convert").json()
+    pay = "/invoices/{}/payments".format(inv["id"])
+    client.post(pay, json={"method": "transferencia", "amount": 113000})  # 50 %
+    client.post(pay, json={"method": "transferencia", "amount": 56500, "kind": "devolucion"})  # devuelve 25 %
+    client.post(pay, json={"method": "transferencia", "amount": 226000})  # paga de mas: 100 %
+    filas = _mov(client)
+    com = sum(D(str(f["amount"])) for f in filas if not db_session.get(Commission, f["id"]).cost_request_id)
+    pago = sum(D(str(f["amount"])) for f in filas if db_session.get(Commission, f["id"]).cost_request_id)
+    assert com == D("20000.00") and pago == D("100000.00")  # 10 % de la venta y el precio: nunca de mas (falla B)
