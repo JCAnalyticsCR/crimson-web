@@ -874,11 +874,18 @@ def early_ok(rule, on: date) -> bool:
 def _accrue_payout(db: Session, deal: Deal, part: AllyParticipation, r: AllyCostRequest, on: date) -> Commission | None:
     if r.status != "aprobado" or d(r.amount) <= 0:
         return None
+    if _live(db, r.tenant_id, Commission.cost_request_id == r.id, Commission.kind == "pago_acordado"):
+        return None  # ya se le debe (o ya se le pago)
+    key = f"pago:{r.id}"
+    if _exists(db, r.tenant_id, key):
+        # se desaprobo (quedo anulado) y se volvio a aprobar: un movimiento nuevo, el anulado queda de historial
+        n = db.scalar(select(func.count()).select_from(Commission).where(Commission.tenant_id == r.tenant_id, Commission.source_key.like(f"pago:{r.id}%")))
+        key = f"pago:{r.id}:re{n}"
     doc = deal.project.number if deal.project is not None else deal.number
     return _accrue(
         db,
         deal=deal,
-        source_key=f"pago:{r.id}",
+        source_key=key,
         beneficiary="aliado",
         participation=part,
         kind="pago_acordado",
@@ -1090,7 +1097,7 @@ def on_cost_request_change(db: Session, r: AllyCostRequest, antes_status: str | 
         return []
     if d(antes_amount) == d(r.amount):
         return []
-    fin = next((c for c in movs if c.source_key == f"pago:{r.id}"), None)
+    fin = next((c for c in movs if c.kind == "pago_acordado" and c.trigger == "proyecto_completado"), None)
     if fin is not None and fin.status in ("pendiente", "en_espera") and len(movs) == 1:
         antes = {"amount": str(fin.amount)}
         fin.amount, fin.base_amount = q2(r.amount), q2(r.amount)

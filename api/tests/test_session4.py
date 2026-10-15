@@ -510,7 +510,8 @@ def test_each_role_sees_only_what_it_needs(client, auth, db_session):
 
     # Solo lectura: ventas y cobros de la empresa, sin gastos, planillas ni exportar
     lec = login("l@ejemplo.com", "lectura")
-    assert report_keys(lec) == {"facturacion", "pendientes", "productos", "ordenes", "cierre", "transacciones", "propinas"}
+    # comisiones: lectura ya ve todos los movimientos (commissions.ver_todo), el reporte es la misma lista
+    assert report_keys(lec) == {"facturacion", "pendientes", "productos", "ordenes", "cierre", "transacciones", "propinas", "comisiones"}
     assert client.get("/reports/facturacion", params={"format": "xlsx"}, headers=lec).status_code == 403
     assert client.get("/expenses", headers=lec).status_code == 403
     assert client.post("/customers", json={"name": "No"}, headers=lec).status_code == 403
