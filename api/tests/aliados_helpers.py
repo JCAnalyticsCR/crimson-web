@@ -105,7 +105,16 @@ def proyecto(db_session, tid: int, opp_id: int, nombre: str, customer_id: int):
     from app.models import AllyParticipation, Opportunity, Project
 
     o = db_session.get(Opportunity, opp_id)
-    pr = Project(tenant_id=tid, number=f"PRO-T{opp_id:04d}", name=nombre, customer_id=customer_id, opportunity_id=o.id, status="en_curso", price=2000000, notes="Nota interna de Crimson")
+    pr = Project(
+        tenant_id=tid,
+        number=f"PRO-T{opp_id:04d}",
+        name=nombre,
+        customer_id=customer_id,
+        opportunity_id=o.id,
+        status="en_curso",
+        price=2000000,
+        notes="Nota interna de Crimson",
+    )
     db_session.add(pr)
     db_session.flush()
     o.project_id, o.status = pr.id, "ganada"
@@ -184,8 +193,26 @@ def escenario(client, admin_h: dict, db_session) -> SimpleNamespace:
 
     ahora = datetime.now(UTC)
     sv = [
-        Survey(tenant_id=tid, number="LEV-A1", kind="cctv", opportunity_id=s.O1, customer_id=s.c1, technician_id=s.uid_a_tec, ally_company_id=s.A, status="borrador"),
-        Survey(tenant_id=tid, number="LEV-B1", kind="cctv", opportunity_id=s.O2, customer_id=s.c2, technician_id=s.uid_b_tec, ally_company_id=s.B, status="borrador"),
+        Survey(
+            tenant_id=tid,
+            number="LEV-A1",
+            kind="cctv",
+            opportunity_id=s.O1,
+            customer_id=s.c1,
+            technician_id=s.uid_a_tec,
+            ally_company_id=s.A,
+            status="borrador",
+        ),
+        Survey(
+            tenant_id=tid,
+            number="LEV-B1",
+            kind="cctv",
+            opportunity_id=s.O2,
+            customer_id=s.c2,
+            technician_id=s.uid_b_tec,
+            ally_company_id=s.B,
+            status="borrador",
+        ),
         Survey(tenant_id=tid, number="LEV-CR1", kind="cctv", opportunity_id=s.O1, customer_id=s.c1, technician_id=admin_id, status="borrador"),
         Survey(tenant_id=tid, number="LEV-NULL", kind="cctv", status="borrador"),
     ]
@@ -200,7 +227,16 @@ def escenario(client, admin_h: dict, db_session) -> SimpleNamespace:
         ot("OT-HOY", project_id=s.P1, customer_id=s.c1, ally_company_id=s.A, technician_id=s.uid_a_tec, scheduled_at=ahora),
         ot("OT-MANANA", project_id=s.P1, customer_id=s.c1, ally_company_id=s.A, technician_id=s.uid_a_tec, scheduled_at=ahora + timedelta(days=1)),
         ot("OT-OTRO", project_id=s.P1, customer_id=s.c1, ally_company_id=s.A, technician_id=s.uid_a_tec2, scheduled_at=ahora),
-        ot("OT-AYER", project_id=s.P1, customer_id=s.c1, ally_company_id=s.A, technician_id=s.uid_a_tec, scheduled_at=ahora - timedelta(days=1), status="finalizada", finished_at=ahora - timedelta(days=1)),
+        ot(
+            "OT-AYER",
+            project_id=s.P1,
+            customer_id=s.c1,
+            ally_company_id=s.A,
+            technician_id=s.uid_a_tec,
+            scheduled_at=ahora - timedelta(days=1),
+            status="finalizada",
+            finished_at=ahora - timedelta(days=1),
+        ),
         ot("OT-B", project_id=s.P3, customer_id=s.c1, ally_company_id=s.B, technician_id=s.uid_b_tec, scheduled_at=ahora),
         ot("OT-NULL", customer_id=s.c1),
     ]
@@ -209,7 +245,9 @@ def escenario(client, admin_h: dict, db_session) -> SimpleNamespace:
     s.W_hoy, s.W_manana, s.W_otro, s.W_ayer_fin, s.W_B, s.W_null = (x.id for x in ws)
 
     def tk(n, **kw):
-        return SupportTicket(tenant_id=tid, number=n, subject=f"Falla {n}", kind="soporte", priority="media", customer_id=s.c1, billable=True, amount=45000, **kw)
+        return SupportTicket(
+            tenant_id=tid, number=n, subject=f"Falla {n}", kind="soporte", priority="media", customer_id=s.c1, billable=True, amount=45000, **kw
+        )
 
     ts = [
         tk("TK-A", project_id=s.P1, ally_company_id=s.A, assigned_to=s.uid_a_tec, status="asignado"),
@@ -227,7 +265,9 @@ def escenario(client, admin_h: dict, db_session) -> SimpleNamespace:
     ta.notes.append(SupportNote(tenant_id=tid, user_id=s.uid_a_jefe, body="Nota del aliado", internal=True))
 
     ks = [
-        MaintenanceContract(tenant_id=tid, number="CTR-A", customer_id=s.c2, name="Mantenimiento asignado a A", ally_company_id=s.A, amount=50000, notes="interno"),
+        MaintenanceContract(
+            tenant_id=tid, number="CTR-A", customer_id=s.c2, name="Mantenimiento asignado a A", ally_company_id=s.A, amount=50000, notes="interno"
+        ),
         MaintenanceContract(tenant_id=tid, number="CTR-P1", customer_id=s.c1, project_id=s.P1, name="Mantenimiento del proyecto P1", amount=80000),
         MaintenanceContract(tenant_id=tid, number="CTR-OTRO", customer_id=s.c2, name="Mantenimiento ajeno", amount=30000),
     ]
@@ -235,7 +275,17 @@ def escenario(client, admin_h: dict, db_session) -> SimpleNamespace:
     db_session.flush()
     s.K_A, s.K_P1, s.K_otro = (x.id for x in ks)
     acts = [
-        CustomerAsset(tenant_id=tid, customer_id=s.c1, project_id=s.P1, name="Cámara entrada", serial="SER-P1", ip="10.0.0.5", mac="AA:BB", firmware="v1", purchase_ref="FC-1"),
+        CustomerAsset(
+            tenant_id=tid,
+            customer_id=s.c1,
+            project_id=s.P1,
+            name="Cámara entrada",
+            serial="SER-P1",
+            ip="10.0.0.5",
+            mac="AA:BB",
+            firmware="v1",
+            purchase_ref="FC-1",
+        ),
         CustomerAsset(tenant_id=tid, customer_id=s.c1, project_id=s.P_cr, name="Cámara de otro proyecto", serial="SER-CR"),
         CustomerAsset(tenant_id=tid, customer_id=s.c2, name="Equipo de otro cliente", serial="SER-C2"),
     ]
@@ -246,7 +296,15 @@ def escenario(client, admin_h: dict, db_session) -> SimpleNamespace:
     iva = next(t for t in client.get("/taxes", headers=admin_h).json() if float(t["rate"]) == 13)
     r = client.post(
         "/products",
-        json={"name": "Cámara demo aliado", "code": "ALI-01", "price": 115000, "currency": "CRC", "cost": 100000, "cost_currency": "CRC", "tax_ids": [iva["id"]]},
+        json={
+            "name": "Cámara demo aliado",
+            "code": "ALI-01",
+            "price": 115000,
+            "currency": "CRC",
+            "cost": 100000,
+            "cost_currency": "CRC",
+            "tax_ids": [iva["id"]],
+        },
         headers=admin_h,
     )
     assert r.status_code == 201, r.text

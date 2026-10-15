@@ -753,15 +753,16 @@ def plan_put(cid: int, data: PlanIn, p: Principal = Depends(require("aliados", "
     """Crea o actualiza la recurrencia que factura la mensualidad (el worker de recurrencias la emite). Nunca cobra sola."""
     c = company(db, cid, p)
     antes = _snapshot(c)
+    if not c.customer_id and not data.crear_cliente:
+        raise HTTPException(422, "Ligá o creá el cliente de facturación del aliado")
+    # el servicio se valida antes de crear nada (un 422 no deja un cliente a medias)
+    prod = _plan_product(db, p, data.product_id or (p.tenant.settings or {}).get("ally_plan_product_id"))
     if not c.customer_id:
-        if not data.crear_cliente:
-            raise HTTPException(422, "Ligá o creá el cliente de facturación del aliado")
         cust = Customer(tenant_id=p.tenant.id, id_type="juridica", id_number=c.tax_id, name=(c.legal_name or c.name)[:200], email=c.email, phone=c.phone)
         db.add(cust)
         db.flush()
         audit(db, p.tenant.id, p.user.id, "create", "customer", cust.id, {"desde": "empresa aliada", "aliado": c.id}, ip=p.ip)
         c.customer_id = cust.id
-    prod = _plan_product(db, p, data.product_id or (p.tenant.settings or {}).get("ally_plan_product_id"))
     c.plan_mode = data.mode
     qty = 1 if data.mode == "fija" else max(len(ally_access.active_members(db, c)), 1)
     template = DocumentIn(

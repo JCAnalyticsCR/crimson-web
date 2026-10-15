@@ -377,7 +377,17 @@ def test_tecnico_aliado_solo_lo_de_hoy(client, auth, db_session):
     r = client.post(f"/aliado/ordenes/{s.W_hoy}/finish", json={}, headers=s.a_tec)
     assert r.status_code == 200 and r.json()["status"] == "finalizada", r.text
     assert client.get(f"/aliado/ordenes/{s.W_hoy}", headers=s.a_tec).status_code == 200  # finalizada hoy: sigue
-    for path in ("/aliado/catalogo", "/aliado/inventario", "/aliado/oportunidades", "/aliado/proyectos", "/aliado/ganancias", "/aliado/activos", "/aliado/mantenimientos", "/aliado/usuarios", "/aliado/suscripcion"):
+    for path in (
+        "/aliado/catalogo",
+        "/aliado/inventario",
+        "/aliado/oportunidades",
+        "/aliado/proyectos",
+        "/aliado/ganancias",
+        "/aliado/activos",
+        "/aliado/mantenimientos",
+        "/aliado/usuarios",
+        "/aliado/suscripcion",
+    ):
         assert client.get(path, headers=s.a_tec).status_code == 403, path
     assert client.post("/aliado/levantamientos", json={"project_id": s.P1}, headers=s.a_tec).status_code == 403
     prods = client.get("/aliado/productos/buscar?q=demo", headers=s.a_tec).json()
@@ -448,7 +458,11 @@ def test_media_ajena_rechazada(client, auth, db_session):
     assert copia["id"] != crimson["id"]
     firmadas = client.post("/aliado/media/firmar", json={"urls": [crimson["url"], copia["url"]]}, headers=s.a_jefe).json()["urls"]
     assert crimson["url"] not in firmadas and copia["url"] in firmadas
-    r = client.post(f"/aliado/proyectos/{s.P1}/precios", json={"what": "Mano de obra", "amount": 1000, "currency": "CRC", "attachment_ids": [crimson["id"]]}, headers=s.a_jefe)
+    r = client.post(
+        f"/aliado/proyectos/{s.P1}/precios",
+        json={"what": "Mano de obra", "amount": 1000, "currency": "CRC", "attachment_ids": [crimson["id"]]},
+        headers=s.a_jefe,
+    )
     assert r.status_code == 404
 
 

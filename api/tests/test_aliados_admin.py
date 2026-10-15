@@ -6,7 +6,14 @@ from tests.aliados_helpers import aliado, escenario, ids, interno, usuario
 def _servicio_mensualidad(client) -> int:
     r = client.post(
         "/products",
-        json={"name": "Mensualidad de la plataforma", "code": "SRV-PLAT", "item_type": "servicio", "price": 0, "currency": "CRC", "cabys_code": "8314100000000"},
+        json={
+            "name": "Mensualidad de la plataforma",
+            "code": "SRV-PLAT",
+            "item_type": "servicio",
+            "price": 0,
+            "currency": "CRC",
+            "cabys_code": "8314100000000",
+        },
     )
     assert r.status_code == 201, r.text
     return r.json()["id"]
@@ -98,7 +105,13 @@ def test_auth_me_y_roles(client, auth, db_session):
 
 def test_buscador_solo_aliados_y_alta_rapida(client, auth, db_session):
     tid = auth["tenant"]["id"]
-    a = aliado(client, dict(client.headers), "Aliado Uno S.A.", "3-101-000001", contacts={"comercial": {"name": "Contacto Comercial", "email": "ventas@aliado-uno.ejemplo.com"}})
+    a = aliado(
+        client,
+        dict(client.headers),
+        "Aliado Uno S.A.",
+        "3-101-000001",
+        contacts={"comercial": {"name": "Contacto Comercial", "email": "ventas@aliado-uno.ejemplo.com"}},
+    )
     from app.models import Supplier
 
     db_session.add(Supplier(tenant_id=tid, name="Proveedor Demo Buscador"))
@@ -108,7 +121,11 @@ def test_buscador_solo_aliados_y_alta_rapida(client, auth, db_session):
     assert hits and {x["kind"] for x in hits} == {"ally"} and hits[0]["tax_id"] == "3-101-000001"
     todos = client.get("/opportunity-allies/companies?q=&todos=true", headers=vend).json()
     assert {x["kind"] for x in todos} == {"ally", "customer", "supplier"}
-    r = client.post("/opportunity-allies/companies", json={"name": "Aliado Nuevo S.A.", "tax_id": "3-101-000009", "contacts": {"tecnico": {"name": "Técnico Nuevo"}}}, headers=vend)
+    r = client.post(
+        "/opportunity-allies/companies",
+        json={"name": "Aliado Nuevo S.A.", "tax_id": "3-101-000009", "contacts": {"tecnico": {"name": "Técnico Nuevo"}}},
+        headers=vend,
+    )
     assert r.status_code == 201, r.text
     assert set(r.json()) >= {"kind", "id", "name", "hint", "tax_id"} and r.json()["kind"] == "ally"
     r2 = client.post("/opportunity-allies/companies", json={"name": "aliado nuevo s.a."}, headers=vend)
