@@ -197,8 +197,9 @@ def create_quote(db: Session, tenant_id: int, user_id: int | None, payload: Docu
 def create_invoice(
     db: Session, tenant_id: int, user_id: int | None, payload: DocumentIn, doc_type: str = "FE", quote: Quote | None = None, *, seller_id=_SELF
 ) -> Invoice:
-    number, consecutive = next_number(db, tenant_id, doc_type)
-    inv = Invoice(tenant_id=tenant_id, number=number, consecutive=consecutive, doc_type=doc_type, created_by=user_id or None, status="creado")
+    # D5: el numero visible se asigna al crear; el consecutivo fiscal de 20 digitos, al emitir (services/einvoice.py)
+    number, _ = next_number(db, tenant_id, doc_type)
+    inv = Invoice(tenant_id=tenant_id, number=number, consecutive=None, doc_type=doc_type, created_by=user_id or None, status="creado")
     inv.seller_id = (user_id or None) if seller_id is _SELF else seller_id  # services/ownership.py
     inv.sale_condition = payload.sale_condition or "01"
     inv.credit_days = payload.credit_days or 0

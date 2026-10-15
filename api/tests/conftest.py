@@ -13,6 +13,48 @@ from app.seeds import seed
 ADMIN = ("admin@crimsonapp.com", "Crimson-2026-seguro")
 
 
+@pytest.fixture(autouse=True)
+def _aislar_hacienda(monkeypatch):
+    """Ninguna prueba sale a la red ni toma nada del .env del desarrollador: una llave FISCAL_KEYS aleatoria por prueba,
+    ENV=local, sin credenciales de Hacienda ni buzon de entorno, produccion prohibida, modo fiscal "none", y un
+    transporte HTTP que FALLA ante cualquier peticion (las pruebas que necesitan Hacienda instalan FakeHacienda)."""
+    import base64
+
+    import httpx
+    from pydantic import SecretStr
+
+    from app.core.config import settings
+    from app.providers.hacienda import client as hclient
+
+    monkeypatch.setattr(settings, "fiscal_keys", SecretStr("ktest:" + base64.urlsafe_b64encode(os.urandom(32)).decode()))
+    monkeypatch.setattr(settings, "env", "local")
+    monkeypatch.setattr(settings, "hacienda_production_allowed", False)
+    monkeypatch.setattr(settings, "einvoice_provider", "none")
+    monkeypatch.setattr(settings, "railway_environment_id", None)
+    monkeypatch.setattr(settings, "hacienda_environment", "pruebas")
+    for k in (
+        "hacienda_username",
+        "hacienda_password",
+        "hacienda_p12_b64",
+        "hacienda_p12_pin",
+        "hacienda_env_tenant",
+        "hacienda_proveedor_sistemas",
+        "reception_imap_host",
+        "reception_imap_user",
+        "reception_imap_password",
+        "reception_imap_tenant",
+    ):
+        monkeypatch.setattr(settings, k, None)
+    hclient.reset_cache()
+
+    def _bloqueado(request):
+        raise AssertionError(f"Petición de red no simulada: {request.method} {request.url}")
+
+    monkeypatch.setattr(hclient, "http_factory", lambda: httpx.Client(transport=httpx.MockTransport(_bloqueado)))
+    yield
+    hclient.reset_cache()
+
+
 @pytest.fixture
 def db_session():
     pg = os.environ.get("TEST_DATABASE_URL")  # opcional: correr la suite contra Postgres real

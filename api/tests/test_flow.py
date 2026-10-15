@@ -69,7 +69,8 @@ def test_sales_flow(client, auth):
     inv = client.post(f"/quotes/{q['id']}/convert")
     assert inv.status_code == 201, inv.text
     inv = inv.json()
-    assert inv["number"] == "FEC-000001" and inv["consecutive"] == "00100001010000000001"
+    # D5: el numero visible se asigna al crear; el consecutivo fiscal de 20 digitos, al emitir
+    assert inv["number"] == "FEC-000001" and inv["consecutive"] is None
     assert Decimal(inv["total"]) == Decimal(q["total"]) and Decimal(inv["balance"]) == Decimal(q["total"])
     assert client.get(f"/quotes/{q['id']}").json()["status"] == "convertida"
     assert client.post(f"/quotes/{q['id']}/convert").status_code == 409

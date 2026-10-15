@@ -91,6 +91,7 @@ def test_reception_of_supplier_xml(client, auth):
         '<?xml version="1.0"?><FacturaElectronica><Clave>50601012600310200000000100001010000000123456789012</Clave>'
         "<NumeroConsecutivo>00100001010000000123</NumeroConsecutivo><FechaEmision>2026-09-10T10:00:00</FechaEmision>"
         "<Emisor><Nombre>Distribuidora Tech SA</Nombre><Identificacion><Numero>3-101-999888</Numero></Identificacion></Emisor>"
+        "<Receptor><Nombre>Grupo Empresarial Crimson SRL</Nombre><Identificacion><Tipo>02</Tipo><Numero>3102000000</Numero></Identificacion></Receptor>"
         "<ResumenFactura><CodigoMoneda>CRC</CodigoMoneda><TotalVenta>100000</TotalVenta><TotalImpuesto>13000</TotalImpuesto>"
         "<TotalComprobante>113000</TotalComprobante></ResumenFactura></FacturaElectronica>"
     )
@@ -102,7 +103,8 @@ def test_reception_of_supplier_xml(client, auth):
     assert client.post("/reception/upload", files={"file": ("mal.xml", "<xml/>", "application/xml")}).status_code == 422
 
     resp = client.post(f"/reception/{d['id']}/respond", json={"action": "aceptada", "iva_condition": "credito"})
-    assert resp.status_code == 200 and resp.json()["hacienda_status"] == "aprobado" and resp.json()["expense_id"]
+    # simulado nunca se muestra como aceptado/aprobado: nada salio a Hacienda
+    assert resp.status_code == 200 and resp.json()["hacienda_status"] == "simulado" and resp.json()["expense_id"]
     assert client.post(f"/reception/{d['id']}/respond", json={"action": "rechazada"}).status_code == 409
     x = client.get(f"/reception/{d['id']}/xml/response")
     assert x.status_code == 200 and "MensajeReceptor" in x.text

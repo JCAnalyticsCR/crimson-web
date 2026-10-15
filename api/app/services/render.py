@@ -42,12 +42,14 @@ td{padding:8px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-
 .excl{margin-top:14px;border:1px dashed #d9d2ca;border-radius:8px;padding:10px 12px;font-size:11.5px;color:#5a5560}.excl .k{font-family:Consolas,monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:#8a858f;margin-bottom:4px}.excl ul{margin:0;padding-left:18px}
 @media (max-width:640px){.meta{grid-template-columns:1fr}.tot{width:100%}.top{flex-direction:column;gap:10px}.docid{text-align:left}th,td{padding:6px 2px}}
 .stamp.paid{background:#e4f6ea;color:#1f9d55}.stamp.void{background:#fde3e6;color:#e2233a}
+.band{margin:-4px 0 14px;padding:8px 12px;border-radius:8px;background:#fff4d6;color:#7a5a00;font-weight:700;font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;text-align:center}
 </style></head><body>
+{% if band %}<div class="band">{{ band }}</div>{% endif %}
 <div class="top">
   <div class="brand">{% if t.logo_url %}<img src="{{ t.logo_url }}" style="height:34px;margin-bottom:6px">{% endif %}<b>{{ t.name }}</b><span>{{ t.legal_name or "" }}{% if t.tax_id %} · Cédula {{ t.tax_id }}{% endif %}</span></div>
   <div class="docid"><div class="k">{{ kind }}</div><div class="n">{{ d.number }}</div>
     {% if d.consecutive %}<div class="k">Consecutivo {{ d.consecutive }}</div>{% endif %}
-    {% if d.clave %}<div class="k" style="text-transform:none">Clave {{ d.clave }}</div>{% endif %}
+    {% if d.clave %}<div class="k" style="text-transform:none">{{ clave_label }} {{ d.clave }}</div>{% endif %}
     <span class="stamp {% if d.status == 'pagada' %}paid{% elif d.status == 'anulada' %}void{% endif %}">{{ d.status }}</span></div>
 </div>
 <div class="meta">
@@ -74,6 +76,7 @@ def render_html(db: Session, doc: Quote | Invoice, tenant: Tenant) -> str:
     c = db.get(Customer, doc.customer_id) if doc.customer_id else None
     is_inv = isinstance(doc, Invoice)
     st = tenant.settings or {}
+    band, clave_label = fiscal_band(db, doc) if is_inv else (None, "Clave")
     return TEMPLATE.render(
         d=doc,
         t=tenant,
@@ -82,13 +85,37 @@ def render_html(db: Session, doc: Quote | Invoice, tenant: Tenant) -> str:
         leyenda=LEYENDA,
         balance=doc.balance if is_inv else None,
         footer=st.get("invoice_footer" if is_inv else "quote_footer"),
+        band=band,
+        clave_label=clave_label,
     )
+
+
+def fiscal_band(db: Session, inv: Invoice) -> tuple[str | None, str]:
+    """Franja del PDF segun el ultimo comprobante aceptado: simulado y pruebas no tienen validez fiscal."""
+    from sqlalchemy import select
+
+    from ..models import EInvoiceDocument
+
+    doc = db.scalar(
+        select(EInvoiceDocument)
+        .where(EInvoiceDocument.invoice_id == inv.id, EInvoiceDocument.doc_type == inv.doc_type)
+        .order_by(EInvoiceDocument.id.desc())
+    )
+    if doc is None:
+        return None, "Clave"
+    if doc.mode == "simulado" or doc.provider == "sandbox":
+        return "Comprobante simulado · sin validez fiscal", "Clave (simulada)"
+    if doc.mode == "pruebas":
+        return "Ambiente de pruebas de Hacienda · sin validez fiscal", "Clave (pruebas)"
+    return None, "Clave"
 
 
 def render_snapshot_html(snap: dict, tenant: Tenant, version: int) -> str:
     """Una version enviada de la cotizacion, tal como salio (cliente, lineas y totales de ese momento)."""
     d = {**snap, "status": f"versión {version}", "consecutive": None, "clave": None}
     return TEMPLATE.render(
+        band=None,
+        clave_label="Clave",
         d=d,
         t=tenant,
         c=snap.get("customer"),

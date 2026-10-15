@@ -737,23 +737,33 @@ def auto_invoice(db: Session, t: Tenant, o: Order) -> str | None:
 
     if o.channel != "tienda" or o.invoice_id or not checkout_cfg(t).get("auto_invoice", True):
         return None
+    from . import hacienda_config as hc
+
     provider = (t.settings or {}).get("einvoice_provider") or cfg.einvoice_provider
+    mode = hc.hacienda_mode(db, t)
     doc_type = "FE" if (o.contact or {}).get("id_number") else "TE"
     sp = db.begin_nested()
     try:
         invoice = invoice_order(db, t, o, None, doc_type, register_payment=True)
         db.flush()
-        if provider == "none":
+        if mode == "ninguno":
             note = f"{invoice.number} creada; sin proveedor fiscal configurado: queda sin emitir ante Hacienda"
         else:
+            # emit() no hace commit ni llama a la red: en emision directa el worker (hacienda.send_pending) lo envia
             doc = esvc.emit(db, t, None, invoice)
-            note = f"{invoice.number} emitida ({doc.status})" + (" · SANDBOX: sin validez fiscal" if provider == "sandbox" else "")
+            if mode in ("pruebas", "produccion"):
+                note = f"{invoice.number} emitida (pendiente de Hacienda); el comprobante sale al cliente al firmarse"
+            else:
+                note = f"{invoice.number} emitida ({doc.status})" + (" · SANDBOX: sin validez fiscal" if provider == "sandbox" else "")
         sp.commit()
     except Exception as ex:  # noqa: BLE001
         sp.rollback()
         msg = getattr(ex, "detail", None) or str(ex)
         _note(o, "sistema", f"Factura automática no se pudo crear: {str(msg)[:200]}. Hacela desde Pedidos.")
         return None
+    if mode in ("pruebas", "produccion"):
+        _note(o, "sistema", note)  # el XML + PDF los entrega einvoice_delivery (art. 18), no este correo
+        return note
     mail = _send_invoice(db, t, o, invoice)
     _note(o, "sistema", note + (f" · correo al cliente: {mail}" if mail else ""))
     return note

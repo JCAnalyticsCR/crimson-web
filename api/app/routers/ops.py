@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
-from ..core.deps import Principal, require
+from ..core.deps import Principal, get_principal, require
 from ..models import Customer, Expense, ExpenseCategory, Invoice, Quote, Recurrence, Supplier, Warehouse
 from ..schemas.sales import DocumentIn
 from ..services import documents as docsvc
@@ -84,6 +84,11 @@ def doc_send(kind: str, id_: int, data: SendIn, p: Principal = Depends(require("
     # El PDF se genera aca y viaja adjunto. Si el servidor no puede generarlo (sin WeasyPrint), el correo no
     # promete un adjunto que no lleva.
     pdf = render_pdf(render_html(db, d, p.tenant))
+    files = [(f"{d.number}.pdf", pdf)] if pdf else []
+    if is_inv:
+        from ..services.einvoice_delivery import attachments_for_invoice
+
+        files += attachments_for_invoice(db, d)  # Decreto 44739-H art. 18: XML firmado + respuesta de Hacienda
     m = queue_email(
         db,
         p.tenant,
@@ -100,8 +105,8 @@ def doc_send(kind: str, id_: int, data: SendIn, p: Principal = Depends(require("
         ),
         kind[:-1],
         d.id,
-        [{"name": f"{d.number}.pdf", "kind": kind, "ref": d.id}] if pdf else [],
-        files=[(f"{d.number}.pdf", pdf)] if pdf else None,
+        [{"name": n, "kind": kind, "ref": d.id} for n, _ in files],
+        files=files or None,
     )
     # Solo se marca como enviada si el proveedor acepto el correo. Simulado (sin llave de Resend) o error
     # no cuentan: marcarla enviada haria creer al vendedor que el cliente ya la tiene.
@@ -138,7 +143,41 @@ def emit(id_: int, p: Principal = Depends(require("sales", "enviar")), db: Sessi
     d = _doc(db, "invoices", id_, p.tenant.id, p)
     doc = esvc.emit(db, p.tenant, p.user.id, d)
     db.commit()
-    return {"status": doc.status, "clave": doc.clave, "message": doc.hacienda_message, "provider": doc.provider}
+    if esvc.is_direct(doc):
+        # el envio va DESPUES del commit (emit() nunca llama a la red). Fallas de red no son 502: el worker reintenta.
+        from ..services.hacienda_sync import send_einvoice
+
+        try:
+            send_einvoice(db, doc.id)
+        except Exception:  # noqa: BLE001
+            db.rollback()
+        db.refresh(doc)
+        db.refresh(d)
+        msg = doc.last_error or doc.hacienda_message
+        if doc.status in ("por_enviar", "enviando"):
+            return {"status": "pendiente", "doc_status": doc.status, "clave": doc.clave, "message": f"Se reintentará automáticamente{': ' + msg if msg else ''}", "provider": doc.provider, "mode": doc.mode}
+        return {"status": d.einvoice_status, "doc_status": doc.status, "clave": doc.clave, "message": msg, "provider": doc.provider, "mode": doc.mode}
+    return {"status": doc.status, "clave": doc.clave, "message": doc.hacienda_message, "provider": doc.provider, "mode": doc.mode}
+
+
+@router.post("/invoices/{id_}/einvoice/refresh")
+def einvoice_refresh(id_: int, p: Principal = Depends(require("sales", "enviar")), db: Session = Depends(get_db)):
+    """Consulta ya el estado del ultimo comprobante (o lo envia si quedo por enviar)."""
+    from ..services.hacienda_sync import refresh_einvoice, send_einvoice
+
+    d = _doc(db, "invoices", id_, p.tenant.id, p)
+    doc = esvc.last_document(db, d)
+    if not doc or not esvc.is_direct(doc):
+        raise HTTPException(409, "La factura no tiene un comprobante enviado a Hacienda")
+    if doc.status == "por_enviar":
+        doc.next_attempt_at = None
+        db.commit()
+        send_einvoice(db, doc.id)
+    else:
+        refresh_einvoice(db, doc.id)
+    db.refresh(doc)
+    db.refresh(d)
+    return {"status": d.einvoice_status, "doc_status": doc.status, "clave": doc.clave, "message": doc.hacienda_message, "last_error": doc.last_error, "mode": doc.mode}
 
 
 class VoidNcIn(BaseModel):
@@ -149,9 +188,20 @@ class VoidNcIn(BaseModel):
 def void_nc(id_: int, data: VoidNcIn, p: Principal = Depends(require("sales", "anular")), db: Session = Depends(get_db)):
     d = _doc(db, "invoices", id_, p.tenant.id, p)
     doc = esvc.credit_note(db, p.tenant, p.user.id, d, data.reason)
-    inv.restock_for_void(db, d, p.user.id)
+    if not esvc.is_direct(doc):
+        inv.restock_for_void(db, d, p.user.id)  # simulado: anulada al instante
     db.commit()
-    return {"status": doc.status, "clave": doc.clave, "consecutive": doc.consecutive}
+    if esvc.is_direct(doc):
+        # directo: la factura se anula y el inventario vuelve solo cuando Hacienda acepta la NC (hacienda_sync)
+        from ..services.hacienda_sync import send_einvoice
+
+        try:
+            send_einvoice(db, doc.id)
+        except Exception:  # noqa: BLE001
+            db.rollback()
+        db.refresh(doc)
+        return {"status": "pendiente" if doc.status in ("por_enviar", "enviando", "enviado", "procesando") else doc.status, "doc_status": doc.status, "clave": doc.clave, "consecutive": doc.consecutive, "mode": doc.mode}
+    return {"status": doc.status, "clave": doc.clave, "consecutive": doc.consecutive, "mode": doc.mode}
 
 
 @router.get("/invoices/{id_}/xml")
@@ -169,6 +219,15 @@ def xml_list(id_: int, p: Principal = Depends(require("sales", "ver")), db: Sess
             "sent_at": x.sent_at,
             "has_document": bool(x.xml_document),
             "has_response": bool(x.xml_response),
+            "mode": x.mode or ("simulado" if x.provider == "sandbox" else None),
+            "last_error": x.last_error,
+            "emitted_at": x.emitted_at,
+            "delivered_at": x.delivered_at,
+            "hacienda_delivered_at": x.hacienda_delivered_at,
+            "receiver_message": x.receiver_message,
+            "receiver_detail": x.receiver_detail,
+            "receiver_at": x.receiver_at,
+            "attempts": x.attempts,
         }
         for x in esvc.documents_for(db, d)
     ]
@@ -310,17 +369,21 @@ def stock_transfer(data: TransferIn, p: Principal = Depends(require("inventory",
 
 
 # ---------- Contabilidad ----------
+D151_KINDS = "^(alquiler|servicios_profesionales|comisiones|intereses)$"
+
+
 class CategoryIn(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=120)
     active: bool = True
+    d151_kind: str | None = Field(None, pattern=D151_KINDS)
 
 
 @router.get("/expense-categories")
-def exp_cats(p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):
-    return [
-        {"id": c.id, "name": c.name, "active": c.active}
-        for c in db.scalars(select(ExpenseCategory).where(ExpenseCategory.tenant_id == p.tenant.id).order_by(ExpenseCategory.name))
-    ]
+def exp_cats(active: int = 0, p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):
+    q = select(ExpenseCategory).where(ExpenseCategory.tenant_id == p.tenant.id)
+    if active:
+        q = q.where(ExpenseCategory.active)  # los selectores solo ofrecen las activas
+    return [{"id": c.id, "name": c.name, "active": c.active, "d151_kind": c.d151_kind} for c in db.scalars(q.order_by(ExpenseCategory.name))]
 
 
 @router.post("/expense-categories", status_code=201)
@@ -331,68 +394,269 @@ def exp_cat_create(data: CategoryIn, p: Principal = Depends(require("accounting"
     return {"id": c.id}
 
 
+@router.put("/expense-categories/{cid}")
+def exp_cat_update(cid: int, data: CategoryIn, p: Principal = Depends(require("accounting", "editar")), db: Session = Depends(get_db)):
+    c = db.get(ExpenseCategory, cid)
+    if not c or c.tenant_id != p.tenant.id:
+        raise HTTPException(404, "Categoría no encontrada")
+    antes = snapshot(c)
+    c.name, c.active, c.d151_kind = data.name, data.active, data.d151_kind  # desactivar no borra
+    audit_change(db, p, "update", "expense_category", c.id, antes, snapshot(c))
+    db.commit()
+    return {"id": c.id, "name": c.name, "active": c.active, "d151_kind": c.d151_kind}
+
+
+IVA_CONDITIONS = "^(credito|credito_parcial|bienes_capital|no_credito|proporcional)$"
+PAYMENT_METHODS = "^(efectivo|tarjeta|transferencia|sinpe|cheque|otro)$"
+# lo unico que se edita de un gasto que viene de un comprobante electronico (los montos salen del XML)
+LOCKED_EDITABLE = (
+    "category_id",
+    "description",
+    "notes",
+    "status",
+    "bank_account_id",
+    "payment_method",
+    "purchase_type",
+    "due_date",
+    "bank_instrument_id",
+    "check_number",
+    "attachment_url",
+)
+
+
 class ExpenseIn(BaseModel):
     category_id: int | None = None
     supplier_id: int | None = None
     description: str = Field(min_length=1, max_length=300)
     date: date
-    currency: str = "CRC"
+    currency: str = Field("CRC", pattern="^[A-Z]{3}$")
     subtotal: Decimal = Field(ge=0)
     tax_rate: Decimal = Decimal(13)
-    iva_credit: str = Field("credito", pattern="^(credito|no_credito|proporcional)$")
+    iva_credit: str = Field("credito", pattern=IVA_CONDITIONS)
     bank_account_id: int | None = None
     reference: str | None = None
     status: str = Field("registrado", pattern="^(registrado|pagado|anulado)$")
     attachment_url: str | None = Field(None, max_length=400)
     reason: str | None = Field(None, max_length=500)  # opcional: motivo del cambio, va a la bitacora
+    fx_rate: Decimal | None = Field(None, gt=0)  # vacio = tipo de cambio de venta del BCCR de esa fecha (CRC = 1)
+    notes: str | None = Field(None, max_length=2000)
+    payment_method: str | None = Field(None, pattern=PAYMENT_METHODS)
+    purchase_type: str = Field("contado", pattern="^(contado|credito)$")
+    due_date: date | None = None
+    bank_instrument_id: int | None = None
+    check_number: str | None = Field(None, max_length=20)
+    tax_credit_amount: Decimal | None = Field(None, ge=0)  # vacio = segun la condicion
 
 
-def _exp_out(e: Expense, db: Session):
+def expense_origin(e: Expense, bank_ids: set[int] | None = None) -> str:
+    if e.received_document_id:
+        return "xml"
+    if e.recurrence_id:
+        return "recurrente"
+    if (e.reference or "").startswith("PLANILLA-"):
+        return "planilla"
+    if bank_ids and e.id in bank_ids:
+        return "banco"
+    return "manual"
+
+
+def _bank_created(db: Session, tenant_id: int) -> set[int]:
+    """Gastos creados desde una linea del extracto (Conciliacion -> crear gasto)."""
+    from ..models import AuditLog
+
+    out = set()
+    for diff in db.scalars(select(AuditLog.diff).where(AuditLog.tenant_id == tenant_id, AuditLog.action == "expense_from_line")):
+        if isinstance(diff, dict) and diff.get("expense_id"):
+            out.add(int(diff["expense_id"]))
+    return out
+
+
+def _crc_amount(v, e: Expense) -> Decimal:
+    return Decimal(str(v or 0)) * (Decimal(str(e.fx_rate or 1)) if e.currency != "CRC" else Decimal(1))
+
+
+def _exp_out(e: Expense, db: Session, bank_ids: set[int] | None = None):
     cat = db.get(ExpenseCategory, e.category_id) if e.category_id else None
+    sup = db.get(Supplier, e.supplier_id) if e.supplier_id else None
     return {
         "id": e.id,
         "category_id": e.category_id,
         "category": cat.name if cat else None,
         "supplier_id": e.supplier_id,
+        "supplier_name": sup.name if sup else None,
         "description": e.description,
         "date": e.date,
         "currency": e.currency,
+        "fx_rate": e.fx_rate,
         "subtotal": e.subtotal,
         "tax_rate": e.tax_rate,
         "tax_amount": e.tax_amount,
         "total": e.total,
+        "total_crc": _crc_amount(e.total, e).quantize(Decimal("0.01")),
         "iva_credit": e.iva_credit,
+        "tax_credit_amount": e.tax_credit_amount,
         "bank_account_id": e.bank_account_id,
         "reference": e.reference,
         "status": e.status,
         "attachment_url": e.attachment_url,
+        "notes": e.notes,
+        "payment_method": e.payment_method,
+        "purchase_type": e.purchase_type,
+        "due_date": e.due_date,
+        "origin": expense_origin(e, bank_ids),
+        "received_document_id": e.received_document_id,
+        "recurrence_id": e.recurrence_id,
+        "bank_instrument_id": e.bank_instrument_id,
+        "check_number": e.check_number,
+        "locked": e.received_document_id is not None,
     }
 
 
+def _expense_query(p: Principal, from_, to, category_id, supplier_id, currency, status, q):
+    query = select(Expense).where(Expense.tenant_id == p.tenant.id)
+    if from_:
+        query = query.where(Expense.date >= from_)
+    if to:
+        query = query.where(Expense.date <= to)
+    if category_id:
+        query = query.where(Expense.category_id == category_id)
+    if supplier_id:
+        query = query.where(Expense.supplier_id == supplier_id)
+    if currency:
+        query = query.where(Expense.currency == currency)
+    if status:
+        query = query.where(Expense.status == status)
+    if q and q.strip():
+        like = "%" + q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        query = query.where(Expense.description.ilike(like, escape="\\") | Expense.reference.ilike(like, escape="\\"))
+    return query
+
+
+def _origin_filter(rows: list[Expense], origin: str | None, bank_ids: set[int]) -> list[Expense]:
+    return [e for e in rows if expense_origin(e, bank_ids) == origin] if origin else rows
+
+
 @router.get("/expenses")
-def expenses(limit: int = Query(50, le=200), p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):
-    return [
-        _exp_out(e, db)
-        for e in db.scalars(select(Expense).where(Expense.tenant_id == p.tenant.id).order_by(Expense.date.desc(), Expense.id.desc()).limit(limit))
-    ]
+def expenses(
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    from_: date | None = Query(None, alias="from"),
+    to: date | None = None,
+    category_id: int | None = None,
+    supplier_id: int | None = None,
+    origin: str | None = Query(None, pattern="^(xml|recurrente|banco|planilla|manual)$"),
+    currency: str | None = None,
+    status: str | None = None,
+    q: str | None = None,
+    p: Principal = Depends(require("accounting", "ver")),
+    db: Session = Depends(get_db),
+):
+    bank_ids = _bank_created(db, p.tenant.id)
+    query = _expense_query(p, from_, to, category_id, supplier_id, currency, status, q).order_by(Expense.date.desc(), Expense.id.desc())
+    if origin:
+        rows = _origin_filter(db.scalars(query).all(), origin, bank_ids)[offset : offset + limit]
+    else:
+        rows = db.scalars(query.offset(offset).limit(limit)).all()
+    return [_exp_out(e, db, bank_ids) for e in rows]
 
 
-def _apply_expense(e: Expense, data: ExpenseIn):
-    for k, v in data.model_dump(exclude={"reason"}).items():
+@router.get("/expenses/summary")
+def expenses_summary(
+    from_: date | None = Query(None, alias="from"),
+    to: date | None = None,
+    category_id: int | None = None,
+    supplier_id: int | None = None,
+    origin: str | None = Query(None, pattern="^(xml|recurrente|banco|planilla|manual)$"),
+    currency: str | None = None,
+    status: str | None = None,
+    q: str | None = None,
+    p: Principal = Depends(require("accounting", "ver")),
+    db: Session = Depends(get_db),
+):
+    bank_ids = _bank_created(db, p.tenant.id)
+    rows = _origin_filter(db.scalars(_expense_query(p, from_, to, category_id, supplier_id, currency, status, q)).all(), origin, bank_ids)
+    live = [e for e in rows if e.status != "anulado"]
+    q2 = Decimal("0.01")
+    return {
+        "count": len(rows),
+        "total_crc": sum((_crc_amount(e.total, e) for e in live), Decimal(0)).quantize(q2),
+        "tax_crc": sum((_crc_amount(e.tax_amount, e) for e in live), Decimal(0)).quantize(q2),
+        "credit_crc": sum((_crc_amount(e.tax_credit_amount, e) for e in live if e.tax_credit_amount is not None), Decimal(0)).quantize(q2),
+    }
+
+
+def bccr_sell(db: Session, currency: str, on: date) -> Decimal | None:
+    """Venta del BCCR de esa fecha o la ultima anterior (None si no hay ninguna)."""
+    from ..models import ExchangeRate
+
+    if currency == "CRC":
+        return Decimal(1)
+    fx = db.scalar(select(ExchangeRate).where(ExchangeRate.currency == currency, ExchangeRate.date <= on).order_by(ExchangeRate.date.desc()))
+    return Decimal(str(fx.sell)) if fx else None
+
+
+def _apply_expense(e: Expense, data: ExpenseIn, db: Session | None = None) -> list[str]:
+    warnings = []
+    for k, v in data.model_dump(exclude={"reason", "fx_rate", "tax_credit_amount"}).items():
         setattr(e, k, v)
     e.tax_amount = (data.subtotal * data.tax_rate / Decimal(100)).quantize(Decimal("0.00001"))
     e.total = data.subtotal + e.tax_amount
+    if data.currency == "CRC":
+        e.fx_rate = Decimal(1)
+    elif data.fx_rate is not None:
+        e.fx_rate = data.fx_rate
+    else:
+        fx = bccr_sell(db, data.currency, data.date) if db is not None else None
+        e.fx_rate = fx or Decimal(1)
+        if fx is None:
+            warnings.append("Sin tipo de cambio del BCCR para esa fecha: se usó 1; indíquelo a mano")
+    if data.tax_credit_amount is not None:
+        e.tax_credit_amount = data.tax_credit_amount
+    elif data.iva_credit in ("credito", "bienes_capital"):
+        e.tax_credit_amount = e.tax_amount
+    elif data.iva_credit == "no_credito":
+        e.tax_credit_amount = Decimal(0)
+    elif data.iva_credit == "credito_parcial":
+        raise HTTPException(422, "Crédito parcial: indique el IVA acreditable")
+    else:
+        e.tax_credit_amount = None  # proporcional: la prorrata se aplica en el reporte de IVA
+    return warnings
+
+
+def _check_instrument(db: Session, p: Principal, e: Expense) -> None:
+    """Cheque: si el numero usado alcanza al siguiente de la chequera, la chequera avanza."""
+    if not e.bank_instrument_id:
+        return
+    from ..models import BankInstrument
+
+    ins = db.get(BankInstrument, e.bank_instrument_id)
+    if not ins or ins.tenant_id != p.tenant.id:
+        raise HTTPException(404, "Chequera o tarjeta no encontrada")
+    if ins.kind == "chequera" and e.check_number and e.check_number.isdigit():
+        n = int(e.check_number)
+        if ins.next_check is None or n >= ins.next_check:
+            ins.next_check = n + 1
 
 
 @router.post("/expenses", status_code=201)
 def expense_create(data: ExpenseIn, p: Principal = Depends(require("accounting", "crear")), db: Session = Depends(get_db)):
     e = Expense(tenant_id=p.tenant.id, created_by=p.user.id)
-    _apply_expense(e, data)
+    warnings = _apply_expense(e, data, db)
+    _check_instrument(db, p, e)
     db.add(e)
     db.flush()
     _audit_expense(db, p, e, {}, "create", data.reason)
     db.commit()
-    return _exp_out(e, db)
+    return {**_exp_out(e, db), "warnings": warnings}
+
+
+def _same(a, b) -> bool:
+    if a is None or b is None:
+        return a is None and b is None
+    try:
+        return abs(Decimal(str(a)) - Decimal(str(b))) <= Decimal("0.00001")
+    except Exception:  # noqa: BLE001
+        return str(a) == str(b)
 
 
 @router.put("/expenses/{eid}")
@@ -401,10 +665,30 @@ def expense_update(eid: int, data: ExpenseIn, p: Principal = Depends(require("ac
     if not e or e.tenant_id != p.tenant.id:
         raise HTTPException(404, "Gasto no encontrado")
     antes = snapshot(e)
-    _apply_expense(e, data)
+    warnings: list[str] = []
+    if e.received_document_id:
+        # montos, divisa, fecha, tasa y condicion salen del XML: nunca se recalculan (tarifas mixtas, otros cargos)
+        cambios = [
+            not _same(data.subtotal, e.subtotal),
+            not _same(data.tax_rate, e.tax_rate),
+            data.currency != e.currency,
+            data.date != e.date,
+            data.iva_credit != e.iva_credit,
+            data.fx_rate is not None and not _same(data.fx_rate, e.fx_rate),
+            data.tax_credit_amount is not None and not _same(data.tax_credit_amount, e.tax_credit_amount),
+        ]
+        if any(cambios):
+            raise HTTPException(409, "Este gasto viene de un comprobante electrónico: los montos salen del XML")
+        for k in LOCKED_EDITABLE:
+            setattr(e, k, getattr(data, k))
+        if e.status == "anulado" and antes.get("status") != "anulado":
+            warnings.append("El gasto quedó anulado; el crédito de IVA sale del comprobante, no del gasto")
+    else:
+        warnings = _apply_expense(e, data, db)
+    _check_instrument(db, p, e)
     _audit_expense(db, p, e, antes, "update", data.reason)
     db.commit()
-    return _exp_out(e, db)
+    return {**_exp_out(e, db), "warnings": warnings}
 
 
 def _audit_expense(db: Session, p: Principal, e: Expense, antes: dict, action: str, reason: str | None) -> None:
@@ -468,6 +752,7 @@ REPORT_NEEDS = {
     "recepciones": ("accounting", "ver"),
     "propinas": ("payments", "ver"),
     "d151": ("accounting", "ver"),
+    "compras": ("accounting", "ver"),
     "planilla": ("payroll", "ver"),
     "conciliacion": ("accounting", "ver"),
     "rentabilidad": ("projects", "ver_todo"),
@@ -534,27 +819,57 @@ class RecurrenceIn(BaseModel):
     end_date: date | None = None
     auto_send: bool = True
     active: bool = True
+    anchor_day: int | None = Field(None, ge=1, le=31)
 
 
-def _next(d: date, f: str) -> date:
+REC_PERMS = {
+    "factura": {"ver": ("sales", "recurrencias"), "crear": ("sales", "recurrencias"), "editar": ("sales", "recurrencias")},
+    "gasto": {"ver": ("accounting", "ver"), "crear": ("accounting", "crear"), "editar": ("accounting", "editar")},
+}
+
+
+def _rec_guard(p: Principal, kind: str, accion: str) -> None:
+    mod, act = REC_PERMS[kind][accion]
+    if not p.can(mod, act):
+        raise HTTPException(403, f"Sin permiso: {mod}.{act}")
+
+
+def _last_day(y: int, m: int) -> int:
+    import calendar
+
+    return calendar.monthrange(y, m)[1]
+
+
+def _next(d: date, f: str, anchor: int | None = None) -> date:
+    """Siguiente fecha. El dia ancla evita que un 31 "baje al 28" para siempre y que el 29 de febrero reviente."""
+    a = anchor or d.day
     if f == "semanal":
         return d + timedelta(days=7)
     if f == "quincenal":
-        return d + timedelta(days=15)
+        first, second = (a, a + 15) if a <= 15 else (a - 15, a)
+        if d.day < min(second, _last_day(d.year, d.month)):
+            return d.replace(day=min(second, _last_day(d.year, d.month)))
+        m = d.month % 12 + 1
+        y = d.year + (1 if m == 1 else 0)
+        return date(y, m, min(first, _last_day(y, m)))
     if f == "anual":
-        return d.replace(year=d.year + 1)
+        y = d.year + 1
+        return date(y, d.month, min(a, _last_day(y, d.month)))
     m = d.month % 12 + 1
     y = d.year + (1 if m == 1 else 0)
-    return d.replace(year=y, month=m, day=min(d.day, 28))
+    return date(y, m, min(a, _last_day(y, m)))
 
 
 def _rec_template(data: RecurrenceIn) -> dict:
-    """Valida la plantilla segun el tipo: factura -> DocumentIn, gasto -> ExpenseIn (la fecha se pone al correr)."""
+    """Valida la plantilla segun el tipo: factura -> DocumentIn, gasto -> ExpenseIn (la fecha se pone al correr).
+    Gasto: por defecto sin credito (el hosting en dolares del exterior no trae factura electronica costarricense; si la
+    trae, el credito llega al vincular la recepcion al gasto generado)."""
     if data.kind == "factura":
         if not data.customer_id:
             raise HTTPException(422, "La recurrencia de factura requiere cliente")
         return DocumentIn(**data.template).model_dump(mode="json")
-    return ExpenseIn(**{**data.template, "date": data.next_date}).model_dump(mode="json", exclude={"date"})
+    tpl = {"iva_credit": "no_credito", "tax_rate": 0, **data.template}
+    return ExpenseIn(**{**tpl, "date": data.next_date}).model_dump(mode="json", exclude={"date"})
 
 
 def _rec_out(r: Recurrence, db: Session):
@@ -574,16 +889,24 @@ def _rec_out(r: Recurrence, db: Session):
         "runs": r.runs,
         "last_invoice_id": r.last_invoice_id,
         "template": r.template,
+        "anchor_day": r.anchor_day,
+        # las mensuales que el calculo viejo ya bajo al 28 quedaron ancladas en 28
+        "anchor_warning": "Ancla 28: revisá si era fin de mes" if r.anchor_day == 28 and r.runs > 0 and r.frequency in ("mensual", "quincenal") else None,
     }
 
 
 @router.get("/recurrences")
-def recurrences(p: Principal = Depends(require("sales", "recurrencias")), db: Session = Depends(get_db)):
-    return [_rec_out(r, db) for r in db.scalars(select(Recurrence).where(Recurrence.tenant_id == p.tenant.id).order_by(Recurrence.next_date))]
+def recurrences(kind: str | None = Query(None, pattern="^(factura|gasto)$"), p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    kinds = [k for k in ("factura", "gasto") if p.can(*REC_PERMS[k]["ver"]) and (kind is None or k == kind)]
+    if not kinds:
+        raise HTTPException(403, "Sin permiso: sales.recurrencias|accounting.ver")
+    q = select(Recurrence).where(Recurrence.tenant_id == p.tenant.id, Recurrence.kind.in_(kinds)).order_by(Recurrence.next_date)
+    return [_rec_out(r, db) for r in db.scalars(q)]
 
 
 @router.post("/recurrences", status_code=201)
-def recurrence_create(data: RecurrenceIn, p: Principal = Depends(require("sales", "recurrencias")), db: Session = Depends(get_db)):
+def recurrence_create(data: RecurrenceIn, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    _rec_guard(p, data.kind, "crear")
     r = Recurrence(
         tenant_id=p.tenant.id,
         name=data.name,
@@ -595,17 +918,24 @@ def recurrence_create(data: RecurrenceIn, p: Principal = Depends(require("sales"
         end_date=data.end_date,
         auto_send=data.auto_send,
         active=data.active,
+        anchor_day=data.anchor_day or data.next_date.day,
     )
     db.add(r)
     db.commit()
     return _rec_out(r, db)
 
 
-@router.put("/recurrences/{rid}")
-def recurrence_update(rid: int, data: RecurrenceIn, p: Principal = Depends(require("sales", "recurrencias")), db: Session = Depends(get_db)):
+def _rec_get(db: Session, p: Principal, rid: int) -> Recurrence:
     r = db.get(Recurrence, rid)
     if not r or r.tenant_id != p.tenant.id:
         raise HTTPException(404, "Recurrencia no encontrada")
+    return r
+
+
+@router.put("/recurrences/{rid}")
+def recurrence_update(rid: int, data: RecurrenceIn, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    r = _rec_get(db, p, rid)
+    _rec_guard(p, r.kind, "editar")
     if data.kind != r.kind:
         raise HTTPException(409, "No se puede cambiar el tipo de una recurrencia")
     r.name, r.customer_id, r.template, r.frequency, r.next_date, r.end_date, r.auto_send, r.active = (
@@ -618,35 +948,56 @@ def recurrence_update(rid: int, data: RecurrenceIn, p: Principal = Depends(requi
         data.auto_send,
         data.active,
     )
+    r.anchor_day = data.anchor_day or r.anchor_day or data.next_date.day
     db.commit()
     return _rec_out(r, db)
 
 
-def run_recurrence(db: Session, r: Recurrence, user_id: int | None) -> Invoice | Expense:
-    if r.kind == "gasto":
-        e = Expense(tenant_id=r.tenant_id, created_by=user_id or None)
-        _apply_expense(e, ExpenseIn(**{**r.template, "date": r.next_date}))
-        db.add(e)
-        db.flush()
-        r.last_expense_id = e.id
-        result: Invoice | Expense = e
-    else:
-        payload = DocumentIn(**{**r.template, "customer_id": r.customer_id})
-        result = docsvc.create_invoice(db, r.tenant_id, user_id, payload, seller_id=None)  # recurrencia: sin vendedor
-        inv.deduct_for_invoice(db, result, user_id)
-        r.last_invoice_id = result.id
-    r.runs += 1
-    r.next_date = _next(r.next_date, r.frequency)
+def _advance(r: Recurrence) -> None:
+    r.next_date = _next(r.next_date, r.frequency, r.anchor_day)
     if r.end_date and r.next_date > r.end_date:
         r.active = False
+
+
+def run_recurrence(db: Session, r: Recurrence, user_id: int | None) -> Invoice | Expense:
+    """Genera el documento del periodo r.next_date y avanza. Gastos: idempotente por (recurrencia, periodo)."""
+    if r.kind == "gasto":
+        from sqlalchemy.exc import IntegrityError
+
+        periodo = r.next_date
+        e = db.scalar(select(Expense).where(Expense.tenant_id == r.tenant_id, Expense.recurrence_id == r.id, Expense.recurrence_date == periodo))
+        if e is None:
+            data = ExpenseIn(**{**r.template, "date": periodo})
+            if data.fx_rate is None and data.currency != "CRC":
+                # el tipo de cambio es el de la fecha del periodo (al ponerse al dia, cada mes con el suyo)
+                data = data.model_copy(update={"fx_rate": bccr_sell(db, data.currency, periodo)})
+            sp = db.begin_nested()
+            try:
+                e = Expense(tenant_id=r.tenant_id, created_by=user_id or None, recurrence_id=r.id, recurrence_date=periodo)
+                _apply_expense(e, data, db)
+                db.add(e)
+                db.flush()
+                sp.commit()
+                r.runs += 1
+            except IntegrityError:
+                sp.rollback()  # otro proceso ya genero este periodo: solo se avanza
+                e = db.scalar(select(Expense).where(Expense.tenant_id == r.tenant_id, Expense.recurrence_id == r.id, Expense.recurrence_date == periodo))
+        r.last_expense_id = e.id
+        _advance(r)
+        return e
+    payload = DocumentIn(**{**r.template, "customer_id": r.customer_id})
+    result = docsvc.create_invoice(db, r.tenant_id, user_id, payload, seller_id=None)  # recurrencia: sin vendedor
+    inv.deduct_for_invoice(db, result, user_id)
+    r.last_invoice_id = result.id
+    r.runs += 1
+    _advance(r)
     return result
 
 
 @router.post("/recurrences/{rid}/run", status_code=201)
-def recurrence_run(rid: int, p: Principal = Depends(require("sales", "recurrencias")), db: Session = Depends(get_db)):
-    r = db.get(Recurrence, rid)
-    if not r or r.tenant_id != p.tenant.id:
-        raise HTTPException(404, "Recurrencia no encontrada")
+def recurrence_run(rid: int, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    r = _rec_get(db, p, rid)
+    _rec_guard(p, r.kind, "editar")
     doc = run_recurrence(db, r, p.user.id)
     db.commit()
     if isinstance(doc, Expense):
@@ -654,12 +1005,54 @@ def recurrence_run(rid: int, p: Principal = Depends(require("sales", "recurrenci
     return {"invoice_id": doc.id, "number": doc.number, "next_date": r.next_date}
 
 
-def run_due_recurrences(db: Session) -> int:
+MAX_CATCH_UP = 12
+
+
+def run_due_recurrences(db: Session, today: date | None = None) -> int:
+    """Cada recurrencia vencida en su propia transaccion, con la fila bloqueada y next_date releido despues del bloqueo.
+    Gastos: se pone al dia (max. 12 periodos por corrida). Facturas: UN periodo por corrida y, si hay mas atrasados,
+    alerta al admin (no se le mandan varias facturas de golpe a un cliente). Una que falla no frena a las demas."""
+    import logging
+
+    log = logging.getLogger("crimson.recurrences")
+    today = today or date.today()
     n = 0
-    for r in db.scalars(select(Recurrence).where(Recurrence.active, Recurrence.next_date <= date.today())):
-        run_recurrence(db, r, None)
-        n += 1
+    ids = db.scalars(select(Recurrence.id).where(Recurrence.active, Recurrence.next_date <= today).order_by(Recurrence.id)).all()
     db.commit()
+    for rid in ids:
+        try:
+            r = db.execute(select(Recurrence).where(Recurrence.id == rid).with_for_update()).scalar_one()
+            db.refresh(r)
+            if not r.active or r.next_date > today:
+                db.commit()
+                continue
+            if r.kind == "gasto":
+                for _ in range(MAX_CATCH_UP):
+                    run_recurrence(db, r, None)
+                    n += 1
+                    if not r.active or r.next_date > today:
+                        break
+            else:
+                run_recurrence(db, r, None)
+                n += 1
+                if r.active and r.next_date <= today:
+                    from ..models import Tenant
+                    from ..services.mail import notify_roles
+
+                    t = db.get(Tenant, r.tenant_id)
+                    notify_roles(
+                        db,
+                        t,
+                        ("admin",),
+                        f"Recurrencia «{r.name}» con periodos atrasados",
+                        f"<p>La recurrencia de factura <b>{r.name}</b> tiene periodos atrasados (siguiente: {r.next_date}). Se generó una sola factura; revísela antes de generar las demás.</p>",
+                        "recurrence",
+                        r.id,
+                    )
+            db.commit()
+        except Exception as e:  # noqa: BLE001
+            db.rollback()
+            log.warning("recurrencia %s: %s", rid, type(e).__name__)
     return n
 
 

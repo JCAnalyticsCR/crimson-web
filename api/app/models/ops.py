@@ -182,9 +182,9 @@ class Expense(TenantMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
     payment_method: Mapped[str | None] = mapped_column(String(20))  # efectivo | tarjeta | transferencia | sinpe | cheque | otro
     purchase_type: Mapped[str] = mapped_column(String(10), default="contado")  # contado | credito
-    due_date: Mapped[date | None] = mapped_column(Date)
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True)  # nullable explicito: el campo "date" tapa el tipo
     recurrence_id: Mapped[int | None] = mapped_column(ForeignKey("recurrence.id", use_alter=True, name="fk_expense_recurrence"))
-    recurrence_date: Mapped[date | None] = mapped_column(Date)
+    recurrence_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     bank_instrument_id: Mapped[int | None] = mapped_column(ForeignKey("bank_instrument.id", name="fk_expense_bank_instrument"))
     check_number: Mapped[str | None] = mapped_column(String(20))
 
