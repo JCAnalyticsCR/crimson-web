@@ -25,6 +25,7 @@ certifi==2026.7.22
     # via
     #   httpcore
     #   httpx
+    #   signxml
 cffi==2.1.1
     # via
     #   argon2-cffi-bindings
@@ -43,9 +44,13 @@ click-plugins==1.1.1.2
 click-repl==0.4.0
     # via celery
 cryptography==50.0.1
-    # via crimson-api
+    # via
+    #   crimson-api
+    #   signxml
 dnspython==2.8.0
     # via email-validator
+elementpath==5.1.4
+    # via xmlschema
 email-validator==2.3.0
     # via pydantic
 et-xmlfile==2.0.0
@@ -73,6 +78,10 @@ jinja2==3.1.6
     # via crimson-api
 kombu==5.6.2
     # via celery
+lxml==6.1.3
+    # via
+    #   crimson-api
+    #   signxml
 mako==1.4.1
     # via alembic
 markupsafe==3.0.3
@@ -115,6 +124,10 @@ python-multipart==0.0.32
 pyyaml==6.0.3
     # via uvicorn
 redis==8.1.0
+    # via crimson-api
+segno==1.6.6
+    # via crimson-api
+signxml==5.1.0
     # via crimson-api
 six==1.17.0
     # via python-dateutil
@@ -163,3 +176,5 @@ wcwidth==0.8.3
     # via prompt-toolkit
 websockets==17.1
     # via uvicorn
+xmlschema==4.3.2
+    # via crimson-api

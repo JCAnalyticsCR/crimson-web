@@ -102,27 +102,62 @@ class OrderLine(Base):
 
 
 class ReceivedDocument(TenantMixin, TimestampMixin, Base):
-    """Factura electronica recibida de un proveedor (XML): recepcion ante Hacienda + gasto (plan 3.4 / eje 3)."""
+    """Comprobante electronico recibido de un proveedor (XML): recepcion ante Hacienda + gasto (plan 3.4 / eje 3).
+    Ver services/reception*.py. Nunca se borra (descartar = conservar 5 anos)."""
 
     __tablename__ = "received_document"
+    __table_args__ = (UniqueConstraint("tenant_id", "clave", name="uq_received_document_clave"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     clave: Mapped[str] = mapped_column(String(50), index=True)
     consecutive: Mapped[str | None] = mapped_column(String(20))
     issuer_name: Mapped[str | None] = mapped_column(String(200))
+    # tal cual viene en el XML (sin separadores, mayusculas): desde nov-2026 hay cedulas juridicas alfanumericas
     issuer_id: Mapped[str | None] = mapped_column(String(30))
     issue_date: Mapped[date | None] = mapped_column(Date)
     currency: Mapped[str] = mapped_column(String(3), default="CRC")
     subtotal: Mapped[float] = mapped_column(Numeric(16, 5), default=0)
     tax_total: Mapped[float] = mapped_column(Numeric(16, 5), default=0)
     total: Mapped[float] = mapped_column(Numeric(16, 5), default=0)
-    iva_condition: Mapped[str] = mapped_column(String(12), default="credito")  # credito | no_credito | proporcional
-    activity_code: Mapped[str | None] = mapped_column(String(10))
+    # credito | credito_parcial | bienes_capital | no_credito | proporcional
+    iva_condition: Mapped[str] = mapped_column(String(16), default="credito")
+    activity_code: Mapped[str | None] = mapped_column(String(10))  # actividad de la EMPRESA elegida al responder
     action: Mapped[str | None] = mapped_column(String(12))  # aceptada | parcial | rechazada
-    hacienda_status: Mapped[str] = mapped_column(String(20), default="pendiente")
+    # copia del estado del ultimo mensaje: sin_respuesta | por_enviar | enviando | enviado | procesando | aceptado |
+    # rechazado | error | simulado | historico. "simulado" nunca se muestra como aceptado.
+    hacienda_status: Mapped[str] = mapped_column(String(20), default="sin_respuesta")
     xml_document: Mapped[str | None] = mapped_column(Text)
-    xml_response: Mapped[str | None] = mapped_column(Text)
+    xml_response: Mapped[str | None] = mapped_column(Text)  # mensaje heredado (antes de reception_response)
     expense_id: Mapped[int | None] = mapped_column(ForeignKey("expense.id"))
+    doc_type: Mapped[str] = mapped_column(String(4), default="FE")  # FE | ND | NC | TE | FEC | FEE | REP
+    schema_version: Mapped[str | None] = mapped_column(String(5))
+    issuer_id_type: Mapped[str | None] = mapped_column(String(2))
+    issuer_email: Mapped[str | None] = mapped_column(String(200))
+    issuer_activity_code: Mapped[str | None] = mapped_column(String(10))  # la del proveedor
+    receiver_id: Mapped[str | None] = mapped_column(String(20))
+    receiver_ok: Mapped[bool | None] = mapped_column(Boolean)
+    fx_rate: Mapped[float] = mapped_column(Numeric(12, 5), default=1)
+    other_charges: Mapped[float] = mapped_column(Numeric(16, 5), default=0)
+    iva_total: Mapped[float | None] = mapped_column(Numeric(16, 5))  # solo IVA (01, 07, 08): base del credito
+    reference_clave: Mapped[str | None] = mapped_column(String(50))
+    # por_revisar | respondido | sin_respuesta | ajeno | invalido | descartado | historico
+    status: Mapped[str] = mapped_column(String(16), default="por_revisar", index=True)
+    origin: Mapped[str] = mapped_column(String(10), default="manual")  # correo | manual | historico
+    message_id: Mapped[int | None] = mapped_column(ForeignKey("reception_message.id", name="fk_received_document_message"))
+    pdf_media_id: Mapped[int | None] = mapped_column(ForeignKey("media.id", name="fk_received_document_pdf"))
+    xml_supplier_response: Mapped[str | None] = mapped_column(Text)  # MensajeHacienda del proveedor
+    supplier_hacienda_status: Mapped[str] = mapped_column(String(12), default="desconocido")  # aceptado | rechazado | desconocido
+    supplier_hacienda_detail: Mapped[str | None] = mapped_column(String(500))
+    credit_amount: Mapped[float | None] = mapped_column(Numeric(16, 5))  # IVA acreditable (divisa del documento)
+    applicable_amount: Mapped[float | None] = mapped_column(Numeric(16, 5))  # gasto aplicable
+    response_detail: Mapped[str | None] = mapped_column(String(160))
+    deadline: Mapped[date | None] = mapped_column(Date)
+    responded_by: Mapped[int | None] = mapped_column(Integer)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    discarded_reason: Mapped[str | None] = mapped_column(String(200))
+    discarded_by: Mapped[int | None] = mapped_column(Integer)
+    discarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status_before_discard: Mapped[str | None] = mapped_column(String(16))
 
 
 class ApiCredential(TenantMixin, TimestampMixin, Base):

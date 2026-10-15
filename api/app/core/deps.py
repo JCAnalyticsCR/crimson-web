@@ -340,3 +340,14 @@ def require_any(module: str, *actions: str):
         return p
 
     return _dep
+
+
+def require_one_of(*pairs: tuple[str, str]):
+    """Basta uno de los permisos (p. ej. settings.ver o accounting.ver para ver el estado de Hacienda)."""
+
+    def _dep(p: Principal = Depends(get_principal)) -> Principal:
+        if not any(p.can(m, a) for m, a in pairs):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, f"Sin permiso: {'|'.join(f'{m}.{a}' for m, a in pairs)}")
+        return p
+
+    return _dep

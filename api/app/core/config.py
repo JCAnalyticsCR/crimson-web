@@ -1,9 +1,33 @@
 """Configuracion central (pydantic-settings). Todo secreto viene de variables de entorno."""
 
+import base64
+import binascii
 from functools import lru_cache
+from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def parse_fiscal_keys(raw: str | None) -> list[tuple[str, bytes]]:
+    """FISCAL_KEYS = "kid:llave,kid:llave" (llave = base64url de 32 bytes). La primera cifra; todas descifran.
+    Lanza ValueError con un mensaje claro (sin mostrar las llaves) si el formato no sirve."""
+    out: list[tuple[str, bytes]] = []
+    for part in [p.strip() for p in (raw or "").split(",") if p.strip()]:
+        kid, sep, key = part.partition(":")
+        kid = kid.strip()
+        if not sep or not kid or not kid.isascii() or not kid.replace("_", "").replace("-", "").isalnum() or len(kid) > 20:
+            raise ValueError("FISCAL_KEYS: cada llave va como kid:llave (kid alfanumérico de hasta 20 caracteres)")
+        try:
+            raw_key = base64.urlsafe_b64decode(key.strip() + "=" * (-len(key.strip()) % 4))
+        except (binascii.Error, ValueError) as e:
+            raise ValueError(f"FISCAL_KEYS: la llave {kid} no es base64url válido") from e
+        if len(raw_key) != 32:
+            raise ValueError(f"FISCAL_KEYS: la llave {kid} debe decodificar a 32 bytes")
+        if any(k == kid for k, _ in out):
+            raise ValueError(f"FISCAL_KEYS: el kid {kid} está repetido")
+        out.append((kid, raw_key))
+    return out
 
 
 class Settings(BaseSettings):
@@ -56,7 +80,29 @@ class Settings(BaseSettings):
     # URL publica de la API para armar la URL del webhook que se registra en ONVO. Vacio = PUBLIC_BASE_URL + "/api"
     # (el nginx del portal pasa /api a la API sin tocar cuerpo ni headers).
     api_public_url: str | None = None
-    einvoice_provider: str = "none"  # none | alanube | gti
+    einvoice_provider: str = "none"  # none | sandbox | alanube | gti ("hacienda" solo lo pone Ajustes -> Hacienda)
+
+    # ---------- Hacienda (factura electronica directa) y recepcion ----------
+    # Llaves de cifrado de las credenciales fiscales (kid:base64url32, separadas por coma; la primera cifra).
+    fiscal_keys: SecretStr | None = None
+    # Segunda llave para produccion: solo cuenta con ENV=production y la huella de instancia guardada al activar.
+    hacienda_production_allowed: bool = False
+    hacienda_proveedor_sistemas: str | None = None  # cedula de ProveedorSistemas; vacio = la de la empresa
+    hacienda_env_tenant: str | None = None  # slug de la empresa de las credenciales de entorno; vacio = la unica activa
+    hacienda_environment: Literal["pruebas", "produccion"] = "pruebas"  # ambiente de las credenciales de entorno
+    hacienda_username: SecretStr | None = None
+    hacienda_password: SecretStr | None = None
+    hacienda_p12_b64: SecretStr | None = None
+    hacienda_p12_pin: SecretStr | None = None
+    railway_environment_id: str | None = None  # lo pone Railway; parte de la huella de instancia
+    # Buzon de recepcion de facturas (IMAP). Sin host, usuario o contrasena: buzon de entorno apagado.
+    reception_imap_host: str | None = None
+    reception_imap_port: int = 993
+    reception_imap_user: str | None = None
+    reception_imap_password: SecretStr | None = None
+    reception_imap_folder: str = "INBOX"
+    reception_imap_tenant: str | None = None
+    reception_imap_since_days: int = 30
 
     # Arranque inicial de entornos compartidos (ver app/bootstrap.py): invitacion de admin, nunca contrasena
     bootstrap_admin_email: str | None = None
@@ -71,6 +117,21 @@ class Settings(BaseSettings):
         for prefix in ("postgres://", "postgresql://"):
             if v.startswith(prefix):
                 return "postgresql+psycopg://" + v[len(prefix) :]
+        return v
+
+    @field_validator("einvoice_provider")
+    @classmethod
+    def _provider(cls, v: str) -> str:
+        # "hacienda" solo lo escriben Ajustes -> Hacienda y el interruptor de produccion (nunca una variable)
+        if v not in ("none", "sandbox", "alanube", "gti"):
+            raise ValueError("EINVOICE_PROVIDER admite none | sandbox | alanube | gti")
+        return v
+
+    @field_validator("fiscal_keys")
+    @classmethod
+    def _fiscal_keys(cls, v: SecretStr | None) -> SecretStr | None:
+        if v is not None and v.get_secret_value().strip():
+            parse_fiscal_keys(v.get_secret_value())
         return v
 
     @model_validator(mode="after")

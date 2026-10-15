@@ -51,6 +51,8 @@ REDACT_COLUMNS = {
     "invitation": {"token_hash": _mark},
     "payment_gateway_config": {"secret_encrypted": None},
     "api_credential": {"secret_hash": _mark, "secret_encrypted": _mark},
+    # credenciales de Hacienda: en el respaldo completo va solo texto cifrado (la llave FISCAL_KEYS nunca va)
+    "fiscal_credential": {"atv_user_enc": None, "atv_password_enc": None, "p12_enc": None, "p12_pin_enc": None},
 }
 REDACT_JSON_SUFFIXES = ("_enc", "_encrypted", "password", "secret", "token")
 

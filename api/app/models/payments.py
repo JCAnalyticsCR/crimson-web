@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -15,6 +15,25 @@ class BankAccount(TenantMixin, Base):
     bank: Mapped[str | None] = mapped_column(String(80))
     currency: Mapped[str] = mapped_column(String(3), default="CRC")
     number: Mapped[str | None] = mapped_column(String(60))  # IBAN / referencia
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    opening_balance: Mapped[float] = mapped_column(Numeric(16, 2), default=0)
+    opening_date: Mapped[date | None] = mapped_column(Date)
+
+
+class BankInstrument(TenantMixin, Base):
+    """Chequera o tarjeta de debito de una cuenta. De la tarjeta solo se guardan los ultimos 4 digitos, nunca el numero."""
+
+    __tablename__ = "bank_instrument"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    bank_account_id: Mapped[int] = mapped_column(ForeignKey("bank_account.id", name="fk_bank_instrument_account"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))  # chequera | tarjeta_debito
+    name: Mapped[str] = mapped_column(String(80))
+    last4: Mapped[str | None] = mapped_column(String(4))
+    holder: Mapped[str | None] = mapped_column(String(120))
+    check_from: Mapped[int | None] = mapped_column(Integer)
+    check_to: Mapped[int | None] = mapped_column(Integer)
+    next_check: Mapped[int | None] = mapped_column(Integer)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
