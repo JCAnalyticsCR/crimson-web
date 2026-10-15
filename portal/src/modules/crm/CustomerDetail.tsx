@@ -39,11 +39,14 @@ export default function CustomerDetail() {
   const [filter, setFilter] = useState("");
   const [contact, setContact] = useState<Contact | null>(null);
   const [edit, setEdit] = useState<Cust | null>(null);
+  // insignia "Empresa aliada": este cliente es el de facturacion de una empresa aliada (solo con aliados.ver)
+  const [aliada, setAliada] = useState<{ id: number; name: string } | null>(null);
 
   const load = useCallback(() => {
     api<Overview>(`/customers/${id}/overview`).then(setOv).catch((e) => toast(e.message, "bad"));
+    if (allows("aliados.ver")) api<{ ally_company?: { id: number; name: string } | null }>(`/customers/${id}`).then((x) => setAliada(x.ally_company || null)).catch(() => setAliada(null));
     api<Contact[]>(`/customers/${id}/contacts`).then((cs) => setContacts(cs.map((c) => ({ ...c, role: c.role || "", email: c.email || "", phone: c.phone || "" }))));
-  }, [id, toast]);
+  }, [id, toast, allows]);
   useEffect(() => { load(); }, [load]);
 
   /* Autoguardado: los datos del cliente (C2) y un contacto existente (C3) se guardan al cerrar; un contacto nuevo
@@ -97,7 +100,7 @@ export default function CustomerDetail() {
     <>
       <div className="page-head">
         <div><div className="meta"><Link to="/clientes" className="row-link">04 · Clientes</Link> / ficha</div><h1 className="h1">{c.name}</h1>
-          <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{c.id_type} · <span className="mono">{c.id_number || "sin identificación"}</span>{c.email ? ` · ${c.email}` : ""}{!c.active && <> · <span className="badge badge--muted">Archivado</span></>}</div>
+          <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{c.id_type} · <span className="mono">{c.id_number || "sin identificación"}</span>{c.email ? ` · ${c.email}` : ""}{!c.active && <> · <span className="badge badge--muted">Archivado</span></>}{aliada && <> · <Link to={`/aliados/${aliada.id}`} className="badge badge--info">Empresa aliada · {aliada.name}</Link></>}</div>
         </div>
         <div className="page-head__actions">
           {wa && <a className="btn btn--ghost btn--sm" href={`https://wa.me/${wa.length === 8 ? "506" + wa : wa}`} target="_blank" rel="noopener"><Icon d={I.whatsapp} />WhatsApp</a>}

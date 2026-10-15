@@ -16,6 +16,7 @@ import { PreviewHidden } from "../../ui/PreviewHidden";
 import { createSurvey, unlinkedNotice, useSurveyAutosave } from "./useSurveyAutosave";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
 import { LinkOpportunity, type OppRef } from "./LinkOpportunity";
+import { AssignAllySurvey } from "./AssignAllySurvey";
 import { pickReview, ReviewPanel, reviewTone, type ReviewInfo } from "./SurveyReview";
 import { CommonSection, initialStatus, PointFields, SystemCalcs, useCommonSpec, type Common, type V2Field } from "./SurveyV2";
 import { RecommendModal, RecoSummary, type RecoFields, type RecoLine } from "./Recommend";
@@ -43,6 +44,8 @@ type Survey = {
   labor: Record<LaborKey, { label: string; people: number; days: string | number }>;
   points?: Point[]; items?: (Omit<Item, "quantity"> & { quantity: string | number })[];
   common?: Common | null; received_by?: string | null; template_version?: number;
+  /** a cargo de una empresa aliada (lo llena desde su portal de aliados) */
+  ally_company_id?: number | null; ally_company?: string | null;
 } & Partial<ReviewInfo>;
 type CostLine = {
   item_id: number; product_id: number | null; name: string; kind: Kind; quantity: string; unit: string; unit_cost: string; cost: string;
@@ -599,6 +602,7 @@ export default function Surveys() {
                   <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
                     <span className={`badge badge--${STATUS[s.status]?.tone || "muted"}`}>{STATUS[s.status]?.label || s.status}</span>
                     {s.review_status && s.status !== "cotizado" && s.status !== "cerrado" && <span className={`badge badge--${reviewTone(s.review_status)}`} title="Revisión del supervisor">{s.review_label}{s.open_observations ? ` · ${s.open_observations}` : ""}</span>}
+                    {s.ally_company && <span className="badge badge--info">Aliado: {s.ally_company}</span>}
                   </span>
                   {sentLine(s) && <div className="meta" style={{ marginTop: 4, textTransform: "none", letterSpacing: 0 }}>{sentLine(s)}</div>}
                 </td>
@@ -658,6 +662,9 @@ export default function Surveys() {
               current={draft.opportunity ?? null}
               onChange={() => open(draft.id!)}  // recarga: el cliente pudo venir de la oportunidad
             />
+          )}
+          {draft.id && draft.opportunity && allows("field.asignar") && !readOnly && (
+            <AssignAllySurvey surveyId={draft.id} opportunityId={draft.opportunity.id} current={rows.find((x) => x.id === draft.id)?.ally_company} onDone={() => { open(draft.id!); load(); }} />
           )}
 
           <CommonSection spec={commonSpec} value={draft.common} readOnly={readOnly} kinds={[draft.kind, ...draft.points.map((p) => kindOf(p, draft))]}

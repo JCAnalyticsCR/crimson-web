@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
-import { Lookup, searchCustomers } from "../../ui/Lookup";
+import { Lookup, searchCustomers, type LookupItem } from "../../ui/Lookup";
 import { SlaTable, type Sla } from "./SlaTable";
 import { TrashButton } from "../../ui/TrashButton";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
@@ -14,15 +14,22 @@ type Contract = {
   every_months: number; next_date: string | null; last_done: string | null; start_date: string | null; end_date: string | null;
   amount: string | null; currency: string | null; scope: string | null; active: boolean; notes: string | null; dias_para_la_proxima: number | null;
   sla: Sla | null;
+  /** lo ejecuta una empresa aliada: sus tickets de mantenimiento nacen asignados a ella */
+  ally_company_id?: number | null; ally_company?: string | null;
 };
 
 const KIND: Record<string, string> = { mantenimiento: "Mantenimiento preventivo", soporte: "Soporte recurrente", renting: "Renting", licencia: "Licencia" };
-const blank = { customer_id: "", customer_name: "", name: "", kind: "mantenimiento", every_months: 6, next_date: "", start_date: "", end_date: "", amount: "0", scope: "", active: true, notes: "", sla: null as Sla | null };
+const blank = { customer_id: "", customer_name: "", name: "", kind: "mantenimiento", every_months: 6, next_date: "", start_date: "", end_date: "", amount: "0", scope: "", active: true, notes: "", sla: null as Sla | null, ally_company_id: "", ally_company: "" };
+const searchAllies = async (q: string): Promise<LookupItem[]> => {
+  const r = await api<{ id: number; name: string; tax_id: string | null }[]>(`/allies/options?q=${encodeURIComponent(q)}`);
+  return r.map((a) => ({ id: a.id, label: a.name, hint: a.tax_id || undefined }));
+};
 type Form = typeof blank & { id?: number };
 const ctrBody = (f: Form) => ({
   customer_id: Number(f.customer_id), name: f.name, kind: f.kind, every_months: Number(f.every_months),
   next_date: f.next_date || null, start_date: f.start_date || null, end_date: f.end_date || null,
   amount: Number(f.amount || 0), currency: "CRC", scope: f.scope || null, active: f.active, notes: f.notes || null, sla: f.sla,
+  ally_company_id: f.ally_company_id ? Number(f.ally_company_id) : null,
 });
 
 export default function Contracts() {
@@ -91,14 +98,14 @@ export default function Contracts() {
               <tr key={c.id} style={{ opacity: c.active ? 1 : 0.5 }}>
                 <td className="mono muted">{c.number}</td>
                 <td style={{ fontWeight: 600 }}>{c.name}<div className="meta">{KIND[c.kind] || c.kind}</div></td>
-                <td className="muted">{c.customer || "—"}</td>
+                <td className="muted">{c.customer || "—"}{c.ally_company && <div><span className="badge badge--info">Aliado: {c.ally_company}</span></div>}</td>
                 <td className="mono muted">{c.every_months} meses</td>
                 <td className="muted">{fmtDate(c.last_done)}</td>
                 <td>{cuando(c)}</td>
                 {verMonto && <td className="num money">{c.amount == null ? "—" : fmtMoney(c.amount, c.currency || undefined)}</td>}
                 <td className="num row-actions" style={{ whiteSpace: "nowrap" }}>
                   {maneja && allows("support_desk.crear") && c.active && <button className="btn btn--soft btn--sm" onClick={() => hacerAhora(c)} title="Abre el ticket y reprograma la próxima">Programar</button>}
-                  {maneja && allows("support_desk.editar") && <button className="btn btn--ghost btn--sm" onClick={() => setForm({ id: c.id, customer_id: String(c.customer_id), customer_name: c.customer || "", name: c.name, kind: c.kind, every_months: c.every_months, next_date: c.next_date || "", start_date: c.start_date || "", end_date: c.end_date || "", amount: String(c.amount ?? 0), scope: c.scope || "", active: c.active, notes: c.notes || "", sla: c.sla })}>Editar</button>}
+                  {maneja && allows("support_desk.editar") && <button className="btn btn--ghost btn--sm" onClick={() => setForm({ id: c.id, customer_id: String(c.customer_id), customer_name: c.customer || "", name: c.name, kind: c.kind, every_months: c.every_months, next_date: c.next_date || "", start_date: c.start_date || "", end_date: c.end_date || "", amount: String(c.amount ?? 0), scope: c.scope || "", active: c.active, notes: c.notes || "", sla: c.sla, ally_company_id: c.ally_company_id ? String(c.ally_company_id) : "", ally_company: c.ally_company || "" })}>Editar</button>}
                   <TrashButton kind="contract" id={c.id} number={c.number} onDone={load} />
                 </td>
               </tr>
@@ -123,6 +130,7 @@ export default function Contracts() {
             <Field label="Inicio"><input className="input" type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} /></Field>
             <Field label="Vence" hint="Vacío = sin fecha de fin."><input className="input" type="date" value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} /></Field>
             <Field label="Activo"><select className="select" value={form.active ? "1" : "0"} onChange={(e) => setForm({ ...form, active: e.target.value === "1" })}><option value="1">Sí</option><option value="0">No</option></select></Field>
+            <Field label="Lo ejecuta: empresa aliada" hint="Opcional. Sus tickets de mantenimiento le llegan a su portal."><Lookup value={form.ally_company} placeholder="Crimson (sin aliado)" fetcher={searchAllies} onSelect={(it, text) => setForm({ ...form, ally_company_id: it ? String(it.id) : "", ally_company: text })} /></Field>
           </div>
           <Field label="Qué incluye" hint="Se copia al ticket para que el técnico sepa qué hacer."><textarea className="textarea" value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value })} placeholder="Limpieza de lentes, revisión de grabación, respaldo de configuración y prueba de respaldo eléctrico." /></Field>
           {/* SLA propio: lo que se le vendio a este cliente. Manda sobre el SLA de la empresa mientras el contrato este activo. */}

@@ -276,6 +276,7 @@ def _project_out(db: Session, ctx: AllyCtx, pr: Project, full: bool = False) -> 
         names = fw._names(db, orders, ctx.p.tenant.id) if orders else {}
         out["scope"] = pr.scope
         out["my_scope_lines"] = sorted({x for a in parts for x in (a.scope_lines or [])})
+        out["my_participations"] = [{"id": a.id, "role": a.role} for a in parts]  # para elegir el papel al enviar precios
         out["orders"] = [
             {
                 "id": x.id,

@@ -23,6 +23,8 @@ type Cabys = { code: string; description: string; tax_rate: number | null; categ
 type CostInfo = {
   cost?: number | null; cost_currency?: string; cost_source?: "proveedor" | "propio" | null; cost_supplier?: string | null; cost_date?: string | null;
   cost_active?: boolean | null; cost_crc?: number | null; margin_real_pct?: number | null; margin_provisional?: boolean | null; supplier_offers?: number | null;
+  /* precio general para aliados (services/ally_pricing): solo llega a quien ve costos */
+  ally_price?: number | null; ally_price_source?: "precio_general" | "recargo" | "precio_aliado" | null;
 };
 type Row = Product & CostInfo & { images?: GalleryImage[]; warehouse_id?: number | null };
 type Offer = {
@@ -205,11 +207,11 @@ export default function Products() {
         {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Nada con esos filtros. Probá limpiarlos o creá el producto." /> : (
           <div className={verCostos ? "prd-dense" : undefined} style={{ overflowX: "auto" }}>
           <table className="table">
-            <thead><tr><th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th>Bodega</th>{verCostos && <th className="num" title="Costo sin IVA: del proveedor vinculado (con la fecha de su lista) o propio">Costo</th>}{verPrecios && <th className="num" title="Sin IVA">Precio de venta</th>}{verCostos && <th className="num" title="Margen sobre la venta: (precio − costo) ÷ precio">Margen</th>}<th>IVA</th><th>Web</th><th /></tr></thead>
+            <thead><tr><th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th>Bodega</th>{verCostos && <th className="num" title="Costo sin IVA: del proveedor vinculado (con la fecha de su lista) o propio">Costo</th>}{verPrecios && <th className="num" title="Sin IVA">Precio de venta</th>}{verCostos && <th className="num" title="Margen sobre la venta: (precio − costo) ÷ precio">Margen</th>}{verCostos && <th className="num" title="Precio general para aliados, sin IVA (recargo sobre el costo o precio fijo)">Precio aliado</th>}<th>IVA</th><th>Web</th><th /></tr></thead>
             <tbody>{items.map((p) => (
               <tr key={p.id}>
                 <td>{thumb(p) ? <span style={{ display: "block", width: 36, height: 36, borderRadius: 8, background: `center/cover no-repeat url("${thumb(p)}")`, border: "1px solid var(--hair)" }} /> : <span style={{ display: "grid", placeItems: "center", width: 36, height: 36, borderRadius: 8, background: "var(--bg-2)", color: "var(--text-3)" }}><Icon d={I.products} size={16} /></span>}</td>
-                <td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.item_type}</td><td className="mono muted">{p.cabys_code || "—"}</td><td className="muted" style={{ fontSize: 13 }}>{whName(p.warehouse_id)}</td>{verCostos && <td className="num"><CostCell p={p} /></td>}{verPrecios && <td className="num money">{fmtMoney(p.price, p.currency)}</td>}{verCostos && <td className="num" style={{ whiteSpace: "nowrap" }}><MarginCell p={p} /></td>}<td className="muted">{p.tax_rate ?? "—"}%</td><td><button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={!allows("catalog.editar") || toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-pressed={p.show_on_web}><i /></button></td>
+                <td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.item_type}</td><td className="mono muted">{p.cabys_code || "—"}</td><td className="muted" style={{ fontSize: 13 }}>{whName(p.warehouse_id)}</td>{verCostos && <td className="num"><CostCell p={p} /></td>}{verPrecios && <td className="num money">{fmtMoney(p.price, p.currency)}</td>}{verCostos && <td className="num" style={{ whiteSpace: "nowrap" }}><MarginCell p={p} /></td>}{verCostos && <td className="num money">{p.ally_price != null ? fmtMoney(p.ally_price, p.currency) : <span className="muted">—</span>}</td>}<td className="muted">{p.tax_rate ?? "—"}%</td><td><button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={!allows("catalog.editar") || toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-pressed={p.show_on_web}><i /></button></td>
                 <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => open(p.id)}>Ver</button><TrashButton kind="product" id={p.id} number={p.code || p.name} onDone={load} /></span></td>
               </tr>
             ))}</tbody>
@@ -323,6 +325,12 @@ function SupplierOffers({ offers, info }: { offers: Offer[] | null; info: CostIn
         <b style={{ fontSize: 13 }}>Ofertas de proveedores</b>
         {info?.margin_real_pct != null && <span className="muted" style={{ fontSize: 12.5 }}>Margen sobre venta {info.margin_provisional ? "objetivo (sin costo)" : "real"}: {Number(info.margin_real_pct).toFixed(1)} %{info.cost_source ? ` · costo ${info.cost_source === "proveedor" ? `de ${info.cost_supplier || "proveedor"}` : "propio"}${info.cost_date ? ` del ${fmtDate(info.cost_date)}` : ""}` : ""}</span>}
       </div>
+      {info && "ally_price" in info && (
+        <p className="muted" style={{ fontSize: 12.5, margin: "4px 0 0" }}>
+          Precio para aliados: {info.ally_price != null ? <b>{fmtMoney(info.ally_price)}</b> : "a consultar (sin costo)"}
+          {info.ally_price_source === "recargo" ? " (recargo sobre el costo)" : info.ally_price_source === "precio_general" ? " (precio fijo)" : ""} · <Link to="/aliados">Aliados → Precios</Link>
+        </p>
+      )}
       {offers === null ? <p className="meta">Cargando…</p> : offers.length === 0 ? (
         <p className="muted" style={{ fontSize: 12.5, margin: "6px 0 0" }}>Sin ofertas vinculadas. En <Link to="/inventario?tab=proveedores">Inventarios → Proveedores</Link> podés vincular este producto con el ítem de la lista del proveedor: el costo y la existencia del proveedor se actualizan solos con cada lista.</p>
       ) : (

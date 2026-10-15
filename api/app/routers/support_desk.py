@@ -693,14 +693,16 @@ def ticket_assign(tid: int, data: AssignIn, p: Principal = Depends(require("supp
     t = _own(db, tid, p)
     _writable(t)
     if data.assigned_to is not None:
-        m = db.scalar(
-            select(TenantUser).where(
-                TenantUser.tenant_id == p.tenant.id, TenantUser.user_id == data.assigned_to, TenantUser.active, TenantUser.role_code.in_(AGENT_ROLES)
-            )
-        )
+        m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.user_id == data.assigned_to, TenantUser.active))
         u = db.get(User, data.assigned_to) if m else None
-        if not m or not u or not u.active:
+        aliado = bool(m and m.ally_company_id)
+        if not m or not u or not u.active or (not aliado and m.role_code not in AGENT_ROLES):
             raise HTTPException(422, "Esa persona no atiende soporte")
+        if aliado and data.assigned_to != t.assigned_to:
+            # un usuario de una empresa aliada: el ticket queda asignado a su empresa (que participe en el proyecto)
+            from ..services.ally_scope import check_ally_assignment
+
+            t.ally_company_id = check_ally_assignment(db, p.tenant.id, ally_company_id=t.ally_company_id, user_ids=[data.assigned_to], project_id=t.project_id)
     antes = t.assigned_to
     if antes != data.assigned_to:
         t.assigned_to = data.assigned_to

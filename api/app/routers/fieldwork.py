@@ -541,13 +541,14 @@ def specs_common(_: Principal = Depends(require("field", "ver"))):
 @router.get("/field/technicians")
 def technicians(
     project_id: int | None = None,
+    opportunity_id: int | None = None,
     ally_company_id: int | None = None,
     p: Principal = Depends(require("field", "ver")),
     db: Session = Depends(get_db),
 ):
     """A quien se le puede asignar una orden. El supervisor no entra a Ajustes, asi que la lista vive aqui.
-    Sin parametros: solo el equipo interno (como siempre). Con project_id: ademas los usuarios activos de las empresas
-    aliadas que participan en ese proyecto; con ally_company_id: solo los de esa empresa (si participa)."""
+    Sin parametros: solo el equipo interno (como siempre). Con project_id (u opportunity_id, para levantamientos): ademas
+    los usuarios activos de las empresas aliadas que participan ahi; con ally_company_id: solo los de esa empresa."""
     from ..models import AllyCompany, AllyParticipation, TenantUser
 
     rows = db.scalars(
@@ -559,12 +560,14 @@ def technicians(
             TenantUser.customer_id.is_(None),
         )
     )
-    internos = [{"id": m.user.id, "name": m.user.full_name, "role": m.role_code, "ally_company_id": None, "company": None} for m in rows if m.user.active]
-    if project_id is None and ally_company_id is None:
+    internos = [{"id": m.user.id, "name": m.user.full_name, "role": m.role_code, "ally_company_id": None, "company": None} for m in rows]
+    if project_id is None and opportunity_id is None and ally_company_id is None:
         return [{k: v for k, v in x.items() if k in ("id", "name", "role")} for x in internos]
     q = select(AllyParticipation.ally_company_id).where(AllyParticipation.tenant_id == p.tenant.id, AllyParticipation.ally_company_id.is_not(None))
     if project_id is not None:
         q = q.where(AllyParticipation.project_id == project_id)
+    if opportunity_id is not None:
+        q = q.where(AllyParticipation.opportunity_id == opportunity_id)
     empresas = set(db.scalars(q))
     if ally_company_id is not None:
         empresas &= {ally_company_id}

@@ -37,7 +37,7 @@ export type ProjectRow = {
 export type Earnings = { moneda?: string; totales: Record<string, string | number>; movimientos?: { concepto?: string; monto?: string; estado?: string; fecha?: string }[] } | null;
 export type ProjectFull = ProjectRow & {
   scope: string | null; my_scope_lines: string[]; orders: { id: number; number: string; title: string; kind: string; status: string; scheduled_at: string | null; technician: string | null }[];
-  requests: Req[]; lo_que_recibo: Earnings; assets_count: number;
+  requests: Req[]; lo_que_recibo: Earnings; assets_count: number; my_participations: { id: number; role: string }[];
 };
 export type Obs = { id: number; round: number; point_code: string | null; text: string; created_by: string; created_at: string; resolved: boolean; resolved_at: string | null; resolved_by: string | null; resolution: string | null };
 export type Point = { id?: number; code: string; kind?: string | null; label: string | null; data: Record<string, unknown>; data_status: Record<string, string> | null; photos: string[]; notes: string | null };

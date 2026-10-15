@@ -67,7 +67,7 @@ export default function AllyProject() {
       <h2 className="h3 al-sec">Mis precios</h2>
       <RequestList rows={p.requests} onRespond={precios ? setResp : undefined} />
       {resp && <div style={{ marginTop: 12 }}><QuoteForm path={`/aliado/solicitudes/${resp.id}`} method="PUT" onCancel={() => setResp(null)} onDone={() => { setResp(null); load(); }} /></div>}
-      {enviar && <div style={{ marginTop: 12 }}><QuoteForm path={`/aliado/proyectos/${p.id}/precios`} method="POST" ask onCancel={() => setEnviar(false)} onDone={() => { setEnviar(false); load(); }} /></div>}
+      {enviar && <div style={{ marginTop: 12 }}><QuoteForm path={`/aliado/proyectos/${p.id}/precios`} method="POST" ask roles={p.my_participations} onCancel={() => setEnviar(false)} onDone={() => { setEnviar(false); load(); }} /></div>}
     </>
   );
 }

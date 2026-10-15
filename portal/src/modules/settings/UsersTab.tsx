@@ -184,7 +184,7 @@ export default function UsersTab() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12, marginTop: 10 }}>
               {data.roles.map((r) => <RoleSummary key={r} code={r} />)}
             </div>
-            <p className="muted" style={{ margin: "10px 0 0" }}>Cada rol ve solo sus secciones del menú y la API aplica los mismos permisos. Los usuarios de aliados y de clientes no se invitan desde aquí: se dan de alta desde la empresa aliada o desde Accesos de clientes.</p>
+            <p className="muted" style={{ margin: "10px 0 0" }}>Cada rol ve solo sus secciones del menú y la API aplica los mismos permisos. Los usuarios de aliados se manejan en Administración → Aliados (desde la ficha de cada empresa aliada) y los de clientes desde Accesos de clientes.</p>
           </details>
           {data.support_members > 0 && (
             /* la pestaña Acceso de soporte solo existe con settings.configurar: sin ese permiso, solo el aviso */

@@ -2,8 +2,8 @@
    Andrés: "Nodo contrata a Crimson, y Crimson contrata a Hauset". El contratante es el cliente al que se cotiza;
    aquí viven las demás empresas, su papel, sus contactos por función y las solicitudes de costo.
    El monto del costo solo lo ve quien ve costos (el servidor ni lo manda a los demás). */
-import { useState } from "react";
-import { api, fmtDate, fmtMoney, uploadFile } from "../../lib/api";
+import { useCallback, useState } from "react";
+import { ApiError, api, fmtDate, fmtMoney, uploadFile } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Field, I, Icon } from "../../ui/components";
 import { Lookup, type LookupItem } from "../../ui/Lookup";
@@ -14,9 +14,12 @@ export type CostRequest = {
   id: number; participation_id: number; opportunity_id: number; what: string; responsible_id: number | null; responsible: string | null;
   due_date: string | null; status: string; pending: boolean; overdue: boolean; costs_visible: boolean;
   amount?: string | null; currency?: string; valid_until?: string | null; exclusions?: string | null; attachments?: { id: number; url: string; filename: string }[];
+  /* respuesta del aliado desde su portal (el desglose solo a quien ve costos) */
+  source?: "crimson" | "aliado"; responded_at?: string | null; responded_by?: string | null; lines?: { concept: string; quantity: string; unit: string | null; unit_price: string }[];
 };
 export type Ally = {
-  id: number; opportunity_id: number; project_id: number | null; customer_id: number | null; supplier_id: number | null; company_kind: "customer" | "supplier" | null;
+  id: number; opportunity_id: number; project_id: number | null; ally_company_id?: number | null; customer_id: number | null; supplier_id: number | null;
+  company_kind: "ally" | "customer" | "supplier" | null; ally_state?: string | null; visible_to_ally?: boolean;
   name: string; role: string; scope: string | null; scope_lines: string[]; contacts: Record<string, Contact>; requests?: CostRequest[];
 };
 export type PendingCost = CostRequest & { ally: string; opportunity_number: string; opportunity_title: string };
@@ -32,13 +35,25 @@ const STATE_BADGE: Record<string, string> = { solicitado: "warn", recibido: "inf
 export const partyLine = (o: { customer: string | null; end_customer?: string | null; site?: string | null }) =>
   `${o.customer || "Sin cliente"}${o.end_customer ? ` → para ${o.end_customer}` : ""}${o.site ? ` · ${o.site}` : ""}`;
 
-/* Clientes y proveedores en un solo buscador: el id del proveedor viaja negativo para no chocar con el del cliente. */
-const searchCompanies = async (q: string): Promise<LookupItem[]> => {
-  const r = await api<{ kind: string; id: number; name: string; hint: string }[]>(`/opportunity-allies/companies?q=${encodeURIComponent(q)}`);
-  return r.map((c) => ({ id: c.kind === "supplier" ? -c.id : c.id, label: c.name, hint: c.hint }));
+/* Empresa de la participacion: una empresa aliada (lo normal, 12:45 "lo ocupo que salgan solo los aliados") o, con
+   "¿No es aliado?", un cliente o proveedor como antes. El buscador devuelve ids de tres tablas: se guardan aparte. */
+type CompanyKind = "ally" | "customer" | "supplier";
+type CompanyRef = { kind: CompanyKind; id: number };
+const picked = new Map<number, CompanyRef>();
+let seq = 0;
+const searchCompanies = (todos: boolean) => async (q: string): Promise<LookupItem[]> => {
+  const r = await api<{ kind: CompanyKind; id: number; name: string; hint: string; tax_id?: string | null; suspended?: boolean }[]>(
+    `/opportunity-allies/companies?q=${encodeURIComponent(q)}${todos ? "&todos=true" : ""}`,
+  );
+  return r.map((c) => {
+    seq += 1;
+    picked.set(seq, { kind: c.kind, id: c.id });
+    return { id: seq, label: c.name, hint: [c.hint, c.tax_id, c.suspended ? "suspendido" : null].filter(Boolean).join(" · ") };
+  });
 };
 
-type AllyForm = { id?: number; company: number; company_name: string; role: string; scope: string; scope_lines: string[]; contacts: Record<string, Contact> };
+type AllyForm = { id?: number; company: CompanyRef | null; company_name: string; role: string; scope: string; scope_lines: string[]; contacts: Record<string, Contact>; visible: boolean };
+type QuickAlly = { name: string; tax_id: string; func: string; contact: string; existing?: { id: number; name: string } | null };
 type ReqForm = {
   id?: number; ally_id: number; ally: string; what: string; responsible_id: string; responsible?: string | null; due_date: string; status: string;
   amount: string; currency: string; valid_until: string; exclusions: string; attachments: { id: number; url: string; filename: string }[];
@@ -53,6 +68,10 @@ export function AlliesPanel({ oppId, allies, canEdit, seesCosts, sellers, quoteI
   const [req, setReq] = useState<ReqForm | null>(null);
   const [lines, setLines] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [todos, setTodos] = useState(false);
+  const [quick, setQuick] = useState<QuickAlly | null>(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const fetcher = useCallback(searchCompanies(todos), [todos]);
   const reqs = allies.flatMap((a) => a.requests || []);
   const pend = reqs.filter((r) => r.pending);
   const late = reqs.filter((r) => r.overdue);
@@ -63,9 +82,35 @@ export function AlliesPanel({ oppId, allies, canEdit, seesCosts, sellers, quoteI
   };
   const openAlly = (a?: Ally) => {
     loadLines(); setReq(null);
+    setQuick(null);
+    const ref: CompanyRef | null = a ? (a.ally_company_id ? { kind: "ally", id: a.ally_company_id } : a.supplier_id ? { kind: "supplier", id: a.supplier_id } : a.customer_id ? { kind: "customer", id: a.customer_id } : null) : null;
+    setTodos(!!a && a.company_kind !== "ally");
     setForm(a
-      ? { id: a.id, company: a.supplier_id ? -a.supplier_id : a.customer_id || 0, company_name: a.name, role: a.role, scope: a.scope || "", scope_lines: a.scope_lines, contacts: a.contacts || {} }
-      : { company: 0, company_name: "", role: "subcontratista", scope: "", scope_lines: [], contacts: {} });
+      ? { id: a.id, company: ref, company_name: a.name, role: a.role, scope: a.scope || "", scope_lines: a.scope_lines, contacts: a.contacts || {}, visible: a.visible_to_ally !== false }
+      : { company: null, company_name: "", role: "subcontratista", scope: "", scope_lines: [], contacts: {}, visible: true });
+  };
+  /* "+ Crear aliado «texto»": alta rapida (nombre, cedula y un contacto por funcion) y queda elegido */
+  const crearAliado = async () => {
+    if (!quick || !form) return;
+    try {
+      const contacts = quick.contact.trim() ? { [quick.func]: { name: quick.contact.trim() } } : {};
+      const c = await api<{ kind: CompanyKind; id: number; name: string }>("/opportunity-allies/companies", { method: "POST", json: { name: quick.name, tax_id: quick.tax_id || null, contacts } });
+      setForm({ ...form, company: { kind: "ally", id: c.id }, company_name: c.name });
+      setQuick(null);
+      toast(`Aliado ${c.name} creado`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) setQuick({ ...quick, existing: (e.data as { existing?: { id: number; name: string } })?.existing || null });
+      else toast(e instanceof Error ? e.message : "No se pudo crear", "bad");
+    }
+  };
+  const usarExistente = () => {
+    if (!quick?.existing || !form) return;
+    setForm({ ...form, company: { kind: "ally", id: quick.existing.id }, company_name: quick.existing.name });
+    setQuick(null);
+  };
+  const convertir = (a: Ally) => {
+    if (!confirm(`¿Convertir a ${a.name} en empresa aliada? Así podrá ver esta oportunidad en su portal.`)) return;
+    run(() => api<Ally[]>(`/opportunity-allies/${a.id}/to-ally`, { method: "POST", json: {} }), `${a.name} ahora es empresa aliada`);
   };
   const run = async (fn: () => Promise<Ally[]>, ok: string) => {
     if (busy) return;
@@ -77,9 +122,10 @@ export function AlliesPanel({ oppId, allies, canEdit, seesCosts, sellers, quoteI
 
   const saveAlly = async () => {
     if (!form || !form.company) return;
+    const k = form.company;
     const json = {
-      customer_id: form.company > 0 ? form.company : null, supplier_id: form.company < 0 ? -form.company : null, role: form.role,
-      scope: form.scope.trim() || null, scope_lines: form.scope_lines, contacts: form.contacts,
+      ally_company_id: k.kind === "ally" ? k.id : null, customer_id: k.kind === "customer" ? k.id : null, supplier_id: k.kind === "supplier" ? k.id : null, role: form.role,
+      scope: form.scope.trim() || null, scope_lines: form.scope_lines, contacts: form.contacts, visible_to_ally: form.visible,
     };
     const done = await run(
       () => api<Ally[]>(form.id ? `/opportunity-allies/${form.id}` : `/opportunities/${oppId}/allies`, { method: form.id ? "PUT" : "POST", json }),
@@ -137,9 +183,15 @@ export function AlliesPanel({ oppId, allies, canEdit, seesCosts, sellers, quoteI
       {allies.map((a) => (
         <article className="ally" key={a.id}>
           <div className="ally__head">
-            <div className="ally__name"><b>{a.name}</b><span className="opp__kind">{ALLY_ROLES[a.role] || a.role}</span><span className="meta">{a.company_kind === "supplier" ? "Proveedor" : "Cliente"}</span></div>
+            <div className="ally__name">
+              <b>{a.name}</b><span className="opp__kind">{ALLY_ROLES[a.role] || a.role}</span>
+              <span className="meta">{a.company_kind === "ally" ? "Aliado" : a.company_kind === "supplier" ? "Proveedor" : "Cliente"}</span>
+              {a.company_kind === "ally" && a.visible_to_ally === false && <span className="badge badge--muted">Oculta al aliado</span>}
+              {a.company_kind === "ally" && a.ally_state && a.ally_state !== "activo" && <span className="badge badge--warn">{a.ally_state}</span>}
+            </div>
             {canEdit && (
               <div className="ally__actions">
+                {a.company_kind !== "ally" && <button className="btn btn--ghost btn--sm" onClick={() => convertir(a)}>Convertir en aliado</button>}
                 <button className="btn btn--ghost btn--sm" onClick={() => openReq(a)}>Solicitar costo</button>
                 <button className="btn btn--ghost btn--sm" onClick={() => openAlly(a)}>Editar</button>
                 <button className="btn btn--ghost btn--sm" onClick={() => removeAlly(a)} aria-label={`Quitar ${a.name}`}><Icon d={I.x} size={14} /></button>
@@ -166,10 +218,17 @@ export function AlliesPanel({ oppId, allies, canEdit, seesCosts, sellers, quoteI
                   <div className="meta ally__req-meta">
                     <span>{r.responsible || "Sin responsable"}</span>
                     <span>{r.due_date ? `Límite ${fmtDate(r.due_date)}` : "Sin fecha límite"}</span>
+                    {r.source === "aliado" && <span>Enviada por el aliado</span>}
+                    {r.source !== "aliado" && r.responded_at && <span>Respondida por el aliado el {fmtDate(r.responded_at.slice(0, 10))}</span>}
                     {r.costs_visible && r.amount != null && <span className="money">{fmtMoney(r.amount, r.currency)}</span>}
                     {r.costs_visible && r.valid_until && <span>Vigente hasta {fmtDate(r.valid_until)}</span>}
                   </div>
                   {r.costs_visible && r.exclusions && <p className="ally__scope">Excluye: {r.exclusions}</p>}
+                  {r.costs_visible && (r.lines || []).length > 0 && (
+                    <ul className="ally__scope" style={{ margin: "4px 0", paddingLeft: 18 }}>
+                      {(r.lines || []).map((l, i) => <li key={i}>{l.concept}: {Number(l.quantity)} {l.unit || ""} × {fmtMoney(l.unit_price, r.currency)}</li>)}
+                    </ul>
+                  )}
                   {r.costs_visible && (r.attachments || []).length > 0 && <div className="ally__chips">{(r.attachments || []).map((x) => <a key={x.id} href={x.url} target="_blank" rel="noreferrer">{x.filename}</a>)}</div>}
                   {canEdit && (seesCosts || !["aprobado", "rechazado"].includes(r.status)) && (
                     <div className="ally__req-actions">
@@ -186,11 +245,49 @@ export function AlliesPanel({ oppId, allies, canEdit, seesCosts, sellers, quoteI
 
       {form && (
         <div className="opp-newcust">
-          <div className="opp-newcust__head"><b>{form.id ? `Editar aliado · ${form.company_name}` : "Nuevo aliado"}</b><span className="muted">Una empresa que ya existe como cliente o proveedor.</span></div>
+          <div className="opp-newcust__head"><b>{form.id ? `Editar aliado · ${form.company_name}` : "Nuevo aliado"}</b><span className="muted">Elegí una empresa aliada o creala aquí.</span></div>
           <div className="grid-2">
-            <Field label="Empresa"><Lookup value={form.company_name} placeholder="Buscar cliente o proveedor…" fetcher={searchCompanies} onSelect={(it, text) => setForm({ ...form, company: it ? it.id : 0, company_name: text })} /></Field>
+            <Field label="Empresa aliada">
+              <Lookup
+                value={form.company_name}
+                placeholder={todos ? "Buscar aliado, cliente o proveedor…" : "Buscar empresa aliada…"}
+                fetcher={fetcher}
+                onSelect={(it, text) => setForm({ ...form, company: it ? picked.get(it.id) || null : null, company_name: text })}
+                onCreate={(text) => setQuick({ name: text, tax_id: "", func: "comercial", contact: "" })}
+                createLabel="Crear aliado"
+              />
+              <button type="button" className="btn btn--ghost btn--sm" style={{ alignSelf: "flex-start", marginTop: 4 }} onClick={() => setTodos((t) => !t)}>{todos ? "Solo empresas aliadas" : "¿No es aliado? Buscar en clientes y proveedores"}</button>
+            </Field>
             <Field label="Papel"><select className="select" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{Object.entries(ALLY_ROLES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
           </div>
+          {quick && (
+            <div className="opp-newcust" style={{ margin: "0 0 10px" }}>
+              <b>Crear aliado «{quick.name}»</b>
+              <div className="grid-3">
+                <Field label="Nombre"><input className="input" value={quick.name} onChange={(e) => setQuick({ ...quick, name: e.target.value, existing: null })} /></Field>
+                <Field label="Cédula jurídica (opcional)"><input className="input" value={quick.tax_id} onChange={(e) => setQuick({ ...quick, tax_id: e.target.value, existing: null })} /></Field>
+                <Field label="Contacto">
+                  <select className="select" value={quick.func} onChange={(e) => setQuick({ ...quick, func: e.target.value })}>{Object.entries(CONTACT_FUNCS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+                  <input className="input" placeholder="Nombre del contacto" value={quick.contact} onChange={(e) => setQuick({ ...quick, contact: e.target.value })} />
+                </Field>
+              </div>
+              {quick.existing && (
+                <p className="muted" style={{ margin: "4px 0" }}>Ya existe: <b>{quick.existing.name}</b>{" "}
+                  <button type="button" className="btn btn--soft btn--sm" onClick={usarExistente}>Usar este</button>
+                </p>
+              )}
+              <div className="ally__form-foot">
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => setQuick(null)}>Cancelar</button>
+                <button type="button" className="btn btn--crimson btn--sm" disabled={quick.name.trim().length < 2} onClick={crearAliado}>Crear aliado</button>
+              </div>
+            </div>
+          )}
+          {form.company?.kind === "ally" && (
+            <label className="pf-bool" title="El aliado verá esta oportunidad, su alcance y lo que le pidamos">
+              <input type="checkbox" checked={form.visible} onChange={(e) => setForm({ ...form, visible: e.target.checked })} />Visible en el portal del aliado
+              <span className="meta" style={{ marginLeft: 6 }}>El aliado verá esta oportunidad, su alcance y lo que le pidamos.</span>
+            </label>
+          )}
           <Field label="Alcance asignado"><textarea className="textarea" style={{ minHeight: 56 }} value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value })} placeholder="Tendido y fusión de fibra entre bodegas…" /></Field>
           {lines && lines.length > 0 && (
             <Field label="Partidas de la cotización (opcional)">
@@ -201,6 +298,8 @@ export function AlliesPanel({ oppId, allies, canEdit, seesCosts, sellers, quoteI
               </div>
             </Field>
           )}
+          <details open={form.company?.kind !== "ally"}>
+          <summary className="meta" style={{ cursor: "pointer", margin: "6px 0" }}>{form.company?.kind === "ally" ? "Contactos del aliado · editar solo para esta oportunidad" : "Contactos por función"}</summary>
           <div className="ally__contact-grid">
             {Object.entries(CONTACT_FUNCS).map(([k, label]) => {
               const c = form.contacts[k] || {};
@@ -215,6 +314,7 @@ export function AlliesPanel({ oppId, allies, canEdit, seesCosts, sellers, quoteI
               );
             })}
           </div>
+          </details>
           <div className="ally__form-foot">
             <button className="btn btn--ghost btn--sm" onClick={() => setForm(null)}>Cancelar</button>
             <button className="btn btn--crimson btn--sm" disabled={!form.company || busy} onClick={saveAlly}>Guardar aliado</button>

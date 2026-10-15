@@ -235,3 +235,23 @@ def test_aliado_responde_y_envia_precios(client, auth, db_session):
     )
     assert r.status_code == 201
     assert uid(client, s.a_jefe) == s.uid_a_jefe
+
+
+def test_asignar_desde_la_bandeja_y_levantamiento_a_tecnico_aliado(client, auth, db_session):
+    from app.models import SupportTicket, Survey
+
+    s = escenario(client, dict(client.headers), db_session)
+    # "Tomar"/responsable de la bandeja: un tecnico aliado deja el ticket asignado a su empresa
+    r = client.post(f"/tickets/{s.T_A_libre}/assign", json={"assigned_to": s.uid_a_tec2})
+    assert r.status_code == 200, r.text
+    assert db_session.get(SupportTicket, s.T_A_libre).ally_company_id == s.A
+    assert client.post(f"/tickets/{s.T_A_libre}/assign", json={"assigned_to": s.uid_b_tec}).status_code == 422
+    # levantamiento de Crimson en O1 -> tecnico de A (participa en O1); el de B no
+    tecs = client.get(f"/field/technicians?opportunity_id={s.O1}").json()
+    assert s.uid_a_tec in ids(tecs) and s.uid_b_tec not in ids(tecs)
+    assert client.post(f"/surveys/{s.S_cr}/assign", json={"technician_id": s.uid_b_tec}).status_code == 422
+    r = client.post(f"/surveys/{s.S_cr}/assign", json={"technician_id": s.uid_a_tec})
+    assert r.status_code == 200 and r.json()["ally_company"] == "Aliado Uno S.A.", r.text
+    db_session.expire_all()
+    assert db_session.get(Survey, s.S_cr).ally_company_id == s.A
+    assert s.S_cr in ids(client.get("/aliado/levantamientos", headers=s.a_tec).json())

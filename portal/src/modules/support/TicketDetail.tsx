@@ -26,6 +26,13 @@ export function TicketDetail({ ticket: t, meta, now, onClose, onChanged, onEdit,
   resolveOnOpen?: boolean;
 }) {
   const { allows, toast } = useSession();
+  // responsables de la empresa aliada del ticket (asignada o del proyecto): "Responsable" los suma a los internos
+  const aliadaId = t.ally_company_id ?? Number((t.allies.find((a) => a.key.startsWith("a:"))?.key || "").slice(2) || 0);
+  const [agentesAliado, setAgentesAliado] = useState<{ id: number; name: string; company: string | null }[]>([]);
+  useEffect(() => {
+    if (!aliadaId || !allows("support_desk.editar")) { setAgentesAliado([]); return; }
+    api<{ id: number; name: string; company: string | null }[]>(`/tickets/meta/agents?ally_company_id=${aliadaId}`).then((r) => setAgentesAliado(r.filter((x) => x.company))).catch(() => setAgentesAliado([]));
+  }, [aliadaId, allows]);
   const canEdit = allows("support_desk.editar");
   const canFollow = allows("support_desk.seguir|support_desk.editar");
   // el monto que se cobra es precio: el tecnico no lo ve ni lo escribe (13/10, 22:07); lo pone admin o contabilidad
@@ -145,12 +152,13 @@ export function TicketDetail({ ticket: t, meta, now, onClose, onChanged, onEdit,
                   <select className="select" aria-label="Responsable" value={t.assigned_to ?? ""} onChange={(e) => asignar(e.target.value ? Number(e.target.value) : null)}>
                     <option value="">Sin asignar</option>
                     {(meta?.agents || []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    {agentesAliado.map((a) => <option key={`al${a.id}`} value={a.id}>{a.name} · {a.company}</option>)}
                   </select>
                 ) : t.assigned || "Sin asignar"}</dd>
               </div>
               <div><dt>Equipo</dt><dd>{t.asset || "—"}</dd></div>
               <div><dt>Proyecto</dt><dd>{t.project_id ? <Link to={`/proyectos/${t.project_id}`}>{t.project || "Ver"}</Link> : "—"}</dd></div>
-              <div><dt>Empresa aliada</dt><dd>{t.allies.length ? t.allies.map((a) => a.name).join(", ") : "—"}</dd></div>
+              <div><dt>Empresa aliada</dt><dd>{t.ally_company ? <b>{t.ally_company}</b> : null}{t.ally_company && t.allies.length ? " · " : ""}{t.allies.length ? t.allies.filter((a) => a.name !== t.ally_company).map((a) => a.name).join(", ") : t.ally_company ? "" : "—"}</dd></div>
               <div><dt>Abierto por</dt><dd>{t.opened_by_name || "—"} · {fechaCR(t.created_at)}</dd></div>
               <div><dt>Horas</dt><dd className="mono">{Number(t.hours || 0)}</dd></div>
               <div><dt>Cobro</dt><dd>{t.billable ? (verMonto ? <span className="money">{fmtMoney(t.amount)}</span> : "Se cobra") : "Sin costo"}</dd></div>

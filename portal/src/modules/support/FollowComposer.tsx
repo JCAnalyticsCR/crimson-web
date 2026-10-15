@@ -12,7 +12,7 @@ import { esAbierto, type Ticket } from "./ticketTypes";
 const ATAJOS = ["Llamé al cliente", "Le escribí por WhatsApp", "Sin respuesta del cliente", "Pedimos repuesto", "Visita agendada", "Probado y funcionando"];
 
 type Draft = {
-  body: string; internal: boolean; hours: string; photos: string[];
+  body: string; internal: boolean; hours: string; photos: string[]; share_ally?: boolean;
   next_step: string; next_step_at: string | null; clear: boolean; status: string;
 };
 const blank = (t: Ticket): Draft => ({
@@ -79,7 +79,7 @@ export function FollowComposer({ ticket, onSaved, autoFocus, focusNext, onCancel
         if (draft.body.trim()) {
           return api<Ticket>(`/tickets/${ticket.id}/notes`, {
             method: "POST",
-            json: { body: draft.body.trim(), internal: draft.internal, photos: draft.photos, hours: draft.hours ? Number(draft.hours) : null, status: canEdit && draft.status && draft.status !== ticket.status ? draft.status : null, ...paso },
+            json: { body: draft.body.trim(), internal: draft.internal, share_ally: !!(draft.internal && draft.share_ally && ticket.ally_company_id), photos: draft.photos, hours: draft.hours ? Number(draft.hours) : null, status: canEdit && draft.status && draft.status !== ticket.status ? draft.status : null, ...paso },
           });
         }
         // sin texto: solo cambia el proximo paso (no hay nota ni primera respuesta)
@@ -134,6 +134,9 @@ export function FollowComposer({ ticket, onSaved, autoFocus, focusNext, onCancel
       <PhotoStrip value={draft.photos} onChange={(photos) => set({ photos })} label="Foto" privado="support_desk" />
       <div className="tk-compose__row">
         <label style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={draft.internal} onChange={(e) => set({ internal: e.target.checked })} />Nota interna (no cuenta como respuesta al cliente)</label>
+        {draft.internal && ticket.ally_company_id && (
+          <label style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={!!draft.share_ally} onChange={(e) => set({ share_ally: e.target.checked })} />Compartir con {ticket.ally_company}</label>
+        )}
         <input className="input input--mono" style={{ maxWidth: 100 }} inputMode="decimal" placeholder="horas" aria-label="Horas" value={draft.hours} onChange={(e) => set({ hours: e.target.value })} />
         {canEdit && (
           <select className="select select--sm" aria-label="Dejar en" value={draft.status} onChange={(e) => set({ status: e.target.value })}>
