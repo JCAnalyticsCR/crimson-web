@@ -271,7 +271,7 @@ def test_tope_de_zips_por_correo(client, auth, db_session, monkeypatch):
     def zip_de(n: int) -> bytes:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-            z.writestr(f"relleno-{n}.bin", os.urandom(120 * 1024))  # cada zip pasa sus propios limites
+            z.writestr(f"relleno-{n}.bin", b"BIN" + os.urandom(120 * 1024))  # "otro" (bytes al azar podrian empezar con "<")
         return buf.getvalue()
 
     files = [(f"z{i}.zip", zip_de(i)) for i in range(4)] + [("f.zip", _zip_con(factura(71)))]
