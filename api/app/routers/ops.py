@@ -1083,6 +1083,8 @@ def run_due_recurrences(db: Session, today: date | None = None) -> int:
                 run_recurrence(db, r, None)
                 n += 1
                 if r.active and r.next_date <= today:
+                    from html import escape
+
                     from ..models import Tenant
                     from ..services.mail import notify_roles
 
@@ -1092,7 +1094,8 @@ def run_due_recurrences(db: Session, today: date | None = None) -> int:
                         t,
                         ("admin",),
                         f"Recurrencia «{r.name}» con periodos atrasados",
-                        f"<p>La recurrencia de factura <b>{r.name}</b> tiene periodos atrasados (siguiente: {r.next_date}). Se generó una sola factura; revísela antes de generar las demás.</p>",
+                        f"<p>La recurrencia de factura <b>{escape(r.name or '')}</b> tiene periodos atrasados (siguiente: {r.next_date}). "
+                        "Se generó una sola factura; revísela antes de generar las demás.</p>",
                         "recurrence",
                         r.id,
                     )
