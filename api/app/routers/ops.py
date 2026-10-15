@@ -897,6 +897,8 @@ def _rec_template(data: RecurrenceIn, db: Session | None = None, tenant_id: int 
     if data.kind == "factura":
         if not data.customer_id:
             raise HTTPException(422, "La recurrencia de factura requiere cliente")
+        if db is not None and tenant_id is not None:
+            docsvc.check_customer(db, tenant_id, data.customer_id)  # de ESTA empresa: cada corrida le factura a el
         return DocumentIn(**data.template).model_dump(mode="json")
     tpl = {"iva_credit": "no_credito", "tax_rate": 0, **data.template}
     exp = ExpenseIn(**{**tpl, "date": data.next_date})
@@ -909,6 +911,7 @@ def _rec_template(data: RecurrenceIn, db: Session | None = None, tenant_id: int 
 
 def _rec_out(r: Recurrence, db: Session):
     c = db.get(Customer, r.customer_id) if r.customer_id else None
+    c = c if c is not None and c.tenant_id == r.tenant_id else None  # nunca el nombre de un cliente de otra empresa
     return {
         "id": r.id,
         "name": r.name,

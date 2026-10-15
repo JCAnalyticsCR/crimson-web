@@ -147,6 +147,8 @@ def direct_payload(
     """Todo lo que necesita xml44.build_comprobante. lenient=True (simulado) rellena lo que falte con marcadores."""
     prof = hc.profile(db, tenant)
     c = db.get(Customer, inv.customer_id) if inv.customer_id else None
+    if c is not None and c.tenant_id != inv.tenant_id:
+        c = None  # un cliente de otra empresa nunca es el receptor (defensa: documents.check_customer ya lo impide)
     if doc_type in ("FE", "FEE", "NC", "ND") and not (c and c.id_number):
         raise HTTPException(422, "La factura electronica requiere receptor con identificacion (use Tiquete si es consumidor final)")
     if not lenient and inv.medical_exemption_card:

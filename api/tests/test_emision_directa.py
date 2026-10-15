@@ -379,3 +379,39 @@ def test_entrega_a_un_correo_malo_tiene_tope_y_no_deja_sin_turno_a_las_demas(cli
     assert len(salidas) == k and len(fallos()) == ed.MAX_FAILS  # ni otro intento ni otro aviso
     x = [d for d in client.get(f"/invoices/{a['id']}/xml").json() if d["id"] == doc.id][0]
     assert x["delivery_failed_at"] and not x["delivered_at"]
+
+
+def test_cliente_de_otra_empresa_no_se_factura_ni_recibe_el_comprobante(client, auth, db_session, pruebas, correos):
+    """customer_id de otra empresa: cotizacion, factura (crear y editar) y recurrencia -> 404 antes de gastar el numero.
+    Defensa: una factura que ya quedo con un cliente ajeno no se emite con su cedula ni le entrega el XML."""
+    from app.models import BillingGroup, Customer, Invoice, Tenant
+    from app.services.einvoice_delivery import recipients
+
+    otra = Tenant(slug="otra-emision", name="Otra empresa de prueba", default_currency="CRC")
+    db_session.add(otra)
+    db_session.flush()
+    ajeno = Customer(tenant_id=otra.id, name="Cliente ajeno", id_type="juridica", id_number="3101999999", email="ajeno@otra.example")
+    db_session.add(ajeno)
+    db_session.commit()
+    prods = client.get("/products", params={"q": "domo"}).json()["items"]
+    linea = [{"product_id": prods[0]["id"], "quantity": 1}]
+    inv = _factura(client)
+    numeros = {g.doc_type: g.current for g in db_session.query(BillingGroup).all()}
+    assert client.post("/invoices", json={"customer_id": ajeno.id, "lines": linea}).status_code == 404
+    assert client.post("/quotes", json={"customer_id": ajeno.id, "lines": linea}).status_code == 404
+    assert client.put(f"/invoices/{inv['id']}", json={"customer_id": ajeno.id, "lines": linea}).status_code == 404
+    db_session.expire_all()
+    assert {g.doc_type: g.current for g in db_session.query(BillingGroup).all()} == numeros  # no se gasto ningun numero
+    rec = {"name": "Mensual", "kind": "factura", "customer_id": ajeno.id, "template": {"lines": linea}, "next_date": (date.today() + timedelta(days=5)).isoformat()}
+    assert client.post("/recurrences", json=rec).status_code == 404
+    # defensa: la factura ya tiene el cliente ajeno (dato viejo): no sale a Hacienda con su cedula ni le llega el correo
+    row = db_session.get(Invoice, inv["id"])
+    row.customer_id = ajeno.id
+    db_session.commit()
+    r = client.post(f"/invoices/{inv['id']}/emit")
+    assert r.status_code == 422 and not pruebas.posts, r.text
+    assert not [c for c in correos if c["to"] == "ajeno@otra.example"]
+    from app.models import EInvoiceDocument
+
+    fake_doc = EInvoiceDocument(tenant_id=row.tenant_id, invoice_id=row.id, doc_type="FE", consecutive="0" * 20, provider="hacienda", mode="produccion")
+    assert recipients(db_session, fake_doc, row) == []

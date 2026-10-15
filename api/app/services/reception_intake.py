@@ -252,6 +252,8 @@ def _our_receiver(db: Session, doc: EInvoiceDocument) -> str | None:
             pass
     inv = db.get(Invoice, doc.invoice_id)
     c = db.get(Customer, inv.customer_id) if inv and inv.customer_id else None
+    if c is not None and c.tenant_id != doc.tenant_id:
+        return None  # un cliente de otra empresa no cuenta como nuestro receptor
     return c.id_number if c and c.id_number else None
 
 
