@@ -12,6 +12,13 @@ let waiters: (() => void)[] = [];
 
 const MARGIN = 120; // segundos: se renueva antes de que venza para no mostrar una foto rota
 
+/* El portal de aliados firma con su propia ruta (/aliado/media/firmar: solo lo publico y lo de SU equipo). */
+let signPath = "/media/sign";
+export function setSignPath(path: string | null) {
+  if ((path || "/media/sign") !== signPath) cache.clear();
+  signPath = path || "/media/sign";
+}
+
 /** Solo las de nuestra multimedia y que todavia no traen firma (las del portal del cliente ya vienen firmadas). */
 export function needsSign(u: string | null | undefined): u is string {
   return !!u && u.includes("/media/f/") && !/[?&]s=/.test(u);
@@ -31,7 +38,7 @@ async function flush() {
   for (let i = 0; i < urls.length; i += 200) {
     const part = urls.slice(i, i + 200);
     try {
-      const r = await api<{ urls: Record<string, string>; expires_at: number | null }>("/media/sign", { method: "POST", json: { urls: part } });
+      const r = await api<{ urls: Record<string, string>; expires_at: number | null }>(signPath, { method: "POST", json: { urls: part } });
       for (const u of part) {
         const s = r.urls[u];
         // publica: misma URL, sin vencimiento. Privada: hasta la expiracion de su firma. Sin acceso: vacia un rato

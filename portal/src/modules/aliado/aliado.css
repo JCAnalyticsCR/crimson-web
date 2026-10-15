@@ -1,0 +1,44 @@
+/* Portal de aliados: se apoya en el del cliente (cliente.css, móvil primero, validado a 390 px) y solo agrega lo
+   propio. Colores siempre con tokens (ui/tokens.css): claro y oscuro salen solos. */
+.al .cp-tabs button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 2px; font-size: 11px; color: var(--text-3); background: transparent; border: 0; min-width: 0; cursor: pointer; }
+.al .cp-tabs button.is-active { color: var(--crimson); font-weight: 600; }
+.al-more { position: fixed; z-index: 21; left: 8px; right: 8px; bottom: calc(64px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 2px; padding: 8px; border: 1px solid var(--hair); border-radius: 14px; background: var(--surface, var(--bg)); box-shadow: 0 10px 30px rgba(0, 0, 0, .18); }
+.al-more a { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 10px; color: inherit; text-decoration: none; font-size: 15px; }
+.al-more a.active { background: var(--crimson-soft); color: var(--crimson); }
+@media (min-width: 900px) { .al-more { display: none; } }
+.al-preview { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 16px; background: var(--warn-soft); border-bottom: 1px solid var(--warn); font-size: 13px; }
+.al-preview span { flex: 1 1 220px; min-width: 0; }
+.al-band { padding: 10px 16px; background: var(--warn-soft); border-bottom: 1px solid var(--warn); font-size: 14px; }
+.al-band a { color: var(--crimson); font-weight: 600; }
+.al-kv { display: grid; grid-template-columns: minmax(110px, auto) 1fr; gap: 6px 12px; font-size: 14px; }
+.al-kv dt { color: var(--text-3); }
+.al-kv dd { margin: 0; overflow-wrap: anywhere; }
+.al-sec { margin: 20px 0 8px; }
+.al-big { display: flex; flex-direction: column; gap: 10px; }
+.al-big .cp-row { padding: 16px; }
+.al-money b { font-variant-numeric: tabular-nums; }
+.al-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.al-actions .btn { min-height: 44px; }
+.al-table { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.al-table table { width: 100%; min-width: 520px; border-collapse: collapse; font-size: 13px; }
+.al-table th, .al-table td { padding: 8px 10px; border-bottom: 1px solid var(--hair); text-align: left; vertical-align: top; }
+.al-table td.num, .al-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.al-cat { display: grid; gap: 12px; grid-template-columns: 1fr; }
+@media (min-width: 640px) { .al-cat { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1000px) { .al-cat { grid-template-columns: repeat(3, 1fr); } }
+.al-cat__it { display: flex; gap: 12px; padding: 12px; border: 1px solid var(--hair); border-radius: 14px; background: var(--surface, var(--bg)); min-width: 0; text-decoration: none; color: inherit; }
+.al-cat__img { width: 72px; height: 72px; flex: none; border-radius: 10px; background: var(--bg-2) center/contain no-repeat; }
+.al-cat__price { font-size: 18px; font-weight: 700; color: var(--crimson); }
+.al-lines { display: flex; flex-direction: column; gap: 8px; }
+.al-line { display: grid; grid-template-columns: 1fr; gap: 6px; padding: 10px; border: 1px solid var(--hair); border-radius: 10px; }
+@media (min-width: 700px) { .al-line { grid-template-columns: 2fr 1fr 1fr 1.4fr auto; align-items: end; } }
+.al-point { border: 1px solid var(--hair); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.al-point__grid { display: grid; gap: 10px; grid-template-columns: 1fr; }
+@media (min-width: 700px) { .al-point__grid { grid-template-columns: repeat(2, 1fr); } }
+.al-obs { padding: 10px 12px; border-radius: 12px; border: 1px solid var(--warn); background: var(--warn-soft); }
+.al-obs.is-done { border-color: var(--hair); background: var(--bg-2); }
+.al-chart { display: flex; align-items: flex-end; gap: 6px; height: 140px; padding: 8px 0; overflow-x: auto; }
+.al-chart__col { flex: 1 0 28px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; min-width: 28px; }
+.al-chart__bar { width: 100%; border-radius: 4px 4px 0 0; background: var(--crimson); }
+.al-chart__bar--fee { background: var(--text-3); }
+.al-chart__lbl { font-size: 10px; color: var(--text-3); }

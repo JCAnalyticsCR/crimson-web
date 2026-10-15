@@ -42,7 +42,7 @@ export const ROLES: Record<string, RoleMeta> = {
     summary: "Todo el dinero de la empresa: facturas, cobros, gastos, recepción de XML, conciliación, planillas y reportes.",
     can: ["Facturas y cobros de toda la empresa", "Gastos, recepción y conciliación", "Planillas, colillas y comisiones", "Aprobaciones de planillas y comisiones", "Los reportes de la empresa con Excel"],
     cannot: ["Crear ventas o cobrar", "Ver costos de productos ni márgenes (salvo que el administrador lo habilite)", "Configurar la empresa o los usuarios"],
-    menu: ["/", "/aprobaciones", "/facturas", "/pagos", "/recurrencias", "/clientes", "/productos", "/inventario", "/compras", "/comisiones", "/contabilidad", "/recepcion", "/conciliacion", "/planillas", "/vehiculos", "/reportes", "/archivo", "/ajustes"],
+    menu: ["/", "/aprobaciones", "/facturas", "/pagos", "/recurrencias", "/clientes", "/productos", "/inventario", "/compras", "/comisiones", "/aliados", "/contabilidad", "/recepcion", "/conciliacion", "/planillas", "/vehiculos", "/reportes", "/archivo", "/ajustes"],
   },
   tecnico: {
     label: "Técnico instalador", tone: "#b45309", glyph: "T",
@@ -51,19 +51,18 @@ export const ROLES: Record<string, RoleMeta> = {
     cannot: ["Ver precios, costos ni montos", "Ver trabajos de otros técnicos", "Ver facturas, cobros o reportes"],
     menu: ["/", "/ordenes-trabajo", "/levantamientos", "/tickets", "/mantenimientos", "/activos", "/inventario", "/ajustes"],
   },
+  // Roles de empresa aliada: no entran al panel interno (sin `menu`): tienen su propio portal (modules/aliado, AllyShell)
   aliado: {
     label: "Aliado comercial", tone: "#4338ca", glyph: "AL",
     summary: "Empresa aliada: ve solo lo que tiene en común con Crimson — oportunidades, levantamientos, proyectos, tickets y mantenimientos — y el catálogo con su precio de aliado.",
-    can: ["Oportunidades y proyectos en común", "Hacer levantamientos de lo que llevan en común", "Darle sus precios a Crimson cuando se los pide", "Tickets y mantenimientos asignados a su empresa", "Catálogo con precio de aliado e inventario (solo cantidades)", "Sus ganancias por proyecto"],
+    can: ["Oportunidades y proyectos en común", "Hacer levantamientos de lo que llevan en común", "Darle sus precios a Crimson cuando se los pide", "Tickets y mantenimientos asignados a su empresa", "Catálogo con precio de aliado e inventario (solo cantidades)", "Ver sus ganancias por proyecto y su rentabilidad en el tiempo"],
     cannot: ["Cotizar o facturar a nombre de Crimson", "Ver clientes, proyectos o tickets que no sean en común", "Ver costos de Crimson ni lo que Crimson le cobra al cliente", "Ver contabilidad, planillas o reportes"],
-    menu: ["/", "/oportunidades", "/proyectos", "/ordenes-trabajo", "/levantamientos", "/tickets", "/mantenimientos", "/activos", "/clientes", "/productos", "/inventario", "/comisiones", "/ajustes"],
   },
   tecnico_aliado: {
     label: "Técnico de aliado", tone: "#9a3412", glyph: "TA",
     summary: "Técnico de una empresa aliada: solo lo que le toca hoy — sus levantamientos, órdenes de trabajo, tickets y mantenimientos asignados.",
     can: ["Ver su trabajo del día", "Llenar levantamientos en sitio", "Atender los tickets y mantenimientos que le asignan", "Registrar material, horas, fotos y firma"],
     cannot: ["Ver precios ni costos", "Ver activos o datos de clientes fuera de su trabajo", "Ver trabajo de otros técnicos"],
-    menu: ["/", "/ordenes-trabajo", "/levantamientos", "/tickets", "/mantenimientos", "/ajustes"],
   },
   supervisor: {
     label: "Supervisor técnico", tone: "#0f766e", glyph: "S",
@@ -108,6 +107,8 @@ export const ROLES: Record<string, RoleMeta> = {
 
 export const isClientRole = (code: string | undefined) => code === "cliente_admin" || code === "cliente_usuario";
 export const isAllyRole = (code: string | undefined) => code === "aliado" || code === "tecnico_aliado";
+/** Cliente o aliado: tienen su propio portal y nunca el panel interno. */
+export const isExternalRole = (code: string | undefined) => isClientRole(code) || isAllyRole(code);
 
 /** La sección (o una ruta dentro de ella, p. ej. /cotizaciones/nueva) está en el menú de ese rol. Sin lista: sí. */
 export const inRoleMenu = (code: string | undefined, to: string) => {

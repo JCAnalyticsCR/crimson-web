@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { api, auth, bootstrap, type Me } from "../lib/api";
+import { ALLY_PREVIEW_KEY, api, auth, bootstrap, readAllyPreview, type AllyPreview, type Me } from "../lib/api";
 import { canAny, inRoleMenu, type Perms } from "./roles";
 
 type Session = {
@@ -14,6 +14,8 @@ type Session = {
   /** La seccion (ruta) esta en el menu explicito del rol (roles.ts); sin lista, si. No es seguridad: la API manda. */
   inMenu: (to: string) => boolean;
   viewAs: string | null; setViewAs: (role: string | null) => void; matrix: Record<string, Perms>;
+  /** "Ver como este aliado" (solo admin): el portal de aliados con los datos reales de esa empresa, solo lectura. */
+  allyPreview: AllyPreview | null; setAllyPreview: (v: AllyPreview | null) => void;
   /** Vuelve a pedir la matriz de roles (p. ej. despues de cambiar "Quien ve costos" en Ajustes). */
   reloadMatrix: () => void;
 };
@@ -30,6 +32,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const toastTimer = useRef<number | undefined>(undefined);
   const [viewAs, setViewAsState] = useState<string | null>(() => { try { return sessionStorage.getItem("crimson-view-as"); } catch { return null; } });
   const [matrix, setMatrix] = useState<Record<string, Perms>>({});
+  const [allyPv, setAllyPv] = useState<AllyPreview | null>(() => readAllyPreview());
 
   const reload = useCallback(async () => {
     try { setMe(await api<Me>("/auth/me")); } catch { setMe(null); }
@@ -55,6 +58,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const setViewAs = (r: string | null) => {
     setViewAsState(r);
     try { if (r) sessionStorage.setItem("crimson-view-as", r); else sessionStorage.removeItem("crimson-view-as"); } catch { /* privado */ }
+    if (!r) setAllyPreview(null);
+  };
+  // "Salir" de la vista previa del aliado borra las dos llaves (rol y empresa)
+  const setAllyPreview = (v: AllyPreview | null) => {
+    setAllyPv(v);
+    try { if (v) sessionStorage.setItem(ALLY_PREVIEW_KEY, JSON.stringify(v)); else sessionStorage.removeItem(ALLY_PREVIEW_KEY); } catch { /* privado */ }
+    if (v) { setViewAsState(v.role); try { sessionStorage.setItem("crimson-view-as", v.role); } catch { /* privado */ } }
   };
 
   const login = async (email: string, password: string, totp?: string, newPassword?: string) => {
@@ -74,7 +84,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // La vista previa solo existe para administradores y solo reduce permisos (nunca amplia lo que la API permite).
-  const previewing = me?.role === "admin" && viewAs && matrix[viewAs] ? viewAs : null;
+  // Un rol aliado sin empresa elegida no es vista previa (AppShell abre el selector de aliado).
+  const allyPreview = me?.role === "admin" && allyPv?.company_id ? allyPv : null;
+  const aliadoSinEmpresa = (viewAs === "aliado" || viewAs === "tecnico_aliado") && !allyPreview;
+  const previewing = me?.role === "admin" && viewAs && matrix[viewAs] && !aliadoSinEmpresa ? viewAs : null;
   const role = previewing || me?.role || "";
   const perms: Perms = useMemo(() => (previewing ? matrix[previewing] : me?.permissions) || {}, [previewing, matrix, me?.permissions]);
   const allows = useCallback((need?: string) => canAny(perms, need), [perms]);
@@ -83,7 +96,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const inMenu = useCallback((to: string) => inRoleMenu(role, to), [role]);
 
   return (
-    <Ctx.Provider value={{ me, loading, login, logout, reload, theme, toggleTheme: () => setTheme((t) => (t === "dark" ? "light" : "dark")), toast, role, perms, allows, realAllows, inMenu, viewAs: previewing, setViewAs, matrix, reloadMatrix }}>
+    <Ctx.Provider value={{ me, loading, login, logout, reload, theme, toggleTheme: () => setTheme((t) => (t === "dark" ? "light" : "dark")), toast, role, perms, allows, realAllows, inMenu, viewAs: previewing, setViewAs, matrix, reloadMatrix, allyPreview, setAllyPreview }}>
       {children}
       {toastState && (
         <div className={`toast toast--${toastState.tone}`} role="status">

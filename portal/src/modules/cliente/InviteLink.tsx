@@ -5,10 +5,10 @@ import { I, Icon } from "../../ui/components";
 
 export type InviteOut = { id: number; link: string; emailed: boolean; expires_at?: string };
 
-export function InviteLink({ inv, email }: { inv: InviteOut; email: string }) {
+export function InviteLink({ inv, email, portal = "clientes" }: { inv: InviteOut; email: string; portal?: "clientes" | "aliados" }) {
   const { toast } = useSession();
   const copiar = async () => { try { await navigator.clipboard.writeText(inv.link); toast("Enlace copiado"); } catch { toast("No se pudo copiar; selecciónelo a mano", "bad"); } };
-  const wa = `https://wa.me/?text=${encodeURIComponent(`Le damos acceso al portal de clientes de Crimson. Cree su contraseña aquí (vence en 7 días): ${inv.link}`)}`;
+  const wa = `https://wa.me/?text=${encodeURIComponent(`Le damos acceso al portal de ${portal} de Crimson. Cree su contraseña aquí (vence en 7 días): ${inv.link}`)}`;
   return (
     <div className="cp-card" style={{ display: "flex", flexDirection: "column", gap: 8, background: "var(--surface-2)" }}>
       {inv.emailed

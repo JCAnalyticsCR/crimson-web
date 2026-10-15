@@ -8,7 +8,7 @@ import { SessionProvider, useSession } from "./app/session";
 import AppShell from "./app/AppShell";
 import Guard from "./app/Guard";
 import Login from "./modules/auth/Login";
-import { isClientRole } from "./app/roles";
+import { isAllyRole, isClientRole } from "./app/roles";
 import StoreHost, { isStoreHost } from "./modules/store/StoreHost";
 const Dashboard = lazy(() => import("./modules/dashboard/Dashboard"));
 const DocList = lazy(() => import("./modules/sales/DocList"));
@@ -63,11 +63,36 @@ const ClientAssets = lazy(() => import("./modules/cliente/ClientAssets"));
 const ClientDocs = lazy(() => import("./modules/cliente/ClientDocs"));
 const ClientUsers = lazy(() => import("./modules/cliente/ClientUsers"));
 const ClientAccount = lazy(() => import("./modules/cliente/ClientAccount"));
+// Portal de aliados: su propio layout y su propio menu (nunca el panel interno). "Ver como este aliado" (admin) lo usa.
+const AllyShell = lazy(() => import("./modules/aliado/AllyShell"));
+const AllyHome = lazy(() => import("./modules/aliado/AllyHome"));
+const AllyOpportunities = lazy(() => import("./modules/aliado/AllyOpportunities"));
+const AllyOpportunity = lazy(() => import("./modules/aliado/AllyOpportunity"));
+const AllyProjects = lazy(() => import("./modules/aliado/AllyProjects"));
+const AllyProject = lazy(() => import("./modules/aliado/AllyProject"));
+const AllySurveys = lazy(() => import("./modules/aliado/AllySurveys"));
+const AllySurvey = lazy(() => import("./modules/aliado/AllySurvey"));
+const AllyOrders = lazy(() => import("./modules/aliado/AllyOrders"));
+const AllyTickets = lazy(() => import("./modules/aliado/AllyTickets"));
+const AllyTicket = lazy(() => import("./modules/aliado/AllyTicket"));
+const AllyNewTicket = lazy(() => import("./modules/aliado/AllyNewTicket"));
+const AllyContracts = lazy(() => import("./modules/aliado/AllyContracts"));
+const AllyAssets = lazy(() => import("./modules/aliado/AllyAssets"));
+const AllyCatalog = lazy(() => import("./modules/aliado/AllyCatalog"));
+const AllyInventory = lazy(() => import("./modules/aliado/AllyInventory"));
+const AllyEarnings = lazy(() => import("./modules/aliado/AllyEarnings"));
+const AllySubscription = lazy(() => import("./modules/aliado/AllySubscription"));
+const AllyUsers = lazy(() => import("./modules/aliado/AllyUsers"));
+const AllyAccount = lazy(() => import("./modules/aliado/AllyAccount"));
+// Administracion -> Aliados (interno)
+const Allies = lazy(() => import("./modules/aliados/Allies"));
+const AllyDetail = lazy(() => import("./modules/aliados/AllyDetail"));
 
 function Private() {
-  const { me, loading } = useSession();
+  const { me, loading, allyPreview } = useSession();
   if (loading) return <div style={{ minHeight: "100dvh", display: "grid", placeItems: "center" }}><span className="spinner" /></div>;
   if (!me) return <Login />;
+  if (isAllyRole(me.role) || allyPreview) return <Suspense fallback={<Loading />}><AllyShell /></Suspense>;
   return isClientRole(me.role) ? <Suspense fallback={<Loading />}><ClientShell /></Suspense> : <AppShell />;
 }
 
@@ -83,8 +108,11 @@ const g = (need: string, el: ReactElement) => <Guard need={need}>{el}</Guard>;
 const Loading = () => <div style={{ minHeight: "60vh", display: "grid", placeItems: "center" }}><span className="spinner" /></div>;
 
 function App() {
-  const { me } = useSession();
+  const { me, allyPreview } = useSession();
   const cliente = isClientRole(me?.role);
+  // los roles aliados (y el admin en "Ver como este aliado") solo tienen las rutas de su portal
+  const aliado = isAllyRole(me?.role) || !!allyPreview;
+  const ag = (need: string, el: ReactElement) => <Guard need={`aliado.${need}`}>{el}</Guard>;
   return (
     <Suspense fallback={<Loading />}>
     <Routes>
@@ -98,7 +126,31 @@ function App() {
       <Route path="/eventos/:slug/:event" element={<PublicEvent />} />
       <Route path="/entrada/:code" element={<TicketPage />} />
       <Route path="/solicitar-acceso" element={<RequestAccess />} />
-      {cliente ? (
+      {aliado ? (
+        <Route element={<Private />}>
+          <Route path="/" element={<AllyHome />} />
+          <Route path="/oportunidades" element={ag("oportunidades", <AllyOpportunities />)} />
+          <Route path="/oportunidades/:id" element={ag("oportunidades", <AllyOpportunity />)} />
+          <Route path="/proyectos" element={ag("proyectos", <AllyProjects />)} />
+          <Route path="/proyectos/:id" element={ag("proyectos", <AllyProject />)} />
+          <Route path="/levantamientos" element={ag("levantamientos", <AllySurveys />)} />
+          <Route path="/levantamientos/:id" element={ag("levantamientos", <AllySurvey />)} />
+          <Route path="/ordenes" element={ag("ordenes", <AllyOrders />)} />
+          <Route path="/ordenes/:id" element={ag("ordenes", <AllyOrders />)} />
+          <Route path="/soporte" element={ag("tickets", <AllyTickets />)} />
+          <Route path="/soporte/nuevo" element={ag("tickets_crear", <AllyNewTicket />)} />
+          <Route path="/soporte/:id" element={ag("tickets", <AllyTicket />)} />
+          <Route path="/mantenimientos" element={ag("mantenimientos", <AllyContracts />)} />
+          <Route path="/activos" element={ag("activos", <AllyAssets />)} />
+          <Route path="/catalogo" element={ag("catalogo", <AllyCatalog />)} />
+          <Route path="/inventario" element={ag("inventario", <AllyInventory />)} />
+          <Route path="/ganancias" element={ag("ganancias", <AllyEarnings />)} />
+          <Route path="/suscripcion" element={ag("suscripcion", <AllySubscription />)} />
+          <Route path="/equipo" element={ag("usuarios", <AllyUsers />)} />
+          <Route path="/mi-cuenta" element={<AllyAccount />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      ) : cliente ? (
         <Route element={<Private />}>
           <Route path="/" element={<ClientHome />} />
           <Route path="/mis-tickets" element={<ClientTickets />} />
@@ -137,6 +189,8 @@ function App() {
         <Route path="/tickets" element={g("support_desk.ver", <Tickets />)} />
         <Route path="/mantenimientos" element={g("support_desk.ver", <Contracts />)} />
         <Route path="/comisiones" element={g("commissions.ver", <Commissions />)} />
+        <Route path="/aliados" element={g("aliados.ver", <Allies />)} />
+        <Route path="/aliados/:id" element={g("aliados.ver", <AllyDetail />)} />
         <Route path="/productos" element={g("catalog.ver", <Products />)} />
         <Route path="/productos/cabys" element={g("catalog.editar", <CabysBulk />)} />
         <Route path="/inventario" element={g("inventory.ver", <Inventory />)} />

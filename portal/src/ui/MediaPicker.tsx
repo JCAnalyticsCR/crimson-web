@@ -127,8 +127,10 @@ export function PhotoStrip({ value, onChange, label = "Agregar fotografía", dis
   value: string[]; onChange: (v: string[]) => void; label?: string; disabled?: boolean; caption?: string; onOpen?: (index: number) => void; uploadPath?: string; privado?: PrivateModule;
 }) {
   const interno = !uploadPath || uploadPath === "/media";
+  // el portal de aliados sube fotos privadas de su equipo y las firma con su propia ruta (lib/media.ts setSignPath)
+  const firma = interno || !!uploadPath?.startsWith("/aliado/");
   const { upload, busy } = useUpload(uploadPath, interno ? privado : undefined);
-  const ver = useMediaUrls(value, interno); // URL para mostrar (firmada si es privada)
+  const ver = useMediaUrls(value, firma); // URL para mostrar (firmada si es privada)
   const [abierta, setAbierta] = useState<number | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const take = async (files: FileList | null) => {
@@ -155,7 +157,7 @@ export function PhotoStrip({ value, onChange, label = "Agregar fotografía", dis
         </button>
       )}
       {disabled && value.length === 0 && <span className="muted" style={{ fontSize: 13 }}>Sin fotografías.</span>}
-      {abierta !== null && <Lightbox fotos={value.map((url) => ({ url, caption }))} start={abierta} onClose={() => setAbierta(null)} sign={interno} />}
+      {abierta !== null && <Lightbox fotos={value.map((url) => ({ url, caption }))} start={abierta} onClose={() => setAbierta(null)} sign={firma} />}
     </div>
   );
 }

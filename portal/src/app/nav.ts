@@ -43,6 +43,8 @@ export const NAV: NavGroup[] = [
   { group: "Administración", items: [
     { to: "/compras", label: "Compras", icon: I.upload, need: "purchases.ver" },
     { to: "/comisiones", label: "Comisiones", icon: I.trend, need: "commissions.ver" },
+    // empresas aliadas: datos, usuarios, precios de aliado y mensualidad (sus usuarios usan el portal de aliados)
+    { to: "/aliados", label: "Aliados", icon: I.team, need: "aliados.ver" },
     { to: "/contabilidad", label: "Contabilidad", icon: I.accounting, need: "accounting.ver" },
     { to: "/recepcion", label: "Recepción XML", icon: I.bell, need: "accounting.ver" },
     { to: "/conciliacion", label: "Conciliación", icon: I.bank, need: "accounting.ver" },

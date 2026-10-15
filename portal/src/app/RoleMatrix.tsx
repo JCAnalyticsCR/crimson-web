@@ -4,7 +4,7 @@
    sección le sale a cada rol. Nunca queda desactualizada como un texto escrito a mano. */
 import { Fragment } from "react";
 import { NAV } from "./nav";
-import { ROLES, canAny, inRoleMenu, isClientRole } from "./roles";
+import { ROLES, canAny, inRoleMenu, isExternalRole } from "./roles";
 import { useSession } from "./session";
 
 const MONEY: { label: string; need: string }[] = [
@@ -18,8 +18,8 @@ const no = <span className="muted" aria-label="no">—</span>;
 
 export default function RoleMatrix() {
   const { matrix } = useSession();
-  // mismo orden que Ajustes y "Ver como"; sin soporte ni roles de cliente (tienen su propio portal)
-  const roles = Object.keys(ROLES).filter((r) => r !== "soporte" && !isClientRole(r) && matrix[r]);
+  // mismo orden que Ajustes y "Ver como"; sin soporte ni roles de cliente o aliado (tienen su propio portal)
+  const roles = Object.keys(ROLES).filter((r) => r !== "soporte" && !isExternalRole(r) && matrix[r]);
   if (!roles.length) return <p className="muted" style={{ fontSize: 13, margin: 0 }}>Cargando la matriz de roles…</p>;
 
   const cell = { padding: "6px 10px", textAlign: "center" as const };
@@ -55,6 +55,7 @@ export default function RoleMatrix() {
           ))}
         </tbody>
       </table>
+      <p className="meta" style={{ margin: "8px 0 0" }}>Aliado comercial y Técnico de aliado usan el portal de aliados (Administración → Aliados).</p>
     </div>
   );
 }

@@ -1,9 +1,26 @@
 /* Cliente HTTP: token de acceso en memoria, refresh automatico por cookie httpOnly, errores tipados. */
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string, public headers?: Headers) {
+  /** data: el cuerpo de la respuesta de error (p. ej. {detail, existing} de un 409 por duplicado). */
+  constructor(public status: number, message: string, public headers?: Headers, public data?: unknown) {
     super(message);
   }
+}
+
+/* "Ver como este aliado" (solo admin): el portal de aliados se dibuja con los datos REALES de esa empresa. La API lo
+   aplica solo a /aliado/* y solo para lectura (core/ally.py); el navegador manda la empresa elegida en cabeceras. */
+export const ALLY_PREVIEW_KEY = "crimson-view-ally";
+export type AllyPreview = { company_id: number; user_id?: number | null; role: "aliado" | "tecnico_aliado"; name?: string; user_name?: string | null };
+export function readAllyPreview(): AllyPreview | null {
+  try { const raw = sessionStorage.getItem(ALLY_PREVIEW_KEY); return raw ? (JSON.parse(raw) as AllyPreview) : null; } catch { return null; }
+}
+function previewHeaders(path: string): Record<string, string> {
+  if (!path.startsWith("/aliado")) return {};
+  const v = readAllyPreview();
+  if (!v?.company_id) return {};
+  const h: Record<string, string> = { "X-View-As-Ally": String(v.company_id) };
+  if (v.user_id) h["X-View-As-User"] = String(v.user_id);
+  return h;
 }
 
 let accessToken: string | null = null;
@@ -30,7 +47,7 @@ async function tryRefresh(): Promise<boolean> {
    Los enlaces <a href="/api/..."> no llevan el token (vive en memoria), por eso se piden con fetch + Bearer
    y se entregan como blob: descarga (Excel, XML) o pestana nueva (PDF/HTML imprimible). */
 async function fetchBlob(path: string, retry = true): Promise<Blob> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...previewHeaders(path) };
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
   const r = await fetch(`/api${path}`, { headers, credentials: "include" });
   if (r.status === 401 && retry && (await tryRefresh())) return fetchBlob(path, false);
@@ -84,7 +101,7 @@ export const bootstrap = () => (accessToken ? Promise.resolve(true) : tryRefresh
 
 export async function api<T = unknown>(path: string, init: RequestInit & { json?: unknown; retry?: boolean } = {}): Promise<T> {
   const { json, retry = true, ...rest } = init;
-  const headers: Record<string, string> = { ...(rest.headers as Record<string, string>) };
+  const headers: Record<string, string> = { ...previewHeaders(path), ...(rest.headers as Record<string, string>) };
   if (json !== undefined) headers["Content-Type"] = "application/json";
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
   const r = await fetch(`/api${path}`, { ...rest, headers, credentials: "include", body: json !== undefined ? JSON.stringify(json) : rest.body });
@@ -94,8 +111,9 @@ export async function api<T = unknown>(path: string, init: RequestInit & { json?
   }
   if (!r.ok) {
     let msg = r.statusText;
-    try { const j = await r.json(); msg = typeof j.detail === "string" ? j.detail : Array.isArray(j.detail) ? friendly(j.detail) : "No se pudo completar la solicitud"; } catch { /* sin cuerpo */ }
-    throw new ApiError(r.status, msg, r.headers);
+    let data: unknown;
+    try { const j = await r.json(); data = j; msg = typeof j.detail === "string" ? j.detail : Array.isArray(j.detail) ? friendly(j.detail) : "No se pudo completar la solicitud"; } catch { /* sin cuerpo */ }
+    throw new ApiError(r.status, msg, r.headers, data);
   }
   if (r.status === 204) return undefined as T;
   return r.json() as Promise<T>;
@@ -104,7 +122,9 @@ export async function api<T = unknown>(path: string, init: RequestInit & { json?
 /* ---------- Tipos ---------- */
 export type Tenant = { id: number; slug: string; name: string; legal_name: string | null; tax_id: string | null; default_currency: string; logo_url: string | null; plan: string };
 export type User = { id: number; email: string; full_name: string; totp_enabled: boolean };
-export type Me = { user: User; tenant: Tenant; role: string; permissions: Record<string, string[]>; memberships: { tenant: Tenant; role: string }[] };
+/** ally_company: solo usuarios de una empresa aliada (portal /aliado). */
+export type AllyCompanyMe = { id: number; name: string; state: "activo" | "suspendido" | "inactivo"; suspended_reason: string | null; features?: { ganancias: boolean } };
+export type Me = { user: User; tenant: Tenant; role: string; permissions: Record<string, string[]>; memberships: { tenant: Tenant; role: string }[]; ally_company?: AllyCompanyMe | null };
 export type Customer = { id: number; id_type: string; id_number: string | null; name: string; email: string | null; phone: string | null; whatsapp: string | null; currency: string; active: boolean };
 export type Product = { id: number; name: string; code: string; item_type: string; price: number; currency: string; cabys_code: string | null; unit: string; tax_rate: number | null; category_id: number | null; show_on_web: boolean; tax_ids?: number[]; brand?: string | null; supplier_stock?: number | null };
 export type Line = { id?: number; product_id: number | null; code: string | null; name: string; description: string | null; cabys_code?: string | null; unit: string; quantity: string; unit_price: string; discount_type: string; discount_value: string; tax_rate: string; subtotal?: string; tax_amount?: string; total?: string; treatment?: string; supplied_by?: string | null };

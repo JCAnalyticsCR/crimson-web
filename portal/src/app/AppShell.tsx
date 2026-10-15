@@ -9,6 +9,7 @@ import UserMenu from "./UserMenu";
 import { NuevaVersion } from "./NuevaVersion";
 import { NAV } from "./nav";
 import PreviewBand from "./PreviewBand";
+import AllyPreviewPicker from "./AllyPreviewPicker";
 import { useApprovalCount } from "../modules/approvals/useApprovalCount";
 
 /* El menu vive en nav.ts (lo extienden otros frentes sin tocar este archivo). Se reexporta por compatibilidad. */
@@ -23,6 +24,8 @@ export default function AppShell() {
   const aprob = useApprovalCount(); // numero junto a "Aprobaciones"
   const [clock, setClock] = useState("");
   const [welcome, setWelcome] = useState(() => { try { return sessionStorage.getItem("crimson-welcome") === "1"; } catch { return false; } });
+  // "Ver como" un rol aliado: se elige la empresa (y la persona) y se abre su portal con datos reales, solo lectura
+  const [pickAlly, setPickAlly] = useState<"aliado" | "tecnico_aliado" | null>(null);
 
   useEffect(() => {
     const t = () => setClock(new Date().toLocaleTimeString("es-CR", { hour12: false, timeZone: "America/Costa_Rica" }));
@@ -85,7 +88,7 @@ export default function AppShell() {
             {me?.role === "admin" && (
               <label className="viewas" title="Previsualizar el panel con otro rol">
                 <span className="meta">{viewAs ? "Viendo como" : "Ver como"}</span>
-                <select value={viewAs || "admin"} onChange={(e) => setViewAs(e.target.value === "admin" ? null : e.target.value)}>
+                <select value={viewAs || "admin"} onChange={(e) => { const v = e.target.value; if (v === "aliado" || v === "tecnico_aliado") setPickAlly(v); else setViewAs(v === "admin" ? null : v); }}>
                   {Object.entries(ROLES).filter(([k]) => k !== "soporte" && !isClientRole(k)).map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
                 </select>
               </label>
@@ -102,6 +105,7 @@ export default function AppShell() {
         </main>
       </div>
       {welcome && me && <RoleWelcome onClose={closeWelcome} />}
+      {pickAlly && <AllyPreviewPicker role={pickAlly} onClose={() => setPickAlly(null)} />}
       <style>{`@media (max-width:900px){#burger{display:inline-flex!important}}`}</style>
     </div>
   );
