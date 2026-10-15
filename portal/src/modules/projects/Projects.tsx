@@ -9,11 +9,14 @@ import { ArchiveActions } from "../../ui/ArchiveActions";
 import { TrashButton } from "../../ui/TrashButton";
 import { ALLY_ROLES, CONTACT_FUNCS, partyLine, type Ally } from "../crm/OpportunityAllies";
 import { ReservationRow, type Reservation } from "../inventory/Inventory";
+import DealTerms from "../commissions/DealTerms";
 
 type Eco = {
   price: string; cost_planned: string; cost_materials: string; cost_labor: string; cost_travel: string; cost_extra: string;
   cost_real: string; profit: string | null; margin_real: number | null; margin_planned: number; hours: number; hours_estimated?: number | null;
   sin_costos?: boolean; provisional?: boolean; aviso?: string | null;
+  /* economia: venta en colones (cotizacion en USD), aliados (precios aprobados), comisiones y utilidad neta */
+  price_crc?: string; cost_allies?: string; commissions?: string; profit_net?: string | null; margin_net?: number | null;
 };
 type Project = {
   id: number; number: string; name: string; status: string; customer_id: number | null; customer: string | null; site: string | null;
@@ -90,6 +93,7 @@ function Detail({ id }: { id: number }) {
   const puedeReservar = allows("inventory.crear|projects.editar");
   const [edit, setEdit] = useState<{ status: string; cost_labor: string; cost_travel: string; cost_extra: string; end_date: string; notes: string } | null>(null);
   const verPlata = allows("catalog.costos");
+  const [deal, setDeal] = useState<{ id: number; name: string } | null>(null);
 
   const load = useCallback(() => {
     api<Project>(`/projects/${id}`).then(setP);
@@ -163,12 +167,15 @@ function Detail({ id }: { id: number }) {
 
       {e && verPlata && (
         <div className="eco">
-          <div className="eco__box"><span className="meta">Venta sin IVA</span><b className="money">{fmtMoney(e.price)}</b></div>
+          <div className="eco__box"><span className="meta">Venta sin IVA</span><b className="money">{fmtMoney(e.price_crc ?? e.price)}</b>{e.price_crc != null && Number(e.price_crc) !== Number(e.price) ? <small className="muted" style={{ display: "block", fontSize: 12 }}>cotizado {fmtMoney(e.price, "USD")}</small> : null}</div>
           {/* sin costos o sin cerrar: el real es provisional y manda el cotizado (nunca 100 % como definitivo) */}
           <div className="eco__box"><span className="meta">Costo real{e.provisional ? " · provisional" : ""}</span><b className="money">{fmtMoney(e.cost_real)}</b></div>
           <div className={`eco__box ${e.profit == null || e.provisional ? "" : Number(e.profit) >= 0 ? "is-good" : "is-bad"}`}><span className="meta">Utilidad{e.provisional ? " · provisional" : ""}</span><b className="money">{e.profit == null ? "—" : fmtMoney(e.profit)}</b></div>
           <div className="eco__box"><span className="meta">Margen presupuestado</span><b>{e.margin_planned.toFixed(1)}%</b></div>
           <div className={`eco__box ${e.margin_real == null || e.provisional ? "" : e.margin_real >= e.margin_planned - 5 ? "is-good" : "is-bad"}`}><span className="meta">Margen real{e.provisional ? " · provisional" : ""}</span><b>{e.margin_real == null ? "—" : `${e.margin_real.toFixed(1)}%`}</b>{e.aviso && <small className="muted" style={{ display: "block", fontSize: 12 }}>{e.aviso}</small>}</div>
+          {e.cost_allies != null && <div className="eco__box"><span className="meta">Aliados · incluido en el costo</span><b className="money">{fmtMoney(e.cost_allies)}</b></div>}
+          {e.commissions != null && <div className="eco__box"><span className="meta">Comisiones y bonos</span><b className="money">{fmtMoney(e.commissions)}</b></div>}
+          {e.commissions != null && <div className={`eco__box ${e.profit_net == null || e.provisional ? "" : Number(e.profit_net) >= 0 ? "is-good" : "is-bad"}`}><span className="meta">Utilidad neta{e.provisional ? " · provisional" : ""}{e.margin_net != null ? ` · ${e.margin_net.toFixed(1)}%` : ""}</span><b className="money">{e.profit_net == null ? "—" : fmtMoney(e.profit_net)}</b></div>}
           <div className="eco__box"><span className="meta">Horas de campo (h·persona)</span><b>{e.hours}</b>{e.hours_estimated ? <small className="muted" style={{ display: "block", fontSize: 12 }}>de {e.hours_estimated} estimadas</small> : null}</div>
         </div>
       )}
@@ -207,6 +214,13 @@ function Detail({ id }: { id: number }) {
                 <b>{a.name}</b> <span className="badge badge--muted">{ALLY_ROLES[a.role] || a.role}</span>
                 {a.scope && <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>{a.scope}</p>}
                 {Object.entries(a.contacts || {}).map(([k, c]) => <div key={k} className="meta" style={{ overflowWrap: "anywhere" }}>{CONTACT_FUNCS[k] || k}: {[c.name, c.phone, c.email].filter(Boolean).join(" · ")}</div>)}
+                {a.deal && (
+                  /* que recibe este aliado aqui (solo quien ve costos): pago acordado, comision y bonos */
+                  <p style={{ margin: "6px 0 0", fontSize: 13 }}>
+                    Recibe: {[Number(a.deal.pago_acordado_crc) ? `${fmtMoney(a.deal.pago_acordado_crc)} pago acordado` : null, a.deal.commission_summary ? `${a.deal.commission_summary}${a.deal.commission_general ? " (regla general)" : ""}` : null, a.deal.bonus_summary].filter(Boolean).join(" · ") || "sin acuerdo económico"}
+                  </p>
+                )}
+                {allows("commissions.configurar") && <button className="btn btn--ghost btn--sm" style={{ marginTop: 6 }} onClick={() => setDeal({ id: a.id, name: a.name })}>Acuerdo económico</button>}
               </div>
             ))}
           </div>
@@ -257,7 +271,7 @@ function Detail({ id }: { id: number }) {
           {verPlata && <>
             <p className="muted" style={{ fontSize: 13 }}>Los equipos se costean solos con lo que descontaron las órdenes. Aquí van los costos que no pasan por bodega.</p>
             <div className="grid-3">
-              <Field label="Mano de obra"><input className="input input--mono" inputMode="decimal" value={edit.cost_labor} onChange={(ev) => setEdit({ ...edit, cost_labor: ev.target.value })} /></Field>
+              <Field label="Mano de obra propia" hint="Lo de los aliados se suma solo desde sus precios aprobados."><input className="input input--mono" inputMode="decimal" value={edit.cost_labor} onChange={(ev) => setEdit({ ...edit, cost_labor: ev.target.value })} /></Field>
               <Field label="Viáticos y transporte"><input className="input input--mono" inputMode="decimal" value={edit.cost_travel} onChange={(ev) => setEdit({ ...edit, cost_travel: ev.target.value })} /></Field>
               <Field label="Otros costos"><input className="input input--mono" inputMode="decimal" value={edit.cost_extra} onChange={(ev) => setEdit({ ...edit, cost_extra: ev.target.value })} /></Field>
             </div>
@@ -265,6 +279,7 @@ function Detail({ id }: { id: number }) {
           <Field label="Notas"><textarea className="textarea" value={edit.notes} onChange={(ev) => setEdit({ ...edit, notes: ev.target.value })} /></Field>
         </Modal>
       )}
+      {deal && <DealTerms participationId={deal.id} name={deal.name} onClose={() => setDeal(null)} onSaved={load} />}
     </>
   );
 }

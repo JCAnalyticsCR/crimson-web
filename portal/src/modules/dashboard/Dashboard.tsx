@@ -34,6 +34,7 @@ const PENDING: { key: string; label: string; to: string; need: string; hot?: boo
   { key: "cotizaciones_por_aprobar", label: "Descuentos por aprobar", to: "/cotizaciones?pendiente=cotizaciones_por_aprobar", need: "sales.ver", hot: true },
   { key: "pedidos_web", label: "Pedidos web por atender", to: "/ordenes?pendiente=por_atender", need: "sales.ver", hot: true },
   { key: "costos_aliados", label: "Costos de aliados pendientes", to: "/oportunidades?pendiente=costos_aliados", need: "crm_pipeline.ver", hot: true },
+  { key: "comisiones_por_aprobar", label: "Comisiones por aprobar", to: "/comisiones?tab=bandeja", need: "commissions.aprobar", hot: true },
 ];
 
 /** Una tarjeta de pendientes: en 0 se ve apagada pero igual navega; sin permiso para la lista queda como dato. */
@@ -137,6 +138,17 @@ export default function Dashboard() {
                 <Link className="eco__box" to="/oportunidades"><span className="meta">Abiertas · {d.mi_embudo.abiertas}</span><b className="money">{fmtMoney(d.mi_embudo.monto, d.mi_embudo.moneda)}</b></Link>
                 <Link className="eco__box" to="/oportunidades"><span className="meta">Ponderado por probabilidad</span><b className="money">{fmtMoney(d.mi_embudo.ponderado, d.mi_embudo.moneda)}</b></Link>
                 <Link className="eco__box is-good" to="/oportunidades"><span className="meta">Ganado este mes · {d.mi_embudo.ganadas_mes}</span><b className="money">{fmtMoney(d.mi_embudo.ganado_mes, d.mi_embudo.moneda)}</b></Link>
+              </div>
+            </Card>
+          )}
+
+          {d.comisiones && (
+            /* 13/10 34:35: "va a poder ver cuanto esta ganando en tiempo real" (misma cuenta que Comisiones -> Mis comisiones) */
+            <Card title="Mis comisiones" extra={<Link className="btn btn--ghost btn--sm" to="/comisiones">Ver detalle</Link>}>
+              <div className="eco">
+                <Link className="eco__box is-good" to="/comisiones"><span className="meta">Ganado este mes</span><b className="money">{fmtMoney(d.comisiones.ganado_mes, d.comisiones.moneda)}</b></Link>
+                <Link className="eco__box" to="/comisiones"><span className="meta">Por cobrar · si te pagan tus facturas</span><b className="money">{fmtMoney(d.comisiones.por_cobrar, d.comisiones.moneda)}</b></Link>
+                <Link className="eco__box" to="/comisiones"><span className="meta">Pagado este mes</span><b className="money">{fmtMoney(d.comisiones.pagado_mes, d.comisiones.moneda)}</b></Link>
               </div>
             </Card>
           )}

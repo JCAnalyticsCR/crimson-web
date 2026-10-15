@@ -33,14 +33,14 @@ export const ROLES: Record<string, RoleMeta> = {
   ventas: {
     label: "Vendedor", tone: "#2f6fed", glyph: "V",
     summary: "Cotiza y factura con el precio de venta. Ve solo sus oportunidades, cotizaciones, facturas y comisiones; nunca el costo.",
-    can: ["Sus oportunidades y cotizaciones (el consecutivo es el de la empresa)", "Facturar y buscar sus facturas", "Ver en resumen los levantamientos de sus oportunidades y pedir uno nuevo", "Productos y servicios con el precio de venta", "Pedidos de la tienda", "Sus comisiones en tiempo real"],
+    can: ["Sus oportunidades y cotizaciones (el consecutivo es el de la empresa)", "Facturar y buscar sus facturas", "Ver en resumen los levantamientos de sus oportunidades y pedir uno nuevo", "Productos y servicios con el precio de venta", "Pedidos de la tienda", "Ver en tiempo real cuánto lleva ganado en comisiones"],
     cannot: ["Ver el costo del proveedor, el margen o la utilidad", "Ver lo que venden los demás o el total de la empresa", "Llenar o editar levantamientos", "Descontar más del límite sin aprobación", "Anular facturas"],
     menu: ["/", "/oportunidades", "/cotizaciones", "/facturas", "/pagos", "/levantamientos", "/clientes", "/productos", "/ordenes", "/comisiones", "/archivo", "/ajustes"],
   },
   contabilidad: {
     label: "Contador", tone: "#6b46c1", glyph: "K",
     summary: "Todo el dinero de la empresa: facturas, cobros, gastos, recepción de XML, conciliación, planillas y reportes.",
-    can: ["Facturas y cobros de toda la empresa", "Gastos, recepción y conciliación", "Planillas, colillas y comisiones", "Aprobaciones de planillas y comisiones", "Los reportes de la empresa con Excel"],
+    can: ["Facturas y cobros de toda la empresa", "Gastos, recepción y conciliación", "Planillas, colillas y comisiones", "Aprobaciones de planillas y comisiones", "Aprobar y marcar pagadas las comisiones y los pagos a aliados", "Los reportes de la empresa con Excel"],
     cannot: ["Crear ventas o cobrar", "Ver costos de productos ni márgenes (salvo que el administrador lo habilite)", "Configurar la empresa o los usuarios"],
     menu: ["/", "/aprobaciones", "/facturas", "/pagos", "/recurrencias", "/clientes", "/productos", "/inventario", "/compras", "/comisiones", "/aliados", "/contabilidad", "/recepcion", "/conciliacion", "/planillas", "/vehiculos", "/reportes", "/archivo", "/ajustes"],
   },
