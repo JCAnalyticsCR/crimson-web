@@ -685,6 +685,9 @@ def invoice_order(db: Session, t: Tenant, o: Order, user_id: int | None, doc_typ
         db.add(c)
         db.flush()
         customer_id = c.id
+    from ..models import Product
+
+    prods = {p.id: p for p in db.scalars(select(Product).where(Product.id.in_([ln.product_id for ln in o.lines if ln.product_id] or [0])))}
     payload = DocumentIn(
         customer_id=customer_id,
         currency=o.currency,
@@ -694,6 +697,10 @@ def invoice_order(db: Session, t: Tenant, o: Order, user_id: int | None, doc_typ
             LineInSchema(
                 product_id=ln.product_id,
                 name=ln.name,
+                # el comprobante electronico necesita el CABYS (y la unidad) del producto
+                cabys_code=(prods.get(ln.product_id).cabys_code if prods.get(ln.product_id) else None),
+                code=(prods.get(ln.product_id).code if prods.get(ln.product_id) else None),
+                unit=(prods.get(ln.product_id).unit if prods.get(ln.product_id) and prods.get(ln.product_id).unit else "Unid"),
                 quantity=d(ln.quantity),
                 unit_price=d(ln.unit_price),
                 discount_type=ln.discount_type,
