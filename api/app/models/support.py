@@ -12,7 +12,7 @@ Ojo con el nombre: Ticket ya existe y es la entrada de un evento. El del cliente
 
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -116,8 +116,27 @@ class MaintenanceContract(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     ally_company_id: Mapped[int | None] = mapped_column(ForeignKey("ally_company.id", ondelete="RESTRICT", name="fk_contract_ally_company"), index=True)
 
 
+# ---------- Comisiones v2 (economia): libro unico de lo que la empresa le debe a un vendedor o a un aliado ----------
+BENEFICIARIES = ("vendedor", "aliado")  # vendedor = cualquier usuario interno
+RULE_KINDS = ("comision", "bono_fin", "bono_anticipo")
+ENTRY_KINDS = ("comision", "bono", "pago_acordado", "ajuste")
+TRIGGERS = ("cobro", "cotizacion_aceptada", "proyecto_completado")  # + "manual" solo en movimientos
+ENTRY_STATES = ("en_espera", "pendiente", "aprobada", "pagada", "anulada")
+TRANSITIONS = {
+    "en_espera": {"anulada"},  # sale de espera solo con recalculo
+    "pendiente": {"aprobada", "pagada", "anulada"},  # pendiente -> pagada directo (test_session6)
+    "aprobada": {"pagada", "pendiente", "anulada"},
+    "pagada": set(),  # una pagada no se toca: se corrige con un ajuste
+    "anulada": set(),
+}
+DEAL_KINDS = ("venta", "proyecto")  # Opportunity.kind
+SOLUTIONS = ("cctv", "redes", "acceso", "asistencia", "ups", "cableado", "anpr", "otro")  # = SURVEY_KINDS
+
+
 class CommissionRule(TenantMixin, TimestampMixin, Base):
-    """Cuanto comisiona cada quien. Sin usuario = regla general de la empresa."""
+    """Cuanto gana cada quien y cuando. Vendedor sin persona = regla general (solo alcanza a los roles de
+    Comisiones -> Configuracion). Aliado sin empresa = todos los aliados; con participation_id = el acuerdo de UN
+    proyecto con ese aliado, que manda sobre las generales (services/commissions.best_rule)."""
 
     __tablename__ = "commission_rule"
 
@@ -128,24 +147,67 @@ class CommissionRule(TenantMixin, TimestampMixin, Base):
     percent: Mapped[float] = mapped_column(Numeric(6, 2), default=0)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[str | None] = mapped_column(Text)
+    beneficiary: Mapped[str] = mapped_column(String(10), default="vendedor", server_default="vendedor")  # vendedor | aliado
+    ally_company_id: Mapped[int | None] = mapped_column(ForeignKey("ally_company.id", name="fk_crule_ally_company"), index=True)
+    participation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ally_participation.id", ondelete="CASCADE", name="fk_crule_participation"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String(14), default="comision", server_default="comision")  # comision | bono_fin | bono_anticipo
+    trigger: Mapped[str] = mapped_column(String(20), default="cobro", server_default="cobro")  # cuando se devenga
+    deal_kind: Mapped[str | None] = mapped_column(String(12))  # venta | proyecto | None = cualquiera
+    solution: Mapped[str | None] = mapped_column(String(20))  # SOLUTIONS | None = cualquiera
+    fixed_amount: Mapped[float | None] = mapped_column(Numeric(16, 2))  # monto fijo (excluyente con percent > 0)
+    fixed_currency: Mapped[str | None] = mapped_column(String(3))
+    committed_date: Mapped[date | None] = mapped_column(Date)  # bono_anticipo: fecha comprometida de entrega
+    early_days: Mapped[int | None] = mapped_column(Integer)  # bono_anticipo: dias minimos de anticipacion (None = 1)
+    valid_from: Mapped[date | None] = mapped_column(Date)
+    valid_to: Mapped[date | None] = mapped_column(Date)
 
 
 class Commission(TenantMixin, TimestampMixin, Base):
-    """Comision devengada. Nace cuando entra el pago, no cuando se factura: "venta cobrada -> comision"."""
+    """Movimiento del libro: comision, bono, pago acordado o ajuste de un vendedor (user_id) o de una empresa aliada
+    (ally_company_id). Nace con el evento de su regla ("venta cobrada -> comision", 22/09) y pasa por la bandeja.
+    Nunca se borra: se anula o se revierte con un ajuste. source_key hace idempotente cada devengo."""
 
     __tablename__ = "commission"
+    __table_args__ = (UniqueConstraint("tenant_id", "source_key", name="uq_commission_source"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), index=True)  # null en movimientos de aliado
     invoice_id: Mapped[int | None] = mapped_column(ForeignKey("invoice.id"), index=True)
     payment_id: Mapped[int | None] = mapped_column(ForeignKey("payment.id"), index=True)
     rule_id: Mapped[int | None] = mapped_column(ForeignKey("commission_rule.id"))
     base: Mapped[str] = mapped_column(String(10), default="venta")
     base_amount: Mapped[float] = mapped_column(Numeric(16, 2), default=0)  # sobre que se calculo
     percent: Mapped[float] = mapped_column(Numeric(6, 2), default=0)
-    amount: Mapped[float] = mapped_column(Numeric(16, 2), default=0)
+    amount: Mapped[float] = mapped_column(Numeric(16, 2), default=0)  # negativo solo en kind "ajuste"
     currency: Mapped[str] = mapped_column(String(3), default="CRC")
     earned_on: Mapped[date] = mapped_column(Date, index=True)
-    status: Mapped[str] = mapped_column(String(12), default="pendiente", index=True)  # pendiente | aprobada | pagada | anulada
+    # en_espera | pendiente | aprobada | pagada | anulada (TRANSITIONS)
+    status: Mapped[str] = mapped_column(String(12), default="pendiente", index=True)
     paid_on: Mapped[date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)
+    beneficiary: Mapped[str] = mapped_column(String(10), default="vendedor", server_default="vendedor")
+    ally_company_id: Mapped[int | None] = mapped_column(ForeignKey("ally_company.id", name="fk_comm_ally_company"), index=True)
+    participation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ally_participation.id", ondelete="SET NULL", name="fk_comm_participation"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String(14), default="comision", server_default="comision")  # ENTRY_KINDS
+    trigger: Mapped[str] = mapped_column(String(20), default="cobro", server_default="cobro")  # TRIGGERS + manual
+    quote_id: Mapped[int | None] = mapped_column(ForeignKey("quote.id", ondelete="SET NULL", name="fk_comm_quote"), index=True)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("project.id", ondelete="SET NULL", name="fk_comm_project"), index=True)
+    opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunity.id", ondelete="SET NULL", name="fk_comm_opportunity"))
+    cost_request_id: Mapped[int | None] = mapped_column(ForeignKey("ally_cost_request.id", ondelete="SET NULL", name="fk_comm_cost_request"))
+    source_key: Mapped[str | None] = mapped_column(String(120))  # idempotencia (uq_commission_source)
+    fx: Mapped[float | None] = mapped_column(Numeric(12, 5))  # tipo de cambio usado para amount_crc
+    amount_crc: Mapped[float | None] = mapped_column(Numeric(16, 2))  # equivalente en colones al devengar
+    terms: Mapped[dict | None] = mapped_column(JSON)  # foto de la regla y de la base de venta al devengar
+    description: Mapped[str | None] = mapped_column(String(240))  # concepto legible: NUNCA lleva montos de base
+    hold_reason: Mapped[str | None] = mapped_column(String(240))  # por que esta en_espera
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("user.id", name="fk_comm_approved_by"))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    paid_by: Mapped[int | None] = mapped_column(ForeignKey("user.id", name="fk_comm_paid_by"))
+    paid_ref: Mapped[str | None] = mapped_column(String(120))  # comprobante: "Planilla oct-2026"
+    expense_id: Mapped[int | None] = mapped_column(ForeignKey("expense.id", ondelete="SET NULL", name="fk_comm_expense"))
+    void_reason: Mapped[str | None] = mapped_column(String(240))
+    reverses_id: Mapped[int | None] = mapped_column(ForeignKey("commission.id", name="fk_comm_reverses"))
