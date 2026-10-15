@@ -46,6 +46,17 @@ def fx_bccr_daily() -> dict:
     return {"sell": str(fx.sell), "buy": str(fx.buy)}
 
 
+@celery.task(name="suppliers.sync_eurocomp")
+def suppliers_sync_eurocomp() -> dict:
+    """Catalogo de Eurocomp por SiReTT, cada hora (Eurocomp permite una consulta masiva por hora). Sin credenciales no
+    hace nada; un fallo queda en el estado que ve el catalogo de proveedores y no se reintenta hasta la proxima hora."""
+    from app.core.db import SessionLocal
+    from app.services import supplier_sync
+
+    with SessionLocal() as db:
+        return {str(k): v for k, v in supplier_sync.sync_all(db).items()}
+
+
 @celery.task(name="sales.mark_overdue")
 def mark_overdue() -> int:
     """Marca vencidas las cotizaciones/facturas cuya fecha paso (los recordatorios por correo llegan en Fase 1.4)."""
@@ -478,5 +489,7 @@ celery.conf.beat_schedule = {
     "run-recurrences": {"task": "sales.run_recurrences", "schedule": crontab(hour=5, minute=0)},
     "retry-outbox": {"task": "mail.retry_outbox", "schedule": crontab(minute="*/15")},
     "fx-bccr-daily": {"task": "fx.bccr_daily", "schedule": crontab(hour=6, minute=15)},
+    # minuto 17: lejos del :00 de las demas tareas; antes del :25 de back-in-stock (avisos de "volvio a haber")
+    "suppliers-sync-eurocomp": {"task": "suppliers.sync_eurocomp", "schedule": crontab(minute=17)},
     "mark-overdue": {"task": "sales.mark_overdue", "schedule": crontab(hour=0, minute=30)},
 }

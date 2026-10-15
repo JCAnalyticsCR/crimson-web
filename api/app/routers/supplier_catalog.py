@@ -23,7 +23,8 @@ from sqlalchemy.orm import Session
 from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..models import Category, Product, ProductTax, Supplier, SupplierItem, SupplierListImport, Tax
-from ..services import pricing
+from ..providers.sirett import SirettError
+from ..services import pricing, supplier_sync
 from ..services import supplier_catalog as sc
 from ..services import supplier_lists as sl
 from ..services import tabular as tb
@@ -33,7 +34,7 @@ from ..services.totals import d
 router = APIRouter(prefix="/supplier-catalog", tags=["proveedores"])
 
 MAX = 5 * 1024 * 1024
-API_LABEL = "Conexión por API: pendiente de credenciales (SiReTT)"
+API_LABEL = "Conexión por API: pendiente de credenciales (SiReTT)"  # ver supplier_sync.status
 COST_KEYS = ("cost", "prev_cost", "cost_crc", "tax_rate")
 
 
@@ -154,10 +155,31 @@ def suppliers(p: Principal = Depends(require("catalog", "ver")), db: Session = D
                     if li
                     else None
                 ),
-                "api": {"status": "pendiente", "label": API_LABEL},
+                "api": supplier_sync.status(p.tenant, s),
             }
         )
     out.sort(key=lambda s: (s["items"] == 0, s["name"].lower()))
+    return out
+
+
+@router.post("/suppliers/{sid}/sync")
+def supplier_sync_now(sid: int, p: Principal = Depends(require("catalog", "crear")), db: Session = Depends(get_db)):
+    """Sincronizar ahora por SiReTT (Eurocomp). Eurocomp admite una consulta del catalogo completo por hora."""
+    _need_costs(p)
+    s = db.get(Supplier, sid)
+    if not s or s.tenant_id != p.tenant.id:
+        raise HTTPException(404, "Proveedor no encontrado")
+    st = supplier_sync.status(p.tenant, s)
+    if st["status"] == "no_aplica":
+        raise HTTPException(409, "Este proveedor no tiene conexión por API")
+    if st["status"] == "pendiente":
+        raise HTTPException(409, "Faltan las credenciales de Eurocomp en el servidor")
+    try:
+        out = supplier_sync.sync_tenant(db, p.tenant, user_id=p.user.id)
+    except SirettError as e:
+        raise HTTPException(429 if e.code == 20 else 502, e.message) from None
+    except supplier_sync.SyncRefused as e:
+        raise HTTPException(409, str(e)) from None
     return out
 
 

@@ -14,7 +14,7 @@ type Cat = { category: string | null; subcategory: string | null; count: number 
 type Sup = {
   id: number; name: string; items: number; active: number; linked: number; in_stock: number; categories: Cat[];
   last_list: { list_date: string; source: string; source_file: string | null; imported_at: string; summary: Record<string, number> | null } | null;
-  api: { status: string; label: string };
+  api: { status: string; label: string | null; last_ok_at?: string; last_try_at?: string; last_summary?: Record<string, number> };
 };
 type LinkedProduct = { id: number; code: string; name: string; active: boolean; price?: Num; currency?: string };
 type Item = {
@@ -70,12 +70,23 @@ export default function SupplierCatalog() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [mode, setMode] = useState<"link" | "add" | null>(null);
   const [sugOpen, setSugOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const loadSups = useCallback(() => api<Sup[]>("/supplier-catalog/suppliers").then((r) => {
     setSups(r);
     setSid((cur) => (cur && r.some((s) => s.id === cur) ? cur : (r.find((s) => s.items > 0)?.id ?? null)));
   }).catch((e) => { toastRef.current(e instanceof Error ? e.message : "Error", "bad"); setSups([]); }), []);
   useEffect(() => { loadSups(); }, [loadSups]);
+  /* Proveedor conectado por API (SiReTT de Eurocomp): se sincroniza solo cada hora; el boton adelanta la proxima. */
+  const apiSup = (sups || []).find((s) => ["conectado", "listo", "error"].includes(s.api.status));
+  const syncNow = () => {
+    if (!apiSup) return;
+    setSyncing(true);
+    api<Record<string, number>>(`/supplier-catalog/suppliers/${apiSup.id}/sync`, { method: "POST" })
+      .then((r) => toast(`Sincronizado: ${r.utiles} artículos útiles de ${r.recibidos} · ${r.nuevo} nuevos · ${r.actualizado} actualizados · ${r.vinculos} vínculos nuevos`))
+      .catch((e) => toast(e instanceof Error ? e.message : "Error", "bad"))
+      .finally(() => { setSyncing(false); loadSups(); });
+  };
 
   const query = useCallback((offset = 0) => {
     const p = new URLSearchParams({ limit: "60", offset: String(offset), estado: f.estado });
@@ -122,6 +133,7 @@ export default function SupplierCatalog() {
         <span className="muted" style={{ fontSize: 13 }}>{withItems.length ? `${withItems.length} con catálogo cargado` : "Ninguno con catálogo todavía"}</span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           {canLink && withItems.length > 0 && <button className="btn btn--soft btn--sm" onClick={() => setSugOpen(true)}><Icon d={I.link} />Sugerencias de vínculo</button>}
+          {canAdd && apiSup && <button className="btn btn--soft btn--sm" onClick={syncNow} disabled={syncing} title="Eurocomp permite una consulta del catálogo completo por hora"><Icon d={I.refresh} />{syncing ? "Sincronizando…" : `Sincronizar ${apiSup.name.split(" ")[0]}`}</button>}
           {canAdd && <button className="btn btn--crimson btn--sm" onClick={() => setImporting(true)}><Icon d={I.upload} />Importar lista</button>}
         </div>
       </div>
@@ -135,7 +147,7 @@ export default function SupplierCatalog() {
               <span className="prv-sup__name">{s.name}</span>
               <span className="prv-sup__nums"><span><b>{s.active}</b> ítems</span><span><b>{s.in_stock}</b> con existencia</span><span><b>{s.linked}</b> vinculados</span></span>
               <span className="meta">{s.last_list ? `Lista del ${fmtDate(s.last_list.list_date)}${s.last_list.source_file ? ` · ${s.last_list.source_file}` : ""}` : "Sin lista"}</span>
-              <span className="prv-api"><i />{s.api.label}</span>
+              {s.api.label && <span className="prv-api" data-status={s.api.status}><i />{s.api.label}{s.api.last_ok_at ? ` · ${new Date(s.api.last_ok_at).toLocaleString("es-CR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}</span>}
             </button>
           ))}
         </div>

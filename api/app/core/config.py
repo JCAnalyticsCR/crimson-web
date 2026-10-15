@@ -87,6 +87,16 @@ class Settings(BaseSettings):
     api_public_url: str | None = None
     einvoice_provider: str = "none"  # none | sandbox | alanube | gti ("hacienda" solo lo pone Ajustes -> Hacienda)
 
+    # ---------- Eurocomp (SiReTT WebService, Crimson entra como CLIENTE wsc_) ----------
+    # API Key (sirett_cli_...) o, mientras Eurocomp no la emita, la credencial heredada ID + contrasena. Vacio = sin
+    # sincronizacion (el catalogo del proveedor sigue entrando por Excel). Ver services/supplier_sync.py.
+    eurocomp_ws_url: str = "https://eurocompcr.com/webservice.php"
+    eurocomp_ws_key: SecretStr | None = None
+    eurocomp_ws_id: str | None = None
+    eurocomp_ws_password: SecretStr | None = None
+    eurocomp_bodega: int = 1  # bodega de Eurocomp con existencias para Crimson (las demas reportan 0)
+    eurocomp_supplier: str = "Eurocomp Costa Rica"  # nombre del proveedor en el catalogo de proveedores
+
     # ---------- Hacienda (factura electronica directa) y recepcion ----------
     # Llaves de cifrado de las credenciales fiscales (kid:base64url32, separadas por coma; la primera cifra).
     fiscal_keys: SecretStr | None = None
@@ -136,6 +146,16 @@ class Settings(BaseSettings):
         if s:
             logging.getLogger("crimson.config").warning("EINVOICE_PROVIDER=%r no es none | sandbox | alanube | gti: se usa none", s[:20])
         return "none"
+
+    @field_validator("eurocomp_bodega", mode="before")
+    @classmethod
+    def _eurocomp_bodega(cls, v) -> int:
+        # mismo criterio: una variable rara no tumba el arranque (se usa la bodega 1, la que tiene existencias)
+        try:
+            return max(1, int(str(v).strip()))
+        except (TypeError, ValueError):
+            logging.getLogger("crimson.config").warning("EUROCOMP_BODEGA=%r no es un numero: se usa 1", str(v)[:20])
+            return 1
 
     @field_validator("hacienda_environment", mode="before")
     @classmethod

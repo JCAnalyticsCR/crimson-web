@@ -12,6 +12,8 @@
 .prv-sup__nums b { font-family: var(--mono); color: var(--text); font-weight: 500; }
 .prv-api { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-3); border-top: 1px solid var(--hair); padding-top: 8px; margin-top: 2px; }
 .prv-api i { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex: none; }
+.prv-api[data-status="conectado"] i { background: var(--ok); }
+.prv-api[data-status="error"] i { background: var(--bad); }
 
 .prv-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 16px; align-items: start; }
 .prv-cats { background: var(--surface); border: 1px solid var(--hair); border-radius: var(--r-lg); padding: 8px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: calc(var(--top-h) + 12px); max-height: calc(100dvh - var(--top-h) - 40px); overflow: auto; }
