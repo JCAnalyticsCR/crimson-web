@@ -524,25 +524,40 @@ def send_pending(db: Session, limit: int = 20) -> dict:
             log.warning("envio de comprobante %s: %s", did, type(e).__name__)
     from .einvoice_delivery import deliver
 
+    # entregas pendientes, en orden: lo que no tiene nada que entregar (respuesta de Hacienda sin XML) o ya se dejo tras
+    # el tope de reintentos (delivery_failed_at) no entra; lo que espera su reintento no gasta el cupo del lote, asi
+    # que unas pocas direcciones malas no dejan sin turno a los comprobantes nuevos
     pend = db.scalars(
-        select(EInvoiceDocument)
+        select(EInvoiceDocument.id)
         .where(
             EInvoiceDocument.mode.in_(("pruebas", "produccion")),
             EInvoiceDocument.xml_document.is_not(None),
             or_(
-                EInvoiceDocument.delivered_at.is_(None) & EInvoiceDocument.status.in_(("enviado", "procesando", "aceptada", "rechazada")),
-                EInvoiceDocument.hacienda_delivered_at.is_(None) & EInvoiceDocument.status.in_(("aceptada", "rechazada")),
+                EInvoiceDocument.delivered_at.is_(None)
+                & EInvoiceDocument.delivery_failed_at.is_(None)
+                & EInvoiceDocument.status.in_(("enviado", "procesando", "aceptada", "rechazada")),
+                EInvoiceDocument.hacienda_delivered_at.is_(None)
+                & EInvoiceDocument.hacienda_delivery_failed_at.is_(None)
+                & EInvoiceDocument.xml_response.is_not(None)
+                & EInvoiceDocument.status.in_(("aceptada", "rechazada")),
             ),
         )
-        .limit(limit)
+        .order_by(EInvoiceDocument.id)
+        .limit(limit * 10)
     ).all()
-    for doc in pend:
+    worked = 0
+    for did in pend:
+        if worked >= limit:
+            break
         try:
-            out["entregas"] += deliver(db, doc.id, "emitido") + deliver(db, doc.id, "hacienda")
+            n = deliver(db, did, "emitido") + deliver(db, did, "hacienda")
             db.commit()
+            out["entregas"] += n
+            worked += 1 if n else 0
         except Exception as e:  # noqa: BLE001
             db.rollback()
-            log.warning("entrega del comprobante %s: %s", doc.id, type(e).__name__)
+            worked += 1
+            log.warning("entrega del comprobante %s: %s", did, type(e).__name__)
     return out
 
 

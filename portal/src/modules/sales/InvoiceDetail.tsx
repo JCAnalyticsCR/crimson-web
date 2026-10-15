@@ -11,7 +11,7 @@ const METHODS = [["efectivo", "Efectivo"], ["sinpe", "SINPE Móvil"], ["transfer
 const KINDS = [["captura", "Captura (recibido)"], ["autorizacion", "Autorización"], ["devolucion", "Devolución"], ["reembolso", "Reembolso"], ["reautorizacion", "Re-autorización"]];
 type XmlDoc = {
   id: number; doc_type: string; consecutive: string; clave: string | null; status: string; message: string | null; provider: string; has_document: boolean; has_response: boolean;
-  mode: string | null; last_error: string | null; emitted_at: string | null; delivered_at: string | null; hacienda_delivered_at: string | null;
+  mode: string | null; last_error: string | null; emitted_at: string | null; delivered_at: string | null; hacienda_delivered_at: string | null; delivery_failed_at: string | null; hacienda_delivery_failed_at: string | null;
   receiver_message: string | null; receiver_detail: string | null; receiver_at: string | null; attempts: number;
 };
 const MODE_TAG: Record<string, string> = { simulado: "Simulado", pruebas: "Pruebas", produccion: "Producción" };
@@ -72,7 +72,7 @@ export default function InvoiceDetail() {
                 {last?.last_error && <p style={{ fontSize: 13, margin: "6px 0 0", color: "var(--bad)" }}>{last.last_error}</p>}
                 {nc && nc.status !== "aceptada" && <p style={{ fontSize: 13, margin: "6px 0 0" }}>Nota de crédito {nc.consecutive}: {EI_TEXT[nc.status] || nc.status}{nc.last_error ? ` · ${nc.last_error}` : ""}</p>}
                 {last && (last.mode === "pruebas" || last.mode === "produccion") && (
-                  <p className="muted" style={{ fontSize: 12.5, margin: "6px 0 0" }}>Entregado al cliente: {last.delivered_at ? `XML y PDF el ${when(last.delivered_at)}` : "pendiente"}{last.hacienda_delivered_at ? ` · respuesta de Hacienda el ${when(last.hacienda_delivered_at)}` : ""}{last.mode === "pruebas" ? " (en pruebas va a los administradores, no al cliente)" : ""}</p>
+                  <p className="muted" style={{ fontSize: 12.5, margin: "6px 0 0" }}>Entregado al cliente: {last.delivered_at ? `XML y PDF el ${when(last.delivered_at)}` : last.delivery_failed_at ? "no se pudo (el correo falló varias veces: revise el correo del cliente y use Enviar por correo)" : "pendiente"}{last.hacienda_delivered_at ? ` · respuesta de Hacienda el ${when(last.hacienda_delivered_at)}` : last.hacienda_delivery_failed_at ? " · la respuesta de Hacienda no se pudo entregar" : ""}{last.mode === "pruebas" ? " (en pruebas va a los administradores, no al cliente)" : ""}</p>
                 )}
                 {client && (
                   <div className={client.receiver_message === "1" ? "" : "acc-warn"} style={{ marginTop: 8, fontSize: 13, padding: client.receiver_message === "1" ? 0 : undefined, borderRadius: 10, border: client.receiver_message === "1" ? undefined : "1px solid var(--warn)", background: client.receiver_message === "1" ? undefined : "var(--warn-soft)" }}>

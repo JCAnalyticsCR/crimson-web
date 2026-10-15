@@ -460,6 +460,8 @@ def upgrade() -> None:
         b.add_column(sa.Column("last_error", sa.String(length=300), nullable=True))
         b.add_column(sa.Column("delivered_at", sa.DateTime(timezone=True), nullable=True))
         b.add_column(sa.Column("hacienda_delivered_at", sa.DateTime(timezone=True), nullable=True))
+        b.add_column(sa.Column("delivery_failed_at", sa.DateTime(timezone=True), nullable=True))
+        b.add_column(sa.Column("hacienda_delivery_failed_at", sa.DateTime(timezone=True), nullable=True))
         b.add_column(sa.Column("receiver_message", sa.String(length=1), nullable=True))
         b.add_column(sa.Column("receiver_detail", sa.String(length=160), nullable=True))
         b.add_column(sa.Column("receiver_xml", sa.Text(), nullable=True))
@@ -477,6 +479,8 @@ def downgrade() -> None:
             "receiver_xml",
             "receiver_detail",
             "receiver_message",
+            "hacienda_delivery_failed_at",
+            "delivery_failed_at",
             "hacienda_delivered_at",
             "delivered_at",
             "last_error",

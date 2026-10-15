@@ -241,6 +241,9 @@ class EInvoiceDocument(TenantMixin, TimestampMixin, Base):
     last_error: Mapped[str | None] = mapped_column(String(300))
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # XML + PDF entregados al cliente
     hacienda_delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # respuesta de Hacienda entregada
+    # tope de reintentos de la entrega (correo rechazado una y otra vez): no se insiste y se avisa al admin
+    delivery_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hacienda_delivery_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # mensaje receptor de NUESTRO cliente sobre este comprobante (1 acepta, 2 parcial, 3 rechaza)
     receiver_message: Mapped[str | None] = mapped_column(String(1))
     receiver_detail: Mapped[str | None] = mapped_column(String(160))

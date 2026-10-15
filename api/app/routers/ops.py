@@ -224,6 +224,8 @@ def xml_list(id_: int, p: Principal = Depends(require("sales", "ver")), db: Sess
             "emitted_at": x.emitted_at,
             "delivered_at": x.delivered_at,
             "hacienda_delivered_at": x.hacienda_delivered_at,
+            "delivery_failed_at": x.delivery_failed_at,
+            "hacienda_delivery_failed_at": x.hacienda_delivery_failed_at,
             "receiver_message": x.receiver_message,
             "receiver_detail": x.receiver_detail,
             "receiver_at": x.receiver_at,

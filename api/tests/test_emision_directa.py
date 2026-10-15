@@ -301,3 +301,81 @@ def test_lo_que_hacienda_no_recibio_no_se_entrega_al_cliente(client, auth, db_se
     doc = db_session.query(EInvoiceDocument).filter(EInvoiceDocument.invoice_id == inv["id"]).one()
     assert doc.status == "error" and doc.delivered_at is None
     assert not [c for c in correos if f"{doc.clave}.xml" in c["files"]]
+
+
+def test_entrega_a_un_correo_malo_tiene_tope_y_no_deja_sin_turno_a_las_demas(client, auth, db_session, pruebas, monkeypatch):
+    """Un correo que el proveedor rechaza siempre (4xx): la espera se duplica y, tras MAX_FAILS, la etapa queda sin
+    entregar (fuera de la cola del worker, sin rehacer el PDF ni otro EmailOutbox) con UN aviso al admin. El lote va en
+    orden y lo que espera no gasta el cupo; una aceptada sin XML de respuesta no se queda en la cola."""
+    from datetime import UTC, datetime
+
+    from app.models import EInvoiceDocument, EmailOutbox
+    from app.services import einvoice_delivery as ed
+    from app.services import mail
+    from app.services.hacienda_sync import send_pending
+
+    salidas, malos = [], set()
+
+    def deliver(m, files=None):
+        salidas.append({"inv": m.entity_id, "subject": m.subject, "files": bool(files)})
+        m.status, m.error = ("error", "422: correo inválido") if files and m.entity_id in malos else ("enviado", None)
+
+    monkeypatch.setattr(mail, "deliver", deliver)
+    a = _factura(client)
+    malos.add(a["id"])
+    assert client.post(f"/invoices/{a['id']}/emit").status_code == 200
+    doc = db_session.query(EInvoiceDocument).filter(EInvoiceDocument.invoice_id == a["id"]).one()
+
+    def fallos():
+        return db_session.query(EmailOutbox).filter(EmailOutbox.entity_id == a["id"], EmailOutbox.status == "fallido").all()
+
+    def envejecer(delta):
+        for m in fallos():
+            m.created_at = datetime.now(UTC) - delta
+        db_session.commit()
+
+    assert len(fallos()) == 1
+    envejecer(timedelta(minutes=20))
+    send_pending(db_session)
+    assert len(fallos()) == 2
+    envejecer(timedelta(minutes=20))
+    send_pending(db_session)
+    assert len(fallos()) == 2  # con 2 fallos la espera ya es de 30 min
+    # otro comprobante pendiente sale aunque el lote sea de 1: el que espera no gasta el cupo
+    b = _factura(client)
+    assert client.post(f"/invoices/{b['id']}/emit").status_code == 200
+    doc_b = db_session.query(EInvoiceDocument).filter(EInvoiceDocument.invoice_id == b["id"]).one()
+    db_session.query(EmailOutbox).filter(EmailOutbox.entity_id == b["id"]).delete()
+    doc_b.delivered_at = None
+    db_session.commit()
+    send_pending(db_session, limit=1)
+    db_session.refresh(doc_b)
+    assert doc_b.delivered_at is not None
+    # una aceptada sin XML de respuesta no tiene nada que entregar: no vuelve a la cola en cada vuelta
+    doc_b.status, doc_b.xml_response, doc_b.hacienda_delivered_at = "aceptada", None, None
+    db_session.commit()
+    llamadas, real = [], ed.deliver
+    monkeypatch.setattr(ed, "deliver", lambda db, did, stage: llamadas.append(did) or real(db, did, stage))
+    send_pending(db_session)
+    assert doc_b.id not in llamadas
+    # tope: tras MAX_FAILS fallos ya no se insiste
+    for _ in range(ed.MAX_FAILS):
+        if len(fallos()) >= ed.MAX_FAILS:
+            break
+        envejecer(timedelta(hours=5))
+        send_pending(db_session)
+    assert len(fallos()) == ed.MAX_FAILS
+    envejecer(timedelta(hours=5))
+    n = len(salidas)
+    send_pending(db_session)
+    db_session.refresh(doc)
+    assert doc.delivery_failed_at is not None and doc.delivered_at is None
+    assert not [s for s in salidas[n:] if s["files"]]
+    avisos = [s for s in salidas[n:] if s["subject"].startswith("Entrega fallida")]
+    assert avisos and all(s["inv"] == a["id"] for s in avisos)
+    envejecer(timedelta(hours=5))
+    k = len(salidas)
+    send_pending(db_session)
+    assert len(salidas) == k and len(fallos()) == ed.MAX_FAILS  # ni otro intento ni otro aviso
+    x = [d for d in client.get(f"/invoices/{a['id']}/xml").json() if d["id"] == doc.id][0]
+    assert x["delivery_failed_at"] and not x["delivered_at"]
