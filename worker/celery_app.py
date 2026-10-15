@@ -19,6 +19,16 @@ celery = Celery("crimson", broker=settings.redis_url, backend=settings.redis_url
 celery.conf.update(timezone="America/Costa_Rica", enable_utc=True, task_acks_late=True, worker_prefetch_multiplier=1)
 
 
+def _log_fiscal_keys() -> None:
+    """Solo kid y sha256(llave)[:8] de FISCAL_KEYS (deben ser los mismos que registra la API)."""
+    from app.core import secretbox
+
+    secretbox.keys()
+
+
+_log_fiscal_keys()
+
+
 @celery.task(name="fx.bccr_daily", autoretry_for=(Exception,), retry_backoff=60, max_retries=5)
 def fx_bccr_daily() -> dict:
     """Tipo de cambio de venta/compra del BCCR (API SDDE con BCCR_TOKEN). Sin token no hace nada."""

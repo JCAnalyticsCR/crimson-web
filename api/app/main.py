@@ -57,6 +57,9 @@ log = logging.getLogger("crimson")
 
 
 def create_app() -> FastAPI:
+    from .core import secretbox
+
+    secretbox.keys()  # registra (INFO) solo los kid y sha256(llave)[:8] de FISCAL_KEYS: api y worker deben coincidir
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",
