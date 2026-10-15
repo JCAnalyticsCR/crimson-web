@@ -3,6 +3,7 @@ from datetime import date, datetime
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -80,7 +81,11 @@ class Role(Base):
 
 class TenantUser(TimestampMixin, Base):
     __tablename__ = "tenant_user"
-    __table_args__ = (UniqueConstraint("tenant_id", "user_id", name="uq_tenant_user"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "user_id", name="uq_tenant_user"),
+        # una membresia es interna, de un cliente o de una empresa aliada: nunca de las dos externas a la vez
+        CheckConstraint("NOT (customer_id IS NOT NULL AND ally_company_id IS NOT NULL)", name="ck_tenant_user_un_externo"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenant.id", ondelete="CASCADE"), index=True)
@@ -89,6 +94,10 @@ class TenantUser(TimestampMixin, Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     # Solo usuarios del portal del cliente: la empresa cliente que representan. Interno = None.
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id", ondelete="RESTRICT"), index=True)
+    # Solo usuarios de una empresa aliada (roles aliado/tecnico_aliado): su portal (/aliado). Interno = None.
+    ally_company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ally_company.id", ondelete="RESTRICT", name="fk_tenant_user_ally_company"), index=True
+    )
 
     tenant: Mapped[Tenant] = relationship(back_populates="users")
     user: Mapped[User] = relationship(back_populates="memberships")
@@ -107,6 +116,10 @@ class Invitation(TenantMixin, TimestampMixin, Base):
     invited_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
     # invitacion al portal del cliente: al aceptarla la membresia queda ligada a este cliente
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id", ondelete="CASCADE"), index=True)
+    # invitacion al portal de aliados: al aceptarla la membresia queda ligada a esta empresa aliada
+    ally_company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ally_company.id", ondelete="CASCADE", name="fk_invitation_ally_company"), index=True
+    )
     # Reenviar y revocar (Ajustes -> Usuarios). Revocar tambien pone expires_at=ahora: lo que solo mire el
     # vencimiento la rechaza igual. revoked_by sin FK, como los *_by de ArchiveMixin.
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -13,6 +13,7 @@ Ojo con el nombre: Ticket ya existe y es la entrada de un evento. El del cliente
 from datetime import date, datetime
 
 from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -67,6 +68,10 @@ class SupportTicket(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     # proximo paso del seguimiento: que hay que hacer y para cuando (lo que Andres llama "dar los seguimientos")
     next_step: Mapped[str | None] = mapped_column(String(200))
     next_step_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # ticket asignado a una empresa aliada (lo atiende desde su portal); NULL = de Crimson
+    ally_company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ally_company.id", ondelete="RESTRICT", name="fk_support_ticket_ally_company"), index=True
+    )
 
     notes: Mapped[list["SupportNote"]] = relationship(cascade="all, delete-orphan", order_by="SupportNote.id", lazy="selectin")
 
@@ -82,6 +87,8 @@ class SupportNote(TenantMixin, TimestampMixin, Base):
     body: Mapped[str] = mapped_column(Text)
     internal: Mapped[bool] = mapped_column(Boolean, default=False)
     photos: Mapped[list] = mapped_column(JSON, default=list)
+    # nota interna compartida con la empresa aliada del ticket (el cliente final sigue sin verla)
+    share_ally: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
 
 
 class MaintenanceContract(ArchiveMixin, TenantMixin, TimestampMixin, Base):
@@ -107,6 +114,8 @@ class MaintenanceContract(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
     # SLA propio del contrato {"critica": {"respuesta": h, "resolucion": h}, ...}; None = el de la empresa
     sla: Mapped[dict | None] = mapped_column(JSON)
+    # lo ejecuta una empresa aliada: sus tickets de mantenimiento nacen asignados a ella
+    ally_company_id: Mapped[int | None] = mapped_column(ForeignKey("ally_company.id", ondelete="RESTRICT", name="fk_contract_ally_company"), index=True)
 
 
 class CommissionRule(TenantMixin, TimestampMixin, Base):

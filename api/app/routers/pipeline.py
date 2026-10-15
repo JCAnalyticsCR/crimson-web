@@ -386,6 +386,11 @@ def _check_owner(db: Session, p: Principal, uid: int) -> User:
     m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.user_id == uid, TenantUser.active))
     if not m:
         raise HTTPException(422, "Ese responsable no es un usuario activo de la empresa")
+    # una oportunidad o una solicitud de costo la persigue alguien de Crimson: nunca un cliente ni un aliado
+    from ..core.deps import EXTERNAL_ROLES
+
+    if m.customer_id is not None or m.ally_company_id is not None or m.role_code in EXTERNAL_ROLES:
+        raise HTTPException(422, "El responsable tiene que ser del equipo de Crimson")
     return m.user
 
 

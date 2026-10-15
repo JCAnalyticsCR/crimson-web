@@ -787,14 +787,16 @@ def test_solicitud_de_levantamiento_se_atiende_en_cualquier_etapa_abierta(client
     opp = client.post("/opportunities", json={"title": "Ya cotizando", "kind": "proyecto", "customer_id": cust["id"]}, headers=a).json()
     assert client.post(f"/opportunities/{opp['id']}/quote", json={}, headers=a).status_code == 201
     assert client.get(f"/opportunities/{opp['id']}", headers=a).json()["survey_request"] is None
-    for h in (sup, t, ali):  # sin solicitud: nadie que no la vea en el embudo la abre
+    for h in (sup, t):  # sin solicitud: nadie que no la vea en el embudo la abre
         assert client.get(f"/surveys/from-opportunity/{opp['id']}", headers=h).status_code == 404
+    # un aliado no entra a ningun endpoint interno (aliado_final §4: get_principal lo rechaza; su portal es /aliado)
+    assert client.get(f"/surveys/from-opportunity/{opp['id']}", headers=ali).status_code == 403
     r = client.post(f"/opportunities/{opp['id']}/request-survey", json={}, headers=a)
     assert r.status_code == 200 and r.json()["status"] == "cotizando"  # el embudo no retrocede
     assert client.get(f"/opportunities/{opp['id']}", headers=a).json()["survey_request"] is not None
     # pedida: la atiende el equipo de campo interno; un aliado sigue sin verla (ni leer ni ligar)
-    assert client.get(f"/surveys/from-opportunity/{opp['id']}", headers=ali).status_code == 404
-    assert client.post("/surveys", json={"kind": "cctv", "opportunity_id": opp["id"]}, headers=ali).status_code == 404
+    assert client.get(f"/surveys/from-opportunity/{opp['id']}", headers=ali).status_code == 403
+    assert client.post("/surveys", json={"kind": "cctv", "opportunity_id": opp["id"]}, headers=ali).status_code == 403
     assert client.get(f"/surveys/from-opportunity/{opp['id']}", headers=t).status_code == 200
     pre = client.get(f"/surveys/from-opportunity/{opp['id']}", headers=sup)
     assert pre.status_code == 200 and pre.json()["customer_id"] == cust["id"]

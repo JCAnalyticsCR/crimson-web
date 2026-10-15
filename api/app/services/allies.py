@@ -13,7 +13,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..core.deps import Principal
-from ..models import AllyCostRequest, AllyParticipation, Customer, Opportunity, User
+from ..models import AllyCompany, AllyCostRequest, AllyParticipation, Customer, Opportunity, User
 from ..models.allies import COST_OPEN
 from .archive import live
 
@@ -25,6 +25,7 @@ def is_overdue(r: AllyCostRequest, today: date | None = None) -> bool:
 
 def request_out(db: Session, r: AllyCostRequest, p: Principal) -> dict:
     who = db.get(User, r.responsible_id) if r.responsible_id else None
+    rb = db.get(User, r.responded_by) if r.responded_by else None
     out = {
         "id": r.id,
         "participation_id": r.participation_id,
@@ -39,6 +40,10 @@ def request_out(db: Session, r: AllyCostRequest, p: Principal) -> dict:
         "costs_visible": p.sees_costs,
         "created_at": r.created_at,
         "updated_at": r.updated_at,
+        # respuesta del aliado desde su portal: quien y cuando (sin montos) y si la envio por iniciativa
+        "source": r.source or "crimson",
+        "responded_at": r.responded_at,
+        "responded_by": rb.full_name if rb else None,
     }
     if p.sees_costs:
         out.update(
@@ -47,18 +52,23 @@ def request_out(db: Session, r: AllyCostRequest, p: Principal) -> dict:
             valid_until=r.valid_until,
             exclusions=r.exclusions,
             attachments=r.attachments or [],
+            lines=r.lines or [],
         )
     return out
 
 
 def ally_out(db: Session, a: AllyParticipation, p: Principal, with_requests: bool = True) -> dict:
+    comp = db.get(AllyCompany, a.ally_company_id) if a.ally_company_id else None
     out = {
         "id": a.id,
         "opportunity_id": a.opportunity_id,
         "project_id": a.project_id,
+        "ally_company_id": a.ally_company_id,
         "customer_id": a.customer_id,
         "supplier_id": a.supplier_id,
-        "company_kind": "customer" if a.customer_id else "supplier" if a.supplier_id else None,
+        "company_kind": "ally" if a.ally_company_id else "customer" if a.customer_id else "supplier" if a.supplier_id else None,
+        "ally_state": comp.state if comp else None,
+        "visible_to_ally": a.visible_to_ally,
         "name": a.name,
         "role": a.role,
         "scope": a.scope,

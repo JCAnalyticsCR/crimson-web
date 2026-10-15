@@ -2,21 +2,28 @@
 
 Todo pasa por la oportunidad (mismos permisos y alcance que el embudo: el vendedor solo toca las suyas) y cada
 cambio deja una linea en su bitacora. Rutas bajo /opportunity-allies para no chocar con /opportunities/{oid}.
-Nada de esto se expone en /cliente/*: el portal del cliente no importa este router ni sus tablas."""
+Nada de esto se expone en /cliente/*: el portal del cliente no importa este router ni sus tablas.
+
+Empresa aliada (12:45-13:23): el buscador trae por defecto SOLO empresas aliadas (todos=true: tambien clientes y
+proveedores, como antes) y se puede dar de alta un aliado ahi mismo. Sus contactos por funcion viven en la empresa
+aliada y se precargan en la participacion. Las participaciones viejas (cliente/proveedor) no dan acceso al portal de
+aliados hasta "Convertir en aliado". Al aliado le llegan avisos sin montos."""
 
 from __future__ import annotations
 
+import html
 from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from pydantic import BaseModel, EmailStr, Field, field_validator
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from ..core.config import settings as cfg
 from ..core.db import get_db
 from ..core.deps import Principal, require
-from ..models import AllyCostRequest, AllyParticipation, Customer, Media, Opportunity, Supplier
+from ..models import AllyCompany, AllyCostRequest, AllyParticipation, Customer, Media, Opportunity, Supplier, TenantUser, User
 from ..models.allies import ALLY_ROLES, CONTACT_FUNCTIONS, COST_STATES
 from ..services import allies as svc
 from ..services.documents import audit
@@ -43,8 +50,10 @@ class ContactIn(BaseModel):
 
 
 class AllyIn(BaseModel):
+    ally_company_id: int | None = None
     customer_id: int | None = None
     supplier_id: int | None = None
+    visible_to_ally: bool = True  # el aliado la ve en su portal (solo con empresa aliada)
     role: str = Field("subcontratista", pattern="^(" + "|".join(ALLY_ROLES) + ")$")
     scope: str | None = Field(None, max_length=4000)
     scope_lines: list[str] = Field(default_factory=list, max_length=60)
@@ -72,18 +81,26 @@ class CostRequestIn(BaseModel):
     attachment_ids: list[int] | None = Field(None, max_length=10)
 
 
-def _company(db: Session, p: Principal, data: AllyIn) -> tuple[int | None, int | None, str]:
-    if bool(data.customer_id) == bool(data.supplier_id):
-        raise HTTPException(422, "Elegí la empresa: un cliente o un proveedor existente")
+def _company(db: Session, p: Principal, data: AllyIn) -> tuple[int | None, int | None, int | None, str]:
+    """(ally_company_id, customer_id, supplier_id, nombre): exactamente una de las tres."""
+    if sum(1 for x in (data.ally_company_id, data.customer_id, data.supplier_id) if x) != 1:
+        raise HTTPException(422, "Elegí la empresa aliada")
+    if data.ally_company_id:
+        a = db.get(AllyCompany, data.ally_company_id)
+        if not a or a.tenant_id != p.tenant.id:
+            raise HTTPException(404, "Empresa aliada no encontrada")
+        if not a.active:
+            raise HTTPException(422, "Esa empresa aliada está inactiva")
+        return a.id, None, None, a.name
     if data.customer_id:
         c = db.get(Customer, data.customer_id)
         if not c or c.tenant_id != p.tenant.id:
             raise HTTPException(404, "Cliente no encontrado")
-        return c.id, None, c.name
+        return None, c.id, None, c.name
     s = db.get(Supplier, data.supplier_id)
     if not s or s.tenant_id != p.tenant.id:
         raise HTTPException(404, "Proveedor no encontrado")
-    return None, s.id, s.name
+    return None, None, s.id, s.name
 
 
 def _ally(db: Session, aid: int, p: Principal) -> tuple[AllyParticipation, Opportunity]:
@@ -108,10 +125,33 @@ def _contacts(data: AllyIn) -> dict:
     return {k: v.model_dump() for k, v in data.contacts.items() if any((v.name, v.email, v.phone))}
 
 
+def _dup_where(aid: int | None, cid: int | None, sid: int | None):
+    if aid:
+        return AllyParticipation.ally_company_id == aid
+    return AllyParticipation.customer_id == cid if cid else AllyParticipation.supplier_id == sid
+
+
+def _ally_hit(a: AllyCompany) -> dict:
+    out = {"kind": "ally", "id": a.id, "name": a.name, "hint": "Aliado", "tax_id": a.tax_id}
+    if a.suspended_at:
+        out["suspended"] = True
+    return out
+
+
 @router.get("/opportunity-allies/companies")
-def companies(q: str = "", p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = Depends(get_db)):
-    """Buscador de empresas para ligar un aliado: clientes y proveedores existentes (solo nombre)."""
+def companies(q: str = "", todos: bool = False, p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = Depends(get_db)):
+    """Buscador de empresas para ligar un aliado. Por defecto SOLO empresas aliadas activas (12:45 "lo ocupo que salgan
+    solo los aliados"), con nombre y cedula. todos=true: ademas clientes y proveedores (solo nombre), como antes."""
     like = f"%{q.strip()}%"
+    allies = db.scalars(
+        select(AllyCompany)
+        .where(AllyCompany.tenant_id == p.tenant.id, AllyCompany.active.is_(True), or_(AllyCompany.name.ilike(like), AllyCompany.tax_id.ilike(like)))
+        .order_by(AllyCompany.name)
+        .limit(10)
+    )
+    hits = [_ally_hit(a) for a in allies]
+    if not todos:
+        return hits
     custs = db.scalars(
         select(Customer).where(Customer.tenant_id == p.tenant.id, Customer.name.ilike(like), Customer.trashed_at.is_(None)).order_by(Customer.name).limit(10)
     )
@@ -121,9 +161,55 @@ def companies(q: str = "", p: Principal = Depends(require("crm_pipeline", "ver")
         .order_by(Supplier.name)
         .limit(10)
     )
-    return [{"kind": "customer", "id": c.id, "name": c.name, "hint": "Cliente"} for c in custs] + [
-        {"kind": "supplier", "id": s.id, "name": s.name, "hint": "Proveedor"} for s in sups
-    ]
+    return (
+        hits
+        + [{"kind": "customer", "id": c.id, "name": c.name, "hint": "Cliente"} for c in custs]
+        + [{"kind": "supplier", "id": s.id, "name": s.name, "hint": "Proveedor"} for s in sups]
+    )
+
+
+class QuickAllyIn(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    tax_id: str | None = Field(None, max_length=30)
+    email: EmailStr | None = None
+    phone: str | None = Field(None, max_length=40)
+    contacts: dict[str, ContactIn] = Field(default_factory=dict)
+
+    @field_validator("contacts")
+    @classmethod
+    def _funciones(cls, v: dict) -> dict:
+        malas = [k for k in v if k not in CONTACT_FUNCTIONS]
+        if malas:
+            raise ValueError(f"Función de contacto desconocida: {', '.join(malas)}")
+        return v
+
+
+@router.post("/opportunity-allies/companies", status_code=201)
+def company_quick_create(data: QuickAllyIn, p: Principal = Depends(require("crm_pipeline", "editar")), db: Session = Depends(get_db)):
+    """Alta rapida de un aliado desde la oportunidad (13:10 "si es un aliado nuevo, poder agregarlo ahi"). Sin usuarios
+    ni mensualidad: eso es de Administracion -> Aliados."""
+    from .ally_admin import clean_tax, contacts_clean, duplicate_response, find_duplicate
+
+    name = " ".join(data.name.split())
+    tax = clean_tax(data.tax_id)
+    dup = find_duplicate(db, p.tenant.id, name, tax)
+    if dup:
+        return duplicate_response(dup, kind="ally")
+    a = AllyCompany(
+        tenant_id=p.tenant.id,
+        name=name,
+        tax_id=tax,
+        email=str(data.email).lower() if data.email else None,
+        phone=data.phone,
+        contacts=contacts_clean(data.contacts),
+        active=True,
+        created_by=p.user.id,
+    )
+    db.add(a)
+    db.flush()
+    audit(db, p.tenant.id, p.user.id, "create", "ally_company", a.id, {"name": a.name, "desde": "oportunidad"}, ip=p.ip)
+    db.commit()
+    return _ally_hit(a)
 
 
 @router.get("/opportunity-allies/pending")
@@ -149,27 +235,26 @@ def list_allies(oid: int, p: Principal = Depends(require("crm_pipeline", "ver"))
 @router.post("/opportunities/{oid}/allies", status_code=201)
 def add_ally(oid: int, data: AllyIn, p: Principal = Depends(require("crm_pipeline", "editar")), db: Session = Depends(get_db)):
     o = _own(db, oid, p)
-    cid, sid, name = _company(db, p, data)
-    dup = db.scalar(
-        select(AllyParticipation).where(
-            AllyParticipation.opportunity_id == o.id,
-            AllyParticipation.role == data.role,
-            AllyParticipation.customer_id == cid if cid else AllyParticipation.supplier_id == sid,
-        )
-    )
+    aid, cid, sid, name = _company(db, p, data)
+    dup = db.scalar(select(AllyParticipation).where(AllyParticipation.opportunity_id == o.id, AllyParticipation.role == data.role, _dup_where(aid, cid, sid)))
     if dup:
         raise HTTPException(409, f"{name} ya participa como {ROLE_LABEL[data.role]}")
+    contactos = _contacts(data)
+    if aid and not contactos:
+        contactos = dict(db.get(AllyCompany, aid).contacts or {})  # los detalles viven "por detras del aliado" (13:10)
     a = AllyParticipation(
         tenant_id=p.tenant.id,
         opportunity_id=o.id,
         project_id=o.project_id,  # si la oportunidad ya tiene proyecto, el aliado lo comparte
+        ally_company_id=aid,
         customer_id=cid,
         supplier_id=sid,
+        visible_to_ally=data.visible_to_ally if aid else True,
         name=name,
         role=data.role,
         scope=data.scope,
         scope_lines=[x.strip()[:200] for x in data.scope_lines if x.strip()],
-        contacts=_contacts(data),
+        contacts=contactos,
         created_by=p.user.id,
     )
     db.add(a)
@@ -183,9 +268,9 @@ def add_ally(oid: int, data: AllyIn, p: Principal = Depends(require("crm_pipelin
 @router.put("/opportunity-allies/{aid}")
 def update_ally(aid: int, data: AllyIn, p: Principal = Depends(require("crm_pipeline", "editar")), db: Session = Depends(get_db)):
     a, o = _ally(db, aid, p)
-    cid, sid, name = _company(db, p, data)
+    comp_id, cid, sid, name = _company(db, p, data)
     cambios = []
-    if (cid, sid) != (a.customer_id, a.supplier_id):
+    if (comp_id, cid, sid) != (a.ally_company_id, a.customer_id, a.supplier_id):
         cambios.append(f"empresa {a.name} → {name}")
     if data.role != a.role:
         cambios.append(f"papel {ROLE_LABEL.get(a.role, a.role)} → {ROLE_LABEL[data.role]}")
@@ -193,13 +278,72 @@ def update_ally(aid: int, data: AllyIn, p: Principal = Depends(require("crm_pipe
         cambios.append("alcance")
     if _contacts(data) != (a.contacts or {}):
         cambios.append("contactos")
-    a.customer_id, a.supplier_id, a.name, a.role = cid, sid, name, data.role
+    a.ally_company_id, a.customer_id, a.supplier_id, a.name, a.role = comp_id, cid, sid, name, data.role
+    if "visible_to_ally" in data.model_fields_set and data.visible_to_ally != a.visible_to_ally:
+        a.visible_to_ally = data.visible_to_ally  # apagarla le quita el acceso al aliado al instante
+        cambios.append("visible en el portal del aliado" if data.visible_to_ally else "oculta en el portal del aliado")
     a.scope = data.scope
     a.scope_lines = [x.strip()[:200] for x in data.scope_lines if x.strip()]
     a.contacts = _contacts(data)
     if cambios:
         _log(o, p.user.full_name, f"Aliado {name} actualizado: {', '.join(cambios)}")
         audit(db, p.tenant.id, p.user.id, "ally_update", "opportunity", o.id, {"ally_id": a.id, "cambios": cambios}, ip=p.ip)
+    db.commit()
+    return _list(db, o, p)
+
+
+class ToAllyIn(BaseModel):
+    ally_company_id: int | None = None
+
+
+@router.post("/opportunity-allies/{aid}/to-ally")
+def convert_to_ally(aid: int, data: ToAllyIn | None = None, p: Principal = Depends(require("crm_pipeline", "editar")), db: Session = Depends(get_db)):
+    """Participacion vieja (un cliente o un proveedor) -> empresa aliada. Con id usa esa empresa; sin id busca la
+    empresa aliada ligada a ese cliente/proveedor o con su cedula o nombre, y si no existe la crea copiando sus datos."""
+    from .ally_admin import clean_tax, find_duplicate
+
+    a, o = _ally(db, aid, p)
+    if a.ally_company_id:
+        raise HTTPException(409, "Esta participación ya es de una empresa aliada")
+    comp = None
+    if data and data.ally_company_id:
+        comp = db.get(AllyCompany, data.ally_company_id)
+        if not comp or comp.tenant_id != p.tenant.id:
+            raise HTTPException(404, "Empresa aliada no encontrada")
+    else:
+        src = db.get(Customer, a.customer_id) if a.customer_id else db.get(Supplier, a.supplier_id) if a.supplier_id else None
+        tax = clean_tax(src.id_number if isinstance(src, Customer) else getattr(src, "tax_id", None)) if src else None
+        link = AllyCompany.customer_id == a.customer_id if a.customer_id else AllyCompany.supplier_id == a.supplier_id
+        comp = db.scalar(select(AllyCompany).where(AllyCompany.tenant_id == p.tenant.id, link).limit(1)) if src else None
+        comp = comp or find_duplicate(db, p.tenant.id, src.name if src else a.name, tax)
+        if comp is None:
+            comp = AllyCompany(
+                tenant_id=p.tenant.id,
+                name=(src.name if src else a.name)[:160],
+                tax_id=tax,
+                email=(getattr(src, "email", None) or "").lower() or None,
+                phone=getattr(src, "phone", None),
+                contacts=dict(a.contacts or {}),
+                customer_id=a.customer_id,
+                supplier_id=a.supplier_id,
+                active=True,
+                created_by=p.user.id,
+            )
+            db.add(comp)
+            db.flush()
+            audit(db, p.tenant.id, p.user.id, "create", "ally_company", comp.id, {"name": comp.name, "desde": "participación"}, ip=p.ip)
+        else:
+            # la empresa aliada recuerda de que cliente/proveedor salio (para facturarle o pagarle)
+            if a.customer_id and not comp.customer_id:
+                comp.customer_id = a.customer_id
+            if a.supplier_id and not comp.supplier_id:
+                comp.supplier_id = a.supplier_id
+    if not comp.active:
+        raise HTTPException(422, "Esa empresa aliada está inactiva")
+    antes = "cliente" if a.customer_id else "proveedor"
+    a.ally_company_id, a.customer_id, a.supplier_id, a.name = comp.id, None, None, comp.name
+    _log(o, p.user.full_name, f"Aliado {comp.name} convertido de {antes} a empresa aliada")
+    audit(db, p.tenant.id, p.user.id, "ally_convert", "opportunity", o.id, {"ally_id": a.id, "ally_company_id": comp.id}, ip=p.ip)
     db.commit()
     return _list(db, o, p)
 
@@ -271,8 +415,41 @@ def add_request(aid: int, data: CostRequestIn, p: Principal = Depends(require("c
     db.flush()
     _log(o, p.user.full_name, f"Solicitud de costo a {a.name}: {r.what} · responsable {who.full_name if who else 'sin asignar'} · para {_fecha(r.due_date)}")
     audit(db, p.tenant.id, p.user.id, "cost_request", "opportunity", o.id, {"request_id": r.id, "ally": a.name}, ip=p.ip)
+    if a.ally_company_id and a.visible_to_ally:
+        _notify_ally_request(db, p, a, o, r)
     db.commit()
     return _list(db, o, p)
+
+
+def _notify_ally_request(db: Session, p: Principal, a: AllyParticipation, o: Opportunity, r: AllyCostRequest) -> int:
+    """Aviso a los usuarios "aliado" activos de esa empresa: que se pide, de que oportunidad y para cuando. Sin montos."""
+    from ..services.mail import queue_email
+
+    rows = db.scalars(
+        select(User)
+        .join(TenantUser, TenantUser.user_id == User.id)
+        .where(
+            TenantUser.tenant_id == p.tenant.id,
+            TenantUser.ally_company_id == a.ally_company_id,
+            TenantUser.role_code == "aliado",
+            TenantUser.active,
+            User.active,
+        )
+    ).all()
+    e = html.escape
+    base = cfg.public_base_url.rstrip("/")
+    asunto = f"Crimson le pide precios: {r.what[:60]} · {o.title[:60]}"
+    cuerpo = (
+        f"<p>{e(p.tenant.name)} le pide precios para <b>{e(o.title)}</b>:</p><blockquote>{e(r.what)}</blockquote>"
+        + (f"<p>Antes del {_fecha(r.due_date)}.</p>" if r.due_date else "")
+        + f'<p><a href="{base}/oportunidades/{o.id}">Responder en el portal de aliados</a></p>'
+    )
+    n = 0
+    for u in rows:
+        if u.email:
+            queue_email(db, p.tenant, u.email, asunto, cuerpo, "ally_cost_request", r.id)
+            n += 1
+    return n
 
 
 @router.put("/opportunity-allies/requests/{rid}")
@@ -312,4 +489,3 @@ def remove_request(rid: int, p: Principal = Depends(require("crm_pipeline", "edi
     db.delete(r)
     db.commit()
     return _list(db, o, p)
-

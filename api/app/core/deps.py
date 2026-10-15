@@ -55,6 +55,9 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "reports": ["ver", "exportar"],
         "vehicles": ["ver", "crear", "editar", "exportar"],
         "approvals": ["ver"],  # aprueba planillas y comisiones
+        # Administracion -> Aliados: ve las empresas aliadas y factura su mensualidad (ya tiene sales.recurrencias).
+        # Usuarios y precios de aliados quedan para el admin.
+        "aliados": ["ver", "mensualidad"],
     },
     # Tecnico instalador de Crimson: solo lo asignado, desde el celular. Nunca ve precios ni costos (22:07-22:23).
     "tecnico": {
@@ -67,30 +70,32 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "assets": ["ver", "crear", "editar"],
         "support_desk": ["ver", "crear", "editar"],  # solo los suyos: sin ver_todo
     },
-    # Aliado comercial (10:31-19:40, 26:36-27:48): ve solo lo que tiene EN COMUN con Crimson. El filtro "en comun"
-    # lo pone el frente de alcance aliado; mientras no exista, el rol no es asignable (ASSIGNABLE_ROLES lo excluye).
-    # Sin ventas, sin dinero de Crimson, sin ver_todo. "cotizar_aliado" y "precio_aliado" son acciones nuevas que
-    # implementan los frentes alcance y precio aliado.
+    # Aliado comercial (12:04-12:32): gerencia de una empresa aliada. Portal propio /aliado; nunca el panel interno.
+    # Todo sale filtrado por TenantUser.ally_company_id (services/ally_scope.py). Ningun modulo interno: get_principal
+    # lo rechaza igual, pero asi una compuerta que fallara no le abriria nada.
     "aliado": {
-        "dashboard": ["ver"],
-        "crm": ["ver"],  # clientes en comun (18:27-18:38)
-        "crm_pipeline": ["ver", "cotizar_aliado"],  # oportunidades en comun (14:24-14:32); le da sus precios a Crimson (15:37)
-        "field": ["ver", "crear", "editar"],  # levantamientos de lo que llevan en comun (14:53, 15:23); OT de sus tecnicos (14:35)
-        "projects": ["ver"],  # proyectos aprobados en comun; no cotiza (15:29-15:37)
-        "support_desk": ["ver", "editar"],  # tickets asignados a su empresa y mantenimientos en comun (15:48-16:01, 17:18)
-        "assets": ["ver"],  # activos de clientes en comun (18:14-18:25)
-        "catalog": ["ver", "precio_aliado"],  # todo el catalogo con precio diferenciado (18:39-19:16)
-        "inventory": ["ver"],  # solo cantidades (20:01-20:17)
-        "commissions": ["ver"],  # lo que gana por proyecto (26:36-27:48)
+        "aliado": [
+            "ver",
+            "oportunidades",
+            "proyectos",
+            "precios",
+            "levantamientos",
+            "levantamientos_crear",
+            "asignar",
+            "ordenes",
+            "tickets",
+            "tickets_crear",
+            "mantenimientos",
+            "activos",
+            "catalogo",
+            "inventario",
+            "ganancias",
+            "suscripcion",
+            "usuarios",
+        ]
     },
-    # Tecnico de un aliado (26:03-26:31): "solo tiene que ver que le toca hacer el dia de hoy". Levantamientos,
-    # soporte y mantenimiento asignados; ni siquiera los activos del cliente. Sin precios.
-    "tecnico_aliado": {
-        "dashboard": ["ver"],
-        "catalog": ["ver"],  # buscador de equipos del levantamiento; sin precios
-        "field": ["ver", "crear", "editar"],  # solo lo suyo: sin ver_todo
-        "support_desk": ["ver", "editar"],  # tickets y mantenimientos asignados a el
-    },
+    # Tecnico de un aliado (26:03-26:31): "que le toca hacer el dia de hoy". Sin precios, sin activos, sin oportunidades.
+    "tecnico_aliado": {"aliado": ["ver", "levantamientos", "ordenes", "tickets"]},
     # Supervisor tecnico: todos los levantamientos, proyectos y ordenes de trabajo; materiales y activos.
     # Revisa y aprueba lo que manda el tecnico; el costeo es del administrador (no ve costos salvo Ajustes).
     "supervisor": {
@@ -171,12 +176,14 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
     "cliente_usuario": {"portal": ["ver", "tickets"]},
 }
 CLIENT_ROLES = ("cliente_admin", "cliente_usuario")
-# Usuarios de una empresa aliada: usan el panel interno, pero todo lo que ven sale filtrado por "en comun".
-# No se asignan desde Ajustes ni por invitacion suelta: se dan de alta desde su empresa aliada (frente alcance).
-ALLY_ROLES = ("aliado", "tecnico_aliado")
+# Usuarios de una empresa aliada: viven en su propio portal (/aliado, routers/ally_portal.py), como los de cliente.
+# No se asignan desde Ajustes ni por invitacion suelta: se invitan desde la ficha de su empresa aliada (/allies).
+# OJO: models/allies.py ya tiene ALLY_ROLES = papeles de la participacion (contratante, subcontratista...).
+ALLY_USER_ROLES = ("aliado", "tecnico_aliado")
+EXTERNAL_ROLES = CLIENT_ROLES + ALLY_USER_ROLES
 # Lo que se asigna desde Ajustes -> Usuarios: solo roles internos de Crimson. Un rol de cliente sin cliente ligado
 # no tiene sentido (y no veria nada); esos se asignan desde la bandeja de accesos del portal del cliente.
-ASSIGNABLE_ROLES = [r for r in ROLE_PERMISSIONS if r != "soporte" and r not in CLIENT_ROLES and r not in ALLY_ROLES]
+ASSIGNABLE_ROLES = [r for r in ROLE_PERMISSIONS if r != "soporte" and r not in EXTERNAL_ROLES]
 # Andres 08:07: "eso solo lo puede ver el administrador... solo lo puedo ver yo". Por defecto nadie mas ve costos;
 # el admin puede habilitarlo en Ajustes a estos roles y a ningun otro (ventas, caja, tecnicos, aliados: nunca).
 COST_ROLE_CHOICES = ("supervisor", "contabilidad", "inventario", "lectura")
@@ -207,6 +214,8 @@ class Principal:
     permissions: dict[str, list[str]]
     ip: str | None = None
     customer_id: int | None = None  # solo roles de cliente: la empresa cliente a la que pertenece
+    ally_company_id: int | None = None  # solo roles aliados: la empresa aliada a la que pertenece
+    preview_by: int | None = None  # "Ver como este aliado": id del admin que mira (solo lectura, core/ally.py)
 
     @property
     def is_client(self) -> bool:
@@ -214,7 +223,11 @@ class Principal:
 
     @property
     def is_ally(self) -> bool:
-        return self.role in ALLY_ROLES
+        return self.role in ALLY_USER_ROLES
+
+    @property
+    def is_external(self) -> bool:
+        return self.is_client or self.is_ally
 
     @property
     def sees_field_all(self) -> bool:
@@ -282,6 +295,12 @@ def get_session_principal(
     m = db.scalar(select(TenantUser).where(TenantUser.user_id == user.id, TenantUser.tenant_id == tenant.id, TenantUser.active))
     if not m:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Sin acceso a esta empresa")
+    # empresa aliada: el rol y la empresa van juntos. Un aliado sin empresa no ve nada; una membresia con empresa
+    # aliada y un rol interno es inconsistente y nunca se trata como interna (le abriria todo el panel)
+    if m.role_code in ALLY_USER_ROLES and not m.ally_company_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Su cuenta de aliado no está ligada a una empresa aliada. Escríbanos para revisarlo.")
+    if m.ally_company_id and m.role_code not in ALLY_USER_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Su acceso no es válido. Escríbanos para revisarlo.")
     ip = request.client.host if request.client else None
     if m.role_code == "soporte":
         _support_gate(db, user, tenant, request, ip)
@@ -292,14 +311,16 @@ def get_session_principal(
         permissions=effective_permissions(tenant, m.role_code, _role_permissions(db, m.role_code)),
         ip=ip,
         customer_id=m.customer_id,
+        ally_company_id=m.ally_company_id,
     )
 
 
 def get_principal(p: Principal = Depends(get_session_principal)) -> Principal:
-    """Principal para TODO endpoint interno. Un usuario de cliente nunca pasa de aqui: asi ningun endpoint
-    interno (incluidos los que solo piden sesion, como archivo, multimedia o tipo de cambio) le queda abierto
-    por olvido. Lo unico que usa get_session_principal es /auth (su cuenta) y el portal del cliente."""
-    if p.is_client:
+    """Principal para TODO endpoint interno. Un usuario de cliente o de una empresa aliada nunca pasa de aqui: asi
+    ningun endpoint interno (incluidos los que solo piden sesion, como archivo, multimedia o tipo de cambio) le queda
+    abierto por olvido. Lo unico que usa get_session_principal es /auth (su cuenta), el portal del cliente (/cliente)
+    y el portal de aliados (/aliado, core/ally.py)."""
+    if p.is_external or p.ally_company_id is not None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Esta seccion es solo para el equipo de Crimson")
     return p
 

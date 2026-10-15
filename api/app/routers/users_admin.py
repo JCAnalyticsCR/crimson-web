@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 
 from ..core.config import settings as cfg
 from ..core.db import get_db
-from ..core.deps import ALLY_ROLES, ASSIGNABLE_ROLES, COST_ROLE_CHOICES, Principal, cost_roles, require
+from ..core.deps import ALLY_USER_ROLES, ASSIGNABLE_ROLES, COST_ROLE_CHOICES, Principal, cost_roles, require
 from ..core.ratelimit import admin_users_limiter, reauth_limiter, token_limiter
 from ..core.security import MAX_PASSWORD, hash_password, hash_token, new_temp_password, password_is_strong, verify_password
 from ..models import EmailOutbox, Invitation, PasswordReset, Tenant, TenantUser, User
@@ -66,7 +66,7 @@ VER = require("settings", "ver")
 # Membresias e invitaciones sin customer_id que NO se gestionan aqui: soporte temporal (su pestana) y usuarios de
 # empresas aliadas (se dan de alta y se gestionan desde su empresa aliada; pasarlos a un rol interno les daria todo
 # el panel sin el filtro "en comun").
-NOT_HERE = ("soporte", *ALLY_ROLES)
+NOT_HERE = ("soporte", *ALLY_USER_ROLES)
 ALLY_MSG = "Ese usuario es de una empresa aliada: se gestiona desde su empresa aliada"
 
 
@@ -94,14 +94,15 @@ def _actor_key(p: Principal) -> str:
 
 
 def _member(db: Session, p: Principal, uid: int) -> TenantUser:
-    """Membresia interna de la empresa. Usuarios del portal de clientes: 404 (se manejan en Accesos de clientes).
-    Soporte temporal: 409 (tiene su vencimiento y se gestiona en su pestana). Empresa aliada: 409 (su empresa aliada)."""
+    """Membresia interna de la empresa. Usuarios del portal de clientes o de una empresa aliada: 404 (se manejan en
+    Accesos de clientes y en Administracion -> Aliados). Soporte temporal: 409 (tiene su vencimiento y se gestiona en
+    su pestana). Rol aliado sin empresa (dato viejo): 409 (su empresa aliada)."""
     m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.user_id == uid))
-    if not m or m.customer_id:
+    if not m or m.customer_id or m.ally_company_id:
         raise HTTPException(404, "Usuario no encontrado")
     if m.role_code == "soporte":
         raise HTTPException(409, "Ese acceso se gestiona en Ajustes → Acceso de soporte")
-    if m.role_code in ALLY_ROLES:
+    if m.role_code in ALLY_USER_ROLES:
         raise HTTPException(409, ALLY_MSG)
     return m
 
@@ -137,6 +138,7 @@ def _pending_internal(db: Session, tenant_id: int, email: str, exclude_id: int |
         Invitation.tenant_id == tenant_id,
         func.lower(Invitation.email) == email,
         Invitation.customer_id.is_(None),
+        Invitation.ally_company_id.is_(None),
         Invitation.role_code.not_in(NOT_HERE),
         Invitation.accepted_at.is_(None),
         Invitation.revoked_at.is_(None),
@@ -172,7 +174,7 @@ def _supersede(db: Session, tenant_id: int, email: str, actor_id: int | None, ip
 def _invitation(db: Session, p: Principal, iid: int) -> Invitation:
     """Invitacion interna de la empresa (las del portal de clientes, de soporte y de aliados se manejan en sus pantallas)."""
     inv = db.get(Invitation, iid)
-    if not inv or inv.tenant_id != p.tenant.id or inv.customer_id or inv.role_code in NOT_HERE:
+    if not inv or inv.tenant_id != p.tenant.id or inv.customer_id or inv.ally_company_id or inv.role_code in NOT_HERE:
         raise HTTPException(404, "Invitación no encontrada")
     return inv
 
@@ -206,7 +208,9 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
     tid, now = p.tenant.id, datetime.now(UTC)
     # los usuarios del portal del cliente se administran desde Accesos de clientes, los de soporte en su pestana y
     # los de empresas aliadas desde su empresa aliada
-    internos = db.scalars(select(TenantUser).where(TenantUser.tenant_id == tid, TenantUser.customer_id.is_(None))).all()
+    internos = db.scalars(
+        select(TenantUser).where(TenantUser.tenant_id == tid, TenantUser.customer_id.is_(None), TenantUser.ally_company_id.is_(None))
+    ).all()
     rows = [m for m in internos if m.role_code not in NOT_HERE]
     support_members = sum(1 for m in internos if m.role_code == "soporte" and m.active)
     ids = [m.user_id for m in rows]
@@ -233,6 +237,7 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
             .where(
                 Invitation.tenant_id == tid,
                 Invitation.customer_id.is_(None),
+                Invitation.ally_company_id.is_(None),
                 Invitation.role_code.not_in(NOT_HERE),
                 Invitation.accepted_at.is_(None),
                 Invitation.revoked_at.is_(None),
@@ -334,7 +339,7 @@ def invite(data: InviteIn, response: Response, p: Principal = Depends(ADMIN), db
             raise HTTPException(409, "Ese correo ya tiene acceso al portal de clientes.")
         if m.role_code == "soporte":
             raise HTTPException(409, "Esa persona tiene un acceso de soporte técnico; se gestiona en Acceso de soporte.")
-        if m.role_code in ALLY_ROLES:
+        if m.ally_company_id or m.role_code in ALLY_USER_ROLES:
             raise HTTPException(409, "Esa persona es usuaria de una empresa aliada: se gestiona desde su empresa aliada.")
         raise HTTPException(409, "Ese correo ya es usuario de la empresa. Si está inactivo, activalo desde la lista.")
     now = datetime.now(UTC)
@@ -456,6 +461,14 @@ def accept(data: AcceptIn, request: Request, db: Session = Depends(get_db)):
     inv = _live_invitation(db, data.token)
     if not inv:
         raise HTTPException(404, "Invitación inválida, vencida o revocada")
+    company = None
+    if inv.ally_company_id:
+        # invitacion al portal de aliados: la empresa tiene que seguir activa (antes de crear la cuenta)
+        from ..models import AllyCompany
+
+        company = db.get(AllyCompany, inv.ally_company_id)
+        if not company or company.tenant_id != inv.tenant_id or not company.active:
+            raise HTTPException(409, "Esa empresa aliada ya no está activa. Escríbanos.")
     now = datetime.now(UTC)
     u = db.scalar(select(User).where(User.email == inv.email.lower()))
     existing = u is not None
@@ -499,10 +512,19 @@ def accept(data: AcceptIn, request: Request, db: Session = Depends(get_db)):
                 )
             raise HTTPException(409, "Entrá primero con tu contraseña temporal y creá la tuya; después aceptá la invitación.")
     m = db.scalar(select(TenantUser).where(TenantUser.user_id == u.id, TenantUser.tenant_id == inv.tenant_id))
-    if inv.customer_id:
+    if inv.ally_company_id:
+        # portal de aliados: la membresia queda atada a ESA empresa aliada. Una cuenta interna, de un cliente o de otra
+        # empresa aliada nunca se convierte por aceptar un enlace (una persona = una membresia por empresa).
+        if m and m.ally_company_id != inv.ally_company_id:
+            raise HTTPException(409, "Este correo ya tiene otro acceso en la empresa. Escríbanos para revisarlo.")
+        if m:
+            m.role_code, m.active = inv.role_code, True
+        else:
+            db.add(TenantUser(tenant_id=inv.tenant_id, user_id=u.id, role_code=inv.role_code, ally_company_id=inv.ally_company_id))
+    elif inv.customer_id:
         # invitacion al portal del cliente: la membresia queda atada a ESE cliente. Nunca se convierte una
         # cuenta interna en cuenta de cliente (ni al reves) por aceptar un enlace.
-        if m and m.customer_id != inv.customer_id:
+        if m and (m.customer_id != inv.customer_id or m.ally_company_id):
             raise HTTPException(409, "Este correo ya tiene otro acceso en la empresa. Escríbanos para revisarlo.")
         if m:
             m.role_code, m.active = inv.role_code, True
@@ -516,7 +538,11 @@ def accept(data: AcceptIn, request: Request, db: Session = Depends(get_db)):
         invalidate_resets(db, u.id)
     inv.accepted_at = now
     db.flush()
-    if not inv.customer_id:
+    if company is not None:
+        from ..services.ally_access import refresh_plan_quantity
+
+        refresh_plan_quantity(db, company)  # mensualidad por usuario: un usuario mas
+    if not inv.customer_id and not inv.ally_company_id:
         # las demas invitaciones internas del mismo correo ya no tienen sentido
         _supersede(db, inv.tenant_id, inv.email.lower(), u.id, ip, {"reemplazada_por": inv.id}, exclude_id=inv.id)
     audit(db, inv.tenant_id, u.id, "invite_accept", "invitation", inv.id, {"email": inv.email, "role": inv.role_code, "cuenta_existente": existing}, ip=ip)

@@ -99,6 +99,8 @@ class Survey(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     received_by: Mapped[str | None] = mapped_column(String(160))  # quien recibio al tecnico en el sitio
     # version de la plantilla (survey_specs.TEMPLATE_VERSION) con que se lleno; los existentes quedan en 1
     template_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    # levantamiento a cargo de una empresa aliada (lo ve en su portal); NULL = de Crimson
+    ally_company_id: Mapped[int | None] = mapped_column(ForeignKey("ally_company.id", ondelete="RESTRICT", name="fk_survey_ally_company"), index=True)
 
     points: Mapped[list["SurveyPoint"]] = relationship(cascade="all, delete-orphan", lazy="selectin", order_by="SurveyPoint.id")
     items: Mapped[list["SurveyItem"]] = relationship(cascade="all, delete-orphan", lazy="selectin", order_by="SurveyItem.id")
@@ -226,6 +228,8 @@ class WorkOrder(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     customer_signature: Mapped[str | None] = mapped_column(String(160))  # nombre de quien recibe
     warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouse.id"))
     stock_applied: Mapped[bool] = mapped_column(Boolean, default=False)  # el consumo ya descontó inventario
+    # orden asignada a una empresa aliada (sus tecnicos la ejecutan desde su portal); NULL = de Crimson
+    ally_company_id: Mapped[int | None] = mapped_column(ForeignKey("ally_company.id", ondelete="RESTRICT", name="fk_work_order_ally_company"), index=True)
 
     materials: Mapped[list["WorkOrderMaterial"]] = relationship(cascade="all, delete-orphan", lazy="selectin", order_by="WorkOrderMaterial.id")
     time_entries: Mapped[list["WorkOrderTime"]] = relationship(cascade="all, delete-orphan", lazy="selectin", order_by="WorkOrderTime.started_at")

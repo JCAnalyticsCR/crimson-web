@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from ..core.config import settings as cfg
 from ..core.db import get_db
-from ..core.deps import CLIENT_ROLES, Principal, require
+from ..core.deps import ALLY_USER_ROLES, CLIENT_ROLES, EXTERNAL_ROLES, Principal, require
 from ..models import Customer, Opportunity, Product, Project, Survey, SurveyItem, SurveyObservation, SurveyPoint, User, Warehouse, WorkOrder, WorkOrderMaterial
 from ..schemas.sales import DocumentIn, LineInSchema
 from ..services import approvals as aprob
@@ -91,7 +91,7 @@ def per_diem(tenant) -> Decimal:
 
 
 def reviewer_roles(tenant) -> tuple[str, ...]:
-    roles = (tenant.settings or {}).get("survey_reviewer_roles")
+    roles = [r for r in (tenant.settings or {}).get("survey_reviewer_roles") or [] if r not in EXTERNAL_ROLES]  # nunca un cliente ni un aliado
     return tuple(roles) if roles else REVIEWER_ROLES
 
 
@@ -472,20 +472,21 @@ def _labor_payload(data: SurveyIn) -> dict:
     return {k: {"people": (src.get(k) or LaborIn()).people, "days": str((src.get(k) or LaborIn()).days)} for k in LABOR_TYPES}
 
 
-def _check_customer(db: Session, p: Principal, data: SurveyIn, s: Survey | None = None) -> None:
+def _check_customer(db: Session, p: Principal | int, data: SurveyIn, s: Survey | None = None) -> None:
     """El cliente del levantamiento es de esta empresa (si no, la ficha diria el nombre de un cliente ajeno)."""
     from ..services.refs import check_refs
 
-    check_refs(db, p.tenant.id, {"customer_id": data.customer_id}, refs={"customer_id": (Customer, "Cliente no encontrado")}, current=s)
+    tid = p if isinstance(p, int) else p.tenant.id
+    check_refs(db, tid, {"customer_id": data.customer_id}, refs={"customer_id": (Customer, "Cliente no encontrado")}, current=s)
 
 
-def _apply_fields(s: Survey, data: SurveyIn, db: Session, p: Principal) -> None:
+def _apply_fields(s: Survey, data: SurveyIn, db: Session, tenant_id: int, valid_user_ids: set[int] | None = None) -> None:
     labor = _labor_payload(data)
     # la oportunidad no se toca aqui (ver SurveyIn.opportunity_id) y el cliente tiene que ser de esta empresa
     exclude = {"points", "items", "labor", "techs", "days", "visit_tech_ids", "common", "received_by", "opportunity_id", "customer_id"}
     for k, v in data.model_dump(exclude=exclude).items():
         setattr(s, k, v)
-    _check_customer(db, p, data, s)
+    _check_customer(db, tenant_id, data, s)
     s.customer_id = data.customer_id
     # solo si vienen: un cliente que no los conoce no borra lo que otro guardo
     if "common" in data.model_fields_set:
@@ -498,11 +499,19 @@ def _apply_fields(s: Survey, data: SurveyIn, db: Session, p: Principal) -> None:
     tarifas = (s.labor or {}).get("tarifas")  # las pone el costeo; el tecnico al guardar no las ve ni las borra
     s.labor = {**labor, "tarifas": tarifas} if tarifas else labor
     s.techs, s.days = labor["tecnico"]["people"], d(labor["tecnico"]["days"])
-    # solo usuarios de esta empresa
+    # solo usuarios de esta empresa (o, desde el portal de aliados, de su equipo)
     from ..models import TenantUser
 
-    validos = set(db.scalars(select(TenantUser.user_id).where(TenantUser.tenant_id == p.tenant.id)))
+    validos = valid_user_ids if valid_user_ids is not None else set(db.scalars(select(TenantUser.user_id).where(TenantUser.tenant_id == tenant_id)))
     s.visit_tech_ids = [i for i in dict.fromkeys(data.visit_tech_ids) if i in validos]
+
+
+def apply_survey_payload(db: Session, s: Survey, data: SurveyIn, tenant_id: int, valid_user_ids: set[int] | None = None) -> None:
+    """Lo que manda el formulario del levantamiento: campos, seccion comun, personal, puntos y materiales. Conserva lo
+    del costeo (unit_cost, recomendacion, tarifas). Sin control de alcance: quien llama ya lo hizo (el endpoint interno
+    con _survey; el portal de aliados con su AllyScope). valid_user_ids=None: cualquier usuario de la empresa."""
+    _apply_fields(s, data, db, tenant_id, valid_user_ids)
+    _apply_children(s, data)
 
 
 @router.get("/field/specs")
@@ -571,8 +580,7 @@ def survey_create(data: SurveyIn, p: Principal = Depends(require("field", "crear
     o = _linkable_opportunity(db, p, data.opportunity_id, customer_id=data.customer_id) if data.opportunity_id else None
     number, _ = next_number(db, p.tenant.id, "LEV")
     s = Survey(tenant_id=p.tenant.id, number=number, technician_id=p.user.id, template_version=TEMPLATE_VERSION)
-    _apply_fields(s, data, db, p)
-    _apply_children(s, data)
+    apply_survey_payload(db, s, data, p.tenant.id)
     if o:
         s.opportunity_id = o.id
         if not s.customer_id and o.customer_id:
@@ -671,8 +679,7 @@ def survey_update(sid: int, data: SurveyIn, p: Principal = Depends(require("fiel
     from ..services import bitacora  # bitacora con antes/despues; no cambia como se guardan los puntos
 
     antes = bitacora.survey_state(s)
-    _apply_fields(s, data, db, p)
-    _apply_children(s, data)
+    apply_survey_payload(db, s, data, p.tenant.id)
     c = db.get(Customer, s.customer_id) if s.customer_id else None
     bitacora.audit_survey_update(db, p, s, antes, company=c.name if c else (s.contact or {}).get("name"))
     if s.review_status == "aprobado" and not s.quote_id and not p.can("field", "revisar"):
@@ -934,6 +941,16 @@ def survey_apply_product(sid: int, data: ApplyProductIn, p: Principal = Depends(
 def survey_send(sid: int, p: Principal = Depends(require("field", "crear")), db: Session = Depends(get_db)):
     """El técnico envía el levantamiento a revisión (supervisor o administrador) y ve a quién le llegó el aviso."""
     s = _survey(db, sid, p)
+    notified = send_survey(db, p.tenant, s, p.user, p.ip)
+    db.commit()
+    out = _survey_out(db, s)
+    out["notified"] = notified
+    return out
+
+
+def send_survey(db: Session, tenant, s: Survey, sender: User, ip: str | None, sender_label: str | None = None) -> list[dict]:
+    """Validaciones del envio, paso a revision, aviso a los revisores de hoy y bitacora. Devuelve a quien se aviso.
+    No hace commit. sender_label: como se nombra al remitente en el aviso ("Nombre (Empresa aliada)")."""
     if not s.points and not s.items:
         raise HTTPException(422, "Agregá al menos un punto o material antes de enviar")
     if s.status in ("cotizado", "cerrado"):
@@ -950,22 +967,22 @@ def survey_send(sid: int, p: Principal = Depends(require("field", "crear")), db:
     s.status = "enviado"
     s.review_status = "pendiente"  # todo envio (o reenvio tras observaciones) vuelve a la cola de revision
     s.sent_at = datetime.now(UTC)
-    s.sent_by = p.user.id
+    s.sent_by = sender.id
     cliente = db.get(Customer, s.customer_id).name if s.customer_id else (s.contact or {}).get("name") or "sin cliente"
     spec = SPECS.get(s.kind, SPECS["otro"])
     filas = "".join(f"<li>{html.escape(x.code)} · {html.escape(x.label or '')}</li>" for x in s.points[:20])
     labor = survey_labor(s)
     personal = " · ".join(f"{LABOR_TYPES[k][0]}: {v['people']} × {v['days']:g} día(s)" for k, v in labor.items() if v["people"])
-    roles = reviewer_roles(p.tenant)
+    roles = reviewer_roles(tenant)
     # Andres (13/10, 21:05) no sabia quien recibia lo enviado ni donde: el aviso lleva directo al levantamiento
     # y a la bandeja de Aprobaciones. s.id es entero: no necesita escape.
     base = cfg.public_base_url.rstrip("/")
     notify_roles(
         db,
-        p.tenant,
+        tenant,
         roles,
         f"{'Levantamiento corregido' if reenvio else 'Nuevo levantamiento'} {s.number} · {cliente}",
-        f"<p><b>{html.escape(spec['label'])}</b> levantado por {html.escape(p.user.full_name)}.</p>"
+        f"<p><b>{html.escape(spec['label'])}</b> levantado por {html.escape(sender_label or sender.full_name)}.</p>"
         f"<p>Cliente: {html.escape(cliente)}<br>Sitio: {html.escape(s.site or '—')}<br>"
         f"{len(s.points)} {html.escape(spec['point_label'].lower())}(s) · {len(s.items)} materiales y equipos<br>{html.escape(personal or 'sin personal')}</p>"
         f"<ul>{filas}</ul><p>{'El técnico resolvió las observaciones. ' if reenvio else ''}Abrí el levantamiento para revisarlo: aprobalo o devolvelo con observaciones antes del costeo.</p>"
@@ -974,21 +991,18 @@ def survey_send(sid: int, p: Principal = Depends(require("field", "crear")), db:
         "survey",
         s.id,
     )
-    notified = [r for r in _reviewers(db, p.tenant)]
+    notified = [r for r in _reviewers(db, tenant)]
     audit(
         db,
-        p.tenant.id,
-        p.user.id,
+        tenant.id,
+        sender.id,
         "send",
         "survey",
         s.id,
         {"puntos": len(s.points), "materiales": len(s.items), "notificados": [r["name"] for r in notified]},
-        ip=p.ip,
+        ip=ip,
     )
-    db.commit()
-    out = _survey_out(db, s)
-    out["notified"] = notified
-    return out
+    return notified
 
 
 class ObservationIn(BaseModel):
@@ -1065,18 +1079,26 @@ class ResolveIn(BaseModel):
 def survey_observation_resolve(sid: int, oid: int, data: ResolveIn, p: Principal = Depends(require("field", "editar")), db: Session = Depends(get_db)):
     """El tecnico marca una observacion como resuelta (o la reabre). Con todas resueltas puede reenviar."""
     s = _survey(db, sid, p)
-    o = next((x for x in s.observations if x.id == oid), None)
+    resolve_observation(db, s, oid, p.user, data.resolution, resolved=data.resolved, ip=p.ip)
+    db.commit()
+    return _survey_out(db, s)
+
+
+def resolve_observation(
+    db: Session, s: Survey, obs_id: int, user: User, resolution: str | None, resolved: bool = True, ip: str | None = None
+) -> SurveyObservation:
+    """Marca resuelta (o reabre) una observacion DE ESTE levantamiento (otra: 404). No hace commit."""
+    o = next((x for x in s.observations if x.id == obs_id), None)
     if not o:
         raise HTTPException(404, "Observación no encontrada")
     if s.status in ("cotizado", "cerrado"):
         raise HTTPException(409, "El levantamiento ya fue cotizado")
-    if data.resolved:
-        o.resolved_at, o.resolved_by, o.resolution = datetime.now(UTC), p.user.id, (data.resolution or "").strip() or None
+    if resolved:
+        o.resolved_at, o.resolved_by, o.resolution = datetime.now(UTC), user.id, (resolution or "").strip() or None
     else:
         o.resolved_at, o.resolved_by, o.resolution = None, None, None
-    audit(db, p.tenant.id, p.user.id, "observation_resolve" if data.resolved else "observation_reopen", "survey", s.id, {"observacion": o.id}, ip=p.ip)
-    db.commit()
-    return _survey_out(db, s)
+    audit(db, s.tenant_id, user.id, "observation_resolve" if resolved else "observation_reopen", "survey", s.id, {"observacion": o.id}, ip=ip)
+    return o
 
 
 @router.get("/surveys/{sid}/costing")
@@ -1607,15 +1629,23 @@ def _crew(o: WorkOrder) -> set[int]:
     return {i for i in [o.technician_id, *(o.helpers or [])] if i}
 
 
+def _crew_member():
+    """Rol que recibe ordenes: tecnico, supervisor o admin del equipo interno, o un usuario de una empresa aliada
+    (siempre ligado a su empresa; que la empresa participe en el proyecto lo valida check_ally_assignment)."""
+    from ..models import TenantUser
+
+    interno = TenantUser.role_code.in_(CREW_ROLES) & TenantUser.ally_company_id.is_(None) & TenantUser.customer_id.is_(None)
+    aliado = TenantUser.role_code.in_(ALLY_USER_ROLES) & TenantUser.ally_company_id.is_not(None)
+    return or_(interno, aliado)
+
+
 def _eligible(db: Session, tenant_id: int, user_id: int | None) -> bool:
-    """Usuario activo de la empresa con rol tecnico, supervisor o admin."""
+    """Usuario activo de la empresa con rol tecnico, supervisor o admin (o de una empresa aliada)."""
     from ..models import TenantUser
 
     if not user_id:
         return False
-    m = db.scalar(
-        select(TenantUser).where(TenantUser.tenant_id == tenant_id, TenantUser.user_id == user_id, TenantUser.active, TenantUser.role_code.in_(CREW_ROLES))
-    )
+    m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == tenant_id, TenantUser.user_id == user_id, TenantUser.active, _crew_member()))
     u = db.get(User, user_id) if m else None
     return bool(m and u and u.active)
 
@@ -1638,7 +1668,7 @@ def _activos(db: Session, tenant_id: int, ids) -> set[int]:
     stmt = (
         select(TenantUser.user_id)
         .join(User, User.id == TenantUser.user_id)
-        .where(TenantUser.tenant_id == tenant_id, TenantUser.user_id.in_(ids), TenantUser.active, TenantUser.role_code.in_(CREW_ROLES), User.active)
+        .where(TenantUser.tenant_id == tenant_id, TenantUser.user_id.in_(ids), TenantUser.active, _crew_member(), User.active)
     )
     return set(db.scalars(stmt))
 
@@ -2055,10 +2085,19 @@ def order_action(oid: int, action: str, data: ProgressIn | None = None, p: Princ
     o = _order(db, oid, p)
     if action not in ACTIONS:
         raise HTTPException(404, "Acción no soportada")
+    apply_order_progress(db, o, data or ProgressIn(), action, p, p.tenant)
+    db.commit()
+    return _order_out(db, o, tenant=p.tenant)
+
+
+def apply_order_progress(db: Session, o: WorkOrder, data: ProgressIn, action: str, actor: Principal, tenant) -> None:
+    """Llegué / iniciar / pausar / avanzar / finalizar / cancelar sobre una orden YA autorizada por quien llama (el
+    endpoint interno con _order, el portal de aliados con su AllyScope). Al finalizar descuenta el material una sola vez,
+    termina el proyecto si era la ultima orden y avisa a administracion. No hace commit."""
+    p = actor
     if o.status in CERRADAS:
         raise HTTPException(409, f"La orden está {o.status}; ya no se modifica")
     now = datetime.now(UTC)
-    data = data or ProgressIn()
     quienes = set(data.workers) if data.workers else None
 
     # validaciones antes de tocar nada (un 409/403 no deja la orden a medias)
@@ -2072,13 +2111,13 @@ def order_action(oid: int, action: str, data: ProgressIn | None = None, p: Princ
     if action == "start":
         equipo = _crew(o)
         # sin "workers" trabaja el equipo que hoy puede recibir ordenes (un ayudante dado de baja no abre jornada)
-        trabajan = quienes if quienes is not None else {uid for uid in equipo if _eligible(db, p.tenant.id, uid)}
+        trabajan = quienes if quienes is not None else {uid for uid in equipo if _eligible(db, tenant.id, uid)}
         if not trabajan:
             raise HTTPException(409, "Asigná un técnico antes de iniciar")
         fuera = trabajan - equipo
         if fuera and not p.can("field", "asignar"):
             raise HTTPException(403, "Solo quien asigna puede sumar gente a la orden")
-        bajas = sorted(uid for uid in trabajan if not _eligible(db, p.tenant.id, uid))
+        bajas = sorted(uid for uid in trabajan if not _eligible(db, tenant.id, uid))
         if bajas:
             # del equipo pero dado de baja (inactivo o cambio de rol): se dice quien. El nombre sale de _names, que solo
             # devuelve gente de esta empresa
@@ -2139,7 +2178,7 @@ def order_action(oid: int, action: str, data: ProgressIn | None = None, p: Princ
             o.started_at = now
         o.finished_at, o.status = now, "finalizada"
         consumed = _apply_materials(db, o, p)
-        audit(db, p.tenant.id, p.user.id, "finish", "work_order", o.id, {"materiales": consumed}, ip=p.ip)
+        audit(db, tenant.id, p.user.id, "finish", "work_order", o.id, {"materiales": consumed}, ip=p.ip)
         if o.project_id:
             pr = _ref(db, Project, o.project_id, o.tenant_id)  # nunca se termina el proyecto de otra empresa
             if pr and all(x.status in CERRADAS for x in pr.orders if x.trashed_at is None) and pr.status != "terminado":
@@ -2147,7 +2186,7 @@ def order_action(oid: int, action: str, data: ProgressIn | None = None, p: Princ
                 horas = sum((order_hours(x)[0] or 0 for x in pr.orders), 0.0)
                 notify_roles(
                     db,
-                    p.tenant,
+                    tenant,
                     ("admin", "contabilidad"),
                     f"Proyecto {pr.number} terminado · listo para facturación",
                     f"<p><b>{html.escape(pr.name)}</b> quedó terminado.</p>"
@@ -2159,8 +2198,6 @@ def order_action(oid: int, action: str, data: ProgressIn | None = None, p: Princ
     elif action == "cancel":
         _close_running(o, now)
         o.status = "cancelada"
-    db.commit()
-    return _order_out(db, o, tenant=p.tenant)
 
 
 def _apply_materials(db: Session, o: WorkOrder, p: Principal) -> int:

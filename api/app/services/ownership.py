@@ -56,13 +56,20 @@ def eligible_seller(db, tenant_id: int, uid: int | None) -> bool:
     """Puede ser el vendedor de un documento (verlo y comisionarlo): usuario ACTIVO del equipo de esta empresa, ni
     de un cliente ni de un aliado. Vale igual para elegirlo en el editor que para heredarlo de la oportunidad (cuyo
     responsable solo se valida como miembro activo, pipeline._check_owner)."""
-    from ..core.deps import ALLY_ROLES, CLIENT_ROLES
+    from ..core.deps import ALLY_USER_ROLES, CLIENT_ROLES
     from ..models import TenantUser
 
     if not uid:
         return False
     m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == tenant_id, TenantUser.user_id == uid, TenantUser.active))
-    return bool(m and m.customer_id is None and m.role_code not in CLIENT_ROLES and m.role_code not in ALLY_ROLES and m.user.active)
+    return bool(
+        m
+        and m.customer_id is None
+        and m.ally_company_id is None
+        and m.role_code not in CLIENT_ROLES
+        and m.role_code not in ALLY_USER_ROLES
+        and m.user.active
+    )
 
 
 def opportunity_seller(db, o) -> int | None:

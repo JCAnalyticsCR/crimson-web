@@ -14,7 +14,7 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
-from app.core.deps import ALLY_ROLES, ASSIGNABLE_ROLES, ROLE_PERMISSIONS
+from app.core.deps import ALLY_USER_ROLES, ASSIGNABLE_ROLES, ROLE_PERMISSIONS
 
 PW = "Rol-prueba-2026"
 
@@ -313,19 +313,19 @@ def test_archivo_del_vendedor_solo_sus_oportunidades(client, auth, db_session):
 
 
 def test_aliados_definidos_pero_no_asignables(client, auth, db_session):
-    for r in ALLY_ROLES:
+    for r in ALLY_USER_ROLES:
         assert r in ROLE_PERMISSIONS and r not in ASSIGNABLE_ROLES
         perms = ROLE_PERMISSIONS[r]
         assert not {"sales", "payments", "accounting", "payroll", "reports", "purchases", "settings", "events", "vehicles"} & set(perms), r
-        assert not {"precios", "costos"} & set(perms["catalog"]), r
+        assert not {"precios", "costos"} & set(perms.get("catalog", [])), r
         assert all("ver_todo" not in acts for acts in perms.values()), r
     assert not {"assets", "crm", "crm_pipeline"} & set(ROLE_PERMISSIONS["tecnico_aliado"])
-    assert not set(ALLY_ROLES) & set(client.get("/settings/users").json()["roles"])
+    assert not set(ALLY_USER_ROLES) & set(client.get("/settings/users").json()["roles"])
     assert client.post("/settings/invitations", json={"email": "aliado@ejemplo.com", "role": "aliado"}).status_code == 422
     assert client.post("/settings/invitations", json={"email": "tec.aliado@ejemplo.com", "role": "tecnico_aliado"}).status_code == 422
     # aparecen en "Ver como" (la matriz que usa la vista previa del admin)
     m = client.get("/auth/roles").json()
-    assert set(ALLY_ROLES) <= set(m["matrix"]) and m["roles"][:4] == ["admin", "ventas", "contabilidad", "tecnico"]
+    assert set(ALLY_USER_ROLES) <= set(m["matrix"]) and m["roles"][:4] == ["admin", "ventas", "contabilidad", "tecnico"]
     # tampoco se le asigna a un usuario que ya existe
     v = _entrar(client, db_session, auth["tenant"]["id"], "vend-aliado@ejemplo.com", "ventas")
     assert client.patch(f"/settings/users/{_uid(client, v)}", json={"role": "aliado"}).status_code == 422
@@ -336,7 +336,7 @@ def test_archivo_cerrado_a_aliados(client, auth, db_session):
     from app.core.security import hash_password
     from app.models import TenantUser, User
 
-    for role in ALLY_ROLES:
+    for role in ALLY_USER_ROLES:
         u = User(email=f"{role}@ejemplo.com", full_name="Aliado", password_hash=hash_password(PW))
         db_session.add(u)
         db_session.flush()
