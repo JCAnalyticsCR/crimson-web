@@ -23,7 +23,8 @@ pago (misma clave que usa el motor, asi un cobro viejo no comisiona dos veces), 
 colones (los de otra moneda quedan null: los lectores usan amount x tipo de cambio de hoy) y completed_at de los
 proyectos ya cerrados. NO se devengan comisiones historicas.
 
-downgrade: borra los movimientos de aliados (perdida de datos: no tienen usuario y user_id vuelve a NOT NULL) y
+downgrade: borra los movimientos de aliados (perdida de datos: no tienen usuario y user_id vuelve a NOT NULL), borra
+las reglas de aliado, por participacion y los bonos, desactiva las de vendedor que el esquema viejo no sabe leer y
 quita columnas y restriccion en orden inverso.
 """
 
@@ -114,6 +115,19 @@ def upgrade() -> None:
 def downgrade() -> None:
     # perdida de datos: los movimientos de aliados no tienen usuario y user_id vuelve a NOT NULL
     op.execute("DELETE FROM commission WHERE beneficiary = 'aliado' OR user_id IS NULL")
+    # Reglas que el esquema viejo no sabe leer. Sin beneficiary/kind/participation_id, el codigo anterior
+    # ("user_id IS NULL AND active" = regla general de vendedores) tomaria una regla de aliados, un acuerdo de
+    # proyecto o un bono como comision de todos los vendedores. Las de aliado, por participacion y los bonos se
+    # borran (primero sueltan los movimientos de vendedor que las usaron: commission.rule_id es NO ACTION). Las de
+    # vendedor con algo que el esquema viejo no tiene (otro evento, filtros, vigencia, monto fijo) se desactivan
+    # para que no comisionen distinto de lo pactado; se ven en la lista y el admin decide.
+    nuevas = "beneficiary = 'aliado' OR participation_id IS NOT NULL OR kind <> 'comision'"
+    op.execute(f"UPDATE commission SET rule_id = NULL WHERE rule_id IN (SELECT id FROM commission_rule WHERE {nuevas})")
+    op.execute(f"DELETE FROM commission_rule WHERE {nuevas}")
+    op.execute(
+        "UPDATE commission_rule SET active = false WHERE \"trigger\" <> 'cobro' OR deal_kind IS NOT NULL OR solution IS NOT NULL "
+        "OR valid_from IS NOT NULL OR valid_to IS NOT NULL OR fixed_amount IS NOT NULL"
+    )
 
     with op.batch_alter_table("project") as b:
         b.drop_column("completed_at")

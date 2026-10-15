@@ -133,3 +133,45 @@ def test_tecnico_sin_permiso_de_editar_no_archiva(client, auth, db_session):
     cust = client.get("/customers").json()["items"][0]
     pr = client.post("/projects", json={"name": "Ajeno", "customer_id": cust["id"]}).json()
     assert client.post(f"/archive/project/{pr['id']}/archive", headers=v).status_code == 403  # ventas solo ve proyectos
+
+
+def test_purga_de_oportunidad_con_acuerdo_de_aliado_usado(client, auth, db_session):
+    """El acuerdo del aliado (reglas por participacion) se va con la oportunidad; un movimiento anulado que uso esa
+    regla suelta el enlace (commission.rule_id es NO ACTION): la purga no revienta, ni a mano ni en el worker."""
+    from app.models import Commission, CommissionRule, Tenant
+    from app.services.archive import purge_expired
+
+    cust = client.get("/customers").json()["items"][0]
+    ally = client.post("/allies", json={"name": "Aliado Uno S.A.", "tax_id": "3-101-000301"}).json()["id"]
+    reglas = 0
+    oids = []
+    for titulo in ("Cámaras bodega", "Red oficina"):
+        o = _opp(client, title=titulo)
+        r = client.post(f"/opportunities/{o['id']}/allies", json={"ally_company_id": ally, "role": "subcontratista"})
+        aid = next(a["id"] for a in r.json() if a.get("ally_company_id") == ally)
+        body = {"commission": {"base": "venta", "percent": 10, "trigger": "cotizacion_aceptada"}, "bonus_complete": {"amount": 5000}}
+        assert client.put(f"/commissions/deals/{aid}", json=body).status_code == 200
+        q = client.post(f"/opportunities/{o['id']}/quote", json={}).json()["quote_id"]
+        lines = [{"name": "Instalación", "quantity": 1, "unit_price": 100000, "tax_rate": 13}]
+        assert client.put(f"/quotes/{q}", json={"customer_id": cust["id"], "lines": lines}).status_code == 200
+        client.post(f"/quotes/{q}/send")
+        acepta = {"status": "aceptada", "contact_name": "Persona Cliente", "channel": "correo"}
+        assert client.post(f"/quotes/{q}/acceptance", json=acepta).status_code == 200
+        assert client.post(f"/quotes/{q}/acceptance", json={"status": "pendiente"}).status_code == 200  # deshace: anulada
+        assert client.post(f"/archive/opportunity/{o['id']}/trash").status_code == 200
+        reglas += 2
+        oids.append(o["id"])
+    movs = db_session.scalars(select(Commission).where(Commission.beneficiary == "aliado")).all()
+    assert len(movs) == 2 and all(m.status == "anulada" and m.rule_id for m in movs)
+    assert len(db_session.scalars(select(CommissionRule).where(CommissionRule.participation_id.is_not(None))).all()) == reglas
+    # a mano
+    assert client.delete(f"/archive/opportunity/{oids[0]}").status_code == 200
+    # el worker
+    t = db_session.get(Tenant, auth["tenant"]["id"])
+    t.settings = {**(t.settings or {}), "archive_purge_days": 10}
+    db_session.commit()
+    assert purge_expired(db_session, datetime.now(UTC) + timedelta(days=10, minutes=1)) == 1
+    db_session.expire_all()
+    movs = db_session.scalars(select(Commission).where(Commission.beneficiary == "aliado")).all()
+    assert len(movs) == 2 and all(m.rule_id is None and m.terms["rule"] for m in movs)  # la foto de la regla queda
+    assert not db_session.scalars(select(CommissionRule).where(CommissionRule.participation_id.is_not(None))).all()

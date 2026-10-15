@@ -21,11 +21,13 @@ inventario, cargas de combustible, pedidos web y la bitacora.
 
 from __future__ import annotations
 
+import logging
 import math
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -65,6 +67,7 @@ from ..models import (
 )
 from .documents import audit
 
+log = logging.getLogger(__name__)
 DEFAULT_PURGE_DAYS = 30
 OPEN_ORDER = ("asignada", "en_sitio", "en_proceso")
 IN_PROGRESS_ORDER = ("en_sitio", "en_proceso")
@@ -137,13 +140,7 @@ def purge_at(obj, tenant: Tenant) -> datetime | None:
 
 
 def title_of(obj) -> str:
-    return (
-        getattr(obj, "title", None)
-        or getattr(obj, "subject", None)
-        or getattr(obj, "name", None)
-        or getattr(obj, "site", None)
-        or ""
-    )
+    return getattr(obj, "title", None) or getattr(obj, "subject", None) or getattr(obj, "name", None) or getattr(obj, "site", None) or ""
 
 
 def ref_of(obj) -> str:
@@ -400,7 +397,13 @@ def _detach(db: Session, kind: str, obj) -> None:
         db.execute(update(Project).where(Project.survey_id == obj.id).values(survey_id=None))
     elif kind == "opportunity":
         from ..models import AllyCostRequest, AllyParticipation
+        from . import commissions
 
+        # el acuerdo economico de cada aliado (reglas por participacion) se va con el: los movimientos que usaron esas
+        # reglas (anulados, o de un proyecto ya borrado) sueltan rule_id antes del borrado. Sin esto, la cascada de
+        # fk_crule_participation choca con commission.rule_id (NO ACTION) y la purga revienta (IntegrityError)
+        for part in db.scalars(select(AllyParticipation).where(AllyParticipation.opportunity_id == obj.id)).all():
+            commissions.drop_participation_rules(db, part)
         # aliados y solicitudes de costo son de la oportunidad: se van con ella (tambien en SQLite sin cascada)
         db.execute(delete(AllyCostRequest).where(AllyCostRequest.opportunity_id == obj.id))
         db.execute(delete(AllyParticipation).where(AllyParticipation.opportunity_id == obj.id))
@@ -474,11 +477,16 @@ def purge_expired(db: Session, now: datetime | None = None) -> int:
             model = KINDS[kind][0]
             rows = db.scalars(select(model).where(model.tenant_id == tenant.id, model.trashed_at.is_not(None), model.trashed_at <= limit)).all()
             for obj in rows:
+                oid = obj.id
                 try:
                     with db.begin_nested():
                         purge(db, kind, obj, None)
                     n += 1
                 except HTTPException:
+                    continue
+                except IntegrityError:
+                    # una referencia que _detach no suelta: queda en la papelera y la corrida sigue con lo demas
+                    log.exception("purga: %s %s de la empresa %s no se pudo borrar", kind, oid, tenant.id)
                     continue
     db.commit()
     return n

@@ -18,8 +18,9 @@ def _cust(client):
     return client.get("/customers").json()["items"][0]
 
 
-def _negocio(client, ally_id: int, venta=200000, precio=100000, titulo="Cámaras bodega norte", estado="aprobado"):
-    """Oportunidad con el aliado, su precio (en colones) y la cotizacion de Crimson -> proyecto."""
+def _negocio(client, ally_id: int, venta=200000, precio=100000, titulo="Cámaras bodega norte", estado="aprobado", proyecto=True):
+    """Oportunidad con el aliado, su precio (en colones) y la cotizacion de Crimson -> proyecto (o solo la
+    cotizacion, si proyecto=False: una venta sin proyecto)."""
     o = client.post("/opportunities", json={"title": titulo, "customer_id": _cust(client)["id"], "amount": venta}).json()
     r = client.post(f"/opportunities/{o['id']}/allies", json={"ally_company_id": ally_id, "role": "subcontratista"})
     assert r.status_code == 201, r.text
@@ -34,6 +35,8 @@ def _negocio(client, ally_id: int, venta=200000, precio=100000, titulo="Cámaras
         json={"customer_id": _cust(client)["id"], "lines": [{"name": "Instalación", "quantity": 1, "unit_price": venta, "tax_rate": 13}]},
     )
     assert r.status_code == 200, r.text
+    if not proyecto:
+        return {"opp": o["id"], "aid": aid, "rid": rid, "qid": q["quote_id"], "pr": None}
     pr = client.post(f"/quotes/{q['quote_id']}/project", json={})
     assert pr.status_code == 201, pr.text
     return {"opp": o["id"], "aid": aid, "rid": rid, "qid": q["quote_id"], "pr": pr.json()}
@@ -121,10 +124,17 @@ def test_alcance_del_aliado(client, auth, db_session):
     assert client.get(f"/aliado/ganancias/proyectos/{nb['pr']['id']}", headers=ha).status_code == 404
     det = client.get(f"/aliado/ganancias/proyectos/{na['pr']['id']}", headers=ha)
     assert det.status_code == 200 and len(det.json()["movimientos"]) == 4
-    for body in (ga, det.json()):
+    qnum = client.get(f"/quotes/{na['qid']}").json()["number"]
+    proy = client.get(f"/aliado/proyectos/{na['pr']['id']}", headers=ha).json()
+    for body in (ga, det.json(), proy["lo_que_recibo"]):
         keys = keys_rec(body)
         assert not {"price", "price_crc", "cost_real", "cost_allies", "base_amount", "percent", "invoice_id", "quote_id"} & keys
         assert inv["number"] not in str(body), [k for k in str(body).split(",") if inv["number"] in k]
+    # el concepto no lleva el % (con el monto despejaria la venta al cliente) ni el numero de la cotizacion
+    for m in det.json()["movimientos"] + proy["lo_que_recibo"]["movimientos"]:
+        assert "%" not in m["description"] and qnum not in m["description"] and na["pr"]["number"] in m["description"], m["description"]
+    com = next(m for m in det.json()["movimientos"] if m["kind"] == "comision")
+    assert com["description"] == f"Comisión al completar el proyecto · {na['pr']['number']}"
     # /commissions* es interno: el aliado no entra; el admin lo consulta por empresa
     assert client.get("/commissions", headers=ha).status_code == 403
     assert client.get("/commissions/earnings", params={"ally_company_id": a}, headers=ha).status_code == 403
@@ -133,7 +143,6 @@ def test_alcance_del_aliado(client, auth, db_session):
     assert client.get(f"/commissions/earnings/projects/{nb['pr']['id']}", params={"ally_company_id": a}).status_code == 404
     lista = {x["ally_company_id"]: x for x in client.get("/commissions/allies").json()}
     assert D(str(lista[a]["por_recibir"])) == D("160000.00") and lista[b]["proyectos"] == 1
-    proy = client.get(f"/aliado/proyectos/{na['pr']['id']}", headers=ha).json()
     assert D(str(proy["lo_que_recibo"]["totales"]["por_recibir"])) == D("160000.00")
 
 
@@ -281,3 +290,55 @@ def test_devolucion_con_comision_y_pago_acordado_al_cobrar(client, auth, db_sess
     com = sum(D(str(f["amount"])) for f in filas if not db_session.get(Commission, f["id"]).cost_request_id)
     pago = sum(D(str(f["amount"])) for f in filas if db_session.get(Commission, f["id"]).cost_request_id)
     assert com == D("20000.00") and pago == D("100000.00")  # 10 % de la venta y el precio: nunca de mas (falla B)
+
+
+def test_precio_aprobado_despues_de_cobrar(client, auth, db_session):
+    """E5: el precio se aprueba con el negocio ya cobrado y el pago acordado se devenga al cobrar (venta sin proyecto,
+    o ally_payout_trigger = cobro): devenga la parte ya cobrada; no queda "proyectado" para siempre."""
+    ally = client.post("/allies", json={"name": "Aliado Uno S.A.", "tax_id": "3-101-000214"}).json()["id"]
+    body = {"what": "Mano de obra de fibra", "status": "aprobado", "amount": 100000, "currency": "CRC"}
+    # venta sin proyecto, cobrada completa, precio en revision
+    n = _negocio(client, ally, estado="recibido", proyecto=False)
+    inv = client.post(f"/quotes/{n['qid']}/convert").json()
+    client.post(f"/invoices/{inv['id']}/payments", json={"method": "transferencia", "amount": 226000})
+    assert not [f for f in _mov(client) if f["kind"] == "pago_acordado"]  # en revision: no se devenga
+    assert client.put(f"/opportunity-allies/requests/{n['rid']}", json=body).status_code == 200
+    pagos = [f for f in _mov(client) if f["kind"] == "pago_acordado"]
+    assert len(pagos) == 1 and D(str(pagos[0]["amount"])) == D("100000.00") and pagos[0]["trigger"] == "cobro"
+    assert pagos[0]["invoice_id"] == inv["id"] and pagos[0]["status"] == "pendiente"
+    # repetir la aprobacion (otro guardado igual) no duplica
+    assert client.put(f"/opportunity-allies/requests/{n['rid']}", json=body).status_code == 200
+    assert len([f for f in _mov(client) if f["kind"] == "pago_acordado"]) == 1
+    # con proyecto y pago acordado al cobrar: aprobado con el 50 % cobrado devenga 50 %; el otro cobro completa
+    assert client.put("/commissions/config", json={"ally_payout_trigger": "cobro"}).status_code == 200
+    n2 = _negocio(client, ally, estado="recibido", titulo="Red oficina sur")
+    inv2 = client.post(f"/quotes/{n2['qid']}/convert").json()
+    client.post(f"/invoices/{inv2['id']}/payments", json={"method": "transferencia", "amount": 113000})  # 50 %
+    assert client.put(f"/opportunity-allies/requests/{n2['rid']}", json=body).status_code == 200
+    de2 = [f for f in _mov(client, project_id=n2["pr"]["id"]) if f["kind"] == "pago_acordado"]
+    assert [D(str(f["amount"])) for f in de2] == [D("50000.00")]
+    g = client.get("/commissions/earnings", params={"ally_company_id": ally}).json()
+    fila = next(x for x in g["proyectos"] if x["project_id"] == n2["pr"]["id"])
+    assert D(str(fila["proyectado"])) == D("50000.00")
+    client.post(f"/invoices/{inv2['id']}/payments", json={"method": "transferencia", "amount": 113000})
+    de2 = [f for f in _mov(client, project_id=n2["pr"]["id"]) if f["kind"] == "pago_acordado"]
+    assert sum(D(str(f["amount"])) for f in de2) == D("100000.00")
+    g = client.get("/commissions/earnings", params={"ally_company_id": ally}).json()
+    assert D(str(next(x for x in g["proyectos"] if x["project_id"] == n2["pr"]["id"])["proyectado"])) == 0
+
+
+def test_proyecto_cancelado_no_proyecta(client, auth, db_session):
+    admin_h = dict(client.headers)
+    ally = client.post("/allies", json={"name": "Aliado Uno S.A.", "tax_id": "3-101-000215"}).json()["id"]
+    ha = usuario(client, admin_h, ally, "jefe@aliado-uno.ejemplo.com", "aliado")
+    n = _negocio(client, ally)
+    g = client.get("/aliado/ganancias", headers=ha).json()
+    assert D(str(g["totales"]["proyectado"])) == D("100000.00")
+    r = client.put(f"/projects/{n['pr']['id']}", json={"name": n["pr"]["name"], "status": "cancelado"})
+    assert r.status_code == 200, r.text
+    for h in (ha, admin_h):
+        path = "/aliado/ganancias" if h is ha else "/commissions/earnings"
+        g = client.get(path, headers=h, params={} if h is ha else {"ally_company_id": ally}).json()
+        assert D(str(g["totales"]["proyectado"])) == 0 and all(D(str(x["proyectado"])) == 0 for x in g["proyectos"])
+    det = client.get(f"/aliado/ganancias/proyectos/{n['pr']['id']}", headers=ha).json()
+    assert D(str(det["totales"]["proyectado"])) == 0 and D(str(det["proyectado"]["pago_acordado"])) == 0

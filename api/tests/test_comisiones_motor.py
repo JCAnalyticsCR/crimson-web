@@ -168,6 +168,18 @@ def test_factura_anulada(client, auth, db_session):
     client.post(f"/invoices/{inv2['id']}/void")
     rev = [x for x in _rows(client) if x["invoice_id"] == inv2["id"] and x["kind"] == "ajuste"]
     assert len(rev) == 1 and rev[0]["reverses_id"] == pagada["id"] and rev[0]["status"] == "pendiente" and D(str(rev[0]["amount"])) == D("-25000.00")
+    # "al aceptar la cotizacion": nace sin factura y la cotizacion convertida ya no se anula; anular su factura la anula
+    _rule(client, user_id=vid, name="Al aceptar", percent=5, trigger="cotizacion_aceptada")
+    q = _quote(client, [{"name": "Kit", "quantity": 1, "unit_price": 100000, "tax_rate": 13}], seller_id=vid)
+    client.post(f"/quotes/{q['id']}/send")
+    _acepta(client, q["id"])
+    inv3 = client.post(f"/quotes/{q['id']}/convert").json()
+    de_q = [x for x in _rows(client) if x["quote_id"] == q["id"]]
+    assert len(de_q) == 1 and de_q[0]["invoice_id"] is None and de_q[0]["status"] == "pendiente"
+    assert client.post(f"/quotes/{q['id']}/void").status_code == 409
+    assert client.post(f"/invoices/{inv3['id']}/void").status_code == 200
+    de_q = [x for x in _rows(client) if x["quote_id"] == q["id"]]
+    assert len(de_q) == 1 and de_q[0]["status"] == "anulada" and inv3["number"] in de_q[0]["void_reason"]
 
 
 # ---------- 7. mismo pago, vendedor y aliado (falla C) ----------
@@ -589,7 +601,9 @@ def test_lectura_sin_precio_del_aliado_y_aprobaciones(client, auth, db_session):
     assert not [r for r in client.get("/reports/comisiones", headers=lh).json()["rows"] if r[3] == "Pago acordado"]
     assert [r for r in client.get("/reports/comisiones", headers=ch).json()["rows"] if r[3] == "Pago acordado"]
     # Aprobaciones: el aliado por su nombre, el tipo del movimiento y la misma cuenta que Inicio
-    espera = Commission(tenant_id=tid, user_id=auth["user"]["id"], amount=0, earned_on=HOY, status="en_espera", base="margen", hold_reason="Falta el costo de: Algo")
+    espera = Commission(
+        tenant_id=tid, user_id=auth["user"]["id"], amount=0, earned_on=HOY, status="en_espera", base="margen", hold_reason="Falta el costo de: Algo"
+    )
     db_session.add(espera)
     db_session.commit()
     sec = next(s for s in client.get("/approvals").json()["sections"] if s["key"] == "comisiones_por_aprobar")
@@ -602,7 +616,9 @@ def test_lectura_sin_precio_del_aliado_y_aprobaciones(client, auth, db_session):
 def test_movimientos_paginados(client, auth, db_session):
     tid = auth["tenant"]["id"]
     for i in range(5):
-        db_session.add(Commission(tenant_id=tid, user_id=auth["user"]["id"], amount=1000, amount_crc=1000, fx=1, currency="CRC", earned_on=HOY - timedelta(days=i)))
+        db_session.add(
+            Commission(tenant_id=tid, user_id=auth["user"]["id"], amount=1000, amount_crc=1000, fx=1, currency="CRC", earned_on=HOY - timedelta(days=i))
+        )
     db_session.commit()
     r = client.get("/commissions", params={"limit": 2, "offset": 1}).json()
     assert len(r["rows"]) == 2 and r["total_rows"] == 5 and D(str(r["totals"]["pendiente"])) == D("5000.00")

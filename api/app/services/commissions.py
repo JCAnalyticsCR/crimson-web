@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -787,7 +787,13 @@ def _live(db: Session, tenant_id: int, *where) -> list[Commission]:
 
 # ---------- E6 · Factura anulada ----------
 def on_invoice_void(db: Session, inv: Invoice, user_id: int | None = None) -> int:
-    return reverse_or_void(db, _live(db, inv.tenant_id, Commission.invoice_id == inv.id), f"Factura {inv.number} anulada", user_id)
+    """Lo devengado con la factura y, si viene de una cotizacion, lo devengado "al aceptar" esa cotizacion: nacio sin
+    factura (invoice_id null) y una cotizacion convertida ya no se anula (sales.void_quote da 409), asi que anular la
+    factura (o su NC) es el unico camino para revertirlo (falla E)."""
+    cond = Commission.invoice_id == inv.id
+    if inv.quote_id:
+        cond = or_(cond, and_(Commission.quote_id == inv.quote_id, Commission.trigger == "cotizacion_aceptada"))
+    return reverse_or_void(db, _live(db, inv.tenant_id, cond), f"Factura {inv.number} anulada", user_id)
 
 
 # ---------- E2 · Cotizacion aceptada ----------
@@ -1101,6 +1107,83 @@ def recalc(db: Session, c: Commission, user_id: int | None = None) -> bool:
 
 
 # ---------- E5 · Precio del aliado ----------
+def _participation_invoice(db: Session, part: AllyParticipation) -> Invoice | None:
+    """La factura del negocio de la participacion (la del proyecto o la de su cotizacion convertida)."""
+    pr = db.get(Project, part.project_id) if part.project_id else None
+    if pr is not None and pr.invoice_id:
+        return db.get(Invoice, pr.invoice_id)
+    q = db.get(Quote, pr.quote_id) if pr is not None and pr.quote_id else None
+    if q is None and part.opportunity_id:
+        opp = db.get(Opportunity, part.opportunity_id)
+        q = db.get(Quote, opp.quote_id) if opp is not None and opp.quote_id else None
+    if q is not None and q.converted_invoice_id:
+        return db.get(Invoice, q.converted_invoice_id)
+    return None
+
+
+def _paid_sale(db: Session, inv: Invoice) -> Decimal:
+    """Venta sin IVA ya cobrada en la factura (capturas confirmadas menos devoluciones y reembolsos), en su moneda."""
+    total, net = d(inv.total), net_sale(inv)
+    if total <= 0 or net <= 0:
+        return ZERO
+    s = Decimal(0)
+    for pay in db.scalars(
+        select(Payment).where(
+            Payment.tenant_id == inv.tenant_id,
+            Payment.invoice_id == inv.id,
+            Payment.status == "confirmado",
+            Payment.kind.in_(("captura", "devolucion", "reembolso")),
+        )
+    ):
+        v = _paid_in_doc(db, pay, inv) * net / total
+        s += v if pay.kind == "captura" else -v
+    return max(s, Decimal(0))
+
+
+def _accrue_paid_payout(db: Session, part: AllyParticipation, r: AllyCostRequest, cfg: dict) -> Commission | None:
+    """Precio aprobado DESPUES de cobrar, cuando el pago acordado se devenga al cobrar (venta sin proyecto o
+    ally_payout_trigger = cobro): devenga ya la parte cobrada (precio x cobrado sin IVA / venta), con la misma cuenta
+    que _on_capture. Los cobros siguientes completan el resto; nunca pasa del precio (spec E5)."""
+    if r.status != "aprobado" or d(r.amount) <= 0:
+        return None
+    inv = _participation_invoice(db, part)
+    if inv is None or inv.status == "anulada":
+        return None
+    deal = deal_of(db, invoice=inv)
+    if not (cfg["ally_payout_trigger"] == "cobro" or deal.project is None):
+        return None  # se devenga al completar el proyecto
+    venta = convert(db, d(deal.project.price), deal.price_currency, inv.currency) if deal.project is not None else net_sale(inv)
+    cobrado = _paid_sale(db, inv)
+    if venta <= 0 or cobrado <= 0:
+        return None
+    parte = min(d(r.amount) * cobrado / venta, d(r.amount) - _payout_accrued(db, r))
+    if parte <= 0:
+        return None
+    key = f"pago:{r.id}:cobrado"
+    if _exists(db, r.tenant_id, key):
+        # se desaprobo (quedo anulado o revertido) y se volvio a aprobar: un movimiento nuevo
+        n = db.scalar(select(func.count()).select_from(Commission).where(Commission.tenant_id == r.tenant_id, Commission.source_key.like(f"{key}%")))
+        key = f"{key}:re{n}"
+    return _accrue(
+        db,
+        deal=deal,
+        source_key=key,
+        beneficiary="aliado",
+        participation=part,
+        kind="pago_acordado",
+        trigger="cobro",
+        base="venta",
+        base_sale=cobrado,
+        base_amount=d(r.amount),
+        percent=0,
+        amount=parte,
+        currency=r.currency,
+        earned_on=date.today(),
+        description=f"Pago acordado: {r.what[:150]} · {inv.number}",
+        cost_request=r,
+    )
+
+
 def on_cost_request_change(db: Session, r: AllyCostRequest, antes_status: str | None, antes_amount) -> list[Commission]:
     part = r.participation or db.get(AllyParticipation, r.participation_id)
     movs = _live(db, r.tenant_id, Commission.cost_request_id == r.id)
@@ -1115,7 +1198,8 @@ def on_cost_request_change(db: Session, r: AllyCostRequest, antes_status: str | 
         if pr is not None and pr.completed_at is not None and cfg["ally_payout_trigger"] == "proyecto_completado":
             c = _accrue_payout(db, deal_of(db, project=pr), part, r, date.today())  # aprobado despues de completar
             return [c] if c is not None else []
-        return []
+        c = _accrue_paid_payout(db, part, r, cfg)  # se devenga al cobrar: lo ya cobrado no vuelve a pasar por _on_capture
+        return [c] if c is not None else []
     if d(antes_amount) == d(r.amount):
         return []
     fin = next((c for c in movs if c.kind == "pago_acordado" and c.trigger == "proyecto_completado"), None)
@@ -1333,13 +1417,22 @@ def ally_entry_out(c: Commission, names: Names) -> dict:
 
 
 def _ally_description(c: Commission, names: Names) -> str:
-    """El concepto sin el numero de factura de Crimson: el aliado ve el proyecto (o nada). Sobre la utilidad, nunca
-    el % (con su monto deduciria la utilidad de Crimson)."""
-    txt = safe_description(c, True) or KIND_LABEL.get(c.kind or "", "")
-    inv = names.get(Invoice, c.invoice_id, "number")
-    if inv and inv in txt:
-        pr = names.get(Project, c.project_id, "number")
-        txt = txt.replace(inv, pr) if pr else txt.replace(f" · {inv}", "")
+    """El concepto para el aliado, sin texto interno de Crimson (aliado_final regla 4): nunca el % (con el monto
+    despejaria la venta al cliente, lo cobrado o la utilidad) ni el numero de factura o de cotizacion. La comision se
+    arma de cero (tipo + cuando + proyecto); bonos, pago acordado y ajustes conservan su concepto sin esos numeros."""
+    kind = c.kind or "comision"
+    pr = names.get(Project, c.project_id, "number")
+    if kind == "comision":
+        txt = f"{KIND_LABEL['comision']} {TRIGGER_LABEL.get(c.trigger or 'cobro', '')}".strip()
+    else:
+        txt = c.description or KIND_LABEL.get(kind, "")
+        for num in (names.get(Invoice, c.invoice_id, "number"), names.get(Quote, c.quote_id, "number")):
+            if num:
+                txt = txt.replace(f" · {num}", "").replace(f" {num}", "").replace(num, "")
+        if "%" in txt:  # un ajuste manual o una fila vieja con el %: solo el tipo
+            txt = KIND_LABEL.get(kind, kind)
+    if pr and pr not in txt:
+        txt = f"{txt} · {pr}"
     return txt
 
 
@@ -1600,6 +1693,10 @@ def _project_projection(db: Session, tenant, pr: Project, parts: list[AllyPartic
     """Lo que el aliado todavia puede recibir en un proyecto (en colones): pagos acordados aprobados sin devengar,
     la comision por su regla sobre la venta (proyectos abiertos) y los bonos posibles."""
     out = {"pago_acordado": ZERO, "comision": ZERO, "bonos": ZERO, "bono_anticipo": None}
+    if pr.status == "cancelado":
+        # cancelado: lo devengado se anulo o revirtio y el resto nunca llega; nada queda por proyectar
+        out["total"] = ZERO
+        return out
     deal = deal_of(db, project=pr)
     hoy = date.today()
     abierto = pr.status in OPEN_PROJECT and pr.completed_at is None
