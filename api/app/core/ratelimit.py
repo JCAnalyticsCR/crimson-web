@@ -59,6 +59,12 @@ catalog_limiter = SlidingWindow(limit=240, seconds=60)
 stock_alert_limiter = SlidingWindow(limit=10, seconds=3600)
 # Gestion de usuarios: acciones que mandan correo o generan credenciales, por admin
 admin_users_limiter = SlidingWindow(limit=30, seconds=3600)
+# Portal de aliados (usuarios externos): cada invitacion es un correo con la marca de la empresa (por empresa aliada y
+# por dia; revocar y volver a invitar tambien cuenta), cada archivo se guarda en la base (por persona) y cada ticket
+# avisa por correo a administracion y supervision (por persona)
+ally_invite_limiter = SlidingWindow(limit=20, seconds=86400)
+ally_media_limiter = SlidingWindow(limit=120, seconds=3600)
+ally_ticket_limiter = SlidingWindow(limit=20, seconds=3600)
 # Reautenticacion con la contrasena del admin (se cuenta cada intento, antes de verificar)
 reauth_limiter = SlidingWindow(limit=10, seconds=900)
 # Enlaces publicos con token (invitacion, restablecer): revisar y confirmar

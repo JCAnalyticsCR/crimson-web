@@ -14,14 +14,17 @@ Agrega:
   interno (solo a su portal). CHECK ck_tenant_user_un_externo: una membresia no es de un cliente y de un aliado a la vez.
 - ally_participation.ally_company_id + visible_to_ally; ally_cost_request.lines/source/responded_by/responded_at.
 - survey / work_order / support_ticket / maintenance_contract .ally_company_id (asignacion explicita a la empresa) y
-  support_note.share_ally (nota interna compartida con el aliado).
+  support_note.share_ally + share_ally_company_id (nota interna compartida con LA empresa aliada que tenia el ticket).
 
 Nada existente cambia de significado: columnas nuevas nulas o con default, sin backfill (las participaciones viejas
 por cliente/proveedor siguen igual; se convierten a mano con "Convertir en aliado"). Los roles aliado/tecnico_aliado
 los crea sync_roles al arrancar.
 
 Si economia se integro antes y ya creo una ally_company minima, esta migracion no la crea: solo agrega las columnas
-que le falten (unica rama condicional, ver _ally_company_existente).
+que le falten (unica rama condicional, ver _ally_company_existente) y anota en la tabla auxiliar
+aliados_e9c4a7b21d63_agregado que le agrego. El downgrade lee esa tabla: en ese caso quita SOLO lo que esta migracion
+agrego y deja la tabla de economia (su propio downgrade la borra); sin la tabla auxiliar, la tabla es de esta migracion
+y se borra entera.
 
 downgrade: borra las empresas aliadas y sus precios y desliga a sus usuarios. En un entorno real, las membresias con
 ally_company_id se desactivan o borran a mano ANTES; en desarrollo quedan con role_code aliado sin empresa y
@@ -77,6 +80,16 @@ _ASIGNABLES = [
 ]
 
 
+# tabla auxiliar: solo existe si ally_company ya venia de economia; guarda lo que esta migracion le agrego
+_MARCA = "aliados_e9c4a7b21d63_agregado"
+_IDX_EXTRA = (
+    ("ix_ally_company_name", "name"),
+    ("ix_ally_company_tax_id", "tax_id"),
+    ("ix_ally_company_active", "active"),
+    ("ix_ally_company_customer_id", "customer_id"),
+)
+
+
 def _ally_company_existente() -> bool:
     return sa.inspect(op.get_bind()).has_table("ally_company")
 
@@ -105,29 +118,65 @@ def _create_ally_company() -> None:
 
 
 def _complete_ally_company() -> None:
-    """Economia ya creo la tabla minima: se agregan solo las columnas, FK, unico e indices que falten."""
+    """Economia ya creo la tabla minima: se agregan solo las columnas, FK, unico e indices que falten, y se anota que se
+    agrego (tabla _MARCA) para que el downgrade quite exactamente eso."""
     insp = sa.inspect(op.get_bind())
     cols = {c["name"] for c in insp.get_columns("ally_company")}
     idx = {i["name"] for i in insp.get_indexes("ally_company")}
     fks = {f.get("name") for f in insp.get_foreign_keys("ally_company")}
     uqs = {u.get("name") for u in insp.get_unique_constraints("ally_company")}
+    agregado: list[dict] = []
     with op.batch_alter_table("ally_company", schema=None) as b:
         for name, make in _EXTRA:
             if name not in cols:
                 b.add_column(make())
+                agregado.append({"kind": "column", "name": name})
         for name, tbl, fcols, ond in _FKS:
             if name not in fks:
                 b.create_foreign_key(name, tbl, fcols, ["id"], ondelete=ond)
+                agregado.append({"kind": "fk", "name": name})
         if "uq_ally_company_tax" not in uqs:
             b.create_unique_constraint("uq_ally_company_tax", ["tenant_id", "tax_id"])
-        for ix, col in (
-            ("ix_ally_company_name", "name"),
-            ("ix_ally_company_tax_id", "tax_id"),
-            ("ix_ally_company_active", "active"),
-            ("ix_ally_company_customer_id", "customer_id"),
-        ):
+            agregado.append({"kind": "unique", "name": "uq_ally_company_tax"})
+        for ix, col in _IDX_EXTRA:
             if ix not in idx:
                 b.create_index(ix, [col], unique=False)
+                agregado.append({"kind": "index", "name": ix})
+    marca = op.create_table(
+        _MARCA,
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("kind", sa.String(length=10), nullable=False),
+        sa.Column("name", sa.String(length=80), nullable=False),
+    )
+    if agregado:
+        op.bulk_insert(marca, agregado)
+
+
+def _drop_ally_company() -> None:
+    """Inverso exacto del paso 1 del upgrade: si la tabla venia de economia (hay _MARCA) quita solo lo agregado aqui;
+    si no, la tabla es de esta migracion y se borra entera."""
+    bind = op.get_bind()
+    if sa.inspect(bind).has_table(_MARCA):
+        filas = bind.execute(sa.text(f"SELECT kind, name FROM {_MARCA}")).all()
+        por_tipo: dict[str, list[str]] = {}
+        for kind, name in filas:
+            por_tipo.setdefault(kind, []).append(name)
+        with op.batch_alter_table("ally_company", schema=None) as b:
+            for ix in por_tipo.get("index", []):
+                b.drop_index(ix)
+            for uq in por_tipo.get("unique", []):
+                b.drop_constraint(uq, type_="unique")
+            for fk in por_tipo.get("fk", []):
+                b.drop_constraint(fk, type_="foreignkey")
+            for col in reversed(por_tipo.get("column", [])):
+                b.drop_column(col)
+        op.drop_table(_MARCA)
+        return
+    with op.batch_alter_table("ally_company", schema=None) as b:
+        for ix, _col in reversed(_IDX_EXTRA):
+            b.drop_index(ix)
+        b.drop_index(b.f("ix_ally_company_tenant_id"))
+    op.drop_table("ally_company")
 
 
 def upgrade() -> None:
@@ -189,10 +238,14 @@ def upgrade() -> None:
         b.create_foreign_key("fk_costreq_responded_by", "user", ["responded_by"], ["id"])
     with op.batch_alter_table("support_note", schema=None) as b:
         b.add_column(sa.Column("share_ally", sa.Boolean(), server_default=sa.false(), nullable=False))
+        b.add_column(sa.Column("share_ally_company_id", sa.Integer(), nullable=True))
+        b.create_foreign_key("fk_support_note_share_ally", "ally_company", ["share_ally_company_id"], ["id"], ondelete="SET NULL")
 
 
 def downgrade() -> None:
     with op.batch_alter_table("support_note", schema=None) as b:
+        b.drop_constraint("fk_support_note_share_ally", type_="foreignkey")
+        b.drop_column("share_ally_company_id")
         b.drop_column("share_ally")
     with op.batch_alter_table("ally_cost_request", schema=None) as b:
         b.drop_constraint("fk_costreq_responded_by", type_="foreignkey")
@@ -222,10 +275,4 @@ def downgrade() -> None:
         b.drop_index(b.f("ix_ally_product_price_product_id"))
         b.drop_index(b.f("ix_ally_product_price_tenant_id"))
     op.drop_table("ally_product_price")
-    with op.batch_alter_table("ally_company", schema=None) as b:
-        b.drop_index(b.f("ix_ally_company_customer_id"))
-        b.drop_index(b.f("ix_ally_company_active"))
-        b.drop_index(b.f("ix_ally_company_tax_id"))
-        b.drop_index(b.f("ix_ally_company_name"))
-        b.drop_index(b.f("ix_ally_company_tenant_id"))
-    op.drop_table("ally_company")
+    _drop_ally_company()

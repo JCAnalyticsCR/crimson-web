@@ -1987,14 +1987,11 @@ def order_update(oid: int, data: WorkOrderEditIn, p: Principal = Depends(require
     nuevos = [cambios["technician_id"]] if cambios.get("technician_id") and cambios["technician_id"] != o.technician_id else []
     nuevos += [h for h in cambios.get("helpers") or [] if h not in (o.helpers or [])]
     _check_crew(db, p.tenant.id, nuevos)
-    _reassign_ally(
-        db,
-        p,
-        o,
-        data.ally_company_id if "ally_company_id" in data.model_fields_set else o.ally_company_id,
-        cambios,
-        force="ally_company_id" in data.model_fields_set,
-    )
+    # empresa aliada: la que venga; si no viene y cambio el equipo, la de los tecnicos (como en /assign: un equipo solo de
+    # Crimson devuelve la orden a Crimson); si no, la que tenia (cambiar el proyecto la revalida)
+    explicita = "ally_company_id" in data.model_fields_set
+    equipo = bool({"technician_id", "helpers"} & set(cambios))
+    _reassign_ally(db, p, o, data.ally_company_id if explicita else (None if equipo else o.ally_company_id), cambios, force=explicita)
     for k, v in cambios.items():
         setattr(o, k, v)
     if "materials" in data.model_fields_set:
@@ -2029,7 +2026,7 @@ def _reassign_ally(db: Session, p: Principal, o: WorkOrder, ally_company_id: int
     ayu = cambios.get("helpers", o.helpers) or []
     pid = cambios.get("project_id", o.project_id)
     antes = _crew(o)
-    o.ally_company_id = check_ally_assignment(db, p.tenant.id, ally_company_id=ally_company_id, user_ids=[tec, *ayu], project_id=pid)
+    o.ally_company_id = check_ally_assignment(db, p.tenant.id, ally_company_id=ally_company_id, user_ids=[tec, *ayu], project_id=pid, current=o.ally_company_id)
     nuevos = {i for i in [tec, *ayu] if i} - antes
     if nuevos:
         notify_ally_work(db, p.tenant, nuevos, o.number, cambios.get("title") or o.title, cambios.get("scheduled_at", o.scheduled_at))

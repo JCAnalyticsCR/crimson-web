@@ -4,7 +4,8 @@ Orden de resolucion (ally_price):
 1. precio fijo para esa empresa aliada (AllyProductPrice) -> "precio_aliado"
 2. precio fijo general (ally_company_id NULL) -> "precio_general"
 3. costo del producto + recargo (el de la empresa aliada, si no el de Ajustes ally_markup_pct, si no 5 %) -> "recargo"
-4. nada aplica -> (None, None, "a_consultar"): "Precio a consultar con Crimson". NUNCA se devuelve el costo como precio.
+4. nada aplica (o el recargo es 0 %) -> (None, None, "a_consultar"): "Precio a consultar con Crimson". NUNCA se devuelve
+   el costo como precio.
 
 Redondeo solo con recargo: colones hacia arriba a 10 (no a 100: comeria un recargo chico); otras monedas a 2 decimales.
 Tope: nunca mas caro que el precio publico (estado "igual_al_publico").
@@ -73,7 +74,8 @@ def ally_price(
             # precio fijo en otra moneda: se lleva a la del producto con el tipo de cambio del dia
             precio = precio * d(fx) if product.currency == "CRC" else precio / d(fx)
             precio = _round(precio, product.currency)
-    elif product.cost is not None and d(product.cost) > 0:
+    elif product.cost is not None and d(product.cost) > 0 and markup_for(tenant, company) > 0:
+        # un recargo de 0 % (o negativo, de un dato viejo) daria el costo exacto como precio: eso nunca sale
         costo = cost_in(db, product, product.currency, fx)
         precio = _round(price_from_markup(costo, markup_for(tenant, company)), product.currency)
         fuente = "recargo"

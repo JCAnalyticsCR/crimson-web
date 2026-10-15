@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import ALLY_USER_ROLES, Principal, get_principal, require
+from ..core.ratelimit import admin_users_limiter
 from ..models import (
     AllyCompany,
     AllyParticipation,
@@ -162,6 +163,14 @@ def detail_out(db: Session, c: AllyCompany, p: Principal) -> dict:
     prjs = {x.id: x for x in db.scalars(select(Project).where(Project.id.in_({a.project_id for a in parts if a.project_id})))} if parts else {}
     counts = common_counts(db, p.tenant.id, [c.id]).get(c.id, {})
     out = list_row(db, c, counts)
+
+    def ve_opp(o: Opportunity | None) -> bool:
+        # el titulo y el estado de una oportunidad son del embudo: solo quien lo ve, y el vendedor sin "ver_todo" solo
+        # las suyas (contabilidad ve Aliados para la mensualidad, no el embudo de los demas)
+        if o is None or not p.can("crm_pipeline", "ver"):
+            return False
+        return p.can("crm_pipeline", "ver_todo") or o.owner_id == p.user.id
+
     out.update(
         legal_name=c.legal_name,
         contacts=c.contacts or {},
@@ -181,7 +190,7 @@ def detail_out(db: Session, c: AllyCompany, p: Principal) -> dict:
                 "id": a.id,
                 "role": a.role,
                 "visible_to_ally": a.visible_to_ally,
-                "opportunity": {"id": o.id, "number": o.number, "title": o.title, "status": o.status} if (o := opps.get(a.opportunity_id)) else None,
+                "opportunity": {"id": o.id, "number": o.number, "title": o.title, "status": o.status} if ve_opp(o := opps.get(a.opportunity_id)) else None,
                 "project": {"id": pr.id, "number": pr.number, "status": pr.status} if (pr := prjs.get(a.project_id)) else None,
             }
             for a in parts
@@ -250,7 +259,7 @@ def config_get(p: Principal = Depends(require("aliados", "ver")), db: Session = 
 class ConfigIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    markup_pct: Decimal | None = Field(None, ge=0, le=100)
+    markup_pct: Decimal | None = Field(None, gt=0, le=100)  # 0 % seria vender al costo exacto
     plan_product_id: int | None = None
     assets_scope: str | None = Field(None, pattern="^(proyectos|clientes)$")
 
@@ -429,7 +438,7 @@ class CompanyIn(BaseModel):
     contacts: dict[str, ContactIn] | None = None
     customer_id: int | None = None
     supplier_id: int | None = None
-    markup_pct: Decimal | None = Field(None, ge=0, le=100)
+    markup_pct: Decimal | None = Field(None, gt=0, le=100)  # 0 % seria vender al costo exacto
     max_users: int | None = Field(None, ge=1, le=10000)
     notes: str | None = Field(None, max_length=4000)
 
@@ -584,6 +593,7 @@ class AllyInviteIn(BaseModel):
 
 @router.post("/{cid}/invitations", status_code=201)
 def ally_invite(cid: int, data: AllyInviteIn, p: Principal = Depends(require("aliados", "usuarios")), db: Session = Depends(get_db)):
+    admin_users_limiter.hit(f"{p.tenant.id}:{p.user.id}")  # cada invitacion es un correo: mismo tope que las internas
     c = company(db, cid, p)
     inv = ally_access.invite_ally_user(db, p.tenant, c, str(data.email), data.role, p.user.id, name=data.name)
     audit(db, p.tenant.id, p.user.id, "invite", "ally_company", c.id, {"email": str(data.email).lower(), "role": data.role}, ip=p.ip)

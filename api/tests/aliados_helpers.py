@@ -260,7 +260,9 @@ def escenario(client, admin_h: dict, db_session) -> SimpleNamespace:
     s.T_A, s.T_A_libre, s.T_B, s.T_null = (x.id for x in ts)
     ta = ts[0]
     ta.notes.append(SupportNote(tenant_id=tid, user_id=admin_id, body="Nota interna solo Crimson", internal=True))
-    ta.notes.append(SupportNote(tenant_id=tid, user_id=admin_id, body="Nota interna compartida con el aliado", internal=True, share_ally=True))
+    ta.notes.append(
+        SupportNote(tenant_id=tid, user_id=admin_id, body="Nota interna compartida con el aliado", internal=True, share_ally=True, share_ally_company_id=s.A)
+    )
     ta.notes.append(SupportNote(tenant_id=tid, user_id=admin_id, body="Respuesta publica al cliente", internal=False))
     ta.notes.append(SupportNote(tenant_id=tid, user_id=s.uid_a_jefe, body="Nota del aliado", internal=True))
 

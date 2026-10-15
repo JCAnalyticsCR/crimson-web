@@ -81,15 +81,16 @@ class CostRequestIn(BaseModel):
     attachment_ids: list[int] | None = Field(None, max_length=10)
 
 
-def _company(db: Session, p: Principal, data: AllyIn) -> tuple[int | None, int | None, int | None, str]:
-    """(ally_company_id, customer_id, supplier_id, nombre): exactamente una de las tres."""
+def _company(db: Session, p: Principal, data: AllyIn, current: AllyParticipation | None = None) -> tuple[int | None, int | None, int | None, str]:
+    """(ally_company_id, customer_id, supplier_id, nombre): exactamente una de las tres. Una empresa aliada inactiva no
+    entra a una participacion nueva, pero la que ya tenia (current) se sigue editando (papel, alcance, visibilidad)."""
     if sum(1 for x in (data.ally_company_id, data.customer_id, data.supplier_id) if x) != 1:
         raise HTTPException(422, "Elegí la empresa aliada")
     if data.ally_company_id:
         a = db.get(AllyCompany, data.ally_company_id)
         if not a or a.tenant_id != p.tenant.id:
             raise HTTPException(404, "Empresa aliada no encontrada")
-        if not a.active:
+        if not a.active and not (current is not None and current.ally_company_id == a.id):
             raise HTTPException(422, "Esa empresa aliada está inactiva")
         return a.id, None, None, a.name
     if data.customer_id:
@@ -268,15 +269,24 @@ def add_ally(oid: int, data: AllyIn, p: Principal = Depends(require("crm_pipelin
 @router.put("/opportunity-allies/{aid}")
 def update_ally(aid: int, data: AllyIn, p: Principal = Depends(require("crm_pipeline", "editar")), db: Session = Depends(get_db)):
     a, o = _ally(db, aid, p)
-    comp_id, cid, sid, name = _company(db, p, data)
+    comp_id, cid, sid, name = _company(db, p, data, current=a)
     cambios = []
-    if (comp_id, cid, sid) != (a.ally_company_id, a.customer_id, a.supplier_id):
+    otra_empresa = (comp_id, cid, sid) != (a.ally_company_id, a.customer_id, a.supplier_id)
+    if otra_empresa and a.requests:
+        # las solicitudes (montos, lineas, exclusiones, adjuntos) son de la empresa que respondio: con otra empresa en la
+        # participacion, la nueva veria en su portal el precio de la anterior
+        raise HTTPException(409, "Esta participación tiene solicitudes de precio: quítela y cree otra para la nueva empresa")
+    contactos = _contacts(data)
+    if otra_empresa and comp_id and (not contactos or contactos == (a.contacts or {})):
+        # los contactos que traia el formulario eran los de la empresa anterior: van los de la nueva
+        contactos = dict(db.get(AllyCompany, comp_id).contacts or {})
+    if otra_empresa:
         cambios.append(f"empresa {a.name} → {name}")
     if data.role != a.role:
         cambios.append(f"papel {ROLE_LABEL.get(a.role, a.role)} → {ROLE_LABEL[data.role]}")
     if (data.scope or None) != (a.scope or None) or [x.strip() for x in data.scope_lines if x.strip()] != (a.scope_lines or []):
         cambios.append("alcance")
-    if _contacts(data) != (a.contacts or {}):
+    if contactos != (a.contacts or {}):
         cambios.append("contactos")
     a.ally_company_id, a.customer_id, a.supplier_id, a.name, a.role = comp_id, cid, sid, name, data.role
     if "visible_to_ally" in data.model_fields_set and data.visible_to_ally != a.visible_to_ally:
@@ -284,12 +294,23 @@ def update_ally(aid: int, data: AllyIn, p: Principal = Depends(require("crm_pipe
         cambios.append("visible en el portal del aliado" if data.visible_to_ally else "oculta en el portal del aliado")
     a.scope = data.scope
     a.scope_lines = [x.strip()[:200] for x in data.scope_lines if x.strip()]
-    a.contacts = _contacts(data)
+    a.contacts = contactos
     if cambios:
         _log(o, p.user.full_name, f"Aliado {name} actualizado: {', '.join(cambios)}")
         audit(db, p.tenant.id, p.user.id, "ally_update", "opportunity", o.id, {"ally_id": a.id, "cambios": cambios}, ip=p.ip)
     db.commit()
     return _list(db, o, p)
+
+
+def _misma_empresa(db: Session, a: AllyParticipation, comp: AllyCompany) -> bool:
+    """La empresa aliada es el mismo cliente/proveedor de la participacion vieja (ligado o con la misma cedula)."""
+    from .ally_admin import clean_tax
+
+    if (a.customer_id and comp.customer_id == a.customer_id) or (a.supplier_id and comp.supplier_id == a.supplier_id):
+        return True
+    src = db.get(Customer, a.customer_id) if a.customer_id else db.get(Supplier, a.supplier_id) if a.supplier_id else None
+    tax = clean_tax(src.id_number if isinstance(src, Customer) else getattr(src, "tax_id", None)) if src is not None else None
+    return bool(tax and clean_tax(comp.tax_id) == tax)
 
 
 class ToAllyIn(BaseModel):
@@ -340,6 +361,10 @@ def convert_to_ally(aid: int, data: ToAllyIn | None = None, p: Principal = Depen
                 comp.supplier_id = a.supplier_id
     if not comp.active:
         raise HTTPException(422, "Esa empresa aliada está inactiva")
+    if data and data.ally_company_id and a.requests and not _misma_empresa(db, a, comp):
+        # con solicitudes, solo la empresa aliada que ES ese cliente/proveedor (si no, veria en su portal el precio
+        # que mando otra)
+        raise HTTPException(409, "Esta participación tiene solicitudes de precio de otra empresa: quítela y cree otra para la empresa aliada")
     antes = "cliente" if a.customer_id else "proveedor"
     a.ally_company_id, a.customer_id, a.supplier_id, a.name = comp.id, None, None, comp.name
     _log(o, p.user.full_name, f"Aliado {comp.name} convertido de {antes} a empresa aliada")

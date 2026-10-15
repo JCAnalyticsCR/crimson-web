@@ -515,6 +515,13 @@ def accept(data: AcceptIn, request: Request, db: Session = Depends(get_db)):
         # empresa aliada nunca se convierte por aceptar un enlace (una persona = una membresia por empresa).
         if m and m.ally_company_id != inv.ally_company_id:
             raise HTTPException(409, "Este correo ya tiene otro acceso en la empresa. Escríbanos para revisarlo.")
+        if m and m.role_code != inv.role_code:
+            from ..services.ally_access import invited_by_ally
+
+            # el rol de alguien que ya existe solo lo cambia Crimson: una invitacion del portal del aliado (siempre de
+            # tecnico) no le baja el rol a un gerente ni reactiva a quien Crimson desactivo
+            if invited_by_ally(db, inv):
+                raise HTTPException(409, "Ese usuario lo administra Crimson. Escríbanos para revisarlo.")
         if m:
             m.role_code, m.active = inv.role_code, True
         else:

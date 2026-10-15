@@ -68,9 +68,24 @@ def seats(db: Session, company: AllyCompany, exclude_email: str | None = None) -
     return {"used": act + pend, "max": company.max_users, "active": act, "pending": pend}
 
 
-def invite_ally_user(db: Session, tenant: Tenant, company: AllyCompany, email: str, role: str, invited_by: int | None, name: str | None = None) -> dict:
+def invite_ally_user(
+    db: Session,
+    tenant: Tenant,
+    company: AllyCompany,
+    email: str,
+    role: str,
+    invited_by: int | None,
+    name: str | None = None,
+    by_ally: bool = False,
+) -> dict:
     """Invitacion al portal de aliados ligada a ESA empresa. Devuelve {id, link, emailed, expires_at}: sin Resend el
-    correo queda simulado y la pantalla ofrece el enlace para mandarlo por WhatsApp, sin afirmar que llego."""
+    correo queda simulado y la pantalla de Crimson ofrece el enlace para mandarlo por WhatsApp, sin afirmar que llego.
+
+    - Un correo con otro acceso en la empresa (cuenta interna, de un cliente o de otra empresa aliada) o con una
+      invitacion viva de otro alcance (interna, de un cliente o de otra empresa aliada) -> 409: nunca se anula la
+      invitacion de otro ni se le gana el correo a su dueno.
+    - by_ally (la manda un usuario aliado desde su portal): solo tecnicos de su empresa; a quien administra Crimson (un
+      gerente, aunque este desactivado) no lo reactiva una invitacion del aliado."""
     if role not in ALLY_USER_ROLES:
         raise HTTPException(422, "Rol de aliado inválido")
     if company.tenant_id != tenant.id:
@@ -86,16 +101,28 @@ def invite_ally_user(db: Session, tenant: Tenant, company: AllyCompany, email: s
             raise HTTPException(409, "Ese correo ya tiene otro acceso en la empresa. Use otro correo.")
         if m and m.active:
             raise HTTPException(409, "Esa persona ya tiene acceso")
+        if m and by_ally and m.role_code != "tecnico_aliado":
+            raise HTTPException(409, "Ese usuario lo administra Crimson. Escríbanos si necesita cambiarlo.")
+    ahora = datetime.now(UTC)
+    vivas = list(
+        db.scalars(
+            select(Invitation).where(
+                Invitation.tenant_id == tenant.id,
+                func.lower(Invitation.email) == email,
+                Invitation.accepted_at.is_(None),
+                Invitation.revoked_at.is_(None),
+                Invitation.expires_at > ahora,
+            )
+        )
+    )
+    if any(i.ally_company_id != company.id for i in vivas):
+        # invitacion viva interna, de un cliente o de otra empresa aliada: no se anula ni se reemplaza desde aqui
+        raise HTTPException(409, "Ese correo ya tiene otro acceso en la empresa. Use otro correo.")
     st = seats(db, company, exclude_email=email)  # la invitacion viva de este mismo correo se reemplaza abajo
     if company.max_users is not None and st["used"] >= company.max_users:
         raise HTTPException(409, f"Su plan permite {company.max_users} usuarios")
-    ahora = datetime.now(UTC)
-    # una sola invitacion viva por correo: la anterior deja de servir
-    for old in db.scalars(
-        select(Invitation).where(
-            Invitation.tenant_id == tenant.id, func.lower(Invitation.email) == email, Invitation.accepted_at.is_(None), Invitation.expires_at > ahora
-        )
-    ):
+    # una sola invitacion viva por correo EN ESTA EMPRESA: la anterior deja de servir
+    for old in vivas:
         old.expires_at = ahora
     raw = secrets.token_urlsafe(32)
     inv = Invitation(
@@ -126,6 +153,18 @@ def invite_ally_user(db: Session, tenant: Tenant, company: AllyCompany, email: s
         inv.id,
     )
     return {"id": inv.id, "link": link, "emailed": m_out.status == "enviado", "expires_at": inv.expires_at}
+
+
+def invited_by_ally(db: Session, inv: Invitation) -> bool:
+    """La invitacion la mando un usuario aliado desde su portal (no Crimson)."""
+    if not inv.invited_by:
+        return False
+    return (
+        db.scalar(
+            select(TenantUser.id).where(TenantUser.tenant_id == inv.tenant_id, TenantUser.user_id == inv.invited_by, TenantUser.ally_company_id.is_not(None))
+        )
+        is not None
+    )
 
 
 def users_out(db: Session, company: AllyCompany) -> dict:
@@ -186,10 +225,11 @@ def plan_invoices(db: Session, company: AllyCompany, limit: int = 60) -> list[In
     )
 
 
-def plan_status(db: Session, company: AllyCompany, today: date | None = None) -> dict:
-    """al_dia, o vencida con monto (saldo de las vencidas, por moneda dominante) y dias del atraso mas viejo."""
+def plan_status(db: Session, company: AllyCompany, today: date | None = None, visible=None) -> dict:
+    """al_dia, o vencida con monto (saldo de las vencidas, por moneda dominante) y dias del atraso mas viejo.
+    visible: filtro opcional de facturas (el portal del aliado solo cuenta las emitidas)."""
     today = today or date.today()
-    vencidas = [i for i in plan_invoices(db, company, limit=500) if d(i.balance) > 0 and i.due_date and i.due_date < today]
+    vencidas = [i for i in plan_invoices(db, company, limit=500) if d(i.balance) > 0 and i.due_date and i.due_date < today and (visible is None or visible(i))]
     if not vencidas:
         return {"estado": "al_dia", "vencido": None}
     moneda = vencidas[0].currency

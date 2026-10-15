@@ -87,6 +87,9 @@ class SupportNote(TenantMixin, TimestampMixin, Base):
     photos: Mapped[list] = mapped_column(JSON, default=list)
     # nota interna compartida con la empresa aliada del ticket (el cliente final sigue sin verla)
     share_ally: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    # CON QUE empresa se compartio (la que tenia el ticket al escribirla): si el ticket pasa a otra empresa aliada, la
+    # nueva no lee lo que Crimson le compartio solo a la anterior
+    share_ally_company_id: Mapped[int | None] = mapped_column(ForeignKey("ally_company.id", ondelete="SET NULL", name="fk_support_note_share_ally"))
 
 
 class MaintenanceContract(ArchiveMixin, TenantMixin, TimestampMixin, Base):

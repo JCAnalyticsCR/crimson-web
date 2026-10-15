@@ -96,6 +96,17 @@ def test_factura_de_mensualidad_y_suscripcion(client, auth, db_session):
     assert r.status_code == 201, r.text
     inv = db_session.get(Invoice, r.json()["invoice_id"])
     assert inv.external_order == "MENSUALIDAD-PLATAFORMA" and inv.customer_id == comp.customer_id
+    # recien emitida por la recurrencia queda "creado" (sin enviar): el aliado todavia no la ve ni la descarga
+    assert inv.status == "creado"
+    assert client.get("/aliado/suscripcion", headers=h).json()["facturas"] == []
+    assert inv.id not in {f["id"] for f in client.get("/aliado/facturas", headers=h).json()}
+    assert client.get(f"/aliado/facturas/{inv.id}/pdf", headers=h).status_code == 404
+    inv.due_date, inv.balance = date.today() - timedelta(days=3), inv.total
+    db_session.commit()
+    assert client.get("/aliado/suscripcion", headers=h).json()["estado"] == "al_dia"  # un borrador no le cuenta como atraso
+    inv.status = "enviada"
+    inv.due_date, inv.balance = date.today() + timedelta(days=15), inv.total
+    db_session.commit()
     sus = client.get("/aliado/suscripcion", headers=h).json()
     assert [f["id"] for f in sus["facturas"]] == [inv.id] and sus["estado"] == "al_dia" and sus["plan"]["frecuencia"] == "mensual"
     # facturas de otros clientes y anuladas: nunca

@@ -10,12 +10,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import AllyCompany, TenantUser, User
+from ..models import AllyCompany, AuditLog, TenantUser, User
 from .db import get_db
 from .deps import ALLY_USER_ROLES, ROLE_PERMISSIONS, Principal, get_session_principal
 
@@ -24,6 +25,7 @@ PREVIEW_HEADER = "X-View-As-Ally"  # id de la empresa aliada
 PREVIEW_USER_HEADER = "X-View-As-User"  # opcional: id del usuario aliado a imitar
 PREVIEW_POST_OK = ("/aliado/media/firmar",)  # firmar fotos no escribe nada
 READ_METHODS = ("GET", "HEAD", "OPTIONS")
+PREVIEW_HOURS = 8  # una activacion de "Ver como" dura una jornada; despues se vuelve a activar (y queda otra constancia)
 
 
 @dataclass
@@ -39,6 +41,25 @@ def _int(v: str | None) -> int | None:
         return int(v) if v is not None and str(v).strip() else None
     except ValueError:
         return None
+
+
+def _check_preview_audited(db: Session, p: Principal, company_id: int, user_id: int | None) -> None:
+    """La vista previa queda SIEMPRE en la bitacora: solo vale si este admin la activo (POST /allies/{id}/preview, que
+    deja AuditLog preview_ally) para esa empresa y esa persona en las ultimas PREVIEW_HOURS horas. Sin eso, mandar la
+    cabecera a mano (o con un token filtrado) no abre nada."""
+    desde = datetime.now(UTC) - timedelta(hours=PREVIEW_HOURS)
+    logs = db.scalars(
+        select(AuditLog.diff).where(
+            AuditLog.tenant_id == p.tenant.id,
+            AuditLog.user_id == p.user.id,
+            AuditLog.action == "preview_ally",
+            AuditLog.entity == "ally_company",
+            AuditLog.entity_id == company_id,
+            AuditLog.at >= desde,
+        )
+    ).all()
+    if not any((x or {}).get("user_id") == user_id for x in logs):
+        raise HTTPException(403, "Activá «Ver como este aliado» desde Administración → Aliados (la vista previa venció o no se activó).")
 
 
 def _preview(request: Request, p: Principal, db: Session) -> Principal:
@@ -61,6 +82,7 @@ def _preview(request: Request, p: Principal, db: Session) -> Principal:
         if not m or not u or m.role_code not in ALLY_USER_ROLES:
             raise HTTPException(422, "Esa persona no es de esa empresa aliada")
         user, role = u, m.role_code
+    _check_preview_audited(db, p, company.id, user.id if user is not p.user else None)
     return Principal(
         user=user,
         tenant=p.tenant,

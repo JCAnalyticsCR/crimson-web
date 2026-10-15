@@ -70,7 +70,7 @@ def test_usuarios_del_aliado_desde_admin_y_portal(client, auth, db_session):
     roles = {u["email"]: u["role"] for u in client.get(f"/allies/{a}/users").json()["users"]}
     assert roles == {"jefe@aliado-uno.ejemplo.com": "aliado", "tec@aliado-uno.ejemplo.com": "tecnico_aliado"}
     r = client.post("/aliado/usuarios", json={"email": "nuevo@aliado-uno.ejemplo.com", "role": "aliado"}, headers=jefe)
-    assert r.status_code == 201, r.text
+    assert r.status_code == 202 and "link" not in r.json(), r.text  # el enlace le llega por correo, nunca al aliado
     inv = next(i for i in client.get("/aliado/usuarios", headers=jefe).json()["invitations"] if i["email"] == "nuevo@aliado-uno.ejemplo.com")
     assert inv["role"] == "tecnico_aliado"  # el aliado solo invita tecnicos
     assert client.post(f"/aliado/usuarios/invitaciones/{inv['id']}/revocar", headers=jefe).status_code == 200

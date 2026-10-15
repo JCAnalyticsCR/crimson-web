@@ -171,12 +171,15 @@ def check_ally_assignment(
     user_ids: list[int | None],
     project_id: int | None = None,
     opportunity_id: int | None = None,
+    current: int | None = None,
 ) -> int | None:
     """Escrituras INTERNAS (OT, levantamiento, ticket, contrato): la empresa aliada a la que queda asignado el trabajo.
 
     Los tecnicos aliados de la lista tienen que ser de una sola empresa, la misma que la explicita si viene; si no viene,
     se toma la de los tecnicos. Con proyecto u oportunidad, la empresa tiene que participar ahi. La empresa tiene que
-    estar activa y sin suspender, y sus usuarios activos. Devuelve el id final o None (trabajo de Crimson)."""
+    estar activa y sin suspender (salvo que sea la que el trabajo YA tenia, current: editar una orden o un ticket de un
+    aliado suspendido no se traba; asignarle trabajo nuevo si), y sus usuarios activos. Devuelve el id final o None
+    (trabajo de Crimson)."""
     ids = [u for u in dict.fromkeys(user_ids) if u]
     externos = (
         list(db.scalars(select(TenantUser).where(TenantUser.tenant_id == tenant_id, TenantUser.user_id.in_(ids), TenantUser.ally_company_id.is_not(None))))
@@ -194,7 +197,7 @@ def check_ally_assignment(
     company = db.get(AllyCompany, cid)
     if not company or company.tenant_id != tenant_id:
         raise HTTPException(404, "Empresa aliada no encontrada")
-    if not company.active or company.suspended_at:
+    if (not company.active or company.suspended_at) and cid != current:
         raise HTTPException(422, "Esa empresa aliada está suspendida o inactiva")
     for m in externos:
         if not m.active or not m.user.active:

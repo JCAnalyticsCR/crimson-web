@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 from ..core.ally import AllyCtx, get_ally, need
 from ..core.config import settings as cfg
 from ..core.db import get_db
+from ..core.ratelimit import ally_invite_limiter, ally_media_limiter, ally_ticket_limiter
 from ..models import (
     AllyCostRequest,
     AllyParticipation,
@@ -77,7 +78,8 @@ OPP_CLOSED = ("ganada", "perdida")
 INVOICE_VISIBLE = ("enviada", "pagada", "parcial", "vencida")  # mismo criterio que el portal del cliente
 MAX_PHOTOS = 8
 TICKET_KINDS = ("soporte", "garantia", "mantenimiento", "visita", "consulta")
-ORDER_ACTIONS = ("arrive", "start", "progress", "finish")  # cancelar es de Crimson
+# cancelar es de Crimson. pause = "Terminar jornada" (cierra el tiempo corriendo de SU equipo)
+ORDER_ACTIONS = ("arrive", "start", "pause", "progress", "finish")
 
 # Proyeccion por lista blanca de lo interno (fieldwork) que reutiliza el formulario de campo
 ALLY_SURVEY_KEYS = (
@@ -351,6 +353,11 @@ def _order_ally_out(db: Session, ctx: AllyCtx, o: WorkOrder, full: bool = False,
     out["photos"] = _sign(ctx, o.photos or [])
     out["crew"] = [{"id": c["id"], "name": c["name"], "role": c["role"]} for c in raw.get("crew") or []]
     out["running"] = [{"user_id": r["user_id"], "user": r["user"], "started_at": r["started_at"]} for r in raw.get("running") or []]
+    team = ctx.scope.team_user_ids()
+    # tiempo de SU equipo corriendo desde hace mas de fw.MAX_CORRIENDO_H: al terminar la jornada o finalizar se indica
+    # la hora real en que terminaron (fin_jornada)
+    limite = _now() - timedelta(hours=fw.MAX_CORRIENDO_H)
+    out["stale"] = any(e.ended_at is None and e.user_id in team and _aware(e.started_at) < limite for e in o.time_entries)
     out["can_act"] = ctx.preview_by is None and o.status not in fw.CERRADAS
     if full:
         out["materials"] = [_pick(m, ALLY_MATERIAL_KEYS) for m in raw.get("materials") or []]
@@ -358,8 +365,17 @@ def _order_ally_out(db: Session, ctx: AllyCtx, o: WorkOrder, full: bool = False,
 
 
 # ---------- Salidas: ticket, contrato, activo ----------
-def _note_visible(n: SupportNote, team: set[int]) -> bool:
-    return (not n.internal) or bool(n.share_ally) or (n.user_id in team)
+def _note_visible(n: SupportNote, team: set[int], company_id: int) -> bool:
+    """Publicas, las de su equipo y las internas que Crimson compartio con ESTA empresa (no con la que tenia antes el
+    ticket)."""
+    return (not n.internal) or (bool(n.share_ally) and n.share_ally_company_id == company_id) or (n.user_id in team)
+
+
+def _assigned_name(db: Session, uid: int | None, team: set[int]) -> str | None:
+    """Responsable visto por el aliado: el nombre completo si es de su equipo; de Crimson, solo el nombre de pila."""
+    if not uid:
+        return None
+    return _user_name(db, uid) if uid in team else _first(_user_name(db, uid))
 
 
 def _ticket_out(db: Session, ctx: AllyCtx, t: SupportTicket, full: bool = False) -> dict:
@@ -379,7 +395,7 @@ def _ticket_out(db: Session, ctx: AllyCtx, t: SupportTicket, full: bool = False)
         "project": pr.number if pr and pr.tenant_id == t.tenant_id else None,
         "asset": {"name": a.name, "model": a.model, "serial": a.serial, "location": a.location} if a and a.tenant_id == t.tenant_id else None,
         "assigned_to": t.assigned_to,
-        "assigned": _user_name(db, t.assigned_to) if t.assigned_to in team else (_first(_user_name(db, t.assigned_to)) if t.assigned_to else None),
+        "assigned": _assigned_name(db, t.assigned_to, team),
         "due_at": t.due_at,
         "resolve_due_at": t.resolve_due_at,
         "first_reply_at": t.first_reply_at,
@@ -399,7 +415,7 @@ def _ticket_out(db: Session, ctx: AllyCtx, t: SupportTicket, full: bool = False)
         out["hours"] = t.hours
         notas = []
         for n in t.notes:
-            if not _note_visible(n, team):
+            if not _note_visible(n, team, ctx.company.id):
                 continue
             mio = n.user_id in team
             autor = _user_name(db, n.user_id) if mio else (f"{_first(_user_name(db, n.user_id)) or 'Equipo'} · Crimson" if n.user_id else "Crimson")
@@ -424,6 +440,7 @@ def _contract_out(db: Session, ctx: AllyCtx, c: MaintenanceContract) -> dict:
         select(SupportTicket).where(SupportTicket.contract_id == c.id, SupportTicket.status.in_(OPEN_TICKET), *ctx.scope.tickets()).order_by(SupportTicket.id)
     ).all()
     s = c.sla or {}
+    team = ctx.scope.team_user_ids()
     return {
         "id": c.id,
         "number": c.number,
@@ -438,7 +455,7 @@ def _contract_out(db: Session, ctx: AllyCtx, c: MaintenanceContract) -> dict:
         "scope": c.scope,
         "active": c.active,
         "sla": {k: {"respuesta": v.get("respuesta"), "resolucion": v.get("resolucion")} for k, v in s.items() if isinstance(v, dict)} or None,
-        "tickets_abiertos": [{"id": t.id, "number": t.number, "status": t.status, "assigned": _user_name(db, t.assigned_to)} for t in abiertos],
+        "tickets_abiertos": [{"id": t.id, "number": t.number, "status": t.status, "assigned": _assigned_name(db, t.assigned_to, team)} for t in abiertos],
         # integracion de estado de equipos bloqueada (18:00): el lugar queda marcado
         "device_status": None,
         "device_status_label": "Estado de equipos: pendiente de conexión",
@@ -848,15 +865,25 @@ class AllySurveyIn(AllySurveyEditIn):
     project_id: int | None = None
 
 
-def _to_survey_in(data: AllySurveyEditIn, customer_id: int | None) -> fw.SurveyIn:
+def _to_survey_in(data: AllySurveyEditIn, customer_id: int | None, s: Survey | None = None, team: set[int] | None = None) -> fw.SurveyIn:
+    """Cuerpo del portal -> SurveyIn interno. Al GUARDAR (s), lo que el formulario del aliado no manda se conserva: el
+    personal requerido (labor/techs/days, que Crimson usa para costear) y quienes hicieron la visita. De esa lista, los
+    de Crimson (que el aliado no ve) quedan siempre; los de su equipo son los que mande."""
     payload = data.model_dump(exclude={"technician_id", "opportunity_id", "project_id"}, exclude_unset=False)
     sent = data.model_fields_set
     if "common" not in sent:
         payload.pop("common", None)
     if "received_by" not in sent:
         payload.pop("received_by", None)
-    s = fw.SurveyIn(**payload, customer_id=customer_id)
-    return s
+    if s is not None:
+        if not ({"labor", "techs", "days"} & sent):
+            # el que ya tiene, sin tarifas (esas las conserva apply_survey_payload)
+            payload["labor"] = {k: {"people": v["people"], "days": v["days"]} for k, v in fw.survey_labor(s).items()}
+        team = team or set()
+        previos = [int(i) for i in (s.visit_tech_ids or []) if str(i).isdigit()]
+        propios = list(data.visit_tech_ids) if "visit_tech_ids" in sent else [i for i in previos if i in team]
+        payload["visit_tech_ids"] = [*(i for i in previos if i not in team), *propios]
+    return fw.SurveyIn(**payload, customer_id=customer_id)
 
 
 def _survey_photos_check(db: Session, ctx: AllyCtx, data: AllySurveyEditIn, s: Survey | None) -> None:
@@ -928,7 +955,10 @@ def levantamiento_guardar(sid: int, data: AllySurveyEditIn, ctx: AllyCtx = Depen
     from ..services import bitacora
 
     antes = bitacora.survey_state(s)
-    fw.apply_survey_payload(db, s, _to_survey_in(data, s.customer_id), ctx.p.tenant.id, valid_user_ids=ctx.scope.team_user_ids())
+    team = ctx.scope.team_user_ids()
+    # validos: su equipo y los de Crimson que ya estaban en la visita (se conservan; uno nuevo de afuera no entra)
+    validos = team | {int(i) for i in (s.visit_tech_ids or []) if str(i).isdigit()}
+    fw.apply_survey_payload(db, s, _to_survey_in(data, s.customer_id, s, team), ctx.p.tenant.id, valid_user_ids=validos)
     bitacora.audit_survey_update(db, ctx.p, s, antes, company=ctx.company.name)
     if s.review_status == "aprobado" and not s.quote_id:
         s.review_status = "pendiente"  # lo aprobado ya no es lo mismo: Crimson lo vuelve a revisar
@@ -1048,6 +1078,10 @@ class AllyProgressIn(BaseModel):
     customer_signature: str | None = Field(None, max_length=160)
     quantities: dict[int, Decimal] | None = None
     removed: list[int] | None = None
+    agregados: list[AllyMaterialIn] | None = Field(None, max_length=60)  # lineas nuevas (se suman, no reemplazan)
+    # terminar jornada / finalizar con tiempo de su equipo corriendo de mas (se olvidaron de terminar la jornada): la
+    # hora real en que terminaron. Sin esto la orden quedaria trabada hasta que Crimson corrija el tiempo
+    fin_jornada: datetime | None = None
 
     @field_validator("quantities")
     @classmethod
@@ -1066,43 +1100,119 @@ class OrderAssignIn(BaseModel):
 
 @router.patch("/ordenes/{oid}/asignar")
 def orden_asignar(oid: int, body: OrderAssignIn, ctx: AllyCtx = Depends(need("asignar")), db: Session = Depends(get_db)):
-    """Reasigna entre los tecnicos activos de SU equipo (nunca uno interno ni de otro aliado)."""
+    """Reasigna entre los tecnicos activos de SU equipo (nunca uno interno ni de otro aliado). En una cuadrilla mixta
+    (Crimson asigno la orden a la empresa con personal suyo) el personal de Crimson no lo toca el aliado: sus ayudantes
+    se conservan tal cual y, si el tecnico principal es de Crimson, la reasignacion la hace Crimson."""
     from ..services.ally_scope import notify_ally_work
 
     o = _my_order(db, ctx, oid)
     if o.status in fw.CERRADAS:
         raise HTTPException(409, f"La orden está {o.status}; ya no se modifica")
-    ids = [body.technician_id, *(body.helpers or [])]
-    for uid in ids:
-        if uid is not None:
-            _team_member(ctx, uid)
+    team = ctx.scope.team_user_ids()
     antes = fw._crew(o)
+    if o.technician_id and o.technician_id not in team and body.technician_id != o.technician_id:
+        raise HTTPException(409, "El técnico a cargo de esta orden es de Crimson: la reasignación la hace Crimson")
+    if body.technician_id is not None and body.technician_id != o.technician_id and body.technician_id not in team:
+        raise HTTPException(422, "Ese técnico no es de su empresa")
+    # solo se valida a quien entra (de su equipo y activo); quien ya estaba se conserva aunque hoy este inactivo
+    for uid in [body.technician_id, *(body.helpers or [])]:
+        if uid is not None and uid not in antes:
+            _team_member(ctx, uid)
+    de_crimson = [i for i in (o.helpers or []) if i not in team]
+    propios = [i for i in (body.helpers or []) if i in team]
     o.technician_id = body.technician_id
-    o.helpers = [i for i in dict.fromkeys(body.helpers or []) if i != o.technician_id]
+    o.helpers = [i for i in dict.fromkeys([*de_crimson, *propios]) if i != o.technician_id]
     audit(db, ctx.p.tenant.id, ctx.p.user.id, "assign", "work_order", o.id, {"technician_id": o.technician_id, "helpers": o.helpers}, ip=ctx.p.ip)
     notify_ally_work(db, ctx.p.tenant, fw._crew(o) - antes, o.number, o.title, o.scheduled_at)
     db.commit()
     return _order_ally_out(db, ctx, o, full=True)
 
 
+def _cerrar_jornada_vieja(db: Session, ctx: AllyCtx, o: WorkOrder, fin: datetime) -> int:
+    """Tiempo de SU equipo que quedo corriendo de mas (se olvidaron de terminar la jornada): se cierra a la hora real que
+    indica el aliado. Mismas reglas que una correccion interna: despues del inicio, no a futuro, y una jornada no pasa
+    de fw.MAX_CORRIENDO_H. El tiempo de Crimson lo corrige Crimson."""
+    team = ctx.scope.team_user_ids()
+    now = _now()
+    fin = fin.astimezone(UTC) if fin.tzinfo else fin.replace(tzinfo=UTC)
+    limite = now - timedelta(hours=fw.MAX_CORRIENDO_H)
+    viejas = [e for e in o.time_entries if e.ended_at is None and e.user_id in team and _aware(e.started_at) < limite]
+    if fin > now + timedelta(minutes=5):
+        raise HTTPException(422, "La hora en que terminaron no puede ser a futuro")
+    for e in viejas:
+        inicio = _aware(e.started_at)
+        if fin <= inicio:
+            raise HTTPException(422, "La hora en que terminaron tiene que ser después de la hora de inicio")
+        if fin - inicio > timedelta(hours=fw.MAX_CORRIENDO_H):
+            raise HTTPException(422, f"Una jornada no pasa de {fw.MAX_CORRIENDO_H} horas: indicá la hora real en que terminaron ese día")
+    for e in viejas:
+        e.ended_at = fin
+        e.minutes = fw._mins(e.started_at, fin)
+    if viejas:
+        audit(
+            db,
+            ctx.p.tenant.id,
+            ctx.p.user.id,
+            "time_close_aliado",
+            "work_order",
+            o.id,
+            {"entries": [e.id for e in viejas], "ended_at": fin.isoformat()},
+            ip=ctx.p.ip,
+        )
+    return len(viejas)
+
+
 @router.post("/ordenes/{oid}/{accion}")
 def orden_accion(oid: int, accion: str, data: AllyProgressIn | None = None, ctx: AllyCtx = Depends(need("ordenes")), db: Session = Depends(get_db)):
+    """Llegue / iniciar / terminar jornada / guardar avance / finalizar. Iniciar y terminar jornada abren y cierran el
+    tiempo de SU equipo (el personal de Crimson de una cuadrilla mixta lleva el suyo). El material va por id (quantities,
+    removed) y lo nuevo en "agregados": nunca se reescribe la lista (pisaria lo que otro anoto mientras tanto)."""
     o = _my_order(db, ctx, oid)
     if accion not in ORDER_ACTIONS:
         raise HTTPException(404, "Acción no soportada")
+    if o.status in fw.CERRADAS:
+        raise HTTPException(409, f"La orden está {o.status}; ya no se modifica")
     data = data or AllyProgressIn()
+    team = ctx.scope.team_user_ids()
     photos = _fotos_del_equipo(db, ctx, data.photos, o.photos or []) if data.photos is not None else None
-    for m in data.materials or []:
+    for m in [*(data.materials or []), *(data.agregados or [])]:
         _product(db, ctx, m.product_id)
+    if data.fin_jornada is not None and accion not in ("pause", "finish"):
+        raise HTTPException(422, "La hora en que terminaron solo se indica al terminar la jornada o al finalizar")
+    workers = None
+    if accion == "start":
+        activos = {m.user_id for m in ctx.scope.active_team()}
+        workers = sorted(i for i in fw._crew(o) if i in activos)
+        if not workers:
+            raise HTTPException(409, "Asigná un técnico de su equipo antes de iniciar")
+    materials = data.materials
+    if materials is not None and not materials and o.materials:
+        materials = None  # una lista vacia no borra lo planificado: para quitar una linea se manda su id en "removed"
     progress = fw.ProgressIn(
         tasks=data.tasks,
         photos=photos,
         notes=data.notes,
-        materials=[fw.MaterialIn(**m.model_dump()) for m in data.materials] if data.materials is not None else None,
+        materials=[fw.MaterialIn(**m.model_dump()) for m in materials] if materials is not None else None,
         customer_signature=data.customer_signature,
         quantities=data.quantities,
         removed=data.removed,
+        workers=workers,
     )
+    if data.fin_jornada is not None:
+        _cerrar_jornada_vieja(db, ctx, o, data.fin_jornada)
+    if accion == "pause":
+        corriendo = sorted({e.user_id for e in o.time_entries if e.ended_at is None and e.user_id in team})
+        if not corriendo:
+            if data.fin_jornada is None:
+                raise HTTPException(409, "No hay tiempo corriendo de su equipo")
+            accion = "progress"  # ya se cerro con la hora indicada: solo se guarda lo demas
+        progress.workers = corriendo or None
+    if data.agregados and not o.stock_applied:
+        from ..models import WorkOrderMaterial
+
+        for m in data.agregados:
+            o.materials.append(WorkOrderMaterial(product_id=m.product_id, name=m.name, quantity=m.quantity, unit=m.unit, planned=m.planned))
+        db.flush()
     fw.apply_order_progress(db, o, progress, accion, ctx.p, ctx.p.tenant)
     db.commit()
     return _order_ally_out(db, ctx, o, full=True)
@@ -1139,6 +1249,7 @@ class AllyTicketIn(BaseModel):
 
 @router.post("/tickets", status_code=201)
 def ticket_crear(data: AllyTicketIn, ctx: AllyCtx = Depends(need("tickets_crear")), db: Session = Depends(get_db)):
+    ally_ticket_limiter.hit(f"{ctx.p.tenant.id}:{ctx.p.user.id}")  # cada ticket avisa por correo a la oficina
     pr = ctx.scope.one(Project, data.project_id, ctx.scope.projects(), "Proyecto")
     if data.asset_id is not None:
         ctx.scope.one(CustomerAsset, data.asset_id, ctx.scope.assets(), "Equipo")
@@ -1236,9 +1347,12 @@ def ticket_editar(tid: int, data: AllyTicketPatchIn, ctx: AllyCtx = Depends(need
     if "assigned_to" in data.model_fields_set:
         if not ctx.p.can("aliado", "asignar"):
             raise HTTPException(403, "Reasignar el ticket lo hace el aliado")
-        if data.assigned_to is not None:
-            _team_member(ctx, data.assigned_to)
         antes = t.assigned_to
+        if antes and antes not in ctx.scope.team_user_ids() and data.assigned_to != antes:
+            # lo atiende alguien de Crimson: el aliado no se lo quita
+            raise HTTPException(409, "Este ticket lo atiende Crimson: la reasignación la hace Crimson")
+        if data.assigned_to is not None and data.assigned_to != antes:
+            _team_member(ctx, data.assigned_to)
         if antes != data.assigned_to:
             t.assigned_to = data.assigned_to
             if t.assigned_to and t.status == "nuevo":
@@ -1487,10 +1601,16 @@ def ganancias_proyecto(pid: int, ctx: AllyCtx = Depends(need("ganancias")), db: 
     return econ.ally_project_earnings(db, ctx.p.tenant, ctx.company.id, pr.id)
 
 
+def _emitida(inv: Invoice) -> bool:
+    """La factura ya le llego al aliado: mismo criterio que el portal del cliente (un borrador "creado", como el que
+    deja la recurrencia de la mensualidad antes de enviarse, no se ve ni se descarga)."""
+    return inv.status != "anulada" and (inv.status in INVOICE_VISIBLE or inv.einvoice_status == "aceptada")
+
+
 def _factura_visible(c, inv: Invoice) -> bool:
-    if not c.customer_id or inv.tenant_id != c.tenant_id or inv.customer_id != c.customer_id or inv.status == "anulada":
+    if not c.customer_id or inv.tenant_id != c.tenant_id or inv.customer_id != c.customer_id:
         return False
-    return inv.status in INVOICE_VISIBLE or inv.einvoice_status == "aceptada" or inv.external_order == ally_access.PLAN_ORDER
+    return _emitida(inv)
 
 
 def _invoice_out(inv: Invoice) -> dict:
@@ -1514,7 +1634,9 @@ def suscripcion(ctx: AllyCtx = Depends(need("suscripcion")), db: Session = Depen
     c = ctx.company
     r = db.get(Recurrence, c.recurrence_id) if c.recurrence_id else None
     lines = ((r.template or {}).get("lines") or []) if r else []
-    st = ally_access.plan_status(db, c)
+    facturas = [i for i in ally_access.plan_invoices(db, c) if _emitida(i)]
+    # el atraso tambien sale de lo emitido: un borrador que Crimson no ha enviado no le cuenta como vencido
+    st = ally_access.plan_status(db, c, visible=_emitida)
     return {
         "plan": {
             "monto": c.plan_amount,
@@ -1529,7 +1651,7 @@ def suscripcion(ctx: AllyCtx = Depends(need("suscripcion")), db: Session = Depen
         else None,
         "estado": st["estado"],
         "vencido": st["vencido"],
-        "facturas": [_invoice_out(i) for i in ally_access.plan_invoices(db, c)],
+        "facturas": [_invoice_out(i) for i in facturas],
         "seats": {k: v for k, v in ally_access.seats(db, c).items() if k in ("used", "max")},
     }
 
@@ -1577,23 +1699,37 @@ class InviteIn(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     email: EmailStr
-    name: str | None = Field(None, max_length=120)
+    name: str | None = Field(None, max_length=120)  # se ignora: no va en el correo (ver invitar)
     role: str | None = None  # se ignora: el aliado solo invita tecnicos
 
 
-@router.post("/usuarios", status_code=201)
+INVITE_SENT = "Si ese correo puede recibir acceso, le llegará la invitación. Si no le llega, pídale el enlace a Crimson."
+
+
+@router.post("/usuarios", status_code=202)
 def invitar(data: InviteIn, ctx: AllyCtx = Depends(need("usuarios")), db: Session = Depends(get_db)):
-    """El aliado invita a su gente, siempre como tecnico_aliado y siempre a SU empresa."""
+    """El aliado invita a su gente, siempre como tecnico_aliado y siempre a SU empresa.
+
+    Misma respuesta pase lo que pase con el correo (202): el portal no confirma si ese correo es de alguien de Crimson,
+    de un cliente o de otro aliado. Nunca devuelve el enlace (con el token, el aliado podria aceptar por otra persona y
+    quedarse con su correo): le llega por correo y, si no sale, lo entrega Crimson. Sin el nombre en el correo (texto
+    libre de un usuario externo con la marca de la empresa). Con tope por empresa y dia."""
+    ally_invite_limiter.hit(f"{ctx.p.tenant.id}:{ctx.company.id}")
+    email = str(data.email).strip().lower()
+    st = ally_access.seats(db, ctx.company, exclude_email=email)
+    if ctx.company.max_users is not None and st["used"] >= ctx.company.max_users:
+        # antes de mirar el correo: el tope no dice nada de quien es
+        raise HTTPException(409, f"Su plan permite {ctx.company.max_users} usuarios")
+    ok = True
     try:
-        inv = ally_access.invite_ally_user(db, ctx.p.tenant, ctx.company, str(data.email), "tecnico_aliado", ctx.p.user.id, name=data.name)
+        ally_access.invite_ally_user(db, ctx.p.tenant, ctx.company, email, "tecnico_aliado", ctx.p.user.id, by_ally=True)
     except HTTPException as ex:
-        if ex.status_code == 409 and "plan permite" not in str(ex.detail):
-            # sin revelar si el correo es de alguien de Crimson, de un cliente o de otro aliado
-            raise HTTPException(409, "No se pudo invitar a ese correo. Si ya tiene acceso, puede entrar con su contraseña.") from None
-        raise
-    audit(db, ctx.p.tenant.id, ctx.p.user.id, "invite_aliado", "ally_company", ctx.company.id, ip=ctx.p.ip)
+        if ex.status_code != 409 or "plan permite" in str(ex.detail):
+            raise
+        ok = False
+    audit(db, ctx.p.tenant.id, ctx.p.user.id, "invite_aliado", "ally_company", ctx.company.id, {"email": email, "creada": ok}, ip=ctx.p.ip)
     db.commit()
-    return inv
+    return {"ok": True, "detail": INVITE_SENT}
 
 
 @router.post("/usuarios/invitaciones/{iid}/revocar")
@@ -1639,6 +1775,7 @@ def usuario(uid: int, data: UsuarioIn, ctx: AllyCtx = Depends(need("usuarios")),
 async def media_subir(file: UploadFile = File(...), ctx: AllyCtx = Depends(need("ver")), db: Session = Depends(get_db)):
     """Foto o PDF privado del equipo del aliado. El dedupe es SOLO contra lo que subio esta misma persona: subir los
     mismos bytes que una foto de Crimson crea un registro propio (si no, sus fotos no validarian)."""
+    ally_media_limiter.hit(f"{ctx.p.tenant.id}:{ctx.p.user.id}")
     data = await file.read(MAX_PDF + 1)
     kind = sniff(data)
     if not kind:
@@ -1657,6 +1794,13 @@ async def media_subir(file: UploadFile = File(...), ctx: AllyCtx = Depends(need(
         )
     )
     if m is None:
+        # tope por empresa aliada (los archivos se guardan en la base): lo que subio todo su equipo
+        tope = max(cfg.ally_media_quota_mb, 0) * 1024 * 1024
+        usado = db.scalar(
+            select(func.coalesce(func.sum(Media.size), 0)).where(Media.tenant_id == ctx.p.tenant.id, Media.created_by.in_(ctx.scope.team_user_ids()))
+        )
+        if int(usado or 0) + len(data) > tope:
+            raise HTTPException(413, f"Su empresa llegó al tope de archivos ({cfg.ally_media_quota_mb} MB). Escríbanos para ampliarlo.")
         name = "".join(ch if (ch.isascii() and ch.isalnum()) or ch in "._- " else "_" for ch in (file.filename or "archivo"))[:120] or "archivo"
         m = Media(
             tenant_id=ctx.p.tenant.id,

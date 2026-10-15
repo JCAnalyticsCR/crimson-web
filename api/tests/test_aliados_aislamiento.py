@@ -254,14 +254,19 @@ def test_vista_previa_admin(client, auth, db_session):
 
     admin_h = dict(client.headers)
     s = escenario(client, admin_h, db_session)
+    pv = {**admin_h, "X-View-As-Ally": str(s.A)}
+    # sin activarla (y sin dejar constancia) la cabecera sola no abre nada
+    assert client.get("/aliado/oportunidades", headers=pv).status_code == 403
     r = client.post(f"/allies/{s.A}/preview", json={})
     assert r.status_code == 200 and r.json()["company"]["name"] == "Aliado Uno S.A."
     assert db_session.scalars(select(AuditLog).where(AuditLog.action == "preview_ally", AuditLog.entity_id == s.A)).first() is not None
-    pv = {**admin_h, "X-View-As-Ally": str(s.A)}
     reales = ids(client.get("/aliado/oportunidades?estado=todas", headers=s.a_jefe).json())
     assert ids(client.get("/aliado/oportunidades?estado=todas", headers=pv).json()) == reales == {s.O1, s.O3}
     assert client.post("/aliado/levantamientos", json={"project_id": s.P1}, headers=pv).status_code == 403
     pvt = {**pv, "X-View-As-User": str(s.uid_a_tec)}
+    # como una persona concreta: la activacion tiene que ser para esa persona
+    assert client.get("/aliado/mi-dia", headers=pvt).status_code == 403
+    assert client.post(f"/allies/{s.A}/preview", json={"user_id": s.uid_a_tec}).status_code == 200
     vista, real = client.get("/aliado/mi-dia", headers=pvt).json(), client.get("/aliado/mi-dia", headers=s.a_tec).json()
     for k in ("ordenes", "levantamientos", "tickets"):
         assert ids(vista[k]) == ids(real[k]), k
@@ -271,6 +276,13 @@ def test_vista_previa_admin(client, auth, db_session):
     assert client.get("/aliado/oportunidades", headers={**vend, "X-View-As-Ally": str(s.A)}).status_code == 403
     # solo el admin activa la vista previa
     assert client.post(f"/allies/{s.A}/preview", json={}, headers=vend).status_code == 403
+    # la activacion vence (core/ally.PREVIEW_HOURS): despues hay que volver a activarla (y queda otra constancia)
+    from datetime import UTC, datetime, timedelta
+
+    for log in db_session.scalars(select(AuditLog).where(AuditLog.action == "preview_ally", AuditLog.entity_id == s.A)):
+        log.at = datetime.now(UTC) - timedelta(hours=9)
+    db_session.commit()
+    assert client.get("/aliado/oportunidades", headers=pv).status_code == 403
 
 
 def test_oportunidades_solo_en_comun(client, auth, db_session):

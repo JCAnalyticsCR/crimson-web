@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     media_url_secret: str | None = Field(None, min_length=32)
     media_url_minutes: int = 30  # vida del enlace que pide el portal para mostrar una foto
     media_email_url_days: int = 30  # informes que viajan por correo: el cliente abre el correo dias despues
+    # Tope de archivos (fotos y PDF) que puede subir cada empresa aliada desde su portal, en MB (se guardan en la base)
+    ally_media_quota_mb: int = 1024
 
     # Integraciones (vacias = adaptadores en modo manual/sandbox)
     # ONVO por variable de entorno = respaldo de una sola empresa; lo normal es Ajustes -> Pasarelas (cifrado por empresa)

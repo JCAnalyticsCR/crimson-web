@@ -582,7 +582,9 @@ def ticket_update(tid: int, data: TicketIn, p: Principal = Depends(require("supp
         from ..services.ally_scope import check_ally_assignment
 
         explicita = data.ally_company_id if "ally_company_id" in data.model_fields_set else (t.ally_company_id if data.assigned_to == t.assigned_to else None)
-        t.ally_company_id = check_ally_assignment(db, p.tenant.id, ally_company_id=explicita, user_ids=[data.assigned_to], project_id=data.project_id)
+        t.ally_company_id = check_ally_assignment(
+            db, p.tenant.id, ally_company_id=explicita, user_ids=[data.assigned_to], project_id=data.project_id, current=t.ally_company_id
+        )
     campos = []
     for k, v in data.model_dump(exclude={"ally_company_id"}).items():
         if k in ("contact", "tags") and not v:
@@ -657,7 +659,17 @@ def ticket_note(tid: int, data: NoteIn, p: Principal = Depends(require_any("supp
     if data.clear_next_step or data.next_step or data.next_step_at:
         _aplicar_paso(db, p, t, data.next_step, data.next_step_at, data.clear_next_step)
     compartir = bool(data.share_ally and data.internal and t.ally_company_id)
-    t.notes.append(SupportNote(tenant_id=t.tenant_id, user_id=p.user.id, body=data.body, internal=data.internal, photos=data.photos, share_ally=compartir))
+    t.notes.append(
+        SupportNote(
+            tenant_id=t.tenant_id,
+            user_id=p.user.id,
+            body=data.body,
+            internal=data.internal,
+            photos=data.photos,
+            share_ally=compartir,
+            share_ally_company_id=t.ally_company_id if compartir else None,  # solo esa empresa la lee
+        )
+    )
     if not data.internal and not t.first_reply_at:
         t.first_reply_at = datetime.now(UTC)  # el reloj del SLA para la primera respuesta
     if data.hours is not None:
@@ -702,7 +714,9 @@ def ticket_assign(tid: int, data: AssignIn, p: Principal = Depends(require("supp
             # un usuario de una empresa aliada: el ticket queda asignado a su empresa (que participe en el proyecto)
             from ..services.ally_scope import check_ally_assignment
 
-            t.ally_company_id = check_ally_assignment(db, p.tenant.id, ally_company_id=t.ally_company_id, user_ids=[data.assigned_to], project_id=t.project_id)
+            t.ally_company_id = check_ally_assignment(
+                db, p.tenant.id, ally_company_id=t.ally_company_id, user_ids=[data.assigned_to], project_id=t.project_id, current=t.ally_company_id
+            )
     antes = t.assigned_to
     if antes != data.assigned_to:
         t.assigned_to = data.assigned_to
@@ -815,8 +829,17 @@ def ticket_to_work_order(tid: int, data: VisitIn, p: Principal = Depends(require
         raise HTTPException(422, "Esa persona no puede recibir órdenes")
     from ..services.ally_scope import check_ally_assignment
 
-    # la OT hereda la empresa aliada del ticket (y un tecnico aliado tiene que ser de esa empresa)
-    aliada = check_ally_assignment(db, p.tenant.id, ally_company_id=t.ally_company_id, user_ids=[data.technician_id], project_id=t.project_id)
+    # la OT hereda la empresa aliada del ticket (y un tecnico aliado tiene que ser de esa empresa). Con un tecnico de
+    # Crimson la visita es de Crimson: no hereda (si no, un ticket de un aliado suspendido no podria generar la visita)
+    interno = data.technician_id is not None and (
+        db.scalar(
+            select(TenantUser.id).where(TenantUser.tenant_id == p.tenant.id, TenantUser.user_id == data.technician_id, TenantUser.ally_company_id.is_not(None))
+        )
+        is None
+    )
+    aliada = (
+        None if interno else check_ally_assignment(db, p.tenant.id, ally_company_id=t.ally_company_id, user_ids=[data.technician_id], project_id=t.project_id)
+    )
     number, _ = next_number(db, p.tenant.id, "OT")
     o = WorkOrder(
         tenant_id=p.tenant.id,
@@ -1064,7 +1087,7 @@ def contract_update(cid: int, data: ContractIn, p: Principal = Depends(require("
         from ..services.ally_scope import check_ally_assignment
 
         c.ally_company_id = (
-            check_ally_assignment(db, p.tenant.id, ally_company_id=data.ally_company_id, user_ids=[], project_id=data.project_id)
+            check_ally_assignment(db, p.tenant.id, ally_company_id=data.ally_company_id, user_ids=[], project_id=data.project_id, current=c.ally_company_id)
             if data.ally_company_id
             else None
         )
