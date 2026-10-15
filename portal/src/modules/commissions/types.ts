@@ -2,11 +2,11 @@
 
 export type Entry = {
   id: number; user_id: number | null; user: string | null; invoice: string | null; invoice_id: number | null;
-  base: string; base_amount: string | null; percent: string | null; amount: string; currency: string; earned_on: string; status: string; paid_on: string | null;
+  base: string; base_amount: string | null; percent: string | null; amount: string | null; currency: string; earned_on: string; status: string; paid_on: string | null;
   beneficiary: "vendedor" | "aliado"; beneficiary_name: string | null; ally_company_id: number | null;
   kind: "comision" | "bono" | "pago_acordado" | "ajuste"; trigger: string; description: string | null;
   project_id: number | null; project: string | null; quote_id: number | null; quote: string | null; participation_id: number | null;
-  amount_crc: string; hold_reason: string | null; approved_at: string | null; approved_by: string | null;
+  amount_crc: string | null; hold_reason: string | null; approved_at: string | null; approved_by: string | null;
   paid_ref: string | null; void_reason: string | null; reverses_id: number | null; can_approve: boolean;
 };
 export type Ledger = { rows: Entry[]; totals: { en_espera: number; pendiente: string; aprobada: string; pagada: string }; by_currency: Record<string, Record<string, string>>; total_rows: number };

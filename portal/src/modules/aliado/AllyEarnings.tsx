@@ -1,22 +1,23 @@
-/* Mis ganancias (31:29-31:53): lo que la alianza le deja a lo largo del tiempo. Los montos los calcula economía
-   (services/commissions: pagos acordados, comisiones, bonos); este frente suma la mensualidad de la plataforma y el
-   neto. Un solo gráfico de magnitud (lo devengado por mes, un tono) y la tabla con el detalle. Sin IVA. */
+/* Mis ganancias (spec economia 9.8; 26:36-27:23 y 31:29-31:53): lo que la alianza le deja a lo largo del tiempo.
+   Los montos los calcula economía (services/commissions: pagos acordados, comisiones, bonos) y solo de lo que
+   Crimson le comparte; este frente suma la mensualidad de la plataforma y el neto. Tarjetas, 24 meses, la tabla por
+   proyecto con "lo que pusiste" y el detalle de cada uno (/aliado/ganancias/proyectos/{id}). Sin IVA. */
 import { useEffect, useState } from "react";
 import { ApiError, api, fmtMoney } from "../../lib/api";
 import { Empty } from "../../ui/components";
+import { AllyProjectsCard, AllyStatCards } from "../commissions/AllyEarnings";
+import type { AllyEarningsData } from "../commissions/types";
+import "../commissions/commissions.css";
 import { errorText } from "./shared";
-
-type Mes = { mes: string; devengado: string; recibido: string; mensualidad: string; neto: string };
-type G = { moneda?: string; totales: Record<string, string>; por_mes: Mes[]; proyectos?: { project_id: number; number?: string; name?: string; devengado?: string }[]; nota: string };
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "set", "oct", "nov", "dic"];
 const mesLbl = (k: string) => { const [y, m] = k.split("-"); return `${MESES[Number(m) - 1] || m} ${y.slice(2)}`; };
 
 export default function AllyEarnings() {
-  const [g, setG] = useState<G | null>(null);
+  const [g, setG] = useState<AllyEarningsData | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
-    api<G>("/aliado/ganancias").then(setG).catch((e) => setErr(e instanceof ApiError && e.status === 503 ? "Disponible pronto: Crimson está terminando el cálculo de lo que recibe cada aliado." : errorText(e)));
+    api<AllyEarningsData>("/aliado/ganancias").then(setG).catch((e) => setErr(e instanceof ApiError && e.status === 503 ? "Disponible pronto: Crimson está terminando el cálculo de lo que recibe cada aliado." : errorText(e)));
   }, []);
   if (err) return <><div className="cp-h"><h1 className="h1">Mis ganancias</h1></div><p className="muted">{err}</p></>;
   if (!g) return <div style={{ minHeight: "40vh", display: "grid", placeItems: "center" }}><span className="spinner" /></div>;
@@ -26,13 +27,14 @@ export default function AllyEarnings() {
   return (
     <>
       <div className="cp-h"><h1 className="h1">Mis ganancias</h1></div>
+      <AllyStatCards g={g} tu="tus" />
       <div className="cp-grid cp-grid--3 al-money" style={{ marginBottom: 16 }}>
-        <div className="cp-stat"><span className="meta">Recibido</span><b>{fmtMoney(t.recibido, mon)}</b></div>
-        <div className="cp-stat"><span className="meta">Por recibir</span><b>{fmtMoney(t.por_recibir, mon)}</b></div>
-        <div className="cp-stat"><span className="meta">Neto después de la mensualidad</span><b>{fmtMoney(t.neto, mon)}</b><span className="muted" style={{ fontSize: 13 }}>Mensualidad del período: {fmtMoney(t.mensualidad, mon)}</span></div>
+        <div className="cp-stat"><span className="meta">Devengado en el período</span><b>{fmtMoney(t.devengado, mon)}</b></div>
+        <div className="cp-stat"><span className="meta">Mensualidad de la plataforma</span><b>{fmtMoney(t.mensualidad, mon)}</b></div>
+        <div className="cp-stat"><span className="meta">Neto después de la mensualidad</span><b>{fmtMoney(t.neto, mon)}</b></div>
       </div>
       {g.por_mes.length ? (
-        <div className="cp-card">
+        <div className="cp-card" style={{ marginBottom: 16 }}>
           <b>Lo devengado por mes</b>
           <div className="al-chart" role="img" aria-label="Gráfico de lo devengado por mes; el detalle está en la tabla de abajo">
             {g.por_mes.map((m) => (
@@ -54,7 +56,8 @@ export default function AllyEarnings() {
           </div>
         </div>
       ) : <Empty title="Todavía no hay movimientos" />}
-      <p className="meta" style={{ marginTop: 8 }}>{g.nota}</p>
+      <AllyProjectsCard g={g} projectBase={(pid) => `/aliado/ganancias/proyectos/${pid}`} onError={setErr} />
+      <p className="meta" style={{ marginTop: 8 }}>{g.nota || "Montos sin IVA. Para cobrar, enviá tu factura electrónica a Crimson por el monto aprobado."}</p>
     </>
   );
 }

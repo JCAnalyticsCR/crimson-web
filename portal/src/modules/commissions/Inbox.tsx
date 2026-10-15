@@ -8,7 +8,8 @@ import { KIND, errText, type Beneficiaries, type Entry, type Inbox as InboxData,
 
 type PayForm = { ids: number[]; paid_on: string; paid_ref: string };
 type VoidForm = { ids: number[]; reason: string };
-type AdjForm = { beneficiary: "vendedor" | "aliado"; user_id: string; ally_company_id: string; amount: string; currency: string; description: string };
+type AdjForm = { beneficiary: "vendedor" | "aliado"; user_id: string; ally_company_id: string; project_id: string; amount: string; currency: string; description: string };
+type ProjectLite = { id: number; number: string; name: string };
 type Backfill = { from: string; result: { creados: number; por_beneficiario: { name: string; count: number; total_crc: string }[] } | null };
 
 const hoy = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Costa_Rica" });
@@ -25,10 +26,12 @@ export default function Inbox({ onChange }: { onChange?: () => void }) {
   const [bf, setBf] = useState<Backfill | null>(null);
   const [ben, setBen] = useState<Beneficiaries | null>(null);
   const [busy, setBusy] = useState(false);
+  const [proyectos, setProyectos] = useState<ProjectLite[] | null>(null);
 
   const load = useCallback(() => { api<InboxData>("/commissions/inbox").then((x) => { setD(x); setSel({}); }).catch((e) => toast(errText(e), "bad")); }, [toast]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (configura && (adj || bf) && !ben) api<Beneficiaries>("/commissions/beneficiaries").then(setBen).catch(() => setBen({ users: [], allies: [] })); }, [configura, adj, bf, ben]);
+  useEffect(() => { if (adj && !proyectos) api<ProjectLite[]>("/projects").then(setProyectos).catch(() => setProyectos([])); }, [adj, proyectos]);
 
   const done = (msg: string) => { toast(msg); load(); onChange?.(); };
   const patch = async (ids: number[], status: string, extra: Record<string, unknown> = {}) => {
@@ -48,7 +51,7 @@ export default function Inbox({ onChange }: { onChange?: () => void }) {
   };
   const saveAdj = async () => {
     if (!adj) return;
-    const body = { beneficiary: adj.beneficiary, user_id: adj.beneficiary === "vendedor" ? Number(adj.user_id) || null : null, ally_company_id: adj.beneficiary === "aliado" ? Number(adj.ally_company_id) || null : null, amount: adj.amount, currency: adj.currency, description: adj.description };
+    const body = { beneficiary: adj.beneficiary, user_id: adj.beneficiary === "vendedor" ? Number(adj.user_id) || null : null, ally_company_id: adj.beneficiary === "aliado" ? Number(adj.ally_company_id) || null : null, project_id: Number(adj.project_id) || null, amount: adj.amount, currency: adj.currency, description: adj.description };
     try { await api("/commissions/adjustments", { method: "POST", json: body }); setAdj(null); done("Ajuste registrado: queda pendiente de aprobación"); }
     catch (e) { toast(errText(e), "bad"); }
   };
@@ -111,7 +114,7 @@ export default function Inbox({ onChange }: { onChange?: () => void }) {
       </div>
       {configura && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-          <button className="btn btn--ghost btn--sm" onClick={() => setAdj({ beneficiary: "vendedor", user_id: "", ally_company_id: "", amount: "", currency: "CRC", description: "" })}><Icon d={I.plus} />Ajuste manual</button>
+          <button className="btn btn--ghost btn--sm" onClick={() => setAdj({ beneficiary: "vendedor", user_id: "", ally_company_id: "", project_id: "", amount: "", currency: "CRC", description: "" })}><Icon d={I.plus} />Ajuste manual</button>
           <button className="btn btn--ghost btn--sm" onClick={() => setBf({ from: hoy().slice(0, 8) + "01", result: null })}><Icon d={I.refresh} />Aplicar reglas a fechas anteriores</button>
         </div>
       )}
@@ -158,6 +161,11 @@ export default function Inbox({ onChange }: { onChange?: () => void }) {
             <Field label="Moneda"><select className="select" value={adj.currency} onChange={(e) => setAdj({ ...adj, currency: e.target.value })}><option>CRC</option><option>USD</option></select></Field>
           </div>
           <Field label="Concepto"><input className="input" maxLength={240} value={adj.description} onChange={(e) => setAdj({ ...adj, description: e.target.value })} /></Field>
+          {proyectos && proyectos.length > 0 && (
+            <Field label="Proyecto (opcional)" hint="Ligado a un proyecto, el ajuste entra en su utilidad neta y en lo que ve el aliado de ese proyecto.">
+              <select className="select" value={adj.project_id} onChange={(e) => setAdj({ ...adj, project_id: e.target.value })}><option value="">Sin proyecto</option>{proyectos.map((x) => <option key={x.id} value={x.id}>{x.number} · {x.name}</option>)}</select>
+            </Field>
+          )}
         </Modal>
       )}
       {bf && (

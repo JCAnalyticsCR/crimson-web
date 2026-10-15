@@ -10,6 +10,7 @@ export type RuleForm = {
   id?: number; beneficiary: "vendedor" | "aliado"; who: string; kind: "comision" | "bono_fin"; name: string; base: "venta" | "margen";
   mode: "percent" | "fixed"; percent: string; fixed_amount: string; fixed_currency: string; trigger: string;
   deal_kind: string; solution: string; valid_from: string; valid_to: string; active: boolean; notes: string;
+  whoName?: string | null; // nombre guardado: la persona puede estar desactivada y ya no salir en la lista
 };
 
 export function blankRule(cfg: Config | null, beneficiary: "vendedor" | "aliado" = "vendedor", kind: "comision" | "bono_fin" = "comision"): RuleForm {
@@ -29,6 +30,7 @@ export function ruleToForm(r: Rule): RuleForm {
     name: r.name, base: r.base as "venta" | "margen", mode: fixed ? "fixed" : "percent", percent: r.percent ?? "", fixed_amount: r.fixed_amount ?? "",
     fixed_currency: r.fixed_currency || "CRC", trigger: r.trigger, deal_kind: r.deal_kind || "", solution: r.solution || "",
     valid_from: r.valid_from || "", valid_to: r.valid_to || "", active: r.active, notes: r.notes || "",
+    whoName: r.beneficiary === "aliado" ? r.ally : r.user,
   };
 }
 
@@ -39,6 +41,9 @@ export default function RuleModal({ initial, ben, defaultMargin, onClose, onSave
   const [f, setF] = useState<RuleForm>(initial);
   const [busy, setBusy] = useState(false);
   const set = (p: Partial<RuleForm>) => setF((x) => ({ ...x, ...p }));
+  // la persona o el aliado de la regla ya no esta en la lista (desactivado): se conserva, no pasa a "todos"
+  const fuera = !!initial.who && f.who === initial.who && !!ben
+    && !(f.beneficiary === "vendedor" ? ben.users.some((u) => String(u.id) === f.who) : ben.allies.some((a) => String(a.id) === f.who));
   const ejemplo = useMemo(() => {
     const venta = 1000000;
     if (f.mode === "fixed") return Number(f.fixed_amount) > 0 ? `Monto fijo: ${fmtMoney(f.fixed_amount, f.fixed_currency)} por negocio${f.trigger === "cobro" ? " (repartido según lo cobrado)" : ""}.` : null;
@@ -73,11 +78,11 @@ export default function RuleModal({ initial, ben, defaultMargin, onClose, onSave
         </Field>
         {f.beneficiary === "vendedor" ? (
           <Field label="Persona" hint="«Todos los vendedores» solo alcanza a los roles de Configuración (por defecto, Vendedor).">
-            <select className="select" value={f.who} onChange={(e) => set({ who: e.target.value })}><option value="">Todos los vendedores</option>{ben?.users.map((u) => <option key={u.id} value={u.id}>{u.name} · {u.role_label}</option>)}</select>
+            <select className="select" value={f.who} onChange={(e) => set({ who: e.target.value })}><option value="">Todos los vendedores</option>{fuera && <option value={f.who}>{f.whoName || "Persona"} (inactiva)</option>}{ben?.users.map((u) => <option key={u.id} value={u.id}>{u.name} · {u.role_label}</option>)}</select>
           </Field>
         ) : (
           <Field label="Empresa aliada" hint="«Todos los aliados» no alcanza a quien contrata a Crimson.">
-            <select className="select" value={f.who} onChange={(e) => set({ who: e.target.value })}><option value="">Todos los aliados</option>{ben?.allies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
+            <select className="select" value={f.who} onChange={(e) => set({ who: e.target.value })}><option value="">Todos los aliados</option>{fuera && <option value={f.who}>{f.whoName || "Aliado"} (inactivo)</option>}{ben?.allies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
           </Field>
         )}
         <Field label="Tipo" hint="El bono por terminar antes se pacta en el acuerdo económico de cada proyecto.">
@@ -109,7 +114,8 @@ export default function RuleModal({ initial, ben, defaultMargin, onClose, onSave
         <Field label="Vigente desde"><input className="input" type="date" value={f.valid_from} onChange={(e) => set({ valid_from: e.target.value })} /></Field>
         <Field label="Vigente hasta"><input className="input" type="date" value={f.valid_to} onChange={(e) => set({ valid_to: e.target.value })} /></Field>
       </div>
-      {f.base === "margen" && <div className="com-warn">Con la comisión y el porcentaje, la persona puede deducir la utilidad. No se le muestra la base.</div>}
+      {f.base === "margen" && <div className="com-warn">Con la comisión y el porcentaje, la persona puede deducir la utilidad. No se le muestra la base ni el porcentaje.</div>}
+      {f.base === "margen" && <p className="com-note">Un servicio sin producto no tiene costo: en una venta sin proyecto, las líneas escritas a mano cuentan completas como utilidad. Con proyecto manda la rentabilidad del proyecto al cerrarse.</p>}
       {ejemplo && <div className="com-example">{ejemplo}</div>}
       <label className="com-check"><input type="checkbox" checked={f.active} onChange={(e) => set({ active: e.target.checked })} />Activa</label>
       <Field label="Notas"><input className="input" maxLength={2000} value={f.notes} onChange={(e) => set({ notes: e.target.value })} /></Field>

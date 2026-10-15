@@ -74,7 +74,8 @@ export default function Commissions() {
     { key: "bandeja", label: "Bandeja", show: aprueba },
     { key: "movimientos", label: "Movimientos", show: verTodo },
     { key: "reglas", label: "Reglas", show: verTodo },
-    { key: "aliados", label: "Aliados", show: verTodo },
+    // los precios del aliado (lo que pusiste, su pago acordado) son costo de Crimson: solo con catalog.costos
+    { key: "aliados", label: "Aliados", show: verTodo && costos },
     { key: "numeros", label: "Mis números", show: verTodo && costos },
     { key: "config", label: "Configuración", show: configura },
   ].filter((t) => t.show), [verTodo, aprueba, configura, costos]);

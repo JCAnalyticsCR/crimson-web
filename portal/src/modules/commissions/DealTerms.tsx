@@ -2,6 +2,7 @@
    aprobados), su comision en este proyecto y los bonos por completar y por terminar antes. Lo usan Proyectos y
    Oportunidades. Ver: commissions.ver_todo + costos; guardar: commissions.configurar. */
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Field, Modal } from "../../ui/components";
@@ -52,6 +53,9 @@ export default function DealTerms({ participationId, name, onClose, onSaved }: {
           <b>Lo que recibe por su trabajo</b>
           {d.pago_acordado.length === 0 ? <p className="muted" style={{ margin: "4px 0 12px" }}>Aprobá el precio del aliado en Solicitudes de costo (en la oportunidad).</p> : (
             <ul style={{ margin: "4px 0 12px", paddingLeft: 18 }}>{d.pago_acordado.map((r) => <li key={r.id}>{r.what}: {fmtMoney(r.amount, r.currency)}</li>)}</ul>
+          )}
+          {d.participation.opportunity_id && allows("crm_pipeline.ver") && (
+            <p style={{ margin: "-6px 0 12px" }}><Link className="row-link" to={`/oportunidades?id=${d.participation.opportunity_id}`} onClick={onClose}>Gestionar en la oportunidad</Link></p>
           )}
           <b>Comisión en este proyecto</b>
           <label className="com-check"><input type="radio" disabled={ro} checked={!f.own} onChange={() => set({ own: false })} />Usar la regla general{d.general_rule ? ` (${d.general_rule.summary})` : " (no hay: no comisiona)"}</label>
