@@ -9,6 +9,7 @@ import { Dropzone } from "../../ui/MediaPicker";
 import AuthLink from "../../ui/AuthLink";
 import WebInventory from "./WebInventory";
 import SupplierCatalog from "./SupplierCatalog";
+import Kardex, { type KardexProduct } from "./Kardex";
 
 type Wh = { id: number; name: string; location: string | null; is_default: boolean; active: boolean };
 type Level = { product_id: number; warehouse_id: number; quantity: string; code: string; name: string; min_stock: number; warehouse: string; committed?: string; available?: string; serialized?: boolean };
@@ -52,6 +53,7 @@ export default function Inventory() {
   const [products, setProducts] = useState<Product[]>([]);
   const [projects, setProjects] = useState<ProjectLite[]>([]);
   const [filter, setFilter] = useState<number | "">("");
+  const [kardexProduct, setKardexProduct] = useState<KardexProduct | null>(null);
   const [modal, setModal] = useState<"move" | "transfer" | "wh" | null>(null);
   const emptyMv = { product_id: "", warehouse_id: "", kind: "entrada", quantity: "1", reference: "", note: "", movement_type: "", project_id: "", serial: "", location: "", custodian: "", owner: "", voucher_media: "" };
   const [mv, setMv] = useState(emptyMv);
@@ -101,7 +103,7 @@ export default function Inventory() {
       </div>
 
       <div className="tabs" style={{ alignSelf: "flex-start" }} role="tablist">
-        {[["existencias", "Existencias"], ["reservas", "Reservas"], ["seriales", "Seriales"], ...(allows("catalog.precios") ? [["web", "Inventario web"]] : []), ...(allows("catalog.ver") ? [["proveedores", "Proveedores"]] : [])].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "is-active" : ""} onClick={() => setTab(k)}>{l}</button>)}
+        {[["existencias", "Existencias"], ["movimientos", "Movimientos"], ["reservas", "Reservas"], ["seriales", "Seriales"], ...(allows("catalog.precios") ? [["web", "Inventario web"]] : []), ...(allows("catalog.ver") ? [["proveedores", "Proveedores"]] : [])].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "is-active" : ""} onClick={() => setTab(k)}>{l}</button>)}
       </div>
 
       {tab === "existencias" && <>
@@ -122,8 +124,8 @@ export default function Inventory() {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Card title={onlyLow ? "Existencias de los productos bajo mínimo" : "Existencias por ubicación"} flush extra={allows("reports.exportar") ? <AuthLink path="/reports/inventario?format=xlsx" download="inventario.xlsx"><Icon d={I.reports} />Excel</AuthLink> : undefined}>
             {levelsSt === null ? <Loading /> : shown.length === 0 ? <Empty hint={onlyLow ? "Ningún producto bajo mínimo tiene existencias registradas en bodega." : "Registrá una entrada para empezar; las ventas descuentan solas de la ubicación predeterminada."} /> : (
-              <table className="table"><thead><tr><th>Producto</th><th>Ubicación</th><th className="num">Cantidad</th><th className="num" title="Reservas confirmadas y vigentes">Comprometido</th><th className="num">Disponible</th><th className="num">Mínimo</th></tr></thead>
-                <tbody>{shown.map((l, i) => <tr key={i}><td><b>{l.name}</b>{l.serialized && <span className="badge badge--muted" style={{ marginLeft: 6 }}>Serie</span>}<div className="meta mono">{l.code}</div></td><td className="muted">{l.warehouse}</td><td className="num mono" style={{ color: Number(l.quantity) <= l.min_stock ? "var(--bad)" : undefined, fontWeight: 700 }}>{Number(l.quantity)}</td><td className="num mono" style={{ color: n(l.committed) > 0 ? "var(--warn)" : "var(--text-3)" }}>{n(l.committed) || "—"}</td><td className="num mono" style={{ color: n(l.available ?? l.quantity) < 0 ? "var(--bad)" : undefined }}>{n(l.available ?? l.quantity)}</td><td className="num mono muted">{l.min_stock}</td></tr>)}</tbody></table>
+              <table className="table"><thead><tr><th>Producto</th><th>Ubicación</th><th className="num">Cantidad</th><th className="num" title="Reservas confirmadas y vigentes">Comprometido</th><th className="num">Disponible</th><th className="num">Mínimo</th><th /></tr></thead>
+                <tbody>{shown.map((l, i) => <tr key={i}><td><b>{l.name}</b>{l.serialized && <span className="badge badge--muted" style={{ marginLeft: 6 }}>Serie</span>}<div className="meta mono">{l.code}</div></td><td className="muted">{l.warehouse}</td><td className="num mono" style={{ color: Number(l.quantity) <= l.min_stock ? "var(--bad)" : undefined, fontWeight: 700 }}>{Number(l.quantity)}</td><td className="num mono" style={{ color: n(l.committed) > 0 ? "var(--warn)" : "var(--text-3)" }}>{n(l.committed) || "—"}</td><td className="num mono" style={{ color: n(l.available ?? l.quantity) < 0 ? "var(--bad)" : undefined }}>{n(l.available ?? l.quantity)}</td><td className="num mono muted">{l.min_stock}</td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => { setKardexProduct({ id: l.product_id, code: l.code, name: l.name }); setTab("movimientos"); }}>Movimientos</button></td></tr>)}</tbody></table>
             )}
           </Card>
           <Card title="Alertas de stock mínimo" flush>
@@ -135,6 +137,7 @@ export default function Inventory() {
         </div>
       </>}
 
+      {tab === "movimientos" && <Kardex initProduct={kardexProduct} whs={whs} />}
       {tab === "reservas" && <Reservations products={products} whs={whs} projects={projects} onChange={load} />}
       {tab === "seriales" && <Units products={products} whs={whs} projects={projects} onChange={load} />}
       {/* la tienda es precio: el tecnico (inventory.ver sin precios) no tiene esta pestaña */}

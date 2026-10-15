@@ -6,12 +6,13 @@ aliados tenga usuarios propios (vacio = la empresa).
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -414,12 +415,20 @@ def unit_update(uid: int, data: UnitPatch, p: Principal = Depends(require("inven
             raise HTTPException(404, "Proyecto no encontrado")
     if fields.get("status", u.status) == "instalado" and not u.customer_asset_id and not fields.get("project_id", u.project_id):
         raise HTTPException(422, "Para marcarla instalada indicá el proyecto")
-    antes = u.status
+    antes, antes_proyecto = u.status, u.project_id
     for k in ("status", "warehouse_id", "project_id", "condition", "location", "notes"):
         if k in fields:
             setattr(u, k, fields[k])
     if u.status == "instalado" and not u.customer_asset_id:
         _link_asset(db, p, u, data)
+    # una serie entregada o instalada en un proyecto salio de bodega (y si vuelve, entra): se concilia el proyecto
+    if antes != u.status or antes_proyecto != u.project_id:
+        from ..services import project_stock
+
+        for pid in {antes_proyecto, u.project_id} - {None}:
+            pr = db.get(Project, pid)
+            if pr and pr.tenant_id == p.tenant.id:
+                project_stock.reconcile(db, pr, [u.product_id], p.user.id, reason=f"serie {u.serial}", warehouse_id=u.warehouse_id)
     audit(db, p.tenant.id, p.user.id, "unit", "stock_unit", u.id, {"de": antes, "a": u.status}, ip=p.ip)
     db.commit()
     return _unit_out(db, u)
@@ -461,16 +470,40 @@ def _link_asset(db: Session, p: Principal, u: StockUnit, data: UnitPatch) -> Non
     u.customer_asset_id = a.id
 
 
-# ---------- Libro de movimientos (con los datos enriquecidos) ----------
+CR = ZoneInfo("America/Costa_Rica")
+
+
+# ---------- Libro de movimientos / kardex (con los datos enriquecidos) ----------
+KIND_LABEL = {
+    "entrada": "Entrada",
+    "salida": "Salida",
+    "venta": "Venta",
+    "devolucion": "Devolución",
+    "ajuste": "Ajuste",
+    "transferencia_out": "Traslado (sale)",
+    "transferencia_in": "Traslado (entra)",
+}
+
+
 @router.get("/stock/movements")
 def movements(
     product_id: int | None = None,
     project_id: int | None = None,
     warehouse_id: int | None = None,
+    user_id: int | None = None,
+    kind: str | None = Query(None, max_length=30),
+    date_from: date | None = None,
+    date_to: date | None = None,
+    q: str | None = Query(None, max_length=80),
     limit: int = Query(100, le=500),
+    offset: int = Query(0, ge=0),
     p: Principal = Depends(require("inventory", "ver")),
     db: Session = Depends(get_db),
 ):
+    """Kardex: cada entrada y salida con quien la hizo, cuando y de que documento viene (factura, proyecto, orden,
+    pedido web, compra). Filtrado por un producto devuelve ademas el saldo despues de cada movimiento."""
+    from ..models import Invoice, Order
+
     stmt = select(StockMovement).where(StockMovement.tenant_id == p.tenant.id)
     if product_id:
         stmt = stmt.where(StockMovement.product_id == product_id)
@@ -478,9 +511,35 @@ def movements(
         stmt = stmt.where(StockMovement.project_id == project_id)
     if warehouse_id:
         stmt = stmt.where(StockMovement.warehouse_id == warehouse_id)
-    rows = db.scalars(stmt.order_by(StockMovement.id.desc()).limit(limit)).all()
+    if user_id:
+        stmt = stmt.where(StockMovement.created_by == user_id)
+    if kind:
+        stmt = stmt.where(StockMovement.kind == kind)
+    if date_from:
+        stmt = stmt.where(StockMovement.at >= datetime.combine(date_from, time.min, tzinfo=CR))
+    if date_to:
+        stmt = stmt.where(StockMovement.at <= datetime.combine(date_to, time.max, tzinfo=CR))
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        ids = select(Product.id).where(Product.tenant_id == p.tenant.id, or_(Product.code.ilike(like), Product.name.ilike(like)))
+        stmt = stmt.where(or_(StockMovement.product_id.in_(ids), StockMovement.reference.ilike(like), StockMovement.serial.ilike(like)))
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = db.scalars(stmt.order_by(StockMovement.at.desc(), StockMovement.id.desc()).offset(offset).limit(limit)).all()
     prods = {x.id: x for x in db.scalars(select(Product).where(Product.id.in_({m.product_id for m in rows})))} if rows else {}
     whs = {w.id: w.name for w in db.scalars(select(Warehouse).where(Warehouse.tenant_id == p.tenant.id))}
+    users = {u.id: (u.full_name or u.email) for u in db.scalars(select(User).where(User.id.in_({m.created_by for m in rows if m.created_by})))} if rows else {}
+    invs = {i.id: i.number for i in db.scalars(select(Invoice).where(Invoice.id.in_({m.invoice_id for m in rows if m.invoice_id})))} if rows else {}
+    projs = {x.id: x.number for x in db.scalars(select(Project).where(Project.id.in_({m.project_id for m in rows if m.project_id})))} if rows else {}
+    orders = {o.id: o.number for o in db.scalars(select(Order).where(Order.id.in_({m.order_id for m in rows if m.order_id})))} if rows else {}
+    # saldo despues de cada movimiento (solo con un producto): el total de hoy menos lo posterior
+    saldo = None
+    if product_id and rows:
+        base = select(func.coalesce(func.sum(StockMovement.quantity), 0)).where(StockMovement.tenant_id == p.tenant.id, StockMovement.product_id == product_id)
+        if warehouse_id:
+            base = base.where(StockMovement.warehouse_id == warehouse_id)
+        newest = rows[0]
+        later = base.where(or_(StockMovement.at > newest.at, (StockMovement.at == newest.at) & (StockMovement.id > newest.id)))
+        saldo = Decimal(str(db.scalar(base) or 0)) - Decimal(str(db.scalar(later) or 0))
     out = []
     for m in rows:
         pr = prods.get(m.product_id)
@@ -493,19 +552,30 @@ def movements(
             "warehouse_id": m.warehouse_id,
             "warehouse": whs.get(m.warehouse_id),
             "kind": m.kind,
+            "kind_label": KIND_LABEL.get(m.kind, m.kind),
             "movement_type": m.movement_type,
             "quantity": m.quantity,
+            "balance": saldo,
             "reference": m.reference,
             "note": m.note,
+            "user_id": m.created_by,
+            "user": users.get(m.created_by) if m.created_by else "Sistema",
+            "invoice_id": m.invoice_id,
+            "invoice_number": invs.get(m.invoice_id),
             "project_id": m.project_id,
+            "project_number": projs.get(m.project_id),
+            "order_id": m.order_id,
+            "order_number": orders.get(m.order_id),
             "serial": m.serial,
             "voucher_media": m.voucher_media,
             "owner": m.owner,
             "custodian": m.custodian,
             "location": m.location,
         }
+        if saldo is not None:
+            saldo -= Decimal(str(m.quantity))
         if p.sees_costs:
             row["unit_cost"] = m.unit_cost
             row["transfer_price"] = m.transfer_price
         out.append(row)
-    return out
+    return {"total": total, "items": out}

@@ -2375,15 +2375,28 @@ def apply_order_progress(db: Session, o: WorkOrder, data: ProgressIn, action: st
 
 
 def _apply_materials(db: Session, o: WorkOrder, p: Principal) -> int:
-    """Descuenta del inventario lo realmente utilizado (una sola vez por orden)."""
+    """Descuenta del inventario lo realmente utilizado (una sola vez por orden). Orden de un PROYECTO: concilia el
+    proyecto, asi lo que la factura ya saco no vuelve a salir (y lo que se uso de mas si sale)."""
     if o.stock_applied:
         return 0
     wh = o.warehouse_id or (invsvc.default_warehouse(db, o.tenant_id).id if invsvc.default_warehouse(db, o.tenant_id) else None)
+    pr = db.get(Project, o.project_id) if o.project_id else None
+    if pr is not None and pr.tenant_id == o.tenant_id:
+        from ..services import project_stock
+        from ..services.reservations import consume_for_order
+
+        o.stock_applied = True
+        ids = [m.product_id for m in o.materials]
+        n = len(project_stock.reconcile(db, pr, ids, p.user.id, reason=f"orden {o.number}", warehouse_id=wh, reference=o.number))
+        consume_for_order(db, o)
+        return n
     n = 0
     for m in o.materials:
         if not m.product_id or d(m.quantity) <= 0 or not wh:
             continue
-        invsvc.move(db, o.tenant_id, p.user.id, m.product_id, wh, "salida", -d(m.quantity), reference=o.number, note=f"Orden {o.number}")
+        invsvc.move(
+            db, o.tenant_id, p.user.id, m.product_id, wh, "salida", -d(m.quantity), reference=o.number, note=f"Orden {o.number}", movement_type="consumo_orden"
+        )
         n += 1
     o.stock_applied = True
     # reservas formales del proyecto: lo usado las consume (no cambia el descuento de arriba)

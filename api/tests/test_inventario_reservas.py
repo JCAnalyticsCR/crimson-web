@@ -79,7 +79,7 @@ def test_movimiento_enriquecido_y_el_de_siempre(client, auth):
         },
     )
     assert r.status_code == 201, r.text
-    rows = client.get("/stock/movements", params={"product_id": prod["id"]}).json()
+    rows = client.get("/stock/movements", params={"product_id": prod["id"]}).json()["items"]
     assert rows[0]["movement_type"] == "consumo_proyecto" and rows[0]["project_id"] == pr["id"] and rows[0]["serial"] == "SN-001"
     assert rows[0]["custodian"] == "Técnico Juan" and rows[0]["location"] == "Estante A3" and Decimal(str(rows[0]["transfer_price"])) == Decimal("55.5")
     assert rows[1]["movement_type"] is None and rows[1]["owner"] is None  # el viejo queda igual

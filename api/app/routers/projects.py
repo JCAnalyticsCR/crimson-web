@@ -685,6 +685,9 @@ def purchase_status(rid: int, data: ReqStatusIn, p: Principal = Depends(require(
     r = db.get(PurchaseRequest, rid)
     if not r or r.tenant_id != p.tenant.id:
         raise HTTPException(404, "Solicitud no encontrada")
+    if r.status == "recibida" and data.status != "recibida":
+        # la entrada ya esta en el kardex: cambiarla de estado y volver a recibirla la sumaba otra vez
+        raise HTTPException(409, "La compra ya se recibió y su mercadería entró a bodega. Para devolverla registrá una salida por devolución en Inventarios.")
     if data.status == "recibida" and r.status != "recibida":
         wh = data.warehouse_id or (invsvc.default_warehouse(db, p.tenant.id).id if invsvc.default_warehouse(db, p.tenant.id) else None)
         if not wh:
@@ -792,6 +795,7 @@ def asset_create(data: AssetIn, p: Principal = Depends(require("assets", "crear"
     a = CustomerAsset(tenant_id=p.tenant.id, **data.model_dump())
     db.add(a)
     db.flush()
+    _asset_stock(db, p, a.project_id, a.product_id, "equipo registrado como instalado")
     audit(db, p.tenant.id, p.user.id, "create", "asset", a.id, ip=p.ip)
     db.commit()
     return _asset_out(db, a)
@@ -803,10 +807,25 @@ def asset_update(aid: int, data: AssetIn, p: Principal = Depends(require("assets
     if not a or a.tenant_id != p.tenant.id:
         raise HTTPException(404, "Activo no encontrado")
     check_refs(db, p.tenant.id, data.model_dump(), ASSET_REFS, current=a)
+    antes = (a.project_id, a.product_id)
     for k, v in data.model_dump().items():
         setattr(a, k, v)
+    db.flush()
+    _asset_stock(db, p, antes[0], antes[1], "equipo instalado corregido")
+    _asset_stock(db, p, a.project_id, a.product_id, "equipo instalado corregido")
     db.commit()
     return _asset_out(db, a)
+
+
+def _asset_stock(db: Session, p: Principal, project_id: int | None, product_id: int | None, reason: str) -> None:
+    """Un equipo instalado en un proyecto salio de bodega: el kardex del proyecto se concilia (nunca dos veces)."""
+    if not project_id or not product_id:
+        return
+    pr = db.get(Project, project_id)
+    if pr and pr.tenant_id == p.tenant.id:
+        from ..services import project_stock
+
+        project_stock.reconcile(db, pr, [product_id], p.user.id, reason=reason)
 
 
 # ---------- Informe de entrega ----------
@@ -877,11 +896,13 @@ def project_invoice(pid: int, p: Principal = Depends(require("sales", "crear")),
 
     ya_convertida = q.status == "convertida"
     inv = db.get(Invoice, q.converted_invoice_id) if ya_convertida else svc.convert_quote(db, p.tenant.id, p.user.id, q)
-    # Si las ordenes ya sacaron el material de bodega, la factura no vuelve a descontarlo: seria contarlo dos veces.
-    if not ya_convertida and not any(o.stock_applied for o in pr.orders):
-        invsvc.deduct_for_invoice(db, inv, p.user.id)
     antes = pr.status
     pr.invoice_id, pr.status = inv.id, "facturado"
+    # el material sale UNA vez: lo que las ordenes ya sacaron no vuelve a salir y lo que ninguna orden saco sale ahora
+    # (antes, con alguna orden aplicada la factura no descontaba nada, y una cotizacion ya convertida descontaba doble)
+    from ..services import project_stock
+
+    project_stock.reconcile_all(db, pr, p.user.id, reason="proyecto facturado", invoice=inv)
     from ..services import commissions as comsvc
 
     comsvc.link_to_project(db, pr)

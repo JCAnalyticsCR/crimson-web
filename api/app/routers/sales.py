@@ -674,6 +674,8 @@ def update_invoice(iid: int, data: DocumentIn, p: Principal = Depends(require("s
 @router.post("/invoices/{iid}/void", response_model=InvoiceOut)
 def void_invoice(iid: int, p: Principal = Depends(require("sales", "anular")), db: Session = Depends(get_db)):
     inv = _own(db, Invoice, iid, p.tenant.id, p)
+    if inv.status == "anulada":  # anular dos veces devolvia el inventario dos veces
+        raise HTTPException(409, "La factura ya está anulada")
     if inv.einvoice_status == "aceptada":
         raise HTTPException(409, "Factura aceptada por Hacienda: se anula emitiendo Nota de Credito (Fase 2)")
     from ..models import EInvoiceDocument

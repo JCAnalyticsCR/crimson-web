@@ -105,7 +105,14 @@ def transfer(db: Session, tenant_id: int, user_id: int | None, product_id: int, 
 
 
 def deduct_for_invoice(db: Session, inv: Invoice, user_id: int | None) -> int:
-    """Descuenta cada linea de producto del inventario predeterminado. Sin inventario configurado: no hace nada."""
+    """Descuenta cada linea de producto del inventario predeterminado. Sin inventario configurado: no hace nada.
+    Factura de un PROYECTO: no descuenta a ciegas, concilia (lo que las ordenes ya sacaron no vuelve a salir)."""
+    from . import project_stock
+
+    pr = project_stock.project_for_invoice(db, inv)
+    if pr is not None:
+        ids = {ln.product_id for ln in inv.lines if ln.product_id}
+        return len(project_stock.reconcile(db, pr, ids, user_id, reason="factura", invoice=inv))
     w = default_warehouse(db, inv.tenant_id)
     if not w:
         return 0
@@ -121,10 +128,27 @@ def deduct_for_invoice(db: Session, inv: Invoice, user_id: int | None) -> int:
 
 
 def restock_for_void(db: Session, inv: Invoice, user_id: int | None) -> int:
-    rows = db.scalars(select(StockMovement).where(StockMovement.invoice_id == inv.id, StockMovement.kind == "venta")).all()
-    for r in rows:
-        move(db, inv.tenant_id, user_id, r.product_id, r.warehouse_id, "devolucion", -Decimal(str(r.quantity)), inv.number, "anulacion", None, inv.id)
-    return len(rows)
+    """Devuelve a bodega lo que la factura saco y todavia no volvio. Idempotente: anular dos veces (o la NC de Hacienda
+    despues de una anulacion) no devuelve dos veces. Factura de un proyecto: concilia, porque lo ya INSTALADO esta en
+    el cliente y no vuelve a bodega aunque se anule la factura."""
+    from . import project_stock
+
+    pr = project_stock.project_for_invoice(db, inv)
+    if pr is not None:
+        ids = {ln.product_id for ln in inv.lines if ln.product_id}
+        return len(project_stock.reconcile(db, pr, ids, user_id, reason="factura anulada", invoice=inv))
+    net = db.execute(
+        select(StockMovement.product_id, StockMovement.warehouse_id, func.sum(StockMovement.quantity))
+        .where(StockMovement.tenant_id == inv.tenant_id, StockMovement.invoice_id == inv.id)
+        .group_by(StockMovement.product_id, StockMovement.warehouse_id)
+    ).all()
+    n = 0
+    for product_id, warehouse_id, qty in net:
+        q = Decimal(str(qty or 0))
+        if q < 0:
+            move(db, inv.tenant_id, user_id, product_id, warehouse_id, "devolucion", -q, inv.number, "anulacion", None, inv.id)
+            n += 1
+    return n
 
 
 def low_stock(db: Session, tenant_id: int) -> list[dict]:

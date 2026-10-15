@@ -1,0 +1,13 @@
+/* Inventarios -> Movimientos (kardex): filtros, chips de resumen, tabla y paginación. */
+.kdx-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.kdx-filters .lookup { flex: 1 1 200px; max-width: 260px; }
+
+.kdx-chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.kdx-chip { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: var(--bg-2); color: var(--text-2); font-family: var(--mono); }
+.kdx-chip--ok { background: var(--ok-soft); color: var(--ok); }
+.kdx-chip--bad { background: var(--bad-soft); color: var(--bad); }
+
+.kdx-table { min-width: 800px; }
+.kdx-note { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.kdx-pager { display: flex; gap: 10px; align-items: center; justify-content: flex-end; }
