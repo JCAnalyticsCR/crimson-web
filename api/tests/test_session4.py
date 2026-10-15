@@ -288,7 +288,12 @@ def test_inbox_imap_imports_xml(client, auth, db_session):
     assert client.put(
         "/settings/inbox", json={"enabled": True, "host": "imap.ejemplo.com", "user": "facturas@ejemplo.com", "password": "clave-app-123"}
     ).json()["has_password"]
-    fake = FakeImapUid([msg.as_bytes(), resp.as_bytes(), msg.as_bytes()], password="clave-app-123")
+    # el tercero trae el mismo XML en otro correo (reenvio): mismos bytes del correo se saltarian por sha256 (§6.4 paso 4)
+    reenvio = MIMEMultipart()
+    reenvio["Subject"] = "RV: Factura electronica"
+    reenvio.attach(MIMEApplication(xml.encode(), Name="factura.xml", _subtype="xml"))
+    reenvio.get_payload()[0]["Content-Disposition"] = 'attachment; filename="factura.xml"'
+    fake = FakeImapUid([msg.as_bytes(), resp.as_bytes(), reenvio.as_bytes()], password="clave-app-123")
     t = db_session.get(Tenant, auth["tenant"]["id"])
     res = poll(db_session, t, connect=lambda: fake)
     # nunca se marca nada en el servidor (antes: store \Seen uno por uno); cada correo queda registrado
