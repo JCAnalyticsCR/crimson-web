@@ -179,7 +179,9 @@ def test_mismo_pago_vendedor_y_aliado(client, auth, db_session):
     o = client.post("/opportunities", json={"title": "Red oficina", "customer_id": _cust(client)["id"], "owner_id": vid, "amount": 1000000}).json()
     assert client.post(f"/opportunities/{o['id']}/allies", json={"ally_company_id": ally, "role": "subcontratista"}).status_code == 201
     q = client.post(f"/opportunities/{o['id']}/quote", json={}).json()
-    client.put(f"/quotes/{q['quote_id']}", json={"customer_id": _cust(client)["id"], "lines": [{"name": "Red", "quantity": 1, "unit_price": 1000000, "tax_rate": 13}]})
+    client.put(
+        f"/quotes/{q['quote_id']}", json={"customer_id": _cust(client)["id"], "lines": [{"name": "Red", "quantity": 1, "unit_price": 1000000, "tax_rate": 13}]}
+    )
     inv = client.post(f"/quotes/{q['quote_id']}/convert").json()
     _pay(client, inv["id"], 565000)
     filas = _rows(client)
@@ -247,7 +249,15 @@ def test_utilidad_sin_costo_queda_en_espera(client, auth, db_session):
     prod = client.post("/products", json={"name": "Cámara domo prueba", "code": "CAM-UT", "price": 0}).json()
     lines = [
         {"product_id": prod["id"], "name": "Cámara domo prueba", "quantity": 1, "unit_price": 100000, "tax_rate": 13},
-        {"product_id": prod["id"], "name": "Cámara del cliente", "quantity": 5, "unit_price": 0, "tax_rate": 13, "treatment": "aportado", "supplied_by": "Cliente"},
+        {
+            "product_id": prod["id"],
+            "name": "Cámara del cliente",
+            "quantity": 5,
+            "unit_price": 0,
+            "tax_rate": 13,
+            "treatment": "aportado",
+            "supplied_by": "Cliente",
+        },
     ]
     inv = _inv(client, lines=lines, seller_id=vid)
     _pay(client, inv["id"], inv["total"])
@@ -361,7 +371,10 @@ def test_validaciones_de_regla(client, auth, db_session):
     assert client.post("/commissions/rules", json={"beneficiary": "aliado", "kind": "bono_anticipo", "fixed_amount": 1000, "name": "x"}).status_code == 422
     assert client.post("/commissions/rules", json={"name": "Cero", "percent": 0}).status_code == 422
     assert client.post("/commissions/rules", json={"name": "Ambos", "percent": 5, "fixed_amount": 1000}).status_code == 422
-    assert client.post("/commissions/rules", json={"name": "Fechas", "percent": 5, "valid_from": str(HOY), "valid_to": str(HOY - timedelta(days=1))}).status_code == 422
+    assert (
+        client.post("/commissions/rules", json={"name": "Fechas", "percent": 5, "valid_from": str(HOY), "valid_to": str(HOY - timedelta(days=1))}).status_code
+        == 422
+    )
     cli = client.post("/customers", json={"name": "Cliente Demo"}).json()
     from app.core.security import hash_password
     from app.models import TenantUser, User

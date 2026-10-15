@@ -29,7 +29,10 @@ def _negocio(client, ally_id: int, venta=200000, precio=100000, titulo="Cámaras
     ).json()
     rid = next(x for x in lst if x["id"] == aid)["requests"][0]["id"]
     q = client.post(f"/opportunities/{o['id']}/quote", json={}).json()
-    r = client.put(f"/quotes/{q['quote_id']}", json={"customer_id": _cust(client)["id"], "lines": [{"name": "Instalación", "quantity": 1, "unit_price": venta, "tax_rate": 13}]})
+    r = client.put(
+        f"/quotes/{q['quote_id']}",
+        json={"customer_id": _cust(client)["id"], "lines": [{"name": "Instalación", "quantity": 1, "unit_price": venta, "tax_rate": 13}]},
+    )
     assert r.status_code == 200, r.text
     pr = client.post(f"/quotes/{q['quote_id']}/project", json={})
     assert pr.status_code == 201, pr.text
@@ -184,7 +187,9 @@ def test_mis_numeros_por_aliado(client, auth, db_session):
     assert D(str(fila["venta_proyectos"])) == D("200000.00") and D(str(fila["utilidad_crimson"])) == D("40000.00")  # 200 000 - 100 000 - 60 000
     mes = next(m for m in num["meses"] if m["mes"] == HOY.strftime("%Y-%m"))
     assert mes["proyectos_cerrados"] >= 1 and D(str(mes["pagos_aliados"])) == D("100000.00")
-    assert D(str(mes["utilidad_despues_comisiones"])) == D(str(mes["utilidad_bruta"])) - D(str(mes["comisiones_vendedores"])) - D(str(mes["comisiones_aliados"]))
+    assert D(str(mes["utilidad_despues_comisiones"])) == D(str(mes["utilidad_bruta"])) - D(str(mes["comisiones_vendedores"])) - D(
+        str(mes["comisiones_aliados"])
+    )
     vh = interno(client, db_session, auth["tenant"]["id"], "vendedora@ejemplo.com", "ventas")
     assert client.get("/commissions/numbers", headers=vh).status_code == 403
     ch = interno(client, db_session, auth["tenant"]["id"], "contadora@ejemplo.com", "contabilidad")
