@@ -353,11 +353,25 @@ def test_mensaje_receptor_de_un_cliente(client, auth, db_session, monkeypatch):
     inv = client.post("/invoices", json={"customer_id": cust["id"], "lines": [{"product_id": prods[0]["id"], "quantity": 1}]}).json()
     em = client.post(f"/invoices/{inv['id']}/emit").json()
     antes = db_session.query(EmailOutbox).count()
-    r = up(client, mensaje_receptor(em["clave"], emisor=EMPRESA, receptor="3101123456", mensaje="3", detalle="No corresponde al pedido"), name="mr.xml")
-    assert r.status_code == 200 and r.json()["adjuntos"][0]["kind"] == "respuesta_cliente"
+    receptor = "".join(ch for ch in cust["id_number"] if ch.isdigit())  # la cedula del cliente de la factura
+    # un tercero que conoce la clave (la cedula de la empresa es publica) no puede "rechazar" la factura en nombre del cliente
+    r = up(client, mensaje_receptor(em["clave"], emisor=EMPRESA, receptor="3101999999", mensaje="3", detalle="Rechazo falso"), name="mr.xml")
+    assert r.status_code == 422 and "cliente" in r.json()["detail"]
     doc = db_session.query(EInvoiceDocument).filter(EInvoiceDocument.clave == em["clave"]).one()
-    assert doc.receiver_message == "3" and doc.receiver_detail == "No corresponde al pedido"
-    assert db_session.query(EmailOutbox).count() > antes  # alerta: hay que emitir la NC
+    assert doc.receiver_message is None and db_session.query(EmailOutbox).count() == antes
+    detalle = 'No corresponde <a href="https://phish.example">aqui</a>'
+    r = up(client, mensaje_receptor(em["clave"], emisor=EMPRESA, receptor=receptor, mensaje="3", detalle=detalle.replace("<", "&lt;")), name="mr.xml")
+    assert r.status_code == 200 and r.json()["adjuntos"][0]["kind"] == "respuesta_cliente"
+    db_session.refresh(doc)
+    assert doc.receiver_message == "3" and doc.receiver_detail == detalle
+    alertas = db_session.query(EmailOutbox).order_by(EmailOutbox.id).all()[antes:]
+    assert alertas  # alerta: hay que emitir la NC
+    assert all("<a href" not in m.html and "firma no verificada" in m.html for m in alertas)  # escapado y rotulado
+    # el primero no se sobrescribe: un segundo mensaje (aceptacion) queda en la bitacora, no en la factura
+    r = up(client, mensaje_receptor(em["clave"], emisor=EMPRESA, receptor=receptor, mensaje="1"), name="mr2.xml")
+    assert r.status_code == 422 and "se conserva el primero" in r.json()["detail"]
+    db_session.refresh(doc)
+    assert doc.receiver_message == "3"
     xs = client.get(f"/invoices/{inv['id']}/xml").json()
     assert xs[0]["receiver_message"] == "3"
 

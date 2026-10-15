@@ -11,7 +11,7 @@ import "./doc-list.css";
 const PENDIENTES: Record<string, string> = {
   facturas_vencidas: "Facturas vencidas (sin pagar y con la fecha de vencimiento pasada)",
   facturas_por_cobrar: "Facturas por cobrar (creadas o con pago parcial)",
-  documentos_rechazados: "Facturas rechazadas por Hacienda",
+  documentos_rechazados: "Facturas rechazadas o con error en Hacienda",
   enlaces_abiertos: "Facturas con un enlace de pago abierto (vigente y sin pagar)",
   cotizaciones_sin_respuesta: "Cotizaciones sin respuesta (creadas o enviadas, sin convertir)",
   cotizaciones_por_aprobar: "Cotizaciones con descuento por aprobar",

@@ -169,6 +169,23 @@ def create_expense_from_document(
     return e
 
 
+def amounts_from_response(doc: ReceivedDocument) -> dict:
+    """Montos del gasto segun la respuesta ya guardada (vincular despues, "Registrar gasto", historico de Fygaro).
+    Parcial: el monto e IVA aceptados que se guardaron al responder; en el historico, credito + gasto aplicable del
+    mensaje de Fygaro. Si no hay ninguno (parcial con 05 sin montos) -> 409: nunca se escribe un gasto en cero."""
+    cond = doc.iva_condition or "credito"
+    credit = d(doc.credit_amount) if doc.credit_amount is not None else None
+    if doc.action == "parcial":
+        if doc.accepted_total is not None:
+            total, tax = d(doc.accepted_total), d(doc.accepted_tax)
+        elif doc.applicable_amount is not None:
+            total, tax = d(doc.applicable_amount) + (credit or 0), credit or Decimal(0)
+        else:
+            raise HTTPException(409, "No se conoce el monto aceptado de esta aceptación parcial: registre el gasto a mano")
+        return expense_amounts(doc, "parcial", cond, credit, total, tax)
+    return expense_amounts(doc, "aceptada", cond, credit if credit is not None else (iva_of(doc) if cond == "credito" else None))
+
+
 def _update_linked_expense(db: Session, p: Principal, doc: ReceivedDocument, amounts: dict, action: str) -> None:
     e = db.get(Expense, doc.expense_id) if doc.expense_id else None
     if not e:
@@ -178,6 +195,9 @@ def _update_linked_expense(db: Session, p: Principal, doc: ReceivedDocument, amo
         setattr(e, k, v)
     if action == "rechazada":
         e.status = "anulado"
+    elif e.status == "anulado" and doc.action == "rechazada":
+        # lo anulo el rechazo anterior (doc.action todavia es la respuesta previa): la nueva lo acepta y vuelve a contar
+        e.status = "registrado"
     audit_change(db, p, "update", "expense", e.id, antes, snapshot(e), reason=f"Nueva respuesta al comprobante {doc.clave}: {action}")
 
 
@@ -225,6 +245,8 @@ def expense_candidates(db: Session, doc: ReceivedDocument) -> list[dict]:
         if total and abs(abs(d(e.total)) - total) > total * Decimal("0.02"):
             continue
         sup = db.get(Supplier, e.supplier_id) if e.supplier_id else None
+        if sup is not None and sup.tenant_id != doc.tenant_id:
+            sup = None  # un proveedor de otra empresa nunca se muestra
         if sup and not xml44.same_id(sup.tax_id, doc.issuer_id):
             continue
         out.append(
@@ -349,6 +371,14 @@ def respond(db: Session, p: Principal, rid: int, data: RespondIn) -> tuple[Recei
     except IntegrityError as e:
         sp.rollback()
         db.rollback()  # tambien se devuelve el consecutivo: no se gastan dos
+        same = (ReceptionResponse.tenant_id == tenant.id, ReceptionResponse.mode == mode, ReceptionResponse.consecutive == consecutive)
+        if db.scalar(select(ReceptionResponse.id).where(*same)):
+            # no es un doble clic: la numeracion choca con un mensaje que ya existe (p. ej. el historico de Fygaro)
+            raise HTTPException(
+                409,
+                f"El consecutivo {consecutive} ya lo tiene otro mensaje receptor (¿histórico de Fygaro?): "
+                "ajuste el consecutivo en Ajustes → Hacienda → Consecutivos",
+            ) from e
         raise HTTPException(409, "Ya fue respondido (otra persona lo respondió al mismo tiempo)") from e
     # gasto
     amounts = expense_amounts(doc, data.action, cond, calc.credit, data.accepted_total, data.accepted_tax) if data.action != "rechazada" else None
@@ -369,6 +399,9 @@ def respond(db: Session, p: Principal, rid: int, data: RespondIn) -> tuple[Recei
     doc.activity_code = activity
     doc.credit_amount = calc.credit
     doc.applicable_amount = calc.applicable
+    # parcial: se guarda lo aceptado (con 05 no hay credito ni gasto aplicable de donde reconstruirlo despues)
+    doc.accepted_total = data.accepted_total if data.action == "parcial" else None
+    doc.accepted_tax = data.accepted_tax if data.action == "parcial" else None
     doc.response_detail = data.detail
     doc.action = data.action
     doc.status = "respondido"
@@ -406,13 +439,7 @@ def expense_for_document(db: Session, p: Principal, doc: ReceivedDocument, categ
         amounts["iva_credit"] = "no_credito"
         amounts["tax_credit_amount"] = Decimal(0)
     elif doc.status in ("respondido", "historico") and doc.action in ("aceptada", "parcial"):
-        cond = doc.iva_condition or "credito"
-        credit = d(doc.credit_amount) if doc.credit_amount is not None else None
-        if doc.action == "parcial":
-            base = d(doc.applicable_amount) + (credit or 0)
-            amounts = expense_amounts(doc, "parcial", cond, credit, base, credit or 0)
-        else:
-            amounts = expense_amounts(doc, "aceptada", cond, credit if credit is not None else (iva_of(doc) if cond == "credito" else None))
+        amounts = amounts_from_response(doc)
     else:
         raise HTTPException(409, "Solo se registra gasto de un tiquete o de un comprobante aceptado")
     e = create_expense_from_document(db, p.tenant.id, doc, p.user.id, category_id, amounts, ip=p.ip)
@@ -427,20 +454,34 @@ def retry(db: Session, p: Principal, doc: ReceivedDocument) -> None:
     audit(db, p.tenant.id, p.user.id, "reception_retry", "received_document", doc.id, {"intento_anterior": last.attempt, "estado": last.status}, ip=p.ip)
 
 
+def legacy_simulated(doc: ReceivedDocument, rs: list[ReceptionResponse]) -> bool:
+    """Respondido antes de la migracion: sin filas en reception_response, su mensaje heredado vive en xml_response y
+    el relleno lo dejo en hacienda_status=simulado (nunca se envio a Hacienda)."""
+    return doc.status == "respondido" and not rs and doc.hacienda_status == "simulado"
+
+
+def reopen_blocker(db: Session, tenant: Tenant, doc: ReceivedDocument, rs: list[ReceptionResponse] | None = None) -> str | None:
+    """Motivo por el que NO se puede reabrir para produccion (None = se puede)."""
+    if hc.reception_mode(db, tenant) != "produccion":
+        return "Reabrir es solo para pasar a producción lo que se probó antes del cambio"
+    if doc.status == "historico" or doc.origin == "historico":
+        return "Es un comprobante histórico de Fygaro: no se reabre"
+    if overdue(doc):
+        return "El plazo para responder ya venció"
+    rs = responses(db, doc) if rs is None else rs
+    if any(r.mode == "produccion" or r.status == "historico" for r in rs):
+        return "Ya tiene un mensaje de producción o histórico"
+    if doc.status != "respondido" or not (rs or legacy_simulated(doc, rs)):
+        return "Solo se reabre un comprobante respondido en simulado o pruebas"
+    return None
+
+
 def reopen(db: Session, p: Principal, doc: ReceivedDocument, confirm: bool) -> None:
     if not confirm:
         raise HTTPException(422, "Confirme que este comprobante NO se respondió en Fygaro")
-    if hc.reception_mode(db, p.tenant) != "produccion":
-        raise HTTPException(409, "Reabrir es solo para pasar a producción lo que se probó antes del cambio")
-    if doc.status == "historico" or doc.origin == "historico":
-        raise HTTPException(409, "Es un comprobante histórico de Fygaro: no se reabre")
-    if overdue(doc):
-        raise HTTPException(409, "El plazo para responder ya venció")
-    rs = responses(db, doc)
-    if any(r.mode == "produccion" or r.status == "historico" for r in rs):
-        raise HTTPException(409, "Ya tiene un mensaje de producción o histórico")
-    if doc.status != "respondido" or not rs:
-        raise HTTPException(409, "Solo se reabre un comprobante respondido en simulado o pruebas")
+    why = reopen_blocker(db, p.tenant, doc)
+    if why:
+        raise HTTPException(409, why)
     doc.status = "por_revisar"
     audit(db, p.tenant.id, p.user.id, "reception_reopen", "received_document", doc.id, {"confirmo_no_en_fygaro": True}, ip=p.ip)
 

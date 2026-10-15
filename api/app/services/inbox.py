@@ -372,12 +372,11 @@ def poll(db: Session, t: Tenant, connect=None) -> dict:
                 continue
             raw = _body(_ok(client.uid("FETCH", str(uid), "(BODY.PEEK[])"))) or b""
             sha = hashlib.sha256(raw).hexdigest()
-            seen = db.scalar(
-                select(ReceptionMessage.id).where(
-                    ReceptionMessage.tenant_id == t.id, ReceptionMessage.sha256 == sha, ReceptionMessage.mailbox_id == mbox_id, ReceptionMessage.uidvalidity != mbox.uidvalidity
-                )
-            )
-            if seen:  # UIDVALIDITY nueva: el mismo correo ya se proceso con la numeracion anterior
+            # §6.4 paso 4: el mismo correo (mismo sha256) ya registrado en CUALQUIER buzon de la empresa -> solo avanzar.
+            # Cubre la UIDVALIDITY nueva y el paso del buzon de Ajustes a variables de entorno (otra fila de
+            # reception_mailbox con last_uid = 0 que vuelve a bajar los ultimos N dias).
+            seen = db.scalar(select(ReceptionMessage.id).where(ReceptionMessage.tenant_id == t.id, ReceptionMessage.sha256 == sha).limit(1))
+            if seen:
                 mbox.last_uid = uid
                 db.commit()
                 continue

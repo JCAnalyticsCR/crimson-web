@@ -151,14 +151,7 @@ def detail(db: Session, p: Principal, doc: ReceivedDocument, extra_warnings: lis
     msg = db.get(ReceptionMessage, doc.message_id) if doc.message_id else None
     mode = hc.reception_mode(db, p.tenant)
     last = rs[-1] if rs else None
-    can_reopen = (
-        mode == "produccion"
-        and doc.status == "respondido"
-        and doc.origin != "historico"
-        and bool(rs)
-        and not any(r.mode == "produccion" or r.status == "historico" for r in rs)
-        and not rsvc.overdue(doc)
-    )
+    can_reopen = rsvc.reopen_blocker(db, p.tenant, doc, rs) is None
     out.update(
         {
             "lines": lines,
@@ -177,7 +170,9 @@ def detail(db: Session, p: Principal, doc: ReceivedDocument, extra_warnings: lis
             "can_refresh": bool(last and last.status in ("enviado", "procesando", "enviando")),
             "can_expense": not doc.expense_id and (doc.doc_type == "TE" or (doc.status in ("respondido", "historico") and doc.action in ("aceptada", "parcial")) or (doc.status == "ajeno" and not doc.receiver_id)),
             "warnings": list(dict.fromkeys(warnings)),
-            "expense_candidates": rsvc.expense_candidates(db, doc) if doc.status == "por_revisar" or (doc.status == "respondido" and not doc.expense_id) else [],
+            "expense_candidates": rsvc.expense_candidates(db, doc)
+            if doc.status == "por_revisar" or (doc.status in ("respondido", "historico") and doc.action in ("aceptada", "parcial") and not doc.expense_id)
+            else [],
             "proposal": proposal,
             "supplier_hacienda_detail": doc.supplier_hacienda_detail,
         }
@@ -344,11 +339,22 @@ class AssignPdfIn(BaseModel):
 
 @router.post("/messages/{mid}/assign-pdf")
 def assign_pdf(mid: int, data: AssignPdfIn, p: Principal = Depends(require("accounting", "crear")), db: Session = Depends(get_db)):
+    from ..services import media_access as ma
+
     m = db.get(ReceptionMessage, mid)
     if not m or m.tenant_id != p.tenant.id:
         raise HTTPException(404, "Correo no encontrado")
-    media = db.get(Media, data.media_id)
-    if not media or media.tenant_id != p.tenant.id or media.content_type != "application/pdf":
+    # solo un PDF "sin asignar" de ESTE correo (privado de contabilidad): nunca cualquier Media por id
+    pending = {x.get("media_id") for x in (m.summary or []) if x.get("result") == "sin_asignar"}
+    media = db.get(Media, data.media_id) if data.media_id in pending else None
+    if (
+        not media
+        or media.tenant_id != p.tenant.id
+        or media.content_type != "application/pdf"
+        or media.visibility != "private"
+        or media.module != "accounting"
+        or not ma.can_view(p, media)
+    ):
         raise HTTPException(404, "PDF no encontrado")
     doc = rsvc.get_doc(db, p.tenant.id, data.received_document_id)
     doc.pdf_media_id = media.id
@@ -611,12 +617,7 @@ def link_expense(rid: int, data: LinkExpenseIn, p: Principal = Depends(require("
         raise HTTPException(409, "Solo se vincula un gasto a un comprobante aceptado")
     if doc.expense_id:
         raise HTTPException(409, "El comprobante ya tiene un gasto ligado")
-    credit = _d(doc.credit_amount) if doc.credit_amount is not None else None
-    if doc.action == "parcial":
-        amounts = rsvc.expense_amounts(doc, "parcial", doc.iva_condition, credit, _d(doc.applicable_amount) + (credit or 0), credit or 0)
-    else:
-        amounts = rsvc.expense_amounts(doc, "aceptada", doc.iva_condition, credit)
-    rsvc.link_expense(db, p, doc, data.expense_id, amounts)
+    rsvc.link_expense(db, p, doc, data.expense_id, rsvc.amounts_from_response(doc))
     db.commit()
     return detail(db, p, doc)
 

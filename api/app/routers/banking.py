@@ -461,14 +461,23 @@ def expense_from_line(lid: int, data: ExpenseFromLineIn, p: Principal = Depends(
         cat = db.get(ExpenseCategory, data.category_id)
         if not cat or cat.tenant_id != p.tenant.id:
             raise HTTPException(404, "Categoria no encontrada")
+    from .ops import bccr_sell
+
     total = -d(ln.amount)
     sub = (total / (1 + data.tax_rate / 100)).quantize(Decimal("0.00001"))
+    warnings = []
+    currency = acct.currency or "CRC"
+    fx = bccr_sell(db, currency, ln.date)  # los reportes pasan a colones con expense.fx_rate (CRC = 1)
+    if fx is None:
+        fx = Decimal(1)
+        warnings.append("Sin tipo de cambio del BCCR para esa fecha: se usó 1; corríjalo en el gasto")
     e = Expense(
         tenant_id=p.tenant.id,
         category_id=data.category_id,
         description=(data.description or ln.description)[:300],
         date=ln.date,
-        currency=acct.currency,
+        currency=currency,
+        fx_rate=fx,
         subtotal=sub,
         tax_rate=data.tax_rate,
         tax_amount=total - sub,
@@ -484,7 +493,7 @@ def expense_from_line(lid: int, data: ExpenseFromLineIn, p: Principal = Depends(
     ln.status, ln.matched_type, ln.matched_id, ln.matched_by = "conciliado", "expense", e.id, "manual"
     audit(db, p.tenant.id, p.user.id, "expense_from_line", "bank_line", ln.id, {"expense_id": e.id}, ip=p.ip)
     db.commit()
-    return _line_out(ln, db)
+    return {**_line_out(ln, db), "warnings": warnings}
 
 
 def summary(db: Session, tid: int, a: date, b: date) -> list[list]:

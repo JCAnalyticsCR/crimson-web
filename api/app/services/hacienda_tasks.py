@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, date, datetime, timedelta
+from html import escape
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -52,17 +53,27 @@ def alerts_for(db: Session, t: Tenant, today: date | None = None) -> list[str]:
             out.append(f"Venció ayer el plazo para responder el comprobante de {d.issuer_name or d.issuer_id} ({d.consecutive or d.clave[-10:]})")
         elif 0 <= left <= 2:
             out.append(f"Quedan {left} días hábiles para responder el comprobante de {d.issuer_name or d.issuer_id} ({d.consecutive or d.clave[-10:]})")
-    for r in db.scalars(select(ReceptionResponse).where(ReceptionResponse.tenant_id == t.id, ReceptionResponse.status.in_(("por_enviar", "rechazado", "enviado", "procesando")))):
+    def recent(dt) -> bool:
+        return bool(_aware(dt) and now - _aware(dt) <= timedelta(hours=24))
+
+    watched = ("por_enviar", "rechazado", "enviado", "procesando", "error")
+    for r in db.scalars(select(ReceptionResponse).where(ReceptionResponse.tenant_id == t.id, ReceptionResponse.status.in_(watched))):
         d = db.get(ReceivedDocument, r.received_document_id)
-        if r.status == "por_enviar" and d is not None and (business_days_left(today, d.deadline) or 99) <= 2:
+        left = business_days_left(today, d.deadline) if d is not None else None
+        if r.status == "por_enviar" and left is not None and left <= 2:  # 0 = vence hoy: tambien se avisa
             out.append(f"Mensaje receptor sin enviar con plazo a punto de vencer ({d.issuer_name}): {r.last_error or 'revise las credenciales'}")
-        elif r.status == "rechazado" and _aware(r.resolved_at) and now - _aware(r.resolved_at) <= timedelta(hours=24):
+        elif r.status == "rechazado" and recent(r.resolved_at):
             out.append(f"Hacienda rechazó el mensaje receptor de {d.issuer_name if d else ''}: {r.hacienda_detail or ''}"[:300])
+        elif r.status == "error" and r.mode in ("pruebas", "produccion") and recent(r.resolved_at):
+            # incluye "Sin respuesta de Hacienda en 72 h": la consulta horaria lo pasa a error antes del correo diario
+            out.append(f"Mensaje receptor con error ante Hacienda ({d.issuer_name if d else ''}): {r.last_error or r.hacienda_detail or ''}"[:300])
         elif r.status in ("enviado", "procesando") and _aware(r.sent_at) and now - _aware(r.sent_at) > timedelta(hours=72):
             out.append(f"Mensaje receptor sin respuesta de Hacienda en 72 h ({d.issuer_name if d else ''})")
     for e in db.scalars(select(EInvoiceDocument).where(EInvoiceDocument.tenant_id == t.id, EInvoiceDocument.mode.in_(("pruebas", "produccion")))):
-        if e.status == "rechazada" and _aware(e.resolved_at) and now - _aware(e.resolved_at) <= timedelta(hours=24):
+        if e.status == "rechazada" and recent(e.resolved_at):
             out.append(f"Hacienda rechazó el comprobante {e.doc_type} {e.consecutive}: {e.hacienda_message or ''}"[:300])
+        elif e.status == "error" and recent(e.resolved_at):
+            out.append(f"Comprobante {e.doc_type} {e.consecutive} con error ante Hacienda: {e.last_error or e.hacienda_message or ''}"[:300])
         elif e.status in ("enviado", "procesando") and _aware(e.sent_at) and now - _aware(e.sent_at) > timedelta(hours=72):
             out.append(f"Comprobante {e.doc_type} {e.consecutive} sin respuesta de Hacienda en 72 h")
         if e.receiver_message in ("2", "3"):
@@ -105,7 +116,9 @@ def daily_alerts(db: Session) -> int:
         items = alerts_for(db, t)
         if not items:
             continue
-        html = "<h3>Hacienda y recepción · pendientes</h3><ul>" + "".join(f"<li>{x}</li>" for x in items) + "</ul><p>Entre a Contabilidad → Tributario para el detalle.</p>"
+        # los textos traen datos de XML que manda cualquiera (nombre del emisor, detalles): siempre escapados
+        lis = "".join(f"<li>{escape(x)}</li>" for x in items)
+        html = f"<h3>Hacienda y recepción · pendientes</h3><ul>{lis}</ul><p>Entre a Contabilidad → Tributario para el detalle.</p>"
         seen = set()
         for mbr in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.active, TenantUser.role_code.in_(("admin", "contabilidad")))):
             email = (mbr.user.email or "").lower()

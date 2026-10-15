@@ -430,7 +430,9 @@ class ExpenseIn(BaseModel):
     description: str = Field(min_length=1, max_length=300)
     date: date
     currency: str = Field("CRC", pattern="^[A-Z]{3}$")
-    subtotal: Decimal = Field(ge=0)
+    # sin ge=0 aqui: un gasto de una NC recibida guarda sus montos en negativo y el portal los reenvia al editar la
+    # categoria o el estado. La regla ">= 0" vale para los gastos a mano (_apply_expense); los del XML no se recalculan.
+    subtotal: Decimal
     tax_rate: Decimal = Decimal(13)
     iva_credit: str = Field("credito", pattern=IVA_CONDITIONS)
     bank_account_id: int | None = None
@@ -445,7 +447,7 @@ class ExpenseIn(BaseModel):
     due_date: date | None = None
     bank_instrument_id: int | None = None
     check_number: str | None = Field(None, max_length=20)
-    tax_credit_amount: Decimal | None = Field(None, ge=0)  # vacio = segun la condicion
+    tax_credit_amount: Decimal | None = None  # vacio = segun la condicion (>= 0 en gastos a mano, ver _apply_expense)
 
 
 def expense_origin(e: Expense, bank_ids: set[int] | None = None) -> str:
@@ -475,9 +477,29 @@ def _crc_amount(v, e: Expense) -> Decimal:
     return Decimal(str(v or 0)) * (Decimal(str(e.fx_rate or 1)) if e.currency != "CRC" else Decimal(1))
 
 
+def _own_or_none(db: Session, model, oid: int | None, tenant_id: int):
+    """La fila solo si es de la empresa (nunca el nombre de un proveedor o categoria de otra)."""
+    row = db.get(model, oid) if oid else None
+    return row if row is not None and row.tenant_id == tenant_id else None
+
+
+def _check_refs(db: Session, tenant_id: int, supplier_id: int | None, category_id: int | None, bank_account_id: int | None) -> None:
+    """Proveedor, categoria y cuenta del gasto (o de su plantilla recurrente) tienen que ser de la misma empresa."""
+    from ..models import BankAccount
+
+    refs = (
+        (Supplier, supplier_id, "Proveedor no encontrado"),
+        (ExpenseCategory, category_id, "Categoría no encontrada"),
+        (BankAccount, bank_account_id, "Cuenta no encontrada"),
+    )
+    for model, oid, msg in refs:
+        if oid and _own_or_none(db, model, oid, tenant_id) is None:
+            raise HTTPException(404, msg)
+
+
 def _exp_out(e: Expense, db: Session, bank_ids: set[int] | None = None):
-    cat = db.get(ExpenseCategory, e.category_id) if e.category_id else None
-    sup = db.get(Supplier, e.supplier_id) if e.supplier_id else None
+    cat = _own_or_none(db, ExpenseCategory, e.category_id, e.tenant_id)
+    sup = _own_or_none(db, Supplier, e.supplier_id, e.tenant_id)
     return {
         "id": e.id,
         "category_id": e.category_id,
@@ -596,6 +618,10 @@ def bccr_sell(db: Session, currency: str, on: date) -> Decimal | None:
 
 
 def _apply_expense(e: Expense, data: ExpenseIn, db: Session | None = None) -> list[str]:
+    if data.subtotal < 0:
+        raise HTTPException(422, "El subtotal no puede ser negativo")
+    if data.tax_credit_amount is not None and data.tax_credit_amount < 0:
+        raise HTTPException(422, "El IVA acreditable no puede ser negativo")
     warnings = []
     for k, v in data.model_dump(exclude={"reason", "fx_rate", "tax_credit_amount"}).items():
         setattr(e, k, v)
@@ -640,6 +666,7 @@ def _check_instrument(db: Session, p: Principal, e: Expense) -> None:
 
 @router.post("/expenses", status_code=201)
 def expense_create(data: ExpenseIn, p: Principal = Depends(require("accounting", "crear")), db: Session = Depends(get_db)):
+    _check_refs(db, p.tenant.id, data.supplier_id, data.category_id, data.bank_account_id)
     e = Expense(tenant_id=p.tenant.id, created_by=p.user.id)
     warnings = _apply_expense(e, data, db)
     _check_instrument(db, p, e)
@@ -664,6 +691,7 @@ def expense_update(eid: int, data: ExpenseIn, p: Principal = Depends(require("ac
     e = db.get(Expense, eid)
     if not e or e.tenant_id != p.tenant.id:
         raise HTTPException(404, "Gasto no encontrado")
+    _check_refs(db, p.tenant.id, None if e.received_document_id else data.supplier_id, data.category_id, data.bank_account_id)
     antes = snapshot(e)
     warnings: list[str] = []
     if e.received_document_id:
@@ -693,7 +721,7 @@ def expense_update(eid: int, data: ExpenseIn, p: Principal = Depends(require("ac
 
 def _audit_expense(db: Session, p: Principal, e: Expense, antes: dict, action: str, reason: str | None) -> None:
     """Gasto: antes/despues de los campos que cambiaron; company = el proveedor."""
-    sup = db.get(Supplier, e.supplier_id) if e.supplier_id else None
+    sup = _own_or_none(db, Supplier, e.supplier_id, e.tenant_id)
     version = next_version(db, p.tenant.id, "expense", e.id) if action == "update" else 1
     audit_change(
         db, p, action, "expense", e.id, antes, snapshot(e), reason=reason, version=version, company=sup.name if sup else None, always=action == "create"
@@ -860,7 +888,7 @@ def _next(d: date, f: str, anchor: int | None = None) -> date:
     return date(y, m, min(a, _last_day(y, m)))
 
 
-def _rec_template(data: RecurrenceIn) -> dict:
+def _rec_template(data: RecurrenceIn, db: Session | None = None, tenant_id: int | None = None) -> dict:
     """Valida la plantilla segun el tipo: factura -> DocumentIn, gasto -> ExpenseIn (la fecha se pone al correr).
     Gasto: por defecto sin credito (el hosting en dolares del exterior no trae factura electronica costarricense; si la
     trae, el credito llega al vincular la recepcion al gasto generado)."""
@@ -869,7 +897,12 @@ def _rec_template(data: RecurrenceIn) -> dict:
             raise HTTPException(422, "La recurrencia de factura requiere cliente")
         return DocumentIn(**data.template).model_dump(mode="json")
     tpl = {"iva_credit": "no_credito", "tax_rate": 0, **data.template}
-    return ExpenseIn(**{**tpl, "date": data.next_date}).model_dump(mode="json", exclude={"date"})
+    exp = ExpenseIn(**{**tpl, "date": data.next_date})
+    if exp.subtotal < 0 or (exp.tax_credit_amount is not None and exp.tax_credit_amount < 0):
+        raise HTTPException(422, "La plantilla del gasto no puede tener montos negativos")
+    if db is not None and tenant_id is not None:
+        _check_refs(db, tenant_id, exp.supplier_id, exp.category_id, exp.bank_account_id)
+    return exp.model_dump(mode="json", exclude={"date"})
 
 
 def _rec_out(r: Recurrence, db: Session):
@@ -912,7 +945,7 @@ def recurrence_create(data: RecurrenceIn, p: Principal = Depends(get_principal),
         name=data.name,
         kind=data.kind,
         customer_id=data.customer_id if data.kind == "factura" else None,
-        template=_rec_template(data),
+        template=_rec_template(data, db, p.tenant.id),
         frequency=data.frequency,
         next_date=data.next_date,
         end_date=data.end_date,
@@ -938,19 +971,33 @@ def recurrence_update(rid: int, data: RecurrenceIn, p: Principal = Depends(get_p
     _rec_guard(p, r.kind, "editar")
     if data.kind != r.kind:
         raise HTTPException(409, "No se puede cambiar el tipo de una recurrencia")
+    r.anchor_day = _anchor_for_update(r, data)  # antes de pisar next_date: compara con la fecha guardada
     r.name, r.customer_id, r.template, r.frequency, r.next_date, r.end_date, r.auto_send, r.active = (
         data.name,
         data.customer_id if r.kind == "factura" else None,
-        _rec_template(data),
+        _rec_template(data, db, p.tenant.id),
         data.frequency,
         data.next_date,
         data.end_date,
         data.auto_send,
         data.active,
     )
-    r.anchor_day = data.anchor_day or r.anchor_day or data.next_date.day
     db.commit()
     return _rec_out(r, db)
+
+
+def _anchor_for_update(r: Recurrence, data: RecurrenceIn) -> int:
+    """Dia ancla al editar. Un ancla distinta a la guardada manda. Si solo cambio la proxima fecha (el portal reenvia el
+    ancla vieja o la deja vacia), el ancla pasa a ser el dia de la fecha nueva, salvo que la fecha nueva sea justo el
+    ancla recortada al fin de ese mes (31 -> 28 de febrero): ahi el 31 se conserva."""
+    if data.anchor_day is not None and data.anchor_day != r.anchor_day:
+        return data.anchor_day
+    if data.next_date != r.next_date:
+        old = r.anchor_day or r.next_date.day
+        if min(old, _last_day(data.next_date.year, data.next_date.month)) != data.next_date.day:
+            return data.next_date.day
+        return old
+    return data.anchor_day or r.anchor_day or data.next_date.day
 
 
 def _advance(r: Recurrence) -> None:

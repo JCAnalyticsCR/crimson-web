@@ -114,6 +114,7 @@ def _fail(r, msg: str) -> None:
     r.status = "error"
     r.last_error = (msg or "")[:300]
     r.claimed_at = None
+    r.resolved_at = now()  # estado final: la alerta diaria toma los errores de las ultimas 24 h
 
 
 def send_response(db: Session, response_id: int) -> str | None:
@@ -283,7 +284,10 @@ def _copy_invoice_status(db: Session, doc: EInvoiceDocument, *, user_id: int | N
     elif doc.status == "rechazada":
         inv.einvoice_status = "rechazada"
     elif doc.status == "error":
-        inv.einvoice_status = "sin_emitir" if (doc.attempts or 0) == 0 else "rechazada"
+        # §6.5.4 paso 5: sin ningun POST nunca salio -> sin_emitir. Con POST (403, "no encuentra el documento", 72 h sin
+        # respuesta...) Hacienda NO lo rechazo y pudo haberlo aceptado: "error" (sigue en el IVA debito; reemitir es una
+        # decision de quien revisa, no algo automatico). "rechazada" queda solo para el rechazo real de Hacienda.
+        inv.einvoice_status = "sin_emitir" if (doc.attempts or 0) == 0 else "error"
 
 
 def _void_after_nc(db: Session, inv: Invoice, doc: EInvoiceDocument, user_id: int | None) -> None:
@@ -415,9 +419,11 @@ def _deliver_safe(db: Session, doc_id: int, stage: str) -> None:
 
 
 def _alert_admins(db: Session, tenant: Tenant, subject: str, text: str) -> None:
+    from html import escape
+
     from .mail import notify_roles
 
-    notify_roles(db, tenant, ("admin",), subject, f"<p>{text}</p>", "hacienda", 0)
+    notify_roles(db, tenant, ("admin",), subject, f"<p>{escape(text)}</p>", "hacienda", 0)
 
 
 # ================================================================ lotes del worker

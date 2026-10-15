@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..models import EInvoiceDocument, Invoice, ReceivedDocument, ReceptionMessage, Tenant
+from ..models import Customer, EInvoiceDocument, Invoice, ReceivedDocument, ReceptionMessage, Tenant
 from ..providers.hacienda import xml44
 from .documents import audit
 from .reception_calc import deadline
@@ -209,34 +209,71 @@ def apply_supplier_response(db: Session, doc: ReceivedDocument, root, raw_text: 
     return True
 
 
-def apply_client_receptor_message(db: Session, tenant: Tenant, root, raw_text: str) -> EInvoiceDocument | None:
+def _our_receiver(db: Session, doc: EInvoiceDocument) -> str | None:
+    """Cedula del receptor de NUESTRO comprobante: la del XML firmado; si no hay, la del cliente de la factura."""
+    if doc.xml_document:
+        try:
+            n = xml44.text(xml44.parse_xml_bytes(doc.xml_document.encode("utf-8")), "Receptor", "Identificacion", "Numero")
+            if n:
+                return n
+        except Exception:  # noqa: BLE001 - XML propio ilegible: se usa el cliente
+            pass
+    inv = db.get(Invoice, doc.invoice_id)
+    c = db.get(Customer, inv.customer_id) if inv and inv.customer_id else None
+    return c.id_number if c and c.id_number else None
+
+
+def apply_client_receptor_message(db: Session, tenant: Tenant, root, raw_text: str) -> tuple[EInvoiceDocument | None, str | None]:
     """Mensaje receptor de NUESTRO cliente sobre un comprobante emitido por la empresa (Res. 0027-2024 art. 10): se liga
-    a la factura y, con aceptacion parcial o rechazo, alerta para emitir la nota de credito."""
+    a la factura y, con aceptacion parcial o rechazo, alerta para emitir la nota de credito.
+
+    Llega por correo sin autenticar y la firma no se verifica: solo cuenta si la cedula del receptor es la del cliente
+    de esa factura, y el primero que llega no se sobrescribe (Hacienda solo admite un mensaje por clave). Devuelve
+    (documento, None) o (None, motivo para ignorarlo)."""
+    tercero = "mensaje de aceptación de un tercero"
     mr = xml44.parse_mensaje_receptor(root)
     if not mr["clave"] or not xml44.same_id(mr["issuer_id"], tenant.tax_id):
-        return None
+        return None, tercero
     doc = db.scalar(select(EInvoiceDocument).where(EInvoiceDocument.tenant_id == tenant.id, EInvoiceDocument.clave == mr["clave"]))
     if doc is None:
-        return None
-    doc.receiver_message = (mr["mensaje"] or "")[:1] or None
+        return None, tercero
+    msg = (mr["mensaje"] or "")[:1] or None
+    ours = _our_receiver(db, doc)
+    if not ours or not mr["receiver_id"] or not xml44.same_id(mr["receiver_id"], ours):
+        why = {"clave": doc.clave, "mensaje": msg, "motivo": "la cédula del receptor no es la del cliente"}
+        audit(db, tenant.id, None, "client_receptor_message_ignored", "invoice", doc.invoice_id, why)
+        return None, f"{tercero}: la cédula del receptor no es la del cliente de la factura"
+    if doc.receiver_message:
+        if doc.receiver_message == msg and (doc.receiver_detail or None) == mr["detalle"]:
+            return doc, None  # el mismo mensaje otra vez (reenvio): sin cambios ni alerta
+        audit(
+            db, tenant.id, None, "client_receptor_message_ignored", "invoice", doc.invoice_id,
+            {"clave": doc.clave, "antes": doc.receiver_message, "nuevo": msg, "motivo": "ya había un mensaje del cliente"},
+        )
+        return None, "ya había un mensaje del cliente para esa factura: se conserva el primero"
+    doc.receiver_message = msg
     doc.receiver_detail = mr["detalle"]
     doc.receiver_xml = raw_text
     doc.receiver_at = datetime.now(UTC)
     if doc.receiver_message in ("2", "3"):
         _alert_client_rejection(db, tenant, doc)
-    return doc
+    return doc, None
 
 
 def _alert_client_rejection(db: Session, tenant: Tenant, doc: EInvoiceDocument) -> None:
+    from html import escape
+
     from ..models import TenantUser
     from .mail import queue_email
 
     inv = db.get(Invoice, doc.invoice_id)
     what = "aceptó parcialmente" if doc.receiver_message == "2" else "rechazó"
     number = inv.number if inv else doc.consecutive
+    # el detalle sale del XML que llego por correo: escapado, y rotulado como no verificado
     html = (
-        f"<p>El cliente {what} la factura <b>{number}</b> (clave {doc.clave}).</p>"
-        f"<p>Detalle: {doc.receiver_detail or '—'}</p><p>Hay que emitir la nota de crédito (Res. MH-DGT-RES-0027-2024 art. 10).</p>"
+        f"<p>Según el archivo recibido (firma no verificada), el cliente {what} la factura <b>{escape(number or '')}</b> "
+        f"(clave {escape(doc.clave or '')}).</p>"
+        f"<p>Detalle: {escape(doc.receiver_detail or '—')}</p><p>Revise y, si corresponde, emita la nota de crédito (Res. MH-DGT-RES-0027-2024 art. 10).</p>"
     )
     to = set()
     for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.active, TenantUser.role_code == "admin")):
@@ -349,13 +386,13 @@ def ingest_files(
                     res["ignorados"].append({"name": it.name, "reason": "el comprobante ya tenía su respuesta de Hacienda"})
                     entry.update(result="ignorado", received_document_id=doc.id, error="ya tenía respuesta")
             elif it.kind == "mensaje_receptor":
-                ed = apply_client_receptor_message(db, tenant, it.root, xml44.to_utf8_text(it.data, it.root))
+                ed, why = apply_client_receptor_message(db, tenant, it.root, xml44.to_utf8_text(it.data, it.root))
                 if ed is not None:
                     res["adjuntos"].append({"kind": "respuesta_cliente", "id": ed.id})
                     entry.update(result="respuesta_cliente", clave=ed.clave)
                 else:
-                    res["ignorados"].append({"name": it.name, "reason": "mensaje de aceptación de un tercero"})
-                    entry.update(result="ignorado", error="mensaje de aceptación de un tercero")
+                    res["ignorados"].append({"name": it.name, "reason": why})
+                    entry.update(result="ignorado", error=why)
             elif it.kind == "pdf":
                 target = _match_pdf(it.name, lote) if lote else None
                 if target is None and not lote:

@@ -121,7 +121,9 @@ class ReceptionResponse(TenantMixin, Base):
     __tablename__ = "reception_response"
     __table_args__ = (
         UniqueConstraint("received_document_id", "attempt", name="uq_reception_response_attempt"),
-        UniqueConstraint("tenant_id", "consecutive", name="uq_reception_response_consecutive"),
+        # con el modo: los T0x (simulado y pruebas) copian sucursal y terminal de su F0x, asi que T05 n.o N es el mismo
+        # texto que F05 n.o N (el de Fygaro en el historico). Dentro de un mismo modo el consecutivo no se repite.
+        UniqueConstraint("tenant_id", "mode", "consecutive", name="uq_reception_response_consecutive"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

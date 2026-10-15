@@ -6,10 +6,11 @@ reception_message (cada correo o carga manual), bank_instrument (chequeras y tar
 reception_response (cada intento de mensaje receptor, firmado una sola vez).
 
 Columnas nuevas: received_document (tipo, version, receptor, tipo de cambio, IVA, estado, plazo, respuesta del
-proveedor, credito y gasto aplicable, descarte), expense (comprobante ligado, tipo de cambio, IVA acreditable, pago,
-recurrencia, chequera/tarjeta), expense_category.d151_kind, recurrence.anchor_day, bank_account.opening_*,
-einvoice_document (modo, reintentos, entrega al cliente, mensaje receptor del cliente). Unico (tenant_id, clave) en
-received_document y (tenant_id, recurrence_id, recurrence_date) en expense.
+proveedor, credito y gasto aplicable, monto e IVA aceptados en una parcial, descarte), expense (comprobante ligado,
+tipo de cambio, IVA acreditable, pago, recurrencia, chequera/tarjeta), expense_category.d151_kind,
+recurrence.anchor_day, bank_account.opening_*, einvoice_document (modo, reintentos, entrega al cliente, mensaje
+receptor del cliente). Unico (tenant_id, clave) en received_document, (tenant_id, recurrence_id, recurrence_date) en
+expense y (tenant_id, mode, consecutive) en reception_response (T0x copia sucursal y terminal de F0x).
 
 Duplicados por clave antes del unico: si todas menos una son copias exactas sin respuesta (mismo XML, sin accion ni
 gasto) se borran las copias (queda la de menor id, o la que tenga accion/gasto) y queda una fila en audit_log
@@ -378,7 +379,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["tenant_id"], ["tenant.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("received_document_id", "attempt", name="uq_reception_response_attempt"),
-        sa.UniqueConstraint("tenant_id", "consecutive", name="uq_reception_response_consecutive"),
+        sa.UniqueConstraint("tenant_id", "mode", "consecutive", name="uq_reception_response_consecutive"),
     )
     op.create_index("ix_reception_response_tenant_id", "reception_response", ["tenant_id"])
     op.create_index("ix_reception_response_received_document_id", "reception_response", ["received_document_id"])
@@ -405,6 +406,8 @@ def upgrade() -> None:
         b.add_column(sa.Column("supplier_hacienda_detail", sa.String(length=500), nullable=True))
         b.add_column(sa.Column("credit_amount", sa.Numeric(16, 5), nullable=True))
         b.add_column(sa.Column("applicable_amount", sa.Numeric(16, 5), nullable=True))
+        b.add_column(sa.Column("accepted_total", sa.Numeric(16, 5), nullable=True))
+        b.add_column(sa.Column("accepted_tax", sa.Numeric(16, 5), nullable=True))
         b.add_column(sa.Column("response_detail", sa.String(length=160), nullable=True))
         b.add_column(sa.Column("deadline", sa.Date(), nullable=True))
         b.add_column(sa.Column("responded_by", sa.Integer(), nullable=True))
@@ -537,6 +540,8 @@ def downgrade() -> None:
             "responded_by",
             "deadline",
             "response_detail",
+            "accepted_tax",
+            "accepted_total",
             "applicable_amount",
             "credit_amount",
             "supplier_hacienda_detail",

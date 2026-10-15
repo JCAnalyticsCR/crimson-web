@@ -18,6 +18,7 @@ from decimal import Decimal
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -183,12 +184,10 @@ def _historic_response(db: Session, tenant: Tenant, doc: ReceivedDocument, mr: d
 def _maybe_expense(db: Session, p: Principal, doc: ReceivedDocument, category_id: int | None) -> bool:
     if doc.expense_id or doc.action not in ("aceptada", "parcial"):
         return False
-    credit = Decimal(str(doc.credit_amount)) if doc.credit_amount is not None else None
-    if doc.action == "parcial":
-        base = Decimal(str(doc.applicable_amount or 0)) + (credit or 0)
-        amounts = rsvc.expense_amounts(doc, "parcial", doc.iva_condition, credit, base, credit or 0)
-    else:
-        amounts = rsvc.expense_amounts(doc, "aceptada", doc.iva_condition, credit)
+    try:
+        amounts = rsvc.amounts_from_response(doc)
+    except HTTPException:
+        return False  # parcial sin monto aceptado conocido: sin gasto automatico (nunca uno en cero)
     rsvc.create_expense_from_document(db, p.tenant.id, doc, p.user.id, category_id, amounts, ip=p.ip)
     return True
 
@@ -206,12 +205,10 @@ def _update_linked_after_fygaro(db: Session, p: Principal, doc: ReceivedDocument
     if doc.action == "rechazada":
         e.status = "anulado"
     else:
-        credit = Decimal(str(doc.credit_amount)) if doc.credit_amount is not None else None
-        if doc.action == "parcial":
-            base = Decimal(str(doc.applicable_amount or 0)) + (credit or 0)
-            amounts = rsvc.expense_amounts(doc, "parcial", doc.iva_condition, credit, base, credit or 0)
-        else:
-            amounts = rsvc.expense_amounts(doc, "aceptada", doc.iva_condition, credit)
+        try:
+            amounts = rsvc.amounts_from_response(doc)
+        except HTTPException:
+            amounts = {}  # parcial sin monto aceptado conocido: el gasto conserva sus montos (nunca en cero)
         for k, v in amounts.items():
             setattr(e, k, v)
     audit_change(db, p, "update", "expense", e.id, antes, snapshot(e), reason=f"Mensaje de Fygaro importado para {doc.clave}")
@@ -291,98 +288,119 @@ def import_zip(db: Session, p: Principal, data: bytes, commit: bool, create_expe
         hacienda = (xml44.to_utf8_text(ours[1], ours[2]), (xml44.text(ours[2], "DetalleMensaje") or "")[:500] or None) if ours else None
         existing = db.scalar(select(ReceivedDocument).where(ReceivedDocument.tenant_id == tenant.id, ReceivedDocument.clave == g.clave))
         try:
-            if existing is not None:
-                changed = []
-                if supplier and not existing.xml_supplier_response:
-                    if commit:
-                        apply_supplier_response(db, existing, supplier[2], xml44.to_utf8_text(supplier[1], supplier[2]))
-                    changed.append("respuesta del proveedor")
-                if g.pdfs and not existing.pdf_media_id:
-                    if commit:
-                        m, _ = save_media(db, tenant.id, g.pdfs[0][1], g.pdfs[0][0], p.user.id, visibility="private", module="accounting")
-                        existing.pdf_media_id = m.id
-                    changed.append("PDF")
-                rs = rsvc.responses(db, existing)
-                only_local = all(r.mode in ("simulado", "pruebas") and r.status != "historico" for r in rs)
-                if mr and only_local and existing.status != "historico":
-                    if commit:
-                        _historic_response(db, tenant, existing, mr, xml44.to_utf8_text(g.mr[1], g.mr[2]), hacienda, p.user.id)
-                        existing.origin = existing.origin or "historico"
-                        _update_linked_after_fygaro(db, p, existing)
-                    changed.append("mensaje de Fygaro (gana sobre lo respondido aquí)")
-                if changed:
-                    result.append({"row": i, "action": "actualizar", "detail": f"{g.clave}: se agrega " + ", ".join(changed)})
+            # cada grupo en su propio savepoint (el with lo confirma aun con "continue"): un choque del unico
+            # (consecutivo, clave) es un error de esa fila, no un 500 que tumba toda la importacion
+            with db.begin_nested():
+                if existing is not None:
+                    changed = []
+                    if supplier and not existing.xml_supplier_response:
+                        if commit:
+                            apply_supplier_response(db, existing, supplier[2], xml44.to_utf8_text(supplier[1], supplier[2]))
+                        changed.append("respuesta del proveedor")
+                    if g.pdfs and not existing.pdf_media_id:
+                        if commit:
+                            m, _ = save_media(db, tenant.id, g.pdfs[0][1], g.pdfs[0][0], p.user.id, visibility="private", module="accounting")
+                            existing.pdf_media_id = m.id
+                        changed.append("PDF")
+                    rs = rsvc.responses(db, existing)
+                    only_local = all(r.mode in ("simulado", "pruebas") and r.status != "historico" for r in rs)
+                    if mr and only_local and existing.status != "historico":
+                        if commit:
+                            _historic_response(db, tenant, existing, mr, xml44.to_utf8_text(g.mr[1], g.mr[2]), hacienda, p.user.id)
+                            existing.origin = existing.origin or "historico"
+                            _update_linked_after_fygaro(db, p, existing)
+                        changed.append("mensaje de Fygaro (gana sobre lo respondido aquí)")
+                    if changed:
+                        result.append({"row": i, "action": "actualizar", "detail": f"{g.clave}: se agrega " + ", ".join(changed)})
+                    else:
+                        result.append({"row": i, "action": "omitir", "detail": f"{g.clave}: ya registrada"})
+                    continue
+                if not g.doc:
+                    result.append({"row": i, "action": "omitir", "detail": f"{g.clave}: mensaje sin comprobante en el archivo"})
+                    continue
+                parsed = xml44.parse_comprobante(g.doc[2], g.doc[1])
+                st, reason = initial_status(tenant, parsed)
+                if st is None:
+                    result.append({"row": i, "action": "omitir", "detail": f"{g.clave}: {reason}"})
+                    continue
+                detail = parsed.issuer_name or g.clave
+                if mr:
+                    final = "historico"
+                elif st == "por_revisar" and parsed.issue_date and (deadline(parsed.issue_date) or date.min) >= date.today():
+                    final = "por_revisar"
+                elif st == "por_revisar":
+                    final, detail = "historico", f"{detail} · sin mensaje: se presume aceptado"
                 else:
-                    result.append({"row": i, "action": "omitir", "detail": f"{g.clave}: ya registrada"})
-                continue
-            if not g.doc:
-                result.append({"row": i, "action": "omitir", "detail": f"{g.clave}: mensaje sin comprobante en el archivo"})
-                continue
-            parsed = xml44.parse_comprobante(g.doc[2], g.doc[1])
-            st, reason = initial_status(tenant, parsed)
-            if st is None:
-                result.append({"row": i, "action": "omitir", "detail": f"{g.clave}: {reason}"})
-                continue
-            detail = parsed.issuer_name or g.clave
-            if mr:
-                final = "historico"
-            elif st == "por_revisar" and parsed.issue_date and (deadline(parsed.issue_date) or date.min) >= date.today():
-                final = "por_revisar"
-            elif st == "por_revisar":
-                final, detail = "historico", f"{detail} · sin mensaje: se presume aceptado"
-            else:
-                final = st
-            result.append({"row": i, "action": "nuevo", "detail": f"{g.clave} · {detail} · {final}"})
-            if not commit:
-                continue
-            doc = ReceivedDocument(
-                tenant_id=tenant.id,
-                clave=parsed.clave,
-                consecutive=parsed.consecutive,
-                issuer_name=parsed.issuer_name,
-                issuer_id=parsed.issuer_id,
-                issuer_id_type=parsed.issuer_id_type,
-                issuer_email=parsed.issuer_email,
-                issuer_activity_code=(parsed.issuer_activity_code or "")[:10] or None,
-                issue_date=parsed.issue_date,
-                currency=parsed.currency,
-                fx_rate=parsed.fx_rate,
-                subtotal=parsed.net,
-                tax_total=parsed.tax_total,
-                iva_total=parsed.iva_total,
-                other_charges=parsed.other_charges,
-                total=parsed.total,
-                doc_type=parsed.doc_type,
-                schema_version=parsed.schema_version,
-                receiver_id=(parsed.receiver_id or "")[:20] or None,
-                receiver_ok=xml44.same_id(parsed.receiver_id, tenant.tax_id) if parsed.receiver_id else None,
-                reference_clave=parsed.reference_clave,
-                status=final if final != "historico" else "por_revisar",
-                origin="historico",
-                xml_document=xml44.to_utf8_text(g.doc[1], g.doc[2]),
-                hacienda_status="sin_respuesta",
-                iva_condition="credito",
-                deadline=deadline(parsed.issue_date),
-            )
-            db.add(doc)
-            db.flush()
-            if supplier:
-                apply_supplier_response(db, doc, supplier[2], xml44.to_utf8_text(supplier[1], supplier[2]))
-            if g.pdfs:
-                m, _ = save_media(db, tenant.id, g.pdfs[0][1], g.pdfs[0][0], p.user.id, visibility="private", module="accounting")
-                doc.pdf_media_id = m.id
-            if mr:
-                _historic_response(db, tenant, doc, mr, xml44.to_utf8_text(g.mr[1], g.mr[2]), hacienda, p.user.id)
-                if create_expenses:
-                    _maybe_expense(db, p, doc, None)
-            elif final == "historico":
-                doc.status = "historico"
-                doc.hacienda_status = "historico"
+                    final = st
+                result.append({"row": i, "action": "nuevo", "detail": f"{g.clave} · {detail} · {final}"})
+                if not commit:
+                    continue
+                doc = ReceivedDocument(
+                    tenant_id=tenant.id,
+                    clave=parsed.clave,
+                    consecutive=parsed.consecutive,
+                    issuer_name=parsed.issuer_name,
+                    issuer_id=parsed.issuer_id,
+                    issuer_id_type=parsed.issuer_id_type,
+                    issuer_email=parsed.issuer_email,
+                    issuer_activity_code=(parsed.issuer_activity_code or "")[:10] or None,
+                    issue_date=parsed.issue_date,
+                    currency=parsed.currency,
+                    fx_rate=parsed.fx_rate,
+                    subtotal=parsed.net,
+                    tax_total=parsed.tax_total,
+                    iva_total=parsed.iva_total,
+                    other_charges=parsed.other_charges,
+                    total=parsed.total,
+                    doc_type=parsed.doc_type,
+                    schema_version=parsed.schema_version,
+                    receiver_id=(parsed.receiver_id or "")[:20] or None,
+                    receiver_ok=xml44.same_id(parsed.receiver_id, tenant.tax_id) if parsed.receiver_id else None,
+                    reference_clave=parsed.reference_clave,
+                    status=final if final != "historico" else "por_revisar",
+                    origin="historico",
+                    xml_document=xml44.to_utf8_text(g.doc[1], g.doc[2]),
+                    hacienda_status="sin_respuesta",
+                    iva_condition="credito",
+                    deadline=deadline(parsed.issue_date),
+                )
+                db.add(doc)
+                db.flush()
+                if supplier:
+                    apply_supplier_response(db, doc, supplier[2], xml44.to_utf8_text(supplier[1], supplier[2]))
+                if g.pdfs:
+                    m, _ = save_media(db, tenant.id, g.pdfs[0][1], g.pdfs[0][0], p.user.id, visibility="private", module="accounting")
+                    doc.pdf_media_id = m.id
+                if mr:
+                    _historic_response(db, tenant, doc, mr, xml44.to_utf8_text(g.mr[1], g.mr[2]), hacienda, p.user.id)
+                    if create_expenses:
+                        _maybe_expense(db, p, doc, None)
+                elif final == "historico":
+                    doc.status = "historico"
+                    doc.hacienda_status = "historico"
+                db.flush()
         except HTTPException as e:
+            _drop_last_ok(result, i)
             result.append({"row": i, "action": "error", "detail": f"{g.clave}: {e.detail}"})
         except xml44.XmlRejected as e:
+            _drop_last_ok(result, i)
             result.append({"row": i, "action": "error", "detail": f"{g.clave}: {e}"})
+        except IntegrityError as e:
+            _drop_last_ok(result, i)
+            result.append({"row": i, "action": "error", "detail": f"{g.clave}: {_integrity_detail(e)}"})
     return result, maxes
+
+
+def _drop_last_ok(result: list[dict], row: int) -> None:
+    """La fila ya se habia anotado como nuevo/actualizar antes de fallar: queda solo el error."""
+    if result and result[-1]["row"] == row and result[-1]["action"] != "error":
+        result.pop()
+
+
+def _integrity_detail(e: IntegrityError) -> str:
+    if "consecutive" in str(e.orig if hasattr(e, "orig") else e):
+        return "el consecutivo del mensaje receptor ya existe (otro mensaje de producción con el mismo número)"
+    return "ya existe un registro con esos datos"
 
 
 def import_table(db: Session, p: Principal, data: bytes, filename: str, commit: bool, create_expenses: bool) -> tuple[list[dict], dict[str, int], dict]:
@@ -423,66 +441,91 @@ def import_table(db: Session, p: Principal, data: bytes, filename: str, commit: 
         result.append({"row": i, "action": "nuevo", "detail": f"{cl} · {tb.text(v['issuer'], 80) or ''} · {action}"})
         if not commit:
             continue
-        doc_type = TYPE_NAMES.get(tb.norm(v["doc_type"]), "FE")
-        credit = tb.num(v["credit"])
-        applicable = tb.num(v["applicable"])
-        if credit is None and action != "rechazada":
-            credit = {"credito": tax, "bienes_capital": tax, "no_credito": Decimal(0)}.get(cond)
-        if applicable is None and credit is not None and action == "aceptada":
-            applicable = total - credit
-        doc = ReceivedDocument(
-            tenant_id=tenant.id,
-            clave=cl,
-            consecutive=cl[21:41],
-            issuer_name=tb.text(v["issuer"], 200),
-            issuer_id=xml44.norm_id(tb.text(v["issuer_id"], 30)),
-            issue_date=dt,
-            currency="USD" if tb.norm(v["currency"]) in ("usd", "dolares", "dolar") else "CRC",
-            fx_rate=tb.num(v["fx"]) or Decimal(1),
-            subtotal=total - tax,
-            tax_total=tax,
-            total=total,
-            doc_type=doc_type,
-            status="historico",
-            origin="historico",
-            action=action,
-            iva_condition=cond if action != "rechazada" else "credito",
-            activity_code=tb.text(v["activity"], 10),
-            credit_amount=credit if action != "rechazada" else None,
-            applicable_amount=applicable if action != "rechazada" else None,
-            hacienda_status="historico",
-            deadline=deadline(dt),
-            responded_at=datetime.now(UTC),
-        )
-        db.add(doc)
-        db.flush()
-        if cons:
-            from .reception_calc import IVA_CODES, MESSAGE_CODE
-
-            db.add(
-                ReceptionResponse(
-                    tenant_id=tenant.id,
-                    received_document_id=doc.id,
-                    attempt=1,
-                    message_code=MESSAGE_CODE[action],
-                    iva_condition_code=IVA_CODES.get(cond) if action != "rechazada" else None,
-                    activity_code=doc.activity_code,
-                    tax_total=tax,
-                    total=total,
-                    credit_amount=doc.credit_amount,
-                    applicable_amount=doc.applicable_amount,
-                    consecutive=cons[:20],
-                    mode="produccion",
-                    emitted_at=datetime.now(UTC),
-                    status="historico",
-                    created_by=p.user.id,
-                    created_at=datetime.now(UTC),
-                )
-            )
-            db.flush()
-        if create_expenses:
-            _maybe_expense(db, p, doc, _category(db, tenant.id, v["category"], cats, commit))
+        cat_id = _category(db, tenant.id, v["category"], cats, commit) if create_expenses else None  # fuera del savepoint
+        try:
+            with db.begin_nested():  # una fila = un savepoint: un choque del unico (p. ej. el consecutivo) es error de esa fila
+                _table_row(db, p, tenant, v, cl, cons, action, cond, total, tax, dt, cat_id, create_expenses)
+        except IntegrityError as e:
+            _drop_last_ok(result, i)
+            result.append({"row": i, "action": "error", "detail": f"{cl}: {_integrity_detail(e)}"})
     return result, maxes, recognized
+
+
+def _table_row(
+    db: Session,
+    p: Principal,
+    tenant: Tenant,
+    v: dict,
+    cl: str,
+    cons: str | None,
+    action: str,
+    cond: str,
+    total: Decimal,
+    tax: Decimal,
+    dt,
+    cat_id: int | None,
+    create_expenses: bool,
+) -> None:
+    doc_type = TYPE_NAMES.get(tb.norm(v["doc_type"]), "FE")
+    credit = tb.num(v["credit"])
+    applicable = tb.num(v["applicable"])
+    if credit is None and action != "rechazada":
+        credit = {"credito": tax, "bienes_capital": tax, "no_credito": Decimal(0)}.get(cond)
+    if applicable is None and credit is not None and action == "aceptada":
+        applicable = total - credit
+    doc = ReceivedDocument(
+        tenant_id=tenant.id,
+        clave=cl,
+        consecutive=cl[21:41],
+        issuer_name=tb.text(v["issuer"], 200),
+        issuer_id=xml44.norm_id(tb.text(v["issuer_id"], 30)),
+        issue_date=dt,
+        currency="USD" if tb.norm(v["currency"]) in ("usd", "dolares", "dolar") else "CRC",
+        fx_rate=tb.num(v["fx"]) or Decimal(1),
+        subtotal=total - tax,
+        tax_total=tax,
+        total=total,
+        doc_type=doc_type,
+        status="historico",
+        origin="historico",
+        action=action,
+        iva_condition=cond if action != "rechazada" else "credito",
+        activity_code=tb.text(v["activity"], 10),
+        credit_amount=credit if action != "rechazada" else None,
+        applicable_amount=applicable if action != "rechazada" else None,
+        hacienda_status="historico",
+        deadline=deadline(dt),
+        responded_at=datetime.now(UTC),
+    )
+    db.add(doc)
+    db.flush()
+    if cons:
+        from .reception_calc import IVA_CODES, MESSAGE_CODE
+
+        db.add(
+            ReceptionResponse(
+                tenant_id=tenant.id,
+                received_document_id=doc.id,
+                attempt=1,
+                message_code=MESSAGE_CODE[action],
+                iva_condition_code=IVA_CODES.get(cond) if action != "rechazada" else None,
+                activity_code=doc.activity_code,
+                tax_total=tax,
+                total=total,
+                credit_amount=doc.credit_amount,
+                applicable_amount=doc.applicable_amount,
+                consecutive=cons[:20],
+                mode="produccion",
+                emitted_at=datetime.now(UTC),
+                status="historico",
+                created_by=p.user.id,
+                created_at=datetime.now(UTC),
+            )
+        )
+        db.flush()
+    if create_expenses:
+        _maybe_expense(db, p, doc, cat_id)
+    db.flush()
 
 
 def run(db: Session, p: Principal, data: bytes, filename: str, commit: bool, create_expenses: bool) -> dict:

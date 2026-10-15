@@ -150,6 +150,9 @@ class ReceivedDocument(TenantMixin, TimestampMixin, Base):
     supplier_hacienda_detail: Mapped[str | None] = mapped_column(String(500))
     credit_amount: Mapped[float | None] = mapped_column(Numeric(16, 5))  # IVA acreditable (divisa del documento)
     applicable_amount: Mapped[float | None] = mapped_column(Numeric(16, 5))  # gasto aplicable
+    # aceptacion parcial: monto e IVA aceptados (con condicion 05 no hay credito ni gasto aplicable de donde sacarlos)
+    accepted_total: Mapped[float | None] = mapped_column(Numeric(16, 5))
+    accepted_tax: Mapped[float | None] = mapped_column(Numeric(16, 5))
     response_detail: Mapped[str | None] = mapped_column(String(160))
     deadline: Mapped[date | None] = mapped_column(Date)
     responded_by: Mapped[int | None] = mapped_column(Integer)

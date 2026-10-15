@@ -29,7 +29,7 @@ const PENDING: { key: string; label: string; to: string; need: string; hot?: boo
   { key: "facturas_por_cobrar", label: "Facturas por cobrar", to: "/facturas?pendiente=facturas_por_cobrar", need: "sales.ver" },
   { key: "cotizaciones_sin_respuesta", label: "Cotizaciones sin respuesta", to: "/cotizaciones?pendiente=cotizaciones_sin_respuesta", need: "sales.ver" },
   { key: "enlaces_abiertos", label: "Enlaces de pago abiertos", to: "/facturas?pendiente=enlaces_abiertos", need: "sales.ver" },
-  { key: "documentos_rechazados", label: "Rechazados por Hacienda", to: "/facturas?pendiente=documentos_rechazados", need: "sales.ver", hot: true },
+  { key: "documentos_rechazados", label: "Rechazados o con error en Hacienda", to: "/facturas?pendiente=documentos_rechazados", need: "sales.ver", hot: true },
   { key: "stock_bajo", label: "Productos con stock bajo", to: "/inventario?stock=bajo", need: "inventory.ver", hot: true },
   { key: "cotizaciones_por_aprobar", label: "Descuentos por aprobar", to: "/cotizaciones?pendiente=cotizaciones_por_aprobar", need: "sales.ver", hot: true },
   { key: "pedidos_web", label: "Pedidos web por atender", to: "/ordenes?pendiente=por_atender", need: "sales.ver", hot: true },

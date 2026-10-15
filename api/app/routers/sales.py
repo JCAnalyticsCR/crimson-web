@@ -152,7 +152,7 @@ def pending_where(key: str, p: Principal) -> list:
     elif key == "facturas_por_cobrar":
         out.append(Invoice.status.in_(("creado", "parcial")))
     elif key == "documentos_rechazados":
-        out.append(Invoice.einvoice_status == "rechazada")
+        out.append(Invoice.einvoice_status.in_(("rechazada", "error")))  # error: Hacienda no respondio o no lo encontro
     elif key == "enlaces_abiertos":
         # facturas con un enlace de pago vigente sin pagar (una factura con dos enlaces cuenta una vez)
         abiertos = select(PaymentLink.invoice_id).where(PaymentLink.tenant_id == tid, PaymentLink.paid_at.is_(None), PaymentLink.expires_at > datetime.now(UTC))
