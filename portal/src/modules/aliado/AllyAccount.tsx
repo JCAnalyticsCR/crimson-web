@@ -48,7 +48,7 @@ function DosPasos() {
       <b>Verificación en dos pasos</b>
       {me?.user.totp_enabled ? (
         <>
-          <span className="meta">Activa para {me.user.email}. Si pierde el teléfono, entra con uno de sus códigos de recuperación.</span>
+          <span className="muted" style={{ fontSize: 13 }}>Activa para {me.user.email}. Si pierde el teléfono, entra con uno de sus códigos de recuperación.</span>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button className="btn btn--ghost btn--sm" onClick={() => setPw({ password: "", regenerar: true })}>Generar códigos nuevos</button>
             <button className="btn btn--danger btn--sm" onClick={() => setPw({ password: "", regenerar: false })}>Desactivar</button>
@@ -56,7 +56,7 @@ function DosPasos() {
         </>
       ) : totp ? (
         <>
-          <span className="meta">Agregue esta clave en su app de autenticación y confirme con el código de seis dígitos.</span>
+          <span className="muted" style={{ fontSize: 13 }}>Agregue esta clave en su app de autenticación y confirme con el código de seis dígitos.</span>
           <code className="mono" style={{ padding: 10, background: "var(--bg-2)", borderRadius: 8, wordBreak: "break-all" }}>{totp.secret}</code>
           <div style={{ display: "flex", gap: 8 }}>
             <input className="input input--mono" inputMode="numeric" maxLength={6} placeholder="000000" aria-label="Código de seis dígitos" value={code} onChange={(e) => setCode(e.target.value)} style={{ width: 140 }} />
@@ -65,7 +65,7 @@ function DosPasos() {
         </>
       ) : (
         <>
-          <span className="meta">Además de la contraseña, pide un código de su teléfono al entrar.</span>
+          <span className="muted" style={{ fontSize: 13 }}>Además de la contraseña, pide un código de su teléfono al entrar.</span>
           <button className="btn btn--soft" style={{ alignSelf: "flex-start" }} disabled={busy} onClick={configurar}><Icon d={I.shield} />Configurar</button>
         </>
       )}

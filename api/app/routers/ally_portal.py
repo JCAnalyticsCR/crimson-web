@@ -276,6 +276,7 @@ def _project_out(db: Session, ctx: AllyCtx, pr: Project, full: bool = False) -> 
     }
     if full:
         names = fw._names(db, orders, ctx.p.tenant.id) if orders else {}
+        team = ctx.scope.team_user_ids()
         out["scope"] = pr.scope
         out["my_scope_lines"] = sorted({x for a in parts for x in (a.scope_lines or [])})
         out["my_participations"] = [{"id": a.id, "role": a.role} for a in parts]  # para elegir el papel al enviar precios
@@ -287,7 +288,8 @@ def _project_out(db: Session, ctx: AllyCtx, pr: Project, full: bool = False) -> 
                 "kind": x.kind,
                 "status": x.status,
                 "scheduled_at": x.scheduled_at,
-                "technician": names.get(x.technician_id),
+                # de Crimson, solo el nombre de pila (como en los tickets y en la OT)
+                "technician": names.get(x.technician_id) if x.technician_id in team else _first(names.get(x.technician_id)),
             }
             for x in orders
         ]
@@ -351,9 +353,15 @@ def _order_ally_out(db: Session, ctx: AllyCtx, o: WorkOrder, full: bool = False,
     raw = fw._order_out(db, o, full=full, names=names, tenant=ctx.p.tenant)
     out = _pick(raw, ALLY_ORDER_KEYS)
     out["photos"] = _sign(ctx, o.photos or [])
-    out["crew"] = [{"id": c["id"], "name": c["name"], "role": c["role"]} for c in raw.get("crew") or []]
-    out["running"] = [{"user_id": r["user_id"], "user": r["user"], "started_at": r["started_at"]} for r in raw.get("running") or []]
     team = ctx.scope.team_user_ids()
+
+    def quien(uid: int | None, nombre: str | None) -> str | None:
+        # personal de Crimson en una cuadrilla mixta: solo el nombre de pila (como en los tickets)
+        return nombre if uid in team else _first(nombre)
+
+    out["technician"] = quien(o.technician_id, out.get("technician"))
+    out["crew"] = [{"id": c["id"], "name": quien(c["id"], c["name"]), "role": c["role"]} for c in raw.get("crew") or []]
+    out["running"] = [{"user_id": r["user_id"], "user": quien(r["user_id"], r["user"]), "started_at": r["started_at"]} for r in raw.get("running") or []]
     # tiempo de SU equipo corriendo desde hace mas de fw.MAX_CORRIENDO_H: al terminar la jornada o finalizar se indica
     # la hora real en que terminaron (fin_jornada)
     limite = _now() - timedelta(hours=fw.MAX_CORRIENDO_H)

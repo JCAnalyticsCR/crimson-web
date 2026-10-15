@@ -169,9 +169,9 @@ export default function AllySurvey() {
               <div key={k} className="al-labor__row">
                 <span>{label}</span>
                 <input className="input input--mono" inputMode="numeric" aria-label={`${label}: personas`} disabled={ro} value={d.labor[k]?.people ?? "0"} onChange={(e) => setLabor(k, { people: e.target.value })} />
-                <span className="meta">personas ×</span>
+                <span className="al-labor__u">personas ×</span>
                 <input className="input input--mono" inputMode="decimal" aria-label={`${label}: días`} disabled={ro} value={d.labor[k]?.days ?? "0"} onChange={(e) => setLabor(k, { days: e.target.value })} />
-                <span className="meta">días</span>
+                <span className="al-labor__u">días</span>
               </div>
             ))}
           </div>
