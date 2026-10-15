@@ -10,6 +10,7 @@ import { NuevaVersion } from "./NuevaVersion";
 import { NAV } from "./nav";
 import PreviewBand from "./PreviewBand";
 import { useApprovalCount } from "../modules/approvals/useApprovalCount";
+import { useReceptionCount } from "../modules/accounting/useReceptionCount";
 
 /* El menu vive en nav.ts (lo extienden otros frentes sin tocar este archivo). Se reexporta por compatibilidad. */
 export { NAV } from "./nav";
@@ -21,6 +22,7 @@ export default function AppShell() {
   const nav = useNavigate();
   const loc = useLocation();
   const aprob = useApprovalCount(); // numero junto a "Aprobaciones"
+  const recep = useReceptionCount(); // comprobantes por revisar junto a "Contabilidad"
   const [clock, setClock] = useState("");
   const [welcome, setWelcome] = useState(() => { try { return sessionStorage.getItem("crimson-welcome") === "1"; } catch { return false; } });
 
@@ -58,6 +60,7 @@ export default function AppShell() {
               <NavLink key={it.to} to={it.to} end={it.end} className={({ isActive }) => `nav__link ${isActive ? "is-active" : ""}`}>
                 <Icon d={it.icon} /><span>{it.label}</span>
                 {it.badge === "approvals" && aprob ? <span className="nav__badge" aria-label={`${aprob} pendientes`}>{aprob > 99 ? "99+" : aprob}</span> : null}
+                {it.badge === "recepcion" && recep ? <span className="nav__badge" style={recep.urgent ? undefined : { background: "var(--warn)" }} aria-label={`${recep.count} comprobantes por revisar`}>{recep.count > 99 ? "99+" : recep.count}</span> : null}
               </NavLink>
             ))}
           </div>

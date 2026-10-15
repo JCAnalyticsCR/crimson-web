@@ -1,0 +1,35 @@
+/* Contabilidad: tres partes (Facturas, Contable, Tributario) con sub-pestanas. En movil, filas desplazables. */
+.acc-band { padding: 8px 14px; border-radius: 10px; background: var(--warn-soft); border: 1px solid var(--warn); color: var(--text); font-size: 13px; font-weight: 600; }
+.acc-parts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.acc-part { display: block; text-decoration: none; color: var(--text-2); background: var(--surface); border: 1.5px solid var(--hair-2); border-radius: 14px; padding: 12px 16px; }
+.acc-part b { display: block; font-size: 15px; color: var(--text); }
+.acc-part span { font-size: 12.5px; }
+.acc-part.is-active { border-color: var(--crimson); background: var(--crimson-soft); }
+.acc-sub { display: flex; gap: 4px; padding: 4px; border-radius: 10px; background: var(--bg-2); max-width: 100%; overflow-x: auto; scrollbar-width: none; align-self: flex-start; }
+.acc-sub::-webkit-scrollbar { display: none; }
+.acc-sub a { white-space: nowrap; text-decoration: none; padding: 6px 12px; border-radius: 8px; font-weight: 600; color: var(--text-2); font-size: 13px; }
+.acc-sub a.is-active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.acc-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.acc-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: var(--bg-2); color: var(--text-2); }
+.acc-chip--ok { background: var(--ok-soft); color: var(--ok); }
+.acc-chip--bad { background: var(--bad-soft, #fde3e6); color: var(--bad); }
+.acc-chip--warn { background: var(--warn-soft); color: var(--warn); }
+.acc-detail { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.acc-warn { padding: 10px 14px; border-radius: 10px; background: var(--warn-soft); border: 1px solid var(--warn); font-size: 13px; }
+.acc-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13px; }
+.acc-kv dt { color: var(--text-3); }
+.acc-kv dd { margin: 0; overflow-wrap: anywhere; }
+.acc-seg { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; border-radius: 10px; background: var(--bg-2); }
+.acc-seg button { flex: 1 1 auto; border: 0; background: transparent; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-weight: 600; color: var(--text-2); font-size: 13px; }
+.acc-seg button.is-active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.acc-timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.acc-timeline li { border-left: 3px solid var(--hair-2); padding: 4px 0 4px 12px; font-size: 13px; }
+.acc-drop { border: 1.5px dashed var(--hair-2); border-radius: 12px; padding: 28px 20px; text-align: center; cursor: pointer; color: var(--text-3); font-size: 14px; }
+.acc-drop.is-over { border-color: var(--crimson); background: var(--crimson-soft); }
+.acc-check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+@media (max-width: 900px) {
+  .acc-parts { display: flex; overflow-x: auto; scrollbar-width: none; }
+  .acc-parts::-webkit-scrollbar { display: none; }
+  .acc-part { flex: 0 0 auto; min-width: 210px; }
+  .acc-detail { grid-template-columns: 1fr; }
+}

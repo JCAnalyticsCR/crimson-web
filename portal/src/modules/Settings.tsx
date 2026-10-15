@@ -9,6 +9,8 @@ import { SlaSettings } from "./support/SlaTable";
 import { Bitacora } from "./Bitacora";
 import DataExport from "./tools/DataExport";
 import UsersTab from "./settings/UsersTab";
+import HaciendaTab from "./settings/HaciendaTab";
+import { MODE_LABEL, type HaciendaState } from "./accounting/hacienda";
 
 type Group = { id: number; doc_type: string; prefix: string; branch: string; terminal: string; current: number; is_default: boolean };
 type Cfg = { prevent_negative_stock?: boolean; reservation_auto_approve_units?: number; reservation_days?: number; labor_day_cost?: number; labor_day_cost_civil?: number; labor_day_cost_contratado?: number; per_diem_cost?: number; travel_cost?: number; max_discount_pct?: number; archive_purge_days?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; notify_due: boolean; remind_days_before: number; daily_close_email: boolean; bcc: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
@@ -21,7 +23,7 @@ type Mail = { id: number; to: string; subject: string; status: string; entity: s
 
 /* Las claves no cambian (los enlaces ?tab= siguen sirviendo). "Soporte" chocaba con el menú Soporte (tickets) y
    Andrés creyó que era una conexión con Fygaro (03:31); la Bandeja XML la mezcló con el correo que sale (03:46). */
-const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["pagos", "Pagos y cobros"], ["inventario", "Inventario"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"], ["bandeja", "XML de proveedores"], ["sla", "SLA"], ["soporte", "Acceso de soporte"], ["api", "API"], ["bitacora", "Bitácora"], ["respaldo", "Respaldo"]];
+const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["hacienda", "Hacienda"], ["pagos", "Pagos y cobros"], ["inventario", "Inventario"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"], ["bandeja", "XML de proveedores"], ["sla", "SLA"], ["soporte", "Acceso de soporte"], ["api", "API"], ["bitacora", "Bitácora"], ["respaldo", "Respaldo"]];
 
 export default function Settings() {
   const { me, reload, toast, allows } = useSession();
@@ -51,12 +53,14 @@ export default function Settings() {
   /* Los codigos se muestran UNA sola vez: despues solo existen hasheados en la base. */
   const [recovery, setRecovery] = useState<string[] | null>(null);
   const [apagar, setApagar] = useState<{ password: string; regenerar: boolean } | null>(null);
+  const [hmode, setHmode] = useState<HaciendaState["mode"] | null>(null);
 
   const load = () => {
     if (!allows("settings.ver")) return;
     api<Cfg>("/settings").then(setCfg); api<Group[]>("/billing-groups").then(setGroups); api<Bank[]>("/settings/bank-accounts").then(setBanks);
     api<Gw[]>("/settings/gateways").then(setGws); api<Mail[]>("/settings/outbox").then(setMails);
     api<OnvoStatus>("/settings/gateways/onvo/status").then(setOnvoSt).catch(() => {});
+    api<HaciendaState>("/settings/hacienda").then((h) => setHmode(h.mode)).catch(() => setHmode(null));
   };
   const testOnvo = async () => {
     setTestBusy(true); setTestResult(null);
@@ -102,7 +106,7 @@ export default function Settings() {
           {cfg && (
             <Card title="Teléfonos, actividad y redes">
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <Field label="Códigos de actividad económica (Hacienda)" hint="Separados por coma. El primero es el predeterminado."><input className="input" defaultValue={cfg.activity_codes.join(", ")} onBlur={(e) => saveCfg({ activity_codes: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} /></Field>
+                <Field label="Códigos de actividad económica (Hacienda)" hint="Se administran en Ajustes → Hacienda (con su descripción y cuál es la predeterminada)."><div className="input" style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--bg-2)" }}><span className="mono">{cfg.activity_codes.join(", ") || "—"}</span><button className="btn btn--ghost btn--sm" style={{ marginLeft: "auto" }} onClick={() => setParams({ tab: "hacienda" })}>Ajustes → Hacienda</button></div></Field>
                 <Field label="Teléfono principal (WhatsApp)"><input className="input" defaultValue={cfg.phones[0]?.number || ""} onBlur={(e) => saveCfg({ phones: [{ number: e.target.value, kind: "whatsapp", main: true }] })} /></Field>
                 <div className="grid-3">
                   {(["facebook", "instagram", "linkedin"] as const).map((k) => <Field key={k} label={k[0].toUpperCase() + k.slice(1)}><input className="input" defaultValue={cfg.social[k] || ""} onBlur={(e) => saveCfg({ social: { ...cfg.social, [k]: e.target.value } })} /></Field>)}
@@ -126,8 +130,8 @@ export default function Settings() {
               </div>
               <Field label="Mensaje al pie de toda factura"><textarea className="textarea" defaultValue={cfg.invoice_footer} onBlur={(e) => saveCfg({ invoice_footer: e.target.value })} /></Field>
               <Field label="Mensaje al pie de cotizaciones" hint="Ideal para instrucciones de pago y cuentas bancarias."><textarea className="textarea" defaultValue={cfg.quote_footer} onBlur={(e) => saveCfg({ quote_footer: e.target.value })} /></Field>
-              <Field label="Proveedor de factura electrónica" hint="sandbox simula Hacienda para pruebas; Alanube/GTI requieren credenciales (Fase 2).">
-                <select className="select" value={cfg.einvoice_provider} onChange={(e) => saveCfg({ einvoice_provider: e.target.value })}><option value="none">Sin proveedor</option><option value="sandbox">Sandbox (simulación)</option><option value="alanube">Alanube</option><option value="gti">GTI</option></select>
+              <Field label="Factura electrónica (Hacienda)" hint="El modo (desactivada, simulado, pruebas o producción) se cambia en Ajustes → Hacienda.">
+                <div className="input" style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--bg-2)" }}><b>{hmode ? MODE_LABEL[hmode] : "—"}</b><button className="btn btn--ghost btn--sm" style={{ marginLeft: "auto" }} onClick={() => setParams({ tab: "hacienda" })}>Configurar en Ajustes → Hacienda</button></div>
               </Field>
             </div>
           </Card>
@@ -153,10 +157,10 @@ export default function Settings() {
                 <Field label="Correos en copia (BCC) de toda factura" hint="Separados por coma."><input className="input" defaultValue={cfg.bcc.join(", ")} onBlur={(e) => saveCfg({ bcc: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} /></Field>
               </div>
             </Card>
-            <Card title="Grupos de facturación y consecutivos" flush>
+            <Card title="Numeración visible de documentos" flush>
               <table className="table"><thead><tr><th>Tipo</th><th>Prefijo</th><th>Sucursal</th><th>Terminal</th><th className="num">Actual</th><th /></tr></thead>
-                <tbody>{groups.map((g) => <tr key={g.id}><td style={{ fontWeight: 600 }}>{g.doc_type}</td><td><input className="input" style={{ height: 32, width: 80 }} value={g.prefix} onChange={(e) => setGroups(groups.map((x) => (x.id === g.id ? { ...x, prefix: e.target.value } : x)))} /></td><td><input className="input input--mono" style={{ height: 32, width: 64 }} value={g.branch} onChange={(e) => setGroups(groups.map((x) => (x.id === g.id ? { ...x, branch: e.target.value } : x)))} /></td><td><input className="input input--mono" style={{ height: 32, width: 84 }} value={g.terminal} onChange={(e) => setGroups(groups.map((x) => (x.id === g.id ? { ...x, terminal: e.target.value } : x)))} /></td><td className="num"><input className="input input--mono" style={{ height: 32, width: 90 }} value={g.current} onChange={(e) => setGroups(groups.map((x) => (x.id === g.id ? { ...x, current: Number(e.target.value) } : x)))} /></td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => saveGroup(g)}>Guardar</button></td></tr>)}</tbody></table>
-              <p className="muted" style={{ padding: "10px 18px", fontSize: 12 }}>Consecutivo v4.4 = sucursal (3) + terminal (5) + tipo (2) + secuencia (10). El valor actual nunca retrocede.</p>
+                <tbody>{groups.filter((g) => !/^[FT]0[1-7]$/.test(g.doc_type)).map((g) => <tr key={g.id}><td style={{ fontWeight: 600 }}>{g.doc_type}</td><td><input className="input" style={{ height: 32, width: 80 }} value={g.prefix} onChange={(e) => setGroups(groups.map((x) => (x.id === g.id ? { ...x, prefix: e.target.value } : x)))} /></td><td><input className="input input--mono" style={{ height: 32, width: 64 }} value={g.branch} onChange={(e) => setGroups(groups.map((x) => (x.id === g.id ? { ...x, branch: e.target.value } : x)))} /></td><td><input className="input input--mono" style={{ height: 32, width: 84 }} value={g.terminal} onChange={(e) => setGroups(groups.map((x) => (x.id === g.id ? { ...x, terminal: e.target.value } : x)))} /></td><td className="num"><input className="input input--mono" style={{ height: 32, width: 90 }} value={g.current} onChange={(e) => setGroups(groups.map((x) => (x.id === g.id ? { ...x, current: Number(e.target.value) } : x)))} /></td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => saveGroup(g)}>Guardar</button></td></tr>)}</tbody></table>
+              <p className="muted" style={{ padding: "10px 18px", fontSize: 12 }}>El número que se ve en el documento (FEC-000513). El consecutivo fiscal de 20 dígitos se asigna al emitir y se administra en Ajustes → Hacienda → Consecutivos. El valor actual nunca retrocede.</p>
             </Card>
           </div>
         </div>
@@ -257,6 +261,7 @@ export default function Settings() {
       )}
 
       {tab === "api" && <ApiCreds />}
+      {tab === "hacienda" && <HaciendaTab />}
       {tab === "bandeja" && <InboxSettings />}
       {tab === "sla" && <SlaSettings />}
       {tab === "soporte" && allows("settings.configurar") && <SupportAccess />}
@@ -374,7 +379,7 @@ POST /api/v1/checkout   { token: JWT HS256, kid }`}</code>
 }
 
 /* ---------- Bandeja IMAP: XML de proveedores entran solos a Recepcion ---------- */
-type Inbox = { enabled: boolean; host: string; port: number; user: string; folder: string; has_password: boolean; last_run: string | null; last_result: { messages: number; nuevos: number; duplicados: number; ignorados: number; errores: string[] } | null };
+type Inbox = { enabled: boolean; host: string; port: number; user: string; folder: string; has_password: boolean; last_run: string | null; last_result: { messages: number; nuevos: number; duplicados: number; ignorados: number; errores: string[] } | null; source?: "env" | "ajustes"; env_mailbox?: string };
 function InboxSettings() {
   const { toast, allows } = useSession();
   const navigate = useNavigate();
@@ -394,16 +399,24 @@ function InboxSettings() {
     finally { setBusy(false); }
   };
   const activo = cfg.enabled && cfg.has_password;
+  if (cfg.source === "env") {
+    return (
+      <Card title="Buzón de facturas de proveedores" extra={<span className="meta" style={{ color: "var(--ok)" }}>● Activo · revisa cada 15 min</span>}>
+        <p style={{ fontSize: 13, marginTop: 0 }}>Configurado en el servidor: <span className="mono">{cfg.env_mailbox}</span>. Se cambia en las variables del servidor (RECEPTION_IMAP_*), no aquí.</p>
+        {allows("accounting.ver") && <button className="btn btn--soft btn--sm" onClick={() => navigate("/contabilidad/facturas/correos")}>Ver los correos recibidos</button>}
+      </Card>
+    );
+  }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
     <Card title="¿Para qué sirve esta pestaña?">
       <ol className="muted" style={{ fontSize: 13, lineHeight: 1.7, paddingLeft: 18, margin: 0 }}>
         <li>Para <b>recibir</b> solas las facturas electrónicas (XML) que te mandan tus <b>proveedores</b>: lo que Crimson compra (equipos, materiales, servicios).</li>
-        <li>La plataforma revisa cada 15 minutos un buzón de correo dedicado; cada XML que llega aparece en <b>Administración → Recepción XML</b>, listo para revisarlo y registrarlo como gasto.</li>
+        <li>La plataforma revisa cada 15 minutos un buzón de correo dedicado; cada comprobante que llega (XML, PDF y la respuesta de Hacienda) aparece en <b>Contabilidad → Facturas</b>, listo para responderlo ante Hacienda y registrarlo como gasto. Nunca marca los correos como leídos.</li>
         <li><b>No envía correos ni tiene que ver con Resend.</b> El correo que sale de la plataforma (invitaciones, cotizaciones, facturas) se configura en la pestaña <b>Correo</b>.</li>
-        <li><b>Es opcional.</b> Mientras no lo configurés, podés subir los XML a mano en Recepción XML.</li>
+        <li><b>Es opcional.</b> Mientras no lo configurés, podés cargar los archivos a mano en Contabilidad → Facturas.</li>
       </ol>
-      {allows("accounting.ver") && <button className="btn btn--soft btn--sm" style={{ marginTop: 12 }} onClick={() => navigate("/recepcion")}>Abrir Recepción XML</button>}
+      {allows("accounting.ver") && <button className="btn btn--soft btn--sm" style={{ marginTop: 12 }} onClick={() => navigate("/contabilidad/facturas")}>Abrir Contabilidad → Facturas</button>}
     </Card>
     <div className="grid-2">
       <Card title="Buzón de facturas de proveedores" extra={<span className="meta" style={{ color: activo ? "var(--ok)" : "var(--text-3)" }}>{activo ? "● Activo · revisa cada 15 min" : "● Apagado"}</span>}>
@@ -424,7 +437,7 @@ function InboxSettings() {
         <ol className="muted" style={{ fontSize: 13, lineHeight: 1.7, paddingLeft: 18, margin: 0 }}>
           <li>Creá un buzón dedicado (p. ej. <span className="mono">facturas@tuempresa.com</span>) y pedile a tus proveedores que envíen ahí sus facturas electrónicas.</li>
           <li>En Gmail o Microsoft 365 generá una <b>contraseña de aplicación</b>; no uses la contraseña principal.</li>
-          <li>Cada correo no leído con XML adjunto crea el comprobante en <b>Recepción XML</b>, listo para aceptar y convertir en gasto. Las respuestas de Hacienda se ignoran y los duplicados no se repiten.</li>
+          <li>Cada correo nuevo con XML, PDF o zip crea el comprobante en <b>Contabilidad → Facturas</b>, listo para aceptar y convertir en gasto. La respuesta de Hacienda y el PDF se emparejan con su comprobante y los duplicados no se repiten.</li>
         </ol>
         {cfg.last_run && cfg.last_result && (
           <div style={{ marginTop: 14, padding: 12, borderRadius: 10, background: "var(--bg-2)", fontSize: 13 }}>

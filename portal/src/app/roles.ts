@@ -39,10 +39,10 @@ export const ROLES: Record<string, RoleMeta> = {
   },
   contabilidad: {
     label: "Contador", tone: "#6b46c1", glyph: "K",
-    summary: "Todo el dinero de la empresa: facturas, cobros, gastos, recepción de XML, conciliación, planillas y reportes.",
-    can: ["Facturas y cobros de toda la empresa", "Gastos, recepción y conciliación", "Planillas, colillas y comisiones", "Aprobaciones de planillas y comisiones", "Los reportes de la empresa con Excel"],
-    cannot: ["Crear ventas o cobrar", "Ver costos de productos ni márgenes (salvo que el administrador lo habilite)", "Configurar la empresa o los usuarios"],
-    menu: ["/", "/aprobaciones", "/facturas", "/pagos", "/recurrencias", "/clientes", "/productos", "/inventario", "/compras", "/comisiones", "/contabilidad", "/recepcion", "/conciliacion", "/planillas", "/vehiculos", "/reportes", "/archivo", "/ajustes"],
+    summary: "Todo el dinero de la empresa: facturas de proveedores ante Hacienda, gastos, bancos, el panel tributario, planillas y reportes.",
+    can: ["Facturas de proveedores: recibir, aceptar o rechazar ante Hacienda", "Gastos, recurrentes, categorías y bancos", "Panel tributario del mes", "Facturas y cobros de toda la empresa", "Planillas, colillas y comisiones", "Aprobaciones de planillas y comisiones", "Los reportes de la empresa con Excel", "Importar el histórico de recepciones de Fygaro"],
+    cannot: ["Crear ventas o cobrar", "Ver costos de productos ni márgenes (salvo que el administrador lo habilite)", "Configurar la empresa o los usuarios", "Cargar las credenciales de Hacienda ni activar producción"],
+    menu: ["/", "/aprobaciones", "/facturas", "/pagos", "/recurrencias", "/clientes", "/productos", "/inventario", "/compras", "/comisiones", "/contabilidad", "/planillas", "/vehiculos", "/reportes", "/importar", "/archivo", "/ajustes"],
   },
   tecnico: {
     label: "Técnico instalador", tone: "#b45309", glyph: "T",

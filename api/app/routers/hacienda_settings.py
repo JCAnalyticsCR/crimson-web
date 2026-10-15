@@ -199,6 +199,12 @@ def fiscal_geo(p: Principal = Depends(get_principal)):
     return geo_catalog()
 
 
+@router.get("/fiscal/mode")
+def fiscal_mode(p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    """Modo fiscal vigente (lo usa el editor de facturas: en emision directa la fecha la pone la emision)."""
+    return {"mode": hc.hacienda_mode(db, p.tenant)}
+
+
 class ActivityIn(BaseModel):
     code: str = Field(pattern=r"^[0-9A-Za-z.]{6}$")
     description: str | None = Field(None, max_length=200)

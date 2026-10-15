@@ -1,6 +1,6 @@
 /* Conciliacion bancaria: importar estado de cuenta, casar movimientos. */
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney, uploadFile } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
@@ -27,7 +27,8 @@ const STATUS_TABS: [StatusFilter, string][] = [["", "Todos"], ["pendiente", "Pen
 export default function Banking() {
   const { toast } = useSession();
   const [accounts, setAccounts] = useState<BankAccount[] | null>(null);
-  const [selId, setSelId] = useState<number | null>(null);
+  const { id: routeId } = useParams(); // /contabilidad/contable/bancos/:id/conciliacion abre esa cuenta
+  const [selId, setSelId] = useState<number | null>(routeId ? Number(routeId) : null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pendiente");
   const [lines, setLines] = useState<BankLine[]>([]);
   const [linesLoading, setLinesLoading] = useState(false);
