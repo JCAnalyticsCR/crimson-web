@@ -31,7 +31,6 @@ from .extra import (
     Ticket,
     TicketType,
 )
-from .fiscal import FiscalActivity, FiscalCredential, FiscalProfile, ReceptionMailbox, ReceptionMessage, ReceptionResponse
 from .field import (
     CustomerAsset,
     Opportunity,
@@ -46,6 +45,7 @@ from .field import (
     WorkOrderMaterial,
     WorkOrderTime,
 )
+from .fiscal import FiscalActivity, FiscalCredential, FiscalProfile, ReceptionMailbox, ReceptionMessage, ReceptionResponse
 from .ops import (
     EInvoiceDocument,
     EmailOutbox,

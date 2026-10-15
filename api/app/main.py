@@ -70,6 +70,9 @@ def create_app() -> FastAPI:
         docs_url="/docs" if not settings.is_prod else None,
         redoc_url=None,
     )
+    from .core.bodylimit import BodyLimitMiddleware
+
+    app.add_middleware(BodyLimitMiddleware)  # antes que CORS: el 413 lleva sus encabezados
     app.add_middleware(
         CORSMiddleware,
         # el portal + la landing (esta solo usa /public/incidents y no manda cookies)

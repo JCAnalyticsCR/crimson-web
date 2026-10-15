@@ -234,7 +234,7 @@ def test_consecutivos_fiscales_y_settings_sin_texto_cifrado(client, auth):
     st = client.get("/settings/hacienda").json()
     assert st["consecutives_confirmed_at"] is None and st["consecutives"][0]["current"] == 85
     assert client.put(f"/settings/billing-groups/{g['group_id']}", json={"prefix": "F01", "current": 84}).status_code == 422  # nunca retrocede
-    client.put("/settings/inbox", json={"enabled": True, "host": "imap.ejemplo.com", "user": "f@ejemplo.com", "password": "clave-123"})
+    client.put("/settings/inbox", json={"enabled": True, "host": "imap.ejemplo.com", "user": "f@ejemplo.com", "password": "clave-123", "admin_password": ADMIN_PASSWORD})
     assert "password_enc" not in client.get("/settings").text
 
 

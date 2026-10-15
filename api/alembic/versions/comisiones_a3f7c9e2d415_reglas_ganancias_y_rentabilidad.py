@@ -103,10 +103,14 @@ def upgrade() -> None:
     with op.batch_alter_table("project") as b:
         b.add_column(sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True))
 
-    # Relleno portable (SQLite y Postgres). Un pago viejo ya comisiono: su clave queda tomada.
+    # Relleno portable (SQLite y Postgres). Un pago viejo ya comisiono: su clave queda tomada. Solo la fila de menor id
+    # de cada (empresa, pago, usuario): dos filas viejas del mismo pago y usuario chocaban con uq_commission_source y
+    # revertian TODO el upgrade (la otra queda sin clave, como estaba; services/commissions la sigue contando).
     op.execute(
         "UPDATE commission SET source_key = 'cobro:' || CAST(payment_id AS VARCHAR(20)) || ':v:' || CAST(user_id AS VARCHAR(20)) "
-        "WHERE payment_id IS NOT NULL AND user_id IS NOT NULL"
+        "WHERE payment_id IS NOT NULL AND user_id IS NOT NULL AND id = ("
+        "SELECT MIN(c2.id) FROM commission c2 WHERE c2.tenant_id = commission.tenant_id AND c2.payment_id = commission.payment_id "
+        "AND c2.user_id = commission.user_id)"
     )
     op.execute("UPDATE commission SET amount_crc = amount, fx = 1 WHERE currency = 'CRC'")
     op.execute("UPDATE project SET completed_at = COALESCE(delivered_at, updated_at) WHERE status IN ('terminado', 'entregado', 'facturado')")

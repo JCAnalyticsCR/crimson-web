@@ -168,7 +168,7 @@ export default function CustomerDetail() {
         </Card>
       )}
 
-      <div className="grid-2" style={{ gridTemplateColumns: "minmax(0, 1.6fr) minmax(0, 1fr)", alignItems: "start" }}>
+      <div className="grid-2 grid-2--split">
         <Card title="Línea de tiempo" extra={<div className="tabs">{[["", "Todo"], ["factura", "Facturas"], ["pago", "Pagos"], ["cotizacion", "Cotizaciones"], ["nota", "Notas"]].map(([k, l]) => <button key={k} className={filter === k ? "is-active" : ""} onClick={() => setFilter(k)}>{l}</button>)}</div>}>
           <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
             <textarea className="textarea" style={{ minHeight: 44 }} placeholder="Agregar una nota interna (llamada, acuerdo, visita…)" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) addNote(); }} />

@@ -91,7 +91,7 @@ def _line_out(ln: BankStatementLine, db: Session) -> dict:
     elif ln.matched_type == "expense" and ln.matched_id:
         e = db.get(Expense, ln.matched_id)
         if e:
-            match = {"type": "expense", "id": e.id, "label": f"Gasto · {e.description}", "amount": e.total, "date": e.date, "to": "/contabilidad"}
+            match = {"type": "expense", "id": e.id, "label": f"Gasto · {e.description}", "amount": e.total, "date": e.date, "to": f"/contabilidad/contable?expense={e.id}"}
     return {
         "id": ln.id,
         "date": ln.date,

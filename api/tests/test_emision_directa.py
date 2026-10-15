@@ -163,8 +163,8 @@ def test_nc_directa_anula_y_devuelve_inventario_solo_al_aceptarse(client, auth, 
     assert client.get(f"/invoices/{inv['id']}").json()["status"] == "anulada"
     stock1 = sum(Decimal(str(lv["quantity"])) for lv in client.get("/stock").json()["levels"])
     assert stock1 == stock0 + 2
-    from app.services.hacienda_sync import _void_after_nc
     from app.models import Invoice
+    from app.services.hacienda_sync import _void_after_nc
 
     i = db_session.get(Invoice, inv["id"])
     i.status = "creado"  # aunque alguien la reabriera, el inventario no vuelve dos veces

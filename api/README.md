@@ -117,12 +117,18 @@ AES-256-GCM (llave `FISCAL_KEYS`) y nunca se vuelven a mostrar: la API devuelve 
 
 | Variable | Uso |
 |---|---|
-| `FISCAL_KEYS` | `kid:llave` separadas por coma (llave = base64url de 32 bytes). La primera cifra; todas descifran (rotación). **La misma en `api` y `worker`** (variable compartida del proyecto). Sin ella, fuera de `ENV=local` con SQLite, guardar credenciales responde 503. |
-| `HACIENDA_PRODUCTION_ALLOWED` | `true` solo en el servicio de producción, el día del cambio. |
+| `FISCAL_KEYS` | `kid:llave` separadas por coma (llave = base64url de 32 bytes). La primera cifra; todas descifran (rotación). **La misma en `api` y `worker`** (variable compartida del proyecto), nunca en `respaldo`. Sin ella, fuera de `ENV=local`, guardar credenciales de Hacienda **o la contraseña del buzón** responde 503. Con ella, `app.bootstrap` pasa solo las contraseñas de buzón guardadas con el cifrado heredado (derivado de `JWT_SECRET`) a esta llave. Mal escrita: no tumba el arranque; queda un error en el log y todo lo fiscal sin llave (503). |
+| `ENV`, `PUBLIC_BASE_URL` | `production` y la URL pública del portal, **iguales en `api` y `worker`** (variables compartidas): con `RAILWAY_ENVIRONMENT_ID` forman la huella de instancia, y el que envía y consulta a Hacienda es el worker. Los dos registran al arrancar `FISCAL_KEYS cargadas: … · huella de instancia …`: deben coincidir. |
+| `HACIENDA_PRODUCTION_ALLOWED` | `true` en `api` **y** `worker` (variable compartida), solo en el servicio de producción y el día del cambio. |
 | `HACIENDA_PROVEEDOR_SISTEMAS` | Cédula para `ProveedorSistemas`; vacío = la de la empresa (desarrollo propio). |
 | `HACIENDA_ENV_TENANT` / `HACIENDA_ENVIRONMENT` | Empresa (slug) y ambiente (`pruebas`/`produccion`) de las credenciales de entorno. |
 | `HACIENDA_USERNAME`, `HACIENDA_PASSWORD`, `HACIENDA_P12_B64`, `HACIENDA_P12_PIN` | Respaldo por entorno para una sola empresa (las de Ajustes mandan). |
-| `RECEPTION_IMAP_HOST`, `RECEPTION_IMAP_PORT` (993), `RECEPTION_IMAP_USER`, `RECEPTION_IMAP_PASSWORD`, `RECEPTION_IMAP_FOLDER` (INBOX), `RECEPTION_IMAP_TENANT`, `RECEPTION_IMAP_SINCE_DAYS` (30) | Buzón de recepción. Sin host, usuario o contraseña: apagado (queda la configuración de Ajustes → XML de proveedores). |
+| `RECEPTION_IMAP_HOST`, `RECEPTION_IMAP_PORT` (993), `RECEPTION_IMAP_USER`, `RECEPTION_IMAP_PASSWORD`, `RECEPTION_IMAP_FOLDER` (INBOX), `RECEPTION_IMAP_TENANT`, `RECEPTION_IMAP_SINCE_DAYS` (30) | Buzón de recepción. Sin host, usuario o contraseña: apagado (queda la configuración de Ajustes → XML de proveedores, que pide la contraseña del administrador al guardar la del buzón o cambiar servidor, puerto o usuario, y solo se conecta a direcciones públicas). |
+| `ALLY_MEDIA_QUOTA_MB` | Tope de fotos y PDF por empresa aliada (defecto 1024). |
+| `EINVOICE_PROVIDER` | Ya existía. `none` \| `sandbox` \| `alanube` \| `gti`; vacío o cualquier otro valor = `none` con un aviso en el log (antes un valor raro tumbaba el arranque). |
+
+Una variable definida **sin valor** vale lo mismo que no tenerla (`env_ignore_empty`): no tumba `api`, `worker` ni
+`alembic`. `HACIENDA_ENVIRONMENT` mal escrito queda en `pruebas` (nunca producción por error).
 
 Generar `FISCAL_KEYS` **en la consola del servicio en Railway** (sin copiarla a ningún chat):
 
@@ -136,6 +142,37 @@ correr `python -m app.tools.rotate_fiscal_keys` (o `--dry-run`) y recién entonc
 
 Antes de desplegar la migración `f1c7a9d3e520`: `python -m app.tools.check_reception_dupes` (solo lectura) lista las
 recepciones duplicadas por clave; las copias exactas sin respuesta se fusionan solas, el resto hay que resolverlo a mano.
+
+### Desplegar la rama de la reunión sobre la base de producción
+
+El contenedor que hoy corre en Railway no tiene las herramientas nuevas: los chequeos previos van en SQL (consola de
+Postgres de Railway, solo lectura). Las 6 migraciones corren en **una** transacción con `lock_timeout` de 15 s: si
+algo falla, la base queda en `c5d18e3f7a2b`, el contenedor nuevo no arranca y el viejo sigue sirviendo.
+
+1. **Respaldo** inmediato (`pg_dump` o el cron `respaldo`): hay rellenos sin vuelta atrás (limpieza del costo/margen en
+   `internal_notes`, token fuera del HTML de `email_outbox`, recepciones duplicadas exactas borradas, `aprobado` →
+   `simulado`). En la consola del `api` actual, `alembic current` debe dar exactamente `c5d18e3f7a2b`.
+2. **Chequeos** (deben dar vacío o lo esperado):
+   ```sql
+   -- recepciones duplicadas que la migracion no fusiona sola (vivas > 1 o xmls > 1: resolver a mano)
+   SELECT tenant_id, clave, array_agg(id ORDER BY id), count(*) FILTER (WHERE action IS NOT NULL OR expense_id IS NOT NULL) AS vivas,
+          count(DISTINCT md5(btrim(replace(replace(coalesce(xml_document, ''), E'\uFEFF', ''), E'\r\n', E'\n'), E' \t\r\n'))) AS xmls
+     FROM received_document GROUP BY tenant_id, clave HAVING count(*) > 1;
+   -- facturas "aceptadas" del proveedor sandbox de antes (quedan como simuladas; su NC se anula aqui, no va a Hacienda)
+   SELECT count(*) FROM einvoice_document WHERE provider = 'sandbox' AND status = 'aceptada';
+   -- recurrencias de gasto atrasadas: la primera corrida (05:00) genera hasta 12 periodos de cada una
+   SELECT id, name, next_date FROM recurrence WHERE active AND kind = 'gasto' AND next_date < current_date;
+   ```
+   Si no se quieren los periodos atrasados de gasto, ajustar `next_date` antes.
+3. **Variables**: revisar `EINVOICE_PROVIDER` en `api`, `worker` y `respaldo` (vacía o rara ya no tumba nada, pero
+   queda `none`). Ninguna variable nueva es obligatoria para este despliegue.
+4. **Orden**: desactivar el auto-deploy de `worker` y `respaldo` para este push (o redesplegarlos a mano después).
+   Desplegar `api` y confirmar en su log la migración y `alembic current` = `f1c7a9d3e520`; recién entonces desplegar
+   `worker` (y `respaldo`). Con el esquema viejo, 11 de las 20 tareas del worker nuevo fallan (recordatorios, SLA,
+   mantenimientos, Hacienda) sin que nadie lo note. El `portal` puede ir con el `api`.
+5. **Ventana** de poco uso: mientras migra, el api viejo espera los bloqueos (decenas de segundos).
+6. **Volver atrás**: redesplegar la imagen anterior de `api` y `worker` **sin** `alembic downgrade` (el código de
+   `main` funciona sobre el esquema nuevo; el downgrade no restaura los rellenos).
 
 ### Puesta en marcha (runbook)
 

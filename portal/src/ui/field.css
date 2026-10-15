@@ -21,6 +21,9 @@
 a.eco__box, button.eco__box { color: inherit; text-decoration: none; text-align: left; font: inherit; cursor: pointer; }
 a.eco__box:hover, button.eco__box:hover { border-color: var(--crimson); }
 .eco__box b { font-size: 19px; font-family: var(--mono); }
+/* telefonos chicos: dos columnas de ~150 px y montos como 3 300 000,00 se salian de la tarjeta */
+.eco__box { min-width: 0; }
+@media (max-width: 420px) { .eco__box b, .eco__box .money { font-size: clamp(13px, 4.2vw, 19px); overflow-wrap: anywhere; } }
 .eco__box.is-good b { color: var(--ok); }
 .eco__box.is-bad b { color: var(--bad); }
 

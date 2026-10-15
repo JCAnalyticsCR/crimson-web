@@ -5,10 +5,14 @@
    Cada botón manda SOLO lo que cambió desde la última respuesta del servidor (como el panel interno): el material que
    ya existe va por id (quantities / removed) y el nuevo en "agregados". Mandar todo pisaría lo que Crimson u otro
    técnico anotaron mientras tanto. Si quedó tiempo corriendo de más (se olvidaron de terminar la jornada), se indica
-   la hora real en que terminaron. */
+   la hora real en que terminaron.
+   Autoguardado (como la OT interna): tareas, usado del material que ya existe, fotos, notas y "recibe conforme" suben
+   solos tras cada pausa, al cambiar de pestaña o de pantalla y al cerrar (POST progress con solo lo distinto del
+   último guardado aceptado). El material nuevo o quitado va solo con los botones. En la vista previa no se guarda. */
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../../lib/api";
+import { useRecordAutosave } from "../../lib/useRecordAutosave";
 import { useSession } from "../../app/session";
 import { Badge, Empty, Field, I, Icon } from "../../ui/components";
 import { Lookup, type LookupItem } from "../../ui/Lookup";
@@ -19,6 +23,19 @@ import { errorText, fmtWhen, useAlly, type Material, type OrderRow, type Tech } 
 const num = (v: string | number | null | undefined) => Number(String(v ?? "").replace(",", ".")) || 0;
 /* Costa Rica es UTC-6 todo el año: la hora se escribe en hora de aquí aunque el teléfono tenga mal la zona. */
 const toISO = (local: string) => new Date(`${local}:00-06:00`).toISOString();
+
+/* Lo que se autoguarda de una orden: nunca material nuevo ni quitado (crearia o borraria lineas en cada pausa). */
+type Avance = { id: number; tasks: { text: string; done: boolean }[]; photos: string[]; notes: string; customer_signature: string; quantities: Record<string, number> };
+const avanceBody = (v: Avance): Record<string, unknown> => ({ tasks: v.tasks, photos: v.photos, notes: v.notes, customer_signature: v.customer_signature, quantities: v.quantities });
+/** Solo lo distinto del último guardado aceptado (las cantidades, línea por línea). */
+function avanceDiff(b: Record<string, unknown>, prev: Record<string, unknown> | null): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of ["tasks", "photos", "notes", "customer_signature"]) if (JSON.stringify(b[k]) !== JSON.stringify(prev?.[k])) out[k] = b[k];
+  const antes = (prev?.quantities || {}) as Record<string, number>;
+  const q = Object.fromEntries(Object.entries(b.quantities as Record<string, number>).filter(([k, v]) => antes[k] !== v));
+  if (Object.keys(q).length) out.quantities = q;
+  return out;
+}
 
 function OrderList() {
   const [estado, setEstado] = useState<"pendientes" | "finalizadas" | "todas">("pendientes");
@@ -72,6 +89,24 @@ function OrderDetail({ id }: { id: number }) {
     const r = await api<{ id: number; code: string; name: string }[]>(`${ALLY_FIELD_API.productSearch}?q=${encodeURIComponent(q)}`);
     return r.map((p) => ({ id: p.id, label: p.name, hint: p.code }));
   }, []);
+  const avance: Avance | null = o
+    ? { id, tasks, photos, notes, customer_signature: firma, quantities: Object.fromEntries(mats.filter((m) => m.id).map((m) => [String(m.id), num(m.quantity)])) }
+    : null;
+  const auto = useRecordAutosave<Avance>({
+    ns: "aliado-ot",
+    mode: "pause",
+    value: avance,
+    idOf: (v) => v.id,
+    body: avanceBody,
+    save: async (b, _id, ctx) => {
+      const diff = avanceDiff(b, ctx.prev);
+      if (!Object.keys(diff).length) return;
+      await api(ALLY_FIELD_API.orderAction(id, "progress"), { method: "POST", json: diff, headers: ctx.headers, keepalive: ctx.keepalive });
+    },
+    enabled: !!o && o.can_act && !readOnly,
+    label: () => o?.number || "La orden",
+    apply: (v) => { setTasks(v.tasks); setPhotos(v.photos); setNotes(v.notes); setFirma(v.customer_signature); setMats((cur) => cur.map((m) => (m.id && v.quantities[String(m.id)] !== undefined ? { ...m, quantity: String(v.quantities[String(m.id)]) } : m))); },
+  });
   if (err) return <p className="muted">{err}</p>;
   if (!o) return <div style={{ minHeight: "40vh", display: "grid", placeItems: "center" }}><span className="spinner" /></div>;
   const act = o.can_act && !readOnly;
@@ -98,13 +133,16 @@ function OrderDetail({ id }: { id: number }) {
     setBusy(true);
     try {
       const body = { ...cambios(), ...((a === "pause" || a === "finish") && o.stale && finJornada ? { fin_jornada: toISO(finJornada) } : {}) };
-      take(await api<OrderRow>(ALLY_FIELD_API.orderAction(id, a), { method: "POST", json: body }));
+      // nunca a la par del autoguardado; la respuesta pasa a ser la referencia
+      const x = await auto.exclusive(avance as Avance, () => api<OrderRow>(ALLY_FIELD_API.orderAction(id, a), { method: "POST", json: body }));
+      auto.fromServer();
+      take(x);
       toast(a === "finish" ? "Orden finalizada" : a === "start" ? "Jornada iniciada" : a === "pause" ? "Jornada terminada" : "Guardado");
     } catch (e) { toast(e instanceof Error ? e.message : "No se pudo guardar", "bad"); }
     finally { setBusy(false); }
   };
   const asignar = async (tid: number) => {
-    try { take(await api<OrderRow>(`/aliado/ordenes/${id}/asignar`, { method: "PATCH", json: { technician_id: tid, helpers: o.helpers.filter((h) => h !== tid) } })); toast("Orden reasignada"); }
+    try { const x = await api<OrderRow>(`/aliado/ordenes/${id}/asignar`, { method: "PATCH", json: { technician_id: tid, helpers: o.helpers.filter((h) => h !== tid) } }); auto.fromServer(); take(x); toast("Orden reasignada"); }
     catch (e) { toast(e instanceof Error ? e.message : "No se pudo reasignar", "bad"); }
   };
   const setMat = (i: number, patch: Partial<Material>) => setMats(mats.map((m, j) => (j === i ? { ...m, ...patch } : m)));
@@ -137,6 +175,7 @@ function OrderDetail({ id }: { id: number }) {
           <span className="meta">Se usa al terminar la jornada o al finalizar. Una jornada no pasa de 16 horas.</span>
         </div>
       )}
+      {auto.bar}
       {act && (
         <div className="al-actions" style={{ margin: "12px 0" }}>
           {o.status === "asignada" && <button className="btn btn--soft" disabled={busy} onClick={() => accion("arrive")}><Icon d={I.check} />Llegué</button>}

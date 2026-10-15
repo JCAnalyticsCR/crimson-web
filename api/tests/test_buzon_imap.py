@@ -9,7 +9,7 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 from pydantic import SecretStr
 
-from tests.hacienda_utils import FakeImapUid, clave, email_with, fe_xml, role_headers
+from tests.hacienda_utils import ADMIN_PASSWORD, FakeImapUid, clave, email_with, fe_xml, role_headers
 
 HOY = date.today()
 FECHA = f"{HOY.isoformat()}T10:00:00-06:00"
@@ -28,7 +28,7 @@ def correo(n: int, **kw) -> bytes:
 
 
 def _ajustes(client):
-    r = client.put("/settings/inbox", json={"enabled": True, "host": "imap.ejemplo.com", "user": "facturas@ejemplo.com", "password": "clave-app-123"})
+    r = client.put("/settings/inbox", json={"enabled": True, "host": "imap.ejemplo.com", "user": "facturas@ejemplo.com", "password": "clave-app-123", "admin_password": ADMIN_PASSWORD})
     assert r.status_code == 200 and r.json()["source"] == "ajustes"
 
 

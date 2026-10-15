@@ -398,6 +398,11 @@ class InboxIn(BaseModel):
     user: str = Field("", max_length=200)
     password: str | None = Field(None, max_length=300)  # vacio = conservar la guardada
     folder: str = Field("INBOX", max_length=120)
+    # contrasena del usuario que guarda: se pide al guardar una contrasena o al cambiar servidor, puerto o usuario
+    admin_password: str | None = Field(None, max_length=200)
+
+
+INBOX_CONNECTION = ("host", "port", "user")
 
 
 def _inbox_out(t: Tenant, db: Session | None = None) -> dict:
@@ -421,16 +426,36 @@ def inbox_get(p: Principal = Depends(require("settings", "ver")), db: Session = 
 def inbox_put(data: InboxIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
     from sqlalchemy.orm.attributes import flag_modified
 
-    from ..services.inbox import config, encrypt_password
+    from ..core import secretbox
+    from ..core.reauth import require_reauth
+    from ..services.inbox import config, encrypt_password, host_problem
 
     cur = config(p.tenant)
-    new = {**cur, **data.model_dump(exclude={"password"})}
+    data.host, data.user, data.folder = data.host.strip(), data.user.strip(), (data.folder.strip() or "INBOX")
+    if (why := host_problem(data.host)) is not None:
+        raise HTTPException(422, why)
+    conexion = any(str(getattr(data, k)) != str(cur.get(k) or ("993" if k == "port" else "")) for k in INBOX_CONNECTION)
+    if conexion and cur.get("password_enc") and not data.password:
+        # la contrasena guardada nunca viaja a otro servidor ni a otro usuario sin que alguien la vuelva a escribir
+        raise HTTPException(422, "Cambiaste el servidor, el puerto o el usuario: volvé a escribir la contraseña del buzón")
+    if data.password or conexion:
+        require_reauth(p, data.admin_password)  # core/reauth.py: mismo limitador y mismo 403 que Hacienda y usuarios
+    new = {**cur, **data.model_dump(exclude={"password", "admin_password"})}
     if data.password:
-        new["password_enc"] = encrypt_password(p.tenant.id, data.password)  # FISCAL_KEYS (AES-GCM) si esta disponible
+        try:
+            new["password_enc"] = encrypt_password(p.tenant.id, data.password)  # FISCAL_KEYS (AES-GCM)
+        except secretbox.SecretUnavailable as e:
+            raise HTTPException(503, str(e)) from e
     st = dict(p.tenant.settings or {})
     st["inbox"] = new
     p.tenant.settings = st
     flag_modified(p.tenant, "settings")
+    campos = ("enabled", *INBOX_CONNECTION, "folder")
+    diff = {k: [cur.get(k), new.get(k)] for k in campos if cur.get(k) != new.get(k)}
+    if data.password:
+        diff["contraseña"] = "cambiada"  # nunca el valor
+    if diff:
+        audit(db, p.tenant.id, p.user.id, "update", "inbox", p.tenant.id, diff, ip=p.ip)
     db.commit()
     return _inbox_out(p.tenant, db)
 
@@ -438,15 +463,6 @@ def inbox_put(data: InboxIn, p: Principal = Depends(require("settings", "configu
 @router.post("/inbox/run")
 def inbox_run(p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
     """Revisa la bandeja ahora (el worker lo hace cada 15 minutos si esta activa)."""
-    from ..services.inbox import MailboxBusy, poll
+    from ..services.inbox import poll_http
 
-    try:
-        return poll(db, p.tenant)
-    except MailboxBusy as e:
-        raise HTTPException(409, "Ya se está revisando el buzón") from e
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from e
-    except OSError as e:
-        raise HTTPException(502, f"No se pudo conectar al servidor de correo: {e}") from e
-    except Exception as e:  # noqa: BLE001 - imaplib.IMAP4.error (credenciales) y similares
-        raise HTTPException(502, f"El servidor de correo rechazó la conexión: {e}") from e
+    return poll_http(db, p.tenant)

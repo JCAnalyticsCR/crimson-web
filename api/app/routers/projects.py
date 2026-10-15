@@ -433,6 +433,7 @@ def project_from_quote(qid: int, data: FromQuoteIn, p: Principal = Depends(requi
     db.flush()
     from ..services import commissions as comsvc
 
+    comsvc.link_to_project(db, pr)  # lo devengado al aceptar (o cobrado con la factura) entra a la economia del proyecto
     comsvc.on_quote_won(db, q)  # crear el proyecto es aceptacion implicita (reglas "al aceptar la cotizacion")
     faltantes = _reservar(db, p, pr, order)
     audit(db, p.tenant.id, p.user.id, "from_quote", "project", pr.id, {"quote": q.number, "por_comprar": len(faltantes)}, ip=p.ip)
@@ -883,6 +884,7 @@ def project_invoice(pid: int, p: Principal = Depends(require("sales", "crear")),
     pr.invoice_id, pr.status = inv.id, "facturado"
     from ..services import commissions as comsvc
 
+    comsvc.link_to_project(db, pr)
     comsvc.on_project_status(db, pr, antes)
     audit(db, p.tenant.id, p.user.id, "invoice", "project", pr.id, {"invoice_id": inv.id}, ip=p.ip)
     db.commit()

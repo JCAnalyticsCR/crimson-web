@@ -379,6 +379,24 @@ def _still_earned(rows) -> bool:
     return any(c.kind != "ajuste" and c.status != "anulada" and c.id not in revertidos for c in rows)
 
 
+MANUAL_VOID = "manual_void"
+
+
+def mark_manual_void(c: Commission) -> None:
+    """Anulada a mano en la bandeja (PATCH /commissions): una decision de contabilidad o del admin, no del motor. El
+    motor no la vuelve a devengar sola al convertir o crear el proyecto (solo una aceptacion nueva lo hace)."""
+    c.terms = {**(c.terms or {}), MANUAL_VOID: True}
+
+
+def _manually_voided(rows) -> bool:
+    """El ultimo movimiento de base (no ajuste ni reverso) del grupo lo anulo una persona."""
+    base = [c for c in rows if c.kind != "ajuste" and not _is_reversal(c)]
+    if not base:
+        return False
+    last = max(base, key=lambda c: c.id)
+    return last.status == "anulada" and bool((last.terms or {}).get(MANUAL_VOID))
+
+
 def _fx_for(db: Session, currency: str, doc) -> Decimal:
     if currency == "CRC":
         return Decimal(1)
@@ -491,14 +509,36 @@ def _base_sale_of(c: Commission) -> Decimal:
     return d(c.base_amount) if c.base == "venta" else Decimal(0)  # filas viejas sin terms
 
 
-def _ben_filter(beneficiary: str, uid: int | None, part: AllyParticipation | None) -> list:
+def _sale_filter(beneficiary: str, part: AllyParticipation | None) -> list:
+    """Lo que ya cobro "la venta" sea quien sea el vendedor: si la cotizacion o la factura cambia de vendedor, el nuevo
+    no vuelve a cobrar lo que ya devengo el anterior (la venta comisiona una sola vez). Cada aliado por su participacion."""
     if beneficiary == "vendedor":
-        return [Commission.beneficiary == "vendedor", Commission.user_id == uid]
+        return [Commission.beneficiary == "vendedor"]
     return [Commission.participation_id == part.id]
 
 
+def _payment_commissioned(db: Session, payment: Payment) -> bool:
+    """El cobro ya comisiono al vendedor (en cualquier estado y a cualquier usuario). Los movimientos viejos llevan la
+    clave cobro:{pago}:v:{quien hizo la factura}; el vendedor responsable puede ser otro y su clave no choca."""
+    return (
+        db.scalar(
+            select(Commission.id)
+            .where(
+                Commission.tenant_id == payment.tenant_id,
+                Commission.payment_id == payment.id,
+                Commission.beneficiary == "vendedor",
+                Commission.trigger == "cobro",
+                Commission.kind == "comision",
+            )
+            .limit(1)
+        )
+        is not None
+    )
+
+
 def _sold_base(db: Session, inv: Invoice, beneficiary: str, uid, part) -> Decimal:
-    """Venta sin IVA ya comisionada al cobrar en esta factura (tope de la falla B), neta de devoluciones."""
+    """Venta sin IVA ya comisionada al cobrar en esta factura (tope de la falla B), neta de devoluciones. Del vendedor
+    cuenta lo de cualquier vendedor (_sale_filter): cambiar de vendedor no reinicia el tope."""
     rows = db.scalars(
         select(Commission).where(
             Commission.tenant_id == inv.tenant_id,
@@ -506,7 +546,7 @@ def _sold_base(db: Session, inv: Invoice, beneficiary: str, uid, part) -> Decima
             Commission.status != "anulada",
             Commission.trigger == "cobro",
             Commission.kind.in_(("comision", "ajuste")),
-            *_ben_filter(beneficiary, uid, part),
+            *_sale_filter(beneficiary, part),
         )
     ).all()
     # las devoluciones del pago acordado (grupo pago:{rid}) llevan participation_id pero no son de esta comision: si
@@ -610,6 +650,8 @@ def _on_capture(db: Session, payment: Payment, inv: Invoice, only: set[str] | No
         rule = _pick(rules, cfg, deal, on, ben)
         if rule is None or trigger_of(rule, deal) != "cobro":
             continue
+        if beneficiary == "vendedor" and _payment_commissioned(db, payment):
+            continue  # backfill de un pago viejo: ya comisiono a quien hizo la factura
         ya = _sold_base(db, inv, beneficiary, uid, part)
         base_sale = max(Decimal(0), min(raw, net - ya))
         if base_sale <= 0:
@@ -878,10 +920,18 @@ def _accrue_quote(db: Session, q: Quote, n: int, on: date, only_missing: bool) -
         rule = _pick(rules, cfg, deal, on, ben)
         if rule is None or trigger_of(rule, deal) != "cotizacion_aceptada":
             continue
-        if only_missing and _still_earned(
-            _live(db, q.tenant_id, Commission.quote_id == q.id, Commission.trigger == "cotizacion_aceptada", *_ben_filter(beneficiary, uid, part))
-        ):
-            continue  # aceptar y despues convertir devenga una sola vez (uno pagado y revertido ya no cuenta)
+        if only_missing:
+            grupo = list(
+                db.scalars(
+                    select(Commission)
+                    .where(Commission.tenant_id == q.tenant_id, Commission.quote_id == q.id, Commission.trigger == "cotizacion_aceptada", *_sale_filter(beneficiary, part))
+                    .order_by(Commission.id)
+                )
+            )
+            # aceptar y despues convertir devenga una sola vez (uno pagado y revertido ya no cuenta), aunque la cotizacion
+            # haya cambiado de vendedor entre la aceptacion y la conversion; y lo que contabilidad anulo a mano no vuelve solo
+            if _still_earned([c for c in grupo if c.status != "anulada"]) or _manually_voided(grupo):
+                continue
         hold = None
         if rule.base == "margen":
             base_amount, hold = margin_base(db, deal, base_sale, "cotizacion_aceptada")
@@ -1124,6 +1174,31 @@ def on_project_status(db: Session, pr: Project, antes: str | None) -> list[Commi
         # cierre quien lo cierre (ultima OT, facturar el proyecto o editarlo)
         on_project_costs(db, pr)
     return out
+
+
+def link_to_project(db: Session, pr: Project) -> int:
+    """Lo devengado antes de que existiera el proyecto (al aceptar la cotizacion, cobros de la factura convertida antes
+    de crear el proyecto) nacio con project_id NULL: sin esto no entraba en la economia del proyecto, en los reportes de
+    rentabilidad ni en lo ya ganado de la proyeccion del aliado. Se llama al crear el proyecto y al facturarlo."""
+    conds = []
+    if pr.quote_id:
+        conds.append(Commission.quote_id == pr.quote_id)
+        q = db.get(Quote, pr.quote_id)
+        if q is not None and q.converted_invoice_id:
+            conds.append(Commission.invoice_id == q.converted_invoice_id)
+    if pr.invoice_id:
+        conds.append(Commission.invoice_id == pr.invoice_id)
+    if not conds:
+        return 0
+    n = 0
+    for c in db.scalars(select(Commission).where(Commission.tenant_id == pr.tenant_id, Commission.project_id.is_(None), or_(*conds))):
+        c.project_id = pr.id
+        if c.opportunity_id is None and pr.opportunity_id:
+            c.opportunity_id = pr.opportunity_id
+        n += 1
+    if n:
+        db.flush()
+    return n
 
 
 def project_earned(db: Session, pr: Project) -> bool:

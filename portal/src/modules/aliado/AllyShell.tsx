@@ -35,7 +35,11 @@ export default function AllyShell() {
   const [mas, setMas] = useState(false);
   useEffect(() => { setSignPath("/aliado/media/firmar"); return () => setSignPath(null); }, []);
   const items = isTech
-    ? [{ to: "/", label: "Hoy", short: "Hoy", icon: I.clock, end: true, tab: true } as Item, { to: "/mi-cuenta", label: "Mi cuenta", short: "Cuenta", icon: I.settings, tab: true } as Item]
+    ? [
+        { to: "/", label: "Hoy", short: "Hoy", icon: I.clock, end: true, tab: true } as Item,
+        // en la vista previa del admin no: "Mi cuenta" mostraba la contrasena y el 2FA del propio admin
+        ...(preview ? [] : [{ to: "/mi-cuenta", label: "Mi cuenta", short: "Cuenta", icon: I.settings, tab: true } as Item]),
+      ]
     : ITEMS.filter((it) => (!it.need || can(it.need)) && (!it.feature || company?.features?.[it.feature] !== false));
   const tabs = isTech ? items : items.filter((it) => it.tab).slice(0, 4);
   const salir = async () => { try { await logout(); } finally { nav("/login", { replace: true }); } };

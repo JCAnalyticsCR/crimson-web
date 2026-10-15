@@ -2,6 +2,7 @@
 
 import base64
 import binascii
+import logging
 from functools import lru_cache
 from typing import Literal
 
@@ -31,7 +32,9 @@ def parse_fiscal_keys(raw: str | None) -> list[tuple[str, bytes]]:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # env_ignore_empty: una variable creada sin valor en Railway vale lo mismo que no tenerla (antes un
+    # HACIENDA_PRODUCTION_ALLOWED='' o RECEPTION_IMAP_PORT='' tumbaban api, worker y alembic al importar Settings)
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", env_ignore_empty=True)
 
     app_name: str = "Crimson API"
     env: str = Field("local", description="local | staging | production")
@@ -121,19 +124,35 @@ class Settings(BaseSettings):
                 return "postgresql+psycopg://" + v[len(prefix) :]
         return v
 
-    @field_validator("einvoice_provider")
+    @field_validator("einvoice_provider", mode="before")
     @classmethod
-    def _provider(cls, v: str) -> str:
-        # "hacienda" solo lo escriben Ajustes -> Hacienda y el interruptor de produccion (nunca una variable)
-        if v not in ("none", "sandbox", "alanube", "gti"):
-            raise ValueError("EINVOICE_PROVIDER admite none | sandbox | alanube | gti")
-        return v
+    def _provider(cls, v) -> str:
+        # "hacienda" solo lo escriben Ajustes -> Hacienda y el interruptor de produccion (nunca una variable). Tolerante:
+        # Settings se valida al importar (alembic, bootstrap, api, worker, respaldo) y un valor raro que en main pasaba
+        # ("", "Sandbox", "manual") no puede impedir que el servicio arranque: se normaliza o queda en "none" con aviso.
+        s = str(v or "").strip().lower()
+        if s in ("none", "sandbox", "alanube", "gti"):
+            return s
+        if s:
+            logging.getLogger("crimson.config").warning("EINVOICE_PROVIDER=%r no es none | sandbox | alanube | gti: se usa none", s[:20])
+        return "none"
+
+    @field_validator("hacienda_environment", mode="before")
+    @classmethod
+    def _hacienda_env(cls, v) -> str:
+        # ambiente de las credenciales de ENTORNO: un valor raro nunca tumba el arranque ni apunta a produccion
+        s = str(v or "").strip().lower()
+        if s in ("pruebas", "produccion"):
+            return s
+        if s:
+            logging.getLogger("crimson.config").warning("HACIENDA_ENVIRONMENT=%r no es pruebas | produccion: se usa pruebas", s[:20])
+        return "pruebas"
 
     @field_validator("fiscal_keys")
     @classmethod
     def _fiscal_keys(cls, v: SecretStr | None) -> SecretStr | None:
-        if v is not None and v.get_secret_value().strip():
-            parse_fiscal_keys(v.get_secret_value())
+        # El formato se revisa en core/secretbox.keys(): una FISCAL_KEYS mal escrita deja las credenciales fiscales sin
+        # llave (503 al guardarlas, aviso en el log) en vez de impedir que api, worker y alembic arranquen.
         return v
 
     @model_validator(mode="after")

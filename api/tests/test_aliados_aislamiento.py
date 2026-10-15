@@ -106,13 +106,26 @@ EXPLICITAS = [
 ]
 
 
-@pytest.mark.parametrize("rol", ["aliado", "tecnico_aliado"])
+@pytest.mark.parametrize("rol", ["aliado", "tecnico_aliado", "cliente_admin", "cliente_usuario"])
 def test_barrido_internos_403(client, auth, db_session, rol):
     from app.core.deps import get_principal
 
     admin_h = dict(client.headers)
-    a = client.post("/allies", json={"name": "Aliado Barrido S.A."}).json()["id"]
-    h = usuario(client, admin_h, a, f"barrido.{rol}@aliado-uno.ejemplo.com", rol)
+    if rol.startswith("cliente"):
+        # los usuarios del portal del cliente tampoco entran a nada interno (antes solo ~15 rutas explicitas)
+        from app.core.security import hash_password
+        from app.models import Customer, TenantUser, User
+
+        c = db_session.scalars(select(Customer).where(Customer.tenant_id == auth["tenant"]["id"])).first()
+        u = User(email=f"barrido.{rol}@cliente.ejemplo.com", full_name="Cliente Barrido", password_hash=hash_password(PW))
+        db_session.add(u)
+        db_session.flush()
+        db_session.add(TenantUser(tenant_id=auth["tenant"]["id"], user_id=u.id, role_code=rol, customer_id=c.id))
+        db_session.commit()
+        h = login(client, u.email)
+    else:
+        a = client.post("/allies", json={"name": "Aliado Barrido S.A."}).json()["id"]
+        h = usuario(client, admin_h, a, f"barrido.{rol}@aliado-uno.ejemplo.com", rol)
     client.headers.pop("Authorization")
     malos, barridas = [], 0
     for path, methods, dep in _routes():
@@ -173,6 +186,20 @@ def test_membresia_inconsistente_bloqueada(client, auth, db_session):
     assert client.get("/auth/me", headers=h1).status_code == 403
     assert client.get("/products", headers=h1).status_code == 403
     assert client.get("/auth/me", headers=h2).status_code == 403
+    # lo mismo del lado del cliente: un cliente con rol interno, o un rol de cliente sin cliente, no entra
+    c = db_session.scalars(select(Customer).where(Customer.tenant_id == tid)).first()
+    cli_admin = User(email="admin.cliente.raro@ejemplo.com", full_name="Raro Cliente", password_hash=hash_password(PW))
+    cli_sin = User(email="cliente.sin.empresa@ejemplo.com", full_name="Sin Cliente", password_hash=hash_password(PW))
+    db_session.add_all([cli_admin, cli_sin])
+    db_session.flush()
+    db_session.add(TenantUser(tenant_id=tid, user_id=cli_admin.id, role_code="admin", customer_id=c.id))
+    db_session.add(TenantUser(tenant_id=tid, user_id=cli_sin.id, role_code="cliente_admin"))
+    db_session.commit()
+    for email in (cli_admin.email, cli_sin.email):
+        h = login(client, email)
+        assert client.get("/auth/me", headers=h).status_code == 403
+        assert client.get("/products", headers=h).status_code == 403
+        assert client.get("/cliente/inicio", headers=h).status_code == 403
     assert client.get("/aliado/inicio", headers=h2).status_code == 403
     # una membresia nunca es de un cliente y de un aliado a la vez (CHECK)
     c = db_session.scalars(select(Customer).where(Customer.tenant_id == tid)).first()

@@ -308,12 +308,20 @@ def availability(pid: int, p: Principal = Depends(require("catalog", "ver")), db
     }
 
 
+def qty_label(v) -> str:
+    """Cantidad para leer en es-CR: Decimal("3.000") -> "3" (con :g salia "3.000", que se lee tres mil), 2.5 -> "2,5"."""
+    q = Decimal(str(v)).normalize()
+    if q == q.to_integral_value():
+        return str(int(q))
+    return f"{q:f}".replace(".", ",")
+
+
 def store_availability(pr: Product, own: Decimal) -> dict:
     """Etiqueta de disponibilidad para la tienda: propio, bajo pedido o agotado."""
     if pr.item_type != "producto":
         return {"state": "servicio", "label": "Servicio", "own": 0}
     if own > 0:
-        return {"state": "en_bodega", "label": f"Disponible ({own:g} en bodega)", "own": own}
+        return {"state": "en_bodega", "label": f"Disponible ({qty_label(own)} en bodega)", "own": own}
     if (pr.supplier_stock or 0) > 0:
         return {"state": "bajo_pedido", "label": "Bajo pedido (3-5 días hábiles)", "own": 0}
     return {"state": "agotado", "label": "Consultar disponibilidad", "own": 0}

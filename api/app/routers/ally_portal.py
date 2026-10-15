@@ -1070,7 +1070,7 @@ def levantamiento_asignar(sid: int, data: AssignTechIn, ctx: AllyCtx = Depends(n
 def _my_order(db: Session, ctx: AllyCtx, oid: int) -> WorkOrder:
     o = ctx.scope.one(WorkOrder, oid, ctx.scope.work_orders(), "Orden de trabajo")
     if ctx.scope.is_tech and not ctx.scope.is_today_for_tech(o):
-        raise HTTPException(404, "Orden de trabajo no encontrado")
+        raise HTTPException(404, "Orden de trabajo no encontrada")
     return o
 
 

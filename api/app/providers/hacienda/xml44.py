@@ -115,6 +115,10 @@ def parse_xml_bytes(data: bytes) -> etree._Element:
         raise XmlRejected("XML mal formado") from e
     if root is None:
         raise XmlRejected("XML vacío")
+    info = root.getroottree().docinfo
+    if info.doctype or info.internalDTD is not None or info.externalDTD is not None:
+        # un DOCTYPE despues de 4 KB (comentario largo delante) pasaba _head_has_dtd: la regla se cumple igual
+        raise XmlRejected("XML con DTD o entidades: rechazado")
     return root
 
 

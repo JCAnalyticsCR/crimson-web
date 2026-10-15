@@ -126,6 +126,14 @@ activity_t = sa.table(
 )
 
 
+def _xml_key(x: str | None) -> str | None:
+    """XML comparable: sin BOM, sin espacios al borde y con saltos de linea LF (el mismo comprobante bajado dos veces
+    puede diferir solo en eso; no por eso hay que resolverlo a mano)."""
+    if x is None:
+        return None
+    return x.lstrip("\ufeff").replace("\r\n", "\n").strip()
+
+
 def dedupe_receptions(bind) -> list[int]:
     """Borra copias exactas sin respuesta de una misma clave. Devuelve los ids borrados. Aborta si no se puede decidir."""
     borrados: list[int] = []
@@ -138,7 +146,7 @@ def dedupe_receptions(bind) -> list[int]:
             {"t": tid, "c": clave},
         ).all()
         vivas = [r for r in rows if r.action is not None or r.expense_id is not None]
-        xmls = {r.xml_document for r in rows}
+        xmls = {_xml_key(r.xml_document) for r in rows}
         if len(vivas) > 1 or len(xmls) > 1:
             raise RuntimeError(f"Recepciones duplicadas por clave (ids {', '.join(str(r.id) for r in rows)}): resolver a mano antes de migrar")
         queda = vivas[0] if vivas else rows[0]
@@ -172,6 +180,10 @@ def backfill(bind) -> None:
             codes = [c for c in ((_json(raw_settings) or {}).get("activity_codes") or []) if isinstance(c, str) and ACTIVITY_RE.match(c)]
             for i, code in enumerate(dict.fromkeys(codes)):
                 bind.execute(activity_t.insert().values(tenant_id=tid, code=code, description=None, is_default=i == 0, active=True))
+
+    # ---- comprobantes emitidos con el proveedor "sandbox" de antes: eran simulados (sin modo). Asi una nota de credito
+    # con emision directa nunca se manda a Hacienda referenciando una clave inventada (einvoice.credit_note)
+    bind.execute(sa.text("UPDATE einvoice_document SET mode = 'simulado' WHERE provider = 'sandbox' AND mode IS NULL"))
 
     # ---- recepciones
     for sql in (

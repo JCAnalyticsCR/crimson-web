@@ -301,6 +301,10 @@ def get_session_principal(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Su cuenta de aliado no está ligada a una empresa aliada. Escríbanos para revisarlo.")
     if m.ally_company_id and m.role_code not in ALLY_USER_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Su acceso no es válido. Escríbanos para revisarlo.")
+    # lo mismo con el cliente: una membresia con cliente y un rol interno (dato heredado, arreglo manual) nunca abre el
+    # panel interno; y un rol de cliente sin cliente no ve nada
+    if (m.customer_id and m.role_code not in CLIENT_ROLES) or (m.role_code in CLIENT_ROLES and not m.customer_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Su acceso no es válido. Escríbanos para revisarlo.")
     ip = request.client.host if request.client else None
     if m.role_code == "soporte":
         _support_gate(db, user, tenant, request, ip)
@@ -320,7 +324,7 @@ def get_principal(p: Principal = Depends(get_session_principal)) -> Principal:
     ningun endpoint interno (incluidos los que solo piden sesion, como archivo, multimedia o tipo de cambio) le queda
     abierto por olvido. Lo unico que usa get_session_principal es /auth (su cuenta), el portal del cliente (/cliente)
     y el portal de aliados (/aliado, core/ally.py)."""
-    if p.is_external or p.ally_company_id is not None:
+    if p.is_external or p.ally_company_id is not None or p.customer_id is not None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Esta seccion es solo para el equipo de Crimson")
     return p
 

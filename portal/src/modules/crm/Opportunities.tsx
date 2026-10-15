@@ -386,7 +386,7 @@ export default function Opportunities() {
             <button className="btn btn--ghost btn--sm" onClick={load}><Icon d={I.refresh} /></button>
           </div>
           {listSt === null ? <Loading /> : list.length === 0 ? <Empty hint="Cada visita, llamada o referido entra aquí antes de convertirse en cotización." /> : (
-            <table className="table">
+            <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="table">
               <thead><tr><th>Número</th><th>Título</th><th>Tipo</th><th>Partes</th><th>Estado</th><th className="num">Monto</th><th>Próxima acción</th><th>Responsable</th><th /></tr></thead>
               <tbody>{list.map((o) => {
                 const dias = dueIn(o.next_action_date);
@@ -404,7 +404,7 @@ export default function Opportunities() {
                   </tr>
                 );
               })}</tbody>
-            </table>
+            </table></div>
           )}
         </Card>
       )}

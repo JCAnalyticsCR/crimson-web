@@ -2,10 +2,12 @@
    con la misma API /auth/2fa/* del panel interno (aliado_final §10.3). Los códigos de recuperación se muestran una
    sola vez. En la vista previa del admin no se muestra (la pantalla no sale del menú). */
 import { useState } from "react";
+import { Navigate } from "react-router-dom";
 import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { I, Icon, Modal } from "../../ui/components";
 import ClientAccount from "../cliente/ClientAccount";
+import { useAlly } from "./shared";
 
 function DosPasos() {
   const { me, reload, toast } = useSession();
@@ -94,6 +96,8 @@ function DosPasos() {
 }
 
 export default function AllyAccount() {
+  const { preview } = useAlly();
+  if (preview) return <Navigate to="/" replace />; // la cuenta que se veria es la del admin, no la del aliado
   return (
     <>
       <ClientAccount />

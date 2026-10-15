@@ -85,7 +85,7 @@ export default function Dashboard() {
           <h1 className="h1">{saludo}, {me?.user.full_name.split(" ")[0]}.</h1>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
             <span className="badge" style={{ background: `color-mix(in srgb, ${rm.tone} 14%, transparent)`, color: rm.tone, fontWeight: 700 }}>{rm.label}</span>
-            {d?.scope === "mine" && <span className="muted" style={{ fontSize: 13 }}>Estás viendo solo lo tuyo: tus oportunidades, tus ventas y tus cobros.</span>}
+            {d?.scope === "mine" && <span className="muted" style={{ fontSize: 13 }}>{allows("sales.crear") ? "Estás viendo solo lo tuyo: tus oportunidades, tus ventas y tus cobros." : "Estás viendo solo lo tuyo."}</span>}
           </div>
         </div>
         <div className="page-head__actions">
@@ -196,7 +196,7 @@ export default function Dashboard() {
               )}
             </Card>}
             <Card title="Facturas recientes" flush extra={<Link className="btn btn--ghost btn--sm" to="/facturas">Ver todas</Link>}>
-              {d.facturas_recientes.length === 0 ? <Empty hint="Creá tu primera factura desde una cotización." action={<Link className="btn btn--crimson btn--sm" to="/cotizaciones/nueva">Nueva cotización</Link>} /> : (
+              {d.facturas_recientes.length === 0 ? (allows("sales.crear") ? <Empty hint="Creá tu primera factura desde una cotización." action={<Link className="btn btn--crimson btn--sm" to="/cotizaciones/nueva">Nueva cotización</Link>} /> : <Empty hint="Todavía no hay facturas tuyas." />) : (
                 <table className="table">
                   <thead><tr><th>Código</th><th>Cliente</th><th className="num">Importe</th><th>Estado</th></tr></thead>
                   <tbody>{d.facturas_recientes.map((f) => (

@@ -3,10 +3,14 @@
    márgenes, recomendación de equipos ni informe: eso lo hace Crimson. Lo que el aliado guarda conserva lo que Crimson
    ya costeó (la API no lo toca). Al terminar: "Enviar a revisión". Si vuelve con observaciones, se marcan resueltas.
    El personal requerido y quienes hicieron la visita solo se mandan si el aliado los cambió (la API conserva lo demás,
-   incluidos los técnicos de Crimson de la visita, que aquí no se ven). */
+   incluidos los técnicos de Crimson de la visita, que aquí no se ven).
+   Autoguardado (como el levantamiento interno): lo escrito sube solo tras cada pausa, al cambiar de pestaña o de
+   pantalla y al cerrar; sin red queda una copia en el dispositivo que se ofrece al volver. En la vista previa del
+   admin (solo lectura) no se guarda nada. */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../../lib/api";
+import { useRecordAutosave } from "../../lib/useRecordAutosave";
 import { useSession } from "../../app/session";
 import { Field, I, Icon } from "../../ui/components";
 import { Lookup, type LookupItem } from "../../ui/Lookup";
@@ -31,6 +35,23 @@ const toDraft = (s: SurveyFull): Draft => ({
   labor: laborDe(s), visit_tech_ids: s.visit_tech_ids || [],
 });
 const n = (v: string) => Number(String(v).replace(",", ".")) || 0;
+
+/* Lo que se guarda (boton Guardar y autoguardado): el personal y la visita solo si el aliado los cambio respecto de lo
+   que trajo el servidor (la API conserva el personal que Crimson costea y los tecnicos de Crimson de la visita). */
+function bodyOf(d: Draft, s: SurveyFull): Record<string, unknown> {
+  const original = toDraft(s);
+  const laborCambio = JSON.stringify(d.labor) !== JSON.stringify(original.labor);
+  const visitaCambio = JSON.stringify(d.visit_tech_ids) !== JSON.stringify(original.visit_tech_ids);
+  return {
+    kind: d.kind, site: d.site || null, contact: d.contact, visit_date: d.visit_date || null, notes: d.notes || null, photos: d.photos,
+    points: d.points.map((p) => ({ id: p.id, code: p.code, kind: p.kind && p.kind !== d.kind ? p.kind : null, label: p.label, data: p.data, data_status: p.data_status, photos: p.photos, notes: p.notes })),
+    items: d.items.filter((it) => it.name.trim()).map((it) => ({ id: it.id, product_id: it.product_id, name: it.name, quantity: it.quantity || 0, unit: it.unit || "Unid", note: it.note, kind: it.kind })),
+    common: d.common, received_by: d.received_by || null,
+    ...(d.technician_id && d.technician_id !== s.technician_id ? { technician_id: d.technician_id } : {}),
+    ...(laborCambio ? { labor: Object.fromEntries(Object.entries(d.labor).map(([k, v]) => [k, { people: Math.round(n(v.people)), days: n(v.days) }])) } : {}),
+    ...(visitaCambio ? { visit_tech_ids: d.visit_tech_ids } : {}),
+  };
+}
 
 function Input({ f, value, onChange, disabled }: { f: V2Field; value: unknown; onChange: (v: unknown) => void; disabled?: boolean }) {
   if (f.type === "bool") return <label className="pf-bool"><input type="checkbox" disabled={disabled} checked={value === true} onChange={(e) => onChange(e.target.checked)} />Sí</label>;
@@ -71,6 +92,18 @@ export default function AllySurvey() {
     return r.map((p) => ({ id: p.id, label: p.name, hint: p.code }));
   }, []);
   const spec = useMemo(() => (specs && d ? specs[d.kind] || specs.otro : null), [specs, d]);
+  const auto = useRecordAutosave<Draft>({
+    ns: "aliado-lev",
+    mode: "pause",
+    value: s && d ? d : null,
+    idOf: () => sid,
+    body: (v) => (s ? bodyOf(v, s) : {}),
+    save: async (b, _id, ctx) => { await api(ALLY_FIELD_API.saveSurvey(sid), { method: "PUT", json: b, headers: ctx.headers, keepalive: ctx.keepalive }); },
+    enabled: !!s && !readOnly && s.can_edit,
+    label: () => s?.number || "El levantamiento",
+    apply: (data) => { setD(data); setDirty(true); },
+    delay: 3000,
+  });
 
   if (err) return <p className="muted">{err}</p>;
   if (!s || !d) return <div style={{ minHeight: "40vh", display: "grid", placeItems: "center" }}><span className="spinner" /></div>;
@@ -84,19 +117,7 @@ export default function AllySurvey() {
     up({ points: [...d.points, { code: `${pre}-${String(n).padStart(2, "0")}`, label: null, data: {}, data_status: initialStatus(spec?.fields), photos: [], notes: null }] });
   };
 
-  const original = toDraft(s);
-  const laborCambio = JSON.stringify(d.labor) !== JSON.stringify(original.labor);
-  const visitaCambio = JSON.stringify(d.visit_tech_ids) !== JSON.stringify(original.visit_tech_ids);
-  const body = () => ({
-    kind: d.kind, site: d.site || null, contact: d.contact, visit_date: d.visit_date || null, notes: d.notes || null, photos: d.photos,
-    points: d.points.map((p) => ({ id: p.id, code: p.code, kind: p.kind && p.kind !== d.kind ? p.kind : null, label: p.label, data: p.data, data_status: p.data_status, photos: p.photos, notes: p.notes })),
-    items: d.items.filter((it) => it.name.trim()).map((it) => ({ id: it.id, product_id: it.product_id, name: it.name, quantity: it.quantity || 0, unit: it.unit || "Unid", note: it.note, kind: it.kind })),
-    common: d.common, received_by: d.received_by || null,
-    ...(d.technician_id && d.technician_id !== s.technician_id ? { technician_id: d.technician_id } : {}),
-    // solo si los cambió: la API conserva el personal que Crimson costea y los técnicos de Crimson de la visita
-    ...(laborCambio ? { labor: Object.fromEntries(Object.entries(d.labor).map(([k, v]) => [k, { people: Math.round(n(v.people)), days: n(v.days) }])) } : {}),
-    ...(visitaCambio ? { visit_tech_ids: d.visit_tech_ids } : {}),
-  });
+  const body = () => bodyOf(d, s);
   // quienes hicieron la visita: su equipo (/aliado/tecnicos) y los de su equipo que ya estaban anotados
   const visitantes = [
     ...techs.map((t) => ({ id: t.id, name: t.name })),
@@ -105,7 +126,11 @@ export default function AllySurvey() {
   const setLabor = (k: string, patch: Partial<{ people: string; days: string }>) => up({ labor: { ...d.labor, [k]: { ...d.labor[k], ...patch } } });
   const guardar = async (silencioso = false) => {
     setBusy(true);
-    try { const x = await api<SurveyFull>(ALLY_FIELD_API.saveSurvey(sid), { method: "PUT", json: body() }); setS(x); setD(toDraft(x)); setDirty(false); if (!silencioso) toast("Levantamiento guardado"); return true; }
+    try {
+      // nunca a la par del autoguardado; la respuesta pasa a ser la referencia (no es un cambio del usuario)
+      const x = await auto.exclusive(d, () => api<SurveyFull>(ALLY_FIELD_API.saveSurvey(sid), { method: "PUT", json: body() }));
+      auto.fromServer(); setS(x); setD(toDraft(x)); setDirty(false); if (!silencioso) toast("Levantamiento guardado"); return true;
+    }
     catch (e) { toast(e instanceof Error ? e.message : "No se pudo guardar", "bad"); return false; }
     finally { setBusy(false); }
   };
@@ -117,7 +142,7 @@ export default function AllySurvey() {
       toast("Enviado a revisión de Crimson");
       // el técnico solo ve sus borradores y los devueltos: el enviado sale de su lista y vuelve a "Hoy"
       if (isTech) { nav("/", { replace: true }); return; }
-      setS(x); setD(toDraft(x)); setDirty(false);
+      auto.fromServer(); setS(x); setD(toDraft(x)); setDirty(false);
     }
     catch (e) { toast(e instanceof Error ? e.message : "No se pudo enviar", "bad"); }
     finally { setBusy(false); }
@@ -137,6 +162,7 @@ export default function AllySurvey() {
           {!ro && <button className="btn btn--crimson" disabled={busy} onClick={enviar}><Icon d={I.arrow} />Enviar a revisión</button>}
         </div>
       </div>
+      {auto.bar}
       {s.observations.length > 0 && (
         <div className="cp-list" style={{ marginBottom: 12 }}>
           {s.observations.map((o) => (

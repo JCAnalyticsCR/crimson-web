@@ -21,6 +21,7 @@ import email
 import email.header
 import hashlib
 import imaplib
+import ipaddress
 import logging
 import os
 import re
@@ -98,16 +99,47 @@ def imap_aad(tenant_id: int) -> str:
 
 
 def encrypt_password(tenant_id: int, raw: str) -> str:
-    """Con FISCAL_KEYS: secretbox (AES-GCM). Sin ella se sigue guardando con el cifrado heredado (no se rompe la pestana)."""
+    """Siempre secretbox (AES-GCM con FISCAL_KEYS). Sin FISCAL_KEYS fuera de desarrollo -> SecretUnavailable (503 en
+    Ajustes, como las credenciales de Hacienda): el cifrado heredado sale del JWT_SECRET y quien lo tenga descifraria la
+    contrasena del buzon desde cualquier respaldo de la base."""
     if secretbox.available():
         return secretbox.seal_text(raw, imap_aad(tenant_id))
-    return encrypt(raw)
+    if settings.env == "local":
+        return encrypt(raw)  # desarrollo con Postgres local y sin FISCAL_KEYS
+    raise secretbox.SecretUnavailable("Falta configurar FISCAL_KEYS en el servidor para guardar la contraseña del buzón")
 
 
 def decrypt_password(tenant_id: int, enc: str) -> str:
     if enc.startswith("v1."):
         return secretbox.unseal_text(enc, imap_aad(tenant_id))
     return decrypt(enc)
+
+
+def upgrade_legacy_passwords(db: Session, dry_run: bool = False) -> dict:
+    """Contrasenas de buzon guardadas con el cifrado heredado (JWT_SECRET, antes de FISCAL_KEYS): se descifran y se
+    vuelven a sellar con secretbox. Idempotente; sin FISCAL_KEYS no hace nada. Corre en app.bootstrap (cada arranque del
+    api) y en app.tools.rotate_fiscal_keys. Solo cuenta: nunca registra datos."""
+    out = {"migradas": 0, "ilegibles": 0}
+    if not secretbox.available():
+        return out
+    for t in db.scalars(select(Tenant)).all():
+        box = dict((t.settings or {}).get("inbox") or {})
+        tok = box.get("password_enc")
+        if not tok or tok.startswith("v1."):
+            continue
+        try:
+            plain = decrypt(tok)
+        except Exception:  # noqa: BLE001 - otro JWT_SECRET: queda como esta (el buzon avisa que no se puede descifrar)
+            out["ilegibles"] += 1
+            continue
+        if not dry_run:
+            box["password_enc"] = secretbox.seal_text(plain, imap_aad(t.id))
+            st = dict(t.settings or {})
+            st["inbox"] = box
+            t.settings = st
+            flag_modified(t, "settings")
+        out["migradas"] += 1
+    return out
 
 
 def env_applies(db: Session, tenant: Tenant) -> bool:
@@ -290,8 +322,50 @@ def _date(msg: Message) -> datetime | None:
         return None
 
 
+_BLOCKED_SUFFIXES = (".internal", ".local", ".localhost", ".localdomain", ".lan", ".home.arpa")
+
+
+def host_problem(host: str) -> str | None:
+    """Servidor IMAP de Ajustes que no puede ser: un nombre interno o una IP privada (el buzon no sondea la red interna
+    ni le entrega la contrasena a un servicio de adentro)."""
+    h = (host or "").strip().lower().rstrip(".")
+    if not h:
+        return None
+    msg = "Use el nombre público del servidor de correo (p. ej. imap.gmail.com)"
+    try:
+        return None if ipaddress.ip_address(h.strip("[]")).is_global else msg
+    except ValueError:
+        pass
+    if h == "localhost" or h.endswith(_BLOCKED_SUFFIXES) or "." not in h:
+        return msg
+    return None
+
+
+def public_address(host: str, port: int) -> str:
+    """Resuelve el servidor y devuelve una direccion publica. Una privada, de loopback o reservada -> OSError (la
+    conexion se hace a ESA direccion: un DNS que cambia entre la revision y la conexion no lleva adentro)."""
+    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    for *_x, addr in infos:
+        ip = ipaddress.ip_address(addr[0])
+        if ip.is_global:
+            return addr[0]
+    raise OSError("el servidor de correo no tiene una dirección pública")
+
+
+class _PublicIMAP4SSL(imaplib.IMAP4_SSL):
+    """IMAP4_SSL que solo se conecta a una direccion publica (el certificado se sigue validando contra el nombre)."""
+
+    def _create_socket(self, timeout):
+        ip = public_address(self.host, self.port)
+        sock = socket.create_connection((ip, self.port), timeout)
+        return self.ssl_context.wrap_socket(sock, server_hostname=self.host)
+
+
 def _connect(cfg: MailboxConfig):
-    return imaplib.IMAP4_SSL(cfg.host, cfg.port, ssl_context=ssl.create_default_context(), timeout=25)
+    # el buzon de Ajustes lo escribe un usuario: nunca hacia la red interna. El de entorno (RECEPTION_IMAP_*) lo pone
+    # quien administra el servidor; en desarrollo (ENV=local) se permite cualquiera
+    cls = _PublicIMAP4SSL if cfg.source == "ajustes" and settings.env != "local" else imaplib.IMAP4_SSL
+    return cls(cfg.host, cfg.port, ssl_context=ssl.create_default_context(), timeout=25)
 
 
 def new_message(tenant: Tenant, raw: bytes, *, mailbox_id: int | None, uid: int | None, uidvalidity: int | None, user_id: int | None = None, msg: Message | None = None, status: str = "procesado") -> ReceptionMessage:
@@ -331,6 +405,28 @@ def process_raw(db: Session, tenant: Tenant, raw: bytes, *, mailbox_id: int | No
     rm.error = "; ".join(e["error"] for e in res["errores"])[:500] or None
     rm.raw_eml = raw if rm.status in ("error", "parcial") and len(raw) <= MAX_EML else None
     return rm, res
+
+
+def poll_http(db: Session, t: Tenant, off_message: str | None = None) -> dict:
+    """poll() para los botones "Revisar ahora": cada falla con un mensaje generico. El texto de la excepcion (conexion
+    rehusada, tiempo agotado, nombre que no resuelve) dejaba sondear puertos de la red interna; queda en el log."""
+    from fastapi import HTTPException
+
+    try:
+        return poll(db, t)
+    except MailboxBusy as e:
+        raise HTTPException(409, "Ya se está revisando el buzón") from e
+    except ValueError as e:
+        raise HTTPException(422, off_message or str(e)) from e
+    except imaplib.IMAP4.error as e:
+        log.warning("buzon %s: el servidor rechazo la sesion (%s)", t.slug, type(e).__name__)
+        raise HTTPException(502, "El servidor de correo rechazó el usuario, la contraseña o la carpeta") from e
+    except OSError as e:
+        log.warning("buzon %s: sin conexion (%s)", t.slug, type(e).__name__)
+        raise HTTPException(502, "No se pudo conectar al servidor de correo: revisá el servidor y el puerto (SSL)") from e
+    except Exception as e:  # noqa: BLE001
+        log.warning("buzon %s: %s", t.slug, type(e).__name__)
+        raise HTTPException(502, "El servidor de correo rechazó la conexión") from e
 
 
 def poll(db: Session, t: Tenant, connect=None) -> dict:

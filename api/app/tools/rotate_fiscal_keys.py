@@ -1,4 +1,5 @@
-"""Vuelve a cifrar con la llave principal de FISCAL_KEYS toda credencial fiscal (y contrasena de buzon) cifrada con otra.
+"""Vuelve a cifrar con la llave principal de FISCAL_KEYS toda credencial fiscal (y contrasena de buzon) cifrada con otra,
+incluidas las contrasenas de buzon que todavia usan el cifrado heredado derivado del JWT_SECRET.
 
 Uso:  python -m app.tools.rotate_fiscal_keys [--dry-run]
 Procedimiento: agregar la llave nueva AL PRINCIPIO de FISCAL_KEYS (dejando la vieja detras), desplegar api y worker,
@@ -44,6 +45,12 @@ def rotate(db: Session, dry_run: bool = False) -> dict:
             out["credenciales"] += 1
             if not dry_run:
                 c.key_id = kid
+    # contrasenas de buzon con el cifrado heredado (JWT_SECRET): se pasan a FISCAL_KEYS (app.bootstrap tambien lo hace)
+    from ..services.inbox import upgrade_legacy_passwords
+
+    legacy = upgrade_legacy_passwords(db, dry_run=dry_run)
+    out["buzones"] += legacy["migradas"]
+    out["ilegibles"] += legacy["ilegibles"]
     for t in db.scalars(select(Tenant)).all():
         inbox = dict((t.settings or {}).get("inbox") or {})
         tok = inbox.get("password_enc")

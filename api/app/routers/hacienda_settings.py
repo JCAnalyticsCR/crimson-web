@@ -25,7 +25,15 @@ from ..core.ratelimit import hacienda_test_limiter
 from ..core.reauth import require_reauth
 from ..models import FiscalActivity, FiscalCredential
 from ..providers.hacienda import xml44
-from ..providers.hacienda.client import HaciendaAuthError, HaciendaClient, HaciendaUnavailable, ProductionBlocked, instance_fingerprint, lookup_activities, production_keys
+from ..providers.hacienda.client import (
+    HaciendaAuthError,
+    HaciendaClient,
+    HaciendaUnavailable,
+    ProductionBlocked,
+    instance_fingerprint,
+    lookup_activities,
+    production_keys,
+)
 from ..providers.hacienda.xades import CertError, load_p12
 from ..services import hacienda_config as hc
 from ..services.bitacora import audit_change, snapshot

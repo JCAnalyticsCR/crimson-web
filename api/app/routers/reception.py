@@ -316,19 +316,10 @@ def inbox_status(p: Principal = Depends(require("accounting", "ver")), db: Sessi
 
 @router.post("/inbox/run")
 def inbox_run(p: Principal = Depends(require("accounting", "crear")), db: Session = Depends(get_db)):
-    from ..services.inbox import MailboxBusy, poll
+    from ..services.inbox import poll_http
 
     inbox_run_limiter.hit(str(p.tenant.id))
-    try:
-        return poll(db, p.tenant)
-    except MailboxBusy as e:
-        raise HTTPException(409, "Ya se está revisando el buzón") from e
-    except ValueError as e:
-        raise HTTPException(422, "Buzón apagado: configúrelo en Ajustes → XML de proveedores o en las variables del servidor") from e
-    except OSError as e:
-        raise HTTPException(502, f"No se pudo conectar al servidor de correo: {e}") from e
-    except Exception as e:  # noqa: BLE001 - imaplib.IMAP4.error (credenciales) y similares
-        raise HTTPException(502, f"El servidor de correo rechazó la conexión: {e}") from e
+    return poll_http(db, p.tenant, "Buzón apagado: configúrelo en Ajustes → XML de proveedores o en las variables del servidor")
 
 
 @router.post("/messages/{mid}/reprocess")

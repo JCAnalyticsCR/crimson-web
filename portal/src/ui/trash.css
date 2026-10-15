@@ -17,6 +17,9 @@
 .row-actions__in { display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; }
 @media (max-width: 640px) {
   .table td.row-actions, .table th.row-actions { position: sticky; right: 0; z-index: 1; background: var(--surface); box-shadow: -10px 0 12px -10px rgba(21, 19, 26, .35); }
+  /* el encabezado de esa columna (un <th /> vacio en casi todas las tablas) tambien queda fijo: si no, los titulos
+     quedaban corridos (FECHA o CLIENTE encima del boton Abrir) */
+  .table:has(td.row-actions) thead th:last-child { position: sticky; right: 0; z-index: 1; background: var(--surface); }
   .table tbody tr:hover td.row-actions { background: var(--surface-2); }
 }
 

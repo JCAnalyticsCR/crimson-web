@@ -10,6 +10,13 @@ from __future__ import annotations
 import sqlalchemy as sa
 
 
+def _xml_key(x: str | None) -> str | None:
+    """La misma comparacion que la migracion (sin BOM, sin espacios al borde, saltos de linea LF)."""
+    if x is None:
+        return None
+    return x.lstrip("\ufeff").replace("\r\n", "\n").strip()
+
+
 def find(conn) -> list[dict]:
     out = []
     for tid, clave, _n in conn.execute(sa.text("SELECT tenant_id, clave, COUNT(*) FROM received_document GROUP BY tenant_id, clave HAVING COUNT(*) > 1")).all():
@@ -17,7 +24,7 @@ def find(conn) -> list[dict]:
             sa.text("SELECT id, xml_document, action, expense_id FROM received_document WHERE tenant_id = :t AND clave = :c ORDER BY id"), {"t": tid, "c": clave}
         ).all()
         vivas = [r for r in rows if r.action is not None or r.expense_id is not None]
-        out.append({"tenant_id": tid, "ids": [r.id for r in rows], "auto": len(vivas) <= 1 and len({r.xml_document for r in rows}) == 1})
+        out.append({"tenant_id": tid, "ids": [r.id for r in rows], "auto": len(vivas) <= 1 and len({_xml_key(r.xml_document) for r in rows}) == 1})
     return out
 
 

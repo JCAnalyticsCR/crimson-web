@@ -1645,6 +1645,7 @@ HORAS_JORNADA = 8  # horas por jornada para el estimado (Ajustes: tenant.setting
 MAX_CORRIENDO_H = 16  # una entrada abierta mas de esto es un olvido: hay que corregirla
 CREW_ROLES = ("tecnico", "supervisor", "admin")  # quien puede recibir una orden (los de /field/technicians)
 CERRADAS = ("finalizada", "cancelada")
+OPEN_PROJECT = ("planificado", "en_curso", "pausado")
 _MESES = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "set", "oct", "nov", "dic")
 
 
@@ -2347,7 +2348,9 @@ def apply_order_progress(db: Session, o: WorkOrder, data: ProgressIn, action: st
         audit(db, tenant.id, p.user.id, "finish", "work_order", o.id, {"materiales": consumed}, ip=p.ip)
         if o.project_id:
             pr = _ref(db, Project, o.project_id, o.tenant_id)  # nunca se termina el proyecto de otra empresa
-            if pr and all(x.status in CERRADAS for x in pr.orders if x.trashed_at is None) and pr.status != "terminado":
+            # solo un proyecto abierto se completa solo: uno cancelado no se reabre (ni vuelve a devengar saltandose la
+            # aprobacion de comisiones) y uno entregado o facturado no baja a terminado
+            if pr and all(x.status in CERRADAS for x in pr.orders if x.trashed_at is None) and pr.status in OPEN_PROJECT:
                 antes_pr = pr.status
                 pr.status = "terminado"
                 from ..services import commissions as comsvc

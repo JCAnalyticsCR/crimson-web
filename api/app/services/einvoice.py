@@ -341,6 +341,8 @@ def credit_note(db: Session, tenant: Tenant, user_id: int, inv: Invoice, reason:
     original = db.scalar(
         select(EInvoiceDocument).where(EInvoiceDocument.invoice_id == inv.id, EInvoiceDocument.clave == inv.clave).order_by(EInvoiceDocument.id.desc())
     )
+    if mode in ("pruebas", "produccion"):
+        mode = _nc_mode(original, mode)
     sp = db.begin_nested()
     try:
         doc = _credit_note_numbered(db, tenant, user_id, inv, reason, mode, original)
@@ -349,6 +351,31 @@ def credit_note(db: Session, tenant: Tenant, user_id: int, inv: Invoice, reason:
         raise
     sp.commit()
     return doc
+
+
+def doc_mode(doc: EInvoiceDocument | None) -> str | None:
+    """Donde se emitio un comprobante: simulado (incluye el proveedor "sandbox" de antes, sin modo), pruebas o
+    produccion. None si no hay registro."""
+    if doc is None:
+        return None
+    if doc.provider == "sandbox" or doc.mode == "simulado":
+        return "simulado"
+    return doc.mode
+
+
+def _nc_mode(original: EInvoiceDocument | None, mode: str) -> str:
+    """La NC va al mismo ambiente que su factura. Una factura que nunca llego a ESTE ambiente de Hacienda (simulada, o
+    de pruebas con produccion activa) se anula aqui con una NC simulada: una NC fiscal real que referencia una clave que
+    Hacienda no recibio gastaria un consecutivo y quedaria en el sistema fiscal. Una de produccion no se acredita en
+    pruebas."""
+    orig = doc_mode(original)
+    if orig == mode:
+        return mode
+    if orig in ("simulado", "pruebas"):
+        return "simulado"
+    if orig == "produccion":
+        raise HTTPException(409, "La factura se emitió en Producción: su nota de crédito se emite con Producción activa (Ajustes → Hacienda)")
+    raise HTTPException(409, "No se encontró el comprobante electrónico de la factura: no se puede emitir la nota de crédito")
 
 
 def _credit_note_numbered(db: Session, tenant: Tenant, user_id: int, inv: Invoice, reason: str, mode: str, original) -> EInvoiceDocument:

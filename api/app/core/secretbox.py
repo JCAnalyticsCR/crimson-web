@@ -50,15 +50,30 @@ def _dev_key() -> bytes:
     return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b"crimson-fiscal-dev").derive(settings.jwt_secret.encode())
 
 
+def _instance_line() -> str:
+    """Lo que decide si este proceso puede hablar con produccion de Hacienda (sin secretos): api y worker deben
+    coincidir, porque el que envia y consulta es el worker."""
+    from ..providers.hacienda.client import instance_fingerprint
+
+    return f"huella de instancia {instance_fingerprint()} · ENV={settings.env} · HACIENDA_PRODUCTION_ALLOWED={settings.hacienda_production_allowed}"
+
+
 def keys() -> list[tuple[str, bytes]]:
     """Llaves vigentes en orden (la primera cifra). Vacio = no hay con que cifrar."""
     raw = settings.fiscal_keys.get_secret_value() if settings.fiscal_keys else ""
     if raw.strip():
-        ks = parse_fiscal_keys(raw)
+        try:
+            ks = parse_fiscal_keys(raw)
+        except ValueError as e:
+            # mal escrita: las credenciales fiscales quedan sin llave (503) y el servicio sigue arriba
+            if "malformed" not in _logged:
+                _logged.add("malformed")
+                log.error("%s: las credenciales fiscales y la contraseña del buzón quedan sin llave hasta corregirla", e)
+            return []
         sig = ",".join(f"{kid}:{hashlib.sha256(k).hexdigest()[:8]}" for kid, k in ks)
         if sig not in _logged:  # solo kid y huella corta: sirve para ver que api y worker tienen la misma
             _logged.add(sig)
-            log.info("FISCAL_KEYS cargadas: %s", sig)
+            log.info("FISCAL_KEYS cargadas: %s · %s", sig, _instance_line())
         return ks
     if _dev_allowed():
         if not _warned["dev"]:

@@ -190,7 +190,7 @@ export default function Settings() {
 
       {tab === "pagos" && cfg && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <div className="grid-2" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", alignItems: "start" }}>
+        <div className="grid-2 grid-2--even">
           <Card title="Métodos de pago personalizados" extra={<button className="btn btn--ghost btn--sm" onClick={() => saveCfg({ manual_payment_methods: [...cfg.manual_payment_methods, { name: "Nuevo método", instructions: "", active: true }] })}><Icon d={I.plus} />Agregar</button>}>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {cfg.manual_payment_methods.map((m, i) => (
@@ -357,7 +357,7 @@ function ApiCreds() {
       <Card title="Cómo usarla">
         <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13 }}>
           <p className="muted">Encabezados <span className="mono">X-Api-Key</span> (public key) y <span className="mono">X-Api-Secret</span>. Endpoints:</p>
-          <code className="mono" style={{ padding: 12, background: "var(--bg-2)", borderRadius: 10, fontSize: 12, lineHeight: 1.7, whiteSpace: "pre" }}>{`GET  /api/v1/customers · POST /api/v1/customers
+          <code className="mono" style={{ display: "block", maxWidth: "100%", overflowX: "auto", padding: 12, background: "var(--bg-2)", borderRadius: 10, fontSize: 12, lineHeight: 1.7, whiteSpace: "pre" }}>{`GET  /api/v1/customers · POST /api/v1/customers
 GET  /api/v1/products  · GET  /api/v1/inventory
 GET  /api/v1/invoices  · POST /api/v1/invoices
 POST /api/v1/payment-links/{invoice_id}
@@ -384,17 +384,28 @@ function InboxSettings() {
   const { toast, allows } = useSession();
   const navigate = useNavigate();
   const [cfg, setCfg] = useState<Inbox | null>(null);
+  const [saved, setSaved] = useState<Inbox | null>(null);
   const [password, setPassword] = useState("");
+  const [adminPw, setAdminPw] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => { api<Inbox>("/settings/inbox").then(setCfg); }, []);
+  const loaded = (c: Inbox) => { setCfg(c); setSaved(c); };
+  useEffect(() => { api<Inbox>("/settings/inbox").then(loaded); }, []);
   if (!cfg) return <span className="spinner" />;
+  // otro servidor, puerto o usuario: la contrasena guardada no viaja sola (se vuelve a escribir) y, como guardar una
+  // contrasena, pide la del administrador (la API responde 422 / 403 si falta)
+  const conexion = !!saved && (cfg.host.trim() !== saved.host || Number(cfg.port) !== Number(saved.port) || cfg.user.trim() !== saved.user);
+  const pideClave = conexion && !!saved?.has_password && !password;
+  const pideAdmin = !!password || conexion;
   const save = async () => {
-    try { setCfg(await api<Inbox>("/settings/inbox", { method: "PUT", json: { enabled: cfg.enabled, host: cfg.host, port: Number(cfg.port), user: cfg.user, folder: cfg.folder, password: password || null } })); setPassword(""); toast("Bandeja guardada"); }
+    try {
+      loaded(await api<Inbox>("/settings/inbox", { method: "PUT", json: { enabled: cfg.enabled, host: cfg.host, port: Number(cfg.port), user: cfg.user, folder: cfg.folder, password: password || null, admin_password: pideAdmin ? adminPw : null } }));
+      setPassword(""); setAdminPw(""); toast("Bandeja guardada");
+    }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
   const run = async () => {
     setBusy(true);
-    try { const r = await api<{ messages: number; nuevos: number; duplicados: number; errores: string[] }>("/settings/inbox/run", { method: "POST" }); toast(`${r.messages} correos revisados · ${r.nuevos} comprobantes nuevos${r.errores.length ? ` · ${r.errores.length} con error` : ""}`); setCfg(await api<Inbox>("/settings/inbox")); }
+    try { const r = await api<{ messages: number; nuevos: number; duplicados: number; errores: string[] }>("/settings/inbox/run", { method: "POST" }); toast(`${r.messages} correos revisados · ${r.nuevos} comprobantes nuevos${r.errores.length ? ` · ${r.errores.length} con error` : ""}`); loaded(await api<Inbox>("/settings/inbox")); }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
     finally { setBusy(false); }
   };
@@ -425,11 +436,12 @@ function InboxSettings() {
           <Field label="Servidor IMAP"><input className="input" placeholder="mail.tudominio.com o imap.gmail.com" value={cfg.host} onChange={(e) => setCfg({ ...cfg, host: e.target.value })} /></Field>
           <Field label="Puerto (SSL)"><input className="input input--mono" value={cfg.port} onChange={(e) => setCfg({ ...cfg, port: Number(e.target.value) || 993 })} /></Field>
           <Field label="Usuario"><input className="input" placeholder="facturas@empresa.com" value={cfg.user} onChange={(e) => setCfg({ ...cfg, user: e.target.value })} /></Field>
-          <Field label="Contraseña de aplicación" hint={cfg.has_password ? "Guardada cifrada. Dejá vacío para conservarla." : "Se guarda cifrada."}><input className="input" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+          <Field label="Contraseña de aplicación" hint={pideClave ? "Cambiaste el servidor, el puerto o el usuario: volvé a escribirla." : cfg.has_password ? "Guardada cifrada. Dejá vacío para conservarla." : "Se guarda cifrada."}><input className="input" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
           <Field label="Carpeta"><input className="input" value={cfg.folder} onChange={(e) => setCfg({ ...cfg, folder: e.target.value })} /></Field>
+          {pideAdmin && <Field label="Tu contraseña de administrador" hint="Se pide al guardar la contraseña del buzón o al cambiar el servidor."><input className="input" type="password" autoComplete="current-password" value={adminPw} onChange={(e) => setAdminPw(e.target.value)} /></Field>}
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-          <button className="btn btn--crimson" onClick={save}>Guardar</button>
+          <button className="btn btn--crimson" onClick={save} disabled={pideClave || (pideAdmin && !adminPw)}>Guardar</button>
           <button className="btn btn--soft" onClick={run} disabled={busy || !cfg.has_password}>{busy ? "Revisando…" : "Revisar ahora"}</button>
         </div>
       </Card>

@@ -189,6 +189,12 @@ def blockers(db: Session, kind: str, obj, to: str) -> list[str]:
                 out.append("sus órdenes ya descontaron inventario")
             if db.scalar(select(MaintenanceContract.id).where(MaintenanceContract.project_id == obj.id, MaintenanceContract.active)):
                 out.append("tiene un contrato de mantenimiento activo")
+            from .commissions import project_earned
+
+            if project_earned(db, obj):
+                # como cancelarlo (projects.project_update): lo devengado al completarlo lo anula o revierte quien aprueba
+                # comisiones; la papelera no se lo salta ni deja comisiones por pagar de un proyecto borrado
+                out.append("devengó comisiones, bonos o pagos acordados al completarse: primero lo cancela quien aprueba comisiones")
     elif kind == "work_order":
         if obj.status in IN_PROGRESS_ORDER:
             out.append("el técnico la está ejecutando (en sitio / en proceso)")

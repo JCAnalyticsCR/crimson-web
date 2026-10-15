@@ -87,6 +87,22 @@ def extra_invites(db: Session, spec: str | None, base_url: str | None = None) ->
     return out
 
 
+def legacy_secrets(db: Session) -> None:
+    """Contrasenas de buzon con el cifrado heredado (JWT_SECRET) -> FISCAL_KEYS, en cuanto FISCAL_KEYS exista. Nunca
+    tumba el arranque: un fallo queda en el log y se reintenta en el siguiente."""
+    from .services.inbox import upgrade_legacy_passwords
+
+    try:
+        res = upgrade_legacy_passwords(db)
+        db.commit()
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        print(f"[bootstrap] No se pudo migrar el cifrado de las contraseñas de buzón: {type(e).__name__}", flush=True)
+        return
+    if res["migradas"] or res["ilegibles"]:
+        print(f"[bootstrap] Contraseñas de buzón: {res['migradas']} pasadas a FISCAL_KEYS, {res['ilegibles']} ilegibles.", flush=True)
+
+
 def main() -> None:
     with SessionLocal() as db:
         nuevos = sync_roles(db)  # roles nuevos disponibles aunque el entorno ya tenga usuarios
@@ -95,6 +111,7 @@ def main() -> None:
             print(f"[bootstrap] {nuevos} rol(es) nuevo(s) disponibles para asignar.", flush=True)
         link = run(db, settings.bootstrap_admin_email, demo=settings.bootstrap_demo)
         extras = extra_invites(db, settings.bootstrap_invites)
+        legacy_secrets(db)
     for email, role, url in extras:
         print(f"[bootstrap] Invitacion de prueba · rol {role} · {email} (vence en {INVITE_HOURS} h, un solo uso):", flush=True)
         print(f"[bootstrap] {url}", flush=True)

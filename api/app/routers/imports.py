@@ -587,7 +587,9 @@ async def run_import(
     if len(data) > MAX:
         raise HTTPException(413, "Archivo muy grande (maximo 5 MB)")
     try:
-        rows = tb.read_table(data, file.filename or "")
+        rows = tb.read_table(data, file.filename or "", max_rows=5001)  # la fila de encabezado cuenta
+    except tb.TooManyRows as e:
+        raise HTTPException(422, "Maximo 5000 filas por archivo; divídalo en partes") from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(422, f"No se pudo leer el archivo: {e}") from e
     if not rows:

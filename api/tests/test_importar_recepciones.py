@@ -95,7 +95,7 @@ def test_csv_con_sinonimos_y_gastos(client, auth, db_session):
     csv = (
         "Clave;Fecha;Tipo;Emisor;Cédula emisor;Moneda;Impuesto;Total;Acción;Condición IVA;Código actividad;Consecutivo receptor;Categoría\n"
         f"{c};10/09/2026;FE;Proveedor CSV SA;3101000001;CRC;13000;113000;Aceptado;01;6202.0;00100001050000000361;Servicios\n"
-    ).encode("utf-8")
+    ).encode()
     r = importar(client, csv, name="historico.csv", commit=True, create_expenses=True)
     assert r.status_code == 200 and r.json()["summary"]["nuevo"] == 1, r.text
     doc = db_session.query(ReceivedDocument).filter(ReceivedDocument.clave == c).one()

@@ -14,8 +14,10 @@ const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 export default function Reports() {
   // ?r=<clave>&from=&to= (enlaces "en pantalla" del panel Tributario): reporte y rango iniciales
   const [params] = useSearchParams();
-  const [cat, setCat] = useState<Cat[]>([]);
-  const [key, setKey] = useState(() => params.get("r") || "facturacion");
+  const [cat, setCat] = useState<Cat[] | null>(null);
+  // el reporte inicial sale del catalogo del rol (?r= solo si esta en el): "facturacion" fijo le daba 403 al supervisor,
+  // a bodega y a caja, con el titulo en "…" y "Descargar Excel" apuntando a un reporte prohibido
+  const [key, setKey] = useState<string | null>(null);
   const [rep, setRep] = useState<Rep | null>(null);
   const [range, setRange] = useState(() => {
     const from = params.get("from") || "", to = params.get("to") || "";
@@ -25,8 +27,19 @@ export default function Reports() {
     };
   });
   const [loading, setLoading] = useState(false);
-  useEffect(() => { api<Cat[]>("/reports").then(setCat); }, []);
-  useEffect(() => { setLoading(true); api<Rep>(`/reports/${key}?from=${range.from}&to=${range.to}`).then(setRep).finally(() => setLoading(false)); }, [key, range.from, range.to]);
+  useEffect(() => {
+    api<Cat[]>("/reports").then((c) => {
+      setCat(c);
+      const pedido = params.get("r");
+      setKey(pedido && c.some((x) => x.key === pedido) ? pedido : c[0]?.key ?? null);
+    }).catch(() => setCat([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!key) return;
+    setLoading(true);
+    api<Rep>(`/reports/${key}?from=${range.from}&to=${range.to}`).then(setRep).catch(() => setRep(null)).finally(() => setLoading(false));
+  }, [key, range.from, range.to]);
   const xlsx = `/reports/${key}?from=${range.from}&to=${range.to}&format=xlsx`;
 
   return (
@@ -36,17 +49,17 @@ export default function Reports() {
         <div className="page-head__actions">
           <input className="input" type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} style={{ width: 150 }} />
           <input className="input" type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} style={{ width: 150 }} />
-          <AuthLink className="btn btn--crimson" path={xlsx} download={`${key}-${range.from}-${range.to}.xlsx`}><Icon d={I.reports} />Descargar Excel</AuthLink>
+          {key && <AuthLink className="btn btn--crimson" path={xlsx} download={`${key}-${range.from}-${range.to}.xlsx`}><Icon d={I.reports} />Descargar Excel</AuthLink>}
         </div>
       </div>
       <div className="actions-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
-        {cat.map((c) => (
+        {(cat || []).map((c) => (
           <button key={c.key} className="action" onClick={() => setKey(c.key)} style={{ textAlign: "left", cursor: "pointer", borderColor: key === c.key ? "var(--crimson)" : undefined, background: key === c.key ? "var(--crimson-soft)" : undefined }}>
             <i><Icon d={I.reports} /></i><div><b>{c.title}</b><span>{c.description}</span></div>
           </button>
         ))}
       </div>
-      <Card title={rep?.title || "…"} flush extra={<span className="meta">{rep ? `${rep.from} → ${rep.to} · ${rep.rows.length} filas` : ""}{loading && <span className="spinner" style={{ display: "inline-block", marginLeft: 10, verticalAlign: "middle" }} />}</span>}>
+      {cat !== null && cat.length === 0 ? <Card title="Reportes"><Empty hint="Tu rol no tiene reportes disponibles." /></Card> : <Card title={rep?.title || "…"} flush extra={<span className="meta">{rep ? `${rep.from} → ${rep.to} · ${rep.rows.length} filas` : ""}{loading && <span className="spinner" style={{ display: "inline-block", marginLeft: 10, verticalAlign: "middle" }} />}</span>}>
         {!rep && loading ? <Loading /> : !rep || rep.rows.length === 0 ? <Empty hint="No hay datos en el periodo seleccionado." /> : (
           <div style={{ overflowX: "auto" }}>
             <table className="table">
@@ -56,7 +69,7 @@ export default function Reports() {
             {rep.totals && <div style={{ display: "flex", gap: 22, padding: "12px 18px", borderTop: "1px solid var(--hair)", justifyContent: "flex-end" }}>{Object.entries(rep.totals).map(([k, v]) => <span key={k} className="muted" style={{ fontSize: 13 }}>{k}: <b className="money" style={{ color: "var(--text)" }}>{k === "n" || k.startsWith("Provisionales") ? v : k.includes("%") ? `${Number(v).toFixed(1)}%` : fmtMoney(v)}</b></span>)}</div>}
           </div>
         )}
-      </Card>
+      </Card>}
     </>
   );
 }

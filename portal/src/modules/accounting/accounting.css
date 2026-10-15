@@ -28,8 +28,11 @@
 .acc-drop.is-over { border-color: var(--crimson); background: var(--crimson-soft); }
 .acc-check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
 @media (max-width: 900px) {
-  .acc-parts { display: flex; overflow-x: auto; scrollbar-width: none; }
-  .acc-parts::-webkit-scrollbar { display: none; }
-  .acc-part { flex: 0 0 auto; min-width: 210px; }
+  /* tres pestanas compactas en vez de tarjetas que se deslizaban: a 390 px la primera llenaba el ancho con el texto
+     cortado y Contable / Tributario quedaban fuera de la pantalla sin senal (la activa no se veia) */
+  .acc-parts { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .acc-part { padding: 10px 8px; text-align: center; }
+  .acc-part b { font-size: 14px; overflow-wrap: anywhere; }
+  .acc-part span { display: none; }
   .acc-detail { grid-template-columns: 1fr; }
 }

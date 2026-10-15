@@ -9,7 +9,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func, or_, select, true
+from sqlalchemy import and_, case, func, or_, select, true
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
@@ -676,6 +676,25 @@ def void_invoice(iid: int, p: Principal = Depends(require("sales", "anular")), d
     inv = _own(db, Invoice, iid, p.tenant.id, p)
     if inv.einvoice_status == "aceptada":
         raise HTTPException(409, "Factura aceptada por Hacienda: se anula emitiendo Nota de Credito (Fase 2)")
+    from ..models import EInvoiceDocument
+    from ..services.einvoice import LIVE
+
+    enviada = db.scalar(
+        select(EInvoiceDocument.id).where(
+            EInvoiceDocument.tenant_id == p.tenant.id,
+            EInvoiceDocument.invoice_id == inv.id,
+            EInvoiceDocument.doc_type != "NC",
+            EInvoiceDocument.provider == "hacienda",
+            or_(EInvoiceDocument.status.in_(LIVE), and_(EInvoiceDocument.status == "error", EInvoiceDocument.attempts > 0)),
+        )
+    )
+    if enviada or inv.einvoice_status == "pendiente":
+        # el worker la sigue mandando y consultando, y si Hacienda ya la acepto el IVA debito existe: anularla aqui la
+        # sacaria del D-104 y la NC ya no se ofreceria. Se espera la respuesta y, si la acepto, se anula con NC
+        raise HTTPException(
+            409,
+            "El comprobante electrónico ya se envió a Hacienda y su estado no está confirmado: consultá el estado; si Hacienda lo aceptó, se anula con nota de crédito",
+        )
     inv.status = "anulada"
     invsvc.restock_for_void(db, inv, p.user.id)
     from ..services import commissions as comsvc

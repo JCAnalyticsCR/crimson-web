@@ -254,7 +254,7 @@ def test_migracion_usa_el_mismo_plazo():
 
 # ---------------------------------------------------------------- calculo
 def test_calculo_tabla_e_invariantes():
-    I, V, T = Decimal("15000"), Decimal("13000"), Decimal("115000")  # noqa: N806 - nombres de la spec
+    I, V, T = Decimal("15000"), Decimal("13000"), Decimal("115000")  # noqa: E741, N806 - nombres de la spec
     c = compute("aceptada", "01", I, V, T)
     assert c.credit == V and c.applicable == T - V and c.xml_amounts  # hay impuesto que no es IVA
     assert compute("aceptada", "01", V, V, T).xml_amounts is False
@@ -345,7 +345,7 @@ def test_vincular_gasto_recurrente_existente(client, auth):
 
 
 def test_mensaje_receptor_de_un_cliente(client, auth, db_session, monkeypatch):
-    from app.models import EmailOutbox, EInvoiceDocument
+    from app.models import EInvoiceDocument, EmailOutbox
 
     client.put("/settings", json={"einvoice_provider": "sandbox"})
     cust = client.get("/customers").json()["items"][0]

@@ -286,7 +286,7 @@ def test_inbox_imap_imports_xml(client, auth, db_session):
     resp.attach(MIMEApplication(b"<MensajeHacienda><Clave>x</Clave></MensajeHacienda>", _subtype="xml"))
     resp.get_payload()[0]["Content-Disposition"] = 'attachment; filename="respuesta.xml"'
     assert client.put(
-        "/settings/inbox", json={"enabled": True, "host": "imap.ejemplo.com", "user": "facturas@ejemplo.com", "password": "clave-app-123"}
+        "/settings/inbox", json={"enabled": True, "host": "imap.ejemplo.com", "user": "facturas@ejemplo.com", "password": "clave-app-123", "admin_password": "Crimson-2026-seguro"}
     ).json()["has_password"]
     # el tercero trae el mismo XML en otro correo (reenvio): mismos bytes del correo se saltarian por sha256 (§6.4 paso 4)
     reenvio = MIMEMultipart()

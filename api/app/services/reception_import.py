@@ -32,7 +32,11 @@ from .reception_calc import ACTION_OF_CODE, IVA_NAMES, deadline, name_of
 from .reception_intake import CLAVE_RE, CONSEC_RE, ZipRejected, apply_supplier_response, expand_zip, initial_status, sniff, supplier_response_problem
 from .sequences import ensure_fiscal_groups
 
-MAX_IMPORT = 50 * 1024 * 1024
+MAX_IMPORT = 50 * 1024 * 1024  # zip de XML (expand_zip pone sus propios topes)
+# Excel o CSV: el mismo tope de archivo que el resto de importaciones de tabla. Las filas, mas holgadas que las 5000 de
+# /imports: el historico de comprobantes recibidos de un ano de Fygaro puede pasarlas.
+MAX_TABLE = 5 * 1024 * 1024
+MAX_TABLE_ROWS = 20_000
 TEMPLATE = [
     "Clave",
     "Fecha",
@@ -409,8 +413,10 @@ def _integrity_detail(e: IntegrityError) -> str:
 
 def import_table(db: Session, p: Principal, data: bytes, filename: str, commit: bool, create_expenses: bool) -> tuple[list[dict], dict[str, int], dict]:
     tenant = p.tenant
+    if len(data) > MAX_TABLE:
+        raise HTTPException(413, "Archivo muy grande (máximo 5 MB para Excel o CSV; los XML pueden ir en un .zip de hasta 50 MB)")
     try:
-        rows = tb.read_table(data, filename)
+        rows = tb.read_table(data, filename, max_rows=MAX_TABLE_ROWS)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(422, f"No se pudo leer el archivo: {e}") from e
     if not rows:

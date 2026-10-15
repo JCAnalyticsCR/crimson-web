@@ -213,6 +213,7 @@ def commission_status(data: CommissionStatusIn, p: Principal = Depends(require("
                 c.approved_by, c.approved_at = p.user.id, now
         elif data.status == "anulada":
             c.void_reason = data.reason.strip()[:240]
+            svc.mark_manual_void(c)  # el motor no la vuelve a devengar sola (convertir, crear el proyecto)
         if data.status != "pagada":
             c.paid_on = None  # una pagada no cambia de estado: aqui nunca se borra un pago real
         audit(db, p.tenant.id, p.user.id, "status", "commission", c.id, {"de": antes, "a": data.status, "ref": c.paid_ref, "motivo": c.void_reason}, ip=p.ip)

@@ -159,8 +159,11 @@ class AllyScope:
     def one(self, model, oid: int, conds: list, label: str):
         obj = self.db.scalar(select(model).where(model.id == oid, *conds))
         if obj is None:
-            raise HTTPException(404, f"{label} no encontrado")
+            raise HTTPException(404, f"{label} no encontrad{'a' if label in FEMENINO else 'o'}")
         return obj
+
+
+FEMENINO = {"Oportunidad", "Orden de trabajo"}  # "Oportunidad no encontrado" salia con el genero mal
 
 
 def check_ally_assignment(
