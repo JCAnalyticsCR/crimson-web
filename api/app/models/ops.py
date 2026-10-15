@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -148,6 +148,8 @@ class ExpenseCategory(TenantMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # gasto especifico del D-151/D-270: alquiler | servicios_profesionales | comisiones | intereses (None = ninguno)
+    d151_kind: Mapped[str | None] = mapped_column(String(24))
 
 
 class Expense(TenantMixin, TimestampMixin, Base):
@@ -163,13 +165,30 @@ class Expense(TenantMixin, TimestampMixin, Base):
     tax_rate: Mapped[float] = mapped_column(Numeric(6, 3), default=13)
     tax_amount: Mapped[float] = mapped_column(Numeric(16, 5), default=0)
     total: Mapped[float] = mapped_column(Numeric(16, 5), default=0)
-    iva_credit: Mapped[str] = mapped_column(String(12), default="credito")  # credito | no_credito | proporcional
+    # credito | credito_parcial | bienes_capital | no_credito | proporcional
+    iva_credit: Mapped[str] = mapped_column(String(16), default="credito")
     bank_account_id: Mapped[int | None] = mapped_column(ForeignKey("bank_account.id"))
     reference: Mapped[str | None] = mapped_column(String(120))
-    received_clave: Mapped[str | None] = mapped_column(String(50))  # clave del XML recibido (Fase 2)
+    received_clave: Mapped[str | None] = mapped_column(String(50))  # clave del XML recibido
     attachment_url: Mapped[str | None] = mapped_column(String(400))
     status: Mapped[str] = mapped_column(String(20), default="registrado")  # registrado | pagado | anulado
     created_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
+    # gasto que nace (o se vincula) de un comprobante electronico: los montos salen del XML y quedan bloqueados
+    received_document_id: Mapped[int | None] = mapped_column(
+        ForeignKey("received_document.id", use_alter=True, name="fk_expense_received_document"), index=True
+    )
+    fx_rate: Mapped[float] = mapped_column(Numeric(12, 5), default=1)
+    tax_credit_amount: Mapped[float | None] = mapped_column(Numeric(16, 5))  # IVA acreditable en la divisa del gasto
+    notes: Mapped[str | None] = mapped_column(Text)
+    payment_method: Mapped[str | None] = mapped_column(String(20))  # efectivo | tarjeta | transferencia | sinpe | cheque | otro
+    purchase_type: Mapped[str] = mapped_column(String(10), default="contado")  # contado | credito
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True)  # nullable explicito: el campo "date" tapa el tipo
+    recurrence_id: Mapped[int | None] = mapped_column(ForeignKey("recurrence.id", use_alter=True, name="fk_expense_recurrence"))
+    recurrence_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    bank_instrument_id: Mapped[int | None] = mapped_column(ForeignKey("bank_instrument.id", name="fk_expense_bank_instrument"))
+    check_number: Mapped[str | None] = mapped_column(String(20))
+
+    __table_args__ = (UniqueConstraint("tenant_id", "recurrence_id", "recurrence_date", name="uq_expense_recurrence_date"),)
 
 
 # ---------- Recurrencias (plan 4): plantilla -> factura en la fecha programada ----------
@@ -190,6 +209,7 @@ class Recurrence(TenantMixin, TimestampMixin, Base):
     last_invoice_id: Mapped[int | None] = mapped_column(ForeignKey("invoice.id"))
     last_expense_id: Mapped[int | None] = mapped_column(ForeignKey("expense.id"))
     runs: Mapped[int] = mapped_column(Integer, default=0)
+    anchor_day: Mapped[int | None] = mapped_column(SmallInteger)  # dia ancla: un 31 no "baja al 28" para siempre
 
 
 # ---------- Factura electronica (plan 5.1) ----------
@@ -206,13 +226,29 @@ class EInvoiceDocument(TenantMixin, TimestampMixin, Base):
     reference_clave: Mapped[str | None] = mapped_column(String(50))  # NC/ND: clave del documento original
     provider: Mapped[str] = mapped_column(String(20))
     provider_ref: Mapped[str | None] = mapped_column(String(120))
-    status: Mapped[str] = mapped_column(String(20), default="pendiente")  # pendiente | enviado | aceptada | rechazada | error
+    # por_enviar | enviando | enviado | procesando | pendiente | aceptada | rechazada | error
+    status: Mapped[str] = mapped_column(String(20), default="pendiente")
     hacienda_message: Mapped[str | None] = mapped_column(Text)
     xml_document: Mapped[str | None] = mapped_column(Text)
     xml_response: Mapped[str | None] = mapped_column(Text)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    mode: Mapped[str | None] = mapped_column(String(12))  # simulado | pruebas | produccion
+    emitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(300))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # XML + PDF entregados al cliente
+    hacienda_delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # respuesta de Hacienda entregada
+    # tope de reintentos de la entrega (correo rechazado una y otra vez): no se insiste y se avisa al admin
+    delivery_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hacienda_delivery_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # mensaje receptor de NUESTRO cliente sobre este comprobante (1 acepta, 2 parcial, 3 rechaza)
+    receiver_message: Mapped[str | None] = mapped_column(String(1))
+    receiver_detail: Mapped[str | None] = mapped_column(String(160))
+    receiver_xml: Mapped[str | None] = mapped_column(Text)
+    receiver_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # ---------- Correo saliente (outbox) y webhooks (plan 6, 5.3) ----------

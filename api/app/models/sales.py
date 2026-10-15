@@ -111,7 +111,7 @@ class Invoice(_DocBase, Base):
     payment_method: Mapped[str] = mapped_column(String(4), default="01")  # 01 efectivo, 02 tarjeta, 04 transf, 06 SINPE
     balance: Mapped[float] = mapped_column(Numeric(16, 5), default=0)
     quote_id: Mapped[int | None] = mapped_column(ForeignKey("quote.id", use_alter=True, name="fk_invoice_quote_id"))
-    einvoice_status: Mapped[str] = mapped_column(String(20), default="sin_emitir")  # sin_emitir | pendiente | aceptada | rechazada
+    einvoice_status: Mapped[str] = mapped_column(String(20), default="sin_emitir")  # sin_emitir | pendiente | aceptada | rechazada | error | importada
 
     lines: Mapped[list["InvoiceLine"]] = relationship(cascade="all, delete-orphan", order_by="InvoiceLine.position", lazy="selectin")
     payments: Mapped[list["Payment"]] = relationship(back_populates="invoice", lazy="selectin")  # noqa: F821

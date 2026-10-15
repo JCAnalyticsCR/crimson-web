@@ -14,6 +14,7 @@ from ..core.config import settings
 from ..core.security import sign_purpose_token
 from ..models import (
     AuditLog,
+    Customer,
     ExchangeRate,
     Invoice,
     InvoiceLine,
@@ -25,6 +26,7 @@ from ..models import (
 )
 from ..schemas.sales import DocumentIn, LineInSchema
 from . import units
+from .refs import check_refs
 from .sequences import next_number
 from .totals import LineIn, balance, compute_document, d
 
@@ -114,8 +116,15 @@ def line_in(ln: LineInSchema) -> LineIn:
     )
 
 
+def check_customer(db: Session, tenant_id: int, customer_id: int | None) -> None:
+    """El cliente es de ESTA empresa (404 si no): si no, la factura se emitiria a Hacienda con la cedula y el correo de
+    un cliente ajeno y el XML y el PDF le llegarian a el (services/refs.py)."""
+    check_refs(db, tenant_id, {"customer_id": customer_id}, refs={"customer_id": (Customer, "Cliente no encontrado")})
+
+
 def apply_document(db: Session, doc: Quote | Invoice, payload: DocumentIn, line_cls, tenant_id: int) -> None:
     """Escribe cabecera + lineas y recalcula totales. Reutilizado por cotizacion y factura."""
+    check_customer(db, tenant_id, payload.customer_id)
     doc.customer_id = payload.customer_id
     doc.currency = payload.currency
     if payload.fx_sell is None:
@@ -182,6 +191,7 @@ _SELF = object()
 
 
 def create_quote(db: Session, tenant_id: int, user_id: int | None, payload: DocumentIn, *, seller_id=_SELF) -> Quote:
+    check_customer(db, tenant_id, payload.customer_id)  # antes de gastar el numero
     number, _ = next_number(db, tenant_id, "COT")
     days = payload.valid_days or 15
     q = Quote(tenant_id=tenant_id, number=number, created_by=user_id or None, status="creado")
@@ -197,8 +207,10 @@ def create_quote(db: Session, tenant_id: int, user_id: int | None, payload: Docu
 def create_invoice(
     db: Session, tenant_id: int, user_id: int | None, payload: DocumentIn, doc_type: str = "FE", quote: Quote | None = None, *, seller_id=_SELF
 ) -> Invoice:
-    number, consecutive = next_number(db, tenant_id, doc_type)
-    inv = Invoice(tenant_id=tenant_id, number=number, consecutive=consecutive, doc_type=doc_type, created_by=user_id or None, status="creado")
+    # D5: el numero visible se asigna al crear; el consecutivo fiscal de 20 digitos, al emitir (services/einvoice.py)
+    check_customer(db, tenant_id, payload.customer_id)  # antes de gastar el numero
+    number, _ = next_number(db, tenant_id, doc_type)
+    inv = Invoice(tenant_id=tenant_id, number=number, consecutive=None, doc_type=doc_type, created_by=user_id or None, status="creado")
     inv.seller_id = (user_id or None) if seller_id is _SELF else seller_id  # services/ownership.py
     inv.sale_condition = payload.sale_condition or "01"
     inv.credit_days = payload.credit_days or 0

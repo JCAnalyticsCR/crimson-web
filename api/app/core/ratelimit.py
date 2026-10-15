@@ -80,3 +80,6 @@ token_limiter = SlidingWindow(limit=20, seconds=600)
 pwreset_ip_limiter = SlidingWindow(limit=5, seconds=3600)
 pwreset_email_limiter = SlidingWindow(limit=3, seconds=3600)  # clave: sha256 del correo; al pasarse se ignora en silencio
 pwreset_global_limiter = SlidingWindow(limit=100, seconds=3600)
+# Hacienda: "Probar conexion" pide un token al IdP (no abusar) y "Revisar buzon ahora" abre IMAP, por empresa
+hacienda_test_limiter = SlidingWindow(limit=5, seconds=900)
+inbox_run_limiter = SlidingWindow(limit=4, seconds=300)

@@ -198,28 +198,152 @@ def auto_match(db: Session, acct: BankAccount) -> int:
     return n
 
 
+def _instrument_out(i) -> dict:
+    return {
+        "id": i.id,
+        "bank_account_id": i.bank_account_id,
+        "kind": i.kind,
+        "name": i.name,
+        "last4": i.last4,
+        "holder": i.holder,
+        "check_from": i.check_from,
+        "check_to": i.check_to,
+        "next_check": i.next_check,
+        "active": i.active,
+    }
+
+
+def _account_out(db: Session, a: BankAccount) -> dict:
+    from ..models import BankInstrument
+
+    counts = dict(db.execute(select(BankStatementLine.status, func.count()).where(BankStatementLine.bank_account_id == a.id).group_by(BankStatementLine.status)).all())
+    last = db.scalar(select(func.max(BankStatementLine.date)).where(BankStatementLine.bank_account_id == a.id))
+    q = select(func.coalesce(func.sum(BankStatementLine.amount), 0)).where(BankStatementLine.bank_account_id == a.id, BankStatementLine.status != "ignorado")
+    if a.opening_date:
+        q = q.where(BankStatementLine.date >= a.opening_date)
+    moved = d(db.scalar(q))
+    return {
+        "id": a.id,
+        "name": a.name,
+        "bank": a.bank,
+        "currency": a.currency,
+        "number": a.number,
+        "active": a.active,
+        "pending": counts.get("pendiente", 0),
+        "reconciled": counts.get("conciliado", 0),
+        "ignored": counts.get("ignorado", 0),
+        "last_date": last,
+        "opening_balance": a.opening_balance,
+        "opening_date": a.opening_date,
+        # saldo segun el extracto importado (el banco no se conecta): apertura + movimientos desde la fecha de apertura
+        "balance": (d(a.opening_balance) + moved).quantize(Decimal("0.01")),
+        "balance_date": last,
+        "instruments": [_instrument_out(i) for i in db.scalars(select(BankInstrument).where(BankInstrument.bank_account_id == a.id).order_by(BankInstrument.id))],
+    }
+
+
 @router.get("/accounts")
-def accounts(p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):
-    out = []
-    for a in db.scalars(select(BankAccount).where(BankAccount.tenant_id == p.tenant.id, BankAccount.active).order_by(BankAccount.name)):
-        counts = dict(
-            db.execute(select(BankStatementLine.status, func.count()).where(BankStatementLine.bank_account_id == a.id).group_by(BankStatementLine.status)).all()
-        )
-        last = db.scalar(select(func.max(BankStatementLine.date)).where(BankStatementLine.bank_account_id == a.id))
-        out.append(
-            {
-                "id": a.id,
-                "name": a.name,
-                "bank": a.bank,
-                "currency": a.currency,
-                "number": a.number,
-                "pending": counts.get("pendiente", 0),
-                "reconciled": counts.get("conciliado", 0),
-                "ignored": counts.get("ignorado", 0),
-                "last_date": last,
-            }
-        )
-    return out
+def accounts(all: int = 0, p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):  # noqa: A002
+    q = select(BankAccount).where(BankAccount.tenant_id == p.tenant.id)
+    if not all:
+        q = q.where(BankAccount.active)
+    return [_account_out(db, a) for a in db.scalars(q.order_by(BankAccount.name))]
+
+
+class AccountIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    bank: str | None = Field(None, max_length=80)
+    currency: str = Field("CRC", pattern="^(CRC|USD|EUR)$")
+    number: str | None = Field(None, max_length=60)
+    active: bool = True
+    opening_balance: Decimal = Decimal(0)
+    opening_date: date | None = None
+
+
+@router.post("/accounts", status_code=201)
+def account_create(data: AccountIn, p: Principal = Depends(require("accounting", "editar")), db: Session = Depends(get_db)):
+    a = BankAccount(tenant_id=p.tenant.id, **data.model_dump())
+    db.add(a)
+    db.flush()
+    audit(db, p.tenant.id, p.user.id, "create", "bank_account", a.id, {"name": a.name, "currency": a.currency}, ip=p.ip)
+    db.commit()
+    return _account_out(db, a)
+
+
+@router.put("/accounts/{aid}")
+def account_update(aid: int, data: AccountIn, p: Principal = Depends(require("accounting", "editar")), db: Session = Depends(get_db)):
+    from ..services.bitacora import audit_change, snapshot
+
+    a = _account(db, aid, p.tenant.id)
+    antes = snapshot(a)
+    for k, v in data.model_dump().items():
+        setattr(a, k, v)
+    audit_change(db, p, "update", "bank_account", a.id, antes, snapshot(a))
+    db.commit()
+    return _account_out(db, a)
+
+
+class InstrumentIn(BaseModel):
+    kind: str = Field(pattern="^(chequera|tarjeta_debito)$")
+    name: str = Field(min_length=1, max_length=80)
+    last4: str | None = Field(None, max_length=40)
+    holder: str | None = Field(None, max_length=120)
+    check_from: int | None = Field(None, ge=0)
+    check_to: int | None = Field(None, ge=0)
+    next_check: int | None = Field(None, ge=0)
+    active: bool = True
+
+
+def _validate_instrument(data: InstrumentIn) -> dict:
+    v = data.model_dump()
+    if data.kind == "tarjeta_debito":
+        last4 = (data.last4 or "").strip()
+        if not last4 or not last4.isdigit() or len(last4) != 4:
+            raise HTTPException(422, "Solo los últimos 4 dígitos de la tarjeta")  # nunca el numero completo
+        v.update(last4=last4, check_from=None, check_to=None, next_check=None)
+    else:
+        if data.check_from is None or data.check_to is None or data.check_from > data.check_to:
+            raise HTTPException(422, "La chequera necesita un rango válido (desde ≤ hasta)")
+        nxt = data.next_check if data.next_check is not None else data.check_from
+        if not (data.check_from <= nxt <= data.check_to + 1):
+            raise HTTPException(422, "El siguiente cheque debe estar dentro del rango")
+        v.update(last4=None, next_check=nxt)
+    return v
+
+
+@router.get("/accounts/{aid}/instruments")
+def instruments(aid: int, p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):
+    from ..models import BankInstrument
+
+    _account(db, aid, p.tenant.id)
+    return [_instrument_out(i) for i in db.scalars(select(BankInstrument).where(BankInstrument.bank_account_id == aid).order_by(BankInstrument.id))]
+
+
+@router.post("/accounts/{aid}/instruments", status_code=201)
+def instrument_create(aid: int, data: InstrumentIn, p: Principal = Depends(require("accounting", "editar")), db: Session = Depends(get_db)):
+    from ..models import BankInstrument
+
+    _account(db, aid, p.tenant.id)
+    i = BankInstrument(tenant_id=p.tenant.id, bank_account_id=aid, **_validate_instrument(data))
+    db.add(i)
+    db.flush()
+    audit(db, p.tenant.id, p.user.id, "create", "bank_instrument", i.id, {"kind": i.kind, "name": i.name}, ip=p.ip)
+    db.commit()
+    return _instrument_out(i)
+
+
+@router.put("/instruments/{iid}")
+def instrument_update(iid: int, data: InstrumentIn, p: Principal = Depends(require("accounting", "editar")), db: Session = Depends(get_db)):
+    from ..models import BankInstrument
+
+    i = db.get(BankInstrument, iid)
+    if not i or i.tenant_id != p.tenant.id:
+        raise HTTPException(404, "Chequera o tarjeta no encontrada")
+    for k, v in _validate_instrument(data).items():
+        setattr(i, k, v)
+    audit(db, p.tenant.id, p.user.id, "update", "bank_instrument", i.id, {"kind": i.kind, "name": i.name}, ip=p.ip)
+    db.commit()
+    return _instrument_out(i)
 
 
 @router.get("/{aid}/lines")
@@ -337,14 +461,23 @@ def expense_from_line(lid: int, data: ExpenseFromLineIn, p: Principal = Depends(
         cat = db.get(ExpenseCategory, data.category_id)
         if not cat or cat.tenant_id != p.tenant.id:
             raise HTTPException(404, "Categoria no encontrada")
+    from .ops import bccr_sell
+
     total = -d(ln.amount)
     sub = (total / (1 + data.tax_rate / 100)).quantize(Decimal("0.00001"))
+    warnings = []
+    currency = acct.currency or "CRC"
+    fx = bccr_sell(db, currency, ln.date)  # los reportes pasan a colones con expense.fx_rate (CRC = 1)
+    if fx is None:
+        fx = Decimal(1)
+        warnings.append("Sin tipo de cambio del BCCR para esa fecha: se usó 1; corríjalo en el gasto")
     e = Expense(
         tenant_id=p.tenant.id,
         category_id=data.category_id,
         description=(data.description or ln.description)[:300],
         date=ln.date,
-        currency=acct.currency,
+        currency=currency,
+        fx_rate=fx,
         subtotal=sub,
         tax_rate=data.tax_rate,
         tax_amount=total - sub,
@@ -360,7 +493,7 @@ def expense_from_line(lid: int, data: ExpenseFromLineIn, p: Principal = Depends(
     ln.status, ln.matched_type, ln.matched_id, ln.matched_by = "conciliado", "expense", e.id, "manual"
     audit(db, p.tenant.id, p.user.id, "expense_from_line", "bank_line", ln.id, {"expense_id": e.id}, ip=p.ip)
     db.commit()
-    return _line_out(ln, db)
+    return {**_line_out(ln, db), "warnings": warnings}
 
 
 def summary(db: Session, tid: int, a: date, b: date) -> list[list]:

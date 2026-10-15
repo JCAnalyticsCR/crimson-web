@@ -1,12 +1,12 @@
 /* Importador de datos / herramienta de migración desde Fygaro. */
-import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { uploadFile } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, I, Icon } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
 
-type ImportKind = "customers" | "products" | "suppliers" | "invoices" | "catalogo";
+type ImportKind = "customers" | "products" | "suppliers" | "invoices" | "catalogo" | "recepciones";
 type ActionKind = "nuevo" | "actualizar" | "omitir" | "error";
 type PreviewRow = { row: number; action: ActionKind; detail: string | null };
 type PreviewResult = {
@@ -14,14 +14,17 @@ type PreviewResult = {
   summary: { nuevo: number; actualizar: number; omitir: number; error: number };
   columns: Record<string, string | null>;
   result: PreviewRow[];
+  notes?: string[];
 };
 
-const KINDS: { id: ImportKind; label: string; desc: string; route: string }[] = [
-  { id: "customers", label: "Clientes", desc: "Nombre, cédula, correo y teléfono.", route: "/clientes" },
-  { id: "products", label: "Productos y servicios", desc: "Código, nombre, precio, CABYS, impuesto.", route: "/productos" },
-  { id: "suppliers", label: "Proveedores", desc: "Nombre, cédula, contacto y condiciones de pago.", route: "/contabilidad" },
-  { id: "invoices", label: "Facturas históricas", desc: "Documentos previos como referencia (no se reenvían a Hacienda).", route: "/facturas" },
-  { id: "catalogo", label: "Lista de precios de proveedor", desc: "Crea productos propios directo desde la lista: el costo entra tal cual y el precio sale del margen. Para tener el catálogo del proveedor aparte y vincular solo lo que vendés, usá Inventarios → Proveedores.", route: "/productos" },
+/* need: el permiso que pide la API para ese tipo (la lista se filtra con el; la API sigue siendo la frontera) */
+const KINDS: { id: ImportKind; label: string; desc: string; route: string; need: string }[] = [
+  { id: "customers", label: "Clientes", desc: "Nombre, cédula, correo y teléfono.", route: "/clientes", need: "crm.crear" },
+  { id: "products", label: "Productos y servicios", desc: "Código, nombre, precio, CABYS, impuesto.", route: "/productos", need: "catalog.crear" },
+  { id: "suppliers", label: "Proveedores", desc: "Nombre, cédula, contacto y condiciones de pago.", route: "/contabilidad/contable/proveedores", need: "catalog.crear" },
+  { id: "invoices", label: "Facturas históricas", desc: "Documentos previos como referencia (no se reenvían a Hacienda).", route: "/facturas", need: "sales.crear" },
+  { id: "catalogo", label: "Lista de precios de proveedor", desc: "Crea productos propios directo desde la lista: el costo entra tal cual y el precio sale del margen. Para tener el catálogo del proveedor aparte y vincular solo lo que vendés, usá Inventarios → Proveedores.", route: "/productos", need: "catalog.costos" },
+  { id: "recepciones", label: "Recepciones de Fygaro", desc: "El zip de «Download All» de Fygaro (comprobantes, respuestas, mensajes y PDF) o un CSV/Excel. Quedan como históricas: no se envían a Hacienda ni se responden de nuevo.", route: "/contabilidad/facturas/recibidas", need: "accounting.crear" },
 ];
 
 const ACTION_LABELS: Record<ActionKind, string> = {
@@ -34,7 +37,8 @@ const ACTION_COLORS: Record<ActionKind, string> = {
 export default function Importer() {
   const { toast, allows } = useSession();
   // la lista de proveedor escribe costo y margen: solo quien ve costos (la API responde 403 a los demas)
-  const kinds = KINDS.filter((k) => k.id !== "catalogo" || allows("catalog.costos"));
+  const kinds = KINDS.filter((k) => allows(k.need));
+  const [params] = useSearchParams();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -46,9 +50,15 @@ export default function Importer() {
   const [committed, setCommitted] = useState<PreviewResult | null>(null);
   /* La lista del proveedor trae costos, no precios: el margen y la divisa definen a cuánto se vende. */
   const [opts, setOpts] = useState({ margin: "35", supplier: "", brand: "", currency: "USD" });
-  const qs = () => (kind === "catalogo" ? `&margin=${encodeURIComponent(opts.margin)}&supplier=${encodeURIComponent(opts.supplier)}&brand=${encodeURIComponent(opts.brand)}&currency=${opts.currency}` : "");
+  const [createExpenses, setCreateExpenses] = useState(false);
+  const qs = () => (kind === "catalogo" ? `&margin=${encodeURIComponent(opts.margin)}&supplier=${encodeURIComponent(opts.supplier)}&brand=${encodeURIComponent(opts.brand)}&currency=${opts.currency}` : kind === "recepciones" ? `&create_expenses=${createExpenses}` : "");
 
   const chooseKind = (k: ImportKind) => { setKind(k); setStep(2); setFile(null); setPreview(null); setCommitted(null); };
+  // /importar?kind=recepciones (desde Contabilidad -> Facturas) entra directo al tipo
+  useEffect(() => {
+    const k = params.get("kind") as ImportKind | null;
+    if (k && kinds.some((x) => x.id === k)) chooseKind(k);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pickFile = (f: File) => {
     setFile(f);
@@ -129,6 +139,13 @@ export default function Importer() {
         <Card title={`Importar ${currentKindMeta?.label}`}>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <p className="muted" style={{ fontSize: 13 }}>{currentKindMeta?.desc}{kind === "catalogo" ? " Subí el archivo tal como lo manda el proveedor: no hay plantilla que llenar." : " Descargá la plantilla, completala y subila aquí."}</p>
+            {kind === "recepciones" && (
+              <div className="muted" style={{ fontSize: 13 }}>
+                <p style={{ margin: "0 0 6px" }}>Lo normal es subir el <b>.zip</b> que baja Fygaro con «Download All» (o un zip de zips). Si un comprobante ya está aquí y solo se respondió en simulado o pruebas, <b>gana el mensaje de Fygaro</b> (fue el que valió).</p>
+                <p style={{ margin: 0 }}>El importador <b>no cambia los consecutivos</b>: te dice el último número de aceptación de Fygaro para que el administrador lo ponga en Ajustes → Hacienda → Consecutivos.</p>
+                <label style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}><input type="checkbox" checked={createExpenses} onChange={(e) => setCreateExpenses(e.target.checked)} />Crear también los gastos de las aceptadas</label>
+              </div>
+            )}
             {kind !== "catalogo" && (
               <AuthLink path={`/import/${kind}/template`} download={`plantilla-${kind}.xlsx`} className="btn btn--ghost btn--sm">
                 <Icon d={I.reports} />Descargar plantilla
@@ -151,8 +168,8 @@ export default function Importer() {
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) pickFile(f); }}
             >
-              <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) pickFile(f); e.target.value = ""; }} />
-              {busy ? <span className="spinner" /> : <><Icon d={I.plus} />{" Arrastrá o hacé clic para elegir un .csv o .xlsx"}</>}
+              <input ref={fileRef} type="file" accept={kind === "recepciones" ? ".zip,.csv,.xlsx,.xml" : ".csv,.xlsx,.xls"} hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) pickFile(f); e.target.value = ""; }} />
+              {busy ? <span className="spinner" /> : <><Icon d={I.plus} />{kind === "recepciones" ? " Arrastrá o hacé clic para elegir el .zip de Fygaro, un .csv o un .xlsx" : " Arrastrá o hacé clic para elegir un .csv o .xlsx"}</>}
             </div>
           </div>
         </Card>
@@ -170,6 +187,8 @@ export default function Importer() {
               </div>
             ))}
           </div>
+
+          {preview.notes && preview.notes.length > 0 && <div style={{ background: "var(--warn-soft)", border: "1px solid var(--warn)", borderRadius: 12, padding: "10px 14px", fontSize: 13 }}>{preview.notes.map((n) => <div key={n}>⚠ {n}</div>)}</div>}
 
           {/* columnas reconocidas */}
           <Card title="Columnas detectadas">

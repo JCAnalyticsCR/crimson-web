@@ -49,6 +49,9 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   /* vendedor responsable: lo elige solo quien tiene sales.asignar (el admin); los demas lo ven */
   const asigna = allows("sales.asignar");
   const [sellers, setSellers] = useState<{ id: number; name: string }[]>([]);
+  /* actividades economicas de Ajustes -> Hacienda (antes fijas en 6202.0 / 4322.0) y modo fiscal vigente */
+  const [acts, setActs] = useState<{ id: number; code: string; description: string | null; is_default: boolean }[]>([]);
+  const [fmode, setFmode] = useState<string | null>(null);
   const pending = doc.status === "por_aprobar";
   // grupoB: aceptada por el cliente = bloqueada (se deshace la respuesta en el panel Versiones)
   const accepted = isQ && (doc as Quote).acceptance_status === "aceptada";
@@ -56,6 +59,8 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
 
   useEffect(() => {
     api<{ items: Customer[] }>("/customers?limit=100").then((r) => setCustomers(r.items));
+    api<{ id: number; code: string; description: string | null; is_default: boolean }[]>("/fiscal/activities").then(setActs).catch(() => setActs([]));
+    api<{ mode: string }>("/fiscal/mode").then((r) => setFmode(r.mode)).catch(() => setFmode(null));
     api<{ sell: string; buy: string } | null>("/fx/today").then((r) => r && setFx(r)).catch(() => {});
     api<{ limit: number; free: boolean }>("/sales/discount-limit").then(setLimit).catch(() => {});
     if (!isNew) api<Quote & Invoice>(`/${isQ ? "quotes" : "invoices"}/${id}`).then(hydrate);
@@ -283,7 +288,10 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
             <div className="card"><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div className="meta">Otros ajustes</div>
               <Field label="Orden externa #"><input className="input" value={doc.external_order || ""} disabled={locked} onChange={(e) => setDoc({ ...doc, external_order: e.target.value })} /></Field>
-              <Field label="Código de actividad"><select className="select" value={doc.activity_code || ""} disabled={locked} onChange={(e) => setDoc({ ...doc, activity_code: e.target.value })}><option value="">Seleccione…</option><option>6202.0</option><option>4322.0</option></select></Field>
+              <Field label="Código de actividad" hint="Vacío = la actividad por defecto de Ajustes → Hacienda."><select className="select" value={doc.activity_code || ""} disabled={locked} onChange={(e) => setDoc({ ...doc, activity_code: e.target.value })}><option value="">Por defecto{acts.find((a) => a.is_default) ? ` (${acts.find((a) => a.is_default)!.code})` : ""}</option>{acts.map((a) => <option key={a.id} value={a.code}>{a.code}{a.description ? ` · ${a.description}` : ""}</option>)}{doc.activity_code && !acts.some((a) => a.code === doc.activity_code) && <option value={doc.activity_code}>{doc.activity_code}</option>}</select></Field>
+              {!isQ && (fmode === "pruebas" || fmode === "produccion" || ((doc as Invoice).einvoice_status && (doc as Invoice).einvoice_status !== "sin_emitir")) && (
+                <Field label="Fecha" hint="La fecha la pone la emisión (Hacienda no admite fechas anteriores ni posteriores)."><div className="input" style={{ display: "flex", alignItems: "center", background: "var(--bg-2)" }}>{doc.issue_date || "al emitir"}</div></Field>
+              )}
               {/* La exoneracion medica no aplica a las cotizaciones de Crimson (pedido de Andres); el campo es compartido y sigue en facturas. */}
               {!isQ && <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={!!doc.medical_exemption_card} disabled={locked} onChange={(e) => setDoc({ ...doc, medical_exemption_card: e.target.checked })} />Exoneración médica IVA (tarjeta de crédito)</label>}
             </div></div>

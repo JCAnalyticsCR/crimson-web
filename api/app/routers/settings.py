@@ -118,23 +118,57 @@ class SettingsIn(BaseModel):
         return list(dict.fromkeys(v))
 
 
+def _public_settings(v):
+    """Quita en forma recursiva las llaves que terminan en _enc o _encrypted (p. ej. inbox.password_enc): GET /settings
+    lo ve el rol soporte y nunca debe llevar texto cifrado."""
+    if isinstance(v, dict):
+        return {k: _public_settings(x) for k, x in v.items() if not (str(k).endswith("_enc") or str(k).endswith("_encrypted"))}
+    if isinstance(v, list):
+        return [_public_settings(x) for x in v]
+    return v
+
+
 @router.get("")
 def get_settings(p: Principal = Depends(require("settings", "ver"))):
-    return {**DEFAULTS, **(p.tenant.settings or {})}
+    return _public_settings({**DEFAULTS, **(p.tenant.settings or {})})
 
 
 @router.put("")
 def put_settings(data: SettingsIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
+    from ..services import hacienda_config as hc
+
     t = db.get(Tenant, p.tenant.id)
     antes = list((t.settings or {}).get("cost_roles") or [])
+    prov_antes = hc.provider_setting(t)
     t.settings = {**DEFAULTS, **(t.settings or {}), **data.model_dump(exclude_unset=True, mode="json")}
+    if "einvoice_provider" in data.model_fields_set and data.einvoice_provider != prov_antes:
+        # cualquier cambio de modo por la ruta generica apaga produccion (entrar a produccion: solo el interruptor)
+        hc.turn_off_production(db, t, p.user.id, ip=p.ip, reason=f"PUT /settings: {prov_antes} -> {data.einvoice_provider}")
+    if "activity_codes" in data.model_fields_set:
+        _sync_activities_from_codes(db, t, data.activity_codes or [])
     if "cost_roles" in data.model_fields_set:
         # quien ve costos es un permiso: queda en la bitacora con antes/despues (solo si cambio). Aplica en la
         # siguiente peticion: los permisos se calculan en cada request, no hace falta cerrar sesiones.
         despues = list(t.settings.get("cost_roles") or [])
         audit_change(db, p, "permissions", "tenant", t.id, {"cost_roles": antes}, {"cost_roles": despues}, reason="Quien ve costos")
     db.commit()
-    return t.settings
+    return _public_settings(t.settings)
+
+
+def _sync_activities_from_codes(db: Session, t: Tenant, codes: list[str]) -> None:
+    """Compatibilidad: la lista vieja activity_codes alimenta fiscal_activity (agrega las que falten; no borra)."""
+    from ..models import FiscalActivity
+    from ..services.hacienda_config import ACTIVITY_RE
+
+    have = {a.code: a for a in db.scalars(select(FiscalActivity).where(FiscalActivity.tenant_id == t.id))}
+    any_default = any(a.is_default and a.active for a in have.values())
+    for c in codes:
+        if isinstance(c, str) and ACTIVITY_RE.match(c) and c not in have:
+            a = FiscalActivity(tenant_id=t.id, code=c, is_default=not any_default, active=True)
+            db.add(a)
+            have[c] = a
+            any_default = True
+    db.flush()
 
 
 # ---------- Cuentas bancarias ----------
@@ -189,6 +223,26 @@ def group_update(gid: int, data: GroupIn, p: Principal = Depends(require("settin
         raise HTTPException(404, "Grupo no encontrado")
     if data.current is not None and data.current < g.current:
         raise HTTPException(422, "El consecutivo nunca retrocede (Hacienda no permite reutilizar)")
+    from ..services import hacienda_config as hc
+    from ..services.sequences import is_fiscal_group
+
+    if is_fiscal_group(g.doc_type):
+        # F0x/T0x: solo sucursal, terminal y numero. next_fiscal_consecutive busca por doc_type exacto: un segundo
+        # grupo "F01" o uno sin "por defecto" romperia el unico uq_billing_group.
+        if data.prefix != g.prefix or data.is_default is False:
+            raise HTTPException(422, "Los consecutivos fiscales solo cambian sucursal, terminal y número")
+        if g.doc_type.startswith("F"):
+            if hc.production_on(db, p.tenant):
+                raise HTTPException(409, "Desactive producción primero")
+            antes = {"branch": g.branch, "terminal": g.terminal, "current": g.current}
+            prof = hc.profile(db, p.tenant)
+            prof.consecutives_confirmed_at, prof.consecutives_confirmed_by = None, None
+            g.branch, g.terminal = data.branch, data.terminal
+            if data.current is not None:
+                g.current = data.current
+            audit_change(db, p, "update", "billing_group", g.id, antes, {"branch": g.branch, "terminal": g.terminal, "current": g.current}, reason="Consecutivo fiscal")
+            db.commit()
+            return {"ok": True}
     g.prefix, g.branch, g.terminal = data.prefix, data.branch, data.terminal
     if data.current is not None:
         g.current = data.current
@@ -346,43 +400,50 @@ class InboxIn(BaseModel):
     folder: str = Field("INBOX", max_length=120)
 
 
-def _inbox_out(t: Tenant) -> dict:
-    from ..services.inbox import config
+def _inbox_out(t: Tenant, db: Session | None = None) -> dict:
+    from ..services.inbox import config, env_applies
 
     c = config(t)
-    return {k: v for k, v in c.items() if k != "password_enc"} | {"has_password": bool(c.get("password_enc"))}
+    out = {k: v for k, v in c.items() if k != "password_enc"} | {"has_password": bool(c.get("password_enc"))}
+    src = "env" if db is not None and env_applies(db, t) else "ajustes"
+    out["source"] = src
+    if src == "env":  # configurado en el servidor (RECEPTION_IMAP_*): la pantalla lo muestra en solo lectura
+        out["env_mailbox"] = f"{cfg.reception_imap_user}@{cfg.reception_imap_host}/{cfg.reception_imap_folder or 'INBOX'}"
+    return out
 
 
 @router.get("/inbox")
-def inbox_get(p: Principal = Depends(require("settings", "ver"))):
-    return _inbox_out(p.tenant)
+def inbox_get(p: Principal = Depends(require("settings", "ver")), db: Session = Depends(get_db)):
+    return _inbox_out(p.tenant, db)
 
 
 @router.put("/inbox")
 def inbox_put(data: InboxIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
     from sqlalchemy.orm.attributes import flag_modified
 
-    from ..services.inbox import config
+    from ..services.inbox import config, encrypt_password
 
     cur = config(p.tenant)
     new = {**cur, **data.model_dump(exclude={"password"})}
     if data.password:
-        new["password_enc"] = encrypt(data.password)
+        new["password_enc"] = encrypt_password(p.tenant.id, data.password)  # FISCAL_KEYS (AES-GCM) si esta disponible
     st = dict(p.tenant.settings or {})
     st["inbox"] = new
     p.tenant.settings = st
     flag_modified(p.tenant, "settings")
     db.commit()
-    return _inbox_out(p.tenant)
+    return _inbox_out(p.tenant, db)
 
 
 @router.post("/inbox/run")
 def inbox_run(p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
     """Revisa la bandeja ahora (el worker lo hace cada 15 minutos si esta activa)."""
-    from ..services.inbox import poll
+    from ..services.inbox import MailboxBusy, poll
 
     try:
         return poll(db, p.tenant)
+    except MailboxBusy as e:
+        raise HTTPException(409, "Ya se está revisando el buzón") from e
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     except OSError as e:

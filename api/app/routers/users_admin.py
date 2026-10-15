@@ -33,7 +33,8 @@ from sqlalchemy.orm import Session
 from ..core.config import settings as cfg
 from ..core.db import get_db
 from ..core.deps import ALLY_USER_ROLES, ASSIGNABLE_ROLES, COST_ROLE_CHOICES, Principal, cost_roles, require
-from ..core.ratelimit import admin_users_limiter, reauth_limiter, token_limiter
+from ..core.ratelimit import admin_users_limiter, token_limiter
+from ..core.reauth import actor_key, require_reauth
 from ..core.security import MAX_PASSWORD, hash_password, hash_token, new_temp_password, password_is_strong, verify_password
 from ..models import EmailOutbox, Invitation, PasswordReset, Tenant, TenantUser, User
 from ..services.accounts import (
@@ -90,7 +91,7 @@ def _esc(s: str | None) -> str:
 
 
 def _actor_key(p: Principal) -> str:
-    return f"{p.tenant.id}:{p.user.id}"
+    return actor_key(p)
 
 
 def _member(db: Session, p: Principal, uid: int) -> TenantUser:
@@ -120,9 +121,7 @@ def _guard_admin_invite(p: Principal, role_code: str) -> None:
 
 
 def _reauth(p: Principal, password: str | None) -> None:
-    reauth_limiter.hit(_actor_key(p))  # cada intento cuenta, antes de verificar
-    if not password or not verify_password(password, p.user.password_hash):
-        raise HTTPException(403, "Confirmá con tu contraseña de administrador")  # 403, nunca 401
+    require_reauth(p, password)  # core/reauth.py (mismo limitador y mismo 403)
 
 
 def _member_by_email(db: Session, tenant_id: int, email: str) -> TenantUser | None:

@@ -31,6 +31,7 @@ from .extra import (
     Ticket,
     TicketType,
 )
+from .fiscal import FiscalActivity, FiscalCredential, FiscalProfile, ReceptionMailbox, ReceptionMessage, ReceptionResponse
 from .field import (
     CustomerAsset,
     Opportunity,
@@ -59,7 +60,7 @@ from .ops import (
     Warehouse,
     WebhookEvent,
 )
-from .payments import BankAccount, Payment, PaymentLink
+from .payments import BankAccount, BankInstrument, Payment, PaymentLink
 from .sales import BillingGroup, Invoice, InvoiceLine, Quote, QuoteAcceptance, QuoteLine, QuoteVersion
 from .store import ApiCredential, Coupon, Order, OrderLine, ReceivedDocument, StorePage, StoreStockAlert
 from .supplier_catalog import SupplierItem, SupplierListImport
@@ -102,6 +103,13 @@ __all__ = [
     "Invoice",
     "InvoiceLine",
     "BankAccount",
+    "BankInstrument",
+    "FiscalProfile",
+    "FiscalActivity",
+    "FiscalCredential",
+    "ReceptionMailbox",
+    "ReceptionMessage",
+    "ReceptionResponse",
     "Payment",
     "PaymentLink",
     "Warehouse",

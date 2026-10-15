@@ -268,39 +268,16 @@ def test_support_grant_audited_readonly_and_revoke(client, auth):
 
 
 # ---------- bandeja IMAP ----------
-class FakeImap:
-    def __init__(self, raw_messages):
-        self.msgs = raw_messages
-        self.seen = []
-
-    def login(self, u, p):
-        assert p == "clave-app-123"
-
-    def select(self, folder):
-        return "OK", [b"1"]
-
-    def search(self, charset, crit):
-        return "OK", [b" ".join(str(i + 1).encode() for i in range(len(self.msgs)))]
-
-    def fetch(self, mid, what):
-        return "OK", [(b"1 (RFC822)", self.msgs[int(mid) - 1])]
-
-    def store(self, mid, flags, val):
-        self.seen.append(mid)
-
-    def logout(self):
-        pass
-
-
 def test_inbox_imap_imports_xml(client, auth, db_session):
     from email.mime.application import MIMEApplication
     from email.mime.multipart import MIMEMultipart
 
-    from app.models import Tenant
+    from app.models import ReceptionMessage, Tenant
     from app.services.inbox import poll
+    from tests.hacienda_utils import FakeImapUid
 
     clave = "50601092600310123456700100001010000000001100000001"
-    xml = f"<FacturaElectronica><Clave>{clave}</Clave><NumeroConsecutivo>00100001010000000001</NumeroConsecutivo><FechaEmision>2026-09-01T10:00:00-06:00</FechaEmision><Emisor><Nombre>Distribuidora Tec</Nombre><Identificacion><Numero>3101234567</Numero></Identificacion></Emisor><ResumenFactura><CodigoMoneda>CRC</CodigoMoneda><TotalVentaNeta>100000</TotalVentaNeta><TotalImpuesto>13000</TotalImpuesto><TotalComprobante>113000</TotalComprobante></ResumenFactura></FacturaElectronica>"
+    xml = f"<FacturaElectronica><Clave>{clave}</Clave><NumeroConsecutivo>00100001010000000001</NumeroConsecutivo><FechaEmision>2026-09-01T10:00:00-06:00</FechaEmision><Emisor><Nombre>Distribuidora Tec</Nombre><Identificacion><Numero>3101234567</Numero></Identificacion></Emisor><Receptor><Nombre>Grupo Empresarial Crimson SRL</Nombre><Identificacion><Tipo>02</Tipo><Numero>3102000000</Numero></Identificacion></Receptor><ResumenFactura><CodigoMoneda>CRC</CodigoMoneda><TotalVentaNeta>100000</TotalVentaNeta><TotalImpuesto>13000</TotalImpuesto><TotalComprobante>113000</TotalComprobante></ResumenFactura></FacturaElectronica>"
     msg = MIMEMultipart()
     msg["Subject"] = "Factura electronica"
     msg.attach(MIMEApplication(xml.encode(), Name="factura.xml", _subtype="xml"))
@@ -311,10 +288,17 @@ def test_inbox_imap_imports_xml(client, auth, db_session):
     assert client.put(
         "/settings/inbox", json={"enabled": True, "host": "imap.ejemplo.com", "user": "facturas@ejemplo.com", "password": "clave-app-123"}
     ).json()["has_password"]
-    fake = FakeImap([msg.as_bytes(), resp.as_bytes(), msg.as_bytes()])
+    # el tercero trae el mismo XML en otro correo (reenvio): mismos bytes del correo se saltarian por sha256 (§6.4 paso 4)
+    reenvio = MIMEMultipart()
+    reenvio["Subject"] = "RV: Factura electronica"
+    reenvio.attach(MIMEApplication(xml.encode(), Name="factura.xml", _subtype="xml"))
+    reenvio.get_payload()[0]["Content-Disposition"] = 'attachment; filename="factura.xml"'
+    fake = FakeImapUid([msg.as_bytes(), resp.as_bytes(), reenvio.as_bytes()], password="clave-app-123")
     t = db_session.get(Tenant, auth["tenant"]["id"])
     res = poll(db_session, t, connect=lambda: fake)
-    assert res["nuevos"] == 1 and res["duplicados"] == 1 and res["ignorados"] == 1 and len(fake.seen) == 3
+    # nunca se marca nada en el servidor (antes: store \Seen uno por uno); cada correo queda registrado
+    assert res["nuevos"] == 1 and res["duplicados"] == 1 and res["ignorados"] == 1 and fake.stored == []
+    assert db_session.query(ReceptionMessage).filter(ReceptionMessage.tenant_id == t.id).count() == 3
     assert client.get("/reception").json()[0]["clave"] == clave
     assert client.get("/settings/inbox").json()["last_result"]["nuevos"] == 1
 
@@ -504,7 +488,8 @@ def test_each_role_sees_only_what_it_needs(client, auth, db_session):
 
     # Contabilidad: todo el dinero de la empresa, sin ajustes. Sin rentabilidad: el costo es solo del admin (13/10, 08:07)
     a = login("a@ejemplo.com", "contabilidad")
-    assert len(report_keys(a)) == 18 and not report_keys(a) & {"rentabilidad", "rentabilidad_tipo"}
+    # 19: comisiones (economia) y el libro de compras (facturacion) tambien son de contabilidad
+    assert len(report_keys(a)) == 19 and not report_keys(a) & {"rentabilidad", "rentabilidad_tipo"}
     assert client.get("/dashboard", headers=a).json()["scope"] == "company"
     assert client.get("/settings", headers=a).status_code == 403
 

@@ -30,6 +30,17 @@ def get_tenant(p: Principal = Depends(get_principal)):
 
 @router.patch("/tenant", response_model=TenantOut)
 def update_tenant(data: TenantUpdate, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
+    from ..services import hacienda_config as hc
+
+    # Hacienda (D2): esta ruta no entra a produccion ni cambia la cedula con produccion activa; cambiar el modo la apaga
+    st_in = (data.settings or {}) if "settings" in data.model_fields_set else {}
+    if "einvoice_provider" in st_in:
+        if st_in["einvoice_provider"] not in ("none", "sandbox", "alanube", "gti"):
+            raise HTTPException(422, "El modo fiscal se cambia en Ajustes → Hacienda")
+        if st_in["einvoice_provider"] != hc.provider_setting(p.tenant):
+            hc.turn_off_production(db, p.tenant, p.user.id, ip=p.ip, reason="PATCH /tenant")
+    if "tax_id" in data.model_fields_set and (data.tax_id or "") != (p.tenant.tax_id or "") and hc.production_on(db, p.tenant):
+        raise HTTPException(409, "Desactive producción primero")
     for k, v in data.model_dump(exclude_unset=True).items():
         if k == "settings" and v is not None:
             v = dict(v)

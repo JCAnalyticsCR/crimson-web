@@ -21,14 +21,22 @@ const Settings = lazy(() => import("./modules/Settings"));
 const PayPage = lazy(() => import("./modules/pay/PayPage"));
 const Payments = lazy(() => import("./modules/payments/Payments"));
 const Inventory = lazy(() => import("./modules/inventory/Inventory"));
-const Accounting = lazy(() => import("./modules/accounting/Accounting"));
+// Contabilidad en tres partes (Facturas, Contable, Tributario): hub con rutas anidadas
+const AccountingHub = lazy(() => import("./modules/accounting/AccountingHub"));
+const ReceptionInbox = lazy(() => import("./modules/accounting/facturas/Inbox"));
+const ReceptionDetail = lazy(() => import("./modules/accounting/facturas/ReceptionDetail"));
+const MailLog = lazy(() => import("./modules/accounting/facturas/MailLog"));
+const Expenses = lazy(() => import("./modules/accounting/contable/Expenses"));
+const Categories = lazy(() => import("./modules/accounting/contable/Categories"));
+const Suppliers = lazy(() => import("./modules/accounting/contable/Suppliers"));
+const Banks = lazy(() => import("./modules/accounting/contable/Banks"));
+const TaxPanel = lazy(() => import("./modules/accounting/tributario/TaxPanel"));
 const Reports = lazy(() => import("./modules/reports/Reports"));
 const Recurrences = lazy(() => import("./modules/sales/Recurrences"));
 const Invite = lazy(() => import("./modules/auth/Invite"));
 const Store = lazy(() => import("./modules/store/Store"));
 const PublicStore = lazy(() => import("./modules/store/PublicStore"));
 const Orders = lazy(() => import("./modules/store/Orders"));
-const Reception = lazy(() => import("./modules/accounting/Reception"));
 const Coupons = lazy(() => import("./modules/catalog/Coupons"));
 const CustomerDetail = lazy(() => import("./modules/crm/CustomerDetail"));
 const Pos = lazy(() => import("./modules/pos/Pos"));
@@ -176,8 +184,8 @@ function App() {
         <Route path="/clientes/:id" element={g("crm.ver", <CustomerDetail />)} />
         <Route path="/pos" element={g("sales.crear", <Pos />)} />
         <Route path="/planillas" element={g("payroll.ver", <Payroll />)} />
-        <Route path="/conciliacion" element={g("accounting.ver", <Banking />)} />
-        <Route path="/importar" element={g("settings.configurar", <Importer />)} />
+        <Route path="/conciliacion" element={<Navigate to="/contabilidad/contable/bancos" replace />} />
+        <Route path="/importar" element={g("settings.configurar|accounting.crear", <Importer />)} />
         <Route path="/archivo" element={g("field.editar|projects.editar|crm_pipeline.editar|crm.editar|catalog.editar|support_desk.editar|assets.editar|purchases.crear", <Archive />)} />
         <Route path="/oportunidades" element={g("crm_pipeline.ver", <Opportunities />)} />
         <Route path="/levantamientos" element={g("field.ver", <Surveys />)} />
@@ -196,10 +204,23 @@ function App() {
         <Route path="/inventario" element={g("inventory.ver", <Inventory />)} />
         <Route path="/mi-tienda" element={g("settings.configurar", <Store />)} />
         <Route path="/ordenes" element={g("sales.ver", <Orders />)} />
-        <Route path="/recepcion" element={g("accounting.ver", <Reception />)} />
+        <Route path="/recepcion" element={<Navigate to="/contabilidad/facturas" replace />} />
         <Route path="/cupones" element={g("catalog.editar", <Coupons />)} />
         <Route path="/reportes" element={g("reports.ver", <Reports />)} />
-        <Route path="/contabilidad" element={g("accounting.ver", <Accounting />)} />
+        <Route path="/contabilidad" element={g("accounting.ver", <AccountingHub />)}>
+          <Route index element={<Navigate to="/contabilidad/facturas" replace />} />
+          <Route path="facturas" element={<ReceptionInbox />} />
+          <Route path="facturas/recibidas" element={<ReceptionInbox all />} />
+          <Route path="facturas/correos" element={<MailLog />} />
+          <Route path="facturas/:id" element={<ReceptionDetail />} />
+          <Route path="contable" element={<Expenses />} />
+          <Route path="contable/recurrentes" element={<Recurrences kind="gasto" />} />
+          <Route path="contable/categorias" element={<Categories />} />
+          <Route path="contable/proveedores" element={<Suppliers />} />
+          <Route path="contable/bancos" element={<Banks />} />
+          <Route path="contable/bancos/:id/conciliacion" element={<Banking />} />
+          <Route path="tributario" element={<TaxPanel />} />
+        </Route>
         <Route path="/ajustes" element={<Settings />} />
         <Route path="/accesos-clientes" element={g("portal_clientes.ver", <AccessRequests />)} />
         <Route path="/vehiculos" element={g("vehicles.ver", <Vehicles />)} />

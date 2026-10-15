@@ -98,7 +98,8 @@ function TabRuns() {
 
   const load = () => api<RunListItem[]>("/payroll/runs").then(setRuns).catch((e) => toast(e.message, "bad"));
   const loadDetail = (id: number) => api<RunDetail>(`/payroll/runs/${id}`).then(setDetail).catch((e) => toast(e.message, "bad"));
-  useEffect(() => { load(); api<BankAccount[]>("/settings/bank-accounts").then(setBanks); }, []);
+  // cuentas desde /banking/accounts: contabilidad no entra a /settings
+  useEffect(() => { load(); api<BankAccount[]>("/banking/accounts").then(setBanks).catch(() => setBanks([])); }, []);
 
   const createRun = async () => {
     setBusy(true);

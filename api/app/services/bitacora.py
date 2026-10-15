@@ -17,7 +17,26 @@ from ..models import AuditLog
 from .documents import audit
 
 # Nunca a la bitacora: binarios, secretos y marcas que cambian solas
-_SKIP = {"data", "password_hash", "secret_encrypted", "totp_secret", "updated_at", "created_at"}
+_SKIP = {
+    "data",
+    "password_hash",
+    "secret_encrypted",
+    "totp_secret",
+    "updated_at",
+    "created_at",
+    # Hacienda y recepcion: credenciales cifradas y XML completos (el XML no es un "cambio" legible y pesa)
+    "atv_user_enc",
+    "atv_password_enc",
+    "p12_enc",
+    "p12_pin_enc",
+    "raw_eml",
+    "xml_document",
+    "xml_response",
+    "xml_supplier_response",
+    "xml_signed",
+    "hacienda_xml",
+    "receiver_xml",
+}
 
 
 def jsonable(v):

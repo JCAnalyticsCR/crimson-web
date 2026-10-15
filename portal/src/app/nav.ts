@@ -4,8 +4,8 @@
    sumar la ruta a su `menu` en roles.ts. La API sigue siendo la frontera de seguridad. */
 import { I } from "../ui/components";
 
-/* badge: numero junto a la entrada (hoy solo "approvals": pendientes de la bandeja de Aprobaciones) */
-export type NavItem = { to: string; label: string; icon: string; end?: boolean; need?: string; badge?: "approvals" };
+/* badge: numero junto a la entrada ("approvals": pendientes de Aprobaciones; "recepcion": comprobantes por revisar) */
+export type NavItem = { to: string; label: string; icon: string; end?: boolean; need?: string; badge?: "approvals" | "recepcion" };
 export type NavGroup = { group: string; items: NavItem[] };
 
 export const NAV: NavGroup[] = [
@@ -45,13 +45,12 @@ export const NAV: NavGroup[] = [
     { to: "/comisiones", label: "Comisiones", icon: I.trend, need: "commissions.ver" },
     // empresas aliadas: datos, usuarios, precios de aliado y mensualidad (sus usuarios usan el portal de aliados)
     { to: "/aliados", label: "Aliados", icon: I.team, need: "aliados.ver" },
-    { to: "/contabilidad", label: "Contabilidad", icon: I.accounting, need: "accounting.ver" },
-    { to: "/recepcion", label: "Recepción XML", icon: I.bell, need: "accounting.ver" },
-    { to: "/conciliacion", label: "Conciliación", icon: I.bank, need: "accounting.ver" },
+    // Facturas (recepcion), Contable (gastos, bancos, conciliacion) y Tributario viven dentro de Contabilidad
+    { to: "/contabilidad", label: "Contabilidad", icon: I.accounting, need: "accounting.ver", badge: "recepcion" },
     { to: "/planillas", label: "Planillas", icon: I.team, need: "payroll.ver" },
     { to: "/vehiculos", label: "Vehículos", icon: "M3 13l2-5a2 2 0 0 1 1.9-1.4h10.2A2 2 0 0 1 19 8l2 5v4a1 1 0 0 1-1 1h-1|M3 13v4a1 1 0 0 0 1 1h1|M3 13h18|M9 18h6|M7 18a2 2 0 1 0 0 .1|M17 18a2 2 0 1 0 0 .1", need: "vehicles.ver" },
     { to: "/reportes", label: "Reportes", icon: I.reports, need: "reports.ver" },
-    { to: "/importar", label: "Importar datos", icon: I.upload, need: "settings.configurar" },
+    { to: "/importar", label: "Importar datos", icon: I.upload, need: "settings.configurar|accounting.crear" },
     // archivados y papelera: lo ve quien puede archivar o mandar algo a la papelera (misma lista que la API)
     { to: "/archivo", label: "Archivo", icon: I.box, need: "field.editar|projects.editar|crm_pipeline.editar|crm.editar|catalog.editar|support_desk.editar|assets.editar|purchases.crear" },
     // sin `need`: todos la ven (Mi cuenta: contraseña y 2FA)

@@ -23,6 +23,8 @@ from .models import (
     Customer,
     ExchangeRate,
     ExpenseCategory,
+    FiscalActivity,
+    FiscalProfile,
     Product,
     ProductTax,
     Role,
@@ -33,7 +35,7 @@ from .models import (
     User,
     Warehouse,
 )
-from .services.sequences import DEFAULT_GROUPS, get_or_create_group
+from .services.sequences import DEFAULT_GROUPS, ensure_fiscal_groups, get_or_create_group
 
 DEMO_PRODUCTS = [
     ("CAM-DOME-4MP", "Camara domo IP 4MP ColorVu", "producto", 68500, "4223200000100", "Camara de videovigilancia IP 4MP con vision nocturna a color"),
@@ -108,7 +110,7 @@ def seed_base(db: Session, demo: bool = False) -> Tenant:
                 "invoice_valid_days": 8,
                 "quote_valid_days": 15,
                 "quote_footer": "Precios en colones. Vigencia 15 dias. Pago por SINPE Movil o transferencia.",
-                "activity_codes": ["6202.0", "4322.0"],
+                "activity_codes": ["6202.0", "4321.0"],
                 "bcc": [],
             },
         )
@@ -118,6 +120,30 @@ def seed_base(db: Session, demo: bool = False) -> Tenant:
             db.add(Currency(tenant_id=t.id, code=code, is_default=default))
         for doc_type in DEFAULT_GROUPS:
             get_or_create_group(db, t.id, doc_type)
+    ensure_fiscal_groups(db, t.id)  # consecutivos fiscales F01..F07 (produccion) y T01..T07 (simulado y pruebas)
+    if not db.scalar(select(FiscalProfile).where(FiscalProfile.tenant_id == t.id)):
+        # datos ficticios del emisor: el admin pone los reales en Ajustes -> Hacienda
+        db.add(
+            FiscalProfile(
+                tenant_id=t.id,
+                id_type="02",
+                email="facturacion@ejemplo.com",
+                phone_country="506",
+                province="1",
+                canton="01",
+                district="01",
+                district_name="Carmen",
+                other_signs="Dirección de prueba 123",
+                environment="pruebas",
+            )
+        )
+    if not db.scalar(select(FiscalActivity).where(FiscalActivity.tenant_id == t.id)):
+        db.add_all(
+            [
+                FiscalActivity(tenant_id=t.id, code="6202.0", description="Consultoría informática y gestión de instalaciones informáticas", is_default=True),
+                FiscalActivity(tenant_id=t.id, code="4321.0", description="Instalaciones eléctricas", is_default=False),
+            ]
+        )
 
     if not db.scalar(select(Tax).where(Tax.tenant_id == t.id)):
         iva13 = Tax(tenant_id=t.id, name="IVA - Tarifa general 13%", code="01", rate_code="08", rate=13)

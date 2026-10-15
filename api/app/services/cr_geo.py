@@ -93,3 +93,20 @@ def valid(provincia: str | None, canton: str | None) -> bool:
 
 def fuera_gam(provincia: str | None, canton: str | None) -> bool:
     return provincia in PROVINCIAS_FUERA_GAM or canton in CANTONES_FUERA_GAM
+
+
+# Codificacion de ubicacion de Hacienda (v4.4): provincia 1-7 y canton por su posicion en la lista oficial (las listas
+# de arriba siguen ese orden). El distrito se escribe por codigo (el catalogo completo de distritos es fase 2).
+PROVINCE_CODES = {"San José": "1", "Alajuela": "2", "Cartago": "3", "Heredia": "4", "Guanacaste": "5", "Puntarenas": "6", "Limón": "7"}
+
+
+def canton_code(provincia: str, canton: str) -> str:
+    """"NN" = posicion del canton en la lista de su provincia + 1. KeyError/ValueError si no existe."""
+    return f"{PROVINCIAS[provincia].index(canton) + 1:02d}"
+
+
+def geo_catalog() -> list[dict]:
+    return [
+        {"code": code, "name": prov, "cantons": [{"code": f"{i + 1:02d}", "name": c} for i, c in enumerate(PROVINCIAS[prov])]}
+        for prov, code in sorted(PROVINCE_CODES.items(), key=lambda x: x[1])
+    ]

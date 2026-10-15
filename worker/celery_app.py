@@ -19,6 +19,16 @@ celery = Celery("crimson", broker=settings.redis_url, backend=settings.redis_url
 celery.conf.update(timezone="America/Costa_Rica", enable_utc=True, task_acks_late=True, worker_prefetch_multiplier=1)
 
 
+def _log_fiscal_keys() -> None:
+    """Solo kid y sha256(llave)[:8] de FISCAL_KEYS (deben ser los mismos que registra la API)."""
+    from app.core import secretbox
+
+    secretbox.keys()
+
+
+_log_fiscal_keys()
+
+
 @celery.task(name="fx.bccr_daily", autoretry_for=(Exception,), retry_backoff=60, max_retries=5)
 def fx_bccr_daily() -> dict:
     """Tipo de cambio de venta/compra del BCCR (API SDDE con BCCR_TOKEN). Sin token no hace nada."""
@@ -154,25 +164,41 @@ def daily_close_email() -> int:
 
 @celery.task(name="reception.poll_inboxes")
 def poll_inboxes() -> int:
-    """Bandejas IMAP activas: importa XML de proveedores. Un buzon con error no detiene a los demas."""
-    from sqlalchemy import select
-
+    """Buzones de recepcion (entorno o Ajustes): cada correo se confirma solo; arriendo tomado -> se salta."""
     from app.core.db import SessionLocal
-    from app.models import Tenant
-    from app.services.inbox import config, poll
+    from app.services.hacienda_tasks import poll_inboxes as run
 
-    n = 0
     with SessionLocal() as db:
-        for t in db.scalars(select(Tenant).where(Tenant.active)):
-            if not config(t).get("enabled"):
-                continue
-            try:
-                res = poll(db, t)
-                n += res["nuevos"]
-            except Exception as e:  # noqa: BLE001
-                db.rollback()
-                log.warning("bandeja %s: %s", t.slug, e)
-    return n
+        return run(db)
+
+
+@celery.task(name="hacienda.send_pending")
+def hacienda_send_pending() -> dict:
+    """Mensajes receptor y comprobantes por enviar (reclamo atomico: dos workers no mandan lo mismo) + entregas al cliente."""
+    from app.core.db import SessionLocal
+    from app.services.hacienda_sync import send_pending
+
+    with SessionLocal() as db:
+        return send_pending(db)
+
+
+@celery.task(name="hacienda.poll_status")
+def hacienda_poll_status() -> dict:
+    """Consulta lo enviado (1, 2, 5, 10, 20, 30 min y luego cada hora) y recupera filas atascadas en "enviando"."""
+    from app.core.db import SessionLocal
+    from app.services.hacienda_sync import poll_status
+
+    with SessionLocal() as db:
+        return poll_status(db)
+
+
+@celery.task(name="hacienda.daily_alerts")
+def hacienda_daily_alerts() -> int:
+    from app.core.db import SessionLocal
+    from app.services.hacienda_tasks import daily_alerts
+
+    with SessionLocal() as db:
+        return daily_alerts(db)
 
 
 @celery.task(name="support.expire_grants")
@@ -434,6 +460,9 @@ def purge_trash() -> int:
 celery.conf.beat_schedule = {
     "purge-trash": {"task": "archive.purge_trash", "schedule": crontab(hour=3, minute=20)},
     "poll-inboxes": {"task": "reception.poll_inboxes", "schedule": crontab(minute="*/15")},
+    "hacienda-send-pending": {"task": "hacienda.send_pending", "schedule": crontab(minute="*/2")},
+    "hacienda-poll-status": {"task": "hacienda.poll_status", "schedule": crontab(minute="*/5")},
+    "hacienda-daily-alerts": {"task": "hacienda.daily_alerts", "schedule": crontab(hour=7, minute=10)},
     "expire-support": {"task": "support.expire_grants", "schedule": crontab(minute=5)},
     "stale-followups": {"task": "crm.stale_followups", "schedule": crontab(hour=7, minute=30, day_of_week="mon-fri")},
     "low-stock-requests": {"task": "inventory.low_stock_requests", "schedule": crontab(hour=6, minute=45)},

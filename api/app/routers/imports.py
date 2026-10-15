@@ -83,6 +83,25 @@ TEMPLATES = {
     "suppliers": ["Nombre", "Identificacion", "Correo electronico", "Telefono"],
     "invoices": ["Numero", "Fecha", "Cliente", "Identificacion", "Subtotal", "Impuesto", "Total", "Saldo", "Moneda", "Clave"],
     "catalogo": ["Categoria", "Codigo", "Descripcion", "Stock", "Precio", "Bodega"],
+    # historico de Fygaro (lo normal es el zip "Download All"; el CSV/Excel no trae XML)
+    "recepciones": [
+        "Clave",
+        "Fecha",
+        "Tipo",
+        "Emisor",
+        "Identificacion emisor",
+        "Moneda",
+        "Tipo de cambio",
+        "Impuesto",
+        "Total",
+        "Accion",
+        "Condicion IVA",
+        "Codigo actividad",
+        "IVA acreditado",
+        "Gasto aplicable",
+        "Consecutivo receptor",
+        "Categoria",
+    ],
 }
 
 
@@ -481,8 +500,9 @@ def _catalog(db: Session, tid: int, rows: list[dict], commit: bool, opts: dict |
     return out
 
 
-PROCESSORS = {"customers": _customers, "products": _products, "suppliers": _suppliers, "invoices": _invoices, "catalogo": _catalog}
+PROCESSORS = {"customers": _customers, "products": _products, "suppliers": _suppliers, "invoices": _invoices, "catalogo": _catalog, "recepciones": None}
 PERM = {
+    "recepciones": ("accounting", "crear"),  # contabilidad importa; nunca toca los consecutivos fiscales
     "customers": ("crm", "crear"),
     "products": ("catalog", "crear"),
     "suppliers": ("catalog", "crear"),
@@ -525,6 +545,7 @@ async def run_import(
     supplier: str | None = None,
     brand: str | None = None,
     currency: str = "USD",
+    create_expenses: bool = False,
     file: UploadFile = File(...),
     p: Principal = Depends(require("dashboard", "ver")),
     db: Session = Depends(get_db),
@@ -540,6 +561,28 @@ async def run_import(
         # la lista del proveedor escribe costo y margen (y la vista previa deja deducir el margen por defecto):
         # quien no ve costos tampoco los escribe (Andres 08:07). Igual que supplier_catalog.import_list.
         raise HTTPException(403, "Sin permiso: catalog.costos")
+    if kind == "recepciones":
+        from ..services import reception_import
+
+        data = await file.read(reception_import.MAX_IMPORT + 1)
+        out = reception_import.run(db, p, data, file.filename or "", commit, create_expenses)
+        result = out["result"]
+        summary = {a: sum(1 for r in result if r["action"] == a) for a in ("nuevo", "actualizar", "omitir", "error")}
+        if commit:
+            audit(db, p.tenant.id, p.user.id, "import", kind, None, {"file": file.filename, **summary, "max_receptor": out["max_receptor"]}, ip=p.ip)
+            db.commit()
+        else:
+            db.rollback()
+        return {
+            "kind": kind,
+            "commit": commit,
+            "rows": out["rows"],
+            "summary": summary,
+            "columns": out["columns"],
+            "result": result[:1000],
+            "notes": out["notes"],
+            "at": date.today(),
+        }
     data = await file.read(MAX + 1)
     if len(data) > MAX:
         raise HTTPException(413, "Archivo muy grande (maximo 5 MB)")
