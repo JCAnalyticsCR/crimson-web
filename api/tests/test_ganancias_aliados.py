@@ -342,3 +342,24 @@ def test_proyecto_cancelado_no_proyecta(client, auth, db_session):
         assert D(str(g["totales"]["proyectado"])) == 0 and all(D(str(x["proyectado"])) == 0 for x in g["proyectos"])
     det = client.get(f"/aliado/ganancias/proyectos/{n['pr']['id']}", headers=ha).json()
     assert D(str(det["totales"]["proyectado"])) == 0 and D(str(det["proyectado"]["pago_acordado"])) == 0
+
+
+def test_pago_acordado_pagado_rechazado_y_reaprobado(client, auth, db_session):
+    ally = client.post("/allies", json={"name": "Aliado Uno S.A.", "tax_id": "3-101-000217"}).json()["id"]
+    n = _negocio(client, ally)
+    _completar(client, n["pr"])
+    pago = next(f for f in _mov(client) if f["kind"] == "pago_acordado")
+    assert client.patch("/commissions", json={"ids": [pago["id"]], "status": "pagada", "paid_ref": "Transferencia 1234"}).status_code == 200
+
+    def neto():
+        return sum((D(str(f["amount"])) for f in _mov(client) if f["status"] != "anulada"), D(0))
+
+    body = {"what": "Mano de obra de fibra", "amount": 100000, "currency": "CRC"}
+    assert client.put(f"/opportunity-allies/requests/{n['rid']}", json={**body, "status": "rechazado"}).status_code == 200
+    assert neto() == 0  # pagado + su reverso
+    # pagado y revertido no cuenta como devengado: re-aprobar con el proyecto completado se le debe otra vez
+    assert client.put(f"/opportunity-allies/requests/{n['rid']}", json={**body, "status": "aprobado"}).status_code == 200
+    assert neto() == D("100000.00")
+    # rechazar otra vez no anula el reverso de lo pagado
+    assert client.put(f"/opportunity-allies/requests/{n['rid']}", json={**body, "status": "rechazado"}).status_code == 200
+    assert neto() == 0

@@ -357,6 +357,28 @@ def _exists(db: Session, tenant_id: int, key: str) -> bool:
     return db.scalar(select(Commission.id).where(Commission.tenant_id == tenant_id, Commission.source_key == key)) is not None
 
 
+def _fresh_key(db: Session, tenant_id: int, key: str) -> str:
+    """La clave misma si no se ha usado; si ya existe (se anulo o se revirtio y se vuelve a devengar), key:re{n} libre.
+    El movimiento viejo queda de historial."""
+    if not _exists(db, tenant_id, key):
+        return key
+    n = (db.scalar(select(func.count()).select_from(Commission).where(Commission.tenant_id == tenant_id, Commission.source_key.like(f"{key}:re%"))) or 0) + 1
+    while _exists(db, tenant_id, f"{key}:re{n}"):
+        n += 1
+    return f"{key}:re{n}"
+
+
+def _is_reversal(c: Commission) -> bool:
+    return (c.source_key or "").startswith("rev:")
+
+
+def _still_earned(rows) -> bool:
+    """Hay un movimiento de base (no ajuste) vivo sin su reverso: lo devengado sigue en pie. Uno pagado y revertido
+    (pagada + rev:{id}) neto da 0 y ya no cuenta."""
+    revertidos = {c.reverses_id for c in rows if _is_reversal(c) and c.status != "anulada"}
+    return any(c.kind != "ajuste" and c.status != "anulada" and c.id not in revertidos for c in rows)
+
+
 def _fx_for(db: Session, currency: str, doc) -> Decimal:
     if currency == "CRC":
         return Decimal(1)
@@ -674,8 +696,31 @@ def _group_key(c: Commission) -> str:
     return f"v:{c.user_id}"
 
 
+def _shrink_held(db: Session, held: list[Commission], ref_held: Decimal, payment: Payment, inv: Invoice) -> None:
+    """Lo que sigue en espera (utilidad sin costos o proyecto abierto) no tiene monto que revertir: la devolucion le
+    baja la base de venta guardada, asi el recalculo y el tope de la factura ya no cuentan la plata devuelta. Si se
+    devolvio todo, se anula. Cada fila anota el pago para que reprocesar (backfill) no lo descuente dos veces."""
+    held_sale = sum((_base_sale_of(c) for c in held), Decimal(0))
+    if held_sale <= 0 or ref_held <= 0:
+        return
+    for c in held:
+        s = _base_sale_of(c)
+        if s <= 0:
+            continue
+        nuevo = q2(max(Decimal(0), s - ref_held * s / held_sale))
+        t = dict(c.terms or {})
+        t["base_sale"] = str(nuevo)
+        t["devoluciones"] = [*(t.get("devoluciones") or []), payment.id]
+        antes = {"base_sale": str(q2(s)), "status": c.status}
+        c.terms = t
+        if nuevo <= 0:
+            c.status, c.void_reason, c.hold_reason = "anulada", f"Se devolvió lo cobrado · {inv.number}"[:240], None
+        audit(db, c.tenant_id, None, "refund", "commission", c.id, before=antes, after={"base_sale": str(nuevo), "status": c.status, "pago": payment.id})
+
+
 def _on_refund(db: Session, payment: Payment, inv: Invoice) -> list[Commission]:
-    """Devolucion o reembolso: ajuste negativo a la tasa efectiva de cada beneficiario, nunca mas de lo devengado."""
+    """Devolucion o reembolso: ajuste negativo a la tasa efectiva de cada beneficiario, nunca mas de lo devengado.
+    La plata devuelta se reparte en proporcion entre lo calculado (ajuste dev:) y lo que espera (baja su base)."""
     total, net = d(inv.total), net_sale(inv)
     if total <= 0:
         return []
@@ -684,7 +729,13 @@ def _on_refund(db: Session, payment: Payment, inv: Invoice) -> list[Commission]:
     on = _fecha(payment.paid_at)
     movs = db.scalars(
         select(Commission)
-        .where(Commission.tenant_id == inv.tenant_id, Commission.invoice_id == inv.id, Commission.status != "anulada", Commission.trigger == "cobro")
+        .where(
+            Commission.tenant_id == inv.tenant_id,
+            Commission.invoice_id == inv.id,
+            Commission.status != "anulada",
+            Commission.trigger == "cobro",
+            Commission.earned_on <= on,  # reprocesar (backfill) no le cobra la devolucion a cobros posteriores
+        )
         .order_by(Commission.id)
     ).all()
     groups: dict[str, list[Commission]] = {}
@@ -692,13 +743,24 @@ def _on_refund(db: Session, payment: Payment, inv: Invoice) -> list[Commission]:
         groups.setdefault(_group_key(c), []).append(c)
     out = []
     for k, rows in groups.items():
+        held = [c for c in rows if c.kind != "ajuste" and c.status == "en_espera"]
         base_rows = [c for c in rows if c.kind != "ajuste" and c.status != "en_espera"]
+        held_sale = sum((_base_sale_of(c) for c in held), Decimal(0))
         sale = sum((_base_sale_of(c) for c in base_rows), Decimal(0))
+        devuelto = -sum((_base_sale_of(c) for c in rows if (c.source_key or "").startswith("dev:")), Decimal(0))
+        vivo = held_sale + max(sale - devuelto, Decimal(0))
+        if vivo <= 0:
+            continue
+        ref = min(ref_sale, vivo)  # devolver un sobrepago no baja el tope por debajo de 0
+        ref_held = ref * held_sale / vivo
+        if not any(payment.id in ((c.terms or {}).get("devoluciones") or []) for c in held):
+            _shrink_held(db, held, ref_held, payment, inv)
+        ref_done = ref - ref_held
         earned = sum((d(c.amount) for c in base_rows), Decimal(0))
         neto = sum((d(c.amount) for c in rows), Decimal(0))
-        if sale <= 0 or neto <= 0:
+        if ref_done <= 0 or sale <= 0 or neto <= 0:
             continue
-        ajuste = -min(ref_sale * earned / sale, neto)
+        ajuste = -min(ref_done * earned / sale, neto)
         if q2(ajuste) == 0:
             continue
         last = rows[-1]
@@ -715,7 +777,7 @@ def _on_refund(db: Session, payment: Payment, inv: Invoice) -> list[Commission]:
             kind="ajuste",
             trigger="cobro",
             base=last.base,
-            base_sale=-ref_sale,
+            base_sale=-ref_done,
             base_amount=0,
             percent=0,
             amount=ajuste,
@@ -737,6 +799,8 @@ def reverse_or_void(db: Session, movs, motivo: str, user_id: int | None = None) 
     """Lo no pagado se anula; lo pagado se corrige con un ajuste negativo pendiente. Nunca se borra nada."""
     n = 0
     for c in movs:
+        if _is_reversal(c):
+            continue  # rev:{id} ya corrige uno pagado (que sigue vivo): anularlo o revertirlo volveria a deber lo pagado
         if c.status in ("en_espera", "pendiente", "aprobada"):
             antes = c.status
             c.status, c.void_reason = "anulada", motivo[:240]
@@ -814,10 +878,10 @@ def _accrue_quote(db: Session, q: Quote, n: int, on: date, only_missing: bool) -
         rule = _pick(rules, cfg, deal, on, ben)
         if rule is None or trigger_of(rule, deal) != "cotizacion_aceptada":
             continue
-        if only_missing and _live(
-            db, q.tenant_id, Commission.quote_id == q.id, Commission.trigger == "cotizacion_aceptada", *_ben_filter(beneficiary, uid, part)
+        if only_missing and _still_earned(
+            _live(db, q.tenant_id, Commission.quote_id == q.id, Commission.trigger == "cotizacion_aceptada", *_ben_filter(beneficiary, uid, part))
         ):
-            continue  # aceptar y despues convertir devenga una sola vez
+            continue  # aceptar y despues convertir devenga una sola vez (uno pagado y revertido ya no cuenta)
         hold = None
         if rule.base == "margen":
             base_amount, hold = margin_base(db, deal, base_sale, "cotizacion_aceptada")
@@ -826,10 +890,9 @@ def _accrue_quote(db: Session, q: Quote, n: int, on: date, only_missing: bool) -
         else:
             base_amount = base_sale
         sk = f"cot:{q.id}:{key}:{n}"
-        if only_missing and _exists(db, q.tenant_id, sk):
-            # aceptar, deshacer (anulada) y convertir: la conversion es aceptacion implicita y devenga con clave nueva
-            m = db.scalar(select(func.count()).select_from(Commission).where(Commission.tenant_id == q.tenant_id, Commission.source_key.like(f"{sk}%")))
-            sk = f"{sk}:re{m}"
+        if only_missing:
+            # aceptar, deshacer (anulada o revertida) y convertir: la conversion es aceptacion implicita y devenga con clave nueva
+            sk = _fresh_key(db, q.tenant_id, sk)
         c = _accrue(
             db,
             deal=deal,
@@ -896,13 +959,12 @@ def early_ok(rule, on: date) -> bool:
 def _accrue_payout(db: Session, deal: Deal, part: AllyParticipation, r: AllyCostRequest, on: date) -> Commission | None:
     if r.status != "aprobado" or d(r.amount) <= 0:
         return None
-    if _live(db, r.tenant_id, Commission.cost_request_id == r.id, Commission.kind == "pago_acordado"):
+    # cuenta el neto, no que exista una fila: pagado y revertido (pagada + rev:) neto da 0 y al re-aprobar se debe otra vez
+    falta = d(r.amount) - _payout_accrued(db, r)
+    if q2(falta) <= 0:
         return None  # ya se le debe (o ya se le pago)
-    key = f"pago:{r.id}"
-    if _exists(db, r.tenant_id, key):
-        # se desaprobo (quedo anulado) y se volvio a aprobar: un movimiento nuevo, el anulado queda de historial
-        n = db.scalar(select(func.count()).select_from(Commission).where(Commission.tenant_id == r.tenant_id, Commission.source_key.like(f"pago:{r.id}%")))
-        key = f"pago:{r.id}:re{n}"
+    # se desaprobo (quedo anulado o revertido) y se volvio a aprobar: un movimiento nuevo, el viejo queda de historial
+    key = _fresh_key(db, r.tenant_id, f"pago:{r.id}")
     doc = deal.project.number if deal.project is not None else deal.number
     return _accrue(
         db,
@@ -916,7 +978,7 @@ def _accrue_payout(db: Session, deal: Deal, part: AllyParticipation, r: AllyCost
         base_sale=d(deal.project.price) if deal.project is not None else ZERO,
         base_amount=d(r.amount),
         percent=0,
-        amount=d(r.amount),
+        amount=falta,
         currency=r.currency,
         earned_on=on,
         description=f"Pago acordado: {r.what[:150]} · {doc}",
@@ -924,7 +986,22 @@ def _accrue_payout(db: Session, deal: Deal, part: AllyParticipation, r: AllyCost
     )
 
 
-def _accrue_project(db: Session, pr: Project) -> list[Commission]:
+def _family_key(db: Session, tenant_id: int, key: str) -> str | None:
+    """Para completar otra vez un proyecto que se cancelo: None si lo devengado con esa clave (o sus key:re{n}) sigue
+    en pie; si todo quedo anulado o revertido, una clave libre (lo viejo queda de historial)."""
+    fam = list(
+        db.scalars(select(Commission).where(Commission.tenant_id == tenant_id, or_(Commission.source_key == key, Commission.source_key.like(f"{key}:re%"))))
+    )
+    if fam:
+        revs = db.scalars(select(Commission).where(Commission.tenant_id == tenant_id, Commission.reverses_id.in_([c.id for c in fam]))).all()
+        if _still_earned(fam + list(revs)):
+            return None
+    return _fresh_key(db, tenant_id, key)
+
+
+def _accrue_project(db: Session, pr: Project, again: bool = False) -> list[Commission]:
+    """again: completar desde on_project_status. Si el proyecto ya se habia completado y se cancelo (todo quedo anulado o
+    revertido), devenga otra vez con clave nueva. El backfill no lo usa: ahi la clave existente manda (idempotente)."""
     deal = deal_of(db, project=pr)
     cfg = _cfg(db, pr.tenant_id)
     rules = _rules(db, pr.tenant_id)
@@ -932,11 +1009,15 @@ def _accrue_project(db: Session, pr: Project) -> list[Commission]:
     price, cur = d(pr.price), deal.price_currency
     out: list[Commission | None] = []
     bens = _beneficiaries(db, deal, cfg)
+
+    def sk(base: str) -> str | None:
+        return _family_key(db, pr.tenant_id, base) if again else base
+
     for ben in bens:
         beneficiary, key, uid, _role, part = ben
         suf = f"v:{uid}" if beneficiary == "vendedor" else str(part.id)
         rule = _pick(rules, cfg, deal, on, ben)
-        if rule is not None and trigger_of(rule, deal) == "proyecto_completado" and price > 0:
+        if rule is not None and trigger_of(rule, deal) == "proyecto_completado" and price > 0 and (fin_key := sk(f"fin:{pr.id}:{key}")) is not None:
             hold = None
             if rule.base == "margen":
                 base_amount, hold = margin_base(db, deal, price, "proyecto_completado")
@@ -948,7 +1029,7 @@ def _accrue_project(db: Session, pr: Project) -> list[Commission]:
                     _accrue(
                         db,
                         deal=deal,
-                        source_key=f"fin:{pr.id}:{key}",
+                        source_key=fin_key,
                         beneficiary=beneficiary,
                         user_id=uid,
                         participation=part,
@@ -967,13 +1048,14 @@ def _accrue_project(db: Session, pr: Project) -> list[Commission]:
                     )
                 )
         fin = _pick(rules, cfg, deal, on, ben, "bono_fin")
-        if fin is not None:
+        bono_key = sk(f"bono_fin:{pr.id}:{suf}") if fin is not None else None
+        if fin is not None and bono_key is not None:
             amt, bcur = _bonus_amount(db, fin, price, cur)
             out.append(
                 _accrue(
                     db,
                     deal=deal,
-                    source_key=f"bono_fin:{pr.id}:{suf}",
+                    source_key=bono_key,
                     beneficiary=beneficiary,
                     user_id=uid,
                     participation=part,
@@ -991,13 +1073,14 @@ def _accrue_project(db: Session, pr: Project) -> list[Commission]:
                 )
             )
         ant = _pick(rules, cfg, deal, on, ben, "bono_anticipo")
-        if ant is not None and early_ok(ant, on):
+        ant_key = sk(f"bono_ant:{pr.id}:{suf}") if ant is not None and early_ok(ant, on) else None
+        if ant is not None and ant_key is not None:
             amt, bcur = _bonus_amount(db, ant, price, cur)
             out.append(
                 _accrue(
                     db,
                     deal=deal,
-                    source_key=f"bono_ant:{pr.id}:{suf}",
+                    source_key=ant_key,
                     beneficiary=beneficiary,
                     user_id=uid,
                     participation=part,
@@ -1028,16 +1111,25 @@ def on_project_status(db: Session, pr: Project, antes: str | None) -> list[Commi
     if pr.status in CLOSED and pr.completed_at is None:
         pr.completed_at = datetime.now(UTC)
         db.flush()
-        out = _accrue_project(db, pr)
+        out = _accrue_project(db, pr, again=True)
     elif pr.status == "cancelado" and antes != "cancelado":
         reverse_or_void(
             db, _live(db, pr.tenant_id, Commission.project_id == pr.id, Commission.trigger == "proyecto_completado"), f"Proyecto {pr.number} cancelado"
         )
+        # ya no esta completado: si vuelve a cerrarse se completa otra vez y devenga con claves nuevas (lo anulado o
+        # revertido queda de historial), en vez de quedarse sin comisiones para siempre
+        pr.completed_at = None
     if pr.status in CLOSED and antes not in CLOSED:
         # lo cobrado con el proyecto abierto quedo en espera de su utilidad (HOLD_PROJECT): al cerrar se recalcula, lo
         # cierre quien lo cierre (ultima OT, facturar el proyecto o editarlo)
         on_project_costs(db, pr)
     return out
+
+
+def project_earned(db: Session, pr: Project) -> bool:
+    """Lo devengado al completar el proyecto (comision, bonos, pago acordado) sigue en pie: cancelarlo lo anula o lo
+    revierte. projects.project_update exige commissions.aprobar para eso."""
+    return _still_earned(_live(db, pr.tenant_id, Commission.project_id == pr.id, Commission.trigger == "proyecto_completado"))
 
 
 def on_project_costs(db: Session, pr: Project) -> int:
@@ -2096,14 +2188,22 @@ def backfill(db: Session, tenant, desde: date) -> list[Commission]:
         )
     ):
         eventos.append((_fecha(pay.paid_at), 0, "pago", pay))
+    # crear el proyecto desde la cotizacion no cambia su estado, pero es aceptacion implicita (on_quote_won)
+    proyecto_de = {
+        qid: local_date(creado)
+        for qid, creado in db.execute(select(Project.quote_id, Project.created_at).where(Project.tenant_id == tid, Project.quote_id.is_not(None)))
+    }
     for q in db.scalars(select(Quote).where(Quote.tenant_id == tid, Quote.status != "anulada")):
         acc = db.scalars(
             select(QuoteAcceptance).where(QuoteAcceptance.quote_id == q.id, QuoteAcceptance.status == "aceptada").order_by(QuoteAcceptance.id)
         ).all()
         if q.acceptance_status == "aceptada" and acc and (acc[-1].decided_on or date.today()) >= desde:
             eventos.append((acc[-1].decided_on or date.today(), 1, "cot", q))
-        elif q.status == "convertida" and local_date(q.updated_at) and local_date(q.updated_at) >= desde:
-            eventos.append((local_date(q.updated_at), 1, "won", q))
+            continue
+        # se gano el dia que primero se convirtio a factura o a proyecto
+        ganada = [f for f in (local_date(q.updated_at) if q.status == "convertida" else None, proyecto_de.get(q.id)) if f is not None]
+        if ganada and min(ganada) >= desde:
+            eventos.append((min(ganada), 1, "won", q))
     for pr in db.scalars(select(Project).where(Project.tenant_id == tid, Project.completed_at.is_not(None))):
         if local_date(pr.completed_at) >= desde and pr.status in CLOSED:
             eventos.append((local_date(pr.completed_at), 2, "fin", pr))

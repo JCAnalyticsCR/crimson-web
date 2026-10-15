@@ -519,11 +519,19 @@ def project_update(pid: int, data: ProjectIn, p: Principal = Depends(require("pr
         # quien no ve la economia recibe los costos ocultos y mandaria 0: sin esto borraba los costos del proyecto
         for k in PROJECT_COST_FIELDS:
             cambios.pop(k, None)
+    from ..services import commissions as comsvc
+
+    if cambios.get("status") == "cancelado" and estado_antes != "cancelado" and not p.can("commissions", "aprobar") and comsvc.project_earned(db, pr):
+        # cancelar anula o revierte lo devengado al completarlo (incluso aprobado o pagado): no se salta la aprobacion
+        raise HTTPException(
+            409,
+            "Este proyecto ya devengó comisiones, bonos o pagos acordados al completarse y cancelarlo los anula o revierte. "
+            "Lo puede cancelar quien aprueba comisiones.",
+        )
     for k, v in cambios.items():
         setattr(pr, k, v)
     if pr.status == "entregado" and not pr.delivered_at:
         pr.delivered_at = datetime.now(UTC)
-    from ..services import commissions as comsvc
 
     # completar devenga (comisiones al completar, bonos, pago acordado); cancelar revierte; costos nuevos recalculan
     # lo que espera la utilidad del proyecto

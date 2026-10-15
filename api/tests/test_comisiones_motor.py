@@ -426,6 +426,15 @@ def test_backfill_idempotente(client, auth, db_session):
     assert len(_rows(client)) == 1
     assert client.post("/commissions/backfill", json={"from": desde, "dry_run": False}).json()["creados"] == 0
     assert client.post("/commissions/backfill", json={"from": str(HOY + timedelta(days=1))}).status_code == 422
+    # crear el proyecto desde la cotizacion no cambia su estado pero es aceptacion implicita: "al aceptar" lo alcanza
+    q = _quote(client, [{"name": "Kit", "quantity": 1, "unit_price": 100000, "tax_rate": 13}], seller_id=vid)
+    assert client.post(f"/quotes/{q['id']}/project", json={}).status_code == 201
+    _rule(client, user_id=vid, name="Al aceptar", percent=5, trigger="cotizacion_aceptada")
+    assert client.post("/commissions/backfill", json={"from": desde, "dry_run": True}).json()["creados"] == 1
+    assert client.post("/commissions/backfill", json={"from": desde, "dry_run": False}).json()["creados"] == 1
+    assert client.post("/commissions/backfill", json={"from": desde, "dry_run": False}).json()["creados"] == 0
+    de_q = [f for f in _rows(client) if f["quote_id"] == q["id"]]
+    assert len(de_q) == 1 and D(str(de_q[0]["amount"])) == D("5000.00")
 
 
 # ---------- 18. bandeja ----------
@@ -623,3 +632,94 @@ def test_movimientos_paginados(client, auth, db_session):
     r = client.get("/commissions", params={"limit": 2, "offset": 1}).json()
     assert len(r["rows"]) == 2 and r["total_rows"] == 5 and D(str(r["totals"]["pendiente"])) == D("5000.00")
     assert r["rows"][0]["earned_on"] == str(HOY - timedelta(days=1))
+
+
+def _neto(filas) -> Decimal:
+    return sum((D(str(f["amount"])) for f in filas if f["status"] != "anulada"), D(0))
+
+
+# ---------- 27. revision 3: reversar dos veces no le vuelve a deber lo pagado ----------
+def test_doble_reverso_de_la_cotizacion(client, auth, db_session):
+    vh, vid = _vendedora(client, db_session, auth)
+    _rule(client, user_id=vid, name="Al aceptar", percent=5, trigger="cotizacion_aceptada")
+    q = _quote(client, [{"name": "Kit", "quantity": 1, "unit_price": 200000, "tax_rate": 13}], seller_id=vid)
+    client.post(f"/quotes/{q['id']}/send")
+    _acepta(client, q["id"])
+    c1 = _rows(client)[0]
+    assert client.patch("/commissions", json={"ids": [c1["id"]], "status": "pagada", "paid_ref": "Planilla oct-2026"}).status_code == 200
+    _acepta(client, q["id"], "pendiente")
+    assert _neto(_rows(client)) == 0  # pagada + su reverso
+    _acepta(client, q["id"])
+    assert _neto(_rows(client)) == D("10000.00")
+    _acepta(client, q["id"], "pendiente")
+    filas = _rows(client)
+    assert _neto(filas) == 0
+    rev = next(f for f in filas if f["reverses_id"] == c1["id"])
+    assert rev["status"] == "pendiente"  # el reverso de la pagada sigue vivo
+    # pagada y revertida: convertir (aceptacion implicita) devenga otra vez
+    assert client.post(f"/quotes/{q['id']}/convert").status_code in (200, 201)
+    assert _neto(_rows(client)) == D("10000.00")
+
+
+# ---------- 28. revision 3: la devolucion tambien baja lo que espera la utilidad ----------
+def test_devolucion_de_lo_que_espera_costos(client, auth, db_session):
+    vh, vid = _vendedora(client, db_session, auth)
+    _rule(client, user_id=vid, name="Utilidad", base="margen", percent=10)
+    prod = client.post("/products", json={"name": "Cámara domo prueba", "code": "CAM-DV", "price": 0}).json()
+    inv = _inv(client, lines=[{"product_id": prod["id"], "name": "Cámara domo prueba", "quantity": 1, "unit_price": 100000, "tax_rate": 13}], seller_id=vid)
+    _pay(client, inv["id"], inv["total"])
+    assert _rows(client)[0]["status"] == "en_espera"
+    _pay(client, inv["id"], inv["total"], kind="devolucion")
+    f = _rows(client)[0]
+    assert f["status"] == "anulada" and "devolvió" in f["void_reason"]
+    obj = db_session.get(Product, prod["id"])
+    obj.cost, obj.cost_currency = D("60000"), "CRC"
+    db_session.commit()
+    assert client.post("/commissions/recalc-waiting").status_code == 200
+    assert _neto(_rows(client)) == 0  # nunca comision sobre plata devuelta
+    _pay(client, inv["id"], inv["total"])  # vuelve a pagar: el tope de la factura no cuenta lo devuelto
+    assert _neto(_rows(client)) == D("4000.00")
+
+
+def test_devolucion_parcial_con_utilidad_del_proyecto_en_espera(client, auth, db_session):
+    vh, vid = _vendedora(client, db_session, auth)
+    _rule(client, user_id=vid, name="Utilidad", base="margen", percent=10)
+    q = _quote(client, [{"name": "Instalación", "quantity": 1, "unit_price": 1000000, "tax_rate": 13}], seller_id=vid)
+    pr = client.post(f"/quotes/{q['id']}/project", json={}).json()
+    inv = client.post(f"/quotes/{q['id']}/convert").json()
+    _pay(client, inv["id"], 1130000)
+    _pay(client, inv["id"], 565000, kind="devolucion")
+    client.put(f"/projects/{pr['id']}", json={"name": pr["name"], "status": "terminado", "cost_labor": 400000})
+    vivas = [f for f in _rows(client) if f["status"] != "anulada"]
+    assert len(vivas) == 1 and vivas[0]["status"] == "pendiente" and D(str(vivas[0]["amount"])) == D("30000.00")  # 10 % de la mitad de 600 000
+
+
+# ---------- 29. revision 3: cancelar un proyecto completado exige aprobar comisiones ----------
+def test_cancelar_proyecto_completado(client, auth, db_session):
+    tid = auth["tenant"]["id"]
+    vh, vid = _vendedora(client, db_session, auth)
+    _rule(client, user_id=vid, name="Al completar", percent=10, trigger="proyecto_completado")
+    q = _quote(client, [{"name": "Instalación", "quantity": 1, "unit_price": 500000, "tax_rate": 13}], seller_id=vid)
+    pr = client.post(f"/quotes/{q['id']}/project", json={}).json()
+    body = {"name": pr["name"], "status": "terminado"}
+    assert client.put(f"/projects/{pr['id']}", json=body).status_code == 200
+    c = _rows(client)[0]
+    assert client.patch("/commissions", json={"ids": [c["id"]], "status": "pagada", "paid_ref": "Planilla oct-2026"}).status_code == 200
+    sh = interno(client, db_session, tid, "supervisora@ejemplo.com", "supervisor")
+    r = client.put(f"/projects/{pr['id']}", json={**body, "status": "cancelado"}, headers=sh)
+    assert r.status_code == 409 and "aprueba comisiones" in r.json()["detail"]
+    assert _neto(_rows(client)) == D("50000.00")
+    assert client.put(f"/projects/{pr['id']}", json={**body, "status": "cancelado"}).status_code == 200
+    assert _neto(_rows(client)) == 0
+    db_session.expire_all()
+    assert db_session.get(Project, pr["id"]).completed_at is None
+    # vuelve a cerrarse: se completa otra vez y devenga con clave nueva (lo pagado y revertido queda de historial)
+    assert client.put(f"/projects/{pr['id']}", json=body).status_code == 200
+    filas = _rows(client)
+    assert _neto(filas) == D("50000.00")
+    nueva = next(f for f in filas if f["kind"] == "comision" and f["status"] == "pendiente")
+    assert db_session.get(Commission, nueva["id"]).source_key.endswith(":re1")
+    # sin nada devengado vivo, el supervisor si lo cancela
+    q2 = _quote(client, [{"name": "Otra", "quantity": 1, "unit_price": 100000, "tax_rate": 13}], seller_id=vid)
+    pr2 = client.post(f"/quotes/{q2['id']}/project", json={}).json()
+    assert client.put(f"/projects/{pr2['id']}", json={"name": pr2["name"], "status": "cancelado"}, headers=sh).status_code == 200
