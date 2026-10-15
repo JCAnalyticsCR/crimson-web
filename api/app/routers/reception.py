@@ -1,5 +1,5 @@
 """Recepcion de comprobantes de proveedores: bandeja, detalle, respuesta ante Hacienda (mensaje receptor v4.4),
-descargas, cargas manuales, bitacora de correos y buzon. Contabilidad (Blanca) lo opera todo; sin costos ni margen.
+descargas, cargas manuales, bitacora de correos y buzon. Contabilidad lo opera todo; sin costos ni margen.
 
 Rutas viejas que se conservan: GET /reception (lista), POST /reception/upload (201/409/422), GET /reception/{id}/xml/{which}.
 """
