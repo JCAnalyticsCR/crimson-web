@@ -180,6 +180,8 @@ def supplier_sync_now(sid: int, p: Principal = Depends(require("catalog", "crear
         raise HTTPException(429 if e.code == 20 else 502, e.message) from None
     except supplier_sync.SyncRefused as e:
         raise HTTPException(409, str(e)) from None
+    finally:
+        supplier_sync.trim_memory()  # la API no se queda con el pico de la descarga
     return out
 
 

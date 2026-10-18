@@ -11,12 +11,18 @@ costo y la existencia del proveedor pasan a los productos vinculados. Nunca toca
 PROPIA de Crimson (eso solo lo mueve el kardex). Ademas, al producto vinculado que no los tiene le completa el CABYS
 (13 digitos, lo recomienda el propio SiReTT) y las fotos.
 
+Cuando corre: el catalogo completo UNA vez por semana (lunes 03:17); es la consulta pesada (34 MB) y solo hace falta
+para descubrir articulos nuevos, CABYS y fotos. Las existencias y costos de lo que Crimson YA vende (los vinculados)
+se refrescan cada 6 horas con la consulta por lista de codigos (`refresh_linked`): unas pocas llamadas chicas, sin
+limite de frecuencia en Eurocomp. Asi la tienda sigue diciendo "bajo pedido" con datos de horas, no de dias.
+
 Seguridad de datos: si Eurocomp responde una lista sospechosamente corta (menos de la mitad de lo que habia) no se
 aplica, para no dejar inactivo medio catalogo por una respuesta cortada.
 """
 
 from __future__ import annotations
 
+import ctypes
 import logging
 import re
 from datetime import UTC, datetime
@@ -163,7 +169,7 @@ def status(t: Tenant, supplier: Supplier | None) -> dict:
     if s.get("last_error") and (s.get("last_try_at") or "") > (s.get("last_ok_at") or ""):
         return {"status": "error", "label": f"Conectado por API (SiReTT) · la última sincronización falló: {s['last_error']}", **s}
     if s.get("last_ok_at"):
-        return {"status": "conectado", "label": "Conectado por API (SiReTT) · se sincroniza cada hora", **s}
+        return {"status": "conectado", "label": "Conectado por API (SiReTT) · catálogo cada semana, existencias de lo vinculado cada 6 horas", **s}
     return {"status": "listo", "label": "Conectado por API (SiReTT) · todavía no se sincroniza", **s}
 
 
@@ -172,15 +178,32 @@ class SyncRefused(Exception):
     pass
 
 
-def fetch(client: SirettClient | None = None) -> list[dict]:
-    """Catalogo completo de la bodega de Eurocomp (una vez por hora). Lanza SirettError."""
+def trim_memory() -> None:
+    """Devuelve al sistema la memoria que Python ya libero (glibc la retiene si no se le pide). En Railway se paga la
+    RAM tomada, no la usada: sin esto cada proceso queda con el pico de la ultima sincronizacion."""
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):  # fuera de Linux/glibc no hace falta
+        pass
+
+
+def fetch(client: SirettClient | None = None) -> tuple[list[dict], int]:
+    """Catalogo completo de la bodega de Eurocomp, leido por partes y filtrado al vuelo: devuelve (lo que le sirve a
+    Crimson, cuantos articulos mando Eurocomp). Lanza SirettError."""
     client = client or SirettClient.from_settings()
     if client is None:
         raise SirettError(-1, "Faltan las credenciales de Eurocomp (EUROCOMP_WS_ID y EUROCOMP_WS_PASSWORD, o EUROCOMP_WS_KEY)")
-    return client.bodega_items(settings.eurocomp_bodega)
+    seen = 0
+
+    def keep(i: dict) -> bool:
+        nonlocal seen
+        seen += 1
+        return relevant(i) is not None
+
+    return client.bodega_items(settings.eurocomp_bodega, keep=keep), seen
 
 
-def apply(db: Session, t: Tenant, items: list[dict], *, user_id: int | None = None) -> dict:
+def apply(db: Session, t: Tenant, items: list[dict], *, user_id: int | None = None, received: int | None = None) -> dict:
     """Aplica el catalogo ya descargado a una empresa (flush, sin commit). Lanza SyncRefused si la lista es sospechosa."""
     supplier = find_supplier(db, t.id) or sl.resolve_supplier(db, t.id, None, settings.eurocomp_supplier)[0]
     parsed = build_parsed(items)
@@ -207,7 +230,7 @@ def apply(db: Session, t: Tenant, items: list[dict], *, user_id: int | None = No
     )
     enriched = enrich_products(db, t, supplier, now)
     db.flush()
-    out = {"supplier_id": supplier.id, "recibidos": len(items), "utiles": len(parsed.rows), **res["summary"], **enriched}
+    out = {"supplier_id": supplier.id, "recibidos": received if received is not None else len(items), "utiles": len(parsed.rows), **res["summary"], **enriched}
     audit(db, t.id, user_id, "supplier_sync", "supplier", supplier.id, out)
     return out
 
@@ -249,13 +272,22 @@ def targets(db: Session) -> list[Tenant]:
     return tenants
 
 
-def sync_tenant(db: Session, t: Tenant, *, user_id: int | None = None, client: SirettClient | None = None, items: list[dict] | None = None) -> dict:
+def sync_tenant(
+    db: Session,
+    t: Tenant,
+    *,
+    user_id: int | None = None,
+    client: SirettClient | None = None,
+    items: list[dict] | None = None,
+    received: int | None = None,
+) -> dict:
     """Descarga (si no viene ya descargado) y aplica para una empresa, guardando el estado (exito o error) aunque
     falle. Hace commit."""
     now = datetime.now(UTC)
     try:
-        items = items if items is not None else fetch(client)
-        out = apply(db, t, items, user_id=user_id)
+        if items is None:
+            items, received = fetch(client)
+        out = apply(db, t, items, user_id=user_id, received=received)
     except (SirettError, SyncRefused) as e:
         db.rollback()
         t = db.get(Tenant, t.id)
@@ -281,7 +313,7 @@ def sync_all(db: Session, client: SirettClient | None = None) -> dict:
         return {"skipped": "sin credenciales de Eurocomp"}
     now = datetime.now(UTC)
     try:
-        items = fetch(client)
+        items, received = fetch(client)
     except SirettError as e:
         for t in tenants:
             _save_state(t, last_try_at=now, last_error=e.message, last_code=e.code)
@@ -291,7 +323,79 @@ def sync_all(db: Session, client: SirettClient | None = None) -> dict:
     out = {}
     for t in tenants:
         try:
-            out[t.id] = sync_tenant(db, t, items=items)
+            out[t.id] = sync_tenant(db, t, items=items, received=received)
         except (SirettError, SyncRefused) as e:  # el estado ya quedo guardado; las demas empresas siguen
             out[t.id] = {"error": str(e)}
+    return out
+
+
+# ---------- existencias de lo vinculado (cada 6 horas) ----------
+def refresh_linked(db: Session, client: SirettClient | None = None) -> dict:
+    """Existencia y costo al momento de los articulos de Eurocomp que Crimson YA vende (vinculados a un producto), con
+    la consulta por lista de codigos (de a 50, sin limite de frecuencia). No crea ni inactiva articulos: eso es del
+    catalogo semanal. Un codigo que Eurocomp ya no devuelve queda con existencia 0 (no se vende "bajo pedido" lo que el
+    proveedor no confirma). Hace commit."""
+    tenants = targets(db)
+    if not tenants:
+        return {"skipped": "ninguna empresa con el proveedor"}
+    client = client or SirettClient.from_settings()
+    if client is None:
+        return {"skipped": "sin credenciales de Eurocomp"}
+    linked: dict[int, list[SupplierItem]] = {}
+    for t in tenants:
+        sup = find_supplier(db, t.id)
+        if sup is not None:
+            linked[t.id] = list(
+                db.scalars(
+                    select(SupplierItem).where(
+                        SupplierItem.tenant_id == t.id,
+                        SupplierItem.supplier_id == sup.id,
+                        SupplierItem.active,
+                        SupplierItem.product_id.is_not(None),
+                    )
+                )
+            )
+    codes = sorted({i.code for items in linked.values() for i in items if i.code})
+    if not codes:
+        return {"skipped": "nada vinculado"}
+    now = datetime.now(UTC)
+    try:
+        fresh = {(r.get("codigo") or "").strip(): r for r in client.items_list(settings.eurocomp_bodega, codes)}
+    except SirettError as e:
+        log.warning("Eurocomp (existencias): %s", e.message)
+        return {"error": e.message, "code": e.code}
+    fx = sc.usd_rate(db)
+    out = {}
+    for t in tenants:
+        items = linked.get(t.id) or []
+        cambios = sin_dato = 0
+        for it in items:
+            r = fresh.get(it.code)
+            if r is None:
+                sin_dato += 1
+            stock = _dec(r.get("stock")) if r else Decimal(0)
+            new_stock = int(stock) if stock is not None else it.stock
+            cost = _dec(r.get("precio")) if r else None
+            new_cost = cost if cost is not None and cost > 0 else it.cost
+            if new_stock != it.stock or (new_cost is not None and (it.cost is None or Decimal(str(it.cost)) != new_cost)):
+                cambios += 1
+            if new_cost is not None and it.cost is not None and Decimal(str(it.cost)) != new_cost:
+                it.prev_cost = it.cost
+            it.stock, it.cost = new_stock, new_cost
+            if r:
+                it.raw = {**(it.raw or {}), "stock": r.get("stock"), "precio": r.get("precio")}
+            it.list_date = now.astimezone(CR).date()
+        db.flush()
+        for pid in sorted({i.product_id for i in items}):
+            p = db.get(Product, pid)
+            if p is None or p.tenant_id != t.id:
+                continue
+            sc.sync_product(db, p, fx=fx)
+            if any(i.product_id == pid and i.supplier_id == p.supplier_id for i in items):
+                p.supplier_updated_at = now  # la tienda decide "bajo pedido" con la hora real de la consulta
+        res = {"vinculados": len(items), "cambios": cambios, "sin_dato": sin_dato}
+        _save_state(t, last_stock_at=now, last_stock_summary=res)
+        out[t.id] = res
+    db.commit()
+    log.info("Eurocomp (existencias): %s", out)
     return out

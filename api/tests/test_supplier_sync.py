@@ -43,14 +43,19 @@ def eurocomp(monkeypatch):
     monkeypatch.setattr(settings, "eurocomp_ws_password", SecretStr("x"))
     monkeypatch.setattr(settings, "eurocomp_ws_key", None)
 
-    def bodega_items(self, bid):
+    def bodega_items(self, bid, keep=None):
         state["calls"] += 1
         if state["error"] is not None:
             raise SirettError(state["error"])
         assert bid == settings.eurocomp_bodega
-        return [dict(i) for i in state["items"]]
+        return [dict(i) for i in state["items"] if keep is None or keep(dict(i))]
+
+    def items_list(self, bid, codes):
+        state["list_calls"] = state.get("list_calls", 0) + 1
+        return [dict(i) for i in state["items"] if i["codigo"] in codes]
 
     monkeypatch.setattr(SirettClient, "bodega_items", bodega_items)
+    monkeypatch.setattr(SirettClient, "items_list", items_list)
     return state
 
 
@@ -78,6 +83,16 @@ def test_soap_response_parsing():
 
     rows = SirettClient.rows(etree.fromstring(xml, PARSER))
     assert rows == [{"codigo": "AC1104", "descripcion": "ADAPTADOR BALUN SEÑAL", "precio": "1.82", "stock": "16.000"}]
+    # por partes (como llega por la red), cortado en pedazos de 7 bytes: mismo resultado sin armar el documento entero
+    chunks = [xml[i : i + 7] for i in range(0, len(xml), 7)]
+    assert SirettClient.parse_rows(chunks) == rows
+    assert SirettClient.parse_rows(chunks, keep=lambda r: r["codigo"] != "AC1104") == []
+    throttled = xml.replace(b"<result>0</result>", b"<result>20</result>")
+    with pytest.raises(SirettError) as e:
+        SirettClient.parse_rows([throttled])
+    assert e.value.code == 20
+    with pytest.raises(SirettError):
+        SirettClient.parse_rows([xml[:200]])  # respuesta cortada
 
 
 def test_sync_links_enriches_and_never_touches_own_stock(client, auth, db_session, eurocomp):
@@ -136,6 +151,39 @@ def test_suspicious_or_throttled_response_changes_nothing(client, auth, db_sessi
     eurocomp["error"] = None
     r = client.post(f"/supplier-catalog/suppliers/{s.id}/sync")
     assert r.status_code == 200 and r.json()["utiles"] == 5
+
+
+def test_stock_refresh_updates_only_linked_products(client, auth, db_session, eurocomp):
+    """Cada 6 horas: existencia y costo de lo vinculado, sin la consulta masiva; lo que Eurocomp ya no devuelve queda en 0."""
+    tid = auth["tenant"]["id"]
+    prod = Product(tenant_id=tid, code="HIK-1047", name="Cámara 4MP ColorVu", price=Decimal("45000"), supplier_sku="SG2104")
+    db_session.add(prod)
+    db_session.commit()
+    ss.sync_all(db_session)
+    assert eurocomp["calls"] == 1
+    db_session.refresh(prod)
+    assert prod.supplier_stock == 5
+    before = prod.supplier_updated_at
+
+    eurocomp["items"] = [dict(CAMARA, stock="2.000", precio="50.00"), UTP]
+    out = ss.refresh_linked(db_session)[tid]
+    assert out == {"vinculados": 1, "cambios": 1, "sin_dato": 0}
+    assert eurocomp["calls"] == 1 and eurocomp["list_calls"] == 1  # nunca la consulta masiva
+    db_session.refresh(prod)
+    assert prod.supplier_stock == 2 and prod.cost == Decimal("50") and prod.price == Decimal("45000")
+    assert prod.supplier_updated_at >= before
+    item = db_session.scalar(select(SupplierItem).where(SupplierItem.code == "SG2104"))
+    assert item.prev_cost == Decimal("48.5") and item.active
+    # el articulo de la lista sin vincular no se toca
+    utp = db_session.scalar(select(SupplierItem).where(SupplierItem.code == "CB0001"))
+    assert utp.stock == 5
+
+    eurocomp["items"] = [UTP]  # Eurocomp ya no confirma la camara: no se vende "bajo pedido"
+    assert ss.refresh_linked(db_session)[tid]["sin_dato"] == 1
+    db_session.refresh(prod)
+    assert prod.supplier_stock == 0
+    st = next(x for x in client.get("/supplier-catalog/suppliers").json() if x["name"].lower().startswith("eurocomp"))["api"]
+    assert st["last_stock_at"] and "cada 6 horas" in st["label"]
 
 
 def test_without_credentials_nothing_runs(client, auth, db_session, monkeypatch):

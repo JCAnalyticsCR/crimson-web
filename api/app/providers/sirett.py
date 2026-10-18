@@ -14,6 +14,7 @@ Nunca se registra la credencial: ni en logs, ni en errores, ni en la respuesta g
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from html import escape
 
 import httpx
@@ -106,20 +107,81 @@ class SirettClient:
         return root
 
     @staticmethod
+    def _row(e) -> dict | None:
+        kids = [c for c in e if _local(c.tag)]
+        names = {_local(c.tag) for c in kids}
+        if "codigo" in names and "descripcion" in names:
+            return {_local(c.tag): (c.text or "").strip() for c in kids if _local(c.tag) != "precios_extra"}
+        return None
+
+    @staticmethod
     def rows(root) -> list[dict]:
         """Cada articulo (items_Row) como dict de textos limpios; precios_extra queda fuera (no viene poblado)."""
-        out = []
-        for e in root.iter():
-            kids = [c for c in e if _local(c.tag)]
-            names = {_local(c.tag) for c in kids}
-            if "codigo" in names and "descripcion" in names:
-                out.append({_local(c.tag): (c.text or "").strip() for c in kids if _local(c.tag) != "precios_extra"})
+        return [r for e in root.iter() if (r := SirettClient._row(e)) is not None]
+
+    @staticmethod
+    def parse_rows(chunks: Iterable[bytes], keep: Callable[[dict], bool] | None = None) -> list[dict]:
+        """Lo mismo que rows(), leyendo la respuesta por partes: cada articulo se arma, se decide con `keep` y se suelta.
+        El catalogo completo (34 MB, 11.500 articulos) nunca esta entero en memoria: armarlo dejaba cada proceso con
+        ~450 MB tomados hasta reiniciarse, y en Railway la RAM retenida es lo que se paga."""
+        parser = etree.XMLPullParser(
+            events=("end",), resolve_entities=False, no_network=True, load_dtd=False, huge_tree=True, remove_comments=True
+        )
+        out: list[dict] = []
+        result: str | None = None
+        fault: str | None = None
+
+        def drain() -> None:
+            nonlocal result, fault
+            for _, e in parser.read_events():
+                name = _local(e.tag)
+                if name == "result":
+                    result = (e.text or "").strip()
+                elif name == "faultstring":
+                    fault = e.text
+                elif (row := SirettClient._row(e)) is not None:
+                    if keep is None or keep(row):
+                        out.append(row)
+                    e.clear(keep_tail=True)
+                    parent = e.getparent()
+                    while parent is not None and e.getprevious() is not None:
+                        del parent[0]
+
+        try:
+            for chunk in chunks:
+                parser.feed(chunk)
+                drain()
+            parser.close()
+            drain()
+        except etree.XMLSyntaxError:
+            raise SirettError(-1, "Respuesta de Eurocomp ilegible") from None
+        if result is None:
+            raise SirettError(-1, f"Eurocomp respondió un error SOAP: {(fault or 'sin detalle')[:160]}")
+        code = int(result or "-1")
+        if code != 0:
+            raise SirettError(code)
         return out
 
+    def stream_rows(self, op: str, keep: Callable[[dict], bool] | None = None, **params) -> list[dict]:
+        try:
+            with httpx.stream(
+                "POST",
+                self.url,
+                content=self._envelope(op, params),
+                headers={"Content-Type": "text/xml; charset=utf-8", "SOAPAction": f'"urn:server#{op}"'},
+                timeout=self.timeout,
+            ) as r:
+                if r.status_code >= 400:
+                    raise SirettError(-1, f"Eurocomp respondió HTTP {r.status_code}")
+                return self.parse_rows(r.iter_bytes(), keep)
+        except httpx.HTTPError as e:
+            raise SirettError(-1, f"Eurocomp no respondió ({type(e).__name__})") from None
+
     # ---------- consultas ----------
-    def bodega_items(self, bid: int) -> list[dict]:
-        """Catalogo completo de la bodega (todos los articulos, con o sin existencia). Una vez por hora."""
-        return self.rows(self.call("wsc_request_bodega_all_items", bid=bid))
+    def bodega_items(self, bid: int, keep: Callable[[dict], bool] | None = None) -> list[dict]:
+        """Catalogo completo de la bodega (todos los articulos, con o sin existencia), leido por partes; `keep` decide
+        cuales se guardan. Eurocomp admite una consulta masiva por hora."""
+        return self.stream_rows("wsc_request_bodega_all_items", keep, bid=bid)
 
     def items_list(self, bid: int, codes: list[str]) -> list[dict]:
         """Articulos puntuales al momento (sin limite de frecuencia), de a 50 codigos."""

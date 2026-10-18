@@ -14,4 +14,7 @@ RUN uv sync --frozen --no-dev --extra pdf
 ENV PATH="/app/.venv/bin:$PATH"
 RUN useradd --create-home --uid 10001 crimson && chown -R crimson /app
 USER crimson
-CMD ["celery", "-A", "worker_celery_app:celery", "worker", "--beat", "--loglevel=INFO", "--concurrency=2", "--schedule=/tmp/celerybeat-schedule"]
+# RAM = lo que se paga en Railway (CPU casi en cero): un solo proceso de tareas (son livianas) que se renueva al pasar
+# de 250 MB, sin gossip/mingle (un solo worker) y glibc con 2 arenas en vez de 8 x nucleo
+ENV MALLOC_ARENA_MAX=2
+CMD ["celery", "-A", "worker_celery_app:celery", "worker", "--beat", "--loglevel=INFO", "--concurrency=1", "--max-memory-per-child=250000", "--without-gossip", "--without-mingle", "--schedule=/tmp/celerybeat-schedule"]

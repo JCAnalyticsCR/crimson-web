@@ -14,5 +14,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 RUN useradd --create-home --uid 10001 crimson && chown -R crimson /app
 USER crimson
 EXPOSE 8000
+# glibc con 2 arenas en vez de 8 x nucleo: menos RAM retenida (Railway cobra la RAM tomada)
+ENV MALLOC_ARENA_MAX=2
 # Migra, emite la invitacion inicial si el entorno esta vacio y arranca. En Railway el healthcheck apunta a /health
 CMD ["sh", "-c", "alembic upgrade head && python -m app.bootstrap && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]

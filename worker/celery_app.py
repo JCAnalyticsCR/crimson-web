@@ -48,13 +48,27 @@ def fx_bccr_daily() -> dict:
 
 @celery.task(name="suppliers.sync_eurocomp")
 def suppliers_sync_eurocomp() -> dict:
-    """Catalogo de Eurocomp por SiReTT, cada hora (Eurocomp permite una consulta masiva por hora). Sin credenciales no
-    hace nada; un fallo queda en el estado que ve el catalogo de proveedores y no se reintenta hasta la proxima hora."""
+    """Catalogo completo de Eurocomp por SiReTT, una vez por semana (articulos nuevos, CABYS, fotos). Sin credenciales
+    no hace nada; un fallo queda en el estado que ve el catalogo de proveedores (se reintenta con el boton
+    "Sincronizar")."""
+    from app.core.db import SessionLocal
+    from app.services import supplier_sync
+
+    try:
+        with SessionLocal() as db:
+            return {str(k): v for k, v in supplier_sync.sync_all(db).items()}
+    finally:
+        supplier_sync.trim_memory()
+
+
+@celery.task(name="suppliers.eurocomp_stock")
+def suppliers_eurocomp_stock() -> dict:
+    """Cada 6 horas: existencia y costo al momento de lo que Crimson ya vende de Eurocomp (consulta liviana)."""
     from app.core.db import SessionLocal
     from app.services import supplier_sync
 
     with SessionLocal() as db:
-        return {str(k): v for k, v in supplier_sync.sync_all(db).items()}
+        return {str(k): v for k, v in supplier_sync.refresh_linked(db).items()}
 
 
 @celery.task(name="sales.mark_overdue")
@@ -531,7 +545,9 @@ celery.conf.beat_schedule = {
     "run-recurrences": {"task": "sales.run_recurrences", "schedule": crontab(hour=5, minute=0)},
     "retry-outbox": {"task": "mail.retry_outbox", "schedule": crontab(minute="*/15")},
     "fx-bccr-daily": {"task": "fx.bccr_daily", "schedule": crontab(hour=6, minute=15)},
-    # minuto 17: lejos del :00 de las demas tareas; antes del :25 de back-in-stock (avisos de "volvio a haber")
-    "suppliers-sync-eurocomp": {"task": "suppliers.sync_eurocomp", "schedule": crontab(minute=17)},
+    # catalogo completo (34 MB) los lunes de madrugada; existencias de lo vinculado cada 6 horas. Minuto 17: lejos del
+    # :00 de las demas tareas y antes del :25 de back-in-stock (avisos de "volvio a haber")
+    "suppliers-sync-eurocomp": {"task": "suppliers.sync_eurocomp", "schedule": crontab(day_of_week=1, hour=3, minute=17)},
+    "suppliers-eurocomp-stock": {"task": "suppliers.eurocomp_stock", "schedule": crontab(hour="5,11,17,23", minute=17)},
     "mark-overdue": {"task": "sales.mark_overdue", "schedule": crontab(hour=0, minute=30)},
 }
