@@ -470,13 +470,22 @@ def _pick_by_words(prods: list[Product], words: tuple[str, ...], never: tuple[st
 RJ45_NO = ("tester", "ponchadora", "crimp", "pinza", "balun", "pareja", "acoplador", "punto de acceso", "router", "onu")
 
 
+_PACK = re.compile(r"\b(\d{2,4})\s*(?:unidades|unid|uds|piezas|pzas|pcs)\b")
+
+
+def pack_size(p: Product) -> int:
+    """Cuantas unidades trae (los conectores se venden en bolsa: "RJ45 Cat6A 100 unidades"); 1 si no lo dice."""
+    m = _PACK.search(fold(p.name))
+    return int(m.group(1)) if m else 1
+
+
 def _consumable(p: Product | None) -> Product | None:
-    """Un conector suelto cuesta centavos: si el unico del catalogo es caro (jack, paquete), no se suma al kit;
-    queda en "lo cotizamos" para no inflar el total."""
+    """Un conector suelto cuesta centavos: si el del catalogo es caro POR UNIDAD (un jack), no se suma al kit y queda
+    en "lo cotizamos" para no inflar el total. Una bolsa se mide por lo que cuesta cada conector de la bolsa."""
     if p is None:
         return None
     limit = Decimal(2) if (p.currency or "CRC").upper() == "USD" else Decimal(1000)
-    return p if Decimal(str(p.price)) <= limit else None
+    return p if Decimal(str(p.price)) / pack_size(p) <= limit else None
 
 
 FEATURED_TYPES = (
@@ -563,13 +572,15 @@ def build_kit(prods: list[Product], answers: dict) -> dict:
 
     rj = sug.get("Conectores RJ45")
     if rj:
+        conn = _consumable(
+            _pick_by_words(prods, ("conector", "rj45"), RJ45_NO) or _pick_by_words(prods, ("rj45",), RJ45_NO + ("switch", "puerto", "modulo", "ficha"))
+        )
+        pack = pack_size(conn) if conn else 1
         add(
-            _consumable(
-                _pick_by_words(prods, ("conector", "rj45"), RJ45_NO) or _pick_by_words(prods, ("rj45",), RJ45_NO + ("switch", "puerto", "modulo", "ficha"))
-            ),
-            rj["quantity"],
+            conn,
+            math.ceil(rj["quantity"] / pack),
             "Instalación",
-            rj["reason"],
+            rj["reason"] + (f" (bolsa de {pack})" if pack > 1 else ""),
             "Conectores RJ45",
         )
     cable_m = (Decimal(n * meters) * Decimal("1.15")).quantize(Decimal(1))

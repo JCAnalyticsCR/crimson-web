@@ -265,6 +265,46 @@ def test_arma_tu_sistema_con_productos_reales(client, auth, db_session):
     assert prods
 
 
+def test_kit_completo_con_bolsa_de_conectores_bobina_y_disco_de_eurocomp(client, auth, db_session):
+    """Lo que vende Eurocomp: conectores en bolsa de 100, cable en bobina de 305 m y discos que llegan como "HD INTERNO"
+    (el nombre limpio de la tienda los vuelve "Disco duro interno"). El kit sale con precio en vez de "lo cotizamos"."""
+    from app.services.product_names import tidy
+
+    _publicar(client)
+    prods = _catalogo(db_session)
+    t = db_session.scalar(select(Tenant).where(Tenant.slug == "crimson"))
+    prods["RJ45-100"].show_on_web = False  # solo la bolsa
+    db_session.add_all(
+        [
+            Product(tenant_id=t.id, code="AC1070", name=tidy("CONECTOR HIKVISION DS-1M6AUA RJ45 CAT6A 100 UNIDADES SIN BLINDAJE"), price=12, currency="USD", show_on_web=True),
+            Product(tenant_id=t.id, code="AC3211", name=tidy("CABLE UTP CAT6 NOVA FAN60305001C 305M PVC"), price=75, currency="USD", show_on_web=True),
+            Product(tenant_id=t.id, code="AM2017", name=tidy("HD INTERNO 2TB SEAGATE ST2000VX017 3.5'' SATA III / OPTIMIZADO PARA VIDEOVIGILANCIA 303801487"), price=60, currency="USD", show_on_web=True),
+        ]
+    )
+    for code in ("WD44PURZ", "WD23PURZ"):
+        prods[code].show_on_web = False
+    db_session.commit()
+    k = client.post("/public/store/crimson/kit", json={"place": "casa", "indoor": 2, "outdoor": 2, "days": 15, "remote": True}).json()
+    by_code = {ln["product"]["code"]: ln for ln in k["lines"]}
+    assert by_code["AM2017"]["quantity"] == 1  # 1.4 TB -> el de 2 TB
+    assert by_code["AC1070"]["quantity"] == 1 and "bolsa de 100" in by_code["AC1070"]["reason"]  # 8 conectores = 1 bolsa
+    assert by_code["AC3211"]["quantity"] == 1  # 92 m -> 1 bobina
+    assert [m["name"] for m in k["missing"]] == ["Caja de paso exterior"]  # lo unico que Eurocomp no vende
+
+
+def test_nombres_legibles_desde_la_descripcion_del_proveedor():
+    from app.services.product_names import tidy
+
+    assert (
+        tidy("CAMARA BULLET HIKVISION DS-2CD2043G2-LI2U(2.8MM)(O-STD) (E) 4MP ACUSENSE ALCANCE IR Y LUZ BLANCA HASTA 40 M 311326530")
+        == "Cámara bullet Hikvision DS-2CD2043G2-LI2U(2.8MM) 4MP AcuSense alcance IR y luz blanca hasta 40 m"
+    )
+    assert tidy("HD INTERNO 2TB SEAGATE ST2000VX017 SATA III") == "Disco duro interno 2TB Seagate ST2000VX017 SATA III"
+    assert tidy("SENSOR MAGNETICO PARA PUERTA HIKVISION DS-PD1-MC-RS 302400989 GRIS") == "Sensor magnético para puerta Hikvision DS-PD1-MC-RS gris"
+    assert tidy("Cámara domo IP 4MP ColorVu") == "Cámara domo IP 4MP ColorVu"  # escrito a mano: no se toca
+    assert tidy("") == ""
+
+
 def test_asesoria_crea_oportunidad_y_avisa_a_ventas(client, auth, db_session):
     _publicar(client)
     prods = _catalogo(db_session)

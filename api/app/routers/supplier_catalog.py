@@ -24,7 +24,7 @@ from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..models import Category, Product, ProductTax, Supplier, SupplierItem, SupplierListImport, Tax
 from ..providers.sirett import SirettError
-from ..services import pricing, supplier_sync
+from ..services import pricing, product_names, supplier_sync
 from ..services import supplier_catalog as sc
 from ..services import supplier_lists as sl
 from ..services import tabular as tb
@@ -410,7 +410,7 @@ def add_to_catalog(iid: int, data: AddIn, p: Principal = Depends(require("catalo
     prod = Product(
         tenant_id=p.tenant.id,
         code=code,
-        name=(data.name or it.name)[:200],
+        name=(data.name or product_names.tidy(it.name))[:200],  # legible en la tienda; el original queda en la factura
         item_type="producto",
         unit="Unid",
         price=price,
