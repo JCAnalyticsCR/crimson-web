@@ -11,12 +11,49 @@ from sqlalchemy.orm import Session
 
 from ..models import Invoice, Product, StockMovement, Tenant, Warehouse
 
+SELLABLE = "venta"  # Warehouse.kind de lo que se vende e instala; revision y proveedor nunca cuentan como disponible
+SPECIAL_WAREHOUSES = {
+    "revision": ("Revisión de garantías", "Equipos de clientes que Crimson revisa antes de mandarlos a garantía"),
+    "proveedor": ("Garantías en el distribuidor", "Equipos de clientes en el taller del distribuidor"),
+}
+
 
 def default_warehouse(db: Session, tenant_id: int) -> Warehouse | None:
-    return db.scalar(select(Warehouse).where(Warehouse.tenant_id == tenant_id, Warehouse.active).order_by(Warehouse.is_default.desc(), Warehouse.id))
+    """La bodega de venta predeterminada (nunca una de revision o del proveedor)."""
+    return db.scalar(
+        select(Warehouse)
+        .where(Warehouse.tenant_id == tenant_id, Warehouse.active, Warehouse.kind == SELLABLE)
+        .order_by(Warehouse.is_default.desc(), Warehouse.id)
+    )
 
 
-EXTRA_FIELDS = {"project_id", "serial", "movement_type", "voucher_media", "transfer_price", "owner", "custodian", "location", "order_id"}
+def sellable_ids(db: Session, tenant_id: int) -> set[int]:
+    return set(db.scalars(select(Warehouse.id).where(Warehouse.tenant_id == tenant_id, Warehouse.kind == SELLABLE)))
+
+
+def special_warehouse(db: Session, tenant_id: int, kind: str) -> Warehouse:
+    """La bodega de revision o la del distribuidor; se crea la primera vez que una garantia la necesita."""
+    w = db.scalar(select(Warehouse).where(Warehouse.tenant_id == tenant_id, Warehouse.kind == kind, Warehouse.active).order_by(Warehouse.id))
+    if w is None:
+        name, desc = SPECIAL_WAREHOUSES[kind]
+        w = Warehouse(tenant_id=tenant_id, name=name, description=desc, kind=kind, is_default=False, active=True)
+        db.add(w)
+        db.flush()
+    return w
+
+
+EXTRA_FIELDS = {
+    "project_id",
+    "serial",
+    "movement_type",
+    "voucher_media",
+    "transfer_price",
+    "owner",
+    "custodian",
+    "location",
+    "order_id",
+    "warranty_id",
+}
 
 
 def prevent_negative(db: Session, tenant_id: int) -> bool:
@@ -118,7 +155,7 @@ def _home_warehouse(db: Session, p: Product) -> Warehouse | None:
     """Bodega de origen del producto si esta activa; si no, la predeterminada (igual que la tienda)."""
     if p.warehouse_id:
         w = db.get(Warehouse, p.warehouse_id)
-        if w and w.active and w.tenant_id == p.tenant_id:
+        if w and w.active and w.tenant_id == p.tenant_id and w.kind == SELLABLE:
             return w
     return default_warehouse(db, p.tenant_id)
 
@@ -185,9 +222,12 @@ def restock_for_void(db: Session, inv: Invoice, user_id: int | None) -> int:
 
 
 def low_stock(db: Session, tenant_id: int) -> list[dict]:
+    """Bajo minimo: solo cuenta lo que esta en bodegas de venta (lo que esta en revision o en el proveedor no se vende)."""
     levels = {}
+    ok = sellable_ids(db, tenant_id)
     for lv in stock_levels(db, tenant_id):
-        levels[lv["product_id"]] = levels.get(lv["product_id"], Decimal(0)) + lv["quantity"]
+        if lv["warehouse_id"] in ok:
+            levels[lv["product_id"]] = levels.get(lv["product_id"], Decimal(0)) + lv["quantity"]
     out = []
     for p in db.scalars(select(Product).where(Product.tenant_id == tenant_id, Product.active, Product.item_type == "producto", Product.min_stock > 0)):
         q = levels.get(p.id, Decimal(0))

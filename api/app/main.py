@@ -50,6 +50,7 @@ from .routers import (
     support_desk,
     users_admin,
     vehicles,
+    warranties,
     webhooks,
 )
 from .routers import bitacora as bitacora_router
@@ -133,6 +134,7 @@ def create_app() -> FastAPI:
     app.include_router(stock.router)
     app.include_router(commissions.router)  # comisiones, ganancias de aliados y Mis numeros (economia)
     app.include_router(support_desk.router)
+    app.include_router(warranties.router)  # garantias: revision de Crimson -> distribuidor -> cliente
     app.include_router(public.router)
     app.include_router(public_incidents.router)
     app.include_router(public_access.router)

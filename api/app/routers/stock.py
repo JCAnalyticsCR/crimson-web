@@ -480,7 +480,7 @@ def stock_health(days: int = Query(180, ge=7, le=730), p: Principal = Depends(re
 
 
 class HealthFixIn(BaseModel):
-    kind: str = Field(pattern="^(factura|proyecto|pedido)$")
+    kind: str = Field(pattern="^(factura|proyecto|pedido|garantia)$")
     ref_id: int
 
 
@@ -507,6 +507,7 @@ KIND_LABEL = {
     "ajuste": "Ajuste",
     "transferencia_out": "Traslado (sale)",
     "transferencia_in": "Traslado (entra)",
+    "garantia": "Garantía",
 }
 
 

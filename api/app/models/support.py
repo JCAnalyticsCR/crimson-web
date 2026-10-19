@@ -19,6 +19,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from ..core.db import Base
 from .base import ArchiveMixin, TenantMixin, TimestampMixin
 
+# Garantia (Andres, 19/10): el equipo del cliente pasa primero por una revision de Crimson; si procede se manda al
+# distribuidor (tiene taller especializado) y vuelve reparado o reemplazado. recibido -> en_distribuidor -> devuelto
+# -> cerrado (entregado al cliente); cerrado directo si la revision dice que no procede; anulado si se abrio por error.
+WARRANTY_STATES = ("recibido", "en_distribuidor", "devuelto", "cerrado", "anulado")
+WARRANTY_REVIEW = ("procede", "no_procede")
+WARRANTY_RESULTS = ("reparado", "reemplazado", "rechazado")
+
 TICKET_KINDS = ("soporte", "garantia", "mantenimiento", "visita", "instalacion", "consulta")
 TICKET_STATES = ("nuevo", "asignado", "en_proceso", "esperando_cliente", "resuelto", "cerrado")
 PRIORITIES = ("baja", "media", "alta", "critica")
@@ -210,3 +217,51 @@ class Commission(TenantMixin, TimestampMixin, Base):
     expense_id: Mapped[int | None] = mapped_column(ForeignKey("expense.id", ondelete="SET NULL", name="fk_comm_expense"))
     void_reason: Mapped[str | None] = mapped_column(String(240))
     reverses_id: Mapped[int | None] = mapped_column(ForeignKey("commission.id", name="fk_comm_reverses"))
+
+
+class WarrantyCase(TenantMixin, TimestampMixin, Base):
+    """Una garantia: el equipo de un cliente desde que Crimson lo recibe hasta que se lo devuelve.
+
+    El kardex lo sigue por estado (services/warranty.py): recibido o devuelto = en la bodega de revision; en el
+    distribuidor = en la bodega del proveedor; cerrado = ya no esta en manos de Crimson. Si Crimson le dio al cliente
+    un reemplazo de su propia bodega, ese reemplazo sale de la bodega de venta y la unidad que vuelve del distribuidor
+    entra a la venta (el proveedor no acepta devoluciones: queda como mercaderia de Crimson)."""
+
+    __tablename__ = "warranty_case"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    number: Mapped[str] = mapped_column(String(40), index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customer.id"), index=True)
+    ticket_id: Mapped[int | None] = mapped_column(ForeignKey("support_ticket.id"), index=True)
+    asset_id: Mapped[int | None] = mapped_column(ForeignKey("customer_asset.id"), index=True)
+    # sin producto del catalogo la garantia se sigue igual, pero sin movimientos de bodega
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("product.id"))
+    equipment: Mapped[str] = mapped_column(String(200))  # como lo describe quien lo recibe
+    serial: Mapped[str | None] = mapped_column(String(80), index=True)
+    quantity: Mapped[float] = mapped_column(Numeric(14, 3), default=1)
+    problem: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="recibido", index=True)
+
+    # revision previa de Crimson
+    review: Mapped[str | None] = mapped_column(String(12))  # procede | no_procede
+    review_note: Mapped[str | None] = mapped_column(Text)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # distribuidor
+    supplier_id: Mapped[int | None] = mapped_column(ForeignKey("supplier.id"))
+    supplier_ref: Mapped[str | None] = mapped_column(String(80))  # numero de RMA o boleta del distribuidor
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    returned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result: Mapped[str | None] = mapped_column(String(12))  # reparado | reemplazado | rechazado
+    new_serial: Mapped[str | None] = mapped_column(String(80))  # si el distribuidor lo cambio por otro
+
+    # reemplazo que Crimson le da al cliente de su propia bodega (para no dejarlo sin equipo mientras tanto)
+    replacement_product_id: Mapped[int | None] = mapped_column(ForeignKey("product.id"))
+    replacement_qty: Mapped[float] = mapped_column(Numeric(14, 3), default=0)
+    replacement_serial: Mapped[str | None] = mapped_column(String(80))
+
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closing_note: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
+    history: Mapped[list] = mapped_column(JSON, default=list)

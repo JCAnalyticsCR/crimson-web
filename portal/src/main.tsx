@@ -53,6 +53,7 @@ const Assets = lazy(() => import("./modules/projects/Assets"));
 const Purchases = lazy(() => import("./modules/projects/Purchases"));
 const Tickets = lazy(() => import("./modules/support/Tickets"));
 const Contracts = lazy(() => import("./modules/support/Contracts"));
+const Warranties = lazy(() => import("./modules/support/Warranties"));
 const Commissions = lazy(() => import("./modules/commissions/Commissions"));
 const Archive = lazy(() => import("./modules/tools/Archive"));
 const AccessRequests = lazy(() => import("./modules/clientaccess/AccessRequests"));
@@ -196,6 +197,7 @@ function App() {
         <Route path="/compras" element={g("purchases.ver", <Purchases />)} />
         <Route path="/tickets" element={g("support_desk.ver", <Tickets />)} />
         <Route path="/mantenimientos" element={g("support_desk.ver", <Contracts />)} />
+        <Route path="/garantias" element={g("garantias.ver", <Warranties />)} />
         <Route path="/comisiones" element={g("commissions.ver", <Commissions />)} />
         <Route path="/aliados" element={g("aliados.ver", <Allies />)} />
         <Route path="/aliados/:id" element={g("aliados.ver", <AllyDetail />)} />

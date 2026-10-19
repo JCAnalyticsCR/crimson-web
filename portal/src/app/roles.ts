@@ -33,9 +33,9 @@ export const ROLES: Record<string, RoleMeta> = {
   ventas: {
     label: "Vendedor", tone: "#2f6fed", glyph: "V",
     summary: "Cotiza y factura con el precio de venta. Ve solo sus oportunidades, cotizaciones, facturas y comisiones; nunca el costo.",
-    can: ["Sus oportunidades y cotizaciones (el consecutivo es el de la empresa)", "Facturar y buscar sus facturas", "Ver en resumen los levantamientos de sus oportunidades y pedir uno nuevo", "Productos y servicios con el precio de venta", "Pedidos de la tienda", "Ver en tiempo real cuánto lleva ganado en comisiones"],
+    can: ["Sus oportunidades y cotizaciones (el consecutivo es el de la empresa)", "Facturar y buscar sus facturas", "Ver en resumen los levantamientos de sus oportunidades y pedir uno nuevo", "Productos y servicios con el precio de venta", "Existencias y ajustes de inventario (entradas, salidas y ajustes)", "Pedidos de la tienda", "Ver en tiempo real cuánto lleva ganado en comisiones"],
     cannot: ["Ver el costo del proveedor, el margen o la utilidad", "Ver lo que venden los demás o el total de la empresa", "Llenar o editar levantamientos", "Descontar más del límite sin aprobación", "Anular facturas"],
-    menu: ["/", "/oportunidades", "/cotizaciones", "/facturas", "/pagos", "/levantamientos", "/clientes", "/productos", "/ordenes", "/comisiones", "/archivo", "/ajustes"],
+    menu: ["/", "/oportunidades", "/cotizaciones", "/facturas", "/pagos", "/levantamientos", "/clientes", "/productos", "/inventario", "/ordenes", "/comisiones", "/archivo", "/ajustes"],
   },
   contabilidad: {
     label: "Contador", tone: "#6b46c1", glyph: "K",
@@ -47,9 +47,9 @@ export const ROLES: Record<string, RoleMeta> = {
   tecnico: {
     label: "Técnico instalador", tone: "#b45309", glyph: "T",
     summary: "Solo lo suyo, desde el celular: el trabajo del día, el levantamiento en sitio y la evidencia de la instalación.",
-    can: ["Ver sus órdenes de trabajo del día", "Llenar levantamientos técnicos en sitio", "Atender los tickets de soporte que le asignan", "Registrar material usado, horas, fotos y firma del cliente", "Registrar su tiempo por jornada en la orden", "Anotar los equipos que deja instalados"],
+    can: ["Ver sus órdenes de trabajo del día", "Llenar levantamientos técnicos en sitio", "Atender los tickets de soporte que le asignan", "Registrar material usado, horas, fotos y firma del cliente", "Registrar su tiempo por jornada en la orden", "Anotar los equipos que deja instalados", "Recibir equipos en garantía y hacer la revisión de Crimson"],
     cannot: ["Ver precios, costos ni montos", "Ver trabajos de otros técnicos", "Ver facturas, cobros o reportes"],
-    menu: ["/", "/ordenes-trabajo", "/levantamientos", "/tickets", "/mantenimientos", "/activos", "/inventario", "/ajustes"],
+    menu: ["/", "/ordenes-trabajo", "/levantamientos", "/tickets", "/garantias", "/mantenimientos", "/activos", "/inventario", "/ajustes"],
   },
   // Roles de empresa aliada: no entran al panel interno (sin `menu`): tienen su propio portal (modules/aliado, AllyShell)
   aliado: {
@@ -69,7 +69,7 @@ export const ROLES: Record<string, RoleMeta> = {
     summary: "Manda el campo: revisa levantamientos, asigna órdenes de trabajo, proyectos y materiales. El costeo es del administrador.",
     can: ["Asignar y programar órdenes de trabajo", "Revisar y aprobar levantamientos antes del costeo", "Bandeja de Aprobaciones: levantamientos por revisar y reservas de material", "Proyectos, activos del cliente y solicitudes de compra", "Toda la mesa de soporte y los mantenimientos", "Movimientos de inventario"],
     cannot: ["Ver costos o márgenes (salvo que el administrador lo habilite)", "Facturar o cobrar", "Ver planillas, gastos ni conciliación", "Configurar la empresa"],
-    menu: ["/", "/oportunidades", "/proyectos", "/ordenes-trabajo", "/levantamientos", "/aprobaciones", "/tickets", "/mantenimientos", "/activos", "/clientes", "/accesos-clientes", "/productos", "/inventario", "/compras", "/vehiculos", "/reportes", "/archivo", "/ajustes"],
+    menu: ["/", "/oportunidades", "/proyectos", "/ordenes-trabajo", "/levantamientos", "/aprobaciones", "/tickets", "/garantias", "/mantenimientos", "/activos", "/clientes", "/accesos-clientes", "/productos", "/inventario", "/compras", "/vehiculos", "/reportes", "/archivo", "/ajustes"],
   },
   caja: {
     label: "Caja", tone: "#0e9f6e", glyph: "C",
@@ -80,8 +80,8 @@ export const ROLES: Record<string, RoleMeta> = {
   inventario: {
     label: "Bodega", tone: "#b7791f", glyph: "B",
     summary: "Catálogo y existencias por ubicación. No ve ventas, clientes, costos ni dinero.",
-    can: ["Productos, variantes e imágenes (con precio de venta)", "Entradas, salidas y transferencias", "Reportes de inventario y movimientos"],
-    cannot: ["Ver el costo del proveedor o importar listas de proveedor (salvo que el administrador lo habilite)", "Ver ventas, clientes o cobros", "Ver contabilidad o planillas"],
+    can: ["Productos, variantes e imágenes (con precio de venta)", "Transferencias entre ubicaciones y series", "Reportes de inventario y movimientos"],
+    cannot: ["Ver el costo del proveedor o importar listas de proveedor (salvo que el administrador lo habilite)", "Hacer ajustes de inventario (solo vendedores y administrador)", "Ver ventas, clientes o cobros", "Ver contabilidad o planillas"],
   },
   lectura: {
     label: "Solo lectura", tone: "#6b6570", glyph: "L",

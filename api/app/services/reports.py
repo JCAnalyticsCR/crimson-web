@@ -358,7 +358,17 @@ def inventario(db: Session, tid: int, a: date, b: date) -> Report:
         p, w = prods.get(lv["product_id"]), whs.get(lv["warehouse_id"])
         if p:
             rows.append(
-                [p.code, p.name, w.name if w else "", lv["quantity"], p.min_stock, p.price, p.currency, "BAJO" if lv["quantity"] <= p.min_stock else "OK"]
+                [
+                    p.code,
+                    p.name,
+                    w.name if w else "",
+                    lv["quantity"],
+                    p.min_stock,
+                    p.price,
+                    p.currency,
+                    # revision y proveedor son equipos de clientes en garantia: no son existencia de venta
+                    ("BAJO" if lv["quantity"] <= p.min_stock else "OK") if (w is None or w.kind == "venta") else "Garantía",
+                ]
             )
     return Report("inventario", "Inventario", ["Código", "Producto", "Inventario", "Cantidad", "Mínimo", "Precio", "Divisa", "Alerta"], rows, {"n": len(rows)})
 

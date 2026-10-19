@@ -98,7 +98,7 @@ export default function Dashboard() {
         {allows("catalog.crear") && <Link className="action" to="/productos?nuevo=1"><i><Icon d={I.products} /></i><div><b>Crear producto</b><span>Precio, CABYS e impuesto</span></div></Link>}
         {allows("sales.crear") && <Link className="action" to="/cotizaciones/nueva"><i><Icon d={I.quote} /></i><div><b>Crear cotización</b><span>Y convertirla a factura en un clic</span></div></Link>}
         {allows("sales.crear") && !allows("catalog.crear") && inMenu("/pos") && <Link className="action" to="/pos"><i><Icon d={I.wallet} /></i><div><b>Punto de venta</b><span>Cobro de mostrador con vuelto</span></div></Link>}
-        {allows("inventory.crear") && <Link className="action" to="/inventario"><i><Icon d={I.inventory} /></i><div><b>Movimiento de inventario</b><span>Entradas, salidas y transferencias</span></div></Link>}
+        {allows("inventory.ajustar") && <Link className="action" to="/inventario"><i><Icon d={I.inventory} /></i><div><b>Ajuste de inventario</b><span>Entradas, salidas y transferencias</span></div></Link>}
         {allows("reports.ver") && <Link className="action" to="/reportes"><i><Icon d={I.reports} /></i><div><b>Reportes</b><span>Los reportes de tu rol, con Excel</span></div></Link>}
       </div>
 

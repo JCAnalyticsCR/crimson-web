@@ -228,7 +228,7 @@ def product_filters(p: Principal = Depends(require("catalog", "ver")), db: Sessi
         "warehouses": [
             {"id": w.id, "name": w.name}
             for w in db.scalars(
-                select(Warehouse).where(Warehouse.tenant_id == p.tenant.id, Warehouse.active).order_by(Warehouse.is_default.desc(), Warehouse.id)
+                select(Warehouse).where(Warehouse.tenant_id == p.tenant.id, Warehouse.active, Warehouse.kind == "venta").order_by(Warehouse.is_default.desc(), Warehouse.id)
             )
         ],
     }

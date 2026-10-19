@@ -36,6 +36,9 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         # desde la oportunidad (POST /opportunities/{id}/request-survey). Sin crear ni editar.
         "field": ["ver", "resumen"],
         "commissions": ["ver"],  # solo las suyas: sin ver_todo
+        # ajustes de inventario (entradas, salidas y ajustes manuales): solo vendedores y el administrador por ahora
+        # (Andres, 19/10). Ve las existencias sin costo; trasladar entre bodegas sigue siendo de bodega.
+        "inventory": ["ver", "ajustar"],
     },
     # Contador: todo el dinero de la empresa (gastos, conciliacion, planillas, reportes) sin configurar la empresa.
     # El costo de producto y el margen son del administrador (Ajustes -> Quien ve costos lo puede habilitar).
@@ -69,6 +72,8 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "projects": ["ver"],
         "assets": ["ver", "crear", "editar"],
         "support_desk": ["ver", "crear", "editar"],  # solo los suyos: sin ver_todo
+        # garantias: recibe el equipo y hace la revision previa de Crimson (Andres, 19/10)
+        "garantias": ["ver", "crear", "editar"],
     },
     # Aliado comercial (12:04-12:32): gerencia de una empresa aliada. Portal propio /aliado; nunca el panel interno.
     # Todo sale filtrado por TenantUser.ally_company_id (services/ally_scope.py). Ningun modulo interno: get_principal
@@ -105,6 +110,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "catalog": ["ver", "precios"],
         # aprobar_reserva: confirma reservas de material (AC25: ver existencia no es retirar)
         "inventory": ["ver", "crear", "editar", "exportar", "aprobar_reserva"],
+        "garantias": ["ver", "crear", "editar"],
         # revisar: aprueba o devuelve con observaciones lo que el tecnico envia, antes del costeo.
         # saltar_revision (cotizar sin revision aprobada) queda solo para admin ("*").
         "field": ["ver", "ver_todo", "crear", "editar", "asignar", "revisar"],
@@ -134,6 +140,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "dashboard": ["ver"],
         "catalog": ["ver", "precios", "crear", "editar"],
         "inventory": ["ver", "crear", "editar", "exportar"],
+        "garantias": ["ver"],  # ve donde esta cada equipo de garantia (bodegas de revision y del distribuidor)
         "reports": ["ver", "exportar"],
     },
     # Solo lectura (socio, auditor): ve ventas y cobros de la empresa sin modificar nada. Sin gastos, planillas

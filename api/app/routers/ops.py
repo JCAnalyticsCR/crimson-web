@@ -259,18 +259,22 @@ class WarehouseIn(BaseModel):
     location: str | None = None
     is_default: bool = False
     active: bool = True
+    # venta (se vende e instala) | revision (garantias en revision de Crimson) | proveedor (en el distribuidor)
+    kind: str = Field("venta", pattern="^(venta|revision|proveedor)$")
 
 
 @router.get("/warehouses")
 def warehouses(p: Principal = Depends(require("inventory", "ver")), db: Session = Depends(get_db)):
     return [
-        {"id": w.id, "name": w.name, "description": w.description, "location": w.location, "is_default": w.is_default, "active": w.active}
+        {"id": w.id, "name": w.name, "description": w.description, "location": w.location, "is_default": w.is_default, "active": w.active, "kind": w.kind}
         for w in db.scalars(select(Warehouse).where(Warehouse.tenant_id == p.tenant.id).order_by(Warehouse.is_default.desc(), Warehouse.id))
     ]
 
 
 @router.post("/warehouses", status_code=201)
 def warehouse_create(data: WarehouseIn, p: Principal = Depends(require("inventory", "crear")), db: Session = Depends(get_db)):
+    if data.is_default and data.kind != "venta":
+        raise HTTPException(422, "La bodega predeterminada tiene que ser de venta")
     if data.is_default:
         for w in db.scalars(select(Warehouse).where(Warehouse.tenant_id == p.tenant.id)):
             w.is_default = False
@@ -285,6 +289,8 @@ def warehouse_update(wid: int, data: WarehouseIn, p: Principal = Depends(require
     w = db.get(Warehouse, wid)
     if not w or w.tenant_id != p.tenant.id:
         raise HTTPException(404, "Inventario no encontrado")
+    if data.is_default and data.kind != "venta":
+        raise HTTPException(422, "La bodega predeterminada tiene que ser de venta")
     if data.is_default:
         for o in db.scalars(select(Warehouse).where(Warehouse.tenant_id == p.tenant.id)):
             o.is_default = False
@@ -343,7 +349,9 @@ class MoveIn(BaseModel):
 
 
 @router.post("/stock/movements", status_code=201)
-def stock_move(data: MoveIn, p: Principal = Depends(require("inventory", "crear")), db: Session = Depends(get_db)):
+def stock_move(data: MoveIn, p: Principal = Depends(require("inventory", "ajustar")), db: Session = Depends(get_db)):
+    """Entrada, salida o ajuste manual (sin documento que lo respalde): inventory.ajustar, que hoy tienen solo los
+    vendedores y el administrador (Andres, 19/10). Lo que nace de un documento (factura, compra, orden) no pasa por aca."""
     qty = abs(data.quantity) if data.kind == "entrada" else -abs(data.quantity) if data.kind == "salida" else data.quantity
     if data.project_id:
         from ..models import Project

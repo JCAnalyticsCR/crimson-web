@@ -26,6 +26,8 @@ export const NAV: NavGroup[] = [
   { group: "Técnico", items: [
     { to: "/levantamientos", label: "Levantamientos", icon: I.ruler, need: "field.ver" },
     { to: "/tickets", label: "Soporte", icon: I.life, need: "support_desk.ver" },
+    // revisión de Crimson -> distribuidor -> cliente (Andrés, 19/10)
+    { to: "/garantias", label: "Garantías", icon: I.shield, need: "garantias.ver" },
     { to: "/mantenimientos", label: "Mantenimientos", icon: I.refresh, need: "support_desk.ver" },
     { to: "/activos", label: "Activos del cliente", icon: I.shield, need: "assets.ver" },
   ]},

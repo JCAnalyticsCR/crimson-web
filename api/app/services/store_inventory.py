@@ -100,9 +100,13 @@ def settings_of(tenant: Tenant | None) -> dict:
 
 
 def web_warehouses(db: Session, tenant_id: int, cfg: dict) -> list[int]:
-    """Bodegas activas que alimentan la web, la predeterminada primero."""
+    """Bodegas de venta activas que alimentan la web, la predeterminada primero (revision y proveedor nunca)."""
     active = list(
-        db.scalars(select(Warehouse.id).where(Warehouse.tenant_id == tenant_id, Warehouse.active).order_by(Warehouse.is_default.desc(), Warehouse.id))
+        db.scalars(
+            select(Warehouse.id)
+            .where(Warehouse.tenant_id == tenant_id, Warehouse.active, Warehouse.kind == invsvc.SELLABLE)
+            .order_by(Warehouse.is_default.desc(), Warehouse.id)
+        )
     )
     chosen = {int(x) for x in (cfg.get("warehouse_ids") or [])}
     return [w for w in active if w in chosen] if chosen else active
@@ -497,8 +501,19 @@ def release_for_order(db: Session, o: Order, note: str | None = None, user_id: i
     for r in _order_reservations(db, o):
         r.status, r.closed_note = "cancelada", (note or f"Pedido {o.number} cancelado")[:300]
         n += 1
-    for req in db.scalars(select(PurchaseRequest).where(PurchaseRequest.order_id == o.id, PurchaseRequest.status == "borrador")):
-        req.status = "cancelada"
+    for req in db.scalars(select(PurchaseRequest).where(PurchaseRequest.order_id == o.id, PurchaseRequest.status.in_(("borrador", "solicitada", "recibida")))):
+        if req.status == "borrador":
+            req.status = "cancelada"
+            continue
+        # ya se le pidio (o ya llego) del proveedor: el proveedor casi nunca acepta devoluciones (Andres, 19/10), asi
+        # que la compra sigue y la mercaderia queda en la bodega de Crimson, a la venta
+        from .store_orders import _note
+
+        _note(
+            o,
+            user_id,
+            f"La compra {req.number} al proveedor ya estaba {'recibida' if req.status == 'recibida' else 'pedida'}: el producto queda en la bodega de Crimson, a la venta",
+        )
     if n:
         audit(db, o.tenant_id, user_id, "release", "order", o.id, {"reservas": n})
     return n

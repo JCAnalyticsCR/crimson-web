@@ -8,7 +8,8 @@ Revisa:
 - facturas (sueltas) cuyo kardex no coincide con sus lineas, o anuladas que no devolvieron;
 - proyectos donde lo que salio no es max(facturado, instalado);
 - pedidos web despachados que no sacaron todo, y cancelados/reembolsados con mercaderia afuera sin decidir
-  si volvio.
+  si volvio;
+- garantias cuyo kardex no coincide con su estado, y las abiertas hace mas de 30 dias.
 """
 
 from __future__ import annotations
@@ -20,13 +21,15 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import Invoice, InvoiceLine, Order, Product, Project, StockMovement, Tenant, Warehouse
+from ..models import Invoice, InvoiceLine, Order, Product, Project, StockMovement, Tenant, Warehouse, WarrantyCase
 from . import inventory as invsvc
 from . import project_stock, store_inventory
+from . import warranty as warsvc
 
 ZERO = Decimal(0)
 DAYS = 180  # ventana de documentos que se revisan (lo viejo ya se reviso o se conto)
 NO_DEVUELTO = "Producto no devuelto"
+WARRANTY_MAX_DAYS = 30  # una garantia abierta mas de un mes se avisa (el cliente esta sin su equipo)
 
 
 def _d(v) -> Decimal:
@@ -165,6 +168,38 @@ def check(db: Session, tenant_id: int, days: int = DAYS) -> dict:
                         }
                     )
 
+    # 5) garantias abiertas (o cerradas en la ventana)
+    now = datetime.now(UTC)
+    for c in db.scalars(select(WarrantyCase).where(WarrantyCase.tenant_id == tenant_id)):
+        closed = c.closed_at.replace(tzinfo=UTC) if c.closed_at and c.closed_at.tzinfo is None else c.closed_at
+        if c.status not in warsvc.OPEN and closed and closed.date() < since:
+            continue
+        want, have = warsvc.targets(db, c), warsvc.moved(db, c)
+        for key in sorted(set(want) | set(have)):
+            if want.get(key, ZERO) != have.get(key, ZERO):
+                issues.append(
+                    {
+                        "kind": "garantia",
+                        "ref_id": c.id,
+                        "doc": f"Garantía {c.number}",
+                        "product": name(key[0]),
+                        "detail": f"{warsvc.STATE_LABEL[c.status]}: en {whs.get(key[1], 'la bodega')} debería haber {_fmt(want.get(key, ZERO))} y el kardex registra {_fmt(have.get(key, ZERO))}",
+                        "fixable": True,
+                    }
+                )
+        created = c.created_at.replace(tzinfo=UTC) if c.created_at and c.created_at.tzinfo is None else c.created_at
+        if c.status in warsvc.OPEN and created and (now - created).days > WARRANTY_MAX_DAYS:
+            issues.append(
+                {
+                    "kind": "garantia_vieja",
+                    "ref_id": c.id,
+                    "doc": f"Garantía {c.number}",
+                    "product": c.equipment,
+                    "detail": f"{warsvc.STATE_LABEL[c.status]} hace {(now - created).days} días: el cliente sigue sin su equipo",
+                    "fixable": False,
+                }
+            )
+
     counts: dict[str, int] = {}
     for i in issues:
         counts[i["kind"]] = counts.get(i["kind"], 0) + 1
@@ -188,4 +223,9 @@ def fix(db: Session, tenant: Tenant, kind: str, ref_id: int, user_id: int | None
         if not o or o.tenant_id != tenant.id:
             raise HTTPException(404, "Pedido no encontrado")
         return store_inventory.fulfill_for_order(db, o, user_id)
+    if kind == "garantia":
+        c = db.get(WarrantyCase, ref_id)
+        if not c or c.tenant_id != tenant.id:
+            raise HTTPException(404, "Garantía no encontrada")
+        return warsvc.reconcile(db, c, user_id, "corregido desde salud del inventario")
     raise HTTPException(422, "Ese descuadre se resuelve a mano (ajuste o decisión sobre la devolución)")

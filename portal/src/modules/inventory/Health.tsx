@@ -4,13 +4,14 @@ import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, I, Icon, Loading } from "../../ui/components";
 
-type Issue = { kind: "negativo" | "factura" | "proyecto" | "pedido" | "pedido_sin_decidir"; ref_id: number; doc: string; product: string; detail: string; fixable: boolean };
+type Issue = { kind: "negativo" | "factura" | "proyecto" | "pedido" | "pedido_sin_decidir" | "garantia" | "garantia_vieja"; ref_id: number; doc: string; product: string; detail: string; fixable: boolean };
 type HealthData = { checked_at: string; days: number; total: number; counts: Record<string, number>; issues: Issue[] };
 
 const KIND_LABEL: Record<Issue["kind"], string> = {
   negativo: "Existencias negativas", factura: "Facturas", proyecto: "Proyectos", pedido: "Pedidos web", pedido_sin_decidir: "Devoluciones sin decidir",
+  garantia: "Garantías", garantia_vieja: "Garantías de más de 30 días",
 };
-const KIND_ORDER: Issue["kind"][] = ["negativo", "factura", "proyecto", "pedido", "pedido_sin_decidir"];
+const KIND_ORDER: Issue["kind"][] = ["negativo", "factura", "proyecto", "pedido", "pedido_sin_decidir", "garantia", "garantia_vieja"];
 
 export default function Health() {
   const { toast, allows } = useSession();
@@ -68,7 +69,7 @@ export default function Health() {
                     <td className="num" style={{ whiteSpace: "nowrap" }}>
                       {iss.fixable && allows("inventory.editar")
                         ? <button className="btn btn--soft btn--sm" disabled={busy === iss.ref_id} onClick={() => fix(iss)}>{busy === iss.ref_id ? "Corrigiendo…" : "Corregir"}</button>
-                        : <span className="muted" style={{ fontSize: 12.5 }}>{iss.kind === "negativo" ? "Revisá con un conteo o un ajuste" : iss.kind === "pedido_sin_decidir" ? "Decidí en el pedido si volvió" : null}</span>}
+                        : <span className="muted" style={{ fontSize: 12.5 }}>{iss.kind === "negativo" ? "Revisá con un conteo o un ajuste" : iss.kind === "pedido_sin_decidir" ? "Decidí en el pedido si volvió" : iss.kind === "garantia_vieja" ? "Dale seguimiento en Garantías" : null}</span>}
                     </td>
                   </tr>
                 ))}</tbody>

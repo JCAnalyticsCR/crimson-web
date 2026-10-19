@@ -12,7 +12,9 @@ import SupplierCatalog from "./SupplierCatalog";
 import Kardex, { type KardexProduct } from "./Kardex";
 import Health from "./Health";
 
-type Wh = { id: number; name: string; location: string | null; is_default: boolean; active: boolean };
+type Wh = { id: number; name: string; location: string | null; is_default: boolean; active: boolean; kind?: "venta" | "revision" | "proveedor" };
+/* revisión y distribuidor: equipos de clientes en garantía; nunca se venden ni cuentan para el mínimo */
+const WH_KIND: Record<string, string> = { venta: "Venta", revision: "Revisión de garantías", proveedor: "En el distribuidor" };
 type Level = { product_id: number; warehouse_id: number; quantity: string; code: string; name: string; min_stock: number; warehouse: string; committed?: string; available?: string; serialized?: boolean };
 type Low = { product_id: number; code: string; name: string; quantity: string; min_stock: number };
 type ProjectLite = { id: number; number: string; name: string };
@@ -61,7 +63,7 @@ export default function Inventory() {
   const [mv, setMv] = useState(emptyMv);
   const [mvMore, setMvMore] = useState(false);
   const [tr, setTr] = useState({ product_id: "", from_id: "", to_id: "", quantity: "1" });
-  const [wh, setWh] = useState({ name: "", location: "", is_default: false });
+  const [wh, setWh] = useState({ name: "", location: "", is_default: false, kind: "venta" });
   // ?stock=bajo llega desde "Productos con stock bajo" del inicio: la tabla muestra solo esos productos
   const onlyLow = params.get("stock") === "bajo";
   const lowIds = new Set(low.map((l) => l.product_id));
@@ -99,9 +101,10 @@ export default function Inventory() {
       <div className="page-head">
         <div><div className="meta">06 · Inventarios</div><h1 className="h1">Inventarios</h1></div>
         <div className="page-head__actions">
-          <button className="btn btn--ghost btn--sm" onClick={() => setModal("wh")}><Icon d={I.plus} />Ubicación</button>
-          <button className="btn btn--soft btn--sm" onClick={() => setModal("transfer")}><Icon d={I.arrow} />Transferir</button>
-          <button className="btn btn--crimson" onClick={() => setModal("move")}><Icon d={I.plus} />Movimiento</button>
+          {allows("inventory.crear") && <button className="btn btn--ghost btn--sm" onClick={() => setModal("wh")}><Icon d={I.plus} />Ubicación</button>}
+          {allows("inventory.crear") && <button className="btn btn--soft btn--sm" onClick={() => setModal("transfer")}><Icon d={I.arrow} />Transferir</button>}
+          {/* entradas, salidas y ajustes manuales: solo vendedores y administrador (Andrés, 19/10) */}
+          {allows("inventory.ajustar") && <button className="btn btn--crimson" onClick={() => setModal("move")}><Icon d={I.plus} />Ajuste de inventario</button>}
         </div>
       </div>
 
@@ -111,7 +114,7 @@ export default function Inventory() {
 
       {tab === "existencias" && <>
         <div className="pending">
-          {whs.map((w) => <div key={w.id} className={filter === w.id ? "hot" : ""} onClick={() => setFilter(filter === w.id ? "" : w.id)} style={{ cursor: "pointer" }}><b>{levels.filter((l) => l.warehouse_id === w.id).reduce((a, l) => a + Number(l.quantity), 0)}</b><span>{w.name}{w.is_default ? " · predeterminada" : ""}{w.location ? ` · ${w.location}` : ""}</span></div>)}
+          {whs.map((w) => <div key={w.id} className={filter === w.id ? "hot" : ""} onClick={() => setFilter(filter === w.id ? "" : w.id)} style={{ cursor: "pointer" }}><b>{levels.filter((l) => l.warehouse_id === w.id).reduce((a, l) => a + Number(l.quantity), 0)}</b><span>{w.name}{w.is_default ? " · predeterminada" : ""}{w.kind && w.kind !== "venta" ? ` · ${WH_KIND[w.kind]} (no se vende)` : ""}{w.location ? ` · ${w.location}` : ""}</span></div>)}
           <div><b>{total}</b><span>Unidades {filter ? "en la ubicación" : "totales"}</span></div>
           <div><b>{comprometido}</b><span>Comprometidas en reservas</span></div>
           <div className={low.length ? "hot" : ""}><b>{low.length}</b><span>Productos bajo mínimo</span></div>
@@ -188,7 +191,8 @@ export default function Inventory() {
         <Modal title="Nueva ubicación" onClose={() => setModal(null)} foot={<><button className="btn btn--ghost" onClick={() => setModal(null)}>Cancelar</button><button className="btn btn--crimson" onClick={submit}>Crear</button></>}>
           <Field label="Nombre"><input className="input" value={wh.name} onChange={(e) => setWh({ ...wh, name: e.target.value })} /></Field>
           <Field label="Localización"><input className="input" value={wh.location} onChange={(e) => setWh({ ...wh, location: e.target.value })} /></Field>
-          <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={wh.is_default} onChange={(e) => setWh({ ...wh, is_default: e.target.checked })} />Predeterminada (las ventas descuentan de aquí)</label>
+          <Field label="Tipo" hint="Revisión y distribuidor guardan equipos de clientes en garantía: no se venden."><select className="select" value={wh.kind} onChange={(e) => setWh({ ...wh, kind: e.target.value, is_default: e.target.value === "venta" ? wh.is_default : false })}>{Object.entries(WH_KIND).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
+          {wh.kind === "venta" && <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={wh.is_default} onChange={(e) => setWh({ ...wh, is_default: e.target.checked })} />Predeterminada (las ventas descuentan de aquí)</label>}
         </Modal>
       )}
     </>

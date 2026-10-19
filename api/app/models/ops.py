@@ -19,6 +19,10 @@ class Warehouse(TenantMixin, Base):
     location: Mapped[str | None] = mapped_column(String(160))
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # venta: lo que se vende y se instala (tienda, facturas, proyectos) | revision: equipos de clientes que Crimson
+    # revisa antes de mandar a garantia | proveedor: equipos que estan en el taller del distribuidor. Lo que esta en
+    # revision o en el proveedor nunca se vende ni cuenta como existencia disponible.
+    kind: Mapped[str] = mapped_column(String(12), default="venta", server_default="venta")
 
 
 class StockMovement(TenantMixin, Base):
@@ -49,6 +53,8 @@ class StockMovement(TenantMixin, Base):
     location: Mapped[str | None] = mapped_column(String(160))  # sub-ubicacion: estante, rack, vehiculo
     # salida por un pedido (tienda): evita descontar dos veces entre despacho y factura
     order_id: Mapped[int | None] = mapped_column(ForeignKey("order.id", name="fk_stock_movement_order"), index=True)
+    # movimiento de una garantia (services/warranty.py concilia el caso contra estas filas)
+    warranty_id: Mapped[int | None] = mapped_column(ForeignKey("warranty_case.id", name="fk_stock_movement_warranty"), index=True)
 
 
 MOVEMENT_TYPES = (
@@ -61,6 +67,7 @@ MOVEMENT_TYPES = (
     "devolucion",
     "ajuste",
     "traslado",
+    "garantia",
 )
 
 

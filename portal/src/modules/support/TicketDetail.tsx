@@ -122,6 +122,8 @@ export function TicketDetail({ ticket: t, meta, now, onClose, onChanged, onEdit,
         <span style={{ marginRight: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
           {allows("field.asignar") && !t.work_order_id && abierto && !bloqueado && <button className="btn btn--soft" onClick={() => setVisita({ technician_id: "", scheduled_at: "", site: "" })}><Icon d={I.check} />Mandar un técnico</button>}
           {t.work_order_id && <Link className="btn btn--ghost" to={`/ordenes-trabajo?id=${t.work_order_id}`}>Ver la orden</Link>}
+          {/* garantía: Crimson recibe el equipo, lo revisa y, si procede, lo manda al distribuidor (Andrés, 19/10) */}
+          {t.customer_id && allows("garantias.ver") && <Link className="btn btn--ghost" to={`/garantias?ticket=${t.id}`}><Icon d={I.shield} />Garantía</Link>}
         </span>
         {canEdit && !bloqueado && <button className="btn btn--ghost" onClick={() => onEdit(t)}>Editar</button>}
         {canEdit && !bloqueado && abierto && <button className="btn btn--crimson" onClick={() => setCerrar(nuevoResolver())}>Resolver</button>}

@@ -70,6 +70,7 @@ from .support import (
     MaintenanceContract,
     SupportNote,
     SupportTicket,
+    WarrantyCase,
 )
 from .vehicles import FuelLoad, Vehicle, VehicleCost
 
@@ -160,6 +161,7 @@ __all__ = [
     "PurchaseRequest",
     "PurchaseRequestLine",
     "SupportTicket",
+    "WarrantyCase",
     "SupportNote",
     "MaintenanceContract",
     "CommissionRule",
