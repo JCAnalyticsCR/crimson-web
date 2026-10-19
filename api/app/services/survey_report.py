@@ -34,7 +34,7 @@ LABOR_LABELS = {"tecnico": "Personal técnico", "civil": "Personal de obra civil
 TEMPLATE = env.from_string("""<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Informe preliminar {{ s.number }}</title>
 <style>
 @page { size: Letter; margin: 16mm 14mm 18mm; @bottom-center { content: "Documento preliminar, no constituye cotización · pág. " counter(page) " de " counter(pages); font-size: 9px; color: #8a858f; } }
-body{font-family:Manrope,"Segoe UI",Arial,sans-serif;color:#15131a;font-size:12px;line-height:1.45;margin:0}
+body{font-family:Arial,Helvetica,sans-serif;color:#15131a;font-size:12px;line-height:1.45;margin:0}
 .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #e2233a;padding-bottom:14px;margin-bottom:16px}
 .brand b{font-size:20px;letter-spacing:-.02em;display:block}.brand span{color:#5a5560;font-size:11px}
 .docid{text-align:right}.k{font-family:Consolas,monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:#8a858f}

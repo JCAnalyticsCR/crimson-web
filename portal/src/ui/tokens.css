@@ -1,13 +1,6 @@
 /* Sistema de diseno del portal Crimson · derivado de la landing ("sala de monitoreo").
    Tokens en :root (claro) y en [data-theme=dark]. Nada de Fygaro: solo comportamiento. */
 
-@font-face { font-family: "Bricolage Grotesque"; src: url(/fonts/BricolageGrotesque-var.woff2) format("woff2"); font-weight: 200 800; font-display: swap; }
-@font-face { font-family: Manrope; src: url(/fonts/Manrope-400.woff2) format("woff2"); font-weight: 400; font-display: swap; }
-@font-face { font-family: Manrope; src: url(/fonts/Manrope-500.woff2) format("woff2"); font-weight: 500; font-display: swap; }
-@font-face { font-family: Manrope; src: url(/fonts/Manrope-600.woff2) format("woff2"); font-weight: 600; font-display: swap; }
-@font-face { font-family: Manrope; src: url(/fonts/Manrope-700.woff2) format("woff2"); font-weight: 700; font-display: swap; }
-@font-face { font-family: "JetBrains Mono"; src: url(/fonts/JetBrainsMono-500.woff2) format("woff2"); font-weight: 500; font-display: swap; }
-
 :root {
   /* marca */
   --crimson: #e2233a;
@@ -44,9 +37,9 @@
   --shadow: 0 10px 30px -18px rgba(21, 19, 26, 0.35);
   --shadow-lg: 0 30px 60px -30px rgba(21, 19, 26, 0.45);
 
-  --sans: Manrope, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --display: "Bricolage Grotesque", Manrope, system-ui, sans-serif;
-  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  --sans: Arial, Helvetica, sans-serif;
+  --display: Arial, Helvetica, sans-serif;
+  --mono: Arial, Helvetica, sans-serif;
 
   --r-sm: 8px; --r: 12px; --r-lg: 16px; --r-xl: 20px;
   --nav-w: 248px;

@@ -194,15 +194,15 @@ function Comprobante({ o }: { o: PedidoGes }) {
         <rect x="1" y="1" width="278" height="358" rx="14" fill="#fff" stroke="#15131a" strokeOpacity=".18" />
         <rect x="1" y="1" width="278" height="64" rx="14" fill="#15131a" />
         <rect x="1" y="50" width="278" height="15" fill="#15131a" />
-        <text x="20" y="30" fill="#f4f1ee" fontFamily="JetBrains Mono, monospace" fontSize="10" letterSpacing="1.4">BANCO DE EJEMPLO</text>
-        <text x="20" y="50" fill="#fff" fontFamily="Manrope, sans-serif" fontSize="15" fontWeight="700">{o.pago.kind === "transferencia" ? "Transferencia enviada" : "SINPE Móvil enviado"}</text>
+        <text x="20" y="30" fill="#f4f1ee" fontFamily="Arial, Helvetica, sans-serif" fontSize="10" letterSpacing="1.4">BANCO DE EJEMPLO</text>
+        <text x="20" y="50" fill="#fff" fontFamily="Arial, Helvetica, sans-serif" fontSize="15" fontWeight="700">{o.pago.kind === "transferencia" ? "Transferencia enviada" : "SINPE Móvil enviado"}</text>
         <circle cx="140" cy="108" r="22" fill="#157a41" />
         <path d="M129 108l7 7 14-14" stroke="#fff" strokeWidth="3.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-        <text x="140" y="164" textAnchor="middle" fill="#15131a" fontFamily="Bricolage Grotesque, Manrope, sans-serif" fontSize="28" fontWeight="700">{colones(o.total)}</text>
+        <text x="140" y="164" textAnchor="middle" fill="#15131a" fontFamily="Arial, Helvetica, sans-serif" fontSize="28" fontWeight="700">{colones(o.total)}</text>
         {[["Para", "Crimson (ejemplo)"], ["Detalle", o.numero], ["Referencia", `EJ-${o.numero.replace(/\D/g, "").slice(-4)}-0001`], ["Fecha", p ? cuando(p.at) : "—"]].map(([k, v], i) => (
           <g key={k}>
-            <text x="20" y={206 + i * 34} fill="#6f6a74" fontFamily="JetBrains Mono, monospace" fontSize="9.5" letterSpacing="1.2">{k.toUpperCase()}</text>
-            <text x="20" y={222 + i * 34} fill="#15131a" fontFamily="Manrope, sans-serif" fontSize="13" fontWeight="600">{v}</text>
+            <text x="20" y={206 + i * 34} fill="#6f6a74" fontFamily="Arial, Helvetica, sans-serif" fontSize="9.5" letterSpacing="1.2">{k.toUpperCase()}</text>
+            <text x="20" y={222 + i * 34} fill="#15131a" fontFamily="Arial, Helvetica, sans-serif" fontSize="13" fontWeight="600">{v}</text>
           </g>
         ))}
       </svg>

@@ -117,7 +117,7 @@ function Personalizacion({ cfg, setCfg, guardar }: { cfg: Datos["cfg"]; setCfg: 
   const [s, setS] = useState(cfg.secondary);
   useEffect(() => { setP(cfg.primary); setS(cfg.secondary); }, [cfg.primary, cfg.secondary]);
   const color = (v: string, local: (x: string) => void, k: "primary" | "secondary") => { local(v); if (HEX.test(v)) setCfg({ [k]: v.toLowerCase() }); };
-  const fuente = cfg.font === "Bricolage Grotesque" ? '"Bricolage Grotesque", Manrope, sans-serif' : cfg.font === "Manrope" ? "Manrope, system-ui, sans-serif" : `"${cfg.font}", system-ui, sans-serif`;
+  const fuente = "Arial, Helvetica, sans-serif"; // toda la tienda en Arial
   return (
     <div className="ges-mt-dos">
       <section className="card ges-card" aria-labelledby="ges-mt-p">
@@ -132,7 +132,7 @@ function Personalizacion({ cfg, setCfg, guardar }: { cfg: Datos["cfg"]; setCfg: 
             <span className="ges-color"><input type="color" value={HEX.test(s) ? s : cfg.secondary} onChange={(e) => color(e.target.value, setS, "secondary")} aria-label="Elegir color secundario" /><input className="input input--mono ges-left" value={s} onChange={(e) => color(e.target.value, setS, "secondary")} aria-invalid={!HEX.test(s) || undefined} spellCheck={false} /></span>
           </Campo>
           <Campo label="Tipo de tienda" hint="Catálogo muestra productos; Tienda agrega carrito y pago en línea."><select className="select" value={cfg.kind} onChange={(e) => setCfg({ kind: e.target.value })}><option value="catalogo">Catálogo</option><option value="tienda">Tienda (carrito)</option></select></Campo>
-          <Campo label="Tipografía"><select className="select" value={cfg.font} onChange={(e) => setCfg({ font: e.target.value })}>{["Manrope", "Bricolage Grotesque", "Sora", "Space Grotesk"].map((f) => <option key={f}>{f}</option>)}</select></Campo>
+          <Campo label="Tipografía"><select className="select" value={cfg.font} onChange={(e) => setCfg({ font: e.target.value })}>{["Arial"].map((f) => <option key={f}>{f}</option>)}</select></Campo>
           <Campo label="Moneda de la tienda"><select className="select" value={cfg.currency} onChange={(e) => setCfg({ currency: e.target.value })}><option value="CRC">Colones (₡)</option><option value="USD">Dólares ($)</option></select></Campo>
           <Campo label="Dominio" hint="Propio: apuntar un CNAME al portal."><input className="input" value={cfg.domain} onChange={(e) => setCfg({ domain: e.target.value })} /></Campo>
         </div>

@@ -10,11 +10,11 @@
   --crimson:#e2233a; --crimson-dark:#c41a2f; --crimson-soft:rgba(226,35,58,.18); --white:#f4f1ee;
   --ok:#1fa35a;
   /* Tipografia de titulares: sans geometrica, sin cursivas. ?font=space|bricolage|syne para comparar; Sora por defecto */
-  --serif:'Bricolage Grotesque','Segoe UI',system-ui,sans-serif;--dw:700;
-  --sans:Manrope,system-ui,-apple-system,sans-serif;
-  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --serif:Arial, Helvetica, sans-serif;--dw:700;
+  --sans:Arial, Helvetica, sans-serif;
+  --mono:Arial, Helvetica, sans-serif;
 
-  --fs-display:clamp(48px,8.4vw,140px);
+  --fs-display:Arial, Helvetica, sans-serif;
   --fs-d2:clamp(36px,4vw,64px);
   --fs-d3:clamp(26px,2.2vw,34px);
   --fs-lead:clamp(17px,1.25vw,20px);
@@ -46,9 +46,9 @@ ul,ol{list-style:none}
 /* ---------- Tipografía: tres voces ---------- */
 .meta{font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.14em;text-transform:uppercase;font-weight:500;font-variant-numeric:tabular-nums;color:var(--muted)}
 .eyebrow{font-family:var(--mono);font-size:var(--fs-meta);letter-spacing:.22em;text-transform:uppercase;color:var(--crimson);font-weight:500}
-html[data-font=space]{--serif:'Space Grotesk','Segoe UI',system-ui,sans-serif;--dw:700}
-html[data-font=sora]{--serif:'Sora','Segoe UI',system-ui,sans-serif;--dw:700}
-html[data-font=syne]{--serif:'Syne','Segoe UI',system-ui,sans-serif;--dw:800}
+html[data-font=space]{--serif:Arial, Helvetica, sans-serif;--dw:700}
+html[data-font=sora]{--serif:Arial, Helvetica, sans-serif;--dw:700}
+html[data-font=syne]{--serif:Arial, Helvetica, sans-serif;--dw:800}
 .display{font-family:var(--serif);font-weight:var(--dw);font-size:var(--fs-display);line-height:.98;letter-spacing:-.03em;text-wrap:balance;hanging-punctuation:first}
 .display-2{font-family:var(--serif);font-weight:var(--dw);font-size:var(--fs-d2);line-height:1;letter-spacing:-.02em;text-wrap:balance}
 .display em,.display-2 em{color:var(--crimson);font-style:normal}
@@ -180,7 +180,7 @@ img[data-lqip].is-loaded{}
 .hero__aside,.hero__index{opacity:0;animation:rise 900ms var(--ease-enter) both}
 .hero__aside{animation-delay:.4s}.hero__index{animation-delay:.6s}
 /* Portatiles: el titular cede para que los CTA entren en la primera vista */
-@media (min-width:768px) and (max-height:900px){.hero{--fs-display:clamp(44px,6.4vw,104px)}.hero .lead{font-size:17px}}
+@media (min-width:768px) and (max-height:900px){.hero{--fs-display:Arial, Helvetica, sans-serif}.hero .lead{font-size:17px}}
 @keyframes rise{to{opacity:1;transform:none}}
 
 /* Red animada (SVG generado en JS) */
@@ -560,7 +560,7 @@ section{padding:var(--space) var(--pad)}
   .ruta__card{margin-top:0;gap:8px}
   .ruta__card h3{font-size:19px}
   .porque__head{display:flex;flex-direction:column;align-items:stretch;gap:16px}.porque__grid{grid-template-columns:1fr;gap:28px}.radar__scope{max-width:340px}.radar__lbl{display:none}.radar__legend{display:flex}.radar__readout{display:flex}.ficha__rows{padding:4px 16px}.ficha__rows li{grid-template-columns:36px 1fr;gap:10px 12px;padding:14px 0}.ficha__n{display:none}.ficha__ico{width:36px;height:36px}.ficha__ico svg{width:18px;height:18px}.ficha__ok{display:none}.ficha__head{padding:14px 16px}.ficha__head>span:last-child{display:none}.ficha__claim{padding:10px 16px 14px}.prensa{grid-template-columns:1fr;gap:18px;padding:16px}.aliado{flex-direction:column;align-items:flex-start;gap:12px}
-  :root{--pad:20px;--space:52px;--fs-display:44px;--fs-d2:36px;--fs-d3:26px;--fs-lead:16px}
+  :root{--pad:20px;--space:52px;--fs-display:Arial, Helvetica, sans-serif;--fs-d2:36px;--fs-d3:26px;--fs-lead:16px}
   html{-webkit-tap-highlight-color:transparent}
   .only-mobile{display:inline-flex!important}
   .hide-mobile{display:none!important}
@@ -698,7 +698,7 @@ section{padding:var(--space) var(--pad)}
   .footer__bottom div{gap:16px}
 }
 @media (max-width:380px){
-  :root{--fs-display:40px;--fs-d2:33px}
+  :root{--fs-display:Arial, Helvetica, sans-serif;--fs-d2:33px}
   .stats b{font-size:44px}
 }
 

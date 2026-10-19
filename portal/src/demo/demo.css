@@ -8,7 +8,7 @@ html.demo-on body { padding-top: var(--demo-h); background: var(--demo-cream); }
   position: fixed; top: 0; left: 0; right: 0; height: var(--demo-h); z-index: 100;
   display: flex; align-items: center; gap: 10px; padding: 0 max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left));
   background: var(--demo-ink); color: rgba(244, 241, 238, .82); border-bottom: 1px solid rgba(255, 255, 255, .08);
-  font: 500 10px/1 "JetBrains Mono", ui-monospace, Consolas, monospace; letter-spacing: .12em; text-transform: uppercase;
+  font: 500 10px/1 Arial, Helvetica, sans-serif; letter-spacing: .12em; text-transform: uppercase;
   white-space: nowrap;
 }
 /* el texto nunca se corta a media palabra: «● Vista previa» siempre entero; con los chips de la capa abiertos, el texto
@@ -28,11 +28,11 @@ html.demo-on body { padding-top: var(--demo-h); background: var(--demo-cream); }
 .demo-guia {
   position: relative; flex: none; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px 0 9px; border: 0; border-radius: 999px;
   cursor: pointer; background: transparent; color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .25);
-  font: 700 12.5px/1 Manrope, system-ui, sans-serif; letter-spacing: 0; text-transform: none; white-space: nowrap;
+  font: 700 12.5px/1 Arial, Helvetica, sans-serif; letter-spacing: 0; text-transform: none; white-space: nowrap;
 }
 .demo-guia::before { content: ""; position: absolute; inset: -4px 0; } /* zona tactil de 40 px */
 .demo-guia svg { width: 15px; height: 15px; flex: none; fill: none; stroke: #ff5a6e; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.demo-guia small { font: 500 10.5px/1 "JetBrains Mono", ui-monospace, monospace; color: #b9b5b0; }
+.demo-guia small { font: 500 10.5px/1 Arial, Helvetica, sans-serif; color: #b9b5b0; }
 .demo-guia:focus-visible { outline: 2px solid #ff5a6e; outline-offset: 2px; }
 @media (hover: hover) { .demo-guia:hover { box-shadow: inset 0 0 0 1px #fff; } }
 @media (max-width: 399px) { .demo-guia small { display: none; } .demo-guia { padding: 0 10px 0 8px; } }
@@ -50,7 +50,7 @@ html.demo-on .shop { min-height: calc(100dvh - var(--demo-h)); }
 .demo-credit {
   display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: space-between; align-items: center;
   padding: 14px max(16px, 4vw) calc(14px + env(safe-area-inset-bottom)); background: var(--demo-ink); color: rgba(244, 241, 238, .6);
-  font: 400 12px/1.5 Manrope, system-ui, sans-serif; border-top: 1px solid rgba(255, 255, 255, .08);
+  font: 400 12px/1.5 Arial, Helvetica, sans-serif; border-top: 1px solid rgba(255, 255, 255, .08);
 }
 .demo-credit span:first-child { max-width: 72ch; }
 .demo-credit__mas a { margin: 0 2px; }
@@ -66,28 +66,28 @@ html.demo-on.cap-con-control .demo-credit, html.demo-on:has(.lqv-barra) .demo-cr
 .demo-notice__card {
   width: min(440px, 100%); background: #fff; color: var(--demo-ink); border-radius: 12px; padding: 22px 22px 18px;
   display: grid; gap: 10px; box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .6); border-top: 3px solid var(--demo-crimson);
-  font-family: Manrope, system-ui, sans-serif;
+  font-family: Arial, Helvetica, sans-serif;
 }
-.demo-notice__eyebrow { font: 500 10.5px/1 "JetBrains Mono", ui-monospace, monospace; letter-spacing: .18em; text-transform: uppercase; color: var(--demo-crimson); }
-.demo-notice h2 { font: 700 21px/1.15 "Bricolage Grotesque", Manrope, sans-serif; letter-spacing: -.02em; margin: 0; }
+.demo-notice__eyebrow { font: 500 10.5px/1 Arial, Helvetica, sans-serif; letter-spacing: .18em; text-transform: uppercase; color: var(--demo-crimson); }
+.demo-notice h2 { font: 700 21px/1.15 Arial, Helvetica, sans-serif; letter-spacing: -.02em; margin: 0; }
 .demo-notice p { margin: 0; color: #5a5560; font-size: 14.5px; line-height: 1.55; }
 .demo-notice__btn {
   justify-self: end; margin-top: 4px; min-height: 44px; padding: 0 22px; border: 0; border-radius: 999px; cursor: pointer;
-  background: var(--demo-ink); color: #fff; font: 700 14px Manrope, system-ui, sans-serif;
+  background: var(--demo-ink); color: #fff; font: 700 14px Arial, Helvetica, sans-serif;
 }
 .demo-notice__btn:focus-visible { outline: 2px solid var(--demo-crimson); outline-offset: 3px; }
 
 /* ---------- candado de entrada (respaldo) ---------- */
 .demo-gate {
   min-height: calc(100dvh - var(--demo-h, 0px)); display: grid; place-items: center; padding: 24px 16px;
-  background: radial-gradient(120% 70% at 50% 0%, #fff 0%, var(--demo-cream) 60%); color: var(--demo-ink); font-family: Manrope, system-ui, sans-serif;
+  background: radial-gradient(120% 70% at 50% 0%, #fff 0%, var(--demo-cream) 60%); color: var(--demo-ink); font-family: Arial, Helvetica, sans-serif;
 }
 html:not(.demo-on) body:has(.demo-gate) { padding-top: 0; }
 .demo-gate__card { width: min(400px, 100%); display: grid; gap: 12px; justify-items: center; text-align: center; }
 .demo-gate__card img { height: 42px; width: auto; margin-bottom: 12px; }
-.demo-gate__eyebrow { display: inline-flex; align-items: center; gap: 8px; font: 500 11px/1 "JetBrains Mono", ui-monospace, monospace; letter-spacing: .2em; text-transform: uppercase; color: var(--demo-crimson); }
+.demo-gate__eyebrow { display: inline-flex; align-items: center; gap: 8px; font: 500 11px/1 Arial, Helvetica, sans-serif; letter-spacing: .2em; text-transform: uppercase; color: var(--demo-crimson); }
 .demo-gate__eyebrow i { width: 7px; height: 7px; border-radius: 50%; background: var(--demo-crimson); }
-.demo-gate h1 { font: 700 clamp(26px, 6vw, 32px)/1.1 "Bricolage Grotesque", Manrope, sans-serif; letter-spacing: -.02em; margin: 0; }
+.demo-gate h1 { font: 700 clamp(26px, 6vw, 32px)/1.1 Arial, Helvetica, sans-serif; letter-spacing: -.02em; margin: 0; }
 .demo-gate p { margin: 0; color: #5a5560; font-size: 14.5px; line-height: 1.55; max-width: 34ch; }
 .demo-gate__pin { position: relative; width: 248px; height: 64px; margin-top: 10px; }
 .demo-gate__pin input {
@@ -108,7 +108,7 @@ html:not(.demo-on) body:has(.demo-gate) { padding-top: 0; }
 .demo-gate__msg { min-height: 22px; color: var(--demo-crimson) !important; font-weight: 600; font-size: 13.5px !important; }
 .demo-gate__btn {
   min-height: 48px; width: 248px; border: 0; border-radius: 999px; cursor: pointer; background: var(--demo-crimson); color: #fff;
-  font: 700 15px Manrope, system-ui, sans-serif; transition: opacity 200ms;
+  font: 700 15px Arial, Helvetica, sans-serif; transition: opacity 200ms;
 }
 .demo-gate__btn:disabled { opacity: .4; cursor: default; }
 .demo-gate__btn:focus-visible { outline: 2px solid var(--demo-ink); outline-offset: 3px; }
@@ -122,10 +122,10 @@ html:not(.demo-on) body:has(.demo-gate) { padding-top: 0; }
 /* ---------- seccion aun no integrada en esta vista previa ---------- */
 .demo-pendiente {
   min-height: calc(100dvh - var(--demo-h)); display: grid; place-content: center; justify-items: center; gap: 12px; padding: 32px 16px; text-align: center;
-  background: var(--demo-cream); color: var(--demo-ink); font-family: Manrope, system-ui, sans-serif; outline: none;
+  background: var(--demo-cream); color: var(--demo-ink); font-family: Arial, Helvetica, sans-serif; outline: none;
 }
-.demo-pendiente__ceja { font: 500 11px/1 "JetBrains Mono", ui-monospace, monospace; letter-spacing: .2em; text-transform: uppercase; color: #c41a2f; }
-.demo-pendiente h1 { margin: 0; max-width: 22ch; font: 700 clamp(26px, 5vw, 40px)/1.08 "Bricolage Grotesque", Manrope, sans-serif; letter-spacing: -.02em; text-wrap: balance; }
+.demo-pendiente__ceja { font: 500 11px/1 Arial, Helvetica, sans-serif; letter-spacing: .2em; text-transform: uppercase; color: #c41a2f; }
+.demo-pendiente h1 { margin: 0; max-width: 22ch; font: 700 clamp(26px, 5vw, 40px)/1.08 Arial, Helvetica, sans-serif; letter-spacing: -.02em; text-wrap: balance; }
 .demo-pendiente p { margin: 0; color: #5a5560; font-size: 15px; }
 .demo-pendiente__acc { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 6px; }
 .demo-pendiente__acc a { min-height: 44px; display: inline-flex; align-items: center; padding: 0 18px; border-radius: 999px; background: var(--demo-ink); color: #fff; font-weight: 700; font-size: 14.5px; }

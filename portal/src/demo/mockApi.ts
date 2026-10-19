@@ -155,7 +155,7 @@ async function route(path: string, sp: URLSearchParams, method: string, init?: R
     return json({
       store: {
         name: "Crimson", tagline: "Seguridad electrónica, redes y soporte técnico en Costa Rica.", logo_url: `${import.meta.env.BASE_URL}logo.png`,
-        primary: "#e2233a", secondary: "#15131a", font: "Manrope", kind: "tienda", whatsapp: WHATSAPP, currency: "CRC",
+        primary: "#e2233a", secondary: "#15131a", font: "Arial", kind: "tienda", whatsapp: WHATSAPP, currency: "CRC",
         legal: { privacy: c.snap.legal.privacy || "", terms: c.snap.legal.terms || "" },
       },
       nav: [],

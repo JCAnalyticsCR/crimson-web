@@ -196,7 +196,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
 
   return (
     <StoreProvider value={ctx}>
-    <div className="shop" style={{ fontFamily: S.font && S.font !== "Manrope" ? `"${S.font}", var(--sans)` : undefined }}>
+    <div className="shop" style={{ fontFamily: undefined /* toda la tienda en Arial (var(--sans)) */ }}>
       <a className="sh-skip" href="#contenido">Saltar al contenido</a>
       <header className="sh-head vt-head">
         <div className="sh-wrap">

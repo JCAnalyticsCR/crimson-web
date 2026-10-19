@@ -414,7 +414,7 @@ def _email_html(t: Tenant, o: Order, kind: str, extra: str = "") -> str:
     )
     instr = pay_instructions(t, o) if kind == "recibido" and o.status in ("nuevo", "en_revision") else None
     url = track_url(t, o)
-    return f"""<div style="font-family:Manrope,Arial,sans-serif;max-width:560px;margin:auto;color:#15131a">
+    return f"""<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#15131a">
 <div style="border-bottom:3px solid {primary};padding:12px 0;font-size:18px;font-weight:700">{e(cfg.get("name") or t.name)}</div>
 <p style="font-size:15px">{intro}</p>
 <p style="font-size:13px;color:#5a5560">Pedido <b>{e(o.number)}</b> · Estado: <b>{e(STATUS_LABEL.get(o.status, o.status))}</b></p>

@@ -57,7 +57,7 @@ export default function StoreHost() {
       .then((j) => setSlug(j.slug))
       .catch(() => setErr(true));
   }, []);
-  if (err) return <div style={{ minHeight: "100dvh", display: "grid", placeItems: "center", background: "#f6f2ee", color: "#5a5560", fontFamily: "Manrope, system-ui, sans-serif" }}>Tienda no disponible en este momento.</div>;
+  if (err) return <div style={{ minHeight: "100dvh", display: "grid", placeItems: "center", background: "#f6f2ee", color: "#5a5560", fontFamily: "Arial, Helvetica, sans-serif" }}>Tienda no disponible en este momento.</div>;
   if (!slug) return <Spin />;
   return (
     <Suspense fallback={<Spin />}>

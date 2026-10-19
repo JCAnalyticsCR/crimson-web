@@ -25,7 +25,7 @@ env.filters["unidad"] = unit_label
 TEMPLATE = env.from_string("""<!doctype html><html lang="es"><head><meta charset="utf-8"><title>{{ kind }} {{ d.number }}</title>
 <style>
 @page { size: Letter; margin: 18mm 16mm; }
-body{font-family:Manrope,"Segoe UI",Arial,sans-serif;color:#15131a;font-size:12px;line-height:1.45;margin:0}
+body{font-family:Arial,Helvetica,sans-serif;color:#15131a;font-size:12px;line-height:1.45;margin:0}
 .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #e2233a;padding-bottom:14px;margin-bottom:18px}
 .brand b{font-size:20px;letter-spacing:-.02em;display:block}.brand span{color:#5a5560;font-size:11px}
 .docid{text-align:right}.docid .k{font-family:Consolas,monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#8a858f}

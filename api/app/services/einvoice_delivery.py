@@ -71,7 +71,7 @@ def _pdf(db: Session, inv: Invoice, t: Tenant) -> bytes | None:
 def _html(t: Tenant, title: str, lines: list[str], test: bool) -> str:
     banner = f'<p style="background:#fff4d6;color:#7a5a00;padding:8px 12px;border-radius:8px;font-weight:700">{TEST_TAG}</p>' if test else ""
     body = "".join(f"<p>{x}</p>" for x in lines)
-    return f"""<div style="font-family:Manrope,Arial,sans-serif;max-width:560px;margin:auto;color:#15131a">
+    return f"""<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#15131a">
 <div style="border-bottom:3px solid #e2233a;padding:12px 0;font-size:18px;font-weight:700">{t.name}</div>{banner}
 <h3 style="margin:14px 0 6px">{title}</h3>{body}
 <p style="color:#8a858f;font-size:12px">Cualquier consulta, responda a este correo.</p></div>"""

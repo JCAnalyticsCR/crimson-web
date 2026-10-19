@@ -266,7 +266,7 @@ _e = html.escape
 
 def _shell(tenant: Tenant, inner: str) -> str:
     """Mismo estilo que doc_email_html: encabezado con la empresa y borde carmesi."""
-    return f"""<div style="font-family:Manrope,Arial,sans-serif;max-width:560px;margin:auto;color:#15131a">
+    return f"""<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#15131a">
 <div style="border-bottom:3px solid #e2233a;padding:12px 0;font-size:18px;font-weight:700">{_e(tenant.name)}</div>
 {inner}
 <p style="color:#8a858f;font-size:12px">Crimson nunca te va a pedir tu contraseña por correo, por teléfono ni por WhatsApp.</p></div>"""

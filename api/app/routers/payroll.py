@@ -324,7 +324,7 @@ def slip(rid: int, lid: int, p: Principal = Depends(require("payroll", "ver")), 
     ]
     body = "".join(f'<tr class="{c}"><td>{esc(label)}</td><td class="n">{money(v, "CRC")}</td></tr>' for label, v, c in rows)
     return f"""<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Colilla {esc(ln.employee_name)}</title>
-<style>body{{font-family:Manrope,system-ui,sans-serif;color:#15131a;max-width:640px;margin:32px auto;padding:0 16px}}
+<style>body{{font-family:Arial,Helvetica,sans-serif;color:#15131a;max-width:640px;margin:32px auto;padding:0 16px}}
 h1{{font-size:20px;margin:0}} .m{{color:#6b6570;font-size:13px}} table{{width:100%;border-collapse:collapse;margin-top:20px}}
 td{{padding:9px 0;border-bottom:1px solid #eee;font-size:14px}} .n{{text-align:right;font-variant-numeric:tabular-nums}}
 tr.b td{{font-weight:700;border-top:2px solid #15131a}} .brand{{border-left:4px solid #e2233a;padding-left:12px;margin-bottom:18px}}

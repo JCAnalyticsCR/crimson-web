@@ -28,7 +28,7 @@ function Aviso() {
   );
 }
 const Fuera = () => (
-  <div style={{ padding: 24, fontFamily: "Manrope, sans-serif" }}>
+  <div style={{ padding: 24, fontFamily: "Arial, Helvetica, sans-serif" }}>
     <p>Ruta fuera del módulo de gestión (en la demo real es la tienda).</p>
     <ul>{rutas.map((r) => <li key={r.path}><Link to={r.path}>{r.path}</Link></li>)}</ul>
   </div>

@@ -10,8 +10,8 @@
   --ven-crimson: #e2233a; --ven-crimson-dark: #c41a2f; --ven-crimson-hi: #ff5a6e; --ven-crimson-soft: rgba(226, 35, 58, .10);
   --ven-ok: #157a41; --ven-ok-soft: rgba(21, 122, 65, .10); --ven-warn: #8a5208; --ven-warn-soft: #fff4e0; --ven-warn-dark: #f2c98a;
   --ven-hair: rgba(21, 19, 26, .10); --ven-hair-2: rgba(21, 19, 26, .18); --ven-hair-dark: rgba(255, 255, 255, .10);
-  --ven-serif: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif; --ven-sans: Manrope, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --ven-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --ven-serif: Arial, Helvetica, sans-serif; --ven-sans: Arial, Helvetica, sans-serif;
+  --ven-mono: Arial, Helvetica, sans-serif;
   --ven-micro: 200ms; --ven-drawer: 380ms; --ven-ease-enter: cubic-bezier(.16, 1, .3, 1); --ven-ease-button: cubic-bezier(.25, .46, .45, .94);
   --ven-tope: calc(var(--demo-h, 0px) + 52px + 16px);
   container-type: inline-size;

@@ -234,7 +234,7 @@ export const AJUSTES_INV: { label: string; valor: string; tipo: "check" | "campo
 // ---------------------------------------------------------------- Mi Tienda
 export const TIENDA = {
   name: "Crimson", tagline: "Seguridad electrónica, redes y soporte técnico en Costa Rica.", primary: "#e2233a", secondary: "#15131a",
-  kind: "tienda", font: "Manrope", currency: "CRC", domain: "tienda.crimsoncr.com",
+  kind: "tienda", font: "Arial", currency: "CRC", domain: "tienda.crimsoncr.com",
 };
 export const DESTACADOS = [
   "KIT EASYLINK NVS IP HIKVISION DS-J142(STD)/NKS422W02H BULLET 2MP",

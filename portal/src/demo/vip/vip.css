@@ -11,9 +11,9 @@
   --vip-light: #f4f1ee; --vip-muted-dark: #b9b5b0; --vip-text-2: #5a5560; --vip-text-3: #6f6a74;
   --vip-crimson: #e2233a; --vip-crimson-dark: #c41a2f; --vip-crimson-hi: #ff5a6e; --vip-ok: #1fa35a;
   --vip-hair: rgba(21, 19, 26, .10); --vip-hair-2: rgba(21, 19, 26, .18); --vip-hair-dark: rgba(255, 255, 255, .10);
-  --vip-serif: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
-  --vip-sans: Manrope, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --vip-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --vip-serif: Arial, Helvetica, sans-serif;
+  --vip-sans: Arial, Helvetica, sans-serif;
+  --vip-mono: Arial, Helvetica, sans-serif;
   --vip-r: 6px; --vip-wrap: 1280px; --vip-pad: max(16px, 4vw);
   --vip-micro: 200ms; --vip-drawer: 380ms; --vip-ease-enter: cubic-bezier(.16, 1, .3, 1);
   --vip-focus: var(--vip-crimson-dark);

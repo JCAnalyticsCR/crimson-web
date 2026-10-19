@@ -28,7 +28,7 @@ STORE_DEFAULTS = {
     "favicon_url": None,
     "primary": "#e2233a",
     "secondary": "#15131a",
-    "font": "Manrope",
+    "font": "Arial",
     "domain": None,
     "published": False,
     "kind": "catalogo",  # catalogo | tienda (carrito y checkout)

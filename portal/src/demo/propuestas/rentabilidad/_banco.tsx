@@ -19,7 +19,7 @@ function Verificacion() {
   const v = verificarModelo();
   const celda = { padding: "6px 10px", borderBottom: "1px solid rgba(21,19,26,.1)", textAlign: "left" as const, fontVariantNumeric: "tabular-nums" as const };
   return (
-    <main style={{ maxWidth: 1100, margin: "0 auto", padding: "24px 16px", fontFamily: "Manrope, system-ui, sans-serif", color: "#15131a" }}>
+    <main style={{ maxWidth: 1100, margin: "0 auto", padding: "24px 16px", fontFamily: "Arial, Helvetica, sans-serif", color: "#15131a" }}>
       <h1 style={{ fontSize: 26, fontWeight: 700 }}>Modelo de rentabilidad · vectores de prueba</h1>
       <p style={{ margin: "8px 0 16px", fontWeight: 700, color: v.ok ? "#157a41" : "#c41a2f" }}>
         {v.ok ? "✓" : "✕"} {v.pasan} de {v.total} pasan (tolerancia ±₡1). <Link to="/rentabilidad" style={{ textDecoration: "underline" }}>Volver a la página</Link>

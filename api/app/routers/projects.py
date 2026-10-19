@@ -862,7 +862,7 @@ def delivery_report(pid: int, p: Principal = Depends(require("projects", "ver"))
 
     gal = "".join(f'<img src="{esc(u)}" alt="">' for u in sign_urls(db, p.tenant.id, photos[:24]) if isinstance(u, str))
     return f"""<!doctype html><html lang=es><head><meta charset=utf-8><title>Informe {esc(pr.number)}</title>
-<style>body{{font-family:Manrope,system-ui,sans-serif;color:#15131a;max-width:820px;margin:28px auto;padding:0 18px}}
+<style>body{{font-family:Arial,Helvetica,sans-serif;color:#15131a;max-width:820px;margin:28px auto;padding:0 18px}}
 h1{{font-size:26px;margin:0}}h3{{font-size:16px;margin:0 0 4px}}.m{{color:#6b6570;font-size:12.5px}}
 .brand{{border-left:4px solid #e2233a;padding-left:12px;margin-bottom:20px}}
 .block{{border:1px solid #eee;border-radius:12px;padding:14px;margin:12px 0}}
