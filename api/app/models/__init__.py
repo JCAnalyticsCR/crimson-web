@@ -57,6 +57,7 @@ from .ops import (
     StockMovement,
     StockReservation,
     StockUnit,
+    TaskRun,
     Warehouse,
     WebhookEvent,
 )
@@ -123,6 +124,7 @@ __all__ = [
     "Recurrence",
     "EInvoiceDocument",
     "EmailOutbox",
+    "TaskRun",
     "WebhookEvent",
     "PaymentGatewayConfig",
     "StorePage",

@@ -385,6 +385,9 @@ def outbox(limit: int = 30, p: Principal = Depends(require("settings", "ver")), 
             "sent_at": m.sent_at,
             "error": m.error,
             "created_at": m.created_at,
+            # "error" con hora = se reintenta (espera creciente); a los MAX_ATTEMPTS queda "fallido"
+            "attempts": m.attempts or 0,
+            "next_attempt_at": m.next_attempt_at,
         }
         for m in rows
     ]

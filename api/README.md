@@ -208,6 +208,37 @@ cadena del certificado en la firma. **Fase 2**: ND, FEE, FEC, REP, exoneraciones
 contingencia, callback, verificación de la firma del proveedor, catálogo de distritos y cédulas alfanuméricas en la
 emisión.
 
+## Worker: correo, beat y salud (plan 1.2 y 1.8)
+
+- **Un solo beat.** El beat va embebido en el worker con `celery-redbeat`: horario y candado en Redis
+  (`--scheduler=redbeat.RedBeatScheduler`; en `celery worker` la opción `-S` es `--statedb`). Durante un despliegue el
+  contenedor nuevo espera el candado y ninguna tarea sale dos veces. Si un contenedor muere sin soltarlo, el candado vence
+  a los 5 min (5 × el intervalo máximo de 60 s).
+- **Correo.** Cada aviso automático lleva `dedupe_key` (único por empresa). Un envío que falla se reintenta a los 15,
+  30, 60, 120 y 240 min y al 6.º intento queda `fallido`, con un aviso al vendedor responsable (o a los
+  administradores). Un correo con adjuntos (PDF, XML) nunca se reenvía sin ellos: queda `fallido` y se reenvía desde el
+  documento. Lo que lleva más de 24 h en cola ya no sale.
+- **Hora de Costa Rica.** `app/core/timeutil.py` (`cr_now`, `cr_today`): el cierre de caja de las 21:00 y el
+  vencimiento usan el día de Costa Rica (el contenedor corre en UTC).
+- **Al arrancar**, el worker registra en WARNING los nombres que le faltan de `RESEND_API_KEY`, `MAIL_FROM`,
+  `PUBLIC_BASE_URL`, `BCCR_TOKEN` y `FISCAL_KEYS` (solo nombres).
+- **Corridas.** Cada tarea deja su corrida en `task_run` (señales de Celery). Si una falla, un correo a los
+  administradores y a `OPS_ALERT_EMAILS`, como máximo uno por tarea y por día.
+- **`GET /health/deep`** (público, sin datos sensibles): latido del beat y del worker (`salud.latido`, cada 5 min),
+  correo configurado en el worker, ENV, existencias de Eurocomp (< 8 h), correos fallidos en 24 h, tipo de cambio
+  (≤ 2 días hábiles), modo de ONVO y facturas "Por emitir" de más de 24 h. Responde **503** si falla la base, el latido
+  tiene más de 15 min o, en producción, el worker no tiene `RESEND_API_KEY`; lo demás sale como aviso. El monitor
+  externo mira esta ruta.
+- **Correo diario de Salud** a las 07:00 a los administradores y a `OPS_ALERT_EMAILS`.
+- **Logs:** INFO a stdout y WARNING o más a stderr (`app/core/logging.py`), en api y worker. `LOG_LEVEL` lo cambia.
+- **Monitor de respaldo:** `scripts/monitor/tienda_check.py` (GitHub Actions cada 30 min, `.github/workflows/monitor.yml`;
+  variables del repo opcionales `TIENDA_URL`, `TIENDA_SLUG`, `HEALTH_DEEP_URL`).
+
+| Variable | Uso |
+|---|---|
+| `OPS_ALERT_EMAILS` | Correos de quien opera la plataforma, separados por coma, en el `worker`: reciben las fallas de tareas y el correo de Salud. |
+| `LOG_LEVEL` | Nivel de log de api y worker (defecto `INFO`). |
+
 ## Pendiente (requiere credenciales o decisiones del cliente)
 
 1. Hacienda: la conexión directa está lista (ver «Hacienda y recepción»); falta cargar las credenciales y el `.p12` de **pruebas**, correr `hacienda_smoke` contra el validador real y, el día del cambio, el runbook de arriba. Mientras tanto el modo por defecto no emite (o simula, sin validez fiscal).

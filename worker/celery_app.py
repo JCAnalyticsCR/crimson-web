@@ -11,10 +11,25 @@ from datetime import date
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import setup_logging as celery_setup_logging
 
 from app.core.config import settings
+from app.tasks.salud import connect_signals
 
 log = logging.getLogger("crimson.worker")
+
+
+@celery_setup_logging.connect
+def _logging(loglevel=None, **_kw) -> None:
+    """Plan 1.8: INFO a stdout y WARNING+ a stderr (Celery mandaba todo a stderr y Railway lo marcaba como error).
+    Con esta señal conectada Celery no toca el logging ni redirige stdout."""
+    from app.core.logging import setup_logging
+
+    setup_logging(loglevel)
+
+
+connect_signals()  # plan 1.8: cada corrida queda en task_run y un fallo avisa (uno por tarea y por dia)
+
 celery = Celery("crimson", broker=settings.redis_url, backend=settings.redis_url)
 celery.conf.update(timezone="America/Costa_Rica", enable_utc=True, task_acks_late=True, worker_prefetch_multiplier=1)
 # Un solo beat (plan 1.2): horario y candado en Redis (celery-redbeat). Durante un despliegue conviven dos workers con
@@ -536,6 +551,26 @@ def purge_trash() -> int:
     return n
 
 
+@celery.task(name="salud.latido")
+def salud_latido() -> dict:
+    """Latido del beat y del worker (con los nombres de la configuracion que le falta): /health/deep lo mira."""
+    from app.core.db import SessionLocal
+    from app.tasks.salud import heartbeat
+
+    with SessionLocal() as db:
+        return heartbeat(db)
+
+
+@celery.task(name="salud.correo_diario")
+def salud_correo_diario() -> int:
+    """Correo de Salud a los administradores y a OPS_ALERT_EMAILS; purga las corridas de mas de 30 dias."""
+    from app.core.db import SessionLocal
+    from app.tasks.salud import daily_report
+
+    with SessionLocal() as db:
+        return daily_report(db)
+
+
 celery.conf.beat_schedule = {
     "purge-trash": {"task": "archive.purge_trash", "schedule": crontab(hour=3, minute=20)},
     "poll-inboxes": {"task": "reception.poll_inboxes", "schedule": crontab(minute="*/15")},
@@ -563,4 +598,7 @@ celery.conf.beat_schedule = {
     "suppliers-sync-eurocomp": {"task": "suppliers.sync_eurocomp", "schedule": crontab(day_of_week=1, hour=3, minute=17)},
     "suppliers-eurocomp-stock": {"task": "suppliers.eurocomp_stock", "schedule": crontab(hour="5,11,17,23", minute=17)},
     "mark-overdue": {"task": "sales.mark_overdue", "schedule": crontab(hour=0, minute=30)},
+    # plan 1.8: latido cada 5 min (/health/deep da 503 si pasan 15 sin latido) y correo de Salud a las 07:00
+    "salud-latido": {"task": "salud.latido", "schedule": crontab(minute="*/5")},
+    "salud-correo-diario": {"task": "salud.correo_diario", "schedule": crontab(hour=7, minute=0)},
 }

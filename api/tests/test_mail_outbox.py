@@ -154,6 +154,21 @@ def test_documento_con_adjuntos_no_se_reenvia_sin_ellos(db_session, t, resend):
     assert [a.to for a in _avisos(db_session, t)] == ["vendedora@ejemplo.com"]
 
 
+def test_reenviado_a_mano_no_se_reintenta_ni_avisa(db_session, t, resend):
+    """El vendedor vio "El correo NO salió" y lo reenvio enseguida: el fallido viejo ni sale ni genera aviso."""
+    v = _vendedora(db_session, t)
+    inv = _factura(db_session, t, seller_id=v.id)
+    resend.caido = True
+    viejo = mail.queue_email(db_session, t, "Cliente@Ejemplo.com", inv.number, "<p>x</p>", "invoice", inv.id, files=[("x.pdf", b"%PDF")])
+    resend.caido = False
+    mail.queue_email(db_session, t, "cliente@ejemplo.com", inv.number, "<p>x</p>", "invoice", inv.id, files=[("x.pdf", b"%PDF")])
+    db_session.commit()
+    out = retry_outbox(db_session, now=datetime.now(UTC) + timedelta(seconds=5))
+    db_session.refresh(viejo)
+    assert viejo.status == "fallido" and out["reemplazados"] == 1 and out["fallidos"] == 0
+    assert not _avisos(db_session, t)
+
+
 def test_aviso_agrupado_por_dueño_y_sin_dueño_va_a_los_administradores(db_session, t, resend):
     v = _vendedora(db_session, t)
     a = _factura(db_session, t, seller_id=v.id, number="FEC-000911")

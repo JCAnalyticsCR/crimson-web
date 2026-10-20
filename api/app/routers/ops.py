@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -26,6 +27,7 @@ from ..services.ownership import owns_doc
 from ..services.render import money, render_html, render_pdf
 
 router = APIRouter(tags=["operacion"])
+log = logging.getLogger("crimson.ops")
 
 
 def _doc(db: Session, kind: str, id_: int, tenant_id: int, p: Principal | None = None):
@@ -150,6 +152,7 @@ def emit(id_: int, p: Principal = Depends(require("sales", "enviar")), db: Sessi
         try:
             send_einvoice(db, doc.id)
         except Exception:  # noqa: BLE001
+            log.exception("emision de la factura %s: el envio inmediato fallo, queda para el worker", id_)
             db.rollback()
         db.refresh(doc)
         db.refresh(d)
@@ -203,6 +206,7 @@ def void_nc(id_: int, data: VoidNcIn, p: Principal = Depends(require("sales", "a
         try:
             send_einvoice(db, doc.id)
         except Exception:  # noqa: BLE001
+            log.exception("nota de credito de la factura %s: el envio inmediato fallo, queda para el worker", id_)
             db.rollback()
         db.refresh(doc)
         return {"status": "pendiente" if doc.status in ("por_enviar", "enviando", "enviado", "procesando") else doc.status, "doc_status": doc.status, "clave": doc.clave, "consecutive": doc.consecutive, "mode": doc.mode}
@@ -1223,7 +1227,7 @@ def run_due_recurrences(db: Session, today: date | None = None) -> int:
             db.commit()
         except Exception as e:  # noqa: BLE001
             db.rollback()
-            log.warning("recurrencia %s: %s", rid, type(e).__name__)
+            log.exception("recurrencia %s: %s", rid, type(e).__name__)  # con traza: es dinero que no se facturo
     return n
 
 

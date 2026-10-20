@@ -7,6 +7,8 @@
   avisa al dueño del documento, que lo reenvia desde el documento.
 - Cada reintento fallido duplica la espera (mail.retry_wait); al intento mail.MAX_ATTEMPTS queda "fallido", con el
   mismo aviso. Una direccion mala ya no son 96 intentos al dia.
+- Si despues salio bien otro correo del mismo documento a la misma direccion (el vendedor lo reenvio), el viejo se
+  deja sin reintento y sin aviso.
 - Lo que lleva mas de MAX_AGE en la cola (filas de antes de este cambio, o un worker caido mucho tiempo) se deja sin
   enviar y sin aviso: un recordatorio de hace dias confunde mas de lo que ayuda (lo cuenta el correo de Salud).
 """
@@ -17,7 +19,7 @@ import html
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..models import EmailOutbox, Invoice, Order, Quote, Tenant, TenantUser
@@ -39,6 +41,26 @@ def _give_up(m: EmailOutbox, motivo: str) -> None:
     prev = (m.error or "").strip()
     m.status, m.next_attempt_at = FAILED, None
     m.error = (f"{motivo} Último error: {prev}" if prev else motivo)[:500]
+
+
+def _superseded(db: Session, m: EmailOutbox) -> bool:
+    """Despues de este salio bien otro correo del mismo documento a la misma direccion (el vendedor lo reenvio): ni se
+    reintenta ni se avisa."""
+    if not m.entity or not m.entity_id:
+        return False
+    later = db.scalar(
+        select(EmailOutbox.id)
+        .where(
+            EmailOutbox.tenant_id == m.tenant_id,
+            EmailOutbox.entity == m.entity,
+            EmailOutbox.entity_id == m.entity_id,
+            func.lower(EmailOutbox.to) == (m.to or "").strip().lower(),
+            EmailOutbox.id > m.id,
+            EmailOutbox.status == "enviado",
+        )
+        .limit(1)
+    )
+    return later is not None
 
 
 def _internal_email(db: Session, tenant_id: int, user_id: int | None) -> str | None:
@@ -125,10 +147,13 @@ def retry_outbox(db: Session, now: datetime | None = None, limit: int = BATCH) -
         .limit(limit)
         .with_for_update(skip_locked=True)  # dos workers nunca toman el mismo correo
     )
-    out = {"reintentos": 0, "enviados": 0, "fallidos": 0, "vencidos": 0, "avisos": 0}
+    out = {"reintentos": 0, "enviados": 0, "fallidos": 0, "vencidos": 0, "reemplazados": 0, "avisos": 0}
     failed: list[EmailOutbox] = []
     for m in db.scalars(q).all():
-        if m.attachments:
+        if _superseded(db, m):
+            _give_up(m, "Ya salió un envío posterior del mismo documento a esta dirección.")
+            out["reemplazados"] += 1
+        elif m.attachments:
             _give_up(m, "Llevaba adjuntos, que no se guardan: no se reenvía sin ellos.")
             failed.append(m)
         elif now - (_aware(m.created_at) or now) > MAX_AGE:

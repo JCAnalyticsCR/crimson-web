@@ -62,7 +62,9 @@ log = logging.getLogger("crimson")
 
 def create_app() -> FastAPI:
     from .core import secretbox
+    from .core.logging import setup_logging
 
+    setup_logging()  # INFO a stdout, WARNING+ a stderr (Railway marcaba todo como error); uvicorn incluido
     secretbox.keys()  # registra (INFO) solo los kid y sha256(llave)[:8] de FISCAL_KEYS: api y worker deben coincidir
     app = FastAPI(
         title=settings.app_name,

@@ -23,6 +23,18 @@ def health(db: Session = Depends(get_db)):
     return {"status": "ok", "app": settings.app_name, "env": settings.env}
 
 
+@router.get("/health/deep")
+def health_deep(db: Session = Depends(get_db)):
+    """Salud profunda para el monitor externo (plan 1.8): latido del beat y del worker, correo del worker, Eurocomp,
+    correo fallido, tipo de cambio, ENV, ONVO y cola "Por emitir". Sin datos sensibles; 503 si algo critico falla."""
+    from fastapi.responses import JSONResponse
+
+    from ..services.salud import deep
+
+    out = deep(db)
+    return JSONResponse(out, status_code=503 if out["status"] == "falla" else 200, headers={"Cache-Control": "no-store"})
+
+
 @router.get("/tenant", response_model=TenantOut)
 def get_tenant(p: Principal = Depends(get_principal)):
     return p.tenant

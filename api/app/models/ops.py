@@ -286,6 +286,24 @@ class EmailOutbox(TenantMixin, TimestampMixin, Base):
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # cuando lo toma mail.retry_outbox
 
 
+class TaskRun(Base):
+    """Corrida de una tarea del worker (plan 1.8): cuando empezo y termino, si salio bien, un resumen y el error.
+    La llenan las señales de Celery (app/tasks/salud.py); el latido del worker (salud.latido) deja aqui su fila y
+    /health/deep la mira. De la plataforma, no de una empresa (las tareas recorren todas). Se purga a los 30 dias."""
+
+    __tablename__ = "task_run"
+    __table_args__ = (Index("ix_task_run_task_started", "task", "started_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task: Mapped[str] = mapped_column(String(80))  # nombre de la tarea (sales.daily_close_email)
+    task_id: Mapped[str | None] = mapped_column(String(64), index=True)  # id de Celery
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ok: Mapped[bool | None] = mapped_column(Boolean)  # None = corriendo (o el proceso murio a media tarea)
+    summary: Mapped[dict | None] = mapped_column(JSON)  # lo que devolvio la tarea (conteos), recortado
+    error: Mapped[str | None] = mapped_column(Text)  # tipo y mensaje, sin URLs con parametros ni llaves
+
+
 class WebhookEvent(Base):
     """Evento crudo de proveedor (ONVO, PayPal, fiscal). Idempotente por (provider, external_id)."""
 

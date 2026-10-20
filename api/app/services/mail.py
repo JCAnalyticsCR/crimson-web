@@ -47,6 +47,7 @@ def dedupe(key: str | None) -> str | None:
 def _by_key(db: Session, tenant_id: int, key: str) -> EmailOutbox | None:
     return db.scalar(select(EmailOutbox).where(EmailOutbox.tenant_id == tenant_id, EmailOutbox.dedupe_key == key))
 
+
 # Correos que llevan una llave de entrada (invitaciones, enlaces de contrasena) o avisan de un cambio de credenciales.
 # Nunca van en copia al BCC de la empresa (seria robo de cuenta: el enlace le llegaria tambien a contabilidad), el
 # enlace se borra del HTML guardado despues de enviarlo (el respaldo exporta email_outbox) y el worker no los
