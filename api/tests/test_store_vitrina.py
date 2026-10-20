@@ -449,3 +449,12 @@ def test_seo_por_dominio_metas_datos_estructurados_sitemap_y_301(client, auth, d
     assert go("/page/solicitud-de-asesoria-personalizada/").headers["location"].endswith("/asesoria")
     assert go("/products/").headers["location"].endswith("/catalogo")
     assert go("/products/no-existe/").headers["location"].endswith("/catalogo")
+    # sin mapa de importacion: el mismo equipo por codigo (catalogo publico de la tienda vieja, fygaro_legacy.json)...
+    r = go("/products/c2751caf-691d-494f-96e2-d34efdfe4de0/")  # Disco 4TB WD44PURZ en Fygaro
+    assert r.status_code == 301 and r.headers["location"].startswith("https://tienda.crimsoncr.com/p/disco-duro-de-4tb")
+    # ...y si ese equipo ya no se vende, una busqueda con su nombre (no el catalogo general)
+    r = go("/products/c65ca62b-9889-41cd-b648-50c06739f501/")  # camara IFLUX que no esta en la tienda nueva
+    assert r.headers["location"] == "https://tienda.crimsoncr.com/buscar?q=C%C3%A1mara%20Smart"
+    # el endpoint del portal (respaldo si nginx no lo atiende) resuelve igual
+    assert client.get("/public/store/crimson/legacy/product/c2751caf-691d-494f-96e2-d34efdfe4de0").json() == {"product_id": prods["WD44PURZ"].id}
+    assert client.get("/public/store/crimson/legacy/product/c65ca62b-9889-41cd-b648-50c06739f501").json() == {"search": "Cámara Smart"}

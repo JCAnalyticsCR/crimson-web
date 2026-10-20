@@ -358,7 +358,9 @@ def test_auto_invoice_on_payment_sandbox_and_no_double_stock(client, auth, db_se
     assert inv.balance == 0 and abs(float(inv.total) - float(o["total"])) < 0.01
     notas = [h["note"] for h in paid["history"] if h.get("kind") == "nota"]
     assert any("SANDBOX" in n and inv.number in n for n in notas)
-    assert db_session.query(EmailOutbox).filter(EmailOutbox.entity == "invoice", EmailOutbox.entity_id == inv.id).count() == 1
+    # sin Hacienda en produccion el comprobante no tiene validez fiscal: nunca se le manda al cliente como factura
+    assert any("no se envió al cliente" in n for n in notas)
+    assert db_session.query(EmailOutbox).filter(EmailOutbox.entity == "invoice", EmailOutbox.entity_id == inv.id).count() == 0
     # sin proveedor fiscal: el comprobante se crea pero se dice que queda sin emitir
     client.put("/settings", json={"einvoice_provider": "none"})
     o2 = client.post(f"{SLUG}/checkout", json=_body(prods[0]["id"], contact={"name": "Luis", "email": "l@correo.com", "phone": "88880001"})).json()

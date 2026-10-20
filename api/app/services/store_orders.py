@@ -771,40 +771,8 @@ def auto_invoice(db: Session, t: Tenant, o: Order) -> str | None:
     if mode in ("pruebas", "produccion"):
         _note(o, "sistema", note)  # el XML + PDF los entrega einvoice_delivery (art. 18), no este correo
         return note
-    mail = _send_invoice(db, t, o, invoice)
-    _note(o, "sistema", note + (f" · correo al cliente: {mail}" if mail else ""))
+    # Sin Hacienda en produccion (ninguno o simulado) el documento NO tiene validez fiscal: nunca se le manda al
+    # cliente como "factura electronica". Queda la factura interna (cobro e inventario) y el aviso para emitirla a mano.
+    note += " · no se envió al cliente: emití el comprobante electrónico a mano mientras la conexión con Hacienda no esté en producción"
+    _note(o, "sistema", note)
     return note
-
-
-def _send_invoice(db: Session, t: Tenant, o: Order, invoice) -> str | None:
-    from .mail import doc_email_html, queue_email
-    from .render import money, render_html, render_pdf
-
-    to = ((o.contact or {}).get("email") or "").strip()
-    if not to:
-        return None
-    try:
-        pdf = render_pdf(render_html(db, invoice, t))
-    except Exception:  # noqa: BLE001
-        pdf = None
-    kind = "factura electrónica" if invoice.doc_type == "FE" else "tiquete electrónico"
-    m = queue_email(
-        db,
-        t,
-        to,
-        f"{kind.capitalize()} {invoice.number} · pedido {o.number}",
-        doc_email_html(
-            t,
-            kind,
-            invoice.number,
-            money(invoice.total, invoice.currency),
-            None,
-            f"Comprobante de tu pedido {o.number}. ¡Gracias por tu compra!",
-            attached=pdf is not None,
-        ),
-        "invoice",
-        invoice.id,
-        [{"name": f"{invoice.number}.pdf", "kind": "invoices", "ref": invoice.id}] if pdf else [],
-        files=[(f"{invoice.number}.pdf", pdf)] if pdf else None,
-    )
-    return {"enviado": "enviado", "simulado": "no salió (correo sin configurar)", "error": "no salió (error)"}.get(m.status, m.status)

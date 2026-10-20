@@ -14,6 +14,7 @@ from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..core.ratelimit import public_limiter
 from ..models import Category, Coupon, Customer, Invoice, Order, Product, ProductVariant, StorePage, Tenant
+from ..services import fygaro_legacy
 from ..services import store_inventory as sinv
 from ..services.documents import audit
 from ..services.store_orders import STATUS_LABEL, aware
@@ -579,6 +580,11 @@ def store_legacy(slug: str, kind: str, ref: str, db: Session = Depends(get_db)):
         p = db.get(Product, e["id"]) if e else None
         if p and p.tenant_id == t.id and p.show_on_web and p.active:
             return {"product_id": p.id}
+        # El producto de Fygaro ya no esta (o nunca se importo): el mismo equipo en el catalogo vivo, por codigo o
+        # modelo. Si no hay, una busqueda con su nombre (mejor que dejar al cliente en el catalogo general).
+        hit = fygaro_legacy.resolve(db, t.id, ref, e)
+        if hit:
+            return {"product_id": hit[1]} if hit[0] == "product" else {"search": hit[1]}
     elif kind == "category":
         cid = (fy.get("categories") or {}).get(ref)
         if cid:

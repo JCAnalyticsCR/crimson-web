@@ -673,7 +673,7 @@ def breadcrumb_ld(base: str, items: list[tuple[str, str]]) -> dict:
     }
 
 
-def legacy_target(path: str, query: dict, product_map: dict, category_map: dict, resolve_product, resolve_category) -> str:
+def legacy_target(path: str, query: dict, product_map: dict, category_map: dict, resolve_product, resolve_category, resolve_unmapped=None) -> str:
     """Direccion vieja de Fygaro -> direccion nueva (301). resolve_* reciben el id propio y devuelven la ruta."""
     p = "/" + (path or "").strip("/")
     parts = [x for x in p.split("/") if x]
@@ -699,8 +699,11 @@ def legacy_target(path: str, query: dict, product_map: dict, category_map: dict,
             return resolve_category(cid) if cid else "/catalogo"
         e = product_map.get(parts[1])
         if e and e.get("id"):
-            return resolve_product(int(e["id"])) or "/catalogo"
-        return "/catalogo"
+            hit = resolve_product(int(e["id"]))
+            if hit:
+                return hit
+        # sin mapa o el producto ya no esta: el mismo equipo por codigo/modelo, o una busqueda con su nombre
+        return (resolve_unmapped(parts[1], e) if resolve_unmapped else None) or "/catalogo"
     return "/"
 
 

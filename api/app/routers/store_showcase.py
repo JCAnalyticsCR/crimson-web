@@ -11,7 +11,7 @@ import html as htmllib
 import re
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
@@ -24,6 +24,7 @@ from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..core.ratelimit import SlidingWindow
 from ..models import Category, Opportunity, Product, ProductTax, Tenant
+from ..services import fygaro_legacy
 from ..services import store_showcase as sv
 from ..services.documents import audit
 from ..services.mail import notify_roles
@@ -1177,8 +1178,14 @@ def seo_legacy(
     def to_category(cid: int) -> str:
         return f"/c/{slugs[cid]}" if cid in slugs else "/catalogo"
 
+    def unmapped(ref: str, entry: dict | None) -> str | None:
+        hit = fygaro_legacy.resolve(db, t.id, ref, entry)
+        if not hit:
+            return None
+        return to_product(int(hit[1])) if hit[0] == "product" else f"/buscar?q={quote(str(hit[1]), safe='')}"
+
     q = {k: v[0] for k, v in parse_qs(parts.query).items() if v}
-    target = sv.legacy_target(parts.path, q, fy.get("products") or {}, fy.get("categories") or {}, to_product, to_category)
+    target = sv.legacy_target(parts.path, q, fy.get("products") or {}, fy.get("categories") or {}, to_product, to_category, unmapped)
     return RedirectResponse(_base(h) + target, status_code=301, headers={"Cache-Control": "public, max-age=86400"})
 
 

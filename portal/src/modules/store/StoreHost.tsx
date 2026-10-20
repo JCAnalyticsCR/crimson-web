@@ -29,7 +29,7 @@ function Legacy({ slug, kind }: { slug: string; kind: "product" | "category" }) 
   useEffect(() => {
     fetch(`/api/public/store/${slug}/legacy/${kind}/${encodeURIComponent(ref || "")}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((j) => setTo(j?.product_id ? `/p/producto-${j.product_id}` : j?.category_id ? `/c/${j.category_id}` : "/catalogo"))
+      .then((j) => setTo(j?.product_id ? `/p/producto-${j.product_id}` : j?.category_id ? `/c/${j.category_id}` : j?.search ? `/buscar?q=${encodeURIComponent(j.search)}` : "/catalogo"))
       .catch(() => setTo("/catalogo"));
   }, [slug, kind, ref]);
   return to ? <Navigate to={to} replace /> : <Spin />;
