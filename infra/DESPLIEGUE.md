@@ -11,7 +11,7 @@ tumbe la plataforma. Complementa `infra/RESPALDO.md` (respaldos) y el runbook de
 ## 1. El camino de un cambio
 
 ```
-push a main ──► GitHub Actions "CI" (5 trabajos en paralelo, < 10 min)
+push a main ──► GitHub Actions "CI" (6 trabajos en paralelo, < 10 min)
                    │  verde  ──► Railway despliega SOLO los servicios cuyas rutas vigiladas cambiaron
                    │  rojo   ──► Railway marca el despliegue SKIPPED: producción sigue con la versión anterior
 ```
@@ -24,16 +24,17 @@ push a main ──► GitHub Actions "CI" (5 trabajos en paralelo, < 10 min)
 
 | Trabajo | Qué hace | Falla si… |
 |---|---|---|
-| API · ruff + pytest | `uv sync --locked`, `ruff check app`, `pytest -n auto` (en paralelo, Argon2 barato solo en pruebas) | el lock no coincide con `pyproject.toml`, hay errores de lint o falla una prueba |
+| API · ruff + pytest | `uv sync --locked`, `ruff check app ../worker`, `pytest -n auto` (en paralelo, Argon2 barato solo en pruebas) | el lock no coincide con `pyproject.toml`, hay errores de lint o falla una prueba |
 | Migraciones | Postgres 16 vacía: una sola cabeza de Alembic, `alembic upgrade head`, `alembic check`, y la última migración se revierte y se vuelve a aplicar | hay dos cabezas, una migración no corre en Postgres, el modelo y las migraciones no coinciden, o el `downgrade` no sirve |
 | Portal · tsc + vite build | `npm ci`, `tsc -b`, `vite build` | errores de tipos o de build |
 | Portal · imagen + nginx -t | `docker build portal` (el Dockerfile arma `nginx.conf` con `envsubst` y corre `nginx -t`) | `nginx.conf` o el Dockerfile del portal tienen un error |
 | Respaldo · imagen + age | construye `infra/respaldo/Dockerfile` y cifra unos bytes con una llave desechable (`respaldo_diario --revisar`) | la imagen del cron de respaldo no construye o le falta `age`/`rclone` |
+| Dependencias · pip-audit | busca vulnerabilidades conocidas en lo que fija `uv.lock` | **nunca** (informativo: el paso queda en rojo y el trabajo en verde) |
 
 Lo mismo en local, antes de subir:
 
 ```bash
-cd api && uv sync --locked && uv run ruff check app && uv run pytest -n auto -q
+cd api && uv sync --locked && uv run ruff check app ../worker && uv run pytest -n auto -q
 cd api && DATABASE_URL=postgresql+psycopg://crimson:crimson_local_only@localhost:5432/crimson \
           uv run alembic upgrade head && uv run alembic check      # con infra/docker-compose.yml levantado
 cd portal && npm ci && npx tsc -b && npx vite build
@@ -49,7 +50,9 @@ Reglas que el CI hace cumplir:
 
 - **Migraciones:** como máximo una revisión por ítem, re-encadenada al head vigente antes de fusionar (nada de
   revisiones `merge`), reversible, y el modelo tiene que quedar igual que la migración (`alembic check`).
-- **Dependencias:** `uv.lock` siempre al día (`uv sync --locked`). Las nuevas, pineadas con `==`.
+- **Dependencias:** `uv.lock` siempre al día (`uv sync --locked`). Las nuevas, pineadas con `==`. Si el paso de
+  `pip-audit` sale en rojo, la corrección va en un PR aparte: `uv lock --upgrade-package <paquete>` y la suite en
+  verde. No bloquea a propósito: una vulnerabilidad recién publicada no puede frenar un arreglo urgente.
 
 ## 3. Activar "Wait for CI" y las rutas vigiladas en Railway (una vez)
 
@@ -89,8 +92,9 @@ Anotar fecha y resultado en la bitácora de operaciones. Es parte del criterio d
 
 ### Recomendado: proteger `main` en GitHub
 
-Settings → Branches → regla para `main`: "Require status checks to pass" con los cinco trabajos del CI. Así un PR
-rojo no se puede fusionar. Si alguien empuja directo a `main`, la compuerta de Railway sigue protegiendo producción.
+Settings → Branches → regla para `main`: "Require status checks to pass" con los cinco trabajos del CI que
+bloquean (todos menos *Dependencias · pip-audit*). Así un PR rojo no se puede fusionar. Si alguien empuja directo a
+`main`, la compuerta de Railway sigue protegiendo producción.
 
 ## 4. Ventanas, orden y migraciones
 

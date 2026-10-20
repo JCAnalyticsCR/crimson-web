@@ -43,8 +43,8 @@ jobs:
           cache-dependency-glob: api/uv.lock
       - name: Dependencias (falla si uv.lock no coincide con pyproject.toml)
         run: uv sync --locked
-      - name: Ruff
-        run: uv run ruff check app
+      - name: Ruff (api y worker; varios items agregan tareas a worker/celery_app.py)
+        run: uv run ruff check app ../worker
       - name: Pruebas en paralelo
         env:
           # Algunas pruebas esperan date.today() y la app usa en partes la fecha de Costa Rica: en un runner UTC
@@ -52,6 +52,31 @@ jobs:
           # equipo hasta que la app deje de usar date.today().
           TZ: America/Costa_Rica
         run: uv run pytest -n auto -q -p no:cacheprovider
+
+  dependencias:
+    name: Dependencias · pip-audit (informativo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: api/uv.lock
+      - run: uv sync --locked
+      # No bloquea: una vulnerabilidad recien publicada en una dependencia no puede frenar el despliegue de un arreglo
+      # urgente. Queda en rojo dentro del trabajo (el trabajo sigue verde) y se corrige con
+      # `uv lock --upgrade-package <paquete>` en un PR aparte (infra/DESPLIEGUE.md seccion 2).
+      - name: Vulnerabilidades conocidas en las dependencias de uv.lock
+        continue-on-error: true
+        run: uv run pip-audit --progress-spinner off --skip-editable
 
   migraciones:
     name: Migraciones · Postgres vacia + alembic check
