@@ -166,7 +166,7 @@ export default function StoreHome() {
                 );
               })}
             </ul>
-            <p className="vt-kits__note">Precio de referencia del equipo con IVA. Un técnico valida el kit antes de cobrar; la instalación se cotiza aparte.</p>
+            <p className="vt-kits__note">Precio de referencia del equipo con IVA. Antes de instalar, un técnico revisa que el kit se ajuste a tu sitio; la instalación se cotiza aparte.</p>
           </div>
         </section>
       )}
@@ -183,7 +183,7 @@ export default function StoreHome() {
           <div>
             <span className="sh-eyebrow">4 preguntas · 1 minuto</span>
             <h2>¿No sabés qué cámaras comprar?</h2>
-            <p>Decinos qué querés proteger y te armamos el sistema con equipo real de la tienda: cámaras, grabador, disco y cableado. Un técnico lo revisa antes de cobrarte.</p>
+            <p>Decinos qué querés proteger y te armamos el sistema con equipo real de la tienda: cámaras, grabador, disco y cableado. Un técnico lo revisa antes de instalarlo.</p>
           </div>
           <Link className="sh-btn sh-btn--crimson" to={to("/arma-tu-sistema")}><Ico d={IC.cam} />Arma tu sistema</Link>
         </div>

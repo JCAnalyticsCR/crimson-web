@@ -102,7 +102,7 @@ export default function KitBuilder() {
       <header className="vt-cathead">
         <span className="sh-eyebrow">Configurador · 4 preguntas</span>
         <h1>Arma tu sistema de cámaras</h1>
-        <p>Respondé y te mostramos al instante un kit con equipo real de la tienda. Es una sugerencia: un técnico de Crimson la valida antes de cobrar o instalar.</p>
+        <p>Respondé y te mostramos al instante un kit con equipo real de la tienda. Es una sugerencia: antes de instalar, un técnico de Crimson revisa que se ajuste a tu sitio.</p>
       </header>
       <div className="vt-kitb__grid">
         <form className="vt-q" onSubmit={(e) => e.preventDefault()} aria-label="Preguntas del configurador">

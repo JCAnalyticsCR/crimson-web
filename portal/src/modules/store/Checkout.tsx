@@ -293,7 +293,7 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
                   <label key={m.code} className="sh-opt"><input type="radio" name="pay" checked={f.method === m.code} onChange={() => set("method", m.code)} />
                     <span>{m.label}{m.simulated && <em className="ck-tag">Modo de prueba</em>}<small>{m.hint}</small></span><span /></label>
                 ))}</div>
-                {method?.needs_proof && <p className="sh-note" style={{ margin: 0 }}>Al confirmar te mostramos los datos para pagar. Apartamos los productos mientras pagás: subí el comprobante cuanto antes.</p>}
+                {method?.needs_proof && <p className="sh-note" style={{ margin: 0 }}>Al confirmar te mostramos los datos para pagar. Tu pedido se confirma cuando subís el comprobante: hacelo cuanto antes.</p>}
                 {method?.code === "tarjeta" && (method.simulated
                   ? <p className="ck-sim" role="note"><b>Pago simulado.</b> Esta tienda todavía no tiene ONVO conectado: el pago con tarjeta es solo de prueba y no se cobra nada.</p>
                   : <p className="sh-note" style={{ margin: 0 }}><Ico d={IC.lock} size={14} /> Te llevamos a la página segura de ONVO. Nunca vemos los datos de tu tarjeta.</p>)}
@@ -371,7 +371,7 @@ function Summary({ quote, qErr, cart, cur, setQty, remove }: { quote: Quote | nu
           {!quote.free_shipping && Number(quote.free_shipping_from) > 0 && <p className="sh-note" style={{ margin: 0 }}>Envío gratis en compras desde {money(quote.free_shipping_from as number, cur)}.</p>}
           {(quote.taxes?.length ? quote.taxes : [{ rate: "13", amount: quote.tax_total }]).map((t) => <div key={t.rate} className="sh-totrow"><span>IVA {t.rate} %</span><b>{money(t.amount, cur)}</b></div>)}
           <div className="sh-totrow sh-totrow--big"><span>Total</span><b>{money(quote.total, cur)}</b></div>
-          <p className="sh-note" style={{ margin: 0 }}>Calculado por la tienda con los precios vigentes. Con tu pago emitimos la factura electrónica.</p>
+          <p className="sh-note" style={{ margin: 0 }}>Calculado por la tienda con los precios vigentes. Te enviamos la factura electrónica en un máximo de 1 día hábil.</p>
         </div>
       ) : <p className="sh-note" role="status">{qErr || "Calculando total…"}</p>}
     </div>

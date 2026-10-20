@@ -137,7 +137,7 @@ export default function OrderStatus({ api, token, store, onBack }: { api: ApiFn;
                 <button type="button" className="sh-btn sh-btn--ghost sh-btn--sm" onClick={() => copy(o.number, "num")}><Ico d={IC.copy} size={16} />{copied === "num" ? "Copiado" : "Copiar n.º de pedido"}</button>
                 <button type="button" className="sh-btn sh-btn--ghost sh-btn--sm" onClick={() => copy(String(Number(o.total).toFixed(cur === "CRC" ? 0 : 2)), "amt")}><Ico d={IC.copy} size={16} />{copied === "amt" ? "Copiado" : `Copiar monto`}</button>
               </div>
-              {o.expires_at && o.status === "nuevo" && <p className="sh-note" style={{ margin: 0 }}>Apartamos los productos hasta el {fmtWhen(o.expires_at)}</p>}
+              {o.expires_at && o.status === "nuevo" && <p className="sh-note" style={{ margin: 0 }}>Pagá antes del {fmtWhen(o.expires_at)} para confirmar tu pedido</p>}
               {(o.needs_proof || o.status === "en_revision") && o.payment_kind !== "tarjeta" && o.payment_kind !== "efectivo" && (
                 <div className="ck-proof">
                   <input ref={fileRef} id="ck-proof" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(e) => upload(e.target.files?.[0])} hidden />

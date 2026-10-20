@@ -55,7 +55,7 @@ DEFAULT_PAGES = {
         "según el método elegido. También podés retirar en nuestras instalaciones coordinando por WhatsApp.\n\n"
         "Tiempos\n"
         "Producto disponible: sale en 1 a 2 días hábiles después de confirmado el pago. Producto bajo pedido: de 3 a 5 "
-        "días hábiles; te confirmamos la fecha antes de cobrar.\n\n"
+        "días hábiles; te avisamos la fecha de entrega en cuanto confirmamos tu pago.\n\n"
         "Devoluciones\n"
         "Si el producto llega dañado o no corresponde a lo pedido, escribinos en los 8 días naturales siguientes a la "
         "entrega con fotos del empaque y del equipo. Lo revisamos y, si procede, lo cambiamos o devolvemos el dinero. "
@@ -90,7 +90,7 @@ DEFAULT_FAQ = [
     },
     {
         "q": "¿Qué significa “bajo pedido”?",
-        "a": "Lo traemos del distribuidor para vos. Normalmente tarda de 3 a 5 días hábiles; te confirmamos la fecha antes de cobrar.",
+        "a": "Lo traemos del distribuidor para vos. Normalmente tarda de 3 a 5 días hábiles; te avisamos la fecha de entrega en cuanto confirmamos tu pago.",
     },
     {
         "q": "¿Puedo ver las cámaras desde el celular?",
@@ -618,7 +618,7 @@ def build_kit(prods: list[Product], answers: dict, prefer: set[int] | None = Non
         add(_first(pools, _pick_by_words, ("caja", "exterior"), ("tapa", "fuerte", "carton")), ext["quantity"], "Instalación", ext["reason"], "Caja de paso exterior")
 
     notes = [
-        "Kit sugerido: un técnico de Crimson lo valida antes de cobrar o instalar (distancias, alturas y red del sitio).",
+        "Kit sugerido: antes de instalar, un técnico de Crimson revisa distancias, alturas y red del sitio.",
         f"Almacenamiento estimado con grabación continua a 4 MP en H.265+ (~{GB_PER_CAMERA_DAY} GB por cámara al día). Con grabación por movimiento rinde 2 a 3 veces más.",
     ]
     if remote:
