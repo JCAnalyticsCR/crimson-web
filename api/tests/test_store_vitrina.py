@@ -455,6 +455,15 @@ def test_seo_por_dominio_metas_datos_estructurados_sitemap_y_301(client, auth, d
     # ...y si ese equipo ya no se vende, una busqueda con su nombre (no el catalogo general)
     r = go("/products/c65ca62b-9889-41cd-b648-50c06739f501/")  # camara IFLUX que no esta en la tienda nueva
     assert r.headers["location"] == "https://tienda.crimsoncr.com/buscar?q=C%C3%A1mara%20Smart"
+    # el modelo solo en el NOMBRE (asi vienen los productos del proveedor): palabra completa, nunca un pedazo
+    from app.models import Product as _P
+
+    sw = _P(tenant_id=prods["WD44PURZ"].tenant_id, code="RC5062", name="Switch Hikvision DS-3E1518P-SI 16 puertos PoE", price=100, show_on_web=True)
+    parecido = _P(tenant_id=sw.tenant_id, code="249", name="Switch Hikvision DS-3E1518P-EI/M 16 puertos", price=100, show_on_web=True)
+    db_session.add_all([parecido, sw])
+    db_session.commit()
+    r = go("/products/cb294175-80b7-40ec-856e-9565f0af1324/")  # Fygaro: SKU DS3E1518PSI
+    assert r.headers["location"].endswith(f"-{sw.id}") and not r.headers["location"].endswith(f"-{parecido.id}")
     # el endpoint del portal (respaldo si nginx no lo atiende) resuelve igual
     assert client.get("/public/store/crimson/legacy/product/c2751caf-691d-494f-96e2-d34efdfe4de0").json() == {"product_id": prods["WD44PURZ"].id}
     assert client.get("/public/store/crimson/legacy/product/c65ca62b-9889-41cd-b648-50c06739f501").json() == {"search": "Cámara Smart"}

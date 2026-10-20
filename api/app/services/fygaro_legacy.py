@@ -41,10 +41,19 @@ def match(db: Session, tid: int, codes: list[str]) -> int | None:
     wanted = {c for c in (norm(x) for x in codes) if len(c) >= 4}
     if not wanted:
         return None
-    rows = db.execute(select(Product.id, Product.code, Product.model, Product.supplier_sku).where(Product.tenant_id == tid, Product.active, Product.show_on_web)).all()
-    for pid, code, model, ssku in rows:
+    rows = db.execute(
+        select(Product.id, Product.code, Product.model, Product.supplier_sku, Product.name).where(Product.tenant_id == tid, Product.active, Product.show_on_web)
+    ).all()
+    for pid, code, model, ssku, _ in rows:
         if wanted & {norm(code), norm(model), norm(ssku)}:
             return pid
+    # Los productos del proveedor traen el modelo solo dentro del nombre ("Switch Hikvision DS-3E1518P-SI 16 puertos"):
+    # se compara PALABRA COMPLETA (con y sin lo que va entre parentesis), nunca un pedazo, para no confundir
+    # DS-3E1518P-SI con DS-3E1518P-EI/M.
+    for pid, _, _, _, name in rows:
+        for tok in (name or "").split():
+            if norm(tok) in wanted or norm(tok.split("(")[0]) in wanted:
+                return pid
     return None
 
 
