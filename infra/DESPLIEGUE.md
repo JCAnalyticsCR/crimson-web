@@ -69,11 +69,13 @@ En cada servicio: **Settings → Source**.
   raíz del repo.
 - `docs/**` (landing y demo en GitHub Pages) y `.github/**` no despliegan ningún servicio.
 - Si el interruptor "Wait for CI" no aparece: en GitHub → Settings → Applications → Railway, aceptar los permisos
-  nuevos que pide la app. El workflow ya cumple el requisito (`on: push` sobre `main`).
+  nuevos que pide la app. El workflow ya cumple el requisito (`on: push` con `main` en `branches`; no quitarlo
+  aunque `"**"` ya lo incluya).
 
 Cómo se comporta (documentación de Railway):
 
-- El despliegue queda en **WAITING** hasta que terminan todos los workflows de GitHub Actions del commit.
+- El despliegue queda en **WAITING** hasta que terminan todos los workflows de GitHub Actions del commit. Railway
+  mira la conclusión de cada workflow, no de cada trabajo (por eso el paso informativo de `pip-audit` no bloquea).
 - Uno **fallido** lo pasa a **SKIPPED** al instante; producción sigue con la versión anterior.
 - Uno **cancelado** solo bloquea si ningún otro workflow del commit pasó. Como el de GitHub Pages también corre en
   `main`, el CI **nunca se cancela en `main`** (cada commit tiene su propio grupo de concurrencia).

@@ -5,7 +5,8 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    # "**" ya incluye main; main va explicito porque Railway ofrece "Wait for CI" solo si ve un `on.push` sobre main
+    branches: ["main", "**"]
   pull_request:
   workflow_dispatch:
 
