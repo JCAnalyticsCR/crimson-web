@@ -145,7 +145,7 @@ def _warehouse(db: Session, tid: int, name, cache: dict, commit: bool) -> tuple[
     w = db.scalar(select(Warehouse).where(Warehouse.tenant_id == tid, func.lower(Warehouse.name) == key))
     nueva = w is None
     if nueva and commit:
-        w = Warehouse(tenant_id=tid, name=name, is_default=False, active=True)
+        w = Warehouse(tenant_id=tid, name=name, is_default=False, active=True, kind="venta")  # explicito: es vendible
         db.add(w)
         db.flush()
     cache[key] = (w, nueva)

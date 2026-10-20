@@ -40,7 +40,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, time, timedelta
-from decimal import Decimal
+from decimal import ROUND_FLOOR, Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -207,7 +207,8 @@ def _own_by_wh(db: Session, tenant_id: int, product_ids: list[int] | None, whs: 
             for w in whs:
                 k = (pid, w)
                 if k in out or k in units:
-                    out[k] = min(out.get(k, ZERO), units.get(k, ZERO))
+                    # una serie es una unidad entera: nunca 2,5 de un equipo serializado
+                    out[k] = min(out.get(k, ZERO), units.get(k, ZERO)).to_integral_value(rounding=ROUND_FLOOR)
     return out
 
 
