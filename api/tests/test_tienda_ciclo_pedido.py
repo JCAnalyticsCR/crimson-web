@@ -164,6 +164,31 @@ def test_sin_cancelar_al_vencer_nota_una_vez_y_pago_tardio(client, auth, db_sess
     assert avisos and "Ojo" in avisos[0].html  # el pago llego despues del plazo: confirmar existencia
 
 
+def test_pago_tardio_de_pedido_mixto_vuelve_a_reservar_lo_propio(client, auth, db_session):
+    """1 propio + 2 bajo pedido, la reserva propia vence y lo pagan tarde: lo propio se vuelve a reservar (no queda
+    sin apartar hasta el despacho) y la compra nace UNA vez, en una solicitud nueva que reemplaza a la reservada."""
+    _publish(client)
+    _pagos(client)
+    main, _ = _whs(client)
+    p = _bajo_pedido(client, db_session, "CIC-11", "Kit NVR 8 canales", qty=5)
+    _in(client, p["id"], main["id"], 1)
+    o = _order(db_session, _buy(client, [{"product_id": p["id"], "quantity": 3}]).json()["number"])
+    vieja = _req(db_session, o)
+    assert vieja.status == "reservada"
+    _vencer(db_session, o)
+    sinv.expire_holds(db_session)  # cancel_unpaid_on_expiry apagado: sigue "nuevo"
+    assert db_session.scalar(select(StockReservation).where(StockReservation.order_id == o.id)).status == "vencida"
+    assert client.post(f"/store-orders/{o.id}/status", json={"status": "pagado"}).status_code == 200
+    db_session.refresh(vieja)
+    activas = db_session.scalars(select(StockReservation).where(StockReservation.order_id == o.id, StockReservation.status == "confirmada")).all()
+    assert len(activas) == 1 and D(str(activas[0].quantity)) == 1 and activas[0].expires_at is None
+    reqs = db_session.scalars(select(PurchaseRequest).where(PurchaseRequest.order_id == o.id).order_by(PurchaseRequest.id)).all()
+    assert [r.status for r in reqs] == ["cancelada", "borrador"] and D(str(reqs[1].lines[0].quantity)) == 2
+    avisos = _purchase_mails(db_session)
+    assert len({m.subject for m in avisos}) == 1 and "Ojo" in avisos[0].html and reqs[1].number in avisos[0].subject
+    assert client.get(f"/store/orders/{o.id}/inventory").json()["estado"] == "requiere_compra"
+
+
 def test_comprobante_en_revision_no_se_cancela(client, auth, db_session):
     _publish(client)
     _pagos(client)

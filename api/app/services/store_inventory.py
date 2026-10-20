@@ -433,28 +433,40 @@ def _moved(db: Session, o: Order, invoice_id: int | None = None) -> dict[int, De
 
 def mark_paid(db: Session, o: Order, user_id: int | None = None) -> dict:
     """Pagado: la compra bajo pedido nace ahora (solicitud reservada -> borrador + aviso "PAGADO: comprar hoy") y las
-    reservas web del pedido dejan de vencer (se mantienen hasta el despacho). Si ya se habian vencido y el pedido no
-    tiene nada reservado ni despachado, se vuelve a reservar (force: lo que no haya queda "requiere compra"); esto
-    hace commit."""
-    compra = [r.number for r in activate_requests(db, o, user_id)]
+    reservas web del pedido dejan de vencer (se mantienen hasta el despacho).
+    Pago tardio (la reserva propia ya habia vencido y no hay nada reservado, consumido ni despachado): se vuelve a
+    planear TODO el pedido con force (lo propio que haya hoy se reserva; el resto nace en borrador con UN aviso, o
+    "requiere compra" si ya no hay) y la solicitud que seguia reservada queda reemplazada: activarla sola dejaba la
+    parte propia sin reservar. Esto hace commit. Si al proveedor ya se le pidio algo, no se vuelve a planear."""
     rows = _order_reservations(db, o, ("confirmada",))
     for r in rows:
         r.expires_at = None
-    if rows:
-        return {"reservas_fijas": len(rows), **({"compra": compra} if compra else {})}
-    if compra:
-        return {"reservas_fijas": 0, "compra": compra}
-    has_any = db.scalar(
-        select(func.count(StockReservation.id)).where(StockReservation.order_id == o.id, StockReservation.status.in_(("confirmada", "consumida")))
-    )
-    has_req = db.scalar(select(func.count(PurchaseRequest.id)).where(PurchaseRequest.order_id == o.id, PurchaseRequest.status != "cancelada"))
-    if has_any or has_req or any(v > 0 for v in _moved(db, o).values()):
-        return {"reservas_fijas": 0}
+    if not rows and _late_replan(db, o):
+        for req in db.scalars(select(PurchaseRequest).where(PurchaseRequest.order_id == o.id, PurchaseRequest.status == RESERVED_REQUEST)):
+            req.status = "cancelada"
+            audit(db, o.tenant_id, user_id, "status", "purchase_request", req.id, {"status": "cancelada", "motivo": f"pedido {o.number} pagado tarde: se vuelve a reservar"})
+        db.flush()
+        res = hold_for_order(db, o, user_id=user_id, force=True, commit=True)
+        return {"re_reserva": len(res["reservas"]), "requiere_compra": res["requiere_compra"]}
+    compra = [r.number for r in activate_requests(db, o, user_id)]
+    return {"reservas_fijas": len(rows), **({"compra": compra} if compra else {})}
+
+
+def _late_replan(db: Session, o: Order) -> bool:
+    """Lo propio del pedido vencio (sin nada reservado, consumido ni despachado) y su compra al proveedor, si la hay,
+    sigue "reservada" (nunca se le pidio): al pagarse hay que planear el pedido de nuevo."""
     lapsed = db.scalar(select(func.count(StockReservation.id)).where(StockReservation.order_id == o.id, StockReservation.status == "vencida"))
     if not lapsed:
-        return {"reservas_fijas": 0}
-    res = hold_for_order(db, o, user_id=user_id, force=True, commit=True)
-    return {"re_reserva": len(res["reservas"]), "requiere_compra": res["requiere_compra"]}
+        return False
+    held = db.scalar(
+        select(func.count(StockReservation.id)).where(StockReservation.order_id == o.id, StockReservation.status.in_(("confirmada", "consumida")))
+    )
+    if held or any(v > 0 for v in _moved(db, o).values()):
+        return False
+    other = db.scalar(
+        select(func.count(PurchaseRequest.id)).where(PurchaseRequest.order_id == o.id, PurchaseRequest.status.not_in((RESERVED_REQUEST, "cancelada")))
+    )
+    return not other
 
 
 def release_for_order(db: Session, o: Order, note: str | None = None, user_id: int | None = None) -> int:
