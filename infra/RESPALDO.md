@@ -80,6 +80,10 @@ Todos los días a las **03:15 hora de Costa Rica** Railway arranca el servicio `
    junto a un resumen `.json` **sin datos personales** (hashes, tamaños, filas, migración y commit). El resumen se sube
    después del `.age`: si el resumen existe, el cifrado está completo.
 5. **Avisos:** latido al monitor si todo salió bien; si algo falló, latido de falla y correo (sección 4.5).
+6. **Registro:** la corrida queda en `task_run` (tarea `respaldo.diario`: inicio, fin, ok, hash, tamaño, filas,
+   verificación o el error, sin datos personales). El correo diario de **Salud** (07:00) muestra el último respaldo
+   y lista la corrida si falló. Va después de los avisos y nunca tumba el respaldo: si la base no responde o la tabla
+   todavía no existe, solo queda en el log.
 
 Los temporales (tienen datos personales) se borran siempre. El log termina con
 `OK respaldo diario crimson-AAAAMMDD-HHMMSS.zip.age sha256=… filas=… verificacion=restaurado` o con
@@ -188,6 +192,9 @@ y ambas se rotan si cambia el equipo. Si eso no es aceptable, no se agrega la ll
   con el paso que falló y el detalle. Los mensajes nombran variables, nunca sus valores, y quitan `usuario:clave@` de
   cualquier URL.
 - **Railway:** activar las notificaciones de fallos del servicio.
+- **Correo de Salud (07:00):** la línea "Respaldo diario" sale de `task_run` (`app.services.respaldo_estado`): el
+  último respaldo bueno, hace cuántas horas, filas, tamaño cifrado y el inicio del SHA-256. Queda en **AVISO** (nunca
+  en falla de la plataforma) si la última corrida falló o si pasaron más de 26 h sin un respaldo bueno.
 
 | Mensaje en el log o el correo | Qué revisar |
 |---|---|

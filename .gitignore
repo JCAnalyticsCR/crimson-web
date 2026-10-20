@@ -53,3 +53,13 @@ respaldos/
 crimson-respaldo-*.zip
 crimson-datos-*.zip
 *.pgdump
+# respaldo diario cifrado (app.tools.respaldo_diario) y lo que se baja o se descifra para probarlo a mano
+# (infra/RESPALDO.md seccion 5): ni cifrado entra al repo, y las llaves de age nunca salen del gestor de contrasenas
+*.zip.age
+crimson-[0-9]*.zip
+crimson.zip
+crimson-[0-9]*.json
+prueba-recuperacion*.db
+custodio*.txt
+llave-prueba*.txt
+llave-privada*.txt

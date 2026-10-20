@@ -1,5 +1,6 @@
-"""Respaldo diario automatico (plan 1.9): respalda, verifica restaurando, cifra con age, sube con rclone y avisa si falla.
-Prueba mensual: baja el ultimo, revisa edad y hashes, descifra y restaura. age y rclone se simulan (sin red ni bucket)."""
+"""Respaldo diario automatico (plan 1.9): respalda, verifica restaurando, cifra con age, sube con rclone, avisa si falla y
+deja la corrida en task_run (plan 1.8) para el correo de Salud. Prueba mensual: baja el ultimo, revisa edad y hashes,
+descifra y restaura. age y rclone se simulan (sin red ni bucket)."""
 
 import base64
 import fnmatch
@@ -15,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.db import Base, make_engine
 from app.seeds import seed
+from app.services import respaldo_estado
 from app.tools import prueba_restauracion as prueba
 from app.tools import respaldo_diario as rd
 from app.tools import restore as restore_tool
@@ -95,6 +97,53 @@ def avisos(monkeypatch):
     monkeypatch.setattr(httpx, "post", _post)
     monkeypatch.setattr(httpx, "get", _get)
     return enviados
+
+
+@pytest.fixture(autouse=True)
+def _base_por_defecto(tmp_path, monkeypatch):
+    """Las pruebas sin base_origen tambien registran la corrida: que sea en una SQLite desechable, nunca en ./crimson.db."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{(tmp_path / 'sin-base.db').as_posix()}")
+
+
+def _crear_task_run(url: str) -> None:
+    """La tabla task_run del plan 1.8 (mismas columnas). Si el modelo ya la trae, checkfirst no la toca."""
+    md = sa.MetaData()
+    sa.Table(
+        "task_run",
+        md,
+        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("task", sa.String(80)),
+        sa.Column("task_id", sa.String(64)),
+        sa.Column("started_at", sa.DateTime(timezone=True)),
+        sa.Column("finished_at", sa.DateTime(timezone=True)),
+        sa.Column("ok", sa.Boolean),
+        sa.Column("summary", sa.JSON),
+        sa.Column("error", sa.Text),
+    )
+    eng = make_engine(url)
+    md.create_all(eng, checkfirst=True)
+    eng.dispose()
+
+
+def _corridas(url: str) -> list[dict]:
+    eng = make_engine(url)
+    with eng.connect() as c:
+        filas = [dict(r) for r in c.execute(sa.text("SELECT * FROM task_run WHERE task = 'respaldo.diario' ORDER BY id")).mappings()]
+    eng.dispose()
+    for f in filas:
+        if isinstance(f["summary"], str):
+            f["summary"] = json.loads(f["summary"])
+    return filas
+
+
+def _revision(url: str, now: datetime) -> dict | None:
+    eng = make_engine(url)
+    with eng.connect() as c:
+        r = respaldo_estado.revision(c, now=now)
+    eng.dispose()
+    return r
 
 
 @pytest.fixture
@@ -297,3 +346,58 @@ def test_prueba_mensual_no_confia_en_el_resumen_del_bucket(base_origen, nube, av
     with pytest.raises(rd.Fallo) as e:
         prueba.bajar(DESTINO, identidad, tmp_path / "r2", max_horas=100000)
     assert e.value.codigo == prueba.DESCARGA
+
+
+def test_corridas_quedan_en_task_run_y_salud_las_ve(base_origen, nube, avisos, trabajo):
+    _crear_task_run(base_origen)
+    assert rd.ejecutar(_env(trabajo), ahora=DOMINGO_1) == rd.OK
+    (buena,) = _corridas(base_origen)
+    r = buena["summary"]
+    assert buena["ok"] in (True, 1) and buena["error"] is None and buena["task_id"].startswith("crimson-")
+    assert len(r["zip_sha256"]) == 64 and r["filas"] > 0 and r["age_bytes"] > 0 and r["verificacion"] == "restaurado"
+    assert r["carpetas"] == ["diario", "semanal", "mensual"]
+    assert ADMIN[0] not in json.dumps(r)  # el resumen de la corrida no lleva datos personales
+
+    ahora = datetime.now(UTC)
+    rev = _revision(base_origen, ahora + timedelta(hours=2))
+    assert rev["ok"] is True and rev["critico"] is False and rev["filas"] == r["filas"]
+    assert rev["sha256"].startswith(r["zip_sha256"][:16]) and rev["tamano"].endswith("MB")
+    vencida = _revision(base_origen, ahora + timedelta(hours=30))
+    assert vencida["ok"] is False and "vencido" in vencida and vencida["critico"] is False  # aviso, nunca 503
+
+    nube.falla.add("rclone")
+    assert rd.ejecutar(_env(trabajo), ahora=DOMINGO_1 + timedelta(days=1)) == rd.SUBIDA
+    mala = _corridas(base_origen)[-1]
+    assert mala["ok"] in (False, 0) and "subida" in mala["error"]
+    rev = _revision(base_origen, datetime.now(UTC))
+    assert rev["ok"] is False and "subida" in rev["fallo"] and rev["filas"] == r["filas"]  # muestra el ultimo bueno
+
+
+def test_configuracion_incompleta_tambien_queda_en_task_run(nube, avisos, trabajo, tmp_path, monkeypatch):
+    from app.core.config import settings
+
+    url = f"sqlite:///{(tmp_path / 'con-task-run.db').as_posix()}"
+    _crear_task_run(url)
+    monkeypatch.setattr(settings, "database_url", url)
+    assert rd.ejecutar(_env(trabajo, RESPALDO_DESTINO=None), ahora=DOMINGO_1) == rd.CONFIG
+    (mala,) = _corridas(url)
+    assert mala["ok"] in (False, 0) and "RESPALDO_DESTINO" in mala["error"] and mala["summary"]["paso"] == "configuracion"
+    assert _revision(url, datetime.now(UTC))["ultimo"] == "ninguno salió bien"
+
+
+def test_sin_task_run_el_respaldo_sigue(base_origen, nube, avisos, trabajo, capsys):
+    eng = make_engine(base_origen)
+    with eng.begin() as c:
+        c.execute(sa.text("DROP TABLE IF EXISTS task_run"))  # antes del plan 1.8 (o si se borro)
+    eng.dispose()
+    assert rd.ejecutar(_env(trabajo), ahora=DOMINGO_1) == rd.OK
+    assert "no tiene task_run" in capsys.readouterr().err
+    assert _revision(base_origen, datetime.now(UTC)) is None
+    assert avisos["latidos"] == ["https://latido.ejemplo.com/abc"]
+
+
+def test_registrar_con_la_base_caida_no_lanza(tmp_path, capsys):
+    url = f"sqlite:///{(tmp_path / 'no-existe' / 'x.db').as_posix()}"
+    ahora = datetime.now(UTC)
+    assert respaldo_estado.registrar(url, corrida="crimson-x", inicio=ahora, fin=ahora, ok=False, resumen=None, error="respaldo: caida") is False
+    assert "no se pudo registrar" in capsys.readouterr().err

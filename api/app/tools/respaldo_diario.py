@@ -16,6 +16,8 @@ Pasos:
    .age: si el resumen existe, el .age esta completo.
 5. Latido a RESPALDO_PING_URL (monitor tipo heartbeat: si un dia no llega, el monitor avisa aunque este proceso ni
    arranque). Si algo fallo: latido a <url>/fail y correo a RESPALDO_AVISO_A (por Resend, sin pasar por la base).
+6. La corrida (hash, tamano, filas o el error) queda en task_run (app.services.respaldo_estado): el correo de Salud la
+   muestra. Si la tabla no existe o la base no responde, solo queda en el log.
 
 Nunca sube nada sin cifrar y siempre borra los temporales (tienen datos personales).
 Codigos de salida: 0 bien · 1 configuracion · 2 respaldo · 3 verificacion · 4 cifrado · 5 subida.
@@ -249,6 +251,7 @@ def ejecutar(env: Mapping[str, str] | None = None, ahora: datetime | None = None
     from ..providers.einvoice import cr_now
 
     env = os.environ if env is None else env
+    inicio = datetime.now(UTC)
     ahora_cr = ahora or cr_now()
     dia = ahora_cr.date()
     nombre = "crimson-" + ahora_cr.astimezone(UTC).strftime("%Y%m%d-%H%M%S")
@@ -309,6 +312,7 @@ def ejecutar(env: Mapping[str, str] | None = None, ahora: datetime | None = None
             print(f"FALLO {f.paso}: {f.detalle}", file=sys.stderr)
         latido(ping, ok=False)
         enviar_aviso(env, f"Crimson: falló el respaldo diario ({fallos[0].paso})", html_falla(fallos, resumen, dia))
+        registrar_corrida(nombre, inicio, ok=False, resumen=resumen, fallos=fallos)
         return fallos[0].codigo
     if resumen is None:  # no deberia pasar: sin fallos siempre hay resumen
         return RESPALDO
@@ -317,7 +321,22 @@ def ejecutar(env: Mapping[str, str] | None = None, ahora: datetime | None = None
         f"archivos={resumen['archivos']} verificacion={resumen['verificacion']} carpetas={','.join(carpetas(dia))}"
     )
     latido(ping, ok=True)
+    registrar_corrida(nombre, inicio, ok=True, resumen=resumen, fallos=[])
     return OK
+
+
+def registrar_corrida(nombre: str, inicio: datetime, *, ok: bool, resumen: dict | None, fallos: list[Fallo]) -> bool:
+    """La corrida va a task_run (plan 1.8): el correo de Salud de las 07:00 muestra el ultimo respaldo y sus fallas.
+    Va despues del latido y del correo: si la base es lo que fallo, los avisos ya salieron."""
+    from ..core.config import settings
+    from ..services import respaldo_estado
+
+    if resumen is not None:
+        resumen = {**resumen, "carpetas": carpetas(date.fromisoformat(resumen["fecha_cr"]))}
+    elif fallos:
+        resumen = {"paso": fallos[0].paso, "codigo": fallos[0].codigo}
+    error = "; ".join(f"{f.paso}: {f.detalle}" for f in fallos) or None
+    return respaldo_estado.registrar(settings.database_url, corrida=nombre, inicio=inicio, fin=datetime.now(UTC), ok=ok, resumen=resumen, error=error)
 
 
 def revisar(env: Mapping[str, str]) -> int:
