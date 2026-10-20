@@ -727,6 +727,11 @@ def plan_out(db: Session, c: AllyCompany) -> dict:
             "active": r.active,
             "since": c.plan_since,
             "recurrence_id": r.id,
+            # plan 1.4: la primera factura la revisa una persona; despues salen solas
+            "first_run_requires_approval": r.first_run_requires_approval,
+            "last_send_status": r.last_send_status,
+            "last_send_note": r.last_send_note,
+            "last_invoice_id": r.last_invoice_id,
         }
         if r
         else None,
@@ -742,6 +747,7 @@ def plan_out(db: Session, c: AllyCompany) -> dict:
                 "balance": i.balance,
                 "status": i.status,
                 "currency": i.currency,
+                "sent_at": i.sent_at,
             }
             for i in ally_access.plan_invoices(db, c)
         ],
@@ -764,11 +770,15 @@ class PlanIn(BaseModel):
     active: bool = True
     product_id: int | None = None
     crear_cliente: bool = False
+    # la primera factura espera "Aprobar y enviar" (por defecto en planes nuevos); None al actualizar = no cambia
+    first_run_requires_approval: bool | None = None
 
 
 @router.put("/{cid}/plan")
 def plan_put(cid: int, data: PlanIn, p: Principal = Depends(require("aliados", "mensualidad")), db: Session = Depends(get_db)):
-    """Crea o actualiza la recurrencia que factura la mensualidad (el worker de recurrencias la emite). Nunca cobra sola."""
+    """Crea o actualiza la recurrencia que factura la mensualidad. El worker la genera y, con auto_send, la envia con
+    su PDF y enlace de pago; la primera de cada plan espera "Aprobar y enviar" en Aprobaciones (plan 1.4). Nunca cobra
+    sola con tarjeta ni suspende al aliado."""
     c = company(db, cid, p)
     antes = _snapshot(c)
     if not c.customer_id and not data.crear_cliente:
@@ -791,8 +801,10 @@ def plan_put(cid: int, data: PlanIn, p: Principal = Depends(require("aliados", "
     DocumentIn(**template)  # validar antes de guardar
     r = db.get(Recurrence, c.recurrence_id) if c.recurrence_id else None
     if r is None or r.tenant_id != p.tenant.id:
-        r = Recurrence(tenant_id=p.tenant.id, kind="factura", frequency="mensual", runs=0)
+        r = Recurrence(tenant_id=p.tenant.id, kind="factura", frequency="mensual", runs=0, first_run_requires_approval=True)
         db.add(r)
+    if data.first_run_requires_approval is not None:
+        r.first_run_requires_approval = data.first_run_requires_approval
     r.name = f"Mensualidad aliado · {c.name}"[:160]
     r.customer_id = c.customer_id
     r.template = template

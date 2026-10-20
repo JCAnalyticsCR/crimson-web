@@ -103,6 +103,23 @@ def legacy_secrets(db: Session) -> None:
         print(f"[bootstrap] Contraseñas de buzón: {res['migradas']} pasadas a FISCAL_KEYS, {res['ilegibles']} ilegibles.", flush=True)
 
 
+def plan_product(db: Session) -> None:
+    """Semilla del servicio "Mensualidad de la plataforma" (plan 1.4) en las empresas que todavia no eligieron uno.
+    Idempotente y nunca tumba el arranque."""
+    from .models import Tax, Tenant
+    from .seeds import ensure_plan_product
+
+    try:
+        for t in db.scalars(select(Tenant).where(Tenant.active)).all():
+            iva = db.scalar(select(Tax).where(Tax.tenant_id == t.id, Tax.rate_code == "08"))
+            if ensure_plan_product(db, t, iva) is not None:
+                print(f"[bootstrap] Servicio «Mensualidad de la plataforma» creado en {t.slug} (confirmá su CABYS en Productos).", flush=True)
+        db.commit()
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        print(f"[bootstrap] No se pudo crear el servicio de la mensualidad: {type(e).__name__}", flush=True)
+
+
 def main() -> None:
     with SessionLocal() as db:
         nuevos = sync_roles(db)  # roles nuevos disponibles aunque el entorno ya tenga usuarios
@@ -112,6 +129,7 @@ def main() -> None:
         link = run(db, settings.bootstrap_admin_email, demo=settings.bootstrap_demo)
         extras = extra_invites(db, settings.bootstrap_invites)
         legacy_secrets(db)
+        plan_product(db)
     for email, role, url in extras:
         print(f"[bootstrap] Invitacion de prueba · rol {role} · {email} (vence en {INVITE_HOURS} h, un solo uso):", flush=True)
         print(f"[bootstrap] {url}", flush=True)

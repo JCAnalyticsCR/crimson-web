@@ -78,7 +78,7 @@ def test_correo_aceptado_la_deja_por_cobrar_y_vencible(client, auth, db_session,
     assert mark_overdue(db_session, today=hoy + timedelta(days=6)) >= 1
     db_session.expire_all()
     assert db_session.get(Invoice, inv["id"]).status == "vencida"
-    db_session.get(Invoice, inv["id"]).due_date = hoy - timedelta(days=1)
+    db_session.get(Invoice, inv["id"]).due_date = hoy - timedelta(days=3)  # holgura: la lista usa la fecha de Costa Rica
     db_session.commit()
     assert inv["id"] in _pend(client, "facturas_vencidas")
 

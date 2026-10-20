@@ -3,6 +3,7 @@
 from datetime import date, datetime
 
 from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint
+from sqlalchemy import true as sa_true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -217,6 +218,12 @@ class Recurrence(TenantMixin, TimestampMixin, Base):
     last_expense_id: Mapped[int | None] = mapped_column(ForeignKey("expense.id"))
     runs: Mapped[int] = mapped_column(Integer, default=0)
     anchor_day: Mapped[int | None] = mapped_column(SmallInteger)  # dia ancla: un 31 no "baja al 28" para siempre
+    # Envio automatico (plan 1.4): la primera factura de cada plan espera "Aprobar y enviar" en Aprobaciones; desde que
+    # una persona la aprueba (o la envia a mano), las siguientes salen solas con su PDF y enlace de pago.
+    first_run_requires_approval: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true())
+    # resultado del ultimo envio: por_aprobar | pendiente (sin envio automatico) | enviada | fallida | sin_correo
+    last_send_status: Mapped[str | None] = mapped_column(String(12))
+    last_send_note: Mapped[str | None] = mapped_column(String(240))
 
 
 # ---------- Factura electronica (plan 5.1) ----------

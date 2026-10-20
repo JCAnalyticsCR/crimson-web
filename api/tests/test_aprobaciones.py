@@ -21,6 +21,9 @@ KEYS = [
     "accesos_portal",
     "planillas_por_aprobar",
     "comisiones_por_aprobar",
+    # plan 1.4: primera mensualidad de cada plan (Aprobar y enviar) y propuesta de suspension a D+30
+    "mensualidades_por_aprobar",
+    "aliados_en_mora",
 ]
 
 

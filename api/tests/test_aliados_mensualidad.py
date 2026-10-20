@@ -83,48 +83,112 @@ def test_por_usuario_recalcula(client, auth, db_session):
     assert cantidad() == 2
 
 
-def test_factura_de_mensualidad_y_suscripcion(client, auth, db_session):
-    from app.models import AllyCompany, Invoice
+def _correo_ok(monkeypatch, salida: list | None = None):
+    """El proveedor de correo acepta todo (y el PDF existe aunque el equipo no tenga WeasyPrint)."""
+    from app.services import documents_send, mail
 
+    def deliver(m, files=None):
+        m.status, m.provider_id = "enviado", f"re_{m.id}"
+        if salida is not None:
+            salida.append((m, [n for n, _ in (files or [])]))
+
+    monkeypatch.setattr(mail, "deliver", deliver)
+    monkeypatch.setattr(documents_send, "render_pdf", lambda html: b"%PDF-1.7 prueba")
+
+
+def test_factura_de_mensualidad_y_suscripcion(client, auth, db_session, monkeypatch):
+    """Plan 1.4: la primera mensualidad queda por aprobar (borrador que el aliado no ve); "Aprobar y enviar" la manda
+    con PDF y enlace, el aliado la ve "por pagar" y la paga en linea; la segunda sale sola."""
+    from app.models import AllyCompany, Invoice, Recurrence
+
+    salida: list = []
+    _correo_ok(monkeypatch, salida)
     admin_h = dict(client.headers)
-    a = client.post("/allies", json={"name": "Aliado Uno S.A.", "tax_id": "3-101-000001"}).json()["id"]
+    a = client.post("/allies", json={"name": "Aliado Uno S.A.", "tax_id": "3-101-000001", "email": "pagos@aliado-uno.ejemplo.com"}).json()["id"]
     h = usuario(client, admin_h, a, "jefe@aliado-uno.ejemplo.com", "aliado")
     pid = _servicio(client)
-    assert _plan(client, a, pid).status_code == 200
+    plan = _plan(client, a, pid).json()["plan"]
+    assert plan["first_run_requires_approval"] is True and plan["auto_send"] is True
     comp = db_session.get(AllyCompany, a)
     r = client.post(f"/recurrences/{comp.recurrence_id}/run")
     assert r.status_code == 201, r.text
+    assert r.json()["send_status"] == "por_aprobar" and r.json()["sent"] is False
     inv = db_session.get(Invoice, r.json()["invoice_id"])
     assert inv.external_order == "MENSUALIDAD-PLATAFORMA" and inv.customer_id == comp.customer_id
-    # recien emitida por la recurrencia queda "creado" (sin enviar): el aliado todavia no la ve ni la descarga
-    assert inv.status == "creado"
+    # la primera espera la aprobacion: sigue "creado", sin enviar, y el aliado no la ve ni la descarga
+    assert inv.status == "creado" and inv.sent_at is None
+    assert not [m for m, _ in salida if m.to == "pagos@aliado-uno.ejemplo.com"]
     assert client.get("/aliado/suscripcion", headers=h).json()["facturas"] == []
     assert inv.id not in {f["id"] for f in client.get("/aliado/facturas", headers=h).json()}
     assert client.get(f"/aliado/facturas/{inv.id}/pdf", headers=h).status_code == 404
+    assert client.post(f"/aliado/facturas/{inv.id}/pagar", headers=h).status_code == 404
     inv.due_date, inv.balance = date.today() - timedelta(days=3), inv.total
     db_session.commit()
     assert client.get("/aliado/suscripcion", headers=h).json()["estado"] == "al_dia"  # un borrador no le cuenta como atraso
-    inv.status = "enviada"
-    inv.due_date, inv.balance = date.today() + timedelta(days=15), inv.total
+    inv.due_date = date.today() + timedelta(days=15)
     db_session.commit()
+    # Aprobaciones -> "Mensualidades por aprobar" con su accion
+    sec = next(x for x in client.get("/approvals", params={"limit": 50}).json()["sections"] if x["key"] == "mensualidades_por_aprobar")
+    item = next(i for i in sec["items"] if i["id"] == inv.id)
+    assert item["action"]["path"] == f"/recurrences/{comp.recurrence_id}/approve-send" and item["action"]["label"] == "Aprobar y enviar"
+    ok = client.post(item["action"]["path"]).json()
+    assert ok["sent"] is True and ok["status"] == "enviada"
+    m, files = [x for x in salida if x[0].to == "pagos@aliado-uno.ejemplo.com"][-1]
+    assert "Aviso de cobro" in m.subject and "/pagar/" in m.html and files == [f"{inv.number}.pdf"]
+    db_session.expire_all()
+    inv = db_session.get(Invoice, inv.id)
+    assert inv.status == "enviada" and inv.sent_at is not None
+    assert db_session.get(Recurrence, comp.recurrence_id).first_run_requires_approval is False
+    assert inv.id not in {i["id"] for i in next(x for x in client.get("/approvals").json()["sections"] if x["key"] == "mensualidades_por_aprobar")["items"]}
+    # el aliado la ve por pagar, con su estado real, y la paga en linea
     sus = client.get("/aliado/suscripcion", headers=h).json()
-    assert [f["id"] for f in sus["facturas"]] == [inv.id] and sus["estado"] == "al_dia" and sus["plan"]["frecuencia"] == "mensual"
+    f = next(x for x in sus["facturas"] if x["id"] == inv.id)
+    assert sus["estado"] == "al_dia" and sus["plan"]["frecuencia"] == "mensual" and f["estado"] == "por_pagar" and f["pagable"] is True
+    pago = client.post(f"/aliado/facturas/{inv.id}/pagar", headers=h)
+    assert pago.status_code == 200 and "/pagar/" in pago.json()["url"]
+    assert client.get(f"/aliado/facturas/{inv.id}/pdf", headers=h).status_code == 200
     # facturas de otros clientes y anuladas: nunca
     otra = db_session.scalars(select(Invoice).where(Invoice.customer_id != comp.customer_id)).first()
     if otra is None:
         otro = client.get("/customers").json()["items"][0]
         q = client.post("/invoices", json={"customer_id": otro["id"], "lines": [{"name": "Algo", "quantity": 1, "unit_price": 1000}]})
         otra = db_session.get(Invoice, q.json()["id"])
-    facturas = {f["id"] for f in client.get("/aliado/facturas", headers=h).json()}
+    facturas = {x["id"] for x in client.get("/aliado/facturas", headers=h).json()}
     assert inv.id in facturas and otra.id not in facturas
     assert client.get(f"/aliado/facturas/{otra.id}/pdf", headers=h).status_code == 404
-    assert client.get(f"/aliado/facturas/{inv.id}/pdf", headers=h).status_code == 200
+    assert client.post(f"/aliado/facturas/{otra.id}/pagar", headers=h).status_code == 404
     # vencida: saldo con fecha de vencimiento pasada
     inv.due_date, inv.balance = date.today() - timedelta(days=10), inv.total
     db_session.commit()
     sus = client.get("/aliado/suscripcion", headers=h).json()
     assert sus["estado"] == "vencida" and sus["vencido"]["dias"] == 10
+    assert next(x for x in sus["facturas"] if x["id"] == inv.id)["estado"] == "vencida"
     assert client.get(f"/allies/{a}/plan").json()["estado"] == "vencida"
+    # el segundo mes sale solo (sin pasar por Aprobaciones)
+    r2 = client.post(f"/recurrences/{comp.recurrence_id}/run").json()
+    assert r2["send_status"] == "enviada" and r2["sent"] is True
+    db_session.expire_all()
+    assert db_session.get(Invoice, r2["invoice_id"]).status == "enviada"
+    out = client.get(f"/allies/{a}/plan").json()
+    assert out["plan"]["last_send_status"] == "enviada" and out["plan"]["last_invoice_id"] == r2["invoice_id"]
+
+
+def test_plan_usa_el_servicio_por_defecto(client, auth, db_session):
+    """Semilla (plan 1.4): "Mensualidad de la plataforma" con CABYS queda por defecto en Ajustes -> Aliados."""
+    from app.models import AllyCompany, Product, Recurrence
+
+    cfg = client.get("/allies/config").json()
+    prod = db_session.get(Product, cfg["plan_product_id"])
+    assert prod.code == "SRV-PLATAFORMA" and prod.item_type == "servicio" and len(prod.cabys_code) == 13 and not prod.show_on_web
+    a = client.post("/allies", json={"name": "Aliado Dos S.A.", "tax_id": "3-101-000002"}).json()["id"]
+    body = {"amount": 40000, "currency": "CRC", "mode": "fija", "next_date": date.today().isoformat(), "crear_cliente": True}
+    assert client.put(f"/allies/{a}/plan", json=body).status_code == 200
+    rec = db_session.get(Recurrence, db_session.get(AllyCompany, a).recurrence_id)
+    assert rec.template["lines"][0]["product_id"] == prod.id and rec.first_run_requires_approval is True
+    # actualizar el plan no vuelve a pedir aprobacion si ya se aprobo
+    rec.first_run_requires_approval = False
+    db_session.commit()
+    assert client.put(f"/allies/{a}/plan", json={**body, "amount": 45000}).json()["plan"]["first_run_requires_approval"] is False
 
 
 def test_ganancias_con_mensualidad(client, auth, db_session):

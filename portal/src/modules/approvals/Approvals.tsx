@@ -1,7 +1,7 @@
 /* Bandeja de Aprobaciones. Andres (13/10, 21:05-21:42) no sabia quien recibia lo enviado ni donde:
    "tendria que ser como otra categoria aqui… aprobaciones". Junta lo que ya espera un visto
    bueno (services/approvals.py en la API). Aqui NO se aprueba nada: cada elemento abre la pantalla donde se aprueba,
-   viendo lo que se aprueba. Lo mas antiguo primero. */
+   viendo lo que se aprueba (salvo "Aprobar y enviar" de las mensualidades, plan 1.4). Lo mas antiguo primero. */
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtMoney, parseTs } from "../../lib/api";
@@ -37,12 +37,31 @@ const goTo = (key: string) => {
   document.getElementById(key)?.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
 };
 
-function Row({ it }: { it: ApprovalItem }) {
+/* "Aprobar y enviar" (mensualidades, plan 1.4): la unica accion que se hace desde la bandeja. La persona puede abrir
+   la factura antes (el elemento la abre) y el boton pide confirmacion: sale el correo al cliente. */
+function ActionButton({ it, onDone }: { it: ApprovalItem; onDone: () => void }) {
+  const { toast, allows } = useSession();
+  const [busy, setBusy] = useState(false);
+  if (!it.action || !allows("sales.enviar")) return null;
+  const run = async () => {
+    if (!it.action || !confirm(`${it.action.label}: le llega al cliente ${it.title} con su PDF y enlace de pago. ¿Continuar?`)) return;
+    setBusy(true);
+    try {
+      const r = await api<{ sent: boolean; note: string | null; number: string }>(it.action.path, { method: "POST" });
+      toast(r.sent ? `${r.number} enviada al cliente` : r.note || "No salió el correo", r.sent ? undefined : "bad");
+      onDone();
+    } catch (e) { toast(e instanceof Error ? e.message : "No se pudo", "bad"); }
+    finally { setBusy(false); }
+  };
+  return <button className="btn btn--crimson btn--sm aprob-item__action" disabled={busy} onClick={run}>{it.action.label}</button>;
+}
+
+function Row({ it, onDone }: { it: ApprovalItem; onDone: () => void }) {
   const late = lateDays(it.since);
   const when = late ? `esperando hace ${late} día${late !== 1 ? "s" : ""}` : ago(it.since);
   return (
-    <li>
-      <Link className={`aprob-item${late ? " is-late" : ""}`} to={it.to}>
+    <li style={it.action ? { display: "flex", gap: 8, alignItems: "center" } : undefined}>
+      <Link className={`aprob-item${late ? " is-late" : ""}`} to={it.to} style={it.action ? { flex: 1 } : undefined}>
         <span className="aprob-item__ref mono">{it.ref}</span>
         <span className="aprob-item__main">
           <b>{it.title}</b>
@@ -55,17 +74,18 @@ function Row({ it }: { it: ApprovalItem }) {
         </span>
         <em className="aprob-item__go">Abrir →</em>
       </Link>
+      <ActionButton it={it} onDone={onDone} />
     </li>
   );
 }
 
-function Section({ s }: { s: ApprovalSection }) {
+function Section({ s, onDone }: { s: ApprovalSection; onDone: () => void }) {
   const rest = s.count - s.items.length;
   return (
     <div id={s.key} className="aprob-sec">
       <Card title={`${s.label} · ${s.count}`} extra={<Link className="btn btn--ghost btn--sm" to={s.to}>Ver todos →</Link>} flush>
         <p className="muted aprob-hint">{s.hint}{s.reviewers?.length ? ` Avisamos a: ${s.reviewers.join(", ")}.` : ""}</p>
-        <ul className="aprob-list">{s.items.map((it) => <Row key={it.id} it={it} />)}</ul>
+        <ul className="aprob-list">{s.items.map((it) => <Row key={it.id} it={it} onDone={onDone} />)}</ul>
         {rest > 0 && <p className="aprob-more">y {rest} más · <Link to={s.to}>Ver todos</Link></p>}
       </Card>
     </div>
@@ -104,7 +124,7 @@ export default function Approvals() {
       {data === null ? (
         failed ? <Card><Empty title="No se pudo cargar la bandeja" hint="Revisá la conexión y tocá Actualizar." /></Card> : <Loading />
       ) : conPend.length === 0 ? (
-        <Card><Empty title="Nada pendiente de aprobar" hint="Cuando un técnico envíe un levantamiento a revisión, o una cotización, reserva, planilla o comisión necesite tu visto bueno, aparece aquí." /></Card>
+        <Card><Empty title="Nada pendiente de aprobar" hint="Cuando un técnico envíe un levantamiento a revisión, o una cotización, reserva, planilla, comisión o mensualidad necesite tu visto bueno, aparece aquí." /></Card>
       ) : (
         <>
           <nav className="aprob-chips" aria-label="Secciones con pendientes">
@@ -112,7 +132,7 @@ export default function Approvals() {
               <a key={s.key} href={`#${s.key}`} onClick={(e) => { e.preventDefault(); goTo(s.key); }}>{s.label} <b>{s.count}</b></a>
             ))}
           </nav>
-          {conPend.map((s) => <Section key={s.key} s={s} />)}
+          {conPend.map((s) => <Section key={s.key} s={s} onDone={load} />)}
           {alDia.length > 0 && <p className="muted aprob-ok">✓ Al día: {alDia.map((s) => s.label).join(" · ")}</p>}
         </>
       )}

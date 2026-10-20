@@ -17,14 +17,17 @@ from sqlalchemy.orm import Session
 from ..core.deps import Principal
 from ..models import (
     AccessRequest,
+    AllyCompany,
     AllyCostRequest,
     Commission,
     Customer,
+    Invoice,
     Opportunity,
     PayrollRun,
     Product,
     Project,
     Quote,
+    Recurrence,
     StockReservation,
     Survey,
     User,
@@ -281,6 +284,71 @@ def _commission_item(db: Session, p: Principal, c: Commission) -> dict:
     )
 
 
+# ---------- mensualidades (plan 1.4) ----------
+PLAN_SEND_PENDING = ("por_aprobar", "fallida", "sin_correo")
+_PLAN_BADGE = {"por_aprobar": "Primera del plan: revisala", "fallida": "No salió: reenviar", "sin_correo": "Cliente sin correo"}
+
+
+def _plan_send_where(p: Principal) -> list:
+    """Ultima factura de una recurrencia que espera "Aprobar y enviar" (la primera del plan) o que no salio."""
+    pend = select(Recurrence.last_invoice_id).where(
+        Recurrence.tenant_id == p.tenant.id,
+        Recurrence.kind == "factura",
+        Recurrence.last_invoice_id.is_not(None),
+        Recurrence.last_send_status.in_(PLAN_SEND_PENDING),
+    )
+    return [Invoice.tenant_id == p.tenant.id, Invoice.id.in_(pend), Invoice.status != "anulada", Invoice.sent_at.is_(None)]
+
+
+def _plan_send_item(db: Session, p: Principal, inv: Invoice) -> dict:
+    r = db.scalar(select(Recurrence).where(Recurrence.tenant_id == inv.tenant_id, Recurrence.last_invoice_id == inv.id))
+    precio = p.sees_prices
+    row = _row(
+        inv.id,
+        inv.number,
+        _customer(db, inv.customer_id),
+        ((r.name if r else "") + (f" · {r.last_send_note}" if r and r.last_send_note else ""))[:200] or None,
+        since=inv.created_at,
+        badge=_PLAN_BADGE.get(r.last_send_status) if r else None,
+        amount=inv.total if precio else None,
+        currency=inv.currency if precio else None,
+        to=f"/facturas/{inv.id}",
+    )
+    if r is not None:
+        # unica accion que se hace desde la bandeja: la persona ya reviso la factura (abrirla queda a un clic)
+        row["action"] = {"label": "Aprobar y enviar" if r.last_send_status == "por_aprobar" else "Reenviar", "path": f"/recurrences/{r.id}/approve-send"}
+    return row
+
+
+def _ally_mora_where(p: Principal) -> list:
+    from .ally_access import mora_where
+    from .invoice_states import cr_today
+
+    return mora_where(p.tenant.id, cr_today())
+
+
+def _ally_mora_item(db: Session, p: Principal, c: AllyCompany) -> dict:
+    from datetime import timedelta
+
+    from .ally_access import SUSPEND_DAYS, plan_status
+    from .invoice_states import cr_today
+
+    hoy = cr_today()
+    v = plan_status(db, c, today=hoy).get("vencido") or {}
+    dias = int(v.get("dias") or SUSPEND_DAYS)
+    return _row(
+        c.id,
+        f"ALI-{c.id}",
+        c.name,
+        f"Mensualidad con {dias} días de atraso. Propuesta: suspender el acceso al portal (lo decide una persona).",
+        since=(hoy - timedelta(days=max(dias - SUSPEND_DAYS, 0))).isoformat(),
+        badge="Proponer suspensión",
+        amount=v.get("monto"),
+        currency=v.get("moneda"),
+        to=f"/aliados/{c.id}",
+    )
+
+
 SECTIONS: tuple[Section, ...] = (
     Section(
         "levantamientos_por_revisar",
@@ -369,6 +437,29 @@ SECTIONS: tuple[Section, ...] = (
         _commission_where,
         lambda: [Commission.earned_on, Commission.id],
         _commission_item,
+    ),
+    Section(
+        "mensualidades_por_aprobar",
+        "Mensualidades por aprobar",
+        "La primera factura de cada plan (y las que no salieron) espera tu visto bueno. Revisala y tocá «Aprobar y enviar»: "
+        "sale con su PDF y enlace de pago, y desde la siguiente salen solas.",
+        ("sales.recurrencias", "sales.enviar"),
+        "/recurrencias",
+        Invoice,
+        _plan_send_where,
+        lambda: [Invoice.created_at, Invoice.id],
+        _plan_send_item,
+    ),
+    Section(
+        "aliados_en_mora",
+        "Aliados con la mensualidad atrasada",
+        "30 días o más de atraso. El sistema no suspende a nadie: abrí el aliado y decidí (Datos → Acceso al portal).",
+        ("aliados.editar",),
+        "/aliados",
+        AllyCompany,
+        _ally_mora_where,
+        lambda: [AllyCompany.name, AllyCompany.id],
+        _ally_mora_item,
     ),
 )
 

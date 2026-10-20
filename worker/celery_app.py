@@ -30,6 +30,7 @@ _log_fiscal_keys()
 
 # Tareas por area (api/app/tasks/<area>.py, registradas con shared_task): aqui solo se importan y se agendan.
 import app.tasks.cobranza  # noqa: E402,F401  sales.mark_overdue, sales.reminders, cobranza.resumen_semanal (plan 1.3)
+import app.tasks.mensualidades  # noqa: E402,F401  mensualidades.vista_previa (plan 1.4)
 
 
 @celery.task(name="fx.bccr_daily", autoretry_for=(Exception,), retry_backoff=60, max_retries=5)
@@ -497,4 +498,5 @@ celery.conf.beat_schedule = {
     "suppliers-eurocomp-stock": {"task": "suppliers.eurocomp_stock", "schedule": crontab(hour="5,11,17,23", minute=17)},
     "mark-overdue": {"task": "sales.mark_overdue", "schedule": crontab(hour=0, minute=30)},
     "cobranza-resumen-semanal": {"task": "cobranza.resumen_semanal", "schedule": crontab(hour=7, minute=0, day_of_week="mon")},
+    "mensualidades-vista-previa": {"task": "mensualidades.vista_previa", "schedule": crontab(hour=7, minute=20)},
 }

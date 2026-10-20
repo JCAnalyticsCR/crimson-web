@@ -185,7 +185,7 @@ def test_corrida_en_seco_no_escribe_nada(client, auth, db_session, correo):
     b = _enviada(db_session, client, sin_correo, due=HOY + timedelta(days=3))
     _factura(client, cid, due=HOY)  # borrador
     antes = (db_session.scalar(select(func.count()).select_from(EmailOutbox)), db_session.scalar(select(func.count()).select_from(PaymentLink)))
-    pv = client.get("/collections/preview").json()
+    pv = client.get("/collections/preview", params={"fecha": HOY.isoformat()}).json()
     assert any("fecha de corte" in w for w in pv["warnings"])  # sin corte: muestra todas y avisa
     assert [x["invoice_id"] for x in pv["items"]] == [a] and pv["items"][0]["stage"] == "D+3"
     assert pv["skipped"][0]["invoice_id"] == b and pv["skipped"][0]["reason"] == "El cliente no tiene correo"

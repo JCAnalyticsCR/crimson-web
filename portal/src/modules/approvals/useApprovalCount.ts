@@ -13,6 +13,8 @@ export type ApprovalItem = {
   since: string | null; badge: string | null;
   /** solo donde el permiso de la seccion ya implica ver ese dinero (cotizaciones con precios, aliados con costos, comisiones) */
   amount: string | number | null; currency: string | null; to: string;
+  /** solo "mensualidades_por_aprobar" (plan 1.4): la accion que se hace desde la bandeja ("Aprobar y enviar") */
+  action?: { label: string; path: string } | null;
 };
 export type ApprovalSection = {
   key: string; label: string; hint: string; needs: string[]; to: string; count: number; items: ApprovalItem[];
