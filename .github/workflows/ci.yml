@@ -128,3 +128,19 @@ jobs:
       # imagen que despliega Railway (si nginx.conf tiene un error, falla aqui y no en produccion).
       - name: Construir la imagen del portal (incluye nginx -t)
         run: docker build --pull -t crimson-portal:ci portal
+
+  respaldo:
+    name: Respaldo · imagen + age
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Construir la imagen del cron de respaldo
+        run: docker build --pull -f infra/respaldo/Dockerfile -t crimson-respaldo:ci .
+      # llave desechable creada dentro del contenedor: comprueba que age y rclone estan y que el cifrado funciona
+      - name: La imagen cifra con age (--revisar, sin base ni bucket)
+        run: |
+          docker run --rm -e RESPALDO_DESTINO=prueba:bucket crimson-respaldo:ci sh -c \
+            'export RESPALDO_AGE_RECIPIENTS="$(age-keygen 2>&1 >/dev/null | sed "s/^Public key: //")" && rclone version | head -n 1 && python -m app.tools.respaldo_diario --revisar'

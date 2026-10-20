@@ -166,6 +166,11 @@ def verificar(zip_path: Path, tmp: Path, modo: str) -> str:
         rc = restore.main([str(zip_path), "--target", f"sqlite:///{destino.as_posix()}"])
     except Exception as e:  # noqa: BLE001
         raise Fallo(VERIFICACION, "verificacion", f"{type(e).__name__}: {limpio(e, 300)}") from e
+    finally:
+        try:
+            destino.unlink(missing_ok=True)  # es una copia en claro de toda la base: fuera del disco apenas se verifica
+        except OSError:
+            pass  # la carpeta temporal se borra completa al final de la corrida
     if rc != 0:
         raise Fallo(VERIFICACION, "verificacion", f"la restauracion de prueba salio con codigo {rc} (codigos en infra/RESPALDO.md seccion 5)")
     return "restaurado"

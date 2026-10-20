@@ -11,7 +11,7 @@ tumbe la plataforma. Complementa `infra/RESPALDO.md` (respaldos) y el runbook de
 ## 1. El camino de un cambio
 
 ```
-push a main ──► GitHub Actions "CI" (4 trabajos en paralelo, < 10 min)
+push a main ──► GitHub Actions "CI" (5 trabajos en paralelo, < 10 min)
                    │  verde  ──► Railway despliega SOLO los servicios cuyas rutas vigiladas cambiaron
                    │  rojo   ──► Railway marca el despliegue SKIPPED: producción sigue con la versión anterior
 ```
@@ -28,6 +28,7 @@ push a main ──► GitHub Actions "CI" (4 trabajos en paralelo, < 10 min)
 | Migraciones | Postgres 16 vacía: una sola cabeza de Alembic, `alembic upgrade head`, `alembic check`, y la última migración se revierte y se vuelve a aplicar | hay dos cabezas, una migración no corre en Postgres, el modelo y las migraciones no coinciden, o el `downgrade` no sirve |
 | Portal · tsc + vite build | `npm ci`, `tsc -b`, `vite build` | errores de tipos o de build |
 | Portal · imagen + nginx -t | `docker build portal` (el Dockerfile arma `nginx.conf` con `envsubst` y corre `nginx -t`) | `nginx.conf` o el Dockerfile del portal tienen un error |
+| Respaldo · imagen + age | construye `infra/respaldo/Dockerfile` y cifra unos bytes con una llave desechable (`respaldo_diario --revisar`) | la imagen del cron de respaldo no construye o le falta `age`/`rclone` |
 
 Lo mismo en local, antes de subir:
 
@@ -37,6 +38,7 @@ cd api && DATABASE_URL=postgresql+psycopg://crimson:crimson_local_only@localhost
           uv run alembic upgrade head && uv run alembic check      # con infra/docker-compose.yml levantado
 cd portal && npm ci && npx tsc -b && npx vite build
 docker build -t crimson-portal:local portal                         # nginx -t
+docker build -f infra/respaldo/Dockerfile -t crimson-respaldo:local .  # imagen del cron de respaldo
 ```
 
 Reglas que el CI hace cumplir:
@@ -81,7 +83,7 @@ Anotar fecha y resultado en la bitácora de operaciones. Es parte del criterio d
 
 ### Recomendado: proteger `main` en GitHub
 
-Settings → Branches → regla para `main`: "Require status checks to pass" con los cuatro trabajos del CI. Así un PR
+Settings → Branches → regla para `main`: "Require status checks to pass" con los cinco trabajos del CI. Así un PR
 rojo no se puede fusionar. Si alguien empuja directo a `main`, la compuerta de Railway sigue protegiendo producción.
 
 ## 4. Ventanas, orden y migraciones

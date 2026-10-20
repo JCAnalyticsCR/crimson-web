@@ -34,6 +34,7 @@ class Nube:
         self.objetos: dict[str, bytes] = {}
         self.llamadas: list[list[str]] = []
         self.falla: set[str] = set()
+        self.en_disco_al_subir: set[str] = set()
 
     def instalar(self, monkeypatch):
         monkeypatch.setattr(rd, "herramienta", lambda nombre: nombre)
@@ -58,6 +59,7 @@ class Nube:
             src, dst = args[2], args[3]
             if dst.startswith("nube:"):
                 self.objetos[dst] = Path(src).read_bytes()
+                self.en_disco_al_subir.update(x.name for x in Path(src).parent.iterdir())
             else:
                 Path(dst).write_bytes(self.objetos[src])
             return ""
@@ -160,7 +162,9 @@ def test_respaldo_diario_completo(base_origen, nube, avisos, trabajo, capsys):
     age = next(a for a in nube.llamadas if a[0] == "age")
     assert age[1:5] == ["-r", LLAVE_1, "-r", LLAVE_2]
     assert all("--no-check-dest" in a for a in nube.llamadas if a[0] == "rclone")  # credenciales que solo escriben
-    assert list(trabajo.iterdir()) == []  # el zip con datos personales no queda en disco
+    # mientras se sube, en disco solo queda lo cifrado y el resumen: ni el zip ni la base de verificacion en claro
+    assert nube.en_disco_al_subir and all(n.endswith((".zip.age", ".json")) for n in nube.en_disco_al_subir)
+    assert list(trabajo.iterdir()) == []  # y al terminar no queda nada
     assert avisos["latidos"] == ["https://latido.ejemplo.com/abc"] and avisos["correos"] == []
     assert "OK respaldo diario crimson-" in capsys.readouterr().out
 

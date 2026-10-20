@@ -11,7 +11,7 @@ cp ../.env.example ../.env               # ajustar JWT_SECRET; con SQLite no hac
 uv run alembic upgrade head              # migraciones
 uv run python -m app.seeds --admin-email tu@correo.com --admin-password '<fuerte>'
 uv run uvicorn app.main:app --reload     # http://127.0.0.1:8000/docs
-uv run pytest -q                         # 25 tests: totales v4.4, consecutivos, auth, flujo, roles, PDF/correo, inventario, e-invoice+NC, reportes/Excel, ajustes, recurrencias, webhook ONVO, tienda+checkout, órdenes→tiquete, recepción XML, búsqueda, API pública
+uv run pytest -n auto -q                 # toda la suite en paralelo (pytest-xdist), igual que el CI (.github/workflows/ci.yml)
 ```
 
 Portal: `cd portal && npm install && npm run dev` → http://localhost:5173 (proxy `/api` → `:8000`).
@@ -19,7 +19,7 @@ Todo junto con Docker: `docker compose -f infra/docker-compose.yml up --build`.
 
 ## Staging en Railway
 
-Proyecto `crimson-plataforma` (entorno `production` de Railway, datos de prueba): servicios `api` (raíz `/api`), `portal` (raíz `/portal`, nginx con proxy `/api` a la URL pública de la API), `worker` (raíz del repo, `RAILWAY_DOCKERFILE_PATH=worker/Dockerfile`), Postgres y Redis. Cada push a `main` redespliega.
+Proyecto `crimson-plataforma` (entorno `production` de Railway, datos de prueba): servicios `api` (raíz `/api`), `portal` (raíz `/portal`, nginx con proxy `/api` a la URL pública de la API), `worker` (raíz del repo, `RAILWAY_DOCKERFILE_PATH=worker/Dockerfile`), Postgres y Redis. Cada push a `main` redespliega **solo si el CI pasa** ("Wait for CI" y rutas vigiladas: `infra/DESPLIEGUE.md`). Respaldo diario cifrado fuera de Railway: servicio cron `respaldo` (`infra/RESPALDO.md` §4).
 
 - Portal: https://portal-production-4312.up.railway.app · API: https://api-production-f07a.up.railway.app (`/health`, `/docs`).
 - Arranque sin contraseñas: con la base vacía y `BOOTSTRAP_ADMIN_EMAIL` definido, `python -m app.bootstrap` (corre en cada arranque) emite una invitación de admin de un solo uso y la escribe en el log de `api`. Cada reinicio sin usuarios la reemplaza; una vez aceptada, queda inerte.
