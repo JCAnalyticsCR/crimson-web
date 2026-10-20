@@ -60,7 +60,7 @@ export default function InvoiceDetail() {
 
   return (
     <>
-      <DocEditor kind="invoice" key={`${inv?.status}-${inv?.payments.length ?? 0}`} />
+      <DocEditor kind="invoice" key={`${inv?.status}-${inv?.payments.length ?? 0}-${inv?.einvoice_status}`} />
       {inv && (
         <div className="doc" style={{ marginTop: -4 }}>
           <Card title="Pagos" flush extra={<div style={{ display: "flex", gap: 8 }}>
