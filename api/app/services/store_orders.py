@@ -69,7 +69,7 @@ CHECKOUT_DEFAULTS: dict = {
         "sinpe": {"active": True, "phone": "", "holder": "", "note": ""},
         "transferencia": {"active": True, "bank": "", "iban": "", "holder": "", "holder_id": "", "note": ""},
         "tarjeta": {"active": False, "installments": False, "max_installments": 0},
-        # efectivo solo con retiro en sitio (pregunta 7 a Andres, recomendado si): contra entrega a domicilio se
+        # efectivo solo con retiro en sitio (por defecto; Mi Tienda lo puede abrir al envio): contra entrega a domicilio se
         # despacha mercaderia que no se devuelve sin haberla cobrado
         "efectivo": {"active": False, "note": "Pago en efectivo al retirar el pedido.", "pickup_only": True},
     },
