@@ -525,6 +525,8 @@ def _inventory(db: Session, o: Order, old: str, new: str, user_id: int | None = 
     enviado/entregado descuenta una sola vez, cancelado libera. "Comprobante en revision" sigue siendo un pedido
     sin pagar: para el inventario cuenta como "nuevo" (asi el pago confirmado tambien fija la reserva)."""
     store_inventory.on_order_status(db, o, "nuevo" if old in ("nuevo", "en_revision") else old, new, user_id)
+    if {old, new} == {"nuevo", "en_revision"}:  # comprobante subido o rechazado: el plazo de lo apartado
+        store_inventory.on_review(db, o, under_review=new == "en_revision")
     if new == "cancelado":
         o.inventory_state = "released"
     elif new in ("enviado", "entregado"):

@@ -228,6 +228,38 @@ def test_comprobante_en_revision_no_se_cancela(client, auth, db_session):
     assert _avail(client, p["id"]).json()[str(p["id"])]["disponible"] is False
 
 
+def test_comprobante_en_revision_mantiene_lo_propio_y_rechazado_da_plazo(client, auth, db_session):
+    """Con el comprobante en revision lo propio tampoco vence (el comprobante puede ser bueno: si se liberara, otro
+    cliente se lleva la ultima unidad de un pedido pagado). Rechazado, el cliente tiene al menos 24 h para subir otro."""
+    _publish(client)
+    _pagos(client)
+    main, _ = _whs(client)
+    p = _prod(client, "CIC-14", "Cámara bala 4 MP")
+    _in(client, p["id"], main["id"], 1)
+    _cfg(client, cancel_unpaid_on_expiry=True)
+    r = _buy(client, [{"product_id": p["id"], "quantity": 1}])
+    o = _order(db_session, r.json()["number"])
+    client.post(f"{SLUG}/orders/{r.json()['track_token']}/proof", files={"file": ("s.png", PNG + b"p", "image/png")})
+    res = db_session.scalar(select(StockReservation).where(StockReservation.order_id == o.id))
+    db_session.refresh(res)
+    assert res.status == "confirmada" and res.expires_at is None
+    o.expires_at = datetime.now(UTC) - timedelta(hours=1)  # el plazo para pagar paso mientras se revisaba
+    db_session.commit()
+    sinv.expire_holds(db_session)
+    db_session.refresh(o)
+    db_session.refresh(res)
+    assert o.status == "en_revision" and res.status == "confirmada"
+    assert _avail(client, p["id"]).json()[str(p["id"])]["disponible"] is False  # sigue apartado
+    # rechazado: vuelve a "nuevo" con 24 h para subir otro; no se cancela en la corrida siguiente
+    assert client.post(f"/store-orders/{o.id}/status", json={"status": "nuevo"}).status_code == 200
+    db_session.refresh(o)
+    db_session.refresh(res)
+    assert so.aware(o.expires_at) > datetime.now(UTC) + timedelta(hours=23) and so.aware(res.expires_at) == so.aware(o.expires_at)
+    sinv.expire_holds(db_session)
+    db_session.refresh(o)
+    assert o.status == "nuevo"
+
+
 # ---------- tarjeta: nunca se cancela sin preguntarle a ONVO ----------
 def test_tarjeta_pagada_en_onvo_sin_webhook_queda_pagada(client, auth, db_session, fake_onvo):
     fake_onvo.connect(client)

@@ -19,6 +19,8 @@ Reglas
 - Vencimiento (expire_holds): las reservas web vencen, y los pedidos "nuevo" con el plazo para pagar vencido (tengan
   o no reserva propia) dejan una nota en el historial; con cancel_unpaid_on_expiry se cancelan, pero nunca uno con
   tarjeta sin preguntarle a ONVO (si ONVO no responde, se reintenta) ni uno con comprobante en revision.
+  Con comprobante en revision tampoco vence lo apartado (on_review); si lo rechazan, el pedido tiene al menos 24 h
+  para subir otro.
 - force=True (pedido ya pagado que se vuelve a reservar) nunca rechaza: lo que falte queda "requiere compra".
 - Despacho (enviado/entregado) o factura: la reserva se consume y sale del inventario UNA sola vez. Las
   salidas llevan order_id; la factura de un pedido ya despachado solo enlaza esas salidas (asi anular la
@@ -35,6 +37,7 @@ API para el checkout (todas reciben la sesion; las que dicen "hace commit" lo ha
 - fulfill_for_order(db, order, user_id=None, invoice=None) -> int (sin commit)
 - deduct_for_order_invoice(db, order, invoice, user_id=None) -> int (sin commit; reemplaza deduct_for_invoice)
 - on_order_status(db, order, old, new, user_id=None) -> dict (sin commit, salvo la re-reserva al pagar)
+- on_review(db, order, under_review) -> None     (sin commit; comprobante subido o rechazado)
 - order_stock(db, order) -> dict                 (estado de inventario del pedido para el admin)
 - expire_holds(db) -> int                        (worker; hace commit)
 - back_in_stock(db) -> int                       (worker; hace commit)
@@ -606,6 +609,26 @@ def deduct_for_order_invoice(db: Session, o: Order, invoice: Invoice, user_id: i
     if not _managed(db, o):
         return invsvc.deduct_for_invoice(db, invoice, user_id)
     return fulfill_for_order(db, o, user_id, invoice)
+
+
+REVIEW_GRACE = timedelta(hours=24)  # comprobante rechazado: tiempo minimo para subir otro antes de que venza
+
+
+def on_review(db: Session, o: Order, under_review: bool) -> None:
+    """Comprobante subido (under_review): lo propio del pedido deja de vencer mientras el equipo lo revisa (lo del
+    proveedor ya sigue apartado: availability._web_requests); el comprobante puede ser bueno. Rechazado: el pedido
+    vuelve a "nuevo" con al menos REVIEW_GRACE para subir otro (el correo de rechazo se lo pide) y lo propio vence
+    con el. Sin commit."""
+    rows = _order_reservations(db, o, ("confirmada",))
+    if under_review:
+        for r in rows:
+            r.expires_at = None
+        return
+    if o.expires_at is None:
+        return
+    o.expires_at = max(_aware(o.expires_at), _now() + REVIEW_GRACE)
+    for r in rows:
+        r.expires_at = o.expires_at
 
 
 def on_order_status(db: Session, o: Order, old: str | None, new: str, user_id: int | None = None) -> dict:
