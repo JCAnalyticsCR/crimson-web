@@ -9,6 +9,9 @@
   24 h y el correo de la empresa; a los administradores y a OPS_ALERT_EMAILS. Purga las corridas de mas de 30 dias.
 
 OPS_ALERT_EMAILS: correos de quien opera la plataforma, separados por coma (variable de entorno; nunca en el codigo).
+
+Las dos tareas (salud.latido, salud.correo_diario) son shared_task: worker/celery_app.py solo importa este modulo y
+pone sus entradas en el beat (regla de integracion 4).
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import os
 import re
 from datetime import UTC, datetime, timedelta
 
+from celery import shared_task
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -261,10 +265,7 @@ def daily_report(db: Session, now: datetime | None = None) -> int:
             f"<td>{html.escape((x['error'] or '')[:200])}</td></tr>"
             for x in malas
         )
-        bloque_t = (
-            "<table border=0 cellpadding=4><tr><th>Tarea</th><th>Fallas</th><th>Sin terminar</th><th>Último error</th></tr>"
-            f"{filas_t}</table>"
-        )
+        bloque_t = f"<table border=0 cellpadding=4><tr><th>Tarea</th><th>Fallas</th><th>Sin terminar</th><th>Último error</th></tr>{filas_t}</table>"
     else:
         bloque_t = f"<p>Ninguna tarea falló ({sum(x['total'] for x in tareas)} corridas de {len(tareas)} tareas).</p>"
     body = (
@@ -284,3 +285,18 @@ def purge(db: Session, now: datetime | None = None) -> int:
     b = db.execute(delete(TaskRun).where(TaskRun.task == HEARTBEAT_TASK, TaskRun.started_at < now - KEEP_HEARTBEAT)).rowcount or 0
     db.commit()
     return a + b
+
+
+# ---------- tareas del worker (las pone en el beat worker/celery_app.py) ----------
+@shared_task(name="salud.latido")
+def latido() -> dict:
+    """Latido del beat y del worker (con los nombres de la configuracion que le falta): /health/deep lo mira."""
+    with _session() as db:
+        return heartbeat(db)
+
+
+@shared_task(name="salud.correo_diario")
+def correo_diario() -> int:
+    """Correo de Salud a los administradores y a OPS_ALERT_EMAILS; purga las corridas de mas de 30 dias."""
+    with _session() as db:
+        return daily_report(db)

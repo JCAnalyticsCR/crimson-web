@@ -109,6 +109,26 @@ def test_avisos_de_eurocomp_tipo_de_cambio_y_por_emitir(db_session):
     assert svc.check_por_emitir(db_session, now)["ok"] is True
 
 
+def test_onvo_tarjeta_apagada_no_avisa_y_encendida_sin_llave_live_si(db_session, monkeypatch):
+    """Tarjeta apagada en Mi Tienda es una decision (no un aviso diario); encendida en produccion sin llave live, la
+    tienda no la ofrece y se pierde la venta; una llave live fuera de produccion cobraria dinero real."""
+    t = _t(db_session)
+    monkeypatch.setattr(settings, "onvo_secret_key", "onvo_test_secret_key_" + "x" * 24)  # llave de entorno de prueba
+    monkeypatch.setattr(settings, "env", "production")
+    c = svc.check_onvo(db_session)
+    assert c == {"ok": True, "critico": False, "modo": "test", "tarjeta": "apagada"}
+    store = (t.settings or {}).get("store") or {}
+    t.settings = {**(t.settings or {}), "store": {**store, "checkout": {**(store.get("checkout") or {}), "methods": {"tarjeta": {"active": True}}}}}
+    db_session.commit()
+    c = svc.check_onvo(db_session)
+    assert c["ok"] is False and c["tarjeta"] == "activa" and c["modo"] == "test"
+    monkeypatch.setattr(settings, "onvo_secret_key", "onvo_live_secret_key_" + "x" * 24)
+    assert svc.check_onvo(db_session)["ok"] is True
+    monkeypatch.setattr(settings, "env", "staging")
+    assert svc.check_onvo(db_session)["ok"] is False  # live fuera de produccion
+    assert "onvo_live" not in str(svc.check_onvo(db_session))  # nunca la llave
+
+
 # ---------- corridas y fallas ----------
 def test_tarea_que_falla_queda_registrada_y_avisa_una_sola_vez_por_dia(worker, db_session, monkeypatch):
     monkeypatch.setenv("OPS_ALERT_EMAILS", "operacion@ejemplo.com, ")
@@ -146,7 +166,7 @@ def test_el_worker_registra_las_señales_y_programa_latido_y_correo(worker):
     assert task_postrun.receivers and task_failure.receivers
     beat = worker.celery.conf.beat_schedule
     assert beat["salud-latido"]["task"] == "salud.latido" and beat["salud-correo-diario"]["task"] == "salud.correo_diario"
-    assert worker.salud_latido()["env"] == settings.env
+    assert worker.celery.tasks["salud.latido"]()["env"] == settings.env
 
 
 def test_sanitize():
@@ -169,13 +189,13 @@ def test_correo_diario_a_admin_y_operacion_una_vez_y_purga(worker, db_session, m
         ]
     )
     db_session.commit()
-    assert worker.salud_correo_diario() == 2
+    assert worker.celery.tasks["salud.correo_diario"]() == 2
     correos = _alertas(db_session, "salud:diario:")
     assert sorted(c.to for c in correos) == ["admin@crimsonapp.com", "operacion@ejemplo.com"]
     html = correos[0].html
     assert "sales.run_recurrences" in html and "dato raro" in html and "Latido del worker" in html and "Correos de las últimas 24 h" in html
     # corre dos veces el mismo dia: no se repite
-    worker.salud_correo_diario()
+    worker.celery.tasks["salud.correo_diario"]()
     assert len(_alertas(db_session, "salud:diario:")) == 2
     tareas = {r.task for r in db_session.scalars(select(TaskRun))}
     assert "viejo" not in tareas and "salud.latido" in tareas  # se purgo lo viejo; el latido reciente queda
@@ -216,6 +236,54 @@ def test_recurrencia_que_falla_deja_la_traza(db_session, caplog, monkeypatch):
         ops.run_due_recurrences(db_session, today=date(2026, 1, 2))
     rec = [x for x in caplog.records if x.name == "crimson.recurrences"]
     assert rec and rec[0].exc_info is not None
+
+
+# ---------- monitor sintetico de la tienda (scripts/monitor/tienda_check.py) ----------
+def _tienda_check():
+    import importlib.util
+
+    path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "monitor", "tienda_check.py"))
+    spec = importlib.util.spec_from_file_location("tienda_check", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_monitor_de_la_tienda_muestra_rotativa():
+    tc = _tienda_check()
+    locs = list(range(10))
+    assert tc.sample(locs, 3, now=0) == [0, 1, 2] and tc.sample(locs, 3, now=1800) == [3, 4, 5]
+    assert tc.sample(locs, 3, now=1800 * 3) == [9, 0, 1]  # da la vuelta: en unas horas pasa por todo el sitemap
+    assert tc.sample(locs[:2], 5) == [0, 1] and tc.sample([], 3) == []
+
+
+def test_monitor_de_la_tienda_detecta_basura_gzip_pagina_en_blanco_y_pago_simulado(monkeypatch):
+    import json
+
+    tc = _tienda_check()
+    base, deep = "https://tienda.ejemplo.com", "https://panel.ejemplo.com/api/health/deep"
+    ok = b'<html><head><title>Producto</title></head><body><div id="root"></div><script type="module" src="/assets/index.js"></script></body></html>'
+    urls = [f"{base}/p/{i}" for i in range(8)]
+    pages = {
+        f"{base}/sitemap.xml": (200, ("<urlset>" + "".join(f"<url><loc>{u}</loc></url>" for u in urls) + "</urlset>").encode(), {}),
+        f"{base}/": (200, ok, {}),
+        f"{base}/catalogo": (200, ok, {}),
+        f"{base}/api/public/store/tienda/checkout-config": (200, json.dumps({"methods": [{"code": "sinpe", "simulated": False}]}).encode(), {}),
+        deep: (200, b'{"status": "ok"}', {}),
+        **{u: (200, ok, {}) for u in urls},
+    }
+    monkeypatch.setattr(tc, "get", lambda url, timeout=25.0: pages.get(url, (404, b"no existe", {})))
+    monkeypatch.setattr(tc.time, "sleep", lambda s: None)
+    assert tc.run(base, "tienda", 3, deep) == []
+    # /catalogo con el fragmento SSI comprimido pegado y sin la app, pago simulado y /health/deep en 503
+    pages[f"{base}/catalogo"] = (200, b"<html><head></head><body>\x1f\x8b\x08\x00\x00</body></html>", {})
+    pages[f"{base}/api/public/store/tienda/checkout-config"] = (200, json.dumps({"methods": [{"code": "tarjeta", "simulated": True}]}).encode(), {})
+    pages[deep] = (503, b'{"status": "falla"}', {})
+    fails = tc.run(base, "tienda", 3, deep)
+    texto = " | ".join(fails)
+    assert "1f8b" in texto and "sin <title>" in texto and "/assets/" in texto
+    assert "metodos simulados ['tarjeta']" in texto and "health/deep: estado 503 (falla)" in texto
+    assert tc.main(["--base", base, "--slug", "tienda", "--sample", "3", "--deep", deep]) == 1
 
 
 class _Ctx:

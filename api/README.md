@@ -226,9 +226,10 @@ emisión.
   administradores y a `OPS_ALERT_EMAILS`, como máximo uno por tarea y por día.
 - **`GET /health/deep`** (público, sin datos sensibles): latido del beat y del worker (`salud.latido`, cada 5 min),
   correo configurado en el worker, ENV, existencias de Eurocomp (< 8 h), correos fallidos en 24 h, tipo de cambio
-  (≤ 2 días hábiles), modo de ONVO y facturas "Por emitir" de más de 24 h. Responde **503** si falla la base, el latido
-  tiene más de 15 min o, en producción, el worker no tiene `RESEND_API_KEY`; lo demás sale como aviso. El monitor
-  externo mira esta ruta.
+  (≤ 2 días hábiles), modo de ONVO (avisa si la tienda ofrece tarjeta sin llave live en producción; la tarjeta
+  apagada no avisa) y facturas "Por emitir" de más de 24 h. Responde **503** si falla la base, el latido tiene más de
+  15 min o, en producción, el worker no tiene `RESEND_API_KEY`; lo demás sale como aviso. El monitor externo mira esta
+  ruta.
 - **Correo diario de Salud** a las 07:00 a los administradores y a `OPS_ALERT_EMAILS`.
 - **Logs:** INFO a stdout y WARNING o más a stderr (`app/core/logging.py`), en api y worker. `LOG_LEVEL` lo cambia.
 - **Monitor de respaldo:** `scripts/monitor/tienda_check.py` (GitHub Actions cada 30 min, `.github/workflows/monitor.yml`;

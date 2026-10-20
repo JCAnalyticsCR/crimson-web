@@ -114,7 +114,8 @@ def _notify_owners(db: Session, failed: list[EmailOutbox]) -> int:
         if t is None:
             continue
         filas = "".join(
-            f"<li><b>{html.escape(label or m.subject or '')}</b> · para {html.escape(m.to or '')} · {html.escape((m.error or '')[:160])}</li>" for label, m in items
+            f"<li><b>{html.escape(label or m.subject or '')}</b> · para {html.escape(m.to or '')} · {html.escape((m.error or '')[:160])}</li>"
+            for label, m in items
         )
         ids = ",".join(str(m.id) for _, m in items)
         mail.queue_email(

@@ -68,7 +68,7 @@ def sample(locs: list[str], n: int, now: float | None = None) -> list[str]:
         return []
     if len(locs) <= n:
         return list(locs)
-    slot = int((now or time.time()) // 1800)
+    slot = int((time.time() if now is None else now) // 1800)
     start = (slot * n) % len(locs)
     return [locs[(start + i) % len(locs)] for i in range(n)]
 

@@ -6,8 +6,9 @@ correos ni llaves: el endpoint es publico para el monitor externo). Si una revis
 Criticas (la plataforma no esta funcionando): la base de datos, el latido del beat y el worker (menos de 15 min) y,
 en produccion, el correo configurado en el worker (sin RESEND_API_KEY ningun aviso le llega a nadie).
 Avisos (se ven en el correo de Salud y en el JSON, sin tumbar el monitor): existencias de Eurocomp de mas de 8 h,
-correos "fallido" en 24 h, tipo de cambio de mas de 2 dias habiles, ENV distinto de produccion, ONVO con llave de
-pruebas en produccion (o live fuera de produccion) y la cola "Por emitir" con facturas de mas de 24 h.
+correos "fallido" en 24 h, tipo de cambio de mas de 2 dias habiles, ENV distinto de produccion, la tienda ofreciendo
+tarjeta sin llave ONVO live en produccion (o una llave live fuera de produccion) y la cola "Por emitir" con facturas de
+mas de 24 h.
 """
 
 from __future__ import annotations
@@ -51,7 +52,9 @@ def business_days_between(a: date, b: date) -> int:
 
 
 def last_heartbeat(db: Session) -> TaskRun | None:
-    return db.scalar(select(TaskRun).where(TaskRun.task == HEARTBEAT_TASK, TaskRun.ok.is_(True)).order_by(TaskRun.started_at.desc(), TaskRun.id.desc()).limit(1))
+    return db.scalar(
+        select(TaskRun).where(TaskRun.task == HEARTBEAT_TASK, TaskRun.ok.is_(True)).order_by(TaskRun.started_at.desc(), TaskRun.id.desc()).limit(1)
+    )
 
 
 # ---------- revisiones ----------
@@ -114,24 +117,33 @@ def check_fx(db: Session, today: date) -> dict:
 
 
 def check_onvo(db: Session) -> dict:
-    """Modo de la llave ONVO activa de cada empresa (nunca la llave). Tarjeta apagada no es problema: es una decision."""
+    """Modo de la llave ONVO activa de cada empresa (nunca la llave) y si la tienda ofrece tarjeta.
+    La tarjeta apagada en Mi Tienda es una decision, no un problema (asi no avisa todos los dias). En produccion avisa
+    si la tienda tiene la tarjeta encendida sin una llave live (el cliente no la ve: venta perdida); fuera de
+    produccion, ante cualquier llave live (cada pago cobraria dinero real)."""
     from . import onvo
+    from .store_orders import checkout_cfg
 
-    modos = []
+    modos, bad, tarjeta = [], False, False
     for t in db.scalars(select(Tenant).where(Tenant.active)):
         modo = onvo.status(db, t).get("mode")  # llave de la pasarela activa (o la de entorno de esa empresa)
+        on = bool((checkout_cfg(t)["methods"].get("tarjeta") or {}).get("active"))
+        tarjeta = tarjeta or on
         if modo:
             modos.append(modo)
+        bad = bad or ((on and modo != "live") if settings.is_prod else modo == "live")
     if not modos:
-        return {"ok": True, "critico": False, "modo": "sin_tarjeta"}
-    bad = any(m != "live" for m in modos) if settings.is_prod else any(m == "live" for m in modos)
-    modo = "live" if all(m == "live" for m in modos) else ("test" if all(m == "test" for m in modos) else "mixto")
-    return {"ok": not bad, "critico": False, "modo": modo}
+        modo = "sin_llave"
+    else:
+        modo = "live" if all(m == "live" for m in modos) else ("test" if all(m == "test" for m in modos) else "mixto")
+    return {"ok": not bad, "critico": False, "modo": modo, "tarjeta": "activa" if tarjeta else "apagada"}
 
 
 def check_por_emitir(db: Session, now: datetime, tenant_id: int | None = None) -> dict:
-    q = select(func.count()).select_from(Invoice).where(
-        Invoice.einvoice_status == "sin_emitir", Invoice.status.in_(POR_EMITIR_STATES), Invoice.created_at < now - POR_EMITIR_MAX
+    q = (
+        select(func.count())
+        .select_from(Invoice)
+        .where(Invoice.einvoice_status == "sin_emitir", Invoice.status.in_(POR_EMITIR_STATES), Invoice.created_at < now - POR_EMITIR_MAX)
     )
     if tenant_id is not None:
         q = q.where(Invoice.tenant_id == tenant_id)

@@ -14,7 +14,7 @@ from celery.schedules import crontab
 from celery.signals import setup_logging as celery_setup_logging
 
 from app.core.config import settings
-from app.tasks.salud import connect_signals
+from app.tasks.salud import connect_signals  # tambien registra las tareas salud.* (shared_task)
 
 log = logging.getLogger("crimson.worker")
 
@@ -549,26 +549,6 @@ def purge_trash() -> int:
         n = purge_expired(db)
     log.info("Papelera: %s registro(s) purgado(s)", n)
     return n
-
-
-@celery.task(name="salud.latido")
-def salud_latido() -> dict:
-    """Latido del beat y del worker (con los nombres de la configuracion que le falta): /health/deep lo mira."""
-    from app.core.db import SessionLocal
-    from app.tasks.salud import heartbeat
-
-    with SessionLocal() as db:
-        return heartbeat(db)
-
-
-@celery.task(name="salud.correo_diario")
-def salud_correo_diario() -> int:
-    """Correo de Salud a los administradores y a OPS_ALERT_EMAILS; purga las corridas de mas de 30 dias."""
-    from app.core.db import SessionLocal
-    from app.tasks.salud import daily_report
-
-    with SessionLocal() as db:
-        return daily_report(db)
 
 
 celery.conf.beat_schedule = {
