@@ -202,3 +202,23 @@ def test_genera_con_la_fecha_de_costa_rica(client, auth, db_session, correo, mon
     db_session.expire_all()
     r = db_session.get(Recurrence, rec["id"])
     assert r.runs == 1 and r.next_date == date(2027, 1, 1) and r.last_send_status == "enviada" and len(_al(correo, CLIENTE)) == 1
+
+
+def test_error_interno_al_enviar_queda_para_reenviar(client, auth, db_session, correo, monkeypatch):
+    from app.models import Invoice, Recurrence
+    from app.routers.ops import run_due_recurrences
+    from app.services import documents_send
+
+    rec = _rec(client, _cliente(client), first_run_requires_approval=False)
+
+    def revienta(*a, **k):
+        raise RuntimeError("falla de prueba")
+
+    monkeypatch.setattr(documents_send, "send_document", revienta)
+    assert run_due_recurrences(db_session, today=HOY) == 1
+    db_session.expire_all()
+    r = db_session.get(Recurrence, rec["id"])
+    assert r.last_send_status == "fallida" and db_session.get(Invoice, r.last_invoice_id).sent_at is None
+    assert any("sin enviar" in m.subject for m in _admin(correo))
+    sec = next(x for x in client.get("/approvals").json()["sections"] if x["key"] == "mensualidades_por_aprobar")
+    assert r.last_invoice_id in {i["id"] for i in sec["items"]}

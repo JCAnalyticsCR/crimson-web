@@ -1301,6 +1301,14 @@ def run_due_recurrences(db: Session, today: date | None = None) -> int:
                 except Exception:  # noqa: BLE001
                     db.rollback()
                     log.exception("recurrencia %s: envio", rid)
+                    try:  # que no quede "pendiente" en silencio: aparece en Aprobaciones para reenviarla
+                        r = db.get(Recurrence, rid)
+                        factura = db.get(Invoice, factura.id)
+                        r.last_send_status, r.last_send_note = "fallida", "Error interno al enviarla"
+                        _rec_alert(db, r, factura, "Factura recurrente sin enviar", "No salió por un error interno. Reenviala desde Aprobaciones o desde la factura.")
+                        db.commit()
+                    except Exception:  # noqa: BLE001
+                        db.rollback()
             db.commit()
         except Exception as e:  # noqa: BLE001
             db.rollback()
