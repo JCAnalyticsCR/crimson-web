@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pyotp
 from sqlalchemy import select
 
+from app.core.security import hash_password
 from app.models import AuditLog, EmailOutbox, User
 from tests.conftest import ADMIN
 
@@ -108,6 +109,12 @@ def test_apagar_avisa_por_correo_y_pide_contrasena(client, auth, db_session):
     _activar(client)
     n = len(_avisos(db_session, uid))
     assert n >= 1  # la activacion tambien avisa
+    # admin: su rol lo exige (por defecto), no se apaga ni con la contrasena; se cambia de telefono
+    r = client.post("/auth/2fa/disable", json={"password": ADMIN[1]})
+    assert r.status_code == 409 and "Cambiar de teléfono" in r.json()["detail"]
+    assert db_session.get(User, uid).totp_enabled is True
+    # la empresa deja de exigirlo: ya se puede apagar (con la contrasena)
+    assert client.put("/settings", json={"twofa_roles": ["contabilidad"]}).status_code == 200
     assert client.post("/auth/2fa/disable", json={"password": "otra-cosa-123"}).status_code == 400
     assert client.post("/auth/2fa/disable", json={"password": ADMIN[1]}).status_code == 204
     u = db_session.get(User, uid)
@@ -138,3 +145,28 @@ def test_setup_de_antes_del_despliegue_se_puede_confirmar(client, auth, db_sessi
     db_session.commit()
     assert client.post("/auth/2fa/verify", json={"code": _codigo(sec)}).status_code == 200
     assert db_session.get(User, auth["user"]["id"]).totp_enabled is True
+
+
+def test_obligatoria_en_otra_empresa_tampoco_se_apaga(client, auth, db_session):
+    """El 2FA es de la persona: si en alguna de sus empresas su rol lo exige, no se apaga desde ninguna."""
+    from app.models import Tenant, TenantUser
+
+    sec = pyotp.random_base32()
+    u = User(email="dos.empresas@ejemplo.com", full_name="Persona de prueba", password_hash=hash_password("Usuario-2026-ok"))
+    u.totp_secret, u.totp_enabled = sec, True
+    db_session.add(u)
+    otra = Tenant(slug="otra-empresa-2fa", name="Otra empresa de prueba")
+    db_session.add(otra)
+    db_session.flush()
+    db_session.add(TenantUser(tenant_id=auth["tenant"]["id"], user_id=u.id, role_code="ventas"))
+    db_session.add(TenantUser(tenant_id=otra.id, user_id=u.id, role_code="contabilidad"))
+    db_session.commit()
+    from fastapi.testclient import TestClient
+
+    c = TestClient(client.app)
+    r = c.post("/auth/login", json={"email": u.email, "password": "Usuario-2026-ok", "totp_code": _codigo(sec), "tenant_slug": auth["tenant"]["slug"]})
+    assert r.status_code == 200, r.text
+    c.headers["Authorization"] = f"Bearer {r.json()['access_token']}"
+    assert c.get("/auth/me").json()["twofa"]["required"] is False  # en esta empresa es de ventas
+    assert c.post("/auth/2fa/disable", json={"password": "Usuario-2026-ok"}).status_code == 409
+    assert db_session.get(User, u.id).totp_enabled is True

@@ -123,6 +123,21 @@ def client_ip(request: Request) -> str:
     return request.client.host if request.client else "?"
 
 
+@router.get("/ip-check")
+def ip_check(request: Request, response: Response):
+    """Sonda del plan 1.10 (sin sesion; en tienda.* nginx no deja pasar /api/auth). Devuelve la IP que el API le
+    atribuye a quien llama y que paso con las cabeceras del nginx del portal:
+    - por el panel (https://panel.../api/auth/ip-check): "firmadas" y tu IP publica = todo bien; "rechazadas" = la
+      llave PROXY_SHARED_KEY no coincide entre portal y api; "ninguna" = el edge del API quita las cabeceras propias
+      (o el portal no tiene la llave).
+    - directo al API con cabeceras inventadas: "rechazadas" = el edge las deja pasar y el API no les cree.
+    Solo la IP de quien pregunta y una palabra: nada que no sepa ya."""
+    from ..core.clientip import source
+
+    response.headers["Cache-Control"] = "no-store"
+    return {"ip": client_ip(request), "cabeceras": source(request)}
+
+
 def _known_ip(db: Session, user: User, ip: str, now: datetime) -> bool:
     """La duena de una cuenta bloqueada sigue pudiendo entrar desde donde ya entro bien (una sesion emitida a esa IP
     en los ultimos 30 dias): un ataque desde otras IPs no la deja afuera. El limite por cuenta + IP sigue aplicando."""
@@ -230,7 +245,8 @@ def _portal_only(request: Request) -> None:
     origin = request.headers.get("origin")
     if origin is None:
         return
-    allowed = {o for o in (_origin(x) for x in [*settings.cors_origins, settings.public_base_url]) if o}
+    landing = {o for o in (_origin(x) for x in settings.landing_origins) if o}  # la landing nunca, aunque figure en CORS_ORIGINS
+    allowed = {o for o in (_origin(x) for x in [*settings.cors_origins, settings.public_base_url]) if o} - landing
     if origin.strip().rstrip("/").lower() not in allowed:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Origen no permitido")
 
@@ -402,9 +418,22 @@ def totp_recovery_codes(data: PasswordOnlyIn, p: Principal = Depends(get_session
     return RecoveryCodesOut(codes=codigos)
 
 
+def _twofa_required_somewhere(db: Session, user: User) -> bool:
+    """El 2FA es de la persona (no de la empresa): basta que una de sus membresias activas lo exija."""
+    ms = db.scalars(select(TenantUser).join(Tenant).where(TenantUser.user_id == user.id, TenantUser.active, Tenant.active)).all()
+    return any(twofa.is_required(m.tenant, m.role_code) for m in ms)
+
+
 @router.post("/2fa/disable", status_code=204)
 def totp_disable(data: PasswordOnlyIn, p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
-    """Apaga el 2FA con la contrasena. Sin esto, perder el telefono significaba entrar a la base de datos."""
+    """Apaga el 2FA con la contrasena. Sin esto, perder el telefono significaba entrar a la base de datos.
+    Plan 1.10: si su rol (en cualquiera de sus empresas) exige 2FA no se apaga; se cambia de telefono (setup con
+    contrasena y codigo) o, sin telefono ni codigos, lo quita el administrador al restablecer la contrasena."""
+    if _twofa_required_somewhere(db, p.user):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Tu rol exige la verificación en dos pasos: no se puede desactivar. Si cambiaste de teléfono, usá «Cambiar de teléfono».",
+        )
     if not verify_password(data.password, p.user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Contrasena incorrecta")
     p.user.totp_enabled = False

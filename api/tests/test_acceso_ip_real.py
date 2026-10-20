@@ -48,6 +48,19 @@ def test_ip_invalida_o_cabeceras_repetidas_se_ignoran(client, db_session, from_i
     assert _login_ip(db_session) == "testclient"
 
 
+def test_sonda_dice_si_las_cabeceras_llegaron_y_valieron(client, from_ip):
+    """La sonda de antes de desplegar: el edge del API deja pasar las cabeceras propias y el API solo cree en las
+    firmadas. Sin sesion, sin la llave en la respuesta y sin cache."""
+    h = from_ip("203.0.113.60")
+    r = client.get("/auth/ip-check", headers=h)
+    assert r.status_code == 200 and r.json() == {"ip": "203.0.113.60", "cabeceras": "firmadas"}
+    assert r.headers["cache-control"] == "no-store"
+    assert h["X-Crimson-Proxy-Key"] not in r.text
+    inventadas = client.get("/auth/ip-check", headers={"X-Crimson-Client-IP": "198.51.100.5", "X-Crimson-Proxy-Key": "y" * 43})
+    assert inventadas.json() == {"ip": "testclient", "cabeceras": "rechazadas"}
+    assert client.get("/auth/ip-check").json() == {"ip": "testclient", "cabeceras": "ninguna"}
+
+
 def test_llave_corta_se_ignora_sin_tumbar_el_arranque():
     from app.core.config import Settings
 

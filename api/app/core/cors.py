@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from starlette.middleware.cors import CORSMiddleware
 
 # rutas que la landing puede llamar desde el navegador (sin cookies)
@@ -22,13 +24,22 @@ def landing_path(path: str) -> bool:
     return any(path == p or path.startswith(p + "/") for p in LANDING_PATHS)
 
 
+def _clean(origins: list[str]) -> list[str]:
+    return list(dict.fromkeys(o.strip().rstrip("/") for o in origins if o and o.strip()))
+
+
 class SplitCORSMiddleware:
     def __init__(self, app, portal_origins: list[str], landing_origins: list[str]):
-        self.portal_origins = list(dict.fromkeys(portal_origins))
-        self.landing_only = {o for o in landing_origins if o not in self.portal_origins}
-        self.portal = CORSMiddleware(
-            app, allow_origins=self.portal_origins, allow_credentials=True, allow_methods=PORTAL_METHODS, allow_headers=PORTAL_HEADERS
-        )
+        landing = _clean(landing_origins)
+        portal = _clean(portal_origins)
+        # Cookies solo para el portal: un origen que tambien figura en LANDING_ORIGINS (p. ej. la landing que quedo en
+        # CORS_ORIGINS de antes) se trata como landing; y "*" con cookies seria cualquier sitio: se ignora.
+        raros = [o for o in portal if o == "*" or o in landing]
+        if raros:
+            logging.getLogger("crimson.config").warning("CORS_ORIGINS: sin cookies para %s (comodin o landing)", ", ".join(raros)[:200])
+        self.portal_origins = [o for o in portal if o not in raros]
+        self.landing_only = {o for o in landing if o != "*"}
+        self.portal = CORSMiddleware(app, allow_origins=self.portal_origins, allow_credentials=True, allow_methods=PORTAL_METHODS, allow_headers=PORTAL_HEADERS)
         self.landing = CORSMiddleware(
             app, allow_origins=sorted(self.landing_only), allow_credentials=False, allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["Content-Type"]
         )

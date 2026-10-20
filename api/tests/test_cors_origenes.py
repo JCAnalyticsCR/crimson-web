@@ -68,3 +68,26 @@ def test_refresh_solo_desde_el_portal(c):
     assert c.post("/auth/refresh", headers={"Origin": PANEL, "Sec-Fetch-Site": "same-origin"}).status_code == 200
     assert c.post("/auth/refresh", headers={"Origin": PANEL + "/"}).status_code == 200
     assert c.post("/auth/refresh").status_code == 200
+
+
+def test_landing_en_cors_origins_igual_va_sin_cookies(db_session, monkeypatch):
+    """La landing que quedo en CORS_ORIGINS de antes (o un "*") no recibe cookies: con cookies solo el panel."""
+    from app.core.config import settings
+    from app.core.db import get_db
+    from app.main import create_app
+
+    monkeypatch.setattr(settings, "cors_origins", [PANEL, LANDING, "*"])
+    monkeypatch.setattr(settings, "landing_origins", [LANDING + "/"])
+    monkeypatch.setattr(settings, "public_base_url", PANEL)
+    app = create_app()
+    app.dependency_overrides[get_db] = lambda: db_session
+    c2 = TestClient(app)
+    r = _pre(c2, "/public/incidents", LANDING)
+    assert r.headers["access-control-allow-origin"] == LANDING and "access-control-allow-credentials" not in r.headers
+    assert "access-control-allow-origin" not in _pre(c2, "/auth/refresh", LANDING).headers
+    otro = _pre(c2, "/auth/refresh", "https://malo.example")
+    assert otro.headers.get("access-control-allow-origin") not in ("*", "https://malo.example")
+    assert _pre(c2, "/auth/refresh", PANEL).headers["access-control-allow-credentials"] == "true"
+    # el refresh tampoco se canjea desde la landing
+    assert c2.post("/auth/login", json={"email": ADMIN[0], "password": ADMIN[1]}).status_code == 200
+    assert c2.post("/auth/refresh", headers={"Origin": LANDING}).status_code == 403

@@ -239,8 +239,10 @@ export default function Settings() {
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button className="btn btn--ghost btn--sm" onClick={() => setSetup2fa("cambio")}>Cambiar de teléfono</button>
                   <button className="btn btn--ghost btn--sm" onClick={() => setApagar({ password: "", regenerar: true })}>Generar códigos nuevos</button>
-                  <button className="btn btn--danger btn--sm" onClick={() => setApagar({ password: "", regenerar: false })}>Desactivar 2FA</button>
+                  {/* plan 1.10: si el rol la exige no se apaga (la API responde 409); se cambia de teléfono */}
+                  {!me.twofa?.required && <button className="btn btn--danger btn--sm" onClick={() => setApagar({ password: "", regenerar: false })}>Desactivar 2FA</button>}
                 </div>
+                {me.twofa?.required && <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Tu rol la exige: no se puede desactivar. Si cambiás de teléfono, usá «Cambiar de teléfono».</p>}
               </div>
             ) : <button className="btn btn--soft" onClick={() => setSetup2fa("nuevo")}>Configurar 2FA</button>}
           </Card>

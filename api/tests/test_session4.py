@@ -328,8 +328,9 @@ def test_expense_recurrence_reports_and_login_limit(client, auth):
         assert rep.status_code == 200, (key, rep.text)
         assert client.get(f"/reports/{key}", params={"from": a, "to": b, "format": "xlsx"}).status_code == 200
 
-    codes = [client.post("/auth/login", json={"email": "nadie@ejemplo.com", "password": "mala-mala-1"}).status_code for _ in range(21)]
-    assert codes[-1] == 429 and set(codes[:19]) == {401}
+    # plan 1.10: solo cuentan los fallidos (el login del fixture no gasta cupo); por IP, 20 contra cualquier cuenta
+    codes = [client.post("/auth/login", json={"email": f"nadie{i}@ejemplo.com", "password": "mala-mala-1"}).status_code for i in range(21)]
+    assert codes[-1] == 429 and set(codes[:20]) == {401}
     assert ADMIN  # el admin sigue existiendo; el limite es por IP, no bloquea la cuenta
 
 

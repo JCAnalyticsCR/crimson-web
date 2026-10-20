@@ -10,6 +10,8 @@ Ahora:
 - Sin llave, o si no coincide: request.client.host tal como lo deja uvicorn, que ya no cree en cualquier
   X-Forwarded-For (FORWARDED_ALLOW_IPS = solo redes internas, ver api/Dockerfile).
 - Las dos cabeceras se quitan de la peticion: ninguna ruta ni ningun log las ve.
+- Sonda (GET /auth/ip-check, sin sesion): dice que IP ve el API y si las cabeceras llegaron y valieron. Asi se
+  verifica, antes de confiar en los limites por IP, que el edge del API no quita las cabeceras propias.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from .config import settings
 
 CLIENT_IP_HEADER = b"x-crimson-client-ip"
 PROXY_KEY_HEADER = b"x-crimson-proxy-key"
+SOURCE_KEY = "crimson_client_ip"
 
 
 def _ip(raw: bytes) -> str | None:
@@ -60,9 +63,20 @@ class ClientIPMiddleware:
             if ips or keys:
                 scope = dict(scope)
                 scope["headers"] = rest
+                src = "rechazadas"
                 # una sola de cada una: repetidas = alguien las esta inyectando, no se cree ninguna
                 if len(ips) == 1 and len(keys) == 1 and _key_ok(keys[0]):
                     ip = _ip(ips[0])
                     if ip:
                         scope["client"] = (ip, 0)
+                        src = "firmadas"
+                # para la sonda (GET /auth/ip-check): llegaron las cabeceras y si valieron. Nunca la llave.
+                scope["state"] = {**(scope.get("state") or {}), SOURCE_KEY: src}
         await self.app(scope, receive, send)
+
+
+def source(request) -> str:
+    """firmadas = IP del nginx del portal con la llave buena; rechazadas = llegaron cabeceras sin llave valida (llave
+    distinta entre servicios o alguien las escribio); ninguna = no llego ninguna (el edge las quita o no paso por el
+    nginx del portal)."""
+    return (request.scope.get("state") or {}).get(SOURCE_KEY, "ninguna")
