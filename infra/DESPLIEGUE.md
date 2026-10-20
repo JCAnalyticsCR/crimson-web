@@ -41,6 +41,10 @@ docker build -t crimson-portal:local portal                         # nginx -t
 docker build -f infra/respaldo/Dockerfile -t crimson-respaldo:local .  # imagen del cron de respaldo
 ```
 
+Las pruebas del CI corren con `TZ=America/Costa_Rica`, el mismo reloj de las máquinas del equipo: varias esperan
+`date.today()` y la app usa en partes la fecha de Costa Rica, así que en UTC fallarían de 18:00 a 24:00 CR. Se quita
+cuando la app deje de usar `date.today()` (la producción corre en UTC).
+
 Reglas que el CI hace cumplir:
 
 - **Migraciones:** como máximo una revisión por ítem, re-encadenada al head vigente antes de fusionar (nada de

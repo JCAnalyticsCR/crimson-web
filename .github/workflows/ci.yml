@@ -46,6 +46,11 @@ jobs:
       - name: Ruff
         run: uv run ruff check app
       - name: Pruebas en paralelo
+        env:
+          # Algunas pruebas esperan date.today() y la app usa en partes la fecha de Costa Rica: en un runner UTC
+          # fallarian de 18:00 a 24:00 CR (y el CI bloquearia despliegues de noche). Mismo reloj que las maquinas del
+          # equipo hasta que la app deje de usar date.today().
+          TZ: America/Costa_Rica
         run: uv run pytest -n auto -q -p no:cacheprovider
 
   migraciones:
