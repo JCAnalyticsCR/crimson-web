@@ -585,7 +585,21 @@ def _bank_created(db: Session, tenant_id: int) -> set[int]:
 
 
 def _crc_amount(v, e: Expense) -> Decimal:
-    return Decimal(str(v or 0)) * (Decimal(str(e.fx_rate or 1)) if e.currency != "CRC" else Decimal(1))
+    """Monto del gasto en colones con su tasa; si le falta (o quedo en 1), la del BCCR de su fecha (services/fx).
+    Nunca suma dolares como colones: sin ninguna tasa, FxMissing -> 422."""
+    from sqlalchemy.orm import object_session
+
+    from ..services.fx import FxMissing, doc_rate
+
+    if (e.currency or "CRC") == "CRC":
+        return Decimal(str(v or 0))
+    db = object_session(e)
+    if db is None:
+        stored = Decimal(str(e.fx_rate or 0))
+        if stored <= 1:
+            raise FxMissing(e.currency)
+        return Decimal(str(v or 0)) * stored
+    return Decimal(str(v or 0)) * doc_rate(db, e.currency, e.fx_rate, e.date)
 
 
 def _own_or_none(db: Session, model, oid: int | None, tenant_id: int):

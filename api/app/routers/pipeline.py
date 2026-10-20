@@ -18,7 +18,8 @@ from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..models import Customer, Opportunity, Project, Quote, Survey, User
 from ..services.archive import live
-from ..services.documents import CR, audit, today_fx
+from ..services.documents import CR, audit
+from ..services.fx import rate_or_none
 from ..services.mail import notify_roles
 from ..services.ownership import opportunity_seller
 from ..services.totals import d
@@ -161,16 +162,17 @@ def _scope(stmt, p: Principal, owner_id: int | None, mine: bool = False):
 
 
 class _ToCompany:
-    """Montos de oportunidades a la moneda de la empresa con el tipo de cambio del dia (las oportunidades no guardan
-    tipo de cambio). Cachea el tipo por moneda dentro de una misma respuesta. Sin tipo de cambio cargado today_fx da
-    1: igual se marca convertido (el portal muestra "≈") y no se inventa un tipo."""
+    """Montos de oportunidades a la moneda de la empresa con el tipo de cambio del dia (services/fx; las oportunidades
+    no guardan tipo de cambio). Cachea el tipo por moneda dentro de una misma respuesta. Lo convertido se marca (el
+    portal muestra "≈"). Sin tipo de cambio cargado ese monto no se suma (nunca un dolar como un colon) y queda
+    `missing`; el embudo sigue funcionando con lo demas."""
 
     def __init__(self, db: Session, tenant) -> None:
-        self.db, self.base, self.rates, self.converted = db, tenant.default_currency or "CRC", {}, False
+        self.db, self.base, self.rates, self.converted, self.missing = db, tenant.default_currency or "CRC", {}, False, False
 
-    def _rate(self, cur: str) -> Decimal:  # colones por unidad de esa moneda
+    def _rate(self, cur: str) -> Decimal | None:  # colones por unidad de esa moneda (None: no hay tasa)
         if cur not in self.rates:
-            self.rates[cur] = d(today_fx(self.db, cur)[0])
+            self.rates[cur] = rate_or_none(self.db, cur)
         return self.rates[cur]
 
     def __call__(self, amount, currency: str | None) -> Decimal:
@@ -178,10 +180,12 @@ class _ToCompany:
         if cur == self.base:
             return d(amount)
         self.converted = True
-        v = d(amount) * self._rate(cur)
-        if self.base != "CRC" and self._rate(self.base):
-            v = v / self._rate(self.base)
-        return v
+        r = self._rate(cur)
+        rb = self._rate(self.base) if self.base != "CRC" else Decimal(1)
+        if r is None or rb is None:
+            self.missing = True
+            return Decimal(0)
+        return d(amount) * r / rb
 
 
 def _open_rows(db: Session, p: Principal, owner_id: int | None = None, kind: str | None = None) -> list[Opportunity]:

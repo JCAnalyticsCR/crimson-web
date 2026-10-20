@@ -12,7 +12,7 @@ from ..core.config import settings
 from ..core.db import get_db
 from ..core.deps import Principal, get_principal, require
 from ..models import ExchangeRate
-from ..schemas.core import ExchangeRateIn, ExchangeRateOut, TenantOut, TenantUpdate
+from ..schemas.core import ExchangeRateIn, ExchangeRateOut, FxTodayOut, TenantOut, TenantUpdate
 
 router = APIRouter(tags=["core"])
 
@@ -62,9 +62,20 @@ def fx_list(currency: str = "USD", limit: int = 30, _: Principal = Depends(get_p
     return db.scalars(select(ExchangeRate).where(ExchangeRate.currency == currency).order_by(ExchangeRate.date.desc()).limit(limit)).all()
 
 
-@router.get("/fx/today", response_model=ExchangeRateOut | None)
+@router.get("/fx/today", response_model=FxTodayOut | None)
 def fx_today(currency: str = "USD", _: Principal = Depends(get_principal), db: Session = Depends(get_db)):
-    return db.scalar(select(ExchangeRate).where(ExchangeRate.currency == currency, ExchangeRate.date <= date.today()).order_by(ExchangeRate.date.desc()))
+    """La tasa que usa el sistema (services/fx: la mas reciente) con su fecha, fuente y si esta vieja (mas de 2 dias
+    habiles). null si no hay ninguna: los documentos en esa moneda no se pueden guardar hasta cargarla."""
+    from ..services import fx as fxsvc
+
+    return fxsvc.info(db, currency)
+
+
+def _after_new_rate(db: Session, reason: str) -> None:
+    """Tasa nueva -> el guardian de margen revisa la tienda (su propio commit; un error suyo no deshace la tasa)."""
+    from ..services import margin_guard
+
+    margin_guard.run_all(db, reason=reason)
 
 
 @router.put("/fx", response_model=ExchangeRateOut)
@@ -76,7 +87,9 @@ def fx_upsert(data: ExchangeRateIn, _: Principal = Depends(require("settings", "
     fx.sell, fx.buy, fx.source, fx.note = data.sell, data.buy, "manual", data.note
     db.commit()
     db.refresh(fx)
-    return fx
+    out = ExchangeRateOut.model_validate(fx)
+    _after_new_rate(db, "tipo de cambio manual")
+    return out
 
 
 def save_bccr_today(db: Session) -> ExchangeRate:
@@ -90,6 +103,8 @@ def save_bccr_today(db: Session) -> ExchangeRate:
         db.add(fx)
     fx.sell, fx.buy, fx.source, fx.note = sell, buy, "bccr", "API SDDE del BCCR"
     db.commit()
+    db.refresh(fx)
+    _after_new_rate(db, "tipo de cambio del BCCR")
     db.refresh(fx)
     return fx
 

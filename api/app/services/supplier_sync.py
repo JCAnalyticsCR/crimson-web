@@ -408,4 +408,9 @@ def refresh_linked(db: Session, client: SirettClient | None = None) -> dict:
         out[t.id] = res
     db.commit()
     log.info("Eurocomp (existencias): %s", out)
+    # costo nuevo -> margen nuevo: el guardian revisa la tienda (nunca reprecia; saca de venta lo que quede bajo el
+    # minimo y propone el precio en Aprobaciones). Su propio commit; un error suyo no deshace este refresco.
+    from . import margin_guard
+
+    margin_guard.run_all(db, reason="costos de Eurocomp")
     return out

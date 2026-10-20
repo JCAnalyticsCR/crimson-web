@@ -281,6 +281,50 @@ def _commission_item(db: Session, p: Principal, c: Commission) -> dict:
     )
 
 
+# ---------- precios por revisar (guardian de margen, plan 1.12) ----------
+def _price_review_where(p: Principal) -> list:
+    return [Product.tenant_id == p.tenant.id, Product.margin_flagged_at.is_not(None), Product.active, Product.show_on_web]
+
+
+def _pct(v) -> str:
+    return f"{Decimal(str(v or 0)).normalize():f}".replace(".", ",")
+
+
+def _money_txt(v, cur: str | None) -> str:
+    n = Decimal(str(v or 0))
+    if (cur or "CRC") == "CRC":
+        return "₡" + f"{n:,.0f}".replace(",", " ")
+    return "$" + f"{n:,.2f}".replace(",", " ").replace(".", ",")
+
+
+def _price_review_item(db: Session, p: Principal, prod: Product) -> dict:
+    from .margin_guard import review
+
+    r = review(p.tenant, prod)
+    sub = f"Margen {_pct(r['margin_pct'])} % (mínimo {_pct(r['min_pct'])} %) · precio actual {_money_txt(r['price'], r['currency'])}"
+    if r["dudoso"]:
+        sub += f" · dudoso: el costo cambió {_pct(r['jump_pct'])} %, verificalo con el proveedor antes de aplicar"
+    badge = "Fuera de venta" if r["held"] else ("Sobre el tope: sigue a la venta" if r["over_cap"] else "Solo informe: sigue a la venta")
+    row = _row(
+        prod.id,
+        prod.code,
+        prod.name,
+        sub[:300],
+        since=prod.margin_flagged_at,
+        badge=badge + (" · dudoso" if r["dudoso"] else ""),
+        amount=r["suggested"],  # el precio sugerido (sin IVA): la seccion exige ver costos
+        currency=r["currency"],
+        to=f"/productos?q={prod.code}",
+    )
+    # el unico pendiente que se resuelve aqui mismo: aplicar el precio sugerido con un clic (nunca se reprecia solo)
+    row["action"] = {
+        "label": "Aplicar",
+        "path": f"/approvals/prices/{prod.id}/apply",
+        "confirm": f"¿Cambiar el precio de {prod.name} a {_money_txt(r['suggested'], r['currency'])} sin IVA y volver a publicarlo?",
+    }
+    return row
+
+
 SECTIONS: tuple[Section, ...] = (
     Section(
         "levantamientos_por_revisar",
@@ -369,6 +413,19 @@ SECTIONS: tuple[Section, ...] = (
         _commission_where,
         lambda: [Commission.earned_on, Commission.id],
         _commission_item,
+    ),
+    Section(
+        "precios_por_revisar",
+        "Precios por revisar",
+        "Productos de la tienda que quedaron bajo el margen mínimo por el costo del proveedor o el tipo de cambio. "
+        "Los que dicen «Fuera de venta» se muestran como «Consultar» hasta que apliqués un precio; el sistema nunca "
+        "cambia un precio solo.",
+        ("catalog.costos", "catalog.editar"),
+        "/aprobaciones#precios_por_revisar",
+        Product,
+        _price_review_where,
+        lambda: [Product.margin_flagged_at, Product.id],
+        _price_review_item,
     ),
 )
 

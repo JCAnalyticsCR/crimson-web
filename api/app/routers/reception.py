@@ -40,8 +40,21 @@ def _d(x) -> Decimal:
     return x if isinstance(x, Decimal) else Decimal(str(x or 0))
 
 
-def _crc(doc: ReceivedDocument) -> Decimal:
-    return _d(doc.total) * (_d(doc.fx_rate) or 1) if (doc.currency or "CRC") != "CRC" else _d(doc.total)
+def _crc(doc: ReceivedDocument) -> Decimal | None:
+    """Total en colones con el tipo de cambio del XML; si no lo trae (o quedo en 1), el del BCCR de su fecha
+    (services/fx.doc_rate). None si no hay ninguna tasa: nunca se muestra un dolar como un colon."""
+    from sqlalchemy.orm import object_session
+
+    from ..services.fx import FxMissing, doc_rate
+
+    if (doc.currency or "CRC") == "CRC":
+        return _d(doc.total)
+    db = object_session(doc)
+    try:
+        rate = doc_rate(db, doc.currency, doc.fx_rate, doc.issue_date) if db is not None else (_d(doc.fx_rate) if _d(doc.fx_rate) > 1 else None)
+    except FxMissing:
+        return None
+    return _d(doc.total) * rate if rate else None
 
 
 def _responses_by_doc(db: Session, ids: list[int]) -> dict[int, list[ReceptionResponse]]:

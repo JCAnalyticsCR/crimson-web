@@ -21,6 +21,7 @@ KEYS = [
     "accesos_portal",
     "planillas_por_aprobar",
     "comisiones_por_aprobar",
+    "precios_por_revisar",  # plan 1.12: guardian de margen (solo quien ve costos y edita el catalogo)
 ]
 
 
@@ -57,13 +58,13 @@ def test_aprobaciones_permisos_por_rol(client, auth, db_session):
     # supervisor: solo lo que el ya puede aprobar (sin costos: el costo es del administrador)
     keys = [s["key"] for s in _full(client, sup)["sections"]]
     assert "levantamientos_por_revisar" in keys and "reservas_material" in keys
-    for k in ("levantamientos_por_costear", "cotizaciones_por_aprobar", "costos_aliados", "accesos_portal", "planillas_por_aprobar", "comisiones_por_aprobar"):
+    for k in ("levantamientos_por_costear", "cotizaciones_por_aprobar", "costos_aliados", "accesos_portal", "planillas_por_aprobar", "comisiones_por_aprobar", "precios_por_revisar"):
         assert k not in keys, k
 
     # contador: planillas y comisiones
     keys = [s["key"] for s in _full(client, ct)["sections"]]
     assert "planillas_por_aprobar" in keys and "comisiones_por_aprobar" in keys
-    assert "levantamientos_por_revisar" not in keys and "cotizaciones_por_aprobar" not in keys
+    assert "levantamientos_por_revisar" not in keys and "cotizaciones_por_aprobar" not in keys and "precios_por_revisar" not in keys
 
     # si el admin le habilita costos al supervisor (Ajustes -> Quien ve costos), le aparece la seccion de aliados sola
     t = db_session.get(Tenant, tid)

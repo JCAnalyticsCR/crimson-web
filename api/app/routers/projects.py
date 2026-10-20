@@ -37,6 +37,7 @@ from ..services import inventory as invsvc
 from ..services import pricing
 from ..services.archive import live
 from ..services.documents import audit, local_date, today_fx
+from ..services.fx import doc_rate, rate_or_none
 from ..services.mail import notify_roles
 from ..services.refs import check_refs
 from ..services.sequences import next_number
@@ -103,8 +104,8 @@ def price_crc(db: Session, pr: Project) -> Decimal:
     q = db.get(Quote, pr.quote_id) if pr.quote_id else None
     if q is None or (q.currency or "CRC") == "CRC":
         return d(pr.price)
-    fx = d(q.fx_sell)
-    return d(pr.price) * (fx if fx > 0 else today_fx(db, q.currency)[0])
+    # la tasa guardada en la cotizacion; si falta o quedo en 1 (sistema viejo), la del BCCR de su fecha (services/fx)
+    return d(pr.price) * doc_rate(db, q.currency, q.fx_sell, q.issue_date)
 
 
 def ally_cost_of_project(db: Session, pr: Project, fx: Decimal | None = None) -> Decimal:
@@ -132,7 +133,7 @@ def ally_cost_of_project(db: Session, pr: Project, fx: Decimal | None = None) ->
 def direct_cost(db: Session, pr: Project, fx: Decimal | None = None) -> Decimal:
     """Costo directo real: materiales consumidos + mano de obra propia + viaticos + otros + aliados (falla K: la
     fila de gerencia lo recalculaba a mano y sin aliados)."""
-    fx = fx if fx is not None else today_fx(db, "USD")[0]
+    fx = fx if fx is not None else rate_or_none(db, "USD")  # None: cada costo en dolares la consulta (o 422 sin tasa)
     return consumed_cost(db, pr, fx) + d(pr.cost_labor) + d(pr.cost_travel) + d(pr.cost_extra) + ally_cost_of_project(db, pr, fx)
 
 
@@ -159,7 +160,7 @@ def economics(db: Session, pr: Project, fx: Decimal | None = None) -> dict:
     """Lo que costo de verdad el proyecto contra lo que se vendio. Unica fuente: la usan la ficha y el reporte."""
     from ..routers.fieldwork import order_hours, survey_estimate
 
-    fx = fx if fx is not None else today_fx(db, "USD")[0]
+    fx = fx if fx is not None else rate_or_none(db, "USD")
     materials = consumed_cost(db, pr, fx)
     allies = ally_cost_of_project(db, pr, fx)
     real = materials + d(pr.cost_labor) + d(pr.cost_travel) + d(pr.cost_extra) + allies
@@ -369,7 +370,7 @@ def project_from_quote(qid: int, data: FromQuoteIn, p: Principal = Depends(requi
     c = db.get(Customer, q.customer_id) if q.customer_id else None
     survey = db.scalar(select(Survey).where(Survey.quote_id == q.id))
     opp = db.scalar(select(Opportunity).where(Opportunity.tenant_id == p.tenant.id, Opportunity.quote_id == q.id))
-    fx = today_fx(db, "USD")[0]
+    fx = rate_or_none(db, "USD")
     cost_planned = Decimal(0)
     for ln in q.lines:
         prod = db.get(Product, ln.product_id) if ln.product_id else None

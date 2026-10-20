@@ -473,8 +473,10 @@ function AddModal({ item, onClose, onDone }: { item: Detail; onClose: () => void
   useEffect(() => { api<Named[]>("/categories").then(setCats).catch(() => setCats([])); }, []);
   /* margen SOBRE LA VENTA: precio = costo / (1 - margen). En colones, redondeado hacia arriba a la centena. */
   const m = Number(form.margin) / 100;
-  const ok = m >= 0 && m < 0.96 && item.cost != null && n(item.cost) > 0;
-  const base = form.currency === "CRC" ? n(item.cost_crc) : (item.currency === "CRC" ? n(item.cost) / n(pr?.fx || 1) : n(item.cost));
+  /* sin tipo de cambio cargado no se inventa uno (nunca 1): lo que hay que convertir queda sin precio */
+  const fxOk = form.currency === "CRC" ? item.currency === "CRC" || item.cost_crc != null : item.currency !== "CRC" || n(pr?.fx) > 0;
+  const ok = m >= 0 && m < 0.96 && item.cost != null && n(item.cost) > 0 && fxOk;
+  const base = form.currency === "CRC" ? n(item.cost_crc) : (item.currency === "CRC" ? (fxOk ? n(item.cost) / n(pr?.fx) : 0) : n(item.cost));
   const price = ok ? (form.currency === "CRC" ? Math.ceil(base / (1 - m) / 100) * 100 : Math.round((base / (1 - m)) * 100) / 100) : null;
   const save = async () => {
     setBusy(true);
@@ -498,6 +500,7 @@ function AddModal({ item, onClose, onDone }: { item: Detail; onClose: () => void
       <div className="prv-price">
         <span className="meta">Precio de venta sin IVA</span>
         <b>{price != null ? fmtMoney(price, form.currency) : "—"}</b>
+        {!fxOk && <span className="muted" style={{ fontSize: 12.5, color: "var(--warn)" }}>Sin tipo de cambio del dólar: cargalo en Ajustes → Facturación para calcular el precio.</span>}
         <span className="muted" style={{ fontSize: 12.5 }}>= costo {form.currency === "CRC" ? crc(item.cost_crc) : money(base, "USD")} ÷ (1 − {form.margin || 0} %){form.currency === "CRC" ? " · redondeado a la centena" : ""}</span>
       </div>
       <p className="muted" style={{ marginTop: 10, fontSize: 12.5 }}>IVA 13 % y CABYS vacío para completar en Productos → Completar CABYS. No se publica en la tienda hasta que lo actives. Queda vinculado: cada lista nueva actualiza su costo y la existencia del proveedor.</p>

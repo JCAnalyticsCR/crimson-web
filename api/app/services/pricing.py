@@ -107,16 +107,24 @@ def cost_in(db: Session, product, currency: str = "CRC", fx: Decimal | None = No
     return cost * d(rate) if currency == "CRC" else cost / d(rate)
 
 
+def _rate(db: Session, currency: str, usd: Decimal | None) -> Decimal:
+    """Colones por unidad: el dolar que ya trae el llamador (si es valido) o la funcion unica services/fx.fx."""
+    if currency == "USD" and usd is not None and d(usd) > 0:
+        return d(usd)
+    from .fx import fx as fx_of
+
+    return fx_of(db, currency).tasa
+
+
 def convert(db: Session, amount, from_currency: str | None, to_currency: str | None, fx: Decimal | None = None) -> Decimal:
-    """Monto de una moneda a otra con el tipo de cambio de venta del dia (solo CRC y USD en el sistema).
-    fx = colones por dolar, para no consultarlo en cada linea."""
+    """Monto de una moneda a otra con el tipo de cambio de venta del dia (services/fx).
+    fx = colones por dolar, para no consultarlo en cada linea. Sin tasa lanza FxMissing (nunca convierte con 1)."""
     a = d(amount or 0)
     src, dst = (from_currency or "CRC").upper(), (to_currency or "CRC").upper()
     if src == dst:
         return a
-    rate = d(fx if fx is not None else today_fx(db, "USD")[0]) or Decimal(1)
-    crc = a * rate if src == "USD" else a
-    return crc if dst == "CRC" else (crc / rate).quantize(Decimal("0.00001"))
+    crc = a if src == "CRC" else a * _rate(db, src, fx)
+    return crc if dst == "CRC" else (crc / _rate(db, dst, fx)).quantize(Decimal("0.00001"))
 
 
 def price_in(db: Session, product, currency: str = "CRC", fx: Decimal | None = None, amount=None) -> Decimal:

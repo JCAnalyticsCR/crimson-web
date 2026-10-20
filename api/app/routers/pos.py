@@ -22,9 +22,20 @@ from ..services import documents as docsvc
 from ..services import einvoice as esvc
 from ..services import inventory as invsvc
 from ..services.documents import audit
+from ..services.fx import FxMissing, rate_or_none
 from ..services.totals import d
 
 router = APIRouter(prefix="/pos", tags=["pos"])
+
+
+def _pos_price(db: Session, pr: Product, cur: str, fx: Decimal | None) -> Decimal | None:
+    """Precio en la moneda de la caja; None si es de otra moneda y no hay tipo de cambio (nunca se convierte con 1)."""
+    from ..services import pricing
+
+    try:
+        return pricing.price_in(db, pr, cur, fx)
+    except FxMissing:
+        return None
 
 
 @router.get("/catalog")
@@ -34,12 +45,11 @@ def catalog(p: Principal = Depends(require("sales", "crear")), db: Session = Dep
     (las de garantias no cuentan) y lo del proveedor con su fecha. El precio va tambien en la moneda de la caja
     (pos_price / pos_currency), con el tipo de cambio del dia."""
     from ..services import availability as avsvc
-    from ..services import pricing
 
     prods = list(db.scalars(select(Product).where(Product.tenant_id == p.tenant.id, Product.active).order_by(Product.name)))
     av = avsvc.availability_many(db, p.tenant, prods, audience="interno")
     cur = p.tenant.default_currency or "CRC"
-    fx = docsvc.today_fx(db, "USD")[0]
+    fx = rate_or_none(db, "USD")  # sin tasa la caja abre igual: solo lo que hay que convertir queda sin precio
     variants: dict[int, list] = defaultdict(list)
     for v in db.scalars(select(ProductVariant).where(ProductVariant.tenant_id == p.tenant.id, ProductVariant.active).order_by(ProductVariant.position)):
         variants[v.product_id].append({"id": v.id, "name": v.name, "code": v.code, "price": v.price})
@@ -58,7 +68,7 @@ def catalog(p: Principal = Depends(require("sales", "crear")), db: Session = Dep
                 "category_id": pr.category_id,
                 "tax_rate": float(pr.taxes[0].tax.rate) if pr.taxes else 13,
                 "stock": a.get("own_free") if pr.item_type == "producto" else None,
-                "pos_price": pricing.price_in(db, pr, cur, fx),
+                "pos_price": _pos_price(db, pr, cur, fx),
                 "pos_currency": cur,
                 "availability": {
                     k: a.get(k)
@@ -106,7 +116,7 @@ def sale(data: SaleIn, p: Principal = Depends(require("sales", "crear")), db: Se
     from ..services import pricing
 
     cur = p.tenant.default_currency or "CRC"
-    fx = docsvc.today_fx(db, "USD")[0]
+    fx = rate_or_none(db, "USD")  # None: se consulta (y da 422 claro) solo si una linea necesita convertirse
     lines = []
     for ln in data.lines:
         pr = db.get(Product, ln.product_id)

@@ -39,7 +39,8 @@ from ..schemas.sales import DocumentIn, LineInSchema
 from ..services import ally_access, ally_pricing
 from ..services.archive import live
 from ..services.bitacora import audit_change, jsonable
-from ..services.documents import audit, today_fx
+from ..services.documents import audit
+from ..services.fx import rate_or_none
 from ..services.totals import d
 
 router = APIRouter(prefix="/allies", tags=["aliados"])
@@ -396,7 +397,7 @@ def price_preview(product_id: int, ally_company_id: int | None = None, p: Princi
         raise HTTPException(403, "Solo quien ve costos")
     prod = _ref(db, Product, product_id, p, "Producto no encontrado")
     comp = _ref(db, AllyCompany, ally_company_id, p, "Empresa aliada no encontrada")
-    fx = today_fx(db, "USD")[0]
+    fx = rate_or_none(db, "USD")  # sin tasa: lo que necesita convertirse sale "a consultar"
     precio, fuente, estado = ally_pricing.ally_price(db, p.tenant, prod, comp, fx=fx)
     return {
         "product_id": prod.id,

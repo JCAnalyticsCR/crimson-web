@@ -136,11 +136,13 @@ def crc_of(db: Session, c: Commission) -> Decimal:
 
 
 def _doc_crc(db: Session, doc, amount) -> Decimal:
-    """Monto de un documento en colones con SU tipo de cambio (como los reportes)."""
+    """Monto de un documento en colones con SU tipo de cambio (como los reportes). Si le falta o quedo en 1 (el
+    sistema viejo caia a 1 sin tasa), el del BCCR de su fecha (services/fx.doc_rate)."""
+    from .fx import doc_rate
+
     if doc is None or (doc.currency or "CRC") == "CRC":
         return d(amount)
-    fx = d(doc.fx_sell)
-    return d(amount) * (fx if fx > 0 else _rate(db, doc.currency))
+    return d(amount) * doc_rate(db, doc.currency, doc.fx_sell, getattr(doc, "issue_date", None))
 
 
 # ---------- 5.1 El negocio de un documento ----------
@@ -561,8 +563,9 @@ def _sold_base(db: Session, inv: Invoice, beneficiary: str, uid, part) -> Decima
 def _doc_cost(db: Session, doc) -> tuple[Decimal, list[str]]:
     """Costo de Crimson de las lineas con producto (normal y cortesia; aportado y excluido no son costo de Crimson)."""
     from . import pricing
+    from .fx import rate_or_none
 
-    fx = today_fx(db, "USD")[0]
+    fx = rate_or_none(db, "USD")  # None: solo un costo en otra moneda la consulta (sin ninguna tasa, 422 claro)
     cost, faltan = Decimal(0), []
     for ln in doc.lines:
         if not ln.product_id or (ln.treatment or "normal") not in ("normal", "cortesia"):
@@ -2153,7 +2156,9 @@ def numbers(db: Session, tenant, a: date, b: date) -> dict:
         M[k]["cobrado_sin_iva"] += v
         if inv.seller_id:
             V(inv.seller_id)["cobrado_sin_iva"] += v
-    fx = today_fx(db, "USD")[0]
+    from .fx import rate_or_none
+
+    fx = rate_or_none(db, "USD")
     for pr in db.scalars(select(Project).where(Project.tenant_id == tid, Project.completed_at.is_not(None), Project.trashed_at.is_(None))):
         if pr.status == "cancelado":
             continue

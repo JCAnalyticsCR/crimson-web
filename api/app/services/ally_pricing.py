@@ -21,7 +21,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..models import AllyCompany, AllyProductPrice, Product
-from .pricing import cost_in, price_from_markup
+from .pricing import convert, cost_in, price_from_markup
 from .totals import d
 
 DEFAULT_MARKUP = Decimal(5)
@@ -57,9 +57,22 @@ def _round(p: Decimal, currency: str) -> Decimal:
 
 
 def ally_price(
-    db: Session, tenant, product: Product, company: AllyCompany | None, *, fx: Decimal, fixed: dict | None = None
+    db: Session, tenant, product: Product, company: AllyCompany | None, *, fx: Decimal | None, fixed: dict | None = None
 ) -> tuple[Decimal | None, str | None, str]:
-    """(precio sin IVA en la moneda del producto | None, fuente, estado ok|a_consultar|igual_al_publico)."""
+    """(precio sin IVA en la moneda del producto | None, fuente, estado ok|a_consultar|igual_al_publico).
+    fx = colones por dolar (None: se consulta solo si hace falta convertir). Sin tipo de cambio cargado, lo que
+    necesita convertirse queda "a_consultar" (nunca se convierte con 1)."""
+    from .fx import FxMissing
+
+    try:
+        return _ally_price(db, tenant, product, company, fx=fx, fixed=fixed)
+    except FxMissing:
+        return None, None, "a_consultar"
+
+
+def _ally_price(
+    db: Session, tenant, product: Product, company: AllyCompany | None, *, fx: Decimal | None, fixed: dict | None = None
+) -> tuple[Decimal | None, str | None, str]:
     if fixed is None:
         fixed = fixed_prices(db, product.tenant_id, [product.id], company.id if company else None)
     cid = company.id if company is not None else None
@@ -72,7 +85,7 @@ def ally_price(
         precio = d(row.price)
         if (row.currency or product.currency) != product.currency:
             # precio fijo en otra moneda: se lleva a la del producto con el tipo de cambio del dia
-            precio = precio * d(fx) if product.currency == "CRC" else precio / d(fx)
+            precio = convert(db, precio, row.currency or product.currency, product.currency, fx)
             precio = _round(precio, product.currency)
     elif product.cost is not None and d(product.cost) > 0 and markup_for(tenant, company) > 0:
         # un recargo de 0 % (o negativo, de un dato viejo) daria el costo exacto como precio: eso nunca sale

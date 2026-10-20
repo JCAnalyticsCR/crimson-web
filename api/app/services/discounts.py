@@ -113,12 +113,12 @@ def quote_margin(db: Session, tenant_id: int, quote) -> Decimal | None:
 
     neto = cost = Decimal(0)
     con_costo = False
+    from .fx import rate_or_none
+
     fx = None
     for ln, prod in _cost_lines(db, tenant_id, quote):
         if fx is None:
-            from .documents import today_fx
-
-            fx = today_fx(db, "USD")[0]
+            fx = rate_or_none(db, "USD")  # None: solo un costo en otra moneda la consulta (sin tasa, 422 claro)
         con_costo = True
         neto += d(ln.subtotal)
         cost += pricing.cost_in(db, prod, quote.currency, fx) * d(ln.quantity)

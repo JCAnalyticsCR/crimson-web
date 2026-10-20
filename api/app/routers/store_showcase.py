@@ -28,6 +28,7 @@ from ..services import fygaro_legacy
 from ..services import store_showcase as sv
 from ..services.availability import settings_of, sort_key
 from ..services.documents import audit
+from ..services.fx import FxMissing
 from ..services.mail import notify_roles
 from .auth import client_ip
 from .public_incidents import _CONTROL, _buscar_cliente
@@ -298,7 +299,7 @@ class Ctx:
         price = Decimal(str(out["display_price"]))
         cmp = None
         if p.compare_price:
-            c = _gross(self.pricer(p.compare_price, p.currency), out["tax_rate"])
+            c = _gross(self.pricer.of(p, p.compare_price), out["tax_rate"])
             cmp = c if c > price else None
         out.update(
             {
@@ -408,12 +409,13 @@ def showcase_public(slug: str, response: Response, db: Session = Depends(get_db)
         if not k.get("active", True):
             continue
         kit = sv.build_kit(pool, k.get("answers") or {}, prefer=sellable)  # cada pieza: primero lo que se puede comprar
-        lines = [ln for ln in kit["lines"] if Decimal(str(ln["product"].price or 0)) > 0]
+        # solo piezas con precio de hoy (retenido por margen o sin tipo de cambio = "a consultar", fuera del total)
+        lines = [ln for ln in kit["lines"] if ctx.pricer.of(ln["product"], ln["product"].price or 0) > 0]
         if not lines:
             continue
         total = sum(
             (
-                _gross(ctx.pricer(ln["product"].price, ln["product"].currency), float(ln["product"].taxes[0].tax.rate) if ln["product"].taxes else 13)
+                _gross(ctx.pricer.of(ln["product"], ln["product"].price), float(ln["product"].taxes[0].tax.rate) if ln["product"].taxes else 13)
                 * ln["quantity"]
                 for ln in lines
             ),
@@ -513,7 +515,7 @@ def catalog(
                 scores[p.id] = s
         prods = [p for p in prods if p.id in scores]
 
-    disp = {p.id: _gross(ctx.pricer(p.price, p.currency), float(p.taxes[0].tax.rate) if p.taxes else 13) for p in prods}
+    disp = {p.id: _gross(ctx.pricer.of(p, p.price), float(p.taxes[0].tax.rate) if p.taxes else 13) for p in prods}
     av = {p.id: (stock_all.get(p.id) or {}).get("state") for p in prods}
     types = {p.id: sv.product_type(p) for p in prods}
     brands_sel = {b.lower() for b in (brand or []) if b}
@@ -819,7 +821,10 @@ def _crear_oportunidad(db: Session, slug: str, data: AdvisoryIn, ip: str) -> Non
         p = prods.get(it.product_id)
         if not p:
             continue
-        neto = ctx.pricer(p.price, p.currency) * it.quantity
+        try:  # estimado interno de la oportunidad: con el precio de lista aunque la vitrina lo muestre "a consultar"
+            neto = ctx.pricer(p.price, p.currency) * it.quantity
+        except FxMissing:
+            neto = Decimal(0)
         monto += neto
         lineas.append(f"• {it.quantity} × {p.name} ({p.code})")
     cliente = _buscar_cliente(db, t.id, email, data.phone)  # se liga si existe; no se crea cliente desde internet

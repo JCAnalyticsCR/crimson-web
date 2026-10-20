@@ -84,6 +84,15 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type", "X-Requested-With", "X-View-As-Ally", "X-View-As-User"],
     )
 
+    from fastapi.responses import JSONResponse
+
+    from .services.fx import FxMissing
+
+    @app.exception_handler(FxMissing)
+    async def fx_missing(request: Request, exc: FxMissing):
+        # plan 1.12: sin tipo de cambio nunca se convierte con 1; lo que lo necesita responde un 422 claro
+        return JSONResponse(status_code=422, content={"detail": exc.detail})
+
     @app.middleware("http")
     async def request_log(request: Request, call_next):
         t0 = time.perf_counter()

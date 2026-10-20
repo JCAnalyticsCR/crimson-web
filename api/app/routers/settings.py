@@ -3,6 +3,8 @@ Usuarios e invitaciones viven en routers/users_admin.py."""
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
@@ -21,6 +23,7 @@ from ..services.mail import mail_status, queue_email
 from ..services.sla import SLA_DEFECTO, normalizar
 
 router = APIRouter(prefix="/settings", tags=["ajustes"])
+log = logging.getLogger("crimson.ajustes")
 
 DEFAULTS = {
     "invoice_valid_days": 8,
@@ -48,7 +51,11 @@ DEFAULTS = {
     "travel_cost": 35000,  # transporte estimado por trabajo
     "fuel_cost_per_km": 0,  # si se cobra por kilometro, el transporte se calcula con esto
     "quote_approval_amount": 2000000,  # cotizacion por encima -> aprobacion
-    "min_margin_pct": 25,  # margen por debajo -> aprobacion
+    "min_margin_pct": 25,  # margen por debajo -> aprobacion (cotizaciones) y guardian de margen de la tienda
+    # guardian de margen (plan 1.12): None = la primera corrida es solo informe y despues queda "activo" (saca de venta
+    # lo que quede bajo el minimo; nunca reprecia). "informe" lo deja sin ocultar nada. Tope de productos por corrida.
+    "margin_guard_mode": None,
+    "margin_guard_cap": 20,
     # SLA de soporte por prioridad (horas). Un contrato con SLA propio lo reemplaza para ese cliente.
     "sla": SLA_DEFECTO,
     "archive_purge_days": 30,  # dias en la papelera antes de que el worker lo borre definitivamente
@@ -87,6 +94,8 @@ class SettingsIn(BaseModel):
     fuel_cost_per_km: float | None = Field(None, ge=0)
     quote_approval_amount: float | None = Field(None, ge=0)
     min_margin_pct: float | None = Field(None, ge=0, le=95)
+    margin_guard_mode: str | None = Field(None, pattern="^(informe|activo)$")
+    margin_guard_cap: int | None = Field(None, ge=1, le=1000)
     sla: dict | None = None
 
     @field_validator("sla")
@@ -152,7 +161,21 @@ def put_settings(data: SettingsIn, p: Principal = Depends(require("settings", "c
         despues = list(t.settings.get("cost_roles") or [])
         audit_change(db, p, "permissions", "tenant", t.id, {"cost_roles": antes}, {"cost_roles": despues}, reason="Quien ve costos")
     db.commit()
+    if data.model_fields_set & GUARD_KEYS:
+        # otro minimo, objetivo, modo o tope: el guardian vuelve a revisar la tienda ya (no espera al proximo refresco)
+        from ..services import margin_guard
+
+        try:
+            margin_guard.run(db, t, reason="ajustes")
+            db.commit()
+        except Exception:  # noqa: BLE001  guardar los ajustes nunca falla por el guardian
+            db.rollback()
+            log.exception("guardian de margen al guardar ajustes (empresa %s)", t.id)
+            t = db.get(Tenant, p.tenant.id)
     return _public_settings(t.settings)
+
+
+GUARD_KEYS = {"min_margin_pct", "default_margin_pct", "margin_guard_mode", "margin_guard_cap"}
 
 
 def _sync_activities_from_codes(db: Session, t: Tenant, codes: list[str]) -> None:

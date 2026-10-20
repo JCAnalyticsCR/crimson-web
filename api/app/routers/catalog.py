@@ -140,9 +140,9 @@ def _with_costs(db: Session, p: Principal, prods: list[Product]) -> list[Product
     info = supcat.cost_info(db, p.tenant, prods) if p.sees_costs and prods else {}
     if p.sees_costs and prods:
         from ..services import ally_pricing
-        from ..services.documents import today_fx
+        from ..services.fx import rate_or_none
 
-        fx = today_fx(db, "USD")[0]
+        fx = rate_or_none(db, "USD")  # sin tasa la lista sigue; el precio de aliado en otra moneda queda "a consultar"
         fijos = ally_pricing.fixed_prices(db, p.tenant.id, [x.id for x in prods], None)
     out = []
     for pr in prods:
