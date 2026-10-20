@@ -194,3 +194,43 @@ def test_paneles_internos_sin_tasa_no_se_caen(client, auth, db_session):
     assert item["pos_price"] is None  # sin tasa no se convierte con 1
     assert any(i["pos_price"] is not None for i in cat.json() if i["currency"] == "CRC")
     assert client.get("/opportunities/board").status_code == 200
+
+
+def test_tienda_en_dolares_sin_tasa_no_tumba_portada_ni_checkout(client, auth, db_session):
+    """Tienda que vende en dolares: sin tasa, lo que esta en colones (y las tarifas de envio, que se configuran en
+    colones) queda "a consultar"; la portada y el checkout-config responden igual (nunca un 422 ni un 500)."""
+    prods = _shop(client, free_shipping_from=50000)
+    assert client.put("/store", json={"currency": "USD"}).status_code == 200
+    crc = next(p for p in prods if p["currency"] == "CRC")
+    home = client.get(SLUG)
+    assert home.status_code == 200 and all(r["display_amount"] is not None for r in home.json()["shipping_rates"])
+    _sin_tasas(db_session)
+    home = client.get(SLUG)
+    assert home.status_code == 200 and all(r["display_amount"] is None for r in home.json()["shipping_rates"])
+    cfg = client.get(f"{SLUG}/checkout-config")
+    assert cfg.status_code == 200 and cfg.json()["free_shipping_from"] is None
+    assert all(r["display_amount"] is None for r in cfg.json()["shipping_rates"])
+    lista = {p["id"]: p for p in client.get(f"{SLUG}/products").json()}
+    assert lista[crc["id"]]["price_on_request"] is True
+    r = client.post(f"{SLUG}/checkout", json=_body(crc["id"], lines=[{"product_id": crc["id"], "quantity": 1}]))
+    assert r.status_code == 409 and "precio a consultar" in r.json()["detail"]
+
+
+def test_gasto_sin_tasa_de_su_fecha_usa_la_mas_cercana_y_sin_ninguna_da_422(client, auth, db_session):
+    """Registrar un gasto en dolares: la tasa del BCCR de su fecha; si no hay ninguna anterior, la mas cercana con
+    aviso (antes se guardaba 1 "con aviso"); sin ninguna tasa cargada, 422 claro."""
+    _sin_tasas(db_session)
+    _tasa(db_session, date(2026, 9, 1), sell="500")
+    assert fxsvc.for_date(db_session, "USD", date(2026, 9, 15)) == (Decimal(500), None)
+    tasa, aviso = fxsvc.for_date(db_session, "USD", date(2026, 8, 1))
+    assert tasa == Decimal(500) and "01/09/2026" in aviso
+    assert fxsvc.for_date(db_session, "CRC", date(2026, 8, 1)) == (Decimal(1), None)
+    base = {"description": "Licencia", "currency": "USD", "subtotal": 100, "tax_rate": 0, "iva_credit": "no_credito"}
+    r = client.post("/expenses", json={**base, "date": "2026-08-01"})
+    assert r.status_code in (200, 201), r.text
+    body = r.json()
+    assert Decimal(str(body["fx_rate"])) == Decimal(500)
+    assert any("se usó el del 01/09/2026" in w for w in body["warnings"])
+    _sin_tasas(db_session)
+    r = client.post("/expenses", json={**base, "date": "2026-08-02"})
+    assert r.status_code == 422 and "tipo de cambio" in r.json()["detail"]

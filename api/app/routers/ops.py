@@ -759,10 +759,14 @@ def _apply_expense(e: Expense, data: ExpenseIn, db: Session | None = None) -> li
     elif data.fx_rate is not None:
         e.fx_rate = data.fx_rate
     else:
-        fx = bccr_sell(db, data.currency, data.date) if db is not None else None
-        e.fx_rate = fx or Decimal(1)
-        if fx is None:
-            warnings.append("Sin tipo de cambio del BCCR para esa fecha: se usó 1; indíquelo a mano")
+        # la del BCCR de su fecha (o la mas cercana, con aviso); nunca 1: sin ninguna tasa, FxMissing -> 422 claro
+        from ..services.fx import FxMissing, for_date
+
+        if db is None:
+            raise FxMissing(data.currency)
+        e.fx_rate, aviso = for_date(db, data.currency, data.date)
+        if aviso:
+            warnings.append(aviso)
     if data.tax_credit_amount is not None:
         e.tax_credit_amount = data.tax_credit_amount
     elif data.iva_credit in ("credito", "bienes_capital"):

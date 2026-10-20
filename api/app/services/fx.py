@@ -122,6 +122,19 @@ def doc_rate(db: Session, currency: str | None, stored, on: date | None) -> Deci
     return fx(db, cur, on).tasa
 
 
+def for_date(db: Session, currency: str | None, on: date | None) -> tuple[Decimal, str | None]:
+    """(tasa, aviso) para REGISTRAR un gasto o un movimiento de esa fecha: la de esa fecha o la ultima anterior; si no
+    hay ninguna anterior, la mas cercana posterior con un aviso para corregirla. Nunca 1 para otra moneda (antes se
+    guardaba 1 "con aviso"): sin ninguna tasa cargada lanza FxMissing (422 claro)."""
+    t = fx(db, currency, on)
+    if t.fecha is not None and on is not None and t.fecha > on:
+        return t.tasa, (
+            f"Sin tipo de cambio del BCCR para esa fecha: se usó el del {t.fecha.strftime('%d/%m/%Y')} "
+            f"({t.tasa.normalize():f}); corríjalo a mano si hace falta"
+        )
+    return t.tasa, None
+
+
 def info(db: Session, currency: str = "USD") -> dict | None:
     """Lo que muestran el editor de documentos y Ajustes: tasa del dia con su fecha, fuente y si esta vieja."""
     cur = (currency or "USD").upper()

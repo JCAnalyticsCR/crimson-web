@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
@@ -25,6 +27,7 @@ from ..services import cabys as cabys_svc
 from ..services import supplier_catalog as supcat
 
 router = APIRouter(tags=["catalogo"])
+log = logging.getLogger("crimson.catalogo")
 
 # Campos de costo del producto: solo los escribe quien los ve (catalog.costos)
 COST_FIELDS = {"cost", "cost_currency", "margin_pct"}
@@ -303,9 +306,21 @@ def toggle_web(pid: int, data: WebIn, p: Principal = Depends(require("catalog", 
     """Publica o quita el producto de la tienda desde la lista, sin abrir la ficha."""
     pr = _own(db, Product, pid, p.tenant.id)
     pr.show_on_web = data.show_on_web
+    _margin_recheck(db, p, pr)
     db.commit()
     db.refresh(pr)
     return _product_out(pr, p)
+
+
+def _margin_recheck(db: Session, p: Principal, pr: Product) -> None:
+    """Producto en Precios por revisar (guardian de margen, plan 1.12) editado a mano: si su precio ya cumple el margen
+    minimo (o se despublico) vuelve a la venta ya. Guardar el producto nunca falla por el guardian."""
+    from ..services import margin_guard
+
+    try:
+        margin_guard.recheck(db, p.tenant, pr)
+    except Exception:  # noqa: BLE001
+        log.exception("guardian de margen al editar el producto %s", pr.id)
 
 
 @router.get("/products/{pid}/availability")
@@ -352,6 +367,7 @@ def update_product(pid: int, data: ProductIn, p: Principal = Depends(require("ca
         for tid in data.tax_ids:
             _own(db, Tax, tid, p.tenant.id)
             pr.taxes.append(ProductTax(tax_id=tid))
+    _margin_recheck(db, p, pr)
     db.commit()
     db.refresh(pr)
     return _product_out(pr, p)

@@ -1,9 +1,12 @@
 """Tareas del guardian de margen (plan 1.12; la logica vive en services/margin_guard).
 
 - margin.guard: revisa todas las empresas. Ya corre solo despues de cada refresco de Eurocomp y de cada tasa nueva;
-  esta tarea queda como red (una vez al dia, antes del resumen) y para lanzarla a mano.
-- margin.daily_summary: correo diario al admin con lo que esta bajo el minimo (fuera de venta, solo informe, sobre el
-  tope, dudoso). Una vez por dia y por empresa aunque el beat dispare dos veces; nada que decir = no hay correo.
+  esta tarea queda para lanzarla a mano.
+- margin.daily_summary (la unica entrada del beat, regla 4 del plan): primero corre el guardian como red (con
+  BCCR_TOKEN vacio y sin credenciales de Eurocomp no hay refresco ni tasa nueva que lo dispare) y despues manda el
+  correo diario al admin con lo que esta bajo el minimo (fuera de venta, solo informe, sobre el tope, dudoso) y la
+  alerta de tipo de cambio viejo o faltante. Una vez por dia y por empresa aunque el beat dispare dos veces; nada que
+  decir = no hay correo.
 
 Las funciones reciben la sesion (se prueban sin Celery); las tareas solo abren la sesion y las llaman.
 """
@@ -67,4 +70,5 @@ def margin_daily_summary_task() -> int:
     from ..core.db import SessionLocal
 
     with SessionLocal() as db:
+        guard_all(db)  # red diaria: run_all hace su propio commit por empresa y nunca lanza
         return daily_summary(db)

@@ -412,6 +412,16 @@ class Pricer:
         crc = a if cur == "CRC" else a * self._rate(cur)
         return crc if self.currency == "CRC" else (crc / self._rate(self.currency)).quantize(Decimal("0.00001"))
 
+    def maybe(self, amount, currency: str | None) -> Decimal | None:
+        """Como __call__ pero None si falta la tasa: montos que solo se MUESTRAN (tarifas de envio, envio gratis desde)
+        en una tienda que no vende en colones. La portada y el checkout nunca se caen por eso."""
+        from ..services.fx import FxMissing
+
+        try:
+            return self(amount, currency)
+        except FxMissing:
+            return None
+
     def of(self, p: Product, amount=None) -> Decimal:
         """Precio del producto sin IVA en la moneda de la tienda (amount: el de una variante o el que pida la
         vitrina; por defecto el precio web). 0 = "precio a consultar": retenido por margen o sin tipo de cambio."""
@@ -533,7 +543,8 @@ def store_home(slug: str, db: Session = Depends(get_db)):
         ],
         "product_count": sum(counts.values()),
         # las tarifas se configuran en colones (Mi Tienda -> "Base ₡"); display_amount = en la moneda de la tienda, con IVA
-        "shipping_rates": [{**r, "display_amount": _gross(pricer(r.get("amount") or 0, "CRC"), 13)} for r in cfg["shipping_rates"] if r.get("active")],
+        # sin tipo de cambio (tienda en otra moneda) la tarifa queda null: "a consultar", nunca un 500 ni un 422
+        "shipping_rates": [{**r, "display_amount": ship_display(pricer, r)} for r in cfg["shipping_rates"] if r.get("active")],
         "payment_methods": manual_methods(t),
     }
 
@@ -777,7 +788,10 @@ def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
         )
     ship_amount = shipping_cost(ship, sum((d(ln.quantity) * d(prods[ln.product_id].weight_kg or 0) for ln in data.lines), Decimal(0))) if ship else Decimal(0)
     if ship_amount and pricer.currency != "CRC":  # las tarifas de envio se configuran en colones
-        ship_amount = pricer(ship_amount, "CRC").quantize(Decimal("0.01"))
+        conv = pricer.maybe(ship_amount, "CRC")
+        if conv is None:  # sin tipo de cambio no se cobra un envio inventado; el resto de la tienda sigue arriba
+            raise HTTPException(409, f"Envío {ship['name']}: monto a consultar. Elegí retiro en sitio o escribinos y te lo confirmamos.")
+        ship_amount = conv.quantize(Decimal("0.01"))
     if ship_amount > 0 and rate_zone(ship) != "retiro" and free_shipping_ok(t, pricer, items):
         ship_amount = Decimal(0)  # envio gratis desde el monto de Mi Tienda -> Pagos y entrega
     if ship and ship_amount > 0:
@@ -831,7 +845,14 @@ def free_shipping_threshold(t: Tenant, pricer: Pricer) -> Decimal | None:
     from ..services.store_orders import checkout_cfg
 
     raw = d(checkout_cfg(t).get("free_shipping_from") or 0)
-    return pricer(raw, "CRC").quantize(Decimal("0.01")) if raw > 0 else None
+    conv = pricer.maybe(raw, "CRC") if raw > 0 else None  # sin tipo de cambio: no se ofrece (nunca un umbral con 1)
+    return conv.quantize(Decimal("0.01")) if conv is not None else None
+
+
+def ship_display(pricer: Pricer, r: dict) -> Decimal | None:
+    """Tarifa de envio (se configura en colones) con IVA en la moneda de la tienda; None si falta el tipo de cambio."""
+    v = pricer.maybe(r.get("amount") or 0, "CRC")
+    return _gross(v, 13) if v is not None else None
 
 
 def free_shipping_ok(t: Tenant, pricer: Pricer, items: list[dict]) -> bool:

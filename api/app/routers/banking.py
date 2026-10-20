@@ -469,8 +469,13 @@ def expense_from_line(lid: int, data: ExpenseFromLineIn, p: Principal = Depends(
     currency = acct.currency or "CRC"
     fx = bccr_sell(db, currency, ln.date)  # los reportes pasan a colones con expense.fx_rate (CRC = 1)
     if fx is None:
-        fx = Decimal(1)
-        warnings.append("Sin tipo de cambio del BCCR para esa fecha: se usó 1; corríjalo en el gasto")
+        # sin tasa en o antes de esa fecha: la mas cercana con aviso (services/fx, plan 1.12). Nunca 1: sin ninguna
+        # tasa cargada, FxMissing -> 422 claro
+        from ..services.fx import for_date
+
+        fx, aviso = for_date(db, currency, ln.date)
+        if aviso:
+            warnings.append(aviso)
     e = Expense(
         tenant_id=p.tenant.id,
         category_id=data.category_id,

@@ -265,6 +265,42 @@ def run(db: Session, t: Tenant, *, reason: str = "") -> dict:
     return out
 
 
+def recheck(db: Session, t: Tenant, p: Product) -> None:
+    """Despues de editar a mano un producto que estaba en revision (precio, costo, moneda o publicacion): si su margen
+    ya llega al minimo (o dejo de publicarse) sale de la revision y vuelve a la venta en el acto, sin esperar al
+    proximo refresco; si sigue bajo, se actualiza el sugerido. Nunca saca de venta por una edicion manual (eso lo
+    decide la proxima corrida, con su tope) ni toca el resumen. Sin commit; nunca lanza."""
+    if not p.margin_hold and p.margin_flagged_at is None:
+        return
+    if not (p.active and p.show_on_web):
+        p.margin_hold, p.margin_flagged_at = False, None
+        return
+    cfg = config(t)
+    c = evaluate(t, p, Rates(db), cfg)
+    if isinstance(c, str):
+        return  # sin tasa o sin costo: se queda como estaba
+    info = dict(p.margin_info or {})
+    info.update(
+        {
+            "margin_pct": _s(c.margin_pct),
+            "min_pct": _s(cfg["min_pct"]),
+            "target_pct": _s(c.target_pct),
+            "price": _s(c.price),
+            "currency": c.currency,
+            "cost": _s(c.cost),
+            "cost_currency": c.cost_currency,
+            "cost_crc": _s(c.cost_crc),
+            "suggested": _s(c.suggested),
+            "checked_at": datetime.now(UTC).isoformat(),
+        }
+    )
+    if c.margin_pct >= cfg["min_pct"]:
+        # alguien reviso el precio a mano: el costo de hoy pasa a ser la referencia de saltos
+        info.update({"flagged": False, "dudoso": False, "over_cap": False, "cost_ref": _s(c.cost), "cost_ref_currency": c.cost_currency})
+        p.margin_hold, p.margin_flagged_at = False, None
+    p.margin_info = info
+
+
 def held(db: Session, tid: int) -> list[Product]:
     return list(db.scalars(select(Product).where(Product.tenant_id == tid, Product.margin_hold, Product.active, Product.show_on_web)))
 
@@ -356,13 +392,47 @@ def apply(db: Session, t: Tenant, p: Product, user_id: int | None, ip: str | Non
 
 
 # ---------- resumen diario al admin ----------
+def fx_alerts(db: Session, t: Tenant) -> list[str]:
+    """Alerta de tipo de cambio (plan 3, "BCCR diario mas alerta si queda viejo"): una linea por moneda que la tienda
+    necesita (precio o costo de un producto publicado en otra moneda) y que falta o tiene mas de 2 dias habiles.
+    Hoy BCCR_TOKEN puede estar vacio: la tasa se carga a mano y nadie se entera si se olvida."""
+    need: set[str] = set()
+    rows = db.execute(
+        select(Product.currency, Product.cost_currency, Product.cost).where(Product.tenant_id == t.id, Product.active, Product.show_on_web)
+    ).all()
+    for cur, ccur, cost in rows:
+        if (cur or "CRC").upper() != "CRC":
+            need.add(cur.upper())
+        if cost is not None and d(cost) > 0 and (ccur or "USD").upper() != "CRC":
+            need.add((ccur or "USD").upper())
+    out = []
+    for cur in sorted(need):
+        i = fxsvc.info(db, cur)
+        if i is None:
+            out.append(
+                f"No hay tipo de cambio de {cur} cargado: lo que tiene precio en {cur} sale «Consultar» en la tienda y el "
+                "guardián no puede revisar el margen de lo que cuesta en esa moneda. Cargalo en Ajustes → Facturación."
+            )
+        elif i["stale"]:
+            fecha = i["date"].strftime("%d/%m/%Y") if i["date"] else "?"
+            out.append(
+                f"El tipo de cambio de {cur} es del {fecha} ({i['source_label']}, {i['business_days_old']} días hábiles): "
+                "los precios y márgenes en esa moneda se calculan con una tasa vieja. Cargá la de hoy en Ajustes → Facturación."
+            )
+    return out
+
+
 def summary_html(db: Session, t: Tenant, base_url: str) -> tuple[str, str] | None:
-    """(asunto, html) del resumen diario, o None si no hay nada bajo el minimo."""
+    """(asunto, html) del resumen diario, o None si no hay nada bajo el minimo ni un tipo de cambio viejo o faltante."""
     from .render import money
 
     rows = flagged(db, t.id)
-    if not rows:
+    alerts = fx_alerts(db, t)
+    if not rows and not alerts:
         return None
+    fx_html = "".join(f"<p><b>Tipo de cambio:</b> {html.escape(a)}</p>" for a in alerts)
+    if not rows:
+        return f"Tipo de cambio viejo o faltante ({len(alerts)})", fx_html
     cfg = config(t)
     n_held = sum(1 for p in rows if p.margin_hold)
     n_dud = sum(1 for p in rows if (p.margin_info or {}).get("dudoso"))
@@ -381,7 +451,7 @@ def summary_html(db: Session, t: Tenant, base_url: str) -> tuple[str, str] | Non
     link = f"{base_url.rstrip('/')}/aprobaciones#precios_por_revisar"
     modo = "activo: lo que queda bajo el mínimo sale de venta" if cfg["mode"] == "activo" else "informe: no se saca nada de venta"
     body = (
-        f"<p>{len(rows)} producto(s) de la tienda están bajo el margen mínimo de {_s(cfg['min_pct'])} % "
+        f"{fx_html}<p>{len(rows)} producto(s) de la tienda están bajo el margen mínimo de {_s(cfg['min_pct'])} % "
         f"({n_held} fuera de venta, {n_dud} con un salto de costo dudoso). Modo {modo}.</p><ul>{''.join(li)}</ul>{mas}"
         f'<p>El sistema nunca cambia un precio solo: revisalos y aplicá el sugerido con un clic en '
         f'<a href="{html.escape(link)}">Aprobaciones → Precios por revisar</a>.</p>'

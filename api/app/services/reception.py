@@ -25,6 +25,7 @@ from ..providers.hacienda.provider import InvalidXml, SimulatedHacienda
 from . import hacienda_config as hc
 from .bitacora import audit_change, snapshot
 from .documents import audit
+from .fx import doc_rate
 from .reception_calc import FISCAL_CODE, MESSAGE_CODE, CalcError, business_days_left, code_of, compute, name_of
 from .sequences import next_fiscal_consecutive
 
@@ -153,7 +154,8 @@ def create_expense_from_document(
         description=f"{prefix}{doc.issuer_name or 'Proveedor'} · {doc.consecutive or doc.clave[-10:]}"[:300],
         date=doc.issue_date or date.today(),
         currency=doc.currency or "CRC",
-        fx_rate=doc.fx_rate or 1,
+        # la tasa del XML; si no la trae, la del BCCR de su fecha (services/fx). Nunca 1 para dolares: sin tasa, 422
+        fx_rate=doc_rate(db, doc.currency, doc.fx_rate, doc.issue_date),
         received_document_id=doc.id,
         received_clave=doc.clave,
         reference=doc.clave,
@@ -215,7 +217,8 @@ def link_expense(db: Session, p: Principal, doc: ReceivedDocument, expense_id: i
     sup = find_or_create_supplier(db, p.tenant.id, doc, p.user.id)
     e.received_document_id, e.received_clave, e.reference = doc.id, doc.clave, doc.clave
     e.supplier_id = sup.id if sup else e.supplier_id
-    e.currency, e.fx_rate = doc.currency or e.currency, doc.fx_rate or 1
+    e.currency = doc.currency or e.currency
+    e.fx_rate = doc_rate(db, e.currency, doc.fx_rate, doc.issue_date)  # nunca 1 para dolares (services/fx)
     for k, v in amounts.items():
         setattr(e, k, v)
     doc.expense_id = e.id

@@ -273,3 +273,87 @@ def test_resumen_diario_al_admin_una_vez_por_dia(client, auth, db_session):
     correos = db_session.scalars(select(EmailOutbox).where(EmailOutbox.id > antes)).all()
     assert correos and all(c.subject.startswith("Margen: 1 producto(s) bajo el 25") for c in correos)
     assert p.name in correos[0].html and "Precios por revisar" in correos[0].html and "nunca cambia un precio solo" in correos[0].html
+
+
+def test_editar_a_mano_un_precio_retenido_lo_libera_ya(client, auth, db_session):
+    """Alguien corrige el precio en Productos en lugar de "Aplicar": si ya cumple el minimo vuelve a la venta en el
+    acto (sin esperar al proximo refresco); si sigue bajo, sigue fuera con el sugerido al dia. Editar nunca saca de
+    venta por si solo y nunca reprecia."""
+    tid = auth["tenant"]["id"]
+    _shop(client)
+    p = _producto(client, db_session, tid, code="EDIT-1", cost="140")
+    t = db_session.get(Tenant, tid)
+    t.settings = {**(t.settings or {}), "margin_guard_mode": "activo"}
+    db_session.commit()
+    margin_guard.run_all(db_session)
+    db_session.refresh(p)
+    assert p.margin_hold
+    ficha = next(x for x in client.get("/products", params={"q": "EDIT-1"}).json()["items"] if x["id"] == p.id)
+    assert ficha["margin_hold"] is True
+    base = {k: ficha[k] for k in ("code", "name", "currency", "cost", "cost_currency") if k in ficha}
+    # sube el precio pero no alcanza (140 x 512,35 = 71 729 de costo; 85 000 da 15,6 %): sigue fuera
+    r = client.put(f"/products/{p.id}", json={**base, "price": 85000})
+    assert r.status_code == 200, r.text
+    db_session.refresh(p)
+    assert p.margin_hold and p.margin_info["margin_pct"] == "15.6" and p.price == Decimal(85000)
+    # con 110 000 el margen es 34,8 %: vuelve a la venta ya y sale de la revision
+    r = client.put(f"/products/{p.id}", json={**base, "price": 110000})
+    assert r.status_code == 200 and r.json()["margin_hold"] is False
+    db_session.refresh(p)
+    assert not p.margin_hold and p.margin_flagged_at is None and p.price == Decimal(110000)
+    assert _pub(client, p.id)["price_on_request"] is False
+    assert p.id not in [i["id"] for i in _sec(client, "precios_por_revisar")["items"]]
+
+
+def test_despublicar_desde_la_lista_saca_de_la_revision(client, auth, db_session):
+    tid = auth["tenant"]["id"]
+    _shop(client)
+    p = _producto(client, db_session, tid, code="WEB-1", cost="140")
+    t = db_session.get(Tenant, tid)
+    t.settings = {**(t.settings or {}), "margin_guard_mode": "activo"}
+    db_session.commit()
+    margin_guard.run_all(db_session)
+    assert client.patch(f"/products/{p.id}/web", json={"show_on_web": False}).status_code == 200
+    db_session.refresh(p)
+    assert not p.margin_hold and p.margin_flagged_at is None
+
+
+def test_resumen_avisa_tipo_de_cambio_viejo_o_faltante(client, auth, db_session):
+    """BCCR_TOKEN vacio: la tasa se carga a mano. Si queda vieja (mas de 2 dias habiles) o falta y la tienda tiene
+    productos con costo o precio en dolares, el resumen diario lo avisa aunque no haya nada bajo el minimo."""
+    tid = auth["tenant"]["id"]
+    _shop(client)
+    _producto(client, db_session, tid, code="FX-VIEJO")
+    db_session.execute(delete(ExchangeRate))
+    db_session.add(ExchangeRate(date=date(2026, 1, 5), currency="USD", sell=Decimal("512.35"), buy=Decimal("505.10"), source="manual"))
+    db_session.commit()
+    antes = db_session.scalar(select(EmailOutbox.id).order_by(EmailOutbox.id.desc())) or 0
+    assert tareas.daily_summary(db_session) == 1
+    c = db_session.scalars(select(EmailOutbox).where(EmailOutbox.id > antes)).first()
+    assert c.subject.startswith("Tipo de cambio viejo o faltante") and "05/01/2026" in c.html and "Manual" in c.html
+    # sin ninguna tasa: tambien avisa (al dia siguiente; hoy ya salio)
+    t = db_session.get(Tenant, tid)
+    t.settings = {k: v for k, v in (t.settings or {}).items() if k != "margin_guard_summary_on"}
+    db_session.execute(delete(ExchangeRate))
+    db_session.commit()
+    assert tareas.daily_summary(db_session) == 1
+    c = db_session.scalars(select(EmailOutbox).where(EmailOutbox.id > antes).order_by(EmailOutbox.id.desc())).first()
+    assert "No hay tipo de cambio de USD" in c.html
+    assert margin_guard.fx_alerts(db_session, t)
+
+
+def test_red_diaria_corre_el_guardian_antes_del_resumen(client, auth, db_session):
+    """La unica entrada del beat (margin.daily_summary) corre primero el guardian: sin BCCR ni Eurocomp nadie mas lo
+    dispara y una edicion de costo hecha a mano igual queda protegida al dia siguiente."""
+    tid = auth["tenant"]["id"]
+    _shop(client)
+    p = _producto(client, db_session, tid, code="RED-1")
+    t = db_session.get(Tenant, tid)
+    t.settings = {**(t.settings or {}), "margin_guard_mode": "activo"}
+    db_session.commit()
+    _set_cost(db_session, p, 140)  # nadie corrio el guardian todavia
+    out = tareas.guard_all(db_session)
+    assert out[tid]["nuevos_retenidos"] == 1 and out[tid]["reason"] == "revisión diaria"
+    db_session.refresh(p)
+    assert p.margin_hold
+    assert tareas.daily_summary(db_session) == 1

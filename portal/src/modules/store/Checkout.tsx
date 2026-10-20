@@ -9,7 +9,8 @@ import "./checkout.css";
 
 export type CartItem = { key: string; id: number; variant_id: number | null; name: string; image: string | null; price: number; currency: string; qty: number };
 type Method = { code: string; label: string; needs_proof: boolean; simulated: boolean; hint: string };
-type Rate = { name: string; zone: "retiro" | "gam" | "fuera_gam" | null; per_kg: boolean; display_amount: string | number };
+/* display_amount null: la tienda vende en otra moneda y falta el tipo de cambio (plan 1.12): "a consultar", nunca "gratis" */
+type Rate = { name: string; zone: "retiro" | "gam" | "fuera_gam" | null; per_kg: boolean; display_amount: string | number | null };
 type Cfg = {
   currency: string; methods: Method[]; shipping_rates: Rate[]; provinces: Record<string, string[]>;
   outside_gam: { provinces: string[]; cantons: string[] }; terms_required: boolean; pickup: { address?: string; hours?: string }; whatsapp: string;
@@ -255,7 +256,7 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
               <fieldset className="sh-fieldset"><legend>¿Cómo lo recibís?</legend>
                 <div className="sh-choice">
                   {canShip && <label className="sh-opt"><input type="radio" name="dtype" checked={f.dtype === "envio"} onChange={() => set("dtype", "envio")} /><span><Ico d={IC.truck} size={16} /> Envío a domicilio<small>Te lo llevamos a la dirección que indiqués.</small></span><span /></label>}
-                  {canPickup && <label className="sh-opt"><input type="radio" name="dtype" checked={f.dtype === "retiro"} onChange={() => set("dtype", "retiro")} /><span><Ico d={IC.store} size={16} /> Retiro en sitio<small>{cfg.pickup?.address || "Te avisamos cuando esté listo."}{cfg.pickup?.hours ? ` · ${cfg.pickup.hours}` : ""}</small></span><span className="sh-meta">{pickupRate && Number(pickupRate.display_amount) ? money(pickupRate.display_amount, cur) : "gratis"}</span></label>}
+                  {canPickup && <label className="sh-opt"><input type="radio" name="dtype" checked={f.dtype === "retiro"} onChange={() => set("dtype", "retiro")} /><span><Ico d={IC.store} size={16} /> Retiro en sitio<small>{cfg.pickup?.address || "Te avisamos cuando esté listo."}{cfg.pickup?.hours ? ` · ${cfg.pickup.hours}` : ""}</small></span><span className="sh-meta">{pickupRate && pickupRate.display_amount == null ? "a consultar" : pickupRate && Number(pickupRate.display_amount) ? money(pickupRate.display_amount as number, cur) : "gratis"}</span></label>}
                 </div>
               </fieldset>
               {f.dtype === "envio" && (
@@ -275,7 +276,7 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
                           <label key={r.name} className="sh-opt" data-off={!ok}>
                             <input type="radio" name="rate" checked={f.rate === r.name} disabled={!ok} onChange={() => set("rate", r.name)} />
                             <span>{r.name}{!ok && <small>Tu dirección está fuera de la GAM</small>}</span>
-                            <span className="sh-meta">{r.per_kg ? "según peso" : Number(r.display_amount) ? money(r.display_amount, cur) : "gratis"}</span>
+                            <span className="sh-meta">{r.per_kg ? "según peso" : r.display_amount == null ? "a consultar" : Number(r.display_amount) ? money(r.display_amount, cur) : "gratis"}</span>
                           </label>
                         );
                       })}</div>

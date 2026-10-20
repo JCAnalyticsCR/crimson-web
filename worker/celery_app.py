@@ -18,6 +18,8 @@ log = logging.getLogger("crimson.worker")
 celery = Celery("crimson", broker=settings.redis_url, backend=settings.redis_url)
 celery.conf.update(timezone="America/Costa_Rica", enable_utc=True, task_acks_late=True, worker_prefetch_multiplier=1)
 
+import app.tasks.margen  # noqa: E402,F401  guardian de margen (plan 1.12): margin.guard y margin.daily_summary
+
 
 def _log_fiscal_keys() -> None:
     """Solo kid y sha256(llave)[:8] de FISCAL_KEYS (deben ser los mismos que registra la API)."""
@@ -550,4 +552,6 @@ celery.conf.beat_schedule = {
     "suppliers-sync-eurocomp": {"task": "suppliers.sync_eurocomp", "schedule": crontab(day_of_week=1, hour=3, minute=17)},
     "suppliers-eurocomp-stock": {"task": "suppliers.eurocomp_stock", "schedule": crontab(hour="5,11,17,23", minute=17)},
     "mark-overdue": {"task": "sales.mark_overdue", "schedule": crontab(hour=0, minute=30)},
+    # despues de la tasa del BCCR (6:15) y del refresco de Eurocomp (5:17), que ya corren el guardian
+    "margin-daily-summary": {"task": "margin.daily_summary", "schedule": crontab(hour=7, minute=5)},
 }
