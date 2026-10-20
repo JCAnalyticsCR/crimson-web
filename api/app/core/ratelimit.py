@@ -1,5 +1,5 @@
 """Limite de intentos por clave (IP) en ventana deslizante. En memoria: basta con una replica de la API.
-Con varias replicas habria que moverlo a Redis (misma interfaz)."""
+Con varias replicas habria que moverlo a Redis (misma interfaz). La IP es la real del cliente (core/clientip.py)."""
 
 from __future__ import annotations
 
@@ -35,7 +35,106 @@ class SlidingWindow:
             self.hits.clear()
 
 
-login_limiter = SlidingWindow(limit=20, seconds=600)  # 20 intentos / 10 min por IP
+class FailureLimiter:
+    """Cuenta solo FALLOS por clave, con espera progresiva. Los primeros `free` fallos no esperan; desde ahi cada
+    intento nuevo espera base * 2^(fallos - free) segundos desde el ultimo fallo (tope `cap`). La clave se olvida
+    `forget` segundos despues de su ultimo fallo, o al acertar (clear)."""
+
+    def __init__(self, free: int, base: int, cap: int, forget: int):
+        self.free, self.base, self.cap, self.forget = free, base, cap, forget
+        self.state: dict[str, tuple[int, float]] = {}  # clave -> (fallos, momento del ultimo fallo)
+        self.lock = Lock()
+        self.clock = time.monotonic  # las pruebas lo reemplazan para simular la espera
+
+    def _live(self, key: str, now: float) -> tuple[int, float]:
+        n, last = self.state.get(key, (0, 0.0))
+        if n and now - last > self.forget:
+            self.state.pop(key, None)
+            return 0, 0.0
+        return n, last
+
+    def wait(self, key: str) -> int:
+        """Segundos que faltan para poder intentar de nuevo (0 = puede)."""
+        now = self.clock()
+        with self.lock:
+            n, last = self._live(key, now)
+            if n < self.free:
+                return 0
+            pause = min(self.cap, self.base * 2 ** (n - self.free))
+            return max(0, int(pause - (now - last)) + 1) if now - last < pause else 0
+
+    def check(self, key: str, message: str) -> None:
+        w = self.wait(key)
+        if w:
+            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, message.format(espera=_espera(w)), headers={"Retry-After": str(w)})
+
+    def fail(self, key: str) -> int:
+        now = self.clock()
+        with self.lock:
+            n, _ = self._live(key, now)
+            self.state[key] = (n + 1, now)
+            if len(self.state) > 50_000:  # higiene: no crecer sin limite
+                for k in [k for k, (_, t) in self.state.items() if now - t > self.forget][:10_000]:
+                    self.state.pop(k, None)
+            return n + 1
+
+    def count(self, key: str) -> int:
+        with self.lock:
+            return self._live(key, self.clock())[0]
+
+    def clear(self, key: str) -> None:
+        with self.lock:
+            self.state.pop(key, None)
+
+    def reset(self) -> None:
+        with self.lock:
+            self.state.clear()
+
+
+def _espera(seg: int) -> str:
+    return f"{seg} segundos" if seg < 90 else f"{-(-seg // 60)} minutos"
+
+
+class LoginLimiter:
+    """Inicio de sesion (plan 1.10). Solo cuentan los intentos FALLIDOS (entrar bien no gasta cupo).
+
+    - Por IP: 20 fallidos seguidos (contra cualquier cuenta) y despues espera progresiva desde 1 min (tope 15 min).
+    - Por cuenta + IP: 5 fallidos y despues espera progresiva desde 30 s (tope 15 min). Frena solo a esa IP: 25
+      fallidos desde una IP no le impiden entrar a la duena de la cuenta desde otra.
+    - Por cuenta (todas las IPs, bloqueo en la base, routers/auth.py): cada IP aporta como mucho ACCOUNT_SHARE
+      fallidos, asi que un tercero no puede bloquear la cuenta desde una sola IP.
+    """
+
+    ACCOUNT_SHARE = 3
+
+    def __init__(self):
+        self.ip = FailureLimiter(free=20, base=60, cap=900, forget=900)
+        self.account = FailureLimiter(free=5, base=30, cap=900, forget=3600)
+
+    @staticmethod
+    def _acct(email: str, ip: str) -> str:
+        import hashlib
+
+        return hashlib.sha256(f"{email.strip().lower()}|{ip}".encode()).hexdigest()[:32]
+
+    def check(self, email: str, ip: str) -> None:
+        self.ip.check(ip, "Demasiados intentos fallidos desde esta conexión. Esperá {espera} y probá de nuevo.")
+        self.account.check(self._acct(email, ip), "Demasiados intentos fallidos con esta cuenta. Esperá {espera} y probá de nuevo.")
+
+    def fail(self, email: str, ip: str) -> bool:
+        """Registra un fallo. Devuelve True si este fallo todavia cuenta para el bloqueo de la cuenta en la base."""
+        self.ip.fail(ip)
+        return self.account.fail(self._acct(email, ip)) <= self.ACCOUNT_SHARE
+
+    def success(self, email: str, ip: str) -> None:
+        self.account.clear(self._acct(email, ip))
+
+    def reset(self) -> None:
+        self.ip.reset()
+        self.account.reset()
+
+
+login_limiter = LoginLimiter()
 public_limiter = SlidingWindow(limit=30, seconds=600)  # checkouts publicos por IP
 webhook_limiter = SlidingWindow(limit=240, seconds=60)  # webhooks de ONVO por empresa: holgado para rafagas reales
 # Reporte de incidencias desde la pagina web: una persona real no manda mas de 5 por hora; el tope global
@@ -49,7 +148,10 @@ survey_request_limiter = SlidingWindow(limit=10, seconds=3600)
 quote_limiter = SlidingWindow(limit=300, seconds=600)
 checkout_global_limiter = SlidingWindow(limit=300, seconds=3600)
 order_lookup_limiter = SlidingWindow(limit=10, seconds=600)
+# Comprobantes de pago: 10 por hora por pedido y por IP (subir el 11.o de OTRO pedido sigue entrando); el tope por
+# IP frena a quien prueba con muchos enlaces de pedido
 order_proof_limiter = SlidingWindow(limit=10, seconds=3600)
+order_proof_ip_limiter = SlidingWindow(limit=60, seconds=3600)
 # Solicitudes de acceso al portal del cliente (pagina publica): mismo criterio que las incidencias.
 access_request_limiter = SlidingWindow(limit=5, seconds=3600)
 access_request_global_limiter = SlidingWindow(limit=120, seconds=3600)

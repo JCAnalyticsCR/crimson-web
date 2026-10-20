@@ -98,6 +98,9 @@ def get_ally(request: Request, p: Principal = Depends(get_session_principal), db
     from ..services.ally_scope import AllyScope
 
     if p.role == "admin" and p.ally_company_id is None and request.headers.get(PREVIEW_HEADER):
+        from .twofa import enforce
+
+        enforce(p.user, p.tenant, p.role)  # la vista previa es del panel interno: misma compuerta de 2FA
         p = _preview(request, p, db)
         company = db.get(AllyCompany, p.ally_company_id)
         return AllyCtx(p, company, AllyScope(db, p, company), p.preview_by)

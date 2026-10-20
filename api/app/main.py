@@ -6,7 +6,6 @@ import logging
 import time
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import settings
 from .routers import (
@@ -72,17 +71,12 @@ def create_app() -> FastAPI:
         redoc_url=None,
     )
     from .core.bodylimit import BodyLimitMiddleware
+    from .core.clientip import ClientIPMiddleware
+    from .core.cors import SplitCORSMiddleware
 
     app.add_middleware(BodyLimitMiddleware)  # antes que CORS: el 413 lleva sus encabezados
-    app.add_middleware(
-        CORSMiddleware,
-        # el portal + la landing (esta solo usa /public/incidents y no manda cookies)
-        allow_origins=list(dict.fromkeys([*settings.cors_origins, *settings.landing_origins])),
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        # X-View-As-Ally / X-View-As-User: "Ver como este aliado" del admin (solo lectura, core/ally.py)
-        allow_headers=["Authorization", "Content-Type", "X-Requested-With", "X-View-As-Ally", "X-View-As-User"],
-    )
+    # cookies solo para el portal; la landing sin cookies y solo en sus rutas publicas (core/cors.py)
+    app.add_middleware(SplitCORSMiddleware, portal_origins=list(settings.cors_origins), landing_origins=list(settings.landing_origins))
 
     @app.middleware("http")
     async def request_log(request: Request, call_next):
@@ -94,6 +88,9 @@ def create_app() -> FastAPI:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
+
+    # el ultimo que se agrega es el de afuera: la IP real queda puesta antes de CORS, limitadores y request_log
+    app.add_middleware(ClientIPMiddleware)
 
     app.include_router(core.router)
     app.include_router(auth.router)

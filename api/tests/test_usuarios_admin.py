@@ -36,11 +36,11 @@ def _mk_user(db, tid, email, role="ventas", pw=PW, **cols):
     return u
 
 
-def _login_as(client, email, pw, **extra):
-    """Login sin el Authorization del admin (y lo deja como estaba)."""
+def _login_as(client, email, pw, _headers=None, **extra):
+    """Login sin el Authorization del admin (y lo deja como estaba). _headers: p. ej. otra IP (fixture from_ip)."""
     h = client.headers.pop("Authorization", None)
     try:
-        return client.post("/auth/login", json={"email": email, "password": pw, **extra})
+        return client.post("/auth/login", json={"email": email, "password": pw, **extra}, headers=_headers)
     finally:
         if h:
             client.headers["Authorization"] = h
@@ -353,8 +353,11 @@ def test_reset_quita_2fa(client, auth, db_session):
     # el codigo de recuperacion no se consume si el login no termina
     assert _login_as(client, v.email, temp, new_password="corta", totp_code="ABCD-2345").status_code == 422
     assert db_session.get(User, v.id).totp_recovery == [hash_recovery("ABCD-2345")]
-    assert _login_as(client, v.email, temp, new_password=NUEVA, totp_code=pyotp.TOTP(secreto).now()).status_code == 200
-    assert _login_as(client, v.email, NUEVA, totp_code=pyotp.TOTP(secreto).now()).status_code == 200
+    codigo = pyotp.TOTP(secreto).now()
+    assert _login_as(client, v.email, temp, new_password=NUEVA, totp_code=codigo).status_code == 200
+    # plan 1.10: el codigo que se acaba de usar no sirve otra vez; el de la ventana siguiente si
+    assert _login_as(client, v.email, NUEVA, totp_code=codigo).status_code == 401
+    assert _login_as(client, v.email, NUEVA, totp_code=pyotp.TOTP(secreto).at(datetime.now(UTC) + timedelta(seconds=30))).status_code == 200
 
 
 def test_no_se_restablece_propio_soporte_cliente_otra_empresa_compartido(client, auth, db_session):
@@ -578,7 +581,7 @@ def test_limite_de_acciones_del_admin(client, auth, db_session, monkeypatch):
     assert client.post("/settings/invitations", json={"email": "limite3@ejemplo.com", "role": "ventas"}).status_code == 429
 
 
-def test_lista_de_usuarios(client, auth, db_session, monkeypatch):
+def test_lista_de_usuarios(client, auth, db_session, monkeypatch, from_ip):
     monkeypatch.delenv("RESEND_API_KEY", raising=False)
     tid = auth["tenant"]["id"]
     v = _mk_user(db_session, tid, "lista@ejemplo.com", full_name="Ana Lista")
@@ -612,9 +615,11 @@ def test_lista_de_usuarios(client, auth, db_session, monkeypatch):
         assert k in x, k
     assert x["shared"] is False and x["locked_until"] is None and x["is_self"] is False
     assert {"roles", "cost_roles", "cost_role_choices"} <= set(d)
-    # bloqueado por intentos: se ve y restablecer lo desbloquea
-    for _ in range(6):
-        _login_as(client, v.email, "Clave-incorrecta-1")
+    # bloqueado por intentos: se ve y restablecer lo desbloquea. Desde 1.10 una sola IP no bloquea la cuenta (aporta
+    # como mucho 3 fallidos): el bloqueo es de un ataque desde varias IPs
+    for n in range(4):
+        for _ in range(3):
+            assert _login_as(client, v.email, "Clave-incorrecta-1", _headers=from_ip(f"203.0.113.{n + 1}")).status_code == 401
     assert next(u for u in client.get("/settings/users").json()["users"] if u["id"] == v.id)["locked_until"]
     client.post(f"/settings/users/{v.id}/reset-password", json={"mode": "enlace", "admin_password": ADMIN_PW})
     x = next(u for u in client.get("/settings/users").json()["users"] if u["id"] == v.id)

@@ -14,7 +14,7 @@ def actor_key(p: Principal) -> str:
     return f"{p.tenant.id}:{p.user.id}"
 
 
-def require_reauth(p: Principal, password: str | None) -> None:
+def require_reauth(p: Principal, password: str | None, message: str = "Confirmá con tu contraseña de administrador") -> None:
     reauth_limiter.hit(actor_key(p))  # cada intento cuenta, antes de verificar
     if not password or not verify_password(password, p.user.password_hash):
-        raise HTTPException(403, "Confirmá con tu contraseña de administrador")  # 403, nunca 401
+        raise HTTPException(403, message)  # 403, nunca 401

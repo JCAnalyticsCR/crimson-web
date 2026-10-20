@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
-from ..core.ratelimit import checkout_global_limiter, order_lookup_limiter, order_proof_limiter, public_limiter
+from ..core.ratelimit import checkout_global_limiter, order_lookup_limiter, order_proof_ip_limiter, order_proof_limiter, public_limiter
 from ..models import Media, Order, OrderLine, Tenant
 from ..providers.payments import key_mode
 from ..services import cr_geo, onvo, store_inventory
@@ -275,13 +275,17 @@ def order_status(slug: str, token: str, response: Response, db: Session = Depend
 
 @router.post("/public/store/{slug}/orders/{token}/proof", status_code=201)
 async def order_proof(slug: str, token: str, request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    order_proof_limiter.hit(f"proof:{client_ip(request)}")
+    ip = client_ip(request)
+    order_proof_ip_limiter.hit(f"proof-ip:{ip}")  # tope por IP: probar muchos enlaces de pedido
     t, o = _public_order(db, slug, token)
+    # por pedido y por IP: 10 comprobantes de un pedido no le cierran la puerta a otro pedido desde la misma conexion
+    # (una oficina con varias compras) ni el que tiene el enlace de un pedido traba a otra persona
+    order_proof_limiter.hit(f"proof:{o.id}:{ip}")
     if o.payment_kind not in so.NEEDS_PROOF or o.status not in ("nuevo", "en_revision"):
         raise HTTPException(409, "Este pedido no espera un comprobante")
     data = await file.read(so.MAX_PROOF + 1)
     m = so.save_proof(db, t, o, data, file.filename)
-    audit(db, t.id, None, "proof", "order", o.id, {"media_id": m.id, "size": m.size}, ip=client_ip(request))
+    audit(db, t.id, None, "proof", "order", o.id, {"media_id": m.id, "size": m.size}, ip=ip)
     if o.status == "nuevo":
         so.transition(db, t, o, "en_revision", by="cliente", note="Comprobante subido", notify=False)
     so.notify_team(db, t, o, "comprobante")

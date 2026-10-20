@@ -8,6 +8,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core import twofa
 from ..core.config import settings as cfg
 from ..core.crypto import encrypt, mask
 from ..core.db import get_db
@@ -58,6 +59,9 @@ DEFAULTS = {
     "reservation_auto_approve_units": 0,
     "reservation_days": 15,  # vigencia por defecto de una reserva
     "cost_roles": [],  # roles que, ademas del admin, ven costos (Andres 08:07: por defecto nadie)
+    # 2FA obligatorio (plan 1.10, core/twofa.py): por defecto administracion y contabilidad, con 7 dias de gracia
+    "twofa_roles": list(twofa.DEFAULT_ROLES),
+    "twofa_grace_days": twofa.DEFAULT_GRACE_DAYS,
 }
 
 
@@ -117,6 +121,20 @@ class SettingsIn(BaseModel):
             raise ValueError(f"Estos roles no pueden ver costos: {', '.join(malos)}")
         return list(dict.fromkeys(v))
 
+    # Ajustes -> Usuarios -> "Verificacion en dos pasos obligatoria": roles que la exigen y dias de gracia
+    twofa_roles: list[str] | None = None
+    twofa_grace_days: int | None = Field(None, ge=0, le=twofa.MAX_GRACE_DAYS)
+
+    @field_validator("twofa_roles")
+    @classmethod
+    def _twofa_roles(cls, v):
+        if v is None:
+            return None
+        malos = [r for r in v if r not in twofa.role_choices()]
+        if malos:
+            raise ValueError(f"Roles que no existen en el panel: {', '.join(malos)}")
+        return list(dict.fromkeys(v))
+
 
 def _public_settings(v):
     """Quita en forma recursiva las llaves que terminan en _enc o _encrypted (p. ej. inbox.password_enc): GET /settings
@@ -139,6 +157,7 @@ def put_settings(data: SettingsIn, p: Principal = Depends(require("settings", "c
 
     t = db.get(Tenant, p.tenant.id)
     antes = list((t.settings or {}).get("cost_roles") or [])
+    twofa_antes = {"twofa_roles": list(twofa.required_roles(t)), "twofa_grace_days": twofa.grace_days(t)}
     prov_antes = hc.provider_setting(t)
     t.settings = {**DEFAULTS, **(t.settings or {}), **data.model_dump(exclude_unset=True, mode="json")}
     if "einvoice_provider" in data.model_fields_set and data.einvoice_provider != prov_antes:
@@ -151,6 +170,11 @@ def put_settings(data: SettingsIn, p: Principal = Depends(require("settings", "c
         # siguiente peticion: los permisos se calculan en cada request, no hace falta cerrar sesiones.
         despues = list(t.settings.get("cost_roles") or [])
         audit_change(db, p, "permissions", "tenant", t.id, {"cost_roles": antes}, {"cost_roles": despues}, reason="Quien ve costos")
+    if {"twofa_roles", "twofa_grace_days"} & data.model_fields_set:
+        # politica de seguridad: queda en la bitacora con antes/despues (solo si cambio)
+        despues2 = {"twofa_roles": list(twofa.required_roles(t)), "twofa_grace_days": twofa.grace_days(t)}
+        if despues2 != twofa_antes:
+            audit_change(db, p, "permissions", "tenant", t.id, twofa_antes, despues2, reason="Verificación en dos pasos obligatoria")
     db.commit()
     return _public_settings(t.settings)
 

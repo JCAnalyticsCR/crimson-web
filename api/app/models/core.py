@@ -2,6 +2,7 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     CheckConstraint,
     Date,
@@ -50,6 +51,12 @@ class User(TimestampMixin, Base):
     totp_secret: Mapped[str | None] = mapped_column(String(64))
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     totp_recovery: Mapped[list] = mapped_column(JSON, default=list)  # hashes de los codigos de un solo uso
+    # 2FA (plan 1.10): el secreto nuevo espera aqui hasta que /2fa/verify lo confirma (el anterior sigue activo
+    # mientras tanto); totp_last_step = ultima ventana de 30 s ya usada (un codigo no sirve dos veces);
+    # twofa_required_since = primera vez que su rol le exigio 2FA (desde ahi corren los dias de gracia de la empresa)
+    totp_pending_secret: Mapped[str | None] = mapped_column(String(64))
+    totp_last_step: Mapped[int | None] = mapped_column(BigInteger)
+    twofa_required_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     failed_logins: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

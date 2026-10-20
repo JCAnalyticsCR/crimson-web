@@ -208,7 +208,10 @@ def test_2fa_con_codigos_de_recuperacion(client, auth, db_session):
     client.headers.pop("Authorization", None)
     sin = client.post("/auth/login", json={"email": correo, "password": pw})
     assert sin.status_code == 401 and sin.headers.get("X-2FA") == "required"
-    con = client.post("/auth/login", json={"email": correo, "password": pw, "totp_code": pyotp.TOTP(setup["secret"]).now()})
+    # el codigo de la activacion ya se uso (plan 1.10: un codigo no sirve dos veces): el de la ventana siguiente
+    import time
+
+    con = client.post("/auth/login", json={"email": correo, "password": pw, "totp_code": pyotp.TOTP(setup["secret"]).at(time.time() + 30)})
     assert con.status_code == 200
 
     # el teléfono se perdió: entra con un código de recuperación, y ese código no sirve dos veces

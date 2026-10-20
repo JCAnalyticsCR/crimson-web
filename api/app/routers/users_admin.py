@@ -30,6 +30,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..core import twofa
 from ..core.config import settings as cfg
 from ..core.db import get_db
 from ..core.deps import ALLY_USER_ROLES, ASSIGNABLE_ROLES, COST_ROLE_CHOICES, Principal, cost_roles, require
@@ -298,6 +299,10 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
         # "Quien ve costos": lo habilitado hoy y los roles que se pueden habilitar (el resto nunca)
         "cost_roles": list(cost_roles(p.tenant)),
         "cost_role_choices": list(COST_ROLE_CHOICES),
+        # 2FA obligatorio (core/twofa.py): roles que lo exigen, dias de gracia y los roles que se pueden elegir
+        "twofa_roles": list(twofa.required_roles(p.tenant)),
+        "twofa_grace_days": twofa.grace_days(p.tenant),
+        "twofa_role_choices": twofa.role_choices(),
         "mail_configured": mail_configured(),
         "support_members": support_members,
     }
@@ -671,7 +676,7 @@ def reset_password(uid: int, data: ResetIn, response: Response, p: Principal = D
     if data.mode == "temporal":
         if quita_2fa:
             # la temporal cambia la contrasena y cierra sesiones en este mismo paso: se puede quitar ya
-            u.totp_enabled, u.totp_secret, u.totp_recovery = False, None, []
+            u.totp_enabled, u.totp_secret, u.totp_recovery, u.totp_pending_secret = False, None, [], None
             sin_2fa = True
             audit(db, tid, p.user.id, "2fa_reset", "user", uid, ip=p.ip)
         temp = new_temp_password()
