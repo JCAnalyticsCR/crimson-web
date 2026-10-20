@@ -60,7 +60,7 @@ from ..services import ally_access, ally_pricing
 from ..services import media_access as ma
 from ..services import sla as slasvc
 from ..services.documents import audit, local_date, today_fx
-from ..services.mail import notify_roles, queue_email
+from ..services.mail import notify_roles
 from ..services.render import render_html, render_pdf
 from ..services.sequences import next_number
 from ..services.survey_specs import system_calcs
@@ -683,21 +683,14 @@ def _apply_quote(db: Session, ctx: AllyCtx, r: AllyCostRequest, data: AllyQuoteI
 
 
 def _notify_offer(db: Session, ctx: AllyCtx, o: Opportunity, r: AllyCostRequest, texto: str) -> None:
-    """Correo SIN montos (puede leerlo una vendedora que no ve costos) al responsable o al dueno de la oportunidad."""
+    """Correo SIN montos a quien aprueba y ve costos (plan maestro 1.6): lo que cobra el aliado es costo y la vendedora
+    no lo aprueba. La bitacora de la oportunidad (que la vendedora si ve) dice que llego."""
+    from ..services import avisos_venta
     from .pipeline import _log
 
     _log(o, ctx.company.name, texto)
     audit(db, ctx.p.tenant.id, ctx.p.user.id, "ally_offer", "opportunity", o.id, {"request_id": r.id, "ally_company_id": ctx.company.id}, ip=ctx.p.ip)
-    destino = db.get(User, r.responsible_id or o.owner_id) if (r.responsible_id or o.owner_id) else None
-    asunto = f"{ctx.company.name} · precio recibido · {o.title[:60]}"
-    cuerpo = (
-        f"<p><b>{html.escape(ctx.company.name)}</b> {html.escape(texto)} en <b>{html.escape(o.number)}</b> · {html.escape(o.title)}.</p>"
-        f'<p><a href="{cfg.public_base_url.rstrip("/")}/oportunidades?id={o.id}">Abrir la oportunidad</a></p>'
-    )
-    if destino and destino.email:
-        queue_email(db, ctx.p.tenant, destino.email, asunto, cuerpo, "opportunity", o.id)
-    else:
-        notify_roles(db, ctx.p.tenant, ("admin",), asunto, cuerpo, "opportunity", o.id)
+    avisos_venta.precio_aliado(db, ctx.p.tenant, o, r, ctx.company.name, texto)
 
 
 def _tope_avisos(ctx: AllyCtx) -> None:

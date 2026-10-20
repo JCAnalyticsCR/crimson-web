@@ -1,0 +1,141 @@
+"""Tareas del worker de ventas (plan maestro 1.6). worker/celery_app.py solo las importa y las programa en el beat.
+
+Cotizaciones frias: Andres, "cotizacion lleva cinco dias sin seguimiento, que se le avise a la vendedora". Antes el
+correo le llegaba a quien la tecleo (no a la vendedora), contaba desde la fecha de emision (no desde el ultimo envio),
+incluia las que el cliente ya habia aceptado o rechazado y se repetia todos los dias."""
+
+from __future__ import annotations
+
+import html
+import logging
+from datetime import UTC, datetime, time, timedelta
+
+from celery import shared_task
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from ..models import AuditLog, Customer, Project, Quote, QuoteVersion
+from ..services import avisos_venta as avisos
+from ..services.documents import CR, audit, local_date
+
+log = logging.getLogger(__name__)
+
+FRIA_DIAS = 5  # dias desde el ultimo envio sin respuesta del cliente
+REPETIR_DIAS = 5  # una cotizacion fria no se vuelve a avisar antes de esto
+ACCION_FRIA = "aviso_cotizacion_fria"  # bitacora de la cotizacion: hace de llave de deduplicacion (no se repite)
+MAX_FILAS = 20
+
+
+def _aware(dt: datetime) -> datetime:
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)  # SQLite devuelve la hora sin zona (es UTC)
+
+
+def cotizaciones_frias(db: Session, tenant_id: int, ahora: datetime | None = None, dias: int = FRIA_DIAS) -> list[tuple[Quote, datetime]]:
+    """Enviadas al cliente y sin su respuesta (ni aceptadas ni rechazadas), sin convertir y sin proyecto, cuyo ULTIMO
+    envio (QuoteVersion.sent_at; las de antes de las versiones, su fecha de emision) fue hace `dias` o mas.
+    Devuelve (cotizacion, ultimo envio), lo mas viejo primero."""
+    ahora = ahora or datetime.now(UTC)
+    corte = ahora - timedelta(days=dias)
+    ultimo = (
+        select(QuoteVersion.quote_id, func.max(QuoteVersion.sent_at).label("enviada"))
+        .where(QuoteVersion.tenant_id == tenant_id)
+        .group_by(QuoteVersion.quote_id)
+        .subquery()
+    )
+    con_proyecto = select(Project.quote_id).where(Project.tenant_id == tenant_id, Project.quote_id.is_not(None))
+    filas = db.execute(
+        select(Quote, ultimo.c.enviada)
+        .outerjoin(ultimo, ultimo.c.quote_id == Quote.id)
+        .where(Quote.tenant_id == tenant_id, Quote.status == "enviada", Quote.acceptance_status == "pendiente", Quote.id.not_in(con_proyecto))
+    ).all()
+    out = []
+    for q, enviada in filas:
+        desde = _aware(enviada) if enviada else datetime.combine(q.issue_date, time(0), tzinfo=CR)
+        if desde <= corte:
+            out.append((q, desde))
+    return sorted(out, key=lambda x: (x[1], x[0].id))
+
+
+def avisar_cotizaciones_frias(db: Session, tenant, ahora: datetime | None = None) -> int:
+    """Un correo por vendedora con SUS cotizaciones frias (vendedor responsable; sin vendedor, quien la tecleo). Una
+    cotizacion ya avisada no se repite antes de REPETIR_DIAS (queda en su bitacora). Si la vendedora ya no esta activa,
+    la lista va a administracion para reasignarla. Devuelve cuantas cotizaciones se avisaron. No hace commit."""
+    ahora = ahora or datetime.now(UTC)
+    frias = cotizaciones_frias(db, tenant.id, ahora)
+    if not frias:
+        return 0
+    ids = [q.id for q, _ in frias]
+    ya = set(
+        db.scalars(
+            select(AuditLog.entity_id).where(
+                AuditLog.tenant_id == tenant.id,
+                AuditLog.action == ACCION_FRIA,
+                AuditLog.entity == "quote",
+                AuditLog.entity_id.in_(ids),
+                AuditLog.at >= ahora - timedelta(days=REPETIR_DIAS),
+            )
+        )
+    )
+    pendientes = [(q, desde) for q, desde in frias if q.id not in ya]
+    if not pendientes:
+        return 0
+    activos = {m.user.id: m for m in avisos.miembros(db, tenant, user_ids=[avisos.quote_owner(q) for q, _ in pendientes])}
+    por_persona: dict[int, list[tuple[Quote, datetime]]] = {}
+    for q, desde in pendientes:
+        dueno = avisos.quote_owner(q)
+        por_persona.setdefault(dueno if dueno in activos else 0, []).append((q, desde))
+    hoy = local_date(ahora)
+    n = 0
+    for uid, items in por_persona.items():
+        destinos = [activos[uid]] if uid else avisos.miembros(db, tenant, roles=("admin",))
+
+        def cuerpo(_m, items=items, uid=uid) -> str:
+            filas = "".join(
+                f'<li><a href="{html.escape(avisos.enlace(f"/cotizaciones/{q.id}"))}"><b>{html.escape(q.number)}</b></a> · '
+                f"{html.escape(_cliente(db, q))} · {html.escape(q.currency)} {q.total:,.0f} · "
+                f"enviada hace {(hoy - local_date(desde)).days} días</li>"
+                for q, desde in items[:MAX_FILAS]
+            )
+            mas = f"<p>… y {len(items) - MAX_FILAS} más.</p>" if len(items) > MAX_FILAS else ""
+            intro = (
+                f"Llevan {FRIA_DIAS} días o más desde el último envío y el cliente no ha respondido:"
+                if uid
+                else "Estas cotizaciones están frías y su vendedora ya no está activa: reasignalas o dales seguimiento:"
+            )
+            return (
+                f'<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;color:#15131a"><p>{intro}</p><ul>{filas}</ul>{mas}'
+                "<p>Una llamada a tiempo es la diferencia. Si el cliente ya respondió, registralo en Versiones de la cotización: "
+                "así no vuelve a aparecer aquí.</p></div>"
+            )
+
+        asunto = f"{len(items)} cotización{'es' if len(items) != 1 else ''} sin respuesta del cliente"
+        enviados = avisos.avisar(db, tenant, destinos, asunto, cuerpo, "quote", items[0][0].id)
+        if not enviados:
+            continue  # sin correo: se vuelve a intentar en la proxima corrida
+        for q, _ in items:
+            audit(db, tenant.id, None, ACCION_FRIA, "quote", q.id, {"para": uid or "admin", "dias": FRIA_DIAS})
+        n += len(items)
+    return n
+
+
+def _cliente(db: Session, q: Quote) -> str:
+    c = db.get(Customer, q.customer_id) if q.customer_id else None
+    return c.name if c is not None and c.tenant_id == q.tenant_id else "sin cliente"
+
+
+@shared_task(name="crm.stale_quotes")
+def stale_quotes() -> int:
+    """Lunes a viernes por la manana (beat "stale-quotes"): cotizaciones frias a su vendedora."""
+    from ..core.db import SessionLocal
+    from ..models import Tenant
+
+    n = 0
+    with SessionLocal() as db:
+        for t in db.scalars(select(Tenant).where(Tenant.active)).all():
+            try:
+                n += avisar_cotizaciones_frias(db, t)
+                db.commit()
+            except Exception:  # noqa: BLE001  una empresa con datos raros no frena a las demas
+                db.rollback()
+                log.exception("cotizaciones frias (empresa %s)", t.id)
+    return n

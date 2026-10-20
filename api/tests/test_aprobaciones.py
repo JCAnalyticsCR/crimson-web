@@ -12,10 +12,13 @@ from app.models import AccessRequest, Commission, EmailOutbox, PayrollRun, Surve
 from tests.test_campo import _login, _survey
 from tests.test_inventario_reservas import _entrada, _new_product, _wh
 
+# plan maestro 1.6 suma "levantamientos_solicitados" (al principio del flujo) y "cotizaciones_aceptadas"
 KEYS = [
+    "levantamientos_solicitados",
     "levantamientos_por_revisar",
     "levantamientos_por_costear",
     "cotizaciones_por_aprobar",
+    "cotizaciones_aceptadas",
     "costos_aliados",
     "reservas_material",
     "accesos_portal",
