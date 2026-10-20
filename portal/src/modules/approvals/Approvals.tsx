@@ -1,7 +1,8 @@
 /* Bandeja de Aprobaciones. Andres (13/10, 21:05-21:42) no sabia quien recibia lo enviado ni donde:
    "tendria que ser como otra categoria aqui… aprobaciones". Junta lo que ya espera un visto
    bueno (services/approvals.py en la API). Aqui NO se aprueba nada: cada elemento abre la pantalla donde se aprueba,
-   viendo lo que se aprueba. Lo mas antiguo primero. */
+   viendo lo que se aprueba. Lo mas antiguo primero. Unica accion directa (plan maestro 1.6): «Crear y asignar» en
+   Levantamientos solicitados, que no aprueba nada, solo arranca el levantamiento que pidio la vendedora. */
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, fmtMoney, parseTs } from "../../lib/api";
@@ -152,7 +153,7 @@ export default function Approvals() {
       {data === null ? (
         failed ? <Card><Empty title="No se pudo cargar la bandeja" hint="Revisá la conexión y tocá Actualizar." /></Card> : <Loading />
       ) : conPend.length === 0 ? (
-        <Card><Empty title="Nada pendiente de aprobar" hint="Cuando un técnico envíe un levantamiento a revisión, o una cotización, reserva, planilla o comisión necesite tu visto bueno, aparece aquí." /></Card>
+        <Card><Empty title="Nada pendiente de aprobar" hint="Cuando una vendedora pida un levantamiento, un técnico envíe uno a revisión, un cliente acepte una cotización, o una cotización, reserva, planilla o comisión necesite tu visto bueno, aparece aquí." /></Card>
       ) : (
         <>
           <nav className="aprob-chips" aria-label="Secciones con pendientes">

@@ -2054,12 +2054,13 @@ def order_create(data: WorkOrderIn, p: Principal = Depends(require("field", "asi
 
 
 # Orden sin nadie que la ejecute (ni tecnico de Crimson ni empresa aliada): "por programar", destacada en la lista y en
-# "Mi dia" de quien asigna. Al recibir tecnico (o empresa aliada) pasa a "asignada".
+# "Mi dia" de quien asigna. Hoy nace asi la visita de un ticket sin tecnico (support_desk.ticket_to_work_order). Al
+# recibir equipo (tecnico o ayudante) o empresa aliada pasa a "asignada".
 POR_PROGRAMAR = "por_programar"
 
 
 def programada(o: WorkOrder) -> None:
-    if o.status == POR_PROGRAMAR and (o.technician_id or o.ally_company_id):
+    if o.status == POR_PROGRAMAR and (_crew(o) or o.ally_company_id):
         o.status = "asignada"
 
 
