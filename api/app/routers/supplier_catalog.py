@@ -137,6 +137,19 @@ def suppliers(p: Principal = Depends(require("catalog", "ver")), db: Session = D
     last: dict[int, SupplierListImport] = {}
     for imp in db.scalars(select(SupplierListImport).where(SupplierListImport.tenant_id == tid).order_by(SupplierListImport.id)):
         last[imp.supplier_id] = imp
+    # productos con este proveedor asignado pero sin item vinculado: su existencia del proveedor no cuenta
+    unlinked = dict(
+        db.execute(
+            select(Product.supplier_id, func.count())
+            .where(
+                Product.tenant_id == tid,
+                Product.active,
+                Product.supplier_id.is_not(None),
+                ~select(SupplierItem.id).where(SupplierItem.product_id == Product.id).exists(),
+            )
+            .group_by(Product.supplier_id)
+        ).all()
+    )
     out = []
     for s in db.scalars(select(Supplier).where(Supplier.tenant_id == tid).order_by(Supplier.name)):
         n, act, linked, stock = stats.get(s.id, (0, 0, 0, 0))
@@ -149,6 +162,7 @@ def suppliers(p: Principal = Depends(require("catalog", "ver")), db: Session = D
                 "active": int(act or 0),
                 "linked": int(linked or 0),
                 "in_stock": int(stock or 0),
+                "unlinked_products": int(unlinked.get(s.id) or 0),
                 "categories": sorted(cats.get(s.id, []), key=lambda c: ((c["category"] or "~").lower(), (c["subcategory"] or "").lower())),
                 "last_list": (
                     {"list_date": li.list_date, "source": li.source, "source_file": li.source_file, "imported_at": li.imported_at, "summary": li.summary}

@@ -9,7 +9,9 @@ Revisa:
 - proyectos donde lo que salio no es max(facturado, instalado);
 - pedidos web despachados que no sacaron todo, y cancelados/reembolsados con mercaderia afuera sin decidir
   si volvio;
-- garantias cuyo kardex no coincide con su estado, y las abiertas hace mas de 30 dias.
+- garantias cuyo kardex no coincide con su estado, y las abiertas hace mas de 30 dias;
+- productos marcados con un proveedor que tiene catalogo (Eurocomp) pero SIN item vinculado: su existencia del
+  proveedor no es confiable (la disponibilidad no la cuenta) y hay que vincularlos (accion "vincular").
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import Invoice, InvoiceLine, Order, Product, Project, StockMovement, Tenant, Warehouse, WarrantyCase
+from ..models import Invoice, InvoiceLine, Order, Product, Project, StockMovement, Supplier, SupplierItem, Tenant, Warehouse, WarrantyCase
 from . import inventory as invsvc
 from . import project_stock, store_inventory
 from . import warranty as warsvc
@@ -200,10 +202,46 @@ def check(db: Session, tenant_id: int, days: int = DAYS) -> dict:
                 }
             )
 
+    issues.extend(unlinked(db, tenant_id))
+
     counts: dict[str, int] = {}
     for i in issues:
         counts[i["kind"]] = counts.get(i["kind"], 0) + 1
     return {"checked_at": datetime.now(UTC), "days": days, "total": len(issues), "counts": counts, "issues": issues}
+
+
+def unlinked(db: Session, tenant_id: int) -> list[dict]:
+    """Productos activos con proveedor de catalogo (Eurocomp por API o con lista cargada) y ningun item vinculado."""
+    from .supplier_sync import is_eurocomp
+
+    with_catalog = set(db.scalars(select(SupplierItem.supplier_id).where(SupplierItem.tenant_id == tenant_id).distinct()))
+    sups = {s.id: s for s in db.scalars(select(Supplier).where(Supplier.tenant_id == tenant_id))}
+    targets = {sid for sid, s in sups.items() if sid in with_catalog or is_eurocomp(s)}
+    if not targets:
+        return []
+    linked = select(SupplierItem.id).where(SupplierItem.product_id == Product.id).exists()
+    out = []
+    for p in db.scalars(
+        select(Product)
+        .where(Product.tenant_id == tenant_id, Product.active, Product.item_type == "producto", Product.supplier_id.in_(targets), ~linked)
+        .order_by(Product.name)
+        .limit(500)
+    ):
+        viejo = f" (el Excel viejo decía {p.supplier_stock})" if (p.supplier_stock or 0) > 0 else ""
+        out.append(
+            {
+                "kind": "sin_vincular",
+                "ref_id": p.id,
+                "doc": f"Proveedor {sups[p.supplier_id].name}",
+                "product": f"{p.code} · {p.name}",
+                "detail": f"Sin ítem del catálogo del proveedor vinculado: su existencia no cuenta en la tienda ni en el inventario{viejo}",
+                "fixable": False,
+                "action": "vincular",
+                "supplier_id": p.supplier_id,
+                "code": p.supplier_sku or p.code,
+            }
+        )
+    return out
 
 
 def fix(db: Session, tenant: Tenant, kind: str, ref_id: int, user_id: int | None) -> int:

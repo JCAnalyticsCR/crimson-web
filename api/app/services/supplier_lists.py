@@ -7,6 +7,11 @@ celda ("SEGURIDAD Camaras"). Otros proveedores: encabezados por sinonimos o un m
 
 Idempotente por (proveedor, codigo): una segunda corrida con el mismo archivo no cambia nada. Lo que ya no viene en
 la lista nueva queda inactivo (no se borra). La fecha de la lista queda en cada item y en el historial.
+
+Excel contra API: un item que llego por la API del proveedor (source="api", SiReTT) con dato vigente manda sobre un
+Excel: el Excel no lo inactiva si no lo trae ni le pisa existencia, costo y fecha si lo trae (el dato de la API es mas
+nuevo y se refresca cada 6 horas). Asi un Excel viejo no deja "sin existencia" medio catalogo ni hace que la tienda
+venda con numeros de hace semanas.
 """
 
 from __future__ import annotations
@@ -294,6 +299,16 @@ def resolve_supplier(db: Session, tenant_id: int, supplier_id: int | None, name:
     return s, True
 
 
+API_VIGENTE_DAYS = 8  # el catalogo por API se aplica cada semana (y lo vinculado cada 6 h): mas viejo ya no manda
+
+
+def api_vigente(item: SupplierItem | None) -> bool:
+    """El item viene por la API del proveedor y su dato esta vigente: un Excel no lo inactiva ni lo pisa."""
+    if item is None or item.source != "api" or not item.active or item.list_date is None:
+        return False
+    return (date.today() - item.list_date).days <= API_VIGENTE_DAYS
+
+
 def _same(a, b) -> bool:
     if a is None or b is None:
         return a is None and b is None
@@ -349,6 +364,28 @@ def apply_list(
         if r.stock is not None and r.stock < 0:
             warnings.append("existencia negativa")
         item = existing.get(key)
+        if source != "api" and api_vigente(item):
+            # viene por la API con dato vigente: el Excel no lo pisa (se informa, sin cambios)
+            out.append(
+                {
+                    "row": r.row,
+                    "action": "sin_cambios",
+                    "base": "api_vigente",
+                    "code": r.code,
+                    "name": r.name,
+                    "model": r.model,
+                    "category": r.category,
+                    "subcategory": r.subcategory,
+                    "stock": item.stock,
+                    "cost": item.cost,
+                    "prev_cost": None,
+                    "currency": item.currency,
+                    "changed": [],
+                    "warnings": [],
+                    "detail": "Viene por la API del proveedor con dato vigente: se conserva el de la API",
+                }
+            )
+            continue
         new_vals = {
             "name": r.name,
             "description": r.description,
@@ -411,8 +448,12 @@ def apply_list(
         )
     # lo que ya no viene en la lista queda inactivo (no se borra: el historial y los vinculos se conservan)
     gone = []
+    kept_api = 0
     for key, it in existing.items():
         if key not in seen and it.active:
+            if source != "api" and api_vigente(it):
+                kept_api += 1  # un Excel no inactiva lo que la API del proveedor confirma
+                continue
             it.active = False
             gone.append({"code": it.code, "name": it.name, "product_id": it.product_id})
     db.flush()
@@ -471,6 +512,7 @@ def apply_list(
         "dudoso": sum(1 for o in out if o["action"] == "dudoso"),
         "error": sum(1 for o in out if o["action"] == "error"),
         "inactivar": len(gone),
+        "api_conservados": kept_api + sum(1 for o in out if o.get("base") == "api_vigente"),
         "vinculos": len(links),
         "sugerencias": suggestions,
         "productos": len(products),

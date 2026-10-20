@@ -159,16 +159,19 @@ def _save_state(t: Tenant, **vals) -> None:
 
 
 def status(t: Tenant, supplier: Supplier | None) -> dict:
-    """Lo que ve el catalogo de proveedores en lugar de "API pendiente"."""
+    """Lo que ve el catalogo de proveedores en lugar de "API pendiente". Trae las dos horas: el catalogo semanal
+    (last_ok_at) y las existencias de lo vinculado cada 6 h (last_stock_at), y el ultimo error de cualquiera de las dos."""
     client = SirettClient.from_settings()
     if not is_eurocomp(supplier):
         return {"status": "no_aplica", "label": None}
     if client is None:
         return {"status": "pendiente", "label": "Conexión por API: pendiente de credenciales (SiReTT)"}
     s = _state(t)
+    if s.get("last_stock_error") and (s.get("last_stock_try_at") or "") > (s.get("last_stock_at") or ""):
+        return {"status": "error", "label": f"Conectado por API (SiReTT) · el último refresco de existencias falló: {s['last_stock_error']}", **s}
     if s.get("last_error") and (s.get("last_try_at") or "") > (s.get("last_ok_at") or ""):
         return {"status": "error", "label": f"Conectado por API (SiReTT) · la última sincronización falló: {s['last_error']}", **s}
-    if s.get("last_ok_at"):
+    if s.get("last_ok_at") or s.get("last_stock_at"):
         return {"status": "conectado", "label": "Conectado por API (SiReTT) · catálogo cada semana, existencias de lo vinculado cada 6 horas", **s}
     return {"status": "listo", "label": "Conectado por API (SiReTT) · todavía no se sincroniza", **s}
 
@@ -305,7 +308,7 @@ def sync_tenant(
 
 
 def sync_all(db: Session, client: SirettClient | None = None) -> dict:
-    """Tarea de cada hora: UNA descarga (Eurocomp permite una por hora) aplicada a cada empresa que trabaja con ellos."""
+    """Catalogo completo (lunes 03:17): UNA descarga aplicada a cada empresa que trabaja con Eurocomp."""
     tenants = targets(db)
     if not tenants:
         return {"skipped": "ninguna empresa con el proveedor"}
@@ -362,6 +365,11 @@ def refresh_linked(db: Session, client: SirettClient | None = None) -> dict:
     try:
         fresh = {(r.get("codigo") or "").strip(): r for r in client.items_list(settings.eurocomp_bodega, codes)}
     except SirettError as e:
+        # como sync_all: el error queda a la vista en Inventarios -> Proveedores (antes solo iba al log y la tienda
+        # seguia diciendo "bajo pedido" con un dato que ya no se refrescaba)
+        for t in tenants:
+            _save_state(t, last_stock_try_at=now, last_stock_error=e.message, last_try_at=now, last_error=e.message, last_code=e.code)
+        db.commit()
         log.warning("Eurocomp (existencias): %s", e.message)
         return {"error": e.message, "code": e.code}
     fx = sc.usd_rate(db)
@@ -394,7 +402,9 @@ def refresh_linked(db: Session, client: SirettClient | None = None) -> dict:
             if any(i.product_id == pid and i.supplier_id == p.supplier_id for i in items):
                 p.supplier_updated_at = now  # la tienda decide "bajo pedido" con la hora real de la consulta
         res = {"vinculados": len(items), "cambios": cambios, "sin_dato": sin_dato}
-        _save_state(t, last_stock_at=now, last_stock_summary=res)
+        prev = _state(t)
+        clear = {"last_error": None} if prev.get("last_error") and prev.get("last_error") == prev.get("last_stock_error") else {}
+        _save_state(t, last_stock_at=now, last_stock_try_at=now, last_stock_summary=res, last_stock_error=None, **clear)
         out[t.id] = res
     db.commit()
     log.info("Eurocomp (existencias): %s", out)

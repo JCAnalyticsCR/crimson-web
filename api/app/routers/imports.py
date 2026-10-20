@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
-from ..models import Category, Customer, Invoice, InvoiceLine, Product, ProductTax, Supplier, Tax, Warehouse
+from ..models import Category, Customer, Invoice, InvoiceLine, Product, ProductTax, StockMovement, Supplier, Tax, Warehouse
 from ..services import tabular as tb
 from ..services.documents import audit
 from ..services.totals import d
@@ -55,6 +55,9 @@ COLS = {
         "description_invoice": ("descripcion_larga", "descripcion_factura", "detalle_factura"),
         "stock_min": ("stock_minimo", "minimo", "min_stock"),
         "warehouse": WAREHOUSE_ALIASES + ("inventario",),
+        # carga inicial: existencia propia con la que el producto entra a la bodega (crea la entrada en el kardex)
+        # solo encabezados explicitos: un "Stock" de un exporte de Fygaro no entra al kardex por accidente
+        "initial_qty": ("cantidad_inicial", "existencia_inicial", "inventario_inicial", "stock_inicial"),
     },
     "suppliers": {
         "name": ("nombre", "proveedor", "razon_social", "name"),
@@ -79,7 +82,7 @@ COLS = {
 
 TEMPLATES = {
     "customers": ["Nombre", "Tipo de identificacion", "Identificacion", "Correo electronico", "Telefono", "WhatsApp", "Moneda", "Notas"],
-    "products": ["Codigo", "Nombre", "Precio", "Tipo", "CABYS", "IVA", "Unidad", "Moneda", "Bodega"],
+    "products": ["Codigo", "Nombre", "Precio", "Tipo", "CABYS", "IVA", "Unidad", "Moneda", "Bodega", "Cantidad inicial", "Stock minimo"],
     "suppliers": ["Nombre", "Identificacion", "Correo electronico", "Telefono"],
     "invoices": ["Numero", "Fecha", "Cliente", "Identificacion", "Subtotal", "Impuesto", "Total", "Saldo", "Moneda", "Clave"],
     "catalogo": ["Categoria", "Codigo", "Descripcion", "Stock", "Precio", "Bodega"],
@@ -191,7 +194,33 @@ def _customers(db: Session, tid: int, rows: list[dict], commit: bool):
     return out
 
 
-def _products(db: Session, tid: int, rows: list[dict], commit: bool):
+def _initial_stock(db: Session, tid: int, p: Product | None, wh: Warehouse | None, qty: Decimal | None, opts: dict) -> tuple[Warehouse | None, str | None, str]:
+    """Carga inicial de una fila: (bodega, error, nota). Solo bodegas de venta, solo con permiso de ajustar el
+    inventario y solo si el producto todavia no tiene movimientos en esa bodega (re-importar no suma otra vez)."""
+    from ..services import inventory as invsvc
+
+    if qty is None or qty == 0:
+        return None, None, ""
+    if qty < 0:
+        return None, "cantidad inicial negativa", ""
+    if not opts.get("can_stock"):
+        return None, "cargar existencias requiere permiso para ajustar el inventario", ""
+    target = wh or invsvc.default_warehouse(db, tid)
+    if target is None:
+        return None, "no hay bodega de venta para la cantidad inicial", ""
+    if (target.kind or "venta") != invsvc.SELLABLE:
+        return None, f"la bodega {target.name} es de garantías: la cantidad inicial va a una bodega de venta", ""
+    if p is not None and p.id and target.id and db.scalar(
+        select(func.count()).select_from(StockMovement).where(StockMovement.tenant_id == tid, StockMovement.product_id == p.id, StockMovement.warehouse_id == target.id)
+    ):
+        return None, None, f" · ya tiene movimientos en {target.name}: la cantidad inicial no se aplica (use un ajuste)"
+    return target, None, f" · entrada inicial {qty.normalize():f} en {target.name}"
+
+
+def _products(db: Session, tid: int, rows: list[dict], commit: bool, opts: dict | None = None):
+    from ..services import inventory as invsvc
+
+    opts = opts or {}
     taxes = {d(t.rate): t for t in db.scalars(select(Tax).where(Tax.tenant_id == tid, Tax.active))}
     out = []
     seen = set()
@@ -227,6 +256,17 @@ def _products(db: Session, tid: int, rows: list[dict], commit: bool):
         action = "actualizar" if p else "nuevo"
         wh, wh_new = _warehouse(db, tid, v["warehouse"], whs, commit)
         wh_txt = f" · bodega {tb.text(v['warehouse'], 120)}{' (nueva)' if wh_new else ''}" if (wh is not None or wh_new) else ""
+        qty = tb.num(v["initial_qty"]) if kind == "producto" else None
+        if wh_new and wh is None:  # vista previa con una bodega nueva: se crea (de venta) al aplicar
+            stock_wh, stock_err, stock_txt = None, None, ""
+            if qty:
+                stock_err = "cantidad inicial negativa" if qty < 0 else (None if opts.get("can_stock") else "cargar existencias requiere permiso para ajustar el inventario")
+                stock_txt = f" · entrada inicial {qty.normalize():f} en {tb.text(v['warehouse'], 120)}"
+        else:
+            stock_wh, stock_err, stock_txt = _initial_stock(db, tid, p, wh, qty, opts)
+        if stock_err:
+            out.append({"row": i, "action": "error", "detail": f"{code}: {stock_err}"})
+            continue
         if commit:
             if not p:
                 p = Product(tenant_id=tid, code=code, name=name)
@@ -242,7 +282,13 @@ def _products(db: Session, tid: int, rows: list[dict], commit: bool):
             p.taxes.clear()
             db.flush()
             p.taxes.append(ProductTax(tax_id=taxes[rate].id))
-        out.append({"row": i, "action": action, "detail": f"{code} · {name} · {price:,.2f} · IVA {rate}%{wh_txt}"})
+            mins = tb.num(v["stock_min"])
+            if mins is not None and mins >= 0:
+                p.min_stock = int(mins)
+            if stock_wh is not None and qty and qty > 0:
+                db.flush()
+                invsvc.move(db, tid, opts.get("user_id"), p.id, stock_wh.id, "entrada", qty, "INV-INICIAL", "Carga inicial (importador de productos)")
+        out.append({"row": i, "action": action, "detail": f"{code} · {name} · {price:,.2f} · IVA {rate}%{wh_txt}{stock_txt}"})
     return out
 
 
@@ -405,11 +451,39 @@ def _category(db: Session, tid: int, group: str, name: str, cache: dict, commit:
     return cat
 
 
+def _catalog_item(db: Session, tid: int, supplier, pr: Product, code: str, name: str, desc: str, brand, model, stock, cost, currency: str, fx) -> None:
+    """La existencia y el costo del proveedor viajan por el catalogo de proveedores (SupplierItem), no directo al
+    producto: el item se crea o actualiza y se vincula (mismo codigo del proveedor); sync_product copia costo,
+    existencia y fecha. Un item que llego por la API con dato vigente no se pisa. Si el item ya esta vinculado a OTRO
+    producto, queda como esta (para revisar el vinculo en Inventarios -> Proveedores)."""
+    from datetime import date
+
+    from ..models import SupplierItem
+    from ..services import supplier_catalog as sc
+    from ..services import supplier_lists as sl
+
+    it = db.scalar(select(SupplierItem).where(SupplierItem.tenant_id == tid, SupplierItem.supplier_id == supplier.id, SupplierItem.code == code))
+    if it is None:
+        it = SupplierItem(tenant_id=tid, supplier_id=supplier.id, code=code, name=name[:300], source="excel")
+        db.add(it)
+    if not sl.api_vigente(it):
+        it.name, it.description, it.brand = name[:300], desc or it.description, brand
+        it.model, it.model_key = model or it.model, sc.model_key(model or it.model)
+        it.stock = int(stock) if stock is not None else None
+        it.cost, it.currency = cost, currency
+        it.source, it.list_date, it.active = "excel", date.today(), True
+    db.flush()
+    if it.product_id is None:
+        sc.link(db, it, pr, "sku", None, sync=False)
+    if it.product_id == pr.id:
+        sc.sync_product(db, pr, fx=fx)
+
+
 def _catalog(db: Session, tid: int, rows: list[dict], commit: bool, opts: dict | None = None):
     """Lista de precios de un proveedor: el costo entra tal cual y el precio de venta se calcula con el margen.
-    Las filas sin codigo son encabezados de categoria (asi vienen los listados de Eurocomp)."""
-    from datetime import UTC, datetime
-
+    Las filas sin codigo son encabezados de categoria (asi vienen los listados de Eurocomp). La existencia del
+    proveedor ya NO se escribe directo en el producto (Product.supplier_stock): va al catalogo de proveedores
+    (SupplierItem vinculado), que es lo unico que cuenta la disponibilidad."""
     from ..models import Supplier, Tenant
     from ..services import pricing
     from ..services.documents import today_fx
@@ -483,11 +557,13 @@ def _catalog(db: Session, tid: int, rows: list[dict], commit: bool, opts: dict |
             pr.brand, pr.model = brand, model or pr.model
             pr.supplier_id = supplier.id if supplier else pr.supplier_id
             pr.supplier_sku = code
-            pr.supplier_stock = int(stock) if stock is not None else None
-            pr.supplier_updated_at = datetime.now(UTC)
             pr.category_id = cat.id if cat else pr.category_id
             if wh is not None:
                 pr.warehouse_id = wh.id
+            if supplier is not None:
+                db.flush()
+                usd = today_fx(db, "USD")[0]
+                _catalog_item(db, tid, supplier, pr, code, headline, raw_name, brand, model, stock, cost, cost_currency, usd)
         out.append(
             {
                 "row": i,
@@ -600,7 +676,9 @@ async def run_import(
     cols = CATALOG_COLS if kind == "catalogo" else COLS[kind]
     recognized = {field: next((a for a in aliases if a in headers), None) for field, aliases in cols.items()}
     opts = {"margin": margin, "supplier": supplier, "brand": brand, "currency": currency}
-    result = PROCESSORS[kind](db, p.tenant.id, rows, commit, opts) if kind == "catalogo" else PROCESSORS[kind](db, p.tenant.id, rows, commit)
+    if kind == "products":
+        opts = {"can_stock": p.can("inventory", "ajustar"), "user_id": p.user.id}
+    result = PROCESSORS[kind](db, p.tenant.id, rows, commit, opts) if kind in ("catalogo", "products") else PROCESSORS[kind](db, p.tenant.id, rows, commit)
     summary = {a: sum(1 for r in result if r["action"] == a) for a in ("nuevo", "actualizar", "omitir", "error")}
     if commit:
         audit(db, p.tenant.id, p.user.id, "import", kind, None, {"file": file.filename, **summary}, ip=p.ip)
