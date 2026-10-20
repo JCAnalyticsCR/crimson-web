@@ -47,7 +47,7 @@ def _mark(r: dict) -> str:
 
 
 REDACT_COLUMNS = {
-    "user": {"password_hash": _mark, "totp_secret": None, "totp_recovery": [], "totp_enabled": False},
+    "user": {"password_hash": _mark, "totp_secret": None, "totp_pending_secret": None, "totp_recovery": [], "totp_enabled": False},
     "invitation": {"token_hash": _mark},
     "payment_gateway_config": {"secret_encrypted": None},
     "api_credential": {"secret_hash": _mark, "secret_encrypted": _mark},

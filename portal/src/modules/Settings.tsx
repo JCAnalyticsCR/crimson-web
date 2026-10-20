@@ -1,7 +1,7 @@
 /* Ajustes (plan 3.8): empresa, facturacion, pagos (metodos manuales, cuentas, pasarelas), usuarios (settings/UsersTab.tsx), cuenta/2FA, correo saliente. */
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api, fmtDate } from "../lib/api";
+import { api, fmtDate, parseTs } from "../lib/api";
 import { useSession } from "../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../ui/components";
 import { ImageField } from "../ui/MediaPicker";
@@ -10,6 +10,7 @@ import { Bitacora } from "./Bitacora";
 import DataExport from "./tools/DataExport";
 import UsersTab from "./settings/UsersTab";
 import HaciendaTab from "./settings/HaciendaTab";
+import TwoFactorSetup from "./auth/TwoFactorSetup";
 import { MODE_LABEL, type HaciendaState } from "./accounting/hacienda";
 
 type Group = { id: number; doc_type: string; prefix: string; branch: string; terminal: string; current: number; is_default: boolean };
@@ -42,8 +43,8 @@ export default function Settings() {
   const [mailsSt, setMails] = useState<Mail[] | null>(null); // null = cargando
   const mails = mailsSt ?? [];
   const [company, setCompany] = useState({ name: "", legal_name: "", tax_id: "", default_currency: "CRC", sector: "", logo_url: "" });
-  const [totp, setTotp] = useState<{ secret: string; otpauth_uri: string } | null>(null);
-  const [code, setCode] = useState("");
+  /* 2FA: configurar la primera vez o cambiar de telefono (contrasena + codigo actual; la app vieja sirve hasta confirmar) */
+  const [setup2fa, setSetup2fa] = useState<"nuevo" | "cambio" | null>(null);
   const [bank, setBank] = useState<{ id?: number; name: string; bank: string; currency: string; number: string; active: boolean } | null>(null);
   const [gw, setGw] = useState<{ provider: string; client_id: string; secret: string; webhook_secret: string; is_primary: boolean; active: boolean; mode: string } | null>(null);
   const [onvoSt, setOnvoSt] = useState<OnvoStatus | null>(null);
@@ -78,8 +79,7 @@ export default function Settings() {
   const saveGroup = (g: Group) => api(`/settings/billing-groups/${g.id}`, { method: "PUT", json: { prefix: g.prefix, branch: g.branch, terminal: g.terminal, current: g.current, is_default: g.is_default } }).then(() => ok("Grupo actualizado")).catch(err);
   const saveBank = () => { if (!bank) return; const { id, ...b } = bank; api(id ? `/settings/bank-accounts/${id}` : "/settings/bank-accounts", { method: id ? "PUT" : "POST", json: b }).then(() => { setBank(null); ok("Cuenta guardada"); }).catch(err); };
   const saveGw = () => { if (!gw) return; api("/settings/gateways", { method: "PUT", json: { ...gw, secret: gw.secret || null, webhook_secret: gw.webhook_secret || null } }).then(() => { setGw(null); ok("Pasarela guardada"); }).catch(err); };
-  const setup2fa = () => api<{ secret: string; otpauth_uri: string }>("/auth/2fa/setup", { method: "POST" }).then(setTotp).catch(err);
-  const verify2fa = () => api<{ codes: string[] }>("/auth/2fa/verify", { method: "POST", json: { code } }).then(async (r) => { await reload(); setTotp(null); setCode(""); setRecovery(r.codes); toast("2FA activado"); }).catch(() => toast("Código inválido", "bad"));
+  const done2fa = async (codes: string[]) => { await reload(); setSetup2fa(null); setRecovery(codes); };
   const disable2fa = () => { if (!apagar) return; api("/auth/2fa/disable", { method: "POST", json: { password: apagar.password } }).then(async () => { await reload(); setApagar(null); toast("2FA desactivado"); }).catch(err); };
   const regen2fa = () => { if (!apagar) return; api<{ codes: string[] }>("/auth/2fa/recovery-codes", { method: "POST", json: { password: apagar.password } }).then((r) => { setApagar(null); setRecovery(r.codes); toast("Códigos nuevos generados; los anteriores ya no sirven"); }).catch(err); };
   const changePw = () => api("/auth/password", { method: "POST", json: pw }).then(() => { setPw({ current_password: "", new_password: "" }); toast("Contraseña actualizada"); }).catch(err);
@@ -225,22 +225,24 @@ export default function Settings() {
       {tab === "cuenta" && (
         <div className="grid-2">
           <Card title="Autenticación de dos factores">
-            {me?.user.totp_enabled ? (
+            {me?.twofa?.required && !me.user.totp_enabled && (
+              <p style={{ fontSize: 13, margin: "0 0 10px", color: "var(--warn)" }}>
+                <b>Obligatoria para tu rol.</b>{me.twofa.deadline ? ` Activala antes del ${parseTs(me.twofa.deadline).toLocaleDateString("es-CR", { day: "numeric", month: "long" })}.` : ""}
+              </p>
+            )}
+            {setup2fa ? (
+              <TwoFactorSetup change={setup2fa === "cambio"} onDone={done2fa} onCancel={() => setSetup2fa(null)} />
+            ) : me?.user.totp_enabled ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <p className="muted">2FA <b style={{ color: "var(--ok)" }}>activo</b> para {me.user.email}.</p>
                 <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Si perdés el teléfono, entrás con uno de tus códigos de recuperación en lugar del código de seis dígitos.</p>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="btn btn--ghost btn--sm" onClick={() => setSetup2fa("cambio")}>Cambiar de teléfono</button>
                   <button className="btn btn--ghost btn--sm" onClick={() => setApagar({ password: "", regenerar: true })}>Generar códigos nuevos</button>
                   <button className="btn btn--danger btn--sm" onClick={() => setApagar({ password: "", regenerar: false })}>Desactivar 2FA</button>
                 </div>
               </div>
-            ) : totp ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <p className="muted" style={{ fontSize: 13 }}>Agregá esta clave en tu app de autenticación y confirmá con el código.</p>
-                <code className="mono" style={{ padding: 10, background: "var(--bg-2)", borderRadius: 8, wordBreak: "break-all" }}>{totp.secret}</code>
-                <div style={{ display: "flex", gap: 8 }}><input className="input input--mono" maxLength={6} placeholder="000000" value={code} onChange={(e) => setCode(e.target.value)} style={{ width: 140 }} /><button className="btn btn--crimson" onClick={verify2fa}>Activar</button></div>
-              </div>
-            ) : <button className="btn btn--soft" onClick={setup2fa}>Configurar 2FA</button>}
+            ) : <button className="btn btn--soft" onClick={() => setSetup2fa("nuevo")}>Configurar 2FA</button>}
           </Card>
           <Card title="Cambiar contraseña">
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

@@ -94,6 +94,15 @@ Motor en `services/commissions.py`, endpoints en `routers/commissions.py`. Libro
 - Pagos en línea (ONVO: Checkout alojado) se aplican solo si la API de ONVO confirma el pago, por webhook o al volver el comprador; nunca por el regreso del navegador solo. Nunca se guardan datos de tarjeta. Llaves en Ajustes → Pagos → Pasarelas (cifradas por empresa); en producción solo `onvo_live_`.
 - Logs sin Authorization ni cuerpos; CORS por lista; cookies httpOnly + SameSite.
 
+### Acceso seguro (plan 1.10)
+
+- **IP real**: el nginx del portal toma la IP del cliente (realip sobre `X-Forwarded-For`, solo desde redes internas) y la manda al API en `X-Crimson-Client-IP` con `X-Crimson-Proxy-Key`. El API la usa solo si la llave coincide (`core/clientip.py`); si no, la IP de la conexión. uvicorn ya no corre con `--forwarded-allow-ips='*'` (`FORWARDED_ALLOW_IPS` = redes internas, en `api/Dockerfile`) ni con log de acceso (`--no-access-log`).
+- **Variables**: `PROXY_SHARED_KEY` en **portal y api** (la misma; hex de 64 caracteres, `openssl rand -hex 32`; menos de 32 caracteres se ignora). Sin ella todo sigue funcionando, pero el panel ve a todos con la IP de la salida del portal. Sonda después de desplegar: entrar al panel y revisar en Ajustes → Bitácora que el login muestre tu IP pública; si sale la de la salida del portal (o una `100.64.x.x`), el edge del API está quitando las cabeceras propias o la llave no coincide entre servicios.
+- **Login**: solo cuentan los fallidos. Por IP: 20 y después espera progresiva; por cuenta + IP: 5 y espera progresiva (30 s, 1, 2… hasta 15 min). La cuenta se bloquea 15 min solo con fallidos de 4+ IPs (cada IP aporta 3) y no para la IP donde la persona ya entró bien.
+- **2FA**: cambiarlo con el 2FA activo exige contraseña y código actual; el anterior sigue activo hasta confirmar el nuevo; correo "Cambió tu verificación en dos pasos"; un código no se usa dos veces. Obligatorio por rol (Ajustes → Usuarios; por defecto admin y contabilidad, 7 días de gracia): vencida la gracia, el panel interno responde 403 `X-2FA-Setup` y el portal muestra la configuración forzada.
+- **CORS**: con cookies solo los `CORS_ORIGINS` (el panel); `LANDING_ORIGINS` sin cookies y solo en `/public/incidents` y `/public/access-requests`. `/auth/refresh` rechaza otro `Origin` o `Sec-Fetch-Site: cross-site`.
+- **Tienda**: en `tienda.*` nginx solo deja pasar `/api/public/` y `/api/media/f/` (el resto, 404). HSTS de un año en el portal.
+
 ## Hacienda y recepción de comprobantes
 
 Emisión directa con Hacienda (FE, TE y NC v4.4, firma XAdES-EPES) y recepción de los comprobantes de proveedores
