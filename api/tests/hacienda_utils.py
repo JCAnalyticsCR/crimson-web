@@ -343,5 +343,5 @@ def load_credentials(client, p12: bytes, pin: str, env: str = "pruebas", user: s
 def modo_pruebas(client, p12: bytes, pin: str):
     r = load_credentials(client, p12, pin)
     assert r.status_code == 200, r.text
-    r = client.put("/settings/hacienda/mode", json={"mode": "pruebas"})
+    r = client.put("/settings/hacienda/mode", json={"mode": "pruebas", "confirm_text": "PRUEBAS"})
     assert r.status_code == 200 and r.json()["mode"] == "pruebas", r.text

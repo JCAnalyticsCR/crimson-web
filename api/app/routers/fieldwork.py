@@ -2359,10 +2359,14 @@ def apply_order_progress(db: Session, o: WorkOrder, data: ProgressIn, action: st
                 # completar el proyecto devenga lo "al completar" (lo puede disparar un tecnico: el motor no usa permisos)
                 comsvc.on_project_status(db, pr, antes_pr)
                 horas = sum((order_hours(x)[0] or 0 for x in pr.orders), 0.0)
+                from ..core.deps import roles_that_can
+
+                # solo a quien puede facturar el proyecto (POST /projects/{id}/invoice: sales.crear y ver todos los
+                # proyectos). Contabilidad ya no crea ventas (plan 1.7): la factura le llega despues por "Por emitir"
                 notify_roles(
                     db,
                     tenant,
-                    ("admin", "contabilidad"),
+                    roles_that_can(db, tenant, ("sales", "crear"), ("projects", "ver_todo")),
                     f"Proyecto {pr.number} terminado · listo para facturación",
                     f"<p><b>{html.escape(pr.name)}</b> quedó terminado.</p>"
                     f"<p>{len(pr.orders)} orden(es) de trabajo · {round(horas, 1)} horas de campo.</p>"

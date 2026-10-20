@@ -13,6 +13,7 @@ from celery import Celery
 from celery.schedules import crontab
 
 from app.core.config import settings
+from app.tasks import fiscal as _tareas_fiscales  # noqa: F401  cola "Por emitir" (plan 1.7)
 
 log = logging.getLogger("crimson.worker")
 celery = Celery("crimson", broker=settings.redis_url, backend=settings.redis_url)
@@ -550,4 +551,5 @@ celery.conf.beat_schedule = {
     "suppliers-sync-eurocomp": {"task": "suppliers.sync_eurocomp", "schedule": crontab(day_of_week=1, hour=3, minute=17)},
     "suppliers-eurocomp-stock": {"task": "suppliers.eurocomp_stock", "schedule": crontab(hour="5,11,17,23", minute=17)},
     "mark-overdue": {"task": "sales.mark_overdue", "schedule": crontab(hour=0, minute=30)},
+    "fiscal-por-emitir": {"task": "fiscal.por_emitir_diario", "schedule": crontab(hour=8, minute=30)},
 }

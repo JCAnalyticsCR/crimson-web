@@ -653,7 +653,8 @@ def get_invoice(iid: int, p: Principal = Depends(require("sales", "ver")), db: S
 @router.put("/invoices/{iid}", response_model=InvoiceOut)
 def update_invoice(iid: int, data: DocumentIn, p: Principal = Depends(require("sales", "editar")), db: Session = Depends(get_db)):
     inv = _own(db, Invoice, iid, p.tenant.id, p)
-    if inv.status == "anulada" or inv.einvoice_status in ("pendiente", "aceptada"):
+    # emitida_fuera: el comprobante vive en Fygaro; editar aqui la dejaria distinta de lo que se declaro (plan 1.7)
+    if inv.status == "anulada" or inv.einvoice_status in ("pendiente", "aceptada", "emitida_fuera"):
         raise HTTPException(409, "La factura ya fue emitida o anulada; use nota de credito")
     if inv.payments:
         raise HTTPException(409, "La factura tiene pagos registrados")

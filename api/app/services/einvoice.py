@@ -41,6 +41,8 @@ FISCAL_CODE = {"FE": "01", "ND": "02", "NC": "03", "TE": "04"}
 ID_TYPE = {"fisica": "01", "juridica": "02", "dimex": "03", "nite": "04", "extranjero": "05"}
 LIVE = ("por_enviar", "enviando", "enviado", "procesando", "pendiente", "aceptada")
 PENDING = ("por_enviar", "enviando", "enviado", "procesando", "pendiente")
+# einvoice_status de una factura cuyo comprobante se emitio FUERA de la plataforma: nunca se emite aqui
+OUTSIDE = ("emitida_fuera", "importada")
 SALE_CONDITIONS = {"01", "02", "03", "04", "05", "06", "07", "08", "10", "12", "13", "14", "15", "99"}
 PAYMENT_METHODS = {"01", "02", "03", "04", "05", "06", "07", "99"}
 
@@ -236,12 +238,23 @@ def _simulate(payload: dict):
 
 
 # ---------------------------------------------------------------- emitir
+def outside_detail(inv: Invoice) -> str:
+    if inv.einvoice_status == "importada":
+        return "La factura viene del histórico importado: ya se emitió fuera de la plataforma y no se vuelve a emitir"
+    numero = f", n.º {inv.external_number}" if inv.external_number else ""
+    return f"La factura ya se emitió fuera de la plataforma{numero}: no se vuelve a emitir"
+
+
 def emit(db: Session, tenant: Tenant, user_id: int | None, inv: Invoice) -> EInvoiceDocument:
     # la regla "ya esta pendiente o aceptada" se evalua despues del bloqueo: doble clic = un solo comprobante
     db.execute(select(Invoice.id).where(Invoice.id == inv.id).with_for_update())
-    db.refresh(inv, ["einvoice_status", "status"])
+    db.refresh(inv, ["einvoice_status", "status", "external_number"])
     if inv.status == "anulada":
         raise HTTPException(409, "Factura anulada")
+    if inv.einvoice_status in OUTSIDE:
+        # emitida en Fygaro (cola "Por emitir") o importada del historico: volver a emitirla duplicaria el comprobante
+        # ante Hacienda (plan 1.7). Se revisa ANTES del modo: tampoco en produccion se reemite
+        raise HTTPException(409, outside_detail(inv))
     if inv.einvoice_status in ("pendiente", "aceptada"):
         raise HTTPException(409, f"La factura ya esta {inv.einvoice_status}")
     if not inv.lines:

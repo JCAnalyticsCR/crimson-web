@@ -218,7 +218,7 @@ def test_cambiar_de_modo_apaga_produccion(client, auth, db_session, monkeypatch,
     prof = db_session.query(FiscalProfile).one()
     db_session.refresh(prof)
     assert prof.environment == "pruebas" and prof.production_enabled_at is None and prof.production_instance is None
-    r = client.put("/settings/hacienda/mode", json={"mode": "pruebas"})
+    r = client.put("/settings/hacienda/mode", json={"mode": "pruebas", "confirm_text": "PRUEBAS"})
     assert r.json()["mode"] == "pruebas"  # volver a "hacienda" no revive produccion
     assert client.patch("/tenant", json={"settings": {"einvoice_provider": "hacienda"}}).status_code == 422
 

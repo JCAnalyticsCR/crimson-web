@@ -179,6 +179,10 @@ def put_profile(data: ProfileIn, p: Principal = Depends(require("settings", "con
 
 class ModeIn(BaseModel):
     mode: str = Field(pattern="^(none|sandbox|pruebas|produccion)$")
+    confirm_text: str | None = None  # para entrar a Pruebas: escribir PRUEBAS (plan 1.11)
+
+
+PRUEBAS_RIESGO = "cada venta real se emitiría al ambiente de pruebas y después no se podría emitir en producción"
 
 
 @router.put("/settings/hacienda/mode")
@@ -186,6 +190,10 @@ def put_mode(data: ModeIn, p: Principal = Depends(require("settings", "configura
     if data.mode == "produccion":
         raise HTTPException(422, "Producción se activa con el interruptor")
     antes = hc.hacienda_mode(db, p.tenant)
+    # Pruebas en la empresa real quema cada venta (plan 4.6): se confirma por escrito. Para probar la conexion sin
+    # tocar las ventas: python -m app.tools.hacienda_smoke --sin-modo (no cambia el modo)
+    if data.mode == "pruebas" and antes != "pruebas" and (data.confirm_text or "").strip().upper() != "PRUEBAS":
+        raise HTTPException(422, f"Escriba PRUEBAS para confirmar: {PRUEBAS_RIESGO}")
     st = dict(p.tenant.settings or {})
     st["einvoice_provider"] = {"none": "none", "sandbox": "sandbox", "pruebas": "hacienda"}[data.mode]
     p.tenant.settings = st

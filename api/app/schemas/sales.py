@@ -147,6 +147,9 @@ class InvoiceOut(DocBaseOut):
     balance: Decimal
     quote_id: int | None
     einvoice_status: str
+    # emitida fuera de la plataforma (Fygaro): numero y fecha del comprobante de alla (plan 1.7)
+    external_number: str | None = None
+    external_date: date | None = None
     payments: list[PaymentOut] = []
 
 
