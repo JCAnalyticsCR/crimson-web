@@ -3,7 +3,7 @@
    recalcula al cambiar una respuesta (sin boton extra) y se puede llevar al carrito o mandar como asesoria. */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Crumbs, IC, Ico, PriceTag, Viewfinder, money, useHead, usePath, useStore, waLink, type VProd } from "./storeKit";
+import { AvailBadge, Crumbs, IC, Ico, PriceTag, Viewfinder, cannotBuy, money, useHead, usePath, useStore, waLink, type VProd } from "./storeKit";
 
 type Line = { role: string; reason: string; quantity: number; subtotal: string | number; product: VProd };
 type Kit = { answers: Answers; place_label: string; cameras: number; storage_tb: string | number; lines: Line[]; missing: { name: string; quantity: number; reason: string; role: string }[]; notes: string[]; total: string | number; currency: string };
@@ -80,7 +80,8 @@ export default function KitBuilder() {
 
   const addAll = () => {
     if (!kit) return;
-    priced.forEach((l) => ctx.addToCart(l.product, l.quantity));
+    // lo que no se puede comprar en linea (sin existencia ni proveedor vigente) no entra al carrito: se consulta
+    priced.filter((l) => !(ctx.isShop && cannotBuy(l.product.availability))).forEach((l) => ctx.addToCart(l.product, l.quantity));
     setAdded(true);
     window.setTimeout(() => setAdded(false), 2200);
   };
@@ -162,6 +163,7 @@ export default function KitBuilder() {
                       <span className="sh-meta">{l.role}</span>
                       <Link to={to(l.product.path)} className="vt-kitres__name">{l.product.name}</Link>
                       <small>{l.reason}</small>
+                      <AvailBadge a={l.product.availability} compact />
                     </div>
                     <div className="vt-kitres__qty"><b>×{l.quantity}</b>{Number(l.product.display_price) > 0 ? <span>{money(l.subtotal, kit.currency)}</span> : <span>a consultar</span>}</div>
                   </li>

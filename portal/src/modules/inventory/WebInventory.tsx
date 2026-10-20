@@ -1,5 +1,6 @@
 /* Inventario web: lo publicado en la tienda contra el inventario real (bodegas web - reservas), lo reservado
-   por pedidos, bajo pedido y agotado. Alertas de publicados sin stock ni proveedor y ajustes de la tienda. */
+   por pedidos, bajo pedido y agotado. Alertas de publicados sin stock ni proveedor y ajustes de la tienda.
+   La disponibilidad es la de la funcion unica del API (services/availability): los mismos estados en todo lado. */
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
@@ -8,20 +9,21 @@ import { Card, Empty, Field, Loading, Modal } from "../../ui/components";
 type Row = {
   id: number; code: string; name: string; show_on_web: boolean; web_featured: boolean; web_price: string | null; price: string | null; currency: string; serialized: boolean;
   estado: string; mensaje: string; propio: string; reservado: string; reservado_pedidos: string; libre: string;
-  proveedor: number | null; proveedor_al: string | null; proveedor_viejo: boolean; alerta: boolean; avisos: number;
+  proveedor: number | null; proveedor_al: string | null; proveedor_viejo: boolean; proveedor_nombre?: string | null; proveedor_hace?: string | null;
+  proveedor_sin_vincular?: number | null; max_qty?: number | null; alerta: boolean; avisos: number;
 };
 type WhRow = { id: number; name: string; is_default: boolean; web: boolean };
 type Settings = {
-  enabled: boolean; enforce_stock: boolean; warehouse_ids: number[]; quantity_display: string; low_threshold: number; backorder_enabled: boolean;
-  backorder_lead: string; supplier_max_age_days: number; sell_when_unknown: boolean; out_of_stock: string; out_of_stock_action: string;
+  enabled: boolean; warehouse_ids: number[]; quantity_display: string; low_threshold: number; backorder_enabled: boolean;
+  backorder_lead: string; supplier_max_age_hours: number; out_of_stock: string; out_of_stock_action: string;
   hold_hours_manual: number; hold_minutes_card: number; cancel_unpaid_on_expiry: boolean; warehouses: WhRow[];
 };
 type Hold = { id: number; order_id: number | null; order: string | null; order_status: string | null; product_id: number; name: string; warehouse: string; quantity: string; expires_at: string | null };
-type Summary = { publicados: number; disponible: number; bajo_pedido: number; consultar: number; agotado: number; alertas: number; reservado_pedidos: string; avisos: number };
+type Summary = { publicados: number; en_bodega: number; bajo_pedido: number; consultar: number; agotado: number; alertas: number; reservado_pedidos: string; avisos: number };
 type Data = { summary: Summary; items: Row[]; settings: Settings; holds: Hold[] };
 
 const ESTADO: Record<string, { label: string; tone: string }> = {
-  disponible: { label: "Disponible", tone: "ok" }, bajo_pedido: { label: "Bajo pedido", tone: "warn" },
+  en_bodega: { label: "En bodega", tone: "ok" }, bajo_pedido: { label: "Bajo pedido", tone: "warn" },
   consultar: { label: "Consultar", tone: "warn" }, agotado: { label: "Agotado", tone: "bad" },
 };
 const n = (v: string | number | null | undefined) => Number(v ?? 0);
@@ -57,8 +59,10 @@ export default function WebInventory() {
   };
   const saveCfg = async () => {
     if (!cfg) return;
-    const { warehouses, ...rest } = cfg;
+    const { warehouses, ...all } = cfg;
     void warehouses;
+    // solo los ajustes vigentes (los obsoletos enforce_stock / sell_when_unknown / dias ya no se mandan)
+    const rest = Object.fromEntries(Object.entries(all).filter(([k]) => !["enforce_stock", "sell_when_unknown", "supplier_max_age_days"].includes(k)));
     try {
       const r = await api<Settings>("/store/inventory/settings", { method: "PUT", json: rest });
       setCfg(r); toast("Ajustes de la tienda guardados"); load();
@@ -81,20 +85,20 @@ export default function WebInventory() {
   return (
     <>
       <span className="muted" style={{ fontSize: 13, maxWidth: 760 }}>
-        Disponible web = existencias en las bodegas que alimentan la tienda menos lo reservado (proyectos, bodega y pedidos web). Un pedido web reserva solo; si no se paga a tiempo, la reserva vence y se libera. Al despachar o facturar sale del inventario una sola vez.
+        Disponible web = existencias en las bodegas de venta que alimentan la tienda menos lo reservado (proyectos, bodega y pedidos web), más lo que el proveedor confirma con dato vigente como «bajo pedido». Un pedido web reserva solo; si no se paga a tiempo, la reserva vence y se libera. Al despachar o facturar sale del inventario una sola vez.
       </span>
       <div className="pending">
         {pill("", "Publicados", s.publicados)}
-        {pill("disponible", "Disponibles", s.disponible)}
+        {pill("en_bodega", "En bodega", s.en_bodega)}
         {pill("bajo_pedido", "Bajo pedido", s.bajo_pedido)}
         {pill("consultar", "Proveedor sin dato reciente", s.consultar)}
         {pill("agotado", "Agotados", s.agotado)}
         {pill("reservado", "Reservado por pedidos", n(s.reservado_pedidos))}
         {pill("alertas", "Alertas", s.alertas, s.alertas > 0)}
       </div>
-      {!data.settings.enforce_stock && data.settings.enabled && (
+      {data.settings.enabled && (
         <div className="list-filter card" role="status">
-          <span>Modo aviso: la tienda reserva lo que hay y lo que falta queda <b>«requiere compra»</b>, sin rechazar pedidos. Cuando el inventario esté cargado, encendé <b>«Bloquear ventas sin existencia»</b> abajo.</span>
+          <span>En línea solo se vende lo disponible: lo que no hay en bodega ni confirma el proveedor con dato vigente (o pasa de lo que confirma) no se puede comprar y la tienda ofrece <b>«Consultar por WhatsApp»</b>.</span>
         </div>
       )}
 
@@ -128,7 +132,7 @@ export default function WebInventory() {
                       <td className="num mono">{n(r.propio)}</td>
                       <td className="num mono" style={{ color: n(r.reservado_pedidos) > 0 ? "var(--warn)" : "var(--text-3)" }}>{n(r.reservado_pedidos) || "—"}{n(r.reservado) > n(r.reservado_pedidos) && <div className="meta">total {n(r.reservado)}</div>}</td>
                       <td className="num mono" style={{ fontWeight: 700 }}>{n(r.libre)}</td>
-                      <td className="muted" style={{ whiteSpace: "nowrap" }}>{r.proveedor != null ? <>{r.proveedor} u.<div className="meta" style={{ color: r.proveedor_viejo ? "var(--bad)" : undefined }}>{r.proveedor_al ? fmtDate(r.proveedor_al.slice(0, 10)) : "sin fecha"}{r.proveedor_viejo ? " · viejo" : ""}</div></> : "—"}</td>
+                      <td className="muted" style={{ whiteSpace: "nowrap" }}>{r.proveedor != null ? <>{r.proveedor_nombre ? `${r.proveedor_nombre}: ` : ""}{r.proveedor} u.<div className="meta" style={{ color: r.proveedor_viejo ? "var(--bad)" : undefined }} title={r.proveedor_al ? fmtDate(r.proveedor_al.slice(0, 10)) : undefined}>{r.proveedor_al ? `actualizado ${r.proveedor_hace || fmtDate(r.proveedor_al.slice(0, 10))}` : "sin fecha"}{r.proveedor_viejo ? " · dato viejo" : ""}</div></> : r.proveedor_sin_vincular ? <span title="Tiene proveedor pero ningún ítem del catálogo vinculado: su existencia no cuenta">sin vincular</span> : "—"}</td>
                       {verPrecio && <td className="num mono">{r.web_price != null ? fmtMoney(r.web_price, r.currency) : <span className="muted">{r.price != null ? fmtMoney(r.price, r.currency) : "—"}</span>}</td>}
                       <td className="num">{canEdit && <button className="btn btn--ghost btn--sm" onClick={() => setEdit({ row: r, web_price: r.web_price != null ? String(n(r.web_price)) : "", web_featured: r.web_featured, show_on_web: r.show_on_web })}>Publicación</button>}</td>
                     </tr>
@@ -152,8 +156,7 @@ export default function WebInventory() {
       {cfg && (
         <Card title="Ajustes de la tienda · inventario">
           <div className="grid-2">
-            <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} />Reservar inventario al recibir pedidos web</label>
-            <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={cfg.enforce_stock} onChange={(e) => setCfg({ ...cfg, enforce_stock: e.target.checked })} />Bloquear ventas sin existencia (nunca sobrevender)</label>
+            <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} />Reservar inventario al recibir pedidos web (apagado: la tienda vende sin control de inventario)</label>
           </div>
           <Field label="Bodegas que alimentan la web" hint="Todas marcadas = todas las activas (también las nuevas).">
             <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>{cfg.warehouses.map((w) => <label key={w.id} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={whOn(w.id)} onChange={(e) => wh(w.id, e.target.checked)} />{w.name}{w.is_default ? " (predeterminada)" : ""}</label>)}</div>
@@ -164,13 +167,12 @@ export default function WebInventory() {
             <Field label="Agotados"><select className="select" value={cfg.out_of_stock} onChange={(e) => setCfg({ ...cfg, out_of_stock: e.target.value })}><option value="mostrar">Mostrar como agotado</option><option value="ocultar">Ocultar del catálogo</option></select></Field>
             <Field label="Botón en agotados"><select className="select" value={cfg.out_of_stock_action} onChange={(e) => setCfg({ ...cfg, out_of_stock_action: e.target.value })}><option value="whatsapp">Consultar por WhatsApp</option><option value="avisarme">Avisarme cuando haya</option><option value="ninguna">Ninguno</option></select></Field>
             <Field label="Plazo bajo pedido"><input className="input" value={cfg.backorder_lead} onChange={(e) => setCfg({ ...cfg, backorder_lead: e.target.value })} /></Field>
-            <Field label="Dato del proveedor vigente (días)" hint="Más viejo: «Consultar disponibilidad»."><input className="input input--mono" type="number" min={0} value={cfg.supplier_max_age_days} onChange={(e) => setCfg({ ...cfg, supplier_max_age_days: Number(e.target.value) })} /></Field>
+            <Field label="Dato del proveedor vigente (horas)" hint="Eurocomp se refresca cada 6 h. Más viejo: «Consultar disponibilidad» y no se vende en línea."><input className="input input--mono" type="number" min={1} value={cfg.supplier_max_age_hours} onChange={(e) => setCfg({ ...cfg, supplier_max_age_hours: Number(e.target.value) })} /></Field>
             <Field label="Reserva sin pago: SINPE / transferencia (horas)"><input className="input input--mono" type="number" min={1} value={cfg.hold_hours_manual} onChange={(e) => setCfg({ ...cfg, hold_hours_manual: Number(e.target.value) })} /></Field>
             <Field label="Reserva sin pago: tarjeta (minutos)"><input className="input input--mono" type="number" min={5} value={cfg.hold_minutes_card} onChange={(e) => setCfg({ ...cfg, hold_minutes_card: Number(e.target.value) })} /></Field>
           </div>
           <div className="grid-2">
             <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={cfg.backorder_enabled} onChange={(e) => setCfg({ ...cfg, backorder_enabled: e.target.checked })} />Vender bajo pedido lo que tiene el proveedor (genera solicitud de compra)</label>
-            <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={cfg.sell_when_unknown} onChange={(e) => setCfg({ ...cfg, sell_when_unknown: e.target.checked })} />Vender también con dato del proveedor viejo</label>
             <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={cfg.cancel_unpaid_on_expiry} onChange={(e) => setCfg({ ...cfg, cancel_unpaid_on_expiry: e.target.checked })} />Cancelar el pedido cuando vence la reserva sin pago</label>
           </div>
           {canConfig && <div><button className="btn btn--crimson btn--sm" onClick={saveCfg}>Guardar ajustes</button></div>}

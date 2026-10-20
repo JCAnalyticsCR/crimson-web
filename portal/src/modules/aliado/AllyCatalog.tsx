@@ -9,7 +9,7 @@ import { errorText } from "./shared";
 type Prod = {
   id: number; code: string; name: string; brand: string | null; model: string | null; item_type: string; unit: string; category: string | null; description: string | null;
   datasheet_url: string | null; tax_rate: string | null; currency: string; precio_publico: string; precio_publico_con_iva: string | null; precio_aliado: string | null;
-  precio_aliado_con_iva: string | null; precio_aliado_estado: "ok" | "a_consultar" | "igual_al_publico"; disponibilidad: string; image?: string | null; images?: { url: string; main: boolean }[];
+  precio_aliado_con_iva: string | null; precio_aliado_estado: "ok" | "a_consultar" | "igual_al_publico"; disponibilidad: string; disponibilidad_detalle?: { state: string; en_bodega?: number | string | null; bajo_pedido_cantidad?: number | string | null; actualizado_al?: string | null } | null; image?: string | null; images?: { url: string; main: boolean }[];
 };
 
 function Precio({ p }: { p: Prod }) {
@@ -34,7 +34,7 @@ function Ficha({ id, onClose }: { id: number; onClose: () => void }) {
           <div style={{ display: "flex", gap: 8, overflowX: "auto" }}>{imgs.map((u, i) => u && <img key={i} src={u} alt="" style={{ height: 120, borderRadius: 10 }} />)}</div>
           <div className="meta">{p.code}{p.brand ? ` · ${p.brand}` : ""}{p.model ? ` · ${p.model}` : ""}{p.category ? ` · ${p.category}` : ""}</div>
           <Precio p={p} />
-          <div className="meta">{p.disponibilidad}</div>
+          <div className="meta">{p.disponibilidad}{p.disponibilidad_detalle?.actualizado_al && Number(p.disponibilidad_detalle.bajo_pedido_cantidad ?? 0) > 0 ? ` · bajo pedido actualizado ${new Date(p.disponibilidad_detalle.actualizado_al).toLocaleString("es-CR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}</div>
           {p.description && <p style={{ whiteSpace: "pre-wrap" }}>{p.description}</p>}
           {p.datasheet_url && <a href={p.datasheet_url} target="_blank" rel="noopener noreferrer">Ficha técnica</a>}
         </div>

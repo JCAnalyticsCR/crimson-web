@@ -6,6 +6,7 @@ import { api, type Product } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Field, I, Icon, Loading } from "../../ui/components";
 import { ImageField } from "../../ui/MediaPicker";
+import { AvailBadge } from "../../ui/Availability";
 
 type Banner = { id?: string; image: string; title: string; text: string; link: string; cta: string; position: number; active: boolean };
 type Kit = { id: string; title: string; text: string; answers: { place?: string; indoor?: number; outdoor?: number; days?: number; remote?: boolean }; active: boolean };
@@ -13,8 +14,14 @@ type Trust = { icon: string; title: string; text: string };
 type Faq = { q: string; a: string };
 type Showcase = {
   headline: string; subline: string; seo_description: string; ga4_id: string; banners: Banner[]; featured: number[]; kits: Kit[]; trust: Trust[];
-  faq: Faq[]; pages: { envios: string; garantias: string }; legal: { terms?: string; privacy?: string }; featured_products: { id: number; name: string; code: string; show_on_web: boolean }[]; slug: string; domain: string | null;
+  faq: Faq[]; pages: { envios: string; garantias: string }; legal: { terms?: string; privacy?: string };
+  /* state/label: disponibilidad de la funcion unica (lo que ve el cliente) */
+  featured_products: { id: number; name: string; code: string; show_on_web: boolean; state?: string | null; label?: string | null }[];
+  kits_preview?: { id: string; lines: { product_id: number; name: string; quantity: number; state: string | null; label: string | null }[]; missing: string[] }[];
+  slug: string; domain: string | null;
 };
+/* se puede comprar en linea ya (en bodega o bajo pedido con dato vigente) */
+const vendible = (state?: string | null) => state === "en_bodega" || state === "bajo_pedido";
 type PShow = { id: number; name: string; code: string; price: number | null; currency: string; compare_price: number | null; datasheet_url: string | null; specs: Record<string, string>; derived_specs: Record<string, string>; path: string };
 
 const TABS = ["Portada", "Destacados y kits", "Páginas", "Por producto", "Medición"] as const;
@@ -51,7 +58,7 @@ export default function StoreShowcaseAdmin() {
           {tab === "Destacados y kits" && (
             <div style={{ display: "grid", gap: 16 }}>
               <FeaturedEditor ids={d.featured} items={d.featured_products} onSave={(featured) => save({ featured })} />
-              <KitsEditor value={d.kits} onSave={(kits) => save({ kits })} />
+              <KitsEditor value={d.kits} preview={d.kits_preview || []} onSave={(kits) => save({ kits })} />
             </div>
           )}
 
@@ -136,6 +143,8 @@ function TrustEditor({ value, onSave }: { value: Trust[]; onSave: (v: Trust[]) =
 function ProductPicker({ onPick, placeholder = "Buscar producto por nombre o código" }: { onPick: (p: Product) => void; placeholder?: string }) {
   const [q, setQ] = useState("");
   const [res, setRes] = useState<Product[]>([]);
+  const [todos, setTodos] = useState(false); // por defecto solo propone lo que se puede comprar
+  const shown = todos ? res : res.filter((p) => p.item_type !== "producto" || vendible(p.availability?.state));
   useEffect(() => {
     if (q.trim().length < 2) { setRes([]); return; }
     const t = window.setTimeout(() => api<{ items: Product[] }>(`/products?q=${encodeURIComponent(q.trim())}&limit=8`).then((r) => setRes(r.items)).catch(() => setRes([])), 250);
@@ -143,10 +152,14 @@ function ProductPicker({ onPick, placeholder = "Buscar producto por nombre o có
   }, [q]);
   return (
     <div style={{ position: "relative" }}>
-      <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} />
-      {res.length > 0 && (
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <input className="input" style={{ flex: "1 1 220px" }} value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} />
+        <label style={{ fontSize: 12.5, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={todos} onChange={(e) => setTodos(e.target.checked)} />Incluir lo que no se puede comprar</label>
+      </div>
+      {q.trim().length >= 2 && res.length > 0 && shown.length === 0 && <p className="meta" style={{ margin: "6px 0 0" }}>Nada vendible con esa búsqueda (sin existencia ni proveedor vigente). Marcá «Incluir lo que no se puede comprar» para verlo igual.</p>}
+      {shown.length > 0 && (
         <div style={{ position: "absolute", zIndex: 5, left: 0, right: 0, top: 40, background: "var(--surface)", border: "1px solid var(--hair-2)", borderRadius: 10, boxShadow: "0 12px 30px -16px rgba(0,0,0,.4)" }}>
-          {res.map((p) => <button key={p.id} className="nav__link" style={{ width: "100%", textAlign: "left", border: 0, background: "none", cursor: "pointer", color: "var(--text)", display: "block", padding: "8px 12px" }} onClick={() => { onPick(p); setQ(""); setRes([]); }}><b style={{ fontSize: 13 }}>{p.name}</b> <span className="meta">{p.code}{!p.show_on_web ? " · no publicado" : ""}</span></button>)}
+          {shown.map((p) => <button key={p.id} className="nav__link" style={{ width: "100%", textAlign: "left", border: 0, background: "none", cursor: "pointer", color: "var(--text)", display: "block", padding: "8px 12px" }} onClick={() => { onPick(p); setQ(""); setRes([]); }}><b style={{ fontSize: 13 }}>{p.name}</b> <span className="meta">{p.code}{!p.show_on_web ? " · no publicado" : ""}</span> {p.item_type === "producto" && <AvailBadge a={p.availability} />}</button>)}
         </div>
       )}
     </div>
@@ -164,11 +177,11 @@ function FeaturedEditor({ ids, items, onSave }: { ids: number[]; items: Showcase
         <button className="btn btn--crimson btn--sm" onClick={() => onSave(list.map((x) => x.id))} disabled={JSON.stringify(list.map((x) => x.id)) === JSON.stringify(ids)}><Icon d={I.check} />Guardar destacados</button>
       </div>
       <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Vacío = la tienda elige sola uno o dos por categoría, con foto y precio. Se muestran hasta 8.</p>
-      <ProductPicker onPick={(p) => !list.some((x) => x.id === p.id) && list.length < 24 && setList([...list, { id: p.id, name: p.name, code: p.code, show_on_web: p.show_on_web }])} />
+      <ProductPicker onPick={(p) => !list.some((x) => x.id === p.id) && list.length < 24 && setList([...list, { id: p.id, name: p.name, code: p.code, show_on_web: p.show_on_web, state: p.availability?.state, label: p.availability?.label_publico || p.availability?.label }])} />
       {list.map((p, i) => (
         <div key={p.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
           <span className="meta" style={{ width: 22 }}>{i + 1}</span>
-          <span style={{ flex: 1, minWidth: 0 }}>{p.name} <span className="meta">{p.code}</span>{!p.show_on_web && <span className="badge badge--muted" style={{ marginLeft: 6 }}>no publicado</span>}</span>
+          <span style={{ flex: 1, minWidth: 0 }}>{p.name} <span className="meta">{p.code}</span>{!p.show_on_web && <span className="badge badge--muted" style={{ marginLeft: 6 }}>no publicado</span>}{p.state && <span style={{ marginLeft: 6 }} title={p.label || undefined}><AvailBadge a={{ state: p.state, label: p.label || "" }} /></span>}{p.state && !vendible(p.state) && <span className="meta" style={{ marginLeft: 6, color: "var(--warn)" }}>no se puede comprar en línea</span>}</span>
           <button className="btn btn--ghost btn--sm" onClick={() => move(i, -1)} aria-label="Subir">↑</button>
           <button className="btn btn--ghost btn--sm" onClick={() => move(i, 1)} aria-label="Bajar">↓</button>
           <button className="x" onClick={() => setList(list.filter((x) => x.id !== p.id))} aria-label="Quitar"><Icon d={I.x} size={14} /></button>
@@ -178,7 +191,7 @@ function FeaturedEditor({ ids, items, onSave }: { ids: number[]; items: Showcase
   );
 }
 
-function KitsEditor({ value, onSave }: { value: Kit[]; onSave: (v: Kit[]) => void }) {
+function KitsEditor({ value, preview, onSave }: { value: Kit[]; preview: NonNullable<Showcase["kits_preview"]>; onSave: (v: Kit[]) => void }) {
   const [list, setList] = useState<Kit[]>(value);
   useEffect(() => setList(value), [value]);
   const upd = (i: number, p: Partial<Kit>) => setList(list.map((k, j) => (j === i ? { ...k, ...p } : k)));
@@ -192,7 +205,7 @@ function KitsEditor({ value, onSave }: { value: Kit[]; onSave: (v: Kit[]) => voi
           <button className="btn btn--crimson btn--sm" onClick={() => onSave(list)}><Icon d={I.check} />Guardar kits</button>
         </div>
       </div>
-      <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Cada kit se arma con el configurador “Arma tu sistema”: los productos y el precio salen del catálogo vigente, nunca quedan desactualizados.</p>
+      <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Cada kit se arma con el configurador “Arma tu sistema”: los productos y el precio salen del catálogo vigente, nunca quedan desactualizados. Primero propone lo que se puede comprar (en bodega o bajo pedido).</p>
       {list.map((k, i) => (
         <div key={i} style={row}>
           <div className="grid-2">
@@ -207,6 +220,17 @@ function KitsEditor({ value, onSave }: { value: Kit[]; onSave: (v: Kit[]) => voi
             <label style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={k.active} onChange={(e) => upd(i, { active: e.target.checked })} />Activo</label>
             <button className="btn btn--danger btn--sm" onClick={() => setList(list.filter((_, j) => j !== i))}>Quitar</button>
           </div>
+          {(() => {
+            const pv = preview.find((x) => x.id === k.id);
+            if (!pv) return null;
+            const malos = pv.lines.filter((ln) => !vendible(ln.state));
+            return (
+              <div className="meta" style={{ display: "grid", gap: 3 }}>
+                <span>Hoy arma: {pv.lines.length ? pv.lines.map((ln) => `${ln.quantity} × ${ln.name}`).join(" · ") : "nada (sin productos que calcen)"}{pv.missing.length ? ` · para cotizar: ${pv.missing.join(", ")}` : ""}</span>
+                {malos.length > 0 && <span style={{ color: "var(--warn)" }}>Sin existencia ni proveedor vigente: {malos.map((ln) => ln.name).join(", ")} (el cliente lo consulta por WhatsApp)</span>}
+              </div>
+            );
+          })()}
         </div>
       ))}
     </div>

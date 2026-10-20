@@ -1,11 +1,15 @@
 /* Inventarios por ubicacion: existencias (calculadas del ledger), movimientos, transferencias y alertas de stock minimo.
-   Reservas formales (AC25: ver existencia no es retirar) y unidades con numero de serie. */
+   Reservas formales (AC25: ver existencia no es retirar) y unidades con numero de serie.
+   Existencias abre en "Disponibilidad" (funcion unica del API: propio + proveedor con su fecha); "Por ubicación" es
+   el kardex por bodega. Los totales nunca suman las bodegas de garantías (revisión y distribuidor). */
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, type Product } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { Dropzone } from "../../ui/MediaPicker";
+import { Lookup, type LookupItem } from "../../ui/Lookup";
+import Disponibilidad from "./Disponibilidad";
 import AuthLink from "../../ui/AuthLink";
 import WebInventory from "./WebInventory";
 import SupplierCatalog from "./SupplierCatalog";
@@ -15,7 +19,7 @@ import Health from "./Health";
 type Wh = { id: number; name: string; location: string | null; is_default: boolean; active: boolean; kind?: "venta" | "revision" | "proveedor" };
 /* revisión y distribuidor: equipos de clientes en garantía; nunca se venden ni cuentan para el mínimo */
 const WH_KIND: Record<string, string> = { venta: "Venta", revision: "Revisión de garantías", proveedor: "En el distribuidor" };
-type Level = { product_id: number; warehouse_id: number; quantity: string; code: string; name: string; min_stock: number; warehouse: string; committed?: string; available?: string; serialized?: boolean };
+type Level = { product_id: number; warehouse_id: number; quantity: string; code: string; name: string; min_stock: number; warehouse: string; warehouse_kind?: string; committed?: string; available?: string; serialized?: boolean };
 type Low = { product_id: number; code: string; name: string; quantity: string; min_stock: number };
 type ProjectLite = { id: number; number: string; name: string };
 export type Reservation = {
@@ -42,6 +46,12 @@ const MOVE_TYPES: [string, string][] = [
   ["asignacion_interna", "Asignación interna"], ["devolucion", "Devolución"], ["ajuste", "Ajuste"], ["traslado", "Traslado"],
 ];
 const n = (v: string | number | null | undefined) => Number(v ?? 0);
+/* buscador de productos (solo inventariables): una lista de 100 no alcanza con el catalogo de Eurocomp */
+const searchGoods = async (q: string): Promise<LookupItem[]> => {
+  const r = await api<{ items: (Product & { availability?: { label?: string } | null })[] }>(`/products?limit=20&item_type=producto${q ? `&q=${encodeURIComponent(q)}` : ""}`);
+  return r.items.map((p) => ({ id: p.id, label: `${p.code} · ${p.name}`, hint: p.availability?.label || undefined }));
+};
+const isSale = (l: Level) => (l.warehouse_kind || "venta") === "venta";
 const isoLocal = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 
 export default function Inventory() {
@@ -59,6 +69,9 @@ export default function Inventory() {
   const [kardexProduct, setKardexProduct] = useState<KardexProduct | null>(null);
   const [modal, setModal] = useState<"move" | "transfer" | "wh" | null>(null);
   const [healthCount, setHealthCount] = useState(0);
+  const [vista, setVista] = useState<"disponibilidad" | "ubicacion">(params.get("vista") === "ubicacion" || params.get("stock") === "bajo" ? "ubicacion" : "disponibilidad");
+  const [mvLabel, setMvLabel] = useState("");
+  const [trLabel, setTrLabel] = useState("");
   const emptyMv = { product_id: "", warehouse_id: "", kind: "entrada", quantity: "1", reference: "", note: "", movement_type: "", project_id: "", serial: "", location: "", custodian: "", owner: "", voucher_media: "" };
   const [mv, setMv] = useState(emptyMv);
   const [mvMore, setMvMore] = useState(false);
@@ -89,11 +102,12 @@ export default function Inventory() {
       }
       if (modal === "transfer") await api("/stock/transfer", { method: "POST", json: { ...tr, product_id: Number(tr.product_id), from_id: Number(tr.from_id), to_id: Number(tr.to_id) } });
       if (modal === "wh") await api("/warehouses", { method: "POST", json: wh });
-      toast("Guardado"); setModal(null); setMv(emptyMv); setMvMore(false); load();
+      toast("Guardado"); setModal(null); setMv(emptyMv); setMvLabel(""); setTrLabel(""); setMvMore(false); load();
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
-  const total = levels.reduce((a, l) => a + Number(l.quantity), 0);
-  const comprometido = levels.reduce((a, l) => a + n(l.committed), 0);
+  // solo bodegas de venta: lo que esta en revision o en el distribuidor (garantias) no es existencia de Crimson
+  const total = levels.filter(isSale).reduce((a, l) => a + Number(l.quantity), 0);
+  const comprometido = levels.filter(isSale).reduce((a, l) => a + n(l.committed), 0);
   const setTab = (k: string) => { const p = new URLSearchParams(params); if (k === "existencias") p.delete("tab"); else p.set("tab", k); setParams(p); };
 
   return (
@@ -113,9 +127,16 @@ export default function Inventory() {
       </div>
 
       {tab === "existencias" && <>
+        <div className="tabs" style={{ alignSelf: "flex-start" }} role="tablist" aria-label="Vista de existencias">
+          <button role="tab" aria-selected={vista === "disponibilidad"} className={vista === "disponibilidad" ? "is-active" : ""} onClick={() => setVista("disponibilidad")}>Disponibilidad</button>
+          <button role="tab" aria-selected={vista === "ubicacion"} className={vista === "ubicacion" ? "is-active" : ""} onClick={() => setVista("ubicacion")}>Por ubicación (kardex)</button>
+        </div>
+      </>}
+      {tab === "existencias" && vista === "disponibilidad" && <Disponibilidad onKardex={(p) => { setKardexProduct(p); setTab("movimientos"); }} />}
+      {tab === "existencias" && vista === "ubicacion" && <>
         <div className="pending">
           {whs.map((w) => <div key={w.id} className={filter === w.id ? "hot" : ""} onClick={() => setFilter(filter === w.id ? "" : w.id)} style={{ cursor: "pointer" }}><b>{levels.filter((l) => l.warehouse_id === w.id).reduce((a, l) => a + Number(l.quantity), 0)}</b><span>{w.name}{w.is_default ? " · predeterminada" : ""}{w.kind && w.kind !== "venta" ? ` · ${WH_KIND[w.kind]} (no se vende)` : ""}{w.location ? ` · ${w.location}` : ""}</span></div>)}
-          <div><b>{total}</b><span>Unidades {filter ? "en la ubicación" : "totales"}</span></div>
+          <div><b>{total}</b><span>Unidades {filter ? "en la ubicación" : "en bodegas de venta"}</span></div>
           <div><b>{comprometido}</b><span>Comprometidas en reservas</span></div>
           <div className={low.length ? "hot" : ""}><b>{low.length}</b><span>Productos bajo mínimo</span></div>
         </div>
@@ -152,9 +173,9 @@ export default function Inventory() {
       {tab === "proveedores" && allows("catalog.ver") && <SupplierCatalog />}
 
       {modal === "move" && (
-        <Modal title="Movimiento de inventario" onClose={() => setModal(null)} foot={<><button className="btn btn--ghost" onClick={() => setModal(null)}>Cancelar</button><button className="btn btn--crimson" onClick={submit}>Registrar</button></>}>
+        <Modal title="Movimiento de inventario" onClose={() => setModal(null)} foot={<><button className="btn btn--ghost" onClick={() => setModal(null)}>Cancelar</button><button className="btn btn--crimson" disabled={!mv.product_id || !mv.warehouse_id} onClick={submit}>Registrar</button></>}>
           <div className="grid-2">
-            <Field label="Producto"><select className="select" value={mv.product_id} onChange={(e) => setMv({ ...mv, product_id: e.target.value })}><option value="">Seleccione…</option>{products.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></Field>
+            <Field label="Producto" hint="Escribí código, nombre o modelo."><Lookup value={mvLabel} placeholder="Buscar producto…" fetcher={searchGoods} onSelect={(it, text) => { setMvLabel(text); setMv({ ...mv, product_id: it ? String(it.id) : "" }); }} /></Field>
             <Field label="Ubicación"><select className="select" value={mv.warehouse_id} onChange={(e) => setMv({ ...mv, warehouse_id: e.target.value })}><option value="">Seleccione…</option>{whs.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></Field>
             <Field label="Tipo"><select className="select" value={mv.kind} onChange={(e) => setMv({ ...mv, kind: e.target.value })}><option value="entrada">Entrada (compra)</option><option value="salida">Salida</option><option value="ajuste">Ajuste (+/−)</option></select></Field>
             <Field label="Cantidad"><input className="input input--mono" value={mv.quantity} onChange={(e) => setMv({ ...mv, quantity: e.target.value })} /></Field>
@@ -179,7 +200,7 @@ export default function Inventory() {
       )}
       {modal === "transfer" && (
         <Modal title="Transferir entre ubicaciones" onClose={() => setModal(null)} foot={<><button className="btn btn--ghost" onClick={() => setModal(null)}>Cancelar</button><button className="btn btn--crimson" onClick={submit}>Transferir</button></>}>
-          <Field label="Producto"><select className="select" value={tr.product_id} onChange={(e) => setTr({ ...tr, product_id: e.target.value })}><option value="">Seleccione…</option>{products.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></Field>
+          <Field label="Producto"><Lookup value={trLabel} placeholder="Buscar producto…" fetcher={searchGoods} onSelect={(it, text) => { setTrLabel(text); setTr({ ...tr, product_id: it ? String(it.id) : "" }); }} /></Field>
           <div className="grid-3">
             <Field label="Desde"><select className="select" value={tr.from_id} onChange={(e) => setTr({ ...tr, from_id: e.target.value })}><option value="">…</option>{whs.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></Field>
             <Field label="Hacia"><select className="select" value={tr.to_id} onChange={(e) => setTr({ ...tr, to_id: e.target.value })}><option value="">…</option>{whs.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></Field>

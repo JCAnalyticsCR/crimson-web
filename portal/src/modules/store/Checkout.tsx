@@ -19,6 +19,17 @@ type Quote = {
   subtotal: number; discount_total: number; tax_total: number; shipping: number; total: number; currency: string; coupon: string | null;
   taxes: { rate: string; amount: number }[]; lines: { name: string; quantity: number; total: number; shipping: boolean }[];
   free_shipping?: boolean; free_shipping_from?: string | number | null;
+  /* misma regla que el checkout (services/availability): lo que no se puede comprar en linea y el tope por producto */
+  availability?: Record<string, { state: string; label: string; disponible: boolean; max_qty: number | null }>;
+};
+/* linea que el checkout va a rechazar: no se vende en linea o pasa del tope */
+const lineProblem = (q: Quote | null, l: CartItem, cart: CartItem[]): string | null => {
+  const a = q?.availability?.[String(l.id)];
+  if (!a) return null;
+  if (!a.disponible) return "No se puede comprar en línea: consultanos por WhatsApp";
+  const total = cart.filter((x) => x.id === l.id).reduce((s, x) => s + x.qty, 0); // las variantes comparten existencia
+  if (a.max_qty != null && total > Number(a.max_qty)) return `En línea podemos venderte hasta ${Number(a.max_qty)}`;
+  return null;
 };
 export type Placed = {
   number: string | null; status: string; total: number; currency: string; payment_kind: string | null; payment_method: string | null;
@@ -319,7 +330,7 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
           {err && <p className="sh-err" role="alert" style={{ margin: 0 }}>{err}</p>}
           <div className="ck-actions">
             {step > 0 && <button type="button" className="sh-btn sh-btn--ghost" onClick={() => goStep(step - 1)}><Ico d={IC.back} size={16} />Atrás</button>}
-            <button type="submit" className="sh-btn sh-btn--crimson ck-go" disabled={busy || (step === 3 && !quote)}>
+            <button type="submit" className="sh-btn sh-btn--crimson ck-go" disabled={busy || (step === 3 && (!quote || cart.some((l) => !!lineProblem(quote, l, cart))))}>
               {step < 3 ? <>Continuar<Ico d={IC.next} size={16} /></> : busy ? "Enviando…" : <>Confirmar pedido · {totalTxt}</>}
             </button>
           </div>
@@ -340,6 +351,7 @@ function Summary({ quote, qErr, cart, cur, setQty, remove }: { quote: Quote | nu
             <div className="sh-line__img">{l.image ? <img src={l.image} alt="" loading="lazy" decoding="async" /> : null}</div>
             <div style={{ minWidth: 0 }}>
               <div className="sh-line__name">{l.name}</div>
+              {lineProblem(quote, l, cart) && <div className="sh-note" style={{ margin: "2px 0", color: "var(--crimson-dark, #9b1c2c)" }}>{lineProblem(quote, l, cart)}</div>}
               <div className="ck-qty">
                 <button type="button" onClick={() => setQty(l.key, l.qty - 1)} aria-label={`Quitar uno de ${l.name}`} disabled={l.qty <= 1}>−</button>
                 <span aria-label="Cantidad">{l.qty}</span>

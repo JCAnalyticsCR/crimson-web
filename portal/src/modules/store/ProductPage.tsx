@@ -4,7 +4,7 @@
    ficha tecnica PDF, "¿Que necesito ademas?", relacionados y compartir. En movil la barra de compra queda fija. */
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AvailBadge, Crumbs, EmptyHelp, Grid, IC, Ico, PriceTag, ProductCard, Viewfinder, cannotBuy, money, useAvailability, useHead, usePath, useStore, waLink, type Variant, type VProd } from "./storeKit";
+import { AvailBadge, Crumbs, EmptyHelp, Grid, IC, Ico, PriceTag, ProductCard, Viewfinder, cannotBuy, money, normAvail, useAvailability, useHead, usePath, useStore, waLink, type Variant, type VProd } from "./storeKit";
 
 type Detail = VProd & {
   description: string | null; specs: Record<string, string>; datasheet_url: string | null; net_price: string | number; tax_amount: string | number;
@@ -38,7 +38,8 @@ export default function ProductPage() {
 
   const ids = useMemo(() => (d ? [d.id, ...d.related.map((r) => r.id), ...d.accessories.flatMap((g) => g.items.map((i) => i.id))] : []), [d]);
   const avail = useAvailability(ids);
-  const a = (d && avail[d.id]) || d?.availability;
+  const a = normAvail((d && avail[d.id]) || d?.availability);
+  // tope en linea (max_qty del API: lo propio libre + lo que el proveedor confirma); sin dato, 999 y el checkout valida
   const maxQty = a?.max_qty && a.max_qty > 0 ? Math.min(999, a.max_qty) : 999;
   useEffect(() => { if (qty > maxQty) setQty(maxQty); }, [maxQty, qty]);
 
@@ -59,7 +60,7 @@ export default function ProductPage() {
   const shown = { ...d, display_price: price };
   const ask = d.price_on_request || !Number(price);
   const soldOut = cannotBuy(a);
-  const soldLabel = a?.state === "agotado" ? "Agotado" : "Sin existencias confirmadas";
+  const soldLabel = a?.state === "agotado" ? "Agotado" : "Consultar disponibilidad";
   const net = variant ? Number(price) / (1 + d.tax_rate / 100) : Number(d.net_price);
   const iva = Number(price) - net;
   const save = d.compare_display_price && Number(d.compare_display_price) > Number(price) ? Number(d.compare_display_price) - Number(price) : 0;
@@ -122,7 +123,8 @@ export default function ProductPage() {
                     <Ico d={added ? IC.check : IC.bag} />{soldOut ? soldLabel : added ? "Agregado" : ctx.isShop ? "Agregar al carrito" : "Agregar a la cotización"}
                   </button>
                 </div>
-                {a?.max_qty && a.max_qty > 0 && a.max_qty < 999 ? <p className="vt-buybox__note">Quedan {a.max_qty} en bodega.</p> : null}
+                {a && (a.state === "disponible" || a.state === "ultimas") && a.cantidad != null && a.cantidad > 0 && a.cantidad < 999 ? <p className="vt-buybox__note">Quedan {a.cantidad} en bodega{a.max_qty && a.max_qty > a.cantidad ? `; ${a.max_qty - a.cantidad} más bajo pedido` : ""}.</p> : null}
+                {soldOut && <p className="vt-buybox__note">No lo podemos vender en línea en este momento: escribinos y te confirmamos disponibilidad y plazo.</p>}
                 {added && <button className="vt-link vt-buy__view" onClick={ctx.openCart}>Ver {ctx.isShop ? "carrito" : "cotización"} →</button>}
                 <Link className="vt-install" to={installHref}>
                   <Ico d={IC.tool} /><span><b>¿Lo instalamos nosotros?</b><small>Técnicos de Crimson · te cotizamos la instalación sin compromiso</small></span><Ico d={IC.next} />

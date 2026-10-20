@@ -17,7 +17,7 @@ import OrderStatus, { OrderLookup } from "./OrderStatus";
 import Consent from "./Consent";
 import ProductPage from "./ProductPage";
 import StoreHome from "./StoreHome";
-import { catSlugs, safeStore, StoreProvider, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
+import { catSlugs, normAvail, safeStore, StoreProvider, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
 import "./shop.css";
 import "./vitrina.css";
 
@@ -40,7 +40,8 @@ type Home = {
 type Avail = { state: string; label: string };
 type Variant = { id: number; name: string; price: string | number; display_price?: string | number };
 type Prod = Omit<PubProduct, "variants"> & { code: string; category: string | null; category_id: number | null; brand: string | null; tax_rate: number; item_type: string; display_price: string | number; display_currency: string; availability: Avail; variants: Variant[] };
-type Line = { key: string; id: number; variant_id: number | null; name: string; image: string | null; price: number; currency: string; qty: number };
+/* max: tope en linea del producto (max_qty de la disponibilidad); el checkout lo vuelve a validar */
+type Line = { key: string; id: number; variant_id: number | null; name: string; image: string | null; price: number; currency: string; qty: number; max?: number | null };
 
 const money = (v: string | number, cur = "CRC") =>
   new Intl.NumberFormat("es-CR", { style: "currency", currency: cur, currencyDisplay: "narrowSymbol", minimumFractionDigits: cur === "CRC" ? 0 : 2, maximumFractionDigits: cur === "CRC" ? 0 : 2 }).format(Number(v) || 0);
@@ -125,10 +126,13 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
   const estimate = cart.reduce((a, l) => a + l.qty * l.price, 0);
   const add = (p: Prod, variant?: Variant, qty = 1) => {
     const key = `${p.id}:${variant?.id ?? 0}`;
+    const av = normAvail(p.availability);
+    const max = av?.max_qty && av.max_qty > 0 ? av.max_qty : null;
+    const cap = (n: number) => (max ? Math.min(max, n) : n);
     setCart((c) => {
       const found = c.find((l) => l.key === key);
-      if (found) return c.map((l) => (l.key === key ? { ...l, qty: l.qty + qty } : l));
-      return [...c, { key, id: p.id, variant_id: variant?.id ?? null, name: variant ? `${p.name} · ${variant.name}` : p.name, image: p.image, price: Number(variant?.display_price ?? p.display_price), currency: p.display_currency, qty }];
+      if (found) return c.map((l) => (l.key === key ? { ...l, qty: cap(l.qty + qty), max } : l));
+      return [...c, { key, id: p.id, variant_id: variant?.id ?? null, name: variant ? `${p.name} · ${variant.name}` : p.name, image: p.image, price: Number(variant?.display_price ?? p.display_price), currency: p.display_currency, qty: cap(qty), max }];
     });
     if (!calm() && navigator.userActivation?.isActive) navigator.vibrate?.(10);
     window.clearTimeout(toastT.current);
@@ -136,7 +140,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
     setBump((b) => b + 1);
     toastT.current = window.setTimeout(() => setToast(null), 2600);
   };
-  const setQty = (key: string, qty: number) => setCart((c) => c.map((l) => (l.key === key ? { ...l, qty: Math.max(1, Math.min(999, qty || 1)) } : l)));
+  const setQty = (key: string, qty: number) => setCart((c) => c.map((l) => (l.key === key ? { ...l, qty: Math.max(1, Math.min(l.max && l.max > 0 ? l.max : 999, qty || 1)) } : l)));
   const remove = (key: string) => setCart((c) => c.filter((l) => l.key !== key));
   useEffect(() => {
     if (!drawer) return;

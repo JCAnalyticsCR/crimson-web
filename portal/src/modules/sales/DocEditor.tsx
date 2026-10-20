@@ -9,6 +9,7 @@ import AuthLink from "../../ui/AuthLink";
 import { NO_SUMA, TREATMENTS, unitOptions, type Treatment } from "../../lib/units";
 import QuoteVersions from "./QuoteVersions";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
+import { AvailBadge, availText, sinExistencia } from "../../ui/Availability";
 
 type Preview = { subtotal: string; discount_total: string; tax_total: string; total: string; lines: { subtotal: string; tax_amount: string; total: string; unit_price: string; name: string; tax_rate: string }[] };
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? String(Number(n.toFixed(5))) : String(v ?? ""); };
@@ -16,6 +17,13 @@ const blankLine = (): Line => ({ product_id: null, code: null, name: "", descrip
 /* Una linea en 0 sin tratamiento no explica nada: hay que decir si es pendiente, aportada, cortesia o exclusion. */
 const zeroUnexplained = (l: Line) => (l.treatment || "normal") === "normal" && !(Number(l.unit_price) > 0);
 const nameRows = (s: string) => Math.min(4, Math.max(1, Math.ceil((s || "").length / 44)));
+/* Precio del producto en la moneda del documento con el tipo de cambio de venta: antes se copiaba el numero tal cual
+   (un producto de USD 50 entraba a una factura en colones como 50 colones). Solo CRC y USD en el sistema. */
+const inCurrency = (price: number, from: string | null | undefined, to: string | null | undefined, usd: number) => {
+  const f = (from || "CRC").toUpperCase(), t = (to || "CRC").toUpperCase();
+  if (f === t || !(usd > 0)) return price;
+  return f === "USD" ? price * usd : price / usd;
+};
 type DocState = Partial<Quote & Invoice>;
 /* Lo que se manda al guardar (y lo que compara el borrador local). */
 const toPayload = (doc: DocState, lines: Line[], asigna = false) => ({
@@ -103,7 +111,16 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   }, [payload, isNew, doc.id]);
 
   const setLine = (i: number, patch: Partial<Line>) => setLines((ls) => ls.map((l, k) => (k === i ? { ...l, ...patch } : l)));
-  const addProducts = (ps: Product[]) => { setLines((ls) => [...ls, ...ps.map((p) => ({ ...blankLine(), product_id: p.id, code: p.code, name: p.name, unit: p.unit, unit_price: String(p.price), tax_rate: String(p.tax_rate ?? 13) }))]); setPick(false); };
+  const addProducts = (ps: Product[]) => {
+    const to = doc.currency || "CRC";
+    const usd = Number(to === "USD" ? (doc.fx_sell ?? fx?.sell) : fx?.sell) || 0;
+    const otra = ps.filter((p) => (p.currency || "CRC") !== to);
+    if (otra.length && !usd) toast("Sin tipo de cambio del día: revisá el precio de los productos en otra moneda", "bad");
+    setLines((ls) => [...ls, ...ps.map((p) => ({ ...blankLine(), product_id: p.id, code: p.code, name: p.name, unit: p.unit, unit_price: num(inCurrency(Number(p.price), p.currency, to, usd)), tax_rate: String(p.tax_rate ?? 13) }))]);
+    const sin = ps.filter((p) => sinExistencia(p.availability));
+    if (sin.length) toast(`${sin.length === 1 ? sin[0].name : `${sin.length} productos`}: sin existencia propia ni del proveedor (se venden sin respaldo)`, "bad");
+    setPick(false);
+  };
 
   const save = useCallback(async (then?: "send" | "convert") => {
     if (payload.lines.length === 0) return toast("Agregá al menos una línea", "bad");
@@ -371,12 +388,12 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
         </aside>
       </div>
 
-      {pick && <ProductPicker onClose={() => setPick(false)} onPick={addProducts} />}
+      {pick && <ProductPicker onClose={() => setPick(false)} onPick={addProducts} docCurrency={cur} />}
     </>
   );
 }
 
-function ProductPicker({ onClose, onPick }: { onClose: () => void; onPick: (ps: Product[]) => void }) {
+function ProductPicker({ onClose, onPick, docCurrency }: { onClose: () => void; onPick: (ps: Product[]) => void; docCurrency: string }) {
   const [q, setQ] = useState("");
   const [items, setItems] = useState<Product[]>([]);
   const [sel, setSel] = useState<Record<number, Product>>({});
@@ -388,15 +405,16 @@ function ProductPicker({ onClose, onPick }: { onClose: () => void; onPick: (ps: 
   }, [q]);
   useEffect(() => { const t = setTimeout(() => load(), 200); return () => clearTimeout(t); }, [load]);
   const n = Object.keys(sel).length;
+  const sinRespaldo = Object.values(sel).filter((p) => sinExistencia(p.availability)).length;
   return (
-    <Modal title="Productos & Servicios" onClose={onClose} wide foot={<><button className="btn btn--ghost" onClick={onClose}>Cancelar</button><button className="btn btn--crimson" disabled={!n} onClick={() => onPick(Object.values(sel))}>Seleccionar{n ? ` (${n})` : ""}</button></>}>
+    <Modal title="Productos & Servicios" onClose={onClose} wide foot={<><button className="btn btn--ghost" onClick={onClose}>Cancelar</button>{sinRespaldo > 0 && <span className="muted" style={{ fontSize: 12.5, color: "var(--warn)", marginRight: "auto" }}>{sinRespaldo} sin existencia propia ni del proveedor</span>}<button className="btn btn--crimson" disabled={!n} onClick={() => onPick(Object.values(sel))}>Seleccionar{n ? ` (${n})` : ""}</button></>}>
       <div className="search" style={{ maxWidth: "none" }}><Icon d={I.search} size={16} /><input autoFocus placeholder="Buscar por nombre, código o CABYS…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
       {items.length === 0 ? <Empty hint="Creá el producto desde Productos & Servicios." /> : (
         <table className="table">
-          <thead><tr><th /><th>Código</th><th>Nombre</th><th className="num">Precio</th><th>IVA</th></tr></thead>
+          <thead><tr><th /><th>Código</th><th>Nombre</th><th>Disponibilidad</th><th className="num">Precio</th><th>IVA</th></tr></thead>
           <tbody>{items.map((p) => (
             <tr key={p.id} onClick={() => setSel((s) => { const c = { ...s }; if (c[p.id]) delete c[p.id]; else c[p.id] = p; return c; })} style={{ cursor: "pointer" }}>
-              <td><input type="checkbox" readOnly checked={!!sel[p.id]} /></td><td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}<div className="meta" style={{ marginTop: 2 }}>{p.item_type}{p.cabys_code ? ` · CABYS ${p.cabys_code}` : ""}</div></td><td className="num money">{fmtMoney(p.price, p.currency)}</td><td className="muted">{p.tax_rate ?? 13}%</td>
+              <td><input type="checkbox" readOnly checked={!!sel[p.id]} /></td><td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}<div className="meta" style={{ marginTop: 2 }}>{p.item_type}{p.cabys_code ? ` · CABYS ${p.cabys_code}` : ""}</div></td><td style={{ minWidth: 150 }}>{p.item_type === "producto" ? <><AvailBadge a={p.availability} /><div className="meta">{availText(p.availability)}</div></> : <span className="muted">—</span>}</td><td className="num money">{fmtMoney(p.price, p.currency)}{(p.currency || "CRC") !== docCurrency && <div className="meta">se convierte a {docCurrency}</div>}</td><td className="muted">{p.tax_rate ?? 13}%</td>
             </tr>
           ))}</tbody>
         </table>

@@ -19,7 +19,7 @@ const STATUS: Record<string, { label: string; tone: string }> = {
   borrador: { label: "Borrador", tone: "muted" }, solicitada: { label: "Solicitada", tone: "info" },
   recibida: { label: "Recibida", tone: "ok" }, cancelada: { label: "Cancelada", tone: "muted" },
 };
-const REASON: Record<string, string> = { proyecto: "Materiales de proyecto", stock_bajo: "Inventario bajo el mínimo", manual: "Pedido manual" };
+const REASON: Record<string, string> = { proyecto: "Materiales de proyecto", stock_bajo: "Inventario bajo el mínimo", manual: "Pedido manual", pedido_web: "Pedido web bajo pedido (al recibirla queda reservada para ese pedido)" };
 
 export default function Purchases() {
   const { toast, allows } = useSession();

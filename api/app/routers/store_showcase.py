@@ -109,14 +109,53 @@ class ShowcaseIn(BaseModel):
 
 
 def _admin_out(t: Tenant, db: Session) -> dict:
+    """Mi Tienda -> Vitrina, con la disponibilidad de la funcion unica en los destacados y en lo que arma cada kit
+    (los kits proponen primero lo que se puede comprar; lo que no, se ve marcado)."""
+    from ..services.availability import availability_many
+
     cfg = store_cfg(t)
     sc = sv.showcase_cfg(cfg)
     ids = sc["featured"]
     prods = {p.id: p for p in db.scalars(select(Product).where(Product.tenant_id == t.id, Product.id.in_(ids)))} if ids else {}
+    published = _published(db, t.id)
+    av = availability_many(db, t, list({*prods.values(), *published}), audience="publico")
+    pool = [p for p in published if not (av.get(p.id) or {}).get("ocultar")]
+    sellable = {p.id for p in pool if _sellable(av.get(p.id))}
+    kits_preview = []
+    for k in sc["kits"]:
+        kit = sv.build_kit(pool, k.get("answers") or {}, prefer=sellable)
+        kits_preview.append(
+            {
+                "id": k.get("id"),
+                "lines": [
+                    {
+                        "product_id": ln["product"].id,
+                        "name": ln["product"].name,
+                        "quantity": ln["quantity"],
+                        "state": (av.get(ln["product"].id) or {}).get("state"),
+                        "label": (av.get(ln["product"].id) or {}).get("label"),
+                    }
+                    for ln in kit["lines"]
+                ],
+                "missing": [m["name"] for m in kit["missing"]],
+            }
+        )
     return {
         **sc,
         "legal": cfg.get("legal") or {},
-        "featured_products": [{"id": i, "name": prods[i].name, "code": prods[i].code, "show_on_web": prods[i].show_on_web} for i in ids if i in prods],
+        "featured_products": [
+            {
+                "id": i,
+                "name": prods[i].name,
+                "code": prods[i].code,
+                "show_on_web": prods[i].show_on_web,
+                "state": (av.get(i) or {}).get("state"),
+                "label": (av.get(i) or {}).get("label"),
+            }
+            for i in ids
+            if i in prods
+        ],
+        "kits_preview": kits_preview,
         "slug": t.slug,
         "domain": cfg.get("domain"),
     }

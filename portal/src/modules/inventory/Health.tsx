@@ -1,17 +1,22 @@
-/* Salud del inventario: compara cada documento contra el kardex y lista discrepancias corregibles. */
+/* Salud del inventario: compara cada documento contra el kardex y lista discrepancias corregibles. Tambien lista
+   los productos con proveedor de catalogo (Eurocomp) sin item vinculado: su existencia del proveedor no cuenta. */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, I, Icon, Loading } from "../../ui/components";
 
-type Issue = { kind: "negativo" | "factura" | "proyecto" | "pedido" | "pedido_sin_decidir" | "garantia" | "garantia_vieja"; ref_id: number; doc: string; product: string; detail: string; fixable: boolean };
+type Issue = {
+  kind: "negativo" | "factura" | "proyecto" | "pedido" | "pedido_sin_decidir" | "garantia" | "garantia_vieja" | "sin_vincular";
+  ref_id: number; doc: string; product: string; detail: string; fixable: boolean; action?: string; code?: string | null;
+};
 type HealthData = { checked_at: string; days: number; total: number; counts: Record<string, number>; issues: Issue[] };
 
 const KIND_LABEL: Record<Issue["kind"], string> = {
   negativo: "Existencias negativas", factura: "Facturas", proyecto: "Proyectos", pedido: "Pedidos web", pedido_sin_decidir: "Devoluciones sin decidir",
-  garantia: "Garantías", garantia_vieja: "Garantías de más de 30 días",
+  garantia: "Garantías", garantia_vieja: "Garantías de más de 30 días", sin_vincular: "Proveedor sin vincular",
 };
-const KIND_ORDER: Issue["kind"][] = ["negativo", "factura", "proyecto", "pedido", "pedido_sin_decidir", "garantia", "garantia_vieja"];
+const KIND_ORDER: Issue["kind"][] = ["negativo", "factura", "proyecto", "pedido", "pedido_sin_decidir", "garantia", "garantia_vieja", "sin_vincular"];
 
 export default function Health() {
   const { toast, allows } = useSession();
@@ -67,7 +72,9 @@ export default function Health() {
                     <td>{iss.product}</td>
                     <td>{iss.detail}</td>
                     <td className="num" style={{ whiteSpace: "nowrap" }}>
-                      {iss.fixable && allows("inventory.editar")
+                      {iss.action === "vincular"
+                        ? <Link className="btn btn--soft btn--sm" to="/inventario?tab=proveedores" title={iss.code ? `Buscá ${iss.code} en el catálogo del proveedor y vinculalo` : undefined}>Vincular</Link>
+                        : iss.fixable && allows("inventory.editar")
                         ? <button className="btn btn--soft btn--sm" disabled={busy === iss.ref_id} onClick={() => fix(iss)}>{busy === iss.ref_id ? "Corrigiendo…" : "Corregir"}</button>
                         : <span className="muted" style={{ fontSize: 12.5 }}>{iss.kind === "negativo" ? "Revisá con un conteo o un ajuste" : iss.kind === "pedido_sin_decidir" ? "Decidí en el pedido si volvió" : iss.kind === "garantia_vieja" ? "Dale seguimiento en Garantías" : null}</span>}
                     </td>

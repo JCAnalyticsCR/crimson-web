@@ -6,12 +6,14 @@ import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components
 import { GalleryField, type GalleryImage } from "../../ui/MediaPicker";
 import { Lookup, type LookupItem } from "../../ui/Lookup";
 import { TrashButton } from "../../ui/TrashButton";
+import { AvailBadge, availText, qty, type Availability as Avail } from "../../ui/Availability";
 import "./productos.css";
 
 type Tax = { id: number; name: string; rate: number };
 type Named = { id: number; name: string };
 type Variant = { id?: number; name: string; code: string; price: string; active: boolean; options: Record<string, string> };
-type Availability = { own_stock: string; min_stock: number; supplier_stock: number | null; supplier_updated_at: string | null; label: string };
+/* la ficha: la funcion unica del API (interno, con lo libre por bodega de venta) + lo que ve el cliente en la tienda */
+type Availability = Avail & { min_stock: number; label_publico?: string | null; bodegas?: { nombre: string; disponible: number | string }[] };
 type Full = Product & {
   cost: number | null; cost_currency: string; margin_pct: number | null; brand: string | null; model: string | null; supplier_sku: string | null; supplier_stock: number | null;
   tax_ids: number[]; description_invoice: string | null; description_store: string | null; min_stock: number; images: GalleryImage[];
@@ -199,7 +201,7 @@ export default function Products() {
           <select className="select select--sm" value={f.supplier_id} onChange={(e) => setF({ ...f, supplier_id: e.target.value })}><option value="">Todo proveedor</option>{(opts?.suppliers || suppliers).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
           <select className="select select--sm" value={f.web} onChange={(e) => setF({ ...f, web: e.target.value })}><option value="">En la tienda: todos</option><option value="true">Publicados</option><option value="false">Ocultos</option></select>
           {!!opts?.warehouses?.length && <select className="select select--sm" value={f.warehouse_id} onChange={(e) => setF({ ...f, warehouse_id: e.target.value })} title="Bodega o inventario de origen"><option value="">Toda bodega</option>{opts.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>}
-          <select className="select select--sm" value={f.proveedor} onChange={(e) => setF({ ...f, proveedor: e.target.value })} title="Vinculado a la lista de un proveedor (Inventarios → Proveedores) o con proveedor asignado"><option value="">Con y sin proveedor</option><option value="con">Con proveedor</option><option value="sin">Sin proveedor</option></select>
+          <select className="select select--sm" value={f.proveedor} onChange={(e) => setF({ ...f, proveedor: e.target.value })} title="Vinculado a la lista de un proveedor (Inventarios → Proveedores) o con proveedor asignado"><option value="">Con y sin proveedor</option><option value="con">Con proveedor</option><option value="sin">Sin proveedor</option><option value="vinculado">Vinculado a la lista del proveedor</option><option value="sin_vincular">Con proveedor sin vincular (su existencia no cuenta)</option></select>
           {!!opts?.sin_cabys && <button className={`btn btn--sm ${f.sin_cabys ? "btn--crimson" : "btn--ghost"}`} onClick={() => setF({ ...f, sin_cabys: !f.sin_cabys })} title="Sin CABYS no se puede facturar">Sin CABYS ({opts.sin_cabys})</button>}
           {(q || f.item_type || f.category_id || f.brand || f.supplier_id || f.web || f.sin_cabys || f.warehouse_id || f.proveedor) && <button className="btn btn--ghost btn--sm" onClick={() => { setQ(""); setF({ item_type: "", category_id: "", brand: "", supplier_id: "", web: "", sin_cabys: false, warehouse_id: "", proveedor: "" }); }}><Icon d={I.x} size={14} />Limpiar</button>}
           <button className="btn btn--ghost btn--sm" onClick={load} style={{ marginLeft: "auto" }}><Icon d={I.refresh} /></button>
@@ -207,11 +209,11 @@ export default function Products() {
         {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Nada con esos filtros. Probá limpiarlos o creá el producto." /> : (
           <div className={verCostos ? "prd-dense" : undefined} style={{ overflowX: "auto" }}>
           <table className="table">
-            <thead><tr><th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th>Bodega</th>{verCostos && <th className="num" title="Costo sin IVA: del proveedor vinculado (con la fecha de su lista) o propio">Costo</th>}{verPrecios && <th className="num" title="Sin IVA">Precio de venta</th>}{verCostos && <th className="num" title="Margen sobre la venta: (precio − costo) ÷ precio">Margen</th>}{verCostos && <th className="num" title="Precio general para aliados, sin IVA (recargo sobre el costo o precio fijo)">Precio aliado</th>}<th>IVA</th><th>Web</th><th /></tr></thead>
+            <thead><tr><th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th>Bodega</th><th className="num" title="Libre en bodegas de venta (sin las de garantías) menos lo reservado">Propio</th><th className="num" title="Existencia del proveedor vinculado (Eurocomp)">Proveedor</th><th title="Cuándo se actualizó la existencia del proveedor">Actualizado</th>{verCostos && <th className="num" title="Costo sin IVA: del proveedor vinculado (con la fecha de su lista) o propio">Costo</th>}{verPrecios && <th className="num" title="Sin IVA">Precio de venta</th>}{verCostos && <th className="num" title="Margen sobre la venta: (precio − costo) ÷ precio">Margen</th>}{verCostos && <th className="num" title="Precio general para aliados, sin IVA (recargo sobre el costo o precio fijo)">Precio aliado</th>}<th>IVA</th><th>Web</th><th /></tr></thead>
             <tbody>{items.map((p) => (
               <tr key={p.id}>
                 <td>{thumb(p) ? <span style={{ display: "block", width: 36, height: 36, borderRadius: 8, background: `center/cover no-repeat url("${thumb(p)}")`, border: "1px solid var(--hair)" }} /> : <span style={{ display: "grid", placeItems: "center", width: 36, height: 36, borderRadius: 8, background: "var(--bg-2)", color: "var(--text-3)" }}><Icon d={I.products} size={16} /></span>}</td>
-                <td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.item_type}</td><td className="mono muted">{p.cabys_code || "—"}</td><td className="muted" style={{ fontSize: 13 }}>{whName(p.warehouse_id)}</td>{verCostos && <td className="num"><CostCell p={p} /></td>}{verPrecios && <td className="num money">{fmtMoney(p.price, p.currency)}</td>}{verCostos && <td className="num" style={{ whiteSpace: "nowrap" }}><MarginCell p={p} /></td>}{verCostos && <td className="num money">{p.ally_price != null ? fmtMoney(p.ally_price, p.currency) : <span className="muted">—</span>}</td>}<td className="muted">{p.tax_rate ?? "—"}%</td><td><button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={!allows("catalog.editar") || toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-pressed={p.show_on_web}><i /></button></td>
+                <td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.item_type}</td><td className="mono muted">{p.cabys_code || "—"}</td><td className="muted" style={{ fontSize: 13 }}>{whName(p.warehouse_id)}</td><StockCells a={p.availability} />{verCostos && <td className="num"><CostCell p={p} /></td>}{verPrecios && <td className="num money">{fmtMoney(p.price, p.currency)}</td>}{verCostos && <td className="num" style={{ whiteSpace: "nowrap" }}><MarginCell p={p} /></td>}{verCostos && <td className="num money">{p.ally_price != null ? fmtMoney(p.ally_price, p.currency) : <span className="muted">—</span>}</td>}<td className="muted">{p.tax_rate ?? "—"}%</td><td><button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={!allows("catalog.editar") || toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-pressed={p.show_on_web}><i /></button></td>
                 <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => open(p.id)}>Ver</button><TrashButton kind="product" id={p.id} number={p.code || p.name} onDone={load} /></span></td>
               </tr>
             ))}</tbody>
@@ -260,12 +262,13 @@ export default function Products() {
             <Field label="Descripción · Comercio electrónico" hint="Corta; va a Links y a la tienda."><textarea className="textarea" style={{ minHeight: 60 }} value={edit.description_store} onChange={(e) => setEdit({ ...edit, description_store: e.target.value })} /></Field>
             <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={edit.show_on_web} onChange={(e) => setEdit({ ...edit, show_on_web: e.target.checked })} />Mostrar en sitio web</label>
             {verCostos && edit.id && <SupplierOffers offers={offers} info={costOf} />}
-            {avail && (
-              <p className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
-                Disponibilidad que ve el cliente: <b>{avail.label}</b>
-                {avail.supplier_stock != null && ` · el proveedor reporta ${avail.supplier_stock} unidades`}
-                {avail.supplier_updated_at && ` (lista del ${parseTs(avail.supplier_updated_at).toLocaleDateString("es-CR", { timeZone: "America/Costa_Rica" })})`}.
-              </p>
+            {avail && avail.state !== "servicio" && (
+              <div className="muted" style={{ fontSize: 12.5, marginTop: 8, display: "grid", gap: 4 }}>
+                <span><AvailBadge a={avail} /> {availText(avail)}{avail.supplier_updated_at && ` (${parseTs(avail.supplier_updated_at).toLocaleString("es-CR", { timeZone: "America/Costa_Rica", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })})`}</span>
+                {!!avail.bodegas?.length && <span>Por bodega de venta: {avail.bodegas.map((b) => `${b.nombre} ${qty(b.disponible)}`).join(" · ")}</span>}
+                {avail.supplier_unlinked_qty ? <span style={{ color: "var(--warn)" }}>Tiene proveedor pero ningún ítem de su lista vinculado: su existencia no cuenta. Vinculalo en <Link to="/inventario?tab=proveedores">Inventarios → Proveedores</Link>.</span> : null}
+                {avail.label_publico && <span>Lo que ve el cliente en la tienda: <b>{avail.label_publico}</b></span>}
+              </div>
             )}
           </>}
 
@@ -294,6 +297,19 @@ export default function Products() {
           </>}
         </Modal>
       )}
+    </>
+  );
+}
+
+/* Propio (libre en bodegas de venta) · Proveedor · Actualizado: la funcion unica del API */
+function StockCells({ a }: { a?: Avail | null }) {
+  if (!a || a.state === "servicio") return <><td className="num muted">—</td><td className="num muted">—</td><td className="muted">—</td></>;
+  const own = Number(a.own_free ?? 0);
+  return (
+    <>
+      <td className="num mono" style={{ fontWeight: own > 0 ? 700 : undefined, color: own > 0 ? undefined : "var(--text-3)" }} title={Number(a.own_reserved ?? 0) > 0 ? `${qty(a.own_reserved)} reservado` : undefined}>{qty(own)}</td>
+      <td className="num mono" title={a.supplier_name || undefined}>{a.supplier_linked ? qty(a.supplier_qty) : a.supplier_unlinked_qty ? <span className="muted" title="Proveedor sin vincular: no cuenta">s/v</span> : <span className="muted">—</span>}</td>
+      <td className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap", color: a.supplier_linked && !a.supplier_fresh ? "var(--bad)" : undefined }}>{a.supplier_linked ? `${a.supplier_age || "sin fecha"}${a.supplier_fresh ? "" : " · viejo"}` : "—"}</td>
     </>
   );
 }

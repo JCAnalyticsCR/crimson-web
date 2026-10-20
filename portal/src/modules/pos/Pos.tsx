@@ -5,13 +5,17 @@ import { api, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, I, Icon, Modal } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
+import { availText, sinExistencia, type Availability } from "../../ui/Availability";
 
 /* ---------- Types ---------- */
 type Variant = { id: number; name: string; code: string; price: number | null };
+/* stock = libre propio en bodegas de venta (funcion unica del API); availability trae tambien lo del proveedor.
+   pos_price / pos_currency: el precio en la moneda de la caja (el API convierte USD/CRC con el tipo del dia). */
 type CatalogItem = {
   id: number; code: string; name: string; price: number; currency: string;
   item_type: string; category_id: number | null; tax_rate: number;
   stock: number | string | null; image: string | null; variants: Variant[];
+  pos_price?: number | string; pos_currency?: string; availability?: Availability | null;
 };
 type CartLine = {
   key: string; product_id: number; variant_id?: number;
@@ -64,7 +68,7 @@ export default function Pos() {
   /* load catalog */
   useEffect(() => {
     api<CatalogItem[]>("/pos/catalog")
-      .then((items) => setCatalog(items.map((i) => ({ ...i, price: Number(i.price), tax_rate: Number(i.tax_rate) }))))
+      .then((items) => setCatalog(items.map((i) => ({ ...i, price: Number(i.price), tax_rate: Number(i.tax_rate), pos_price: i.pos_price != null ? Number(i.pos_price) : Number(i.price), pos_currency: i.pos_currency || i.currency }))))
       .catch((e) => toast(e instanceof Error ? e.message : "Error al cargar catálogo", "bad"))
       .finally(() => setCatLoading(false));
   }, [toast]);
@@ -109,15 +113,25 @@ export default function Pos() {
   const change = Math.max(0, totalPaid - grossTotal);
 
   /* ---------- Cart helpers ---------- */
+  /* precio en la moneda de la caja: el del producto ya viene convertido; el de una variante se convierte igual */
+  const posPrice = (item: CatalogItem, v?: Variant) => {
+    const base = Number(item.pos_price ?? item.price);
+    if (v?.price == null) return base;
+    const factor = Number(item.price) > 0 ? base / Number(item.price) : 1;
+    return Math.round(Number(v.price) * factor * 100000) / 100000;
+  };
   const addToCart = (item: CatalogItem, variantId?: number) => {
     const variant = variantId != null ? item.variants.find((v) => v.id === variantId) : undefined;
-    const price = variant?.price != null ? Number(variant.price) : Number(item.price);
+    const price = posPrice(item, variant);
+    if (item.item_type === "producto" && sinExistencia(item.availability) && !cart.some((l) => l.product_id === item.id)) {
+      toast(`${item.name}: sin existencia propia ni del proveedor. Se puede vender, pero no hay respaldo en bodega.`, "bad");
+    }
     const name = variant ? `${item.name} — ${variant.name}` : item.name;
     const key = `${item.id}-${variantId ?? 0}`;
     setCart((prev) => {
       const idx = prev.findIndex((l) => l.key === key);
       if (idx >= 0) return prev.map((l, i) => (i === idx ? { ...l, quantity: l.quantity + 1 } : l));
-      return [...prev, { key, product_id: item.id, variant_id: variantId, name, unit_price: price, tax_rate: Number(item.tax_rate), discount: 0, quantity: 1, currency: item.currency }];
+      return [...prev, { key, product_id: item.id, variant_id: variantId, name, unit_price: price, tax_rate: Number(item.tax_rate), discount: 0, quantity: 1, currency: item.pos_currency || item.currency }];
     });
     setVariantItem(null);
   };
@@ -259,18 +273,22 @@ export default function Pos() {
                   )}
                   <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.3, flex: 1 }}>{item.name}</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 4 }}>
-                    <span className="money" style={{ color: "var(--crimson)", fontSize: 12.5, fontWeight: 700 }}>
-                      {fmtMoney(item.price, item.currency)}
+                    <span className="money" style={{ color: "var(--crimson)", fontSize: 12.5, fontWeight: 700 }} title={item.currency !== item.pos_currency ? `${fmtMoney(item.price, item.currency)} convertido` : undefined}>
+                      {fmtMoney(item.pos_price ?? item.price, item.pos_currency || item.currency)}
                     </span>
-                    {item.item_type === "producto" && item.stock != null && (
-                      <span style={{
-                        fontSize: 10, padding: "1px 5px", borderRadius: 999, fontFamily: "var(--mono)",
-                        background: Number(item.stock) > 0 ? "var(--ok-soft)" : "var(--bad-soft)",
-                        color: Number(item.stock) > 0 ? "var(--ok)" : "var(--bad)",
-                      }}>
-                        {Number(item.stock)}
-                      </span>
-                    )}
+                    {item.item_type === "producto" && item.stock != null && (() => {
+                      const own = Number(item.stock) > 0;
+                      const prov = item.availability?.state === "bajo_pedido";
+                      return (
+                        <span title={availText(item.availability)} style={{
+                          fontSize: 10, padding: "1px 5px", borderRadius: 999, fontFamily: "var(--mono)",
+                          background: own ? "var(--ok-soft)" : prov ? "var(--warn-soft)" : "var(--bad-soft)",
+                          color: own ? "var(--ok)" : prov ? "var(--warn)" : "var(--bad)",
+                        }}>
+                          {own ? Number(item.stock) : prov ? `prov. ${Number(item.availability?.supplier_available ?? 0)}` : "0"}
+                        </span>
+                      );
+                    })()}
                     {item.variants.length > 0 && (
                       <span className="meta" style={{ fontSize: 9.5, color: "var(--text-3)" }}>
                         {item.variants.length} var.
@@ -531,7 +549,7 @@ export default function Pos() {
               >
                 <span>{v.name}</span>
                 <span className="money" style={{ fontSize: 13 }}>
-                  {fmtMoney(v.price != null ? v.price : variantItem.price, variantItem.currency)}
+                  {fmtMoney(posPrice(variantItem, v), variantItem.pos_currency || variantItem.currency)}
                 </span>
               </button>
             ))}

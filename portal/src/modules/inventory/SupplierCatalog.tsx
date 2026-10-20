@@ -1,6 +1,7 @@
 /* Inventarios -> Proveedores. El catálogo de cada proveedor (Eurocomp, …) aparte de lo que Crimson tiene en bodega:
    Andrés pidió verlo "de una manera categorizada diferente para no mezclarlos con lo que nosotros tenemos localmente".
-   Entra hoy por la lista en Excel; el conector por API (SiReTT) usará el mismo catálogo. */
+   Entra por la API de Eurocomp (SiReTT: catálogo cada semana, existencias de lo vinculado cada 6 horas) o por la
+   lista en Excel, que nunca pisa ni inactiva lo que la API confirma con dato vigente. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtDate, fmtMoney, uploadFile } from "../../lib/api";
@@ -12,9 +13,12 @@ import "./proveedores.css";
 type Num = string | number | null | undefined;
 type Cat = { category: string | null; subcategory: string | null; count: number };
 type Sup = {
-  id: number; name: string; items: number; active: number; linked: number; in_stock: number; categories: Cat[];
+  id: number; name: string; items: number; active: number; linked: number; in_stock: number; categories: Cat[]; unlinked_products?: number;
   last_list: { list_date: string; source: string; source_file: string | null; imported_at: string; summary: Record<string, number> | null } | null;
-  api: { status: string; label: string | null; last_ok_at?: string; last_try_at?: string; last_summary?: Record<string, number> };
+  api: {
+    status: string; label: string | null; last_ok_at?: string; last_try_at?: string; last_summary?: Record<string, number>;
+    last_stock_at?: string; last_stock_error?: string | null; last_stock_summary?: Record<string, number>;
+  };
 };
 type LinkedProduct = { id: number; code: string; name: string; active: boolean; price?: Num; currency?: string };
 type Item = {
@@ -44,6 +48,12 @@ type CatFilter = { category: string | null; subcategory: string | null } | null;
 const n = (v: Num) => Number(v ?? 0);
 const crc = (v: Num) => (v == null || v === "" ? "—" : fmtMoney(Math.round(n(v)), "CRC"));
 const money = (v: Num, cur = "USD") => (v == null || v === "" ? "—" : fmtMoney(v, cur));
+const when = (s?: string) => (s ? new Date(s).toLocaleString("es-CR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
+const hace = (s?: string) => {
+  if (!s) return "";
+  const h = Math.floor((Date.now() - new Date(s).getTime()) / 3600000);
+  return h < 1 ? "hace menos de 1 h" : h < 48 ? `hace ${h} h` : `hace ${Math.floor(h / 24)} días`;
+};
 const today = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const METHOD: Record<string, string> = { sku: "por código", modelo: "por modelo", nombre: "por nombre", manual: "confirmado", creado: "creado desde aquí" };
 const ACTIONS: [string, string, string][] = [
@@ -147,7 +157,14 @@ export default function SupplierCatalog() {
               <span className="prv-sup__name">{s.name}</span>
               <span className="prv-sup__nums"><span><b>{s.active}</b> ítems</span><span><b>{s.in_stock}</b> con existencia</span><span><b>{s.linked}</b> vinculados</span></span>
               <span className="meta">{s.last_list ? `Lista del ${fmtDate(s.last_list.list_date)}${s.last_list.source_file ? ` · ${s.last_list.source_file}` : ""}` : "Sin lista"}</span>
-              {s.api.label && <span className="prv-api" data-status={s.api.status}><i />{s.api.label}{s.api.last_ok_at ? ` · ${new Date(s.api.last_ok_at).toLocaleString("es-CR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}</span>}
+              {s.api.label && <span className="prv-api" data-status={s.api.status}><i />{s.api.label}</span>}
+              {s.api.label && (s.api.last_ok_at || s.api.last_stock_at) && (
+                <span className="meta">
+                  {s.api.last_ok_at ? `Catálogo: ${when(s.api.last_ok_at)}` : "Catálogo: sin sincronizar"}
+                  {s.api.last_stock_at ? ` · Existencias: ${hace(s.api.last_stock_at)} (${when(s.api.last_stock_at)})` : " · Existencias: sin refrescar"}
+                </span>
+              )}
+              {!!s.unlinked_products && <span className="meta" style={{ color: "var(--warn)" }}>{s.unlinked_products} producto{s.unlinked_products !== 1 ? "s" : ""} con este proveedor sin vincular: su existencia no cuenta</span>}
             </button>
           ))}
         </div>
@@ -308,6 +325,12 @@ function ImportModal({ sups, current, onClose, onDone }: { sups: Sup[]; current:
           <button onClick={() => setShow("")} title="Tus productos vinculados que cambian de costo o existencia"><span>Productos propios</span><b>{s.productos}</b></button>
         </div>
 
+        {!!s.api_conservados && (
+          <div className="prv-banner" role="status" style={{ marginTop: 12 }}>
+            <span className="prv-banner__tag">API</span>
+            <span><b>{s.api_conservados} ítems</b> vienen por la API del proveedor con dato vigente: el Excel no los inactiva ni les cambia existencia ni costo.</span>
+          </div>
+        )}
         {s.inactivar > 0 && s.inactivar >= s.nuevo + s.actualizado + s.sin_cambios + s.dudoso && (
           <div className="prv-banner" role="alert" style={{ marginTop: 12, borderColor: "var(--warn)", background: "var(--warn-soft)" }}>
             <span className="prv-banner__tag" style={{ color: "var(--warn)", borderColor: "var(--warn)" }}>Ojo</span>
