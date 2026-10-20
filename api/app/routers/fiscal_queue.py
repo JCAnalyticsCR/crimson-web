@@ -57,7 +57,13 @@ def _row(db: Session, inv: Invoice, today: dt.date) -> dict:
 
 
 def _state(inv: Invoice) -> dict:
-    return {"id": inv.id, "number": inv.number, "einvoice_status": inv.einvoice_status, "external_number": inv.external_number, "external_date": inv.external_date}
+    return {
+        "id": inv.id,
+        "number": inv.number,
+        "einvoice_status": inv.einvoice_status,
+        "external_number": inv.external_number,
+        "external_date": inv.external_date,
+    }
 
 
 @router.get("/fiscal/queue")

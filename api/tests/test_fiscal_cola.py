@@ -128,7 +128,9 @@ def test_marcar_emitida_en_fygaro_y_emit_la_rechaza(client, auth, db_session):
     log = db_session.query(AuditLog).filter(AuditLog.action == "emitida_fuera", AuditLog.entity_id == inv["id"]).one()
     assert log.diff["antes"] == "sin_emitir" and log.diff["numero"] == "FE-0000123"
     cola = _cola(client)
-    assert inv["id"] not in [x["id"] for x in cola["items"]] and cola["emitidas_fuera_mes"] == (1 if (date.today() - timedelta(days=1)).month == date.today().month else 0)
+    assert inv["id"] not in [x["id"] for x in cola["items"]] and cola["emitidas_fuera_mes"] == (
+        1 if (date.today() - timedelta(days=1)).month == date.today().month else 0
+    )
 
     # nunca se reemite: ni en simulado ni en pruebas ni en produccion (la guarda va antes del modo)
     for prov in ("none", "sandbox"):
@@ -184,7 +186,18 @@ def test_validaciones_de_la_marca(client, auth, db_session):
     # un comprobante de PRODUCCION vivo nunca se tapa con la marca; uno en camino a Hacienda tampoco
     for status, einv in (("aceptada", "aceptada"), ("por_enviar", "pendiente")):
         p = _pagar(client, _factura(client))
-        db_session.add(EInvoiceDocument(tenant_id=auth["tenant"]["id"], invoice_id=p["id"], doc_type="FE", consecutive="00100001010000000999", provider="hacienda", status=status, mode="produccion", attempts=1))
+        db_session.add(
+            EInvoiceDocument(
+                tenant_id=auth["tenant"]["id"],
+                invoice_id=p["id"],
+                doc_type="FE",
+                consecutive="00100001010000000999",
+                provider="hacienda",
+                status=status,
+                mode="produccion",
+                attempts=1,
+            )
+        )
         db_session.get(Invoice, p["id"]).einvoice_status = einv
         db_session.commit()
         assert _marcar(client, p["id"], number=f"FE-{status}").status_code == 409
@@ -230,6 +243,28 @@ def test_emitidas_fuera_este_mes_en_hora_de_costa_rica(client, auth, db_session)
     assert fq.external_month_count(db_session, tid, date(2026, 11, 1)) == 1
     assert fq.external_month_count(db_session, tid, date(2026, 12, 15)) == 0
     assert fq.month_of(date(2026, 12, 9)) == (date(2026, 12, 1), date(2027, 1, 1))
+
+
+def test_marcar_de_noche_usa_la_fecha_de_costa_rica(client, auth, db_session, monkeypatch):
+    """31/10 a las 21:00 en Costa Rica ya es 1/11 en UTC: la fecha de hoy (y el mes del contador) es la de Costa Rica."""
+    from app.providers.einvoice import CR
+    from app.services import fiscal_queue as fq
+
+    monkeypatch.setattr(fq, "cr_now", lambda: datetime(2026, 10, 31, 21, 0, tzinfo=CR))
+    a, b = _pagar(client, _factura(client)), _pagar(client, _factura(client))
+    # manana en Costa Rica (aunque en UTC ya sea "hoy") es fecha futura
+    assert _marcar(client, a["id"], number="FE-N1", when=date(2026, 11, 1)).status_code == 422
+    assert _marcar(client, a["id"], number="FE-N1", when=date(2026, 10, 31)).status_code == 200
+    cola = _cola(client)
+    assert cola["today"] == "2026-10-31" and cola["mes"] == "2026-10" and cola["emitidas_fuera_mes"] == 1
+    assert [x["id"] for x in cola["items"]] == [b["id"]]
+
+
+def test_sin_ventas_no_ve_la_cola(client, auth, db_session):
+    tec = role_headers(client, db_session, auth["tenant"]["id"], "tec.cola@ejemplo.com", "tecnico")
+    inv = _pagar(client, _factura(client))
+    assert client.get("/fiscal/queue", headers=tec).status_code == 403
+    assert _marcar(client, inv["id"], number="FE-T1", headers=tec).status_code == 403
 
 
 def test_correo_diario_una_vez_por_dia_de_costa_rica(client, auth, db_session, correos, monkeypatch):

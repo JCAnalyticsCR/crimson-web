@@ -238,7 +238,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
         </div>
         <div className="page-head__actions">
           {!isNew && <AuthLink path={`/${isQ ? "quotes" : "invoices"}/${id}/pdf`}>PDF / Imprimir</AuthLink>}
-          {!isNew && isQ && <button className="btn btn--ghost btn--sm" onClick={() => act("duplicate")}>Duplicar</button>}
+          {!isNew && isQ && allows("sales.crear") && <button className="btn btn--ghost btn--sm" onClick={() => act("duplicate")}>Duplicar</button>}
         </div>
       </div>
 
@@ -311,7 +311,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                       </tr>
                     );
                   })}
-                  {lines.length === 0 && <tr><td colSpan={7}><div className="empty" style={{ padding: 28 }}><span className="meta">Sin líneas</span><div className="h3">Agregá productos o escribí una línea libre</div><button className="btn btn--ghost btn--sm" onClick={() => setLines([blankLine()])}>Línea libre</button></div></td></tr>}
+                  {lines.length === 0 && <tr><td colSpan={7}><div className="empty" style={{ padding: 28 }}><span className="meta">Sin líneas</span><div className="h3">{ro ? "El documento no tiene líneas" : "Agregá productos o escribí una línea libre"}</div>{!ro && <button className="btn btn--ghost btn--sm" onClick={() => setLines([blankLine()])}>Línea libre</button>}</div></td></tr>}
                 </tbody>
               </table>
               {lines.length > 0 && !ro && <div style={{ padding: 10 }}><button className="btn btn--ghost btn--sm" onClick={() => setLines((ls) => [...ls, blankLine()])}><Icon d={I.plus} />Línea libre</button></div>}

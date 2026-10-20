@@ -31,10 +31,8 @@ STATUS = {"enviada": "enviada", "pagada": "pagada", "parcial": "pago parcial", "
 INSTRUCTION = {
     "ninguno": "La conexión con Hacienda todavía no está en producción: emití cada una en Fygaro hoy mismo y marcala "
     "«Emitida en Fygaro» con su número. Lo marcado no se vuelve a emitir.",
-    "simulado": "El modo fiscal es Simulado (sin validez fiscal): emití cada una en Fygaro y marcala «Emitida en Fygaro» "
-    "con su número.",
-    "pruebas": "El modo fiscal es Pruebas (sin validez fiscal): emití cada una en Fygaro y marcala «Emitida en Fygaro» "
-    "con su número.",
+    "simulado": "El modo fiscal es Simulado (sin validez fiscal): emití cada una en Fygaro y marcala «Emitida en Fygaro» con su número.",
+    "pruebas": "El modo fiscal es Pruebas (sin validez fiscal): emití cada una en Fygaro y marcala «Emitida en Fygaro» con su número.",
     "produccion": "Emití cada una desde la factura con «Emitir a Hacienda».",
 }
 

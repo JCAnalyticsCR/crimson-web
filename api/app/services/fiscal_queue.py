@@ -39,7 +39,9 @@ def queue_where(tenant_id: int) -> list:
     """La UNICA definicion de "Por emitir": la lista, el contador y el correo diario salen de aqui."""
     sent = (
         select(EmailOutbox.id)
-        .where(EmailOutbox.tenant_id == Invoice.tenant_id, EmailOutbox.entity == "invoice", EmailOutbox.entity_id == Invoice.id, EmailOutbox.status == "enviado")
+        .where(
+            EmailOutbox.tenant_id == Invoice.tenant_id, EmailOutbox.entity == "invoice", EmailOutbox.entity_id == Invoice.id, EmailOutbox.status == "enviado"
+        )
         .exists()
     )
     link = select(PaymentLink.id).where(PaymentLink.invoice_id == Invoice.id).exists()
@@ -67,15 +69,17 @@ def queue_count(db: Session, tenant_id: int, scope=None) -> int:
 
 def month_of(today: date) -> tuple[date, date]:
     first = today.replace(day=1)
-    nxt = (first.replace(year=first.year + 1, month=1) if first.month == 12 else first.replace(month=first.month + 1))
+    nxt = first.replace(year=first.year + 1, month=1) if first.month == 12 else first.replace(month=first.month + 1)
     return first, nxt
 
 
 def external_month_count(db: Session, tenant_id: int, today: date | None = None, scope=None) -> int:
     """Emitidas fuera este mes (por la fecha de emision en Fygaro, mes de Costa Rica)."""
     first, nxt = month_of(today or cr_today())
-    q = select(func.count()).select_from(Invoice).where(
-        Invoice.tenant_id == tenant_id, Invoice.einvoice_status == "emitida_fuera", Invoice.external_date >= first, Invoice.external_date < nxt
+    q = (
+        select(func.count())
+        .select_from(Invoice)
+        .where(Invoice.tenant_id == tenant_id, Invoice.einvoice_status == "emitida_fuera", Invoice.external_date >= first, Invoice.external_date < nxt)
     )
     if scope is not None:
         q = q.where(scope)
