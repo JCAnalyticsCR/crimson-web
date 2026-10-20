@@ -18,6 +18,8 @@ export type Ticket = {
   description?: string | null; solution?: string | null; photos?: string[]; notes?: Note[]; history?: HistoryItem[];
   /** empresa aliada que lo atiende (asignacion explicita; la ve en su portal de aliados) */
   ally_company_id?: number | null; ally_company?: string | null;
+  /** estado de la visita (OT) del ticket, solo en el detalle: "por_programar" = sin tecnico todavia, se destaca */
+  work_order_status?: string | null;
 };
 export type Resumen = { abiertos: number; vencidos: number; por_vencer: number; sin_responsable: number; seguimiento_hoy: number; sin_movimiento: number; asignados_a_mi: number };
 export type Meta = {

@@ -82,11 +82,16 @@ export function TicketDetail({ ticket: t, meta, now, onClose, onChanged, onEdit,
     try { const r = await api<Ticket>(`/tickets/${t.id}/amount`, { method: "PATCH", json: { amount: Number(monto || 0) } }); onChanged(r); setMonto(null); toast("Monto guardado"); }
     catch (e) { fail(e); }
   };
+  /* "Mandar un técnico" arranca con el responsable del ticket (si puede recibir la orden): casi siempre es quien va */
+  const nuevaVisita = (): Visita => {
+    const resp = t.assigned_to && ((meta?.agents || []).some((a) => a.id === t.assigned_to) || agentesAliado.some((a) => a.id === t.assigned_to)) ? String(t.assigned_to) : "";
+    return { technician_id: resp, scheduled_at: "", site: "" };
+  };
   const mandarTecnico = async () => {
     if (!visita) return;
     try {
-      const r = await api<{ number: string }>(`/tickets/${t.id}/work-order`, { method: "POST", json: { technician_id: visita.technician_id ? Number(visita.technician_id) : null, scheduled_at: localToISO(visita.scheduled_at), site: visita.site || null } });
-      toast(`Orden ${r.number} creada`); setVisita(null);
+      const r = await api<{ number: string; status?: string }>(`/tickets/${t.id}/work-order`, { method: "POST", json: { technician_id: visita.technician_id ? Number(visita.technician_id) : null, scheduled_at: localToISO(visita.scheduled_at), site: visita.site || null } });
+      toast(r.status === "por_programar" ? `Orden ${r.number} creada sin técnico: queda por programar` : `Orden ${r.number} creada`, r.status === "por_programar" ? "bad" : undefined); setVisita(null);
       onChanged(await api<Ticket>(`/tickets/${t.id}`));
     } catch (e) { fail(e); }
   };
@@ -120,8 +125,10 @@ export function TicketDetail({ ticket: t, meta, now, onClose, onChanged, onEdit,
     <>
       <Modal title={`${t.number} · ${t.subject}`} onClose={onClose} wide foot={<>
         <span style={{ marginRight: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {allows("field.asignar") && !t.work_order_id && abierto && !bloqueado && <button className="btn btn--soft" onClick={() => setVisita({ technician_id: "", scheduled_at: "", site: "" })}><Icon d={I.check} />Mandar un técnico</button>}
-          {t.work_order_id && <Link className="btn btn--ghost" to={`/ordenes-trabajo?id=${t.work_order_id}`}>Ver la orden</Link>}
+          {allows("field.asignar") && !t.work_order_id && abierto && !bloqueado && <button className="btn btn--soft" onClick={() => setVisita(nuevaVisita())}><Icon d={I.check} />Mandar un técnico</button>}
+          {t.work_order_id && (t.work_order_status === "por_programar"
+            ? <Link className="btn btn--soft" style={{ borderColor: "var(--warn)", color: "var(--warn)" }} to={`/ordenes-trabajo?id=${t.work_order_id}`} title="La visita no tiene técnico: asignala en Órdenes de trabajo">Visita por programar · asignar técnico</Link>
+            : <Link className="btn btn--ghost" to={`/ordenes-trabajo?id=${t.work_order_id}`}>Ver la orden</Link>)}
           {/* garantía: Crimson recibe el equipo, lo revisa y, si procede, lo manda al distribuidor (Andrés, 19/10) */}
           {t.customer_id && allows("garantias.ver") && <Link className="btn btn--ghost" to={`/garantias?ticket=${t.id}`}><Icon d={I.shield} />Garantía</Link>}
         </span>
@@ -231,7 +238,7 @@ export function TicketDetail({ ticket: t, meta, now, onClose, onChanged, onEdit,
         </>}>
           <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Se crea con el cliente, el sitio y la descripción de este ticket. El técnico la ve en «Mi día».</p>
           <div className="grid-2">
-            <Field label="Técnico"><select className="select" value={visita.technician_id} onChange={(e) => setVisita({ ...visita, technician_id: e.target.value })}><option value="">Sin asignar</option>{(meta?.agents || []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+            <Field label="Técnico" hint={visita.technician_id ? undefined : "Sin técnico la orden queda «por programar» hasta que alguien la asigne."}><select className="select" value={visita.technician_id} onChange={(e) => setVisita({ ...visita, technician_id: e.target.value })}><option value="">Sin asignar</option>{(meta?.agents || []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}{agentesAliado.map((a) => <option key={`al${a.id}`} value={a.id}>{a.name} · {a.company}</option>)}</select></Field>
             <Field label="Fecha y hora"><input className="input" type="datetime-local" value={visita.scheduled_at} onChange={(e) => setVisita({ ...visita, scheduled_at: e.target.value })} /></Field>
           </div>
           <Field label="Sitio"><input className="input" value={visita.site} onChange={(e) => setVisita({ ...visita, site: e.target.value })} /></Field>

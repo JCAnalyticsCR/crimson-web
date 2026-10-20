@@ -42,6 +42,7 @@ type Today = { today: Order[]; next: Order[]; surveys: { id: number; number: str
 type Tech = { id: number; name: string; role: string; company?: string | null; ally_company_id?: number | null };
 
 const STATUS: Record<string, { label: string; tone: string }> = {
+  por_programar: { label: "Por programar", tone: "warn" }, // visita de un ticket sin tecnico: se destaca hasta asignarla
   asignada: { label: "Asignada", tone: "info" }, en_sitio: { label: "En sitio", tone: "warn" }, en_proceso: { label: "En proceso", tone: "warn" },
   finalizada: { label: "Finalizada", tone: "ok" }, cancelada: { label: "Cancelada", tone: "muted" },
 };
@@ -285,7 +286,7 @@ export default function WorkOrders() {
 
   const insignias = (o: Order) => (
     <>
-      {!o.technician_id && !CERRADAS.includes(o.status) && <span className="badge badge--warn">Sin técnico</span>}
+      {!o.technician_id && !CERRADAS.includes(o.status) && o.status !== "por_programar" && <span className="badge badge--warn">Sin técnico</span>}
       {o.ally_company && <span className="badge badge--info">Aliado: {o.ally_company}</span>}
       {enCurso(o.running, now) && <span className="badge badge--info">{enCurso(o.running, now)}</span>}
     </>

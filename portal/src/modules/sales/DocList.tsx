@@ -15,6 +15,7 @@ const PENDIENTES: Record<string, string> = {
   enlaces_abiertos: "Facturas con un enlace de pago abierto (vigente y sin pagar)",
   cotizaciones_sin_respuesta: "Cotizaciones sin respuesta (creadas o enviadas, sin convertir)",
   cotizaciones_por_aprobar: "Cotizaciones con descuento por aprobar",
+  cotizaciones_aceptadas: "Aceptadas por el cliente y sin convertir (ni a factura ni a proyecto)",
 };
 
 const FILTERS: Record<string, { key: string; label: string }[]> = {

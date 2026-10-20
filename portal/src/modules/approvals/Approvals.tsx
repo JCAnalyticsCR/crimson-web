@@ -3,10 +3,10 @@
    bueno (services/approvals.py en la API). Aqui NO se aprueba nada: cada elemento abre la pantalla donde se aprueba,
    viendo lo que se aprueba. Lo mas antiguo primero. */
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, fmtMoney, parseTs } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Card, Empty, I, Icon, Loading } from "../../ui/components";
+import { Card, Empty, Field, I, Icon, Loading, Modal } from "../../ui/components";
 import type { ApprovalItem, ApprovalSection, ApprovalsFull } from "./useApprovalCount";
 import "./approvals.css";
 
@@ -37,11 +37,59 @@ const goTo = (key: string) => {
   document.getElementById(key)?.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
 };
 
-function Row({ it }: { it: ApprovalItem }) {
+type Tech = { id: number; name: string; role: string; company?: string | null; ally_company_id?: number | null };
+
+/* «Crear y asignar» (Levantamientos solicitados): el levantamiento nace ligado a la oportunidad de la vendedora, a nombre
+   del tecnico elegido (de Crimson o de un aliado que participa), que recibe el aviso. POST /surveys/from-opportunity. */
+function CrearYAsignar({ it, onClose, onDone }: { it: ApprovalItem; onClose: () => void; onDone: () => void }) {
+  const { toast } = useSession();
+  const nav = useNavigate();
+  const [techs, setTechs] = useState<Tech[] | null>(null);
+  const [sel, setSel] = useState("");
+  const [fecha, setFecha] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api<Tech[]>(`/field/technicians?opportunity_id=${it.id}`).then(setTechs).catch(() => setTechs([])); }, [it.id]);
+  const crear = async () => {
+    const t = techs?.find((x) => String(x.id) === sel);
+    if (!t) return;
+    setBusy(true);
+    try {
+      const s = await api<{ id: number; number: string }>(`/surveys/from-opportunity/${it.id}`, { method: "POST", json: { technician_id: t.id, ally_company_id: t.ally_company_id ?? null, visit_date: fecha || null } });
+      toast(`Levantamiento ${s.number} creado y asignado a ${t.name}`);
+      onDone();
+      nav(`/levantamientos?id=${s.id}`);
+    } catch (e) { toast(e instanceof Error ? e.message : "No se pudo crear el levantamiento", "bad"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal title={`Crear y asignar · ${it.ref}`} onClose={onClose} foot={<>
+      <button className="btn btn--ghost" onClick={onClose}>Cancelar</button>
+      <button className="btn btn--crimson" disabled={!sel || busy} onClick={crear}><Icon d={I.check} />Crear y asignar</button>
+    </>}>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>{it.title}{it.subtitle ? ` · ${it.subtitle}` : ""}. El levantamiento sale con el cliente, el sitio y la solución de la oportunidad; el técnico recibe el aviso por correo.</p>
+      <div className="grid-2">
+        <Field label="Técnico">
+          <select className="select" value={sel} onChange={(e) => setSel(e.target.value)} disabled={techs === null}>
+            <option value="">{techs === null ? "Cargando…" : "Elegí…"}</option>
+            {(techs || []).map((t) => <option key={t.id} value={t.id}>{t.company ? `${t.name} · ${t.company}` : t.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Fecha de visita" hint="Opcional"><input className="input" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
+      </div>
+    </Modal>
+  );
+}
+
+function Row({ it, onChanged }: { it: ApprovalItem; onChanged: () => void }) {
+  const { allows } = useSession();
+  const [crear, setCrear] = useState(false);
   const late = lateDays(it.since);
   const when = late ? `esperando hace ${late} día${late !== 1 ? "s" : ""}` : ago(it.since);
+  const accion = it.action === "crear_levantamiento" && allows("field.crear") && allows("field.asignar");
   return (
-    <li>
+    <li className={accion ? "aprob-row--act" : undefined}>
+      {accion && <button type="button" className="btn btn--soft btn--sm aprob-act" onClick={() => setCrear(true)}><Icon d={I.plus} />Crear y asignar</button>}
+      {crear && <CrearYAsignar it={it} onClose={() => setCrear(false)} onDone={() => { setCrear(false); onChanged(); }} />}
       <Link className={`aprob-item${late ? " is-late" : ""}`} to={it.to}>
         <span className="aprob-item__ref mono">{it.ref}</span>
         <span className="aprob-item__main">
@@ -59,13 +107,13 @@ function Row({ it }: { it: ApprovalItem }) {
   );
 }
 
-function Section({ s }: { s: ApprovalSection }) {
+function Section({ s, onChanged }: { s: ApprovalSection; onChanged: () => void }) {
   const rest = s.count - s.items.length;
   return (
     <div id={s.key} className="aprob-sec">
       <Card title={`${s.label} · ${s.count}`} extra={<Link className="btn btn--ghost btn--sm" to={s.to}>Ver todos →</Link>} flush>
         <p className="muted aprob-hint">{s.hint}{s.reviewers?.length ? ` Avisamos a: ${s.reviewers.join(", ")}.` : ""}</p>
-        <ul className="aprob-list">{s.items.map((it) => <Row key={it.id} it={it} />)}</ul>
+        <ul className="aprob-list">{s.items.map((it) => <Row key={it.id} it={it} onChanged={onChanged} />)}</ul>
         {rest > 0 && <p className="aprob-more">y {rest} más · <Link to={s.to}>Ver todos</Link></p>}
       </Card>
     </div>
@@ -112,7 +160,7 @@ export default function Approvals() {
               <a key={s.key} href={`#${s.key}`} onClick={(e) => { e.preventDefault(); goTo(s.key); }}>{s.label} <b>{s.count}</b></a>
             ))}
           </nav>
-          {conPend.map((s) => <Section key={s.key} s={s} />)}
+          {conPend.map((s) => <Section key={s.key} s={s} onChanged={load} />)}
           {alDia.length > 0 && <p className="muted aprob-ok">✓ Al día: {alDia.map((s) => s.label).join(" · ")}</p>}
         </>
       )}
