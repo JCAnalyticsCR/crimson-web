@@ -19,6 +19,7 @@ from ..services import documents as docsvc
 from ..services import einvoice as esvc
 from ..services import inventory as inv
 from ..services import reports as rp
+from ..services.ally_access import PLAN_ORDER  # marca de las facturas de mensualidad (plan 1.4)
 from ..services.bitacora import audit_change, next_version, snapshot
 from ..services.documents import audit
 from ..services.ownership import owns_doc
@@ -1120,9 +1121,6 @@ def run_recurrence(db: Session, r: Recurrence, user_id: int | None) -> Invoice |
     return result
 
 
-PLAN_ORDER = "MENSUALIDAD-PLATAFORMA"  # services/ally_access.PLAN_ORDER (marca de las facturas de mensualidad)
-
-
 def _rec_alert(db: Session, r: Recurrence, invoice: Invoice, title: str, body: str) -> None:
     from html import escape
 
@@ -1185,7 +1183,8 @@ def deliver_recurrence(db: Session, r: Recurrence, invoice: Invoice, user_id: in
     t = db.get(Tenant, r.tenant_id)
     label = None if invoice.einvoice_status == "aceptada" else "aviso de cobro"
     try:
-        res = send_document(db, t, invoice, None, None, True, user_id, label=label)
+        # el envio automatico lleva llave (una factura, un correo); "Aprobar y enviar" o "Reenviar" no
+        res = send_document(db, t, invoice, None, None, True, user_id, label=label, dedupe_key=None if approved else f"rec:{r.id}:{invoice.id}")
     except HTTPException as e:
         res = {"sent": False, "status": "error", "note": str(e.detail)}
     if res["sent"]:
@@ -1253,8 +1252,10 @@ def run_due_recurrences(db: Session, today: date | None = None) -> int:
     alerta al admin (no se le mandan varias facturas de golpe a un cliente). Una que falla no frena a las demas."""
     import logging
 
+    from ..services.invoice_states import cr_today
+
     log = logging.getLogger("crimson.recurrences")
-    today = today or date.today()
+    today = today or cr_today()  # fecha de Costa Rica: a las 18:00 CR la de UTC ya es la de manana
     n = 0
     ids = db.scalars(select(Recurrence.id).where(Recurrence.active, Recurrence.next_date <= today).order_by(Recurrence.id)).all()
     db.commit()

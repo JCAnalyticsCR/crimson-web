@@ -54,6 +54,8 @@ def test_borrador_sin_enviar_no_esta_por_cobrar_ni_vence(client, auth, db_sessio
     assert db_session.get(Invoice, inv["id"]).status == "creado"
     dash = client.get("/dashboard").json()
     assert inv["id"] not in {x["id"] for x in dash["por_cobrar"]}
+    kpis = client.get(f"/customers/{cid}/overview").json()["kpis"]  # la ficha del cliente usa la misma definicion
+    assert Decimal(str(kpis["due"])) == 0 and kpis["overdue"] == 0 and kpis["invoices"] == 1
 
 
 def test_correo_aceptado_la_deja_por_cobrar_y_vencible(client, auth, db_session, monkeypatch):
@@ -81,6 +83,8 @@ def test_correo_aceptado_la_deja_por_cobrar_y_vencible(client, auth, db_session,
     db_session.get(Invoice, inv["id"]).due_date = hoy - timedelta(days=3)  # holgura: la lista usa la fecha de Costa Rica
     db_session.commit()
     assert inv["id"] in _pend(client, "facturas_vencidas")
+    kpis = client.get(f"/customers/{cid}/overview").json()["kpis"]
+    assert kpis["overdue"] == 1 and Decimal(str(kpis["due"])) == Decimal("113000")
 
 
 def test_correo_simulado_no_la_envia(client, auth, monkeypatch):
@@ -114,6 +118,19 @@ def test_enlace_de_pago_compartido_la_deja_por_cobrar(client, auth, db_session):
     assert client.post(f"/invoices/{otra['id']}/payment-link").status_code == 409
 
 
+def test_enlace_de_pago_por_la_api_publica_la_deja_por_cobrar(client, auth):
+    cred = client.post("/settings/api-credentials", json={"name": "Integración de prueba"}).json()
+    h = {"X-Api-Key": cred["kid"], "X-Api-Secret": cred["secret"]}
+    cid = _cliente(client)
+    inv = _factura(client, cid)
+    assert inv["id"] not in _pend(client, "facturas_por_cobrar")
+    assert client.post(f"/v1/payment-links/{inv['id']}", headers=h).status_code == 200
+    assert client.get(f"/invoices/{inv['id']}").json()["sent_at"] and inv["id"] in _pend(client, "facturas_por_cobrar")
+    otra = _factura(client, cid)
+    client.post(f"/invoices/{otra['id']}/void")
+    assert client.post(f"/v1/payment-links/{otra['id']}", headers=h).status_code == 409
+
+
 def test_vencidas_con_la_fecha_de_costa_rica(client, auth, db_session, monkeypatch):
     """23:30 en Costa Rica ya es el dia siguiente en UTC: una factura que vence hoy (CR) todavia no esta vencida."""
     from app.models import Invoice
@@ -131,9 +148,8 @@ def test_vencidas_con_la_fecha_de_costa_rica(client, auth, db_session, monkeypat
 
 
 def test_portal_del_cliente_solo_ve_lo_enviado(client, auth, db_session, monkeypatch):
-    from app.services.invoice_states import is_visible
-
     from app.models import Invoice
+    from app.services.invoice_states import is_visible
 
     cid = _cliente(client)
     borrador = _factura(client, cid)

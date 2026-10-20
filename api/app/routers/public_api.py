@@ -26,6 +26,7 @@ from ..schemas.crm import CustomerIn, CustomerOut, ProductOut
 from ..schemas.sales import DocumentIn, InvoiceOut
 from ..services import documents as docsvc
 from ..services import inventory as inv
+from ..services.invoice_states import mark_sent
 
 admin = APIRouter(prefix="/settings/api-credentials", tags=["ajustes"])
 v1 = APIRouter(prefix="/v1", tags=["api publica"])
@@ -146,7 +147,10 @@ def v1_payment_link(invoice_id: int, ctx=Depends(api_tenant), db: Session = Depe
     i = db.get(Invoice, invoice_id)
     if not i or i.tenant_id != t.id:
         raise HTTPException(404, "Factura no encontrada")
+    if i.status == "anulada":
+        raise HTTPException(409, "La factura está anulada")
     link = docsvc.get_or_create_payment_link(db, t.id, i)
+    mark_sent(i)  # el enlace es para compartirlo: desde aqui la factura esta por cobrar (plan 1.3)
     db.commit()
     return {"url": link.url, "expires_at": link.expires_at}
 
@@ -186,6 +190,7 @@ def v1_checkout(data: CheckoutJwtIn, db: Session = Depends(get_db)):
     )
     i = docsvc.create_invoice(db, t.id, None, doc, "TE")
     link = docsvc.get_or_create_payment_link(db, t.id, i)
+    mark_sent(i)  # el enlace de pago ya va para quien paga (plan 1.3: con enlace = enviada)
     db.commit()
     return {"invoice_id": i.id, "number": i.number, "checkout_url": link.url, "expires_at": link.expires_at}
 

@@ -234,6 +234,7 @@ def test_resumen_semanal_con_linea_base_y_cobranza_recuperada(client, auth, db_s
     iid = _enviada(db_session, client, cid, due=HOY - timedelta(days=10), hace=40)
     lunes = HOY
     assert weekly_summary(db_session, today=lunes) == 1
+    assert weekly_summary(db_session, today=lunes) == 0  # doble disparo del beat: un solo resumen por semana
     t = db_session.get(Tenant, auth["tenant"]["id"])
     base = t.settings["collections_baseline"]
     assert base["date"] == lunes.isoformat() and Decimal(base["overdue"]) == Decimal("113000.00")

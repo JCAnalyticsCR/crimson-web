@@ -191,6 +191,31 @@ def test_plan_usa_el_servicio_por_defecto(client, auth, db_session):
     assert client.put(f"/allies/{a}/plan", json={**body, "amount": 45000}).json()["plan"]["first_run_requires_approval"] is False
 
 
+def test_mensualidad_por_defecto_configurable(client, auth, db_session):
+    """El precio lo fija Andres (sesion 0.11): por defecto fija por empresa y sin monto; queda en Ajustes -> Aliados y
+    con eso arranca el formulario de cada plan nuevo."""
+    from tests.test_session4 import _user_with_role
+
+    cfg = client.get("/allies/config").json()
+    assert cfg["plan_default"] == {"amount": None, "currency": "CRC", "mode": "fija"}
+    assert cfg["plan_product"]["code"] == "SRV-PLATAFORMA" and len(cfg["plan_product"]["cabys_code"]) == 13
+    out = client.put("/allies/config", json={"plan_default_amount": 35000, "plan_default_currency": "USD", "plan_default_mode": "por_usuario"})
+    assert out.status_code == 200, out.text
+    pd = out.json()["plan_default"]
+    assert Decimal(str(pd["amount"])) == 35000 and pd["currency"] == "USD" and pd["mode"] == "por_usuario"
+    a = client.post("/allies", json={"name": "Aliado Tres S.A.", "tax_id": "3-101-000003"}).json()["id"]
+    plan = client.get(f"/allies/{a}/plan").json()
+    assert plan["plan"] is None and plan["defaults"]["mode"] == "por_usuario" and Decimal(str(plan["defaults"]["amount"])) == 35000
+    assert client.put("/allies/config", json={"plan_default_amount": None}).json()["plan_default"]["amount"] is None
+    # cambiarla exige el permiso de la mensualidad
+    pw = _user_with_role(db_session, auth["tenant"]["id"], "ventas.mensualidad@ejemplo.com", "ventas")
+    keep = client.headers.pop("Authorization")
+    tok = client.post("/auth/login", json={"email": "ventas.mensualidad@ejemplo.com", "password": pw}).json()["access_token"]
+    client.headers["Authorization"] = keep
+    r = client.put("/allies/config", json={"plan_default_amount": 1}, headers={"Authorization": f"Bearer {tok}"})
+    assert r.status_code == 403
+
+
 def test_ganancias_con_mensualidad(client, auth, db_session):
     from app.models import AllyCompany, Invoice
 

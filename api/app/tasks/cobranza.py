@@ -411,7 +411,7 @@ def set_baseline(t: Tenant, today: date, vencida: Decimal) -> dict:
 
 def weekly_summary(db: Session, today: date | None = None) -> int:
     """Resumen semanal de cartera al admin (lunes 07:00 CR). La primera vez registra la linea base del dia 0."""
-    from ..services.documents_send import queue_once
+    from ..services.documents_send import queue_once, queued_before
 
     today = today or cr_today()
     e = html.escape
@@ -465,13 +465,14 @@ def weekly_summary(db: Session, today: date | None = None) -> int:
             + mora
             + "<p>Detalle en Facturas → Vencidas.</p>"
         )
+        asunto = f"Cartera de la semana · {today:%d/%m/%Y}"
         vistos: set[str] = set()
         for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.active, TenantUser.role_code == "admin")):
             correo = (m.user.email or "").strip().lower()
-            if not correo or correo in vistos:
-                continue
+            if not correo or correo in vistos or queued_before(db, t.id, correo, asunto):
+                continue  # doble disparo del beat: el resumen de esta semana ya salio
             vistos.add(correo)
-            queue_once(db, t, correo, f"Cartera de la semana · {t.name}", body, "report", 0, dedupe_key=f"cartera:{t.id}:{semana.year}-{semana.week}:{correo}")
+            queue_once(db, t, correo, f"{asunto} · {t.name}", body, "report", 0, dedupe_key=f"cartera:{t.id}:{semana.year}-{semana.week}:{correo}")
             n += 1
         db.commit()
     return n

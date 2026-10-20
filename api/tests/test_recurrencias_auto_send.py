@@ -2,7 +2,7 @@
 con su PDF y enlace de pago, "enviada" solo si el proveedor acepto el correo, aviso al admin si falla o si el cliente no
 tiene correo, y vista previa al admin a D-3. Nombres y correos ficticios (repo publico)."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -165,6 +165,7 @@ def test_vista_previa_al_admin_a_d_menos_3(client, auth, db_session, correo):
     _rec(client, cid, next_date=HOY + timedelta(days=3), name="Monitoreo sede central")
     _rec(client, cid, next_date=HOY + timedelta(days=5), name="Otra fecha")
     assert preview_upcoming(db_session, today=HOY) == 1
+    assert preview_upcoming(db_session, today=HOY) == 0  # doble disparo del beat: una sola vista previa por dia
     m = db_session.scalars(select(EmailOutbox).where(EmailOutbox.subject.like("En 3 días%"))).all()[-1]
     assert m.to == "admin@crimsonapp.com" and "Monitoreo sede central" in m.html and "Otra fecha" not in m.html
     assert "₡56,500.00" in m.html and "Aprobar y enviar" in m.html
@@ -178,3 +179,26 @@ def test_recurrencias_existentes_quedan_por_aprobar(db_session):
 
     col = Recurrence.__table__.c.first_run_requires_approval
     assert col.server_default is not None and col.default.arg is True
+
+
+def test_genera_con_la_fecha_de_costa_rica(client, auth, db_session, correo, monkeypatch):
+    """Borde 18:00-24:00 CR: a las 23:30 del 30/11 en Costa Rica ya es 1/12 en UTC; la mensualidad del 1/12 no sale un
+    dia antes. Y el doble disparo del worker ese dia no genera otra."""
+    from zoneinfo import ZoneInfo
+
+    from app.models import Recurrence
+    from app.providers import einvoice as prov
+    from app.routers.ops import run_due_recurrences
+
+    cr = ZoneInfo("America/Costa_Rica")
+    rec = _rec(client, _cliente(client), next_date=date(2026, 12, 1), first_run_requires_approval=False)
+    monkeypatch.setattr(prov, "cr_now", lambda: datetime(2026, 11, 30, 23, 30, tzinfo=cr))
+    run_due_recurrences(db_session)
+    db_session.expire_all()
+    assert db_session.get(Recurrence, rec["id"]).runs == 0 and not _al(correo, CLIENTE)
+    monkeypatch.setattr(prov, "cr_now", lambda: datetime(2026, 12, 1, 0, 10, tzinfo=cr))
+    run_due_recurrences(db_session)
+    run_due_recurrences(db_session)
+    db_session.expire_all()
+    r = db_session.get(Recurrence, rec["id"])
+    assert r.runs == 1 and r.next_date == date(2027, 1, 1) and r.last_send_status == "enviada" and len(_al(correo, CLIENTE)) == 1

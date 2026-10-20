@@ -153,9 +153,14 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
         if p.can("sales", "ver")
         else []
     )
+    from ..services.invoice_states import cr_today, is_cobrable
+
     live = [i for i in invs if i.status != "anulada"]
     billed = sum((d(i.total) for i in live), Decimal(0))
-    due = sum((d(i.balance) for i in live), Decimal(0))
+    # por cobrar = lo que le llego al cliente y tiene saldo (plan 1.3); un borrador sin enviar no es deuda
+    cobrables = [i for i in live if is_cobrable(i)]
+    due = sum((d(i.balance) for i in cobrables), Decimal(0))
+    hoy = cr_today()
     inv_ids = [i.id for i in invs]
     pays = (
         db.scalars(select(Payment).where(Payment.tenant_id == tid, Payment.invoice_id.in_(inv_ids)).order_by(Payment.paid_at.desc()).limit(50)).all()
@@ -246,7 +251,7 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
             "invoices": len(live),
             "quotes": len(quotes),
             "last_purchase": live[0].issue_date if live else None,
-            "overdue": sum(1 for i in live if i.status == "vencida"),
+            "overdue": sum(1 for i in cobrables if i.status == "vencida" or (i.due_date and i.due_date < hoy)),
         },
         "timeline": events[:120],
         # "Aqui solo veo esto y no tengo mas datos": que equipo le instalamos, si sigue en garantia,

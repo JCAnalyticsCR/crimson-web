@@ -48,6 +48,14 @@ def queue_once(
     return queue_email(db, tenant, to, subject, html, entity, entity_id, attachments, files=files, **kw)
 
 
+def queued_before(db: Session, tenant_id: int, to: str, subject_prefix: str) -> bool:
+    """Ya hay en el outbox un correo a `to` cuyo asunto empieza con `subject_prefix` (que lleva la fecha del resumen).
+    Resguardo de los resumenes al admin ante un doble disparo del beat o una reentrega de Celery (acks_late) que no
+    depende del dedupe_key del plan 1.2."""
+    q = select(EmailOutbox.id).where(EmailOutbox.tenant_id == tenant_id, EmailOutbox.to == to, EmailOutbox.subject.startswith(subject_prefix, autoescape=True))
+    return db.scalar(q.limit(1)) is not None
+
+
 # ---------- adjuntos ----------
 def pdf_of(db: Session, tenant: Tenant, doc: Quote | Invoice, kind: str | None = None) -> bytes | None:
     """PDF del documento. Si el servidor no puede generarlo (sin WeasyPrint) el correo no promete un adjunto."""
@@ -76,13 +84,16 @@ def send_document(
     *,
     ip: str | None = None,
     label: str | None = None,
+    dedupe_key: str | None = None,
 ) -> dict:
     """Manda la cotizacion o la factura con su PDF (y en facturas el enlace de pago y el XML fiscal si lo hay).
 
     Devuelve {status, sent, to, note, version, outbox_id}. Solo con el correo aceptado por el proveedor ("enviado") la
     factura pasa a "enviada" y queda por cobrar (sent_at), y la cotizacion congela su version: simulado (sin llave de
     Resend) o error no cuentan, porque harian creer que el cliente ya la tiene. No hace commit.
-    label: "aviso de cobro" para la mensualidad sin comprobante fiscal (modo de Hacienda "ninguno")."""
+    label: "aviso de cobro" para la mensualidad sin comprobante fiscal (modo de Hacienda "ninguno").
+    dedupe_key: solo los envios automaticos (regla 6 del plan); el reenvio de una persona nunca lleva llave, porque con
+    el outbox del plan 1.2 la misma llave devolveria el intento que fallo en vez de mandarlo otra vez."""
     is_inv = isinstance(doc, Invoice)
     c = db.get(Customer, doc.customer_id) if doc.customer_id else None
     if c is not None and c.tenant_id != doc.tenant_id:
@@ -104,7 +115,7 @@ def send_document(
     if is_inv:
         files += fiscal_files(db, doc)
     entity = "invoice" if is_inv else "quote"
-    m = queue_email(
+    m = queue_once(
         db,
         tenant,
         to,
@@ -122,6 +133,7 @@ def send_document(
         doc.id,
         [{"name": n, "kind": "invoices" if is_inv else "quotes", "ref": doc.id} for n, _ in files],
         files=files or None,
+        dedupe_key=dedupe_key,
     )
     sent = m.status == "enviado"
     if sent and doc.status == "creado":

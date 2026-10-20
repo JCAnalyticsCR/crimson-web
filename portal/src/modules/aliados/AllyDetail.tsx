@@ -25,6 +25,7 @@ type Plan = {
     recurrence_id: number; first_run_requires_approval: boolean; last_send_status: string | null; last_send_note: string | null; last_invoice_id: number | null;
   } | null;
   customer: { id: number; name: string } | null; estado: string; vencido: { monto: string; moneda: string; dias: number } | null;
+  defaults?: { amount: string | number | null; currency: string; mode: string }; /* Ajustes -> Aliados (plan 1.4) */
   facturas: { id: number; number: string; issue_date: string; due_date: string | null; total: string; balance: string; status: string; currency: string; sent_at: string | null }[];
 };
 const FUNCIONES: Record<string, string> = { comercial: "Comercial", tecnico: "Técnico", aprobador: "Aprobador", pagos: "Pagos" };
@@ -225,6 +226,7 @@ function Mensualidad({ a, reload }: { a: Detail; reload: () => void }) {
     api<Plan>(`/allies/${a.id}/plan`).then((x) => {
       setD(x);
       if (x.plan) setF({ amount: String(x.plan.amount ?? ""), currency: x.plan.currency, mode: x.plan.mode, next_date: x.plan.next_date, auto_send: x.plan.auto_send, active: x.plan.active, first_run_requires_approval: x.plan.first_run_requires_approval });
+      else if (x.defaults) { const df = x.defaults; setF((f0) => ({ ...f0, amount: df.amount == null ? "" : String(df.amount), currency: df.currency, mode: df.mode })); }
     }).catch(() => setD(null));
   }, [a.id]);
   useEffect(load, [load]);

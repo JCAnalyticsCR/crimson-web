@@ -63,7 +63,7 @@ def upcoming(db: Session, tenant_id: int, on: date) -> list[Recurrence]:
 
 def preview_upcoming(db: Session, today: date | None = None, days: int = PREVIEW_DAYS) -> int:
     """Correo a los administradores con lo que se cobra en `days` dias. Devuelve cuantos correos salieron."""
-    from ..services.documents_send import queue_once
+    from ..services.documents_send import queue_once, queued_before
 
     today = today or cr_today()
     on = today + timedelta(days=days)
@@ -89,13 +89,14 @@ def preview_upcoming(db: Session, today: date | None = None, days: int = PREVIEW
             + "".join(filas)
             + "</table><p>Si algo no corresponde, cambialo en Facturación → Recurrencias antes de esa fecha.</p>"
         )
+        asunto = f"En {days} días ({on:%d/%m/%Y}):"
         vistos: set[str] = set()
         for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.active, TenantUser.role_code == "admin")):
             correo = (m.user.email or "").strip().lower()
-            if not correo or correo in vistos:
-                continue
+            if not correo or correo in vistos or queued_before(db, t.id, correo, asunto):
+                continue  # doble disparo del beat: la vista previa de ese dia ya salio
             vistos.add(correo)
-            queue_once(db, t, correo, f"En {days} días: {len(recs)} cobro(s) recurrente(s) · {t.name}", body, "recurrence", recs[0].id, dedupe_key=f"prevista:{t.id}:{on}:{correo}")
+            queue_once(db, t, correo, f"{asunto} {len(recs)} cobro(s) recurrente(s) · {t.name}", body, "recurrence", recs[0].id, dedupe_key=f"prevista:{t.id}:{on}:{correo}")
             n += 1
         db.commit()
     return n

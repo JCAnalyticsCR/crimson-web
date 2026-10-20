@@ -32,6 +32,7 @@ from ..models import (
     Project,
     Recurrence,
     Supplier,
+    Tenant,
     TenantUser,
 )
 from ..models.allies import CONTACT_FUNCTIONS
@@ -246,12 +247,33 @@ def allies_options(q: str = "", p: Principal = Depends(get_principal), db: Sessi
 ASSETS_SCOPES = ("proyectos", "clientes")
 
 
+PLAN_MODES = ("fija", "por_usuario")
+
+
+def plan_defaults(t) -> dict:
+    """Mensualidad por defecto de los planes nuevos (plan 1.4): fija por empresa mientras Andres no fije otra cosa
+    (sesion 0.11, pregunta 8). El monto queda vacio hasta que se defina: nunca se inventa un precio."""
+    st = t.settings or {}
+    amount = st.get("ally_plan_default_amount")
+    mode = st.get("ally_plan_default_mode")
+    return {
+        "amount": None if amount in (None, "") else d(amount),
+        "currency": st.get("ally_plan_default_currency") or "CRC",
+        "mode": mode if mode in PLAN_MODES else "fija",
+    }
+
+
 @router.get("/config")
 def config_get(p: Principal = Depends(require("aliados", "ver")), db: Session = Depends(get_db)):
     st = p.tenant.settings or {}
+    pid = st.get("ally_plan_product_id")
+    prod = db.get(Product, pid) if pid else None
+    prod = prod if prod is not None and prod.tenant_id == p.tenant.id else None
     return {
         "markup_pct": ally_pricing.tenant_markup(p.tenant) if p.sees_costs else None,
-        "plan_product_id": st.get("ally_plan_product_id"),
+        "plan_product_id": pid,
+        "plan_product": {"id": prod.id, "code": prod.code, "name": prod.name, "cabys_code": prod.cabys_code} if prod else None,
+        "plan_default": plan_defaults(p.tenant),
         "assets_scope": st.get("ally_assets_scope", "proyectos"),
     }
 
@@ -262,6 +284,10 @@ class ConfigIn(BaseModel):
     markup_pct: Decimal | None = Field(None, gt=0, le=100)  # 0 % seria vender al costo exacto
     plan_product_id: int | None = None
     assets_scope: str | None = Field(None, pattern="^(proyectos|clientes)$")
+    # mensualidad por defecto de los planes nuevos (plan 1.4); null en el monto = sin definir
+    plan_default_amount: Decimal | None = Field(None, ge=0)
+    plan_default_currency: str | None = Field(None, pattern="^(CRC|USD)$")
+    plan_default_mode: str | None = Field(None, pattern="^(fija|por_usuario)$")
 
 
 @router.put("/config")
@@ -269,10 +295,12 @@ def config_put(data: ConfigIn, p: Principal = Depends(require("aliados", "ver"))
     sent = data.model_fields_set
     if sent & {"markup_pct", "assets_scope"} and not (p.can("aliados", "precios") and p.sees_costs):
         raise HTTPException(403, "El recargo y el alcance de activos los cambia administración")
-    if "plan_product_id" in sent and not p.can("aliados", "mensualidad"):
+    plan_keys = {"plan_product_id", "plan_default_amount", "plan_default_currency", "plan_default_mode"}
+    if sent & plan_keys and not p.can("aliados", "mensualidad"):
         raise HTTPException(403, "Sin permiso: aliados.mensualidad")
     st = dict(p.tenant.settings or {})
-    antes = {k: st.get(k) for k in ("ally_markup_pct", "ally_plan_product_id", "ally_assets_scope")}
+    llaves = ("ally_markup_pct", "ally_plan_product_id", "ally_assets_scope", "ally_plan_default_amount", "ally_plan_default_currency", "ally_plan_default_mode")
+    antes = {k: st.get(k) for k in llaves}
     if "markup_pct" in sent:
         st["ally_markup_pct"] = None if data.markup_pct is None else str(data.markup_pct)
     if "assets_scope" in sent and data.assets_scope:
@@ -281,6 +309,12 @@ def config_put(data: ConfigIn, p: Principal = Depends(require("aliados", "ver"))
         if data.plan_product_id is not None:
             _plan_product(db, p, data.plan_product_id)
         st["ally_plan_product_id"] = data.plan_product_id
+    if "plan_default_amount" in sent:
+        st["ally_plan_default_amount"] = None if data.plan_default_amount is None else str(data.plan_default_amount)
+    if "plan_default_currency" in sent and data.plan_default_currency:
+        st["ally_plan_default_currency"] = data.plan_default_currency
+    if "plan_default_mode" in sent and data.plan_default_mode:
+        st["ally_plan_default_mode"] = data.plan_default_mode
     p.tenant.settings = st  # se mezcla sin pisar otras llaves
     audit_change(db, p, "update", "tenant_settings", p.tenant.id, antes, {k: st.get(k) for k in antes}, extra={"seccion": "aliados"})
     db.commit()
@@ -736,6 +770,8 @@ def plan_out(db: Session, c: AllyCompany) -> dict:
         if r
         else None,
         "customer": {"id": cust.id, "name": cust.name} if cust else None,
+        # con que arranca el formulario de un plan nuevo (Ajustes -> Aliados)
+        "defaults": plan_defaults(db.get(Tenant, c.tenant_id)),
         **st,
         "facturas": [
             {
