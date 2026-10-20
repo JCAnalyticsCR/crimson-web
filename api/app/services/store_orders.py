@@ -451,7 +451,8 @@ def _email_html(t: Tenant, o: Order, kind: str, extra: str = "") -> str:
     boton = "Subir el comprobante" if kind == "por_vencer" and o.payment_kind in NEEDS_PROOF else "Ver mi pedido"
     pie = "Guardá este correo: el botón te lleva al estado de tu pedido."
     if kind == "vencido":
-        url, boton, pie = store_base(t), "Volver a la tienda", f"El pedido {o.number} quedó cancelado y no se cobró nada."
+        # un SINPE puede haberse pagado sin subir el comprobante: nunca se afirma que "no se cobro nada"
+        url, boton, pie = store_base(t), "Volver a la tienda", "Si ya habías pagado, respondé a este correo con el comprobante y lo resolvemos."
     return f"""<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#15131a">
 <div style="border-bottom:3px solid {primary};padding:12px 0;font-size:18px;font-weight:700">{e(cfg.get("name") or t.name)}</div>
 <p style="font-size:15px">{intro}</p>

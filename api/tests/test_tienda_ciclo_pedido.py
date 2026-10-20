@@ -234,6 +234,7 @@ def test_consulta_a_onvo_cada_15_min_aplica_el_pago(client, auth, db_session, fa
     assert tienda.sync_card_orders(db_session) == 1
     db_session.refresh(o)
     assert o.status == "pagado" and o.paid_at
+    assert any("consulta automática" in (h.get("note") or "") for h in o.history)
     assert tienda.sync_card_orders(db_session) == 0  # ya no se consulta
 
 
@@ -332,6 +333,26 @@ def test_efectivo_solo_con_retiro_en_sitio(client, auth):
     body = {k: cfg[k] for k in ("methods", "free_shipping_from", "auto_invoice", "pickup", "notify_roles")}
     assert client.put("/store/checkout", json=body).status_code == 200
     assert client.post(f"{SLUG}/checkout", json=_body(pid, payment_method="efectivo", idempotency_key="ck-cash-envio")).status_code == 201
+
+
+def test_efectivo_al_retirar_activa_la_compra_cuando_el_equipo_lo_avanza(client, auth, db_session):
+    """El efectivo se paga al retirar: que el equipo avance el pedido es la decision de comprar lo bajo pedido."""
+    _publish(client)
+    _pagos(client)
+    p = _bajo_pedido(client, db_session, "CIC-10", "Cerradura inteligente")
+    body = {
+        "lines": [{"product_id": p["id"], "quantity": 1}],
+        "contact": {"name": "Ana Vega", "email": "ana@ejemplo.com"},
+        "payment_method": "efectivo",
+        "delivery": {"type": "retiro"},
+        "shipping_method": "Retiro en tienda",
+    }
+    r = client.post(f"{SLUG}/checkout", json=body)
+    assert r.status_code == 201, r.text
+    o = _order(db_session, r.json()["number"])
+    assert _req(db_session, o).status == "reservada" and _purchase_mails(db_session) == []
+    assert client.post(f"/store-orders/{o.id}/status", json={"status": "listo"}).status_code == 200
+    assert _req(db_session, o).status == "borrador" and len({m.subject for m in _purchase_mails(db_session)}) == 1
 
 
 # ---------- "Avisarme cuando haya" ----------

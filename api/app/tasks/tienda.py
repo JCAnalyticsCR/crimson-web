@@ -92,7 +92,7 @@ def sync_card_orders(db: Session, now: datetime | None = None) -> int:
             t = tenants.setdefault(o.tenant_id, db.get(Tenant, o.tenant_id))
             if t is None or not t.active:
                 continue
-            onvo.sync_order(db, t, o)
+            onvo.sync_order(db, t, o, "consulta automática")
             if o.status != "nuevo":
                 n += 1
             db.commit()

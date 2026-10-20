@@ -369,7 +369,7 @@ def _throttled(session_id: str) -> bool:
     return False
 
 
-def _sync(db: Session, t: Tenant, session_id: str | None, expect: dict) -> str | None:
+def _sync(db: Session, t: Tenant, session_id: str | None, expect: dict, source: str = "regreso") -> str | None:
     if not session_id or session_id.startswith("sim_") or _throttled(session_id):
         return None
     key = verify_key(db, t.id)
@@ -377,16 +377,17 @@ def _sync(db: Session, t: Tenant, session_id: str | None, expect: dict) -> str |
         return None
     api = OnvoAdapter(key)
     try:
-        return _apply_session(db, t, api, api.get_checkout(session_id), {"id": session_id}, "regreso", expect)
+        return _apply_session(db, t, api, api.get_checkout(session_id), {"id": session_id}, source, expect)
     except OnvoError as e:
         log.info("sync ONVO %s: %s", session_id, e.message)
         return None
 
 
-def sync_order(db: Session, t: Tenant, o: Order) -> str | None:
+def sync_order(db: Session, t: Tenant, o: Order, source: str = "regreso") -> str | None:
+    """source: "regreso" (el comprador volvio de ONVO) o "consulta automática" (worker cada 15 min)."""
     if o.payment_kind != "tarjeta" or o.status not in ("nuevo", "en_revision"):
         return None
-    return _sync(db, t, o.payment_ref, {"order_id": o.id, "tenant_id": t.id})
+    return _sync(db, t, o.payment_ref, {"order_id": o.id, "tenant_id": t.id}, source)
 
 
 # intenciones que ONVO da por terminadas sin cobro (cualquier otro estado puede terminar cobrando: no se cancela)
