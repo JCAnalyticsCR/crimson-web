@@ -10,7 +10,9 @@ import { availText, sinExistencia, type Availability } from "../../ui/Availabili
 /* ---------- Types ---------- */
 type Variant = { id: number; name: string; code: string; price: number | null };
 /* stock = libre propio en bodegas de venta (funcion unica del API); availability trae tambien lo del proveedor.
-   pos_price / pos_currency: el precio en la moneda de la caja (el API convierte USD/CRC con el tipo del dia). */
+   pos_price / pos_currency: el precio en la moneda de la caja (el API convierte USD/CRC con el tipo del dia). Sin tipo
+   de cambio el API manda pos_price null: se muestra en su propia moneda (nunca un dolar como colon) y al cobrar el API
+   responde un 422 claro. */
 type CatalogItem = {
   id: number; code: string; name: string; price: number; currency: string;
   item_type: string; category_id: number | null; tax_rate: number;
@@ -68,7 +70,7 @@ export default function Pos() {
   /* load catalog */
   useEffect(() => {
     api<CatalogItem[]>("/pos/catalog")
-      .then((items) => setCatalog(items.map((i) => ({ ...i, price: Number(i.price), tax_rate: Number(i.tax_rate), pos_price: i.pos_price != null ? Number(i.pos_price) : Number(i.price), pos_currency: i.pos_currency || i.currency }))))
+      .then((items) => setCatalog(items.map((i) => ({ ...i, price: Number(i.price), tax_rate: Number(i.tax_rate), pos_price: i.pos_price != null ? Number(i.pos_price) : Number(i.price), pos_currency: i.pos_price != null ? i.pos_currency || i.currency : i.currency }))))
       .catch((e) => toast(e instanceof Error ? e.message : "Error al cargar catálogo", "bad"))
       .finally(() => setCatLoading(false));
   }, [toast]);

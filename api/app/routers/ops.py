@@ -733,13 +733,15 @@ def expenses_summary(
 
 
 def bccr_sell(db: Session, currency: str, on: date) -> Decimal | None:
-    """Venta del BCCR de esa fecha o la ultima anterior (None si no hay ninguna)."""
-    from ..models import ExchangeRate
+    """Venta del BCCR de esa fecha o la ultima anterior, con la funcion unica (services/fx). None si no hay ninguna
+    anterior: el llamador avisa en lugar de inventar una."""
+    from ..services import fx as fxsvc
 
-    if currency == "CRC":
-        return Decimal(1)
-    fx = db.scalar(select(ExchangeRate).where(ExchangeRate.currency == currency, ExchangeRate.date <= on).order_by(ExchangeRate.date.desc()))
-    return Decimal(str(fx.sell)) if fx else None
+    try:
+        t = fxsvc.fx(db, currency, on)
+    except fxsvc.FxMissing:
+        return None
+    return None if (t.fecha and on and t.fecha > on) else t.tasa
 
 
 def _apply_expense(e: Expense, data: ExpenseIn, db: Session | None = None) -> list[str]:

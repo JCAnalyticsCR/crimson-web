@@ -130,7 +130,7 @@ def _product_out(pr: Product, p: Principal | None = None) -> ProductOut:
     if p is not None and not p.sees_prices:  # el tecnico ve el catalogo sin plata
         o.price = 0
     if p is not None and not p.sees_costs:  # la vendedora cotiza con el precio, no con el costo
-        o.cost, o.margin_pct = None, None
+        o.cost, o.margin_pct, o.margin_hold = None, None, None
     return o
 
 
