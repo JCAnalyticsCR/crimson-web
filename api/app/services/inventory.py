@@ -222,15 +222,24 @@ def restock_for_void(db: Session, inv: Invoice, user_id: int | None) -> int:
 
 
 def low_stock(db: Session, tenant_id: int) -> list[dict]:
-    """Bajo minimo: solo cuenta lo que esta en bodegas de venta (lo que esta en revision o en el proveedor no se vende)."""
+    """Bajo minimo: solo cuenta lo que esta en bodegas de venta (lo que esta en revision o en el proveedor no se vende).
+    Un producto que Crimson nunca tuvo en bodega y se vende "bajo pedido" desde el catalogo del proveedor (item
+    vinculado) no es un problema de stock: no se avisa (el minimo es para lo que se tiene en bodega)."""
+    from ..models import SupplierItem
+
     levels = {}
     ok = sellable_ids(db, tenant_id)
+    stocked: set[int] = set()
     for lv in stock_levels(db, tenant_id):
         if lv["warehouse_id"] in ok:
             levels[lv["product_id"]] = levels.get(lv["product_id"], Decimal(0)) + lv["quantity"]
+            stocked.add(lv["product_id"])
+    backorder = set(db.scalars(select(SupplierItem.product_id).where(SupplierItem.tenant_id == tenant_id, SupplierItem.product_id.is_not(None))))
     out = []
     for p in db.scalars(select(Product).where(Product.tenant_id == tenant_id, Product.active, Product.item_type == "producto", Product.min_stock > 0)):
         q = levels.get(p.id, Decimal(0))
+        if p.id in backorder and p.id not in stocked:
+            continue  # bajo pedido desde el proveedor y nunca en bodega
         if q <= p.min_stock:
             out.append({"product_id": p.id, "code": p.code, "name": p.name, "quantity": q, "min_stock": p.min_stock})
     return out

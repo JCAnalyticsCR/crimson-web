@@ -231,8 +231,9 @@ def test_catalogo_y_ficha_con_existencias_reales(client, auth, db_session):
     r = client.get("/public/store/crimson/catalog", params={"limit": 60})
     assert r.status_code == 200, r.text
     av = {p["code"]: p["availability"] for p in r.json()["items"]}
-    assert av["DS-2CD1043G2-LIU"]["state"] == "disponible"
-    assert av["WD44PURZ"]["state"] == "ultimas"
+    # mismo diccionario que el resto de la tienda (services/availability): en_bodega, con "ultimas" si quedan pocas
+    assert av["DS-2CD1043G2-LIU"]["state"] == "en_bodega" and not av["DS-2CD1043G2-LIU"]["ultimas"]
+    assert av["WD44PURZ"]["state"] == "en_bodega" and av["WD44PURZ"]["ultimas"]
     # el filtro de entrega inmediata usa la misma disponibilidad
     inm = {p["code"] for p in client.get("/public/store/crimson/catalog", params={"avail": "inmediata", "limit": 60}).json()["items"]}
     assert inm == {"DS-2CD1043G2-LIU", "WD44PURZ"}
@@ -240,7 +241,7 @@ def test_catalogo_y_ficha_con_existencias_reales(client, auth, db_session):
     assert client.put("/store/inventory/settings", json={"quantity_display": "exacta"}).status_code == 200
     d = client.get(f"/public/store/crimson/item/x-{prods['DS-2CD1043G2-LIU'].id}")
     assert d.status_code == 200, d.text
-    assert d.json()["availability"]["state"] == "disponible" and d.json()["availability"]["max_qty"] == 9
+    assert d.json()["availability"]["state"] == "en_bodega" and d.json()["availability"]["max_qty"] == 9
     assert client.get("/public/store/crimson/showcase").status_code == 200
     assert client.get("/public/store/crimson/catalog", params={"ids": str(prods["WD44PURZ"].id)}).status_code == 200
 

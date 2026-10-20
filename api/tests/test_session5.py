@@ -82,8 +82,11 @@ def test_web_toggle_and_store_availability(client, auth, db_session):
     ).json()
     from app.models import Product
 
-    db_session.get(Product, nuevo["id"]).supplier_stock = 12  # el stock del proveedor lo escribe la importación, no la ficha
-    db_session.commit()
+    # el stock del proveedor viene del catalogo de proveedores (item vinculado, con fecha), no de la ficha
+    from tests.test_disponibilidad import supplier_item
+
+    assert db_session.get(Product, nuevo["id"]) is not None
+    supplier_item(db_session, nuevo["id"], 12)
     bp = next(x for x in client.get("/public/store/crimson/products").json() if x["id"] == nuevo["id"])
     assert bp["availability"]["state"] == "bajo_pedido"
     av = client.get(f"/products/{prod['id']}/availability").json()

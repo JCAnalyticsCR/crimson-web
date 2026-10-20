@@ -979,11 +979,18 @@ def offer_key(o: dict) -> str:
 
 
 def own_offer(db: Session, prod: Product) -> dict:
-    """Oferta de un producto propio elegido a mano (no salio en la busqueda)."""
+    """Oferta de un producto propio elegido a mano (no salio en la busqueda). Las existencias (propia y del proveedor,
+    con su fecha) salen de la funcion unica: antes, al elegir a mano, se perdia stock_propio."""
+    from . import availability
+
     off = supplier_catalog.best_offer_for_product(db, prod) or {}
     if off.get("product_id") != prod.id:
         # la real puede devolver una oferta de proveedor como "mejor": para el producto propio se usan sus datos
         off = {**off, "source": "propio", "product_id": prod.id, "supplier_item_id": None, "name": prod.name, "model": prod.model, "code": prod.code}
+    row = availability.one(db, prod.tenant_id, prod, audience="interno")
+    off.update(supplier_catalog.stock_fields(row))
+    if row.get("supplier_name"):
+        off["supplier"] = row["supplier_name"]
     return off
 
 
@@ -991,14 +998,18 @@ def own_offer(db: Session, prod: Product) -> dict:
 def _availability(o: dict, units: int) -> tuple[int, str]:
     sp = _d(o.get("stock_propio")) or Decimal(0)
     sv = _d(o.get("stock_proveedor")) or Decimal(0)
+    fresh = o.get("supplier_fresh", True)  # ofertas sin el dato (versiones viejas): como siempre
     need = max(units, 1)
     if sp > 0 and sp >= need:
         return 3, f"{_g(sp)} en bodega"
     if sp > 0:
         return 2, f"{_g(sp)} en bodega (faltan {_g(need - sp)})"
-    if sv > 0:
-        quien = o.get("supplier") if o.get("source") == "proveedor" and o.get("supplier") else "Proveedor"
+    quien = o.get("supplier") or "Proveedor"
+    if sv > 0 and fresh:
         return 1, f"{quien}: {_g(sv)} disponibles"
+    if sv > 0:
+        # el dato del proveedor esta viejo: no se cuenta como disponible (la tienda tampoco lo vende)
+        return 0, f"{quien}: {_g(sv)} · dato viejo ({o.get('supplier_age') or 'sin fecha'})"
     return 0, "Sin existencias"
 
 
@@ -1075,6 +1086,9 @@ def evaluate(req: Req, line: dict, o: dict, prod: Product | None, fx: Decimal, m
         "sale_price": sale.quantize(Decimal("0.01")) if sale is not None else None,
         "price_estimated": estimated,
         "updated_at": o.get("updated_at"),
+        "supplier_updated_at": o.get("supplier_updated_at"),
+        "supplier_age": o.get("supplier_age"),
+        "supplier_fresh": o.get("supplier_fresh"),
         "_sort_price": unit_price * max(units, 1) if unit_price else None,
     }
 

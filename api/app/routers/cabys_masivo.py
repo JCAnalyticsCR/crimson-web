@@ -19,7 +19,6 @@ from ..core.deps import Principal, require
 from ..models import Category, Product, ProductTax, Tax
 from ..services import cabys as cabys_svc
 from ..services import cabys_suggest
-from ..services import inventory as invsvc
 from ..services.documents import audit
 
 router = APIRouter(tags=["catalogo"])
@@ -49,9 +48,10 @@ def pending(
         stmt = stmt.where(or_(Product.name.ilike(like), Product.code.ilike(like), Product.brand.ilike(like), Product.model.ilike(like)))
     rows = db.scalars(stmt).all()
     cats = {c.id: c.name for c in db.scalars(select(Category).where(Category.tenant_id == p.tenant.id))}
-    stock: dict[int, Decimal] = {}
-    for lv in invsvc.stock_levels(db, p.tenant.id):
-        stock[lv["product_id"]] = stock.get(lv["product_id"], Decimal(0)) + lv["quantity"]
+    from ..services.availability import availability_many
+
+    # existencias de la funcion unica: libre en bodegas de venta y proveedor vinculado (garantias y Excel viejo no)
+    av = availability_many(db, p.tenant, rows, audience="interno")
     items = [
         {
             "id": x.id,
@@ -62,8 +62,8 @@ def pending(
             "item_type": x.item_type,
             "category_id": x.category_id,
             "category": cats.get(x.category_id) if x.category_id else None,
-            "own_stock": stock.get(x.id, Decimal(0)),
-            "supplier_stock": x.supplier_stock,
+            "own_stock": Decimal(str((av.get(x.id) or {}).get("own_free") or 0)),
+            "supplier_stock": (av.get(x.id) or {}).get("supplier_qty"),
             "tax_rate": float(x.taxes[0].tax.rate) if x.taxes else None,
         }
         for x in rows

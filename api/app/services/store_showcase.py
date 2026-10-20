@@ -502,12 +502,15 @@ FEATURED_TYPES = (
 )
 
 
-def default_featured(prods: list[Product], limit: int = 8) -> list[Product]:
+def default_featured(prods: list[Product], limit: int = 8, prefer: set[int] | None = None) -> list[Product]:
     """Destacados cuando Andres no eligio: uno por tipo de equipo que mas se vende (camara, grabador, switch...),
-    con foto y precio, el de precio mas representativo (la mediana del tipo, no el mas barato ni el mas caro)."""
+    con foto y precio, el de precio mas representativo (la mediana del tipo, no el mas barato ni el mas caro).
+    prefer: ids de lo que se puede comprar ya (services/availability); si un tipo tiene alguno, se elige entre ellos."""
     out: list[Product] = []
     for t in FEATURED_TYPES:
         c = sorted((p for p in _priced(prods) if p.images and product_type(p) == t), key=lambda p: Decimal(str(p.price)))
+        if prefer and any(p.id in prefer for p in c):
+            c = [p for p in c if p.id in prefer]
         if c:
             out.append(c[len(c) // 2])
         if len(out) >= limit:
@@ -515,11 +518,25 @@ def default_featured(prods: list[Product], limit: int = 8) -> list[Product]:
     return out
 
 
-def build_kit(prods: list[Product], answers: dict) -> dict:
+def _first(pools: list[list[Product]], fn, *args):
+    """El primer pool donde el selector encuentra algo (lo vendible primero; si no hay, el catalogo publicado)."""
+    r = None
+    for pool in pools:
+        r = fn(pool, *args)
+        if (r[0] if isinstance(r, tuple) else r) is not None:
+            return r
+    return r
+
+
+def build_kit(prods: list[Product], answers: dict, prefer: set[int] | None = None) -> dict:
     """Kit sugerido con productos reales del catalogo. Las cantidades salen de las MISMAS reglas que usa el
     levantamiento tecnico (survey_specs.suggest_materials); aqui solo se eligen los productos. Lo que no se
-    encuentra en la tienda se lista para cotizarlo (no se inventa)."""
+    encuentra en la tienda se lista para cotizarlo (no se inventa).
+    prefer: ids de lo que se puede comprar ya (en bodega o bajo pedido, services/availability): cada pieza se elige
+    primero entre esos; solo si ninguno sirve se usa el resto del catalogo publicado."""
     from .survey_specs import suggest_materials
+
+    pools = [[p for p in prods if p.id in prefer], prods] if prefer is not None else [prods]
 
     place = answers.get("place") if answers.get("place") in PLACES else "casa"
     indoor = max(0, min(32, int(answers.get("indoor") or 0)))
@@ -544,19 +561,19 @@ def build_kit(prods: list[Product], answers: dict) -> dict:
         else:
             lines.append({"product": p, "quantity": int(math.ceil(float(qty))), "role": role, "reason": reason})
 
-    cam_out = _pick_camera(prods, True) if outdoor else None
-    cam_in = _pick_camera(prods, False) if indoor else None
+    cam_out = _first(pools, _pick_camera, True) if outdoor else None
+    cam_in = _first(pools, _pick_camera, False) if indoor else None
     if outdoor:
         add(cam_out, outdoor, "Cámaras exteriores", f"{outdoor} punto(s) afuera: formato bullet, resistente al agua", "Cámara IP exterior PoE 4 MP")
     if indoor:
         add(cam_in, indoor, "Cámaras interiores", f"{indoor} punto(s) adentro: formato domo, discreto", "Cámara IP interior PoE 4 MP")
 
-    nvr, nvr_poe = _pick_recorder(prods, n)
+    nvr, nvr_poe = _first(pools, _pick_recorder, n)
     nvr_label = next((k for k in sug if k.startswith("NVR")), f"NVR {n} canales")
     add(nvr, 1, "Grabador", f"{n} cámara(s): {nvr_label.lower()}" + (" con PoE integrado (no hace falta switch)" if nvr_poe else ""), nvr_label)
 
     need_tb = (Decimal(n) * Decimal(days) * GB_PER_CAMERA_DAY / 1000 * Decimal("1.1")).quantize(Decimal("0.1"))
-    disk, disk_qty = _pick_disk(prods, need_tb)
+    disk, disk_qty = _first(pools, _pick_disk, need_tb)
     add(
         disk,
         disk_qty or 1,
@@ -568,12 +585,13 @@ def build_kit(prods: list[Product], answers: dict) -> dict:
     sw_name = next((k for k in sug if k.startswith("Switch PoE")), None)
     if sw_name and not nvr_poe:
         need_ports = int(re.search(r"(\d+)", sw_name).group(1))
-        add(_pick_switch(prods, min(need_ports, n)), 1, "Red", f"alimenta las {n} cámaras por el mismo cable (PoE)", sw_name)
+        add(_first(pools, _pick_switch, min(need_ports, n)), 1, "Red", f"alimenta las {n} cámaras por el mismo cable (PoE)", sw_name)
 
     rj = sug.get("Conectores RJ45")
     if rj:
         conn = _consumable(
-            _pick_by_words(prods, ("conector", "rj45"), RJ45_NO) or _pick_by_words(prods, ("rj45",), RJ45_NO + ("switch", "puerto", "modulo", "ficha"))
+            _first(pools, _pick_by_words, ("conector", "rj45"), RJ45_NO)
+            or _first(pools, _pick_by_words, ("rj45",), RJ45_NO + ("switch", "puerto", "modulo", "ficha"))
         )
         pack = pack_size(conn) if conn else 1
         add(
@@ -584,12 +602,12 @@ def build_kit(prods: list[Product], answers: dict) -> dict:
             "Conectores RJ45",
         )
     cable_m = (Decimal(n * meters) * Decimal("1.15")).quantize(Decimal(1))
-    bobina = _pick_by_words(prods, ("bobina",), ("coaxial",)) or _pick_by_words(prods, ("cable", "305"))
+    bobina = _first(pools, _pick_by_words, ("bobina",), ("coaxial",)) or _first(pools, _pick_by_words, ("cable", "305"))
     if bobina:
         add(bobina, max(1, math.ceil(cable_m / 305)), "Instalación", f"{cable_m} m de cable UTP ({meters} m por cámara + 15 %)", "Cable UTP")
     else:
         add(
-            _pick_by_words(prods, ("cable", "utp"), ("patch", "hdmi", "coaxial")),
+            _first(pools, _pick_by_words, ("cable", "utp"), ("patch", "hdmi", "coaxial")),
             cable_m,
             "Instalación",
             f"{cable_m} m de cable UTP ({meters} m por cámara + 15 %)",
@@ -597,7 +615,7 @@ def build_kit(prods: list[Product], answers: dict) -> dict:
         )
     ext = sug.get("Caja de paso exterior")
     if ext:
-        add(_pick_by_words(prods, ("caja", "exterior"), ("tapa", "fuerte", "carton")), ext["quantity"], "Instalación", ext["reason"], "Caja de paso exterior")
+        add(_first(pools, _pick_by_words, ("caja", "exterior"), ("tapa", "fuerte", "carton")), ext["quantity"], "Instalación", ext["reason"], "Caja de paso exterior")
 
     notes = [
         "Kit sugerido: un técnico de Crimson lo valida antes de cobrar o instalar (distancias, alturas y red del sitio).",
@@ -657,12 +675,14 @@ def head_html(meta: dict) -> str:
     return "\n".join(parts)
 
 
-def availability_schema(state: str) -> str:
+def availability_schema(state: str, ultimas: bool | None = False) -> str:
+    """Estado de services/availability -> schema.org (en_bodega con pocas unidades = LimitedAvailability)."""
+    if state in ("en_bodega", "disponible", "ultimas"):
+        return "https://schema.org/LimitedAvailability" if (ultimas or state == "ultimas") else "https://schema.org/InStock"
     return {
-        "disponible": "https://schema.org/InStock",
-        "ultimas": "https://schema.org/LimitedAvailability",
         "bajo_pedido": "https://schema.org/BackOrder",
         "agotado": "https://schema.org/OutOfStock",
+        "servicio": "https://schema.org/InStock",
     }.get(state, "https://schema.org/BackOrder")  # "consultar": se trae del distribuidor
 
 

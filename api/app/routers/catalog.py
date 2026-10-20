@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
@@ -168,7 +166,7 @@ def products(
     web: bool | None = None,
     sin_cabys: bool = False,
     warehouse_id: int | None = None,
-    proveedor: str | None = Query(None, pattern="^(con|sin)$"),
+    proveedor: str | None = Query(None, pattern="^(con|sin|vinculado|sin_vincular)$"),
     cursor: int | None = None,
     limit: int = Query(20, le=100),
     p: Principal = Depends(require("catalog", "ver")),
@@ -176,7 +174,10 @@ def products(
 ):
     """El buscador por texto no alcanza con 200 productos del proveedor: se filtra por tipo, categoria,
     marca, proveedor, si esta en la tienda y si le falta el CABYS (lo que bloquea facturar).
-    proveedor=con|sin: con proveedor = vinculado a un item de un catalogo de proveedor o con proveedor asignado."""
+    proveedor=con|sin: con proveedor = vinculado a un item de un catalogo de proveedor o con proveedor asignado.
+    proveedor=vinculado: con item del catalogo de proveedores (su existencia cuenta); sin_vincular: tiene proveedor
+    asignado pero ningun item vinculado (su existencia del proveedor NO cuenta: hay que vincularlo).
+    Cada fila trae `availability` (services/availability, audiencia interno): propio, proveedor y fecha."""
     stmt = select(Product).where(Product.tenant_id == p.tenant.id, Product.active)
     if q:
         like = f"%{q}%"
@@ -198,11 +199,25 @@ def products(
     if warehouse_id:
         stmt = stmt.where(Product.warehouse_id == warehouse_id)
     if proveedor:
-        con = or_(Product.supplier_id.is_not(None), select(SupplierItem.id).where(SupplierItem.product_id == Product.id).exists())
-        stmt = stmt.where(con if proveedor == "con" else ~con)
+        linked = select(SupplierItem.id).where(SupplierItem.product_id == Product.id).exists()
+        con = or_(Product.supplier_id.is_not(None), linked)
+        stmt = stmt.where(
+            {"con": con, "sin": ~con, "vinculado": linked, "sin_vincular": Product.supplier_id.is_not(None) & ~linked}[proveedor]
+        )
     page = _page(db, stmt, cursor, limit, Product, lambda pr: pr)
-    page.items = _with_costs(db, p, page.items)
+    prods = page.items
+    page.items = _with_costs(db, p, prods)
+    _with_availability(db, p, prods, page.items)
     return page
+
+
+def _with_availability(db: Session, p: Principal, prods: list[Product], outs: list[ProductOut]) -> None:
+    """Disponibilidad de la funcion unica en cada fila (propio / proveedor / actualizado). Nunca lleva costos."""
+    from ..services import availability as avsvc
+
+    av = avsvc.availability_many(db, p.tenant, prods, audience="interno")
+    for pr, o in zip(prods, outs, strict=True):
+        o.availability = av.get(pr.id)
 
 
 @router.get("/products/meta/filters")
@@ -273,7 +288,10 @@ def create_product(data: ProductIn, p: Principal = Depends(require("catalog", "c
 
 @router.get("/products/{pid}", response_model=ProductOut)
 def get_product(pid: int, p: Principal = Depends(require("catalog", "ver")), db: Session = Depends(get_db)):
-    return _with_costs(db, p, [_own(db, Product, pid, p.tenant.id)])[0]
+    pr = _own(db, Product, pid, p.tenant.id)
+    out = _with_costs(db, p, [pr])
+    _with_availability(db, p, [pr], out)
+    return out[0]
 
 
 class WebIn(BaseModel):
@@ -292,39 +310,28 @@ def toggle_web(pid: int, data: WebIn, p: Principal = Depends(require("catalog", 
 
 @router.get("/products/{pid}/availability")
 def availability(pid: int, p: Principal = Depends(require("catalog", "ver")), db: Session = Depends(get_db)):
-    """Existencias propias por bodega + disponibilidad del proveedor (lo que ve el cliente en la tienda)."""
-    from ..services import inventory as invsvc
+    """La funcion unica (services/availability): propio libre/reservado por bodega de venta (las de garantias no
+    cuentan), proveedor con nombre y fecha, y lo que ve el cliente en la tienda (label_publico)."""
+    from ..services import availability as avsvc
 
     pr = _own(db, Product, pid, p.tenant.id)
-    levels = [lv for lv in invsvc.stock_levels(db, p.tenant.id, product_id=pid)]
-    own = sum((lv["quantity"] for lv in levels), Decimal(0))
+    row = avsvc.one(db, p.tenant, pr, audience="interno", by_warehouse=True)
+    pub = avsvc.one(db, p.tenant, pr, audience="publico")
     return {
-        "product_id": pid,
-        "own_stock": own,
+        **row,
+        "own_stock": row.get("own_on_hand"),
         "min_stock": pr.min_stock,
-        "supplier_stock": pr.supplier_stock,
-        "supplier_updated_at": pr.supplier_updated_at,
-        "label": store_availability(pr, own)["label"],
+        "supplier_stock": row.get("supplier_qty"),
+        "label_publico": pub.get("label"),
+        "state_publico": pub.get("state"),
     }
 
 
 def qty_label(v) -> str:
     """Cantidad para leer en es-CR: Decimal("3.000") -> "3" (con :g salia "3.000", que se lee tres mil), 2.5 -> "2,5"."""
-    q = Decimal(str(v)).normalize()
-    if q == q.to_integral_value():
-        return str(int(q))
-    return f"{q:f}".replace(".", ",")
+    from ..services.availability import qty_text
 
-
-def store_availability(pr: Product, own: Decimal) -> dict:
-    """Etiqueta de disponibilidad para la tienda: propio, bajo pedido o agotado."""
-    if pr.item_type != "producto":
-        return {"state": "servicio", "label": "Servicio", "own": 0}
-    if own > 0:
-        return {"state": "en_bodega", "label": f"Disponible ({qty_label(own)} en bodega)", "own": own}
-    if (pr.supplier_stock or 0) > 0:
-        return {"state": "bajo_pedido", "label": "Bajo pedido (3-5 días hábiles)", "own": 0}
-    return {"state": "agotado", "label": "Consultar disponibilidad", "own": 0}
+    return qty_text(v)
 
 
 @router.put("/products/{pid}", response_model=ProductOut)

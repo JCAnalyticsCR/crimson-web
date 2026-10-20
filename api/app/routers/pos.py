@@ -29,15 +29,23 @@ router = APIRouter(prefix="/pos", tags=["pos"])
 
 @router.get("/catalog")
 def catalog(p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
-    """Productos activos con existencias y variantes, en un solo viaje (la pantalla filtra en el navegador)."""
-    stock: dict[int, Decimal] = defaultdict(Decimal)
-    for s in invsvc.stock_levels(db, p.tenant.id):
-        stock[s["product_id"]] += s["quantity"]
+    """Productos activos con su disponibilidad y variantes, en un solo viaje (la pantalla filtra en el navegador).
+    La existencia es la de la funcion unica (services/availability): lo libre en bodegas de venta menos reservas
+    (las de garantias no cuentan) y lo del proveedor con su fecha. El precio va tambien en la moneda de la caja
+    (pos_price / pos_currency), con el tipo de cambio del dia."""
+    from ..services import availability as avsvc
+    from ..services import pricing
+
+    prods = list(db.scalars(select(Product).where(Product.tenant_id == p.tenant.id, Product.active).order_by(Product.name)))
+    av = avsvc.availability_many(db, p.tenant, prods, audience="interno")
+    cur = p.tenant.default_currency or "CRC"
+    fx = docsvc.today_fx(db, "USD")[0]
     variants: dict[int, list] = defaultdict(list)
     for v in db.scalars(select(ProductVariant).where(ProductVariant.tenant_id == p.tenant.id, ProductVariant.active).order_by(ProductVariant.position)):
         variants[v.product_id].append({"id": v.id, "name": v.name, "code": v.code, "price": v.price})
     out = []
-    for pr in db.scalars(select(Product).where(Product.tenant_id == p.tenant.id, Product.active).order_by(Product.name)):
+    for pr in prods:
+        a = av.get(pr.id) or {}
         img = next((i.get("url") for i in (pr.images or []) if i.get("main")), (pr.images or [{}])[0].get("url") if pr.images else None)
         out.append(
             {
@@ -49,7 +57,13 @@ def catalog(p: Principal = Depends(require("sales", "crear")), db: Session = Dep
                 "item_type": pr.item_type,
                 "category_id": pr.category_id,
                 "tax_rate": float(pr.taxes[0].tax.rate) if pr.taxes else 13,
-                "stock": stock.get(pr.id) if pr.item_type == "producto" else None,
+                "stock": a.get("own_free") if pr.item_type == "producto" else None,
+                "pos_price": pricing.price_in(db, pr, cur, fx),
+                "pos_currency": cur,
+                "availability": {
+                    k: a.get(k)
+                    for k in ("state", "label", "own_free", "own_reserved", "supplier_qty", "supplier_available", "supplier_name", "supplier_fresh", "supplier_age", "max_qty")
+                },
                 "image": img,
                 "variants": variants.get(pr.id, []),
             }
@@ -89,19 +103,24 @@ def sale(data: SaleIn, p: Principal = Depends(require("sales", "crear")), db: Se
             raise HTTPException(422, "La factura electrónica requiere un cliente con identificación; use tiquete para consumidor final")
     if any(ln.unit_price is not None for ln in data.lines) and not p.can("sales", "editar"):
         raise HTTPException(403, "Sin permiso para cambiar precios en caja")
+    from ..services import pricing
+
+    cur = p.tenant.default_currency or "CRC"
+    fx = docsvc.today_fx(db, "USD")[0]
     lines = []
     for ln in data.lines:
         pr = db.get(Product, ln.product_id)
         if not pr or pr.tenant_id != p.tenant.id or not pr.active:
             raise HTTPException(404, "Producto no disponible")
-        name, code, price = pr.name, pr.code, d(pr.price)
+        # el precio del producto en la moneda de la caja (un producto en dolares no entra como colones)
+        name, code, price = pr.name, pr.code, pricing.price_in(db, pr, cur, fx)
         if ln.variant_id:
             v = db.get(ProductVariant, ln.variant_id)
             if not v or v.product_id != pr.id or not v.active:
                 raise HTTPException(404, "Variante no disponible")
             name, code = f"{pr.name} · {v.name}", v.code
             if v.price is not None:
-                price = d(v.price)
+                price = pricing.price_in(db, pr, cur, fx, amount=v.price)
         lines.append(
             LineInSchema(
                 product_id=pr.id,
@@ -114,7 +133,7 @@ def sale(data: SaleIn, p: Principal = Depends(require("sales", "crear")), db: Se
             )
         )
     payload = DocumentIn(
-        customer_id=data.customer_id, currency=p.tenant.default_currency, lines=lines, internal_notes=data.notes, external_order="POS", payment_method="01"
+        customer_id=data.customer_id, currency=cur, lines=lines, internal_notes=data.notes, external_order="POS", payment_method="01"
     )
     chk = discounts.check(db, p, payload)
     if chk.exceeds:

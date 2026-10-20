@@ -307,7 +307,9 @@ def stock(warehouse_id: int | None = None, p: Principal = Depends(require("inven
 
     levels = inv.stock_levels(db, p.tenant.id, warehouse_id=warehouse_id)
     prods = {pr.id: pr for pr in db.scalars(select(Product).where(Product.tenant_id == p.tenant.id))}
-    whs = {w.id: w.name for w in db.scalars(select(Warehouse).where(Warehouse.tenant_id == p.tenant.id))}
+    wh_rows = list(db.scalars(select(Warehouse).where(Warehouse.tenant_id == p.tenant.id)))
+    whs = {w.id: w.name for w in wh_rows}
+    kinds = {w.id: w.kind for w in wh_rows}  # el portal no suma las de garantias (revision, distribuidor) en los totales
     # comprometido = reservas confirmadas y vigentes (AC25). Sin reservas es 0 y disponible = cantidad.
     comp = committed(db, p.tenant.id, warehouse_id=warehouse_id)
     return {
@@ -319,6 +321,7 @@ def stock(warehouse_id: int | None = None, p: Principal = Depends(require("inven
                 "min_stock": prods[lv["product_id"]].min_stock,
                 "serialized": bool(prods[lv["product_id"]].serialized),
                 "warehouse": whs.get(lv["warehouse_id"]),
+                "warehouse_kind": kinds.get(lv["warehouse_id"]) or "venta",
                 "committed": comp.get((lv["product_id"], lv["warehouse_id"]), Decimal(0)),
                 "available": lv["quantity"] - comp.get((lv["product_id"], lv["warehouse_id"]), Decimal(0)),
             }
@@ -327,6 +330,99 @@ def stock(warehouse_id: int | None = None, p: Principal = Depends(require("inven
         ],
         "low": inv.low_stock(db, p.tenant.id),
     }
+
+
+AVAIL_FILTERS = "^(propio|eurocomp|sin|viejo|sin_vincular)$"
+
+
+@router.get("/stock/availability")
+def stock_availability(
+    filtro: str | None = Query(None, pattern=AVAIL_FILTERS),
+    q: str | None = Query(None, max_length=120),
+    p: Principal = Depends(require("inventory", "ver")),
+    db: Session = Depends(get_db),
+):
+    """Inventario -> Disponibilidad: TODOS los productos vendibles con la funcion unica (services/availability):
+    propio (libre / reservado, solo bodegas de venta), proveedor (Eurocomp) con su fecha, y el estado. Con cero propio
+    muestra lo del proveedor en vez de salir vacia. Primero lo propio. Filtros: propio (con existencia propia),
+    eurocomp (solo del proveedor), sin (sin existencia), viejo (dato del proveedor viejo), sin_vincular."""
+    from sqlalchemy import or_
+
+    from ..models import Product
+    from ..services.availability import availability_many, sort_key
+
+    stmt = select(Product).where(Product.tenant_id == p.tenant.id, Product.active, Product.item_type == "producto")
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        stmt = stmt.where(or_(Product.name.ilike(like), Product.code.ilike(like), Product.model.ilike(like), Product.supplier_sku.ilike(like)))
+    prods = list(db.scalars(stmt.order_by(Product.name)))
+    av = availability_many(db, p.tenant, prods, audience="interno")
+    summary = {
+        "productos": len(prods),
+        "con_propio": 0,
+        "solo_proveedor": 0,
+        "sin_existencia": 0,
+        "dato_viejo": 0,
+        "sin_vincular": 0,
+        "propio_libre": Decimal(0),
+        "propio_reservado": Decimal(0),
+        "proveedor": Decimal(0),
+    }
+    rows = []
+    for pr in prods:
+        a = av.get(pr.id) or {}
+        own = Decimal(str(a.get("own_on_hand") or 0))
+        sup = Decimal(str(a.get("supplier_qty") or 0))
+        viejo = bool(a.get("supplier_linked") and sup > 0 and not a.get("supplier_fresh"))
+        kind = "propio" if own > 0 else ("eurocomp" if sup > 0 else "sin")
+        summary["con_propio" if kind == "propio" else "solo_proveedor" if kind == "eurocomp" else "sin_existencia"] += 1
+        summary["dato_viejo"] += int(viejo)
+        summary["sin_vincular"] += int(bool(a.get("supplier_unlinked_qty")))
+        summary["propio_libre"] += Decimal(str(a.get("own_free") or 0))
+        summary["propio_reservado"] += Decimal(str(a.get("own_reserved") or 0))
+        summary["proveedor"] += sup
+        if filtro in ("propio", "eurocomp", "sin") and kind != filtro:
+            continue
+        if filtro == "viejo" and not viejo:
+            continue
+        if filtro == "sin_vincular" and not a.get("supplier_unlinked_qty"):
+            continue
+        rows.append(
+            {
+                "id": pr.id,
+                "code": pr.code,
+                "name": pr.name,
+                "brand": pr.brand,
+                "show_on_web": pr.show_on_web,
+                "min_stock": pr.min_stock,
+                **{
+                    k: a.get(k)
+                    for k in (
+                        "state",
+                        "label",
+                        "label_publico",
+                        "own_on_hand",
+                        "own_free",
+                        "own_reserved",
+                        "own_reserved_web",
+                        "supplier_linked",
+                        "supplier_qty",
+                        "supplier_available",
+                        "supplier_committed",
+                        "supplier_name",
+                        "supplier_source",
+                        "supplier_updated_at",
+                        "supplier_fresh",
+                        "supplier_age",
+                        "supplier_unlinked_qty",
+                        "max_qty",
+                    )
+                },
+                "supplier_old": viejo,
+            }
+        )
+    rows.sort(key=lambda r: (sort_key(r), r["name"].lower()))
+    return {"summary": summary, "items": rows[:3000], "total": len(rows)}
 
 
 class MoveIn(BaseModel):

@@ -19,7 +19,7 @@ from tests.test_comercial2 import _cust
 
 FX = Decimal("512.35")  # tipo de cambio sembrado (seeds)
 
-# codigo, nombre, costo USD, precio CRC, existencias propias, existencias del proveedor (Product.supplier_stock)
+# codigo, nombre, costo USD, precio CRC, existencias propias, existencias del proveedor (item vinculado del catalogo)
 CATALOGO = [
     ("T-CAM-B4-EXT", "Cámara IP Bullet 4MP exterior PoE IR 30m IP67", 40, 45000, 12, None),
     ("T-CAM-B4-PROV", "Cámara IP Bullet 4MP exterior PoE ColorVu IP67", 35, 40000, 0, 30),
@@ -40,14 +40,20 @@ CATALOGO = [
 def _catalogo(db, tid) -> dict[str, Product]:
     w = invsvc.default_warehouse(db, tid)
     out = {}
-    for code, name, cost, price, stock, prov in CATALOGO:
-        p = Product(tenant_id=tid, code=code, name=name, price=price, cost=cost, cost_currency="USD", supplier_stock=prov, unit="Unid")
+    for code, name, cost, price, stock, _prov in CATALOGO:
+        p = Product(tenant_id=tid, code=code, name=name, price=price, cost=cost, cost_currency="USD", unit="Unid")
         db.add(p)
         db.flush()
         if stock:
             invsvc.move(db, tid, None, p.id, w.id, "entrada", Decimal(stock), "INV-PRUEBA")
         out[code] = p
     db.commit()
+    from tests.test_disponibilidad import supplier_item
+
+    for code, *_rest, prov in CATALOGO:
+        if prov:
+            # la existencia del proveedor solo cuenta vinculada y con fecha (services/availability)
+            supplier_item(db, out[code].id, prov, cost=out[code].cost)
     return out
 
 

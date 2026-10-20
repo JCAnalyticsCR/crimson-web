@@ -23,14 +23,14 @@ import re
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Category, Product, StockMovement, Supplier, SupplierItem
-from . import pricing
+from ..models import Category, Product, Supplier, SupplierItem, Tenant
+from . import availability, pricing
 from . import tabular as tb
 from .documents import today_fx
 from .totals import d
@@ -318,18 +318,36 @@ def _supplier_names(db: Session, ids: Iterable[int]) -> dict[int, str]:
 
 
 def own_stock(db: Session, tenant_id: int, product_ids: Iterable[int]) -> dict[int, Decimal]:
+    """Lo libre propio de cada producto con la funcion unica (bodegas de venta menos reservas; garantias no)."""
     ids = list({i for i in product_ids if i})
     if not ids:
         return {}
-    q = (
-        select(StockMovement.product_id, func.coalesce(func.sum(StockMovement.quantity), 0))
-        .where(StockMovement.tenant_id == tenant_id, StockMovement.product_id.in_(ids))
-        .group_by(StockMovement.product_id)
-    )
-    return {pid: Decimal(str(q_)) for pid, q_ in db.execute(q)}
+    rows = availability.availability_many(db, tenant_id, ids, audience="interno")
+    return {pid: Decimal(str(r.get("own_free") or 0)) for pid, r in rows.items()}
 
 
-def _offer_item(i: SupplierItem, supplier: str | None, fx: Decimal) -> dict:
+def stock_fields(row: dict | None) -> dict:
+    """Las existencias de una oferta propia, desde la fila interna de services/availability."""
+    r = row or {}
+    return {
+        "stock_propio": Decimal(str(r.get("own_free") or 0)),
+        "stock_proveedor": r.get("supplier_qty"),
+        "stock_proveedor_vendible": r.get("supplier_available"),
+        "supplier_fresh": bool(r.get("supplier_fresh")),
+        "supplier_updated_at": r.get("supplier_updated_at"),
+        "supplier_age": r.get("supplier_age"),
+        "availability_state": r.get("state"),
+    }
+
+
+def item_freshness(i: SupplierItem, max_age_h: int, now: datetime | None = None) -> dict:
+    """Frescura de un item SIN vincular (solo tiene la fecha de la lista): mismo umbral que la funcion unica."""
+    at = availability.list_datetime(i.list_date)
+    fresh = at is not None and (now or datetime.now(UTC)) - at <= timedelta(hours=max_age_h)
+    return {"supplier_fresh": bool(fresh), "supplier_updated_at": at, "supplier_age": availability.age_text(at)}
+
+
+def _offer_item(i: SupplierItem, supplier: str | None, fx: Decimal, max_age_h: int | None = None) -> dict:
     return {
         "source": "proveedor",
         "product_id": i.product_id,
@@ -351,10 +369,12 @@ def _offer_item(i: SupplierItem, supplier: str | None, fx: Decimal) -> dict:
         "stock_proveedor": i.stock,
         "updated_at": i.list_date,
         "active": bool(i.active),
+        **(item_freshness(i, max_age_h) if max_age_h is not None else {}),
     }
 
 
-def _offer_propio(p: Product, own: Decimal, supplier: str | None, category: str | None, fx: Decimal) -> dict:
+def _offer_propio(p: Product, row: dict | None, supplier: str | None, category: str | None, fx: Decimal) -> dict:
+    """Oferta del catalogo propio: las existencias salen de la funcion unica (row = fila interna)."""
     return {
         "source": "propio",
         "product_id": p.id,
@@ -372,10 +392,9 @@ def _offer_propio(p: Product, own: Decimal, supplier: str | None, category: str 
         "cost_crc": to_crc(p.cost, p.cost_currency, fx),
         "sale_price": d(p.price) if p.price is not None else None,
         "sale_currency": p.currency,
-        "stock_propio": own,
-        "stock_proveedor": p.supplier_stock,
         "updated_at": _aware(p.supplier_updated_at).date() if p.supplier_updated_at else None,
         "active": bool(p.active),
+        **stock_fields(row),
     }
 
 
@@ -546,21 +565,23 @@ def search_offers(
         hit_items.append((i, sc))
 
     pmap = {p.id: p for p in prods}
-    own = own_stock(db, tenant_id, hit_products)
+    av = availability.availability_many(db, tenant_id, [pmap[pid] for pid in hit_products], audience="interno")
+    max_age_h = availability.max_age_hours(availability.settings_of(db.get(Tenant, tenant_id)))
     names = _supplier_names(db, [pmap[pid].supplier_id for pid in hit_products] + [i.supplier_id for i, _ in hit_items])
     for pid, sc in hit_products.items():
         p = pmap[pid]
-        o = _offer_propio(p, own.get(pid, Decimal(0)), names.get(p.supplier_id) if p.supplier_id else None, cat_name(p.category_id), fx)
+        a = av.get(pid) or {}
+        o = _offer_propio(p, a, a.get("supplier_name") or (names.get(p.supplier_id) if p.supplier_id else None), cat_name(p.category_id), fx)
         o["score"] = sc
         rows.append(o)
     for i, sc in hit_items:
-        o = _offer_item(i, names.get(i.supplier_id), fx)
+        o = _offer_item(i, names.get(i.supplier_id), fx, max_age_h)
         o["score"] = sc
         rows.append(o)
 
     def order(o: dict):
         own_ok = (o["stock_propio"] or 0) > 0
-        sup_ok = (o["stock_proveedor"] or 0) > 0
+        sup_ok = (o["stock_proveedor"] or 0) > 0 and o.get("supplier_fresh", True)
         cost = o["cost_crc"] if o["cost_crc"] is not None else Decimal("1e18")
         return (-o["score"], not own_ok, not sup_ok, o["source"] != "propio", cost)
 

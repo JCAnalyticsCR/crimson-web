@@ -358,8 +358,26 @@ def _variants(db: Session, product_ids: list[int]) -> dict[int, list[dict]]:
 
 
 def _stock_of(db: Session, tenant_id: int, product_ids: list[int]) -> dict[int, dict]:
-    """Disponibilidad web real por producto (bodegas web - reservas; ver services/store_inventory)."""
-    return sinv.availability(db, tenant_id, product_ids)
+    """Disponibilidad para la tienda con la funcion unica (services/availability, audiencia publico)."""
+    from ..services.availability import availability_many
+
+    return availability_many(db, tenant_id, product_ids, audience="publico")
+
+
+# producto sin fila de disponibilidad (no deberia pasar): no se vende en linea hasta saberlo
+UNKNOWN_AVAILABILITY = {
+    "state": "consultar",
+    "estado": "consultar",
+    "label": "Consultar disponibilidad",
+    "mensaje": "Consultar disponibilidad",
+    "plazo": None,
+    "disponible": False,
+    "accion": "whatsapp",
+    "ultimas": False,
+    "ocultar": False,
+    "cantidad": None,
+    "max_qty": None,
+}
 
 
 class Pricer:
@@ -388,7 +406,7 @@ def _gross(net: Decimal, rate) -> Decimal:
 def _prod_pub(
     p: Product,
     variants: list[dict] | None = None,
-    stock: Decimal | None = None,
+    stock: dict | None = None,
     pricer: Pricer | None = None,
     cats: dict | None = None,
     compact: bool = False,
@@ -414,7 +432,7 @@ def _prod_pub(
         "tax_rate": rate,
         "item_type": p.item_type,
         "variants": [{**v, "price": v["price"] if v["price"] is not None else sinv.web_price(p)} for v in (variants or [])],
-        "availability": _availability(p, stock if stock is not None else Decimal(0)),
+        "availability": _availability(p, stock),
     }
     if pricer is not None:
         # precio final al consumidor: en la moneda de la tienda y CON IVA (asi se exhibe en Costa Rica)
@@ -425,12 +443,13 @@ def _prod_pub(
     return out
 
 
-def _availability(p: Product, own) -> dict:
-    if isinstance(own, dict):  # ya viene calculada por store_inventory
-        return own
-    from .catalog import store_availability
-
-    return store_availability(p, own)
+def _availability(p: Product, row) -> dict:
+    """La fila de la funcion unica (audiencia publico); sin fila, "consultar" (nunca se inventa existencia)."""
+    if isinstance(row, dict) and row.get("state"):
+        return row
+    if p.item_type != "producto":
+        return {**UNKNOWN_AVAILABILITY, "state": "servicio", "estado": "servicio", "label": "Servicio", "mensaje": "Servicio", "disponible": True, "accion": "comprar"}
+    return dict(UNKNOWN_AVAILABILITY)
 
 
 @router.get("/public/store-domain")
@@ -549,7 +568,7 @@ def store_products(
         rows = rows[offset : offset + limit]
     vmap = _variants(db, [p.id for p in rows])
     stock = _stock_of(db, t.id, [p.id for p in rows])
-    return [_prod_pub(p, vmap.get(p.id), stock.get(p.id, Decimal(0)), pricer, cats, compact) for p in rows]
+    return [_prod_pub(p, vmap.get(p.id), stock.get(p.id), pricer, cats, compact) for p in rows]
 
 
 @router.get("/public/store/{slug}/products/{pid}")
@@ -564,8 +583,8 @@ def store_product(slug: str, pid: int, db: Session = Depends(get_db)):
     stock = _stock_of(db, t.id, [p.id] + [r.id for r in related])
     pricer, cats = Pricer(db, t), _cat_names(db, t.id)
     return {
-        **_prod_pub(p, _variants(db, [p.id]).get(p.id), stock.get(p.id, Decimal(0)), pricer, cats),
-        "related": [_prod_pub(r, None, stock.get(r.id, Decimal(0)), pricer, cats, True) for r in related],
+        **_prod_pub(p, _variants(db, [p.id]).get(p.id), stock.get(p.id), pricer, cats),
+        "related": [_prod_pub(r, None, stock.get(r.id), pricer, cats, True) for r in related],
     }
 
 
@@ -752,8 +771,11 @@ def store_quote(slug: str, data: CheckoutIn, request: Request, db: Session = Dep
     quote_limiter.hit(f"quote:{request.client.host if request.client else '?'}")
     t = _tenant(db, slug)
     items, calc, coupon, ship, shipping, discount_total = _quote_cart(db, t, data)
+    av = _stock_of(db, t.id, [ln.product_id for ln in data.lines])
     return {
         **quote_detail(items, calc),
+        # el carrito avisa ANTES de pagar lo que no se puede comprar en linea o pasa del tope (misma regla del checkout)
+        "availability": {str(pid): {k: a.get(k) for k in ("state", "label", "disponible", "max_qty", "accion")} for pid, a in av.items()},
         "subtotal": calc.subtotal + discount_total - shipping,
         "discount_total": discount_total,
         "tax_total": calc.tax_total,
@@ -877,9 +899,17 @@ def search(q: str = Query(min_length=1), p: Principal = Depends(require("dashboa
             else []
         ):
             out.append({"kind": "factura", "id": i.id, "title": i.number, "sub": f"{c.name} · {i.status}", "to": f"/facturas/{i.id}"})
-    for pr in db.scalars(select(Product).where(Product.tenant_id == tid, or_(Product.name.ilike(like), Product.code.ilike(like))).limit(5)) if can_cat else []:
+    found = list(db.scalars(select(Product).where(Product.tenant_id == tid, Product.active, or_(Product.name.ilike(like), Product.code.ilike(like))).limit(5))) if can_cat else []
+    if found:
+        from ..services.availability import STATES, availability_many
+
+        av = availability_many(db, p.tenant, found, audience="interno")
+    for pr in found:
         # el tecnico busca equipos sin ver precios (Andres 22:07): sin catalog.precios solo el codigo
         sub = f"{pr.code} · {pr.currency} {d(pr.price):,.2f}" if p.sees_prices else pr.code
+        st = (av.get(pr.id) or {}).get("state")
+        if st and st != "servicio":
+            sub += f" · {STATES[st]}"
         out.append({"kind": "producto", "id": pr.id, "title": pr.name, "sub": sub, "to": f"/productos?q={pr.code}"})
     for o in db.scalars(select(Order).where(Order.tenant_id == tid, Order.number.ilike(like)).limit(5)) if can_sales else []:
         out.append({"kind": "orden", "id": o.id, "title": o.number, "sub": o.status, "to": "/ordenes"})

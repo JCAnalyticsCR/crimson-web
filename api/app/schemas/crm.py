@@ -125,6 +125,8 @@ class ProductOut(BaseModel):
     # precio GENERAL de aliado (services/ally_pricing.py): solo quien ve costos (deja deducir el costo: 105 / 1,05)
     ally_price: float | None = None
     ally_price_source: str | None = None
+    # disponibilidad de la funcion unica (services/availability, audiencia interno): propio, proveedor y fecha
+    availability: dict | None = None
 
 
 class Page(BaseModel):

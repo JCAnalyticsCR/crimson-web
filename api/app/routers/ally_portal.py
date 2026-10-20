@@ -53,14 +53,11 @@ from ..models import (
     Survey,
     TenantUser,
     User,
-    Warehouse,
     WorkOrder,
 )
 from ..models.allies import COST_OPEN
 from ..services import ally_access, ally_pricing
-from ..services import inventory as invsvc
 from ..services import media_access as ma
-from ..services import reservations as ressvc
 from ..services import sla as slasvc
 from ..services.documents import audit, local_date, today_fx
 from ..services.mail import notify_roles, queue_email
@@ -1442,17 +1439,20 @@ def _main_image(pr: Product) -> str | None:
     return main["url"] if main else None
 
 
-def _own_stock(db: Session, tenant_id: int) -> dict[int, Decimal]:
-    out: dict[int, Decimal] = {}
-    for lv in invsvc.stock_levels(db, tenant_id):
-        out[lv["product_id"]] = out.get(lv["product_id"], Decimal(0)) + lv["quantity"]
-    return out
+def _availability(db: Session, ctx: AllyCtx, prods) -> dict[int, dict]:
+    """La funcion unica con audiencia "aliado": propio libre y "bajo pedido: N" con su fecha, sin nombrar al
+    proveedor ni costos (regla de aliados)."""
+    from ..services.availability import availability_many
+
+    return availability_many(db, ctx.p.tenant, prods, audience="aliado")
 
 
-def _catalog_out(db: Session, ctx: AllyCtx, pr: Product, fx: Decimal, fixed: dict, own: dict, cats: dict, full: bool = False) -> dict:
-    from .catalog import store_availability
+ALLY_AVAIL_KEYS = ("state", "label", "en_bodega", "bajo_pedido_cantidad", "actualizado_al", "dato_vigente", "plazo")
 
+
+def _catalog_out(db: Session, ctx: AllyCtx, pr: Product, fx: Decimal, fixed: dict, av: dict, cats: dict, full: bool = False) -> dict:
     precio, _fuente, estado = ally_pricing.ally_price(db, ctx.p.tenant, pr, ctx.company, fx=fx, fixed=fixed)
+    a = av.get(pr.id) or {}
     tax = d(pr.taxes[0].tax.rate) if pr.taxes else None
     out = {
         "id": pr.id,
@@ -1472,7 +1472,8 @@ def _catalog_out(db: Session, ctx: AllyCtx, pr: Product, fx: Decimal, fixed: dic
         "precio_aliado": precio,
         "precio_aliado_con_iva": ally_pricing.with_tax(precio, pr),
         "precio_aliado_estado": estado,
-        "disponibilidad": store_availability(pr, own.get(pr.id, Decimal(0)))["label"],
+        "disponibilidad": a.get("label"),
+        "disponibilidad_detalle": {k: a.get(k) for k in ALLY_AVAIL_KEYS},
     }
     if full:
         out["images"] = [{"url": x.get("url"), "main": bool(x.get("main"))} for x in pr.images or [] if isinstance(x, dict) and x.get("url")]
@@ -1510,9 +1511,9 @@ def catalogo(
     rows = rows[:limit]
     fx = today_fx(db, "USD")[0]  # un solo tipo de cambio por request
     fixed = ally_pricing.fixed_prices(db, ctx.p.tenant.id, [r.id for r in rows], ctx.company.id)
-    own = _own_stock(db, ctx.p.tenant.id)
+    av = _availability(db, ctx, rows)
     cats = _cats(db, ctx.p.tenant.id)
-    return {"items": [_catalog_out(db, ctx, pr, fx, fixed, own, cats) for pr in rows], "next_cursor": nxt}
+    return {"items": [_catalog_out(db, ctx, pr, fx, fixed, av, cats) for pr in rows], "next_cursor": nxt}
 
 
 @router.get("/catalogo/meta")
@@ -1536,7 +1537,7 @@ def catalogo_ficha(pid: int, ctx: AllyCtx = Depends(need("catalogo")), db: Sessi
         raise HTTPException(404, "Producto no encontrado")
     fx = today_fx(db, "USD")[0]
     fixed = ally_pricing.fixed_prices(db, ctx.p.tenant.id, [pr.id], ctx.company.id)
-    return _catalog_out(db, ctx, pr, fx, fixed, _own_stock(db, ctx.p.tenant.id), _cats(db, ctx.p.tenant.id), full=True)
+    return _catalog_out(db, ctx, pr, fx, fixed, _availability(db, ctx, [pr]), _cats(db, ctx.p.tenant.id), full=True)
 
 
 @router.get("/productos/buscar")
@@ -1553,28 +1554,23 @@ def productos_buscar(q: str = "", ctx: AllyCtx = Depends(need("ver")), db: Sessi
 
 @router.get("/inventario")
 def inventario(q: str = "", con_existencia: bool = True, ctx: AllyCtx = Depends(need("inventario")), db: Session = Depends(get_db)):
-    """Solo cantidades (20:01-20:14): disponible = existencia - comprometido por reservas, por bodega activa."""
+    """Solo cantidades (20:01-20:14), con la funcion unica: disponible = libre en bodegas de venta (las de garantias
+    nunca) menos reservas, por bodega; y "bajo pedido: N" con su fecha, sin nombrar al proveedor."""
     tid = ctx.p.tenant.id
-    bodegas = {w.id: w.name for w in db.scalars(select(Warehouse).where(Warehouse.tenant_id == tid, Warehouse.active.is_(True)))}
     stmt = select(Product).where(Product.tenant_id == tid, Product.active.is_(True), Product.item_type == "producto")
     if q.strip():
         like = f"%{q.strip()}%"
         stmt = stmt.where(or_(Product.name.ilike(like), Product.code.ilike(like), Product.model.ilike(like)))
     prods = db.scalars(stmt.order_by(Product.name).limit(1000)).all()
-    niveles: dict[int, dict[int, Decimal]] = {}
-    for lv in invsvc.stock_levels(db, tid):
-        if lv["warehouse_id"] in bodegas:
-            niveles.setdefault(lv["product_id"], {})[lv["warehouse_id"]] = lv["quantity"]
-    comprometido = ressvc.committed(db, tid)
+    from ..services.availability import availability_many, sort_key
+
+    av = availability_many(db, ctx.p.tenant, prods, audience="aliado", by_warehouse=True)
     rows = []
-    for pr in prods:
-        por_bodega = []
-        for wid, qty in (niveles.get(pr.id) or {}).items():
-            disp = max(qty - comprometido.get((pr.id, wid), Decimal(0)), Decimal(0))
-            por_bodega.append({"nombre": bodegas[wid], "disponible": disp})
-        total = sum((b["disponible"] for b in por_bodega), Decimal(0))
-        bajo_pedido = (pr.supplier_stock or 0) > 0
-        if con_existencia and total <= 0 and not bajo_pedido:
+    for pr in sorted(prods, key=lambda x: sort_key(av.get(x.id))):  # primero lo que hay en bodega
+        a = av.get(pr.id) or {}
+        total = Decimal(str(a.get("en_bodega") or 0))
+        bajo = Decimal(str(a.get("bajo_pedido_cantidad") or 0))
+        if con_existencia and total <= 0 and bajo <= 0:
             continue
         rows.append(
             {
@@ -1583,8 +1579,12 @@ def inventario(q: str = "", con_existencia: bool = True, ctx: AllyCtx = Depends(
                 "name": pr.name,
                 "unit": pr.unit,
                 "disponible_total": total,
-                "bodegas": sorted(por_bodega, key=lambda b: b["nombre"]),
-                "bajo_pedido": bajo_pedido,
+                "bodegas": sorted([b for b in a.get("bodegas") or [] if b.get("nombre")], key=lambda b: b["nombre"]),
+                "bajo_pedido": bajo > 0,
+                "bajo_pedido_cantidad": bajo,
+                "actualizado_al": a.get("actualizado_al"),
+                "estado": a.get("state"),
+                "etiqueta": a.get("label"),
             }
         )
         if len(rows) >= 300:

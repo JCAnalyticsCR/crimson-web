@@ -449,9 +449,12 @@ def _reservar(db: Session, p: Principal, pr: Project, order: WorkOrder) -> list[
     Andres lo explico asi: "los proveedores no dan credito", o sea que el material no llega solo porque el
     proyecto exista; hay que pedirlo y pagarlo. Enterarse el dia de la instalacion es tarde.
     """
-    levels: dict[int, Decimal] = {}
-    for lv in invsvc.stock_levels(db, p.tenant.id):
-        levels[lv["product_id"]] = levels.get(lv["product_id"], Decimal(0)) + lv["quantity"]
+    from ..services.availability import availability_many
+
+    # existencia de la funcion unica: lo que hay en bodegas de VENTA (las de garantias no se instalan); lo comprometido
+    # se descuenta abajo con la regla de proyectos (reservas formales o lo planificado de otras OT abiertas)
+    av = availability_many(db, p.tenant, [m.product_id for m in order.materials if m.product_id], audience="interno")
+    levels = {pid: Decimal(str(r.get("own_on_hand") or 0)) for pid, r in av.items()}
     apartados = db.scalars(
         select(WorkOrder).where(
             WorkOrder.tenant_id == p.tenant.id, WorkOrder.project_id != pr.id, WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")), live(WorkOrder)
@@ -477,8 +480,9 @@ def _reservar(db: Session, p: Principal, pr: Project, order: WorkOrder) -> list[
         libre = levels.get(m.product_id, Decimal(0)) - comprometido.get(m.product_id, Decimal(0))
         falta = d(m.planned) - max(libre, Decimal(0))
         if falta > 0:
-            prod = db.get(Product, m.product_id)
-            faltan.append({"product_id": m.product_id, "name": m.name, "to_buy": falta, "supplier_stock": prod.supplier_stock if prod else None})
+            a = av.get(m.product_id) or {}
+            # solo lo que el proveedor confirma con dato vigente (un numero viejo no sirve para planificar la compra)
+            faltan.append({"product_id": m.product_id, "name": m.name, "to_buy": falta, "supplier_stock": a.get("supplier_qty") if a.get("supplier_fresh") else None})
     if faltan:
         req = _new_request(db, p, faltan, reason="proyecto", project_id=pr.id, note=f"Material que falta para arrancar {pr.number}")
         filas = "".join(
@@ -549,9 +553,6 @@ def project_update(pid: int, data: ProjectIn, p: Principal = Depends(require("pr
 def requirements(pid: int, p: Principal = Depends(require("projects", "ver")), db: Session = Depends(get_db)):
     """Materiales planificados contra existencias: qué hay en bodega y qué hay que comprar."""
     pr = _project(db, pid, p)
-    levels = {}
-    for lv in invsvc.stock_levels(db, p.tenant.id):
-        levels[lv["product_id"]] = levels.get(lv["product_id"], Decimal(0)) + lv["quantity"]
     need: dict[int, dict] = {}
     for o in pr.orders:
         for m in o.materials:
@@ -560,11 +561,25 @@ def requirements(pid: int, p: Principal = Depends(require("projects", "ver")), d
             row = need.setdefault(m.product_id, {"product_id": m.product_id, "name": m.name, "planned": Decimal(0), "used": Decimal(0)})
             row["planned"] += d(m.planned)
             row["used"] += d(m.quantity)
+    from ..services.availability import availability_many
+
+    # en bodega = bodegas de venta (funcion unica); las de garantias no se instalan
+    av = availability_many(db, p.tenant, list(need), audience="interno")
     out = []
     for row in need.values():
-        stock = levels.get(row["product_id"], Decimal(0))
+        a = av.get(row["product_id"]) or {}
+        stock = Decimal(str(a.get("own_on_hand") or 0))
         pending = max(row["planned"] - row["used"], Decimal(0))
-        out.append({**row, "stock": stock, "pending": pending, "to_buy": max(pending - stock, Decimal(0))})
+        out.append(
+            {
+                **row,
+                "stock": stock,
+                "pending": pending,
+                "to_buy": max(pending - stock, Decimal(0)),
+                "supplier_qty": a.get("supplier_qty"),
+                "supplier_fresh": bool(a.get("supplier_fresh")),
+            }
+        )
     return sorted(out, key=lambda r: -r["to_buy"])
 
 
@@ -697,6 +712,11 @@ def purchase_status(rid: int, data: ReqStatusIn, p: Principal = Depends(require(
                 invsvc.move(
                     db, p.tenant.id, p.user.id, ln.product_id, wh, "entrada", d(ln.quantity), reference=r.number, note="Compra recibida", unit_cost=ln.unit_cost
                 )
+        if r.reason == "pedido_web" and r.order_id:
+            # lo que se compro para un pedido web queda reservado para ese pedido (no se lo lleva el siguiente cliente)
+            from ..services import store_inventory
+
+            store_inventory.reserve_received(db, r, wh, p.user.id)
     r.status = data.status
     audit(db, p.tenant.id, p.user.id, "status", "purchase_request", r.id, {"status": data.status}, ip=p.ip)
     db.commit()

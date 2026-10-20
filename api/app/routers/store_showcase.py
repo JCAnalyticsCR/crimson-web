@@ -26,6 +26,7 @@ from ..core.ratelimit import SlidingWindow
 from ..models import Category, Opportunity, Product, ProductTax, Tenant
 from ..services import fygaro_legacy
 from ..services import store_showcase as sv
+from ..services.availability import settings_of, sort_key
 from ..services.documents import audit
 from ..services.mail import notify_roles
 from .auth import client_ip
@@ -225,28 +226,20 @@ def _categories(db: Session, tid: int) -> list[Category]:
     return list(db.scalars(select(Category).where(Category.tenant_id == tid, Category.show_on_web).order_by(Category.name)))
 
 
-def _avail(base: dict, p: Product, own: Decimal | dict) -> dict:
-    """Disponible / Ultimas unidades / Bajo pedido / Consultar. Es el respaldo: si existe el endpoint de inventario
-    (/availability), el navegador lo usa y este dato solo cubre mientras carga.
-    `own` es la existencia propia (Decimal) o, desde la integracion con el inventario, la fila ya calculada por
-    services/store_inventory (dict con "cantidad" solo si Ajustes publica la cantidad exacta y "ultimas")."""
-    st = base.get("state")
-    if st == "servicio":
-        return {"state": "servicio", "label": "Servicio", "max_qty": None}
-    if st == "en_bodega":
-        if isinstance(own, dict):
-            qty = own.get("cantidad")
-            limit = int(qty) if qty is not None and not (p.supplier_stock or 0) else None
-            last = bool(own.get("ultimas")) or (qty is not None and qty <= 2)
-        else:
-            limit = int(own) if not (p.supplier_stock or 0) else None  # sin respaldo del proveedor: no vender mas de lo que hay
-            last = own <= 2
-        if last:
-            return {"state": "ultimas", "label": "Últimas unidades", "max_qty": limit}
-        return {"state": "disponible", "label": "Disponible", "max_qty": limit}
-    if st == "bajo_pedido":
-        return {"state": "bajo_pedido", "label": "Bajo pedido · 3 a 5 días hábiles", "max_qty": None}
-    return {"state": "consultar", "label": "Consultar disponibilidad", "max_qty": None}
+AVAIL_KEYS = ("state", "label", "max_qty", "ultimas", "cantidad", "disponible", "accion", "plazo")
+
+
+def _avail(row: dict | None) -> dict:
+    """La disponibilidad de la vitrina ES la de la funcion unica (services/availability, audiencia publico): mismos
+    estados y etiquetas que la lista, la ficha y /availability en vivo. Solo se recortan las llaves."""
+    from .store import UNKNOWN_AVAILABILITY
+
+    r = row if isinstance(row, dict) and row.get("state") else UNKNOWN_AVAILABILITY
+    return {k: r.get(k) for k in AVAIL_KEYS}
+
+
+def _sellable(row: dict | None) -> bool:
+    return bool((row or {}).get("disponible")) and (row or {}).get("state") != "servicio"
 
 
 class Ctx:
@@ -255,12 +248,13 @@ class Ctx:
     def __init__(self, db: Session, t: Tenant):
         self.db, self.t = db, t
         self.cfg = store_cfg(t)
+        self.cfg_inv = settings_of(t)
         self.pricer = Pricer(db, t)
         self.cats = _categories(db, t.id)
         self.cat_name = {c.id: c.name for c in self.cats}
         self.cat_slug = sv.category_slugs(self.cats)
 
-    def card(self, p: Product, own: Decimal, variants: list | None = None, full: bool = False) -> dict:
+    def card(self, p: Product, own: dict | None, variants: list | None = None, full: bool = False) -> dict:
         out = _prod_pub(p, variants, own, self.pricer, self.cat_name, compact=not full)
         price = Decimal(str(out["display_price"]))
         cmp = None
@@ -275,7 +269,7 @@ class Ctx:
                 "compare_display_price": cmp,
                 "price_on_request": price <= 0,
                 "category_path": f"/c/{self.cat_slug[p.category_id]}" if p.category_id in self.cat_slug else None,
-                "availability": _avail(out["availability"], p, own),
+                "availability": _avail(own),
             }
         )
         if not full:
@@ -283,7 +277,7 @@ class Ctx:
         return out
 
 
-def _stock_map(db: Session, tid: int, prods: list[Product]) -> dict[int, Decimal]:
+def _stock_map(db: Session, tid: int, prods: list[Product]) -> dict[int, dict]:
     return _stock_of(db, tid, [p.id for p in prods]) if prods else {}
 
 
@@ -362,18 +356,22 @@ def showcase_public(slug: str, response: Response, db: Session = Depends(get_db)
         if p.brand:
             brands[p.brand] = brands.get(p.brand, 0) + 1
     by_id = {p.id: p for p in prods}
-    featured = [by_id[i] for i in sc["featured"] if i in by_id]
-    if not featured:  # sin eleccion de Andres: uno por tipo de equipo, con foto y precio
-        featured = sv.default_featured(prods)
-    fresh = [p for p in sorted(prods, key=lambda p: (_created(p), p.id), reverse=True) if p.images and p not in featured][:8]
-    shown = featured[:8] + fresh
-    stock = _stock_map(db, t.id, shown)
+    stock = _stock_map(db, t.id, prods)  # una sola consulta: destacados, novedades y kits con la misma disponibilidad
+    # Ajustes "ocultar agotados": tampoco salen en destacados, novedades ni kits
+    pool = [p for p in prods if not (stock.get(p.id) or {}).get("ocultar")]
+    sellable = {p.id for p in pool if _sellable(stock.get(p.id))}
+    featured = [by_id[i] for i in sc["featured"] if i in by_id and by_id[i] in pool]
+    if not featured:  # sin eleccion de Andres: uno por tipo de equipo, con foto y precio, primero lo que se puede comprar
+        featured = sv.default_featured(pool, prefer=sellable)
+    fresh = [p for p in sorted(pool, key=lambda p: (_created(p), p.id), reverse=True) if p.images and p not in featured][:8]
     kits = []
     for k in sc["kits"]:
         if not k.get("active", True):
             continue
-        kit = sv.build_kit(prods, k.get("answers") or {})
+        kit = sv.build_kit(pool, k.get("answers") or {}, prefer=sellable)  # cada pieza: primero lo que se puede comprar
         lines = [ln for ln in kit["lines"] if Decimal(str(ln["product"].price or 0)) > 0]
+        if not lines:
+            continue
         total = sum(
             (
                 _gross(ctx.pricer(ln["product"].price, ln["product"].currency), float(ln["product"].taxes[0].tax.rate) if ln["product"].taxes else 13)
@@ -403,8 +401,8 @@ def showcase_public(slug: str, response: Response, db: Session = Depends(get_db)
         "trust": sc["trust"],
         "categories": _cat_tree(ctx, counts, images),
         "brands": [{"name": b, "count": n} for b, n in sorted(brands.items(), key=lambda x: -x[1])[:14]],
-        "featured": [ctx.card(p, stock.get(p.id, Decimal(0))) for p in featured[:8]],
-        "fresh": [ctx.card(p, stock.get(p.id, Decimal(0))) for p in fresh],
+        "featured": [ctx.card(p, stock.get(p.id)) for p in featured[:8]],
+        "fresh": [ctx.card(p, stock.get(p.id)) for p in fresh],
         "kits": kits,
         "product_count": len(prods),
         "currency": ctx.pricer.currency,
@@ -446,7 +444,9 @@ def catalog(
         want = [int(x) for x in ids.split(",") if x.strip().isdigit()][:12]
         by_id = {p.id: p for p in prods}
         rows = [by_id[i] for i in want if i in by_id]
-        return {"items": [ctx.card(p, stock_all.get(p.id, Decimal(0)), full=True) | {"specs": sv.derive_specs(p)} for p in rows], "total": len(rows)}
+        return {"items": [ctx.card(p, stock_all.get(p.id), full=True) | {"specs": sv.derive_specs(p)} for p in rows], "total": len(rows)}
+    if ctx.cfg_inv.get("out_of_stock") == "ocultar":  # Ajustes: los agotados no se listan (la ficha directa abre)
+        prods = [p for p in prods if not (stock_all.get(p.id) or {}).get("ocultar")]
 
     all_counts: dict[int, int] = {}
     for p in prods:
@@ -475,7 +475,7 @@ def catalog(
         prods = [p for p in prods if p.id in scores]
 
     disp = {p.id: _gross(ctx.pricer(p.price, p.currency), float(p.taxes[0].tax.rate) if p.taxes else 13) for p in prods}
-    av = {p.id: _avail(_avail_base(p, stock_all.get(p.id, Decimal(0))), p, stock_all.get(p.id, Decimal(0)))["state"] for p in prods}
+    av = {p.id: (stock_all.get(p.id) or {}).get("state") for p in prods}
     types = {p.id: sv.product_type(p) for p in prods}
     brands_sel = {b.lower() for b in (brand or []) if b}
 
@@ -491,9 +491,9 @@ def catalog(
                 return False
         if skip != "avail" and avail:
             st = av[p.id]
-            if avail in ("disponible", "inmediata") and st not in ("disponible", "ultimas"):
+            if avail in ("disponible", "inmediata") and st != "en_bodega":
                 return False
-            if avail == "bajo_pedido" and st not in ("disponible", "ultimas", "bajo_pedido"):
+            if avail == "bajo_pedido" and st not in ("en_bodega", "bajo_pedido"):
                 return False
         return True
 
@@ -510,14 +510,14 @@ def catalog(
     for p in prods:
         if keep(p, "avail"):
             st = av[p.id]
-            if st in ("disponible", "ultimas"):
+            if st == "en_bodega":
                 facet_av["disponible"] += 1
-            if st in ("disponible", "ultimas", "bajo_pedido"):
+            if st in ("en_bodega", "bajo_pedido"):
                 facet_av["bajo_pedido"] += 1
     priced = [disp[p.id] for p in prods if keep(p, "price") and disp[p.id] > 0]
 
-    if sort == "relevance":
-        rows.sort(key=lambda p: (-scores.get(p.id, 0), _rank_default(p)))
+    if sort == "relevance":  # primero lo que se puede comprar ya (lo propio), luego bajo pedido
+        rows.sort(key=lambda p: (-scores.get(p.id, 0), sort_key(stock_all.get(p.id)), _rank_default(p)))
     elif sort == "name":
         rows.sort(key=lambda p: p.name.lower())
     elif sort in ("price_asc", "price_desc"):
@@ -531,7 +531,7 @@ def catalog(
     vmap = _variants(db, [p.id for p in page])
     response.headers["X-Total-Count"] = str(total)
     return {
-        "items": [ctx.card(p, stock_all.get(p.id, Decimal(0)), vmap.get(p.id)) for p in page],
+        "items": [ctx.card(p, stock_all.get(p.id), vmap.get(p.id)) for p in page],
         "total": total,
         "offset": offset,
         "category": (
@@ -557,14 +557,6 @@ def catalog(
         "currency": ctx.pricer.currency,
         "nav": nav,
     }
-
-
-def _avail_base(p: Product, own) -> dict:
-    if isinstance(own, dict):  # ya viene calculada por store_inventory (existencias reales, reservas y proveedor)
-        return own
-    from .catalog import store_availability
-
-    return store_availability(p, own)
 
 
 ACCESSORY_RULES = {
@@ -627,7 +619,7 @@ def item(slug: str, ref: str, response: Response, db: Session = Depends(get_db))
             groups.append({"title": title, "reason": why, "items": cands[:3]})
     every = [p] + related + [r for g in groups for r in g["items"]]
     stock = _stock_map(db, t.id, every)
-    out = ctx.card(p, stock.get(p.id, Decimal(0)), _variants(db, [p.id]).get(p.id), full=True)
+    out = ctx.card(p, stock.get(p.id), _variants(db, [p.id]).get(p.id), full=True)
     rate = Decimal(str(out["tax_rate"]))
     gross = Decimal(str(out["display_price"]))
     net = (gross / (1 + rate / 100)).quantize(Decimal("0.01"))
@@ -647,8 +639,8 @@ def item(slug: str, ref: str, response: Response, db: Session = Depends(get_db))
         "net_price": net,
         "tax_amount": (gross - net).quantize(Decimal("0.01")),
         "breadcrumbs": crumbs,
-        "related": [ctx.card(r, stock.get(r.id, Decimal(0))) for r in related],
-        "accessories": [{"title": g["title"], "reason": g["reason"], "items": [ctx.card(r, stock.get(r.id, Decimal(0))) for r in g["items"]]} for g in groups],
+        "related": [ctx.card(r, stock.get(r.id)) for r in related],
+        "accessories": [{"title": g["title"], "reason": g["reason"], "items": [ctx.card(r, stock.get(r.id)) for r in g["items"]]} for g in groups],
         "whatsapp": ctx.cfg.get("whatsapp") or "",
     }
 
@@ -694,11 +686,13 @@ def kit(slug: str, data: KitAnswers, request: Request, db: Session = Depends(get
     t = _tenant(db, slug)
     ctx = Ctx(db, t)
     prods = _published(db, t.id)
-    k = sv.build_kit(prods, data.model_dump())
-    stock = _stock_map(db, t.id, [ln["product"] for ln in k["lines"]])
+    stock = _stock_map(db, t.id, prods)
+    # el armador propone primero lo que se puede comprar (en bodega o bajo pedido) y nunca lo oculto por agotado
+    pool = [p for p in prods if not (stock.get(p.id) or {}).get("ocultar")]
+    k = sv.build_kit(pool, data.model_dump(), prefer={p.id for p in pool if _sellable(stock.get(p.id))})
     lines, total = [], Decimal(0)
     for ln in k["lines"]:
-        c = ctx.card(ln["product"], stock.get(ln["product"].id, Decimal(0)))
+        c = ctx.card(ln["product"], stock.get(ln["product"].id))
         sub = Decimal(str(c["display_price"])) * ln["quantity"]
         total += sub
         lines.append({"role": ln["role"], "reason": ln["reason"], "quantity": ln["quantity"], "subtotal": sub, "product": c})
@@ -961,7 +955,7 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str) -> dict:
         if not p or p.tenant_id != t.id or not p.show_on_web or not p.active:
             return meta | {"title": f"Producto no disponible · {name}", "robots": "noindex,follow", "canonical": base + "/catalogo"}
         ctx = Ctx(db, t)
-        own = _stock_of(db, t.id, [p.id]).get(p.id, Decimal(0))
+        own = _stock_of(db, t.id, [p.id]).get(p.id)
         c = ctx.card(p, own, full=True)
         url = base + c["path"]
         desc = re.sub(r"\s+", " ", (p.description_store or p.description_invoice or p.name)).strip()
@@ -974,7 +968,7 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str) -> dict:
             "@type": "Offer",
             "url": url,
             "priceCurrency": c["display_currency"],
-            "availability": sv.availability_schema(c["availability"]["state"]),
+            "availability": sv.availability_schema(c["availability"]["state"], c["availability"].get("ultimas")),
             "itemCondition": "https://schema.org/NewCondition",
             "seller": {"@id": base + "/#org"},
         }
