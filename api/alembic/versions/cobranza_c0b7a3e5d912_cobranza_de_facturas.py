@@ -37,11 +37,11 @@ def upgrade() -> None:
         sa.Column("stage", sa.SmallInteger(), nullable=False),
         sa.Column("sent_on", sa.Date(), nullable=False, index=True),
         sa.Column("due_date", sa.Date(), nullable=False),
-        sa.Column("balance", sa.Numeric(16, 5), nullable=True),
-        sa.Column("currency", sa.String(3), nullable=True),
-        sa.Column("status", sa.String(12), nullable=True),
+        sa.Column("balance", sa.Numeric(16, 5), nullable=False),
+        sa.Column("currency", sa.String(3), nullable=False),
+        sa.Column("status", sa.String(12), nullable=False),
         sa.Column("outbox_id", sa.Integer(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint("invoice_id", "stage", name="uq_collection_reminder_stage"),
     )
 
