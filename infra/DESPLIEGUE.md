@@ -75,6 +75,8 @@ Cómo se comporta (documentación de Railway):
 - Uno **cancelado** solo bloquea si ningún otro workflow del commit pasó. Como el de GitHub Pages también corre en
   `main`, el CI **nunca se cancela en `main`** (cada commit tiene su propio grupo de concurrencia).
 - Si en 2 horas no terminó, el despliegue se salta.
+- El build de GitHub Pages ("pages build and deployment") también es un workflow del commit: si falla, ese commit
+  tampoco despliega la plataforma. Los cambios de `docs/` van en commits aparte de los de `api/` o `portal/`.
 
 ### Prueba de la compuerta (una vez, en ventana)
 
