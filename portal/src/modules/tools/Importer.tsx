@@ -20,7 +20,7 @@ type PreviewResult = {
 /* need: el permiso que pide la API para ese tipo (la lista se filtra con el; la API sigue siendo la frontera) */
 const KINDS: { id: ImportKind; label: string; desc: string; route: string; need: string }[] = [
   { id: "customers", label: "Clientes", desc: "Nombre, cédula, correo y teléfono.", route: "/clientes", need: "crm.crear" },
-  { id: "products", label: "Productos y servicios", desc: "Código, nombre, precio, CABYS, impuesto.", route: "/productos", need: "catalog.crear" },
+  { id: "products", label: "Productos y servicios", desc: "Código, nombre, precio, CABYS, impuesto. Carga inicial: columna «Cantidad inicial» (y «Bodega») crea la entrada en el kardex; solo si el producto no tiene movimientos en esa bodega.", route: "/productos", need: "catalog.crear" },
   { id: "suppliers", label: "Proveedores", desc: "Nombre, cédula, contacto y condiciones de pago.", route: "/contabilidad/contable/proveedores", need: "catalog.crear" },
   { id: "invoices", label: "Facturas históricas", desc: "Documentos previos como referencia (no se reenvían a Hacienda).", route: "/facturas", need: "sales.crear" },
   { id: "catalogo", label: "Lista de precios de proveedor", desc: "Crea productos propios directo desde la lista: el costo entra tal cual y el precio sale del margen. Para tener el catálogo del proveedor aparte y vincular solo lo que vendés, usá Inventarios → Proveedores.", route: "/productos", need: "catalog.costos" },

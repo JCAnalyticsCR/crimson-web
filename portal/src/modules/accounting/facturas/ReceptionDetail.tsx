@@ -1,13 +1,15 @@
 /* Detalle de un comprobante recibido: datos, archivos y la respuesta ante Hacienda (aceptar / parcial / rechazar con
    actividad y condicion del IVA), con el calculo en vivo del IVA acreditable y el gasto aplicable. Despues de responder:
    linea de tiempo por intento y acciones (consultar, enviar, responder de nuevo, reabrir, gasto, vincular un gasto que
-   ya existia, descartar). Se puede adjuntar el PDF o la respuesta de Hacienda de esa clave cuando llegan aparte. */
+   ya existia, descartar). Se puede adjuntar el PDF o la respuesta de Hacienda de esa clave cuando llegan aparte.
+   Aceptada una factura de compra, quien maneja inventario le da entrada al inventario (StockIn). */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, downloadFile, fmtDate, fmtMoney, openFile, parseTs, uploadFile } from "../../../lib/api";
 import { useSession } from "../../../app/session";
 import { Badge, Card, Field, I, Icon, Loading, Modal } from "../../../ui/components";
 import { ACTIONS, ACTION_LABEL, DOC_TYPES, IVA_CONDITIONS, calcLive, ivaLabel, plazo, type IvaCondition, type ReceptionDetail as Detail } from "../hacienda";
+import StockIn from "./StockIn";
 
 type Activity = { id: number; code: string; description: string | null; is_default: boolean };
 type Cat = { id: number; name: string };
@@ -265,6 +267,7 @@ export default function ReceptionDetail() {
               )}
             </Card>
           )}
+          {(d.action === "aceptada" || d.action === "parcial") && (allows("inventory.ajustar") || allows("inventory.crear")) && <StockIn key={`${d.id}-${d.responses.length}`} docId={d.id} />}
           {allows("accounting.editar") && (["por_revisar", "ajeno", "invalido", "sin_respuesta"].includes(d.status) || d.status === "descartado") && (
             <Card title={d.status === "descartado" ? "Descartado" : "Descartar"}>
               {d.status === "descartado" ? (

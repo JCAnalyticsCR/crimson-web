@@ -661,3 +661,56 @@ async def attach(rid: int, file: UploadFile = File(...), p: Principal = Depends(
     audit(db, p.tenant.id, p.user.id, "reception_attach", "received_document", doc.id, {"tipo": kind}, ip=p.ip)
     db.commit()
     return detail(db, p, doc)
+
+
+# ---------- entrada al inventario desde la factura del proveedor ----------
+def _can_stock(p: Principal) -> bool:
+    return p.can("inventory", "ajustar") or p.can("inventory", "crear")
+
+
+@router.get("/{rid}/stock-lines")
+def stock_lines(rid: int, p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):
+    """Lineas del XML con el producto sugerido para "Dar entrada al inventario" (services/reception_stock)."""
+    from ..models import Warehouse
+    from ..services import inventory as invsvc
+    from ..services import reception_stock as rst
+
+    doc = rsvc.get_doc(db, p.tenant.id, rid)
+    return {
+        "lines": rst.suggestions(db, doc),
+        "accepted": rst.accepted(doc),
+        "entered": rst.entered(db, doc),
+        "can_stock": _can_stock(p),
+        "warehouses": [
+            {"id": w.id, "name": w.name, "is_default": w.is_default}
+            for w in db.scalars(
+                select(Warehouse)
+                .where(Warehouse.tenant_id == p.tenant.id, Warehouse.active, Warehouse.kind == invsvc.SELLABLE)
+                .order_by(Warehouse.is_default.desc(), Warehouse.id)
+            )
+        ],
+    }
+
+
+class StockInLine(BaseModel):
+    line: int = Field(ge=1)
+    product_id: int | None = None
+    quantity: Decimal | None = Field(None, gt=0)
+
+
+class StockInIn(BaseModel):
+    warehouse_id: int
+    items: list[StockInLine] = Field(min_length=1, max_length=500)
+
+
+@router.post("/{rid}/stock-in", status_code=201)
+def stock_in(rid: int, data: StockInIn, p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):
+    """Da entrada al inventario a las lineas ligadas a productos (una sola vez por comprobante)."""
+    from ..services import reception_stock as rst
+
+    if not _can_stock(p):
+        raise HTTPException(403, "Dar entrada al inventario lo hace quien maneja inventario")
+    doc = rsvc.get_doc(db, p.tenant.id, rid, lock=True)
+    n = rst.stock_in(db, doc, [x.model_dump() for x in data.items], data.warehouse_id, p.user.id, ip=p.ip)
+    db.commit()
+    return {"movimientos": n, "reference": rst.reference(doc)}
