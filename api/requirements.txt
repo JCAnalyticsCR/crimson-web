@@ -20,6 +20,10 @@ argon2-cffi-bindings==26.1.0
 billiard==4.3.0
     # via celery
 celery==5.6.3
+    # via
+    #   celery-redbeat
+    #   crimson-api
+celery-redbeat==2.4.2
     # via crimson-api
 certifi==2026.7.22
     # via
@@ -114,7 +118,9 @@ pyjwt==2.15.1
 pyotp==2.10.0
     # via crimson-api
 python-dateutil==2.9.0.post0
-    # via celery
+    # via
+    #   celery
+    #   celery-redbeat
 python-dotenv==1.2.3
     # via
     #   pydantic-settings
@@ -124,7 +130,9 @@ python-multipart==0.0.32
 pyyaml==6.0.3
     # via uvicorn
 redis==8.1.0
-    # via crimson-api
+    # via
+    #   celery-redbeat
+    #   crimson-api
 segno==1.6.6
     # via crimson-api
 signxml==5.1.0
@@ -137,6 +145,8 @@ sqlalchemy==2.0.54
     #   crimson-api
 starlette==1.6.0
     # via fastapi
+tenacity==9.1.4
+    # via celery-redbeat
 typing-extensions==4.16.0
     # via
     #   alembic

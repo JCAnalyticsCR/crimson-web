@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -261,6 +261,12 @@ class EInvoiceDocument(TenantMixin, TimestampMixin, Base):
 # ---------- Correo saliente (outbox) y webhooks (plan 6, 5.3) ----------
 class EmailOutbox(TenantMixin, TimestampMixin, Base):
     __tablename__ = "email_outbox"
+    # dedupe_key: el mismo aviso automatico no sale dos veces (dos corridas, dos beats, un reintento de la tarea).
+    # Unica por empresa; NULL (correos manuales) no choca con nada.
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "dedupe_key", name="uq_email_outbox_dedupe"),
+        Index("ix_email_outbox_retry", "status", "next_attempt_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     to: Mapped[str] = mapped_column(String(300))
@@ -270,10 +276,14 @@ class EmailOutbox(TenantMixin, TimestampMixin, Base):
     attachments: Mapped[list] = mapped_column(JSON, default=list)  # [{name, kind, ref}]
     entity: Mapped[str | None] = mapped_column(String(40))
     entity_id: Mapped[int | None] = mapped_column(Integer)
-    status: Mapped[str] = mapped_column(String(20), default="pendiente")  # pendiente | enviado | error | simulado
+    # pendiente | enviado | error (se reintenta) | fallido (ya no se reintenta) | simulado (sin llave de correo)
+    status: Mapped[str] = mapped_column(String(20), default="pendiente")
     provider_id: Mapped[str | None] = mapped_column(String(120))
     error: Mapped[str | None] = mapped_column(Text)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dedupe_key: Mapped[str | None] = mapped_column(String(200))
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # envios intentados
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # cuando lo toma mail.retry_outbox
 
 
 class WebhookEvent(Base):

@@ -11,9 +11,9 @@ from __future__ import annotations
 import secrets
 from dataclasses import dataclass
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
-CR = ZoneInfo("America/Costa_Rica")
+# cr_now vive en core/timeutil (una sola hora de Costa Rica para todo); se reexporta para los imports de siempre
+from ..core.timeutil import CR, cr_now  # noqa: F401
 
 
 @dataclass
@@ -40,12 +40,6 @@ class EInvoiceProvider:
 
     def receptor_status(self, provider_ref: str) -> EmitResult:  # pragma: no cover
         raise NotImplementedError
-
-
-def cr_now() -> datetime:
-    """Hora de Costa Rica sin microsegundos: la fecha de la clave y la FechaEmision salen de aqui (no de UTC: despues de
-    las 18:00 la fecha UTC ya es la del dia siguiente)."""
-    return datetime.now(CR).replace(microsecond=0)
 
 
 def security_code() -> str:
