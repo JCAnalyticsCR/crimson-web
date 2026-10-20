@@ -102,7 +102,7 @@ const instructions = (code: string, number: string, total: string) => ({
 const ESTADOS_EJEMPLO = ["nuevo", "en_revision", "pagado", "preparando", "enviado", "entregado"] as const;
 const MIN = 60_000, HORA = 60 * MIN;
 const DESFASE: Record<string, number> = { nuevo: 0, en_revision: 25 * MIN, pagado: 2 * HORA, preparando: 22 * HORA, enviado: 46 * HORA, entregado: 70 * HORA };
-const LINEAS_EJEMPLO = [{ product_id: 53, quantity: 2 }, { product_id: 177, quantity: 1 }, { product_id: 11, quantity: 1 }];
+const LINEAS_EJEMPLO = [{ product_id: 68, quantity: 2 }, { product_id: 186, quantity: 1 }, { product_id: 240, quantity: 1 }];
 
 function pedidoEjemplo(c: Catalog, estado: string, comprobante?: { filename: string; at: string }): DemoOrder | null {
   const i = (ESTADOS_EJEMPLO as readonly string[]).indexOf(estado);

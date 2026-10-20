@@ -1,133 +1,211 @@
 """Snapshot del catalogo publico para la DEMOSTRACION estatica de la tienda (docs/demo-tienda/).
 
-Lee el catalogo publico exportado de Fygaro (infra/fygaro/catalogo-fygaro-*.json) y la division territorial
-(api/app/services/cr_geo.py) y escribe portal/src/demo/snapshot.json, que el build de la demo empaqueta.
+Descarga el catalogo real de la tienda propia (GET /public/store/crimson/products y /public/store/crimson)
+y escribe portal/src/demo/snapshot.json, que el build de la demo empaqueta.
 
+- Fuente: tienda propia en produccion (api-production-f07a.up.railway.app). Son datos publicos sin costo.
 - Excluye productos sin precio.
-- Precios: se guardan en USD sin IVA (como vienen); la demo los exhibe en colones con IVA usando un tipo de
-  cambio FIJO de referencia (FX abajo). No es el tipo de cambio del dia.
-- Imagenes: solo las URLs publicas originales de Fygaro (no se descarga nada).
-- Disponibilidad: SIMULADA y deterministica (la mayoria "bajo pedido", algunas "disponible"); sin cantidades.
-- Marca: deducida del nombre/SKU con reglas simples (el catalogo de Fygaro no la trae en un campo).
+- Precios: los productos vienen en CRC sin IVA (campo `price`). Se guardan en `crc`; el campo `usd` se
+  conserva como crc / FX solo por compatibilidad con el campo `fx`. net() en catalog.ts usa `crc`.
+- Imagenes: URLs publicas de eurocompcr.com tal como las devuelve la API.
+- Disponibilidad REAL: 'b' bajo pedido, 'a' agotado, 'd' en bodega (del campo availability.state).
+- Categorias: IDs reales del arbol de la tienda (no se reasignan IDs).
+- `mod`: ID del producto cero-rellenado (ordena 'recientes' de forma estable, mayor id = mas reciente).
+- Textos legales: de la tienda real si vienen; si estan vacios, de Fygaro de respaldo.
+- Copia cruda fechada en infra/tienda/catalogo-tienda-AAAA-MM-DD.json (reproducibilidad sin red).
 
-Uso (desde la raiz del repo):  python portal/scripts/demo_snapshot.py
+Uso (desde la raiz del repo):
+  python portal/scripts/demo_snapshot.py                          # descarga y genera
+  python portal/scripts/demo_snapshot.py --from-file <path>      # lee archivo local (sin red)
 """
 
 from __future__ import annotations
 
+import argparse
 import json
-import re
-import runpy
 import sys
-import zlib
+import urllib.request
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "infra" / "fygaro" / "catalogo-fygaro-2026-10-12.json"
-GEO = ROOT / "api" / "app" / "services" / "cr_geo.py"
+RAW_DIR = ROOT / "infra" / "tienda"
 OUT = ROOT / "portal" / "src" / "demo" / "snapshot.json"
-FX = 512  # colones por dolar, REFERENCIA fija para la demostracion
-IVA = 13  # tasa general de Costa Rica (Fygaro trae tasas recalculadas con decimales: 13.2, 12.8...)
+GEO = ROOT / "api" / "app" / "services" / "cr_geo.py"
 
-BRANDS: list[tuple[str, str]] = [
-    ("Ezviz", r"ezviz|\bcs-|^cs[a-z0-9]"),
-    ("Axis", r"\baxis\b"),
-    ("Hikvision", r"hikvision|\bhik\b|hilook|acusense|colorvu|\bds-|^ds|\bids-?|^ids|^crds|^crae|^ae-|\bae-|^k1t|easylink|ax pro"),
-    ("Ubiquiti", r"ubiquiti|unifi|ubiwifi|\bubi\b|\bui\b|^u[a-z0-9]{1,4}[-]|^usw|^uvc|^u6|^u7|^ucg|^ck-|^uf-|^udb|^umr|^urack|cloudkey|^cru"),
-    ("Teklink-T", r"teklink"),
-    ("APC", r"\bapc\b|back-ups"),
-    ("CDP", r"\bcdp\b"),
-    ("Nova", r"\bnova\b"),
-    ("Kingston", r"kingston"),
-    ("Western Digital", r"western digital|\bwdi?\b|purple|^crwd"),
-    ("ADATA", r"adata"),
-    ("Iflux", r"iflux|^fd-"),
-    ("Seagate", r"seagate|skyhawk"),
-    ("Lantek", r"lantek|^ltk"),
-    ("Panduit", r"panduit|mini-?com|pan-net"),
-    ("Sprotek", r"sprotek"),
-    ("Smartbitt", r"smartbitt"),
-    ("Xiaomi", r"xiaomi"),
-    ("TP-Link", r"tp-link|tplink"),
-    ("ZKTeco", r"zkteco"),
-    ("Dahua", r"dahua"),
-    ("Mikrotik", r"mikrotik"),
-    ("Epcom", r"epcom"),
-    ("AOC", r"aoc"),
-    ("HP", r"hp"),
-    ("Futronic", r"futronic"),
-]
+API_BASE = "https://api-production-f07a.up.railway.app"
+STORE_SLUG = "crimson"
+
+FX = 512          # tipo de cambio fijo de REFERENCIA (la demo no convierte monedas en vivo)
+IVA = 13          # tasa general Costa Rica; la API ya trae tax_rate por producto
 
 
-def brand_of(name: str, sku: str) -> str | None:
-    t = f"{name} {sku}".lower()
-    s = sku.lower().strip()
-    for b, rx in BRANDS:
-        if re.search(rx, t) or re.search(rx, s):
-            return b
-    return None
+# Textos legales de respaldo (Fygaro); se usan si la tienda real no tiene los suyos.
+_LEGAL_FALLBACK = {
+    "terms": (
+        "Condiciones de Uso\nAl acceder o usar este sitio web, aceptás las presentes condiciones. "
+        "Crimson CR se reserva el derecho de modificarlas en cualquier momento.\n\n"
+        "Propiedad intelectual\nTodo el contenido de este sitio — textos, imágenes, logotipos y código — "
+        "es propiedad de Crimson CR o de sus proveedores y está protegido por las leyes de propiedad "
+        "intelectual de Costa Rica.\n\n"
+        "Limitación de responsabilidad\nCrimson CR no se responsabiliza por daños directos o indirectos "
+        "derivados del uso del sitio ni de los productos adquiridos, salvo lo que establezca la garantía "
+        "de fábrica del fabricante."
+    ),
+    "privacy": (
+        "Política de Privacidad\nCrimson CR recopila únicamente los datos necesarios para procesar tus "
+        "pedidos: nombre, correo electrónico, dirección de entrega y método de pago. No vendemos ni "
+        "compartimos tus datos con terceros salvo los estrictamente necesarios para el despacho (empresa "
+        "de mensajería) o para el cumplimiento legal.\n\n"
+        "Cookies\nUsamos cookies de sesión para el carrito de compras. No usamos cookies de rastreo de "
+        "terceros ni publicidad comportamental.\n\n"
+        "Contacto\nPara ejercer tus derechos de acceso, rectificación o cancelación, escribinos a "
+        "info@crimsoncr.com."
+    ),
+}
+
+AVAIL_MAP = {
+    "bajo_pedido": "b",
+    "agotado": "a",
+    "en_bodega": "d",
+    "disponible": "d",   # por si la tienda agrega este estado en el futuro
+}
 
 
-def main() -> int:
-    d = json.loads(SRC.read_text(encoding="utf-8"))
-    geo = runpy.run_path(str(GEO))
+def _fetch(url: str) -> bytes:
+    with urllib.request.urlopen(url, timeout=30) as r:
+        return r.read()
 
-    # categorias: madres 1..N, subcategorias 101.. (las vacias tambien: la demo solo muestra las que tienen productos)
-    cats: list[dict] = []
-    by_name: dict[tuple[str, str | None], int] = {}
-    nid = 1
-    sid = 101
-    for c in d["categories"]:
-        cats.append({"id": nid, "name": c["name"], "parent": None})
-        by_name[(c["name"], None)] = nid
-        for s in c.get("subcategories") or []:
-            cats.append({"id": sid, "name": s["name"], "parent": nid})
-            by_name[(c["name"], s["name"])] = sid
-            sid += 1
-        nid += 1
 
-    prods = []
-    for i, p in enumerate(d["products"], start=1):
-        usd = float(p.get("price") or 0)
-        if usd <= 0:
-            continue  # sin precio: fuera de la demo
-        cat = None
-        if p.get("categories"):
-            parent = p["categories"][0]
-            sub = (p.get("subcategories") or [None])[0]
-            cat = by_name.get((parent, sub)) or by_name.get((parent, None))
-        sku = (p.get("sku") or "").strip()
-        avail = "d" if zlib.crc32(sku.encode()) % 10 < 3 else "b"  # ~30 % "Disponible", el resto "Bajo pedido"
-        prods.append(
-            {
-                "id": i,
-                "code": sku or f"P{i}",
-                "name": re.sub(r"\s+", " ", p["name"]).strip(),
-                "brand": brand_of(p["name"], sku),
-                "desc": (p.get("description") or "").strip() or None,
-                "usd": round(usd, 2),
-                "rate": IVA,
-                "images": [u for u in p.get("images") or [] if u.startswith("https://")],
-                "cat": cat,
-                "mod": p.get("lastmod") or "",
-                "avail": avail,
-            }
+def load_raw(from_file: str | None) -> tuple[list[dict], dict]:
+    """Devuelve (products, store_info). Descarga de la red o lee el archivo local."""
+    if from_file:
+        p = Path(from_file)
+        d = json.loads(p.read_text(encoding="utf-8"))
+        prods = d["prods"]
+        store = d["store"]
+        print(f"Leyendo desde {p} ({len(prods)} productos)")
+    else:
+        print("Descargando catálogo de la tienda real...")
+        prods = json.loads(_fetch(f"{API_BASE}/public/store/{STORE_SLUG}/products"))
+        store = json.loads(_fetch(f"{API_BASE}/public/store/{STORE_SLUG}"))
+        today = str(date.today())
+        raw_path = RAW_DIR / f"catalogo-tienda-{today}.json"
+        RAW_DIR.mkdir(parents=True, exist_ok=True)
+        raw_path.write_text(
+            json.dumps({"prods": prods, "store": store, "fetched": today}, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
         )
+        print(f"Copia cruda guardada: {raw_path.relative_to(ROOT)}")
+    return prods, store
 
+
+def build_categories(store_cats: list[dict]) -> tuple[list[dict], dict[int, int]]:
+    """Convierte el arbol de la API en lista plana y devuelve el mapa cat_id -> parent_id."""
+    cats: list[dict] = []
+    for c in store_cats:
+        cats.append({"id": c["id"], "name": c["name"], "parent": None})
+        for s in c.get("subcategories") or []:
+            cats.append({"id": s["id"], "name": s["name"], "parent": c["id"]})
+    by_parent = {c["id"]: (c["parent"] if c["parent"] is not None else None) for c in cats}
+    return cats, by_parent
+
+
+def main(args: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Genera snapshot.json de la demo")
+    parser.add_argument("--from-file", metavar="PATH", help="Lee el JSON crudo en lugar de descargar")
+    ns = parser.parse_args(args)
+
+    prods_raw, store_raw = load_raw(ns.from_file)
+
+    # ---------------------------------------------------------------- fecha de extraccion
+    if ns.from_file:
+        p = Path(ns.from_file)
+        try:
+            extracted_at = json.loads(p.read_text(encoding="utf-8")).get("fetched", str(date.today()))
+        except Exception:
+            extracted_at = str(date.today())
+    else:
+        extracted_at = str(date.today())
+
+    # ---------------------------------------------------------------- geografía
+    try:
+        import runpy
+        geo = runpy.run_path(str(GEO))
+        provincias = geo["PROVINCIAS"]
+        outside_gam = {"provinces": sorted(geo["PROVINCIAS_FUERA_GAM"]), "cantons": sorted(geo["CANTONES_FUERA_GAM"])}
+    except Exception as e:
+        print(f"Advertencia: no se pudo cargar cr_geo.py ({e}); se usan valores vacíos")
+        provincias = {}
+        outside_gam = {"provinces": [], "cantons": []}
+
+    # ---------------------------------------------------------------- categorias
+    store_cats = store_raw.get("categories") or []
+    cats, _ = build_categories(store_cats)
+
+    # ---------------------------------------------------------------- productos
+    prods_out: list[dict] = []
+    for p in prods_raw:
+        crc = float(p.get("price") or 0)
+        if crc <= 0:
+            continue  # sin precio: fuera de la demo
+        avail_state = (p.get("availability") or {}).get("state", "bajo_pedido")
+        avail = AVAIL_MAP.get(avail_state, "b")
+        rate = float(p.get("tax_rate") or IVA)
+        brand = p.get("brand") or None
+        cat_id = p.get("category_id") or None
+        images = [u for u in (p.get("images") or []) if isinstance(u, str) and u.startswith("https://")]
+        code = (p.get("code") or "").strip() or f"P{p['id']}"
+        desc = (p.get("description") or "").strip() or None
+        prods_out.append({
+            "id": p["id"],
+            "code": code,
+            "name": p["name"].strip(),
+            "brand": brand,
+            "desc": desc,
+            "crc": round(crc),             # CRC sin IVA (fuente principal de precio)
+            "usd": round(crc / FX, 2),     # solo para compatibilidad con fx; net() usa crc
+            "rate": int(round(rate)),
+            "images": images,
+            "cat": cat_id,
+            "mod": str(p["id"]).zfill(6),  # orden estable: mayor id = mas reciente
+            "avail": avail,
+        })
+
+    # ---------------------------------------------------------------- textos legales
+    store_legal = (store_raw.get("store") or {}).get("legal") or {}
+    legal: dict[str, str] = {}
+    for k in ("terms", "privacy"):
+        v = store_legal.get(k, "").strip()
+        legal[k] = v if v else _LEGAL_FALLBACK.get(k, "")
+
+    # ---------------------------------------------------------------- salida
     out = {
-        "source": SRC.relative_to(ROOT).as_posix(),
-        "extracted_at": d.get("extracted_at"),
+        "source": f"{API_BASE}/public/store/{STORE_SLUG}/products",
+        "extracted_at": extracted_at,
         "fx": FX,
-        "legal": d.get("legal") or {},
-        "provinces": geo["PROVINCIAS"],
-        "outside_gam": {"provinces": sorted(geo["PROVINCIAS_FUERA_GAM"]), "cantons": sorted(geo["CANTONES_FUERA_GAM"])},
+        "legal": legal,
+        "provinces": provincias,
+        "outside_gam": outside_gam,
         "categories": cats,
-        "products": prods,
+        "products": prods_out,
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    sin_marca = sum(1 for p in prods if not p["brand"])
-    print(f"{len(prods)} productos ({len(d['products']) - len(prods)} sin precio excluidos), {sin_marca} sin marca -> {OUT.relative_to(ROOT)} ({OUT.stat().st_size // 1024} KB)")
+
+    sin_imagen = sum(1 for p in prods_out if not p["images"])
+    sin_marca = sum(1 for p in prods_out if not p["brand"])
+    avail_counts: dict[str, int] = {}
+    for p in prods_out:
+        avail_counts[p["avail"]] = avail_counts.get(p["avail"], 0) + 1
+    excluidos = len(prods_raw) - len(prods_out)
+    print(
+        f"{len(prods_out)} productos ({excluidos} sin precio excluidos): "
+        + ", ".join(f"{v} {k}" for k, v in sorted(avail_counts.items()))
+        + f"  |  {sin_imagen} sin imagen  |  {sin_marca} sin marca"
+        + f"  ->  {OUT.relative_to(ROOT)} ({OUT.stat().st_size // 1024} KB)"
+    )
+    print(f"Fecha de extracción: {extracted_at}")
     return 0
 
 

@@ -30,7 +30,7 @@ type Step = {
 export const tourSteps = (productPath: string): Step[] => [
   {
     id: "portada", title: "La portada de Crimson",
-    body: "Vitrina con la marca de Crimson: categorías, kits listos y lo más pedido, con precios y existencias del inventario (en esta vista previa, la disponibilidad es simulada).",
+    body: "Vitrina con la marca de Crimson: categorías, kits listos y lo más pedido. Los precios y la disponibilidad son los del inventario del proveedor en la fecha de la copia del catálogo.",
     path: "/", target: ["#vt-title", ".vt-hero", ".sh-hero", "main h1"],
   },
   {

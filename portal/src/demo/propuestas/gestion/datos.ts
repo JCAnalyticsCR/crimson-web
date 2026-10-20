@@ -1,6 +1,6 @@
 /* Datos de ejemplo del equipo GESTION (Detras de escena, C1 y E1). Copia canonica de la especificacion (3.0, 3.5,
-   3.6 y 3.7): productos reales del snapshot (precio sin IVA = usd x 512; con IVA x 1,13), pedidos de ejemplo con
-   totales calculados con la misma cuenta que quote() de mockApi, y las reglas reales de estados de
+   3.6 y 3.7): productos reales del catalogo de la tienda (precio sin IVA = crc; con IVA = crc x 1,13), pedidos
+   de ejemplo con totales calculados con la misma cuenta que quote() de mockApi, y las reglas reales de estados de
    api/app/services/store_orders.py (STATUS_LABEL, TRANSITIONS, next_states) y de Orders.tsx (ACTION).
    Fechas SIEMPRE relativas a Date.now(). Correos ficticios en @example.com (RFC 2606). */
 
@@ -49,28 +49,26 @@ export function siguientes(o: { status: Estado; pago: { kind: string }; entrega:
   return orden.filter((s) => nxt.has(s));
 }
 
-// ---------------------------------------------------------------- productos reales del snapshot
+// ---------------------------------------------------------------- productos reales del catalogo de la tienda
 export type Producto = { id: number; nombre: string; corto: string; code: string; neto: number; conIva: number; disponible: boolean; path: string };
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const P = (id: number, nombre: string, corto: string, code: string, neto: number, disponible: boolean, slug: string): Producto =>
   ({ id, nombre, corto, code, neto, conIva: r2(neto * 1.13), disponible, path: `/p/${slug}-${id}` });
 export const PRODUCTOS: Record<number, Producto> = Object.fromEntries([
-  P(53, "Camara IP Hikvision 4MP Acusense Bullet IP67", "Bullet IP67", "DS2CD2043G2LI2U", 55603.2, false, "camara-ip-hikvision-4mp-acusense-bullet-ip67"),
-  P(118, "Camara Tipo Domo Hikvision 4MP Acusense Smart Hybrid Lght", "Domo Acusense", "DS-2CD2143G2-LIS2U(2.8mm)", 61327.36, true, "camara-tipo-domo-hikvision-4mp-acusense-smart-hybrid-lght"),
-  P(177, "Grabador IP NVR Hikvision 4CH PoE", "Grabador 4CH", "DS-7104NI-Q1/4P", 52684.8, true, "grabador-ip-nvr-hikvision-4ch-poe"),
-  P(93, "Grabador Hikvision NVR 8ch 4MP H.265+ 1 SATA PoE", "Grabador 8CH", "DS-7108NI-Q1/8P", 64000, false, "grabador-hikvision-nvr-8ch-4mp-h-265-1-sata-poe"),
-  P(11, "Disco duro 2TB Western Digital Sata Purple", "Disco 2TB", "CRWD23PURZ", 43765.76, false, "disco-duro-2tb-western-digital-sata-purple"),
-  P(10, "Disco duro de 4TB Western Digital Purple", "Disco 4TB", "WD44PURZ", 87040, false, "disco-duro-de-4tb-western-digital-purple"),
-  P(12, "Disco duro 6TB Western Digital Sata Purple", "Disco duro 6TB", "CRWD64PURZ", 121687.04, false, "disco-duro-6tb-western-digital-sata-purple"),
-  P(92, "CABLE U/UTP CAT5E HIKVISION 305 METROS", "Cable UTP 305 m", "DS-1LN5EUEC0", 40673.28, false, "cable-u-utp-cat5e-hikvision-305-metros"),
-  P(318, "CAJA CUADRADA EXTERIOR FS TEKLINK-T 3 ENTRADAS 1/2 PULGADA INCLUYE 2 TAPONES DE CIERRE 2G50-3", "Caja exterior", "2G50-3", 3584, true, "caja-cuadrada-exterior-fs-teklink-t-3-entradas-1-2-pulgada"),
-  P(108, "UPS APC BACK-UPS 1600VA / 960W 120V AVR", "UPS APC 1600VA", "BX1600M-LM", 97280, false, "ups-apc-back-ups-1600va-960w-120v-avr"),
-  P(36, "UPS HIKVISION DS-UPS1000-X", "UPS Hikvision", "DS-UPS1000-X", 25600, false, "ups-hikvision-ds-ups1000-x"),
-  P(40, "Camara Bullet Easy Link para exteriores 4MP", "Bullet Easy Link", "DS-2CV1043G2LIDWF28B", 24064, false, "camara-bullet-easy-link-para-exteriores-4mp"),
-  P(39, "Camara Turret Easy Link 4MP Interiores", "Turret Easy Link", "DS-2CV1F43G2LIDWF28", 24064, false, "camara-turret-easy-link-4mp-interiores"),
-  P(5, "Kit Easylink WiFi de 4 MP, Bullet Exterior - Domo Interiores", "Kit Easylink WiFi", "DS-J142I/NKS424W02H", 55296, true, "kit-easylink-wifi-de-4-mp-bullet-exterior-domo-interiores"),
-  P(215, "Cámara Bullet 4 MP ColorVu 3.0", "Bullet ColorVu", "DS-2CD1047G3-LIU", 47104, false, "camara-bullet-4-mp-colorvu-3-0"),
-  P(8, "UniFi U7-Pro Punto de Acceso WiFi 7 Ubiquiti", "UniFi U7-Pro", "U7PRO", 145459.2, true, "unifi-u7-pro-punto-de-acceso-wifi-7-ubiquiti"),
+  P(68,  "Cámara bullet Hikvision DS-2CD2043G2-LI2U(2.8MM) 4MP AcuSense smart hybrid light",   "Bullet AcuSense",   "SG2045",       55800,  false, "camara-bullet-hikvision-ds-2cd2043g2-li2u-2-8mm-4mp-acusense-smart"),
+  P(90,  "Cámara dome Hikvision DS-2CD2143G2-LIS2U(2.8mm) 4MP AcuSense smart hybrid",          "Dome AcuSense",     "SG2044",       59000,  false, "camara-dome-hikvision-ds-2cd2143g2-lis2u-2-8mm-4mp-acusense-smart"),
+  P(186, "Grabadora NVR Hikvision DS-7104NI-Q1/4P 4 canales IP hasta 6 MP PoE",                "Grabador 4CH PoE",  "3102068",      50700,  false, "grabadora-nvr-hikvision-ds-7104ni-q1-4p-4-canales-ip-hasta-6-mp-full"),
+  P(188, "Grabadora NVR Hikvision DS-7608NXI-K1/8P 8 canales IP 8 puertos PoE 4K",             "Grabador 8CH PoE",  "SG5046",       177400, false, "grabadora-nvr-hikvision-ds-7608nxi-k1-8p-8-canales-ip-8-puertos-poe"),
+  P(240, "Disco duro interno 2TB Seagate ST2000VX017 3.5'' SATA optimizado videovigilancia",    "Disco 2TB Seagate", "ST2000VX017",  87100,  false, "disco-duro-interno-2tb-seagate-st2000vx017-3-5-sata-iii-5400-rpm"),
+  P(241, "Disco duro interno 4TB ST4000VX016 Seagate 3.5 pulg. SATA optimizado videovigilancia","Disco 4TB Seagate", "ST4000VX016",  116100, false, "disco-duro-interno-4tb-st4000vx016-seagate-3-5-pulg-sata-iii-cmr"),
+  P(242, "Disco duro interno 6TB Western Digital Purple WD64PURZ SATA",                         "Disco 6TB WD",      "WD64PURZ",     211200, false, "disco-duro-interno-6tb-western-digital-purple-wd64purz-sata-iii-gb-s"),
+  P(245, "Cable UTP Cat6 Nova FAN60305001C 305M PVC",                                           "Cable UTP 305 m",   "FAN60305001C", 28500,  false, "cable-utp-cat6-nova-fan60305001c-305m-pvc"),
+  P(17,  "Soporte de muro para cámara de seguridad Hikvision DS-1602ZJ",                        "Soporte muro",      "300025",       8900,   false, "soporte-de-muro-para-camara-de-seguridad-hikvision-ds-1602zj"),
+  P(39,  "Switch Hikvision DS-3T1506HP-EI-UPS 4 puertos PoE / 2 SFP con respaldo de energía",  "Switch-UPS",        "RC5081",       93000,  false, "switch-hikvision-ds-3t1506hp-ei-ups-4-puertos-gigabit-poe-2-puertos"),
+  P(130, "Cámara turret Hikvision DS-2CD1367G2H-LIU(2.8mm) smart hybrid IP67 6MP",             "Turret 6MP",        "SG2026",       52000,  false, "camara-turret-hikvision-ds-2cd1367g2h-liu-2-8mm-smart-hybrid-light"),
+  P(200, "Kit de cámaras WiFi bala y torreta Hikvision NKS4245WBTH 4MP 5MP WiFi",              "Kit WiFi Hikvision","SG2166",       67500,  false, "kit-de-camaras-wifi-bala-y-torreta-hikvision-nks4245wbth-4mp-5mp-wifi"),
+  P(63,  "Cámara bullet Hikvision DS-2CD1047G3-LIU(2.8MM) 4MP ColorVu 3.0 WDR H.265",         "Bullet ColorVu 3.0","SG2104",       49700,  false, "camara-bullet-hikvision-ds-2cd1047g3-liu-2-8mm-4mp-colorvu-3-0-wdr-h"),
+  P(28,  "Punto de acceso Hikvision DS-3WF02-5AC/D 5 GHz 867 Mbps wireless bridge",            "Punto Acceso 5GHz", "RC3013",       52200,  false, "punto-de-acceso-hikvision-ds-3wf02-5ac-d-5-ghz-867-mbps-wireless"),
 ].map((p) => [p.id, p]));
 
 // ---------------------------------------------------------------- pedidos
@@ -163,9 +161,9 @@ export function pedido128(k: Estado, ahora = Date.now()): PedidoGes {
   const flujo: Paso[] = CAMINO_128.slice(0, hasta + 1).map((s) => ({ s, min: OFF_128[s], by: POR_128[s] }));
   const ult = CAMINO_128[hasta];
   return construir({
-    numero: "ORD-000128", cliente: MARIA, entrega: GAM_ALAJUELA, pago: "sinpe", items: [[53, 2], [177, 1], [11, 1]],
+    numero: "ORD-000128", cliente: MARIA, entrega: GAM_ALAJUELA, pago: "sinpe", items: [[68, 2], [186, 1], [240, 1]],
     haceMin: OFF_128[ult] + 15, flujo, factura: "FE-000231", tracking: "EJ012844710CR",
-    requiereCompra: "2 × Bullet IP67, 1 × Disco 2TB", margen: 0.36,
+    requiereCompra: "2 × Bullet AcuSense, 1 × Disco 2TB Seagate", margen: 0.36,
   }, ahora);
 }
 
@@ -173,30 +171,30 @@ export function pedidosEjemplo(ahora = Date.now()): PedidoGes[] {
   const H = 60;
   return [
     pedido128("en_revision", ahora),
-    construir({ numero: "ORD-000127", cliente: { name: "Jorge Vargas", email: "jorge@example.com" }, entrega: RETIRO, pago: "tarjeta", items: [[118, 1]],
+    construir({ numero: "ORD-000127", cliente: { name: "Jorge Vargas", email: "jorge@example.com" }, entrega: RETIRO, pago: "tarjeta", items: [[90, 1]],
       haceMin: 3 * H, flujo: [{ s: "nuevo", min: 0, by: null }, { s: "pagado", min: 2, by: "ONVO (pago en línea; ejemplo para cuando se contrate)" }], factura: "FE-000230", margen: 0.30 }, ahora),
     construir({ numero: "ORD-000126", cliente: { name: "Laura Méndez", company: "Comercial Ejemplo S.A.", id_number: "3-101-000000 (ejemplo)", email: "compras@example.com" },
       entrega: { type: "envio", method: "Envío GAM", province: "San José", canton: "San José", district: "Catedral" }, pago: "transferencia",
-      items: [[53, 4], [118, 4], [93, 1], [12, 1], [92, 1], [318, 4]], haceMin: 5 * H, flujo: [{ s: "nuevo", min: 0, by: null }],
+      items: [[68, 4], [90, 4], [188, 1], [242, 1], [245, 1], [17, 4]], haceMin: 5 * H, flujo: [{ s: "nuevo", min: 0, by: null }],
       factura: "FE-000232", requiereCompra: "4 productos", margen: 0.35 }, ahora),
-    construir({ numero: "ORD-000125", cliente: { name: "Ana Solano", email: "ana@example.com" }, entrega: RETIRO, pago: "efectivo", items: [[5, 1]],
+    construir({ numero: "ORD-000125", cliente: { name: "Ana Solano", email: "ana@example.com" }, entrega: RETIRO, pago: "efectivo", items: [[200, 1]],
       haceMin: 26 * H, flujo: [{ s: "nuevo", min: 0, by: null }, { s: "preparando", min: 3 * H, by: "Andrés" }, { s: "listo", min: 20 * H, by: "Andrés" }], margen: 0.22 }, ahora),
     construir({ numero: "ORD-000124", cliente: { name: "Carlos Jiménez", email: "carlos@example.com" },
-      entrega: { type: "envio", method: "Envío fuera de la GAM", province: "Guanacaste", canton: "Liberia", district: "Liberia" }, pago: "sinpe", items: [[8, 1]],
+      entrega: { type: "envio", method: "Envío fuera de la GAM", province: "Guanacaste", canton: "Liberia", district: "Liberia" }, pago: "sinpe", items: [[28, 1]],
       haceMin: 52 * H, flujo: [{ s: "nuevo", min: 0, by: null }, { s: "en_revision", min: 30, by: "Carlos (cliente)" }, { s: "pagado", min: 2 * H, by: "Andrés" },
         { s: "preparando", min: 20 * H, by: "Andrés" }, { s: "enviado", min: 46 * H, by: "Andrés" }], factura: "FE-000227", tracking: "EJ012790115CR", margen: 0.37 }, ahora),
     construir({ numero: "ORD-000123", cliente: { name: "Sofía Mora", email: "sofia@example.com" },
-      entrega: { type: "envio", method: "Envío GAM", province: "Heredia", canton: "Heredia", district: "Mercedes" }, pago: "tarjeta", items: [[177, 1]],
+      entrega: { type: "envio", method: "Envío GAM", province: "Heredia", canton: "Heredia", district: "Mercedes" }, pago: "tarjeta", items: [[186, 1]],
       haceMin: 96 * H, flujo: [{ s: "nuevo", min: 0, by: null }, { s: "pagado", min: 2, by: "ONVO (pago en línea; ejemplo para cuando se contrate)" }, { s: "preparando", min: 18 * H, by: "Andrés" },
         { s: "enviado", min: 26 * H, by: "Andrés" }, { s: "entregado", min: 50 * H, by: "Andrés" }], factura: "FE-000226", tracking: "EJ012733904CR", margen: 0.34 }, ahora),
     construir({ numero: "ORD-000122", cliente: { name: "Diego Castro", email: "diego@example.com" },
-      entrega: { type: "envio", method: "Envío GAM", province: "San José", canton: "Desamparados", district: "San Miguel" }, pago: "sinpe", items: [[39, 2]],
+      entrega: { type: "envio", method: "Envío GAM", province: "San José", canton: "Desamparados", district: "San Miguel" }, pago: "sinpe", items: [[130, 2]],
       haceMin: 102 * H, flujo: [{ s: "nuevo", min: 0, by: null }, { s: "cancelado", min: RESERVA_HORAS * H, by: "Sistema", note: "No se recibió el pago a tiempo; la reserva venció sola." }],
       cancel: "No se recibió el pago a tiempo; la reserva venció sola.", margen: null }, ahora),
     construir({ numero: "ORD-000121", cliente: { name: "Valeria Rojas", email: "valeria@example.com" },
-      entrega: { type: "envio", method: "Envío GAM", province: "Cartago", canton: "Cartago", district: "Oriental" }, pago: "transferencia", items: [[12, 1]],
+      entrega: { type: "envio", method: "Envío GAM", province: "Cartago", canton: "Cartago", district: "Oriental" }, pago: "transferencia", items: [[242, 1]],
       haceMin: 116 * H, flujo: [{ s: "nuevo", min: 0, by: null }, { s: "en_revision", min: 60, by: "Valeria (cliente)" }, { s: "pagado", min: 3 * H, by: "Andrés" }],
-      factura: "FE-000229", requiereCompra: "1 × Disco duro 6TB", margen: 0.35 }, ahora),
+      factura: "FE-000229", requiereCompra: "1 × Disco duro 6TB WD Purple", margen: 0.35 }, ahora),
   ];
 }
 /* numero de factura que sale al confirmar el pago (los de ejemplo traen el suyo; los de prueba toman uno libre) */
@@ -207,15 +205,15 @@ export type FilaInv = { id: number; bodega: number; proveedor: string | null };
 /* "En bodegas web" con los pedidos de ejemplo en su estado inicial. Lo reservado y lo que "requiere compra" se
    calcula de los pedidos (Pedidos y Detras de escena cuentan la misma historia). */
 export const INVENTARIO: FilaInv[] = [
-  { id: 118, bodega: 9, proveedor: null },
-  { id: 177, bodega: 2, proveedor: null },
-  { id: 5, bodega: 3, proveedor: null },
-  { id: 8, bodega: 2, proveedor: null },
-  { id: 318, bodega: 40, proveedor: null },
-  { id: 53, bodega: 0, proveedor: "Eurocomp · 120 u. · hace 2 días (cargado a mano)" },
-  { id: 11, bodega: 0, proveedor: "Eurocomp · 35 u. · hace 2 días (cargado a mano)" },
-  { id: 12, bodega: 0, proveedor: "Eurocomp · 8 u. · hace 6 días (cargado a mano)" },
-  { id: 108, bodega: 0, proveedor: "Eurocomp · 6 u. · hace 3 días (cargado a mano)" },
+  { id: 90,  bodega: 9,  proveedor: null },
+  { id: 186, bodega: 2,  proveedor: null },
+  { id: 200, bodega: 3,  proveedor: null },
+  { id: 28,  bodega: 2,  proveedor: null },
+  { id: 17,  bodega: 40, proveedor: null },
+  { id: 68,  bodega: 0,  proveedor: "Eurocomp · 120 u. · hace 2 días (cargado a mano)" },
+  { id: 240, bodega: 0,  proveedor: "Eurocomp · 35 u. · hace 2 días (cargado a mano)" },
+  { id: 242, bodega: 0,  proveedor: "Eurocomp · 8 u. · hace 6 días (cargado a mano)" },
+  { id: 39,  bodega: 0,  proveedor: "Eurocomp · 6 u. · hace 3 días (cargado a mano)" },
 ];
 export const RESUMEN_INV = { publicados: 429, disponible: 152, bajo_pedido: 277, consultar: 0, agotado: 0, alertas: 0 };
 export const AJUSTES_INV: { label: string; valor: string; tipo: "check" | "campo" }[] = [
@@ -237,14 +235,14 @@ export const TIENDA = {
   kind: "tienda", font: "Arial", currency: "CRC", domain: "tienda.crimsoncr.com",
 };
 export const DESTACADOS = [
-  "KIT EASYLINK NVS IP HIKVISION DS-J142(STD)/NKS422W02H BULLET 2MP",
-  "NVR Hikvision AcuSense de 8 Canales IP 8MP con AcuSense y Switch PoE",
-  "Cámara wifi exterior 3K, EZVIZ, Deteción de humanos y vehículos,",
-  "Switch Hikvision 16 Puertos Gigabit PoE+ / Administrable / Hasta 300 metros",
-  "Punto de acceso WiFi 7 Versión Lite-, para montaje en cielorrazo,",
-  "Terminal de huellas dactilares y control de acceso K1T807MBFWX-E1",
-  "VIDEO INTERCOM 4-WIRE ANALOG KIT / DS-KIS302-P",
-  "UPS CDP 1000VA/500W 6 OUTLET R-SMART1010",
+  "Grabadora NVR Hikvision DS-7608NXI-K1/8P 8 canales IP 8 puertos PoE 4K",
+  "Cámara bullet Hikvision DS-2CD2043G2-LI2U(2.8MM) 4MP AcuSense smart hybrid light",
+  "Kit de cámaras WiFi bala y torreta Hikvision NKS4245WBTH 4MP 5MP WiFi",
+  "Switch Hikvision DS-3E1518P-EI/M 16 puertos gigabit PoE",
+  "Punto de acceso Hikvision DS-3WF02-5AC/D 5 GHz 867 Mbps wireless bridge",
+  "Control de acceso facial y huellas Hikvision DS-K1T344MBFWX-E1",
+  "Video intercom 4-WIRE analog kit Hikvision DS-KIS302-P",
+  "Switch Hikvision DS-3T1506HP-EI-UPS 4 puertos PoE con respaldo de energía",
 ];
 export type Kit = { id: string; title: string; text: string; place: string; indoor: number; outdoor: number; days: number };
 export const KITS: Kit[] = [
@@ -277,9 +275,9 @@ export const EMBUDO: Record<Periodo, [string, number][]> = {
 };
 /* [producto, vistas, al carrito, vendidas] */
 export const MAS_VISTO: Record<Periodo, [number, number, number, number][]> = {
-  "7": [[40, 99, 2, 1], [5, 77, 2, 1], [53, 69, 2, 1], [177, 58, 1, 1], [215, 54, 1, 0], [8, 48, 0, 0]],
-  "30": [[40, 412, 9, 5], [5, 318, 6, 3], [53, 287, 7, 4], [177, 241, 4, 3], [215, 226, 5, 2], [8, 198, 2, 1]],
-  "90": [[40, 1170, 26, 13], [5, 902, 17, 8], [53, 815, 20, 11], [177, 684, 11, 8], [215, 641, 14, 5], [8, 562, 6, 3]],
+  "7":  [[68, 99, 2, 1], [200, 77, 2, 1], [90, 69, 2, 1], [186, 58, 1, 1], [63, 54, 1, 0], [28, 48, 0, 0]],
+  "30": [[68, 412, 9, 5], [200, 318, 6, 3], [90, 287, 7, 4], [186, 241, 4, 3], [63, 226, 5, 2], [28, 198, 2, 1]],
+  "90": [[68, 1170, 26, 13], [200, 902, 17, 8], [90, 815, 20, 11], [186, 684, 11, 8], [63, 641, 14, 5], [28, 562, 6, 3]],
 };
 export const CANALES: Record<Periodo, [string, number][]> = {
   "7": [["Tienda en línea", 468_000], ["Cotizaciones y proyectos", 1_620_000], ["Punto de venta", 190_000]],

@@ -4,12 +4,12 @@
    la tienda. Si el almacenamiento no guarda, NO se avisa (volver a montar borraria el carrito que vive en memoria). */
 import { CLAVES, EVENTOS } from "../registro";
 
-export const NOTA_CARRITO = "Pusimos 2 × Camara IP Hikvision 4MP Acusense Bullet IP67 de ejemplo en tu carrito para mostrarte el pago completo.";
+export const NOTA_CARRITO = "Pusimos 2 × Cámara bullet Hikvision DS-2CD2043G2-LI2U 4MP AcuSense de ejemplo en tu carrito para mostrarte el pago completo.";
 
 type Line = { key: string; id: number; variant_id: number | null; name: string; image: string | null; price: number; currency: string; qty: number };
 
 const RESPALDO: Line = {
-  key: "53:0", id: 53, variant_id: null, name: "Camara IP Hikvision 4MP Acusense Bullet IP67", image: null, price: 62831.62, currency: "CRC", qty: 2,
+  key: "68:0", id: 68, variant_id: null, name: "Cámara bullet Hikvision DS-2CD2043G2-LI2U(2.8MM) 4MP AcuSense smart hybrid light", image: null, price: 63054, currency: "CRC", qty: 2,
 };
 
 function leer(): Line[] | null {
@@ -24,7 +24,7 @@ export async function sembrarCarritoSiVacio(): Promise<string | null> {
   let image: string | null = null;
   let price = RESPALDO.price;
   try {
-    const r = await fetch("/api/public/store/crimson/item/x-53"); // lo responde mockApi: nada sale a la red
+    const r = await fetch("/api/public/store/crimson/item/x-68"); // lo responde mockApi: nada sale a la red
     if (r.ok) {
       const d = (await r.json()) as { image?: string | null; display_price?: number };
       image = typeof d.image === "string" ? d.image : null;

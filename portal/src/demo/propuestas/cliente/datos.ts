@@ -57,23 +57,23 @@ export type PedidoEj = {
   numero: "ORD-000128" | "ORD-000097"; factura: string; guia: string | null; transportista: string | null; pago: string; entrega: string;
   lineas: LineaEj[]; envio: { nombre: string; total: number }; subtotal: number; envioSinIva: number; iva: number; total: number;
 };
-/** ORD-000128: lineas y totales de quote() de mockApi con 2 x 53, 1 x 177, 1 x 11 y «Envio GAM». Total ₡238 607,36. */
+/** ORD-000128: lineas y totales de quote() de mockApi con 2 x 68, 1 x 186, 1 x 240 y «Envio GAM». Total ₡285 777. */
 export const ORD128: PedidoEj = {
   numero: "ORD-000128", factura: "FE-000231", guia: "EJ012844710CR", transportista: "Correos de Costa Rica", pago: "SINPE Móvil",
   entrega: "Envío GAM · San Rafael, Alajuela, Alajuela",
   lineas: [
-    { id: 53, nombre: "Camara IP Hikvision 4MP Acusense Bullet IP67", cantidad: 2, total: 125663.23 },
-    { id: 177, nombre: "Grabador IP NVR Hikvision 4CH PoE", cantidad: 1, total: 59533.82 },
-    { id: 11, nombre: "Disco duro 2TB Western Digital Sata Purple", cantidad: 1, total: 49455.31 },
+    { id: 68,  nombre: "Cámara bullet Hikvision DS-2CD2043G2-LI2U(2.8MM) 4MP AcuSense smart hybrid light", cantidad: 2, total: 126108 },
+    { id: 186, nombre: "Grabadora NVR Hikvision DS-7104NI-Q1/4P 4 canales IP hasta 6 MP PoE",              cantidad: 1, total: 57291 },
+    { id: 240, nombre: "Disco duro interno 2TB Seagate ST2000VX017 3.5'' SATA optimizado videovigilancia", cantidad: 1, total: 98423 },
   ],
-  envio: { nombre: "Envío GAM", total: 3955 }, subtotal: 207656.96, envioSinIva: 3500, iva: 27450.4, total: 238607.36,
+  envio: { nombre: "Envío GAM", total: 3955 }, subtotal: 249400, envioSinIva: 3500, iva: 32877, total: 285777,
 };
-/** ORD-000097: la compra anterior de Maria, 1 x UPS HIKVISION DS-UPS1000-X con «Envio GAM». Total ₡32 883. */
+/** ORD-000097: la compra anterior de Maria, 1 x Switch-UPS Hikvision DS-3T1506HP-EI-UPS con «Envio GAM». Total ₡109 045. */
 export const ORD097: PedidoEj = {
   numero: "ORD-000097", factura: "FE-000164", guia: null, transportista: null, pago: "SINPE Móvil",
   entrega: "Envío GAM · San Rafael, Alajuela, Alajuela",
-  lineas: [{ id: 36, nombre: "UPS HIKVISION DS-UPS1000-X", cantidad: 1, total: 28928 }],
-  envio: { nombre: "Envío GAM", total: 3955 }, subtotal: 25600, envioSinIva: 3500, iva: 3783, total: 32883,
+  lineas: [{ id: 39, nombre: "Switch Hikvision DS-3T1506HP-EI-UPS 4 puertos PoE / 2 SFP con respaldo de energía", cantidad: 1, total: 105090 }],
+  envio: { nombre: "Envío GAM", total: 3955 }, subtotal: 93000, envioSinIva: 3500, iva: 12545, total: 109045,
 };
 export const articulos = (p: PedidoEj) => p.lineas.reduce((a, l) => a + l.cantidad, 0);
 
@@ -81,11 +81,11 @@ export const articulos = (p: PedidoEj) => p.lineas.reduce((a, l) => a + l.cantid
 export type TipoEquipo = "camara" | "grabador" | "disco" | "ups";
 export type Equipo = { serie: string; id: number; nombre: string; tipo: TipoEquipo; pedido: "ORD-000128" | "ORD-000097"; nota?: string };
 export const EQUIPOS: Equipo[] = [
-  { serie: "EJ-53-0001", id: 53, nombre: "Camara IP Hikvision 4MP Acusense Bullet IP67", tipo: "camara", pedido: "ORD-000128" },
-  { serie: "EJ-53-0002", id: 53, nombre: "Camara IP Hikvision 4MP Acusense Bullet IP67", tipo: "camara", pedido: "ORD-000128" },
-  { serie: "EJ-177-0001", id: 177, nombre: "Grabador IP NVR Hikvision 4CH PoE", tipo: "grabador", pedido: "ORD-000128" },
-  { serie: "EJ-11-0001", id: 11, nombre: "Disco duro 2TB Western Digital Sata Purple", tipo: "disco", pedido: "ORD-000128", nota: "Instalado en el grabador" },
-  { serie: "EJ-36-0001", id: 36, nombre: "UPS HIKVISION DS-UPS1000-X", tipo: "ups", pedido: "ORD-000097" },
+  { serie: "EJ-68-0001",  id: 68,  nombre: "Cámara bullet Hikvision DS-2CD2043G2-LI2U(2.8MM) 4MP AcuSense smart hybrid light", tipo: "camara",   pedido: "ORD-000128" },
+  { serie: "EJ-68-0002",  id: 68,  nombre: "Cámara bullet Hikvision DS-2CD2043G2-LI2U(2.8MM) 4MP AcuSense smart hybrid light", tipo: "camara",   pedido: "ORD-000128" },
+  { serie: "EJ-186-0001", id: 186, nombre: "Grabadora NVR Hikvision DS-7104NI-Q1/4P 4 canales IP hasta 6 MP PoE",              tipo: "grabador", pedido: "ORD-000128" },
+  { serie: "EJ-240-0001", id: 240, nombre: "Disco duro interno 2TB Seagate ST2000VX017 3.5'' SATA optimizado videovigilancia",  tipo: "disco",    pedido: "ORD-000128", nota: "Instalado en el grabador" },
+  { serie: "EJ-39-0001",  id: 39,  nombre: "Switch Hikvision DS-3T1506HP-EI-UPS 4 puertos PoE / 2 SFP con respaldo de energía",tipo: "ups",      pedido: "ORD-000097" },
 ];
 export const EQUIPO_FALLA = "EJ-53-0002";
 export const MOTIVOS: Record<TipoEquipo, string[]> = {

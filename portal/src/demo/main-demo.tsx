@@ -78,7 +78,7 @@ const Spin = () => <div className="demo-spin" role="status" aria-label="Cargando
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Gate guestName="Andrés" productPath="/p/camara-bullet-easy-link-4mp-40" router="hash" preload={loadStore}>
+    <Gate guestName="Andrés" productPath="/p/camara-bullet-hikvision-ds-2cd2043g2-li2u-2-8mm-4mp-acusense-smart-68" router="hash" preload={loadStore}>
       <HashRouter>
         <DemoShell fx={FX_REF} etiquetasExtra={etiquetasExtra}>
           <Suspense fallback={<Spin />}>

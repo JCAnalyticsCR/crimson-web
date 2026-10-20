@@ -2,12 +2,20 @@
    Port fiel (simplificado donde no cambia lo que se ve) de api/app/services/store_showcase.py y de los endpoints
    publicos de api/app/routers/store_showcase.py: tipo de equipo, especificaciones deducidas, busqueda tolerante,
    facetas, ficha, "¿Que necesito ademas?" y el configurador "Arma tu sistema" (build_kit).
-   Los datos salen de snapshot.json (catalogo publico de Fygaro, ver portal/scripts/demo_snapshot.py).
+   Los datos salen de snapshot.json (catalogo real de la tienda propia, ver portal/scripts/demo_snapshot.py).
+   Fuente: GET /public/store/crimson/products — precios en CRC sin IVA, disponibilidad real del proveedor.
    Este archivo NO se usa en el portal ni en la tienda real: solo en el build de la demo (vite.demo.config.ts). */
 
 export type RawProduct = {
-  id: number; code: string; name: string; brand: string | null; desc: string | null; usd: number; rate: number;
-  images: string[]; cat: number | null; mod: string; avail: "d" | "b";
+  id: number; code: string; name: string; brand: string | null; desc: string | null;
+  /** CRC sin IVA (fuente principal de precio desde la tienda real). */
+  crc: number;
+  /** USD sin IVA conservado por compatibilidad: crc / fx. net() usa crc. */
+  usd: number;
+  rate: number;
+  images: string[]; cat: number | null; mod: string;
+  /** 'b' bajo pedido · 'a' agotado · 'd' en bodega / disponible */
+  avail: "d" | "b" | "a";
 };
 export type RawCat = { id: number; name: string; parent: number | null };
 export type Snapshot = {
@@ -165,8 +173,9 @@ export const splitTerms = (q: string) => (q || "").trim().split(/[\s,;/]+/).filt
 
 // ---------------------------------------------------------------- el "servidor" de la demo
 export const AVAIL = {
-  d: { state: "disponible", label: "Disponible", max_qty: null },
+  d: { state: "en_bodega", label: "En bodega", max_qty: null },
   b: { state: "bajo_pedido", label: "Bajo pedido · 3 a 5 días hábiles", max_qty: null },
+  a: { state: "agotado", label: "Agotado", max_qty: 0 },
 } as const;
 
 const DEFAULT_KITS = [
@@ -244,19 +253,24 @@ export class Catalog {
     [...this.cats].sort((a, b) => a.id - b.id).forEach((c) => { let s = slugify(c.name, 60); if (seen.has(s)) s = `${s}-${c.id}`; seen.add(s); this.catSlug.set(c.id, s); });
   }
 
-  // ---------- precios: USD sin IVA -> colones con IVA (tipo de cambio fijo de referencia) ----------
-  net(p: RawProduct) { return round2(p.usd * this.fx); }
+  // ---------- precios: CRC sin IVA -> colones con IVA ----------
+  /** Precio neto en CRC sin IVA. Usa `crc` si el producto lo trae; si no, usd × fx (catálogo legacy). */
+  net(p: RawProduct) { return "crc" in p && p.crc > 0 ? p.crc : round2(p.usd * this.fx); }
   gross(p: RawProduct) { return round2(this.net(p) * (1 + p.rate / 100)); }
 
   card(p: RawProduct, full = false) {
     const desc = p.desc && !full && p.desc.length > 180 ? `${p.desc.slice(0, 177).trimEnd()}…` : p.desc;
-    const price = this.gross(p);
+    const netPrice = this.net(p);
+    const grossPrice = this.gross(p);
+    // price y currency: CRC cuando el snapshot trae `crc`; USD si es catálogo legacy
+    const hasCrc = "crc" in p && p.crc > 0;
     return {
-      id: p.id, code: p.code, name: p.name, price: p.usd, currency: "USD", featured: false, description: desc,
+      id: p.id, code: p.code, name: p.name, price: hasCrc ? netPrice : p.usd, currency: hasCrc ? "CRC" : "USD",
+      featured: false, description: desc,
       image: p.images[0] || null, images: full ? p.images : p.images.slice(0, 2), category_id: p.cat, category: p.cat ? this.catName.get(p.cat) ?? null : null,
       brand: p.brand, tax_rate: p.rate, item_type: "producto", variants: [], availability: { ...AVAIL[p.avail] },
-      display_currency: "CRC", display_price: price, path: productPath(p), model: null, type: productType(p),
-      compare_display_price: null, price_on_request: price <= 0,
+      display_currency: "CRC", display_price: grossPrice, path: productPath(p), model: null, type: productType(p),
+      compare_display_price: null, price_on_request: grossPrice <= 0,
       category_path: p.cat && this.catSlug.has(p.cat) ? `/c/${this.catSlug.get(p.cat)}` : null,
     };
   }
@@ -326,7 +340,7 @@ export class Catalog {
   defaultFeatured(limit = 8): RawProduct[] {
     const out: RawProduct[] = [];
     for (const t of FEATURED_TYPES) {
-      const c = this.prods.filter((p) => p.usd > 0 && p.images.length && productType(p) === t).sort((a, b) => a.usd - b.usd);
+      const c = this.prods.filter((p) => this.net(p) > 0 && p.images.length && p.avail !== "a" && productType(p) === t).sort((a, b) => this.net(a) - this.net(b));
       if (c.length) out.push(c[Math.floor(c.length / 2)]);
       if (out.length >= limit) break;
     }
@@ -399,20 +413,25 @@ export class Catalog {
         if (maxP !== null && (g > maxP || g <= 0)) return false;
       }
       if (skip !== "avail" && avail) {
-        if ((avail === "disponible" || avail === "inmediata") && st(p) !== "disponible") return false;
-        if (avail === "bajo_pedido" && !["disponible", "bajo_pedido"].includes(st(p))) return false;
+        if ((avail === "disponible" || avail === "inmediata" || avail === "en_bodega") && st(p) !== "en_bodega") return false;
+        if (avail === "bajo_pedido" && !["en_bodega", "bajo_pedido"].includes(st(p))) return false;
       }
       return true;
     };
     let rows = prods.filter((p) => keep(p));
     const fb = new Map<string, number>(), ft = new Map<string, number>();
-    const fav = { disponible: 0, bajo_pedido: 0 };
+    const fav = { disponible: 0, bajo_pedido: 0, agotado: 0 };
     const priced: number[] = [];
     for (const p of prods) {
       if (p.brand && keep(p, "brand")) fb.set(p.brand, (fb.get(p.brand) || 0) + 1);
       const t = productType(p);
       if (t && keep(p, "type")) ft.set(t, (ft.get(t) || 0) + 1);
-      if (keep(p, "avail")) { if (st(p) === "disponible") fav.disponible++; fav.bajo_pedido++; }
+      if (keep(p, "avail")) {
+        const s = st(p);
+        if (s === "en_bodega") fav.disponible++;
+        if (s !== "agotado") fav.bajo_pedido++;
+        if (s === "agotado") fav.agotado++;
+      }
       if (keep(p, "price") && this.gross(p) > 0) priced.push(this.gross(p));
     }
     const sort = sp.get("sort") || "relevance";
@@ -476,7 +495,7 @@ export class Catalog {
   }
 
   // ---------- "Arma tu sistema" ----------
-  private priced() { return this.prods.filter((p) => p.usd > 0); }
+  private priced() { return this.prods.filter((p) => this.net(p) > 0 && p.avail !== "a"); }
   private pickCamera(outdoor: boolean) {
     const cams = this.priced().filter((p) => {
       const n = fold(p.name);

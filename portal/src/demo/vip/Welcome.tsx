@@ -16,7 +16,7 @@ export type Feature = { cam: string; tag: string; title: string; body: string; c
 export const features = (productPath: string): Feature[] => [
   {
     cam: "01", tag: "Inventario", title: "Inventario real, con disponibilidad",
-    body: "Cada producto muestra si hay en bodega y cuántas unidades quedan. Sale del mismo inventario que usa Crimson, sin cargar existencias a mano en otra plataforma. En esta vista previa, la disponibilidad es simulada.",
+    body: "Cada producto muestra si está disponible o bajo pedido según el inventario del proveedor. Sale del mismo catálogo que usa Crimson, sin cargar productos a mano en otra plataforma. La disponibilidad refleja el estado al día de la copia del catálogo.",
     cta: "Ver el catálogo", path: "/catalogo",
   },
   {
