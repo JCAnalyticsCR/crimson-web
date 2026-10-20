@@ -63,7 +63,14 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const pending = doc.status === "por_aprobar";
   // grupoB: aceptada por el cliente = bloqueada (se deshace la respuesta en el panel Versiones)
   const accepted = isQ && (doc as Quote).acceptance_status === "aceptada";
-  const locked = !isNew && (doc.status === "convertida" || doc.status === "anulada" || accepted || (kind === "invoice" && ((doc as Invoice).payments?.length ?? 0) > 0));
+  /* emitida (o en camino a Hacienda) o emitida en Fygaro: el comprobante ya existe y la API no deja editarla */
+  const emitida = kind === "invoice" && ["pendiente", "aceptada", "emitida_fuera"].includes((doc as Invoice).einvoice_status || "");
+  const locked = !isNew && (doc.status === "convertida" || doc.status === "anulada" || accepted || emitida || (kind === "invoice" && ((doc as Invoice).payments?.length ?? 0) > 0));
+  /* quien no edita ventas (p. ej. contabilidad: envia y cobra, no crea ventas, plan 1.7) ve el documento sin campos
+     editables ni botones que le darian 403; si puede enviar, tiene "Enviar al cliente" sin guardar */
+  const canEdit = isNew ? allows("sales.crear") : allows("sales.editar");
+  const ro = locked || !canEdit;
+  const canSend = allows("sales.enviar");
 
   useEffect(() => {
     api<{ items: Customer[] }>("/customers?limit=100").then((r) => setCustomers(r.items));
@@ -96,7 +103,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     value: cargado ? { doc, lines } : null,
     idOf: (v) => (v.doc.id as number | undefined) ?? undefined,
     body: (v) => toPayload(v.doc, v.lines, asigna),
-    enabled: !locked && (allows("sales.editar") || (isNew && allows("sales.crear"))),
+    enabled: !ro,
     label: (v) => v.doc.number || (isQ ? "La cotización nueva" : "La factura nueva"),
     apply: (v) => {
       setDoc((cur) => { const next = { ...cur } as Record<string, unknown>; for (const k of EDITABLE) next[k] = (v.doc as Record<string, unknown>)[k]; return next as DocState; });
@@ -158,6 +165,20 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     } catch (e) { toast(e instanceof Error ? e.message : "Error al guardar", "bad"); }
     finally { setBusy(false); }
   }, [payload, isQ, isNew, id, nav, toast, auto, doc, lines]);
+
+  /* Enviar sin guardar: para quien envia pero no edita ventas (contabilidad, plan 1.7). El mismo correo que
+     "Guardar & enviar": PDF y enlace de pago; solo queda "enviada" si el correo salio de verdad. */
+  const sendOnly = async () => {
+    setBusy(true);
+    try {
+      const r = await api<{ status: string; sent: boolean; to: string; note: string | null; version?: number | null }>(`/${isQ ? "quotes" : "invoices"}/${id}/email`, { method: "POST", json: {} });
+      if (!r.sent) { toast(`${isQ ? "Cotización" : "Factura"} ${doc.number}: ${r.note || "el correo no salió."}`, "bad"); return; }
+      toast(`${isQ ? "Cotización" : "Factura"} ${doc.number} enviada a ${r.to}${r.version ? ` · v${r.version}` : ""}`);
+      if (isQ) api<Quote & Invoice>(`/quotes/${id}`).then(hydrate).catch(() => {});
+      else setDoc({ ...doc, status: doc.status === "creado" ? "enviada" : doc.status });
+    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+    finally { setBusy(false); }
+  };
 
   /* Aceptada: no se guarda nada antes (esta bloqueada); la API convierte la version aceptada. */
   const convertAccepted = async () => {
@@ -228,7 +249,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               <select
                 className="select"
                 value={doc.customer_id ?? ""}
-                disabled={locked}
+                disabled={ro}
                 onChange={(e) => {
                   /* La divisa la manda el cliente: si prefiere dolares, el documento arranca en dolares
                      (pedido de Andres en la revision del 22/09). Se puede cambiar a mano despues. */
@@ -241,13 +262,13 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               </select>
             </Field>
             <Field label="Divisa" hint={doc.customer_id && customers.find((c) => c.id === doc.customer_id)?.currency !== cur ? `El cliente prefiere ${customers.find((c) => c.id === doc.customer_id)?.currency}; esta cambiada a mano.` : fx ? `Tipo de cambio hoy: venta ${fx.sell} · compra ${fx.buy}` : undefined}>
-              <select className="select" value={cur} disabled={locked} onChange={(e) => setDoc({ ...doc, currency: e.target.value })}><option>CRC</option><option>USD</option></select>
+              <select className="select" value={cur} disabled={ro} onChange={(e) => setDoc({ ...doc, currency: e.target.value })}><option>CRC</option><option>USD</option></select>
             </Field>
             <Field label="Grupo de facturación"><select className="select" disabled><option>{isQ ? "COT · Cotizaciones" : "FEC · Facturas electrónicas"}</option></select></Field>
           </div></div>
 
           <div className="card">
-            <div className="card__head"><h3 className="h3">Productos & Servicios</h3><button className="btn btn--soft btn--sm" disabled={locked} onClick={() => setPick(true)}><Icon d={I.plus} />Agregar Productos & Servicios</button></div>
+            <div className="card__head"><h3 className="h3">Productos & Servicios</h3><button className="btn btn--soft btn--sm" disabled={ro} onClick={() => setPick(true)}><Icon d={I.plus} />Agregar Productos & Servicios</button></div>
             <div className="card__body" style={{ padding: 0 }}>
               <table className="lines">
                 <thead><tr><th>Concepto</th><th style={{ width: 118 }}>Cant. · unidad</th><th style={{ width: 128 }}>Precio</th><th style={{ width: 72 }}>Desc. %</th><th style={{ width: 82 }}>IVA</th><th className="num" style={{ width: 120 }}>Subtotal</th><th style={{ width: 34 }} /></tr></thead>
@@ -259,15 +280,15 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                     return (
                       <tr key={i} className="line">
                         <td className="c-name">
-                          <textarea className="input line-name" rows={nameRows(l.name)} placeholder="Nombre del producto o servicio" value={l.name} disabled={locked} onChange={(e) => setLine(i, { name: e.target.value })} />
-                          <textarea className="line-desc" rows={1} placeholder="Descripción (click para editar)" value={l.description || ""} disabled={locked} onChange={(e) => setLine(i, { description: e.target.value })} />
+                          <textarea className="input line-name" rows={nameRows(l.name)} placeholder="Nombre del producto o servicio" value={l.name} disabled={ro} onChange={(e) => setLine(i, { name: e.target.value })} />
+                          <textarea className="line-desc" rows={1} placeholder="Descripción (click para editar)" value={l.description || ""} disabled={ro} onChange={(e) => setLine(i, { description: e.target.value })} />
                           <div className="line-meta">
-                            <select className={`select select--sm line-treat${zero ? " is-warn" : ""}${t !== "normal" ? " is-set" : ""}`} value={t} disabled={locked} title={TREATMENTS.find((x) => x.value === t)?.hint} onChange={(e) => setLine(i, { treatment: e.target.value })} aria-label="Tratamiento de la línea">
+                            <select className={`select select--sm line-treat${zero ? " is-warn" : ""}${t !== "normal" ? " is-set" : ""}`} value={t} disabled={ro} title={TREATMENTS.find((x) => x.value === t)?.hint} onChange={(e) => setLine(i, { treatment: e.target.value })} aria-label="Tratamiento de la línea">
                               {TREATMENTS.map((x) => <option key={x.value} value={x.value}>{x.value === "normal" ? "Tratamiento: normal" : x.label}</option>)}
                             </select>
                             {/* grupo B: quién aporta la línea (empresas participantes de la oportunidad ligada) */}
                             {t === "aportado" && (parties.length > 0 || l.supplied_by) && (
-                              <select className="select select--sm line-treat is-set" value={l.supplied_by || ""} disabled={locked} onChange={(e) => setLine(i, { supplied_by: e.target.value || null })} aria-label="Aportado por">
+                              <select className="select select--sm line-treat is-set" value={l.supplied_by || ""} disabled={ro} onChange={(e) => setLine(i, { supplied_by: e.target.value || null })} aria-label="Aportado por">
                                 <option value="">Aportado por: cliente/aliado</option>
                                 {l.supplied_by && !parties.some((x) => x.name === l.supplied_by) && <option value={l.supplied_by}>Aportado por {l.supplied_by}</option>}
                                 {parties.map((x) => <option key={x.name} value={x.name}>Aportado por {x.name}</option>)}
@@ -279,38 +300,38 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                           {t !== "normal" && <div className="line-note">{TREATMENTS.find((x) => x.value === t)?.hint}</div>}
                         </td>
                         <td className="c-qty" data-label="Cant. · unidad">
-                          <input className="input input--mono" inputMode="decimal" value={l.quantity} disabled={locked} onChange={(e) => setLine(i, { quantity: e.target.value })} />
-                          <select className="select select--sm line-unit" value={l.unit} disabled={locked} onChange={(e) => setLine(i, { unit: e.target.value })} aria-label="Unidad" title={unitOptions(l.unit).find((u) => u.value === l.unit)?.label}>{unitOptions(l.unit).map((u) => <option key={u.value} value={u.value}>{u.short}</option>)}</select>
+                          <input className="input input--mono" inputMode="decimal" value={l.quantity} disabled={ro} onChange={(e) => setLine(i, { quantity: e.target.value })} />
+                          <select className="select select--sm line-unit" value={l.unit} disabled={ro} onChange={(e) => setLine(i, { unit: e.target.value })} aria-label="Unidad" title={unitOptions(l.unit).find((u) => u.value === l.unit)?.label}>{unitOptions(l.unit).map((u) => <option key={u.value} value={u.value}>{u.short}</option>)}</select>
                         </td>
-                        <td className="c-price" data-label="Precio"><input className="input input--mono line-price" inputMode="decimal" value={l.unit_price} disabled={locked} onChange={(e) => setLine(i, { unit_price: e.target.value })} /></td>
-                        <td className="c-disc" data-label="Desc. %"><input className="input input--mono" inputMode="decimal" value={l.discount_value} disabled={locked} onChange={(e) => setLine(i, { discount_value: e.target.value })} /></td>
-                        <td className="c-tax" data-label="IVA"><select className="select" value={l.tax_rate} disabled={locked} onChange={(e) => setLine(i, { tax_rate: e.target.value })}>{["13", "4", "2", "1", "0"].map((r) => <option key={r} value={r}>{r}%</option>)}</select></td>
+                        <td className="c-price" data-label="Precio"><input className="input input--mono line-price" inputMode="decimal" value={l.unit_price} disabled={ro} onChange={(e) => setLine(i, { unit_price: e.target.value })} /></td>
+                        <td className="c-disc" data-label="Desc. %"><input className="input input--mono" inputMode="decimal" value={l.discount_value} disabled={ro} onChange={(e) => setLine(i, { discount_value: e.target.value })} /></td>
+                        <td className="c-tax" data-label="IVA"><select className="select" value={l.tax_rate} disabled={ro} onChange={(e) => setLine(i, { tax_rate: e.target.value })}>{["13", "4", "2", "1", "0"].map((r) => <option key={r} value={r}>{r}%</option>)}</select></td>
                         <td className="c-sub num money" data-label="Subtotal">{nosuma ? <span className="muted">No suma</span> : prev?.lines[i] ? fmtMoney(prev.lines[i].subtotal, cur) : "—"}</td>
-                        <td className="c-x">{!locked && <button className="x" onClick={() => setLines((ls) => ls.filter((_, k) => k !== i))} aria-label="Eliminar"><Icon d={I.x} size={14} /></button>}</td>
+                        <td className="c-x">{!ro && <button className="x" onClick={() => setLines((ls) => ls.filter((_, k) => k !== i))} aria-label="Eliminar"><Icon d={I.x} size={14} /></button>}</td>
                       </tr>
                     );
                   })}
                   {lines.length === 0 && <tr><td colSpan={7}><div className="empty" style={{ padding: 28 }}><span className="meta">Sin líneas</span><div className="h3">Agregá productos o escribí una línea libre</div><button className="btn btn--ghost btn--sm" onClick={() => setLines([blankLine()])}>Línea libre</button></div></td></tr>}
                 </tbody>
               </table>
-              {lines.length > 0 && !locked && <div style={{ padding: 10 }}><button className="btn btn--ghost btn--sm" onClick={() => setLines((ls) => [...ls, blankLine()])}><Icon d={I.plus} />Línea libre</button></div>}
+              {lines.length > 0 && !ro && <div style={{ padding: 10 }}><button className="btn btn--ghost btn--sm" onClick={() => setLines((ls) => [...ls, blankLine()])}><Icon d={I.plus} />Línea libre</button></div>}
             </div>
           </div>
 
           <div className="grid-2">
             <div className="card"><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <Field label="Notas internas" hint="No salen en el documento."><textarea className="textarea" value={doc.internal_notes || ""} disabled={locked} onChange={(e) => setDoc({ ...doc, internal_notes: e.target.value })} /></Field>
-              <Field label="Notas externas" hint="Se imprimen y se envían al cliente."><textarea className="textarea" value={doc.external_notes || ""} disabled={locked} onChange={(e) => setDoc({ ...doc, external_notes: e.target.value })} /></Field>
+              <Field label="Notas internas" hint="No salen en el documento."><textarea className="textarea" value={doc.internal_notes || ""} disabled={ro} onChange={(e) => setDoc({ ...doc, internal_notes: e.target.value })} /></Field>
+              <Field label="Notas externas" hint="Se imprimen y se envían al cliente."><textarea className="textarea" value={doc.external_notes || ""} disabled={ro} onChange={(e) => setDoc({ ...doc, external_notes: e.target.value })} /></Field>
             </div></div>
             <div className="card"><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div className="meta">Otros ajustes</div>
-              <Field label="Orden externa #"><input className="input" value={doc.external_order || ""} disabled={locked} onChange={(e) => setDoc({ ...doc, external_order: e.target.value })} /></Field>
-              <Field label="Código de actividad" hint="Vacío = la actividad por defecto de Ajustes → Hacienda."><select className="select" value={doc.activity_code || ""} disabled={locked} onChange={(e) => setDoc({ ...doc, activity_code: e.target.value })}><option value="">Por defecto{acts.find((a) => a.is_default) ? ` (${acts.find((a) => a.is_default)!.code})` : ""}</option>{acts.map((a) => <option key={a.id} value={a.code}>{a.code}{a.description ? ` · ${a.description}` : ""}</option>)}{doc.activity_code && !acts.some((a) => a.code === doc.activity_code) && <option value={doc.activity_code}>{doc.activity_code}</option>}</select></Field>
+              <Field label="Orden externa #"><input className="input" value={doc.external_order || ""} disabled={ro} onChange={(e) => setDoc({ ...doc, external_order: e.target.value })} /></Field>
+              <Field label="Código de actividad" hint="Vacío = la actividad por defecto de Ajustes → Hacienda."><select className="select" value={doc.activity_code || ""} disabled={ro} onChange={(e) => setDoc({ ...doc, activity_code: e.target.value })}><option value="">Por defecto{acts.find((a) => a.is_default) ? ` (${acts.find((a) => a.is_default)!.code})` : ""}</option>{acts.map((a) => <option key={a.id} value={a.code}>{a.code}{a.description ? ` · ${a.description}` : ""}</option>)}{doc.activity_code && !acts.some((a) => a.code === doc.activity_code) && <option value={doc.activity_code}>{doc.activity_code}</option>}</select></Field>
               {!isQ && (fmode === "pruebas" || fmode === "produccion" || ((doc as Invoice).einvoice_status && (doc as Invoice).einvoice_status !== "sin_emitir")) && (
                 <Field label="Fecha" hint="La fecha la pone la emisión (Hacienda no admite fechas anteriores ni posteriores)."><div className="input" style={{ display: "flex", alignItems: "center", background: "var(--bg-2)" }}>{doc.issue_date || "al emitir"}</div></Field>
               )}
               {/* La exoneracion medica no aplica a las cotizaciones de Crimson (pedido de Andres); el campo es compartido y sigue en facturas. */}
-              {!isQ && <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={!!doc.medical_exemption_card} disabled={locked} onChange={(e) => setDoc({ ...doc, medical_exemption_card: e.target.checked })} />Exoneración médica IVA (tarjeta de crédito)</label>}
+              {!isQ && <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={!!doc.medical_exemption_card} disabled={ro} onChange={(e) => setDoc({ ...doc, medical_exemption_card: e.target.checked })} />Exoneración médica IVA (tarjeta de crédito)</label>}
             </div></div>
           </div>
         </div>
@@ -326,8 +347,8 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               {kind === "invoice" && !isNew && <div className="total" style={{ color: "var(--crimson)" }}><span>Saldo</span><span className="money">{fmtMoney((doc as Invoice).balance, cur)}</span></div>}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 14 }}>
-              <Field label="Descuento global"><select className="select" value={doc.discount_type} disabled={locked} onChange={(e) => setDoc({ ...doc, discount_type: e.target.value })}><option value="percent">%</option><option value="amount">Monto</option></select></Field>
-              <Field label="Valor"><input className="input input--mono" value={doc.discount_value ?? "0"} disabled={locked} onChange={(e) => setDoc({ ...doc, discount_value: e.target.value })} /></Field>
+              <Field label="Descuento global"><select className="select" value={doc.discount_type} disabled={ro} onChange={(e) => setDoc({ ...doc, discount_type: e.target.value })}><option value="percent">%</option><option value="amount">Monto</option></select></Field>
+              <Field label="Valor"><input className="input input--mono" value={doc.discount_value ?? "0"} disabled={ro} onChange={(e) => setDoc({ ...doc, discount_value: e.target.value })} /></Field>
             </div>
           </div></div>
 
@@ -361,13 +382,15 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               <p className="muted" style={{ fontSize: 12, margin: 0 }}>Podés guardarla mientras tanto.</p>
             </div></div>
           )}
-          {(!locked || (accepted && doc.status !== "convertida" && doc.status !== "anulada")) && (
+          {(!locked || (accepted && doc.status !== "convertida" && doc.status !== "anulada")) && (canEdit || canSend || allows("sales.crear") || allows("projects.crear") || allows("sales.anular")) && (
             <div className="card"><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {limit && !limit.free && !accepted && <p className="muted" style={{ fontSize: 12, margin: 0 }}>Tu descuento máximo es {Number(limit.limit)} % (incluye rebajas al precio de catálogo). Más que eso requiere aprobación.</p>}
-              <div>{auto.bar}</div>
-              {!accepted && <button className="btn btn--crimson" disabled={busy} onClick={() => save()}><Icon d={I.check} />Guardar</button>}
-              {!pending && !accepted && <button className="btn" disabled={busy || blocked} onClick={() => save("send")}><Icon d={I.whatsapp} />Guardar & enviar al cliente</button>}
-              {isQ && !pending && <button className="btn btn--soft" disabled={busy || blocked} onClick={() => (accepted ? convertAccepted() : save("convert"))}><Icon d={I.invoice} />Convertir a factura</button>}
+              {canEdit && limit && !limit.free && !accepted && <p className="muted" style={{ fontSize: 12, margin: 0 }}>Tu descuento máximo es {Number(limit.limit)} % (incluye rebajas al precio de catálogo). Más que eso requiere aprobación.</p>}
+              {canEdit && <div>{auto.bar}</div>}
+              {canEdit && !accepted && <button className="btn btn--crimson" disabled={busy} onClick={() => save()}><Icon d={I.check} />Guardar</button>}
+              {!pending && !accepted && canSend && (canEdit
+                ? <button className="btn" disabled={busy || blocked} onClick={() => save("send")}><Icon d={I.whatsapp} />Guardar & enviar al cliente</button>
+                : !isNew && <button className="btn" disabled={busy || blocked} onClick={sendOnly}><Icon d={I.whatsapp} />Enviar al cliente</button>)}
+              {isQ && !pending && allows("sales.crear") && (accepted || canEdit) && <button className="btn btn--soft" disabled={busy || blocked} onClick={() => (accepted ? convertAccepted() : save("convert"))}><Icon d={I.invoice} />Convertir a factura</button>}
               {isQ && !isNew && !pending && allows("projects.crear") && (
                 /* Instalaciones: la cotización aprobada arranca el proyecto con su primera orden de trabajo. */
                 opp?.kind === "venta"

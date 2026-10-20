@@ -5,6 +5,7 @@ import { Badge, Card, Empty, I, Icon, Loading } from "../../ui/components";
 import { useSession } from "../../app/session";
 import { TrashLocked } from "../../ui/TrashButton";
 import { LOCKED } from "../../ui/trash";
+import PorEmitir from "./PorEmitir";
 import "./doc-list.css";
 
 /* Filtros que llegan desde "Acciones pendientes" del inicio (?pendiente=<clave>): misma definicion que el conteo. */
@@ -19,7 +20,7 @@ const PENDIENTES: Record<string, string> = {
 
 const FILTERS: Record<string, { key: string; label: string }[]> = {
   quotes: [{ key: "", label: "Todas" }, { key: "creado", label: "Creadas" }, { key: "por_aprobar", label: "Por aprobar" }, { key: "enviada", label: "Enviadas" }, { key: "convertida", label: "Convertidas" }, { key: "anulada", label: "Anuladas" }],
-  invoices: [{ key: "", label: "Todas" }, { key: "creado", label: "Creadas" }, { key: "parcial", label: "Parciales" }, { key: "pagada", label: "Pagadas" }, { key: "vencida", label: "Vencidas" }, { key: "anulada", label: "Anuladas" }],
+  invoices: [{ key: "", label: "Todas" }, { key: "creado", label: "Creadas" }, { key: "parcial", label: "Parciales" }, { key: "pagada", label: "Pagadas" }, { key: "vencida", label: "Vencidas" }, { key: "anulada", label: "Anuladas" }, { key: "por_emitir", label: "Por emitir" }],
 };
 
 export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {
@@ -32,8 +33,12 @@ export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {
   const [cursor, setCursor] = useState<number | null>(null);
   const [status, setStatus] = useState(params.get("estado") || "");
   const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0); // Refrescar en "Por emitir"
   const q = params.get("q") || "";
   const pendiente = params.get("pendiente") || "";
+  /* "Por emitir" (plan 1.7) no es un estado de la factura: es la cola fiscal, con su propia lista y acciones.
+     El correo diario de contabilidad abre /facturas?estado=por_emitir. */
+  const porEmitir = !isQ && status === "por_emitir" && !q && !pendiente;
   const [text, setText] = useState(q);
   useEffect(() => { setText(q); }, [q]); // atrás/adelante del navegador
 
@@ -67,7 +72,7 @@ export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {
     setCursor(r.next_cursor);
     setLoading(false);
   }, [kind, status, q, pendiente]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (!porEmitir) load(); }, [load, porEmitir]);
 
   const base = isQ ? "/cotizaciones" : "/facturas";
   const idx = isQ ? "02" : "03";
@@ -76,7 +81,7 @@ export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {
       <div className="page-head">
         <div><div className="meta">{idx} · Facturación</div><h1 className="h1">{isQ ? "Cotizaciones" : "Facturas"}</h1></div>
         <div className="page-head__actions">
-          <button className="btn btn--ghost btn--sm" onClick={() => load()}><Icon d={I.refresh} />Refrescar</button>
+          <button className="btn btn--ghost btn--sm" onClick={() => (porEmitir ? setTick((t) => t + 1) : load())}><Icon d={I.refresh} />Refrescar</button>
           {allows("sales.crear") && <button className="btn btn--crimson" onClick={() => nav(`${base}/nueva`)}><Icon d={I.plus} />{isQ ? "Nueva cotización" : "Nueva factura"}</button>}
         </div>
       </div>
@@ -99,7 +104,7 @@ export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {
           <span className="muted" style={{ fontSize: 13 }}>{q ? `Resultados para “${q}”` : "Modificadas recientemente"}</span>
           {!pendiente && <div className="tabs">{FILTERS[kind].map((f) => <button key={f.key} className={status === f.key ? "is-active" : ""} onClick={() => setStatus(f.key)}>{f.label}</button>)}</div>}
         </div>
-        {items.length === 0 && loading ? <Loading /> : items.length === 0 ? (
+        {porEmitir ? <PorEmitir key={tick} /> : items.length === 0 && loading ? <Loading /> : items.length === 0 ? (
           q
             /* sin sugerir que exista en otro lado: lo ajeno no existe para el vendedor (13/10 35:50) */
             ? <Empty title={`No encontramos «${q}» entre ${todo ? "las" : "tus"} ${isQ ? "cotizaciones" : "facturas"}.`} hint="Probá con otro número, el nombre del cliente o parte de él." />
@@ -122,7 +127,7 @@ export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {
             ))}</tbody>
           </table>
         )}
-        {cursor && <div style={{ padding: 14, textAlign: "center" }}><button className="btn btn--soft btn--sm" onClick={() => load(true, cursor)} disabled={loading}>Más resultados</button></div>}
+        {!porEmitir && cursor && <div style={{ padding: 14, textAlign: "center" }}><button className="btn btn--soft btn--sm" onClick={() => load(true, cursor)} disabled={loading}>Más resultados</button></div>}
       </Card>
     </>
   );

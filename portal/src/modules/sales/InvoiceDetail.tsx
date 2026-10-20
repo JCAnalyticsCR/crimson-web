@@ -5,6 +5,7 @@ import { api, fmtDate, fmtMoney, type Invoice } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Card, Field, I, Icon, Modal } from "../../ui/components";
 import DocEditor from "./DocEditor";
+import { MarkExternal } from "./PorEmitir";
 import AuthLink from "../../ui/AuthLink";
 
 const METHODS = [["efectivo", "Efectivo"], ["sinpe", "SINPE Móvil"], ["transferencia", "Transferencia"], ["tarjeta", "Tarjeta"], ["onvo", "ONVO (en línea)"], ["paypal", "PayPal"]];
@@ -29,6 +30,8 @@ export default function InvoiceDetail() {
   const [docs, setDocs] = useState<XmlDoc[]>([]);
   const [nc, setNc] = useState<string | null>(null);
   const [mail, setMail] = useState<{ to: string; message: string } | null>(null);
+  const [fmode, setFmode] = useState<string | null>(null); // modo fiscal vigente: con "ninguno" se emite en Fygaro
+  const [marcar, setMarcar] = useState(false);
   const emit = async () => { try { const r = await api<{ status: string; clave: string; message: string }>(`/invoices/${id}/emit`, { method: "POST" }); toast(`Hacienda: ${r.status}${r.message ? ` · ${r.message}` : ""}`); reload(); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } };
   const refreshEi = async () => { try { const r = await api<{ status: string; doc_status: string; message: string | null; last_error: string | null }>(`/invoices/${id}/einvoice/refresh`, { method: "POST" }); toast(`Hacienda: ${EI_TEXT[r.doc_status] || r.doc_status}${r.last_error ? ` · ${r.last_error}` : ""}`); reload(); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } };
   const loadXml = () => api(`/invoices/${id}/xml`).then((r) => setXmls(r as never)).catch((e) => toast(e.message, "bad"));
@@ -37,12 +40,22 @@ export default function InvoiceDetail() {
   const [form, setForm] = useState({ method: "sinpe", kind: "captura", amount: "", external_ref: "", paid_at: new Date().toISOString().slice(0, 10), notify_customer: true });
   const reload = () => { api<Invoice>(`/invoices/${id}`).then(setInv); api<XmlDoc[]>(`/invoices/${id}/xml`).then(setDocs).catch(() => setDocs([])); };
   useEffect(() => { reload(); }, [id]);
+  useEffect(() => { api<{ mode: string }>("/fiscal/mode").then((r) => setFmode(r.mode)).catch(() => setFmode(null)); }, []);
   useEffect(() => { if (inv) setForm((f) => ({ ...f, amount: f.amount || inv.balance })); }, [inv]);
 
   const submitPay = async () => {
     try { setInv(await api<Invoice>(`/invoices/${id}/payments`, { method: "POST", json: { ...form, amount: form.amount } })); setPay(false); toast("Pago registrado"); }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
+  const undoMark = async () => {
+    if (!inv || !confirm(`¿Quitar la marca «emitida en Fygaro» de ${inv.number}? Vuelve a la lista «Por emitir».`)) return;
+    try { await api(`/fiscal/queue/${id}/external`, { method: "DELETE" }); toast("Marca quitada"); reload(); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
+  const est = inv?.einvoice_status ?? "";
+  const fuera = est === "emitida_fuera" || est === "importada"; // su comprobante vive fuera de la plataforma: nunca se emite aqui
+  /* Marcar emitida en Fygaro (plan 1.7): lo que no tiene un comprobante real aqui (sin emitir, o solo simulado o de
+     pruebas). En produccion se emite desde la plataforma. El servidor valida lo mismo. */
+  const puedeMarcar = !!inv && allows("sales.enviar") && fmode !== null && fmode !== "produccion" && inv.status !== "anulada" && !fuera && est !== "pendiente" && !docs.some((x) => x.mode === "produccion" && x.status !== "rechazada");
   const getLink = async () => { try { setLink(await api(`/invoices/${id}/payment-link`, { method: "POST" })); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } };
 
   return (
@@ -51,7 +64,7 @@ export default function InvoiceDetail() {
       {inv && (
         <div className="doc" style={{ marginTop: -4 }}>
           <Card title="Pagos" flush extra={<div style={{ display: "flex", gap: 8 }}>
-            <button className="btn btn--ghost btn--sm" onClick={getLink}><Icon d={I.link} />Enlace de pago</button>
+            {allows("sales.enviar") && <button className="btn btn--ghost btn--sm" onClick={getLink}><Icon d={I.link} />Enlace de pago</button>}
             {allows("payments.crear") && <button className="btn btn--crimson btn--sm" disabled={inv.status === "anulada" || Number(inv.balance) <= 0} onClick={() => setPay(true)}><Icon d={I.plus} />Agregar pago</button>}
           </div>}>
             {inv.payments.length === 0 ? <div className="empty" style={{ padding: 26 }}><span className="meta">Sin pagos</span><div className="h3">Saldo pendiente {fmtMoney(inv.balance, inv.currency)}</div><p className="muted">Registrá un pago manual o compartí el enlace de pago por WhatsApp.</p></div> : (
@@ -61,14 +74,19 @@ export default function InvoiceDetail() {
               </table>
             )}
           </Card>
-          <Card title="Documentos electrónicos" extra={<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button className="btn btn--ghost btn--sm" onClick={loadXml}>XMLs</button>{allows("sales.enviar") && docs.some((x) => x.mode === "pruebas" || x.mode === "produccion") && <button className="btn btn--soft btn--sm" onClick={refreshEi}>Consultar estado</button>}{allows("sales.enviar") && inv.einvoice_status !== "aceptada" && inv.einvoice_status !== "pendiente" && inv.status !== "anulada" && <button className="btn btn--crimson btn--sm" onClick={emit}><Icon d={I.check} />Emitir a Hacienda</button>}{allows("sales.anular") && inv.einvoice_status === "aceptada" && inv.status !== "anulada" && <button className="btn btn--danger btn--sm" onClick={() => setNc("")}>Anular con NC</button>}</div>}>
+          <Card title="Documentos electrónicos" extra={<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button className="btn btn--ghost btn--sm" onClick={loadXml}>XMLs</button>{allows("sales.enviar") && docs.some((x) => x.mode === "pruebas" || x.mode === "produccion") && <button className="btn btn--soft btn--sm" onClick={refreshEi}>Consultar estado</button>}{allows("sales.enviar") && !fuera && fmode !== "ninguno" && est !== "aceptada" && est !== "pendiente" && inv.status !== "anulada" && <button className="btn btn--crimson btn--sm" onClick={emit}><Icon d={I.check} />Emitir a Hacienda</button>}{puedeMarcar && <button className={`btn ${fmode === "ninguno" && est === "sin_emitir" ? "btn--crimson" : "btn--soft"} btn--sm`} onClick={() => setMarcar(true)}>Marcar emitida en Fygaro</button>}{allows("sales.anular") && inv.einvoice_status === "aceptada" && inv.status !== "anulada" && <button className="btn btn--danger btn--sm" onClick={() => setNc("")}>Anular con NC</button>}</div>}>
             {(() => {
               const last = docs.filter((x) => x.doc_type === inv.doc_type).slice(-1)[0];
               const nc = docs.filter((x) => x.doc_type === "NC").slice(-1)[0];
               const client = docs.find((x) => x.receiver_message);
               return <>
-                <div className="status-line"><Badge status={inv.einvoice_status === "sin_emitir" ? "pendiente" : inv.einvoice_status === "aceptada" ? "confirmado" : inv.einvoice_status === "rechazada" ? "fallido" : inv.einvoice_status} /><span>Hacienda · v4.4 · {inv.consecutive || "sin consecutivo (se asigna al emitir)"}</span>{last?.mode && <span className={`badge ${last.mode === "produccion" ? "badge--ok" : "badge--warn"}`}>{MODE_TAG[last.mode] || last.mode}</span>}</div>
-                {last && EI_TEXT[last.status] && <p style={{ fontSize: 13, margin: "8px 0 0" }}>{EI_TEXT[last.status]}</p>}
+                <div className="status-line"><Badge status={inv.einvoice_status === "sin_emitir" ? "pendiente" : inv.einvoice_status === "aceptada" ? "confirmado" : inv.einvoice_status === "rechazada" ? "fallido" : inv.einvoice_status} /><span>{fuera ? "Fuera de la plataforma" : `Hacienda · v4.4 · ${inv.consecutive || "sin consecutivo (se asigna al emitir)"}`}</span>{last?.mode && <span className={`badge ${last.mode === "produccion" ? "badge--ok" : "badge--warn"}`}>{MODE_TAG[last.mode] || last.mode}</span>}</div>
+                {est === "emitida_fuera" && (
+                  <p style={{ fontSize: 13, margin: "8px 0 0" }}>Emitida en Fygaro · n.º <span className="mono">{inv.external_number}</span>{inv.external_date ? ` · ${fmtDate(inv.external_date)}` : ""}. No se vuelve a emitir aquí; si hay que anularla, la nota de crédito también va en Fygaro.{allows("settings.configurar") && <> <button className="btn btn--ghost btn--sm" onClick={undoMark}>Quitar la marca</button></>}</p>
+                )}
+                {est === "importada" && <p className="muted" style={{ fontSize: 13, margin: "8px 0 0" }}>Viene del histórico importado: ya se emitió fuera de la plataforma y no se vuelve a emitir.</p>}
+                {fmode === "ninguno" && est === "sin_emitir" && inv.status !== "anulada" && <p className="muted" style={{ fontSize: 13, margin: "8px 0 0" }}>Hacienda todavía no está en producción: emitila en Fygaro el mismo día y marcala aquí con su número.</p>}
+                {last && !fuera && EI_TEXT[last.status] && <p style={{ fontSize: 13, margin: "8px 0 0" }}>{EI_TEXT[last.status]}</p>}
                 {last?.last_error && <p style={{ fontSize: 13, margin: "6px 0 0", color: "var(--bad)" }}>{last.last_error}</p>}
                 {nc && nc.status !== "aceptada" && <p style={{ fontSize: 13, margin: "6px 0 0" }}>Nota de crédito {nc.consecutive}: {EI_TEXT[nc.status] || nc.status}{nc.last_error ? ` · ${nc.last_error}` : ""}</p>}
                 {last && (last.mode === "pruebas" || last.mode === "produccion") && (
@@ -86,7 +104,7 @@ export default function InvoiceDetail() {
             {inv.clave && <p className="mono" style={{ fontSize: 11, marginTop: 8, wordBreak: "break-all", color: "var(--text-2)" }}>Clave {inv.clave}</p>}
             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
               <AuthLink className="btn btn--soft btn--sm" path={`/invoices/${id}/pdf`}>PDF / Imprimir</AuthLink>
-              <button className="btn btn--soft btn--sm" onClick={() => setMail({ to: "", message: "" })}>Enviar por correo</button>
+              {allows("sales.enviar") && <button className="btn btn--soft btn--sm" onClick={() => setMail({ to: "", message: "" })}>Enviar por correo</button>}
             </div>
           </Card>
         </div>
@@ -126,6 +144,7 @@ export default function InvoiceDetail() {
           <Field label="Mensaje"><textarea className="textarea" value={mail.message} onChange={(e) => setMail({ ...mail, message: e.target.value })} /></Field>
         </Modal>
       )}
+      {marcar && inv && <MarkExternal inv={inv} onClose={() => setMarcar(false)} onDone={() => { setMarcar(false); reload(); }} />}
       {link && inv && (
         <Modal title="Enlace de pago para la factura" onClose={() => setLink(null)} foot={<button className="btn btn--ghost" onClick={() => setLink(null)}>Cerrar</button>}>
           <p className="muted" style={{ fontSize: 13 }}>URL única de {inv.number}. Vence {fmtDate(link.expires_at.slice(0, 10))} · abierta {link.opened_count} veces.</p>

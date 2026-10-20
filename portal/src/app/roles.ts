@@ -40,8 +40,8 @@ export const ROLES: Record<string, RoleMeta> = {
   contabilidad: {
     label: "Contador", tone: "#6b46c1", glyph: "K",
     summary: "Todo el dinero de la empresa: facturas de proveedores ante Hacienda, gastos, bancos, el panel tributario, planillas, comisiones y reportes.",
-    can: ["Facturas de proveedores: recibir, aceptar o rechazar ante Hacienda", "Gastos, recurrentes, categorías y bancos", "Panel tributario del mes", "Facturas y cobros de toda la empresa", "Planillas, colillas y comisiones", "Aprobaciones de planillas y comisiones", "Aprobar y marcar pagadas las comisiones y los pagos a aliados", "La mensualidad de las empresas aliadas", "Los reportes de la empresa con Excel", "Importar el histórico de recepciones de Fygaro"],
-    cannot: ["Crear ventas o cobrar", "Ver costos de productos ni márgenes (salvo que el administrador lo habilite)", "Configurar la empresa o los usuarios", "Cargar las credenciales de Hacienda ni activar producción"],
+    can: ["Facturas de proveedores: recibir, aceptar o rechazar ante Hacienda", "Gastos, recurrentes, categorías y bancos", "Panel tributario del mes", "Facturas y cobros de toda la empresa", "Enviar facturas, crear enlaces de pago y registrar cobros", "Emitir a Hacienda o marcar lo emitido en Fygaro (lista «Por emitir»)", "Planillas, colillas y comisiones", "Aprobaciones de planillas y comisiones", "Aprobar y marcar pagadas las comisiones y los pagos a aliados", "La mensualidad de las empresas aliadas", "Los reportes de la empresa con Excel", "Importar el histórico de recepciones de Fygaro"],
+    cannot: ["Crear o editar ventas (cotizaciones y facturas)", "Ver costos de productos ni márgenes (salvo que el administrador lo habilite)", "Configurar la empresa o los usuarios", "Cargar las credenciales de Hacienda ni activar producción"],
     menu: ["/", "/aprobaciones", "/facturas", "/pagos", "/recurrencias", "/clientes", "/productos", "/inventario", "/compras", "/comisiones", "/aliados", "/contabilidad", "/planillas", "/vehiculos", "/reportes", "/importar", "/archivo", "/ajustes"],
   },
   tecnico: {
