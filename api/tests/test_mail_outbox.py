@@ -319,3 +319,36 @@ class _Ctx:
 
     def __exit__(self, *a):
         return False
+
+
+# ---------- migracion ----------
+def test_migracion_del_outbox_sube_y_baja():
+    """La revision es reversible: baja (quita llave, intentos e indice) y vuelve a subir sobre una base aparte."""
+    import importlib.util
+    from pathlib import Path
+
+    import sqlalchemy as sa
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    from app.core.db import Base
+
+    path = next(Path(__file__).resolve().parents[1].joinpath("alembic", "versions").glob("correo_*_outbox_dedupe_y_reintentos.py"))
+    spec = importlib.util.spec_from_file_location("correo_mig", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    eng = sa.create_engine("sqlite://")
+    Base.metadata.create_all(eng)
+
+    def cols(conn):
+        return {c["name"] for c in sa.inspect(conn).get_columns("email_outbox")}
+
+    with eng.begin() as conn:
+        mod.op = Operations(MigrationContext.configure(conn))
+        mod.downgrade()
+        assert not {"dedupe_key", "attempts", "next_attempt_at"} & cols(conn)
+        mod.upgrade()
+        assert {"dedupe_key", "attempts", "next_attempt_at"} <= cols(conn)
+        assert "uq_email_outbox_dedupe" in {u["name"] for u in sa.inspect(conn).get_unique_constraints("email_outbox")}
+        assert "ix_email_outbox_retry" in {i["name"] for i in sa.inspect(conn).get_indexes("email_outbox")}
+    eng.dispose()

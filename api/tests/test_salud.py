@@ -295,3 +295,29 @@ class _Ctx:
 
     def __exit__(self, *a):
         return False
+
+
+def test_migracion_de_corridas_sube_y_baja():
+    import importlib.util
+    from pathlib import Path
+
+    import sqlalchemy as sa
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    from app.core.db import Base
+
+    path = next(Path(__file__).resolve().parents[1].joinpath("alembic", "versions").glob("salud_*_corridas_de_tareas.py"))
+    spec = importlib.util.spec_from_file_location("salud_mig", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    eng = sa.create_engine("sqlite://")
+    Base.metadata.create_all(eng)
+    with eng.begin() as conn:
+        mod.op = Operations(MigrationContext.configure(conn))
+        mod.downgrade()
+        assert "task_run" not in sa.inspect(conn).get_table_names()
+        mod.upgrade()
+        cols = {c["name"] for c in sa.inspect(conn).get_columns("task_run")}
+        assert {"task", "task_id", "started_at", "finished_at", "ok", "summary", "error"} <= cols
+    eng.dispose()
