@@ -3,6 +3,8 @@ Usuarios e invitaciones viven en routers/users_admin.py."""
 
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
@@ -28,7 +30,12 @@ DEFAULTS = {
     "invoice_footer": "",
     "quote_footer": "",
     "notify_due": True,
-    "remind_days_before": 3,
+    "remind_days_before": 3,  # compatibilidad: la secuencia de cobro usa collections_stages (plan 1.3)
+    # Cobranza (plan 1.3): fecha de corte de cartera (sin ella no sale ningun recordatorio) y etapas en dias respecto
+    # del vencimiento (negativo = antes). Las mensualidades de aliados tienen las suyas (aviso de atraso a D+5).
+    "collections_start_date": None,
+    "collections_stages": [-3, 0, 3, 10],
+    "collections_ally_stages": [-3, 0, 5, 10],
     "daily_close_email": False,
     "bcc": [],
     "manual_payment_methods": [
@@ -68,6 +75,19 @@ class SettingsIn(BaseModel):
     quote_footer: str | None = None
     notify_due: bool | None = None
     remind_days_before: int | None = Field(None, ge=0, le=60)
+    collections_start_date: date | None = None
+    collections_stages: list[int] | None = None
+    collections_ally_stages: list[int] | None = None
+
+    @field_validator("collections_stages", "collections_ally_stages")
+    @classmethod
+    def _stages(cls, v):
+        if v is None:
+            return None
+        vals = sorted(set(v))
+        if not vals or len(vals) > 8 or any(x < -30 or x > 120 for x in vals):
+            raise ValueError("Etapas de cobro: de 1 a 8 días entre -30 (antes de vencer) y 120 (después)")
+        return vals
     daily_close_email: bool | None = None
     bcc: list[EmailStr] | None = None
     manual_payment_methods: list[dict] | None = None
@@ -146,6 +166,10 @@ def put_settings(data: SettingsIn, p: Principal = Depends(require("settings", "c
         hc.turn_off_production(db, t, p.user.id, ip=p.ip, reason=f"PUT /settings: {prov_antes} -> {data.einvoice_provider}")
     if "activity_codes" in data.model_fields_set:
         _sync_activities_from_codes(db, t, data.activity_codes or [])
+    cobro = {"notify_due", "collections_start_date", "collections_stages", "collections_ally_stages"} & data.model_fields_set
+    if cobro:
+        # encender los recordatorios o mover la fecha de corte decide a quien se le cobra: queda en la bitacora
+        audit(db, t.id, p.user.id, "update", "tenant_settings", t.id, {"seccion": "cobranza", **{k: t.settings.get(k) for k in sorted(cobro)}}, ip=p.ip)
     if "cost_roles" in data.model_fields_set:
         # quien ve costos es un permiso: queda en la bitacora con antes/despues (solo si cambio). Aplica en la
         # siguiente peticion: los permisos se calculan en cada request, no hace falta cerrar sesiones.

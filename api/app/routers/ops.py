@@ -21,9 +21,8 @@ from ..services import inventory as inv
 from ..services import reports as rp
 from ..services.bitacora import audit_change, next_version, snapshot
 from ..services.documents import audit
-from ..services.mail import doc_email_html, queue_email
 from ..services.ownership import owns_doc
-from ..services.render import money, render_html, render_pdf
+from ..services.render import render_html, render_pdf
 
 router = APIRouter(tags=["operacion"])
 
@@ -65,76 +64,15 @@ class SendIn(BaseModel):
 
 @router.post("/{kind}/{id_}/email")
 def doc_send(kind: str, id_: int, data: SendIn, p: Principal = Depends(require("sales", "enviar")), db: Session = Depends(get_db)):
+    """Envoltorio de services/documents_send.send_document (lo usan tambien la recurrencia y la cobranza)."""
     if kind not in ("quotes", "invoices"):
         raise HTTPException(404)
+    from ..services.documents_send import send_document
+
     d = _doc(db, kind, id_, p.tenant.id, p)
-    c = db.get(Customer, d.customer_id) if d.customer_id else None
-    to = data.to or (c.email if c else None)
-    if not to:
-        raise HTTPException(422, "El cliente no tiene correo; indique uno")
-    is_inv = kind == "invoices"
-    if not is_inv:
-        from ..services.units import check_ready
-
-        check_ready(d, "enviar la cotización")
-    link = None
-    if is_inv and data.with_payment_link and Decimal(str(d.balance)) > 0:
-        link = docsvc.get_or_create_payment_link(db, p.tenant.id, d).url
-    subject = f"{'Factura' if is_inv else 'Cotización'} {d.number} · {p.tenant.name}"
-    # El PDF se genera aca y viaja adjunto. Si el servidor no puede generarlo (sin WeasyPrint), el correo no
-    # promete un adjunto que no lleva.
-    pdf = render_pdf(render_html(db, d, p.tenant))
-    files = [(f"{d.number}.pdf", pdf)] if pdf else []
-    if is_inv:
-        from ..services.einvoice_delivery import attachments_for_invoice
-
-        files += attachments_for_invoice(db, d)  # Decreto 44739-H art. 18: XML firmado + respuesta de Hacienda
-    m = queue_email(
-        db,
-        p.tenant,
-        to,
-        subject,
-        doc_email_html(
-            p.tenant,
-            "factura" if is_inv else "cotización",
-            d.number,
-            money(d.total, d.currency),
-            link,
-            data.message or (p.tenant.settings or {}).get("invoice_footer" if is_inv else "quote_footer"),
-            attached=pdf is not None,
-        ),
-        kind[:-1],
-        d.id,
-        [{"name": n, "kind": kind, "ref": d.id} for n, _ in files],
-        files=files or None,
-    )
-    # Solo se marca como enviada si el proveedor acepto el correo. Simulado (sin llave de Resend) o error
-    # no cuentan: marcarla enviada haria creer al vendedor que el cliente ya la tiene.
-    sent = m.status == "enviado"
-    if sent and d.status == "creado":
-        d.status = "enviada"
-    version = None
-    if sent and not is_inv:
-        from ..services import quote_versions as qv
-
-        # lo que salio queda congelado como version (v1, v2... si se edito despues de enviarla)
-        version = qv.record_send(db, p.tenant, p.user.id, d, "correo", to, ip=p.ip)[0].version
-    if sent and not is_inv:
-        from ..models import Opportunity
-
-        for o in db.scalars(select(Opportunity).where(Opportunity.tenant_id == p.tenant.id, Opportunity.quote_id == d.id)):
-            if o.status in ("nuevo", "contactado", "requiere_visita", "levantamiento", "cotizando"):
-                audit(db, p.tenant.id, p.user.id, "status", "opportunity", o.id, {"de": o.status, "a": "enviada"}, ip=p.ip)
-                o.status = "enviada"
-    audit(db, p.tenant.id, p.user.id, "send", kind[:-1], d.id, {"to": to, "mail": m.status}, ip=p.ip)
+    r = send_document(db, p.tenant, d, data.to, data.message, data.with_payment_link, p.user.id, ip=p.ip)
     db.commit()
-    if m.status == "simulado":
-        note = "El correo NO salió: no hay servicio de correo configurado (falta la llave de Resend). El documento no se marcó como enviado."
-    elif m.status == "error":
-        note = f"El correo NO salió ({(m.error or 'error del proveedor')[:160]}). El documento no se marcó como enviado."
-    else:
-        note = None
-    return {"status": m.status, "sent": sent, "to": to, "note": note, "version": version}
+    return {k: r[k] for k in ("status", "sent", "to", "note", "version")}
 
 
 # ---------- Factura electronica ----------

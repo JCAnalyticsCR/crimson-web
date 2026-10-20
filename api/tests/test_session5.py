@@ -284,7 +284,9 @@ def test_technician_cannot_see_money_or_others(client, auth, db_session):
 def test_ceo_dashboard_row(client, auth):
     cust = client.get("/customers").json()["items"][0]
     client.post("/opportunities", json={"title": "Pipeline", "customer_id": cust["id"], "amount": 2000000, "probability": 50})
-    client.post("/invoices", json={"customer_id": cust["id"], "lines": [{"name": "Servicio", "quantity": 1, "unit_price": 100000, "tax_rate": 13}]})
+    inv = client.post("/invoices", json={"customer_id": cust["id"], "lines": [{"name": "Servicio", "quantity": 1, "unit_price": 100000, "tax_rate": 13}]}).json()
+    assert Decimal(str(client.get("/dashboard").json()["gerencia"]["receivable"])) == 0  # borrador sin enviar (plan 1.3)
+    client.post(f"/invoices/{inv['id']}/payment-link")  # compartida con el cliente: ya esta por cobrar
     g = client.get("/dashboard").json()["gerencia"]
     assert Decimal(str(g["pipeline"])) == Decimal("2000000") and Decimal(str(g["pipeline_weighted"])) == Decimal("1000000.00")
     assert Decimal(str(g["receivable"])) >= Decimal("113000") and g["opportunities"] >= 1

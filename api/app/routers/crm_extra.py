@@ -237,6 +237,7 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
             "notes": c.notes,
             "address": c.address,
             "active": c.active,
+            "no_reminders": bool(c.no_reminders),
             "created_at": c.created_at,
         },
         "kpis": {

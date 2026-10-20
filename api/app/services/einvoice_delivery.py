@@ -138,6 +138,10 @@ def _close(db: Session, t: Tenant, doc: EInvoiceDocument, inv: Invoice, stage: s
         _alert_undeliverable(db, t, doc, inv, stage, given_up)
     elif finished:
         setattr(doc, f"{prefix}delivered_at", datetime.now(UTC))
+        if n and stage == "emitido" and doc.mode == "produccion" and doc.doc_type == inv.doc_type:
+            from .invoice_states import mark_sent
+
+            mark_sent(inv)  # el comprobante le llego al cliente: la factura queda por cobrar (plan 1.3)
     if n or finished:
         info = {"etapa": stage, "correos": n, "modo": doc.mode, "entregado": finished and not given_up}
         if finished and given_up:
@@ -211,11 +215,12 @@ def deliver(db: Session, doc_id: int, stage: str) -> int:
     return 0
 
 
-def attachments_for_invoice(db: Session, inv: Invoice) -> list[tuple[str, bytes]]:
-    """Para POST /invoices/{id}/email: XML firmado (y la respuesta de Hacienda si ya llego) del ultimo comprobante directo."""
+def attachments_for_invoice(db: Session, inv: Invoice, modes: tuple[str, ...] = ("pruebas", "produccion")) -> list[tuple[str, bytes]]:
+    """Para POST /invoices/{id}/email: XML firmado (y la respuesta de Hacienda si ya llego) del ultimo comprobante directo.
+    Los recordatorios de cobro piden solo modes=("produccion",): al cliente nunca le llega un XML de pruebas."""
     doc = db.scalar(
         select(EInvoiceDocument)
-        .where(EInvoiceDocument.invoice_id == inv.id, EInvoiceDocument.doc_type == inv.doc_type, EInvoiceDocument.mode.in_(("pruebas", "produccion")), EInvoiceDocument.xml_document.is_not(None))
+        .where(EInvoiceDocument.invoice_id == inv.id, EInvoiceDocument.doc_type == inv.doc_type, EInvoiceDocument.mode.in_(modes), EInvoiceDocument.xml_document.is_not(None))
         .order_by(EInvoiceDocument.id.desc())
     )
     if not doc:

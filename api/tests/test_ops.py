@@ -37,8 +37,7 @@ def test_email_lleva_el_pdf_adjunto_de_verdad(client, auth, monkeypatch):
     y si el servidor no puede generarlo el texto no promete un adjunto."""
     import base64
 
-    from app.routers import ops
-    from app.services import mail
+    from app.services import documents_send, mail
 
     enviado = {}
 
@@ -55,7 +54,8 @@ def test_email_lleva_el_pdf_adjunto_de_verdad(client, auth, monkeypatch):
 
     monkeypatch.setenv("RESEND_API_KEY", "prueba")
     monkeypatch.setattr(mail.httpx, "post", fake_post)
-    monkeypatch.setattr(ops, "render_pdf", lambda html: b"%PDF-1.7 prueba")
+    # el envio vive en services/documents_send.py (plan 1.3: lo reutilizan la recurrencia y la cobranza)
+    monkeypatch.setattr(documents_send, "render_pdf", lambda html: b"%PDF-1.7 prueba")
     inv, _ = _quote_to_invoice(client)
     r = client.post(f"/invoices/{inv['id']}/email", json={})
     assert r.status_code == 200 and r.json()["sent"] is True
@@ -66,7 +66,7 @@ def test_email_lleva_el_pdf_adjunto_de_verdad(client, auth, monkeypatch):
 
     # sin WeasyPrint: sin adjunto y sin prometerlo
     enviado.clear()
-    monkeypatch.setattr(ops, "render_pdf", lambda html: None)
+    monkeypatch.setattr(documents_send, "render_pdf", lambda html: None)
     r = client.post(f"/invoices/{inv['id']}/email", json={})
     assert "attachments" not in enviado and "adjunto en PDF" not in enviado["html"]
 

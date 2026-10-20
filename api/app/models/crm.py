@@ -1,4 +1,5 @@
 from sqlalchemy import JSON, Boolean, String, Text
+from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..core.db import Base
@@ -22,3 +23,5 @@ class Customer(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     exemption: Mapped[dict | None] = mapped_column(JSON)  # tipo, numero, institucion, fecha, porcentaje
     notes: Mapped[str | None] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # cobranza (plan 1.3): este cliente no recibe recordatorios automaticos de cobro (acuerdo de pago, cliente delicado)
+    no_reminders: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())

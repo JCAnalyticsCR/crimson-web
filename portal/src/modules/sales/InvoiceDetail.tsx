@@ -43,7 +43,12 @@ export default function InvoiceDetail() {
     try { setInv(await api<Invoice>(`/invoices/${id}/payments`, { method: "POST", json: { ...form, amount: form.amount } })); setPay(false); toast("Pago registrado"); }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
-  const getLink = async () => { try { setLink(await api(`/invoices/${id}/payment-link`, { method: "POST" })); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } };
+  const getLink = async () => { try { setLink(await api(`/invoices/${id}/payment-link`, { method: "POST" })); reload(); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } };
+  const togglePause = async () => {
+    if (!inv) return;
+    try { setInv(await api<Invoice>(`/invoices/${id}/reminders`, { method: "PUT", json: { paused: !inv.reminders_paused } })); toast(inv.reminders_paused ? "Recordatorios reanudados" : "Recordatorios en pausa"); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
 
   return (
     <>
@@ -59,6 +64,17 @@ export default function InvoiceDetail() {
                 <thead><tr><th>Fecha</th><th>Método</th><th>Tipo</th><th>Referencia</th><th className="num">Monto</th><th>Estado</th></tr></thead>
                 <tbody>{inv.payments.map((p) => <tr key={p.id}><td className="muted">{fmtDate(p.paid_at)}</td><td style={{ textTransform: "capitalize" }}>{p.method}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.kind}</td><td className="mono muted">{p.external_ref || "—"}</td><td className="num money">{(p.kind === "devolucion" || p.kind === "reembolso") ? "−" : ""}{fmtMoney(p.amount, p.currency)}</td><td><Badge status={p.status} /></td></tr>)}</tbody>
               </table>
+            )}
+          </Card>
+          <Card title="Cobranza" extra={allows("sales.enviar") && inv.status !== "anulada" && Number(inv.balance) > 0 && <button className="btn btn--ghost btn--sm" onClick={togglePause}>{inv.reminders_paused ? "Reanudar recordatorios" : "Pausar recordatorios"}</button>}>
+            <p className="muted" style={{ fontSize: 13, margin: 0 }}>
+              {inv.sent_at ? `Le llegó al cliente el ${when(inv.sent_at)}.` : "Borrador: todavía no le llegó al cliente (envíela por correo o comparta el enlace de pago). No vence ni recibe recordatorios."}
+              {inv.reminders_paused ? " Los recordatorios automáticos están en pausa." : ""}
+            </p>
+            {(inv.reminders || []).length > 0 && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                {(inv.reminders || []).map((r) => <span key={r.stage} className={`badge ${r.status === "enviado" ? "badge--info" : "badge--bad"}`} title={r.status}>{r.stage} · {fmtDate(r.sent_on)}{r.status !== "enviado" ? " · no salió" : ""}</span>)}
+              </div>
             )}
           </Card>
           <Card title="Documentos electrónicos" extra={<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button className="btn btn--ghost btn--sm" onClick={loadXml}>XMLs</button>{allows("sales.enviar") && docs.some((x) => x.mode === "pruebas" || x.mode === "produccion") && <button className="btn btn--soft btn--sm" onClick={refreshEi}>Consultar estado</button>}{allows("sales.enviar") && inv.einvoice_status !== "aceptada" && inv.einvoice_status !== "pendiente" && inv.status !== "anulada" && <button className="btn btn--crimson btn--sm" onClick={emit}><Icon d={I.check} />Emitir a Hacienda</button>}{allows("sales.anular") && inv.einvoice_status === "aceptada" && inv.status !== "anulada" && <button className="btn btn--danger btn--sm" onClick={() => setNc("")}>Anular con NC</button>}</div>}>

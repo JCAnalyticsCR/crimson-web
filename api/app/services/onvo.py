@@ -258,10 +258,22 @@ def _paid_invoice(db: Session, t: Tenant, iid: int, obj: dict, amount_cents, cur
     if amount <= 0:
         return f"monto {amount} inválido: no se aplica"
     if currency and currency != inv.currency:
-        audit(db, t.id, None, "onvo_revisar", "invoice", inv.id, {"intencion": intent_id, "moneda": currency, "monto": str(amount)})
-        return f"ONVO cobró {currency} {amount} pero la factura {inv.number} es en {inv.currency}: revisar"
+        msg = f"ONVO cobró {currency} {amount} pero la factura {inv.number} es en {inv.currency}: revisar"
+        if not _flagged(db, t, inv, intent_id):
+            audit(db, t.id, None, "onvo_revisar", "invoice", inv.id, {"intencion": intent_id, "moneda": currency, "monto": str(amount)})
+            _invoice_alert(db, t, inv, f"Pago ONVO en otra moneda · factura {inv.number}", f"{msg}. No se aplicó a la factura.", red=True)
+        return msg
     if inv.status == "anulada":
-        audit(db, t.id, None, "onvo_revisar", "invoice", inv.id, {"intencion": intent_id, "monto": str(amount), "motivo": "factura anulada"})
+        if not _flagged(db, t, inv, intent_id):
+            audit(db, t.id, None, "onvo_revisar", "invoice", inv.id, {"intencion": intent_id, "monto": str(amount), "motivo": "factura anulada"})
+            _invoice_alert(
+                db,
+                t,
+                inv,
+                f"Dinero por devolver · factura {inv.number} anulada",
+                f"ONVO cobró {_m(amount, inv.currency)} (intención {intent_id}) por una factura anulada. Devolvé el dinero desde el panel de ONVO o aplicalo a otra factura.",
+                red=True,
+            )
         return f"factura {inv.number} anulada: ONVO cobró {amount}, devolver el dinero"
     p = add_payment(
         db,
@@ -271,14 +283,79 @@ def _paid_invoice(db: Session, t: Tenant, iid: int, obj: dict, amount_cents, cur
         PaymentIn(method="onvo", kind="captura", currency=inv.currency, amount=amount, external_ref=intent_id[:120], notes=f"Pago en línea ONVO ({source})"),
     )
     p.provider, p.provider_event = "onvo", slim(obj)
-    if Decimal(str(inv.balance)) < 0:
+    saldo = Decimal(str(inv.balance))
+    if saldo < 0:
         audit(db, t.id, None, "onvo_sobrepago", "invoice", inv.id, {"intencion": intent_id, "monto": str(amount), "saldo": str(inv.balance)})
-    if Decimal(str(inv.balance)) <= 0:
+        _invoice_alert(
+            db,
+            t,
+            inv,
+            f"Sobrepago ONVO · factura {inv.number}",
+            f"ONVO cobró {_m(amount, inv.currency)} y la factura quedó con saldo a favor del cliente de {_m(-saldo, inv.currency)}. Devolvé la diferencia o aplicala a otra factura.",
+            red=True,
+        )
+    else:
+        restante = f"Saldo pendiente: {_m(saldo, inv.currency)}." if saldo > 0 else "La factura quedó pagada."
+        _invoice_alert(db, t, inv, f"Pago en línea recibido · factura {inv.number}", f"ONVO cobró {_m(amount, inv.currency)} (intención {intent_id}). {restante}")
+    _receipt(db, t, inv, amount, intent_id)
+    if saldo <= 0:
         from datetime import UTC, datetime
 
         for link in db.scalars(select(PaymentLink).where(PaymentLink.invoice_id == inv.id, PaymentLink.paid_at.is_(None))):
             link.paid_at = datetime.now(UTC)
     return f"pago {p.id} aplicado a {inv.number}"
+
+
+# ---------- avisos del pago de una factura (plan 1.3) ----------
+def _m(v, cur: str) -> str:
+    from .render import money
+
+    return money(v, cur)
+
+
+def _flagged(db: Session, t: Tenant, inv: Invoice, intent_id: str) -> bool:
+    """Ese cobro ya se marco para revisar (la consulta al volver y el reintento del webhook no repiten la alerta)."""
+    from ..models import AuditLog
+
+    rows = db.scalars(
+        select(AuditLog).where(AuditLog.tenant_id == t.id, AuditLog.entity == "invoice", AuditLog.entity_id == inv.id, AuditLog.action == "onvo_revisar")
+    )
+    return any((a.diff or {}).get("intencion") == intent_id for a in rows)
+
+
+def _invoice_alert(db: Session, t: Tenant, inv: Invoice, title: str, detail: str, red: bool = False) -> None:
+    """Aviso a administracion y contabilidad. Rojo: dinero que hay que devolver o revisar (anulada, otra moneda, sobrepago)."""
+    from html import escape
+
+    from .mail import notify_roles
+
+    c = db.get(Customer, inv.customer_id) if inv.customer_id else None
+    quien = c.name if c is not None and c.tenant_id == t.id else "sin cliente"
+    estilo = "background:#fde8e8;color:#8a1c1c;border-left:4px solid #b3261e;padding:10px 14px" if red else "padding:4px 0"
+    html_ = (
+        f'<div style="{estilo}"><b>{escape(title)}</b></div><p>{escape(detail)}</p>'
+        f"<p>{escape(inv.number)} · {escape(quien)}. Revisala en Facturas.</p>"
+    )
+    notify_roles(db, t, ("admin", "contabilidad"), ("ALERTA · " if red else "") + title, html_, "invoice", inv.id)
+
+
+def _receipt(db: Session, t: Tenant, inv: Invoice, amount: Decimal, intent_id: str) -> None:
+    """Recibo al cliente con el saldo que queda (si tiene correo)."""
+    from html import escape
+
+    from .documents_send import queue_once
+    from .render import money
+
+    c = db.get(Customer, inv.customer_id) if inv.customer_id else None
+    if c is None or c.tenant_id != t.id or not (c.email or "").strip():
+        return
+    saldo = Decimal(str(inv.balance))
+    resto = f"Saldo pendiente: <b>{money(saldo, inv.currency)}</b>." if saldo > 0 else "La factura quedó pagada en su totalidad. ¡Gracias!"
+    html_ = f"""<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#15131a">
+<div style="border-bottom:3px solid #e2233a;padding:12px 0;font-size:18px;font-weight:700">{escape(t.name)}</div>
+<p>Recibimos su pago en línea de <b>{money(amount, inv.currency)}</b> para la factura <b>{escape(inv.number)}</b>.</p>
+<p>{resto}</p><p style="color:#8a858f;font-size:12px">Referencia del pago: {escape(intent_id)}. Cualquier consulta, responda a este correo.</p></div>"""
+    queue_once(db, t, c.email.strip(), f"Recibimos su pago · {inv.number} · {t.name}", html_, "invoice", inv.id, dedupe_key=f"recibo:{inv.id}:{intent_id}")
 
 
 def _note_attempt(db: Session, t: Tenant, meta: dict, intent_id: str, text: str) -> str:

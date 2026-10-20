@@ -6,7 +6,7 @@ import { useSession } from "../../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
 
-type Cust = { id: number; name: string; id_type: string; id_number: string | null; email: string | null; phone: string | null; whatsapp: string | null; currency: string; notes: string | null; address: Record<string, string> | null; active: boolean; created_at: string };
+type Cust = { id: number; name: string; id_type: string; id_number: string | null; email: string | null; phone: string | null; whatsapp: string | null; currency: string; notes: string | null; address: Record<string, string> | null; active: boolean; no_reminders?: boolean; created_at: string };
 type Ev = { at: string; kind: string; title: string; amount?: string; currency?: string; status: string | null; to?: string; id?: number; author?: string | null };
 type Asset = { id: number; name: string; model: string | null; serial: string | null; location: string | null; installed_at: string | null; warranty_until: string | null; warranty_days: number | null };
 type Proj = { id: number; number: string; name: string; status: string; end_date: string | null };
@@ -83,6 +83,10 @@ export default function CustomerDetail() {
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
   const delContact = async (kid?: number) => { if (!kid || !confirm("¿Quitar el contacto?")) return; await api(`/customers/${id}/contacts/${kid}`, { method: "DELETE" }); load(); };
+  const toggleReminders = async (off: boolean) => {
+    try { await api(`/customers/${id}`, { method: "PUT", json: { name: ov?.customer.name, no_reminders: off } }); toast(off ? "El cliente ya no recibe recordatorios de cobro" : "Recordatorios de cobro activos"); load(); }
+    catch (e) { toast(e instanceof Error ? e.message : "No se pudo guardar", "bad"); }
+  };
   const saveCustomer = async () => {
     if (!edit) return;
     try {
@@ -218,6 +222,11 @@ export default function CustomerDetail() {
               <dt className="muted">Dirección</dt><dd style={{ margin: 0 }}>{c.address?.senas || "—"}</dd>
               <dt className="muted">Notas</dt><dd style={{ margin: 0, whiteSpace: "pre-wrap" }}>{c.notes || "—"}</dd>
             </dl>
+            {/* cobranza (plan 1.3): acuerdo de pago o cliente delicado -> sin recordatorios automaticos */}
+            <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13, marginTop: 14 }}>
+              <input type="checkbox" checked={!!c.no_reminders} disabled={!allows("crm.editar")} onChange={(e) => toggleReminders(e.target.checked)} style={{ marginTop: 3 }} />
+              <span><b>Sin recordatorios de cobro</b><br /><span className="muted">El cliente no recibe los recordatorios automáticos de facturas por vencer o vencidas.</span></span>
+            </label>
             {c.active && <button className="btn btn--danger btn--sm" style={{ marginTop: 16 }} onClick={archive}>Archivar cliente</button>}
           </Card>
         </div>

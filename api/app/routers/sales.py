@@ -24,7 +24,7 @@ from ..schemas.sales import (
     PaymentOut,
     QuoteOut,
 )
-from ..services import discounts, units
+from ..services import discounts, invoice_states, units
 from ..services import documents as svc
 from ..services import inventory as invsvc
 from ..services import quote_versions as qv
@@ -114,10 +114,17 @@ def _quote_out(db: Session, q: Quote, p: Principal) -> QuoteOut:
 
 
 def _inv_out(db: Session, i: Invoice, p: Principal) -> InvoiceOut:
+    from ..models import CollectionReminder
+    from ..tasks.cobranza import stage_label
+
     o = InvoiceOut.model_validate(i)
     o.customer_name = _cust_name(db, i.customer_id)
     o.seller_name = _user_name(db, i.seller_id)
     o.internal_notes = _notes_for(p, i.internal_notes)
+    o.reminders = [
+        {"stage": stage_label(r.stage), "sent_on": r.sent_on, "status": r.status}
+        for r in db.scalars(select(CollectionReminder).where(CollectionReminder.invoice_id == i.id).order_by(CollectionReminder.sent_on, CollectionReminder.id))
+    ]
     return o
 
 
@@ -146,11 +153,11 @@ def pending_where(key: str, p: Principal) -> list:
     out = [model.tenant_id == tid]
     if _pend_mine(p):
         out.append(doc_mine(model, p.user.id))
-    today = date.today()
+    today = invoice_states.cr_today()
     if key == "facturas_vencidas":
-        out += [Invoice.status.in_(("creado", "parcial", "vencida")), Invoice.due_date < today]
+        out.append(invoice_states.overdue_where(today))  # por cobrar con la fecha pasada (nunca un borrador sin enviar)
     elif key == "facturas_por_cobrar":
-        out.append(Invoice.status.in_(("creado", "parcial")))
+        out.append(invoice_states.cobrable_where())  # enviada, con saldo, ni pagada ni anulada (plan 1.3)
     elif key == "documentos_rechazados":
         out.append(Invoice.einvoice_status.in_(("rechazada", "error")))  # error: Hacienda no respondio o no lo encontro
     elif key == "enlaces_abiertos":
@@ -721,7 +728,10 @@ def pay_invoice(iid: int, data: PaymentIn, p: Principal = Depends(require("payme
 @router.post("/invoices/{iid}/payment-link", response_model=PaymentLinkOut)
 def payment_link(iid: int, p: Principal = Depends(require("sales", "enviar")), db: Session = Depends(get_db)):
     inv = _own(db, Invoice, iid, p.tenant.id, p)
+    if inv.status == "anulada":
+        raise HTTPException(409, "La factura está anulada")
     link = svc.get_or_create_payment_link(db, p.tenant.id, inv)
+    invoice_states.mark_sent(inv)  # el enlace es para compartirlo: desde aqui la factura esta por cobrar (plan 1.3)
     db.commit()
     return PaymentLinkOut(
         url=link.url,
@@ -729,6 +739,51 @@ def payment_link(iid: int, p: Principal = Depends(require("sales", "enviar")), d
         expires_at=link.expires_at.isoformat(),
         opened_count=link.opened_count,
     )
+
+
+# ---------- Cobranza (plan 1.3) ----------
+class RemindersIn(BaseModel):
+    paused: bool
+
+
+@router.put("/invoices/{iid}/reminders", response_model=InvoiceOut)
+def invoice_reminders(iid: int, data: RemindersIn, p: Principal = Depends(require("sales", "enviar")), db: Session = Depends(get_db)):
+    """Pausa o reanuda la secuencia de recordatorios de esta factura (acuerdo de pago, reclamo en curso)."""
+    inv = _own(db, Invoice, iid, p.tenant.id, p)
+    if inv.reminders_paused != data.paused:
+        inv.reminders_paused = data.paused
+        audit(db, p.tenant.id, p.user.id, "reminders_paused" if data.paused else "reminders_resumed", "invoice", inv.id, ip=p.ip)
+    db.commit()
+    return _inv_out(db, inv, p)
+
+
+@router.get("/collections/preview")
+def collections_preview(fecha: date | None = None, p: Principal = Depends(require("sales", "ver_todo")), db: Session = Depends(get_db)):
+    """Corrida en seco de la secuencia: quien recibiria que recordatorio en esa fecha (no manda ni escribe nada).
+    Andres aprueba esta lista antes de volver a encender "Notificar vencimiento al cliente"."""
+    from ..tasks import cobranza
+
+    hoy = invoice_states.cr_today()
+    out = cobranza.preview(db, p.tenant, fecha or hoy)
+    cartera = cobranza.portfolio(db, p.tenant, hoy)
+    out["cartera"] = {"total": cartera["total"], "vencida": cartera["vencida"], "n": cartera["n"], "n_vencidas": cartera["n_vencidas"], "currency": p.tenant.default_currency or "CRC"}
+    out["baseline"] = (p.tenant.settings or {}).get("collections_baseline")
+    return out
+
+
+@router.post("/collections/baseline")
+def collections_baseline(p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
+    """Registra la cartera vencida de hoy como linea base del dia 0 (con ella se compara el resumen semanal)."""
+    from ..models import Tenant
+    from ..tasks import cobranza
+
+    t = db.get(Tenant, p.tenant.id)
+    antes = (t.settings or {}).get("collections_baseline")
+    hoy = invoice_states.cr_today()
+    base = cobranza.set_baseline(t, hoy, cobranza.portfolio(db, t, hoy)["vencida"])
+    audit(db, t.id, p.user.id, "collections_baseline", "tenant", t.id, {"antes": antes, "despues": base}, ip=p.ip)
+    db.commit()
+    return base
 
 
 # ---------- Pagos (listado) ----------
@@ -852,7 +907,7 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
     if mine:
         for x in db.scalars(
             select(Invoice)
-            .where(Invoice.tenant_id == tid, own_inv, Invoice.status.in_(("creado", "parcial", "vencida")), Invoice.balance > 0)
+            .where(Invoice.tenant_id == tid, own_inv, invoice_states.cobrable_where())
             .order_by(Invoice.due_date)
             .limit(8)
         ):
@@ -926,7 +981,7 @@ def _ceo_row(db: Session, p: Principal) -> dict:
     pipeline = sum((d(o.amount) for o in opps), Decimal(0))
     weighted = sum((d(o.amount) * o.probability / 100 for o in opps), Decimal(0))
     receivable = d(
-        db.scalar(select(func.coalesce(func.sum(Invoice.balance), 0)).where(Invoice.tenant_id == tid, Invoice.status.in_(("creado", "parcial", "vencida"))))
+        db.scalar(select(func.coalesce(func.sum(Invoice.balance), 0)).where(Invoice.tenant_id == tid, invoice_states.cobrable_where()))
     )
     active = db.scalars(select(Project).where(Project.tenant_id == tid, Project.status.in_(("planificado", "en_curso", "pausado")), live(Project))).all()
     closed = db.scalars(

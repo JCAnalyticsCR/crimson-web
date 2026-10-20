@@ -72,7 +72,8 @@ td{padding:8px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-
 </body></html>""")
 
 
-def render_html(db: Session, doc: Quote | Invoice, tenant: Tenant) -> str:
+def render_html(db: Session, doc: Quote | Invoice, tenant: Tenant, kind: str | None = None) -> str:
+    """kind cambia el titulo ("Aviso de cobro": la mensualidad sin comprobante fiscal no se presenta como factura)."""
     c = db.get(Customer, doc.customer_id) if doc.customer_id else None
     is_inv = isinstance(doc, Invoice)
     st = tenant.settings or {}
@@ -81,7 +82,7 @@ def render_html(db: Session, doc: Quote | Invoice, tenant: Tenant) -> str:
         d=doc,
         t=tenant,
         c=c,
-        kind="Factura" if is_inv else "Cotización",
+        kind=kind or ("Factura" if is_inv else "Cotización"),
         leyenda=LEYENDA,
         balance=doc.balance if is_inv else None,
         footer=st.get("invoice_footer" if is_inv else "quote_footer"),

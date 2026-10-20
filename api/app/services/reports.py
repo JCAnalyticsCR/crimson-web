@@ -50,12 +50,11 @@ def facturacion(db: Session, tid: int, a: date, b: date) -> Report:
 
 
 def pendientes(db: Session, tid: int, a: date, b: date) -> Report:
-    rows = db.scalars(
-        select(Invoice)
-        .where(Invoice.tenant_id == tid, Invoice.status.in_(("creado", "parcial", "vencida", "enviada")), Invoice.balance > 0)
-        .order_by(Invoice.due_date)
-    ).all()
-    today = date.today()
+    from .invoice_states import cobrable_where, cr_today
+
+    # por cobrar = lo que le llego al cliente y tiene saldo (plan 1.3): la misma definicion que el inicio y la lista
+    rows = db.scalars(select(Invoice).where(Invoice.tenant_id == tid, cobrable_where()).order_by(Invoice.due_date)).all()
+    today = cr_today()
     return Report(
         "pendientes",
         "Facturas pendientes",

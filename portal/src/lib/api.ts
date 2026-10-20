@@ -146,7 +146,9 @@ export type Quote = Doc & {
   acceptance_status?: "pendiente" | "aceptada" | "rechazada"; accepted_version?: number | null; current_version?: number | null; has_unsent_changes?: boolean;
 };
 export type Payment = { id: number; invoice_id?: number | null; invoice_number?: string | null; customer?: string | null; method: string; kind: string; currency: string; amount: string; tip: string; external_ref: string | null; provider: string; paid_at: string; status: string };
-export type Invoice = Doc & { doc_type: string; consecutive: string | null; clave: string | null; balance: string; quote_id: number | null; einvoice_status: string; payments: Payment[]; sale_condition: string; credit_days: number; payment_method: string };
+export type Invoice = Doc & { doc_type: string; consecutive: string | null; clave: string | null; balance: string; quote_id: number | null; einvoice_status: string; payments: Payment[]; sale_condition: string; credit_days: number; payment_method: string;
+  /* cobranza (plan 1.3): cuando le llego al cliente, pausa de la secuencia y recordatorios ya enviados */
+  sent_at?: string | null; reminders_paused?: boolean; reminders?: { stage: string; sent_on: string; status: string }[] };
 export type DocListItem = { id: number; number: string; customer_name: string | null; currency: string; total: string; balance: string | null; status: string; issue_date: string; due_date: string | null; acceptance_status?: string | null; seller_name?: string | null };
 export type Ceo = {
   pipeline: string; pipeline_weighted: string; opportunities: number; receivable: string; sold_month: string;

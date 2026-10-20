@@ -20,7 +20,7 @@ from datetime import UTC, date, datetime
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
@@ -37,6 +37,7 @@ from ..models import (
     TenantUser,
     User,
 )
+from ..services import invoice_states
 from ..services import sla as slasvc
 from ..services.client_access import invite_client
 from ..services.documents import audit
@@ -54,7 +55,7 @@ TIPOS = {"falla": "soporte", "garantia": "garantia", "mantenimiento": "mantenimi
 TIPO_LABEL = {"falla": "Falla", "garantia": "Garantía", "mantenimiento": "Mantenimiento", "otro": "Consulta"}
 # lo que el cliente ve de cada documento: borradores y anulados no son asunto suyo
 QUOTE_VISIBLE = ("enviada", "convertida", "vencida")
-INVOICE_VISIBLE = ("enviada", "pagada", "parcial", "vencida")
+INVOICE_VISIBLE = ("enviada", "pagada", "parcial", "vencida")  # compatibilidad: la definicion es services/invoice_states
 MAX_PHOTOS = 8
 
 
@@ -409,7 +410,7 @@ def documentos(p: Principal = Depends(need("documentos")), db: Session = Depends
         .where(
             Invoice.tenant_id == p.tenant.id,
             Invoice.customer_id == p.customer_id,
-            or_(Invoice.status.in_(INVOICE_VISIBLE), (Invoice.einvoice_status == "aceptada") & (Invoice.status != "anulada")),
+            invoice_states.visible_where(),  # le llego al cliente (plan 1.3): nunca un borrador ni una anulada
         )
         .order_by(Invoice.issue_date.desc(), Invoice.id.desc())
         .limit(200)
@@ -423,7 +424,7 @@ def _documento(db: Session, kind: str, did: int, p: Principal):
         ok = d is not None and d.status in QUOTE_VISIBLE
     elif kind == "invoices":
         d = db.get(Invoice, did)
-        ok = d is not None and (d.status in INVOICE_VISIBLE or (d.einvoice_status == "aceptada" and d.status != "anulada"))
+        ok = d is not None and invoice_states.is_visible(d)
     else:
         raise HTTPException(404, "Documento no encontrado")
     if not ok or d.tenant_id != p.tenant.id or d.customer_id != p.customer_id:

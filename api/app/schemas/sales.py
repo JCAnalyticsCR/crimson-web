@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -148,6 +148,10 @@ class InvoiceOut(DocBaseOut):
     quote_id: int | None
     einvoice_status: str
     payments: list[PaymentOut] = []
+    # cobranza (plan 1.3): cuando le llego al cliente, pausa de la secuencia y avisos ya enviados
+    sent_at: datetime | None = None
+    reminders_paused: bool = False
+    reminders: list[dict] = []
 
 
 class PaymentLinkOut(BaseModel):

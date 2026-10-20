@@ -1,0 +1,253 @@
+"""Secuencia de recordatorios de cobro (plan 1.3): D-3, D0, D+3, D+10 con PDF y enlace de pago, una vez por etapa,
+solo sobre lo enviado, con fecha de corte de cartera, pausa por cliente y por factura, y corrida en seco que no
+escribe nada. Nombres y correos ficticios (repo publico)."""
+
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
+
+import pytest
+from sqlalchemy import func, select
+
+from tests.test_cobranza_estados import _cliente, _factura
+
+HOY = date.today()
+
+
+@pytest.fixture
+def correo(monkeypatch):
+    """Correo configurado y aceptado por el proveedor; guarda (fila, adjuntos) de cada envio."""
+    from app.services import documents_send, mail
+
+    salida: list = []
+
+    def deliver(m, files=None):
+        m.status, m.provider_id = "enviado", f"re_{m.id}"
+        salida.append((m, [n for n, _ in (files or [])]))
+
+    monkeypatch.setenv("RESEND_API_KEY", "re_prueba")
+    monkeypatch.setattr(mail, "deliver", deliver)
+    monkeypatch.setattr(documents_send, "render_pdf", lambda html: b"%PDF-1.7 prueba")
+    return salida
+
+
+def _encender(client, desde: date = HOY - timedelta(days=90), **extra):
+    r = client.put("/settings", json={"notify_due": True, "collections_start_date": desde.isoformat(), **extra})
+    assert r.status_code == 200, r.text
+
+
+def _enviada(db_session, client, cid: int, due: date, hace: int = 20, issue: date | None = None) -> int:
+    """Factura enviada al cliente hace `hace` dias (como si el correo hubiera salido entonces)."""
+    from app.models import Invoice
+
+    inv = _factura(client, cid, due=due)
+    i = db_session.get(Invoice, inv["id"])
+    i.sent_at = datetime.now(UTC) - timedelta(days=hace)
+    i.status = "enviada"
+    if issue:
+        i.issue_date = issue
+    db_session.commit()
+    return inv["id"]
+
+
+def _al_cliente(salida, email="pagos@cliente-prueba.ejemplo.com"):
+    return [(m, f) for m, f in salida if m.to == email]
+
+
+def test_secuencia_completa_y_un_pago_la_corta(client, auth, db_session, correo):
+    from app.models import CollectionReminder
+    from app.tasks.cobranza import mark_overdue, run_reminders
+
+    cid = _cliente(client)
+    _encender(client)
+    iid = _enviada(db_session, client, cid, due=HOY + timedelta(days=3))
+    borrador = _factura(client, cid, due=HOY + timedelta(days=3))["id"]  # nunca enviado: no recibe nada
+
+    r = run_reminders(db_session, today=HOY)  # D-3
+    assert r["enviados"] == 1
+    m, files = _al_cliente(correo)[-1]
+    assert "vence el" in m.subject and "/pagar/" in m.html and files == [f"{_numero(client, iid)}.pdf"]
+    assert m.entity == "invoice" and m.entity_id == iid
+    # doble disparo el mismo dia: no se repite
+    assert run_reminders(db_session, today=HOY)["enviados"] == 0
+    assert run_reminders(db_session, today=HOY + timedelta(days=1))["enviados"] == 0
+    assert run_reminders(db_session, today=HOY + timedelta(days=3))["enviados"] == 1  # D0
+    assert "Hoy vence" in _al_cliente(correo)[-1][0].subject
+    mark_overdue(db_session, today=HOY + timedelta(days=4))
+    assert client.get(f"/invoices/{iid}").json()["status"] == "vencida"
+    assert run_reminders(db_session, today=HOY + timedelta(days=6))["enviados"] == 1  # D+3
+    m, files = _al_cliente(correo)[-1]
+    assert "3 días de atraso" in m.subject and "/pagar/" in m.html and files
+    etapas = client.get(f"/invoices/{iid}").json()["reminders"]
+    assert [e["stage"] for e in etapas] == ["D-3", "D0", "D+3"] and all(e["status"] == "enviado" for e in etapas)
+    # el cliente paga: la secuencia se corta (D+10 ya no sale)
+    total = client.get(f"/invoices/{iid}").json()["total"]
+    client.post(f"/invoices/{iid}/payments", json={"method": "sinpe", "kind": "captura", "amount": total})
+    assert run_reminders(db_session, today=HOY + timedelta(days=13))["enviados"] == 0
+    assert db_session.scalar(select(func.count()).select_from(CollectionReminder).where(CollectionReminder.invoice_id == borrador)) == 0
+
+
+def _numero(client, iid: int) -> str:
+    return client.get(f"/invoices/{iid}").json()["number"]
+
+
+def test_worker_caido_no_manda_etapas_atrasadas_de_golpe(client, auth, db_session, correo):
+    from app.tasks.cobranza import run_reminders
+
+    cid = _cliente(client)
+    _encender(client)
+    iid = _enviada(db_session, client, cid, due=HOY - timedelta(days=12), hace=40)
+    assert run_reminders(db_session, today=HOY)["enviados"] == 1
+    assert [e["stage"] for e in client.get(f"/invoices/{iid}").json()["reminders"]] == ["D+10"]
+
+
+def test_no_recuerda_el_mismo_dia_que_la_recibio(client, auth, db_session, correo):
+    from app.tasks.cobranza import run_reminders
+
+    cid = _cliente(client)
+    _encender(client)
+    iid = _enviada(db_session, client, cid, due=HOY, hace=0)  # contado: vence el dia que se envia
+    assert run_reminders(db_session, today=HOY)["enviados"] == 0
+    assert run_reminders(db_session, today=HOY + timedelta(days=1))["enviados"] == 0
+    assert run_reminders(db_session, today=HOY + timedelta(days=3))["enviados"] == 1
+    assert [e["stage"] for e in client.get(f"/invoices/{iid}").json()["reminders"]] == ["D+3"]
+
+
+def test_fecha_de_corte_y_sin_corte_no_sale_nada(client, auth, db_session, correo):
+    from app.tasks.cobranza import run_reminders
+
+    cid = _cliente(client)
+    vieja = _enviada(db_session, client, cid, due=HOY - timedelta(days=3), hace=60, issue=HOY - timedelta(days=60))
+    nueva = _enviada(db_session, client, cid, due=HOY - timedelta(days=3), hace=10, issue=HOY - timedelta(days=10))
+    client.put("/settings", json={"notify_due": True})
+    assert run_reminders(db_session, today=HOY)["enviados"] == 0  # sin fecha de corte: nada
+    _encender(client, desde=HOY - timedelta(days=30))
+    assert run_reminders(db_session, today=HOY)["enviados"] == 1
+    assert client.get(f"/invoices/{vieja}").json()["reminders"] == []
+    assert len(client.get(f"/invoices/{nueva}").json()["reminders"]) == 1
+
+
+def test_pausas_apagado_y_sin_correo(client, auth, db_session, correo, monkeypatch):
+    from app.tasks.cobranza import run_reminders
+
+    cid = _cliente(client)
+    otro = _cliente(client, email="tesoreria@otro-cliente.ejemplo.com")
+    _encender(client)
+    a = _enviada(db_session, client, cid, due=HOY - timedelta(days=3))
+    b = _enviada(db_session, client, otro, due=HOY - timedelta(days=3))
+    # pausa por factura y por cliente
+    assert client.put(f"/invoices/{a}/reminders", json={"paused": True}).json()["reminders_paused"] is True
+    r = client.put(f"/customers/{otro}", json={"name": "Cliente Prueba Cobro S.A.", "no_reminders": True})
+    assert r.status_code == 200 and r.json()["no_reminders"] is True
+    assert run_reminders(db_session, today=HOY) == {"enviados": 0, "fallidos": 0, "omitidos": 2}
+    client.put(f"/invoices/{a}/reminders", json={"paused": False})
+    # apagado: nada
+    client.put("/settings", json={"notify_due": False})
+    assert run_reminders(db_session, today=HOY)["enviados"] == 0
+    client.put("/settings", json={"notify_due": True})
+    # sin servicio de correo no se gasta la etapa
+    monkeypatch.delenv("RESEND_API_KEY")
+    assert run_reminders(db_session, today=HOY).get("sin_correo") is True
+    monkeypatch.setenv("RESEND_API_KEY", "re_prueba")
+    assert run_reminders(db_session, today=HOY)["enviados"] == 1
+    assert len(client.get(f"/invoices/{a}").json()["reminders"]) == 1 and client.get(f"/invoices/{b}").json()["reminders"] == []
+
+
+def test_correo_que_falla_queda_marcado_y_avisa(client, auth, db_session, monkeypatch):
+    from app.models import EmailOutbox
+    from app.services import documents_send, mail
+    from app.tasks.cobranza import run_reminders
+
+    def deliver(m, files=None):
+        m.status, m.error = "error", "rechazado por el proveedor"
+
+    monkeypatch.setenv("RESEND_API_KEY", "re_prueba")
+    monkeypatch.setattr(mail, "deliver", deliver)
+    monkeypatch.setattr(documents_send, "render_pdf", lambda html: b"%PDF-1.7 prueba")
+    cid = _cliente(client)
+    _encender(client)
+    iid = _enviada(db_session, client, cid, due=HOY - timedelta(days=3))
+    r = run_reminders(db_session, today=HOY)
+    assert r["fallidos"] == 1 and r["enviados"] == 0
+    assert client.get(f"/invoices/{iid}").json()["reminders"][0]["status"] == "error"
+    # no se reintenta sin el PDF (mail.retry_outbox toma pendiente|error) y el admin recibe el aviso
+    al_cliente = db_session.scalars(select(EmailOutbox).where(EmailOutbox.to == "pagos@cliente-prueba.ejemplo.com")).all()
+    assert [m.status for m in al_cliente] == ["fallido"]
+    assert db_session.scalar(select(EmailOutbox).where(EmailOutbox.subject.like("Cobranza:%")))
+    assert run_reminders(db_session, today=HOY)["fallidos"] == 0  # la etapa no se repite
+
+
+def test_corrida_en_seco_no_escribe_nada(client, auth, db_session, correo):
+    from app.models import CollectionReminder, EmailOutbox, PaymentLink
+
+    cid = _cliente(client)
+    sin_correo = client.post("/customers", json={"name": "Cliente Sin Correo", "id_type": "fisica"}).json()["id"]
+    a = _enviada(db_session, client, cid, due=HOY - timedelta(days=3))
+    b = _enviada(db_session, client, sin_correo, due=HOY + timedelta(days=3))
+    _factura(client, cid, due=HOY)  # borrador
+    antes = (db_session.scalar(select(func.count()).select_from(EmailOutbox)), db_session.scalar(select(func.count()).select_from(PaymentLink)))
+    pv = client.get("/collections/preview").json()
+    assert any("fecha de corte" in w for w in pv["warnings"])  # sin corte: muestra todas y avisa
+    assert [x["invoice_id"] for x in pv["items"]] == [a] and pv["items"][0]["stage"] == "D+3"
+    assert pv["skipped"][0]["invoice_id"] == b and pv["skipped"][0]["reason"] == "El cliente no tiene correo"
+    assert pv["ejemplo"]["subject"] == pv["items"][0]["subject"] and "Pagar en línea" in pv["ejemplo"]["html"]
+    assert Decimal(str(pv["cartera"]["vencida"])) > 0 and pv["baseline"] is None
+    # otra fecha
+    pv2 = client.get("/collections/preview", params={"fecha": (HOY + timedelta(days=7)).isoformat()}).json()
+    assert [x["stage"] for x in pv2["items"]] == ["D+10"] and [x["stage"] for x in pv2["skipped"]] == ["D+3"]
+    despues = (db_session.scalar(select(func.count()).select_from(EmailOutbox)), db_session.scalar(select(func.count()).select_from(PaymentLink)))
+    assert antes == despues and db_session.scalar(select(func.count()).select_from(CollectionReminder)) == 0
+    # solo quien ve todas las ventas
+    from tests.test_session4 import _user_with_role
+
+    pw = _user_with_role(db_session, auth["tenant"]["id"], "vende.cobro@ejemplo.com", "ventas")
+    keep = client.headers.pop("Authorization")
+    tok = client.post("/auth/login", json={"email": "vende.cobro@ejemplo.com", "password": pw}).json()["access_token"]
+    client.headers["Authorization"] = keep
+    assert client.get("/collections/preview", headers={"Authorization": f"Bearer {tok}"}).status_code == 403
+
+
+def test_mensualidad_de_aliado_avisa_a_d_mas_5(client, auth, db_session, correo):
+    from app.models import Invoice
+    from app.tasks.cobranza import run_reminders
+
+    cid = _cliente(client, email="pagos@aliado-cobro.ejemplo.com")
+    _encender(client)
+    iid = _enviada(db_session, client, cid, due=HOY - timedelta(days=4), hace=30)
+    db_session.get(Invoice, iid).external_order = "MENSUALIDAD-PLATAFORMA"
+    db_session.commit()
+    run_reminders(db_session, today=HOY - timedelta(days=4))  # D0
+    assert run_reminders(db_session, today=HOY - timedelta(days=1))["enviados"] == 0  # D+3 no es etapa de aliados
+    assert run_reminders(db_session, today=HOY + timedelta(days=1))["enviados"] == 1  # D+5
+    m, _ = _al_cliente(correo, "pagos@aliado-cobro.ejemplo.com")[-1]
+    assert "Mensualidad" in m.subject and "5 días de atraso" in m.subject
+    # etapas configurables
+    assert client.put("/settings", json={"collections_ally_stages": [-200]}).status_code == 422
+    assert client.put("/settings", json={"collections_stages": [10, 0, -3, 0]}).json()["collections_stages"] == [-3, 0, 10]
+
+
+def test_resumen_semanal_con_linea_base_y_cobranza_recuperada(client, auth, db_session, correo):
+    from app.models import EmailOutbox, Tenant
+    from app.tasks.cobranza import run_reminders, weekly_summary
+
+    cid = _cliente(client)
+    _encender(client)
+    iid = _enviada(db_session, client, cid, due=HOY - timedelta(days=10), hace=40)
+    lunes = HOY
+    assert weekly_summary(db_session, today=lunes) == 1
+    t = db_session.get(Tenant, auth["tenant"]["id"])
+    base = t.settings["collections_baseline"]
+    assert base["date"] == lunes.isoformat() and Decimal(base["overdue"]) == Decimal("113000.00")
+    primero = db_session.scalars(select(EmailOutbox).where(EmailOutbox.subject.like("Cartera de la semana%"))).all()[-1]
+    assert "Línea base registrada hoy" in primero.html
+    # recordatorio, el cliente paga despues y el resumen siguiente lo cuenta como cobranza recuperada
+    run_reminders(db_session, today=lunes + timedelta(days=1))
+    total = client.get(f"/invoices/{iid}").json()["total"]
+    client.post(
+        f"/invoices/{iid}/payments", json={"method": "sinpe", "kind": "captura", "amount": total, "paid_at": (lunes + timedelta(days=2)).isoformat()}
+    )
+    assert weekly_summary(db_session, today=lunes + timedelta(days=7)) == 1
+    ultimo = db_session.scalars(select(EmailOutbox).where(EmailOutbox.subject.like("Cartera de la semana%")).order_by(EmailOutbox.id.desc())).first()
+    assert "₡113,000.00" in ultimo.html and "Día 0" in ultimo.html and "1 recordatorio(s) enviados" in ultimo.html
+    # linea base manual desde Ajustes
+    r = client.post("/collections/baseline")
+    assert r.status_code == 200 and Decimal(r.json()["overdue"]) == 0
