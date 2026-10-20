@@ -98,7 +98,8 @@ def _espera(seg: int) -> str:
 class LoginLimiter:
     """Inicio de sesion (plan 1.10). Solo cuentan los intentos FALLIDOS (entrar bien no gasta cupo).
 
-    - Por IP: 20 fallidos seguidos (contra cualquier cuenta) y despues espera progresiva desde 1 min (tope 15 min).
+    - Por IP: 20 fallidos (contra cualquier cuenta; se olvidan 15 min despues del ultimo) y despues espera progresiva
+      desde 1 min (tope 15 min). Acertar no lo limpia: detras de una IP puede haber una oficina entera.
     - Por cuenta + IP: 5 fallidos y despues espera progresiva desde 30 s (tope 15 min). Frena solo a esa IP: 25
       fallidos desde una IP no le impiden entrar a la duena de la cuenta desde otra.
     - Por cuenta (todas las IPs, bloqueo en la base, routers/auth.py): cada IP aporta como mucho ACCOUNT_SHARE
