@@ -86,6 +86,8 @@ def test_primera_por_aprobar_y_despues_salen_solas(client, auth, db_session, cor
     segunda = db_session.get(Invoice, r.last_invoice_id)
     assert segunda.id != primera.id and segunda.status == "enviada" and segunda.sent_at and r.last_send_status == "enviada"
     assert len(_al(correo, CLIENTE)) == 2
+    # doble disparo del worker el mismo dia: ni otra factura ni otro correo
+    assert run_due_recurrences(db_session, today=HOY) == 0 and len(_al(correo, CLIENTE)) == 2
 
 
 def test_resend_caido_queda_pendiente_y_avisa(client, auth, db_session, correo):

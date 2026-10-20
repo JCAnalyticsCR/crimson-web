@@ -251,3 +251,24 @@ def test_resumen_semanal_con_linea_base_y_cobranza_recuperada(client, auth, db_s
     # linea base manual desde Ajustes
     r = client.post("/collections/baseline")
     assert r.status_code == 200 and Decimal(r.json()["overdue"]) == 0
+
+
+def test_corrida_diaria_con_la_fecha_de_costa_rica(client, auth, db_session, correo, monkeypatch):
+    """Borde 18:00-24:00 CR: a las 23:30 en Costa Rica ya es el dia siguiente en UTC; la etapa no sale un dia antes."""
+    from zoneinfo import ZoneInfo
+
+    from app.providers import einvoice as prov
+    from app.tasks.cobranza import run_reminders
+
+    cid = _cliente(client)
+    _encender(client)
+    vence = HOY + timedelta(days=30)
+    iid = _enviada(db_session, client, cid, due=vence)
+    d3 = vence - timedelta(days=3)
+    cr = ZoneInfo("America/Costa_Rica")
+    monkeypatch.setattr(prov, "cr_now", lambda: datetime(d3.year, d3.month, d3.day, 0, 10, tzinfo=cr) - timedelta(minutes=40))  # 23:30 CR
+    assert run_reminders(db_session)["enviados"] == 0
+    monkeypatch.setattr(prov, "cr_now", lambda: datetime(d3.year, d3.month, d3.day, 0, 10, tzinfo=cr))
+    assert run_reminders(db_session)["enviados"] == 1
+    assert run_reminders(db_session)["enviados"] == 0  # doble disparo del beat
+    assert [e["stage"] for e in client.get(f"/invoices/{iid}").json()["reminders"]] == ["D-3"]
