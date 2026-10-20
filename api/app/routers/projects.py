@@ -700,6 +700,9 @@ def purchase_status(rid: int, data: ReqStatusIn, p: Principal = Depends(require(
     r = db.get(PurchaseRequest, rid)
     if not r or r.tenant_id != p.tenant.id:
         raise HTTPException(404, "Solicitud no encontrada")
+    if r.status == "reservada":
+        # pedido web sin pagar: la compra nace al cobrar (no se le devuelve nada al proveedor)
+        raise HTTPException(409, "Esta solicitud espera el pago del pedido web: pasa a borrador sola al pagarse y se cancela sola si el pedido vence o se cancela.")
     if r.status == "recibida" and data.status != "recibida":
         # la entrada ya esta en el kardex: cambiarla de estado y volver a recibirla la sumaba otra vez
         raise HTTPException(409, "La compra ya se recibió y su mercadería entró a bodega. Para devolverla registrá una salida por devolución en Inventarios.")

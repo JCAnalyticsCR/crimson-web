@@ -11,8 +11,14 @@ Reglas
 - Las variantes (ProductVariant) comparten la existencia del producto padre: el ledger no tiene variante.
 - Pedido web: reserva AUTOMATICA (origin='web', sin aprobacion humana) bajo el mismo candado de las reservas
   formales (AC06). Lo que no hay en bodega pero el proveedor tiene sale "bajo pedido": no reserva stock
-  propio, genera una solicitud de compra (reason='pedido_web') para el admin. Al recibir esa compra, lo que entra a
-  bodega queda reservado para ESE pedido (reserve_received).
+  propio, genera una solicitud de compra (reason='pedido_web'). La compra nace al cobrar: mientras el pedido no
+  se paga la solicitud queda "reservada" (aparta lo del proveedor hasta que el pedido vence, sin aviso: al proveedor
+  no se le devuelve nada) y al pagarse pasa a borrador con UN aviso "PAGADO: comprar hoy" con los codigos del
+  proveedor (activate_requests). Al recibir esa compra, lo que entra a bodega queda reservado para ESE pedido
+  (reserve_received).
+- Vencimiento (expire_holds): las reservas web vencen, y los pedidos "nuevo" con el plazo para pagar vencido (tengan
+  o no reserva propia) dejan una nota en el historial; con cancel_unpaid_on_expiry se cancelan, pero nunca uno con
+  tarjeta sin preguntarle a ONVO (si ONVO no responde, se reintenta) ni uno con comprobante en revision.
 - force=True (pedido ya pagado que se vuelve a reservar) nunca rechaza: lo que falte queda "requiere compra".
 - Despacho (enviado/entregado) o factura: la reserva se consume y sale del inventario UNA sola vez. Las
   salidas llevan order_id; la factura de un pedido ya despachado solo enlaza esas salidas (asi anular la
@@ -24,16 +30,19 @@ API para el checkout (todas reciben la sesion; las que dicen "hace commit" lo ha
 - hold_for_order(db, order, *, user_id=None, force=False, commit=True) -> dict   (hace commit; 409 si no alcanza)
 - reserve_received(db, request, warehouse_id, user_id=None) -> int  (sin commit; compra recibida de un pedido web)
 - mark_paid(db, order) -> dict                  (sin commit)
+- activate_requests(db, order, user_id=None) -> list   (sin commit; reservada -> borrador + aviso de compra)
 - release_for_order(db, order, note=None, user_id=None) -> int   (sin commit)
 - fulfill_for_order(db, order, user_id=None, invoice=None) -> int (sin commit)
 - deduct_for_order_invoice(db, order, invoice, user_id=None) -> int (sin commit; reemplaza deduct_for_invoice)
 - on_order_status(db, order, old, new, user_id=None) -> dict (sin commit, salvo la re-reserva al pagar)
 - order_stock(db, order) -> dict                 (estado de inventario del pedido para el admin)
 - expire_holds(db) -> int                        (worker; hace commit)
+- back_in_stock(db) -> int                       (worker; hace commit)
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -59,11 +68,13 @@ from . import reservations as rsv
 from .availability import (  # noqa: F401
     DEFAULTS,
     KEY,
+    RESERVED_REQUEST,
     SELLABLE_STATES,
     STATES,
     _committed,
     _free_by_wh,
     _own_by_wh,
+    _pick,
     availability_many,
     settings_of,
     supplier_status,
@@ -71,7 +82,9 @@ from .availability import (  # noqa: F401
 )
 from .documents import audit
 
+log = logging.getLogger("crimson.tienda")
 SELLABLE = ("en_bodega", "bajo_pedido")
+UNPAID = ("nuevo", "en_revision")  # pedido sin pago confirmado (el comprobante en revision tampoco es pago)
 ZERO = Decimal(0)
 
 
@@ -85,6 +98,11 @@ def _fmt(q: Decimal) -> str:
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _aware(dt: datetime | None) -> datetime | None:
+    """SQLite devuelve las fechas sin zona aunque se guarden en UTC."""
+    return dt.replace(tzinfo=UTC) if dt is not None and dt.tzinfo is None else dt
 
 
 def _tenant(db: Session, tenant) -> Tenant:
@@ -131,19 +149,27 @@ def _hold_expiry(o: Order, cfg: dict) -> datetime | None:
     return _now() + timedelta(hours=int(cfg.get("hold_hours_manual") or 48))
 
 
+def order_alive(o: Order, now: datetime | None = None) -> bool:
+    """Pedido sin pagar que todavia aparta lo bajo pedido (mismo criterio que availability._web_requests): con
+    comprobante en revision, o "nuevo" sin plazo vencido."""
+    if o.status == "en_revision":
+        return True
+    return o.status == "nuevo" and (o.expires_at is None or _aware(o.expires_at) > (now or _now()))
+
+
 def _order_wh_order(p: Product, whs: list[int]) -> list[int]:
     """Primero la bodega de origen del producto (si alimenta la web), luego el resto."""
     return sorted(whs, key=lambda w: (w != p.warehouse_id, whs.index(w)))
 
 
-def _purchase_request(db: Session, o: Order, rows: list[tuple[Product, Decimal, str]]) -> PurchaseRequest:
+def _purchase_request(db: Session, o: Order, rows: list[tuple[Product, Decimal, str]], status: str = "borrador") -> PurchaseRequest:
     from .sequences import next_number
 
     number, _ = next_number(db, o.tenant_id, "SC")
     req = PurchaseRequest(
         tenant_id=o.tenant_id,
         number=number,
-        status="borrador",
+        status=status,
         reason="pedido_web",
         order_id=o.id,
         notes=f"Pedido web {o.number}: " + "; ".join(f"{p.name} x {_fmt(q)} ({why})" for p, q, why in rows),
@@ -243,12 +269,16 @@ def hold_for_order(db: Session, o: Order, *, user_id: int | None = None, force: 
             db.flush()
             result["reservas"].append({"id": r.id, "product_id": p.id, "warehouse_id": w, "quantity": q})
         if back:
-            req = _purchase_request(db, o, back)
+            # la compra nace al cobrar: sin pago, la solicitud solo aparta lo del proveedor (sin aviso); ya pagado
+            # (re-reserva con force), nace en borrador con el aviso de compra
+            unpaid = o.status in UNPAID
+            req = _purchase_request(db, o, back, RESERVED_REQUEST if unpaid else "borrador")
             result.update(requiere_compra=True, solicitud_compra=req.number)
             result["bajo_pedido"] = [
                 {"product_id": p.id, "name": p.name, "quantity": q, "motivo": why, "plazo": cfg.get("backorder_lead")} for p, q, why in back
             ]
-            _notify_purchase(db, t, o, req, back)
+            if not unpaid:
+                _notify_paid_purchase(db, t, o, [req])
         result["vence"] = expires
         audit(
             db,
@@ -270,22 +300,73 @@ def hold_for_order(db: Session, o: Order, *, user_id: int | None = None, force: 
     return result
 
 
-def _notify_purchase(db: Session, t: Tenant, o: Order, req: PurchaseRequest, rows) -> None:
+def _supplier_codes(db: Session, tenant_id: int, product_ids: list[int]) -> dict[int, tuple[str, str | None]]:
+    """{producto: (codigo del proveedor, nombre del proveedor)} del item vinculado que lo representa (el mismo que
+    usa la disponibilidad): el codigo con el que se le pide a Eurocomp (SiReTT)."""
+    from ..models import Supplier, SupplierItem
+
+    if not product_ids:
+        return {}
+    by_pid: dict[int, list] = {}
+    for it in db.scalars(select(SupplierItem).where(SupplierItem.tenant_id == tenant_id, SupplierItem.product_id.in_(product_ids))):
+        by_pid.setdefault(it.product_id, []).append(it)
+    picked = {pid: _pick(items) for pid, items in by_pid.items()}
+    sup_ids = {it.supplier_id for it in picked.values() if it is not None}
+    names = {s.id: s.name for s in db.scalars(select(Supplier).where(Supplier.id.in_(sup_ids)))} if sup_ids else {}
+    return {pid: (it.code, names.get(it.supplier_id)) for pid, it in picked.items() if it is not None}
+
+
+def _notify_paid_purchase(db: Session, t: Tenant, o: Order, reqs: list[PurchaseRequest]) -> int:
+    """UN aviso por pago: "PAGADO: comprar hoy" con lo que falta y el codigo de cada articulo en el proveedor."""
     import html
 
     from .mail import notify_roles
 
-    items = "".join(f"<li>{html.escape(p.name)} × {_fmt(q)} · {html.escape(why)}</li>" for p, q, why in rows)
-    notify_roles(
+    e = html.escape
+    lines = [ln for r in reqs for ln in r.lines]
+    codes = _supplier_codes(db, o.tenant_id, [ln.product_id for ln in lines if ln.product_id])
+    proveedores = sorted({c[1] for c in codes.values() if c[1]})
+    quien = " y ".join(proveedores) if proveedores else "el proveedor"
+    items = "".join(
+        f"<li><b>{e(ln.name)}</b> × {_fmt(_dec(ln.quantity))}"
+        + (f" · código {e(codes[ln.product_id][0])}" + (f" ({e(codes[ln.product_id][1])})" if codes[ln.product_id][1] else "") if ln.product_id in codes else " · sin código del proveedor: buscalo a mano")
+        + "</li>"
+        for ln in lines
+    )
+    numeros = ", ".join(r.number for r in reqs)
+    tarde = ""
+    if o.expires_at is not None and o.paid_at is not None and _aware(o.paid_at) > _aware(o.expires_at):
+        tarde = "<p><b>Ojo:</b> el pago llegó después del plazo; lo apartado ya había vuelto a la venta. Confirmá la existencia con el proveedor antes de prometer fecha.</p>"
+    return notify_roles(
         db,
         t,
         ("admin", "supervisor"),
-        f"Pedido web {o.number} requiere compra ({req.number})",
-        f"<p>El pedido <b>{html.escape(o.number)}</b> incluye artículos sin existencia propia:</p><ul>{items}</ul>"
-        f"<p>Se creó la solicitud de compra <b>{html.escape(req.number)}</b> en borrador.</p>",
+        f"PAGADO: comprar hoy a {quien} · pedido {o.number} ({numeros})",
+        f"<p>El pedido web <b>{e(o.number)}</b> ya está <b>pagado</b>. Hay que comprarle hoy a {e(quien)}:</p><ul>{items}</ul>{tarde}"
+        f"<p>La solicitud de compra <b>{e(numeros)}</b> quedó en borrador: marcala «solicitada» al hacer el pedido. Al recibir la compra queda reservada para este pedido.</p>",
         "purchase_request",
-        req.id,
+        reqs[0].id,
     )
+
+
+def activate_requests(db: Session, o: Order, user_id: int | None = None) -> list[PurchaseRequest]:
+    """El pedido se pago (o el efectivo contra entrega avanza): sus solicitudes "reservada" pasan a borrador y sale UN
+    aviso de compra. Idempotente: lo ya activado no vuelve a avisar. Sin commit."""
+    reqs = list(
+        db.scalars(
+            select(PurchaseRequest)
+            .where(PurchaseRequest.tenant_id == o.tenant_id, PurchaseRequest.order_id == o.id, PurchaseRequest.status == RESERVED_REQUEST)
+            .order_by(PurchaseRequest.id)
+        )
+    )
+    if not reqs:
+        return []
+    for r in reqs:
+        r.status = "borrador"
+        audit(db, o.tenant_id, user_id, "status", "purchase_request", r.id, {"status": "borrador", "motivo": f"pedido {o.number} pagado"})
+    db.flush()
+    _notify_paid_purchase(db, db.get(Tenant, o.tenant_id), o, reqs)
+    return reqs
 
 
 def reserve_received(db: Session, req: PurchaseRequest, warehouse_id: int, user_id: int | None = None) -> int:
@@ -351,14 +432,18 @@ def _moved(db: Session, o: Order, invoice_id: int | None = None) -> dict[int, De
 
 
 def mark_paid(db: Session, o: Order, user_id: int | None = None) -> dict:
-    """Pagado: las reservas web del pedido dejan de vencer (se mantienen hasta el despacho). Si ya se habian
-    vencido y el pedido no tiene nada reservado ni despachado, se vuelve a reservar (force: lo que no haya
-    queda "requiere compra"); esto hace commit."""
+    """Pagado: la compra bajo pedido nace ahora (solicitud reservada -> borrador + aviso "PAGADO: comprar hoy") y las
+    reservas web del pedido dejan de vencer (se mantienen hasta el despacho). Si ya se habian vencido y el pedido no
+    tiene nada reservado ni despachado, se vuelve a reservar (force: lo que no haya queda "requiere compra"); esto
+    hace commit."""
+    compra = [r.number for r in activate_requests(db, o, user_id)]
     rows = _order_reservations(db, o, ("confirmada",))
     for r in rows:
         r.expires_at = None
     if rows:
-        return {"reservas_fijas": len(rows)}
+        return {"reservas_fijas": len(rows), **({"compra": compra} if compra else {})}
+    if compra:
+        return {"reservas_fijas": 0, "compra": compra}
     has_any = db.scalar(
         select(func.count(StockReservation.id)).where(StockReservation.order_id == o.id, StockReservation.status.in_(("confirmada", "consumida")))
     )
@@ -373,14 +458,16 @@ def mark_paid(db: Session, o: Order, user_id: int | None = None) -> dict:
 
 
 def release_for_order(db: Session, o: Order, note: str | None = None, user_id: int | None = None) -> int:
-    """Cancelado: libera las reservas abiertas del pedido y cancela su solicitud de compra si sigue en borrador.
-    No toca el ledger: si ya habia salido mercaderia, la devolucion se registra aparte (o anulando la factura)."""
+    """Cancelado: libera las reservas abiertas del pedido y cancela su solicitud de compra si sigue reservada (sin
+    pagar) o en borrador. No toca el ledger: si ya habia salido mercaderia, la devolucion se registra aparte (o
+    anulando la factura)."""
     n = 0
     for r in _order_reservations(db, o):
         r.status, r.closed_note = "cancelada", (note or f"Pedido {o.number} cancelado")[:300]
         n += 1
-    for req in db.scalars(select(PurchaseRequest).where(PurchaseRequest.order_id == o.id, PurchaseRequest.status.in_(("borrador", "solicitada", "recibida")))):
-        if req.status == "borrador":
+    open_reqs = (RESERVED_REQUEST, "borrador", "solicitada", "recibida")
+    for req in db.scalars(select(PurchaseRequest).where(PurchaseRequest.order_id == o.id, PurchaseRequest.status.in_(open_reqs))):
+        if req.status in (RESERVED_REQUEST, "borrador"):
             req.status = "cancelada"
             continue
         # ya se le pidio (o ya llego) del proveedor: el proveedor casi nunca acepta devoluciones (Andres, 19/10), asi
@@ -515,6 +602,9 @@ def on_order_status(db: Session, o: Order, old: str | None, new: str, user_id: i
         return {}
     if new in ("pagado", "preparando") and old == "nuevo":
         return mark_paid(db, o, user_id)
+    if old == "nuevo" and new in ("listo", "enviado", "entregado"):
+        # efectivo contra entrega avanza sin pago: que el equipo lo avance es la decision de comprar lo bajo pedido
+        activate_requests(db, o, user_id)
     if new in ("enviado", "entregado"):
         return {"movimientos": fulfill_for_order(db, o, user_id)}
     if new == "cancelado":
@@ -532,13 +622,16 @@ def order_stock(db: Session, o: Order) -> dict:
     names = {p.id: p.name for p in db.scalars(select(Product).where(Product.id.in_({r.product_id for r in res} | set(moved))))} if (res or moved) else {}
     whn = dict(db.execute(select(Warehouse.id, Warehouse.name).where(Warehouse.tenant_id == o.tenant_id)).all())
     activas = [r for r in res if r.status == "confirmada"]
+    apartada = any(rq.status == RESERVED_REQUEST for rq in reqs)
     if any(v > 0 for v in moved.values()):
         estado = "despachado"
     elif any(rq.status in ("borrador", "solicitada") for rq in reqs):
         estado = "requiere_compra"
+    elif apartada and order_alive(o):
+        estado = "espera_pago"  # bajo pedido: se compra al cobrar
     elif activas:
         estado = "reservado"
-    elif any(r.status == "vencida" for r in res):
+    elif any(r.status == "vencida" for r in res) or apartada:
         estado = "vencido"
     elif res:
         estado = "liberado"
@@ -567,9 +660,23 @@ def order_stock(db: Session, o: Order) -> dict:
 
 
 # ---------- worker ----------
+EXPIRED_NOTE = "vencio"  # marca (clave) de la nota "venció el plazo" en el historial: una sola vez por pedido
+
+
 def expire_holds(db: Session) -> int:
-    """Reservas web vencidas sin pago -> vencida, con nota en el pedido; si Ajustes lo pide, cancela el pedido
-    (y su solicitud de compra en borrador). Hace commit. El resto de reservas las vence reservations.expire_due."""
+    """Pedidos web sin pagar que vencieron. Hace commit (por pedido: uno con datos raros no frena a los demas).
+
+    1. Reservas web vencidas -> vencida (lo propio vuelve a venderse).
+    2. Cada pedido "nuevo" de la tienda cuya reserva vencio o cuyo plazo para pagar (expires_at) paso, tenga o no
+       reserva propia (todo bajo pedido): lo apartado del proveedor ya no cuenta (availability._web_requests) y queda
+       UNA nota en el historial (nunca en o.notes, que es la nota del cliente).
+    3. Si Ajustes lo pide (cancel_unpaid_on_expiry), store_orders.expire_unpaid lo cancela: con tarjeta, antes le
+       pregunta a ONVO (pagado -> se aplica; sin respuesta -> no se cancela y se reintenta); con comprobante en
+       revision nunca se toca (no es "nuevo").
+    Devuelve las reservas vencidas mas los pedidos sin reserva propia que se cancelaron.
+    El resto de reservas las vence reservations.expire_due."""
+    from . import store_orders as so
+
     now = _now()
     rows = list(
         db.scalars(
@@ -581,31 +688,47 @@ def expire_holds(db: Session) -> int:
             )
         )
     )
-    orders: set[int] = set()
+    with_hold: set[int] = set()
     for r in rows:
         r.status, r.closed_note = "vencida", "Pedido sin pagar: venció la reserva"
         if r.order_id:
-            orders.add(r.order_id)
-    for oid in orders:
-        o = db.get(Order, oid)
-        if not o or o.status != "nuevo":
-            continue
-        stamp = f"[{now:%Y-%m-%d %H:%M}] Venció la reserva de inventario sin pago."
-        o.notes = f"{o.notes}\n{stamp}" if o.notes else stamp
-        if settings_of(db.get(Tenant, o.tenant_id)).get("cancel_unpaid_on_expiry"):
-            o.status = "cancelado"
-            release_for_order(db, o, "Venció sin pago")
-            audit(db, o.tenant_id, None, "status", "order", o.id, {"status": "cancelado", "motivo": "reserva vencida sin pago"})
+            with_hold.add(r.order_id)
     db.commit()
-    return len(rows)
+    due = set(
+        db.scalars(
+            select(Order.id).where(Order.channel == "tienda", Order.status == "nuevo", Order.expires_at.is_not(None), Order.expires_at <= now)
+        )
+    )
+    n = len(rows)
+    for oid in sorted(with_hold | due):
+        try:
+            o = db.get(Order, oid, with_for_update=True, populate_existing=True)
+            if not o or o.status != "nuevo":
+                continue  # pagado, cancelado o con comprobante en revision: no se toca
+            t = db.get(Tenant, o.tenant_id)
+            outcome = so.expire_unpaid(db, t, o) if settings_of(t).get("cancel_unpaid_on_expiry") else "sin_cancelar"
+            if outcome != "cancelado" and o.status == "nuevo" and not so.has_note(o, EXPIRED_NOTE):
+                so._note(o, "sistema", "Venció el plazo para pagar sin pago confirmado: lo apartado volvió a la venta.", key=EXPIRED_NOTE)
+            if outcome == "cancelado" and oid not in with_hold:
+                n += 1
+            db.commit()
+        except Exception:  # noqa: BLE001  un pedido raro no frena a los demas; se reintenta en la proxima corrida
+            db.rollback()
+            log.exception("vencimiento del pedido %s", oid)
+    return n
 
 
 def back_in_stock(db: Session) -> int:
-    """Avisos "Avisarme cuando haya": producto otra vez disponible -> correo a quien lo pidio (una vez)."""
+    """Avisos "Avisarme cuando haya": producto otra vez disponible -> correo a quien lo pidio, con el enlace a la ficha.
+    Se marca avisado SOLO cuando el correo quedo "enviado": si fallo, el worker de correo lo reintenta y la proxima
+    corrida lo marca (sin encolar otro: el correo va ligado al aviso). Uno "simulado" (sin proveedor de correo) se
+    vuelve a mandar cuando el correo ya esta configurado. Sin correo (solo telefono) se marca como siempre: el
+    aviso por WhatsApp lo hace el equipo desde el panel."""
     import html
 
-    from ..models import StoreStockAlert
-    from .mail import queue_email
+    from ..models import EmailOutbox, StoreStockAlert
+    from . import store_orders as so
+    from .mail import deliver, mail_configured, queue_email
 
     n = 0
     pend = list(db.scalars(select(StoreStockAlert).where(StoreStockAlert.notified_at.is_(None))))
@@ -621,18 +744,37 @@ def back_in_stock(db: Session) -> int:
             st = av.get(a.product_id)
             if not st or st["estado"] not in SELLABLE:
                 continue
+            if not a.email:
+                a.notified_at = _now()
+                n += 1
+                continue
             p = db.get(Product, a.product_id)
-            if a.email:
-                queue_email(
+            m = db.scalar(
+                select(EmailOutbox)
+                .where(EmailOutbox.tenant_id == tid, EmailOutbox.entity == "stock_alert", EmailOutbox.entity_id == a.id)
+                .order_by(EmailOutbox.id.desc())
+                .limit(1)
+            )
+            if m is None:
+                url = so.product_url(t, p)
+                m = queue_email(
                     db,
                     t,
                     a.email,
                     f"Ya hay {p.name} · {t.name}",
-                    f"<p>¡Buenas noticias! <b>{html.escape(p.name)}</b> ya está {html.escape(st['mensaje'].lower())}.</p>",
-                    "product",
-                    p.id,
+                    f"<div style='font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#15131a'>"
+                    f"<p>¡Buenas noticias! <b>{html.escape(p.name)}</b> ya está {html.escape(st['mensaje'].lower())}.</p>"
+                    f"<p><a href='{html.escape(url)}' style='display:inline-block;background:#e2233a;color:#fff;padding:12px 18px;border-radius:10px;"
+                    f"text-decoration:none;font-weight:700'>Ver el producto</a></p>"
+                    f"<p style='color:#8a858f;font-size:12px'>Te escribimos porque pediste que te avisáramos. La existencia puede cambiar: si lo querés, "
+                    f"no esperés mucho.</p></div>",
+                    "stock_alert",
+                    a.id,
                 )
-            a.notified_at = _now()
-            n += 1
+            elif m.status == "simulado" and mail_configured():
+                deliver(m)  # quedo simulado sin proveedor de correo; ahora si hay
+            if m.status == "enviado":
+                a.notified_at = _now()
+                n += 1
     db.commit()
     return n

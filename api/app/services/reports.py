@@ -414,9 +414,12 @@ def _crc(amount, currency: str, fx) -> Decimal:
 
 
 def ordenes(db: Session, tid: int, a: date, b: date) -> Report:
+    """Todas las ordenes del periodo, pero el Total suma SOLO las pagadas (PAID_STATES): un pedido sin pagar,
+    cancelado o reembolsado no es una venta."""
     from datetime import datetime as dt
 
     from ..models import Order
+    from .store_orders import PAID_STATES
 
     lo, hi = dt.combine(a, dt.min.time()), dt.combine(b, dt.max.time())
     rows = db.scalars(select(Order).where(Order.tenant_id == tid, Order.created_at >= lo, Order.created_at <= hi).order_by(Order.id)).all()
@@ -438,7 +441,11 @@ def ordenes(db: Session, tid: int, a: date, b: date) -> Report:
             ]
             for o in rows
         ],
-        {"Total": sum((Decimal(str(o.total)) for o in rows if o.status != "cancelado"), Decimal(0)), "Órdenes": len(rows)},
+        {
+            "Total": sum((Decimal(str(o.total)) for o in rows if o.status in PAID_STATES), Decimal(0)),
+            "Órdenes": len(rows),
+            "Pagadas": sum(1 for o in rows if o.status in PAID_STATES),
+        },
     )
 
 

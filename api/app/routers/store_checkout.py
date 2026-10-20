@@ -142,6 +142,7 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
         raise HTTPException(422, "Para continuar aceptá los términos y condiciones")
     kind, label = so.normalize_method(db, t, data.payment_method)
     delivery = data.delivery
+    so.check_delivery(t, kind, delivery.type if delivery else None)  # efectivo: solo con retiro en sitio
     if delivery and delivery.type == "envio" and not (c.phone and len(so.digits(c.phone)) >= 8):
         raise HTTPException(422, "Para el envío necesitamos un teléfono de contacto")
 
@@ -354,6 +355,7 @@ class CardCfg(_Cfg):
 class CashCfg(_Cfg):
     active: bool = False
     note: str | None = Field(None, max_length=500)
+    pickup_only: bool = True  # efectivo solo con "Retiro en sitio" (contra entrega a domicilio = mercaderia sin cobrar)
 
 
 class MethodsCfg(_Cfg):

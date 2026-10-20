@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -274,8 +275,6 @@ def _paid_invoice(db: Session, t: Tenant, iid: int, obj: dict, amount_cents, cur
     if Decimal(str(inv.balance)) < 0:
         audit(db, t.id, None, "onvo_sobrepago", "invoice", inv.id, {"intencion": intent_id, "monto": str(amount), "saldo": str(inv.balance)})
     if Decimal(str(inv.balance)) <= 0:
-        from datetime import UTC, datetime
-
         for link in db.scalars(select(PaymentLink).where(PaymentLink.invoice_id == inv.id, PaymentLink.paid_at.is_(None))):
             link.paid_at = datetime.now(UTC)
     return f"pago {p.id} aplicado a {inv.number}"
@@ -388,6 +387,96 @@ def sync_order(db: Session, t: Tenant, o: Order) -> str | None:
     if o.payment_kind != "tarjeta" or o.status not in ("nuevo", "en_revision"):
         return None
     return _sync(db, t, o.payment_ref, {"order_id": o.id, "tenant_id": t.id})
+
+
+# intenciones que ONVO da por terminadas sin cobro (cualquier otro estado puede terminar cobrando: no se cancela)
+INTENT_NOT_PAID = ("requires_payment_method", "canceled", "cancelled", "failed")
+
+
+def order_payment(db: Session, t: Tenant, o: Order) -> str:
+    """Antes de cancelar por vencido un pedido con tarjeta: ¿ONVO cobro? Respuesta definitiva o "no se sabe":
+    - pagado: ONVO cobro y el pago se aplico ahora (o llego dinero que no se pudo aplicar: el pedido queda "revisar");
+    - sin_pago: nunca se abrio una sesion real (simulada o sin sesion) o ONVO responde que no cobro;
+    - pendiente: ONVO tiene un pago en proceso (por ejemplo esperando al banco);
+    - sin_respuesta: ONVO no respondio o no hay llave para preguntarle.
+    Solo "sin_pago" permite cancelar. No usa el freno por sesion (lo llama el worker, no el comprador)."""
+    if o.payment_kind != "tarjeta" or o.status not in ("nuevo", "en_revision"):
+        return "no_aplica"
+    ref = o.payment_ref or ""
+    if not ref or ref.startswith("sim_"):
+        return "sin_pago"
+    key = verify_key(db, t.id)
+    if not key:
+        return "sin_respuesta"
+    api = OnvoAdapter(key)
+    try:
+        s = api.get_checkout(ref)
+        if s.get("paymentStatus") == "paid":
+            _apply_session(db, t, api, s, {"id": ref}, "vencimiento", {"order_id": o.id, "tenant_id": t.id})
+            return "pagado" if o.status != "nuevo" else "revisar"
+        pid = str(s.get("paymentIntentId") or "")
+        if pid:
+            st = str(api.get_intent(pid).get("status") or "")
+            if st not in INTENT_NOT_PAID:
+                return "pendiente"
+    except OnvoError as e:
+        log.warning("ONVO no confirmó el pedido %s al vencer: %s", o.number, e.message)
+        return "sin_respuesta"
+    return "sin_pago"
+
+
+# ---------- aviso al admin: ONVO no puede entregar sus eventos ----------
+ALERT_ENTITY = "onvo_webhook"
+
+
+def _cr_now() -> datetime:
+    from ..providers.einvoice import CR
+
+    return datetime.now(CR)
+
+
+def webhook_alert(db: Session, t: Tenant, status: int, detail: str) -> bool:
+    """401 (secreto que no coincide) o 503 (no se pudo confirmar con ONVO) en /webhooks/onvo: correo al admin, como
+    maximo UNO por dia de Costa Rica (despues de las 18:00 la fecha UTC ya es otra). Sin ONVO conectado no avisa (una
+    sonda a la URL no es un pago perdido). No hace commit. Devuelve True si aviso."""
+    import html
+
+    from ..models import EmailOutbox
+    from .mail import notify_roles
+
+    g = gateway(db, t.id)
+    if not (verify_key(db, t.id) or (g and g.secret_encrypted)):
+        return False
+    hoy = _cr_now().replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
+    ya = db.scalar(
+        select(EmailOutbox.id).where(EmailOutbox.tenant_id == t.id, EmailOutbox.entity == ALERT_ENTITY, EmailOutbox.created_at >= hoy).limit(1)
+    )
+    if ya:
+        return False
+    if status == 401:
+        titulo = "ONVO no puede avisar los pagos: el secreto del webhook no coincide"
+        que = (
+            "El panel rechazó (401) un aviso que llegó a la dirección del webhook de ONVO porque el secreto no coincide (o falta). "
+            "Si es ONVO, los pagos con tarjeta solo se confirman cuando el comprador vuelve a la tienda o en la consulta automática. "
+            "Revisá Ajustes → Pasarelas → ONVO: el secreto del webhook tiene que ser el mismo que muestra el panel de ONVO."
+        )
+    else:
+        titulo = "ONVO avisó un pago que no se pudo confirmar"
+        que = (
+            "Llegó un aviso de ONVO que el panel no pudo confirmar consultando a ONVO (503). ONVO lo reintenta solo; "
+            "si se repite, revisá el pedido o la factura en el panel de ONVO y la llave en Ajustes → Pasarelas."
+        )
+    notify_roles(
+        db,
+        t,
+        ("admin",),
+        titulo,
+        f"<p><b>{html.escape(titulo)}</b></p><p>{html.escape(que)}</p><p style='color:#5a5560;font-size:13px'>Detalle: {html.escape(detail[:300])}</p>"
+        "<p style='color:#8a858f;font-size:12px'>Este aviso sale como máximo una vez por día.</p>",
+        ALERT_ENTITY,
+        t.id,
+    )
+    return True
 
 
 def sync_invoice(db: Session, t: Tenant, inv: Invoice, link: PaymentLink) -> str | None:

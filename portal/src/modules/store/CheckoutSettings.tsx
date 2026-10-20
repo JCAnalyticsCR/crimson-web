@@ -10,7 +10,7 @@ type Methods = {
   sinpe: { active: boolean; phone?: string; holder?: string; note?: string };
   transferencia: { active: boolean; bank?: string; iban?: string; holder?: string; holder_id?: string; note?: string };
   tarjeta: { active: boolean; installments?: boolean; max_installments?: number };
-  efectivo: { active: boolean; note?: string };
+  efectivo: { active: boolean; note?: string; pickup_only?: boolean };
 };
 type Ck = { methods: Methods; pickup: { address?: string; hours?: string }; notify_roles: string[]; free_shipping_from: number | string; auto_invoice: boolean };
 type Resp = { checkout: Ck; onvo: { configured: boolean; simulation: boolean; mode: "test" | "live" | null } };
@@ -35,7 +35,7 @@ export default function CheckoutSettings({ rates, onRates }: { rates: ZoneRate[]
           sinpe: { active: m.sinpe.active, phone: m.sinpe.phone || null, holder: m.sinpe.holder || null, note: m.sinpe.note || null },
           transferencia: { active: m.transferencia.active, bank: m.transferencia.bank || null, iban: m.transferencia.iban || null, holder: m.transferencia.holder || null, holder_id: m.transferencia.holder_id || null, note: m.transferencia.note || null },
           tarjeta: { active: m.tarjeta.active, installments: !!m.tarjeta.installments, max_installments: Number(m.tarjeta.max_installments || 0) },
-          efectivo: { active: m.efectivo.active, note: m.efectivo.note || null },
+          efectivo: { active: m.efectivo.active, note: m.efectivo.note || null, pickup_only: m.efectivo.pickup_only !== false },
         },
         pickup: { address: ck.pickup?.address || null, hours: ck.pickup?.hours || null },
         notify_roles: ck.notify_roles,
@@ -81,7 +81,9 @@ export default function CheckoutSettings({ rates, onRates }: { rates: ZoneRate[]
           </div>
         </div>
         <div className="ck-cfg__m" data-on={on(m.efectivo.active)}>
-          <label><input type="checkbox" checked={m.efectivo.active} onChange={(e) => setM("efectivo", { active: e.target.checked })} />Efectivo contra entrega o al retirar</label>
+          <label><input type="checkbox" checked={m.efectivo.active} onChange={(e) => setM("efectivo", { active: e.target.checked })} />Efectivo al retirar (o contra entrega)</label>
+          <label style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={m.efectivo.pickup_only !== false} onChange={(e) => setM("efectivo", { pickup_only: e.target.checked })} />Solo con retiro en sitio</label>
+          <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>{m.efectivo.pickup_only !== false ? "El checkout no ofrece efectivo para envíos a domicilio." : "Contra entrega a domicilio: la mercadería sale sin estar cobrada y no se devuelve al proveedor."}</p>
           <Field label="Texto para el cliente"><input className="input" value={m.efectivo.note || ""} onChange={(e) => setM("efectivo", { note: e.target.value })} /></Field>
         </div>
         <div className="grid-2">

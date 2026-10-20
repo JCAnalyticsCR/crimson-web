@@ -69,7 +69,9 @@ CHECKOUT_DEFAULTS: dict = {
         "sinpe": {"active": True, "phone": "", "holder": "", "note": ""},
         "transferencia": {"active": True, "bank": "", "iban": "", "holder": "", "holder_id": "", "note": ""},
         "tarjeta": {"active": False, "installments": False, "max_installments": 0},
-        "efectivo": {"active": False, "note": "Pago en efectivo al recibir o al retirar el pedido."},
+        # efectivo solo con retiro en sitio (pregunta 7 a Andres, recomendado si): contra entrega a domicilio se
+        # despacha mercaderia que no se devuelve sin haberla cobrado
+        "efectivo": {"active": False, "note": "Pago en efectivo al retirar el pedido.", "pickup_only": True},
     },
     "free_shipping_from": 0,  # envio gratis desde este monto (en colones, con IVA); 0 = nunca
     "auto_invoice": True,  # comprobante electronico automatico al confirmarse el pago
@@ -155,8 +157,28 @@ def methods_available(db: Session, t: Tenant) -> list[dict]:
                 if not simulation_allowed():
                     continue  # sin credenciales en produccion: la tarjeta no se ofrece
                 simulated = True
-        out.append({"code": code, "label": METHOD_LABEL[code], "needs_proof": code in NEEDS_PROOF, "simulated": simulated, "hint": method_hint(t, code)})
+        out.append(
+            {
+                "code": code,
+                "label": METHOD_LABEL[code],
+                "needs_proof": code in NEEDS_PROOF,
+                "simulated": simulated,
+                "hint": method_hint(t, code),
+                "pickup_only": pickup_only(m) if code == "efectivo" else False,
+            }
+        )
     return out
+
+
+def pickup_only(method_cfg: dict) -> bool:
+    """El efectivo se ofrece solo con "Retiro en sitio" salvo que Mi Tienda lo abra tambien al envio."""
+    return bool(method_cfg.get("pickup_only", True))
+
+
+def check_delivery(t: Tenant, code: str | None, delivery_type: str | None) -> None:
+    """El metodo de pago segun el tipo de entrega: efectivo solo al retirar (si asi esta configurado)."""
+    if code == "efectivo" and pickup_only(checkout_cfg(t)["methods"]["efectivo"]) and delivery_type != "retiro":
+        raise HTTPException(422, "El pago en efectivo es solo para retiro en sitio. Elegí otro método de pago o retirá tu pedido.")
 
 
 def method_hint(t: Tenant, code: str) -> str:
@@ -316,6 +338,13 @@ def track_url(t: Tenant, o: Order) -> str:
     return f"{store_base(t)}?pedido={track_token(o)}"
 
 
+def product_url(t: Tenant, p) -> str:
+    """Ficha del producto en la tienda (dominio propio o /tienda/{slug} del portal)."""
+    from .store_showcase import product_path
+
+    return f"{store_base(t).rstrip('/')}{product_path(p)}"
+
+
 def order_public(db: Session, t: Tenant, o: Order) -> dict:
     """Lo que ve el comprador: sin ids internos, sin notas del equipo, sin datos de otros pedidos."""
     from ..routers.store import store_cfg
@@ -388,7 +417,10 @@ CUSTOMER_SUBJECT = {
     "entregado": "Pedido {n} entregado",
     "cancelado": "Pedido {n} cancelado",
     "reembolsado": "Reembolso registrado · pedido {n}",
+    "por_vencer": "Tu pedido {n} sigue pendiente de pago",
+    "vencido": "Tu pedido {n} venció sin pago",
 }
+SHOW_INSTRUCTIONS = ("recibido", "por_vencer")  # correos que llevan "Cómo pagar"
 
 
 def _email_html(t: Tenant, o: Order, kind: str, extra: str = "") -> str:
@@ -406,14 +438,20 @@ def _email_html(t: Tenant, o: Order, kind: str, extra: str = "") -> str:
         "entregado": "Tu pedido fue entregado. ¡Gracias por comprar con nosotros!",
         "cancelado": "Tu pedido fue cancelado.",
         "reembolsado": "Registramos el reembolso de tu pedido.",
+        "por_vencer": "Tu pedido sigue pendiente de pago.",
+        "vencido": "El plazo para pagar tu pedido venció y lo cancelamos: los productos volvieron a la venta.",
     }[kind]
     rows = "".join(
         f"<tr><td style='padding:6px 0'>{e(ln.name)} × {d(ln.quantity):g}</td><td style='padding:6px 0;text-align:right'>{fmt_money(ln.total, o.currency)}</td></tr>"
         for ln in o.lines
         if not _is_ship(ln)
     )
-    instr = pay_instructions(t, o) if kind == "recibido" and o.status in ("nuevo", "en_revision") else None
+    instr = pay_instructions(t, o) if kind in SHOW_INSTRUCTIONS and o.status in ("nuevo", "en_revision") else None
     url = track_url(t, o)
+    boton = "Subir el comprobante" if kind == "por_vencer" and o.payment_kind in NEEDS_PROOF else "Ver mi pedido"
+    pie = "Guardá este correo: el botón te lleva al estado de tu pedido."
+    if kind == "vencido":
+        url, boton, pie = store_base(t), "Volver a la tienda", f"El pedido {o.number} quedó cancelado y no se cobró nada."
     return f"""<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#15131a">
 <div style="border-bottom:3px solid {primary};padding:12px 0;font-size:18px;font-weight:700">{e(cfg.get("name") or t.name)}</div>
 <p style="font-size:15px">{intro}</p>
@@ -423,8 +461,8 @@ def _email_html(t: Tenant, o: Order, kind: str, extra: str = "") -> str:
 <p style="text-align:right;font-size:13px;color:#5a5560;margin:8px 0 0">Envío (sin IVA) {fmt_money(o.shipping, o.currency)} · IVA {fmt_money(o.tax_total, o.currency)}</p>
 <p style="text-align:right;font-size:18px;font-weight:700;margin:4px 0 16px">Total {fmt_money(o.total, o.currency)}</p>
 {f'<div style="background:#f6f2ee;border-radius:8px;padding:12px 14px;white-space:pre-wrap;font-size:14px"><b>Cómo pagar · {e(o.payment_method or "")}</b><br>{e(instr)}</div>' if instr else ""}
-<p><a href="{e(url)}" style="display:inline-block;background:{primary};color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700">Ver mi pedido</a></p>
-<p style="color:#8a858f;font-size:12px">Guardá este correo: el botón te lleva al estado de tu pedido. Cualquier consulta, respondé a este correo.</p></div>"""
+<p><a href="{e(url)}" style="display:inline-block;background:{primary};color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700">{boton}</a></p>
+<p style="color:#8a858f;font-size:12px">{e(pie)} Cualquier consulta, respondé a este correo.</p></div>"""
 
 
 def notify_customer(db: Session, t: Tenant, o: Order, kind: str, extra: str = "") -> EmailOutbox | None:
@@ -468,9 +506,17 @@ def _hist(o: Order, status: str, by, note: str | None = None) -> None:
     o.history = [*(o.history or []), {"status": status, "at": datetime.now(UTC).isoformat(), "by": by, **({"note": note} if note else {})}]
 
 
-def _note(o: Order, by, note: str) -> None:
-    """Anotacion sin cambio de estado (factura automatica, pago que no cubre el total...)."""
-    o.history = [*(o.history or []), {"status": o.status, "at": datetime.now(UTC).isoformat(), "by": by, "note": note, "kind": "nota"}]
+def _note(o: Order, by, note: str, key: str | None = None) -> None:
+    """Anotacion sin cambio de estado (factura automatica, pago que no cubre el total...). `key` marca las que van
+    una sola vez (recordatorio de pago, "venció el plazo"): has_note la busca."""
+    o.history = [
+        *(o.history or []),
+        {"status": o.status, "at": datetime.now(UTC).isoformat(), "by": by, "note": note, "kind": "nota", **({"key": key} if key else {})},
+    ]
+
+
+def has_note(o: Order, key: str) -> bool:
+    return any(h.get("key") == key for h in (o.history or []))
 
 
 def _inventory(db: Session, o: Order, old: str, new: str, user_id: int | None = None) -> None:
@@ -582,6 +628,78 @@ def mark_paid(db: Session, t: Tenant, o: Order, *, by, ref: str | None, note: st
         o.payment_ref = ref[:120]
     transition(db, t, o, "pagado", by=by, note=note)
     return True
+
+
+# ---------- vencimiento y recordatorio de pago (worker) ----------
+REMINDER_NOTE = "recordatorio_pago"  # clave de la nota: un recordatorio por pedido (dedupe)
+ONVO_WAIT_NOTE = "onvo_sin_confirmar"
+
+
+def _cr_when(dt: datetime) -> str:
+    from ..providers.einvoice import CR
+
+    return aware(dt).astimezone(CR).strftime("%d/%m/%Y a las %H:%M")
+
+
+def _redo_html(db: Session, t: Tenant, o: Order) -> str:
+    """Pedido vencido: enlace a la ficha de cada producto (lo que se pueda volver a comprar) para rehacer la compra."""
+    from ..models import Product
+
+    e = html.escape
+    ids = list(dict.fromkeys(ln.product_id for ln in o.lines if ln.product_id))
+    prods = {p.id: p for p in db.scalars(select(Product).where(Product.id.in_(ids)))} if ids else {}
+    items = "".join(
+        f"<li><a href='{e(product_url(t, p))}' style='color:#15131a'>{e(p.name)}</a></li>"
+        for pid in ids
+        if (p := prods.get(pid)) is not None and p.active and p.show_on_web
+    )
+    if not items:
+        return "<p style='font-size:14px'>Si todavía lo querés, podés hacer el pedido de nuevo en la tienda.</p>"
+    return f"<p style='font-size:14px'>Si todavía lo querés, podés hacer el pedido de nuevo:</p><ul style='font-size:14px'>{items}</ul>"
+
+
+def expire_unpaid(db: Session, t: Tenant, o: Order) -> str:
+    """Pedido "nuevo" con el plazo para pagar vencido y cancel_unpaid_on_expiry encendido. Devuelve que paso:
+    cancelado | pagado | pendiente | sin_respuesta | revisar.
+    - Con tarjeta, primero se le pregunta a ONVO (onvo.order_payment): si cobro, el pago se aplica y el pedido queda
+      pagado; si no responde o el pago esta en proceso, NO se cancela (se reintenta en la proxima corrida).
+    - Si no: transition(cancelado, by="sistema", "Venció sin pago") libera la reserva y cancela la solicitud de
+      compra reservada, y el cliente recibe un correo con el enlace para rehacer la compra."""
+    if o.status != "nuevo":
+        return o.status  # comprobante en revision, pagado...: no se toca
+    if o.payment_kind == "tarjeta":
+        from . import onvo
+
+        st = onvo.order_payment(db, t, o)
+        if st != "sin_pago":
+            if st in ("pendiente", "sin_respuesta") and not has_note(o, ONVO_WAIT_NOTE):
+                _note(
+                    o,
+                    "sistema",
+                    "Venció el plazo, pero ONVO no confirmó que no hubo pago (sin respuesta o pago en proceso): no se cancela; se vuelve a consultar.",
+                    key=ONVO_WAIT_NOTE,
+                )
+            return st
+    transition(db, t, o, "cancelado", by="sistema", note="Venció sin pago", notify=False)
+    notify_customer(db, t, o, "vencido", _redo_html(db, t, o))
+    return "cancelado"
+
+
+def remind_unpaid(db: Session, t: Tenant, o: Order) -> EmailOutbox | None:
+    """Recordatorio de pago antes del vencimiento (SINPE / transferencia): instrucciones y boton para subir el
+    comprobante. Una sola vez por pedido (clave REMINDER_NOTE en el historial; el pedido se bloquea antes de mirarla).
+    Devuelve el correo (None si ya se recordo o el pedido no tiene correo)."""
+    if o.status != "nuevo" or o.payment_kind not in NEEDS_PROOF or o.expires_at is None or has_note(o, REMINDER_NOTE):
+        return None
+    cancela = store_inventory.settings_of(t).get("cancel_unpaid_on_expiry")
+    extra = (
+        f"<p style='font-size:14px'>Pagá antes del <b>{html.escape(_cr_when(o.expires_at))}</b> para confirmar tu pedido."
+        + (" Después de esa hora se cancela y los productos vuelven a la venta." if cancela else "")
+        + " Si ya pagaste, subí el comprobante con el botón de abajo.</p>"
+    )
+    m = notify_customer(db, t, o, "por_vencer", extra)
+    _note(o, "sistema", "Recordatorio de pago al cliente" + (f" ({m.status})" if m else ": el pedido no tiene correo"), key=REMINDER_NOTE)
+    return m
 
 
 def attention_where(tid: int) -> list:
