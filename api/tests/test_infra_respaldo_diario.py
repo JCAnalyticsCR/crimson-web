@@ -282,3 +282,18 @@ def test_prueba_mensual_detecta_respaldo_viejo_y_alterado(base_origen, nube, avi
     with pytest.raises(rd.Fallo) as e:
         prueba.bajar(DESTINO, identidad, tmp_path / "r3")
     assert e.value.codigo == prueba.SIN_RESPALDO
+
+
+def test_prueba_mensual_no_confia_en_el_resumen_del_bucket(base_origen, nube, avisos, trabajo, tmp_path):
+    """Quien pueda escribir en el bucket no puede colar rutas ni lineas extra en $GITHUB_OUTPUT ni un checkout raro."""
+    assert rd.ejecutar(_env(trabajo, RAILWAY_GIT_COMMIT_SHA="main; rm -rf /"), ahora=DOMINGO_1) == rd.OK
+    identidad = tmp_path / "llave-prueba.txt"
+    identidad.write_text("AGE-SECRET-KEY-PRUEBA", encoding="utf-8")
+    r = prueba.bajar(DESTINO, identidad, tmp_path / "r1", max_horas=100000)
+    assert r["commit"] is None  # no es un SHA: se restaura con main
+    clave = next(n for n in nube.objetos if n.startswith(f"{DESTINO}/diario/") and n.endswith(".json"))
+    resumen = json.loads(nube.objetos[clave])
+    nube.objetos[clave] = json.dumps({**resumen, "archivo": resumen["archivo"] + "\nzip=/etc/passwd"}).encode()
+    with pytest.raises(rd.Fallo) as e:
+        prueba.bajar(DESTINO, identidad, tmp_path / "r2", max_horas=100000)
+    assert e.value.codigo == prueba.DESCARGA

@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -23,6 +24,9 @@ from pathlib import Path
 from .respaldo_diario import FORMATO, Fallo, correr, herramienta, sha256_archivo
 
 CONFIG, SIN_RESPALDO, DESCARGA, DESCIFRADO = 1, 2, 3, 4
+# lo que viene del bucket es dato: solo nombres y SHA con la forma esperada (nada de rutas ni saltos de linea)
+_ARCHIVO = re.compile(r"^crimson-\d{8}-\d{6}\.zip\.age$")
+_COMMIT = re.compile(r"^[0-9a-f]{7,40}$")
 
 
 def ultimo_resumen(rclone: str, destino: str) -> str:
@@ -42,8 +46,10 @@ def bajar(destino: str, identidad: Path, carpeta: Path, max_horas: float = 36, a
     resumen_path = carpeta / "resumen.json"
     correr([rclone, "copyto", f"{destino}/diario/{nombre}", str(resumen_path)], DESCARGA, "descarga")
     resumen = json.loads(resumen_path.read_text(encoding="utf-8"))
-    if resumen.get("formato") != FORMATO:
+    if resumen.get("formato") != FORMATO or not _ARCHIVO.match(str(resumen.get("archivo") or "")):
         raise Fallo(DESCARGA, "descarga", f"{nombre} no es un resumen de respaldo de Crimson")
+    if not _COMMIT.match(str(resumen.get("commit") or "")):
+        resumen["commit"] = None  # lo que no es un SHA no se usa para hacer checkout (ni entra a $GITHUB_OUTPUT)
     creado = datetime.fromisoformat(resumen["creado"])
     horas = ((ahora or datetime.now(UTC)) - creado).total_seconds() / 3600
     if horas > max_horas:
