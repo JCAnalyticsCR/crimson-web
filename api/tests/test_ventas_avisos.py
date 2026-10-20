@@ -201,11 +201,14 @@ def test_ticket_sin_tecnico_queda_por_programar(client, auth, db_session):
     tec = db_session.scalar(select(User).where(User.email == "tecnico-tk@ejemplo.com")).id
     cust = _cliente(client)
     t = client.post("/tickets", json={"customer_id": cust["id"], "subject": "Cámara sin imagen", "priority": "alta"}).json()
+    abiertos = client.get("/dashboard").json()["gerencia"]["jobs_open"]
 
     r = client.post(f"/tickets/{t['id']}/work-order", json={})
     assert r.status_code == 201 and r.json()["status"] == "por_programar", r.text
     oid = r.json()["work_order_id"]
     assert client.get(f"/tickets/{t['id']}").json()["work_order_status"] == "por_programar"
+    # sigue contando como trabajo abierto en la fila de gerencia del inicio
+    assert client.get("/dashboard").json()["gerencia"]["jobs_open"] == abiertos + 1
     # se destaca para quien asigna: en pendientes y en "Mi dia"
     assert oid in [x["id"] for x in client.get("/work-orders", params={"status": "pendientes"}).json()]
     assert oid in [x["id"] for x in client.get("/work-orders/meta/today").json()["next"]]

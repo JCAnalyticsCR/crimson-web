@@ -32,10 +32,11 @@ def _aware(dt: datetime) -> datetime:
 
 def cotizaciones_frias(db: Session, tenant_id: int, ahora: datetime | None = None, dias: int = FRIA_DIAS) -> list[tuple[Quote, datetime]]:
     """Enviadas al cliente y sin su respuesta (ni aceptadas ni rechazadas), sin convertir y sin proyecto, cuyo ULTIMO
-    envio (QuoteVersion.sent_at; las de antes de las versiones, su fecha de emision) fue hace `dias` o mas.
-    Devuelve (cotizacion, ultimo envio), lo mas viejo primero."""
+    envio (QuoteVersion.sent_at; las de antes de las versiones, su fecha de emision) fue hace `dias` o mas, en dias de
+    calendario de Costa Rica (un envio de las 8 p. m. CR ya es del dia siguiente en UTC: contado en UTC saldria un dia
+    tarde). Devuelve (cotizacion, ultimo envio), lo mas viejo primero."""
     ahora = ahora or datetime.now(UTC)
-    corte = ahora - timedelta(days=dias)
+    corte = local_date(ahora) - timedelta(days=dias)
     ultimo = (
         select(QuoteVersion.quote_id, func.max(QuoteVersion.sent_at).label("enviada"))
         .where(QuoteVersion.tenant_id == tenant_id)
@@ -51,7 +52,7 @@ def cotizaciones_frias(db: Session, tenant_id: int, ahora: datetime | None = Non
     out = []
     for q, enviada in filas:
         desde = _aware(enviada) if enviada else datetime.combine(q.issue_date, time(0), tzinfo=CR)
-        if desde <= corte:
+        if local_date(desde) <= corte:
             out.append((q, desde))
     return sorted(out, key=lambda x: (x[1], x[0].id))
 
@@ -65,6 +66,10 @@ def avisar_cotizaciones_frias(db: Session, tenant, ahora: datetime | None = None
     if not frias:
         return 0
     ids = [q.id for q, _ in frias]
+    hoy = local_date(ahora)
+    # avisada el dia D (calendario CR) no se repite hasta el dia D + REPETIR_DIAS, corra el beat un segundo antes o
+    # despues (contado en horas, un aviso de las 07:45:10 se saltaba la corrida de las 07:45:05 cinco dias despues)
+    desde_aviso = datetime.combine(hoy - timedelta(days=REPETIR_DIAS - 1), time(0), tzinfo=CR).astimezone(UTC)
     ya = set(
         db.scalars(
             select(AuditLog.entity_id).where(
@@ -72,7 +77,7 @@ def avisar_cotizaciones_frias(db: Session, tenant, ahora: datetime | None = None
                 AuditLog.action == ACCION_FRIA,
                 AuditLog.entity == "quote",
                 AuditLog.entity_id.in_(ids),
-                AuditLog.at >= ahora - timedelta(days=REPETIR_DIAS),
+                AuditLog.at >= desde_aviso,
             )
         )
     )
@@ -84,7 +89,6 @@ def avisar_cotizaciones_frias(db: Session, tenant, ahora: datetime | None = None
     for q, desde in pendientes:
         dueno = avisos.quote_owner(q)
         por_persona.setdefault(dueno if dueno in activos else 0, []).append((q, desde))
-    hoy = local_date(ahora)
     n = 0
     for uid, items in por_persona.items():
         destinos = [activos[uid]] if uid else avisos.miembros(db, tenant, roles=("admin",))

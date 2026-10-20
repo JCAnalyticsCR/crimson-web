@@ -1038,7 +1038,9 @@ def _ceo_row(db: Session, p: Principal) -> dict:
         db.scalar(select(func.coalesce(func.sum(Invoice.total), 0)).where(Invoice.tenant_id == tid, Invoice.status != "anulada", Invoice.issue_date >= m0))
     )
     week = today + timedelta(days=7 - today.weekday())
-    jobs = db.scalars(select(WorkOrder).where(WorkOrder.tenant_id == tid, WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")), live(WorkOrder))).all()
+    # por_programar (visita de un ticket sin tecnico) tambien es un trabajo abierto
+    abiertas = ("por_programar", "asignada", "en_sitio", "en_proceso")
+    jobs = db.scalars(select(WorkOrder).where(WorkOrder.tenant_id == tid, WorkOrder.status.in_(abiertas), live(WorkOrder))).all()
     quotes_sent = db.scalar(select(func.count()).select_from(Quote).where(Quote.tenant_id == tid, Quote.status == "enviada"))
     quotes_won = db.scalar(select(func.count()).select_from(Quote).where(Quote.tenant_id == tid, Quote.status == "convertida", Quote.updated_at >= m0))
     warranties = [

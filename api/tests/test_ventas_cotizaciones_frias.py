@@ -4,13 +4,14 @@ convertidas o con proyecto), le llega a la vendedora correcta (no a quien la tec
 
 import os
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
 from sqlalchemy import select
 
 from app.core.config import settings
 from app.models import AuditLog, EmailOutbox, Quote, QuoteVersion, Tenant, TenantUser, User
+from app.services.documents import CR, local_date
 from app.tasks import ventas
 from tests.test_campo import _login
 
@@ -118,6 +119,42 @@ def test_cotizacion_fria_sin_versiones_y_vendedora_inactiva(client, auth, db_ses
     assert _avisos(db_session, "vendedora-baja@ejemplo.com") == []
     admin = _avisos(db_session, auth["user"]["email"])
     assert len(admin) == 1 and q["number"] in admin[0].html and "ya no está activa" in admin[0].html
+
+
+def test_cotizacion_fria_cuenta_dias_de_costa_rica(client, auth, db_session):
+    """Borde de las 18:00-24:00 CR: un envio de las 8:30 p. m. CR ya es del dia siguiente en UTC. Los 5 dias (y los 5
+    sin repetir) se cuentan en el calendario de Costa Rica, a la hora del beat (07:45 CR)."""
+    tid = auth["tenant"]["id"]
+    ven = _login(client, db_session, tid, "vendedora-noche@ejemplo.com", "ventas")
+    cust = client.get("/customers").json()["items"][0]
+    t = db_session.get(Tenant, tid)
+    hoy = local_date(datetime.now(UTC))
+    beat = datetime.combine(hoy, time(7, 45), tzinfo=CR)
+
+    def _enviada_el(dia: date, hora: time) -> dict:
+        q = _enviada(client, db_session, ven, cust["id"], 0)
+        v = db_session.scalar(select(QuoteVersion).where(QuoteVersion.quote_id == q["id"]))
+        v.sent_at = datetime.combine(dia, hora, tzinfo=CR).astimezone(UTC)
+        db_session.commit()
+        return q
+
+    noche = _enviada_el(hoy - timedelta(days=5), time(20, 30))  # en UTC seria hace 4 dias
+    casi = _enviada_el(hoy - timedelta(days=4), time(23, 59))
+    frias = {q.id for q, _ in ventas.cotizaciones_frias(db_session, tid, beat)}
+    assert noche["id"] in frias and casi["id"] not in frias
+
+    assert ventas.avisar_cotizaciones_frias(db_session, t, beat) == 1
+    db_session.commit()
+    mios = _avisos(db_session, "vendedora-noche@ejemplo.com")
+    assert len(mios) == 1 and noche["number"] in mios[0].html and "hace 5 días" in mios[0].html
+    # avisada hoy: la corrida del dia 4 no la repite (pero ya avisa la de las 23:59); la del dia 5 si, aunque corra antes
+    assert ventas.avisar_cotizaciones_frias(db_session, t, beat + timedelta(days=4)) == 1
+    db_session.commit()
+    assert noche["number"] not in _avisos(db_session, "vendedora-noche@ejemplo.com")[-1].html
+    # (la bitacora guarda la hora real: las dos quedaron avisadas hoy, asi que el dia 5 vuelven las dos)
+    assert ventas.avisar_cotizaciones_frias(db_session, t, beat + timedelta(days=5, seconds=-30)) == 2
+    db_session.commit()
+    assert noche["number"] in _avisos(db_session, "vendedora-noche@ejemplo.com")[-1].html
 
 
 def test_worker_programa_y_corre_las_cotizaciones_frias(db_session, monkeypatch):
