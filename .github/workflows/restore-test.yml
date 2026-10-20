@@ -1,0 +1,90 @@
+# Prueba mensual de restauracion (plan 1.9 · infra/RESPALDO.md seccion 5): baja el respaldo diario mas reciente del
+# bucket, revisa que tenga menos de 36 h y que sus hashes coincidan, lo descifra con la llave de PRUEBA y lo restaura en
+# una Postgres vacia con el codigo del mismo commit. Termina en rojo si algo no cuadra (GitHub avisa por correo).
+#
+# Apagado hasta configurarlo (pasos en infra/RESPALDO.md seccion 4.4):
+#   - variable de repositorio RESPALDO_PRUEBA_ACTIVA=true y RESPALDO_DESTINO (p. ej. respaldo:crimson-respaldos)
+#   - environment "respaldo-prueba" (solo rama main) con los secretos RESPALDO_AGE_IDENTITY (llave privada de la PRUEBA,
+#     nunca la de los custodios) y RESPALDO_RCLONE_CONF (rclone.conf con un remoto "respaldo" de SOLO LECTURA)
+name: Prueba de restauracion
+
+on:
+  schedule:
+    - cron: "30 12 2 * *" # dia 2 de cada mes, 06:30 hora de Costa Rica
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prueba-restauracion
+  cancel-in-progress: false
+
+jobs:
+  restaurar:
+    if: vars.RESPALDO_PRUEBA_ACTIVA == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: respaldo-prueba
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: restauracion
+          POSTGRES_USER: crimson
+          POSTGRES_PASSWORD: solo_ci_desechable
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U crimson -d restauracion"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      RESPALDO_DESTINO: ${{ vars.RESPALDO_DESTINO }}
+      RESPALDO_MAX_HORAS: "36"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # para volver al commit exacto del respaldo
+          persist-credentials: false
+      - name: age y rclone
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends age rclone
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.10.11"
+          python-version: "3.12"
+      - name: Dependencias
+        working-directory: api
+        run: uv sync --frozen
+      - name: Llaves de la prueba (solo en el disco temporal del runner)
+        env:
+          AGE_IDENTITY: ${{ secrets.RESPALDO_AGE_IDENTITY }}
+          RCLONE_CONF: ${{ secrets.RESPALDO_RCLONE_CONF }}
+        run: |
+          umask 077
+          printf '%s\n' "$AGE_IDENTITY" > "$RUNNER_TEMP/llave-prueba.txt"
+          printf '%s\n' "$RCLONE_CONF" > "$RUNNER_TEMP/rclone.conf"
+      - name: Bajar, revisar y descifrar el ultimo respaldo
+        id: bajar
+        working-directory: api
+        env:
+          RCLONE_CONFIG: ${{ runner.temp }}/rclone.conf
+          RESPALDO_AGE_IDENTITY_FILE: ${{ runner.temp }}/llave-prueba.txt
+        run: uv run python -m app.tools.prueba_restauracion --dir "$RUNNER_TEMP/restauracion"
+      - name: Mismo codigo que el respaldo
+        env:
+          COMMIT: ${{ steps.bajar.outputs.commit }}
+        run: |
+          if [ -n "$COMMIT" ] && git cat-file -e "${COMMIT}^{commit}" 2>/dev/null; then
+            git checkout --detach "$COMMIT"
+          else
+            echo "::warning::El respaldo no trae un commit conocido: se restaura con main (si la migracion no coincide, restore sale con codigo 5)"
+          fi
+      - name: Restaurar en Postgres vacia y verificar conteos y hashes
+        working-directory: api
+        env:
+          ZIP: ${{ steps.bajar.outputs.zip }}
+        run: |
+          uv sync --frozen
+          uv run python -m app.tools.restore "$ZIP" --target "postgresql://crimson:solo_ci_desechable@localhost:5432/restauracion"
+      - name: Borrar lo descifrado y las llaves
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/restauracion" "$RUNNER_TEMP/llave-prueba.txt" "$RUNNER_TEMP/rclone.conf"

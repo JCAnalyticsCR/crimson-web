@@ -97,6 +97,7 @@ def main(argv: list[str] | None = None) -> int:
             out = out / name
         m = bk.write_to_path(conn, Base.metadata, out, tenant=tenant, redact=a.redactar, include_blobs=not a.sin_archivos)
         dialect = conn.dialect.name
+    engine.dispose()  # sin conexiones abiertas: el cron de respaldo diario tiene que terminar limpio
     tot = m["totals"]
     print(f"Respaldo: {tot['tables']} tablas, {tot['rows']} filas, {tot['blobs']} archivos ({tot['blob_bytes'] / 1_048_576:.1f} MB)")
     print(f"Migracion: {', '.join(m['alembic_revisions']) or 'sin alembic_version'} - motor: {dialect}")

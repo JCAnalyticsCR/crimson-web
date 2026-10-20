@@ -66,6 +66,15 @@ def main(argv: list[str] | None = None) -> int:
         print("AVISO: respaldo sin archivos de multimedia: las imagenes y PDF quedaran vacios.")
 
     engine = make_engine(normalize_url(a.target))
+    try:
+        return _restaurar(engine, z, m, a.permitir_version_distinta)
+    finally:
+        # sin conexiones abiertas al terminar: el cron de respaldo restaura aqui su verificacion y tiene que salir limpio
+        engine.dispose()
+        z.close()
+
+
+def _restaurar(engine, z: zipfile.ZipFile, m: dict, permitir: bool) -> int:
     md = Base.metadata
     revs = m.get("alembic_revisions") or []
     heads = code_heads()
@@ -79,11 +88,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"ERROR: la base destino NO esta vacia ({t} tiene {n} filas; {len(busy)} tablas con datos). Restaure solo en una base nueva.", file=sys.stderr)
                 return 4
             current = bk.alembic_revisions(conn)
-            if revs and current and sorted(current) != sorted(revs) and not a.permitir_version_distinta:
+            if revs and current and sorted(current) != sorted(revs) and not permitir:
                 print(f"ERROR: el destino esta en la migracion {current} y el respaldo en {revs}. Use la misma version del codigo o --permitir-version-distinta.", file=sys.stderr)
                 return 5
         else:
-            if revs and heads and sorted(revs) != heads and not a.permitir_version_distinta:
+            if revs and heads and sorted(revs) != heads and not permitir:
                 print(f"ERROR: el respaldo es de la migracion {revs} y este codigo esta en {heads}. Haga checkout de la version del respaldo o use --permitir-version-distinta.", file=sys.stderr)
                 return 5
             md.create_all(conn)
@@ -108,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         for p in problems:
             print(f"  - {p}", file=sys.stderr)
         return 7
-    print(f"OK restaurado y verificado: {len(m['tables'])} tablas, {tot['rows']} filas, hashes identicos al respaldo ({m['sha256'][:16]}...)")
+    print(f"OK restaurado y verificado: {len(m['tables'])} tablas, {m['totals']['rows']} filas, hashes identicos al respaldo ({m['sha256'][:16]}...)")
     return 0
 
 

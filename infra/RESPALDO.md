@@ -3,8 +3,8 @@
 Cómo se respalda la plataforma Crimson, dónde se guarda, cuánto se conserva y cómo se **prueba** que el
 respaldo sirve. Un respaldo que nunca se restauró no es un respaldo: es una esperanza.
 
-> Nada de esto está configurado en Railway todavía. Este documento dice qué hacer; los pasos en Railway
-> los ejecuta una persona con acceso, a mano, una vez.
+> El código del respaldo diario y de la prueba de restauración ya está en el repo (sección 4). Crear el servicio
+> en Railway, el bucket y las llaves lo hace una persona con acceso, a mano, una vez.
 
 ---
 
@@ -66,51 +66,136 @@ La contraseña de la base se le pasa a `pg_dump` por variable de entorno, nunca 
 **Los respaldos nunca van al repositorio** (el repo es público). `.gitignore` ya excluye `respaldos/`,
 `crimson-respaldo-*.zip`, `crimson-datos-*.zip` y `*.pgdump`.
 
-## 4. Programarlo en Railway (pendiente de hacer a mano)
+## 4. Respaldo diario automático (servicio cron `respaldo`)
 
-### Opción recomendada: un servicio cron aparte
+Todos los días a las **03:15 hora de Costa Rica** Railway arranca el servicio `respaldo` (imagen
+`infra/respaldo/Dockerfile`), que corre `python -m app.tools.respaldo_diario` y se apaga:
 
-Railway corre un servicio con "Cron Schedule": arranca a la hora indicada, ejecuta el comando y se apaga
-(no consume mientras no corre).
+1. `app.tools.backup` de toda la base (con archivos) a un zip temporal.
+2. **Verificación:** restaura ese zip en una SQLite desechable y compara conteos y hashes de cada tabla
+   (`app.tools.restore`). Si falla, el cifrado igual se sube (puede servir en Postgres), pero cuenta como falla y avisa.
+3. **Cifrado** con `age` para las llaves **públicas** de los custodios: el servicio cifra pero no puede descifrar.
+   Antes de subir comprueba que lo que va a subir es un archivo de `age`: **nunca sube nada en claro**.
+4. **Subida** con `rclone` a `diario/` (y a `semanal/` los domingos, `mensual/` el día 1 y `anual/` el 1 de enero),
+   junto a un resumen `.json` **sin datos personales** (hashes, tamaños, filas, migración y commit). El resumen se sube
+   después del `.age`: si el resumen existe, el cifrado está completo.
+5. **Avisos:** latido al monitor si todo salió bien; si algo falló, latido de falla y correo (sección 4.5).
 
-1. En el proyecto de Railway: **New → GitHub Repo** con este mismo repositorio; nombre `respaldo`.
-2. Settings → Root Directory: `api`. Mismo builder que el servicio de la API.
-3. Variables: `DATABASE_URL` como referencia a la del Postgres (`${{Postgres.DATABASE_URL}}`), `ENV=production`,
-   `JWT_SECRET` (la misma de la API; la valida la configuración) y las credenciales del almacenamiento externo
-   (ver abajo). Nada más: en particular **no** `FISCAL_KEYS` ni ninguna `HACIENDA_*` (el respaldo solo lleva el
-   texto cifrado de las credenciales de Hacienda; la llave y el respaldo nunca están en el mismo servicio).
-4. Settings → Cron Schedule: `15 9 * * *` (09:15 UTC = 03:15 hora de Costa Rica, todos los días).
-5. Start command (ejemplo con rclone hacia un bucket S3 compatible; `RCLONE_CONFIG_*` en variables):
+Los temporales (tienen datos personales) se borran siempre. El log termina con
+`OK respaldo diario crimson-AAAAMMDD-HHMMSS.zip.age sha256=… filas=… verificacion=restaurado` o con
+`FALLO <paso>: …` y un código distinto de 0: 1 configuración · 2 respaldo · 3 verificación · 4 cifrado · 5 subida.
+Los nombres de archivo llevan la fecha y hora **UTC**.
 
-   ```bash
-   python -m app.tools.backup --salida /tmp/crimson.zip --sin-pg-dump \
-     && age -r "$RESPALDO_AGE_PUBLIC_KEY" -o /tmp/crimson.zip.age /tmp/crimson.zip \
-     && rclone copyto /tmp/crimson.zip.age "respaldo:crimson-respaldos/diario/crimson-$(date -u +%Y%m%d-%H%M).zip.age"
-   ```
+Se eligió un servicio cron y no una tarea del worker: el worker no necesita las herramientas de cifrado ni las
+credenciales del bucket, un respaldo pesado no compite con las tareas normales y el cron no consume mientras no corre.
 
-   - `age` cifra con una llave **pública**: el servicio puede cifrar pero no descifrar. La llave privada
-     vive solo en el gestor de contraseñas (2 personas con acceso).
-   - Si el builder no trae `age`/`rclone`, agregarlos como paquetes del build (Nixpacks: `aptPkgs`) o usar
-     una imagen propia. No cambia el código de la aplicación.
-6. Revisar el primer día: en los logs del servicio debe aparecer `OK ... sha256=...`. Si sale con código
-   distinto de 0, Railway marca la ejecución como fallida: activar la notificación de fallos del servicio.
-
-### Alternativa: tarea del worker (Celery beat)
-
-Si se prefiere no tener otro servicio, se puede agregar una tarea al `worker/celery_app.py` que llame a
-`app.tools.backup.main([...])` y suba el archivo. Desventaja: el worker necesita las herramientas de
-cifrado y subida, y un respaldo pesado compite con las tareas normales. Por eso se recomienda el cron aparte.
-
-### Dónde guardarlo: FUERA de Railway
+### 4.1 Almacenamiento externo: FUERA de Railway
 
 Un respaldo en el mismo proveedor que la base no protege de un problema con la cuenta o la región.
 
 - **Recomendado:** bucket S3 compatible en otro proveedor (Backblaze B2, Cloudflare R2 o AWS S3) con
-  **versionado** activado y, si el proveedor lo permite, **bloqueo de objetos** (object lock) en modo
-  gobernanza por 30 días: ni un error ni una credencial robada pueden borrar los respaldos recientes.
-- Credenciales del bucket con permiso **solo de escritura** en la carpeta de respaldos (sin listar ni borrar).
+  **versionado** y, si el proveedor lo permite, **bloqueo de objetos** (object lock / retención) por 14 días: ni un
+  error ni una credencial robada pueden borrar los respaldos recientes.
+- **Credencial de escritura** para el servicio `respaldo`: solo subir objetos (sin listar, leer ni borrar) cuando el
+  proveedor lo permite (B2: capacidad `writeFiles`; AWS: política con `s3:PutObject` únicamente). Si el proveedor no
+  tiene credenciales de solo escritura, el bloqueo de objetos es lo que impide borrar.
+- **Credencial de lectura**, aparte, solo para la prueba de restauración (4.4).
 - Copia mensual adicional descargada a un medio de la empresa (disco cifrado), fuera de la nube.
-- Nunca: en el repositorio, en un chat, en correo, ni en carpetas sincronizadas personales.
+- Nunca: en el repositorio, en un chat, en correo, ni en carpetas sincronizadas personales (OneDrive, Drive).
+
+### 4.2 Llaves de cifrado (age)
+
+- Cada custodio (una persona del responsable técnico y una de Crimson) genera su par **en una máquina de confianza**:
+  `age-keygen -o custodio.txt`. La línea `# public key: age1…` es la pública. El archivo completo (la privada) va al
+  gestor de contraseñas y a ningún otro lado.
+- Para la prueba automática (4.4) se genera un **tercer par**, solo para eso.
+- `RESPALDO_AGE_RECIPIENTS` = las públicas, separadas por coma. Si alguien pega ahí una privada
+  (`AGE-SECRET-KEY-…`), el respaldo se niega a correr y avisa: hay que rotar ese par.
+- Si un custodio deja de serlo: se quita su pública y se agrega la del reemplazo. Los respaldos anteriores siguen
+  cifrados también para él hasta que vencen por retención.
+
+### 4.3 Crear el servicio en Railway (una vez)
+
+1. **New → GitHub Repo** (este repositorio), nombre `respaldo`.
+2. **Settings → Source:** Root Directory vacío (la raíz del repo) y la variable
+   `RAILWAY_DOCKERFILE_PATH=infra/respaldo/Dockerfile`. Watch Paths `/api/**` y `/infra/respaldo/**`; "Wait for CI"
+   encendido (ver `infra/DESPLIEGUE.md`).
+3. **Settings → Deploy:** Cron Schedule `15 9 * * *` (09:15 UTC = 03:15 CR). Restart Policy: *Never* (el fallo ya
+   avisó; reintentar en bucle no lo arregla).
+4. **Variables** (ningún valor real va al repositorio):
+
+   | Variable | Valor |
+   |---|---|
+   | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
+   | `ENV` | `production` |
+   | `JWT_SECRET` | la misma del api (la valida la configuración al arrancar) |
+   | `RESPALDO_DESTINO` | `respaldo:<bucket>` (remoto `respaldo` de rclone + bucket, opcionalmente con un prefijo) |
+   | `RESPALDO_AGE_RECIPIENTS` | llaves públicas `age1…` separadas por coma (custodios + prueba) |
+   | `RCLONE_CONFIG_RESPALDO_TYPE` | `s3` |
+   | `RCLONE_CONFIG_RESPALDO_PROVIDER` | el del proveedor (ver la documentación de rclone para S3) |
+   | `RCLONE_CONFIG_RESPALDO_ENDPOINT` | URL S3 del proveedor |
+   | `RCLONE_CONFIG_RESPALDO_ACCESS_KEY_ID`, `RCLONE_CONFIG_RESPALDO_SECRET_ACCESS_KEY` | la credencial de **escritura** |
+   | `RCLONE_CONFIG_RESPALDO_NO_CHECK_BUCKET` | `true` (esa credencial no puede revisar ni crear el bucket) |
+   | `RESPALDO_PING_URL` | URL del latido del monitor (4.5) |
+   | `RESPALDO_AVISO_A` | correos que reciben la falla, separados por coma |
+   | `RESEND_API_KEY`, `MAIL_FROM` | las variables compartidas del correo (las mismas del api y el worker) |
+   | `RESPALDO_VERIFICAR` | vacía (= `restaurar`); `hashes` solo si la restauración de prueba diera falsas alarmas |
+
+   Nada más: **no** `FISCAL_KEYS` ni ninguna `HACIENDA_*` (el respaldo lleva el texto cifrado de las credenciales de
+   Hacienda; la llave y el respaldo nunca están en el mismo servicio).
+5. **Revisar la configuración** sin tocar la base: Custom Start Command
+   `python -m app.tools.respaldo_diario --revisar`, una corrida (`railway cron run` o "Run now"), y borrar el comando.
+   Debe decir `OK configuracion`.
+6. **Primera corrida real:** `railway cron run` y buscar `OK respaldo diario` en el log y los dos archivos en
+   `diario/` del bucket.
+7. **Probar el aviso** una vez, con el monitor todavía en pausa: `RESPALDO_VERIFICAR=x`, correr el cron, confirmar que
+   llega el correo "falló el respaldo diario (configuracion)" y volver a dejar la variable vacía. Solo el correo:
+   `python -m app.tools.respaldo_diario --probar-aviso`.
+
+Listo cuando: 7 respaldos diarios seguidos en `diario/` y una prueba de restauración automática en verde (4.4).
+
+### 4.4 Prueba de restauración automática (mensual)
+
+`.github/workflows/restore-test.yml` corre el día 2 de cada mes a las 06:30 CR (y a mano con "Run workflow"):
+
+1. `python -m app.tools.prueba_restauracion`: baja el resumen más reciente de `diario/` y su `.age`, exige que el
+   respaldo tenga **menos de 36 h** (si no, el cron dejó de correr), compara el hash del cifrado con el resumen, lo
+   descifra con la llave de **prueba** y compara el hash del zip.
+2. Vuelve al **commit** del respaldo (lo anota el resumen) para restaurar con el mismo esquema.
+3. `python -m app.tools.restore` en una **Postgres vacía**: inserta todo y compara conteos y hashes de cada tabla.
+4. Borra lo descifrado y las llaves del runner, pase lo que pase.
+
+Si algo no cuadra queda en rojo y GitHub avisa por correo. Para activarla:
+
+1. GitHub → Settings → Environments → `respaldo-prueba`, con *Deployment branches* limitado a `main`. Secretos del
+   environment: `RESPALDO_AGE_IDENTITY` (el contenido del archivo de la llave de prueba) y `RESPALDO_RCLONE_CONF`
+   (un `rclone.conf` con un remoto `[respaldo]` y la credencial de **solo lectura**).
+2. Variables de repositorio: `RESPALDO_DESTINO` (igual que en Railway) y `RESPALDO_PRUEBA_ACTIVA=true`.
+3. Actions → "Prueba de restauracion" → Run workflow, y verla en verde.
+
+El costo de automatizarla: quien tenga la llave de prueba y la credencial de lectura puede leer los respaldos. Por
+eso viven solo en un environment limitado a `main`, la credencial es de solo lectura y distinta de la de escritura,
+y ambas se rotan si cambia el equipo. Si eso no es aceptable, no se agrega la llave de prueba a
+`RESPALDO_AGE_RECIPIENTS`, `RESPALDO_PRUEBA_ACTIVA` queda apagada y la prueba se hace a mano (sección 5).
+
+### 4.5 Avisos
+
+- **Latido (heartbeat):** un monitor tipo heartbeat (Better Stack, healthchecks.io o similar) con período de 24 h y
+  2 h de gracia; su URL va en `RESPALDO_PING_URL`. El respaldo la llama al terminar bien y llama `<url>/fail` si
+  falla. Si un día no llega nada (el cron ni arrancó), el monitor avisa igual. Alertas a los mismos destinatarios
+  del monitor de la tienda.
+- **Correo de falla:** a `RESPALDO_AVISO_A`, directo por Resend (no depende de la base, que puede ser lo que falló),
+  con el paso que falló y el detalle. Los mensajes nombran variables, nunca sus valores, y quitan `usuario:clave@` de
+  cualquier URL.
+- **Railway:** activar las notificaciones de fallos del servicio.
+
+| Mensaje en el log o el correo | Qué revisar |
+|---|---|
+| `configuracion: faltan o estan mal: …` | la variable que nombra (ausente o mal escrita) |
+| `respaldo: OperationalError …` | la base no responde o cambió `DATABASE_URL` |
+| `verificacion: … codigo 5` | el servicio `respaldo` quedó con código viejo: redesplegarlo con la última migración |
+| `cifrado: …` | `age` rechazó una llave pública |
+| `subida: …` | credencial vencida, bucket inexistente o un bloqueo de objetos que exige Content-MD5 (actualizar rclone) |
 
 ### Retención sugerida
 
@@ -122,12 +207,15 @@ Un respaldo en el mismo proveedor que la base no protege de un problema con la c
 | Anual | el del 1 de enero | al menos 5 años (registros contables y tributarios; confirmar el plazo con el contador) |
 
 Se implementa con reglas de ciclo de vida del bucket por carpeta (`diario/`, `semanal/`, `mensual/`,
-`anual/`): el cron copia el mismo archivo a las carpetas que correspondan según la fecha.
+`anual/`): el cron sube el mismo archivo a las carpetas que correspondan según la fecha de Costa Rica.
 
 Objetivo con esta pauta: se pierde como máximo un día de datos (RPO 24 h) y se recupera en menos de 2 horas
-(RTO), siempre que la prueba de la sección 5 se haga de verdad.
+(RTO), siempre que la prueba de restauración se haga de verdad (4.4 o sección 5).
 
-## 5. Prueba de recuperación (mensual, paso a paso)
+## 5. Prueba de recuperación a mano (paso a paso)
+
+La automática (4.4) corre cada mes. Esta, completa y con la API levantada, se hace al menos cada 3 meses, cuando la
+automática no está activa o cuando falla.
 
 Responsable: quien administre la plataforma. Duración: 20–30 minutos. Se hace en una base **nueva y vacía**,
 nunca sobre producción.
