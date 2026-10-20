@@ -386,7 +386,7 @@ def _hold(db: Session, p: Principal, q, chk) -> list[str]:
         q.approval_reason = " ".join(razones)[:400]
         audit(db, p.tenant.id, p.user.id, "needs_approval", "quote", q.id, {"razones": razones}, ip=p.ip)
         if antes != "por_aprobar" or devuelta:
-            avisos.descuento_por_aprobar(db, p.tenant, q, p.user.id)
+            avisos.descuento_por_aprobar(db, p.tenant, q, p.user.id, tras_rechazo=devuelta)
     elif q.status == "por_aprobar":
         q.status = "creado"  # quedo dentro de los limites (o lo edito quien aprueba)
         q.approval_reason = None

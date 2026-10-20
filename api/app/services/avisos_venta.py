@@ -211,9 +211,11 @@ def cotizacion_aceptada(db: Session, tenant, q: Quote, *, version: int | None, q
     return avisar(db, tenant, destinos, f"Cotización aceptada: {q.number} · {cliente}", cuerpo, "quote", q.id, minutos=VENTANA_ACEPTADA, excluir=actor_id)
 
 
-def descuento_por_aprobar(db: Session, tenant, q: Quote, actor_id: int | None) -> int:
+def descuento_por_aprobar(db: Session, tenant, q: Quote, actor_id: int | None, *, tras_rechazo: bool = False) -> int:
     """La cotizacion quedo retenida (descuento, monto o margen): aviso inmediato a quien aprueba. El motivo va sin cifras
-    de margen (public_reason): el correo no es lugar para el costo."""
+    de margen (public_reason): el correo no es lugar para el costo. Pasarse del limite, corregir y volver a pasarse no
+    repite el aviso dentro de la ventana; volver a pedirlo despues de un rechazo si avisa (entre uno y otro hubo una
+    decision de quien aprueba, no hay forma de inundarlo)."""
     from .discounts import public_reason
 
     destinos = [m for m in miembros(db, tenant) if m.can("sales", "aprobar")]
@@ -233,7 +235,8 @@ def descuento_por_aprobar(db: Session, tenant, q: Quote, actor_id: int | None) -
             texto=texto,
         )
 
-    return avisar(db, tenant, destinos, f"Cotización por aprobar: {q.number} · {cliente}", cuerpo, "quote", q.id, minutos=VENTANA_POR_APROBAR, excluir=actor_id)
+    asunto = f"Cotización por aprobar: {q.number} · {cliente}"
+    return avisar(db, tenant, destinos, asunto, cuerpo, "quote", q.id, minutos=0 if tras_rechazo else VENTANA_POR_APROBAR, excluir=actor_id)
 
 
 def descuento_resuelto(db: Session, tenant, q: Quote, actor_id: int | None, *, aprobado: bool, motivo: str | None = None) -> int:
