@@ -673,6 +673,7 @@ def order_stock(db: Session, o: Order) -> dict:
 
 # ---------- worker ----------
 EXPIRED_NOTE = "vencio"  # marca (clave) de la nota "venció el plazo" en el historial: una sola vez por pedido
+NOTE_WINDOW = timedelta(days=3)  # sin cancel_unpaid_on_expiry, un pedido vencido hace mas ya tiene su nota
 
 
 def expire_holds(db: Session) -> int:
@@ -706,11 +707,14 @@ def expire_holds(db: Session) -> int:
         if r.order_id:
             with_hold.add(r.order_id)
     db.commit()
-    due = set(
-        db.scalars(
-            select(Order.id).where(Order.channel == "tienda", Order.status == "nuevo", Order.expires_at.is_not(None), Order.expires_at <= now)
+    due_rows = db.execute(
+        select(Order.id, Order.tenant_id, Order.expires_at).where(
+            Order.channel == "tienda", Order.status == "nuevo", Order.expires_at.is_not(None), Order.expires_at <= now
         )
-    )
+    ).all()
+    cancels = {tid: bool(settings_of(db.get(Tenant, tid)).get("cancel_unpaid_on_expiry")) for tid in {r.tenant_id for r in due_rows}}
+    # sin cancelar, al pedido vencido solo se le deja la nota (en la primera corrida): los viejos no se releen cada 5 min
+    due = {r.id for r in due_rows if cancels[r.tenant_id] or _aware(r.expires_at) > now - NOTE_WINDOW}
     n = len(rows)
     for oid in sorted(with_hold | due):
         try:

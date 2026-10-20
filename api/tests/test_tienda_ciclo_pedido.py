@@ -114,6 +114,28 @@ def test_sinpe_sin_pagar_vence_libera_y_nunca_avisa_compra(client, auth, db_sess
     assert len(_order_mails(db_session, o, "Tu pedido")) == 1
 
 
+def test_al_encender_cancelar_los_pedidos_viejos_se_cancelan_sin_correo(client, auth, db_session):
+    """cancel_unpaid_on_expiry se enciende una semana despues del despliegue: lo abandonado de antes se cancela (y
+    libera) pero el cliente no recibe "tu pedido venció" por un pedido de hace dias; uno recien vencido si."""
+    _publish(client)
+    _pagos(client)
+    p = _bajo_pedido(client, db_session, "CIC-12", "Gabinete de rack", qty=4)
+    viejo = _order(db_session, _buy(client, [{"product_id": p["id"], "quantity": 1}]).json()["number"])
+    nuevo = _order(db_session, _buy(client, [{"product_id": p["id"], "quantity": 1}]).json()["number"])
+    _vencer(db_session, viejo, minutes=6 * 24 * 60)
+    _vencer(db_session, nuevo, minutes=30)
+    sinv.expire_holds(db_session)  # todavia apagado: solo la nota del recien vencido (el viejo ya no se relee)
+    db_session.refresh(viejo)
+    assert viejo.status == "nuevo" and not so.has_note(viejo, "vencio")
+    _cfg(client, cancel_unpaid_on_expiry=True)
+    sinv.expire_holds(db_session)
+    db_session.refresh(viejo)
+    db_session.refresh(nuevo)
+    assert viejo.status == nuevo.status == "cancelado" and _req(db_session, viejo).status == "cancelada"
+    assert _order_mails(db_session, viejo, "Tu pedido") == [] and any("Sin correo al cliente" in (h.get("note") or "") for h in viejo.history)
+    assert len(_order_mails(db_session, nuevo, "Tu pedido")) == 1
+
+
 def test_pagado_pasa_a_borrador_con_un_solo_aviso_de_compra(client, auth, db_session):
     _publish(client)
     _pagos(client)
@@ -288,6 +310,26 @@ def test_recordatorio_24h_antes_una_sola_vez(client, auth, db_session):
     assert len(_order_mails(db_session, o, "Tu pedido")) == 1 and _order_mails(db_session, otro, "Tu pedido") == []
     # pasada la mitad del plazo corto, el otro si recibe el suyo
     assert tienda.payment_reminders(db_session, now + timedelta(hours=3)) == 1
+
+
+def test_recordatorio_respeta_la_pausa_del_cliente(client, auth, db_session):
+    """Customer.no_reminders (plan 1.3): si el cliente tiene los recordatorios pausados, no se le recuerda el pago."""
+    from app.models import Customer
+
+    _publish(client)
+    _pagos(client)
+    main, _ = _whs(client)
+    p = _prod(client, "CIC-13", "Fuente 12 V")
+    _in(client, p["id"], main["id"], 2)
+    o = _order(db_session, _buy(client, [{"product_id": p["id"], "quantity": 1}]).json()["number"])
+    c = db_session.get(Customer, o.customer_id)
+    c.no_reminders = True  # el campo llega con 1.3; aqui basta el atributo
+    now = datetime.now(UTC)
+    o.created_at, o.expires_at = now - timedelta(hours=30), now + timedelta(hours=2)
+    db_session.commit()
+    assert tienda.payment_reminders(db_session, now) == 0
+    db_session.refresh(o)
+    assert _order_mails(db_session, o, "Tu pedido") == [] and so.has_note(o, so.REMINDER_NOTE)
 
 
 def test_recordatorio_no_va_a_tarjeta_ni_a_comprobante_en_revision(client, auth, db_session):

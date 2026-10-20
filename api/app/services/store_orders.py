@@ -16,7 +16,7 @@ import html
 import logging
 import re
 import secrets
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import jwt
@@ -634,6 +634,9 @@ def mark_paid(db: Session, t: Tenant, o: Order, *, by, ref: str | None, note: st
 # ---------- vencimiento y recordatorio de pago (worker) ----------
 REMINDER_NOTE = "recordatorio_pago"  # clave de la nota: un recordatorio por pedido (dedupe)
 ONVO_WAIT_NOTE = "onvo_sin_confirmar"
+# vencido hace mas que esto: se cancela SIN correo al cliente. Al encender cancel_unpaid_on_expiry (una semana despues
+# del despliegue) los pedidos abandonados de antes se cancelan juntos: nadie recibe "tu pedido vencio" semanas despues
+EXPIRED_MAIL_WINDOW = timedelta(hours=24)
 
 
 def _cr_when(dt: datetime) -> str:
@@ -665,7 +668,8 @@ def expire_unpaid(db: Session, t: Tenant, o: Order) -> str:
     - Con tarjeta, primero se le pregunta a ONVO (onvo.order_payment): si cobro, el pago se aplica y el pedido queda
       pagado; si no responde o el pago esta en proceso, NO se cancela (se reintenta en la proxima corrida).
     - Si no: transition(cancelado, by="sistema", "Venció sin pago") libera la reserva y cancela la solicitud de
-      compra reservada, y el cliente recibe un correo con el enlace para rehacer la compra."""
+      compra reservada, y el cliente recibe un correo con el enlace para rehacer la compra (si vencio hace menos de
+      EXPIRED_MAIL_WINDOW; uno mas viejo se cancela con una nota y sin correo)."""
     if o.status != "nuevo":
         return o.status  # comprobante en revision, pagado...: no se toca
     if o.payment_kind == "tarjeta":
@@ -681,16 +685,25 @@ def expire_unpaid(db: Session, t: Tenant, o: Order) -> str:
                     key=ONVO_WAIT_NOTE,
                 )
             return st
+    viejo = o.expires_at is not None and aware(o.expires_at) < datetime.now(UTC) - EXPIRED_MAIL_WINDOW
     transition(db, t, o, "cancelado", by="sistema", note="Venció sin pago", notify=False)
-    notify_customer(db, t, o, "vencido", _redo_html(db, t, o))
+    if viejo:
+        _note(o, "sistema", "Sin correo al cliente: el plazo para pagar había vencido hace más de 24 horas.")
+    else:
+        notify_customer(db, t, o, "vencido", _redo_html(db, t, o))
     return "cancelado"
 
 
 def remind_unpaid(db: Session, t: Tenant, o: Order) -> EmailOutbox | None:
     """Recordatorio de pago antes del vencimiento (SINPE / transferencia): instrucciones y boton para subir el
     comprobante. Una sola vez por pedido (clave REMINDER_NOTE en el historial; el pedido se bloquea antes de mirarla).
-    Devuelve el correo (None si ya se recordo o el pedido no tiene correo)."""
+    Respeta la pausa de recordatorios del cliente (Customer.no_reminders, plan 1.3) cuando ese campo existe.
+    Devuelve el correo (None si ya se recordo, el cliente los tiene pausados o el pedido no tiene correo)."""
     if o.status != "nuevo" or o.payment_kind not in NEEDS_PROOF or o.expires_at is None or has_note(o, REMINDER_NOTE):
+        return None
+    c = db.get(Customer, o.customer_id) if o.customer_id else None
+    if c is not None and getattr(c, "no_reminders", False):
+        _note(o, "sistema", "Recordatorio de pago omitido: el cliente tiene los recordatorios pausados", key=REMINDER_NOTE)
         return None
     cancela = store_inventory.settings_of(t).get("cancel_unpaid_on_expiry")
     extra = (
