@@ -271,7 +271,7 @@ def _web_requests(db: Session, tenant_id: int, product_ids: list[int]) -> dict[i
     return {pid: max(_dec(q), ZERO) for pid, q in rows}
 
 
-def _pick(items: list[SupplierItem]) -> SupplierItem | None:
+def _pick(items: list):
     """El item que representa al proveedor: activo con existencia, por API, la lista mas reciente."""
     act = [i for i in items if i.active]
     pool = act or items
@@ -290,8 +290,10 @@ def supplier_status(db: Session, tenant, products: Iterable[Product], cfg: dict 
     cfg = cfg if cfg is not None else settings_of(t)
     now = now or _now()
     ids = [p.id for p in prods]
-    by_pid: dict[int, list[SupplierItem]] = defaultdict(list)
-    for it in db.scalars(select(SupplierItem).where(SupplierItem.tenant_id == t.id, SupplierItem.product_id.in_(ids))):
+    by_pid: dict[int, list] = defaultdict(list)
+    # solo las columnas que hacen falta: la fila cruda de SiReTT (raw) y la descripcion pesan y aca no se usan
+    cols = (SupplierItem.id, SupplierItem.product_id, SupplierItem.supplier_id, SupplierItem.stock, SupplierItem.active, SupplierItem.source, SupplierItem.list_date)
+    for it in db.execute(select(*cols).where(SupplierItem.tenant_id == t.id, SupplierItem.product_id.in_(ids))):
         by_pid[it.product_id].append(it)
     names = (
         {s.id: s.name for s in db.scalars(select(Supplier).where(Supplier.id.in_({i.supplier_id for v in by_pid.values() for i in v})))} if by_pid else {}

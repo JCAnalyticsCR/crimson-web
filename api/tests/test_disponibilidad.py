@@ -209,3 +209,16 @@ def test_un_solo_diccionario_de_estados():
     assert not hasattr(sinv, "LEGACY_STATE")  # el diccionario viejo ya no existe
     assert sinv.settings_of is av.settings_of and sinv.DEFAULTS is av.DEFAULTS  # reexportados, no duplicados
     assert av.qty_text(D("3.000")) == "3" and av.qty_text(D("2.50")) == "2,5"
+
+
+def test_stock_bajo_no_marca_lo_que_se_vende_bajo_pedido(db_session):
+    t, main, _ = _whs(db_session)
+    bajo_pedido = _prod(db_session, "AV-MIN-BP", min_stock=3)
+    propio = _prod(db_session, "AV-MIN-PROP", min_stock=3)
+    supplier_item(db_session, bajo_pedido.id, 20, hours_ago=1)
+    low = {x["product_id"] for x in invsvc.low_stock(db_session, t)}
+    assert propio.id in low and bajo_pedido.id not in low  # nunca se tuvo en bodega: se vende bajo pedido
+    # una vez que Crimson lo tuvo en bodega, el minimo vuelve a importar
+    invsvc.move(db_session, t, None, bajo_pedido.id, main.id, "entrada", D(1))
+    db_session.commit()
+    assert bajo_pedido.id in {x["product_id"] for x in invsvc.low_stock(db_session, t)}

@@ -68,7 +68,7 @@ export default function Disponibilidad({ onKardex }: { onKardex?: (p: { id: numb
                   <td className="num mono" style={{ color: Number(r.own_reserved ?? 0) > 0 ? "var(--warn)" : "var(--text-3)" }}>{Number(r.own_reserved ?? 0) > 0 ? qty(r.own_reserved) : "—"}</td>
                   <td className="num mono">{r.supplier_linked ? <span title={r.supplier_name || undefined}>{qty(r.supplier_qty)}{Number(r.supplier_qty ?? 0) > Number(r.supplier_available ?? 0) && r.supplier_fresh ? <div className="meta">{qty(r.supplier_available)} vendibles</div> : null}</span> : r.supplier_unlinked_qty ? <Link to="/inventario?tab=proveedores" title="Tiene proveedor pero ningún ítem de su lista vinculado: su existencia no cuenta">vincular</Link> : <span className="muted">—</span>}</td>
                   <td className="muted" style={{ whiteSpace: "nowrap", color: r.supplier_old ? "var(--bad)" : undefined }}>{r.supplier_linked ? <>{r.supplier_name ? `${r.supplier_name} · ` : ""}{r.supplier_age || "sin fecha"}{r.supplier_old ? " · viejo" : ""}</> : "—"}</td>
-                  <td><AvailBadge a={r} />{r.label_publico && <div className="meta">Tienda: {r.label_publico}</div>}</td>
+                  <td><AvailBadge a={r} />{r.label_publico && <div className="meta" style={{ textTransform: "none" }}>Tienda: {r.label_publico}</div>}</td>
                   <td className="num">{onKardex && <button className="btn btn--ghost btn--sm" onClick={() => onKardex({ id: r.id, code: r.code, name: r.name })}>Movimientos</button>}</td>
                 </tr>
               ))}</tbody>
