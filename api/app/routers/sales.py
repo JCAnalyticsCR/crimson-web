@@ -241,7 +241,7 @@ def _own(db: Session, model, id_: int, tenant_id: int, p: Principal | None = Non
 @router.post("/documents/preview")
 def preview(data: DocumentIn, p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
     """Totales en vivo para el editor (sin guardar). Completa precio/impuesto desde el producto si falta."""
-    lines = [svc._fill_line_from_product(db, p.tenant.id, ln) for ln in data.lines]
+    lines = [svc._fill_line_from_product(db, p.tenant.id, ln, data.currency) for ln in data.lines]
     calc = compute_document(
         [svc.line_in(ln) for ln in lines],
         data.discount_type,

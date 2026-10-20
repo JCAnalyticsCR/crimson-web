@@ -1249,7 +1249,8 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
             unit_cost, supplier, source = _best_offer_cost(db, prod, unit_cost, source)
         # precio de lista si el producto lo tiene; si no, sale del costo con el margen objetivo
         price_from_cost = not (prod and d(prod.price) > 0)
-        unit_price = pricing.sale_price(db, unit_cost, "CRC", "CRC", margin_pct) if price_from_cost else d(prod.price)
+        # el precio de lista en colones (un producto en dolares se convierte con el tipo de cambio del dia)
+        unit_price = pricing.sale_price(db, unit_cost, "CRC", "CRC", margin_pct) if price_from_cost else pricing.price_in(db, prod, "CRC", fx)
         kind = it.kind or "material"
         lines.append(
             {

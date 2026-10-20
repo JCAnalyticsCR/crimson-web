@@ -105,3 +105,24 @@ def cost_in(db: Session, product, currency: str = "CRC", fx: Decimal | None = No
         return cost
     rate = fx if fx is not None else today_fx(db, product.cost_currency or "USD")[0]
     return cost * d(rate) if currency == "CRC" else cost / d(rate)
+
+
+def convert(db: Session, amount, from_currency: str | None, to_currency: str | None, fx: Decimal | None = None) -> Decimal:
+    """Monto de una moneda a otra con el tipo de cambio de venta del dia (solo CRC y USD en el sistema).
+    fx = colones por dolar, para no consultarlo en cada linea."""
+    a = d(amount or 0)
+    src, dst = (from_currency or "CRC").upper(), (to_currency or "CRC").upper()
+    if src == dst:
+        return a
+    rate = d(fx if fx is not None else today_fx(db, "USD")[0]) or Decimal(1)
+    crc = a * rate if src == "USD" else a
+    return crc if dst == "CRC" else (crc / rate).quantize(Decimal("0.00001"))
+
+
+def price_in(db: Session, product, currency: str = "CRC", fx: Decimal | None = None, amount=None) -> Decimal:
+    """Precio de venta del producto (o `amount`, en la moneda del producto) en la moneda del documento.
+    Antes se copiaba el precio tal cual: un producto en dolares entraba a una factura en colones como 50 colones."""
+    if product is None:
+        return Decimal(0)
+    base = product.price if amount is None else amount
+    return convert(db, base, product.currency or "CRC", currency, fx)

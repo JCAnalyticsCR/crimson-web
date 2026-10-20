@@ -86,11 +86,17 @@ def today_fx(db: Session, currency: str) -> tuple[Decimal, Decimal]:
     return (d(fx.sell), d(fx.buy)) if fx else (Decimal(1), Decimal(1))
 
 
-def _fill_line_from_product(db: Session, tenant_id: int, ln: LineInSchema) -> LineInSchema:
+def _fill_line_from_product(db: Session, tenant_id: int, ln: LineInSchema, currency: str | None = None) -> LineInSchema:
+    """Completa la linea con los datos del producto. El precio se lleva a la moneda del documento (un producto en
+    dolares en una factura en colones entraba con el numero en dolares)."""
     if ln.product_id and (not ln.name or ln.unit_price is None):
         p = db.get(Product, ln.product_id)
         if not p or p.tenant_id != tenant_id:
             raise HTTPException(404, "Producto no encontrado")
+        if ln.unit_price is None:
+            from .pricing import price_in
+
+            ln = ln.model_copy(update={"unit_price": price_in(db, p, currency or p.currency)})
         ln = ln.model_copy(
             update={
                 "name": ln.name or p.name,
@@ -138,7 +144,7 @@ def apply_document(db: Session, doc: Quote | Invoice, payload: DocumentIn, line_
     doc.external_order, doc.activity_code = payload.external_order, payload.activity_code
     doc.medical_exemption_card = payload.medical_exemption_card
 
-    lines = [_fill_line_from_product(db, tenant_id, ln) for ln in payload.lines]
+    lines = [_fill_line_from_product(db, tenant_id, ln, payload.currency) for ln in payload.lines]
     calc = compute_document(
         [line_in(ln) for ln in lines],
         payload.discount_type,

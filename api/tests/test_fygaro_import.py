@@ -154,6 +154,9 @@ def test_storefront_shows_imported_catalog_in_store_currency(client, auth, db_se
     assert Decimal(str(ship["shipping"])) == Decimal("6.83")
     gam = next(r for r in client.get("/public/store/crimson").json()["shipping_rates"] if r["name"] == "Envío GAM")
     assert Decimal(str(gam["display_amount"])) == Decimal("7.72")  # 6.831 x 1.13, con IVA
+    # en linea solo se vende lo disponible (services/availability): con 1 en bodega el pedido entra
+    main = next(w for w in client.get("/warehouses").json() if w["is_default"])
+    client.post("/stock/movements", json={"product_id": p["id"], "warehouse_id": main["id"], "kind": "entrada", "quantity": 1})
     o = client.post("/public/store/crimson/checkout", json=body)
     assert o.status_code == 201 and o.json()["currency"] == "USD" and Decimal(str(o.json()["total"])).quantize(Decimal("0.01")) == Decimal("267.02")
 
