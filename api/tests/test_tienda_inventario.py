@@ -15,7 +15,6 @@ from app.models import (
     EmailOutbox,
     Order,
     OrderLine,
-    Product,
     PurchaseRequest,
     StockMovement,
     StockReservation,
@@ -58,10 +57,10 @@ def _in(client, pid, wid, qty):
 
 
 def _supplier(db, pid, qty, days_ago=0):
-    p = db.get(Product, pid)
-    p.supplier_stock = qty
-    p.supplier_updated_at = datetime.now(UTC) - timedelta(days=days_ago)
-    db.commit()
+    # la existencia del proveedor solo cuenta si viene de un item VINCULADO (services/availability)
+    from .test_disponibilidad import supplier_item
+
+    supplier_item(db, pid, qty, days_ago=days_ago)
 
 
 def _avail(client, *ids):
@@ -95,13 +94,13 @@ def test_disponibilidad_propio_proveedor_agotado_y_bodegas_web(client, auth, db_
     _supplier(db_session, c["id"], 10, days_ago=30)  # dato viejo -> consultar
     # d: nada -> agotado
 
-    # por defecto la cantidad exacta, con el texto de siempre
-    assert _avail(client, a["id"]).json()[str(a["id"])]["mensaje"] == "Disponible (9 en bodega)"
+    # por defecto la cantidad exacta (un solo diccionario de estados y etiquetas: services/availability)
+    assert _avail(client, a["id"]).json()[str(a["id"])]["mensaje"] == "En bodega · 9 disponibles"
     _cfg(client, quantity_display="umbral")
     r = _avail(client, a["id"], b["id"], c["id"], d["id"])
     assert "max-age=30" in r.headers["cache-control"]
     av = r.json()
-    assert av[str(a["id"])]["estado"] == "disponible" and av[str(a["id"])]["mensaje"] == "Disponible" and av[str(a["id"])]["disponible"]
+    assert av[str(a["id"])]["estado"] == "en_bodega" and av[str(a["id"])]["mensaje"] == "En bodega" and av[str(a["id"])]["disponible"]
     assert av[str(a["id"])]["cantidad"] is None  # modo umbral: no se publica el numero
     assert av[str(b["id"])]["estado"] == "bajo_pedido" and av[str(b["id"])]["plazo"] == "3-5 días hábiles" and av[str(b["id"])]["disponible"]
     assert av[str(c["id"])]["estado"] == "consultar" and av[str(c["id"])]["mensaje"] == "Consultar disponibilidad" and not av[str(c["id"])]["disponible"]
@@ -115,7 +114,7 @@ def test_disponibilidad_propio_proveedor_agotado_y_bodegas_web(client, auth, db_
     # solo la bodega principal alimenta la web
     _cfg(client, warehouse_ids=[main["id"]])
     one = _avail(client, a["id"]).json()[str(a["id"])]
-    assert D(str(one["cantidad"])) == 5 and one["mensaje"] == "Disponible (5 en bodega)"
+    assert D(str(one["cantidad"])) == 5 and one["mensaje"] == "En bodega · 5 disponibles"
     # una reserva confirmada (proyecto, bodega) baja lo disponible web; bajo el umbral -> ultimas unidades
     tid = auth["tenant"]["id"]
     res = rsv.create(db_session, tid, None, a["id"], D(3), main["id"])
@@ -124,9 +123,9 @@ def test_disponibilidad_propio_proveedor_agotado_y_bodegas_web(client, auth, db_
     _cfg(client, quantity_display="umbral", low_threshold=3)
     one = _avail(client, a["id"]).json()[str(a["id"])]
     assert one["mensaje"] == "¡Últimas unidades!" and one["ultimas"] and one["cantidad"] is None
-    # sin stock libre pero con proveedor viejo: consultar; "sell_when_unknown" lo vuelve comprable
+    # sin stock libre pero con proveedor viejo: consultar, y ya no se vende en linea (sell_when_unknown se ignora)
     _cfg(client, sell_when_unknown=True)
-    assert _avail(client, c["id"]).json()[str(c["id"])]["disponible"] is True
+    assert _avail(client, c["id"]).json()[str(c["id"])]["disponible"] is False
 
     # la vitrina recibe la misma disponibilidad y la etiqueta de siempre (state/label)
     pub = {p["id"]: p for p in client.get("/public/store/crimson/products").json()}
@@ -200,9 +199,9 @@ def test_checkout_reserva_web_y_bajo_pedido(client, auth, db_session):
     # el panel interno de reservas muestra el origen
     lista = client.get("/stock/reservations", params={"status": "abiertas"}).json()["items"]
     assert any(x["origin"] == "web" and x["order_id"] == o.id for x in lista)
-    # pedir mas de lo que el proveedor reporta, con bloqueo: 409 claro
+    # pedir mas de lo vendible (el proveedor reporta 5 y 2 ya estan prometidos a este pedido): 409 claro
     no = _buy(client, [{"product_id": p["id"], "quantity": 9}])
-    assert no.status_code == 409 and "el proveedor reporta 5" in no.json()["detail"]
+    assert no.status_code == 409 and "quedan 0 y 3 más bajo pedido" in no.json()["detail"]
 
 
 def test_dos_clientes_la_ultima_unidad_por_la_api(client, auth, db_session):
@@ -216,13 +215,11 @@ def test_dos_clientes_la_ultima_unidad_por_la_api(client, auth, db_session):
     no = _buy(client, [{"product_id": p["id"], "quantity": 1}])
     assert no.status_code == 409 and no.json()["detail"] == "Ya no hay suficiente Lector biométrico: quedan 0."
     assert len([o for o in client.get("/orders").json() if o["channel"] == "tienda"]) == 1  # el rechazado no dejo pedido
-    # modo aviso (defecto): no rechaza; reserva lo que hay y el resto queda "requiere compra"
+    # sin enforce_stock tampoco se vende en linea lo que no hay ni tiene el proveedor (antes quedaba "requiere compra")
     _cfg(client, enforce_stock=False)
-    ok = _buy(client, [{"product_id": p["id"], "quantity": 1}])
-    assert ok.status_code == 201
-    o = _order(db_session, ok.json()["number"])
-    assert client.get(f"/store/orders/{o.id}/inventory").json()["estado"] == "requiere_compra"
-    assert db_session.scalar(select(PurchaseRequest.id).order_by(PurchaseRequest.id.desc())) != antes
+    no = _buy(client, [{"product_id": p["id"], "quantity": 1}])
+    assert no.status_code == 409 and no.json()["detail"] == "Ya no hay suficiente Lector biométrico: quedan 0."
+    assert db_session.scalar(select(PurchaseRequest.id).order_by(PurchaseRequest.id.desc())) == antes
     # apagado del todo: el checkout es el de siempre (sin reservas)
     _cfg(client, enabled=False)
     off = _buy(client, [{"product_id": p["id"], "quantity": 1}])
@@ -256,7 +253,7 @@ def test_vencimiento_libera_y_pagar_fija(client, auth, db_session):
     # el de tarjeta no se paga: vence, el worker la libera y deja nota en el pedido
     r2.expires_at = now - timedelta(minutes=1)
     db_session.commit()
-    assert _avail(client, p["id"]).json()[str(p["id"])]["estado"] == "disponible"  # vencida ya no compromete
+    assert _avail(client, p["id"]).json()[str(p["id"])]["estado"] == "en_bodega"  # vencida ya no compromete
     assert sinv.expire_holds(db_session) == 1
     db_session.refresh(r2)
     db_session.refresh(card)
@@ -293,7 +290,7 @@ def test_cancelar_libera_reserva_y_solicitud(client, auth, db_session):
     db_session.refresh(r)
     db_session.refresh(req)
     assert r.status == "cancelada" and req.status == "cancelada"
-    assert _avail(client, p["id"]).json()[str(p["id"])]["estado"] == "disponible"
+    assert _avail(client, p["id"]).json()[str(p["id"])]["estado"] == "en_bodega"
     assert _ledger(db_session, p["id"]) == 1  # reservar y cancelar nunca toca el ledger
 
 

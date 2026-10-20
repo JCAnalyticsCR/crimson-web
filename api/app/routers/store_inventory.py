@@ -24,12 +24,16 @@ router = APIRouter(tags=["tienda"])
 # ---------- Ajustes ----------
 class StoreInventorySettingsIn(BaseModel):
     enabled: bool | None = None
-    enforce_stock: bool | None = None
     warehouse_ids: list[int] | None = None
     quantity_display: str | None = Field(None, pattern="^(exacta|umbral|oculta)$")
     low_threshold: int | None = Field(None, ge=0, le=10000)
     backorder_enabled: bool | None = None
     backorder_lead: str | None = Field(None, max_length=60)
+    # frescura del dato del proveedor (Eurocomp refresca cada 6 h): mas viejo -> "Consultar disponibilidad"
+    supplier_max_age_hours: int | None = Field(None, ge=1, le=24 * 60)
+    # obsoletos (se aceptan para no romper pantallas viejas y se ignoran): la tienda nunca vende en linea lo que no
+    # tiene ni el proveedor confirma con dato vigente (services/availability, max_qty)
+    enforce_stock: bool | None = None
     supplier_max_age_days: int | None = Field(None, ge=0, le=365)
     sell_when_unknown: bool | None = None
     out_of_stock: str | None = Field(None, pattern="^(mostrar|ocultar)$")
@@ -41,10 +45,13 @@ class StoreInventorySettingsIn(BaseModel):
 
 
 def _whs(db: Session, tenant_id: int, cfg: dict) -> list[dict]:
+    """Solo las bodegas de venta: las de garantias (revision, distribuidor) nunca alimentan la web."""
     web = set(sinv.web_warehouses(db, tenant_id, cfg))
     return [
         {"id": w.id, "name": w.name, "is_default": w.is_default, "web": w.id in web}
-        for w in db.scalars(select(Warehouse).where(Warehouse.tenant_id == tenant_id, Warehouse.active).order_by(Warehouse.is_default.desc(), Warehouse.id))
+        for w in db.scalars(
+            select(Warehouse).where(Warehouse.tenant_id == tenant_id, Warehouse.active, Warehouse.kind == "venta").order_by(Warehouse.is_default.desc(), Warehouse.id)
+        )
     ]
 
 
@@ -77,7 +84,7 @@ def put_inv_settings(data: StoreInventorySettingsIn, p: Principal = Depends(requ
 # ---------- Panel "Inventario web" ----------
 @router.get("/store/inventory")
 def web_inventory(
-    estado: str | None = Query(None, pattern="^(disponible|bajo_pedido|consultar|agotado|alertas|reservado)$"),
+    estado: str | None = Query(None, pattern="^(en_bodega|disponible|bajo_pedido|consultar|agotado|alertas|reservado)$"),
     q: str | None = Query(None, max_length=120),
     todos: bool = False,
     p: Principal = Depends(require("inventory", "ver")),
@@ -104,7 +111,9 @@ def web_inventory(
     items = []
     # el tecnico (y el aliado) tienen inventory.ver para las cantidades, pero nunca ven precios (13/10, 22:07)
     precios = p.sees_prices
-    summary = {"publicados": 0, "disponible": 0, "bajo_pedido": 0, "consultar": 0, "agotado": 0, "alertas": 0, "reservado_pedidos": Decimal(0), "avisos": 0}
+    summary = {"publicados": 0, "en_bodega": 0, "bajo_pedido": 0, "consultar": 0, "agotado": 0, "alertas": 0, "reservado_pedidos": Decimal(0), "avisos": 0}
+    if estado == "disponible":  # nombre viejo del estado
+        estado = "en_bodega"
     for x in prods:
         a = av.get(x.id) or {}
         alerta = bool(x.show_on_web and a.get("estado") in ("agotado", "consultar"))
@@ -127,6 +136,10 @@ def web_inventory(
             "proveedor": a.get("proveedor"),
             "proveedor_al": a.get("proveedor_al"),
             "proveedor_viejo": a.get("proveedor_viejo"),
+            "proveedor_nombre": a.get("supplier_name"),
+            "proveedor_hace": a.get("supplier_age"),
+            "proveedor_sin_vincular": a.get("supplier_unlinked_qty"),
+            "max_qty": a.get("max_qty"),
             "alerta": alerta,
             "avisos": waiting.get(x.id, 0),
         }
@@ -134,15 +147,16 @@ def web_inventory(
             summary["publicados"] += 1
             summary[a.get("estado")] = summary.get(a.get("estado"), 0) + 1
             summary["alertas"] += int(alerta)
-        summary["reservado_pedidos"] += a.get("reservado_web") or Decimal(0)
+        summary["reservado_pedidos"] += Decimal(str(a.get("reservado_web") or 0))
         summary["avisos"] += waiting.get(x.id, 0)
         if estado == "alertas" and not alerta:
             continue
         if estado == "reservado" and not (a.get("reservado_web") or 0):
             continue
-        if estado in ("disponible", "bajo_pedido", "consultar", "agotado") and a.get("estado") != estado:
+        if estado in ("en_bodega", "bajo_pedido", "consultar", "agotado") and a.get("estado") != estado:
             continue
         items.append(row)
+    summary["disponible"] = summary["en_bodega"]  # nombre viejo, para pantallas abiertas antes de esta version
     cfg = sinv.settings_of(p.tenant)
     return {"summary": summary, "items": items, "settings": {**cfg, "warehouses": _whs(db, tid, cfg)}, "holds": _holds(db, tid)}
 

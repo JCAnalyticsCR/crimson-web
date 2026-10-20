@@ -1,26 +1,28 @@
-"""Tienda conectada al inventario real: disponibilidad web, reservas de pedidos web y salida al despachar.
+"""Tienda conectada al inventario real: reservas de pedidos web, compra bajo pedido y salida al despachar.
+
+La disponibilidad (propio + proveedor, estados y etiquetas) NO se calcula aca: es la funcion unica de
+services/availability (`availability_many`), que este modulo reexporta junto con los Ajustes de la tienda.
 
 Reglas
-- Disponible web = existencias en las bodegas que alimentan la web (Ajustes de la tienda; vacio = todas las
-  activas) - reservas confirmadas y vigentes (de proyectos, de bodega y de otros pedidos web).
-  Productos serializados: por bodega cuenta el menor entre el ledger y las series "disponible".
+- Lo que se vende en linea por producto es `max_qty` = libre propio en las bodegas de la web + lo que el proveedor
+  tiene con dato vigente, menos lo ya prometido en solicitudes de compra de pedidos web abiertas. Lo que no tiene ni
+  existencia propia ni del proveedor (o el dato del proveedor esta viejo) NO se compra en linea: 409 y la tienda
+  ofrece "Consultar por WhatsApp". El viejo enforce_stock ya no cambia esto (se acepta y se ignora).
 - Las variantes (ProductVariant) comparten la existencia del producto padre: el ledger no tiene variante.
-- Estados: disponible | bajo_pedido (proveedor con existencia y dato reciente o sin fecha) | consultar
-  (proveedor con dato viejo) | agotado | servicio.
 - Pedido web: reserva AUTOMATICA (origin='web', sin aprobacion humana) bajo el mismo candado de las reservas
   formales (AC06). Lo que no hay en bodega pero el proveedor tiene sale "bajo pedido": no reserva stock
-  propio, genera una solicitud de compra (reason='pedido_web') para el admin.
-- enforce_stock (Ajustes de la tienda): encendido, lo que no hay ni se puede pedir al proveedor se rechaza con
-  409 "Ya no hay suficiente X: quedan N". Apagado (defecto, para no frenar la tienda mientras se carga el
-  inventario): se reserva lo que hay y el resto queda "requiere compra".
+  propio, genera una solicitud de compra (reason='pedido_web') para el admin. Al recibir esa compra, lo que entra a
+  bodega queda reservado para ESE pedido (reserve_received).
+- force=True (pedido ya pagado que se vuelve a reservar) nunca rechaza: lo que falte queda "requiere compra".
 - Despacho (enviado/entregado) o factura: la reserva se consume y sale del inventario UNA sola vez. Las
   salidas llevan order_id; la factura de un pedido ya despachado solo enlaza esas salidas (asi anular la
   factura devuelve la mercaderia, como siempre).
 
 API para el checkout (todas reciben la sesion; las que dicen "hace commit" lo hacen):
 - settings_of(tenant) -> dict
-- availability(db, tenant, product_ids, public=True) -> {product_id: {...}}
+- availability(db, tenant, product_ids, public=True) -> {product_id: {...}}   (atajo a availability_many)
 - hold_for_order(db, order, *, user_id=None, force=False, commit=True) -> dict   (hace commit; 409 si no alcanza)
+- reserve_received(db, request, warehouse_id, user_id=None) -> int  (sin commit; compra recibida de un pedido web)
 - mark_paid(db, order) -> dict                  (sin commit)
 - release_for_order(db, order, note=None, user_id=None) -> int   (sin commit)
 - fulfill_for_order(db, order, user_id=None, invoice=None) -> int (sin commit)
@@ -47,34 +49,29 @@ from ..models import (
     PurchaseRequestLine,
     StockMovement,
     StockReservation,
-    StockUnit,
     Tenant,
     Warehouse,
 )
 from . import inventory as invsvc
 from . import reservations as rsv
+
+# Ajustes, bodegas y existencias viven en services/availability (la funcion unica); se reexportan aca
+from .availability import (  # noqa: F401
+    DEFAULTS,
+    KEY,
+    SELLABLE_STATES,
+    STATES,
+    _committed,
+    _free_by_wh,
+    _own_by_wh,
+    availability_many,
+    settings_of,
+    supplier_status,
+    web_warehouses,
+)
 from .documents import audit
 
-KEY = "store_inventory"
-DEFAULTS: dict = {
-    "enabled": True,  # reservar al crear pedidos web
-    "enforce_stock": False,  # True: rechaza lo que no hay ni se puede pedir al proveedor
-    "warehouse_ids": [],  # bodegas que alimentan la web; vacio = todas las activas
-    "quantity_display": "exacta",  # exacta | umbral | oculta (exacta = como la tienda de siempre)
-    "low_threshold": 3,  # "ultimas unidades" a partir de aqui (modo umbral)
-    "backorder_enabled": True,  # vender bajo pedido lo que el proveedor tiene
-    "backorder_lead": "3-5 días hábiles",
-    "supplier_max_age_days": 7,  # dato del proveedor mas viejo -> "Consultar disponibilidad"
-    "sell_when_unknown": False,  # vender "consultar" como bajo pedido
-    "out_of_stock": "mostrar",  # mostrar | ocultar (agotados en el catalogo)
-    "out_of_stock_action": "whatsapp",  # avisarme | whatsapp | ninguna
-    "hold_hours_manual": 48,  # SINPE, transferencia, efectivo
-    "hold_minutes_card": 30,  # tarjeta
-    "card_keywords": ["tarjeta", "card", "onvo", "paypal"],
-    "cancel_unpaid_on_expiry": False,  # al vencer la reserva sin pago, cancelar el pedido
-}
-SELLABLE = ("disponible", "bajo_pedido")
-LEGACY_STATE = {"disponible": "en_bodega", "bajo_pedido": "bajo_pedido", "consultar": "agotado", "agotado": "agotado", "servicio": "servicio"}
+SELLABLE = ("en_bodega", "bajo_pedido")
 ZERO = Decimal(0)
 
 
@@ -94,174 +91,15 @@ def _tenant(db: Session, tenant) -> Tenant:
     return tenant if isinstance(tenant, Tenant) else db.get(Tenant, int(tenant))
 
 
-def settings_of(tenant: Tenant | None) -> dict:
-    """Ajustes de inventario de la tienda (tenant.settings['store_inventory'] sobre los predeterminados)."""
-    return {**DEFAULTS, **(((tenant.settings or {}) if tenant else {}).get(KEY) or {})}
-
-
-def web_warehouses(db: Session, tenant_id: int, cfg: dict) -> list[int]:
-    """Bodegas de venta activas que alimentan la web, la predeterminada primero (revision y proveedor nunca)."""
-    active = list(
-        db.scalars(
-            select(Warehouse.id)
-            .where(Warehouse.tenant_id == tenant_id, Warehouse.active, Warehouse.kind == invsvc.SELLABLE)
-            .order_by(Warehouse.is_default.desc(), Warehouse.id)
-        )
-    )
-    chosen = {int(x) for x in (cfg.get("warehouse_ids") or [])}
-    return [w for w in active if w in chosen] if chosen else active
-
-
 def web_price(p: Product):
     """Precio base de la tienda (sin IVA, moneda del producto)."""
     return p.web_price if p.web_price is not None else p.price
 
 
-# ---------- existencias ----------
-def _own_by_wh(db: Session, tenant_id: int, product_ids: list[int] | None, whs: list[int]) -> dict[tuple[int, int], Decimal]:
-    """{(producto, bodega): existencia}; serializados = min(ledger, series disponibles)."""
-    if not whs:
-        return {}
-    q = (
-        select(StockMovement.product_id, StockMovement.warehouse_id, func.coalesce(func.sum(StockMovement.quantity), 0))
-        .where(StockMovement.tenant_id == tenant_id, StockMovement.warehouse_id.in_(whs))
-        .group_by(StockMovement.product_id, StockMovement.warehouse_id)
-    )
-    if product_ids is not None:
-        q = q.where(StockMovement.product_id.in_(product_ids))
-    out = {(pid, wid): _dec(qty) for pid, wid, qty in db.execute(q)}
-    sq = select(Product.id).where(Product.tenant_id == tenant_id, Product.serialized.is_(True))
-    if product_ids is not None:
-        sq = sq.where(Product.id.in_(product_ids))
-    serial_ids = set(db.scalars(sq))
-    if serial_ids:
-        units = {
-            (pid, wid): _dec(n)
-            for pid, wid, n in db.execute(
-                select(StockUnit.product_id, StockUnit.warehouse_id, func.count(StockUnit.id))
-                .where(
-                    StockUnit.tenant_id == tenant_id, StockUnit.product_id.in_(serial_ids), StockUnit.status == "disponible", StockUnit.warehouse_id.in_(whs)
-                )
-                .group_by(StockUnit.product_id, StockUnit.warehouse_id)
-            )
-        }
-        for pid in serial_ids:
-            for w in whs:
-                k = (pid, w)
-                if k in out or k in units:
-                    out[k] = min(out.get(k, ZERO), units.get(k, ZERO))
-    return out
-
-
-def _committed(db: Session, tenant_id: int, product_ids: list[int] | None, whs: list[int]) -> dict[tuple[int, int], tuple[Decimal, Decimal]]:
-    """{(producto, bodega): (comprometido total, comprometido por pedidos web)} confirmado y vigente."""
-    if not whs:
-        return {}
-    q = (
-        select(
-            StockReservation.product_id,
-            StockReservation.warehouse_id,
-            StockReservation.origin,
-            func.coalesce(func.sum(StockReservation.quantity - StockReservation.consumed_quantity), 0),
-        )
-        .where(StockReservation.tenant_id == tenant_id, StockReservation.status == "confirmada", rsv._vigente(), StockReservation.warehouse_id.in_(whs))
-        .group_by(StockReservation.product_id, StockReservation.warehouse_id, StockReservation.origin)
-    )
-    if product_ids is not None:
-        q = q.where(StockReservation.product_id.in_(product_ids))
-    out: dict[tuple[int, int], tuple[Decimal, Decimal]] = {}
-    for pid, wid, origin, qty in db.execute(q):
-        qty = max(_dec(qty), ZERO)
-        tot, web = out.get((pid, wid), (ZERO, ZERO))
-        out[(pid, wid)] = (tot + qty, web + (qty if origin == "web" else ZERO))
-    return out
-
-
-def _free_by_wh(db: Session, tenant_id: int, product_ids: list[int] | None, whs: list[int]) -> tuple[dict, dict, dict]:
-    own = _own_by_wh(db, tenant_id, product_ids, whs)
-    comp = _committed(db, tenant_id, product_ids, whs)
-    free = {k: max(own.get(k, ZERO) - comp.get(k, (ZERO, ZERO))[0], ZERO) for k in set(own) | set(comp)}
-    return own, comp, free
-
-
-def _supplier(p: Product, cfg: dict, now: datetime) -> str | None:
-    """'fresco' | 'viejo' | None (sin existencia del proveedor)."""
-    if (p.supplier_stock or 0) <= 0:
-        return None
-    at = rsv._aware(p.supplier_updated_at)
-    if at is None:
-        return "fresco"  # sin fecha (cargado a mano): como siempre, bajo pedido
-    if now - at > timedelta(days=int(cfg.get("supplier_max_age_days") or 0)):
-        return "viejo"
-    return "fresco"
-
-
-def _state(p: Product, libre: Decimal, cfg: dict, now: datetime) -> dict:
-    if p.item_type != "producto":
-        return {"estado": "servicio", "mensaje": "Servicio", "plazo": None}
-    if libre > 0:
-        mode = cfg.get("quantity_display") or "umbral"
-        ultimas = libre <= _dec(cfg.get("low_threshold") or 0)
-        if mode == "exacta":
-            msg = f"Disponible ({_fmt(libre)} en bodega)"  # mismo texto que la vitrina de siempre
-        elif mode == "umbral" and ultimas:
-            msg = "¡Últimas unidades!"
-        else:
-            msg = "Disponible"
-        return {"estado": "disponible", "mensaje": msg, "plazo": None, "ultimas": bool(ultimas and mode != "oculta")}
-    sup = _supplier(p, cfg, now)
-    lead = cfg.get("backorder_lead") or None
-    if sup == "fresco" and cfg.get("backorder_enabled", True):
-        return {"estado": "bajo_pedido", "mensaje": f"Bajo pedido · entrega en {lead}" if lead else "Bajo pedido", "plazo": lead}
-    if sup is not None:
-        return {"estado": "consultar", "mensaje": "Consultar disponibilidad", "plazo": None}
-    return {"estado": "agotado", "mensaje": "Agotado", "plazo": None}
-
-
 def availability(db: Session, tenant, product_ids, public: bool = True) -> dict[int, dict]:
-    """Disponibilidad web por producto. public=True: lo que puede ver el cliente (sin costos ni existencias
-    del proveedor; la cantidad solo si Ajustes dice "exacta"). public=False agrega el detalle interno."""
-    t = _tenant(db, tenant)
-    cfg = settings_of(t)
-    ids = sorted({int(x) for x in product_ids})
-    if not ids or t is None:
-        return {}
-    prods = {p.id: p for p in db.scalars(select(Product).where(Product.tenant_id == t.id, Product.id.in_(ids)))}
-    whs = web_warehouses(db, t.id, cfg)
-    own, comp, free = _free_by_wh(db, t.id, list(prods), whs)
-    now = _now()
-    out: dict[int, dict] = {}
-    for pid, p in prods.items():
-        libre = sum((free.get((pid, w), ZERO) for w in whs), ZERO)
-        st = _state(p, libre, cfg, now)
-        estado = st["estado"]
-        row = {
-            "product_id": pid,
-            "estado": estado,
-            "state": LEGACY_STATE[estado],  # compatibilidad con la vitrina actual (data-s)
-            "disponible": estado in SELLABLE or estado == "servicio" or (estado == "consultar" and bool(cfg.get("sell_when_unknown"))),
-            "mensaje": st["mensaje"],
-            "label": st["mensaje"],
-            "plazo": st["plazo"],
-            "ultimas": bool(st.get("ultimas")),
-            "cantidad": libre if (estado == "disponible" and cfg.get("quantity_display") == "exacta") else None,
-            "accion": (None if cfg.get("out_of_stock_action") == "ninguna" else cfg.get("out_of_stock_action")) if estado in ("agotado", "consultar") else None,
-            "ocultar": estado == "agotado" and cfg.get("out_of_stock") == "ocultar",
-        }
-        if not public:
-            row.update(
-                {
-                    "propio": sum((own.get((pid, w), ZERO) for w in whs), ZERO),
-                    "reservado": sum((comp.get((pid, w), (ZERO, ZERO))[0] for w in whs), ZERO),
-                    "reservado_web": sum((comp.get((pid, w), (ZERO, ZERO))[1] for w in whs), ZERO),
-                    "libre": libre,
-                    "proveedor": p.supplier_stock,
-                    "proveedor_al": p.supplier_updated_at,
-                    "proveedor_viejo": _supplier(p, cfg, now) == "viejo",
-                }
-            )
-        out[pid] = row
-    return out
+    """Disponibilidad web por producto, con la funcion unica (services/availability). public=True: lo que ve el
+    cliente (audiencia publico). public=False: el detalle interno del panel "Inventario web" (bodegas de la web)."""
+    return availability_many(db, tenant, product_ids, audience="publico" if public else "interno", web_only=True)
 
 
 def visible(db: Session, tenant, products: list[Product]) -> list[Product]:
@@ -328,9 +166,10 @@ def hold_for_order(db: Session, o: Order, *, user_id: int | None = None, force: 
 
     - Toma el candado de cada (producto, bodega web) en orden fijo (sin abrazos mortales), relee lo libre y
       crea reservas CONFIRMADAS origin='web' con order_id y vencimiento segun el metodo de pago.
-    - Lo que no alcanza: bajo pedido (proveedor reciente) -> solicitud de compra; si no y enforce_stock esta
-      encendido -> rollback de TODO (pedido incluido) y 409 "Ya no hay suficiente X: quedan N".
-      force=True nunca rechaza (lo faltante queda "requiere compra"): para pedidos ya pagados.
+    - Lo que no alcanza: bajo pedido (proveedor con dato vigente, hasta lo que todavia no esta prometido a otros
+      pedidos web) -> solicitud de compra. Si tampoco alcanza (o no hay nada que vender): rollback de TODO (pedido
+      incluido) y 409 "Ya no hay suficiente X: quedan N" (con o sin enforce_stock: en linea no se vende lo que no
+      esta disponible). force=True nunca rechaza (lo faltante queda "requiere compra"): para pedidos ya pagados.
     - Hace commit (el candado vive hasta el commit). Devuelve el resumen para la respuesta del checkout.
     """
     t = db.get(Tenant, o.tenant_id)
@@ -354,6 +193,8 @@ def hold_for_order(db: Session, o: Order, *, user_id: int | None = None, force: 
             if lk is not None:
                 proc_locks.append(lk)
         _, _, free = _free_by_wh(db, o.tenant_id, list(need), whs)
+        # el proveedor se relee bajo el candado: lo prometido por otro pedido web que acaba de entrar ya cuenta
+        sup = supplier_status(db, t, list(prods.values()), cfg, now)
         plan: list[tuple[Product, int, Decimal]] = []
         back: list[tuple[Product, Decimal, str]] = []
         problems: list[str] = []
@@ -371,14 +212,13 @@ def hold_for_order(db: Session, o: Order, *, user_id: int | None = None, force: 
                     take -= q
             if resto <= 0:
                 continue
-            sup = _supplier(p, cfg, now)
-            backorder_ok = cfg.get("backorder_enabled", True) and (sup == "fresco" or (sup == "viejo" and cfg.get("sell_when_unknown")))
-            if backorder_ok and resto <= _dec(p.supplier_stock):
+            avail = (sup.get(pid) or {}).get("available") or ZERO  # vendible bajo pedido (fresco, sin prometer)
+            if resto <= avail:
                 back.append((p, resto, "bajo pedido al proveedor"))
-            elif force or not cfg.get("enforce_stock"):
+            elif force:
                 back.append((p, resto, "sin existencia: requiere compra"))
-            elif backorder_ok:
-                problems.append(f"Ya no hay suficiente {p.name}: quedan {_fmt(libre)} y el proveedor reporta {p.supplier_stock}.")
+            elif avail > 0:
+                problems.append(f"Ya no hay suficiente {p.name}: quedan {_fmt(libre)} y {_fmt(avail)} más bajo pedido.")
             else:
                 problems.append(f"Ya no hay suficiente {p.name}: quedan {_fmt(libre)}.")
         if problems:
@@ -446,6 +286,44 @@ def _notify_purchase(db: Session, t: Tenant, o: Order, req: PurchaseRequest, row
         "purchase_request",
         req.id,
     )
+
+
+def reserve_received(db: Session, req: PurchaseRequest, warehouse_id: int, user_id: int | None = None) -> int:
+    """Compra recibida de un pedido web (reason='pedido_web'): lo que entro a bodega queda reservado para ESE pedido
+    (confirmada, sin vencimiento: se compro para el) y no se lo lleva el siguiente cliente. Si el pedido ya se cancelo,
+    se despacho o se entrego, la mercaderia queda libre en bodega. Sin commit. Devuelve cuantas reservas creo."""
+    if req.reason != "pedido_web" or not req.order_id:
+        return 0
+    o = db.get(Order, req.order_id)
+    if o is None or o.tenant_id != req.tenant_id or o.status in ("cancelado", "reembolsado", "enviado", "entregado"):
+        return 0
+    need, _ = _needs(db, o)
+    n = 0
+    now = _now()
+    for ln in req.lines:
+        if not ln.product_id or ln.product_id not in need or _dec(ln.quantity) <= 0:
+            continue
+        db.add(
+            StockReservation(
+                tenant_id=o.tenant_id,
+                product_id=ln.product_id,
+                warehouse_id=warehouse_id,
+                quantity=_dec(ln.quantity),
+                consumed_quantity=ZERO,
+                status="confirmada",
+                origin="web",
+                order_id=o.id,
+                expires_at=None,
+                requested_by=user_id,
+                approved_at=now,
+                reason=f"Pedido web {o.number}: compra {req.number} recibida",
+            )
+        )
+        n += 1
+    if n:
+        db.flush()
+        audit(db, o.tenant_id, user_id, "reserve_received", "order", o.id, {"solicitud": req.number, "reservas": n})
+    return n
 
 
 def _order_reservations(db: Session, o: Order, statuses=("pendiente", "confirmada")) -> list[StockReservation]:
