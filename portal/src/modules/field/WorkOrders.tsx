@@ -225,7 +225,7 @@ export default function WorkOrders() {
   const formBody = (f: Form) => ({
     title: f.title, kind: f.kind, project_id: f.project_id ? Number(f.project_id) : null, customer_id: f.customer_id ? Number(f.customer_id) : null,
     site: f.site || null, scheduled_at: toISO(f.scheduled_at),
-    technician_id: f.technician_id ? Number(f.technician_id) : null, helpers: f.helpers, warehouse_id: f.warehouse_id, tasks: f.tasks, notes: f.notes || null,
+    technician_id: f.technician_id ? Number(f.technician_id) : null, helpers: f.helpers, warehouse_id: f.warehouse_id, tasks: f.tasks.filter((t) => t.text.trim()).map((t) => ({ ...t, text: t.text.trim() })), notes: f.notes || null,
     ally_company_id: f.ally_company_id ? Number(f.ally_company_id) : null,
     materials: f.materials.filter((m) => m.name.trim()).map((m) => ({ id: m.id, product_id: m.product_id, name: m.name, quantity: num(m.quantity), unit: m.unit || "Unid", planned: num(m.planned) })),
   });
@@ -278,9 +278,11 @@ export default function WorkOrders() {
     setOpen(null);
   };
   /* Editar el texto de tareas no borra lo que el tecnico ya marco: la tarea con el mismo texto conserva su "hecha". */
+  /* Mientras se escribe el texto queda tal cual (lineas vacias y espacios al final incluidos): si se limpiara aqui, el
+     Enter y el espacio al final de la linea se borrarian al instante. La limpieza va en formBody, al guardar. */
   const tareasDesde = (txt: string, antes: Task[]) => {
     const hechas = new Map(antes.map((t) => [t.text.trim(), !!t.done]));
-    return txt.split("\n").filter((x) => x.trim()).map((x) => ({ text: x.trim(), done: hechas.get(x.trim()) ?? false }));
+    return txt.split("\n").map((x) => ({ text: x, done: hechas.get(x.trim()) ?? false }));
   };
 
   const insignias = (o: Order) => (
