@@ -61,10 +61,29 @@ def customers(
     return _page(db, stmt, cursor, limit, Customer, CustomerOut.model_validate)
 
 
+def can_pause_collections(p: Principal) -> bool:
+    """Pausar la cobranza de un cliente apaga los recordatorios de TODAS sus facturas (tambien las de otro vendedor y
+    el aviso de atraso de la mensualidad de un aliado): es de quien cobra toda la cartera, no de crm.editar. La pausa
+    de una sola factura sigue en PUT /invoices/{id}/reminders (sales.enviar sobre las propias)."""
+    return p.can("settings", "configurar") or (p.can("sales", "enviar") and p.can("sales", "ver_todo"))
+
+
+def _reminders_guard(p: Principal) -> None:
+    if not can_pause_collections(p):
+        raise HTTPException(403, "Sin permiso: pausar la cobranza de un cliente es de quien envía y ve toda la cartera (sales.enviar y sales.ver_todo)")
+
+
 @router.post("/customers", response_model=CustomerOut, status_code=201)
 def create_customer(data: CustomerIn, p: Principal = Depends(require("crm", "crear")), db: Session = Depends(get_db)):
+    from ..services.documents import audit
+
+    if data.no_reminders:
+        _reminders_guard(p)
     c = Customer(tenant_id=p.tenant.id, **data.model_dump())
     db.add(c)
+    db.flush()
+    if c.no_reminders:
+        audit(db, p.tenant.id, p.user.id, "reminders", "customer", c.id, {"antes": False, "despues": True}, ip=p.ip)
     db.commit()
     db.refresh(c)
     return c
@@ -84,9 +103,17 @@ def get_customer(cid: int, p: Principal = Depends(require("crm", "ver")), db: Se
 
 @router.put("/customers/{cid}", response_model=CustomerOut)
 def update_customer(cid: int, data: CustomerIn, p: Principal = Depends(require("crm", "editar")), db: Session = Depends(get_db)):
+    from ..services.documents import audit
+
     c = _own(db, Customer, cid, p.tenant.id)
-    for k, v in data.model_dump(exclude_unset=True).items():  # lo que no se envia no se borra
+    cambios = data.model_dump(exclude_unset=True)  # lo que no se envia no se borra
+    pausa = "no_reminders" in cambios and bool(cambios["no_reminders"]) != bool(c.no_reminders)
+    if pausa:
+        _reminders_guard(p)  # el formulario completo reenvia el valor de siempre: solo se exige si cambia
+    for k, v in cambios.items():
         setattr(c, k, v)
+    if pausa:
+        audit(db, p.tenant.id, p.user.id, "reminders", "customer", c.id, {"antes": not c.no_reminders, "despues": bool(c.no_reminders)}, ip=p.ip)
     db.commit()
     db.refresh(c)
     return c

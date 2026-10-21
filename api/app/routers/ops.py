@@ -1011,6 +1011,36 @@ def recurrences(kind: str | None = Query(None, pattern="^(factura|gasto)$"), p: 
     return [_rec_out(r, db) for r in db.scalars(q)]
 
 
+def send_terms(db: Session, tenant_id: int, customer_id: int | None, template: dict | None) -> tuple:
+    """A quien y cuanto le cobra la recurrencia: (cliente, moneda, total de la plantilla). Si cambia, la aprobacion
+    de la primera ya no cubre lo que sale (otro destinatario u otro monto)."""
+    from ..tasks.mensualidades import template_total_of
+
+    tot = template_total_of(db, tenant_id, customer_id, template)
+    return (customer_id, tot[1] if tot else (template or {}).get("currency"), tot[0] if tot else None)
+
+
+def send_flags(r: Recurrence) -> dict:
+    return {"auto_send": bool(r.auto_send), "first_run_requires_approval": bool(r.first_run_requires_approval)}
+
+
+def set_send_approval(p: Principal, r: Recurrence, requested: bool | None, rearm: bool = False) -> None:
+    """La revision humana antes de que la recurrencia le mande correos solos al cliente (plan 1.4).
+
+    - Cambio el cliente, la moneda o el total (rearm): la proxima vuelve a esperar "Aprobar y enviar", pida lo que pida
+      el formulario. Quien quiera quitarla la desmarca en otro guardado.
+    - Quitar la revision (dejar que salgan solas) es de quien puede enviar facturas (sales.enviar): contabilidad crea y
+      edita recurrencias y planes, pero no envia (la aprobacion exige ese permiso)."""
+    if rearm:
+        r.first_run_requires_approval = True
+        return
+    if requested is None or requested == bool(r.first_run_requires_approval):
+        return
+    if not requested and not p.can("sales", "enviar"):
+        raise HTTPException(403, "Sin permiso: sales.enviar. Solo quien envía facturas puede dejar que salgan solas sin revisar la próxima.")
+    r.first_run_requires_approval = requested
+
+
 @router.post("/recurrences", status_code=201)
 def recurrence_create(data: RecurrenceIn, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
     _rec_guard(p, data.kind, "crear")
@@ -1026,9 +1056,14 @@ def recurrence_create(data: RecurrenceIn, p: Principal = Depends(get_principal),
         auto_send=data.auto_send,
         active=data.active,
         anchor_day=data.anchor_day or data.next_date.day,
-        first_run_requires_approval=True if data.first_run_requires_approval is None else data.first_run_requires_approval,
+        first_run_requires_approval=True,
     )
+    if r.kind == "factura":
+        set_send_approval(p, r, data.first_run_requires_approval)
     db.add(r)
+    db.flush()
+    if r.kind == "factura":
+        audit(db, p.tenant.id, p.user.id, "create", "recurrence", r.id, {**send_flags(r), "customer_id": r.customer_id}, ip=p.ip)
     db.commit()
     return _rec_out(r, db)
 
@@ -1046,6 +1081,8 @@ def recurrence_update(rid: int, data: RecurrenceIn, p: Principal = Depends(get_p
     _rec_guard(p, r.kind, "editar")
     if data.kind != r.kind:
         raise HTTPException(409, "No se puede cambiar el tipo de una recurrencia")
+    factura = r.kind == "factura"
+    antes = {**send_flags(r), "terms": send_terms(db, r.tenant_id, r.customer_id, r.template)} if factura else None
     r.anchor_day = _anchor_for_update(r, data)  # antes de pisar next_date: compara con la fecha guardada
     r.name, r.customer_id, r.template, r.frequency, r.next_date, r.end_date, r.auto_send, r.active = (
         data.name,
@@ -1057,10 +1094,20 @@ def recurrence_update(rid: int, data: RecurrenceIn, p: Principal = Depends(get_p
         data.auto_send,
         data.active,
     )
-    if data.first_run_requires_approval is not None:
-        r.first_run_requires_approval = data.first_run_requires_approval
+    if factura:
+        terms = send_terms(db, r.tenant_id, r.customer_id, r.template)
+        set_send_approval(p, r, data.first_run_requires_approval, rearm=terms != antes["terms"])
+        despues = {**send_flags(r), "terms": terms}
+        if despues != antes:
+            # a quien, cuanto y si sale solo: queda en la bitacora con el antes y el despues
+            audit_change(db, p, "update", "recurrence", r.id, _jsonable_terms(antes), _jsonable_terms(despues))
     db.commit()
     return _rec_out(r, db)
+
+
+def _jsonable_terms(x: dict) -> dict:
+    cliente, moneda, total = x["terms"]
+    return {**{k: v for k, v in x.items() if k != "terms"}, "customer_id": cliente, "currency": moneda, "total": str(total) if total is not None else None}
 
 
 def _anchor_for_update(r: Recurrence, data: RecurrenceIn) -> int:
@@ -1142,15 +1189,41 @@ def _rec_alert(db: Session, r: Recurrence, invoice: Invoice, title: str, body: s
     )
 
 
-def deliver_recurrence(db: Session, r: Recurrence, invoice: Invoice, user_id: int | None = None, approved: bool = False) -> dict:
+def _rec_alert_once(db: Session, r: Recurrence, invoice: Invoice, title: str, body: str) -> None:
+    """_rec_alert que no se repite: el worker corre a diario y el periodo detenido sigue igual hasta que alguien actua."""
+    from ..models import EmailOutbox
+
+    ya = db.scalar(
+        select(EmailOutbox.id)
+        .where(EmailOutbox.tenant_id == r.tenant_id, EmailOutbox.entity == "recurrence", EmailOutbox.entity_id == r.id, EmailOutbox.subject == f"{title} · {invoice.number}")
+        .limit(1)
+    )
+    if ya is None:
+        _rec_alert(db, r, invoice, title, body)
+
+
+PRODUCCION_SIN_EMITIR = "Emitila antes de enviarla: Hacienda está en producción y la entrega fiscal le manda el XML al cliente."
+
+
+def _unemitted_in_production(db: Session, tenant, invoice: Invoice) -> bool:
+    """Hacienda en produccion y la factura sin comprobante aceptado: no sale como "aviso de cobro" sin el XML. La
+    emision automatica de las mensualidades es del plan 2.1; mientras tanto una persona la emite."""
+    from ..services.hacienda_config import hacienda_mode
+
+    return invoice.einvoice_status != "aceptada" and hacienda_mode(db, tenant) == "produccion"
+
+
+def deliver_recurrence(db: Session, r: Recurrence, invoice: Invoice, user_id: int | None = None, approved: bool = False, hold: bool = False) -> dict:
     """Envio automatico de la factura de la recurrencia (plan 1.4), despues de guardarla.
 
     - Sin auto_send no se envia (queda "pendiente" para enviarla a mano).
     - La primera de cada plan (first_run_requires_approval) queda en Aprobaciones -> "Mensualidades por aprobar" y el
       admin recibe el aviso. approved=True es "Aprobar y enviar": desde ahi las siguientes salen solas.
+    - hold: la genero alguien sin permiso de envio ("Generar ahora" de contabilidad): tambien espera "Aprobar y enviar".
     - Queda "enviada" solo si el proveedor acepto el correo; si falla (o el cliente no tiene correo) se avisa al admin.
-    - Sin comprobante fiscal (modo de Hacienda "ninguno" o sin emitir) sale como "aviso de cobro" con su PDF y enlace.
-      La emision automatica de las mensualidades llega con Hacienda en produccion (plan 2.1).
+    - La mensualidad sin comprobante fiscal (modo de Hacienda "ninguno" o sin emitir) sale como "aviso de cobro" con su
+      PDF y enlace (render.doc_kind). Con Hacienda en produccion no sale sin emitir: queda por aprobar con la nota y el
+      aviso al admin (la emision automatica llega con el plan 2.1).
     No hace commit."""
     from ..models import Tenant
     from ..services.documents_send import send_document
@@ -1158,33 +1231,40 @@ def deliver_recurrence(db: Session, r: Recurrence, invoice: Invoice, user_id: in
     plan = invoice.external_order == PLAN_ORDER
     que = "La mensualidad" if plan else "La factura recurrente"
     sin_enviar = "Mensualidad sin enviar" if plan else "Factura recurrente sin enviar"
+    por_aprobar = "Mensualidad por aprobar" if plan else "Factura recurrente por aprobar"
+    t = db.get(Tenant, r.tenant_id)
     if not approved:
         if not r.auto_send:
             r.last_send_status = "pendiente"
             return {"status": "pendiente", "sent": False, "note": None}
-        if r.first_run_requires_approval:
+        if r.first_run_requires_approval or hold:
             r.last_send_status = "por_aprobar"
+            r.last_send_note = None if r.first_run_requires_approval else "La generó alguien sin permiso de envío"
             _rec_alert(
                 db,
                 r,
                 invoice,
-                "Mensualidad por aprobar" if plan else "Factura recurrente por aprobar",
+                por_aprobar,
                 f"{que} quedó generada y espera tu visto bueno: revisala y tocá «Aprobar y enviar» en Aprobaciones. "
-                "Desde la siguiente, sale sola con su PDF y enlace de pago.",
+                + ("Desde la siguiente, sale sola con su PDF y enlace de pago." if r.first_run_requires_approval else "La generó alguien que no envía facturas."),
             )
-            return {"status": "por_aprobar", "sent": False, "note": None}
+            return {"status": "por_aprobar", "sent": False, "note": r.last_send_note}
+        if _unemitted_in_production(db, t, invoice):
+            r.last_send_status, r.last_send_note = "por_aprobar", PRODUCCION_SIN_EMITIR
+            _rec_alert(db, r, invoice, por_aprobar, f"{que} quedó generada pero no salió: {PRODUCCION_SIN_EMITIR}")
+            return {"status": "por_aprobar", "sent": False, "note": r.last_send_note}
     else:
+        if _unemitted_in_production(db, t, invoice):
+            raise HTTPException(409, PRODUCCION_SIN_EMITIR)
         r.first_run_requires_approval = False  # se aprobo el contenido; si el correo falla se reenvia aparte
     c = db.get(Customer, invoice.customer_id) if invoice.customer_id else None
     if c is None or c.tenant_id != r.tenant_id or not (c.email or "").strip():
         r.last_send_status, r.last_send_note = "sin_correo", "El cliente no tiene correo"
         _rec_alert(db, r, invoice, sin_enviar, f"{que} no salió: el cliente no tiene correo. Agregalo en su ficha y reenviala desde Aprobaciones.")
         return {"status": "sin_correo", "sent": False, "note": r.last_send_note}
-    t = db.get(Tenant, r.tenant_id)
-    label = None if invoice.einvoice_status == "aceptada" else "aviso de cobro"
     try:
         # el envio automatico lleva llave (una factura, un correo); "Aprobar y enviar" o "Reenviar" no
-        res = send_document(db, t, invoice, None, None, True, user_id, label=label, dedupe_key=None if approved else f"rec:{r.id}:{invoice.id}")
+        res = send_document(db, t, invoice, None, None, True, user_id, dedupe_key=None if approved else f"rec:{r.id}:{invoice.id}")
     except HTTPException as e:
         res = {"sent": False, "status": "error", "note": str(e.detail)}
     if res["sent"]:
@@ -1195,29 +1275,50 @@ def deliver_recurrence(db: Session, r: Recurrence, invoice: Invoice, user_id: in
     return {"status": r.last_send_status, "sent": bool(res["sent"]), "note": r.last_send_note}
 
 
-def _awaiting_approval(db: Session, r: Recurrence) -> bool:
-    """La factura anterior sigue esperando "Aprobar y enviar": no se le apila otra al cliente. Si una persona ya la
-    envio a mano, cuenta como aprobada y desde ahi salen solas."""
-    if not r.first_run_requires_approval or not r.last_invoice_id:
-        return False
+def pending_send(db: Session, r: Recurrence, settle: bool = True) -> Invoice | None:
+    """La ultima factura de la recurrencia todavia no le llego al cliente y espera a una persona: "Aprobar y enviar"
+    (por_aprobar) o "Reenviar" (fallida, sin_correo). Mientras tanto no se genera otra: no se le apilan facturas al
+    cliente ni se pierde de vista la anterior (Aprobaciones solo mira la ultima). Devuelve esa factura o None.
+
+    Resuelta: anulada, ya enviada (sent_at o un estado que solo existe despues de enviar) o pagada por otra via (saldo
+    0). Una enviada a mano cuenta como aprobacion solo si era la que esperaba "Aprobar y enviar" (settle=True la
+    registra); un envio viejo (el relleno de sent_at de la migracion de cobranza) no apaga la revision pedida."""
+    from ..services.invoice_states import is_sent
+
+    if r.kind != "factura" or not r.last_invoice_id:
+        return None
     last = db.get(Invoice, r.last_invoice_id)
-    if last is None or last.status == "anulada":
-        return False
-    if last.sent_at is not None:
-        r.first_run_requires_approval = False
-        return False
-    return bool(r.auto_send) and r.last_send_status == "por_aprobar"
+    if last is None or last.tenant_id != r.tenant_id or last.status == "anulada":
+        return None
+    if is_sent(last) or Decimal(str(last.balance or 0)) <= 0:
+        if settle and last.sent_at is not None and r.last_send_status == "por_aprobar" and r.first_run_requires_approval:
+            r.first_run_requires_approval = False
+        return None
+    from ..services.approvals import PLAN_SEND_PENDING
+
+    return last if r.last_send_status in PLAN_SEND_PENDING else None
+
+
+def _pending_message(r: Recurrence, last: Invoice) -> str:
+    if r.last_send_status == "por_aprobar":
+        return f"La factura anterior ({last.number}) espera «Aprobar y enviar». Aprobala o anulala antes de generar otra."
+    return f"La factura anterior ({last.number}) no le llegó al cliente. Reenviala o anulala antes de generar otra."
 
 
 @router.post("/recurrences/{rid}/run", status_code=201)
 def recurrence_run(rid: int, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
     r = _rec_get(db, p, rid)
     _rec_guard(p, r.kind, "editar")
+    previa = pending_send(db, r)
+    if previa is not None:
+        db.commit()
+        raise HTTPException(409, _pending_message(r, previa))
     doc = run_recurrence(db, r, p.user.id)
     db.commit()
     if isinstance(doc, Expense):
         return {"expense_id": doc.id, "total": doc.total, "next_date": r.next_date}
-    envio = deliver_recurrence(db, r, doc, p.user.id)
+    # le llega al cliente solo si quien la genera puede enviar facturas; si no, espera "Aprobar y enviar"
+    envio = deliver_recurrence(db, r, doc, p.user.id, hold=not p.can("sales", "enviar"))
     db.commit()
     return {"invoice_id": doc.id, "number": doc.number, "next_date": r.next_date, "send_status": envio["status"], "sent": envio["sent"]}
 
@@ -1237,6 +1338,8 @@ def recurrence_approve_send(rid: int, p: Principal = Depends(get_principal), db:
         raise HTTPException(409, "Esta recurrencia no tiene una factura por enviar")
     if d.sent_at is not None and r.last_send_status == "enviada":
         raise HTTPException(409, "Esa factura ya se envió")
+    if d.status == "pagada" or Decimal(str(d.balance or 0)) <= 0:
+        raise HTTPException(409, "Esa factura ya está pagada: no se le cobra al cliente")
     out = deliver_recurrence(db, r, d, p.user.id, approved=True)
     audit(db, p.tenant.id, p.user.id, "approve_send", "recurrence", r.id, {"invoice_id": d.id, "resultado": r.last_send_status}, ip=p.ip)
     db.commit()
@@ -1273,8 +1376,17 @@ def run_due_recurrences(db: Session, today: date | None = None) -> int:
                     if not r.active or r.next_date > today:
                         break
             else:
-                if _awaiting_approval(db, r):
-                    db.commit()  # la anterior sigue por aprobar: se espera (el aviso ya le llego al admin)
+                previa = pending_send(db, r)
+                if previa is not None:
+                    # la anterior sigue esperando a una persona: no se genera otra. Un aviso por periodo detenido.
+                    _rec_alert_once(
+                        db,
+                        r,
+                        previa,
+                        f"Recurrencia detenida ({r.next_date:%d/%m/%Y})",
+                        f"El periodo del {r.next_date:%d/%m/%Y} no se generó. {_pending_message(r, previa)} Se genera en la primera corrida después de que la envíes o la anules.",
+                    )
+                    db.commit()
                     continue
                 factura = run_recurrence(db, r, None)
                 n += 1

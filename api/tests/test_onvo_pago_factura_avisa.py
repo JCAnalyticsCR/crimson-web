@@ -86,3 +86,24 @@ def test_otra_moneda_y_sobrepago_alertan(client, auth, db_session, fake_onvo):
     assert client.get(f"/invoices/{b['id']}").json()["status"] == "pagada"
     recibo = _salida(db_session, CLIENTE)[-1]
     assert "pagada en su totalidad" in recibo.html
+
+
+def test_pago_a_las_20_cr_queda_con_la_fecha_de_costa_rica(client, auth, db_session, fake_onvo, monkeypatch):
+    """Borde 18:00-24:00 CR: a las 20:00 del 30/11 en Costa Rica ya es 1/12 en UTC (02:00). El pago queda con la fecha
+    de CR, la misma con la que la secuencia fecha el recordatorio (el resumen semanal las compara)."""
+    from datetime import date, datetime
+    from zoneinfo import ZoneInfo
+
+    from app.providers import einvoice as prov
+
+    tid = auth["tenant"]["id"]
+    fake_onvo.connect(client)
+    inv = _factura(client, _cliente(client))
+    token = _enlace(client, inv["id"])
+    client.post(f"/public/pay/{token}/onvo")
+    fake_onvo.pay("cs_1", amount=50000 * 100)
+    ahora = datetime(2026, 12, 1, 2, 0, tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("America/Costa_Rica"))
+    monkeypatch.setattr(prov, "cr_now", lambda: ahora)
+    assert fake_onvo.send(client, tid, "checkout-session.succeeded", {"id": "cs_1"}).status_code == 200
+    pagos = client.get(f"/invoices/{inv['id']}").json()["payments"]
+    assert len(pagos) == 1 and pagos[0]["paid_at"] == date(2026, 11, 30).isoformat()

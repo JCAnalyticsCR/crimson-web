@@ -95,7 +95,8 @@ def v1_customers(q: str | None = None, ctx=Depends(api_tenant), db: Session = De
 @v1.post("/customers", response_model=CustomerOut, status_code=201)
 def v1_customer_create(data: CustomerIn, ctx=Depends(api_tenant), db: Session = Depends(get_db)):
     t, _ = ctx
-    c = Customer(tenant_id=t.id, **data.model_dump())
+    # pausar la cobranza de un cliente es de una persona con permiso de cobro (routers/catalog.can_pause_collections)
+    c = Customer(tenant_id=t.id, **data.model_dump(exclude={"no_reminders"}))
     db.add(c)
     db.commit()
     db.refresh(c)

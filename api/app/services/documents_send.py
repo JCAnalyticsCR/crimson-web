@@ -19,7 +19,7 @@ from . import documents as docsvc
 from .documents import audit
 from .invoice_states import mark_sent
 from .mail import doc_email_html, queue_email
-from .render import money, render_html, render_pdf
+from .render import AVISO_DE_COBRO, doc_kind, money, render_html, render_pdf
 
 
 # ---------- correo idempotente (interfaz del plan 1.2) ----------
@@ -91,7 +91,10 @@ def send_document(
     Devuelve {status, sent, to, note, version, outbox_id}. Solo con el correo aceptado por el proveedor ("enviado") la
     factura pasa a "enviada" y queda por cobrar (sent_at), y la cotizacion congela su version: simulado (sin llave de
     Resend) o error no cuentan, porque harian creer que el cliente ya la tiene. No hace commit.
-    label: "aviso de cobro" para la mensualidad sin comprobante fiscal (modo de Hacienda "ninguno").
+    Un correo con adjuntos que el proveedor rechaza queda "fallido", no "error": mail.retry_outbox (pendiente|error) lo
+    mandaria sin el PDF ni el XML (los adjuntos no se guardan) y sin marcar la factura enviada. Lo reenvia una persona.
+    label: tipo de documento para el correo y el PDF; por defecto render.doc_kind ("aviso de cobro" en la mensualidad
+    sin comprobante fiscal, plan 1.4).
     dedupe_key: solo los envios automaticos (regla 6 del plan); el reenvio de una persona nunca lleva llave, porque con
     el outbox del plan 1.2 la misma llave devolveria el intento que fallo en vez de mandarlo otra vez."""
     is_inv = isinstance(doc, Invoice)
@@ -105,12 +108,13 @@ def send_document(
         from .units import check_ready
 
         check_ready(doc, "enviar la cotización")
-    kind_text = label or ("factura" if is_inv else "cotización")
+    kind_text = label or doc_kind(doc)
+    titulo = f"{kind_text[:1].upper()}{kind_text[1:]}"
     link = None
     if is_inv and with_payment_link and Decimal(str(doc.balance)) > 0 and doc.status != "anulada":
         link = docsvc.get_or_create_payment_link(db, tenant.id, doc).url
-    subject = f"{kind_text[:1].upper()}{kind_text[1:]} {doc.number} · {tenant.name}"
-    pdf = pdf_of(db, tenant, doc, kind=(f"{kind_text[:1].upper()}{kind_text[1:]}" if label else None))
+    subject = f"{titulo} {doc.number} · {tenant.name}"
+    pdf = pdf_of(db, tenant, doc, kind=titulo)
     files = [(f"{doc.number}.pdf", pdf)] if pdf else []
     if is_inv:
         files += fiscal_files(db, doc)
@@ -135,6 +139,8 @@ def send_document(
         files=files or None,
         dedupe_key=dedupe_key,
     )
+    if m.status == "error" and files:
+        m.status = "fallido"  # fuera de mail.retry_outbox: nunca le llega al cliente sin el PDF (plan 1.2)
     sent = m.status == "enviado"
     if sent and doc.status == "creado":
         doc.status = "enviada"
@@ -151,10 +157,11 @@ def send_document(
             if o.status in ("nuevo", "contactado", "requiere_visita", "levantamiento", "cotizando"):
                 audit(db, tenant.id, actor, "status", "opportunity", o.id, {"de": o.status, "a": "enviada"}, ip=ip)
                 o.status = "enviada"
-    audit(db, tenant.id, actor, "send", entity, doc.id, {"to": to, "mail": m.status, **({"como": label} if label else {})}, ip=ip)
+    como = {"como": kind_text} if label or kind_text == AVISO_DE_COBRO else {}
+    audit(db, tenant.id, actor, "send", entity, doc.id, {"to": to, "mail": m.status, **como}, ip=ip)
     if m.status == "simulado":
         note = "El correo NO salió: no hay servicio de correo configurado (falta la llave de Resend). El documento no se marcó como enviado."
-    elif m.status == "error":
+    elif m.status in ("error", "fallido"):
         note = f"El correo NO salió ({(m.error or 'error del proveedor')[:160]}). El documento no se marcó como enviado."
     else:
         note = None

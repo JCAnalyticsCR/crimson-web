@@ -758,9 +758,11 @@ def invoice_reminders(iid: int, data: RemindersIn, p: Principal = Depends(requir
 
 
 @router.get("/collections/preview")
-def collections_preview(fecha: date | None = None, p: Principal = Depends(require("sales", "ver_todo")), db: Session = Depends(get_db)):
+def collections_preview(fecha: date | None = None, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
     """Corrida en seco de la secuencia: quien recibiria que recordatorio en esa fecha (no manda ni escribe nada).
-    Andres aprueba esta lista antes de volver a encender "Notificar vencimiento al cliente"."""
+    Andres aprueba esta lista antes de volver a encender "Notificar vencimiento al cliente".
+    Mismo permiso que encender los recordatorios (Ajustes): trae la cartera de toda la empresa y la lista de deudores
+    con su correo, que caja, lectura o soporte no deben ver aunque busquen cualquier factura (sales.ver_todo)."""
     from ..tasks import cobranza
 
     hoy = invoice_states.cr_today()

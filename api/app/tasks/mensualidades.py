@@ -28,24 +28,33 @@ PREVIEW_DAYS = 3
 
 def template_total(db: Session, r: Recurrence) -> tuple[Decimal, str] | None:
     """Total que tendria la factura de la plantilla hoy (mismas reglas que al crearla). None si la plantilla no sirve."""
+    return template_total_of(db, r.tenant_id, r.customer_id, r.template)
+
+
+def template_total_of(db: Session, tenant_id: int, customer_id: int | None, template: dict | None) -> tuple[Decimal, str] | None:
     from ..schemas.sales import DocumentIn
     from ..services import documents as docsvc
     from ..services.totals import compute_document
 
     try:
-        payload = DocumentIn(**{**(r.template or {}), "customer_id": r.customer_id})
-        lines = [docsvc._fill_line_from_product(db, r.tenant_id, ln, payload.currency) for ln in payload.lines]
+        payload = DocumentIn(**{**(template or {}), "customer_id": customer_id})
+        lines = [docsvc._fill_line_from_product(db, tenant_id, ln, payload.currency) for ln in payload.lines]
         calc = compute_document([docsvc.line_in(ln) for ln in lines], payload.discount_type, payload.discount_value)
     except Exception:  # noqa: BLE001  una plantilla rota no frena la vista previa de las demas
         return None
     return Decimal(str(calc.total)), payload.currency
 
 
-def what_happens(r: Recurrence, c: Customer | None) -> str:
+def what_happens(r: Recurrence, c: Customer | None, previa=None, produccion: bool = False) -> str:
+    """Lo mismo que van a hacer run_due_recurrences y deliver_recurrence ese dia (routers/ops.py)."""
+    if previa is not None:
+        return f"Detenida: la anterior ({previa.number}) todavía no le llegó al cliente; se genera cuando la envíes o la anules"
     if not r.auto_send:
         return "Se genera; el envío automático está apagado (enviala a mano)"
     if r.first_run_requires_approval:
         return "Espera tu «Aprobar y enviar» en Aprobaciones"
+    if produccion:
+        return "Espera que la emitas (Hacienda en producción)"
     if c is None or not (c.email or "").strip():
         return "No va a salir: el cliente no tiene correo"
     return "Sale sola con su PDF y enlace de pago"
@@ -63,7 +72,9 @@ def upcoming(db: Session, tenant_id: int, on: date) -> list[Recurrence]:
 
 def preview_upcoming(db: Session, today: date | None = None, days: int = PREVIEW_DAYS) -> int:
     """Correo a los administradores con lo que se cobra en `days` dias. Devuelve cuantos correos salieron."""
+    from ..routers.ops import pending_send
     from ..services.documents_send import queue_once, queued_before
+    from ..services.hacienda_config import hacienda_mode
 
     today = today or cr_today()
     on = today + timedelta(days=days)
@@ -75,13 +86,14 @@ def preview_upcoming(db: Session, today: date | None = None, days: int = PREVIEW
         if not recs:
             continue
         filas = []
+        produccion = hacienda_mode(db, t) == "produccion"  # la mensualidad no se emite sola todavia (plan 2.1)
         for r in recs:
             c = db.get(Customer, r.customer_id) if r.customer_id else None
             c = c if c is not None and c.tenant_id == t.id else None
             tot = template_total(db, r)
             filas.append(
                 f"<tr><td>{e(r.name or '')}</td><td>{e(c.name if c else 'sin cliente')}</td>"
-                f"<td align=right>{money(*tot) if tot else '—'}</td><td>{e(what_happens(r, c))}</td></tr>"
+                f"<td align=right>{money(*tot) if tot else '—'}</td><td>{e(what_happens(r, c, pending_send(db, r, settle=False), produccion))}</td></tr>"
             )
         body = (
             f"<p>El <b>{on:%d/%m/%Y}</b> se generan {len(recs)} factura(s) recurrente(s):</p>"

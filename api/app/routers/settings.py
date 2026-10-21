@@ -88,6 +88,17 @@ class SettingsIn(BaseModel):
         if not vals or len(vals) > 8 or any(x < -30 or x > 120 for x in vals):
             raise ValueError("Etapas de cobro: de 1 a 8 días entre -30 (antes de vencer) y 120 (después)")
         return vals
+
+    @field_validator("collections_start_date")
+    @classmethod
+    def _corte(cls, v):
+        # un año a medio teclear (0202-...) dejaria entrar toda la cartera vieja a la secuencia; uno muy lejano la apaga
+        from ..services.invoice_states import cr_today
+
+        if v is not None and not (date(2020, 1, 1) <= v <= date(cr_today().year + 1, 12, 31)):
+            raise ValueError("Fecha de corte de cartera: entre 2020 y el año que viene")
+        return v
+
     daily_close_email: bool | None = None
     bcc: list[EmailStr] | None = None
     manual_payment_methods: list[dict] | None = None

@@ -49,6 +49,18 @@ def _enviada(db_session, client, cid: int, due: date, hace: int = 20, issue: dat
     return inv["id"]
 
 
+def _pago(db_session, iid: int, monto: Decimal, el: date, provider: str = "manual", method: str = "onvo"):
+    """Pago confirmado de la factura en la fecha `el` (provider "onvo" = entro por el enlace de pago)."""
+    from app.models import Invoice
+    from app.schemas.sales import PaymentIn
+    from app.services.documents import add_payment
+
+    inv = db_session.get(Invoice, iid)
+    p = add_payment(db_session, inv.tenant_id, None, inv, PaymentIn(method=method, kind="captura", currency=inv.currency, amount=monto, paid_at=el))
+    p.provider = provider
+    db_session.commit()
+
+
 def _al_cliente(salida, email="pagos@cliente-prueba.ejemplo.com"):
     return [(m, f) for m, f in salida if m.to == email]
 
@@ -196,7 +208,7 @@ def test_corrida_en_seco_no_escribe_nada(client, auth, db_session, correo):
     assert [x["stage"] for x in pv2["items"]] == ["D+10"] and [x["stage"] for x in pv2["skipped"]] == ["D+3"]
     despues = (db_session.scalar(select(func.count()).select_from(EmailOutbox)), db_session.scalar(select(func.count()).select_from(PaymentLink)))
     assert antes == despues and db_session.scalar(select(func.count()).select_from(CollectionReminder)) == 0
-    # solo quien ve todas las ventas
+    # solo quien configura la cobranza (Ajustes)
     from tests.test_session4 import _user_with_role
 
     pw = _user_with_role(db_session, auth["tenant"]["id"], "vende.cobro@ejemplo.com", "ventas")
@@ -204,10 +216,18 @@ def test_corrida_en_seco_no_escribe_nada(client, auth, db_session, correo):
     tok = client.post("/auth/login", json={"email": "vende.cobro@ejemplo.com", "password": pw}).json()["access_token"]
     client.headers["Authorization"] = keep
     assert client.get("/collections/preview", headers={"Authorization": f"Bearer {tok}"}).status_code == 403
+    # caja busca cualquier factura (sales.ver_todo) pero no ve la cartera de la empresa ni la lista de deudores
+    pw = _user_with_role(db_session, auth["tenant"]["id"], "caja.cobro@ejemplo.com", "caja")
+    keep = client.headers.pop("Authorization")
+    tok = client.post("/auth/login", json={"email": "caja.cobro@ejemplo.com", "password": pw}).json()["access_token"]
+    client.headers["Authorization"] = keep
+    assert client.get("/collections/preview", headers={"Authorization": f"Bearer {tok}"}).status_code == 403
 
 
-def test_mensualidad_de_aliado_avisa_a_d_mas_5(client, auth, db_session, correo):
-    from app.models import Invoice
+def test_mensualidad_de_aliado_avisa_a_d_mas_5(client, auth, db_session, correo, monkeypatch):
+    from app.models import Invoice, Tenant
+    from app.services import documents_send
+    from app.services.render import render_html
     from app.tasks.cobranza import run_reminders
 
     cid = _cliente(client, email="pagos@aliado-cobro.ejemplo.com")
@@ -217,9 +237,20 @@ def test_mensualidad_de_aliado_avisa_a_d_mas_5(client, auth, db_session, correo)
     db_session.commit()
     run_reminders(db_session, today=HOY - timedelta(days=4))  # D0
     assert run_reminders(db_session, today=HOY - timedelta(days=1))["enviados"] == 0  # D+3 no es etapa de aliados
+    pdfs: list[str] = []
+    monkeypatch.setattr(documents_send, "render_pdf", lambda h: pdfs.append(h) or b"%PDF-1.7 prueba")
     assert run_reminders(db_session, today=HOY + timedelta(days=1))["enviados"] == 1  # D+5
-    m, _ = _al_cliente(correo, "pagos@aliado-cobro.ejemplo.com")[-1]
-    assert "Mensualidad" in m.subject and "5 días de atraso" in m.subject
+    m, files = _al_cliente(correo, "pagos@aliado-cobro.ejemplo.com")[-1]
+    assert "Mensualidad" in m.subject and "5 días de atraso" in m.subject and files
+    # sin comprobante fiscal es un aviso de cobro: el PDF del recordatorio no se titula "Factura" (render.doc_kind),
+    # igual que el primer correo y el PDF que descarga el aliado
+    assert "Aviso de cobro" in pdfs[-1] and ">Factura<" not in pdfs[-1]
+    t = db_session.get(Tenant, auth["tenant"]["id"])
+    inv = db_session.get(Invoice, iid)
+    assert "Aviso de cobro" in render_html(db_session, inv, t)
+    inv.einvoice_status = "aceptada"  # con el comprobante aceptado ya es la factura
+    assert "Aviso de cobro" not in render_html(db_session, inv, t)
+    db_session.rollback()
     # etapas configurables
     assert client.put("/settings", json={"collections_ally_stages": [-200]}).status_code == 422
     assert client.put("/settings", json={"collections_stages": [10, 0, -3, 0]}).json()["collections_stages"] == [-3, 0, 10]
@@ -240,18 +271,19 @@ def test_resumen_semanal_con_linea_base_y_cobranza_recuperada(client, auth, db_s
     assert base["date"] == lunes.isoformat() and Decimal(base["overdue"]) == Decimal("113000.00")
     primero = db_session.scalars(select(EmailOutbox).where(EmailOutbox.subject.like("Cartera de la semana%"))).all()[-1]
     assert "Línea base registrada hoy" in primero.html
-    # recordatorio, el cliente paga despues y el resumen siguiente lo cuenta como cobranza recuperada
+    # recordatorio, el cliente paga despues: solo lo cobrado POR EL ENLACE es cobranza recuperada (C.2); un SINPE
+    # registrado a mano se muestra aparte y no infla la cifra de valor
     run_reminders(db_session, today=lunes + timedelta(days=1))
-    total = client.get(f"/invoices/{iid}").json()["total"]
-    client.post(
-        f"/invoices/{iid}/payments", json={"method": "sinpe", "kind": "captura", "amount": total, "paid_at": (lunes + timedelta(days=2)).isoformat()}
-    )
+    _pago(db_session, iid, Decimal("50000"), lunes + timedelta(days=2), provider="onvo")
+    _pago(db_session, iid, Decimal("13000"), lunes + timedelta(days=3), provider="manual", method="sinpe")
     assert weekly_summary(db_session, today=lunes + timedelta(days=7)) == 1
     ultimo = db_session.scalars(select(EmailOutbox).where(EmailOutbox.subject.like("Cartera de la semana%")).order_by(EmailOutbox.id.desc())).first()
     assert "₡113,000.00" in ultimo.html and "Día 0" in ultimo.html and "1 recordatorio(s) enviados" in ultimo.html
+    assert "después de un recordatorio): <b>₡50,000.00</b>" in ultimo.html
+    assert "Por otros medios después de un aviso" in ultimo.html and "₡13,000.00" in ultimo.html
     # linea base manual desde Ajustes
     r = client.post("/collections/baseline")
-    assert r.status_code == 200 and Decimal(r.json()["overdue"]) == 0
+    assert r.status_code == 200 and Decimal(r.json()["overdue"]) == Decimal("50000")  # el saldo que queda
 
 
 def test_corrida_diaria_con_la_fecha_de_costa_rica(client, auth, db_session, correo, monkeypatch):
@@ -273,3 +305,32 @@ def test_corrida_diaria_con_la_fecha_de_costa_rica(client, auth, db_session, cor
     assert run_reminders(db_session)["enviados"] == 1
     assert run_reminders(db_session)["enviados"] == 0  # doble disparo del beat
     assert [e["stage"] for e in client.get(f"/invoices/{iid}").json()["reminders"]] == ["D-3"]
+
+
+def test_pausa_por_cliente_es_de_quien_cobra_y_queda_en_bitacora(client, auth, db_session):
+    """La pausa por cliente apaga los recordatorios de TODAS sus facturas: un vendedor (crm.editar, clientes compartidos)
+    no la toca; el admin si, y queda en la bitacora con el antes y el despues."""
+    from app.models import AuditLog
+    from tests.test_session4 import _user_with_role
+
+    cid = _cliente(client)
+    pw = _user_with_role(db_session, auth["tenant"]["id"], "vende.pausa@ejemplo.com", "ventas")
+    keep = client.headers.pop("Authorization")
+    tok = client.post("/auth/login", json={"email": "vende.pausa@ejemplo.com", "password": pw}).json()["access_token"]
+    client.headers["Authorization"] = keep
+    h = {"Authorization": f"Bearer {tok}"}
+    assert client.put(f"/customers/{cid}", json={"name": "Cliente Prueba Cobro S.A.", "no_reminders": True}, headers=h).status_code == 403
+    assert client.post("/customers", json={"name": "Otro Cliente", "id_type": "fisica", "no_reminders": True}, headers=h).status_code == 403
+    # el formulario completo reenvia el valor de siempre: editar el telefono sigue pudiendo
+    r = client.put(f"/customers/{cid}", json={"name": "Cliente Prueba Cobro S.A.", "phone": "8888-0000", "no_reminders": False}, headers=h)
+    assert r.status_code == 200
+    assert client.put(f"/customers/{cid}", json={"name": "Cliente Prueba Cobro S.A.", "no_reminders": True}).json()["no_reminders"] is True
+    log = db_session.scalars(select(AuditLog).where(AuditLog.entity == "customer", AuditLog.entity_id == cid, AuditLog.action == "reminders")).one()
+    assert log.diff == {"antes": False, "despues": True}
+
+
+def test_fecha_de_corte_con_un_anio_razonable(client, auth):
+    """Al teclear el anio digito por digito el navegador da fechas intermedias (0202-...): no se guardan."""
+    assert client.put("/settings", json={"collections_start_date": "0202-05-01"}).status_code == 422
+    assert client.put("/settings", json={"collections_start_date": "2999-05-01"}).status_code == 422
+    assert client.put("/settings", json={"collections_start_date": (HOY - timedelta(days=30)).isoformat()}).status_code == 200

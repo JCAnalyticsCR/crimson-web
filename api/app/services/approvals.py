@@ -290,31 +290,47 @@ _PLAN_BADGE = {"por_aprobar": "Primera del plan: revisala", "fallida": "No saliÃ
 
 
 def _plan_send_where(p: Principal) -> list:
-    """Ultima factura de una recurrencia que espera "Aprobar y enviar" (la primera del plan) o que no salio."""
+    """Ultima factura de una recurrencia que espera "Aprobar y enviar" (la primera del plan) o que no salio. Con saldo:
+    una que ya se pago por otra via (pago registrado a mano) no se le vuelve a cobrar al cliente."""
     pend = select(Recurrence.last_invoice_id).where(
         Recurrence.tenant_id == p.tenant.id,
         Recurrence.kind == "factura",
         Recurrence.last_invoice_id.is_not(None),
         Recurrence.last_send_status.in_(PLAN_SEND_PENDING),
     )
-    return [Invoice.tenant_id == p.tenant.id, Invoice.id.in_(pend), Invoice.status != "anulada", Invoice.sent_at.is_(None)]
+    return [
+        Invoice.tenant_id == p.tenant.id,
+        Invoice.id.in_(pend),
+        Invoice.status.not_in(("anulada", "pagada")),
+        Invoice.balance > 0,
+        Invoice.sent_at.is_(None),
+    ]
 
 
 def _plan_send_item(db: Session, p: Principal, inv: Invoice) -> dict:
+    from ..models import Tenant
+    from .hacienda_config import hacienda_mode
+
     r = db.scalar(select(Recurrence).where(Recurrence.tenant_id == inv.tenant_id, Recurrence.last_invoice_id == inv.id))
     precio = p.sees_prices
+    badge = _PLAN_BADGE.get(r.last_send_status) if r else None
+    if r is not None and r.last_send_status == "por_aprobar" and not r.first_run_requires_approval:
+        badge = "Por aprobar: revisala"  # no es la primera: la genero alguien sin permiso de envio o falta emitirla
     row = _row(
         inv.id,
         inv.number,
         _customer(db, inv.customer_id),
         ((r.name if r else "") + (f" Â· {r.last_send_note}" if r and r.last_send_note else ""))[:200] or None,
         since=inv.created_at,
-        badge=_PLAN_BADGE.get(r.last_send_status) if r else None,
+        badge=badge,
         amount=inv.total if precio else None,
         currency=inv.currency if precio else None,
         to=f"/facturas/{inv.id}",
     )
-    if r is not None:
+    # Hacienda en produccion: sin comprobante aceptado no se manda desde aqui; se abre la factura para emitirla (la
+    # entrega fiscal le manda el XML al cliente y la marca enviada)
+    sin_emitir = inv.einvoice_status != "aceptada" and hacienda_mode(db, db.get(Tenant, inv.tenant_id)) == "produccion"
+    if r is not None and not sin_emitir:
         # unica accion que se hace desde la bandeja: la persona ya reviso la factura (abrirla queda a un clic)
         row["action"] = {"label": "Aprobar y enviar" if r.last_send_status == "por_aprobar" else "Reenviar", "path": f"/recurrences/{r.id}/approve-send"}
     return row

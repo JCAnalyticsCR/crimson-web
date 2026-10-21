@@ -259,9 +259,9 @@ def plan_invoices(db: Session, company: AllyCompany, limit: int = 60) -> list[In
 def plan_status(db: Session, company: AllyCompany, today: date | None = None, visible=None) -> dict:
     """al_dia, o vencida con monto (saldo de las vencidas, por moneda dominante) y dias del atraso mas viejo.
     visible: filtro opcional de facturas (el portal del aliado solo cuenta las emitidas)."""
-    from .invoice_states import is_cobrable
+    from .invoice_states import cr_today, is_cobrable
 
-    today = today or date.today()
+    today = today or cr_today()  # fecha de Costa Rica: desde las 18:00 CR la de UTC ya es la de manana
     # por cobrar (enviada y con saldo, plan 1.3): un borrador que el aliado no recibio nunca cuenta como atraso
     vencidas = [i for i in plan_invoices(db, company, limit=500) if is_cobrable(i) and i.due_date and i.due_date < today and (visible is None or visible(i))]
     if not vencidas:

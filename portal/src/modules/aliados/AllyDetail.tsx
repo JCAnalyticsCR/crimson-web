@@ -242,7 +242,7 @@ function Mensualidad({ a, reload }: { a: Detail; reload: () => void }) {
     } catch (e) { toast(e instanceof Error ? e.message : "No se pudo", "bad"); }
   };
   if (!d) return <div className="spinner" />;
-  const pendienteEnvio = d.plan && ["por_aprobar", "fallida", "sin_correo"].includes(d.plan.last_send_status || "") && d.facturas.some((x) => x.id === d.plan?.last_invoice_id && !x.sent_at && x.status !== "anulada");
+  const pendienteEnvio = d.plan && ["por_aprobar", "fallida", "sin_correo"].includes(d.plan.last_send_status || "") && d.facturas.some((x) => x.id === d.plan?.last_invoice_id && !x.sent_at && x.status !== "anulada" && Number(x.balance) > 0);
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <Card title="Mensualidad de la plataforma">
@@ -254,7 +254,9 @@ function Mensualidad({ a, reload }: { a: Detail; reload: () => void }) {
           <Field label="Servicio facturado" hint="Producto de tipo servicio con su CABYS"><Lookup value={prod?.label || ""} fetcher={searchProducts} onSelect={(it) => setProd(it)} placeholder={d.plan?.product_id ? "El configurado" : "Buscar servicio"} /></Field>
         </div>
         <label className="pf-bool"><input type="checkbox" checked={f.auto_send} onChange={(e) => setF({ ...f, auto_send: e.target.checked })} />Enviar la factura automáticamente (PDF y enlace de pago)</label>
-        {f.auto_send && <label className="pf-bool"><input type="checkbox" checked={f.first_run_requires_approval} onChange={(e) => setF({ ...f, first_run_requires_approval: e.target.checked })} />La próxima la reviso yo (Aprobaciones → Mensualidades por aprobar); después salen solas</label>}
+        {/* quitar la revisión (que salgan solas) es de quien envía facturas; cambiar el monto o la moneda la vuelve a pedir */}
+        {f.auto_send && <label className="pf-bool"><input type="checkbox" checked={f.first_run_requires_approval} disabled={!allows("sales.enviar") && f.first_run_requires_approval && (d.plan?.first_run_requires_approval ?? true)} onChange={(e) => setF({ ...f, first_run_requires_approval: e.target.checked })} />La próxima la reviso yo (Aprobaciones → Mensualidades por aprobar); después salen solas</label>}
+        {f.auto_send && d.plan && <p className="meta" style={{ margin: 0 }}>Si cambiás el monto, la moneda o el cliente, la próxima vuelve a esperar tu «Aprobar y enviar».</p>}
         <label className="pf-bool"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} />Cobro activo</label>
         {!a.customer_id && <p className="meta">Se va a crear el cliente de facturación con los datos del aliado.</p>}
         <button className="btn btn--crimson" disabled={f.amount === ""} onClick={guardar}><Icon d={I.check} />Crear o actualizar el cobro mensual</button>

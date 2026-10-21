@@ -224,7 +224,8 @@ export default function CustomerDetail() {
             </dl>
             {/* cobranza (plan 1.3): acuerdo de pago o cliente delicado -> sin recordatorios automaticos */}
             <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13, marginTop: 14 }}>
-              <input type="checkbox" checked={!!c.no_reminders} disabled={!allows("crm.editar")} onChange={(e) => toggleReminders(e.target.checked)} style={{ marginTop: 3 }} />
+              {/* apaga los recordatorios de TODAS sus facturas: de quien cobra toda la cartera (routers/catalog.can_pause_collections) */}
+              <input type="checkbox" checked={!!c.no_reminders} disabled={!(allows("settings.configurar") || (allows("sales.enviar") && allows("sales.ver_todo")))} onChange={(e) => toggleReminders(e.target.checked)} style={{ marginTop: 3 }} />
               <span><b>Sin recordatorios de cobro</b><br /><span className="muted">El cliente no recibe los recordatorios automáticos de facturas por vencer o vencidas.</span></span>
             </label>
             {c.active && <button className="btn btn--danger btn--sm" style={{ marginTop: 16 }} onClick={archive}>Archivar cliente</button>}

@@ -35,7 +35,7 @@ export default function CollectionsCard({ cfg, save }: { cfg: CollectionsCfg; sa
   const [fecha, setFecha] = useState(today());
   const [ejemplo, setEjemplo] = useState(false);
   const [busy, setBusy] = useState(false);
-  const canPreview = allows("sales.ver_todo");
+  const canPreview = allows("settings.configurar"); // trae la cartera de toda la empresa y los deudores con su correo
 
   const load = async (f = fecha) => {
     setBusy(true);
@@ -46,6 +46,14 @@ export default function CollectionsCard({ cfg, save }: { cfg: CollectionsCfg; sa
   const baseline = async () => {
     try { await api("/collections/baseline", { method: "POST" }); toast("Línea base registrada"); load(); }
     catch (e) { toast(e instanceof Error ? e.message : "No se pudo", "bad"); }
+  };
+  /* La fecha de corte se guarda al salir del campo, no en cada tecla: al teclear el año dígito por dígito el navegador
+     da fechas válidas intermedias (0002, 0020, 0202...) y un corte en el año 0202 metería toda la cartera vieja. */
+  const corte = (v: string) => {
+    if (v === (cfg.collections_start_date || "")) return;
+    const y = v ? Number(v.slice(0, 4)) : 0;
+    if (v && (y < 2020 || y > new Date().getFullYear() + 1)) { toast("Fecha de corte: escribí una fecha entre 2020 y el año que viene", "bad"); return; }
+    save({ collections_start_date: v || null });
   };
   const stages = (key: "collections_stages" | "collections_ally_stages", text: string) => {
     const v = parse(text);
@@ -61,7 +69,7 @@ export default function CollectionsCard({ cfg, save }: { cfg: CollectionsCfg; sa
           <span><b>Recordatorios de cobro al cliente</b><br /><span className="muted">Solo facturas que ya le llegaron al cliente, con saldo. Cada recordatorio lleva el PDF y el enlace de pago. Antes de encenderlo, revisá la vista previa.</span></span>
         </label>
         <Field label="Fecha de corte de cartera" hint="Solo se recuerdan facturas emitidas desde esta fecha. Sin fecha no sale ningún recordatorio.">
-          <input className="input" type="date" value={cfg.collections_start_date || ""} onChange={(e) => save({ collections_start_date: e.target.value || null })} style={{ maxWidth: 200 }} />
+          <input className="input" type="date" key={cfg.collections_start_date || ""} defaultValue={cfg.collections_start_date || ""} min="2020-01-01" onBlur={(e) => corte(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") corte(e.currentTarget.value); }} style={{ maxWidth: 200 }} />
         </Field>
         <div className="grid-2">
           <Field label="Etapas (días respecto del vencimiento)" hint="Negativo = antes de vencer. Ej.: -3, 0, 3, 10">

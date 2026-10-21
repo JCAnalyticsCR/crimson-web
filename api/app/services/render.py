@@ -72,8 +72,31 @@ td{padding:8px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-
 </body></html>""")
 
 
+AVISO_DE_COBRO = "aviso de cobro"
+
+
+def doc_kind(doc: Quote | Invoice) -> str:
+    """Como se le presenta el documento al cliente, en minuscula ("factura", "cotización" o "aviso de cobro").
+
+    Plan 1.4: la mensualidad de un aliado sin comprobante fiscal aceptado (modo de Hacienda "ninguno" o sin emitir) es
+    un "aviso de cobro", no una factura. Una sola regla para el primer correo, los recordatorios de la secuencia, el
+    PDF que descarga el aliado y la impresion: el mismo documento nunca sale con dos titulos."""
+    if not isinstance(doc, Invoice):
+        return "cotización"
+    from .ally_access import PLAN_ORDER
+
+    if doc.external_order == PLAN_ORDER and doc.einvoice_status != "aceptada":
+        return AVISO_DE_COBRO
+    return "factura"
+
+
+def doc_title(doc: Quote | Invoice) -> str:
+    k = doc_kind(doc)
+    return f"{k[:1].upper()}{k[1:]}"
+
+
 def render_html(db: Session, doc: Quote | Invoice, tenant: Tenant, kind: str | None = None) -> str:
-    """kind cambia el titulo ("Aviso de cobro": la mensualidad sin comprobante fiscal no se presenta como factura)."""
+    """kind cambia el titulo; por defecto doc_title ("Aviso de cobro" en la mensualidad sin comprobante fiscal)."""
     c = db.get(Customer, doc.customer_id) if doc.customer_id else None
     is_inv = isinstance(doc, Invoice)
     st = tenant.settings or {}
@@ -82,7 +105,7 @@ def render_html(db: Session, doc: Quote | Invoice, tenant: Tenant, kind: str | N
         d=doc,
         t=tenant,
         c=c,
-        kind=kind or ("Factura" if is_inv else "Cotización"),
+        kind=kind or doc_title(doc),
         leyenda=LEYENDA,
         balance=doc.balance if is_inv else None,
         footer=st.get("invoice_footer" if is_inv else "quote_footer"),

@@ -835,12 +835,14 @@ def plan_put(cid: int, data: PlanIn, p: Principal = Depends(require("aliados", "
         lines=[LineInSchema(product_id=prod.id, name=f"Acceso a la plataforma · {c.name}"[:200], quantity=Decimal(qty), unit_price=data.amount)],
     ).model_dump(mode="json", exclude={"customer_id"})
     DocumentIn(**template)  # validar antes de guardar
+    from .ops import send_flags, send_terms, set_send_approval
+
     r = db.get(Recurrence, c.recurrence_id) if c.recurrence_id else None
-    if r is None or r.tenant_id != p.tenant.id:
-        r = Recurrence(tenant_id=p.tenant.id, kind="factura", frequency="mensual", runs=0, first_run_requires_approval=True)
+    nueva = r is None or r.tenant_id != p.tenant.id
+    if nueva:
+        r = Recurrence(tenant_id=p.tenant.id, kind="factura", frequency="mensual", runs=0, first_run_requires_approval=True, auto_send=True)
         db.add(r)
-    if data.first_run_requires_approval is not None:
-        r.first_run_requires_approval = data.first_run_requires_approval
+    envio_antes = {**send_flags(r), "terms": None if nueva else send_terms(db, p.tenant.id, r.customer_id, r.template)}
     r.name = f"Mensualidad aliado · {c.name}"[:160]
     r.customer_id = c.customer_id
     r.template = template
@@ -849,10 +851,15 @@ def plan_put(cid: int, data: PlanIn, p: Principal = Depends(require("aliados", "
     r.auto_send = data.auto_send
     r.active = data.active
     r.auto_charge = False  # nunca se cobra solo
+    # otro cliente, otra moneda u otro monto: la proxima vuelve a esperar "Aprobar y enviar"; quitar la revision es de
+    # quien envia facturas (contabilidad tiene aliados.mensualidad pero no sales.enviar)
+    terms = send_terms(db, p.tenant.id, r.customer_id, r.template)
+    set_send_approval(p, r, data.first_run_requires_approval, rearm=not nueva and terms != envio_antes["terms"])
     db.flush()
     c.recurrence_id = r.id
     c.plan_amount, c.plan_currency = data.amount, data.currency
     c.plan_since = c.plan_since or data.next_date
-    audit_change(db, p, "plan", "ally_company", c.id, antes, _snapshot(c), company=c.name, always=True)
+    envio = {"antes": {k: v for k, v in envio_antes.items() if k != "terms"}, "despues": send_flags(r)}
+    audit_change(db, p, "plan", "ally_company", c.id, antes, _snapshot(c), company=c.name, always=True, extra={"envio": envio})
     db.commit()
     return plan_out(db, c)

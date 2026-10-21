@@ -381,9 +381,16 @@ def portfolio(db: Session, t: Tenant, today: date) -> dict:
     }
 
 
-def recovered_after_reminders(db: Session, t: Tenant, a: date, b: date) -> Decimal:
-    """Cobrado entre a y b (inclusive) en facturas que ya habian recibido un recordatorio ese dia o antes (C.2)."""
-    total = Decimal(0)
+LINK_PROVIDERS = ("onvo",)  # cobros que entran por el enlace de pago (PayPal esta apagado en /public/pay)
+
+
+def recovered_after_reminders(db: Session, t: Tenant, a: date, b: date) -> dict[str, Decimal]:
+    """Cobrado entre a y b (inclusive) en facturas que ya habian recibido un recordatorio ese dia o antes (C.2).
+
+    "enlace" es la cobranza recuperada: colones cobrados POR EL ENLACE de pago despues de un recordatorio (la cifra de
+    valor con la que se cobra el servicio, nunca inflada). "otros" es lo que entro despues de un aviso por SINPE,
+    transferencia o efectivo registrado a mano: se muestra aparte y no cuenta como recuperado."""
+    out = {"enlace": Decimal(0), "otros": Decimal(0)}
     pagos = db.scalars(
         select(Payment).where(Payment.tenant_id == t.id, Payment.kind == "captura", Payment.status == "confirmado", Payment.paid_at >= a, Payment.paid_at <= b)
     ).all()
@@ -393,8 +400,8 @@ def recovered_after_reminders(db: Session, t: Tenant, a: date, b: date) -> Decim
         )
         if primero is not None and primero <= p.paid_at:
             inv = db.get(Invoice, p.invoice_id)
-            total += _crc(t, inv, p.amount)
-    return total.quantize(Decimal("0.01"))
+            out["enlace" if p.provider in LINK_PROVIDERS else "otros"] += _crc(t, inv, p.amount)
+    return {k: v.quantize(Decimal("0.01")) for k, v in out.items()}
 
 
 def _customer_name(db: Session, inv: Invoice) -> str:
@@ -459,8 +466,10 @@ def weekly_summary(db: Session, today: date | None = None) -> int:
             f"<p>Por cobrar: <b>{money(p['total'], cur)}</b> en {p['n']} factura(s). Vencida: <b>{money(p['vencida'], cur)}</b> en {p['n_vencidas']}.</p>"
             f"<p>{comparacion}</p>"
             f"<p>Últimos 7 días: {enviados} recordatorio(s) enviados{f', {fallidos} sin salir' if fallidos else ''}; "
-            f"cobrado después de un recordatorio: <b>{money(recuperado, cur)}</b>.</p>"
-            f"<table border=0 cellpadding=6><tr><th align=left>Antigüedad</th><th align=right>Saldo</th></tr>{tramos}</table>"
+            f"cobranza recuperada (cobrado por el enlace de pago después de un recordatorio): <b>{money(recuperado['enlace'], cur)}</b>."
+            + (f" Por otros medios después de un aviso (SINPE, transferencia o efectivo, no cuenta como recuperado): {money(recuperado['otros'], cur)}." if recuperado["otros"] else "")
+            + "</p>"
+            + f"<table border=0 cellpadding=6><tr><th align=left>Antigüedad</th><th align=right>Saldo</th></tr>{tramos}</table>"
             + (f"<p><b>Las 10 vencidas más grandes</b></p><table border=0 cellpadding=6><tr><th>Factura</th><th>Cliente</th><th>Días</th><th>Saldo</th></tr>{filas}</table>" if filas else "")
             + mora
             + "<p>Detalle en Facturas → Vencidas.</p>"

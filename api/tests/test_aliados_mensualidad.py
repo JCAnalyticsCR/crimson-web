@@ -185,10 +185,12 @@ def test_plan_usa_el_servicio_por_defecto(client, auth, db_session):
     assert client.put(f"/allies/{a}/plan", json=body).status_code == 200
     rec = db_session.get(Recurrence, db_session.get(AllyCompany, a).recurrence_id)
     assert rec.template["lines"][0]["product_id"] == prod.id and rec.first_run_requires_approval is True
-    # actualizar el plan no vuelve a pedir aprobacion si ya se aprobo
+    # actualizar el plan no vuelve a pedir aprobacion si ya se aprobo (otra fecha); otro monto si
     rec.first_run_requires_approval = False
     db_session.commit()
-    assert client.put(f"/allies/{a}/plan", json={**body, "amount": 45000}).json()["plan"]["first_run_requires_approval"] is False
+    otra_fecha = (date.today() + timedelta(days=5)).isoformat()
+    assert client.put(f"/allies/{a}/plan", json={**body, "next_date": otra_fecha}).json()["plan"]["first_run_requires_approval"] is False
+    assert client.put(f"/allies/{a}/plan", json={**body, "amount": 45000}).json()["plan"]["first_run_requires_approval"] is True
 
 
 def test_mensualidad_por_defecto_configurable(client, auth, db_session):
@@ -254,3 +256,34 @@ def test_ganancias_sin_economia(client, auth, db_session, monkeypatch):
     assert client.get("/aliado/ganancias", headers=h).status_code == 503
     assert client.get("/auth/me", headers=h).json()["ally_company"]["features"]["ganancias"] is False
     assert client.get("/aliado/inicio", headers=h).json()["dinero"] is None
+
+
+def test_plan_revision_de_la_primera_y_cambio_de_monto(client, auth, db_session):
+    """Plan 1.4: dejar que la mensualidad salga sola sin revisar es de quien envia facturas (contabilidad tiene
+    aliados.mensualidad pero no sales.enviar), y cambiar el monto vuelve a pedir "Aprobar y enviar". Queda en la bitacora."""
+    from app.models import AllyCompany, AuditLog, Recurrence
+    from tests.test_session4 import _user_with_role
+
+    a = client.post("/allies", json={"name": "Aliado Dos S.A.", "tax_id": "3-101-000002", "email": "pagos@aliado-dos.ejemplo.com"}).json()["id"]
+    pid = _servicio(client)
+    assert _plan(client, a, pid).json()["plan"]["first_run_requires_approval"] is True
+    pw = _user_with_role(db_session, auth["tenant"]["id"], "conta.mensualidad@ejemplo.com", "contabilidad")
+    keep = client.headers.pop("Authorization")
+    tok = client.post("/auth/login", json={"email": "conta.mensualidad@ejemplo.com", "password": pw}).json()["access_token"]
+    client.headers["Authorization"] = keep
+    h = {"Authorization": f"Bearer {tok}"}
+    body = {"amount": 50000, "currency": "CRC", "mode": "fija", "next_date": date.today().isoformat(), "product_id": pid}
+    assert client.put(f"/allies/{a}/plan", json={**body, "first_run_requires_approval": False}, headers=h).status_code == 403
+    assert client.put(f"/allies/{a}/plan", json={**body, "first_run_requires_approval": True}, headers=h).status_code == 200
+    # el admin la deja salir sola; despues sube el monto: la proxima vuelve a esperar la revision
+    assert _plan(client, a, pid, first_run_requires_approval=False).json()["plan"]["first_run_requires_approval"] is False
+    assert _plan(client, a, pid, amount=65000, first_run_requires_approval=False).json()["plan"]["first_run_requires_approval"] is True
+    rec = db_session.get(Recurrence, db_session.get(AllyCompany, a).recurrence_id)
+    assert rec.first_run_requires_approval is True
+    logs = db_session.scalars(
+        select(AuditLog).where(AuditLog.entity == "ally_company", AuditLog.entity_id == a, AuditLog.action == "plan").order_by(AuditLog.id)
+    ).all()
+    assert logs[-1].diff["envio"] == {
+        "antes": {"auto_send": True, "first_run_requires_approval": False},
+        "despues": {"auto_send": True, "first_run_requires_approval": True},
+    }

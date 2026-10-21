@@ -245,6 +245,7 @@ def _paid_order(db: Session, t: Tenant, oid: int, obj: dict, amount_cents, curre
 def _paid_invoice(db: Session, t: Tenant, iid: int, obj: dict, amount_cents, currency, intent_id: str, source: str) -> str:
     from ..schemas.sales import PaymentIn
     from .documents import add_payment
+    from .invoice_states import cr_today
 
     inv = db.get(Invoice, iid, with_for_update=True, populate_existing=True)
     if not inv or inv.tenant_id != t.id:
@@ -280,7 +281,11 @@ def _paid_invoice(db: Session, t: Tenant, iid: int, obj: dict, amount_cents, cur
         t.id,
         None,
         inv,
-        PaymentIn(method="onvo", kind="captura", currency=inv.currency, amount=amount, external_ref=intent_id[:120], notes=f"Pago en línea ONVO ({source})"),
+        # fecha de Costa Rica: un pago a las 20:00 CR no queda con la fecha UTC del dia siguiente (el resumen semanal la
+        # compara con la del recordatorio, que tambien es de CR)
+        PaymentIn(
+            method="onvo", kind="captura", currency=inv.currency, amount=amount, external_ref=intent_id[:120], notes=f"Pago en línea ONVO ({source})", paid_at=cr_today()
+        ),
     )
     p.provider, p.provider_event = "onvo", slim(obj)
     saldo = Decimal(str(inv.balance))
