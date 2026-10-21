@@ -80,6 +80,30 @@ def test_vencimiento_con_el_dia_de_costa_rica(worker, db_session):
     assert hoy.status == "parcial"  # a las 21:00 CR todavia es su dia de vencimiento
 
 
+def test_recordatorio_con_el_dia_de_costa_rica_y_una_sola_vez(worker, db_session):
+    """sales.reminders: el objetivo sale del dia de Costa Rica (no del UTC del contenedor) y lleva dedupe_key (regla 6):
+    si la tarea corre dos veces el mismo dia, el cliente recibe un solo recordatorio."""
+    from datetime import timedelta
+
+    from app.models import Customer
+
+    t = db_session.scalar(select(Tenant).order_by(Tenant.id))
+    t.settings = {**(t.settings or {}), "notify_due": True, "remind_days_before": 3}
+    c = Customer(tenant_id=t.id, name="Cliente de prueba", email="Cliente@Ejemplo.com")
+    db_session.add(c)
+    db_session.flush()
+    # 3 dias despues del dia CR (10 de marzo); con date.today() del reloj real nunca coincidiria
+    inv = Invoice(
+        tenant_id=t.id, number="FEC-000780", customer_id=c.id, issue_date=DIA_CR, due_date=DIA_CR + timedelta(days=3), status="enviada", balance=Decimal("1000")
+    )
+    db_session.add(inv)
+    db_session.commit()
+    assert worker.reminders() == 1
+    worker.reminders()  # segunda corrida del mismo dia (reintento, tarea reentregada)
+    rows = db_session.scalars(select(EmailOutbox).where(EmailOutbox.entity == "invoice", EmailOutbox.entity_id == inv.id)).all()
+    assert len(rows) == 1 and rows[0].dedupe_key == f"recordatorio:{inv.id}:{inv.due_date}:cliente@ejemplo.com"
+
+
 class _Ctx:
     def __init__(self, s):
         self.s = s

@@ -7,16 +7,20 @@ cierre de caja diario, emision fiscal en contingencia (Fase 2), conciliacion ONV
 from __future__ import annotations
 
 import logging
-from datetime import date
 
 from celery import Celery
 from celery.schedules import crontab
 from celery.signals import setup_logging as celery_setup_logging
 
 from app.core.config import settings
+from app.core.logging import setup_logging
 from app.tasks.salud import connect_signals  # tambien registra las tareas salud.* (shared_task)
 
 log = logging.getLogger("crimson.worker")
+# plan 1.8: antes de las lineas de arranque de abajo (kid de FISCAL_KEYS, configuracion faltante), que salen al importar
+# este modulo y antes de la señal de Celery: sin esto el INFO se perdia y el WARNING salia sin nivel ni logger. La
+# señal lo vuelve a aplicar (idempotente) con el nivel de la linea de comando.
+setup_logging()
 
 
 @celery_setup_logging.connect
@@ -155,6 +159,7 @@ def reminders() -> int:
     from sqlalchemy import select
 
     from app.core.db import SessionLocal
+    from app.core.timeutil import cr_today
     from app.models import Customer, Invoice, Tenant
     from app.services.mail import doc_email_html, queue_email
     from app.services.render import money
@@ -165,7 +170,7 @@ def reminders() -> int:
             st = t.settings or {}
             if not st.get("notify_due", True):
                 continue
-            target = date.today() + timedelta(days=int(st.get("remind_days_before", 3)))
+            target = cr_today() + timedelta(days=int(st.get("remind_days_before", 3)))
             for inv in db.scalars(
                 select(Invoice).where(Invoice.tenant_id == t.id, Invoice.status.in_(("creado", "enviada", "parcial")), Invoice.due_date == target)
             ):
@@ -179,6 +184,8 @@ def reminders() -> int:
                         doc_email_html(t, "factura", inv.number, money(inv.balance, inv.currency), None, "Le recordamos que su factura vence pronto."),
                         "invoice",
                         inv.id,
+                        # regla 6: dos corridas el mismo dia (reintento, tarea reentregada) no le repiten el correo
+                        dedupe_key=f"recordatorio:{inv.id}:{inv.due_date}:{c.email.strip().lower()}",
                     )
                     n += 1
         db.commit()

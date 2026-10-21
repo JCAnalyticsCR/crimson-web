@@ -276,7 +276,8 @@ class EmailOutbox(TenantMixin, TimestampMixin, Base):
     attachments: Mapped[list] = mapped_column(JSON, default=list)  # [{name, kind, ref}]
     entity: Mapped[str | None] = mapped_column(String(40))
     entity_id: Mapped[int | None] = mapped_column(Integer)
-    # pendiente | enviado | error (se reintenta) | fallido (ya no se reintenta) | simulado (sin llave de correo)
+    # pendiente | enviado | error (se reintenta) | fallido (ya no se reintenta) | reemplazado (salio despues otro envio
+    # del mismo documento a la misma direccion) | simulado (sin llave de correo)
     status: Mapped[str] = mapped_column(String(20), default="pendiente")
     provider_id: Mapped[str | None] = mapped_column(String(120))
     error: Mapped[str | None] = mapped_column(Text)

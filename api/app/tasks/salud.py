@@ -1,14 +1,22 @@
 """Salud de la plataforma del lado del worker (plan 1.8).
 
 - Corridas: las señales de Celery (task_prerun, task_postrun, task_failure) dejan cada corrida en task_run (inicio,
-  fin, ok, resumen, error). Un fallo manda correo a los administradores y a OPS_ALERT_EMAILS (JC), como maximo uno
-  por tarea y por dia de Costa Rica (dedupe_key). Registrar nunca rompe la tarea: un error aqui solo va al log.
+  fin, ok, resumen, error). Un reintento programado (autoretry) no es una falla: queda ok=None con su hora de fin y
+  {"reintento": true}; la falla es solo el estado final (task_failure). Un fallo manda correo a quien opera la
+  plataforma, como maximo uno por tarea y por dia de Costa Rica (dedupe_key). Registrar nunca rompe la tarea: un error
+  aqui solo va al log.
 - Latido (salud.latido, cada 5 min): el worker deja su fila con los NOMBRES de la configuracion que le falta y su
-  ENV. Si el beat o el worker se detienen, /health/deep da 503 en menos de 15 min.
+  ENV. El beat, al despachar el latido, deja la suya (salud.beat, señal after_task_publish): asi el beat se mide aparte
+  y una tarea larga que deja el latido en la cola no da un 503 falso. Si el contenedor se detiene, /health/deep da 503
+  en menos de 15 min.
 - Correo diario de Salud (salud.correo_diario, 07:00 CR): las revisiones de /health/deep, las tareas que fallaron en
-  24 h y el correo de la empresa; a los administradores y a OPS_ALERT_EMAILS. Purga las corridas de mas de 30 dias.
+  24 h y el correo de la empresa operadora, a quien opera la plataforma. Los administradores de las demas empresas
+  reciben solo el bloque de la suya (conteos filtrados por empresa; nunca errores de tareas ni conteos globales).
+  Purga las corridas de mas de 30 dias.
 
-OPS_ALERT_EMAILS: correos de quien opera la plataforma, separados por coma (variable de entorno; nunca en el codigo).
+Quien opera la plataforma: los administradores de la empresa OPS_TENANT (slug; si no esta, la primera empresa activa) y
+OPS_ALERT_EMAILS (correos separados por coma). Variables de entorno; nunca en el codigo.
+Los textos de error no llevan parametros de URL, llaves, correos, numeros largos (cedulas) ni el DETAIL de Postgres.
 
 Las dos tareas (salud.latido, salud.correo_diario) son shared_task: worker/celery_app.py solo importa este modulo y
 pone sus entradas en el beat (regla de integracion 4).
@@ -36,6 +44,7 @@ from ..services import salud as svc
 log = logging.getLogger("crimson.salud")
 
 HEARTBEAT_TASK = svc.HEARTBEAT_TASK
+BEAT_TASK = svc.BEAT_TASK
 SELF_RECORDED = frozenset({HEARTBEAT_TASK})  # deja su propia fila (no depende de las señales)
 KEEP = timedelta(days=30)
 KEEP_HEARTBEAT = timedelta(days=2)
@@ -54,18 +63,32 @@ def _session() -> Session:
 # ---------- textos sin secretos ----------
 _QUERY = re.compile(r"(https?://[^\s'\"?#]+)\?[^\s'\"]*")
 _SECRET = re.compile(r"(?i)(bearer\s+|(?:token|key|secret|password|passwd|pin|signature|sig)\s*[=:]\s*)[^\s&'\",;]+")
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_LONG_DIGITS = re.compile(r"(?<!\d)\d{9,}(?!\d)")  # cedulas (9 a 12 digitos), telefonos con prefijo, cuentas
 
 
 def sanitize(msg: str) -> str:
-    """Sin parametros de URL (ahi viajan tokens) ni valores de llaves o contraseñas; recortado."""
+    """Sin parametros de URL (ahi viajan tokens), valores de llaves o contraseñas, correos ni numeros largos; recortado."""
     msg = _QUERY.sub(r"\1?…", msg or "")
     msg = _SECRET.sub(lambda m: m.group(1) + "***", msg)
+    msg = _EMAIL.sub("[correo]", msg)
+    msg = _LONG_DIGITS.sub("[número]", msg)
     return msg[:500]
 
 
 def error_text(exc: BaseException | None) -> str:
+    """Tipo y mensaje del error, sin datos de clientes. De la base, solo los tipos y el nombre de la restriccion: el
+    mensaje de psycopg trae el DETAIL de Postgres con los valores de la fila (y SQLAlchemy, los parametros)."""
     if exc is None:
         return "Error desconocido"
+    from sqlalchemy.exc import SQLAlchemyError
+
+    if isinstance(exc, SQLAlchemyError):
+        orig = getattr(exc, "orig", None)
+        if orig is None:
+            return type(exc).__name__
+        cons = getattr(getattr(orig, "diag", None), "constraint_name", None)
+        return sanitize(f"{type(exc).__name__} ({type(orig).__name__}{f', restricción {cons}' if cons else ''})")
     return sanitize(f"{type(exc).__name__}: {exc}")
 
 
@@ -95,18 +118,24 @@ def _tenants(db: Session) -> list[Tenant]:
     return list(db.scalars(select(Tenant).where(Tenant.active).order_by(Tenant.id)))
 
 
-def _send_all(db: Session, subject: str, body: str, key: str, per_tenant=None) -> int:
-    """A los administradores de cada empresa activa y, con la primera (la que opera la plataforma), a OPS_ALERT_EMAILS.
-    `per_tenant(t)` agrega el bloque de cada empresa. Cada destinatario lleva su dedupe_key."""
-    n = 0
+def operator_tenant(db: Session) -> Tenant | None:
+    """La empresa que opera la plataforma: OPS_TENANT (slug) o, si no esta o no existe, la primera empresa activa."""
     tenants = _tenants(db)
-    for i, t in enumerate(tenants):
-        html_t = body + (per_tenant(t) if per_tenant else "")
-        n += mail.notify_roles(db, t, ("admin",), subject, html_t, "salud", 0, dedupe_key=key)
-        if i == 0:
-            for e in ops_emails():
-                mail.queue_email(db, t, e, subject, html_t, "salud", 0, dedupe_key=f"{key}|{e}")
-                n += 1
+    slug = (os.getenv("OPS_TENANT") or "").strip().lower()
+    return next((t for t in tenants if slug and (t.slug or "").lower() == slug), tenants[0] if tenants else None)
+
+
+def _send_ops(db: Session, subject: str, body: str, key: str) -> int:
+    """Avisos de la plataforma (fallas de tareas, el correo de Salud con sus revisiones globales): solo a quien la
+    opera, los administradores de la empresa operadora y OPS_ALERT_EMAILS (con esa empresa). Nunca a las demas
+    empresas: el cuerpo trae conteos de todas y textos de error. Cada destinatario lleva su dedupe_key."""
+    t = operator_tenant(db)
+    if t is None:
+        return 0
+    n = mail.notify_roles(db, t, ("admin",), subject, body, "salud", 0, dedupe_key=key)
+    for e in ops_emails():
+        mail.queue_email(db, t, e, subject, body, "salud", 0, dedupe_key=f"{key}|{e}")
+        n += 1
     return n
 
 
@@ -156,7 +185,12 @@ def on_postrun(task_id=None, task=None, retval=None, state=None, **_kw) -> None:
             if state == "SUCCESS":
                 r.ok, r.summary = True, _summary(retval)
             elif state == "RETRY":
-                r.ok, r.error = False, r.error or sanitize(f"Reintento programado: {retval}")
+                # autoretry (fx.bccr_daily): no es una falla, la tarea vuelve a correr; si al final falla, lo dice
+                # task_failure. ok=None con hora de fin = reintento (sin hora de fin = en curso)
+                exc = getattr(retval, "exc", None)
+                motivo = error_text(exc) if isinstance(exc, BaseException) else sanitize(str(retval or ""))
+                r.ok, r.summary = None, {"reintento": True}
+                r.error = r.error or f"Reintento programado: {motivo}"[:500]
             else:
                 r.ok = False
             db.commit()
@@ -164,17 +198,33 @@ def on_postrun(task_id=None, task=None, retval=None, state=None, **_kw) -> None:
         log.exception("no se pudo registrar el fin de %s", getattr(task, "name", "?"))
 
 
+def on_publish(sender=None, **_kw) -> None:
+    """En el proceso del beat: al despachar salud.latido deja la fila salud.beat. Asi /health/deep sabe que el beat
+    vive aunque el latido espere en la cola detras de una tarea larga. Nunca rompe el despacho."""
+    if sender != HEARTBEAT_TASK:
+        return
+    try:
+        with _session() as db:
+            now = datetime.now(UTC)
+            db.add(TaskRun(task=BEAT_TASK, started_at=now, finished_at=now, ok=True))
+            db.commit()
+    except Exception:  # noqa: BLE001
+        log.exception("no se pudo registrar el despacho del latido")
+
+
 def connect_signals() -> None:
     """Lo llama worker/celery_app.py. dispatch_uid: importar dos veces no registra dos veces."""
-    from celery.signals import task_failure, task_postrun, task_prerun
+    from celery.signals import after_task_publish, task_failure, task_postrun, task_prerun
 
     task_prerun.connect(on_prerun, weak=False, dispatch_uid="crimson.salud.prerun")
     task_postrun.connect(on_postrun, weak=False, dispatch_uid="crimson.salud.postrun")
     task_failure.connect(on_failure, weak=False, dispatch_uid="crimson.salud.failure")
+    after_task_publish.connect(on_publish, weak=False, dispatch_uid="crimson.salud.publish")
 
 
 def alert_failure(db: Session, task: str, err: str) -> int:
-    """Correo de "una tarea fallo", como maximo uno por tarea y por dia de Costa Rica (por destinatario)."""
+    """Correo de "una tarea fallo" a quien opera la plataforma, como maximo uno por tarea y por dia de Costa Rica (por
+    destinatario)."""
     hoy = cr_today()
     subject = f"Falló una tarea automática: {task}"
     body = (
@@ -183,7 +233,7 @@ def alert_failure(db: Session, task: str, err: str) -> int:
         "<p>Se avisa una sola vez por día por tarea; las siguientes fallas quedan en las corridas del worker y en el "
         "correo diario de Salud.</p>"
     )
-    return _send_all(db, subject, body, f"salud:fallo:{task}:{hoy}")
+    return _send_ops(db, subject, body, f"salud:fallo:{task}:{hoy}")
 
 
 # ---------- latido ----------
@@ -227,31 +277,38 @@ def _detail(c: dict) -> str:
 def _runs_24h(db: Session, now: datetime) -> list[dict]:
     desde = now - timedelta(hours=24)
     out: dict[str, dict] = {}
-    for r in db.scalars(select(TaskRun).where(TaskRun.started_at >= desde, TaskRun.task != HEARTBEAT_TASK).order_by(TaskRun.started_at)):
-        x = out.setdefault(r.task, {"task": r.task, "total": 0, "fallas": 0, "sin_terminar": 0, "error": None})
+    q = select(TaskRun).where(TaskRun.started_at >= desde, TaskRun.task.not_in((HEARTBEAT_TASK, BEAT_TASK))).order_by(TaskRun.started_at)
+    for r in db.scalars(q):
+        x = out.setdefault(r.task, {"task": r.task, "total": 0, "fallas": 0, "sin_terminar": 0, "reintentos": 0, "error": None})
         x["total"] += 1
         started = r.started_at if r.started_at.tzinfo else r.started_at.replace(tzinfo=UTC)
         if r.ok is False:
             x["fallas"] += 1
             x["error"] = r.error
+        elif r.ok is None and r.finished_at is not None:
+            x["reintentos"] += 1  # reintento programado: la corrida siguiente dice como termino
         elif r.ok is None and now - started > STUCK:
             x["sin_terminar"] += 1
     return sorted(out.values(), key=lambda x: (-x["fallas"], -x["sin_terminar"], x["task"]))
 
 
 def _tenant_block(db: Session, t: Tenant, now: datetime) -> str:
+    """Lo de una sola empresa: sus correos de 24 h y su cola "Por emitir" (los "fallido", por la hora en que se dejaron)."""
     desde = now - timedelta(hours=24)
     rows = db.execute(
         select(EmailOutbox.status, func.count()).where(EmailOutbox.tenant_id == t.id, EmailOutbox.created_at >= desde).group_by(EmailOutbox.status)
     ).all()
     por = dict(rows)
+    por["fallido"] = svc.check_outbox(db, now, t.id)["fallidos_24h"]
     pe = svc.check_por_emitir(db, now, t.id)["mas_de_24h"]
     correo = " · ".join(f"{k}: {por.get(k, 0)}" for k in ("enviado", "error", "fallido", "simulado"))
     return f"<h4 style='margin:16px 0 4px'>{html.escape(t.name)}</h4><p>Correos de las últimas 24 h: {correo}<br>Facturas por emitir con más de 24 h: {pe}</p>"
 
 
 def daily_report(db: Session, now: datetime | None = None) -> int:
-    """Arma y manda el correo de Salud (uno por dia y destinatario) y purga corridas viejas. Hace commit."""
+    """Arma y manda el correo de Salud (uno por dia y destinatario) y purga corridas viejas. Hace commit.
+    Quien opera la plataforma recibe las revisiones, las tareas y el bloque de la empresa operadora; los administradores
+    de cada una de las demas empresas, solo el bloque de la suya."""
     now = now or datetime.now(UTC)
     hoy = cr_today()
     rep = svc.deep(db, now=now, today=hoy)
@@ -273,7 +330,14 @@ def daily_report(db: Session, now: datetime | None = None) -> int:
         f"<table border=0 cellpadding=4>{filas}</table>"
         f"<h4 style='margin:16px 0 4px'>Tareas automáticas (24 h)</h4>{bloque_t}"
     )
-    n = _send_all(db, f"Salud de la plataforma · {hoy} · {estado}", body, f"salud:diario:{hoy}", per_tenant=lambda t: _tenant_block(db, t, now))
+    op = operator_tenant(db)
+    n = _send_ops(db, f"Salud de la plataforma · {hoy} · {estado}", body + (_tenant_block(db, op, now) if op else ""), f"salud:diario:{hoy}")
+    for t in _tenants(db):
+        if op is not None and t.id == op.id:
+            continue
+        n += mail.notify_roles(
+            db, t, ("admin",), f"Salud de su empresa · {t.name} · {hoy}", _tenant_block(db, t, now), "salud", 0, dedupe_key=f"salud:empresa:{hoy}"
+        )
     db.commit()
     purge(db, now)
     return n
@@ -282,7 +346,7 @@ def daily_report(db: Session, now: datetime | None = None) -> int:
 def purge(db: Session, now: datetime | None = None) -> int:
     now = now or datetime.now(UTC)
     a = db.execute(delete(TaskRun).where(TaskRun.started_at < now - KEEP)).rowcount or 0
-    b = db.execute(delete(TaskRun).where(TaskRun.task == HEARTBEAT_TASK, TaskRun.started_at < now - KEEP_HEARTBEAT)).rowcount or 0
+    b = db.execute(delete(TaskRun).where(TaskRun.task.in_((HEARTBEAT_TASK, BEAT_TASK)), TaskRun.started_at < now - KEEP_HEARTBEAT)).rowcount or 0
     db.commit()
     return a + b
 
@@ -297,6 +361,6 @@ def latido() -> dict:
 
 @shared_task(name="salud.correo_diario")
 def correo_diario() -> int:
-    """Correo de Salud a los administradores y a OPS_ALERT_EMAILS; purga las corridas de mas de 30 dias."""
+    """Correo de Salud a quien opera la plataforma (y su bloque a cada empresa); purga las corridas de mas de 30 dias."""
     with _session() as db:
         return daily_report(db)

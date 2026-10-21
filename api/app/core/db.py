@@ -11,7 +11,9 @@ from .config import settings
 
 def make_engine(url: str | None = None) -> Engine:
     url = url or settings.database_url
-    kwargs: dict = {"pool_pre_ping": True}
+    # hide_parameters en produccion: el texto de un error de la base no lleva los valores de la fila (correos, cedulas,
+    # el XML) a los logs, a task_run ni a los correos de falla (plan 1.8)
+    kwargs: dict = {"pool_pre_ping": True, "hide_parameters": settings.is_prod}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
     engine = create_engine(url, **kwargs)

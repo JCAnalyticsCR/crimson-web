@@ -1,8 +1,9 @@
 """Configuracion que el worker necesita para que lo automatico le llegue a alguien.
 
-El worker lee varias variables "sueltas" con os.getenv (RESEND_API_KEY, MAIL_FROM, BCCR_TOKEN) ademas de las de
-Settings. Si falta una, el worker arranca igual y todo queda "simulado" o se salta en silencio. Al arrancar se registran
-en WARNING solo los NOMBRES que faltan (nunca valores), y el latido del worker los lleva a /health/deep.
+El worker lee varias variables "sueltas" con os.getenv (RESEND_API_KEY, MAIL_FROM, BCCR_TOKEN, OPS_ALERT_EMAILS)
+ademas de las de Settings. Si falta una, el worker arranca igual y todo queda "simulado" o se salta en silencio. Al
+arrancar se registran en WARNING solo los NOMBRES que faltan (nunca valores), y el latido del worker los lleva a
+/health/deep y al correo de Salud (como aviso: ninguna tumba el monitor).
 """
 
 from __future__ import annotations
@@ -11,7 +12,8 @@ import logging
 import os
 
 # en el orden en que se revisan; ninguna es secreta como nombre
-WORKER_CONFIG = ("RESEND_API_KEY", "MAIL_FROM", "PUBLIC_BASE_URL", "BCCR_TOKEN", "FISCAL_KEYS")
+# OPS_ALERT_EMAILS: sin ella las fallas de tareas y el correo de Salud solo le llegan a los administradores (no a JC)
+WORKER_CONFIG = ("RESEND_API_KEY", "MAIL_FROM", "PUBLIC_BASE_URL", "BCCR_TOKEN", "FISCAL_KEYS", "OPS_ALERT_EMAILS")
 
 
 def _env(name: str) -> bool:
@@ -31,6 +33,7 @@ def missing_config() -> list[str]:
         "PUBLIC_BASE_URL": base_url,
         "BCCR_TOKEN": _env("BCCR_TOKEN"),
         "FISCAL_KEYS": fiscal,
+        "OPS_ALERT_EMAILS": "@" in (os.getenv("OPS_ALERT_EMAILS") or ""),
     }
     return [n for n in WORKER_CONFIG if not present[n]]
 
@@ -40,7 +43,7 @@ def log_missing_config(logger: logging.Logger | None = None) -> list[str]:
     faltan = missing_config()
     if faltan:
         (logger or logging.getLogger("crimson.config")).warning(
-            "Configuracion del worker incompleta, faltan: %s (sin RESEND_API_KEY los correos quedan 'simulado'; sin BCCR_TOKEN no hay tipo de cambio automatico)",
+            "Configuracion del worker incompleta, faltan: %s (sin RESEND_API_KEY los correos quedan 'simulado'; sin BCCR_TOKEN no hay tipo de cambio automatico; sin OPS_ALERT_EMAILS las fallas y el correo de Salud no le llegan a quien opera la plataforma)",
             ", ".join(faltan),
         )
     return faltan

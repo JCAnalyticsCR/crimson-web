@@ -1,16 +1,19 @@
 """Reintento del correo saliente (tarea mail.retry_outbox, cada 15 minutos).
 
-- Solo toma "pendiente" o "error" cuyo `next_attempt_at` ya paso (o sin hora: filas de antes de los reintentos), de la
-  mas vieja a la mas nueva. Nunca invitaciones ni enlaces de contraseña (SENSITIVE_ENTITIES: su HTML guardado ya no
-  tiene el enlace; el admin usa "Reenviar").
-- Un correo que llevaba adjuntos (cotizacion o factura con su PDF, XML) no se reenvia sin ellos: queda "fallido" y se le
-  avisa al dueño del documento, que lo reenvia desde el documento.
-- Cada reintento fallido duplica la espera (mail.retry_wait); al intento mail.MAX_ATTEMPTS queda "fallido", con el
-  mismo aviso. Una direccion mala ya no son 96 intentos al dia.
-- Si despues salio bien otro correo del mismo documento a la misma direccion (el vendedor lo reenvio), el viejo se
-  deja sin reintento y sin aviso.
-- Lo que lleva mas de MAX_AGE en la cola (filas de antes de este cambio, o un worker caido mucho tiempo) se deja sin
-  enviar y sin aviso: un recordatorio de hace dias confunde mas de lo que ayuda (lo cuenta el correo de Salud).
+- Solo toma "pendiente" o "error" cuyo `next_attempt_at` ya paso (o sin hora: los que llevaban adjuntos y las filas de
+  antes de los reintentos), de la mas vieja a la mas nueva. Nunca invitaciones ni enlaces de contraseña
+  (SENSITIVE_ENTITIES: su HTML guardado ya no tiene el enlace; el admin usa "Reenviar").
+- En este orden:
+  1. Si despues salio bien otro correo del mismo documento a la misma direccion (el vendedor lo reenvio), el viejo
+     queda "reemplazado": sin reintento, sin aviso y sin contar como fallido en Salud.
+  2. Lo que lleva mas de MAX_AGE en la cola queda "fallido" sin salir: un recordatorio de hace dias confunde mas de lo
+     que ayuda. Si es un correo de despues de este cambio (con intentos: el worker estuvo caido mas de 24 h), se le
+     avisa al dueño del documento; las filas de antes (0 intentos, a veces de hace meses) no generan aviso. Salud los
+     cuenta por la hora en que se dejaron (updated_at).
+  3. Un correo que llevaba adjuntos (cotizacion o factura con su PDF, XML) no se reenvia sin ellos: queda "fallido" y
+     se le avisa al dueño del documento, que lo reenvia desde el documento.
+  4. Lo demas se reintenta; cada fallo duplica la espera (mail.retry_wait) y al intento mail.MAX_ATTEMPTS queda
+     "fallido", con el mismo aviso. Una direccion mala ya no son 96 intentos al dia.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ log = logging.getLogger("crimson.mail")
 MAX_AGE = timedelta(hours=24)
 BATCH = 50
 FAILED = "fallido"
+REPLACED = "reemplazado"  # salio despues otro envio del mismo documento a la misma direccion
 _DOCS = {"quote": ("Cotización", Quote), "invoice": ("Factura", Invoice)}
 
 
@@ -37,9 +41,9 @@ def _aware(dt: datetime | None) -> datetime | None:
     return dt if dt is None or dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
-def _give_up(m: EmailOutbox, motivo: str) -> None:
+def _give_up(m: EmailOutbox, motivo: str, status: str = FAILED) -> None:
     prev = (m.error or "").strip()
-    m.status, m.next_attempt_at = FAILED, None
+    m.status, m.next_attempt_at = status, None
     m.error = (f"{motivo} Último error: {prev}" if prev else motivo)[:500]
 
 
@@ -149,17 +153,20 @@ def retry_outbox(db: Session, now: datetime | None = None, limit: int = BATCH) -
         .with_for_update(skip_locked=True)  # dos workers nunca toman el mismo correo
     )
     out = {"reintentos": 0, "enviados": 0, "fallidos": 0, "vencidos": 0, "reemplazados": 0, "avisos": 0}
-    failed: list[EmailOutbox] = []
+    avisar: list[EmailOutbox] = []  # lo que ya no sale y su dueño debe saberlo
     for m in db.scalars(q).all():
         if _superseded(db, m):
-            _give_up(m, "Ya salió un envío posterior del mismo documento a esta dirección.")
+            _give_up(m, "Ya salió un envío posterior del mismo documento a esta dirección.", REPLACED)
             out["reemplazados"] += 1
-        elif m.attachments:
-            _give_up(m, "Llevaba adjuntos, que no se guardan: no se reenvía sin ellos.")
-            failed.append(m)
-        elif now - (_aware(m.created_at) or now) > MAX_AGE:
+        elif now - (_aware(m.created_at) or now) > MAX_AGE:  # antes que los adjuntos: lo viejo nunca genera aviso
             _give_up(m, f"Se dejó de reintentar: llevaba más de {int(MAX_AGE.total_seconds() // 3600)} h sin salir.")
             out["vencidos"] += 1
+            if m.attempts:  # de despues de este cambio: el worker estuvo caido; las filas de antes tienen 0 intentos
+                avisar.append(m)
+        elif m.attachments:
+            _give_up(m, "Llevaba adjuntos, que no se guardan: no se reenvía sin ellos.")
+            out["fallidos"] += 1
+            avisar.append(m)
         else:
             mail.deliver(m)
             out["reintentos"] += 1
@@ -167,12 +174,12 @@ def retry_outbox(db: Session, now: datetime | None = None, limit: int = BATCH) -
                 out["enviados"] += 1
             elif m.status == "error" and (m.attempts or 0) >= mail.MAX_ATTEMPTS:
                 _give_up(m, f"Falló {mail.MAX_ATTEMPTS} veces: ya no se reintenta.")
-                failed.append(m)
-    out["fallidos"] = len(failed)
+                out["fallidos"] += 1
+                avisar.append(m)
     db.commit()  # lo enviado y lo fallido queda marcado antes de mandar los avisos
-    if failed:
-        out["avisos"] = _notify_owners(db, failed)
+    if avisar:
+        out["avisos"] = _notify_owners(db, avisar)
         db.commit()
-    if failed or out["vencidos"]:
-        log.warning("Correo: %s fallido(s) y %s vencido(s) sin salir", len(failed), out["vencidos"])
+    if out["fallidos"] or out["vencidos"]:
+        log.warning("Correo: %s fallido(s) y %s vencido(s) sin salir", out["fallidos"], out["vencidos"])
     return out

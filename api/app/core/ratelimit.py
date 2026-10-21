@@ -55,6 +55,9 @@ access_request_limiter = SlidingWindow(limit=5, seconds=3600)
 access_request_global_limiter = SlidingWindow(limit=120, seconds=3600)
 # Disponibilidad de la vitrina: liviana y cacheable, pero se consulta en cada pagina del catalogo
 catalog_limiter = SlidingWindow(limit=240, seconds=60)
+# /health/deep (publico, plan 1.8): el monitor pasa cada pocos minutos y el resultado se guarda 30 s (la base ya no se
+# consulta en cada llamada); holgado para que un monitor detras del mismo proxy no reciba un 429 falso
+health_limiter = SlidingWindow(limit=120, seconds=60)
 # "Avisarme cuando haya" (tienda): como un formulario publico
 stock_alert_limiter = SlidingWindow(limit=10, seconds=3600)
 # Gestion de usuarios: acciones que mandan correo o generan credenciales, por admin

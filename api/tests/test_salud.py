@@ -11,9 +11,20 @@ import pytest
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.models import EmailOutbox, ExchangeRate, Invoice, TaskRun, Tenant
+from app.models import EmailOutbox, ExchangeRate, Invoice, TaskRun, Tenant, TenantUser, User
 from app.services import salud as svc
 from app.tasks import salud
+
+TOKEN = "token-de-salud-de-prueba"
+H = {"X-Health-Token": TOKEN}  # el detalle de /health/deep solo con el token
+
+
+@pytest.fixture(autouse=True)
+def _detalle_y_sin_cache(monkeypatch):
+    """Las pruebas leen el detalle (con el token) y cambian datos entre llamadas: sin el guardado de 30 s."""
+    monkeypatch.setenv("HEALTH_TOKEN", TOKEN)
+    monkeypatch.setattr(svc, "DEEP_CACHE_SECONDS", 0)
+    monkeypatch.delenv("OPS_TENANT", raising=False)
 
 
 @pytest.fixture
@@ -40,33 +51,113 @@ def _alertas(db, prefix):
 
 # ---------- latido y /health/deep ----------
 def test_sin_latido_o_latido_vencido_da_503(client, db_session):
-    r = client.get("/health/deep")
+    r = client.get("/health/deep", headers=H)
     assert r.status_code == 503 and r.json()["checks"]["beat"]["ok"] is False
     salud.heartbeat(db_session)
-    r = client.get("/health/deep")
+    r = client.get("/health/deep", headers=H)
     assert r.status_code == 200, r.json()
     assert r.json()["checks"]["beat"]["ok"] is True and r.headers["cache-control"] == "no-store"
     # el worker se detiene: a los 15 min sin latido, 503
     for hb in db_session.scalars(select(TaskRun).where(TaskRun.task == "salud.latido")):
         hb.started_at = hb.finished_at = datetime.now(UTC) - timedelta(minutes=16)
     db_session.commit()
-    r = client.get("/health/deep")
+    r = client.get("/health/deep", headers=H)
     assert r.status_code == 503 and r.json()["status"] == "falla" and r.json()["checks"]["beat"]["edad_min"] >= 15
+
+
+def test_publico_solo_el_estado(client, db_session, monkeypatch):
+    """Sin el token (o con uno malo, o sin HEALTH_TOKEN definido) solo el estado: nada de nombres de configuracion,
+    conteos ni modos. El monitor externo solo mira el codigo."""
+    salud.heartbeat(db_session)
+    for headers in ({}, {"X-Health-Token": "otro"}):
+        r = client.get("/health/deep", headers=headers)
+        assert r.status_code == 200 and set(r.json()) == {"status", "at"}
+    assert "checks" in client.get("/health/deep", headers=H).json()
+    monkeypatch.delenv("HEALTH_TOKEN")
+    assert set(client.get("/health/deep", headers=H).json()) == {"status", "at"}
+    # el 503 tambien llega sin detalle
+    for hb in db_session.scalars(select(TaskRun).where(TaskRun.task == "salud.latido")):
+        hb.started_at = hb.finished_at = datetime.now(UTC) - timedelta(minutes=16)
+    db_session.commit()
+    r = client.get("/health/deep")
+    assert r.status_code == 503 and r.json()["status"] == "falla" and "checks" not in r.json()
+
+
+def test_resultado_guardado_y_limite_por_ip(client, db_session, monkeypatch):
+    """Cada pasada cuesta consultas y descifrar la llave de ONVO: se guarda 30 s y una rafaga recibe 429."""
+    monkeypatch.setattr(svc, "DEEP_CACHE_SECONDS", 30)
+    llamadas = []
+    real = svc.deep
+    monkeypatch.setattr(svc, "deep", lambda db: llamadas.append(1) or real(db))
+    salud.heartbeat(db_session)
+    codes = [client.get("/health/deep").status_code for _ in range(121)]
+    assert len(llamadas) == 1
+    assert codes[:120] == [200] * 120 and codes[120] == 429
+
+
+def test_tarea_larga_no_da_503_falso_pero_un_contenedor_detenido_si(db_session):
+    """Un solo proceso: el latido espera detras de una tarea larga (catalogo de Eurocomp). Vale mientras el beat siga
+    despachando (fila salud.beat) y el worker trabaje; si el contenedor se detuvo, el beat tampoco despacha."""
+    now = datetime.now(UTC)
+    db_session.add(TaskRun(task="salud.latido", started_at=now - timedelta(minutes=40), finished_at=now - timedelta(minutes=40), ok=True))
+    larga = TaskRun(task="suppliers.sync_eurocomp", started_at=now - timedelta(minutes=35))  # en curso
+    db_session.add(larga)
+    db_session.commit()
+    assert svc.check_beat(db_session, now)["ok"] is False  # sin señal del beat no alcanza con la corrida en curso
+    db_session.add(TaskRun(task="salud.beat", started_at=now - timedelta(minutes=2), finished_at=now - timedelta(minutes=2), ok=True))
+    db_session.commit()
+    c = svc.check_beat(db_session, now)
+    assert c["ok"] is True and c["critico"] is True and "ocupado" in c["detalle"]
+    # recien termino la larga: el latido sale en unos minutos; sigue vivo
+    larga.finished_at, larga.ok = now - timedelta(minutes=1), True
+    db_session.commit()
+    assert svc.check_beat(db_session, now)["ok"] is True
+    # el contenedor se detuvo: 16 min despues ni el beat despacha ni el worker trabaja
+    assert svc.check_beat(db_session, now + timedelta(minutes=16))["ok"] is False
+    # una corrida "en curso" de mas de 1 h es un proceso que murio a media tarea, no un worker ocupado
+    larga.finished_at, larga.ok, larga.started_at = None, None, now - timedelta(hours=2)
+    db_session.commit()
+    assert svc.check_beat(db_session, now)["ok"] is False
+
+
+def test_el_beat_deja_su_fila_al_despachar_el_latido(worker, db_session):
+    salud.on_publish(sender="hacienda.send_pending")
+    assert not db_session.scalars(select(TaskRun).where(TaskRun.task == "salud.beat")).all()
+    salud.on_publish(sender="salud.latido")
+    r = db_session.scalar(select(TaskRun).where(TaskRun.task == "salud.beat"))
+    assert r is not None and r.ok is True and r.finished_at is not None
+    # no es una tarea: no sale en las corridas del correo de Salud
+    assert not [x for x in salud._runs_24h(db_session, datetime.now(UTC)) if x["task"] == "salud.beat"]
 
 
 def test_el_latido_lleva_los_nombres_de_la_configuracion_que_falta(client, db_session, monkeypatch):
     monkeypatch.delenv("RESEND_API_KEY", raising=False)
     monkeypatch.setenv("BCCR_TOKEN", "token-de-prueba")
+    monkeypatch.delenv("OPS_ALERT_EMAILS", raising=False)
     s = salud.heartbeat(db_session)
     assert "RESEND_API_KEY" in s["faltan"] and "BCCR_TOKEN" not in s["faltan"] and s["correo"] is False
-    body = client.get("/health/deep").json()
-    assert "RESEND_API_KEY" in body["checks"]["config_worker"]["faltan"]
+    # sin OPS_ALERT_EMAILS JC no recibe las fallas ni el correo de Salud: sale en el latido (aviso, no critico)
+    assert "OPS_ALERT_EMAILS" in s["faltan"]
+    body = client.get("/health/deep", headers=H).json()
+    assert {"RESEND_API_KEY", "OPS_ALERT_EMAILS"} <= set(body["checks"]["config_worker"]["faltan"])
+    assert body["checks"]["config_worker"]["critico"] is False
     assert "token-de-prueba" not in str(body)  # solo nombres, nunca valores
     # fuera de produccion el correo del worker es un aviso; en produccion es critico
     assert client.get("/health/deep").status_code == 200
     monkeypatch.setattr(settings, "env", "production")
-    r = client.get("/health/deep")
+    r = client.get("/health/deep", headers=H)
     assert r.status_code == 503 and r.json()["checks"]["correo_worker"]["ok"] is False
+    monkeypatch.setenv("OPS_ALERT_EMAILS", "operacion@ejemplo.com")
+    assert "OPS_ALERT_EMAILS" not in salud.heartbeat(db_session)["faltan"]
+
+
+def test_el_arranque_del_worker_avisa_si_falta_ops_alert_emails(monkeypatch, caplog):
+    from app.core.envcheck import log_missing_config
+
+    monkeypatch.delenv("OPS_ALERT_EMAILS", raising=False)
+    with caplog.at_level(logging.WARNING, logger="crimson.config"):
+        assert "OPS_ALERT_EMAILS" in log_missing_config()
+    assert any("OPS_ALERT_EMAILS" in r.getMessage() for r in caplog.records)
 
 
 def test_health_deep_sin_datos_sensibles(client, auth, db_session):
@@ -74,7 +165,7 @@ def test_health_deep_sin_datos_sensibles(client, auth, db_session):
     t = _t(db_session)
     db_session.add(EmailOutbox(tenant_id=t.id, to="cliente-secreto@ejemplo.com", subject="Factura", html="x", status="fallido"))
     db_session.commit()
-    body = client.get("/health/deep").json()
+    body = client.get("/health/deep", headers=H).json()
     assert body["checks"]["correo_fallido"] == {"ok": False, "critico": False, "fallidos_24h": 1}
     texto = str(body)
     assert "@" not in texto and "cliente-secreto" not in texto and "secret" not in texto.lower()
@@ -84,6 +175,15 @@ def test_avisos_de_eurocomp_tipo_de_cambio_y_por_emitir(db_session):
     t = _t(db_session)
     now = datetime(2026, 10, 20, 15, 0, tzinfo=UTC)
     assert svc.check_eurocomp(db_session, now) == {"ok": True, "critico": False, "aplica": False}
+    # solo el catalogo semanal o un error de credenciales (nada vinculado, integracion pospuesta): no hay existencias
+    # que refrescar, no es un aviso diario
+    t.settings = {**(t.settings or {}), "supplier_sync": {"eurocomp": {"last_ok_at": (now - timedelta(days=3)).isoformat(), "last_error": "credenciales"}}}
+    db_session.commit()
+    assert svc.check_eurocomp(db_session, now) == {"ok": True, "critico": False, "aplica": False}
+    # el refresco de existencias se intento y nunca salio bien: eso si
+    t.settings = {**t.settings, "supplier_sync": {"eurocomp": {"last_stock_try_at": (now - timedelta(hours=1)).isoformat()}}}
+    db_session.commit()
+    assert svc.check_eurocomp(db_session, now)["detalle"] == "existencias nunca refrescadas"
     t.settings = {**(t.settings or {}), "supplier_sync": {"eurocomp": {"last_stock_at": (now - timedelta(hours=9)).isoformat()}}}
     db_session.commit()
     c = svc.check_eurocomp(db_session, now)
@@ -160,9 +260,10 @@ def test_tarea_que_sale_bien_deja_su_resumen(worker, db_session):
 
 
 def test_el_worker_registra_las_señales_y_programa_latido_y_correo(worker):
-    from celery.signals import task_failure, task_postrun, task_prerun
+    from celery.signals import after_task_publish, task_failure, task_postrun, task_prerun
 
     assert any("crimson.salud.prerun" in str(k) for k, _ in [(r[0], r[1]) for r in task_prerun.receivers])
+    assert any("crimson.salud.publish" in str(r[0]) for r in after_task_publish.receivers)
     assert task_postrun.receivers and task_failure.receivers
     beat = worker.celery.conf.beat_schedule
     assert beat["salud-latido"]["task"] == "salud.latido" and beat["salud-correo-diario"]["task"] == "salud.correo_diario"
@@ -173,6 +274,52 @@ def test_sanitize():
     s = salud.sanitize("GET https://x.ejemplo.com/a/b?token=SECRETO&b=2 fallo; password=otro key: valor Bearer abc.def")
     assert "SECRETO" not in s and "otro" not in s and "valor" not in s and "abc.def" not in s
     assert "https://x.ejemplo.com/a/b" in s
+    s = salud.sanitize("no salio para cliente.uno@empresa-a.co.cr (cedula 3101123456) factura FEC-000901")
+    assert "@" not in s and "3101123456" not in s and "FEC-000901" in s
+
+
+def test_error_de_la_base_sin_el_detalle_de_la_fila():
+    """psycopg trae el DETAIL de Postgres con los valores (y SQLAlchemy los parametros): de la base solo van los tipos y
+    el nombre de la restriccion."""
+    from sqlalchemy.exc import IntegrityError
+
+    class UniqueViolation(Exception):
+        class diag:  # noqa: N801  como psycopg
+            constraint_name = "uq_customer_email"
+
+    e = IntegrityError(
+        "INSERT INTO customer (email) VALUES (%(email)s)",
+        {"email": "cliente@empresa-a.com"},
+        UniqueViolation('duplicate key value violates unique constraint "uq_customer_email"\nDETAIL: Key (email)=(cliente@empresa-a.com) already exists.'),
+    )
+    txt = salud.error_text(e)
+    assert txt == "IntegrityError (UniqueViolation, restricción uq_customer_email)"
+    assert "@" not in txt and "DETAIL" not in txt
+
+
+def test_en_produccion_la_base_no_muestra_parametros(monkeypatch):
+    from app.core.db import make_engine
+
+    monkeypatch.setattr(settings, "env", "production")
+    eng = make_engine("sqlite://")
+    assert eng.hide_parameters is True
+    eng.dispose()
+
+
+def test_un_reintento_programado_no_es_una_falla(worker, db_session):
+    """fx.bccr_daily (autoretry): falla una vez, se reintenta y sale bien. El correo de Salud no la cuenta como falla."""
+    from celery.exceptions import Retry
+
+    tarea = type("T", (), {"name": "fx.bccr_daily"})()
+    salud.on_prerun(task_id="t-1", task=tarea)
+    salud.on_postrun(task_id="t-1", task=tarea, retval=Retry(exc=RuntimeError("BCCR caido para x@ejemplo.com"), when=60), state="RETRY")
+    salud.on_prerun(task_id="t-1", task=tarea)  # el reintento llega con el mismo id
+    salud.on_postrun(task_id="t-1", task=tarea, retval={"sell": "510"}, state="SUCCESS")
+    runs = db_session.scalars(select(TaskRun).where(TaskRun.task == "fx.bccr_daily").order_by(TaskRun.id)).all()
+    assert [r.ok for r in runs] == [None, True] and runs[0].finished_at and runs[0].summary == {"reintento": True}
+    assert "RuntimeError" in runs[0].error and "@" not in runs[0].error
+    x = next(x for x in salud._runs_24h(db_session, datetime.now(UTC) + timedelta(hours=2)) if x["task"] == "fx.bccr_daily")
+    assert x["fallas"] == 0 and x["sin_terminar"] == 0 and x["reintentos"] == 1
 
 
 # ---------- correo diario ----------
@@ -202,6 +349,49 @@ def test_correo_diario_a_admin_y_operacion_una_vez_y_purga(worker, db_session, m
     assert db_session.scalar(select(TaskRun).where(TaskRun.task == "salud.latido", TaskRun.started_at < now - timedelta(days=2))) is None
 
 
+# ---------- varias empresas ----------
+def _otra_empresa(db, slug="empresa-b", admin="admin-b@ejemplo.com"):
+    b = Tenant(slug=slug, name="Empresa B")
+    db.add(b)
+    db.flush()
+    u = User(email=admin, full_name="Admin B", password_hash="x")
+    db.add(u)
+    db.flush()
+    db.add(TenantUser(tenant_id=b.id, user_id=u.id, role_code="admin"))
+    db.commit()
+    return b
+
+
+def test_lo_de_la_plataforma_solo_le_llega_a_quien_la_opera(worker, db_session, monkeypatch):
+    """Con dos empresas, el admin de la B no recibe el texto de error de una tarea ni los conteos globales: solo el
+    bloque de su empresa. Lo de la plataforma va a la empresa operadora (OPS_TENANT o la primera) y a OPS_ALERT_EMAILS."""
+    monkeypatch.setenv("OPS_ALERT_EMAILS", "operacion@ejemplo.com")
+    a = _t(db_session)
+    b = _otra_empresa(db_session)
+    db_session.add(EmailOutbox(tenant_id=a.id, to="cliente@empresa-a.com", subject="Factura", html="x", status="fallido"))
+    db_session.commit()
+    salud.alert_failure(db_session, "prueba.global", "IntegrityError (UniqueViolation, restricción uq_x)")
+    db_session.commit()
+    alertas = _alertas(db_session, "salud:fallo:prueba.global:")
+    assert sorted(x.to for x in alertas) == ["admin@crimsonapp.com", "operacion@ejemplo.com"] and all(x.tenant_id == a.id for x in alertas)
+    salud.heartbeat(db_session)
+    salud.daily_report(db_session)
+    de_b = db_session.scalars(select(EmailOutbox).where(EmailOutbox.to == "admin-b@ejemplo.com")).all()
+    assert len(de_b) == 1 and de_b[0].tenant_id == b.id and de_b[0].subject.startswith("Salud de su empresa")
+    assert "Empresa B" in de_b[0].html and "Tareas automáticas" not in de_b[0].html and "Latido" not in de_b[0].html
+    assert html_of(db_session, "admin@crimsonapp.com", "salud:diario:").count("<h4") == 2  # tareas + su propia empresa
+    assert "Empresa B" not in html_of(db_session, "operacion@ejemplo.com", "salud:diario:")
+    # OPS_TENANT elige la operadora
+    monkeypatch.setenv("OPS_TENANT", "empresa-b")
+    assert salud.operator_tenant(db_session).id == b.id
+    salud.alert_failure(db_session, "prueba.otra", "RuntimeError: x")
+    assert sorted(x.to for x in _alertas(db_session, "salud:fallo:prueba.otra:")) == ["admin-b@ejemplo.com", "operacion@ejemplo.com"]
+
+
+def html_of(db, to, prefix):
+    return next(x.html for x in _alertas(db, prefix) if x.to == to)
+
+
 # ---------- logging ----------
 def test_logging_info_a_stdout_y_warning_a_stderr(capsys):
     from app.core.logging import setup_logging
@@ -217,6 +407,16 @@ def test_logging_info_a_stdout_y_warning_a_stderr(capsys):
     assert "INFO crimson.prueba" in out and "WARNING crimson.prueba" in err
     uv = logging.getLogger("uvicorn.error")
     assert uv.propagate and not uv.handlers
+
+
+def test_el_worker_configura_el_logging_antes_de_sus_lineas_de_arranque(worker):
+    """El WARNING de configuracion faltante y el INFO de FISCAL_KEYS salen al importar el modulo, antes de la señal
+    setup_logging de Celery: sin esto salian por el lastResort de Python (sin nivel ni logger) o se perdian."""
+    import inspect
+
+    src = inspect.getsource(worker)
+    assert src.index("\nsetup_logging()") < src.index("\n_log_fiscal_keys()") < src.index("\n_log_missing_config()")
+    assert any(getattr(h, "_crimson_handler", False) for h in logging.getLogger().handlers)
 
 
 def test_recurrencia_que_falla_deja_la_traza(db_session, caplog, monkeypatch):

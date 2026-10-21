@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from app.models import EmailOutbox, Invoice, Tenant, TenantUser, User
 from app.services import mail
+from app.services.salud import check_outbox
 from app.tasks.correo import MAX_AGE, retry_outbox
 
 
@@ -137,6 +138,7 @@ def test_un_reintento_que_sale_queda_enviado(db_session, t, resend):
     out = retry_outbox(db_session, now=datetime.now(UTC) + timedelta(minutes=16))
     db_session.refresh(m)
     assert out["enviados"] == 1 and m.status == "enviado" and m.attempts == 2 and m.next_attempt_at is None
+    assert m.error is None  # Ajustes ya no muestra en rojo el error del primer intento debajo de un correo confirmado
 
 
 def test_documento_con_adjuntos_no_se_reenvia_sin_ellos(db_session, t, resend):
@@ -146,6 +148,7 @@ def test_documento_con_adjuntos_no_se_reenvia_sin_ellos(db_session, t, resend):
     m = mail.queue_email(db_session, t, "cliente@ejemplo.com", f"Factura {inv.number}", "<p>x</p>", "invoice", inv.id, files=[(f"{inv.number}.pdf", b"%PDF")])
     db_session.commit()
     assert m.status == "error" and m.attachments == [{"name": f"{inv.number}.pdf"}]
+    assert m.next_attempt_at is None and not mail.will_retry(m)  # no se reintenta: nada de "se reintenta solo"
     resend.caido = False
     retry_outbox(db_session, now=datetime.now(UTC) + timedelta(seconds=5))
     db_session.refresh(m)
@@ -165,8 +168,10 @@ def test_reenviado_a_mano_no_se_reintenta_ni_avisa(db_session, t, resend):
     db_session.commit()
     out = retry_outbox(db_session, now=datetime.now(UTC) + timedelta(seconds=5))
     db_session.refresh(viejo)
-    assert viejo.status == "fallido" and out["reemplazados"] == 1 and out["fallidos"] == 0
+    assert viejo.status == "reemplazado" and out["reemplazados"] == 1 and out["fallidos"] == 0
     assert not _avisos(db_session, t)
+    # ya resuelto: Salud no lo cuenta como correo fallido
+    assert check_outbox(db_session, datetime.now(UTC), t.id)["fallidos_24h"] == 0
 
 
 def test_aviso_agrupado_por_dueño_y_sin_dueño_va_a_los_administradores(db_session, t, resend):
@@ -203,18 +208,77 @@ def test_un_aviso_que_falla_no_genera_otro_aviso(db_session, t, resend):
 
 
 def test_viejos_de_antes_del_cambio_no_salen(db_session, t, resend):
-    """Filas en "error" de antes de los reintentos (0 intentos, sin hora): si llevan mas de 24 h se dejan, sin aviso."""
+    """Filas en "error" de antes de los reintentos (0 intentos, sin hora): si llevan mas de 24 h se dejan, sin aviso.
+    Tambien las que llevaban adjuntos: la antiguedad se revisa primero (el dia del despliegue nadie recibe avisos de
+    cotizaciones de hace meses)."""
+    v = _vendedora(db_session, t)
+    inv = _factura(db_session, t, seller_id=v.id)
     viejo = EmailOutbox(tenant_id=t.id, to="cliente@ejemplo.com", subject="Recordatorio viejo", html="<p>x</p>", entity="invoice", entity_id=1, status="error")
     viejo.created_at = datetime.now(UTC) - MAX_AGE - timedelta(hours=1)
+    viejo_pdf = EmailOutbox(
+        tenant_id=t.id, to="cliente2@ejemplo.com", subject=f"Factura {inv.number}", html="<p>x</p>", entity="invoice", entity_id=inv.id,
+        status="error", attachments=[{"name": f"{inv.number}.pdf"}],
+    )  # fmt: skip
+    viejo_pdf.created_at = datetime.now(UTC) - timedelta(days=60)
     reciente = EmailOutbox(tenant_id=t.id, to="otro@ejemplo.com", subject="Reciente", html="<p>x</p>", entity="customer", entity_id=1, status="error")
-    db_session.add_all([viejo, reciente])
+    db_session.add_all([viejo, viejo_pdf, reciente])
     db_session.commit()
     out = retry_outbox(db_session)
     db_session.refresh(viejo)
+    db_session.refresh(viejo_pdf)
     db_session.refresh(reciente)
-    assert viejo.status == "fallido" and out["vencidos"] == 1 and not resend.a("cliente@ejemplo.com")
+    assert viejo.status == "fallido" and out["vencidos"] == 2 and not resend.a("cliente@ejemplo.com")
+    assert viejo_pdf.status == "fallido" and "24 h" in viejo_pdf.error and out["fallidos"] == 0
     assert reciente.status == "enviado"
     assert not _avisos(db_session, t)
+    # Salud los cuenta por la hora en que se dejaron, no por la de creacion (de mas de 24 h por definicion)
+    assert check_outbox(db_session, datetime.now(UTC), t.id)["fallidos_24h"] == 2
+
+
+def test_vencido_por_worker_caido_avisa_al_dueño_y_cuenta_en_salud(db_session, t, resend):
+    """Un correo de despues del cambio (con intentos) que paso mas de 24 h en la cola porque el worker estuvo caido: no
+    sale, pero el vendedor se entera y el correo de Salud lo cuenta."""
+    v = _vendedora(db_session, t)
+    inv = _factura(db_session, t, seller_id=v.id)
+    m = EmailOutbox(
+        tenant_id=t.id, to="cliente@ejemplo.com", subject=f"Recordatorio {inv.number}", html="<p>x</p>", entity="invoice", entity_id=inv.id,
+        status="error", attempts=1, next_attempt_at=datetime.now(UTC) - timedelta(hours=23),
+    )  # fmt: skip
+    m.created_at = datetime.now(UTC) - MAX_AGE - timedelta(minutes=30)
+    db_session.add(m)
+    db_session.commit()
+    out = retry_outbox(db_session)
+    db_session.refresh(m)
+    assert m.status == "fallido" and out["vencidos"] == 1 and out["avisos"] == 1 and not resend.a("cliente@ejemplo.com")
+    avisos = _avisos(db_session, t)
+    assert [a.to for a in avisos] == ["vendedora@ejemplo.com"] and inv.number in avisos[0].html
+    assert check_outbox(db_session, datetime.now(UTC))["fallidos_24h"] == 1
+
+
+def test_lo_que_no_se_reintenta_no_dice_que_se_reintenta(client, auth, db_session, t, resend):
+    """Ajustes -> Correo: "se reintenta solo" (retrying) solo para lo que el worker de verdad reintenta. Una invitacion
+    o un documento con adjuntos que falla queda sin hora de reintento y se ve "fallido" de una vez."""
+    resend.caido = True
+    normal = mail.queue_email(db_session, t, "cliente@ejemplo.com", "Aviso", "<p>x</p>", "customer", 1)
+    pdf = mail.queue_email(db_session, t, "cliente@ejemplo.com", "Factura", "<p>x</p>", "invoice", 1, files=[("x.pdf", b"%PDF")])
+    inv = mail.queue_email(db_session, t, "nuevo@ejemplo.com", "Invitación", "<p>/invitacion/abcdefghijklmnopqrstu</p>", "invitation", 1)
+    db_session.commit()
+    assert normal.next_attempt_at is not None and pdf.next_attempt_at is None and inv.next_attempt_at is None
+    assert all(x.status == "error" and x.attempts == 1 for x in (normal, pdf, inv))
+    rows = {r["id"]: r for r in client.get("/settings/outbox").json()}
+    assert rows[normal.id]["retrying"] is True
+    assert rows[pdf.id]["retrying"] is False and rows[inv.id]["retrying"] is False
+
+
+def test_avisos_internos_sin_copia_al_bcc_de_la_empresa(db_session, t, resend):
+    """El BCC de la empresa (contabilidad) recibe copia de los documentos, no de las alertas de la plataforma."""
+    t.settings = {**(t.settings or {}), "bcc": ["conta@ejemplo.com"]}
+    db_session.commit()
+    doc = mail.queue_email(db_session, t, "cliente@ejemplo.com", "Factura", "<p>x</p>", "invoice", 1)
+    salud = mail.queue_email(db_session, t, "operacion@ejemplo.com", "Falló una tarea", "<p>x</p>", "salud", 0)
+    aviso = mail.queue_email(db_session, t, "vendedora@ejemplo.com", "No salió", "<p>x</p>", "outbox", 1)
+    assert doc.bcc == "conta@ejemplo.com" and salud.bcc is None and aviso.bcc is None
+    assert resend.a("operacion@ejemplo.com")[0]["bcc"] == []
 
 
 def test_invitaciones_y_enlaces_de_contraseña_no_se_reintentan(db_session, t, resend):
@@ -222,6 +286,7 @@ def test_invitaciones_y_enlaces_de_contraseña_no_se_reintentan(db_session, t, r
     m = mail.queue_email(db_session, t, "nuevo@ejemplo.com", "Invitación", "<p>/invitacion/abcdefghijklmnopqrstu</p>", "invitation", 1)
     db_session.commit()
     resend.caido = False
+    assert m.next_attempt_at is None and not mail.will_retry(m)
     retry_outbox(db_session, now=datetime.now(UTC) + timedelta(days=1))
     db_session.refresh(m)
     assert m.status == "error" and len(resend.a("nuevo@ejemplo.com")) == 1
@@ -264,7 +329,8 @@ def test_un_solo_beat_con_candado_en_redis():
 
 
 def test_dos_beats_despachan_una_sola_vez():
-    """Con un Redis real (REDBEAT_TEST_REDIS_URL): el segundo beat no consigue el candado mientras el primero vive."""
+    """Con un Redis real (REDBEAT_TEST_REDIS_URL): el segundo beat no consigue el candado mientras el primero vive.
+    Sin Redis se salta; el criterio de 1.2 (dos procesos beat locales) tiene su prueba manual en api/README.md."""
     import os
 
     url = os.environ.get("REDBEAT_TEST_REDIS_URL")

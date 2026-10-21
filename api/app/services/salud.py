@@ -1,10 +1,16 @@
 """Salud de la plataforma (plan 1.8): lo que mira GET /health/deep y lo que resume el correo diario de Salud.
 
 Cada revision devuelve {"ok": bool, "critico": bool, ...datos sin informacion sensible} (nada de montos, nombres,
-correos ni llaves: el endpoint es publico para el monitor externo). Si una revision critica falla, /health/deep da 503.
+correos ni llaves). Si una revision critica falla, /health/deep da 503. Sin X-Health-Token (HEALTH_TOKEN) el endpoint
+solo dice el estado (public_view): el detalle es un mapa de la configuracion y no es para cualquiera en internet.
+El resultado se guarda DEEP_CACHE_SECONDS (DeepCache): el monitor pasa cada pocos minutos y cada revision cuesta
+consultas (y descifrar la llave de ONVO de cada empresa).
 
 Criticas (la plataforma no esta funcionando): la base de datos, el latido del beat y el worker (menos de 15 min) y,
-en produccion, el correo configurado en el worker (sin RESEND_API_KEY ningun aviso le llega a nadie).
+en produccion, el correo configurado en el worker (sin RESEND_API_KEY ningun aviso le llega a nadie). El worker tiene
+un solo proceso: si una tarea larga (catalogo de Eurocomp, buzon IMAP) deja el latido esperando en la cola, cuenta como
+vivo mientras el beat siga despachando (su fila salud.beat) y el worker este trabajando (una corrida en curso de menos
+de 1 h o una que termino hace menos de 15 min).
 Avisos (se ven en el correo de Salud y en el JSON, sin tumbar el monitor): existencias de Eurocomp de mas de 8 h,
 correos "fallido" en 24 h, tipo de cambio de mas de 2 dias habiles, ENV distinto de produccion, la tienda ofreciendo
 tarjeta sin llave ONVO live en produccion (o una llave live fuera de produccion) y la cola "Por emitir" con facturas de
@@ -13,7 +19,9 @@ mas de 24 h.
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, date, datetime, timedelta
+from threading import Lock
 
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
@@ -22,7 +30,10 @@ from ..core.config import settings
 from ..models import EmailOutbox, ExchangeRate, Invoice, TaskRun, Tenant
 
 HEARTBEAT_TASK = "salud.latido"
+BEAT_TASK = "salud.beat"  # fila que deja el beat al despachar el latido (no es una tarea): el beat, medido aparte
 HEARTBEAT_MAX = timedelta(minutes=15)
+BUSY_MAX = timedelta(hours=1)  # una corrida sin terminar de mas de 1 h ya no es "ocupado": el proceso murio
+DEEP_CACHE_SECONDS = 30
 EUROCOMP_STOCK_MAX = timedelta(hours=8)  # se refresca cada 6 h (05, 11, 17, 23 CR): 2 h de holgura
 FX_MAX_BUSINESS_DAYS = 2
 POR_EMITIR_MAX = timedelta(hours=24)
@@ -51,19 +62,46 @@ def business_days_between(a: date, b: date) -> int:
     return n
 
 
+def _last(db: Session, task: str) -> TaskRun | None:
+    return db.scalar(select(TaskRun).where(TaskRun.task == task, TaskRun.ok.is_(True)).order_by(TaskRun.started_at.desc(), TaskRun.id.desc()).limit(1))
+
+
 def last_heartbeat(db: Session) -> TaskRun | None:
-    return db.scalar(
-        select(TaskRun).where(TaskRun.task == HEARTBEAT_TASK, TaskRun.ok.is_(True)).order_by(TaskRun.started_at.desc(), TaskRun.id.desc()).limit(1)
+    return _last(db, HEARTBEAT_TASK)
+
+
+def _age(r: TaskRun | None, now: datetime) -> timedelta | None:
+    return None if r is None else now - (_aware(r.finished_at or r.started_at) or now)
+
+
+_NOT_TASKS = (HEARTBEAT_TASK, BEAT_TASK)
+
+
+def _worker_busy(db: Session, now: datetime) -> bool:
+    """El worker esta trabajando: una corrida en curso de menos de BUSY_MAX o una que termino hace menos de 15 min."""
+    running = db.scalar(
+        select(TaskRun.id)
+        .where(TaskRun.task.not_in(_NOT_TASKS), TaskRun.ok.is_(None), TaskRun.finished_at.is_(None), TaskRun.started_at >= now - BUSY_MAX)
+        .limit(1)
     )
+    if running is not None:
+        return True
+    return db.scalar(select(TaskRun.id).where(TaskRun.task.not_in(_NOT_TASKS), TaskRun.finished_at >= now - HEARTBEAT_MAX).limit(1)) is not None
 
 
 # ---------- revisiones ----------
 def check_beat(db: Session, now: datetime) -> dict:
-    hb = last_heartbeat(db)
-    if hb is None:
-        return {"ok": False, "critico": True, "detalle": "sin latido del worker"}
-    age = now - (_aware(hb.finished_at or hb.started_at) or now)
-    return {"ok": age < HEARTBEAT_MAX, "critico": True, "edad_min": int(age.total_seconds() // 60)}
+    hb_age = _age(last_heartbeat(db), now)
+    if hb_age is not None and hb_age < HEARTBEAT_MAX:
+        return {"ok": True, "critico": True, "edad_min": int(hb_age.total_seconds() // 60)}
+    out = {"ok": False, "critico": True}
+    out.update({"edad_min": int(hb_age.total_seconds() // 60)} if hb_age is not None else {"detalle": "sin latido del worker"})
+    # el latido puede estar esperando detras de una tarea larga (un solo proceso): vale si el beat sigue despachando y
+    # el worker trabaja. Si el contenedor se detuvo, el beat (embebido) tampoco despacha: 503 en menos de 15 min.
+    beat_age = _age(_last(db, BEAT_TASK), now)
+    if beat_age is not None and beat_age < HEARTBEAT_MAX and _worker_busy(db, now):
+        out.update(ok=True, detalle="worker ocupado: el latido espera en la cola y el beat sigue despachando")
+    return out
 
 
 def check_worker_config(db: Session) -> tuple[dict, dict]:
@@ -88,7 +126,9 @@ def check_eurocomp(db: Session, now: datetime) -> dict:
     edades = []
     for t in db.scalars(select(Tenant).where(Tenant.active)):
         st = ((t.settings or {}).get("supplier_sync") or {}).get("eurocomp") or {}
-        if not st:
+        # solo si el refresco de existencias corrio alguna vez: el catalogo semanal (last_ok_at) o un error de
+        # credenciales no lo son, y sin productos vinculados (o con la integracion pospuesta) no hay nada que refrescar
+        if not (st.get("last_stock_at") or st.get("last_stock_try_at")):
             continue
         last = _parse(st.get("last_stock_at"))
         edades.append(now - last if last else None)
@@ -101,7 +141,9 @@ def check_eurocomp(db: Session, now: datetime) -> dict:
 
 
 def check_outbox(db: Session, now: datetime, tenant_id: int | None = None) -> dict:
-    q = select(func.count()).select_from(EmailOutbox).where(EmailOutbox.status == "fallido", EmailOutbox.created_at >= now - timedelta(hours=24))
+    """Correos que en las ultimas 24 h quedaron "fallido" (por la hora en que se dejaron, updated_at: los que vencieron
+    en la cola tienen created_at de mas de 24 h). Los "reemplazados" (el vendedor ya lo reenvio) no cuentan."""
+    q = select(func.count()).select_from(EmailOutbox).where(EmailOutbox.status == "fallido", EmailOutbox.updated_at >= now - timedelta(hours=24))
     if tenant_id is not None:
         q = q.where(EmailOutbox.tenant_id == tenant_id)
     n = db.scalar(q) or 0
@@ -181,3 +223,25 @@ def deep(db: Session, now: datetime | None = None, today: date | None = None) ->
     else:
         status = "aviso"
     return {"status": status, "env": settings.env, "checks": checks, "at": now.isoformat()}
+
+
+def public_view(rep: dict) -> dict:
+    """Lo que ve cualquiera sin X-Health-Token: el estado y la hora. El monitor externo solo mira el codigo (200/503)."""
+    return {"status": rep["status"], "at": rep["at"]}
+
+
+class DeepCache:
+    """deep() guardado unos segundos. Una sola consulta a la vez: una rafaga espera el resultado en vez de recalcularlo."""
+
+    def __init__(self, seconds: float):
+        self.seconds = seconds
+        self._lock = Lock()
+        self._at: float | None = None
+        self._value: dict | None = None
+
+    def get(self, compute) -> dict:
+        with self._lock:
+            now = time.monotonic()
+            if self._value is None or self._at is None or now - self._at >= self.seconds:
+                self._value, self._at = compute(), now
+            return self._value

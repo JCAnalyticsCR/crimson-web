@@ -4,7 +4,8 @@ Reintentos (los hace mail.retry_outbox, app/tasks/correo.py): un envio que falla
 `next_attempt_at`; la espera se duplica (15, 30, 60, 120, 240 min) y al intento MAX_ATTEMPTS pasa a "fallido" (ya no
 se reintenta y se le avisa al dueño del documento). Antes se reintentaba cada 15 min para siempre: una direccion mala
 eran 96 intentos al dia. Un correo que llevaba adjuntos (PDF, XML) nunca se reintenta: los adjuntos no se guardan y
-saldria sin ellos.
+saldria sin ellos. Ni ese ni una invitacion (SENSITIVE_ENTITIES) llevan hora de reintento: `will_retry` dice si el
+worker lo va a intentar de nuevo (Ajustes -> Correo solo muestra "se reintenta solo" en ese caso).
 
 `dedupe_key`: el mismo aviso automatico no sale dos veces (dos corridas de la tarea, dos beats durante un despliegue).
 """
@@ -53,6 +54,9 @@ def _by_key(db: Session, tenant_id: int, key: str) -> EmailOutbox | None:
 # enlace se borra del HTML guardado despues de enviarlo (el respaldo exporta email_outbox) y el worker no los
 # reintenta (su HTML ya no sirve): el admin usa "Reenviar".
 SENSITIVE_ENTITIES = frozenset({"invitation", "password_reset", "user_security"})
+# Avisos internos de la plataforma (fallas de tareas, correo de Salud, "no le llegaron al cliente"): tampoco van en copia
+# al BCC de la empresa (pensado para que contabilidad reciba los documentos), pero si se reintentan.
+NO_BCC_ENTITIES = frozenset({"salud", "outbox"})
 _LINK_TOKEN = re.compile(r"(/(?:invitacion|restablecer)/)[A-Za-z0-9_\-]{16,}")
 
 
@@ -86,7 +90,7 @@ def queue_email(
         if prev is not None:
             return prev
     sensitive = entity in SENSITIVE_ENTITIES
-    bcc = None if sensitive else (",".join((tenant.settings or {}).get("bcc") or []) or None)
+    bcc = None if sensitive or entity in NO_BCC_ENTITIES else (",".join((tenant.settings or {}).get("bcc") or []) or None)
     desc = attachments or ([{"name": n} for n, _ in files] if files else [])
     m = EmailOutbox(tenant_id=tenant.id, to=to, bcc=bcc, subject=subject, html=html, attachments=desc, entity=entity, entity_id=entity_id, dedupe_key=key)
     if key:
@@ -158,9 +162,17 @@ def mail_status() -> dict:
     return out
 
 
+def will_retry(m: EmailOutbox) -> bool:
+    """El worker lo va a volver a intentar solo: "error" con hora de reintento, sin adjuntos y que no sea una invitacion
+    ni un enlace de contraseña. Lo demas que fallo ya no sale de nuevo (se reenvia a mano)."""
+    return m.status == "error" and m.next_attempt_at is not None and not m.attachments and m.entity not in SENSITIVE_ENTITIES
+
+
 def deliver(m: EmailOutbox, files: list[tuple[str, bytes]] | None = None) -> None:
-    """Un intento de envio. Si falla: "error", un intento mas y la hora del siguiente (retry_wait). Si llevaba
-    adjuntos, el siguiente paso de mail.retry_outbox no lo reenvia: lo deja "fallido" y avisa al dueño."""
+    """Un intento de envio. Si falla: "error" y un intento mas; la hora del siguiente (retry_wait) solo si el worker lo
+    reintenta. Con adjuntos o si es una invitacion queda sin hora: mail.retry_outbox no reenvia lo primero (lo deja
+    "fallido" y avisa al dueño en su siguiente pasada) ni toca lo segundo (el admin usa "Reenviar").
+    Si sale, se borra el error de un intento anterior (Ajustes lo mostraba en rojo debajo de un correo confirmado)."""
     key, sender = os.getenv("RESEND_API_KEY"), _sender()
     if not key:
         m.status, m.sent_at = "simulado", datetime.now(UTC)
@@ -184,11 +196,11 @@ def deliver(m: EmailOutbox, files: list[tuple[str, bytes]] | None = None) -> Non
             timeout=20,
         )
         r.raise_for_status()
-        m.status, m.provider_id, m.sent_at, m.next_attempt_at = "enviado", r.json().get("id"), datetime.now(UTC), None
+        m.status, m.provider_id, m.sent_at, m.next_attempt_at, m.error = "enviado", r.json().get("id"), datetime.now(UTC), None, None
     except Exception as e:  # noqa: BLE001
         m.status, m.error = "error", str(e)[:500]
-        # con adjuntos no hay espera: el siguiente paso del worker lo da por fallido (no lo reenvia sin ellos)
-        m.next_attempt_at = datetime.now(UTC) + (timedelta(0) if files else retry_wait(m.attempts))
+        no_retry = bool(files) or m.entity in SENSITIVE_ENTITIES
+        m.next_attempt_at = None if no_retry else datetime.now(UTC) + retry_wait(m.attempts)
 
 
 def doc_email_html(tenant: Tenant, kind: str, number: str, total: str, link: str | None, message: str | None, attached: bool = True) -> str:

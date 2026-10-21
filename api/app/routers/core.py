@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
@@ -24,15 +24,29 @@ def health(db: Session = Depends(get_db)):
 
 
 @router.get("/health/deep")
-def health_deep(db: Session = Depends(get_db)):
+def health_deep(request: Request, db: Session = Depends(get_db), x_health_token: str | None = Header(default=None)):
     """Salud profunda para el monitor externo (plan 1.8): latido del beat y del worker, correo del worker, Eurocomp,
-    correo fallido, tipo de cambio, ENV, ONVO y cola "Por emitir". Sin datos sensibles; 503 si algo critico falla."""
+    correo fallido, tipo de cambio, ENV, ONVO y cola "Por emitir"; 503 si algo critico falla.
+    Publico: solo el estado (el monitor mira el codigo). El detalle de cada revision, con X-Health-Token igual a la
+    variable HEALTH_TOKEN (sin ella, nunca). Limite por IP y resultado guardado unos segundos: cada pasada cuesta."""
+    import hmac
+    import os
+
     from fastapi.responses import JSONResponse
 
-    from ..services.salud import deep
+    from ..core.ratelimit import health_limiter
+    from ..services import salud as svc
+    from .auth import client_ip
 
-    out = deep(db)
-    return JSONResponse(out, status_code=503 if out["status"] == "falla" else 200, headers={"Cache-Control": "no-store"})
+    health_limiter.hit(f"deep:{client_ip(request)}")
+    cache = getattr(request.app.state, "salud_deep", None)
+    if cache is None:
+        cache = request.app.state.salud_deep = svc.DeepCache(svc.DEEP_CACHE_SECONDS)
+    out = cache.get(lambda: svc.deep(db))
+    token = (os.getenv("HEALTH_TOKEN") or "").strip()
+    detail = bool(token and x_health_token and hmac.compare_digest(x_health_token.encode(), token.encode()))
+    body = out if detail else svc.public_view(out)
+    return JSONResponse(body, status_code=503 if out["status"] == "falla" else 200, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/tenant", response_model=TenantOut)

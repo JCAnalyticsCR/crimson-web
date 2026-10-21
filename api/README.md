@@ -214,30 +214,49 @@ emisión.
   (`--scheduler=redbeat.RedBeatScheduler`; en `celery worker` la opción `-S` es `--statedb`). Durante un despliegue el
   contenedor nuevo espera el candado y ninguna tarea sale dos veces. Si un contenedor muere sin soltarlo, el candado vence
   a los 5 min (5 × el intervalo máximo de 60 s).
+- **Prueba manual de "dos beats despachan una sola vez"** (criterio de 1.2; la prueba automática
+  `test_dos_beats_despachan_una_sola_vez` necesita `REDBEAT_TEST_REDIS_URL` y en el CI se salta):
+  1. `docker run --rm -p 6379:6379 redis:7` y, en dos terminales, desde `api/`:
+     `REDIS_URL=redis://localhost:6379/0 PYTHONPATH=.:../worker uv run celery -A celery_app:celery beat --scheduler=redbeat.RedBeatScheduler --loglevel=INFO`
+     (en Windows, `PYTHONPATH=.;..\worker`).
+  2. El primero dice `beat: Acquired lock`; el segundo se queda en `beat: Acquiring lock...` y no escribe ningún
+     `Sending due task`. Durante 10 min, cada `Sending due task salud-latido` aparece una sola vez cada 5 min.
+  3. Cortar el primero (Ctrl+C): el segundo toma el candado y sigue despachando, sin repetir el minuto.
 - **Correo.** Cada aviso automático lleva `dedupe_key` (único por empresa). Un envío que falla se reintenta a los 15,
   30, 60, 120 y 240 min y al 6.º intento queda `fallido`, con un aviso al vendedor responsable (o a los
   administradores). Un correo con adjuntos (PDF, XML) nunca se reenvía sin ellos: queda `fallido` y se reenvía desde el
-  documento. Lo que lleva más de 24 h en cola ya no sale.
+  documento. Las invitaciones y enlaces de contraseña tampoco se reintentan (el admin usa "Reenviar"). Ajustes → Correo
+  solo dice "se reintenta solo" cuando el worker de verdad lo reintenta. Si el vendedor ya lo reenvió y salió, el viejo
+  queda `reemplazado` (no cuenta como fallido). Lo que lleva más de 24 h en cola ya no sale: si es de después de este
+  cambio (el worker estuvo caído), se le avisa al dueño del documento; las filas de antes no generan aviso.
 - **Hora de Costa Rica.** `app/core/timeutil.py` (`cr_now`, `cr_today`): el cierre de caja de las 21:00 y el
   vencimiento usan el día de Costa Rica (el contenedor corre en UTC).
 - **Al arrancar**, el worker registra en WARNING los nombres que le faltan de `RESEND_API_KEY`, `MAIL_FROM`,
-  `PUBLIC_BASE_URL`, `BCCR_TOKEN` y `FISCAL_KEYS` (solo nombres).
-- **Corridas.** Cada tarea deja su corrida en `task_run` (señales de Celery). Si una falla, un correo a los
-  administradores y a `OPS_ALERT_EMAILS`, como máximo uno por tarea y por día.
-- **`GET /health/deep`** (público, sin datos sensibles): latido del beat y del worker (`salud.latido`, cada 5 min),
-  correo configurado en el worker, ENV, existencias de Eurocomp (< 8 h), correos fallidos en 24 h, tipo de cambio
+  `PUBLIC_BASE_URL`, `BCCR_TOKEN`, `FISCAL_KEYS` y `OPS_ALERT_EMAILS` (solo nombres). El logging queda configurado
+  antes de esas líneas: salen con nivel y logger.
+- **Corridas.** Cada tarea deja su corrida en `task_run` (señales de Celery). Un reintento programado (autoretry) no
+  cuenta como falla. Si una falla, un correo a quien opera la plataforma (administradores de la empresa operadora y
+  `OPS_ALERT_EMAILS`), como máximo uno por tarea y por día. Los textos de error no llevan correos, cédulas, llaves ni
+  el DETAIL de Postgres (y en producción el engine corre con `hide_parameters`).
+- **`GET /health/deep`**: latido del worker (`salud.latido`, cada 5 min) y del beat (fila `salud.beat` al despachar el
+  latido: una tarea larga que deja el latido en la cola no da un 503 falso), correo configurado en el worker, ENV,
+  existencias de Eurocomp (< 8 h, solo si el refresco corrió alguna vez), correos fallidos en 24 h, tipo de cambio
   (≤ 2 días hábiles), modo de ONVO (avisa si la tienda ofrece tarjeta sin llave live en producción; la tarjeta
-  apagada no avisa) y facturas "Por emitir" de más de 24 h. Responde **503** si falla la base, el latido tiene más de
-  15 min o, en producción, el worker no tiene `RESEND_API_KEY`; lo demás sale como aviso. El monitor externo mira esta
-  ruta.
-- **Correo diario de Salud** a las 07:00 a los administradores y a `OPS_ALERT_EMAILS`.
+  apagada no avisa) y facturas "Por emitir" de más de 24 h. Responde **503** si falla la base, el worker y el beat
+  llevan más de 15 min sin señal o, en producción, el worker no tiene `RESEND_API_KEY`; lo demás sale como aviso.
+  **Público: solo `{"status", "at"}`** (el monitor externo mira el código). El detalle, con el encabezado
+  `X-Health-Token` igual a `HEALTH_TOKEN`. Límite de 120 consultas por minuto e IP y resultado guardado 30 s.
+- **Correo diario de Salud** a las 07:00 a quien opera la plataforma (revisiones, tareas y su empresa). Los
+  administradores de cada una de las demás empresas reciben solo el bloque de la suya.
 - **Logs:** INFO a stdout y WARNING o más a stderr (`app/core/logging.py`), en api y worker. `LOG_LEVEL` lo cambia.
 - **Monitor de respaldo:** `scripts/monitor/tienda_check.py` (GitHub Actions cada 30 min, `.github/workflows/monitor.yml`;
   variables del repo opcionales `TIENDA_URL`, `TIENDA_SLUG`, `HEALTH_DEEP_URL`).
 
 | Variable | Uso |
 |---|---|
-| `OPS_ALERT_EMAILS` | Correos de quien opera la plataforma, separados por coma, en el `worker`: reciben las fallas de tareas y el correo de Salud. |
+| `OPS_ALERT_EMAILS` | Correos de quien opera la plataforma, separados por coma, en el `worker`: reciben las fallas de tareas y el correo de Salud. Si falta, sale en el WARNING de arranque, en el latido y en `/health/deep` (aviso). |
+| `OPS_TENANT` | Slug de la empresa que opera la plataforma (`worker`): sus administradores reciben lo de la plataforma. Si falta, la primera empresa activa. |
+| `HEALTH_TOKEN` | En el `api`: con el encabezado `X-Health-Token` igual a este valor, `/health/deep` devuelve el detalle de cada revisión. Sin él, solo el estado. |
 | `LOG_LEVEL` | Nivel de log de api y worker (defecto `INFO`). |
 
 ## Pendiente (requiere credenciales o decisiones del cliente)

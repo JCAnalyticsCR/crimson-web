@@ -373,6 +373,8 @@ def mail_test(p: Principal = Depends(require("settings", "configurar")), db: Ses
 
 @router.get("/outbox")
 def outbox(limit: int = 30, p: Principal = Depends(require("settings", "ver")), db: Session = Depends(get_db)):
+    from ..services.mail import will_retry
+
     rows = db.scalars(select(EmailOutbox).where(EmailOutbox.tenant_id == p.tenant.id).order_by(EmailOutbox.id.desc()).limit(limit)).all()
     return [
         {
@@ -385,9 +387,11 @@ def outbox(limit: int = 30, p: Principal = Depends(require("settings", "ver")), 
             "sent_at": m.sent_at,
             "error": m.error,
             "created_at": m.created_at,
-            # "error" con hora = se reintenta (espera creciente); a los MAX_ATTEMPTS queda "fallido"
+            # el worker lo reintenta solo (espera creciente; a los MAX_ATTEMPTS queda "fallido"). Con adjuntos o una
+            # invitacion, no: el portal lo muestra "fallido" de una vez
             "attempts": m.attempts or 0,
             "next_attempt_at": m.next_attempt_at,
+            "retrying": will_retry(m),
         }
         for m in rows
     ]
