@@ -58,8 +58,9 @@ def _row(db: Session, inv: Invoice, today: dt.date, since: dt.datetime | None) -
         # sin_emitir, o aceptada/rechazada/error solo en simulado o en pruebas (sin validez fiscal)
         "einvoice_status": inv.einvoice_status,
         "created_at": inv.created_at,
-        # se puede marcar en este modo (con produccion activa, solo lo creado antes de activarla)
-        "markable": fq.markable_in_mode(inv, since),
+        # la misma regla que la marca (services/fiscal_queue.mark_blocker): el boton que se ofrece no falla. Con
+        # produccion activa, solo lo creado antes de activarla
+        "markable": fq.mark_blocker(db, inv, since) is None,
     }
 
 

@@ -67,7 +67,17 @@ class SendIn(BaseModel):
 def doc_send(kind: str, id_: int, data: SendIn, p: Principal = Depends(require("sales", "enviar")), db: Session = Depends(get_db)):
     if kind not in ("quotes", "invoices"):
         raise HTTPException(404)
+    if kind == "quotes" and not p.sends_quotes:
+        # contabilidad envia facturas (plan 1.7); la cotizacion es de quien cotiza
+        raise HTTPException(403, "Enviar cotizaciones es de quien cotiza (crear o editar ventas)")
     d = _doc(db, kind, id_, p.tenant.id, p)
+    if kind == "quotes":
+        # las mismas guardas que "Marcar enviada" (POST /quotes/{id}/send): con un descuento o un margen esperando al
+        # admin, por correo se le saltaria la aprobacion
+        if d.status == "por_aprobar":
+            raise HTTPException(409, "La cotización tiene un descuento pendiente de aprobación")
+        if d.status in ("convertida", "anulada"):
+            raise HTTPException(409, f"La cotización está {d.status}")
     c = db.get(Customer, d.customer_id) if d.customer_id else None
     to = data.to or (c.email if c else None)
     if not to:

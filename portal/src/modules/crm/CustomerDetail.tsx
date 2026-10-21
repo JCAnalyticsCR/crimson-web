@@ -67,6 +67,10 @@ export default function CustomerDetail() {
   if (!ov) return <div style={{ display: "grid", placeItems: "center", minHeight: 300 }}><span className="spinner" /></div>;
   const c = ov.customer;
   const events = ov.timeline.filter((e) => !filter || e.kind === filter);
+  /* sin botones que fallan (plan 1.7): con solo crm.ver (contabilidad, supervisor, tecnico) la ficha es de lectura, y
+     cotizar o facturar es de quien crea ventas (las rutas /cotizaciones/nueva y /facturas/nueva piden sales.crear) */
+  const editaCrm = allows("crm.editar");
+  const vende = allows("sales.crear");
 
   const addNote = async () => {
     if (!note.trim()) return;
@@ -104,9 +108,9 @@ export default function CustomerDetail() {
         </div>
         <div className="page-head__actions">
           {wa && <a className="btn btn--ghost btn--sm" href={`https://wa.me/${wa.length === 8 ? "506" + wa : wa}`} target="_blank" rel="noopener"><Icon d={I.whatsapp} />WhatsApp</a>}
-          <button className="btn btn--ghost btn--sm" onClick={() => setEdit({ ...c })}>Editar datos</button>
-          <button className="btn btn--soft btn--sm" onClick={() => nav(`/cotizaciones/nueva?cliente=${c.id}`)}><Icon d={I.quote} />Cotizar</button>
-          <button className="btn btn--crimson btn--sm" onClick={() => nav(`/facturas/nueva?cliente=${c.id}`)}><Icon d={I.invoice} />Facturar</button>
+          {editaCrm && <button className="btn btn--ghost btn--sm" onClick={() => setEdit({ ...c })}>Editar datos</button>}
+          {vende && <button className="btn btn--soft btn--sm" onClick={() => nav(`/cotizaciones/nueva?cliente=${c.id}`)}><Icon d={I.quote} />Cotizar</button>}
+          {vende && <button className="btn btn--crimson btn--sm" onClick={() => nav(`/facturas/nueva?cliente=${c.id}`)}><Icon d={I.invoice} />Facturar</button>}
         </div>
       </div>
 
@@ -170,10 +174,12 @@ export default function CustomerDetail() {
 
       <div className="grid-2 grid-2--split">
         <Card title="Línea de tiempo" extra={<div className="tabs">{[["", "Todo"], ["factura", "Facturas"], ["pago", "Pagos"], ["cotizacion", "Cotizaciones"], ["nota", "Notas"]].map(([k, l]) => <button key={k} className={filter === k ? "is-active" : ""} onClick={() => setFilter(k)}>{l}</button>)}</div>}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-            <textarea className="textarea" style={{ minHeight: 44 }} placeholder="Agregar una nota interna (llamada, acuerdo, visita…)" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) addNote(); }} />
-            <button className="btn btn--crimson btn--sm" onClick={addNote} disabled={!note.trim()}>Anotar</button>
-          </div>
+          {editaCrm && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+              <textarea className="textarea" style={{ minHeight: 44 }} placeholder="Agregar una nota interna (llamada, acuerdo, visita…)" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) addNote(); }} />
+              <button className="btn btn--crimson btn--sm" onClick={addNote} disabled={!note.trim()}>Anotar</button>
+            </div>
+          )}
           {events.length === 0 ? <Empty title="Sin movimientos" hint="Las cotizaciones, facturas, pagos y notas de este cliente aparecen aquí." /> : (
             <ol style={{ listStyle: "none", margin: 0, padding: 0, position: "relative" }}>
               <span style={{ position: "absolute", left: 15, top: 6, bottom: 6, width: 2, background: "var(--hair)" }} />
@@ -189,7 +195,7 @@ export default function CustomerDetail() {
                     <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                       {e.amount != null && <span className="money" style={{ fontWeight: 600 }}>{fmtMoney(e.amount, e.currency)}</span>}
                       {e.status && <Badge status={e.status} />}
-                      {e.kind === "nota" && <button className="btn btn--ghost btn--sm" onClick={() => delNote(e.id)} title="Borrar nota"><Icon d={I.x} size={12} /></button>}
+                      {e.kind === "nota" && editaCrm && <button className="btn btn--ghost btn--sm" onClick={() => delNote(e.id)} title="Borrar nota"><Icon d={I.x} size={12} /></button>}
                     </div>
                   </li>
                 );
@@ -199,12 +205,12 @@ export default function CustomerDetail() {
         </Card>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          <Card title="Contactos" flush extra={<button className="btn btn--ghost btn--sm" onClick={() => setContact({ name: "", role: "", email: "", phone: "", receives_invoices: false })}><Icon d={I.plus} />Agregar</button>}>
+          <Card title="Contactos" flush extra={editaCrm && <button className="btn btn--ghost btn--sm" onClick={() => setContact({ name: "", role: "", email: "", phone: "", receives_invoices: false })}><Icon d={I.plus} />Agregar</button>}>
             {contactsSt === null ? <Loading /> : contacts.length === 0 ? <Empty title="Sin contactos" hint="Personas de la empresa: compras, contabilidad, junta…" /> : (
               <table className="table"><tbody>{contacts.map((k) => (
                 <tr key={k.id}>
                   <td><b>{k.name}</b>{k.receives_invoices && <span className="badge badge--info" style={{ marginLeft: 6 }}>Facturas</span>}<div className="meta" style={{ textTransform: "none" }}>{[k.role, k.email, k.phone].filter(Boolean).join(" · ")}</div></td>
-                  <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setContact(k)}>Editar</button><button className="btn btn--ghost btn--sm" onClick={() => delContact(k.id)}><Icon d={I.x} size={12} /></button></td>
+                  <td className="num">{editaCrm && <><button className="btn btn--ghost btn--sm" onClick={() => setContact(k)}>Editar</button><button className="btn btn--ghost btn--sm" onClick={() => delContact(k.id)}><Icon d={I.x} size={12} /></button></>}</td>
                 </tr>
               ))}</tbody></table>
             )}
@@ -218,7 +224,7 @@ export default function CustomerDetail() {
               <dt className="muted">Dirección</dt><dd style={{ margin: 0 }}>{c.address?.senas || "—"}</dd>
               <dt className="muted">Notas</dt><dd style={{ margin: 0, whiteSpace: "pre-wrap" }}>{c.notes || "—"}</dd>
             </dl>
-            {c.active && <button className="btn btn--danger btn--sm" style={{ marginTop: 16 }} onClick={archive}>Archivar cliente</button>}
+            {c.active && editaCrm && <button className="btn btn--danger btn--sm" style={{ marginTop: 16 }} onClick={archive}>Archivar cliente</button>}
           </Card>
         </div>
       </div>

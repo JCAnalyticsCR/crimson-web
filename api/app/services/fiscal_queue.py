@@ -9,8 +9,9 @@ responde 409) ni se reemite al pasar a produccion (plan 2.1): duplicaria el comp
   comprobante = "sin_emitir", o emitida solo en simulado o en pruebas (la tienda y el POS "emiten" solos en esos modos y
   eso no vale ante Hacienda, plan 0.5). Un borrador sin enviar ni cobrar no entra.
 - Marcar: lo hace quien tiene sales.emitir_fuera (contabilidad, la duena de la emision; y el admin). Desde
-  "sin_emitir" o desde lo que solo se emitio en simulado o en pruebas. Nunca con un comprobante de produccion vivo ni
-  con uno en camino a Hacienda. Con produccion activa, solo lo creado ANTES de activarla (lo vendido antes del corte que
+  "sin_emitir" o desde lo que solo se emitio en simulado o en pruebas. Nunca con un comprobante de produccion que pudo
+  llegar a Hacienda (vivo, o con error despues de un envio real) ni con uno en camino; uno de produccion que se cerro
+  sin ningun envio (se apago produccion antes de mandarlo) no cuenta: nunca salio. Con produccion activa, solo lo creado ANTES de activarla (lo vendido antes del corte que
   ya se emitio en Fygaro: reemitirlo aqui lo duplicaria, plan 4.5); lo posterior se emite desde la plataforma.
 - Las fechas son las de Costa Rica (despues de las 18:00 la fecha UTC ya es la de manana).
 """
@@ -29,7 +30,7 @@ from ..models import EInvoiceDocument, EmailOutbox, Invoice, PaymentLink, Tenant
 from ..providers.einvoice import cr_now
 from . import hacienda_config as hc
 from .documents import audit
-from .einvoice import doc_mode
+from .einvoice import LIVE, doc_mode
 
 QUEUE_STATUSES = ("enviada", "pagada", "parcial")
 # estados que no dicen "enviada" aunque la factura ya le llego al cliente (por correo o por el enlace de pago)
@@ -127,23 +128,37 @@ def markable_in_mode(inv: Invoice, since: datetime | None) -> bool:
     return since is None or (inv.created_at is not None and _aware(inv.created_at) < since)
 
 
-def check_markable(db: Session, inv: Invoice, tenant: Tenant | None = None) -> None:
+def reached_hacienda(d: EInvoiceDocument) -> bool:
+    """Un comprobante de PRODUCCION que pudo llegar a Hacienda (la misma regla que void_invoice): vivo, o con error
+    despues de un POST real. Uno con error y attempts == 0 nunca salio: se apago produccion o el servidor la bloqueo
+    mientras esperaba al worker (send_einvoice lo cierra con "Cambio el modo") y la factura volvio a "sin_emitir"."""
+    return doc_mode(d) == "produccion" and (d.status in LIVE or (d.status == "error" and (d.attempts or 0) > 0))
+
+
+def mark_blocker(db: Session, inv: Invoice, since: datetime | None, docs: list[EInvoiceDocument] | None = None) -> str | None:
+    """Por que NO se puede marcar emitida fuera (None = se puede). La lista (markable de cada fila), el detalle y la
+    marca usan esta misma regla: un boton que se ofrece no falla. `since`: production_since() del modo vigente."""
     if inv.status == "anulada":
-        raise HTTPException(409, "La factura está anulada")
+        return "La factura está anulada"
     if inv.einvoice_status == "emitida_fuera":
-        raise HTTPException(409, f"La factura ya está marcada emitida fuera de la plataforma (n.º {inv.external_number})")
+        return f"La factura ya está marcada emitida fuera de la plataforma (n.º {inv.external_number})"
     if inv.einvoice_status == "importada":
-        raise HTTPException(409, "La factura viene del histórico importado: ya está emitida fuera de la plataforma")
-    docs = _docs(db, inv)
+        return "La factura viene del histórico importado: ya está emitida fuera de la plataforma"
+    docs = _docs(db, inv) if docs is None else docs
     if inv.einvoice_status == "pendiente" or any(d.status in IN_FLIGHT for d in docs):
-        raise HTTPException(409, "La factura tiene un comprobante en camino a Hacienda: esperá la respuesta antes de marcarla")
-    if any(doc_mode(d) == "produccion" and d.status != "rechazada" for d in docs):
-        raise HTTPException(409, "La factura tiene un comprobante de Producción en la plataforma: no se marca emitida fuera")
-    if tenant is not None and not markable_in_mode(inv, production_since(db, tenant)):
+        return "La factura tiene un comprobante en camino a Hacienda: esperá la respuesta antes de marcarla"
+    if any(reached_hacienda(d) for d in docs):
+        return "La factura tiene un comprobante de Producción en la plataforma: no se marca emitida fuera"
+    if not markable_in_mode(inv, since):
         # una marca aqui la sacaria de Hacienda para siempre (emit() responde 409 a lo marcado)
-        raise HTTPException(
-            409, "Hacienda está en producción y esta factura es posterior a la activación: se emite desde la plataforma con «Emitir a Hacienda»"
-        )
+        return "Hacienda está en producción y esta factura es posterior a la activación: se emite desde la plataforma con «Emitir a Hacienda»"
+    return None
+
+
+def check_markable(db: Session, inv: Invoice, tenant: Tenant | None = None) -> None:
+    why = mark_blocker(db, inv, production_since(db, tenant) if tenant is not None else None)
+    if why:
+        raise HTTPException(409, why)
 
 
 def clean_number(number: str) -> str:

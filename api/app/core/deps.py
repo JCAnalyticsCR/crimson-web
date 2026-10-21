@@ -260,6 +260,13 @@ class Principal:
         sus cobros. "sales.asignar" (elegir el vendedor de un documento) no lo tiene ningun rol: solo el admin ("*")."""
         return self.can("sales", "ver_todo")
 
+    @property
+    def sends_quotes(self) -> bool:
+        """Enviar una cotizacion (correo o "Marcar enviada") congela su version y pasa la oportunidad del vendedor a
+        "enviada": es de quien cotiza (sales.crear o sales.editar), ademas de sales.enviar. Contabilidad tiene
+        sales.enviar para mandar FACTURAS (plan 1.7), no las cotizaciones de los vendedores."""
+        return self.can("sales", "enviar") and (self.can("sales", "crear") or self.can("sales", "editar"))
+
     def can(self, module: str, action: str) -> bool:
         return perms_allow(self.permissions, module, action)
 

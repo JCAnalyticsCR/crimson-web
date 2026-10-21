@@ -67,10 +67,11 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const emitida = kind === "invoice" && ["pendiente", "aceptada", "emitida_fuera"].includes((doc as Invoice).einvoice_status || "");
   const locked = !isNew && (doc.status === "convertida" || doc.status === "anulada" || accepted || emitida || (kind === "invoice" && ((doc as Invoice).payments?.length ?? 0) > 0));
   /* quien no edita ventas (p. ej. contabilidad: envia y cobra, no crea ventas, plan 1.7) ve el documento sin campos
-     editables ni botones que le darian 403; si puede enviar, tiene "Enviar al cliente" sin guardar */
+     editables ni botones que le darian 403; si puede enviar, tiene "Enviar al cliente" sin guardar. Una cotizacion
+     la envia solo quien cotiza (crear o editar ventas, como la API: Principal.sends_quotes): contabilidad envia facturas */
   const canEdit = isNew ? allows("sales.crear") : allows("sales.editar");
   const ro = locked || !canEdit;
-  const canSend = allows("sales.enviar");
+  const canSend = allows("sales.enviar") && (!isQ || allows("sales.crear") || allows("sales.editar"));
 
   useEffect(() => {
     api<{ items: Customer[] }>("/customers?limit=100").then((r) => setCustomers(r.items));

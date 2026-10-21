@@ -125,3 +125,33 @@ def test_listo_para_facturacion_solo_a_quien_factura(client, auth, db_session):
     assert r.status_code == 200, r.text
     avisos = db_session.query(EmailOutbox).filter(EmailOutbox.subject.like("%listo para facturación%")).all()
     assert [a.to for a in avisos] == ["admin@crimsonapp.com"]  # contabilidad no puede facturar el proyecto: no se le avisa
+
+
+def test_contabilidad_envia_facturas_no_cotizaciones(client, auth, db_session, correos):
+    """sales.enviar es para mandar FACTURAS: una cotizacion la envia quien cotiza. Enviarla congela su version y pasa la
+    oportunidad del vendedor a "enviada"; por correo tampoco se salta la aprobacion de un descuento."""
+    from app.models import Quote, QuoteVersion
+
+    conta = role_headers(client, db_session, auth["tenant"]["id"], "conta.cotiza@ejemplo.com", "contabilidad")
+    cust = client.get("/customers").json()["items"][0]
+    body = {"customer_id": cust["id"], "lines": [{"name": "Servicio", "quantity": 1, "unit_price": 1000, "tax_rate": 13}]}
+    q = client.post("/quotes", json=body).json()
+    assert client.post(f"/quotes/{q['id']}/email", json={"to": "cliente@ejemplo.com"}, headers=conta).status_code == 403
+    assert client.post(f"/quotes/{q['id']}/send", json={"channel": "whatsapp"}, headers=conta).status_code == 403
+    assert client.get(f"/quotes/{q['id']}").json()["status"] == "creado" and correos == []
+    assert db_session.query(QuoteVersion).filter(QuoteVersion.quote_id == q["id"]).count() == 0
+    # con un descuento esperando al admin no sale por correo (ni a una direccion cualquiera): la misma guarda que
+    # "Marcar enviada"
+    db_session.get(Quote, q["id"]).status = "por_aprobar"
+    db_session.commit()
+    r = client.post(f"/quotes/{q['id']}/email", json={"to": "otro@ejemplo.com"})
+    assert r.status_code == 409 and "aprobación" in r.json()["detail"] and correos == []
+    for estado in ("convertida", "anulada"):
+        db_session.get(Quote, q["id"]).status = estado
+        db_session.commit()
+        assert client.post(f"/quotes/{q['id']}/email", json={"to": "cliente@ejemplo.com"}).status_code == 409
+    # quien cotiza la sigue enviando
+    db_session.get(Quote, q["id"]).status = "creado"
+    db_session.commit()
+    r = client.post(f"/quotes/{q['id']}/email", json={"to": "cliente@ejemplo.com"})
+    assert r.status_code == 200 and r.json()["sent"], r.text

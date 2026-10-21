@@ -199,6 +199,24 @@ def test_produccion_interruptor_y_huella(client, auth, db_session, monkeypatch, 
     r = client.post(f"/invoices/{inv['id']}/emit")
     assert r.status_code == 409 and "no la permite" in r.json()["detail"], r.text
     assert db_session.query(EInvoiceDocument).filter(EInvoiceDocument.invoice_id == inv["id"]).count() == 0
+    # tampoco se responde a un proveedor: con el modo efectivo "ninguno" el mensaje receptor saldria simulado (sin validez
+    # fiscal ni credito de IVA) y el comprobante quedaria respondido creyendo estar en produccion
+    from datetime import date
+
+    from app.models import ReceptionResponse
+    from tests.hacienda_utils import clave, fe_xml
+
+    hoy = date.today()
+    num = "00100001010000000777"
+    xml = fe_xml(clave(fecha=hoy.strftime("%d%m%y"), consecutivo=num), fecha=f"{hoy.isoformat()}T10:00:00-06:00", consecutivo=num)
+    rec = client.post("/reception/upload", files={"file": ("f.xml", xml.encode(), "application/xml")})
+    assert rec.status_code == 201, rec.text
+    rid = rec.json()["id"]
+    r = client.post(f"/reception/{rid}/respond", json={"action": "aceptada"})
+    assert r.status_code == 409 and "no la permite" in r.json()["detail"], r.text
+    assert db_session.query(ReceptionResponse).filter(ReceptionResponse.received_document_id == rid).count() == 0
+    det = client.get(f"/reception/{rid}").json()
+    assert det["status"] == "por_revisar" and det["can_respond"] and det["can_reopen"] is False
     monkeypatch.setattr(settings, "railway_environment_id", "ambiente-prod")
     assert hc.production_blocked(db_session, t) is None
     assert hc.hacienda_mode(db_session, t) == "produccion"

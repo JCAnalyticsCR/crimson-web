@@ -251,6 +251,93 @@ def test_validaciones_de_la_marca(client, auth, db_session):
         assert _marcar(client, p["id"], number=f"FE-{status}").status_code == 409
 
 
+def test_produccion_cerrada_sin_envio_se_marca(client, auth, db_session):
+    """Se apago produccion (o el servidor la bloqueo) con comprobantes de produccion esperando al worker: send_einvoice
+    los cierra con "Cambio el modo" SIN ningun POST (attempts == 0) y la factura vuelve a "sin_emitir". Nunca llegaron a
+    Hacienda: entran a "Por emitir", se marcan y la fila lo dice (markable). Uno con error DESPUES de un POST real pudo
+    llegar: ese no se tapa con la marca, y la fila no ofrece el boton (la misma regla que void_invoice)."""
+    from app.models import EInvoiceDocument, Invoice
+    from app.services import hacienda_sync
+
+    tid = auth["tenant"]["id"]
+    nunca, quizas = _pagar(client, _factura(client)), _pagar(client, _factura(client))
+    doc = EInvoiceDocument(
+        tenant_id=tid,
+        invoice_id=nunca["id"],
+        doc_type="FE",
+        consecutive="00100001010000000901",
+        provider="hacienda",
+        status="por_enviar",
+        mode="produccion",
+        attempts=0,
+    )
+    db_session.add(doc)
+    db_session.get(Invoice, nunca["id"]).einvoice_status = "pendiente"
+    db_session.commit()
+    assert _marcar(client, nunca["id"], number="FE-N0").status_code == 409  # en camino: se espera
+    # el modo vigente es "ninguno" (produccion apagada): el worker la cierra sin mandarla
+    assert hacienda_sync.send_einvoice(db_session, doc.id) == "error"
+    db_session.refresh(doc)
+    assert doc.attempts == 0 and "Cambió el modo" in doc.last_error
+    assert db_session.get(Invoice, nunca["id"]).einvoice_status == "sin_emitir"
+    db_session.add(
+        EInvoiceDocument(
+            tenant_id=tid,
+            invoice_id=quizas["id"],
+            doc_type="FE",
+            consecutive="00100001010000000902",
+            provider="hacienda",
+            status="error",
+            mode="produccion",
+            attempts=1,
+        )
+    )
+    db_session.get(Invoice, quizas["id"]).einvoice_status = "sin_emitir"  # p. ej. un intento posterior que no salio
+    db_session.commit()
+    marcable = {x["id"]: x["markable"] for x in _cola(client)["items"]}
+    assert marcable[nunca["id"]] is True and marcable[quizas["id"]] is False
+    r = _marcar(client, quizas["id"], number="FE-Q1")
+    assert r.status_code == 409 and "Producción" in r.json()["detail"]
+    assert _marcar(client, nunca["id"], number="FE-N1").status_code == 200
+    assert nunca["id"] not in _ids(client)
+
+
+def test_emitida_en_fygaro_con_un_comprobante_de_pruebas_se_anula(client, auth, db_session):
+    """Aceptada en el ambiente de PRUEBAS (sin validez fiscal) y despues emitida en Fygaro: la NC tambien va en Fygaro y
+    aqui se anula la factura interna. El comprobante de pruebas no lo impide (si no, no habria salida); uno de
+    produccion, o uno viejo sin modo, si."""
+    from app.models import EInvoiceDocument, Invoice
+
+    tid = auth["tenant"]["id"]
+    inv = _factura(client)
+    _doc(db_session, tid, inv["id"], "aceptada", "pruebas", "aceptada")
+    assert _marcar(client, inv["id"], number="FE-PR1").status_code == 200
+    r = client.post(f"/invoices/{inv['id']}/void")
+    assert r.status_code == 200 and r.json()["status"] == "anulada", r.text
+    # sin la marca, la aceptada (aunque sea de pruebas) se anula con su nota de credito, como siempre
+    otra = _factura(client)
+    _doc(db_session, tid, otra["id"], "aceptada", "pruebas", "aceptada")
+    assert client.post(f"/invoices/{otra['id']}/void").status_code == 409
+    # emitida fuera con un comprobante sin modo (de antes de la columna) que pudo llegar a Hacienda: no se anula a ciegas
+    vieja = _factura(client)
+    assert _marcar(client, vieja["id"], number="FE-PR2").status_code == 200
+    db_session.add(
+        EInvoiceDocument(
+            tenant_id=tid,
+            invoice_id=vieja["id"],
+            doc_type="FE",
+            consecutive="00100001010000000903",
+            provider="hacienda",
+            status="aceptada",
+            mode=None,
+            attempts=1,
+        )
+    )
+    db_session.commit()
+    assert client.post(f"/invoices/{vieja['id']}/void").status_code == 409
+    assert db_session.get(Invoice, vieja["id"]).status != "anulada"
+
+
 def test_permisos_y_alcance(client, auth, db_session):
     tid = auth["tenant"]["id"]
     conta = role_headers(client, db_session, tid, "conta.cola@ejemplo.com", "contabilidad")

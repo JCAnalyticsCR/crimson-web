@@ -15,6 +15,9 @@ type XmlDoc = {
   mode: string | null; last_error: string | null; emitted_at: string | null; delivered_at: string | null; hacienda_delivered_at: string | null; delivery_failed_at: string | null; hacienda_delivery_failed_at: string | null;
   receiver_message: string | null; receiver_detail: string | null; receiver_at: string | null; attempts: number;
 };
+/* estados de un comprobante en camino a Hacienda y "vivo" (services/einvoice: IN_FLIGHT y LIVE) */
+const EN_CAMINO = ["por_enviar", "enviando", "enviado", "procesando", "pendiente"];
+const llegoAHacienda = (x: XmlDoc) => x.mode === "produccion" && (EN_CAMINO.includes(x.status) || x.status === "aceptada" || (x.status === "error" && (x.attempts ?? 0) > 0));
 const MODE_TAG: Record<string, string> = { simulado: "Simulado", pruebas: "Pruebas", produccion: "Producción" };
 const EI_TEXT: Record<string, string> = { por_enviar: "Por enviar a Hacienda (se reintenta solo)", enviando: "Enviando a Hacienda", enviado: "Enviado: Hacienda lo está validando", procesando: "En proceso en Hacienda" };
 const CLIENT_MSG: Record<string, string> = { "1": "Aceptada por el cliente", "2": "Aceptada parcialmente por el cliente", "3": "Rechazada por el cliente" };
@@ -58,8 +61,10 @@ export default function InvoiceDetail() {
      emitirlo aqui lo duplicaria. Lo posterior se emite desde la plataforma. */
   const corte = fmode === "produccion" && !!since && !!inv?.created_at && parseTs(inv.created_at) < parseTs(since);
   /* Marcar emitida en Fygaro (plan 1.7, contabilidad: sales.emitir_fuera): lo que no tiene un comprobante real aqui
-     (sin emitir, o solo simulado o de pruebas). El servidor valida lo mismo (services/fiscal_queue.check_markable). */
-  const puedeMarcar = !!inv && allows("sales.emitir_fuera") && fmode !== null && (fmode !== "produccion" || corte) && inv.status !== "anulada" && !fuera && est !== "pendiente" && !docs.some((x) => x.mode === "produccion" && x.status !== "rechazada");
+     (sin emitir, o solo simulado o de pruebas). Bloquea uno en camino y uno de produccion que pudo llegar a Hacienda
+     (vivo, o con error despues de un envio real); uno de produccion cerrado sin ningun envio nunca salio. La misma
+     regla que el servidor (services/fiscal_queue.mark_blocker). */
+  const puedeMarcar = !!inv && allows("sales.emitir_fuera") && fmode !== null && (fmode !== "produccion" || corte) && inv.status !== "anulada" && !fuera && est !== "pendiente" && !docs.some((x) => EN_CAMINO.includes(x.status) || llegoAHacienda(x));
   /* Emitida en Fygaro y anulada alla con su nota de credito: aqui se anula la factura interna (cartera, saldo y
      comisiones). Sin pagos, como en el editor: con un cobro primero va la devolucion. */
   const anularFuera = async () => {
