@@ -784,6 +784,7 @@ def survey_create_and_assign(oid: int, data: SurveyFromRequestIn, p: Principal =
             f'<p><a href="{html.escape(avisos.enlace(f"/levantamientos?id={s.id}"))}">Abrir el levantamiento</a></p>',
             "survey",
             s.id,
+            company_bcc=False,  # aviso interno: no va al BCC de las facturas
         )
     notify_ally_work(db, p.tenant, {data.technician_id}, s.number, f"Levantamiento {s.site or ''}".strip(), s.visit_date, entity_id=s.id)
     db.commit()
@@ -852,6 +853,7 @@ def survey_assign(sid: int, data: SurveyAssignIn, p: Principal = Depends(require
                 f'<p><a href="{html.escape(avisos.enlace(f"/levantamientos?id={s.id}"))}">Abrir el levantamiento</a></p>',
                 "survey",
                 s.id,
+                company_bcc=False,
             )
         notify_ally_work(db, p.tenant, {data.technician_id}, s.number, f"Levantamiento {s.site or ''}".strip(), s.visit_date, entity_id=s.id)
     db.commit()

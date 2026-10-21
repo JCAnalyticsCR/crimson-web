@@ -255,6 +255,35 @@ def test_aprobada_o_rechazada_sin_vendedora_que_la_abra_va_a_administracion(clie
     assert _para(mails) == ["otra-admin@ejemplo.com"] and "reasignala" in mails[0].html
 
 
+def test_avisos_internos_no_van_al_bcc_de_la_empresa_ni_llevan_el_monto(client, auth, db_session):
+    """Ajustes -> "Correos en copia (BCC) de toda factura" suele ser el archivo o el contador externo: los avisos del
+    equipo (por aprobar, aprobada, aceptada) no le llegan. Y el motivo de una retenida por monto va sin el total ni el
+    tope interno. Un correo de documento sigue yendo en copia, como antes."""
+    from app.models import Tenant
+    from app.services.mail import queue_email
+
+    tid, ven, _sup = _equipo(client, db_session, auth, "bcc")
+    assert client.put("/settings", json={"bcc": ["archivo@ejemplo.com"], "quote_approval_amount": 1000}).status_code == 200
+    cust = _cliente(client)
+    q = client.post("/quotes", headers=ven, json={"customer_id": cust["id"], "lines": [_linea()]}).json()
+    assert q["status"] == "por_aprobar"
+    pedido = _correos(db_session, "quote", q["id"], "Cotización por aprobar")
+    assert len(pedido) == 1 and "supera el tope para cotizar sin aprobación" in pedido[0].html
+    assert "CRC" not in pedido[0].html and "226" not in pedido[0].html and "1,000" not in pedido[0].html
+    assert client.post(f"/quotes/{q['id']}/approve").status_code == 200
+    assert client.post(f"/quotes/{q['id']}/send", json={"channel": "whatsapp"}, headers=ven).status_code == 200
+    r = client.post(f"/quotes/{q['id']}/acceptance", json={"status": "aceptada", "contact_name": "Persona Cliente", "channel": "whatsapp"}, headers=ven)
+    assert r.status_code == 200, r.text
+    avisos = [m for p in ("Cotización por aprobar", "Cotización aprobada", "Cotización aceptada") for m in _correos(db_session, "quote", q["id"], p)]
+    assert len(avisos) >= 3 and all(m.bcc is None for m in avisos)
+
+    # un correo de documento (sin company_bcc=False) sigue con la copia de la empresa
+    t = db_session.get(Tenant, tid)
+    m = queue_email(db_session, t, "cliente@ejemplo.com", "Factura de prueba", "<p>x</p>", "invoice", 1)
+    assert m.bcc == "archivo@ejemplo.com"
+    db_session.rollback()
+
+
 # ---------- ordenes de trabajo ----------
 def test_ot_asignada_avisa_al_tecnico_interno_una_vez(client, auth, db_session, monkeypatch):
     monkeypatch.setattr(settings, "public_base_url", BASE)

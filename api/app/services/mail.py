@@ -39,11 +39,14 @@ def queue_email(
     entity_id: int,
     attachments: list | None = None,
     files: list[tuple[str, bytes]] | None = None,
+    *,
+    company_bcc: bool = True,
 ) -> EmailOutbox:
     """files son los adjuntos reales (nombre, bytes); no se guardan en la BD, solo viajan con el envio.
-    attachments es la descripcion que queda en la bitacora de salida."""
+    attachments es la descripcion que queda en la bitacora de salida. company_bcc=False: un aviso interno del equipo
+    (avisos_venta) no va en copia al BCC de la empresa ("de toda factura": archivo o contador externo)."""
     sensitive = entity in SENSITIVE_ENTITIES
-    bcc = None if sensitive else (",".join((tenant.settings or {}).get("bcc") or []) or None)
+    bcc = None if sensitive or not company_bcc else (",".join((tenant.settings or {}).get("bcc") or []) or None)
     m = EmailOutbox(tenant_id=tenant.id, to=to, bcc=bcc, subject=subject, html=html, attachments=attachments or [], entity=entity, entity_id=entity_id)
     db.add(m)
     db.flush()

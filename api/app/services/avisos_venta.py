@@ -13,14 +13,17 @@ mover (la RACI de avisos de la sesion con Andres):
 - Precio recibido de un aliado -> quien lo aprueba y ve costos, no la vendedora (lo que cobra el aliado es costo).
 - Cotizaciones frias -> la vendedora de cada una (app/tasks/ventas.py).
 
-Sin montos, costos ni margenes en el cuerpo: el correo puede ir en copia (Ajustes -> BCC) y lo leen personas que no ven
-costos. Fatiga de alertas: quien hizo el cambio no se avisa a si mismo, cada persona recibe un solo correo por evento
+Son correos internos: nunca van en copia al BCC de la empresa (Ajustes -> "Correos en copia (BCC) de toda factura" suele
+ser un buzon de archivo o el contador externo; queue_email(company_bcc=False)). Sin costos ni margenes en el cuerpo y,
+salvo el resumen de frias (su total, solo a quien ve los precios de esa cotizacion), sin montos: el motivo de una
+retenida va sin el monto ni el tope (_motivo_sin_cifras). Fatiga de alertas: quien hizo el cambio no se avisa a si mismo, cada persona recibe un solo correo por evento
 y el mismo aviso no se repite dentro de su ventana (ya_avisado, como support_desk._ya_avisado y
 ally_scope._ya_avisado). Cada enlace lleva a una pantalla que esa persona puede abrir: nunca a un 404."""
 
 from __future__ import annotations
 
 import html
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -137,7 +140,7 @@ def avisar(
         vistos.add(correo)
         if ya_avisado(db, tenant.id, correo, entity, entity_id, asunto, minutos):
             continue
-        queue_email(db, tenant, correo, asunto, cuerpo(m), entity, entity_id)
+        queue_email(db, tenant, correo, asunto, cuerpo(m), entity, entity_id, company_bcc=False)
         n += 1
     return n
 
@@ -221,19 +224,30 @@ def cotizacion_aceptada(db: Session, tenant, q: Quote, *, version: int | None, q
     return avisar(db, tenant, destinos, f"Cotización aceptada: {q.number} · {cliente}", cuerpo, "quote", q.id, minutos=VENTANA_ACEPTADA, excluir=actor_id)
 
 
-def descuento_por_aprobar(db: Session, tenant, q: Quote, actor_id: int | None, *, tras_decision: bool = False) -> int:
-    """La cotizacion quedo retenida (descuento, monto o margen): aviso inmediato a quien aprueba. El motivo va sin cifras
-    de margen (public_reason): el correo no es lugar para el costo. Pasarse del limite, corregir y volver a pasarse no
-    repite el aviso dentro de la ventana; volver a pedirlo despues de un rechazo o de una aprobacion si avisa (entre uno
-    y otro hubo una decision de quien aprueba, no hay forma de inundarlo)."""
+# la frase del tope de discounts.approval_reasons, con el total de la cotizacion y el tope interno de la empresa
+_MONTO_TOPE = re.compile(r"El monto \([^)]*\) supera el tope de [\d.,]+ para cotizar sin aprobación\.")
+
+
+def _motivo_sin_cifras(texto: str | None) -> str | None:
+    """El motivo para el correo: sin cifras de margen (public_reason) y sin el monto ni el tope (se ven en el panel)."""
     from .discounts import public_reason
 
+    motivo = public_reason(texto, False)
+    return _MONTO_TOPE.sub("El monto supera el tope para cotizar sin aprobación.", motivo) if motivo else motivo
+
+
+def descuento_por_aprobar(db: Session, tenant, q: Quote, actor_id: int | None, *, tras_decision: bool = False) -> int:
+    """La cotizacion quedo retenida (descuento, monto o margen): aviso inmediato a quien aprueba. El motivo va sin cifras
+    de margen ni el monto y el tope (_motivo_sin_cifras): el correo no es lugar para el costo ni para los totales.
+    Pasarse del limite, corregir y volver a pasarse no
+    repite el aviso dentro de la ventana; volver a pedirlo despues de un rechazo o de una aprobacion si avisa (entre uno
+    y otro hubo una decision de quien aprueba, no hay forma de inundarlo)."""
     destinos = [m for m in miembros(db, tenant) if m.can("sales", "aprobar")]
     if not destinos:
         return 0
     cliente = _cliente(db, q)
     vendedora = db.get(User, actor_id) if actor_id else None
-    motivo = public_reason(q.approval_reason, False)
+    motivo = _motivo_sin_cifras(q.approval_reason)
 
     def cuerpo(m: Miembro) -> str:
         url, texto = (enlace(f"/cotizaciones/{q.id}"), "Revisar y aprobar") if ve_cotizacion(m, q) else (enlace("/aprobaciones"), "Abrir Aprobaciones")
