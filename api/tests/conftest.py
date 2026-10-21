@@ -13,6 +13,20 @@ from app.seeds import seed
 ADMIN = ("admin@crimsonapp.com", "Crimson-2026-seguro")
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _argon2_barato():
+    """Argon2 con el costo minimo en las pruebas (cada prueba siembra un admin y varias inician sesion): con los
+    parametros de produccion la suite pasa la mayor parte del tiempo calculando hashes. verify() lee los parametros
+    del propio hash, asi que lo que se guarda y lo que se compara sigue siendo Argon2 real. Produccion no cambia."""
+    from argon2 import PasswordHasher
+
+    from app.core import security
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(security, "_ph", PasswordHasher(time_cost=1, memory_cost=8, parallelism=1))
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _aislar_hacienda(monkeypatch):
     """Ninguna prueba sale a la red ni toma nada del .env del desarrollador: una llave FISCAL_KEYS aleatoria por prueba,

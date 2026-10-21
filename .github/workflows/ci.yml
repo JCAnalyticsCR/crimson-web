@@ -1,0 +1,235 @@
+# CI de la plataforma: corre en cada push (cualquier rama) y en cada PR. Railway despliega main SOLO si este workflow
+# termina en verde ("Wait for CI" en api, worker, portal y respaldo; ver infra/DESPLIEGUE.md).
+# Sin secretos: nada de lo que corre aqui necesita credenciales reales.
+name: CI
+
+on:
+  push:
+    # "**" ya incluye main; main va explicito porque Railway ofrece "Wait for CI" solo si ve un `on.push` sobre main
+    branches: ["main", "**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# En main cada commit tiene su propio grupo: Railway espera la corrida de ESE commit y una corrida cancelada no la
+# bloquea si otro workflow del mismo commit (p. ej. el de GitHub Pages) termino bien. En las demas ramas, una corrida
+# nueva cancela la anterior.
+concurrency:
+  group: ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  UV_VERSION: "0.10.11"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  api:
+    name: API · ruff + pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: api/uv.lock
+      - name: Dependencias (falla si uv.lock no coincide con pyproject.toml)
+        run: uv sync --locked
+      - name: Ruff (api y worker; varios items agregan tareas a worker/celery_app.py)
+        run: uv run ruff check app ../worker
+      - name: Pruebas en paralelo
+        env:
+          # Reloj de Costa Rica, NO el de produccion (UTC), hasta los items 2.1 y 3.4. La app todavia mezcla date.today()
+          # con la fecha CR (88 usos; el plan los corrige en 2.1 y 3.4, no antes): con TZ=UTC el CI quedaba en rojo de
+          # 18:00 a 24:00 CR segun la hora del push, y el ultimo dia de cada mes fallaban pruebas de comisiones (Inicio,
+          # reportes y backfill cortan por mes CR y earned_on sale de date.today()). Un rojo que depende de la hora no
+          # detecta nada: bloquea despliegues (Wait for CI). El borde se prueba a proposito (infra/DESPLIEGUE.md 2).
+          TZ: America/Costa_Rica
+        run: uv run pytest -n auto -q -p no:cacheprovider
+
+  # En un PR BLOQUEA: una dependencia con una vulnerabilidad conocida no entra a main sin que alguien lo decida. En un
+  # push solo informa (el paso queda en rojo y el trabajo en verde): una vulnerabilidad recien publicada en otra parte
+  # no puede frenar el despliegue de un arreglo urgente. Se corrige con `uv lock --upgrade-package <paquete>` o
+  # `npm install <paquete>@<version> --save-exact`, en ese PR o en uno aparte (infra/DESPLIEGUE.md seccion 2).
+  dependencias:
+    name: Dependencias · pip-audit + npm audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: api/uv.lock
+      - run: uv sync --locked
+        working-directory: api
+      - name: API · vulnerabilidades conocidas en uv.lock (pip-audit)
+        continue-on-error: ${{ github.event_name != 'pull_request' }}
+        working-directory: api
+        env:
+          # Excepciones aceptadas, separadas por espacio (p. ej. "GHSA-xxxx-xxxx-xxxx"). Cada una con su motivo, quien
+          # la acepto y hasta cuando, en un comentario en esta linea. Hoy: ninguna.
+          IGNORAR: ""
+        run: |
+          args=""
+          for id in $IGNORAR; do args="$args --ignore-vuln $id"; done
+          uv run pip-audit --progress-spinner off --skip-editable $args
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Portal · vulnerabilidades altas en package-lock.json (npm audit, sin las de desarrollo)
+        continue-on-error: ${{ github.event_name != 'pull_request' }}
+        working-directory: portal
+        run: npm audit --omit=dev --audit-level=high
+
+  migraciones:
+    name: Migraciones · Postgres vacia + alembic check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: crimson_ci
+          POSTGRES_USER: crimson
+          POSTGRES_PASSWORD: solo_ci_desechable
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U crimson -d crimson_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg://crimson:solo_ci_desechable@localhost:5432/crimson_ci
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: api/uv.lock
+      - run: uv sync --locked
+      - name: Una sola cabeza de Alembic (nada de revisiones merge ni ramas sueltas)
+        run: |
+          heads="$(uv run alembic heads)"
+          echo "$heads"
+          test "$(printf '%s\n' "$heads" | grep -c '(head)')" -eq 1
+      - name: alembic upgrade head sobre una Postgres vacia
+        run: uv run alembic upgrade head
+      - name: alembic check (el modelo y las migraciones dicen lo mismo)
+        run: uv run alembic check
+      - name: La ultima migracion se puede revertir y volver a aplicar
+        run: |
+          uv run alembic downgrade -1
+          uv run alembic upgrade head
+          uv run alembic check
+      # Las pruebas de concurrencia del inventario (SELECT ... FOR UPDATE: nunca vender dos veces la ultima unidad) solo
+      # tienen sentido contra Postgres real; en el trabajo de la API se saltan. Van aqui, al final (reinician la base),
+      # y sin -n: las dos usan la misma base. Una prueba saltada no cuenta como pasada.
+      - name: Carreras de inventario contra Postgres real
+        env:
+          TEST_PG_RACE_URL: postgresql://crimson:solo_ci_desechable@localhost:5432/crimson_ci
+        run: |
+          uv run pytest -q -p no:cacheprovider -rs --junitxml="$RUNNER_TEMP/carreras.xml" \
+            tests/test_inventario_reservas.py::test_ac06_concurrencia_postgres_real \
+            tests/test_tienda_inventario.py::test_ac06_tienda_postgres_real
+          grep -q 'skipped="0"' "$RUNNER_TEMP/carreras.xml" || { echo "::error::Las pruebas de Postgres real se saltaron"; exit 1; }
+
+  portal:
+    name: Portal · tsc + vite build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: portal
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: portal/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Tipos (tsc -b, igual que npm run build)
+        run: npx tsc -b
+      - name: Build
+        run: npx vite build
+
+  nginx:
+    name: Portal · imagen + nginx -t
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # El Dockerfile del portal arma nginx.conf con envsubst y corre `nginx -t` en el build: se prueba la misma
+      # imagen que despliega Railway (si nginx.conf tiene un error, falla aqui y no en produccion).
+      - name: Construir la imagen del portal (incluye nginx -t)
+        run: docker build --pull -t crimson-portal:ci portal
+
+  respaldo:
+    name: Respaldo · imagen + ciclo completo (SQLite y Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: crimson_ci
+          POSTGRES_USER: crimson
+          POSTGRES_PASSWORD: solo_ci_desechable
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U crimson -d crimson_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Construir la imagen del cron de respaldo
+        run: docker build --pull -f infra/respaldo/Dockerfile -t crimson-respaldo:ci .
+      # Dentro de la imagen, con age y rclone reales y nada real: base con la semilla y un valor de cada tipo -> respaldo
+      # diario (verificado en una SQLite desechable) -> bucket local de rclone -> prueba mensual (bajar, hashes,
+      # descifrar) -> restore en una base vacia. Ver infra/respaldo/ciclo_ci.sh.
+      - name: Ciclo completo en SQLite (sin base real ni bucket)
+        run: >-
+          docker run --rm -e RAILWAY_GIT_COMMIT_SHA=${{ github.sha }}
+          -v "$GITHUB_WORKSPACE/infra/respaldo/ciclo_ci.sh:/ciclo_ci.sh:ro"
+          crimson-respaldo:ci sh /ciclo_ci.sh
+      # El camino de produccion: el cron respalda desde Postgres con el rol de solo lectura de RESPALDO.md 4.3 y verifica
+      # restaurando en SQLite (Postgres -> SQLite: Numeric, timestamptz, JSON y bytea entre motores), y la prueba
+      # mensual restaura en una Postgres vacia (Postgres -> Postgres, con las secuencias). --network host: el contenedor
+      # llega al servicio por localhost:5432.
+      - name: Ciclo completo desde Postgres, como produccion
+        env:
+          PG_ID: ${{ job.services.postgres.id }}
+        run: |
+          docker exec "$PG_ID" createdb -U crimson restaurada
+          docker exec "$PG_ID" psql -v ON_ERROR_STOP=1 -U crimson -d crimson_ci -c \
+            "CREATE ROLE respaldo LOGIN PASSWORD 'solo_ci_desechable'; GRANT CONNECT ON DATABASE crimson_ci TO respaldo; GRANT pg_read_all_data TO respaldo;"
+          docker run --rm --network host -e RAILWAY_GIT_COMMIT_SHA=${{ github.sha }} \
+            -e CICLO_ORIGEN_URL=postgresql://crimson:solo_ci_desechable@localhost:5432/crimson_ci \
+            -e CICLO_LECTURA_URL=postgresql://respaldo:solo_ci_desechable@localhost:5432/crimson_ci \
+            -e CICLO_RESTAURADA_URL=postgresql://crimson:solo_ci_desechable@localhost:5432/restaurada \
+            -v "$GITHUB_WORKSPACE/infra/respaldo/ciclo_ci.sh:/ciclo_ci.sh:ro" \
+            crimson-respaldo:ci sh /ciclo_ci.sh

@@ -8,3 +8,11 @@ crimson.db
 .env
 .env.*
 tests
+# respaldos, lo que se baja o se descifra a mano y las llaves (infra/RESPALDO.md): nunca dentro de la imagen
+respaldos
+**/*.zip
+**/*.zip.age
+**/*.pgdump
+**/llave-*.txt
+**/custodio*.txt
+**/crimson-[0-9]*.json
