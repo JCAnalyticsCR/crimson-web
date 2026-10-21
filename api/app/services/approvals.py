@@ -290,21 +290,18 @@ def _pct(v) -> str:
     return f"{Decimal(str(v or 0)).normalize():f}".replace(".", ",")
 
 
-def _money_txt(v, cur: str | None) -> str:
-    n = Decimal(str(v or 0))
-    if (cur or "CRC") == "CRC":
-        return "₡" + f"{n:,.0f}".replace(",", " ")
-    return "$" + f"{n:,.2f}".replace(",", " ").replace(".", ",")
-
-
 def _price_review_item(db: Session, p: Principal, prod: Product) -> dict:
-    from .margin_guard import review
+    from urllib.parse import quote
+
+    from .margin_guard import dudoso_txt, money_txt, review
 
     r = review(p.tenant, prod)
-    sub = f"Margen {_pct(r['margin_pct'])} % (mínimo {_pct(r['min_pct'])} %) · precio actual {_money_txt(r['price'], r['currency'])}"
+    sub = f"Margen {_pct(r['margin_pct'])} % (mínimo {_pct(r['min_pct'])} %) · precio actual {money_txt(r['price'], r['currency'])}"
+    if r["low_variants"]:
+        sub += f" · {r['low_variants']} variante(s) con precio propio bajo el mínimo"
     if r["dudoso"]:
-        sub += f" · dudoso: el costo cambió {_pct(r['jump_pct'])} %, verificalo con el proveedor antes de aplicar"
-    badge = "Fuera de venta" if r["held"] else ("Sobre el tope: sigue a la venta" if r["over_cap"] else "Solo informe: sigue a la venta")
+        sub += f" · dudoso: {dudoso_txt(r)} antes de aplicar"
+    badge = "Fuera de venta" if r["held"] else ("Frenado: sigue a la venta" if r["over_cap"] else "Solo informe: sigue a la venta")
     row = _row(
         prod.id,
         prod.code,
@@ -314,13 +311,16 @@ def _price_review_item(db: Session, p: Principal, prod: Product) -> dict:
         badge=badge + (" · dudoso" if r["dudoso"] else ""),
         amount=r["suggested"],  # el precio sugerido (sin IVA): la seccion exige ver costos
         currency=r["currency"],
-        to=f"/productos?q={prod.code}",
+        to=f"/productos?q={quote(prod.code, safe='')}&ficha={prod.id}",  # abre la ficha para verificar el costo
     )
-    # el unico pendiente que se resuelve aqui mismo: aplicar el precio sugerido con un clic (nunca se reprecia solo)
+    que = (("el precio y " if r["base_low"] else "") + f"{r['low_variants']} variante(s)") if r["low_variants"] else "el precio"
+    # el unico pendiente que se resuelve aqui mismo: aplicar el precio sugerido con un clic (nunca se reprecia solo).
+    # body = el precio que se muestra: si el sugerido de hoy es otro, la API responde 409 y no aplica otro monto
     row["action"] = {
         "label": "Aplicar",
         "path": f"/approvals/prices/{prod.id}/apply",
-        "confirm": f"¿Cambiar el precio de {prod.name} a {_money_txt(r['suggested'], r['currency'])} sin IVA y volver a publicarlo?",
+        "body": {"price": r["suggested"]},
+        "confirm": f"¿Cambiar {que} de {prod.name} a {money_txt(r['suggested'], r['currency'])} sin IVA y volver a publicarlo?",
     }
     return row
 
@@ -421,7 +421,7 @@ SECTIONS: tuple[Section, ...] = (
         "Los que dicen «Fuera de venta» se muestran como «Consultar» hasta que apliqués un precio; el sistema nunca "
         "cambia un precio solo.",
         ("catalog.costos", "catalog.editar"),
-        "/aprobaciones#precios_por_revisar",
+        "/aprobaciones?seccion=precios_por_revisar",  # la seccion entera (la bandeja corta en 50)
         Product,
         _price_review_where,
         lambda: [Product.margin_flagged_at, Product.id],
@@ -441,10 +441,11 @@ def summary(db: Session, p: Principal) -> dict:
     return {"total": sum(x["count"] for x in secs), "sections": secs}
 
 
-def full(db: Session, p: Principal, limit: int = 20) -> dict:
+def full(db: Session, p: Principal, limit: int = 20, only: str | None = None) -> dict:
+    """only = la clave de una seccion: solo esa ("Ver todos" de la bandeja, que corta en 50 por seccion)."""
     out = []
     for s in SECTIONS:
-        if not allowed(p, s):
+        if not allowed(p, s) or (only and s.key != only):
             continue
         rows = db.scalars(select(s.model).where(*s.where(p)).order_by(*s.order()).limit(limit)).all()
         sec = {
@@ -461,5 +462,9 @@ def full(db: Session, p: Principal, limit: int = 20) -> dict:
 
             # "¿quien lo recibe?": a quien le llega el aviso de cada levantamiento enviado
             sec["reviewers"] = [f"{r['name']} ({r['role']})" for r in _reviewers(db, p.tenant)]
+        if s.key == "precios_por_revisar":
+            # la ultima revision del guardian quedo frenada (posible error de datos): la bandeja ofrece destrabarla
+            last = (p.tenant.settings or {}).get("margin_guard_last") or {}
+            sec["brake"] = {"reason": last["frenada"], "frenados": last.get("frenados", 0), "at": last.get("at")} if last.get("frenada") else None
         out.append(sec)
     return {"total": sum(x["count"] for x in out), "sections": out}

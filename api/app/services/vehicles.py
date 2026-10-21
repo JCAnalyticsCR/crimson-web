@@ -21,7 +21,7 @@ from io import BytesIO
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import ExchangeRate, FuelLoad, Project, Vehicle, VehicleCost
+from ..models import FuelLoad, Project, Vehicle, VehicleCost
 from . import tabular as tb
 
 NOTE = "Comprar en un mes no equivale a consumir en ese mes."
@@ -47,19 +47,24 @@ def settings_of(tenant) -> dict:
 
 # ---------- tipo de cambio: las cargas en dolares se analizan en colones ----------
 class Fx:
+    """Cache por (moneda, fecha) sobre la funcion unica services/fx.fx (la de esa fecha o la ultima anterior; si no hay
+    anterior, la mas cercana posterior). None = no hay ninguna tasa: la carga queda fuera del analisis, nunca con 1."""
+
     def __init__(self, db: Session):
         self.db = db
         self.cache: dict[tuple[str, date], Decimal | None] = {}
 
     def rate(self, currency: str, on: date) -> Decimal | None:
+        from .fx import FxMissing, fx
+
         if currency == "CRC":
             return Decimal(1)
         key = (currency, on)
         if key not in self.cache:
-            fx = self.db.scalar(
-                select(ExchangeRate).where(ExchangeRate.currency == currency, ExchangeRate.date <= on).order_by(ExchangeRate.date.desc()).limit(1)
-            ) or self.db.scalar(select(ExchangeRate).where(ExchangeRate.currency == currency).order_by(ExchangeRate.date).limit(1))
-            self.cache[key] = d(fx.sell) if fx else None
+            try:
+                self.cache[key] = fx(self.db, currency, on).tasa
+            except FxMissing:
+                self.cache[key] = None
         return self.cache[key]
 
     def crc(self, amount, currency: str, on: date) -> Decimal | None:

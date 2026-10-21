@@ -32,6 +32,8 @@ type Detail = Opp & {
 type Board = {
   columns: { status: string; count: number; amount: string; weighted: string; items: Opp[] }[]; total: string; weighted: string;
   won_month?: { count: number; amount: string }; currency?: string; converted?: boolean;
+  /* alguna oportunidad en otra moneda no se sumo porque falta su tipo de cambio (nunca un dolar como colon) */
+  sin_tipo_de_cambio?: boolean;
 };
 type Pending = Opp & { days_late: number };
 /* sellers: responsables que se eligen al reasignar (solo quien ve todo el embudo); assignees: el equipo, para tareas como la solicitud de costo a un aliado. */
@@ -325,6 +327,7 @@ export default function Opportunities() {
           <div className="eco__box">
             <span className="meta">{meta && !meta.can_see_all ? "Mi embudo abierto" : "Embudo abierto"}</span><b className="money">{fmtMoney(board.total, board.currency)}</b>
             {board.converted && <span className="meta" title="Hay oportunidades en otra moneda">≈ al tipo de cambio de hoy</span>}
+            {board.sin_tipo_de_cambio && <span className="meta" style={{ color: "var(--bad)" }} title="Cargalo en Ajustes → Facturación">Sin tipo de cambio: no suma lo que está en otra moneda</span>}
           </div>
           <div className="eco__box"><span className="meta">Ponderado por probabilidad</span><b className="money">{fmtMoney(board.weighted, board.currency)}</b></div>
           <div className="eco__box"><span className="meta">Oportunidades</span><b>{board.columns.reduce((s, c) => s + c.count, 0)}</b></div>

@@ -314,7 +314,8 @@ def toggle_web(pid: int, data: WebIn, p: Principal = Depends(require("catalog", 
 
 def _margin_recheck(db: Session, p: Principal, pr: Product) -> None:
     """Producto en Precios por revisar (guardian de margen, plan 1.12) editado a mano: si su precio ya cumple el margen
-    minimo (o se despublico) vuelve a la venta ya. Guardar el producto nunca falla por el guardian."""
+    minimo vuelve a la venta ya. Despublicarlo y volverlo a publicar NO lo libera (sigue fuera si sigue bajo el minimo).
+    Guardar el producto nunca falla por el guardian."""
     from ..services import margin_guard
 
     try:

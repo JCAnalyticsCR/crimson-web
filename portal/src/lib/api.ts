@@ -165,7 +165,7 @@ export type Dashboard = {
   facturas_recientes: { id: number; number: string; customer: string | null; total: string; balance: string; currency: string; status: string; date: string }[];
   acciones_pendientes: Record<string, number>;
   /* inicio del vendedor: su embudo con la misma cuenta que Oportunidades, en la moneda de la empresa */
-  mi_embudo?: { abiertas: number; monto: string; ponderado: string; ganadas_mes: number; ganado_mes: string; perdidas_mes: number; moneda: string; convertido: boolean } | null;
+  mi_embudo?: { abiertas: number; monto: string; ponderado: string; ganadas_mes: number; ganado_mes: string; perdidas_mes: number; moneda: string; convertido: boolean; sin_tipo_de_cambio?: boolean } | null;
   /* Mis comisiones (vendedor, sin ver_todo): la misma cuenta que /commissions/summary, en colones y sin IVA */
   comisiones?: { ganado_mes: string; pagado_mes: string; por_cobrar: string; moneda: string } | null;
 };

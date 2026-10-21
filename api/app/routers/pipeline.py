@@ -230,6 +230,7 @@ def pipeline_summary(db: Session, p: Principal, owner_id: int | None = None, kin
         "perdidas_mes": len(perdidas),
         "moneda": conv.base,
         "convertido": conv.converted,
+        "sin_tipo_de_cambio": conv.missing,  # algun monto en otra moneda no se sumo (falta su tasa): el portal avisa
     }
 
 
@@ -265,6 +266,7 @@ def board(
         "won_month": {"count": len(ganadas), "amount": _money(sum((conv(o.amount, o.currency) for o in ganadas), Decimal(0)))},
         "currency": conv.base,
         "converted": conv.converted,
+        "sin_tipo_de_cambio": conv.missing,  # algun monto en otra moneda no se sumo (falta su tasa): el portal avisa
     }
 
 

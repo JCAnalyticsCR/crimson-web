@@ -53,7 +53,8 @@ export default function Products() {
   const [taxes, setTaxes] = useState<Tax[]>([]);
   const [cats, setCats] = useState<Named[]>([]);
   const [suppliers, setSuppliers] = useState<Named[]>([]);
-  const [q, setQ] = useState("");
+  /* ?q= filtra al abrir (los enlaces de Aprobaciones y del resumen de margen llegan con el codigo) */
+  const [q, setQ] = useState(params.get("q") || "");
   const [tab, setTab] = useState<string>("general");
   const [edit, setEdit] = useState<Edit | null>(params.get("nuevo") ? { ...blank } : null);
   const [variants, setVariants] = useState<Variant[]>([]);
@@ -129,6 +130,17 @@ export default function Products() {
       toast("Producto guardado"); setEdit(null); setVariants([]); setParams({}); load();
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
+
+  /* ?ficha=ID abre la ficha del producto una vez (Aprobaciones → Precios por revisar: verificar el costo antes de
+     aplicar el precio sugerido) */
+  const fichaAbierta = useRef(false);
+  useEffect(() => {
+    const id = Number(params.get("ficha"));
+    if (fichaAbierta.current || !Number.isInteger(id) || id <= 0) return;
+    fichaAbierta.current = true;
+    open(id).catch((e) => toast(e instanceof Error ? e.message : "No se pudo abrir el producto", "bad"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
 
   const copyLink = async () => {
     if (!edit?.id) return;
@@ -328,7 +340,7 @@ function CostCell({ p }: { p: Row }) {
 
 function MarginCell({ p }: { p: Row }) {
   /* plan 1.12: el guardian de margen lo saco de la tienda ("Consultar") hasta que alguien aplique un precio */
-  const hold = p.margin_hold ? <> <Link className="badge badge--bad" to="/aprobaciones#precios_por_revisar" title="Bajo el margen mínimo: en la tienda sale «Consultar». Revisalo en Aprobaciones → Precios por revisar.">fuera de venta</Link></> : null;
+  const hold = p.margin_hold ? <> <Link className="badge badge--bad" to="/aprobaciones?seccion=precios_por_revisar" title="Bajo el margen mínimo: en la tienda sale «Consultar». Revisalo en Aprobaciones → Precios por revisar.">fuera de venta</Link></> : null;
   if (p.margin_real_pct == null) return hold ?? <span className="muted">—</span>;
   const m = Number(p.margin_real_pct);
   if (p.margin_provisional) return <span className="mono muted" title="Sin costo: es el margen objetivo, no el real. Cargá el costo o vinculalo a un proveedor.">{m.toFixed(1)} % <span className="badge badge--muted">prov.</span>{hold}</span>;

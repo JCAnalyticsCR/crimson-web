@@ -71,15 +71,26 @@ def fx_today(currency: str = "USD", _: Principal = Depends(get_principal), db: S
     return fxsvc.info(db, currency)
 
 
-def _after_new_rate(db: Session, reason: str) -> None:
-    """Tasa nueva -> el guardian de margen revisa la tienda (su propio commit; un error suyo no deshace la tasa)."""
+def _after_new_rate(db: Session, reason: str, tenant_id: int | None = None) -> None:
+    """Tasa nueva -> el guardian de margen revisa la tienda (su propio commit; un error suyo no deshace la tasa).
+    Desde el portal solo la empresa de quien la cargo: el request no escribe ni saca de venta en otras empresas (la
+    tasa es global; las demas las revisa la red diaria del worker). Desde el worker (tenant_id None), todas."""
+    from ..models import Tenant
     from ..services import margin_guard
 
-    margin_guard.run_all(db, reason=reason)
+    if tenant_id is None:
+        margin_guard.run_all(db, reason=reason)
+        return
+    t = db.get(Tenant, tenant_id)
+    if t is not None and t.active:
+        margin_guard.run_safe(db, t, reason=reason)
 
 
 @router.put("/fx", response_model=ExchangeRateOut)
-def fx_upsert(data: ExchangeRateIn, _: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
+def fx_upsert(data: ExchangeRateIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
+    from ..core.ratelimit import margin_run_limiter
+
+    margin_run_limiter.hit(f"t{p.tenant.id}")  # cada tasa recorre la tienda entera de la empresa
     fx = db.scalar(select(ExchangeRate).where(ExchangeRate.date == data.date, ExchangeRate.currency == data.currency))
     if fx is None:
         fx = ExchangeRate(date=data.date, currency=data.currency)
@@ -88,12 +99,13 @@ def fx_upsert(data: ExchangeRateIn, _: Principal = Depends(require("settings", "
     db.commit()
     db.refresh(fx)
     out = ExchangeRateOut.model_validate(fx)
-    _after_new_rate(db, "tipo de cambio manual")
+    _after_new_rate(db, "tipo de cambio manual", p.tenant.id)
     return out
 
 
-def save_bccr_today(db: Session) -> ExchangeRate:
-    """Consulta el BCCR (API SDDE) y guarda venta/compra de hoy. Compartido con el worker diario."""
+def save_bccr_today(db: Session, tenant_id: int | None = None) -> ExchangeRate:
+    """Consulta el BCCR (API SDDE) y guarda venta/compra de hoy. Compartido con el worker diario (tenant_id None: el
+    guardian revisa todas las empresas; desde el portal, solo la de quien lo pidio)."""
     from ..providers.fx.bccr import fetch_today
 
     sell, buy = fetch_today()
@@ -104,20 +116,22 @@ def save_bccr_today(db: Session) -> ExchangeRate:
     fx.sell, fx.buy, fx.source, fx.note = sell, buy, "bccr", "API SDDE del BCCR"
     db.commit()
     db.refresh(fx)
-    _after_new_rate(db, "tipo de cambio del BCCR")
+    _after_new_rate(db, "tipo de cambio del BCCR", tenant_id)
     db.refresh(fx)
     return fx
 
 
 @router.post("/fx/bccr", response_model=ExchangeRateOut)
-def fx_bccr(_: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
+def fx_bccr(p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
     """Actualiza ya el tipo de cambio desde el BCCR (el worker lo hace solo cada dia a las 6:15)."""
     from fastapi import HTTPException
 
+    from ..core.ratelimit import margin_run_limiter
     from ..providers.fx.bccr import BccrError
 
+    margin_run_limiter.hit(f"t{p.tenant.id}")
     try:
-        return save_bccr_today(db)
+        return save_bccr_today(db, p.tenant.id)
     except BccrError as e:
         raise HTTPException(422 if "Falta" in str(e) else 502, str(e)) from e
     except Exception as e:  # noqa: BLE001 - red caida, BCCR fuera de servicio

@@ -385,6 +385,9 @@ def variants_replace(pid: int, data: list[VariantIn], p: Principal = Depends(req
         if vid not in keep:
             row.active = False
     audit(db, p.tenant.id, p.user.id, "variants", "product", pid, {"count": len(data)}, ip=p.ip)
+    from .catalog import _margin_recheck
+
+    _margin_recheck(db, p, pr)  # la tienda vende la variante a su precio: si estaba en revision por margen, se revisa ya
     db.commit()
     rows = db.scalars(select(ProductVariant).where(ProductVariant.product_id == pid).order_by(ProductVariant.position, ProductVariant.id)).all()
     return [variant_out(v, pr.price, p.sees_prices) for v in rows]

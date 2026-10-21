@@ -133,7 +133,7 @@ export default function Dashboard() {
 
           {d.mi_embudo && (
             /* misma cuenta que Oportunidades (pipeline_summary): el número del inicio y el del embudo no pueden diferir */
-            <Card title="Mi embudo" extra={<span className="meta">{d.mi_embudo.convertido ? "≈ al tipo de cambio de hoy" : "lo que llevás vendido"}</span>}>
+            <Card title="Mi embudo" extra={<span className="meta" style={d.mi_embudo.sin_tipo_de_cambio ? { color: "var(--bad)" } : undefined}>{d.mi_embudo.sin_tipo_de_cambio ? "Sin tipo de cambio: no suma lo que está en otra moneda" : d.mi_embudo.convertido ? "≈ al tipo de cambio de hoy" : "lo que llevás vendido"}</span>}>
               <div className="eco">
                 <Link className="eco__box" to="/oportunidades"><span className="meta">Abiertas · {d.mi_embudo.abiertas}</span><b className="money">{fmtMoney(d.mi_embudo.monto, d.mi_embudo.moneda)}</b></Link>
                 <Link className="eco__box" to="/oportunidades"><span className="meta">Ponderado por probabilidad</span><b className="money">{fmtMoney(d.mi_embudo.ponderado, d.mi_embudo.moneda)}</b></Link>

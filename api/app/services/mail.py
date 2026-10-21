@@ -18,6 +18,9 @@ from ..models import EmailOutbox, Tenant
 # enlace se borra del HTML guardado despues de enviarlo (el respaldo exporta email_outbox) y el worker no los
 # reintenta (su HTML ya no sirve): el admin usa "Reenviar".
 SENSITIVE_ENTITIES = frozenset({"invitation", "password_reset", "user_security"})
+# Correos internos con costos o margenes (resumen del guardian de margen): solo al destinatario, nunca en copia al BCC
+# de la empresa (esa lista es la de "toda factura": el contador o una firma externa que no ve costos).
+NO_BCC_ENTITIES = frozenset({"margin_summary"})
 _LINK_TOKEN = re.compile(r"(/(?:invitacion|restablecer)/)[A-Za-z0-9_\-]{16,}")
 
 
@@ -43,7 +46,7 @@ def queue_email(
     """files son los adjuntos reales (nombre, bytes); no se guardan en la BD, solo viajan con el envio.
     attachments es la descripcion que queda en la bitacora de salida."""
     sensitive = entity in SENSITIVE_ENTITIES
-    bcc = None if sensitive else (",".join((tenant.settings or {}).get("bcc") or []) or None)
+    bcc = None if sensitive or entity in NO_BCC_ENTITIES else (",".join((tenant.settings or {}).get("bcc") or []) or None)
     m = EmailOutbox(tenant_id=tenant.id, to=to, bcc=bcc, subject=subject, html=html, attachments=attachments or [], entity=entity, entity_id=entity_id)
     db.add(m)
     db.flush()

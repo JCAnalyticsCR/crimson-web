@@ -245,3 +245,70 @@ def test_gasto_sin_tasa_de_su_fecha_usa_la_mas_cercana_y_sin_ninguna_da_422(clie
     _sin_tasas(db_session)
     r = client.post("/expenses", json={**base, "date": "2026-08-02"})
     assert r.status_code == 422 and "tipo de cambio" in r.json()["detail"]
+
+
+# ---------- las copias que quedaban fuera de fx() ----------
+def test_comprobante_en_dolares_nunca_va_a_hacienda_con_tipo_de_cambio_1(client, auth, db_session):
+    """Factura en dolares heredada con fx_sell en 1 (lo que guardaba el today_fx viejo): el XML lleva la tasa del BCCR
+    de su fecha, nunca TipoCambio 1; sin ninguna tasa, error claro. En colones sigue siendo 1."""
+    from app.models import Invoice, Tenant
+    from app.providers.hacienda import xml44
+    from app.services import einvoice
+
+    assert xml44._tipo_cambio("CRC", None) == Decimal(1)
+    for malo in (None, 0, 1, "1.00000"):
+        with pytest.raises(xml44.BuildError):
+            xml44._tipo_cambio("USD", malo)
+    assert xml44._tipo_cambio("USD", "512.35") == Decimal("512.35")
+
+    cust = client.get("/customers").json()["items"][0]
+    prod = client.get("/products", params={"q": "domo"}).json()["items"][0]
+    r = client.post("/invoices", json={"customer_id": cust["id"], "currency": "USD", "lines": [{"product_id": prod["id"], "quantity": 1}]})
+    assert r.status_code == 201, r.text
+    inv = db_session.get(Invoice, r.json()["id"])
+    inv.fx_sell = Decimal(1)
+    db_session.commit()
+    t = db_session.get(Tenant, auth["tenant"]["id"])
+    now = datetime.now(UTC)
+    payload = einvoice.direct_payload(db_session, t, inv, "TE", "0" * 20, "5" * 50, now, lenient=True)
+    assert payload["currency"] == "USD" and payload["fx"] == Decimal("512.35")
+    _sin_tasas(db_session)
+    with pytest.raises(fxsvc.FxMissing):
+        einvoice.direct_payload(db_session, t, inv, "TE", "0" * 20, "5" * 50, now, lenient=True)
+
+
+def test_recepcion_importada_en_dolares_guarda_la_tasa_del_bccr(client, auth, db_session):
+    """El historico de Fygaro sin columna de tipo de cambio: un comprobante en dolares guarda la tasa del BCCR de su
+    fecha (antes 1). Sin ninguna tasa cargada esa fila es un error, no un 1 silencioso."""
+    from app.models import ReceivedDocument
+    from tests.test_importar_recepciones import cl, importar
+
+    head = "Clave;Fecha;Tipo;Emisor;Cédula emisor;Moneda;Impuesto;Total;Acción;Condición IVA;Código actividad\n"
+    c1, c2 = cl(41), cl(42)
+    csv = (head + f"{c1};10/09/2026;FE;Proveedor USD SA;3101000001;USD;13;113;Aceptado;01;6202.0\n").encode()
+    r = importar(client, csv, name="historico.csv", commit=True)
+    assert r.status_code == 200 and r.json()["summary"]["nuevo"] == 1, r.text
+    doc = db_session.query(ReceivedDocument).filter(ReceivedDocument.clave == c1).one()
+    assert doc.currency == "USD" and Decimal(str(doc.fx_rate)) == Decimal("512.35")
+    _sin_tasas(db_session)
+    csv = (head + f"{c2};10/09/2026;FE;Proveedor USD SA;3101000001;USD;13;113;Aceptado;01;6202.0\n").encode()
+    r = importar(client, csv, name="historico.csv", commit=True)
+    assert r.status_code == 200 and r.json()["summary"]["error"] == 1 and "tipo de cambio" in r.json()["result"][-1]["detail"]
+    assert db_session.query(ReceivedDocument).filter(ReceivedDocument.clave == c2).count() == 0
+
+
+def test_vehiculos_y_embudo_usan_la_funcion_unica(client, auth, db_session):
+    """vehicles.Fx delega en fx() (sin tasa: None, la carga queda fuera del analisis) y el embudo avisa cuando no sumo
+    una oportunidad en otra moneda por falta de tasa."""
+    from app.services.vehicles import Fx
+
+    assert Fx(db_session).rate("USD", date(2026, 9, 1)) == Decimal("512.35")  # la mas cercana posterior (semilla de hoy)
+    assert Fx(db_session).rate("CRC", date(2026, 9, 1)) == Decimal(1)
+    cust = client.get("/customers").json()["items"][0]
+    r = client.post("/opportunities", json={"title": "Oportunidad en dolares", "customer_id": cust["id"], "amount": 1000, "currency": "USD"})
+    assert r.status_code in (200, 201), r.text
+    assert client.get("/opportunities/board").json()["sin_tipo_de_cambio"] is False
+    _sin_tasas(db_session)
+    assert Fx(db_session).rate("USD", date(2026, 9, 1)) is None
+    b = client.get("/opportunities/board")
+    assert b.status_code == 200 and b.json()["sin_tipo_de_cambio"] is True

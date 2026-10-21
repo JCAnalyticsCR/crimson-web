@@ -358,6 +358,19 @@ def m5(x) -> str:
     return f"{Decimal(str(x)).quantize(Q5, rounding=ROUND_HALF_UP):.5f}"
 
 
+def _tipo_cambio(moneda: str, fx) -> Decimal:
+    """1 en colones; en otra moneda la tasa del documento, nunca 1 (services/fx ya la resuelve al armar el payload)."""
+    if moneda == "CRC":
+        return Decimal(1)
+    try:
+        v = Decimal(str(fx)) if fx is not None else Decimal(0)
+    except InvalidOperation:
+        v = Decimal(0)
+    if v <= 1:
+        raise BuildError(f"Falta el tipo de cambio de {moneda} del comprobante (TipoCambio no puede ser 1)")
+    return v
+
+
 def cr_iso(dt: datetime) -> str:
     """Hora de Costa Rica con zona y sin microsegundos: 2026-10-14T23:30:00-06:00."""
     if dt.tzinfo is None:
@@ -556,8 +569,9 @@ def build_comprobante(p: dict) -> etree._Element:
         desglose[("01", rcode)] = desglose.get(("01", rcode), Decimal(0)) + tax
     rs = b.el(root, "ResumenFactura")
     ctm = b.el(rs, "CodigoTipoMoneda")
-    b.el(ctm, "CodigoMoneda", p.get("currency") or "CRC")
-    b.el(ctm, "TipoCambio", m5(p.get("fx") or 1))
+    moneda = p.get("currency") or "CRC"
+    b.el(ctm, "CodigoMoneda", moneda)
+    b.el(ctm, "TipoCambio", m5(_tipo_cambio(moneda, p.get("fx"))))
     gravado, exento = tot["sg"] + tot["mg"], tot["se"] + tot["me"]
     for tag, key in (("TotalServGravados", "sg"), ("TotalServExentos", "se"), ("TotalMercanciasGravadas", "mg"), ("TotalMercanciasExentas", "me")):
         b.el(rs, tag, m5(tot[key]))

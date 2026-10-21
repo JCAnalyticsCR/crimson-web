@@ -53,10 +53,12 @@ DEFAULTS = {
     "quote_approval_amount": 2000000,  # cotizacion por encima -> aprobacion
     "min_margin_pct": 25,  # margen por debajo -> aprobacion (cotizaciones) y guardian de margen de la tienda
     # guardian de margen (plan 1.12): None = la primera corrida es solo informe y despues queda "activo" (saca de venta
-    # lo que quede bajo el minimo; nunca reprecia). "informe" lo deja sin ocultar nada. Tope de productos por corrida.
+    # TODO lo que quede bajo el minimo; nunca reprecia). "informe" lo deja sin ocultar nada.
     "margin_guard_mode": None,
+    # freno: SOLO ante una señal de error (tipo de cambio que salto, mayoria con costo dudoso) no deja mas que esto
+    # fuera de venta en total y avisa al admin; sin señal no hay tope (pregunta abierta para Andres)
     "margin_guard_cap": 20,
-    "margin_guard_jump_pct": 25,  # salto de costo que se marca "dudoso" (Andres confirma el umbral)
+    "margin_guard_jump_pct": 25,  # salto de costo o de tipo de cambio que se marca "dudoso" (Andres confirma el umbral)
     # SLA de soporte por prioridad (horas). Un contrato con SLA propio lo reemplaza para ese cliente.
     "sla": SLA_DEFECTO,
     "archive_purge_days": 30,  # dias en la papelera antes de que el worker lo borre definitivamente

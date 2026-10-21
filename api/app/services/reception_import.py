@@ -25,6 +25,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from ..core.deps import Principal
 from ..models import ExpenseCategory, ReceivedDocument, ReceptionResponse, Tenant
 from ..providers.hacienda import xml44
+from . import fx as fxsvc
 from . import reception as rsvc
 from . import tabular as tb
 from .bitacora import audit_change, snapshot
@@ -458,6 +459,9 @@ def import_table(db: Session, p: Principal, data: bytes, filename: str, commit: 
         except IntegrityError as e:
             _drop_last_ok(result, i)
             result.append({"row": i, "action": "error", "detail": f"{cl}: {_integrity_detail(e)}"})
+        except fxsvc.FxMissing as e:
+            _drop_last_ok(result, i)
+            result.append({"row": i, "action": "error", "detail": f"{cl}: {e}"})
     return result, maxes, recognized
 
 
@@ -483,6 +487,10 @@ def _table_row(
         credit = {"credito": tax, "bienes_capital": tax, "no_credito": Decimal(0)}.get(cond)
     if applicable is None and credit is not None and action == "aceptada":
         applicable = total - credit
+    cur = "USD" if tb.norm(v["currency"]) in ("usd", "dolares", "dolar") else "CRC"
+    # la del archivo si viene; si no, la del BCCR de la fecha del comprobante (services/fx). Nunca 1 para dolares: sin
+    # ninguna tasa cargada, FxMissing -> esa fila queda como error
+    fx_rate = fxsvc.doc_rate(db, cur, tb.num(v["fx"]), dt)
     doc = ReceivedDocument(
         tenant_id=tenant.id,
         clave=cl,
@@ -490,8 +498,8 @@ def _table_row(
         issuer_name=tb.text(v["issuer"], 200),
         issuer_id=xml44.norm_id(tb.text(v["issuer_id"], 30)),
         issue_date=dt,
-        currency="USD" if tb.norm(v["currency"]) in ("usd", "dolares", "dolar") else "CRC",
-        fx_rate=tb.num(v["fx"]) or Decimal(1),
+        currency=cur,
+        fx_rate=fx_rate,
         subtotal=total - tax,
         tax_total=tax,
         total=total,

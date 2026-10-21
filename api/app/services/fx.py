@@ -6,6 +6,7 @@
 - Otra moneda: la tasa de venta (BCCR o manual) de esa fecha o la ultima anterior. Sin fecha, la mas reciente cargada.
   Si no hay ninguna anterior a la fecha pedida (documento mas viejo que la primera tasa) se usa la mas cercana
   posterior, marcada vieja.
+- change_pct(db, moneda): cuanto cambio la tasa vigente contra la anterior (señal de una tasa mal digitada).
 - NUNCA devuelve 1 para una moneda distinta de CRC: sin ninguna tasa cargada lanza FxMissing. El API la convierte en
   un 422 claro (main.py); la tienda la atrapa y pasa a "Consultar" solo los productos que la necesitan (un tipo de
   cambio faltante no tumba el checkout de lo que esta en colones).
@@ -98,6 +99,22 @@ def fx(db: Session, currency: str | None, on: date | None = None, *, side: str =
     ref = on or cr_today()
     stale = later or business_days_between(row.date, ref) > STALE_BUSINESS_DAYS
     return Tasa(value, row.date, row.source or "manual", stale)
+
+
+def change_pct(db: Session, currency: str | None) -> Decimal:
+    """Cuanto cambio (%) la tasa de venta vigente contra la del dia cargado anterior. 0 en CRC, sin tasa o sin una
+    anterior. Lo usa el guardian de margen para marcar "dudoso" un tipo de cambio mal digitado (540 -> 5400)."""
+    cur = (currency or "CRC").upper()
+    if cur == "CRC":
+        return Decimal(0)
+    base = select(ExchangeRate).where(ExchangeRate.currency == cur)
+    last = db.scalar(base.order_by(ExchangeRate.date.desc(), ExchangeRate.id.desc()))
+    if last is None or _dec(last.sell) <= 0:
+        return Decimal(0)
+    prev = db.scalar(base.where(ExchangeRate.date < last.date, ExchangeRate.sell > 0).order_by(ExchangeRate.date.desc(), ExchangeRate.id.desc()))
+    if prev is None:
+        return Decimal(0)
+    return ((_dec(last.sell) - _dec(prev.sell)) / _dec(prev.sell) * 100).quantize(Decimal("0.1"))
 
 
 def rate_or_none(db: Session, currency: str | None) -> Decimal | None:

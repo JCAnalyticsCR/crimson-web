@@ -683,6 +683,12 @@ async def run_import(
     if commit:
         audit(db, p.tenant.id, p.user.id, "import", kind, None, {"file": file.filename, **summary}, ip=p.ip)
         db.commit()
+        if kind in ("catalogo", "products"):
+            # costos o precios nuevos: el guardian de margen revisa ya la tienda (su propio commit; nunca deshace esto)
+            from ..models import Tenant
+            from ..services import margin_guard
+
+            margin_guard.run_safe(db, db.get(Tenant, p.tenant.id), reason="importación de catálogo")
     else:
         db.rollback()
     return {"kind": kind, "commit": commit, "rows": len(rows), "summary": summary, "columns": recognized, "result": result[:1000], "at": date.today()}

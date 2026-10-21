@@ -315,8 +315,13 @@ def item_detail(iid: int, p: Principal = Depends(require("catalog", "ver")), db:
     else:
         out["suggestions"] = []
     if p.sees_costs and not it.product_id:
+        from ..services.fx import FxMissing
+
         margin = pricing.default_margin(p.tenant)
-        price = pricing.sale_price(db, d(it.cost), it.currency or "USD", "CRC", margin, fx) if it.cost is not None else None
+        try:
+            price = pricing.sale_price(db, d(it.cost), it.currency or "USD", "CRC", margin, fx) if it.cost is not None else None
+        except FxMissing:
+            price, fx = None, None  # sin tipo de cambio el cajon abre igual: la propuesta queda sin precio (plan 1.12)
         out["proposal"] = {
             "code": _proposed_code(db, p.tenant.id, it, sup),
             "margin_pct": margin,
@@ -545,6 +550,12 @@ async def import_list(
     if commit:
         audit(db, p.tenant.id, p.user.id, "import", "supplier_list", sup.id, {"file": file.filename, "list_date": ld.isoformat(), **res["summary"]}, ip=p.ip)
         db.commit()
+        # la lista copia el costo a lo vinculado: el guardian de margen revisa ya, sin esperar a la red diaria (su
+        # propio commit; un error suyo no deshace la lista)
+        from ..models import Tenant
+        from ..services import margin_guard
+
+        res["margin_guard"] = margin_guard.run_safe(db, db.get(Tenant, p.tenant.id), reason="lista de proveedor")
     else:
         db.rollback()
         if new_sup:

@@ -9,7 +9,9 @@ import { Card, Field } from "../../ui/components";
 
 export type GuardLast = {
   mode: "informe" | "activo"; at: string; reason: string; evaluados: number; bajo_minimo: number; retenidos: number;
-  nuevos_retenidos: number; liberados: number; dudosos: number; sobre_tope: number; sin_tasa: number; sin_costo: number;
+  nuevos_retenidos: number; liberados: number; dudosos: number; frenados: number; sin_tasa: number; sin_costo: number;
+  /* la revision parecio un error de datos (tipo de cambio que salto, mayoria con costo dudoso): por que */
+  frenada?: string | null;
 };
 export type MarginCfg = {
   min_margin_pct?: number; default_margin_pct?: number; margin_guard_mode?: "informe" | "activo" | null; margin_guard_cap?: number; margin_guard_jump_pct?: number;
@@ -55,23 +57,28 @@ export default function MarginGuardCard({ cfg, save }: { cfg: MarginCfg; save: (
               <option value="activo">{MODO.activo}</option>
             </select>
           </Field>
-          <Field label="Tope por revisión (productos)" hint="Una revisión no saca de venta más que esto (un tipo de cambio mal digitado no vacía la tienda).">
+          <Field label="Freno ante un posible error (productos)" hint="Solo si el tipo de cambio saltó o la mayoría de los costos cambió de golpe: no deja más que esto fuera de venta y te avisa. Sin esa señal sale de venta todo lo que quede bajo el mínimo.">
             <input className="input input--mono" type="number" min={1} max={1000} disabled={!edita} defaultValue={cfg.margin_guard_cap ?? 20} onBlur={(e) => e.target.value.trim() && Number(e.target.value) !== Number(cfg.margin_guard_cap ?? 20) && save({ margin_guard_cap: Number(e.target.value) })} />
           </Field>
-          <Field label="Salto de costo «dudoso» (%)" hint="Si el costo cambia esto o más de una vez, el aviso pide verificarlo con el proveedor antes de aplicar (posible error de la lista).">
+          <Field label="Salto «dudoso» de costo o tipo de cambio (%)" hint="Si el costo o el tipo de cambio cambia esto o más de una vez, se avisa para verificarlo (posible error de la lista o de digitación) antes de aplicar.">
             <input className="input input--mono" type="number" min={1} max={500} disabled={!edita} defaultValue={cfg.margin_guard_jump_pct ?? 25} onBlur={(e) => e.target.value.trim() && Number(e.target.value) > 0 && Number(e.target.value) !== Number(cfg.margin_guard_jump_pct ?? 25) && save({ margin_guard_jump_pct: Number(e.target.value) })} />
           </Field>
         </div>
         {shown ? (
           <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
             Última revisión ({shown.reason || "automática"}, {new Date(shown.at).toLocaleString("es-CR")}, modo {shown.mode}): {shown.evaluados} evaluados, <b>{shown.bajo_minimo} bajo el mínimo</b>, {shown.retenidos} fuera de venta
-            {shown.dudosos ? `, ${shown.dudosos} con un salto de costo dudoso` : ""}{shown.sobre_tope ? `, ${shown.sobre_tope} sobre el tope` : ""}
+            {shown.dudosos ? `, ${shown.dudosos} con un salto dudoso` : ""}{shown.frenados ? `, ${shown.frenados} frenados (siguen a la venta)` : ""}
             {shown.sin_tasa ? `, ${shown.sin_tasa} sin tipo de cambio` : ""}{shown.sin_costo ? `, ${shown.sin_costo} sin costo` : ""}.
           </p>
         ) : <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Todavía no hay revisiones. Corre sola después de cada refresco de Eurocomp y de cada tipo de cambio nuevo.</p>}
+        {shown?.frenada && (
+          <p style={{ fontSize: 12.5, margin: 0, color: "var(--warn)" }}>
+            <b>Revisión frenada:</b> {shown.frenada}. Corregí el dato o confirmalo con «Sacar de venta todo» en Aprobaciones → Precios por revisar.
+          </p>
+        )}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           {revisa && <button className="btn btn--soft btn--sm" onClick={run} disabled={busy}>{busy ? "Revisando…" : "Revisar ahora"}</button>}
-          <Link className="btn btn--ghost btn--sm" to="/aprobaciones#precios_por_revisar">Aprobaciones → Precios por revisar</Link>
+          <Link className="btn btn--ghost btn--sm" to="/aprobaciones?seccion=precios_por_revisar">Aprobaciones → Precios por revisar</Link>
         </div>
         <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>El sistema nunca cambia un precio solo: propone el precio (costo × tipo de cambio ÷ (1 − margen objetivo), redondeado a la centena) y lo aplicás con un clic.</p>
       </div>

@@ -3,9 +3,9 @@
    bueno (services/approvals.py en la API). Casi nada se aprueba aqui: cada elemento abre la pantalla donde se aprueba,
    viendo lo que se aprueba. La excepcion son los "Precios por revisar" del guardian de margen (plan 1.12): el precio
    sugerido se aplica con un clic (nunca se reprecia solo). Lo mas antiguo primero. */
-import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { api, fmtMoney, parseTs } from "../../lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { api, ApiError, fmtMoney, parseTs } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, I, Icon, Loading } from "../../ui/components";
 import type { ApprovalItem, ApprovalSection, ApprovalsFull } from "./useApprovalCount";
@@ -46,8 +46,12 @@ function Row({ it, onDone }: { it: ApprovalItem; onDone: () => void }) {
   const act = async () => {
     if (!it.action || (it.action.confirm && !confirm(it.action.confirm))) return;
     setBusy(true);
-    try { await api(it.action.path, { method: "POST" }); toast("Precio aplicado: el producto vuelve a la venta"); onDone(); }
-    catch (e) { toast(e instanceof Error ? e.message : "No se pudo aplicar", "bad"); }
+    try { await api(it.action.path, { method: "POST", json: it.action.body }); toast("Precio aplicado: el producto vuelve a la venta"); onDone(); }
+    catch (e) {
+      toast(e instanceof Error ? e.message : "No se pudo aplicar", "bad");
+      // 409: ya salio de la revision o el sugerido de hoy es otro; la bandeja se recarga con el dato al dia
+      if (e instanceof ApiError && e.status === 409) onDone();
+    }
     finally { setBusy(false); }
   };
   return (
@@ -70,14 +74,39 @@ function Row({ it, onDone }: { it: ApprovalItem; onDone: () => void }) {
   );
 }
 
-function Section({ s, onDone }: { s: ApprovalSection; onDone: () => void }) {
+/* "Precios por revisar" frenada: la revision parecio un error de datos (tipo de cambio que salto, costos dudosos) y dejo
+   productos bajo el minimo a la venta. Una persona lo destraba despues de verificar (o corrige el dato y se libera solo). */
+function Brake({ b, onDone }: { b: NonNullable<ApprovalSection["brake"]>; onDone: () => void }) {
+  const { toast } = useSession();
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    if (!confirm(`¿Verificaste el tipo de cambio y los costos? Se sacan de venta los ${b.frenados} producto(s) frenados (pasan a «Consultar»). No cambia ningún precio.`)) return;
+    setBusy(true);
+    try {
+      const r = await api<{ nuevos_retenidos: number }>("/approvals/prices/run", { method: "POST", json: { confirmar: true } });
+      toast(`${r.nuevos_retenidos} producto(s) fuera de venta hasta que apliqués su precio`); onDone();
+    } catch (e) { toast(e instanceof Error ? e.message : "No se pudo revisar", "bad"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="aprob-brake">
+      <p><b>Revisión frenada:</b> {b.reason}. {b.frenados} producto(s) bajo el mínimo siguen a la venta por si es un error del dato. Si el dato está mal, corregilo (Ajustes → Facturación) y se libera solo.</p>
+      <button className="btn btn--crimson btn--sm" onClick={go} disabled={busy}>{busy ? "Revisando…" : "Sacar de venta todo"}</button>
+    </div>
+  );
+}
+
+function Section({ s, onDone, whole }: { s: ApprovalSection; onDone: () => void; whole: boolean }) {
   const rest = s.count - s.items.length;
   return (
     <div id={s.key} className="aprob-sec">
-      <Card title={`${s.label} · ${s.count}`} extra={<Link className="btn btn--ghost btn--sm" to={s.to}>Ver todos →</Link>} flush>
+      <Card title={`${s.label} · ${s.count}`} extra={whole ? undefined : <Link className="btn btn--ghost btn--sm" to={s.to}>Ver todos →</Link>} flush>
         <p className="muted aprob-hint">{s.hint}{s.reviewers?.length ? ` Avisamos a: ${s.reviewers.join(", ")}.` : ""}</p>
+        {s.brake && <Brake b={s.brake} onDone={onDone} />}
         <ul className="aprob-list">{s.items.map((it) => <Row key={it.id} it={it} onDone={onDone} />)}</ul>
-        {rest > 0 && <p className="aprob-more">y {rest} más · <Link to={s.to}>Ver todos</Link></p>}
+        {rest > 0 && (whole
+          ? <p className="aprob-more">y {rest} más: aplicá o revisá estos y tocá Actualizar.</p>
+          : <p className="aprob-more">y {rest} más · <Link to={s.to}>Ver todos</Link></p>)}
       </Card>
     </div>
   );
@@ -85,17 +114,29 @@ function Section({ s, onDone }: { s: ApprovalSection; onDone: () => void }) {
 
 export default function Approvals() {
   const { allows, toast } = useSession();
+  const [params] = useSearchParams();
+  const { hash } = useLocation();
+  /* ?seccion=clave: "Ver todos" de una seccion (la bandeja entera corta en 50 por seccion) */
+  const only = params.get("seccion");
   const [data, setData] = useState<ApprovalsFull | null>(null);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const scrolled = useRef(false);
 
   const load = useCallback(async () => {
     setBusy(true);
-    try { setData(await api<ApprovalsFull>("/approvals?limit=50")); setFailed(false); }
+    const path = only ? `/approvals?section=${encodeURIComponent(only)}&limit=500` : "/approvals?limit=50";
+    try { setData(await api<ApprovalsFull>(path)); setFailed(false); }
     catch (e) { toast(e instanceof Error ? e.message : "No se pudo cargar la bandeja", "bad"); setFailed(true); }
     finally { setBusy(false); }
-  }, [toast]);
+  }, [toast, only]);
   useEffect(() => { load(); }, [load]);
+  /* los enlaces del correo, de Productos y de Ajustes traen #seccion: se baja a ella cuando ya cargo (una sola vez) */
+  useEffect(() => {
+    if (!data || scrolled.current || !hash) return;
+    scrolled.current = true;
+    requestAnimationFrame(() => goTo(decodeURIComponent(hash.slice(1))));
+  }, [data, hash]);
 
   // en vista previa, solo lo que ese rol aprobaria (la API responde con la cuenta real)
   const secs = (data?.sections || []).filter((s) => s.needs.every((n) => allows(n)));
@@ -107,6 +148,7 @@ export default function Approvals() {
       <div className="page-head">
         <div><div className="meta">Bandeja</div><h1 className="h1">Aprobaciones</h1></div>
         <div className="page-head__actions">
+          {only && <Link className="btn btn--ghost" to="/aprobaciones">← Toda la bandeja</Link>}
           <button className="btn btn--ghost" onClick={load} disabled={busy}><Icon d={I.refresh} />Actualizar</button>
         </div>
       </div>
@@ -123,7 +165,7 @@ export default function Approvals() {
               <a key={s.key} href={`#${s.key}`} onClick={(e) => { e.preventDefault(); goTo(s.key); }}>{s.label} <b>{s.count}</b></a>
             ))}
           </nav>
-          {conPend.map((s) => <Section key={s.key} s={s} onDone={load} />)}
+          {conPend.map((s) => <Section key={s.key} s={s} onDone={load} whole={!!only} />)}
           {alDia.length > 0 && <p className="muted aprob-ok">✓ Al día: {alDia.map((s) => s.label).join(" · ")}</p>}
         </>
       )}

@@ -1,12 +1,13 @@
 """Tareas del guardian de margen (plan 1.12; la logica vive en services/margin_guard).
 
-- margin.guard: revisa todas las empresas. Ya corre solo despues de cada refresco de Eurocomp y de cada tasa nueva;
-  esta tarea queda para lanzarla a mano.
+- margin.guard: revisa todas las empresas. Ya corre solo despues de cada refresco de Eurocomp, de cada lista de
+  proveedor y de cada tasa nueva (desde el portal, solo la empresa que la cargo); esta tarea queda para lanzarla a mano.
 - margin.daily_summary (la unica entrada del beat, regla 4 del plan): primero corre el guardian como red (con
-  BCCR_TOKEN vacio y sin credenciales de Eurocomp no hay refresco ni tasa nueva que lo dispare) y despues manda el
-  correo diario al admin con lo que esta bajo el minimo (fuera de venta, solo informe, sobre el tope, dudoso) y la
-  alerta de tipo de cambio viejo o faltante. Una vez por dia y por empresa aunque el beat dispare dos veces; nada que
-  decir = no hay correo.
+  BCCR_TOKEN vacio y sin credenciales de Eurocomp no hay refresco ni tasa nueva que lo dispare, y revisa las empresas
+  que no cargaron la tasa) y despues manda el correo diario al admin con lo que esta bajo el minimo (fuera de venta,
+  solo informe, frenado, dudoso), los saltos dudosos que siguen sobre el minimo y la alerta de tipo de cambio viejo o
+  faltante. Una vez por dia y por empresa aunque el beat dispare dos veces; nada que decir = no hay correo. Sin BCC
+  (mail.NO_BCC_ENTITIES): trae margenes y precios, de los que sale el costo.
 
 Las funciones reciben la sesion (se prueban sin Celery); las tareas solo abren la sesion y las llaman.
 """
@@ -46,9 +47,10 @@ def daily_summary(db: Session) -> int:
             if msg is None:
                 continue
             subject, body = msg
-            notify_roles(db, t, ("admin",), f"{subject} · {t.name}", body, "product", 0)
-            st["margin_guard_summary_on"] = hoy
-            t.settings = st
+            # entidad propia: el resumen trae margenes y precios (el costo se deduce) y no va al BCC de las facturas
+            notify_roles(db, t, ("admin",), f"{subject} · {t.name}", body, "margin_summary", 0)
+            # releer con bloqueo despues de enviar (Resend puede tardar): un PUT /settings de ese rato no se revierte
+            margin_guard.save_settings(db, t.id, {"margin_guard_summary_on": hoy})
             db.commit()
             n += 1
         except Exception:  # noqa: BLE001  una empresa con datos raros no frena a las demas

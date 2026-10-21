@@ -304,6 +304,11 @@ def sync_tenant(
     log.info(
         "Eurocomp (empresa %s): %s utiles de %s, %s nuevos, %s actualizados", t.id, out["utiles"], out["recibidos"], out.get("nuevo"), out.get("actualizado")
     )
+    # el catalogo tambien copia el costo a lo vinculado: el guardian de margen revisa ya (su propio commit; nunca
+    # deshace la sincronizacion)
+    from . import margin_guard
+
+    margin_guard.run_safe(db, t, reason="catálogo de Eurocomp")
     return out
 
 
@@ -408,9 +413,11 @@ def refresh_linked(db: Session, client: SirettClient | None = None) -> dict:
         out[t.id] = res
     db.commit()
     log.info("Eurocomp (existencias): %s", out)
-    # costo nuevo -> margen nuevo: el guardian revisa la tienda (nunca reprecia; saca de venta lo que quede bajo el
-    # minimo y propone el precio en Aprobaciones). Su propio commit; un error suyo no deshace este refresco.
+    # costo nuevo -> margen nuevo: el guardian revisa la tienda de cada empresa refrescada (nunca reprecia; saca de
+    # venta lo que quede bajo el minimo y propone el precio en Aprobaciones). Su propio commit; un error suyo no
+    # deshace este refresco.
     from . import margin_guard
 
-    margin_guard.run_all(db, reason="costos de Eurocomp")
+    for t in tenants:
+        margin_guard.run_safe(db, t, reason="costos de Eurocomp")
     return out
