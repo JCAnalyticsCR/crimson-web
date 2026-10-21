@@ -129,8 +129,7 @@ def for_date(db: Session, currency: str | None, on: date | None) -> tuple[Decima
     t = fx(db, currency, on)
     if t.fecha is not None and on is not None and t.fecha > on:
         return t.tasa, (
-            f"Sin tipo de cambio del BCCR para esa fecha: se usó el del {t.fecha.strftime('%d/%m/%Y')} "
-            f"({t.tasa.normalize():f}); corríjalo a mano si hace falta"
+            f"Sin tipo de cambio del BCCR para esa fecha: se usó el del {t.fecha.strftime('%d/%m/%Y')} ({t.tasa.normalize():f}); corríjalo a mano si hace falta"
         )
     return t.tasa, None
 

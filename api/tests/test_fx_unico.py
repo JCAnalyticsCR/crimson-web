@@ -29,7 +29,9 @@ def _tasa(db, dia: date, sell="512.35", buy="505.10", source="manual"):
 
 def _producto(db, tid, code, price, currency="CRC", **kw) -> Product:
     iva = db.scalar(select(Tax).where(Tax.tenant_id == tid, Tax.rate_code == "08"))
-    p = Product(tenant_id=tid, code=code, name=kw.pop("name", f"Equipo {code}"), price=Decimal(str(price)), currency=currency, show_on_web=True, active=True, **kw)
+    p = Product(
+        tenant_id=tid, code=code, name=kw.pop("name", f"Equipo {code}"), price=Decimal(str(price)), currency=currency, show_on_web=True, active=True, **kw
+    )
     p.taxes.append(ProductTax(tax_id=iva.id))
     db.add(p)
     db.commit()
@@ -127,7 +129,16 @@ def test_tasa_de_documento_guardado(client, auth, db_session):
 def test_gasto_en_dolares_con_tasa_uno_no_suma_dolares_como_colones(client, auth, db_session):
     tid = auth["tenant"]["id"]
     _tasa(db_session, date(2026, 9, 10), sell="500")
-    e = Expense(tenant_id=tid, date=date(2026, 9, 10), description="Licencia anual", currency="USD", fx_rate=Decimal(1), subtotal=Decimal(100), tax_amount=Decimal(0), total=Decimal(100))
+    e = Expense(
+        tenant_id=tid,
+        date=date(2026, 9, 10),
+        description="Licencia anual",
+        currency="USD",
+        fx_rate=Decimal(1),
+        subtotal=Decimal(100),
+        tax_amount=Decimal(0),
+        total=Decimal(100),
+    )
     db_session.add(e)
     db_session.commit()
     rows = client.get("/expenses").json()

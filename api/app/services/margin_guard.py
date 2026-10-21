@@ -350,7 +350,7 @@ def review(t: Tenant, p: Product) -> dict:
 
 
 def apply(db: Session, t: Tenant, p: Product, user_id: int | None, ip: str | None = None) -> dict:
-    """"Aplicar": el precio sugerido, recalculado AHORA con el costo y el tipo de cambio vigentes, pasa a ser el
+    """Boton "Aplicar": el precio sugerido, recalculado AHORA con el costo y el tipo de cambio vigentes, pasa a ser el
     precio de la tienda (el precio web si el producto lo tiene; si no, el de lista) y el producto vuelve a la venta.
     Sin commit. FxMissing (sin tasa) sube como 422."""
     from fastapi import HTTPException
@@ -397,9 +397,7 @@ def fx_alerts(db: Session, t: Tenant) -> list[str]:
     necesita (precio o costo de un producto publicado en otra moneda) y que falta o tiene mas de 2 dias habiles.
     Hoy BCCR_TOKEN puede estar vacio: la tasa se carga a mano y nadie se entera si se olvida."""
     need: set[str] = set()
-    rows = db.execute(
-        select(Product.currency, Product.cost_currency, Product.cost).where(Product.tenant_id == t.id, Product.active, Product.show_on_web)
-    ).all()
+    rows = db.execute(select(Product.currency, Product.cost_currency, Product.cost).where(Product.tenant_id == t.id, Product.active, Product.show_on_web)).all()
     for cur, ccur, cost in rows:
         if (cur or "CRC").upper() != "CRC":
             need.add(cur.upper())
@@ -453,7 +451,7 @@ def summary_html(db: Session, t: Tenant, base_url: str) -> tuple[str, str] | Non
     body = (
         f"{fx_html}<p>{len(rows)} producto(s) de la tienda están bajo el margen mínimo de {_s(cfg['min_pct'])} % "
         f"({n_held} fuera de venta, {n_dud} con un salto de costo dudoso). Modo {modo}.</p><ul>{''.join(li)}</ul>{mas}"
-        f'<p>El sistema nunca cambia un precio solo: revisalos y aplicá el sugerido con un clic en '
+        f"<p>El sistema nunca cambia un precio solo: revisalos y aplicá el sugerido con un clic en "
         f'<a href="{html.escape(link)}">Aprobaciones → Precios por revisar</a>.</p>'
     )
     return f"Margen: {len(rows)} producto(s) bajo el {_s(cfg['min_pct'])} %", body
