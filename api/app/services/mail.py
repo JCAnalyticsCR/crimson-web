@@ -96,9 +96,18 @@ def queue_email(
         if prev is not None:
             return prev
     sensitive = entity in SENSITIVE_ENTITIES
-    bcc = None if sensitive or not company_bcc or entity in NO_BCC_ENTITIES else (",".join((tenant.settings or {}).get("bcc") or []) or None)
+    blocked = blocked_recipients(tenant)
+    company = [b for b in (tenant.settings or {}).get("bcc") or [] if b.strip().lower() not in blocked]
+    bcc = None if sensitive or not company_bcc or entity in NO_BCC_ENTITIES else (",".join(company) or None)
     desc = attachments or ([{"name": n} for n, _ in files] if files else [])
     m = EmailOutbox(tenant_id=tenant.id, to=to, bcc=bcc, subject=subject, html=html, attachments=desc, entity=entity, entity_id=entity_id, dedupe_key=key)
+    if not sensitive and (to or "").strip().lower() in blocked:
+        # Ajustes -> "Correos que no reciben nada del sistema" (p. ej. la cuenta de quien desarrolla la plataforma): queda
+        # en la bitacora como omitido y no sale. Lo de su propia cuenta (contrasena, invitacion, seguridad) si le llega.
+        m.status = "omitido"
+        db.add(m)
+        db.flush()
+        return m
     if key:
         # carrera con otro proceso que mando el mismo aviso: la restriccion unica decide y se devuelve el que gano
         sp = db.begin_nested()
@@ -119,6 +128,11 @@ def queue_email(
     if sensitive:
         m.html = redact_links(m.html)  # el correo real ya salio con el enlace; lo guardado no lo tiene
     return m
+
+
+def blocked_recipients(tenant: Tenant) -> set[str]:
+    """Correos que nunca reciben nada del sistema (Ajustes): ni avisos, ni copias, ni resumenes."""
+    return {str(x).strip().lower() for x in (tenant.settings or {}).get("mail_blocklist") or [] if str(x).strip()}
 
 
 def notify_roles(

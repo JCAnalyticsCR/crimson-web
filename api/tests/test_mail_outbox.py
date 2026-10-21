@@ -418,3 +418,15 @@ def test_migracion_del_outbox_sube_y_baja():
         assert "uq_email_outbox_dedupe" in {u["name"] for u in sa.inspect(conn).get_unique_constraints("email_outbox")}
         assert "ix_email_outbox_retry" in {i["name"] for i in sa.inspect(conn).get_indexes("email_outbox")}
     eng.dispose()
+
+
+def test_correo_bloqueado_no_recibe_nada_salvo_lo_de_su_cuenta(db_session, t, resend):
+    """Ajustes -> "Correos que no reciben nada del sistema": ni avisos ni copia oculta; lo de su propia cuenta si."""
+    t.settings = {**(t.settings or {}), "mail_blocklist": ["Dev@Ejemplo.com"], "bcc": ["dev@ejemplo.com", "conta@ejemplo.com"]}
+    db_session.flush()
+    aviso = mail.queue_email(db_session, t, "dev@ejemplo.com", "Aviso", "<p>x</p>", "quote", 1)
+    assert aviso.status == "omitido" and aviso.sent_at is None
+    factura = mail.queue_email(db_session, t, "cliente@ejemplo.com", "Factura", "<p>x</p>", "invoice", 1)
+    assert factura.bcc == "conta@ejemplo.com"  # la copia oculta sigue para los demas
+    clave = mail.queue_email(db_session, t, "dev@ejemplo.com", "Restablecer", "<p>x</p>", "password_reset", 1)
+    assert clave.status != "omitido"

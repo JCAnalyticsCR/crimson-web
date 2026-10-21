@@ -46,6 +46,8 @@ DEFAULTS = {
     # cotizacion aceptada de una venta de solo equipo: tambien al supervisor (plan 1.6; la RACI 0.11 lo puede apagar)
     "notify_supervisor_equipment_sale": True,
     "bcc": [],
+    # nunca reciben nada del sistema (ni avisos, ni copias, ni resumenes): p. ej. la cuenta de quien desarrolla la plataforma
+    "mail_blocklist": [],
     "manual_payment_methods": [
         {"name": "SINPE Móvil", "instructions": "Envíe el pago al número indicado y comparta el comprobante.", "active": True},
         {"name": "Transferencia", "instructions": "Cuenta IBAN indicada en la factura.", "active": True},
@@ -120,6 +122,7 @@ class SettingsIn(BaseModel):
     daily_close_email: bool | None = None
     notify_supervisor_equipment_sale: bool | None = None
     bcc: list[EmailStr] | None = None
+    mail_blocklist: list[EmailStr] | None = None
     manual_payment_methods: list[dict] | None = None
     activity_codes: list[str] | None = None
     einvoice_provider: str | None = Field(None, pattern="^(none|sandbox|alanube|gti)$")
