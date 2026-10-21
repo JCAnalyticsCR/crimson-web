@@ -1,7 +1,7 @@
 #!/bin/sh
 # Ciclo completo del respaldo diario DENTRO de la imagen del cron: las herramientas reales (age y rclone de Debian, los
 # flags que usa el codigo, el usuario 10001, alembic.ini) y nada real: una base desechable con la semilla y un valor de
-# cada tipo que cambia entre motores, una llave desechable y un "bucket" local de rclone (:local:).
+# cada tipo que cambia entre motores, llaves desechables (custodio y prueba) y un "bucket" local de rclone (:local:).
 #
 # Bases (variables opcionales; sin ellas, todo en SQLite):
 #   CICLO_ORIGEN_URL      base de origen: se migra y se siembra con ella (dueno de las tablas)
@@ -64,10 +64,12 @@ with sessionmaker(bind=eng)() as s:
 eng.dispose()
 PY
 
-echo "== llave desechable (la publica va a RESPALDO_AGE_RECIPIENTS)"
+echo "== llaves desechables: una de custodio (RESPALDO_AGE_RECIPIENTS) y una de prueba (RESPALDO_AGE_RECIPIENTS_PRUEBA)"
+age-keygen -o "$T/llave-custodio.txt" 2>/dev/null
 age-keygen -o "$T/llave-prueba.txt" 2>/dev/null
-RESPALDO_AGE_RECIPIENTS="$(sed -n 's/^# public key: //p' "$T/llave-prueba.txt")"
-export RESPALDO_AGE_RECIPIENTS
+RESPALDO_AGE_RECIPIENTS="$(sed -n 's/^# public key: //p' "$T/llave-custodio.txt")"
+RESPALDO_AGE_RECIPIENTS_PRUEBA="$(sed -n 's/^# public key: //p' "$T/llave-prueba.txt")"
+export RESPALDO_AGE_RECIPIENTS RESPALDO_AGE_RECIPIENTS_PRUEBA
 
 echo "== respaldo diario (revisar y correr), verificado en una SQLite desechable"
 DATABASE_URL="$LECTURA" python -m app.tools.respaldo_diario --revisar
@@ -79,6 +81,18 @@ if ls "$T" | grep -q '^crimson-respaldo-'; then
   echo "FALLO: quedaron temporales del respaldo en $T" >&2
   exit 1
 fi
+# el custodio abre todas las copias; la llave de prueba solo la de diario/ (semanal/, mensual/ y anual/ existen los
+# domingos y los dias 1: ese dia tambien se revisan)
+for f in "$T"/bucket/*/crimson-*.zip.age; do
+  age -d -i "$T/llave-custodio.txt" "$f" >/dev/null
+  case "$f" in
+    */diario/*) age -d -i "$T/llave-prueba.txt" "$f" >/dev/null ;;
+    *) if age -d -i "$T/llave-prueba.txt" "$f" >/dev/null 2>&1; then
+         echo "FALLO: la llave de prueba abre $(basename "$(dirname "$f")")/" >&2
+         exit 1
+       fi ;;
+  esac
+done
 
 echo "== prueba mensual: bajar el ultimo, revisar edad y hashes, descifrar"
 RESPALDO_AGE_IDENTITY_FILE="$T/llave-prueba.txt" GITHUB_OUTPUT="$T/salida" \

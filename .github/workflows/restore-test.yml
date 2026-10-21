@@ -9,11 +9,14 @@
 # Resultado: latido a un monitor tipo heartbeat mensual (RESPALDO_PRUEBA_PING_URL): <url> si salio bien y <url>/fail si
 # fallo. Si la prueba ni corre (apagada, Actions deshabilitado), el latido no llega y el monitor avisa igual.
 #
-# Apagado hasta configurarlo (pasos en infra/RESPALDO.md seccion 4.4):
+# Descifra la base COMPLETA (datos personales, semillas de 2FA) en un runner de GitHub: Crimson lo acepta por escrito
+# antes de activarla. Apagado hasta configurarlo (requisitos y pasos en infra/RESPALDO.md seccion 4.4):
+#   - environment "respaldo-prueba" solo para main y con Required reviewers (los custodios, sin bypass de
+#     administradores): sin eso, cualquiera que llegue a main con un workflow propio podria imprimir los secretos.
+#     Secretos: RESPALDO_DESTINO (p. ej. respaldo:<bucket>), RESPALDO_AGE_IDENTITY (llave privada de la PRUEBA, nunca la
+#     de los custodios; su publica va en RESPALDO_AGE_RECIPIENTS_PRUEBA y solo abre diario/), RESPALDO_RCLONE_CONF
+#     (rclone.conf con un remoto "respaldo" que solo lista y lee diario/) y RESPALDO_PRUEBA_PING_URL (latido mensual)
 #   - variable de repositorio RESPALDO_PRUEBA_ACTIVA=true
-#   - environment "respaldo-prueba" (solo rama main) con los secretos RESPALDO_DESTINO (p. ej. respaldo:<bucket>),
-#     RESPALDO_AGE_IDENTITY (llave privada de la PRUEBA, nunca la de los custodios), RESPALDO_RCLONE_CONF (rclone.conf
-#     con un remoto "respaldo" de SOLO LECTURA) y RESPALDO_PRUEBA_PING_URL (latido del monitor mensual)
 name: Prueba de restauracion
 
 on:

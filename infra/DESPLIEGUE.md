@@ -128,6 +128,9 @@ Settings → Branches → regla para `main`: "Require status checks to pass" con
 *Dependencias* también bloquea). Así un PR rojo no se puede fusionar. Si alguien empuja directo a `main`, la compuerta
 de Railway sigue protegiendo producción.
 
+Para los **secretos** de la prueba mensual de restauración proteger `main` no alcanza: el environment
+`respaldo-prueba` exige *Required reviewers* antes de activarla (`infra/RESPALDO.md` 4.4).
+
 ## 4. Ventanas, orden y migraciones
 
 **Ventanas de despliegue:** fuera de **07:00–09:00** y de **20:45–21:15** hora de Costa Rica (tareas del beat:

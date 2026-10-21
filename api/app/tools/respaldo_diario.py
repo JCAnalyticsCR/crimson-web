@@ -10,7 +10,9 @@ Pasos:
 2. Verificacion: restaura ese .zip en una SQLite desechable y compara conteos y hashes (app.tools.restore). Con
    RESPALDO_VERIFICAR=hashes solo revisa los hashes del zip. Si la verificacion falla el respaldo cifrado IGUAL se sube
    (puede servir en Postgres) pero el proceso termina en falla y avisa.
-3. Cifrado con age para las llaves PUBLICAS de RESPALDO_AGE_RECIPIENTS: este servicio cifra pero no puede descifrar.
+3. Cifrado con age para las llaves PUBLICAS de RESPALDO_AGE_RECIPIENTS (custodios): este servicio cifra pero no puede
+   descifrar. La llave de la prueba mensual (RESPALDO_AGE_RECIPIENTS_PRUEBA) solo abre la copia de diario/: lo que se
+   guarda semanas, meses o anos (semanal/, mensual/, anual/) va en un segundo .age solo para los custodios.
 4. Subida con rclone a RESPALDO_DESTINO/diario/ (y semanal/, mensual/, anual/ segun la fecha de Costa Rica): el .age y
    un resumen .json SIN datos personales (hashes, tamanos, filas, migracion, commit). El resumen se sube despues del
    .age: si el resumen existe, el .age esta completo.
@@ -38,7 +40,7 @@ import sys
 import tempfile
 import zipfile
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from html import escape
 from pathlib import Path
@@ -67,9 +69,10 @@ class Fallo(Exception):
 @dataclass
 class Config:
     destino: str
-    recipients: list[str]
+    recipients: list[str]  # custodios: todas las copias
     verificar: str = "restaurar"
     tmp: str | None = None
+    prueba: list[str] = field(default_factory=list)  # prueba mensual (RESPALDO.md 4.4): solo la copia de diario/
 
 
 def limpio(texto: str, largo: int = 500) -> str:
@@ -89,28 +92,39 @@ def describir(e: BaseException, largo: int = 300) -> str:
     return f"{type(e).__name__}: {limpio(e, largo)}"
 
 
+def _llaves(env: Mapping[str, str], variable: str, problemas: list[str]) -> list[str]:
+    llaves = [k for k in re.split(r"[\s,]+", env.get(variable) or "") if k]
+    if any(not _AGE_PUBLICA.match(k) for k in llaves):
+        privada = any(k.upper().startswith("AGE-SECRET-KEY-") for k in llaves)
+        problemas.append(
+            f"{variable} tiene una LLAVE PRIVADA: quitela de inmediato y rote ese par de llaves"
+            if privada
+            else f"{variable} tiene valores que no son llaves publicas age1..."
+        )
+    return llaves
+
+
 def leer_config(env: Mapping[str, str]) -> Config:
     """Valida las variables. Los mensajes nombran la variable, nunca su valor (puede ser una llave pegada por error)."""
     problemas = []
     destino = (env.get("RESPALDO_DESTINO") or "").strip().rstrip("/")
     if not destino or ":" not in destino:
         problemas.append("RESPALDO_DESTINO (remoto de rclone, p. ej. respaldo:crimson-respaldos)")
-    recipients = [k for k in re.split(r"[\s,]+", env.get("RESPALDO_AGE_RECIPIENTS") or "") if k]
+    recipients = _llaves(env, "RESPALDO_AGE_RECIPIENTS", problemas)
     if not recipients:
-        problemas.append("RESPALDO_AGE_RECIPIENTS (llaves PUBLICAS de age, age1...)")
-    elif any(not _AGE_PUBLICA.match(k) for k in recipients):
-        privada = any(k.upper().startswith("AGE-SECRET-KEY-") for k in recipients)
+        problemas.append("RESPALDO_AGE_RECIPIENTS (llaves PUBLICAS de age de los custodios, age1...)")
+    prueba = _llaves(env, "RESPALDO_AGE_RECIPIENTS_PRUEBA", problemas)
+    if set(prueba) & set(recipients):
+        # la de prueba tambien abriria semanal/, mensual/ y anual/ (meses o anos de respaldos) desde GitHub
         problemas.append(
-            "RESPALDO_AGE_RECIPIENTS tiene una LLAVE PRIVADA: quitela de inmediato y rote ese par de llaves"
-            if privada
-            else "RESPALDO_AGE_RECIPIENTS tiene valores que no son llaves publicas age1..."
+            "RESPALDO_AGE_RECIPIENTS_PRUEBA repite una llave de RESPALDO_AGE_RECIPIENTS: la llave de prueba va solo en RESPALDO_AGE_RECIPIENTS_PRUEBA"
         )
     verificar = (env.get("RESPALDO_VERIFICAR") or "restaurar").strip().lower()
     if verificar not in ("restaurar", "hashes"):
         problemas.append("RESPALDO_VERIFICAR (restaurar | hashes)")
     if problemas:
         raise Fallo(CONFIG, "configuracion", "faltan o estan mal: " + "; ".join(problemas))
-    return Config(destino=destino, recipients=recipients, verificar=verificar, tmp=(env.get("RESPALDO_TMP") or None))
+    return Config(destino=destino, recipients=recipients, verificar=verificar, tmp=(env.get("RESPALDO_TMP") or None), prueba=prueba)
 
 
 def herramienta(nombre: str) -> str:
@@ -196,9 +210,9 @@ def verificar(zip_path: Path, tmp: Path, modo: str) -> str:
     return "restaurado"
 
 
-def cifrar(zip_path: Path, recipients: list[str]) -> Path:
+def cifrar(zip_path: Path, recipients: list[str], out: Path | None = None) -> Path:
     exe = herramienta("age")
-    out = zip_path.with_name(zip_path.name + ".age")
+    out = out or zip_path.with_name(zip_path.name + ".age")
     args = [exe]
     for k in recipients:
         args += ["-r", k]
@@ -293,13 +307,17 @@ def ejecutar(env: Mapping[str, str] | None = None, ahora: datetime | None = None
             fallos.append(f)
             verificacion = "fallida"
         zip_sha, zip_bytes = sha256_archivo(zip_path), zip_path.stat().st_size
-        age_path = cifrar(zip_path, cfg.recipients)
-        zip_path.unlink()  # el zip en claro sale del disco apenas existe el cifrado
+        dias = carpetas(dia)
+        archivo = f"{nombre}.zip.age"  # mismo nombre en cada carpeta del bucket
+        age_path = cifrar(zip_path, [*cfg.recipients, *cfg.prueba])
+        # con llave de prueba, lo que se guarda mas que los 14 dias de diario/ va en otro .age solo para los custodios
+        largo = cifrar(zip_path, cfg.recipients, tmp / f"{nombre}.custodios.zip.age") if cfg.prueba and len(dias) > 1 else age_path
+        zip_path.unlink()  # el zip en claro sale del disco apenas existen los cifrados
         tot = m["totals"]
         resumen = {
             "formato": FORMATO,
             "version": VERSION,
-            "archivo": age_path.name,
+            "archivo": archivo,
             "creado": m["created_at"],
             "fecha_cr": dia.isoformat(),
             "commit": env.get("RAILWAY_GIT_COMMIT_SHA") or None,
@@ -313,13 +331,20 @@ def ejecutar(env: Mapping[str, str] | None = None, ahora: datetime | None = None
             "filas": tot["rows"],
             "archivos": tot["blobs"],
             "verificacion": verificacion,
-            "destinatarios": len(cfg.recipients),
+            "destinatarios": len(cfg.recipients) + len(cfg.prueba),
+            "llave_prueba": bool(cfg.prueba),
         }
-        json_path = tmp / f"{nombre}.json"
-        json_path.write_text(json.dumps(resumen, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-        for carpeta in carpetas(dia):
-            subir(age_path, f"{cfg.destino}/{carpeta}/{age_path.name}")
-            subir(json_path, f"{cfg.destino}/{carpeta}/{json_path.name}")
+        copias = {age_path: (resumen, tmp / f"{nombre}.json")}
+        if largo is not age_path:
+            de_custodios = {**resumen, "age_sha256": sha256_archivo(largo), "age_bytes": largo.stat().st_size}
+            de_custodios.update(destinatarios=len(cfg.recipients), llave_prueba=False)
+            copias[largo] = (de_custodios, tmp / f"{nombre}.custodios.json")
+        for r, json_path in copias.values():
+            json_path.write_text(json.dumps(r, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        for carpeta in dias:
+            cifrado = age_path if carpeta == "diario" else largo
+            subir(cifrado, f"{cfg.destino}/{carpeta}/{archivo}")
+            subir(copias[cifrado][1], f"{cfg.destino}/{carpeta}/{nombre}.json")
             resumen["subido"] = True
     except Fallo as f:
         fallos.append(f)
@@ -408,14 +433,15 @@ def revisar(env: Mapping[str, str]) -> int:
             p = Path(d) / "prueba.txt"
             p.write_text("prueba", encoding="utf-8")
             args = [age]
-            for k in cfg.recipients:
+            for k in [*cfg.recipients, *cfg.prueba]:
                 args += ["-r", k]
             correr([*args, "-o", str(p) + ".age", str(p)], CIFRADO, "cifrado", timeout=60)
     except Fallo as f:
         print(f"FALLO {f.paso}: {f.detalle}", file=sys.stderr)
         return f.codigo
     avisos = "si" if (env.get("RESPALDO_AVISO_A") and env.get("RESEND_API_KEY")) else "NO (sin RESPALDO_AVISO_A o RESEND_API_KEY)"
-    print(f"OK configuracion: destino {cfg.destino}, {len(cfg.recipients)} llave(s) publica(s), verificacion {cfg.verificar}")
+    prueba = f"{len(cfg.prueba)} de prueba (solo diario/)" if cfg.prueba else "sin llave de prueba"
+    print(f"OK configuracion: destino {cfg.destino}, {len(cfg.recipients)} llave(s) publica(s) de custodios, {prueba}, verificacion {cfg.verificar}")
     print(f"   correo de falla: {avisos} · latido: {'si' if env.get('RESPALDO_PING_URL') else 'NO (sin RESPALDO_PING_URL)'}")
     return OK
 

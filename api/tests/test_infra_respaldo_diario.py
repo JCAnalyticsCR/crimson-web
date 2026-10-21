@@ -4,6 +4,7 @@ descifra y restaura. age y rclone se simulan (sin red ni bucket)."""
 
 import base64
 import fnmatch
+import hashlib
 import json
 import shutil
 import sys
@@ -26,12 +27,14 @@ from tests.conftest import ADMIN
 DESTINO = "nube:crimson-respaldos"
 LLAVE_1 = "age1" + "q" * 58
 LLAVE_2 = "age1" + "z" * 58
+LLAVE_PRUEBA = "age1" + "p" * 58
 # 03:15 hora de Costa Rica del 2026-11-01, domingo y dia 1: va a diario/, semanal/ y mensual/ (no a anual/)
 DOMINGO_1 = datetime(2026, 11, 1, 3, 15, tzinfo=timezone(timedelta(hours=-6)))
 
 
 class Nube:
-    """age y rclone de mentira: el "cifrado" es reversible pero no deja el zip legible; el bucket es un diccionario."""
+    """age y rclone de mentira: el "cifrado" es reversible pero no deja el zip legible y anota para que llaves se cifro
+    (destinatarios()); el bucket es un diccionario."""
 
     def __init__(self):
         self.objetos: dict[str, bytes] = {}
@@ -54,9 +57,10 @@ class Nube:
         if exe == "age":
             src, out = Path(args[-1]), Path(args[args.index("-o") + 1])
             if "-d" in args:
-                out.write_bytes(base64.b64decode(src.read_bytes()[len(rd.AGE_HEADER) + 1 :]))
+                out.write_bytes(base64.b64decode(src.read_bytes().split(b"\n", 2)[2]))
             else:
-                out.write_bytes(rd.AGE_HEADER + b"\n" + base64.b64encode(src.read_bytes()))
+                llaves = ",".join(args[i + 1] for i, a in enumerate(args) if a == "-r").encode()
+                out.write_bytes(rd.AGE_HEADER + b"\n" + llaves + b"\n" + base64.b64encode(src.read_bytes()))
             return ""
         if args[1] == "copyto":
             src, dst = args[2], args[3]
@@ -71,6 +75,11 @@ class Nube:
             nombres = [k[len(carpeta) :] for k in self.objetos if k.startswith(carpeta)]
             return "".join(n + "\n" for n in nombres if "/" not in n and fnmatch.fnmatch(n, patron))
         raise AssertionError(f"comando no simulado: {args}")
+
+
+def destinatarios(cifrado: bytes) -> list[str]:
+    """Las llaves para las que el age de mentira cifro ese archivo."""
+    return cifrado.split(b"\n", 2)[1].decode().split(",")
 
 
 @pytest.fixture
@@ -219,6 +228,57 @@ def test_respaldo_diario_completo(base_origen, nube, avisos, trabajo, capsys):
     assert list(trabajo.iterdir()) == []  # y al terminar no queda nada
     assert avisos["latidos"] == ["https://latido.ejemplo.com/abc"] and avisos["correos"] == []
     assert "OK respaldo diario crimson-" in capsys.readouterr().out
+    # sin llave de prueba: un solo cifrado, el mismo en todas las carpetas
+    assert len({nube.objetos[n] for n in cifrados}) == 1 and resumen["llave_prueba"] is False
+    assert destinatarios(nube.objetos[cifrados[0]]) == [LLAVE_1, LLAVE_2]
+
+
+def test_llave_de_prueba_solo_abre_diario(base_origen, nube, avisos, trabajo, tmp_path):
+    """La llave de la prueba mensual vive en GitHub (RESPALDO.md 4.4): si se filtra, abre a lo sumo los 14 dias de
+    diario/, nunca semanal/, mensual/ ni anual/ (meses o anos de respaldos con datos personales y semillas de 2FA)."""
+    env = _env(trabajo, RESPALDO_AGE_RECIPIENTS=f"{LLAVE_1},{LLAVE_2}", RESPALDO_AGE_RECIPIENTS_PRUEBA=LLAVE_PRUEBA)
+    assert rd.ejecutar(env, ahora=DOMINGO_1) == rd.OK
+    por_carpeta = {}
+    for carpeta in ("diario", "semanal", "mensual"):
+        (cifrado,) = [n for n in nube.objetos if n.startswith(f"{DESTINO}/{carpeta}/") and n.endswith(".zip.age")]
+        (resumen,) = [json.loads(v) for n, v in nube.objetos.items() if n.startswith(f"{DESTINO}/{carpeta}/") and n.endswith(".json")]
+        # cada carpeta: su resumen describe SU cifrado, con el mismo nombre de archivo y el mismo zip adentro
+        assert resumen["age_sha256"] == hashlib.sha256(nube.objetos[cifrado]).hexdigest()
+        assert resumen["age_bytes"] == len(nube.objetos[cifrado]) and cifrado.endswith("/" + resumen["archivo"])
+        por_carpeta[carpeta] = (destinatarios(nube.objetos[cifrado]), resumen)
+    assert por_carpeta["diario"][0] == [LLAVE_1, LLAVE_2, LLAVE_PRUEBA]
+    assert por_carpeta["diario"][1]["destinatarios"] == 3 and por_carpeta["diario"][1]["llave_prueba"] is True
+    for carpeta in ("semanal", "mensual"):
+        llaves, resumen = por_carpeta[carpeta]
+        assert llaves == [LLAVE_1, LLAVE_2] and resumen["destinatarios"] == 2 and resumen["llave_prueba"] is False
+        assert resumen["zip_sha256"] == por_carpeta["diario"][1]["zip_sha256"]
+    assert sum(1 for a in nube.llamadas if a[0] == "age") == 2
+    assert all(n.endswith((".zip.age", ".json")) for n in nube.en_disco_al_subir) and list(trabajo.iterdir()) == []
+    # la prueba mensual baja de diario/ y lo abre con la llave de prueba
+    identidad = tmp_path / "llave-prueba.txt"
+    identidad.write_text("AGE-SECRET-KEY-PRUEBA", encoding="utf-8")
+    assert prueba.bajar(DESTINO, identidad, tmp_path / "r", max_horas=100000)["zip_sha256"] == por_carpeta["diario"][1]["zip_sha256"]
+    # un dia que solo va a diario/: un solo cifrado
+    nube.llamadas.clear()
+    assert rd.ejecutar(env, ahora=DOMINGO_1 + timedelta(days=2)) == rd.OK  # martes 3
+    (age,) = [a for a in nube.llamadas if a[0] == "age"]
+    assert age[1:7] == ["-r", LLAVE_1, "-r", LLAVE_2, "-r", LLAVE_PRUEBA]
+
+
+@pytest.mark.parametrize(
+    ("prueba_valor", "esperado"),
+    [("AGE-SECRET-KEY-1" + "P" * 58, "RESPALDO_AGE_RECIPIENTS_PRUEBA tiene una LLAVE PRIVADA"), (LLAVE_1, "repite una llave de RESPALDO_AGE_RECIPIENTS")],
+    ids=["privada", "repetida"],
+)
+def test_llave_de_prueba_mal_configurada(nube, avisos, trabajo, monkeypatch, capsys, prueba_valor, esperado):
+    from app.tools import backup
+
+    monkeypatch.setattr(backup, "main", lambda argv=None: pytest.fail("no debe respaldar sin configuracion"))
+    assert rd.ejecutar(_env(trabajo, RESPALDO_AGE_RECIPIENTS=LLAVE_1, RESPALDO_AGE_RECIPIENTS_PRUEBA=prueba_valor), ahora=DOMINGO_1) == rd.CONFIG
+    err = capsys.readouterr().err
+    (correo,) = avisos["correos"]
+    assert esperado in err and prueba_valor not in err and prueba_valor not in correo["html"]  # nombra la variable, nunca el valor
+    assert nube.objetos == {}
 
 
 def test_sin_cifrado_no_se_sube_nada(base_origen, nube, avisos, trabajo):

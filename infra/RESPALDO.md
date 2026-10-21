@@ -75,7 +75,10 @@ Todos los días a las **03:15 hora de Costa Rica** Railway arranca el servicio `
 2. **Verificación:** restaura ese zip en una SQLite desechable y compara conteos y hashes de cada tabla
    (`app.tools.restore`). Si falla, el cifrado igual se sube (puede servir en Postgres), pero cuenta como falla y avisa.
 3. **Cifrado** con `age` para las llaves **públicas** de los custodios: el servicio cifra pero no puede descifrar.
-   Antes de subir comprueba que lo que va a subir es un archivo de `age`: **nunca sube nada en claro**.
+   Antes de subir comprueba que lo que va a subir es un archivo de `age`: **nunca sube nada en claro**. La llave de la
+   prueba mensual (4.2 y 4.4) solo abre la copia de `diario/`: los días que también van a `semanal/`, `mensual/` o
+   `anual/`, esas carpetas reciben un segundo `.age` cifrado **solo** para los custodios (mismo zip, mismo nombre, su
+   propio resumen con su hash).
 4. **Subida** con `rclone` a `diario/` (y a `semanal/` los domingos, `mensual/` el día 1 y `anual/` el 1 de enero),
    junto a un resumen `.json` **sin datos personales** (hashes, tamaños, filas, migración y commit). El resumen se sube
    después del `.age`: si el resumen existe, el cifrado está completo.
@@ -107,7 +110,14 @@ Un respaldo en el mismo proveedor que la base no protege de un problema con la c
   Con esa credencial rclone **no puede** leer lo que sube: el respaldo sube con `--no-check-dest` (no mira si el
   destino existe) y `--s3-no-head` (no hace el `HEAD` de verificación después del `PUT`, que daría 403 y dejaría la
   subida por fallida; la integridad la confirma el MD5 que devuelve el `PUT`). No quitar esos dos flags del código.
-- **Credencial de lectura**, aparte, solo para la prueba de restauración (4.4).
+- **Credencial de lectura**, aparte, solo para la prueba de restauración (4.4), y lo más angosta que permita el
+  proveedor: **solo listar y leer** (nada de escribir ni borrar) y **solo el prefijo `diario/`** (`<prefijo>/diario/`
+  si `RESPALDO_DESTINO` lleva prefijo), que es lo único que la prueba baja:
+  - B2: llave de aplicación limitada al bucket, con `namePrefix` = `diario/` y solo `listFiles` y `readFiles`.
+  - AWS S3: `s3:ListBucket` sobre el bucket con la condición `StringLike` `s3:prefix` = `diario/*`, y `s3:GetObject`
+    sobre `arn:aws:s3:::<bucket>/diario/*`. Nada más.
+  - Cloudflare R2 no limita por prefijo: la credencial queda de solo lectura sobre ese bucket. Lo que protege
+    `semanal/`, `mensual/` y `anual/` es que la llave de prueba no los abre (4.2).
 - Copia mensual adicional descargada a un medio de la empresa (disco cifrado), fuera de la nube.
 - Nunca: en el repositorio, en un chat, en correo, ni en carpetas sincronizadas personales (OneDrive, Drive).
 
@@ -116,9 +126,20 @@ Un respaldo en el mismo proveedor que la base no protege de un problema con la c
 - Cada custodio (una persona del responsable técnico y una de Crimson) genera su par **en una máquina de confianza**:
   `age-keygen -o custodio.txt`. La línea `# public key: age1…` es la pública. El archivo completo (la privada) va al
   gestor de contraseñas y a ningún otro lado.
-- Para la prueba automática (4.4) se genera un **tercer par**, solo para eso.
-- `RESPALDO_AGE_RECIPIENTS` = las públicas, separadas por coma. Si alguien pega ahí una privada
+- `RESPALDO_AGE_RECIPIENTS` = las públicas **de los custodios**, separadas por coma. Si alguien pega ahí una privada
   (`AGE-SECRET-KEY-…`), el respaldo se niega a correr y avisa: hay que rotar ese par.
+- Para la prueba automática (4.4) se genera un **tercer par**, solo para eso, y su pública va en
+  `RESPALDO_AGE_RECIPIENTS_PRUEBA`, **nunca** en `RESPALDO_AGE_RECIPIENTS`: así solo abre la copia de `diario/` (14 días
+  de retención) y no los respaldos que se guardan meses o años. Si la misma llave está en las dos variables, el
+  respaldo se niega a correr y avisa. Su privada vive en GitHub (4.4), por eso:
+  - **Se rota cada 12 meses** y cada vez que alguien con acceso a la configuración del repositorio o de Railway deja
+    el equipo: (1) generar el par nuevo en una máquina de confianza; (2) en Railway, poner la pública nueva en
+    `RESPALDO_AGE_RECIPIENTS_PRUEBA` (en lugar de la vieja); (3) en GitHub, reemplazar `RESPALDO_AGE_IDENTITY` por la
+    privada nueva **después** del siguiente respaldo diario (la prueba baja siempre el último); (4) correr la prueba a
+    mano ("Run workflow") y verla en verde; (5) **destruir** la privada vieja (de la máquina y del gestor de
+    contraseñas). Los `.age` viejos de `diario/` vencen solos en 14 días.
+  - Si se sospecha que se filtró: rotarla ya (mismos pasos) junto con la credencial de lectura del bucket, y tratarlo
+    como incidente (4.4, "Qué expone").
 - Si un custodio deja de serlo: se quita su pública y se agrega la del reemplazo. Los respaldos anteriores siguen
   cifrados también para él hasta que vencen por retención.
 
@@ -154,7 +175,8 @@ Un respaldo en el mismo proveedor que la base no protege de un problema con la c
    | `ENV` | `production` |
    | `JWT_SECRET` | **una propia**, aleatoria y de 32 caracteres o más, distinta de la del api (`python -c "import secrets; print(secrets.token_urlsafe(48))"`). Solo existe para que la configuración de la app valide. La del api **nunca** va a este servicio: deriva la llave que cifra los secretos de pasarelas y buzones que viajan en el respaldo, y firma las sesiones |
    | `RESPALDO_DESTINO` | `respaldo:<bucket>` (remoto `respaldo` de rclone + bucket, opcionalmente con un prefijo) |
-   | `RESPALDO_AGE_RECIPIENTS` | llaves públicas `age1…` separadas por coma (custodios + prueba) |
+   | `RESPALDO_AGE_RECIPIENTS` | llaves públicas `age1…` de los **custodios**, separadas por coma |
+   | `RESPALDO_AGE_RECIPIENTS_PRUEBA` | la pública `age1…` de la llave de **prueba** (4.2), solo si la prueba automática está activa (4.4). Abre solo la copia de `diario/` |
    | `RCLONE_CONFIG_RESPALDO_TYPE` | `s3` |
    | `RCLONE_CONFIG_RESPALDO_PROVIDER` | el del proveedor (ver la documentación de rclone para S3) |
    | `RCLONE_CONFIG_RESPALDO_ENDPOINT` | URL S3 del proveedor |
@@ -205,20 +227,45 @@ completo, se repite la prueba a mano (sección 5).
 los mismos destinatarios del respaldo diario. Así avisa si la prueba falla **y** si deja de correr (apagada, Actions
 deshabilitado). GitHub, aparte, solo le escribe a quien tocó por última vez el cron del workflow: no cuenta como aviso.
 
-Para activarla:
+**Qué expone.** La prueba descifra la base **completa** en un runner de GitHub (una máquina virtual efímera de un
+tercero): datos personales de clientes y contactos, hashes de contraseñas, **semillas de 2FA en claro**
+(`user.totp_secret`), hashes de invitaciones y de credenciales de API, y el texto cifrado de pasarelas y Hacienda.
+Quien tenga la llave de prueba y la credencial de lectura puede leer los respaldos de `diario/` (hasta 14 días). Si se
+filtran: rotar las dos (4.2), restablecer el 2FA de todos los usuarios, pedir cambio de contraseña y tratarlo como
+incidente de datos personales. **Crimson acepta ese riesgo por escrito antes de activarla** (quién y cuándo, en la
+bitácora de operaciones); si no lo acepta, la llave de prueba no se crea, `RESPALDO_PRUEBA_ACTIVA` queda apagada y la
+prueba se hace a mano (sección 5).
 
-1. GitHub → Settings → Environments → `respaldo-prueba`, con *Deployment branches* limitado a `main`. Secretos del
-   environment: `RESPALDO_DESTINO` (igual que en Railway), `RESPALDO_AGE_IDENTITY` (el contenido del archivo de la
-   llave de prueba), `RESPALDO_RCLONE_CONF` (un `rclone.conf` con un remoto `[respaldo]` y la credencial de **solo
-   lectura**) y `RESPALDO_PRUEBA_PING_URL` (la URL del latido del monitor mensual).
-2. Variable de repositorio `RESPALDO_PRUEBA_ACTIVA=true`. Mientras no esté, cada mes queda una advertencia "prueba
+**Requisitos para activarla (no son recomendaciones):**
+
+1. **Environment `respaldo-prueba` con revisión obligatoria.** GitHub → Settings → Environments → `respaldo-prueba`:
+   - *Deployment branches and tags*: solo `main`.
+   - *Required reviewers*: los custodios (al menos uno), con *Allow administrators to bypass configured protection
+     rules* **apagado**.
+   - Por qué: limitar el environment a `main` **no** basta. Cualquiera con permiso de escritura en el repo (o un token
+     de un colaborador que se filtre) puede subir a `main` un workflow propio que use `environment: respaldo-prueba` e
+     imprima los secretos. Con revisión obligatoria, **todo** trabajo que pida ese environment (el de este workflow o
+     uno nuevo) espera a que un custodio lo apruebe: si no lo reconoce, lo rechaza. Cada mes GitHub le escribe al
+     revisor cuando la prueba queda esperando (espera hasta 30 días); si nadie aprueba, el latido no llega y el monitor
+     mensual avisa.
+   - Secretos del environment (nunca de repositorio): `RESPALDO_DESTINO` (igual que en Railway),
+     `RESPALDO_AGE_IDENTITY` (el contenido del archivo de la llave de **prueba**), `RESPALDO_RCLONE_CONF` (un
+     `rclone.conf` con un remoto `[respaldo]` y la credencial de **lectura** de 4.1) y `RESPALDO_PRUEBA_PING_URL` (la
+     URL del latido del monitor mensual).
+2. **Credencial de lectura** solo para listar y leer `diario/` (4.1), distinta de la de escritura.
+3. **Llave de prueba** solo en `RESPALDO_AGE_RECIPIENTS_PRUEBA` (4.2), con su rotación anotada en la bitácora.
+
+Además, recomendado: un *ruleset* en `main` (Settings → Rules) sin *force push* ni borrado, y con PR obligatorio
+cuando todo el equipo trabaje por PR (hoy la landing se publica con commits directos a `main`). No reemplaza el
+punto 1: con un solo mantenedor no se puede exigir la aprobación de otra persona (GitHub no deja aprobar el PR
+propio), y quien llegue a `main` por cualquier camino igual tendría que pasar por la revisión del environment.
+
+Y entonces:
+
+1. Variable de repositorio `RESPALDO_PRUEBA_ACTIVA=true`. Mientras no esté, cada mes queda una advertencia "prueba
    APAGADA" en Actions (y el monitor, si ya existe, avisa).
-3. Actions → "Prueba de restauracion" → Run workflow, y verla en verde (y el latido en el monitor).
-
-El costo de automatizarla: quien tenga la llave de prueba y la credencial de lectura puede leer los respaldos. Por
-eso viven solo en un environment limitado a `main`, la credencial es de solo lectura y distinta de la de escritura,
-y ambas se rotan si cambia el equipo. Si eso no es aceptable, no se agrega la llave de prueba a
-`RESPALDO_AGE_RECIPIENTS`, `RESPALDO_PRUEBA_ACTIVA` queda apagada y la prueba se hace a mano (sección 5).
+2. Actions → "Prueba de restauracion" → Run workflow, aprobarla como revisor, y verla en verde (y el latido en el
+   monitor).
 
 ### 4.5 Avisos
 
