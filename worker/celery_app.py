@@ -14,8 +14,8 @@ from celery.signals import setup_logging as celery_setup_logging
 
 from app.core.config import settings
 from app.core.logging import setup_logging
-from app.tasks.salud import connect_signals  # tambien registra las tareas salud.* (shared_task)
 from app.tasks import fiscal as _tareas_fiscales  # noqa: F401  cola "Por emitir" (plan 1.7)
+from app.tasks.salud import connect_signals  # tambien registra las tareas salud.* (shared_task)
 
 log = logging.getLogger("crimson.worker")
 # plan 1.8: antes de las lineas de arranque de abajo (kid de FISCAL_KEYS, configuracion faltante), que salen al importar

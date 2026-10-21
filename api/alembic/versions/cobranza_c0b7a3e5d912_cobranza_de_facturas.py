@@ -15,17 +15,18 @@ en su corrida de las 00:30).
 las filas existentes). Tabla nueva `collection_reminder`: una fila por factura y etapa (D-3, D0, D+3, D+10).
 
 Revision ID: c0b7a3e5d912
-Revises: d7e2a9c41f58
+Revises: c3f8a1d6e924
 Create Date: 2026-10-20 12:00:00
 """
 
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "c0b7a3e5d912"
-down_revision: str | None = "d7e2a9c41f58"
+down_revision: str | None = "c3f8a1d6e924"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
