@@ -343,6 +343,27 @@ def test_ticket_sin_tecnico_queda_por_programar(client, auth, db_session):
     assert _para(_correos(db_session, "work_order", r.json()["work_order_id"], "Orden de trabajo asignada")) == ["tecnico-tk@ejemplo.com"]
 
 
+def test_visita_de_un_ticket_con_tecnico_aliado_le_avisa_por_su_portal(client, auth, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "public_base_url", BASE)
+    admin_h = dict(client.headers)
+    a = aliado(client, admin_h, "Aliado Visita S.A.", "3-101-000099")
+    tec_h = usuario(client, admin_h, a, "tec@aliado-visita.ejemplo.com", "tecnico_aliado", "Tecnico Aliado Visita")
+    tec = uid(client, tec_h)
+    body = {"customer_id": _cliente(client)["id"], "subject": "Grabador sin disco", "priority": "media", "assigned_to": tec}
+    t = client.post("/tickets", json=body).json()
+    assert t["ally_company_id"] == a, t
+
+    # "Mandar un tecnico" con el responsable aliado: la OT es de su empresa y el tecnico recibe un solo aviso, el del
+    # portal de aliados (el de Ordenes de trabajo de Crimson no, porque no la puede abrir)
+    r = client.post(f"/tickets/{t['id']}/work-order", json={"technician_id": tec})
+    assert r.status_code == 201 and r.json()["status"] == "asignada", r.text
+    o = db_session.get(WorkOrder, r.json()["work_order_id"])
+    assert o.ally_company_id == a and o.technician_id == tec
+    mails = _correos(db_session, "ally_work", o.id, f"Tiene un trabajo nuevo: {o.number}")
+    assert _para(mails) == ["tec@aliado-visita.ejemplo.com"] and f"{BASE}/" in mails[0].html, [m.subject for m in mails]
+    assert _correos(db_session, "work_order", o.id, "Orden de trabajo asignada") == []
+
+
 def test_ot_cerrada_editada_no_avisa_ni_se_reabre(client, auth, db_session):
     tid = auth["tenant"]["id"]
     sup = _login(client, db_session, tid, "supervisor-otc@ejemplo.com", "supervisor")
