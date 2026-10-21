@@ -1,6 +1,6 @@
 /* Editor de documento (cotizacion o factura): contenido + columna derecha fija con totales/acciones/tipo de cambio.
    Los totales se recalculan en vivo contra /documents/preview (misma logica que el guardado). */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney, type Customer, type Invoice, type Line, type Product, type Quote } from "../../lib/api";
 import { useSession } from "../../app/session";
@@ -40,7 +40,7 @@ const EDITABLE = ["customer_id", "currency", "discount_type", "discount_value", 
 export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const { id } = useParams();
   const nav = useNavigate();
-  const [search] = useSearchParams();
+  const [search, setSearch] = useSearchParams();
   const { toast, me, allows } = useSession();
   const isNew = !id || id === "nueva";
   const isQ = kind === "quote";
@@ -79,7 +79,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     api<{ items: Customer[] }>("/customers?limit=100").then((r) => setCustomers(r.items));
     api<{ id: number; code: string; description: string | null; is_default: boolean }[]>("/fiscal/activities").then(setActs).catch(() => setActs([]));
     api<{ mode: string }>("/fiscal/mode").then((r) => setFmode(r.mode)).catch(() => setFmode(null));
-    api<FxToday | null>("/fx/today").then((r) => { setFx(r); setFxLoaded(true); }).catch(() => {});
+    api<FxToday | null>("/fx/today").then((r) => { setFx(r); setFxLoaded(true); }).catch(() => setFxLoaded(true));
     api<{ limit: number; free: boolean }>("/sales/discount-limit").then(setLimit).catch(() => {});
     if (!isNew) api<Quote & Invoice>(`/${isQ ? "quotes" : "invoices"}/${id}`).then(hydrate);
   }, [id, isNew, isQ]);
@@ -131,6 +131,34 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     if (sin.length) toast(`${sin.length === 1 ? sin[0].name : `${sin.length} productos`}: sin existencia propia ni del proveedor (se venden sin respaldo)`, "bad");
     setPick(false);
   };
+
+  /* ?productos=1,2,3: vienen de Productos & Servicios ("Agregar a cotización"). Se agregan una sola vez, cuando el documento
+     y el tipo de cambio ya cargaron, igual que desde el buscador; la vendedora revisa y guarda. */
+  const traidos = useRef(false);
+  /* Miniatura de cada línea con producto (pedido 21/10): reconocimiento visual para la vendedora y el cliente */
+  const [fotos, setFotos] = useState<Record<number, string>>({});
+  const idsLineas = lines.map((l) => l.product_id).filter((x): x is number => !!x).join(",");
+  useEffect(() => {
+    const faltan = [...new Set(idsLineas.split(",").filter(Boolean).map(Number))].filter((i) => !(i in fotos));
+    if (!faltan.length) return;
+    api<{ items: (Product & { images?: { url: string; main?: boolean }[] })[] }>(`/products?ids=${faltan.join(",")}&limit=100`)
+      .then((r) => setFotos((f0) => { const n = { ...f0 }; faltan.forEach((i) => { n[i] = ""; }); r.items.forEach((x) => { n[x.id] = (x.images || []).find((im) => im.main)?.url || x.images?.[0]?.url || ""; }); return n; }))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idsLineas]);
+  const [nuevoCliente, setNuevoCliente] = useState(false);
+  useEffect(() => {
+    const raw = search.get("productos");
+    if (!raw || traidos.current || !cargado || !fxLoaded) return;
+    traidos.current = true;
+    const ids = raw.split(",").map(Number).filter((n) => n > 0).slice(0, 50);
+    const limpiar = () => { const n = new URLSearchParams(search); n.delete("productos"); setSearch(n, { replace: true }); };
+    if (locked || !canEdit) { toast("Esta cotización ya no se puede editar: los artículos no se agregaron", "bad"); limpiar(); return; }
+    Promise.all(ids.map((i) => api<Product>(`/products/${i}`).catch(() => null)))
+      .then((ps) => { const ok = ps.filter((x): x is Product => !!x); if (ok.length) { addProducts(ok); toast(`${ok.length} artículo(s) agregado(s): revisá y guardá`); } })
+      .finally(limpiar);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cargado, fxLoaded, search]);
 
   const save = useCallback(async (then?: "send" | "convert") => {
     if (payload.lines.length === 0) return toast("Agregá al menos una línea", "bad");
@@ -260,8 +288,10 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div className="card"><div className="card__body grid-3">
             <Field label="Cliente">
+              <div style={{ display: "flex", gap: 6 }}>
               <select
                 className="select"
+                style={{ flex: 1, minWidth: 0 }}
                 value={doc.customer_id ?? ""}
                 disabled={ro}
                 onChange={(e) => {
@@ -274,6 +304,8 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               >
                 <option value="">Seleccione…</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
+              {!ro && allows("crm.crear") && <button type="button" className="btn btn--soft btn--sm" title="Crear un cliente sin salir de la cotización" onClick={() => setNuevoCliente(true)}><Icon d={I.plus} />Nuevo</button>}
+              </div>
             </Field>
             <Field label="Divisa" hint={doc.customer_id && customers.find((c) => c.id === doc.customer_id)?.currency !== cur ? `El cliente prefiere ${customers.find((c) => c.id === doc.customer_id)?.currency}; esta cambiada a mano.` : fx ? `Tipo de cambio (${fx.source_label}, ${fmtDate(fx.date)}): venta ${fx.sell} · compra ${fx.buy}${fx.stale ? " · tasa vieja" : ""}` : undefined}>
               <select className="select" value={cur} disabled={ro} onChange={(e) => setDoc({ ...doc, currency: e.target.value })}><option>CRC</option><option>USD</option></select>
@@ -294,6 +326,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                     return (
                       <tr key={i} className="line">
                         <td className="c-name">
+                          {l.product_id && fotos[l.product_id] ? <img src={fotos[l.product_id]} alt="" loading="lazy" style={{ float: "left", width: 44, height: 44, objectFit: "contain", borderRadius: 8, border: "1px solid var(--hair)", background: "#fff", marginRight: 8 }} /> : null}
                           <textarea className="input line-name" rows={nameRows(l.name)} placeholder="Nombre del producto o servicio" value={l.name} disabled={ro} onChange={(e) => setLine(i, { name: e.target.value })} />
                           <textarea className="line-desc" rows={1} placeholder="Descripción (click para editar)" value={l.description || ""} disabled={ro} onChange={(e) => setLine(i, { description: e.target.value })} />
                           <div className="line-meta">
@@ -440,8 +473,35 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
         </aside>
       </div>
 
+      {nuevoCliente && <NuevoCliente onClose={() => setNuevoCliente(false)} onCreated={(c) => { setCustomers((cs) => [c, ...cs.filter((x) => x.id !== c.id)]); setDoc({ ...doc, customer_id: c.id, currency: c.currency || doc.currency || "CRC" }); setNuevoCliente(false); }} />}
       {pick && <ProductPicker onClose={() => setPick(false)} onPick={addProducts} docCurrency={cur} />}
     </>
+  );
+}
+
+/* Cliente nuevo sin salir de la cotización (pedido 21/10): lo mínimo para cotizar; la ficha se completa después en Clientes */
+function NuevoCliente({ onClose, onCreated }: { onClose: () => void; onCreated: (c: Customer) => void }) {
+  const { toast } = useSession();
+  const [f, setF] = useState({ name: "", id_type: "fisica", id_number: "", email: "", phone: "" });
+  const [busy, setBusy] = useState(false);
+  const crear = async () => {
+    setBusy(true);
+    try {
+      const c = await api<Customer>("/customers", { method: "POST", json: { name: f.name.trim(), id_type: f.id_type, id_number: f.id_number.trim() || null, email: f.email.trim() || null, phone: f.phone.trim() || null } });
+      toast(`Cliente ${c.name} creado`); onCreated(c);
+    } catch (e) { toast(e instanceof Error ? e.message : "No se pudo crear el cliente", "bad"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal title="Cliente nuevo" onClose={onClose} foot={<><button className="btn btn--ghost" onClick={onClose}>Cancelar</button><button className="btn btn--crimson" disabled={busy || f.name.trim().length < 2} onClick={crear}><Icon d={I.check} />Crear y usar</button></>}>
+      <div className="grid-2">
+        <Field label="Nombre o razón social"><input className="input" autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
+        <Field label="Tipo de identificación"><select className="select" value={f.id_type} onChange={(e) => setF({ ...f, id_type: e.target.value })}><option value="fisica">Física</option><option value="juridica">Jurídica</option><option value="dimex">DIMEX</option><option value="nite">NITE</option><option value="extranjero">Extranjero</option></select></Field>
+        <Field label="Cédula (opcional)"><input className="input" value={f.id_number} onChange={(e) => setF({ ...f, id_number: e.target.value })} /></Field>
+        <Field label="Correo (opcional)" hint="Para mandarle la cotización"><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
+        <Field label="Teléfono (opcional)"><input className="input" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
+      </div>
+    </Modal>
   );
 }
 

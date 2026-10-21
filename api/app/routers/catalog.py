@@ -197,6 +197,7 @@ def products(
     sin_cabys: bool = False,
     warehouse_id: int | None = None,
     proveedor: str | None = Query(None, pattern="^(con|sin|vinculado|sin_vincular)$"),
+    ids: str | None = Query(None, max_length=1000),  # "1,2,3": las fotos de las lineas de un documento en un solo viaje
     cursor: int | None = None,
     limit: int = Query(20, le=100),
     p: Principal = Depends(require("catalog", "ver")),
@@ -209,6 +210,9 @@ def products(
     asignado pero ningun item vinculado (su existencia del proveedor NO cuenta: hay que vincularlo).
     Cada fila trae `availability` (services/availability, audiencia interno): propio, proveedor y fecha."""
     stmt = select(Product).where(Product.tenant_id == p.tenant.id, Product.active)
+    if ids:
+        wanted = [int(x) for x in ids.split(",") if x.strip().isdigit()][:100]
+        stmt = stmt.where(Product.id.in_(wanted or [0]))
     if q:
         like = f"%{q}%"
         stmt = stmt.where(
