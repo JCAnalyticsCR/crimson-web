@@ -16,6 +16,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..core.deps import _role_permissions, effective_permissions
+from ..core.ratelimit import login_limiter
 from ..core.security import hash_password, hash_token
 from ..models import EmailOutbox, PasswordReset, RefreshToken, Tenant, TenantUser, User
 from .documents import CR
@@ -250,7 +251,8 @@ def find_reset(db: Session, raw: str | None) -> tuple[PasswordReset, User] | Non
 
 
 def set_password(user: User, raw: str) -> None:
-    """Contrasena elegida por la persona: limpia la temporal y desbloquea."""
+    """Contrasena elegida por la persona: limpia la temporal y desbloquea (tambien los fallidos del login por cuenta:
+    eran contra la anterior)."""
     user.password_hash = hash_password(raw)
     user.password_changed_at = datetime.now(UTC)
     user.must_change_password = False
@@ -258,6 +260,7 @@ def set_password(user: User, raw: str) -> None:
     user.temp_password_by = user.temp_password_tenant_id = None
     user.failed_logins = 0
     user.locked_until = None
+    login_limiter.forget_account(user.email)
 
 
 # ---------- Correos ----------

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -60,6 +60,12 @@ class MembershipOut(BaseModel):
     role: str
 
 
+class TwoFactorStateOut(BaseModel):
+    required: bool
+    deadline: datetime | None = None
+    blocked: bool = False
+
+
 class MeOut(BaseModel):
     user: UserOut
     tenant: TenantOut
@@ -68,11 +74,28 @@ class MeOut(BaseModel):
     memberships: list[MembershipOut]
     # solo usuarios de una empresa aliada: {id, name, state, suspended_reason, features: {ganancias}}
     ally_company: dict | None = None
+    # 2FA obligatorio para su rol (core/twofa.py): el portal avisa en la gracia y fuerza la configuracion al vencer
+    twofa: TwoFactorStateOut | None = None
 
 
 class TotpSetupOut(BaseModel):
     secret: str
     otpauth_uri: str
+
+
+class TotpSetupIn(BaseModel):
+    """Cambio de telefono con el 2FA activo: contrasena y codigo actual (o uno de recuperacion). Primera vez: vacio."""
+
+    password: str | None = Field(None, max_length=200)
+    code: str | None = Field(None, max_length=20)
+
+
+class RecoveryCodesIn(BaseModel):
+    """Codigos de recuperacion nuevos: contrasena y el codigo ACTUAL de la app (no uno de recuperacion: con uno de esos
+    se usa "Cambiar de telefono", que al confirmar tambien entrega codigos nuevos)."""
+
+    password: str = Field(max_length=200)
+    code: str = Field("", max_length=20)
 
 
 class TotpVerifyIn(BaseModel):
@@ -85,6 +108,14 @@ class RecoveryCodesOut(BaseModel):
 
 class PasswordOnlyIn(BaseModel):
     password: str = Field(max_length=200)
+
+
+class TotpDisableIn(BaseModel):
+    """Desactivar el 2FA (si el rol no lo exige): contrasena y el codigo actual de la app o uno de recuperacion, lo
+    mismo que "Cambiar de telefono". Con la sesion y la contrasena solas no se apaga para configurarlo con otra app."""
+
+    password: str = Field(max_length=200)
+    code: str = Field("", max_length=20)
 
 
 class PasswordChangeIn(BaseModel):

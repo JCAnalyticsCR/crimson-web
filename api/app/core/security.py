@@ -82,6 +82,23 @@ def verify_totp(secret: str, code: str) -> bool:
     return pyotp.TOTP(secret).verify(code, valid_window=1)
 
 
+def totp_step(secret: str, code: str, after: int | None = None) -> int | None:
+    """Paso de tiempo (ventana de 30 s) en que el codigo es valido, con un paso de tolerancia a cada lado; None si no
+    sirve. `after` = ultimo paso ya usado por la cuenta: un codigo de ese paso o anterior no se acepta otra vez
+    (quien lo vio por encima del hombro o en un registro no lo puede repetir)."""
+    code = (code or "").strip()
+    if not secret or len(code) != 6 or not code.isdigit():
+        return None
+    totp = pyotp.TOTP(secret)
+    now = totp.timecode(datetime.now(UTC))
+    for step in (now - 1, now, now + 1):
+        if after is not None and step <= after:
+            continue
+        if secrets.compare_digest(totp.generate_otp(step), code):
+            return step
+    return None
+
+
 # --- Tokens firmados de proposito especifico (enlaces de pago, invitaciones) ---
 def sign_purpose_token(purpose: str, data: dict, days: int) -> str:
     now = datetime.now(UTC)

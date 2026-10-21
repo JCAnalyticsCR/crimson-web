@@ -3,17 +3,22 @@ Usuarios e invitaciones viven en routers/users_admin.py."""
 
 from __future__ import annotations
 
+import html
 import logging
+from datetime import UTC, datetime
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core import twofa
 from ..core.config import settings as cfg
 from ..core.crypto import encrypt, mask
 from ..core.db import get_db
 from ..core.deps import COST_ROLE_CHOICES, Principal, require
+from ..core.reauth import require_reauth
 from ..models import BankAccount, BillingGroup, EmailOutbox, PaymentGatewayConfig, Tenant
 from ..providers.payments import OnvoAdapter, OnvoError, key_mode, key_problem, webhook_secret_problem
 from ..services import onvo
@@ -68,6 +73,9 @@ DEFAULTS = {
     "reservation_auto_approve_units": 0,
     "reservation_days": 15,  # vigencia por defecto de una reserva
     "cost_roles": [],  # roles que, ademas del admin, ven costos (Andres 08:07: por defecto nadie)
+    # 2FA obligatorio (plan 1.10, core/twofa.py): por defecto administracion y contabilidad, con 7 dias de gracia
+    "twofa_roles": list(twofa.DEFAULT_ROLES),
+    "twofa_grace_days": twofa.DEFAULT_GRACE_DAYS,
 }
 
 
@@ -130,6 +138,22 @@ class SettingsIn(BaseModel):
             raise ValueError(f"Estos roles no pueden ver costos: {', '.join(malos)}")
         return list(dict.fromkeys(v))
 
+    # Ajustes -> Usuarios -> "Verificacion en dos pasos obligatoria": roles que la exigen y dias de gracia. Aflojarla
+    # (quitar un rol o dar mas dias) pide admin_password; nunca se guarda en los ajustes.
+    twofa_roles: list[str] | None = None
+    twofa_grace_days: int | None = Field(None, ge=0, le=twofa.MAX_GRACE_DAYS)
+    admin_password: str | None = Field(None, max_length=200)
+
+    @field_validator("twofa_roles")
+    @classmethod
+    def _twofa_roles(cls, v):
+        if v is None:
+            return None
+        malos = [r for r in v if r not in twofa.role_choices()]
+        if malos:
+            raise ValueError(f"Roles que no existen en el panel: {', '.join(malos)}")
+        return list(dict.fromkeys(v))
+
 
 def _public_settings(v):
     """Quita en forma recursiva las llaves que terminan en _enc o _encrypted (p. ej. inbox.password_enc): GET /settings
@@ -152,8 +176,16 @@ def put_settings(data: SettingsIn, p: Principal = Depends(require("settings", "c
 
     t = db.get(Tenant, p.tenant.id)
     antes = list((t.settings or {}).get("cost_roles") or [])
+    twofa_antes = _twofa_policy(t)
     prov_antes = hc.provider_setting(t)
-    t.settings = {**DEFAULTS, **(t.settings or {}), **data.model_dump(exclude_unset=True, mode="json")}
+    nuevos = {**DEFAULTS, **(t.settings or {}), **data.model_dump(exclude_unset=True, exclude={"admin_password"}, mode="json")}
+    twofa_despues = _twofa_policy(SimpleNamespace(settings=nuevos))
+    afloja = bool(set(twofa_antes["twofa_roles"]) - set(twofa_despues["twofa_roles"])) or (twofa_despues["twofa_grace_days"] > twofa_antes["twofa_grace_days"])
+    if afloja:
+        # politica de seguridad: con una sesion de admin secuestrada no se le quita el 2FA obligatorio a nadie. Antes de
+        # tocar nada (un raise despues de mutar dejaria el cambio pendiente en la sesion de BD)
+        require_reauth(p, data.admin_password, "Confirmá con tu contraseña para aflojar la verificación en dos pasos obligatoria")
+    t.settings = nuevos
     if "einvoice_provider" in data.model_fields_set and data.einvoice_provider != prov_antes:
         # cualquier cambio de modo por la ruta generica apaga produccion (entrar a produccion: solo el interruptor)
         hc.turn_off_production(db, t, p.user.id, ip=p.ip, reason=f"PUT /settings: {prov_antes} -> {data.einvoice_provider}")
@@ -164,6 +196,11 @@ def put_settings(data: SettingsIn, p: Principal = Depends(require("settings", "c
         # siguiente peticion: los permisos se calculan en cada request, no hace falta cerrar sesiones.
         despues = list(t.settings.get("cost_roles") or [])
         audit_change(db, p, "permissions", "tenant", t.id, {"cost_roles": antes}, {"cost_roles": despues}, reason="Quien ve costos")
+    if {"twofa_roles", "twofa_grace_days"} & data.model_fields_set and twofa_despues != twofa_antes:
+        # politica de seguridad: queda en la bitacora con antes/despues (solo si cambio)
+        audit_change(db, p, "permissions", "tenant", t.id, twofa_antes, twofa_despues, reason="Verificación en dos pasos obligatoria")
+        if afloja:
+            _avisar_admins_2fa(db, p, t, twofa_antes, twofa_despues)
     db.commit()
     if data.model_fields_set & GUARD_KEYS:
         # otro minimo, objetivo, modo o tope: el guardian vuelve a revisar la tienda ya (no espera al proximo refresco)
@@ -180,6 +217,37 @@ def put_settings(data: SettingsIn, p: Principal = Depends(require("settings", "c
 
 
 GUARD_KEYS = {"min_margin_pct", "default_margin_pct", "margin_guard_mode", "margin_guard_cap", "margin_guard_jump_pct"}
+
+
+def _twofa_policy(t) -> dict:
+    return {"twofa_roles": list(twofa.required_roles(t)), "twofa_grace_days": twofa.grace_days(t)}
+
+
+def _avisar_admins_2fa(db: Session, p: Principal, t: Tenant, antes: dict, despues: dict) -> None:
+    """Se aflojo el 2FA obligatorio: correo a cada administrador activo de la empresa (tambien a quien lo hizo: si su
+    sesion la usa otra persona, se entera)."""
+    from ..models import Role, TenantUser, User
+    from ..services.accounts import fecha_cr, notify_security
+
+    nombres = dict(db.execute(select(Role.code, Role.name)).all())
+
+    def roles(xs: list[str]) -> str:
+        return ", ".join(nombres.get(r, r) for r in xs) or "ningún rol"
+
+    admins = db.scalars(
+        select(User)
+        .join(TenantUser, TenantUser.user_id == User.id)
+        .where(TenantUser.tenant_id == t.id, TenantUser.role_code == "admin", TenantUser.active, User.active)
+    ).all()
+    e = html.escape
+    cuerpo = (
+        f"<p>{e(p.user.full_name or p.user.email)} cambió la verificación en dos pasos obligatoria de {e(t.name)} el "
+        f"{fecha_cr(datetime.now(UTC))}.</p><p>Antes: {e(roles(antes['twofa_roles']))}, con {antes['twofa_grace_days']} días de gracia.<br>"
+        f"Ahora: {e(roles(despues['twofa_roles']))}, con {despues['twofa_grace_days']} días de gracia.</p>"
+        "<p>Si no fue alguien de tu equipo, cambiá tu contraseña y revisá Ajustes → Usuarios.</p>"
+    )
+    for a in admins:
+        notify_security(db, t, a, "Cambió la verificación en dos pasos obligatoria", cuerpo)
 
 
 def _sync_activities_from_codes(db: Session, t: Tenant, codes: list[str]) -> None:

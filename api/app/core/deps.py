@@ -361,6 +361,9 @@ def get_principal(p: Principal = Depends(get_session_principal)) -> Principal:
     y el portal de aliados (/aliado, core/ally.py)."""
     if p.is_external or p.ally_company_id is not None or p.customer_id is not None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Esta seccion es solo para el equipo de Crimson")
+    from . import twofa
+
+    twofa.enforce(p.user, p.tenant, p.role)  # 2FA obligatorio para su rol y la gracia vencida: 403 + X-2FA-Setup
     return p
 
 

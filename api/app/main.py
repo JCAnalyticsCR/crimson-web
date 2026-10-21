@@ -6,7 +6,6 @@ import logging
 import time
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import settings
 from .routers import (
@@ -67,6 +66,14 @@ def create_app() -> FastAPI:
 
     setup_logging()  # INFO a stdout, WARNING+ a stderr (Railway marcaba todo como error); uvicorn incluido
     secretbox.keys()  # registra (INFO) solo los kid y sha256(llave)[:8] de FISCAL_KEYS: api y worker deben coincidir
+    if settings.is_prod and settings.proxy_shared_key is None:
+        # plan 1.10: sin la llave el API ve todo el panel y la tienda con la IP de salida del nginx del portal: los
+        # limites por IP (login, checkout, Mi pedido, comprobantes...) pasan a ser globales y la bitacora no muestra la
+        # IP real. No se impide el arranque (tumbaria el panel y la tienda); /health lo dice en "proxy_key".
+        log.error(
+            "PROXY_SHARED_KEY falta (o tiene menos de 32 caracteres): los limites por IP son GLOBALES. Cargar la misma "
+            "llave en portal y api y verificar /api/auth/ip-check por el panel (debe decir 'firmadas' con la IP propia)."
+        )
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",
@@ -75,17 +82,15 @@ def create_app() -> FastAPI:
         redoc_url=None,
     )
     from .core.bodylimit import BodyLimitMiddleware
+    from .core.clientip import ClientIPMiddleware
+    from .core.cors import SplitCORSMiddleware, log_origins, split_origins
 
     app.add_middleware(BodyLimitMiddleware)  # antes que CORS: el 413 lleva sus encabezados
-    app.add_middleware(
-        CORSMiddleware,
-        # el portal + la landing (esta solo usa /public/incidents y no manda cookies)
-        allow_origins=list(dict.fromkeys([*settings.cors_origins, *settings.landing_origins])),
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        # X-View-As-Ally / X-View-As-User: "Ver como este aliado" del admin (solo lectura, core/ally.py)
-        allow_headers=["Authorization", "Content-Type", "X-Requested-With", "X-View-As-Ally", "X-View-As-User"],
-    )
+    # cookies solo para el panel (en produccion, solo el origen de PUBLIC_BASE_URL); la landing sin cookies y solo en sus
+    # rutas publicas (core/cors.py)
+    origins = split_origins(list(settings.cors_origins), list(settings.landing_origins), settings.public_base_url, settings.is_prod)
+    log_origins(origins)
+    app.add_middleware(SplitCORSMiddleware, origins=origins)
 
     from fastapi.responses import JSONResponse
 
@@ -106,6 +111,9 @@ def create_app() -> FastAPI:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
+
+    # el ultimo que se agrega es el de afuera: la IP real queda puesta antes de CORS, limitadores y request_log
+    app.add_middleware(ClientIPMiddleware)
 
     app.include_router(core.router)
     app.include_router(auth.router)

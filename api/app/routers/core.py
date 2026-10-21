@@ -20,7 +20,9 @@ router = APIRouter(tags=["core"])
 @router.get("/health")
 def health(db: Session = Depends(get_db)):
     db.execute(text("SELECT 1"))
-    return {"status": "ok", "app": settings.app_name, "env": settings.env}
+    # proxy_key (plan 1.10): "falta" = el API no tiene PROXY_SHARED_KEY y los limites por IP del panel y la tienda son
+    # globales (todos llegan con la IP del nginx del portal). No dice si coincide con la del portal: eso, /auth/ip-check.
+    return {"status": "ok", "app": settings.app_name, "env": settings.env, "proxy_key": "ok" if settings.proxy_shared_key is not None else "falta"}
 
 
 @router.get("/health/deep")
@@ -76,6 +78,13 @@ def update_tenant(data: TenantUpdate, p: Principal = Depends(require("settings",
                 # Si viene igual a lo guardado (alguien reenvia el dict completo) se ignora; si cambia, se rechaza.
                 if list(v.pop("cost_roles") or []) != list((p.tenant.settings or {}).get("cost_roles") or []):
                     raise HTTPException(422, "Quién ve costos se cambia en Ajustes → Usuarios (queda en la bitácora)")
+            from ..core import twofa
+
+            vigente = {"twofa_roles": list(twofa.required_roles(p.tenant)), "twofa_grace_days": twofa.grace_days(p.tenant)}
+            for k2, actual in vigente.items():
+                # el 2FA obligatorio es politica de seguridad: igual que quien ve costos, solo por PUT /settings
+                if k2 in v and v.pop(k2) != actual:
+                    raise HTTPException(422, "La verificación en dos pasos obligatoria se cambia en Ajustes → Usuarios (queda en la bitácora)")
             p.tenant.settings = {**(p.tenant.settings or {}), **v}
         else:
             setattr(p.tenant, k, v)

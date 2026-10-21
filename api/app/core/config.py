@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     # Nunca sale del cuerpo de la peticion: el que reporta no elige a que empresa le cae el ticket.
     public_incident_tenant: str | None = None
 
+    # IP real del cliente detras del portal (core/clientip.py). El nginx del portal manda X-Crimson-Client-IP junto con
+    # X-Crimson-Proxy-Key = esta llave (la misma variable en portal y api, >= 32 caracteres). Sin llave, o si no
+    # coincide, la IP es la que entrega uvicorn (FORWARDED_ALLOW_IPS en api/Dockerfile: solo redes internas), que por el
+    # panel y la tienda es la del nginx del portal para todos: obligatoria en produccion (ERROR al arrancar, /health).
+    proxy_shared_key: SecretStr | None = None
+
     # Enlaces publicos de pago
     public_base_url: str = "http://localhost:5173"
     payment_link_days: int = 30
@@ -167,6 +173,15 @@ class Settings(BaseSettings):
         if s:
             logging.getLogger("crimson.config").warning("HACIENDA_ENVIRONMENT=%r no es pruebas | produccion: se usa pruebas", s[:20])
         return "pruebas"
+
+    @field_validator("proxy_shared_key")
+    @classmethod
+    def _proxy_key(cls, v: SecretStr | None) -> SecretStr | None:
+        # una llave corta se adivina: se ignora (la IP vuelve a ser la del proxy) en vez de impedir el arranque
+        if v is not None and len(v.get_secret_value().strip()) < 32:
+            logging.getLogger("crimson.config").warning("PROXY_SHARED_KEY tiene menos de 32 caracteres: se ignora")
+            return None
+        return v
 
     @field_validator("fiscal_keys")
     @classmethod

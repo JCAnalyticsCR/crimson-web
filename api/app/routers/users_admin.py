@@ -30,10 +30,12 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..core import twofa
+from ..core.clientip import ip_key
 from ..core.config import settings as cfg
 from ..core.db import get_db
 from ..core.deps import ALLY_USER_ROLES, ASSIGNABLE_ROLES, COST_ROLE_CHOICES, Principal, cost_roles, require
-from ..core.ratelimit import admin_users_limiter, token_limiter
+from ..core.ratelimit import admin_users_limiter, login_limiter, token_limiter
 from ..core.reauth import actor_key, require_reauth
 from ..core.security import MAX_PASSWORD, hash_password, hash_token, new_temp_password, password_is_strong, verify_password
 from ..models import EmailOutbox, Invitation, PasswordReset, Tenant, TenantUser, User
@@ -226,6 +228,11 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
         lu = aware(u.locked_until)
         return u.locked_until if lu and lu > now else None
 
+    def intentos(u: User):
+        """Muchos fallidos al entrar (todas las IPs): desde un equipo que no es suyo se espera entre intentos."""
+        s = login_limiter.account_flagged(u.email or "")
+        return now + timedelta(seconds=s) if s else None
+
     miembros = {(m.user.email or "").lower() for m in internos}
     inv = [
         i
@@ -287,6 +294,7 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
                 "must_change_password": bool(m.user.must_change_password),
                 "temp_password_expires_at": m.user.temp_password_expires_at if m.user.must_change_password else None,
                 "locked_until": locked(m.user),
+                "login_failures_until": intentos(m.user),
                 "reset_link_expires_at": resets.get(m.user_id),
                 "password_changed_at": m.user.password_changed_at,
                 "member_since": m.created_at,
@@ -298,6 +306,10 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
         # "Quien ve costos": lo habilitado hoy y los roles que se pueden habilitar (el resto nunca)
         "cost_roles": list(cost_roles(p.tenant)),
         "cost_role_choices": list(COST_ROLE_CHOICES),
+        # 2FA obligatorio (core/twofa.py): roles que lo exigen, dias de gracia y los roles que se pueden elegir
+        "twofa_roles": list(twofa.required_roles(p.tenant)),
+        "twofa_grace_days": twofa.grace_days(p.tenant),
+        "twofa_role_choices": twofa.role_choices(),
         "mail_configured": mail_configured(),
         "support_members": support_members,
     }
@@ -391,7 +403,7 @@ def invite(data: InviteIn, response: Response, p: Principal = Depends(ADMIN), db
 @router.post("/invitations/check", tags=["publico"])
 def invite_check(data: TokenIn, request: Request, db: Session = Depends(get_db)):
     """Pagina publica /invitacion/:token: a que empresa y con que rol, y si el correo ya tiene cuenta."""
-    token_limiter.hit(f"inv:{_ip(request)}")
+    token_limiter.hit(f"inv:{ip_key(_ip(request))}")
     inv = _live_invitation(db, data.token)
     if not inv:
         raise HTTPException(404, "Invitación inválida, vencida o revocada")
@@ -454,7 +466,7 @@ class AcceptIn(BaseModel):
 @router.post("/invitations/accept", tags=["publico"])
 def accept(data: AcceptIn, request: Request, db: Session = Depends(get_db)):
     ip = _ip(request)
-    token_limiter.hit(f"inv:{ip}")
+    token_limiter.hit(f"inv:{ip_key(ip)}")
     inv = _live_invitation(db, data.token)
     if not inv:
         raise HTTPException(404, "Invitación inválida, vencida o revocada")
@@ -671,7 +683,7 @@ def reset_password(uid: int, data: ResetIn, response: Response, p: Principal = D
     if data.mode == "temporal":
         if quita_2fa:
             # la temporal cambia la contrasena y cierra sesiones en este mismo paso: se puede quitar ya
-            u.totp_enabled, u.totp_secret, u.totp_recovery = False, None, []
+            u.totp_enabled, u.totp_secret, u.totp_recovery, u.totp_pending_secret = False, None, [], None
             sin_2fa = True
             audit(db, tid, p.user.id, "2fa_reset", "user", uid, ip=p.ip)
         temp = new_temp_password()
@@ -681,6 +693,7 @@ def reset_password(uid: int, data: ResetIn, response: Response, p: Principal = D
         u.temp_password_by, u.temp_password_tenant_id = p.user.id, tid  # el login la revalida (temp_password_alive)
         u.password_changed_at = now
         u.failed_logins, u.locked_until = 0, None
+        login_limiter.forget_account(u.email)
         invalidate_resets(db, uid)
         end_sessions(db, u)  # todas sus sesiones y session_version + 1
         audit(
@@ -717,6 +730,7 @@ def reset_password(uid: int, data: ResetIn, response: Response, p: Principal = D
         db, p.tenant, u.email, f"Creá tu nueva contraseña · {p.tenant.name}", reset_email_html(p.tenant, u.full_name, link, "24 horas"), "password_reset", pr.id
     )
     u.failed_logins, u.locked_until = 0, None
+    login_limiter.forget_account(u.email)  # como el desbloqueo de siempre: el admin lo pidio
     audit(
         db,
         tid,

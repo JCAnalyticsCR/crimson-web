@@ -57,6 +57,7 @@ def _aislar_hacienda(monkeypatch):
         "reception_imap_user",
         "reception_imap_password",
         "reception_imap_tenant",
+        "proxy_shared_key",
     ):
         monkeypatch.setattr(settings, k, None)
     hclient.reset_cache()
@@ -120,6 +121,21 @@ def client(db_session):
     app = create_app()
     app.dependency_overrides[get_db] = lambda: db_session
     return TestClient(app)
+
+
+@pytest.fixture
+def from_ip(monkeypatch):
+    """Cabeceras del nginx del portal (plan 1.10) para que una peticion de prueba llegue con otra IP real.
+    La llave es aleatoria por prueba: settings.proxy_shared_key solo existe mientras dura la prueba."""
+    import secrets
+
+    from pydantic import SecretStr
+
+    from app.core.config import settings
+
+    llave = secrets.token_urlsafe(32)
+    monkeypatch.setattr(settings, "proxy_shared_key", SecretStr(llave))
+    return lambda ip: {"X-Crimson-Client-IP": ip, "X-Crimson-Proxy-Key": llave}
 
 
 @pytest.fixture

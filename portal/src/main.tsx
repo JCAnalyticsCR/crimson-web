@@ -62,6 +62,8 @@ const Approvals = lazy(() => import("./modules/approvals/Approvals"));
 const RequestAccess = lazy(() => import("./modules/auth/RequestAccess"));
 const ResetPassword = lazy(() => import("./modules/auth/ResetPassword"));
 const ForgotPassword = lazy(() => import("./modules/auth/ForgotPassword"));
+// 2FA obligatorio para el rol con la gracia vencida (plan 1.10): solo puede activarla o salir
+const TwoFactorForced = lazy(() => import("./modules/auth/TwoFactorForced"));
 // Portal del cliente: su propio layout y su propio menu (nunca el panel interno)
 const ClientShell = lazy(() => import("./modules/cliente/ClientShell"));
 const ClientHome = lazy(() => import("./modules/cliente/ClientHome"));
@@ -101,6 +103,7 @@ function Private() {
   const { me, loading, allyPreview } = useSession();
   if (loading) return <div style={{ minHeight: "100dvh", display: "grid", placeItems: "center" }}><span className="spinner" /></div>;
   if (!me) return <Login />;
+  if (me.twofa?.blocked) return <Suspense fallback={<Loading />}><TwoFactorForced /></Suspense>;
   if (isAllyRole(me.role) || allyPreview) return <Suspense fallback={<Loading />}><AllyShell /></Suspense>;
   return isClientRole(me.role) ? <Suspense fallback={<Loading />}><ClientShell /></Suspense> : <AppShell />;
 }

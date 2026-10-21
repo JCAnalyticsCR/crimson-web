@@ -22,6 +22,7 @@ _SKIP = {
     "password_hash",
     "secret_encrypted",
     "totp_secret",
+    "totp_pending_secret",
     "updated_at",
     "created_at",
     # Hacienda y recepcion: credenciales cifradas y XML completos (el XML no es un "cambio" legible y pesa)

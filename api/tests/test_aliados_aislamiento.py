@@ -26,6 +26,8 @@ PUBLICAS = {
     ("/auth/password-reset/check", "POST"),
     ("/auth/password-reset/confirm", "POST"),
     ("/auth/password-reset/request", "POST"),
+    # sonda de la IP real (plan 1.10): solo devuelve la IP de quien llama y una palabra; en tienda.* nginx no la deja pasar
+    ("/auth/ip-check", "GET"),
     # invitaciones: la pagina publica /invitacion/:token
     ("/settings/invitations/accept", "POST"),
     ("/settings/invitations/check", "POST"),

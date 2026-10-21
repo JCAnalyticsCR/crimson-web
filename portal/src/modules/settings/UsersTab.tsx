@@ -12,9 +12,9 @@ import { roleMeta } from "../../app/roles";
 import RoleMatrix from "../../app/RoleMatrix";
 import { Card, Empty, Field, I, Icon, Loading, Modal } from "../../ui/components";
 
-type U = { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null; is_self: boolean; shared: boolean; must_change_password: boolean; temp_password_expires_at: string | null; locked_until: string | null; reset_link_expires_at: string | null; password_changed_at: string | null; member_since: string | null };
+type U = { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null; is_self: boolean; shared: boolean; must_change_password: boolean; temp_password_expires_at: string | null; locked_until: string | null; login_failures_until?: string | null; reset_link_expires_at: string | null; password_changed_at: string | null; member_since: string | null };
 type Inv = { id: number; email: string; role: string; expires_at: string; status: "pendiente" | "vencida"; sent_count: number; last_sent_at: string | null; invited_by: string | null; email_status: string | null; email_error: string | null };
-type UsersResp = { users: U[]; invitations: Inv[]; roles: string[]; mail_configured: boolean; support_members: number; cost_roles: string[]; cost_role_choices: string[] };
+type UsersResp = { users: U[]; invitations: Inv[]; roles: string[]; mail_configured: boolean; support_members: number; cost_roles: string[]; cost_role_choices: string[]; twofa_roles?: string[]; twofa_grace_days?: number; twofa_role_choices?: string[] };
 type InviteOut = { id: number; link: string; emailed: boolean; email_error: string | null; expires_at: string };
 type ResetOut =
   | { mode: "temporal"; temp_password: string; expires_at: string; email: string; name: string; login_url: string }
@@ -160,10 +160,12 @@ export default function UsersTab() {
                         <td style={{ minWidth: 160 }}>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, maxWidth: 240 }}>
                             {u.totp && <Chip tone="ok" title="Verificación en dos pasos activa">2FA</Chip>}
+                            {!u.totp && u.active && data.twofa_roles?.includes(u.role) && <Chip tone="warn" title="Su rol exige la verificación en dos pasos: al vencer la gracia, el panel solo le deja configurarla">Sin 2FA · obligatoria</Chip>}
                             {u.must_change_password && <Chip tone="warn">Debe cambiar la contraseña · vence {fecha(u.temp_password_expires_at)}</Chip>}
-                            {u.locked_until && <Chip tone="bad" title="Se desbloquea solo o al restablecer la contraseña">Bloqueado hasta {hora(u.locked_until)}</Chip>}
+                            {u.locked_until && <Chip tone="bad" title="Por contraseñas equivocadas al aceptar una invitación. Se desbloquea solo o al restablecer la contraseña">Bloqueado hasta {hora(u.locked_until)}</Chip>}
+                            {u.login_failures_until && <Chip tone="warn" title="Muchos intentos fallidos de entrar con esta cuenta. Desde un equipo donde ya entró no espera; desde otro, espera hasta un minuto entre intentos. Se normaliza sola o al restablecer la contraseña">Intentos fallidos · hasta {hora(u.login_failures_until)}</Chip>}
                             {u.reset_link_expires_at && <Chip tone="info">Enlace de contraseña enviado · vence {fecha(u.reset_link_expires_at)}</Chip>}
-                            {!u.totp && !u.must_change_password && !u.locked_until && !u.reset_link_expires_at && <span className="muted">—</span>}
+                            {!u.totp && !(u.active && data.twofa_roles?.includes(u.role)) && !u.must_change_password && !u.locked_until && !u.login_failures_until && !u.reset_link_expires_at && <span className="muted">—</span>}
                           </div>
                         </td>
                         <td className="muted" style={{ whiteSpace: "nowrap" }}>{u.last_login ? fechaHora(u.last_login) : "nunca"}</td>
@@ -232,6 +234,9 @@ export default function UsersTab() {
       )}
 
       {canEdit && <CostRoles key={data.cost_roles.join(",")} current={data.cost_roles} choices={data.cost_role_choices} onSaved={load} />}
+      {canEdit && data.twofa_roles && data.twofa_role_choices && (
+        <TwoFactorPolicy key={`${data.twofa_roles.join(",")}|${data.twofa_grace_days}`} current={data.twofa_roles} grace={data.twofa_grace_days ?? 7} choices={data.twofa_role_choices} onSaved={load} askPassword={setPwAsk} />
+      )}
       {me?.role === "admin" && (
         <Card title="Qué ve cada rol" extra={<span className="meta">sale del código: menú y permisos</span>}>
           <p className="muted" style={{ fontSize: 12.5, marginTop: 0 }}>Operación, Técnico, Catálogo y Administración son grupos del menú, no roles. Para ver el panel exactamente como lo ve una persona, usá «Ver como» arriba a la derecha.</p>
@@ -494,6 +499,56 @@ function ResetResult({ r, mailConfigured, copy, onClose }: { r: ResetOut & { use
       </div>
       <p style={{ color: "var(--bad)", fontSize: 13, fontWeight: 600, margin: 0 }}>Al cerrar esta ventana no se puede volver a ver.</p>
     </Modal>
+  );
+}
+
+/* Verificación en dos pasos obligatoria (plan 1.10). Por defecto administración y contabilidad, con 7 días de gracia
+   desde que la persona entra por primera vez con ese rol sin 2FA. Vencida la gracia, el panel solo le deja activarla.
+   El cambio queda en la bitácora. Aflojarla (quitar un rol o dar más días) pide la contraseña de quien actúa y avisa por
+   correo a los administradores. El acceso de soporte temporal la exige siempre, sin gracia (no se configura aquí). */
+function TwoFactorPolicy({ current, grace, choices, onSaved, askPassword }: { current: string[]; grace: number; choices: string[]; onSaved: () => void; askPassword: (a: Ask) => void }) {
+  const { toast } = useSession();
+  const [sel, setSel] = useState<string[]>(current);
+  const [dias, setDias] = useState(grace);
+  const [busy, setBusy] = useState(false);
+  const changed = dias !== grace || sel.length !== current.length || sel.some((r) => !current.includes(r));
+  const quita = current.filter((r) => !sel.includes(r));
+  const listo = () => toast(sel.length ? `Listo: la verificación en dos pasos es obligatoria para ${sel.map((r) => roleMeta(r).label).join(", ")}` : "Listo: la verificación en dos pasos queda opcional para todos");
+  const save = async () => {
+    if (quita.length || dias > grace) {
+      const texto = [
+        quita.length ? `${quita.map((r) => roleMeta(r).label).join(", ")} deja de tener la verificación en dos pasos obligatoria: esas cuentas quedan protegidas solo con la contraseña.` : "",
+        dias > grace ? `Los días de gracia pasan de ${grace} a ${dias}.` : "",
+        "Los administradores reciben un correo con el cambio.",
+      ].filter(Boolean).join(" ");
+      askPassword({ title: "Aflojar la verificación en dos pasos", text: texto, cta: "Guardar", run: async (pw) => { await api("/settings", { method: "PUT", json: { twofa_roles: sel, twofa_grace_days: dias, admin_password: pw } }); listo(); onSaved(); } });
+      return;
+    }
+    setBusy(true);
+    try {
+      await api("/settings", { method: "PUT", json: { twofa_roles: sel, twofa_grace_days: dias } });
+      listo();
+      onSaved();
+    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Card title="Verificación en dos pasos obligatoria">
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Los roles marcados tienen que activar la verificación en dos pasos (código del teléfono además de la contraseña). Cada persona tiene unos días de gracia desde que entra por primera vez; después el panel solo le deja configurarla.</p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 18px", marginBottom: 12 }}>
+        {choices.map((r) => (
+          <label key={r} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13.5 }}>
+            <input type="checkbox" checked={sel.includes(r)} onChange={(e) => setSel(e.target.checked ? [...sel, r] : sel.filter((x) => x !== r))} />
+            {roleMeta(r).label}
+          </label>
+        ))}
+      </div>
+      <p className="muted" style={{ fontSize: 12.5, margin: "0 0 10px" }}>El acceso de soporte temporal siempre la exige, sin días de gracia.</p>
+      <Field label="Días de gracia" hint="De 0 a 30. Recomendado: 7.">
+        <input className="input input--mono" type="number" min={0} max={30} value={dias} onChange={(e) => setDias(Math.max(0, Math.min(30, Number(e.target.value) || 0)))} style={{ width: 100 }} />
+      </Field>
+      <button className="btn btn--crimson btn--sm" style={{ marginTop: 12 }} onClick={save} disabled={busy || !changed}>{busy ? "Guardando…" : "Guardar"}</button>
+    </Card>
   );
 }
 

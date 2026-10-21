@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { I, Icon } from "../ui/components";
+import { parseTs } from "../lib/api";
 import { useSession } from "./session";
 import GlobalSearch from "./GlobalSearch";
 import { ROLES, isClientRole, roleMeta } from "./roles";
@@ -102,6 +103,13 @@ export default function AppShell() {
           </div>
         </header>
         <main className="content">
+          {/* 2FA obligatorio para su rol (plan 1.10): aviso durante la gracia; al vencer, main.tsx muestra la pantalla forzada */}
+          {me?.twofa?.required && !me.user.totp_enabled && me.twofa.deadline && !viewAs && (
+            <div role="status" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 14px", marginBottom: 14, borderRadius: 10, background: "var(--warn-soft)", border: "1px solid color-mix(in srgb, var(--warn) 45%, transparent)", fontSize: 13.5 }}>
+              <span style={{ flex: "1 1 260px" }}><b>Activá la verificación en dos pasos antes del {parseTs(me.twofa.deadline).toLocaleDateString("es-CR", { day: "numeric", month: "long" })}.</b> Tu rol la exige; después de esa fecha el panel solo te deja configurarla.</span>
+              <button className="btn btn--crimson btn--sm" onClick={() => nav("/ajustes?tab=cuenta")}>Activar ahora</button>
+            </div>
+          )}
           <Suspense fallback={<div style={{ minHeight: "50vh", display: "grid", placeItems: "center" }}><span className="spinner" /></div>}>
             <Outlet />
           </Suspense>

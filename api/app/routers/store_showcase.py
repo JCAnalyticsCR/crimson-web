@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, fi
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from ..core.clientip import ip_key
 from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..core.ratelimit import SlidingWindow
@@ -723,7 +724,7 @@ class KitAnswers(BaseModel):
 @pub.post("/kit")
 def kit(slug: str, data: KitAnswers, request: Request, db: Session = Depends(get_db)):
     """'Arma tu sistema': 4 respuestas -> kit con productos reales y cantidades de las reglas del levantamiento."""
-    kit_limiter.hit(f"kit:{client_ip(request)}")
+    kit_limiter.hit(f"kit:{ip_key(client_ip(request))}")
     t = _tenant(db, slug)
     ctx = Ctx(db, t)
     prods = _published(db, t.id)
@@ -897,7 +898,7 @@ async def advisory(slug: str, request: Request, db: Session = Depends(get_db)):
     Mismas defensas que /public/incidents: tope de tamano leyendo el stream, validacion estricta, honeypot,
     limite por IP y global, y respuesta identica pase lo que pase."""
     ip = client_ip(request)
-    advisory_limiter.hit(f"asesoria:{ip}")
+    advisory_limiter.hit(f"asesoria:{ip_key(ip)}")
     advisory_global_limiter.hit("asesoria:*")
     largo = request.headers.get("content-length")
     if largo and (not largo.isdigit() or int(largo) > ADVISORY_MAX_BODY):

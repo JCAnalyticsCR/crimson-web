@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from ..core.clientip import ip_key
 from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..core.ratelimit import public_limiter
@@ -817,7 +818,7 @@ def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
 def store_quote(slug: str, data: CheckoutIn, request: Request, db: Session = Depends(get_db)):
     from ..core.ratelimit import quote_limiter
 
-    quote_limiter.hit(f"quote:{request.client.host if request.client else '?'}")
+    quote_limiter.hit(f"quote:{ip_key(request.client.host if request.client else None)}")
     t = _tenant(db, slug)
     items, calc, coupon, ship, shipping, discount_total = _quote_cart(db, t, data)
     av = _stock_of(db, t.id, [ln.product_id for ln in data.lines])
@@ -900,7 +901,7 @@ def store_contact(slug: str, data: ContactIn, request: Request, db: Session = De
     from ..models import CustomerNote, TenantUser
     from ..services.mail import queue_email
 
-    public_limiter.hit(f"contact:{request.client.host if request.client else '?'}")
+    public_limiter.hit(f"contact:{ip_key(request.client.host if request.client else None)}")
     t = _tenant(db, slug)
     email = str(data.email).lower()
     c = db.scalar(select(Customer).where(Customer.tenant_id == t.id, Customer.email == email))

@@ -25,6 +25,7 @@ const ACCION: Record<string, string> = {
   user_profile: "Editó datos del usuario", password_reset: "Restableció contraseña (temporal)", password_reset_link: "Envió enlace de contraseña",
   password_reset_done: "Cambió contraseña con enlace", password_temp_changed: "Cambió la contraseña temporal", password_reset_request: "Pidió restablecer contraseña",
   sessions_revoke: "Cerró sesiones", "2fa_reset": "Quitó la verificación en dos pasos", password_reset_invalidated: "Anuló enlaces o contraseñas temporales",
+  "2fa_on": "Activó la verificación en dos pasos", "2fa_change": "Cambió la verificación en dos pasos de teléfono", "2fa_off": "Desactivó la verificación en dos pasos", "2fa_recovery": "Generó códigos de recuperación nuevos",
 };
 const CAMPO: Record<string, string> = {
   role: "Rol", active: "Activo", site: "Sitio", notes: "Notas", photos: "Fotos", label: "Rótulo", data: "Datos", kind: "Tipo", status: "Estado",
