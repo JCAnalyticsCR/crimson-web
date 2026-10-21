@@ -90,10 +90,21 @@ def _cn(name: x509.Name) -> str | None:
 
 
 def _load(p12: bytes, pin: str):
-    try:
-        key, cert, extra = pkcs12.load_key_and_certificates(p12, (pin or "").encode("utf-8"))
-    except Exception as e:  # noqa: BLE001 - ValueError del PIN o del archivo: mismo mensaje, sin detalles
-        raise CertError("PIN incorrecto o archivo dañado") from e
+    # El PIN tal cual y, si no abre, sin espacios ni saltos de linea en los extremos: al copiarlo y pegarlo es
+    # comun que venga con uno de mas, y la llave lo rechaza igual que a un PIN incorrecto.
+    intentos = list(dict.fromkeys([pin or "", (pin or "").strip()]))
+    err: Exception | None = None
+    for intento in intentos:
+        try:
+            key, cert, extra = pkcs12.load_key_and_certificates(p12, intento.encode("utf-8"))
+            break
+        except Exception as e:  # noqa: BLE001 - ValueError del PIN o del archivo: mismo mensaje, sin detalles
+            err = e
+    else:
+        raise CertError(
+            "El PIN no abre el certificado (o el archivo no es la llave criptográfica .p12). Es el PIN que se definió al "
+            "generar la llave en TRIBU-CR/ATV (las nuevas: 14 caracteres), no la contraseña de ATV ni de TRIBU-CR."
+        ) from err
     if key is None or cert is None:
         raise CertError("El archivo .p12 no trae llave privada y certificado")
     return key, cert, list(extra or [])

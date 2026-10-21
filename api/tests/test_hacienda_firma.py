@@ -50,7 +50,7 @@ def test_load_p12_rechaza_pin_vencido_y_rsa_debil(p12_empresa):
     p12, pin = p12_empresa
     info = load_p12(p12, pin)
     assert info.key_bits == 2048 and info.days_left > 20 and "CPJ" in (info.serial_number_attr or "") and len(info.sha256) == 64
-    with pytest.raises(CertError, match="PIN incorrecto"):
+    with pytest.raises(CertError, match="El PIN no abre"):
         load_p12(p12, pin + "x")
     vencido, pin_v = make_p12(EMPRESA, expired=True)
     with pytest.raises(CertError, match="venció"):

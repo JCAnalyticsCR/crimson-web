@@ -310,6 +310,8 @@ def create_product(data: ProductIn, p: Principal = Depends(require("catalog", "c
         # quien no ve costos tampoco los escribe: el producto nace sin costo y el admin lo carga o lo vincula
         for k in COST_FIELDS:
             fields.pop(k, None)
+    if not p.can("catalog", "publicar"):
+        fields["show_on_web"] = False  # publicar en la tienda es solo del administrador (pedido 21/10)
     pr = Product(tenant_id=p.tenant.id, **fields)
     for tid in data.tax_ids:
         _own(db, Tax, tid, p.tenant.id)
@@ -333,8 +335,9 @@ class WebIn(BaseModel):
 
 
 @router.patch("/products/{pid}/web", response_model=ProductOut)
-def toggle_web(pid: int, data: WebIn, p: Principal = Depends(require("catalog", "editar")), db: Session = Depends(get_db)):
-    """Publica o quita el producto de la tienda desde la lista, sin abrir la ficha."""
+def toggle_web(pid: int, data: WebIn, p: Principal = Depends(require("catalog", "publicar")), db: Session = Depends(get_db)):
+    """Publica o quita el producto de la tienda desde la lista, sin abrir la ficha. Solo el administrador (catalog.publicar
+    no lo tiene ningun otro rol): ventas e inventario editan la ficha pero no deciden que se vende en linea."""
     pr = _own(db, Product, pid, p.tenant.id)
     pr.show_on_web = data.show_on_web
     _margin_recheck(db, p, pr)
@@ -390,7 +393,7 @@ def update_product(pid: int, data: ProductIn, p: Principal = Depends(require("ca
         _own(db, Warehouse, data.warehouse_id, p.tenant.id)
     # lo que no se envia no se borra. Quien no ve costos recibe cost=None en la ficha y lo devolveria asi: sin este
     # filtro, cada guardado de bodega borraba el costo del producto (Andres 08:07: el costo es solo del admin)
-    exclude = {"tax_ids"} | (set() if p.sees_costs else COST_FIELDS)
+    exclude = {"tax_ids"} | (set() if p.sees_costs else COST_FIELDS) | (set() if p.can("catalog", "publicar") else {"show_on_web"})
     for k, v in data.model_dump(exclude=exclude, exclude_unset=True).items():
         setattr(pr, k, v)
     if "tax_ids" in data.model_fields_set:
