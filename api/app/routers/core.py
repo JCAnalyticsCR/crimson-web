@@ -27,8 +27,8 @@ def health(db: Session = Depends(get_db)):
 def health_deep(request: Request, db: Session = Depends(get_db), x_health_token: str | None = Header(default=None)):
     """Salud profunda para el monitor externo (plan 1.8): latido del beat y del worker, correo del worker, Eurocomp,
     correo fallido, tipo de cambio, ENV, ONVO y cola "Por emitir"; 503 si algo critico falla.
-    Publico: solo el estado y el ENV (el monitor de palabra clave busca "env":"production"; un 503 es caida). El
-    detalle de cada revision, con X-Health-Token igual a la
+    Publico: solo el estado y el ENV (el monitor de palabra clave busca "env":"production"; en el 503 el ENV no sale,
+    asi cae por el codigo y por la palabra). El detalle de cada revision, con X-Health-Token igual a la
     variable HEALTH_TOKEN (sin ella, nunca). Limite por IP y resultado guardado unos segundos: cada pasada cuesta."""
     import hmac
     import os

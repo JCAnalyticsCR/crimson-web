@@ -33,15 +33,18 @@ LOC = re.compile(r"<loc>\s*([^<\s]+)\s*</loc>")
 
 
 def get(url: str, timeout: float = 25.0) -> tuple[int, bytes, dict]:
-    """(estado, cuerpo descomprimido, cabeceras). Pide gzip como un navegador; los errores HTTP tambien se devuelven."""
+    """(estado, cuerpo descomprimido, cabeceras con el nombre en minuscula). Pide gzip como un navegador; los errores
+    HTTP tambien se devuelven. Los nombres de cabecera no distinguen mayusculas (un proxy puede mandar
+    `content-encoding`): se pasan a minuscula antes de buscarlos, si no el cuerpo quedaria comprimido."""
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Encoding": "gzip, deflate", "Accept": "text/html,application/json;q=0.9,*/*;q=0.8"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 (URL de configuracion, https)
-            status, raw, headers = r.status, r.read(), dict(r.headers)
+            status, raw, items = r.status, r.read(), r.headers.items()
     except urllib.error.HTTPError as e:
-        status, raw, headers = e.code, e.read(), dict(e.headers or {})
-    enc = (headers.get("Content-Encoding") or "").lower()
-    if enc == "gzip":
+        status, raw, items = e.code, e.read(), (e.headers.items() if e.headers else [])
+    headers = {k.lower(): v for k, v in items}
+    enc = (headers.get("content-encoding") or "").strip().lower()
+    if enc in ("gzip", "x-gzip"):
         raw = gzip.decompress(raw)
     elif enc == "deflate":
         raw = zlib.decompress(raw)

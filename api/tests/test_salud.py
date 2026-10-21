@@ -68,7 +68,8 @@ def test_sin_latido_o_latido_vencido_da_503(client, db_session):
 def test_publico_solo_el_estado(client, db_session, monkeypatch):
     """Sin el token (o con uno malo, o sin HEALTH_TOKEN definido) solo el estado y el ENV: nada de nombres de
     configuracion, conteos ni modos. El monitor externo de 0.8 es de palabra clave y busca "env":"production" (lo
-    mismo que ya publica /health) en el texto crudo; un 503 cuenta como caida."""
+    mismo que ya publica /health) en el texto crudo. En el 503 la palabra no sale: el monitor cae aunque el proveedor
+    ignore el codigo HTTP y solo mire la palabra."""
     salud.heartbeat(db_session)
     clave = f'"env":"{settings.env}"'  # tal cual la busca el monitor: sin espacios
     for headers in ({}, {"X-Health-Token": "otro"}):
@@ -84,7 +85,9 @@ def test_publico_solo_el_estado(client, db_session, monkeypatch):
     db_session.commit()
     r = client.get("/health/deep")
     assert r.status_code == 503 and r.json()["status"] == "falla" and "checks" not in r.json()
-    assert set(r.json()) == {"status", "env", "at"}
+    assert set(r.json()) == {"status", "at"} and clave not in r.text  # sin la palabra clave del monitor
+    assert svc.public_view({"status": "falla", "env": "production", "at": "x"}) == {"status": "falla", "at": "x"}
+    assert svc.public_view({"status": "aviso", "env": "production", "at": "x"})["env"] == "production"  # 200: si sale
 
 
 def test_resultado_guardado_y_limite_por_ip(client, db_session, monkeypatch):
@@ -488,6 +491,52 @@ def test_monitor_de_la_tienda_detecta_basura_gzip_pagina_en_blanco_y_pago_simula
     assert "1f8b" in texto and "sin <title>" in texto and "/assets/" in texto
     assert "metodos simulados ['tarjeta']" in texto and "health/deep: estado 503 (falla)" in texto
     assert tc.main(["--base", base, "--slug", "tienda", "--sample", "3", "--deep", deep]) == 1
+
+
+def test_monitor_de_la_tienda_descomprime_con_la_cabecera_en_minuscula(monkeypatch):
+    """El get real contra un servidor local: un proxy puede mandar `content-encoding: gzip` en minuscula. Los nombres
+    de cabecera no distinguen mayusculas; si el monitor los buscara tal cual, el cuerpo quedaria comprimido y cada
+    pagina saldria con "1f8b", "sin <title>" y sin la app (falsa alarma cada 30 min). Tambien en un 404 (HTTPError)."""
+    import gzip
+    import threading
+    import urllib.request
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    tc = _tienda_check()
+    ok = b'<html><head><title>Producto</title></head><body><script type="module" src="/assets/index.js"></script></body></html>'
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            rutas = {"/minuscula": (200, "content-encoding"), "/normal": (200, "Content-Encoding")}
+            code, name = rutas.get(self.path, (404, "content-encoding"))  # /falta: 404 comprimido, en minuscula
+            body = gzip.compress(ok if code == 200 else b"no existe")
+            self.send_response(code)
+            self.send_header("Content-Type", "text/html")
+            self.send_header(name, "gzip")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    hilo = threading.Thread(target=srv.serve_forever, daemon=True)
+    hilo.start()
+    # sin proxies del sistema: la peticion va directo al servidor local
+    monkeypatch.setattr(tc.urllib.request, "urlopen", urllib.request.build_opener(urllib.request.ProxyHandler({})).open)
+    try:
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        for ruta in ("/minuscula", "/normal"):
+            st, body, headers = tc.get(base + ruta)
+            assert st == 200 and body == ok and headers["content-encoding"] == "gzip"
+            assert tc.check_page(base + ruta) == []
+        st, body, headers = tc.get(base + "/falta")
+        assert st == 404 and body == b"no existe" and headers["content-encoding"] == "gzip"
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        hilo.join(timeout=5)
 
 
 class _Ctx:

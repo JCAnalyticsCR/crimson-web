@@ -10,6 +10,7 @@ import AuthLink from "../../../ui/AuthLink";
 import { Dropzone } from "../../../ui/MediaPicker";
 import { VerArchivo } from "../../../ui/VerArchivo";
 import { IVA_CONDITIONS } from "../hacienda";
+import { hoyCR } from "../../../lib/fechaCR";
 
 type Named = { id: number; name: string };
 type Instrument = { id: number; kind: "chequera" | "tarjeta_debito"; name: string; last4: string | null; next_check: number | null; active: boolean };
@@ -98,7 +99,7 @@ export default function Expenses() {
     <>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
         <AuthLink path="/reports/gastos?format=xlsx" download="gastos.xlsx"><Icon d={I.reports} />Excel</AuthLink>
-        {allows("accounting.crear") && <button className="btn btn--crimson btn--sm" onClick={() => setEdit({ ...blank })}><Icon d={I.plus} />Registrar gasto</button>}
+        {allows("accounting.crear") && <button className="btn btn--crimson btn--sm" onClick={() => setEdit({ ...blank, date: hoyCR() })}><Icon d={I.plus} />Registrar gasto</button>}
       </div>
       <div className="kpi">
         {res && <div className="kpi__card"><span className="kpi__corner" /><div className="kpi__label">Resultado del mes (sin IVA)</div><div className="kpi__value">{fmtMoney(res.totals.resultado)}</div><div className="kpi__sub">{res.rows.map((r) => <span key={String(r[0])}>{r[0]} <b className="money">{fmtMoney(r[1])}</b></span>)}</div></div>}
