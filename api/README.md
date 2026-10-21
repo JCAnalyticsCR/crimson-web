@@ -105,7 +105,18 @@ proveedores se simulan), *Simulado* (todo se simula, con la marca "sin validez f
 (ambiente de pruebas real) y *Producción*, que solo se activa con el interruptor del administrador (contraseña +
 escribir PRODUCCIÓN + lista de verificación en verde) **y** solo envía si, en el momento de cada envío, el servidor
 tiene `HACIENDA_PRODUCTION_ALLOWED=true`, `ENV=production` y la misma huella de instancia que cuando se activó
-(Railway copia las variables al duplicar un ambiente; la huella no). Cualquier cambio de modo apaga producción.
+(Railway copia las variables al duplicar un ambiente; la huella no). Si con el interruptor encendido falla una de esas
+llaves, **no se emite nada** (el modo efectivo es *Desactivada* y Ajustes muestra el motivo): nunca cae a *Pruebas*.
+Cualquier cambio de modo apaga producción, y apagar el interruptor deja la empresa en *Desactivada*: a *Pruebas* solo se
+entra eligiéndolo y escribiendo PRUEBAS.
+
+**Mientras el modo sea *Desactivada*** cada venta pagada o enviada se emite en Fygaro el mismo día: Facturas → **Por
+emitir** lista lo que falta (contabilidad recibe la lista a las 08:30), incluido lo que solo se "emitió" en *Simulado* o
+en *Pruebas* (sin validez fiscal), y "Marcar emitida en Fygaro" guarda el número y la fecha
+(`einvoice_status = emitida_fuera`). Marcar es de contabilidad y del administrador (`sales.emitir_fuera`): la marca saca
+la venta de la cola. Lo marcado, igual que lo importado del histórico, **nunca** se vuelve a emitir desde la plataforma
+(tampoco en producción): `POST /invoices/{id}/emit` responde 409. Con producción activa solo se marca lo creado antes de
+activarla (lo del corte que ya salió en Fygaro); lo posterior se emite desde la plataforma.
 
 ### Regla de credenciales
 
@@ -184,9 +195,13 @@ algo falla, la base queda en `c5d18e3f7a2b`, el contenedor nuevo no arranca y el
 2. El administrador entra a **Ajustes → Hacienda**: completa identificación, ubicación y actividades; en
    **Credenciales → Pruebas** carga el usuario y la contraseña **de pruebas** de ATV (son distintas a las de
    producción) y la llave criptográfica de pruebas con su PIN; "Probar conexión".
-3. Modo **Pruebas**. Correr `python -m app.tools.hacienda_smoke --tenant <slug> --cabys <código> --confirmo-pruebas`
-   para confirmar con el validador real: firma, ruta de estado del mensaje receptor (`{clave}-{consecutivo}`),
-   clasificación servicio/mercancía y si hace falta la cadena del certificado.
+3. **Sin tocar el Modo** (la empresa real sigue en *Desactivada*): en la consola del `api`, correr
+   `python -m app.tools.hacienda_smoke --tenant <slug> --cabys <código> --confirmo-pruebas --sin-modo` para confirmar
+   con el validador real: firma, ruta de estado del mensaje receptor (`{clave}-{consecutivo}`), clasificación
+   servicio/mercancía y si hace falta la cadena del certificado. Usa las credenciales de **Pruebas**, no crea facturas,
+   no cambia el modo y solo gasta la numeración de pruebas (T01/T05). Se anotan solo los estados. **Nunca** se pasa la
+   empresa real a modo *Pruebas*: cada venta real se emitiría al ambiente de pruebas y después no se podría emitir en
+   producción (por eso Ajustes pide escribir PRUEBAS). El modo *Pruebas* queda para una empresa de prueba.
 4. Antes de producción: volver a bajar los XSD v4.4 (actualización del 1-nov-2026) a
    `app/providers/hacienda/xsd/esquemas/2024/v4.4/` y comparar; si cambiaron, ajustar y volver a correr las pruebas.
 5. Con contabilidad: importar el histórico de recepciones de Fygaro (Importar datos → Recepciones de Fygaro, el zip de
@@ -267,7 +282,7 @@ emisión.
 
 ## Pendiente (requiere credenciales o decisiones del cliente)
 
-1. Hacienda: la conexión directa está lista (ver «Hacienda y recepción»); falta cargar las credenciales y el `.p12` de **pruebas**, correr `hacienda_smoke` contra el validador real y, el día del cambio, el runbook de arriba. Mientras tanto el modo por defecto no emite (o simula, sin validez fiscal).
+1. Hacienda: la conexión directa está lista (ver «Hacienda y recepción»); falta cargar las credenciales y el `.p12` de **pruebas**, correr `hacienda_smoke --sin-modo` contra el validador real (sin cambiar el modo) y, el día del cambio, el runbook de arriba. Mientras tanto el modo por defecto no emite (o simula, sin validez fiscal).
 2. ONVO: cobro con tarjeta (tienda), enlace de pago de facturas y reembolso desde el pedido ya están; falta probar de punta a punta con la llave de pruebas en staging y, después, tarjetas guardadas y reautorizaciones. PayPal pendiente.
 3. BCCR: correo + token del servicio de indicadores para el tipo de cambio automático.
 4. Resend: llave para que los correos salgan de verdad (hoy quedan en la bandeja de salida como `simulado`).

@@ -295,6 +295,12 @@ def respond(db: Session, p: Principal, rid: int, data: RespondIn) -> tuple[Recei
         raise HTTPException(409, f"Ya fue respondido como {doc.action or 'respondido'}")
     if doc.doc_type == "TE":
         raise HTTPException(409, BLOCKED["sin_respuesta"])
+    blocked = hc.production_blocked(db, tenant)
+    if blocked:
+        # interruptor de produccion encendido y una llave del servidor que falla: el modo efectivo es "ninguno" y
+        # reception_mode lo trataria como simulado. Un mensaje receptor simulado sobre un comprobante REAL de un
+        # proveedor lo dejaria respondido sin validez fiscal (ni credito de IVA) creyendo estar en produccion
+        raise HTTPException(409, f"Producción está activada pero este servidor no la permite ({blocked}): no se respondió. Revise Ajustes → Hacienda")
     if data.action in ("parcial", "rechazada") and not data.detail:
         raise HTTPException(422, "El detalle es obligatorio (5 a 160 caracteres) en aceptación parcial y rechazo")
     if data.link_expense_id and data.action == "rechazada":
@@ -462,6 +468,9 @@ def legacy_simulated(doc: ReceivedDocument, rs: list[ReceptionResponse]) -> bool
 
 def reopen_blocker(db: Session, tenant: Tenant, doc: ReceivedDocument, rs: list[ReceptionResponse] | None = None) -> str | None:
     """Motivo por el que NO se puede reabrir para produccion (None = se puede)."""
+    blocked = hc.production_blocked(db, tenant)
+    if blocked:
+        return f"Producción está activada pero este servidor no la permite ({blocked}): se reabre cuando vuelva a estar disponible"
     if hc.reception_mode(db, tenant) != "produccion":
         return "Reabrir es solo para pasar a producción lo que se probó antes del cambio"
     if doc.status == "historico" or doc.origin == "historico":

@@ -34,14 +34,14 @@ export const ROLES: Record<string, RoleMeta> = {
     label: "Vendedor", tone: "#2f6fed", glyph: "V",
     summary: "Cotiza y factura con el precio de venta. Ve solo sus oportunidades, cotizaciones, facturas y comisiones; nunca el costo.",
     can: ["Sus oportunidades y cotizaciones (el consecutivo es el de la empresa)", "Facturar y buscar sus facturas", "Ver en resumen los levantamientos de sus oportunidades y pedir uno nuevo", "Productos y servicios con el precio de venta", "Existencias y ajustes de inventario (entradas, salidas y ajustes)", "Pedidos de la tienda", "Ver en tiempo real cuánto lleva ganado en comisiones"],
-    cannot: ["Ver el costo del proveedor, el margen o la utilidad", "Ver lo que venden los demás o el total de la empresa", "Llenar o editar levantamientos", "Descontar más del límite sin aprobación", "Anular facturas"],
+    cannot: ["Ver el costo del proveedor, el margen o la utilidad", "Ver lo que venden los demás o el total de la empresa", "Llenar o editar levantamientos", "Descontar más del límite sin aprobación", "Anular facturas", "Marcar facturas emitidas en Fygaro (lo hace contabilidad)"],
     menu: ["/", "/oportunidades", "/cotizaciones", "/facturas", "/pagos", "/levantamientos", "/clientes", "/productos", "/inventario", "/ordenes", "/comisiones", "/archivo", "/ajustes"],
   },
   contabilidad: {
     label: "Contador", tone: "#6b46c1", glyph: "K",
     summary: "Todo el dinero de la empresa: facturas de proveedores ante Hacienda, gastos, bancos, el panel tributario, planillas, comisiones y reportes.",
-    can: ["Facturas de proveedores: recibir, aceptar o rechazar ante Hacienda", "Gastos, recurrentes, categorías y bancos", "Panel tributario del mes", "Facturas y cobros de toda la empresa", "Planillas, colillas y comisiones", "Aprobaciones de planillas y comisiones", "Aprobar y marcar pagadas las comisiones y los pagos a aliados", "La mensualidad de las empresas aliadas", "Los reportes de la empresa con Excel", "Importar el histórico de recepciones de Fygaro"],
-    cannot: ["Crear ventas o cobrar", "Ver costos de productos ni márgenes (salvo que el administrador lo habilite)", "Configurar la empresa o los usuarios", "Cargar las credenciales de Hacienda ni activar producción"],
+    can: ["Facturas de proveedores: recibir, aceptar o rechazar ante Hacienda", "Gastos, recurrentes, categorías y bancos", "Panel tributario del mes", "Facturas y cobros de toda la empresa", "Enviar facturas, crear enlaces de pago y registrar cobros", "Emitir a Hacienda o marcar lo emitido en Fygaro (lista «Por emitir»)", "Planillas, colillas y comisiones", "Aprobaciones de planillas y comisiones", "Aprobar y marcar pagadas las comisiones y los pagos a aliados", "La mensualidad de las empresas aliadas", "Los reportes de la empresa con Excel", "Importar el histórico de recepciones de Fygaro"],
+    cannot: ["Crear o editar ventas (cotizaciones y facturas) ni enviar cotizaciones", "Ver costos de productos ni márgenes (salvo que el administrador lo habilite)", "Configurar la empresa o los usuarios", "Cargar las credenciales de Hacienda ni activar producción"],
     menu: ["/", "/aprobaciones", "/facturas", "/pagos", "/recurrencias", "/clientes", "/productos", "/inventario", "/compras", "/comisiones", "/aliados", "/contabilidad", "/planillas", "/vehiculos", "/reportes", "/importar", "/archivo", "/ajustes"],
   },
   tecnico: {

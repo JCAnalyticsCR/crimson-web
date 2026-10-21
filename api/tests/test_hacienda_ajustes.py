@@ -187,17 +187,55 @@ def test_produccion_interruptor_y_huella(client, auth, db_session, monkeypatch, 
     prof = db_session.query(FiscalProfile).one()
     db_session.refresh(prof)
     assert prof.production_instance and prof.environment == "produccion"
-    # otro servidor (ambiente duplicado en Railway): el modo efectivo es pruebas
+    # otro servidor (ambiente duplicado en Railway) o una llave del servidor que falla: no se emite nada. Nunca cae a
+    # pruebas: cada venta real iria al ambiente de pruebas sin que nadie escribiera PRUEBAS (plan 1.11 y 4.6)
     monkeypatch.setattr(settings, "railway_environment_id", "ambiente-clonado")
-    assert hc.hacienda_mode(db_session, t) == "pruebas"
+    assert hc.hacienda_mode(db_session, t) == "ninguno" and hc.production_blocked(db_session, t)
+    from app.models import EInvoiceDocument
+
+    cust = client.get("/customers").json()["items"][0]
+    prods = client.get("/products", params={"q": "domo"}).json()["items"]
+    inv = client.post("/invoices", json={"customer_id": cust["id"], "lines": [{"product_id": prods[0]["id"], "quantity": 1}]}).json()
+    r = client.post(f"/invoices/{inv['id']}/emit")
+    assert r.status_code == 409 and "no la permite" in r.json()["detail"], r.text
+    assert db_session.query(EInvoiceDocument).filter(EInvoiceDocument.invoice_id == inv["id"]).count() == 0
+    # tampoco se responde a un proveedor: con el modo efectivo "ninguno" el mensaje receptor saldria simulado (sin validez
+    # fiscal ni credito de IVA) y el comprobante quedaria respondido creyendo estar en produccion
+    from datetime import date
+
+    from app.models import ReceptionResponse
+    from tests.hacienda_utils import clave, fe_xml
+
+    hoy = date.today()
+    num = "00100001010000000777"
+    xml = fe_xml(clave(fecha=hoy.strftime("%d%m%y"), consecutivo=num), fecha=f"{hoy.isoformat()}T10:00:00-06:00", consecutivo=num)
+    rec = client.post("/reception/upload", files={"file": ("f.xml", xml.encode(), "application/xml")})
+    assert rec.status_code == 201, rec.text
+    rid = rec.json()["id"]
+    r = client.post(f"/reception/{rid}/respond", json={"action": "aceptada"})
+    assert r.status_code == 409 and "no la permite" in r.json()["detail"], r.text
+    assert db_session.query(ReceptionResponse).filter(ReceptionResponse.received_document_id == rid).count() == 0
+    det = client.get(f"/reception/{rid}").json()
+    assert det["status"] == "por_revisar" and det["can_respond"] and det["can_reopen"] is False
     monkeypatch.setattr(settings, "railway_environment_id", "ambiente-prod")
+    assert hc.production_blocked(db_session, t) is None
     assert hc.hacienda_mode(db_session, t) == "produccion"
     # con produccion activa no se cambia la cedula ni un F0x
     perfil = client.get("/settings/hacienda").json()["profile"]
     perfil = {k: v for k, v in perfil.items() if v is not None}
     assert client.put("/settings/hacienda/profile", json={**perfil, "tax_id": "3-102-111111"}).status_code == 409
     assert client.put(f"/settings/billing-groups/{g['group_id']}", json={"prefix": "F05", "current": 400}).status_code == 409
-    # apagar
+    # apagar: la empresa queda en Desactivada (no se emite; lo vendido entra a "Por emitir"), nunca en Pruebas sin
+    # escribir PRUEBAS
+    r = client.post("/settings/hacienda/production", json={"enabled": False, "admin_password": ADMIN_PASSWORD})
+    assert r.status_code == 200 and r.json()["mode"] == "ninguno" and r.json()["einvoice_provider"] == "none", r.text
+    assert r.json()["production"]["enabled_at"] is None
+    from app.models import AuditLog
+
+    log = db_session.query(AuditLog).filter(AuditLog.action == "hacienda_mode").order_by(AuditLog.id.desc()).first()
+    assert log.diff == {"antes": "produccion", "despues": "none"}
+    # apagar otra vez no toca un modo que ya no es produccion
+    assert client.put("/settings/hacienda/mode", json={"mode": "pruebas", "confirm_text": "PRUEBAS"}).json()["mode"] == "pruebas"
     r = client.post("/settings/hacienda/production", json={"enabled": False, "admin_password": ADMIN_PASSWORD})
     assert r.status_code == 200 and r.json()["mode"] == "pruebas"
 
@@ -218,7 +256,7 @@ def test_cambiar_de_modo_apaga_produccion(client, auth, db_session, monkeypatch,
     prof = db_session.query(FiscalProfile).one()
     db_session.refresh(prof)
     assert prof.environment == "pruebas" and prof.production_enabled_at is None and prof.production_instance is None
-    r = client.put("/settings/hacienda/mode", json={"mode": "pruebas"})
+    r = client.put("/settings/hacienda/mode", json={"mode": "pruebas", "confirm_text": "PRUEBAS"})
     assert r.json()["mode"] == "pruebas"  # volver a "hacienda" no revive produccion
     assert client.patch("/tenant", json={"settings": {"einvoice_provider": "hacienda"}}).status_code == 422
 

@@ -15,6 +15,7 @@ from celery.signals import setup_logging as celery_setup_logging
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.tasks.salud import connect_signals  # tambien registra las tareas salud.* (shared_task)
+from app.tasks import fiscal as _tareas_fiscales  # noqa: F401  cola "Por emitir" (plan 1.7)
 
 log = logging.getLogger("crimson.worker")
 # plan 1.8: antes de las lineas de arranque de abajo (kid de FISCAL_KEYS, configuracion faltante), que salen al importar
@@ -592,4 +593,5 @@ celery.conf.beat_schedule = {
     # plan 1.8: latido cada 5 min (/health/deep da 503 si pasan 15 sin latido) y correo de Salud a las 07:00
     "salud-latido": {"task": "salud.latido", "schedule": crontab(minute="*/5")},
     "salud-correo-diario": {"task": "salud.correo_diario", "schedule": crontab(hour=7, minute=0)},
+    "fiscal-por-emitir": {"task": "fiscal.por_emitir_diario", "schedule": crontab(hour=8, minute=30)},
 }

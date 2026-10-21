@@ -432,6 +432,9 @@ class MarkSentIn(BaseModel):
 def send_quote(qid: int, data: MarkSentIn | None = None, p: Principal = Depends(require("sales", "enviar")), db: Session = Depends(get_db)):
     """Marca como enviada por fuera del correo (WhatsApp, en mano). Igual que el correo, guarda la version enviada."""
     data = data or MarkSentIn()
+    if not p.sends_quotes:
+        # contabilidad envia facturas (plan 1.7); la cotizacion es de quien cotiza
+        raise HTTPException(403, "Enviar cotizaciones es de quien cotiza (crear o editar ventas)")
     q = _own(db, Quote, qid, p.tenant.id, p)
     if q.status == "por_aprobar":
         raise HTTPException(409, "La cotización tiene un descuento pendiente de aprobación")
@@ -653,7 +656,8 @@ def get_invoice(iid: int, p: Principal = Depends(require("sales", "ver")), db: S
 @router.put("/invoices/{iid}", response_model=InvoiceOut)
 def update_invoice(iid: int, data: DocumentIn, p: Principal = Depends(require("sales", "editar")), db: Session = Depends(get_db)):
     inv = _own(db, Invoice, iid, p.tenant.id, p)
-    if inv.status == "anulada" or inv.einvoice_status in ("pendiente", "aceptada"):
+    # emitida_fuera: el comprobante vive en Fygaro; editar aqui la dejaria distinta de lo que se declaro (plan 1.7)
+    if inv.status == "anulada" or inv.einvoice_status in ("pendiente", "aceptada", "emitida_fuera"):
         raise HTTPException(409, "La factura ya fue emitida o anulada; use nota de credito")
     if inv.payments:
         raise HTTPException(409, "La factura tiene pagos registrados")
@@ -683,15 +687,18 @@ def void_invoice(iid: int, p: Principal = Depends(require("sales", "anular")), d
     from ..models import EInvoiceDocument
     from ..services.einvoice import LIVE
 
-    enviada = db.scalar(
-        select(EInvoiceDocument.id).where(
-            EInvoiceDocument.tenant_id == p.tenant.id,
-            EInvoiceDocument.invoice_id == inv.id,
-            EInvoiceDocument.doc_type != "NC",
-            EInvoiceDocument.provider == "hacienda",
-            or_(EInvoiceDocument.status.in_(LIVE), and_(EInvoiceDocument.status == "error", EInvoiceDocument.attempts > 0)),
-        )
-    )
+    where = [
+        EInvoiceDocument.tenant_id == p.tenant.id,
+        EInvoiceDocument.invoice_id == inv.id,
+        EInvoiceDocument.doc_type != "NC",
+        EInvoiceDocument.provider == "hacienda",
+        or_(EInvoiceDocument.status.in_(LIVE), and_(EInvoiceDocument.status == "error", EInvoiceDocument.attempts > 0)),
+    ]
+    if inv.einvoice_status == "emitida_fuera":
+        # emitida en Fygaro (plan 1.7): su comprobante real vive alla y la NC tambien se emite alla. Lo que quedo aqui de
+        # simulado o de pruebas no tiene validez fiscal y no impide anularla (si no, no habria salida: aqui no hay NC)
+        where.append(or_(EInvoiceDocument.mode.is_(None), EInvoiceDocument.mode.notin_(("simulado", "pruebas"))))
+    enviada = db.scalar(select(EInvoiceDocument.id).where(*where))
     if enviada or inv.einvoice_status == "pendiente":
         # el worker la sigue mandando y consultando, y si Hacienda ya la acepto el IVA debito existe: anularla aqui la
         # sacaria del D-104 y la NC ya no se ofreceria. Se espera la respuesta y, si la acepto, se anula con NC

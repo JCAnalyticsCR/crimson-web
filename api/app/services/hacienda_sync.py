@@ -339,6 +339,8 @@ def _copy_invoice_status(db: Session, doc: EInvoiceDocument, *, user_id: int | N
         if doc.status == "aceptada":
             _void_after_nc(db, inv, doc, user_id)
         return
+    if inv.einvoice_status == "emitida_fuera":
+        return  # emitida en Fygaro (plan 1.7): un comprobante viejo de simulado o de pruebas no le cambia el estado
     if doc.status in ("por_enviar", "enviando", "enviado", "procesando"):
         inv.einvoice_status = "pendiente"
     elif doc.status == "aceptada":

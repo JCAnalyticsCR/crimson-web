@@ -97,7 +97,7 @@ def test_reemitir_tras_rechazo_toma_consecutivo_nuevo(client, auth, db_session, 
 def test_sin_credenciales_perfil_incompleto_y_doble_emit(client, auth, db_session):
     from app.models import EInvoiceDocument, FiscalProfile
 
-    client.put("/settings/hacienda/mode", json={"mode": "pruebas"})
+    client.put("/settings/hacienda/mode", json={"mode": "pruebas", "confirm_text": "PRUEBAS"})
     inv = _factura(client)
     r = client.post(f"/invoices/{inv['id']}/emit")
     assert r.status_code == 409 and "credenciales" in r.json()["detail"]

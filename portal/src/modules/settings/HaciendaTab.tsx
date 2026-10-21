@@ -25,6 +25,7 @@ export default function HaciendaTab() {
   const [busy, setBusy] = useState(false);
   const [prodModal, setProdModal] = useState<"on" | "off" | null>(null);
   const [prodForm, setProdForm] = useState({ admin_password: "", confirm_text: "" });
+  const [pruebasTxt, setPruebasTxt] = useState<string | null>(null); // confirmacion escrita para el modo Pruebas (plan 1.11)
   const [confirmPw, setConfirmPw] = useState<string | null>(null);
   const [delPw, setDelPw] = useState<string | null>(null);
   const [groups, setGroups] = useState<HaciendaState["consecutives"]>([]);
@@ -44,7 +45,10 @@ export default function HaciendaTab() {
   const prov = geo.find((p) => p.code === prof.province);
   const c: CredBlock = st.credentials[env];
 
-  const setMode = (mode: string) => call(() => api("/settings/hacienda/mode", { method: "PUT", json: { mode } }), "Modo actualizado");
+  const setMode = (mode: string, confirm_text?: string) => call(() => api("/settings/hacienda/mode", { method: "PUT", json: { mode, confirm_text } }), "Modo actualizado");
+  /* Pruebas en la empresa real manda cada venta al ambiente de pruebas: se confirma escribiendo PRUEBAS. Para probar
+     la conexion sin tocar las ventas: credenciales de Pruebas + "Probar conexion" + hacienda_smoke --sin-modo. */
+  const pickMode = (k: string) => (k === "pruebas" && st.mode !== "pruebas" ? setPruebasTxt("") : setMode(k));
   const saveProfile = () => call(() => api("/settings/hacienda/profile", { method: "PUT", json: { ...prof, commercial_name: prof.commercial_name || null, phone: prof.phone || null, district_name: prof.district_name || null, barrio: prof.barrio || null } }), "Identificación guardada");
   const addAct = () => call(() => api("/settings/hacienda/activities", { method: "POST", json: { code: newAct.code.trim(), description: newAct.description.trim() || null } }).then((r) => { setNewAct({ code: "", description: "" }); return r; }), "Actividad agregada");
   const saveCred = async () => {
@@ -72,19 +76,19 @@ export default function HaciendaTab() {
     <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
       <div className="grid-2">
         <Card title="Modo" extra={<span className={`badge ${st.mode === "produccion" ? "badge--bad" : st.mode === "pruebas" ? "badge--warn" : "badge--muted"}`} style={{ fontSize: 13 }}>{MODE_LABEL[st.mode]}</span>}>
-          <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Desactivada: no se emite (las respuestas a proveedores se simulan). Simulado: todo se simula, sin validez fiscal. Pruebas: ambiente de pruebas real de Hacienda. Producción solo con el interruptor de abajo.</p>
+          <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Desactivada: no se emite (las respuestas a proveedores se simulan). Simulado: todo se simula, sin validez fiscal. Pruebas: ambiente de pruebas real de Hacienda (cada venta real iría a pruebas: para probar la conexión no hace falta cambiar el modo). Producción solo con el interruptor de abajo.</p>
           <div className="acc-seg">
-            {[["none", "Desactivada", "ninguno"], ["sandbox", "Simulado", "simulado"], ["pruebas", "Pruebas", "pruebas"]].map(([k, l, m]) => <button key={k} type="button" disabled={ro || busy} className={st.mode === m ? "is-active" : ""} onClick={() => setMode(k)}>{l}</button>)}
+            {[["none", "Desactivada", "ninguno"], ["sandbox", "Simulado", "simulado"], ["pruebas", "Pruebas", "pruebas"]].map(([k, l, m]) => <button key={k} type="button" disabled={ro || busy} className={st.mode === m ? "is-active" : ""} onClick={() => pickMode(k)}>{l}</button>)}
           </div>
         </Card>
         <Card title="Producción">
           <ul style={{ listStyle: "none", padding: 0, margin: 0, fontSize: 13, display: "flex", flexDirection: "column", gap: 4 }}>
             {st.production.checks.map((ch) => <li key={ch.key} style={{ color: ch.ok ? "var(--ok)" : "var(--bad)" }}>{ch.ok ? "✓" : "✗"} <span style={{ color: "var(--text)" }}>{ch.detail}</span></li>)}
           </ul>
-          {st.production.blocked_reason && <div className="acc-warn" style={{ marginTop: 8 }}>{st.production.blocked_reason}</div>}
+          {st.production.blocked_reason && <div className="acc-warn" style={{ marginTop: 8 }}>No se emite nada (ni a producción ni a pruebas) hasta resolverlo: {st.production.blocked_reason}</div>}
           {!ro && (
             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-              {st.production.enabled_at ? <button className="btn btn--soft btn--sm" onClick={() => setProdModal("off")}>Volver a pruebas</button> : <button className="btn btn--danger btn--sm" onClick={() => setProdModal("on")}>Activar producción</button>}
+              {st.production.enabled_at ? <button className="btn btn--soft btn--sm" onClick={() => setProdModal("off")}>Apagar producción</button> : <button className="btn btn--danger btn--sm" onClick={() => setProdModal("on")}>Activar producción</button>}
               {st.production.enabled_at && <span className="muted" style={{ fontSize: 12 }}>Activa desde {parseTs(st.production.enabled_at).toLocaleString("es-CR")}</span>}
             </div>
           )}
@@ -175,10 +179,19 @@ export default function HaciendaTab() {
       </Card>
 
       {prodModal && (
-        <Modal title={prodModal === "on" ? "Activar producción" : "Volver a pruebas"} onClose={() => setProdModal(null)} foot={<><button className="btn btn--ghost" onClick={() => setProdModal(null)}>Cancelar</button><button className={`btn ${prodModal === "on" ? "btn--danger" : "btn--crimson"}`} disabled={busy || !prodForm.admin_password || (prodModal === "on" && !/^PRODUCCI[OÓ]N$/i.test(prodForm.confirm_text.trim()))} onClick={async () => { await call(() => api("/settings/hacienda/production", { method: "POST", json: { enabled: prodModal === "on", ...prodForm } }), prodModal === "on" ? "Producción activada" : "Producción desactivada"); setProdModal(null); setProdForm({ admin_password: "", confirm_text: "" }); }}>{prodModal === "on" ? "Activar" : "Desactivar"}</button></>}>
+        <Modal title={prodModal === "on" ? "Activar producción" : "Apagar producción"} onClose={() => setProdModal(null)} foot={<><button className="btn btn--ghost" onClick={() => setProdModal(null)}>Cancelar</button><button className={`btn ${prodModal === "on" ? "btn--danger" : "btn--crimson"}`} disabled={busy || !prodForm.admin_password || (prodModal === "on" && !/^PRODUCCI[OÓ]N$/i.test(prodForm.confirm_text.trim()))} onClick={async () => { await call(() => api("/settings/hacienda/production", { method: "POST", json: { enabled: prodModal === "on", ...prodForm } }), prodModal === "on" ? "Producción activada" : "Producción desactivada"); setProdModal(null); setProdForm({ admin_password: "", confirm_text: "" }); }}>{prodModal === "on" ? "Activar" : "Desactivar"}</button></>}>
           {prodModal === "on" && <p style={{ fontSize: 13, marginTop: 0 }}>Desde ahora los comprobantes y los mensajes receptor van a Hacienda <b>con validez fiscal</b>. Escribí <b>PRODUCCIÓN</b> para confirmar.</p>}
           {prodModal === "on" && <Field label="Confirmación"><input className="input" value={prodForm.confirm_text} onChange={(e) => setProdForm({ ...prodForm, confirm_text: e.target.value })} /></Field>}
+          {/* apagar deja la empresa en Desactivada, nunca en Pruebas (cada venta real iria al ambiente de pruebas) */}
+          {prodModal === "off" && <p style={{ fontSize: 13, marginTop: 0 }}>La empresa queda en modo <b>Desactivada</b>: no se emite nada hasta volver a activar producción y lo vendido entra a la lista «Por emitir».</p>}
           <Field label="Tu contraseña de administrador"><input className="input" type="password" autoComplete="new-password" value={prodForm.admin_password} onChange={(e) => setProdForm({ ...prodForm, admin_password: e.target.value })} /></Field>
+        </Modal>
+      )}
+      {pruebasTxt !== null && (
+        <Modal title="Pasar a modo Pruebas" onClose={() => setPruebasTxt(null)} foot={<><button className="btn btn--ghost" onClick={() => setPruebasTxt(null)}>Cancelar</button><button className="btn btn--danger" disabled={busy || pruebasTxt.trim().toUpperCase() !== "PRUEBAS"} onClick={async () => { await setMode("pruebas", pruebasTxt.trim()); setPruebasTxt(null); }}>Pasar a Pruebas</button></>}>
+          <div className="acc-warn" style={{ marginTop: 0 }}>Con el modo Pruebas, <b>cada venta real se emitiría al ambiente de pruebas y después no se podría emitir en producción</b>.</div>
+          <p className="muted" style={{ fontSize: 13 }}>Para probar la conexión con Hacienda sin tocar las ventas no hace falta cambiar el modo: cargá las credenciales de Pruebas abajo y usá «Probar conexión»; la prueba completa la corre el equipo técnico sin cambiar el modo. Si igual querés pasar a Pruebas, escribí <b>PRUEBAS</b>.</p>
+          <Field label="Confirmación"><input className="input" autoFocus value={pruebasTxt} onChange={(e) => setPruebasTxt(e.target.value)} /></Field>
         </Modal>
       )}
       {confirmPw !== null && (

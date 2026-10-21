@@ -42,12 +42,15 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
     },
     # Contador: todo el dinero de la empresa (gastos, conciliacion, planillas, reportes) sin configurar la empresa.
     # El costo de producto y el margen son del administrador (Ajustes -> Quien ve costos lo puede habilitar).
+    # Plan maestro 1.7: opera la facturacion sin el admin. Envia facturas, crea enlaces de pago, emite y registra
+    # cobros; NO crea ventas (sin sales.crear ni sales.editar). emitir_fuera ("Marcar emitida en Fygaro", saca la venta
+    # de la cola "Por emitir") es solo de contabilidad, la duena de la emision, y del admin: ningun otro rol lo tiene.
     "contabilidad": {
         "dashboard": ["ver", "empresa"],
         "crm": ["ver"],
         "catalog": ["ver", "precios"],
-        "sales": ["ver", "ver_todo", "exportar", "recurrencias"],
-        "payments": ["ver", "exportar"],
+        "sales": ["ver", "ver_todo", "exportar", "recurrencias", "enviar", "emitir_fuera"],
+        "payments": ["ver", "exportar", "crear"],
         "accounting": ["ver", "crear", "editar", "exportar"],
         "inventory": ["ver", "exportar"],
         "projects": ["ver", "ver_todo"],
@@ -257,12 +260,23 @@ class Principal:
         sus cobros. "sales.asignar" (elegir el vendedor de un documento) no lo tiene ningun rol: solo el admin ("*")."""
         return self.can("sales", "ver_todo")
 
+    @property
+    def sends_quotes(self) -> bool:
+        """Enviar una cotizacion (correo o "Marcar enviada") congela su version y pasa la oportunidad del vendedor a
+        "enviada": es de quien cotiza (sales.crear o sales.editar), ademas de sales.enviar. Contabilidad tiene
+        sales.enviar para mandar FACTURAS (plan 1.7), no las cotizaciones de los vendedores."""
+        return self.can("sales", "enviar") and (self.can("sales", "crear") or self.can("sales", "editar"))
+
     def can(self, module: str, action: str) -> bool:
-        p = self.permissions
-        if "*" in p:
-            return True
-        acts = p.get(module, [])
-        return "*" in acts or action in acts
+        return perms_allow(self.permissions, module, action)
+
+
+def perms_allow(perms: dict, module: str, action: str) -> bool:
+    """La misma regla que Principal.can sobre un mapa de permisos suelto ("*" = todo)."""
+    if "*" in perms:
+        return True
+    acts = perms.get(module, [])
+    return "*" in acts or action in acts
 
 
 def _role_permissions(db: Session, code: str) -> dict:
@@ -272,6 +286,20 @@ def _role_permissions(db: Session, code: str) -> dict:
         return ROLE_PERMISSIONS[code]
     r = db.scalar(select(Role).where(Role.code == code))
     return r.permissions if r and r.permissions else {}
+
+
+def roles_that_can(db: Session, tenant: Tenant, *needs: tuple[str, str]) -> tuple[str, ...]:
+    """Roles internos con miembros activos en esta empresa que tienen TODOS esos permisos (predefinidos y
+    personalizados). Para avisos que piden una accion: el aviso le llega solo a quien la puede hacer (plan 1.7)."""
+    codes = db.scalars(select(TenantUser.role_code).where(TenantUser.tenant_id == tenant.id, TenantUser.active).distinct()).all()
+    out = []
+    for code in sorted(set(codes)):
+        if code in EXTERNAL_ROLES or code == "soporte":
+            continue
+        perms = effective_permissions(tenant, code, _role_permissions(db, code))
+        if all(perms_allow(perms, m, a) for m, a in needs):
+            out.append(code)
+    return tuple(out)
 
 
 def get_session_principal(

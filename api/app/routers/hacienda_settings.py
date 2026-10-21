@@ -179,6 +179,10 @@ def put_profile(data: ProfileIn, p: Principal = Depends(require("settings", "con
 
 class ModeIn(BaseModel):
     mode: str = Field(pattern="^(none|sandbox|pruebas|produccion)$")
+    confirm_text: str | None = None  # para entrar a Pruebas: escribir PRUEBAS (plan 1.11)
+
+
+PRUEBAS_RIESGO = "cada venta real se emitiría al ambiente de pruebas y después no se podría emitir en producción"
 
 
 @router.put("/settings/hacienda/mode")
@@ -186,6 +190,10 @@ def put_mode(data: ModeIn, p: Principal = Depends(require("settings", "configura
     if data.mode == "produccion":
         raise HTTPException(422, "Producción se activa con el interruptor")
     antes = hc.hacienda_mode(db, p.tenant)
+    # Pruebas en la empresa real quema cada venta (plan 4.6): se confirma por escrito. Para probar la conexion sin
+    # tocar las ventas: python -m app.tools.hacienda_smoke --sin-modo (no cambia el modo)
+    if data.mode == "pruebas" and antes != "pruebas" and (data.confirm_text or "").strip().upper() != "PRUEBAS":
+        raise HTTPException(422, f"Escriba PRUEBAS para confirmar: {PRUEBAS_RIESGO}")
     st = dict(p.tenant.settings or {})
     st["einvoice_provider"] = {"none": "none", "sandbox": "sandbox", "pruebas": "hacienda"}[data.mode]
     p.tenant.settings = st
@@ -209,8 +217,11 @@ def fiscal_geo(p: Principal = Depends(get_principal)):
 
 @router.get("/fiscal/mode")
 def fiscal_mode(p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
-    """Modo fiscal vigente (lo usa el editor de facturas: en emision directa la fecha la pone la emision)."""
-    return {"mode": hc.hacienda_mode(db, p.tenant)}
+    """Modo fiscal vigente (lo usa el editor de facturas: en emision directa la fecha la pone la emision) y, en
+    produccion, desde cuando: lo creado antes se puede marcar emitido en Fygaro (services/fiscal_queue.py)."""
+    from ..services.fiscal_queue import production_since
+
+    return {"mode": hc.hacienda_mode(db, p.tenant), "production_since": production_since(db, p.tenant)}
 
 
 class ActivityIn(BaseModel):
@@ -469,7 +480,15 @@ def production(data: ProductionIn, p: Principal = Depends(require("settings", "c
     require_reauth(p, data.admin_password)
     prof = hc.profile(db, p.tenant)
     if not data.enabled:
-        hc.turn_off_production(db, p.tenant, p.user.id, ip=p.ip, reason="interruptor")
+        # apagar produccion deja la empresa en Desactivada (no se emite; lo vendido entra a "Por emitir"), nunca en
+        # Pruebas: cada venta real iria al ambiente de pruebas sin que nadie escribiera PRUEBAS (plan 1.11 y 4.6)
+        antes = hc.hacienda_mode(db, p.tenant)
+        if hc.turn_off_production(db, p.tenant, p.user.id, ip=p.ip, reason="interruptor") and hc.provider_setting(p.tenant) == "hacienda":
+            st = dict(p.tenant.settings or {})
+            st["einvoice_provider"] = "none"
+            p.tenant.settings = st
+            flag_modified(p.tenant, "settings")
+            audit(db, p.tenant.id, p.user.id, "hacienda_mode", "tenant", p.tenant.id, {"antes": antes, "despues": "none"}, ip=p.ip)
         db.commit()
         return hacienda_state(db, p)
     if (data.confirm_text or "").strip().upper() not in ("PRODUCCIÓN", "PRODUCCION"):
