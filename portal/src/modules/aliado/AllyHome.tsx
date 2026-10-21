@@ -1,5 +1,6 @@
-/* Inicio del aliado: lo que lleva en común con Crimson de un vistazo. Precios que Crimson le pidió (la fecha límite
-   más próxima primero), lo que recibe (sin IVA) y el trabajo de hoy de su equipo. El técnico ve "Hoy". */
+/* Inicio del aliado (Andrés, 21/10): primero lo que va a ganar, después los proyectos y oportunidades en común y los
+   levantamientos que puede hacer; luego precios que Crimson le pidió, tickets y el trabajo de hoy de su equipo.
+   El técnico ve "Hoy". */
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
@@ -38,25 +39,35 @@ export default function AllyHome() {
   return (
     <>
       <div className="cp-h"><div><div className="meta">{d.company.name}</div><h1 className="h1">¡Hola!</h1></div></div>
-      <div className="cp-grid cp-grid--3" style={{ marginBottom: 16 }}>
-        {stat("/oportunidades", "Oportunidades abiertas en común", c.oportunidades_abiertas)}
-        {stat("/oportunidades", "Precios que Crimson le pidió", c.precios_pendientes, c.precio_mas_proximo ? `Antes del ${fmtDate(c.precio_mas_proximo)}` : undefined)}
-        {stat("/proyectos", "Proyectos activos", c.proyectos_activos)}
-        {stat("/ordenes", "Órdenes de hoy (su equipo)", c.ot_hoy_equipo)}
-        {stat("/soporte", "Tickets abiertos", c.tickets_abiertos, c.tickets_fuera_de_tiempo ? `${c.tickets_fuera_de_tiempo} fuera de tiempo` : undefined)}
-        {stat("/levantamientos", "Levantamientos devueltos", c.levantamientos_devueltos)}
-        {stat("/mantenimientos", "Mantenimientos en 30 días", c.mantenimientos_30_dias)}
-      </div>
-      {d.dinero && (
+      {d.dinero ? (
         <div className="cp-card al-money" style={{ marginBottom: 16 }}>
-          <div className="meta">Lo que recibe de la alianza · sin IVA</div>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <div className="meta">Lo que gana con la alianza · sin IVA</div>
+            {can("ganancias") && <Link className="btn btn--soft btn--sm" to="/ganancias">Ver mis ganancias por proyecto</Link>}
+          </div>
           <div className="cp-grid cp-grid--3" style={{ marginTop: 8 }}>
             <div><span className="meta">Recibido</span><b style={{ display: "block", fontSize: 20 }}>{fmtMoney(d.dinero.recibido, d.dinero.moneda)}</b></div>
             <div><span className="meta">Por recibir</span><b style={{ display: "block", fontSize: 20 }}>{fmtMoney(d.dinero.por_recibir, d.dinero.moneda)}</b></div>
             <div><span className="meta">Proyectado</span><b style={{ display: "block", fontSize: 20 }}>{fmtMoney(d.dinero.proyectado, d.dinero.moneda)}</b></div>
           </div>
         </div>
+      ) : can("ganancias") && (
+        <div className="cp-card" style={{ marginBottom: 16 }}>
+          <div className="meta">Lo que gana con la alianza</div>
+          <p className="muted" style={{ margin: "6px 0 0" }}>Aparece aquí cuando Crimson registre el acuerdo de un proyecto en común. <Link to="/ganancias">Mis ganancias</Link></p>
+        </div>
       )}
+      <div className="cp-grid cp-grid--3" style={{ marginBottom: 16 }}>
+        {stat("/proyectos", "Proyectos activos en común", c.proyectos_activos)}
+        {stat("/oportunidades", "Oportunidades abiertas en común", c.oportunidades_abiertas)}
+        {stat("/levantamientos", "Levantamientos por hacer", c.levantamientos_por_hacer ?? 0, c.levantamientos_devueltos ? `${c.levantamientos_devueltos} devuelto(s) para corregir` : undefined)}
+      </div>
+      <div className="cp-grid cp-grid--3" style={{ marginBottom: 16 }}>
+        {stat("/oportunidades", "Precios que Crimson le pidió", c.precios_pendientes, c.precio_mas_proximo ? `Antes del ${fmtDate(c.precio_mas_proximo)}` : undefined)}
+        {stat("/ordenes", "Órdenes de hoy (su equipo)", c.ot_hoy_equipo)}
+        {stat("/soporte", "Tickets abiertos", c.tickets_abiertos, c.tickets_fuera_de_tiempo ? `${c.tickets_fuera_de_tiempo} fuera de tiempo` : undefined)}
+        {stat("/mantenimientos", "Mantenimientos en 30 días", c.mantenimientos_30_dias)}
+      </div>
       <h2 className="h3 al-sec">Precios que Crimson le pidió</h2>
       {d.precios_pedidos?.length ? (
         <div className="cp-list">

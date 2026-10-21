@@ -560,6 +560,8 @@ def inicio(ctx: AllyCtx = Depends(need("ver")), db: Session = Depends(get_db)):
             "tickets_abiertos": len(tickets),
             "tickets_fuera_de_tiempo": sum(1 for t in tickets if slasvc.fuera_de_tiempo(t, ahora)),
             "levantamientos_devueltos": db.scalar(select(func.count()).select_from(Survey).where(*sc.surveys(), Survey.review_status == "devuelto")) or 0,
+            # lo que el aliado puede hacer ya: levantamientos de su empresa todavia sin enviar a Crimson
+            "levantamientos_por_hacer": db.scalar(select(func.count()).select_from(Survey).where(*sc.surveys(), Survey.status == "borrador")) or 0,
             "mantenimientos_30_dias": sum(1 for k in contratos if k.next_date and k.next_date <= hoy + timedelta(days=30)),
         },
         "precios_pedidos": [_request_out(db, ctx, r) for r in sorted(pend, key=lambda r: (r.due_date is None, r.due_date or date.max, r.id))[:10]],

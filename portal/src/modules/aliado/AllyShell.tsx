@@ -7,26 +7,11 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { setSignPath } from "../../lib/media";
 import { I, Icon } from "../../ui/components";
+import { ALLY_ITEMS, type Item } from "./portalNav";
 import { useAlly } from "./shared";
 import "../cliente/cliente.css";
 import "./aliado.css";
 
-type Item = { to: string; label: string; short: string; icon: string; need?: string; end?: boolean; tab?: boolean; feature?: "ganancias" };
-const ITEMS: Item[] = [
-  { to: "/", label: "Inicio", short: "Inicio", icon: I.home, end: true, tab: true },
-  { to: "/oportunidades", label: "Oportunidades", short: "Oport.", icon: I.trend, need: "oportunidades" },
-  { to: "/proyectos", label: "Proyectos", short: "Proyectos", icon: I.box, need: "proyectos", tab: true },
-  { to: "/levantamientos", label: "Levantamientos", short: "Campo", icon: I.ruler, need: "levantamientos", tab: true },
-  { to: "/ordenes", label: "Órdenes", short: "Órdenes", icon: I.check, need: "ordenes" },
-  { to: "/soporte", label: "Soporte", short: "Soporte", icon: I.life, need: "tickets", tab: true },
-  { to: "/mantenimientos", label: "Mantenimientos", short: "Mant.", icon: I.refresh, need: "mantenimientos" },
-  { to: "/activos", label: "Activos", short: "Activos", icon: I.shield, need: "activos" },
-  { to: "/catalogo", label: "Catálogo", short: "Catálogo", icon: I.products, need: "catalogo" },
-  { to: "/inventario", label: "Inventario", short: "Inventario", icon: I.inventory, need: "inventario" },
-  { to: "/ganancias", label: "Mis ganancias", short: "Ganancias", icon: I.wallet, need: "ganancias", feature: "ganancias" },
-  { to: "/suscripcion", label: "Mi suscripción", short: "Suscripción", icon: I.invoice, need: "suscripcion" },
-  { to: "/equipo", label: "Mi equipo", short: "Equipo", icon: I.team, need: "usuarios" },
-];
 
 export default function AllyShell() {
   const { me, logout, theme, toggleTheme, setViewAs } = useSession();
@@ -40,7 +25,7 @@ export default function AllyShell() {
         // en la vista previa del admin no: "Mi cuenta" mostraba la contrasena y el 2FA del propio admin
         ...(preview ? [] : [{ to: "/mi-cuenta", label: "Mi cuenta", short: "Cuenta", icon: I.settings, tab: true } as Item]),
       ]
-    : ITEMS.filter((it) => (!it.need || can(it.need)) && (!it.feature || company?.features?.[it.feature] !== false));
+    : ALLY_ITEMS.filter((it) => (!it.need || can(it.need)) && (!it.feature || company?.features?.[it.feature] !== false));
   const tabs = isTech ? items : items.filter((it) => it.tab).slice(0, 4);
   const salir = async () => { try { await logout(); } finally { nav("/login", { replace: true }); } };
   const salirVista = () => { setViewAs(null); nav("/aliados", { replace: true }); };

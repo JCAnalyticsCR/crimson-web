@@ -445,6 +445,11 @@ def test_levantamientos_por_empresa(client, auth, db_session):
     assert s.S_A in ids(client.get("/aliado/levantamientos", headers=s.a_tec).json())
     assert s.S_A not in ids(client.get("/aliado/levantamientos", headers=s.a_tec2).json())
     assert client.get(f"/aliado/levantamientos/{s.S_A}", headers=s.a_tec2).status_code == 404
+    # Inicio: "levantamientos por hacer" cuenta solo los borradores de su propia empresa (los mismos de su lista)
+    lev = client.get("/aliado/levantamientos", headers=s.a_jefe).json()
+    filas = lev if isinstance(lev, list) else lev.get("items", [])
+    borradores = sum(1 for x in filas if x.get("status") == "borrador")
+    assert client.get("/aliado/inicio", headers=s.a_jefe).json()["counters"]["levantamientos_por_hacer"] == borradores
 
 
 def test_tickets_y_notas(client, auth, db_session):

@@ -2,10 +2,11 @@
    (roles.ts) con los permisos que manda la API (/auth/roles, ya con "Quién ve costos"). Andrés preguntó si
    "Técnico", "Catálogo" o "Administración" eran roles (22:30-22:45): aquí se ve que son grupos del menú y qué
    sección le sale a cada rol. Nunca queda desactualizada como un texto escrito a mano. */
-import { Fragment } from "react";
+import { Fragment, type CSSProperties } from "react";
 import { NAV } from "./nav";
 import { ROLES, canAny, inRoleMenu, isExternalRole } from "./roles";
 import { useSession } from "./session";
+import { ALLY_ITEMS } from "../modules/aliado/portalNav";
 
 const MONEY: { label: string; need: string }[] = [
   { label: "Ve precio de venta", need: "catalog.precios" },
@@ -55,7 +56,38 @@ export default function RoleMatrix() {
           ))}
         </tbody>
       </table>
-      <p className="meta" style={{ margin: "8px 0 0" }}>Aliado comercial y Técnico de aliado usan el portal de aliados (Administración → Aliados).</p>
+      <AllyMatrix cell={cell} first={first} />
     </div>
+  );
+}
+
+/* Los dos roles de empresa aliada no entran al panel: usan el portal de aliados. Se asignan desde Administración ->
+   Aliados -> ficha -> Usuarios (o el aliado comercial invita a sus técnicos desde «Mi equipo»). */
+function AllyMatrix({ cell, first }: { cell: CSSProperties; first: CSSProperties }) {
+  const { matrix } = useSession();
+  const roles = (["aliado", "tecnico_aliado"] as const).filter((r) => matrix[r]);
+  if (!roles.length) return null;
+  const tiene = (r: string, need?: string) => !need || canAny(matrix[r], `aliado.${need}`);
+  return (
+    <>
+      <h4 className="h3" style={{ margin: "20px 0 6px" }}>Portal de aliados</h4>
+      <p className="meta" style={{ margin: "0 0 8px" }}>Solo ven lo de su propia empresa. Se dan de alta en Administración → Aliados → la ficha del aliado → Usuarios; el aliado comercial además invita a sus técnicos desde «Mi equipo».</p>
+      <table className="table" style={{ fontSize: 12.5, minWidth: 140 + roles.length * 110 }}>
+        <thead><tr><th style={first}>Sección del portal</th>{roles.map((r) => <th key={r} style={{ ...cell, whiteSpace: "normal" }} title={ROLES[r].summary}>{ROLES[r].label}</th>)}</tr></thead>
+        <tbody>
+          {ALLY_ITEMS.map((it) => (
+            <tr key={it.to}>
+              <td style={first}>{it.to === "/" ? "Inicio (técnico: «Hoy», su trabajo del día)" : it.label}</td>
+              {roles.map((r) => {
+                // el técnico entra solo por «Hoy»: ve levantamientos, órdenes y tickets asignados a él, nada más
+                const ok = r === "tecnico_aliado" ? it.to === "/" || (["levantamientos", "ordenes", "tickets"].includes(it.need || "") && tiene(r, it.need)) : tiene(r, it.need);
+                return <td key={r} style={cell}>{ok ? yes : no}</td>;
+              })}
+            </tr>
+          ))}
+          <tr><td style={first}>Ve costos o márgenes de Crimson</td>{roles.map((r) => <td key={r} style={cell}>{no}</td>)}</tr>
+        </tbody>
+      </table>
+    </>
   );
 }
