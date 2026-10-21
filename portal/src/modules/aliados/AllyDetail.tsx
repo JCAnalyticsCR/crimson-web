@@ -2,7 +2,7 @@
    Los usuarios del aliado se invitan AQUÍ (no en Ajustes → Usuarios): aliado comercial o técnico de aliado.
    "Ver como este aliado" abre su portal con sus datos reales, en solo lectura. */
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
 import AllyPreviewPicker from "../../app/AllyPreviewPicker";
@@ -31,6 +31,8 @@ type Plan = {
 const FUNCIONES: Record<string, string> = { comercial: "Comercial", tecnico: "Técnico", aprobador: "Aprobador", pagos: "Pagos" };
 const ROL: Record<string, string> = { aliado: "Aliado comercial", tecnico_aliado: "Técnico de aliado" };
 type Tab = "datos" | "usuarios" | "comun" | "precios" | "mensualidad" | "numeros";
+const TABS: Tab[] = ["datos", "usuarios", "comun", "precios", "mensualidad", "numeros"];
+type FirstInvite = { invite: InviteOut; email: string };
 
 function Datos({ a, reload }: { a: Detail; reload: () => void }) {
   const { toast, allows } = useSession();
@@ -89,11 +91,11 @@ function Datos({ a, reload }: { a: Detail; reload: () => void }) {
   );
 }
 
-function Usuarios({ a }: { a: Detail }) {
+function Usuarios({ a, first, onPreview }: { a: Detail; first?: FirstInvite | null; onPreview?: () => void }) {
   const { toast, allows } = useSession();
   const [d, setD] = useState<Users | null>(null);
   const [f, setF] = useState({ email: "", role: "tecnico_aliado", name: "" });
-  const [inv, setInv] = useState<InviteOut | null>(null);
+  const [inv, setInv] = useState<InviteOut | null>(first?.invite ?? null);
   const load = useCallback(() => { api<Users>(`/allies/${a.id}/users`).then(setD).catch(() => setD(null)); }, [a.id]);
   useEffect(load, [load]);
   const puede = allows("aliados.usuarios");
@@ -132,10 +134,46 @@ function Usuarios({ a }: { a: Detail }) {
             <Field label="Rol"><select className="select" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>{Object.entries(ROL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
           </div>
           <button className="btn btn--crimson" disabled={!f.email.includes("@")} onClick={invitar}><Icon d={I.plus} />Invitar</button>
-          {inv && <div style={{ marginTop: 12 }}><InviteLink inv={inv} email={f.email} portal="aliados" /></div>}
+          {inv && <div style={{ marginTop: 12 }}><InviteLink inv={inv} email={f.email || first?.email || ""} portal="aliados" /></div>}
         </Card>
       )}
+      <Card title="Qué ve este aliado en su portal" extra={onPreview && <button className="btn btn--soft btn--sm" onClick={onPreview}><Icon d={I.arrow} />Ver como este aliado</button>}>
+        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6 }}>
+          <li><b>Solo lo de su empresa.</b> Las oportunidades y proyectos donde participa y que están marcados como visibles (pestaña En común), sus levantamientos, órdenes de trabajo y tickets, el catálogo con su precio de aliado y su mensualidad.</li>
+          <li><b>Nunca</b> ve costos ni márgenes de Crimson, otros clientes ni a otros aliados, ni las notas internas de esta ficha.</li>
+          <li>El <b>aliado comercial</b> puede invitar a sus técnicos desde su portal (cuentan en los cupos). El <b>técnico de aliado</b> solo ve su trabajo asignado del día.</li>
+          <li>Si lo suspendés o desactivás (Datos → Acceso al portal), sus usuarios dejan de entrar al instante.</li>
+        </ul>
+      </Card>
     </div>
+  );
+}
+
+/* Incorporacion de un aliado nuevo: lo que falta para que trabaje en la plataforma. Se oculta cuando esta todo. */
+function Pasos({ a, go }: { a: Detail; go: (t: Tab) => void }) {
+  const { allows } = useSession();
+  const pasos: { ok: boolean; parcial?: boolean; txt: string; hint: string; tab: Tab }[] = [
+    { ok: !!(a.tax_id && a.email), txt: "Datos de la empresa", hint: a.tax_id && a.email ? "Cédula y correo" : "Falta la cédula jurídica o el correo", tab: "datos" },
+    {
+      ok: a.users_active > 0, parcial: a.invitations_pending > 0, txt: "Acceso al portal",
+      hint: a.users_active > 0 ? `${a.users_active} usuario(s) activo(s)` : a.invitations_pending > 0 ? "Invitación enviada: falta que la acepte" : "Invitá a su primer usuario", tab: "usuarios",
+    },
+    ...(allows("aliados.mensualidad") ? [{ ok: a.plan.activo, txt: "Mensualidad", hint: a.plan.activo ? "Cobro mensual configurado" : "Configurá el cobro mensual de la plataforma", tab: "mensualidad" as Tab }] : []),
+    { ok: a.participations.length > 0, txt: "Trabajo en común", hint: a.participations.length > 0 ? `${a.participations.length} participación(es)` : "Sumalo a una oportunidad (Aliados y participación)", tab: "comun" },
+  ];
+  if (!a.active || pasos.every((x) => x.ok)) return null;
+  const hechos = pasos.filter((x) => x.ok).length;
+  return (
+    <Card title={`Incorporación · ${hechos} de ${pasos.length}`}>
+      <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+        {pasos.map((x) => (
+          <button key={x.txt} type="button" className="btn btn--ghost" style={{ justifyContent: "flex-start", textAlign: "left", height: "auto", padding: "8px 10px", whiteSpace: "normal" }} onClick={() => go(x.tab)}>
+            <span className={`badge badge--${x.ok ? "ok" : x.parcial ? "warn" : "muted"}`} style={{ marginRight: 8 }}>{x.ok ? "Listo" : x.parcial ? "En curso" : "Falta"}</span>
+            <span><b>{x.txt}</b><br /><span className="meta">{x.hint}</span></span>
+          </button>
+        ))}
+      </div>
+    </Card>
   );
 }
 
@@ -279,8 +317,10 @@ function Mensualidad({ a, reload }: { a: Detail; reload: () => void }) {
 export default function AllyDetail() {
   const { id } = useParams();
   const { allows, me } = useSession();
+  const [sp] = useSearchParams();
+  const first = (useLocation().state as FirstInvite | null) ?? null; // la invitacion hecha al crear el aliado
   const [a, setA] = useState<Detail | null>(null);
-  const [tab, setTab] = useState<Tab>("datos");
+  const [tab, setTab] = useState<Tab>(TABS.includes(sp.get("tab") as Tab) ? (sp.get("tab") as Tab) : "datos");
   const [preview, setPreview] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const load = useCallback(() => { api<Detail>(`/allies/${id}`).then(setA).catch((e) => setErr(e instanceof Error ? e.message : "No se pudo cargar")); }, [id]);
@@ -303,11 +343,12 @@ export default function AllyDetail() {
           {me?.role === "admin" && <button className="btn btn--soft" onClick={() => setPreview(true)}><Icon d={I.arrow} />Ver como este aliado</button>}
         </div>
       </div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+      <Pasos a={a} go={setTab} />
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "16px 0" }}>
         {tabs.filter(([, , ok]) => ok).map(([k, l]) => <button key={k} className={`btn btn--sm ${tab === k ? "btn--crimson" : "btn--ghost"}`} onClick={() => setTab(k)}>{l}</button>)}
       </div>
       {tab === "datos" && <Datos a={a} reload={load} />}
-      {tab === "usuarios" && <Usuarios a={a} />}
+      {tab === "usuarios" && <Usuarios a={a} first={first} onPreview={me?.role === "admin" ? () => setPreview(true) : undefined} />}
       {tab === "comun" && <EnComun a={a} reload={load} />}
       {tab === "precios" && <Precios a={a} reload={load} />}
       {tab === "mensualidad" && <Mensualidad a={a} reload={load} />}

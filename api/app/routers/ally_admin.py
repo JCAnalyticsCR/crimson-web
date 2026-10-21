@@ -34,6 +34,7 @@ from ..models import (
     Supplier,
     Tenant,
     TenantUser,
+    User,
 )
 from ..models.allies import CONTACT_FUNCTIONS
 from ..schemas.sales import DocumentIn, LineInSchema
@@ -136,6 +137,12 @@ def _plan_brief(db: Session, c: AllyCompany) -> dict:
 
 def list_row(db: Session, c: AllyCompany, counts: dict) -> dict:
     st = ally_access.seats(db, c)
+    # acceso al portal de un vistazo: el ultimo ingreso de cualquiera de sus usuarios activos (None = nunca entro)
+    last = db.scalar(
+        select(func.max(User.last_login_at))
+        .join(TenantUser, TenantUser.user_id == User.id)
+        .where(TenantUser.tenant_id == c.tenant_id, TenantUser.ally_company_id == c.id, TenantUser.active, User.active)
+    )
     return {
         "id": c.id,
         "name": c.name,
@@ -145,6 +152,8 @@ def list_row(db: Session, c: AllyCompany, counts: dict) -> dict:
         "state": c.state,
         "suspended_reason": c.suspended_reason,
         "users_active": st["active"],
+        "invitations_pending": st["pending"],
+        "last_login": last.isoformat() if last else None,
         "seats_used": st["used"],
         "seats_max": c.max_users,
         "proyectos_en_comun": counts.get("proyectos", 0),

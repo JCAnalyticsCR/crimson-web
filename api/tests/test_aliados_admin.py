@@ -40,6 +40,12 @@ def test_alta_y_duplicados(client, auth, db_session):
     # la ficha y la lista
     assert client.get(f"/allies/{a['id']}").json()["participations"] == []
     assert {x["id"] for x in client.get("/allies").json()} >= {a["id"], b["id"]}
+    # alta en un paso: invitar al primer usuario y la lista muestra el acceso al portal (pendiente, nunca entro)
+    fila = next(x for x in client.get("/allies").json() if x["id"] == a["id"])
+    assert fila["users_active"] == 0 and fila["invitations_pending"] == 0 and fila["last_login"] is None
+    assert client.post(f"/allies/{a['id']}/invitations", json={"email": "comercial@aliado-uno.ejemplo.com", "role": "aliado"}).status_code == 201
+    fila = next(x for x in client.get("/allies").json() if x["id"] == a["id"])
+    assert fila["invitations_pending"] == 1 and fila["last_login"] is None
 
 
 def test_permisos_de_administracion(client, auth, db_session):

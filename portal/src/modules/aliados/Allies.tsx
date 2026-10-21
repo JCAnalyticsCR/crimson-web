@@ -4,14 +4,15 @@
    por defecto del cobro mensual (plan 1.4). Sus usuarios usan el portal de aliados. */
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ApiError, api } from "../../lib/api";
+import { ApiError, api, fmtDate } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
+import type { InviteOut } from "../cliente/InviteLink";
 import { Lookup, searchCustomers, searchProducts, type LookupItem } from "../../ui/Lookup";
 
 export type AllyRow = {
   id: number; name: string; tax_id: string | null; email: string | null; phone: string | null; state: "activo" | "suspendido" | "inactivo"; suspended_reason: string | null;
-  users_active: number; seats_used: number; seats_max: number | null; proyectos_en_comun: number; oportunidades_abiertas: number;
+  users_active: number; invitations_pending: number; last_login: string | null; seats_used: number; seats_max: number | null; proyectos_en_comun: number; oportunidades_abiertas: number;
   plan: { amount: string | null; currency: string; mode: string; al_dia: boolean; activo: boolean };
 };
 type PlanDefault = { amount: string | number | null; currency: "CRC" | "USD"; mode: "fija" | "por_usuario" };
@@ -33,7 +34,10 @@ function NewAlly({ onClose }: { onClose: () => void }) {
   const nav = useNavigate();
   const { toast } = useSession();
   const [modo, setModo] = useState<"nuevo" | "proveedor" | "cliente">("nuevo");
+  const { allows } = useSession();
   const [f, setF] = useState({ name: "", tax_id: "", email: "", phone: "" });
+  /* alta en un paso: el primer usuario del portal (normalmente su contacto comercial) se invita al crear */
+  const [inv, setInv] = useState({ on: allows("aliados.usuarios"), email: "", name: "", role: "aliado" });
   const [ref, setRef] = useState<LookupItem | null>(null);
   const [dup, setDup] = useState<{ id: number; name: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -42,9 +46,15 @@ function NewAlly({ onClose }: { onClose: () => void }) {
     setDup(null);
     try {
       const body = modo === "nuevo" ? { name: f.name, tax_id: f.tax_id || null, email: f.email || null, phone: f.phone || null } : modo === "proveedor" ? { supplier_id: ref?.id } : { customer_id: ref?.id };
-      const a = await api<{ id: number }>("/allies", { method: "POST", json: body });
+      const a = await api<{ id: number; email?: string | null }>("/allies", { method: "POST", json: body });
+      const correo = (inv.email || (modo === "nuevo" ? f.email : a.email || "")).trim();
+      let invite: InviteOut | null = null;
+      if (inv.on && correo.includes("@")) {
+        try { invite = await api<InviteOut>(`/allies/${a.id}/invitations`, { method: "POST", json: { email: correo, role: inv.role, name: inv.name || null } }); }
+        catch (e) { toast(`Aliado creado, pero la invitación no salió: ${e instanceof Error ? e.message : "error"}`, "bad"); }
+      }
       onClose();
-      nav(`/aliados/${a.id}`);
+      nav(`/aliados/${a.id}?tab=${invite ? "usuarios" : "datos"}`, { state: invite ? { invite, email: correo } : undefined });
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) setDup((e.data as { existing?: { id: number; name: string } })?.existing || null);
       toast(e instanceof Error ? e.message : "No se pudo crear", "bad");
@@ -66,6 +76,18 @@ function NewAlly({ onClose }: { onClose: () => void }) {
         <Field label={modo === "proveedor" ? "Proveedor" : "Cliente"} hint="Se copian el nombre, la cédula, el correo y el teléfono, y queda ligado.">
           <Lookup value={ref?.label || ""} fetcher={modo === "proveedor" ? searchSuppliers : searchCustomers} onSelect={(it) => setRef(it)} placeholder="Buscar" />
         </Field>
+      )}
+      {allows("aliados.usuarios") && (
+        <div style={{ borderTop: "1px solid var(--hair)", marginTop: 12, paddingTop: 12 }}>
+          <label className="pf-bool"><input type="checkbox" checked={inv.on} onChange={(e) => setInv({ ...inv, on: e.target.checked })} />Invitar ya a su primer usuario al portal de aliados</label>
+          {inv.on && (
+            <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", marginTop: 8 }}>
+              <Field label="Correo" hint={modo === "nuevo" ? "Vacío = el correo de la empresa" : "Vacío = el correo del registro"}><input className="input" type="email" value={inv.email} placeholder={modo === "nuevo" ? f.email : ""} onChange={(e) => setInv({ ...inv, email: e.target.value })} /></Field>
+              <Field label="Nombre (opcional)"><input className="input" value={inv.name} onChange={(e) => setInv({ ...inv, name: e.target.value })} /></Field>
+              <Field label="Rol" hint="El comercial ve lo de su empresa e invita a sus técnicos"><select className="select" value={inv.role} onChange={(e) => setInv({ ...inv, role: e.target.value })}><option value="aliado">Aliado comercial</option><option value="tecnico_aliado">Técnico de aliado</option></select></Field>
+            </div>
+          )}
+        </div>
       )}
       {dup && <p className="muted">Ya existe: <Link to={`/aliados/${dup.id}`} onClick={onClose}>{dup.name}</Link></p>}
     </Modal>
@@ -162,14 +184,16 @@ export default function Allies() {
       {!rows ? <div className="spinner" /> : rows.length ? (
         <div style={{ overflowX: "auto" }}>
           <table className="table">
-            <thead><tr><th>Aliado</th><th>Cédula</th><th>Estado</th><th>Usuarios</th><th>En común</th><th>Mensualidad</th></tr></thead>
+            <thead><tr><th>Aliado</th><th>Cédula</th><th>Estado</th><th>Acceso al portal</th><th>En común</th><th>Mensualidad</th></tr></thead>
             <tbody>
               {rows.map((a) => (
                 <tr key={a.id}>
                   <td><Link to={`/aliados/${a.id}`}><b>{a.name}</b></Link>{a.email && <div className="meta">{a.email}</div>}</td>
                   <td>{a.tax_id || "—"}</td>
                   <td><span className={`badge badge--${STATE_TONE[a.state]}`}>{STATE_LABEL[a.state]}</span></td>
-                  <td>{a.users_active}{a.seats_max ? ` / ${a.seats_max}` : ""}</td>
+                  <td>{a.users_active > 0
+                    ? <>{a.users_active} activo(s){a.seats_max ? ` de ${a.seats_max}` : ""}<div className="meta">{a.last_login ? `último ingreso ${fmtDate(a.last_login.slice(0, 10))}` : "todavía no entra"}{a.invitations_pending ? ` · ${a.invitations_pending} invitación(es) pendiente(s)` : ""}</div></>
+                    : a.invitations_pending ? <span className="badge badge--warn">Invitación pendiente</span> : <span className="badge badge--muted">Sin usuarios</span>}</td>
                   <td>{a.proyectos_en_comun} proyecto(s) · {a.oportunidades_abiertas} oportunidad(es) abiertas</td>
                   <td>{a.plan.activo ? <span className={`badge badge--${a.plan.al_dia ? "ok" : "bad"}`}>{a.plan.al_dia ? "Al día" : "Vencida"}</span> : <span className="muted">Sin plan</span>}</td>
                 </tr>
