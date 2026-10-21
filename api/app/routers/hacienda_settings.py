@@ -217,8 +217,11 @@ def fiscal_geo(p: Principal = Depends(get_principal)):
 
 @router.get("/fiscal/mode")
 def fiscal_mode(p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
-    """Modo fiscal vigente (lo usa el editor de facturas: en emision directa la fecha la pone la emision)."""
-    return {"mode": hc.hacienda_mode(db, p.tenant)}
+    """Modo fiscal vigente (lo usa el editor de facturas: en emision directa la fecha la pone la emision) y, en
+    produccion, desde cuando: lo creado antes se puede marcar emitido en Fygaro (services/fiscal_queue.py)."""
+    from ..services.fiscal_queue import production_since
+
+    return {"mode": hc.hacienda_mode(db, p.tenant), "production_since": production_since(db, p.tenant)}
 
 
 class ActivityIn(BaseModel):
@@ -477,7 +480,15 @@ def production(data: ProductionIn, p: Principal = Depends(require("settings", "c
     require_reauth(p, data.admin_password)
     prof = hc.profile(db, p.tenant)
     if not data.enabled:
-        hc.turn_off_production(db, p.tenant, p.user.id, ip=p.ip, reason="interruptor")
+        # apagar produccion deja la empresa en Desactivada (no se emite; lo vendido entra a "Por emitir"), nunca en
+        # Pruebas: cada venta real iria al ambiente de pruebas sin que nadie escribiera PRUEBAS (plan 1.11 y 4.6)
+        antes = hc.hacienda_mode(db, p.tenant)
+        if hc.turn_off_production(db, p.tenant, p.user.id, ip=p.ip, reason="interruptor") and hc.provider_setting(p.tenant) == "hacienda":
+            st = dict(p.tenant.settings or {})
+            st["einvoice_provider"] = "none"
+            p.tenant.settings = st
+            flag_modified(p.tenant, "settings")
+            audit(db, p.tenant.id, p.user.id, "hacienda_mode", "tenant", p.tenant.id, {"antes": antes, "despues": "none"}, ip=p.ip)
         db.commit()
         return hacienda_state(db, p)
     if (data.confirm_text or "").strip().upper() not in ("PRODUCCIÓN", "PRODUCCION"):

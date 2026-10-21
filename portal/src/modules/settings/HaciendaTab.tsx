@@ -85,10 +85,10 @@ export default function HaciendaTab() {
           <ul style={{ listStyle: "none", padding: 0, margin: 0, fontSize: 13, display: "flex", flexDirection: "column", gap: 4 }}>
             {st.production.checks.map((ch) => <li key={ch.key} style={{ color: ch.ok ? "var(--ok)" : "var(--bad)" }}>{ch.ok ? "✓" : "✗"} <span style={{ color: "var(--text)" }}>{ch.detail}</span></li>)}
           </ul>
-          {st.production.blocked_reason && <div className="acc-warn" style={{ marginTop: 8 }}>{st.production.blocked_reason}</div>}
+          {st.production.blocked_reason && <div className="acc-warn" style={{ marginTop: 8 }}>No se emite nada (ni a producción ni a pruebas) hasta resolverlo: {st.production.blocked_reason}</div>}
           {!ro && (
             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-              {st.production.enabled_at ? <button className="btn btn--soft btn--sm" onClick={() => setProdModal("off")}>Volver a pruebas</button> : <button className="btn btn--danger btn--sm" onClick={() => setProdModal("on")}>Activar producción</button>}
+              {st.production.enabled_at ? <button className="btn btn--soft btn--sm" onClick={() => setProdModal("off")}>Apagar producción</button> : <button className="btn btn--danger btn--sm" onClick={() => setProdModal("on")}>Activar producción</button>}
               {st.production.enabled_at && <span className="muted" style={{ fontSize: 12 }}>Activa desde {parseTs(st.production.enabled_at).toLocaleString("es-CR")}</span>}
             </div>
           )}
@@ -179,9 +179,11 @@ export default function HaciendaTab() {
       </Card>
 
       {prodModal && (
-        <Modal title={prodModal === "on" ? "Activar producción" : "Volver a pruebas"} onClose={() => setProdModal(null)} foot={<><button className="btn btn--ghost" onClick={() => setProdModal(null)}>Cancelar</button><button className={`btn ${prodModal === "on" ? "btn--danger" : "btn--crimson"}`} disabled={busy || !prodForm.admin_password || (prodModal === "on" && !/^PRODUCCI[OÓ]N$/i.test(prodForm.confirm_text.trim()))} onClick={async () => { await call(() => api("/settings/hacienda/production", { method: "POST", json: { enabled: prodModal === "on", ...prodForm } }), prodModal === "on" ? "Producción activada" : "Producción desactivada"); setProdModal(null); setProdForm({ admin_password: "", confirm_text: "" }); }}>{prodModal === "on" ? "Activar" : "Desactivar"}</button></>}>
+        <Modal title={prodModal === "on" ? "Activar producción" : "Apagar producción"} onClose={() => setProdModal(null)} foot={<><button className="btn btn--ghost" onClick={() => setProdModal(null)}>Cancelar</button><button className={`btn ${prodModal === "on" ? "btn--danger" : "btn--crimson"}`} disabled={busy || !prodForm.admin_password || (prodModal === "on" && !/^PRODUCCI[OÓ]N$/i.test(prodForm.confirm_text.trim()))} onClick={async () => { await call(() => api("/settings/hacienda/production", { method: "POST", json: { enabled: prodModal === "on", ...prodForm } }), prodModal === "on" ? "Producción activada" : "Producción desactivada"); setProdModal(null); setProdForm({ admin_password: "", confirm_text: "" }); }}>{prodModal === "on" ? "Activar" : "Desactivar"}</button></>}>
           {prodModal === "on" && <p style={{ fontSize: 13, marginTop: 0 }}>Desde ahora los comprobantes y los mensajes receptor van a Hacienda <b>con validez fiscal</b>. Escribí <b>PRODUCCIÓN</b> para confirmar.</p>}
           {prodModal === "on" && <Field label="Confirmación"><input className="input" value={prodForm.confirm_text} onChange={(e) => setProdForm({ ...prodForm, confirm_text: e.target.value })} /></Field>}
+          {/* apagar deja la empresa en Desactivada, nunca en Pruebas (cada venta real iria al ambiente de pruebas) */}
+          {prodModal === "off" && <p style={{ fontSize: 13, marginTop: 0 }}>La empresa queda en modo <b>Desactivada</b>: no se emite nada hasta volver a activar producción y lo vendido entra a la lista «Por emitir».</p>}
           <Field label="Tu contraseña de administrador"><input className="input" type="password" autoComplete="new-password" value={prodForm.admin_password} onChange={(e) => setProdForm({ ...prodForm, admin_password: e.target.value })} /></Field>
         </Modal>
       )}

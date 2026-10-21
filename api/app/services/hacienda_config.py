@@ -3,7 +3,10 @@
 Fuente unica del modo (D3): tenant.settings.einvoice_provider (none | sandbox | hacienda; alanube/gti = none) +
 fiscal_profile.environment (pruebas | produccion). hacienda_mode() devuelve ninguno | simulado | pruebas | produccion,
 y "produccion" solo si el interruptor del admin esta encendido Y las tres llaves del servidor se cumplen en el momento
-(HACIENDA_PRODUCTION_ALLOWED, ENV=production y la huella de instancia guardada). Si no, "pruebas": nada sale a produccion.
+(HACIENDA_PRODUCTION_ALLOWED, ENV=production y la huella de instancia guardada). Con el interruptor encendido y una
+llave que falla (otro servidor, variable borrada) el modo es "ninguno": no se emite nada. Nunca "pruebas": la empresa
+real en Pruebas manda cada venta al ambiente de pruebas y la deja quemada para produccion (plan 1.11 y 4.6); a Pruebas
+solo se entra con PUT /settings/hacienda/mode y la confirmacion escrita.
 """
 
 from __future__ import annotations
@@ -58,7 +61,9 @@ def production_state(db: Session, tenant: Tenant) -> tuple[bool, str | None]:
 def hacienda_mode(db: Session, tenant: Tenant) -> str:
     prov = provider_setting(tenant)
     if prov == "hacienda":
-        return "produccion" if production_state(db, tenant)[0] else "pruebas"
+        if not production_on(db, tenant):
+            return "pruebas"
+        return "produccion" if production_state(db, tenant)[0] else "ninguno"  # produccion bloqueada: no se emite
     if prov == "sandbox":
         return "simulado"
     return "ninguno"  # none, alanube, gti
@@ -73,6 +78,14 @@ def reception_mode(db: Session, tenant: Tenant) -> str:
 def production_on(db: Session, tenant: Tenant) -> bool:
     prof = profile(db, tenant)
     return provider_setting(tenant) == "hacienda" and prof.environment == "produccion" and prof.production_enabled_at is not None
+
+
+def production_blocked(db: Session, tenant: Tenant) -> str | None:
+    """Motivo si el interruptor de produccion esta encendido pero el servidor no la permite (entonces no se emite)."""
+    if not production_on(db, tenant):
+        return None
+    ok, why = production_state(db, tenant)
+    return None if ok else (why or "el servidor no permite producción")
 
 
 def turn_off_production(db: Session, tenant: Tenant, user_id: int | None, ip: str | None = None, reason: str = "cambio de modo") -> bool:

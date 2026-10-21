@@ -51,8 +51,29 @@ def _ids(client, headers=None):
     return [x["id"] for x in _cola(client, headers)["items"]]
 
 
+def _hoy():
+    """Hoy en Costa Rica, no el de la maquina: en un runner en UTC, de 18:00 a 24:00 CR date.today() ya es manana y la
+    marca responderia 422 "posterior a hoy" (regla 8 de la seccion 2)."""
+    from app.services.fiscal_queue import cr_today
+
+    return cr_today()
+
+
 def _marcar(client, inv_id, number="00100001010000004321", when=None, headers=None):
-    return client.post(f"/fiscal/queue/{inv_id}/external", json={"number": number, "date": (when or date.today()).isoformat()}, headers=headers or {})
+    return client.post(f"/fiscal/queue/{inv_id}/external", json={"number": number, "date": (when or _hoy()).isoformat()}, headers=headers or {})
+
+
+def _doc(db_session, tenant_id, inv_id, status, mode, einvoice_status, provider="hacienda"):
+    """Un comprobante ya registrado (sin red): simulado, de pruebas o de produccion."""
+    from app.models import EInvoiceDocument, Invoice
+
+    db_session.add(
+        EInvoiceDocument(
+            tenant_id=tenant_id, invoice_id=inv_id, doc_type="FE", consecutive="00100001010000000999", provider=provider, status=status, mode=mode, attempts=1
+        )
+    )
+    db_session.get(Invoice, inv_id).einvoice_status = einvoice_status
+    db_session.commit()
 
 
 def test_que_entra_a_por_emitir(client, auth, db_session, correos):
@@ -67,6 +88,22 @@ def test_que_entra_a_por_emitir(client, auth, db_session, correos):
     assert client.post(f"/invoices/{anulada['id']}/void").status_code == 200
     vencida_sin_enviar, vencida_con_enlace = _factura(client), _factura(client)
     client.post(f"/invoices/{vencida_con_enlace['id']}/payment-link")
+    # compartida por WhatsApp con el enlace de pago y todavia "creado": ya salio de la empresa (igual que al vencer)
+    creada_con_enlace = _factura(client)
+    assert client.post(f"/invoices/{creada_con_enlace['id']}/payment-link").status_code == 200
+    # "emitida" solo en SIMULADO (la tienda y el POS emiten solos en ese modo) o en PRUEBAS: sin validez fiscal, falta
+    # emitirla de verdad. Con un comprobante de produccion no entra.
+    tid = auth["tenant"]["id"]
+    client.put("/settings", json={"einvoice_provider": "sandbox"})
+    simulada = _pagar(client, _factura(client))
+    assert client.post(f"/invoices/{simulada['id']}/emit").json()["status"] == "aceptada"
+    simulada_borrador = _factura(client)  # emitida en simulado pero ni enviada ni cobrada
+    assert client.post(f"/invoices/{simulada_borrador['id']}/emit").json()["status"] == "aceptada"
+    client.put("/settings", json={"einvoice_provider": "none"})
+    rechazada_en_pruebas = _pagar(client, _factura(client))
+    _doc(db_session, tid, rechazada_en_pruebas["id"], "rechazada", "pruebas", "rechazada")
+    de_produccion = _pagar(client, _factura(client))
+    _doc(db_session, tid, de_produccion["id"], "aceptada", "produccion", "aceptada")
     from app.models import Invoice
 
     for x in (vencida_sin_enviar, vencida_con_enlace):
@@ -76,10 +113,22 @@ def test_que_entra_a_por_emitir(client, auth, db_session, correos):
 
     cola = _cola(client)
     ids = [x["id"] for x in cola["items"]]
-    # un borrador sin enviar ni cobrar no se emite; una anulada tampoco
-    assert set(ids) == {pagada["id"], parcial["id"], enviada["id"], vencida_con_enlace["id"]}
-    assert borrador["id"] not in ids and anulada["id"] not in ids and vencida_sin_enviar["id"] not in ids
-    assert cola["total"] == 4 and cola["mode"] == "ninguno" and cola["emitidas_fuera_mes"] == 0 and cola["can_mark"]
+    # un borrador sin enviar ni cobrar no se emite; una anulada tampoco; con comprobante de produccion ya esta emitida
+    esperadas = {pagada["id"], parcial["id"], enviada["id"], vencida_con_enlace["id"], creada_con_enlace["id"], simulada["id"], rechazada_en_pruebas["id"]}
+    assert set(ids) == esperadas
+    for fuera in (borrador, anulada, vencida_sin_enviar, simulada_borrador, de_produccion):
+        assert fuera["id"] not in ids
+    assert cola["total"] == len(esperadas) and cola["mode"] == "ninguno" and cola["emitidas_fuera_mes"] == 0 and cola["can_mark"]
+    estados = {x["id"]: x["einvoice_status"] for x in cola["items"]}
+    assert estados[simulada["id"]] == "aceptada" and estados[pagada["id"]] == "sin_emitir"
+    assert all(x["markable"] for x in cola["items"]) and cola["production_since"] is None
+    # el contador y el correo diario salen de la misma definicion
+    from app.services import fiscal_queue as fq
+
+    assert fq.queue_count(db_session, tid) == len(esperadas)
+    # la simulada se marca (la venta real se emitio en Fygaro) y sale de la cola
+    assert _marcar(client, simulada["id"], number="FE-SIM-1").status_code == 200
+    assert simulada["id"] not in _ids(client)
     assert ids == sorted(ids)  # la mas vieja primero (misma fecha: por numero)
     assert all(x["days_waiting"] == 0 for x in cola["items"]) and cola["oldest_issue_date"]
 
@@ -119,18 +168,17 @@ def test_marcar_emitida_en_fygaro_y_emit_la_rechaza(client, auth, db_session):
     from app.models import AuditLog, EInvoiceDocument, Invoice
 
     inv = _pagar(client, _factura(client))
-    r = _marcar(client, inv["id"], number="  FE-0000123 ", when=date.today() - timedelta(days=1))
+    ayer = _hoy() - timedelta(days=1)
+    r = _marcar(client, inv["id"], number="  FE-0000123 ", when=ayer)
     assert r.status_code == 200, r.text
     assert r.json()["einvoice_status"] == "emitida_fuera" and r.json()["external_number"] == "FE-0000123"
     got = client.get(f"/invoices/{inv['id']}").json()
     assert got["einvoice_status"] == "emitida_fuera" and got["external_number"] == "FE-0000123"
-    assert got["external_date"] == (date.today() - timedelta(days=1)).isoformat()
+    assert got["external_date"] == ayer.isoformat()
     log = db_session.query(AuditLog).filter(AuditLog.action == "emitida_fuera", AuditLog.entity_id == inv["id"]).one()
     assert log.diff["antes"] == "sin_emitir" and log.diff["numero"] == "FE-0000123"
     cola = _cola(client)
-    assert inv["id"] not in [x["id"] for x in cola["items"]] and cola["emitidas_fuera_mes"] == (
-        1 if (date.today() - timedelta(days=1)).month == date.today().month else 0
-    )
+    assert inv["id"] not in [x["id"] for x in cola["items"]] and cola["emitidas_fuera_mes"] == (1 if ayer.month == _hoy().month else 0)
 
     # nunca se reemite: ni en simulado ni en pruebas ni en produccion (la guarda va antes del modo)
     for prov in ("none", "sandbox"):
@@ -164,12 +212,12 @@ def test_validaciones_de_la_marca(client, auth, db_session):
     from app.models import EInvoiceDocument, Invoice
 
     a, b = _pagar(client, _factura(client)), _pagar(client, _factura(client))
-    assert _marcar(client, a["id"], when=date.today() + timedelta(days=2)).status_code == 422  # fecha futura
+    assert _marcar(client, a["id"], when=_hoy() + timedelta(days=1)).status_code == 422  # fecha futura (manana en Costa Rica)
     assert _marcar(client, a["id"], number="<script>").status_code == 422
     assert _marcar(client, a["id"], number="FE-77").status_code == 200
     r = _marcar(client, b["id"], number="FE-77")  # el mismo numero en otra factura: casi seguro un error
     assert r.status_code == 409 and a["number"] in r.json()["detail"]
-    assert client.post("/fiscal/queue/999999/external", json={"number": "X1", "date": date.today().isoformat()}).status_code == 404
+    assert client.post("/fiscal/queue/999999/external", json={"number": "X1", "date": _hoy().isoformat()}).status_code == 404
     # anulada
     c = _factura(client)
     client.post(f"/invoices/{c['id']}/void")
@@ -215,9 +263,13 @@ def test_permisos_y_alcance(client, auth, db_session):
     assert set(_ids(client, conta)) == {del_admin["id"], del_vendedor["id"]}
     assert _cola(client, lectura)["can_mark"] is False
     assert _marcar(client, del_admin["id"], number="FE-1", headers=lectura).status_code == 403
-    # el vendedor solo ve y marca lo suyo; lo ajeno no existe
-    assert _ids(client, vend) == [del_vendedor["id"]]
-    assert _marcar(client, del_admin["id"], number="FE-1", headers=vend).status_code == 404
+    # el vendedor ve lo suyo pero no lo marca: la marca saca la venta de la cola y del correo a contabilidad, y la
+    # emision es de contabilidad (sales.emitir_fuera, plan 1.7 y la RACI). Lo ajeno ni lo ve.
+    vista = _cola(client, vend)
+    assert [x["id"] for x in vista["items"]] == [del_vendedor["id"]] and vista["can_mark"] is False
+    assert _marcar(client, del_vendedor["id"], number="FE-V1", headers=vend).status_code == 403
+    assert _marcar(client, del_admin["id"], number="FE-1", headers=vend).status_code == 403
+    assert del_vendedor["id"] in _ids(client, conta)
     assert _marcar(client, del_admin["id"], number="FE-1", headers=conta).status_code == 200
     # deshacer una marca equivocada: solo quien configura la empresa
     assert client.delete(f"/fiscal/queue/{del_admin['id']}/external", headers=conta).status_code == 403
@@ -225,6 +277,54 @@ def test_permisos_y_alcance(client, auth, db_session):
     assert r.status_code == 200 and r.json()["einvoice_status"] == "sin_emitir" and r.json()["external_number"] is None
     assert del_admin["id"] in _ids(client, conta)
     assert client.delete(f"/fiscal/queue/{del_admin['id']}/external").status_code == 409
+
+
+def test_numero_repetido_no_nombra_una_factura_ajena(client, auth, db_session):
+    """Un rol con sales.emitir_fuera pero sin sales.ver_todo marca lo suyo; si el numero ya esta en una factura que no
+    ve, el 409 no la nombra (lo ajeno no aparece en ningun lado)."""
+    from app.models import Invoice, Role, TenantUser, User
+
+    tid = auth["tenant"]["id"]
+    db_session.add(Role(code="marca_propia", name="Marca lo propio", permissions={"sales": ["ver", "emitir_fuera"]}))
+    db_session.commit()
+    propio = role_headers(client, db_session, tid, "marca.propia@ejemplo.com", "marca_propia")
+    uid = db_session.query(User).filter(User.email == "marca.propia@ejemplo.com").one().id
+    assert db_session.query(TenantUser).filter(TenantUser.user_id == uid).one().role_code == "marca_propia"
+    ajena, suya = _pagar(client, _factura(client)), _pagar(client, _factura(client))
+    db_session.get(Invoice, suya["id"]).seller_id = uid
+    db_session.commit()
+    assert _ids(client, propio) == [suya["id"]]
+    assert _marcar(client, ajena["id"], number="FE-500").status_code == 200  # el admin, sobre la ajena
+    r = _marcar(client, suya["id"], number="FE-500", headers=propio)
+    assert r.status_code == 409 and ajena["number"] not in r.json()["detail"] and "otra factura" in r.json()["detail"]
+    assert _marcar(client, suya["id"], number="FE-501", headers=propio).status_code == 200
+
+
+def test_en_produccion_solo_se_marca_lo_de_antes_de_activarla(client, auth, db_session, monkeypatch):
+    """El dia del corte (plan 2.1) lo vendido antes de activar produccion que ya salio en Fygaro se marca (reemitirlo
+    lo duplicaria, plan 4.5); lo vendido despues se emite desde la plataforma y una marca lo sacaria de Hacienda."""
+    from app.models import Invoice, Tenant
+    from app.services import hacienda_config as hc
+
+    antes, despues = _pagar(client, _factura(client)), _pagar(client, _factura(client))
+    ahora = datetime.now(UTC)
+    db_session.get(Invoice, antes["id"]).created_at = ahora - timedelta(days=2)
+    hc.profile(db_session, db_session.get(Tenant, auth["tenant"]["id"])).production_enabled_at = ahora - timedelta(days=1)
+    db_session.commit()
+    monkeypatch.setattr(hc, "hacienda_mode", lambda db, t: "produccion")
+    cola = _cola(client)
+    assert cola["mode"] == "produccion" and cola["production_since"]
+    marcable = {x["id"]: x["markable"] for x in cola["items"]}
+    assert marcable == {antes["id"]: True, despues["id"]: False}
+    assert client.get("/fiscal/mode").json()["production_since"]
+    r = _marcar(client, despues["id"], number="FE-P1")
+    assert r.status_code == 409 and "Emitir a Hacienda" in r.json()["detail"]
+    assert db_session.get(Invoice, despues["id"]).einvoice_status == "sin_emitir"
+    assert _marcar(client, antes["id"], number="FE-P0").status_code == 200
+    # fuera de produccion (Desactivada) se marca todo
+    monkeypatch.setattr(hc, "hacienda_mode", lambda db, t: "ninguno")
+    assert _cola(client)["production_since"] is None
+    assert _marcar(client, despues["id"], number="FE-P1").status_code == 200
 
 
 def test_emitidas_fuera_este_mes_en_hora_de_costa_rica(client, auth, db_session):
@@ -258,6 +358,9 @@ def test_marcar_de_noche_usa_la_fecha_de_costa_rica(client, auth, db_session, mo
     cola = _cola(client)
     assert cola["today"] == "2026-10-31" and cola["mes"] == "2026-10" and cola["emitidas_fuera_mes"] == 1
     assert [x["id"] for x in cola["items"]] == [b["id"]]
+    # sin elegir la fecha (la de hoy por defecto, como el portal): la de Costa Rica, no la UTC de manana
+    r = _marcar(client, b["id"], number="FE-N2")
+    assert r.status_code == 200 and r.json()["external_date"] == "2026-10-31"
 
 
 def test_sin_ventas_no_ve_la_cola(client, auth, db_session):

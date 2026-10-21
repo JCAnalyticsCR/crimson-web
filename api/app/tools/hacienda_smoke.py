@@ -153,7 +153,8 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - herramient
         if not t:
             print("Empresa no encontrada")
             return 1
-        mode = hc.hacienda_mode(db, t)
+        # produccion encendida pero bloqueada por el servidor da modo "ninguno": igual cuenta como produccion activa
+        mode = "produccion" if hc.production_on(db, t) else hc.hacienda_mode(db, t)
         problem = mode_problem(mode, args.sin_modo, args.confirmo_pruebas)
         if problem:
             print(problem)

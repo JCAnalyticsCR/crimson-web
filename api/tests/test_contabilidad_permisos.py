@@ -16,7 +16,7 @@ def correos(monkeypatch):
     enviados = []
 
     def deliver(m, files=None):
-        enviados.append({"to": m.to, "subject": m.subject})
+        enviados.append({"to": m.to, "subject": m.subject, "html": m.html})
         m.status = "enviado"
 
     monkeypatch.setattr(mail, "deliver", deliver)
@@ -37,6 +37,8 @@ def test_matriz_contabilidad():
     conta = ROLE_PERMISSIONS["contabilidad"]
     assert "enviar" in conta["sales"] and "crear" in conta["payments"]
     assert "crear" not in conta["sales"] and "editar" not in conta["sales"] and "anular" not in conta["sales"]
+    # "Marcar emitida en Fygaro" saca la venta de la cola: solo contabilidad (y el admin, "*")
+    assert [r for r, perms in ROLE_PERMISSIONS.items() if "emitir_fuera" in perms.get("sales", [])] == ["contabilidad"]
 
 
 def test_contabilidad_envia_enlaza_y_cobra_sin_403(client, auth, db_session, correos):
@@ -55,9 +57,25 @@ def test_contabilidad_envia_enlaza_y_cobra_sin_403(client, auth, db_session, cor
     # emitir: el permiso alcanza (en modo "ninguno" el modo es quien lo frena, no un 403)
     r = client.post(f"/invoices/{inv['id']}/emit", headers=conta)
     assert r.status_code == 502 and "Sin proveedor fiscal" in r.json()["detail"]
-    # y marcarla emitida en Fygaro desde la cola
-    r = client.post(f"/fiscal/queue/{inv['id']}/external", json={"number": "FE-900", "date": inv["issue_date"]}, headers=conta)
+    # y marcarla emitida en Fygaro desde la cola (con la fecha de hoy en Costa Rica: el issue_date sale de la fecha de la
+    # maquina y en un servidor en UTC, de 18:00 a 24:00 CR, ya es manana)
+    from app.services.fiscal_queue import cr_today
+
+    r = client.post(f"/fiscal/queue/{inv['id']}/external", json={"number": "FE-900", "date": cr_today().isoformat()}, headers=conta)
     assert r.status_code == 200 and r.json()["einvoice_status"] == "emitida_fuera"
+
+
+def test_mensaje_del_correo_va_como_texto(client, auth, db_session, correos):
+    """Quien envia escribe el mensaje: nunca entra como HTML (un enlace o un formulario saldria con la marca de la
+    empresa junto al boton de pago)."""
+    conta = role_headers(client, db_session, auth["tenant"]["id"], "conta.mensaje@ejemplo.com", "contabilidad")
+    inv = _factura(client)
+    msg = 'Hola <a href="https://ejemplo.net/x">pague aqui</a>\nGracias & saludos'
+    r = client.post(f"/invoices/{inv['id']}/email", json={"to": "cliente@ejemplo.com", "message": msg}, headers=conta)
+    assert r.status_code == 200 and r.json()["sent"], r.text
+    html = correos[-1]["html"]
+    assert '<a href="https://ejemplo.net/x">' not in html
+    assert "&lt;a href=&quot;https://ejemplo.net/x&quot;&gt;pague aqui&lt;/a&gt;" in html and "Gracias &amp; saludos" in html
 
 
 def test_contabilidad_no_crea_ventas(client, auth, db_session):

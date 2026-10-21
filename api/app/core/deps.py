@@ -42,13 +42,14 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
     },
     # Contador: todo el dinero de la empresa (gastos, conciliacion, planillas, reportes) sin configurar la empresa.
     # El costo de producto y el margen son del administrador (Ajustes -> Quien ve costos lo puede habilitar).
-    # Plan maestro 1.7: opera la facturacion sin el admin. Envia facturas, crea enlaces de pago, emite (o marca
-    # emitida en Fygaro) y registra cobros; NO crea ventas (sin sales.crear ni sales.editar).
+    # Plan maestro 1.7: opera la facturacion sin el admin. Envia facturas, crea enlaces de pago, emite y registra
+    # cobros; NO crea ventas (sin sales.crear ni sales.editar). emitir_fuera ("Marcar emitida en Fygaro", saca la venta
+    # de la cola "Por emitir") es solo de contabilidad, la duena de la emision, y del admin: ningun otro rol lo tiene.
     "contabilidad": {
         "dashboard": ["ver", "empresa"],
         "crm": ["ver"],
         "catalog": ["ver", "precios"],
-        "sales": ["ver", "ver_todo", "exportar", "recurrencias", "enviar"],
+        "sales": ["ver", "ver_todo", "exportar", "recurrencias", "enviar", "emitir_fuera"],
         "payments": ["ver", "exportar", "crear"],
         "accounting": ["ver", "crear", "editar", "exportar"],
         "inventory": ["ver", "exportar"],

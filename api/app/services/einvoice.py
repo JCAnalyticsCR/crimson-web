@@ -238,6 +238,14 @@ def _simulate(payload: dict):
 
 
 # ---------------------------------------------------------------- emitir
+def _no_provider(db: Session, tenant: Tenant) -> None:
+    why = hc.production_blocked(db, tenant)
+    if why:
+        # interruptor encendido y una llave del servidor que falla: no se emite (ni a produccion ni a pruebas)
+        raise HTTPException(409, f"Producción está activada pero este servidor no la permite ({why}): no se emitió. Revise Ajustes → Hacienda")
+    raise HTTPException(502, "Sin proveedor fiscal configurado (Ajustes → Hacienda: elija el modo)")
+
+
 def outside_detail(inv: Invoice) -> str:
     if inv.einvoice_status == "importada":
         return "La factura viene del histórico importado: ya se emitió fuera de la plataforma y no se vuelve a emitir"
@@ -261,7 +269,7 @@ def emit(db: Session, tenant: Tenant, user_id: int | None, inv: Invoice) -> EInv
         raise HTTPException(422, "La factura no tiene lineas")
     mode = hc.hacienda_mode(db, tenant)
     if mode == "ninguno":
-        raise HTTPException(502, "Sin proveedor fiscal configurado (Ajustes → Hacienda: elija el modo)")
+        _no_provider(db, tenant)
     doc_type = inv.doc_type or "FE"
     if doc_type not in ("FE", "TE"):
         raise HTTPException(422, f"{doc_type}: no soportado aún en emisión directa")
@@ -350,7 +358,7 @@ def credit_note(db: Session, tenant: Tenant, user_id: int, inv: Invoice, reason:
         raise HTTPException(409, "La factura ya tiene una nota de crédito en curso")
     mode = hc.hacienda_mode(db, tenant)
     if mode == "ninguno":
-        raise HTTPException(502, "Sin proveedor fiscal configurado (Ajustes → Hacienda: elija el modo)")
+        _no_provider(db, tenant)
     original = db.scalar(
         select(EInvoiceDocument).where(EInvoiceDocument.invoice_id == inv.id, EInvoiceDocument.clave == inv.clave).order_by(EInvoiceDocument.id.desc())
     )

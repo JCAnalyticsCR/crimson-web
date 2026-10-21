@@ -105,12 +105,18 @@ proveedores se simulan), *Simulado* (todo se simula, con la marca "sin validez f
 (ambiente de pruebas real) y *Producción*, que solo se activa con el interruptor del administrador (contraseña +
 escribir PRODUCCIÓN + lista de verificación en verde) **y** solo envía si, en el momento de cada envío, el servidor
 tiene `HACIENDA_PRODUCTION_ALLOWED=true`, `ENV=production` y la misma huella de instancia que cuando se activó
-(Railway copia las variables al duplicar un ambiente; la huella no). Cualquier cambio de modo apaga producción.
+(Railway copia las variables al duplicar un ambiente; la huella no). Si con el interruptor encendido falla una de esas
+llaves, **no se emite nada** (el modo efectivo es *Desactivada* y Ajustes muestra el motivo): nunca cae a *Pruebas*.
+Cualquier cambio de modo apaga producción, y apagar el interruptor deja la empresa en *Desactivada*: a *Pruebas* solo se
+entra eligiéndolo y escribiendo PRUEBAS.
 
 **Mientras el modo sea *Desactivada*** cada venta pagada o enviada se emite en Fygaro el mismo día: Facturas → **Por
-emitir** lista lo que falta (contabilidad recibe la lista a las 08:30) y "Marcar emitida en Fygaro" guarda el número y
-la fecha (`einvoice_status = emitida_fuera`). Lo marcado, igual que lo importado del histórico, **nunca** se vuelve a
-emitir desde la plataforma (tampoco en producción): `POST /invoices/{id}/emit` responde 409.
+emitir** lista lo que falta (contabilidad recibe la lista a las 08:30), incluido lo que solo se "emitió" en *Simulado* o
+en *Pruebas* (sin validez fiscal), y "Marcar emitida en Fygaro" guarda el número y la fecha
+(`einvoice_status = emitida_fuera`). Marcar es de contabilidad y del administrador (`sales.emitir_fuera`): la marca saca
+la venta de la cola. Lo marcado, igual que lo importado del histórico, **nunca** se vuelve a emitir desde la plataforma
+(tampoco en producción): `POST /invoices/{id}/emit` responde 409. Con producción activa solo se marca lo creado antes de
+activarla (lo del corte que ya salió en Fygaro); lo posterior se emite desde la plataforma.
 
 ### Regla de credenciales
 

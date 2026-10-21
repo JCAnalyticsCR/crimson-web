@@ -33,7 +33,8 @@ INSTRUCTION = {
     "«Emitida en Fygaro» con su número. Lo marcado no se vuelve a emitir.",
     "simulado": "El modo fiscal es Simulado (sin validez fiscal): emití cada una en Fygaro y marcala «Emitida en Fygaro» con su número.",
     "pruebas": "El modo fiscal es Pruebas (sin validez fiscal): emití cada una en Fygaro y marcala «Emitida en Fygaro» con su número.",
-    "produccion": "Emití cada una desde la factura con «Emitir a Hacienda».",
+    "produccion": "Lo vendido antes de activar producción: confirmá primero en Fygaro que no se emitió ahí (si ya se emitió, "
+    "marcala «Emitida en Fygaro»: emitirla de nuevo duplicaría el comprobante). Lo demás se emite desde la factura con «Emitir a Hacienda».",
 }
 
 

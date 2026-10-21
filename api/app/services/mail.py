@@ -6,6 +6,7 @@ import base64
 import os
 import re
 from datetime import UTC, datetime
+from html import escape
 
 import httpx
 from sqlalchemy import select
@@ -126,9 +127,11 @@ def deliver(m: EmailOutbox, files: list[tuple[str, bytes]] | None = None) -> Non
 
 
 def doc_email_html(tenant: Tenant, kind: str, number: str, total: str, link: str | None, message: str | None, attached: bool = True) -> str:
+    # el mensaje lo escribe quien envia (POST /{kind}/{id}/email, sales.enviar): va como texto, nunca como HTML (un
+    # enlace o un formulario inyectado saldria con la marca y el dominio de la empresa). pre-wrap guarda los saltos.
     return f"""<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#15131a">
 <div style="border-bottom:3px solid #e2233a;padding:12px 0;font-size:18px;font-weight:700">{tenant.name}</div>
 <p>Le compartimos la <b>{kind} {number}</b> por <b>{total}</b>.</p>
 {f'<p><a href="{link}" style="display:inline-block;background:#e2233a;color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700">Ver y pagar en línea</a></p>' if link else ""}
-{f'<p style="color:#5a5560;white-space:pre-wrap">{message}</p>' if message else ""}
+{f'<p style="color:#5a5560;white-space:pre-wrap">{escape(message)}</p>' if message else ""}
 <p style="color:#8a858f;font-size:12px">{"El documento va adjunto en PDF. " if attached else ""}Cualquier consulta, responda a este correo.</p></div>"""

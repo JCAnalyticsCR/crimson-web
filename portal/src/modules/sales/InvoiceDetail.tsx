@@ -1,11 +1,11 @@
 /* Detalle de factura: editor + bloque de pagos + modal de pago + enlace de pago (WhatsApp / copiar / abrir). */
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { api, fmtDate, fmtMoney, type Invoice } from "../../lib/api";
+import { api, fmtDate, fmtMoney, parseTs, type Invoice } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Card, Field, I, Icon, Modal } from "../../ui/components";
 import DocEditor from "./DocEditor";
-import { MarkExternal } from "./PorEmitir";
+import { CORTE_AVISO, MarkExternal } from "./PorEmitir";
 import AuthLink from "../../ui/AuthLink";
 
 const METHODS = [["efectivo", "Efectivo"], ["sinpe", "SINPE Móvil"], ["transferencia", "Transferencia"], ["tarjeta", "Tarjeta"], ["onvo", "ONVO (en línea)"], ["paypal", "PayPal"]];
@@ -31,6 +31,7 @@ export default function InvoiceDetail() {
   const [nc, setNc] = useState<string | null>(null);
   const [mail, setMail] = useState<{ to: string; message: string } | null>(null);
   const [fmode, setFmode] = useState<string | null>(null); // modo fiscal vigente: con "ninguno" se emite en Fygaro
+  const [since, setSince] = useState<string | null>(null); // en produccion: desde cuando (lo de antes se puede marcar)
   const [marcar, setMarcar] = useState(false);
   const emit = async () => { try { const r = await api<{ status: string; clave: string; message: string }>(`/invoices/${id}/emit`, { method: "POST" }); toast(`Hacienda: ${r.status}${r.message ? ` · ${r.message}` : ""}`); reload(); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } };
   const refreshEi = async () => { try { const r = await api<{ status: string; doc_status: string; message: string | null; last_error: string | null }>(`/invoices/${id}/einvoice/refresh`, { method: "POST" }); toast(`Hacienda: ${EI_TEXT[r.doc_status] || r.doc_status}${r.last_error ? ` · ${r.last_error}` : ""}`); reload(); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } };
@@ -40,7 +41,7 @@ export default function InvoiceDetail() {
   const [form, setForm] = useState({ method: "sinpe", kind: "captura", amount: "", external_ref: "", paid_at: new Date().toISOString().slice(0, 10), notify_customer: true });
   const reload = () => { api<Invoice>(`/invoices/${id}`).then(setInv); api<XmlDoc[]>(`/invoices/${id}/xml`).then(setDocs).catch(() => setDocs([])); };
   useEffect(() => { reload(); }, [id]);
-  useEffect(() => { api<{ mode: string }>("/fiscal/mode").then((r) => setFmode(r.mode)).catch(() => setFmode(null)); }, []);
+  useEffect(() => { api<{ mode: string; production_since?: string | null }>("/fiscal/mode").then((r) => { setFmode(r.mode); setSince(r.production_since ?? null); }).catch(() => setFmode(null)); }, []);
   useEffect(() => { if (inv) setForm((f) => ({ ...f, amount: f.amount || inv.balance })); }, [inv]);
 
   const submitPay = async () => {
@@ -53,9 +54,18 @@ export default function InvoiceDetail() {
   };
   const est = inv?.einvoice_status ?? "";
   const fuera = est === "emitida_fuera" || est === "importada"; // su comprobante vive fuera de la plataforma: nunca se emite aqui
-  /* Marcar emitida en Fygaro (plan 1.7): lo que no tiene un comprobante real aqui (sin emitir, o solo simulado o de
-     pruebas). En produccion se emite desde la plataforma. El servidor valida lo mismo. */
-  const puedeMarcar = !!inv && allows("sales.enviar") && fmode !== null && fmode !== "produccion" && inv.status !== "anulada" && !fuera && est !== "pendiente" && !docs.some((x) => x.mode === "produccion" && x.status !== "rechazada");
+  /* Con produccion activa solo se marca lo creado antes de activarla (el corte, plan 2.1): si ya salio en Fygaro,
+     emitirlo aqui lo duplicaria. Lo posterior se emite desde la plataforma. */
+  const corte = fmode === "produccion" && !!since && !!inv?.created_at && parseTs(inv.created_at) < parseTs(since);
+  /* Marcar emitida en Fygaro (plan 1.7, contabilidad: sales.emitir_fuera): lo que no tiene un comprobante real aqui
+     (sin emitir, o solo simulado o de pruebas). El servidor valida lo mismo (services/fiscal_queue.check_markable). */
+  const puedeMarcar = !!inv && allows("sales.emitir_fuera") && fmode !== null && (fmode !== "produccion" || corte) && inv.status !== "anulada" && !fuera && est !== "pendiente" && !docs.some((x) => x.mode === "produccion" && x.status !== "rechazada");
+  /* Emitida en Fygaro y anulada alla con su nota de credito: aqui se anula la factura interna (cartera, saldo y
+     comisiones). Sin pagos, como en el editor: con un cobro primero va la devolucion. */
+  const anularFuera = async () => {
+    if (!inv || !confirm(`¿Ya emitiste en Fygaro la nota de crédito de ${inv.number}? Al anularla aquí sale de la cartera y de las comisiones. Esta acción no se deshace.`)) return;
+    try { await api(`/invoices/${id}/void`, { method: "POST" }); toast("Factura anulada"); reload(); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
   const getLink = async () => { try { setLink(await api(`/invoices/${id}/payment-link`, { method: "POST" })); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } };
 
   return (
@@ -82,10 +92,11 @@ export default function InvoiceDetail() {
               return <>
                 <div className="status-line"><Badge status={inv.einvoice_status === "sin_emitir" ? "pendiente" : inv.einvoice_status === "aceptada" ? "confirmado" : inv.einvoice_status === "rechazada" ? "fallido" : inv.einvoice_status} /><span>{fuera ? "Fuera de la plataforma" : `Hacienda · v4.4 · ${inv.consecutive || "sin consecutivo (se asigna al emitir)"}`}</span>{last?.mode && <span className={`badge ${last.mode === "produccion" ? "badge--ok" : "badge--warn"}`}>{MODE_TAG[last.mode] || last.mode}</span>}</div>
                 {est === "emitida_fuera" && (
-                  <p style={{ fontSize: 13, margin: "8px 0 0" }}>Emitida en Fygaro · n.º <span className="mono">{inv.external_number}</span>{inv.external_date ? ` · ${fmtDate(inv.external_date)}` : ""}. No se vuelve a emitir aquí; si hay que anularla, la nota de crédito también va en Fygaro.{allows("settings.configurar") && <> <button className="btn btn--ghost btn--sm" onClick={undoMark}>Quitar la marca</button></>}</p>
+                  <p style={{ fontSize: 13, margin: "8px 0 0" }}>Emitida en Fygaro · n.º <span className="mono">{inv.external_number}</span>{inv.external_date ? ` · ${fmtDate(inv.external_date)}` : ""}. No se vuelve a emitir aquí; si hay que anularla, primero se emite la nota de crédito en Fygaro y después se anula aquí.{allows("sales.anular") && inv.status !== "anulada" && inv.payments.length === 0 && <> <button className="btn btn--danger btn--sm" onClick={anularFuera}>Anular factura</button></>}{allows("settings.configurar") && <> <button className="btn btn--ghost btn--sm" onClick={undoMark}>Quitar la marca</button></>}</p>
                 )}
                 {est === "importada" && <p className="muted" style={{ fontSize: 13, margin: "8px 0 0" }}>Viene del histórico importado: ya se emitió fuera de la plataforma y no se vuelve a emitir.</p>}
-                {fmode === "ninguno" && est === "sin_emitir" && inv.status !== "anulada" && <p className="muted" style={{ fontSize: 13, margin: "8px 0 0" }}>Hacienda todavía no está en producción: emitila en Fygaro el mismo día y marcala aquí con su número.</p>}
+                {fmode === "ninguno" && est === "sin_emitir" && inv.status !== "anulada" && <p className="muted" style={{ fontSize: 13, margin: "8px 0 0" }}>Hacienda todavía no está en producción: {allows("sales.emitir_fuera") ? "emitila en Fygaro el mismo día y marcala aquí con su número." : "contabilidad la emite en Fygaro el mismo día y la marca aquí con su número."}</p>}
+                {corte && puedeMarcar && <div className="acc-warn" style={{ marginTop: 8, fontSize: 13 }}>{CORTE_AVISO}</div>}
                 {last && !fuera && EI_TEXT[last.status] && <p style={{ fontSize: 13, margin: "8px 0 0" }}>{EI_TEXT[last.status]}</p>}
                 {last?.last_error && <p style={{ fontSize: 13, margin: "6px 0 0", color: "var(--bad)" }}>{last.last_error}</p>}
                 {nc && nc.status !== "aceptada" && <p style={{ fontSize: 13, margin: "6px 0 0" }}>Nota de crédito {nc.consecutive}: {EI_TEXT[nc.status] || nc.status}{nc.last_error ? ` · ${nc.last_error}` : ""}</p>}
@@ -144,7 +155,7 @@ export default function InvoiceDetail() {
           <Field label="Mensaje"><textarea className="textarea" value={mail.message} onChange={(e) => setMail({ ...mail, message: e.target.value })} /></Field>
         </Modal>
       )}
-      {marcar && inv && <MarkExternal inv={inv} onClose={() => setMarcar(false)} onDone={() => { setMarcar(false); reload(); }} />}
+      {marcar && inv && <MarkExternal inv={inv} warn={corte ? CORTE_AVISO : undefined} onClose={() => setMarcar(false)} onDone={() => { setMarcar(false); reload(); }} />}
       {link && inv && (
         <Modal title="Enlace de pago para la factura" onClose={() => setLink(null)} foot={<button className="btn btn--ghost" onClick={() => setLink(null)}>Cerrar</button>}>
           <p className="muted" style={{ fontSize: 13 }}>URL única de {inv.number}. Vence {fmtDate(link.expires_at.slice(0, 10))} · abierta {link.opened_count} veces.</p>
