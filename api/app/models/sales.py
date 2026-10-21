@@ -118,6 +118,9 @@ class Invoice(_DocBase, Base):
     # borrador: no vence, no sale en "por cobrar" ni recibe recordatorios (services/invoice_states.py).
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reminders_paused: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())  # pausa la secuencia de cobro
+    # Plan 1.4: la genero esta recurrencia. Sin comprobante fiscal aceptado sale como "aviso de cobro" (render.doc_kind):
+    # contabilidad emite el comprobante real aparte y el mismo cobro no circula como dos "facturas".
+    recurrence_id: Mapped[int | None] = mapped_column(ForeignKey("recurrence.id", use_alter=True, name="fk_invoice_recurrence"))
 
     lines: Mapped[list["InvoiceLine"]] = relationship(cascade="all, delete-orphan", order_by="InvoiceLine.position", lazy="selectin")
     payments: Mapped[list["Payment"]] = relationship(back_populates="invoice", lazy="selectin")  # noqa: F821

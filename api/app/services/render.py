@@ -78,14 +78,16 @@ AVISO_DE_COBRO = "aviso de cobro"
 def doc_kind(doc: Quote | Invoice) -> str:
     """Como se le presenta el documento al cliente, en minuscula ("factura", "cotización" o "aviso de cobro").
 
-    Plan 1.4: la mensualidad de un aliado sin comprobante fiscal aceptado (modo de Hacienda "ninguno" o sin emitir) es
-    un "aviso de cobro", no una factura. Una sola regla para el primer correo, los recordatorios de la secuencia, el
-    PDF que descarga el aliado y la impresion: el mismo documento nunca sale con dos titulos."""
+    Plan 1.4: lo que genera una recurrencia (la mensualidad de un aliado, el mantenimiento o el monitoreo mensual a un
+    cliente) sin comprobante fiscal aceptado (modo de Hacienda "ninguno" o sin emitir) es un "aviso de cobro", no una
+    factura: contabilidad emite el comprobante real aparte y el mismo cobro no circula como dos facturas. Una sola regla
+    para el primer correo, los recordatorios de la secuencia, el PDF que descarga el aliado y la impresion: el mismo
+    documento nunca sale con dos titulos."""
     if not isinstance(doc, Invoice):
         return "cotización"
     from .ally_access import PLAN_ORDER
 
-    if doc.external_order == PLAN_ORDER and doc.einvoice_status != "aceptada":
+    if (doc.external_order == PLAN_ORDER or doc.recurrence_id is not None) and doc.einvoice_status != "aceptada":
         return AVISO_DE_COBRO
     return "factura"
 

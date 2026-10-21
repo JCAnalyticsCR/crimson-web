@@ -154,18 +154,24 @@ def _fmt(d: date) -> str:
 
 
 def reminder_email(t: Tenant, inv: Invoice, stage: int, today: date, link: str | None, attached: bool) -> tuple[str, str]:
+    from ..services.render import AVISO_DE_COBRO, doc_kind
+
     e = html.escape
     saldo = money(inv.balance, inv.currency)
-    que = f"la mensualidad de la plataforma <b>{e(inv.number)}</b>" if is_plan(inv) else f"la factura <b>{e(inv.number)}</b>"
+    # el mismo nombre que el primer correo y el PDF (render.doc_kind): factura o aviso de cobro (recurrencia sin
+    # comprobante fiscal); la mensualidad de aliados se nombra como tal
+    kind = "mensualidad" if is_plan(inv) else doc_kind(inv)
+    art = "el" if kind == AVISO_DE_COBRO else "la"
+    que = f"la mensualidad de la plataforma <b>{e(inv.number)}</b>" if is_plan(inv) else f"{art} {kind} <b>{e(inv.number)}</b>"
     dias = (today - inv.due_date).days
     if dias < 0:
-        subject = f"Recordatorio: {'mensualidad' if is_plan(inv) else 'factura'} {inv.number} vence el {_fmt(inv.due_date)}"
+        subject = f"Recordatorio: {kind} {inv.number} vence el {_fmt(inv.due_date)}"
         intro = f"Le recordamos que {que} por <b>{saldo}</b> vence el <b>{_fmt(inv.due_date)}</b>."
     elif dias == 0:
-        subject = f"Hoy vence {'la mensualidad' if is_plan(inv) else 'la factura'} {inv.number}"
+        subject = f"Hoy vence {art} {kind} {inv.number}"
         intro = f"Hoy vence {que}. El saldo pendiente es de <b>{saldo}</b>."
     else:
-        subject = f"{'Mensualidad' if is_plan(inv) else 'Factura'} {inv.number} con {dias} día{'s' if dias != 1 else ''} de atraso"
+        subject = f"{kind[:1].upper()}{kind[1:]} {inv.number} con {dias} día{'s' if dias != 1 else ''} de atraso"
         intro = f"{que[:1].upper()}{que[1:]} venció el <b>{_fmt(inv.due_date)}</b> y tiene un saldo pendiente de <b>{saldo}</b>."
     boton = (
         f'<p><a href="{e(link)}" style="display:inline-block;background:#e2233a;color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700">Pagar en línea</a></p>'
@@ -454,7 +460,7 @@ def weekly_summary(db: Session, today: date | None = None) -> int:
             for dias, inv, monto in p["top"]
         )
         tramos = "".join(f"<tr><td>{lbl}</td><td align=right>{money(p['buckets'][k], cur)}</td></tr>" for k, lbl in BUCKETS)
-        aliados = db.scalars(select(AllyCompany).where(*mora_where(t.id, today)).order_by(AllyCompany.name)).all()
+        aliados = db.scalars(select(AllyCompany).where(*mora_where(t.id, today, start=config(t)["start_date"])).order_by(AllyCompany.name)).all()
         mora = (
             f"<p><b>Aliados con {SUSPEND_DAYS} días o más de atraso</b> (propuesta de suspensión en Aprobaciones): "
             f"{e(', '.join(a.name for a in aliados))}.</p>"

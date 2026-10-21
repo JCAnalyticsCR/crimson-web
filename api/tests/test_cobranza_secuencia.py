@@ -334,3 +334,34 @@ def test_fecha_de_corte_con_un_anio_razonable(client, auth):
     assert client.put("/settings", json={"collections_start_date": "0202-05-01"}).status_code == 422
     assert client.put("/settings", json={"collections_start_date": "2999-05-01"}).status_code == 422
     assert client.put("/settings", json={"collections_start_date": (HOY - timedelta(days=30)).isoformat()}).status_code == 200
+
+
+def test_recordatorio_de_una_recurrencia_es_aviso_de_cobro(client, auth, db_session, correo, monkeypatch):
+    """Lo que genera una recurrencia (no solo la mensualidad de aliados) sin comprobante fiscal es un aviso de cobro:
+    el recordatorio lo nombra igual que el primer correo y el PDF (render.doc_kind)."""
+    from app.models import Invoice, Recurrence, Tenant
+    from app.services import documents_send
+    from app.tasks.cobranza import run_reminders
+
+    cid = _cliente(client, email="pagos@cliente-aviso.ejemplo.com")
+    _encender(client)
+    iid = _enviada(db_session, client, cid, due=HOY - timedelta(days=3), hace=30)
+    rec = Recurrence(tenant_id=auth["tenant"]["id"], name="Monitoreo", kind="factura", customer_id=cid, template={"lines": []}, frequency="mensual", next_date=HOY)
+    db_session.add(rec)
+    db_session.flush()
+    db_session.get(Invoice, iid).recurrence_id = rec.id
+    db_session.commit()
+    pdfs: list[str] = []
+    monkeypatch.setattr(documents_send, "render_pdf", lambda h: pdfs.append(h) or b"%PDF-1.7 prueba")
+    assert run_reminders(db_session, today=HOY)["enviados"] == 1  # D+3
+    m, _ = _al_cliente(correo, "pagos@cliente-aviso.ejemplo.com")[-1]
+    assert m.subject.startswith("Aviso de cobro") and "3 días de atraso" in m.subject and "El aviso de cobro <b>" in m.html
+    assert "Aviso de cobro" in pdfs[-1] and ">Factura<" not in pdfs[-1]
+    # con el comprobante aceptado ya es la factura
+    from app.tasks.cobranza import reminder_email
+
+    inv = db_session.get(Invoice, iid)
+    inv.einvoice_status = "aceptada"
+    asunto, cuerpo = reminder_email(db_session.get(Tenant, auth["tenant"]["id"]), inv, 3, HOY, None, True)
+    assert asunto.startswith("Factura") and "La factura <b>" in cuerpo
+    db_session.rollback()

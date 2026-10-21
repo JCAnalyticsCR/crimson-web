@@ -214,7 +214,7 @@ function Precios({ a, reload }: { a: Detail; reload: () => void }) {
 }
 
 /* plan 1.4: resultado del ultimo envio de la mensualidad y estado real de cada factura */
-const SEND_TXT: Record<string, string> = { por_aprobar: "espera tu «Aprobar y enviar»", pendiente: "pendiente de envío", enviada: "enviada", fallida: "no salió", sin_correo: "el cliente no tiene correo" };
+const SEND_TXT: Record<string, string> = { por_aprobar: "espera tu «Aprobar y enviar»", enviando: "envío sin confirmar (revisala y reenviala)", pendiente: "pendiente de envío", enviada: "enviada", fallida: "no salió", sin_correo: "el cliente no tiene correo" };
 const facturaEstado = (x: Plan["facturas"][number]) => (x.status === "anulada" ? "anulada" : Number(x.balance) <= 0 ? "pagada" : !x.sent_at && x.status === "creado" ? "borrador (no enviada)" : x.status === "vencida" || (x.due_date && x.due_date < new Date().toISOString().slice(0, 10)) ? "vencida" : "por pagar");
 
 function Mensualidad({ a, reload }: { a: Detail; reload: () => void }) {
@@ -242,7 +242,7 @@ function Mensualidad({ a, reload }: { a: Detail; reload: () => void }) {
     } catch (e) { toast(e instanceof Error ? e.message : "No se pudo", "bad"); }
   };
   if (!d) return <div className="spinner" />;
-  const pendienteEnvio = d.plan && ["por_aprobar", "fallida", "sin_correo"].includes(d.plan.last_send_status || "") && d.facturas.some((x) => x.id === d.plan?.last_invoice_id && !x.sent_at && x.status !== "anulada" && Number(x.balance) > 0);
+  const pendienteEnvio = d.plan && ["por_aprobar", "enviando", "fallida", "sin_correo"].includes(d.plan.last_send_status || "") && d.facturas.some((x) => x.id === d.plan?.last_invoice_id && !x.sent_at && x.status !== "anulada" && Number(x.balance) > 0);
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <Card title="Mensualidad de la plataforma">

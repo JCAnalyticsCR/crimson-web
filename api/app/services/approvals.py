@@ -285,8 +285,15 @@ def _commission_item(db: Session, p: Principal, c: Commission) -> dict:
 
 
 # ---------- mensualidades (plan 1.4) ----------
-PLAN_SEND_PENDING = ("por_aprobar", "fallida", "sin_correo")
-_PLAN_BADGE = {"por_aprobar": "Primera del plan: revisala", "fallida": "No salió: reenviar", "sin_correo": "Cliente sin correo"}
+# enviando: la factura quedo guardada y el envio automatico no termino (el worker se cayo entre los dos pasos o un error
+# interno en "Generar ahora"); no se reintenta solo porque el correo pudo haber salido: una persona lo revisa y reenvia
+PLAN_SEND_PENDING = ("por_aprobar", "enviando", "fallida", "sin_correo")
+_PLAN_BADGE = {
+    "por_aprobar": "Primera del plan: revisala",
+    "enviando": "Envío interrumpido: revisá y reenviá",
+    "fallida": "No salió: reenviar",
+    "sin_correo": "Cliente sin correo",
+}
 
 
 def _plan_send_where(p: Principal) -> list:
@@ -337,10 +344,11 @@ def _plan_send_item(db: Session, p: Principal, inv: Invoice) -> dict:
 
 
 def _ally_mora_where(p: Principal) -> list:
+    from ..tasks.cobranza import config  # import local: la fecha de corte de cartera es la de la secuencia de cobro
     from .ally_access import mora_where
     from .invoice_states import cr_today
 
-    return mora_where(p.tenant.id, cr_today())
+    return mora_where(p.tenant.id, cr_today(), start=config(p.tenant)["start_date"])
 
 
 def _ally_mora_item(db: Session, p: Principal, c: AllyCompany) -> dict:

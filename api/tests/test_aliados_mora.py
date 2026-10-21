@@ -74,6 +74,17 @@ def test_borrador_vencido_no_es_mora(client, auth, db_session):
     assert a not in _mora(client)
 
 
+def test_la_fecha_de_corte_deja_fuera_la_mora_vieja(client, auth, db_session):
+    """Lo emitido antes de la fecha de corte de cartera (la de los recordatorios) pudo pagarse por fuera: no es motivo
+    para proponer una suspension."""
+    a, _ = _aliado_con_mensualidad(client, db_session, vence_hace=45)  # emitida hace 53 dias
+    assert a in _mora(client)
+    assert client.put("/settings", json={"collections_start_date": (HOY - timedelta(days=60)).isoformat()}).status_code == 200
+    assert a in _mora(client)
+    assert client.put("/settings", json={"collections_start_date": (HOY - timedelta(days=10)).isoformat()}).status_code == 200
+    assert a not in _mora(client)
+
+
 def test_aviso_al_aliado_a_d_mas_5_y_resumen(client, auth, db_session, monkeypatch):
     from app.models import EmailOutbox
     from app.tasks.cobranza import run_reminders, weekly_summary

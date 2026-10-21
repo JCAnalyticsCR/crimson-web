@@ -12,12 +12,15 @@ type Rec = {
   /* plan 1.4: la primera factura espera "Aprobar y enviar"; resultado del ultimo envio */
   first_run_requires_approval: boolean; last_send_status: SendStatus | null; last_send_note: string | null;
   last_invoice: { id: number; number: string; status: string; sent_at: string | null; balance: string; currency: string } | null;
+  /* mensualidad de un aliado: su plantilla la arma el plan; se edita desde la ficha del aliado */
+  plan?: boolean; ally_id?: number | null;
   template: { lines?: { product_id: number | null; name?: string; quantity: string }[]; description?: string; subtotal?: string; tax_rate?: string; category_id?: number | null; supplier_id?: number | null; iva_credit?: string; bank_account_id?: number | null; currency?: string };
 };
 type Named = { id: number; name: string };
-type SendStatus = "por_aprobar" | "pendiente" | "enviada" | "fallida" | "sin_correo";
+type SendStatus = "por_aprobar" | "enviando" | "pendiente" | "enviada" | "fallida" | "sin_correo";
 const SEND: Record<SendStatus, { label: string; tone: string }> = {
   por_aprobar: { label: "por aprobar", tone: "warn" },
+  enviando: { label: "envío sin confirmar", tone: "warn" },
   pendiente: { label: "pendiente de envío", tone: "muted" },
   enviada: { label: "enviada", tone: "ok" },
   fallida: { label: "fallida", tone: "bad" },
@@ -123,7 +126,9 @@ export default function Recurrences({ kind: only }: { kind?: "factura" | "gasto"
                 {r.last_send_status && <span className={`badge badge--${SEND[r.last_send_status]?.tone || "muted"}`} style={{ marginLeft: 6 }} title={r.last_send_note || undefined}>{SEND[r.last_send_status]?.label || r.last_send_status}</span>}
               </> : r.last_expense_id ? <Link className="row-link mono" to={`/contabilidad/contable?expense=${r.last_expense_id}`}>Gasto #{r.last_expense_id}</Link> : "—"}</td>
               <td><Badge status={r.active ? "confirmado" : "anulada"} /></td>
-              <td className="num" style={{ whiteSpace: "nowrap" }}>{r.kind === "factura" && r.last_invoice && !r.last_invoice.sent_at && r.last_invoice.status !== "anulada" && Number(r.last_invoice.balance) > 0 && (r.last_send_status === "por_aprobar" || r.last_send_status === "fallida" || r.last_send_status === "sin_correo") && allows("sales.enviar") && <button className="btn btn--crimson btn--sm" onClick={() => approve(r)}>{r.last_send_status === "por_aprobar" ? "Aprobar y enviar" : "Reenviar"}</button>} <button className="btn btn--soft btn--sm" onClick={() => run(r)}>Generar ahora</button> <button className="btn btn--ghost btn--sm" onClick={() => openEdit(r)}>Ver</button></td>
+              <td className="num" style={{ whiteSpace: "nowrap" }}>{r.kind === "factura" && r.last_invoice && !r.last_invoice.sent_at && r.last_invoice.status !== "anulada" && Number(r.last_invoice.balance) > 0 && (r.last_send_status === "por_aprobar" || r.last_send_status === "enviando" || r.last_send_status === "fallida" || r.last_send_status === "sin_correo") && allows("sales.enviar") && <button className="btn btn--crimson btn--sm" onClick={() => approve(r)}>{r.last_send_status === "por_aprobar" ? "Aprobar y enviar" : "Reenviar"}</button>} <button className="btn btn--soft btn--sm" onClick={() => run(r)}>Generar ahora</button> {r.plan
+                ? r.ally_id ? <Link className="btn btn--ghost btn--sm" to={`/aliados/${r.ally_id}`} title="La mensualidad se cambia desde la ficha del aliado">Ver aliado</Link> : null
+                : <button className="btn btn--ghost btn--sm" onClick={() => openEdit(r)}>Ver</button>}</td>
             </tr>)}</tbody></table>
         )}
       </Card>

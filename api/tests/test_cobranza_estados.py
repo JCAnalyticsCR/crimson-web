@@ -191,21 +191,44 @@ def test_entrega_fiscal_en_produccion_la_marca_enviada(client, auth, db_session,
     assert db_session.get(Invoice, otra["id"]).sent_at is None
 
 
-def test_relleno_de_la_migracion(client, auth, db_session):
-    from app.models import Invoice, PaymentLink
-
+def _migracion():
     path = next(Path(__file__).resolve().parents[1].joinpath("alembic", "versions").glob("cobranza_*.py"))
     spec = importlib.util.spec_from_file_location("cobranza_mig", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    return mod
 
+
+def test_relleno_de_la_migracion(client, auth, db_session):
+    """sent_at = created_at para lo que el cliente ya tiene. "vencida" sola no prueba nada: el worker viejo vencia
+    borradores (las mensualidades que dejaba la recurrencia); sin evidencia de envio vuelven a "creado"."""
+    from app.models import Invoice, PaymentLink
+    from app.services.documents import audit
+    from app.services.invoice_states import is_sent
+
+    mod = _migracion()
+    tid = auth["tenant"]["id"]
     cid = _cliente(client)
-    ids = {k: _factura(client, cid)["id"] for k in ("borrador", "enviada", "vencida", "con_enlace", "con_pago")}
+    claves = ("borrador", "enviada", "vencida_borrador", "vencida_por_correo", "vencida_simulado", "con_enlace", "con_pago", "importada", "importada_vencida", "aceptada_vencida")
+    ids = {k: _factura(client, cid)["id"] for k in claves}
     client.post(f"/invoices/{ids['con_enlace']}/payment-link")
     client.post(f"/invoices/{ids['con_pago']}/payments", json={"method": "efectivo", "kind": "captura", "amount": 1000})
     db_session.expire_all()
-    db_session.get(Invoice, ids["enviada"]).status = "enviada"
-    db_session.get(Invoice, ids["vencida"]).status = "vencida"
+    estado = {
+        "enviada": ("enviada", "sin_emitir"),
+        "vencida_borrador": ("vencida", "sin_emitir"),
+        "vencida_por_correo": ("vencida", "sin_emitir"),
+        "vencida_simulado": ("vencida", "sin_emitir"),
+        "importada": ("creado", "importada"),
+        "importada_vencida": ("vencida", "importada"),
+        "aceptada_vencida": ("vencida", "aceptada"),
+    }
+    for k, (st, ei) in estado.items():
+        inv = db_session.get(Invoice, ids[k])
+        inv.status, inv.einvoice_status = st, ei
+    # la bitacora del envio por correo (doc_send): solo el aceptado por el proveedor prueba que le llego
+    audit(db_session, tid, None, "send", "invoice", ids["vencida_por_correo"], {"to": "pagos@cliente-prueba.ejemplo.com", "mail": "enviado"})
+    audit(db_session, tid, None, "send", "invoice", ids["vencida_simulado"], {"to": "pagos@cliente-prueba.ejemplo.com", "mail": "simulado"})
     for i in ids.values():
         db_session.get(Invoice, i).sent_at = None  # como justo despues del add_column
     db_session.commit()
@@ -214,7 +237,40 @@ def test_relleno_de_la_migracion(client, auth, db_session):
     mod.backfill(db_session.connection())  # idempotente
     db_session.commit()
     db_session.expire_all()
-    enviadas = {k for k, i in ids.items() if db_session.get(Invoice, i).sent_at is not None}
-    assert enviadas == {"enviada", "vencida", "con_enlace", "con_pago"}
-    assert Decimal(str(db_session.get(Invoice, ids["con_pago"]).balance)) > 0
-    assert datetime.now(UTC) - db_session.get(Invoice, ids["enviada"]).sent_at.replace(tzinfo=UTC) < timedelta(hours=1)
+    inv = {k: db_session.get(Invoice, i) for k, i in ids.items()}
+    assert {k for k, i in inv.items() if i.sent_at is not None} == {"enviada", "vencida_por_correo", "con_enlace", "con_pago"}
+    assert Decimal(str(inv["con_pago"].balance)) > 0
+    assert datetime.now(UTC) - inv["enviada"].sent_at.replace(tzinfo=UTC) < timedelta(hours=1)
+    # el borrador que el worker viejo habia vencido nunca salio: vuelve a borrador y no esta por cobrar
+    assert inv["vencida_borrador"].status == "creado" and inv["vencida_simulado"].status == "creado"
+    assert not is_sent(inv["vencida_borrador"]) and inv["vencida_por_correo"].status == "vencida"
+    # importadas y aceptadas: el cliente ya las tiene (cuentan como enviadas), pero sin sent_at no reciben recordatorios
+    assert inv["importada_vencida"].status == "vencida" and inv["aceptada_vencida"].status == "vencida"
+    assert all(is_sent(inv[k]) for k in ("importada", "importada_vencida", "aceptada_vencida"))
+
+
+def test_importada_del_historico_esta_por_cobrar_y_vence(client, auth, db_session):
+    """El historico de Fygaro (routers/imports._invoices) entra como "creado" e "importada" sin sent_at: el cliente ya la
+    recibio de Fygaro, asi que esta por cobrar, vence y suma en la cartera; no recibe recordatorios automaticos."""
+    from app.models import Customer, Invoice, Tenant
+    from app.routers.imports import _invoices
+    from app.tasks.cobranza import candidates, config, mark_overdue, portfolio
+
+    tid = auth["tenant"]["id"]
+    hoy = date.today()
+    fila = {"numero": "FE-HIST-000101", "fecha": (hoy - timedelta(days=20)).isoformat(), "cliente": "Cliente Historico S.A.", "identificacion": "3-101-999993", "total": "113000", "impuesto": "13000", "saldo": "113000", "estado": "pendiente"}
+    assert _invoices(db_session, tid, [fila], commit=True)[0]["action"] == "nuevo"
+    db_session.commit()
+    imp = db_session.scalar(select(Invoice).where(Invoice.tenant_id == tid, Invoice.number == "FE-HIST-000101"))
+    assert imp.status == "creado" and imp.einvoice_status == "importada" and imp.sent_at is None
+    assert imp.id in _pend(client, "facturas_por_cobrar") and imp.id in _pend(client, "facturas_vencidas")
+    t = db_session.get(Tenant, tid)
+    assert portfolio(db_session, t, hoy)["n_vencidas"] >= 1
+    assert mark_overdue(db_session, today=hoy) >= 1
+    db_session.expire_all()
+    assert db_session.get(Invoice, imp.id).status == "vencida"
+    # con la fecha de corte antes de su emision, igual no recibe recordatorios: no tiene sent_at
+    db_session.get(Customer, imp.customer_id).email = "pagos@cliente-historico.ejemplo.com"
+    t.settings = {**(t.settings or {}), "collections_start_date": (hoy - timedelta(days=60)).isoformat()}
+    db_session.commit()
+    assert imp.id not in {c.inv.id for c in candidates(db_session, t, hoy, config(t))}

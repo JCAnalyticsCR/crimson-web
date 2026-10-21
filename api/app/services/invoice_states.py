@@ -3,10 +3,16 @@
 Antes cada pantalla tenia la suya: "por cobrar" no incluia las enviadas, el worker volvia "vencida" un borrador que el
 cliente nunca recibio (y el aliado lo veia como deuda) y los recordatorios salian sobre borradores. Ahora:
 
-- ENVIADA: le llego al cliente. Estados que solo existen despues de enviar (enviada, parcial, vencida, pagada) o
+- ENVIADA: le llego al cliente. Estados que solo existen despues de enviar (enviada, parcial, vencida, pagada),
   `sent_at` (correo aceptado por el proveedor, enlace de pago creado para compartir, comprobante fiscal entregado o envio
-  automatico de la recurrencia). Un "creado" sin sent_at es un borrador.
-- VISIBLE: lo que ven el portal del cliente y el del aliado: enviada (o aceptada por Hacienda) y no anulada.
+  automatico de la recurrencia) o un documento que el cliente ya tiene por otra via: importada del historico (Fygaro ya
+  se la entrego) o con el comprobante aceptado por Hacienda (emitirla es de una persona con sales.enviar; si la entrega
+  fiscal no llego, por ejemplo cliente sin correo, igual es una venta emitida). Un "creado" sin nada de eso es un
+  borrador.
+  Los recordatorios exigen ademas `sent_at` (tasks/cobranza.candidates): una importada no recibe correos automaticos
+  (su saldo y su vencimiento vienen del sistema anterior y pudo pagarse por fuera) hasta que alguien la envie o
+  comparta su enlace desde aqui.
+- VISIBLE: lo que ven el portal del cliente y el del aliado: enviada y no anulada.
 - COBRABLE: enviada, no anulada ni pagada y con saldo. Es "por cobrar" en el inicio, la lista y los reportes.
 - VENCIBLE: cobrable que todavia no esta "vencida": lo unico que el worker puede pasar a vencida.
 
@@ -23,6 +29,7 @@ from sqlalchemy import and_, or_
 from ..models import Invoice
 
 SENT_STATES = ("enviada", "parcial", "vencida", "pagada")  # solo existen despues de enviar (o de cobrar)
+DELIVERED_ELSEWHERE = ("importada", "aceptada")  # einvoice_status: el cliente ya la tiene (Fygaro o Hacienda)
 VISIBLE = SENT_STATES
 COBRABLE = ("creado", "enviada", "parcial", "vencida")  # "creado" solo con sent_at
 VENCIBLE = ("creado", "enviada", "parcial")  # "creado" solo con sent_at
@@ -38,11 +45,11 @@ def cr_today() -> date:
 
 # ---------- predicados ----------
 def is_sent(inv: Invoice) -> bool:
-    return inv.sent_at is not None or inv.status in SENT_STATES
+    return inv.sent_at is not None or inv.status in SENT_STATES or inv.einvoice_status in DELIVERED_ELSEWHERE
 
 
 def is_visible(inv: Invoice) -> bool:
-    return inv.status != "anulada" and (is_sent(inv) or inv.einvoice_status == "aceptada")
+    return inv.status != "anulada" and is_sent(inv)
 
 
 def is_cobrable(inv: Invoice) -> bool:
@@ -55,11 +62,11 @@ def is_vencible(inv: Invoice, today: date) -> bool:
 
 # ---------- filtros SQL ----------
 def sent_where():
-    return or_(Invoice.sent_at.is_not(None), Invoice.status.in_(SENT_STATES))
+    return or_(Invoice.sent_at.is_not(None), Invoice.status.in_(SENT_STATES), Invoice.einvoice_status.in_(DELIVERED_ELSEWHERE))
 
 
 def visible_where():
-    return and_(Invoice.status != "anulada", or_(sent_where(), Invoice.einvoice_status == "aceptada"))
+    return and_(Invoice.status != "anulada", sent_where())
 
 
 def cobrable_where():
@@ -78,6 +85,17 @@ def overdue_where(today: date):
 # ---------- transicion ----------
 def mark_sent(inv: Invoice, when: datetime | None = None) -> None:
     """La factura le llego al cliente: queda la primera fecha (el reenvio no la mueve). No cambia el estado: pasar de
-    "creado" a "enviada" es del envio por correo (services/documents_send.py)."""
+    "creado" a "enviada" es del envio por correo (services/documents_send.py).
+
+    Si es la ultima de una recurrencia, la recurrencia registra ahi mismo que salio (routers/ops.settle_sent): enviada
+    a mano desde la factura, enlace compartido o entrega fiscal. Asi Recurrencias, la ficha del aliado y la vista previa
+    D-3 dicen lo que de verdad paso, sin esperar a que se genere el periodo siguiente."""
     if inv.sent_at is None:
         inv.sent_at = when or datetime.now(UTC)
+        from sqlalchemy.orm import object_session
+
+        db = object_session(inv)
+        if db is not None and inv.id is not None:
+            from ..routers.ops import settle_invoice_sent  # import local: el router importa este servicio
+
+            settle_invoice_sent(db, inv)

@@ -287,3 +287,32 @@ def test_plan_revision_de_la_primera_y_cambio_de_monto(client, auth, db_session)
         "antes": {"auto_send": True, "first_run_requires_approval": False},
         "despues": {"auto_send": True, "first_run_requires_approval": True},
     }
+
+
+def test_plan_contabilidad_adelanta_el_cobro_y_vuelve_la_revision(client, auth, db_session):
+    """La revision tambien cubre cuando sale: contabilidad (aliados.mensualidad sin sales.enviar) puede posponer el
+    cobro, pero si lo adelanta o vuelve a encender el envio automatico la proxima espera "Aprobar y enviar"."""
+    from tests.test_session4 import _user_with_role
+
+    a = client.post("/allies", json={"name": "Aliado Tres S.A.", "tax_id": "3-101-000003", "email": "pagos@aliado-tres.ejemplo.com"}).json()["id"]
+    pid = _servicio(client)
+    hoy = date.today()
+    en = lambda d: (hoy + timedelta(days=d)).isoformat()  # noqa: E731
+    assert _plan(client, a, pid, next_date=en(20), first_run_requires_approval=False).json()["plan"]["first_run_requires_approval"] is False
+    pw = _user_with_role(db_session, auth["tenant"]["id"], "conta.agenda.plan@ejemplo.com", "contabilidad")
+    keep = client.headers.pop("Authorization")
+    tok = client.post("/auth/login", json={"email": "conta.agenda.plan@ejemplo.com", "password": pw}).json()["access_token"]
+    client.headers["Authorization"] = keep
+    h = {"Authorization": f"Bearer {tok}"}
+
+    def conta(**kw) -> bool:
+        body = {"amount": 50000, "currency": "CRC", "mode": "fija", "next_date": en(25), "product_id": pid, **kw}
+        r = client.put(f"/allies/{a}/plan", json=body, headers=h)
+        assert r.status_code == 200, r.text
+        return r.json()["plan"]["first_run_requires_approval"]
+
+    assert conta() is False  # posponer no la pide de nuevo
+    assert conta(next_date=en(2)) is True  # adelantarlo si
+    assert _plan(client, a, pid, next_date=en(2), first_run_requires_approval=False).json()["plan"]["first_run_requires_approval"] is False
+    assert conta(next_date=en(2), auto_send=False) is False  # apagar el envio no manda nada
+    assert conta(next_date=en(2), auto_send=True) is True  # volver a encenderlo vuelve a pedir la revision

@@ -43,8 +43,10 @@ def is_emitted(inv: Invoice) -> bool:
     return is_visible(inv)
 
 
-def mora_where(tenant_id: int, today: date, days: int = SUSPEND_DAYS) -> list:
-    """Empresas aliadas activas y sin suspender con una mensualidad por cobrar vencida hace `days` dias o mas."""
+def mora_where(tenant_id: int, today: date, days: int = SUSPEND_DAYS, start: date | None = None) -> list:
+    """Empresas aliadas activas y sin suspender con una mensualidad por cobrar vencida hace `days` dias o mas.
+    start: fecha de corte de cartera (collections_start_date, la misma de los recordatorios): lo emitido antes pudo
+    pagarse por fuera y no es motivo para proponer una suspension. Sin fecha de corte cuenta todo lo enviado."""
     from .invoice_states import cobrable_where
 
     atrasadas = select(Invoice.customer_id).where(
@@ -53,6 +55,7 @@ def mora_where(tenant_id: int, today: date, days: int = SUSPEND_DAYS) -> list:
         cobrable_where(),
         Invoice.due_date.is_not(None),
         Invoice.due_date <= today - timedelta(days=days),
+        *([Invoice.issue_date >= start] if start else []),
     )
     return [
         AllyCompany.tenant_id == tenant_id,

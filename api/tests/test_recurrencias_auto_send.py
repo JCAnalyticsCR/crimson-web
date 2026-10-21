@@ -77,8 +77,10 @@ def test_primera_por_aprobar_y_despues_salen_solas(client, auth, db_session, cor
     out = client.post(f"/recurrences/{rec['id']}/approve-send").json()
     assert out["sent"] is True and out["status"] == "enviada"
     m, files = _al(correo, CLIENTE)[-1]
-    # una recurrencia comun sale como factura (el "aviso de cobro" es de la mensualidad de aliados: render.doc_kind)
-    assert m.subject.startswith("Factura") and "Le compartimos la <b>factura" in m.html and "/pagar/" in m.html and files == [f"{primera.number}.pdf"]
+    # sin comprobante fiscal (modo "ninguno") cualquier recurrencia sale como aviso de cobro, no solo la mensualidad de
+    # aliados (plan 1.4, render.doc_kind): contabilidad emite el comprobante real aparte y no circulan dos "facturas"
+    assert m.subject.startswith("Aviso de cobro") and "Le compartimos el <b>aviso de cobro" in m.html and "/pagar/" in m.html and files == [f"{primera.number}.pdf"]
+    assert primera.recurrence_id == rec["id"]
     assert client.post(f"/recurrences/{rec['id']}/approve-send").status_code == 409  # ya salio
     # el periodo siguiente sale solo
     assert run_due_recurrences(db_session, today=HOY) == 1
@@ -152,14 +154,31 @@ def test_sin_envio_automatico_y_cliente_sin_correo(client, auth, db_session, cor
 
 
 def test_enviarla_a_mano_cuenta_como_aprobada(client, auth, db_session, correo):
-    from app.models import Invoice, Recurrence
+    from app.models import EmailOutbox, Invoice, Recurrence
     from app.routers.ops import run_due_recurrences
+    from app.tasks.mensualidades import preview_upcoming
 
     rec = _rec(client, _cliente(client), next_date=HOY - timedelta(days=31))
     run_due_recurrences(db_session, today=HOY)
     db_session.expire_all()
     primera = db_session.get(Recurrence, rec["id"]).last_invoice_id
     assert client.post(f"/invoices/{primera}/email", json={}).json()["sent"] is True
+    # la recurrencia lo registra en el momento (no al generar el periodo siguiente): Recurrencias dice "enviada", sale
+    # de Aprobaciones y la vista previa D-3 ya no anuncia "Aprobar y enviar"
+    fila = next(x for x in client.get("/recurrences").json() if x["id"] == rec["id"])
+    assert fila["last_send_status"] == "enviada" and fila["first_run_requires_approval"] is False and fila["last_send_note"] is None
+    assert primera not in _por_aprobar(client)
+    db_session.expire_all()
+    r = db_session.get(Recurrence, rec["id"])
+    atrasada = r.next_date
+    r.next_date = HOY + timedelta(days=3)
+    db_session.commit()
+    assert preview_upcoming(db_session, today=HOY) == 1
+    m = db_session.scalars(select(EmailOutbox).where(EmailOutbox.subject.like("En 3 días%"))).all()[-1]
+    assert "Sale sola con su PDF" in m.html and "Aprobar y enviar" not in m.html
+    r = db_session.get(Recurrence, rec["id"])
+    r.next_date = atrasada
+    db_session.commit()
     run_due_recurrences(db_session, today=HOY)
     db_session.expire_all()
     r = db_session.get(Recurrence, rec["id"])
@@ -429,3 +448,137 @@ def test_produccion_sin_emitir_no_sale_como_aviso(client, auth, db_session, corr
     assert not _por_aprobar(client)[r.last_invoice_id].get("action")  # se abre la factura para emitirla
     res = client.post(f"/recurrences/{rec['id']}/approve-send")
     assert res.status_code == 409 and "Emitila" in res.json()["detail"] and not _al(correo, CLIENTE)
+
+
+def test_enlace_compartido_tambien_la_registra(client, auth, db_session, correo):
+    """Compartir el enlace de pago (POST /invoices/{id}/payment-link) es entregarla: la que no salio deja de figurar
+    "fallida" y sale de Aprobaciones."""
+    from app.models import Recurrence
+    from app.routers.ops import run_due_recurrences
+
+    rec = _rec(client, _cliente(client), first_run_requires_approval=False)
+    correo["ok"] = False
+    run_due_recurrences(db_session, today=HOY)
+    db_session.expire_all()
+    iid = db_session.get(Recurrence, rec["id"]).last_invoice_id
+    assert db_session.get(Recurrence, rec["id"]).last_send_status == "fallida" and iid in _por_aprobar(client)
+    assert client.post(f"/invoices/{iid}/payment-link").status_code == 200
+    fila = next(x for x in client.get("/recurrences").json() if x["id"] == rec["id"])
+    assert fila["last_send_status"] == "enviada" and iid not in _por_aprobar(client)
+
+
+def test_envio_interrumpido_no_se_pierde(client, auth, db_session, correo):
+    """El worker se cae entre guardar la factura y mandarla (la tarea se reentrega, pero next_date ya avanzo): queda
+    "enviando", detiene el periodo siguiente, sale en Aprobaciones y en la corrida siguiente pasa a "fallida" con el
+    aviso al admin. No se manda sola otra vez (el correo pudo haber salido)."""
+    from app.models import Recurrence
+    from app.routers.ops import run_due_recurrences, run_recurrence
+
+    rec = _rec(client, _cliente(client), first_run_requires_approval=False)
+    r = db_session.get(Recurrence, rec["id"])
+    factura = run_recurrence(db_session, r, None)
+    db_session.commit()  # aqui se cae el worker: nunca llega a deliver_recurrence
+    fid = factura.id
+    db_session.expire_all()
+    r = db_session.get(Recurrence, rec["id"])
+    siguiente = r.next_date
+    assert r.last_send_status == "enviando"
+    item = _por_aprobar(client)[fid]
+    assert item["badge"] == "Envío interrumpido: revisá y reenviá" and item["action"]["label"] == "Reenviar"
+    # recien guardada (un envio en curso): la corrida no la toca, y tampoco genera el periodo siguiente
+    assert run_due_recurrences(db_session, today=siguiente) == 0
+    db_session.expire_all()
+    assert db_session.get(Recurrence, rec["id"]).last_send_status == "enviando"
+    # mas tarde: interrumpida -> fallida, aviso al admin, sin otro correo al cliente ni otra factura
+    r = db_session.get(Recurrence, rec["id"])
+    r.updated_at = datetime.now(UTC) - timedelta(hours=1)
+    db_session.commit()
+    assert run_due_recurrences(db_session, today=siguiente) == 0
+    db_session.expire_all()
+    r = db_session.get(Recurrence, rec["id"])
+    assert r.last_send_status == "fallida" and "interrumpi" in r.last_send_note and r.last_invoice_id == fid
+    assert not _al(correo, CLIENTE) and any("sin enviar" in m.subject and "interrumpió" in m.html for m in _admin(correo))
+    assert client.post(f"/recurrences/{rec['id']}/approve-send").json()["sent"] is True
+
+
+def test_generar_ahora_con_error_interno_queda_fallida(client, auth, db_session, correo, monkeypatch):
+    from app.services import documents_send
+
+    rec = _rec(client, _cliente(client), first_run_requires_approval=False)
+
+    def revienta(*a, **k):
+        raise RuntimeError("falla de prueba")
+
+    monkeypatch.setattr(documents_send, "send_document", revienta)
+    out = client.post(f"/recurrences/{rec['id']}/run")
+    assert out.status_code == 201 and out.json()["send_status"] == "fallida" and out.json()["sent"] is False
+    assert _por_aprobar(client)[out.json()["invoice_id"]]["action"]["label"] == "Reenviar"
+    assert any("sin enviar" in m.subject for m in _admin(correo))
+
+
+def test_contabilidad_cambia_cuando_sale_y_vuelve_la_revision(client, auth, db_session, correo):
+    """La revision humana cubre tambien cuando y cada cuanto sale: quien no envia facturas no puede, cambiando la
+    frecuencia, adelantando la fecha o volviendo a encender el envio, hacer que salgan facturas sin que nadie las vea."""
+    from app.models import AuditLog, Recurrence
+
+    h = _como(client, db_session, auth, "conta.agenda@ejemplo.com", "contabilidad")
+    cid = _cliente(client)
+    fut = HOY + timedelta(days=20)
+
+    def aprobada(**extra) -> dict:
+        rec = _rec(client, cid, next_date=fut, first_run_requires_approval=False, **extra)
+        assert rec["first_run_requires_approval"] is False
+        return rec
+
+    def guarda(rec, headers=None, **cambios) -> bool:
+        r = client.put(f"/recurrences/{rec['id']}", json=_body(rec, **cambios), headers=headers or {})
+        assert r.status_code == 200, r.text
+        return r.json()["first_run_requires_approval"]
+
+    a = aprobada()
+    assert guarda(a, h, frequency="semanal") is True  # cada semana: vuelve a esperar "Aprobar y enviar"
+    q = select(AuditLog).where(AuditLog.entity == "recurrence", AuditLog.entity_id == a["id"], AuditLog.action == "update").order_by(AuditLog.id)
+    log = db_session.scalars(q).all()[-1]
+    assert log.before["frequency"] == "mensual" and log.after["frequency"] == "semanal"
+    b = aprobada()
+    assert guarda(b, h, next_date=(HOY - timedelta(days=365)).isoformat()) is True  # una fecha de hace un ano
+    c = aprobada(auto_send=False)
+    assert guarda(c, h, auto_send=True) is True  # el envio que el admin habia apagado
+    d = aprobada(active=False)
+    assert guarda(d, h, active=True) is True
+    # posponer o cambiar el nombre no la pide de nuevo
+    e = aprobada()
+    assert guarda(e, h, next_date=(fut + timedelta(days=5)).isoformat()) is False
+    e = next(x for x in client.get("/recurrences").json() if x["id"] == e["id"])
+    assert guarda(e, h, name="Monitoreo sede norte") is False
+    # quien envia facturas si puede cambiar la frecuencia sin que vuelva la revision
+    f = aprobada()
+    assert guarda(f, frequency="semanal") is False
+    db_session.expire_all()
+    assert db_session.get(Recurrence, a["id"]).first_run_requires_approval is True
+
+
+def test_mensualidad_no_se_edita_desde_recurrencias(client, auth, db_session, correo):
+    """El formulario de Recurrencias arma la plantilla con solo producto y cantidad: guardarlo sobre la mensualidad de
+    un aliado le quitaria el monto, la moneda y la marca de aliado. Se edita desde la ficha del aliado."""
+    from app.models import AllyCompany, Recurrence
+
+    a = client.post("/allies", json={"name": "Aliado Plantilla S.A.", "tax_id": "3-101-000088", "email": "pagos@aliado-plantilla.ejemplo.com"}).json()["id"]
+    prod = {"name": "Mensualidad de la plataforma", "code": "SRV-PLAT-R", "item_type": "servicio", "price": 0, "currency": "CRC", "cabys_code": "8314100000000"}
+    pid = client.post("/products", json=prod).json()["id"]
+    plan = {"amount": 40, "currency": "USD", "mode": "fija", "next_date": (HOY + timedelta(days=10)).isoformat(), "product_id": pid, "crear_cliente": True}
+    assert client.put(f"/allies/{a}/plan", json=plan).status_code == 200
+    rid = db_session.get(AllyCompany, a).recurrence_id
+    filas = client.get("/recurrences").json()
+    fila = next(x for x in filas if x["id"] == rid)
+    assert fila["plan"] is True and fila["ally_id"] == a
+    form = {"lines": [{"product_id": pid, "quantity": "1"}]}  # lo que manda el modal de Recurrencias
+    r = client.put(f"/recurrences/{rid}", json=_body(fila, template=form, first_run_requires_approval=True))
+    assert r.status_code == 409 and "aliado" in r.json()["detail"]
+    db_session.expire_all()
+    tpl = db_session.get(Recurrence, rid).template
+    assert tpl["external_order"] == "MENSUALIDAD-PLATAFORMA" and tpl["currency"] == "USD" and float(tpl["lines"][0]["unit_price"]) == 40
+    # una recurrencia comun se sigue editando desde aqui
+    comun = _rec(client, _cliente(client))
+    assert comun["plan"] is False and comun["ally_id"] is None
+    assert client.put(f"/recurrences/{comun['id']}", json=_body(comun, name="Monitoreo editado")).status_code == 200

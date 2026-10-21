@@ -1,8 +1,16 @@
 """cobranza: facturas enviadas, pausa de recordatorios y bitacora de la secuencia de cobro (plan 1.3)
 
 Una factura "por cobrar" es la que le llego al cliente: `invoice.sent_at` (nulo = borrador sin enviar). Relleno: las
-que ya estan enviada, parcial o vencida, o tienen enlace de pago o pagos, toman sent_at = created_at (el cliente ya las
-tiene; las demas siguen siendo borradores y salen de "por cobrar", de "vencidas" y de los recordatorios).
+que ya estan enviada o parcial, o tienen enlace de pago o pagos, toman sent_at = created_at (el cliente ya las tiene;
+las demas siguen siendo borradores y salen de "por cobrar", de "vencidas" y de los recordatorios).
+"vencida" sola no prueba nada: el worker viejo (sales.mark_overdue, estados creado y parcial) y el recompute_balance
+viejo pasaban a "vencida" borradores que nunca salieron, como las mensualidades que dejaba la recurrencia. Una vencida
+toma sent_at solo con evidencia de envio (enlace de pago, pagos o un envio por correo que el proveedor acepto, en la
+bitacora: action "send" con mail "enviado"); sin evidencia vuelve a "creado". Las importadas del historico y las que
+tienen el comprobante aceptado por Hacienda ya cuentan como enviadas por su einvoice_status (services/invoice_states):
+no se tocan ni toman sent_at por su estado (sin sent_at no reciben recordatorios automaticos).
+downgrade quita las columnas y la tabla; no devuelve a "vencida" los borradores (el worker viejo los vuelve a marcar
+en su corrida de las 00:30).
 `invoice.reminders_paused` y `customer.no_reminders` pausan la secuencia (por factura y por cliente; nada cambia para
 las filas existentes). Tabla nueva `collection_reminder`: una fila por factura y etapa (D-3, D0, D+3, D+10).
 
@@ -48,17 +56,48 @@ def upgrade() -> None:
     backfill(op.get_bind())
 
 
+LINK = "EXISTS (SELECT 1 FROM payment_link pl WHERE pl.invoice_id = invoice.id)"
+PAID = "EXISTS (SELECT 1 FROM payment pa WHERE pa.invoice_id = invoice.id)"
+ELSEWHERE = "COALESCE(einvoice_status, '') IN ('importada', 'aceptada')"
+
+
+def _sent_by_mail(conn) -> set[int]:
+    """Facturas con un envio por correo aceptado por el proveedor (bitacora de doc_send: {"to", "mail"}). El JSON se
+    lee en Python: igual en Postgres (dict) y en SQLite (texto)."""
+    import json
+
+    out: set[int] = set()
+    rows = conn.execute(sa.text("SELECT entity_id, diff FROM audit_log WHERE action = 'send' AND entity = 'invoice' AND entity_id IS NOT NULL"))
+    for entity_id, diff in rows:
+        if isinstance(diff, str):
+            try:
+                diff = json.loads(diff)
+            except ValueError:
+                diff = None
+        if isinstance(diff, dict) and diff.get("mail") == "enviado":
+            out.add(int(entity_id))
+    return out
+
+
 def backfill(conn) -> None:
-    """Lo que el cliente ya tiene (enviada, parcial o vencida, con enlace de pago o con pagos) queda enviado desde que se
-    creo. Idempotente: solo toca las filas sin sent_at."""
+    """Lo que el cliente ya tiene (enviada o parcial, con enlace de pago o con pagos) queda enviado desde que se creo.
+    Una "vencida" solo con evidencia de envio; sin ella vuelve a "creado" (nunca salio). Idempotente: solo toca las
+    filas sin sent_at."""
     conn.execute(
         sa.text(
             "UPDATE invoice SET sent_at = created_at WHERE sent_at IS NULL AND ("
-            "status IN ('enviada', 'parcial', 'vencida') "
-            "OR id IN (SELECT invoice_id FROM payment_link) "
-            "OR id IN (SELECT invoice_id FROM payment))"
+            f"(status IN ('enviada', 'parcial') AND COALESCE(einvoice_status, '') <> 'importada') OR {LINK} OR {PAID})"
         )
     )
+    vencidas = conn.execute(sa.text(f"SELECT id FROM invoice WHERE status = 'vencida' AND sent_at IS NULL AND NOT ({ELSEWHERE})")).scalars().all()
+    if not vencidas:
+        return
+    por_correo = _sent_by_mail(conn)
+    for iid in vencidas:
+        if iid in por_correo:
+            conn.execute(sa.text("UPDATE invoice SET sent_at = created_at WHERE id = :i AND sent_at IS NULL"), {"i": iid})
+        else:
+            conn.execute(sa.text("UPDATE invoice SET status = 'creado' WHERE id = :i AND status = 'vencida' AND sent_at IS NULL"), {"i": iid})
 
 
 def downgrade() -> None:
