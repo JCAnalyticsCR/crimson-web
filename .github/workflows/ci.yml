@@ -188,19 +188,48 @@ jobs:
         run: docker build --pull -t crimson-portal:ci portal
 
   respaldo:
-    name: Respaldo · imagen + ciclo completo
+    name: Respaldo · imagen + ciclo completo (SQLite y Postgres)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: crimson_ci
+          POSTGRES_USER: crimson
+          POSTGRES_PASSWORD: solo_ci_desechable
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U crimson -d crimson_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Construir la imagen del cron de respaldo
         run: docker build --pull -f infra/respaldo/Dockerfile -t crimson-respaldo:ci .
-      # Dentro de la imagen, con age y rclone reales y nada real: SQLite con la semilla -> respaldo diario -> bucket local
-      # de rclone -> prueba mensual (bajar, hashes, descifrar) -> restore en una base vacia. Ver infra/respaldo/ciclo_ci.sh.
-      - name: Ciclo completo del respaldo en la imagen (sin base real ni bucket)
+      # Dentro de la imagen, con age y rclone reales y nada real: base con la semilla y un valor de cada tipo -> respaldo
+      # diario (verificado en una SQLite desechable) -> bucket local de rclone -> prueba mensual (bajar, hashes,
+      # descifrar) -> restore en una base vacia. Ver infra/respaldo/ciclo_ci.sh.
+      - name: Ciclo completo en SQLite (sin base real ni bucket)
         run: >-
           docker run --rm -e RAILWAY_GIT_COMMIT_SHA=${{ github.sha }}
           -v "$GITHUB_WORKSPACE/infra/respaldo/ciclo_ci.sh:/ciclo_ci.sh:ro"
           crimson-respaldo:ci sh /ciclo_ci.sh
+      # El camino de produccion: el cron respalda desde Postgres con el rol de solo lectura de RESPALDO.md 4.3 y verifica
+      # restaurando en SQLite (Postgres -> SQLite: Numeric, timestamptz, JSON y bytea entre motores), y la prueba
+      # mensual restaura en una Postgres vacia (Postgres -> Postgres, con las secuencias). --network host: el contenedor
+      # llega al servicio por localhost:5432.
+      - name: Ciclo completo desde Postgres, como produccion
+        env:
+          PG_ID: ${{ job.services.postgres.id }}
+        run: |
+          docker exec "$PG_ID" createdb -U crimson restaurada
+          docker exec "$PG_ID" psql -v ON_ERROR_STOP=1 -U crimson -d crimson_ci -c \
+            "CREATE ROLE respaldo LOGIN PASSWORD 'solo_ci_desechable'; GRANT CONNECT ON DATABASE crimson_ci TO respaldo; GRANT pg_read_all_data TO respaldo;"
+          docker run --rm --network host -e RAILWAY_GIT_COMMIT_SHA=${{ github.sha }} \
+            -e CICLO_ORIGEN_URL=postgresql://crimson:solo_ci_desechable@localhost:5432/crimson_ci \
+            -e CICLO_LECTURA_URL=postgresql://respaldo:solo_ci_desechable@localhost:5432/crimson_ci \
+            -e CICLO_RESTAURADA_URL=postgresql://crimson:solo_ci_desechable@localhost:5432/restaurada \
+            -v "$GITHUB_WORKSPACE/infra/respaldo/ciclo_ci.sh:/ciclo_ci.sh:ro" \
+            crimson-respaldo:ci sh /ciclo_ci.sh
