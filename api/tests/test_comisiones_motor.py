@@ -2,17 +2,20 @@
 aceptacion de cotizacion, proyecto completado, base utilidad que espera costos, bandeja, segregacion, visibilidad y
 tiempo real del vendedor. Repo publico: solo nombres y correos de prueba."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
 
 from app.models import Commission, CommissionRule, ExchangeRate, Opportunity, Product, Project
+from app.providers.einvoice import cr_now
 from app.services.commissions import Deal, best_rule
 from tests.aliados_helpers import interno, uid
 
 D = Decimal
-HOY = date.today()
+# la fecha de Costa Rica, la que usa la app para cortar (backfill, meses): con el reloj en UTC date.today() ya es la de
+# manana de 18:00 a 24:00 CR, y el ultimo dia del mes HOY.replace(day=1) caeria en el mes siguiente ("fecha futura")
+HOY = cr_now().date()
 
 
 def _cust(client):

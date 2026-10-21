@@ -48,11 +48,12 @@ jobs:
         run: uv run ruff check app ../worker
       - name: Pruebas en paralelo
         env:
-          # El mismo reloj que produccion (Railway corre en UTC). Una prueba que falla solo de 18:00 a 24:00 CR muestra
-          # que la app mezcla date.today() con la fecha de Costa Rica: es un error real (seccion 2, regla 8), no del CI.
-          # Para verlo a cualquier hora en local: TZ=XXX-14 uv run pytest ... (desde las 04:00 CR la fecha local ya
-          # es la de manana, como en produccion despues de las 18:00).
-          TZ: UTC
+          # Reloj de Costa Rica, NO el de produccion (UTC), hasta los items 2.1 y 3.4. La app todavia mezcla date.today()
+          # con la fecha CR (88 usos; el plan los corrige en 2.1 y 3.4, no antes): con TZ=UTC el CI quedaba en rojo de
+          # 18:00 a 24:00 CR segun la hora del push, y el ultimo dia de cada mes fallaban pruebas de comisiones (Inicio,
+          # reportes y backfill cortan por mes CR y earned_on sale de date.today()). Un rojo que depende de la hora no
+          # detecta nada: bloquea despliegues (Wait for CI). El borde se prueba a proposito (infra/DESPLIEGUE.md 2).
+          TZ: America/Costa_Rica
         run: uv run pytest -n auto -q -p no:cacheprovider
 
   # En un PR BLOQUEA: una dependencia con una vulnerabilidad conocida no entra a main sin que alguien lo decida. En un

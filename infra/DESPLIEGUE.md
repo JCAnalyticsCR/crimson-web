@@ -24,7 +24,7 @@ push a main ──► GitHub Actions "CI" (6 trabajos en paralelo, < 10 min)
 
 | Trabajo | Qué hace | Falla si… |
 |---|---|---|
-| API · ruff + pytest | `uv sync --locked`, `ruff check app ../worker`, `pytest -n auto` (en paralelo, Argon2 barato solo en pruebas, reloj en UTC como producción) | el lock no coincide con `pyproject.toml`, hay errores de lint o falla una prueba |
+| API · ruff + pytest | `uv sync --locked`, `ruff check app ../worker`, `pytest -n auto` (en paralelo, Argon2 barato solo en pruebas, reloj de Costa Rica hasta los ítems 2.1 y 3.4) | el lock no coincide con `pyproject.toml`, hay errores de lint o falla una prueba |
 | Migraciones | Postgres 16 vacía: una sola cabeza de Alembic, `alembic upgrade head`, `alembic check`, la última migración se revierte y se vuelve a aplicar, y al final las carreras de inventario contra Postgres real (`SELECT … FOR UPDATE`) | hay dos cabezas, una migración no corre en Postgres, el modelo y las migraciones no coinciden, el `downgrade` no sirve, o dos pedidos pueden llevarse la última unidad |
 | Portal · tsc + vite build | `npm ci`, `tsc -b`, `vite build` | errores de tipos o de build |
 | Portal · imagen + nginx -t | `docker build portal` (el Dockerfile arma `nginx.conf` con `envsubst` y corre `nginx -t`) | `nginx.conf` o el Dockerfile del portal tienen un error |
@@ -34,7 +34,7 @@ push a main ──► GitHub Actions "CI" (6 trabajos en paralelo, < 10 min)
 Lo mismo en local, antes de subir:
 
 ```bash
-cd api && uv sync --locked && uv run ruff check app ../worker && TZ=UTC uv run pytest -n auto -q
+cd api && uv sync --locked && uv run ruff check app ../worker && TZ=America/Costa_Rica uv run pytest -n auto -q
 cd api && DATABASE_URL=postgresql+psycopg://crimson:crimson_local_only@localhost:5432/crimson \
           uv run alembic upgrade head && uv run alembic check      # con infra/docker-compose.yml levantado
 cd portal && npm ci && npx tsc -b && npx vite build
@@ -43,18 +43,32 @@ docker build -f infra/respaldo/Dockerfile -t crimson-respaldo:local .  # imagen 
 docker run --rm -v "$PWD/infra/respaldo/ciclo_ci.sh:/ciclo_ci.sh:ro" crimson-respaldo:local sh /ciclo_ci.sh
 ```
 
-Las pruebas del CI corren con `TZ=UTC`, el mismo reloj de producción (Railway). Una prueba que falla solo de 18:00 a
-24:00 CR no es "un problema del CI": muestra que la app (o la prueba) mezcla `date.today()`, que en producción es la
-fecha UTC, con la fecha de Costa Rica (`cr_now()`), justo el borde que pide vigilar la sección 2, regla 8 del plan.
-Se arregla usando la fecha de Costa Rica, nunca fijando otro reloj en el CI. Para verlo a cualquier hora en local:
-`TZ=XXX-14 uv run pytest -q tests/test_x.py` (desde las 04:00 CR la fecha local ya es la de mañana, como en
-producción después de las 18:00 CR; funciona igual en Windows y en Linux).
+Las pruebas del CI corren con `TZ=America/Costa_Rica`, **no** con el reloj de producción (Railway corre en UTC), y
+así se quedan hasta los ítems 2.1 y 3.4. La app todavía mezcla `date.today()` (en producción, la fecha UTC) con la
+fecha de Costa Rica (`cr_now()`): son 88 usos y el plan los corrige en 2.1 (fechas de dinero y fiscales, con
+`cr_today()`) y en 3.4 (el resto, con la regla DTZ de ruff), no antes. Con `TZ=UTC` el CI quedaba en rojo según la
+**hora del push**: de 18:00 a 24:00 CR fallaban pruebas que comparan contra la fecha CR, y el último día de cada mes
+(y el 31 de diciembre) fallaban además las de comisiones de *Inicio*, reportes y backfill, que cortan por mes CR
+mientras `earned_on` sale de `date.today()`. Un rojo que depende de la hora no detecta nada: bloquea despliegues
+(Wait for CI) y enseña a saltarse el CI.
 
-Hoy hay **un** error conocido de este tipo, de la app y no de la prueba: `commissions.py` fecha con `date.today()` los
-movimientos creados "ahora" (`earned_on`, líneas ~874, ~1348 y ~1413), y *Mis números* corta en la fecha CR. Lo
-corrige el ítem 2.1 (`cr_today()` en las fechas de dinero). Mientras tanto,
-`test_ganancias_aliados.py::test_ajuste_del_pago_acordado_no_resta_dos_veces` está marcada `xfail` **solo** en ese
-horario y con `strict`: cuando 2.1 lo corrija, la marca hace fallar el CI hasta que se quite.
+El borde de las 18:00-24:00 CR (sección 2, regla 8 del plan) se prueba **a propósito**, no con la suerte de la hora:
+
+- Una prueba nueva toma "hoy" de donde lo toma el código que prueba: `cr_now().date()` si el endpoint corta en la
+  fecha CR (backfill, *Mis números*, reportes por mes), nunca `date.today()` "porque en mi máquina da lo mismo".
+- Las de dinero fijan la hora del borde (un `ahora`/`now` explícito o `monkeypatch` sobre la función de la fecha).
+- Para ver a cualquier hora en local cómo se comporta con el reloj de producción ya en el borde:
+  `TZ=XXX-14 uv run pytest -q tests/test_x.py` (desde las 04:00 CR la fecha local ya es la de mañana, como en
+  producción después de las 18:00 CR; funciona igual en Windows y en Linux). El fin de mes no se ve así: hay que
+  correrlo un último día de mes de noche.
+
+Errores conocidos de este tipo, **de la app** (los corrige 2.1): `commissions.py` fecha con `date.today()` los
+movimientos creados "ahora" (`earned_on`, líneas ~874, ~1348 y ~1413), y *Mis números*, *Inicio* y
+`/reports/comisiones` cortan en la fecha CR. `test_ganancias_aliados.py::test_ajuste_del_pago_acordado_no_resta_dos_veces`
+queda marcada `xfail` (`strict`) para cuando el reloj del CI esté en el borde: con el reloj de Costa Rica no aplica.
+
+**Al cerrar 2.1 y 3.4:** volver a `TZ: UTC` en `.github/workflows/ci.yml` (y aquí), correr la suite con `TZ=XXX-14`
+y quitar la marca `xfail` que sobre.
 
 Reglas que el CI hace cumplir:
 
