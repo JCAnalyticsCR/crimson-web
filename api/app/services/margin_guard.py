@@ -10,8 +10,8 @@ Para cada producto publicado en la tienda con costo y precio:
   en la tienda (margin_hold: la vitrina dice "Consultar" y el checkout no lo vende).
 - NUNCA reprecia solo: el precio cambia unicamente con "Aplicar" (apply), que lo vuelve a publicar.
 - Si el margen se recupera (bajo el costo o el dolar, o alguien cambio el precio) vuelve solo a la venta.
-- Un salto de costo de 25 % o mas contra el costo de referencia se marca "dudoso" (posible error de la lista del
-  proveedor): igual se protege el margen, pero el aviso pide verificar el costo antes de aplicar.
+- Un salto de costo de 25 % o mas (`margin_guard_jump_pct`) contra el costo de referencia se marca "dudoso" (posible
+  error de la lista del proveedor): igual se protege el margen, pero el aviso pide verificar el costo antes de aplicar.
 - `margin_guard_mode`: sin definir = la PRIMERA corrida es `informe` (no oculta nada) y queda `activo`. Un admin lo
   puede dejar en `informe`; en informe tambien se liberan los retenidos.
 - Tope (`margin_guard_cap`, 20): una corrida no saca de venta mas productos que eso (un tipo de cambio mal digitado no
@@ -39,7 +39,7 @@ from .totals import d
 
 log = logging.getLogger("crimson.margen")
 
-JUMP_PCT = Decimal(25)  # salto de costo que se marca "dudoso"
+JUMP_PCT = Decimal(25)  # salto de costo que se marca "dudoso" (Ajustes: margin_guard_jump_pct; Andres confirma el umbral)
 DEFAULT_CAP = 20
 MODES = ("informe", "activo")
 
@@ -56,6 +56,10 @@ def config(t: Tenant) -> dict:
         cap = max(1, int(cap)) if cap is not None else DEFAULT_CAP
     except (TypeError, ValueError):
         cap = DEFAULT_CAP
+    try:
+        jump = d(st["margin_guard_jump_pct"]) if st.get("margin_guard_jump_pct") is not None else JUMP_PCT
+    except (TypeError, ValueError, ArithmeticError):
+        jump = JUMP_PCT
     return {
         "min_pct": min_margin(t),
         "target_pct": default_margin(t),
@@ -63,6 +67,7 @@ def config(t: Tenant) -> dict:
         "mode": raw if raw in MODES else "informe",
         "first_run": raw not in MODES,
         "cap": cap,
+        "jump_pct": jump if jump > 0 else JUMP_PCT,
     }
 
 
@@ -191,7 +196,7 @@ def run(db: Session, t: Tenant, *, reason: str = "") -> dict:
         out["evaluados"] += 1
         info = dict(p.margin_info or {})
         ref, jump = _jump(db, p, c, info)
-        dudoso = abs(jump) >= JUMP_PCT
+        dudoso = abs(jump) >= cfg["jump_pct"]
         low = c.margin_pct < cfg["min_pct"]
         info.update(
             {

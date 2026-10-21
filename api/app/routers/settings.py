@@ -56,6 +56,7 @@ DEFAULTS = {
     # lo que quede bajo el minimo; nunca reprecia). "informe" lo deja sin ocultar nada. Tope de productos por corrida.
     "margin_guard_mode": None,
     "margin_guard_cap": 20,
+    "margin_guard_jump_pct": 25,  # salto de costo que se marca "dudoso" (Andres confirma el umbral)
     # SLA de soporte por prioridad (horas). Un contrato con SLA propio lo reemplaza para ese cliente.
     "sla": SLA_DEFECTO,
     "archive_purge_days": 30,  # dias en la papelera antes de que el worker lo borre definitivamente
@@ -96,6 +97,7 @@ class SettingsIn(BaseModel):
     min_margin_pct: float | None = Field(None, ge=0, le=95)
     margin_guard_mode: str | None = Field(None, pattern="^(informe|activo)$")
     margin_guard_cap: int | None = Field(None, ge=1, le=1000)
+    margin_guard_jump_pct: float | None = Field(None, gt=0, le=500)
     sla: dict | None = None
 
     @field_validator("sla")
@@ -175,7 +177,7 @@ def put_settings(data: SettingsIn, p: Principal = Depends(require("settings", "c
     return _public_settings(t.settings)
 
 
-GUARD_KEYS = {"min_margin_pct", "default_margin_pct", "margin_guard_mode", "margin_guard_cap"}
+GUARD_KEYS = {"min_margin_pct", "default_margin_pct", "margin_guard_mode", "margin_guard_cap", "margin_guard_jump_pct"}
 
 
 def _sync_activities_from_codes(db: Session, t: Tenant, codes: list[str]) -> None:

@@ -12,7 +12,7 @@ export type GuardLast = {
   nuevos_retenidos: number; liberados: number; dudosos: number; sobre_tope: number; sin_tasa: number; sin_costo: number;
 };
 export type MarginCfg = {
-  min_margin_pct?: number; default_margin_pct?: number; margin_guard_mode?: "informe" | "activo" | null; margin_guard_cap?: number;
+  min_margin_pct?: number; default_margin_pct?: number; margin_guard_mode?: "informe" | "activo" | null; margin_guard_cap?: number; margin_guard_jump_pct?: number;
   margin_guard_last?: GuardLast | null;
 };
 
@@ -57,6 +57,9 @@ export default function MarginGuardCard({ cfg, save }: { cfg: MarginCfg; save: (
           </Field>
           <Field label="Tope por revisión (productos)" hint="Una revisión no saca de venta más que esto (un tipo de cambio mal digitado no vacía la tienda).">
             <input className="input input--mono" type="number" min={1} max={1000} disabled={!edita} defaultValue={cfg.margin_guard_cap ?? 20} onBlur={(e) => e.target.value.trim() && Number(e.target.value) !== Number(cfg.margin_guard_cap ?? 20) && save({ margin_guard_cap: Number(e.target.value) })} />
+          </Field>
+          <Field label="Salto de costo «dudoso» (%)" hint="Si el costo cambia esto o más de una vez, el aviso pide verificarlo con el proveedor antes de aplicar (posible error de la lista).">
+            <input className="input input--mono" type="number" min={1} max={500} disabled={!edita} defaultValue={cfg.margin_guard_jump_pct ?? 25} onBlur={(e) => e.target.value.trim() && Number(e.target.value) > 0 && Number(e.target.value) !== Number(cfg.margin_guard_jump_pct ?? 25) && save({ margin_guard_jump_pct: Number(e.target.value) })} />
           </Field>
         </div>
         {shown ? (

@@ -357,3 +357,17 @@ def test_red_diaria_corre_el_guardian_antes_del_resumen(client, auth, db_session
     db_session.refresh(p)
     assert p.margin_hold
     assert tareas.daily_summary(db_session) == 1
+
+
+def test_umbral_de_salto_dudoso_configurable(client, auth, db_session):
+    """El 25 % del salto "dudoso" es el default (Andres confirma el umbral): con 40 % un salto de 30 % ya no se marca."""
+    tid = auth["tenant"]["id"]
+    _shop(client)
+    p = _producto(client, db_session, tid, code="JUMP-1")
+    assert client.put("/settings", json={"margin_guard_mode": "activo", "margin_guard_jump_pct": 40}).status_code == 200
+    assert client.get("/settings").json()["margin_guard_jump_pct"] == 40
+    _set_cost(db_session, p, 130)  # +30 %
+    margin_guard.run_all(db_session)
+    db_session.refresh(p)
+    assert p.margin_hold and p.margin_info["jump_pct"] == "30" and p.margin_info["dudoso"] is False
+    assert client.put("/settings", json={"margin_guard_jump_pct": 0}).status_code == 422
