@@ -110,6 +110,14 @@ class PasswordOnlyIn(BaseModel):
     password: str = Field(max_length=200)
 
 
+class TotpDisableIn(BaseModel):
+    """Desactivar el 2FA (si el rol no lo exige): contrasena y el codigo actual de la app o uno de recuperacion, lo
+    mismo que "Cambiar de telefono". Con la sesion y la contrasena solas no se apaga para configurarlo con otra app."""
+
+    password: str = Field(max_length=200)
+    code: str = Field("", max_length=20)
+
+
 class PasswordChangeIn(BaseModel):
     current_password: str = Field(max_length=200)
     new_password: str = Field(min_length=10, max_length=200)

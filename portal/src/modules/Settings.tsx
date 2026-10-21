@@ -81,7 +81,8 @@ export default function Settings() {
   const saveBank = () => { if (!bank) return; const { id, ...b } = bank; api(id ? `/settings/bank-accounts/${id}` : "/settings/bank-accounts", { method: id ? "PUT" : "POST", json: b }).then(() => { setBank(null); ok("Cuenta guardada"); }).catch(err); };
   const saveGw = () => { if (!gw) return; api("/settings/gateways", { method: "PUT", json: { ...gw, secret: gw.secret || null, webhook_secret: gw.webhook_secret || null } }).then(() => { setGw(null); ok("Pasarela guardada"); }).catch(err); };
   const done2fa = async (codes: string[]) => { await reload(); setSetup2fa(null); setRecovery(codes); };
-  const disable2fa = () => { if (!apagar) return; api("/auth/2fa/disable", { method: "POST", json: { password: apagar.password } }).then(async () => { await reload(); setApagar(null); toast("2FA desactivado"); }).catch(err); };
+  /* desactivar pide lo mismo que «Cambiar de teléfono»: contraseña y el código de la app (o uno de recuperación) */
+  const disable2fa = () => { if (!apagar) return; api("/auth/2fa/disable", { method: "POST", json: { password: apagar.password, code: apagar.code.trim() } }).then(async () => { await reload(); setApagar(null); toast("2FA desactivado"); }).catch(err); };
   const regen2fa = () => { if (!apagar) return; api<{ codes: string[] }>("/auth/2fa/recovery-codes", { method: "POST", json: { password: apagar.password, code: apagar.code.trim() } }).then((r) => { setApagar(null); setRecovery(r.codes); toast("Códigos nuevos generados; los anteriores ya no sirven"); }).catch(err); };
   const changePw = () => api("/auth/password", { method: "POST", json: pw }).then(() => { setPw({ current_password: "", new_password: "" }); toast("Contraseña actualizada"); }).catch(err);
 
@@ -305,7 +306,7 @@ export default function Settings() {
             <button className="btn btn--ghost" onClick={() => setApagar(null)}>Cancelar</button>
             {apagar.regenerar
               ? <button className="btn btn--crimson" onClick={regen2fa} disabled={!apagar.password || apagar.code.trim().length !== 6}>Generar</button>
-              : <button className="btn btn--danger" onClick={disable2fa} disabled={!apagar.password}>Desactivar</button>}
+              : <button className="btn btn--danger" onClick={disable2fa} disabled={!apagar.password || apagar.code.trim().length < 6}>Desactivar</button>}
           </>}
         >
           <p className="muted" style={{ fontSize: 13.5, marginTop: 0 }}>
@@ -313,10 +314,14 @@ export default function Settings() {
               ? "Los códigos que tenías dejan de servir en el momento en que se generan los nuevos. Si ya no tenés la app, usá «Cambiar de teléfono» con un código de recuperación: al terminar te da códigos nuevos."
               : "La cuenta vuelve a entrar solo con la contraseña. Si esa contraseña ya circuló por algún lado, mejor cambiala primero."}
           </p>
-          <Field label="Confirmá con tu contraseña"><input className="input" type="password" autoComplete="current-password" autoFocus value={apagar.password} onChange={(e) => setApagar({ ...apagar, password: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter" && apagar.password && !apagar.regenerar) disable2fa(); }} /></Field>
-          {apagar.regenerar && (
+          <Field label="Confirmá con tu contraseña"><input className="input" type="password" autoComplete="current-password" autoFocus value={apagar.password} onChange={(e) => setApagar({ ...apagar, password: e.target.value })} /></Field>
+          {apagar.regenerar ? (
             <Field label="Código de tu app" hint="El de seis dígitos que muestra en este momento.">
               <input className="input input--mono" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="000000" value={apagar.code} onChange={(e) => setApagar({ ...apagar, code: e.target.value.replace(/\D/g, "") })} onKeyDown={(e) => { if (e.key === "Enter" && apagar.password && apagar.code.length === 6) regen2fa(); }} style={{ width: 140 }} />
+            </Field>
+          ) : (
+            <Field label="Código de tu app" hint="Si ya no tenés la app, usá uno de tus códigos de recuperación.">
+              <input className="input input--mono" autoComplete="one-time-code" maxLength={9} placeholder="000000" value={apagar.code} onChange={(e) => setApagar({ ...apagar, code: e.target.value.toUpperCase() })} onKeyDown={(e) => { if (e.key === "Enter" && apagar.password && apagar.code.trim().length >= 6) disable2fa(); }} style={{ width: 160 }} />
             </Field>
           )}
         </Modal>

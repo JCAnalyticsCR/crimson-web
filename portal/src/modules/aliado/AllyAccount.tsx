@@ -14,7 +14,8 @@ function DosPasos() {
   const [totp, setTotp] = useState<{ secret: string; otpauth_uri: string } | null>(null);
   const [code, setCode] = useState("");
   const [recovery, setRecovery] = useState<string[] | null>(null);
-  /* regenerar: códigos nuevos (contraseña + código ACTUAL de la app, plan 1.10); si no, desactivar */
+  /* regenerar: códigos nuevos (contraseña + código ACTUAL de la app, plan 1.10); si no, desactivar (contraseña + código
+     de la app o uno de recuperación) */
   const [pw, setPw] = useState<{ password: string; code: string; regenerar: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const fallo = (e: unknown, msg: string) => toast(e instanceof Error ? e.message : msg, "bad");
@@ -38,7 +39,7 @@ function DosPasos() {
         const r = await api<{ codes: string[] }>("/auth/2fa/recovery-codes", { method: "POST", json: { password: pw.password, code: pw.code.trim() } });
         setRecovery(r.codes);
       } else {
-        await api("/auth/2fa/disable", { method: "POST", json: { password: pw.password } });
+        await api("/auth/2fa/disable", { method: "POST", json: { password: pw.password, code: pw.code.trim() } });
         await reload();
         toast("Verificación en dos pasos desactivada");
       }
@@ -86,11 +87,13 @@ function DosPasos() {
       {pw && (
         <Modal title={pw.regenerar ? "Generar códigos nuevos" : "Desactivar la verificación en dos pasos"} onClose={() => setPw(null)} foot={<>
           <button className="btn btn--ghost" onClick={() => setPw(null)}>Cancelar</button>
-          <button className={`btn ${pw.regenerar ? "btn--crimson" : "btn--danger"}`} disabled={busy || !pw.password || (pw.regenerar && pw.code.trim().length !== 6)} onClick={confirmar}>{pw.regenerar ? "Generar" : "Desactivar"}</button>
+          <button className={`btn ${pw.regenerar ? "btn--crimson" : "btn--danger"}`} disabled={busy || !pw.password || (pw.regenerar ? pw.code.trim().length !== 6 : pw.code.trim().length < 6)} onClick={confirmar}>{pw.regenerar ? "Generar" : "Desactivar"}</button>
         </>}>
-          <p style={{ marginTop: 0 }}>{pw.regenerar ? "Confirme con su contraseña y el código de seis dígitos que muestra su app en este momento. Los códigos anteriores dejan de servir." : "Confirme con su contraseña."}</p>
+          <p style={{ marginTop: 0 }}>{pw.regenerar ? "Confirme con su contraseña y el código de seis dígitos que muestra su app en este momento. Los códigos anteriores dejan de servir." : "Confirme con su contraseña y el código que muestra su app en este momento (si ya no tiene la app, uno de sus códigos de recuperación)."}</p>
           <input className="input" type="password" autoComplete="current-password" aria-label="Contraseña" value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} />
-          {pw.regenerar && <input className="input input--mono" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="000000" aria-label="Código de la app" value={pw.code} onChange={(e) => setPw({ ...pw, code: e.target.value.replace(/\D/g, "") })} style={{ width: 140, marginTop: 8 }} />}
+          {pw.regenerar
+            ? <input className="input input--mono" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="000000" aria-label="Código de la app" value={pw.code} onChange={(e) => setPw({ ...pw, code: e.target.value.replace(/\D/g, "") })} style={{ width: 140, marginTop: 8 }} />
+            : <input className="input input--mono" autoComplete="one-time-code" maxLength={9} placeholder="000000" aria-label="Código de la app o de recuperación" value={pw.code} onChange={(e) => setPw({ ...pw, code: e.target.value.toUpperCase() })} style={{ width: 160, marginTop: 8 }} />}
         </Modal>
       )}
     </div>

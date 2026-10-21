@@ -106,9 +106,9 @@ def test_un_codigo_usado_no_se_repite(client, auth, db_session):
     assert u.totp_last_step is not None
 
 
-def test_apagar_avisa_por_correo_y_pide_contrasena(client, auth, db_session):
+def test_apagar_avisa_por_correo_y_pide_contrasena_y_codigo(client, auth, db_session):
     uid = auth["user"]["id"]
-    _activar(client)
+    sec = _activar(client)
     n = len(_avisos(db_session, uid))
     assert n >= 1  # la activacion tambien avisa
     # admin: su rol lo exige (por defecto), no se apaga ni con la contrasena; se cambia de telefono
@@ -118,8 +118,13 @@ def test_apagar_avisa_por_correo_y_pide_contrasena(client, auth, db_session):
     # la empresa deja de exigirlo (aflojarlo pide la contrasena del admin): ya se puede apagar (con la contrasena)
     assert client.put("/settings", json={"twofa_roles": ["contabilidad"], "admin_password": ADMIN[1]}).status_code == 200
     n = len(_avisos(db_session, uid))  # el aviso a los admins de la politica nueva
-    assert client.post("/auth/2fa/disable", json={"password": "otra-cosa-123"}).status_code == 403
-    assert client.post("/auth/2fa/disable", json={"password": ADMIN[1]}).status_code == 204
+    codigo = _codigo(sec, 30)  # la ventana siguiente: la actual la uso la activacion
+    assert client.post("/auth/2fa/disable", json={"password": "otra-cosa-123", "code": codigo}).status_code == 403
+    # con la contrasena sola (o un codigo inventado) no se apaga: es el mismo requisito que cambiar de telefono
+    assert client.post("/auth/2fa/disable", json={"password": ADMIN[1]}).status_code == 403
+    assert client.post("/auth/2fa/disable", json={"password": ADMIN[1], "code": "ABCD-2345"}).status_code == 403
+    assert db_session.get(User, uid).totp_enabled is True
+    assert client.post("/auth/2fa/disable", json={"password": ADMIN[1], "code": codigo}).status_code == 204
     u = db_session.get(User, uid)
     assert u.totp_enabled is False and u.totp_secret is None and u.totp_pending_secret is None
     assert len(_avisos(db_session, uid)) == n + 1
@@ -257,3 +262,19 @@ def test_el_mismo_codigo_toma_la_fila_antes_de_compararlo(client, auth, db_sessi
     pedidos.clear()
     assert client.post("/auth/2fa/setup", json={"password": ADMIN[1], "code": _codigo(sec, 30)}).status_code == 200
     assert ("User", True) in pedidos
+
+
+def test_sesion_y_contrasena_no_apagan_el_2fa_para_quedarselo(client, auth, db_session):
+    """La cadena: con la sesion y la contrasena (sin el telefono) apagar el 2FA y configurarlo con la app del atacante.
+    Desactivar pide lo mismo que "Cambiar de telefono"; con un codigo de recuperacion real si se puede."""
+    uid = auth["user"]["id"]
+    assert client.put("/settings", json={"twofa_roles": [], "admin_password": ADMIN[1]}).status_code == 200
+    sec = client.post("/auth/2fa/setup").json()["secret"]
+    codes = client.post("/auth/2fa/verify", json={"code": _codigo(sec)}).json()["codes"]
+    assert client.post("/auth/2fa/disable", json={"password": ADMIN[1]}).status_code == 403
+    assert client.post("/auth/2fa/setup").status_code == 403  # sigue activo: setup pide contrasena y codigo
+    u = db_session.get(User, uid)
+    assert u.totp_enabled and u.totp_secret == sec and u.totp_pending_secret is None
+    # la duena sin la app: un codigo de recuperacion sirve (y ya no sirve otra vez)
+    assert client.post("/auth/2fa/disable", json={"password": ADMIN[1], "code": codes[0]}).status_code == 204
+    assert db_session.get(User, uid).totp_enabled is False

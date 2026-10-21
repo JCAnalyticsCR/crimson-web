@@ -80,11 +80,14 @@ def create_app() -> FastAPI:
     )
     from .core.bodylimit import BodyLimitMiddleware
     from .core.clientip import ClientIPMiddleware
-    from .core.cors import SplitCORSMiddleware
+    from .core.cors import SplitCORSMiddleware, log_origins, split_origins
 
     app.add_middleware(BodyLimitMiddleware)  # antes que CORS: el 413 lleva sus encabezados
-    # cookies solo para el portal; la landing sin cookies y solo en sus rutas publicas (core/cors.py)
-    app.add_middleware(SplitCORSMiddleware, portal_origins=list(settings.cors_origins), landing_origins=list(settings.landing_origins))
+    # cookies solo para el panel (en produccion, solo el origen de PUBLIC_BASE_URL); la landing sin cookies y solo en sus
+    # rutas publicas (core/cors.py)
+    origins = split_origins(list(settings.cors_origins), list(settings.landing_origins), settings.public_base_url, settings.is_prod)
+    log_origins(origins)
+    app.add_middleware(SplitCORSMiddleware, origins=origins)
 
     @app.middleware("http")
     async def request_log(request: Request, call_next):

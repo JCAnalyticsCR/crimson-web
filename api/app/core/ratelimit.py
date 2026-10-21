@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict, deque
+from collections.abc import Callable
 from threading import Lock
 
 from fastapi import HTTPException, status
@@ -43,11 +44,18 @@ class FailureLimiter:
     intento nuevo espera base * 2^(fallos - free) segundos desde el ultimo fallo (tope `cap`). La clave se olvida
     `forget` segundos despues de su ultimo fallo, o al acertar (clear). Como mucho `max_keys` claves en memoria: pasado
     el tope se olvidan primero las vencidas y, si no alcanza, las de fallo mas viejo (quien ataca ahora queda entre las
-    recientes)."""
+    recientes).
+
+    Intentos en curso (reserve): mirar la espera y anotar el intento es UNA operacion con el lock tomado, y el intento
+    cuenta como fallo provisional mientras se verifica (Argon2 tarda y corre sin el GIL). Sin esto, 40 logins a la vez
+    leian la espera en 0 antes de que alguno anotara su fallo y todos probaban la contrasena. Al terminar: confirm (fue
+    un fallo) o release (acerto o no cuenta), sin tocar los fallos anteriores."""
 
     def __init__(self, free: int, base: int, cap: int, forget: int, max_keys: int = 50_000):
         self.free, self.base, self.cap, self.forget, self.max_keys = free, base, cap, forget, max_keys
         self.state: dict[str, tuple[int, float]] = {}  # clave -> (fallos, momento del ultimo fallo)
+        self.pending: dict[str, dict[int, float]] = {}  # clave -> {reserva: momento} de los intentos en curso
+        self._seq = 0
         self.lock = Lock()
         self.clock = time.monotonic  # las pruebas lo reemplazan para simular la espera
 
@@ -69,28 +77,66 @@ class FailureLimiter:
             return 0, 0.0
         return n, last
 
+    def _wait(self, key: str, now: float) -> int:
+        """Con el lock tomado. Los intentos en curso cuentan como fallos (del momento en que se reservaron)."""
+        n, last = self._live(key, now)
+        p = self.pending.get(key)
+        if p:
+            n, last = n + len(p), max(last, *p.values())
+        if n < self.free:
+            return 0
+        pause = min(self.cap, self.base * 2 ** (n - self.free))
+        return max(0, int(pause - (now - last)) + 1) if now - last < pause else 0
+
     def wait(self, key: str) -> int:
         """Segundos que faltan para poder intentar de nuevo (0 = puede)."""
         now = self.clock()
         with self.lock:
-            n, last = self._live(key, now)
-            if n < self.free:
-                return 0
-            pause = min(self.cap, self.base * 2 ** (n - self.free))
-            return max(0, int(pause - (now - last)) + 1) if now - last < pause else 0
+            return self._wait(key, now)
 
     def check(self, key: str, message: str) -> None:
         w = self.wait(key)
         if w:
-            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, message.format(espera=_espera(w)), headers={"Retry-After": str(w)})
+            raise _too_many(message, w)
 
-    def fail(self, key: str) -> int:
+    def reserve(self, key: str, enforce: bool = True) -> tuple[int, int]:
+        """Atomico: si no hay espera (o enforce=False) anota el intento en curso y devuelve (0, reserva); si la hay,
+        devuelve (segundos, 0) sin anotar nada. La reserva se cierra con confirm o release."""
         now = self.clock()
         with self.lock:
+            if enforce:
+                w = self._wait(key, now)
+                if w:
+                    return w, 0
+            self._seq += 1
+            self.pending.setdefault(key, {})[self._seq] = now
+            return 0, self._seq
+
+    def _drop(self, key: str, ticket: int) -> None:
+        p = self.pending.get(key)
+        if p is not None:
+            p.pop(ticket, None)
+            if not p:
+                self.pending.pop(key, None)
+
+    def confirm(self, key: str, ticket: int) -> int:
+        """El intento reservado fallo: pasa a ser un fallo (ahora). Devuelve los fallos de la clave."""
+        now = self.clock()
+        with self.lock:
+            self._drop(key, ticket)
             n, _ = self._live(key, now)
             self.state[key] = (n + 1, now)
             self._trim(now)
             return n + 1
+
+    def release(self, key: str, ticket: int) -> None:
+        """El intento reservado no fue un fallo (acerto, o no llego a probar nada que cuente): se quita sin mas."""
+        with self.lock:
+            self._drop(key, ticket)
+
+    def fail(self, key: str) -> int:
+        """Un fallo sin reserva previa."""
+        return self.confirm(key, 0)
 
     def count(self, key: str) -> int:
         with self.lock:
@@ -104,16 +150,56 @@ class FailureLimiter:
             return int(self.forget - (now - last)) + 1 if n and n >= self.free else 0
 
     def clear(self, key: str) -> None:
+        """Olvida los fallos (no los intentos que siguen en curso)."""
         with self.lock:
             self.state.pop(key, None)
 
     def reset(self) -> None:
         with self.lock:
             self.state.clear()
+            self.pending.clear()
 
 
 def _espera(seg: int) -> str:
     return f"{seg} segundos" if seg < 90 else f"{-(-seg // 60)} minutos"
+
+
+def _too_many(message: str, wait: int) -> HTTPException:
+    return HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, message.format(espera=_espera(wait)), headers={"Retry-After": str(wait)})
+
+
+MSG_IP = "Demasiados intentos fallidos desde esta conexión. Esperá {espera} y probá de nuevo."
+MSG_ACCOUNT_IP = "Demasiados intentos fallidos con esta cuenta. Esperá {espera} y probá de nuevo."
+MSG_DEVICE = "Demasiados intentos fallidos desde este equipo. Esperá {espera} y probá de nuevo."
+MSG_ACCOUNT = "Hubo muchos intentos fallidos con esta cuenta. Esperá {espera} y probá de nuevo; desde un equipo donde ya entraste no hace falta esperar."
+
+
+class LoginAttempt:
+    """Un login en curso, reservado en cada limitador que le toca (LoginLimiter.begin). Se cierra UNA vez: fail()
+    (contrasena o codigo equivocado), success(), o close() si no cuenta (falta el codigo 2FA, contrasena temporal, sin
+    empresa...). El router llama close() en un finally: una reserva nunca queda colgada."""
+
+    def __init__(self, owner: LoginLimiter, held: list[tuple[FailureLimiter, str, int]], email: str, ip: str, device: str | None):
+        self.owner, self.held, self.email, self.ip, self.device = owner, held, email, ip, device
+
+    def fail(self) -> int:
+        """Devuelve los fallidos de la cuenta desde todas las IPs."""
+        total = 0
+        for lim, key, ticket in self.held:
+            n = lim.confirm(key, ticket)
+            if lim is self.owner.total:
+                total = n
+        self.held = []
+        return total
+
+    def success(self) -> None:
+        self.close()
+        self.owner.success(self.email, self.ip, self.device)
+
+    def close(self) -> None:
+        for lim, key, ticket in self.held:
+            lim.release(key, ticket)
+        self.held = []
 
 
 class LoginLimiter:
@@ -133,6 +219,8 @@ class LoginLimiter:
       margen al atacante); cambiar la contrasena si (forget_account): los fallidos eran contra la anterior.
     - Por equipo (la cookie de equipo de quien ya entro desde ahi): 5 fallidos y despues espera progresiva desde 30 s
       (tope 15 min). Una cookie robada no da intentos sin limite repartidos entre muchas IPs.
+    Cada intento se reserva antes de verificar (begin): los que llegan a la vez cuentan como fallos mientras estan en
+    curso, asi que los topes valen aunque el atacante mande muchos logins simultaneos.
     Las IPv6 cuentan por su red /64 (clientip.ip_key).
     """
 
@@ -165,30 +253,31 @@ class LoginLimiter:
         return cls._h(f"equipo|{device}")
 
     def check(self, email: str, ip: str) -> None:
-        """Por IP y por cuenta + IP (no necesitan la base)."""
-        self.ip.check(ip_key(ip), "Demasiados intentos fallidos desde esta conexión. Esperá {espera} y probá de nuevo.")
-        self.account.check(self._acct(email, ip), "Demasiados intentos fallidos con esta cuenta. Esperá {espera} y probá de nuevo.")
+        """Vistazo previo por IP y por cuenta + IP (no necesitan la base). No reserva: el que vale es begin."""
+        self.ip.check(ip_key(ip), MSG_IP)
+        self.account.check(self._acct(email, ip), MSG_ACCOUNT_IP)
 
-    def check_device(self, device: str) -> None:
-        self.device.check(self._dev(device), "Demasiados intentos fallidos desde este equipo. Esperá {espera} y probá de nuevo.")
-
-    def account_wait(self, email: str) -> int:
-        """Segundos que espera quien no es de confianza para la cuenta (0 = puede intentar)."""
-        return self.total.wait(self._total(email))
-
-    def check_account(self, email: str) -> None:
-        self.total.check(
-            self._total(email),
-            "Hubo muchos intentos fallidos con esta cuenta. Esperá {espera} y probá de nuevo; desde un equipo donde ya entraste no hace falta esperar.",
-        )
-
-    def fail(self, email: str, ip: str, device: str | None = None) -> int:
-        """Registra un fallo. Devuelve los fallidos de la cuenta desde todas las IPs."""
-        self.ip.fail(ip_key(ip))
-        self.account.fail(self._acct(email, ip))
+    def begin(self, email: str, ip: str, device: str | None, trusted: Callable[[], bool]) -> LoginAttempt:
+        """Reserva el intento en cada limitador (por IP, cuenta + IP, equipo y cuenta) o responde 429 sin reservar
+        nada. La espera por cuenta (todas las IPs) no aplica a quien es de confianza para la cuenta (trusted(), que
+        consulta la base solo si hace falta); su intento igual queda anotado."""
+        steps: list[tuple[FailureLimiter, str, str]] = [(self.ip, ip_key(ip), MSG_IP), (self.account, self._acct(email, ip), MSG_ACCOUNT_IP)]
         if device:
-            self.device.fail(self._dev(device))
-        return self.total.fail(self._total(email))
+            steps.append((self.device, self._dev(device), MSG_DEVICE))
+        steps.append((self.total, self._total(email), MSG_ACCOUNT))
+        attempt = LoginAttempt(self, [], email, ip, device)
+        try:
+            for lim, key, msg in steps:
+                w, ticket = lim.reserve(key)
+                if w and lim is self.total and trusted():
+                    w, ticket = lim.reserve(key, enforce=False)
+                if w:
+                    raise _too_many(msg, w)
+                attempt.held.append((lim, key, ticket))
+        except BaseException:
+            attempt.close()
+            raise
+        return attempt
 
     def account_failures(self, email: str) -> int:
         return self.total.count(self._total(email))

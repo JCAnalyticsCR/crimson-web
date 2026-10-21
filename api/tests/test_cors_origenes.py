@@ -91,3 +91,43 @@ def test_landing_en_cors_origins_igual_va_sin_cookies(db_session, monkeypatch):
     # el refresh tampoco se canjea desde la landing
     assert c2.post("/auth/login", json={"email": ADMIN[0], "password": ADMIN[1]}).status_code == 200
     assert c2.post("/auth/refresh", headers={"Origin": LANDING}).status_code == 403
+
+
+def test_en_produccion_solo_el_panel_con_cookies(db_session, monkeypatch, caplog):
+    """La tienda es del mismo sitio que el panel (la cookie de sesion viaja en sus peticiones): aunque figure en
+    CORS_ORIGINS, en produccion va sin cookies y no canjea el refresh. Con cookies solo el origen de PUBLIC_BASE_URL."""
+    import logging
+
+    from app.core.config import settings
+    from app.core.db import get_db
+    from app.main import create_app
+
+    tienda = "https://tienda.ejemplo-crimson.test"
+    monkeypatch.setattr(settings, "env", "production")
+    monkeypatch.setattr(settings, "cors_origins", [PANEL, tienda])
+    monkeypatch.setattr(settings, "landing_origins", [LANDING])
+    monkeypatch.setattr(settings, "public_base_url", PANEL + "/")
+    with caplog.at_level(logging.ERROR, logger="crimson.config"):
+        app = create_app()
+    assert any(tienda in r.getMessage() and r.levelno == logging.ERROR for r in caplog.records)
+    app.dependency_overrides[get_db] = lambda: db_session
+    c3 = TestClient(app)
+    r = _pre(c3, "/auth/refresh", tienda)
+    assert r.headers.get("access-control-allow-origin") == tienda and "access-control-allow-credentials" not in r.headers
+    r = c3.get("/health", headers={"Origin": tienda})
+    assert "access-control-allow-credentials" not in r.headers
+    assert _pre(c3, "/auth/refresh", PANEL).headers["access-control-allow-credentials"] == "true"
+    # el refresh solo desde el panel: la tienda (Sec-Fetch-Site same-site) no se lleva un token
+    assert c3.post("/auth/login", json={"email": ADMIN[0], "password": ADMIN[1]}).status_code == 200
+    assert c3.post("/auth/refresh", headers={"Origin": tienda, "Sec-Fetch-Site": "same-site"}).status_code == 403
+    assert c3.post("/auth/refresh", headers={"Origin": PANEL, "Sec-Fetch-Site": "same-origin"}).status_code == 200
+
+
+def test_en_produccion_el_panel_con_cookies_aunque_no_figure_en_cors_origins(db_session, monkeypatch):
+    from app.core.cors import split_origins
+
+    o = split_origins(["https://otro.ejemplo-crimson.test", "*"], [LANDING], PANEL, prod=True)
+    assert o.credentials == (PANEL,) and o.plain == ("https://otro.ejemplo-crimson.test",) and o.ignored == ("*",)
+    # fuera de produccion, todos los de CORS_ORIGINS con cookies (desarrollo local)
+    o = split_origins([PANEL, "HTTP://localhost:5173/"], [LANDING], PANEL, prod=False)
+    assert o.credentials == (PANEL, "http://localhost:5173") and o.plain == ()

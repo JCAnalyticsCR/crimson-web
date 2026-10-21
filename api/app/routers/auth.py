@@ -3,7 +3,7 @@
 Plan 1.10: el limite del login cuenta solo intentos fallidos (por IP, por cuenta + IP y por equipo, con espera
 progresiva, y por cuenta desde todas las IPs, que hace esperar a lo sumo un minuto a quien no es de confianza para la
 cuenta: un tercero no la bloquea ni deja afuera a la duena, y la respuesta es la misma exista o no la cuenta); el
-refresh solo se acepta desde el portal; el 2FA activo no se cambia (ni se fabrican codigos de
+refresh solo se acepta desde el portal; el 2FA activo no se cambia ni se apaga (ni se fabrican codigos de
 recuperacion) sin contrasena y codigo, cada contrasena que se compara con la sesion abierta cuenta en reauth_limiter,
 un codigo no se repite (ni con dos pedidos a la vez) y el 2FA es obligatorio para los roles que la empresa defina
 (core/twofa.py)."""
@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import secrets
 from datetime import UTC, datetime, timedelta
-from urllib.parse import urlsplit
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -22,9 +21,10 @@ from sqlalchemy.orm import Session
 from ..core import twofa
 from ..core.clientip import ip_key, ip_propia, source
 from ..core.config import settings
+from ..core.cors import origin_of, split_origins
 from ..core.db import get_db
 from ..core.deps import CLIENT_ROLES, ROLE_PERMISSIONS, Principal, effective_permissions, get_principal, get_session_principal
-from ..core.ratelimit import login_limiter, pwreset_email_limiter, pwreset_global_limiter, pwreset_ip_limiter, reauth_limiter, token_limiter
+from ..core.ratelimit import LoginAttempt, login_limiter, pwreset_email_limiter, pwreset_global_limiter, pwreset_ip_limiter, reauth_limiter, token_limiter
 from ..core.reauth import actor_key, require_reauth
 from ..core.security import (
     create_access_token,
@@ -50,13 +50,13 @@ from ..schemas.core import (
     MembershipOut,
     MeOut,
     PasswordChangeIn,
-    PasswordOnlyIn,
     RecoveryCodesIn,
     RecoveryCodesOut,
     ResetConfirmIn,
     ResetRequestIn,
     ResetTokenIn,
     TokenOut,
+    TotpDisableIn,
     TotpSetupIn,
     TotpSetupOut,
     TotpVerifyIn,
@@ -208,12 +208,6 @@ def _trusted(db: Session, request: Request, user: User | None, device: str | Non
     return device is not None or (user is not None and ip_propia(request) and _known_ip(db, user, ip, now))
 
 
-def _login_failed(email: str, ip: str, device: str | None) -> None:
-    """Un intento fallido (tambien adivinar el codigo 2FA): cuenta por IP, por cuenta + IP, por equipo y por cuenta
-    desde todas las IPs. Nada en la base: el limite no bloquea la cuenta y es igual para un correo que no existe."""
-    login_limiter.fail(email, ip, device)
-
-
 def _pick_membership(db: Session, user: User, slug: str | None) -> TenantUser:
     q = select(TenantUser).join(Tenant).where(TenantUser.user_id == user.id, TenantUser.active, Tenant.active)
     if slug:
@@ -230,24 +224,32 @@ def login(data: LoginIn, request: Request, resp: Response, db: Session = Depends
     # previa a un raise quedaria pendiente en la sesion de BD y se guardaria en el siguiente commit.
     ip = client_ip(request)
     email = data.email.lower()
-    login_limiter.check(email, ip)  # solo frena a quien ya fallo (por IP o por esta cuenta desde esta IP)
+    login_limiter.check(email, ip)  # vistazo sin la base: solo frena a quien ya fallo (por IP o por cuenta + IP)
     user = db.scalar(select(User).where(User.email == email))
     if user is not None and not user.active:
         user = None  # como si no existiera: mismas respuestas y mismos limites
-    generic = HTTPException(status.HTTP_401_UNAUTHORIZED, "Credenciales invalidas")
     now = datetime.now(UTC)
     device = _device(request, user)
-    if device:
-        login_limiter.check_device(device)
-    # Muchos fallidos con la cuenta desde todas las IPs: quien no es de confianza espera (a lo sumo un minuto) en vez
-    # de un bloqueo que un tercero renovaria sin fin. La misma respuesta exista o no la cuenta.
-    if login_limiter.account_wait(email) and not _trusted(db, request, user, device, ip, now):
-        login_limiter.check_account(email)
+    # El intento se reserva (por IP, cuenta + IP, equipo y cuenta desde todas las IPs) ANTES de probar la contrasena:
+    # los logins simultaneos no leen todos la espera en 0. Muchos fallidos con la cuenta: quien no es de confianza
+    # espera (a lo sumo un minuto) en vez de un bloqueo que un tercero renovaria sin fin; la misma respuesta exista o
+    # no la cuenta.
+    attempt = login_limiter.begin(email, ip, device, trusted=lambda: _trusted(db, request, user, device, ip, now))
+    try:
+        return _login_checked(data, request, resp, db, user, ip, now, attempt)
+    finally:
+        attempt.close()  # si no fallo ni acerto (falta el 2FA, contrasena temporal...), la reserva no cuenta
+
+
+def _login_checked(data: LoginIn, request: Request, resp: Response, db: Session, user: User | None, ip: str, now: datetime, attempt: LoginAttempt) -> TokenOut:
+    """El resto del login, con el intento ya reservado: attempt.fail() en cada fallo que cuenta (tambien adivinar el
+    codigo 2FA; nada en la base: el limite no bloquea la cuenta y es igual para un correo que no existe)."""
+    generic = HTTPException(status.HTTP_401_UNAUTHORIZED, "Credenciales invalidas")
     if user is None:
-        _login_failed(email, ip, None)
+        attempt.fail()
         raise generic
     if not verify_password(data.password, user.password_hash):
-        _login_failed(email, ip, device)
+        attempt.fail()
         raise generic
     # Compuerta de contrasena temporal (Ajustes -> Usuarios -> Restablecer): antes del 2FA, asi el codigo de la app
     # se escribe una sola vez al final. La contrasena era correcta: estas respuestas no suman intentos fallidos.
@@ -280,14 +282,14 @@ def login(data: LoginIn, request: Request, resp: Response, db: Session = Depends
                 if verify_totp(user.totp_secret or "", data.totp_code):
                     # el codigo era bueno pero ya se uso (doble envio o alguien lo vio): no suma como fallido
                     raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Ese código ya se usó. Esperá a que la app muestre el siguiente.")
-                _login_failed(email, ip, device)  # adivinar el codigo tambien cuenta
+                attempt.fail()  # adivinar el codigo tambien cuenta
                 raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Codigo 2FA invalido")
     m = _pick_membership(db, user, data.tenant_slug)
     if quedan is not None:
         user.totp_recovery = quedan
     if step is not None:
         user.totp_last_step = step  # ese codigo ya no sirve otra vez
-    login_limiter.success(email, ip, device)
+    attempt.success()
     # los fallidos de la cuenta (todas las IPs) NO se limpian al acertar: la duena entra sin devolverle margen al
     # atacante; se olvidan solos (o al cambiar la contrasena)
     if user.must_change_password:
@@ -297,23 +299,19 @@ def login(data: LoginIn, request: Request, resp: Response, db: Session = Depends
     return _issue(db, request, resp, user, m)
 
 
-def _origin(url: str | None) -> str | None:
-    if not url:
-        return None
-    u = urlsplit(url.strip())
-    return f"{u.scheme}://{u.netloc}".lower() if u.scheme and u.netloc else None
-
-
 def _portal_only(request: Request) -> None:
-    """La cookie de sesion solo se canjea desde el portal: con otro Origin o desde otro sitio (Sec-Fetch-Site) se
-    rechaza aunque el navegador la mande. Sin Origin (herramientas, peticiones del mismo origen) pasa."""
+    """La cookie de sesion solo se canjea desde el panel: con otro Origin o desde otro sitio (Sec-Fetch-Site) se
+    rechaza aunque el navegador la mande. Sin Origin (herramientas, peticiones del mismo origen) pasa. Los origenes
+    son los mismos que reciben CORS con cookies (core/cors.py): en produccion solo el de PUBLIC_BASE_URL (la tienda,
+    del mismo sitio que el panel, no aunque figure en CORS_ORIGINS); nunca la landing."""
     if (request.headers.get("sec-fetch-site") or "").strip().lower() == "cross-site":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Origen no permitido")
     origin = request.headers.get("origin")
     if origin is None:
         return
-    landing = {o for o in (_origin(x) for x in settings.landing_origins) if o}  # la landing nunca, aunque figure en CORS_ORIGINS
-    allowed = {o for o in (_origin(x) for x in [*settings.cors_origins, settings.public_base_url]) if o} - landing
+    o = split_origins(list(settings.cors_origins), list(settings.landing_origins), settings.public_base_url, settings.is_prod)
+    panel = origin_of(settings.public_base_url)
+    allowed = {*o.credentials, *([panel] if panel and panel not in o.landing else [])}
     if origin.strip().rstrip("/").lower() not in allowed:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Origen no permitido")
 
@@ -424,7 +422,8 @@ def change_password(data: PasswordChangeIn, response: Response, p: Principal = D
 def totp_setup(data: TotpSetupIn | None = None, p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
     """Genera el secreto nuevo, que queda PENDIENTE hasta que /2fa/verify lo confirma: el 2FA que ya estaba sigue
     activo mientras tanto. La primera vez basta la sesion; con el 2FA activo (cambio de telefono) se exige la
-    contrasena y el codigo actual (o uno de recuperacion): con solo una sesion abierta nadie lo cambia ni lo apaga."""
+    contrasena y el codigo actual (o uno de recuperacion), igual que para apagarlo (/2fa/disable): con la sesion y la
+    contrasena solas nadie lo cambia ni lo apaga."""
     u = p.user
     if u.totp_enabled:
         data = data or TotpSetupIn()
@@ -517,16 +516,26 @@ def _twofa_required_somewhere(db: Session, user: User) -> bool:
 
 
 @router.post("/2fa/disable", status_code=204)
-def totp_disable(data: PasswordOnlyIn, p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
-    """Apaga el 2FA con la contrasena. Sin esto, perder el telefono significaba entrar a la base de datos.
-    Plan 1.10: si su rol (en cualquiera de sus empresas) exige 2FA no se apaga; se cambia de telefono (setup con
-    contrasena y codigo) o, sin telefono ni codigos, lo quita el administrador al restablecer la contrasena."""
+def totp_disable(data: TotpDisableIn, p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
+    """Apaga el 2FA con la contrasena y el codigo actual de la app (o uno de recuperacion), lo mismo que "Cambiar de
+    telefono": si bastara la contrasena, quien tiene la sesion y la contrasena lo apagaria y despues lo configuraria
+    con su propia app (setup sin 2FA activo no pide nada). Sin telefono ni codigos lo quita el administrador al
+    restablecer la contrasena. Plan 1.10: si su rol (en cualquiera de sus empresas) exige 2FA no se apaga; se cambia
+    de telefono."""
     if _twofa_required_somewhere(db, p.user):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "Tu rol exige la verificación en dos pasos: no se puede desactivar. Si cambiaste de teléfono, usá «Cambiar de teléfono».",
         )
-    require_reauth(p, data.password, "Contraseña incorrecta")  # cada intento cuenta (reauth_limiter)
+    require_reauth(p, data.password, "Contraseña incorrecta")  # cada intento cuenta (reauth_limiter, tambien el codigo)
+    u = p.user
+    if u.totp_enabled:
+        db.refresh(u, with_for_update=True)  # el mismo codigo en dos pedidos a la vez: el segundo lo ve ya usado
+        step = totp_step(u.totp_secret or "", data.code or "", after=u.totp_last_step)
+        if step is None and use_recovery_code(u.totp_recovery, data.code or "") is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "El código de tu app (o el de recuperación) no es válido o ya se usó")
+        if step is not None:
+            u.totp_last_step = step
     p.user.totp_enabled = False
     p.user.totp_secret = None
     p.user.totp_pending_secret = None

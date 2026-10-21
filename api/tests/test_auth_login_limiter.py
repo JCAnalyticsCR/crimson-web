@@ -327,3 +327,61 @@ def test_codigo_2fa_equivocado_tambien_cuenta(client, auth, from_ip):
     codes = [_login(client, *ADMIN, ip, totp_code=codigo_malo).status_code for _ in range(6)]
     assert codes[:5] == [401] * 5 and codes[5] == 429
     assert login_limiter.account_failures(ADMIN[0]) == 5  # adivinar el codigo suma al bloqueo de la cuenta
+
+
+def test_reserva_atomica_los_simultaneos_no_leen_la_espera_en_cero():
+    """Mirar la espera y anotar el intento es una sola operacion: los que llegan mientras otro verifica la contrasena
+    cuentan ese intento en curso (antes, 40 a la vez leian 0 y todos probaban la contrasena)."""
+    lim = FailureLimiter(free=2, base=30, cap=60, forget=3600)
+    t = [0.0]
+    lim.clock = lambda: t[0]
+    tickets = [lim.reserve("k") for _ in range(5)]
+    assert [w == 0 for w, _ in tickets] == [True, True, False, False, False]  # solo los libres pasan a la vez
+    assert lim.count("k") == 0  # en curso no es fallo todavia
+    (_, a), (_, b) = tickets[:2]
+    assert lim.confirm("k", a) == 1
+    lim.release("k", b)  # el otro acerto: no suma y no toca el fallo anterior
+    assert lim.count("k") == 1 and lim.wait("k") == 0
+    assert lim.reserve("k", enforce=False)[0] == 0  # de confianza: no espera, pero su intento queda en curso
+    assert lim.wait("k") > 0
+
+
+def test_login_simultaneo_no_salta_la_espera_de_la_cuenta(client, db_session, monkeypatch, from_ip):
+    """Vencida la espera por cuenta, un login que llega mientras otro esta probando la contrasena (desde otra IP) ya
+    ve ese intento: un 429, no otro intento contra la cuenta."""
+    import app.routers.auth as auth_router
+
+    t = _reloj(monkeypatch)
+    u = _mk_user(db_session, "simultanea@ejemplo.com")
+    _bajo_ataque(client, u.email, from_ip)
+    r = _login(_atacante(client), u.email, MALA, from_ip("203.0.113.120"))
+    assert r.status_code == 429
+    t[0] += int(r.headers["Retry-After"])
+    real = auth_router.verify_password
+    durante: list[int] = []
+    llamadas = [0]
+
+    def lento(pw, h):
+        llamadas[0] += 1
+        if llamadas[0] == 1:  # mientras el primero "verifica", llega el segundo desde otra IP
+            durante.append(_login(_atacante(client), u.email, MALA, from_ip("203.0.113.122")).status_code)
+        return real(pw, h)
+
+    monkeypatch.setattr(auth_router, "verify_password", lento)
+    assert _login(_atacante(client), u.email, MALA, from_ip("203.0.113.121")).status_code == 401
+    assert durante == [429]
+    assert login_limiter.account_failures(u.email) == LoginLimiter.ACCOUNT_FREE + 1
+    assert not login_limiter.total.pending  # ninguna reserva queda colgada
+
+
+def test_login_que_no_cuenta_suelta_la_reserva(client, auth, from_ip):
+    """Contrasena correcta pero falta el codigo 2FA (o la contrasena temporal): no suma ni deja la reserva puesta."""
+    sec = client.post("/auth/2fa/setup").json()["secret"]
+    assert client.post("/auth/2fa/verify", json={"code": pyotp.TOTP(sec).now()}).status_code == 200
+    client.headers.pop("Authorization", None)
+    for _ in range(12):
+        r = _login(client, *ADMIN, from_ip("203.0.113.130"))
+        assert r.status_code == 401 and r.headers.get("X-2FA") == "required"
+    assert login_limiter.account_failures(ADMIN[0]) == 0
+    for lim in (login_limiter.ip, login_limiter.account, login_limiter.total, login_limiter.device):
+        assert not lim.pending
