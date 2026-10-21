@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -371,7 +371,19 @@ def _throttled(session_id: str) -> bool:
     return False
 
 
+AUTO = "consulta automática"  # source del worker (store.sync_card_orders)
+AUTO_SESSIONS = timedelta(hours=24)  # consulta automatica: la sesion vigente y las abiertas en este lapso
+
+
+def unreachable(e: OnvoError) -> bool:
+    """ONVO no respondio (red o tiempo agotado: status 0), fallo (5xx), freno por cuota (429) o rechazo la llave
+    (401/403): no es una respuesta sobre el pago. Un 404 (sesion que no existe) o el 409 de "no esta pagada" si lo son."""
+    return e.status == 0 or e.status >= 500 or e.status in (401, 403, 429)
+
+
 def _sync(db: Session, t: Tenant, session_id: str | None, expect: dict, source: str = "regreso") -> str | None:
+    """None si la sesion no esta pagada o no se pudo consultar. En la consulta automatica, si ONVO no responde se
+    relanza el OnvoError: el worker deja de consultar a esa empresa en la corrida."""
     if not session_id or session_id.startswith("sim_") or _throttled(session_id):
         return None
     key = verify_key(db, t.id)
@@ -382,16 +394,22 @@ def _sync(db: Session, t: Tenant, session_id: str | None, expect: dict, source: 
         return _apply_session(db, t, api, api.get_checkout(session_id), {"id": session_id}, source, expect)
     except OnvoError as e:
         log.info("sync ONVO %s: %s", session_id, e.message)
+        if source == AUTO and unreachable(e):
+            raise
         return None
 
 
-def sync_order(db: Session, t: Tenant, o: Order, source: str = "regreso") -> str | None:
-    """source: "regreso" (el comprador volvio de ONVO: su sesion es la ultima) o "consulta automática" (worker cada
-    15 min: TODAS las sesiones del pedido, porque "Pagar con tarjeta" en Mi pedido abre una nueva cada vez y el pago
-    pudo quedar en una anterior)."""
+def sync_order(db: Session, t: Tenant, o: Order, source: str = "regreso", now: datetime | None = None) -> str | None:
+    """source: "regreso" (el comprador volvio de ONVO: su sesion es la ultima) o AUTO (worker cada 15 min, con espera
+    creciente por pedido): la sesion vigente (o.payment_ref) y las abiertas en las ultimas AUTO_SESSIONS, porque "Pagar
+    con tarjeta" en Mi pedido abre una nueva cada vez y el pago pudo quedar en una anterior. Una sesion mas vieja la
+    revisa onvo.order_payment antes de cancelar (todas, hasta MAX_SESSIONS). AUTO relanza OnvoError si ONVO no responde."""
     if o.payment_kind != "tarjeta" or o.status not in ("nuevo", "en_revision"):
         return None
-    refs = [o.payment_ref] if source == "regreso" else order_sessions(db, o)
+    if source == "regreso":
+        refs = [o.payment_ref]
+    else:
+        refs = order_sessions(db, o, since=(now or datetime.now(UTC)) - AUTO_SESSIONS)
     for ref in refs:
         res = _sync(db, t, ref, {"order_id": o.id, "tenant_id": t.id}, source)
         if res is not None:
@@ -402,18 +420,17 @@ def sync_order(db: Session, t: Tenant, o: Order, source: str = "regreso") -> str
 MAX_SESSIONS = 10  # sesiones de ONVO que se revisan por pedido (las mas recientes)
 
 
-def order_sessions(db: Session, o: Order) -> list[str]:
+def order_sessions(db: Session, o: Order, since: datetime | None = None) -> list[str]:
     """Sesiones de Checkout de ONVO abiertas para el pedido, de la mas reciente a la mas vieja: la de o.payment_ref
-    y las que dejo cada card_intent en la bitacora (audit "card_intent"). Sin las simuladas."""
+    y las que dejo cada card_intent en la bitacora (audit "card_intent"), solo las abiertas desde `since` si se da (la
+    vigente va siempre). Sin las simuladas."""
     from ..models import AuditLog
 
     ids = [o.payment_ref or ""]
-    diffs = db.scalars(
-        select(AuditLog.diff)
-        .where(AuditLog.tenant_id == o.tenant_id, AuditLog.entity == "order", AuditLog.entity_id == o.id, AuditLog.action == "card_intent")
-        .order_by(AuditLog.id.desc())
-        .limit(MAX_SESSIONS)
-    )
+    q = select(AuditLog.diff).where(AuditLog.tenant_id == o.tenant_id, AuditLog.entity == "order", AuditLog.entity_id == o.id, AuditLog.action == "card_intent")
+    if since is not None:
+        q = q.where(AuditLog.at >= since)
+    diffs = db.scalars(q.order_by(AuditLog.id.desc()).limit(MAX_SESSIONS))
     ids += [str((d or {}).get("intent") or "") for d in diffs]
     return [s for s in dict.fromkeys(ids) if s and not s.startswith("sim_")][:MAX_SESSIONS]
 

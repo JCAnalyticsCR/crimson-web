@@ -456,12 +456,106 @@ def test_consulta_a_onvo_cada_15_min_aplica_el_pago(client, auth, db_session, fa
     _in(client, p["id"], main["id"], 2)
     o = _order(db_session, _buy(client, [{"product_id": p["id"], "quantity": 1}], "Tarjeta (ONVO)").json()["number"])
     assert tienda.sync_card_orders(db_session) == 0  # sin pagar: nada
+    db_session.refresh(o)
+    assert so._wait_entry(o, so.ONVO_SYNC_NOTE)["checks"] == 1
     fake_onvo.pay(o.payment_ref)
+    assert tienda.sync_card_orders(db_session) == 0  # espera creciente: la corrida siguiente no le vuelve a preguntar
+    _sync_aged(db_session, o, 16)
     assert tienda.sync_card_orders(db_session) == 1
     db_session.refresh(o)
     assert o.status == "pagado" and o.paid_at
-    assert any("consulta automática" in (h.get("note") or "") for h in o.history)
+    assert any(h.get("status") == "pagado" and "consulta automática" in (h.get("note") or "") for h in o.history)
     assert tienda.sync_card_orders(db_session) == 0  # ya no se consulta
+
+
+def _sync_aged(db, o, minutes):
+    """La ultima consulta automatica a ONVO fue hace `minutes`."""
+    when = (datetime.now(UTC) - timedelta(minutes=minutes)).isoformat()
+    o.history = [{**h, "checked_at": when} if h.get("key") == so.ONVO_SYNC_NOTE else h for h in o.history]
+    db.commit()
+
+
+def _gets(monkeypatch):
+    """Sesiones que se le consultan a ONVO (sobre el FakeOnvo ya instalado)."""
+    from app.providers.payments import OnvoAdapter
+
+    seen: list[str] = []
+    orig = OnvoAdapter.get_checkout
+    monkeypatch.setattr(OnvoAdapter, "get_checkout", lambda self, sid: (seen.append(sid), orig(self, sid))[1])
+    return seen
+
+
+def test_pagar_con_tarjeta_tiene_tope_de_sesiones_por_pedido(client, auth, db_session, fake_onvo):
+    """Cada "Pagar con tarjeta" abre una sesion en ONVO que despues se consulta: limite por pedido (aunque cambie la
+    IP) y tope de so.MAX_CARD_SESSIONS en total, contando la del checkout."""
+    from app.core.ratelimit import order_card_limiter
+
+    p = _card_shop(client, db_session, fake_onvo, "CIC-19", "Botón de pánico")
+    r = _buy(client, [{"product_id": p["id"], "quantity": 1}], "Tarjeta (ONVO)")
+    card = f"{SLUG}/orders/{r.json()['track_token']}/card"
+    for _ in range(3):
+        assert client.post(card).status_code == 200
+    assert client.post(card).status_code == 429  # 4 en 10 min para el mismo pedido
+    order_card_limiter.reset()  # pasaron los 10 minutos
+    assert client.post(card).status_code == 200  # la quinta sesion del pedido
+    res = client.post(card)
+    assert res.status_code == 409 and "varias páginas de pago" in res.json()["detail"]
+    o = _order(db_session, r.json()["number"])
+    assert so.card_sessions(db_session, o) == so.MAX_CARD_SESSIONS == len(fake_onvo.created)
+
+
+def test_consulta_automatica_acotada(client, auth, db_session, fake_onvo, monkeypatch):
+    """La consulta automatica no se dispara con pedidos abandonados: sesion vigente y las de las ultimas 24 h,
+    espera creciente por pedido, tope por corrida (primero los consultados hace mas tiempo), corte por empresa cuando
+    ONVO no responde y tiempo maximo por corrida."""
+    p = _card_shop(client, db_session, fake_onvo, "CIC-20", "Sensor de humo", qty=10)
+    seen = _gets(monkeypatch)
+
+    # una sesion de hace mas de 24 h (que no es la vigente) ya no se consulta en cada corrida
+    from app.models import AuditLog
+
+    r = _buy(client, [{"product_id": p["id"], "quantity": 1}], "Tarjeta (ONVO)")
+    vieja = _order(db_session, r.json()["number"])
+    primera = vieja.payment_ref
+    client.post(f"{SLUG}/orders/{r.json()['track_token']}/card")
+    db_session.refresh(vieja)
+    for a in db_session.scalars(select(AuditLog).where(AuditLog.action == "card_intent", AuditLog.entity_id == vieja.id)):
+        if (a.diff or {}).get("intent") == primera:
+            a.at = datetime.now(UTC) - timedelta(hours=30)
+    db_session.commit()
+    assert tienda.sync_card_orders(db_session) == 0
+    assert seen == [vieja.payment_ref]
+    seen.clear()
+
+    # tope por corrida: primero los nunca consultados, despues los consultados hace mas tiempo
+    a, b = _card(client, db_session, p), _card(client, db_session, p)
+    monkeypatch.setattr(tienda, "SYNC_PER_RUN", 1)
+    _sync_aged(db_session, vieja, 60 * 7)
+    assert tienda.sync_card_orders(db_session) == 0 and seen == [a.payment_ref]
+    assert tienda.sync_card_orders(db_session) == 0 and seen == [a.payment_ref, b.payment_ref]
+    assert tienda.sync_card_orders(db_session) == 0 and seen[-1] == vieja.payment_ref  # ya le tocaba de nuevo
+    seen.clear()
+    assert tienda.sync_card_orders(db_session) == 0 and seen == []  # todos esperan: ninguna llamada a ONVO
+    monkeypatch.setattr(tienda, "SYNC_PER_RUN", 100)
+
+    # ONVO no responde: cuenta el intento y el resto de la empresa espera a la proxima corrida
+    c, d = _card(client, db_session, p), _card(client, db_session, p)
+    sc, sd = c.payment_ref, d.payment_ref
+    fake_onvo.fail_get = 1
+    assert tienda.sync_card_orders(db_session) == 0
+    assert seen == [sc] and fake_onvo.fail_get == 0
+    db_session.refresh(c)
+    assert so._wait_entry(c, so.ONVO_SYNC_NOTE)["checks"] == 1
+    fake_onvo.pay(sd)
+    assert tienda.sync_card_orders(db_session) == 1 and seen == [sc, sd]  # c espera
+    db_session.refresh(d)
+    assert d.status == "pagado"
+
+    # tiempo maximo por corrida agotado: no se consulta nada mas
+    e = _card(client, db_session, p)
+    seen.clear()
+    assert tienda.sync_card_orders(db_session, budget=0) == 0 and seen == []
+    assert tienda.sync_card_orders(db_session) == 0 and seen == [e.payment_ref]
 
 
 # ---------- recordatorio de pago ----------

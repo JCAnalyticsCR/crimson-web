@@ -50,6 +50,8 @@ quote_limiter = SlidingWindow(limit=300, seconds=600)
 checkout_global_limiter = SlidingWindow(limit=300, seconds=3600)
 order_lookup_limiter = SlidingWindow(limit=10, seconds=600)
 order_proof_limiter = SlidingWindow(limit=10, seconds=3600)
+# "Pagar con tarjeta" de Mi pedido, por pedido (ademas del limite por IP): cada clic abre una sesion en ONVO
+order_card_limiter = SlidingWindow(limit=3, seconds=600)
 # Solicitudes de acceso al portal del cliente (pagina publica): mismo criterio que las incidencias.
 access_request_limiter = SlidingWindow(limit=5, seconds=3600)
 access_request_global_limiter = SlidingWindow(limit=120, seconds=3600)

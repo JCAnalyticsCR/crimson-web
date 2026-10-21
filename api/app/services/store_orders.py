@@ -644,6 +644,10 @@ def mark_paid(db: Session, t: Tenant, o: Order, *, by, ref: str | None, note: st
 REMINDER_NOTE = "recordatorio_pago"  # clave de la nota: un recordatorio por pedido (dedupe)
 ONVO_WAIT_NOTE = "onvo_sin_confirmar"  # ONVO no respondio o tiene un pago en proceso: se reconsulta con espera creciente
 ONVO_REVIEW_NOTE = "onvo_revisar"  # ONVO dice que cobro pero el pago no se aplico solo: a mano, sin cancelar ni reconsultar
+ONVO_SYNC_NOTE = "onvo_consulta"  # consulta automatica (store.sync_card_orders) sin pago todavia: misma espera creciente
+# Paginas de pago de ONVO por pedido (la del checkout + las de "Pagar con tarjeta" en Mi pedido). Cada una es una
+# llamada a ONVO con la llave del comercio y despues se consulta; una persona real no necesita mas.
+MAX_CARD_SESSIONS = 5
 # Tarjeta: el pedido vence a los hold_minutes_card (lo apartado vuelve a la venta), pero solo se cancela pasado este
 # margen. El enlace de ONVO no se invalida al vencer el pedido: un comprador que todavia llena la tarjeta (o vuelve a
 # la pestana) pagaria un pedido ya cancelado. Mientras tanto la consulta automatica (store.sync_card_orders) aplica
@@ -685,36 +689,61 @@ def lock_order(db: Session, o: Order) -> Order:
     return db.get(Order, o.id, with_for_update=True, populate_existing=True)
 
 
-def _wait_entry(o: Order) -> dict | None:
-    return next((h for h in (o.history or []) if h.get("key") == ONVO_WAIT_NOTE), None)
+def wait_entry(history: list | None, key: str = ONVO_WAIT_NOTE) -> dict | None:
+    return next((h for h in (history or []) if h.get("key") == key), None)
 
 
-def onvo_wait_due(o: Order, now: datetime) -> bool:
-    """Toca volver a preguntarle a ONVO: espera creciente (15 min, 30 min, 1 h... tope 6 h) desde la ultima consulta
-    que no fue definitiva. Asi un pedido trabado no hace una llamada HTTP cada 5 minutos."""
-    h = _wait_entry(o)
+def _wait_entry(o: Order, key: str = ONVO_WAIT_NOTE) -> dict | None:
+    return wait_entry(o.history, key)
+
+
+def last_check(h: dict | None) -> datetime | None:
+    """Cuando se consulto a ONVO por ultima vez segun la entrada de espera (None: nunca o dato raro)."""
     if h is None:
+        return None
+    try:
+        return aware(datetime.fromisoformat(h.get("checked_at") or h["at"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def wait_due(h: dict | None, now: datetime) -> bool:
+    """Toca volver a preguntarle a ONVO: espera creciente (15 min, 30 min, 1 h... tope 6 h) desde la ultima consulta
+    que no fue definitiva. Asi un pedido trabado no hace una llamada HTTP en cada corrida."""
+    last = last_check(h)
+    if last is None:
         return True
     try:
         n = max(int(h.get("checks") or 1), 1)
-        last = aware(datetime.fromisoformat(h.get("checked_at") or h["at"]))
-    except (KeyError, TypeError, ValueError):
+    except (TypeError, ValueError):
         return True
     return now - last >= min(ONVO_RECHECK * 2 ** min(n - 1, 10), ONVO_RECHECK_MAX)
 
 
+def onvo_wait_due(o: Order, now: datetime, key: str = ONVO_WAIT_NOTE) -> bool:
+    return wait_due(_wait_entry(o, key), now)
+
+
+def _count_check(o: Order, now: datetime, key: str, note: str) -> None:
+    """Anota (una vez) la nota `key` y cuenta el intento para la espera creciente. El pedido ya esta bloqueado."""
+    if _wait_entry(o, key) is None:
+        _note(o, "sistema", note, key=key)
+    o.history = [{**h, "checks": int(h.get("checks") or 0) + 1, "checked_at": now.isoformat()} if h.get("key") == key else h for h in (o.history or [])]
+
+
 def _onvo_wait(o: Order, now: datetime) -> None:
-    """Anota (una vez) que ONVO no confirmo y cuenta el intento para la espera creciente. El pedido ya esta bloqueado."""
-    if _wait_entry(o) is None:
-        _note(
-            o,
-            "sistema",
-            "Venció el plazo, pero ONVO no confirmó que no hubo pago (sin respuesta o pago en proceso): no se cancela; se vuelve a consultar.",
-            key=ONVO_WAIT_NOTE,
-        )
-    o.history = [
-        {**h, "checks": int(h.get("checks") or 0) + 1, "checked_at": now.isoformat()} if h.get("key") == ONVO_WAIT_NOTE else h for h in (o.history or [])
-    ]
+    """Vencido sin respuesta definitiva de ONVO: no se cancela y se reconsulta con espera creciente."""
+    _count_check(
+        o,
+        now,
+        ONVO_WAIT_NOTE,
+        "Venció el plazo, pero ONVO no confirmó que no hubo pago (sin respuesta o pago en proceso): no se cancela; se vuelve a consultar.",
+    )
+
+
+def onvo_sync_wait(o: Order, now: datetime) -> None:
+    """Consulta automatica (store.sync_card_orders) sin pago confirmado: la siguiente espera mas (misma escala)."""
+    _count_check(o, now, ONVO_SYNC_NOTE, "Consulta automática a ONVO sin pago confirmado todavía: se vuelve a consultar con espera creciente.")
 
 
 def cancel_since(t: Tenant) -> datetime | None:
@@ -839,6 +868,10 @@ def card_intent(db: Session, t: Tenant, o: Order) -> dict:
     secret = onvo_secret(db, t)
     if not secret and not simulation_allowed():
         raise HTTPException(503, "El pago con tarjeta no está disponible en este momento")
+    if secret and card_sessions(db, o) >= MAX_CARD_SESSIONS:
+        raise HTTPException(
+            409, "Este pedido ya abrió varias páginas de pago. Si ya pagaste, esperá unos minutos a que se confirme; si no, escribinos para completarlo."
+        )
     cents = int((d(o.total) * 100).quantize(Decimal(1)))
     c = o.contact or {}
     try:
@@ -857,6 +890,16 @@ def card_intent(db: Session, t: Tenant, o: Order) -> dict:
     o.payment_ref = it.id[:120]
     audit(db, t.id, None, "card_intent", "order", o.id, {"intent": it.id, "simulated": it.status == "simulated"})
     return {"checkout_url": it.checkout_url, "simulated": it.status == "simulated"}
+
+
+def card_sessions(db: Session, o: Order) -> int:
+    """Paginas de pago de ONVO abiertas para el pedido (bitacora "card_intent", que tambien lee onvo.order_sessions)."""
+    from ..models import AuditLog
+
+    q = select(func.count()).select_from(AuditLog)
+    return int(
+        db.scalar(q.where(AuditLog.tenant_id == o.tenant_id, AuditLog.entity == "order", AuditLog.entity_id == o.id, AuditLog.action == "card_intent")) or 0
+    )
 
 
 def _installments(t: Tenant) -> dict:
