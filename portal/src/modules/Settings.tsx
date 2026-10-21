@@ -19,7 +19,13 @@ type Gw = { id: number; provider: string; client_id: string | null; secret_mask:
 type OnvoStatus = { configured: boolean; source: "ajustes" | "entorno" | null; mode: "test" | "live" | null; webhook_secret: boolean; webhook_url: string; active: boolean; problems: string[] };
 /* Llaves largas (onvo_test_publishable_key_…) rompian la tabla: prefijo + ultimos 4; la completa queda en el title. */
 const shortKey = (k: string | null) => (!k ? "—" : k.length <= 24 ? k : `${k.slice(0, k.includes("_key_") ? k.indexOf("_key_") + 5 : 12)}…${k.slice(-4)}`);
-type Mail = { id: number; to: string; subject: string; status: string; entity: string | null; entity_id: number | null; created_at: string; error: string | null };
+type Mail = { id: number; to: string; subject: string; status: string; entity: string | null; entity_id: number | null; created_at: string; error: string | null; attempts?: number; next_attempt_at?: string | null; retrying?: boolean };
+/* "se reintenta solo" solo si la API dice que el worker lo vuelve a intentar (15, 30, 60, 120, 240 min; al 6.º queda
+   "fallido"). Un correo con adjuntos o una invitación que falla no se reintenta: "fallido" de una vez (se reenvía a
+   mano). "reemplazado": se reenvió después y salió; este ya no cuenta. */
+const MAIL_MAX_ATTEMPTS = 6;
+const mailBadge = (m: Mail) => (m.status === "enviado" ? "confirmado" : m.status === "reemplazado" ? "descartado" : m.retrying ? "pendiente" : m.status === "error" || m.status === "fallido" ? "fallido" : "pendiente");
+const mailError = (m: Mail) => m.error && m.status !== "enviado" && m.status !== "reemplazado";
 
 /* Las claves no cambian (los enlaces ?tab= siguen sirviendo). "Soporte" chocaba con el menú Soporte (tickets) y
    Andrés creyó que era una conexión con Fygaro (03:31); la Bandeja XML la mezcló con el correo que sale (03:46). */
@@ -256,7 +262,7 @@ export default function Settings() {
       {tab === "correo" && (
         <><MailStatus onSent={() => api<Mail[]>("/settings/outbox").then(setMails)} />
         <Card title="Correos enviados" flush>
-          {mailsSt === null ? <Loading /> : mails.length === 0 ? <Empty hint="Cotizaciones, facturas, invitaciones y recordatorios enviados aparecen aquí." /> : <table className="table"><thead><tr><th>Fecha</th><th>Para</th><th>Asunto</th><th>Estado</th></tr></thead><tbody>{mails.map((m) => <tr key={m.id}><td className="muted">{fmtDate(m.created_at.slice(0, 10))}</td><td>{m.to}</td><td>{m.subject}{m.error && <div className="meta" style={{ color: "var(--bad)" }}>{m.error}</div>}</td><td><Badge status={m.status === "enviado" ? "confirmado" : m.status === "error" || m.status === "fallido" ? "fallido" : "pendiente"} />{m.status === "simulado" && <div className="meta">no salió</div>}</td></tr>)}</tbody></table>}
+          {mailsSt === null ? <Loading /> : mails.length === 0 ? <Empty hint="Cotizaciones, facturas, invitaciones y recordatorios enviados aparecen aquí." /> : <table className="table"><thead><tr><th>Fecha</th><th>Para</th><th>Asunto</th><th>Estado</th></tr></thead><tbody>{mails.map((m) => <tr key={m.id}><td className="muted">{fmtDate(m.created_at.slice(0, 10))}</td><td>{m.to}</td><td>{m.subject}{mailError(m) && <div className="meta" style={{ color: "var(--bad)" }}>{m.error}</div>}</td><td><Badge status={mailBadge(m)} />{m.status === "simulado" && <div className="meta">no salió</div>}{m.retrying && <div className="meta">{m.attempts || 1} de {MAIL_MAX_ATTEMPTS} intentos · se reintenta solo</div>}{m.status === "reemplazado" && <div className="meta">se reenvió después</div>}</td></tr>)}</tbody></table>}
         </Card></>
       )}
 

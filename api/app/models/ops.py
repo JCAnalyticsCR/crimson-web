@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -261,6 +261,12 @@ class EInvoiceDocument(TenantMixin, TimestampMixin, Base):
 # ---------- Correo saliente (outbox) y webhooks (plan 6, 5.3) ----------
 class EmailOutbox(TenantMixin, TimestampMixin, Base):
     __tablename__ = "email_outbox"
+    # dedupe_key: el mismo aviso automatico no sale dos veces (dos corridas, dos beats, un reintento de la tarea).
+    # Unica por empresa; NULL (correos manuales) no choca con nada.
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "dedupe_key", name="uq_email_outbox_dedupe"),
+        Index("ix_email_outbox_retry", "status", "next_attempt_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     to: Mapped[str] = mapped_column(String(300))
@@ -270,10 +276,33 @@ class EmailOutbox(TenantMixin, TimestampMixin, Base):
     attachments: Mapped[list] = mapped_column(JSON, default=list)  # [{name, kind, ref}]
     entity: Mapped[str | None] = mapped_column(String(40))
     entity_id: Mapped[int | None] = mapped_column(Integer)
-    status: Mapped[str] = mapped_column(String(20), default="pendiente")  # pendiente | enviado | error | simulado
+    # pendiente | enviado | error (se reintenta) | fallido (ya no se reintenta) | reemplazado (salio despues otro envio
+    # del mismo documento a la misma direccion) | simulado (sin llave de correo)
+    status: Mapped[str] = mapped_column(String(20), default="pendiente")
     provider_id: Mapped[str | None] = mapped_column(String(120))
     error: Mapped[str | None] = mapped_column(Text)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dedupe_key: Mapped[str | None] = mapped_column(String(200))
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # envios intentados
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # cuando lo toma mail.retry_outbox
+
+
+class TaskRun(Base):
+    """Corrida de una tarea del worker (plan 1.8): cuando empezo y termino, si salio bien, un resumen y el error.
+    La llenan las señales de Celery (app/tasks/salud.py); el latido del worker (salud.latido) deja aqui su fila y
+    /health/deep la mira. De la plataforma, no de una empresa (las tareas recorren todas). Se purga a los 30 dias."""
+
+    __tablename__ = "task_run"
+    __table_args__ = (Index("ix_task_run_task_started", "task", "started_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task: Mapped[str] = mapped_column(String(80))  # nombre de la tarea (sales.daily_close_email)
+    task_id: Mapped[str | None] = mapped_column(String(64), index=True)  # id de Celery
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ok: Mapped[bool | None] = mapped_column(Boolean)  # None = corriendo (o el proceso murio a media tarea)
+    summary: Mapped[dict | None] = mapped_column(JSON)  # lo que devolvio la tarea (conteos), recortado
+    error: Mapped[str | None] = mapped_column(Text)  # tipo y mensaje, sin URLs con parametros ni llaves
 
 
 class WebhookEvent(Base):

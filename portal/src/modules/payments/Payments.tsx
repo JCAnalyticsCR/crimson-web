@@ -7,6 +7,7 @@ import AuthLink from "../../ui/AuthLink";
 import { useSession } from "../../app/session";
 import { TrashLocked } from "../../ui/TrashButton";
 import { LOCKED } from "../../ui/trash";
+import { hoyCR, inicioMesCR } from "../../lib/fechaCR";
 
 type Cierre = { columns: string[]; rows: (string | number)[][]; totals: { total: string } | null; from: string; to: string };
 
@@ -15,7 +16,7 @@ export default function Payments() {
   const nav = useNavigate();
   const [items, setItems] = useState<Payment[] | null>(null);
   const [cierre, setCierre] = useState<Cierre | null>(null);
-  const [range, setRange] = useState({ from: new Date(new Date().setDate(1)).toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) });
+  const [range, setRange] = useState({ from: inicioMesCR(), to: hoyCR() });
   // el cierre es de toda la empresa (reports.ver + payments.ver + sales.ver_todo): el vendedor ve solo sus cobros y
   // pedirlo le daba 403 sin capturar y la tarjeta quedaba "Cargando…" para siempre
   const verCierre = allows("reports.ver") && allows("payments.ver") && allows("sales.ver_todo");

@@ -7,16 +7,46 @@ cierre de caja diario, emision fiscal en contingencia (Fase 2), conciliacion ONV
 from __future__ import annotations
 
 import logging
-from datetime import date
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import setup_logging as celery_setup_logging
 
 from app.core.config import settings
+from app.core.logging import setup_logging
+from app.tasks.salud import connect_signals  # tambien registra las tareas salud.* (shared_task)
 
 log = logging.getLogger("crimson.worker")
+# plan 1.8: antes de las lineas de arranque de abajo (kid de FISCAL_KEYS, configuracion faltante), que salen al importar
+# este modulo y antes de la señal de Celery: sin esto el INFO se perdia y el WARNING salia sin nivel ni logger. La
+# señal lo vuelve a aplicar (idempotente) con el nivel de la linea de comando.
+setup_logging()
+
+
+@celery_setup_logging.connect
+def _logging(loglevel=None, **_kw) -> None:
+    """Plan 1.8: INFO a stdout y WARNING+ a stderr (Celery mandaba todo a stderr y Railway lo marcaba como error).
+    Con esta señal conectada Celery no toca el logging ni redirige stdout."""
+    from app.core.logging import setup_logging
+
+    setup_logging(loglevel)
+
+
+connect_signals()  # plan 1.8: cada corrida queda en task_run y un fallo avisa (uno por tarea y por dia)
+
 celery = Celery("crimson", broker=settings.redis_url, backend=settings.redis_url)
 celery.conf.update(timezone="America/Costa_Rica", enable_utc=True, task_acks_late=True, worker_prefetch_multiplier=1)
+# Un solo beat (plan 1.2): horario y candado en Redis (celery-redbeat). Durante un despliegue conviven dos workers con
+# su beat embebido: el nuevo espera el candado y ninguna tarea sale dos veces; el horario ya no vive en /tmp. Si un
+# contenedor muere sin soltarlo, el candado vence solo a los 5 x el intervalo maximo del beat (que lo renueva en cada
+# vuelta). En el worker la opcion es --scheduler (su -S es --statedb); aqui queda como valor por defecto.
+BEAT_MAX_INTERVAL = 60
+celery.conf.update(
+    beat_scheduler="redbeat.RedBeatScheduler",
+    beat_max_loop_interval=BEAT_MAX_INTERVAL,
+    redbeat_redis_url=settings.redis_url,
+    redbeat_lock_timeout=5 * BEAT_MAX_INTERVAL,
+)
 
 
 def _log_fiscal_keys() -> None:
@@ -27,6 +57,17 @@ def _log_fiscal_keys() -> None:
 
 
 _log_fiscal_keys()
+
+
+def _log_missing_config() -> None:
+    """WARNING con los NOMBRES de la configuracion que falta (RESEND_API_KEY, MAIL_FROM, PUBLIC_BASE_URL, BCCR_TOKEN,
+    FISCAL_KEYS): sin ellas el worker arranca igual y lo automatico no le llega a nadie."""
+    from app.core.envcheck import log_missing_config
+
+    log_missing_config(log)
+
+
+_log_missing_config()
 
 
 @celery.task(name="fx.bccr_daily", autoretry_for=(Exception,), retry_backoff=60, max_retries=5)
@@ -77,12 +118,13 @@ def mark_overdue() -> int:
     from sqlalchemy import select, update
 
     from app.core.db import SessionLocal
+    from app.core.timeutil import cr_today
     from app.models import Invoice, Quote
 
     n = 0
     with SessionLocal() as db:
         for model, states in ((Quote, ("creado", "enviada")), (Invoice, ("creado", "parcial"))):
-            ids = db.scalars(select(model.id).where(model.status.in_(states), model.due_date < date.today())).all()
+            ids = db.scalars(select(model.id).where(model.status.in_(states), model.due_date < cr_today())).all()
             if ids:
                 db.execute(update(model).where(model.id.in_(ids)).values(status="vencida"))
                 n += len(ids)
@@ -100,26 +142,13 @@ def run_recurrences() -> int:
 
 
 @celery.task(name="mail.retry_outbox")
-def retry_outbox() -> int:
-    from sqlalchemy import or_, select
-
+def retry_outbox() -> dict:
+    """Reintentos con espera creciente y tope (app/tasks/correo.py); nunca sin adjuntos ni invitaciones."""
     from app.core.db import SessionLocal
-    from app.models import EmailOutbox
-    from app.services.mail import SENSITIVE_ENTITIES, deliver
+    from app.tasks.correo import retry_outbox as run
 
-    n = 0
     with SessionLocal() as db:
-        # invitaciones y enlaces de contrasena no se reintentan: su HTML guardado ya no tiene el enlace (el admin
-        # usa "Reenviar", que rota el token)
-        q = select(EmailOutbox).where(
-            EmailOutbox.status.in_(("pendiente", "error")),
-            or_(EmailOutbox.entity.is_(None), EmailOutbox.entity.not_in(list(SENSITIVE_ENTITIES))),
-        )
-        for m in db.scalars(q.limit(50)):
-            deliver(m)
-            n += 1
-        db.commit()
-    return n
+        return run(db)
 
 
 @celery.task(name="sales.reminders")
@@ -130,6 +159,7 @@ def reminders() -> int:
     from sqlalchemy import select
 
     from app.core.db import SessionLocal
+    from app.core.timeutil import cr_today
     from app.models import Customer, Invoice, Tenant
     from app.services.mail import doc_email_html, queue_email
     from app.services.render import money
@@ -140,7 +170,7 @@ def reminders() -> int:
             st = t.settings or {}
             if not st.get("notify_due", True):
                 continue
-            target = date.today() + timedelta(days=int(st.get("remind_days_before", 3)))
+            target = cr_today() + timedelta(days=int(st.get("remind_days_before", 3)))
             for inv in db.scalars(
                 select(Invoice).where(Invoice.tenant_id == t.id, Invoice.status.in_(("creado", "enviada", "parcial")), Invoice.due_date == target)
             ):
@@ -154,6 +184,8 @@ def reminders() -> int:
                         doc_email_html(t, "factura", inv.number, money(inv.balance, inv.currency), None, "Le recordamos que su factura vence pronto."),
                         "invoice",
                         inv.id,
+                        # regla 6: dos corridas el mismo dia (reintento, tarea reentregada) no le repiten el correo
+                        dedupe_key=f"recordatorio:{inv.id}:{inv.due_date}:{c.email.strip().lower()}",
                     )
                     n += 1
         db.commit()
@@ -165,23 +197,26 @@ def daily_close_email() -> int:
     from sqlalchemy import select
 
     from app.core.db import SessionLocal
+    from app.core.timeutil import cr_today
     from app.models import Tenant, TenantUser
     from app.services.mail import queue_email
     from app.services.reports import cierre_diario
 
     n = 0
+    hoy = cr_today()  # corre a las 21:00 CR = 03:00 UTC del dia siguiente: date.today() reportaba "mañana"
     with SessionLocal() as db:
         for t in db.scalars(select(Tenant).where(Tenant.active)):
             if not (t.settings or {}).get("daily_close_email"):
                 continue
-            rep = cierre_diario(db, t.id, date.today(), date.today())
+            rep = cierre_diario(db, t.id, hoy, hoy)
             rows = (
                 "".join(f"<tr><td>{r[1]}</td><td>{r[2]}</td><td align=right>{r[3]}</td><td align=right>{r[4]}</td></tr>" for r in rep.rows)
                 or "<tr><td colspan=4>Sin cobros hoy</td></tr>"
             )
-            html = f"<h3>Cierre de caja {date.today()}</h3><table border=0 cellpadding=6><tr><th>Método</th><th>Divisa</th><th>Monto</th><th>Pagos</th></tr>{rows}</table><p><b>Total: {rep.totals['total'] if rep.totals else 0}</b></p>"
+            html = f"<h3>Cierre de caja {hoy}</h3><table border=0 cellpadding=6><tr><th>Método</th><th>Divisa</th><th>Monto</th><th>Pagos</th></tr>{rows}</table><p><b>Total: {rep.totals['total'] if rep.totals else 0}</b></p>"
             for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.role_code == "admin", TenantUser.active)):
-                queue_email(db, t, m.user.email, f"Cierre de caja · {t.name} · {date.today()}", html, "report", 0)
+                # un solo cierre por dia y persona aunque la tarea corra dos veces
+                queue_email(db, t, m.user.email, f"Cierre de caja · {t.name} · {hoy}", html, "report", 0, dedupe_key=f"cierre:{hoy}:{m.user_id}")
                 n += 1
         db.commit()
     return n
@@ -550,4 +585,7 @@ celery.conf.beat_schedule = {
     "suppliers-sync-eurocomp": {"task": "suppliers.sync_eurocomp", "schedule": crontab(day_of_week=1, hour=3, minute=17)},
     "suppliers-eurocomp-stock": {"task": "suppliers.eurocomp_stock", "schedule": crontab(hour="5,11,17,23", minute=17)},
     "mark-overdue": {"task": "sales.mark_overdue", "schedule": crontab(hour=0, minute=30)},
+    # plan 1.8: latido cada 5 min (/health/deep da 503 si pasan 15 sin latido) y correo de Salud a las 07:00
+    "salud-latido": {"task": "salud.latido", "schedule": crontab(minute="*/5")},
+    "salud-correo-diario": {"task": "salud.correo_diario", "schedule": crontab(hour=7, minute=0)},
 }

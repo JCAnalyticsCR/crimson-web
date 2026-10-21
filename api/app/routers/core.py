@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
@@ -21,6 +21,33 @@ router = APIRouter(tags=["core"])
 def health(db: Session = Depends(get_db)):
     db.execute(text("SELECT 1"))
     return {"status": "ok", "app": settings.app_name, "env": settings.env}
+
+
+@router.get("/health/deep")
+def health_deep(request: Request, db: Session = Depends(get_db), x_health_token: str | None = Header(default=None)):
+    """Salud profunda para el monitor externo (plan 1.8): latido del beat y del worker, correo del worker, Eurocomp,
+    correo fallido, tipo de cambio, ENV, ONVO y cola "Por emitir"; 503 si algo critico falla.
+    Publico: solo el estado y el ENV (el monitor de palabra clave busca "env":"production"; en el 503 el ENV no sale,
+    asi cae por el codigo y por la palabra). El detalle de cada revision, con X-Health-Token igual a la
+    variable HEALTH_TOKEN (sin ella, nunca). Limite por IP y resultado guardado unos segundos: cada pasada cuesta."""
+    import hmac
+    import os
+
+    from fastapi.responses import JSONResponse
+
+    from ..core.ratelimit import health_limiter
+    from ..services import salud as svc
+    from .auth import client_ip
+
+    health_limiter.hit(f"deep:{client_ip(request)}")
+    cache = getattr(request.app.state, "salud_deep", None)
+    if cache is None:
+        cache = request.app.state.salud_deep = svc.DeepCache(svc.DEEP_CACHE_SECONDS)
+    out = cache.get(lambda: svc.deep(db))
+    token = (os.getenv("HEALTH_TOKEN") or "").strip()
+    detail = bool(token and x_health_token and hmac.compare_digest(x_health_token.encode(), token.encode()))
+    body = out if detail else svc.public_view(out)
+    return JSONResponse(body, status_code=503 if out["status"] == "falla" else 200, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/tenant", response_model=TenantOut)

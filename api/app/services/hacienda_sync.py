@@ -515,7 +515,7 @@ def send_pending(db: Session, limit: int = 20) -> dict:
             out["respuestas"] += 1
         except Exception as e:  # noqa: BLE001
             db.rollback()
-            log.warning("envio de mensaje receptor %s: %s", rid, type(e).__name__)
+            log.exception("envio de mensaje receptor %s: %s", rid, type(e).__name__)
     for did in db.scalars(select(EInvoiceDocument.id).where(cond(EInvoiceDocument)).order_by(EInvoiceDocument.id).limit(limit)).all():
         if rate_limited():
             break
@@ -524,7 +524,7 @@ def send_pending(db: Session, limit: int = 20) -> dict:
             out["comprobantes"] += 1
         except Exception as e:  # noqa: BLE001
             db.rollback()
-            log.warning("envio de comprobante %s: %s", did, type(e).__name__)
+            log.exception("envio de comprobante %s: %s", did, type(e).__name__)
     from .einvoice_delivery import deliver
 
     # entregas pendientes, en orden: lo que no tiene nada que entregar (respuesta de Hacienda sin XML) o ya se dejo tras
@@ -560,7 +560,7 @@ def send_pending(db: Session, limit: int = 20) -> dict:
         except Exception as e:  # noqa: BLE001
             db.rollback()
             worked += 1
-            log.warning("entrega del comprobante %s: %s", did, type(e).__name__)
+            log.exception("entrega del comprobante %s: %s", did, type(e).__name__)
     return out
 
 
@@ -583,12 +583,12 @@ def poll_status(db: Session, limit: int = 50) -> dict:
                 out[key] += 1
             except Exception as e:  # noqa: BLE001
                 db.rollback()
-                log.warning("consulta %s %s: %s", key, rid, type(e).__name__)
+                log.exception("consulta %s %s: %s", key, rid, type(e).__name__)
         for rid in stuck:
             try:
                 refresh(db, rid)
                 out["recuperados"] += 1
             except Exception as e:  # noqa: BLE001
                 db.rollback()
-                log.warning("recuperacion %s %s: %s", key, rid, type(e).__name__)
+                log.exception("recuperacion %s %s: %s", key, rid, type(e).__name__)
     return out

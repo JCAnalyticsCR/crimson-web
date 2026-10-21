@@ -6,6 +6,7 @@ import { useSession } from "../../app/session";
 import { Badge, Card, Field, I, Icon, Modal } from "../../ui/components";
 import DocEditor from "./DocEditor";
 import AuthLink from "../../ui/AuthLink";
+import { hoyCR } from "../../lib/fechaCR";
 
 const METHODS = [["efectivo", "Efectivo"], ["sinpe", "SINPE Móvil"], ["transferencia", "Transferencia"], ["tarjeta", "Tarjeta"], ["onvo", "ONVO (en línea)"], ["paypal", "PayPal"]];
 const KINDS = [["captura", "Captura (recibido)"], ["autorizacion", "Autorización"], ["devolucion", "Devolución"], ["reembolso", "Reembolso"], ["reautorizacion", "Re-autorización"]];
@@ -34,7 +35,7 @@ export default function InvoiceDetail() {
   const loadXml = () => api(`/invoices/${id}/xml`).then((r) => setXmls(r as never)).catch((e) => toast(e.message, "bad"));
   const sendNc = async () => { if (!nc) return; try { const r = await api<{ status: string }>(`/invoices/${id}/credit-note`, { method: "POST", json: { reason: nc } }); toast(r.status === "aceptada" ? "Nota de crédito aceptada; factura anulada" : "Nota de crédito enviada a Hacienda: la factura se anula cuando Hacienda la acepte"); setNc(null); reload(); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } };
   const sendMail = async () => { if (!mail) return; try { const r = await api<{ status: string; sent: boolean; note: string | null }>(`/invoices/${id}/email`, { method: "POST", json: { to: mail.to || null, message: mail.message || null } }); toast(r.note || `Correo ${r.status}`, r.sent ? undefined : "bad"); setMail(null); reload(); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } };
-  const [form, setForm] = useState({ method: "sinpe", kind: "captura", amount: "", external_ref: "", paid_at: new Date().toISOString().slice(0, 10), notify_customer: true });
+  const [form, setForm] = useState({ method: "sinpe", kind: "captura", amount: "", external_ref: "", paid_at: hoyCR(), notify_customer: true });
   const reload = () => { api<Invoice>(`/invoices/${id}`).then(setInv); api<XmlDoc[]>(`/invoices/${id}/xml`).then(setDocs).catch(() => setDocs([])); };
   useEffect(() => { reload(); }, [id]);
   useEffect(() => { if (inv) setForm((f) => ({ ...f, amount: f.amount || inv.balance })); }, [inv]);

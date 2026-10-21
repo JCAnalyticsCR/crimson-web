@@ -17,4 +17,7 @@ USER crimson
 # RAM = lo que se paga en Railway (CPU casi en cero): un solo proceso de tareas (son livianas) que se renueva al pasar
 # de 250 MB, sin gossip/mingle (un solo worker) y glibc con 2 arenas en vez de 8 x nucleo
 ENV MALLOC_ARENA_MAX=2
-CMD ["celery", "-A", "worker_celery_app:celery", "worker", "--beat", "--loglevel=INFO", "--concurrency=1", "--max-memory-per-child=250000", "--without-gossip", "--without-mingle", "--schedule=/tmp/celerybeat-schedule"]
+# Beat embebido con celery-redbeat: horario y candado en Redis, asi dos contenedores durante un despliegue no despachan
+# doble y el horario no se pierde al reiniciar (antes: --schedule=/tmp/celerybeat-schedule). En "celery worker" la
+# opcion es --scheduler: su -S es --statedb.
+CMD ["celery", "-A", "worker_celery_app:celery", "worker", "--beat", "--scheduler=redbeat.RedBeatScheduler", "--loglevel=INFO", "--concurrency=1", "--max-memory-per-child=250000", "--without-gossip", "--without-mingle"]

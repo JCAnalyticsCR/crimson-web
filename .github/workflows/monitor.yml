@@ -1,0 +1,30 @@
+# Monitor sintetico de respaldo (plan 1.8): cada 30 min revisa una muestra rotativa de la tienda (sin basura gzip del
+# SSI, con <title> y la app), el 404 real, que el checkout no ofrezca metodos simulados y, si se define la variable del
+# repo HEALTH_DEEP_URL, que /health/deep responda 200. Si falla, GitHub avisa por correo a quien vigila el repo.
+# El monitor externo (UptimeRobot o similar) sigue siendo el principal y mira /health/deep.
+name: Monitor de la tienda
+
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monitor-tienda
+  cancel-in-progress: false
+
+jobs:
+  tienda:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Revisar la tienda
+        env:
+          TIENDA_URL: ${{ vars.TIENDA_URL || 'https://tienda.crimsoncr.com' }}
+          TIENDA_SLUG: ${{ vars.TIENDA_SLUG || 'crimson' }}
+          HEALTH_DEEP_URL: ${{ vars.HEALTH_DEEP_URL }}
+        run: python3 scripts/monitor/tienda_check.py

@@ -31,6 +31,7 @@ PUBLICAS = {
     ("/settings/invitations/check", "POST"),
     # salud, archivos con llave aleatoria (los privados piden firma) y webhooks firmados
     ("/health", "GET"),
+    ("/health/deep", "GET"),  # monitor externo (plan 1.8): sin X-Health-Token solo el estado; nunca datos de nadie
     ("/media/f/{key}", "GET"),
     ("/webhooks/onvo/{tenant_id}", "POST"),
 }
