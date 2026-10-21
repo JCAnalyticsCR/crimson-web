@@ -151,6 +151,10 @@ export type Quote = Doc & {
   converted_invoice_id: number | null; opportunity?: { id: number; number: string; kind: "venta" | "proyecto"; status: string; parties?: { name: string; role: string }[] } | null;
   /* aceptacion del cliente (aparte de status = emision) y versiones enviadas */
   acceptance_status?: "pendiente" | "aceptada" | "rechazada"; accepted_version?: number | null; current_version?: number | null; has_unsent_changes?: boolean;
+  /* proyecto que salio de esta cotizacion: el boton pasa a "Ver PRO-..." (antes "Convertir a proyecto" daba 409) */
+  project_id?: number | null; project_number?: string | null;
+  /* descuento rechazado por quien aprueba, todavia sin cambios de la vendedora */
+  rejection?: { by: string | null; at: string; reason: string | null } | null;
 };
 export type Payment = { id: number; invoice_id?: number | null; invoice_number?: string | null; customer?: string | null; method: string; kind: string; currency: string; amount: string; tip: string; external_ref: string | null; provider: string; paid_at: string; status: string };
 export type Invoice = Doc & { doc_type: string; consecutive: string | null; clave: string | null; balance: string; quote_id: number | null; einvoice_status: string; payments: Payment[]; sale_condition: string; credit_days: number; payment_method: string;
@@ -234,6 +238,7 @@ export const STATUS: Record<string, { label: string; tone: "ok" | "warn" | "bad"
   por_aprobar: { label: "Por aprobar", tone: "warn" },
   // campo y proyectos
   borrador: { label: "Borrador", tone: "muted" },
+  por_programar: { label: "Por programar", tone: "warn" },
   asignada: { label: "Asignada", tone: "info" },
   en_sitio: { label: "En sitio", tone: "warn" },
   en_proceso: { label: "En proceso", tone: "warn" },

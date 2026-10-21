@@ -27,6 +27,10 @@
 /* "Precios por revisar" frenada (posible error del tipo de cambio o de la lista del proveedor) */
 .aprob-brake { display: flex; align-items: center; gap: 12px; margin: 0 18px 12px; padding: 10px 12px; border-radius: 10px; background: var(--warn-soft); font-size: 13px; }
 .aprob-brake p { margin: 0; flex: 1; }
+/* fila con una accion directa (Levantamientos solicitados -> Crear y asignar): el boton va al lado del enlace, no dentro */
+.aprob-row--act { display: flex; align-items: center; }
+.aprob-row--act .aprob-item { flex: 1 1 auto; min-width: 0; }
+.aprob-act { order: 2; flex: none; margin-right: 18px; }
 .aprob-more { margin: 0; padding: 10px 18px 12px; border-top: 1px solid var(--hair); font-size: 13px; color: var(--text-2); }
 .aprob-ok { margin: 0; font-size: 13px; }
 @media (max-width: 640px) {
@@ -36,4 +40,6 @@
   .aprob-list li.has-action { flex-direction: column; align-items: stretch; }
   .aprob-item__act { padding: 0 14px 12px; }
   .aprob-brake { flex-direction: column; align-items: stretch; margin: 0 14px 12px; }
+  .aprob-row--act { flex-direction: column; align-items: stretch; }
+  .aprob-act { margin: 0 14px 12px; }
 }

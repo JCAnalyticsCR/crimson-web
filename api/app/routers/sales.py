@@ -24,6 +24,7 @@ from ..schemas.sales import (
     PaymentOut,
     QuoteOut,
 )
+from ..services import avisos_venta as avisos
 from ..services import discounts, invoice_states, units
 from ..services import documents as svc
 from ..services import inventory as invsvc
@@ -110,6 +111,16 @@ def _quote_out(db: Session, q: Quote, p: Principal) -> QuoteOut:
         o.opportunity["parties"] = party_names(db, opp)
     st = qv.state(db, q)
     o.current_version, o.has_unsent_changes = st["current_version"], st["has_unsent_changes"]
+    # ya tiene proyecto: el boton pasa a "Ver PRO-..." (antes "Convertir a proyecto" respondia 409). Cualquier proyecto
+    # con esta cotizacion, igual que la regla que daba el 409 (projects.project_from_quote)
+    from ..models import Project
+
+    pr = db.execute(select(Project.id, Project.number).where(Project.tenant_id == q.tenant_id, Project.quote_id == q.id).limit(1)).first()
+    o.project_id, o.project_number = (pr[0], pr[1]) if pr else (None, None)
+    rech = _rechazo_vigente(db, q) if q.status == "por_aprobar" else None
+    if rech is not None:
+        quien = _user_name(db, rech.user_id)
+        o.rejection = {"by": quien, "at": rech.at, "reason": (rech.diff or {}).get("motivo")}
     return o
 
 
@@ -138,7 +149,67 @@ PENDIENTES = {
     "enlaces_abiertos": "invoices",
     "cotizaciones_sin_respuesta": "quotes",
     "cotizaciones_por_aprobar": "quotes",
+    "cotizaciones_aceptadas": "quotes",
 }
+
+# Quien aprueba puede decir que no (POST /quotes/{id}/reject): la cotizacion sigue retenida (no se envia ni se
+# convierte) pero ya no espera a quien aprueba, espera a la vendedora. Vive en la bitacora: la ultima de estas dos
+# acciones manda (volver a guardarla fuera del limite escribe needs_approval y la devuelve a la bandeja).
+_RETENCION = ("needs_approval", "reject_discount")
+
+
+def _rechazo_vigente(db: Session, q: Quote):
+    """El registro del rechazo si es lo ultimo que paso con la retencion de esta cotizacion; si no, None."""
+    from ..models import AuditLog
+
+    ultimo = db.scalar(
+        select(AuditLog)
+        .where(AuditLog.tenant_id == q.tenant_id, AuditLog.entity == "quote", AuditLog.entity_id == q.id, AuditLog.action.in_(_RETENCION))
+        .order_by(AuditLog.id.desc())
+        .limit(1)
+    )
+    return ultimo if ultimo is not None and ultimo.action == "reject_discount" else None
+
+
+def _devuelta(tid: int):
+    """La misma regla que _rechazo_vigente, como filtro SQL (bandeja de Aprobaciones y conteo del inicio)."""
+    from ..models import AuditLog
+
+    ultima = (
+        select(AuditLog.action)
+        .where(AuditLog.tenant_id == tid, AuditLog.entity == "quote", AuditLog.entity_id == Quote.id, AuditLog.action.in_(_RETENCION))
+        .order_by(AuditLog.id.desc())
+        .limit(1)
+        .correlate(Quote)
+        .scalar_subquery()
+    )
+    return func.coalesce(ultima, "") == "reject_discount"
+
+
+# Decisiones de quien aprueba sobre una retencion: rechazarla, o aprobarla (por el boton o guardandola el mismo).
+_DECISIONES = ("reject_discount", "approve_quote")
+
+
+def _decidida(db: Session, q) -> bool:
+    """Lo ultimo que paso con la retencion de esta cotizacion fue una decision de quien aprueba (no un pedido de la
+    vendedora). La proxima retencion es un pedido nuevo y se avisa aunque siga abierta la ventana del anterior: rechazada
+    (siga retenida o la haya liberado dentro del limite) o aprobada, y vuelta a pasar del limite."""
+    from ..models import AuditLog
+
+    if q.id is None:
+        return False
+    ultima = db.scalar(
+        select(AuditLog.action)
+        .where(
+            AuditLog.tenant_id == q.tenant_id,
+            AuditLog.entity == "quote",
+            AuditLog.entity_id == q.id,
+            AuditLog.action.in_(("needs_approval", *_DECISIONES)),
+        )
+        .order_by(AuditLog.id.desc())
+        .limit(1)
+    )
+    return ultima in _DECISIONES
 
 
 def _pend_mine(p: Principal) -> bool:
@@ -167,7 +238,14 @@ def pending_where(key: str, p: Principal) -> list:
     elif key == "cotizaciones_sin_respuesta":
         out.append(Quote.status.in_(("creado", "enviada")))
     elif key == "cotizaciones_por_aprobar":
-        out.append(Quote.status == "por_aprobar")
+        # las rechazadas siguen retenidas pero ya no esperan a quien aprueba (esperan cambios de la vendedora)
+        out += [Quote.status == "por_aprobar", ~_devuelta(tid)]
+    elif key == "cotizaciones_aceptadas":
+        # el cliente dijo que si y nadie la convirtio: ni a factura ni a proyecto (una retenida no se puede convertir)
+        from ..models import Project
+
+        con_proyecto = select(Project.quote_id).where(Project.tenant_id == tid, Project.quote_id.is_not(None))
+        out += [Quote.acceptance_status == "aceptada", Quote.status.not_in(("convertida", "anulada", "por_aprobar")), Quote.id.not_in(con_proyecto)]
     return out
 
 
@@ -301,7 +379,11 @@ def create_quote(data: DocumentIn, p: Principal = Depends(require("sales", "crea
 
 
 def _hold(db: Session, p: Principal, q, chk) -> list[str]:
-    """Deja la cotizacion en "por_aprobar" si excede el descuento, el monto o el margen minimo."""
+    """Deja la cotizacion en "por_aprobar" si excede el descuento, el monto o el margen minimo. Al quedar retenida (o al
+    volver a pedirlo despues de una decision de quien aprueba) se avisa en el momento a quien aprueba. Si la libera quien
+    aprueba al guardarla, es una aprobacion: queda en la bitacora y la vendedora recibe el aviso, como con el boton."""
+    antes = q.status
+    tras_decision = _decidida(db, q)
     razones = ([chk.message] if chk.exceeds else []) + discounts.approval_reasons(db, p, q)
     if p.can("sales", "aprobar"):
         # quien aprueba no se pide permiso: lo que guarda con el margen bajo el minimo queda aprobado a esos precios (la
@@ -337,9 +419,17 @@ def _hold(db: Session, p: Principal, q, chk) -> list[str]:
         q.status = "por_aprobar"
         q.approval_reason = " ".join(razones)[:400]
         audit(db, p.tenant.id, p.user.id, "needs_approval", "quote", q.id, {"razones": razones}, ip=p.ip)
+        if antes != "por_aprobar" or tras_decision:
+            avisos.descuento_por_aprobar(db, p.tenant, q, p.user.id, tras_decision=tras_decision)
     elif q.status == "por_aprobar":
+        motivo = q.approval_reason
         q.status = "creado"  # quedo dentro de los limites (o lo edito quien aprueba)
         q.approval_reason = None
+        if p.can("sales", "aprobar"):
+            # la abrio quien aprueba, la ajusto y la guardo: es su aprobacion (antes la vendedora no se enteraba y el
+            # boton "Aprobar descuento" ya no salia porque el estado habia cambiado)
+            audit(db, p.tenant.id, p.user.id, "approve_quote", "quote", q.id, {"motivo": motivo, "al_guardar": True}, ip=p.ip)
+            avisos.descuento_resuelto(db, p.tenant, q, p.user.id, aprobado=True)
     return razones
 
 
@@ -583,6 +673,9 @@ def quote_acceptance(qid: int, data: AcceptanceIn, p: Principal = Depends(requir
         {"de": antes, "a": data.status, "version": v.version if v else None, "quien": data.contact_name, "medio": data.channel, "restaurada": restored},
         ip=p.ip,
     )
+    if data.status == "aceptada" and antes != "aceptada":
+        # el cliente dijo que si: lo que sigue (convertir, programar la instalacion) no puede esperar a que alguien lo vea
+        avisos.cotizacion_aceptada(db, p.tenant, q, version=v.version, quien=(data.contact_name or "").strip() or None, medio=data.channel, actor_id=p.user.id)
     db.commit()
     db.refresh(q)
     return _quote_out(db, q, p)
@@ -602,6 +695,31 @@ def approve_quote(qid: int, p: Principal = Depends(require("sales", "aprobar")),
     if ok:
         diff["margen_aprobado"] = ok
     audit(db, p.tenant.id, p.user.id, "approve_quote", "quote", q.id, diff, ip=p.ip)
+    avisos.descuento_resuelto(db, p.tenant, q, p.user.id, aprobado=True)
+    db.commit()
+    return _quote_out(db, q, p)
+
+
+class RejectIn(BaseModel):
+    reason: str = Field(min_length=3, max_length=300)
+
+
+@router.post("/quotes/{qid}/reject", response_model=QuoteOut)
+def reject_quote(qid: int, data: RejectIn, p: Principal = Depends(require("sales", "aprobar")), db: Session = Depends(get_db)):
+    """Quien aprueba dice que no, con un motivo. La cotizacion sigue retenida (no se envia ni se convierte: el estado no
+    cambia y el motivo guardado de la retencion tampoco, asi la retencion por margen sigue en pie) y vuelve a la
+    vendedora: sale de la bandeja de quien aprueba y ella recibe el aviso. Si la vuelve a guardar fuera del limite, pide
+    aprobacion otra vez (y se avisa de nuevo); dentro del limite se libera sola."""
+    q = _own(db, Quote, qid, p.tenant.id, p)
+    if q.status != "por_aprobar":
+        raise HTTPException(409, "La cotización no está pendiente de aprobación")
+    if _rechazo_vigente(db, q) is not None:
+        raise HTTPException(409, "Ya la rechazaste: espera los cambios de la vendedora")
+    motivo = " ".join(data.reason.split())
+    if len(motivo) < 3:
+        raise HTTPException(422, "Escribí el motivo del rechazo")
+    audit(db, p.tenant.id, p.user.id, "reject_discount", "quote", q.id, {"motivo": motivo, "razones": q.approval_reason}, ip=p.ip)
+    avisos.descuento_resuelto(db, p.tenant, q, p.user.id, aprobado=False, motivo=motivo)
     db.commit()
     return _quote_out(db, q, p)
 
@@ -1017,7 +1135,9 @@ def _ceo_row(db: Session, p: Principal) -> dict:
         db.scalar(select(func.coalesce(func.sum(Invoice.total), 0)).where(Invoice.tenant_id == tid, Invoice.status != "anulada", Invoice.issue_date >= m0))
     )
     week = today + timedelta(days=7 - today.weekday())
-    jobs = db.scalars(select(WorkOrder).where(WorkOrder.tenant_id == tid, WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")), live(WorkOrder))).all()
+    # por_programar (visita de un ticket sin tecnico) tambien es un trabajo abierto
+    abiertas = ("por_programar", "asignada", "en_sitio", "en_proceso")
+    jobs = db.scalars(select(WorkOrder).where(WorkOrder.tenant_id == tid, WorkOrder.status.in_(abiertas), live(WorkOrder))).all()
     quotes_sent = db.scalar(select(func.count()).select_from(Quote).where(Quote.tenant_id == tid, Quote.status == "enviada"))
     quotes_won = db.scalar(select(func.count()).select_from(Quote).where(Quote.tenant_id == tid, Quote.status == "convertida", Quote.updated_at >= m0))
     warranties = [

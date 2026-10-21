@@ -450,46 +450,8 @@ def sla_breaches() -> int:
     return n
 
 
-@celery.task(name="crm.stale_quotes")
-def stale_quotes() -> int:
-    """Cotizacion enviada hace 5 dias sin respuesta -> se le avisa a quien la hizo. Textual de Andres:
-    "cotizacion lleva cinco días sin seguimiento, que se le avise a la vendedora"."""
-    from datetime import date, timedelta
-
-    from sqlalchemy import select
-
-    from app.core.db import SessionLocal
-    from app.models import Customer, Quote, Tenant, User
-    from app.services.mail import queue_email
-
-    n = 0
-    corte = date.today() - timedelta(days=5)
-    with SessionLocal() as db:
-        for t in db.scalars(select(Tenant).where(Tenant.active)):
-            frias = db.scalars(select(Quote).where(Quote.tenant_id == t.id, Quote.status == "enviada", Quote.issue_date <= corte)).all()
-            por_persona: dict[int, list] = {}
-            for q in frias:
-                por_persona.setdefault(q.created_by or 0, []).append(q)
-            for uid, items in por_persona.items():
-                u = db.get(User, uid) if uid else None
-                if not u or not u.email:
-                    continue
-                filas = "".join(
-                    f"<li><b>{q.number}</b> · {(db.get(Customer, q.customer_id).name if q.customer_id else 'sin cliente')} · {q.currency} {q.total:,.0f} · enviada el {q.issue_date}</li>"
-                    for q in items[:20]
-                )
-                queue_email(
-                    db,
-                    t,
-                    u.email,
-                    f"{len(items)} cotizaciones sin respuesta",
-                    f"<p>Llevan más de 5 días enviadas:</p><ul>{filas}</ul><p>Una llamada a tiempo es la diferencia.</p>",
-                    "quote",
-                    items[0].id,
-                )
-                n += len(items)
-        db.commit()
-    return n
+# crm.stale_quotes (cotizaciones frias a su vendedora, plan maestro 1.6) vive en app/tasks/ventas.py (shared_task)
+import app.tasks.ventas  # noqa: E402,F401
 
 
 @celery.task(name="archive.purge_trash")

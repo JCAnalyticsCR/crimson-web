@@ -81,18 +81,22 @@ def queue_email(
     attachments: list | None = None,
     files: list[tuple[str, bytes]] | None = None,
     dedupe_key: str | None = None,
+    *,
+    company_bcc: bool = True,
 ) -> EmailOutbox:
     """files son los adjuntos reales (nombre, bytes); no se guardan en la BD, solo viajan con el envio.
     attachments es la descripcion que queda en la bitacora de salida (si hay files y no viene, se arma con los nombres:
     asi el reintento sabe que ese correo no puede salir sin sus adjuntos).
-    dedupe_key: si ya hay un correo de esta empresa con esa llave, se devuelve ese y no sale otro."""
+    dedupe_key: si ya hay un correo de esta empresa con esa llave, se devuelve ese y no sale otro.
+    company_bcc=False: un aviso interno del equipo (avisos_venta) no va en copia al BCC de la empresa ("de toda
+    factura": archivo o contador externo)."""
     key = dedupe(dedupe_key)
     if key:
         prev = _by_key(db, tenant.id, key)
         if prev is not None:
             return prev
     sensitive = entity in SENSITIVE_ENTITIES
-    bcc = None if sensitive or entity in NO_BCC_ENTITIES else (",".join((tenant.settings or {}).get("bcc") or []) or None)
+    bcc = None if sensitive or not company_bcc or entity in NO_BCC_ENTITIES else (",".join((tenant.settings or {}).get("bcc") or []) or None)
     desc = attachments or ([{"name": n} for n, _ in files] if files else [])
     m = EmailOutbox(tenant_id=tenant.id, to=to, bcc=bcc, subject=subject, html=html, attachments=desc, entity=entity, entity_id=entity_id, dedupe_key=key)
     if key:

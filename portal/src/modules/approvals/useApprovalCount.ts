@@ -13,10 +13,11 @@ export type ApprovalItem = {
   since: string | null; badge: string | null;
   /** solo donde el permiso de la seccion ya implica ver ese dinero (cotizaciones con precios, aliados con costos, comisiones) */
   amount: string | number | null; currency: string | null; to: string;
-  /** "precios_por_revisar" (plan 1.12): el precio sugerido se aplica aqui con un clic (POST a `path` con `body`, el
-      precio que se muestra: si el de hoy es otro la API responde 409 y no aplica otro monto).
-      "mensualidades_por_aprobar" (plan 1.4): "Aprobar y enviar" (POST a `path` sin `body`) */
-  action?: { label: string; path: string; confirm?: string; body?: unknown } | null;
+  /** acciones directas en la fila. "precios_por_revisar" (plan 1.12): el precio sugerido se aplica aqui con un clic
+      (POST a `path` con `body`; si el de hoy es otro la API responde 409 y no aplica otro monto). "mensualidades_por_aprobar"
+      (plan 1.4): "Aprobar y enviar" (POST a `path` sin `body`). "crear_levantamiento" (plan 1.6: Levantamientos
+      solicitados -> «Crear y asignar»; id = oportunidad) */
+  action?: { label: string; path: string; confirm?: string; body?: unknown } | "crear_levantamiento" | null;
 };
 export type ApprovalSection = {
   key: string; label: string; hint: string; needs: string[]; to: string; count: number; items: ApprovalItem[];

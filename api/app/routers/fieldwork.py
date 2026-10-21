@@ -24,6 +24,7 @@ from ..core.deps import ALLY_USER_ROLES, CLIENT_ROLES, EXTERNAL_ROLES, Principal
 from ..models import Customer, Opportunity, Product, Project, Survey, SurveyItem, SurveyObservation, SurveyPoint, User, Warehouse, WorkOrder, WorkOrderMaterial
 from ..schemas.sales import DocumentIn, LineInSchema
 from ..services import approvals as aprob
+from ..services import avisos_venta as avisos
 from ..services import documents as docsvc
 from ..services import equipment_reco, pricing, supplier_catalog
 from ..services import inventory as invsvc
@@ -720,6 +721,77 @@ def survey_from_opportunity(oid: int, p: Principal = Depends(require("field", "c
     }
 
 
+class SurveyFromRequestIn(BaseModel):
+    technician_id: int
+    ally_company_id: int | None = None
+    visit_date: date | None = None
+
+
+@router.post("/surveys/from-opportunity/{oid}", status_code=201)
+def survey_create_and_assign(oid: int, data: SurveyFromRequestIn, p: Principal = Depends(require("field", "asignar")), db: Session = Depends(get_db)):
+    """«Crear y asignar» de Aprobaciones → Levantamientos solicitados: el levantamiento que pidio la vendedora nace ya
+    ligado a su oportunidad (cliente, sitio y solucion de ella), en borrador y a nombre del tecnico elegido, que recibe
+    el aviso. Quien lo hace necesita crear y asignar levantamientos (supervisor, admin). La oportunidad pasa a
+    "levantamiento" (si iba mas adelante se queda donde esta) y queda anotado en su bitacora."""
+    from ..services.ally_scope import check_ally_assignment, notify_ally_work
+    from .pipeline import _log
+
+    if not p.can("field", "crear"):
+        raise HTTPException(403, "Sin permiso: field.crear")
+    o = _linkable_opportunity(db, p, oid)
+    # dos clics (o dos personas) a la vez: el segundo espera al primero y ve su levantamiento
+    db.execute(select(Opportunity.id).where(Opportunity.id == o.id).with_for_update())
+    if (o.kind or "proyecto") == "venta":
+        raise HTTPException(409, "Una oportunidad de solo venta no lleva levantamiento")
+    vivo = db.scalar(select(Survey).where(Survey.tenant_id == p.tenant.id, Survey.opportunity_id == o.id, live(Survey)).limit(1))
+    if vivo:
+        raise HTTPException(409, f"Ya tiene el levantamiento {vivo.number}")
+    _check_crew(db, p.tenant.id, [data.technician_id])
+    aliada = check_ally_assignment(db, p.tenant.id, ally_company_id=data.ally_company_id, user_ids=[data.technician_id], opportunity_id=o.id)
+    c = db.get(Customer, o.customer_id) if o.customer_id else None
+    c = c if c is not None and c.tenant_id == p.tenant.id else None
+    # Contacto de un lead sin cliente: la misma regla que el GET hermano (survey_from_opportunity) y que Aprobaciones.
+    # Solo quien ve la oportunidad en el embudo se lo lleva al levantamiento (si no, lo completa en el formulario); y si
+    # el levantamiento queda para una empresa aliada, a lo sumo nombre y telefono, nunca el correo (como _opp_out del
+    # portal de aliados): el levantamiento se le muestra completo en su portal.
+    llaves = ("name", "phone") if aliada is not None else ("name", "email", "phone")
+    contacto = {k: v for k, v in (o.contact or {}).items() if k in llaves} if c is None and _sees_in_pipeline(p, o) else {}
+    payload = SurveyIn(
+        kind=o.solution if o.solution in SPECS else "cctv",
+        customer_id=c.id if c else None,
+        site=o.site,
+        visit_date=data.visit_date,
+        contact=contacto,
+    )
+    number, _ = next_number(db, p.tenant.id, "LEV")
+    s = Survey(tenant_id=p.tenant.id, number=number, technician_id=data.technician_id, template_version=TEMPLATE_VERSION, ally_company_id=aliada)
+    apply_survey_payload(db, s, payload, p.tenant.id)
+    s.opportunity_id = o.id
+    db.add(s)
+    db.flush()
+    if o.status in ESPERA_LEVANTAMIENTO:
+        o.status = "levantamiento"
+    tecnico = db.get(User, data.technician_id)
+    _log(o, p.user.full_name, f"Creó el levantamiento {s.number} y se lo asignó a {tecnico.full_name if tecnico else 'un técnico'}")
+    audit(db, p.tenant.id, p.user.id, "create", "survey", s.id, {"desde": "solicitud", "opportunity": o.number, "technician_id": data.technician_id}, ip=p.ip)
+    if aliada is None and data.technician_id != p.user.id and tecnico and tecnico.email:
+        queue_email(
+            db,
+            p.tenant,
+            tecnico.email,
+            f"Tiene un levantamiento nuevo: {s.number}",
+            f"<p>Se le asignó el levantamiento <b>{html.escape(s.number)}</b> ({html.escape(s.site or 'sin sitio')})"
+            f"{f' para el {data.visit_date:%d/%m/%Y}' if data.visit_date else ''}.</p>"
+            f'<p><a href="{html.escape(avisos.enlace(f"/levantamientos?id={s.id}"))}">Abrir el levantamiento</a></p>',
+            "survey",
+            s.id,
+            company_bcc=False,  # aviso interno: no va al BCC de las facturas
+        )
+    notify_ally_work(db, p.tenant, {data.technician_id}, s.number, f"Levantamiento {s.site or ''}".strip(), s.visit_date, entity_id=s.id)
+    db.commit()
+    return _survey_out(db, s)
+
+
 @router.get("/surveys/{sid}")
 def survey_get(sid: int, p: Principal = Depends(require("field", "ver")), db: Session = Depends(get_db)):
     s = _survey(db, sid, p)
@@ -778,9 +850,11 @@ def survey_assign(sid: int, data: SurveyAssignIn, p: Principal = Depends(require
                 p.tenant,
                 u.email,
                 f"Tiene un levantamiento nuevo: {s.number}",
-                f"<p>Se le asignó el levantamiento <b>{html.escape(s.number)}</b> ({html.escape(s.site or 'sin sitio')}).</p>",
+                f"<p>Se le asignó el levantamiento <b>{html.escape(s.number)}</b> ({html.escape(s.site or 'sin sitio')}).</p>"
+                f'<p><a href="{html.escape(avisos.enlace(f"/levantamientos?id={s.id}"))}">Abrir el levantamiento</a></p>',
                 "survey",
                 s.id,
+                company_bcc=False,
             )
         notify_ally_work(db, p.tenant, {data.technician_id}, s.number, f"Levantamiento {s.site or ''}".strip(), s.visit_date, entity_id=s.id)
     db.commit()
@@ -1947,7 +2021,7 @@ def work_orders(
 ):
     stmt = select(WorkOrder).where(WorkOrder.tenant_id == p.tenant.id, *_live_orders())
     if status == "pendientes":
-        stmt = stmt.where(WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")))
+        stmt = stmt.where(WorkOrder.status.in_((POR_PROGRAMAR, "asignada", "en_sitio", "en_proceso")))
     elif status:
         stmt = stmt.where(WorkOrder.status == status)
     if project_id:
@@ -1983,8 +2057,20 @@ def order_create(data: WorkOrderIn, p: Principal = Depends(require("field", "asi
     db.flush()
     audit(db, p.tenant.id, p.user.id, "create", "work_order", o.id, ip=p.ip)
     notify_ally_work(db, p.tenant, _crew(o), o.number, o.title, o.scheduled_at, entity_id=o.id)
+    avisos.ot_asignada(db, p.tenant, o, _crew(o), p.user.id)  # el equipo de Crimson (los aliados: la linea de arriba)
     db.commit()
     return _order_out(db, o, tenant=p.tenant)
+
+
+# Orden sin nadie que la ejecute (ni tecnico de Crimson ni empresa aliada): "por programar", destacada en la lista y en
+# "Mi dia" de quien asigna. Hoy nace asi la visita de un ticket sin tecnico (support_desk.ticket_to_work_order). Al
+# recibir equipo (tecnico o ayudante) o empresa aliada pasa a "asignada".
+POR_PROGRAMAR = "por_programar"
+
+
+def programada(o: WorkOrder) -> None:
+    if o.status == POR_PROGRAMAR and (_crew(o) or o.ally_company_id):
+        o.status = "asignada"
 
 
 @router.get("/work-orders/{oid}")
@@ -2011,8 +2097,13 @@ def order_update(oid: int, data: WorkOrderEditIn, p: Principal = Depends(require
     _check_crew(db, p.tenant.id, nuevos)
     # empresa aliada: la que venga; si no viene, la que tenia (ver _reassign_ally; cambiar el proyecto la revalida)
     _reassign_ally(db, p, o, cambios, explicita="ally_company_id" in data.model_fields_set, ally_company_id=data.ally_company_id)
+    equipo_antes = _crew(o)
     for k, v in cambios.items():
         setattr(o, k, v)
+    if o.status not in CERRADAS:
+        # una orden cancelada o finalizada se puede corregir, pero no es trabajo: nadie recibe "Se te asigno..."
+        programada(o)
+        avisos.ot_asignada(db, p.tenant, o, _crew(o) - equipo_antes, p.user.id)
     if "materials" in data.model_fields_set:
         actuales = {m.id: m for m in o.materials}
         vistos: set[int] = set()
@@ -2067,7 +2158,7 @@ def _reassign_ally(db: Session, p: Principal, o: WorkOrder, cambios: dict, *, ex
         db, p.tenant.id, ally_company_id=cid, user_ids=[tec, *ayu], project_id=pid, current=o.ally_company_id, existing=antes
     )
     nuevos = despues - antes
-    if nuevos:
+    if nuevos and o.status not in CERRADAS:  # editar una orden cerrada no le manda trabajo a nadie
         notify_ally_work(db, p.tenant, nuevos, o.number, cambios.get("title") or o.title, cambios.get("scheduled_at", o.scheduled_at), entity_id=o.id)
 
 
@@ -2092,6 +2183,7 @@ def order_assign(oid: int, data: OrderAssignIn, p: Principal = Depends(require("
     _check_crew(db, p.tenant.id, nuevos)
     # sin empresa en el cuerpo: la orden conserva la suya (la tarjeta manda tecnico y ayudantes aunque solo cambie la fecha)
     _reassign_ally(db, p, o, cambios)
+    equipo_antes = _crew(o)
     if "technician_id" in cambios:
         o.technician_id = cambios["technician_id"]
     if "helpers" in cambios:
@@ -2100,8 +2192,10 @@ def order_assign(oid: int, data: OrderAssignIn, p: Principal = Depends(require("
         o.helpers = [i for i in o.helpers if i != o.technician_id]
     if "scheduled_at" in cambios:
         o.scheduled_at = _utc(cambios["scheduled_at"])
+    programada(o)
     diff = {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in cambios.items()}
     audit(db, p.tenant.id, p.user.id, "assign", "work_order", o.id, diff, ip=p.ip)
+    avisos.ot_asignada(db, p.tenant, o, _crew(o) - equipo_antes, p.user.id)
     db.commit()
     return _order_out(db, o, tenant=p.tenant)
 
@@ -2152,6 +2246,7 @@ def _time_rules(db: Session, o: WorkOrder, p: Principal, data: TimeIn, entry=Non
             raise HTTPException(409, f"Ya hay tiempo de {nombre.full_name if nombre else 'esa persona'} en ese rango")
     if uid not in _crew(o):
         o.helpers = [*(o.helpers or []), uid]  # el supervisor le registra tiempo: queda como ayudante
+        programada(o)  # ya tiene equipo: una orden por programar pasa a asignada, como al asignarla
     return uid, inicio, fin
 
 
@@ -2414,8 +2509,10 @@ def _apply_materials(db: Session, o: WorkOrder, p: Principal) -> int:
 
 @router.get("/work-orders/meta/today")
 def my_day(p: Principal = Depends(require("field", "ver")), db: Session = Depends(get_db)):
-    """Pantalla de inicio del técnico: lo de hoy y lo pendiente."""
-    stmt = select(WorkOrder).where(WorkOrder.tenant_id == p.tenant.id, WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")), *_live_orders())
+    """Pantalla de inicio del técnico: lo de hoy y lo pendiente. Quien ve todo el campo ve ademas lo que espera tecnico
+    (por programar); el tecnico solo lo suyo, y una orden por programar no tiene tecnico."""
+    abiertas = (POR_PROGRAMAR, "asignada", "en_sitio", "en_proceso")
+    stmt = select(WorkOrder).where(WorkOrder.tenant_id == p.tenant.id, WorkOrder.status.in_(abiertas), *_live_orders())
     rows = db.scalars(stmt.order_by(WorkOrder.scheduled_at.is_(None), WorkOrder.scheduled_at)).all()
     if not p.sees_field_all:
         rows = [o for o in rows if o.technician_id == p.user.id or p.user.id in (o.helpers or [])]

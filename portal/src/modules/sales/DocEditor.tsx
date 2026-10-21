@@ -201,7 +201,16 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   };
 
   const approve = async () => {
-    try { const r = await api<Quote>(`/quotes/${id}/approve`, { method: "POST" }); setDoc({ ...doc, status: r.status }); toast("Descuento aprobado: el vendedor ya puede enviarla o convertirla"); }
+    try { const r = await api<Quote>(`/quotes/${id}/approve`, { method: "POST" }); setDoc({ ...doc, status: r.status, rejection: null }); toast("Descuento aprobado: el vendedor ya puede enviarla o convertirla"); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
+  /* Rechazar: sigue retenida y vuelve a la vendedora con el motivo (le llega por correo). Si la vuelve a guardar fuera
+     del limite, pide aprobacion otra vez. */
+  const reject = async () => {
+    const motivo = (prompt("¿Por qué no se aprueba? La vendedora recibe este motivo por correo.") || "").trim();
+    if (!motivo) return;
+    if (motivo.length < 3) return toast("Escribí un motivo un poco más claro", "bad");
+    try { const r = await api<Quote>(`/quotes/${id}/reject`, { method: "POST", json: { reason: motivo } }); setDoc((d) => ({ ...d, rejection: r.rejection ?? null })); toast("Descuento rechazado: la vendedora ya recibió el motivo"); }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
 
@@ -216,6 +225,8 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
 
   /* Cotización aprobada -> proyecto: copia líneas, costo estimado y crea la primera orden de trabajo. */
   const opp = isQ ? (doc as Quote).opportunity : null;
+  const proyecto = isQ && (doc as Quote).project_id ? { id: (doc as Quote).project_id as number, number: (doc as Quote).project_number || "el proyecto" } : null;
+  const rechazo = isQ && pending ? (doc as Quote).rejection ?? null : null;
   const parties = opp?.parties ?? [];
   const toProject = async () => {
     if (!id) return;
@@ -371,10 +382,18 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
           )}
           {isQ && !isNew && doc.id != null && <QuoteVersions quote={doc as Quote} onQuote={(q) => hydrate(q as Quote & Invoice)} />}
           {pending && (
-            <div className="card" style={{ borderColor: "var(--warn)" }}><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <div className="meta" style={{ color: "var(--warn)" }}>Descuento por aprobar</div>
-              <p style={{ fontSize: 13, margin: 0 }}>El descuento supera el límite del vendedor{limit ? ` (${Number(limit.limit)} %)` : ""}. No se puede enviar ni convertir hasta que un administrador lo apruebe.</p>
+            <div className="card" style={{ borderColor: rechazo ? "var(--bad)" : "var(--warn)" }}><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div className="meta" style={{ color: rechazo ? "var(--bad)" : "var(--warn)" }}>{rechazo ? "Descuento rechazado" : "Descuento por aprobar"}</div>
+              {rechazo ? (
+                <>
+                  <p style={{ fontSize: 13, margin: 0 }}>{rechazo.by || "Administración"} no lo aprobó{rechazo.reason ? `: «${rechazo.reason}»` : ""}.</p>
+                  <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Ajustá el descuento o los precios y guardala: si queda dentro del límite se libera; si no, vuelve a pedir aprobación.</p>
+                </>
+              ) : (
+                <p style={{ fontSize: 13, margin: 0 }}>El descuento supera el límite del vendedor{limit ? ` (${Number(limit.limit)} %)` : ""}. No se puede enviar ni convertir hasta que un administrador lo apruebe.</p>
+              )}
               {allows("sales.aprobar") && <button className="btn btn--crimson" onClick={approve}><Icon d={I.check} />Aprobar descuento</button>}
+              {allows("sales.aprobar") && !rechazo && <button className="btn btn--ghost btn--sm" onClick={reject}>Rechazar con un motivo</button>}
             </div></div>
           )}
           {!locked && blocked && (
@@ -394,13 +413,20 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                 ? <button className="btn" disabled={busy || blocked} onClick={() => save("send")}><Icon d={I.whatsapp} />Guardar & enviar al cliente</button>
                 : !isNew && <button className="btn" disabled={busy || blocked} onClick={sendOnly}><Icon d={I.whatsapp} />Enviar al cliente</button>)}
               {isQ && !pending && allows("sales.crear") && (accepted || canEdit) && <button className="btn btn--soft" disabled={busy || blocked} onClick={() => (accepted ? convertAccepted() : save("convert"))}><Icon d={I.invoice} />Convertir a factura</button>}
-              {isQ && !isNew && !pending && allows("projects.crear") && (
+              {isQ && !isNew && !pending && !proyecto && allows("projects.crear") && (
                 /* Instalaciones: la cotización aprobada arranca el proyecto con su primera orden de trabajo. */
                 opp?.kind === "venta"
                   ? <button className="btn btn--ghost btn--sm" disabled={busy} onClick={toProject} title={`La oportunidad ${opp.number} es de solo venta`}>¿Lleva instalación? Crear proyecto</button>
                   : <button className="btn btn--soft" disabled={busy} onClick={toProject}><Icon d={I.box} />Convertir a proyecto</button>
               )}
               {!isNew && allows("sales.anular") && <button className="btn btn--danger" disabled={busy} onClick={() => act("void")}>Anular {isQ ? "cotización" : "factura"}</button>}
+            </div></div>
+          )}
+          {proyecto && (
+            /* ya tiene proyecto: se va a el en vez de intentar crearlo otra vez */
+            <div className="card"><div className="card__body">
+              <p className="muted" style={{ fontSize: 13, margin: 0 }}>Esta cotización ya es el proyecto {proyecto.number}.</p>
+              {allows("projects.ver") && <button className="btn btn--soft" style={{ marginTop: 10, width: "100%" }} onClick={() => nav(`/proyectos/${proyecto.id}`)}><Icon d={I.box} />Ver {proyecto.number} <Icon d={I.arrow} /></button>}
             </div></div>
           )}
           {locked && doc.status === "convertida" && (doc as Quote).converted_invoice_id && (

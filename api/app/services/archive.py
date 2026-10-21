@@ -69,7 +69,7 @@ from .documents import audit
 
 log = logging.getLogger(__name__)
 DEFAULT_PURGE_DAYS = 30
-OPEN_ORDER = ("asignada", "en_sitio", "en_proceso")
+OPEN_ORDER = ("por_programar", "asignada", "en_sitio", "en_proceso")  # por_programar: visita de un ticket sin tecnico
 IN_PROGRESS_ORDER = ("en_sitio", "en_proceso")
 
 # tipo -> (modelo, modulo de permisos, nombre para mensajes)

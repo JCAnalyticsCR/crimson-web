@@ -19,6 +19,7 @@ from ..models import (
     AccessRequest,
     AllyCompany,
     AllyCostRequest,
+    AuditLog,
     Commission,
     Customer,
     Invoice,
@@ -417,7 +418,95 @@ def _ally_mora_item(db: Session, p: Principal, c: AllyCompany) -> dict:
     )
 
 
+# ---------- 1.6: lo que destraba la venta ----------
+def survey_request_where(p: Principal) -> list:
+    """Oportunidades con un levantamiento pedido por la vendedora (POST /opportunities/{id}/request-survey) que nadie
+    atendio todavia. La misma regla que fieldwork.pending_survey_request, en SQL: oportunidad viva y abierta, sin
+    levantamiento vivo y sin uno creado despues de la ultima solicitud."""
+    tid = p.tenant.id
+    pedidas = select(AuditLog.entity_id).where(AuditLog.tenant_id == tid, AuditLog.action == "request_survey", AuditLog.entity == "opportunity")
+    ultima = (
+        select(func.max(AuditLog.at))
+        .where(AuditLog.tenant_id == tid, AuditLog.action == "request_survey", AuditLog.entity == "opportunity", AuditLog.entity_id == Opportunity.id)
+        .correlate(Opportunity)
+        .scalar_subquery()
+    )
+    atendida = (
+        select(Survey.id)
+        .where(Survey.tenant_id == tid, Survey.opportunity_id == Opportunity.id, or_(live(Survey), Survey.created_at >= ultima))
+        .correlate(Opportunity)
+        .exists()
+    )
+    return [Opportunity.tenant_id == tid, live(Opportunity), Opportunity.status.not_in(("ganada", "perdida")), Opportunity.id.in_(pedidas), ~atendida]
+
+
+def _survey_request_item(db: Session, p: Principal, o: Opportunity) -> dict:
+    from ..routers.projects import SOLUCIONES  # import local: el router importa este servicio
+
+    req = db.scalar(
+        select(AuditLog)
+        .where(AuditLog.tenant_id == o.tenant_id, AuditLog.action == "request_survey", AuditLog.entity == "opportunity", AuditLog.entity_id == o.id)
+        .order_by(AuditLog.at.desc(), AuditLog.id.desc())
+        .limit(1)
+    )
+    pref = ((req.diff or {}) if req else {}).get("preferred_date")
+    # un lead sin ficha: el nombre del contacto solo a quien ve la oportunidad en el embudo (como surveys/from-opportunity)
+    ve_opp = p.can("crm_pipeline", "ver") and (p.can("crm_pipeline", "ver_todo") or o.owner_id == p.user.id)
+    sub = " · ".join(x for x in (SOLUCIONES.get(o.solution or "", o.solution), o.site) if x) or None
+    row = _row(
+        o.id,
+        o.number,
+        _customer(db, o.customer_id, o.contact if ve_opp else None),
+        sub,
+        who=_name(db, req.user_id) if req else None,
+        since=req.at if req else o.updated_at,
+        badge=f"Prefiere el {pref[8:10]}/{pref[5:7]}" if isinstance(pref, str) and len(pref) >= 10 else None,
+        to=f"/levantamientos?nuevo={o.id}",
+    )
+    row["action"] = "crear_levantamiento"  # el portal ofrece "Crear y asignar" (POST /surveys/from-opportunity/{id})
+    return row
+
+
+def _accepted_where(p: Principal) -> list:
+    from ..routers.sales import pending_where  # import local: misma definicion que la tarjeta del inicio
+
+    return pending_where("cotizaciones_aceptadas", p)
+
+
+def _accepted_item(db: Session, p: Principal, q: Quote) -> dict:
+    from ..models import QuoteAcceptance
+
+    acc = db.scalar(
+        select(QuoteAcceptance).where(QuoteAcceptance.quote_id == q.id, QuoteAcceptance.status == "aceptada").order_by(QuoteAcceptance.id.desc()).limit(1)
+    )
+    opp = db.scalar(select(Opportunity).where(Opportunity.tenant_id == q.tenant_id, Opportunity.quote_id == q.id).limit(1))
+    paso = "venta de equipo: convertir a factura" if opp is not None and opp.kind == "venta" else "convertir a proyecto o a factura"
+    precio = p.sees_prices
+    return _row(
+        q.id,
+        q.number,
+        _customer(db, q.customer_id),
+        f"Aceptada v{q.accepted_version} · {paso}" if q.accepted_version else paso.capitalize(),
+        who=_name(db, q.seller_id if q.seller_id is not None else q.created_by),
+        since=acc.recorded_at if acc else q.updated_at,
+        amount=q.total if precio else None,
+        currency=q.currency if precio else None,
+        to=f"/cotizaciones/{q.id}",
+    )
+
+
 SECTIONS: tuple[Section, ...] = (
+    Section(
+        "levantamientos_solicitados",
+        "Levantamientos solicitados",
+        "Los piden las vendedoras desde su oportunidad. Creá el levantamiento y asignáselo a un técnico.",
+        ("field.crear", "field.asignar"),
+        "/levantamientos",
+        Opportunity,
+        survey_request_where,
+        lambda: [Opportunity.updated_at, Opportunity.id],
+        _survey_request_item,
+    ),
     Section(
         "levantamientos_por_revisar",
         "Levantamientos por revisar",
@@ -450,6 +539,17 @@ SECTIONS: tuple[Section, ...] = (
         _quotes_where,
         lambda: [Quote.updated_at, Quote.id],
         _quote_item,
+    ),
+    Section(
+        "cotizaciones_aceptadas",
+        "Aceptadas por convertir",
+        "El cliente ya dijo que sí: convertilas a factura o a proyecto para que arranquen el trabajo y el cobro.",
+        ("sales.crear",),
+        "/cotizaciones?pendiente=cotizaciones_aceptadas",
+        Quote,
+        _accepted_where,
+        lambda: [Quote.updated_at, Quote.id],
+        _accepted_item,
     ),
     Section(
         "costos_aliados",

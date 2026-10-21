@@ -458,7 +458,10 @@ def _reservar(db: Session, p: Principal, pr: Project, order: WorkOrder) -> list[
     levels = {pid: Decimal(str(r.get("own_on_hand") or 0)) for pid, r in av.items()}
     apartados = db.scalars(
         select(WorkOrder).where(
-            WorkOrder.tenant_id == p.tenant.id, WorkOrder.project_id != pr.id, WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")), live(WorkOrder)
+            WorkOrder.tenant_id == p.tenant.id,
+            WorkOrder.project_id != pr.id,
+            WorkOrder.status.in_(("por_programar", "asignada", "en_sitio", "en_proceso")),  # por_programar: aun sin tecnico
+            live(WorkOrder),
         )
     ).all()
     # Reservas formales confirmadas (AC25) mandan donde existen; si un proyecto no tiene reserva de un

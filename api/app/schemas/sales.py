@@ -104,6 +104,11 @@ class QuoteOut(DocBaseOut):
     accepted_version: int | None = None
     current_version: int | None = None
     has_unsent_changes: bool = False
+    # proyecto que salio de esta cotizacion: el editor muestra "Ver PRO-..." en vez de "Convertir a proyecto"
+    project_id: int | None = None
+    project_number: str | None = None
+    # descuento rechazado por quien aprueba y todavia sin cambios de la vendedora: {by, at, reason}
+    rejection: dict | None = None
 
 
 class PaymentIn(BaseModel):

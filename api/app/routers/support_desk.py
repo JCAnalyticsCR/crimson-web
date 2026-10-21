@@ -381,6 +381,9 @@ def _out(db: Session, t: SupportTicket, full: bool = True, p: Principal | None =
             for n in t.notes
         ]
         out["history"] = _history(db, t)
+        # la visita sin tecnico se destaca en el detalle ("por programar")
+        wo = db.get(WorkOrder, t.work_order_id) if t.work_order_id else None
+        out["work_order_status"] = wo.status if wo is not None and wo.tenant_id == t.tenant_id else None
     return out
 
 
@@ -833,7 +836,7 @@ def ticket_to_work_order(tid: int, data: VisitIn, p: Principal = Depends(require
     # cliente del portal o alguien de ventas no recibe la orden ni su nombre sale en el informe de entrega
     if data.technician_id is not None and not _eligible(db, p.tenant.id, data.technician_id):
         raise HTTPException(422, "Esa persona no puede recibir órdenes")
-    from ..services.ally_scope import check_ally_assignment
+    from ..services.ally_scope import check_ally_assignment, notify_ally_work
 
     # la OT hereda la empresa aliada del ticket (y un tecnico aliado tiene que ser de esa empresa). Con un tecnico de
     # Crimson la visita es de Crimson: no hereda (si no, un ticket de un aliado suspendido no podria generar la visita)
@@ -860,14 +863,23 @@ def ticket_to_work_order(tid: int, data: VisitIn, p: Principal = Depends(require
         technician_id=data.technician_id,
         notes=t.description,
     )
+    from ..services import avisos_venta as avisos
+    from .fieldwork import POR_PROGRAMAR
+
+    if o.technician_id is None and o.ally_company_id is None:
+        o.status = POR_PROGRAMAR  # nadie la va a hacer todavia: queda destacada hasta que alguien la programe
     db.add(o)
     db.flush()
     t.work_order_id = o.id
     if t.status == "nuevo":
         t.status = "asignado"
     audit(db, p.tenant.id, p.user.id, "work_order", "support_ticket", t.id, {"work_order": o.number}, ip=p.ip)
+    # como al crear la orden en Ordenes de trabajo: el tecnico aliado recibe su aviso (notify_ally_work ignora a los
+    # internos) y el de Crimson el suyo (ot_asignada ignora a los aliados)
+    notify_ally_work(db, p.tenant, {o.technician_id}, o.number, o.title, o.scheduled_at, entity_id=o.id)
+    avisos.ot_asignada(db, p.tenant, o, [o.technician_id], p.user.id)
     db.commit()
-    return {"work_order_id": o.id, "number": o.number}
+    return {"work_order_id": o.id, "number": o.number, "status": o.status}
 
 
 @router.get("/tickets/meta/config")

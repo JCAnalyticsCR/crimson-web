@@ -43,6 +43,8 @@ DEFAULTS = {
     "collections_stages": [-3, 0, 3, 10],
     "collections_ally_stages": [-3, 0, 5, 10],
     "daily_close_email": False,
+    # cotizacion aceptada de una venta de solo equipo: tambien al supervisor (plan 1.6; la RACI 0.11 lo puede apagar)
+    "notify_supervisor_equipment_sale": True,
     "bcc": [],
     "manual_payment_methods": [
         {"name": "SINPE Móvil", "instructions": "Envíe el pago al número indicado y comparta el comprobante.", "active": True},
@@ -116,6 +118,7 @@ class SettingsIn(BaseModel):
         return v
 
     daily_close_email: bool | None = None
+    notify_supervisor_equipment_sale: bool | None = None
     bcc: list[EmailStr] | None = None
     manual_payment_methods: list[dict] | None = None
     activity_codes: list[str] | None = None
