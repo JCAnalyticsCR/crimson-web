@@ -55,9 +55,10 @@ def _by_key(db: Session, tenant_id: int, key: str) -> EmailOutbox | None:
 # enlace se borra del HTML guardado despues de enviarlo (el respaldo exporta email_outbox) y el worker no los
 # reintenta (su HTML ya no sirve): el admin usa "Reenviar".
 SENSITIVE_ENTITIES = frozenset({"invitation", "password_reset", "user_security"})
-# Avisos internos de la plataforma (fallas de tareas, correo de Salud, "no le llegaron al cliente"): tampoco van en copia
-# al BCC de la empresa (pensado para que contabilidad reciba los documentos), pero si se reintentan.
-NO_BCC_ENTITIES = frozenset({"salud", "outbox"})
+# Avisos internos de la plataforma (fallas de tareas, correo de Salud, "no le llegaron al cliente", cola "Por emitir") y correos internos
+# con costos o margenes (resumen del guardian de margen): nunca van en copia al BCC de la empresa (esa lista es la de
+# "toda factura": el contador o una firma externa que no ve costos), pero si se reintentan.
+NO_BCC_ENTITIES = frozenset({"salud", "outbox", "margin_summary", "fiscal_queue"})
 _LINK_TOKEN = re.compile(r"(/(?:invitacion|restablecer)/)[A-Za-z0-9_\-]{16,}")
 
 

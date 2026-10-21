@@ -24,7 +24,7 @@ type Cabys = { code: string; description: string; tax_rate: number | null; categ
 /* Costo y margen (solo roles que ven costos): de dónde sale el costo y el margen real sobre la venta. */
 type CostInfo = {
   cost?: number | null; cost_currency?: string; cost_source?: "proveedor" | "propio" | null; cost_supplier?: string | null; cost_date?: string | null;
-  cost_active?: boolean | null; cost_crc?: number | null; margin_real_pct?: number | null; margin_provisional?: boolean | null; supplier_offers?: number | null;
+  cost_active?: boolean | null; cost_crc?: number | null; margin_real_pct?: number | null; margin_provisional?: boolean | null; supplier_offers?: number | null; margin_hold?: boolean | null;
   /* precio general para aliados (services/ally_pricing): solo llega a quien ve costos */
   ally_price?: number | null; ally_price_source?: "precio_general" | "recargo" | "precio_aliado" | null;
 };
@@ -53,7 +53,8 @@ export default function Products() {
   const [taxes, setTaxes] = useState<Tax[]>([]);
   const [cats, setCats] = useState<Named[]>([]);
   const [suppliers, setSuppliers] = useState<Named[]>([]);
-  const [q, setQ] = useState("");
+  /* ?q= filtra al abrir (los enlaces de Aprobaciones y del resumen de margen llegan con el codigo) */
+  const [q, setQ] = useState(params.get("q") || "");
   const [tab, setTab] = useState<string>("general");
   const [edit, setEdit] = useState<Edit | null>(params.get("nuevo") ? { ...blank } : null);
   const [variants, setVariants] = useState<Variant[]>([]);
@@ -129,6 +130,17 @@ export default function Products() {
       toast("Producto guardado"); setEdit(null); setVariants([]); setParams({}); load();
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
+
+  /* ?ficha=ID abre la ficha del producto una vez (Aprobaciones → Precios por revisar: verificar el costo antes de
+     aplicar el precio sugerido) */
+  const fichaAbierta = useRef(false);
+  useEffect(() => {
+    const id = Number(params.get("ficha"));
+    if (fichaAbierta.current || !Number.isInteger(id) || id <= 0) return;
+    fichaAbierta.current = true;
+    open(id).catch((e) => toast(e instanceof Error ? e.message : "No se pudo abrir el producto", "bad"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
 
   const copyLink = async () => {
     if (!edit?.id) return;
@@ -327,10 +339,12 @@ function CostCell({ p }: { p: Row }) {
 }
 
 function MarginCell({ p }: { p: Row }) {
-  if (p.margin_real_pct == null) return <span className="muted">—</span>;
+  /* plan 1.12: el guardian de margen lo saco de la tienda ("Consultar") hasta que alguien aplique un precio */
+  const hold = p.margin_hold ? <> <Link className="badge badge--bad" to="/aprobaciones?seccion=precios_por_revisar" title="Bajo el margen mínimo: en la tienda sale «Consultar». Revisalo en Aprobaciones → Precios por revisar.">fuera de venta</Link></> : null;
+  if (p.margin_real_pct == null) return hold ?? <span className="muted">—</span>;
   const m = Number(p.margin_real_pct);
-  if (p.margin_provisional) return <span className="mono muted" title="Sin costo: es el margen objetivo, no el real. Cargá el costo o vinculalo a un proveedor.">{m.toFixed(1)} % <span className="badge badge--muted">prov.</span></span>;
-  return <span className="mono" style={{ fontWeight: 700, color: marginTone(m) }}>{m.toFixed(1)} %</span>;
+  if (p.margin_provisional) return <span className="mono muted" title="Sin costo: es el margen objetivo, no el real. Cargá el costo o vinculalo a un proveedor.">{m.toFixed(1)} % <span className="badge badge--muted">prov.</span>{hold}</span>;
+  return <span className="mono" style={{ fontWeight: 700, color: marginTone(m) }}>{m.toFixed(1)} %{hold}</span>;
 }
 
 /* Ficha: las ofertas de proveedores vinculadas (Inventarios → Proveedores). La mejor alimenta costo y "Bajo pedido". */

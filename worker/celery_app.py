@@ -49,6 +49,8 @@ celery.conf.update(
     redbeat_lock_timeout=5 * BEAT_MAX_INTERVAL,
 )
 
+import app.tasks.margen  # noqa: E402,F401  guardian de margen (plan 1.12): margin.guard y margin.daily_summary
+
 
 def _log_fiscal_keys() -> None:
     """Solo kid y sha256(llave)[:8] de FISCAL_KEYS (deben ser los mismos que registra la API)."""
@@ -594,4 +596,6 @@ celery.conf.beat_schedule = {
     "salud-latido": {"task": "salud.latido", "schedule": crontab(minute="*/5")},
     "salud-correo-diario": {"task": "salud.correo_diario", "schedule": crontab(hour=7, minute=0)},
     "fiscal-por-emitir": {"task": "fiscal.por_emitir_diario", "schedule": crontab(hour=8, minute=30)},
+    # despues de la tasa del BCCR (6:15) y del refresco de Eurocomp (5:17), que ya corren el guardian
+    "margin-daily-summary": {"task": "margin.daily_summary", "schedule": crontab(hour=7, minute=5)},
 }

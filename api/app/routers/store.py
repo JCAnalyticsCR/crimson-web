@@ -381,22 +381,58 @@ UNKNOWN_AVAILABILITY = {
 
 
 class Pricer:
-    """Lleva cualquier precio a la moneda de la tienda con el tipo de cambio del dia (venta BCCR).
+    """Lleva cualquier precio a la moneda de la tienda con el tipo de cambio del dia (services/fx, venta BCCR).
     El catalogo puede mezclar monedas (Fygaro publicaba en dolares, la lista de proveedor queda en colones):
-    el cliente ve y paga TODO en una sola moneda, la de Mi Tienda."""
+    el cliente ve y paga TODO en una sola moneda, la de Mi Tienda.
+
+    Un tipo de cambio faltante nunca tumba la tienda (plan 1.12): la tasa se consulta solo cuando hay que convertir y
+    `of(producto)` devuelve 0 ("precio a consultar") para ESE producto si falta su tasa o si el guardian de margen lo
+    saco de venta (margin_hold). Lo que ya esta en la moneda de la tienda se sigue vendiendo. Los montos que no son de
+    un producto (envio, envio gratis desde) pasan por __call__, que si exige la tasa (FxMissing -> 422)."""
 
     def __init__(self, db: Session, t: Tenant):
-        from ..services.documents import today_fx
-
+        self.db = db
         self.currency = (store_cfg(t).get("currency") or t.default_currency or "CRC").upper()
-        self.usd = d(today_fx(db, "USD")[0]) or Decimal(1)
+        self._rates: dict[str, Decimal | None] = {}
+
+    def _rate(self, cur: str) -> Decimal:
+        from ..services.fx import FxMissing, rate_or_none
+
+        if cur not in self._rates:
+            self._rates[cur] = rate_or_none(self.db, cur)  # una consulta por moneda y por respuesta
+        r = self._rates[cur]
+        if r is None:
+            raise FxMissing(cur)
+        return r
 
     def __call__(self, amount, currency: str | None) -> Decimal:
         a, cur = d(amount or 0), (currency or "CRC").upper()
         if cur == self.currency:
             return a
-        crc = a * self.usd if cur == "USD" else a  # solo CRC y USD en el sistema
-        return crc if self.currency == "CRC" else (crc / self.usd).quantize(Decimal("0.00001"))
+        crc = a if cur == "CRC" else a * self._rate(cur)
+        return crc if self.currency == "CRC" else (crc / self._rate(self.currency)).quantize(Decimal("0.00001"))
+
+    def maybe(self, amount, currency: str | None) -> Decimal | None:
+        """Como __call__ pero None si falta la tasa: montos que solo se MUESTRAN (tarifas de envio, envio gratis desde)
+        en una tienda que no vende en colones. La portada y el checkout nunca se caen por eso."""
+        from ..services.fx import FxMissing
+
+        try:
+            return self(amount, currency)
+        except FxMissing:
+            return None
+
+    def of(self, p: Product, amount=None) -> Decimal:
+        """Precio del producto sin IVA en la moneda de la tienda (amount: el de una variante o el que pida la
+        vitrina; por defecto el precio web). 0 = "precio a consultar": retenido por margen o sin tipo de cambio."""
+        from ..services.fx import FxMissing
+
+        if getattr(p, "margin_hold", False):
+            return Decimal(0)
+        try:
+            return self(sinv.web_price(p) if amount is None else amount, p.currency)
+        except FxMissing:
+            return Decimal(0)
 
 
 def _gross(net: Decimal, rate) -> Decimal:
@@ -435,11 +471,14 @@ def _prod_pub(
         "availability": _availability(p, stock),
     }
     if pricer is not None:
-        # precio final al consumidor: en la moneda de la tienda y CON IVA (asi se exhibe en Costa Rica)
+        # precio final al consumidor: en la moneda de la tienda y CON IVA (asi se exhibe en Costa Rica).
+        # 0 = "precio a consultar" (retenido por margen o sin tipo de cambio): la vitrina no lo deja comprar
+        net = pricer.of(p)
         out["display_currency"] = pricer.currency
-        out["display_price"] = _gross(pricer(sinv.web_price(p), p.currency), rate)
+        out["display_price"] = _gross(net, rate)
+        out["price_on_request"] = net <= 0
         for v in out["variants"]:
-            v["display_price"] = _gross(pricer(v["price"], p.currency), rate)
+            v["display_price"] = _gross(pricer.of(p, v["price"]) if net > 0 else Decimal(0), rate)
     return out
 
 
@@ -504,7 +543,8 @@ def store_home(slug: str, db: Session = Depends(get_db)):
         ],
         "product_count": sum(counts.values()),
         # las tarifas se configuran en colones (Mi Tienda -> "Base ₡"); display_amount = en la moneda de la tienda, con IVA
-        "shipping_rates": [{**r, "display_amount": _gross(pricer(r.get("amount") or 0, "CRC"), 13)} for r in cfg["shipping_rates"] if r.get("active")],
+        # sin tipo de cambio (tienda en otra moneda) la tarifa queda null: "a consultar", nunca un 500 ni un 422
+        "shipping_rates": [{**r, "display_amount": ship_display(pricer, r)} for r in cfg["shipping_rates"] if r.get("active")],
         "payment_methods": manual_methods(t),
     }
 
@@ -560,7 +600,7 @@ def store_products(
     rows = sinv.visible(db, t, rows)  # Ajustes de la tienda: agotados ocultos si asi se eligio
     pricer = Pricer(db, t)
     if sort in ("price_asc", "price_desc"):
-        rows.sort(key=lambda p: pricer(sinv.web_price(p), p.currency), reverse=sort == "price_desc")
+        rows.sort(key=lambda p: pricer.of(p), reverse=sort == "price_desc")
     elif sort == "recent":
         rows.sort(key=lambda p: p.id, reverse=True)
     response.headers["X-Total-Count"] = str(len(rows))
@@ -713,8 +753,14 @@ def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
             v = variants.get(ln.variant_id)
             if not v or v.product_id != pr.id:
                 raise HTTPException(422, "Variante no disponible")
-            return pricer(v.price if v.price is not None else sinv.web_price(pr), pr.currency), f"{pr.name} · {v.name}"
-        return pricer(sinv.web_price(pr), pr.currency), pr.name
+            unit, name = pricer.of(pr, v.price if v.price is not None else sinv.web_price(pr)), f"{pr.name} · {v.name}"
+        else:
+            unit, name = pricer.of(pr), pr.name
+        if unit <= 0:
+            # precio a consultar (el guardian de margen lo saco de venta, o falta el tipo de cambio de su moneda):
+            # en linea no se vende a un precio que ya no es el de hoy. El resto del carrito se puede comprar.
+            raise HTTPException(409, f"{pr.name}: precio a consultar. Quitalo del carrito o escribinos y te confirmamos el precio.")
+        return unit, name
 
     gross = sum((d(ln.quantity) * unit_of(ln)[0] for ln in data.lines), Decimal(0))
     coupon = valid_coupon(db, t.id, data.coupon_code, gross)
@@ -742,7 +788,10 @@ def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
         )
     ship_amount = shipping_cost(ship, sum((d(ln.quantity) * d(prods[ln.product_id].weight_kg or 0) for ln in data.lines), Decimal(0))) if ship else Decimal(0)
     if ship_amount and pricer.currency != "CRC":  # las tarifas de envio se configuran en colones
-        ship_amount = pricer(ship_amount, "CRC").quantize(Decimal("0.01"))
+        conv = pricer.maybe(ship_amount, "CRC")
+        if conv is None:  # sin tipo de cambio no se cobra un envio inventado; el resto de la tienda sigue arriba
+            raise HTTPException(409, f"Envío {ship['name']}: monto a consultar. Elegí retiro en sitio o escribinos y te lo confirmamos.")
+        ship_amount = conv.quantize(Decimal("0.01"))
     if ship_amount > 0 and rate_zone(ship) != "retiro" and free_shipping_ok(t, pricer, items):
         ship_amount = Decimal(0)  # envio gratis desde el monto de Mi Tienda -> Pagos y entrega
     if ship and ship_amount > 0:
@@ -796,7 +845,14 @@ def free_shipping_threshold(t: Tenant, pricer: Pricer) -> Decimal | None:
     from ..services.store_orders import checkout_cfg
 
     raw = d(checkout_cfg(t).get("free_shipping_from") or 0)
-    return pricer(raw, "CRC").quantize(Decimal("0.01")) if raw > 0 else None
+    conv = pricer.maybe(raw, "CRC") if raw > 0 else None  # sin tipo de cambio: no se ofrece (nunca un umbral con 1)
+    return conv.quantize(Decimal("0.01")) if conv is not None else None
+
+
+def ship_display(pricer: Pricer, r: dict) -> Decimal | None:
+    """Tarifa de envio (se configura en colones) con IVA en la moneda de la tienda; None si falta el tipo de cambio."""
+    v = pricer.maybe(r.get("amount") or 0, "CRC")
+    return _gross(v, 13) if v is not None else None
 
 
 def free_shipping_ok(t: Tenant, pricer: Pricer, items: list[dict]) -> bool:

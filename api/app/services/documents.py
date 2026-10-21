@@ -16,7 +16,6 @@ from ..core.timeutil import cr_today
 from ..models import (
     AuditLog,
     Customer,
-    ExchangeRate,
     Invoice,
     InvoiceLine,
     Payment,
@@ -81,10 +80,13 @@ def local_date(dt: datetime | None) -> date | None:
 
 
 def today_fx(db: Session, currency: str) -> tuple[Decimal, Decimal]:
-    if currency == "CRC":
+    """(venta, compra) de la tasa mas reciente. Delega en services/fx.fx (la funcion unica): nunca 1 para una moneda
+    distinta de CRC; sin ninguna tasa lanza FxMissing, que el API devuelve como 422 claro."""
+    from .fx import fx
+
+    if (currency or "CRC").upper() == "CRC":
         return Decimal(1), Decimal(1)
-    fx = db.scalar(select(ExchangeRate).where(ExchangeRate.currency == currency).order_by(ExchangeRate.date.desc()))
-    return (d(fx.sell), d(fx.buy)) if fx else (Decimal(1), Decimal(1))
+    return fx(db, currency).tasa, fx(db, currency, side="buy").tasa
 
 
 def _fill_line_from_product(db: Session, tenant_id: int, ln: LineInSchema, currency: str | None = None) -> LineInSchema:

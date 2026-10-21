@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from ..models import Category, Product, Supplier, SupplierItem, Tenant
 from . import availability, pricing
 from . import tabular as tb
-from .documents import today_fx
+from .fx import rate_or_none
 from .totals import d
 
 # ---------- modelo del fabricante ----------
@@ -127,15 +127,19 @@ def _jaccard(a: set[str], b: set[str]) -> float:
 
 
 # ---------- tipo de cambio y fechas ----------
-def usd_rate(db: Session) -> Decimal:
-    return d(today_fx(db, "USD")[0])
+def usd_rate(db: Session) -> Decimal | None:
+    """Venta del dolar (services/fx) o None si no hay ninguna tasa: el refresco de existencias y las listas siguen
+    funcionando; lo que necesita colones queda sin calcular (None), nunca convertido con 1."""
+    return rate_or_none(db, "USD")
 
 
-def to_crc(amount, currency: str | None, fx: Decimal) -> Decimal | None:
+def to_crc(amount, currency: str | None, fx: Decimal | None) -> Decimal | None:
     if amount is None:
         return None
     a = d(amount)
-    return a if (currency or "USD") == "CRC" else (a * fx).quantize(Decimal("0.01"))
+    if (currency or "USD") == "CRC":
+        return a
+    return (a * d(fx)).quantize(Decimal("0.01")) if fx is not None and d(fx) > 0 else None
 
 
 def list_datetime(list_date: date | None) -> datetime | None:

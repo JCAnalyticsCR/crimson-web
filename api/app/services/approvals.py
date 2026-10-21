@@ -281,6 +281,50 @@ def _commission_item(db: Session, p: Principal, c: Commission) -> dict:
     )
 
 
+# ---------- precios por revisar (guardian de margen, plan 1.12) ----------
+def _price_review_where(p: Principal) -> list:
+    return [Product.tenant_id == p.tenant.id, Product.margin_flagged_at.is_not(None), Product.active, Product.show_on_web]
+
+
+def _pct(v) -> str:
+    return f"{Decimal(str(v or 0)).normalize():f}".replace(".", ",")
+
+
+def _price_review_item(db: Session, p: Principal, prod: Product) -> dict:
+    from urllib.parse import quote
+
+    from .margin_guard import dudoso_txt, money_txt, review
+
+    r = review(p.tenant, prod)
+    sub = f"Margen {_pct(r['margin_pct'])} % (mínimo {_pct(r['min_pct'])} %) · precio actual {money_txt(r['price'], r['currency'])}"
+    if r["low_variants"]:
+        sub += f" · {r['low_variants']} variante(s) con precio propio bajo el mínimo"
+    if r["dudoso"]:
+        sub += f" · dudoso: {dudoso_txt(r)} antes de aplicar"
+    badge = "Fuera de venta" if r["held"] else ("Frenado: sigue a la venta" if r["over_cap"] else "Solo informe: sigue a la venta")
+    row = _row(
+        prod.id,
+        prod.code,
+        prod.name,
+        sub[:300],
+        since=prod.margin_flagged_at,
+        badge=badge + (" · dudoso" if r["dudoso"] else ""),
+        amount=r["suggested"],  # el precio sugerido (sin IVA): la seccion exige ver costos
+        currency=r["currency"],
+        to=f"/productos?q={quote(prod.code, safe='')}&ficha={prod.id}",  # abre la ficha para verificar el costo
+    )
+    que = (("el precio y " if r["base_low"] else "") + f"{r['low_variants']} variante(s)") if r["low_variants"] else "el precio"
+    # el unico pendiente que se resuelve aqui mismo: aplicar el precio sugerido con un clic (nunca se reprecia solo).
+    # body = el precio que se muestra: si el sugerido de hoy es otro, la API responde 409 y no aplica otro monto
+    row["action"] = {
+        "label": "Aplicar",
+        "path": f"/approvals/prices/{prod.id}/apply",
+        "body": {"price": r["suggested"]},
+        "confirm": f"¿Cambiar {que} de {prod.name} a {money_txt(r['suggested'], r['currency'])} sin IVA y volver a publicarlo?",
+    }
+    return row
+
+
 SECTIONS: tuple[Section, ...] = (
     Section(
         "levantamientos_por_revisar",
@@ -370,6 +414,19 @@ SECTIONS: tuple[Section, ...] = (
         lambda: [Commission.earned_on, Commission.id],
         _commission_item,
     ),
+    Section(
+        "precios_por_revisar",
+        "Precios por revisar",
+        "Productos de la tienda que quedaron bajo el margen mínimo por el costo del proveedor o el tipo de cambio. "
+        "Los que dicen «Fuera de venta» se muestran como «Consultar» hasta que apliqués un precio; el sistema nunca "
+        "cambia un precio solo.",
+        ("catalog.costos", "catalog.editar"),
+        "/aprobaciones?seccion=precios_por_revisar",  # la seccion entera (la bandeja corta en 50)
+        Product,
+        _price_review_where,
+        lambda: [Product.margin_flagged_at, Product.id],
+        _price_review_item,
+    ),
 )
 
 
@@ -384,10 +441,11 @@ def summary(db: Session, p: Principal) -> dict:
     return {"total": sum(x["count"] for x in secs), "sections": secs}
 
 
-def full(db: Session, p: Principal, limit: int = 20) -> dict:
+def full(db: Session, p: Principal, limit: int = 20, only: str | None = None) -> dict:
+    """only = la clave de una seccion: solo esa ("Ver todos" de la bandeja, que corta en 50 por seccion)."""
     out = []
     for s in SECTIONS:
-        if not allowed(p, s):
+        if not allowed(p, s) or (only and s.key != only):
             continue
         rows = db.scalars(select(s.model).where(*s.where(p)).order_by(*s.order()).limit(limit)).all()
         sec = {
@@ -404,5 +462,9 @@ def full(db: Session, p: Principal, limit: int = 20) -> dict:
 
             # "¿quien lo recibe?": a quien le llega el aviso de cada levantamiento enviado
             sec["reviewers"] = [f"{r['name']} ({r['role']})" for r in _reviewers(db, p.tenant)]
+        if s.key == "precios_por_revisar":
+            # la ultima revision del guardian quedo frenada (posible error de datos): la bandeja ofrece destrabarla
+            last = (p.tenant.settings or {}).get("margin_guard_last") or {}
+            sec["brake"] = {"reason": last["frenada"], "frenados": last.get("frenados", 0), "at": last.get("at")} if last.get("frenada") else None
         out.append(sec)
     return {"total": sum(x["count"] for x in out), "sections": out}

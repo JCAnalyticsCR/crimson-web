@@ -71,7 +71,19 @@ def test_gasto_desde_linea_en_dolares_lleva_tipo_de_cambio(client, auth, db_sess
     assert r.status_code == 201, r.text
     e = db_session.get(Expense, r.json()["match"]["id"])
     assert e.currency == "USD" and Decimal(str(e.fx_rate)) == Decimal(str(venta.sell)) and not r.json()["warnings"]
-    r = client.post(f"/banking/lines/{lineas[1].id}/expense", json={})  # sin tipo de cambio para esa fecha: 1 con aviso
-    assert r.status_code == 201 and r.json()["warnings"]
+    # sin tipo de cambio para esa fecha: la tasa mas cercana con aviso (plan 1.12: nunca 1 para una moneda que no es CRC)
+    r = client.post(f"/banking/lines/{lineas[1].id}/expense", json={})
+    assert r.status_code == 201 and r.json()["warnings"] and "se usó el del" in r.json()["warnings"][0]
     e2 = db_session.get(Expense, r.json()["match"]["id"])
-    assert Decimal(str(e2.fx_rate)) == Decimal(1)
+    primera = db_session.query(ExchangeRate).filter(ExchangeRate.currency == "USD").order_by(ExchangeRate.date).first()
+    assert Decimal(str(e2.fx_rate)) == Decimal(str(primera.sell)) != Decimal(1)
+    # sin ninguna tasa cargada: 422 claro en lugar de un gasto en dolares a 1
+    db_session.query(ExchangeRate).delete()
+    db_session.commit()
+    ln3 = BankStatementLine(
+        tenant_id=tid, bank_account_id=acc["id"], date=hoy, description="Comision 3", amount=-20, status="pendiente", batch="b2", fingerprint="fp-usd-3", imported_at=datetime.now(UTC)
+    )
+    db_session.add(ln3)
+    db_session.commit()
+    r = client.post(f"/banking/lines/{ln3.id}/expense", json={})
+    assert r.status_code == 422 and "tipo de cambio" in r.json()["detail"]

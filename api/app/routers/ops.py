@@ -599,7 +599,21 @@ def _bank_created(db: Session, tenant_id: int) -> set[int]:
 
 
 def _crc_amount(v, e: Expense) -> Decimal:
-    return Decimal(str(v or 0)) * (Decimal(str(e.fx_rate or 1)) if e.currency != "CRC" else Decimal(1))
+    """Monto del gasto en colones con su tasa; si le falta (o quedo en 1), la del BCCR de su fecha (services/fx).
+    Nunca suma dolares como colones: sin ninguna tasa, FxMissing -> 422."""
+    from sqlalchemy.orm import object_session
+
+    from ..services.fx import FxMissing, doc_rate
+
+    if (e.currency or "CRC") == "CRC":
+        return Decimal(str(v or 0))
+    db = object_session(e)
+    if db is None:
+        stored = Decimal(str(e.fx_rate or 0))
+        if stored <= 1:
+            raise FxMissing(e.currency)
+        return Decimal(str(v or 0)) * stored
+    return Decimal(str(v or 0)) * doc_rate(db, e.currency, e.fx_rate, e.date)
 
 
 def _own_or_none(db: Session, model, oid: int | None, tenant_id: int):
@@ -733,13 +747,15 @@ def expenses_summary(
 
 
 def bccr_sell(db: Session, currency: str, on: date) -> Decimal | None:
-    """Venta del BCCR de esa fecha o la ultima anterior (None si no hay ninguna)."""
-    from ..models import ExchangeRate
+    """Venta del BCCR de esa fecha o la ultima anterior, con la funcion unica (services/fx). None si no hay ninguna
+    anterior: el llamador avisa en lugar de inventar una."""
+    from ..services import fx as fxsvc
 
-    if currency == "CRC":
-        return Decimal(1)
-    fx = db.scalar(select(ExchangeRate).where(ExchangeRate.currency == currency, ExchangeRate.date <= on).order_by(ExchangeRate.date.desc()))
-    return Decimal(str(fx.sell)) if fx else None
+    try:
+        t = fxsvc.fx(db, currency, on)
+    except fxsvc.FxMissing:
+        return None
+    return None if (t.fecha and on and t.fecha > on) else t.tasa
 
 
 def _apply_expense(e: Expense, data: ExpenseIn, db: Session | None = None) -> list[str]:
@@ -757,10 +773,14 @@ def _apply_expense(e: Expense, data: ExpenseIn, db: Session | None = None) -> li
     elif data.fx_rate is not None:
         e.fx_rate = data.fx_rate
     else:
-        fx = bccr_sell(db, data.currency, data.date) if db is not None else None
-        e.fx_rate = fx or Decimal(1)
-        if fx is None:
-            warnings.append("Sin tipo de cambio del BCCR para esa fecha: se usó 1; indíquelo a mano")
+        # la del BCCR de su fecha (o la mas cercana, con aviso); nunca 1: sin ninguna tasa, FxMissing -> 422 claro
+        from ..services.fx import FxMissing, for_date
+
+        if db is None:
+            raise FxMissing(data.currency)
+        e.fx_rate, aviso = for_date(db, data.currency, data.date)
+        if aviso:
+            warnings.append(aviso)
     if data.tax_credit_amount is not None:
         e.tax_credit_amount = data.tax_credit_amount
     elif data.iva_credit in ("credito", "bienes_capital"):

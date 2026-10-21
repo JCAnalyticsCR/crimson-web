@@ -10,12 +10,15 @@ import { availText, sinExistencia, type Availability } from "../../ui/Availabili
 /* ---------- Types ---------- */
 type Variant = { id: number; name: string; code: string; price: number | null };
 /* stock = libre propio en bodegas de venta (funcion unica del API); availability trae tambien lo del proveedor.
-   pos_price / pos_currency: el precio en la moneda de la caja (el API convierte USD/CRC con el tipo del dia). */
+   pos_price / pos_currency: el precio en la moneda de la caja (el API convierte USD/CRC con el tipo del dia). Sin tipo
+   de cambio el API manda pos_price null (sin_tc): se muestra en su propia moneda (nunca un dolar como colon) y NO se
+   deja agregar al carrito, que suma todo en la moneda de la caja. */
 type CatalogItem = {
   id: number; code: string; name: string; price: number; currency: string;
   item_type: string; category_id: number | null; tax_rate: number;
   stock: number | string | null; image: string | null; variants: Variant[];
   pos_price?: number | string; pos_currency?: string; availability?: Availability | null;
+  sin_tc?: boolean; // en otra moneda y sin tipo de cambio: no se puede cobrar en la caja
 };
 type CartLine = {
   key: string; product_id: number; variant_id?: number;
@@ -68,7 +71,7 @@ export default function Pos() {
   /* load catalog */
   useEffect(() => {
     api<CatalogItem[]>("/pos/catalog")
-      .then((items) => setCatalog(items.map((i) => ({ ...i, price: Number(i.price), tax_rate: Number(i.tax_rate), pos_price: i.pos_price != null ? Number(i.pos_price) : Number(i.price), pos_currency: i.pos_currency || i.currency }))))
+      .then((items) => setCatalog(items.map((i) => ({ ...i, price: Number(i.price), tax_rate: Number(i.tax_rate), pos_price: i.pos_price != null ? Number(i.pos_price) : Number(i.price), pos_currency: i.pos_price != null ? i.pos_currency || i.currency : i.currency, sin_tc: i.pos_price == null }))))
       .catch((e) => toast(e instanceof Error ? e.message : "Error al cargar catálogo", "bad"))
       .finally(() => setCatLoading(false));
   }, [toast]);
@@ -121,6 +124,12 @@ export default function Pos() {
     return Math.round(Number(v.price) * factor * 100000) / 100000;
   };
   const addToCart = (item: CatalogItem, variantId?: number) => {
+    if (item.sin_tc) {
+      // el carrito suma en la moneda de la caja: sin tasa, un precio en otra moneda se sumaria como si fuera de la caja
+      toast(`${item.name}: no hay tipo de cambio de ${item.currency} cargado. Cargalo en Ajustes → Facturación para cobrarlo en caja.`, "bad");
+      setVariantItem(null);
+      return;
+    }
     const variant = variantId != null ? item.variants.find((v) => v.id === variantId) : undefined;
     const price = posPrice(item, variant);
     if (item.item_type === "producto" && sinExistencia(item.availability) && !cart.some((l) => l.product_id === item.id)) {
@@ -137,7 +146,7 @@ export default function Pos() {
   };
 
   const handleProductClick = (item: CatalogItem) => {
-    if (item.variants.length > 0) { setVariantItem(item); return; }
+    if (item.variants.length > 0 && !item.sin_tc) { setVariantItem(item); return; }
     addToCart(item);
   };
 
@@ -273,7 +282,7 @@ export default function Pos() {
                   )}
                   <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.3, flex: 1 }}>{item.name}</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 4 }}>
-                    <span className="money" style={{ color: "var(--crimson)", fontSize: 12.5, fontWeight: 700 }} title={item.currency !== item.pos_currency ? `${fmtMoney(item.price, item.currency)} convertido` : undefined}>
+                    <span className="money" style={{ color: "var(--crimson)", fontSize: 12.5, fontWeight: 700 }} title={item.sin_tc ? `Sin tipo de cambio de ${item.currency}: no se puede cobrar en caja` : item.currency !== item.pos_currency ? `${fmtMoney(item.price, item.currency)} convertido` : undefined}>
                       {fmtMoney(item.pos_price ?? item.price, item.pos_currency || item.currency)}
                     </span>
                     {item.item_type === "producto" && item.stock != null && (() => {

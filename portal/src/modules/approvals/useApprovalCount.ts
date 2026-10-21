@@ -6,18 +6,23 @@ import { useLocation } from "react-router-dom";
 import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
 
-/** Un pendiente de la bandeja: `to` abre la pantalla donde se aprueba (aqui no se aprueba nada). */
+/** Un pendiente de la bandeja: `to` abre la pantalla donde se aprueba (aqui no se aprueba nada, salvo `action`). */
 export type ApprovalItem = {
   id: number; ref: string; title: string; subtitle: string | null; who: string | null;
   /** ISO de fecha y hora, o solo fecha (AAAA-MM-DD) en comisiones */
   since: string | null; badge: string | null;
   /** solo donde el permiso de la seccion ya implica ver ese dinero (cotizaciones con precios, aliados con costos, comisiones) */
   amount: string | number | null; currency: string | null; to: string;
+  /** solo "precios_por_revisar" (plan 1.12): el precio sugerido se aplica aqui con un clic (POST a `path` con `body`,
+      el precio que se muestra: si el de hoy es otro la API responde 409 y no aplica otro monto) */
+  action?: { label: string; path: string; confirm?: string; body?: unknown };
 };
 export type ApprovalSection = {
   key: string; label: string; hint: string; needs: string[]; to: string; count: number; items: ApprovalItem[];
   /** solo "levantamientos_por_revisar": a quien le llega el aviso ("¿quién es la oficina?") */
   reviewers?: string[];
+  /** solo "precios_por_revisar": la ultima revision quedo frenada por una posible falla de datos */
+  brake?: { reason: string; frenados: number; at?: string | null } | null;
 };
 export type ApprovalsSummary = { total: number; sections: Pick<ApprovalSection, "key" | "label" | "needs" | "to" | "count">[] };
 export type ApprovalsFull = { total: number; sections: ApprovalSection[] };

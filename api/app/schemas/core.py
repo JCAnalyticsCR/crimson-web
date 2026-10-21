@@ -116,6 +116,14 @@ class ExchangeRateOut(BaseModel):
     source: str
 
 
+class FxTodayOut(ExchangeRateOut):
+    """La tasa vigente con lo que el editor de documentos muestra: fuente legible y si esta vieja."""
+
+    source_label: str
+    stale: bool = False
+    business_days_old: int = 0
+
+
 class ExchangeRateIn(BaseModel):
     date: date
     currency: str = "USD"

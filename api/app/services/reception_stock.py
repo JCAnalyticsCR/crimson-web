@@ -24,6 +24,7 @@ from ..models import Product, ReceivedDocument, StockMovement, Supplier, Supplie
 from ..providers.hacienda import xml44
 from . import inventory as invsvc
 from .documents import audit
+from .fx import doc_rate
 
 DOC_TYPES = ("FE", "TE", "FEC")
 
@@ -131,7 +132,8 @@ def stock_in(db: Session, doc: ReceivedDocument, items: list[dict], warehouse_id
     lines = {ln["line"]: ln for ln in parse_lines(doc)}
     if not lines:
         raise HTTPException(422, "El comprobante no tiene líneas legibles en su XML")
-    rate = Decimal(str(doc.fx_rate or 1)) if (doc.currency or "CRC") != "CRC" else Decimal(1)
+    # costo en colones con la tasa del XML (o la del BCCR de su fecha si no la trae); sin ninguna: FxMissing -> 422
+    rate = doc_rate(db, doc.currency, doc.fx_rate, doc.issue_date)
     ref = reference(doc)
     n = 0
     for it in items:

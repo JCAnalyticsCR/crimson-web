@@ -88,3 +88,6 @@ pwreset_global_limiter = SlidingWindow(limit=100, seconds=3600)
 # Hacienda: "Probar conexion" pide un token al IdP (no abusar) y "Revisar buzon ahora" abre IMAP, por empresa
 hacienda_test_limiter = SlidingWindow(limit=5, seconds=900)
 inbox_run_limiter = SlidingWindow(limit=4, seconds=300)
+# Guardian de margen (plan 1.12): cada tasa manual, "Actualizar desde el BCCR" y "Revisar ahora" recorre todos los
+# productos publicados de la empresa. Por empresa; holgado para una persona, frena el martilleo.
+margin_run_limiter = SlidingWindow(limit=10, seconds=60)

@@ -29,6 +29,7 @@ from ..services import equipment_reco, pricing, supplier_catalog
 from ..services import inventory as invsvc
 from ..services.archive import live
 from ..services.documents import audit
+from ..services.fx import rate_or_none
 from ..services.mail import notify_roles, queue_email
 from ..services.refs import check_refs
 from ..services.sequences import next_number
@@ -1224,7 +1225,7 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
     s = db.get(Survey, sid)
     if not s or s.tenant_id != p.tenant.id:
         raise HTTPException(404, "Levantamiento no encontrado")
-    fx = docsvc.today_fx(db, "USD")[0]
+    fx = rate_or_none(db, "USD")  # None: cada costo en dolares la consulta (sin ninguna tasa, 422 claro; nunca 1)
     margin_pct = d(margin) if margin is not None else pricing.default_margin(p.tenant)
     labor_day, transport = rates(p.tenant)
     propias = tarifas_survey(s)
@@ -1242,7 +1243,7 @@ def survey_costing(sid: int, margin: Decimal | None = None, p: Principal = Depen
         if unit_cost <= 0 and it.supplier_cost is not None and d(it.supplier_cost) > 0:
             # oferta de proveedor elegida con la recomendacion: su costo en colones con el tipo de cambio del dia
             cur = it.supplier_currency or "USD"
-            rate = Decimal(1) if cur == "CRC" else (fx if cur == "USD" else docsvc.today_fx(db, cur)[0])
+            rate = Decimal(1) if cur == "CRC" else (fx if cur == "USD" and fx is not None else docsvc.today_fx(db, cur)[0])
             unit_cost, source = d(it.supplier_cost) * d(rate), "proveedor"
             supplier = (it.recommendation or {}).get("supplier")
         if unit_cost <= 0 and prod is not None:

@@ -59,7 +59,8 @@ from ..models.allies import COST_OPEN
 from ..services import ally_access, ally_pricing
 from ..services import media_access as ma
 from ..services import sla as slasvc
-from ..services.documents import audit, local_date, today_fx
+from ..services.documents import audit, local_date
+from ..services.fx import rate_or_none
 from ..services.mail import notify_roles, queue_email
 from ..services.render import render_html, render_pdf
 from ..services.sequences import next_number
@@ -1450,7 +1451,7 @@ def _availability(db: Session, ctx: AllyCtx, prods) -> dict[int, dict]:
 ALLY_AVAIL_KEYS = ("state", "label", "en_bodega", "bajo_pedido_cantidad", "actualizado_al", "dato_vigente", "plazo")
 
 
-def _catalog_out(db: Session, ctx: AllyCtx, pr: Product, fx: Decimal, fixed: dict, av: dict, cats: dict, full: bool = False) -> dict:
+def _catalog_out(db: Session, ctx: AllyCtx, pr: Product, fx: Decimal | None, fixed: dict, av: dict, cats: dict, full: bool = False) -> dict:
     precio, _fuente, estado = ally_pricing.ally_price(db, ctx.p.tenant, pr, ctx.company, fx=fx, fixed=fixed)
     a = av.get(pr.id) or {}
     tax = d(pr.taxes[0].tax.rate) if pr.taxes else None
@@ -1509,7 +1510,7 @@ def catalogo(
     rows = db.scalars(stmt.order_by(Product.id.desc()).limit(limit + 1)).all()
     nxt = rows[limit].id if len(rows) > limit else None
     rows = rows[:limit]
-    fx = today_fx(db, "USD")[0]  # un solo tipo de cambio por request
+    fx = rate_or_none(db, "USD")  # un solo tipo de cambio por request (None: "a consultar" lo que lo necesite)
     fixed = ally_pricing.fixed_prices(db, ctx.p.tenant.id, [r.id for r in rows], ctx.company.id)
     av = _availability(db, ctx, rows)
     cats = _cats(db, ctx.p.tenant.id)
@@ -1535,7 +1536,7 @@ def catalogo_ficha(pid: int, ctx: AllyCtx = Depends(need("catalogo")), db: Sessi
     pr = db.get(Product, pid)
     if not pr or pr.tenant_id != ctx.p.tenant.id or not pr.active:
         raise HTTPException(404, "Producto no encontrado")
-    fx = today_fx(db, "USD")[0]
+    fx = rate_or_none(db, "USD")
     fixed = ally_pricing.fixed_prices(db, ctx.p.tenant.id, [pr.id], ctx.company.id)
     return _catalog_out(db, ctx, pr, fx, fixed, _availability(db, ctx, [pr]), _cats(db, ctx.p.tenant.id), full=True)
 

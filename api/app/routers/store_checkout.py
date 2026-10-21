@@ -64,10 +64,11 @@ def checkout_config(slug: str, db: Session = Depends(get_db)):
     t = _tenant(db, slug)
     cfg, ck = store_cfg(t), so.checkout_cfg(t)
     pricer = Pricer(db, t)
-    from .store import _gross
+    from .store import ship_display
 
     rates = [
-        {"name": r["name"], "zone": rate_zone(r), "per_kg": bool(r.get("per_kg")), "display_amount": _gross(pricer(r.get("amount") or 0, "CRC"), 13)}
+        # display_amount null = sin tipo de cambio (tienda en otra moneda): "a consultar"; el checkout no se cae
+        {"name": r["name"], "zone": rate_zone(r), "per_kg": bool(r.get("per_kg")), "display_amount": ship_display(pricer, r)}
         for r in cfg["shipping_rates"]
         if r.get("active")
     ]

@@ -2,7 +2,7 @@
    Los totales se recalculan en vivo contra /documents/preview (misma logica que el guardado). */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { api, fmtMoney, type Customer, type Invoice, type Line, type Product, type Quote } from "../../lib/api";
+import { api, fmtDate, fmtMoney, type Customer, type Invoice, type Line, type Product, type Quote } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Field, I, Icon, Loading, Modal } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
@@ -51,7 +51,9 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const [prev, setPrev] = useState<Preview | null>(null);
   const [pick, setPick] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [fx, setFx] = useState<{ sell: string; buy: string } | null>(null);
+  /* tasa vigente (services/fx en la API): con su fecha, su fuente y si tiene mas de 2 dias habiles */
+  const [fx, setFx] = useState<FxToday | null>(null);
+  const [fxLoaded, setFxLoaded] = useState(false);
   const [limit, setLimit] = useState<{ limit: number; free: boolean } | null>(null);
   const [cargado, setCargado] = useState(isNew); // un documento existente no tiene borrador hasta que llega del servidor
   /* vendedor responsable: lo elige solo quien tiene sales.asignar (el admin); los demas lo ven */
@@ -77,7 +79,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     api<{ items: Customer[] }>("/customers?limit=100").then((r) => setCustomers(r.items));
     api<{ id: number; code: string; description: string | null; is_default: boolean }[]>("/fiscal/activities").then(setActs).catch(() => setActs([]));
     api<{ mode: string }>("/fiscal/mode").then((r) => setFmode(r.mode)).catch(() => setFmode(null));
-    api<{ sell: string; buy: string } | null>("/fx/today").then((r) => r && setFx(r)).catch(() => {});
+    api<FxToday | null>("/fx/today").then((r) => { setFx(r); setFxLoaded(true); }).catch(() => {});
     api<{ limit: number; free: boolean }>("/sales/discount-limit").then(setLimit).catch(() => {});
     if (!isNew) api<Quote & Invoice>(`/${isQ ? "quotes" : "invoices"}/${id}`).then(hydrate);
   }, [id, isNew, isQ]);
@@ -262,7 +264,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                 <option value="">Seleccione…</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </Field>
-            <Field label="Divisa" hint={doc.customer_id && customers.find((c) => c.id === doc.customer_id)?.currency !== cur ? `El cliente prefiere ${customers.find((c) => c.id === doc.customer_id)?.currency}; esta cambiada a mano.` : fx ? `Tipo de cambio hoy: venta ${fx.sell} · compra ${fx.buy}` : undefined}>
+            <Field label="Divisa" hint={doc.customer_id && customers.find((c) => c.id === doc.customer_id)?.currency !== cur ? `El cliente prefiere ${customers.find((c) => c.id === doc.customer_id)?.currency}; esta cambiada a mano.` : fx ? `Tipo de cambio (${fx.source_label}, ${fmtDate(fx.date)}): venta ${fx.sell} · compra ${fx.buy}${fx.stale ? " · tasa vieja" : ""}` : undefined}>
               <select className="select" value={cur} disabled={ro} onChange={(e) => setDoc({ ...doc, currency: e.target.value })}><option>CRC</option><option>USD</option></select>
             </Field>
             <Field label="Grupo de facturación"><select className="select" disabled><option>{isQ ? "COT · Cotizaciones" : "FEC · Facturas electrónicas"}</option></select></Field>
@@ -407,7 +409,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
           <div className="card"><div className="card__body">
             <div className="meta" style={{ marginBottom: 8 }}>Tipos de cambio</div>
             <div className="totals"><div><span>Venta</span><span className="money">{cur === "CRC" ? "—" : num(doc.fx_sell ?? fx?.sell ?? "")}</span></div><div><span>Compra</span><span className="money">{cur === "CRC" ? "—" : num(doc.fx_buy ?? fx?.buy ?? "")}</span></div></div>
-            <p className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>Se guarda en el documento al emitir. Fuente: BCCR{me?.tenant.default_currency ? ` · base ${me.tenant.default_currency}` : ""}.</p>
+            <FxSource fx={fx} loaded={fxLoaded} cur={cur} docFx={isNew ? null : doc.fx_sell} base={me?.tenant.default_currency} />
           </div></div>
         </aside>
       </div>
@@ -450,3 +452,24 @@ function ProductPicker({ onClose, onPick, docCurrency }: { onClose: () => void; 
 
 // Empty local para el picker (evita importar el de components por el estilo compacto)
 function Empty({ hint }: { hint: string }) { return <div className="empty" style={{ padding: 24 }}><span className="meta">Sin resultados</span><p className="muted">{hint}</p></div>; }
+
+type FxToday = { sell: string; buy: string; date: string; source: string; source_label: string; stale: boolean; business_days_old: number };
+
+/* De donde sale la tasa (plan 1.12): fecha y fuente reales (BCCR o manual), aviso si esta vieja y, sin ninguna,
+   que un documento en dolares no se puede guardar (el sistema nunca convierte con 1). */
+function FxSource({ fx, loaded, cur, docFx, base }: { fx: FxToday | null; loaded: boolean; cur: string; docFx: string | number | null | undefined; base?: string }) {
+  if (!loaded) return null;
+  if (!fx) {
+    return <p style={{ fontSize: 11.5, marginTop: 8, color: "var(--warn)" }}>Sin tipo de cambio cargado: un documento en dólares no se puede guardar hasta cargarlo en Ajustes → Facturación.</p>;
+  }
+  const propia = cur !== "CRC" && docFx != null && Number(docFx) > 0 && Math.abs(Number(docFx) - Number(fx.sell)) > 0.00001;
+  return (
+    <>
+      <p className="muted" style={{ fontSize: 11.5, marginTop: 8, marginBottom: 0 }}>
+        {propia ? "El documento guarda la tasa con la que se hizo. " : "Se guarda en el documento al emitir. "}
+        Tasa vigente: {fx.source_label} · {fmtDate(fx.date)}{base ? ` · base ${base}` : ""}.
+      </p>
+      {fx.stale && <p style={{ fontSize: 11.5, marginTop: 6, marginBottom: 0, color: "var(--warn)" }}>La tasa tiene {fx.business_days_old} días hábiles: actualizala en Ajustes → Facturación antes de emitir en dólares.</p>}
+    </>
+  );
+}

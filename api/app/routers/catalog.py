@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
@@ -25,6 +27,7 @@ from ..services import cabys as cabys_svc
 from ..services import supplier_catalog as supcat
 
 router = APIRouter(tags=["catalogo"])
+log = logging.getLogger("crimson.catalogo")
 
 # Campos de costo del producto: solo los escribe quien los ve (catalog.costos)
 COST_FIELDS = {"cost", "cost_currency", "margin_pct"}
@@ -130,7 +133,7 @@ def _product_out(pr: Product, p: Principal | None = None) -> ProductOut:
     if p is not None and not p.sees_prices:  # el tecnico ve el catalogo sin plata
         o.price = 0
     if p is not None and not p.sees_costs:  # la vendedora cotiza con el precio, no con el costo
-        o.cost, o.margin_pct = None, None
+        o.cost, o.margin_pct, o.margin_hold = None, None, None
     return o
 
 
@@ -140,9 +143,9 @@ def _with_costs(db: Session, p: Principal, prods: list[Product]) -> list[Product
     info = supcat.cost_info(db, p.tenant, prods) if p.sees_costs and prods else {}
     if p.sees_costs and prods:
         from ..services import ally_pricing
-        from ..services.documents import today_fx
+        from ..services.fx import rate_or_none
 
-        fx = today_fx(db, "USD")[0]
+        fx = rate_or_none(db, "USD")  # sin tasa la lista sigue; el precio de aliado en otra moneda queda "a consultar"
         fijos = ally_pricing.fixed_prices(db, p.tenant.id, [x.id for x in prods], None)
     out = []
     for pr in prods:
@@ -303,9 +306,22 @@ def toggle_web(pid: int, data: WebIn, p: Principal = Depends(require("catalog", 
     """Publica o quita el producto de la tienda desde la lista, sin abrir la ficha."""
     pr = _own(db, Product, pid, p.tenant.id)
     pr.show_on_web = data.show_on_web
+    _margin_recheck(db, p, pr)
     db.commit()
     db.refresh(pr)
     return _product_out(pr, p)
+
+
+def _margin_recheck(db: Session, p: Principal, pr: Product) -> None:
+    """Producto en Precios por revisar (guardian de margen, plan 1.12) editado a mano: si su precio ya cumple el margen
+    minimo vuelve a la venta ya. Despublicarlo y volverlo a publicar NO lo libera (sigue fuera si sigue bajo el minimo).
+    Guardar el producto nunca falla por el guardian."""
+    from ..services import margin_guard
+
+    try:
+        margin_guard.recheck(db, p.tenant, pr)
+    except Exception:  # noqa: BLE001
+        log.exception("guardian de margen al editar el producto %s", pr.id)
 
 
 @router.get("/products/{pid}/availability")
@@ -352,6 +368,7 @@ def update_product(pid: int, data: ProductIn, p: Principal = Depends(require("ca
         for tid in data.tax_ids:
             _own(db, Tax, tid, p.tenant.id)
             pr.taxes.append(ProductTax(tax_id=tid))
+    _margin_recheck(db, p, pr)
     db.commit()
     db.refresh(pr)
     return _product_out(pr, p)

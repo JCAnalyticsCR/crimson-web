@@ -27,6 +27,7 @@ from ..providers.hacienda import xml44
 from ..providers.hacienda.provider import HaciendaDirectProvider, InvalidXml, SimulatedHacienda
 from . import hacienda_config as hc
 from .documents import audit
+from .fx import doc_rate
 from .sequences import next_fiscal_consecutive, next_number
 from .units import hacienda_unit
 
@@ -198,7 +199,9 @@ def direct_payload(
         "credit_days": inv.credit_days or 0,
         "lines": lines,
         "currency": inv.currency or "CRC",
-        "fx": inv.fx_sell or 1,
+        # services/fx: la tasa guardada si es valida; si quedo nula o en 1 (factura vieja en dolares), la del BCCR de su
+        # fecha. Nunca TipoCambio 1 a Hacienda para otra moneda: sin ninguna tasa, FxMissing (422 claro)
+        "fx": doc_rate(db, inv.currency, inv.fx_sell, inv.issue_date),
         "payment_method": pay if (pay in PAYMENT_METHODS or not lenient) else "01",
         "reference": reference,
         "tax_total": inv.tax_total,

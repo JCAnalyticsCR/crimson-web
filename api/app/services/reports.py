@@ -141,6 +141,16 @@ def _to_crc(amount, currency: str | None, fx) -> Decimal:
     return _crc(amount, currency or "CRC", fx)
 
 
+def _orate(db: Session, o) -> Decimal:
+    """Tasa de un documento guardado (factura: fx_sell; gasto y comprobante recibido: fx_rate). Si le falta o quedo en
+    1 (el sistema viejo caia a 1 sin tasa), la del BCCR de su fecha (services/fx.doc_rate); sin ninguna, FxMissing."""
+    from .fx import doc_rate
+
+    stored = o.fx_sell if hasattr(o, "fx_sell") else getattr(o, "fx_rate", None)
+    on = getattr(o, "issue_date", None) or getattr(o, "date", None)
+    return doc_rate(db, o.currency, stored, on)
+
+
 def _q2(x: Decimal) -> Decimal:
     return Decimal(str(x)).quantize(Decimal("0.01"))
 
@@ -198,13 +208,13 @@ def iva_breakdown(db: Session, tid: int, a: date, b: date, prorrata_pct=None) ->
             continue
         if inv.status == "anulada" and inv.id not in nc_inv:
             continue
-        deb += _to_crc(inv.tax_total, inv.currency, inv.fx_sell)
+        deb += _to_crc(inv.tax_total, inv.currency, _orate(db, inv))
     for inv_id, nc in nc_inv.items():
         when = local_date(nc.created_at)  # en UTC en cualquier motor; la NC resta en el mes en que se emitio
         if when and a <= when <= b:
             inv = db.get(Invoice, inv_id)
             if inv:
-                deb -= _to_crc(inv.tax_total, inv.currency, inv.fx_sell)
+                deb -= _to_crc(inv.tax_total, inv.currency, _orate(db, inv))
 
     # ---- credito de comprobantes electronicos respondidos
     docs = db.scalars(
@@ -223,7 +233,7 @@ def iva_breakdown(db: Session, tid: int, a: date, b: date, prorrata_pct=None) ->
         r = last.get(d.id)
         if r is not None and r.status in ("rechazado", "error"):
             continue
-        fx = d.fx_rate or 1
+        fx = _orate(db, d)
         credit = _reception_credit(d)
         if credit is None:  # proporcional
             if d.supplier_hacienda_status != "rechazado":
@@ -248,9 +258,9 @@ def iva_breakdown(db: Session, tid: int, a: date, b: date, prorrata_pct=None) ->
     ):
         c = _expense_credit(e)
         if c is None:
-            prop += _to_crc(e.tax_amount, e.currency, e.fx_rate)
+            prop += _to_crc(e.tax_amount, e.currency, _orate(db, e))
         else:
-            manual += _to_crc(c, e.currency, e.fx_rate)
+            manual += _to_crc(c, e.currency, _orate(db, e))
     pct = Decimal(str(prorrata_pct)) if prorrata_pct not in (None, "") else None
     cred_prorrata = (prop * pct / Decimal(100)) if pct is not None else Decimal(0)
     credito = xml_c + manual
@@ -308,7 +318,7 @@ def gastos(db: Session, tid: int, a: date, b: date) -> Report:
                 e.subtotal,
                 e.tax_amount,
                 e.total,
-                _q2(_to_crc(e.total, e.currency, e.fx_rate)),
+                _q2(_to_crc(e.total, e.currency, _orate(db, e))),
                 c if c is not None else "prorrata",
                 e.iva_credit,
                 e.reference or "",
@@ -320,7 +330,7 @@ def gastos(db: Session, tid: int, a: date, b: date) -> Report:
         "Gastos",
         ["Fecha", "Proveedor", "Descripción", "Divisa", "TC", "Subtotal", "IVA", "Total", "Total ₡", "IVA acreditable", "Crédito IVA", "Referencia", "Estado"],
         out,
-        {"total": sum((_to_crc(e.total, e.currency, e.fx_rate) for e in rows), Decimal(0)).quantize(Decimal("0.01")), "n": len(rows)},
+        {"total": sum((_to_crc(e.total, e.currency, _orate(db, e)) for e in rows), Decimal(0)).quantize(Decimal("0.01")), "n": len(rows)},
     )
 
 
@@ -331,7 +341,7 @@ def estado_resultados(db: Session, tid: int, a: date, b: date) -> Report:
 
     ventas = Decimal(0)
     for inv in db.scalars(select(Invoice).where(Invoice.tenant_id == tid, Invoice.issue_date >= a, Invoice.issue_date <= b, Invoice.status != "anulada")):
-        ventas += _to_crc(Decimal(str(inv.subtotal or 0)) - Decimal(str(inv.discount_total or 0)), inv.currency, inv.fx_sell)
+        ventas += _to_crc(Decimal(str(inv.subtotal or 0)) - Decimal(str(inv.discount_total or 0)), inv.currency, _orate(db, inv))
     t = db.get(Tenant, tid)
     pct = (t.settings or {}).get("iva_prorrata_pct") if t else None
     gastos_ = Decimal(0)
@@ -339,7 +349,7 @@ def estado_resultados(db: Session, tid: int, a: date, b: date) -> Report:
         c = _expense_credit(e)
         if c is None:
             c = Decimal(str(e.tax_amount or 0)) * Decimal(str(pct or 0)) / Decimal(100)
-        gastos_ += _to_crc(Decimal(str(e.total or 0)) - c, e.currency, e.fx_rate)
+        gastos_ += _to_crc(Decimal(str(e.total or 0)) - c, e.currency, _orate(db, e))
     ventas, gastos_ = _q2(ventas), _q2(gastos_)
     return Report(
         "resultados",
@@ -409,8 +419,16 @@ def movimientos(db: Session, tid: int, a: date, b: date) -> Report:
 
 # ---------- Sesion 4: ordenes, recepciones, propinas, D-151, planilla, conciliacion ----------
 def _crc(amount, currency: str, fx) -> Decimal:
+    """Monto en colones con la tasa ya resuelta (_orate / services/fx). Nunca multiplica por 1 a otra moneda."""
+    from .fx import FxMissing
+
     v = Decimal(str(amount or 0))
-    return v * Decimal(str(fx or 1)) if currency != "CRC" else v
+    if currency == "CRC":
+        return v
+    rate = Decimal(str(fx or 0))
+    if rate <= 0:
+        raise FxMissing(currency)
+    return v * rate
 
 
 def ordenes(db: Session, tid: int, a: date, b: date) -> Report:
@@ -522,8 +540,8 @@ def recepciones(db: Session, tid: int, a: date, b: date) -> Report:
             for r in rows
         ],
         {
-            "IVA ₡": sum((_sign(r) * _to_crc(r.tax_total, r.currency, r.fx_rate) for r in vivas), Decimal(0)).quantize(Decimal("0.01")),
-            "Total ₡": sum((_sign(r) * _to_crc(r.total, r.currency, r.fx_rate) for r in vivas), Decimal(0)).quantize(Decimal("0.01")),
+            "IVA ₡": sum((_sign(r) * _to_crc(r.tax_total, r.currency, _orate(db, r)) for r in vivas), Decimal(0)).quantize(Decimal("0.01")),
+            "Total ₡": sum((_sign(r) * _to_crc(r.total, r.currency, _orate(db, r)) for r in vivas), Decimal(0)).quantize(Decimal("0.01")),
         },
     )
 
@@ -559,7 +577,7 @@ def d151(db: Session, tid: int, a: date, b: date) -> Report:
         if not s or not s.tax_id:
             continue
         k = (s.tax_id, s.name)
-        amt = _to_crc(e.subtotal, e.currency, e.fx_rate)
+        amt = _to_crc(e.subtotal, e.currency, _orate(db, e))
         cat = cats.get(e.category_id)
         kind = cat.d151_kind if cat and cat.d151_kind else None
         if kind is None:
@@ -603,7 +621,7 @@ def compras(db: Session, tid: int, a: date, b: date) -> Report:
     tot = {"base": Decimal(0), "iva": Decimal(0), "cred": Decimal(0), "apl": Decimal(0)}
     for d in docs:
         r = last.get(d.id)
-        fx, s = d.fx_rate or 1, _sign(d)
+        fx, s = _orate(db, d), _sign(d)
         aceptado = d.supplier_hacienda_status == "aceptado" or (r is not None and r.mode == "produccion" and r.status in ("aceptado", "historico"))
         respaldo = "XML aceptado" if aceptado else ("XML rechazado al proveedor" if d.supplier_hacienda_status == "rechazado" else "XML sin respuesta de Hacienda")
         base = s * _to_crc(Decimal(str(d.total or 0)) - Decimal(str(d.tax_total or 0)), d.currency, fx)
@@ -623,10 +641,10 @@ def compras(db: Session, tid: int, a: date, b: date) -> Report:
     ):
         sup = sups.get(e.supplier_id)
         c = _expense_credit(e) or Decimal(0)
-        base = _to_crc(e.subtotal, e.currency, e.fx_rate)
-        ivac = _to_crc(e.tax_amount, e.currency, e.fx_rate)
-        cred = _to_crc(c, e.currency, e.fx_rate)
-        apl = _to_crc(Decimal(str(e.total or 0)) - c, e.currency, e.fx_rate)
+        base = _to_crc(e.subtotal, e.currency, _orate(db, e))
+        ivac = _to_crc(e.tax_amount, e.currency, _orate(db, e))
+        cred = _to_crc(c, e.currency, _orate(db, e))
+        apl = _to_crc(Decimal(str(e.total or 0)) - c, e.currency, _orate(db, e))
         rows.append([e.date.isoformat(), sup.name if sup else "", sup.tax_id if sup else "", e.reference or e.description[:40], "Gasto", e.currency, e.fx_rate, _q2(base), _q2(ivac), _q2(cred), _q2(apl), e.iva_credit, "", "Sin XML"])
         tot["base"] += base
         tot["iva"] += ivac
@@ -688,7 +706,7 @@ def tax_summary(db: Session, tenant, month: str) -> dict:
             "vencen_pronto": pronto[:30],
             "vencidas": vencidas,
             "respondidas": sum(1 for d in del_mes if d.status in ("respondido", "historico")),
-            "total_crc": _q2(sum((_sign(d) * _to_crc(d.total, d.currency, d.fx_rate) for d in del_mes if d.status not in ("descartado", "ajeno", "invalido") and d.action != "rechazada"), Decimal(0))),
+            "total_crc": _q2(sum((_sign(d) * _to_crc(d.total, d.currency, _orate(db, d)) for d in del_mes if d.status not in ("descartado", "ajeno", "invalido") and d.action != "rechazada"), Decimal(0))),
         },
         "mensajes": {"rechazados": rech[:30], "errores": sum(1 for r in last if r.status == "error"), "por_enviar": sum(1 for r in last if r.status == "por_enviar")},
         "emision": {
@@ -760,10 +778,11 @@ def rentabilidad(db: Session, tid: int, a: date, b: date) -> Report:
     """En qué tipo de trabajo gana Crimson: venta, costo real y margen por proyecto cerrado."""
     from ..models import Project
     from ..routers.projects import economics
-    from .documents import local_date, today_fx
+    from .documents import local_date
+    from .fx import rate_or_none
 
     # Archivar un trabajo terminado es ordenar, no borrarlo: su margen sigue contando. Solo la papelera sale.
-    fx = today_fx(db, "USD")[0]
+    fx = rate_or_none(db, "USD")  # None: cada costo en dolares la consulta (sin ninguna tasa, 422 claro)
     rows, price_total, cost_total, comm_total, provisionales = [], Decimal(0), Decimal(0), Decimal(0), 0
     cerrados = db.scalars(
         select(Project)
@@ -847,9 +866,10 @@ def rentabilidad_tipo(db: Session, tid: int, a: date, b: date) -> Report:
     y hasta hoy eso solo se sabia por intuicion."""
     from ..models import Project
     from ..routers.projects import economics, project_solution
-    from .documents import local_date, today_fx
+    from .documents import local_date
+    from .fx import rate_or_none
 
-    fx = today_fx(db, "USD")[0]
+    fx = rate_or_none(db, "USD")
     por_tipo: dict[str, dict] = {}
     provisionales = 0
     cerrados = db.scalars(

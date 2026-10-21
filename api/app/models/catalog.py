@@ -86,6 +86,12 @@ class Product(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     compare_price: Mapped[float | None] = mapped_column(Numeric(14, 5))
     datasheet_url: Mapped[str | None] = mapped_column(String(500))
     specs: Mapped[dict | None] = mapped_column(JSON)
+    # guardian de margen (services/margin_guard): margin_hold = fuera de venta en la tienda ("Consultar") por quedar
+    # bajo el margen minimo; margin_flagged_at = desde cuando espera en Aprobaciones -> "Precios por revisar";
+    # margin_info = el ultimo calculo (margen, costo, sugerido, dudoso) y el costo de referencia para detectar saltos
+    margin_hold: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    margin_flagged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    margin_info: Mapped[dict | None] = mapped_column(JSON)
 
     taxes: Mapped[list["ProductTax"]] = relationship(cascade="all, delete-orphan")
 

@@ -10,10 +10,11 @@ import { Bitacora } from "./Bitacora";
 import DataExport from "./tools/DataExport";
 import UsersTab from "./settings/UsersTab";
 import HaciendaTab from "./settings/HaciendaTab";
+import MarginGuardCard, { type MarginCfg } from "./settings/MarginGuardCard";
 import { MODE_LABEL, type HaciendaState } from "./accounting/hacienda";
 
 type Group = { id: number; doc_type: string; prefix: string; branch: string; terminal: string; current: number; is_default: boolean };
-type Cfg = { prevent_negative_stock?: boolean; reservation_auto_approve_units?: number; reservation_days?: number; labor_day_cost?: number; labor_day_cost_civil?: number; labor_day_cost_contratado?: number; per_diem_cost?: number; travel_cost?: number; max_discount_pct?: number; archive_purge_days?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; notify_due: boolean; remind_days_before: number; daily_close_email: boolean; bcc: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
+type Cfg = MarginCfg & { prevent_negative_stock?: boolean; reservation_auto_approve_units?: number; reservation_days?: number; labor_day_cost?: number; labor_day_cost_civil?: number; labor_day_cost_contratado?: number; per_diem_cost?: number; travel_cost?: number; max_discount_pct?: number; archive_purge_days?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; notify_due: boolean; remind_days_before: number; daily_close_email: boolean; bcc: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
 type Bank = { id: number; name: string; bank: string | null; currency: string; number: string | null; active: boolean };
 type Gw = { id: number; provider: string; client_id: string | null; secret_mask: string | null; is_primary: boolean; active: boolean; mode: string; webhook_secret_set: boolean };
 type OnvoStatus = { configured: boolean; source: "ajustes" | "entorno" | null; mode: "test" | "live" | null; webhook_secret: boolean; webhook_url: string; active: boolean; problems: string[] };
@@ -142,6 +143,8 @@ export default function Settings() {
             </div>
           </Card>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* plan 1.12: margen minimo de la tienda y guardian de margen (nunca reprecia solo) */}
+            <MarginGuardCard cfg={cfg} save={saveCfg} />
             {/* Precio de mano de obra por defecto. Cada levantamiento lo puede ajustar en su costeo sin tocar esto. */}
             <Card title="Mano de obra (costo por persona por día)">
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
