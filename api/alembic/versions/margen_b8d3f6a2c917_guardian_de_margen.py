@@ -8,7 +8,7 @@ Tres columnas en `product`, todas opcionales o con valor por defecto (expand: na
   referencia con el que se detectan saltos de costo.
 
 Revision ID: b8d3f6a2c917
-Revises: d7e2a9c41f58
+Revises: b8e1d4f7a2c6
 Create Date: 2026-10-20 12:00:00
 """
 
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "b8d3f6a2c917"
-down_revision: str | None = "d7e2a9c41f58"
+down_revision: str | None = "b8e1d4f7a2c6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -5,7 +5,7 @@ El modelo declara `history: Mapped[list]` (NOT NULL, por defecto []) y la migrac
 historial quedan con [] (lo mismo que el modelo pone al crear uno); despues se marca la columna NOT NULL.
 
 Revision ID: e8b3d1f4a627
-Revises: d7e2a9c41f58
+Revises: c033f3af9ca1
 Create Date: 2026-10-20 12:00:00
 """
 
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "e8b3d1f4a627"
-down_revision: str | None = "d7e2a9c41f58"
+down_revision: str | None = "c033f3af9ca1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

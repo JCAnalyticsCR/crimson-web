@@ -11,7 +11,7 @@ Downgrade: el numero y la fecha se copian a las notas internas antes de borrar l
 el estado "emitida_fuera" se deja tal cual: volver a "sin_emitir" abriria la puerta a reemitir ante Hacienda.
 
 Revision ID: b8e1d4f7a2c6
-Revises: d7e2a9c41f58
+Revises: e8b3d1f4a627
 Create Date: 2026-10-20 12:00:00
 """
 
@@ -21,7 +21,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "b8e1d4f7a2c6"
-down_revision: str | None = "d7e2a9c41f58"
+down_revision: str | None = "e8b3d1f4a627"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
