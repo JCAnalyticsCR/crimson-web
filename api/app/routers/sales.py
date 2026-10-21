@@ -179,6 +179,32 @@ def _devuelta(tid: int):
     return func.coalesce(ultima, "") == "reject_discount"
 
 
+# Decisiones de quien aprueba sobre una retencion: rechazarla, o aprobarla (por el boton o guardandola el mismo).
+_DECISIONES = ("reject_discount", "approve_quote")
+
+
+def _decidida(db: Session, q) -> bool:
+    """Lo ultimo que paso con la retencion de esta cotizacion fue una decision de quien aprueba (no un pedido de la
+    vendedora). La proxima retencion es un pedido nuevo y se avisa aunque siga abierta la ventana del anterior: rechazada
+    (siga retenida o la haya liberado dentro del limite) o aprobada, y vuelta a pasar del limite."""
+    from ..models import AuditLog
+
+    if q.id is None:
+        return False
+    ultima = db.scalar(
+        select(AuditLog.action)
+        .where(
+            AuditLog.tenant_id == q.tenant_id,
+            AuditLog.entity == "quote",
+            AuditLog.entity_id == q.id,
+            AuditLog.action.in_(("needs_approval", *_DECISIONES)),
+        )
+        .order_by(AuditLog.id.desc())
+        .limit(1)
+    )
+    return ultima in _DECISIONES
+
+
 def _pend_mine(p: Principal) -> bool:
     """Solo lo propio si el inicio es personal (sin dashboard.empresa) o si la lista lo es (sin sales.ver_todo):
     la tarjeta nunca cuenta filas que la lista no puede mostrar."""
@@ -347,9 +373,10 @@ def create_quote(data: DocumentIn, p: Principal = Depends(require("sales", "crea
 
 def _hold(db: Session, p: Principal, q, chk) -> list[str]:
     """Deja la cotizacion en "por_aprobar" si excede el descuento, el monto o el margen minimo. Al quedar retenida (o al
-    volver a pedirlo despues de un rechazo) se avisa en el momento a quien aprueba."""
+    volver a pedirlo despues de una decision de quien aprueba) se avisa en el momento a quien aprueba. Si la libera quien
+    aprueba al guardarla, es una aprobacion: queda en la bitacora y la vendedora recibe el aviso, como con el boton."""
     antes = q.status
-    devuelta = antes == "por_aprobar" and _rechazo_vigente(db, q) is not None
+    tras_decision = _decidida(db, q)
     razones = ([chk.message] if chk.exceeds else []) + discounts.approval_reasons(db, p, q)
     if p.can("sales", "aprobar"):
         # quien aprueba no se pide permiso: lo que guarda con el margen bajo el minimo queda aprobado a esos precios (la
@@ -385,11 +412,17 @@ def _hold(db: Session, p: Principal, q, chk) -> list[str]:
         q.status = "por_aprobar"
         q.approval_reason = " ".join(razones)[:400]
         audit(db, p.tenant.id, p.user.id, "needs_approval", "quote", q.id, {"razones": razones}, ip=p.ip)
-        if antes != "por_aprobar" or devuelta:
-            avisos.descuento_por_aprobar(db, p.tenant, q, p.user.id, tras_rechazo=devuelta)
+        if antes != "por_aprobar" or tras_decision:
+            avisos.descuento_por_aprobar(db, p.tenant, q, p.user.id, tras_decision=tras_decision)
     elif q.status == "por_aprobar":
+        motivo = q.approval_reason
         q.status = "creado"  # quedo dentro de los limites (o lo edito quien aprueba)
         q.approval_reason = None
+        if p.can("sales", "aprobar"):
+            # la abrio quien aprueba, la ajusto y la guardo: es su aprobacion (antes la vendedora no se enteraba y el
+            # boton "Aprobar descuento" ya no salia porque el estado habia cambiado)
+            audit(db, p.tenant.id, p.user.id, "approve_quote", "quote", q.id, {"motivo": motivo, "al_guardar": True}, ip=p.ip)
+            avisos.descuento_resuelto(db, p.tenant, q, p.user.id, aprobado=True)
     return razones
 
 

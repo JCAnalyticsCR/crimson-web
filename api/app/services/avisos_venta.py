@@ -3,8 +3,12 @@
 Cada evento que frena dinero le llega por correo, con enlace directo al panel (PUBLIC_BASE_URL), a quien lo tiene que
 mover (la RACI de avisos de la sesion con Andres):
 
-- Cotizacion aceptada por el cliente -> administracion, el supervisor (si lleva instalacion) y la vendedora.
-- Cotizacion retenida por descuento, monto o margen -> quien aprueba (sales.aprobar); aprobada o rechazada -> la vendedora.
+- Cotizacion aceptada por el cliente -> administracion, el supervisor y la vendedora (plan 1.6). En una venta de solo
+  equipo el supervisor no tiene instalacion que programar: Ajustes -> Notificaciones lo puede apagar
+  (notify_supervisor_equipment_sale; por defecto encendido, lo que dice el plan, hasta que la RACI de la sesion 0.11
+  decida otra cosa).
+- Cotizacion retenida por descuento, monto o margen -> quien aprueba (sales.aprobar); aprobada o rechazada -> la
+  vendedora, si todavia la puede abrir (si no, administracion, para reasignarla).
 - Orden de trabajo asignada a alguien de Crimson -> esa persona (los de una empresa aliada: ally_scope.notify_ally_work).
 - Precio recibido de un aliado -> quien lo aprueba y ve costos, no la vendedora (lo que cobra el aliado es costo).
 - Cotizaciones frias -> la vendedora de cada una (app/tasks/ventas.py).
@@ -175,10 +179,16 @@ def _lleva_instalacion(db: Session, q: Quote) -> tuple[bool, Opportunity | None]
     return (opp is None or (opp.kind or "proyecto") != "venta"), opp
 
 
+def supervisor_en_venta_de_equipo(tenant) -> bool:
+    """Ajustes -> Notificaciones: la aceptada de una venta de solo equipo tambien le llega al supervisor (por defecto si)."""
+    return bool((tenant.settings or {}).get("notify_supervisor_equipment_sale", True))
+
+
 def cotizacion_aceptada(db: Session, tenant, q: Quote, *, version: int | None, quien: str | None, medio: str | None, actor_id: int | None) -> int:
-    """El cliente dijo que si: administracion, el supervisor (si hay instalacion) y la vendedora. Sin montos."""
+    """El cliente dijo que si: administracion, el supervisor y la vendedora. Sin montos. En una venta de solo equipo el
+    supervisor queda fuera solo si la empresa lo apago en Ajustes (supervisor_en_venta_de_equipo)."""
     instalacion, _opp = _lleva_instalacion(db, q)
-    roles = ("admin", "supervisor") if instalacion else ("admin",)
+    roles = ("admin", "supervisor") if instalacion or supervisor_en_venta_de_equipo(tenant) else ("admin",)
     destinos = miembros(db, tenant, roles=roles) + miembros(db, tenant, user_ids=[quote_owner(q)])
     lev = db.scalar(select(Survey.id).where(Survey.tenant_id == q.tenant_id, Survey.quote_id == q.id).limit(1))
     cliente = _cliente(db, q)
@@ -211,11 +221,11 @@ def cotizacion_aceptada(db: Session, tenant, q: Quote, *, version: int | None, q
     return avisar(db, tenant, destinos, f"Cotización aceptada: {q.number} · {cliente}", cuerpo, "quote", q.id, minutos=VENTANA_ACEPTADA, excluir=actor_id)
 
 
-def descuento_por_aprobar(db: Session, tenant, q: Quote, actor_id: int | None, *, tras_rechazo: bool = False) -> int:
+def descuento_por_aprobar(db: Session, tenant, q: Quote, actor_id: int | None, *, tras_decision: bool = False) -> int:
     """La cotizacion quedo retenida (descuento, monto o margen): aviso inmediato a quien aprueba. El motivo va sin cifras
     de margen (public_reason): el correo no es lugar para el costo. Pasarse del limite, corregir y volver a pasarse no
-    repite el aviso dentro de la ventana; volver a pedirlo despues de un rechazo si avisa (entre uno y otro hubo una
-    decision de quien aprueba, no hay forma de inundarlo)."""
+    repite el aviso dentro de la ventana; volver a pedirlo despues de un rechazo o de una aprobacion si avisa (entre uno
+    y otro hubo una decision de quien aprueba, no hay forma de inundarlo)."""
     from .discounts import public_reason
 
     destinos = [m for m in miembros(db, tenant) if m.can("sales", "aprobar")]
@@ -236,23 +246,29 @@ def descuento_por_aprobar(db: Session, tenant, q: Quote, actor_id: int | None, *
         )
 
     asunto = f"Cotización por aprobar: {q.number} · {cliente}"
-    return avisar(db, tenant, destinos, asunto, cuerpo, "quote", q.id, minutos=0 if tras_rechazo else VENTANA_POR_APROBAR, excluir=actor_id)
+    return avisar(db, tenant, destinos, asunto, cuerpo, "quote", q.id, minutos=0 if tras_decision else VENTANA_POR_APROBAR, excluir=actor_id)
 
 
 def descuento_resuelto(db: Session, tenant, q: Quote, actor_id: int | None, *, aprobado: bool, motivo: str | None = None) -> int:
-    """Quien aprueba decidio: la vendedora se entera en el momento, con el motivo si fue un no."""
-    destinos = miembros(db, tenant, user_ids=[quote_owner(q)])
+    """Quien aprueba decidio: la vendedora se entera en el momento, con el motivo si fue un no. Si ya no la puede abrir
+    (inactiva, o con un rol que no ve esa cotizacion), le llega a administracion para reasignarla: el enlace nunca es
+    un 404."""
+    destinos = [m for m in miembros(db, tenant, user_ids=[quote_owner(q)]) if ve_cotizacion(m, q)]
+    sin_duena = not destinos
+    if sin_duena:
+        destinos = miembros(db, tenant, roles=("admin",))
     quien = db.get(User, actor_id) if actor_id else None
     nombre = _e(quien.full_name if quien else "Administración")
+    reasignar = "Su vendedora ya no la puede abrir: reasignala para que le dé seguimiento." if sin_duena else ""
     if aprobado:
         asunto = f"Cotización aprobada: {q.number}"
-        parrafos = (f"{nombre} aprobó la cotización <b>{_e(q.number)}</b>.", "Ya la podés enviar al cliente o convertir.")
+        parrafos = (f"{nombre} aprobó la cotización <b>{_e(q.number)}</b>.", reasignar or "Ya la podés enviar al cliente o convertir.")
     else:
         asunto = f"Cotización rechazada: {q.number}"
         parrafos = (
             f"{nombre} rechazó el descuento de la cotización <b>{_e(q.number)}</b>.",
             f"Motivo: {_e(motivo)}" if motivo else "",
-            "Ajustá el descuento o los precios y guardala: si queda dentro de tu límite se libera; si no, vuelve a aprobación.",
+            reasignar or "Ajustá el descuento o los precios y guardala: si queda dentro de tu límite se libera; si no, vuelve a aprobación.",
         )
 
     def cuerpo(_m: Miembro) -> str:

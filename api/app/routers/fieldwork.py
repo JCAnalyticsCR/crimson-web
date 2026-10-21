@@ -749,12 +749,18 @@ def survey_create_and_assign(oid: int, data: SurveyFromRequestIn, p: Principal =
     aliada = check_ally_assignment(db, p.tenant.id, ally_company_id=data.ally_company_id, user_ids=[data.technician_id], opportunity_id=o.id)
     c = db.get(Customer, o.customer_id) if o.customer_id else None
     c = c if c is not None and c.tenant_id == p.tenant.id else None
+    # Contacto de un lead sin cliente: la misma regla que el GET hermano (survey_from_opportunity) y que Aprobaciones.
+    # Solo quien ve la oportunidad en el embudo se lo lleva al levantamiento (si no, lo completa en el formulario); y si
+    # el levantamiento queda para una empresa aliada, a lo sumo nombre y telefono, nunca el correo (como _opp_out del
+    # portal de aliados): el levantamiento se le muestra completo en su portal.
+    llaves = ("name", "phone") if aliada is not None else ("name", "email", "phone")
+    contacto = {k: v for k, v in (o.contact or {}).items() if k in llaves} if c is None and _sees_in_pipeline(p, o) else {}
     payload = SurveyIn(
         kind=o.solution if o.solution in SPECS else "cctv",
         customer_id=c.id if c else None,
         site=o.site,
         visit_date=data.visit_date,
-        contact={} if c else {k: v for k, v in (o.contact or {}).items() if k in ("name", "email", "phone")},
+        contact=contacto,
     )
     number, _ = next_number(db, p.tenant.id, "LEV")
     s = Survey(tenant_id=p.tenant.id, number=number, technician_id=data.technician_id, template_version=TEMPLATE_VERSION, ally_company_id=aliada)
@@ -2091,8 +2097,10 @@ def order_update(oid: int, data: WorkOrderEditIn, p: Principal = Depends(require
     equipo_antes = _crew(o)
     for k, v in cambios.items():
         setattr(o, k, v)
-    programada(o)
-    avisos.ot_asignada(db, p.tenant, o, _crew(o) - equipo_antes, p.user.id)
+    if o.status not in CERRADAS:
+        # una orden cancelada o finalizada se puede corregir, pero no es trabajo: nadie recibe "Se te asigno..."
+        programada(o)
+        avisos.ot_asignada(db, p.tenant, o, _crew(o) - equipo_antes, p.user.id)
     if "materials" in data.model_fields_set:
         actuales = {m.id: m for m in o.materials}
         vistos: set[int] = set()
@@ -2147,7 +2155,7 @@ def _reassign_ally(db: Session, p: Principal, o: WorkOrder, cambios: dict, *, ex
         db, p.tenant.id, ally_company_id=cid, user_ids=[tec, *ayu], project_id=pid, current=o.ally_company_id, existing=antes
     )
     nuevos = despues - antes
-    if nuevos:
+    if nuevos and o.status not in CERRADAS:  # editar una orden cerrada no le manda trabajo a nadie
         notify_ally_work(db, p.tenant, nuevos, o.number, cambios.get("title") or o.title, cambios.get("scheduled_at", o.scheduled_at), entity_id=o.id)
 
 
@@ -2235,6 +2243,7 @@ def _time_rules(db: Session, o: WorkOrder, p: Principal, data: TimeIn, entry=Non
             raise HTTPException(409, f"Ya hay tiempo de {nombre.full_name if nombre else 'esa persona'} en ese rango")
     if uid not in _crew(o):
         o.helpers = [*(o.helpers or []), uid]  # el supervisor le registra tiempo: queda como ayudante
+        programada(o)  # ya tiene equipo: una orden por programar pasa a asignada, como al asignarla
     return uid, inicio, fin
 
 

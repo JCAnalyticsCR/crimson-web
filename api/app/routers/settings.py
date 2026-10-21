@@ -30,6 +30,8 @@ DEFAULTS = {
     "notify_due": True,
     "remind_days_before": 3,
     "daily_close_email": False,
+    # cotizacion aceptada de una venta de solo equipo: tambien al supervisor (plan 1.6; la RACI 0.11 lo puede apagar)
+    "notify_supervisor_equipment_sale": True,
     "bcc": [],
     "manual_payment_methods": [
         {"name": "SINPE Móvil", "instructions": "Envíe el pago al número indicado y comparta el comprobante.", "active": True},
@@ -69,6 +71,7 @@ class SettingsIn(BaseModel):
     notify_due: bool | None = None
     remind_days_before: int | None = Field(None, ge=0, le=60)
     daily_close_email: bool | None = None
+    notify_supervisor_equipment_sale: bool | None = None
     bcc: list[EmailStr] | None = None
     manual_payment_methods: list[dict] | None = None
     activity_codes: list[str] | None = None

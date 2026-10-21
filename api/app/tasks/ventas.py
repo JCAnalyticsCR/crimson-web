@@ -2,7 +2,12 @@
 
 Cotizaciones frias: Andres, "cotizacion lleva cinco dias sin seguimiento, que se le avise a la vendedora". Antes el
 correo le llegaba a quien la tecleo (no a la vendedora), contaba desde la fecha de emision (no desde el ultimo envio),
-incluia las que el cliente ya habia aceptado o rechazado y se repetia todos los dias."""
+incluia las que el cliente ya habia aceptado o rechazado y se repetia todos los dias.
+
+PARA EL INTEGRADOR (al fusionar el 1.2): el "no repetir antes de 5 dias" vive hoy en la bitacora (ACCION_FRIA) y la
+corrida se serializa por empresa (_un_solo_aviso). Con el 1.2 adentro, cada correo pasa ademas
+dedupe_key=f"fria:{tenant.id}:{uid}:{hoy.isoformat()}" (uid 0 = administracion; hoy = fecha de Costa Rica): un doble
+disparo del beat queda en un solo correo aunque falle el candado."""
 
 from __future__ import annotations
 
@@ -11,10 +16,10 @@ import logging
 from datetime import UTC, datetime, time, timedelta
 
 from celery import shared_task
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select, text
 from sqlalchemy.orm import Session
 
-from ..models import AuditLog, Customer, Project, Quote, QuoteVersion
+from ..models import AuditLog, Customer, Opportunity, Project, Quote, QuoteVersion
 from ..services import avisos_venta as avisos
 from ..services.documents import CR, audit, local_date
 
@@ -24,6 +29,7 @@ FRIA_DIAS = 5  # dias desde el ultimo envio sin respuesta del cliente
 REPETIR_DIAS = 5  # una cotizacion fria no se vuelve a avisar antes de esto
 ACCION_FRIA = "aviso_cotizacion_fria"  # bitacora de la cotizacion: hace de llave de deduplicacion (no se repite)
 MAX_FILAS = 20
+CANDADO_FRIAS = 1606  # pg_advisory_xact_lock(CANDADO_FRIAS, empresa): una corrida a la vez por empresa
 
 
 def _aware(dt: datetime) -> datetime:
@@ -31,10 +37,13 @@ def _aware(dt: datetime) -> datetime:
 
 
 def cotizaciones_frias(db: Session, tenant_id: int, ahora: datetime | None = None, dias: int = FRIA_DIAS) -> list[tuple[Quote, datetime]]:
-    """Enviadas al cliente y sin su respuesta (ni aceptadas ni rechazadas), sin convertir y sin proyecto, cuyo ULTIMO
-    envio (QuoteVersion.sent_at; las de antes de las versiones, su fecha de emision) fue hace `dias` o mas, en dias de
-    calendario de Costa Rica (un envio de las 8 p. m. CR ya es del dia siguiente en UTC: contado en UTC saldria un dia
-    tarde). Devuelve (cotizacion, ultimo envio), lo mas viejo primero."""
+    """Enviadas al cliente y sin su respuesta (ni aceptadas ni rechazadas), sin convertir, sin proyecto y sin una
+    oportunidad ya cerrada (ganada o perdida: cerrarla en el embudo no toca la cotizacion, que seguia "enviada" y
+    "pendiente"), cuyo ULTIMO envio fue hace `dias` o mas, en dias de calendario de Costa Rica (un envio de las 8 p. m.
+    CR ya es del dia siguiente en UTC: contado en UTC saldria un dia tarde). Ultimo envio = el mas reciente entre una
+    version enviada (QuoteVersion.sent_at) y un reenvio sin cambios (no crea version: queda en la bitacora como
+    "resend_version"); las de antes de las versiones, su fecha de emision. Devuelve (cotizacion, ultimo envio), lo mas
+    viejo primero."""
     ahora = ahora or datetime.now(UTC)
     corte = local_date(ahora) - timedelta(days=dias)
     ultimo = (
@@ -44,24 +53,61 @@ def cotizaciones_frias(db: Session, tenant_id: int, ahora: datetime | None = Non
         .subquery()
     )
     con_proyecto = select(Project.quote_id).where(Project.tenant_id == tenant_id, Project.quote_id.is_not(None))
+    cerrada = exists(
+        select(Opportunity.id).where(Opportunity.tenant_id == tenant_id, Opportunity.quote_id == Quote.id, Opportunity.status.in_(("ganada", "perdida")))
+    )
     filas = db.execute(
         select(Quote, ultimo.c.enviada)
         .outerjoin(ultimo, ultimo.c.quote_id == Quote.id)
-        .where(Quote.tenant_id == tenant_id, Quote.status == "enviada", Quote.acceptance_status == "pendiente", Quote.id.not_in(con_proyecto))
+        .where(
+            Quote.tenant_id == tenant_id,
+            Quote.status == "enviada",
+            Quote.acceptance_status == "pendiente",
+            Quote.id.not_in(con_proyecto),
+            ~cerrada,
+        )
     ).all()
+    if not filas:
+        return []
+    # reenvios sin cambios, solo de las candidatas (la bitacora es grande)
+    reenvios = dict(
+        db.execute(
+            select(AuditLog.entity_id, func.max(AuditLog.at))
+            .where(
+                AuditLog.tenant_id == tenant_id,
+                AuditLog.entity == "quote",
+                AuditLog.action == "resend_version",
+                AuditLog.entity_id.in_([q.id for q, _ in filas]),
+            )
+            .group_by(AuditLog.entity_id)
+        ).all()
+    )
     out = []
     for q, enviada in filas:
-        desde = _aware(enviada) if enviada else datetime.combine(q.issue_date, time(0), tzinfo=CR)
+        envios = [_aware(x) for x in (enviada, reenvios.get(q.id)) if x is not None]
+        desde = max(envios) if envios else datetime.combine(q.issue_date, time(0), tzinfo=CR)
         if local_date(desde) <= corte:
             out.append((q, desde))
     return sorted(out, key=lambda x: (x[1], x[0].id))
 
 
+def _un_solo_aviso(db: Session, tenant_id: int) -> None:
+    """Dos disparos del beat a la vez (dos workers antes del candado de redbeat del 1.2) leerian la bitacora vacia y la
+    vendedora recibiria dos correos. En Postgres la corrida de cada empresa se serializa con un candado de la
+    transaccion (se suelta con el commit o el rollback de esa empresa): la segunda, al entrar, ya ve en la bitacora lo
+    que aviso la primera. SQLite (pruebas) no lo tiene ni lo necesita."""
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(:k, :t)"), {"k": CANDADO_FRIAS, "t": tenant_id})
+
+
 def avisar_cotizaciones_frias(db: Session, tenant, ahora: datetime | None = None) -> int:
     """Un correo por vendedora con SUS cotizaciones frias (vendedor responsable; sin vendedor, quien la tecleo). Una
     cotizacion ya avisada no se repite antes de REPETIR_DIAS (queda en su bitacora). Si la vendedora ya no esta activa,
-    la lista va a administracion para reasignarla. Devuelve cuantas cotizaciones se avisaron. No hace commit."""
+    la lista va a administracion para reasignarla; lo mismo si ya no puede ver esa cotizacion o sus precios (le
+    cambiaron el rol: el correo lleva el total y enlaces que no podria abrir). Devuelve cuantas cotizaciones se
+    avisaron. No hace commit (el commit de quien llama suelta el candado de _un_solo_aviso)."""
     ahora = ahora or datetime.now(UTC)
+    _un_solo_aviso(db, tenant.id)
     frias = cotizaciones_frias(db, tenant.id, ahora)
     if not frias:
         return 0
@@ -88,7 +134,9 @@ def avisar_cotizaciones_frias(db: Session, tenant, ahora: datetime | None = None
     por_persona: dict[int, list[tuple[Quote, datetime]]] = {}
     for q, desde in pendientes:
         dueno = avisos.quote_owner(q)
-        por_persona.setdefault(dueno if dueno in activos else 0, []).append((q, desde))
+        m = activos.get(dueno)
+        puede = m is not None and avisos.ve_cotizacion(m, q) and m.can("catalog", "precios")
+        por_persona.setdefault(dueno if puede else 0, []).append((q, desde))
     n = 0
     for uid, items in por_persona.items():
         destinos = [activos[uid]] if uid else avisos.miembros(db, tenant, roles=("admin",))
@@ -104,7 +152,7 @@ def avisar_cotizaciones_frias(db: Session, tenant, ahora: datetime | None = None
             intro = (
                 f"Llevan {FRIA_DIAS} días o más desde el último envío y el cliente no ha respondido:"
                 if uid
-                else "Estas cotizaciones están frías y su vendedora ya no está activa: reasignalas o dales seguimiento:"
+                else "Estas cotizaciones están frías y su vendedora ya no está activa (o ya no las puede ver): reasignalas o dales seguimiento:"
             )
             return (
                 f'<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;color:#15131a"><p>{intro}</p><ul>{filas}</ul>{mas}'

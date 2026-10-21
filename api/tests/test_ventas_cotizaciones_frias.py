@@ -7,10 +7,10 @@ import sys
 from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.config import settings
-from app.models import AuditLog, EmailOutbox, Quote, QuoteVersion, Tenant, TenantUser, User
+from app.models import AuditLog, EmailOutbox, Opportunity, Quote, QuoteVersion, Tenant, TenantUser, User
 from app.services.documents import CR, local_date
 from app.tasks import ventas
 from tests.test_campo import _login
@@ -155,6 +155,63 @@ def test_cotizacion_fria_cuenta_dias_de_costa_rica(client, auth, db_session):
     assert ventas.avisar_cotizaciones_frias(db_session, t, beat + timedelta(days=5, seconds=-30)) == 2
     db_session.commit()
     assert noche["number"] in _avisos(db_session, "vendedora-noche@ejemplo.com")[-1].html
+
+
+def test_oportunidad_cerrada_no_deja_fria_su_cotizacion(client, auth, db_session):
+    """Perder (o ganar) la oportunidad en el embudo no toca la cotizacion, que sigue "enviada" y "pendiente": no es
+    una cotizacion sin seguimiento y avisarla cada 5 dias seria fatiga de alertas."""
+    tid = auth["tenant"]["id"]
+    ven = _login(client, db_session, tid, "vendedora-cerrada@ejemplo.com", "ventas")
+    cust = client.get("/customers").json()["items"][0]
+    abierta, perdida, ganada = (_enviada(client, db_session, ven, cust["id"], 9) for _ in range(3))
+    for q, st in ((abierta, "negociacion"), (perdida, "perdida"), (ganada, "ganada")):
+        o = client.post("/opportunities", json={"title": f"Oportunidad {st}", "customer_id": cust["id"]}, headers=ven).json()
+        fila = db_session.get(Opportunity, o["id"])
+        fila.quote_id, fila.status = q["id"], st
+    db_session.commit()
+    frias = {q.id for q, _ in ventas.cotizaciones_frias(db_session, tid, AHORA)}
+    assert abierta["id"] in frias and perdida["id"] not in frias and ganada["id"] not in frias
+
+
+def test_reenvio_sin_cambios_cuenta_como_ultimo_envio(client, auth, db_session):
+    """Reenviar la misma cotizacion (misma huella) no crea version ni toca sent_at: queda como "resend_version" en la
+    bitacora. Es seguimiento: cuenta como el ultimo envio."""
+    tid = auth["tenant"]["id"]
+    ven = _login(client, db_session, tid, "vendedora-reenvio@ejemplo.com", "ventas")
+    cust = client.get("/customers").json()["items"][0]
+    t = db_session.get(Tenant, tid)
+    q = _enviada(client, db_session, ven, cust["id"], 9)
+    assert client.post(f"/quotes/{q['id']}/send", json={"channel": "whatsapp"}, headers=ven).status_code == 200
+    assert db_session.scalar(select(func.count()).select_from(QuoteVersion).where(QuoteVersion.quote_id == q["id"])) == 1
+    reenvio = db_session.scalar(select(AuditLog).where(AuditLog.action == "resend_version", AuditLog.entity_id == q["id"]))
+    reenvio.at = AHORA - timedelta(days=4)  # el reenvio fue al dia 5 del primer envio (hace 9)
+    db_session.commit()
+    assert q["id"] not in {x.id for x, _ in ventas.cotizaciones_frias(db_session, tid, AHORA)}
+    assert ventas.avisar_cotizaciones_frias(db_session, t, AHORA) == 0
+    # a los 5 dias del reenvio si esta fria, y el correo cuenta desde el reenvio
+    assert q["id"] in {x.id for x, _ in ventas.cotizaciones_frias(db_session, tid, AHORA + timedelta(days=1))}
+    assert ventas.avisar_cotizaciones_frias(db_session, t, AHORA + timedelta(days=1)) == 1
+    db_session.commit()
+    mios = _avisos(db_session, "vendedora-reenvio@ejemplo.com")
+    assert len(mios) == 1 and "hace 5 días" in mios[0].html
+
+
+def test_vendedora_que_ya_no_ve_la_cotizacion_no_recibe_montos(client, auth, db_session):
+    """Le cambiaron el rol (p. ej. a tecnico, que no ve cotizaciones ni precios): el total y los enlaces no le llegan;
+    la lista va a administracion para reasignarla."""
+    tid = auth["tenant"]["id"]
+    ven = _login(client, db_session, tid, "vendedora-tecnico@ejemplo.com", "ventas")
+    cust = client.get("/customers").json()["items"][0]
+    t = db_session.get(Tenant, tid)
+    q = _enviada(client, db_session, ven, cust["id"], 7)
+    ella = db_session.scalar(select(User).where(User.email == "vendedora-tecnico@ejemplo.com")).id
+    db_session.scalar(select(TenantUser).where(TenantUser.user_id == ella, TenantUser.tenant_id == tid)).role_code = "tecnico"
+    db_session.commit()
+    assert ventas.avisar_cotizaciones_frias(db_session, t, AHORA) >= 1
+    db_session.commit()
+    assert _avisos(db_session, "vendedora-tecnico@ejemplo.com") == []
+    admin = _avisos(db_session, auth["user"]["email"])
+    assert len(admin) == 1 and q["number"] in admin[0].html and "ya no las puede ver" in admin[0].html
 
 
 def test_worker_programa_y_corre_las_cotizaciones_frias(db_session, monkeypatch):

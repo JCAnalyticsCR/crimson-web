@@ -3,11 +3,13 @@ lo tiene que mover (RACI), con enlace directo a una pantalla que esa persona pue
 repetirse. Mas: "Aceptadas por convertir" y "Levantamientos solicitados" en Aprobaciones, el boton "Ver PRO-..." de la
 cotizacion y la OT de un ticket sin tecnico que queda "por programar"."""
 
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.models import EmailOutbox, Opportunity, Quote, Survey, User, WorkOrder
-from tests.aliados_helpers import aliado, participa, usuario
+from app.models import AuditLog, EmailOutbox, Opportunity, Quote, Survey, TenantUser, User, WorkOrder
+from tests.aliados_helpers import aliado, participa, uid, usuario
 from tests.test_campo import _login
 
 BASE = "https://panel.ejemplo.com"
@@ -99,21 +101,34 @@ def test_aceptada_avisa_a_admin_supervisor_y_vendedora_con_enlace(client, auth, 
     assert client.get("/dashboard", headers=ven).json()["acciones_pendientes"]["cotizaciones_aceptadas"] == 0
 
 
-def test_aceptada_de_venta_de_equipo_no_avisa_al_supervisor(client, auth, db_session):
-    _tid, ven, _sup = _equipo(client, db_session, auth, "venta")
-    cust = _cliente(client)
+def _venta_de_equipo_aceptada(client, db_session, ven, cust) -> dict:
     opp = client.post("/opportunities", json={"title": "Solo equipo", "kind": "venta", "customer_id": cust["id"]}, headers=ven).json()
     q = client.post("/quotes", headers=ven, json={"customer_id": cust["id"], "lines": [_linea()]}).json()
     db_session.get(Opportunity, opp["id"]).quote_id = q["id"]
     db_session.commit()
     client.post(f"/quotes/{q['id']}/send", json={"channel": "whatsapp"}, headers=ven)
-    # la registra el admin: le llega a la vendedora; el supervisor no programa nada en una venta de equipo
+    # la registra el admin (el no se avisa a si mismo)
     assert client.post(f"/quotes/{q['id']}/acceptance", json={"status": "aceptada", "contact_name": "Cliente", "channel": "correo"}).status_code == 200
+    return q
+
+
+def test_aceptada_de_venta_de_equipo_avisa_al_supervisor_salvo_que_se_apague(client, auth, db_session):
+    _tid, ven, _sup = _equipo(client, db_session, auth, "venta")
+    cust = _cliente(client)
+    # por defecto, lo que dice el plan: administracion, supervisor y vendedora
+    assert client.get("/settings").json()["notify_supervisor_equipment_sale"] is True
+    q = _venta_de_equipo_aceptada(client, db_session, ven, cust)
     mails = _correos(db_session, "quote", q["id"], "Cotización aceptada")
-    assert _para(mails) == ["vendedora-venta@ejemplo.com"]
-    assert "factura" in mails[0].html and f"/cotizaciones/{q['id']}" in mails[0].html
+    assert _para(mails) == ["supervisor-venta@ejemplo.com", "vendedora-venta@ejemplo.com"]
+    ella = next(m for m in mails if m.to.startswith("vendedora-"))
+    assert "factura" in ella.html and f"/cotizaciones/{q['id']}" in ella.html
     it = next(i for i in _sec(client, "cotizaciones_aceptadas")["items"] if i["id"] == q["id"])
     assert "convertir a factura" in it["subtitle"]
+
+    # Ajustes -> Notificaciones lo apaga: el supervisor no programa nada en una venta de equipo
+    assert client.put("/settings", json={"notify_supervisor_equipment_sale": False}).status_code == 200
+    q2 = _venta_de_equipo_aceptada(client, db_session, ven, cust)
+    assert _para(_correos(db_session, "quote", q2["id"], "Cotización aceptada")) == ["vendedora-venta@ejemplo.com"]
 
 
 # ---------- descuentos ----------
@@ -167,6 +182,77 @@ def test_descuento_por_aprobar_aprobar_y_rechazar(client, auth, db_session, monk
     out = client.put(f"/quotes/{q2['id']}", headers=ven, json={"customer_id": cust["id"], "lines": [_linea(descuento=5)]}).json()
     assert out["status"] == "creado" and out["rejection"] is None
     assert len(_correos(db_session, "quote", q2["id"], "Cotización por aprobar")) == 1
+
+
+def test_quien_aprueba_la_libera_al_guardarla_y_la_vendedora_se_entera(client, auth, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "public_base_url", BASE)
+    _tid, ven, _sup = _equipo(client, db_session, auth, "libera")
+    cust = _cliente(client)
+
+    def body(d):
+        return {"customer_id": cust["id"], "lines": [_linea(descuento=d)]}
+
+    # el admin abre la retenida, le ajusta el descuento y la guarda (sin el boton "Aprobar descuento")
+    q = client.post("/quotes", headers=ven, json=body(30)).json()
+    assert q["status"] == "por_aprobar"
+    assert client.put(f"/quotes/{q['id']}", json=body(20)).json()["status"] == "creado"
+    ok = _correos(db_session, "quote", q["id"], "Cotización aprobada")
+    assert _para(ok) == ["vendedora-libera@ejemplo.com"] and f"{BASE}/cotizaciones/{q['id']}" in ok[0].html
+    accion = select(AuditLog).where(AuditLog.entity == "quote", AuditLog.entity_id == q["id"], AuditLog.action == "approve_quote")
+    assert db_session.scalar(accion) is not None
+    # una que el admin ya habia rechazado, corregida y guardada por el: tambien es su aprobacion
+    q2 = client.post("/quotes", headers=ven, json=body(40)).json()
+    assert client.post(f"/quotes/{q2['id']}/reject", json={"reason": "Muy alto"}).status_code == 200
+    assert client.put(f"/quotes/{q2['id']}", json=body(15)).json()["status"] == "creado"
+    assert _para(_correos(db_session, "quote", q2["id"], "Cotización aprobada")) == ["vendedora-libera@ejemplo.com"]
+    # la vendedora que la corrige ella misma dentro de su limite no "se aprueba": ni aviso ni registro de aprobacion
+    q3 = client.post("/quotes", headers=ven, json=body(30)).json()
+    assert client.put(f"/quotes/{q3['id']}", headers=ven, json=body(5)).json()["status"] == "creado"
+    assert _correos(db_session, "quote", q3["id"], "Cotización aprobada") == []
+    assert db_session.scalar(select(AuditLog).where(AuditLog.entity_id == q3["id"], AuditLog.action == "approve_quote")) is None
+
+
+def test_volver_a_pedir_aprobacion_despues_de_una_decision_avisa(client, auth, db_session):
+    _tid, ven, _sup = _equipo(client, db_session, auth, "otravez")
+    cust = _cliente(client)
+
+    def guardar(qid, d):
+        return client.put(f"/quotes/{qid}", headers=ven, json={"customer_id": cust["id"], "lines": [_linea(descuento=d)]}).json()["status"]
+
+    def pedidos(qid):
+        return len(_correos(db_session, "quote", qid, "Cotización por aprobar"))
+
+    q = client.post("/quotes", headers=ven, json={"customer_id": cust["id"], "lines": [_linea(descuento=30)]}).json()
+    assert pedidos(q["id"]) == 1
+    # rechazada, liberada dentro del limite y enseguida vuelta a pasar: es un pedido nuevo (antes la ventana de 30
+    # minutos del primer aviso se lo comia y volvia a la bandeja sin aviso)
+    assert client.post(f"/quotes/{q['id']}/reject", json={"reason": "Muy alto"}).status_code == 200
+    assert guardar(q["id"], 5) == "creado"
+    assert guardar(q["id"], 25) == "por_aprobar"
+    assert pedidos(q["id"]) == 2
+    # corregir y volver a pasarse sin que nadie decida en medio no repite (ventana)
+    assert guardar(q["id"], 5) == "creado"
+    assert guardar(q["id"], 25) == "por_aprobar"
+    assert pedidos(q["id"]) == 2
+    # aprobada y vuelta a pasar del limite: otra decision en medio, otro aviso
+    assert client.post(f"/quotes/{q['id']}/approve").status_code == 200
+    assert guardar(q["id"], 30) == "por_aprobar"
+    assert pedidos(q["id"]) == 3
+
+
+def test_aprobada_o_rechazada_sin_vendedora_que_la_abra_va_a_administracion(client, auth, db_session):
+    tid, ven, _sup = _equipo(client, db_session, auth, "sinver")
+    _login(client, db_session, tid, "otra-admin@ejemplo.com", "admin")
+    cust = _cliente(client)
+    q = client.post("/quotes", headers=ven, json={"customer_id": cust["id"], "lines": [_linea(descuento=30)]}).json()
+    # a la vendedora la pasan a tecnico: ya no abre cotizaciones ni ve precios
+    ella = db_session.scalar(select(User).where(User.email == "vendedora-sinver@ejemplo.com")).id
+    db_session.scalar(select(TenantUser).where(TenantUser.user_id == ella, TenantUser.tenant_id == tid)).role_code = "tecnico"
+    db_session.commit()
+    assert client.post(f"/quotes/{q['id']}/reject", json={"reason": "Muy alto"}).status_code == 200
+    mails = _correos(db_session, "quote", q["id"], "Cotización rechazada")
+    # la otra administradora (quien rechazo no se avisa a si mismo), para reasignarla
+    assert _para(mails) == ["otra-admin@ejemplo.com"] and "reasignala" in mails[0].html
 
 
 # ---------- ordenes de trabajo ----------
@@ -226,6 +312,35 @@ def test_ticket_sin_tecnico_queda_por_programar(client, auth, db_session):
     assert r.status_code == 201 and r.json()["status"] == "asignada"
     assert db_session.get(WorkOrder, r.json()["work_order_id"]).technician_id == tec
     assert _para(_correos(db_session, "work_order", r.json()["work_order_id"], "Orden de trabajo asignada")) == ["tecnico-tk@ejemplo.com"]
+
+
+def test_ot_cerrada_editada_no_avisa_ni_se_reabre(client, auth, db_session):
+    tid = auth["tenant"]["id"]
+    sup = _login(client, db_session, tid, "supervisor-otc@ejemplo.com", "supervisor")
+    _login(client, db_session, tid, "tecnico-otc1@ejemplo.com", "tecnico")
+    _login(client, db_session, tid, "tecnico-otc2@ejemplo.com", "tecnico")
+    t1 = db_session.scalar(select(User).where(User.email == "tecnico-otc1@ejemplo.com")).id
+    t2 = db_session.scalar(select(User).where(User.email == "tecnico-otc2@ejemplo.com")).id
+    o = client.post("/work-orders", json={"title": "Visita que se cancela", "technician_id": t1}, headers=sup).json()
+    assert client.post(f"/work-orders/{o['id']}/cancel", json={}, headers=sup).status_code == 200
+    # corregirla (p. ej. anotar quien iba a ir) no le avisa a nadie de trabajo por una orden cancelada
+    r = client.put(f"/work-orders/{o['id']}", json={"helpers": [t2]}, headers=sup)
+    assert r.status_code == 200 and r.json()["status"] == "cancelada", r.text
+    assert _para(_correos(db_session, "work_order", o["id"], "Orden de trabajo asignada")) == ["tecnico-otc1@ejemplo.com"]
+
+
+def test_tiempo_registrado_saca_la_ot_de_por_programar(client, auth, db_session):
+    tid = auth["tenant"]["id"]
+    _login(client, db_session, tid, "tecnico-tiempo@ejemplo.com", "tecnico")
+    tec = db_session.scalar(select(User).where(User.email == "tecnico-tiempo@ejemplo.com")).id
+    t = client.post("/tickets", json={"customer_id": _cliente(client)["id"], "subject": "Sin red", "priority": "media"}).json()
+    oid = client.post(f"/tickets/{t['id']}/work-order", json={}).json()["work_order_id"]
+    assert client.get(f"/work-orders/{oid}").json()["status"] == "por_programar"
+    # el supervisor le registra el tiempo a quien fue: queda de ayudante y la orden ya tiene equipo
+    inicio = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
+    r = client.post(f"/work-orders/{oid}/time", json={"user_id": tec, "started_at": inicio, "minutes": 60})
+    assert r.status_code == 201, r.text
+    assert r.json()["status"] == "asignada" and tec in r.json()["helpers"]
 
 
 # ---------- precio del aliado ----------
@@ -292,6 +407,41 @@ def test_levantamiento_solicitado_crear_y_asignar(client, auth, db_session, monk
     otra = client.post("/opportunities", json={"title": "Sin solicitud", "customer_id": cust["id"]}, headers=ven).json()
     assert client.post(f"/surveys/from-opportunity/{otra['id']}", json={"technician_id": tec}, headers=tk).status_code == 403
     assert client.post(f"/surveys/from-opportunity/{otra['id']}", json={"technician_id": tec}, headers=sup).status_code == 404
+
+
+def test_crear_y_asignar_no_reparte_el_correo_del_lead(client, auth, db_session):
+    admin_h = dict(client.headers)
+    tid, ven, sup = _equipo(client, db_session, auth, "lead")
+    _login(client, db_session, tid, "tecnico-lead@ejemplo.com", "tecnico")
+    tec = db_session.scalar(select(User).where(User.email == "tecnico-lead@ejemplo.com")).id
+    contacto = {"name": "Persona Lead", "email": "persona.lead@ejemplo.com", "phone": "8800-0000"}
+
+    def lead(titulo):
+        return client.post("/opportunities", json={"title": titulo, "solution": "cctv", "site": "Local", "contact": contacto}, headers=ven).json()
+
+    # supervisor que no ve la oportunidad en el embudo (entra por la solicitud pendiente): sin el contacto del lead
+    o1 = lead("Lead uno")
+    assert client.post(f"/opportunities/{o1['id']}/request-survey", json={}, headers=ven).status_code == 200
+    r = client.post(f"/surveys/from-opportunity/{o1['id']}", json={"technician_id": tec}, headers=sup)
+    assert r.status_code == 201, r.text
+    assert "persona.lead@ejemplo.com" not in str(r.json()) and not db_session.get(Survey, r.json()["id"]).contact
+
+    # quien si la ve, para un tecnico de Crimson: el contacto completo
+    o2 = lead("Lead dos")
+    r = client.post(f"/surveys/from-opportunity/{o2['id']}", json={"technician_id": tec})
+    assert r.status_code == 201 and db_session.get(Survey, r.json()["id"]).contact == contacto, r.text
+
+    # para un tecnico aliado: nombre y telefono, nunca el correo (tampoco en su portal)
+    o3 = lead("Lead tres")
+    a = aliado(client, admin_h, "Aliado Lead S.A.", "3-101-000088")
+    tec_h = usuario(client, admin_h, a, "tec@aliado-lead.ejemplo.com", "tecnico_aliado", "Tecnico Aliado Lead")
+    participa(client, admin_h, o3["id"], a)
+    r = client.post(f"/surveys/from-opportunity/{o3['id']}", json={"technician_id": uid(client, tec_h)})
+    assert r.status_code == 201, r.text
+    s = db_session.get(Survey, r.json()["id"])
+    assert s.ally_company_id == a and s.contact == {"name": "Persona Lead", "phone": "8800-0000"}
+    vista = client.get(f"/aliado/levantamientos/{s.id}", headers=tec_h)
+    assert vista.status_code == 200 and "persona.lead@ejemplo.com" not in vista.text, vista.text
 
 
 def test_quote_out_sin_proyecto_y_sin_rechazo(client, auth):
