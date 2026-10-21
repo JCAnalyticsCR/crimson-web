@@ -96,6 +96,13 @@ class FailureLimiter:
         with self.lock:
             return self._live(key, self.clock())[0]
 
+    def flagged(self, key: str) -> int:
+        """Segundos que faltan para que la clave se olvide, si ya paso los fallos libres (0 = no los paso)."""
+        now = self.clock()
+        with self.lock:
+            n, last = self._live(key, now)
+            return int(self.forget - (now - last)) + 1 if n and n >= self.free else 0
+
     def clear(self, key: str) -> None:
         with self.lock:
             self.state.pop(key, None)
@@ -117,19 +124,27 @@ class LoginLimiter:
     - Por cuenta + IP: 5 fallidos y despues espera progresiva desde 30 s (tope 15 min). Frena solo a esa IP: 25
       fallidos seguidos desde una IP no le impiden entrar a la duena de la cuenta desde otra.
     - Por cuenta (todas las IPs): cuenta TODOS los fallidos (tambien los codigos 2FA equivocados) y se olvida
-      ACCOUNT_FORGET despues del ultimo. Con eso routers/auth.py bloquea la cuenta en la base: el total de intentos
-      contra una cuenta queda acotado aunque el atacante use muchas IPs. Acertar no lo limpia (si no, cada vez que la
-      duena entra le devolveria margen al atacante); a la duena no la deja afuera porque el bloqueo no aplica desde
-      las IPs de sus sesiones abiertas.
+      ACCOUNT_FORGET despues del ultimo. Pasados ACCOUNT_FREE, quien NO es de confianza para esa cuenta (routers/auth.py:
+      ni la cookie de equipo de la cuenta ni la IP de una sesion abierta) espera entre intentos desde 30 s hasta
+      ACCOUNT_CAP (tope corto, nunca un bloqueo): el total de intentos contra una cuenta queda acotado (unos 60 por
+      hora) aunque el atacante use muchas IPs, y un tercero que lo dispara una y otra vez no deja afuera a la duena: a
+      lo sumo la hace esperar ACCOUNT_CAP desde un equipo nuevo, y desde los suyos no espera. Igual para un correo
+      que no existe (no revela cuales existen). Acertar no lo limpia (si no, cada vez que la duena entra le devolveria
+      margen al atacante); cambiar la contrasena si (forget_account): los fallidos eran contra la anterior.
+    - Por equipo (la cookie de equipo de quien ya entro desde ahi): 5 fallidos y despues espera progresiva desde 30 s
+      (tope 15 min). Una cookie robada no da intentos sin limite repartidos entre muchas IPs.
     Las IPv6 cuentan por su red /64 (clientip.ip_key).
     """
 
+    ACCOUNT_FREE = 10
+    ACCOUNT_CAP = 60
     ACCOUNT_FORGET = 3600
 
     def __init__(self):
         self.ip = FailureLimiter(free=20, base=60, cap=900, forget=900)
         self.account = FailureLimiter(free=5, base=30, cap=900, forget=3600)
-        self.total = FailureLimiter(free=0, base=0, cap=0, forget=self.ACCOUNT_FORGET)  # solo cuenta: nunca hace esperar
+        self.total = FailureLimiter(free=self.ACCOUNT_FREE, base=30, cap=self.ACCOUNT_CAP, forget=self.ACCOUNT_FORGET)
+        self.device = FailureLimiter(free=5, base=30, cap=900, forget=3600)
 
     @staticmethod
     def _h(text: str) -> str:
@@ -145,30 +160,58 @@ class LoginLimiter:
     def _total(cls, email: str) -> str:
         return cls._h(f"{email.strip().lower()}|*")
 
+    @classmethod
+    def _dev(cls, device: str) -> str:
+        return cls._h(f"equipo|{device}")
+
     def check(self, email: str, ip: str) -> None:
+        """Por IP y por cuenta + IP (no necesitan la base)."""
         self.ip.check(ip_key(ip), "Demasiados intentos fallidos desde esta conexión. Esperá {espera} y probá de nuevo.")
         self.account.check(self._acct(email, ip), "Demasiados intentos fallidos con esta cuenta. Esperá {espera} y probá de nuevo.")
 
-    def fail(self, email: str, ip: str) -> int:
-        """Registra un fallo. Devuelve los fallidos de la cuenta desde todas las IPs (los que deciden el bloqueo)."""
+    def check_device(self, device: str) -> None:
+        self.device.check(self._dev(device), "Demasiados intentos fallidos desde este equipo. Esperá {espera} y probá de nuevo.")
+
+    def account_wait(self, email: str) -> int:
+        """Segundos que espera quien no es de confianza para la cuenta (0 = puede intentar)."""
+        return self.total.wait(self._total(email))
+
+    def check_account(self, email: str) -> None:
+        self.total.check(
+            self._total(email),
+            "Hubo muchos intentos fallidos con esta cuenta. Esperá {espera} y probá de nuevo; desde un equipo donde ya entraste no hace falta esperar.",
+        )
+
+    def fail(self, email: str, ip: str, device: str | None = None) -> int:
+        """Registra un fallo. Devuelve los fallidos de la cuenta desde todas las IPs."""
         self.ip.fail(ip_key(ip))
         self.account.fail(self._acct(email, ip))
+        if device:
+            self.device.fail(self._dev(device))
         return self.total.fail(self._total(email))
 
     def account_failures(self, email: str) -> int:
         return self.total.count(self._total(email))
 
+    def account_flagged(self, email: str) -> int:
+        """Segundos que la cuenta sigue con muchos fallidos (desde un equipo que no es de confianza se espera entre
+        intentos); 0 = normal. Para Ajustes -> Usuarios."""
+        return self.total.flagged(self._total(email))
+
     def forget_account(self, email: str) -> None:
-        """Al bloquear la cuenta: el conteo arranca de cero para el siguiente bloqueo."""
+        """La contrasena cambio (o un admin la restablecio): los fallidos de la cuenta eran contra la anterior."""
         self.total.clear(self._total(email))
 
-    def success(self, email: str, ip: str) -> None:
+    def success(self, email: str, ip: str, device: str | None = None) -> None:
         self.account.clear(self._acct(email, ip))
+        if device:
+            self.device.clear(self._dev(device))
 
     def reset(self) -> None:
         self.ip.reset()
         self.account.reset()
         self.total.reset()
+        self.device.reset()
 
 
 login_limiter = LoginLimiter()

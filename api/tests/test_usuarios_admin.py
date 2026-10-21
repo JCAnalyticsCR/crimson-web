@@ -606,6 +606,7 @@ def test_lista_de_usuarios(client, auth, db_session, monkeypatch, from_ip):
         "must_change_password",
         "temp_password_expires_at",
         "locked_until",
+        "login_failures_until",
         "reset_link_expires_at",
         "password_changed_at",
         "member_since",
@@ -613,17 +614,19 @@ def test_lista_de_usuarios(client, auth, db_session, monkeypatch, from_ip):
         "is_self",
     ):
         assert k in x, k
-    assert x["shared"] is False and x["locked_until"] is None and x["is_self"] is False
+    assert x["shared"] is False and x["locked_until"] is None and x["login_failures_until"] is None and x["is_self"] is False
     assert {"roles", "cost_roles", "cost_role_choices"} <= set(d)
-    # bloqueado por intentos: se ve y restablecer lo desbloquea. Desde 1.10 cuentan los fallidos de todas las IPs (10);
-    # cada IP espera despues de 5 seguidos
+    # muchos intentos fallidos (desde 1.10, los de todas las IPs: 10; cada IP espera despues de 5 seguidos): se ve, la
+    # cuenta no queda bloqueada en la base (desde un equipo nuevo se espera a lo sumo un minuto) y restablecer lo limpia
     for n in range(2):
         for _ in range(5):
             assert _login_as(client, v.email, "Clave-incorrecta-1", _headers=from_ip(f"203.0.113.{n + 1}")).status_code == 401
-    assert next(u for u in client.get("/settings/users").json()["users"] if u["id"] == v.id)["locked_until"]
+    x = next(u for u in client.get("/settings/users").json()["users"] if u["id"] == v.id)
+    assert x["login_failures_until"] and x["locked_until"] is None
+    assert _login_as(client, v.email, PW, _headers=from_ip("203.0.113.9")).status_code == 429  # desde un equipo nuevo, espera
     client.post(f"/settings/users/{v.id}/reset-password", json={"mode": "enlace", "admin_password": ADMIN_PW})
     x = next(u for u in client.get("/settings/users").json()["users"] if u["id"] == v.id)
-    assert x["locked_until"] is None and x["reset_link_expires_at"]
+    assert x["login_failures_until"] is None and x["reset_link_expires_at"]
     assert _login_as(client, v.email, PW).status_code == 200
 
 

@@ -12,7 +12,7 @@ import { roleMeta } from "../../app/roles";
 import RoleMatrix from "../../app/RoleMatrix";
 import { Card, Empty, Field, I, Icon, Loading, Modal } from "../../ui/components";
 
-type U = { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null; is_self: boolean; shared: boolean; must_change_password: boolean; temp_password_expires_at: string | null; locked_until: string | null; reset_link_expires_at: string | null; password_changed_at: string | null; member_since: string | null };
+type U = { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null; is_self: boolean; shared: boolean; must_change_password: boolean; temp_password_expires_at: string | null; locked_until: string | null; login_failures_until?: string | null; reset_link_expires_at: string | null; password_changed_at: string | null; member_since: string | null };
 type Inv = { id: number; email: string; role: string; expires_at: string; status: "pendiente" | "vencida"; sent_count: number; last_sent_at: string | null; invited_by: string | null; email_status: string | null; email_error: string | null };
 type UsersResp = { users: U[]; invitations: Inv[]; roles: string[]; mail_configured: boolean; support_members: number; cost_roles: string[]; cost_role_choices: string[]; twofa_roles?: string[]; twofa_grace_days?: number; twofa_role_choices?: string[] };
 type InviteOut = { id: number; link: string; emailed: boolean; email_error: string | null; expires_at: string };
@@ -162,9 +162,10 @@ export default function UsersTab() {
                             {u.totp && <Chip tone="ok" title="Verificación en dos pasos activa">2FA</Chip>}
                             {!u.totp && u.active && data.twofa_roles?.includes(u.role) && <Chip tone="warn" title="Su rol exige la verificación en dos pasos: al vencer la gracia, el panel solo le deja configurarla">Sin 2FA · obligatoria</Chip>}
                             {u.must_change_password && <Chip tone="warn">Debe cambiar la contraseña · vence {fecha(u.temp_password_expires_at)}</Chip>}
-                            {u.locked_until && <Chip tone="bad" title="Se desbloquea solo o al restablecer la contraseña">Bloqueado hasta {hora(u.locked_until)}</Chip>}
+                            {u.locked_until && <Chip tone="bad" title="Por contraseñas equivocadas al aceptar una invitación. Se desbloquea solo o al restablecer la contraseña">Bloqueado hasta {hora(u.locked_until)}</Chip>}
+                            {u.login_failures_until && <Chip tone="warn" title="Muchos intentos fallidos de entrar con esta cuenta. Desde un equipo donde ya entró no espera; desde otro, espera hasta un minuto entre intentos. Se normaliza sola o al restablecer la contraseña">Intentos fallidos · hasta {hora(u.login_failures_until)}</Chip>}
                             {u.reset_link_expires_at && <Chip tone="info">Enlace de contraseña enviado · vence {fecha(u.reset_link_expires_at)}</Chip>}
-                            {!u.totp && !(u.active && data.twofa_roles?.includes(u.role)) && !u.must_change_password && !u.locked_until && !u.reset_link_expires_at && <span className="muted">—</span>}
+                            {!u.totp && !(u.active && data.twofa_roles?.includes(u.role)) && !u.must_change_password && !u.locked_until && !u.login_failures_until && !u.reset_link_expires_at && <span className="muted">—</span>}
                           </div>
                         </td>
                         <td className="muted" style={{ whiteSpace: "nowrap" }}>{u.last_login ? fechaHora(u.last_login) : "nunca"}</td>

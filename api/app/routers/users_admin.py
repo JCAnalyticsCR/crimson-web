@@ -35,7 +35,7 @@ from ..core.clientip import ip_key
 from ..core.config import settings as cfg
 from ..core.db import get_db
 from ..core.deps import ALLY_USER_ROLES, ASSIGNABLE_ROLES, COST_ROLE_CHOICES, Principal, cost_roles, require
-from ..core.ratelimit import admin_users_limiter, token_limiter
+from ..core.ratelimit import admin_users_limiter, login_limiter, token_limiter
 from ..core.reauth import actor_key, require_reauth
 from ..core.security import MAX_PASSWORD, hash_password, hash_token, new_temp_password, password_is_strong, verify_password
 from ..models import EmailOutbox, Invitation, PasswordReset, Tenant, TenantUser, User
@@ -228,6 +228,11 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
         lu = aware(u.locked_until)
         return u.locked_until if lu and lu > now else None
 
+    def intentos(u: User):
+        """Muchos fallidos al entrar (todas las IPs): desde un equipo que no es suyo se espera entre intentos."""
+        s = login_limiter.account_flagged(u.email or "")
+        return now + timedelta(seconds=s) if s else None
+
     miembros = {(m.user.email or "").lower() for m in internos}
     inv = [
         i
@@ -289,6 +294,7 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
                 "must_change_password": bool(m.user.must_change_password),
                 "temp_password_expires_at": m.user.temp_password_expires_at if m.user.must_change_password else None,
                 "locked_until": locked(m.user),
+                "login_failures_until": intentos(m.user),
                 "reset_link_expires_at": resets.get(m.user_id),
                 "password_changed_at": m.user.password_changed_at,
                 "member_since": m.created_at,
@@ -687,6 +693,7 @@ def reset_password(uid: int, data: ResetIn, response: Response, p: Principal = D
         u.temp_password_by, u.temp_password_tenant_id = p.user.id, tid  # el login la revalida (temp_password_alive)
         u.password_changed_at = now
         u.failed_logins, u.locked_until = 0, None
+        login_limiter.forget_account(u.email)
         invalidate_resets(db, uid)
         end_sessions(db, u)  # todas sus sesiones y session_version + 1
         audit(
@@ -723,6 +730,7 @@ def reset_password(uid: int, data: ResetIn, response: Response, p: Principal = D
         db, p.tenant, u.email, f"Creá tu nueva contraseña · {p.tenant.name}", reset_email_html(p.tenant, u.full_name, link, "24 horas"), "password_reset", pr.id
     )
     u.failed_logins, u.locked_until = 0, None
+    login_limiter.forget_account(u.email)  # como el desbloqueo de siempre: el admin lo pidio
     audit(
         db,
         tid,

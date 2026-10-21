@@ -1,17 +1,20 @@
 """Login (email + password + 2FA), refresh rotativo por cookie httpOnly, logout, /me, TOTP.
 
-Plan 1.10: el limite del login cuenta solo intentos fallidos (por IP y por cuenta + IP, con espera progresiva, y por
-cuenta desde todas las IPs, que la bloquea); el bloqueo de la cuenta no deja afuera a la duena desde sus sesiones
-abiertas; el refresh solo se acepta desde el portal; el 2FA activo no se cambia (ni se fabrican codigos de
+Plan 1.10: el limite del login cuenta solo intentos fallidos (por IP, por cuenta + IP y por equipo, con espera
+progresiva, y por cuenta desde todas las IPs, que hace esperar a lo sumo un minuto a quien no es de confianza para la
+cuenta: un tercero no la bloquea ni deja afuera a la duena, y la respuesta es la misma exista o no la cuenta); el
+refresh solo se acepta desde el portal; el 2FA activo no se cambia (ni se fabrican codigos de
 recuperacion) sin contrasena y codigo, cada contrasena que se compara con la sesion abierta cuenta en reauth_limiter,
 un codigo no se repite (ni con dos pedidos a la vez) y el 2FA es obligatorio para los roles que la empresa defina
 (core/twofa.py)."""
 
 from __future__ import annotations
 
+import secrets
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -32,7 +35,9 @@ from ..core.security import (
     new_refresh_token,
     new_totp_secret,
     password_is_strong,
+    read_purpose_token,
     refresh_expiry,
+    sign_purpose_token,
     totp_step,
     totp_uri,
     use_recovery_code,
@@ -75,13 +80,16 @@ from ..services.mail import mail_configured, queue_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 COOKIE = "crimson_refresh"
-MAX_FAILED = 6  # aceptar una invitacion con una cuenta existente (routers/users_admin.py)
+# Aceptar una invitacion con una cuenta existente (routers/users_admin.py): 6 contrasenas equivocadas bloquean ESE
+# paso 15 min (locked_until). El login ya no usa ese bloqueo: un tercero no deja a nadie afuera (core/ratelimit.py).
+MAX_FAILED = 6
 LOCK_MINUTES = 15
-# Login: fallidos de la cuenta desde TODAS las IPs (login_limiter.total; se olvidan 1 h despues del ultimo) que la
-# bloquean LOCK_MINUTES en la base. Cuentan todos, asi el total de intentos contra una cuenta queda acotado aunque el
-# atacante reparta entre muchas IPs. Una sola IP tambien llega, pero la espera progresiva por cuenta + IP la hace
-# tardar unos 15 min; y el bloqueo no aplica desde las IPs de las sesiones abiertas de la duena (_known_ip).
-ACCOUNT_MAX_FAILED = 10
+# Cookie de equipo: la recibe el navegador que entro bien (o que uso un enlace de restablecer, que prueba el correo).
+# No es una sesion ni sirve para entrar: solo exime de la espera por cuenta (login_limiter, por todas las IPs) cuando
+# un tercero la dispara. Firmada; vale para esa cuenta mientras no cambie la contrasena ni se cierren sus sesiones
+# (session_version), y tiene su propio limite de fallidos (una robada no da intentos sin limite).
+DEVICE_COOKIE = "crimson_device"
+DEVICE_DAYS = 180
 
 
 def _set_cookie(resp: Response, raw: str) -> None:
@@ -95,6 +103,40 @@ def _set_cookie(resp: Response, raw: str) -> None:
         path="/",
         domain=settings.cookie_domain,
     )
+
+
+def _device_mark(user: User) -> dict:
+    changed = aware(user.password_changed_at)
+    return {"sub": str(user.id), "pv": int(changed.timestamp()) if changed else 0, "sv": int(user.session_version or 0)}
+
+
+def _set_device(resp: Response, user: User) -> None:
+    tok = sign_purpose_token("device", {**_device_mark(user), "n": secrets.token_urlsafe(12)}, DEVICE_DAYS)
+    resp.set_cookie(
+        DEVICE_COOKIE,
+        tok,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="strict",
+        max_age=DEVICE_DAYS * 86400,
+        path="/",
+        domain=settings.cookie_domain,
+    )
+
+
+def _device(request: Request, user: User | None) -> str | None:
+    """Id del equipo de confianza para ESTA cuenta (la cookie de equipo vigente), o None."""
+    raw = request.cookies.get(DEVICE_COOKIE)
+    if user is None or not raw or len(raw) > 2048:
+        return None
+    try:
+        d = read_purpose_token("device", raw)
+    except jwt.InvalidTokenError:
+        return None
+    if any(str(d.get(k)) != str(v) for k, v in _device_mark(user).items()):
+        return None  # de otra cuenta, o de antes de cambiar la contrasena o de cerrar sus sesiones
+    n = d.get("n")
+    return n if isinstance(n, str) and n else None
 
 
 def _issue(db: Session, request: Request, resp: Response, user: User, membership: TenantUser) -> TokenOut:
@@ -113,6 +155,7 @@ def _issue(db: Session, request: Request, resp: Response, user: User, membership
     twofa.start_grace(user, membership.tenant, membership.role_code, user.last_login_at)
     db.commit()
     _set_cookie(resp, raw)
+    _set_device(resp, user)
     tenant = membership.tenant
     return TokenOut(
         access_token=create_access_token(user.id, tenant.id, membership.role_code, sv=int(user.session_version or 0)),
@@ -145,11 +188,11 @@ def ip_check(request: Request, response: Response):
 
 
 def _known_ip(db: Session, user: User, ip: str, now: datetime) -> bool:
-    """La duena de una cuenta bloqueada sigue pudiendo entrar desde donde tiene una sesion ABIERTA: un refresh token
-    vigente (sin revocar ni vencer) emitido a esa IP despues de su ultimo cambio de contrasena. Un ataque desde otras
-    IPs no la deja afuera; cerrar sesiones o cambiar/restablecer la contrasena quita esas IPs (la de un atacante que
-    llego a tener sesion deja de servir). El limite por cuenta + IP sigue aplicando. Quien llama solo la usa con la IP
-    propia de la persona (clientip.ip_propia): sin la firma del portal todos llegan con la misma IP."""
+    """Ademas de la cookie de equipo, no espera por los fallidos de la cuenta (todas las IPs) quien llega desde donde
+    la duena tiene una sesion ABIERTA: un refresh token vigente (sin revocar ni vencer) emitido a esa IP despues de su
+    ultimo cambio de contrasena. Cerrar sesiones o cambiar/restablecer la contrasena quita esas IPs (la de un atacante
+    que llego a tener sesion deja de servir). El limite por cuenta + IP sigue aplicando. Quien llama solo la usa con la
+    IP propia de la persona (clientip.ip_propia): sin la firma del portal todos llegan con la misma IP."""
     if not ip or ip == "?":
         return False
     q = select(RefreshToken.id).where(RefreshToken.user_id == user.id, RefreshToken.ip == ip, RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > now)
@@ -160,14 +203,15 @@ def _known_ip(db: Session, user: User, ip: str, now: datetime) -> bool:
     return db.scalar(q.limit(1)) is not None
 
 
-def _login_failed(db: Session, user: User | None, email: str, ip: str, now: datetime) -> None:
-    """Un intento fallido: cuenta por IP, por cuenta + IP y por cuenta desde todas las IPs. Este ultimo bloquea la
-    cuenta (todos los fallidos cuentan, tambien adivinar el codigo 2FA) y arranca de cero al bloquearla."""
-    n = login_limiter.fail(email, ip)
-    if user is not None and n >= ACCOUNT_MAX_FAILED:
-        user.locked_until = now + timedelta(minutes=LOCK_MINUTES)
-        login_limiter.forget_account(email)
-        db.commit()
+def _trusted(db: Session, request: Request, user: User | None, device: str | None, ip: str, now: datetime) -> bool:
+    """De confianza para la cuenta: su cookie de equipo, o la IP propia de una de sus sesiones abiertas."""
+    return device is not None or (user is not None and ip_propia(request) and _known_ip(db, user, ip, now))
+
+
+def _login_failed(email: str, ip: str, device: str | None) -> None:
+    """Un intento fallido (tambien adivinar el codigo 2FA): cuenta por IP, por cuenta + IP, por equipo y por cuenta
+    desde todas las IPs. Nada en la base: el limite no bloquea la cuenta y es igual para un correo que no existe."""
+    login_limiter.fail(email, ip, device)
 
 
 def _pick_membership(db: Session, user: User, slug: str | None) -> TenantUser:
@@ -188,16 +232,22 @@ def login(data: LoginIn, request: Request, resp: Response, db: Session = Depends
     email = data.email.lower()
     login_limiter.check(email, ip)  # solo frena a quien ya fallo (por IP o por esta cuenta desde esta IP)
     user = db.scalar(select(User).where(User.email == email))
+    if user is not None and not user.active:
+        user = None  # como si no existiera: mismas respuestas y mismos limites
     generic = HTTPException(status.HTTP_401_UNAUTHORIZED, "Credenciales invalidas")
     now = datetime.now(UTC)
-    if not user or not user.active:
-        _login_failed(db, None, email, ip, now)
+    device = _device(request, user)
+    if device:
+        login_limiter.check_device(device)
+    # Muchos fallidos con la cuenta desde todas las IPs: quien no es de confianza espera (a lo sumo un minuto) en vez
+    # de un bloqueo que un tercero renovaria sin fin. La misma respuesta exista o no la cuenta.
+    if login_limiter.account_wait(email) and not _trusted(db, request, user, device, ip, now):
+        login_limiter.check_account(email)
+    if user is None:
+        _login_failed(email, ip, None)
         raise generic
-    locked = aware(user.locked_until)
-    if locked and locked > now and not (ip_propia(request) and _known_ip(db, user, ip, now)):
-        raise HTTPException(status.HTTP_423_LOCKED, "Cuenta bloqueada temporalmente por intentos fallidos")
     if not verify_password(data.password, user.password_hash):
-        _login_failed(db, user, email, ip, now)
+        _login_failed(email, ip, device)
         raise generic
     # Compuerta de contrasena temporal (Ajustes -> Usuarios -> Restablecer): antes del 2FA, asi el codigo de la app
     # se escribe una sola vez al final. La contrasena era correcta: estas respuestas no suman intentos fallidos.
@@ -230,16 +280,16 @@ def login(data: LoginIn, request: Request, resp: Response, db: Session = Depends
                 if verify_totp(user.totp_secret or "", data.totp_code):
                     # el codigo era bueno pero ya se uso (doble envio o alguien lo vio): no suma como fallido
                     raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Ese código ya se usó. Esperá a que la app muestre el siguiente.")
-                _login_failed(db, user, email, ip, now)  # adivinar el codigo tambien cuenta
+                _login_failed(email, ip, device)  # adivinar el codigo tambien cuenta
                 raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Codigo 2FA invalido")
     m = _pick_membership(db, user, data.tenant_slug)
     if quedan is not None:
         user.totp_recovery = quedan
     if step is not None:
         user.totp_last_step = step  # ese codigo ya no sirve otra vez
-    login_limiter.success(email, ip)
-    # el bloqueo y los fallidos de la cuenta (todas las IPs) NO se limpian al acertar: la duena entra (desde sus sesiones
-    # abiertas aunque este bloqueada) sin devolverle margen al atacante; vencen solos
+    login_limiter.success(email, ip, device)
+    # los fallidos de la cuenta (todas las IPs) NO se limpian al acertar: la duena entra sin devolverle margen al
+    # atacante; se olvidan solos (o al cambiar la contrasena)
     if user.must_change_password:
         set_password(user, data.new_password)
         audit(db, m.tenant_id, user.id, "password_temp_changed", "user", user.id, ip=ip)
@@ -356,7 +406,7 @@ def me(p: Principal = Depends(get_session_principal), db: Session = Depends(get_
 
 
 @router.post("/password", status_code=204)
-def change_password(data: PasswordChangeIn, p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
+def change_password(data: PasswordChangeIn, response: Response, p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
     # cada intento cuenta (reauth_limiter): con una sesion robada no se prueba la contrasena sin limite
     require_reauth(p, data.current_password, "La contraseña actual no es correcta")
     if not password_is_strong(data.new_password):
@@ -366,6 +416,8 @@ def change_password(data: PasswordChangeIn, p: Principal = Depends(get_session_p
     p.user.must_change_password = False
     p.user.temp_password_expires_at = None
     db.commit()
+    login_limiter.forget_account(p.user.email)  # los fallidos eran contra la anterior
+    _set_device(response, p.user)  # las cookies de equipo de antes del cambio ya no valen: este equipo sigue siendo suyo
 
 
 @router.post("/2fa/setup", response_model=TotpSetupOut)
@@ -503,7 +555,7 @@ def password_reset_check(data: ResetTokenIn, request: Request, db: Session = Dep
 
 
 @router.post("/password-reset/confirm")
-def password_reset_confirm(data: ResetConfirmIn, request: Request, db: Session = Depends(get_db)):
+def password_reset_confirm(data: ResetConfirmIn, request: Request, response: Response, db: Session = Depends(get_db)):
     ip = client_ip(request)
     token_limiter.hit(f"reset:{ip_key(ip)}")
     found = find_reset(db, data.token)
@@ -537,6 +589,9 @@ def password_reset_confirm(data: ResetConfirmIn, request: Request, db: Session =
             f"<p>Tu contraseña de Crimson se cambió el {fecha_cr(now)}.{extra} Si no fuiste vos, avisale a tu administrador.</p>",
         )
     db.commit()
+    # el enlace llego a su correo: este navegador queda de confianza para la cuenta (aunque un tercero este disparando
+    # la espera por fallidos, entra sin esperar; la contrasena y el 2FA se piden igual)
+    _set_device(response, user)
     return {"ok": True, "email": user.email}
 
 
