@@ -5,6 +5,7 @@ frente."""
 from datetime import date, timedelta
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import select
 
 from tests.aliados_helpers import aceptar, escenario, usuario
@@ -29,6 +30,15 @@ def _servicio(client) -> int:
 def _plan(client, ally_id, pid, **kw):
     body = {"amount": 50000, "currency": "CRC", "mode": "fija", "next_date": date.today().isoformat(), "product_id": pid, "crear_cliente": True, **kw}
     return client.put(f"/allies/{ally_id}/plan", json=body)
+
+
+@pytest.fixture
+def conta_sin_envio(monkeypatch):
+    """Contabilidad como antes del plan 1.7 (sin sales.enviar): asi se sigue probando la guarda de quien gestiona
+    mensualidades pero no puede mandarlas. Con 1.7 integrado, el rol real de contabilidad si envia facturas."""
+    from app.core.deps import ROLE_PERMISSIONS
+
+    monkeypatch.setitem(ROLE_PERMISSIONS["contabilidad"], "sales", [x for x in ROLE_PERMISSIONS["contabilidad"]["sales"] if x != "enviar"])
 
 
 def test_plan_crea_cliente_y_recurrencia(client, auth, db_session):
@@ -258,7 +268,7 @@ def test_ganancias_sin_economia(client, auth, db_session, monkeypatch):
     assert client.get("/aliado/inicio", headers=h).json()["dinero"] is None
 
 
-def test_plan_revision_de_la_primera_y_cambio_de_monto(client, auth, db_session):
+def test_plan_revision_de_la_primera_y_cambio_de_monto(client, auth, db_session, conta_sin_envio):
     """Plan 1.4: dejar que la mensualidad salga sola sin revisar es de quien envia facturas (contabilidad tiene
     aliados.mensualidad pero no sales.enviar), y cambiar el monto vuelve a pedir "Aprobar y enviar". Queda en la bitacora."""
     from app.models import AllyCompany, AuditLog, Recurrence
@@ -289,7 +299,7 @@ def test_plan_revision_de_la_primera_y_cambio_de_monto(client, auth, db_session)
     }
 
 
-def test_plan_contabilidad_adelanta_el_cobro_y_vuelve_la_revision(client, auth, db_session):
+def test_plan_contabilidad_adelanta_el_cobro_y_vuelve_la_revision(client, auth, db_session, conta_sin_envio):
     """La revision tambien cubre cuando sale: contabilidad (aliados.mensualidad sin sales.enviar) puede posponer el
     cobro, pero si lo adelanta o vuelve a encender el envio automatico la proxima espera "Aprobar y enviar"."""
     from tests.test_session4 import _user_with_role

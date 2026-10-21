@@ -18,6 +18,7 @@ import csv
 import hashlib
 import io
 import json
+import logging
 import zipfile
 from collections import defaultdict
 from collections.abc import Iterable
@@ -201,6 +202,13 @@ def _select_rows(conn: Connection, t: sa.Table, where=None, cols: list[sa.Column
 def plan_rows(conn: Connection, metadata: sa.MetaData, tenant_id: int | None) -> dict[str, list[dict]]:
     """Filas a respaldar por tabla (sin los binarios: esos se leen uno por uno al escribir el zip)."""
     tables, _ = ordered_tables(metadata)
+    # La base puede ir una migracion atras del codigo (el respaldo programado corre antes de que el api termine de
+    # migrar): se respalda lo que existe y se avisa. Al restaurar, alembic crea el esquema y esas tablas quedan vacias.
+    present = set(sa.inspect(conn).get_table_names())
+    faltan = [t.name for t in tables if t.name not in present and t.name not in SKIP_TABLES]
+    if faltan:
+        logging.getLogger("crimson.backup").warning("tablas del codigo que la base todavia no tiene (se omiten): %s", ", ".join(faltan))
+    tables = [t for t in tables if t.name in present]
     out: dict[str, list[dict]] = {}
     nonblob = {t.name: [c for c in t.columns if c.name not in _blob_cols(t)] for t in tables}
     if tenant_id is None:

@@ -89,40 +89,28 @@ def test_cobro_de_la_noche_entra_en_el_cierre_de_su_dia(worker, db_session, monk
 
 
 def test_vencimiento_con_el_dia_de_costa_rica(worker, db_session):
+    """sales.mark_overdue vive en app/tasks/cobranza.py (plan 1.3) y vence solo facturas que le llegaron al cliente
+    (sent_at): a las 21:00 CR todavia es el dia de vencimiento, aunque en UTC ya sea el dia siguiente."""
+    from app.tasks.cobranza import mark_overdue
+
     t = db_session.scalar(select(Tenant).order_by(Tenant.id))
-    hoy = Invoice(tenant_id=t.id, number="FEC-000778", issue_date=DIA_CR, due_date=DIA_CR, status="parcial")
-    ayer = Invoice(tenant_id=t.id, number="FEC-000779", issue_date=DIA_CR, due_date=date(2026, 3, 9), status="parcial")
+    enviada = datetime(2026, 3, 1, 15, 0, tzinfo=UTC)
+    hoy = Invoice(tenant_id=t.id, number="FEC-000778", issue_date=DIA_CR, due_date=DIA_CR, status="parcial", balance=Decimal("100"), sent_at=enviada)
+    ayer = Invoice(
+        tenant_id=t.id, number="FEC-000779", issue_date=DIA_CR, due_date=date(2026, 3, 9), status="parcial", balance=Decimal("100"), sent_at=enviada
+    )
     db_session.add_all([hoy, ayer])
     db_session.commit()
-    worker.mark_overdue()
+    mark_overdue(db_session, today=DIA_CR)
     db_session.refresh(hoy)
     db_session.refresh(ayer)
     assert ayer.status == "vencida"
     assert hoy.status == "parcial"  # a las 21:00 CR todavia es su dia de vencimiento
 
 
-def test_recordatorio_con_el_dia_de_costa_rica_y_una_sola_vez(worker, db_session):
-    """sales.reminders: el objetivo sale del dia de Costa Rica (no del UTC del contenedor) y lleva dedupe_key (regla 6):
-    si la tarea corre dos veces el mismo dia, el cliente recibe un solo recordatorio."""
-    from datetime import timedelta
-
-    from app.models import Customer
-
-    t = db_session.scalar(select(Tenant).order_by(Tenant.id))
-    t.settings = {**(t.settings or {}), "notify_due": True, "remind_days_before": 3}
-    c = Customer(tenant_id=t.id, name="Cliente de prueba", email="Cliente@Ejemplo.com")
-    db_session.add(c)
-    db_session.flush()
-    # 3 dias despues del dia CR (10 de marzo); con date.today() del reloj real nunca coincidiria
-    inv = Invoice(
-        tenant_id=t.id, number="FEC-000780", customer_id=c.id, issue_date=DIA_CR, due_date=DIA_CR + timedelta(days=3), status="enviada", balance=Decimal("1000")
-    )
-    db_session.add(inv)
-    db_session.commit()
-    assert worker.reminders() == 1
-    worker.reminders()  # segunda corrida del mismo dia (reintento, tarea reentregada)
-    rows = db_session.scalars(select(EmailOutbox).where(EmailOutbox.entity == "invoice", EmailOutbox.entity_id == inv.id)).all()
-    assert len(rows) == 1 and rows[0].dedupe_key == f"recordatorio:{inv.id}:{inv.due_date}:cliente@ejemplo.com"
+# El recordatorio con el dia de Costa Rica y una sola vez por etapa (doble disparo del beat) se prueba en
+# tests/test_cobranza_secuencia.py::test_corrida_diaria_con_la_fecha_de_costa_rica: sales.reminders es ahora la
+# secuencia de cobro del plan 1.3 (app/tasks/cobranza.py).
 
 
 class _Ctx:

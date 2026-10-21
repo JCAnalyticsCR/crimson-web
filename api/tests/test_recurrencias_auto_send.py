@@ -53,6 +53,15 @@ def _admin(correo) -> list:
     return [m for m, _ in _al(correo, "admin@crimsonapp.com")]
 
 
+@pytest.fixture
+def conta_sin_envio(monkeypatch):
+    """Contabilidad como antes del plan 1.7 (sin sales.enviar): asi se sigue probando la guarda de quien gestiona
+    mensualidades pero no puede mandarlas. Con 1.7 integrado, el rol real de contabilidad si envia facturas."""
+    from app.core.deps import ROLE_PERMISSIONS
+
+    monkeypatch.setitem(ROLE_PERMISSIONS["contabilidad"], "sales", [x for x in ROLE_PERMISSIONS["contabilidad"]["sales"] if x != "enviar"])
+
+
 def test_primera_por_aprobar_y_despues_salen_solas(client, auth, db_session, correo):
     from app.models import Invoice, Recurrence
     from app.routers.ops import run_due_recurrences
@@ -186,7 +195,7 @@ def test_enviarla_a_mano_cuenta_como_aprobada(client, auth, db_session, correo):
     assert db_session.get(Invoice, r.last_invoice_id).status == "enviada"
 
 
-def test_aprobar_exige_permiso_de_enviar(client, auth, db_session, correo):
+def test_aprobar_exige_permiso_de_enviar(client, auth, db_session, correo, conta_sin_envio):
     rec = _rec(client, _cliente(client))
     client.post(f"/recurrences/{rec['id']}/run")
     pw = _user_with_role(db_session, auth["tenant"]["id"], "conta.recurrente@ejemplo.com", "contabilidad")
@@ -196,7 +205,7 @@ def test_aprobar_exige_permiso_de_enviar(client, auth, db_session, correo):
     h = {"Authorization": f"Bearer {tok}"}
     assert client.post(f"/recurrences/{rec['id']}/approve-send", headers=h).status_code == 403
     keys = [s["key"] for s in client.get("/approvals", headers=h).json()["sections"]]
-    assert "mensualidades_por_aprobar" not in keys  # contabilidad todavia no envia (plan 1.7)
+    assert "mensualidades_por_aprobar" not in keys  # sin sales.enviar no ve la seccion (conta_sin_envio)
 
 
 def test_vista_previa_al_admin_a_d_menos_3(client, auth, db_session, correo):
@@ -368,7 +377,7 @@ def test_la_que_no_salio_detiene_el_periodo_siguiente(client, auth, db_session, 
     assert len(_al(correo, CLIENTE)) == 3  # el intento que fallo, el reenvio y el periodo siguiente
 
 
-def test_contabilidad_no_envia_ni_quita_la_revision(client, auth, db_session, correo):
+def test_contabilidad_no_envia_ni_quita_la_revision(client, auth, db_session, correo, conta_sin_envio):
     from app.models import AuditLog
 
     h = _como(client, db_session, auth, "conta.envio@ejemplo.com", "contabilidad")
@@ -516,7 +525,7 @@ def test_generar_ahora_con_error_interno_queda_fallida(client, auth, db_session,
     assert any("sin enviar" in m.subject for m in _admin(correo))
 
 
-def test_contabilidad_cambia_cuando_sale_y_vuelve_la_revision(client, auth, db_session, correo):
+def test_contabilidad_cambia_cuando_sale_y_vuelve_la_revision(client, auth, db_session, correo, conta_sin_envio):
     """La revision humana cubre tambien cuando y cada cuanto sale: quien no envia facturas no puede, cambiando la
     frecuencia, adelantando la fecha o volviendo a encender el envio, hacer que salgan facturas sin que nadie las vea."""
     from app.models import AuditLog, Recurrence
