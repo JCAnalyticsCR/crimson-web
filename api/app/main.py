@@ -63,6 +63,14 @@ def create_app() -> FastAPI:
     from .core import secretbox
 
     secretbox.keys()  # registra (INFO) solo los kid y sha256(llave)[:8] de FISCAL_KEYS: api y worker deben coincidir
+    if settings.is_prod and settings.proxy_shared_key is None:
+        # plan 1.10: sin la llave el API ve todo el panel y la tienda con la IP de salida del nginx del portal: los
+        # limites por IP (login, checkout, Mi pedido, comprobantes...) pasan a ser globales y la bitacora no muestra la
+        # IP real. No se impide el arranque (tumbaria el panel y la tienda); /health lo dice en "proxy_key".
+        log.error(
+            "PROXY_SHARED_KEY falta (o tiene menos de 32 caracteres): los limites por IP son GLOBALES. Cargar la misma "
+            "llave en portal y api y verificar /api/auth/ip-check por el panel (debe decir 'firmadas' con la IP propia)."
+        )
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",

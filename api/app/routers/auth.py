@@ -1,9 +1,11 @@
 """Login (email + password + 2FA), refresh rotativo por cookie httpOnly, logout, /me, TOTP.
 
-Plan 1.10: el limite del login cuenta solo intentos fallidos (por IP y por cuenta + IP, con espera progresiva); el
-bloqueo de la cuenta no lo dispara un tercero desde una sola IP ni deja afuera a la duena desde donde ya entro; el
-refresh solo se acepta desde el portal; el 2FA activo no se cambia sin contrasena y codigo, un codigo no se repite y
-el 2FA es obligatorio para los roles que la empresa defina (core/twofa.py)."""
+Plan 1.10: el limite del login cuenta solo intentos fallidos (por IP y por cuenta + IP, con espera progresiva, y por
+cuenta desde todas las IPs, que la bloquea); el bloqueo de la cuenta no deja afuera a la duena desde sus sesiones
+abiertas; el refresh solo se acepta desde el portal; el 2FA activo no se cambia (ni se fabrican codigos de
+recuperacion) sin contrasena y codigo, cada contrasena que se compara con la sesion abierta cuenta en reauth_limiter,
+un codigo no se repite (ni con dos pedidos a la vez) y el 2FA es obligatorio para los roles que la empresa defina
+(core/twofa.py)."""
 
 from __future__ import annotations
 
@@ -15,11 +17,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core import twofa
+from ..core.clientip import ip_key, ip_propia, source
 from ..core.config import settings
 from ..core.db import get_db
 from ..core.deps import CLIENT_ROLES, ROLE_PERMISSIONS, Principal, effective_permissions, get_principal, get_session_principal
-from ..core.ratelimit import login_limiter, pwreset_email_limiter, pwreset_global_limiter, pwreset_ip_limiter, token_limiter
-from ..core.reauth import require_reauth
+from ..core.ratelimit import login_limiter, pwreset_email_limiter, pwreset_global_limiter, pwreset_ip_limiter, reauth_limiter, token_limiter
+from ..core.reauth import actor_key, require_reauth
 from ..core.security import (
     create_access_token,
     hash_password,
@@ -43,6 +46,7 @@ from ..schemas.core import (
     MeOut,
     PasswordChangeIn,
     PasswordOnlyIn,
+    RecoveryCodesIn,
     RecoveryCodesOut,
     ResetConfirmIn,
     ResetRequestIn,
@@ -73,9 +77,11 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 COOKIE = "crimson_refresh"
 MAX_FAILED = 6  # aceptar una invitacion con una cuenta existente (routers/users_admin.py)
 LOCK_MINUTES = 15
-# Login: fallidos de la cuenta (todas las IPs) que la bloquean en la base. Cada IP aporta como mucho
-# login_limiter.ACCOUNT_SHARE (3): hacen falta al menos 4 IPs distintas, nunca una sola.
-ACCOUNT_MAX_FAILED = 12
+# Login: fallidos de la cuenta desde TODAS las IPs (login_limiter.total; se olvidan 1 h despues del ultimo) que la
+# bloquean LOCK_MINUTES en la base. Cuentan todos, asi el total de intentos contra una cuenta queda acotado aunque el
+# atacante reparta entre muchas IPs. Una sola IP tambien llega, pero la espera progresiva por cuenta + IP la hace
+# tardar unos 15 min; y el bloqueo no aplica desde las IPs de las sesiones abiertas de la duena (_known_ip).
+ACCOUNT_MAX_FAILED = 10
 
 
 def _set_cookie(resp: Response, raw: str) -> None:
@@ -126,34 +132,41 @@ def client_ip(request: Request) -> str:
 @router.get("/ip-check")
 def ip_check(request: Request, response: Response):
     """Sonda del plan 1.10 (sin sesion; en tienda.* nginx no deja pasar /api/auth). Devuelve la IP que el API le
-    atribuye a quien llama y que paso con las cabeceras del nginx del portal:
-    - por el panel (https://panel.../api/auth/ip-check): "firmadas" y tu IP publica = todo bien; "rechazadas" = la
-      llave PROXY_SHARED_KEY no coincide entre portal y api; "ninguna" = el edge del API quita las cabeceras propias
-      (o el portal no tiene la llave).
-    - directo al API con cabeceras inventadas: "rechazadas" = el edge las deja pasar y el API no les cree.
+    atribuye a quien llama y que paso con las cabeceras del nginx del portal (core/clientip.py, source):
+    - por el panel (https://panel.../api/auth/ip-check): "firmadas" y TU IP publica = todo bien. Con "firmadas" pero
+      otra IP (100.64.x o la del edge), el nginx del portal no reconoce al edge (set_real_ip_from en portal/nginx.conf).
+      "sin_llave" = el portal no tiene PROXY_SHARED_KEY; "rechazadas" = la llave no coincide entre portal y api (o
+      falta en el api: /health dice "proxy_key"); "ninguna" = el edge del API quita las cabeceras propias.
+    - directo al API con cabeceras inventadas (IP y llave): "rechazadas" = el edge las deja pasar y el API no les cree;
+      la IP tiene que ser tu IP publica (si no, FORWARDED_ALLOW_IPS de api/Dockerfile no cubre al edge).
     Solo la IP de quien pregunta y una palabra: nada que no sepa ya."""
-    from ..core.clientip import source
-
     response.headers["Cache-Control"] = "no-store"
     return {"ip": client_ip(request), "cabeceras": source(request)}
 
 
 def _known_ip(db: Session, user: User, ip: str, now: datetime) -> bool:
-    """La duena de una cuenta bloqueada sigue pudiendo entrar desde donde ya entro bien (una sesion emitida a esa IP
-    en los ultimos 30 dias): un ataque desde otras IPs no la deja afuera. El limite por cuenta + IP sigue aplicando."""
+    """La duena de una cuenta bloqueada sigue pudiendo entrar desde donde tiene una sesion ABIERTA: un refresh token
+    vigente (sin revocar ni vencer) emitido a esa IP despues de su ultimo cambio de contrasena. Un ataque desde otras
+    IPs no la deja afuera; cerrar sesiones o cambiar/restablecer la contrasena quita esas IPs (la de un atacante que
+    llego a tener sesion deja de servir). El limite por cuenta + IP sigue aplicando. Quien llama solo la usa con la IP
+    propia de la persona (clientip.ip_propia): sin la firma del portal todos llegan con la misma IP."""
     if not ip or ip == "?":
         return False
-    q = select(RefreshToken.id).where(RefreshToken.user_id == user.id, RefreshToken.ip == ip, RefreshToken.expires_at > now).limit(1)
-    return db.scalar(q) is not None
+    q = select(RefreshToken.id).where(RefreshToken.user_id == user.id, RefreshToken.ip == ip, RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > now)
+    changed = aware(user.password_changed_at)
+    if changed is not None:
+        # refresh_token no guarda la emision: vence = emision + refresh_token_days (security.refresh_expiry)
+        q = q.where(RefreshToken.expires_at > changed + timedelta(days=settings.refresh_token_days))
+    return db.scalar(q.limit(1)) is not None
 
 
 def _login_failed(db: Session, user: User | None, email: str, ip: str, now: datetime) -> None:
-    """Un intento fallido: cuenta por IP y por cuenta + IP; solo los primeros de cada IP suman al bloqueo de la cuenta."""
-    if login_limiter.fail(email, ip) and user is not None:
-        user.failed_logins = int(user.failed_logins or 0) + 1
-        if user.failed_logins >= ACCOUNT_MAX_FAILED:
-            user.locked_until = now + timedelta(minutes=LOCK_MINUTES)
-            user.failed_logins = 0
+    """Un intento fallido: cuenta por IP, por cuenta + IP y por cuenta desde todas las IPs. Este ultimo bloquea la
+    cuenta (todos los fallidos cuentan, tambien adivinar el codigo 2FA) y arranca de cero al bloquearla."""
+    n = login_limiter.fail(email, ip)
+    if user is not None and n >= ACCOUNT_MAX_FAILED:
+        user.locked_until = now + timedelta(minutes=LOCK_MINUTES)
+        login_limiter.forget_account(email)
         db.commit()
 
 
@@ -181,7 +194,7 @@ def login(data: LoginIn, request: Request, resp: Response, db: Session = Depends
         _login_failed(db, None, email, ip, now)
         raise generic
     locked = aware(user.locked_until)
-    if locked and locked > now and not _known_ip(db, user, ip, now):
+    if locked and locked > now and not (ip_propia(request) and _known_ip(db, user, ip, now)):
         raise HTTPException(status.HTTP_423_LOCKED, "Cuenta bloqueada temporalmente por intentos fallidos")
     if not verify_password(data.password, user.password_hash):
         _login_failed(db, user, email, ip, now)
@@ -206,6 +219,9 @@ def login(data: LoginIn, request: Request, resp: Response, db: Session = Depends
     if user.totp_enabled:
         if not data.totp_code:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Se requiere codigo 2FA", headers={"X-2FA": "required"})
+        # dos logins a la vez con el mismo codigo (relevo de phishing, alguien que lo vio): la fila queda tomada hasta
+        # el commit y el segundo lee el paso (o el codigo de recuperacion) ya usado
+        db.refresh(user, with_for_update=True)
         step = totp_step(user.totp_secret or "", data.totp_code, after=user.totp_last_step)
         if step is None:
             # Sin el telefono a mano queda el codigo de recuperacion; se consume recien cuando el login completo pasa.
@@ -222,7 +238,8 @@ def login(data: LoginIn, request: Request, resp: Response, db: Session = Depends
     if step is not None:
         user.totp_last_step = step  # ese codigo ya no sirve otra vez
     login_limiter.success(email, ip)
-    user.failed_logins, user.locked_until = 0, None
+    # el bloqueo y los fallidos de la cuenta (todas las IPs) NO se limpian al acertar: la duena entra (desde sus sesiones
+    # abiertas aunque este bloqueada) sin devolverle margen al atacante; vencen solos
     if user.must_change_password:
         set_password(user, data.new_password)
         audit(db, m.tenant_id, user.id, "password_temp_changed", "user", user.id, ip=ip)
@@ -340,8 +357,8 @@ def me(p: Principal = Depends(get_session_principal), db: Session = Depends(get_
 
 @router.post("/password", status_code=204)
 def change_password(data: PasswordChangeIn, p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
-    if not verify_password(data.current_password, p.user.password_hash):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Contrasena actual incorrecta")
+    # cada intento cuenta (reauth_limiter): con una sesion robada no se prueba la contrasena sin limite
+    require_reauth(p, data.current_password, "La contraseña actual no es correcta")
     if not password_is_strong(data.new_password):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Minimo 10 caracteres con letras y numeros")
     p.user.password_hash = hash_password(data.new_password)
@@ -360,6 +377,7 @@ def totp_setup(data: TotpSetupIn | None = None, p: Principal = Depends(get_sessi
     if u.totp_enabled:
         data = data or TotpSetupIn()
         require_reauth(p, data.password, "Confirmá con tu contraseña")  # cada intento cuenta (tambien adivinar el codigo)
+        db.refresh(u, with_for_update=True)  # el mismo codigo en dos pedidos a la vez: el segundo lo ve ya usado
         step = totp_step(u.totp_secret or "", data.code or "", after=u.totp_last_step)
         quedan = use_recovery_code(u.totp_recovery, data.code or "") if step is None else None
         if step is None and quedan is None:
@@ -377,7 +395,9 @@ def totp_setup(data: TotpSetupIn | None = None, p: Principal = Depends(get_sessi
 @router.post("/2fa/verify", response_model=RecoveryCodesOut)
 def totp_verify(data: TotpVerifyIn, p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
     """Activa (o cambia) el 2FA con el codigo del secreto pendiente y entrega los codigos de recuperacion. Se muestran
-    UNA vez: despues solo viven hasheados. Avisa por correo: si no fue la persona, se entera."""
+    UNA vez: despues solo viven hasheados. Avisa por correo: si no fue la persona, se entera. Cada intento cuenta
+    (reauth_limiter): el codigo del secreto pendiente no se adivina sin limite."""
+    reauth_limiter.hit(actor_key(p))
     u = p.user
     pending = u.totp_pending_secret
     # compatibilidad: un setup de antes del despliegue dejo el secreto en totp_secret con el 2FA apagado
@@ -404,16 +424,36 @@ def totp_verify(data: TotpVerifyIn, p: Principal = Depends(get_session_principal
 
 
 @router.post("/2fa/recovery-codes", response_model=RecoveryCodesOut)
-def totp_recovery_codes(data: PasswordOnlyIn, p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
-    """Genera codigos nuevos (los anteriores dejan de servir). Pide la contrasena: si alguien te deja
-    la sesion abierta, no deberia poder fabricarse una llave de entrada permanente."""
-    if not p.user.totp_enabled:
+def totp_recovery_codes(data: RecoveryCodesIn, p: Principal = Depends(get_session_principal), db: Session = Depends(get_db)):
+    """Genera codigos nuevos (los anteriores dejan de servir). Pide la contrasena (cada intento cuenta) y el codigo
+    ACTUAL de la app, nunca uno de recuperacion: con la sesion y la contrasena solas nadie se fabrica una llave de
+    entrada ni la usa despues en "Cambiar de telefono" para quedarse con el 2FA. Sin la app se usa "Cambiar de
+    telefono" con un codigo de recuperacion (al confirmar entrega codigos nuevos). Avisa por correo."""
+    u = p.user
+    if not u.totp_enabled:
         raise HTTPException(status.HTTP_409_CONFLICT, "El 2FA no esta activo")
-    if not verify_password(data.password, p.user.password_hash):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Contrasena incorrecta")
+    require_reauth(p, data.password, "Confirmá con tu contraseña")
+    db.refresh(u, with_for_update=True)  # el mismo codigo en dos pedidos a la vez: el segundo lo ve ya usado
+    step = totp_step(u.totp_secret or "", data.code, after=u.totp_last_step)
+    if step is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "El código de tu app no es válido (o ya se usó). Si ya no tenés la app, usá «Cambiar de teléfono» con un "
+            "código de recuperación: al terminar te da códigos nuevos.",
+        )
+    u.totp_last_step = step
     codigos = new_recovery_codes()
-    p.user.totp_recovery = [hash_recovery(c) for c in codigos]
-    audit(db, p.tenant.id, p.user.id, "2fa_recovery", "user", p.user.id, ip=p.ip)
+    u.totp_recovery = [hash_recovery(c) for c in codigos]
+    audit(db, p.tenant.id, u.id, "2fa_recovery", "user", u.id, ip=p.ip)
+    notify_security(
+        db,
+        p.tenant,
+        u,
+        "Se generaron códigos de recuperación nuevos",
+        "<p>Se generaron códigos de recuperación nuevos para la verificación en dos pasos de tu cuenta de Crimson el "
+        f"{fecha_cr(datetime.now(UTC))}. Los anteriores ya no sirven. Si no fuiste vos, cambiá tu contraseña y avisale "
+        "a tu administrador.</p>",
+    )
     db.commit()
     return RecoveryCodesOut(codes=codigos)
 
@@ -434,8 +474,7 @@ def totp_disable(data: PasswordOnlyIn, p: Principal = Depends(get_session_princi
             status.HTTP_409_CONFLICT,
             "Tu rol exige la verificación en dos pasos: no se puede desactivar. Si cambiaste de teléfono, usá «Cambiar de teléfono».",
         )
-    if not verify_password(data.password, p.user.password_hash):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Contrasena incorrecta")
+    require_reauth(p, data.password, "Contraseña incorrecta")  # cada intento cuenta (reauth_limiter)
     p.user.totp_enabled = False
     p.user.totp_secret = None
     p.user.totp_pending_secret = None
@@ -455,7 +494,7 @@ def totp_disable(data: PasswordOnlyIn, p: Principal = Depends(get_session_princi
 # ---------- Restablecer contrasena con enlace (publico; nunca 401: el portal cerraria la sesion) ----------
 @router.post("/password-reset/check")
 def password_reset_check(data: ResetTokenIn, request: Request, db: Session = Depends(get_db)):
-    token_limiter.hit(f"reset:{client_ip(request)}")
+    token_limiter.hit(f"reset:{ip_key(client_ip(request))}")
     found = find_reset(db, data.token)
     if not found:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "El enlace venció o ya se usó")
@@ -466,7 +505,7 @@ def password_reset_check(data: ResetTokenIn, request: Request, db: Session = Dep
 @router.post("/password-reset/confirm")
 def password_reset_confirm(data: ResetConfirmIn, request: Request, db: Session = Depends(get_db)):
     ip = client_ip(request)
-    token_limiter.hit(f"reset:{ip}")
+    token_limiter.hit(f"reset:{ip_key(ip)}")
     found = find_reset(db, data.token)
     if not found:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "El enlace venció o ya se usó")
@@ -507,7 +546,7 @@ def password_reset_request(data: ResetRequestIn, request: Request, db: Session =
     Sin correo activo no se hace nada: el enlace solo sirve si llega por correo. Riesgo residual aceptado: la
     diferencia de tiempo entre existe y no existe (el envio a Resend tarda), mitigada por los limites."""
     ip = client_ip(request)
-    pwreset_ip_limiter.hit(ip)
+    pwreset_ip_limiter.hit(ip_key(ip))
     pwreset_global_limiter.hit("global")
     ok = {"ok": True}
     email = str(data.email).strip().lower()

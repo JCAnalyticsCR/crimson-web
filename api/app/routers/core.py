@@ -20,7 +20,9 @@ router = APIRouter(tags=["core"])
 @router.get("/health")
 def health(db: Session = Depends(get_db)):
     db.execute(text("SELECT 1"))
-    return {"status": "ok", "app": settings.app_name, "env": settings.env}
+    # proxy_key (plan 1.10): "falta" = el API no tiene PROXY_SHARED_KEY y los limites por IP del panel y la tienda son
+    # globales (todos llegan con la IP del nginx del portal). No dice si coincide con la del portal: eso, /auth/ip-check.
+    return {"status": "ok", "app": settings.app_name, "env": settings.env, "proxy_key": "ok" if settings.proxy_shared_key is not None else "falta"}
 
 
 @router.get("/tenant", response_model=TenantOut)

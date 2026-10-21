@@ -50,10 +50,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => { off(); window.removeEventListener(TWOFA_EVENT, twofa); };
   }, [reload]);
 
-  const isAdmin = me?.role === "admin";
+  // con la gracia del 2FA vencida /auth/roles da 403: se pide cuando termina la pantalla forzada (blocked pasa a false)
+  const matrixReady = me?.role === "admin" && !me?.twofa?.blocked;
   const reloadMatrix = useCallback(() => {
-    if (isAdmin) api<{ matrix: Record<string, Perms> }>("/auth/roles").then((r) => setMatrix(r.matrix)).catch(() => {});
-  }, [isAdmin]);
+    if (matrixReady) api<{ matrix: Record<string, Perms> }>("/auth/roles").then((r) => setMatrix(r.matrix)).catch(() => {});
+  }, [matrixReady]);
   useEffect(() => { reloadMatrix(); }, [reloadMatrix]);
 
   useEffect(() => { document.documentElement.dataset.theme = theme; try { localStorage.setItem("crimson-theme", theme); } catch { /* privado */ } }, [theme]);

@@ -257,6 +257,13 @@ def test_support_grant_audited_readonly_and_revoke(client, auth):
     client.headers.pop("Authorization", None)
     tok = client.post("/auth/login", json={"email": "soporte.externo@ejemplo.com", "password": "Soporte-2026-ok"}).json()["access_token"]
     h = {"Authorization": f"Bearer {tok}"}
+    # plan 1.10: el acceso de soporte exige 2FA siempre y sin gracia; antes de activarla no ve nada
+    r = client.get("/invoices", headers=h)
+    assert r.status_code == 403 and r.headers.get("X-2FA-Setup") == "required"
+    import pyotp
+
+    sec = client.post("/auth/2fa/setup", headers=h).json()["secret"]
+    assert client.post("/auth/2fa/verify", json={"code": pyotp.TOTP(sec).now()}, headers=h).status_code == 200
     assert client.get("/invoices", headers=h).status_code == 200
     assert client.post("/customers", json={"name": "No"}, headers=h).status_code == 403
     client.headers.update(admin_headers)

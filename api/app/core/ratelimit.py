@@ -1,5 +1,6 @@
 """Limite de intentos por clave (IP) en ventana deslizante. En memoria: basta con una replica de la API.
-Con varias replicas habria que moverlo a Redis (misma interfaz). La IP es la real del cliente (core/clientip.py)."""
+Con varias replicas habria que moverlo a Redis (misma interfaz). La IP es la real del cliente (core/clientip.py); como
+clave, una IPv6 cuenta por su red /64 (clientip.ip_key)."""
 
 from __future__ import annotations
 
@@ -8,6 +9,8 @@ from collections import defaultdict, deque
 from threading import Lock
 
 from fastapi import HTTPException, status
+
+from .clientip import ip_key
 
 
 class SlidingWindow:
@@ -38,13 +41,26 @@ class SlidingWindow:
 class FailureLimiter:
     """Cuenta solo FALLOS por clave, con espera progresiva. Los primeros `free` fallos no esperan; desde ahi cada
     intento nuevo espera base * 2^(fallos - free) segundos desde el ultimo fallo (tope `cap`). La clave se olvida
-    `forget` segundos despues de su ultimo fallo, o al acertar (clear)."""
+    `forget` segundos despues de su ultimo fallo, o al acertar (clear). Como mucho `max_keys` claves en memoria: pasado
+    el tope se olvidan primero las vencidas y, si no alcanza, las de fallo mas viejo (quien ataca ahora queda entre las
+    recientes)."""
 
-    def __init__(self, free: int, base: int, cap: int, forget: int):
-        self.free, self.base, self.cap, self.forget = free, base, cap, forget
+    def __init__(self, free: int, base: int, cap: int, forget: int, max_keys: int = 50_000):
+        self.free, self.base, self.cap, self.forget, self.max_keys = free, base, cap, forget, max_keys
         self.state: dict[str, tuple[int, float]] = {}  # clave -> (fallos, momento del ultimo fallo)
         self.lock = Lock()
         self.clock = time.monotonic  # las pruebas lo reemplazan para simular la espera
+
+    def _trim(self, now: float) -> None:
+        """Con el lock tomado: no crecer sin limite."""
+        if len(self.state) <= self.max_keys:
+            return
+        for k in [k for k, (_, t) in self.state.items() if now - t > self.forget]:
+            self.state.pop(k, None)
+        sobran = len(self.state) - int(self.max_keys * 0.8)
+        if len(self.state) > self.max_keys and sobran > 0:
+            for k, _ in sorted(self.state.items(), key=lambda kv: kv[1][1])[:sobran]:
+                self.state.pop(k, None)
 
     def _live(self, key: str, now: float) -> tuple[int, float]:
         n, last = self.state.get(key, (0, 0.0))
@@ -73,9 +89,7 @@ class FailureLimiter:
         with self.lock:
             n, _ = self._live(key, now)
             self.state[key] = (n + 1, now)
-            if len(self.state) > 50_000:  # higiene: no crecer sin limite
-                for k in [k for k, (_, t) in self.state.items() if now - t > self.forget][:10_000]:
-                    self.state.pop(k, None)
+            self._trim(now)
             return n + 1
 
     def count(self, key: str) -> int:
@@ -101,31 +115,52 @@ class LoginLimiter:
     - Por IP: 20 fallidos (contra cualquier cuenta; se olvidan 15 min despues del ultimo) y despues espera progresiva
       desde 1 min (tope 15 min). Acertar no lo limpia: detras de una IP puede haber una oficina entera.
     - Por cuenta + IP: 5 fallidos y despues espera progresiva desde 30 s (tope 15 min). Frena solo a esa IP: 25
-      fallidos desde una IP no le impiden entrar a la duena de la cuenta desde otra.
-    - Por cuenta (todas las IPs, bloqueo en la base, routers/auth.py): cada IP aporta como mucho ACCOUNT_SHARE
-      fallidos, asi que un tercero no puede bloquear la cuenta desde una sola IP.
+      fallidos seguidos desde una IP no le impiden entrar a la duena de la cuenta desde otra.
+    - Por cuenta (todas las IPs): cuenta TODOS los fallidos (tambien los codigos 2FA equivocados) y se olvida
+      ACCOUNT_FORGET despues del ultimo. Con eso routers/auth.py bloquea la cuenta en la base: el total de intentos
+      contra una cuenta queda acotado aunque el atacante use muchas IPs. Acertar no lo limpia (si no, cada vez que la
+      duena entra le devolveria margen al atacante); a la duena no la deja afuera porque el bloqueo no aplica desde
+      las IPs de sus sesiones abiertas.
+    Las IPv6 cuentan por su red /64 (clientip.ip_key).
     """
 
-    ACCOUNT_SHARE = 3
+    ACCOUNT_FORGET = 3600
 
     def __init__(self):
         self.ip = FailureLimiter(free=20, base=60, cap=900, forget=900)
         self.account = FailureLimiter(free=5, base=30, cap=900, forget=3600)
+        self.total = FailureLimiter(free=0, base=0, cap=0, forget=self.ACCOUNT_FORGET)  # solo cuenta: nunca hace esperar
 
     @staticmethod
-    def _acct(email: str, ip: str) -> str:
+    def _h(text: str) -> str:
         import hashlib
 
-        return hashlib.sha256(f"{email.strip().lower()}|{ip}".encode()).hexdigest()[:32]
+        return hashlib.sha256(text.encode()).hexdigest()[:32]
+
+    @classmethod
+    def _acct(cls, email: str, ip: str) -> str:
+        return cls._h(f"{email.strip().lower()}|{ip_key(ip)}")
+
+    @classmethod
+    def _total(cls, email: str) -> str:
+        return cls._h(f"{email.strip().lower()}|*")
 
     def check(self, email: str, ip: str) -> None:
-        self.ip.check(ip, "Demasiados intentos fallidos desde esta conexión. Esperá {espera} y probá de nuevo.")
+        self.ip.check(ip_key(ip), "Demasiados intentos fallidos desde esta conexión. Esperá {espera} y probá de nuevo.")
         self.account.check(self._acct(email, ip), "Demasiados intentos fallidos con esta cuenta. Esperá {espera} y probá de nuevo.")
 
-    def fail(self, email: str, ip: str) -> bool:
-        """Registra un fallo. Devuelve True si este fallo todavia cuenta para el bloqueo de la cuenta en la base."""
-        self.ip.fail(ip)
-        return self.account.fail(self._acct(email, ip)) <= self.ACCOUNT_SHARE
+    def fail(self, email: str, ip: str) -> int:
+        """Registra un fallo. Devuelve los fallidos de la cuenta desde todas las IPs (los que deciden el bloqueo)."""
+        self.ip.fail(ip_key(ip))
+        self.account.fail(self._acct(email, ip))
+        return self.total.fail(self._total(email))
+
+    def account_failures(self, email: str) -> int:
+        return self.total.count(self._total(email))
+
+    def forget_account(self, email: str) -> None:
+        """Al bloquear la cuenta: el conteo arranca de cero para el siguiente bloqueo."""
+        self.total.clear(self._total(email))
 
     def success(self, email: str, ip: str) -> None:
         self.account.clear(self._acct(email, ip))
@@ -133,6 +168,7 @@ class LoginLimiter:
     def reset(self) -> None:
         self.ip.reset()
         self.account.reset()
+        self.total.reset()
 
 
 login_limiter = LoginLimiter()

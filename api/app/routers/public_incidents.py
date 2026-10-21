@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, fi
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..core.clientip import ip_key
 from ..core.config import settings
 from ..core.db import get_db
 from ..core.ratelimit import incident_global_limiter, incident_limiter
@@ -151,7 +152,7 @@ def _crear(db: Session, data: IncidentIn, ip: str) -> str:
 @router.post("/incidents", status_code=201)
 async def report_incident(request: Request, db: Session = Depends(get_db)):
     ip = client_ip(request)
-    incident_limiter.hit(f"incident:{ip}")
+    incident_limiter.hit(f"incident:{ip_key(ip)}")
     incident_global_limiter.hit("incident:*")
     largo = request.headers.get("content-length")
     if largo and (not largo.isdigit() or int(largo) > MAX_BODY):

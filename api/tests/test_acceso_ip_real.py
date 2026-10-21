@@ -58,7 +58,57 @@ def test_sonda_dice_si_las_cabeceras_llegaron_y_valieron(client, from_ip):
     assert h["X-Crimson-Proxy-Key"] not in r.text
     inventadas = client.get("/auth/ip-check", headers={"X-Crimson-Client-IP": "198.51.100.5", "X-Crimson-Proxy-Key": "y" * 43})
     assert inventadas.json() == {"ip": "testclient", "cabeceras": "rechazadas"}
+    # el portal sin PROXY_SHARED_KEY manda la IP pero no la llave (nginx no manda una cabecera vacia): "sin_llave",
+    # para no confundirlo con una llave distinta entre servicios
+    assert client.get("/auth/ip-check", headers={"X-Crimson-Client-IP": "198.51.100.5"}).json() == {"ip": "testclient", "cabeceras": "sin_llave"}
     assert client.get("/auth/ip-check").json() == {"ip": "testclient", "cabeceras": "ninguna"}
+
+
+def test_sin_llave_en_produccion_avisa_al_arrancar_y_en_health(client, monkeypatch, caplog):
+    """Sin PROXY_SHARED_KEY los limites por IP del panel y la tienda son globales: no se calla."""
+    import logging
+
+    from app.core.config import settings
+    from app.main import create_app
+
+    assert client.get("/health").json()["proxy_key"] == "falta"
+    monkeypatch.setattr(settings, "env", "production")
+    with caplog.at_level(logging.ERROR, logger="crimson"):
+        create_app()
+    assert any("PROXY_SHARED_KEY" in r.getMessage() and r.levelno == logging.ERROR for r in caplog.records)
+
+
+def test_con_llave_health_lo_dice_y_no_hay_error(client, from_ip, monkeypatch, caplog):
+    import logging
+
+    from app.core.config import settings
+    from app.main import create_app
+
+    from_ip("203.0.113.2")
+    assert client.get("/health").json()["proxy_key"] == "ok"
+    monkeypatch.setattr(settings, "env", "production")
+    with caplog.at_level(logging.ERROR, logger="crimson"):
+        create_app()
+    assert not any("PROXY_SHARED_KEY" in r.getMessage() for r in caplog.records)
+
+
+def test_ip_key_agrupa_ipv6_por_red_64():
+    from app.core.clientip import ip_key
+
+    assert ip_key("203.0.113.7") == "203.0.113.7"
+    assert ip_key("2001:db8:1:2::1") == ip_key("2001:db8:1:2:ffff:eeee:dddd:cccc") == "2001:db8:1:2::/64"
+    assert ip_key("2001:db8:1:3::1") != ip_key("2001:db8:1:2::1")
+    assert ip_key("::ffff:203.0.113.7") == "203.0.113.7"
+    assert ip_key("testclient") == "testclient" and ip_key(None) == "?"
+
+
+def test_tienda_cuenta_ipv6_por_su_red(client, auth, from_ip):
+    """Mi pedido (10 busquedas cada 10 min por IP): estrenar direccion dentro del mismo /64 no da cupo nuevo."""
+    codes = [
+        client.post(f"{SLUG}/orders/lookup", json={"number": "NO-EXISTE", "email": "x@ejemplo.com"}, headers=from_ip(f"2001:db8:9:9::{i + 1:x}")).status_code
+        for i in range(11)
+    ]
+    assert codes[-1] == 429 and 429 not in codes[:-1]
 
 
 def test_llave_corta_se_ignora_sin_tumbar_el_arranque():
@@ -199,6 +249,19 @@ def test_nginx_manda_la_ip_firmada_al_api():
     assert "set_real_ip_from 100.64.0.0/10;" in NGINX
     docker = (ROOT / "portal" / "Dockerfile").read_text(encoding="utf-8")
     assert "${PROXY_SHARED_KEY}" in docker and 'PROXY_SHARED_KEY=""' in docker
+    # en Railway, sin llave (o corta) el portal avisa con ERROR al arrancar
+    assert "/docker-entrypoint.d/15-crimson-proxy-key.sh" in docker and "chmod +x /docker-entrypoint.d/15-crimson-proxy-key.sh" in docker
+    assert '"${#PROXY_SHARED_KEY}" -lt 32' in docker and "RAILWAY_ENVIRONMENT" in docker
+
+
+def test_nginx_verifica_el_certificado_del_api():
+    """La llave viaja en cada /api/: el tramo nginx -> API (URL publica HTTPS) verifica certificado y nombre. A nivel de
+    server, asi cubre /api/ y las rutas de SEO; ninguna location lo apaga."""
+    server = next(c for _, c in _bloques(NGINX, "server"))
+    afuera = re.split(r"(?m)^\s*location\s", server, maxsplit=1)[0]  # lo del server antes de la primera location
+    for d in ("proxy_ssl_verify on;", "proxy_ssl_verify_depth 3;", "proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;"):
+        assert d in afuera, d
+    assert "proxy_ssl_verify off" not in NGINX
 
 
 def test_nginx_en_la_tienda_solo_pasa_la_api_publica():

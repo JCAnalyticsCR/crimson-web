@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.clientip import ip_key
 from ..core.db import get_db
 from ..core.ratelimit import public_limiter
 from ..core.security import read_purpose_token
@@ -49,7 +50,7 @@ def pay_page(token: str, db: Session = Depends(get_db)):
 @router.post("/pay/{token}/onvo")
 def pay_onvo(token: str, request: Request, db: Session = Depends(get_db)):
     """Abre la pagina segura de ONVO por el saldo pendiente de la factura."""
-    public_limiter.hit(f"paylink-onvo:{client_ip(request)}")
+    public_limiter.hit(f"paylink-onvo:{ip_key(client_ip(request))}")
     t, inv, link = _link(db, token)
     out = onvo.invoice_checkout(db, t, inv, link)
     db.commit()
@@ -59,7 +60,7 @@ def pay_onvo(token: str, request: Request, db: Session = Depends(get_db)):
 @router.post("/pay/{token}/onvo/sync")
 def pay_onvo_sync(token: str, request: Request, db: Session = Depends(get_db)):
     """Al volver de ONVO: confirma con ONVO la ultima sesion abierta desde este enlace y devuelve la pagina actualizada."""
-    public_limiter.hit(f"paylink-sync:{client_ip(request)}")
+    public_limiter.hit(f"paylink-sync:{ip_key(client_ip(request))}")
     t, inv, link = _link(db, token)
     onvo.sync_invoice(db, t, inv, link)
     db.commit()

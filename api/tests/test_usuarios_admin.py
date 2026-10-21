@@ -615,10 +615,10 @@ def test_lista_de_usuarios(client, auth, db_session, monkeypatch, from_ip):
         assert k in x, k
     assert x["shared"] is False and x["locked_until"] is None and x["is_self"] is False
     assert {"roles", "cost_roles", "cost_role_choices"} <= set(d)
-    # bloqueado por intentos: se ve y restablecer lo desbloquea. Desde 1.10 una sola IP no bloquea la cuenta (aporta
-    # como mucho 3 fallidos): el bloqueo es de un ataque desde varias IPs
-    for n in range(4):
-        for _ in range(3):
+    # bloqueado por intentos: se ve y restablecer lo desbloquea. Desde 1.10 cuentan los fallidos de todas las IPs (10);
+    # cada IP espera despues de 5 seguidos
+    for n in range(2):
+        for _ in range(5):
             assert _login_as(client, v.email, "Clave-incorrecta-1", _headers=from_ip(f"203.0.113.{n + 1}")).status_code == 401
     assert next(u for u in client.get("/settings/users").json()["users"] if u["id"] == v.id)["locked_until"]
     client.post(f"/settings/users/{v.id}/reset-password", json={"mode": "enlace", "admin_password": ADMIN_PW})

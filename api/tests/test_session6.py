@@ -227,8 +227,9 @@ def test_2fa_con_codigos_de_recuperacion(client, auth, db_session):
     # y se puede apagar con la contraseña (plan 1.10: si su rol no la exige; el admin la exige por defecto)
     client.headers.update({"Authorization": "Bearer " + entro.json()["access_token"]})
     assert client.post("/auth/2fa/disable", json={"password": pw}).status_code == 409
-    assert client.put("/settings", json={"twofa_roles": []}).status_code == 200
-    assert client.post("/auth/2fa/disable", json={"password": "otra-cosa"}).status_code == 400
+    assert client.put("/settings", json={"twofa_roles": []}).status_code == 403  # aflojarla pide la contrasena del admin
+    assert client.put("/settings", json={"twofa_roles": [], "admin_password": pw}).status_code == 200
+    assert client.post("/auth/2fa/disable", json={"password": "otra-cosa"}).status_code == 403  # cuenta en reauth_limiter
     assert client.post("/auth/2fa/disable", json={"password": pw}).status_code == 204
     u = db_session.get(User, me["user"]["id"])
     assert u.totp_enabled is False and u.totp_secret is None and u.totp_recovery == []

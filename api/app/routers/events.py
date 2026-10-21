@@ -15,6 +15,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..core.clientip import ip_key
 from ..core.config import settings
 from ..core.db import get_db
 from ..core.deps import Principal, require
@@ -404,7 +405,7 @@ class EventCheckoutIn(BaseModel):
 def pub_checkout(slug: str, event_slug: str, data: EventCheckoutIn, request: Request, db: Session = Depends(get_db)):
     from .store import manual_methods
 
-    public_limiter.hit(f"checkout:{request.client.host if request.client else '?'}")
+    public_limiter.hit(f"checkout:{ip_key(request.client.host if request.client else None)}")
     t, e = _pub_event(db, slug, event_slug)
     if e.status != "publicado":
         raise HTTPException(409, "La venta de entradas está cerrada")

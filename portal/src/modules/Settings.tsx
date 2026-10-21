@@ -53,7 +53,8 @@ export default function Settings() {
   const [pw, setPw] = useState({ current_password: "", new_password: "" });
   /* Los codigos se muestran UNA sola vez: despues solo existen hasheados en la base. */
   const [recovery, setRecovery] = useState<string[] | null>(null);
-  const [apagar, setApagar] = useState<{ password: string; regenerar: boolean } | null>(null);
+  /* regenerar: códigos de recuperación nuevos (plan 1.10: contraseña + código ACTUAL de la app); si no, desactivar el 2FA */
+  const [apagar, setApagar] = useState<{ password: string; code: string; regenerar: boolean } | null>(null);
   const [hmode, setHmode] = useState<HaciendaState["mode"] | null>(null);
 
   const load = () => {
@@ -81,7 +82,7 @@ export default function Settings() {
   const saveGw = () => { if (!gw) return; api("/settings/gateways", { method: "PUT", json: { ...gw, secret: gw.secret || null, webhook_secret: gw.webhook_secret || null } }).then(() => { setGw(null); ok("Pasarela guardada"); }).catch(err); };
   const done2fa = async (codes: string[]) => { await reload(); setSetup2fa(null); setRecovery(codes); };
   const disable2fa = () => { if (!apagar) return; api("/auth/2fa/disable", { method: "POST", json: { password: apagar.password } }).then(async () => { await reload(); setApagar(null); toast("2FA desactivado"); }).catch(err); };
-  const regen2fa = () => { if (!apagar) return; api<{ codes: string[] }>("/auth/2fa/recovery-codes", { method: "POST", json: { password: apagar.password } }).then((r) => { setApagar(null); setRecovery(r.codes); toast("Códigos nuevos generados; los anteriores ya no sirven"); }).catch(err); };
+  const regen2fa = () => { if (!apagar) return; api<{ codes: string[] }>("/auth/2fa/recovery-codes", { method: "POST", json: { password: apagar.password, code: apagar.code.trim() } }).then((r) => { setApagar(null); setRecovery(r.codes); toast("Códigos nuevos generados; los anteriores ya no sirven"); }).catch(err); };
   const changePw = () => api("/auth/password", { method: "POST", json: pw }).then(() => { setPw({ current_password: "", new_password: "" }); toast("Contraseña actualizada"); }).catch(err);
 
   return (
@@ -238,9 +239,9 @@ export default function Settings() {
                 <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Si perdés el teléfono, entrás con uno de tus códigos de recuperación en lugar del código de seis dígitos.</p>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button className="btn btn--ghost btn--sm" onClick={() => setSetup2fa("cambio")}>Cambiar de teléfono</button>
-                  <button className="btn btn--ghost btn--sm" onClick={() => setApagar({ password: "", regenerar: true })}>Generar códigos nuevos</button>
+                  <button className="btn btn--ghost btn--sm" onClick={() => setApagar({ password: "", code: "", regenerar: true })}>Generar códigos nuevos</button>
                   {/* plan 1.10: si el rol la exige no se apaga (la API responde 409); se cambia de teléfono */}
-                  {!me.twofa?.required && <button className="btn btn--danger btn--sm" onClick={() => setApagar({ password: "", regenerar: false })}>Desactivar 2FA</button>}
+                  {!me.twofa?.required && <button className="btn btn--danger btn--sm" onClick={() => setApagar({ password: "", code: "", regenerar: false })}>Desactivar 2FA</button>}
                 </div>
                 {me.twofa?.required && <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Tu rol la exige: no se puede desactivar. Si cambiás de teléfono, usá «Cambiar de teléfono».</p>}
               </div>
@@ -303,16 +304,21 @@ export default function Settings() {
           foot={<>
             <button className="btn btn--ghost" onClick={() => setApagar(null)}>Cancelar</button>
             {apagar.regenerar
-              ? <button className="btn btn--crimson" onClick={regen2fa} disabled={!apagar.password}>Generar</button>
+              ? <button className="btn btn--crimson" onClick={regen2fa} disabled={!apagar.password || apagar.code.trim().length !== 6}>Generar</button>
               : <button className="btn btn--danger" onClick={disable2fa} disabled={!apagar.password}>Desactivar</button>}
           </>}
         >
           <p className="muted" style={{ fontSize: 13.5, marginTop: 0 }}>
             {apagar.regenerar
-              ? "Los códigos que tenías dejan de servir en el momento en que se generan los nuevos."
+              ? "Los códigos que tenías dejan de servir en el momento en que se generan los nuevos. Si ya no tenés la app, usá «Cambiar de teléfono» con un código de recuperación: al terminar te da códigos nuevos."
               : "La cuenta vuelve a entrar solo con la contraseña. Si esa contraseña ya circuló por algún lado, mejor cambiala primero."}
           </p>
-          <Field label="Confirmá con tu contraseña"><input className="input" type="password" autoFocus value={apagar.password} onChange={(e) => setApagar({ ...apagar, password: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter" && apagar.password) (apagar.regenerar ? regen2fa : disable2fa)(); }} /></Field>
+          <Field label="Confirmá con tu contraseña"><input className="input" type="password" autoComplete="current-password" autoFocus value={apagar.password} onChange={(e) => setApagar({ ...apagar, password: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter" && apagar.password && !apagar.regenerar) disable2fa(); }} /></Field>
+          {apagar.regenerar && (
+            <Field label="Código de tu app" hint="El de seis dígitos que muestra en este momento.">
+              <input className="input input--mono" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="000000" value={apagar.code} onChange={(e) => setApagar({ ...apagar, code: e.target.value.replace(/\D/g, "") })} onKeyDown={(e) => { if (e.key === "Enter" && apagar.password && apagar.code.length === 6) regen2fa(); }} style={{ width: 140 }} />
+            </Field>
+          )}
         </Modal>
       )}
 

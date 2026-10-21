@@ -65,7 +65,8 @@ class Settings(BaseSettings):
 
     # IP real del cliente detras del portal (core/clientip.py). El nginx del portal manda X-Crimson-Client-IP junto con
     # X-Crimson-Proxy-Key = esta llave (la misma variable en portal y api, >= 32 caracteres). Sin llave, o si no
-    # coincide, la IP es la que entrega uvicorn (FORWARDED_ALLOW_IPS en api/Dockerfile: solo redes internas).
+    # coincide, la IP es la que entrega uvicorn (FORWARDED_ALLOW_IPS en api/Dockerfile: solo redes internas), que por el
+    # panel y la tienda es la del nginx del portal para todos: obligatoria en produccion (ERROR al arrancar, /health).
     proxy_shared_key: SecretStr | None = None
 
     # Enlaces publicos de pago

@@ -14,7 +14,8 @@ function DosPasos() {
   const [totp, setTotp] = useState<{ secret: string; otpauth_uri: string } | null>(null);
   const [code, setCode] = useState("");
   const [recovery, setRecovery] = useState<string[] | null>(null);
-  const [pw, setPw] = useState<{ password: string; regenerar: boolean } | null>(null);
+  /* regenerar: códigos nuevos (contraseña + código ACTUAL de la app, plan 1.10); si no, desactivar */
+  const [pw, setPw] = useState<{ password: string; code: string; regenerar: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const fallo = (e: unknown, msg: string) => toast(e instanceof Error ? e.message : msg, "bad");
   const configurar = async () => {
@@ -34,7 +35,7 @@ function DosPasos() {
     setBusy(true);
     try {
       if (pw.regenerar) {
-        const r = await api<{ codes: string[] }>("/auth/2fa/recovery-codes", { method: "POST", json: { password: pw.password } });
+        const r = await api<{ codes: string[] }>("/auth/2fa/recovery-codes", { method: "POST", json: { password: pw.password, code: pw.code.trim() } });
         setRecovery(r.codes);
       } else {
         await api("/auth/2fa/disable", { method: "POST", json: { password: pw.password } });
@@ -52,8 +53,8 @@ function DosPasos() {
         <>
           <span className="muted" style={{ fontSize: 13 }}>Activa para {me.user.email}. Si pierde el teléfono, entra con uno de sus códigos de recuperación.</span>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="btn btn--ghost btn--sm" onClick={() => setPw({ password: "", regenerar: true })}>Generar códigos nuevos</button>
-            <button className="btn btn--danger btn--sm" onClick={() => setPw({ password: "", regenerar: false })}>Desactivar</button>
+            <button className="btn btn--ghost btn--sm" onClick={() => setPw({ password: "", code: "", regenerar: true })}>Generar códigos nuevos</button>
+            <button className="btn btn--danger btn--sm" onClick={() => setPw({ password: "", code: "", regenerar: false })}>Desactivar</button>
           </div>
         </>
       ) : totp ? (
@@ -85,10 +86,11 @@ function DosPasos() {
       {pw && (
         <Modal title={pw.regenerar ? "Generar códigos nuevos" : "Desactivar la verificación en dos pasos"} onClose={() => setPw(null)} foot={<>
           <button className="btn btn--ghost" onClick={() => setPw(null)}>Cancelar</button>
-          <button className={`btn ${pw.regenerar ? "btn--crimson" : "btn--danger"}`} disabled={busy || !pw.password} onClick={confirmar}>{pw.regenerar ? "Generar" : "Desactivar"}</button>
+          <button className={`btn ${pw.regenerar ? "btn--crimson" : "btn--danger"}`} disabled={busy || !pw.password || (pw.regenerar && pw.code.trim().length !== 6)} onClick={confirmar}>{pw.regenerar ? "Generar" : "Desactivar"}</button>
         </>}>
-          <p style={{ marginTop: 0 }}>Confirme con su contraseña.</p>
+          <p style={{ marginTop: 0 }}>{pw.regenerar ? "Confirme con su contraseña y el código de seis dígitos que muestra su app en este momento. Los códigos anteriores dejan de servir." : "Confirme con su contraseña."}</p>
           <input className="input" type="password" autoComplete="current-password" aria-label="Contraseña" value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} />
+          {pw.regenerar && <input className="input input--mono" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="000000" aria-label="Código de la app" value={pw.code} onChange={(e) => setPw({ ...pw, code: e.target.value.replace(/\D/g, "") })} style={{ width: 140, marginTop: 8 }} />}
         </Modal>
       )}
     </div>

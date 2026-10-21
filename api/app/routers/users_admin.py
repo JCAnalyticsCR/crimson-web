@@ -31,6 +31,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..core import twofa
+from ..core.clientip import ip_key
 from ..core.config import settings as cfg
 from ..core.db import get_db
 from ..core.deps import ALLY_USER_ROLES, ASSIGNABLE_ROLES, COST_ROLE_CHOICES, Principal, cost_roles, require
@@ -396,7 +397,7 @@ def invite(data: InviteIn, response: Response, p: Principal = Depends(ADMIN), db
 @router.post("/invitations/check", tags=["publico"])
 def invite_check(data: TokenIn, request: Request, db: Session = Depends(get_db)):
     """Pagina publica /invitacion/:token: a que empresa y con que rol, y si el correo ya tiene cuenta."""
-    token_limiter.hit(f"inv:{_ip(request)}")
+    token_limiter.hit(f"inv:{ip_key(_ip(request))}")
     inv = _live_invitation(db, data.token)
     if not inv:
         raise HTTPException(404, "Invitación inválida, vencida o revocada")
@@ -459,7 +460,7 @@ class AcceptIn(BaseModel):
 @router.post("/invitations/accept", tags=["publico"])
 def accept(data: AcceptIn, request: Request, db: Session = Depends(get_db)):
     ip = _ip(request)
-    token_limiter.hit(f"inv:{ip}")
+    token_limiter.hit(f"inv:{ip_key(ip)}")
     inv = _live_invitation(db, data.token)
     if not inv:
         raise HTTPException(404, "Invitación inválida, vencida o revocada")

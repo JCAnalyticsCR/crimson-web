@@ -1,5 +1,6 @@
 """Plan 1.10 · 2FA obligatorio para administracion y contabilidad (por defecto), con 7 dias de gracia y pantalla de
-configuracion forzada. Configurable por empresa en Ajustes -> Usuarios (twofa_roles, twofa_grace_days)."""
+configuracion forzada. Configurable por empresa en Ajustes -> Usuarios (twofa_roles, twofa_grace_days); aflojarlo pide
+la contrasena del admin y avisa a los administradores. El acceso de soporte temporal la exige siempre, sin gracia."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -8,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.core.security import hash_password
-from app.models import AuditLog, TenantUser, User
+from app.models import AuditLog, EmailOutbox, TenantUser, User
 from tests.conftest import ADMIN
 
 PW = "Usuario-2026-ok"
@@ -106,13 +107,64 @@ def test_la_empresa_lo_configura_y_queda_en_la_bitacora(client, auth, db_session
     # quitar el requisito libera a quien estaba bloqueado
     _vencer(db_session, auth["user"]["id"])
     assert client.get("/customers").status_code == 403
-    assert client.put("/settings", json={"twofa_roles": []}).status_code == 403  # bloqueado: ni Ajustes
+    assert client.put("/settings", json={"twofa_roles": [], "admin_password": ADMIN[1]}).status_code == 403  # bloqueado: ni Ajustes
     u = db_session.get(User, auth["user"]["id"])
     u.twofa_required_since = None
     db_session.commit()
-    assert client.put("/settings", json={"twofa_roles": []}).status_code == 200
+    assert client.put("/settings", json={"twofa_roles": [], "admin_password": ADMIN[1]}).status_code == 200
     _vencer(db_session, auth["user"]["id"])
     assert client.get("/customers").status_code == 200
+
+
+def _avisos_politica(db_session):
+    return db_session.scalars(select(EmailOutbox).where(EmailOutbox.entity == "user_security", EmailOutbox.subject.like("%obligatoria%"))).all()
+
+
+def test_aflojar_la_politica_pide_contrasena_y_avisa_a_los_admins(client, auth, db_session):
+    """Con una sesion de admin secuestrada no se le quita el 2FA obligatorio a nadie (ni se estira la gracia)."""
+    tid = auth["tenant"]["id"]
+    otro = _mk_user(db_session, tid, "otro.admin@ejemplo.com", "admin")
+    # quitar un rol o dar mas dias, sin la contrasena (o con otra): 403 y nada cambia
+    for body in ({"twofa_roles": ["admin"]}, {"twofa_grace_days": 10}, {"twofa_roles": ["admin"], "admin_password": "otra-cosa-123"}):
+        assert client.put("/settings", json=body).status_code == 403, body
+    d = client.get("/settings/users").json()
+    assert d["twofa_roles"] == ["admin", "contabilidad"] and d["twofa_grace_days"] == 7
+    assert _avisos_politica(db_session) == []
+    # apretarla (agregar un rol, menos dias) no la pide ni avisa
+    assert client.put("/settings", json={"twofa_roles": ["admin", "contabilidad", "caja"], "twofa_grace_days": 5}).status_code == 200
+    assert _avisos_politica(db_session) == []
+    # con la contrasena si; correo a cada admin activo de la empresa (tambien a quien lo hizo)
+    r = client.put("/settings", json={"twofa_roles": ["admin"], "twofa_grace_days": 9, "admin_password": ADMIN[1]})
+    assert r.status_code == 200 and "admin_password" not in r.json()
+    d = client.get("/settings/users").json()
+    assert d["twofa_roles"] == ["admin"] and d["twofa_grace_days"] == 9
+    avisos = _avisos_politica(db_session)
+    assert {a.to for a in avisos} == {ADMIN[0], otro.email}
+    assert "Contabilidad" in avisos[0].html or "contabilidad" in avisos[0].html
+    # la contrasena nunca queda en los ajustes
+    from app.models import Tenant
+
+    assert "admin_password" not in (db_session.get(Tenant, tid).settings or {})
+
+
+def test_soporte_temporal_la_exige_siempre_y_sin_gracia(client, auth, db_session):
+    g = client.post("/settings/support", json={"email": "soporte.2fa@ejemplo.com", "hours": 2, "reason": "Revisar un cierre"}).json()
+    token = g["invite_link"].rsplit("/", 1)[-1]
+    assert client.post("/settings/invitations/accept", json={"token": token, "full_name": "Soporte de prueba", "password": PW}).status_code == 200
+    # aunque la empresa no exija 2FA a nadie
+    assert client.put("/settings", json={"twofa_roles": [], "admin_password": ADMIN[1]}).status_code == 200
+    c = _sesion(client, "soporte.2fa@ejemplo.com")
+    assert c.get("/auth/me").json()["twofa"] == {"required": True, "deadline": None, "blocked": True}
+    r = c.get("/invoices")
+    assert r.status_code == 403 and r.headers.get("X-2FA-Setup") == "required"  # ni un dato antes de activarla
+    assert db_session.scalar(select(User).where(User.email == "soporte.2fa@ejemplo.com")).twofa_required_since is None
+    sec = c.post("/auth/2fa/setup").json()["secret"]
+    assert c.post("/auth/2fa/verify", json={"code": pyotp.TOTP(sec).now()}).status_code == 200
+    assert c.get("/invoices").status_code == 200
+    # y no se apaga (su rol la exige)
+    assert c.post("/auth/2fa/disable", json={"password": PW}).status_code == 409
+    # no es un rol que la empresa elija
+    assert "soporte" not in client.get("/settings/users").json()["twofa_role_choices"]
 
 
 def test_vista_previa_de_aliado_tambien_pasa_por_la_compuerta(client, auth, db_session):

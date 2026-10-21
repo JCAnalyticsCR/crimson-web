@@ -90,6 +90,14 @@ class TotpSetupIn(BaseModel):
     code: str | None = Field(None, max_length=20)
 
 
+class RecoveryCodesIn(BaseModel):
+    """Codigos de recuperacion nuevos: contrasena y el codigo ACTUAL de la app (no uno de recuperacion: con uno de esos
+    se usa "Cambiar de telefono", que al confirmar tambien entrega codigos nuevos)."""
+
+    password: str = Field(max_length=200)
+    code: str = Field("", max_length=20)
+
+
 class TotpVerifyIn(BaseModel):
     code: str = Field(min_length=6, max_length=6)
 

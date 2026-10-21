@@ -234,7 +234,7 @@ export default function UsersTab() {
 
       {canEdit && <CostRoles key={data.cost_roles.join(",")} current={data.cost_roles} choices={data.cost_role_choices} onSaved={load} />}
       {canEdit && data.twofa_roles && data.twofa_role_choices && (
-        <TwoFactorPolicy key={`${data.twofa_roles.join(",")}|${data.twofa_grace_days}`} current={data.twofa_roles} grace={data.twofa_grace_days ?? 7} choices={data.twofa_role_choices} onSaved={load} />
+        <TwoFactorPolicy key={`${data.twofa_roles.join(",")}|${data.twofa_grace_days}`} current={data.twofa_roles} grace={data.twofa_grace_days ?? 7} choices={data.twofa_role_choices} onSaved={load} askPassword={setPwAsk} />
       )}
       {me?.role === "admin" && (
         <Card title="Qué ve cada rol" extra={<span className="meta">sale del código: menú y permisos</span>}>
@@ -503,20 +503,30 @@ function ResetResult({ r, mailConfigured, copy, onClose }: { r: ResetOut & { use
 
 /* Verificación en dos pasos obligatoria (plan 1.10). Por defecto administración y contabilidad, con 7 días de gracia
    desde que la persona entra por primera vez con ese rol sin 2FA. Vencida la gracia, el panel solo le deja activarla.
-   El cambio queda en la bitácora. */
-function TwoFactorPolicy({ current, grace, choices, onSaved }: { current: string[]; grace: number; choices: string[]; onSaved: () => void }) {
+   El cambio queda en la bitácora. Aflojarla (quitar un rol o dar más días) pide la contraseña de quien actúa y avisa por
+   correo a los administradores. El acceso de soporte temporal la exige siempre, sin gracia (no se configura aquí). */
+function TwoFactorPolicy({ current, grace, choices, onSaved, askPassword }: { current: string[]; grace: number; choices: string[]; onSaved: () => void; askPassword: (a: Ask) => void }) {
   const { toast } = useSession();
   const [sel, setSel] = useState<string[]>(current);
   const [dias, setDias] = useState(grace);
   const [busy, setBusy] = useState(false);
   const changed = dias !== grace || sel.length !== current.length || sel.some((r) => !current.includes(r));
   const quita = current.filter((r) => !sel.includes(r));
+  const listo = () => toast(sel.length ? `Listo: la verificación en dos pasos es obligatoria para ${sel.map((r) => roleMeta(r).label).join(", ")}` : "Listo: la verificación en dos pasos queda opcional para todos");
   const save = async () => {
-    if (quita.length && !window.confirm(`¿Dejar de exigir la verificación en dos pasos a ${quita.map((r) => roleMeta(r).label).join(", ")}? Esas cuentas quedan protegidas solo con la contraseña.`)) return;
+    if (quita.length || dias > grace) {
+      const texto = [
+        quita.length ? `${quita.map((r) => roleMeta(r).label).join(", ")} deja de tener la verificación en dos pasos obligatoria: esas cuentas quedan protegidas solo con la contraseña.` : "",
+        dias > grace ? `Los días de gracia pasan de ${grace} a ${dias}.` : "",
+        "Los administradores reciben un correo con el cambio.",
+      ].filter(Boolean).join(" ");
+      askPassword({ title: "Aflojar la verificación en dos pasos", text: texto, cta: "Guardar", run: async (pw) => { await api("/settings", { method: "PUT", json: { twofa_roles: sel, twofa_grace_days: dias, admin_password: pw } }); listo(); onSaved(); } });
+      return;
+    }
     setBusy(true);
     try {
       await api("/settings", { method: "PUT", json: { twofa_roles: sel, twofa_grace_days: dias } });
-      toast(sel.length ? `Listo: la verificación en dos pasos es obligatoria para ${sel.map((r) => roleMeta(r).label).join(", ")}` : "Listo: la verificación en dos pasos queda opcional para todos");
+      listo();
       onSaved();
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
     finally { setBusy(false); }
@@ -532,6 +542,7 @@ function TwoFactorPolicy({ current, grace, choices, onSaved }: { current: string
           </label>
         ))}
       </div>
+      <p className="muted" style={{ fontSize: 12.5, margin: "0 0 10px" }}>El acceso de soporte temporal siempre la exige, sin días de gracia.</p>
       <Field label="Días de gracia" hint="De 0 a 30. Recomendado: 7.">
         <input className="input input--mono" type="number" min={0} max={30} value={dias} onChange={(e) => setDias(Math.max(0, Math.min(30, Number(e.target.value) || 0)))} style={{ width: 100 }} />
       </Field>

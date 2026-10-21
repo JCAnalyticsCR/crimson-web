@@ -1,12 +1,14 @@
 """Plan 1.10 · 2FA: con el 2FA activo, /auth/2fa/setup exige contrasena y codigo actual; el 2FA anterior sigue activo
-hasta que /2fa/verify confirma el nuevo; aviso por correo; un codigo usado no se repite.
-Reproduce qa-juicio/seguridad_2fa_check.py: con solo la sesion ya no se apaga el 2FA."""
+hasta que /2fa/verify confirma el nuevo; aviso por correo; un codigo usado no se repite (ni con dos pedidos a la vez).
+Reproduce qa-juicio/seguridad_2fa_check.py: con solo la sesion ya no se apaga el 2FA, y con la sesion y la contrasena
+(sin el telefono) tampoco se lo queda otra persona fabricando codigos de recuperacion."""
 
 from datetime import UTC, datetime, timedelta
 
 import pyotp
 from sqlalchemy import select
 
+from app.core.ratelimit import login_limiter
 from app.core.security import hash_password
 from app.models import AuditLog, EmailOutbox, User
 from tests.conftest import ADMIN
@@ -98,7 +100,7 @@ def test_un_codigo_usado_no_se_repite(client, auth, db_session):
     otra = _login(client, totp_code=codigo)
     assert otra.status_code == 401 and "ya se usó" in otra.json()["detail"]
     # repetir el codigo no suma como intento fallido ni traba a la cuenta
-    assert db_session.get(User, auth["user"]["id"]).failed_logins == 0
+    assert login_limiter.account_failures(ADMIN[0]) == 0
     # el codigo de la activacion tampoco sirve para entrar
     u = db_session.get(User, auth["user"]["id"])
     assert u.totp_last_step is not None
@@ -113,9 +115,10 @@ def test_apagar_avisa_por_correo_y_pide_contrasena(client, auth, db_session):
     r = client.post("/auth/2fa/disable", json={"password": ADMIN[1]})
     assert r.status_code == 409 and "Cambiar de teléfono" in r.json()["detail"]
     assert db_session.get(User, uid).totp_enabled is True
-    # la empresa deja de exigirlo: ya se puede apagar (con la contrasena)
-    assert client.put("/settings", json={"twofa_roles": ["contabilidad"]}).status_code == 200
-    assert client.post("/auth/2fa/disable", json={"password": "otra-cosa-123"}).status_code == 400
+    # la empresa deja de exigirlo (aflojarlo pide la contrasena del admin): ya se puede apagar (con la contrasena)
+    assert client.put("/settings", json={"twofa_roles": ["contabilidad"], "admin_password": ADMIN[1]}).status_code == 200
+    n = len(_avisos(db_session, uid))  # el aviso a los admins de la politica nueva
+    assert client.post("/auth/2fa/disable", json={"password": "otra-cosa-123"}).status_code == 403
     assert client.post("/auth/2fa/disable", json={"password": ADMIN[1]}).status_code == 204
     u = db_session.get(User, uid)
     assert u.totp_enabled is False and u.totp_secret is None and u.totp_pending_secret is None
@@ -170,3 +173,87 @@ def test_obligatoria_en_otra_empresa_tampoco_se_apaga(client, auth, db_session):
     assert c.get("/auth/me").json()["twofa"]["required"] is False  # en esta empresa es de ventas
     assert c.post("/auth/2fa/disable", json={"password": "Usuario-2026-ok"}).status_code == 409
     assert db_session.get(User, u.id).totp_enabled is True
+
+
+def test_sin_el_telefono_no_se_fabrican_codigos_ni_se_cambia_el_2fa(client, auth, db_session):
+    """La cadena con la sesion y la contrasena pero sin el telefono: pedir codigos de recuperacion nuevos (para usar uno
+    en "Cambiar de telefono" y despues confirmar con la app del atacante) ya no funciona."""
+    uid = auth["user"]["id"]
+    sec = _activar(client)
+    viejos = list(db_session.get(User, uid).totp_recovery)
+    # 1. codigos nuevos con solo la contrasena: no
+    assert client.post("/auth/2fa/recovery-codes", json={"password": ADMIN[1]}).status_code == 403
+    # ni con un codigo inventado, ni con uno de recuperacion en lugar del de la app
+    assert client.post("/auth/2fa/recovery-codes", json={"password": ADMIN[1], "code": "ABCD-2345"}).status_code == 403
+    # 2. y sin un codigo de recuperacion real, "Cambiar de telefono" tampoco
+    assert client.post("/auth/2fa/setup", json={"password": ADMIN[1], "code": "ABCD-2345"}).status_code == 403
+    # 3. sin secreto pendiente, confirmar con la app del atacante no cambia nada
+    atacante = pyotp.random_base32()
+    assert client.post("/auth/2fa/verify", json={"code": _codigo(atacante)}).status_code == 400
+    u = db_session.get(User, uid)
+    assert u.totp_enabled and u.totp_secret == sec and u.totp_pending_secret is None and u.totp_recovery == viejos
+
+
+def test_codigos_nuevos_con_el_codigo_de_la_app_avisan_y_lo_gastan(client, auth, db_session):
+    uid = auth["user"]["id"]
+    sec = _activar(client)
+    n = len(_avisos(db_session, uid))
+    codigo = _codigo(sec, 30)  # la ventana siguiente: la actual la uso la activacion
+    assert client.post("/auth/2fa/recovery-codes", json={"password": "otra-cosa-123", "code": codigo}).status_code == 403
+    r = client.post("/auth/2fa/recovery-codes", json={"password": ADMIN[1], "code": codigo})
+    assert r.status_code == 200 and len(r.json()["codes"]) == 10
+    avisos = _avisos(db_session, uid)
+    assert len(avisos) == n + 1 and "códigos de recuperación" in avisos[-1].subject
+    # ese codigo ya se uso: no sirve otra vez (ni para codigos ni para cambiar de telefono ni para entrar)
+    assert client.post("/auth/2fa/recovery-codes", json={"password": ADMIN[1], "code": codigo}).status_code == 403
+    assert client.post("/auth/2fa/setup", json={"password": ADMIN[1], "code": codigo}).status_code == 403
+    assert _login(client, totp_code=codigo).status_code == 401
+    # los codigos nuevos sirven en "Cambiar de telefono" (perdio el telefono despues de generarlos)
+    assert client.post("/auth/2fa/setup", json={"password": ADMIN[1], "code": r.json()["codes"][0]}).status_code == 200
+
+
+def test_contrasena_con_la_sesion_abierta_tiene_limite(client, auth, db_session):
+    """Con una sesion robada, /2fa/disable, /2fa/recovery-codes, /auth/password y /2fa/setup no son un oraculo
+    ilimitado de la contrasena: comparten el limite de reautenticacion (10 cada 15 min)."""
+    assert client.put("/settings", json={"twofa_roles": [], "admin_password": ADMIN[1]}).status_code == 200
+    sec = _activar(client)
+    malos = [
+        lambda: client.post("/auth/2fa/disable", json={"password": "otra-cosa-123"}),
+        lambda: client.post("/auth/2fa/recovery-codes", json={"password": "otra-cosa-123", "code": "000000"}),
+        lambda: client.post("/auth/password", json={"current_password": "otra-cosa-123", "new_password": "Nueva-clave-2026"}),
+        lambda: client.post("/auth/2fa/setup", json={"password": "otra-cosa-123", "code": "000000"}),
+    ]
+    codes = [malos[i % 4]().status_code for i in range(8)]  # el PUT de arriba y la confirmacion del 2FA ya contaron 2
+    assert set(codes) == {403}
+    r = client.post("/auth/2fa/disable", json={"password": ADMIN[1]})
+    assert r.status_code == 429 and r.headers.get("Retry-After")
+    assert db_session.get(User, auth["user"]["id"]).totp_secret == sec  # ni con la buena, pasado el limite
+
+
+def test_confirmar_el_secreto_pendiente_tiene_limite(client, auth):
+    client.post("/auth/2fa/setup")
+    codes = [client.post("/auth/2fa/verify", json={"code": "000000"}).status_code for _ in range(11)]
+    assert codes[-1] == 429 and set(codes[:-1]) <= {400, 200}
+
+
+def test_el_mismo_codigo_toma_la_fila_antes_de_compararlo(client, auth, db_session, monkeypatch):
+    """Dos logins (o dos cambios) a la vez con el mismo codigo: la fila del usuario se lee con FOR UPDATE antes de
+    comparar el paso, asi el segundo espera al commit del primero y ve el codigo ya usado. SQLite no lo dibuja: se
+    comprueba que se pide."""
+    sec = _activar(client)
+    pedidos = []
+    original = db_session.refresh
+
+    def espia(obj, *a, **kw):
+        pedidos.append((type(obj).__name__, kw.get("with_for_update")))
+        return original(obj, *a, **kw)
+
+    monkeypatch.setattr(db_session, "refresh", espia)
+    assert _login(client, totp_code=_codigo(sec, 30)).status_code == 200
+    assert ("User", True) in pedidos
+    u = db_session.get(User, auth["user"]["id"])
+    u.totp_last_step = None  # la unica ventana siguiente ya la gasto el login
+    db_session.commit()
+    pedidos.clear()
+    assert client.post("/auth/2fa/setup", json={"password": ADMIN[1], "code": _codigo(sec, 30)}).status_code == 200
+    assert ("User", True) in pedidos

@@ -20,6 +20,7 @@ from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ..core.clientip import ip_key
 from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..core.ratelimit import checkout_global_limiter, order_lookup_limiter, order_proof_ip_limiter, order_proof_limiter, public_limiter
@@ -115,7 +116,7 @@ def _checkout_out(db: Session, t: Tenant, o: Order, pay: dict | None = None, dup
 @router.post("/public/store/{slug}/checkout", status_code=201)
 def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Response, db: Session = Depends(get_db)):
     ip = client_ip(request)
-    public_limiter.hit(f"checkout:{ip}")
+    public_limiter.hit(f"checkout:{ip_key(ip)}")
     checkout_global_limiter.hit("checkout:*")
     if data.website:
         return {"ok": True, "number": None}  # honeypot: al bot se le dice que si, y no se crea nada
@@ -250,7 +251,7 @@ class LookupIn(BaseModel):
 
 @router.post("/public/store/{slug}/orders/lookup")
 def order_lookup(slug: str, data: LookupIn, request: Request, db: Session = Depends(get_db)):
-    order_lookup_limiter.hit(f"lookup:{client_ip(request)}")
+    order_lookup_limiter.hit(f"lookup:{ip_key(client_ip(request))}")
     if data.website:
         raise HTTPException(404, "No encontramos un pedido con ese número y correo")
     t = _tenant(db, slug)
@@ -276,11 +277,11 @@ def order_status(slug: str, token: str, response: Response, db: Session = Depend
 @router.post("/public/store/{slug}/orders/{token}/proof", status_code=201)
 async def order_proof(slug: str, token: str, request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
     ip = client_ip(request)
-    order_proof_ip_limiter.hit(f"proof-ip:{ip}")  # tope por IP: probar muchos enlaces de pedido
+    order_proof_ip_limiter.hit(f"proof-ip:{ip_key(ip)}")  # tope por IP: probar muchos enlaces de pedido
     t, o = _public_order(db, slug, token)
     # por pedido y por IP: 10 comprobantes de un pedido no le cierran la puerta a otro pedido desde la misma conexion
     # (una oficina con varias compras) ni el que tiene el enlace de un pedido traba a otra persona
-    order_proof_limiter.hit(f"proof:{o.id}:{ip}")
+    order_proof_limiter.hit(f"proof:{o.id}:{ip_key(ip)}")
     if o.payment_kind not in so.NEEDS_PROOF or o.status not in ("nuevo", "en_revision"):
         raise HTTPException(409, "Este pedido no espera un comprobante")
     data = await file.read(so.MAX_PROOF + 1)
@@ -295,7 +296,7 @@ async def order_proof(slug: str, token: str, request: Request, file: UploadFile 
 
 @router.post("/public/store/{slug}/orders/{token}/card")
 def order_card(slug: str, token: str, request: Request, db: Session = Depends(get_db)):
-    public_limiter.hit(f"card:{client_ip(request)}")
+    public_limiter.hit(f"card:{ip_key(client_ip(request))}")
     t, o = _public_order(db, slug, token)
     out = so.card_intent(db, t, o)
     db.commit()
@@ -306,7 +307,7 @@ def order_card(slug: str, token: str, request: Request, db: Session = Depends(ge
 def order_card_sync(slug: str, token: str, request: Request, db: Session = Depends(get_db)):
     """Al volver de ONVO: le pregunta a ONVO por la sesion del pedido y, si esta pagada, la aplica (sin esperar el
     webhook). El regreso del navegador por si solo no confirma nada."""
-    public_limiter.hit(f"cardsync:{client_ip(request)}")
+    public_limiter.hit(f"cardsync:{ip_key(client_ip(request))}")
     t, o = _public_order(db, slug, token)
     onvo.sync_order(db, t, o)
     db.commit()
@@ -316,7 +317,7 @@ def order_card_sync(slug: str, token: str, request: Request, db: Session = Depen
 @router.post("/public/store/{slug}/orders/{token}/simulate-payment")
 def order_simulate(slug: str, token: str, request: Request, db: Session = Depends(get_db)):
     """Pago de PRUEBA sin ONVO. No existe en produccion ni cuando hay credenciales reales."""
-    public_limiter.hit(f"sim:{client_ip(request)}")
+    public_limiter.hit(f"sim:{ip_key(client_ip(request))}")
     t, o = _public_order(db, slug, token)
     if not so.simulation_allowed() or so.onvo_secret(db, t):
         raise HTTPException(404, "No disponible")

@@ -11,6 +11,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..core.clientip import ip_key
 from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..core.ratelimit import catalog_limiter, stock_alert_limiter
@@ -233,7 +234,8 @@ def order_inventory(oid: int, p: Principal = Depends(require("sales", "ver")), d
 
 # ---------- Publico ----------
 def _client(request: Request) -> str:
-    return request.client.host if request.client else "?"
+    """Clave de los limitadores publicos: la IP (una IPv6, por su /64)."""
+    return ip_key(request.client.host if request.client else None)
 
 
 @router.get("/public/store/{slug}/availability")

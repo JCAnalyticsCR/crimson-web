@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, fi
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..core.clientip import ip_key
 from ..core.db import get_db
 from ..core.ratelimit import access_request_global_limiter, access_request_limiter
 from ..models import AccessRequest
@@ -98,7 +99,7 @@ def _crear(db: Session, data: AccessRequestIn, ip: str) -> None:
 @router.post("/access-requests", status_code=202)
 async def request_access(request: Request, db: Session = Depends(get_db)):
     ip = client_ip(request)
-    access_request_limiter.hit(f"access:{ip}")
+    access_request_limiter.hit(f"access:{ip_key(ip)}")
     access_request_global_limiter.hit("access:*")
     largo = request.headers.get("content-length")
     if largo and (not largo.isdigit() or int(largo) > MAX_BODY):
