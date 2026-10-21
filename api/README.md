@@ -244,8 +244,12 @@ emisión.
   (≤ 2 días hábiles), modo de ONVO (avisa si la tienda ofrece tarjeta sin llave live en producción; la tarjeta
   apagada no avisa) y facturas "Por emitir" de más de 24 h. Responde **503** si falla la base, el worker y el beat
   llevan más de 15 min sin señal o, en producción, el worker no tiene `RESEND_API_KEY`; lo demás sale como aviso.
-  **Público: solo `{"status", "at"}`** (el monitor externo mira el código). El detalle, con el encabezado
-  `X-Health-Token` igual a `HEALTH_TOKEN`. Límite de 120 consultas por minuto e IP y resultado guardado 30 s.
+  **Público: solo `{"status", "env", "at"}`** (el `env` es el mismo que ya publica `/health`). El detalle, con el
+  encabezado `X-Health-Token` igual a `HEALTH_TOKEN`. Límite de 120 consultas por minuto e IP y resultado guardado 30 s.
+- **Monitor externo (0.8 → 1.8):** en UptimeRobot o Better Stack, editar el monitor de palabra clave y cambiar la URL
+  `https://panel.crimsoncr.com/api/health` por `https://panel.crimsoncr.com/api/health/deep`, con la misma palabra
+  clave `"env":"production"` y la misma alerta (2 fallos seguidos). Un 503 cuenta como caída. Un intervalo de 5 min o
+  más queda muy por debajo del límite por IP.
 - **Correo diario de Salud** a las 07:00 a quien opera la plataforma (revisiones, tareas y su empresa). Los
   administradores de cada una de las demás empresas reciben solo el bloque de la suya.
 - **Logs:** INFO a stdout y WARNING o más a stderr (`app/core/logging.py`), en api y worker. `LOG_LEVEL` lo cambia.

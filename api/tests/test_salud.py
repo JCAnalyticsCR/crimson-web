@@ -66,21 +66,25 @@ def test_sin_latido_o_latido_vencido_da_503(client, db_session):
 
 
 def test_publico_solo_el_estado(client, db_session, monkeypatch):
-    """Sin el token (o con uno malo, o sin HEALTH_TOKEN definido) solo el estado: nada de nombres de configuracion,
-    conteos ni modos. El monitor externo solo mira el codigo."""
+    """Sin el token (o con uno malo, o sin HEALTH_TOKEN definido) solo el estado y el ENV: nada de nombres de
+    configuracion, conteos ni modos. El monitor externo de 0.8 es de palabra clave y busca "env":"production" (lo
+    mismo que ya publica /health) en el texto crudo; un 503 cuenta como caida."""
     salud.heartbeat(db_session)
+    clave = f'"env":"{settings.env}"'  # tal cual la busca el monitor: sin espacios
     for headers in ({}, {"X-Health-Token": "otro"}):
         r = client.get("/health/deep", headers=headers)
-        assert r.status_code == 200 and set(r.json()) == {"status", "at"}
+        assert r.status_code == 200 and set(r.json()) == {"status", "env", "at"}
+        assert clave in r.text and clave in client.get("/health").text
     assert "checks" in client.get("/health/deep", headers=H).json()
     monkeypatch.delenv("HEALTH_TOKEN")
-    assert set(client.get("/health/deep", headers=H).json()) == {"status", "at"}
+    assert set(client.get("/health/deep", headers=H).json()) == {"status", "env", "at"}
     # el 503 tambien llega sin detalle
     for hb in db_session.scalars(select(TaskRun).where(TaskRun.task == "salud.latido")):
         hb.started_at = hb.finished_at = datetime.now(UTC) - timedelta(minutes=16)
     db_session.commit()
     r = client.get("/health/deep")
     assert r.status_code == 503 and r.json()["status"] == "falla" and "checks" not in r.json()
+    assert set(r.json()) == {"status", "env", "at"}
 
 
 def test_resultado_guardado_y_limite_por_ip(client, db_session, monkeypatch):

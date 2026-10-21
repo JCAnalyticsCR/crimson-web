@@ -53,7 +53,7 @@ def test_cierre_de_las_21_reporta_el_dia_de_costa_rica(worker, db_session):
     db_session.add_all(
         [
             Payment(tenant_id=t.id, invoice_id=inv.id, method="sinpe", amount=Decimal("15000"), paid_at=DIA_CR),
-            # un cobro con fecha del dia UTC (el de mañana en Costa Rica) no entra en el cierre de hoy
+            # un cobro con fecha del 11 de marzo (el dia siguiente) no entra en el cierre del 10
             Payment(tenant_id=t.id, invoice_id=inv.id, method="efectivo", amount=Decimal("11000"), paid_at=date(2026, 3, 11)),
         ]
     )
@@ -65,6 +65,27 @@ def test_cierre_de_las_21_reporta_el_dia_de_costa_rica(worker, db_session):
     # la tarea corre dos veces (dos beats, un reintento): el cierre no sale dos veces
     worker.daily_close_email()
     assert len(db_session.scalars(select(EmailOutbox).where(EmailOutbox.entity == "report")).all()) == len(correos)
+
+
+def test_cobro_de_la_noche_entra_en_el_cierre_de_su_dia(worker, db_session, monkeypatch):
+    """Un cobro sin fecha (ONVO, pedido web, POS) a las 19:30 CR (01:30 UTC del dia siguiente) queda con el dia de
+    Costa Rica, no con el UTC del contenedor: entra en el cierre de las 21:00 de ese mismo dia."""
+    from app.schemas.sales import PaymentIn
+    from app.services.documents import add_payment
+
+    monkeypatch.setattr(timeutil, "_utcnow", lambda: datetime(2026, 3, 11, 1, 30, tzinfo=UTC))
+    t = db_session.scalar(select(Tenant).order_by(Tenant.id))
+    t.settings = {**(t.settings or {}), "daily_close_email": True}
+    inv = Invoice(tenant_id=t.id, number="FEC-000781", issue_date=DIA_CR, total=Decimal("12500"), balance=Decimal("12500"), status="enviada")
+    db_session.add(inv)
+    db_session.flush()
+    p = add_payment(db_session, t.id, None, inv, PaymentIn(method="sinpe", amount=Decimal("12500")))
+    db_session.commit()
+    assert p.paid_at == DIA_CR
+    monkeypatch.setattr(timeutil, "_utcnow", lambda: RELOJ)  # 21:00 CR del mismo dia
+    assert worker.daily_close_email() >= 1
+    correos = db_session.scalars(select(EmailOutbox).where(EmailOutbox.entity == "report")).all()
+    assert correos and all(str(DIA_CR) in c.subject for c in correos) and "12500" in correos[0].html
 
 
 def test_vencimiento_con_el_dia_de_costa_rica(worker, db_session):

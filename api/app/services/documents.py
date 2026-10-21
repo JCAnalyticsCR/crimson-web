@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..core.config import settings
 from ..core.security import sign_purpose_token
+from ..core.timeutil import cr_today
 from ..models import (
     AuditLog,
     Customer,
@@ -295,7 +296,7 @@ def add_payment(db: Session, tenant_id: int, user_id: int | None, inv: Invoice, 
         tip=data.tip or 0,
         bank_account_id=data.bank_account_id,
         external_ref=data.external_ref,
-        paid_at=data.paid_at or date.today(),
+        paid_at=data.paid_at or cr_today(),  # dia de Costa Rica: el cierre de las 21:00 CR filtra por esta fecha
         notify_customer=data.notify_customer,
         notes=data.notes,
         created_by=user_id or None,

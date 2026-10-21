@@ -2,7 +2,8 @@
 
 Cada revision devuelve {"ok": bool, "critico": bool, ...datos sin informacion sensible} (nada de montos, nombres,
 correos ni llaves). Si una revision critica falla, /health/deep da 503. Sin X-Health-Token (HEALTH_TOKEN) el endpoint
-solo dice el estado (public_view): el detalle es un mapa de la configuracion y no es para cualquiera en internet.
+solo dice el estado y el ENV (public_view, lo mismo que ya publica /health): el monitor de palabra clave de 0.8 busca
+`"env":"production"`; el detalle es un mapa de la configuracion y no es para cualquiera en internet.
 El resultado se guarda DEEP_CACHE_SECONDS (DeepCache): el monitor pasa cada pocos minutos y cada revision cuesta
 consultas (y descifrar la llave de ONVO de cada empresa).
 
@@ -226,8 +227,9 @@ def deep(db: Session, now: datetime | None = None, today: date | None = None) ->
 
 
 def public_view(rep: dict) -> dict:
-    """Lo que ve cualquiera sin X-Health-Token: el estado y la hora. El monitor externo solo mira el codigo (200/503)."""
-    return {"status": rep["status"], "at": rep["at"]}
+    """Lo que ve cualquiera sin X-Health-Token: el estado, el ENV y la hora. El monitor externo de 0.8 es de palabra
+    clave (`"env":"production"`, el mismo dato que ya publica /health) y un 503 cuenta como caida."""
+    return {"status": rep["status"], "env": rep["env"], "at": rep["at"]}
 
 
 class DeepCache:
