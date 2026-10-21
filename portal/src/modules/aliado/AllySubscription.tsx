@@ -1,15 +1,24 @@
 /* Mi suscripción (28:01-28:22): el plan de la plataforma, si está al día o vencida (con monto y días) y las
-   facturas de la mensualidad con su PDF. Funciona aunque el acceso esté suspendido: es para poder pagar. */
+   facturas de la mensualidad con su PDF, su estado real y el pago en línea (plan 1.4). Funciona aunque el acceso esté
+   suspendido: es para poder pagar. */
 import { useEffect, useState } from "react";
 import { api, downloadFile, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Badge, Empty, I, Icon } from "../../ui/components";
+import { Empty, I, Icon } from "../../ui/components";
 import { errorText } from "./shared";
 
-type Fact = { id: number; number: string; issue_date: string; due_date: string | null; total: string; balance: string; status: string; currency: string };
+type Estado = "por_pagar" | "vencida" | "abonada" | "pagada";
+type Fact = { id: number; number: string; issue_date: string; due_date: string | null; total: string; balance: string; status: string; estado?: Estado; pagable?: boolean; currency: string };
 type Sus = {
   plan: { monto: string; moneda: string; modo: "fija" | "por_usuario"; cantidad: string | null; frecuencia: string; proxima_fecha: string; activa: boolean } | null;
   estado: "al_dia" | "vencida"; vencido: { monto: string; moneda: string; dias: number } | null; facturas: Fact[]; seats: { used: number; max: number | null };
+};
+
+const ESTADO: Record<Estado, { label: string; tone: string }> = {
+  por_pagar: { label: "Por pagar", tone: "warn" },
+  vencida: { label: "Vencida", tone: "bad" },
+  abonada: { label: "Abonada", tone: "warn" },
+  pagada: { label: "Pagada", tone: "ok" },
 };
 
 export default function AllySubscription() {
@@ -17,6 +26,7 @@ export default function AllySubscription() {
   const [s, setS] = useState<Sus | null>(null);
   const [todas, setTodas] = useState<Fact[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [paying, setPaying] = useState<number | null>(null);
   useEffect(() => {
     api<Sus>("/aliado/suscripcion").then(setS).catch((e) => setErr(errorText(e)));
     api<Fact[]>("/aliado/facturas").then(setTodas).catch(() => setTodas([]));
@@ -24,15 +34,30 @@ export default function AllySubscription() {
   if (err) return <p className="muted">{err}</p>;
   if (!s) return <div style={{ minHeight: "40vh", display: "grid", placeItems: "center" }}><span className="spinner" /></div>;
   const pdf = (f: Fact) => downloadFile(`/aliado/facturas/${f.id}/pdf`, `${f.number}.pdf`).catch((e) => toast(e instanceof Error ? e.message : "No se pudo descargar", "bad"));
+  const pagar = async (f: Fact) => {
+    setPaying(f.id);
+    try {
+      const r = await api<{ url: string }>(`/aliado/facturas/${f.id}/pagar`, { method: "POST" });
+      window.open(r.url, "_blank", "noopener");
+    } catch (e) { toast(errorText(e), "bad"); }
+    finally { setPaying(null); }
+  };
   const otras = todas.filter((f) => !s.facturas.some((x) => x.id === f.id));
   const lista = (rows: Fact[]) => (
     <div className="cp-list">
-      {rows.map((f) => (
-        <div key={f.id} className="cp-row">
-          <div className="cp-row__main"><b>{f.number}</b><div className="cp-row__meta">{fmtDate(f.issue_date)}{f.due_date ? ` · vence ${fmtDate(f.due_date)}` : ""} · total {fmtMoney(f.total, f.currency)} · saldo {fmtMoney(f.balance, f.currency)}</div></div>
-          <div className="cp-row__side"><Badge status={f.status} /><button className="btn btn--ghost btn--sm" onClick={() => pdf(f)}><Icon d={I.invoice} size={14} />PDF</button></div>
-        </div>
-      ))}
+      {rows.map((f) => {
+        const e = f.estado ? ESTADO[f.estado] : null;
+        return (
+          <div key={f.id} className="cp-row">
+            <div className="cp-row__main"><b>{f.number}</b><div className="cp-row__meta">{fmtDate(f.issue_date)}{f.due_date ? ` · vence ${fmtDate(f.due_date)}` : ""} · total {fmtMoney(f.total, f.currency)} · saldo {fmtMoney(f.balance, f.currency)}</div></div>
+            <div className="cp-row__side">
+              {e ? <span className={`badge badge--${e.tone}`}>{e.label}</span> : <span className="badge badge--muted">{f.status}</span>}
+              <button className="btn btn--ghost btn--sm" onClick={() => pdf(f)}><Icon d={I.invoice} size={14} />PDF</button>
+              {f.pagable && <button className="btn btn--crimson btn--sm" disabled={paying === f.id} onClick={() => pagar(f)}>Pagar en línea</button>}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
   return (

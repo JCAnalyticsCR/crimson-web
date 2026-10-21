@@ -12,10 +12,11 @@ import UsersTab from "./settings/UsersTab";
 import HaciendaTab from "./settings/HaciendaTab";
 import TwoFactorSetup from "./auth/TwoFactorSetup";
 import MarginGuardCard, { type MarginCfg } from "./settings/MarginGuardCard";
+import CollectionsCard from "./settings/CollectionsCard";
 import { MODE_LABEL, type HaciendaState } from "./accounting/hacienda";
 
 type Group = { id: number; doc_type: string; prefix: string; branch: string; terminal: string; current: number; is_default: boolean };
-type Cfg = MarginCfg & { prevent_negative_stock?: boolean; reservation_auto_approve_units?: number; reservation_days?: number; labor_day_cost?: number; labor_day_cost_civil?: number; labor_day_cost_contratado?: number; per_diem_cost?: number; travel_cost?: number; max_discount_pct?: number; archive_purge_days?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; notify_due: boolean; remind_days_before: number; daily_close_email: boolean; bcc: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
+type Cfg = MarginCfg & { prevent_negative_stock?: boolean; reservation_auto_approve_units?: number; reservation_days?: number; labor_day_cost?: number; labor_day_cost_civil?: number; labor_day_cost_contratado?: number; per_diem_cost?: number; travel_cost?: number; max_discount_pct?: number; archive_purge_days?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; notify_due: boolean; remind_days_before: number; collections_start_date?: string | null; collections_stages?: number[]; collections_ally_stages?: number[]; daily_close_email: boolean; bcc: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
 type Bank = { id: number; name: string; bank: string | null; currency: string; number: string | null; active: boolean };
 type Gw = { id: number; provider: string; client_id: string | null; secret_mask: string | null; is_primary: boolean; active: boolean; mode: string; webhook_secret_set: boolean };
 type OnvoStatus = { configured: boolean; source: "ajustes" | "entorno" | null; mode: "test" | "live" | null; webhook_secret: boolean; webhook_url: string; active: boolean; problems: string[] };
@@ -160,10 +161,9 @@ export default function Settings() {
                 <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Son costos internos, sin IVA. El precio al cliente sale con el margen del costeo. En cada levantamiento se pueden ajustar solo para ese trabajo.</p>
               </div>
             </Card>
+            <CollectionsCard cfg={cfg} save={saveCfg} />
             <Card title="Notificaciones">
               <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13 }}>
-                <label style={{ display: "flex", gap: 10 }}><input type="checkbox" checked={cfg.notify_due} onChange={(e) => saveCfg({ notify_due: e.target.checked })} />Notificar vencimiento al cliente</label>
-                <Field label="¿Cuántos días antes recordar?"><input className="input input--mono" type="number" defaultValue={cfg.remind_days_before} onBlur={(e) => saveCfg({ remind_days_before: Number(e.target.value) })} style={{ width: 120 }} /></Field>
                 <label style={{ display: "flex", gap: 10 }}><input type="checkbox" checked={cfg.daily_close_email} onChange={(e) => saveCfg({ daily_close_email: e.target.checked })} />Enviar reporte de cierre de caja diario</label>
                 <Field label="Correos en copia (BCC) de toda factura" hint="Separados por coma."><input className="input" defaultValue={cfg.bcc.join(", ")} onBlur={(e) => saveCfg({ bcc: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} /></Field>
               </div>

@@ -30,14 +30,40 @@ INVITE_DAYS = 7
 ROLE_LABEL = {"aliado": "Aliado comercial", "tecnico_aliado": "Técnico de aliado"}
 # marca de las facturas de mensualidad (DocumentIn.external_order de la recurrencia): asi se distinguen de las demas
 PLAN_ORDER = "MENSUALIDAD-PLATAFORMA"
-# factura que ya le llego al aliado: mismo criterio que el portal del cliente (routers/client_portal.INVOICE_VISIBLE)
-INVOICE_VISIBLE = ("enviada", "pagada", "parcial", "vencida")
+# mensualidad con 30 dias de atraso -> propuesta de suspension en Aprobaciones (la confirma una persona, plan 1.4)
+SUSPEND_DAYS = 30
 
 
 def is_emitted(inv: Invoice) -> bool:
-    """La factura ya le llego al aliado. Un borrador "creado", como el que deja la recurrencia de la mensualidad antes
-    de enviarse, no se ve, no se descarga, no cuenta como atraso y no se descuenta de lo que recibe."""
-    return inv.status != "anulada" and (inv.status in INVOICE_VISIBLE or inv.einvoice_status == "aceptada")
+    """La factura ya le llego al aliado (services/invoice_states.is_visible: el mismo criterio que el portal del
+    cliente). Un borrador "creado", como el que deja la recurrencia de la mensualidad mientras espera la aprobacion,
+    no se ve, no se descarga, no cuenta como atraso y no se descuenta de lo que recibe."""
+    from .invoice_states import is_visible
+
+    return is_visible(inv)
+
+
+def mora_where(tenant_id: int, today: date, days: int = SUSPEND_DAYS, start: date | None = None) -> list:
+    """Empresas aliadas activas y sin suspender con una mensualidad por cobrar vencida hace `days` dias o mas.
+    start: fecha de corte de cartera (collections_start_date, la misma de los recordatorios): lo emitido antes pudo
+    pagarse por fuera y no es motivo para proponer una suspension. Sin fecha de corte cuenta todo lo enviado."""
+    from .invoice_states import cobrable_where
+
+    atrasadas = select(Invoice.customer_id).where(
+        Invoice.tenant_id == tenant_id,
+        Invoice.external_order == PLAN_ORDER,
+        cobrable_where(),
+        Invoice.due_date.is_not(None),
+        Invoice.due_date <= today - timedelta(days=days),
+        *([Invoice.issue_date >= start] if start else []),
+    )
+    return [
+        AllyCompany.tenant_id == tenant_id,
+        AllyCompany.active.is_(True),
+        AllyCompany.suspended_at.is_(None),
+        AllyCompany.customer_id.is_not(None),
+        AllyCompany.customer_id.in_(atrasadas),
+    ]
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -236,8 +262,11 @@ def plan_invoices(db: Session, company: AllyCompany, limit: int = 60) -> list[In
 def plan_status(db: Session, company: AllyCompany, today: date | None = None, visible=None) -> dict:
     """al_dia, o vencida con monto (saldo de las vencidas, por moneda dominante) y dias del atraso mas viejo.
     visible: filtro opcional de facturas (el portal del aliado solo cuenta las emitidas)."""
-    today = today or date.today()
-    vencidas = [i for i in plan_invoices(db, company, limit=500) if d(i.balance) > 0 and i.due_date and i.due_date < today and (visible is None or visible(i))]
+    from .invoice_states import cr_today, is_cobrable
+
+    today = today or cr_today()  # fecha de Costa Rica: desde las 18:00 CR la de UTC ya es la de manana
+    # por cobrar (enviada y con saldo, plan 1.3): un borrador que el aliado no recibio nunca cuenta como atraso
+    vencidas = [i for i in plan_invoices(db, company, limit=500) if is_cobrable(i) and i.due_date and i.due_date < today and (visible is None or visible(i))]
     if not vencidas:
         return {"estado": "al_dia", "vencido": None}
     moneda = vencidas[0].currency

@@ -49,6 +49,16 @@ DEMO_PRODUCTS = [
     ("SRV-MANT", "Mantenimiento preventivo mensual", "servicio", 45000, "8121100000100", "Visita mensual, limpieza y revision de sistema"),
 ]
 
+# Mensualidad de aliados (plan 1.4): el servicio que factura la recurrencia de cada plan. El CABYS propuesto es el de
+# provision de aplicaciones en linea (la plataforma como servicio); contabilidad lo confirma en el buscador de CABYS de
+# Productos y servicios y lo cambia ahi si corresponde. Queda por defecto en Ajustes -> Aliados (plan_product_id).
+PLAN_PRODUCT = {
+    "code": "SRV-PLATAFORMA",
+    "name": "Mensualidad de la plataforma",
+    "cabys_code": "8315200000000",
+    "description_invoice": "Acceso mensual a la plataforma de Crimson (portal de aliados).",
+}
+
 DEMO_CUSTOMERS = [
     ("juridica", "3-101-123456", "Condominio Hacienda Pinilla", "administracion@hpinilla.example", "+506 8888 0001"),
     ("juridica", "3-101-654321", "Residencial La Julieta Sur", "junta@lajulieta.example", "+506 8888 0002"),
@@ -189,6 +199,10 @@ def seed_base(db: Session, demo: bool = False) -> Tenant:
         for id_type, id_number, name, email, phone in DEMO_CUSTOMERS:
             db.add(Customer(tenant_id=t.id, id_type=id_type, id_number=id_number, name=name, email=email, phone=phone, whatsapp=phone))
 
+    if demo:
+        # entornos compartidos: el servicio lo crea app.bootstrap.plan_product en cada arranque (sin catalogo ficticio)
+        ensure_plan_product(db, t, iva13)
+
     if not db.scalar(select(Warehouse).where(Warehouse.tenant_id == t.id)):
         w = Warehouse(tenant_id=t.id, name="Bodega principal", location="Alajuela", is_default=True)
         db.add(w)
@@ -223,6 +237,24 @@ def seed_base(db: Session, demo: bool = False) -> Tenant:
         )
     db.flush()
     return t
+
+
+def ensure_plan_product(db: Session, t: Tenant, iva13: Tax | None) -> Product | None:
+    """Servicio "Mensualidad de la plataforma" con su CABYS, por defecto en Ajustes -> Aliados. Idempotente: si la
+    empresa ya eligio otro servicio, o ya existe el codigo, no crea nada (no le cambia la eleccion a nadie)."""
+    st = dict(t.settings or {})
+    if st.get("ally_plan_product_id"):
+        return None
+    pr = db.scalar(select(Product).where(Product.tenant_id == t.id, Product.code == PLAN_PRODUCT["code"]))
+    if pr is None:
+        pr = Product(tenant_id=t.id, item_type="servicio", price=0, show_on_web=False, min_stock=0, **PLAN_PRODUCT)
+        if iva13 is not None:
+            pr.taxes.append(ProductTax(tax_id=iva13.id))
+        db.add(pr)
+        db.flush()
+    st["ally_plan_product_id"] = pr.id
+    t.settings = st
+    return pr
 
 
 if __name__ == "__main__":

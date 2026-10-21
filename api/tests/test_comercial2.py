@@ -1,7 +1,7 @@
 """Revision de Andres (comercial 2): tipo de oportunidad, responsable visible y reasignable, cotizacion directa desde
 la oportunidad, acciones pendientes del inicio que llevan a la lista filtrada, y levantamientos con puntos mixtos."""
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from app.models import Invoice, Opportunity, Quote, Survey, Tenant
@@ -116,8 +116,10 @@ def test_dashboard_pending_matches_filtered_lists(client, auth, db_session):
     past = str(date.today() - timedelta(days=10))
     ids = [client.post("/invoices", json={"customer_id": cust["id"], "lines": line, "due_date": past}).json()["id"] for _ in range(2)]
     client.post("/invoices", json={"customer_id": cust["id"], "lines": line})
+    borrador = client.post("/invoices", json={"customer_id": cust["id"], "lines": line, "due_date": past}).json()["id"]
     inv = db_session.get(Invoice, ids[0])
     inv.einvoice_status = "rechazada"
+    inv.sent_at = datetime.now(UTC)  # plan 1.3: por cobrar y vencida solo lo que le llego al cliente
     db_session.commit()
     client.post(f"/invoices/{ids[1]}/payment-link")
     client.post(f"/invoices/{ids[1]}/payment-link")  # mismo enlace o uno nuevo: la factura cuenta una vez
@@ -141,10 +143,15 @@ def test_dashboard_pending_matches_filtered_lists(client, auth, db_session):
 
     pend = check()
     assert pend["facturas_vencidas"] >= 2 and pend["documentos_rechazados"] >= 1 and pend["enlaces_abiertos"] >= 1
+    # un borrador vencido que nunca se envio no esta "por cobrar" ni "vencido" (plan 1.3)
+    vencidas = {r["id"] for r in client.get("/invoices?pendiente=facturas_vencidas&limit=100").json()["items"]}
+    assert ids[0] in vencidas and ids[1] in vencidas and borrador not in vencidas
     assert pend["cotizaciones_por_aprobar"] >= 1 and pend["cotizaciones_sin_respuesta"] >= 2
     # el vendedor: tarjetas y listas cuentan solo lo suyo, y siguen coincidiendo
     vend = _login(client, dict(client.headers), db_session, tid, "vend.d@ejemplo.com", "ventas")
-    client.post("/invoices", json={"customer_id": cust["id"], "lines": line, "due_date": past}, headers=vend)
+    mia = client.post("/invoices", json={"customer_id": cust["id"], "lines": line, "due_date": past}, headers=vend).json()["id"]
+    assert check(vend)["facturas_vencidas"] == 0  # borrador sin enviar
+    client.post(f"/invoices/{mia}/payment-link", headers=vend)  # el enlace para compartir la deja por cobrar
     assert check(vend)["facturas_vencidas"] == 1
     assert client.get("/invoices?pendiente=no_existe").status_code == 422
     assert client.get("/quotes?pendiente=facturas_vencidas").status_code == 422

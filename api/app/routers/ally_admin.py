@@ -32,6 +32,7 @@ from ..models import (
     Project,
     Recurrence,
     Supplier,
+    Tenant,
     TenantUser,
 )
 from ..models.allies import CONTACT_FUNCTIONS
@@ -247,12 +248,33 @@ def allies_options(q: str = "", p: Principal = Depends(get_principal), db: Sessi
 ASSETS_SCOPES = ("proyectos", "clientes")
 
 
+PLAN_MODES = ("fija", "por_usuario")
+
+
+def plan_defaults(t) -> dict:
+    """Mensualidad por defecto de los planes nuevos (plan 1.4): fija por empresa mientras Andres no fije otra cosa
+    (sesion 0.11, pregunta 8). El monto queda vacio hasta que se defina: nunca se inventa un precio."""
+    st = t.settings or {}
+    amount = st.get("ally_plan_default_amount")
+    mode = st.get("ally_plan_default_mode")
+    return {
+        "amount": None if amount in (None, "") else d(amount),
+        "currency": st.get("ally_plan_default_currency") or "CRC",
+        "mode": mode if mode in PLAN_MODES else "fija",
+    }
+
+
 @router.get("/config")
 def config_get(p: Principal = Depends(require("aliados", "ver")), db: Session = Depends(get_db)):
     st = p.tenant.settings or {}
+    pid = st.get("ally_plan_product_id")
+    prod = db.get(Product, pid) if pid else None
+    prod = prod if prod is not None and prod.tenant_id == p.tenant.id else None
     return {
         "markup_pct": ally_pricing.tenant_markup(p.tenant) if p.sees_costs else None,
-        "plan_product_id": st.get("ally_plan_product_id"),
+        "plan_product_id": pid,
+        "plan_product": {"id": prod.id, "code": prod.code, "name": prod.name, "cabys_code": prod.cabys_code} if prod else None,
+        "plan_default": plan_defaults(p.tenant),
         "assets_scope": st.get("ally_assets_scope", "proyectos"),
     }
 
@@ -263,6 +285,10 @@ class ConfigIn(BaseModel):
     markup_pct: Decimal | None = Field(None, gt=0, le=100)  # 0 % seria vender al costo exacto
     plan_product_id: int | None = None
     assets_scope: str | None = Field(None, pattern="^(proyectos|clientes)$")
+    # mensualidad por defecto de los planes nuevos (plan 1.4); null en el monto = sin definir
+    plan_default_amount: Decimal | None = Field(None, ge=0)
+    plan_default_currency: str | None = Field(None, pattern="^(CRC|USD)$")
+    plan_default_mode: str | None = Field(None, pattern="^(fija|por_usuario)$")
 
 
 @router.put("/config")
@@ -270,10 +296,12 @@ def config_put(data: ConfigIn, p: Principal = Depends(require("aliados", "ver"))
     sent = data.model_fields_set
     if sent & {"markup_pct", "assets_scope"} and not (p.can("aliados", "precios") and p.sees_costs):
         raise HTTPException(403, "El recargo y el alcance de activos los cambia administración")
-    if "plan_product_id" in sent and not p.can("aliados", "mensualidad"):
+    plan_keys = {"plan_product_id", "plan_default_amount", "plan_default_currency", "plan_default_mode"}
+    if sent & plan_keys and not p.can("aliados", "mensualidad"):
         raise HTTPException(403, "Sin permiso: aliados.mensualidad")
     st = dict(p.tenant.settings or {})
-    antes = {k: st.get(k) for k in ("ally_markup_pct", "ally_plan_product_id", "ally_assets_scope")}
+    llaves = ("ally_markup_pct", "ally_plan_product_id", "ally_assets_scope", "ally_plan_default_amount", "ally_plan_default_currency", "ally_plan_default_mode")
+    antes = {k: st.get(k) for k in llaves}
     if "markup_pct" in sent:
         st["ally_markup_pct"] = None if data.markup_pct is None else str(data.markup_pct)
     if "assets_scope" in sent and data.assets_scope:
@@ -282,6 +310,12 @@ def config_put(data: ConfigIn, p: Principal = Depends(require("aliados", "ver"))
         if data.plan_product_id is not None:
             _plan_product(db, p, data.plan_product_id)
         st["ally_plan_product_id"] = data.plan_product_id
+    if "plan_default_amount" in sent:
+        st["ally_plan_default_amount"] = None if data.plan_default_amount is None else str(data.plan_default_amount)
+    if "plan_default_currency" in sent and data.plan_default_currency:
+        st["ally_plan_default_currency"] = data.plan_default_currency
+    if "plan_default_mode" in sent and data.plan_default_mode:
+        st["ally_plan_default_mode"] = data.plan_default_mode
     p.tenant.settings = st  # se mezcla sin pisar otras llaves
     audit_change(db, p, "update", "tenant_settings", p.tenant.id, antes, {k: st.get(k) for k in antes}, extra={"seccion": "aliados"})
     db.commit()
@@ -728,10 +762,17 @@ def plan_out(db: Session, c: AllyCompany) -> dict:
             "active": r.active,
             "since": c.plan_since,
             "recurrence_id": r.id,
+            # plan 1.4: la primera factura la revisa una persona; despues salen solas
+            "first_run_requires_approval": r.first_run_requires_approval,
+            "last_send_status": r.last_send_status,
+            "last_send_note": r.last_send_note,
+            "last_invoice_id": r.last_invoice_id,
         }
         if r
         else None,
         "customer": {"id": cust.id, "name": cust.name} if cust else None,
+        # con que arranca el formulario de un plan nuevo (Ajustes -> Aliados)
+        "defaults": plan_defaults(db.get(Tenant, c.tenant_id)),
         **st,
         "facturas": [
             {
@@ -743,6 +784,7 @@ def plan_out(db: Session, c: AllyCompany) -> dict:
                 "balance": i.balance,
                 "status": i.status,
                 "currency": i.currency,
+                "sent_at": i.sent_at,
             }
             for i in ally_access.plan_invoices(db, c)
         ],
@@ -765,11 +807,15 @@ class PlanIn(BaseModel):
     active: bool = True
     product_id: int | None = None
     crear_cliente: bool = False
+    # la primera factura espera "Aprobar y enviar" (por defecto en planes nuevos); None al actualizar = no cambia
+    first_run_requires_approval: bool | None = None
 
 
 @router.put("/{cid}/plan")
 def plan_put(cid: int, data: PlanIn, p: Principal = Depends(require("aliados", "mensualidad")), db: Session = Depends(get_db)):
-    """Crea o actualiza la recurrencia que factura la mensualidad (el worker de recurrencias la emite). Nunca cobra sola."""
+    """Crea o actualiza la recurrencia que factura la mensualidad. El worker la genera y, con auto_send, la envia con
+    su PDF y enlace de pago; la primera de cada plan espera "Aprobar y enviar" en Aprobaciones (plan 1.4). Nunca cobra
+    sola con tarjeta ni suspende al aliado."""
     c = company(db, cid, p)
     antes = _snapshot(c)
     if not c.customer_id and not data.crear_cliente:
@@ -790,10 +836,15 @@ def plan_put(cid: int, data: PlanIn, p: Principal = Depends(require("aliados", "
         lines=[LineInSchema(product_id=prod.id, name=f"Acceso a la plataforma · {c.name}"[:200], quantity=Decimal(qty), unit_price=data.amount)],
     ).model_dump(mode="json", exclude={"customer_id"})
     DocumentIn(**template)  # validar antes de guardar
+    from .ops import needs_rearm, schedule_of, send_flags, send_terms, set_send_approval
+
     r = db.get(Recurrence, c.recurrence_id) if c.recurrence_id else None
-    if r is None or r.tenant_id != p.tenant.id:
-        r = Recurrence(tenant_id=p.tenant.id, kind="factura", frequency="mensual", runs=0)
+    nueva = r is None or r.tenant_id != p.tenant.id
+    if nueva:
+        r = Recurrence(tenant_id=p.tenant.id, kind="factura", frequency="mensual", runs=0, first_run_requires_approval=True, auto_send=True)
         db.add(r)
+    envio_antes = {**send_flags(r), "terms": None if nueva else send_terms(db, p.tenant.id, r.customer_id, r.template)}
+    agenda = None if nueva else schedule_of(r)
     r.name = f"Mensualidad aliado · {c.name}"[:160]
     r.customer_id = c.customer_id
     r.template = template
@@ -802,10 +853,16 @@ def plan_put(cid: int, data: PlanIn, p: Principal = Depends(require("aliados", "
     r.auto_send = data.auto_send
     r.active = data.active
     r.auto_charge = False  # nunca se cobra solo
+    # otro cliente, otra moneda u otro monto, o quien no envia facturas adelanto el cobro o volvio a encender el envio:
+    # la proxima vuelve a esperar "Aprobar y enviar"; quitar la revision es de quien envia facturas (contabilidad tiene
+    # aliados.mensualidad pero no sales.enviar)
+    terms = send_terms(db, p.tenant.id, r.customer_id, r.template)
+    set_send_approval(p, r, data.first_run_requires_approval, rearm=not nueva and needs_rearm(p, terms != envio_antes["terms"], agenda, r))
     db.flush()
     c.recurrence_id = r.id
     c.plan_amount, c.plan_currency = data.amount, data.currency
     c.plan_since = c.plan_since or data.next_date
-    audit_change(db, p, "plan", "ally_company", c.id, antes, _snapshot(c), company=c.name, always=True)
+    envio = {"antes": {k: v for k, v in envio_antes.items() if k != "terms"}, "despues": send_flags(r)}
+    audit_change(db, p, "plan", "ally_company", c.id, antes, _snapshot(c), company=c.name, always=True, extra={"envio": envio})
     db.commit()
     return plan_out(db, c)

@@ -1,6 +1,7 @@
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint
+from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -117,6 +118,14 @@ class Invoice(_DocBase, Base):
     # Con einvoice_status = "emitida_fuera" la plataforma nunca la vuelve a emitir (services/fiscal_queue.py).
     external_number: Mapped[str | None] = mapped_column(String(50))
     external_date: Mapped[date | None] = mapped_column(Date)
+    # Cobranza (plan 1.3): cuando la factura le llego al cliente (correo aceptado por el proveedor, enlace de pago
+    # creado para compartir, comprobante fiscal entregado o envio automatico de la recurrencia). Sin esto es un
+    # borrador: no vence, no sale en "por cobrar" ni recibe recordatorios (services/invoice_states.py).
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reminders_paused: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())  # pausa la secuencia de cobro
+    # Plan 1.4: la genero esta recurrencia. Sin comprobante fiscal aceptado sale como "aviso de cobro" (render.doc_kind):
+    # contabilidad emite el comprobante real aparte y el mismo cobro no circula como dos "facturas".
+    recurrence_id: Mapped[int | None] = mapped_column(ForeignKey("recurrence.id", use_alter=True, name="fk_invoice_recurrence"))
 
     lines: Mapped[list["InvoiceLine"]] = relationship(cascade="all, delete-orphan", order_by="InvoiceLine.position", lazy="selectin")
     payments: Mapped[list["Payment"]] = relationship(back_populates="invoice", lazy="selectin")  # noqa: F821
@@ -125,6 +134,26 @@ class Invoice(_DocBase, Base):
 class InvoiceLine(_LineBase, Base):
     __tablename__ = "invoice_line"
     invoice_id: Mapped[int] = mapped_column(ForeignKey("invoice.id", ondelete="CASCADE"), index=True)
+
+
+class CollectionReminder(TenantMixin, Base):
+    """Bitacora de la secuencia de cobro (plan 1.3): una fila por factura y etapa (dias respecto del vencimiento:
+    -3, 0, 3, 10...). Se escribe ANTES de mandar el correo y es unica por factura y etapa: dos corridas del worker el
+    mismo dia nunca mandan dos veces. Tambien es la evidencia de la cobranza recuperada (pagos despues de un aviso)."""
+
+    __tablename__ = "collection_reminder"
+    __table_args__ = (UniqueConstraint("invoice_id", "stage", name="uq_collection_reminder_stage"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("invoice.id", ondelete="CASCADE", name="fk_collection_reminder_invoice"), index=True)
+    stage: Mapped[int] = mapped_column(SmallInteger)
+    sent_on: Mapped[date] = mapped_column(Date, index=True)  # fecha de Costa Rica de la corrida
+    due_date: Mapped[date] = mapped_column(Date)  # vencimiento al momento del aviso
+    balance: Mapped[float] = mapped_column(Numeric(16, 5), default=0)  # saldo que se cobro en el aviso
+    currency: Mapped[str] = mapped_column(String(3), default="CRC")
+    status: Mapped[str] = mapped_column(String(12), default="pendiente")  # pendiente | enviado | error | simulado
+    outbox_id: Mapped[int | None] = mapped_column(Integer)  # sin FK: la bitacora de salida se puede depurar aparte
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class QuoteVersion(TenantMixin, Base):

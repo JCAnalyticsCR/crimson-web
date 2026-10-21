@@ -183,16 +183,19 @@ def apply_document(db: Session, doc: Quote | Invoice, payload: DocumentIn, line_
 
 
 def recompute_balance(inv: Invoice) -> None:
+    from .invoice_states import cr_today, is_sent
+
     inv.balance = balance(d(inv.total), [(p.kind, p.amount) for p in inv.payments if p.status == "confirmado"])
     if inv.status not in ("anulada",):
         if inv.balance <= 0 and d(inv.total) > 0:
             inv.status = "pagada"
         elif inv.balance < d(inv.total):
             inv.status = "parcial"
-        elif inv.due_date and inv.due_date < date.today():
+        elif inv.due_date and inv.due_date < cr_today() and is_sent(inv):
+            # un borrador que el cliente nunca recibio no "vence" (plan 1.3: services/invoice_states.py)
             inv.status = "vencida"
         elif inv.status in ("pagada", "parcial"):
-            inv.status = "creado"
+            inv.status = "enviada" if inv.sent_at else "creado"
 
 
 # "sin dato": el vendedor responsable es quien teclea. None es un valor valido (venta sin vendedor: tienda, API).

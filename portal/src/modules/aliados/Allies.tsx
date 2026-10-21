@@ -1,19 +1,25 @@
 /* Administración → Aliados (reunión 13/10, 10:47-12:44): las empresas aliadas con su estado, usuarios (cupos),
    lo que llevan en común y si la mensualidad está al día. Arriba, con permiso de precios: el recargo por defecto
-   para aliados ("costo 100 → aliado 105") y qué activos ve el aliado. Sus usuarios usan el portal de aliados. */
+   para aliados ("costo 100 → aliado 105") y qué activos ve el aliado; con permiso de mensualidad, el servicio y el monto
+   por defecto del cobro mensual (plan 1.4). Sus usuarios usan el portal de aliados. */
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError, api } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
-import { Lookup, searchCustomers, type LookupItem } from "../../ui/Lookup";
+import { Lookup, searchCustomers, searchProducts, type LookupItem } from "../../ui/Lookup";
 
 export type AllyRow = {
   id: number; name: string; tax_id: string | null; email: string | null; phone: string | null; state: "activo" | "suspendido" | "inactivo"; suspended_reason: string | null;
   users_active: number; seats_used: number; seats_max: number | null; proyectos_en_comun: number; oportunidades_abiertas: number;
   plan: { amount: string | null; currency: string; mode: string; al_dia: boolean; activo: boolean };
 };
-type Config = { markup_pct: string | null; plan_product_id: number | null; assets_scope: "proyectos" | "clientes" };
+type PlanDefault = { amount: string | number | null; currency: "CRC" | "USD"; mode: "fija" | "por_usuario" };
+type Config = {
+  markup_pct: string | null; plan_product_id: number | null; assets_scope: "proyectos" | "clientes";
+  /* plan 1.4: servicio facturado y mensualidad por defecto de los planes nuevos */
+  plan_product?: { id: number; code: string; name: string; cabys_code: string | null } | null; plan_default?: PlanDefault;
+};
 export const STATE_TONE: Record<string, string> = { activo: "ok", suspendido: "warn", inactivo: "muted" };
 export const STATE_LABEL: Record<string, string> = { activo: "Activo", suspendido: "Suspendido", inactivo: "Inactivo" };
 
@@ -94,6 +100,43 @@ function Ajustes() {
   );
 }
 
+/* Mensualidad de la plataforma (plan 1.4): con qué arranca cada plan nuevo. El precio lo fija Andrés; mientras tanto,
+   fija por empresa y sin monto. La primera factura de cada plan la revisa una persona y las siguientes salen solas. */
+function MensualidadAjustes() {
+  const { toast, allows } = useSession();
+  const [c, setC] = useState<Config | null>(null);
+  const [monto, setMonto] = useState("");
+  const [prod, setProd] = useState<LookupItem | null>(null);
+  const fill = (x: Config) => { setC(x); setMonto(x.plan_default?.amount == null ? "" : String(x.plan_default.amount)); };
+  useEffect(() => { api<Config>("/allies/config").then(fill).catch(() => setC(null)); }, []);
+  if (!c || !allows("aliados.mensualidad")) return null;
+  const guardar = async (json: Record<string, unknown>) => {
+    try { fill(await api<Config>("/allies/config", { method: "PUT", json })); toast("Guardado"); }
+    catch (e) { toast(e instanceof Error ? e.message : "No se pudo guardar", "bad"); }
+  };
+  const pd: PlanDefault = c.plan_default || { amount: null, currency: "CRC", mode: "fija" };
+  const actual = pd.amount == null ? "" : String(pd.amount);
+  return (
+    <Card title="Mensualidad de la plataforma">
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <Field label="Servicio facturado" hint={c.plan_product ? `${c.plan_product.code} · CABYS ${c.plan_product.cabys_code || "sin CABYS"}` : "Producto de tipo servicio con su CABYS"}>
+          <Lookup value={prod?.label || c.plan_product?.name || ""} fetcher={searchProducts} onSelect={(it) => { if (!it) return; setProd(it); guardar({ plan_product_id: it.id }); }} placeholder="Buscar servicio" />
+        </Field>
+        <Field label="Monto por defecto (sin IVA)" hint="Vacío = se define en cada aliado">
+          <input className="input input--mono" style={{ maxWidth: 140 }} inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} onBlur={() => monto.trim() !== actual && guardar({ plan_default_amount: monto.trim() === "" ? null : monto.trim() })} />
+        </Field>
+        <Field label="Moneda">
+          <select className="select" value={pd.currency} onChange={(e) => guardar({ plan_default_currency: e.target.value })}><option>CRC</option><option>USD</option></select>
+        </Field>
+        <Field label="Modo">
+          <select className="select" value={pd.mode} onChange={(e) => guardar({ plan_default_mode: e.target.value })}><option value="fija">Fija por empresa</option><option value="por_usuario">Por usuario activo</option></select>
+        </Field>
+      </div>
+      <p className="meta" style={{ marginBottom: 0 }}>Con esto arranca el cobro mensual de cada aliado nuevo (se puede cambiar en su ficha). La primera factura de cada plan espera tu «Aprobar y enviar» en Aprobaciones; las siguientes salen solas con su PDF y enlace de pago.</p>
+    </Card>
+  );
+}
+
 export default function Allies() {
   const { allows } = useSession();
   const [estado, setEstado] = useState<"activos" | "suspendidos" | "inactivos" | "todos">("activos");
@@ -111,6 +154,7 @@ export default function Allies() {
         </div>
       </div>
       <Ajustes />
+      <MensualidadAjustes />
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
         {(["activos", "suspendidos", "inactivos", "todos"] as const).map((k) => <button key={k} className={`btn btn--sm ${estado === k ? "btn--crimson" : "btn--ghost"}`} onClick={() => setEstado(k)}>{k[0].toUpperCase() + k.slice(1)}</button>)}
         <input className="input" style={{ flex: "1 1 220px" }} placeholder="Buscar por nombre, cédula o correo" value={q} onChange={(e) => setQ(e.target.value)} />

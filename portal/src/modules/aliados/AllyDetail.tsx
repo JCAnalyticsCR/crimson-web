@@ -20,9 +20,13 @@ type Detail = AllyRow & {
 type Users = { users: { id: number; name: string; email: string; role: string; active: boolean; last_login: string | null }[]; invitations: { id: number; email: string; role: string; expires_at: string }[]; seats: { used: number; max: number | null } };
 type Price = { id: number; product_id: number; product: { id: number; code: string; name: string; currency: string; price: string } | null; price: string; currency: string; note: string | null };
 type Plan = {
-  plan: { amount: string; currency: string; mode: string; quantity: string | null; product_id: number | null; next_date: string; auto_send: boolean; active: boolean } | null;
+  plan: {
+    amount: string; currency: string; mode: string; quantity: string | null; product_id: number | null; next_date: string; auto_send: boolean; active: boolean;
+    recurrence_id: number; first_run_requires_approval: boolean; last_send_status: string | null; last_send_note: string | null; last_invoice_id: number | null;
+  } | null;
   customer: { id: number; name: string } | null; estado: string; vencido: { monto: string; moneda: string; dias: number } | null;
-  facturas: { id: number; number: string; issue_date: string; due_date: string | null; total: string; balance: string; status: string; currency: string }[];
+  defaults?: { amount: string | number | null; currency: string; mode: string }; /* Ajustes -> Aliados (plan 1.4) */
+  facturas: { id: number; number: string; issue_date: string; due_date: string | null; total: string; balance: string; status: string; currency: string; sent_at: string | null }[];
 };
 const FUNCIONES: Record<string, string> = { comercial: "Comercial", tecnico: "Técnico", aprobador: "Aprobador", pagos: "Pagos" };
 const ROL: Record<string, string> = { aliado: "Aliado comercial", tecnico_aliado: "Técnico de aliado" };
@@ -209,15 +213,20 @@ function Precios({ a, reload }: { a: Detail; reload: () => void }) {
   );
 }
 
+/* plan 1.4: resultado del ultimo envio de la mensualidad y estado real de cada factura */
+const SEND_TXT: Record<string, string> = { por_aprobar: "espera tu «Aprobar y enviar»", enviando: "envío sin confirmar (revisala y reenviala)", pendiente: "pendiente de envío", enviada: "enviada", fallida: "no salió", sin_correo: "el cliente no tiene correo" };
+const facturaEstado = (x: Plan["facturas"][number]) => (x.status === "anulada" ? "anulada" : Number(x.balance) <= 0 ? "pagada" : !x.sent_at && x.status === "creado" ? "borrador (no enviada)" : x.status === "vencida" || (x.due_date && x.due_date < new Date().toISOString().slice(0, 10)) ? "vencida" : "por pagar");
+
 function Mensualidad({ a, reload }: { a: Detail; reload: () => void }) {
-  const { toast } = useSession();
+  const { toast, allows } = useSession();
   const [d, setD] = useState<Plan | null>(null);
-  const [f, setF] = useState({ amount: "", currency: "CRC", mode: "fija", next_date: new Date().toISOString().slice(0, 10), auto_send: true, active: true });
+  const [f, setF] = useState({ amount: "", currency: "CRC", mode: "fija", next_date: new Date().toISOString().slice(0, 10), auto_send: true, active: true, first_run_requires_approval: true });
   const [prod, setProd] = useState<LookupItem | null>(null);
   const load = useCallback(() => {
     api<Plan>(`/allies/${a.id}/plan`).then((x) => {
       setD(x);
-      if (x.plan) setF({ amount: String(x.plan.amount ?? ""), currency: x.plan.currency, mode: x.plan.mode, next_date: x.plan.next_date, auto_send: x.plan.auto_send, active: x.plan.active });
+      if (x.plan) setF({ amount: String(x.plan.amount ?? ""), currency: x.plan.currency, mode: x.plan.mode, next_date: x.plan.next_date, auto_send: x.plan.auto_send, active: x.plan.active, first_run_requires_approval: x.plan.first_run_requires_approval });
+      else if (x.defaults) { const df = x.defaults; setF((f0) => ({ ...f0, amount: df.amount == null ? "" : String(df.amount), currency: df.currency, mode: df.mode })); }
     }).catch(() => setD(null));
   }, [a.id]);
   useEffect(load, [load]);
@@ -225,7 +234,15 @@ function Mensualidad({ a, reload }: { a: Detail; reload: () => void }) {
     try { await api(`/allies/${a.id}/plan`, { method: "PUT", json: { ...f, product_id: prod?.id ?? d?.plan?.product_id ?? null, crear_cliente: !a.customer_id } }); toast("Cobro mensual guardado"); load(); reload(); }
     catch (e) { toast(e instanceof Error ? e.message : "No se pudo", "bad"); }
   };
+  const aprobar = async () => {
+    if (!d?.plan || !confirm("Le llega la mensualidad al aliado con su PDF y enlace de pago. ¿Enviar?")) return;
+    try {
+      const r = await api<{ sent: boolean; note: string | null; number: string }>(`/recurrences/${d.plan.recurrence_id}/approve-send`, { method: "POST" });
+      toast(r.sent ? `${r.number} enviada; las siguientes salen solas` : r.note || "No salió el correo", r.sent ? undefined : "bad"); load();
+    } catch (e) { toast(e instanceof Error ? e.message : "No se pudo", "bad"); }
+  };
   if (!d) return <div className="spinner" />;
+  const pendienteEnvio = d.plan && ["por_aprobar", "enviando", "fallida", "sin_correo"].includes(d.plan.last_send_status || "") && d.facturas.some((x) => x.id === d.plan?.last_invoice_id && !x.sent_at && x.status !== "anulada" && Number(x.balance) > 0);
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <Card title="Mensualidad de la plataforma">
@@ -236,17 +253,22 @@ function Mensualidad({ a, reload }: { a: Detail; reload: () => void }) {
           <Field label="Próximo cobro"><input className="input" type="date" value={f.next_date} onChange={(e) => setF({ ...f, next_date: e.target.value })} /></Field>
           <Field label="Servicio facturado" hint="Producto de tipo servicio con su CABYS"><Lookup value={prod?.label || ""} fetcher={searchProducts} onSelect={(it) => setProd(it)} placeholder={d.plan?.product_id ? "El configurado" : "Buscar servicio"} /></Field>
         </div>
-        <label className="pf-bool"><input type="checkbox" checked={f.auto_send} onChange={(e) => setF({ ...f, auto_send: e.target.checked })} />Enviar la factura automáticamente</label>
+        <label className="pf-bool"><input type="checkbox" checked={f.auto_send} onChange={(e) => setF({ ...f, auto_send: e.target.checked })} />Enviar la factura automáticamente (PDF y enlace de pago)</label>
+        {/* quitar la revisión (que salgan solas) es de quien envía facturas; cambiar el monto o la moneda la vuelve a pedir */}
+        {f.auto_send && <label className="pf-bool"><input type="checkbox" checked={f.first_run_requires_approval} disabled={!allows("sales.enviar") && f.first_run_requires_approval && (d.plan?.first_run_requires_approval ?? true)} onChange={(e) => setF({ ...f, first_run_requires_approval: e.target.checked })} />La próxima la reviso yo (Aprobaciones → Mensualidades por aprobar); después salen solas</label>}
+        {f.auto_send && d.plan && <p className="meta" style={{ margin: 0 }}>Si cambiás el monto, la moneda o el cliente, la próxima vuelve a esperar tu «Aprobar y enviar».</p>}
         <label className="pf-bool"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} />Cobro activo</label>
         {!a.customer_id && <p className="meta">Se va a crear el cliente de facturación con los datos del aliado.</p>}
         <button className="btn btn--crimson" disabled={f.amount === ""} onClick={guardar}><Icon d={I.check} />Crear o actualizar el cobro mensual</button>
-        <p className="meta">Nunca se cobra solo con tarjeta ni se suspende el acceso por atraso: la suspensión es manual (Datos → Acceso al portal).</p>
+        <p className="meta">Nunca se cobra solo con tarjeta ni se suspende el acceso por atraso: con 30 días de atraso aparece la propuesta en Aprobaciones y la suspensión la decide una persona (Datos → Acceso al portal).</p>
+        {d.plan?.last_send_status && <p style={{ margin: 0, fontSize: 13 }}>Último envío: <b>{SEND_TXT[d.plan.last_send_status] || d.plan.last_send_status}</b>{d.plan.last_send_note ? ` · ${d.plan.last_send_note}` : ""}
+          {pendienteEnvio && allows("sales.enviar") && <> <button className="btn btn--crimson btn--sm" onClick={aprobar}>{d.plan.last_send_status === "por_aprobar" ? "Aprobar y enviar" : "Reenviar"}</button></>}</p>}
       </Card>
       <Card title={`Estado: ${d.estado === "al_dia" ? "al día" : "vencida"}`}>
         {d.vencido && <p><span className="badge badge--bad">Vencida</span> {fmtMoney(d.vencido.monto, d.vencido.moneda)} · {d.vencido.dias} día(s)</p>}
         {d.facturas.length ? (
           <table className="table"><thead><tr><th>Factura</th><th>Emitida</th><th>Total</th><th>Saldo</th><th>Estado</th></tr></thead>
-            <tbody>{d.facturas.map((x) => <tr key={x.id}><td><Link to={`/facturas/${x.id}`}>{x.number}</Link></td><td>{fmtDate(x.issue_date)}</td><td>{fmtMoney(x.total, x.currency)}</td><td>{fmtMoney(x.balance, x.currency)}</td><td>{x.status}</td></tr>)}</tbody>
+            <tbody>{d.facturas.map((x) => <tr key={x.id}><td><Link to={`/facturas/${x.id}`}>{x.number}</Link></td><td>{fmtDate(x.issue_date)}</td><td>{fmtMoney(x.total, x.currency)}</td><td>{fmtMoney(x.balance, x.currency)}</td><td>{facturaEstado(x)}</td></tr>)}</tbody>
           </table>
         ) : <p className="muted">Todavía no hay facturas de mensualidad.</p>}
       </Card>

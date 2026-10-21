@@ -11,7 +11,7 @@ import "./doc-list.css";
 /* Filtros que llegan desde "Acciones pendientes" del inicio (?pendiente=<clave>): misma definicion que el conteo. */
 const PENDIENTES: Record<string, string> = {
   facturas_vencidas: "Facturas vencidas (sin pagar y con la fecha de vencimiento pasada)",
-  facturas_por_cobrar: "Facturas por cobrar (creadas o con pago parcial)",
+  facturas_por_cobrar: "Facturas por cobrar (enviadas al cliente y con saldo)",
   documentos_rechazados: "Facturas rechazadas o con error en Hacienda",
   enlaces_abiertos: "Facturas con un enlace de pago abierto (vigente y sin pagar)",
   cotizaciones_sin_respuesta: "Cotizaciones sin respuesta (creadas o enviadas, sin convertir)",
@@ -20,7 +20,7 @@ const PENDIENTES: Record<string, string> = {
 
 const FILTERS: Record<string, { key: string; label: string }[]> = {
   quotes: [{ key: "", label: "Todas" }, { key: "creado", label: "Creadas" }, { key: "por_aprobar", label: "Por aprobar" }, { key: "enviada", label: "Enviadas" }, { key: "convertida", label: "Convertidas" }, { key: "anulada", label: "Anuladas" }],
-  invoices: [{ key: "", label: "Todas" }, { key: "creado", label: "Creadas" }, { key: "parcial", label: "Parciales" }, { key: "pagada", label: "Pagadas" }, { key: "vencida", label: "Vencidas" }, { key: "anulada", label: "Anuladas" }, { key: "por_emitir", label: "Por emitir" }],
+  invoices: [{ key: "", label: "Todas" }, { key: "creado", label: "Creadas" }, { key: "enviada", label: "Enviadas" }, { key: "parcial", label: "Parciales" }, { key: "pagada", label: "Pagadas" }, { key: "vencida", label: "Vencidas" }, { key: "anulada", label: "Anuladas" }, { key: "por_emitir", label: "Por emitir" }],
 };
 
 export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {

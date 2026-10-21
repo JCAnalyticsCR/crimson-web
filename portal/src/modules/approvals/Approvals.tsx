@@ -2,7 +2,8 @@
    "tendria que ser como otra categoria aqui… aprobaciones". Junta lo que ya espera un visto
    bueno (services/approvals.py en la API). Casi nada se aprueba aqui: cada elemento abre la pantalla donde se aprueba,
    viendo lo que se aprueba. La excepcion son los "Precios por revisar" del guardian de margen (plan 1.12): el precio
-   sugerido se aplica con un clic (nunca se reprecia solo). Lo mas antiguo primero. */
+   sugerido se aplica con un clic (nunca se reprecia solo), y "Aprobar y enviar" de las mensualidades (plan 1.4).
+   Lo mas antiguo primero. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { api, ApiError, fmtMoney, parseTs } from "../../lib/api";
@@ -38,6 +39,25 @@ const goTo = (key: string) => {
   document.getElementById(key)?.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
 };
 
+/* "Aprobar y enviar" (mensualidades, plan 1.4): la unica accion que se hace desde la bandeja. La persona puede abrir
+   la factura antes (el elemento la abre) y el boton pide confirmacion: sale el correo al cliente. */
+function ActionButton({ it, onDone }: { it: ApprovalItem; onDone: () => void }) {
+  const { toast, allows } = useSession();
+  const [busy, setBusy] = useState(false);
+  if (!it.action || !allows("sales.enviar")) return null;
+  const run = async () => {
+    if (!it.action || !confirm(`${it.action.label}: le llega al cliente ${it.title} con su PDF y enlace de pago. ¿Continuar?`)) return;
+    setBusy(true);
+    try {
+      const r = await api<{ sent: boolean; note: string | null; number: string }>(it.action.path, { method: "POST" });
+      toast(r.sent ? `${r.number} enviada al cliente` : r.note || "No salió el correo", r.sent ? undefined : "bad");
+      onDone();
+    } catch (e) { toast(e instanceof Error ? e.message : "No se pudo", "bad"); }
+    finally { setBusy(false); }
+  };
+  return <button className="btn btn--crimson btn--sm aprob-item__action" disabled={busy} onClick={run}>{it.action.label}</button>;
+}
+
 function Row({ it, onDone }: { it: ApprovalItem; onDone: () => void }) {
   const { toast } = useSession();
   const [busy, setBusy] = useState(false);
@@ -69,7 +89,9 @@ function Row({ it, onDone }: { it: ApprovalItem; onDone: () => void }) {
         </span>
         <em className="aprob-item__go">Abrir →</em>
       </Link>
-      {it.action && <div className="aprob-item__act"><button className="btn btn--crimson btn--sm" onClick={act} disabled={busy}>{busy ? "Aplicando…" : it.action.label}</button></div>}
+      {it.action && (it.action.body === undefined
+        ? <div className="aprob-item__act"><ActionButton it={it} onDone={onDone} /></div>
+        : <div className="aprob-item__act"><button className="btn btn--crimson btn--sm" onClick={act} disabled={busy}>{busy ? "Aplicando…" : it.action.label}</button></div>)}
     </li>
   );
 }
@@ -157,7 +179,7 @@ export default function Approvals() {
       {data === null ? (
         failed ? <Card><Empty title="No se pudo cargar la bandeja" hint="Revisá la conexión y tocá Actualizar." /></Card> : <Loading />
       ) : conPend.length === 0 ? (
-        <Card><Empty title="Nada pendiente de aprobar" hint="Cuando un técnico envíe un levantamiento a revisión, o una cotización, reserva, planilla, comisión o precio de la tienda necesite tu visto bueno, aparece aquí." /></Card>
+        <Card><Empty title="Nada pendiente de aprobar" hint="Cuando un técnico envíe un levantamiento a revisión, o una cotización, reserva, planilla, comisión, mensualidad o precio de la tienda necesite tu visto bueno, aparece aquí." /></Card>
       ) : (
         <>
           <nav className="aprob-chips" aria-label="Secciones con pendientes">

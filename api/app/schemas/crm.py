@@ -17,6 +17,7 @@ class CustomerIn(BaseModel):
     exemption: dict | None = None
     notes: str | None = None
     active: bool = True
+    no_reminders: bool = False  # cobranza (plan 1.3): sin recordatorios automaticos de cobro
 
 
 class CustomerOut(CustomerIn):

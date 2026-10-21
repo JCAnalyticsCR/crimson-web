@@ -152,6 +152,10 @@ class InvoiceOut(DocBaseOut):
     external_date: date | None = None
     created_at: datetime | None = None  # con produccion activa, lo creado antes se puede marcar emitido en Fygaro
     payments: list[PaymentOut] = []
+    # cobranza (plan 1.3): cuando le llego al cliente, pausa de la secuencia y avisos ya enviados
+    sent_at: datetime | None = None
+    reminders_paused: bool = False
+    reminders: list[dict] = []
 
 
 class PaymentLinkOut(BaseModel):

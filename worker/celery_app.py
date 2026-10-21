@@ -61,6 +61,9 @@ def _log_fiscal_keys() -> None:
 
 _log_fiscal_keys()
 
+# Tareas por area (api/app/tasks/<area>.py, registradas con shared_task): aqui solo se importan y se agendan.
+import app.tasks.cobranza  # noqa: E402,F401  sales.mark_overdue, sales.reminders, cobranza.resumen_semanal (plan 1.3)
+import app.tasks.mensualidades  # noqa: E402,F401  mensualidades.vista_previa (plan 1.4)
 import app.tasks.tienda  # noqa: E402,F401  tareas de la tienda (recordatorio de pago, consulta a ONVO): plan 1.5
 
 
@@ -117,26 +120,6 @@ def suppliers_eurocomp_stock() -> dict:
         return {str(k): v for k, v in supplier_sync.refresh_linked(db).items()}
 
 
-@celery.task(name="sales.mark_overdue")
-def mark_overdue() -> int:
-    """Marca vencidas las cotizaciones/facturas cuya fecha paso (los recordatorios por correo llegan en Fase 1.4)."""
-    from sqlalchemy import select, update
-
-    from app.core.db import SessionLocal
-    from app.core.timeutil import cr_today
-    from app.models import Invoice, Quote
-
-    n = 0
-    with SessionLocal() as db:
-        for model, states in ((Quote, ("creado", "enviada")), (Invoice, ("creado", "parcial"))):
-            ids = db.scalars(select(model.id).where(model.status.in_(states), model.due_date < cr_today())).all()
-            if ids:
-                db.execute(update(model).where(model.id.in_(ids)).values(status="vencida"))
-                n += len(ids)
-        db.commit()
-    return n
-
-
 @celery.task(name="sales.run_recurrences")
 def run_recurrences() -> int:
     from app.core.db import SessionLocal
@@ -154,47 +137,6 @@ def retry_outbox() -> dict:
 
     with SessionLocal() as db:
         return run(db)
-
-
-@celery.task(name="sales.reminders")
-def reminders() -> int:
-    """Recordatorio N dias antes del vencimiento (ajuste remind_days_before) y aviso de vencidas, por correo al cliente."""
-    from datetime import timedelta
-
-    from sqlalchemy import select
-
-    from app.core.db import SessionLocal
-    from app.core.timeutil import cr_today
-    from app.models import Customer, Invoice, Tenant
-    from app.services.mail import doc_email_html, queue_email
-    from app.services.render import money
-
-    n = 0
-    with SessionLocal() as db:
-        for t in db.scalars(select(Tenant).where(Tenant.active)):
-            st = t.settings or {}
-            if not st.get("notify_due", True):
-                continue
-            target = cr_today() + timedelta(days=int(st.get("remind_days_before", 3)))
-            for inv in db.scalars(
-                select(Invoice).where(Invoice.tenant_id == t.id, Invoice.status.in_(("creado", "enviada", "parcial")), Invoice.due_date == target)
-            ):
-                c = db.get(Customer, inv.customer_id) if inv.customer_id else None
-                if c and c.email:
-                    queue_email(
-                        db,
-                        t,
-                        c.email,
-                        f"Recordatorio: factura {inv.number} vence el {inv.due_date}",
-                        doc_email_html(t, "factura", inv.number, money(inv.balance, inv.currency), None, "Le recordamos que su factura vence pronto."),
-                        "invoice",
-                        inv.id,
-                        # regla 6: dos corridas el mismo dia (reintento, tarea reentregada) no le repiten el correo
-                        dedupe_key=f"recordatorio:{inv.id}:{inv.due_date}:{c.email.strip().lower()}",
-                    )
-                    n += 1
-        db.commit()
-    return n
 
 
 @celery.task(name="sales.daily_close_email")
@@ -598,4 +540,6 @@ celery.conf.beat_schedule = {
     "fiscal-por-emitir": {"task": "fiscal.por_emitir_diario", "schedule": crontab(hour=8, minute=30)},
     # despues de la tasa del BCCR (6:15) y del refresco de Eurocomp (5:17), que ya corren el guardian
     "margin-daily-summary": {"task": "margin.daily_summary", "schedule": crontab(hour=7, minute=5)},
+    "cobranza-resumen-semanal": {"task": "cobranza.resumen_semanal", "schedule": crontab(hour=7, minute=0, day_of_week="mon")},
+    "mensualidades-vista-previa": {"task": "mensualidades.vista_previa", "schedule": crontab(hour=7, minute=20)},
 }

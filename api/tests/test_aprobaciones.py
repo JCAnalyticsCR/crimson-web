@@ -22,6 +22,9 @@ KEYS = [
     "planillas_por_aprobar",
     "comisiones_por_aprobar",
     "precios_por_revisar",  # plan 1.12: guardian de margen (solo quien ve costos y edita el catalogo)
+    # plan 1.4: primera mensualidad de cada plan (Aprobar y enviar) y propuesta de suspension a D+30
+    "mensualidades_por_aprobar",
+    "aliados_en_mora",
 ]
 
 

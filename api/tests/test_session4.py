@@ -545,7 +545,9 @@ def test_discount_limit_and_approval(client, auth, db_session):
     assert client.post(f"/quotes/{big['id']}/convert", headers=v).status_code == 409
     assert client.post(f"/quotes/{big['id']}/approve", headers=v).status_code == 403  # el vendedor no se aprueba solo
     assert client.post(f"/quotes/{big['id']}/approve").json()["status"] == "creado"
-    assert client.post(f"/quotes/{big['id']}/convert", headers=v).status_code == 201
+    conv = client.post(f"/quotes/{big['id']}/convert", headers=v)
+    assert conv.status_code == 201
+    client.post(f"/invoices/{conv.json()['id']}/payment-link", headers=v)  # compartida: queda por cobrar (plan 1.3)
     # bajar el precio de catalogo cuenta como descuento (189 000 -> 150 000 = 20.6 %)
     assert quote(v, 0, 150000)["status"] == "por_aprobar"
     # factura directa por encima del limite: rechazada con mensaje claro

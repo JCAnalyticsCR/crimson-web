@@ -157,7 +157,9 @@ export type Invoice = Doc & { doc_type: string; consecutive: string | null; clav
   /* emitida fuera de la plataforma (Fygaro) mientras Hacienda no esta en produccion: numero y fecha de alla */
   external_number?: string | null; external_date?: string | null;
   /* con produccion activa, lo creado antes de activarla se puede marcar emitido en Fygaro (el corte) */
-  created_at?: string | null };
+  created_at?: string | null;
+  /* cobranza (plan 1.3): cuando le llego al cliente, pausa de la secuencia y recordatorios ya enviados */
+  sent_at?: string | null; reminders_paused?: boolean; reminders?: { stage: string; sent_on: string; status: string }[] };
 export type DocListItem = { id: number; number: string; customer_name: string | null; currency: string; total: string; balance: string | null; status: string; issue_date: string; due_date: string | null; acceptance_status?: string | null; seller_name?: string | null };
 export type Ceo = {
   pipeline: string; pipeline_weighted: string; opportunities: number; receivable: string; sold_month: string;

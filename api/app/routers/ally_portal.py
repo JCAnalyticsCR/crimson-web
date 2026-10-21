@@ -1658,7 +1658,19 @@ def _factura_visible(c, inv: Invoice) -> bool:
     return _emitida(inv)
 
 
+def _estado(inv: Invoice) -> str:
+    """Estado real para el aliado (plan 1.4): por pagar, vencida, abonada o pagada."""
+    from ..services.invoice_states import cr_today
+
+    if inv.status == "pagada" or d(inv.balance) <= 0:
+        return "pagada"
+    if (inv.due_date and inv.due_date < cr_today()) or inv.status == "vencida":
+        return "vencida"
+    return "abonada" if inv.status == "parcial" else "por_pagar"
+
+
 def _invoice_out(inv: Invoice) -> dict:
+    estado = _estado(inv)
     return {
         "id": inv.id,
         "number": inv.number,
@@ -1667,6 +1679,8 @@ def _invoice_out(inv: Invoice) -> dict:
         "total": inv.total,
         "balance": inv.balance,
         "status": inv.status,
+        "estado": estado,
+        "pagable": estado != "pagada",  # con saldo: "Pagar en línea" (POST /aliado/facturas/{id}/pagar)
         "currency": inv.currency,
         "mensualidad": inv.external_order == ally_access.PLAN_ORDER,
     }
@@ -1728,6 +1742,24 @@ def factura_pdf(iid: int, ctx: AllyCtx = Depends(need("suscripcion")), db: Sessi
     if pdf is None:
         return HTMLResponse(html_doc, headers={"X-PDF-Fallback": "html"})
     return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{inv.number}.pdf"'})
+
+
+@router.post("/facturas/{iid}/pagar")
+def factura_pagar(iid: int, ctx: AllyCtx = Depends(need("suscripcion")), db: Session = Depends(get_db)):
+    """Enlace de pago de una factura que ya le llego al aliado y tiene saldo (el mismo del correo; se crea si vencio)."""
+    from ..services.documents import get_or_create_payment_link
+
+    inv = db.get(Invoice, iid)
+    if inv is None or not _factura_visible(ctx.company, inv):
+        raise HTTPException(404, "Factura no encontrada")
+    if d(inv.balance) <= 0:
+        raise HTTPException(409, "Esta factura no tiene saldo por pagar")
+    if ctx.preview_by is not None:
+        raise HTTPException(409, "En la vista previa no se generan enlaces de pago")
+    link = get_or_create_payment_link(db, ctx.p.tenant.id, inv)
+    audit(db, ctx.p.tenant.id, ctx.p.user.id, "paylink_aliado", "invoice", inv.id, ip=ctx.p.ip)
+    db.commit()
+    return {"url": link.url, "expires_at": link.expires_at}
 
 
 # ---------- Mi equipo ----------

@@ -62,7 +62,7 @@ from .ops import (
     WebhookEvent,
 )
 from .payments import BankAccount, BankInstrument, Payment, PaymentLink
-from .sales import BillingGroup, Invoice, InvoiceLine, Quote, QuoteAcceptance, QuoteLine, QuoteVersion
+from .sales import BillingGroup, CollectionReminder, Invoice, InvoiceLine, Quote, QuoteAcceptance, QuoteLine, QuoteVersion
 from .store import ApiCredential, Coupon, Order, OrderLine, ReceivedDocument, StorePage, StoreStockAlert
 from .supplier_catalog import SupplierItem, SupplierListImport
 from .support import (
@@ -98,6 +98,7 @@ __all__ = [
     "SupplierItem",
     "SupplierListImport",
     "BillingGroup",
+    "CollectionReminder",
     "Quote",
     "QuoteLine",
     "QuoteVersion",
