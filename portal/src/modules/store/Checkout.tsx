@@ -99,8 +99,10 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
   // la tarifa GAM no aplica fuera de la GAM; la de "fuera de GAM" se deja siempre (la lista de cantones es conservadora)
   const rateOk = (r: Rate) => !(r.zone === "gam" && outside);
   // efectivo solo con retiro en sitio (Mi Tienda -> Pagos y entrega): con envio no se ofrece
-  const methods = (cfg?.methods || []).filter((m) => !(m.pickup_only && f.dtype !== "retiro"));
-  const hiddenCash = !!cfg && cfg.methods.some((m) => m.pickup_only) && f.dtype !== "retiro";
+  // sin retiro posible, el efectivo "solo al retirar" no se ofrece nunca (si no queda ninguno: compra no disponible)
+  const usable = (cfg?.methods || []).filter((m) => !(m.pickup_only && !canPickup));
+  const methods = usable.filter((m) => !(m.pickup_only && f.dtype !== "retiro"));
+  const hiddenCash = usable.some((m) => m.pickup_only) && f.dtype !== "retiro";
   useEffect(() => {
     if (!cfg) return;
     setF((x) => {
@@ -214,7 +216,7 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
   if (cfgErr) return <div className="sh-wrap sh-empty"><b>{cfgErr}</b><button className="sh-btn sh-btn--ghost" onClick={onBack}>Volver a la tienda</button></div>;
   if (!cart.length) return <div className="sh-wrap sh-empty"><b>Tu carrito está vacío.</b><button className="sh-btn sh-btn--ghost" onClick={onBack}>Ver catálogo</button></div>;
   if (!cfg) return <div className="sh-wrap" style={{ paddingTop: 24 }}><div className="sh-skel" style={{ height: 320 }} /></div>;
-  if (!cfg.methods.length) return <div className="sh-wrap sh-empty"><b>La compra en línea no está disponible en este momento.</b>{cfg.whatsapp && <a className="sh-btn sh-btn--wa" href={wa(cfg.whatsapp, `Hola ${S.name}, quiero comprar:\n${cart.map((l) => `• ${l.qty} × ${l.name}`).join("\n")}`)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Pedir por WhatsApp</a>}</div>;
+  if (!usable.length) return <div className="sh-wrap sh-empty"><b>La compra en línea no está disponible en este momento.</b>{cfg.whatsapp && <a className="sh-btn sh-btn--wa" href={wa(cfg.whatsapp, `Hola ${S.name}, quiero comprar:\n${cart.map((l) => `• ${l.qty} × ${l.name}`).join("\n")}`)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Pedir por WhatsApp</a>}</div>;
 
   const method = methods.find((m) => m.code === f.method);
   const cantons = f.province ? cfg.provinces[f.province] || [] : [];

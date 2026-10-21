@@ -251,8 +251,8 @@ def test_vencimiento_libera_y_pagar_fija(client, auth, db_session):
     assert client.patch(f"/orders/{sinpe.id}", json={"status": "pagado"}).status_code == 200
     db_session.refresh(r1)
     assert r1.expires_at is None and r1.status == "confirmada"
-    # el de tarjeta no se paga: vence, el worker la libera y deja nota en el pedido
-    r2.expires_at = now - timedelta(minutes=1)
+    # el de tarjeta no se paga: vence (el plazo del pedido y su reserva son el mismo), el worker la libera y deja nota
+    r2.expires_at = card.expires_at = now - timedelta(minutes=1)
     db_session.commit()
     assert _avail(client, p["id"]).json()[str(p["id"])]["estado"] == "en_bodega"  # vencida ya no compromete
     assert sinv.expire_holds(db_session) == 1
@@ -272,7 +272,7 @@ def test_vencimiento_libera_y_pagar_fija(client, auth, db_session):
     _cfg(client, cancel_unpaid_on_expiry=True)
     late = _order(db_session, _buy(client, [{"product_id": p["id"], "quantity": 1}]).json()["number"])
     r3 = db_session.scalar(select(StockReservation).where(StockReservation.order_id == late.id))
-    r3.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    r3.expires_at = late.expires_at = datetime.now(UTC) - timedelta(minutes=1)
     db_session.commit()
     assert client.post("/stock/reservations/expire").json()["expired"] == 1
     db_session.refresh(late)

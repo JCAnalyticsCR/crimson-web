@@ -18,9 +18,10 @@ Reglas
   (reserve_received).
 - Vencimiento (expire_holds): las reservas web vencen, y los pedidos "nuevo" con el plazo para pagar vencido (tengan
   o no reserva propia) dejan una nota en el historial; con cancel_unpaid_on_expiry se cancelan, pero nunca uno con
-  tarjeta sin preguntarle a ONVO (si ONVO no responde, se reintenta) ni uno con comprobante en revision.
-  Con comprobante en revision tampoco vence lo apartado (on_review); si lo rechazan, el pedido tiene al menos 24 h
-  para subir otro.
+  tarjeta antes de su margen ni sin preguntarle a ONVO (si ONVO no responde, se reintenta) ni uno con comprobante en
+  revision. El efectivo (se cobra al retirar) y "a coordinar" no tienen plazo para pagar: solo vence lo apartado.
+  Con comprobante en revision lo apartado espera la revision hasta un tope contado desde el PRIMER comprobante
+  (on_review); si lo rechazan, la primera vez el pedido tiene al menos 24 h para subir otro.
 - force=True (pedido ya pagado que se vuelve a reservar) nunca rechaza: lo que falte queda "requiere compra".
 - Despacho (enviado/entregado) o factura: la reserva se consume y sale del inventario UNA sola vez. Las
   salidas llevan order_id; la factura de un pedido ya despachado solo enlaza esas salidas (asi anular la
@@ -33,6 +34,7 @@ API para el checkout (todas reciben la sesion; las que dicen "hace commit" lo ha
 - reserve_received(db, request, warehouse_id, user_id=None) -> int  (sin commit; compra recibida de un pedido web)
 - mark_paid(db, order) -> dict                  (sin commit)
 - activate_requests(db, order, user_id=None) -> list   (sin commit; reservada -> borrador + aviso de compra)
+- order_alive(order, now=None, hold_hours=None) -> bool (lo bajo pedido de un pedido sin pagar todavia aparta)
 - release_for_order(db, order, note=None, user_id=None) -> int   (sin commit)
 - fulfill_for_order(db, order, user_id=None, invoice=None) -> int (sin commit)
 - deduct_for_order_invoice(db, order, invoice, user_id=None) -> int (sin commit; reemplaza deduct_for_invoice)
@@ -152,12 +154,16 @@ def _hold_expiry(o: Order, cfg: dict) -> datetime | None:
     return _now() + timedelta(hours=int(cfg.get("hold_hours_manual") or 48))
 
 
-def order_alive(o: Order, now: datetime | None = None) -> bool:
-    """Pedido sin pagar que todavia aparta lo bajo pedido (mismo criterio que availability._web_requests): con
-    comprobante en revision, o "nuevo" sin plazo vencido."""
-    if o.status == "en_revision":
-        return True
-    return o.status == "nuevo" and (o.expires_at is None or _aware(o.expires_at) > (now or _now()))
+def order_alive(o: Order, now: datetime | None = None, hold_hours: int | None = None) -> bool:
+    """Pedido sin pagar que todavia aparta lo bajo pedido (mismo criterio que availability._web_requests): "nuevo" o
+    con comprobante en revision, mientras no pase su plazo (expires_at; la revision tiene tope: on_review). Sin plazo
+    para pagar (efectivo, "a coordinar"): mientras dure su reserva propia (hold_hours_manual desde que se hizo)."""
+    if o.status not in UNPAID:
+        return False
+    now = now or _now()
+    if o.expires_at is not None:
+        return _aware(o.expires_at) > now
+    return _aware(o.created_at) + timedelta(hours=int(hold_hours or DEFAULTS["hold_hours_manual"])) > now
 
 
 def _order_wh_order(p: Product, whs: list[int]) -> list[int]:
@@ -320,7 +326,8 @@ def _supplier_codes(db: Session, tenant_id: int, product_ids: list[int]) -> dict
 
 
 def _notify_paid_purchase(db: Session, t: Tenant, o: Order, reqs: list[PurchaseRequest]) -> int:
-    """UN aviso por pago: "PAGADO: comprar hoy" con lo que falta y el codigo de cada articulo en el proveedor."""
+    """UN aviso por pago: "PAGADO: comprar hoy" con lo que falta y el codigo de cada articulo en el proveedor. El
+    efectivo que el equipo avanza sin pago (se cobra al retirar) avisa lo mismo pero sin decir que esta pagado."""
     import html
 
     from .mail import notify_roles
@@ -340,12 +347,20 @@ def _notify_paid_purchase(db: Session, t: Tenant, o: Order, reqs: list[PurchaseR
     tarde = ""
     if o.expires_at is not None and o.paid_at is not None and _aware(o.paid_at) > _aware(o.expires_at):
         tarde = "<p><b>Ojo:</b> el pago llegó después del plazo; lo apartado ya había vuelto a la venta. Confirmá la existencia con el proveedor antes de prometer fecha.</p>"
+    if o.paid_at is not None:
+        asunto = f"PAGADO: comprar hoy a {quien} · pedido {o.number} ({numeros})"
+        estado = f"<p>El pedido web <b>{e(o.number)}</b> ya está <b>pagado</b>. Hay que comprarle hoy a {e(quien)}:</p>"
+    else:
+        efectivo = o.payment_kind == "efectivo"
+        asunto = f"Comprar hoy a {quien} · pedido {o.number} {'en efectivo' if efectivo else 'sin pago confirmado'} ({numeros})"
+        como = "se paga en efectivo y <b>todavía no está cobrado</b>" if efectivo else "<b>todavía no tiene el pago confirmado</b>"
+        estado = f"<p>El pedido web <b>{e(o.number)}</b> {como}, pero el equipo ya lo avanzó. Hay que comprarle hoy a {e(quien)}:</p>"
     return notify_roles(
         db,
         t,
         ("admin", "supervisor"),
-        f"PAGADO: comprar hoy a {quien} · pedido {o.number} ({numeros})",
-        f"<p>El pedido web <b>{e(o.number)}</b> ya está <b>pagado</b>. Hay que comprarle hoy a {e(quien)}:</p><ul>{items}</ul>{tarde}"
+        asunto,
+        f"{estado}<ul>{items}</ul>{tarde}"
         f"<p>La solicitud de compra <b>{e(numeros)}</b> quedó en borrador: marcala «solicitada» al hacer el pedido. Al recibir la compra queda reservada para este pedido.</p>",
         "purchase_request",
         reqs[0].id,
@@ -354,7 +369,9 @@ def _notify_paid_purchase(db: Session, t: Tenant, o: Order, reqs: list[PurchaseR
 
 def activate_requests(db: Session, o: Order, user_id: int | None = None) -> list[PurchaseRequest]:
     """El pedido se pago (o el efectivo contra entrega avanza): sus solicitudes "reservada" pasan a borrador y sale UN
-    aviso de compra. Idempotente: lo ya activado no vuelve a avisar. Sin commit."""
+    aviso de compra. Una que alguien mando a la papelera para limpiar vuelve de la papelera: el pedido pagado necesita
+    esa compra (filtrarla dejaba un pedido cobrado sin comprar). Idempotente: lo ya activado no vuelve a avisar. Sin
+    commit."""
     reqs = list(
         db.scalars(
             select(PurchaseRequest)
@@ -364,9 +381,14 @@ def activate_requests(db: Session, o: Order, user_id: int | None = None) -> list
     )
     if not reqs:
         return []
+    motivo = f"pedido {o.number} pagado" if o.paid_at is not None else f"pedido {o.number} en efectivo avanzado por el equipo"
     for r in reqs:
         r.status = "borrador"
-        audit(db, o.tenant_id, user_id, "status", "purchase_request", r.id, {"status": "borrador", "motivo": f"pedido {o.number} pagado"})
+        diff = {"status": "borrador", "motivo": motivo}
+        if r.trashed_at is not None:
+            r.trashed_at, r.trashed_by = None, None
+            diff["restaurada"] = "estaba en la papelera"
+        audit(db, o.tenant_id, user_id, "status", "purchase_request", r.id, diff)
     db.flush()
     _notify_paid_purchase(db, db.get(Tenant, o.tenant_id), o, reqs)
     return reqs
@@ -611,23 +633,37 @@ def deduct_for_order_invoice(db: Session, o: Order, invoice: Invoice, user_id: i
     return fulfill_for_order(db, o, user_id, invoice)
 
 
-REVIEW_GRACE = timedelta(hours=24)  # comprobante rechazado: tiempo minimo para subir otro antes de que venza
+REVIEW_HOLD = timedelta(hours=48)  # lo apartado espera la revision hasta aqui, contado desde el PRIMER comprobante
+REVIEW_GRACE = timedelta(hours=24)  # comprobante rechazado (solo la primera vez): tiempo minimo para subir otro
+GRACE_NOTE = "gracia_comprobante"  # clave de la nota: la gracia por rechazo se da una sola vez
+
+
+def _first_proof_at(o: Order) -> datetime | None:
+    ats = []
+    for pr in o.proofs or []:
+        try:
+            ats.append(_aware(datetime.fromisoformat(pr.get("at"))))
+        except (TypeError, ValueError):
+            continue
+    return min(ats) if ats else None
 
 
 def on_review(db: Session, o: Order, under_review: bool) -> None:
-    """Comprobante subido (under_review): lo propio del pedido deja de vencer mientras el equipo lo revisa (lo del
-    proveedor ya sigue apartado: availability._web_requests); el comprobante puede ser bueno. Rechazado: el pedido
-    vuelve a "nuevo" con al menos REVIEW_GRACE para subir otro (el correo de rechazo se lo pide) y lo propio vence
-    con el. Sin commit."""
-    rows = _order_reservations(db, o, ("confirmada",))
-    if under_review:
-        for r in rows:
-            r.expires_at = None
-        return
+    """Comprobante subido (under_review): el plazo del pedido (y de lo apartado, propio y del proveedor) se estira
+    hasta REVIEW_HOLD desde el PRIMER comprobante: el comprobante puede ser bueno y el equipo necesita tiempo, pero un
+    comprobante falso no aparta inventario para siempre. Rechazado: la primera vez el pedido vuelve a "nuevo" con al
+    menos REVIEW_GRACE para subir otro (el correo de rechazo se lo pide); las siguientes no ganan tiempo. Lo propio
+    vence con el pedido. Sin commit. Un pedido sin plazo para pagar no cambia."""
+    from . import store_orders as so
+
     if o.expires_at is None:
         return
-    o.expires_at = max(_aware(o.expires_at), _now() + REVIEW_GRACE)
-    for r in rows:
+    if under_review:
+        o.expires_at = max(_aware(o.expires_at), (_first_proof_at(o) or _now()) + REVIEW_HOLD)
+    elif not so.has_note(o, GRACE_NOTE):
+        o.expires_at = max(_aware(o.expires_at), _now() + REVIEW_GRACE)
+        so._note(o, "sistema", f"Comprobante rechazado: el cliente tiene hasta el {so._cr_when(o.expires_at)} para subir otro.", key=GRACE_NOTE)
+    for r in _order_reservations(db, o, ("confirmada",)):
         r.expires_at = o.expires_at
 
 
@@ -635,10 +671,12 @@ def on_order_status(db: Session, o: Order, old: str | None, new: str, user_id: i
     """Gancho de PATCH /orders/{id}: pagado/preparando fija la reserva, enviado/entregado descuenta, cancelado libera."""
     if new == old:
         return {}
-    if new in ("pagado", "preparando") and old == "nuevo":
+    if old == "nuevo" and new in ("pagado", "preparando", "listo"):
+        # pagado, o el efectivo (se cobra al retirar) que el equipo avanza: lo propio deja de vencer hasta el retiro
+        # (si ya habia vencido se vuelve a reservar) y la compra bajo pedido nace ahora
         return mark_paid(db, o, user_id)
-    if old == "nuevo" and new in ("listo", "enviado", "entregado"):
-        # efectivo contra entrega avanza sin pago: que el equipo lo avance es la decision de comprar lo bajo pedido
+    if old == "nuevo" and new in ("enviado", "entregado"):
+        # efectivo contra entrega que sale directo: la salida consume lo apartado; la compra bajo pedido nace ahora
         activate_requests(db, o, user_id)
     if new in ("enviado", "entregado"):
         return {"movimientos": fulfill_for_order(db, o, user_id)}
@@ -662,7 +700,7 @@ def order_stock(db: Session, o: Order) -> dict:
         estado = "despachado"
     elif any(rq.status in ("borrador", "solicitada") for rq in reqs):
         estado = "requiere_compra"
-    elif apartada and order_alive(o):
+    elif apartada and order_alive(o, hold_hours=settings_of(db.get(Tenant, o.tenant_id)).get("hold_hours_manual")):
         estado = "espera_pago"  # bajo pedido: se compra al cobrar
     elif activas:
         estado = "reservado"
@@ -696,20 +734,28 @@ def order_stock(db: Session, o: Order) -> dict:
 
 # ---------- worker ----------
 EXPIRED_NOTE = "vencio"  # marca (clave) de la nota "venció el plazo" en el historial: una sola vez por pedido
-NOTE_WINDOW = timedelta(days=3)  # sin cancel_unpaid_on_expiry, un pedido vencido hace mas ya tiene su nota
+HOLD_NOTE = "reserva_vencio"  # sin plazo para pagar (efectivo, "a coordinar"): solo vencio lo apartado
+REVIEW_LATE_NOTE = "revision_vencio"  # el comprobante sigue sin revisar al pasar el tope: aviso al equipo, una vez
+NOTE_WINDOW = timedelta(days=3)  # un pedido vencido hace mas ya tiene su nota: no se relee cada 5 min
 
 
 def expire_holds(db: Session) -> int:
     """Pedidos web sin pagar que vencieron. Hace commit (por pedido: uno con datos raros no frena a los demas).
 
     1. Reservas web vencidas -> vencida (lo propio vuelve a venderse).
-    2. Cada pedido "nuevo" de la tienda cuya reserva vencio o cuyo plazo para pagar (expires_at) paso, tenga o no
-       reserva propia (todo bajo pedido): lo apartado del proveedor ya no cuenta (availability._web_requests) y queda
-       UNA nota en el historial (nunca en o.notes, que es la nota del cliente).
-    3. Si Ajustes lo pide (cancel_unpaid_on_expiry), store_orders.expire_unpaid lo cancela: con tarjeta, antes le
-       pregunta a ONVO (pagado -> se aplica; sin respuesta -> no se cancela y se reintenta); con comprobante en
-       revision nunca se toca (no es "nuevo").
-    Devuelve las reservas vencidas mas los pedidos sin reserva propia que se cancelaron.
+    2. Cada pedido "nuevo" de la tienda cuyo plazo para pagar (expires_at) paso, tenga o no reserva propia (todo bajo
+       pedido): lo apartado del proveedor ya no cuenta (availability._web_requests) y queda UNA nota en el historial
+       (nunca en o.notes, que es la nota del cliente). Si Ajustes lo pide (cancel_unpaid_on_expiry),
+       store_orders.expire_unpaid lo cancela: con tarjeta, solo pasado su margen y despues de preguntarle a ONVO
+       (pagado -> se aplica; sin respuesta o en proceso -> no se cancela y se reconsulta con espera creciente; si ONVO
+       no responde, el resto de sus pedidos con tarjeta espera a la proxima corrida).
+    3. Sin plazo para pagar (efectivo: se cobra al retirar; "a coordinar"): solo vencio lo apartado. Nota, sin cancelar
+       ni correo al cliente.
+    4. Comprobante en revision que paso su tope (on_review): nunca se cancela; nota y UN aviso al equipo de que lo
+       apartado volvio a la venta.
+    Las empresas inactivas solo vencen lo apartado (paso 1). Lo que se relee esta acotado: NOTE_WINDOW, salvo los
+    pedidos de empresas con cancelacion (los sin tarjeta salen en la primera pasada; los con tarjeta, hasta
+    CARD_GRACE + CARD_GIVE_UP). Devuelve las reservas vencidas mas los pedidos sin reserva propia que se cancelaron.
     El resto de reservas las vence reservations.expire_due."""
     from . import store_orders as so
 
@@ -730,24 +776,63 @@ def expire_holds(db: Session) -> int:
         if r.order_id:
             with_hold.add(r.order_id)
     db.commit()
-    due_rows = db.execute(
-        select(Order.id, Order.tenant_id, Order.expires_at).where(
-            Order.channel == "tienda", Order.status == "nuevo", Order.expires_at.is_not(None), Order.expires_at <= now
+    tenants = {t.id: t for t in db.scalars(select(Tenant))}
+    cancel_tids = {tid for tid, t in tenants.items() if t.active and settings_of(t).get("cancel_unpaid_on_expiry")}
+    cond = Order.expires_at > now - NOTE_WINDOW
+    if cancel_tids:
+        card_window = Order.expires_at > now - so.CARD_GRACE - so.CARD_GIVE_UP
+        cond = or_(
+            cond,
+            and_(
+                Order.tenant_id.in_(cancel_tids),
+                Order.status == "nuevo",
+                or_(Order.payment_kind.is_(None), Order.payment_kind != "tarjeta", card_window),
+            ),
         )
-    ).all()
-    cancels = {tid: bool(settings_of(db.get(Tenant, tid)).get("cancel_unpaid_on_expiry")) for tid in {r.tenant_id for r in due_rows}}
-    # sin cancelar, al pedido vencido solo se le deja la nota (en la primera corrida): los viejos no se releen cada 5 min
-    due = {r.id for r in due_rows if cancels[r.tenant_id] or _aware(r.expires_at) > now - NOTE_WINDOW}
+    due = set(
+        db.scalars(select(Order.id).where(Order.channel == "tienda", Order.status.in_(UNPAID), Order.expires_at.is_not(None), Order.expires_at <= now, cond))
+    )
     n = len(rows)
+    onvo_down: set[int] = set()  # empresas cuyo ONVO no respondio en esta corrida
     for oid in sorted(with_hold | due):
         try:
-            o = db.get(Order, oid, with_for_update=True, populate_existing=True)
-            if not o or o.status != "nuevo":
-                continue  # pagado, cancelado o con comprobante en revision: no se toca
-            t = db.get(Tenant, o.tenant_id)
-            outcome = so.expire_unpaid(db, t, o) if settings_of(t).get("cancel_unpaid_on_expiry") else "sin_cancelar"
-            if outcome != "cancelado" and o.status == "nuevo" and not so.has_note(o, EXPIRED_NOTE):
-                so._note(o, "sistema", "Venció el plazo para pagar sin pago confirmado: lo apartado volvió a la venta.", key=EXPIRED_NOTE)
+            o = db.get(Order, oid, populate_existing=True)  # sin candado: la consulta a ONVO no bloquea la fila
+            if not o or o.status not in UNPAID:
+                continue  # pagado o cancelado: no se toca
+            t = tenants.get(o.tenant_id)
+            if t is None or not t.active:
+                continue
+            vencido = o.expires_at is not None and _aware(o.expires_at) <= now
+            if o.status == "en_revision":
+                if vencido and not so.has_note(o, REVIEW_LATE_NOTE):
+                    o = so.lock_order(db, o)
+                    if o.status == "en_revision" and not so.has_note(o, REVIEW_LATE_NOTE):
+                        so._note(
+                            o,
+                            "sistema",
+                            "El comprobante sigue sin revisar y pasó el tiempo de espera: lo apartado volvió a la venta. "
+                            "El pedido no se cancela solo: confirmá o rechazá el pago.",
+                            key=REVIEW_LATE_NOTE,
+                        )
+                        so.notify_team(db, t, o, "revision", detail="Lo apartado para este pedido volvió a la venta mientras el comprobante esperaba revisión.")
+                db.commit()
+                continue
+            if not vencido:
+                if oid in with_hold and not so.has_note(o, HOLD_NOTE):
+                    o = so.lock_order(db, o)
+                    if o.status == "nuevo" and not so.has_note(o, HOLD_NOTE):
+                        so._note(o, "sistema", "Venció la reserva de inventario: lo apartado volvió a la venta. El pedido sigue abierto.", key=HOLD_NOTE)
+                db.commit()
+                continue
+            outcome = "sin_cancelar"
+            if t.id in cancel_tids:
+                outcome = so.expire_unpaid(db, t, o, now, ask_onvo=t.id not in onvo_down)
+                if outcome == "sin_respuesta":
+                    onvo_down.add(t.id)
+            if outcome not in ("cancelado", "revisar") and o.status == "nuevo" and not so.has_note(o, EXPIRED_NOTE):
+                o = so.lock_order(db, o)
+                if o.status == "nuevo" and not so.has_note(o, EXPIRED_NOTE):
+                    so._note(o, "sistema", "Venció el plazo para pagar sin pago confirmado: lo apartado volvió a la venta.", key=EXPIRED_NOTE)
             if outcome == "cancelado" and oid not in with_hold:
                 n += 1
             db.commit()

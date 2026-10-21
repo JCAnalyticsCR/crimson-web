@@ -22,7 +22,7 @@ const STATUS: Record<string, { label: string; tone: string }> = {
 };
 const REASON: Record<string, string> = { proyecto: "Materiales de proyecto", stock_bajo: "Inventario bajo el mínimo", manual: "Pedido manual", pedido_web: "Pedido web bajo pedido (al recibirla queda reservada para ese pedido)" };
 // pedido web sin pagar: la compra nace al cobrar (al proveedor no se le devuelve nada)
-const RESERVADA = "Este pedido web todavía no está pagado: la solicitud solo aparta lo del proveedor. Pasa a borrador sola cuando el pedido se paga (te llega el aviso «PAGADO: comprar hoy») y se cancela sola si el pedido vence o se cancela. No le compres al proveedor antes.";
+const RESERVADA = "Este pedido web todavía no está pagado: la solicitud solo aparta lo del proveedor. Pasa a borrador sola cuando el pedido se paga (te llega el aviso «PAGADO: comprar hoy»). Para descartarla, cancelá el pedido en Pedidos de la tienda; con «Cancelar el pedido cuando vence el plazo para pagar» encendido se cancela sola al vencer. No le compres al proveedor antes.";
 
 export default function Purchases() {
   const { toast, allows } = useSession();

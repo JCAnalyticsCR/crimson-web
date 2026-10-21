@@ -257,16 +257,21 @@ def list_datetime(list_date: date | None) -> datetime | None:
     return datetime.combine(list_date, time(12, 0), tzinfo=UTC)
 
 
-def _web_requests(db: Session, tenant_id: int, product_ids: list[int]) -> dict[int, Decimal]:
+def _web_requests(db: Session, tenant_id: int, product_ids: list[int], hold_hours: int | None = None) -> dict[int, Decimal]:
     """Lo ya prometido al proveedor por pedidos web en solicitudes de compra abiertas (borrador o solicitada) y lo
     apartado por pedidos sin pagar (reservada) MIENTRAS el pedido no vence: vencido, vuelve a venderse aunque el
-    worker todavia no lo haya cancelado. Un comprobante en revision sigue apartando (no se cancela)."""
+    worker todavia no lo haya cancelado (mismo criterio que store_inventory.order_alive).
+    - Con comprobante en revision aparta hasta el tope de la revision (store_inventory.on_review), no para siempre.
+    - Sin plazo para pagar (efectivo, que se cobra al retirar, o "a coordinar"): mientras dure su reserva propia,
+      hold_hours (hold_hours_manual) desde que se hizo el pedido."""
     if not product_ids:
         return {}
     now = _now()
+    hours = int(hold_hours or DEFAULTS["hold_hours_manual"])
     vivo = and_(
         PurchaseRequest.status == RESERVED_REQUEST,
-        or_(Order.status == "en_revision", and_(Order.status == "nuevo", or_(Order.expires_at.is_(None), Order.expires_at > now))),
+        Order.status.in_(("nuevo", "en_revision")),
+        or_(Order.expires_at > now, and_(Order.expires_at.is_(None), Order.created_at > now - timedelta(hours=hours))),
     )
     rows = db.execute(
         select(PurchaseRequestLine.product_id, func.coalesce(func.sum(PurchaseRequestLine.quantity), 0))
@@ -311,7 +316,7 @@ def supplier_status(db: Session, tenant, products: Iterable[Product], cfg: dict 
     names = (
         {s.id: s.name for s in db.scalars(select(Supplier).where(Supplier.id.in_({i.supplier_id for v in by_pid.values() for i in v})))} if by_pid else {}
     )
-    committed = _web_requests(db, t.id, [pid for pid in ids if pid in by_pid])
+    committed = _web_requests(db, t.id, [pid for pid in ids if pid in by_pid], cfg.get("hold_hours_manual"))
     limit = timedelta(hours=max_age_hours(cfg))
     backorder = bool(cfg.get("backorder_enabled", True))
     out: dict[int, dict] = {}

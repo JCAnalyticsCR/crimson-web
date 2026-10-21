@@ -8,6 +8,8 @@ import AuthLink from "../../ui/AuthLink";
 type Cat = { key: string; title: string; description: string };
 type Rep = { key: string; title: string; from: string; to: string; columns: string[]; rows: (string | number | null)[][]; totals: Record<string, string | number> | null };
 const MONEY_COLS = /subtotal|descuento|impuesto|total|saldo|monto|iva|base|venta|precio/i;
+// totales que son conteos, no dinero (reporte de ordenes)
+const COUNT_TOTALS = new Set(["Órdenes", "Pagadas"]);
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -66,7 +68,7 @@ export default function Reports() {
               <thead><tr>{rep.columns.map((c) => <th key={c} className={MONEY_COLS.test(c) ? "num" : ""}>{c}</th>)}</tr></thead>
               <tbody>{rep.rows.map((r, i) => <tr key={i}>{r.map((v, j) => <td key={j} className={MONEY_COLS.test(rep.columns[j]) && typeof v !== "string" ? "num money" : typeof v === "number" ? "num mono" : ""}>{v === null ? "—" : MONEY_COLS.test(rep.columns[j]) && (typeof v === "number" || /^-?\d+(\.\d+)?$/.test(String(v))) ? fmtMoney(v) : String(v)}</td>)}</tr>)}</tbody>
             </table>
-            {rep.totals && <div style={{ display: "flex", gap: 22, padding: "12px 18px", borderTop: "1px solid var(--hair)", justifyContent: "flex-end" }}>{Object.entries(rep.totals).map(([k, v]) => <span key={k} className="muted" style={{ fontSize: 13 }}>{k}: <b className="money" style={{ color: "var(--text)" }}>{k === "n" || k.startsWith("Provisionales") ? v : k.includes("%") ? `${Number(v).toFixed(1)}%` : fmtMoney(v)}</b></span>)}</div>}
+            {rep.totals && <div style={{ display: "flex", gap: 22, padding: "12px 18px", borderTop: "1px solid var(--hair)", justifyContent: "flex-end" }}>{Object.entries(rep.totals).map(([k, v]) => <span key={k} className="muted" style={{ fontSize: 13 }}>{k}: <b className="money" style={{ color: "var(--text)" }}>{k === "n" || COUNT_TOTALS.has(k) || k.startsWith("Provisionales") ? v : k.includes("%") ? `${Number(v).toFixed(1)}%` : fmtMoney(v)}</b></span>)}</div>}
           </div>
         )}
       </Card>}

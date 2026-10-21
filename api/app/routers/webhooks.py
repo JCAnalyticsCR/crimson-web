@@ -8,7 +8,8 @@ Respuestas: 2xx solo si el evento quedo procesado (ONVO cuenta cualquier otro es
 se pudo confirmar se registra con otro id, sin consumir la clave, para que el reintento se aplique. Sin el secreto
 correcto no se aplica nada (cualquiera puede llamar a esta URL) y la respuesta es 401 exista o no la empresa.
 
-Un 401 (empresa con ONVO conectado) o un 503 avisan al admin, como maximo una vez por dia (services/onvo.webhook_alert):
+Un 401 con forma de ONVO (secreto webhook_secret_... y un evento de ONVO, empresa con ONVO conectado) o un 503 avisan
+al admin, como maximo una vez por tipo y por dia (services/onvo.webhook_alert; el correo se encola, no se entrega aqui):
 con el webhook caido, los pagos con tarjeta solo se confirman al volver el comprador o en la consulta automatica.
 """
 
@@ -65,7 +66,7 @@ async def onvo(tenant_id: int, request: Request, db: Session = Depends(get_db), 
 
 
 def _alert(db: Session, t: Tenant, status: int, detail: str) -> None:
-    """Aviso al admin (uno por dia, services/onvo.webhook_alert). Nunca cambia la respuesta a ONVO."""
+    """Aviso al admin (uno por tipo y por dia, services/onvo.webhook_alert). Nunca cambia la respuesta a ONVO."""
     try:
         if onvo_svc.webhook_alert(db, t, status, detail):
             db.commit()
@@ -78,9 +79,9 @@ def _process(db: Session, tenant_id: int, secret: str | None, body: bytes) -> di
     t = db.get(Tenant, tenant_id)
     if not t or not OnvoAdapter.verify_webhook(onvo_svc.webhook_secret(db, tenant_id), secret):
         log.warning("webhook ONVO rechazado: secreto invalido o empresa inexistente (%s)", tenant_id)
-        if t is not None:
-            # ONVO con el secreto viejo (o sin secreto cargado) = pagos sin confirmar por webhook: el admin se entera
-            _alert(db, t, 401, "secreto del webhook ausente o distinto")
+        if t is not None and onvo_svc.onvo_shaped(secret, body):
+            # ONVO con el secreto viejo = pagos sin confirmar por webhook: el admin se entera (una sonda cualquiera no avisa)
+            _alert(db, t, 401, "secreto del webhook distinto")
         raise HTTPException(401, "Secreto de webhook invalido")
     try:
         payload = json.loads(body)

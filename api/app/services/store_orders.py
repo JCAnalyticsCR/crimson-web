@@ -466,13 +466,19 @@ def _email_html(t: Tenant, o: Order, kind: str, extra: str = "") -> str:
 <p style="color:#8a858f;font-size:12px">{e(pie)} Cualquier consulta, respondé a este correo.</p></div>"""
 
 
-def notify_customer(db: Session, t: Tenant, o: Order, kind: str, extra: str = "") -> EmailOutbox | None:
+def notify_customer(db: Session, t: Tenant, o: Order, kind: str, extra: str = "", dedupe_key: str | None = None) -> EmailOutbox | None:
+    """dedupe_key (plan 1.2, regla 6): la llave estable de un correo automatico (recordatorio, vencido). Se le pasa a
+    queue_email cuando la outbox ya la tiene (al fusionar 1.2 queda cableado solo; el integrador puede pasarla siempre).
+    Mientras tanto la barrera es la nota con clave del historial del pedido."""
+    import inspect
+
     from .mail import queue_email
 
     to = ((o.contact or {}).get("email") or "").strip()
     if not to or kind not in CUSTOMER_SUBJECT:
         return None
-    return queue_email(db, t, to, CUSTOMER_SUBJECT[kind].format(n=o.number), _email_html(t, o, kind, extra), "order", o.id)
+    kw = {"dedupe_key": dedupe_key} if dedupe_key and "dedupe_key" in inspect.signature(queue_email).parameters else {}
+    return queue_email(db, t, to, CUSTOMER_SUBJECT[kind].format(n=o.number), _email_html(t, o, kind, extra), "order", o.id, **kw)
 
 
 def notify_team(db: Session, t: Tenant, o: Order, kind: str, detail: str | None = None) -> int:
@@ -485,6 +491,7 @@ def notify_team(db: Session, t: Tenant, o: Order, kind: str, detail: str | None 
         "comprobante": f"Comprobante subido · pedido {o.number}",
         "pagado": f"Pago con tarjeta confirmado · pedido {o.number}",
         "revisar": f"Revisar pago ONVO · pedido {o.number}",
+        "revision": f"Comprobante sin revisar · pedido {o.number}",
     }[kind]
     cuerpo = (
         f"<p><b>{e(titulo)}</b></p>{f'<p>{e(detail)}</p>' if detail else ''}<p>{e(c.get('name') or '')} · {e(c.get('email') or '')} · {e(c.get('phone') or '')}</p>"
@@ -635,9 +642,20 @@ def mark_paid(db: Session, t: Tenant, o: Order, *, by, ref: str | None, note: st
 
 # ---------- vencimiento y recordatorio de pago (worker) ----------
 REMINDER_NOTE = "recordatorio_pago"  # clave de la nota: un recordatorio por pedido (dedupe)
-ONVO_WAIT_NOTE = "onvo_sin_confirmar"
-# vencido hace mas que esto: se cancela SIN correo al cliente. Al encender cancel_unpaid_on_expiry (una semana despues
-# del despliegue) los pedidos abandonados de antes se cancelan juntos: nadie recibe "tu pedido vencio" semanas despues
+ONVO_WAIT_NOTE = "onvo_sin_confirmar"  # ONVO no respondio o tiene un pago en proceso: se reconsulta con espera creciente
+ONVO_REVIEW_NOTE = "onvo_revisar"  # ONVO dice que cobro pero el pago no se aplico solo: a mano, sin cancelar ni reconsultar
+# Tarjeta: el pedido vence a los hold_minutes_card (lo apartado vuelve a la venta), pero solo se cancela pasado este
+# margen. El enlace de ONVO no se invalida al vencer el pedido: un comprador que todavia llena la tarjeta (o vuelve a
+# la pestana) pagaria un pedido ya cancelado. Mientras tanto la consulta automatica (store.sync_card_orders) aplica
+# cualquier pago; pasado el margen, una sesion abierta sin pago (o con 3-D Secure sin completar) es un abandono.
+CARD_GRACE = timedelta(hours=24)
+CARD_GIVE_UP = timedelta(days=7)  # tarjeta que ONVO nunca confirmo ni nego en esta ventana: deja de consultarse (a mano)
+ONVO_RECHECK = timedelta(minutes=15)  # primera espera para reconsultar a ONVO; se duplica en cada intento (tope 6 h)
+ONVO_RECHECK_MAX = timedelta(hours=6)
+# Correo de "vencido": a los pedidos cuyo plazo paso mas de esto ANTES de encender cancel_unpaid_on_expiry (se
+# enciende una semana despues del despliegue) se les cancela sin correo: nadie recibe "tu pedido vencio" por un pedido
+# abandonado de hace dias. Lo que vence con el ajuste ya encendido siempre lleva correo (aunque ONVO tardara en
+# responder). Sin la fecha de encendido (ajuste viejo), cuenta desde ahora.
 EXPIRED_MAIL_WINDOW = timedelta(hours=24)
 
 
@@ -645,6 +663,67 @@ def _cr_when(dt: datetime) -> str:
     from ..providers.einvoice import CR
 
     return aware(dt).astimezone(CR).strftime("%d/%m/%Y a las %H:%M")
+
+
+def store_live(t: Tenant) -> bool:
+    """La tienda publica responde (mismo criterio que routers/store._tenant): empresa activa y tienda publicada. Si no,
+    los correos automaticos al comprador no salen (el enlace del pedido daria 404 y no se podria pagar ni subir nada)."""
+    from ..routers.store import store_cfg
+
+    return bool(t.active and store_cfg(t).get("published"))
+
+
+def reminders_paused(db: Session, o: Order) -> bool:
+    """Pausa de correos automaticos del cliente (Customer.no_reminders, plan 1.3; regla 6) cuando el campo existe."""
+    c = db.get(Customer, o.customer_id) if o.customer_id else None
+    return bool(c is not None and getattr(c, "no_reminders", False))
+
+
+def lock_order(db: Session, o: Order) -> Order:
+    """Relee el pedido con candado antes de escribirle: el historial es un JSON entero y un webhook concurrente no
+    puede perder su anotacion (ni el pago) por una copia vieja."""
+    return db.get(Order, o.id, with_for_update=True, populate_existing=True)
+
+
+def _wait_entry(o: Order) -> dict | None:
+    return next((h for h in (o.history or []) if h.get("key") == ONVO_WAIT_NOTE), None)
+
+
+def onvo_wait_due(o: Order, now: datetime) -> bool:
+    """Toca volver a preguntarle a ONVO: espera creciente (15 min, 30 min, 1 h... tope 6 h) desde la ultima consulta
+    que no fue definitiva. Asi un pedido trabado no hace una llamada HTTP cada 5 minutos."""
+    h = _wait_entry(o)
+    if h is None:
+        return True
+    try:
+        n = max(int(h.get("checks") or 1), 1)
+        last = aware(datetime.fromisoformat(h.get("checked_at") or h["at"]))
+    except (KeyError, TypeError, ValueError):
+        return True
+    return now - last >= min(ONVO_RECHECK * 2 ** min(n - 1, 10), ONVO_RECHECK_MAX)
+
+
+def _onvo_wait(o: Order, now: datetime) -> None:
+    """Anota (una vez) que ONVO no confirmo y cuenta el intento para la espera creciente. El pedido ya esta bloqueado."""
+    if _wait_entry(o) is None:
+        _note(
+            o,
+            "sistema",
+            "Venció el plazo, pero ONVO no confirmó que no hubo pago (sin respuesta o pago en proceso): no se cancela; se vuelve a consultar.",
+            key=ONVO_WAIT_NOTE,
+        )
+    o.history = [
+        {**h, "checks": int(h.get("checks") or 0) + 1, "checked_at": now.isoformat()} if h.get("key") == ONVO_WAIT_NOTE else h for h in (o.history or [])
+    ]
+
+
+def cancel_since(t: Tenant) -> datetime | None:
+    """Cuando se encendio cancel_unpaid_on_expiry (lo guarda PUT /store/inventory/settings)."""
+    raw = store_inventory.settings_of(t).get("cancel_unpaid_since")
+    try:
+        return aware(datetime.fromisoformat(raw)) if raw else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _redo_html(db: Session, t: Tenant, o: Order) -> str:
@@ -664,47 +743,71 @@ def _redo_html(db: Session, t: Tenant, o: Order) -> str:
     return f"<p style='font-size:14px'>Si todavía lo querés, podés hacer el pedido de nuevo:</p><ul style='font-size:14px'>{items}</ul>"
 
 
-def expire_unpaid(db: Session, t: Tenant, o: Order) -> str:
-    """Pedido "nuevo" con el plazo para pagar vencido y cancel_unpaid_on_expiry encendido. Devuelve que paso:
-    cancelado | pagado | pendiente | sin_respuesta | revisar.
-    - Con tarjeta, primero se le pregunta a ONVO (onvo.order_payment): si cobro, el pago se aplica y el pedido queda
-      pagado; si no responde o el pago esta en proceso, NO se cancela (se reintenta en la proxima corrida).
-    - Si no: transition(cancelado, by="sistema", "Venció sin pago") libera la reserva y cancela la solicitud de
-      compra reservada, y el cliente recibe un correo con el enlace para rehacer la compra (si vencio hace menos de
-      EXPIRED_MAIL_WINDOW; uno mas viejo se cancela con una nota y sin correo)."""
+def expire_unpaid(db: Session, t: Tenant, o: Order, now: datetime | None = None, ask_onvo: bool = True) -> str:
+    """Pedido "nuevo" con cancel_unpaid_on_expiry encendido. Devuelve que paso: cancelado | pagado | pendiente |
+    sin_respuesta | revisar | sin_plazo | en_plazo | margen_tarjeta | espera_onvo.
+    - Solo se cancela con un plazo para pagar (expires_at) vencido: el efectivo (se cobra al retirar) y "a coordinar"
+      no tienen plazo y nunca se cancelan solos (su reserva propia vence igual: store_inventory.expire_holds).
+    - Con tarjeta: nunca antes de CARD_GRACE; despues se le pregunta a ONVO por TODAS las sesiones del pedido
+      (onvo.order_payment): si cobro, el pago se aplica; si no responde o el pago esta en proceso, NO se cancela y se
+      reconsulta con espera creciente (ask_onvo=False: ONVO ya no respondio en esta corrida; ni se intenta).
+    - Si no: transition(cancelado, by="sistema", "Venció sin pago") libera la reserva y cancela la solicitud de compra
+      reservada, y el cliente recibe un correo con el enlace para rehacer la compra (dedupe_key), salvo que el pedido
+      ya estuviera abandonado al encender el ajuste, la tienda no este publicada o el cliente tenga la pausa.
+    La consulta a ONVO (HTTP) va sin candado; el pedido se bloquea justo antes de escribirlo."""
+    from . import onvo
+
+    now = now or datetime.now(UTC)
     if o.status != "nuevo":
         return o.status  # comprobante en revision, pagado...: no se toca
+    if o.expires_at is None:
+        return "sin_plazo"
+    deadline = aware(o.expires_at)
+    if deadline > now:
+        return "en_plazo"
     if o.payment_kind == "tarjeta":
-        from . import onvo
-
+        deadline += CARD_GRACE
+        if has_note(o, ONVO_REVIEW_NOTE):
+            return "revisar"
+        if deadline > now:
+            return "margen_tarjeta"
+        if not ask_onvo or not onvo_wait_due(o, now):
+            return "espera_onvo"
         st = onvo.order_payment(db, t, o)
         if st != "sin_pago":
-            if st in ("pendiente", "sin_respuesta") and not has_note(o, ONVO_WAIT_NOTE):
-                _note(
-                    o,
-                    "sistema",
-                    "Venció el plazo, pero ONVO no confirmó que no hubo pago (sin respuesta o pago en proceso): no se cancela; se vuelve a consultar.",
-                    key=ONVO_WAIT_NOTE,
-                )
+            if st in ("pendiente", "sin_respuesta"):
+                o = lock_order(db, o)
+                if o.status == "nuevo":
+                    _onvo_wait(o, now)
             return st
-    viejo = o.expires_at is not None and aware(o.expires_at) < datetime.now(UTC) - EXPIRED_MAIL_WINDOW
+    o = lock_order(db, o)
+    if o.status != "nuevo":
+        return o.status  # lo pagaron (webhook) mientras se consultaba
+    since = cancel_since(t)
+    viejo = deadline < since - EXPIRED_MAIL_WINDOW if since else (deadline < now - EXPIRED_MAIL_WINDOW and not has_note(o, ONVO_WAIT_NOTE))
     transition(db, t, o, "cancelado", by="sistema", note="Venció sin pago", notify=False)
+    motivo = None
     if viejo:
-        _note(o, "sistema", "Sin correo al cliente: el plazo para pagar había vencido hace más de 24 horas.")
+        motivo = "el plazo para pagar ya había vencido antes de encender la cancelación automática"
+    elif not store_live(t):
+        motivo = "la tienda no está publicada"
+    elif reminders_paused(db, o):
+        motivo = "el cliente tiene pausados los correos automáticos"
+    if motivo:
+        _note(o, "sistema", f"Sin correo al cliente: {motivo}.")
     else:
-        notify_customer(db, t, o, "vencido", _redo_html(db, t, o))
+        notify_customer(db, t, o, "vencido", _redo_html(db, t, o), dedupe_key=f"tienda-venc:{o.id}")
     return "cancelado"
 
 
 def remind_unpaid(db: Session, t: Tenant, o: Order) -> EmailOutbox | None:
     """Recordatorio de pago antes del vencimiento (SINPE / transferencia): instrucciones y boton para subir el
-    comprobante. Una sola vez por pedido (clave REMINDER_NOTE en el historial; el pedido se bloquea antes de mirarla).
-    Respeta la pausa de recordatorios del cliente (Customer.no_reminders, plan 1.3) cuando ese campo existe.
+    comprobante. Una sola vez por pedido: dedupe_key (plan 1.2) y la clave REMINDER_NOTE del historial (el pedido se
+    bloquea antes de mirarla). Respeta la pausa del cliente (Customer.no_reminders, plan 1.3) cuando ese campo existe.
     Devuelve el correo (None si ya se recordo, el cliente los tiene pausados o el pedido no tiene correo)."""
     if o.status != "nuevo" or o.payment_kind not in NEEDS_PROOF or o.expires_at is None or has_note(o, REMINDER_NOTE):
         return None
-    c = db.get(Customer, o.customer_id) if o.customer_id else None
-    if c is not None and getattr(c, "no_reminders", False):
+    if reminders_paused(db, o):
         _note(o, "sistema", "Recordatorio de pago omitido: el cliente tiene los recordatorios pausados", key=REMINDER_NOTE)
         return None
     cancela = store_inventory.settings_of(t).get("cancel_unpaid_on_expiry")
@@ -713,7 +816,7 @@ def remind_unpaid(db: Session, t: Tenant, o: Order) -> EmailOutbox | None:
         + (" Después de esa hora se cancela y los productos vuelven a la venta." if cancela else "")
         + " Si ya pagaste, subí el comprobante con el botón de abajo.</p>"
     )
-    m = notify_customer(db, t, o, "por_vencer", extra)
+    m = notify_customer(db, t, o, "por_vencer", extra, dedupe_key=f"tienda-rem:{o.id}")
     _note(o, "sistema", "Recordatorio de pago al cliente" + (f" ({m.status})" if m else ": el pedido no tiene correo"), key=REMINDER_NOTE)
     return m
 

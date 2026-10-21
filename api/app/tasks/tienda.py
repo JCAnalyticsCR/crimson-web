@@ -4,10 +4,11 @@ worker/celery_app.py solo importa este modulo y agenda las tareas por nombre en 
 propia sesion (app.core.db.SessionLocal) y hace commit por pedido: un pedido con datos raros no frena a los demas.
 
 - store.payment_reminders: recordatorio al cliente antes de que venza el plazo para pagar (SINPE / transferencia),
-  con las instrucciones y el boton para subir el comprobante. Uno por pedido (store_orders.REMINDER_NOTE).
+  con las instrucciones y el boton para subir el comprobante. Uno por pedido (dedupe_key y store_orders.REMINDER_NOTE).
+  Solo de tiendas que responden (empresa activa y tienda publicada: store_orders.store_live).
 - store.sync_card_orders: cada 15 min le pregunta a ONVO por los pedidos con tarjeta todavia "nuevo" y con sesion
-  abierta (onvo.sync_order, respeta SYNC_EVERY): un pago cobrado sin webhook queda pagado aunque el comprador no
-  vuelva a la tienda.
+  abierta, por TODAS sus sesiones (onvo.sync_order, respeta SYNC_EVERY): un pago cobrado sin webhook queda pagado
+  aunque el comprador no vuelva a la tienda ni haya pagado en la ultima sesion que abrio.
 El vencimiento y la cancelacion de pedidos sin pagar siguen en inventory.expire_reservations
 (store_inventory.expire_holds).
 """
@@ -50,6 +51,7 @@ def payment_reminders(db: Session, now: datetime | None = None) -> int:
         )
     ).all()
     n = 0
+    tenants: dict[int, Tenant | None] = {}
     for oid in ids:
         try:
             o = db.get(Order, oid, with_for_update=True, populate_existing=True)  # dos corridas a la vez: un solo correo
@@ -57,7 +59,10 @@ def payment_reminders(db: Session, now: datetime | None = None) -> int:
                 continue
             if _aware(o.expires_at) - now > now - _aware(o.created_at):
                 continue
-            if so.remind_unpaid(db, db.get(Tenant, o.tenant_id), o):
+            t = tenants.setdefault(o.tenant_id, db.get(Tenant, o.tenant_id))
+            if t is None or not so.store_live(t):
+                continue  # empresa suspendida o tienda sin publicar: el enlace daria 404 y no se podria pagar
+            if so.remind_unpaid(db, t, o):
                 n += 1
             db.commit()
         except Exception:  # noqa: BLE001
@@ -70,6 +75,7 @@ def sync_card_orders(db: Session, now: datetime | None = None) -> int:
     """Pedidos con tarjeta en "nuevo" con sesion de ONVO abierta (ultimos SYNC_DAYS dias): consulta a ONVO y aplica
     el pago si ya cobro. Devuelve cuantos quedaron pagados."""
     from ..services import onvo
+    from ..services import store_orders as so
 
     now = now or datetime.now(UTC)
     rows = db.scalars(
@@ -87,8 +93,8 @@ def sync_card_orders(db: Session, now: datetime | None = None) -> int:
     for oid in rows:
         try:
             o = db.get(Order, oid)
-            if not o or o.status != "nuevo":
-                continue
+            if not o or o.status != "nuevo" or so.has_note(o, so.ONVO_REVIEW_NOTE):
+                continue  # pagado, cancelado o "revisar" (ONVO cobro y no se aplico: lo resuelve una persona)
             t = tenants.setdefault(o.tenant_id, db.get(Tenant, o.tenant_id))
             if t is None or not t.active:
                 continue

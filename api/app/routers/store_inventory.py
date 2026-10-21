@@ -74,6 +74,9 @@ def put_inv_settings(data: StoreInventorySettingsIn, p: Principal = Depends(requ
     st = {**(t.settings or {})}
     antes = st.get(sinv.KEY) or {}
     st[sinv.KEY] = {**sinv.DEFAULTS, **antes, **vals}
+    if vals.get("cancel_unpaid_on_expiry") and not antes.get("cancel_unpaid_on_expiry"):
+        # desde cuando: lo que ya estaba abandonado al encenderlo se cancela sin correo (store_orders.expire_unpaid)
+        st[sinv.KEY]["cancel_unpaid_since"] = datetime.now(UTC).isoformat()
     t.settings = st
     audit(db, t.id, p.user.id, "update", "store_inventory_settings", t.id, {k: str(v) for k, v in vals.items()}, ip=p.ip)
     db.commit()
