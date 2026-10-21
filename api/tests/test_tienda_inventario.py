@@ -190,12 +190,13 @@ def test_checkout_reserva_web_y_bajo_pedido(client, auth, db_session):
     assert len(res) == 1 and res[0].status == "confirmada" and res[0].origin == "web" and D(str(res[0].quantity)) == 1
     assert res[0].approved_by is None and res[0].approved_at  # automatica: sin aprobacion humana
     req = db_session.scalar(select(PurchaseRequest).where(PurchaseRequest.order_id == o.id))
-    assert req.reason == "pedido_web" and req.status == "borrador" and D(str(req.lines[0].quantity)) == 2
-    assert db_session.scalar(select(EmailOutbox).where(EmailOutbox.entity == "purchase_request", EmailOutbox.entity_id == req.id))
+    # plan 1.5: la compra nace al cobrar. Sin pago la solicitud solo aparta lo del proveedor, sin aviso de compra
+    assert req.reason == "pedido_web" and req.status == "reservada" and D(str(req.lines[0].quantity)) == 2
+    assert not db_session.scalar(select(EmailOutbox).where(EmailOutbox.entity == "purchase_request", EmailOutbox.entity_id == req.id))
     # ya no queda stock propio: el siguiente cliente lo ve bajo pedido
     assert _avail(client, p["id"]).json()[str(p["id"])]["estado"] == "bajo_pedido"
     st = client.get(f"/store/orders/{o.id}/inventory").json()
-    assert st["estado"] == "requiere_compra" and st["solicitudes_compra"][0]["number"] == req.number
+    assert st["estado"] == "espera_pago" and st["solicitudes_compra"][0]["number"] == req.number
     # el panel interno de reservas muestra el origen
     lista = client.get("/stock/reservations", params={"status": "abiertas"}).json()["items"]
     assert any(x["origin"] == "web" and x["order_id"] == o.id for x in lista)
@@ -250,14 +251,16 @@ def test_vencimiento_libera_y_pagar_fija(client, auth, db_session):
     assert client.patch(f"/orders/{sinpe.id}", json={"status": "pagado"}).status_code == 200
     db_session.refresh(r1)
     assert r1.expires_at is None and r1.status == "confirmada"
-    # el de tarjeta no se paga: vence, el worker la libera y deja nota en el pedido
-    r2.expires_at = now - timedelta(minutes=1)
+    # el de tarjeta no se paga: vence (el plazo del pedido y su reserva son el mismo), el worker la libera y deja nota
+    r2.expires_at = card.expires_at = now - timedelta(minutes=1)
     db_session.commit()
     assert _avail(client, p["id"]).json()[str(p["id"])]["estado"] == "en_bodega"  # vencida ya no compromete
     assert sinv.expire_holds(db_session) == 1
     db_session.refresh(r2)
     db_session.refresh(card)
-    assert r2.status == "vencida" and "Venció la reserva" in card.notes and card.status == "nuevo"
+    # la nota va al historial (una vez), no a "Nota del cliente"
+    assert r2.status == "vencida" and card.status == "nuevo" and not card.notes
+    assert [h.get("key") for h in card.history].count("vencio") == 1
     assert client.get(f"/store/orders/{card.id}/inventory").json()["estado"] == "vencido"
     # si igual lo pagan tarde, se vuelve a reservar (hay stock libre)
     assert client.patch(f"/orders/{card.id}", json={"status": "pagado"}).status_code == 200
@@ -269,7 +272,7 @@ def test_vencimiento_libera_y_pagar_fija(client, auth, db_session):
     _cfg(client, cancel_unpaid_on_expiry=True)
     late = _order(db_session, _buy(client, [{"product_id": p["id"], "quantity": 1}]).json()["number"])
     r3 = db_session.scalar(select(StockReservation).where(StockReservation.order_id == late.id))
-    r3.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    r3.expires_at = late.expires_at = datetime.now(UTC) - timedelta(minutes=1)
     db_session.commit()
     assert client.post("/stock/reservations/expire").json()["expired"] == 1
     db_session.refresh(late)
@@ -390,7 +393,7 @@ def test_panel_inventario_web_y_publicacion(client, auth, db_session):
     assert client.put("/store/inventory/settings", json={"warehouse_ids": [99999]}).status_code == 404
 
 
-def test_avisarme_cuando_haya(client, auth, db_session):
+def test_avisarme_cuando_haya(client, auth, db_session, monkeypatch):
     _publish(client)
     main, _ = _whs(client)
     p = _prod(client, "AVI-1", "Kit alarma")
@@ -403,9 +406,17 @@ def test_avisarme_cuando_haya(client, auth, db_session):
     assert client.get("/store/inventory").json()["summary"]["avisos"] == 1
     assert sinv.back_in_stock(db_session) == 0  # sigue agotado
     _in(client, p["id"], main["id"], 1)
-    assert sinv.back_in_stock(db_session) == 1
+    # plan 1.5: se marca avisado solo si el correo quedo "enviado" (sin proveedor de correo queda "simulado")
+    assert sinv.back_in_stock(db_session) == 0
     a = db_session.scalar(select(StoreStockAlert).where(StoreStockAlert.product_id == p["id"]))
-    assert a.notified_at and db_session.scalar(select(EmailOutbox).where(EmailOutbox.to == "luis@ejemplo.com"))
+    assert a.notified_at is None and db_session.scalar(select(EmailOutbox).where(EmailOutbox.to == "luis@ejemplo.com")).status == "simulado"
+    from app.services import mail
+
+    monkeypatch.setattr(mail, "mail_configured", lambda: True)
+    monkeypatch.setattr(mail, "deliver", lambda m, files=None: setattr(m, "status", "enviado"))
+    assert sinv.back_in_stock(db_session) == 1
+    db_session.refresh(a)
+    assert a.notified_at and len(db_session.scalars(select(EmailOutbox).where(EmailOutbox.to == "luis@ejemplo.com")).all()) == 1
 
 
 def test_worker_tareas_registradas(db_session, monkeypatch):

@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -370,7 +371,19 @@ def _throttled(session_id: str) -> bool:
     return False
 
 
-def _sync(db: Session, t: Tenant, session_id: str | None, expect: dict) -> str | None:
+AUTO = "consulta automática"  # source del worker (store.sync_card_orders)
+AUTO_SESSIONS = timedelta(hours=24)  # consulta automatica: la sesion vigente y las abiertas en este lapso
+
+
+def unreachable(e: OnvoError) -> bool:
+    """ONVO no respondio (red o tiempo agotado: status 0), fallo (5xx), freno por cuota (429) o rechazo la llave
+    (401/403): no es una respuesta sobre el pago. Un 404 (sesion que no existe) o el 409 de "no esta pagada" si lo son."""
+    return e.status == 0 or e.status >= 500 or e.status in (401, 403, 429)
+
+
+def _sync(db: Session, t: Tenant, session_id: str | None, expect: dict, source: str = "regreso") -> str | None:
+    """None si la sesion no esta pagada o no se pudo consultar. En la consulta automatica, si ONVO no responde se
+    relanza el OnvoError: el worker deja de consultar a esa empresa en la corrida."""
     if not session_id or session_id.startswith("sim_") or _throttled(session_id):
         return None
     key = verify_key(db, t.id)
@@ -378,16 +391,196 @@ def _sync(db: Session, t: Tenant, session_id: str | None, expect: dict) -> str |
         return None
     api = OnvoAdapter(key)
     try:
-        return _apply_session(db, t, api, api.get_checkout(session_id), {"id": session_id}, "regreso", expect)
+        return _apply_session(db, t, api, api.get_checkout(session_id), {"id": session_id}, source, expect)
     except OnvoError as e:
         log.info("sync ONVO %s: %s", session_id, e.message)
+        if source == AUTO and unreachable(e):
+            raise
         return None
 
 
-def sync_order(db: Session, t: Tenant, o: Order) -> str | None:
+def sync_order(db: Session, t: Tenant, o: Order, source: str = "regreso", now: datetime | None = None) -> str | None:
+    """source: "regreso" (el comprador volvio de ONVO: su sesion es la ultima) o AUTO (worker cada 15 min, con espera
+    creciente por pedido): la sesion vigente (o.payment_ref) y las abiertas en las ultimas AUTO_SESSIONS, porque "Pagar
+    con tarjeta" en Mi pedido abre una nueva cada vez y el pago pudo quedar en una anterior. Una sesion mas vieja la
+    revisa onvo.order_payment antes de cancelar (todas, hasta MAX_SESSIONS). AUTO relanza OnvoError si ONVO no responde."""
     if o.payment_kind != "tarjeta" or o.status not in ("nuevo", "en_revision"):
         return None
-    return _sync(db, t, o.payment_ref, {"order_id": o.id, "tenant_id": t.id})
+    if source == "regreso":
+        refs = [o.payment_ref]
+    else:
+        refs = order_sessions(db, o, since=(now or datetime.now(UTC)) - AUTO_SESSIONS)
+    for ref in refs:
+        res = _sync(db, t, ref, {"order_id": o.id, "tenant_id": t.id}, source)
+        if res is not None:
+            return res
+    return None
+
+
+MAX_SESSIONS = 10  # sesiones de ONVO que se revisan por pedido (las mas recientes)
+
+
+def order_sessions(db: Session, o: Order, since: datetime | None = None) -> list[str]:
+    """Sesiones de Checkout de ONVO abiertas para el pedido, de la mas reciente a la mas vieja: la de o.payment_ref
+    y las que dejo cada card_intent en la bitacora (audit "card_intent"), solo las abiertas desde `since` si se da (la
+    vigente va siempre). Sin las simuladas."""
+    from ..models import AuditLog
+
+    ids = [o.payment_ref or ""]
+    q = select(AuditLog.diff).where(AuditLog.tenant_id == o.tenant_id, AuditLog.entity == "order", AuditLog.entity_id == o.id, AuditLog.action == "card_intent")
+    if since is not None:
+        q = q.where(AuditLog.at >= since)
+    diffs = db.scalars(q.order_by(AuditLog.id.desc()).limit(MAX_SESSIONS))
+    ids += [str((d or {}).get("intent") or "") for d in diffs]
+    return [s for s in dict.fromkeys(ids) if s and not s.startswith("sim_")][:MAX_SESSIONS]
+
+
+# intenciones que ONVO da por terminadas sin cobro (cualquier otro estado puede terminar cobrando: no se cancela)
+INTENT_NOT_PAID = ("requires_payment_method", "canceled", "cancelled", "failed")
+# esperan al comprador (3-D Secure, confirmar): pasado el margen de la tarjeta (store_orders.CARD_GRACE) ya no se
+# completan y cuentan como sin pago. "processing" y similares (esperando al banco) siguen pendientes.
+INTENT_ABANDONED = ("requires_action", "requires_confirmation")
+
+
+def order_payment(db: Session, t: Tenant, o: Order) -> str:
+    """Antes de cancelar por vencido un pedido con tarjeta (pasado store_orders.CARD_GRACE): ¿ONVO cobro en ALGUNA de
+    sus sesiones? Respuesta definitiva o "no se sabe":
+    - pagado: ONVO cobro y el pago se aplico ahora;
+    - revisar: ONVO dice que cobro pero el pago no se aplico (sesion de otro pedido, sin monto, no cubre el total...):
+      queda una nota con clave y el equipo recibe UN aviso; no se cancela ni se vuelve a consultar;
+    - sin_pago: ninguna sesion real (simulada o sin sesion), o ONVO responde que ninguna cobro (una sesion abierta sin
+      intencion, o con 3-D Secure sin completar, es un abandono a esta altura);
+    - pendiente: ONVO tiene un pago en proceso (por ejemplo esperando al banco);
+    - sin_respuesta: ONVO no respondio o no hay llave para preguntarle.
+    Solo "sin_pago" permite cancelar. No usa el freno por sesion (lo llama el worker, no el comprador)."""
+    from . import store_orders as so
+
+    if o.payment_kind != "tarjeta" or o.status not in ("nuevo", "en_revision"):
+        return "no_aplica"
+    refs = order_sessions(db, o)
+    if not refs:
+        return "sin_pago"
+    key = verify_key(db, t.id)
+    if not key:
+        return "sin_respuesta"
+    api = OnvoAdapter(key)
+    pendiente = False
+    try:
+        for ref in refs:
+            s = api.get_checkout(ref)
+            if s.get("paymentStatus") == "paid":
+                antes = len(o.history or [])
+                res = _apply_session(db, t, api, s, {"id": ref}, "vencimiento", {"order_id": o.id, "tenant_id": t.id})
+                if o.status != "nuevo":
+                    return "pagado"
+                o = so.lock_order(db, o)
+                if len(o.history or []) == antes:  # nadie lo anoto (sesion de otro pedido, sin monto...): el equipo no se entero
+                    so.notify_team(db, t, o, "revisar", detail=f"ONVO reporta pagada la sesión {ref}, pero el pago no se aplicó solo: {res}")
+                if not so.has_note(o, so.ONVO_REVIEW_NOTE):
+                    so._note(
+                        o,
+                        "sistema",
+                        f"ONVO reporta un cobro que no se aplicó solo ({res}): revisalo a mano. El pedido no se cancela ni se vuelve a consultar.",
+                        key=so.ONVO_REVIEW_NOTE,
+                    )
+                return "revisar"
+            pid = str(s.get("paymentIntentId") or "")
+            if pid:
+                st = str(api.get_intent(pid).get("status") or "")
+                if st not in INTENT_NOT_PAID + INTENT_ABANDONED:
+                    pendiente = True
+    except OnvoError as e:
+        log.warning("ONVO no confirmó el pedido %s al vencer: %s", o.number, e.message)
+        return "sin_respuesta"
+    return "pendiente" if pendiente else "sin_pago"
+
+
+# ---------- aviso al admin: ONVO no puede entregar sus eventos ----------
+ALERT_ENTITY = "onvo_webhook"  # entity del correo: onvo_webhook_401 / onvo_webhook_503 (un cupo diario por tipo)
+ONVO_EVENTS = ("checkout-session.succeeded", "payment-intent.succeeded", "payment-intent.failed", "payment-intent.deferred")
+
+
+def onvo_shaped(secret: str | None, body: bytes) -> bool:
+    """El 401 parece de ONVO (con el secreto viejo), no una sonda cualquiera a la URL: trae un secreto con la forma de
+    los de ONVO (webhook_secret_...) y un evento de ONVO. Solo entonces vale la pena avisar al admin."""
+    import json
+
+    if not (secret or "").startswith("webhook_secret_") or len(secret or "") < 24:
+        return False
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return False
+    return isinstance(payload, dict) and payload.get("type") in ONVO_EVENTS and isinstance(payload.get("data"), dict)
+
+
+def _cr_now() -> datetime:
+    from ..providers.einvoice import CR
+
+    return datetime.now(CR)
+
+
+def _queue_admins(db: Session, t: Tenant, subject: str, html_body: str, entity: str) -> int:
+    """Encola (pendiente, SIN entregar) un correo a cada admin activo: lo manda el worker de correo (mail.retry_outbox).
+    Asi la respuesta del webhook no espera a Resend ni delata con su demora si la empresa tiene ONVO."""
+    from ..models import EmailOutbox, TenantUser
+
+    vistos: set[str] = set()
+    for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.active, TenantUser.role_code == "admin")):
+        correo = (m.user.email or "").strip().lower()
+        if not correo or correo in vistos:
+            continue
+        vistos.add(correo)
+        db.add(EmailOutbox(tenant_id=t.id, to=correo, subject=subject, html=html_body, attachments=[], entity=entity, entity_id=t.id, status="pendiente"))
+    db.flush()
+    return len(vistos)
+
+
+def webhook_alert(db: Session, t: Tenant, status: int, detail: str) -> bool:
+    """401 (secreto que no coincide) o 503 (no se pudo confirmar con ONVO) en /webhooks/onvo: correo al admin, como
+    maximo UNO por tipo y por dia de Costa Rica (despues de las 18:00 la fecha UTC ya es otra): un 401 falso no tapa
+    el aviso de un 503 real. Sin ONVO conectado no avisa (una sonda a la URL no es un pago perdido). El cupo se revisa
+    otra vez con la empresa bloqueada (dos peticiones a la vez: un solo aviso) y el correo queda encolado, no se
+    entrega dentro de la peticion. No hace commit. Devuelve True si aviso."""
+    import html
+
+    from ..models import EmailOutbox
+
+    g = gateway(db, t.id)
+    if not (verify_key(db, t.id) or (g and g.secret_encrypted)):
+        return False
+    entity = f"{ALERT_ENTITY}_{status}"
+    hoy = _cr_now().replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
+
+    def ya() -> bool:
+        q = select(EmailOutbox.id).where(EmailOutbox.tenant_id == t.id, EmailOutbox.entity == entity, EmailOutbox.created_at >= hoy).limit(1)
+        return db.scalar(q) is not None
+
+    if ya():
+        return False
+    db.execute(select(Tenant.id).where(Tenant.id == t.id).with_for_update())  # hasta el commit del aviso
+    if ya():
+        return False
+    if status == 401:
+        titulo = "ONVO no puede avisar los pagos: el secreto del webhook no coincide"
+        que = (
+            "El panel rechazó (401) un aviso con formato de ONVO porque el secreto del webhook no coincide. "
+            "Si los pagos con tarjeta se están confirmando solos, puede ser un intento ajeno: no hace falta cambiar nada. "
+            "Si no, compará el secreto del webhook de Ajustes → Pasarelas → ONVO con el que muestra el panel de ONVO "
+            "(Desarrolladores → Webhooks). Mientras tanto los pagos con tarjeta se confirman cuando el comprador vuelve a "
+            "la tienda o en la consulta automática."
+        )
+    else:
+        titulo = "ONVO avisó un pago que no se pudo confirmar"
+        que = (
+            "Llegó un aviso de ONVO que el panel no pudo confirmar consultando a ONVO (503). ONVO lo reintenta solo; "
+            "si se repite, revisá el pedido o la factura en el panel de ONVO y la llave en Ajustes → Pasarelas."
+        )
+    cuerpo = (
+        f"<p><b>{html.escape(titulo)}</b></p><p>{html.escape(que)}</p><p style='color:#5a5560;font-size:13px'>Detalle: {html.escape(detail[:300])}</p>"
+        "<p style='color:#8a858f;font-size:12px'>Este aviso sale como máximo una vez por día.</p>"
+    )
+    return _queue_admins(db, t, titulo, cuerpo, entity) > 0
 
 
 def sync_invoice(db: Session, t: Tenant, inv: Invoice, link: PaymentLink) -> str | None:

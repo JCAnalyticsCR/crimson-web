@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
-from ..core.ratelimit import checkout_global_limiter, order_lookup_limiter, order_proof_limiter, public_limiter
+from ..core.ratelimit import checkout_global_limiter, order_card_limiter, order_lookup_limiter, order_proof_limiter, public_limiter
 from ..models import Media, Order, OrderLine, Tenant
 from ..providers.payments import key_mode
 from ..services import cr_geo, onvo, store_inventory
@@ -142,6 +142,7 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
         raise HTTPException(422, "Para continuar aceptá los términos y condiciones")
     kind, label = so.normalize_method(db, t, data.payment_method)
     delivery = data.delivery
+    so.check_delivery(t, kind, delivery.type if delivery else None)  # efectivo: solo con retiro en sitio
     if delivery and delivery.type == "envio" and not (c.phone and len(so.digits(c.phone)) >= 8):
         raise HTTPException(422, "Para el envío necesitamos un teléfono de contacto")
 
@@ -293,6 +294,7 @@ async def order_proof(slug: str, token: str, request: Request, file: UploadFile 
 def order_card(slug: str, token: str, request: Request, db: Session = Depends(get_db)):
     public_limiter.hit(f"card:{client_ip(request)}")
     t, o = _public_order(db, slug, token)
+    order_card_limiter.hit(f"card:{t.id}:{o.id}")  # por pedido: cambiar de IP no abre mas sesiones (tope: so.MAX_CARD_SESSIONS)
     out = so.card_intent(db, t, o)
     db.commit()
     return out
@@ -354,6 +356,7 @@ class CardCfg(_Cfg):
 class CashCfg(_Cfg):
     active: bool = False
     note: str | None = Field(None, max_length=500)
+    pickup_only: bool = True  # efectivo solo con "Retiro en sitio" (contra entrega a domicilio = mercaderia sin cobrar)
 
 
 class MethodsCfg(_Cfg):

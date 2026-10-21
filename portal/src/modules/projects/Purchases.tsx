@@ -16,10 +16,13 @@ type Req = {
 type Named = { id: number; name: string };
 
 const STATUS: Record<string, { label: string; tone: string }> = {
+  reservada: { label: "Espera el pago", tone: "warn" },
   borrador: { label: "Borrador", tone: "muted" }, solicitada: { label: "Solicitada", tone: "info" },
   recibida: { label: "Recibida", tone: "ok" }, cancelada: { label: "Cancelada", tone: "muted" },
 };
 const REASON: Record<string, string> = { proyecto: "Materiales de proyecto", stock_bajo: "Inventario bajo el mínimo", manual: "Pedido manual", pedido_web: "Pedido web bajo pedido (al recibirla queda reservada para ese pedido)" };
+// pedido web sin pagar: la compra nace al cobrar (al proveedor no se le devuelve nada)
+const RESERVADA = "Este pedido web todavía no está pagado: la solicitud solo aparta lo del proveedor. Pasa a borrador sola cuando el pedido se paga (te llega el aviso «PAGADO: comprar hoy»). Para descartarla, cancelá el pedido en Pedidos de la tienda; con «Cancelar el pedido cuando vence el plazo para pagar» encendido se cancela sola al vencer. No le compres al proveedor antes.";
 
 export default function Purchases() {
   const { toast, allows } = useSession();
@@ -83,12 +86,13 @@ export default function Purchases() {
       {open && (
         <Modal title={`${open.number} · ${REASON[open.reason] || open.reason}`} onClose={() => setOpen(null)} wide foot={<>
           {allows("purchases.crear") && open.status === "borrador" && <button className="btn btn--soft" style={{ marginRight: "auto" }} onClick={() => mover(open, "solicitada")}>Marcar como solicitada</button>}
-          {allows("purchases.crear") && open.status !== "recibida" && open.status !== "cancelada" && <button className="btn btn--crimson" onClick={() => mover(open, "recibida")}>Recibí el material</button>}
+          {allows("purchases.crear") && !["recibida", "cancelada", "reservada"].includes(open.status) && <button className="btn btn--crimson" onClick={() => mover(open, "recibida")}>Recibí el material</button>}
           <button className="btn btn--ghost" onClick={() => setOpen(null)}>Cerrar</button>
         </>}>
           <p className="muted" style={{ fontSize: 13.5, marginTop: 0 }}>
             {open.supplier || "Sin proveedor asignado"}{open.project ? ` · Proyecto ${open.project}` : ""} · <span className={`badge badge--${STATUS[open.status]?.tone}`}>{STATUS[open.status]?.label}</span>
           </p>
+          {open.status === "reservada" && <p className="muted" role="note" style={{ fontSize: 13, marginTop: 0, color: "var(--warn)" }}>{RESERVADA}</p>}
           <table className="table">
             <thead><tr><th>Material</th><th className="num">Cantidad</th>{verCostos && <><th className="num">Costo unit.</th><th className="num">Total</th></>}</tr></thead>
             <tbody>{open.lines.map((l, i) => (

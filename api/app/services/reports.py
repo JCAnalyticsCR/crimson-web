@@ -414,19 +414,26 @@ def _crc(amount, currency: str, fx) -> Decimal:
 
 
 def ordenes(db: Session, tid: int, a: date, b: date) -> Report:
+    """Todas las ordenes del periodo, pero el Total suma SOLO las pagadas (PAID_STATES): un pedido sin pagar,
+    cancelado o reembolsado no es una venta. Los dias son de Costa Rica: un pedido de las 7 p. m. del 31 (01:00 UTC
+    del 1.o) es del mes que termina, no del siguiente."""
+    from datetime import UTC, time, timedelta
     from datetime import datetime as dt
 
     from ..models import Order
+    from .documents import CR, local_date
+    from .store_orders import PAID_STATES
 
-    lo, hi = dt.combine(a, dt.min.time()), dt.combine(b, dt.max.time())
-    rows = db.scalars(select(Order).where(Order.tenant_id == tid, Order.created_at >= lo, Order.created_at <= hi).order_by(Order.id)).all()
+    lo = dt.combine(a, time.min, tzinfo=CR).astimezone(UTC)
+    hi = dt.combine(b + timedelta(days=1), time.min, tzinfo=CR).astimezone(UTC)
+    rows = db.scalars(select(Order).where(Order.tenant_id == tid, Order.created_at >= lo, Order.created_at < hi).order_by(Order.id)).all()
     return Report(
         "ordenes",
         "Órdenes",
         ["Fecha", "Orden", "Canal", "Cliente", "Envío", "Pago", "Estado", "Total", "Comprobante"],
         [
             [
-                o.created_at.date().isoformat(),
+                local_date(o.created_at).isoformat(),
                 o.number,
                 o.channel,
                 (o.contact or {}).get("name", ""),
@@ -438,7 +445,11 @@ def ordenes(db: Session, tid: int, a: date, b: date) -> Report:
             ]
             for o in rows
         ],
-        {"Total": sum((Decimal(str(o.total)) for o in rows if o.status != "cancelado"), Decimal(0)), "Órdenes": len(rows)},
+        {
+            "Total": sum((Decimal(str(o.total)) for o in rows if o.status in PAID_STATES), Decimal(0)),
+            "Órdenes": len(rows),
+            "Pagadas": sum(1 for o in rows if o.status in PAID_STATES),
+        },
     )
 
 

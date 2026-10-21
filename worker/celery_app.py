@@ -58,6 +58,8 @@ def _log_fiscal_keys() -> None:
 
 _log_fiscal_keys()
 
+import app.tasks.tienda  # noqa: E402,F401  tareas de la tienda (recordatorio de pago, consulta a ONVO): plan 1.5
+
 
 def _log_missing_config() -> None:
     """WARNING con los NOMBRES de la configuracion que falta (RESEND_API_KEY, MAIL_FROM, PUBLIC_BASE_URL, BCCR_TOKEN,
@@ -571,6 +573,8 @@ celery.conf.beat_schedule = {
     # cada 5 min: las reservas de pago con tarjeta duran 30 min
     "expire-reservations": {"task": "inventory.expire_reservations", "schedule": crontab(minute="*/5")},
     "back-in-stock": {"task": "store.back_in_stock", "schedule": crontab(minute=25)},
+    "store-payment-reminders": {"task": "store.payment_reminders", "schedule": crontab(minute="8,23,38,53")},
+    "store-sync-card-orders": {"task": "store.sync_card_orders", "schedule": crontab(minute="4,19,34,49")},
     "warranty-alerts": {"task": "assets.warranty_alerts", "schedule": crontab(hour=7, minute=0, day_of_week="mon")},
     "maintenance-due": {"task": "support.maintenance_due", "schedule": crontab(hour=6, minute=30)},
     "sla-breaches": {"task": "support.sla_breaches", "schedule": crontab(minute=0)},

@@ -5,10 +5,11 @@
    Modo "cotizacion" (tienda solo catalogo): un formulario corto que llega al equipo como mensaje. */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Field, IC, Ico, local, money, newKey, session, wa, type ApiFn, type StoreInfo } from "./shopkit";
+import { track, type GaItem } from "./analytics";
 import "./checkout.css";
 
 export type CartItem = { key: string; id: number; variant_id: number | null; name: string; image: string | null; price: number; currency: string; qty: number };
-type Method = { code: string; label: string; needs_proof: boolean; simulated: boolean; hint: string };
+type Method = { code: string; label: string; needs_proof: boolean; simulated: boolean; hint: string; pickup_only?: boolean };
 type Rate = { name: string; zone: "retiro" | "gam" | "fuera_gam" | null; per_kg: boolean; display_amount: string | number };
 type Cfg = {
   currency: string; methods: Method[]; shipping_rates: Rate[]; provinces: Record<string, string[]>;
@@ -80,6 +81,14 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((x) => ({ ...x, [k]: v }));
 
   useEffect(() => { api<Cfg>("/checkout-config").then(({ data }) => setCfg(data)).catch((e) => setCfgErr((e as Error).message)); }, [api]);
+  // GA4 (solo con consentimiento): una vez por visita al checkout
+  const gaItems = (): GaItem[] => cart.map((l) => ({ item_id: String(l.id), item_name: l.name, price: l.price, quantity: l.qty }));
+  const begun = useRef(false);
+  useEffect(() => {
+    if (begun.current || !cart.length) return;
+    begun.current = true;
+    track("begin_checkout", { currency: cart[0].currency, value: cart.reduce((a, l) => a + l.price * l.qty, 0), items: gaItems() });
+  }, [cart.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // valores por defecto que dependen de la configuracion
   const pickupRate = cfg?.shipping_rates.find((r) => r.zone === "retiro") || null;
@@ -89,17 +98,23 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
   const outside = !!cfg && (cfg.outside_gam.provinces.includes(f.province) || cfg.outside_gam.cantons.includes(f.canton));
   // la tarifa GAM no aplica fuera de la GAM; la de "fuera de GAM" se deja siempre (la lista de cantones es conservadora)
   const rateOk = (r: Rate) => !(r.zone === "gam" && outside);
+  // efectivo solo con retiro en sitio (Mi Tienda -> Pagos y entrega): con envio no se ofrece
+  // sin retiro posible, el efectivo "solo al retirar" no se ofrece nunca (si no queda ninguno: compra no disponible)
+  const usable = (cfg?.methods || []).filter((m) => !(m.pickup_only && !canPickup));
+  const methods = usable.filter((m) => !(m.pickup_only && f.dtype !== "retiro"));
+  const hiddenCash = usable.some((m) => m.pickup_only) && f.dtype !== "retiro";
   useEffect(() => {
     if (!cfg) return;
     setF((x) => {
       const n = { ...x };
       if (!canShip && canPickup) n.dtype = "retiro";
       if (!canPickup && canShip) n.dtype = "envio";
-      if (!cfg.methods.some((m) => m.code === n.method)) n.method = cfg.methods[0]?.code || "";
+      const ok = cfg.methods.filter((m) => !(m.pickup_only && n.dtype !== "retiro"));
+      if (!ok.some((m) => m.code === n.method)) n.method = ok[0]?.code || "";
       if (n.province && !cfg.provinces[n.province]) { n.province = ""; n.canton = ""; }
       return n;
     });
-  }, [cfg]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cfg, f.dtype]); // eslint-disable-line react-hooks/exhaustive-deps
   // tarifa segun tipo de entrega y zona: retiro -> la de retiro; envio -> la primera valida para esa direccion
   useEffect(() => {
     if (!cfg) return;
@@ -187,6 +202,7 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
         body: JSON.stringify({ lines, contact, delivery, shipping_method: f.rate || null, payment_method: f.method, coupon_code: coupon, notes: f.notes.trim() || null, accept_terms: f.terms, idempotency_key: keyRef.current, expected_total: String(quote.total), website: f.website || null }),
       });
       if (!data.number) { setErr("No pudimos registrar el pedido. Escribinos por WhatsApp."); return; }
+      if (!data.duplicate) track("purchase", { transaction_id: data.number, currency: data.currency, value: Number(data.total), items: gaItems() });
       session.set(`crimson-shop:placed:${data.number}`, JSON.stringify({ email: data.email, pay: data.pay }));
       if (data.pay?.checkout_url) { onPlaced(data); window.location.assign(data.pay.checkout_url); return; }
       onPlaced(data);
@@ -200,9 +216,9 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
   if (cfgErr) return <div className="sh-wrap sh-empty"><b>{cfgErr}</b><button className="sh-btn sh-btn--ghost" onClick={onBack}>Volver a la tienda</button></div>;
   if (!cart.length) return <div className="sh-wrap sh-empty"><b>Tu carrito está vacío.</b><button className="sh-btn sh-btn--ghost" onClick={onBack}>Ver catálogo</button></div>;
   if (!cfg) return <div className="sh-wrap" style={{ paddingTop: 24 }}><div className="sh-skel" style={{ height: 320 }} /></div>;
-  if (!cfg.methods.length) return <div className="sh-wrap sh-empty"><b>La compra en línea no está disponible en este momento.</b>{cfg.whatsapp && <a className="sh-btn sh-btn--wa" href={wa(cfg.whatsapp, `Hola ${S.name}, quiero comprar:\n${cart.map((l) => `• ${l.qty} × ${l.name}`).join("\n")}`)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Pedir por WhatsApp</a>}</div>;
+  if (!usable.length) return <div className="sh-wrap sh-empty"><b>La compra en línea no está disponible en este momento.</b>{cfg.whatsapp && <a className="sh-btn sh-btn--wa" href={wa(cfg.whatsapp, `Hola ${S.name}, quiero comprar:\n${cart.map((l) => `• ${l.qty} × ${l.name}`).join("\n")}`)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Pedir por WhatsApp</a>}</div>;
 
-  const method = cfg.methods.find((m) => m.code === f.method);
+  const method = methods.find((m) => m.code === f.method);
   const cantons = f.province ? cfg.provinces[f.province] || [] : [];
   const totalTxt = quote ? money(quote.total, cur) : "…";
   const summary = <Summary quote={quote} qErr={qErr} cart={cart} cur={cur} setQty={setQty} remove={remove} />;
@@ -289,10 +305,11 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
           {step === 2 && (
             <>
               <fieldset className="sh-fieldset"><legend>¿Cómo vas a pagar?</legend>
-                <div className="sh-choice">{cfg.methods.map((m) => (
+                <div className="sh-choice">{methods.map((m) => (
                   <label key={m.code} className="sh-opt"><input type="radio" name="pay" checked={f.method === m.code} onChange={() => set("method", m.code)} />
                     <span>{m.label}{m.simulated && <em className="ck-tag">Modo de prueba</em>}<small>{m.hint}</small></span><span /></label>
                 ))}</div>
+                {hiddenCash && <p className="sh-note" style={{ margin: 0 }}>El pago en efectivo es solo para retiro en sitio.</p>}
                 {method?.needs_proof && <p className="sh-note" style={{ margin: 0 }}>Al confirmar te mostramos los datos para pagar. Tu pedido se confirma cuando subís el comprobante: hacelo cuanto antes.</p>}
                 {method?.code === "tarjeta" && (method.simulated
                   ? <p className="ck-sim" role="note"><b>Pago simulado.</b> Esta tienda todavía no tiene ONVO conectado: el pago con tarjeta es solo de prueba y no se cobra nada.</p>

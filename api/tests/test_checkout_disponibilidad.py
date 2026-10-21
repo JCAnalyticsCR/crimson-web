@@ -59,6 +59,9 @@ def test_compra_recibida_queda_reservada_para_su_pedido(client, auth, db_session
     o = _order(db_session, _buy(client, [{"product_id": p["id"], "quantity": 2}]).json()["number"])
     req = db_session.scalar(select(PurchaseRequest).where(PurchaseRequest.order_id == o.id))
     assert req.reason == "pedido_web"
+    # la compra nace al cobrar (plan 1.5): sin pago la solicitud no se puede pedir al proveedor
+    assert client.patch(f"/purchase-requests/{req.id}", json={"status": "solicitada"}).status_code == 409
+    client.patch(f"/orders/{o.id}", json={"status": "pagado"})
     assert client.patch(f"/purchase-requests/{req.id}", json={"status": "solicitada"}).status_code == 200
     r = client.patch(f"/purchase-requests/{req.id}", json={"status": "recibida", "warehouse_id": main["id"]})
     assert r.status_code == 200, r.text
@@ -71,7 +74,6 @@ def test_compra_recibida_queda_reservada_para_su_pedido(client, auth, db_session
     assert _avail(client, p["id"]).json()[str(p["id"])]["state"] == "bajo_pedido"
     assert client.get(f"/store/orders/{o.id}/inventory").json()["estado"] == "reservado"
     # al despachar sale de esa reserva, una sola vez
-    client.patch(f"/orders/{o.id}", json={"status": "pagado"})
     assert client.patch(f"/orders/{o.id}", json={"status": "enviado"}).status_code == 200
     total = sum((D(str(m.quantity)) for m in db_session.scalars(select(StockMovement).where(StockMovement.product_id == p["id"]))), D(0))
     assert total == 0
@@ -86,7 +88,8 @@ def test_compra_recibida_de_un_pedido_cancelado_queda_libre(client, auth, db_ses
     supplier_item(db_session, p["id"], 5, hours_ago=1)
     o = _order(db_session, _buy(client, [{"product_id": p["id"], "quantity": 1}]).json()["number"])
     req = db_session.scalar(select(PurchaseRequest).where(PurchaseRequest.order_id == o.id))
-    client.patch(f"/purchase-requests/{req.id}", json={"status": "solicitada"})
+    client.patch(f"/orders/{o.id}", json={"status": "pagado"})  # la compra nace al cobrar (plan 1.5)
+    assert client.patch(f"/purchase-requests/{req.id}", json={"status": "solicitada"}).status_code == 200
     assert client.patch(f"/orders/{o.id}", json={"status": "cancelado"}).status_code == 200
     client.patch(f"/purchase-requests/{req.id}", json={"status": "recibida", "warehouse_id": main["id"]})
     assert not db_session.scalars(select(StockReservation).where(StockReservation.order_id == o.id, StockReservation.status == "confirmada")).all()

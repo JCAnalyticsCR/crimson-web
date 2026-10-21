@@ -42,10 +42,11 @@ from collections.abc import Iterable
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_FLOOR, Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..models import (
+    Order,
     Product,
     PurchaseRequest,
     PurchaseRequestLine,
@@ -91,6 +92,9 @@ STATES: dict[str, str] = {
 }
 SELLABLE_STATES = ("en_bodega", "bajo_pedido", "servicio")
 OPEN_REQUEST = ("borrador", "solicitada")  # solicitudes de compra de pedidos web que ya prometen existencia del proveedor
+# solicitud de un pedido web SIN pagar: aparta lo del proveedor mientras el pedido no vence, pero no avisa ni se compra
+# (la compra nace al cobrar: store_inventory.activate_requests la pasa a borrador)
+RESERVED_REQUEST = "reservada"
 
 
 def settings_of(tenant: Tenant | None) -> dict:
@@ -253,17 +257,30 @@ def list_datetime(list_date: date | None) -> datetime | None:
     return datetime.combine(list_date, time(12, 0), tzinfo=UTC)
 
 
-def _web_requests(db: Session, tenant_id: int, product_ids: list[int]) -> dict[int, Decimal]:
-    """Lo ya prometido al proveedor por pedidos web en solicitudes de compra abiertas (borrador o solicitada)."""
+def _web_requests(db: Session, tenant_id: int, product_ids: list[int], hold_hours: int | None = None) -> dict[int, Decimal]:
+    """Lo ya prometido al proveedor por pedidos web en solicitudes de compra abiertas (borrador o solicitada) y lo
+    apartado por pedidos sin pagar (reservada) MIENTRAS el pedido no vence: vencido, vuelve a venderse aunque el
+    worker todavia no lo haya cancelado (mismo criterio que store_inventory.order_alive).
+    - Con comprobante en revision aparta hasta el tope de la revision (store_inventory.on_review), no para siempre.
+    - Sin plazo para pagar (efectivo, que se cobra al retirar, o "a coordinar"): mientras dure su reserva propia,
+      hold_hours (hold_hours_manual) desde que se hizo el pedido."""
     if not product_ids:
         return {}
+    now = _now()
+    hours = int(hold_hours or DEFAULTS["hold_hours_manual"])
+    vivo = and_(
+        PurchaseRequest.status == RESERVED_REQUEST,
+        Order.status.in_(("nuevo", "en_revision")),
+        or_(Order.expires_at > now, and_(Order.expires_at.is_(None), Order.created_at > now - timedelta(hours=hours))),
+    )
     rows = db.execute(
         select(PurchaseRequestLine.product_id, func.coalesce(func.sum(PurchaseRequestLine.quantity), 0))
         .join(PurchaseRequest, PurchaseRequest.id == PurchaseRequestLine.request_id)
+        .outerjoin(Order, Order.id == PurchaseRequest.order_id)
         .where(
             PurchaseRequest.tenant_id == tenant_id,
             PurchaseRequest.reason == "pedido_web",
-            PurchaseRequest.status.in_(OPEN_REQUEST),
+            or_(PurchaseRequest.status.in_(OPEN_REQUEST), vivo),
             PurchaseRequest.trashed_at.is_(None),
             PurchaseRequestLine.product_id.in_(product_ids),
         )
@@ -299,7 +316,7 @@ def supplier_status(db: Session, tenant, products: Iterable[Product], cfg: dict 
     names = (
         {s.id: s.name for s in db.scalars(select(Supplier).where(Supplier.id.in_({i.supplier_id for v in by_pid.values() for i in v})))} if by_pid else {}
     )
-    committed = _web_requests(db, t.id, [pid for pid in ids if pid in by_pid])
+    committed = _web_requests(db, t.id, [pid for pid in ids if pid in by_pid], cfg.get("hold_hours_manual"))
     limit = timedelta(hours=max_age_hours(cfg))
     backorder = bool(cfg.get("backorder_enabled", True))
     out: dict[int, dict] = {}

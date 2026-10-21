@@ -173,7 +173,7 @@ export default function WebInventory() {
           </div>
           <div className="grid-2">
             <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={cfg.backorder_enabled} onChange={(e) => setCfg({ ...cfg, backorder_enabled: e.target.checked })} />Vender bajo pedido lo que tiene el proveedor (genera solicitud de compra)</label>
-            <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={cfg.cancel_unpaid_on_expiry} onChange={(e) => setCfg({ ...cfg, cancel_unpaid_on_expiry: e.target.checked })} />Cancelar el pedido cuando vence la reserva sin pago</label>
+            <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={cfg.cancel_unpaid_on_expiry} onChange={(e) => setCfg({ ...cfg, cancel_unpaid_on_expiry: e.target.checked })} /><span>Cancelar el pedido cuando vence el plazo para pagar<small className="muted" style={{ display: "block", fontSize: 12 }}>Con tarjeta, 24 h después del plazo y solo si ONVO confirma que no cobró; con comprobante en revisión o en efectivo (se cobra al retirar), nunca. El cliente recibe un correo para rehacer la compra.</small></span></label>
           </div>
           {canConfig && <div><button className="btn btn--crimson btn--sm" onClick={saveCfg}>Guardar ajustes</button></div>}
         </Card>
