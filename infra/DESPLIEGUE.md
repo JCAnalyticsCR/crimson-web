@@ -24,35 +24,50 @@ push a main ──► GitHub Actions "CI" (6 trabajos en paralelo, < 10 min)
 
 | Trabajo | Qué hace | Falla si… |
 |---|---|---|
-| API · ruff + pytest | `uv sync --locked`, `ruff check app ../worker`, `pytest -n auto` (en paralelo, Argon2 barato solo en pruebas) | el lock no coincide con `pyproject.toml`, hay errores de lint o falla una prueba |
-| Migraciones | Postgres 16 vacía: una sola cabeza de Alembic, `alembic upgrade head`, `alembic check`, y la última migración se revierte y se vuelve a aplicar | hay dos cabezas, una migración no corre en Postgres, el modelo y las migraciones no coinciden, o el `downgrade` no sirve |
+| API · ruff + pytest | `uv sync --locked`, `ruff check app ../worker`, `pytest -n auto` (en paralelo, Argon2 barato solo en pruebas, reloj en UTC como producción) | el lock no coincide con `pyproject.toml`, hay errores de lint o falla una prueba |
+| Migraciones | Postgres 16 vacía: una sola cabeza de Alembic, `alembic upgrade head`, `alembic check`, la última migración se revierte y se vuelve a aplicar, y al final las carreras de inventario contra Postgres real (`SELECT … FOR UPDATE`) | hay dos cabezas, una migración no corre en Postgres, el modelo y las migraciones no coinciden, el `downgrade` no sirve, o dos pedidos pueden llevarse la última unidad |
 | Portal · tsc + vite build | `npm ci`, `tsc -b`, `vite build` | errores de tipos o de build |
 | Portal · imagen + nginx -t | `docker build portal` (el Dockerfile arma `nginx.conf` con `envsubst` y corre `nginx -t`) | `nginx.conf` o el Dockerfile del portal tienen un error |
-| Respaldo · imagen + age | construye `infra/respaldo/Dockerfile` y cifra unos bytes con una llave desechable (`respaldo_diario --revisar`) | la imagen del cron de respaldo no construye o le falta `age`/`rclone` |
-| Dependencias · pip-audit | busca vulnerabilidades conocidas en lo que fija `uv.lock` | **nunca** (informativo: el paso queda en rojo y el trabajo en verde) |
+| Respaldo · imagen + ciclo completo | construye `infra/respaldo/Dockerfile` y, dentro de la imagen, con `age` y `rclone` reales y nada real (`infra/respaldo/ciclo_ci.sh`): SQLite con la semilla → respaldo diario → bucket local → prueba mensual (bajar, hashes, descifrar) → `restore` en una base vacía | la imagen no construye, o cualquier paso del respaldo o de su restauración falla con las herramientas de verdad |
+| Dependencias · pip-audit + npm audit | vulnerabilidades conocidas en `uv.lock` y altas en `portal/package-lock.json` (sin las de desarrollo) | **en un PR**, si hay alguna que no esté en la lista de excepciones. En un push solo informa (el paso queda en rojo y el trabajo en verde) |
 
 Lo mismo en local, antes de subir:
 
 ```bash
-cd api && uv sync --locked && uv run ruff check app ../worker && uv run pytest -n auto -q
+cd api && uv sync --locked && uv run ruff check app ../worker && TZ=UTC uv run pytest -n auto -q
 cd api && DATABASE_URL=postgresql+psycopg://crimson:crimson_local_only@localhost:5432/crimson \
           uv run alembic upgrade head && uv run alembic check      # con infra/docker-compose.yml levantado
 cd portal && npm ci && npx tsc -b && npx vite build
 docker build -t crimson-portal:local portal                         # nginx -t
 docker build -f infra/respaldo/Dockerfile -t crimson-respaldo:local .  # imagen del cron de respaldo
+docker run --rm -v "$PWD/infra/respaldo/ciclo_ci.sh:/ciclo_ci.sh:ro" crimson-respaldo:local sh /ciclo_ci.sh
 ```
 
-Las pruebas del CI corren con `TZ=America/Costa_Rica`, el mismo reloj de las máquinas del equipo: varias esperan
-`date.today()` y la app usa en partes la fecha de Costa Rica, así que en UTC fallarían de 18:00 a 24:00 CR. Se quita
-cuando la app deje de usar `date.today()` (la producción corre en UTC).
+Las pruebas del CI corren con `TZ=UTC`, el mismo reloj de producción (Railway). Una prueba que falla solo de 18:00 a
+24:00 CR no es "un problema del CI": muestra que la app (o la prueba) mezcla `date.today()`, que en producción es la
+fecha UTC, con la fecha de Costa Rica (`cr_now()`), justo el borde que pide vigilar la sección 2, regla 8 del plan.
+Se arregla usando la fecha de Costa Rica, nunca fijando otro reloj en el CI. Para verlo a cualquier hora en local:
+`TZ=XXX-14 uv run pytest -q tests/test_x.py` (desde las 04:00 CR la fecha local ya es la de mañana, como en
+producción después de las 18:00 CR; funciona igual en Windows y en Linux).
+
+Hoy hay **un** error conocido de este tipo, de la app y no de la prueba: `commissions.py` fecha con `date.today()` los
+movimientos creados "ahora" (`earned_on`, líneas ~874, ~1348 y ~1413), y *Mis números* corta en la fecha CR. Lo
+corrige el ítem 2.1 (`cr_today()` en las fechas de dinero). Mientras tanto,
+`test_ganancias_aliados.py::test_ajuste_del_pago_acordado_no_resta_dos_veces` está marcada `xfail` **solo** en ese
+horario y con `strict`: cuando 2.1 lo corrija, la marca hace fallar el CI hasta que se quite.
 
 Reglas que el CI hace cumplir:
 
 - **Migraciones:** como máximo una revisión por ítem, re-encadenada al head vigente antes de fusionar (nada de
   revisiones `merge`), reversible, y el modelo tiene que quedar igual que la migración (`alembic check`).
-- **Dependencias:** `uv.lock` siempre al día (`uv sync --locked`). Las nuevas, pineadas con `==`. Si el paso de
-  `pip-audit` sale en rojo, la corrección va en un PR aparte: `uv lock --upgrade-package <paquete>` y la suite en
-  verde. No bloquea a propósito: una vulnerabilidad recién publicada no puede frenar un arreglo urgente.
+- **Dependencias:** `uv.lock` siempre al día (`uv sync --locked`). Las nuevas, pineadas con `==`. En un PR,
+  `pip-audit` y `npm audit --omit=dev --audit-level=high` **bloquean**: la corrección va en ese PR o en uno aparte
+  (`uv lock --upgrade-package <paquete>` / `npm install <paquete>@<versión> --save-exact`, y la suite en verde). Si
+  una vulnerabilidad de Python no tiene arreglo o no aplica, se acepta en `IGNORAR` del paso de `pip-audit`
+  (`.github/workflows/ci.yml`) con el motivo, quién la aceptó y hasta cuándo. En un push a `main` solo informan: una
+  vulnerabilidad recién publicada no puede frenar el despliegue de un arreglo urgente.
+  Al activar la compuerta (2026-10-20) se corrigieron las dos que había: `certifi` 2026.10.19 (raíces de emSign con
+  llaves comprometidas: afecta el TLS hacia Hacienda, ONVO y Resend) y `react-router-dom` 7.18.4 (varias altas).
 
 ## 3. Activar "Wait for CI" y las rutas vigiladas en Railway (una vez)
 
@@ -75,7 +90,8 @@ En cada servicio: **Settings → Source**.
 Cómo se comporta (documentación de Railway):
 
 - El despliegue queda en **WAITING** hasta que terminan todos los workflows de GitHub Actions del commit. Railway
-  mira la conclusión de cada workflow, no de cada trabajo (por eso el paso informativo de `pip-audit` no bloquea).
+  mira la conclusión de cada workflow, no de cada trabajo (por eso, en un push, los pasos informativos de auditoría
+  de dependencias no bloquean).
 - Uno **fallido** lo pasa a **SKIPPED** al instante; producción sigue con la versión anterior.
 - Uno **cancelado** solo bloquea si ningún otro workflow del commit pasó. Como el de GitHub Pages también corre en
   `main`, el CI **nunca se cancela en `main`** (cada commit tiene su propio grupo de concurrencia).
@@ -94,9 +110,9 @@ Anotar fecha y resultado en la bitácora de operaciones. Es parte del criterio d
 
 ### Recomendado: proteger `main` en GitHub
 
-Settings → Branches → regla para `main`: "Require status checks to pass" con los cinco trabajos del CI que
-bloquean (todos menos *Dependencias · pip-audit*). Así un PR rojo no se puede fusionar. Si alguien empuja directo a
-`main`, la compuerta de Railway sigue protegiendo producción.
+Settings → Branches → regla para `main`: "Require status checks to pass" con los seis trabajos del CI (en un PR,
+*Dependencias* también bloquea). Así un PR rojo no se puede fusionar. Si alguien empuja directo a `main`, la compuerta
+de Railway sigue protegiendo producción.
 
 ## 4. Ventanas, orden y migraciones
 

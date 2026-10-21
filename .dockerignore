@@ -1,4 +1,4 @@
-# contexto raiz (worker): solo lo que el Dockerfile copia
+# contexto raiz (worker y respaldo): solo lo que los Dockerfile copian
 *
 !api/
 !worker/
@@ -8,3 +8,12 @@ api/.pytest_cache
 api/.ruff_cache
 api/*.db
 api/tests
+# respaldos, lo que se baja o se descifra a mano y las llaves (infra/RESPALDO.md): nunca dentro de una imagen
+api/respaldos
+api/.env*
+**/*.zip
+**/*.zip.age
+**/*.pgdump
+**/llave-*.txt
+**/custodio*.txt
+**/crimson-[0-9]*.json

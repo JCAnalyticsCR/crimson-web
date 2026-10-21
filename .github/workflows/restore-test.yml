@@ -1,11 +1,19 @@
-# Prueba mensual de restauracion (plan 1.9 · infra/RESPALDO.md seccion 5): baja el respaldo diario mas reciente del
+# Prueba mensual de restauracion (plan 1.9 · infra/RESPALDO.md seccion 4.4): baja el respaldo diario mas reciente del
 # bucket, revisa que tenga menos de 36 h y que sus hashes coincidan, lo descifra con la llave de PRUEBA y lo restaura en
-# una Postgres vacia con el codigo del mismo commit. Termina en rojo si algo no cuadra (GitHub avisa por correo).
+# una Postgres vacia con el codigo del mismo commit (solo si ese commit esta en main).
+#
+# El repo es PUBLICO y cualquiera ve los logs de esta corrida: nada derivado de los datos sale al log. restore solo
+# nombra tablas y conteos, su salida completa queda en el disco temporal del runner, y el destino del bucket es un
+# secreto (GitHub lo enmascara).
+#
+# Resultado: latido a un monitor tipo heartbeat mensual (RESPALDO_PRUEBA_PING_URL): <url> si salio bien y <url>/fail si
+# fallo. Si la prueba ni corre (apagada, Actions deshabilitado), el latido no llega y el monitor avisa igual.
 #
 # Apagado hasta configurarlo (pasos en infra/RESPALDO.md seccion 4.4):
-#   - variable de repositorio RESPALDO_PRUEBA_ACTIVA=true y RESPALDO_DESTINO (p. ej. respaldo:crimson-respaldos)
-#   - environment "respaldo-prueba" (solo rama main) con los secretos RESPALDO_AGE_IDENTITY (llave privada de la PRUEBA,
-#     nunca la de los custodios) y RESPALDO_RCLONE_CONF (rclone.conf con un remoto "respaldo" de SOLO LECTURA)
+#   - variable de repositorio RESPALDO_PRUEBA_ACTIVA=true
+#   - environment "respaldo-prueba" (solo rama main) con los secretos RESPALDO_DESTINO (p. ej. respaldo:<bucket>),
+#     RESPALDO_AGE_IDENTITY (llave privada de la PRUEBA, nunca la de los custodios), RESPALDO_RCLONE_CONF (rclone.conf
+#     con un remoto "respaldo" de SOLO LECTURA) y RESPALDO_PRUEBA_PING_URL (latido del monitor mensual)
 name: Prueba de restauracion
 
 on:
@@ -21,6 +29,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  apagada:
+    if: vars.RESPALDO_PRUEBA_ACTIVA != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: echo "::warning::La prueba mensual de restauracion esta APAGADA (RESPALDO_PRUEBA_ACTIVA no es true). Nadie comprueba que el respaldo diario se pueda restaurar. Ver infra/RESPALDO.md 4.4."
+
   restaurar:
     if: vars.RESPALDO_PRUEBA_ACTIVA == 'true'
     runs-on: ubuntu-latest
@@ -38,7 +53,6 @@ jobs:
           --health-cmd "pg_isready -U crimson -d restauracion"
           --health-interval 5s --health-timeout 5s --health-retries 20
     env:
-      RESPALDO_DESTINO: ${{ vars.RESPALDO_DESTINO }}
       RESPALDO_MAX_HORAS: "36"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -54,29 +68,30 @@ jobs:
       - name: Dependencias
         working-directory: api
         run: uv sync --frozen
-      - name: Llaves de la prueba (solo en el disco temporal del runner)
-        env:
-          AGE_IDENTITY: ${{ secrets.RESPALDO_AGE_IDENTITY }}
-          RCLONE_CONF: ${{ secrets.RESPALDO_RCLONE_CONF }}
-        run: |
-          umask 077
-          printf '%s\n' "$AGE_IDENTITY" > "$RUNNER_TEMP/llave-prueba.txt"
-          printf '%s\n' "$RCLONE_CONF" > "$RUNNER_TEMP/rclone.conf"
+      # Las llaves existen solo durante este paso: se borran al salir de el (bien o mal), antes de cambiar de commit y de
+      # ejecutar el codigo de otra version.
       - name: Bajar, revisar y descifrar el ultimo respaldo
         id: bajar
         working-directory: api
         env:
+          AGE_IDENTITY: ${{ secrets.RESPALDO_AGE_IDENTITY }}
+          RCLONE_CONF: ${{ secrets.RESPALDO_RCLONE_CONF }}
+          RESPALDO_DESTINO: ${{ secrets.RESPALDO_DESTINO }}
           RCLONE_CONFIG: ${{ runner.temp }}/rclone.conf
           RESPALDO_AGE_IDENTITY_FILE: ${{ runner.temp }}/llave-prueba.txt
-        run: uv run python -m app.tools.prueba_restauracion --dir "$RUNNER_TEMP/restauracion"
+        run: |
+          trap 'rm -f "$RESPALDO_AGE_IDENTITY_FILE" "$RCLONE_CONFIG"' EXIT
+          (umask 077 && printf '%s\n' "$AGE_IDENTITY" > "$RESPALDO_AGE_IDENTITY_FILE" && printf '%s\n' "$RCLONE_CONF" > "$RCLONE_CONFIG")
+          uv run python -m app.tools.prueba_restauracion --dir "$RUNNER_TEMP/restauracion"
+      # El commit sale del resumen del bucket: solo se usa si es un commit de main (codigo revisado). Si no, main.
       - name: Mismo codigo que el respaldo
         env:
           COMMIT: ${{ steps.bajar.outputs.commit }}
         run: |
-          if [ -n "$COMMIT" ] && git cat-file -e "${COMMIT}^{commit}" 2>/dev/null; then
+          if [ -n "$COMMIT" ] && git cat-file -e "${COMMIT}^{commit}" 2>/dev/null && git merge-base --is-ancestor "$COMMIT" origin/main; then
             git checkout --detach "$COMMIT"
           else
-            echo "::warning::El respaldo no trae un commit conocido: se restaura con main (si la migracion no coincide, restore sale con codigo 5)"
+            echo "::warning::El respaldo no trae un commit de main: se restaura con main (si la migracion no coincide, restore sale con codigo 5)"
           fi
       - name: Restaurar en Postgres vacia y verificar conteos y hashes
         working-directory: api
@@ -84,7 +99,26 @@ jobs:
           ZIP: ${{ steps.bajar.outputs.zip }}
         run: |
           uv sync --frozen
-          uv run python -m app.tools.restore "$ZIP" --target "postgresql://crimson:solo_ci_desechable@localhost:5432/restauracion"
+          # salida completa al disco del runner (se borra al final); al log publico solo las lineas de resultado
+          rc=0
+          uv run python -m app.tools.restore "$ZIP" --target "postgresql://crimson:solo_ci_desechable@localhost:5432/restauracion" \
+            > "$RUNNER_TEMP/restauracion/restore.log" 2>&1 || rc=$?
+          grep -E '^(Respaldo |AVISO: respaldo|Esquema creado|Insertadas |OK restaurado|ERROR|VERIFICACION FALLIDA|  - )' \
+            "$RUNNER_TEMP/restauracion/restore.log" | cut -c1-300 || true
+          echo "restore salio con codigo $rc (codigos en infra/RESPALDO.md seccion 5)"
+          exit "$rc"
       - name: Borrar lo descifrado y las llaves
         if: always()
         run: rm -rf "$RUNNER_TEMP/restauracion" "$RUNNER_TEMP/llave-prueba.txt" "$RUNNER_TEMP/rclone.conf"
+      - name: Latido del monitor mensual
+        if: always()
+        env:
+          PING_URL: ${{ secrets.RESPALDO_PRUEBA_PING_URL }}
+          RESULTADO: ${{ job.status }}
+        run: |
+          if [ -z "$PING_URL" ]; then
+            echo "::warning::Sin RESPALDO_PRUEBA_PING_URL: si esta prueba falla o deja de correr, solo se entera GitHub"
+            exit 0
+          fi
+          if [ "$RESULTADO" = "success" ]; then url="$PING_URL"; else url="${PING_URL%/}/fail"; fi
+          curl -fsS -m 10 --retry 3 -o /dev/null "$url" || echo "::warning::No se pudo mandar el latido al monitor"

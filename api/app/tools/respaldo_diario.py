@@ -2,7 +2,7 @@
 Ver infra/RESPALDO.md seccion 4 (configuracion) y seccion 5 (prueba de restauracion).
 
     python -m app.tools.respaldo_diario                  # respalda, verifica, cifra, sube y avisa si algo falla
-    python -m app.tools.respaldo_diario --revisar        # solo revisa variables y herramientas (no lee la base)
+    python -m app.tools.respaldo_diario --revisar        # solo revisa variables, herramientas y que la app cargue (no lee la base)
     python -m app.tools.respaldo_diario --probar-aviso   # manda un correo de prueba a RESPALDO_AVISO_A
 
 Pasos:
@@ -15,9 +15,11 @@ Pasos:
    un resumen .json SIN datos personales (hashes, tamanos, filas, migracion, commit). El resumen se sube despues del
    .age: si el resumen existe, el .age esta completo.
 5. Latido a RESPALDO_PING_URL (monitor tipo heartbeat: si un dia no llega, el monitor avisa aunque este proceso ni
-   arranque). Si algo fallo: latido a <url>/fail y correo a RESPALDO_AVISO_A (por Resend, sin pasar por la base).
-6. La corrida (hash, tamano, filas o el error) queda en task_run (app.services.respaldo_estado): el correo de Salud la
-   muestra. Si la tabla no existe o la base no responde, solo queda en el log.
+   arranque). Si algo fallo: latido a <url>/fail y correo a RESPALDO_AVISO_A (por Resend, sin pasar por la base y sin
+   cargar la configuracion de la app: si lo que fallo son las variables, el aviso igual sale).
+6. La corrida (hash, tamano, filas o el error) queda en task_run (app.services.respaldo_estado). El correo de Salud la
+   muestra cuando se integre el plan 1.8 (ver infra/RESPALDO.md 4.5). Si la tabla no existe o la base no responde,
+   solo queda en el log.
 
 Nunca sube nada sin cifrar y siempre borra los temporales (tienen datos personales).
 Codigos de salida: 0 bien · 1 configuracion · 2 respaldo · 3 verificacion · 4 cifrado · 5 subida.
@@ -42,6 +44,7 @@ from html import escape
 from pathlib import Path
 
 import httpx
+from pydantic import ValidationError
 
 FORMATO = "crimson-respaldo-diario"
 VERSION = 1
@@ -50,6 +53,9 @@ AGE_HEADER = b"age-encryption.org/v1"
 # llave publica de age (X25519 o de plugin). Una privada empieza con AGE-SECRET-KEY- y se rechaza.
 _AGE_PUBLICA = re.compile(r"^age1[0-9a-z]{50,}$")
 _CREDENCIAL_EN_URL = re.compile(r"(://)[^/\s:@]+:[^@\s]+@")
+# remitente si falta MAIL_FROM: el mismo de app.services.mail (una prueba lo compara). Copia local a proposito: importar
+# ese modulo carga la configuracion de la app, y el correo de falla tiene que salir aunque la configuracion este rota.
+REMITENTE = "Crimson Consulting <info@crimsoncr.com>"
 
 
 class Fallo(Exception):
@@ -69,6 +75,18 @@ class Config:
 def limpio(texto: str, largo: int = 500) -> str:
     """Mensajes de error para el log y el correo: sin usuario:clave@ de ninguna URL y con tope de largo."""
     return _CREDENCIAL_EN_URL.sub(r"\1***@", str(texto or "")).strip()[-largo:]
+
+
+def describir(e: BaseException, largo: int = 300) -> str:
+    """Una excepcion para el log y el correo. La de la configuracion (pydantic) nombra cada variable y su problema, nunca
+    el valor: str() de un ValidationError trae input_value=..., que puede ser un secreto mal pegado."""
+    if isinstance(e, ValidationError):
+        partes = []
+        for err in e.errors(include_url=False, include_input=False, include_context=False):
+            campo = ".".join(str(x) for x in err.get("loc") or ()).upper()
+            partes.append(f"{campo}: {err.get('msg')}" if campo else str(err.get("msg")))
+        return limpio(f"configuracion de la app invalida: {'; '.join(partes)}", largo)
+    return f"{type(e).__name__}: {limpio(e, largo)}"
 
 
 def leer_config(env: Mapping[str, str]) -> Config:
@@ -144,7 +162,7 @@ def respaldar(tmp: Path, nombre: str) -> tuple[Path, dict]:
     try:
         rc = backup.main(["--salida", str(out), "--sin-pg-dump"])
     except Exception as e:  # noqa: BLE001  (base caida, credencial mala, disco lleno: todo es "no hubo respaldo")
-        raise Fallo(RESPALDO, "respaldo", f"{type(e).__name__}: {limpio(e, 300)}") from e
+        raise Fallo(RESPALDO, "respaldo", describir(e)) from e
     if rc != 0 or not out.is_file():
         raise Fallo(RESPALDO, "respaldo", f"app.tools.backup salio con codigo {rc}")
     with zipfile.ZipFile(out) as z:
@@ -167,7 +185,7 @@ def verificar(zip_path: Path, tmp: Path, modo: str) -> str:
     try:
         rc = restore.main([str(zip_path), "--target", f"sqlite:///{destino.as_posix()}"])
     except Exception as e:  # noqa: BLE001
-        raise Fallo(VERIFICACION, "verificacion", f"{type(e).__name__}: {limpio(e, 300)}") from e
+        raise Fallo(VERIFICACION, "verificacion", describir(e)) from e
     finally:
         try:
             destino.unlink(missing_ok=True)  # es una copia en claro de toda la base: fuera del disco apenas se verifica
@@ -194,10 +212,16 @@ def cifrar(zip_path: Path, recipients: list[str]) -> Path:
     return out
 
 
+# La credencial del bucket solo escribe (no lee, no lista, no borra):
+# --no-check-dest  no mira si el destino existe antes de subir (cada nombre es nuevo).
+# --s3-no-head     no hace HEAD del objeto despues del PUT: con esa credencial da 403 y rclone daria la subida por
+#                  fallida. La integridad la confirma el ETag/MD5 que devuelve el PUT. Con un remoto que no es S3 se ignora.
+RCLONE_SUBIDA = ("--no-check-dest", "--s3-no-head", "--retries", "3", "--low-level-retries", "10", "--stats", "0")
+
+
 def subir(local: Path, remoto: str) -> None:
     exe = herramienta("rclone")
-    # --no-check-dest: las credenciales del bucket solo escriben (no leen ni listan); cada nombre es nuevo
-    correr([exe, "copyto", str(local), remoto, "--no-check-dest", "--retries", "3", "--low-level-retries", "10", "--stats", "0"], SUBIDA, "subida")
+    correr([exe, "copyto", str(local), remoto, *RCLONE_SUBIDA], SUBIDA, "subida")
 
 
 # ---------- avisos ----------
@@ -212,19 +236,18 @@ def latido(url: str | None, ok: bool) -> None:
 
 
 def enviar_aviso(env: Mapping[str, str], asunto: str, html: str) -> bool:
-    """Correo directo por Resend (no por el outbox: si la base es lo que fallo, el aviso igual tiene que salir)."""
+    """Correo directo por Resend: no pasa por el outbox ni carga la configuracion de la app (si la base o las variables
+    son lo que fallo, el aviso igual tiene que salir). Nunca lanza."""
     destinatarios = [x.strip() for x in (env.get("RESPALDO_AVISO_A") or "").split(",") if x.strip()]
     key = env.get("RESEND_API_KEY")
     if not destinatarios or not key:
         print("AVISO: sin RESPALDO_AVISO_A o RESEND_API_KEY: el correo de falla no se pudo mandar (queda el latido y el log)", file=sys.stderr)
         return False
-    from ..services.mail import DEFAULT_FROM
-
     try:
         r = httpx.post(
             "https://api.resend.com/emails",
             headers={"Authorization": f"Bearer {key}"},
-            json={"from": env.get("MAIL_FROM") or DEFAULT_FROM, "to": destinatarios, "subject": asunto, "html": html},
+            json={"from": env.get("MAIL_FROM") or REMITENTE, "to": destinatarios, "subject": asunto, "html": html},
             timeout=20,
         )
         r.raise_for_status()
@@ -301,7 +324,7 @@ def ejecutar(env: Mapping[str, str] | None = None, ahora: datetime | None = None
     except Fallo as f:
         fallos.append(f)
     except Exception as e:  # noqa: BLE001  (cualquier sorpresa tambien avisa: un respaldo que no corre en silencio es lo peor)
-        fallos.append(Fallo(RESPALDO, "inesperado", f"{type(e).__name__}: {limpio(e, 300)}"))
+        fallos.append(Fallo(RESPALDO, "inesperado", describir(e)))
     finally:
         if tmp is not None:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -312,7 +335,7 @@ def ejecutar(env: Mapping[str, str] | None = None, ahora: datetime | None = None
             print(f"FALLO {f.paso}: {f.detalle}", file=sys.stderr)
         latido(ping, ok=False)
         enviar_aviso(env, f"Crimson: falló el respaldo diario ({fallos[0].paso})", html_falla(fallos, resumen, dia))
-        registrar_corrida(nombre, inicio, ok=False, resumen=resumen, fallos=fallos)
+        registrar_corrida(env, nombre, inicio, ok=False, resumen=resumen, fallos=fallos)
         return fallos[0].codigo
     if resumen is None:  # no deberia pasar: sin fallos siempre hay resumen
         return RESPALDO
@@ -321,22 +344,57 @@ def ejecutar(env: Mapping[str, str] | None = None, ahora: datetime | None = None
         f"archivos={resumen['archivos']} verificacion={resumen['verificacion']} carpetas={','.join(carpetas(dia))}"
     )
     latido(ping, ok=True)
-    registrar_corrida(nombre, inicio, ok=True, resumen=resumen, fallos=[])
+    registrar_corrida(env, nombre, inicio, ok=True, resumen=resumen, fallos=[])
     return OK
 
 
-def registrar_corrida(nombre: str, inicio: datetime, *, ok: bool, resumen: dict | None, fallos: list[Fallo]) -> bool:
-    """La corrida va a task_run (plan 1.8): el correo de Salud de las 07:00 muestra el ultimo respaldo y sus fallas.
-    Va despues del latido y del correo: si la base es lo que fallo, los avisos ya salieron."""
-    from ..core.config import settings
-    from ..services import respaldo_estado
+def _url_base(env: Mapping[str, str]) -> str | None:
+    """DATABASE_URL de la configuracion de la app; si la configuracion no carga (la corrida ya fallo por eso y ya aviso),
+    la de la variable de entorno tal cual."""
+    try:
+        from ..core.config import settings
 
-    if resumen is not None:
-        resumen = {**resumen, "carpetas": carpetas(date.fromisoformat(resumen["fecha_cr"]))}
-    elif fallos:
-        resumen = {"paso": fallos[0].paso, "codigo": fallos[0].codigo}
-    error = "; ".join(f"{f.paso}: {f.detalle}" for f in fallos) or None
-    return respaldo_estado.registrar(settings.database_url, corrida=nombre, inicio=inicio, fin=datetime.now(UTC), ok=ok, resumen=resumen, error=error)
+        return settings.database_url
+    except Exception:  # noqa: BLE001
+        url = (env.get("DATABASE_URL") or "").strip()
+        for prefijo in ("postgres://", "postgresql://"):
+            if url.startswith(prefijo):
+                return "postgresql+psycopg://" + url[len(prefijo) :]
+        return url or None
+
+
+def registrar_corrida(env: Mapping[str, str], nombre: str, inicio: datetime, *, ok: bool, resumen: dict | None, fallos: list[Fallo]) -> bool:
+    """La corrida va a task_run (plan 1.8) para el correo de Salud. Va despues del latido y del correo (si la base es lo
+    que fallo, los avisos ya salieron) y nunca lanza ni cambia el codigo de salida."""
+    try:
+        from ..services import respaldo_estado
+
+        if resumen is not None:
+            resumen = {**resumen, "carpetas": carpetas(date.fromisoformat(resumen["fecha_cr"]))}
+        elif fallos:
+            resumen = {"paso": fallos[0].paso, "codigo": fallos[0].codigo}
+        error = "; ".join(f"{f.paso}: {f.detalle}" for f in fallos) or None
+        url = _url_base(env)
+        if not url:
+            print("AVISO: sin DATABASE_URL: la corrida del respaldo no queda en task_run", file=sys.stderr)
+            return False
+        return respaldo_estado.registrar(url, corrida=nombre, inicio=inicio, fin=datetime.now(UTC), ok=ok, resumen=resumen, error=error)
+    except Exception as e:  # noqa: BLE001
+        print(f"AVISO: no se pudo registrar la corrida del respaldo en task_run ({type(e).__name__})", file=sys.stderr)
+        return False
+
+
+def revisar_app() -> None:
+    """Lo que la corrida real va a cargar: la configuracion de la app (Settings, validada con las variables de AHORA, igual
+    que al arrancar) y los modulos de respaldo y restauracion. Sin esto, --revisar diria OK y la corrida fallaria."""
+    try:
+        from ..core.config import Settings
+
+        Settings()
+        from ..services import respaldo_estado  # noqa: F401
+        from . import backup, restore  # noqa: F401
+    except Exception as e:  # noqa: BLE001
+        raise Fallo(CONFIG, "configuracion", describir(e)) from e
 
 
 def revisar(env: Mapping[str, str]) -> int:
@@ -345,6 +403,7 @@ def revisar(env: Mapping[str, str]) -> int:
         cfg = leer_config(env)
         age = herramienta("age")
         herramienta("rclone")
+        revisar_app()
         with tempfile.TemporaryDirectory(prefix="crimson-respaldo-revisar-") as d:
             p = Path(d) / "prueba.txt"
             p.write_text("prueba", encoding="utf-8")

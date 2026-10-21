@@ -81,9 +81,10 @@ Todos los días a las **03:15 hora de Costa Rica** Railway arranca el servicio `
    después del `.age`: si el resumen existe, el cifrado está completo.
 5. **Avisos:** latido al monitor si todo salió bien; si algo falló, latido de falla y correo (sección 4.5).
 6. **Registro:** la corrida queda en `task_run` (tarea `respaldo.diario`: inicio, fin, ok, hash, tamaño, filas,
-   verificación o el error, sin datos personales). El correo diario de **Salud** (07:00) muestra el último respaldo
-   y lista la corrida si falló. Va después de los avisos y nunca tumba el respaldo: si la base no responde o la tabla
-   todavía no existe, solo queda en el log.
+   verificación o el error, sin datos personales). Va después de los avisos y nunca tumba el respaldo: si la base no
+   responde o la tabla todavía no existe, solo queda en el log. **Pendiente:** `task_run`, el correo de Salud y
+   `/health/deep` llegan con el ítem 1.8; hasta integrarlo, el estado del respaldo se ve en el log, el monitor y el
+   bucket (4.5).
 
 Los temporales (tienen datos personales) se borran siempre. El log termina con
 `OK respaldo diario crimson-AAAAMMDD-HHMMSS.zip.age sha256=… filas=… verificacion=restaurado` o con
@@ -101,8 +102,11 @@ Un respaldo en el mismo proveedor que la base no protege de un problema con la c
   **versionado** y, si el proveedor lo permite, **bloqueo de objetos** (object lock / retención) por 14 días: ni un
   error ni una credencial robada pueden borrar los respaldos recientes.
 - **Credencial de escritura** para el servicio `respaldo`: solo subir objetos (sin listar, leer ni borrar) cuando el
-  proveedor lo permite (B2: capacidad `writeFiles`; AWS: política con `s3:PutObject` únicamente). Si el proveedor no
-  tiene credenciales de solo escritura, el bloqueo de objetos es lo que impide borrar.
+  proveedor lo permite (B2: capacidad `writeFiles`; AWS: política con `s3:PutObject` y `s3:AbortMultipartUpload`).
+  Si el proveedor no tiene credenciales de solo escritura, el bloqueo de objetos es lo que impide borrar.
+  Con esa credencial rclone **no puede** leer lo que sube: el respaldo sube con `--no-check-dest` (no mira si el
+  destino existe) y `--s3-no-head` (no hace el `HEAD` de verificación después del `PUT`, que daría 403 y dejaría la
+  subida por fallida; la integridad la confirma el MD5 que devuelve el `PUT`). No quitar esos dos flags del código.
 - **Credencial de lectura**, aparte, solo para la prueba de restauración (4.4).
 - Copia mensual adicional descargada a un medio de la empresa (disco cifrado), fuera de la nube.
 - Nunca: en el repositorio, en un chat, en correo, ni en carpetas sincronizadas personales (OneDrive, Drive).
@@ -126,13 +130,29 @@ Un respaldo en el mismo proveedor que la base no protege de un problema con la c
    encendido (ver `infra/DESPLIEGUE.md`).
 3. **Settings → Deploy:** Cron Schedule `15 9 * * *` (09:15 UTC = 03:15 CR). Restart Policy: *Never* (el fallo ya
    avisó; reintentar en bucle no lo arregla).
-4. **Variables** (ningún valor real va al repositorio):
+4. **Rol de solo lectura en Postgres** (una vez, con el usuario dueño de las tablas, desde `railway connect Postgres`).
+   El respaldo solo lee; si su contenedor se compromete, no puede escribir en producción. La clave se genera en el
+   gestor de contraseñas y no pasa por ningún chat:
+
+   ```sql
+   CREATE ROLE respaldo LOGIN PASSWORD '<clave del gestor de contraseñas>';
+   GRANT CONNECT ON DATABASE railway TO respaldo;      -- el nombre de la base de Railway
+   GRANT pg_read_all_data TO respaldo;                 -- Postgres 14+: SELECT en todas las tablas, también las futuras
+   -- cuando exista task_run (ítem 1.8), para que la corrida quede registrada:
+   GRANT INSERT ON task_run TO respaldo;
+   GRANT USAGE ON SEQUENCE task_run_id_seq TO respaldo;
+   ```
+
+   Sin `pg_read_all_data` (Postgres anterior a 14): `GRANT USAGE ON SCHEMA public TO respaldo; GRANT SELECT ON ALL
+   TABLES IN SCHEMA public TO respaldo; ALTER DEFAULT PRIVILEGES FOR ROLE <dueño> IN SCHEMA public GRANT SELECT ON
+   TABLES TO respaldo;`. Sin el `INSERT` en `task_run` el respaldo funciona igual (avisa en el log que no registró).
+5. **Variables** (ningún valor real va al repositorio):
 
    | Variable | Valor |
    |---|---|
-   | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
+   | `DATABASE_URL` | la del rol `respaldo` (paso 4): `postgresql://respaldo:<clave>@${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}`. **No** `${{Postgres.DATABASE_URL}}` (es el superusuario) |
    | `ENV` | `production` |
-   | `JWT_SECRET` | la misma del api (la valida la configuración al arrancar) |
+   | `JWT_SECRET` | **una propia**, aleatoria y de 32 caracteres o más, distinta de la del api (`python -c "import secrets; print(secrets.token_urlsafe(48))"`). Solo existe para que la configuración de la app valide. La del api **nunca** va a este servicio: deriva la llave que cifra los secretos de pasarelas y buzones que viajan en el respaldo, y firma las sesiones |
    | `RESPALDO_DESTINO` | `respaldo:<bucket>` (remoto `respaldo` de rclone + bucket, opcionalmente con un prefijo) |
    | `RESPALDO_AGE_RECIPIENTS` | llaves públicas `age1…` separadas por coma (custodios + prueba) |
    | `RCLONE_CONFIG_RESPALDO_TYPE` | `s3` |
@@ -140,19 +160,22 @@ Un respaldo en el mismo proveedor que la base no protege de un problema con la c
    | `RCLONE_CONFIG_RESPALDO_ENDPOINT` | URL S3 del proveedor |
    | `RCLONE_CONFIG_RESPALDO_ACCESS_KEY_ID`, `RCLONE_CONFIG_RESPALDO_SECRET_ACCESS_KEY` | la credencial de **escritura** |
    | `RCLONE_CONFIG_RESPALDO_NO_CHECK_BUCKET` | `true` (esa credencial no puede revisar ni crear el bucket) |
+   | `RCLONE_CONFIG_RESPALDO_NO_HEAD` | `true` (no leer el objeto después de subirlo; el código ya pasa `--s3-no-head`, esto lo deja también en el remoto) |
    | `RESPALDO_PING_URL` | URL del latido del monitor (4.5) |
    | `RESPALDO_AVISO_A` | correos que reciben la falla, separados por coma |
    | `RESEND_API_KEY`, `MAIL_FROM` | las variables compartidas del correo (las mismas del api y el worker) |
    | `RESPALDO_VERIFICAR` | vacía (= `restaurar`); `hashes` solo si la restauración de prueba diera falsas alarmas |
 
    Nada más: **no** `FISCAL_KEYS` ni ninguna `HACIENDA_*` (el respaldo lleva el texto cifrado de las credenciales de
-   Hacienda; la llave y el respaldo nunca están en el mismo servicio).
-5. **Revisar la configuración** sin tocar la base: Custom Start Command
+   Hacienda; la llave y el respaldo nunca están en el mismo servicio). El respaldo no descifra nada: el zip lleva los
+   secretos tal como están en la base, cifrados.
+6. **Revisar la configuración** sin tocar la base: Custom Start Command
    `python -m app.tools.respaldo_diario --revisar`, una corrida (`railway cron run` o "Run now"), y borrar el comando.
-   Debe decir `OK configuracion`.
-6. **Primera corrida real:** `railway cron run` y buscar `OK respaldo diario` en el log y los dos archivos en
+   Debe decir `OK configuracion`. Revisa las variables del respaldo, `age` y `rclone`, y que la configuración de la app
+   cargue con estas variables (si falta `JWT_SECRET` o está mal, lo dice nombrando la variable, nunca su valor).
+7. **Primera corrida real:** `railway cron run` y buscar `OK respaldo diario` en el log y los dos archivos en
    `diario/` del bucket.
-7. **Probar el aviso** una vez, con el monitor todavía en pausa: `RESPALDO_VERIFICAR=x`, correr el cron, confirmar que
+8. **Probar el aviso** una vez, con el monitor todavía en pausa: `RESPALDO_VERIFICAR=x`, correr el cron, confirmar que
    llega el correo "falló el respaldo diario (configuracion)" y volver a dejar la variable vacía. Solo el correo:
    `python -m app.tools.respaldo_diario --probar-aviso`.
 
@@ -165,17 +188,32 @@ Listo cuando: 7 respaldos diarios seguidos en `diario/` y una prueba de restaura
 1. `python -m app.tools.prueba_restauracion`: baja el resumen más reciente de `diario/` y su `.age`, exige que el
    respaldo tenga **menos de 36 h** (si no, el cron dejó de correr), compara el hash del cifrado con el resumen, lo
    descifra con la llave de **prueba** y compara el hash del zip.
-2. Vuelve al **commit** del respaldo (lo anota el resumen) para restaurar con el mismo esquema.
+   Las llaves existen en el disco del runner solo durante ese paso: se borran antes de cambiar de commit.
+2. Vuelve al **commit** del respaldo (lo anota el resumen) para restaurar con el mismo esquema, **solo si ese commit
+   está en `main`** (código revisado). Si no, restaura con `main`.
 3. `python -m app.tools.restore` en una **Postgres vacía**: inserta todo y compara conteos y hashes de cada tabla.
-4. Borra lo descifrado y las llaves del runner, pase lo que pase.
+4. Borra lo descifrado del runner, pase lo que pase.
+5. Latido al monitor mensual: `<url>` si salió bien, `<url>/fail` si falló.
 
-Si algo no cuadra queda en rojo y GitHub avisa por correo. Para activarla:
+**El repositorio es público y cualquiera ve los logs de esta corrida.** Por eso nada derivado de los datos sale al
+log: `restore` nombra tablas, columnas y conteos, nunca valores (sus errores dan el tipo, el SQLSTATE y la tabla o
+restricción; el error completo solo con `--detalle-error`, en una máquina de confianza); su salida completa queda en
+el disco temporal del runner; y el destino del bucket es un secreto (GitHub lo enmascara). Si se necesita ver un error
+completo, se repite la prueba a mano (sección 5).
+
+**Avisos:** el latido va a un monitor tipo heartbeat con período de **31 días** y 1 día de gracia, con las alertas a
+los mismos destinatarios del respaldo diario. Así avisa si la prueba falla **y** si deja de correr (apagada, Actions
+deshabilitado). GitHub, aparte, solo le escribe a quien tocó por última vez el cron del workflow: no cuenta como aviso.
+
+Para activarla:
 
 1. GitHub → Settings → Environments → `respaldo-prueba`, con *Deployment branches* limitado a `main`. Secretos del
-   environment: `RESPALDO_AGE_IDENTITY` (el contenido del archivo de la llave de prueba) y `RESPALDO_RCLONE_CONF`
-   (un `rclone.conf` con un remoto `[respaldo]` y la credencial de **solo lectura**).
-2. Variables de repositorio: `RESPALDO_DESTINO` (igual que en Railway) y `RESPALDO_PRUEBA_ACTIVA=true`.
-3. Actions → "Prueba de restauracion" → Run workflow, y verla en verde.
+   environment: `RESPALDO_DESTINO` (igual que en Railway), `RESPALDO_AGE_IDENTITY` (el contenido del archivo de la
+   llave de prueba), `RESPALDO_RCLONE_CONF` (un `rclone.conf` con un remoto `[respaldo]` y la credencial de **solo
+   lectura**) y `RESPALDO_PRUEBA_PING_URL` (la URL del latido del monitor mensual).
+2. Variable de repositorio `RESPALDO_PRUEBA_ACTIVA=true`. Mientras no esté, cada mes queda una advertencia "prueba
+   APAGADA" en Actions (y el monitor, si ya existe, avisa).
+3. Actions → "Prueba de restauracion" → Run workflow, y verla en verde (y el latido en el monitor).
 
 El costo de automatizarla: quien tenga la llave de prueba y la credencial de lectura puede leer los respaldos. Por
 eso viven solo en un environment limitado a `main`, la credencial es de solo lectura y distinta de la de escritura,
@@ -192,9 +230,20 @@ y ambas se rotan si cambia el equipo. Si eso no es aceptable, no se agrega la ll
   con el paso que falló y el detalle. Los mensajes nombran variables, nunca sus valores, y quitan `usuario:clave@` de
   cualquier URL.
 - **Railway:** activar las notificaciones de fallos del servicio.
-- **Correo de Salud (07:00):** la línea "Respaldo diario" sale de `task_run` (`app.services.respaldo_estado`): el
-  último respaldo bueno, hace cuántas horas, filas, tamaño cifrado y el inicio del SHA-256. Queda en **AVISO** (nunca
-  en falla de la plataforma) si la última corrida falló o si pasaron más de 26 h sin un respaldo bueno.
+- **Correo de Salud (07:00) y `/health/deep`: PENDIENTE de integrar con el ítem 1.8** (este código no los trae
+  todavía). Lo que ya está listo en `app.services.respaldo_estado`:
+  - `revision(db, now)`: la línea "Respaldo diario" del correo de Salud (interno): el último respaldo bueno, hace
+    cuántas horas, filas, tamaño cifrado, el inicio del SHA-256 y el error de la última corrida si falló. Queda en
+    **AVISO** (nunca en falla de la plataforma) si la última corrida falló o si pasaron más de 26 h sin un respaldo bueno.
+  - `revision_publica(db, now)`: lo único que puede ir en `/health/deep` (lo consulta un monitor externo): `ok`,
+    `critico`, `vencido` y las horas desde el último bueno. **Nunca** `revision()` ahí: el error trae hosts, usuarios
+    o el bucket.
+
+  Al fusionar 1.8: `"respaldo": respaldo_estado.revision(db, now)` en las revisiones de `app/tasks/salud.py`,
+  `revision_publica` en `/health/deep`, una prueba en `test_salud.py` que verifique la línea, y correr
+  `tests/test_infra_respaldo_diario.py` (la prueba `test_task_run_del_modelo_recibe_la_corrida` se activa sola con el
+  modelo `TaskRun` y falla si sus columnas no calzan). Mientras tanto, el estado del respaldo está en el log del
+  servicio, en el monitor de latido y en los archivos de `diario/`.
 
 | Mensaje en el log o el correo | Qué revisar |
 |---|---|
@@ -203,6 +252,8 @@ y ambas se rotan si cambia el equipo. Si eso no es aceptable, no se agrega la ll
 | `verificacion: … codigo 5` | el servicio `respaldo` quedó con código viejo: redesplegarlo con la última migración |
 | `cifrado: …` | `age` rechazó una llave pública |
 | `subida: …` | credencial vencida, bucket inexistente o un bloqueo de objetos que exige Content-MD5 (actualizar rclone) |
+| `subida: … 403 Forbidden` | la credencial no tiene `PutObject` en ese bucket o prefijo, o alguien quitó `--s3-no-head` del código (4.1) |
+| `configuracion: configuracion de la app invalida: JWT_SECRET: …` | `JWT_SECRET` del servicio `respaldo` ausente, de desarrollo o de menos de 32 caracteres (4.3, paso 5) |
 
 ### Retención sugerida
 
@@ -227,30 +278,38 @@ automática no está activa o cuando falla.
 Responsable: quien administre la plataforma. Duración: 20–30 minutos. Se hace en una base **nueva y vacía**,
 nunca sobre producción.
 
-1. **Bajar el último respaldo** del bucket (`rclone copy respaldo:crimson-respaldos/diario/<último> .`).
-2. **Descifrarlo** en una máquina de confianza: `age -d -i llave-privada.txt -o crimson.zip crimson.zip.age`.
+Todo en una carpeta de trabajo **fuera del repositorio** (por ejemplo `~/recuperacion`), nunca dentro de `api/`: lo
+descifrado no puede terminar en un commit ni en una imagen de Docker construida desde el repo.
+
+1. **Bajar el último respaldo** del bucket a esa carpeta
+   (`rclone copy respaldo:crimson-respaldos/diario/<último> ~/recuperacion/`).
+2. **Descifrarlo** en una máquina de confianza:
+   `age -d -i ~/recuperacion/llave-privada.txt -o ~/recuperacion/crimson.zip ~/recuperacion/crimson.zip.age`
+   (la llave sale del gestor de contraseñas solo para esto y se borra al terminar).
 3. **Mismo código que el respaldo:** abrir `manifest.json`, mirar `alembic_revisions` y hacer checkout de un
    commit con esa migración como cabeza (`uv run alembic heads` debe mostrarla).
 4. **Restaurar en una base vacía** (cualquiera de las dos):
-   - Local, rápido: `uv run python -m app.tools.restore crimson.zip --target sqlite:///./prueba-recuperacion.db`
+   - Local, rápido (desde `api/`):
+     `uv run python -m app.tools.restore ~/recuperacion/crimson.zip --target sqlite:///$HOME/recuperacion/prueba.db`
    - Postgres de prueba (un entorno aparte en Railway o un Postgres local):
-     `uv run python -m app.tools.restore crimson.zip --target postgresql://usuario:clave@host:5432/crimson_prueba`
+     `uv run python -m app.tools.restore ~/recuperacion/crimson.zip --target postgresql://usuario:clave@host:5432/crimson_prueba`
 
    La herramienta: verifica el hash de cada archivo del zip (si alguien lo alteró, se detiene); **se niega**
    si la base destino tiene datos; crea el esquema si no existe; inserta todo en **una sola transacción**
    respetando las llaves foráneas; y al final relee la base y compara conteos y hash de cada tabla.
    Debe terminar con `OK restaurado y verificado`. Cualquier otro final = la prueba falló.
 5. **Probarla funcionando:** levantar la API contra esa base
-   (`DATABASE_URL=sqlite:///./prueba-recuperacion.db uv run uvicorn app.main:app --port 8099`), entrar con
+   (`DATABASE_URL=sqlite:///$HOME/recuperacion/prueba.db uv run uvicorn app.main:app --port 8099`), entrar con
    un usuario real y revisar: última factura emitida, último pago, una foto de un levantamiento, el reporte
    de vehículos del mes. (Si el respaldo era `--redactar`, las contraseñas no sirven: es lo esperado.)
 6. **Anotar el resultado** en la bitácora de operaciones: fecha, archivo probado, su `sha256`, minutos que
    tomó, resultado y quién lo hizo.
-7. **Borrar la base de prueba** y el zip descifrado (contienen datos personales).
+7. **Borrar la carpeta de trabajo** completa: la base de prueba, el zip descifrado y la llave (datos personales).
 
 Códigos de salida de `restore`: 0 bien · 2 no existe el archivo · 3 zip dañado o alterado ·
-4 la base destino no está vacía · 5 versión de migración distinta · 6 error al insertar (no quedó nada a medias) ·
-7 la verificación posterior no coincide.
+4 la base destino no está vacía · 5 versión de migración distinta · 6 error al insertar (no quedó nada a medias; el
+mensaje da el tipo, el SQLSTATE y la tabla o restricción, nunca los valores: `--detalle-error` muestra el error completo,
+solo en una máquina de confianza) · 7 la verificación posterior no coincide.
 
 ## 6. Recuperación real (desastre)
 

@@ -5,12 +5,12 @@ import re
 import time
 import tracemalloc
 import zipfile
-from datetime import date
 from decimal import Decimal as D
 
 import pytest
 from sqlalchemy import select
 
+from app.providers.einvoice import cr_now
 from tests.aliados_helpers import interno, uid
 
 
@@ -205,7 +205,8 @@ def test_backfill_no_duplica_el_cobro_de_quien_hizo_la_factura(client, auth, db_
     db_session.get(Invoice, inv["id"]).seller_id = vb
     c.source_key = f"cobro:{c.payment_id}:v:{va}"
     db_session.commit()
-    r = client.post("/commissions/backfill", json={"from": str(date.today()), "dry_run": False})
+    hoy_cr = cr_now().date()  # el backfill rechaza fechas futuras segun la fecha de Costa Rica (date.today() es UTC en el CI)
+    r = client.post("/commissions/backfill", json={"from": str(hoy_cr), "dry_run": False})
     assert r.status_code == 200 and r.json()["creados"] == 0, r.text
 
 

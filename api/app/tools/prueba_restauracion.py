@@ -27,6 +27,7 @@ CONFIG, SIN_RESPALDO, DESCARGA, DESCIFRADO = 1, 2, 3, 4
 # lo que viene del bucket es dato: solo nombres y SHA con la forma esperada (nada de rutas ni saltos de linea)
 _ARCHIVO = re.compile(r"^crimson-\d{8}-\d{6}\.zip\.age$")
 _COMMIT = re.compile(r"^[0-9a-f]{7,40}$")
+_REVISION = re.compile(r"^[0-9a-z_]{1,64}$")
 
 
 def ultimo_resumen(rclone: str, destino: str) -> str:
@@ -45,13 +46,28 @@ def bajar(destino: str, identidad: Path, carpeta: Path, max_horas: float = 36, a
     nombre = ultimo_resumen(rclone, destino)
     resumen_path = carpeta / "resumen.json"
     correr([rclone, "copyto", f"{destino}/diario/{nombre}", str(resumen_path)], DESCARGA, "descarga")
-    resumen = json.loads(resumen_path.read_text(encoding="utf-8"))
-    if resumen.get("formato") != FORMATO or not _ARCHIVO.match(str(resumen.get("archivo") or "")):
+    try:
+        resumen = json.loads(resumen_path.read_text(encoding="utf-8"))
+    except ValueError:
+        resumen = None
+    if (
+        not isinstance(resumen, dict)
+        or resumen.get("formato") != FORMATO
+        or not _ARCHIVO.match(str(resumen.get("archivo") or ""))
+        or not all(isinstance(resumen.get(k), str) for k in ("creado", "age_sha256", "zip_sha256"))
+    ):
         raise Fallo(DESCARGA, "descarga", f"{nombre} no es un resumen de respaldo de Crimson")
     if not _COMMIT.match(str(resumen.get("commit") or "")):
         resumen["commit"] = None  # lo que no es un SHA no se usa para hacer checkout (ni entra a $GITHUB_OUTPUT)
-    creado = datetime.fromisoformat(resumen["creado"])
-    horas = ((ahora or datetime.now(UTC)) - creado).total_seconds() / 3600
+    # lo que se imprime tambien es dato del bucket: en el log de GitHub una linea que empieza con "::" es un comando
+    filas = resumen.get("filas")
+    resumen["filas"] = filas if isinstance(filas, int) and not isinstance(filas, bool) else None
+    revs = resumen.get("alembic_revisions")
+    resumen["alembic_revisions"] = [r for r in revs if isinstance(r, str) and _REVISION.match(r)] if isinstance(revs, list) else []
+    try:
+        horas = ((ahora or datetime.now(UTC)) - datetime.fromisoformat(resumen["creado"])).total_seconds() / 3600
+    except (TypeError, ValueError) as e:  # fecha mal escrita o sin zona
+        raise Fallo(DESCARGA, "descarga", f"{nombre} no es un resumen de respaldo de Crimson (fecha)") from e
     if horas > max_horas:
         raise Fallo(SIN_RESPALDO, "edad", f"el ultimo respaldo ({resumen['archivo']}) tiene {horas:.0f} h: el respaldo diario no esta corriendo")
     cifrado = carpeta / "respaldo.zip.age"
@@ -81,7 +97,8 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
     except Fallo as f:
         print(f"FALLO {f.paso}: {f.detalle}", file=sys.stderr)
         return f.codigo
-    print(f"OK {r['archivo']}: {r['horas']} h, {r['filas']} filas, migracion {', '.join(r['alembic_revisions']) or '-'}, commit {r.get('commit') or '-'}")
+    filas = "?" if r["filas"] is None else r["filas"]
+    print(f"OK {r['archivo']}: {r['horas']} h, {filas} filas, migracion {', '.join(r['alembic_revisions']) or '-'}, commit {r.get('commit') or '-'}")
     salida = env.get("GITHUB_OUTPUT")
     if salida:
         with open(salida, "a", encoding="utf-8") as f:

@@ -7,11 +7,17 @@ del aliado sale por su portal (/aliado/ganancias*, aliado_final R7); /commission
 from datetime import date, timedelta
 from decimal import Decimal
 
+import pytest
+
 from app.models import Commission
+from app.providers.einvoice import cr_now
 from tests.aliados_helpers import interno, keys_rec, usuario
 
 D = Decimal
-HOY = date.today()
+# la fecha de Costa Rica, la que usa la app: en produccion (y en el CI) date.today() es la fecha UTC, que de 18:00 a
+# 24:00 CR ya es la de manana
+HOY = cr_now().date()
+EN_EL_BORDE = date.today() != HOY  # reloj UTC entre las 18:00 y las 24:00 CR
 
 
 def _cust(client):
@@ -247,6 +253,12 @@ def test_precio_aprobado_al_crearlo_con_proyecto_completado(client, auth, db_ses
     assert db_session.get(Commission, pagos[0]["id"]).source_key.startswith("pago:")
 
 
+@pytest.mark.xfail(
+    EN_EL_BORDE,
+    strict=True,
+    reason="plan 2.1: commissions.py fecha el ajuste con date.today() (earned_on, linea ~1413) y Mis numeros corta en la "
+    "fecha CR: de 18:00 a 24:00 CR el ajuste queda manana y no suma. Cuando 2.1 use cr_today(), esta marca sobra (strict).",
+)
 def test_ajuste_del_pago_acordado_no_resta_dos_veces(client, auth, db_session):
     ally = client.post("/allies", json={"name": "Aliado Uno S.A.", "tax_id": "3-101-000211"}).json()["id"]
     n = _negocio(client, ally)

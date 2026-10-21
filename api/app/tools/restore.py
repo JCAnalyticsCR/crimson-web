@@ -10,6 +10,9 @@ Reglas:
   --permitir-version-distinta lo intenta igual (solo si las columnas son compatibles).
 - Primero verifica el hash de cada archivo del zip; luego inserta todo en UNA transaccion respetando el orden
   de llaves foraneas; al final re-lee el destino y compara conteos y hash de cada tabla. Codigo 0 = identico.
+- Los errores no muestran datos de las filas (la prueba mensual corre en GitHub Actions y el respaldo diario en los
+  logs de Railway): solo el tipo, el SQLSTATE y la tabla, columna o restriccion. --detalle-error muestra el error
+  completo de la base, solo en una maquina de confianza.
 """
 
 from __future__ import annotations
@@ -40,11 +43,42 @@ def code_heads() -> list[str]:
         return []
 
 
+def error_seguro(e: BaseException) -> str:
+    """Un error de la base o de un valor del respaldo SIN los datos. El texto de Postgres (DETAIL: Key (email)=(...)),
+    los parametros de la sentencia y el valor que no se pudo convertir (int('...'), fromisoformat('...')) pueden traer
+    datos personales. Queda el tipo, el SQLSTATE y la tabla, columna, tipo o restriccion que nombra la base."""
+    partes = [type(e).__name__]
+    orig = getattr(e, "orig", None)
+    if orig is not None:
+        partes.append(type(orig).__name__)
+        diag = getattr(orig, "diag", None)  # psycopg
+        if diag is not None:
+            for etiqueta, attr in (
+                ("sqlstate", "sqlstate"),
+                ("tabla", "table_name"),
+                ("columna", "column_name"),
+                ("tipo", "datatype_name"),
+                ("restriccion", "constraint_name"),
+            ):
+                v = getattr(diag, attr, None)
+                if v:
+                    partes.append(f"{etiqueta} {v}")
+        elif type(orig).__module__ == "sqlite3":
+            # SQLite nombra tabla.columna o la restriccion, nunca el valor ("UNIQUE constraint failed: user.email")
+            partes.append(str(orig).splitlines()[0][:200] if str(orig) else "")
+    return " · ".join(x for x in partes if x)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m app.tools.restore", description="Restaura un respaldo de Crimson en una base vacia")
     ap.add_argument("zip", help="archivo .zip generado por app.tools.backup")
     ap.add_argument("--target", required=True, help="DATABASE_URL de la base destino (vacia)")
     ap.add_argument("--permitir-version-distinta", action="store_true", help="restaurar aunque la migracion no coincida")
+    ap.add_argument(
+        "--detalle-error",
+        action="store_true",
+        help="si falla, mostrar el error completo de la base (puede traer datos de las filas: solo en una maquina de confianza)",
+    )
     a = ap.parse_args(argv)
 
     src = Path(a.zip)
@@ -59,7 +93,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {e}", file=sys.stderr)
         return 3
     tot = m["totals"]
-    print(f"Respaldo {m['created_at']} - alcance {m['scope']}{' (' + m['tenant']['slug'] + ')' if m.get('tenant') else ''} - {tot['rows']} filas - hash verificado")
+    print(
+        f"Respaldo {m['created_at']} - alcance {m['scope']}{' (' + m['tenant']['slug'] + ')' if m.get('tenant') else ''} - {tot['rows']} filas - hash verificado"
+    )
     if m.get("redacted"):
         print("AVISO: respaldo SIN secretos: los usuarios deberan restablecer contrasena y 2FA; las pasarelas, sus llaves.")
     if not m.get("blobs_included", True):
@@ -68,6 +104,15 @@ def main(argv: list[str] | None = None) -> int:
     engine = make_engine(normalize_url(a.target))
     try:
         return _restaurar(engine, z, m, a.permitir_version_distinta)
+    except Exception as e:  # noqa: BLE001  (un valor que no se pudo leer, la base que se cayo a media restauracion...)
+        if a.detalle_error:
+            print(f"ERROR al restaurar (no quedo ningun dato a medias): {type(e).__name__}: {e}", file=sys.stderr)
+        else:
+            print(
+                f"ERROR al restaurar (no quedo ningun dato a medias): {error_seguro(e)}. Detalle: --detalle-error, solo en una maquina de confianza.",
+                file=sys.stderr,
+            )
+        return 6
     finally:
         # sin conexiones abiertas al terminar: el cron de respaldo restaura aqui su verificacion y tiene que salir limpio
         engine.dispose()
@@ -85,15 +130,24 @@ def _restaurar(engine, z: zipfile.ZipFile, m: dict, permitir: bool) -> int:
             busy = {t: n for t, n in bk.target_counts(conn, md).items() if n}
             if busy:
                 t, n = next(iter(busy.items()))
-                print(f"ERROR: la base destino NO esta vacia ({t} tiene {n} filas; {len(busy)} tablas con datos). Restaure solo en una base nueva.", file=sys.stderr)
+                print(
+                    f"ERROR: la base destino NO esta vacia ({t} tiene {n} filas; {len(busy)} tablas con datos). Restaure solo en una base nueva.",
+                    file=sys.stderr,
+                )
                 return 4
             current = bk.alembic_revisions(conn)
             if revs and current and sorted(current) != sorted(revs) and not permitir:
-                print(f"ERROR: el destino esta en la migracion {current} y el respaldo en {revs}. Use la misma version del codigo o --permitir-version-distinta.", file=sys.stderr)
+                print(
+                    f"ERROR: el destino esta en la migracion {current} y el respaldo en {revs}. Use la misma version del codigo o --permitir-version-distinta.",
+                    file=sys.stderr,
+                )
                 return 5
         else:
             if revs and heads and sorted(revs) != heads and not permitir:
-                print(f"ERROR: el respaldo es de la migracion {revs} y este codigo esta en {heads}. Haga checkout de la version del respaldo o use --permitir-version-distinta.", file=sys.stderr)
+                print(
+                    f"ERROR: el respaldo es de la migracion {revs} y este codigo esta en {heads}. Haga checkout de la version del respaldo o use --permitir-version-distinta.",
+                    file=sys.stderr,
+                )
                 return 5
             md.create_all(conn)
             stamp = revs or heads
@@ -108,7 +162,7 @@ def _restaurar(engine, z: zipfile.ZipFile, m: dict, permitir: bool) -> int:
         try:
             with conn.begin():
                 bk.restore(conn, md, z, m)
-        except (bk.BackupError, sa.exc.SQLAlchemyError) as e:
+        except bk.BackupError as e:  # nombra tablas y columnas, nunca valores
             print(f"ERROR al restaurar (no quedo nada a medias): {e}", file=sys.stderr)
             return 6
         problems = bk.verify_restored(conn, md, m)
