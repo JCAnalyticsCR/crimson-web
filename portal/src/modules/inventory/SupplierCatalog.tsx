@@ -15,6 +15,8 @@ type Cat = { category: string | null; subcategory: string | null; count: number 
 type Sup = {
   id: number; name: string; items: number; active: number; linked: number; in_stock: number; categories: Cat[]; unlinked_products?: number;
   last_list: { list_date: string; source: string; source_file: string | null; imported_at: string; summary: Record<string, number> | null } | null;
+  /* ultimo cambio REAL de la lista (existencia, costo, entro o salio un item), aparte de cuando se cargo o consulto */
+  last_change_at?: string | null;
   api: {
     status: string; label: string | null; last_ok_at?: string; last_try_at?: string; last_summary?: Record<string, number>;
     last_stock_at?: string; last_stock_error?: string | null; last_stock_summary?: Record<string, number>;
@@ -158,7 +160,7 @@ export default function SupplierCatalog() {
             <button key={s.id} className={`prv-sup${s.id === sid ? " is-active" : ""}`} onClick={() => { setSid(s.id); setCat(null); }} aria-pressed={s.id === sid}>
               <span className="prv-sup__name">{s.name}</span>
               <span className="prv-sup__nums"><span><b>{s.active}</b> ítems</span><span><b>{s.in_stock}</b> con existencia</span><span><b>{s.linked}</b> vinculados</span></span>
-              <span className="meta">{s.last_list ? `Lista del ${fmtDate(s.last_list.list_date)}${s.last_list.source_file ? ` · ${s.last_list.source_file}` : ""}` : "Sin lista"}</span>
+              <span className="meta">{s.last_list ? `Lista del ${fmtDate(s.last_list.list_date)}${s.last_list.source_file ? ` · ${s.last_list.source_file}` : ""}` : "Sin lista"}{!s.api.label && s.last_change_at ? ` · último cambio real ${hace(s.last_change_at)}` : ""}</span>
               {s.api.label && <span className="prv-api" data-status={s.api.status}><i />{s.api.label}</span>}
               {s.api.label && (s.api.last_ok_at || s.api.last_stock_at) && (
                 <span className="meta">

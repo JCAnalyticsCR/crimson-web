@@ -54,8 +54,8 @@ from .routers import (
 )
 from .routers import bitacora as bitacora_router
 from .routers import fiscal_queue as fiscal_queue_router
-from .routers import settings as settings_router
 from .routers import invoice_proofs as invoice_proofs_router
+from .routers import settings as settings_router
 from .routers import store_inventory as store_inventory_router
 
 log = logging.getLogger("crimson")

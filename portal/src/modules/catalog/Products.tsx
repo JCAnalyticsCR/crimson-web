@@ -273,7 +273,7 @@ export default function Products() {
         {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Nada con esos filtros. Probá limpiarlos o creá el producto." /> : (
           <div className={verCostos ? "prd-dense" : undefined} style={{ overflowX: "auto" }}>
           <table className="table">
-            <thead><tr>{cotiza && <th style={{ width: 32 }} title="Marcá para agregar a una cotización" />}<th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th>Bodega</th><th className="num" title="Libre en bodegas de venta (sin las de garantías) menos lo reservado">Propio</th><th className="num" title="Existencia del proveedor vinculado (Eurocomp)">Proveedor</th><th title="Cuándo se actualizó la existencia del proveedor">Actualizado</th>{verCostos && <th className="num" title="Costo sin IVA: del proveedor vinculado (con la fecha de su lista) o propio">Costo</th>}{verPrecios && <th className="num" title="Sin IVA">Precio de venta</th>}{verCostos && <th className="num" title="Margen sobre la venta: (precio − costo) ÷ precio">Margen</th>}{verCostos && <th className="num" title="Precio general para aliados, sin IVA (recargo sobre el costo o precio fijo)">Precio aliado</th>}<th>IVA</th>{publica && <th>Web</th>}<th /></tr></thead>
+            <thead><tr>{cotiza && <th style={{ width: 32 }} title="Marcá para agregar a una cotización" />}<th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th>Bodega</th><th className="num" title="Libre en bodegas de venta (sin las de garantías) menos lo reservado">Propio</th><th className="num" title="Existencia del proveedor vinculado (Eurocomp)">Proveedor</th><th title="Cuándo se consultó al proveedor y cuándo cambió de verdad su existencia o su costo">Proveedor consultado</th>{verCostos && <th className="num" title="Costo sin IVA: del proveedor vinculado (con la fecha de su lista) o propio">Costo</th>}{verPrecios && <th className="num" title="Sin IVA">Precio de venta</th>}{verCostos && <th className="num" title="Margen sobre la venta: (precio − costo) ÷ precio">Margen</th>}{verCostos && <th className="num" title="Precio general para aliados, sin IVA (recargo sobre el costo o precio fijo)">Precio aliado</th>}<th>IVA</th>{publica && <th>Web</th>}<th /></tr></thead>
             <tbody>{items.map((p) => (
               <tr key={p.id}>
                 {cotiza && <td><input type="checkbox" aria-label={`Agregar ${p.name} a una cotización`} checked={sel.has(p.id)} onChange={() => marcar(p.id)} /></td>}
@@ -367,7 +367,7 @@ export default function Products() {
   );
 }
 
-/* Propio (libre en bodegas de venta) · Proveedor · Actualizado: la funcion unica del API */
+/* Propio (libre en bodegas de venta) · Proveedor · Proveedor consultado: la funcion unica del API */
 function StockCells({ a }: { a?: Avail | null }) {
   if (!a || a.state === "servicio") return <><td className="num muted">—</td><td className="num muted">—</td><td className="muted">—</td></>;
   const own = Number(a.own_free ?? 0);

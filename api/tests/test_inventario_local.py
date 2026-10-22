@@ -27,10 +27,11 @@ def test_archiva_solo_lo_viejo_sin_existencia_y_asegura_bodega_principal(client,
     vinculado = _prod(db_session, tid, "FY-EURO")  # de la tienda anterior, vinculado a Eurocomp: lo maneja la sincronizacion
     negativo = _prod(db_session, tid, "FY-NEG")  # negativo: primero el Kardex
     propio = _prod(db_session, tid, "PROPIO-1")  # creado aqui, no de la tienda anterior: nunca se toca
+    emparejado = _prod(db_session, tid, "PROPIO-SKU")  # de Crimson; el importador solo lo emparejo por SKU: nunca se toca
     invsvc.move(db_session, tid, None, con_stock.id, main.id, "entrada", Decimal(2), "INI")
     invsvc.move(db_session, tid, None, negativo.id, main.id, "salida", Decimal(-1), "X")
     supplier_item(db_session, vinculado.id, 0)
-    t.settings = {**(t.settings or {}), "fygaro": {"products": {str(i): {"id": p.id, "created": True, "code": p.code} for i, p in enumerate([viejo, con_stock, vinculado, negativo])}}}
+    t.settings = {**(t.settings or {}), "fygaro": {"products": {**{str(i): {"id": p.id, "created": True, "code": p.code} for i, p in enumerate([viejo, con_stock, vinculado, negativo])}, "99": {"id": emparejado.id, "created": False, "code": emparejado.code}}}}
     db_session.commit()
 
     cands = {c["code"]: c for c in ic.candidates(db_session, t)}
@@ -42,7 +43,7 @@ def test_archiva_solo_lo_viejo_sin_existencia_y_asegura_bodega_principal(client,
     db_session.commit()
     db_session.refresh(viejo)
     assert viejo.archived_at is not None and viejo.active is False  # archivado, no borrado (se restaura desde Archivo)
-    for p in (con_stock, vinculado, negativo, propio):
+    for p in (con_stock, vinculado, negativo, propio, emparejado):
         db_session.refresh(p)
         assert p.archived_at is None and p.active
     assert ic.archive_legacy(db_session, t) == 0  # dos veces no hace nada mas

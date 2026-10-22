@@ -41,6 +41,9 @@ class SupplierItem(TenantMixin, TimestampMixin, Base):
     # cuando cambio DE VERDAD la existencia o el costo (o cuando entro el item). list_date / supplier_updated_at dicen
     # cuando se consulto; esto dice desde cuando el dato es el mismo (pedido 21/10: "actualizado hace 3 h" confundia)
     changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # cuando la sincronizacion de Eurocomp completo (una sola vez por vinculo) el CABYS y las fotos del producto
+    # vinculado si le faltaban. Vinculado despues (linked_at > enriched_at) -> se completa en la corrida siguiente
+    enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     raw: Mapped[dict | None] = mapped_column(JSON)  # la fila tal como vino
     # vinculo con el catalogo propio: metodo sku | modelo | nombre | manual | creado
     product_id: Mapped[int | None] = mapped_column(ForeignKey("product.id", name="fk_supplier_item_product", ondelete="SET NULL"), index=True)

@@ -16,7 +16,7 @@ export type Candidate = {
   stock_propio: number | string; stock_proveedor: number | string | null;
   availability: "bodega" | "bodega_parcial" | "proveedor" | "sin_existencias"; availability_label: string;
   /* existencia del proveedor: cuando se actualizo y si esta vigente (la misma regla de la tienda) */
-  updated_at?: string | null; supplier_updated_at?: string | null; supplier_age?: string | null; supplier_fresh?: boolean | null;
+  updated_at?: string | null; supplier_updated_at?: string | null; supplier_age?: string | null; supplier_changed_age?: string | null; supplier_fresh?: boolean | null;
   quantity: number | string; unit: string; per_unit: number | string; line_unit: string; quantity_note: string | null;
   meets: boolean; matches: string[]; fails: string[]; misses: string[]; unknown: string[];
   criteria: { label: string; points: number; ok: boolean | null; hard?: boolean }[];
@@ -149,7 +149,7 @@ function CandidateCard({ c, value, onQty, busy, disabled, onUse, verCostos, verP
       <div className="reco-card__meta">{[c.brand, c.model || c.code, origen].filter(Boolean).join(" · ")}</div>
       {Number(c.stock_proveedor ?? 0) > 0 && (
         <div className="reco-card__meta" style={{ color: c.supplier_fresh === false ? "var(--bad)" : undefined }}>
-          {c.supplier || "Proveedor"}: {Number(c.stock_proveedor)} · {c.supplier_age && c.supplier_age !== "sin fecha" ? `actualizado ${c.supplier_age}` : c.updated_at ? `lista del ${new Date(String(c.updated_at).length === 10 ? `${c.updated_at}T12:00:00` : String(c.updated_at)).toLocaleDateString("es-CR", { day: "2-digit", month: "short" })}` : "sin fecha"}{c.supplier_fresh === false ? " (dato viejo: confirmá con el proveedor)" : ""}
+          {c.supplier || "Proveedor"}: {Number(c.stock_proveedor)} · {c.supplier_age && c.supplier_age !== "sin fecha" ? `consultado ${c.supplier_age}${c.supplier_changed_age ? ` · último cambio ${c.supplier_changed_age}` : ""}` : c.updated_at ? `lista del ${new Date(String(c.updated_at).length === 10 ? `${c.updated_at}T12:00:00` : String(c.updated_at)).toLocaleDateString("es-CR", { day: "2-digit", month: "short" })}` : "sin fecha"}{c.supplier_fresh === false ? " (dato viejo: confirmá con el proveedor)" : ""}
         </div>
       )}
       <div className="reco-card__chips">

@@ -427,8 +427,8 @@ def apply_list(
                     if abs(pct) >= COST_JUMP_PCT:
                         warnings.append(f"costo cambió {pct:+.0f} %")
         keep_raw = only_price_stock and item is not None
-        if item is None or {"stock", "cost"} & set(changed):
-            changed_at = now  # entro o cambio de verdad su existencia o su costo
+        if item is None or {"stock", "cost", "active"} & set(changed):
+            changed_at = now  # entro, volvio o cambio de verdad su existencia o su costo (con o sin advertencias)
         else:
             changed_at = None
         if item is None:
@@ -478,6 +478,7 @@ def apply_list(
                 kept_api += 1  # un Excel no inactiva lo que la API del proveedor confirma
                 continue
             it.active = False
+            it.changed_at = now
             gone.append({"code": it.code, "name": it.name, "product_id": it.product_id})
     db.flush()
 
@@ -535,6 +536,9 @@ def apply_list(
         "dudoso": sum(1 for o in out if o["action"] == "dudoso"),
         "error": sum(1 for o in out if o["action"] == "error"),
         "inactivar": len(gone),
+        # cambios de verdad de existencia o costo (tambien los "dudosos": un salto de costo es un cambio real)
+        "cambios_reales": sum(1 for o in out if o.get("base") == "nuevo" or (o.get("base") == "actualizado" and {"stock", "cost", "active"} & set(o.get("changed") or [])))
+        + len(gone),
         "api_conservados": kept_api + sum(1 for o in out if o.get("base") == "api_vigente"),
         "vinculos": len(links),
         "sugerencias": suggestions,

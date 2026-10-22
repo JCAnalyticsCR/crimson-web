@@ -30,18 +30,16 @@ def list_proofs(
     p: Principal = Depends(require("payments", "ver")),
     db: Session = Depends(get_db),
 ):
-    stmt = select(InvoicePaymentProof).where(InvoicePaymentProof.tenant_id == p.tenant.id)
+    """El vendedor (sin sales.ver_todo) solo ve los comprobantes de SUS facturas (services/ownership)."""
+    stmt = select(InvoicePaymentProof).where(InvoicePaymentProof.tenant_id == p.tenant.id, *ip.scope(p))
     if status != "todos":
         stmt = stmt.where(InvoicePaymentProof.status == status)
     rows = db.scalars(stmt.order_by(InvoicePaymentProof.id.desc()).limit(limit)).all()
-    return {"items": [ip.staff_out(db, r) for r in rows], "pendientes": ip.pending_count(db, p.tenant.id)}
+    return {"items": [ip.staff_out(db, r) for r in rows], "pendientes": ip.pending_count(db, p.tenant.id, p)}
 
 
 def _get(db: Session, p: Principal, pid: int) -> InvoicePaymentProof:
-    pr = db.get(InvoicePaymentProof, pid)
-    if pr is None or pr.tenant_id != p.tenant.id:
-        raise HTTPException(404, "Comprobante no encontrado")
-    return pr
+    return ip.visible(db, p, pid)
 
 
 @router.get("/payment-proofs/{pid}/file")
@@ -70,6 +68,8 @@ class ApproveIn(BaseModel):
 
     amount: Decimal | None = Field(None, gt=0)
     paid_at: date | None = None
+    # el mismo archivo ya se subio en otra factura o en un pedido web (staff_out.reused_in): aprobar pide confirmarlo
+    confirm_reused: bool = False
 
 
 class RejectIn(BaseModel):
@@ -80,13 +80,13 @@ class RejectIn(BaseModel):
 
 @router.post("/payment-proofs/{pid}/approve")
 def approve(pid: int, data: ApproveIn, p: Principal = Depends(require("payments", "crear")), db: Session = Depends(get_db)):
-    pr, _inv = ip.approve(db, p.tenant, pid, p.user.id, amount=data.amount, paid_at=data.paid_at, ip=p.ip)
+    pr, _inv = ip.approve(db, p.tenant, pid, p.user.id, amount=data.amount, paid_at=data.paid_at, ip=p.ip, p=p, confirm_reused=data.confirm_reused)
     db.commit()
     return ip.staff_out(db, pr)
 
 
 @router.post("/payment-proofs/{pid}/reject")
 def reject(pid: int, data: RejectIn, p: Principal = Depends(require("payments", "crear")), db: Session = Depends(get_db)):
-    pr, _inv = ip.reject(db, p.tenant, pid, p.user.id, data.note, ip=p.ip)
+    pr, _inv = ip.reject(db, p.tenant, pid, p.user.id, data.note, ip=p.ip, p=p)
     db.commit()
     return ip.staff_out(db, pr)

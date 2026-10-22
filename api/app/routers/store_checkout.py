@@ -489,7 +489,7 @@ def list_orders(
     # misma revision: los comprobantes que los clientes suben desde la pagina de pago de una factura (/pagar)
     from ..services.invoice_proofs import pending_count
 
-    facturas = pending_count(db, p.tenant.id) if p.can("payments", "ver") else None
+    facturas = pending_count(db, p.tenant.id, p) if p.can("payments", "ver") else None  # solo las facturas que ve
     return {"items": items, "counts": counts, "por_atender": attention, "labels": so.STATUS_LABEL, "comprobantes_facturas": facturas}
 
 
@@ -650,5 +650,10 @@ table{{width:100%;border-collapse:collapse;margin-top:12px}}td,th{{border-bottom
 
 
 def pending_count(db: Session, p: Principal) -> int:
-    """Tarjeta "Pedidos web por atender" del inicio: misma definicion que /store-orders?pendiente=por_atender."""
-    return db.scalar(select(func.count()).select_from(Order).where(*so.attention_where(p.tenant.id))) or 0
+    """Tarjeta "Pedidos web por atender" del inicio: misma definicion que el contador "Por atender" de Pedidos de la
+    tienda (/store-orders): los pedidos por atender mas los comprobantes de facturas (/pagar) que el que mira puede
+    revisar (payments.ver, solo los de sus facturas si no ve todas)."""
+    from ..services.invoice_proofs import pending_count as proofs_pending
+
+    n = db.scalar(select(func.count()).select_from(Order).where(*so.attention_where(p.tenant.id))) or 0
+    return n + (proofs_pending(db, p.tenant.id, p) if p.can("payments", "ver") else 0)

@@ -1088,6 +1088,7 @@ def evaluate(req: Req, line: dict, o: dict, prod: Product | None, fx: Decimal, m
         "updated_at": o.get("updated_at"),
         "supplier_updated_at": o.get("supplier_updated_at"),
         "supplier_age": o.get("supplier_age"),
+        "supplier_changed_age": o.get("supplier_changed_age"),
         "supplier_fresh": o.get("supplier_fresh"),
         "_sort_price": unit_price * max(units, 1) if unit_price else None,
     }

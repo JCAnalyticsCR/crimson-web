@@ -339,7 +339,8 @@ def stock_fields(row: dict | None) -> dict:
         "stock_proveedor_vendible": r.get("supplier_available"),
         "supplier_fresh": bool(r.get("supplier_fresh")),
         "supplier_updated_at": r.get("supplier_updated_at"),
-        "supplier_age": r.get("supplier_age"),
+        "supplier_age": r.get("supplier_age"),  # cuando se consulto al proveedor
+        "supplier_changed_age": r.get("supplier_changed_age"),  # su ultimo cambio real
         "availability_state": r.get("state"),
     }
 

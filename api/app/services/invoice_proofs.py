@@ -2,9 +2,11 @@
 
 Pedido 21/10 (item 16): la pagina mostraba tarjetas inertes (SINPE sin numero, "PayPal" que no hacia nada). Ahora:
 - SINPE Movil y transferencia muestran los datos de Mi Tienda -> Pagos (numero, titular, banco, IBAN) y dejan subir el
-  comprobante. El comprobante entra a la MISMA revision que los de pedidos web (Pedidos de la tienda -> Por atender,
-  aviso a los mismos roles) y al aprobarse registra el pago en la factura (documents.add_payment). Rechazado: queda el
-  motivo a la vista del cliente y la factura no cambia.
+  comprobante. El comprobante entra a la MISMA revision que los de pedidos web (Pedidos de la tienda -> Por atender) y
+  al aprobarse registra el pago en la factura (documents.add_payment) y le manda el recibo al cliente. Rechazado: queda
+  el motivo a la vista del cliente y la factura no cambia. Las facturas son de cada vendedor (services/ownership): el
+  vendedor solo ve y aprueba los comprobantes de SUS facturas, y el aviso va a quien ve todas las facturas mas el
+  vendedor de esa factura.
 - Tarjeta solo si ONVO esta activo (llave en Ajustes -> Pasarelas o en el entorno): abre el Checkout de ONVO.
 - Efectivo, si Mi Tienda lo tiene activo, solo informa (no lleva comprobante).
 Nunca se aprueba solo: el comprobante es una foto que manda el cliente (la validacion automatica es el item 44, futuro).
@@ -17,7 +19,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..models import Customer, Invoice, InvoicePaymentProof, PaymentLink, Tenant
@@ -159,9 +161,20 @@ def upload(
     return pr
 
 
+def _can_payments(db: Session, t: Tenant, role_code: str, *needs: tuple[str, str]) -> bool:
+    from ..core.deps import _role_permissions, effective_permissions, perms_allow
+
+    perms = effective_permissions(t, role_code, _role_permissions(db, role_code))
+    return all(perms_allow(perms, m, a) for m, a in needs)
+
+
 def notify_team(db: Session, t: Tenant, inv: Invoice, pr: InvoicePaymentProof) -> int:
-    """Mismo aviso y mismos roles que el comprobante de un pedido web (Mi Tienda -> Pagos -> avisar a)."""
-    from .mail import notify_roles
+    """El aviso del comprobante de un pedido web, pero las facturas son de cada vendedor (services/ownership): de los
+    roles de Mi Tienda -> Pagos -> avisar a, solo los que ven TODAS las facturas (sales.ver_todo: admin,
+    contabilidad...), mas el vendedor responsable de ESA factura (o quien la tecleo si no tiene vendedor) si puede ver
+    cobros. Nunca a todo el rol ventas ni en copia a la lista de la empresa: lleva cliente, monto y referencia."""
+    from ..models import TenantUser
+    from .mail import queue_email
 
     e = html.escape
     c = db.get(Customer, inv.customer_id) if inv.customer_id else None
@@ -172,12 +185,68 @@ def notify_team(db: Session, t: Tenant, inv: Invoice, pr: InvoicePaymentProof) -
         + (f" · ref. {e(pr.reference)}" if pr.reference else "")
         + "</p><p>Revisalo en Pedidos de la tienda → Por atender → Comprobantes de facturas. Al aprobarlo se registra el pago en la factura.</p>"
     )
-    roles = tuple(so.checkout_cfg(t).get("notify_roles") or ("admin",))
-    return notify_roles(db, t, roles, titulo, cuerpo, "invoice", inv.id)
+    roles = [r for r in (so.checkout_cfg(t).get("notify_roles") or ("admin",)) if _can_payments(db, t, r, ("sales", "ver_todo"), ("payments", "ver"))]
+    roles = roles or ["admin"]
+    owner = inv.seller_id if inv.seller_id is not None else inv.created_by
+    who = TenantUser.role_code.in_(roles)
+    if owner:
+        who = or_(who, TenantUser.user_id == owner)
+    n, vistos = 0, set()
+    for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.active, who)):
+        if m.role_code not in roles and not _can_payments(db, t, m.role_code, ("payments", "ver")):
+            continue  # el vendedor de la factura sin permiso de cobros: no lo puede revisar
+        correo = (m.user.email or "").strip().lower()
+        if not correo or correo in vistos or not m.user.active:
+            continue
+        vistos.add(correo)
+        queue_email(db, t, correo, titulo, cuerpo, "invoice", inv.id, dedupe_key=f"comprobante:{pr.id}|{correo}", company_bcc=False)
+        n += 1
+    return n
 
 
-def pending_count(db: Session, tenant_id: int) -> int:
-    return int(db.scalar(select(func.count(InvoicePaymentProof.id)).where(InvoicePaymentProof.tenant_id == tenant_id, InvoicePaymentProof.status == "pendiente")) or 0)
+def scope(p) -> list:
+    """Alcance: con sales.ver_todo, todo; el vendedor, solo los comprobantes de SUS facturas (el mismo criterio que la
+    lista de facturas y POST /invoices/{id}/payments, services/ownership)."""
+    from .ownership import doc_mine
+
+    if p is None or p.sees_all_sales:
+        return []
+    return [InvoicePaymentProof.invoice_id.in_(select(Invoice.id).where(Invoice.tenant_id == p.tenant.id, doc_mine(Invoice, p.user.id)))]
+
+
+def pending_count(db: Session, tenant_id: int, p=None) -> int:
+    """Comprobantes de facturas por revisar; con el Principal, solo los que el que mira puede ver."""
+    return int(
+        db.scalar(
+            select(func.count(InvoicePaymentProof.id)).where(InvoicePaymentProof.tenant_id == tenant_id, InvoicePaymentProof.status == "pendiente", *scope(p))
+        )
+        or 0
+    )
+
+
+def reused_in(db: Session, pr: InvoicePaymentProof) -> list[str]:
+    """El MISMO archivo (proof_media no lo duplica: mismo sha256 = mismo media_id) ya se uso en otra factura (en
+    revision o aprobado) o en un pedido web: el comprobante de un pago no paga dos cosas. El revisor lo ve y tiene que
+    confirmarlo para aprobar."""
+    from ..models import Order
+
+    out = [
+        f"la factura {num}" + (" (aprobado)" if st == "aprobado" else " (en revisión)")
+        for num, st in db.execute(
+            select(Invoice.number, InvoicePaymentProof.status)
+            .join(Invoice, Invoice.id == InvoicePaymentProof.invoice_id)
+            .where(
+                InvoicePaymentProof.tenant_id == pr.tenant_id,
+                InvoicePaymentProof.media_id == pr.media_id,
+                InvoicePaymentProof.id != pr.id,
+                InvoicePaymentProof.status.in_(("pendiente", "aprobado")),
+            )
+        )
+    ]
+    for num, proofs in db.execute(select(Order.number, Order.proofs).where(Order.tenant_id == pr.tenant_id, Order.proofs.is_not(None))):
+        if any(isinstance(x, dict) and x.get("media_id") == pr.media_id for x in proofs or []):
+            out.append(f"el pedido web {num}")
+    return out
 
 
 def staff_out(db: Session, pr: InvoicePaymentProof) -> dict:
@@ -208,28 +277,60 @@ def staff_out(db: Session, pr: InvoicePaymentProof) -> dict:
         "payment_id": pr.payment_id,
         "created_at": so.aware(pr.created_at),
         "reviewed_at": so.aware(pr.reviewed_at),
+        "reused_in": reused_in(db, pr) if pr.status == "pendiente" else [],
     }
 
 
-def _pending(db: Session, tenant_id: int, proof_id: int) -> tuple[InvoicePaymentProof, Invoice]:
+def visible(db: Session, p, proof_id: int) -> InvoicePaymentProof:
+    """El comprobante si el que mira puede ver su factura; lo ajeno (otro vendedor) no existe: 404, nunca 403."""
+    from .ownership import owns_doc
+
     pr = db.get(InvoicePaymentProof, proof_id)
+    inv = db.get(Invoice, pr.invoice_id) if pr is not None and pr.tenant_id == p.tenant.id else None
+    if pr is None or inv is None or inv.tenant_id != p.tenant.id or not owns_doc(inv, p):
+        raise HTTPException(404, "Comprobante no encontrado")
+    return pr
+
+
+def _pending(db: Session, tenant_id: int, proof_id: int, p=None) -> tuple[InvoicePaymentProof, Invoice]:
+    """El comprobante y su factura BLOQUEADOS (como store_orders.lock_order): dos aprobaciones a la vez (doble clic,
+    dos revisores en pestanas distintas) o dos comprobantes de la misma factura no registran dos pagos ni pasan del
+    saldo: la segunda espera y ve el estado y el saldo ya actualizados. Lo ajeno (otro vendedor): 404."""
+    from .ownership import owns_doc
+
+    pr = db.get(InvoicePaymentProof, proof_id, with_for_update=True, populate_existing=True)
     if pr is None or pr.tenant_id != tenant_id:
+        raise HTTPException(404, "Comprobante no encontrado")
+    inv = db.get(Invoice, pr.invoice_id, with_for_update=True, populate_existing=True)
+    if inv is None or inv.tenant_id != tenant_id or (p is not None and not owns_doc(inv, p)):
         raise HTTPException(404, "Comprobante no encontrado")
     if pr.status != "pendiente":
         raise HTTPException(409, f"Este comprobante ya fue {'aprobado' if pr.status == 'aprobado' else 'rechazado'}")
-    inv = db.get(Invoice, pr.invoice_id)
-    if inv is None or inv.tenant_id != tenant_id:
-        raise HTTPException(404, "Factura no encontrada")
     return pr, inv
 
 
-def approve(db: Session, t: Tenant, proof_id: int, user_id: int, *, amount: Decimal | None = None, paid_at: date | None = None, ip: str | None = None):
-    """Aprobado: registra el pago en la factura (sin commit). Monto: el que se indique al aprobar, si no el que dijo el
-    cliente, si no el saldo; nunca mas que el saldo (lo de mas se arregla a mano)."""
+def approve(
+    db: Session,
+    t: Tenant,
+    proof_id: int,
+    user_id: int,
+    *,
+    amount: Decimal | None = None,
+    paid_at: date | None = None,
+    ip: str | None = None,
+    p=None,
+    confirm_reused: bool = False,
+):
+    """Aprobado: registra el pago en la factura (sin commit) y le manda el recibo al cliente (como el pago con ONVO).
+    Monto: el que se indique al aprobar, si no el que dijo el cliente, si no el saldo; nunca mas que el saldo (lo de
+    mas se arregla a mano). El mismo archivo ya usado en otra factura o en un pedido web pide confirmarlo."""
     from ..schemas.sales import PaymentIn
     from . import documents as docsvc
 
-    pr, inv = _pending(db, t.id, proof_id)
+    pr, inv = _pending(db, t.id, proof_id, p)
+    otros = reused_in(db, pr)
+    if otros and not confirm_reused:
+        raise HTTPException(409, f"Este mismo comprobante ya se subió en {', '.join(otros)}. Revisalo antes de aprobar y confirmá si es correcto.")
     if inv.status == "anulada":
         raise HTTPException(409, "La factura está anulada: rechazá el comprobante")
     saldo = _d(inv.balance)
@@ -257,13 +358,38 @@ def approve(db: Session, t: Tenant, proof_id: int, user_id: int, *, amount: Deci
     if _d(inv.balance) <= 0:
         for link in db.scalars(select(PaymentLink).where(PaymentLink.invoice_id == inv.id, PaymentLink.paid_at.is_(None))):
             link.paid_at = datetime.now(UTC)
-    audit(db, t.id, user_id, "proof_approve", "invoice", inv.id, {"proof_id": pr.id, "payment_id": pay.id, "monto": str(monto)}, ip=ip)
+    det = {"proof_id": pr.id, "payment_id": pay.id, "monto": str(monto), **({"reusado_en": otros} if otros else {})}
+    audit(db, t.id, user_id, "proof_approve", "invoice", inv.id, det, ip=ip)
+    _receipt(db, t, inv, pr, monto)
     return pr, inv
 
 
-def reject(db: Session, t: Tenant, proof_id: int, user_id: int, note: str, ip: str | None = None):
+def _receipt(db: Session, t: Tenant, inv: Invoice, pr: InvoicePaymentProof, amount: Decimal) -> None:
+    """Lo que promete la pagina de pago ("te avisamos al aplicar el pago"): recibo al cliente con el saldo que queda,
+    como el del pago con ONVO (si la ficha tiene correo)."""
+    from .documents_send import queue_once
+    from .render import money
+
+    c = db.get(Customer, inv.customer_id) if inv.customer_id else None
+    if c is None or c.tenant_id != t.id or not (c.email or "").strip():
+        return
+    e = html.escape
+    saldo = _d(inv.balance)
+    resto = f"Saldo pendiente: <b>{money(saldo, inv.currency)}</b>." if saldo > 0 else "La factura quedó pagada en su totalidad. ¡Gracias!"
+    ref = f"Referencia: {e(pr.reference)}. " if pr.reference else ""
+    body = (
+        '<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#15131a">'
+        f'<div style="border-bottom:3px solid #e2233a;padding:12px 0;font-size:18px;font-weight:700">{e(t.name)}</div>'
+        f"<p>Revisamos su comprobante de {e(LABEL.get(pr.method, pr.method))} y aplicamos el pago de <b>{money(amount, inv.currency)}</b>"
+        f" a la factura <b>{e(inv.number)}</b>.</p><p>{resto}</p>"
+        f'<p style="color:#8a858f;font-size:12px">{ref}Cualquier consulta, responda a este correo.</p></div>'
+    )
+    queue_once(db, t, c.email.strip(), f"Pago aplicado · {inv.number} · {t.name}", body, "invoice", inv.id, dedupe_key=f"recibo-comprobante:{pr.id}")
+
+
+def reject(db: Session, t: Tenant, proof_id: int, user_id: int, note: str, ip: str | None = None, p=None):
     """Rechazado (sin commit): el cliente ve el motivo en la pagina de pago y puede subir otro."""
-    pr, inv = _pending(db, t.id, proof_id)
+    pr, inv = _pending(db, t.id, proof_id, p)
     motivo = (note or "").strip()
     if not motivo:
         raise HTTPException(422, "Indicá el motivo: el cliente lo ve en la página de pago")

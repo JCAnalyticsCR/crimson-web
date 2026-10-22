@@ -294,3 +294,45 @@ def test_agotado_en_eurocomp_sale_de_la_tienda_y_sigue_en_el_panel(client, auth,
     eurocomp["items"] = [CAMARA, UTP]
     ss.refresh_linked(db_session)
     assert pid in pub()
+
+
+def test_lo_vinculado_o_creado_desde_el_panel_recibe_fotos_una_vez(client, auth, db_session, eurocomp):
+    """Item 9 sin regresion: lo que se vincula a mano o se crea desde el panel recibe CABYS y fotos en la corrida
+    siguiente (no tenia nada); la de despues ya no se las repone."""
+    from app.services import supplier_catalog as sc
+
+    tid = auth["tenant"]["id"]
+    ss.sync_all(db_session)
+    it = db_session.scalar(select(SupplierItem).where(SupplierItem.code == "SG2104"))
+    assert it.product_id is None
+    prod = Product(tenant_id=tid, code="CAM-PANEL", name="Cámara del panel", price=Decimal("45000"))
+    db_session.add(prod)
+    db_session.flush()
+    sc.link(db_session, it, prod, "manual", None)
+    db_session.commit()
+    out = ss.sync_all(db_session)[tid]
+    assert out["fotos_completadas"] == 1 and out["cabys_completados"] == 1
+    db_session.refresh(prod)
+    assert len(prod.images) == 2 and prod.cabys_code == "4526100000200"
+    prod.images = []
+    db_session.commit()
+    assert ss.sync_all(db_session)[tid]["fotos_completadas"] == 0
+    db_session.refresh(prod)
+    assert prod.images == []
+
+
+def test_salto_de_costo_dudoso_cuenta_como_cambio_real(client, auth, db_session, eurocomp):
+    """Item 12: una corrida cuyo unico cambio es un salto grande de costo (fila "dudosa") si es un cambio real."""
+    tid = auth["tenant"]["id"]
+    ss.sync_all(db_session)
+    sin = ss.sync_all(db_session)[tid]
+    assert sin["cambios_reales"] == 0
+    from app.models import Tenant
+
+    antes = ss._state(db_session.get(Tenant, tid))["last_change_at"]
+    eurocomp["items"] = [dict(CAMARA, precio="97.00"), BALUN, UTP, PURPLE, UPS]  # +100 %
+    out = ss.sync_all(db_session)[tid]
+    assert out["dudoso"] == 1 and out["actualizado"] == 0 and out["cambios_reales"] == 1
+    assert ss._state(db_session.get(Tenant, tid))["last_change_at"] > antes
+    it = db_session.scalar(select(SupplierItem).where(SupplierItem.code == "SG2104"))
+    assert it.changed_at is not None

@@ -75,6 +75,25 @@ def test_pago_facturado_no_saca_lo_bajo_pedido_y_el_despacho_cuadra(client, auth
     assert client.get("/stock/health").json()["total"] == 0
 
 
+def test_despacho_con_la_compra_sin_recibir_no_deja_negativo(client, auth, db_session):
+    """Entrega directa del proveedor (o la compra no se registro): se despacha antes de recibir la compra."""
+    p, main, o = _pedido_pagado(client, db_session)
+    assert client.post(f"/store-orders/{o.id}/status", json={"status": "enviado", "tracking_number": "G-3"}).status_code == 200
+    assert _saldo(db_session, p["id"], main["id"]) == 0  # lo bajo pedido no sale de una bodega vacia
+    db_session.expire_all()
+    o = db_session.get(Order, o.id)
+    assert any("sin la compra bajo pedido recibida" in (h.get("note") or "") for h in o.history or [])
+    assert _issues(client, "negativo") == []
+    # llega la compra: entra y sale en el mismo acto, ligado al pedido y a su factura
+    req = db_session.scalar(select(PurchaseRequest).where(PurchaseRequest.order_id == o.id))
+    client.patch(f"/purchase-requests/{req.id}", json={"status": "solicitada"})
+    assert client.patch(f"/purchase-requests/{req.id}", json={"status": "recibida", "warehouse_id": main["id"]}).status_code == 200
+    assert _saldo(db_session, p["id"], main["id"]) == 0
+    salidas = db_session.scalars(select(StockMovement).where(StockMovement.product_id == p["id"], StockMovement.quantity < 0)).all()
+    assert sum(-D(str(m.quantity)) for m in salidas) == 3 and all(m.invoice_id == o.invoice_id for m in salidas)
+    assert client.get("/stock/health").json()["total"] == 0
+
+
 def test_salida_adelantada_de_antes_se_devuelve_documentada(client, auth, db_session):
     """Lo que dejo la version anterior: la factura del pago saco tambien lo bajo pedido -> -2 en bodega."""
     p, main, o = _pedido_pagado(client, db_session)

@@ -1,7 +1,7 @@
 """Arranque del inventario local (reunion 21/10, item 11): limpiar lo viejo de la tienda anterior y asegurar la bodega.
 
-- Productos viejos: los que vinieron de la tienda anterior (Fygaro: el mapa que deja el importador en
-  tenant.settings["fygaro"]["products"]) que hoy no tienen existencia propia (cero en todas las bodegas, ninguna en
+- Productos viejos: los que vinieron de la tienda anterior (Fygaro: los que el importador CREO, segun el mapa que deja
+  en tenant.settings["fygaro"]["products"]; lo que solo emparejo con un producto de Crimson no cuenta) que hoy no tienen existencia propia (cero en todas las bodegas, ninguna en
   negativo), no estan vinculados al catalogo de un proveedor (lo de Eurocomp lo maneja la sincronizacion: agotado sale
   solo de la tienda y sigue en el panel) y no estan en uso (reservas abiertas ni pedidos web abiertos). Se ARCHIVAN
   con el mecanismo de siempre (services/archive): salen de listas, busquedas y tienda, conservan toda su historia y se
@@ -29,10 +29,13 @@ OPEN_ORDER = ("nuevo", "en_revision", "pagado", "preparando", "listo")
 
 
 def legacy_ids(t: Tenant) -> set[int]:
-    """Productos que vinieron de la tienda anterior (los que dejo el importador de Fygaro en su mapa)."""
+    """Productos que vinieron de la tienda anterior: los que el importador de Fygaro CREO (created). Los que solo
+    emparejo con un producto que ya existia en Crimson (mismo SKU, created False) son de aqui y nunca se archivan."""
     pmap = ((t.settings or {}).get("fygaro") or {}).get("products") or {}
     out = set()
     for v in pmap.values():
+        if not (v or {}).get("created"):
+            continue
         try:
             out.add(int((v or {}).get("id")))
         except (TypeError, ValueError):

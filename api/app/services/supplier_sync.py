@@ -14,7 +14,7 @@ PROPIA de Crimson (eso solo lo mueve el kardex). Ademas, al producto vinculado q
 Cuando corre: el catalogo completo UNA vez por semana (lunes 03:17); es la consulta pesada (34 MB) y solo hace falta
 para descubrir articulos nuevos, CABYS y fotos. De lo que YA estaba solo actualiza precio y existencia (pedido 21/10:
 nunca vuelve a traer fotos ni descripciones; apply_list(only_price_stock=True)), y el CABYS y las fotos se completan
-solo en los productos que se vinculan en esa misma corrida. Lo que se agota en Eurocomp sale de la tienda en la
+una sola vez por vinculo (lo recien vinculado o creado desde el panel, si le faltan). Lo que se agota en Eurocomp sale de la tienda en la
 sincronizacion siguiente (Ajustes de la tienda: "supplier_out_of_stock", ver services/availability) y sigue en el
 panel: nunca se desactiva ni se despublica el producto. Las existencias y costos de lo que Crimson YA vende (los vinculados)
 se refrescan cada 6 horas con la consulta por lista de codigos (`refresh_linked`): unas pocas llamadas chicas, sin
@@ -252,9 +252,10 @@ def _aware(dt: datetime | None) -> datetime | None:
 
 
 def enrich_products(db: Session, t: Tenant, supplier: Supplier, now: datetime) -> dict:
-    """A los productos vinculados: fecha real de la consulta (no solo el dia). CABYS y fotos (si les faltan) SOLO a los
-    que se vincularon en esta corrida: lo que ya estaba vinculado no vuelve a traer fotos (pedido 21/10; si alguien
-    borro las fotos de un producto, la sincronizacion no se las devuelve)."""
+    """A los productos vinculados: fecha real de la consulta (no solo el dia). CABYS y fotos (si les faltan) UNA sola
+    vez por vinculo (enriched_at): lo recien vinculado o creado desde el panel ("Agregar a mi catalogo") los recibe en
+    la corrida siguiente; lo que ya se completo no vuelve a traer fotos (pedido 21/10; si alguien borro las fotos de un
+    producto, la sincronizacion no se las devuelve)."""
     cabys = images = 0
     linked = db.scalars(
         select(SupplierItem).where(
@@ -268,8 +269,9 @@ def enrich_products(db: Session, t: Tenant, supplier: Supplier, now: datetime) -
         raw = it.raw or {}
         if p.supplier_id == supplier.id:
             p.supplier_updated_at = now  # la tienda decide "bajo pedido" con la hora real de la consulta
-        if it.linked_at is None or _aware(it.linked_at) < now:
-            continue  # vinculado antes de esta corrida: solo precio y existencia
+        if it.enriched_at is not None and (it.linked_at is None or _aware(it.linked_at) <= _aware(it.enriched_at)):
+            continue  # este vinculo ya se completo: solo precio y existencia
+        it.enriched_at = datetime.now(UTC)  # despues del vinculo de esta misma corrida (sc.link marca su propia hora)
         code = (raw.get("cod_hacienda") or "").strip()
         if not p.cabys_code and re.fullmatch(r"\d{13}", code):
             p.cabys_code, p.cabys_set_at = code, now  # cabys_set_by queda vacio: lo puso el proveedor, no una persona
@@ -316,7 +318,7 @@ def sync_tenant(
         db.commit()
         log.warning("Eurocomp (empresa %s): %s", t.id, msg)
         raise
-    changed = {"last_change_at": now} if (out.get("nuevo") or out.get("actualizado") or out.get("inactivar")) else {}
+    changed = {"last_change_at": now} if out.get("cambios_reales") else {}
     _save_state(t, last_try_at=now, last_ok_at=now, last_error=None, last_code=0, last_summary=out, **changed)
     db.commit()
     log.info(

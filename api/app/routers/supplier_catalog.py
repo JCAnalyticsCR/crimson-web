@@ -109,6 +109,13 @@ def _strip(o: dict, p: Principal) -> dict:
 
 
 # ---------- proveedores ----------
+def _api_status(t, s: Supplier, changed_at) -> dict:
+    st = supplier_sync.status(t, s)
+    if st.get("label") and not st.get("last_change_at") and changed_at is not None:
+        st["last_change_at"] = changed_at
+    return st
+
+
 @router.get("/suppliers")
 def suppliers(p: Principal = Depends(require("catalog", "ver")), db: Session = Depends(get_db)):
     """Cada proveedor con su catalogo: cuantos items, vinculados, con existencia, categorias y la ultima lista."""
@@ -127,6 +134,11 @@ def suppliers(p: Principal = Depends(require("catalog", "ver")), db: Session = D
             .group_by(SupplierItem.supplier_id)
         )
     }
+    # el ultimo cambio REAL de la lista de cada proveedor (existencia, costo, entro o salio un item): aparte de la
+    # ultima consulta. Lo usa la cabecera cuando la sincronizacion todavia no lo anoto (datos de antes del 21/10)
+    changed = dict(
+        db.execute(select(SupplierItem.supplier_id, func.max(SupplierItem.changed_at)).where(SupplierItem.tenant_id == tid).group_by(SupplierItem.supplier_id)).all()
+    )
     cats: dict[int, list[dict]] = {}
     for sid, cat, sub, n in db.execute(
         select(SupplierItem.supplier_id, SupplierItem.category, SupplierItem.subcategory, func.count())
@@ -169,7 +181,8 @@ def suppliers(p: Principal = Depends(require("catalog", "ver")), db: Session = D
                     if li
                     else None
                 ),
-                "api": supplier_sync.status(p.tenant, s),
+                "api": _api_status(p.tenant, s, changed.get(s.id)),
+                "last_change_at": changed.get(s.id),
             }
         )
     out.sort(key=lambda s: (s["items"] == 0, s["name"].lower()))

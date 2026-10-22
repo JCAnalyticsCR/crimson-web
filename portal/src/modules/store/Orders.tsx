@@ -32,6 +32,8 @@ type InvProof = {
   id: number; invoice_id: number; invoice_number: string | null; invoice_status: string | null; customer_name: string | null; currency: string;
   balance: string | null; total: string | null; method: string; method_label: string; amount: string | null; reference: string | null;
   filename: string | null; status: string; status_label: string; note: string | null; created_at: string;
+  /* el mismo archivo ya se subio en otra factura o en un pedido web: aprobar pide confirmarlo */
+  reused_in?: string[];
 };
 
 const TABS = ["en_revision", "nuevo", "pagado", "preparando", "listo", "enviado", "entregado", "cancelado", "reembolsado"];
@@ -151,8 +153,10 @@ function InvoiceProofs({ onChange }: { onChange: () => void }) {
     if (txt === null) return;
     const amount = Number(txt.replace(/[^\d.]/g, ""));
     if (!(amount > 0)) { toast("Monto inválido", "bad"); return; }
+    const reused = r.reused_in || [];
+    if (reused.length && !window.confirm(`Este mismo comprobante ya se subió en ${reused.join(", ")}. ¿Lo aprobás igual para ${r.invoice_number}?`)) return;
     setBusy(r.id);
-    try { await api(`/payment-proofs/${r.id}/approve`, { method: "POST", json: { amount } }); toast(`Pago registrado en ${r.invoice_number}`); done(); }
+    try { await api(`/payment-proofs/${r.id}/approve`, { method: "POST", json: { amount, confirm_reused: reused.length > 0 } }); toast(`Pago registrado en ${r.invoice_number}`); done(); }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } finally { setBusy(null); }
   };
   const reject = async (r: InvProof) => {
@@ -173,7 +177,7 @@ function InvoiceProofs({ onChange }: { onChange: () => void }) {
               <tr key={r.id}>
                 <td className="mono" style={{ fontWeight: 600 }}><Link to={`/facturas/${r.invoice_id}`}>{r.invoice_number}</Link></td>
                 <td>{r.customer_name || "—"}</td>
-                <td className="muted">{r.method_label}{r.reference && <div className="meta" style={{ textTransform: "none" }}>Ref. {r.reference}</div>}</td>
+                <td className="muted">{r.method_label}{r.reference && <div className="meta" style={{ textTransform: "none" }}>Ref. {r.reference}</div>}{!!r.reused_in?.length && <div className="meta" style={{ textTransform: "none", color: "var(--bad)" }}>Ya se subió en {r.reused_in.join(", ")}</div>}</td>
                 <td className="num money">{r.amount != null ? fmtMoney(r.amount, r.currency) : "—"}</td>
                 <td className="num money">{fmtMoney(r.balance ?? 0, r.currency)}</td>
                 <td className="muted">{when(r.created_at)}</td>

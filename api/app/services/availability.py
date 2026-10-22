@@ -75,7 +75,7 @@ DEFAULTS: dict = {
     "backorder_lead": "3-5 días hábiles",  # plazo de "bajo pedido" que ve el cliente
     "supplier_max_age_hours": 48,  # dato del proveedor mas viejo -> "Consultar disponibilidad" (SiReTT refresca cada 6 h)
     "out_of_stock": "mostrar",  # mostrar | ocultar (agotados en el catalogo, destacados y kits)
-    # agotado en el proveedor (Eurocomp) y sin existencia propia: "ocultar" lo saca de la tienda (lista, busqueda,
+    # agotado en el proveedor por API (Eurocomp) y sin existencia propia: "ocultar" lo saca de la tienda (lista, busqueda,
     # destacados y kits) desde la sincronizacion siguiente y sigue en el panel; "mostrar" lo deja visible como agotado.
     # Pedido 21/10 (item 10, pregunta 2 abierta): por defecto sale de la tienda. out_of_stock="ocultar" oculta todos.
     "supplier_out_of_stock": "ocultar",
@@ -360,7 +360,7 @@ def supplier_status(db: Session, tenant, products: Iterable[Product], cfg: dict 
             at = pa
         fresh = at is not None and now - at <= limit
         # desde cuando el dato es el mismo: el ultimo cambio real de existencia o costo de lo vinculado (nunca despues
-        # de la consulta). Sin fecha de cambio (datos de antes del 21/10) no se inventa: solo se dice cuando se consulto
+        # de la consulta). Lo de antes del 21/10 lo relleno la migracion con la fecha de su lista; sin fecha no se inventa
         changes = [c for c in (_aware(i.changed_at) for i in items if i.active) if c is not None]
         changed_at = (min(max(changes), at) if at else max(changes)) if changes else None
         comm = committed.get(p.id, ZERO)
@@ -443,14 +443,15 @@ def _internal_label(state: str, own_free: Decimal, own_res: Decimal, s: dict, no
 
 
 def hide(state: str, s: dict, cfg: dict) -> bool:
-    """Sale de la tienda: agotado y Ajustes oculta los agotados, o agotado con el proveedor vinculado (Eurocomp) sin
-    existencia y Ajustes saca de la tienda lo que el proveedor agoto (supplier_out_of_stock, por defecto). En el panel
-    sigue siempre (el producto no se desactiva ni se despublica)."""
+    """Sale de la tienda: agotado y Ajustes oculta los agotados, o agotado con el proveedor vinculado POR API (Eurocomp,
+    que se sincroniza solo) sin existencia y Ajustes saca de la tienda lo que el proveedor agoto (supplier_out_of_stock,
+    por defecto). Lo de listas en Excel de otros proveedores sigue como siempre (out_of_stock). En el panel sigue siempre
+    (el producto no se desactiva ni se despublica)."""
     if state != "agotado":
         return False
     if cfg.get("out_of_stock") == "ocultar":
         return True
-    return bool(s.get("linked")) and (cfg.get("supplier_out_of_stock") or DEFAULTS["supplier_out_of_stock"]) == "ocultar"
+    return bool(s.get("linked")) and s.get("source") == "api" and (cfg.get("supplier_out_of_stock") or DEFAULTS["supplier_out_of_stock"]) == "ocultar"
 
 
 def hides_any(cfg: dict) -> bool:
@@ -551,7 +552,8 @@ def availability_many(
                 {
                     "en_bodega": _num(own_free),
                     "bajo_pedido_cantidad": _num(s["available"]),
-                    "actualizado_al": s["at"] if s["linked"] else None,
+                    "actualizado_al": s["at"] if s["linked"] else None,  # cuando se consulto al proveedor
+                    "cambio_al": s.get("changed_at") if s["linked"] else None,  # su ultimo cambio real (existencia o costo)
                     "dato_vigente": bool(s["fresh"]),
                     "max_qty": _num(max_qty),
                 }

@@ -401,11 +401,16 @@ def activate_requests(db: Session, o: Order, user_id: int | None = None) -> list
 def reserve_received(db: Session, req: PurchaseRequest, warehouse_id: int, user_id: int | None = None) -> int:
     """Compra recibida de un pedido web (reason='pedido_web'): lo que entro a bodega queda reservado para ESE pedido
     (confirmada, sin vencimiento: se compro para el) y no se lo lleva el siguiente cliente. Si el pedido ya se cancelo,
-    se despacho o se entrego, la mercaderia queda libre en bodega. Sin commit. Devuelve cuantas reservas creo."""
+    la mercaderia queda libre en bodega; si ya se despacho, sale ahora lo que el despacho dejo pendiente de la compra. Sin commit. Devuelve cuantas reservas creo."""
     if req.reason != "pedido_web" or not req.order_id:
         return 0
     o = db.get(Order, req.order_id)
-    if o is None or o.tenant_id != req.tenant_id or o.status in ("cancelado", "reembolsado", "enviado", "entregado"):
+    if o is None or o.tenant_id != req.tenant_id or o.status in ("cancelado", "reembolsado"):
+        return 0
+    if o.status in DISPATCHED:
+        # se despacho antes de recibir la compra (entrega directa): lo que quedo pendiente sale ahora de la bodega
+        # donde entro, ligado al pedido y a su factura; si no quedo nada pendiente la mercaderia queda libre
+        fulfill_for_order(db, o, user_id, warehouse_id=warehouse_id, skip_request_id=req.id)
         return 0
     need, _ = _needs(db, o)
     n = 0
@@ -575,18 +580,22 @@ AWAITING = (RESERVED_REQUEST, "borrador", "solicitada")  # compra del pedido que
 DISPATCHED = ("enviado", "entregado")
 
 
-def awaiting_purchase(db: Session, o: Order) -> dict[int, Decimal]:
+def awaiting_purchase(db: Session, o: Order, skip_request_id: int | None = None) -> dict[int, Decimal]:
     """Lo que el pedido espera del proveedor (bajo pedido): lineas de sus solicitudes de compra que todavia no se
-    reciben, por producto. Al recibirse, reserve_received lo deja en bodega reservado para este pedido."""
+    reciben, por producto. Al recibirse, reserve_received lo deja en bodega reservado para este pedido (o, si el pedido
+    ya se despacho, lo saca en ese momento). skip_request_id: la solicitud que se esta recibiendo ahora."""
+    conds = [
+        PurchaseRequest.tenant_id == o.tenant_id,
+        PurchaseRequest.order_id == o.id,
+        PurchaseRequest.status.in_(AWAITING),
+        PurchaseRequestLine.product_id.is_not(None),
+    ]
+    if skip_request_id is not None:
+        conds.append(PurchaseRequest.id != skip_request_id)
     rows = db.execute(
         select(PurchaseRequestLine.product_id, func.coalesce(func.sum(PurchaseRequestLine.quantity), 0))
         .join(PurchaseRequest, PurchaseRequest.id == PurchaseRequestLine.request_id)
-        .where(
-            PurchaseRequest.tenant_id == o.tenant_id,
-            PurchaseRequest.order_id == o.id,
-            PurchaseRequest.status.in_(AWAITING),
-            PurchaseRequestLine.product_id.is_not(None),
-        )
+        .where(*conds)
         .group_by(PurchaseRequestLine.product_id)
     )
     return {pid: _dec(q) for pid, q in rows if _dec(q) > 0}
@@ -653,7 +662,18 @@ def undo_early_exit(db: Session, o: Order, user_id: int | None = None, note: str
     return n
 
 
-def fulfill_for_order(db: Session, o: Order, user_id: int | None = None, invoice: Invoice | None = None) -> int:
+PENDING_NOTE = "salida_pendiente_compra"  # clave de la nota: despachado con lo bajo pedido sin recibir
+
+
+def fulfill_for_order(
+    db: Session,
+    o: Order,
+    user_id: int | None = None,
+    invoice: Invoice | None = None,
+    *,
+    warehouse_id: int | None = None,
+    skip_request_id: int | None = None,
+) -> int:
     """Despacho (o factura): saca del inventario lo que falte por sacar de cada linea, consumiendo primero las
     reservas del pedido (de su bodega) y luego la bodega de origen / predeterminada. Idempotente: lo que ya
     salio por este pedido o por su factura no se vuelve a descontar. Con invoice, las salidas previas del
@@ -661,9 +681,15 @@ def fulfill_for_order(db: Session, o: Order, user_id: int | None = None, invoice
 
     Factura de un pedido SIN despachar (la automatica al confirmarse el pago): lo que se compra bajo pedido y todavia
     no llega (awaiting_purchase) NO sale todavia: sale al despachar, consumiendo la reserva que deja la compra al
-    recibirse. Antes salia al facturar desde una bodega vacia y dejaba la existencia en negativo (Kardex, 21/10)."""
+    recibirse. Antes salia al facturar desde una bodega vacia y dejaba la existencia en negativo (Kardex, 21/10).
+
+    Despacho con la compra bajo pedido sin recibir (entrega directa del proveedor, o la compra no se registro): sale
+    lo que la bodega tiene; lo que falta y espera la compra NO sale de una bodega vacia (otra vez el negativo): queda
+    anotado en el pedido y sale al recibirse la compra (reserve_received -> warehouse_id, skip_request_id)."""
     need, prods = _needs(db, o)
-    awaiting = awaiting_purchase(db, o) if (invoice is not None and o.status not in DISPATCHED) else {}
+    dispatching = invoice is None or o.status in DISPATCHED
+    awaiting = awaiting_purchase(db, o, skip_request_id)
+    pending: dict[int, Decimal] = {}
     inv_id = invoice.id if invoice is not None else o.invoice_id
     if invoice is not None:
         db.execute(
@@ -691,10 +717,18 @@ def fulfill_for_order(db: Session, o: Order, user_id: int | None = None, invoice
             r.consumed_quantity = _dec(r.consumed_quantity) + take
             if _dec(r.consumed_quantity) >= _dec(r.quantity):
                 r.status, r.closed_note = "consumida", f"Despachado en {o.number}"
+        w = warehouse_id or (_fallback_wh(db, p) if falta > 0 else None)
         if falta > 0 and awaiting.get(pid):
-            falta -= min(falta, awaiting[pid])  # bajo pedido sin recibir: sale al despachar, no al facturar
+            if not dispatching:
+                falta -= min(falta, awaiting[pid])  # bajo pedido sin recibir: sale al despachar, no al facturar
+            else:
+                # despacho: sale lo que hay en bodega; lo que falta y espera la compra sale cuando la compra entre
+                free = max(invsvc.on_hand(db, o.tenant_id, pid, w), ZERO) if w else ZERO
+                hold = min(max(falta - free, ZERO), awaiting[pid])
+                if hold > 0:
+                    pending[pid] = hold
+                    falta -= hold
         if falta > 0:
-            w = _fallback_wh(db, p)
             if w is None:
                 continue  # sin bodega configurada: como deduct_for_invoice, no hace nada
             invsvc.move(db, o.tenant_id, user_id, pid, w, "venta", -falta, ref, f"Pedido {o.number}", None, inv_id, movement_type="venta", order_id=o.id)
@@ -705,6 +739,12 @@ def fulfill_for_order(db: Session, o: Order, user_id: int | None = None, invoice
             r.status, r.closed_note = ("consumida" if _dec(r.consumed_quantity) > 0 else "cancelada"), f"Pedido {o.number} despachado; el resto se liberó"
     if n:
         audit(db, o.tenant_id, user_id, "fulfill", "order", o.id, {"movimientos": n, "factura": inv_id})
+    if pending:
+        from . import store_orders as so
+
+        txt = ", ".join(f"{_fmt(q)} de {prods[pid].name}" for pid, q in pending.items())
+        so._note(o, "sistema", f"Despachado sin la compra bajo pedido recibida: {txt} sale de bodega al recibirse la compra (no se deja la existencia en negativo).")
+        audit(db, o.tenant_id, user_id, "fulfill_pending_purchase", "order", o.id, {str(k): str(v) for k, v in pending.items()})
     return n
 
 

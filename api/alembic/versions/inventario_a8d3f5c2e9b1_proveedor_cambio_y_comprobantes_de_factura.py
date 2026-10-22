@@ -2,7 +2,12 @@
 
 `supplier_item.changed_at`: cuando cambio DE VERDAD la existencia o el costo de un item del proveedor (o cuando entro).
 El panel decia "actualizado hace 3 h" (la hora de la consulta) aunque la lista no cambiaba hace dias; ahora dice las dos
-cosas. Sin relleno: lo que ya existe cuenta desde la fecha de su lista hasta el primer cambio que se vea.
+cosas. Relleno: lo que ya existe cuenta desde la fecha de su lista (mediodia de ese dia; sin fecha, su ultima
+escritura) hasta el primer cambio que se vea.
+
+`supplier_item.enriched_at`: la sincronizacion de Eurocomp completa el CABYS y las fotos (si faltan) UNA vez por
+vinculo, tambien a lo creado o vinculado desde el panel. Lo vinculado hace mas de 8 dias ya paso por una sincronizacion
+semanal que lo completo: queda marcado y no vuelve a recibir fotos (si alguien las borro, no regresan).
 
 `invoice_payment_proof`: el comprobante de SINPE o transferencia que el cliente sube desde la pagina publica de pago de
 la factura (/pagar). Entra a la misma revision que los comprobantes de pedidos web y registra el pago al aprobarse.
@@ -13,6 +18,7 @@ Create Date: 2026-10-21 18:00:00
 """
 
 from collections.abc import Sequence
+from datetime import UTC, datetime, time, timedelta
 
 import sqlalchemy as sa
 
@@ -27,6 +33,28 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     with op.batch_alter_table("supplier_item") as b:
         b.add_column(sa.Column("changed_at", sa.DateTime(timezone=True), nullable=True))
+        b.add_column(sa.Column("enriched_at", sa.DateTime(timezone=True), nullable=True))
+    item = sa.table(
+        "supplier_item",
+        sa.column("list_date", sa.Date()),
+        sa.column("changed_at", sa.DateTime(timezone=True)),
+        sa.column("updated_at", sa.DateTime(timezone=True)),
+        sa.column("linked_at", sa.DateTime(timezone=True)),
+        sa.column("enriched_at", sa.DateTime(timezone=True)),
+        sa.column("product_id", sa.Integer()),
+    )
+    bind = op.get_bind()
+    for (d,) in bind.execute(sa.select(item.c.list_date).where(item.c.list_date.is_not(None)).distinct()).all():
+        bind.execute(
+            item.update().where(item.c.list_date == d, item.c.changed_at.is_(None)).values(changed_at=datetime.combine(d, time(12, 0), tzinfo=UTC))
+        )
+    bind.execute(item.update().where(item.c.changed_at.is_(None)).values(changed_at=item.c.updated_at))
+    cutoff = datetime.now(UTC) - timedelta(days=8)
+    bind.execute(
+        item.update()
+        .where(item.c.product_id.is_not(None), item.c.linked_at.is_not(None), item.c.linked_at < cutoff)
+        .values(enriched_at=item.c.linked_at)
+    )
     op.create_table(
         "invoice_payment_proof",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -57,4 +85,5 @@ def downgrade() -> None:
     op.drop_index("ix_invoice_payment_proof_tenant_id", table_name="invoice_payment_proof")
     op.drop_table("invoice_payment_proof")
     with op.batch_alter_table("supplier_item") as b:
+        b.drop_column("enriched_at")
         b.drop_column("changed_at")
