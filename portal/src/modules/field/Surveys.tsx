@@ -20,6 +20,7 @@ import { AssignAllySurvey } from "./AssignAllySurvey";
 import { pickReview, ReviewPanel, reviewTone, type ReviewInfo } from "./SurveyReview";
 import { CommonSection, initialStatus, PointFields, SystemCalcs, useCommonSpec, type Common, type V2Field } from "./SurveyV2";
 import { RecommendModal, RecoSummary, type RecoFields, type RecoLine } from "./Recommend";
+import { SuggestionsModal, sugPayload, toSugRow, type SugBase, type SugRow } from "./SuggestionsModal";
 import SurveySummary from "./SurveySummary";
 
 type FieldSpec = V2Field; // + hint, section, advanced, legacy (plantilla v2)
@@ -58,20 +59,8 @@ type Costing = {
   labor: { techs: number; days: string; day_cost: string; types: LaborType[]; cost: string; transport: string; transport_default: string; transport_custom: boolean; per_diem: string; per_diem_default: string; per_diem_custom: boolean; viaticos: string; travel: string; price: string };
   cost_total: string; price_suggested: string; margin_pct: number; margin_target: number; missing_cost: string[]; cost_complete?: boolean; margin_provisional?: boolean; can_save_catalog: boolean;
 };
-type Suggestion = {
-  name: string; quantity: string | number; unit: string; kind: Kind; reason: string; action: "nuevo" | "sumar" | "cubierto" | "revisar";
-  existing_quantity: string | number; add_quantity: string | number; item_id: number | null; matched_name?: string;
-  /* v2: datos faltantes o estimados, advertencias tecnicas, controladoras alternativas, modelo del curso */
-  missing?: string[]; estimated?: string[]; warnings?: string[]; reference?: boolean;
-  alternatives?: { label: string; reserva: number; actual: boolean }[];
-} & RecoFields; // candidatos reales (Recomendar equipos), solo con ?candidates=true
-type SugRow = Suggestion & { checked: boolean; qty: string };
-/* fila de la tabla de sugerencias: lo nuevo marcado; la linea de discos (TB) se agrega solo eligiendo un disco real */
-const toRow = (x: Suggestion): SugRow => ({
-  ...x,
-  checked: x.action === "nuevo" && x.apply_generic !== false,
-  qty: x.action === "revisar" || x.apply_generic === false ? "" : String(Number(x.action === "sumar" ? x.add_quantity : x.quantity) || ""),
-});
+/* fila de la sugerencia (SuggestionsModal) + candidatos reales (Recomendar equipos), solo con ?candidates=true */
+type Suggestion = SugBase & { kind: Kind } & RecoFields;
 
 const STATUS: Record<string, { label: string; tone: string }> = {
   borrador: { label: "Borrador", tone: "warn" }, enviado: { label: "Enviado a revisión", tone: "info" },
@@ -85,10 +74,6 @@ const KINDS: [Kind, string, string][] = [
 ];
 /* Margen sobre venta m -> recargo sobre costo equivalente: m / (1 - m). */
 const markupOf = (m: number) => (m >= 100 ? 0 : (m / (100 - m)) * 100);
-const ACTION: Record<Suggestion["action"], { label: string; tone: string }> = {
-  nuevo: { label: "Nuevo", tone: "ok" }, sumar: { label: "Ya está: sumar", tone: "info" },
-  cubierto: { label: "Ya alcanza", tone: "muted" }, revisar: { label: "Revisar cantidad", tone: "warn" },
-};
 
 const emptyLabor = (): Labor => ({ tecnico: { people: "2", days: "1" }, civil: { people: "0", days: "0" }, contratado: { people: "0", days: "0" } });
 const emptySurvey = (kind: string) => ({
@@ -116,9 +101,14 @@ export default function Surveys() {
   const [techs, setTechs] = useState<Tech[]>([]);
   const [rows, setRows] = useState<Survey[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const draftRef = useRef<Draft | null>(null);
+  draftRef.current = draft;
   const [costing, setCosting] = useState<Costing | null>(null);
   const [costEdits, setCostEdits] = useState<Record<number, { cost: string; save: boolean }>>({});
-  const [sugs, setSugs] = useState<SugRow[] | null>(null);
+  const [sugs, setSugs] = useState<SugRow<Suggestion>[] | null>(null);
+  const [sugErr, setSugErr] = useState<string | null>(null);
+  // 21/10 ítem 25: cada botón que va al servidor muestra que está trabajando y no se dispara dos veces
+  const [pending, setPending] = useState<null | "sugerir" | "recomendar" | "agregar" | "informe">(null);
   const [reco, setReco] = useState<{ lines: RecoLine[]; focus?: string | null } | null>(null);
   const [verFoto, setVerFoto] = useState<number | null>(null);
   const [sent, setSent] = useState<{ number: string; notified: Tech[]; review?: Review } | null>(null);
@@ -259,6 +249,7 @@ export default function Surveys() {
         : createSurvey(body(draft), (json) => api<Survey>("/surveys", { method: "POST", json }), (why) => { link.lost = why; }));
       if (link.lost) toast(unlinkedNotice(link.lost, s.number), "bad");
       else if (!silent) toast(draft.id ? "Levantamiento guardado" : `Levantamiento ${s.number} creado`);
+      const enviado = draft;
       setDraft((d) => {
         if (!d) return d;
         const next = { ...d, id: s.id, number: s.number, status: s.status, review: pickReview(s), template_version: s.template_version, ...(link.lost ? { opportunity_id: "" } : {}) };
@@ -267,6 +258,10 @@ export default function Surveys() {
         if (d.items !== sent || !s.items) return next;
         const ids = s.items.map((x) => x.id);
         let k = 0;
+        // nada cambio mientras guardaba: los ids nuevos vienen del servidor y no son un cambio por autoguardar. Antes
+        // disparaban otro PUT con la lista de ese momento que, si llegaba despues de «Agregar al levantamiento», borraba
+        // lo recien agregado (21/10, ítem 25: "Equipos · 0")
+        if (d === enviado) auto.fromServer();
         return { ...next, items: d.items.map((it) => (it.name.trim() ? { ...it, id: ids[k++] ?? it.id } : it)) };
       });
       setCalcTick((t) => t + 1);
@@ -280,22 +275,42 @@ export default function Surveys() {
      se elige qué agregar; lo que ya existe se suma en vez de duplicarse. */
   /* Cada linea trae ademas sus equipos reales recomendados (?candidates=true): la linea generica se puede agregar
      como siempre o con «Ver equipos» elegir el producto del catalogo que la cubre. */
+  const errText = (e: unknown) => (e instanceof Error ? e.message : "Error de conexión");
   const suggest = async () => {
-    const s = await save(true);
-    if (!s) return;
+    if (pending) return;
+    setPending("sugerir");
     try {
+      const s = await save(true);
+      if (!s) return; // save ya avisó por qué no se guardó
       const list = await api<Suggestion[]>(`/surveys/${s.id}/suggest?candidates=true`, { method: "POST" });
       if (!list.length) { toast("No hay materiales habituales para este tipo de solución: agregá puntos o cargalos a mano.", "bad"); return; }
-      setSugs(list.map(toRow));
-    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+      setSugErr(null);
+      setSugs(list.map((x) => toSugRow(x)));
+    } catch (e) { toast(`No se pudieron sugerir materiales: ${errText(e)}. Pruebe de nuevo.`, "bad"); }
+    finally { setPending(null); }
   };
 
   /* Andres (LEV-2026-0008): "deberia recomendar cuales camaras podria utilizar con base en los requerimientos". */
   const recommend = async () => {
-    const s = await save(true); // la recomendacion lee los puntos guardados
-    if (!s) return;
-    try { setReco({ lines: await api<RecoLine[]>(`/surveys/${s.id}/suggest?candidates=true`, { method: "POST" }) }); }
-    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+    if (pending) return;
+    setPending("recomendar");
+    try {
+      const s = await save(true); // la recomendacion lee los puntos guardados
+      if (!s) return;
+      setReco({ lines: await api<RecoLine[]>(`/surveys/${s.id}/suggest?candidates=true`, { method: "POST" }) });
+    } catch (e) { toast(`No se pudieron recomendar equipos: ${errText(e)}. Pruebe de nuevo.`, "bad"); }
+    finally { setPending(null); }
+  };
+
+  /* Un paso del servidor que cambia la lista del levantamiento (agregar sugerencias, «Usar este»): primero sube lo
+     pendiente y despues corre en la misma fila que el autoguardado, nunca a la par. Un autoguardado con la lista vieja
+     que llegaba despues reescribia los materiales y borraba lo recien agregado (21/10, ítem 25). */
+  const serverStep = async <R,>(fn: () => Promise<R>): Promise<R> => {
+    await auto.flush();
+    const cur = draftRef.current;
+    if (!cur) return fn();
+    const out = await auto.exclusive(cur, async () => ({ id: cur.id, r: await fn() }));
+    return out.r;
   };
   /* Despues de "Usar este": la linea quedo con su producto. Se recalcula la sugerencia (esa linea pasa a "ya
      alcanza") conservando lo que el usuario ya marco en las demas, y se recarga el levantamiento. */
@@ -305,24 +320,47 @@ export default function Surveys() {
     setReco((r) => (r ? { ...r, lines: list } : r));
     setSugs((prev) => prev && list.map((x) => {
       const old = prev.find((y) => y.name === x.name);
-      return old && old.action === x.action ? { ...x, checked: old.checked, qty: old.qty } : toRow(x);
+      return old && old.action === x.action ? { ...x, checked: old.checked, qty: old.qty } : toSugRow(x);
     }));
     await open(draft.id);
   };
 
   const applySugs = async () => {
-    if (!draft?.id || !sugs) return;
-    const chosen = sugs.filter((x) => x.checked && num(x.qty) > 0);
-    if (!chosen.length) { setSugs(null); return; }
+    if (!draft?.id || !sugs || pending) return;
+    const json = sugPayload(sugs);
+    if (!json.length) { setSugs(null); return; }
+    const id = draft.id;
+    setPending("agregar");
+    setSugErr(null);
+    let r: { added: number; summed: number };
     try {
-      const r = await api<{ added: number; summed: number }>(`/surveys/${draft.id}/suggest/apply`, {
-        method: "POST",
-        json: chosen.map((x) => ({ name: x.name, quantity: num(x.qty), unit: x.unit, kind: x.kind, item_id: x.item_id })),
-      });
+      r = await serverStep(() => api<{ added: number; summed: number }>(`/surveys/${id}/suggest/apply`, { method: "POST", json }));
+    } catch (e) {
+      // el modal queda abierto con lo marcado: se puede reintentar sin volver a elegir
+      setSugErr(`No se agregaron: ${errText(e)}. El levantamiento no cambió; pruebe de nuevo.`);
+      setPending(null);
+      return;
+    }
+    try {
+      await open(id); // la lista nueva viene del servidor y pasa a ser la referencia del autoguardado
       setSugs(null);
-      await open(draft.id);
       toast(`${r.added} agregado${r.added !== 1 ? "s" : ""}${r.summed ? ` · ${r.summed} con cantidad sumada` : ""}. Nada de lo anterior se borró.`);
-    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+    } catch (e) {
+      setSugs(null);
+      toast(`Se agregaron, pero no se pudo recargar el levantamiento (${errText(e)}). Ciérrelo y ábralo de nuevo para verlos.`, "bad");
+    } finally { setPending(null); }
+  };
+
+  /* Informe preliminar: la pestaña se abre al tocar (si no, el navegador la bloquea) y dice que se está preparando; lo
+     pendiente se sube antes para que el informe salga con lo que está en pantalla. Antes se veía en blanco mientras
+     el servidor armaba el PDF y, si fallaba, quedaba así (21/10, ítem 25). */
+  const openReport = () => {
+    if (!draft?.id || pending) return;
+    const id = draft.id;
+    setPending("informe");
+    openFile(`/surveys/${id}/report.pdf`, () => auto.flush())
+      .catch((e) => toast(`No se pudo armar el informe preliminar: ${errText(e)}. Pruebe de nuevo.`, "bad"))
+      .finally(() => setPending(null));
   };
 
   const send = async () => {
@@ -423,6 +461,16 @@ export default function Surveys() {
     // punto nuevo: todos sus campos "confirmado"; un dato vacio o pendiente queda para revisar, nunca como 0
     return { ...d, points: [...d.points, { code: nextCode(d, k), kind: k === d.kind ? null : k, label: "", data: {}, data_status: initialStatus(specs[k]?.fields), photos: [], notes: null }] };
   });
+  /* Botón «+ Punto» y «+ Otro tipo…»: arriba en la tarjeta y repetido al final de la lista (21/10, ítem 23). */
+  const pointAdder = (d: Draft, where: "top" | "foot") => (
+    <div className="point-add">
+      <button className="btn btn--soft btn--sm" onClick={() => addPoint()}><Icon d={I.plus} />{where === "foot" ? `Agregar ${(specs[d.kind]?.point_label || "punto").toLowerCase()}` : specs[d.kind]?.point_label || "Punto"}</button>
+      <select className="select select--sm" value="" aria-label="Agregar un punto de otro tipo" onChange={(e) => { if (e.target.value) addPoint(e.target.value); }}>
+        <option value="">+ Otro tipo…</option>
+        {Object.entries(specs).filter(([k]) => k !== d.kind).map(([k, sp]) => <option key={k} value={k}>{sp.point_label} · {sp.label}</option>)}
+      </select>
+    </div>
+  );
   /* En sitio, las cámaras de un mismo tramo comparten casi todo: se copia la anterior y solo se
      corrige lo que cambia (lo pidió Andrés: "que utilice la misma configuración para estas cámaras"). */
   const dupPoint = (i: number) => setDraft((d) => {
@@ -624,13 +672,13 @@ export default function Surveys() {
             {auto.bar}
             {puedeCotizar && <button className="btn btn--soft" onClick={() => cost()}><Icon d={I.trend} />Costear</button>}
             {draft.id && !draft.quote_id && <PreviewHidden needs={["catalog.costos", "sales.crear"]} label="Costear" />}
-            {draft.id && <button className="btn btn--ghost" title="PDF para el cliente, sin precios ni costos" onClick={() => openFile(`/surveys/${draft.id}/report.pdf`).catch((e) => toast(e.message, "bad"))}><Icon d={I.reports} />Informe preliminar</button>}
+            {draft.id && <button className="btn btn--ghost" title="PDF para el cliente, sin precios ni costos" disabled={!!pending} aria-busy={pending === "informe"} onClick={openReport}><Icon d={I.reports} />{pending === "informe" ? "Preparando informe…" : "Informe preliminar"}</button>}
             {draft.id && allows("sales.enviar") && <button className="btn btn--ghost" onClick={sendReport}>Enviar al cliente</button>}
             {draft.id && <span style={{ marginRight: "auto", display: "inline-flex", gap: 6 }}><ArchiveActions kind="survey" id={draft.id} number={draft.number} archivedAt={draft.archived_at} trashedAt={draft.trashed_at} onDone={() => { close(); load(); }} /></span>}
             <button className="btn btn--ghost" onClick={close}>Cerrar</button>
             {!readOnly && <>
-              <button className="btn btn--ghost" onClick={recommend} disabled={busy || !draft.points.length} title="Equipos reales del catálogo para lo levantado: cámaras, grabador, discos, switch…">Recomendar equipos</button>
-              <button className="btn btn--ghost" onClick={suggest} disabled={busy} title={draft.points.length ? "Propone equipos y materiales según los puntos; vos elegís cuáles agregar al levantamiento." : "Sin puntos: los materiales habituales del tipo de solución; vos elegís cuáles agregar al levantamiento."}>Sugerir materiales</button>
+              <button className="btn btn--ghost" onClick={recommend} disabled={busy || !!pending || !draft.points.length} aria-busy={pending === "recomendar"} title="Equipos reales del catálogo para lo levantado: cámaras, grabador, discos, switch…">{pending === "recomendar" ? "Buscando equipos…" : "Recomendar equipos"}</button>
+              <button className="btn btn--ghost" onClick={suggest} disabled={busy || !!pending} aria-busy={pending === "sugerir"} title={draft.points.length ? "Propone equipos y materiales según los puntos; vos elegís cuáles agregar al levantamiento." : "Sin puntos: los materiales habituales del tipo de solución; vos elegís cuáles agregar al levantamiento."}>{pending === "sugerir" ? "Sugiriendo…" : "Sugerir materiales"}</button>
               <button className="btn btn--ghost" onClick={() => save()} disabled={busy}>Guardar</button>
               <button className="btn btn--crimson" onClick={send} disabled={busy || !draft.points.length} title="Lo revisa el supervisor (o el administrador) en Aprobaciones antes del costeo">{draft.status === "enviado" ? "Reenviar a revisión" : "Enviar a revisión"}</button>
             </>}
@@ -692,15 +740,7 @@ export default function Surveys() {
             </table>
           </Card>
 
-          <Card title={`${pointTitle} · ${draft.points.length}`} extra={!readOnly && (
-            <div className="point-add">
-              <button className="btn btn--soft btn--sm" onClick={() => addPoint()}><Icon d={I.plus} />{spec?.point_label || "Punto"}</button>
-              <select className="select select--sm" value="" aria-label="Agregar un punto de otro tipo" onChange={(e) => { if (e.target.value) addPoint(e.target.value); }}>
-                <option value="">+ Otro tipo…</option>
-                {Object.entries(specs).filter(([k]) => k !== draft.kind).map(([k, sp]) => <option key={k} value={k}>{sp.point_label} · {sp.label}</option>)}
-              </select>
-            </div>
-          )}>
+          <Card title={`${pointTitle} · ${draft.points.length}`} extra={!readOnly && pointAdder(draft, "top")}>
             {draft.points.length === 0 ? <p className="muted" style={{ fontSize: 13, margin: 0 }}>Agregá un punto por cada cámara, puerta, terminal o salida de red que haya que instalar: de ahí salen los materiales y el precio. Si en el sitio hay algo de otro tipo (una puerta, un punto de red, una UPS), elegilo en «+ Otro tipo…».</p> : draft.points.map((pt, i) => {
               const ps = specs[kindOf(pt, draft)];
               const other = !!pt.kind && pt.kind !== draft.kind;
@@ -722,6 +762,8 @@ export default function Surveys() {
               </div>
               );
             })}
+            {/* 21/10, ítem 23: también al final de la lista, para no volver hasta arriba por cada punto */}
+            {!readOnly && draft.points.length > 0 && <div style={{ display: "flex", justifyContent: "flex-start", marginTop: 10, paddingTop: 10, borderTop: "1px dashed var(--hair-2)" }}>{pointAdder(draft, "foot")}</div>}
           </Card>
 
           <SystemCalcs surveyId={draft.id} refresh={calcTick} />
@@ -737,53 +779,23 @@ export default function Surveys() {
       )}
 
       {sugs && draft && (
-        <Modal title="Materiales y equipos sugeridos" onClose={() => setSugs(null)} wide foot={<>
-          <span className="muted" style={{ marginRight: "auto", fontSize: 13 }}>{sugs.filter((x) => x.checked && num(x.qty) > 0).length} para agregar · lo que ya cargaste no se borra</span>
-          <button className="btn btn--ghost" onClick={() => setSugs(null)}>Cancelar</button>
-          <button className="btn btn--crimson" onClick={applySugs}>Agregar al levantamiento</button>
-        </>}>
-          {/* 13/10 33:45-34:10: sugerir propone; agregar lo pasa al levantamiento; la cotización sale después */}
-          <ol className="sug-flow" aria-label="Cómo llegan los materiales a la cotización">
-            <li><b>1</b> Sugerir: el sistema propone según los puntos (no cambia nada)</li>
-            <li><b>2</b> Agregar al levantamiento: pasa a «Equipos y materiales»</li>
-            <li><b>3</b> Revisión, costeo y cotización: la cotización sale con esas líneas</li>
-          </ol>
-          <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Elegir el tipo de cámara en un punto no agrega materiales solo: tocá «Sugerir materiales» cuando termines los puntos.</p>
-          {draft.points.length === 0
-            ? <p style={{ fontSize: 13, margin: 0, background: "var(--warn-soft, rgba(230,160,40,.12))", border: "1px solid var(--warn)", borderRadius: 10, padding: "10px 14px" }}>Todavía no hay puntos levantados, así que no se puede calcular cantidades. Estos son los materiales habituales de <b>{spec?.label || draft.kind}</b>: escribí la cantidad de los que vayas a usar.</p>
-            : <p className="muted" style={{ fontSize: 13, margin: 0 }}>Salen de los puntos levantados (cada uno según su tipo: cámara, puerta, punto de red…), sus observaciones y lo que ya está en la lista. Marcá lo que querés agregar y ajustá la cantidad; si el material ya existe se suma a esa línea.</p>}
-          <table className="table">
-            <thead><tr><th style={{ width: 32 }} /><th>Sugerencia</th><th>Bloque</th><th className="num">Ya cargado</th><th className="num">Agregar</th><th>Por qué</th></tr></thead>
-            <tbody>{sugs.map((x, i) => (
-              <tr key={x.name} style={{ opacity: x.action === "cubierto" && !x.checked ? 0.6 : 1 }}>
-                <td><input type="checkbox" checked={x.checked} disabled={x.apply_generic === false} title={x.apply_generic === false ? "Se agrega eligiendo un equipo real: «Ver equipos»" : undefined} onChange={(e) => setSugs(sugs.map((y, j) => (j === i ? { ...y, checked: e.target.checked } : y)))} /></td>
-                <td>
-                  <b>{x.name}</b> <span className={`badge badge--${ACTION[x.action].tone}`} style={{ marginLeft: 6 }}>{ACTION[x.action].label}</span>
-                  <RecoSummary line={x} onOpen={() => setReco({ lines: sugs, focus: x.name })} />
-                </td>
-                <td className="muted" style={{ textTransform: "capitalize" }}>{x.kind}</td>
-                <td className="num mono">{Number(x.existing_quantity) ? Number(x.existing_quantity) : "—"}</td>
-                <td className="num"><input className="input input--mono" inputMode="decimal" style={{ maxWidth: 90 }} value={x.qty} placeholder="0" disabled={x.apply_generic === false} onChange={(e) => setSugs(sugs.map((y, j) => (j === i ? { ...y, qty: e.target.value, checked: num(e.target.value) > 0 ? true : y.checked } : y)))} /> <span className="muted" style={{ fontSize: 12 }}>{x.unit}</span></td>
-                <td className="muted" style={{ fontSize: 12.5 }}>
-                  {x.reference && <span className="badge badge--warn" style={{ marginRight: 6 }}>referencia del curso</span>}
-                  {x.reason}{x.matched_name && <div>Se suma a «{x.matched_name}», que ya está cargado.</div>}
-                  {x.warnings?.map((w) => <div key={w} className="sug__warn">⚠ {w}</div>)}
-                  {x.alternatives && x.alternatives.length > 1 && (
-                    <ul className="sug__alts" title="Elegí la combinación y ajustá la cantidad">
-                      {x.alternatives.map((o) => <li key={o.label}>{o.label} · reserva {o.reserva}{o.actual ? " (sugerida)" : ""}</li>)}
-                    </ul>
-                  )}
-                </td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </Modal>
+        <SuggestionsModal
+          rows={sugs}
+          onRows={setSugs}
+          onApply={applySugs}
+          onClose={() => { setSugs(null); setSugErr(null); }}
+          busy={pending === "agregar"}
+          error={sugErr}
+          solutionLabel={spec?.label || draft.kind}
+          noPoints={draft.points.length === 0}
+          extra={(x) => <RecoSummary line={x} onOpen={() => setReco({ lines: sugs, focus: x.name })} />}
+        />
       )}
 
       {summaryId !== null && <SurveySummary id={summaryId} onClose={() => { setSummaryId(null); if (params.get("id")) setParams({}); }} />}
 
       {reco && draft?.id && (
-        <RecommendModal surveyId={draft.id} lines={reco.lines} focus={reco.focus} onClose={() => setReco(null)} onApplied={afterReco} />
+        <RecommendModal surveyId={draft.id} lines={reco.lines} focus={reco.focus} compact={!!reco.focus} run={serverStep} onClose={() => setReco(null)} onApplied={afterReco} />
       )}
 
       {sent && (

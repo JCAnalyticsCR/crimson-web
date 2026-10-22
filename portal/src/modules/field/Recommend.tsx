@@ -44,8 +44,12 @@ const qtyText = (v: unknown) => { const x = n(v); return Number.isInteger(x) ? S
 export const recoLines = (lines: RecoLine[]) =>
   lines.filter((l) => l.recommend?.searched).sort((a, b) => (a.kind === "equipo" ? 0 : 1) - (b.kind === "equipo" ? 0 : 1));
 
-export function RecommendModal({ surveyId, lines, focus, onClose, onApplied }: {
+export function RecommendModal({ surveyId, lines, focus, onClose, onApplied, compact, run }: {
   surveyId: number; lines: RecoLine[]; focus?: string | null; onClose: () => void; onApplied: () => Promise<void> | void;
+  /** abierto desde la lista de sugerencias: tarjetas sin foto (21/10, ítem 24) */
+  compact?: boolean;
+  /** el levantamiento lo pasa por su fila de guardado: nunca a la par de un autoguardado que pisaría el equipo elegido */
+  run?: <R,>(fn: () => Promise<R>) => Promise<R>;
 }) {
   const { toast, allows } = useSession();
   const [qty, setQty] = useState<Record<string, string>>({});
@@ -62,13 +66,14 @@ export function RecommendModal({ surveyId, lines, focus, onClose, onApplied }: {
     if (q <= 0) { toast("Escribí la cantidad antes de usar este equipo", "bad"); return; }
     setBusy(k);
     try {
-      await api(`/surveys/${surveyId}/suggest/apply-product`, {
+      const go = () => api(`/surveys/${surveyId}/suggest/apply-product`, {
         method: "POST",
         json: {
           line: line.name, quantity: q, product_id: c.product_id, supplier_item_id: c.product_id ? null : c.supplier_item_id, code: c.code,
           item_id: line.recommend?.current?.item_id ?? line.item_id ?? null,
         },
       });
+      await (run ? run(go) : go());
       toast(`${c.name} × ${qtyText(q)} quedó en el levantamiento`);
       await onApplied();
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
@@ -78,7 +83,7 @@ export function RecommendModal({ surveyId, lines, focus, onClose, onApplied }: {
   const block = (title: string, ls: RecoLine[]) => ls.length > 0 && (
     <div className="reco-group" key={title}>
       {!focus && <div className="reco-group__title">{title}</div>}
-      {ls.map((l) => <LineBlock key={l.name} line={l} qty={qty} setQty={setQty} busy={busy} onUse={use} verCostos={verCostos} verPrecios={verPrecios} />)}
+      {ls.map((l) => <LineBlock key={l.name} line={l} qty={qty} setQty={setQty} busy={busy} onUse={use} verCostos={verCostos} verPrecios={verPrecios} compact={compact} />)}
     </div>
   );
 
@@ -95,9 +100,9 @@ export function RecommendModal({ surveyId, lines, focus, onClose, onApplied }: {
   );
 }
 
-function LineBlock({ line, qty, setQty, busy, onUse, verCostos, verPrecios }: {
+function LineBlock({ line, qty, setQty, busy, onUse, verCostos, verPrecios, compact }: {
   line: RecoLine; qty: Record<string, string>; setQty: (q: Record<string, string>) => void; busy: string | null;
-  onUse: (l: RecoLine, c: Candidate) => void; verCostos: boolean; verPrecios: boolean;
+  onUse: (l: RecoLine, c: Candidate) => void; verCostos: boolean; verPrecios: boolean; compact?: boolean;
 }) {
   const m = line.recommend!;
   const cands = line.candidates || [];
@@ -120,7 +125,7 @@ function LineBlock({ line, qty, setQty, busy, onUse, verCostos, verPrecios }: {
           {cands.map((c) => {
             const k = `${line.name}|${c.key}`;
             return <CandidateCard key={c.key} c={c} value={qty[k] ?? (n(c.quantity) > 0 ? String(n(c.quantity)) : "")} onQty={(v) => setQty({ ...qty, [k]: v })}
-              busy={busy === k} disabled={!!busy} onUse={() => onUse(line, c)} verCostos={verCostos} verPrecios={verPrecios} />;
+              busy={busy === k} disabled={!!busy} onUse={() => onUse(line, c)} verCostos={verCostos} verPrecios={verPrecios} compact={compact} />;
           })}
         </div>
       )}
@@ -128,16 +133,16 @@ function LineBlock({ line, qty, setQty, busy, onUse, verCostos, verPrecios }: {
   );
 }
 
-function CandidateCard({ c, value, onQty, busy, disabled, onUse, verCostos, verPrecios }: {
-  c: Candidate; value: string; onQty: (v: string) => void; busy: boolean; disabled: boolean; onUse: () => void; verCostos: boolean; verPrecios: boolean;
+function CandidateCard({ c, value, onQty, busy, disabled, onUse, verCostos, verPrecios, compact }: {
+  c: Candidate; value: string; onQty: (v: string) => void; busy: boolean; disabled: boolean; onUse: () => void; verCostos: boolean; verPrecios: boolean; compact?: boolean;
 }) {
-  const img = useMediaUrl(c.image);
+  const img = useMediaUrl(compact ? null : c.image);
   const origen = c.source === "proveedor" ? `Proveedor${c.supplier ? ` ${c.supplier}` : ""}` : "Catálogo propio";
   const money = (verCostos && c.cost_crc != null) || (verPrecios && c.sale_price != null);
   return (
     <article className={`reco-card${c.recommended ? " is-rec" : ""}${c.selected ? " is-sel" : ""}${c.meets ? "" : " is-off"}`}>
       <div className="reco-card__top">
-        <div className="reco-card__img">{img ? <img src={img} alt="" loading="lazy" /> : <Icon d={I.box} size={22} />}</div>
+        {!compact && <div className="reco-card__img">{img ? <img src={img} alt="" loading="lazy" /> : <Icon d={I.box} size={22} />}</div>}
         <div className="reco-card__badges">
           {c.recommended && <span className="badge badge--ok">Recomendado</span>}
           {c.selected && <span className="badge badge--info">En uso</span>}
