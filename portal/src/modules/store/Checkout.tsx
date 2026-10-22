@@ -46,8 +46,10 @@ export type Placed = {
 
 const SAVED = "crimson-shop:mis-datos";
 /* lo que se lleva llenado del checkout, solo en esta pestana: abrir los terminos, recargar o ir atras y volver no
-   borra nada (pedido 21/10). Se borra al confirmar el pedido. */
-const DRAFT = "crimson-shop:checkout-borrador";
+   borra nada (pedido 21/10). Se borra al confirmar el pedido. Va por tienda (como el carrito): todas las tiendas
+   viven en el mismo origen y el borrador de una (paso, tarifa, metodo, cupon, terminos aceptados) no puede
+   aparecer en el checkout de otra. */
+const draftKey = (slug: string) => `crimson-shop:checkout-borrador:${slug}`;
 const STEPS = ["Tus datos", "Entrega", "Pago", "Confirmar"] as const;
 type Inv = "consumidor" | "fisica" | "juridica";
 type Form = {
@@ -58,20 +60,21 @@ type Form = {
 const digits = (s: string) => s.replace(/\D/g, "");
 const okEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim());
 
-export default function Checkout({ api, store, cart, mode, onPlaced, onBack, setQty, remove, quoteText, termsHref }: {
-  api: ApiFn; store: StoreInfo; cart: CartItem[]; mode: "pedido" | "cotizacion"; onPlaced: (p: Placed) => void; onBack: () => void;
+export default function Checkout({ api, slug, store, cart, mode, onPlaced, onBack, setQty, remove, quoteText, termsHref }: {
+  api: ApiFn; slug: string; store: StoreInfo; cart: CartItem[]; mode: "pedido" | "cotizacion"; onPlaced: (p: Placed) => void; onBack: () => void;
   setQty: (k: string, n: number) => void; remove: (k: string) => void; quoteText: (l: CartItem[]) => string; termsHref: string;
 }) {
   if (mode === "cotizacion") return <QuoteRequest api={api} store={store} cart={cart} onBack={onBack} quoteText={quoteText} />;
-  return <OrderCheckout api={api} store={store} cart={cart} onPlaced={onPlaced} onBack={onBack} setQty={setQty} remove={remove} termsHref={termsHref} />;
+  return <OrderCheckout api={api} slug={slug} store={store} cart={cart} onPlaced={onPlaced} onBack={onBack} setQty={setQty} remove={remove} termsHref={termsHref} />;
 }
 
-function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, termsHref }: {
-  api: ApiFn; store: StoreInfo; cart: CartItem[]; onPlaced: (p: Placed) => void; onBack: () => void;
+function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, remove, termsHref }: {
+  api: ApiFn; slug: string; store: StoreInfo; cart: CartItem[]; onPlaced: (p: Placed) => void; onBack: () => void;
   setQty: (k: string, n: number) => void; remove: (k: string) => void; termsHref: string;
 }) {
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [cfgErr, setCfgErr] = useState<string | null>(null);
+  const DRAFT = draftKey(slug);
   const saved = useMemo(() => { try { return JSON.parse(local.get(SAVED) || "null") as Partial<Form> | null; } catch { return null; } }, []);
   // borrador de esta pestana (manda sobre "mis datos" guardados: es lo ultimo que la persona escribio)
   const draft = useMemo(() => { try { return JSON.parse(session.get(DRAFT) || "null") as { f?: Partial<Form>; step?: number; coupon?: string | null } | null; } catch { return null; } }, []);
@@ -159,7 +162,7 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
     const rest: Partial<Form> = { ...f };
     delete rest.website; // el honeypot no se guarda
     session.set(DRAFT, JSON.stringify({ f: rest, step, coupon }));
-  }, [f, step, coupon]);
+  }, [DRAFT, f, step, coupon]);
 
   // correo: el servidor revisa formato, errores de dedo (gmial.com) y que el dominio reciba correo (MX). Si la
   // revision falla (red, tope), no se frena la compra: el checkout la repite al confirmar.

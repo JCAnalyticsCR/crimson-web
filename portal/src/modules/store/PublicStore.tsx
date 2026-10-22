@@ -243,7 +243,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
         ) : v === "mi-pedido" ? (
           <OrderLookup api={api} onFound={(t) => go({ pedido: t })} onBack={() => go({})} />
         ) : v === "pagar" || v === "cotizar" ? (
-          <Checkout api={api} store={S} cart={cart} mode={v === "pagar" && isShop ? "pedido" : "cotizacion"} onPlaced={(o) => { setCart([]); go({ pedido: o.track_token }); }} onBack={() => go({})} setQty={setQty} remove={remove} quoteText={quoteText} termsHref={L("/info/terminos")} />
+          <Checkout api={api} slug={slug} store={S} cart={cart} mode={v === "pagar" && isShop ? "pedido" : "cotizacion"} onPlaced={(o) => { setCart([]); go({ pedido: o.track_token }); }} onBack={() => go({})} setQty={setQty} remove={remove} quoteText={quoteText} termsHref={L("/info/terminos")} />
         ) : (
           <Suspense fallback={<Spin />}>
             <Routes>
