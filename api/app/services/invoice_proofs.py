@@ -331,6 +331,9 @@ def approve(
     otros = reused_in(db, pr)
     if otros and not confirm_reused:
         raise HTTPException(409, f"Este mismo comprobante ya se subió en {', '.join(otros)}. Revisalo antes de aprobar y confirmá si es correcto.")
+    # El vendedor no puede aprobar el comprobante de sus propias facturas (payments.confirmar lo tienen admin/conta)
+    if p is not None and not p.can("payments", "confirmar") and inv.seller_id == p.user.id:
+        raise HTTPException(403, "No podés aprobar comprobantes de tus propias facturas. Pedíselo a quien confirma cobros.")
     if inv.status == "anulada":
         raise HTTPException(409, "La factura está anulada: rechazá el comprobante")
     saldo = _d(inv.balance)

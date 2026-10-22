@@ -1055,10 +1055,49 @@ def _crear_oportunidad(db: Session, slug: str, data: AdvisoryIn, ip: str) -> Non
         + f"<p>{'Cliente registrado: ' + e(cliente.name) if cliente else 'Prospecto nuevo (sin ficha de cliente)'} · Oportunidades → {e(number)}</p>"
         + cta(f"/oportunidades?id={o.id}", f"Abrir {number}")
     )
-    # aviso interno de ventas: tambien al "Correo para avisos internos" (pedido 48), como los pedidos web
-    notify_roles(
-        db, t, ("admin", "supervisor", "ventas"), f"Asesoría web {number} · {etiqueta} · {quien[:40]}", cuerpo, "opportunity", o.id, internal_copy=True
-    )
+    # Reparto de consultas web: auto-asignar según la configuración ("turno" o "solucion") antes de avisar.
+    from ..models import TenantUser
+    from ..services.mail import member_inbox, queue_email
+    from ..services.sale_assignment import auto_assign_opportunity
+
+    assigned_uid = auto_assign_opportunity(db, t, o)
+
+    if assigned_uid:
+        # Se asignó automáticamente: aviso con detalle al vendedor asignado y al admin (sin datos al resto)
+        m_v = db.scalar(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.user_id == assigned_uid, TenantUser.active))
+        correo_v = member_inbox(m_v) if m_v else None
+        if correo_v:
+            queue_email(
+                db, t, correo_v,
+                f"Nueva consulta asignada: {e(number)} · {etiqueta}",
+                # El vendedor recibe el detalle completo si fue asignado automáticamente
+                cuerpo,
+                "opportunity", o.id,
+                dedupe_key=f"opp-asig-vendedor:{o.id}",
+                company_bcc=False,
+            )
+        # Admin recibe el detalle completo siempre
+        notify_roles(
+            db, t, ("admin",),
+            f"Asesoría web {number} · {etiqueta} · {quien[:40]} (asignada a {assigned_uid})",
+            cuerpo, "opportunity", o.id, internal_copy=True,
+        )
+    else:
+        # Modo manual: el admin recibe con detalle; los vendedores solo "hay una consulta nueva por asignar"
+        _cuerpo_vendedor = (
+            f"<p>Hay una nueva solicitud de asesoría desde la tienda (<b>{e(number)}</b>) que todavía no tiene responsable.</p>"
+            + cta("/ventas/por-asignar", "Ir a Ventas por asignar")
+        )
+        notify_roles(
+            db, t, ("admin",),
+            f"Asesoría web {number} · {etiqueta} · {quien[:40]}",
+            cuerpo, "opportunity", o.id, internal_copy=True,
+        )
+        notify_roles(
+            db, t, ("supervisor", "ventas"),
+            f"Nueva consulta web por asignar · {etiqueta}",
+            _cuerpo_vendedor, "opportunity", o.id,
+        )
     db.commit()
 
 

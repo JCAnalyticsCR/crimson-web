@@ -56,6 +56,10 @@ class _DocBase(TenantMixin, TimestampMixin):
     # siendo quien tecleo el documento. NULL = venta sin vendedor (tienda en linea, API, recurrencias).
     # Ver services/ownership.py: es la unica definicion de "lo mio".
     seller_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), index=True)
+    # house_sale: "venta de la casa" — el admin la marco explicitamente sin vendedor/comision (bandeja de asignacion).
+    # NULL / False = normal; True = no comisiona aunque despues se asigne un vendedor (la decision es permanente salvo
+    # que el admin la revierta desde la misma bandeja).
+    house_sale: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False, server_default="0")
 
 
 class _LineBase:

@@ -58,10 +58,14 @@ class Payment(TenantMixin, TimestampMixin, Base):
     provider: Mapped[str] = mapped_column(String(20), default="manual")  # manual | onvo | paypal
     provider_event: Mapped[dict | None] = mapped_column(JSON)  # evento crudo del webhook
     paid_at: Mapped[date] = mapped_column(Date)
-    status: Mapped[str] = mapped_column(String(20), default="confirmado")  # confirmado | pendiente | fallido
+    status: Mapped[str] = mapped_column(String(20), default="confirmado")  # confirmado | pendiente | fallido | por_confirmar
     notify_customer: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
+    # Cobros por confirmar: el vendedor lo registra en "por_confirmar"; admin/conta lo confirma o rechaza.
+    confirmed_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
     invoice: Mapped["Invoice"] = relationship(back_populates="payments")  # noqa: F821
 

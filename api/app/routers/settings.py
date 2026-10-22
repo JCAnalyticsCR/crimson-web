@@ -187,6 +187,28 @@ class SettingsIn(BaseModel):
             raise ValueError(f"Estos roles no pueden ver costos: {', '.join(malos)}")
         return list(dict.fromkeys(v))
 
+    # Ajustes -> Ventas: asignación de ventas, cobros, consultas web.
+    # Guardado como tenant.settings["ventas"] (sub-objeto). Valores por defecto en services/sale_assignment.VENTAS_DEFAULTS.
+    ventas: dict | None = None
+
+    @field_validator("ventas")
+    @classmethod
+    def _ventas(cls, v):
+        """Valida el sub-objeto de ajustes de ventas. Solo se guarda lo que pertenece a VENTAS_DEFAULTS."""
+        if v is None:
+            return None
+        from ..services.sale_assignment import VENTAS_DEFAULTS
+
+        MODES = {"manual", "turno", "solucion"}
+        mode = v.get("asignacion_consultas_web")
+        if mode is not None and mode not in MODES:
+            raise ValueError(f"Modo de asignación de consultas inválido: {mode}. Opciones: {', '.join(MODES)}")
+        ventana = v.get("ventana_sugerencia_dias")
+        if ventana is not None and not (7 <= int(ventana) <= 365):
+            raise ValueError("ventana_sugerencia_dias debe estar entre 7 y 365")
+        # Solo guardar llaves conocidas
+        return {k: v[k] for k in VENTAS_DEFAULTS if k in v}
+
     # Ajustes -> Usuarios -> "Verificacion en dos pasos obligatoria": roles que la exigen y dias de gracia. Aflojarla
     # (quitar un rol o dar mas dias) pide admin_password; nunca se guarda en los ajustes.
     twofa_roles: list[str] | None = None
