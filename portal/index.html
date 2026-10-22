@@ -7,6 +7,8 @@
     <!-- robots: lo decide el host (cabecera X-Robots-Tag en nginx.conf y meta que pone main.tsx). La tienda en
          dominio propio se indexa; el panel no. -->
     <link rel="icon" href="/icon.png" />
+    <!-- Imágenes de productos: eurocompcr.com es el origen de las URLs del catálogo -->
+    <link rel="preconnect" href="https://eurocompcr.com" />
     <!-- SEO de la tienda (tienda.*): nginx resuelve estas directivas SSI y trae del API el titulo, la descripcion,
          la canonica, Open Graph y el JSON-LD de la ruta pedida (/public/seo/head). Sin nginx (vite dev) o en el
          panel son comentarios y queda el titulo de abajo. Si el API no responde, queda el stub. -->

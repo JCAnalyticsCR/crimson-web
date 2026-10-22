@@ -1,9 +1,12 @@
 /* Portada de la tienda: "centro de monitoreo" con mesura. Pantalla de decision: el titular y los CTA estan
    desde el primer segundo (movil incluido); nada se mueve solo salvo el punto REC (y no bajo reduced-motion).
-   Todo en un solo viaje al API (/showcase); las imagenes bajo el pliegue son perezosas. */
+   Cuando el snapshot está disponible, las secciones de categorías, marcas, destacados y novedades se muestran
+   al instante (sin esperar /showcase). Los kits y la info de páginas legales siguen viniendo de /showcase. */
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Grid, IC, Ico, KitPhotos, Skeleton, Viewfinder, catIcon, money, useAvailability, useHead, usePath, useStore, waLink, type KitPhoto, type VProd } from "./storeKit";
+import { snapToVProd } from "./catalogFilter";
+import { useSnapshot } from "./useSnapshot";
 
 type Cat = { id: number; name: string; path: string; count: number; image: string | null; children: { name: string; path: string; count: number }[] };
 /* photos: fotos fijas de los equipos reales del kit (o las que Andres eligio en Vitrina) */
@@ -21,12 +24,114 @@ const isExternal = (u: string) => /^https?:\/\//.test(u);
 /** hora local tipo timecode del monitor (se fija al cargar: no es un reloj que repinte) */
 const stamp = () => new Intl.DateTimeFormat("es-CR", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
 
+/** Construye un Showcase parcial desde el snapshot (sin kits ni info de páginas legales). */
+function showcaseFromSnap(snap: import("./catalogFilter").Snapshot): Showcase {
+  const catById = new Map(snap.categories.map((c) => [c.id, c]));
+  const childOf = new Map<number | null, typeof snap.categories>();
+  for (const c of snap.categories) {
+    const pid = c.parent_id != null && catById.has(c.parent_id) ? c.parent_id : null;
+    if (!childOf.has(pid)) childOf.set(pid, []);
+    childOf.get(pid)!.push(c);
+  }
+
+  // Conteo acumulado (con subcategorías)
+  const directCount = new Map<number, number>();
+  for (const p of snap.products) {
+    if (p.category_id != null) directCount.set(p.category_id, (directCount.get(p.category_id) ?? 0) + 1);
+  }
+  const totMemo = new Map<number, number>();
+  function totalCount(cid: number): number {
+    if (totMemo.has(cid)) return totMemo.get(cid)!;
+    let n = directCount.get(cid) ?? 0;
+    for (const ch of childOf.get(cid) ?? []) n += totalCount(ch.id);
+    totMemo.set(cid, n);
+    return n;
+  }
+
+  const categories: Cat[] = (childOf.get(null) ?? [])
+    .map((c) => ({
+      id: c.id, name: c.name, path: `/c/${c.slug}`,
+      count: totalCount(c.id), image: null,
+      children: (childOf.get(c.id) ?? []).map((ch) => ({
+        name: ch.name, path: `/c/${ch.slug}`, count: totalCount(ch.id),
+      })),
+    }))
+    .filter((c) => c.count > 0)
+    .sort((a, b) => b.count - a.count);
+
+  // Marcas: Hikvision primero, luego por conteo
+  const brands = [...snap.brands]
+    .sort((a, b) => {
+      const ah = a.name.toLowerCase() === "hikvision";
+      const bh = b.name.toLowerCase() === "hikvision";
+      if (ah !== bh) return ah ? -1 : 1;
+      return b.count - a.count;
+    })
+    .slice(0, 14);
+
+  const byId = new Map(snap.products.map((p) => [p.id, p]));
+
+  // Destacados: IDs de la vitrina → productos, fallback a los marcados web_featured
+  const featuredIds = snap.showcase.featured.filter((id) => byId.has(id));
+  let featuredProds = featuredIds.map((id) => byId.get(id)!).slice(0, 8);
+  if (!featuredProds.length) {
+    featuredProds = [...snap.products]
+      .filter((p) => p.web_featured && p.image)
+      .sort((a, b) => {
+        const ah = (a.brand ?? "").toLowerCase() === "hikvision";
+        const bh = (b.brand ?? "").toLowerCase() === "hikvision";
+        return ah !== bh ? (ah ? -1 : 1) : a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+      })
+      .slice(0, 8);
+    if (!featuredProds.length) {
+      featuredProds = [...snap.products]
+        .filter((p) => p.image && p.display_price > 0)
+        .slice(0, 8);
+    }
+  }
+  const featured = featuredProds.map((p) => snapToVProd(p, snap.currency, snap.categories));
+  const featuredSet = new Set(featuredProds.map((p) => p.id));
+
+  // Novedades: más recientes con foto, sin solapamiento con destacados
+  const fresh = [...snap.products]
+    .filter((p) => p.image && !featuredSet.has(p.id))
+    .sort((a, b) => b.created_ts - a.created_ts || b.id - a.id)
+    .slice(0, 8)
+    .map((p) => snapToVProd(p, snap.currency, snap.categories));
+
+  return {
+    headline: snap.showcase.headline ?? "",
+    subline: snap.showcase.subline ?? "",
+    banners: (snap.showcase.banners ?? []) as Banner[],
+    trust: snap.showcase.trust ?? [],
+    categories,
+    brands,
+    featured,
+    fresh,
+    kits: [], // los kits no están en el snapshot; /showcase los trae
+    product_count: snap.n,
+    currency: snap.currency,
+    info: [], // /showcase trae los enlaces de páginas legales
+  };
+}
+
 export default function StoreHome() {
   const ctx = useStore();
   const to = usePath();
+  const { snap } = useSnapshot(ctx.slug);
+
+  // Precarga desde el snapshot (instantáneo si el snapshot está en caché)
+  const snapD = useMemo(() => snap ? showcaseFromSnap(snap) : null, [snap]);
+
   const [d, setD] = useState<Showcase | null>(null);
   const [err, setErr] = useState(false);
+
+  // Mostrar datos del snapshot mientras /showcase carga (solo la primera vez)
+  useEffect(() => { if (snapD && !d) setD(snapD); }, [snapD]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // /showcase: siempre se pide para traer los kits y los datos definitivos
   useEffect(() => { ctx.api<Showcase>("/showcase").then(setD).catch(() => setErr(true)); }, [ctx]);
+
   const ids = useMemo(() => (d ? [...d.featured, ...d.fresh].map((p) => p.id) : []), [d]);
   const avail = useAvailability(ids);
   const S = ctx.store;

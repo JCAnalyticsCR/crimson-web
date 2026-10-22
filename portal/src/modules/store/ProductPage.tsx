@@ -1,10 +1,13 @@
 /* Ficha de producto: /p/<nombre>-<id>. Galeria con lupa (escritorio) y visor a pantalla completa con zoom
    (todo dentro de la pagina), marca/modelo/SKU, precio con IVA y desglose, precio anterior, disponibilidad,
    cantidad limitada a lo disponible, carrito (del modulo de pedidos), instalacion, WhatsApp, especificaciones,
-   ficha tecnica PDF, "¿Que necesito ademas?", relacionados y compartir. En movil la barra de compra queda fija. */
+   ficha tecnica PDF, "¿Que necesito ademas?", relacionados y compartir. En movil la barra de compra queda fija.
+   Si el snapshot está cargado, muestra nombre/foto/precio/disponibilidad al instante sin esperar /item. */
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AvailBadge, Crumbs, EmptyHelp, Grid, IC, Ico, PriceTag, ProductCard, Viewfinder, cannotBuy, money, normAvail, useAvailability, useHead, usePath, useStore, waLink, type Variant, type VProd } from "./storeKit";
+import { pidFromRef, snapToVProd } from "./catalogFilter";
+import { useSnapshot } from "./useSnapshot";
 
 type Detail = VProd & {
   description: string | null; specs: Record<string, string>; datasheet_url: string | null; net_price: string | number; tax_amount: string | number;
@@ -29,11 +32,43 @@ export default function ProductPage() {
   const addT = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(addT.current), []);
 
+  // Primer pintado desde el snapshot (sin esperar /item)
+  const { snap } = useSnapshot(ctx.slug);
+  const snapCard = useMemo<VProd | null>(() => {
+    if (!snap) return null;
+    const pid = pidFromRef(ref);
+    if (!pid) return null;
+    const p = snap.products.find((x) => x.id === pid);
+    return p ? snapToVProd(p, snap.currency, snap.categories) : null;
+  }, [snap, ref]);
+
   useEffect(() => {
     let alive = true;
-    setD(null); setMissing(false); setPhoto(0); setQty(1);
-    ctx.api<Detail>(`/item/${encodeURIComponent(ref)}`).then((x) => { if (!alive) return; setD(x); setVariant(x.variants?.[0]); }).catch(() => alive && setMissing(true));
+    setMissing(false); setPhoto(0); setQty(1);
+    // Mostrar datos del snapshot inmediatamente si están en caché (cero latencia)
+    if (snapCard) {
+      setD({
+        ...snapCard,
+        description: null,
+        specs: {},
+        datasheet_url: null,
+        net_price: snapCard.display_price,
+        tax_amount: 0,
+        breadcrumbs: [{ name: "Tienda", path: "/" }],
+        related: [],
+        accessories: [],
+        whatsapp: ctx.store.whatsapp ?? "",
+      } as Detail);
+    } else {
+      setD(null);
+    }
+    // Cargar la ficha completa (description, specs, relacionados, accesorios)
+    ctx.api<Detail>(`/item/${encodeURIComponent(ref)}`)
+      .then((x) => { if (!alive) return; setD(x); setVariant(x.variants?.[0]); })
+      .catch(() => { if (alive) { setD(null); setMissing(true); } });
     return () => { alive = false; };
+  // snapCard se lee sincrónicamente en el efecto; no se incluye en deps para no re-ejecutar cuando el snap llega tarde
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref, ctx]);
   useEffect(() => setInCart(false), [ref]);
   // el nombre cambio -> direccion canonica sin recargar

@@ -1,9 +1,13 @@
 /* Catalogo: /catalogo, /c/<categoria> y /buscar?q=. Filtros (marca, tipo, precio, disponibilidad), orden y "ver mas".
    Todo el estado vive en la URL: atras funciona, se comparte, y Google ve cada categoria en su propia direccion.
-   En movil los filtros van en una hoja inferior (solo se mueve lo que el usuario abre). */
+   En movil los filtros van en una hoja inferior (solo se mueve lo que el usuario abre).
+   Cuando el snapshot está disponible, el filtrado y las facetas son instantáneos (sin llamada al API).
+   Si no hay snapshot (primera visita o falla), cae al endpoint /catalog como antes. */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Crumbs, EmptyHelp, Grid, IC, Ico, Skeleton, money, useAvailability, useHead, usePath, useStore, type VProd } from "./storeKit";
+import { filterCatalog, snapToVProd, type CatalogResult } from "./catalogFilter";
+import { useSnapshot } from "./useSnapshot";
 
 type Facets = { brands: { name: string; count: number }[]; types: { name: string; count: number }[]; availability: { disponible: number; bajo_pedido: number }; price: { min: number; max: number } };
 type CatInfo = { id: number; name: string; slug: string; description: string | null; parent: { name: string; path: string } | null; children: { name: string; path: string }[] };
@@ -40,25 +44,83 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
     return s.toString();
   }, [q, mode, cat, brands.join("|"), tipo, min, max, disp, sort]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Snapshot: filtrado instantáneo en el navegador ─────────────────────────
+  const { snap } = useSnapshot(ctx.slug);
+
+  /** Resultado completo del filtrado desde el snapshot (sin límite de página). */
+  const snapResult = useMemo((): CatalogResult | null => {
+    if (!snap) return null;
+    return filterCatalog(snap, {
+      q: mode === "search" ? q : undefined,
+      category: mode === "category" ? cat : undefined,
+      brands: brands.length ? brands : undefined,
+      tipo: tipo || undefined,
+      min: min ? Number(min.replace(/\D/g, "")) : undefined,
+      max: max ? Number(max.replace(/\D/g, "")) : undefined,
+      avail: disp || undefined,
+      sort,
+      limit: 99999, // todos los resultados; paginamos localmente con displayLimit
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap, q, mode, cat, brands.join("|"), tipo, min, max, disp, sort]);
+
+  /** Cuántos productos mostrar en el modo snapshot (crece con "Cargar más"). */
+  const [displayLimit, setDisplayLimit] = useState(PAGE);
+  useEffect(() => { setDisplayLimit(PAGE); }, [qs]);
+
+  // ── Estado de la respuesta (API o snapshot) ────────────────────────────────
   const [res, setRes] = useState<Res | null>(null);
   const [items, setItems] = useState<VProd[]>([]);
   const [missing, setMissing] = useState(false);
   const [more, setMore] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Cuando hay snapshot: derivar res e items sincrónicamente
+  useEffect(() => {
+    if (!snapResult) return;
+    const sliced = snapResult.items.slice(0, displayLimit);
+    const vprods = sliced.map((p) => snapToVProd(p, snapResult.currency, snap!.categories));
+    setItems(vprods);
+    setRes({
+      items: vprods,
+      total: snapResult.total,
+      category: snapResult.category,
+      facets: snapResult.facets,
+      currency: snapResult.currency,
+      nav: snapResult.nav,
+    } as Res);
+    setLoading(false);
+    // Redirigir /c/5 → /c/<slug> con datos del snapshot
+    if (mode === "category" && snapResult.category && cat !== snapResult.category.slug) {
+      nav({ pathname: to(`/c/${snapResult.category.slug}`), search: loc.search }, { replace: true });
+    }
+  }, [snapResult, displayLimit]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sin snapshot: llamar al API (ruta de respaldo)
   // al cambiar un filtro se mantiene lo anterior a la vista (atenuado) hasta que llega lo nuevo: nada salta
   useEffect(() => {
+    if (snapResult) return; // snapshot disponible: sin llamada al API
     let alive = true;
     setLoading(true); setMissing(false);
     ctx.api<Res>(`/catalog?${qs}&offset=0`).then((r) => { if (!alive) return; setRes(r); setItems(r.items); }).catch(() => alive && setMissing(true)).finally(() => alive && setLoading(false));
     return () => { alive = false; };
-  }, [qs, ctx]);
+  }, [qs, ctx, snapResult]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // otra categoria u otra busqueda: eso si es otra pagina
   useEffect(() => { setRes(null); setItems([]); }, [mode, cat]);
-  // /c/5 (enlace viejo por id) -> /c/<slug>
+  // /c/5 (enlace viejo por id) -> /c/<slug> en modo API
   useEffect(() => {
-    if (mode === "category" && res?.category && cat !== res.category.slug) nav({ pathname: to(`/c/${res.category.slug}`), search: loc.search }, { replace: true });
+    if (snapResult) return; // ya lo maneja el efecto del snapshot
+    if (mode === "category" && res?.category && cat !== res.category.slug)
+      nav({ pathname: to(`/c/${res.category.slug}`), search: loc.search }, { replace: true });
   }, [res, cat, mode]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const loadMore = () => {
+    if (snapResult) {
+      // snapshot: mostrar más sin llamada al API
+      setDisplayLimit((n) => n + PAGE);
+      return;
+    }
     setMore(true);
     ctx.api<Res>(`/catalog?${qs}&offset=${items.length}`).then((r) => setItems((x) => [...x, ...r.items])).finally(() => setMore(false));
   };
