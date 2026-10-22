@@ -275,7 +275,7 @@ def avisar_atrasos(db: Session, tenant: Tenant, ahora: datetime | None = None) -
     from .email_layout import cta
     from .mail import notify_roles, queue_email
 
-    titulos = {"respuesta": "sin primera respuesta a tiempo", "resolucion": "con la resolución atrasada"}
+    titulos = {"respuesta": "sin primera respuesta a tiempo", "resolucion": "con la resolucion atrasada"}
     n = 0
     for tipo, lista in revisar_atrasos(db, tenant, ahora).items():
         if not lista:
