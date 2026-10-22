@@ -15,11 +15,9 @@ import json
 import tracemalloc
 from decimal import Decimal
 
-import pytest
 from sqlalchemy import select
 
 from app.models import Category, Product, Tenant
-
 
 # ---------- fixture: catalogo de ~300 productos ----------
 
