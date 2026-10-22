@@ -6,6 +6,7 @@ Reproduce qa-juicio/seguridad_2fa_check.py: con solo la sesion ya no se apaga el
 from datetime import UTC, datetime, timedelta
 
 import pyotp
+import pytest
 from sqlalchemy import select
 
 from app.core.ratelimit import login_limiter
@@ -36,6 +37,20 @@ def _login(client, **extra):
 
 def _avisos(db_session, uid):
     return db_session.scalars(select(EmailOutbox).where(EmailOutbox.entity == "user_security", EmailOutbox.entity_id == uid)).all()
+
+
+@pytest.fixture(autouse=True)
+def _modo_estricto():
+    """Estas pruebas cubren el esquema de espera progresiva (modo estricto). En produccion esta apagado desde el 21/10:
+    una contrasena equivocada solo se rechaza (tests/test_login_sin_bloqueo.py)."""
+    from app.core.ratelimit import login_limiter, reauth_limiter
+
+    login_limiter.configurar(estricto=True)
+    antes = reauth_limiter.limit
+    reauth_limiter.limit = 10
+    yield
+    login_limiter.configurar(estricto=False)
+    reauth_limiter.limit = antes
 
 
 def test_con_solo_la_sesion_no_se_apaga_el_2fa(client, auth, db_session):

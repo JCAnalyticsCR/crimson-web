@@ -6,6 +6,7 @@ sus sesiones abiertas no espera, y desde uno nuevo espera a lo sumo un minuto. N
 from datetime import UTC, datetime, timedelta
 
 import pyotp
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -40,6 +41,20 @@ def _bajo_ataque(client, email, from_ip, base=200) -> None:
     c = _atacante(client)
     for i in range(LoginLimiter.ACCOUNT_FREE):
         assert _login(c, email, MALA, from_ip(f"203.0.113.{base + i}")).status_code == 401
+
+
+@pytest.fixture(autouse=True)
+def _modo_estricto():
+    """Estas pruebas cubren el esquema de espera progresiva (modo estricto). En produccion esta apagado desde el 21/10:
+    una contrasena equivocada solo se rechaza (tests/test_login_sin_bloqueo.py)."""
+    from app.core.ratelimit import login_limiter, reauth_limiter
+
+    login_limiter.configurar(estricto=True)
+    antes = reauth_limiter.limit
+    reauth_limiter.limit = 10
+    yield
+    login_limiter.configurar(estricto=False)
+    reauth_limiter.limit = antes
 
 
 def test_entrar_bien_no_gasta_cupo(client):

@@ -228,11 +228,18 @@ class LoginLimiter:
     ACCOUNT_CAP = 60
     ACCOUNT_FORGET = 3600
 
-    def __init__(self):
-        self.ip = FailureLimiter(free=20, base=60, cap=900, forget=900)
-        self.account = FailureLimiter(free=5, base=30, cap=900, forget=3600)
-        self.total = FailureLimiter(free=self.ACCOUNT_FREE, base=30, cap=self.ACCOUNT_CAP, forget=self.ACCOUNT_FORGET)
-        self.device = FailureLimiter(free=5, base=30, cap=900, forget=3600)
+    def __init__(self, estricto: bool = False):
+        # Pedido 21/10: una contrasena equivocada solo se rechaza; la cuenta y el equipo nunca quedan esperando. Queda
+        # un unico freno contra robots por conexion (100 fallidos seguidos), que una persona no alcanza.
+        # estricto=True: el esquema anterior (espera progresiva por IP, cuenta y equipo), apagado en produccion.
+        self.configurar(estricto)
+
+    def configurar(self, estricto: bool) -> None:
+        sin_tope = 10**9
+        self.ip = FailureLimiter(free=20 if estricto else 100, base=60, cap=900, forget=900)
+        self.account = FailureLimiter(free=5 if estricto else sin_tope, base=30, cap=900, forget=3600)
+        self.total = FailureLimiter(free=self.ACCOUNT_FREE if estricto else sin_tope, base=30, cap=self.ACCOUNT_CAP, forget=self.ACCOUNT_FORGET)
+        self.device = FailureLimiter(free=5 if estricto else sin_tope, base=30, cap=900, forget=3600)
 
     @staticmethod
     def _h(text: str) -> str:
@@ -349,7 +356,7 @@ ally_notify_limiter = SlidingWindow(limit=30, seconds=3600)
 # oficina para que repartir el trabajo del dia no le trabe el envio de precios.
 ally_assign_limiter = SlidingWindow(limit=60, seconds=3600)
 # Reautenticacion con la contrasena del admin (se cuenta cada intento, antes de verificar)
-reauth_limiter = SlidingWindow(limit=10, seconds=900)
+reauth_limiter = SlidingWindow(limit=10**9, seconds=900)  # confirmar con la contrasena dentro del panel: sin tope (pedido 21/10)
 # Enlaces publicos con token (invitacion, restablecer): revisar y confirmar
 token_limiter = SlidingWindow(limit=20, seconds=600)
 # "Olvide mi contrasena" (autoservicio)

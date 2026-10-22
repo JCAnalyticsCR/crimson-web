@@ -618,6 +618,14 @@ def test_lista_de_usuarios(client, auth, db_session, monkeypatch, from_ip):
     assert {"roles", "cost_roles", "cost_role_choices"} <= set(d)
     # muchos intentos fallidos (desde 1.10, los de todas las IPs: 10; cada IP espera despues de 5 seguidos): se ve, la
     # cuenta no queda bloqueada en la base (desde un equipo nuevo se espera a lo sumo un minuto) y restablecer lo limpia
+    from app.core.ratelimit import login_limiter
+
+    # sin bloqueo (pedido 21/10): diez fallidos y la contrasena correcta entra igual
+    for _ in range(10):
+        assert _login_as(client, v.email, "Clave-incorrecta-1").status_code == 401
+    assert _login_as(client, v.email, PW).status_code == 200
+    client.cookies.clear()  # sin la cookie de equipo que dejo ese ingreso: el resto parte de un equipo nuevo
+    login_limiter.configurar(estricto=True)  # el resto cubre el modo estricto (apagado en produccion)
     for n in range(2):
         for _ in range(5):
             assert _login_as(client, v.email, "Clave-incorrecta-1", _headers=from_ip(f"203.0.113.{n + 1}")).status_code == 401
@@ -628,6 +636,7 @@ def test_lista_de_usuarios(client, auth, db_session, monkeypatch, from_ip):
     x = next(u for u in client.get("/settings/users").json()["users"] if u["id"] == v.id)
     assert x["login_failures_until"] is None and x["reset_link_expires_at"]
     assert _login_as(client, v.email, PW).status_code == 200
+    login_limiter.configurar(estricto=False)
 
 
 def test_aceptar_con_cuenta_existente(client, auth, db_session):

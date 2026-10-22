@@ -9,16 +9,12 @@ def test_health(client):
     assert client.get("/health").json()["status"] == "ok"
 
 
-def test_login_bad_password_and_lockout(client, from_ip):
-    # plan 1.10: los fallidos frenan a ESA IP con espera progresiva; la cuenta no queda bloqueada para su duena
+def test_login_bad_password_sin_bloqueo(client, from_ip):
+    # pedido 21/10: la contrasena equivocada solo se rechaza; ni la cuenta ni el equipo quedan esperando
     malo = from_ip("203.0.113.7")
-    for _ in range(5):
-        r = client.post("/auth/login", json={"email": ADMIN[0], "password": "mala-mala-1"}, headers=malo)
-        assert r.status_code == 401
-    r = client.post("/auth/login", json={"email": ADMIN[0], "password": "mala-mala-1"}, headers=malo)
-    assert r.status_code == 429 and int(r.headers["Retry-After"]) > 0  # espera por intentos
-    assert client.post("/auth/login", json={"email": ADMIN[0], "password": ADMIN[1]}, headers=malo).status_code == 429
-    assert client.post("/auth/login", json={"email": ADMIN[0], "password": ADMIN[1]}, headers=from_ip("198.51.100.20")).status_code == 200
+    for _ in range(12):
+        assert client.post("/auth/login", json={"email": ADMIN[0], "password": "mala-mala-1"}, headers=malo).status_code == 401
+    assert client.post("/auth/login", json={"email": ADMIN[0], "password": ADMIN[1]}, headers=malo).status_code == 200
 
 
 def test_protected_requires_token(client):
