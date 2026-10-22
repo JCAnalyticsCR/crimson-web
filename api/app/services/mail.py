@@ -136,11 +136,21 @@ def blocked_recipients(tenant: Tenant) -> set[str]:
 
 
 def notify_roles(
-    db: Session, tenant: Tenant, roles: tuple[str, ...], subject: str, html: str, entity: str, entity_id: int, dedupe_key: str | None = None
+    db: Session,
+    tenant: Tenant,
+    roles: tuple[str, ...],
+    subject: str,
+    html: str,
+    entity: str,
+    entity_id: int,
+    dedupe_key: str | None = None,
+    *,
+    company_bcc: bool = True,
 ) -> int:
     """Avisa a todos los usuarios activos con esos roles. Lo que en las notas de Andres es
     'Administracion recibe: nuevo levantamiento' o 'proyecto terminado, listo para facturacion'.
-    Con dedupe_key, cada destinatario lleva la suya (llave|correo): un aviso repetido no le llega dos veces a nadie."""
+    Con dedupe_key, cada destinatario lleva la suya (llave|correo): un aviso repetido no le llega dos veces a nadie.
+    company_bcc=False: aviso interno que no va en copia a la lista de la empresa (Ajustes -> copia de toda factura)."""
     from ..models import TenantUser
 
     n = 0
@@ -150,7 +160,9 @@ def notify_roles(
         if not correo or correo in vistos:
             continue
         vistos.add(correo)
-        queue_email(db, tenant, correo, subject, html, entity, entity_id, dedupe_key=f"{dedupe_key}|{correo}" if dedupe_key else None)
+        queue_email(
+            db, tenant, correo, subject, html, entity, entity_id, dedupe_key=f"{dedupe_key}|{correo}" if dedupe_key else None, company_bcc=company_bcc
+        )
         n += 1
     return n
 

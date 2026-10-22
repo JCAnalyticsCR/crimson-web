@@ -158,8 +158,11 @@ def check(db: Session, tenant_id: int, days: int = DAYS) -> dict:
         if o.status in ("enviado", "entregado") and store_inventory._managed(db, o):
             need, _ = store_inventory._needs(db, o)
             moved = store_inventory._moved(db, o)
+            # despachado con la compra bajo pedido sin recibir: esa parte sale al recibirse la compra (fulfill_for_order
+            # la deja pendiente a proposito); no es un descuadre ni se corrige volviendo a despachar
+            espera = store_inventory.awaiting_purchase(db, o)
             for pid, q in need.items():
-                if moved.get(pid, ZERO) < q:
+                if moved.get(pid, ZERO) + espera.get(pid, ZERO) < q:
                     issues.append(
                         {
                             "kind": "pedido",

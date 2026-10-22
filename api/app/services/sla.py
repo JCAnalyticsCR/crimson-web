@@ -330,7 +330,8 @@ def avisar_atrasos(db: Session, tenant: Tenant, ahora: datetime | None = None) -
     """Manda los avisos de atraso por el mecanismo de siempre (outbox de correo). Devuelve cuantos tickets avisaron.
 
     Cada aviso dice de quien es el ticket (cliente), el asunto, cuanto lleva vencido y el enlace para abrirlo (antes
-    llegaba casi vacio: solo el numero y el asunto)."""
+    llegaba casi vacio: solo el numero y el asunto). Es un aviso interno con datos del cliente: no va en copia a la
+    lista de la empresa de Ajustes (company_bcc=False), igual que los demas avisos internos."""
     from ..models import User
     from .mail import notify_roles, queue_email
 
@@ -350,11 +351,11 @@ def avisar_atrasos(db: Session, tenant: Tenant, ahora: datetime | None = None) -
             if len(lista) == 1
             else f"{len(lista)} ticket(s) {titulos[tipo]}"
         )
-        notify_roles(db, tenant, ("admin", "supervisor"), asunto, f"{intro}<ul>{filas}</ul>{mas}", "support_ticket", lista[0].id)
+        notify_roles(db, tenant, ("admin", "supervisor"), asunto, f"{intro}<ul>{filas}</ul>{mas}", "support_ticket", lista[0].id, company_bcc=False)
         for x, d in detalles:
             u = db.get(User, x.assigned_to) if x.assigned_to else None
             if u and u.email:
                 cuerpo = f"<p>Se venció el plazo de {plazos[tipo]} de un ticket asignado a vos:</p><ul>{_fila_html(d)}</ul>"
-                queue_email(db, tenant, u.email, f"Ticket {x.number} {titulos[tipo]} · {d['cliente']}", cuerpo, "support_ticket", x.id)
+                queue_email(db, tenant, u.email, f"Ticket {x.number} {titulos[tipo]} · {d['cliente']}", cuerpo, "support_ticket", x.id, company_bcc=False)
         n += len(lista)
     return n

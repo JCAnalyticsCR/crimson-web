@@ -90,6 +90,9 @@ def test_aviso_sin_primera_respuesta_trae_cliente_asunto_atraso_y_enlace(client,
     cust = client.get("/customers").json()["items"][0]
     t = client.post("/tickets", json={"subject": "Grabadora sin disco", "customer_id": cust["id"], "priority": "alta"}).json()
     tenant = db_session.get(Tenant, auth["tenant"]["id"])
+    # la empresa tiene copia de toda factura (archivo / contador): el aviso interno de soporte no va ahi
+    tenant.settings = {**(tenant.settings or {}), "bcc": ["archivo@ejemplo.com"]}
+    db_session.commit()
     antes = db_session.scalar(select(func.max(EmailOutbox.id))) or 0
     # alta: 4 h para responder; a las 7 h 30 min lleva 3 h 30 min vencido
     creado = db_session.get(SupportTicket, t["id"]).due_at
@@ -101,6 +104,7 @@ def test_aviso_sin_primera_respuesta_trae_cliente_asunto_atraso_y_enlace(client,
     assert cust["name"] in aviso.html and "Grabadora sin disco" in aviso.html
     assert "lleva 3 h 30 min vencido" in aviso.html
     assert f"/tickets?id={t['id']}" in aviso.html
+    assert nuevos and all(m.bcc is None for m in nuevos)
 
 
 # ---------- Reporte desde la pagina web ----------

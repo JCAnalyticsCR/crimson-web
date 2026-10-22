@@ -84,6 +84,9 @@ def test_despacho_con_la_compra_sin_recibir_no_deja_negativo(client, auth, db_se
     o = db_session.get(Order, o.id)
     assert any("sin la compra bajo pedido recibida" in (h.get("note") or "") for h in o.history or [])
     assert _issues(client, "negativo") == []
+    # mientras la compra no se recibe, lo pendiente no es un descuadre del pedido (sale al recibirse)
+    assert _issues(client, "pedido") == []
+    assert client.get("/stock/health").json()["total"] == 0
     # llega la compra: entra y sale en el mismo acto, ligado al pedido y a su factura
     req = db_session.scalar(select(PurchaseRequest).where(PurchaseRequest.order_id == o.id))
     client.patch(f"/purchase-requests/{req.id}", json={"status": "solicitada"})
