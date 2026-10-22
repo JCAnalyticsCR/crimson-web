@@ -1,5 +1,6 @@
 /* Bitácora de la oportunidad: interruptor "Visible para el aliado" por entrada (reunión 2, 21/10, pedido 15).
-   Por defecto todo queda oculto; lo que se prende lo ven en su portal las empresas aliadas que ven esta oportunidad.
+   Por defecto todo queda oculto; lo que se prende lo ven en su portal las empresas aliadas que ven esta oportunidad
+   (si hay más de una, se dice cuáles; el nombre de otra empresa aliada en el texto le sale como "otro aliado").
    Solo aparece si hay alguna (si no, la bitácora se ve igual que siempre). */
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../lib/api";
@@ -38,6 +39,7 @@ export function ShareToggle({ oppId, line, st, onChange, canEdit }: { oppId: num
     <label style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 12, color: on ? "var(--crimson)" : "var(--text-3)", cursor: canEdit ? "pointer" : undefined }} title={`Lo ve${st.companies.length > 1 ? "n" : ""} en su portal: ${quienes || "nadie"}`}>
       <input type="checkbox" checked={on} disabled={!canEdit || busy} onChange={(e) => set(e.target.checked)} />
       Visible para el aliado
+      {st.companies.length > 1 && <span className="muted">· lo verán: {quienes}</span>}
     </label>
   );
 }

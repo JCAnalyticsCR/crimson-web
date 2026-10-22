@@ -59,6 +59,7 @@ from ..models.allies import COST_OPEN
 from ..services import ally_access, ally_pricing
 from ..services import media_access as ma
 from ..services import sla as slasvc
+from ..services.archive import live
 from ..services.documents import audit, local_date
 from ..services.email_layout import cta
 from ..services.fx import rate_or_none
@@ -247,6 +248,10 @@ def _opp_out(db: Session, ctx: AllyCtx, o: Opportunity, full: bool = False) -> d
     return out
 
 
+# pregunta 8: el total sale solo de una cotizacion que Crimson ya le envio al cliente (no un borrador "creado")
+QUOTE_SHOWN = ("enviada", "convertida", "vencida")
+
+
 def _opp_extra(db: Session, ctx: AllyCtx, o: Opportunity, pr: Project | None) -> dict:
     """Reunion 2 (21/10), pedido 14: el detalle "muy basico" ahora trae la etapa con su proxima accion y fecha, los
     seguimientos que Crimson compartio (pedido 15), los levantamientos con su tecnico y la ejecucion del proyecto en
@@ -260,7 +265,7 @@ def _opp_extra(db: Session, ctx: AllyCtx, o: Opportunity, pr: Project | None) ->
     out: dict = {
         "next_action": o.next_action,
         "next_action_date": o.next_action_date,
-        "seguimientos": ally_log.for_ally(db, o, ctx.company.name),
+        "seguimientos": ally_log.for_ally(db, o, ctx.company),
         "surveys": [
             {
                 "id": s.id,
@@ -279,7 +284,7 @@ def _opp_extra(db: Session, ctx: AllyCtx, o: Opportunity, pr: Project | None) ->
     }
     if ctx.company.show_quote_total and o.quote_id:
         q = db.get(Quote, o.quote_id)
-        if q is not None and q.tenant_id == ctx.p.tenant.id and q.status != "anulada":
+        if q is not None and q.tenant_id == ctx.p.tenant.id and q.status in QUOTE_SHOWN:
             out["cotizacion"] = {"number": q.number, "status": q.status, "total": q.total, "currency": q.currency}
     return out
 
@@ -609,11 +614,14 @@ def _tech_home(db: Session, ctx: AllyCtx) -> dict:
     empresa le asigna trabajo, para que el inicio vacio diga a quien acudir."""
     uid = ctx.p.user.id
     hoy = ctx.scope.today
+    from ..core.timeutil import cr_day_bounds
+
+    manana = cr_day_bounds(hoy)[1]  # desde manana en hora de Costa Rica: las vencidas de la empresa no cuentan
+    # sin limit antes del filtro por tecnico (ayudantes es JSON): la lista ya viene acotada a futuro y se corta a 20
     rows = db.scalars(
         select(WorkOrder)
-        .where(*ctx.scope.work_orders(), WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")), WorkOrder.scheduled_at.is_not(None))
+        .where(*ctx.scope.work_orders(), WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")), WorkOrder.scheduled_at >= manana)
         .order_by(WorkOrder.scheduled_at, WorkOrder.id)
-        .limit(200)
     ).all()
     proximas = [
         {
@@ -627,7 +635,19 @@ def _tech_home(db: Session, ctx: AllyCtx) -> dict:
         for o in rows
         if (o.technician_id == uid or uid in (o.helpers or [])) and local_date(o.scheduled_at) > hoy
     ][:20]
-    mis_opps = set(db.scalars(select(Survey.opportunity_id).where(*ctx.scope.surveys(), Survey.opportunity_id.is_not(None))))
+    # cualquier levantamiento suyo, en cualquier estado (el scope del tecnico deja solo borradores y devueltos);
+    # solo se usa el id de la oportunidad para la marca
+    mis_opps = set(
+        db.scalars(
+            select(Survey.opportunity_id).where(
+                Survey.tenant_id == ctx.p.tenant.id,
+                Survey.ally_company_id == ctx.company.id,
+                Survey.technician_id == uid,
+                live(Survey),
+                Survey.opportunity_id.is_not(None),
+            )
+        )
+    )
     opps = db.scalars(
         select(Opportunity).where(*ctx.scope.company_opportunities(), Opportunity.status.not_in(OPP_CLOSED)).order_by(Opportunity.id.desc()).limit(30)
     ).all()

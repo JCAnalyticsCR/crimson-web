@@ -8,13 +8,15 @@ import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Field, Modal } from "../../ui/components";
 
-export type AllyMatch = { company_id: number; company: string; reason: "correo" | "nombre" };
+export type AllyMatch = { company_id: number; company: string; reason: "correo" | "dominio" | "nombre" };
 type Who = { id: number; name: string; email: string; ally_match?: AllyMatch | null };
 type Out = { pendientes: { ordenes: number; levantamientos: number; tickets: number } };
 
 export function AllyMatchChip({ m }: { m: AllyMatch }) {
   const t = m.reason === "correo"
     ? `Su correo es de la empresa aliada ${m.company}: no puede tener un rol interno. Páselo al portal de aliados.`
+    : m.reason === "dominio"
+    ? `Su correo es del mismo dominio que la empresa aliada ${m.company}. Si trabaja para ese aliado, páselo al portal de aliados.`
     : `Se llama igual que la empresa aliada ${m.company} (o uno de sus contactos). Si es la misma persona, páselo al portal de aliados.`;
   return <span className="badge badge--warn" title={t} style={{ whiteSpace: "normal", lineHeight: 1.35, borderRadius: 8, padding: "3px 8px" }}>Parece del aliado {m.company}</span>;
 }

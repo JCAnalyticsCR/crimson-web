@@ -2,10 +2,12 @@
 
 Un usuario de una empresa aliada vive SOLO en el portal de aliados (roles aliado / tecnico_aliado, filtrado "en
 comun"). Como usuario interno veria el panel de Crimson entero. Esto lo detecta:
-- por correo (bloquea al invitar o editar): el correo es el de la empresa aliada o el de uno de sus contactos, o es
-  del dominio propio de la empresa aliada (no los de correo gratuito ni el dominio de los administradores de Crimson);
-- por nombre (solo aviso en Ajustes -> Usuarios): el nombre de la persona es el de la empresa aliada (una persona
-  fisica dada de alta como aliado) o el de uno de sus contactos.
+- por correo exacto (bloquea al invitar o editar): el correo es el de la empresa aliada o el de uno de sus contactos;
+- por dominio (solo aviso en Ajustes -> Usuarios): el correo es del dominio de la empresa aliada (no los de correo
+  gratuito conocidos ni el dominio de los administradores de Crimson). No bloquea: la lista de correos gratuitos nunca
+  esta completa y un dominio compartido dejaria sin acceso a quien si debe tenerlo;
+- por nombre (solo aviso): el nombre de la persona es el de la empresa aliada (una persona fisica dada de alta como
+  aliado) o el de uno de sus contactos.
 Nunca cambia datos: la accion "Pasar al portal de aliados" (routers/ally_admin.py) la hace una persona.
 """
 
@@ -62,26 +64,29 @@ def _index(db: Session, tenant_id: int) -> list[_Ally]:
 
 
 def match_email(db: Session, tenant_id: int, email: str | None) -> AllyCompany | None:
-    """La empresa aliada a la que pertenece ese correo (exacto o de su dominio propio), o None."""
+    """La empresa aliada de la que ese correo es el de la empresa o el de un contacto (exacto), o None. Es lo que
+    bloquea; el dominio solo avisa (matches)."""
     e = (email or "").strip().lower()
     if not e:
         return None
-    idx = _index(db, tenant_id)
-    hit = next((a for a in idx if e in a.emails), None) or next((a for a in idx if _domain(e) in a.domains), None)
+    hit = next((a for a in _index(db, tenant_id) if e in a.emails), None)
     return hit.company if hit else None
 
 
 def matches(db: Session, tenant_id: int, users: list[User]) -> dict[int, dict]:
     """Para la lista de Ajustes -> Usuarios: {user_id: {company_id, company, reason}} de quien parece de un aliado.
-    reason: "correo" (bloquea editar el rol o activarlo) o "nombre" (solo aviso)."""
+    reason: "correo" (exacto: bloquea editar el rol o activarlo), "dominio" o "nombre" (solo aviso)."""
     idx = _index(db, tenant_id)
     if not idx:
         return {}
     out: dict[int, dict] = {}
     for u in users:
         e = (u.email or "").strip().lower()
-        hit = next((a for a in idx if e in a.emails), None) or next((a for a in idx if _domain(e) in a.domains), None)
+        hit = next((a for a in idx if e in a.emails), None)
         reason = "correo"
+        if hit is None:
+            hit = next((a for a in idx if _domain(e) in a.domains), None)
+            reason = "dominio"
         if hit is None:
             n = _norm(u.full_name)
             hit = next((a for a in idx if n and n in a.names), None)

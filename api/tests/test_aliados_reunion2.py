@@ -73,12 +73,49 @@ def test_monto_de_la_cotizacion_solo_si_se_habilita(client, auth, db_session):
     assert client.get(f"/allies/{s.A}").json()["show_quote_total"] is False
     r = client.put(f"/allies/{s.A}", json={"show_quote_total": True})
     assert r.status_code == 200 and r.json()["show_quote_total"] is True
+    # una cotizacion en borrador (creado) todavia no es un monto comprometido: no sale
+    assert client.get(f"/aliado/oportunidades/{oid}", headers=s.a_jefe).json()["cotizacion"] is None
+    from app.models import Quote
+
+    q = db_session.scalar(select(Quote).where(Quote.number == numero))
+    q.status = "enviada"
+    db_session.commit()
     cot = client.get(f"/aliado/oportunidades/{oid}", headers=s.a_jefe).json()["cotizacion"]
     assert cot["number"] == numero and "total" in cot and "currency" in cot
+    q.status = "anulada"
+    db_session.commit()
+    assert client.get(f"/aliado/oportunidades/{oid}", headers=s.a_jefe).json()["cotizacion"] is None
     # solo para esa empresa: la empresa B (en otra oportunidad con cotizacion) sigue sin verlo
     ob = _opp_abierta(client, admin_h, s, "Red bodega oeste", ally=s.B)
     assert client.post(f"/opportunities/{ob}/quote", json={}).status_code == 201
     assert client.get(f"/aliado/oportunidades/{ob}", headers=s.b_jefe).json()["cotizacion"] is None
+
+
+def test_bitacora_compartida_no_nombra_a_otro_aliado(client, auth, db_session):
+    """Una entrada compartida la ven todas las empresas de la oportunidad: el nombre de otra sale como "otro aliado"."""
+    admin_h = dict(client.headers)
+    s = escenario(client, admin_h, db_session)
+    oid = _opp_abierta(client, admin_h, s, "Dos aliados en la misma")
+    participa(client, admin_h, oid, s.B, scope="Fibra óptica entre edificios")
+    lineas = [x for x in client.get(f"/opportunities/{oid}").json()["notes"].split("\n") if x.strip()]
+    de_b = next(x for x in lineas if "Aliado Dos S.A." in x and "agregado" in x)
+    st = client.put(f"/opportunities/{oid}/bitacora-aliado", json={"line": de_b, "visible": True}).json()
+    assert st["companies"] == ["Aliado Dos S.A.", "Aliado Uno S.A."]
+    a = client.get(f"/aliado/oportunidades/{oid}", headers=s.a_jefe).json()["seguimientos"]
+    assert len(a) == 1 and "Aliado Dos" not in a[0]["text"] and "otro aliado" in a[0]["text"] and a[0]["author"].endswith("· Crimson")
+    # la propia empresa si ve su nombre
+    b = client.get(f"/aliado/oportunidades/{oid}", headers=s.b_jefe).json()["seguimientos"]
+    assert "Aliado Dos S.A." in b[0]["text"]
+    # una linea escrita a nombre de una empresa que no es usuario interno sale solo como "Crimson"
+    from app.models import Opportunity
+
+    o = db_session.get(Opportunity, oid)
+    falsa = "20/10/2026 09:00 · Empresa Renombrada Vieja: envió su precio"
+    o.notes = falsa + "\n" + (o.notes or "")
+    db_session.commit()
+    client.put(f"/opportunities/{oid}/bitacora-aliado", json={"line": falsa, "visible": True})
+    a = client.get(f"/aliado/oportunidades/{oid}", headers=s.a_jefe).json()["seguimientos"]
+    assert a[0]["author"] == "Crimson" and "Empresa" not in a[0]["author"]
 
 
 # ---------- 17: ejecucion del proyecto en comun ----------
@@ -118,14 +155,25 @@ def test_inicio_del_tecnico_aliado(client, auth, db_session):
     admin_h = dict(client.headers)
     s = escenario(client, admin_h, db_session)
     oid = _opp_abierta(client, admin_h, s)
+    o2 = _opp_abierta(client, admin_h, s, "Alarma bodega sur")
     db_session.add(Survey(tenant_id=s.tid, number="LEV-T1", kind="cctv", opportunity_id=oid, customer_id=s.c1, technician_id=s.uid_a_tec, ally_company_id=s.A, status="borrador"))
+    # ya enviado: no esta en "hoy", pero la oportunidad sigue marcada como suya
+    db_session.add(Survey(tenant_id=s.tid, number="LEV-T2", kind="cctv", opportunity_id=o2, customer_id=s.c1, technician_id=s.uid_a_tec, ally_company_id=s.A, status="enviado"))
+    # muchas ordenes vencidas de la empresa (de otro tecnico) no le tapan las suyas de los proximos dias
+    from app.models import WorkOrder
+
+    viejo = datetime.now(UTC) - timedelta(days=30)
+    db_session.add_all(
+        WorkOrder(tenant_id=s.tid, number=f"OT-VIEJA-{i}", title="Vencida", kind="instalacion", ally_company_id=s.A, technician_id=s.uid_a_tec2, status="asignada", scheduled_at=viejo)
+        for i in range(210)
+    )
     db_session.commit()
     d = client.get("/aliado/inicio", headers=s.a_tec).json()
     t = d["tecnico"]
     assert "OT-MANANA" in {o["number"] for o in t["proximas"]} and all("id" not in o for o in t["proximas"])
     assert "OT-OTRO" not in {o["number"] for o in t["proximas"]}  # de otro tecnico
     opps = {o["title"]: o for o in t["oportunidades"]}
-    assert opps["Cámaras parqueo este"]["mine"] is True
+    assert opps["Cámaras parqueo este"]["mine"] is True and opps["Alarma bodega sur"]["mine"] is True
     assert "Ana Jefa Uno" in t["asignan"]
     assert "LEV-T1" in {x["number"] for x in d["hoy"]["levantamientos"]}
     assert not PROHIBIDAS & keys_rec(t)  # (las OT de hoy ya traen sus notas de campo: eso es de antes)
@@ -144,7 +192,7 @@ def test_aliado_no_entra_como_usuario_interno(client, auth, db_session):
     admin_h = dict(client.headers)
     s = escenario(client, admin_h, db_session)
     # una invitacion interna de antes de que existiera la empresa aliada
-    vieja = client.post("/settings/invitations", json={"email": "jefe@instala-prueba.ejemplo.com", "role": "tecnico"})
+    vieja = client.post("/settings/invitations", json={"email": "rolando@instala-prueba.ejemplo.com", "role": "tecnico"})
     assert vieja.status_code == 201, vieja.text
     # empresa aliada de una persona fisica, con correo de dominio propio
     r = client.post("/allies", json={"name": "Rolando Prueba Mora", "email": "rolando@instala-prueba.ejemplo.com"})
@@ -155,10 +203,16 @@ def test_aliado_no_entra_como_usuario_interno(client, auth, db_session):
     r = client.post("/settings/invitations/accept", json={"token": vieja.json()["link"].rsplit("/", 1)[-1], "full_name": "Jefe Instala", "password": PW})
     client.headers["Authorization"] = keep
     assert r.status_code == 409 and "portal de aliados" in r.json()["detail"], r.text
-    # invitar como interno su correo o uno de su dominio: no
-    for correo in ("rolando@instala-prueba.ejemplo.com", "otro@instala-prueba.ejemplo.com"):
-        r = client.post("/settings/invitations", json={"email": correo, "role": "tecnico"})
-        assert r.status_code == 409 and "portal de aliados" in r.json()["detail"], r.text
+    # invitar como interno su correo exacto: no. Uno de su dominio si (solo avisa: un dominio compartido no bloquea)
+    r = client.post("/settings/invitations", json={"email": "rolando@instala-prueba.ejemplo.com", "role": "tecnico"})
+    assert r.status_code == 409 and "portal de aliados" in r.json()["detail"], r.text
+    assert client.post("/settings/invitations", json={"email": "otro@instala-prueba.ejemplo.com", "role": "tecnico"}).status_code == 201
+    # desde la ficha del aliado, el correo de un usuario interno manda a "Pasar al portal de aliados"
+    interno(client, db_session, s.tid, "interno.sin.pista@ejemplo.com", "tecnico")
+    r = client.post(f"/allies/{cid}/invitations", json={"email": "interno.sin.pista@ejemplo.com", "role": "tecnico_aliado"})
+    assert r.status_code == 409 and "Pasar al portal de aliados" in r.json()["detail"], r.text
+    dom = interno(client, db_session, s.tid, "colega@instala-prueba.ejemplo.com", "tecnico")
+    uid_dom = client.get("/auth/me", headers=dom).json()["user"]["id"]
     # quedo como interno de antes (dato real del pedido): la lista lo marca
     h = interno(client, db_session, s.tid, "rolando@instala-prueba.ejemplo.com", "tecnico")
     uid = client.get("/auth/me", headers=h).json()["user"]["id"]
@@ -169,6 +223,8 @@ def test_aliado_no_entra_como_usuario_interno(client, auth, db_session):
     rows = {u["id"]: u for u in client.get("/settings/users").json()["users"]}
     assert rows[uid]["ally_match"] == {"company_id": cid, "company": "Rolando Prueba Mora", "reason": "correo"}
     assert rows[uid2]["ally_match"]["reason"] == "nombre"
+    assert rows[uid_dom]["ally_match"]["reason"] == "dominio"
+    assert client.patch(f"/settings/users/{uid_dom}", json={"role": "supervisor"}).status_code == 200  # el dominio no bloquea
     assert rows[s.admin_id]["ally_match"] is None
     # cambiarle el rol interno o reactivarlo: no
     assert client.patch(f"/settings/users/{uid}", json={"role": "supervisor"}).status_code == 409
@@ -181,7 +237,7 @@ def test_aliado_no_entra_como_usuario_interno(client, auth, db_session):
     # pasarlo al portal de aliados: contrasena, no a un admin ni a si mismo, ni con oportunidades a su cargo
     base = {"user_id": uid, "role": "tecnico_aliado"}
     assert client.post(f"/allies/{cid}/users/from-internal", json=base).status_code == 403
-    assert client.post(f"/allies/{cid}/users/from-internal", json={**base, "user_id": s.admin_id, "admin_password": ADMIN_PW}).status_code == 409
+    assert client.post(f"/allies/{cid}/users/from-internal", json={**base, "user_id": s.admin_id, "admin_password": ADMIN_PW}).status_code == 409  # a si mismo
     vend = interno(client, db_session, s.tid, "vendedor.aliado@ejemplo.com", "ventas")
     vid = client.get("/auth/me", headers=vend).json()["user"]["id"]
     client.post("/opportunities", json={"title": "Suya", "customer_id": s.c1}, headers=vend)
@@ -203,3 +259,15 @@ def test_aliado_no_entra_como_usuario_interno(client, auth, db_session):
     assert client.get("/opportunities", headers=h).status_code == 403
     # y no se vuelve a pasar
     assert client.post(f"/allies/{cid}/users/from-internal", json={**base, "admin_password": ADMIN_PW}).status_code == 404
+
+    # un administrador con el correo de un contacto del aliado: no se le cambia el rol interno, pero otro admin si
+    # lo pasa al portal (antes quedaba trabado: ni rol ni conversion)
+    assert client.put(f"/allies/{cid}", json={"contacts": {"tecnico": {"name": "Contacto Admin", "email": "admin.aliado@instala-prueba.ejemplo.com"}}}).status_code == 200
+    interno(client, db_session, s.tid, "admin.aliado@instala-prueba.ejemplo.com", "admin")
+    aid = db_session.scalar(select(TenantUser.user_id).join(TenantUser.user).where(TenantUser.tenant_id == s.tid, TenantUser.role_code == "admin", TenantUser.user_id != s.admin_id))
+    assert client.patch(f"/settings/users/{aid}", json={"role": "supervisor", "admin_password": ADMIN_PW}).status_code == 409
+    r = client.post(f"/allies/{cid}/users/from-internal", json={"user_id": aid, "role": "aliado", "admin_password": ADMIN_PW})
+    assert r.status_code == 200, r.text
+    m = db_session.scalar(select(TenantUser).where(TenantUser.user_id == aid))
+    db_session.refresh(m)
+    assert m.ally_company_id == cid and m.role_code == "aliado"

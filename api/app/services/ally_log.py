@@ -6,7 +6,7 @@ que se comparte se guarda como huella de la linea (AllySharedNote.line_key). Asi
 bitacora tiene que cambiar, y una linea editada o borrada deja de verse sola (deny by default).
 
 Al aliado le sale la fecha, el texto y quien lo escribio: su empresa con su nombre; de Crimson, el nombre de pila y
-"Crimson" (como las notas de los tickets). Nunca las entradas no compartidas.
+"Crimson" (como las notas de los tickets). Nunca las entradas no compartidas ni el nombre de otra empresa aliada.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import re
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import AllyCompany, AllyParticipation, AllySharedNote, Opportunity
+from ..models import AllyCompany, AllyParticipation, AllySharedNote, Opportunity, TenantUser, User
 
 LINE_RE = re.compile(r"^(\d{2}/\d{2}/\d{4} \d{2}:\d{2}) · ([^:]+): (.*)$")
 
@@ -66,34 +66,53 @@ def set_visible(db: Session, o: Opportunity, line: str, visible: bool, user_id: 
     return False
 
 
-def for_ally(db: Session, o: Opportunity, company_name: str) -> list[dict]:
-    """Lo que ve el aliado: solo las entradas compartidas, en el orden de la bitacora (la mas nueva arriba)."""
+def _mask(text: str, names: list[str]) -> str:
+    """Cambia el nombre de otra empresa aliada por "otro aliado" (palabra entera, sin distinguir mayusculas), el mas
+    largo primero."""
+    for n in names:
+        text = re.sub(r"(?<!\w)" + re.escape(n) + r"(?!\w)", "otro aliado", text, flags=re.IGNORECASE)
+    return text
+
+
+def for_ally(db: Session, o: Opportunity, company: AllyCompany) -> list[dict]:
+    """Lo que ve el aliado: solo las entradas compartidas, en el orden de la bitacora (la mas nueva arriba).
+    Una entrada compartida la ven todas las empresas con participacion visible, asi que el texto nunca lleva el nombre
+    de OTRA empresa aliada (las lineas automaticas lo traen: "Aliado X agregado...", "Solicitud de costo a X..."):
+    sale como "otro aliado". El autor: su empresa con su nombre; un usuario interno con su nombre de pila y "Crimson";
+    cualquier otro (otra empresa, una ya quitada o renombrada) solo "Crimson"."""
     keys = shared_keys(db, o)
     if not keys:
         return []
-    # una linea escrita a nombre de OTRA empresa aliada (p. ej. "envio su precio") sale como de Crimson, sin su nombre
-    otras = set(
-        db.scalars(
-            select(AllyCompany.name)
-            .join(AllyParticipation, AllyParticipation.ally_company_id == AllyCompany.id)
-            .where(AllyParticipation.tenant_id == o.tenant_id, AllyParticipation.opportunity_id == o.id)
+    otras: list[str] = []
+    for nombre, razon in db.execute(
+        select(AllyCompany.name, AllyCompany.legal_name).where(AllyCompany.tenant_id == o.tenant_id, AllyCompany.id != company.id)
+    ):
+        otras += [x.strip() for x in (nombre, razon) if x and len(x.strip()) >= 3]
+    propios = {x.strip().lower() for x in (company.name, company.legal_name) if x}
+    otras = sorted({x for x in otras if x.lower() not in propios}, key=len, reverse=True)
+    internos = {
+        " ".join(n.split())
+        for n in db.scalars(
+            select(User.full_name)
+            .join(TenantUser, TenantUser.user_id == User.id)
+            .where(TenantUser.tenant_id == o.tenant_id, TenantUser.ally_company_id.is_(None), TenantUser.customer_id.is_(None))
         )
-    ) - {company_name}
+        if n
+    }
     out = []
     for x in lines_of(o.notes):
         if line_key(x) not in keys:
             continue
         m = LINE_RE.match(x)
         if not m:
-            out.append({"when": None, "author": None, "text": x})
+            out.append({"when": None, "author": None, "text": _mask(x, otras)})
             continue
-        quien = m.group(2).strip()
-        if quien == company_name:
-            autor = company_name
-        elif quien in otras:
-            autor = "Crimson"
+        quien = " ".join(m.group(2).split())
+        if quien == company.name:
+            autor = company.name
+        elif quien in internos:
+            autor = f"{quien.split()[0]} · Crimson"
         else:
-            pila = quien.split()[0] if quien.split() else ""
-            autor = "Crimson" if not pila or pila == "Crimson" else f"{pila} · Crimson"
-        out.append({"when": m.group(1), "author": autor, "text": m.group(3)})
+            autor = "Crimson"
+        out.append({"when": m.group(1), "author": autor, "text": _mask(m.group(3), otras)})
     return out

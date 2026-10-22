@@ -466,7 +466,7 @@ export default function Opportunities() {
                     <textarea className="textarea" autoFocus style={{ minHeight: 64 }} value={touch.note} onChange={(e) => setTouch({ ...touch, note: e.target.value })} placeholder="Llamé a don Andrés; pide propuesta con 8 cámaras…" />
                   </Field>
                   <div className="grid-3">
-                    <Field label="Próxima acción"><input className="input" value={touch.next_action} onChange={(e) => setTouch({ ...touch, next_action: e.target.value })} placeholder="Enviar cotización" /></Field>
+                    <Field label="Próxima acción" hint={allyLog?.can_share ? `Lo ve el aliado (${allyLog.companies.join(", ")}) en su portal, con la fecha.` : undefined}><input className="input" value={touch.next_action} onChange={(e) => setTouch({ ...touch, next_action: e.target.value })} placeholder="Enviar cotización" /></Field>
                     <Field label="Fecha"><input className="input" type="date" value={touch.next_action_date} onChange={(e) => setTouch({ ...touch, next_action_date: e.target.value })} /></Field>
                     <Field label="Mover a"><select className="select" value={touch.status} onChange={(e) => setTouch({ ...touch, status: e.target.value })}><option value="">Dejar igual</option>{(meta?.states || []).map((s) => <option key={s} value={s}>{OPP_STATES[s] || s}</option>)}</select></Field>
                   </div>
@@ -485,7 +485,7 @@ export default function Opportunities() {
                 <b>{partyLine(open)}</b>
               </div>
               <div className="opp-next">
-                <span className="meta">Próxima acción</span>
+                <span className="meta">Próxima acción{allyLog?.can_share && <span title={`La ven en su portal: ${allyLog.companies.join(", ")}`}> · lo ve el aliado</span>}</span>
                 <b>{open.next_action || "Sin próxima acción"}</b>
                 {open.next_action_date && <span style={{ color: (dueIn(open.next_action_date) ?? 1) < 0 ? "var(--bad)" : undefined }}>{fmtDate(open.next_action_date)}</span>}
               </div>
@@ -607,7 +607,7 @@ export default function Opportunities() {
             <Field label="Monto estimado" hint={form.id && open?.quote ? `Sigue a la cotización ${open.quote.number}: se actualiza al guardarla.` : undefined}><input className="input input--mono" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></Field>
             <Field label="Probabilidad" hint={`${form.probability}% · pondera el embudo`}><input type="range" min={0} max={100} step={5} value={form.probability} onChange={(e) => setForm({ ...form, probability: Number(e.target.value) })} style={{ width: "100%" }} /></Field>
             {meta?.can_see_all && <Field label="Responsable"><select className="select" value={form.owner_id} onChange={(e) => setForm({ ...form, owner_id: e.target.value })}><option value="">Yo</option>{meta.sellers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>}
-            <Field label="Próxima acción"><input className="input" value={form.next_action} onChange={(e) => setForm({ ...form, next_action: e.target.value })} placeholder="Visita técnica" /></Field>
+            <Field label="Próxima acción" hint={form.id && form.id === open?.id && allyLog?.can_share ? `Lo ve el aliado (${allyLog.companies.join(", ")}) en su portal, con la fecha.` : undefined}><input className="input" value={form.next_action} onChange={(e) => setForm({ ...form, next_action: e.target.value })} placeholder="Visita técnica" /></Field>
             <Field label="Fecha de la próxima acción"><input className="input" type="date" value={form.next_action_date} onChange={(e) => setForm({ ...form, next_action_date: e.target.value })} /></Field>
           </div>
         </Modal>

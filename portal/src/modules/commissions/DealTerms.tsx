@@ -52,7 +52,10 @@ export default function DealTerms({ participationId, name, onClose, onSaved }: {
   const conVenta = Number(p?.base_price) > 0;
   const venta = conVenta ? Number(p!.base_price) : 1000000;
   const utilidad = Math.round(venta * 0.3);
-  const ventaTxt = conVenta ? `la venta de este proyecto (${fmtMoney(venta)} sin IVA)` : `una venta de ${fmtMoney(venta)} sin IVA`;
+  /* la venta del proyecto llega convertida a la moneda de la proyección (hoy colones); el ejemplo inventado, en colones */
+  const cur = conVenta ? p?.currency || "CRC" : "CRC";
+  const money = (v: number) => fmtMoney(v, cur);
+  const ventaTxt = conVenta ? `la venta de este proyecto (${money(venta)} sin IVA)` : `una venta de ${money(venta)} sin IVA`;
   const pct = (base: number, x: string) => Math.round((base * Number(x || 0)) / 100);
   return (
     <Modal wide title={`Acuerdo económico · ${name}`} onClose={onClose} foot={<><button className="btn btn--ghost" onClick={onClose}>Cerrar</button>{configura && <button className="btn btn--crimson" disabled={busy || !f || (f.early && !f.earlyDate)} onClick={save}>Guardar acuerdo</button>}</>}>
@@ -71,11 +74,11 @@ export default function DealTerms({ participationId, name, onClose, onSaved }: {
           <label className="com-check"><input type="radio" disabled={ro} checked={!f.own} onChange={() => set({ own: false })} />Usar la regla general{d.general_rule ? ` (${d.general_rule.summary})` : " (no hay: no comisiona)"}</label>
           <Ayuda>
             {d.general_rule
-              ? <>La misma comisión que todos los aliados, definida en Comisiones → Reglas. Si la regla cambia, este proyecto la sigue. Ejemplo: si la regla es 5 % de la venta, con {ventaTxt} el aliado gana {fmtMoney(pct(venta, "5"))}.</>
+              ? <>La misma comisión que todos los aliados, definida en Comisiones → Reglas. Si la regla cambia, este proyecto la sigue. Ejemplo: si la regla es 5 % de la venta, con {ventaTxt} el aliado gana {money(pct(venta, "5"))}.</>
               : <>Hoy no hay una regla general para aliados (se crea en Comisiones → Reglas): con esta opción el aliado no gana comisión en este proyecto, solo su pago por el trabajo y los bonos que se marquen abajo.</>}
           </Ayuda>
           <label className="com-check"><input type="radio" disabled={ro} checked={f.own} onChange={() => set({ own: true })} />Acuerdo propio</label>
-          <Ayuda>Una comisión solo para este proyecto, que reemplaza la regla general. Puede ser un porcentaje de la venta sin IVA o de la utilidad, o un monto fijo. Ejemplos con {ventaTxt}: 5 % de la venta = {fmtMoney(pct(venta, "5"))}; 8 % de una utilidad de {fmtMoney(utilidad)} = {fmtMoney(pct(utilidad, "8"))}; o un monto fijo de ₡40 000.</Ayuda>
+          <Ayuda>Una comisión solo para este proyecto, que reemplaza la regla general. Puede ser un porcentaje de la venta sin IVA o de la utilidad, o un monto fijo. Ejemplos con {ventaTxt}: 5 % de la venta = {money(pct(venta, "5"))}; 8 % de una utilidad de {money(utilidad)} = {money(pct(utilidad, "8"))}; o un monto fijo de ₡40 000.</Ayuda>
           {f.own && (
             <div className="grid-2">
               <Field label="Cuánto">
@@ -90,12 +93,12 @@ export default function DealTerms({ participationId, name, onClose, onSaved }: {
           )}
           {f.own && (f.mode === "fixed" ? Number(f.fixed) > 0 : Number(f.percent) > 0) && (
             <Ayuda>
-              Con lo escrito: {f.mode === "fixed" ? <>recibe {fmtMoney(Number(f.fixed))} fijos</> : f.base === "margen" ? <>{f.percent} % de una utilidad de {fmtMoney(utilidad)} = {fmtMoney(pct(utilidad, f.percent))}</> : <>{f.percent} % de {fmtMoney(venta)} = {fmtMoney(pct(venta, f.percent))}</>}
+              Con lo escrito: {f.mode === "fixed" ? <>recibe {fmtMoney(Number(f.fixed), f.currency)} fijos</> : f.base === "margen" ? <>{f.percent} % de una utilidad de {money(utilidad)} = {money(pct(utilidad, f.percent))}</> : <>{f.percent} % de {money(venta)} = {money(pct(venta, f.percent))}</>}
               {f.trigger === "cobro" ? ", en partes a medida que el cliente paga (si paga la mitad, gana la mitad)." : f.trigger === "cotizacion_aceptada" ? ", cuando el cliente acepta la cotización." : ", cuando el proyecto se marca como completado."}
             </Ayuda>
           )}
           <label className="com-check" style={{ marginTop: 10 }}><input type="checkbox" disabled={ro} checked={f.fin} onChange={(e) => set({ fin: e.target.checked })} /><b>Bono por completar el proyecto</b></label>
-          <Ayuda>Un extra, además de la comisión, cuando el proyecto se marca como completado. Ejemplo: ₡25 000 fijos, o 2 % de {ventaTxt} = {fmtMoney(pct(venta, "2"))}.</Ayuda>
+          <Ayuda>Un extra, además de la comisión, cuando el proyecto se marca como completado. Ejemplo: ₡25 000 fijos, o 2 % de {ventaTxt} = {money(pct(venta, "2"))}.</Ayuda>
           {f.fin && (
             <div style={{ display: "flex", gap: 6, maxWidth: 360 }}>
               <select className="select" style={{ width: 130 }} disabled={ro} value={f.finMode} onChange={(e) => set({ finMode: e.target.value as Form["finMode"] })}><option value="fixed">Monto (₡)</option><option value="percent">% de la venta</option></select>

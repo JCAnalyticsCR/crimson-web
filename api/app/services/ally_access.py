@@ -133,6 +133,13 @@ def invite_ally_user(
         m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.user_id == u.id))
         # una cuenta interna, de un cliente o de OTRA empresa aliada nunca se convierte en usuario de esta
         if m and m.ally_company_id != company.id:
+            if not by_ally and not m.customer_id and not m.ally_company_id and m.role_code not in ("soporte", *ALLY_USER_ROLES):
+                # reunion 2, pedido 20: es un usuario interno; se convierte, no se invita de nuevo (solo lo dice a Crimson)
+                raise HTTPException(
+                    409,
+                    "Ese correo es de un usuario interno de Crimson. Para que entre al portal de esta empresa aliada, "
+                    "use Ajustes → Usuarios → Gestionar → «Pasar al portal de aliados».",
+                )
             raise HTTPException(409, "Ese correo ya tiene otro acceso en la empresa. Use otro correo.")
         if m and m.active:
             raise HTTPException(409, "Esa persona ya tiene acceso")
@@ -152,6 +159,8 @@ def invite_ally_user(
     )
     if any(i.ally_company_id != company.id for i in vivas):
         # invitacion viva interna, de un cliente o de otra empresa aliada: no se anula ni se reemplaza desde aqui
+        if not by_ally and any(i.ally_company_id is None and i.customer_id is None for i in vivas):
+            raise HTTPException(409, "Ese correo tiene una invitación interna pendiente: anúlela en Ajustes → Usuarios y vuelva a invitarlo aquí.")
         raise HTTPException(409, "Ese correo ya tiene otro acceso en la empresa. Use otro correo.")
     st = seats(db, company, exclude_email=email)  # la invitacion viva de este mismo correo se reemplaza abajo
     if company.max_users is not None and st["used"] >= company.max_users:

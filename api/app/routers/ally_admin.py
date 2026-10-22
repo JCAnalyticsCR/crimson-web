@@ -721,7 +721,8 @@ def ally_from_internal(cid: int, data: FromInternalIn, p: Principal = Depends(re
     Pasa SU membresia de esta empresa al portal de aliados de `cid`, con rol aliado o tecnico de aliado: desde el
     siguiente request ve solo lo de su empresa en comun (get_session_principal relee la membresia) y sus sesiones de
     aqui se cierran. Toca usuarios internos: ademas pide settings.configurar y la contrasena de quien actua.
-    No toca a un administrador, a si mismo, ni a quien todavia lleva oportunidades abiertas (se reasignan primero)."""
+    No toca a si mismo ni a quien todavia lleva oportunidades abiertas (se reasignan primero); a un administrador
+    solo lo pasa otro administrador y nunca al ultimo activo."""
     from ..core.reauth import require_reauth
     from ..models import SupportTicket, Survey, WorkOrder
     from ..services.accounts import drop_stale_credentials, notify_security, revoke_refresh_tokens
@@ -739,7 +740,14 @@ def ally_from_internal(cid: int, data: FromInternalIn, p: Principal = Depends(re
     if m.user_id == p.user.id:
         raise HTTPException(409, "No puede pasarse a sí mismo al portal de aliados")
     if m.role_code == "admin":
-        raise HTTPException(409, "Es administrador: primero cámbiele el rol en Ajustes → Usuarios")
+        # un admin cuyo correo es del aliado no puede cambiar de rol interno (users_admin._guard_ally_email): se pasa
+        # aqui mismo, solo por otro administrador y si queda al menos un administrador activo
+        from ..services.accounts import active_admins
+
+        if p.role != "admin":
+            raise HTTPException(403, "Solo un administrador puede pasar a otro administrador al portal de aliados")
+        if m.active and active_admins(db, p.tenant.id) <= 1:
+            raise HTTPException(409, "Es el único administrador activo: nombre otro administrador primero")
     abiertas = db.scalar(
         select(func.count()).select_from(Opportunity).where(Opportunity.tenant_id == p.tenant.id, Opportunity.owner_id == m.user_id, Opportunity.status.in_(OPEN_OPP), live(Opportunity))
     ) or 0

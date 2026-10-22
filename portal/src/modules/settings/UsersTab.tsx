@@ -63,6 +63,8 @@ export default function UsersTab() {
 
   const users = data?.users ?? [];
   const invs = data?.invitations ?? [];
+  /* pedido 20: cualquier usuario interno se puede pasar al portal de aliados (no uno mismo; a un admin, solo otro admin) */
+  const canConvert = (u: U) => canEdit && !u.is_self && u.role !== "soporte" && (u.role !== "admin" || viewerIsAdmin) && allows("aliados.usuarios");
   const manage = manageId != null ? users.find((u) => u.id === manageId) ?? null : null;
   const needle = q.trim().toLowerCase();
   const match = (...xs: (string | null | undefined)[]) => !needle || xs.some((x) => (x || "").toLowerCase().includes(needle));
@@ -182,7 +184,7 @@ export default function UsersTab() {
                         </td>
                         <td className="muted" style={{ whiteSpace: "nowrap" }}>{u.last_login ? fechaHora(u.last_login) : "nunca"}</td>
                         <td>{u.active ? <Chip tone="ok">Activo</Chip> : <Chip tone="muted">Inactivo</Chip>}</td>
-                        <td className="num">{canEdit && u.ally_match && !u.is_self && u.role !== "admin" && allows("aliados.usuarios") && <button className="btn btn--soft btn--sm" onClick={() => setToAlly(u)}>Pasar al portal de aliados</button>}{canEdit && <button className="btn btn--ghost btn--sm" onClick={() => setManageId(u.id)}>Gestionar</button>}</td>
+                        <td className="num">{canConvert(u) && u.ally_match && <button className="btn btn--soft btn--sm" onClick={() => setToAlly(u)}>Pasar al portal de aliados</button>}{canEdit && <button className="btn btn--ghost btn--sm" onClick={() => setManageId(u.id)}>Gestionar</button>}</td>
                       </tr>
                     );
                   })}
@@ -299,6 +301,7 @@ export default function UsersTab() {
           onDeleted={() => { setManageId(null); load(); }}
           askPassword={setPwAsk}
           patch={patch}
+          onToAlly={canConvert(manage) ? () => { setManageId(null); setToAlly(manage); } : undefined}
         />
       )}
       {resetFor && (
@@ -343,9 +346,9 @@ function PasswordAsk({ title, text, cta, run, onClose }: Ask & { onClose: () => 
   );
 }
 
-function ManageModal({ u, roles, reauthRoles, viewerIsAdmin, onClose, onChanged, onReset, onDeleted, askPassword, patch }: {
+function ManageModal({ u, roles, reauthRoles, viewerIsAdmin, onClose, onChanged, onReset, onDeleted, askPassword, patch, onToAlly }: {
   u: U; roles: string[]; reauthRoles: string[]; viewerIsAdmin: boolean; onClose: () => void; onChanged: () => void; onReset: () => void; onDeleted: () => void;
-  askPassword: (a: Ask) => void; patch: (uid: number, body: Record<string, unknown>) => Promise<{ ok: boolean }>;
+  askPassword: (a: Ask) => void; patch: (uid: number, body: Record<string, unknown>) => Promise<{ ok: boolean }>; onToAlly?: () => void;
 }) {
   const { toast } = useSession();
   const blank = { full_name: u.name, email: u.email, notify_email: u.notify_email || "", role: u.role, reason: "", admin_password: "" };
@@ -445,6 +448,14 @@ function ManageModal({ u, roles, reauthRoles, viewerIsAdmin, onClose, onChanged,
         </div>
         {u.is_self && <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Para tu cuenta usá Mi cuenta: cambiar contraseña, verificación en dos pasos y cerrar en todos los dispositivos.</p>}
       </div>
+      {onToAlly && (
+        /* reunión 2, pedido 20: también para quien el sistema no detecta (p. ej. un técnico del aliado con correo gratuito) */
+        <div style={{ borderTop: "1px solid var(--hair)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className="meta">¿Trabaja para una empresa aliada?</div>
+          <p className="muted" style={{ fontSize: 13, margin: 0 }}>Las personas de un aliado no entran al panel de Crimson: entran al portal de aliados de su empresa y ven solo lo que tienen en común.{u.ally_match ? ` Parece del aliado ${u.ally_match.company}.` : ""}</p>
+          <div><button className="btn btn--soft btn--sm" onClick={onToAlly}>Pasar al portal de aliados</button></div>
+        </div>
+      )}
       {viewerIsAdmin && !u.is_self && <DeleteUser u={u} onDeleted={onDeleted} />}
     </Modal>
   );
