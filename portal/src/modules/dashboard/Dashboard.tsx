@@ -25,6 +25,8 @@ function Kpi({ label, data, light, cur }: { label: string; data: NonNullable<D["
 /* Acciones pendientes: cada tarjeta lleva a la lista con exactamente esos registros. La clave es la misma que usa
    el servidor para contar (sales.PENDIENTES), asi el numero y las filas no pueden diferir. "hot" = pide atencion. */
 const PENDING: { key: string; label: string; to: string; need: string; hot?: boolean }[] = [
+  /* 21/10 (item 35): lo primero que se ve al entrar son los pedidos web por atender */
+  { key: "pedidos_web", label: "Pedidos web y comprobantes por atender", to: "/ordenes?pendiente=por_atender", need: "sales.ver", hot: true },
   { key: "facturas_vencidas", label: "Facturas vencidas", to: "/facturas?pendiente=facturas_vencidas", need: "sales.ver", hot: true },
   { key: "facturas_por_cobrar", label: "Facturas por cobrar", to: "/facturas?pendiente=facturas_por_cobrar", need: "sales.ver" },
   { key: "cotizaciones_sin_respuesta", label: "Cotizaciones sin respuesta", to: "/cotizaciones?pendiente=cotizaciones_sin_respuesta", need: "sales.ver" },
@@ -33,7 +35,6 @@ const PENDING: { key: string; label: string; to: string; need: string; hot?: boo
   { key: "stock_bajo", label: "Productos con stock bajo", to: "/inventario?stock=bajo", need: "inventory.ver", hot: true },
   { key: "cotizaciones_por_aprobar", label: "Descuentos por aprobar", to: "/cotizaciones?pendiente=cotizaciones_por_aprobar", need: "sales.ver", hot: true },
   { key: "cotizaciones_aceptadas", label: "Aceptadas por convertir", to: "/cotizaciones?pendiente=cotizaciones_aceptadas", need: "sales.ver", hot: true },
-  { key: "pedidos_web", label: "Pedidos web y comprobantes por atender", to: "/ordenes?pendiente=por_atender", need: "sales.ver", hot: true },
   { key: "costos_aliados", label: "Costos de aliados pendientes", to: "/oportunidades?pendiente=costos_aliados", need: "crm_pipeline.ver", hot: true },
   { key: "comisiones_por_aprobar", label: "Comisiones por aprobar", to: "/comisiones?tab=bandeja", need: "commissions.aprobar", hot: true },
 ];
@@ -93,6 +94,16 @@ export default function Dashboard() {
           <button className="btn btn--ghost btn--sm" onClick={load}><Icon d={I.refresh} />Refrescar</button>
         </div>
       </div>
+
+      {/* 21/10 (item 35): las acciones pendientes van arriba de todo, antes de los accesos y los números */}
+      {d && (
+        <Card title="Acciones pendientes" extra={<span className="meta">tocá una para ver cuáles son</span>}>
+          <div className="pending">
+            {PENDING.filter((p) => d.acciones_pendientes[p.key] !== undefined).map((p) =>
+              pendingCard(p.key === "cotizaciones_por_aprobar" && !allows("sales.aprobar") ? { ...p, label: "Esperando aprobación" } : p, d.acciones_pendientes[p.key] ?? 0, allows(p.need)))}
+          </div>
+        </Card>
+      )}
 
       <div className="actions-grid">
         {allows("crm.crear") && <Link className="action" to="/clientes?nuevo=1"><i><Icon d={I.customers} /></i><div><b>Crear cliente</b><span>Ficha con cédula, correo y WhatsApp</span></div></Link>}
@@ -170,13 +181,6 @@ export default function Dashboard() {
               </div>
             </Card>
           )}
-
-          <Card title="Acciones pendientes" extra={<span className="meta">tocá una para ver cuáles son</span>}>
-            <div className="pending">
-              {PENDING.filter((p) => d.acciones_pendientes[p.key] !== undefined).map((p) =>
-                pendingCard(p.key === "cotizaciones_por_aprobar" && !allows("sales.aprobar") ? { ...p, label: "Esperando aprobación" } : p, d.acciones_pendientes[p.key] ?? 0, allows(p.need)))}
-            </div>
-          </Card>
 
           {d.por_cobrar && d.por_cobrar.length > 0 && (
             <Card title="Mis facturas por cobrar" flush extra={<span className="meta">para dar seguimiento</span>}>

@@ -263,6 +263,8 @@ def test_correo_para_avisos_internos_recibe_pedidos_y_ventas(client, auth, db_se
     o = SimpleNamespace(
         id=1, number="WEB-0001", total=Decimal("10000"), currency="CRC", contact={"name": "Cliente Web", "email": "cliente@ejemplo.com"},
         payment_method="SINPE Móvil", shipping_method="Retiro", status="nuevo",
+        # lo que el aviso con el diseno base lee del pedido (vendedor, resumen de lineas y totales)
+        seller_id=None, lines=[], shipping=Decimal(0), tax_total=Decimal(0), discount_total=Decimal(0), coupon_code=None,
     )
     n = notify_team(db_session, t, o, "nuevo")
     db_session.commit()
@@ -316,6 +318,8 @@ def test_rol_creado_desde_ventas_comisiona_recibe_avisos_y_sale_como_vendedor(cl
     o = SimpleNamespace(
         id=7, number="WEB-0007", total=Decimal("1000"), currency="CRC", contact={"name": "Cliente Web", "email": "cliente@ejemplo.com"},
         payment_method="SINPE Móvil", shipping_method="Retiro", status="nuevo",
+        # lo que el aviso con el diseno base lee del pedido (vendedor, resumen de lineas y totales)
+        seller_id=None, lines=[], shipping=Decimal(0), tax_total=Decimal(0), discount_total=Decimal(0), coupon_code=None,
     )
     notify_team(db_session, t, o, "nuevo")
     notify_roles(db_session, t, ("ventas",), "Asesoría web de prueba", "<p>x</p>", "opportunity", 1)

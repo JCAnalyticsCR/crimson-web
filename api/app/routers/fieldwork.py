@@ -776,18 +776,7 @@ def survey_create_and_assign(oid: int, data: SurveyFromRequestIn, p: Principal =
     audit(db, p.tenant.id, p.user.id, "create", "survey", s.id, {"desde": "solicitud", "opportunity": o.number, "technician_id": data.technician_id}, ip=p.ip)
     correo_tec = user_inbox(db, p.tenant.id, tecnico) if tecnico else ""  # su correo de avisos (pedido 22)
     if aliada is None and data.technician_id != p.user.id and correo_tec:
-        queue_email(
-            db,
-            p.tenant,
-            correo_tec,
-            f"Tiene un levantamiento nuevo: {s.number}",
-            f"<p>Se le asignó el levantamiento <b>{html.escape(s.number)}</b> ({html.escape(s.site or 'sin sitio')})"
-            f"{f' para el {data.visit_date:%d/%m/%Y}' if data.visit_date else ''}.</p>"
-            f'<p><a href="{html.escape(avisos.enlace(f"/levantamientos?id={s.id}"))}">Abrir el levantamiento</a></p>',
-            "survey",
-            s.id,
-            company_bcc=False,  # aviso interno: no va al BCC de las facturas
-        )
+        avisar_levantamiento_asignado(db, p.tenant, correo_tec, s, data.visit_date)
     notify_ally_work(db, p.tenant, {data.technician_id}, s.number, f"Levantamiento {s.site or ''}".strip(), s.visit_date, entity_id=s.id)
     db.commit()
     return _survey_out(db, s)
@@ -847,17 +836,7 @@ def survey_assign(sid: int, data: SurveyAssignIn, p: Principal = Depends(require
         u = db.get(User, data.technician_id)
         correo_tec = user_inbox(db, p.tenant.id, u) if u else ""
         if correo_tec and aliada is None:
-            queue_email(
-                db,
-                p.tenant,
-                correo_tec,
-                f"Tiene un levantamiento nuevo: {s.number}",
-                f"<p>Se le asignó el levantamiento <b>{html.escape(s.number)}</b> ({html.escape(s.site or 'sin sitio')}).</p>"
-                f'<p><a href="{html.escape(avisos.enlace(f"/levantamientos?id={s.id}"))}">Abrir el levantamiento</a></p>',
-                "survey",
-                s.id,
-                company_bcc=False,
-            )
+            avisar_levantamiento_asignado(db, p.tenant, correo_tec, s)
         notify_ally_work(db, p.tenant, {data.technician_id}, s.number, f"Levantamiento {s.site or ''}".strip(), s.visit_date, entity_id=s.id)
     db.commit()
     return _survey_out(db, s)
@@ -1178,8 +1157,8 @@ def send_survey(db: Session, tenant, s: Survey, sender: User, ip: str | None, se
         f"<p>Cliente: {html.escape(cliente)}<br>Sitio: {html.escape(s.site or '—')}<br>"
         f"{len(s.points)} {html.escape(spec['point_label'].lower())}(s) · {len(s.items)} materiales y equipos<br>{html.escape(personal or 'sin personal')}</p>"
         f"<ul>{filas}</ul><p>{'El técnico resolvió las observaciones. ' if reenvio else ''}Abrí el levantamiento para revisarlo: aprobalo o devolvelo con observaciones antes del costeo.</p>"
-        f'<p><a href="{base}/levantamientos?id={s.id}">Abrir el levantamiento</a> · '
-        f'<a href="{base}/aprobaciones">Ver todo lo pendiente en Aprobaciones</a></p>',
+        f'<p><a href="{base}/levantamientos?id={s.id}">Abrir el levantamiento</a></p>'  # el boton principal (email_layout)
+        f'<p>Todo lo pendiente está en <a href="{base}/aprobaciones">Aprobaciones</a>.</p>',
         "survey",
         s.id,
     )
@@ -1594,10 +1573,42 @@ def _notify_quote_ready(db: Session, p: Principal, o: Opportunity, q) -> None:
     enlace = f"{settings.public_base_url}/cotizaciones/{q.id}"
     cuerpo = (
         f"<p>La cotización <b>{html.escape(q.number)}</b> de tu oportunidad <b>{html.escape(o.number)}</b> · {html.escape(o.title)} "
-        f"ya está lista, con las líneas del levantamiento.</p>"
-        f'<p><a href="{html.escape(enlace)}">Abrir la cotización</a> para revisarla y enviarla al cliente.</p>'
+        f"ya está lista, con las líneas del levantamiento. Revisala y enviala al cliente.</p>"
+        f'<p><a href="{html.escape(enlace)}">Abrir la cotización</a></p>'
     )
     queue_email(db, p.tenant, correo, f"Tu cotización {q.number} está lista · {o.number}", cuerpo, "quote", q.id)
+
+
+def avisar_levantamiento_asignado(db: Session, tenant, correo: str, s: Survey, visit_date: date | None = None) -> None:
+    """Al tecnico interno: se le asigno un levantamiento (aviso interno: no va al BCC de las facturas)."""
+    queue_email(
+        db,
+        tenant,
+        correo,
+        f"Tiene un levantamiento nuevo: {s.number}",
+        f"<p>Se le asignó el levantamiento <b>{html.escape(s.number)}</b> ({html.escape(s.site or 'sin sitio')})"
+        f"{f' para el {visit_date:%d/%m/%Y}' if visit_date else ''}.</p>"
+        f'<p><a href="{html.escape(avisos.enlace(f"/levantamientos?id={s.id}"))}">Abrir el levantamiento</a></p>',
+        "survey",
+        s.id,
+        company_bcc=False,
+    )
+
+
+def avisar_proyecto_terminado(db: Session, tenant, roles, pr: Project, horas: float) -> None:
+    """A quien puede facturar el proyecto: quedo terminado y listo para facturacion."""
+    notify_roles(
+        db,
+        tenant,
+        roles,
+        f"Proyecto {pr.number} terminado · listo para facturación",
+        f"<p><b>{html.escape(pr.name)}</b> quedó terminado.</p>"
+        f"<p>{len(pr.orders)} orden(es) de trabajo · {round(horas, 1)} horas de campo.</p>"
+        "<p>El informe técnico de entrega ya se puede imprimir desde la ficha del proyecto.</p>"
+        f'<p><a href="{cfg.public_base_url.rstrip("/")}/proyectos/{pr.id}">Abrir el proyecto</a></p>',
+        "project",
+        pr.id,
+    )
 
 
 # ---------- Resumen para la vendedora (solo lectura, sin un solo costo) ----------
@@ -2462,17 +2473,7 @@ def apply_order_progress(db: Session, o: WorkOrder, data: ProgressIn, action: st
 
                 # solo a quien puede facturar el proyecto (POST /projects/{id}/invoice: sales.crear y ver todos los
                 # proyectos). Contabilidad ya no crea ventas (plan 1.7): la factura le llega despues por "Por emitir"
-                notify_roles(
-                    db,
-                    tenant,
-                    roles_that_can(db, tenant, ("sales", "crear"), ("projects", "ver_todo")),
-                    f"Proyecto {pr.number} terminado · listo para facturación",
-                    f"<p><b>{html.escape(pr.name)}</b> quedó terminado.</p>"
-                    f"<p>{len(pr.orders)} orden(es) de trabajo · {round(horas, 1)} horas de campo.</p>"
-                    "<p>El informe técnico de entrega ya se puede imprimir desde la ficha del proyecto.</p>",
-                    "project",
-                    pr.id,
-                )
+                avisar_proyecto_terminado(db, tenant, roles_that_can(db, tenant, ("sales", "crear"), ("projects", "ver_todo")), pr, horas)
     elif action == "cancel":
         _close_running(o, now)
         o.status = "cancelada"
@@ -2561,10 +2562,13 @@ class ReportSendIn(BaseModel):
 
 @router.post("/surveys/{sid}/report/email")
 def survey_report_send(sid: int, data: ReportSendIn, p: Principal = Depends(require("sales", "enviar")), db: Session = Depends(get_db)):
-    """Manda el informe preliminar al cliente (el informe va en el cuerpo del correo). Igual que las cotizaciones:
-    solo cuenta como enviado si el proveedor acepto el correo; simulado o error no."""
+    """Manda el informe preliminar al cliente: un correo con el diseno base (email_layout) y el informe adjunto en PDF
+    (sin WeasyPrint, el informe imprimible en .html). La pagina del informe no va como cuerpo: trae <style> y clases
+    que Outlook y Hotmail descartan. Igual que las cotizaciones: solo cuenta como enviado si el proveedor acepto el
+    correo; simulado o error no, y un rechazo con el adjunto queda "fallido" (el reintento no lo mandaria sin el)."""
     from ..services.mail import queue_email
-    from ..services.survey_report import render_survey_html
+    from ..services.render import render_pdf
+    from ..services.survey_report import render_survey_html, report_email_html
 
     s = _survey(db, sid, p)
     c = db.get(Customer, s.customer_id) if s.customer_id else None
@@ -2574,15 +2578,21 @@ def survey_report_send(sid: int, data: ReportSendIn, p: Principal = Depends(requ
     from ..services.media_access import email_ttl  # fotos privadas: el cliente abre el correo dias despues
 
     page = render_survey_html(db, s, p.tenant, ttl=email_ttl())
-    if data.message:
-        page = page.replace("<body>", f'<body><p style="white-space:pre-wrap">{html.escape(data.message)}</p>', 1)
-    m = queue_email(db, p.tenant, to, f"Informe preliminar {s.number} · {p.tenant.name}", page, "survey", s.id)
+    try:
+        pdf = render_pdf(page)
+    except Exception:  # noqa: BLE001 - un PDF que falla no frena el envio: va el informe imprimible
+        pdf = None
+    archivo = (f"Informe-{s.number}.pdf", pdf) if pdf else (f"Informe-{s.number}.html", page.encode("utf-8"))
+    correo = report_email_html(p.tenant, s.number, c.name if c else None, s.site, data.message, attached_pdf=pdf is not None)
+    m = queue_email(db, p.tenant, to, f"Informe preliminar {s.number} · {p.tenant.name}", correo, "survey", s.id, files=[archivo])
+    if m.status == "error":
+        m.status = "fallido"  # fuera de mail.retry_outbox: nunca le llega al cliente sin el informe
     sent = m.status == "enviado"
     audit(db, p.tenant.id, p.user.id, "send_report", "survey", s.id, {"to": to, "mail": m.status}, ip=p.ip)
     db.commit()
     if m.status == "simulado":
         note = "El correo NO salió: no hay servicio de correo configurado (falta la llave de Resend). No se registró como enviado."
-    elif m.status == "error":
+    elif m.status in ("error", "fallido"):
         note = f"El correo NO salió ({(m.error or 'error del proveedor')[:160]}). No se registró como enviado."
     else:
         note = None

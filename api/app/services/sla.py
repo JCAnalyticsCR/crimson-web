@@ -333,6 +333,7 @@ def avisar_atrasos(db: Session, tenant: Tenant, ahora: datetime | None = None) -
     llegaba casi vacio: solo el numero y el asunto). Es un aviso interno con datos del cliente: no va en copia a la
     lista de la empresa de Ajustes (company_bcc=False), igual que los demas avisos internos."""
     from ..models import User
+    from .email_layout import cta
     from .mail import notify_roles, queue_email, user_inbox
 
     ahora = _aware(ahora) or datetime.now(UTC)
@@ -351,12 +352,12 @@ def avisar_atrasos(db: Session, tenant: Tenant, ahora: datetime | None = None) -
             if len(lista) == 1
             else f"{len(lista)} ticket(s) {titulos[tipo]}"
         )
-        notify_roles(db, tenant, ("admin", "supervisor"), asunto, f"{intro}<ul>{filas}</ul>{mas}", "support_ticket", lista[0].id, company_bcc=False)
+        notify_roles(db, tenant, ("admin", "supervisor"), asunto, f"{intro}<ul>{filas}</ul>{mas}" + cta("/tickets", "Abrir Tickets"), "support_ticket", lista[0].id, company_bcc=False)
         for x, d in detalles:
             u = db.get(User, x.assigned_to) if x.assigned_to else None
             correo = user_inbox(db, tenant.id, u) if u else ""
             if correo:
-                cuerpo = f"<p>Se venció el plazo de {plazos[tipo]} de un ticket asignado a vos:</p><ul>{_fila_html(d)}</ul>"
+                cuerpo = f"<p>Se venció el plazo de {plazos[tipo]} de un ticket asignado a vos:</p><ul>{_fila_html(d)}</ul>" + cta(f"/tickets?id={x.id}", f"Abrir el ticket {x.number}")
                 queue_email(db, tenant, correo, f"Ticket {x.number} {titulos[tipo]} · {d['cliente']}", cuerpo, "support_ticket", x.id, company_bcc=False)
         n += len(lista)
     return n

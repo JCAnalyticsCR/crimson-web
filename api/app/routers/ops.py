@@ -1265,6 +1265,7 @@ def _rec_alert(db: Session, r: Recurrence, invoice: Invoice, title: str, body: s
     from html import escape
 
     from ..models import Tenant
+    from ..services.email_layout import cta
     from ..services.mail import notify_roles
     from ..services.render import money
 
@@ -1276,7 +1277,30 @@ def _rec_alert(db: Session, r: Recurrence, invoice: Invoice, title: str, body: s
         t,
         ("admin",),
         f"{title} · {invoice.number}",
-        f"<p><b>{escape(r.name or '')}</b> · {escape(quien)} · {escape(invoice.number)} por {money(invoice.total, invoice.currency)}.</p><p>{escape(body)}</p>",
+        f"<p><b>{escape(r.name or '')}</b> · {escape(quien)} · {escape(invoice.number)} por {money(invoice.total, invoice.currency)}.</p><p>{escape(body)}</p>"
+        + cta(f"/facturas/{invoice.id}", f"Abrir la factura {invoice.number}"),
+        "recurrence",
+        r.id,
+    )
+
+
+def _rec_behind_alert(db: Session, r: Recurrence) -> None:
+    """La recurrencia tiene periodos atrasados: se genero una sola factura y administracion revisa antes de las demas."""
+    from html import escape
+
+    from ..models import Tenant
+    from ..services.email_layout import cta
+    from ..services.mail import notify_roles
+
+    t = db.get(Tenant, r.tenant_id)
+    notify_roles(
+        db,
+        t,
+        ("admin",),
+        f"Recurrencia «{r.name}» con periodos atrasados",
+        f"<p>La recurrencia de factura <b>{escape(r.name or '')}</b> tiene periodos atrasados (siguiente: {r.next_date}). "
+        "Se generó una sola factura; revísela antes de generar las demás.</p>"
+        + cta("/recurrencias", "Abrir Recurrencias"),
         "recurrence",
         r.id,
     )
@@ -1565,22 +1589,7 @@ def run_due_recurrences(db: Session, today: date | None = None) -> int:
                 factura = run_recurrence(db, r, None)
                 n += 1
                 if r.active and r.next_date <= today:
-                    from html import escape
-
-                    from ..models import Tenant
-                    from ..services.mail import notify_roles
-
-                    t = db.get(Tenant, r.tenant_id)
-                    notify_roles(
-                        db,
-                        t,
-                        ("admin",),
-                        f"Recurrencia «{r.name}» con periodos atrasados",
-                        f"<p>La recurrencia de factura <b>{escape(r.name or '')}</b> tiene periodos atrasados (siguiente: {r.next_date}). "
-                        "Se generó una sola factura; revísela antes de generar las demás.</p>",
-                        "recurrence",
-                        r.id,
-                    )
+                    _rec_behind_alert(db, r)
                 db.commit()
                 _deliver_or_fail(db, rid, factura.id)  # ya guardada: el correo sale despues del commit
             db.commit()

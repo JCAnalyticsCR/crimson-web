@@ -13,9 +13,16 @@ type Methods = {
   tarjeta: { active: boolean; installments?: boolean; max_installments?: number };
   efectivo: { active: boolean; note?: string; pickup_only?: boolean };
 };
-/* verify_email: revisar que el dominio del correo del comprador reciba correo; delivery_notice: aviso interno por cada
-   envio a domicilio para coordinar el mensajero (pedido 21/10) */
-type Ck = { methods: Methods; pickup: { address?: string; hours?: string }; notify_roles: string[]; free_shipping_from: number | string; auto_invoice: boolean; verify_email?: boolean; delivery_notice?: boolean };
+type Ck = {
+  methods: Methods; pickup: { address?: string; hours?: string }; notify_roles: string[]; free_shipping_from: number | string; auto_invoice: boolean;
+  /* verify_email: revisar que el dominio del correo del comprador reciba correo; delivery_notice: aviso interno por cada
+     envio a domicilio para coordinar el mensajero (pedido 21/10) */
+  verify_email?: boolean; delivery_notice?: boolean;
+  /* 21/10 (24/42): la factura de un pedido web asignado comisiona como una venta propia del vendedor */
+  web_orders_commission?: boolean;
+  /* 21/10 (45): transportistas para "Marcar enviado" */
+  carriers?: string[];
+};
 type Resp = { checkout: Ck; onvo: { configured: boolean; simulation: boolean; mode: "test" | "live" | null }; role_choices?: string[]; role_labels?: Record<string, string> };
 export type ZoneRate = { name: string; amount: number; active: boolean; zone?: string | null; [k: string]: unknown };
 
@@ -26,7 +33,9 @@ export default function CheckoutSettings({ rates, onRates }: { rates: ZoneRate[]
   const [d, setD] = useState<Resp | null>(null);
   const [ck, setCk] = useState<Ck | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { api<Resp>("/store/checkout").then((r) => { registerRoles({ labels: r.role_labels }); setD(r); setCk(r.checkout); }).catch((e) => toast(e.message, "bad")); }, [toast]);
+  const [carriersText, setCarriersText] = useState("");
+  const loaded = (r: Resp) => { registerRoles({ labels: r.role_labels }); setD(r); setCk(r.checkout); setCarriersText((r.checkout.carriers || []).join("\n")); };
+  useEffect(() => { api<Resp>("/store/checkout").then(loaded).catch((e) => toast(e.message, "bad")); }, [toast]);
   if (!ck || !d) return <Card title="Pagos y entrega"><Loading /></Card>;
   const m = ck.methods;
   const setM = <K extends keyof Methods>(k: K, patch: Partial<Methods[K]>) => setCk({ ...ck, methods: { ...m, [k]: { ...m[k], ...patch } } });
@@ -46,9 +55,11 @@ export default function CheckoutSettings({ rates, onRates }: { rates: ZoneRate[]
         auto_invoice: ck.auto_invoice,
         verify_email: ck.verify_email !== false,
         delivery_notice: ck.delivery_notice !== false,
+        web_orders_commission: ck.web_orders_commission !== false,
+        carriers: carriersText.split("\n").map((x) => x.trim()).filter(Boolean),
       };
       const r = await api<Resp>("/store/checkout", { method: "PUT", json: body });
-      setD(r); setCk(r.checkout); toast("Pagos y entrega guardados");
+      loaded(r); toast("Pagos y entrega guardados");
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } finally { setBusy(false); }
   };
   const on = (v: boolean) => String(v);
@@ -108,6 +119,10 @@ export default function CheckoutSettings({ rates, onRates }: { rates: ZoneRate[]
         <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={ck.auto_invoice} onChange={(e) => setCk({ ...ck, auto_invoice: e.target.checked })} />Emitir la factura electrónica automáticamente al confirmarse el pago (con cédula: FE; sin cédula: tiquete) y enviarla al cliente</label>
         <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={ck.verify_email !== false} onChange={(e) => setCk({ ...ck, verify_email: e.target.checked })} />Revisar que el correo del comprador exista (el dominio tiene que recibir correo; si la revisión no responde, la compra sigue). Los errores de dedo como «gmial.com» siempre se corrigen.</label>
         <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={ck.delivery_notice !== false} onChange={(e) => setCk({ ...ck, delivery_notice: e.target.checked })} />Avisarle al administrador por correo de cada envío a domicilio (al confirmarse el pago, o al crearse si es contra entrega) para coordinar el mensajero</label>
+        <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={ck.web_orders_commission !== false} onChange={(e) => setCk({ ...ck, web_orders_commission: e.target.checked })} />Los pedidos web asignados a un vendedor (o que él toma) comisionan igual que una venta propia</label>
+        <Field label="Transportistas al marcar «Enviado»" hint="Uno por línea. Al marcar un pedido como enviado se elige de esta lista (o se escribe otro).">
+          <textarea className="input" rows={3} value={carriersText} onChange={(e) => setCarriersText(e.target.value)} placeholder={"Mensajería Crimson\nCorreos de Costa Rica"} />
+        </Field>
         {rates.length > 0 && (
           <div className="ck-cfg__m" data-on="true">
             <span className="meta">Zona de cada tarifa de envío</span>

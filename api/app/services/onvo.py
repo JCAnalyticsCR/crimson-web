@@ -337,10 +337,17 @@ def _invoice_alert(db: Session, t: Tenant, inv: Invoice, title: str, detail: str
 
     c = db.get(Customer, inv.customer_id) if inv.customer_id else None
     quien = c.name if c is not None and c.tenant_id == t.id else "sin cliente"
-    estilo = "background:#fde8e8;color:#8a1c1c;border-left:4px solid #b3261e;padding:10px 14px" if red else "padding:4px 0"
-    html_ = (
-        f'<div style="{estilo}"><b>{escape(title)}</b></div><p>{escape(detail)}</p>'
-        f"<p>{escape(inv.number)} · {escape(quien)}. Revisala en Facturas.</p>"
+    from ..core.config import settings
+    from . import email_layout as el
+
+    html_ = el.render(
+        t,
+        title=title,
+        body=(el.note(html=f"<b>Alerta:</b> {escape(detail)}", warn=True) if red else el.p(detail))
+        + el.data_rows([("Factura", inv.number), ("Cliente", quien)]),
+        preheader=f"{inv.number} · {quien}. {detail}",
+        action=(f"{settings.public_base_url.rstrip('/')}/facturas", "Revisar en Facturas"),
+        foot="Aviso interno de pagos en línea (ONVO).",
     )
     notify_roles(db, t, ("admin", "contabilidad"), ("ALERTA · " if red else "") + title, html_, "invoice", inv.id)
 
@@ -357,10 +364,17 @@ def _receipt(db: Session, t: Tenant, inv: Invoice, amount: Decimal, intent_id: s
         return
     saldo = Decimal(str(inv.balance))
     resto = f"Saldo pendiente: <b>{money(saldo, inv.currency)}</b>." if saldo > 0 else "La factura quedó pagada en su totalidad. ¡Gracias!"
-    html_ = f"""<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#15131a">
-<div style="border-bottom:3px solid #e2233a;padding:12px 0;font-size:18px;font-weight:700">{escape(t.name)}</div>
-<p>Recibimos su pago en línea de <b>{money(amount, inv.currency)}</b> para la factura <b>{escape(inv.number)}</b>.</p>
-<p>{resto}</p><p style="color:#8a858f;font-size:12px">Referencia del pago: {escape(intent_id)}. Cualquier consulta, responda a este correo.</p></div>"""
+    from . import email_layout as el
+
+    html_ = el.render(
+        t,
+        title="Recibimos su pago",
+        body=el.p_html(f"Recibimos su pago en línea de <b>{money(amount, inv.currency)}</b> para la factura <b>{escape(inv.number)}</b>.")
+        + el.data_rows([("Factura", inv.number), ("Monto pagado", money(amount, inv.currency)), ("Referencia", intent_id)])
+        + el.p_html(resto),
+        preheader=f"Pago de {money(amount, inv.currency)} aplicado a la factura {inv.number}.",
+        foot="Cualquier consulta, responda a este correo.",
+    )
     queue_once(db, t, c.email.strip(), f"Recibimos su pago · {inv.number} · {t.name}", html_, "invoice", inv.id, dedupe_key=f"recibo:{inv.id}:{intent_id}")
 
 
@@ -619,14 +633,44 @@ def _queue_admins(db: Session, t: Tenant, subject: str, html_body: str, entity: 
     return len(vistos)
 
 
+def webhook_alert_html(t: Tenant, status: int, detail: str) -> tuple[str, str]:
+    """(asunto, cuerpo) del aviso al admin por un 401 o un 503 del webhook de ONVO."""
+    if status == 401:
+        titulo = "ONVO no puede avisar los pagos: el secreto del webhook no coincide"
+        que = (
+            "El panel rechazó (401) un aviso con formato de ONVO porque el secreto del webhook no coincide. "
+            "Si los pagos con tarjeta se están confirmando solos, puede ser un intento ajeno: no hace falta cambiar nada. "
+            "Si no, compará el secreto del webhook de Ajustes → Pasarelas → ONVO con el que muestra el panel de ONVO "
+            "(Desarrolladores → Webhooks). Mientras tanto los pagos con tarjeta se confirman cuando el comprador vuelve a "
+            "la tienda o en la consulta automática."
+        )
+    else:
+        titulo = "ONVO avisó un pago que no se pudo confirmar"
+        que = (
+            "Llegó un aviso de ONVO que el panel no pudo confirmar consultando a ONVO (503). ONVO lo reintenta solo; "
+            "si se repite, revisá el pedido o la factura en el panel de ONVO y la llave en Ajustes → Pasarelas."
+        )
+    from . import email_layout as el
+
+    # diseno base: este correo no pasa por mail.queue_email (lo encola _queue_admins), asi que se arma aqui con render
+    cuerpo = el.render(
+        t,
+        title=titulo,
+        body=el.p(que) + el.note(f"Detalle: {detail[:300]}", warn=True),
+        preheader=f"{titulo}. Revisá Ajustes → Pasarelas → ONVO.",
+        action=(el.panel_url("/ajustes?tab=pagos"), "Revisar las pasarelas en Ajustes"),
+        foot="Aviso interno de pagos en línea (ONVO). Sale como máximo una vez por día.",
+        vos=True,
+    )
+    return titulo, cuerpo
+
+
 def webhook_alert(db: Session, t: Tenant, status: int, detail: str) -> bool:
     """401 (secreto que no coincide) o 503 (no se pudo confirmar con ONVO) en /webhooks/onvo: correo al admin, como
     maximo UNO por tipo y por dia de Costa Rica (despues de las 18:00 la fecha UTC ya es otra): un 401 falso no tapa
     el aviso de un 503 real. Sin ONVO conectado no avisa (una sonda a la URL no es un pago perdido). El cupo se revisa
     otra vez con la empresa bloqueada (dos peticiones a la vez: un solo aviso) y el correo queda encolado, no se
     entrega dentro de la peticion. No hace commit. Devuelve True si aviso."""
-    import html
-
     from ..models import EmailOutbox
 
     g = gateway(db, t.id)
@@ -644,25 +688,7 @@ def webhook_alert(db: Session, t: Tenant, status: int, detail: str) -> bool:
     db.execute(select(Tenant.id).where(Tenant.id == t.id).with_for_update())  # hasta el commit del aviso
     if ya():
         return False
-    if status == 401:
-        titulo = "ONVO no puede avisar los pagos: el secreto del webhook no coincide"
-        que = (
-            "El panel rechazó (401) un aviso con formato de ONVO porque el secreto del webhook no coincide. "
-            "Si los pagos con tarjeta se están confirmando solos, puede ser un intento ajeno: no hace falta cambiar nada. "
-            "Si no, compará el secreto del webhook de Ajustes → Pasarelas → ONVO con el que muestra el panel de ONVO "
-            "(Desarrolladores → Webhooks). Mientras tanto los pagos con tarjeta se confirman cuando el comprador vuelve a "
-            "la tienda o en la consulta automática."
-        )
-    else:
-        titulo = "ONVO avisó un pago que no se pudo confirmar"
-        que = (
-            "Llegó un aviso de ONVO que el panel no pudo confirmar consultando a ONVO (503). ONVO lo reintenta solo; "
-            "si se repite, revisá el pedido o la factura en el panel de ONVO y la llave en Ajustes → Pasarelas."
-        )
-    cuerpo = (
-        f"<p><b>{html.escape(titulo)}</b></p><p>{html.escape(que)}</p><p style='color:#5a5560;font-size:13px'>Detalle: {html.escape(detail[:300])}</p>"
-        "<p style='color:#8a858f;font-size:12px'>Este aviso sale como máximo una vez por día.</p>"
-    )
+    titulo, cuerpo = webhook_alert_html(t, status, detail)
     return _queue_admins(db, t, titulo, cuerpo, entity) > 0
 
 

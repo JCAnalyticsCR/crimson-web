@@ -41,6 +41,7 @@ from ..models import (
 from ..services import sla as slasvc
 from ..services.archive import live
 from ..services.documents import audit
+from ..services.email_layout import cta
 from ..services.mail import notify_roles, queue_email, user_inbox
 from ..services.refs import check_refs
 from ..services.sequences import next_number
@@ -990,7 +991,8 @@ def _avisar_asignado(db: Session, p: Principal, t: SupportTicket, nuevo: bool = 
         f"<p>Cliente: {html.escape((db.get(Customer, t.customer_id).name if t.customer_id else '') or 'sin ficha')}</p>"
         f"{f'<p>{html.escape(t.description)}</p>' if t.description else ''}"
         f"<p>Primera respuesta antes de {(t.sla or {}).get('respuesta', SLA_HORAS.get(t.priority, 8))} h"
-        f" · resolucion antes de {(t.sla or {}).get('resolucion', '?')} h.</p>"
+        f" · resolución antes de {(t.sla or {}).get('resolucion', '?')} h.</p>"
+        + cta(f"/tickets?id={t.id}", f"Abrir el ticket {t.number}")
     )
     correo = user_inbox(db, p.tenant.id, u) if u else ""  # su correo de avisos, si tiene (pedido 22)
     if correo:

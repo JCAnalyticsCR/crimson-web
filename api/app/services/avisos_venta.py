@@ -148,14 +148,10 @@ def avisar(
 
 
 def _html(*parrafos: str, url: str, texto: str) -> str:
-    """Cuerpo comun: parrafos ya escapados y el boton al panel."""
+    """Cuerpo comun: parrafos ya escapados y la llamada al panel. queue_email lo pone en el diseno base de los correos
+    (email_layout.ensure): el asunto como titulo y el parrafo del enlace como el boton principal."""
     cuerpo = "".join(f"<p>{x}</p>" for x in parrafos if x)
-    return (
-        '<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;color:#15131a">'
-        f"{cuerpo}"
-        f'<p><a href="{html.escape(url)}" style="display:inline-block;background:#e2233a;color:#fff;padding:10px 16px;'
-        f'border-radius:10px;text-decoration:none;font-weight:700">{html.escape(texto)}</a></p></div>'
-    )
+    return f'{cuerpo}<p><a href="{html.escape(url)}">{html.escape(texto)}</a></p>'
 
 
 def _e(v) -> str:

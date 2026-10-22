@@ -19,6 +19,7 @@ from ..core.deps import Principal, require, roles_like
 from ..models import Customer, Opportunity, Project, Quote, Survey, User
 from ..services.archive import live
 from ..services.documents import CR, audit
+from ..services.email_layout import cta
 from ..services.fx import rate_or_none
 from ..services.mail import notify_roles
 from ..services.ownership import opportunity_seller
@@ -551,11 +552,8 @@ def request_survey(oid: int, data: SurveyRequestIn, p: Principal = Depends(requi
     alguien la atienda (fieldwork.pending_survey_request) el equipo de campo interno (supervisor, tecnico) puede crear
     y ligar ese levantamiento aunque la oportunidad no le salga en el embudo, en cualquier etapa abierta: la regla es
     la misma en los dos lados."""
-    from ..core.config import settings
     from ..core.ratelimit import survey_request_limiter
     from ..models import AuditLog
-    from .fieldwork import reviewer_roles  # import local: fieldwork ya importa de aqui
-    from .projects import SOLUCIONES
 
     o = _own(db, oid, p)
     # dos clics (o dos pestanas) a la vez: el segundo espera al primero y ve su registro de "ya se pidio"
@@ -594,19 +592,7 @@ def request_survey(oid: int, data: SurveyRequestIn, p: Principal = Depends(requi
         texto += f": {nota}"
     _log(o, p.user.full_name, texto)
 
-    c = db.get(Customer, o.customer_id) if o.customer_id else None
-    cliente = c.name if c else (o.contact or {}).get("name") or "sin cliente"
-    solucion = SOLUCIONES.get(o.solution or "", o.solution or "—")
-    enlace = f"{settings.public_base_url}/levantamientos?nuevo={o.id}"
-    cuerpo = (
-        f"<p>{html.escape(p.user.full_name)} pide un levantamiento técnico para la oportunidad <b>{html.escape(o.number)}</b> "
-        f"· {html.escape(o.title)}.</p>"
-        f"<p>Cliente: {html.escape(cliente)}<br>Sitio: {html.escape(o.site or '—')}<br>Solución: {html.escape(solucion)}<br>"
-        f"Fecha preferida: {html.escape(data.preferred_date.strftime('%d/%m/%Y') if data.preferred_date else 'sin preferencia')}</p>"
-        + (f"<p>Nota: {html.escape(nota)}</p>" if nota else "")
-        + f'<p><a href="{html.escape(enlace)}">Crear el levantamiento</a> (ya viene con el cliente de la oportunidad).</p>'
-    )
-    n = notify_roles(db, p.tenant, reviewer_roles(p.tenant), f"Solicitud de levantamiento {o.number} · {cliente}", cuerpo, "opportunity", o.id)
+    n = avisar_solicitud_levantamiento(db, p.tenant, o, p.user.full_name, data.preferred_date, nota)
     audit(
         db,
         p.tenant.id,
@@ -621,6 +607,27 @@ def request_survey(oid: int, data: SurveyRequestIn, p: Principal = Depends(requi
         audit(db, p.tenant.id, p.user.id, "status", "opportunity", o.id, {"de": antes, "a": o.status}, ip=p.ip)
     db.commit()
     return {**_out(db, o), "notified": n}
+
+
+def avisar_solicitud_levantamiento(db: Session, tenant, o: Opportunity, quien: str, preferred_date: date | None, nota: str) -> int:
+    """A quien revisa levantamientos: la vendedora pide uno para su oportunidad (sin montos). Devuelve a cuantos aviso."""
+    from .fieldwork import reviewer_roles  # import local: fieldwork ya importa de aqui
+    from .projects import SOLUCIONES
+
+    c = db.get(Customer, o.customer_id) if o.customer_id else None
+    cliente = c.name if c else (o.contact or {}).get("name") or "sin cliente"
+    solucion = SOLUCIONES.get(o.solution or "", o.solution or "—")
+    enlace = f"/levantamientos?nuevo={o.id}"
+    cuerpo = (
+        f"<p>{html.escape(quien)} pide un levantamiento técnico para la oportunidad <b>{html.escape(o.number)}</b> "
+        f"· {html.escape(o.title)}.</p>"
+        f"<p>Cliente: {html.escape(cliente)}<br>Sitio: {html.escape(o.site or '—')}<br>Solución: {html.escape(solucion)}<br>"
+        f"Fecha preferida: {html.escape(preferred_date.strftime('%d/%m/%Y') if preferred_date else 'sin preferencia')}</p>"
+        + (f"<p>Nota: {html.escape(nota)}</p>" if nota else "")
+        + "<p>El levantamiento ya viene con el cliente de la oportunidad.</p>"
+        + cta(enlace, "Crear el levantamiento")  # el boton principal del correo (email_layout)
+    )
+    return notify_roles(db, tenant, reviewer_roles(tenant), f"Solicitud de levantamiento {o.number} · {cliente}", cuerpo, "opportunity", o.id)
 
 
 def sync_amount_from_quote(db: Session, q: Quote) -> None:

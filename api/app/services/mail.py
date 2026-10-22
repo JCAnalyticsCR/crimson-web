@@ -18,6 +18,7 @@ import os
 import re
 from datetime import UTC, datetime, timedelta
 from html import escape
+from typing import TYPE_CHECKING
 
 import httpx
 from sqlalchemy import select
@@ -25,6 +26,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..models import EmailOutbox, Tenant
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from ..models import TenantUser
 
 RETRY_BASE = timedelta(minutes=15)  # espera tras el 1er fallo; se duplica con cada intento
 MAX_ATTEMPTS = 6  # al 6.o envio fallido el correo queda "fallido" (~8 h de intentos)
@@ -60,6 +66,15 @@ SENSITIVE_ENTITIES = frozenset({"invitation", "password_reset", "user_security"}
 # "toda factura": el contador o una firma externa que no ve costos), pero si se reintentan.
 NO_BCC_ENTITIES = frozenset({"salud", "outbox", "margin_summary", "fiscal_queue"})
 _LINK_TOKEN = re.compile(r"(/(?:invitacion|restablecer)/)[A-Za-z0-9_\-]{16,}")
+
+
+def _layout(tenant: Tenant, subject: str, html: str) -> str:
+    from . import email_layout
+
+    try:
+        return email_layout.ensure(tenant, subject, html)
+    except Exception:  # noqa: BLE001 - el marco nunca impide que salga el aviso
+        return html
 
 
 def redact_links(html: str) -> str:
@@ -100,6 +115,8 @@ def queue_email(
     company = [b for b in (tenant.settings or {}).get("bcc") or [] if b.strip().lower() not in blocked]
     bcc = None if sensitive or not company_bcc or entity in NO_BCC_ENTITIES else (",".join(company) or None)
     desc = attachments or ([{"name": n} for n, _ in files] if files else [])
+    # todo correo sale con el diseno base (email_layout); un fragmento suelto se envuelve con el asunto como titulo
+    html = _layout(tenant, subject, html)
     m = EmailOutbox(tenant_id=tenant.id, to=to, bcc=bcc, subject=subject, html=html, attachments=desc, entity=entity, entity_id=entity_id, dedupe_key=key)
     if not sensitive and (to or "").strip().lower() in blocked:
         # Ajustes -> "Correos que no reciben nada del sistema" (p. ej. la cuenta de quien desarrolla la plataforma): queda
@@ -198,6 +215,7 @@ def notify_roles(
     internal_copy: bool = False,
     like: bool = True,
     company_bcc: bool = True,
+    keep: Callable[[TenantUser], bool] | None = None,
 ) -> int:
     """Avisa a todos los usuarios activos con esos roles (a su correo de avisos, member_inbox). Lo que en las notas de
     Andres es 'Administracion recibe: nuevo levantamiento' o 'proyecto terminado, listo para facturacion'.
@@ -205,7 +223,8 @@ def notify_roles(
     internal_copy: tambien al "Correo para avisos internos" (avisos de pedidos y ventas).
     like: tambien a los roles que el admin creo a partir de esos (un "Vendedor senior" recibe lo de ventas). False
     cuando la lista viene de un ajuste que el admin arma a mano (p. ej. quien recibe los pedidos web).
-    company_bcc=False: aviso interno que no va en copia a la lista de la empresa (Ajustes -> copia de toda factura)."""
+    company_bcc=False: aviso interno que no va en copia a la lista de la empresa (Ajustes -> copia de toda factura).
+    keep: filtro por membresia (p. ej. un pedido web de un vendedor no le llega a otro vendedor)."""
     from ..core.deps import roles_like
     from ..models import TenantUser
 
@@ -214,6 +233,8 @@ def notify_roles(
     n = 0
     vistos: set[str] = set()
     for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.active, TenantUser.role_code.in_(roles))):
+        if keep is not None and not keep(m):
+            continue
         correo = member_inbox(m)
         if not correo or correo in vistos:
             continue
@@ -295,12 +316,41 @@ def deliver(m: EmailOutbox, files: list[tuple[str, bytes]] | None = None) -> Non
         m.next_attempt_at = None if no_retry else datetime.now(UTC) + retry_wait(m.attempts)
 
 
-def doc_email_html(tenant: Tenant, kind: str, number: str, total: str, link: str | None, message: str | None, attached: bool = True) -> str:
-    # el mensaje lo escribe quien envia (POST /{kind}/{id}/email, sales.enviar): va como texto, nunca como HTML (un
-    # enlace o un formulario inyectado saldria con la marca y el dominio de la empresa). pre-wrap guarda los saltos.
-    return f"""<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#15131a">
-<div style="border-bottom:3px solid #e2233a;padding:12px 0;font-size:18px;font-weight:700">{tenant.name}</div>
-<p>Le compartimos {"el" if kind.startswith("aviso") else "la"} <b>{kind} {number}</b> por <b>{total}</b>.</p>
-{f'<p><a href="{link}" style="display:inline-block;background:#e2233a;color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700">Ver y pagar en línea</a></p>' if link else ""}
-{f'<p style="color:#5a5560;white-space:pre-wrap">{escape(message)}</p>' if message else ""}
-<p style="color:#8a858f;font-size:12px">{"El documento va adjunto en PDF. " if attached else ""}Cualquier consulta, responda a este correo.</p></div>"""
+def doc_email_html(
+    tenant: Tenant,
+    kind: str,
+    number: str,
+    total: str,
+    link: str | None,
+    message: str | None,
+    attached: bool = True,
+    *,
+    due: str | None = None,
+    issued: str | None = None,
+    view_link: str | None = None,
+) -> str:
+    """Cotizacion, factura o aviso de cobro al cliente (diseno base: email_layout). Con enlace de pago, el boton es
+    "Ver y pagar en línea". Sin enlace de pago (una cotizacion, una factura sin saldo), view_link es el portal de
+    clientes (Documentos) cuando el cliente tiene acceso: el boton es "Ver cotización" / "Ver factura". Sin ninguno de
+    los dos el documento va solo en PDF y el correo sale sin boton (no hay enlace publico de un documento).
+    El mensaje lo escribe quien envia (POST /{kind}/{id}/email, sales.enviar): va como texto, nunca como HTML (un
+    enlace o un formulario inyectado saldria con la marca y el dominio de la empresa)."""
+    from . import email_layout as el
+
+    art = "el" if kind.startswith("aviso") else "la"
+    titulo = f"{kind[:1].upper()}{kind[1:]} {number}"
+    vence = "Válida hasta" if kind.startswith("cotiz") else "Vence"
+    body = (
+        el.p_html(f"Le compartimos {art} <b>{escape(kind)} {escape(number)}</b> por <b>{escape(total)}</b>.")
+        + el.data_rows([("Número", number), ("Fecha", issued), (vence, due)], total=("Total", total))
+        + (el.note(message) if message else "")
+        + (el.p("El documento va adjunto en PDF.", small=True) if attached else "")
+    )
+    return el.render(
+        tenant,
+        title=titulo,
+        body=body,
+        preheader=f"{titulo} por {total}" + (f" · {vence.lower()} {due}" if due else "") + ".",
+        action=(link, "Ver y pagar en línea") if link else ((view_link, f"Ver {kind}") if view_link else None),
+        foot="Cualquier consulta, responda a este correo.",
+    )

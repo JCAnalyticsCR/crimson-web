@@ -201,6 +201,18 @@ def _send_invite(db: Session, tenant: Tenant, inv: Invitation, raw: str) -> tupl
     return link, m
 
 
+def avisar_contrasena_temporal(db: Session, tenant: Tenant, u: User, admin: str, now: datetime) -> None:
+    """Aviso de seguridad: el administrador le puso una contrasena temporal (nunca la lleva el correo)."""
+    notify_security(
+        db,
+        tenant,
+        u,
+        f"Se restableció tu contraseña · {tenant.name}",
+        f"<p>El administrador {_esc(admin)} restableció tu contraseña de Crimson el {fecha_cr(now)}. "
+        "Te va a pasar una contraseña temporal; al entrar vas a crear una propia. Si no lo esperabas, avisale.</p>",
+    )
+
+
 def _invite_out(inv: Invitation, link: str, m: EmailOutbox) -> dict:
     # emailed dice si el correo salio de verdad: sin llave de Resend queda "simulado" y la pantalla no puede
     # decir "le llego un correo". El enlace se devuelve siempre para mandarlo por WhatsApp (InviteTech lo usa).
@@ -762,14 +774,7 @@ def reset_password(uid: int, data: ResetIn, response: Response, p: Principal = D
             {"modo": "temporal", "vence": u.temp_password_expires_at.isoformat(), "2fa_reiniciado": sin_2fa},
             ip=p.ip,
         )
-        notify_security(
-            db,
-            p.tenant,
-            u,
-            f"Se restableció tu contraseña · {p.tenant.name}",
-            f"<p>El administrador {_esc(p.user.full_name)} restableció tu contraseña de Crimson el {fecha_cr(now)}. "
-            "Te va a pasar una contraseña temporal; al entrar vas a crear una propia. Si no lo esperabas, avisale.</p>",
-        )
+        avisar_contrasena_temporal(db, p.tenant, u, p.user.full_name, now)
         expira = u.temp_password_expires_at
         db.commit()
         _no_store(response)

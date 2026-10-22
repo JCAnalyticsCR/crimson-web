@@ -29,6 +29,7 @@ from ..core.ratelimit import incident_global_limiter, incident_limiter
 from ..models import Customer, SupportTicket, Tenant
 from ..services import sla as slasvc
 from ..services.documents import audit
+from ..services.email_layout import cta
 from ..services.mail import notify_roles
 from ..services.sequences import next_number
 from .auth import client_ip
@@ -133,6 +134,13 @@ def _crear(db: Session, data: IncidentIn, ip: str) -> str:
     db.add(tk)
     db.flush()
     audit(db, t.id, None, "create_web", "support_ticket", tk.id, {"ligado_a_cliente": bool(c)}, ip=ip)
+    avisar_ticket_web(db, t, tk, data, c, resumen)
+    db.commit()
+    return tk.number
+
+
+def avisar_ticket_web(db: Session, t, tk: SupportTicket, data, c, resumen: str) -> None:
+    """Aviso a administracion y supervision: entro un reporte desde la pagina web (tambien lo usa la vista previa)."""
     e = html.escape
     cuerpo = (
         f"<p>Entró un reporte desde la página web: <b>{e(tk.number)}</b></p>"
@@ -143,10 +151,9 @@ def _crear(db: Session, data: IncidentIn, ip: str) -> str:
         f"<blockquote>{e(data.description)}</blockquote>"
         f"{'<p>Ubicación: ' + e(data.location) + '</p>' if data.location else ''}"
         f"<p>Primera respuesta antes de {tk.sla['respuesta']} h.</p>"
+        + cta(f"/tickets?id={tk.id}", f"Abrir el ticket {tk.number}")
     )
     notify_roles(db, t, ("admin", "supervisor"), f"Ticket web {tk.number} · {resumen[:50]}", cuerpo, "support_ticket", tk.id)
-    db.commit()
-    return tk.number
 
 
 @router.post("/incidents", status_code=201)

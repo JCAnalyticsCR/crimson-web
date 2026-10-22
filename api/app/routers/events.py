@@ -322,14 +322,19 @@ def _email_tickets(db: Session, tenant: Tenant, e: Event, items: list[Ticket]) -
         if t.holder_email:
             by_mail.setdefault(t.holder_email, []).append(t)
     for mail, ts in by_mail.items():
-        links = "".join(f'<li><a href="{ticket_url(t.code)}">Entrada {t.code}</a></li>' for t in ts)
+        # una entrada: su enlace es el boton del correo (email_layout); varias: la lista con un enlace por entrada
+        links = (
+            f'<p><a href="{ticket_url(ts[0].code)}">Ver mi entrada</a></p>'
+            if len(ts) == 1
+            else "<ul>" + "".join(f'<li><a href="{ticket_url(t.code)}">Entrada {t.code}</a></li>' for t in ts) + "</ul>"
+        )
         when = cr_fmt(e.starts_at)
         queue_email(
             db,
             tenant,
             mail,
             f"Tus entradas · {e.name}",
-            f"<p>¡Listo! Estas son tus entradas para <b>{e.name}</b> ({when}{' · ' + e.venue if e.venue else ''}).</p><ul>{links}</ul><p>Presentá el código QR de cada entrada al ingresar. Cada entrada se puede usar una sola vez.</p>",
+            f"<p>¡Listo! Estas son tus entradas para <b>{e.name}</b> ({when}{' · ' + e.venue if e.venue else ''}).</p>{links}<p>Presentá el código QR de cada entrada al ingresar. Cada entrada se puede usar una sola vez.</p>",
             "ticket",
             ts[0].id,
         )

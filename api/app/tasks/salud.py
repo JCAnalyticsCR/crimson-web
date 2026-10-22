@@ -305,6 +305,12 @@ def _tenant_block(db: Session, t: Tenant, now: datetime) -> str:
     return f"<h4 style='margin:16px 0 4px'>{html.escape(t.name)}</h4><p>Correos de las últimas 24 h: {correo}<br>Facturas por emitir con más de 24 h: {pe}</p>"
 
 
+def _cta_correos() -> str:  # el boton principal del correo de Salud (email_layout): la bitacora de correos
+    from ..services.email_layout import cta
+
+    return cta("/ajustes?tab=correo", "Revisar los correos en Ajustes")
+
+
 def daily_report(db: Session, now: datetime | None = None) -> int:
     """Arma y manda el correo de Salud (uno por dia y destinatario) y purga corridas viejas. Hace commit.
     Quien opera la plataforma recibe las revisiones, las tareas y el bloque de la empresa operadora; los administradores
@@ -325,18 +331,19 @@ def daily_report(db: Session, now: datetime | None = None) -> int:
         bloque_t = f"<table border=0 cellpadding=4><tr><th>Tarea</th><th>Fallas</th><th>Sin terminar</th><th>Último error</th></tr>{filas_t}</table>"
     else:
         bloque_t = f"<p>Ninguna tarea falló ({sum(x['total'] for x in tareas)} corridas de {len(tareas)} tareas).</p>"
+    # el asunto ya es el titulo del correo (email_layout): aqui solo el estado, sin repetirlo en un <h3>
     body = (
-        f"<h3>Salud de la plataforma · {hoy} · {estado}</h3>"
+        f"<p>Estado general: <b>{html.escape(estado)}</b>.</p>"
         f"<table border=0 cellpadding=4>{filas}</table>"
         f"<h4 style='margin:16px 0 4px'>Tareas automáticas (24 h)</h4>{bloque_t}"
     )
     op = operator_tenant(db)
-    n = _send_ops(db, f"Salud de la plataforma · {hoy} · {estado}", body + (_tenant_block(db, op, now) if op else ""), f"salud:diario:{hoy}")
+    n = _send_ops(db, f"Salud de la plataforma · {hoy} · {estado}", body + (_tenant_block(db, op, now) if op else "") + _cta_correos(), f"salud:diario:{hoy}")
     for t in _tenants(db):
         if op is not None and t.id == op.id:
             continue
         n += mail.notify_roles(
-            db, t, ("admin",), f"Salud de su empresa · {t.name} · {hoy}", _tenant_block(db, t, now), "salud", 0, dedupe_key=f"salud:empresa:{hoy}"
+            db, t, ("admin",), f"Salud de su empresa · {t.name} · {hoy}", _tenant_block(db, t, now) + _cta_correos(), "salud", 0, dedupe_key=f"salud:empresa:{hoy}"
         )
     db.commit()
     purge(db, now)

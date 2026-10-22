@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from ..models import AuditLog, Customer, Opportunity, Project, Quote, QuoteVersion
 from ..services import avisos_venta as avisos
 from ..services.documents import CR, audit, local_date
+from ..services.email_layout import cta
 
 log = logging.getLogger(__name__)
 
@@ -155,9 +156,14 @@ def avisar_cotizaciones_frias(db: Session, tenant, ahora: datetime | None = None
                 else "Estas cotizaciones están frías y su vendedora ya no está activa (o ya no las puede ver): reasignalas o dales seguimiento:"
             )
             return (
-                f'<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;color:#15131a"><p>{intro}</p><ul>{filas}</ul>{mas}'
+                f"<p>{intro}</p><ul>{filas}</ul>{mas}"
                 "<p>Una llamada a tiempo es la diferencia. Si el cliente ya respondió, registralo en Versiones de la cotización: "
-                "así no vuelve a aparecer aquí.</p></div>"
+                "así no vuelve a aparecer aquí.</p>"
+                + (  # el boton principal del correo (email_layout)
+                    cta(f"/cotizaciones/{items[0][0].id}", f"Abrir la cotización {items[0][0].number}")
+                    if len(items) == 1
+                    else cta("/cotizaciones", "Abrir Cotizaciones")
+                )
             )
 
         asunto = f"{len(items)} cotización{'es' if len(items) != 1 else ''} sin respuesta del cliente"

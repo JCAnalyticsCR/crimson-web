@@ -71,6 +71,21 @@ def upcoming(db: Session, tenant_id: int, on: date) -> list[Recurrence]:
     )
 
 
+def preview_html(on: date, filas: list[tuple[str, str, str, str]]) -> str:
+    """Cuerpo de la vista previa de recurrencias: (recurrencia, cliente, total, que pasa) por fila, en texto plano.
+    queue_email lo pone en el diseno base (el asunto como titulo y el enlace como boton)."""
+    from ..services.email_layout import cta
+
+    e = html.escape
+    return (
+        f"<p>El <b>{on:%d/%m/%Y}</b> se generan {len(filas)} factura(s) recurrente(s):</p>"
+        "<table border=0 cellpadding=6><tr><th align=left>Recurrencia</th><th align=left>Cliente</th><th align=right>Total</th><th align=left>Qué pasa</th></tr>"
+        + "".join(f"<tr><td>{e(a)}</td><td>{e(b)}</td><td align=right>{e(c)}</td><td>{e(d)}</td></tr>" for a, b, c, d in filas)
+        + "</table><p>Si algo no corresponde, cambialo en Facturación → Recurrencias antes de esa fecha.</p>"
+        + cta("/recurrencias", "Abrir Recurrencias")
+    )
+
+
 def preview_upcoming(db: Session, today: date | None = None, days: int = PREVIEW_DAYS) -> int:
     """Correo a los administradores con lo que se cobra en `days` dias. Devuelve cuantos correos salieron."""
     from ..routers.ops import pending_send
@@ -79,7 +94,6 @@ def preview_upcoming(db: Session, today: date | None = None, days: int = PREVIEW
 
     today = today or cr_today()
     on = today + timedelta(days=days)
-    e = html.escape
     n = 0
     for tid in db.scalars(select(Tenant.id).where(Tenant.active)).all():
         t = db.get(Tenant, tid)
@@ -92,16 +106,8 @@ def preview_upcoming(db: Session, today: date | None = None, days: int = PREVIEW
             c = db.get(Customer, r.customer_id) if r.customer_id else None
             c = c if c is not None and c.tenant_id == t.id else None
             tot = template_total(db, r)
-            filas.append(
-                f"<tr><td>{e(r.name or '')}</td><td>{e(c.name if c else 'sin cliente')}</td>"
-                f"<td align=right>{money(*tot) if tot else '—'}</td><td>{e(what_happens(r, c, pending_send(db, r, settle=False), produccion))}</td></tr>"
-            )
-        body = (
-            f"<p>El <b>{on:%d/%m/%Y}</b> se generan {len(recs)} factura(s) recurrente(s):</p>"
-            "<table border=0 cellpadding=6><tr><th align=left>Recurrencia</th><th align=left>Cliente</th><th align=right>Total</th><th align=left>Qué pasa</th></tr>"
-            + "".join(filas)
-            + "</table><p>Si algo no corresponde, cambialo en Facturación → Recurrencias antes de esa fecha.</p>"
-        )
+            filas.append((r.name or "", c.name if c else "sin cliente", money(*tot) if tot else "—", what_happens(r, c, pending_send(db, r, settle=False), produccion)))
+        body = preview_html(on, filas)
         asunto = f"En {days} días ({on:%d/%m/%Y}):"
         vistos: set[str] = set()
         for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.active, TenantUser.role_code == "admin")):

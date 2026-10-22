@@ -354,7 +354,9 @@ def test_auto_invoice_on_payment_sandbox_and_no_double_stock(client, auth, db_se
     # facturar el pedido pasa por la capa de la tienda (descuenta solo lo que falte), nunca por el descuento viejo
     assert paid["invoice_id"] and len(deducted) == 1 and deducted[0][0] == o["number"] and legacy == []
     inv = db_session.get(Invoice, paid["invoice_id"])
-    assert inv.doc_type == "FE" and inv.einvoice_status == "aceptada" and inv.created_by is None  # venta web: sin vendedor ni comision
+    # venta web sin vendedor asignado: no comisiona; la "tecleo" quien confirmo el pago (la ve en sus Facturas, 21/10 item 24)
+    me = client.get("/auth/me").json()["user"]["id"]
+    assert inv.doc_type == "FE" and inv.einvoice_status == "aceptada" and inv.seller_id is None and inv.created_by == me
     assert inv.balance == 0 and abs(float(inv.total) - float(o["total"])) < 0.01
     notas = [h["note"] for h in paid["history"] if h.get("kind") == "nota"]
     assert any("SANDBOX" in n and inv.number in n for n in notas)

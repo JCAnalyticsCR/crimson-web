@@ -262,6 +262,8 @@ def _order_out(o: Order):
         "proofs": o.proofs or [],
         "expires_at": aware(o.expires_at),
         "inventory_state": o.inventory_state,
+        "seller_id": o.seller_id,  # vendedor del pedido web (21/10, items 24/42)
+        "assigned_at": aware(o.assigned_at),
         "lines": [
             {
                 "id": ln.id,
@@ -282,8 +284,10 @@ def _order_out(o: Order):
 @router.get("/orders")
 def orders(status: str | None = None, limit: int = Query(50, le=200), p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
     from ..services.ownership import visible_invoice_ids
+    from ..services.store_orders import order_scope
 
-    q = select(Order).where(Order.tenant_id == p.tenant.id)
+    # el pedido web de otro vendedor no aparece (21/10, items 24/42): mismo alcance que Pedidos de la tienda
+    q = select(Order).where(Order.tenant_id == p.tenant.id, order_scope(p))
     if status:
         q = q.where(Order.status == status)
     rows = db.scalars(q.order_by(Order.id.desc()).limit(limit)).all()
@@ -303,7 +307,7 @@ def order_status(oid: int, data: OrderStatusIn, p: Principal = Depends(require("
     from ..services import store_orders as so
 
     o = db.get(Order, oid)
-    if not o or o.tenant_id != p.tenant.id:
+    if not o or o.tenant_id != p.tenant.id or not so.sees_order(o, p):
         raise HTTPException(404, "Orden no encontrada")
     old = o.status
     o.status = data.status
@@ -331,10 +335,10 @@ def order_to_invoice(
 ):
     """Convierte la orden en tiquete (TE, consumidor final) o factura (FE, requiere cliente con identificacion).
     register_payment: si el pedido ya se pago, deja el cobro aplicado a la factura (asi no queda "por cobrar")."""
-    from ..services.store_orders import invoice_order
+    from ..services.store_orders import invoice_order, sees_order
 
     o = db.get(Order, oid)
-    if not o or o.tenant_id != p.tenant.id:
+    if not o or o.tenant_id != p.tenant.id or not sees_order(o, p):
         raise HTTPException(404, "Orden no encontrada")
     invoice = invoice_order(db, p.tenant, o, p.user.id, doc_type, register_payment, ip=p.ip)
     db.commit()
@@ -896,14 +900,30 @@ class ContactIn(BaseModel):
     message: str = Field(min_length=3, max_length=4000)
 
 
+def avisar_mensaje_tienda(db: Session, t: Tenant, c: Customer, name: str, email: str, phone: str | None, message: str) -> None:
+    """A cada administrador: alguien escribio desde el formulario de contacto de la tienda (tambien lo usa la vista previa)."""
+    import html
+
+    from ..models import TenantUser
+    from ..services.email_layout import cta
+    from ..services.mail import copy_internal, member_inbox, queue_email
+
+    body = f"<p><b>{html.escape(name)}</b> ({html.escape(email)}{' · ' + html.escape(phone) if phone else ''}) escribió desde la tienda:</p><blockquote>{html.escape(message)}</blockquote>" + cta(f"/clientes/{c.id}", "Abrir la ficha del cliente")
+    asunto = f"Nuevo mensaje de {name} · {t.name}"
+    vistos: set[str] = set()
+    for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.role_code == "admin", TenantUser.active)):
+        correo = member_inbox(m)  # su correo de avisos (pedido 22)
+        if correo and correo not in vistos:
+            vistos.add(correo)
+            queue_email(db, t, correo, asunto, body, "customer", c.id)
+    copy_internal(db, t, asunto, body, "customer", c.id, skip=vistos)  # el buzon de ventas (pedido 48)
+
+
 @router.post("/public/store/{slug}/contact", status_code=201)
 def store_contact(slug: str, data: ContactIn, request: Request, db: Session = Depends(get_db)):
     """Formulario de contacto del sitio: el mensaje queda como nota en la ficha del cliente (lo crea si es nuevo)
     y se avisa por correo a los administradores."""
-    import html
-
-    from ..models import CustomerNote, TenantUser
-    from ..services.mail import copy_internal, member_inbox, queue_email
+    from ..models import CustomerNote
 
     public_limiter.hit(f"contact:{ip_key(request.client.host if request.client else None)}")
     t = _tenant(db, slug)
@@ -914,15 +934,7 @@ def store_contact(slug: str, data: ContactIn, request: Request, db: Session = De
         db.add(c)
         db.flush()
     db.add(CustomerNote(tenant_id=t.id, customer_id=c.id, body=f"Mensaje desde la tienda: {data.message}"))
-    body = f"<p><b>{html.escape(data.name)}</b> ({html.escape(email)}{' · ' + html.escape(data.phone) if data.phone else ''}) escribió desde la tienda:</p><blockquote>{html.escape(data.message)}</blockquote>"
-    asunto = f"Nuevo mensaje de {data.name} · {t.name}"
-    vistos: set[str] = set()
-    for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.role_code == "admin", TenantUser.active)):
-        correo = member_inbox(m)
-        if correo and correo not in vistos:
-            vistos.add(correo)
-            queue_email(db, t, correo, asunto, body, "customer", c.id)
-    copy_internal(db, t, asunto, body, "customer", c.id, skip=vistos)  # el buzon de ventas (pedido 48)
+    avisar_mensaje_tienda(db, t, c, data.name, email, data.phone, data.message)
     audit(db, t.id, None, "contact", "customer", c.id)
     db.commit()
     return {"ok": True}
@@ -983,7 +995,9 @@ def search(q: str = Query(min_length=1), p: Principal = Depends(require("dashboa
         )
         # la foto en el resultado (pedido 21/10): en el telefono es lo que reconoce la vendedora
         out.append({"kind": "producto", "id": pr.id, "title": pr.name, "sub": sub, "to": f"/productos?q={pr.code}", "img": foto})
-    for o in db.scalars(select(Order).where(Order.tenant_id == tid, Order.number.ilike(like)).limit(5)) if can_sales else []:
+    from ..services.store_orders import order_scope
+
+    for o in db.scalars(select(Order).where(Order.tenant_id == tid, Order.number.ilike(like), order_scope(p)).limit(5)) if can_sales else []:
         out.append({"kind": "orden", "id": o.id, "title": o.number, "sub": o.status, "to": "/ordenes"})
     return out[:20]
 

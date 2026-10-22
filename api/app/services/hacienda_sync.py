@@ -499,9 +499,10 @@ def _deliver_safe(db: Session, doc_id: int, stage: str) -> None:
 def _alert_admins(db: Session, tenant: Tenant, subject: str, text: str) -> None:
     from html import escape
 
+    from .email_layout import cta
     from .mail import notify_roles
 
-    notify_roles(db, tenant, ("admin",), subject, f"<p>{escape(text)}</p>", "hacienda", 0)
+    notify_roles(db, tenant, ("admin",), subject, f"<p>{escape(text)}</p>" + cta("/contabilidad/tributario", "Abrir Tributario"), "hacienda", 0)
 
 
 # ================================================================ lotes del worker

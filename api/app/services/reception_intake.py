@@ -298,6 +298,7 @@ def _alert_client_rejection(db: Session, tenant: Tenant, doc: EInvoiceDocument) 
     from html import escape
 
     from ..models import TenantUser
+    from .email_layout import cta
     from .mail import member_inbox, queue_email, user_inbox
 
     inv = db.get(Invoice, doc.invoice_id)
@@ -308,6 +309,7 @@ def _alert_client_rejection(db: Session, tenant: Tenant, doc: EInvoiceDocument) 
         f"<p>Según el archivo recibido (firma no verificada), el cliente {what} la factura <b>{escape(number or '')}</b> "
         f"(clave {escape(doc.clave or '')}).</p>"
         f"<p>Detalle: {escape(doc.receiver_detail or '—')}</p><p>Revise y, si corresponde, emita la nota de crédito (Res. MH-DGT-RES-0027-2024 art. 10).</p>"
+        + (cta(f"/facturas/{inv.id}", f"Abrir la factura {inv.number}") if inv else "")
     )
     to = set()
     for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.active, TenantUser.role_code == "admin")):

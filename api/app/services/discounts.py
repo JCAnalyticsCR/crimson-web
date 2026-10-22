@@ -27,6 +27,7 @@ from ..core.deps import Principal
 from ..models import AuditLog, Product
 from ..schemas.sales import DocumentIn
 from .documents import audit
+from .email_layout import cta
 from .mail import notify_roles
 from .totals import d
 
@@ -268,6 +269,7 @@ def margin_probe(db: Session, p: Principal, quote, margin: Decimal | None, held:
                 "<p>Puede ser trabajo normal con productos de margen bajo o alguien probando precios para deducir el costo "
                 "(el detalle está en la bitácora). Mientras tanto, todas sus cotizaciones quedan esperando tu aprobación, "
                 "sin decirle si fue por el margen.</p>"
+                + cta("/aprobaciones", "Abrir Aprobaciones")
             )
             notify_roles(db, p.tenant, ("admin",), f"Cotizaciones cerca del margen mínimo · {p.user.full_name}", cuerpo, "quote", quote.id)
     return n >= MARGIN_PROBE_LIMIT

@@ -271,16 +271,32 @@ def enviar_aviso(env: Mapping[str, str], asunto: str, html: str) -> bool:
         return False
 
 
+def marco(titulo: str, cuerpo: str, preheader: str | None = None) -> str:
+    """Diseno base de los correos (email_layout.render_static: sin base ni configuracion de la app; ese modulo solo
+    importa la libreria estandar al cargarse)."""
+    from ..services import email_layout as el
+
+    return el.render_static(title=titulo, body=cuerpo, preheader=preheader, foot="Aviso automático del respaldo diario de la plataforma.")
+
+
 def html_falla(fallos: list[Fallo], resumen: dict | None, fecha: date) -> str:
-    items = "".join(f"<li><b>{escape(f.paso)}</b>: {escape(f.detalle)}</li>" for f in fallos)
+    from ..services import email_layout as el
+
+    filas = el.data_rows([(f.paso, f.detalle) for f in fallos])
     subido = ""
     if resumen and resumen.get("subido"):
-        subido = f"<p>El respaldo cifrado <b>sí se subió</b> ({escape(resumen['archivo'])}), pero algo más falló.</p>"
-    return (
-        f"<p>El respaldo diario de la plataforma del {fecha.isoformat()} <b>no terminó bien</b>.</p><ul>{items}</ul>{subido}"
-        "<p>Qué hacer: revisar los registros del servicio <b>respaldo</b> en Railway y seguir infra/RESPALDO.md. "
-        "Mientras no se corrija, la base no tiene respaldo nuevo fuera de Railway.</p>"
+        subido = el.p_html(f"El respaldo cifrado <b>sí se subió</b> ({escape(resumen['archivo'])}), pero algo más falló.")
+    cuerpo = (
+        el.p_html(f"El respaldo diario de la plataforma del {fecha.isoformat()} <b>no terminó bien</b>.")
+        + filas
+        + subido
+        + el.note(
+            html="<b>Qué hacer:</b> revisar los registros del servicio <b>respaldo</b> en Railway y seguir infra/RESPALDO.md. "
+            "Mientras no se corrija, la base no tiene respaldo nuevo fuera de Railway.",
+            warn=True,
+        )
     )
+    return marco("El respaldo diario no terminó bien", cuerpo, f"Respaldo del {fecha.isoformat()}: {len(fallos)} paso(s) con falla.")
 
 
 # ---------- corrida ----------
@@ -455,7 +471,12 @@ def main(argv: list[str] | None = None) -> int:
         return revisar(os.environ)
     if a.probar_aviso:  # sin latido de falla: dejaria el monitor en rojo hasta el respaldo del dia siguiente
         enviado = enviar_aviso(
-            os.environ, "Crimson: prueba del aviso de respaldo", "<p>Prueba del aviso de falla del respaldo diario. No hay que hacer nada.</p>"
+            os.environ,
+            "Crimson: prueba del aviso de respaldo",
+            marco(
+                "Prueba del aviso de respaldo",
+                '<p style="margin:0 0 12px;font-family:Arial,Helvetica,sans-serif;font-size:15px">Prueba del aviso de falla del respaldo diario. No hay que hacer nada.</p>',
+            ),
         )
         print("OK aviso de prueba enviado" if enviado else "FALLO: el aviso de prueba no salio")
         return OK if enviado else CONFIG

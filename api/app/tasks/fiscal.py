@@ -54,28 +54,36 @@ def recipients(db: Session, t: Tenant) -> list[str]:
 
 
 def digest_html(db: Session, t: Tenant, rows: list, total: int, today, fuera_mes: int, mode: str) -> str:
+    from ..services import email_layout as el
+
     base = settings.public_base_url.rstrip("/")
+    td = f"font-family:{el.FONT};font-size:13px;line-height:1.4;color:{el.INK};padding:8px 6px;border-bottom:1px solid {el.LINE}"
+    th = f"font-family:{el.FONT};font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:{el.GREY};padding:8px 6px;border-bottom:2px solid {el.LINE}"
     filas = []
     for inv in rows:
         c = db.get(Customer, inv.customer_id) if inv.customer_id else None
         dias = max((today - inv.issue_date).days, 0) if inv.issue_date else 0
         filas.append(
-            f'<tr><td><a href="{base}/facturas/{inv.id}">{html.escape(inv.number)}</a></td>'
-            f"<td>{html.escape(c.name) if c else 'Sin cliente'}</td>"
-            f'<td align="right">{money(inv.total, inv.currency)}</td>'
-            f"<td>{STATUS.get(inv.status, html.escape(inv.status))}</td>"
-            f"<td>{inv.issue_date.isoformat() if inv.issue_date else ''}{f' · {dias} día(s)' if dias else ' · hoy'}</td></tr>"
+            f'<tr><td style="{td}">{el.link(f"{base}/facturas/{inv.id}", inv.number, el.INK)}</td>'
+            f'<td style="{td}">{html.escape(c.name) if c else "Sin cliente"}</td>'
+            f'<td align="right" style="{td};white-space:nowrap">{money(inv.total, inv.currency)}</td>'
+            f'<td style="{td}">{STATUS.get(inv.status, html.escape(inv.status))}</td>'
+            f'<td style="{td}">{inv.issue_date.isoformat() if inv.issue_date else ""}{f" · {dias} día(s)" if dias else " · hoy"}</td></tr>'
         )
-    mas = f"<p>… y {total - len(rows)} más en la lista.</p>" if total > len(rows) else ""
-    return (
-        f'<div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;color:#15131a">'
-        f"<h3>Facturas por emitir · {today.isoformat()}</h3>"
-        f"<p>{INSTRUCTION.get(mode, INSTRUCTION['ninguno'])}</p>"
-        '<table cellpadding="6" style="border-collapse:collapse;font-size:13px"><tr><th align="left">Factura</th>'
-        '<th align="left">Cliente</th><th align="right">Total</th><th align="left">Estado</th><th align="left">Desde</th></tr>'
-        f"{''.join(filas)}</table>{mas}"
-        f'<p><a href="{base}/facturas?estado=por_emitir">Abrir la lista «Por emitir» ({total})</a></p>'
-        f'<p style="color:#5a5560;font-size:12px">Emitidas fuera de la plataforma este mes: {fuera_mes}.</p></div>'
+    mas = el.p(f"… y {total - len(rows)} más en la lista.", muted=True) if total > len(rows) else ""
+    tabla = (
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:4px 0 16px"><tr>'
+        f'<th align="left" style="{th}">Factura</th><th align="left" style="{th}">Cliente</th><th align="right" style="{th}">Total</th>'
+        f'<th align="left" style="{th}">Estado</th><th align="left" style="{th}">Desde</th></tr>{"".join(filas)}</table>'
+    )
+    body = el.p_html(INSTRUCTION.get(mode, INSTRUCTION["ninguno"])) + tabla + mas + el.p(f"Emitidas fuera de la plataforma este mes: {fuera_mes}.", small=True)
+    return el.render(
+        t,
+        title=f"Facturas por emitir · {today.isoformat()}",
+        body=body,
+        preheader=f"{total} factura(s) esperan su comprobante.",
+        action=(f"{base}/facturas?estado=por_emitir", f"Abrir la lista «Por emitir» ({total})"),
+        foot="Aviso interno de contabilidad.",
     )
 
 

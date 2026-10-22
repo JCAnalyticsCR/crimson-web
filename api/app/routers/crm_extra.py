@@ -168,9 +168,12 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
         if inv_ids
         else []
     )
-    # los pedidos web traen montos: solo quien ve ventas (antes los veia cualquiera con crm.ver, incluido el tecnico)
+    # los pedidos web traen montos: solo quien ve ventas (antes los veia cualquiera con crm.ver, incluido el tecnico).
+    # El de otro vendedor no aparece (store_orders.order_scope, 21/10 items 24/42)
+    from ..services.store_orders import order_scope
+
     orders = (
-        db.scalars(select(Order).where(Order.tenant_id == tid, Order.customer_id == cid).order_by(Order.id.desc()).limit(30)).all()
+        db.scalars(select(Order).where(Order.tenant_id == tid, Order.customer_id == cid, order_scope(p)).order_by(Order.id.desc()).limit(30)).all()
         if p.can("sales", "ver")
         else []
     )

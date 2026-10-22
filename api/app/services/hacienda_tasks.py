@@ -123,6 +123,15 @@ def alerts_for(db: Session, t: Tenant, today: date | None = None) -> list[str]:
     return out
 
 
+def daily_alert_html(items: list[str]) -> str:
+    """Cuerpo de la alerta diaria de Hacienda (queue_email le pone el diseno base)."""
+    from .email_layout import cta
+
+    # los textos traen datos de XML que manda cualquiera (nombre del emisor, detalles): siempre escapados
+    lis = "".join(f"<li>{escape(x)}</li>" for x in items)
+    return f"<ul>{lis}</ul><p>El detalle está en Contabilidad → Tributario.</p>" + cta("/contabilidad/tributario", "Abrir Tributario")
+
+
 def daily_alerts(db: Session) -> int:
     """Correo diario a admin y contabilidad. Sin XML ni secretos."""
     from ..core.deps import roles_like
@@ -133,9 +142,7 @@ def daily_alerts(db: Session) -> int:
         items = alerts_for(db, t)
         if not items:
             continue
-        # los textos traen datos de XML que manda cualquiera (nombre del emisor, detalles): siempre escapados
-        lis = "".join(f"<li>{escape(x)}</li>" for x in items)
-        html = f"<h3>Hacienda y recepción · pendientes</h3><ul>{lis}</ul><p>Entre a Contabilidad → Tributario para el detalle.</p>"
+        html = daily_alert_html(items)
         seen = set()
         for mbr in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.active, TenantUser.role_code.in_(roles_like(db, t, ("admin", "contabilidad"))))):
             email = member_inbox(mbr)

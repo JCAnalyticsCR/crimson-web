@@ -207,3 +207,20 @@ def test_enviar_informe_solo_cuenta_si_el_correo_sale(client, auth, db_session, 
     assert r["status"] == "simulado" and r["sent"] is False and "NO salió" in r["note"]
     log = db_session.scalar(select(AuditLog).where(AuditLog.action == "send_report", AuditLog.entity_id == s["id"]).order_by(AuditLog.id.desc()))
     assert log.diff["mail"] == "simulado"
+
+
+def test_correo_del_informe_con_el_diseno_base_y_el_informe_adjunto(client, auth, db_session, monkeypatch):
+    from sqlalchemy import select
+
+    from app.models import EmailOutbox
+    from app.services import email_layout as el
+
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    s = client.post("/surveys", json={"kind": "redes", "site": "Sitio <b>uno</b>"}).json()
+    r = client.post(f"/surveys/{s['id']}/report/email", json={"to": "cliente@ejemplo.com", "message": 'Hola <a href="https://phish.ejemplo.com">x</a>'})
+    assert r.status_code == 200, r.text
+    m = db_session.scalar(select(EmailOutbox).where(EmailOutbox.entity == "survey", EmailOutbox.entity_id == s["id"]).order_by(EmailOutbox.id.desc()))
+    # el cuerpo es el diseno base (no la pagina del informe con <style>), el mensaje va escapado y el informe adjunto
+    assert el.MARKER in m.html and "<style" not in m.html and "max-width:600px" in m.html
+    assert "&lt;a href=" in m.html and '<a href="https://phish' not in m.html and "Sitio &lt;b&gt;uno&lt;/b&gt;" in m.html
+    assert [a["name"] for a in m.attachments] in ([f"Informe-{s['number']}.pdf"], [f"Informe-{s['number']}.html"])

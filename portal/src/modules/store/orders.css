@@ -10,6 +10,9 @@
 .wo-badge[data-s="en_revision"] { background: rgba(226, 35, 58, .12); color: var(--crimson); }
 .wo-badge[data-s="pagado"], .wo-badge[data-s="listo"], .wo-badge[data-s="entregado"] { background: rgba(26, 138, 75, .14); color: #1a8a4b; }
 .wo-badge[data-s="preparando"], .wo-badge[data-s="enviado"] { background: rgba(40, 110, 210, .12); color: #2a6fd1; }
+/* vendedor del pedido web (21/10, items 24/42) */
+.wo-seller { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.wo-seller.is-me { color: var(--crimson); }
 .wo-cards { display: none; }
 @media (max-width: 760px) {
   .wo-table { display: none !important; }
