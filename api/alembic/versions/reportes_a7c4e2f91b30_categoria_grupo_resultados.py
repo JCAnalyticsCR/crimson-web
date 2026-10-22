@@ -8,7 +8,7 @@ antes siguen por su nombre hasta que contabilidad elija.
 downgrade quita la columna (los gastos no cambian).
 
 Revision ID: a7c4e2f91b30
-Revises: f3a8d2c6b917
+Revises: c7e3a9d15f42
 Create Date: 2026-10-22 09:00:00
 """
 
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "a7c4e2f91b30"
-down_revision: str | None = "f3a8d2c6b917"
+down_revision: str | None = "c7e3a9d15f42"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

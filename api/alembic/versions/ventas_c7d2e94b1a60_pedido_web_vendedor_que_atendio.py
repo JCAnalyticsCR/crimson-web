@@ -8,7 +8,7 @@ habilita). `order.attended_by_id` guarda ese vendedor y `order.attended_source` 
 Sin relleno: los pedidos de antes quedan sin vendedor que atendio. downgrade quita las columnas.
 
 Revision ID: c7d2e94b1a60
-Revises: f3a8d2c6b917
+Revises: a7c4e2f91b30
 Create Date: 2026-10-22 10:00:00
 """
 
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c7d2e94b1a60"
-down_revision: str | None = "f3a8d2c6b917"
+down_revision: str | None = "a7c4e2f91b30"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

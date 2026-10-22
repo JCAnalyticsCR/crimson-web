@@ -8,7 +8,7 @@ Crimson.
 downgrade quita las dos columnas (las oportunidades quedan como de Crimson).
 
 Revision ID: c7e3a9d15f42
-Revises: f3a8d2c6b917
+Revises: c5d2e8f41a76
 Create Date: 2026-10-22 10:00:00
 """
 
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c7e3a9d15f42"
-down_revision: str | None = "f3a8d2c6b917"
+down_revision: str | None = "c5d2e8f41a76"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

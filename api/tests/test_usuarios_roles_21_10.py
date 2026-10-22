@@ -277,6 +277,7 @@ def test_correo_para_avisos_internos_recibe_pedidos_y_ventas(client, auth, db_se
         status="nuevo",
         # lo que el aviso con el diseno base lee del pedido (vendedor, resumen de lineas y totales)
         seller_id=None,
+        attended_by_id=None,
         lines=[],
         shipping=Decimal(0),
         tax_total=Decimal(0),
@@ -343,6 +344,7 @@ def test_rol_creado_desde_ventas_comisiona_recibe_avisos_y_sale_como_vendedor(cl
         status="nuevo",
         # lo que el aviso con el diseno base lee del pedido (vendedor, resumen de lineas y totales)
         seller_id=None,
+        attended_by_id=None,
         lines=[],
         shipping=Decimal(0),
         tax_total=Decimal(0),
