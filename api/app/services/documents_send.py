@@ -98,6 +98,8 @@ def send_document(
     dedupe_key: solo los envios automaticos (regla 6 del plan); el reenvio de una persona nunca lleva llave, porque con
     el outbox del plan 1.2 la misma llave devolveria el intento que fallo en vez de mandarlo otra vez."""
     is_inv = isinstance(doc, Invoice)
+    if is_inv:
+        docsvc.check_not_provisional(db, doc)  # nunca le llega al cliente como BOR-... (pedido 21/10)
     c = db.get(Customer, doc.customer_id) if doc.customer_id else None
     if c is not None and c.tenant_id != doc.tenant_id:
         c = None  # nunca el correo de un cliente de otra empresa

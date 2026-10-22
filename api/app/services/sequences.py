@@ -152,6 +152,44 @@ def is_provisional(db: Session, tenant_id: int, number: str | None) -> bool:
     return prefix is not None and number.startswith(f"{prefix}-")
 
 
+def provisional_prefix(db: Session, tenant_id: int) -> str | None:
+    """Prefijo del contador provisional (None: el tenant nunca tuvo provisionales). Para marcar una lista sin consultar
+    por fila."""
+    return db.scalar(select(BillingGroup.prefix).where(BillingGroup.tenant_id == tenant_id, BillingGroup.doc_type == PROVISIONAL, BillingGroup.is_default))
+
+
+def pending_provisional(inv, prefix: str | None) -> bool:
+    """La factura todavia lleva el numero provisional y su numero definitivo llega al emitir. Una anulada nunca se emite
+    y una "emitida fuera" (Fygaro) ya tiene su comprobante con el numero de alla: ninguna espera numero."""
+    return (
+        prefix is not None
+        and bool(inv.number)
+        and inv.number.startswith(f"{prefix}-")
+        and inv.status != "anulada"
+        and inv.einvoice_status != "emitida_fuera"
+    )
+
+
+_FISCAL_CODE_OF = {"FE": "01", "TE": "04"}
+
+
+def expected_number(db: Session, tenant, doc_type: str) -> str | None:
+    """El numero que tomaria la factura si fuera la proxima en emitirse (solo para mostrarlo: el definitivo lo da la
+    emision, y si otra se emite antes, sigue a esa). No crea grupos ni sube contadores."""
+    from . import hacienda_config as hc  # import local: hacienda_config importa modelos y servicios
+
+    if doc_type not in FISCAL_VISIBLE:
+        return None
+    prefix = db.scalar(select(BillingGroup.prefix).where(BillingGroup.tenant_id == tenant.id, BillingGroup.doc_type == doc_type, BillingGroup.is_default))
+    prefix = prefix or DEFAULT_GROUPS[doc_type][0]
+    if number_from_fiscal_on(tenant.settings) and hc.production_on(db, tenant):
+        gtype = fiscal_group_type(_FISCAL_CODE_OF[doc_type], "produccion")
+        cur = db.scalar(select(BillingGroup.current).where(BillingGroup.tenant_id == tenant.id, BillingGroup.doc_type == gtype))
+    else:
+        cur = db.scalar(select(BillingGroup.current).where(BillingGroup.tenant_id == tenant.id, BillingGroup.doc_type == doc_type, BillingGroup.is_default))
+    return f"{prefix}-{(cur or 0) + 1:06d}"
+
+
 def number_taken(db: Session, tenant_id: int, number: str, exclude_id: int | None = None) -> bool:
     """Otra factura del mismo tenant (incluido el historico importado de Fygaro) ya usa ese numero visible."""
     from ..models import Invoice

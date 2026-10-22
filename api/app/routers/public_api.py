@@ -150,6 +150,7 @@ def v1_payment_link(invoice_id: int, ctx=Depends(api_tenant), db: Session = Depe
         raise HTTPException(404, "Factura no encontrada")
     if i.status == "anulada":
         raise HTTPException(409, "La factura está anulada")
+    docsvc.check_not_provisional(db, i)  # el enlace muestra el numero: primero se emite (pedido 21/10)
     link = docsvc.get_or_create_payment_link(db, t.id, i)
     mark_sent(i)  # el enlace es para compartirlo: desde aqui la factura esta por cobrar (plan 1.3)
     db.commit()

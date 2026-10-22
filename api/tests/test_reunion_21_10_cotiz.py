@@ -205,6 +205,34 @@ def test_produccion_borradores_provisionales_y_emision_fuera_de_orden(client, au
     assert db_session.query(AuditLog).filter(AuditLog.action == "renumber", AuditLog.entity_id.in_([a.id, b.id])).count() == 2
 
 
+def test_produccion_numero_provisional_se_avisa_y_no_sale_al_cliente(client, auth, db_session, produccion):
+    """El portal sabe que el BOR- es provisional (y cual tomaria al emitir); el correo y el enlace de pago esperan a la
+    emision, asi el cliente nunca recibe un numero que despues cambia."""
+    a, t = _factura_db(client, db_session)
+    out = client.get(f"/invoices/{a.id}").json()
+    assert out["number"].startswith("BOR-") and out["number_provisional"] is True
+    assert out["expected_number"] == "FEC-000087"  # sigue a Fygaro (ultimo usado 86)
+    fila = next(i for i in client.get("/invoices").json()["items"] if i["id"] == a.id)
+    assert fila["number_provisional"] is True
+    r = client.post(f"/invoices/{a.id}/email", json={"to": "cliente@example.com"})
+    assert r.status_code == 409 and "provisional" in r.json()["detail"]
+    r = client.post(f"/invoices/{a.id}/payment-link")
+    assert r.status_code == 409 and "emitila" in r.json()["detail"]
+    db_session.refresh(a)
+    assert a.sent_at is None and a.status == "creado"  # no quedo "enviada" ni por cobrar
+    assert _emit(db_session, t, a) == "FEC-000087"
+    out = client.get(f"/invoices/{a.id}").json()
+    assert out["number_provisional"] is False and out["expected_number"] is None
+    assert client.post(f"/invoices/{a.id}/payment-link").status_code == 200  # ya emitida: el enlace dice FEC-000087
+
+
+def test_fuera_de_produccion_la_factura_no_es_provisional(client, auth, db_session):
+    a, _ = _factura_db(client, db_session)
+    out = client.get(f"/invoices/{a.id}").json()
+    assert out["number"].startswith("FEC-") and out["number_provisional"] is False
+    assert client.post(f"/invoices/{a.id}/payment-link").status_code == 200
+
+
 def test_produccion_borrador_anulado_no_choca(client, auth, db_session, produccion):
     a, t = _factura_db(client, db_session)
     r = client.post(f"/invoices/{a.id}/void")

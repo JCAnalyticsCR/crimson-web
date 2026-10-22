@@ -45,6 +45,9 @@ const toPayload = (doc: DocState, lines: Line[], asigna = false) => ({
 /* Al recuperar un borrador solo vuelve lo que el usuario escribe; numero, estado y versiones son del servidor. */
 const EDITABLE = ["customer_id", "currency", "discount_type", "discount_value", "internal_notes", "external_notes", "external_order", "activity_code", "medical_exemption_card", "issue_date", "due_date"] as const;
 
+/* Pedido 21/10: la factura con numero provisional (BOR-...) no se envia: primero se emite y el cliente ve el fiscal. */
+const PROVISIONAL_ENVIO = "Tiene número provisional: emitila ante Hacienda (abajo, en Documentos electrónicos) y después enviala; así el cliente recibe su número fiscal.";
+
 export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const { id } = useParams();
   const nav = useNavigate();
@@ -235,6 +238,13 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
         if (!isNew) setDoc(saved);
         return;
       }
+      if (then === "send" && !isQ && saved.number_provisional) {
+        /* Pedido 21/10: el cliente nunca recibe el numero provisional (cambia al emitir); primero se emite */
+        toast(`Factura ${saved.number} guardada. ${PROVISIONAL_ENVIO}`, "bad");
+        nav(`/facturas/${saved.id}`, { replace: true });
+        setDoc(saved);
+        return;
+      }
       if (then === "send") {
         /* Solo queda "enviada" (y su oportunidad en "Cotización enviada") si el correo salió de verdad;
            si quedó simulado o con error, se guarda el documento pero se avisa claro que el cliente no lo recibió. */
@@ -315,6 +325,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const blocked = isQ && (pendLines.length > 0 || zeroLines.length > 0);
 
   const cur = doc.currency || "CRC";
+  const provisional = !isQ && !isNew && !!(doc as Invoice).number_provisional;
   const title = isNew ? (isQ ? "Nueva cotización" : "Nueva factura") : `${isQ ? "Cotización" : "Factura"}: ${doc.number}`;
 
   /* Cotización aprobada -> proyecto: copia líneas, costo estimado y crea la primera orden de trabajo. */
@@ -343,6 +354,12 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
         <div>
           <div className="status-line"><span>{isQ ? "02 · Cotización" : "03 · Factura"}</span>{doc.status && <Badge status={doc.status} />}{(doc as Invoice).consecutive && <span>· {(doc as Invoice).consecutive}</span>}</div>
           <h1 className="h1" style={{ marginTop: 6 }}>{title}</h1>
+          {provisional && (
+            <div className="status-line" style={{ marginTop: 6 }}>
+              <span className="badge badge--warn" title="El número fiscal se asigna al emitir: si otra factura se emite antes, toma el siguiente.">Número provisional · toma {(doc as Invoice).expected_number || "su número fiscal"} al emitir</span>
+              <span className="muted">No se envía ni se comparte el enlace de pago hasta emitirla: el cliente solo ve el número fiscal.</span>
+            </div>
+          )}
         </div>
         <div className="page-head__actions">
           {!isNew && <AuthLink path={`/${isQ ? "quotes" : "invoices"}/${id}/pdf`}>PDF / Imprimir</AuthLink>}
@@ -527,8 +544,9 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               {canEdit && <div>{auto.bar}</div>}
               {canEdit && !accepted && <button className="btn btn--crimson" disabled={busy} onClick={() => save()}><Icon d={I.check} />Guardar</button>}
               {!pending && !accepted && canSend && (canEdit
-                ? <button className="btn" disabled={busy || blocked} onClick={() => save("send")}><Icon d={I.whatsapp} />Guardar & enviar al cliente</button>
-                : !isNew && <button className="btn" disabled={busy || blocked} onClick={sendOnly}><Icon d={I.whatsapp} />Enviar al cliente</button>)}
+                ? <button className="btn" disabled={busy || blocked || provisional} title={provisional ? PROVISIONAL_ENVIO : undefined} onClick={() => save("send")}><Icon d={I.whatsapp} />Guardar & enviar al cliente</button>
+                : !isNew && <button className="btn" disabled={busy || blocked || provisional} title={provisional ? PROVISIONAL_ENVIO : undefined} onClick={sendOnly}><Icon d={I.whatsapp} />Enviar al cliente</button>)}
+              {!pending && !accepted && canSend && provisional && <p className="muted" style={{ fontSize: 12, margin: 0, color: "var(--warn)" }}>{PROVISIONAL_ENVIO}</p>}
               {isQ && !pending && allows("sales.crear") && (accepted || canEdit) && <button className="btn btn--soft" disabled={busy || blocked} title={doc.customer_id ? undefined : "Primero elegí el cliente"} onClick={() => (accepted ? convertAccepted() : save("convert"))}><Icon d={I.invoice} />Convertir a factura</button>}
               {isQ && !pending && allows("sales.crear") && (accepted || canEdit) && !doc.customer_id && <p className="muted" style={{ fontSize: 12, margin: 0, color: "var(--warn)" }}>Sin cliente no se convierte a factura: la factura sale a su nombre y después no se edita.</p>}
               {isQ && !isNew && !pending && !proyecto && allows("projects.crear") && (

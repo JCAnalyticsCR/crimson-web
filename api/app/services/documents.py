@@ -28,7 +28,7 @@ from ..models import (
 from ..schemas.sales import DocumentIn, LineInSchema
 from . import units
 from .refs import check_refs
-from .sequences import FISCAL_VISIBLE, PROVISIONAL, next_number, provisional_on
+from .sequences import FISCAL_VISIBLE, PROVISIONAL, next_number, pending_provisional, provisional_on, provisional_prefix
 from .totals import LineIn, balance, compute_document, d
 
 
@@ -181,6 +181,19 @@ def apply_document(db: Session, doc: Quote | Invoice, payload: DocumentIn, line_
     doc.subtotal, doc.discount_total, doc.tax_total, doc.total = calc.subtotal, calc.discount_total, calc.tax_total, calc.total
     if isinstance(doc, Invoice):
         recompute_balance(doc)
+
+
+PROVISIONAL_HOLD = (
+    "La factura {n} todavía tiene número provisional: emitila ante Hacienda antes de enviarla o compartir el enlace de "
+    "pago. Al emitir toma su número fiscal y ese es el que recibe el cliente (el provisional no se le muestra)."
+)
+
+
+def check_not_provisional(db: Session, inv: Invoice) -> None:
+    """Pedido 21/10: el cliente nunca recibe una factura (correo, PDF, enlace de pago) con el numero provisional BOR-...,
+    que cambia al emitir. Con Produccion y "numero = consecutivo fiscal" encendidos, primero se emite."""
+    if pending_provisional(inv, provisional_prefix(db, inv.tenant_id)):
+        raise HTTPException(409, PROVISIONAL_HOLD.format(n=inv.number))
 
 
 def recompute_balance(inv: Invoice) -> None:
