@@ -1,21 +1,28 @@
-/* Reportes: cuadricula de reportes -> vista en pantalla + descarga Excel (regla del plan 3.6). */
+/* Reportes: tablero visual, estado de resultados completo (reunion 2, pedidos 1 y 3) y la cuadricula de reportes ->
+   vista en pantalla + descarga Excel (regla del plan 3.6). ?vista=tablero|resultados|todos elige la pestana. */
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, fmtMoney } from "../../lib/api";
+import { useSession } from "../../app/session";
 import { Card, Empty, I, Icon, Loading } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
+import Board from "./Board";
+import ProfitLoss from "./ProfitLoss";
+import "./reports.css";
 
 type Cat = { key: string; title: string; description: string };
 type Rep = { key: string; title: string; from: string; to: string; columns: string[]; rows: (string | number | null)[][]; totals: Record<string, string | number> | null };
 const MONEY_COLS = /subtotal|descuento|impuesto|total|saldo|monto|iva|base|venta|precio/i;
 // totales que son conteos, no dinero (reporte de ordenes)
-const COUNT_TOTALS = new Set(["Órdenes", "Pagadas"]);
+const COUNT_TOTALS = new Set(["Órdenes", "Pagadas", "Líneas", "Registros", "Pendientes", "Conciliados"]);
+type Vista = "tablero" | "resultados" | "todos";
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 export default function Reports() {
   // ?r=<clave>&from=&to= (enlaces "en pantalla" del panel Tributario): reporte y rango iniciales
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
+  const { allows } = useSession();
   const [cat, setCat] = useState<Cat[] | null>(null);
   // el reporte inicial sale del catalogo del rol (?r= solo si esta en el): "facturacion" fijo le daba 403 al supervisor,
   // a bodega y a caja, con el titulo en "…" y "Descargar Excel" apuntando a un reporte prohibido
@@ -43,17 +50,28 @@ export default function Reports() {
     api<Rep>(`/reports/${key}?from=${range.from}&to=${range.to}`).then(setRep).catch(() => setRep(null)).finally(() => setLoading(false));
   }, [key, range.from, range.to]);
   const xlsx = `/reports/${key}?from=${range.from}&to=${range.to}&format=xlsx`;
+  // pestanas: el tablero es de quien ve las ventas de toda la empresa; el estado de resultados, de quien tiene el reporte
+  const conTablero = allows("sales.ver_todo");
+  const conResultados = !!cat?.some((c) => c.key === "resultados");
+  const vistas: [Vista, string][] = [...(conTablero ? [["tablero", "Tablero"]] as [Vista, string][] : []), ...(conResultados ? [["resultados", "Estado de resultados"]] as [Vista, string][] : []), ["todos", "Todos los reportes"]];
+  const pedida = params.get("vista") as Vista | null;
+  const vista: Vista = params.get("r") && !pedida ? "todos" : vistas.find(([k]) => k === pedida)?.[0] ?? (cat === null && pedida ? pedida : vistas[0][0]);
+  const ir = (v: Vista) => { const n = new URLSearchParams(params); n.set("vista", v); n.delete("r"); setParams(n, { replace: true }); };
 
   return (
     <>
       <div className="page-head">
         <div><div className="meta">08 · Reportes</div><h1 className="h1">Reportes</h1></div>
         <div className="page-head__actions">
-          <input className="input" type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} style={{ width: 150 }} />
-          <input className="input" type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} style={{ width: 150 }} />
-          {key && <AuthLink className="btn btn--crimson" path={xlsx} download={`${key}-${range.from}-${range.to}.xlsx`}><Icon d={I.reports} />Descargar Excel</AuthLink>}
+          <input className="input" type="date" aria-label="Desde" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} style={{ width: 150 }} />
+          <input className="input" type="date" aria-label="Hasta" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} style={{ width: 150 }} />
+          {vista === "todos" && key && <AuthLink className="btn btn--crimson" path={xlsx} download={`${key}-${range.from}-${range.to}.xlsx`}><Icon d={I.reports} />Descargar Excel</AuthLink>}
         </div>
       </div>
+      {vistas.length > 1 && <div className="tabs rep-tabs" role="tablist">{vistas.map(([k, l]) => <button key={k} role="tab" aria-selected={vista === k} className={vista === k ? "is-active" : ""} onClick={() => ir(k)}>{l}</button>)}</div>}
+      {vista === "tablero" && conTablero && <Board from={range.from} to={range.to} onPnl={conResultados ? () => ir("resultados") : undefined} />}
+      {vista === "resultados" && conResultados && <ProfitLoss from={range.from} to={range.to} />}
+      {vista === "todos" && <>
       <div className="actions-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
         {(cat || []).map((c) => (
           <button key={c.key} className="action" onClick={() => setKey(c.key)} style={{ textAlign: "left", cursor: "pointer", borderColor: key === c.key ? "var(--crimson)" : undefined, background: key === c.key ? "var(--crimson-soft)" : undefined }}>
@@ -72,6 +90,7 @@ export default function Reports() {
           </div>
         )}
       </Card>}
+      </>}
     </>
   );
 }

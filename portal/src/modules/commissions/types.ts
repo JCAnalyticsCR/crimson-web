@@ -8,6 +8,8 @@ export type Entry = {
   project_id: number | null; project: string | null; quote_id: number | null; quote: string | null; participation_id: number | null;
   amount_crc: string | null; hold_reason: string | null; approved_at: string | null; approved_by: string | null;
   paid_ref: string | null; void_reason: string | null; reverses_id: number | null; can_approve: boolean;
+  /** reunion 2, pedido 2: gasto registrado al pagarla y si el admin puede deshacer el pago */
+  expense_id?: number | null; can_undo_payment?: boolean;
 };
 export type Ledger = { rows: Entry[]; totals: { en_espera: number; pendiente: string; aprobada: string; pagada: string }; by_currency: Record<string, Record<string, string>>; total_rows: number };
 

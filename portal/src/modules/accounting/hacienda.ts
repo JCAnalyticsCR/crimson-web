@@ -46,6 +46,15 @@ export type Reception = {
   credit_amount: string | null; applicable_amount: string | null; hacienda_status: string; supplier_hacienda_status: string;
   deadline: string | null; business_days_left: number | null; has_pdf: boolean; has_supplier_response: boolean; has_response: boolean; has_hacienda_answer: boolean;
   expense_id: number | null; receiver_ok: boolean | null; origin: string; created_at: string;
+  /** solo en la lista "por revisar": la respuesta sugerida (reunion 2, pedido 4) */
+  proposal?: Proposal | null;
+};
+
+/** Respuesta preparada para aprobar con un clic (services/reception_proposal.py). ready=false: se responde a mano. */
+export type Proposal = {
+  action: "aceptada" | "parcial" | "rechazada"; iva_condition: string; activity_code: string | null; create_expense: boolean; link_expense_id: number | null;
+  category_id: number | null; category: string | null; detail: string | null; reference_id: number | null; source: "proveedor" | "predeterminado" | "nota_credito";
+  ready: boolean; reasons: string[]; blockers: string[];
 };
 
 export type ResponseAttempt = {
@@ -62,7 +71,7 @@ export type ReceptionDetail = Reception & {
   message: { id: number; sender: string | null; subject: string | null; received_at: string | null } | null;
   responses: ResponseAttempt[]; discarded_reason: string | null; response_detail: string | null; mode: Mode;
   can_respond: boolean; can_retry: boolean; can_reopen: boolean; can_send: boolean; can_refresh: boolean; can_expense: boolean;
-  warnings: string[]; expense_candidates: Candidate[]; proposal: { action: string; iva_condition: string; create_expense: boolean; reference_id: number } | null;
+  warnings: string[]; expense_candidates: Candidate[]; proposal: Proposal | null;
   supplier_hacienda_detail: string | null;
 };
 

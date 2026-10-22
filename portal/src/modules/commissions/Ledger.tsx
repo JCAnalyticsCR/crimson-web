@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { Card, Empty } from "../../ui/components";
+import { Card, Empty, Field, Modal } from "../../ui/components";
 import { ESTADO, KIND, errText, type Beneficiaries, type Ledger as LedgerData } from "./types";
 
 export default function Ledger() {
@@ -25,6 +25,8 @@ export default function Ledger() {
   }, [configura]);
   const [d, setD] = useState<LedgerData | null>(null);
   const [sel, setSel] = useState<Record<number, boolean>>({});
+  // reunion 2, pedido 2: deshacer un pago marcado por error (solo el admin) anula el gasto que se registro
+  const [undo, setUndo] = useState<{ id: number; reason: string } | null>(null);
   const puedeAprobar = allows("commissions.aprobar");
   const load = useCallback(() => {
     const { who, ...rest } = f;
@@ -44,6 +46,11 @@ export default function Ledger() {
   const marcadas = Object.entries(sel).filter(([, v]) => v).map(([k]) => Number(k));
   const aprobar = async () => {
     try { const r = await api<{ actualizadas: number }>("/commissions", { method: "PATCH", json: { ids: marcadas, status: "aprobada" } }); toast(`${r.actualizadas} aprobado(s)`); load(); }
+    catch (e) { toast(errText(e), "bad"); }
+  };
+  const deshacer = async () => {
+    if (!undo) return;
+    try { await api("/commissions/undo-payment", { method: "POST", json: { ids: [undo.id], reason: undo.reason.trim() } }); toast("Pago deshecho: el gasto en Contabilidad quedó anulado"); setUndo(null); load(); }
     catch (e) { toast(errText(e), "bad"); }
   };
   const monedas = d ? Object.keys(d.by_currency) : [];
@@ -81,19 +88,25 @@ export default function Ledger() {
                   <td className="muted">{fmtDate(r.earned_on)}</td>
                   <td style={{ fontWeight: 600 }}>{r.beneficiary_name || "—"}<div className="meta">{r.beneficiary === "aliado" ? "Aliado" : "Vendedor"}</div></td>
                   <td>{KIND[r.kind] || r.kind}</td>
-                  <td>{r.description || "—"}{r.hold_reason && <div className="meta">{r.hold_reason}</div>}{r.void_reason && <div className="meta">Anulada: {r.void_reason}</div>}{r.paid_ref && <div className="meta">Pago: {r.paid_ref}</div>}</td>
+                  <td>{r.description || "—"}{r.hold_reason && <div className="meta">{r.hold_reason}</div>}{r.void_reason && <div className="meta">Anulada: {r.void_reason}</div>}{r.paid_ref && <div className="meta">Pago: {r.paid_ref}</div>}{r.expense_id ? <div className="meta"><Link className="row-link" to={`/contabilidad/contable?expense=${r.expense_id}`}>Gasto registrado</Link></div> : null}</td>
                   <td className="mono muted">{r.invoice_id ? <Link className="row-link" to={`/facturas/${r.invoice_id}`}>{r.invoice}</Link> : r.quote || "—"}</td>
                   <td className="mono muted">{r.project_id ? <Link className="row-link" to={`/proyectos/${r.project_id}`}>{r.project}</Link> : "—"}</td>
                   <td className="num money">{r.base_amount == null ? <span className="muted" title="Sobre la utilidad (confidencial)">—</span> : Number(r.base_amount) ? fmtMoney(r.base_amount, r.currency) : "—"}</td>
                   <td className="num mono">{r.percent == null ? <span className="muted" title="Sobre la utilidad (confidencial)">—</span> : Number(r.percent) ? `${Number(r.percent)} %` : "—"}</td>
                   <td className={`num money ${Number(r.amount) < 0 ? "com-neg" : ""}`} style={{ fontWeight: 700 }}>{r.amount == null ? <span className="muted" title="Precio del aliado: información de costos">—</span> : fmtMoney(r.amount, r.currency)}</td>
-                  <td><span className={`badge badge--${ESTADO[r.status]?.tone || "muted"}`}>{ESTADO[r.status]?.label || r.status}</span></td>
+                  <td><span className={`badge badge--${ESTADO[r.status]?.tone || "muted"}`}>{ESTADO[r.status]?.label || r.status}</span>{r.can_undo_payment && <div><button className="btn btn--ghost btn--sm" style={{ marginTop: 4 }} onClick={() => setUndo({ id: r.id, reason: "" })}>Deshacer pago</button></div>}</td>
                 </tr>
               ))}</tbody>
             </table>
           </div>
         )}
       </Card>
+      {undo && (
+        <Modal title="Deshacer el pago" onClose={() => setUndo(null)} foot={<><button className="btn btn--ghost" onClick={() => setUndo(null)}>Cancelar</button><button className="btn btn--danger" disabled={undo.reason.trim().length < 3} onClick={deshacer}>Deshacer pago</button></>}>
+          <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Solo para un pago marcado por error (el dinero no salió). La comisión vuelve a «aprobada» y su gasto en Contabilidad queda anulado. Si el pago sí se hizo, corríjalo con un ajuste.</p>
+          <Field label="Motivo"><input className="input" autoFocus value={undo.reason} onChange={(e) => setUndo({ ...undo, reason: e.target.value })} placeholder="Se marcó la comisión equivocada…" /></Field>
+        </Modal>
+      )}
     </>
   );
 }

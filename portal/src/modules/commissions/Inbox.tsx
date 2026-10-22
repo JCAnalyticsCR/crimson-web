@@ -142,7 +142,7 @@ export default function Inbox({ onChange }: { onChange?: () => void }) {
             <Field label="Fecha de pago"><input className="input" type="date" value={pay.paid_on} onChange={(e) => setPay({ ...pay, paid_on: e.target.value })} /></Field>
             <Field label="Referencia" hint="Planilla oct-2026, transferencia 1234…"><input className="input" maxLength={120} value={pay.paid_ref} onChange={(e) => setPay({ ...pay, paid_ref: e.target.value })} /></Field>
           </div>
-          <p className="com-note">No se crea un gasto: la factura del aliado entra por Recepción. Los ajustes negativos se registran como descontados.</p>
+          <p className="com-note">Lo de vendedores queda registrado solo como gasto en Contabilidad (categoría «Comisiones»), una sola vez. Lo de aliados no: su factura entra por Recepción. Los ajustes negativos se registran como descontados.</p>
         </Modal>
       )}
       {anular && (
