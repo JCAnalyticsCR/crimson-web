@@ -125,7 +125,12 @@ def test_eliminar_usuario_sin_actividad_y_desactivar_al_que_tiene(client, auth, 
     h_activo = interno(client, db_session, tid, "vendedor.activo@ejemplo.com", "ventas")
     activo = uid(client, h_activo)
     c = client.get("/customers").json()["items"][0]
-    assert client.post("/quotes", json={"customer_id": c["id"], "lines": [{"name": "X", "quantity": 1, "unit_price": 100, "tax_rate": 0}]}, headers=h_activo).status_code == 201
+    assert (
+        client.post(
+            "/quotes", json={"customer_id": c["id"], "lines": [{"name": "X", "quantity": 1, "unit_price": 100, "tax_rate": 0}]}, headers=h_activo
+        ).status_code
+        == 201
+    )
 
     # reunion 2, pedido 28: con actividad ya no se rechaza; se anonimiza y desactiva (tests/test_reunion2_cuentas.py)
     a = client.get(f"/settings/users/{activo}/activity").json()
@@ -223,7 +228,9 @@ def test_regla_nueva_se_aplica_a_fechas_anteriores_y_el_vendedor_la_ve_pendiente
     vh = interno(client, db_session, tid, "vende.comision@ejemplo.com", "ventas")
     vid = uid(client, vh)
     c = client.get("/customers").json()["items"][0]
-    inv = client.post("/invoices", json={"customer_id": c["id"], "lines": [{"name": "Instalación", "quantity": 1, "unit_price": 1000000, "tax_rate": 13}]}, headers=vh).json()
+    inv = client.post(
+        "/invoices", json={"customer_id": c["id"], "lines": [{"name": "Instalación", "quantity": 1, "unit_price": 1000000, "tax_rate": 13}]}, headers=vh
+    ).json()
     assert client.post(f"/invoices/{inv['id']}/payments", json={"method": "transferencia", "amount": 1130000, "kind": "captura"}).status_code == 201
     assert client.get("/commissions/summary", headers=vh).json()["ganado"]["total"] in (0, "0", "0.00")
     desde = str(HOY.replace(day=1))
@@ -260,10 +267,21 @@ def test_correo_para_avisos_internos_recibe_pedidos_y_ventas(client, auth, db_se
     t = db_session.get(Tenant, auth["tenant"]["id"])
     db_session.refresh(t)
     o = SimpleNamespace(
-        id=1, number="WEB-0001", total=Decimal("10000"), currency="CRC", contact={"name": "Cliente Web", "email": "cliente@ejemplo.com"},
-        payment_method="SINPE Móvil", shipping_method="Retiro", status="nuevo",
+        id=1,
+        number="WEB-0001",
+        total=Decimal("10000"),
+        currency="CRC",
+        contact={"name": "Cliente Web", "email": "cliente@ejemplo.com"},
+        payment_method="SINPE Móvil",
+        shipping_method="Retiro",
+        status="nuevo",
         # lo que el aviso con el diseno base lee del pedido (vendedor, resumen de lineas y totales)
-        seller_id=None, lines=[], shipping=Decimal(0), tax_total=Decimal(0), discount_total=Decimal(0), coupon_code=None,
+        seller_id=None,
+        lines=[],
+        shipping=Decimal(0),
+        tax_total=Decimal(0),
+        discount_total=Decimal(0),
+        coupon_code=None,
     )
     n = notify_team(db_session, t, o, "nuevo")
     db_session.commit()
@@ -315,10 +333,21 @@ def test_rol_creado_desde_ventas_comisiona_recibe_avisos_y_sale_como_vendedor(cl
     assert u in [x["id"] for x in client.get("/opportunities/meta/config").json()["sellers"]]
     # aviso de pedido web y avisos a "ventas" escritos en el codigo (p. ej. la asesoria web de la tienda)
     o = SimpleNamespace(
-        id=7, number="WEB-0007", total=Decimal("1000"), currency="CRC", contact={"name": "Cliente Web", "email": "cliente@ejemplo.com"},
-        payment_method="SINPE Móvil", shipping_method="Retiro", status="nuevo",
+        id=7,
+        number="WEB-0007",
+        total=Decimal("1000"),
+        currency="CRC",
+        contact={"name": "Cliente Web", "email": "cliente@ejemplo.com"},
+        payment_method="SINPE Móvil",
+        shipping_method="Retiro",
+        status="nuevo",
         # lo que el aviso con el diseno base lee del pedido (vendedor, resumen de lineas y totales)
-        seller_id=None, lines=[], shipping=Decimal(0), tax_total=Decimal(0), discount_total=Decimal(0), coupon_code=None,
+        seller_id=None,
+        lines=[],
+        shipping=Decimal(0),
+        tax_total=Decimal(0),
+        discount_total=Decimal(0),
+        coupon_code=None,
     )
     notify_team(db_session, t, o, "nuevo")
     notify_roles(db_session, t, ("ventas",), "Asesoría web de prueba", "<p>x</p>", "opportunity", 1)
@@ -423,8 +452,57 @@ def test_eliminar_cuenta_de_prueba_no_revive_por_bootstrap(client, auth, db_sess
     db_session.expire_all()
     emitidas = extra_invites(db_session, "cuenta.prueba@ejemplo.com:ventas,nueva.prueba@ejemplo.com:lectura", base_url="https://ejemplo.invalid")
     assert [e for e, _r, _l in emitidas] == ["nueva.prueba@ejemplo.com"]
-    vivas = db_session.scalars(select(Invitation).where(Invitation.email == "cuenta.prueba@ejemplo.com", Invitation.accepted_at.is_(None), Invitation.revoked_at.is_(None))).all()
+    vivas = db_session.scalars(
+        select(Invitation).where(Invitation.email == "cuenta.prueba@ejemplo.com", Invitation.accepted_at.is_(None), Invitation.revoked_at.is_(None))
+    ).all()
     assert vivas == []
+
+
+def test_cuenta_eliminada_no_revive_al_rotar_jwt_secret_ni_fiscal_keys(client, auth, db_session, monkeypatch):
+    """La huella del correo eliminado no depende de JWT_SECRET (se rota con las sesiones, como tras el 21/10) y
+    sobrevive a rotar FISCAL_KEYS: con la llave vieja todavia detras, el arranque anota la huella con la nueva."""
+    import base64
+    import os
+
+    from pydantic import SecretStr
+
+    from app.bootstrap import extra_invites
+    from app.core.config import settings
+
+    def llave(kid: str) -> str:
+        return f"{kid}:" + base64.urlsafe_b64encode(os.urandom(32)).decode()
+
+    vieja = llave("kold")
+    monkeypatch.setattr(settings, "fiscal_keys", SecretStr(vieja))
+    t = db_session.get(Tenant, auth["tenant"]["id"])
+    if t.slug != "crimson":
+        t.slug = "crimson"
+        db_session.commit()
+    h = interno(client, db_session, t.id, "rotada.prueba@ejemplo.com", "ventas")
+    u = uid(client, h)
+    assert client.post(f"/settings/users/{u}/delete", json={"admin_password": ADMIN_PW}).status_code == 200
+    db_session.expire_all()
+    reg = db_session.scalars(select(AuditLog).where(AuditLog.action == "user_delete", AuditLog.entity_id == u)).one()
+    assert (reg.before or {}).get("email_hmac_kid") == "fk:kold"
+
+    monkeypatch.setattr(settings, "jwt_secret", settings.jwt_secret + "-rotado")  # incidente: se rota JWT_SECRET
+    assert extra_invites(db_session, "rotada.prueba@ejemplo.com:ventas", base_url="https://ejemplo.invalid") == []
+
+    monkeypatch.setattr(settings, "fiscal_keys", SecretStr(llave("knew") + "," + vieja))  # rotacion: la nueva delante
+    assert extra_invites(db_session, "rotada.prueba@ejemplo.com:ventas", base_url="https://ejemplo.invalid") == []
+    nuevas = db_session.scalars(select(AuditLog).where(AuditLog.action == "user_delete_digest", AuditLog.entity_id == u)).all()
+    assert len(nuevas) == 1 and nuevas[0].diff["email_hmac_kid"] == "fk:knew"
+    assert extra_invites(db_session, "rotada.prueba@ejemplo.com:ventas", base_url="https://ejemplo.invalid") == []
+    assert len(db_session.scalars(select(AuditLog).where(AuditLog.action == "user_delete_digest")).all()) == 1  # no repite
+
+    monkeypatch.setattr(settings, "fiscal_keys", SecretStr(settings.fiscal_keys.get_secret_value().split(",")[0]))  # se quita la vieja
+    assert extra_invites(db_session, "rotada.prueba@ejemplo.com:ventas", base_url="https://ejemplo.invalid") == []
+    assert (
+        db_session.scalars(
+            select(Invitation).where(Invitation.email == "rotada.prueba@ejemplo.com", Invitation.accepted_at.is_(None), Invitation.revoked_at.is_(None))
+        ).all()
+        == []
+    )
 
 
 def test_vendedor_no_duplica_un_cliente_existente(client, auth, db_session):
@@ -447,7 +525,9 @@ def test_correo_de_avisos_solo_lo_ve_el_admin(client, auth, db_session):
     u = uid(client, h)
     assert client.patch(f"/settings/users/{u}", json={"notify_email": "personal@ejemplo.com", "admin_password": ADMIN_PW}).status_code == 200
     assert next(x for x in client.get("/settings/users").json()["users"] if x["id"] == u)["notify_email"] == "personal@ejemplo.com"
-    assert client.put("/settings/roles/lectura", json={"permissions": {"dashboard": ["ver"], "settings": ["ver"]}, "admin_password": ADMIN_PW}).status_code == 200
+    assert (
+        client.put("/settings/roles/lectura", json={"permissions": {"dashboard": ["ver"], "settings": ["ver"]}, "admin_password": ADMIN_PW}).status_code == 200
+    )
     hl = interno(client, db_session, tid, "lee.ajustes@ejemplo.com", "lectura")
     r = client.get("/settings/users", headers=hl)
     assert r.status_code == 200, r.text
@@ -461,7 +541,9 @@ def test_regla_aplicada_hacia_atras_solo_devenga_esa_regla(client, auth, db_sess
     v1, v2 = uid(client, h1), uid(client, h2)
     c = client.get("/customers").json()["items"][0]
     for h in (h1, h2):
-        inv = client.post("/invoices", json={"customer_id": c["id"], "lines": [{"name": "X", "quantity": 1, "unit_price": 100000, "tax_rate": 0}]}, headers=h).json()
+        inv = client.post(
+            "/invoices", json={"customer_id": c["id"], "lines": [{"name": "X", "quantity": 1, "unit_price": 100000, "tax_rate": 0}]}, headers=h
+        ).json()
         assert client.post(f"/invoices/{inv['id']}/payments", json={"method": "transferencia", "amount": 100000, "kind": "captura"}).status_code == 201
     # regla de la primera persona sin aplicarla hacia atras: no devenga nada
     assert client.post("/commissions/rules", json={"user_id": v1, "name": "Uno", "percent": 5}).status_code == 201
@@ -528,7 +610,13 @@ def test_sumarle_algo_sensible_a_un_rol_pide_la_contrasena(client, auth, db_sess
     u = uid(client, h)
     assert client.patch(f"/settings/users/{u}", json={"role": code}).status_code == 200  # no es sensible: sin contrasena
     base = {k: list(v) for k, v in ROLE_PERMISSIONS["lectura"].items()}
-    for extra in ({"payroll": ["ver"]}, {"accounting": ["ver"]}, {"settings": ["ver"]}, {"aliados": ["ver", "usuarios"]}, {"portal_clientes": ["ver", "aprobar"]}):
+    for extra in (
+        {"payroll": ["ver"]},
+        {"accounting": ["ver"]},
+        {"settings": ["ver"]},
+        {"aliados": ["ver", "usuarios"]},
+        {"portal_clientes": ["ver", "aprobar"]},
+    ):
         assert client.put(f"/settings/roles/{code}", json={"permissions": {**base, **extra}}).status_code == 403, extra
         assert client.put("/settings/roles/lectura", json={"permissions": {**base, **extra}}).status_code == 403, extra
     assert "payroll" not in client.get("/auth/me", headers=h).json()["permissions"]
@@ -561,7 +649,9 @@ def test_vendedor_no_duplica_un_cliente_por_la_cedula_con_o_sin_guiones(client, 
         db_session.add(c)
         db_session.commit()
         h = interno(client, db_session, tid, f"vende.ced{guardada[-3:]}@ejemplo.com", "ventas")
-        r = client.post("/customers", json={"name": "Copia", "id_type": "juridica", "id_number": escrita, "email": f"mio{guardada[-3:]}@ejemplo.com"}, headers=h)
+        r = client.post(
+            "/customers", json={"name": "Copia", "id_type": "juridica", "id_number": escrita, "email": f"mio{guardada[-3:]}@ejemplo.com"}, headers=h
+        )
         assert r.status_code == 409 and r.json()["existing"]["id"] == c.id, r.text
         # por importacion: la fila se omite, no se crea una segunda ficha con el correo del vendedor
         csv = ("Nombre,Identificación,Correo electrónico" + chr(10) + f"Copia,{escrita},mio{guardada[-3:]}@ejemplo.com" + chr(10)).encode()

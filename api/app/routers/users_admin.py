@@ -607,7 +607,14 @@ def accept(data: AcceptIn, request: Request, response: Response, db: Session = D
         _supersede(db, inv.tenant_id, inv.email.lower(), u.id, ip, {"reemplazada_por": inv.id}, exclude_id=inv.id)
     cerrada = _close_browser_session(db, request, response, now)
     audit(
-        db, inv.tenant_id, u.id, "invite_accept", "invitation", inv.id, {"email": inv.email, "role": inv.role_code, "cuenta_existente": existing, "cerro_sesion_anterior": cerrada}, ip=ip
+        db,
+        inv.tenant_id,
+        u.id,
+        "invite_accept",
+        "invitation",
+        inv.id,
+        {"email": inv.email, "role": inv.role_code, "cuenta_existente": existing, "cerro_sesion_anterior": cerrada},
+        ip=ip,
     )
     db.commit()
     return {"ok": True, "email": u.email, "existing_account": existing, "previous_session_closed": cerrada}
@@ -865,17 +872,42 @@ def _correo_eliminado(uid: int) -> str:
     return f"eliminado.{uid}.{secrets.token_hex(4)}@{DELETED_DOMAIN}"
 
 
-def email_digest(correo: str) -> str:
-    """Huella CON CLAVE del correo para la bitacora (que no se borra): HMAC-SHA256 con una llave derivada del secreto del
-    servidor. Un sha256 sin sal se revierte probando correos del dominio de la empresa; esta no, sin el secreto.
-    bootstrap.extra_invites compara con la misma funcion."""
+DIGEST_LEGACY_KID = "jwt"
+
+
+def _digest_keys() -> list[tuple[str, bytes]]:
+    """Llaves de la huella del correo, la primera es la que se usa al eliminar. Salen de FISCAL_KEYS (que NO se rota
+    junto con las sesiones: rotar JWT_SECRET, como tras el incidente del 21/10, no las cambia) y cada huella guarda su
+    kid. Al final va la llave heredada derivada de JWT_SECRET (kid "jwt"): solo cifra si no hay FISCAL_KEYS y sirve
+    para reconocer huellas viejas mientras el secreto no cambie."""
+    import hashlib
+
+    from ..core import secretbox
+    from ..core.config import settings
+
+    out = [(f"fk:{kid}", hashlib.sha256(b"crimson:huella-correo-eliminado:v2:" + k).digest()) for kid, k in secretbox.keys()]
+    out.append((DIGEST_LEGACY_KID, hashlib.sha256(b"crimson:huella-correo-eliminado:" + settings.jwt_secret.encode()).digest()))
+    return out
+
+
+def _hmac_correo(llave: bytes, correo: str) -> str:
     import hashlib
     import hmac
 
-    from ..core.config import settings
-
-    llave = hashlib.sha256(b"crimson:huella-correo-eliminado:" + settings.jwt_secret.encode()).digest()
     return hmac.new(llave, (correo or "").strip().lower().encode(), hashlib.sha256).hexdigest()
+
+
+def email_digest(correo: str) -> dict[str, str]:
+    """Huella CON CLAVE del correo para la bitacora (que no se borra): HMAC-SHA256 con la llave principal y su kid.
+    Un sha256 sin sal se revierte probando correos del dominio de la empresa; esta no, sin el secreto."""
+    kid, llave = _digest_keys()[0]
+    return {"email_hmac": _hmac_correo(llave, correo), "email_hmac_kid": kid}
+
+
+def email_digests(correo: str) -> dict[str, str]:
+    """La huella del correo con CADA llave vigente ({kid: huella}): bootstrap.extra_invites reconoce asi una cuenta
+    eliminada aunque la huella se haya hecho con una llave que ya no es la principal."""
+    return {kid: _hmac_correo(llave, correo) for kid, llave in _digest_keys()}
 
 
 def _iniciales(nombre: str | None) -> str:
@@ -1041,7 +1073,7 @@ def user_delete(uid: int, data: DeleteIn, p: Principal = Depends(ADMIN), db: Ses
     correo = u.email or ""
     # en la bitacora (que no se borra) no queda nada que identifique a la persona: correo enmascarado, iniciales y una
     # huella con clave del correo (bootstrap.extra_invites la usa para no volver a invitar una cuenta eliminada)
-    antes = {"email": _enmascarar(correo), "email_hmac": email_digest(correo), "name": _iniciales(u.full_name), "role": m.role_code, "active": m.active}
+    antes = {"email": _enmascarar(correo), **email_digest(correo), "name": _iniciales(u.full_name), "role": m.role_code, "active": m.active}
     tid, now = p.tenant.id, datetime.now(UTC)
     for inv in _pending_internal(db, tid, correo.lower()):
         _revoke_inv(inv, p.user.id, now)

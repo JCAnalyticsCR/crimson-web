@@ -4,6 +4,8 @@ incluidas las contrasenas de buzon que todavia usan el cifrado heredado derivado
 Uso:  python -m app.tools.rotate_fiscal_keys [--dry-run]
 Procedimiento: agregar la llave nueva AL PRINCIPIO de FISCAL_KEYS (dejando la vieja detras), desplegar api y worker,
 correr esto, y recien entonces quitar la vieja. Solo imprime conteos: nunca datos.
+Ese despliegue con las dos llaves tambien deja que el arranque (bootstrap.extra_invites) anote con la llave nueva la
+huella de las cuentas eliminadas que sigan en BOOTSTRAP_INVITES, para que no vuelvan a recibir invitacion.
 """
 
 from __future__ import annotations
