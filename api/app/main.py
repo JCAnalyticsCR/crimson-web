@@ -39,6 +39,7 @@ from .routers import (
     public_api,
     public_incidents,
     reception,
+    roles_admin,
     sales,
     stock,
     store,
@@ -127,6 +128,7 @@ def create_app() -> FastAPI:
     app.include_router(fiscal_queue_router.router)  # cola "Por emitir" (plan 1.7)
     app.include_router(settings_router.router)
     app.include_router(users_admin.router)  # Ajustes -> Usuarios (/settings/users, /settings/invitations)
+    app.include_router(roles_admin.router)  # Ajustes -> Usuarios -> Roles (/settings/roles)
     app.include_router(webhooks.router)
     app.include_router(store.router)
     app.include_router(store_inventory_router.router)

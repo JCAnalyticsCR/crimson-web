@@ -28,19 +28,30 @@ def _aware(dt: datetime | None) -> datetime | None:
     return dt.replace(tzinfo=UTC) if dt is not None and dt.tzinfo is None else dt
 
 
-def role_choices() -> list[str]:
-    """Roles a los que se les puede exigir: los internos que se asignan en Ajustes (no clientes, aliados ni soporte)."""
-    from .deps import ASSIGNABLE_ROLES
+def role_choices(db=None, tenant=None) -> list[str]:
+    """Roles a los que se les puede exigir: los internos que se asignan en Ajustes (no clientes, aliados ni soporte) y,
+    con la empresa, tambien los que creo su administrador (Ajustes -> Usuarios -> Roles; reunion 21/10, pedido 20)."""
+    from .deps import ASSIGNABLE_ROLES, assignable_roles
 
+    if db is not None and tenant is not None:
+        return assignable_roles(db, tenant)
     return list(ASSIGNABLE_ROLES)
 
 
+def _own_custom(tenant, code: str) -> bool:
+    """Codigo de un rol creado por el admin de ESTA empresa (routers/roles_admin.py los arma como t{empresa}_...)."""
+    tid = getattr(tenant, "id", None)
+    return tid is not None and isinstance(code, str) and code.startswith(f"t{tid}_")
+
+
 def required_roles(tenant) -> tuple[str, ...]:
+    """Roles que exigen 2FA en esta empresa. Un rol creado a partir de uno que la exige la hereda al crearse (queda en
+    la lista y el admin la ve marcada); quitarsela despues es aflojar la politica (pide la contrasena)."""
     raw = (getattr(tenant, "settings", None) or {}).get("twofa_roles")
     if raw is None:
         return DEFAULT_ROLES
     ok = set(role_choices())
-    return tuple(r for r in raw if r in ok)
+    return tuple(r for r in raw if r in ok or _own_custom(tenant, r))
 
 
 def grace_days(tenant) -> int:

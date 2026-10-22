@@ -535,7 +535,8 @@ def notify_team(db: Session, t: Tenant, o: Order, kind: str, detail: str | None 
         f"<p>Estado: {e(STATUS_LABEL.get(o.status, o.status))}. Revisalo en Pedidos de la tienda.</p>"
     )
     roles = tuple(checkout_cfg(t).get("notify_roles") or ("admin",))
-    return notify_roles(db, t, roles, titulo, cuerpo, "order", o.id)
+    # tambien al "Correo para avisos internos" de Ajustes (pedido 48: p. ej. el buzon de ventas), ademas de los usuarios
+    return notify_roles(db, t, roles, titulo, cuerpo, "order", o.id, internal_copy=True, like=False)  # la lista la arma el admin
 
 
 DELIVERY_NOTICE_ROLES = ("admin",)  # quien coordina el mensajero (pedido 21/10: el aviso le llega a Andres)
@@ -1084,6 +1085,8 @@ def save_proof(db: Session, t: Tenant, o: Order, data: bytes, filename: str | No
         raise HTTPException(409, "Ya hay varios comprobantes para este pedido. Escribinos por WhatsApp.")
     m = proof_media(db, t, data, filename)
     kind = m.content_type
+    # el nombre que subio ESTE cliente (la multimedia se deduplica por sha256 y su nombre puede ser el de otro)
+    name = "".join(ch if (ch.isascii() and ch.isalnum()) or ch in "._- " else "_" for ch in (filename or "comprobante"))[:120] or "comprobante"
     if any(p.get("media_id") == m.id for p in (o.proofs or [])):
         raise HTTPException(409, "Ese comprobante ya estaba subido")
     o.proofs = [*(o.proofs or []), {"media_id": m.id, "filename": name, "size": m.size, "content_type": kind, "at": datetime.now(UTC).isoformat()}]

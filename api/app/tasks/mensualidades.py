@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from ..models import Customer, Recurrence, Tenant, TenantUser
 from ..services.invoice_states import cr_today
+from ..services.mail import member_inbox
 from ..services.render import money
 
 PREVIEW_DAYS = 3
@@ -104,7 +105,7 @@ def preview_upcoming(db: Session, today: date | None = None, days: int = PREVIEW
         asunto = f"En {days} días ({on:%d/%m/%Y}):"
         vistos: set[str] = set()
         for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.active, TenantUser.role_code == "admin")):
-            correo = (m.user.email or "").strip().lower()
+            correo = member_inbox(m)
             if not correo or correo in vistos or queued_before(db, t.id, correo, asunto):
                 continue  # doble disparo del beat: la vista previa de ese dia ya salio
             vistos.add(correo)

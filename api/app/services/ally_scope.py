@@ -256,7 +256,7 @@ def notify_ally_work(db: Session, tenant, user_ids, number: str, title: str, whe
     from datetime import date as _date
 
     from ..core.config import settings as cfg
-    from .mail import queue_email
+    from .mail import member_inbox, queue_email
 
     ids = {i for i in user_ids or [] if i}
     if not ids:
@@ -274,14 +274,15 @@ def notify_ally_work(db: Session, tenant, user_ids, number: str, title: str, whe
     n = 0
     for m in rows:
         u = m.user
-        if not u or not u.active or not u.email:
+        correo = member_inbox(m)
+        if not u or not u.active or not correo:
             continue
-        if _ya_avisado(db, tenant.id, u.email, number):
+        if _ya_avisado(db, tenant.id, correo, number):
             continue
         queue_email(
             db,
             tenant,
-            u.email,
+            correo,
             f"{_asunto_prefijo(number)}{title[:80]} · {fecha}",
             f"<p>{_html.escape(tenant.name)} le asignó <b>{_html.escape(number)}</b> · {_html.escape(title)} · {fecha}.</p>"
             f'<p><a href="{base}/">Abrir el portal de aliados</a></p>',

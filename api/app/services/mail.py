@@ -135,6 +135,56 @@ def blocked_recipients(tenant: Tenant) -> set[str]:
     return {str(x).strip().lower() for x in (tenant.settings or {}).get("mail_blocklist") or [] if str(x).strip()}
 
 
+def member_inbox(m) -> str:
+    """Correo al que le llegan los AVISOS internos de una membresia (reunion 21/10, pedido 22): su correo de avisos si
+    el admin le puso uno, si no el de entrada. Lo de su cuenta (contrasena, invitacion, seguridad) nunca pasa por aqui:
+    va siempre al correo de entrada (accounts.notify_security)."""
+    if m is None:
+        return ""
+    return ((getattr(m, "notify_email", None) or (m.user.email if m.user is not None else "")) or "").strip().lower()
+
+
+def user_inbox(db: Session, tenant_id: int, user) -> str:
+    """member_inbox para un usuario suelto (p. ej. el tecnico de una orden o el vendedor de una cotizacion)."""
+    from ..models import TenantUser
+
+    if user is None:
+        return ""
+    aviso = db.scalar(select(TenantUser.notify_email).where(TenantUser.tenant_id == tenant_id, TenantUser.user_id == user.id))
+    return ((aviso or user.email) or "").strip().lower()
+
+
+MAX_INTERNAL = 5
+
+
+def internal_inboxes(tenant: Tenant) -> list[str]:
+    """Ajustes -> Notificaciones -> "Correo para avisos internos" (reunion 21/10, pedido 48; p. ej. el buzon de ventas de
+    la empresa): recibe los avisos internos de pedidos y ventas ADEMAS de los usuarios. Nunca a clientes; y si esta en
+    "Correos que no reciben nada del sistema", no recibe nada."""
+    raw = (tenant.settings or {}).get("internal_notify_emails") or []
+    blocked = blocked_recipients(tenant)
+    out: list[str] = []
+    for x in raw if isinstance(raw, list) else [raw]:
+        c = str(x or "").strip().lower()
+        if c and "@" in c and c not in blocked and c not in out:
+            out.append(c)
+    return out[:MAX_INTERNAL]
+
+
+def copy_internal(
+    db: Session, tenant: Tenant, subject: str, html: str, entity: str, entity_id: int | None, *, skip: set[str] | None = None, dedupe_key: str | None = None
+) -> int:
+    """Copia de un aviso interno de pedidos o ventas al buzon interno de la empresa (internal_inboxes). Sin BCC de la
+    empresa (es interno). `skip`: correos que ya lo recibieron en esta tanda (un usuario con ese mismo correo)."""
+    n = 0
+    for correo in internal_inboxes(tenant):
+        if skip and correo in skip:
+            continue
+        queue_email(db, tenant, correo, subject, html, entity, entity_id or 0, dedupe_key=f"{dedupe_key}|{correo}" if dedupe_key else None, company_bcc=False)
+        n += 1
+    return n
+
+
 def notify_roles(
     db: Session,
     tenant: Tenant,
@@ -145,18 +195,26 @@ def notify_roles(
     entity_id: int,
     dedupe_key: str | None = None,
     *,
+    internal_copy: bool = False,
+    like: bool = True,
     company_bcc: bool = True,
 ) -> int:
-    """Avisa a todos los usuarios activos con esos roles. Lo que en las notas de Andres es
-    'Administracion recibe: nuevo levantamiento' o 'proyecto terminado, listo para facturacion'.
+    """Avisa a todos los usuarios activos con esos roles (a su correo de avisos, member_inbox). Lo que en las notas de
+    Andres es 'Administracion recibe: nuevo levantamiento' o 'proyecto terminado, listo para facturacion'.
     Con dedupe_key, cada destinatario lleva la suya (llave|correo): un aviso repetido no le llega dos veces a nadie.
+    internal_copy: tambien al "Correo para avisos internos" (avisos de pedidos y ventas).
+    like: tambien a los roles que el admin creo a partir de esos (un "Vendedor senior" recibe lo de ventas). False
+    cuando la lista viene de un ajuste que el admin arma a mano (p. ej. quien recibe los pedidos web).
     company_bcc=False: aviso interno que no va en copia a la lista de la empresa (Ajustes -> copia de toda factura)."""
+    from ..core.deps import roles_like
     from ..models import TenantUser
 
+    if like:
+        roles = roles_like(db, tenant, roles)
     n = 0
     vistos: set[str] = set()
     for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.active, TenantUser.role_code.in_(roles))):
-        correo = (m.user.email or "").strip().lower()
+        correo = member_inbox(m)
         if not correo or correo in vistos:
             continue
         vistos.add(correo)
@@ -164,6 +222,8 @@ def notify_roles(
             db, tenant, correo, subject, html, entity, entity_id, dedupe_key=f"{dedupe_key}|{correo}" if dedupe_key else None, company_bcc=company_bcc
         )
         n += 1
+    if internal_copy:
+        n += copy_internal(db, tenant, subject, html, entity, entity_id, skip=vistos, dedupe_key=dedupe_key)
     return n
 
 

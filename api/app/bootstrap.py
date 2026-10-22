@@ -56,9 +56,12 @@ def run(db: Session, admin_email: str | None, demo: bool = False, base_url: str 
 
 def extra_invites(db: Session, spec: str | None, base_url: str | None = None) -> list[tuple[str, str, str]]:
     """Invitaciones adicionales (cuentas de prueba por rol). Solo emite si el correo no tiene cuenta ni una
-    invitacion vigente, asi un reinicio no genera enlaces nuevos. Devuelve [(correo, rol, enlace)]."""
+    invitacion vigente, asi un reinicio no genera enlaces nuevos. Devuelve [(correo, rol, enlace)].
+    Un correo cuya cuenta el admin ELIMINO (Ajustes -> Usuarios -> Eliminar; reunion 21/10, pedido 21: "quitar los
+    usuarios de prueba") nunca vuelve a recibir invitacion por aqui aunque siga en BOOTSTRAP_INVITES: la cuenta
+    eliminada no revive como invitacion en cada despliegue. Para volver a darle acceso, el admin lo invita a mano."""
     from .core.deps import ASSIGNABLE_ROLES
-    from .models import Tenant
+    from .models import AuditLog, Tenant
 
     out: list[tuple[str, str, str]] = []
     if not spec:
@@ -67,11 +70,18 @@ def extra_invites(db: Session, spec: str | None, base_url: str | None = None) ->
     if not t:
         return out
     now = datetime.now(UTC)
+    retirados = {
+        str((a.diff or {}).get("email") or (a.before or {}).get("email") or "").strip().lower()
+        for a in db.scalars(select(AuditLog).where(AuditLog.tenant_id == t.id, AuditLog.action == "user_delete"))
+    }
     for item in [x.strip() for x in spec.split(",") if x.strip()]:
         email, _, role = item.partition(":")
         email, role = email.strip().lower(), (role.strip() or "lectura")
         if role not in ASSIGNABLE_ROLES or "@" not in email:
             print(f"[bootstrap] Invitacion omitida (rol o correo invalido): {item}", flush=True)
+            continue
+        if email in retirados:
+            print(f"[bootstrap] Invitacion omitida (la cuenta fue eliminada en Ajustes): {email}", flush=True)
             continue
         if db.scalar(select(User).where(User.email == email)):
             continue

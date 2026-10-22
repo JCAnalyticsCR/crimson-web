@@ -135,7 +135,7 @@ export type User = { id: number; email: string; full_name: string; totp_enabled:
 export type AllyCompanyMe = { id: number; name: string; state: "activo" | "suspendido" | "inactivo"; suspended_reason: string | null; features?: { ganancias: boolean } };
 /** twofa: el rol exige verificacion en dos pasos (deadline = fin de la gracia; blocked = vencio y no la activo). */
 export type TwoFactorState = { required: boolean; deadline: string | null; blocked: boolean };
-export type Me = { user: User; tenant: Tenant; role: string; permissions: Record<string, string[]>; memberships: { tenant: Tenant; role: string }[]; ally_company?: AllyCompanyMe | null; twofa?: TwoFactorState | null };
+export type Me = { user: User; tenant: Tenant; role: string; role_label?: string | null; role_customized?: boolean; role_base?: string | null; role_defaults?: Record<string, string[]> | null; permissions: Record<string, string[]>; memberships: { tenant: Tenant; role: string }[]; ally_company?: AllyCompanyMe | null; twofa?: TwoFactorState | null };
 export type Customer = { id: number; id_type: string; id_number: string | null; name: string; email: string | null; phone: string | null; whatsapp: string | null; currency: string; active: boolean };
 /* availability: la disponibilidad de la funcion unica del API (propio / proveedor / fecha), ver ui/Availability */
 export type Product = { id: number; name: string; code: string; item_type: string; price: number; currency: string; cabys_code: string | null; unit: string; tax_rate: number | null; category_id: number | null; show_on_web: boolean; tax_ids?: number[]; brand?: string | null; supplier_stock?: number | null; availability?: import("../ui/Availability").Availability | null };

@@ -955,7 +955,10 @@ def _crear_oportunidad(db: Session, slug: str, data: AdvisoryIn, ip: str) -> Non
         + ("<p><b>Pide instalación.</b></p>" if data.install else "")
         + f"<p>{'Cliente registrado: ' + e(cliente.name) if cliente else 'Prospecto nuevo (sin ficha de cliente)'} · Oportunidades → {e(number)}</p>"
     )
-    notify_roles(db, t, ("admin", "supervisor", "ventas"), f"Asesoría web {number} · {etiqueta} · {quien[:40]}", cuerpo, "opportunity", o.id)
+    # aviso interno de ventas: tambien al "Correo para avisos internos" (pedido 48), como los pedidos web
+    notify_roles(
+        db, t, ("admin", "supervisor", "ventas"), f"Asesoría web {number} · {etiqueta} · {quien[:40]}", cuerpo, "opportunity", o.id, internal_copy=True
+    )
     db.commit()
 
 

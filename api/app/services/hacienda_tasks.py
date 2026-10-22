@@ -125,7 +125,8 @@ def alerts_for(db: Session, t: Tenant, today: date | None = None) -> list[str]:
 
 def daily_alerts(db: Session) -> int:
     """Correo diario a admin y contabilidad. Sin XML ni secretos."""
-    from .mail import queue_email
+    from ..core.deps import roles_like
+    from .mail import member_inbox, queue_email
 
     n = 0
     for t in db.scalars(select(Tenant).where(Tenant.active)).all():
@@ -136,8 +137,8 @@ def daily_alerts(db: Session) -> int:
         lis = "".join(f"<li>{escape(x)}</li>" for x in items)
         html = f"<h3>Hacienda y recepción · pendientes</h3><ul>{lis}</ul><p>Entre a Contabilidad → Tributario para el detalle.</p>"
         seen = set()
-        for mbr in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.active, TenantUser.role_code.in_(("admin", "contabilidad")))):
-            email = (mbr.user.email or "").lower()
+        for mbr in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.active, TenantUser.role_code.in_(roles_like(db, t, ("admin", "contabilidad"))))):
+            email = member_inbox(mbr)
             if email and email not in seen and mbr.user.active:
                 seen.add(email)
                 queue_email(db, t, email, f"Hacienda: {len(items)} pendiente(s) · {t.name}", html, "hacienda", 0)

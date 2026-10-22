@@ -41,7 +41,7 @@ from ..services import invoice_states
 from ..services import sla as slasvc
 from ..services.client_access import invite_client
 from ..services.documents import audit
-from ..services.mail import notify_roles, queue_email
+from ..services.mail import notify_roles, queue_email, user_inbox
 from ..services.media_access import sign_urls
 from ..services.render import render_html, render_pdf
 from ..services.sequences import next_number
@@ -310,8 +310,9 @@ def comment(tid: int, data: CommentIn, p: Principal = Depends(need("tickets")), 
     destino = db.get(User, t.assigned_to) if t.assigned_to else None
     asunto = f"El cliente respondió en {t.number}"
     cuerpo = f"<p><b>{html.escape(p.user.full_name)}</b> escribió en <b>{html.escape(t.number)}</b>:</p><blockquote>{html.escape(data.body)}</blockquote>"
-    if destino and destino.email:
-        queue_email(db, p.tenant, destino.email, asunto, cuerpo, "support_ticket", t.id)
+    correo = user_inbox(db, p.tenant.id, destino) if destino else ""  # su correo de avisos (pedido 22)
+    if correo:
+        queue_email(db, p.tenant, correo, asunto, cuerpo, "support_ticket", t.id)
     else:
         notify_roles(db, p.tenant, ("admin", "supervisor"), asunto, cuerpo, "support_ticket", t.id)
     db.commit()

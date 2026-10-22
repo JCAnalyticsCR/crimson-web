@@ -16,7 +16,7 @@ import CollectionsCard from "./settings/CollectionsCard";
 import { MODE_LABEL, type HaciendaState } from "./accounting/hacienda";
 
 type Group = { id: number; doc_type: string; prefix: string; branch: string; terminal: string; current: number; is_default: boolean };
-type Cfg = MarginCfg & { prevent_negative_stock?: boolean; reservation_auto_approve_units?: number; reservation_days?: number; labor_day_cost?: number; labor_day_cost_civil?: number; labor_day_cost_contratado?: number; per_diem_cost?: number; travel_cost?: number; max_discount_pct?: number; archive_purge_days?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; invoice_number_fiscal?: boolean; notify_due: boolean; remind_days_before: number; collections_start_date?: string | null; collections_stages?: number[]; collections_ally_stages?: number[]; daily_close_email: boolean; notify_supervisor_equipment_sale?: boolean; bcc: string[]; mail_blocklist?: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
+type Cfg = MarginCfg & { prevent_negative_stock?: boolean; reservation_auto_approve_units?: number; reservation_days?: number; labor_day_cost?: number; labor_day_cost_civil?: number; labor_day_cost_contratado?: number; per_diem_cost?: number; travel_cost?: number; max_discount_pct?: number; archive_purge_days?: number; invoice_valid_days: number; quote_valid_days: number; invoice_footer: string; quote_footer: string; invoice_number_fiscal?: boolean; notify_due: boolean; remind_days_before: number; collections_start_date?: string | null; collections_stages?: number[]; collections_ally_stages?: number[]; daily_close_email: boolean; notify_supervisor_equipment_sale?: boolean; bcc: string[]; mail_blocklist?: string[]; internal_notify_emails?: string[]; manual_payment_methods: { name: string; instructions: string; active: boolean }[]; activity_codes: string[]; einvoice_provider: string; phones: { number: string; kind: string; main: boolean }[]; social: Record<string, string> };
 type Bank = { id: number; name: string; bank: string | null; currency: string; number: string | null; active: boolean };
 type Gw = { id: number; provider: string; client_id: string | null; secret_mask: string | null; is_primary: boolean; active: boolean; mode: string; webhook_secret_set: boolean };
 type OnvoStatus = { configured: boolean; source: "ajustes" | "entorno" | null; mode: "test" | "live" | null; webhook_secret: boolean; webhook_url: string; active: boolean; problems: string[] };
@@ -64,6 +64,10 @@ export default function Settings() {
   /* regenerar: códigos de recuperación nuevos (plan 1.10: contraseña + código ACTUAL de la app); si no, desactivar el 2FA */
   const [apagar, setApagar] = useState<{ password: string; code: string; regenerar: boolean } | null>(null);
   const [hmode, setHmode] = useState<HaciendaState["mode"] | null>(null);
+  /* «Correo para avisos internos»: sumar un buzón nuevo pide la contraseña (recibe datos de clientes y pagos); `rev`
+     vuelve a dibujar el campo con lo guardado si se cancela */
+  const [internos, setInternos] = useState<{ list: string[]; pw: string } | null>(null);
+  const [internosRev, setInternosRev] = useState(0);
 
   const load = () => {
     if (!allows("settings.ver")) return;
@@ -85,6 +89,19 @@ export default function Settings() {
   const err = (e: unknown) => toast(e instanceof Error ? e.message : "Error", "bad");
   const saveCompany = () => api("/tenant", { method: "PATCH", json: { ...company, logo_url: company.logo_url || null, sector: company.sector || null } }).then(async () => { await reload(); ok("Empresa actualizada"); }).catch(err);
   const saveCfg = (patch: Partial<Cfg>) => api<Cfg>("/settings", { method: "PUT", json: patch }).then((c) => { setCfg(c); toast("Ajustes guardados"); }).catch(err);
+  /* solo guarda si cambió (cada guardado queda en la bitácora); con un correo nuevo, primero la contraseña */
+  const saveInternos = (raw: string) => {
+    const list = [...new Set(raw.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean))];
+    const antes = (cfg?.internal_notify_emails || []).map((x) => x.toLowerCase());
+    if (list.length === antes.length && list.every((x, i) => x === antes[i])) return;
+    if (list.some((x) => !antes.includes(x))) { setInternos({ list, pw: "" }); return; }
+    saveCfg({ internal_notify_emails: list });
+  };
+  const confirmInternos = () => {
+    if (!internos) return;
+    api<Cfg>("/settings", { method: "PUT", json: { internal_notify_emails: internos.list, admin_password: internos.pw } })
+      .then((c) => { setCfg(c); setInternos(null); setInternosRev((n) => n + 1); toast("Ajustes guardados"); }).catch(err);
+  };
   const saveGroup = (g: Group) => api(`/settings/billing-groups/${g.id}`, { method: "PUT", json: { prefix: g.prefix, branch: g.branch, terminal: g.terminal, current: g.current, is_default: g.is_default } }).then(() => ok("Grupo actualizado")).catch(err);
   const saveBank = () => { if (!bank) return; const { id, ...b } = bank; api(id ? `/settings/bank-accounts/${id}` : "/settings/bank-accounts", { method: id ? "PUT" : "POST", json: b }).then(() => { setBank(null); ok("Cuenta guardada"); }).catch(err); };
   const saveGw = () => { if (!gw) return; api("/settings/gateways", { method: "PUT", json: { ...gw, secret: gw.secret || null, webhook_secret: gw.webhook_secret || null } }).then(() => { setGw(null); ok("Pasarela guardada"); }).catch(err); };
@@ -166,6 +183,7 @@ export default function Settings() {
               <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13 }}>
                 <label style={{ display: "flex", gap: 10 }}><input type="checkbox" checked={cfg.daily_close_email} onChange={(e) => saveCfg({ daily_close_email: e.target.checked })} />Enviar reporte de cierre de caja diario</label>
                 <label style={{ display: "flex", gap: 10 }}><input type="checkbox" checked={cfg.notify_supervisor_equipment_sale ?? true} onChange={(e) => saveCfg({ notify_supervisor_equipment_sale: e.target.checked })} />Avisar al supervisor las cotizaciones aceptadas de solo venta de equipo</label>
+                <Field label="Correo para avisos internos" hint="Por ejemplo, el buzón de ventas de la empresa. Recibe los avisos de pedidos web, mensajes de la tienda y cotizaciones aceptadas, además de los usuarios. El cliente nunca lo ve: a él todo le sale desde el correo de la empresa (info@). Separados por coma, hasta 5."><input key={internosRev} className="input" type="email" multiple defaultValue={(cfg.internal_notify_emails || []).join(", ")} onBlur={(e) => saveInternos(e.target.value)} placeholder="ventas@empresa.com" /></Field>
                 <Field label="Correos en copia (BCC) de toda factura" hint="Separados por coma."><input className="input" defaultValue={cfg.bcc.join(", ")} onBlur={(e) => saveCfg({ bcc: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} /></Field>
                 <Field label="Correos que no reciben nada del sistema" hint="Separados por coma. Ni avisos, ni copias, ni resúmenes (sí lo de su propia cuenta: contraseña, invitación y seguridad)."><input className="input" defaultValue={(cfg.mail_blocklist || []).join(", ")} onBlur={(e) => saveCfg({ mail_blocklist: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} /></Field>
               </div>
@@ -343,6 +361,12 @@ export default function Settings() {
         </Modal>
       )}
 
+      {internos && (
+        <Modal title="Confirmá con tu contraseña" onClose={() => { setInternos(null); setInternosRev((n) => n + 1); }} foot={<><button className="btn btn--ghost" onClick={() => { setInternos(null); setInternosRev((n) => n + 1); }}>Cancelar</button><button className="btn btn--crimson" disabled={!internos.pw} onClick={confirmInternos}>Guardar</button></>}>
+          <p style={{ marginTop: 0, fontSize: 13 }}>Los avisos internos de pedidos y ventas (con datos de clientes y de sus pagos) también van a llegar a: <b>{internos.list.join(", ")}</b>.</p>
+          <Field label="Tu contraseña de administrador"><input className="input" type="password" autoComplete="current-password" value={internos.pw} onChange={(e) => setInternos({ ...internos, pw: e.target.value })} /></Field>
+        </Modal>
+      )}
       {bank && <Modal title={bank.id ? "Cuenta bancaria" : "Nueva cuenta"} onClose={() => setBank(null)} foot={<><button className="btn btn--ghost" onClick={() => setBank(null)}>Cancelar</button><button className="btn btn--crimson" onClick={saveBank}>Guardar</button></>}>
         <div className="grid-2"><Field label="Nombre"><input className="input" value={bank.name} onChange={(e) => setBank({ ...bank, name: e.target.value })} /></Field><Field label="Banco"><input className="input" value={bank.bank} onChange={(e) => setBank({ ...bank, bank: e.target.value })} /></Field><Field label="Divisa"><select className="select" value={bank.currency} onChange={(e) => setBank({ ...bank, currency: e.target.value })}><option>CRC</option><option>USD</option></select></Field><Field label="Número / IBAN"><input className="input input--mono" style={{ textAlign: "left" }} value={bank.number} onChange={(e) => setBank({ ...bank, number: e.target.value })} /></Field></div>
       </Modal>}

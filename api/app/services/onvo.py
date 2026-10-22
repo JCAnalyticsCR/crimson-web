@@ -606,10 +606,11 @@ def _queue_admins(db: Session, t: Tenant, subject: str, html_body: str, entity: 
     """Encola (pendiente, SIN entregar) un correo a cada admin activo: lo manda el worker de correo (mail.retry_outbox).
     Asi la respuesta del webhook no espera a Resend ni delata con su demora si la empresa tiene ONVO."""
     from ..models import EmailOutbox, TenantUser
+    from .mail import member_inbox
 
     vistos: set[str] = set()
     for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.active, TenantUser.role_code == "admin")):
-        correo = (m.user.email or "").strip().lower()
+        correo = member_inbox(m)
         if not correo or correo in vistos:
             continue
         vistos.add(correo)

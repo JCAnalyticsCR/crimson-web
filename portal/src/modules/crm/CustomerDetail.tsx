@@ -70,6 +70,8 @@ export default function CustomerDetail() {
   /* sin botones que fallan (plan 1.7): con solo crm.ver (contabilidad, supervisor, tecnico) la ficha es de lectura, y
      cotizar o facturar es de quien crea ventas (las rutas /cotizaciones/nueva y /facturas/nueva piden sales.crear) */
   const editaCrm = allows("crm.editar");
+  /* el vendedor anota en la ficha (crm.notas) aunque no la pueda editar (reunión 21/10, pedido 23) */
+  const anota = allows("crm.editar|crm.notas");
   const vende = allows("sales.crear");
 
   const addNote = async () => {
@@ -118,6 +120,13 @@ export default function CustomerDetail() {
         </div>
       </div>
 
+      {!editaCrm && allows("crm.crear") && (
+        /* Reunión 21/10 (pedido 23): el vendedor ve las compras y los datos, pero no los cambia (en especial el correo,
+           para que nadie desvíe las notificaciones del cliente). Lo pide a administración. */
+        <div style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg-2)", fontSize: 13, marginBottom: 14 }}>
+          <b>Ficha de solo lectura.</b> Para cambiar un dato o el correo del cliente, pedíselo a administración.
+        </div>
+      )}
       <div className="kpi" style={{ marginBottom: 18 }}>
         <div className="kpi__card"><div className="kpi__label">Facturado</div><div className="kpi__value money">{fmtMoney(ov.kpis.billed, c.currency)}</div><div className="kpi__sub">{ov.kpis.invoices} facturas</div></div>
         <div className="kpi__card"><div className="kpi__label">Por cobrar</div><div className="kpi__value money" style={{ color: Number(ov.kpis.due) > 0 ? "var(--crimson)" : undefined }}>{fmtMoney(ov.kpis.due, c.currency)}</div><div className="kpi__sub">{ov.kpis.overdue ? `${ov.kpis.overdue} vencidas` : "al día"}</div></div>
@@ -178,7 +187,7 @@ export default function CustomerDetail() {
 
       <div className="grid-2 grid-2--split">
         <Card title="Línea de tiempo" extra={<div className="tabs">{[["", "Todo"], ["factura", "Facturas"], ["pago", "Pagos"], ["cotizacion", "Cotizaciones"], ["nota", "Notas"]].map(([k, l]) => <button key={k} className={filter === k ? "is-active" : ""} onClick={() => setFilter(k)}>{l}</button>)}</div>}>
-          {editaCrm && (
+          {anota && (
             <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
               <textarea className="textarea" style={{ minHeight: 44 }} placeholder="Agregar una nota interna (llamada, acuerdo, visita…)" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) addNote(); }} />
               <button className="btn btn--crimson btn--sm" onClick={addNote} disabled={!note.trim()}>Anotar</button>

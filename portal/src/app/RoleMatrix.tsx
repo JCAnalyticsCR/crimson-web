@@ -4,7 +4,7 @@
    sección le sale a cada rol. Nunca queda desactualizada como un texto escrito a mano. */
 import { Fragment, type CSSProperties } from "react";
 import { NAV } from "./nav";
-import { ROLES, canAny, inRoleMenu, isExternalRole } from "./roles";
+import { ROLES, canAny, customRoleCodes, inRoleMenu, isExternalRole, roleMeta } from "./roles";
 import { useSession } from "./session";
 import { ALLY_ITEMS } from "../modules/aliado/portalNav";
 
@@ -20,7 +20,7 @@ const no = <span className="muted" aria-label="no">—</span>;
 export default function RoleMatrix() {
   const { matrix } = useSession();
   // mismo orden que Ajustes y "Ver como"; sin soporte ni roles de cliente o aliado (tienen su propio portal)
-  const roles = Object.keys(ROLES).filter((r) => r !== "soporte" && !isExternalRole(r) && matrix[r]);
+  const roles = [...Object.keys(ROLES), ...customRoleCodes()].filter((r) => r !== "soporte" && !isExternalRole(r) && matrix[r]);
   if (!roles.length) return <p className="muted" style={{ fontSize: 13, margin: 0 }}>Cargando la matriz de roles…</p>;
 
   const cell = { padding: "6px 10px", textAlign: "center" as const };
@@ -32,7 +32,7 @@ export default function RoleMatrix() {
         <thead>
           <tr>
             <th style={first}>Sección</th>
-            {roles.map((r) => <th key={r} style={{ ...cell, whiteSpace: "normal", lineHeight: 1.25 }} title={ROLES[r].summary}>{ROLES[r].label}</th>)}
+            {roles.map((r) => <th key={r} style={{ ...cell, whiteSpace: "normal", lineHeight: 1.25 }} title={roleMeta(r).summary}>{roleMeta(r).label}</th>)}
           </tr>
         </thead>
         <tbody>

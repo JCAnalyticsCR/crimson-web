@@ -15,7 +15,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
-from ..core.deps import Principal, require
+from ..core.deps import Principal, require, roles_like
 from ..models import Customer, Opportunity, Project, Quote, Survey, User
 from ..services.archive import live
 from ..services.documents import CR, audit
@@ -509,7 +509,7 @@ def meta(p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = D
     equipo = [
         {"id": m.user.id, "name": m.user.full_name}
         for m in db.scalars(
-            select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(("admin", "ventas", "supervisor")))
+            select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(roles_like(db, p.tenant, ("admin", "ventas", "supervisor"), admin=True)))
         )
     ]
     return {

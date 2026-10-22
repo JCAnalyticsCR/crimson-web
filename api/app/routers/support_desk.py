@@ -22,7 +22,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
-from ..core.deps import CLIENT_ROLES, Principal, require, require_any
+from ..core.deps import CLIENT_ROLES, Principal, require, require_any, roles_like
 from ..models import (
     AllyCompany,
     AllyParticipation,
@@ -41,7 +41,7 @@ from ..models import (
 from ..services import sla as slasvc
 from ..services.archive import live
 from ..services.documents import audit
-from ..services.mail import notify_roles, queue_email
+from ..services.mail import notify_roles, queue_email, user_inbox
 from ..services.refs import check_refs
 from ..services.sequences import next_number
 from ..services.totals import d
@@ -80,7 +80,7 @@ def _writable(t: SupportTicket) -> None:
 
 
 # Quien atiende soporte: los mismos que salen en meta.agents (el responsable de un ticket)
-AGENT_ROLES = ("admin", "supervisor", "tecnico")
+AGENT_ROLES = ("admin", "supervisor", "tecnico")  # y los roles creados a partir de esos (roles_like)
 ESTADO_LABEL = {
     "nuevo": "Nuevo",
     "asignado": "Asignado",
@@ -717,7 +717,7 @@ def ticket_assign(tid: int, data: AssignIn, p: Principal = Depends(require("supp
         m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.user_id == data.assigned_to, TenantUser.active))
         u = db.get(User, data.assigned_to) if m else None
         aliado = bool(m and m.ally_company_id)
-        if not m or not u or not u.active or (not aliado and m.role_code not in AGENT_ROLES):
+        if not m or not u or not u.active or (not aliado and m.role_code not in roles_like(db, p.tenant, AGENT_ROLES, admin=True)):
             raise HTTPException(422, "Esa persona no atiende soporte")
         if aliado and data.assigned_to != t.assigned_to:
             # un usuario de una empresa aliada: el ticket queda asignado a su empresa (que participe en el proyecto)
@@ -886,7 +886,9 @@ def ticket_to_work_order(tid: int, data: VisitIn, p: Principal = Depends(require
 def ticket_meta(p: Principal = Depends(require("support_desk", "ver")), db: Session = Depends(get_db)):
     agentes = [
         {"id": m.user.id, "name": m.user.full_name, "role": m.role_code}
-        for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(AGENT_ROLES)))
+        for m in db.scalars(
+            select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(roles_like(db, p.tenant, AGENT_ROLES, admin=True)))
+        )
     ]
     ahora = datetime.now(UTC)
     # mismo alcance que la lista y la misma funcion que cada filtro (services/sla.py): el contador = las tarjetas
@@ -941,7 +943,10 @@ def ticket_agents(ally_company_id: int | None = None, p: Principal = Depends(req
         {"id": m.user.id, "name": m.user.full_name, "role": m.role_code, "company": None}
         for m in db.scalars(
             select(TenantUser).where(
-                TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(AGENT_ROLES), TenantUser.ally_company_id.is_(None)
+                TenantUser.tenant_id == p.tenant.id,
+                TenantUser.active,
+                TenantUser.role_code.in_(roles_like(db, p.tenant, AGENT_ROLES, admin=True)),
+                TenantUser.ally_company_id.is_(None),
             )
         )
         if m.user.active
@@ -987,10 +992,11 @@ def _avisar_asignado(db: Session, p: Principal, t: SupportTicket, nuevo: bool = 
         f"<p>Primera respuesta antes de {(t.sla or {}).get('respuesta', SLA_HORAS.get(t.priority, 8))} h"
         f" · resolucion antes de {(t.sla or {}).get('resolucion', '?')} h.</p>"
     )
-    if u and u.email:
-        if not nuevo and _ya_avisado(db, t, u.email):
+    correo = user_inbox(db, p.tenant.id, u) if u else ""  # su correo de avisos, si tiene (pedido 22)
+    if correo:
+        if not nuevo and _ya_avisado(db, t, correo):
             return  # el responsable va y vuelve (Tomar, selector, autoguardado del PUT): un aviso basta
-        queue_email(db, p.tenant, u.email, f"Ticket {t.number} · {t.subject[:60]}", cuerpo, "support_ticket", t.id)
+        queue_email(db, p.tenant, correo, f"Ticket {t.number} · {t.subject[:60]}", cuerpo, "support_ticket", t.id)
     elif nuevo:
         notify_roles(db, p.tenant, ("admin", "supervisor"), f"Ticket {t.number} sin asignar · {t.subject[:50]}", cuerpo, "support_ticket", t.id)
 

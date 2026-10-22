@@ -298,7 +298,7 @@ def _alert_client_rejection(db: Session, tenant: Tenant, doc: EInvoiceDocument) 
     from html import escape
 
     from ..models import TenantUser
-    from .mail import queue_email
+    from .mail import member_inbox, queue_email, user_inbox
 
     inv = db.get(Invoice, doc.invoice_id)
     what = "aceptó parcialmente" if doc.receiver_message == "2" else "rechazó"
@@ -311,14 +311,14 @@ def _alert_client_rejection(db: Session, tenant: Tenant, doc: EInvoiceDocument) 
     )
     to = set()
     for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.active, TenantUser.role_code == "admin")):
-        if m.user.email:
-            to.add(m.user.email.lower())
+        if member_inbox(m):
+            to.add(member_inbox(m))
     if inv and inv.created_by:
         from ..models import User
 
         u = db.get(User, inv.created_by)
-        if u and u.active and u.email:
-            to.add(u.email.lower())
+        if u and u.active and user_inbox(db, tenant.id, u):
+            to.add(user_inbox(db, tenant.id, u))
     for addr in sorted(to):
         queue_email(db, tenant, addr, f"El cliente {what} la factura {number}: emitir nota de crédito", html, "invoice", inv.id if inv else 0)
     audit(db, tenant.id, None, "client_receptor_message", "invoice", inv.id if inv else None, {"mensaje": doc.receiver_message, "clave": doc.clave})

@@ -498,9 +498,12 @@ def _notify_ally_request(db: Session, p: Principal, a: AllyParticipation, o: Opp
         + f'<p><a href="{base}/oportunidades/{o.id}">Responder en el portal de aliados</a></p>'
     )
     n = 0
+    from ..services.mail import user_inbox
+
     for u in rows:
-        if u.email:
-            queue_email(db, p.tenant, u.email, asunto, cuerpo, "ally_cost_request", r.id)
+        correo = user_inbox(db, p.tenant.id, u)  # su correo de avisos, si el admin le puso uno (pedido 22)
+        if correo:
+            queue_email(db, p.tenant, correo, asunto, cuerpo, "ally_cost_request", r.id)
             n += 1
     return n
 

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
+import { registerRoles, roleMeta } from "../../app/roles";
 import { Card, Field, I, Icon, Loading } from "../../ui/components";
 import "./orders.css";
 
@@ -15,7 +16,7 @@ type Methods = {
 /* verify_email: revisar que el dominio del correo del comprador reciba correo; delivery_notice: aviso interno por cada
    envio a domicilio para coordinar el mensajero (pedido 21/10) */
 type Ck = { methods: Methods; pickup: { address?: string; hours?: string }; notify_roles: string[]; free_shipping_from: number | string; auto_invoice: boolean; verify_email?: boolean; delivery_notice?: boolean };
-type Resp = { checkout: Ck; onvo: { configured: boolean; simulation: boolean; mode: "test" | "live" | null } };
+type Resp = { checkout: Ck; onvo: { configured: boolean; simulation: boolean; mode: "test" | "live" | null }; role_choices?: string[]; role_labels?: Record<string, string> };
 export type ZoneRate = { name: string; amount: number; active: boolean; zone?: string | null; [k: string]: unknown };
 
 const ZONES: [string, string][] = [["", "Según el nombre"], ["retiro", "Retiro en sitio"], ["gam", "Solo GAM"], ["fuera_gam", "Fuera de GAM"]];
@@ -25,7 +26,7 @@ export default function CheckoutSettings({ rates, onRates }: { rates: ZoneRate[]
   const [d, setD] = useState<Resp | null>(null);
   const [ck, setCk] = useState<Ck | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { api<Resp>("/store/checkout").then((r) => { setD(r); setCk(r.checkout); }).catch((e) => toast(e.message, "bad")); }, [toast]);
+  useEffect(() => { api<Resp>("/store/checkout").then((r) => { registerRoles({ labels: r.role_labels }); setD(r); setCk(r.checkout); }).catch((e) => toast(e.message, "bad")); }, [toast]);
   if (!ck || !d) return <Card title="Pagos y entrega"><Loading /></Card>;
   const m = ck.methods;
   const setM = <K extends keyof Methods>(k: K, patch: Partial<Methods[K]>) => setCk({ ...ck, methods: { ...m, [k]: { ...m[k], ...patch } } });
@@ -95,6 +96,15 @@ export default function CheckoutSettings({ rates, onRates }: { rates: ZoneRate[]
           <Field label="Dirección de retiro"><input className="input" value={ck.pickup?.address || ""} onChange={(e) => setCk({ ...ck, pickup: { ...ck.pickup, address: e.target.value } })} placeholder="Oficinas, Escazú" /></Field>
           <Field label="Horario de retiro"><input className="input" value={ck.pickup?.hours || ""} onChange={(e) => setCk({ ...ck, pickup: { ...ck.pickup, hours: e.target.value } })} placeholder="L-V 8 a. m. a 5 p. m." /></Field>
         </div>
+        {d.role_choices && d.role_choices.length > 0 && (
+          <Field label="Quién recibe el aviso de cada pedido web" hint="Además del «Correo para avisos internos» de Ajustes. Un rol creado a partir de otro que ya estaba marcado nace marcado.">
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+              {d.role_choices.map((r) => (
+                <label key={r} style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={ck.notify_roles.includes(r)} onChange={(e) => setCk({ ...ck, notify_roles: e.target.checked ? [...ck.notify_roles, r] : ck.notify_roles.filter((x) => x !== r) })} />{roleMeta(r).label}</label>
+              ))}
+            </div>
+          </Field>
+        )}
         <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={ck.auto_invoice} onChange={(e) => setCk({ ...ck, auto_invoice: e.target.checked })} />Emitir la factura electrónica automáticamente al confirmarse el pago (con cédula: FE; sin cédula: tiquete) y enviarla al cliente</label>
         <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={ck.verify_email !== false} onChange={(e) => setCk({ ...ck, verify_email: e.target.checked })} />Revisar que el correo del comprador exista (el dominio tiene que recibir correo; si la revisión no responde, la compra sigue). Los errores de dedo como «gmial.com» siempre se corrigen.</label>
         <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={ck.delivery_notice !== false} onChange={(e) => setCk({ ...ck, delivery_notice: e.target.checked })} />Avisarle al administrador por correo de cada envío a domicilio (al confirmarse el pago, o al crearse si es contra entrega) para coordinar el mensajero</label>

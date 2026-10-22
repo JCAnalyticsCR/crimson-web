@@ -14,7 +14,11 @@ Reglas que no se negocian:
 - Aqui solo se gestionan usuarios internos: los de clientes, soporte y empresas aliadas tienen su propia pantalla.
 - Aceptar una invitacion con una cuenta que ya existe pide la contrasena de esa cuenta (la propia, no una temporal):
   el enlace solo no basta. Al entrar a otra empresa sus enlaces de contrasena vivos dejan de servir.
-- No se borran usuarios: se desactivan. Todo queda en la bitacora, sin contrasenas, tokens ni enlaces.
+- Un usuario con actividad (documentos o registros a su nombre) no se borra: se desactiva. El admin solo elimina a
+  quien nunca hizo nada (p. ej. una cuenta de prueba; reunion 21/10, pedido 21), con su contrasena. Todo queda en la
+  bitacora, sin contrasenas, tokens ni enlaces.
+- Correo de avisos (pedido 22): opcional; las notificaciones internas le llegan ahi en vez de a su correo de entrada.
+  Lo cambia el admin con su contrasena y se le avisa a la persona en su correo de entrada.
 - Sin correo activo (Resend), cada accion devuelve el enlace para mandarlo por WhatsApp.
 """
 
@@ -34,7 +38,7 @@ from ..core import twofa
 from ..core.clientip import ip_key
 from ..core.config import settings as cfg
 from ..core.db import get_db
-from ..core.deps import ALLY_USER_ROLES, ASSIGNABLE_ROLES, COST_ROLE_CHOICES, Principal, cost_roles, require
+from ..core.deps import ALLY_USER_ROLES, COST_ROLE_CHOICES, Principal, assignable_roles, cost_roles, custom_roles, require
 from ..core.ratelimit import admin_users_limiter, login_limiter, token_limiter
 from ..core.reauth import actor_key, require_reauth
 from ..core.security import MAX_PASSWORD, hash_password, hash_token, new_temp_password, password_is_strong, verify_password
@@ -298,21 +302,46 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
                 "reset_link_expires_at": resets.get(m.user_id),
                 "password_changed_at": m.user.password_changed_at,
                 "member_since": m.created_at,
+                # correo de avisos: suele ser un buzon personal o externo; solo lo ve quien lo cambia (el admin)
+                "notify_email": m.notify_email if p.can("settings", "configurar") else None,
             }
             for m in rows
         ],
         "invitations": [inv_out(i) for i in inv],
-        "roles": ASSIGNABLE_ROLES,
+        "roles": assignable_roles(db, p.tenant),
+        # nombres de los roles que creo el admin (los predefinidos los nombra el portal)
+        "role_labels": {r.code: r.name for r in custom_roles(db, p.tenant)},
+        # roles que piden la contrasena al asignarlos o invitar con ellos (como el de administrador)
+        "reauth_roles": [c for c in assignable_roles(db, p.tenant) if _sensitive_role(db, p.tenant, c)],
         # "Quien ve costos": lo habilitado hoy y los roles que se pueden habilitar (el resto nunca)
         "cost_roles": list(cost_roles(p.tenant)),
         "cost_role_choices": list(COST_ROLE_CHOICES),
         # 2FA obligatorio (core/twofa.py): roles que lo exigen, dias de gracia y los roles que se pueden elegir
         "twofa_roles": list(twofa.required_roles(p.tenant)),
         "twofa_grace_days": twofa.grace_days(p.tenant),
-        "twofa_role_choices": twofa.role_choices(),
+        "twofa_role_choices": twofa.role_choices(db, p.tenant),  # tambien los roles que creo el admin
         "mail_configured": mail_configured(),
         "support_members": support_members,
     }
+
+
+def _sensitive_role(db: Session, tenant, code: str | None) -> bool:
+    """Rol que pide la contrasena al asignarlo o invitar con el, como el de administrador (con una sesion robada no se
+    crea un "casi administrador" sin reautenticar): un rol creado en Ajustes -> Roles copiado del administrador o con
+    acceso a Ajustes, contabilidad, planillas, usuarios de aliados o aprobar accesos de clientes (core/permisos.SENSITIVE),
+    y un predefinido al que la empresa le AGREGO algo de eso (darle planillas a "ventas"; lo que trae de fabrica, como la
+    contabilidad del Contador, no la pide). El administrador se trata aparte."""
+    from ..core.deps import ROLE_PERMISSIONS, _role_permissions, effective_permissions, role_root
+    from ..core.permisos import sensitive_hits
+
+    if not code or code == "admin":
+        return False
+    if code in ROLE_PERMISSIONS:
+        fabrica = ROLE_PERMISSIONS[code]
+        return bool(sensitive_hits(effective_permissions(tenant, code, fabrica)) - sensitive_hits(fabrica))
+    if role_root(db, code) == "admin":
+        return True
+    return bool(sensitive_hits(_role_permissions(db, code)))
 
 
 # ---------- Invitaciones ----------
@@ -329,16 +358,16 @@ class InviteIn(BaseModel):
 
 
 class ResendIn(BaseModel):
-    admin_password: str | None = Field(None, max_length=MAX_PASSWORD)  # solo invitaciones de admin
+    admin_password: str | None = Field(None, max_length=MAX_PASSWORD)  # invitaciones de admin o de un rol sensible
 
 
 @router.post("/invitations", status_code=201)
 def invite(data: InviteIn, response: Response, p: Principal = Depends(ADMIN), db: Session = Depends(get_db)):
     admin_users_limiter.hit(_actor_key(p))
-    if data.role not in ASSIGNABLE_ROLES:
+    if data.role not in assignable_roles(db, p.tenant):
         raise HTTPException(422, "Rol invalido")
     _guard_admin_invite(p, data.role)
-    if data.role == "admin":
+    if data.role == "admin" or _sensitive_role(db, p.tenant, data.role):
         _reauth(p, data.admin_password)
     tid = p.tenant.id
     email = str(data.email).strip().lower()
@@ -415,7 +444,8 @@ def invite_check(data: TokenIn, request: Request, db: Session = Depends(get_db))
 @router.post("/invitations/{iid}/resend")
 def invite_resend(iid: int, response: Response, data: ResendIn | None = None, p: Principal = Depends(ADMIN), db: Session = Depends(get_db)):
     """Reenviar rota el token (el enlace anterior deja de servir) y renueva el vencimiento: sirve para las vencidas.
-    Una invitacion de admin devuelve un enlace vivo para crear un admin: solo otro admin, con su contrasena."""
+    Una invitacion de admin (o de un rol sensible, _sensitive_role) devuelve un enlace vivo para entrar con ese rol: pide
+    la contrasena de quien reenvia, como al invitar."""
     inv = _invitation(db, p, iid)
     _guard_admin_invite(p, inv.role_code)
     if inv.accepted_at:
@@ -425,7 +455,7 @@ def invite_resend(iid: int, response: Response, data: ResendIn | None = None, p:
     if _member_by_email(db, p.tenant.id, inv.email.lower()):
         raise HTTPException(409, "Ese correo ya es usuario de la empresa")
     admin_users_limiter.hit(_actor_key(p))
-    if inv.role_code == "admin":
+    if inv.role_code == "admin" or _sensitive_role(db, p.tenant, inv.role_code):  # el enlace vivo entra con ese rol
         _reauth(p, data.admin_password if data else None)
     now = datetime.now(UTC)
     raw = secrets.token_urlsafe(32)
@@ -572,10 +602,12 @@ class MemberIn(BaseModel):
     active: bool | None = None
     full_name: str | None = Field(None, min_length=2, max_length=160)
     email: EmailStr | None = None
+    # correo de avisos (pedido 22): "" lo quita (los avisos vuelven a su correo de entrada)
+    notify_email: EmailStr | Literal[""] | None = None
     reason: str | None = Field(None, max_length=500)  # opcional: queda en la bitacora
     admin_password: str | None = Field(None, max_length=MAX_PASSWORD)
 
-    @field_validator("full_name", mode="before")
+    @field_validator("full_name", "notify_email", mode="before")
     @classmethod
     def _strip(cls, v):
         return v.strip() if isinstance(v, str) else v
@@ -593,12 +625,22 @@ def member_update(uid: int, data: MemberIn, p: Principal = Depends(ADMIN), db: S
     name_change = data.full_name is not None and data.full_name != u.full_name
     new_email = str(data.email).strip().lower() if data.email else None
     email_change = new_email is not None and new_email != (u.email or "").lower()
-    if role_change and data.role not in ASSIGNABLE_ROLES:
+    new_notify = (str(data.notify_email).strip().lower() or None) if data.notify_email is not None else m.notify_email
+    if new_notify and new_notify == (new_email or u.email or "").lower():
+        new_notify = None  # el mismo de entrada: no hace falta guardarlo aparte
+    notify_change = data.notify_email is not None and new_notify != m.notify_email
+    if role_change and data.role not in assignable_roles(db, p.tenant):
         raise HTTPException(422, "Rol invalido")
     _guard_admin(p, m, data.role if role_change else None)
     if (name_change or email_change) and is_shared(db, uid, tid):
         raise HTTPException(409, "Este usuario también entra a otra empresa: su nombre y correo no se cambian desde aquí")
-    if email_change or (role_change and "admin" in (m.role_code, data.role)) or (active_change and m.role_code == "admin"):
+    if (
+        email_change
+        or (notify_change and new_notify)  # desviar los avisos a otro buzon pide la contrasena; quitarlo no
+        or (role_change and "admin" in (m.role_code, data.role))
+        or (role_change and _sensitive_role(db, p.tenant, data.role))  # un rol con contabilidad, planillas, Ajustes o usuarios agregados
+        or (active_change and m.role_code == "admin")
+    ):
         _reauth(p, data.admin_password)
     if email_change:
         if db.scalar(select(User.id).where(User.email == new_email, User.id != uid)) is not None:
@@ -623,6 +665,10 @@ def member_update(uid: int, data: MemberIn, p: Principal = Depends(ADMIN), db: S
     if email_change:
         u.email = new_email
     audit_change(db, p, "user_profile", "user", uid, perfil, {"full_name": u.full_name, "email": u.email}, reason=data.reason)
+    if notify_change:
+        antes_avisos = m.notify_email
+        m.notify_email = new_notify
+        audit_change(db, p, "user_profile", "user", uid, {"correo_de_avisos": antes_avisos}, {"correo_de_avisos": new_notify}, reason=data.reason)
     db.flush()
     if active_change and data.active is False:
         # desactivar corta el acceso ya (get_session_principal relee la membresia) y sus sesiones de esta empresa
@@ -650,6 +696,16 @@ def member_update(uid: int, data: MemberIn, p: Principal = Depends(ADMIN), db: S
             notify_security(db, p.tenant, u, "Cambió tu correo para entrar a Crimson", cuerpo, to=destino)
         # una invitacion pendiente para el correo nuevo ya no tiene sentido: esa persona ya es usuaria
         _supersede(db, tid, new_email, p.user.id, p.ip, {"correo_de_usuario": uid})
+    if notify_change:
+        # la persona se entera en su correo de entrada (y en el nuevo buzon, si hay): nadie le desvia los avisos callado
+        destino = _esc(new_notify) if new_notify else "tu correo de entrada"
+        cuerpo = (
+            f"<p>Desde ahora los avisos internos de Crimson ({_esc(p.tenant.name)}) te llegan a <b>{destino}</b>. "
+            f"Lo cambió {_esc(p.user.full_name)} el {fecha_cr(datetime.now(UTC))}.</p>"
+            "<p>Tu correo para entrar no cambia. Si no lo pediste, avisale a tu administrador.</p>"
+        )
+        for destino_correo in dict.fromkeys([u.email, *([new_notify] if new_notify else [])]):
+            notify_security(db, p.tenant, u, "Cambió tu correo de avisos en Crimson", cuerpo, to=destino_correo)
     db.commit()
     return {"ok": True}
 
@@ -772,3 +828,161 @@ def sessions_revoke(uid: int, p: Principal = Depends(ADMIN), db: Session = Depen
     audit(db, tid, p.user.id, "sessions_revoke", "user", uid, {"sesiones": n}, ip=p.ip)
     db.commit()
     return {"ok": True, "revoked": n}
+
+
+# ---------- Eliminar un usuario sin actividad (reunion 21/10, pedido 21) ----------
+# Columnas que apuntan a un usuario y NO son actividad: su membresia, sus sesiones y enlaces de contrasena, y quien le
+# genero una temporal. La bitacora se mira aparte (ver _actividad).
+_NO_ES_ACTIVIDAD = {
+    ("tenant_user", "user_id"),
+    ("refresh_token", "user_id"),
+    ("password_reset", "user_id"),
+    ("password_reset", "created_by"),
+    ("user", "temp_password_by"),
+    ("invitation", "revoked_by"),
+}
+# Nombres visibles de lo que suele frenar el borrado (el resto sale con el nombre de la tabla)
+_ETIQUETAS = {
+    "quote": "Cotizaciones",
+    "invoice": "Facturas",
+    "payment": "Pagos registrados",
+    "opportunity": "Oportunidades",
+    "customer_note": "Notas de clientes",
+    "commission": "Comisiones",
+    "commission_rule": "Reglas de comisión",
+    "survey": "Levantamientos",
+    "work_order": "Órdenes de trabajo",
+    "work_order_time": "Horas en órdenes de trabajo",
+    "support_ticket": "Tickets de soporte",
+    "support_note": "Notas en tickets",
+    "stock_movement": "Movimientos de inventario",
+    "stock_reservation": "Reservas de material",
+    "purchase_request": "Solicitudes de compra",
+    "expense": "Gastos",
+    "project": "Proyectos",
+    "invitation": "Invitaciones enviadas",
+    "quote_version": "Cotizaciones enviadas",
+    "quote_acceptance": "Aceptaciones registradas",
+    "warranty_case": "Garantías",
+    "media": "Archivos subidos",
+    "audit_log": "Cambios en la bitácora",
+}
+
+
+def _columnas_de_usuario() -> list:
+    """Toda columna que guarda un id de usuario: llaves foraneas a user.id y los *_by enteros sin llave (archived_by...)."""
+    import sqlalchemy as sa
+
+    from ..core.db import Base
+
+    out = []
+    for t in Base.metadata.sorted_tables:
+        for c in t.columns:
+            if (t.name, c.name) in _NO_ES_ACTIVIDAD or t.name == "audit_log":
+                continue
+            fk = any(f.column.table.name == "user" and f.column.name == "id" for f in c.foreign_keys)
+            if fk or (c.name.endswith("_by") and isinstance(c.type, sa.Integer)):
+                out.append(c)
+    return out
+
+
+def _actividad(db: Session, uid: int) -> list[dict]:
+    """Lo que esta a nombre del usuario: documentos y registros (cualquier columna que lo nombre) y lo que hizo segun la
+    bitacora, sin contar lo de su propia cuenta (entrar, aceptar la invitacion, cambiar su contrasena o su 2FA)."""
+    from sqlalchemy import and_, not_, or_
+
+    from ..models import AuditLog
+
+    cuenta: dict[str, int] = {}
+    for c in _columnas_de_usuario():
+        n = db.scalar(select(func.count()).select_from(c.table).where(c == uid)) or 0
+        if n:
+            cuenta[c.table.name] = cuenta.get(c.table.name, 0) + int(n)
+    propio = or_(and_(AuditLog.entity == "user", AuditLog.entity_id == uid), AuditLog.action == "invite_accept")
+    n = db.scalar(select(func.count()).select_from(AuditLog).where(AuditLog.user_id == uid, not_(propio))) or 0
+    if n:
+        cuenta["audit_log"] = int(n)
+    return [{"what": _ETIQUETAS.get(k, k), "count": v} for k, v in sorted(cuenta.items(), key=lambda x: -x[1])]
+
+
+def _guard_delete(db: Session, p: Principal, uid: int) -> TenantUser:
+    if p.role != "admin":
+        raise HTTPException(403, "Solo un administrador elimina usuarios")
+    m = _member(db, p, uid)
+    if uid == p.user.id:
+        raise HTTPException(409, "No podés eliminar tu propia cuenta")
+    if is_shared(db, uid, p.tenant.id):
+        raise HTTPException(409, "Este usuario también entra a otra empresa: aquí solo se puede desactivar")
+    if m.role_code == "admin" and m.active and count_active_admins(db, p.tenant.id) <= 1:
+        raise HTTPException(409, "Debe quedar al menos un administrador activo")
+    return m
+
+
+@router.get("/users/{uid}/activity")
+def user_activity(uid: int, p: Principal = Depends(ADMIN), db: Session = Depends(get_db)):
+    """¿Se puede eliminar? Solo si no tiene nada a su nombre; si no, se desactiva (y se dice por que)."""
+    m = _member(db, p, uid)
+    act = _actividad(db, uid)
+    motivo = None
+    if p.role != "admin":
+        motivo = "Solo un administrador elimina usuarios"
+    elif uid == p.user.id:
+        motivo = "No podés eliminar tu propia cuenta"
+    elif is_shared(db, uid, p.tenant.id):
+        motivo = "También entra a otra empresa: aquí solo se puede desactivar"
+    elif act:
+        motivo = "Tiene actividad a su nombre: se desactiva para conservar quién hizo qué"
+    elif m.role_code == "admin" and m.active and count_active_admins(db, p.tenant.id) <= 1:
+        motivo = "Es el único administrador activo"
+    return {"can_delete": motivo is None, "reason": motivo, "activity": act}
+
+
+class DeleteIn(BaseModel):
+    admin_password: str = Field(max_length=MAX_PASSWORD)
+    reason: str | None = Field(None, max_length=500)
+
+
+@router.post("/users/{uid}/delete")
+def user_delete(uid: int, data: DeleteIn, p: Principal = Depends(ADMIN), db: Session = Depends(get_db)):
+    """Elimina a un usuario que nunca hizo nada (p. ej. una cuenta de prueba). Con actividad: 409 y se desactiva.
+    La cuenta se borra; si la bitacora ya la nombra (entro alguna vez) y esa tabla no admite borrados, se deja la
+    cuenta inactiva, sin acceso y con el correo liberado (se puede invitar de nuevo con el mismo correo)."""
+    from ..models import AuditLog, RefreshToken
+
+    m = _guard_delete(db, p, uid)
+    admin_users_limiter.hit(_actor_key(p))
+    _reauth(p, data.admin_password)
+    act = _actividad(db, uid)
+    if act:
+        detalle = ", ".join(f"{a['what']} ({a['count']})" for a in act[:4])
+        raise HTTPException(409, f"Tiene actividad a su nombre ({detalle}): no se elimina, desactivalo")
+    u = m.user
+    antes = {"email": u.email, "name": u.full_name, "role": m.role_code, "active": m.active}
+    tid, now = p.tenant.id, datetime.now(UTC)
+    for inv in _pending_internal(db, tid, (u.email or "").lower()):
+        _revoke_inv(inv, p.user.id, now)
+    db.delete(m)
+    for rt in db.scalars(select(RefreshToken).where(RefreshToken.user_id == uid)):
+        db.delete(rt)
+    for pr in db.scalars(select(PasswordReset).where(PasswordReset.user_id == uid)):
+        db.delete(pr)
+    db.flush()
+    en_bitacora = db.scalar(select(AuditLog.id).where(AuditLog.user_id == uid).limit(1)) is not None
+    if en_bitacora:
+        # la bitacora no se toca (en Postgres no admite UPDATE ni DELETE): la cuenta queda como rastro, sin acceso
+        u.email = f"eliminado.{uid}.{secrets.token_hex(4)}@eliminado.invalid"
+        u.full_name = f"{(u.full_name or '').strip()[:140]} (eliminado)"
+        u.active = False
+        u.password_hash = hash_password(secrets.token_urlsafe(32))
+        u.must_change_password, u.temp_password_expires_at = False, None
+        u.totp_enabled, u.totp_secret, u.totp_recovery, u.totp_pending_secret = False, None, [], None
+        u.session_version = int(u.session_version or 0) + 1
+        modo = "cuenta inactiva (la bitácora la nombra)"
+    else:
+        db.delete(u)
+        modo = "borrada"
+    db.flush()
+    audit(db, tid, p.user.id, "user_delete", "user", uid, {**antes, "modo": modo}, ip=p.ip, before=antes, reason=data.reason)
+    login_limiter.forget_account(antes["email"] or "")
+    db.commit()
+    return {"ok": True, "mode": "borrada" if not en_bitacora else "inactiva"}

@@ -74,13 +74,13 @@ def _internal_email(db: Session, tenant_id: int, user_id: int | None) -> str | N
     tu = db.scalar(select(TenantUser).where(TenantUser.tenant_id == tenant_id, TenantUser.user_id == user_id, TenantUser.active))
     if tu is None or tu.customer_id is not None or tu.ally_company_id is not None:
         return None
-    return (tu.user.email or "").strip().lower() or None
+    return mail.member_inbox(tu) or None
 
 
 def _admins(db: Session, tenant_id: int) -> list[str]:
     out: list[str] = []
     for tu in db.scalars(select(TenantUser).where(TenantUser.tenant_id == tenant_id, TenantUser.active, TenantUser.role_code == "admin")):
-        e = (tu.user.email or "").strip().lower()
+        e = mail.member_inbox(tu)
         if e and e not in out:
             out.append(e)
     return out

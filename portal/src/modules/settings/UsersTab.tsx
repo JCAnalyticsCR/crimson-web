@@ -8,13 +8,14 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, parseTs } from "../../lib/api";
 import { useSession } from "../../app/session";
-import { roleMeta } from "../../app/roles";
+import { registerRoles, roleMeta } from "../../app/roles";
 import RoleMatrix from "../../app/RoleMatrix";
+import RolesEditor from "./RolesEditor";
 import { Card, Empty, Field, I, Icon, Loading, Modal } from "../../ui/components";
 
-type U = { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null; is_self: boolean; shared: boolean; must_change_password: boolean; temp_password_expires_at: string | null; locked_until: string | null; login_failures_until?: string | null; reset_link_expires_at: string | null; password_changed_at: string | null; member_since: string | null };
+type U = { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null; is_self: boolean; shared: boolean; must_change_password: boolean; temp_password_expires_at: string | null; locked_until: string | null; login_failures_until?: string | null; reset_link_expires_at: string | null; password_changed_at: string | null; member_since: string | null; notify_email?: string | null };
 type Inv = { id: number; email: string; role: string; expires_at: string; status: "pendiente" | "vencida"; sent_count: number; last_sent_at: string | null; invited_by: string | null; email_status: string | null; email_error: string | null };
-type UsersResp = { users: U[]; invitations: Inv[]; roles: string[]; mail_configured: boolean; support_members: number; cost_roles: string[]; cost_role_choices: string[]; twofa_roles?: string[]; twofa_grace_days?: number; twofa_role_choices?: string[] };
+type UsersResp = { users: U[]; invitations: Inv[]; roles: string[]; role_labels?: Record<string, string>; reauth_roles?: string[]; mail_configured: boolean; support_members: number; cost_roles: string[]; cost_role_choices: string[]; twofa_roles?: string[]; twofa_grace_days?: number; twofa_role_choices?: string[] };
 type InviteOut = { id: number; link: string; emailed: boolean; email_error: string | null; expires_at: string };
 type ResetOut =
   | { mode: "temporal"; temp_password: string; expires_at: string; email: string; name: string; login_url: string }
@@ -54,7 +55,8 @@ export default function UsersTab() {
   /* Cambios que involucran al rol admin (o desactivar a un admin): piden la contraseña de quien actúa. */
   const [pwAsk, setPwAsk] = useState<{ title: string; text: string; cta: string; run: (pw: string) => Promise<void> } | null>(null);
 
-  const load = () => api<UsersResp>("/settings/users").then((d) => { setData(d); setLoadErr(null); }).catch((e) => setLoadErr(errMsg(e)));
+  /* los roles que creó el administrador llegan con su nombre: se registran antes de dibujar la lista */
+  const load = () => api<UsersResp>("/settings/users").then((d) => { registerRoles({ labels: d.role_labels }); setData(d); setLoadErr(null); }).catch((e) => setLoadErr(errMsg(e)));
   useEffect(() => { load(); }, []);
 
   const users = data?.users ?? [];
@@ -69,13 +71,15 @@ export default function UsersTab() {
   const patch = (uid: number, body: Record<string, unknown>) => api<{ ok: boolean }>(`/settings/users/${uid}`, { method: "PATCH", json: body });
   const copy = (text: string, msg = "Copiado") => { navigator.clipboard.writeText(text).then(() => toast(msg)).catch(() => toast("No se pudo copiar: seleccionalo y copialo a mano", "bad")); };
 
+  /* roles creados con acceso a contabilidad, planillas, Ajustes o usuarios: asignarlos pide la contraseña, como el de administrador */
+  const reauth = data?.reauth_roles ?? [];
   const changeRole = (u: U, next: string) => {
     if (next === u.role) return;
     const label = roleMeta(next).label;
-    if (u.role === "admin" || next === "admin") {
+    if (u.role === "admin" || next === "admin" || reauth.includes(next)) {
       setPwAsk({
         title: "Confirmá con tu contraseña",
-        text: next === "admin" ? `${u.name} va a pasar a Administrador: verá y podrá cambiar todo, incluidos costos, usuarios y pasarelas.` : `${u.name} deja de ser Administrador y pasa a ${label}.`,
+        text: next === "admin" ? `${u.name} va a pasar a Administrador: verá y podrá cambiar todo, incluidos costos, usuarios y pasarelas.` : reauth.includes(next) ? `${u.name} pasa a ${label}, un rol con acceso a contabilidad, planillas, Ajustes o usuarios.` : `${u.name} deja de ser Administrador y pasa a ${label}.`,
         cta: "Cambiar rol",
         run: async (pw) => { await patch(u.id, { role: next, admin_password: pw }); toast(`Rol actualizado: ${label}`); load(); },
       });
@@ -90,7 +94,7 @@ export default function UsersTab() {
     try {
       /* invitar como Administrador es crear uno: pide la contraseña de quien invita (igual que ascender a alguien) */
       const json: Record<string, unknown> = { email: invite.email.trim(), role: invite.role };
-      if (invite.role === "admin") json.admin_password = invite.admin_password;
+      if (invite.role === "admin" || reauth.includes(invite.role)) json.admin_password = invite.admin_password;
       const r = await api<InviteOut>("/settings/invitations", { method: "POST", json });
       setInviteOut({ ...r, email: invite.email.trim().toLowerCase(), role: invite.role, resent: false });
       setInvite(null);
@@ -104,9 +108,9 @@ export default function UsersTab() {
     load();
   };
   const resend = async (i: Inv) => {
-    if (i.role === "admin") {
-      /* reenviar devuelve un enlace vivo para crear un administrador: pide la contraseña */
-      setPwAsk({ title: "Confirmá con tu contraseña", text: `Vas a reenviar la invitación de ${i.email} como Administrador. El enlace anterior deja de servir.`, cta: "Reenviar", run: (pw) => doResend(i, pw) });
+    if (i.role === "admin" || reauth.includes(i.role)) {
+      /* reenviar devuelve un enlace vivo para entrar como administrador (o con un rol con contabilidad, planillas, Ajustes o usuarios): pide la contraseña */
+      setPwAsk({ title: "Confirmá con tu contraseña", text: `Vas a reenviar la invitación de ${i.email} como ${roleMeta(i.role).label}. El enlace anterior deja de servir.`, cta: "Reenviar", run: (pw) => doResend(i, pw) });
       return;
     }
     try { await doResend(i); } catch (e) { toast(errMsg(e), "bad"); load(); }
@@ -151,7 +155,7 @@ export default function UsersTab() {
                     const lockedAdmin = u.role === "admin" && !viewerIsAdmin;
                     return (
                       <tr key={u.id}>
-                        <td><b>{u.name}</b>{u.is_self && <> <Chip tone="info">Vos</Chip></>}<div className="meta" style={{ textTransform: "none" }}>{u.email}</div></td>
+                        <td><b>{u.name}</b>{u.is_self && <> <Chip tone="info">Vos</Chip></>}<div className="meta" style={{ textTransform: "none" }}>{u.email}</div>{u.notify_email && <div className="meta" style={{ textTransform: "none" }} title="Las notificaciones internas le llegan a este correo">avisos: {u.notify_email}</div>}</td>
                         <td>
                           <select className="select" style={{ height: 32, width: 165 }} value={u.role} disabled={u.is_self || !canEdit || lockedAdmin} title={u.is_self ? "Tu propio rol no se cambia desde aquí" : lockedAdmin ? "Solo un administrador puede cambiar a otro administrador" : undefined} onChange={(e) => changeRole(u, e.target.value)}>
                             {roleOptions(data.roles, u.role, viewerIsAdmin).map((r) => <option key={r} value={r}>{roleMeta(r).label}</option>)}
@@ -237,20 +241,21 @@ export default function UsersTab() {
       {canEdit && data.twofa_roles && data.twofa_role_choices && (
         <TwoFactorPolicy key={`${data.twofa_roles.join(",")}|${data.twofa_grace_days}`} current={data.twofa_roles} grace={data.twofa_grace_days ?? 7} choices={data.twofa_role_choices} onSaved={load} askPassword={setPwAsk} />
       )}
+      {me?.role === "admin" && <RolesEditor onChanged={load} />}
       {me?.role === "admin" && (
-        <Card title="Qué ve cada rol" extra={<span className="meta">sale del código: menú y permisos</span>}>
+        <Card title="Qué ve cada rol" extra={<span className="meta">menú y permisos de cada rol</span>}>
           <p className="muted" style={{ fontSize: 12.5, marginTop: 0 }}>Operación, Técnico, Catálogo y Administración son grupos del menú, no roles. Para ver el panel exactamente como lo ve una persona, usá «Ver como» arriba a la derecha.</p>
           <RoleMatrix />
         </Card>
       )}
 
       {invite && (
-        <Modal title="Invitar usuario" onClose={() => setInvite(null)} foot={<><button className="btn btn--ghost" onClick={() => setInvite(null)}>Cancelar</button><button className="btn btn--crimson" onClick={sendInvite} disabled={inviteBusy || !invite.email.includes("@") || (invite.role === "admin" && !invite.admin_password)}>{inviteBusy ? "Enviando…" : "Enviar invitación"}</button></>}>
+        <Modal title="Invitar usuario" onClose={() => setInvite(null)} foot={<><button className="btn btn--ghost" onClick={() => setInvite(null)}>Cancelar</button><button className="btn btn--crimson" onClick={sendInvite} disabled={inviteBusy || !invite.email.includes("@") || ((invite.role === "admin" || reauth.includes(invite.role)) && !invite.admin_password)}>{inviteBusy ? "Enviando…" : "Enviar invitación"}</button></>}>
           <Field label="Correo"><input className="input" type="email" autoFocus value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} placeholder="nombre@empresa.com" /></Field>
           <Field label="Rol"><select className="select" value={invite.role} onChange={(e) => setInvite({ ...invite, role: e.target.value })}>{roleOptions(data.roles, invite.role, viewerIsAdmin).map((r) => <option key={r} value={r}>{roleMeta(r).label}</option>)}</select></Field>
           <RoleSummary code={invite.role} />
-          {invite.role === "admin" && (
-            <Field label="Confirmá con tu contraseña" hint="Invitar a un Administrador pide tu contraseña: va a ver y poder cambiar todo, incluidos costos, usuarios y pasarelas.">
+          {(invite.role === "admin" || reauth.includes(invite.role)) && (
+            <Field label="Confirmá con tu contraseña" hint={invite.role === "admin" ? "Invitar a un Administrador pide tu contraseña: va a ver y poder cambiar todo, incluidos costos, usuarios y pasarelas." : "Este rol tiene acceso a contabilidad, planillas, Ajustes o usuarios: invitar con él pide tu contraseña."}>
               <input className="input" type="password" autoComplete="current-password" value={invite.admin_password} onChange={(e) => setInvite({ ...invite, admin_password: e.target.value })} />
             </Field>
           )}
@@ -277,10 +282,12 @@ export default function UsersTab() {
         <ManageModal
           u={manage}
           roles={data.roles}
+          reauthRoles={reauth}
           viewerIsAdmin={viewerIsAdmin}
           onClose={() => setManageId(null)}
           onChanged={load}
           onReset={() => setResetFor(manage)}
+          onDeleted={() => { setManageId(null); load(); }}
           askPassword={setPwAsk}
           patch={patch}
         />
@@ -327,26 +334,30 @@ function PasswordAsk({ title, text, cta, run, onClose }: Ask & { onClose: () => 
   );
 }
 
-function ManageModal({ u, roles, viewerIsAdmin, onClose, onChanged, onReset, askPassword, patch }: {
-  u: U; roles: string[]; viewerIsAdmin: boolean; onClose: () => void; onChanged: () => void; onReset: () => void;
+function ManageModal({ u, roles, reauthRoles, viewerIsAdmin, onClose, onChanged, onReset, onDeleted, askPassword, patch }: {
+  u: U; roles: string[]; reauthRoles: string[]; viewerIsAdmin: boolean; onClose: () => void; onChanged: () => void; onReset: () => void; onDeleted: () => void;
   askPassword: (a: Ask) => void; patch: (uid: number, body: Record<string, unknown>) => Promise<{ ok: boolean }>;
 }) {
   const { toast } = useSession();
-  const [f, setF] = useState({ full_name: u.name, email: u.email, role: u.role, reason: "", admin_password: "" });
+  const blank = { full_name: u.name, email: u.email, notify_email: u.notify_email || "", role: u.role, reason: "", admin_password: "" };
+  const [f, setF] = useState(blank);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  useEffect(() => { setF({ full_name: u.name, email: u.email, role: u.role, reason: "", admin_password: "" }); }, [u.id, u.name, u.email, u.role]);
+  useEffect(() => { setF({ full_name: u.name, email: u.email, notify_email: u.notify_email || "", role: u.role, reason: "", admin_password: "" }); }, [u.id, u.name, u.email, u.role, u.notify_email]);
   const lockedAdmin = u.role === "admin" && !viewerIsAdmin;
   const nameChange = f.full_name.trim() !== u.name;
   const emailChange = f.email.trim().toLowerCase() !== u.email.toLowerCase();
+  const notifyChange = f.notify_email.trim().toLowerCase() !== (u.notify_email || "").toLowerCase();
   const roleChange = f.role !== u.role;
-  const needPw = emailChange || (roleChange && (u.role === "admin" || f.role === "admin"));
-  const dirty = nameChange || emailChange || roleChange;
+  /* desviar los avisos a otro buzón pide tu contraseña (quitarlo no): nadie se lleva las notificaciones callado */
+  const needPw = emailChange || (notifyChange && !!f.notify_email.trim()) || (roleChange && (u.role === "admin" || f.role === "admin" || reauthRoles.includes(f.role)));
+  const dirty = nameChange || emailChange || notifyChange || roleChange;
 
   const save = async () => {
     const body: Record<string, unknown> = {};
     if (nameChange) body.full_name = f.full_name.trim();
     if (emailChange) body.email = f.email.trim();
+    if (notifyChange) body.notify_email = f.notify_email.trim();
     if (roleChange) body.role = f.role;
     if (f.reason.trim()) body.reason = f.reason.trim();
     if (needPw) body.admin_password = f.admin_password;
@@ -387,6 +398,9 @@ function ManageModal({ u, roles, viewerIsAdmin, onClose, onChanged, onReset, ask
           <div className="meta">Datos</div>
           <Field label="Nombre"><input className="input" value={f.full_name} disabled={u.shared || lockedAdmin} onChange={(e) => setF({ ...f, full_name: e.target.value })} /></Field>
           <Field label="Correo" hint={u.shared ? undefined : "Con este correo entra a la plataforma. Le avisamos al correo viejo y al nuevo."}><input className="input" type="email" value={f.email} disabled={u.shared || lockedAdmin} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
+          <Field label="Correo de avisos (opcional)" hint="Si lo llenás, las notificaciones internas (pedidos, cotizaciones, tickets…) le llegan aquí en vez de a su correo de entrada. Lo de su cuenta (contraseña y seguridad) sigue yendo al de entrada.">
+            <input className="input" type="email" placeholder={u.email} value={f.notify_email} disabled={lockedAdmin} onChange={(e) => setF({ ...f, notify_email: e.target.value })} />
+          </Field>
           {u.shared && <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Este usuario también entra a otra empresa: su nombre, correo y contraseña no se cambian desde aquí. El rol y el estado sí (son de esta empresa).</p>}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -405,9 +419,9 @@ function ManageModal({ u, roles, viewerIsAdmin, onClose, onChanged, onReset, ask
       </div>
       {dirty && (
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-          {needPw && <div style={{ flex: "1 1 220px" }}><Field label="Confirmá con tu contraseña" hint={emailChange ? "Cambiar el correo con el que entra pide tu contraseña." : "Todo cambio que involucre al rol Administrador pide tu contraseña."}><input className="input" type="password" autoComplete="current-password" value={f.admin_password} onChange={(e) => setF({ ...f, admin_password: e.target.value })} /></Field></div>}
+          {needPw && <div style={{ flex: "1 1 220px" }}><Field label="Confirmá con tu contraseña" hint={emailChange ? "Cambiar el correo con el que entra pide tu contraseña." : notifyChange && f.notify_email.trim() ? "Cambiar a dónde le llegan los avisos pide tu contraseña." : "Todo cambio que involucre al rol Administrador pide tu contraseña."}><input className="input" type="password" autoComplete="current-password" value={f.admin_password} onChange={(e) => setF({ ...f, admin_password: e.target.value })} /></Field></div>}
           <button className="btn btn--crimson" onClick={save} disabled={busy || (needPw && !f.admin_password) || f.full_name.trim().length < 2}>{busy ? "Guardando…" : "Guardar cambios"}</button>
-          <button className="btn btn--ghost" onClick={() => setF({ full_name: u.name, email: u.email, role: u.role, reason: "", admin_password: "" })} disabled={busy}>Deshacer</button>
+          <button className="btn btn--ghost" onClick={() => setF(blank)} disabled={busy}>Deshacer</button>
         </div>
       )}
       {err && <p style={{ color: "var(--bad)", fontSize: 13, margin: 0 }} role="alert">{err}</p>}
@@ -422,6 +436,7 @@ function ManageModal({ u, roles, viewerIsAdmin, onClose, onChanged, onReset, ask
         </div>
         {u.is_self && <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Para tu cuenta usá Mi cuenta: cambiar contraseña, verificación en dos pasos y cerrar en todos los dispositivos.</p>}
       </div>
+      {viewerIsAdmin && !u.is_self && <DeleteUser u={u} onDeleted={onDeleted} />}
     </Modal>
   );
 }
@@ -582,5 +597,53 @@ function CostRoles({ current, choices, onSaved }: { current: string[]; choices: 
       <p className="muted" style={{ fontSize: 12, margin: "0 0 12px" }}>Aplica en la siguiente acción de cada persona (al recargar la página); no hace falta que cierre sesión.</p>
       <button className="btn btn--crimson btn--sm" onClick={save} disabled={busy || !changed}>{busy ? "Guardando…" : "Guardar"}</button>
     </Card>
+  );
+}
+
+/* Eliminar un usuario (reunión 21/10, pedido 21: cuentas de prueba). Solo si no tiene nada a su nombre; con actividad
+   se desactiva y aquí se dice por qué. Pide la contraseña de quien elimina. */
+type Activity = { can_delete: boolean; reason: string | null; activity: { what: string; count: number }[] };
+function DeleteUser({ u, onDeleted }: { u: U; onDeleted: () => void }) {
+  const { toast } = useSession();
+  const [act, setAct] = useState<Activity | null>(null);
+  const [pw, setPw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const check = async () => {
+    setErr(null);
+    try { setAct(await api<Activity>(`/settings/users/${u.id}/activity`)); }
+    catch (e) { toast(errMsg(e), "bad"); }
+  };
+  const go = async () => {
+    setBusy(true); setErr(null);
+    try { await api(`/settings/users/${u.id}/delete`, { method: "POST", json: { admin_password: pw } }); toast(`${u.name} fue eliminado`); onDeleted(); }
+    catch (e) { setErr(errMsg(e)); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div style={{ borderTop: "1px solid var(--hair)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div className="meta">Eliminar</div>
+      {!act && (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <button className="btn btn--ghost btn--sm" onClick={check}>Eliminar usuario…</button>
+          <span className="muted" style={{ fontSize: 12.5 }}>Solo se elimina a quien no tiene nada a su nombre (p. ej. una cuenta de prueba). Si tiene actividad, se desactiva.</span>
+        </div>
+      )}
+      {act && !act.can_delete && (
+        <div style={{ fontSize: 13 }}>
+          <p style={{ margin: 0, color: "var(--warn)" }}><b>No se puede eliminar:</b> {act.reason}.{u.active ? " Usá «Desactivar»: deja de entrar y lo que hizo se conserva." : ""}</p>
+          {act.activity.length > 0 && <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>{act.activity.slice(0, 8).map((a) => <li key={a.what}>{a.what}: {a.count}</li>)}</ul>}
+        </div>
+      )}
+      {act && act.can_delete && (
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <p style={{ fontSize: 13, margin: 0, flexBasis: "100%" }}>{u.name} no tiene actividad a su nombre. Se elimina su acceso y su cuenta; no se puede deshacer (se puede volver a invitar con el mismo correo).</p>
+          <div style={{ flex: "1 1 220px" }}><Field label="Confirmá con tu contraseña"><input className="input" type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && pw && !busy) go(); }} /></Field></div>
+          <button className="btn btn--danger" onClick={go} disabled={busy || !pw}>{busy ? "Eliminando…" : "Eliminar definitivamente"}</button>
+          <button className="btn btn--ghost" onClick={() => { setAct(null); setPw(""); }} disabled={busy}>Cancelar</button>
+          {err && <p style={{ color: "var(--bad)", fontSize: 13, margin: 0, flexBasis: "100%" }} role="alert">{err}</p>}
+        </div>
+      )}
+    </div>
   );
 }

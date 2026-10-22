@@ -4,7 +4,7 @@ import { I, Icon } from "../ui/components";
 import { parseTs } from "../lib/api";
 import { useSession } from "./session";
 import GlobalSearch from "./GlobalSearch";
-import { ROLES, isClientRole, roleMeta } from "./roles";
+import { ROLES, customRoleCodes, isClientRole, roleMeta } from "./roles";
 import RoleWelcome from "./RoleWelcome";
 import UserMenu from "./UserMenu";
 import { NuevaVersion } from "./NuevaVersion";
@@ -94,6 +94,7 @@ export default function AppShell() {
                 <span className="meta">{viewAs ? "Viendo como" : "Ver como"}</span>
                 <select value={viewAs || "admin"} onChange={(e) => { const v = e.target.value; if (v === "aliado" || v === "tecnico_aliado") setPickAlly(v); else setViewAs(v === "admin" ? null : v); }}>
                   {Object.entries(ROLES).filter(([k]) => k !== "soporte" && !isClientRole(k)).map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
+                  {customRoleCodes().map((k) => <option key={k} value={k}>{roleMeta(k).label}</option>)}
                 </select>
               </label>
             )}
