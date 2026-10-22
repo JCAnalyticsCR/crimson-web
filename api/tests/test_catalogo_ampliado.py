@@ -5,7 +5,7 @@ fixture `eurocomp` de test_supplier_sync: sin red, sin credenciales reales."""
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models import Product, Supplier, SupplierItem
 from app.services import supplier_sync as ss
@@ -376,3 +376,30 @@ def test_put_auto_catalog_settings(client, auth, db_session, eurocomp_ampliado):
     # Verificar que el GET también lo refleja
     r2 = client.get(f"/supplier-catalog/suppliers/{sup.id}/auto-catalog")
     assert r2.json()["enabled"] is True
+
+
+def test_auto_catalog_crea_categorias_y_completa_fotos(client, auth, db_session, eurocomp_ampliado):
+    """22/10: Smart Home no tenía categoría propia y sus productos quedaban fuera del menú, sin foto ni CABYS. Ahora se
+    crea la familia como categoría padre y la subfamilia como hija, y lo recién creado trae fotos y CABYS del proveedor."""
+    from app.models import Category
+
+    enchufe = item("SH0009", "ENCHUFE INTELIGENTE TAPO P100", "SMART HOME", "Corriente Inteligente", "TP-LINK", "12.00",
+                   cabys="4632100000000", img="upload/items/2026/1/sh0009.jpg")
+    eurocomp_ampliado["items"] = [enchufe]
+    tid = auth["tenant"]["id"]
+    ss.sync_all(db_session)
+    t = db_session.get(ss.Tenant, tid)
+    ss.ac_save(t, {"enabled": True, "families": ["Smart home"], "publish_web": True})
+    db_session.commit()
+    t = db_session.get(ss.Tenant, tid)
+    assert ss.auto_catalog_run(db_session, t, ss.find_supplier(db_session, tid), commit_batches=True)["creados"] == 1
+
+    it = db_session.scalar(select(SupplierItem).where(SupplierItem.tenant_id == tid, SupplierItem.code == "SH0009"))
+    p = db_session.get(Product, it.product_id)
+    hija = db_session.get(Category, p.category_id)
+    padre = db_session.get(Category, hija.parent_id)
+    assert hija.name.lower() == "corriente inteligente" and padre.name.lower() == "smart home" and padre.parent_id is None
+    assert p.images and p.images[0]["url"].endswith("sh0009.jpg")
+    assert p.cabys_code == "4632100000000"
+    # otra vez: no duplica categorías
+    assert db_session.scalar(select(func.count()).select_from(Category).where(Category.tenant_id == tid, func.lower(Category.name) == "smart home")) == 1

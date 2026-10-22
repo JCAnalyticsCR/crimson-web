@@ -487,18 +487,35 @@ def _make_code(db: Session, tid: int, it: SupplierItem, supplier_name: str | Non
 
 
 def _suggest_cat(db: Session, tid: int, it: SupplierItem) -> int | None:
-    """Categoría propia cuyo nombre coincide con la subcategoría (o categoría) del ítem del proveedor."""
+    """Categoría propia del ítem del proveedor: la que ya se llame como su subcategoría (o categoría); si no hay, se
+    crea la familia del proveedor como categoría padre y la subfamilia como hija (22/10: Smart Home no tenía ninguna y
+    sus productos quedaban fuera del menú de la tienda)."""
     from ..models import Category
 
+    def find(name: str, parent_id: int | None | bool = False) -> Category | None:
+        q = select(Category).where(Category.tenant_id == tid, func.lower(Category.name) == name.lower())
+        if parent_id is not False:
+            q = q.where(Category.parent_id.is_(None) if parent_id is None else Category.parent_id == parent_id)
+        return db.scalars(q.order_by(Category.id)).first()
+
     for name in (it.subcategory, it.category):
-        if not name:
-            continue
-        c = db.scalar(
-            select(Category).where(Category.tenant_id == tid, func.lower(Category.name) == name.lower())
-        )
-        if c:
+        if name and (c := find(name)):
             return c.id
-    return None
+    if not it.category:
+        return None
+    parent = find(it.category, None)
+    if parent is None:
+        parent = Category(tenant_id=tid, name=it.category[:120], show_on_web=True)
+        db.add(parent)
+        db.flush()
+    if not it.subcategory:
+        return parent.id
+    child = find(it.subcategory, parent.id)
+    if child is None:
+        child = Category(tenant_id=tid, name=it.subcategory[:120], parent_id=parent.id, show_on_web=True)
+        db.add(child)
+        db.flush()
+    return child.id
 
 
 def auto_catalog_run(
@@ -631,6 +648,11 @@ def auto_catalog_run(
             db.commit()
         trim_memory()
 
+    if creados:
+        # fotos y CABYS del proveedor para lo recien creado (lo mismo que hace la sincronizacion con lo vinculado)
+        enrich_products(db, t, supplier, datetime.now(UTC))
+        if commit_batches:
+            db.commit()
     if not commit_batches:
         db.flush()
 
