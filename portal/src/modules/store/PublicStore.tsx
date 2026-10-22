@@ -141,7 +141,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
     window.clearTimeout(toastT.current);
     setToast(p.name);
     setBump((b) => b + 1);
-    toastT.current = window.setTimeout(() => setToast(null), 2600);
+    toastT.current = window.setTimeout(() => setToast(null), 5000); // tiempo para tocar "Ir al carrito" (pedido 21/10)
   };
   const setQty = (key: string, qty: number) => setCart((c) => c.map((l) => (l.key === key ? { ...l, qty: Math.max(1, Math.min(l.max && l.max > 0 ? l.max : 999, qty || 1)) } : l)));
   const remove = (key: string) => setCart((c) => c.filter((l) => l.key !== key));
@@ -243,7 +243,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
         ) : v === "mi-pedido" ? (
           <OrderLookup api={api} onFound={(t) => go({ pedido: t })} onBack={() => go({})} />
         ) : v === "pagar" || v === "cotizar" ? (
-          <Checkout api={api} store={S} cart={cart} mode={v === "pagar" && isShop ? "pedido" : "cotizacion"} onPlaced={(o) => { setCart([]); go({ pedido: o.track_token }); }} onBack={() => go({})} setQty={setQty} remove={remove} quoteText={quoteText} onTerms={() => navigate(L("/info/terminos"))} />
+          <Checkout api={api} store={S} cart={cart} mode={v === "pagar" && isShop ? "pedido" : "cotizacion"} onPlaced={(o) => { setCart([]); go({ pedido: o.track_token }); }} onBack={() => go({})} setQty={setQty} remove={remove} quoteText={quoteText} termsHref={L("/info/terminos")} />
         ) : (
           <Suspense fallback={<Spin />}>
             <Routes>
@@ -317,7 +317,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
         )}
       </aside>
 
-      {toast && <div className="sh-toast" role="status"><Ico d={IC.check} /><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "38vw" }}>Agregado: {toast}</span><button onClick={() => { setToast(null); setDrawer(true); }}>Ver {isShop ? "carrito" : "cotización"}</button></div>}
+      {toast && <div className="sh-toast" role="status"><Ico d={IC.check} /><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "38vw" }}>Agregado: {toast}</span><button onClick={() => { setToast(null); setDrawer(true); }}>Ir {isShop ? "al carrito" : "a la cotización"}</button></div>}
 
       <Consent />
 

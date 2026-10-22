@@ -9,7 +9,10 @@ import { ImageField } from "../../ui/MediaPicker";
 import { AvailBadge } from "../../ui/Availability";
 
 type Banner = { id?: string; image: string; title: string; text: string; link: string; cta: string; position: number; active: boolean };
-type Kit = { id: string; title: string; text: string; answers: { place?: string; indoor?: number; outdoor?: number; days?: number; remote?: boolean }; active: boolean };
+/* photos: fotos fijas que Andres eligio para la tarjeta (vacio = los equipos que el kit arma hoy) */
+type KitPhotoSel = { product_id: number; image: string };
+type Kit = { id: string; title: string; text: string; answers: { place?: string; indoor?: number; outdoor?: number; days?: number; remote?: boolean }; active: boolean; photos?: KitPhotoSel[] };
+type KitPhotoPv = { product_id: number; image: string; label: string; name: string; images: string[] };
 type Trust = { icon: string; title: string; text: string };
 type Faq = { q: string; a: string };
 type Showcase = {
@@ -17,7 +20,7 @@ type Showcase = {
   faq: Faq[]; pages: { envios: string; garantias: string }; legal: { terms?: string; privacy?: string };
   /* state/label: disponibilidad de la funcion unica (lo que ve el cliente) */
   featured_products: { id: number; name: string; code: string; show_on_web: boolean; state?: string | null; label?: string | null }[];
-  kits_preview?: { id: string; lines: { product_id: number; name: string; quantity: number; state: string | null; label: string | null }[]; missing: string[] }[];
+  kits_preview?: { id: string; photos?: KitPhotoPv[]; photos_manual?: boolean; lines: { product_id: number; name: string; quantity: number; state: string | null; label: string | null }[]; missing: string[] }[];
   slug: string; domain: string | null;
 };
 /* se puede comprar en linea ya (en bodega o bajo pedido con dato vigente) */
@@ -220,6 +223,7 @@ function KitsEditor({ value, preview, onSave }: { value: Kit[]; preview: NonNull
             <label style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={k.active} onChange={(e) => upd(i, { active: e.target.checked })} />Activo</label>
             <button className="btn btn--danger btn--sm" onClick={() => setList(list.filter((_, j) => j !== i))}>Quitar</button>
           </div>
+          <KitPhotosEditor value={k.photos || []} pv={preview.find((x) => x.id === k.id)} onChange={(photos) => upd(i, { photos })} />
           {(() => {
             const pv = preview.find((x) => x.id === k.id);
             if (!pv) return null;
@@ -233,6 +237,51 @@ function KitsEditor({ value, preview, onSave }: { value: Kit[]; preview: NonNull
           })()}
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Fotos fijas de la tarjeta del kit (pedido 21/10): Andres elige que equipos se ven y, si el producto tiene varias
+    fotos, cual. Sin elegir, la tarjeta muestra los equipos que el kit arma hoy (camaras, grabador, disco, switch). */
+function KitPhotosEditor({ value, pv, onChange }: { value: KitPhotoSel[]; pv?: NonNullable<Showcase["kits_preview"]>[number]; onChange: (v: KitPhotoSel[]) => void }) {
+  const [names, setNames] = useState<Record<number, string>>({}); // elegidos en esta sesion (aun sin fotos del API)
+  const saved: Record<number, KitPhotoPv> = Object.fromEntries((pv?.photos_manual ? pv.photos || [] : []).map((x) => [x.product_id, x]));
+  const thumb = (on = false): React.CSSProperties => ({ width: 46, height: 46, objectFit: "contain", background: "#f3f1ee", borderRadius: 6, border: `2px solid ${on ? "var(--crimson)" : "var(--hair)"}`, padding: 2 });
+  return (
+    <div style={{ display: "grid", gap: 6 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <b style={{ fontSize: 12.5 }}>Fotos de la tarjeta</b>
+        <span className="meta">{value.length ? `${value.length} de 4 elegidas a mano (solo cuentan productos con foto)` : "Automáticas: los equipos que el kit arma hoy"}</span>
+        {value.length > 0 && <button className="btn btn--ghost btn--sm" onClick={() => onChange([])}>Volver a automáticas</button>}
+      </div>
+      {value.length === 0 && !!pv?.photos?.length && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {pv.photos.map((ph) => <img key={ph.product_id} src={ph.image} alt={ph.name} title={`${ph.label} · ${ph.name}`} style={thumb()} />)}
+        </div>
+      )}
+      {value.map((ph, j) => {
+        const info = saved[ph.product_id];
+        const imgs = info?.images || [];
+        const cur = ph.image || info?.image || "";
+        return (
+          <div key={ph.product_id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
+            <span className="meta" style={{ width: 18 }}>{j + 1}</span>
+            <span style={{ flex: "1 1 180px", minWidth: 0 }}>{info?.name || names[ph.product_id] || `Producto ${ph.product_id}`}{!info && <span className="meta"> · la foto se ve al guardar</span>}</span>
+            {imgs.length > 1 ? imgs.map((src) => (
+              <button key={src} type="button" onClick={() => onChange(value.map((x) => (x.product_id === ph.product_id ? { ...x, image: src } : x)))} aria-label="Usar esta foto" aria-pressed={src === cur} style={{ border: 0, background: "none", padding: 0, cursor: "pointer" }}>
+                <img src={src} alt="" style={thumb(src === cur)} />
+              </button>
+            )) : cur ? <img src={cur} alt="" style={thumb()} /> : null}
+            <button className="x" onClick={() => onChange(value.filter((x) => x.product_id !== ph.product_id))} aria-label="Quitar foto"><Icon d={I.x} size={14} /></button>
+          </div>
+        );
+      })}
+      {value.length < 4 && (
+        <ProductPicker
+          placeholder="Agregar un equipo a la foto del kit (nombre o código)"
+          onPick={(p) => { if (value.some((x) => x.product_id === p.id)) return; setNames((n) => ({ ...n, [p.id]: p.name })); onChange([...value, { product_id: p.id, image: "" }]); }}
+        />
+      )}
     </div>
   );
 }

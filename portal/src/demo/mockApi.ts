@@ -32,7 +32,7 @@ const METHODS = [
 // tarifas de ejemplo (colones sin IVA, como se configuran en Mi Tienda -> Envios)
 const RATES = [
   { name: "Retiro en Alajuela", zone: "retiro" as const, amount: 0 },
-  { name: "Envío GAM", zone: "gam" as const, amount: 3500 },
+  { name: "Envío GAM", zone: "gam" as const, amount: 4000 },
   { name: "Envío fuera de la GAM", zone: "fuera_gam" as const, amount: 5500 },
 ];
 const PICKUP = { address: "Alajuela, Costa Rica · coordinamos la hora por WhatsApp", hours: "" };

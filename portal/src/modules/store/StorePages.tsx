@@ -5,7 +5,7 @@ import { cloneElement, isValidElement, useEffect, useId, useMemo, useState, type
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Blocks, type Block, type PubProduct } from "./Blocks";
 import { KIT_STORAGE } from "./KitBuilder";
-import { AvailBadge, Crumbs, EmptyHelp, IC, Ico, PriceTag, Viewfinder, useAvailability, useHead, usePath, useStore, waLink, type VProd } from "./storeKit";
+import { AvailBadge, Crumbs, EmptyHelp, IC, Ico, PriceTag, Prose, Viewfinder, useAvailability, useHead, usePath, useStore, waLink, type VProd } from "./storeKit";
 
 const SOLUTIONS: [string, string][] = [
   ["cctv", "Videovigilancia"], ["acceso", "Control de acceso"], ["redes", "Redes y WiFi"], ["ups", "Respaldo eléctrico (UPS)"],
@@ -167,19 +167,6 @@ export function AdvisoryPage() {
 }
 
 type Info = { kind: string; title: string; body: string; faq: { q: string; a: string }[] };
-/** parrafos separados por linea en blanco; una primera linea corta sin punto final se lee como subtitulo */
-function Prose({ text }: { text: string }) {
-  const blocks = text.replace(/\r/g, "").split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
-  return (
-    <div className="vt-prose">
-      {blocks.map((b, i) => {
-        const [first, ...rest] = b.split("\n");
-        const heading = rest.length > 0 && first.length < 60 && !/[.:;,]$/.test(first);
-        return heading ? <section key={i}><h2>{first}</h2><p>{rest.join("\n")}</p></section> : <p key={i}>{b}</p>;
-      })}
-    </div>
-  );
-}
 
 export function InfoPage() {
   const ctx = useStore();

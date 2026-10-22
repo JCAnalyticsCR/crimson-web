@@ -115,3 +115,22 @@
 .ck-olines li b { font-family: var(--mono); font-weight: 600; font-size: 13px; white-space: nowrap; }
 .shop .ck-lookup { max-width: 460px; margin: 24px auto; display: grid; gap: 14px; }
 .shop .ck-lookup h1 { font-family: var(--serif); font-size: clamp(28px, 3vw, 38px); margin: 0; letter-spacing: -.02em; }
+
+/* correo del comprador (pedido 21/10): error de dedo o dominio que no recibe correo, con la correccion a un toque */
+.ck-mail { margin: 6px 0 0; font-size: 13px; line-height: 1.4; color: var(--text-2); }
+.ck-mail--bad { color: var(--crimson-dark, #9b1c2c); font-weight: 600; }
+.ck-mail .ck-link { font-weight: 700; }
+
+/* terminos y condiciones encima del checkout: no se sale de la pagina ni se pierde lo llenado */
+.ck-terms { z-index: 90; }
+.ck-terms .sh-modal__box { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 12px; padding: 0; overflow: hidden; outline: none; }
+.ck-terms__head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 12px 0 clamp(18px, 3vw, 30px); }
+.ck-terms__body { overflow: auto; overscroll-behavior: contain; padding: 0 clamp(18px, 3vw, 30px); }
+.ck-terms__foot { display: flex; justify-content: flex-end; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px clamp(18px, 3vw, 30px) 18px; border-top: 1px solid var(--hair); }
+.ck-terms__foot .ck-link { margin-right: auto; font-size: 13.5px; }
+@media (max-width: 520px) {
+  .ck-terms { padding: 0; place-items: end stretch; }
+  .ck-terms .sh-modal__box { max-height: 92dvh; border-radius: var(--r) var(--r) 0 0; }
+  .ck-terms__foot .sh-btn { flex: 1 1 auto; }
+  .ck-terms__foot .ck-link { flex-basis: 100%; }
+}

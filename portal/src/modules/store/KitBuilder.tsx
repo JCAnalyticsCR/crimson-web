@@ -3,10 +3,10 @@
    recalcula al cambiar una respuesta (sin boton extra) y se puede llevar al carrito o mandar como asesoria. */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { AvailBadge, Crumbs, IC, Ico, PriceTag, Viewfinder, cannotBuy, money, useHead, usePath, useStore, waLink, type VProd } from "./storeKit";
+import { AvailBadge, Crumbs, IC, Ico, KitPhotos, PriceTag, Viewfinder, cannotBuy, money, useHead, usePath, useStore, waLink, type KitPhoto, type VProd } from "./storeKit";
 
 type Line = { role: string; reason: string; quantity: number; subtotal: string | number; product: VProd };
-type Kit = { answers: Answers; place_label: string; cameras: number; storage_tb: string | number; lines: Line[]; missing: { name: string; quantity: number; reason: string; role: string }[]; notes: string[]; total: string | number; currency: string };
+type Kit = { answers: Answers; place_label: string; cameras: number; storage_tb: string | number; lines: Line[]; missing: { name: string; quantity: number; reason: string; role: string }[]; notes: string[]; total: string | number; currency: string; photos?: KitPhoto[] };
 type Answers = { place: string; indoor: number; outdoor: number; days: number; remote: boolean };
 
 const PLACES: [string, string, string, string][] = [
@@ -37,6 +37,7 @@ export default function KitBuilder() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [added, setAdded] = useState(false);
+  const [inCart, setInCart] = useState(false); // ya agrego algo: "Ir al carrito" queda a mano (pedido 21/10)
   const total = ans.indoor + ans.outdoor;
 
   useHead({ title: `Arma tu sistema de cámaras · ${ctx.store.name}`, description: "Respondé 4 preguntas y te armamos un kit de videovigilancia con productos reales, validado por un técnico.", path: "/arma-tu-sistema" });
@@ -83,6 +84,7 @@ export default function KitBuilder() {
     // lo que no se puede comprar en linea (sin existencia ni proveedor vigente) no entra al carrito: se consulta
     priced.filter((l) => !(ctx.isShop && cannotBuy(l.product.availability))).forEach((l) => ctx.addToCart(l.product, l.quantity));
     setAdded(true);
+    setInCart(true);
     window.setTimeout(() => setAdded(false), 2200);
   };
   const toAdvice = () => {
@@ -151,6 +153,8 @@ export default function KitBuilder() {
             <span className="sh-meta"><i className="vt-rec" />Kit sugerido · {kit ? `${kit.cameras} CAM · ${kit.storage_tb} TB` : "calculando"}</span>
             <h2 id="vt-kit-title">{kit ? `${kit.place_label} · ${kit.cameras} cámara${kit.cameras === 1 ? "" : "s"}` : "Tu kit"}</h2>
           </div>
+          {/* fotos fijas de los equipos reales que arma el kit (las mismas de su tarjeta en la portada) */}
+          {kit && !!kit.photos?.length && <div className="vt-kitres__photos" data-busy={busy}><KitPhotos photos={kit.photos} cameras={kit.cameras} eager /></div>}
           {err && <p className="sh-err" role="alert">{err}</p>}
           {!kit && !err && <div className="sh-skel" style={{ height: 320 }} />}
           {kit && (
@@ -189,7 +193,7 @@ export default function KitBuilder() {
                 <button className="sh-btn sh-btn--block" data-done={added} onClick={addAll} disabled={!priced.length}>
                   <Ico d={added ? IC.check : IC.bag} />{added ? `Agregado (${priced.length} productos)` : `Agregar el equipo al ${ctx.isShop ? "carrito" : "pedido de cotización"}`}
                 </button>
-                {added && <button className="vt-link" onClick={ctx.openCart}>Ver {ctx.isShop ? "carrito" : "cotización"} →</button>}
+                {inCart && <button className="sh-btn sh-btn--block vt-gocart" onClick={ctx.openCart}><Ico d={IC.bag} />Ir {ctx.isShop ? "al carrito" : "a la cotización"}</button>}
                 {ctx.store.whatsapp && <a className="sh-btn sh-btn--ghost sh-btn--block" href={waLink(ctx.store.whatsapp, kitText)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Enviar el kit por WhatsApp</a>}
               </div>
             </>

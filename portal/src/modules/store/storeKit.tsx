@@ -348,3 +348,48 @@ export function EmptyHelp({ title, text, children }: { title: string; text?: str
     </div>
   );
 }
+
+/** Foto fija de un equipo del kit (la arma el API: los equipos reales del kit o los que eligio Andres en Vitrina). */
+export type KitPhoto = { image: string; label: string; name: string };
+
+/** Fotos fijas de los equipos de un kit (pedido 21/10): 1 a 4 en mosaico, cada una con su rotulo tipo visor. Nada se
+    mueve. Sin fotos (catalogo sin imagenes) cae al muro de camaras, que dice cuantas trae. */
+export function KitPhotos({ photos, label, cameras = 0, eager = false }: { photos: KitPhoto[]; label?: string; cameras?: number; eager?: boolean }) {
+  const shown = photos.slice(0, 4);
+  if (!shown.length) {
+    const n = Math.max(1, Math.min(16, cameras || 1));
+    const cols = Math.ceil(Math.sqrt(n));
+    return (
+      <span className="vt-kit__img vt-kit__wall" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }} aria-hidden="true">
+        {Array.from({ length: cols * cols }, (_, j) => (
+          <span key={j} className="vt-kit__cell" data-on={j < n}>{j < n && <Ico d={IC.cam} size={cols > 3 ? 12 : 16} />}{j < n && <i>{j === 0 && label ? label : `CAM ${String(j + 1).padStart(2, "0")}`}</i>}</span>
+        ))}
+      </span>
+    );
+  }
+  return (
+    <span className="vt-kit__img vt-kit__photos" data-n={shown.length}>
+      {shown.map((ph, j) => (
+        <span key={ph.image + j} className="vt-kit__photo">
+          <img src={ph.image} alt={ph.name} loading={eager ? "eager" : "lazy"} decoding="async" width={240} height={180} />
+          <i>{j === 0 && label ? <><b className="vt-rec" />{label} · </> : null}{ph.label}</i>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** Texto largo de la tienda (terminos, privacidad, envios): parrafos separados por linea en blanco; una primera linea
+    corta sin punto final se lee como subtitulo. Lo usan las paginas de informacion y el modal del checkout. */
+export function Prose({ text }: { text: string }) {
+  const blocks = text.replace(/\r/g, "").split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+  return (
+    <div className="vt-prose">
+      {blocks.map((b, i) => {
+        const [first, ...rest] = b.split("\n");
+        const heading = rest.length > 0 && first.length < 60 && !/[.:;,]$/.test(first);
+        return heading ? <section key={i}><h2>{first}</h2><p>{rest.join("\n")}</p></section> : <p key={i}>{b}</p>;
+      })}
+    </div>
+  );
+}

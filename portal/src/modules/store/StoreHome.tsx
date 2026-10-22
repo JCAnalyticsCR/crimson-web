@@ -3,10 +3,11 @@
    Todo en un solo viaje al API (/showcase); las imagenes bajo el pliegue son perezosas. */
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Grid, IC, Ico, Skeleton, Viewfinder, catIcon, money, useAvailability, useHead, usePath, useStore, waLink, type VProd } from "./storeKit";
+import { Grid, IC, Ico, KitPhotos, Skeleton, Viewfinder, catIcon, money, useAvailability, useHead, usePath, useStore, waLink, type KitPhoto, type VProd } from "./storeKit";
 
 type Cat = { id: number; name: string; path: string; count: number; image: string | null; children: { name: string; path: string; count: number }[] };
-type Kit = { id: string; title: string; text: string; answers: Record<string, unknown>; items: number; total: number | string; image: string | null; cameras: number };
+/* photos: fotos fijas de los equipos reales del kit (o las que Andres eligio en Vitrina) */
+type Kit = { id: string; title: string; text: string; answers: Record<string, unknown>; items: number; total: number | string; image: string | null; photos?: KitPhoto[]; cameras: number };
 type Banner = { id: string; image: string; title: string; text: string; link: string; cta: string };
 type Showcase = {
   headline: string; subline: string; banners: Banner[]; trust: { icon: string; title: string; text: string }[];
@@ -19,23 +20,6 @@ const isExternal = (u: string) => /^https?:\/\//.test(u);
 
 /** hora local tipo timecode del monitor (se fija al cargar: no es un reloj que repinte) */
 const stamp = () => new Intl.DateTimeFormat("es-CR", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
-
-/** Vista multicamara del grabador: una celda por camara del kit (2x2, 3x3, 4x4). Decorativa: el texto del kit ya
-    dice cuantas camaras trae. La foto del equipo va en la primera celda; las demas son pantallas en espera. */
-function KitWall({ n, label, image }: { n: number; label: string; image: string | null }) {
-  const shown = Math.max(1, Math.min(16, n));
-  const cols = Math.ceil(Math.sqrt(shown));
-  return (
-    <span className="vt-kit__img vt-kit__wall" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }} aria-hidden="true">
-      {Array.from({ length: cols * cols }, (_, j) => (
-        <span key={j} className="vt-kit__cell" data-on={j < shown}>
-          {j === 0 && image ? <img src={image} alt="" loading="lazy" decoding="async" width={160} height={100} /> : j < shown ? <Ico d={IC.cam} size={cols > 3 ? 12 : 16} /> : null}
-          {j < shown && <i>{j === 0 ? <><b className="vt-rec" />{label}</> : `CAM ${String(j + 1).padStart(2, "0")}`}</i>}
-        </span>
-      ))}
-    </span>
-  );
-}
 
 export default function StoreHome() {
   const ctx = useStore();
@@ -121,23 +105,16 @@ export default function StoreHome() {
         </section>
       )}
 
-      {/* ---------- categorias: iconografia propia (todas iguales, con o sin foto en el catalogo) ---------- */}
-      <section className="sh-wrap vt-sec" aria-labelledby="vt-cats">
-        <div className="vt-sec__head"><div><span className="sh-eyebrow">Catálogo</span><h2 id="vt-cats">Comprá por categoría</h2></div><Link to={to("/catalogo")} className="vt-more">Ver todo →</Link></div>
-        <ul className="vt-cats" aria-busy={!d}>
-          {!d ? Array.from({ length: 6 }, (_, i) => <li key={i}><div className="vt-cat vt-cat--skel"><span className="vt-cat__ico sh-skel" /><span className="vt-cat__txt"><span className="sh-skel" style={{ height: 16, width: "70%" }} /><span className="sh-skel" style={{ height: 10, width: "45%" }} /></span></div></li>) : d.categories.map((c) => (
-            <li key={c.id}>
-              <Link to={to(c.path)} className="vt-cat">
-                <span className="vt-cat__ico" aria-hidden="true"><Ico d={catIcon(c.name)} size={26} /></span>
-                <span className="vt-cat__txt"><b>{c.name}</b><span className="sh-meta">{c.count} producto{c.count === 1 ? "" : "s"}</span></span>
-                <span className="vt-cat__go" aria-hidden="true"><Ico d={IC.next} size={16} /></span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {/* ---------- kits: los productos estrella de la tienda ---------- */}
+      {/* ---------- kits: los productos estrella de la tienda. Van ANTES de las categorias (pedido 21/10: es lo que
+           mas llama la atencion). Mientras carga, el espacio queda reservado: las categorias no saltan. ---------- */}
+      {!d && !err && (
+        <section className="vt-kits" aria-hidden="true">
+          <div className="sh-wrap">
+            <div className="vt-sec__head vt-sec__head--dark"><div><span className="sh-eyebrow">Kits listos para instalar</span><h2>Sistemas completos, armados por necesidad</h2></div></div>
+            <ul className="vt-kits__list">{Array.from({ length: 3 }, (_, i) => <li key={i}><div className="vt-kit vt-kit--skel"><span className="vt-kit__img" /><span className="vt-kit__body" /></div></li>)}</ul>
+          </div>
+        </section>
+      )}
       {d && d.kits.length > 0 && (
         <section className="vt-kits" aria-labelledby="vt-kits">
           <div className="sh-wrap">
@@ -151,7 +128,7 @@ export default function StoreHome() {
                 return (
                   <li key={k.id}>
                     <Link to={to(`/arma-tu-sistema?${qs}`)} className="vt-kit">
-                      <KitWall n={k.cameras} label={`KIT ${String(i + 1).padStart(2, "0")}`} image={k.image} />
+                      <KitPhotos photos={k.photos || (k.image ? [{ image: k.image, label: "Equipo", name: k.title }] : [])} cameras={k.cameras} label={`KIT ${String(i + 1).padStart(2, "0")}`} />
                       <span className="vt-kit__body">
                         <b>{k.title}</b>
                         <span>{k.text}</span>
@@ -170,6 +147,22 @@ export default function StoreHome() {
           </div>
         </section>
       )}
+
+      {/* ---------- categorias: iconografia propia (todas iguales, con o sin foto en el catalogo) ---------- */}
+      <section className="sh-wrap vt-sec" aria-labelledby="vt-cats">
+        <div className="vt-sec__head"><div><span className="sh-eyebrow">Catálogo</span><h2 id="vt-cats">Comprá por categoría</h2></div><Link to={to("/catalogo")} className="vt-more">Ver todo →</Link></div>
+        <ul className="vt-cats" aria-busy={!d}>
+          {!d ? Array.from({ length: 6 }, (_, i) => <li key={i}><div className="vt-cat vt-cat--skel"><span className="vt-cat__ico sh-skel" /><span className="vt-cat__txt"><span className="sh-skel" style={{ height: 16, width: "70%" }} /><span className="sh-skel" style={{ height: 10, width: "45%" }} /></span></div></li>) : d.categories.map((c) => (
+            <li key={c.id}>
+              <Link to={to(c.path)} className="vt-cat">
+                <span className="vt-cat__ico" aria-hidden="true"><Ico d={catIcon(c.name)} size={26} /></span>
+                <span className="vt-cat__txt"><b>{c.name}</b><span className="sh-meta">{c.count} producto{c.count === 1 ? "" : "s"}</span></span>
+                <span className="vt-cat__go" aria-hidden="true"><Ico d={IC.next} size={16} /></span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
 
       {/* ---------- destacados ---------- */}
       <section className="sh-wrap vt-sec" aria-labelledby="vt-feat">

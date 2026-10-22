@@ -12,6 +12,7 @@ export const local = {
 export const session = {
   get(k: string) { try { return sessionStorage.getItem(k); } catch { return null; } },
   set(k: string, v: string) { try { sessionStorage.setItem(k, v); } catch { /* modo privado */ } },
+  del(k: string) { try { sessionStorage.removeItem(k); } catch { /* modo privado */ } },
 };
 export const fmtWhen = (s: string | null | undefined) =>
   s ? new Date(s).toLocaleString("es-CR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
