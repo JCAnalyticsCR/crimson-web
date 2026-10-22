@@ -55,6 +55,8 @@ export type Proposal = {
   action: "aceptada" | "parcial" | "rechazada"; iva_condition: string; activity_code: string | null; create_expense: boolean; link_expense_id: number | null;
   category_id: number | null; category: string | null; detail: string | null; reference_id: number | null; source: "proveedor" | "predeterminado" | "nota_credito";
   ready: boolean; reasons: string[]; blockers: string[];
+  /** huella de lo que se envia: si cambio entre la vista y el clic, el servidor no envia nada (409) */
+  fingerprint?: string;
 };
 
 export type ResponseAttempt = {

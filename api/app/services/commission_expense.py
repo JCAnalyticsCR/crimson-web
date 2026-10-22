@@ -9,7 +9,10 @@ libro de comisiones). Asi sale en el estado de resultados y Andres ve cuanto le 
 - Deshacer el pago (POST /commissions/undo-payment, solo el admin) anula el gasto: no se borra, queda "anulado" con
   su bitacora, y deja de contar en el estado de resultados.
 - Si al pagar se vincula un gasto que ya existia (expense_id en el PATCH), no se crea otro.
-- Aliados: no. Su factura entra por Recepcion y ese comprobante ya es el gasto (registrarlo aqui lo duplicaria).
+- Aliados: no. Su factura entra por Recepcion y ese comprobante ya es el gasto (registrarlo aqui lo duplicaria); cae en
+  la categoria que se elija al aceptarla (el estado de resultados lo avisa).
+- La referencia COMISION- es solo de este registro: un gasto a mano no la puede usar y el gasto automatico no se edita
+  en montos, fecha ni estado desde Contabilidad (se ajusta desde Comisiones). Ver routers/ops.py.
 - Un ajuste negativo pagado (descontado de un pago) registra un gasto negativo: el neto de comisiones queda bien.
 """
 
@@ -26,8 +29,15 @@ from .documents import audit
 CATEGORY = "Comisiones"
 
 
+REF_PREFIX = "COMISION-"
+
+
 def ref_of(c: Commission) -> str:
-    return f"COMISION-{c.id}"
+    return f"{REF_PREFIX}{c.id}"
+
+
+def is_commission_ref(ref: str | None) -> bool:
+    return (ref or "").strip().upper().startswith(REF_PREFIX)
 
 
 def applies(c: Commission) -> bool:
@@ -51,12 +61,13 @@ def _ours(c: Commission, e: Expense | None) -> bool:
 
 
 def _fill(db: Session, c: Commission, e: Expense) -> None:
-    from .commissions import KIND_LABEL
+    from .commissions import KIND_LABEL, safe_description
 
     who = db.get(User, c.user_id).full_name if c.user_id and db.get(User, c.user_id) else "vendedor"
     amount = Decimal(str(c.amount or 0))
     kind = KIND_LABEL.get(c.kind or "comision", "Comisión")
-    concept = c.description or (c.terms or {}).get("doc") or ""
+    # sin el % sobre la utilidad (filas viejas): el gasto lo ve cualquiera con accounting.ver, no solo quien ve costos
+    concept = safe_description(c, hide_margin=True) or (c.terms or {}).get("doc") or ""
     desc = f"{kind} de {who}" + (f" · {concept}" if concept else "")
     if amount < 0:
         desc = f"Descuento de comisión de {who}" + (f" · {concept}" if concept else "")

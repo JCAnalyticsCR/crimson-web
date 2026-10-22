@@ -2,7 +2,13 @@
 colones o en dolares) y el tablero de indicadores. Rutas de dos segmentos: no chocan con /reports/{key} (ops.py).
 
 - Estado de resultados: el mismo permiso que el reporte "resultados" (accounting.ver: el admin y contabilidad).
-- Tablero: reports.ver + ver las ventas de toda la empresa (sales.ver_todo). El margen solo con catalog.costos.
+- Tablero: reports.ver + ver las ventas de toda la empresa (sales.ver_todo) + los reportes de ventas (el permiso de
+  "Facturacion": sales.exportar). Caja y soporte ven todas las facturas para cobrar o ayudar, pero no los reportes de
+  ventas (vendedores, clientes que deben): no ven el tablero.
+- Margen (utilidad bruta y neta, comisiones, gastos): UNA regla para todas las pantallas, la del estado de resultados
+  (report_allowed "resultados": accounting.ver, el admin y el rol contable, como pide la reunion 2). El estado de
+  resultados es contable (ventas menos gastos registrados); el costo de los productos del catalogo (catalog.costos)
+  sigue siendo solo del admin y no sale aqui.
 """
 
 from __future__ import annotations
@@ -78,9 +84,11 @@ def dashboard(
     p: Principal = Depends(require("reports", "ver")),
     db: Session = Depends(get_db),
 ):
-    if not p.sees_all_sales:
+    from .ops import report_allowed
+
+    if not p.sees_all_sales or not report_allowed(p, "facturacion"):
         raise HTTPException(403, "El tablero muestra las ventas de toda la empresa: no está disponible para su rol")
     a, b = _range(from_, to)
-    out = report_board.board(db, p.tenant.id, a, b, p.sees_costs)
+    out = report_board.board(db, p.tenant.id, a, b, report_allowed(p, "resultados"))
     out["can_pnl"] = p.can("accounting", "ver")
     return out

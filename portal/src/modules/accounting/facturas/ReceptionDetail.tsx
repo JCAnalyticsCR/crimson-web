@@ -103,7 +103,7 @@ export default function ReceptionDetail() {
     setError(null);
     setBusy(true);
     try {
-      const r = await api<Detail>(`/reception/${d.id}/approve`, { method: "POST" });
+      const r = await api<Detail>(`/reception/${d.id}/approve`, { method: "POST", json: { fingerprint: d.proposal?.fingerprint ?? null } });
       setD(r);
       toast(r.hacienda_status === "simulado" ? "Respuesta aprobada (simulado: no se envió a Hacienda)" : `Respuesta aprobada y enviada · Hacienda: ${r.hacienda_status}`);
     } catch (e) { setError(e instanceof Error ? e.message : "Error"); }

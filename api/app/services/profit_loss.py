@@ -8,8 +8,10 @@ gasto: fx_rate) manda esa; si no (o quedo en 1, lo que dejaba el sistema viejo),
 (una factura en colones tambien guarda el tipo de cambio del dia) y, si no, la del BCCR de su fecha. Nunca se suma un
 dolar como un colon: sin ninguna tasa cargada sale FxMissing (422 claro).
 
-Ingresos = venta sin IVA de las facturas no anuladas del periodo (subtotal - descuento global), la misma base del
-reporte viejo. Tipo: si la factura es de un proyecto (el proyecto la apunta, nace de la cotizacion del proyecto o la
+Ingresos = venta sin IVA de las facturas del periodo (subtotal - descuento global) con la regla del borrador D-104
+(services/reports.iva_breakdown): las rechazadas por Hacienda no cuentan; una anulada por una NC aceptada sigue en
+su mes y la NC resta su venta e IVA en el mes en que se emitio (un mes cerrado no cambia despues del cierre); una
+anulada sin NC aceptada no cuenta. Tipo: si la factura es de un proyecto (el proyecto la apunta, nace de la cotizacion del proyecto o la
 oportunidad es "proyecto") todo va a Proyectos; si no, cada linea por el tipo de su producto (producto -> Equipos y
 productos, servicio -> Servicios; sin producto del catalogo -> Otros). El descuento global se reparte en proporcion.
 
@@ -141,36 +143,71 @@ def _project_invoice_ids(db: Session, tid: int, invs: list[Invoice]) -> set[int]
     return out
 
 
-def invoices_of(db: Session, tid: int, a: date, b: date) -> list[Invoice]:
-    return list(
-        db.scalars(
-            select(Invoice)
-            .where(Invoice.tenant_id == tid, Invoice.issue_date >= a, Invoice.issue_date <= b, Invoice.status != "anulada")
-            .order_by(Invoice.issue_date, Invoice.id)
+@dataclass
+class Sale:
+    """Una factura en el periodo con su signo: +1 en su mes de emision, -1 en el mes de la NC que la anulo. `on` es la
+    fecha del movimiento (la de la factura o la de la NC); la tasa siempre es la de la factura."""
+
+    inv: Invoice
+    sign: int
+    on: date
+
+
+def invoices_of(db: Session, tid: int, a: date, b: date) -> list[Sale]:
+    """Las ventas del periodo con la misma regla que el IVA debito del D-104 (services/reports.iva_breakdown)."""
+    from ..models import EInvoiceDocument
+    from .documents import local_date
+
+    nc_inv = {
+        x.invoice_id: x
+        for x in db.scalars(
+            select(EInvoiceDocument).where(EInvoiceDocument.tenant_id == tid, EInvoiceDocument.doc_type == "NC", EInvoiceDocument.status == "aceptada")
         )
-    )
+    }
+    out: list[Sale] = []
+    for inv in db.scalars(
+        select(Invoice).where(Invoice.tenant_id == tid, Invoice.issue_date >= a, Invoice.issue_date <= b).order_by(Invoice.issue_date, Invoice.id)
+    ):
+        if inv.einvoice_status == "rechazada":
+            continue
+        if inv.status == "anulada" and inv.id not in nc_inv:
+            continue
+        out.append(Sale(inv, 1, inv.issue_date))
+    for inv_id, nc in nc_inv.items():
+        when = local_date(nc.created_at)  # la NC resta en el mes en que se emitio
+        if when and a <= when <= b:
+            inv = db.get(Invoice, inv_id)
+            if inv is not None and inv.tenant_id == tid:
+                out.append(Sale(inv, -1, when))
+    return out
 
 
-def income(db: Session, tid: int, a: date, b: date, conv: Converter, invs: list[Invoice] | None = None) -> dict:
-    """Ingresos (sin IVA) por tipo y por vendedor, e IVA cobrado, en la moneda base."""
-    invs = invoices_of(db, tid, a, b) if invs is None else invs
-    proyectos = _project_invoice_ids(db, tid, invs)
-    pids = {ln.product_id for i in invs for ln in i.lines if ln.product_id}
+def net_of(inv: Invoice) -> Decimal:
+    return d(inv.subtotal) - d(inv.discount_total)
+
+
+def income(db: Session, tid: int, a: date, b: date, conv: Converter, invs: list[Sale] | None = None) -> dict:
+    """Ingresos (sin IVA) por tipo y por vendedor, e IVA cobrado, en la moneda base (las NC del periodo restan)."""
+    sales = invoices_of(db, tid, a, b) if invs is None else invs
+    plain = [s.inv for s in sales]
+    proyectos = _project_invoice_ids(db, tid, plain)
+    pids = {ln.product_id for i in plain for ln in i.lines if ln.product_id}
     kinds = dict(db.execute(select(Product.id, Product.item_type).where(Product.id.in_(pids))).all()) if pids else {}
     por_tipo = {k: Line(k, TYPE_LABEL[k]) for k in TYPE_ORDER}
     vendedores: dict[int | None, Line] = {}
     total = iva = Decimal(0)
     n_docs = 0
-    for inv in invs:
-        net = conv(d(inv.subtotal) - d(inv.discount_total), inv.currency, inv.fx_sell, inv.issue_date)
-        iva += conv(inv.tax_total, inv.currency, inv.fx_sell, inv.issue_date)
+    for s in sales:
+        inv, sign = s.inv, s.sign
+        net = sign * conv(net_of(inv), inv.currency, inv.fx_sell, inv.issue_date)
+        iva += sign * conv(inv.tax_total, inv.currency, inv.fx_sell, inv.issue_date)
         total += net
-        n_docs += 1
+        n_docs += 1 if sign > 0 else 0
         sk = inv.seller_id
         if sk not in vendedores:
             vendedores[sk] = Line(str(sk or "sin"), NO_SELLER if sk is None else "", extra={"seller_id": sk, "invoices": 0})
         vendedores[sk].amount += net
-        vendedores[sk].extra["invoices"] += 1
+        vendedores[sk].extra["invoices"] += 1 if sign > 0 else 0
         if inv.id in proyectos:
             por_tipo["proyectos"].amount += net
             continue
@@ -259,6 +296,18 @@ def unpaid_commission_expenses(db: Session, tid: int, a: date, b: date) -> int:
     return sum(1 for c in rows if applies(c))
 
 
+def ally_commissions_paid(db: Session, tid: int, a: date, b: date) -> int:
+    """Comisiones de aliado pagadas en el periodo: no van a "Comisiones" (su factura entra por Recepcion y cuenta en la
+    categoria con que se acepto). El estado de resultados lo dice para que el indicador no se lea como el total."""
+    from ..models import Commission
+    from .commission_expense import applies
+
+    rows = db.scalars(
+        select(Commission).where(Commission.tenant_id == tid, Commission.status == "pagada", Commission.paid_on >= a, Commission.paid_on <= b)
+    ).all()
+    return sum(1 for c in rows if not applies(c))
+
+
 def build(db: Session, tid: int, a: date, b: date, base: str = "CRC") -> dict:
     base = (base or "CRC").upper()
     conv = Converter(db, base)
@@ -276,6 +325,12 @@ def build(db: Session, tid: int, a: date, b: date, base: str = "CRC") -> dict:
     sin_gasto = unpaid_commission_expenses(db, tid, a, b)
     if sin_gasto:
         avisos.append(f"{sin_gasto} comisión(es) pagada(s) en el periodo sin gasto registrado: regístrelas para que cuenten aquí")
+    aliados = ally_commissions_paid(db, tid, a, b)
+    if aliados:
+        avisos.append(
+            f"{aliados} pago(s) a aliados en el periodo no suman en «Comisiones»: su factura entra por Recepción y cuenta en la categoría"
+            " con que se aceptó (elija «Comisiones» al aceptarla para verlas juntas)"
+        )
     if any(x["auto"] for g in ("costo_ventas", "operativo") for x in exp[g]["por_categoria"]):
         avisos.append("Algunas categorías se clasificaron por su nombre: elija su grupo en Contabilidad → Categorías")
     return {

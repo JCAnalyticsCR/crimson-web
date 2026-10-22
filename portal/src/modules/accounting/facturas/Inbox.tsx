@@ -79,15 +79,17 @@ export default function Inbox({ all = false }: { all?: boolean }) {
     finally { setBusy(false); }
   };
 
+  // la huella de la sugerencia que se ve en la bandeja (si cambio, el servidor no la envia)
+  const huella = (id: number) => page?.items.find((r) => r.id === id)?.proposal?.fingerprint ?? null;
   const approve = async (ids: number[]) => {
     if (!ids.length) return;
     setBusy(true);
     try {
       if (ids.length === 1) {
-        const r = await api<Reception>(`/reception/${ids[0]}/approve`, { method: "POST" });
+        const r = await api<Reception>(`/reception/${ids[0]}/approve`, { method: "POST", json: { fingerprint: huella(ids[0]) } });
         toast(r.hacienda_status === "simulado" ? "Respuesta aprobada (simulado: no se envió a Hacienda)" : `Respuesta aprobada y enviada · Hacienda: ${r.hacienda_status}`);
       } else {
-        const r = await api<{ aprobadas: { id: number }[]; omitidas: { id: number; motivo: string }[] }>("/reception/approve-batch", { method: "POST", json: { ids } });
+        const r = await api<{ aprobadas: { id: number }[]; omitidas: { id: number; motivo: string }[] }>("/reception/approve-batch", { method: "POST", json: { ids, fingerprints: Object.fromEntries(ids.map((id) => [id, huella(id)]).filter(([, h]) => h)) } });
         toast(`${r.aprobadas.length} respuesta(s) aprobada(s)${r.omitidas.length ? ` · ${r.omitidas.length} quedaron para revisar a mano: ${r.omitidas[0].motivo}` : ""}`, r.omitidas.length ? "bad" : undefined);
       }
       load();

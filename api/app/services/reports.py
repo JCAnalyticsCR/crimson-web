@@ -777,7 +777,7 @@ def tax_summary(db: Session, tenant, month: str) -> dict:
             # reunion 2, pedido 4: el estado del buzon en palabras (antes solo "sin revisar")
             "buzon": _buzon(db, tenant),
         },
-        "por_aprobar": sum(1 for d in pend[:200] if (_proposal(db, tenant, d) or {}).get("ready")),
+        "por_aprobar": _ready_count(db, tenant, pend),
     }
 
 
@@ -788,10 +788,10 @@ def _buzon(db: Session, tenant) -> dict:
     return {"state": st["state"], "label": st["label"]}
 
 
-def _proposal(db: Session, tenant, doc):
-    from .reception_proposal import propose
+def _ready_count(db: Session, tenant, docs) -> int:
+    from .reception_proposal import ready_count
 
-    return propose(db, tenant, doc)
+    return ready_count(db, tenant, list(docs))
 
 
 def planilla(db: Session, tid: int, a: date, b: date) -> Report:

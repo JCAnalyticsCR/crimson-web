@@ -51,7 +51,8 @@ export default function Reports() {
   }, [key, range.from, range.to]);
   const xlsx = `/reports/${key}?from=${range.from}&to=${range.to}&format=xlsx`;
   // pestanas: el tablero es de quien ve las ventas de toda la empresa; el estado de resultados, de quien tiene el reporte
-  const conTablero = allows("sales.ver_todo");
+  // el tablero pide ver todas las ventas y los reportes de ventas (caja y soporte no: routers/report_board.py)
+  const conTablero = allows("sales.ver_todo") && allows("sales.exportar");
   const conResultados = !!cat?.some((c) => c.key === "resultados");
   const vistas: [Vista, string][] = [...(conTablero ? [["tablero", "Tablero"]] as [Vista, string][] : []), ...(conResultados ? [["resultados", "Estado de resultados"]] as [Vista, string][] : []), ["todos", "Todos los reportes"]];
   const pedida = params.get("vista") as Vista | null;

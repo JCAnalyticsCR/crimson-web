@@ -1,6 +1,6 @@
 /* Tablero de reportes (reunion 2, pedido 3): ventas del periodo y su variacion, por vendedor, por tipo, ultimos 6
    meses, lo cobrado, lo mas vendido y las cuentas por cobrar por antiguedad. Todo en colones con el tipo de cambio de
-   cada documento. El margen solo llega para quien ve costos (el admin): si no viene, no se dibuja. */
+   cada documento. El margen solo llega para quien ve el estado de resultados (admin y contabilidad): si no viene, no se dibuja. */
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtMoney } from "../../lib/api";

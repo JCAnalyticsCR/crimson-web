@@ -1,16 +1,16 @@
 """Reunion 2 (21/10), pedidos 1 a 4: estado de resultados completo, comision pagada -> gasto, tablero de reportes,
 Excel de venta de productos y respuesta sugerida a los comprobantes recibidos. Repo publico: solo datos ficticios."""
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 
 from openpyxl import load_workbook
 from sqlalchemy import select
 
-from app.models import Commission, ExchangeRate, Expense, ExpenseCategory, Product, Project
+from app.models import Commission, EInvoiceDocument, ExchangeRate, Expense, ExpenseCategory, Invoice, Product, Project
 from tests.aliados_helpers import interno, uid
-from tests.hacienda_utils import FakeHacienda, clave, fe_xml, modo_pruebas
+from tests.hacienda_utils import FakeHacienda, clave, fe_xml, mensaje_hacienda, modo_pruebas
 
 D = Decimal
 A, B = "2026-05-01", "2026-05-31"
@@ -142,6 +142,44 @@ def test_estado_de_resultados_permisos(client, auth, db_session):
     assert client.get("/reports/resultados/completo", params={"currency": "EUR"}).status_code == 422
 
 
+def test_estado_de_resultados_nc_en_otro_mes_y_rechazada_cuadran_con_el_d104(client, auth, db_session):
+    """La regla del D-104: la anulada por NC sigue en su mes y la NC resta en el suyo; la rechazada no cuenta."""
+    tid = auth["tenant"]["id"]
+    _inv(client, [{"name": "Venta buena", "quantity": 1, "unit_price": 100000, "tax_rate": 13}])
+    anulada = _inv(client, [{"name": "Venta con NC", "quantity": 1, "unit_price": 50000, "tax_rate": 13}])
+    rechazada = _inv(client, [{"name": "Venta rechazada", "quantity": 1, "unit_price": 30000, "tax_rate": 13}])
+    db_session.get(Invoice, anulada["id"]).status = "anulada"
+    db_session.get(Invoice, rechazada["id"]).einvoice_status = "rechazada"
+    db_session.add(
+        EInvoiceDocument(
+            tenant_id=tid,
+            invoice_id=anulada["id"],
+            doc_type="NC",
+            consecutive="00100001030000000001",
+            clave="7" * 50,
+            provider="hacienda",
+            status="aceptada",
+            mode="produccion",
+            created_at=datetime(2026, 6, 10, 18, 0, tzinfo=UTC),
+        )
+    )
+    db_session.commit()
+    junio = {"from": "2026-06-01", "to": "2026-06-30"}
+    mayo = _pnl(client)
+    assert D(str(mayo["ingresos"]["total"])) == D("150000.00") and D(str(mayo["iva"]["cobrado"])) == D("19500.00")
+    jun = _pnl(client, **junio)
+    assert D(str(jun["ingresos"]["total"])) == D("-50000.00") and D(str(jun["iva"]["cobrado"])) == D("-6500.00")
+    assert jun["ingresos"]["facturas"] == 0
+    # el IVA cobrado cuadra con el debito del borrador D-104 de cada mes
+    for params, x in (({"from": A, "to": B}, mayo), (junio, jun)):
+        rep = client.get("/reports/iva", params=params).json()
+        assert D(str(rep["rows"][0][1])) == D(str(x["iva"]["cobrado"]))
+    # el tablero usa la misma regla (la NC baja la serie en su mes)
+    t = client.get("/reports/tablero/indicadores", params=junio).json()
+    serie = {(x["year"], x["month"]): D(str(x["amount"])) for x in t["serie"]}
+    assert serie[(2026, 5)] == D("150000.00") and serie[(2026, 6)] == D("-50000.00")
+
+
 # ---------------------------------------------------------------- 2. comision pagada -> gasto
 def test_comision_pagada_registra_un_gasto_una_vez_y_deshacer_lo_anula(client, auth, db_session):
     tid = auth["tenant"]["id"]
@@ -171,12 +209,38 @@ def test_comision_pagada_registra_un_gasto_una_vez_y_deshacer_lo_anula(client, a
     assert r.status_code == 200 and r.json()["actualizadas"] == 1, r.text
     db_session.expire_all()
     assert db_session.get(Commission, cid).status == "aprobada" and db_session.get(Expense, e.id).status == "anulado"
+    fila = next(r for r in client.get("/commissions").json()["rows"] if r["id"] == cid)
+    assert fila["expense_id"] is None  # sin pago no hay "Gasto registrado" (el anulado se reutiliza si se vuelve a pagar)
     assert not any(g["label"] == "Comisiones" for g in _pnl(client)["gastos_operacion"]["por_categoria"])
     # volver a pagarla reutiliza el mismo gasto
     assert client.patch("/commissions", json={"ids": [cid], "status": "pagada", "paid_on": DIA.isoformat()}).status_code == 200
     db_session.expire_all()
     assert db_session.get(Commission, cid).expense_id == e.id and db_session.get(Expense, e.id).status == "pagado"
     assert len(db_session.scalars(select(Expense).where(Expense.reference == f"COMISION-{cid}")).all()) == 1
+
+
+def test_gasto_de_comision_solo_se_ajusta_desde_comisiones(client, auth, db_session):
+    _vh, vid = _vendedora(client, db_session, auth, "vendedora.gasto@ejemplo.com")
+    cid, _ = _comision_pendiente(client, db_session, auth, vid)
+    assert client.patch("/commissions", json={"ids": [cid], "status": "pagada", "paid_on": DIA.isoformat()}).status_code == 200
+    db_session.expire_all()
+    eid = db_session.get(Commission, cid).expense_id
+    # un gasto a mano no puede tomar la referencia de una comision (ni al crearlo ni al editarlo)
+    base = {"description": "Gasto de prueba", "date": DIA.isoformat(), "subtotal": 1, "tax_rate": 0}
+    assert client.post("/expenses", json={**base, "reference": f"COMISION-{cid}"}).status_code == 422
+    otro = client.post("/expenses", json=base).json()
+    assert client.put(f"/expenses/{otro['id']}", json={**base, "reference": f"comision-{cid}"}).status_code == 422
+    # el automatico: monto, fecha y estado no se tocan desde Contabilidad; las notas y la categoria si
+    g = next(x for x in client.get("/expenses", params={"from": A, "to": B}).json() if x["id"] == eid)
+    assert g["from_commission"] is True
+    body = {k: g[k] for k in ("description", "date", "currency", "subtotal", "tax_rate", "iva_credit", "reference", "status", "category_id")}
+    assert client.put(f"/expenses/{eid}", json={**body, "subtotal": 1}).status_code == 409
+    assert client.put(f"/expenses/{eid}", json={**body, "status": "anulado"}).status_code == 409
+    r = client.put(f"/expenses/{eid}", json={**body, "notes": "Pagada con la planilla de mayo"})
+    assert r.status_code == 200, r.text
+    db_session.expire_all()
+    e = db_session.get(Expense, eid)
+    assert e.notes == "Pagada con la planilla de mayo" and D(str(e.total)) == D("50000") and e.status == "pagado"
 
 
 def test_comision_pagada_antes_se_registra_desde_resultados(client, auth, db_session):
@@ -212,9 +276,13 @@ def test_tablero_indicadores_y_margen_solo_admin(client, auth, db_session):
     assert t["margen"] is not None and "margen_bruto_pct" in t["margen"]
     conta = interno(client, db_session, tid, "conta.tb@ejemplo.com", "contabilidad")
     tc = client.get("/reports/tablero/indicadores", params={"from": A, "to": B}, headers=conta).json()
-    assert tc["margen"] is None and D(str(tc["ventas"]["total"])) == D("300000.00")
+    # una sola regla: el margen sale a quien ve el estado de resultados (admin y contabilidad)
+    assert tc["margen"] is not None and D(str(tc["ventas"]["total"])) == D("300000.00")
     ventas = interno(client, db_session, tid, "ventas.tb@ejemplo.com", "ventas")
     assert client.get("/reports/tablero/indicadores", headers=ventas).status_code == 403
+    # caja ve todas las facturas para cobrar, pero no los reportes de ventas: tampoco el tablero
+    caja = interno(client, db_session, tid, "caja.tb@ejemplo.com", "caja")
+    assert client.get("/reports/tablero/indicadores", headers=caja).status_code == 403
 
 
 def test_excel_venta_de_productos_completo(client, auth, db_session):
@@ -269,6 +337,8 @@ def test_respuesta_sugerida_se_aprueba_con_un_clic(client, auth, db_session):
     lista = client.get("/reception/documents", params={"status": "por_revisar"}).json()["items"]
     assert next(i for i in lista if i["id"] == d1["id"])["proposal"]["ready"]
     s = client.get("/reception/summary").json()
+    assert s["listas_para_aprobar"] is None  # el menu lo pide cada 5 minutos: el conteo caro solo con ?listas=1
+    s = client.get("/reception/summary", params={"listas": 1}).json()
     assert s["listas_para_aprobar"] >= 1 and s["buzon"]["state"] == "apagado" and "sin revisar" not in s["buzon"]["label"]
     # contabilidad responde la primera a mano: gasto corriente (04) con su categoria
     cat = client.post("/expense-categories", json={"name": "Suministros"}).json()["id"]
@@ -278,7 +348,8 @@ def test_respuesta_sugerida_se_aprueba_con_un_clic(client, auth, db_session):
     d2 = _up(client, 72)
     p2 = client.get(f"/reception/{d2['id']}").json()["proposal"]
     assert p2["source"] == "proveedor" and p2["iva_condition"] == "no_credito" and p2["category_id"] == cat
-    r = client.post(f"/reception/{d2['id']}/approve")
+    assert client.post(f"/reception/{d2['id']}/approve", json={"fingerprint": "otra-huella"}).status_code == 409  # cambio: nada sale
+    r = client.post(f"/reception/{d2['id']}/approve", json={"fingerprint": p2["fingerprint"]})
     assert r.status_code == 200, r.text
     out = r.json()
     assert out["status"] == "respondido" and out["action"] == "aceptada" and out["iva_condition"] == "no_credito"
@@ -288,8 +359,10 @@ def test_respuesta_sugerida_se_aprueba_con_un_clic(client, auth, db_session):
     assert client.post(f"/reception/{d2['id']}/approve").status_code == 409  # ya respondido: no se responde dos veces
     # en lote
     d3, d4 = _up(client, 73), _up(client, 74)
-    r = client.post("/reception/approve-batch", json={"ids": [d3["id"], d4["id"], d2["id"]]}).json()
-    assert {x["id"] for x in r["aprobadas"]} == {d3["id"], d4["id"]} and [o["id"] for o in r["omitidas"]] == [d2["id"]]
+    d5 = _up(client, 77)
+    lote = {"ids": [d3["id"], d4["id"], d2["id"], d5["id"]], "fingerprints": {str(d5["id"]): "vieja"}}
+    r = client.post("/reception/approve-batch", json=lote).json()
+    assert {x["id"] for x in r["aprobadas"]} == {d3["id"], d4["id"]} and [o["id"] for o in r["omitidas"]] == [d2["id"], d5["id"]]
     # el panel tributario dice el estado del buzon en palabras
     ts = client.get("/accounting/tax-summary", params={"month": HOY.strftime("%Y-%m")}).json()
     assert ts["hacienda"]["buzon"]["state"] == "apagado"
@@ -316,3 +389,38 @@ def test_aprobar_en_pruebas_envia_a_hacienda(client, auth, db_session, monkeypat
     out = r.json()
     assert out["responses"][0]["mode"] == "pruebas" and out["hacienda_status"] in ("enviado", "procesando", "aceptado")
     assert len(fake.posts) == 1 and fake.posts[0]["clave"] == _cl(76)
+
+
+def test_sugerencia_no_acepta_un_comprobante_que_hacienda_rechazo_al_proveedor(client, auth, db_session):
+    d = _up(client, 78, emisor="003101000003")
+    assert client.get(f"/reception/{d['id']}").json()["proposal"]["ready"]
+    # el proveedor adjunta la respuesta de Hacienda: rechazado -> no da credito, no se aprueba con un clic
+    mh = mensaje_hacienda(_cl(78, "003101000003"), mensaje="3", detalle="Rechazado")
+    assert client.post("/reception/upload", files={"file": ("r.xml", mh.encode(), "application/xml")}).status_code in (200, 201)
+    db_session.expire_all()
+    det = client.get(f"/reception/{d['id']}").json()
+    # queda invalido (services/reception_intake): sin sugerencia y sin "Aprobar"; propose() ademas lo bloquea si llegara
+    assert det["status"] == "invalido" and det["proposal"] is None
+    assert client.post(f"/reception/{d['id']}/approve").status_code == 409
+    from app.models import ReceivedDocument, Tenant
+    from app.services.reception_proposal import propose
+
+    doc = db_session.get(ReceivedDocument, d["id"])
+    doc.status = "por_revisar"  # defensa: aunque siguiera por revisar, no queda lista
+    p = propose(db_session, db_session.get(Tenant, auth["tenant"]["id"]), doc)
+    assert not p["ready"] and any("rechazó este comprobante" in x for x in p["blockers"])
+    db_session.rollback()
+
+
+def test_buzon_que_dejo_de_revisarse_se_marca_con_error(db_session, auth, monkeypatch):
+    from app.models import Tenant
+    from app.services import inbox
+    from app.services.reception_proposal import inbox_state
+
+    t = db_session.get(Tenant, auth["tenant"]["id"])
+    base = {"source": "ajustes", "mailbox": "recepcion@ejemplo.com/INBOX", "enabled": True, "last_result": {"errores": []}}
+    monkeypatch.setattr(inbox, "status", lambda db, tenant: {**base, "last_run_at": datetime.now(UTC) - timedelta(hours=5)})
+    st = inbox_state(db_session, t)
+    assert st["state"] == "error" and "Sin revisarse desde" in st["label"]
+    monkeypatch.setattr(inbox, "status", lambda db, tenant: {**base, "last_run_at": (datetime.now(UTC) - timedelta(minutes=10)).isoformat()})
+    assert inbox_state(db_session, t)["state"] == "ok"

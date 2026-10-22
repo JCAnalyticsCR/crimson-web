@@ -2,7 +2,7 @@
 colones con el tipo de cambio de cada documento (services/profit_loss.Converter): ventas y su variacion contra el
 periodo anterior de la misma duracion, ventas por vendedor y por tipo, ventas de los ultimos 6 meses, lo cobrado, los
 productos mas vendidos y las cuentas por cobrar por antiguedad. El margen (utilidad bruta y neta del estado de
-resultados) solo va a quien ve costos (catalog.costos: el admin).
+resultados) solo va a quien ve el estado de resultados (routers/report_board.py: la misma regla en todas las pantallas).
 """
 
 from __future__ import annotations
@@ -43,31 +43,32 @@ def _var(now: Decimal, before: Decimal) -> float | None:
     return round(float((now - before) / before * 100), 1) if before else None
 
 
-def board(db: Session, tid: int, a: date, b: date, sees_costs: bool) -> dict:
+def board(db: Session, tid: int, a: date, b: date, sees_pnl: bool) -> dict:
     conv = pl.Converter(db, "CRC")
     invs = pl.invoices_of(db, tid, a, b)
     inc = pl.income(db, tid, a, b, conv, invs)
     # periodo anterior de la misma duracion (oct 1-22 contra sep 9-30): la flecha de "como vamos"
     dias = (b - a).days + 1
     pa, pb = a - timedelta(days=dias), a - timedelta(days=1)
-    antes = sum((conv(pl.d(i.subtotal) - pl.d(i.discount_total), i.currency, i.fx_sell, i.issue_date) for i in pl.invoices_of(db, tid, pa, pb)), Decimal(0))
+    antes = sum((x.sign * conv(pl.net_of(x.inv), x.inv.currency, x.inv.fx_sell, x.inv.issue_date) for x in pl.invoices_of(db, tid, pa, pb)), Decimal(0))
 
     # ultimos 6 meses hasta el mes de "to"
     desde = _month_start(b, 5)
     serie = {(_month_start(b, k).year, _month_start(b, k).month): Decimal(0) for k in range(5, -1, -1)}
-    for i in pl.invoices_of(db, tid, desde, _month_end(b)):
-        k = (i.issue_date.year, i.issue_date.month)
+    for x in pl.invoices_of(db, tid, desde, _month_end(b)):
+        k = (x.on.year, x.on.month)  # la NC resta en su mes
         if k in serie:
-            serie[k] += conv(pl.d(i.subtotal) - pl.d(i.discount_total), i.currency, i.fx_sell, i.issue_date)
+            serie[k] += x.sign * conv(pl.net_of(x.inv), x.inv.currency, x.inv.fx_sell, x.inv.issue_date)
 
     # productos mas vendidos (venta sin IVA en colones)
     top: dict[tuple, list] = {}
-    for i in invs:
+    for x in invs:
+        i = x.inv
         for ln in i.lines:
             k = (ln.code or "", ln.name)
             r = top.setdefault(k, [ln.code or "", ln.name, Decimal(0), Decimal(0)])
-            r[2] += pl.d(ln.quantity)
-            r[3] += conv(ln.subtotal, i.currency, i.fx_sell, i.issue_date)
+            r[2] += x.sign * pl.d(ln.quantity)
+            r[3] += x.sign * conv(ln.subtotal, i.currency, i.fx_sell, i.issue_date)
 
     # cobrado en el periodo (capturas confirmadas menos devoluciones)
     cobrado = Decimal(0)
@@ -121,7 +122,7 @@ def board(db: Session, tid: int, a: date, b: date, sees_costs: bool) -> dict:
         },
         "margen": None,
     }
-    if sees_costs:
+    if sees_pnl:
         res = pl.build(db, tid, a, b, "CRC")
         out["margen"] = {
             "utilidad_bruta": res["utilidad_bruta"],

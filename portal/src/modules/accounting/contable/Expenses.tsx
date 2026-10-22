@@ -20,14 +20,17 @@ export type Exp = {
   subtotal: string; tax_rate: string; tax_amount: string; total: string; total_crc: string; iva_credit: string; tax_credit_amount: string | null; bank_account_id: number | null;
   reference: string | null; status: string; attachment_url: string | null; notes: string | null; payment_method: string | null; purchase_type: string; due_date: string | null;
   origin: string; received_document_id: number | null; recurrence_id: number | null; bank_instrument_id: number | null; check_number: string | null; locked: boolean;
+  from_commission?: boolean;
 };
 type Sum = { count: number; total_crc: string; tax_crc: string; credit_crc: string };
 type Res = { rows: (string | number)[][]; totals: { resultado: string } };
 const ORIGIN: Record<string, string> = { xml: "XML", recurrente: "Recurrente", banco: "Banco", planilla: "Planilla", manual: "Manual" };
 const PAY = [["", "—"], ["efectivo", "Efectivo"], ["tarjeta", "Tarjeta"], ["transferencia", "Transferencia"], ["sinpe", "SINPE"], ["cheque", "Cheque"], ["otro", "Otro"]];
 const blank = { category_id: "", supplier_id: "", attachment_url: "", description: "", date: new Date().toISOString().slice(0, 10), currency: "CRC", fx_rate: "", subtotal: "", tax_rate: "13", iva_credit: "credito", tax_credit_amount: "", bank_account_id: "", bank_instrument_id: "", check_number: "", payment_method: "", purchase_type: "contado", due_date: "", notes: "", reference: "", status: "registrado" };
-type Edit = typeof blank & { id?: number; locked?: boolean; received_document_id?: number | null };
+type Edit = typeof blank & { id?: number; locked?: boolean; received_document_id?: number | null; from_commission?: boolean };
 const month = () => new Date().toISOString().slice(0, 7);
+// la tarjeta del mes solo lleva el resumen (el estado de resultados completo esta en Reportes)
+const RESUMEN = ["Ventas netas", "Gastos", "Utilidad neta (antes del impuesto sobre la renta)"];
 
 export default function Expenses() {
   const { toast, allows } = useSession();
@@ -69,15 +72,15 @@ export default function Expenses() {
   }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const open = (e: Exp) => setEdit({
-    id: e.id, locked: e.locked, received_document_id: e.received_document_id, category_id: String(e.category_id ?? ""), supplier_id: String(e.supplier_id ?? ""), attachment_url: e.attachment_url || "",
+    id: e.id, locked: e.locked, from_commission: !!e.from_commission, received_document_id: e.received_document_id, category_id: String(e.category_id ?? ""), supplier_id: String(e.supplier_id ?? ""), attachment_url: e.attachment_url || "",
     description: e.description, date: e.date, currency: e.currency, fx_rate: String(Number(e.fx_rate)), subtotal: String(Number(e.subtotal)), tax_rate: String(Number(e.tax_rate)), iva_credit: e.iva_credit,
     tax_credit_amount: e.tax_credit_amount === null ? "" : String(Number(e.tax_credit_amount)), bank_account_id: String(e.bank_account_id ?? ""), bank_instrument_id: String(e.bank_instrument_id ?? ""),
     check_number: e.check_number || "", payment_method: e.payment_method || "", purchase_type: e.purchase_type || "contado", due_date: e.due_date || "", notes: e.notes || "", reference: e.reference || "", status: e.status,
   });
   const save = async () => {
     if (!edit) return;
-    const { id, locked, received_document_id, ...b } = edit;
-    void received_document_id;
+    const { id, locked, received_document_id, from_commission, ...b } = edit;
+    void received_document_id; void from_commission;
     const body = {
       ...b,
       category_id: b.category_id ? Number(b.category_id) : null, supplier_id: b.supplier_id ? Number(b.supplier_id) : null, bank_account_id: b.bank_account_id ? Number(b.bank_account_id) : null,
@@ -93,7 +96,7 @@ export default function Expenses() {
   const acct = accounts.find((a) => String(a.id) === edit?.bank_account_id);
   const ins = acct?.instruments.find((i) => String(i.id) === edit?.bank_instrument_id);
   const sub = Number(edit?.subtotal || 0), iva = sub * Number(edit?.tax_rate || 0) / 100;
-  const ro = !!edit?.locked;
+  const ro = !!edit?.locked || !!edit?.from_commission;
 
   return (
     <>
@@ -102,7 +105,7 @@ export default function Expenses() {
         {allows("accounting.crear") && <button className="btn btn--crimson btn--sm" onClick={() => setEdit({ ...blank, date: hoyCR() })}><Icon d={I.plus} />Registrar gasto</button>}
       </div>
       <div className="kpi">
-        {res && <div className="kpi__card"><span className="kpi__corner" /><div className="kpi__label">Resultado del mes (sin IVA)</div><div className="kpi__value">{fmtMoney(res.totals.resultado)}</div><div className="kpi__sub">{res.rows.map((r) => <span key={String(r[0])}>{r[0]} <b className="money">{fmtMoney(r[1])}</b></span>)}</div></div>}
+        {res && <div className="kpi__card"><span className="kpi__corner" /><div className="kpi__label">Resultado del mes (sin IVA)</div><div className="kpi__value">{fmtMoney(res.totals.resultado)}</div><div className="kpi__sub">{res.rows.filter((r) => RESUMEN.includes(String(r[0]))).map((r) => <span key={String(r[0])}>{r[0] === RESUMEN[2] ? "Utilidad neta" : r[0]} <b className="money">{fmtMoney(r[1])}</b></span>)}</div></div>}
         {sum && <div className="kpi__card kpi__card--light"><span className="kpi__corner" /><div className="kpi__label">Gastos del filtro (en colones)</div><div className="kpi__value">{fmtMoney(sum.total_crc)}</div><div className="kpi__sub"><span>{sum.count} gastos</span><span>IVA <b className="money">{fmtMoney(sum.tax_crc)}</b></span><span>IVA acreditable <b className="money">{fmtMoney(sum.credit_crc)}</b></span></div></div>}
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -139,7 +142,10 @@ export default function Expenses() {
 
       {edit && (
         <Modal title={edit.id ? "Gasto" : "Registrar gasto"} wide onClose={() => setEdit(null)} foot={<><button className="btn btn--ghost" onClick={() => setEdit(null)}>Cancelar</button>{allows(edit.id ? "accounting.editar" : "accounting.crear") && <button className="btn btn--crimson" onClick={save}>Guardar</button>}</>}>
-          {ro && (
+          {edit.from_commission && (
+            <div className="acc-warn">Lo registró Comisiones al marcar pagada la comisión: el monto, la fecha y el estado se ajustan desde Comisiones (pagar o deshacer el pago).</div>
+          )}
+          {edit.locked && (
             <div className="acc-warn">
               Viene de un comprobante electrónico: montos, divisa, fecha y condición salen del XML y no se editan.
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
@@ -168,7 +174,7 @@ export default function Expenses() {
             <Field label="Cuenta"><select className="select" value={edit.bank_account_id} onChange={(e) => setEdit({ ...edit, bank_account_id: e.target.value, bank_instrument_id: "" })}><option value="">—</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.currency}</option>)}</select></Field>
             {acct && acct.instruments.length > 0 && <Field label="Chequera o tarjeta"><select className="select" value={edit.bank_instrument_id} onChange={(e) => setEdit({ ...edit, bank_instrument_id: e.target.value })}><option value="">—</option>{acct.instruments.filter((i) => i.active).map((i) => <option key={i.id} value={i.id}>{i.kind === "chequera" ? `Chequera ${i.name}` : `Tarjeta ${i.name} ····${i.last4}`}</option>)}</select></Field>}
             {ins?.kind === "chequera" && <Field label="Número de cheque" hint={ins.next_check ? `Siguiente: ${ins.next_check}` : undefined}><input className="input input--mono" value={edit.check_number} onChange={(e) => setEdit({ ...edit, check_number: e.target.value })} /></Field>}
-            <Field label="Estado"><select className="select" value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })}><option value="registrado">Registrado</option><option value="pagado">Pagado</option><option value="anulado">Anulado</option></select></Field>
+            <Field label="Estado"><select className="select" disabled={!!edit.from_commission} value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })}><option value="registrado">Registrado</option><option value="pagado">Pagado</option><option value="anulado">Anulado</option></select></Field>
             {!ro && <Field label="Referencia" hint="Factura del proveedor, clave…"><input className="input" value={edit.reference} onChange={(e) => setEdit({ ...edit, reference: e.target.value })} /></Field>}
           </div>
           <Field label="Notas"><textarea className="textarea" value={edit.notes} onChange={(e) => setEdit({ ...edit, notes: e.target.value })} /></Field>
