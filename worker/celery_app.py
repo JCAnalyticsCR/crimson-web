@@ -49,8 +49,8 @@ celery.conf.update(
     redbeat_lock_timeout=5 * BEAT_MAX_INTERVAL,
 )
 
-import app.tasks.margen  # noqa: E402,F401  guardian de margen (plan 1.12): margin.guard y margin.daily_summary
 import app.tasks.catalogo  # noqa: E402,F401  publicacion automatica del catalogo de Eurocomp (catalog.auto_catalog)
+import app.tasks.margen  # noqa: E402,F401  guardian de margen (plan 1.12): margin.guard y margin.daily_summary
 
 
 def _log_fiscal_keys() -> None:
