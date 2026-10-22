@@ -282,8 +282,10 @@ def _order_out(o: Order):
 @router.get("/orders")
 def orders(status: str | None = None, limit: int = Query(50, le=200), p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
     from ..services.ownership import visible_invoice_ids
+    from ..services.store_orders import order_scope
 
-    q = select(Order).where(Order.tenant_id == p.tenant.id)
+    # el pedido web de otro vendedor no aparece (21/10, items 24/42): mismo alcance que Pedidos de la tienda
+    q = select(Order).where(Order.tenant_id == p.tenant.id, order_scope(p))
     if status:
         q = q.where(Order.status == status)
     rows = db.scalars(q.order_by(Order.id.desc()).limit(limit)).all()
@@ -303,7 +305,7 @@ def order_status(oid: int, data: OrderStatusIn, p: Principal = Depends(require("
     from ..services import store_orders as so
 
     o = db.get(Order, oid)
-    if not o or o.tenant_id != p.tenant.id:
+    if not o or o.tenant_id != p.tenant.id or not so.sees_order(o, p):
         raise HTTPException(404, "Orden no encontrada")
     old = o.status
     o.status = data.status
@@ -329,10 +331,10 @@ def order_to_invoice(
 ):
     """Convierte la orden en tiquete (TE, consumidor final) o factura (FE, requiere cliente con identificacion).
     register_payment: si el pedido ya se pago, deja el cobro aplicado a la factura (asi no queda "por cobrar")."""
-    from ..services.store_orders import invoice_order
+    from ..services.store_orders import invoice_order, sees_order
 
     o = db.get(Order, oid)
-    if not o or o.tenant_id != p.tenant.id:
+    if not o or o.tenant_id != p.tenant.id or not sees_order(o, p):
         raise HTTPException(404, "Orden no encontrada")
     invoice = invoice_order(db, p.tenant, o, p.user.id, doc_type, register_payment, ip=p.ip)
     db.commit()
@@ -970,7 +972,9 @@ def search(q: str = Query(min_length=1), p: Principal = Depends(require("dashboa
         if st and st != "servicio":
             sub += f" · {STATES[st]}"
         out.append({"kind": "producto", "id": pr.id, "title": pr.name, "sub": sub, "to": f"/productos?q={pr.code}"})
-    for o in db.scalars(select(Order).where(Order.tenant_id == tid, Order.number.ilike(like)).limit(5)) if can_sales else []:
+    from ..services.store_orders import order_scope
+
+    for o in db.scalars(select(Order).where(Order.tenant_id == tid, Order.number.ilike(like), order_scope(p)).limit(5)) if can_sales else []:
         out.append({"kind": "orden", "id": o.id, "title": o.number, "sub": o.status, "to": "/ordenes"})
     return out[:20]
 

@@ -63,6 +63,9 @@ PAID_STATES = ("pagado", "preparando", "listo", "enviado", "entregado")
 METHOD_LABEL = {"sinpe": "SINPE Móvil", "transferencia": "Transferencia bancaria", "tarjeta": "Tarjeta (ONVO)", "efectivo": "Efectivo"}
 NEEDS_PROOF = ("sinpe", "transferencia")
 ATTENTION = ("en_revision", "pagado", "preparando")  # "pedidos por atender" del inicio
+# el vendedor "toma" solo pedidos por atender y sin factura (21/10, items 24/42): reclamar ventas ya facturadas o
+# historicas (con su comision retroactiva) es una reasignacion, y esa es del admin (sales.asignar)
+TAKEABLE = ("nuevo", "en_revision", "pagado", "preparando")
 
 CHECKOUT_DEFAULTS: dict = {
     "methods": {
@@ -392,7 +395,9 @@ def order_public(db: Session, t: Tenant, o: Order) -> dict:
         "history": [
             {"status": h.get("status"), "label": STATUS_LABEL.get(h.get("status"), h.get("status")), "at": h.get("at")}
             for h in (o.history or [])
-            if h.get("kind") != "nota"
+            # nunca las notas del equipo; "internal" (vendedor asignado, 21/10 item 42) tampoco si algun dia el
+            # seguimiento muestra notas (item 36): ese historial tiene que seguir respetando este filtro
+            if h.get("kind") != "nota" and not h.get("internal")
         ],
         "whatsapp": cfg.get("whatsapp") or "",
         "store_name": cfg.get("name"),
@@ -416,6 +421,7 @@ CUSTOMER_SUBJECT = {
     "recibido": "Recibimos tu pedido {n}",
     "pagado": "Pago confirmado · pedido {n}",
     "rechazado": "Revisamos tu comprobante · pedido {n}",
+    "preparando": "Estamos preparando tu pedido {n}",  # solo "Reenviar correo" (pasar a preparando no avisa)
     "listo": "Tu pedido {n} está listo para retiro",
     "enviado": "Tu pedido {n} va en camino",
     "entregado": "Pedido {n} entregado",
@@ -430,6 +436,7 @@ CUSTOMER_TITLE = {
     "recibido": "¡Gracias por tu compra!",
     "pagado": "Pago confirmado",
     "rechazado": "No pudimos validar tu comprobante",
+    "preparando": "Estamos preparando tu pedido",
     "listo": "Tu pedido está listo para retiro",
     "enviado": "Tu pedido va en camino",
     "entregado": "Pedido entregado",
@@ -442,6 +449,7 @@ CUSTOMER_INTRO = {
     "recibido": "Recibimos tu pedido. Este es el resumen; con el botón de abajo seguís su estado en cualquier momento.",
     "pagado": "Confirmamos el pago de tu pedido. Ya lo estamos preparando.",
     "rechazado": "Revisamos el comprobante que subiste y no lo pudimos validar. Subí el comprobante correcto con el botón de abajo y lo revisamos de nuevo.",
+    "preparando": "Ya estamos preparando tu pedido. Te avisamos cuando salga o cuando esté listo para retiro.",
     "listo": "Tu pedido ya está listo. Podés pasar a retirarlo con el número de pedido.",
     "enviado": "Tu pedido salió hacia la dirección de entrega.",
     "entregado": "Tu pedido fue entregado. ¡Gracias por comprar con nosotros!",
@@ -454,10 +462,19 @@ TRACK_LABEL = "Rastrear mi pedido"  # el boton de siempre (21/10, item 40): llev
 EMAIL_GREY, EMAIL_INK, EMAIL_LINE = "#6b6570", "#15131a", "#ebe7e3"
 
 
+def link_kind(c: Customer, contact: dict) -> str:
+    """Como quedo ligado el pedido a la ficha (Order.customer_link): "email" si la ficha tenia el correo del comprador
+    (ligada por correo o creada por este pedido), "cedula" si solo coincidio la cedula y la ficha tenia otro correo."""
+    mail = ((contact or {}).get("email") or "").strip().lower()
+    return "email" if mail and (c.email or "").strip().lower() == mail else "cedula"
+
+
 def notify_email(db: Session, o: Order) -> str:
     """Correo al que van los avisos del pedido (21/10, item 43): el ACTUAL de la ficha del cliente si el pedido esta
-    ligado a uno (el admin lo corrigio despues de la compra); si no, o la ficha no tiene correo, el del pedido."""
-    if o.customer_id:
+    ligado a uno (el admin lo corrigio despues de la compra); si no, o la ficha no tiene correo, el del pedido.
+    Un pedido ligado solo por cedula a una ficha con OTRO correo (customer_link="cedula") sigue al correo del pedido:
+    la cedula es publica y escribirla no hace a nadie dueno de esa ficha (sus avisos llevan el enlace del pedido)."""
+    if o.customer_id and o.customer_link != "cedula":
         c = db.get(Customer, o.customer_id)
         if c is not None and c.tenant_id == o.tenant_id and (c.email or "").strip():
             return c.email.strip()
@@ -482,9 +499,10 @@ def _steps(o: Order) -> list[tuple[str, bool]]:
     retiro = (o.delivery or {}).get("type") == "retiro" or o.status == "listo"
     names = ["Pedido recibido", "Pago confirmado", "Preparando", "Listo para retiro" if retiro else "Enviado", "Entregado"]
     pos = {"nuevo": 0, "en_revision": 0, "pagado": 1, "preparando": 2, "listo": 3, "enviado": 3, "entregado": 4}.get(o.status, -1)
-    if o.payment_kind == "efectivo" and not o.paid_at and pos > 0:
-        names[1] = "Pago al retirar"  # efectivo: avanza sin pago confirmado
-    return [(n, i <= pos) for i, n in enumerate(names)]
+    pendiente = o.payment_kind == "efectivo" and not o.paid_at and pos > 0
+    if pendiente:
+        names[1] = "Pago al retirar"  # efectivo: avanza sin pago confirmado; el paso sigue abierto hasta que pague
+    return [(n, i <= pos and not (pendiente and i == 1)) for i, n in enumerate(names)]
 
 
 def email_button(url: str, label: str, color: str) -> str:
@@ -770,6 +788,8 @@ def transition(
     if not notify:
         return None
     kind = "rechazado" if (new == "nuevo" and old == "en_revision") else new
+    if kind == "preparando":
+        return None  # pasar a preparando no avisa al cliente (su correo es solo para "Reenviar correo")
     key = None
     if kind == "rechazado":
         # 21/10, item 47: el cliente sabe por que y como volver a subirlo. Una llave por rechazo (el n.o de rechazos
@@ -777,6 +797,25 @@ def transition(
         n = sum(1 for h in (o.history or []) if h.get("status") == "nuevo" and h.get("kind") != "nota")
         key = f"tienda-rech:{o.id}:{n}"
     return notify_customer(db, t, o, kind, status_extra(t, o, kind, note), dedupe_key=key)
+
+
+def last_rejection(o: Order) -> dict | None:
+    """El cambio de estado mas reciente fue el rechazo del comprobante (en_revision -> nuevo): su entrada del
+    historial (con la nota = el motivo). "Reenviar correo" reenvia ese aviso y no la confirmacion de compra."""
+    hs = [h for h in (o.history or []) if h.get("kind") != "nota"]
+    if o.status == "nuevo" and len(hs) >= 2 and hs[-1].get("status") == "nuevo" and hs[-2].get("status") == "en_revision":
+        return hs[-1]
+    return None
+
+
+def resend_mail(db: Session, t: Tenant, o: Order) -> EmailOutbox | None:
+    """El correo del estado actual para "Reenviar correo" (sin dedupe_key: el equipo lo pide a proposito)."""
+    rech = last_rejection(o)
+    if rech is not None:
+        return notify_customer(db, t, o, "rechazado", status_extra(t, o, "rechazado", rech.get("note")))
+    # preparando: si ya pago, el de pago confirmado; el efectivo sin pagar, uno neutro (nunca "pago confirmado")
+    kind = {"nuevo": "recibido", "en_revision": "recibido", "preparando": "pagado" if o.paid_at else "preparando"}.get(o.status, o.status)
+    return notify_customer(db, t, o, kind, status_extra(t, o, kind))
 
 
 def status_extra(t: Tenant, o: Order, kind: str, note: str | None = None) -> str:
@@ -1144,6 +1183,28 @@ def order_seller(db: Session, o: Order) -> int | None:
     return o.seller_id if o.seller_id and eligible_seller(db, o.tenant_id, o.seller_id) else None
 
 
+def order_scope(p):
+    """Que pedidos web ve el que mira (21/10, items 24/42; services/ownership.py): con sales.ver_todo, todos; si no,
+    los sin vendedor (la cola que se puede tomar) y los suyos. Los de otro vendedor no aparecen en ningun lado."""
+    if p.sees_all_sales:
+        return true()
+    return or_(Order.seller_id.is_(None), Order.seller_id == p.user.id)
+
+
+def sees_order(o: Order, p) -> bool:
+    return bool(p.sees_all_sales or o.seller_id is None or o.seller_id == p.user.id)
+
+
+def takeable_ids(db: Session, orders) -> set[int]:
+    """De estos pedidos, cuales puede "tomar" un vendedor: sin vendedor, por atender y sin factura viva (una consulta)."""
+    from ..models import Invoice
+
+    cand = [o for o in orders if o.channel == "tienda" and o.seller_id is None and o.status in TAKEABLE]
+    inv_ids = {o.invoice_id for o in cand if o.invoice_id}
+    vivas = set(db.scalars(select(Invoice.id).where(Invoice.id.in_(inv_ids), Invoice.status != "anulada"))) if inv_ids else set()
+    return {o.id for o in cand if o.invoice_id not in vivas}
+
+
 def web_orders_commission(t: Tenant) -> bool:
     """Mi Tienda -> Pagos: la factura de un pedido web asignado comisiona como una venta propia (por defecto si)."""
     return bool(checkout_cfg(t).get("web_orders_commission", True))
@@ -1213,13 +1274,15 @@ def assign_seller(db: Session, t: Tenant, o: Order, seller_id: int | None, *, by
                 .order_by(Payment.paid_at, Payment.id)
             ).all()
             for pay in pagos:
-                commissions.on_payment(db, pay)
+                # reassign: la comision ANULADA de otro vendedor sobre este cobro no bloquea al nuevo (el 409 de arriba
+                # pide anularla justamente para poder reasignar)
+                commissions.on_payment(db, pay, reassign=True)
     audit(db, t.id, by, "assign_seller", "order", o.id, {"from": antes, "to": seller_id, "invoice_id": inv.id if live_inv else None}, ip=ip)
     return True
 
 
 # ---------- factura del pedido ----------
-PAY_METHOD ={"tarjeta": "onvo", "sinpe": "sinpe", "transferencia": "transferencia", "efectivo": "efectivo"}
+PAY_METHOD = {"tarjeta": "onvo", "sinpe": "sinpe", "transferencia": "transferencia", "efectivo": "efectivo"}
 
 
 def invoice_order(db: Session, t: Tenant, o: Order, user_id: int | None, doc_type: str, register_payment: bool, ip: str | None = None):

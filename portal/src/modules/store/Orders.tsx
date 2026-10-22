@@ -27,6 +27,10 @@ type Order = {
   invoice_visible?: boolean | null;
   /* 21/10 (24/42): vendedor del pedido web; la factura que nace del pedido queda a su nombre */
   seller_id?: number | null; seller_name?: string | null; assigned_at?: string | null;
+  /* "Tomar" solo en pedidos por atender y sin factura (lo decide el servidor: store_orders.TAKEABLE) */
+  takeable?: boolean;
+  /* transportistas de Mi Tienda, tal cual (vacia = se escribe a mano); vienen en el detalle del pedido */
+  carriers?: string[];
   /* 21/10 (43): correo al que van los avisos y "Reenviar correo" (el actual de la ficha del cliente) */
   notify_email?: string | null;
 };
@@ -136,7 +140,7 @@ function WebOrders() {
                   <td className="muted">{o.delivery?.type === "retiro" ? "Retiro" : o.shipping_method || "—"}{o.delivery?.canton ? <div className="meta" style={{ textTransform: "none" }}>{o.delivery.canton}, {o.delivery.province}</div> : null}</td>
                   <td className="muted">{o.payment_kind ? METHODS[o.payment_kind] : o.payment_method || "—"}{o.proofs.length > 0 && <div className="meta" style={{ textTransform: "none" }}>{o.proofs.length} comprobante(s)</div>}</td>
                   <td>{o.seller_name ? <span className={o.seller_id === meta.me ? "wo-seller is-me" : "wo-seller"}>{o.seller_id === meta.me ? "Yo" : o.seller_name}</span>
-                    : meta.can_take ? <button className="btn btn--soft btn--sm" onClick={() => take(o)} title="La venta y la comisión quedan a tu nombre">Tomar</button> : <span className="muted">—</span>}</td>
+                    : meta.can_take && o.takeable ? <button className="btn btn--soft btn--sm" onClick={() => take(o)} title="La venta y la comisión quedan a tu nombre">Tomar</button> : <span className="muted">—</span>}</td>
                   <td className="num money">{fmtMoney(o.total, o.currency)}</td>
                   <td><span className="wo-badge" data-s={o.status}>{o.status_label}</span></td>
                   <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => open(o)}>Ver</button><TrashLocked reason={LOCKED.order} /></span></td>
@@ -165,9 +169,17 @@ function Detail({ o, labels, meta, onClose, onChange }: { o: Order; labels: Reco
   const [note, setNote] = useState("");
   const [guide, setGuide] = useState(o.tracking_number || "");
   /* 21/10 (45): transportista de la lista de Mi Tienda ("Mensajería Crimson" incluida) u otro escrito a mano */
-  const carriers = meta.carriers.length ? meta.carriers : ["Mensajería Crimson", "Correos de Costa Rica"];
-  const [carrier, setCarrier] = useState(o.carrier || carriers[0]);
-  const [carrierPick, setCarrierPick] = useState(!o.carrier || carriers.includes(o.carrier) ? (o.carrier || carriers[0]) : OTHER);
+  const carriers = o.carriers ?? meta.carriers;
+  const pickFor = (list: string[]) => (o.carrier ? (list.includes(o.carrier) ? o.carrier : OTHER) : (list[0] ?? OTHER));
+  const [carrier, setCarrier] = useState(o.carrier || carriers[0] || "");
+  const [carrierPick, setCarrierPick] = useState(() => pickFor(carriers));
+  const carriersKey = carriers.join("|");
+  /* la lista puede llegar despues (pedido abierto desde el enlace del aviso): se recalcula la eleccion */
+  useEffect(() => {
+    const pick = pickFor(carriers);
+    setCarrierPick(pick);
+    setCarrier(o.carrier || (pick === OTHER ? "" : pick));
+  }, [carriersKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const [ref, setRef] = useState("");
   const [refund, setRefund] = useState(String(Number(o.total)));
   const [notify, setNotify] = useState(true);
@@ -268,7 +280,7 @@ function Detail({ o, labels, meta, onClose, onChange }: { o: Order; labels: Reco
               {meta.sellers.map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}
             </select>
           ) : o.seller_id ? <b>{o.seller_id === meta.me ? `${o.seller_name} (yo)` : o.seller_name}</b>
-            : meta.can_take ? <button className="btn btn--soft btn--sm" style={{ justifySelf: "start" }} onClick={() => assign(meta.me)}>Tomar este pedido</button> : <span className="muted">Sin vendedor</span>}
+            : meta.can_take && o.takeable ? <button className="btn btn--soft btn--sm" style={{ justifySelf: "start" }} onClick={() => assign(meta.me)}>Tomar este pedido</button> : <span className="muted">Sin vendedor</span>}
           <span className="muted" style={{ fontSize: 12 }}>{o.seller_id ? "La factura del pedido queda a su nombre y cuenta para sus comisiones." : "Sin vendedor, la venta no comisiona."}</span>
         </div>
         {o.notes && <div className="wo-box"><span className="meta">Nota del cliente</span>“{o.notes}”</div>}

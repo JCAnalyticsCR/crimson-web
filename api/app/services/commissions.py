@@ -532,9 +532,11 @@ def _sale_filter(beneficiary: str, part: AllyParticipation | None) -> list:
     return [Commission.participation_id == part.id]
 
 
-def _payment_commissioned(db: Session, payment: Payment) -> bool:
+def _payment_commissioned(db: Session, payment: Payment, ignore_void: bool = False) -> bool:
     """El cobro ya comisiono al vendedor (en cualquier estado y a cualquier usuario). Los movimientos viejos llevan la
-    clave cobro:{pago}:v:{quien hizo la factura}; el vendedor responsable puede ser otro y su clave no choca."""
+    clave cobro:{pago}:v:{quien hizo la factura}; el vendedor responsable puede ser otro y su clave no choca.
+    ignore_void: al reasignar el vendedor de la factura (pedido web, store_orders.assign_seller) la comision ANULADA
+    del anterior no cuenta: se anulo justamente para que el cobro comisione al nuevo."""
     return (
         db.scalar(
             select(Commission.id)
@@ -544,6 +546,7 @@ def _payment_commissioned(db: Session, payment: Payment) -> bool:
                 Commission.beneficiary == "vendedor",
                 Commission.trigger == "cobro",
                 Commission.kind == "comision",
+                *((Commission.status != "anulada",) if ignore_void else ()),
             )
             .limit(1)
         )
@@ -632,15 +635,16 @@ def margin_base(db: Session, deal: Deal, base_sale: Decimal, origen: str = "cobr
 
 
 # ---------- 5.4 E1 · Cobro ----------
-def on_payment(db: Session, payment: Payment) -> list[Commission]:
-    """Desde documents.add_payment con el pago confirmado. Captura devenga; devolucion/reembolso revierten."""
+def on_payment(db: Session, payment: Payment, reassign: bool = False) -> list[Commission]:
+    """Desde documents.add_payment con el pago confirmado. Captura devenga; devolucion/reembolso revierten.
+    reassign: recalculo por cambio de vendedor de la factura (las comisiones anuladas del cobro no lo bloquean)."""
     if payment is None or payment.status != "confirmado" or not payment.invoice_id:
         return []
     inv = db.get(Invoice, payment.invoice_id)
     if inv is None:
         return []
     if payment.kind == "captura":
-        return _on_capture(db, payment, inv)
+        return _on_capture(db, payment, inv, ignore_void=reassign)
     if payment.kind in ("devolucion", "reembolso"):
         return _on_refund(db, payment, inv)
     return []  # autorizacion, void, reautorizacion: no es plata cobrada
@@ -650,7 +654,7 @@ def _paid_in_doc(db: Session, payment: Payment, inv: Invoice) -> Decimal:
     return convert(db, d(payment.amount), payment.currency or inv.currency, inv.currency)
 
 
-def _on_capture(db: Session, payment: Payment, inv: Invoice, only: set[str] | None = None) -> list[Commission]:
+def _on_capture(db: Session, payment: Payment, inv: Invoice, only: set[str] | None = None, ignore_void: bool = False) -> list[Commission]:
     total, net = d(inv.total), net_sale(inv)
     if inv.status == "anulada" or total <= 0 or net <= 0:
         return []
@@ -666,7 +670,7 @@ def _on_capture(db: Session, payment: Payment, inv: Invoice, only: set[str] | No
         rule = _pick(rules, cfg, deal, on, ben)
         if rule is None or trigger_of(rule, deal) != "cobro":
             continue
-        if beneficiary == "vendedor" and _payment_commissioned(db, payment):
+        if beneficiary == "vendedor" and _payment_commissioned(db, payment, ignore_void):
             continue  # backfill de un pago viejo: ya comisiono a quien hizo la factura
         ya = _sold_base(db, inv, beneficiary, uid, part)
         base_sale = max(Decimal(0), min(raw, net - ya))

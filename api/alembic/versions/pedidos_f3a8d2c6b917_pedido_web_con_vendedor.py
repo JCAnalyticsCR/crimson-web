@@ -4,6 +4,10 @@
 lista). La factura que nace del pedido queda con ese vendedor y comisiona como una venta propia (Mi Tienda lo puede
 apagar). `order.assigned_at`: cuando se asigno. Sin relleno: los pedidos de antes quedan sin vendedor.
 
+`order.customer_link` (item 43): como se ligo el pedido a la ficha del cliente ("email" | "cedula"). Los avisos van al
+correo actual de la ficha salvo que el pedido se haya ligado solo por cedula a una ficha con otro correo. NULL en
+los pedidos de antes (sus avisos siguen a la ficha).
+
 downgrade quita las columnas (las facturas ya creadas conservan su seller_id).
 
 Revision ID: f3a8d2c6b917
@@ -27,6 +31,7 @@ def upgrade() -> None:
     with op.batch_alter_table("order") as b:
         b.add_column(sa.Column("seller_id", sa.Integer(), nullable=True))
         b.add_column(sa.Column("assigned_at", sa.DateTime(timezone=True), nullable=True))
+        b.add_column(sa.Column("customer_link", sa.String(8), nullable=True))
         b.create_foreign_key("fk_order_seller_id", "user", ["seller_id"], ["id"])
         b.create_index("ix_order_seller_id", ["seller_id"])
 
@@ -35,5 +40,6 @@ def downgrade() -> None:
     with op.batch_alter_table("order") as b:
         b.drop_index("ix_order_seller_id")
         b.drop_constraint("fk_order_seller_id", type_="foreignkey")
+        b.drop_column("customer_link")
         b.drop_column("assigned_at")
         b.drop_column("seller_id")
