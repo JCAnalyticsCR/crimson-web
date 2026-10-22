@@ -214,6 +214,7 @@ def rebuild(db: Session, tid: int) -> None:
     t = db.get(Tenant, tid)
     if t is None or not t.active:
         return
+    cv = (t.settings or {}).get("catalog_v") or 0  # version del catalogo con la que se arma (antes de leer nada)
     ctx = Ctx(db, t)
     gz = build(db, t, ctx)
 
@@ -234,6 +235,9 @@ def rebuild(db: Session, tid: int) -> None:
         row.n_products = json.loads(gzip.decompress(gz)).get("n", 0)
     except Exception:  # noqa: BLE001
         pass
+    st = dict(t.settings or {})
+    st["snapshot_cv"] = cv
+    t.settings = st
     db.commit()
     log.info("Snapshot empresa %s: %s bytes gz", tid, len(gz))
 
@@ -241,13 +245,22 @@ def rebuild(db: Session, tid: int) -> None:
 def get_or_rebuild(db: Session, tid: int) -> tuple[bytes, str]:
     """Lee el snapshot de la DB; si no existe lo arma (con candado simple). Devuelve (gz, version)."""
 
-    from ..models import StoreSnapshot
+    from ..models import StoreSnapshot, Tenant
+    from .supplier_sync import trim_memory
 
     row = db.scalar(
         select(StoreSnapshot).where(StoreSnapshot.tenant_id == tid)
     )
-    if row is None or row.gz is None:
+    t = db.get(Tenant, tid)
+    st = (t.settings or {}) if t is not None else {}
+    # la API no tiene la cola del worker: si algo visible cambio despues de armarlo (catalog_v > snapshot_cv), la
+    # siguiente visita lo rearma una vez; 20 s de margen juntan varios guardados seguidos en un solo armado
+    stale = row is not None and (st.get("catalog_v") or 0) > (st.get("snapshot_cv") or 0) and (
+        row.built_at is None or (datetime.now(UTC) - (row.built_at if row.built_at.tzinfo else row.built_at.replace(tzinfo=UTC))).total_seconds() > 20
+    )
+    if row is None or row.gz is None or stale:
         rebuild(db, tid)
+        trim_memory()  # armar el snapshot toca todo el catalogo: la memoria vuelve al sistema
         row = db.scalar(
             select(StoreSnapshot).where(StoreSnapshot.tenant_id == tid)
         )

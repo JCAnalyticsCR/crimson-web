@@ -304,3 +304,35 @@ def test_snapshot_tamanio_gz(client, auth, db_session, capsys):
     assert gz_size > 0, "El snapshot no debe estar vacio"
     # 300 productos con ~10 campos livianos: esperamos entre 10 KB y 500 KB gz
     assert gz_size < 512 * 1024, f"El snapshot parece demasiado grande: {gz_size} bytes"
+
+
+def test_snapshot_se_rearma_solo_si_cambio_algo_en_el_panel(client, auth, db_session):
+    """La API no tiene la cola del worker: el endpoint del snapshot lo rearma cuando catalog_v es mas nuevo que el
+    del ultimo armado (y pasaron mas de 20 s), sin depender de que el worker atienda store.rebuild_snapshot."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.models import StoreSnapshot
+    from app.services import store_snapshot
+
+    _publicar(client)
+    prods = _make_catalog(db_session, 5)
+    t = db_session.scalar(select(Tenant).where(Tenant.slug == "crimson"))
+    store_snapshot.rebuild(db_session, t.id)
+    etag1 = client.get("/public/store/crimson/snapshot").headers.get("etag")
+
+    first = prods[0]
+    assert client.put(f"/products/{first.id}", json={"code": first.code, "name": first.name, "price": float(first.price) + 5,
+                                                     "currency": "USD", "item_type": "bien", "tax_ids": []}).status_code == 200
+    # dentro de los 20 s de margen: se sirve el que hay
+    assert client.get("/public/store/crimson/snapshot").headers.get("etag") == etag1
+    row = db_session.get(StoreSnapshot, t.id)
+    row.built_at = datetime.now(UTC) - timedelta(seconds=60)
+    db_session.commit()
+    etag2 = client.get("/public/store/crimson/snapshot").headers.get("etag")
+    assert etag2 != etag1
+    # sin cambios nuevos no se vuelve a armar
+    db_session.expire_all()
+    built = db_session.get(StoreSnapshot, t.id).built_at
+    assert client.get("/public/store/crimson/snapshot").headers.get("etag") == etag2
+    db_session.expire_all()
+    assert db_session.get(StoreSnapshot, t.id).built_at == built
