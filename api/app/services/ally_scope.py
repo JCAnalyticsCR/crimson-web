@@ -6,7 +6,9 @@ Nada interno gana filtros "en comun": los endpoints internos siguen cerrados al 
 En comun =
 - oportunidades: con una participacion de ESTA empresa visible para el aliado (visible_to_ally);
 - proyectos: los de esas participaciones (la participacion queda ligada al proyecto al crearlo);
-- levantamientos, ordenes y tickets: los asignados explicitamente a la empresa (ally_company_id);
+- levantamientos: los asignados a la empresa (ally_company_id) y los de Crimson en una oportunidad en comun hechos
+  por alguien de su equipo (tecnico, quien lo envio o quien visito; esos solo los edita si el tecnico es suyo);
+- ordenes y tickets: los asignados explicitamente a la empresa (ally_company_id);
 - contratos: asignados a la empresa o de un proyecto en comun (17:27 "lo que ya hemos instalado en comun");
 - activos: de proyectos en comun (por defecto) o de clientes en comun (tenant.settings.ally_assets_scope).
 El tecnico del aliado (tecnico_aliado) solo ve lo suyo de HOY: nada de oportunidades, proyectos, contratos ni activos.
@@ -48,6 +50,7 @@ class AllyScope:
         self.today = local_date(datetime.now(UTC))
         self.assets_mode = (p.tenant.settings or {}).get("ally_assets_scope", "proyectos")
         self._team: set[int] | None = None
+        self._shared: list[int] | None = None
 
     # ---------- subconsultas (Select), nunca listas en memoria ----------
     def participations(self):
@@ -106,8 +109,31 @@ class AllyScope:
             return [false()]
         return [Project.tenant_id == self.tid, Project.id.in_(self.project_ids()), live(Project)]
 
+    def shared_survey_ids(self) -> list[int]:
+        """Levantamientos de Crimson (sin empresa asignada) en oportunidades en comun que hizo alguien de SU equipo: el
+        tecnico a cargo, quien lo envio a revision o uno de los que hicieron la visita (reunion 21/10, item 18: el
+        LEV hecho con el tecnico del aliado no le salia porque solo contaba ally_company_id). visit_tech_ids es JSON:
+        se cruza en Python sobre los pocos levantamientos de esas oportunidades."""
+        if self._shared is None:
+            team = self.team_user_ids()
+            out: list[int] = []
+            if team:
+                opps = select(Opportunity.id).where(Opportunity.tenant_id == self.tid, Opportunity.id.in_(self.opp_ids()), live(Opportunity))
+                rows = self.db.execute(
+                    select(Survey.id, Survey.technician_id, Survey.sent_by, Survey.visit_tech_ids).where(
+                        Survey.tenant_id == self.tid, Survey.ally_company_id.is_(None), Survey.opportunity_id.in_(opps)
+                    )
+                )
+                for sid, tec, sent, visit in rows:
+                    vis = {int(x) for x in (visit or []) if str(x).isdigit()}
+                    if tec in team or sent in team or vis & team:
+                        out.append(sid)
+            self._shared = out
+        return self._shared
+
     def surveys(self) -> list:
-        conds = [Survey.tenant_id == self.tid, Survey.ally_company_id == self.cid, live(Survey)]
+        # de la empresa = asignado a ella, o de Crimson en una oportunidad en comun y hecho por su gente (item 18)
+        conds = [Survey.tenant_id == self.tid, live(Survey), or_(Survey.ally_company_id == self.cid, Survey.id.in_(self.shared_survey_ids()))]
         if self.is_tech:
             conds += [Survey.technician_id == self.uid, or_(Survey.status == "borrador", Survey.review_status == "devuelto")]
         return conds

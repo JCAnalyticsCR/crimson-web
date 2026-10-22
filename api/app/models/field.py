@@ -48,6 +48,10 @@ class Opportunity(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     quote_id: Mapped[int | None] = mapped_column(ForeignKey("quote.id"))
     project_id: Mapped[int | None] = mapped_column(ForeignKey("project.id", use_alter=True, name="fk_opportunity_project"))
     created_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
+    # propuesta desde el portal de aliados (reunion 21/10, item 16): None = de Crimson | pendiente | aprobada | rechazada.
+    # ally_proposed_by: la empresa aliada que la propuso (queda aunque se apruebe)
+    ally_approval: Mapped[str | None] = mapped_column(String(12), index=True)
+    ally_proposed_by: Mapped[int | None] = mapped_column(ForeignKey("ally_company.id", ondelete="SET NULL", name="fk_opportunity_ally_proposed_by"))
 
 
 @event.listens_for(Opportunity.status, "set", active_history=True)
