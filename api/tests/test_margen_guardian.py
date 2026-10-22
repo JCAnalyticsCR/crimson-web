@@ -337,10 +337,12 @@ def test_despublicar_y_volver_a_publicar_no_lo_vuelve_a_vender(client, auth, db_
     _activo(db_session, tid)
     margin_guard.run_all(db_session)
     h = _login_role(client, db_session, tid, "inventario-margen@ejemplo.com", "inventario")
-    assert client.patch(f"/products/{p.id}/web", json={"show_on_web": False}, headers=h).status_code == 200
+    # desde el 21/10 publicar en la tienda es solo del admin (catalog.publicar): inventario ya no lo toca
+    assert client.patch(f"/products/{p.id}/web", json={"show_on_web": False}, headers=h).status_code == 403
+    assert client.patch(f"/products/{p.id}/web", json={"show_on_web": False}).status_code == 200
     db_session.refresh(p)
     assert p.margin_hold and p.id not in [i["id"] for i in _sec(client, "precios_por_revisar")["items"]]
-    assert client.patch(f"/products/{p.id}/web", json={"show_on_web": True}, headers=h).status_code == 200
+    assert client.patch(f"/products/{p.id}/web", json={"show_on_web": True}).status_code == 200
     db_session.refresh(p)
     assert p.margin_hold and p.margin_flagged_at is not None
     r = _venta(client, p.id)
