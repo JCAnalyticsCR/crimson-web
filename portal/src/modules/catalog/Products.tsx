@@ -283,9 +283,16 @@ export default function Products() {
                   <b>{p.name}</b>
                   <small className="mono">{p.code}{p.item_type === "servicio" ? " · servicio" : ""}</small>
                   <small>{p.item_type === "producto" ? availText(p.availability) : "Servicio"}</small>
+                  <small>CABYS <span className="mono">{p.cabys_code || "—"}</span> · {whName(p.warehouse_id)}</small>
                   {verPrecios && <span className="money prd-card__precio">{fmtMoney(p.price, p.currency)}</span>}
                 </span>
               </button>
+              {/* lo mismo que la tabla deja hacer (con los mismos permisos): costo y margen, publicar en la web y papelera */}
+              <span className="prd-card__acc">
+                {publica && <button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-label="Publicar en la web" aria-pressed={p.show_on_web}><i /></button>}
+                <TrashButton kind="product" id={p.id} number={p.code || p.name} onDone={load} />
+              </span>
+              {verCostos && <div className="prd-card__costos"><span><small>Costo</small><CostCell p={p} /></span><span><small>Margen</small><MarginCell p={p} /></span><span><small>Aliado</small>{p.ally_price != null ? <span className="money">{fmtMoney(p.ally_price, p.currency)}</span> : <span className="muted">—</span>}</span></div>}
             </li>
           ))}</ul>
           <div className={`prd-tabla${verCostos ? " prd-dense" : ""}`} style={{ overflowX: "auto" }}>

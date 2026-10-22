@@ -47,7 +47,9 @@ body{font-family:Arial,Helvetica,sans-serif;color:#15131a;font-size:12px;line-he
 table{width:100%;border-collapse:collapse;margin-top:6px}th{text-align:left;font-family:Consolas,monospace;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#8a858f;border-bottom:1px solid #e6e1db;padding:6px 4px}
 td{padding:8px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-align:right;font-family:Consolas,monospace;white-space:nowrap}
 .desc{color:#5a5560;font-size:11px}.tot{width:46%;margin-left:auto;margin-top:12px}.tot td{padding:5px 4px;border:0}.tot .grand td{border-top:2px solid #15131a;font-size:15px;font-weight:700;padding-top:8px}
-.notes{margin-top:14px;padding:8px 10px;background:#f6f2ee;border-radius:8px;color:#5a5560;font-size:10px;line-height:1.35;white-space:pre-wrap}
+.notes{margin-top:18px;padding:10px 12px;background:#f6f2ee;border-radius:8px;color:#5a5560;font-size:11px;white-space:pre-wrap}
+.notes--compact{margin-top:14px;padding:8px 10px;font-size:10px;line-height:1.35;white-space:normal}
+.notes--compact p{margin:0 0 4px;white-space:pre-line;overflow-wrap:anywhere}.notes--compact p:last-child{margin-bottom:0}
 .legal{margin-top:10px;padding:6px 9px;border:1px solid #ece7e1;border-radius:6px;color:#6b6670;font-size:8px;line-height:1.3}
 .legal p{margin:0 0 3px;white-space:pre-line;overflow-wrap:anywhere}.legal p:last-child{margin-bottom:0}
 .foot{margin-top:24px;padding-top:10px;border-top:1px solid #e6e1db;font-size:10px;color:#8a858f;display:flex;justify-content:space-between}
@@ -80,8 +82,10 @@ td{padding:8px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-
 <tr><td>Impuestos</td><td class="num">{{ d.tax_total|money(d.currency) }}</td></tr>
 <tr class="grand"><td>Total</td><td class="num">{{ d.total|money(d.currency) }}</td></tr>
 {% if balance is not none %}<tr><td>Saldo</td><td class="num">{{ balance|money(d.currency) }}</td></tr>{% endif %}</table>
-{% if d.external_notes %}<div class="notes">{{ d.external_notes }}</div>{% endif %}
-{% if footer %}<div class="legal">{% for par in footer|parrafos %}<p>{{ par }}</p>{% endfor %}</div>{% endif %}
+{# Pedido 21/10 (item 17): en la FACTURA las notas y las clausulas van compactas (parrafos sin lineas en blanco
+   repetidas, letra menor); la cotizacion conserva su tamano: sus condiciones son las que el cliente lee para aceptar #}
+{% if d.external_notes %}{% if compact %}<div class="notes notes--compact">{% for par in d.external_notes|parrafos %}<p>{{ par }}</p>{% endfor %}</div>{% else %}<div class="notes">{{ d.external_notes }}</div>{% endif %}{% endif %}
+{% if footer %}{% if compact %}<div class="legal">{% for par in footer|parrafos %}<p>{{ par }}</p>{% endfor %}</div>{% else %}<div class="notes">{{ footer }}</div>{% endif %}{% endif %}
 <div class="foot"><span>{{ t.name }}{% if t.tax_id %} · {{ t.tax_id }}{% endif %}</span><span>Generado por Crimson · plataforma de facturación</span></div>
 </body></html>""")
 
@@ -125,6 +129,7 @@ def render_html(db: Session, doc: Quote | Invoice, tenant: Tenant, kind: str | N
         leyenda=LEYENDA,
         balance=doc.balance if is_inv else None,
         footer=st.get("invoice_footer" if is_inv else "quote_footer"),
+        compact=is_inv,
         band=band,
         clave_label=clave_label,
     )

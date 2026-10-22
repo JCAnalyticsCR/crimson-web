@@ -147,9 +147,12 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     setLines((ls) => [...ls, ...nuevas.map((x) => ({ ...blankLine(), ...x }))]);
     setPick(false);
   };
-  /* Sugerencias del catalogo al escribir el concepto (pedido 21/10, como en Fygaro): con 2 letras o mas busca nombre,
-     codigo, modelo o CABYS; si no hay coincidencia la linea sigue siendo libre y se escribe a mano. La linea que ya
-     tiene producto no sugiere (se puede renombrar); si se borra el concepto, vuelve a ser libre. */
+  /* Sugerencias del catalogo al escribir el concepto (pedido 21/10). Por que "antes lo hacia y ya no": el que sugeria
+     al escribir era Fygaro; en Crimson el concepto de la linea siempre fue un textarea libre (desde la fase 0) y el
+     catalogo solo se buscaba desde el boton del modal, asi que al teclear en la linea no salia nada. Ahora, con 2 letras
+     o mas busca nombre, codigo, modelo o CABYS; si no hay coincidencia la linea sigue siendo libre y se escribe a mano.
+     Solo una eleccion explicita cambia la linea (clic, o flechas + Enter): Tab y Enter sin haber navegado dejan el texto
+     tal cual. La linea que ya tiene producto no sugiere (se puede renombrar); si se borra el concepto, vuelve a ser libre. */
   const [sug, setSug] = useState<{ i: number; q: string; items: Product[]; idx: number } | null>(null);
   const sugTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sugSeq = useRef(0);
@@ -163,22 +166,27 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     const seq = ++sugSeq.current;
     sugTimer.current = setTimeout(() => {
       api<{ items: Product[] }>(`/products?limit=8&q=${encodeURIComponent(q)}`)
-        .then((r) => { if (seq === sugSeq.current) setSug({ i, q, items: r.items, idx: 0 }); })
+        .then((r) => { if (seq === sugSeq.current) setSug({ i, q, items: r.items, idx: -1 }); })
         .catch(() => { if (seq === sugSeq.current) setSug(null); });
     }, 220);
+  };
+  /* Cierra la lista e invalida la busqueda pendiente: una respuesta tardia no la reabre sobre una linea sin foco */
+  const closeSug = () => {
+    if (sugTimer.current) clearTimeout(sugTimer.current);
+    sugSeq.current++;
+    setSug(null);
   };
   const pickSug = (i: number, p: Product) => {
     const [x] = fromProduct([p]);
     setLine(i, x);
-    sugSeq.current++;
-    setSug(null);
+    closeSug();
   };
   const onLineKey = (i: number, e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!sug || sug.i !== i || !sug.items.length) { if (e.key === "Escape") setSug(null); return; }
+    if (!sug || sug.i !== i || !sug.items.length) { if (e.key === "Escape" || e.key === "Tab") closeSug(); return; }
     if (e.key === "ArrowDown") { e.preventDefault(); setSug({ ...sug, idx: Math.min(sug.idx + 1, sug.items.length - 1) }); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setSug({ ...sug, idx: Math.max(sug.idx - 1, 0) }); }
-    else if (e.key === "Enter" || e.key === "Tab") { if (e.key === "Enter") e.preventDefault(); pickSug(i, sug.items[sug.idx]); }
-    else if (e.key === "Escape") setSug(null);
+    else if (e.key === "ArrowUp") { e.preventDefault(); setSug({ ...sug, idx: Math.max(sug.idx - 1, -1) }); }
+    else if (e.key === "Enter" && sug.idx >= 0) { e.preventDefault(); pickSug(i, sug.items[sug.idx]); }
+    else if (e.key === "Escape" || e.key === "Tab") closeSug(); // Tab pasa el foco con el texto escrito, nunca elige
   };
 
   /* ?productos=1,2,3: vienen de Productos & Servicios ("Agregar a cotización"). Se agregan una sola vez, cuando el documento
@@ -389,12 +397,12 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                           <div className="lookup">
                             <textarea className="input line-name" rows={nameRows(l.name)} placeholder={l.product_id ? "Nombre del producto o servicio" : "Escribí para buscar en el catálogo o una línea libre"} value={l.name} disabled={ro}
                               aria-autocomplete="list" aria-expanded={sug?.i === i && sug.items.length > 0}
-                              onChange={(e) => onLineName(i, e.target.value)} onKeyDown={(e) => onLineKey(i, e)} onBlur={() => setSug((s) => (s && s.i === i ? null : s))} />
+                              onChange={(e) => onLineName(i, e.target.value)} onKeyDown={(e) => onLineKey(i, e)} onBlur={closeSug} />
                             {sug?.i === i && !ro && (
                               <ul className="lookup__list line-sug" role="listbox">
                                 {sug.items.map((p, k) => (
                                   <li key={p.id} role="option" aria-selected={k === sug.idx}>
-                                    <button type="button" className={k === sug.idx ? "is-active" : undefined} onMouseDown={(e) => e.preventDefault()} onMouseEnter={() => setSug({ ...sug, idx: k })} onClick={() => pickSug(i, p)}>
+                                    <button type="button" className={k === sug.idx ? "is-active" : undefined} onMouseDown={(e) => e.preventDefault()} onClick={() => pickSug(i, p)}>
                                       <Miniatura url={fotoDe(p)} size={34} />
                                       <span style={{ minWidth: 0 }}><b>{p.name}</b><small>{p.code}{p.price != null ? ` · ${fmtMoney(p.price, p.currency)}` : ""}{p.item_type === "producto" && p.availability ? ` · ${availText(p.availability)}` : ""}</small></span>
                                     </button>
@@ -430,7 +438,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                         <td className="c-disc" data-label="Desc. %"><input className="input input--mono" inputMode="decimal" value={l.discount_value} disabled={ro} onChange={(e) => setLine(i, { discount_value: e.target.value })} /></td>
                         <td className="c-tax" data-label="IVA"><select className="select" value={l.tax_rate} disabled={ro} onChange={(e) => setLine(i, { tax_rate: e.target.value })}>{["13", "4", "2", "1", "0"].map((r) => <option key={r} value={r}>{r}%</option>)}</select></td>
                         <td className="c-sub num money" data-label="Subtotal">{nosuma ? <span className="muted">No suma</span> : prev?.lines[i] ? fmtMoney(prev.lines[i].subtotal, cur) : "—"}</td>
-                        <td className="c-x">{!ro && <button className="x" onClick={() => setLines((ls) => ls.filter((_, k) => k !== i))} aria-label="Eliminar"><Icon d={I.x} size={14} /></button>}</td>
+                        <td className="c-x">{!ro && <button className="x" onClick={() => { closeSug(); setLines((ls) => ls.filter((_, k) => k !== i)); }} aria-label="Eliminar"><Icon d={I.x} size={14} /></button>}</td>
                       </tr>
                     );
                   })}

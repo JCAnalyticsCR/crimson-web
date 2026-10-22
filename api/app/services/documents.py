@@ -23,11 +23,12 @@ from ..models import (
     Product,
     Quote,
     QuoteLine,
+    Tenant,
 )
 from ..schemas.sales import DocumentIn, LineInSchema
 from . import units
 from .refs import check_refs
-from .sequences import next_number
+from .sequences import FISCAL_VISIBLE, PROVISIONAL, next_number, provisional_on
 from .totals import LineIn, balance, compute_document, d
 
 
@@ -221,7 +222,10 @@ def create_invoice(
 ) -> Invoice:
     # D5: el numero visible se asigna al crear; el consecutivo fiscal de 20 digitos, al emitir (services/einvoice.py)
     check_customer(db, tenant_id, payload.customer_id)  # antes de gastar el numero
-    number, _ = next_number(db, tenant_id, doc_type)
+    # Pedido 21/10: con "numero = consecutivo fiscal" y Produccion activa, la FE/TE nace con numero provisional (BOR-...)
+    # y toma su FEC/TE definitivo al emitir (services/sequences.py): asi nunca choca con otra factura
+    provisional = doc_type in FISCAL_VISIBLE and provisional_on(db, db.get(Tenant, tenant_id))
+    number, _ = next_number(db, tenant_id, PROVISIONAL if provisional else doc_type)
     inv = Invoice(tenant_id=tenant_id, number=number, consecutive=None, doc_type=doc_type, created_by=user_id or None, status="creado")
     inv.seller_id = (user_id or None) if seller_id is _SELF else seller_id  # services/ownership.py
     inv.sale_condition = payload.sale_condition or "01"
@@ -274,16 +278,17 @@ def quote_to_payload(q: Quote) -> DocumentIn:
 NEEDS_CUSTOMER = "La cotización no tiene cliente: elegí el cliente antes de convertirla en factura (la factura sale a su nombre y después no se edita)."
 
 
-def convert_quote(db: Session, tenant_id: int, user_id: int, q: Quote, customer_id: int | None = None) -> Invoice:
+def convert_quote(db: Session, tenant_id: int, user_id: int, q: Quote, customer_id: int | None = None, ip: str | None = None) -> Invoice:
     """customer_id: el cliente que se elige al convertir cuando la cotizacion no tiene (p. ej. una aceptada, que ya no
-    se edita). Nunca reemplaza al que ya tiene: la factura hereda el de la cotizacion."""
+    se edita). Nunca reemplaza al que ya tiene: la factura hereda el de la cotizacion. ip: la del usuario, para la
+    bitacora (elegir el cliente fija a nombre de quien sale la factura ante Hacienda)."""
     if q.status in ("convertida", "anulada"):
         raise HTTPException(409, f"La cotizacion esta {q.status}")
     # Pedido 21/10: una factura sin cliente no se corrige despues (las facturas no se editan); sin cliente no se convierte
     if q.customer_id is None and customer_id:
         check_customer(db, tenant_id, customer_id)
         q.customer_id = customer_id
-        audit(db, tenant_id, user_id, "update", "quote", q.id, {"customer_id": [None, customer_id], "motivo": "cliente elegido al convertir"})
+        audit(db, tenant_id, user_id, "update", "quote", q.id, {"customer_id": [None, customer_id], "motivo": "cliente elegido al convertir"}, ip=ip)
     if q.customer_id is None:
         raise HTTPException(409, NEEDS_CUSTOMER)
     units.check_ready(q, "convertir la cotización")

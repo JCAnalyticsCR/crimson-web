@@ -474,7 +474,7 @@ def convert_quote(qid: int, data: ConvertIn | None = None, p: Principal = Depend
     if q.status == "por_aprobar":
         raise HTTPException(409, "La cotización tiene un descuento pendiente de aprobación")
     _use_accepted(db, p, q)
-    inv = svc.convert_quote(db, p.tenant.id, p.user.id, q, customer_id=data.customer_id if data else None)
+    inv = svc.convert_quote(db, p.tenant.id, p.user.id, q, customer_id=data.customer_id if data else None, ip=p.ip)
     invsvc.deduct_for_invoice(db, inv, p.user.id)
     from ..models import Opportunity
 
