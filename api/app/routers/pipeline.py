@@ -21,6 +21,7 @@ from ..services.archive import live
 from ..services.documents import CR, audit
 from ..services.email_layout import cta
 from ..services.fx import rate_or_none
+from ..services.invoice_states import cr_today
 from ..services.mail import notify_roles
 from ..services.ownership import opportunity_seller
 from ..services.totals import d
@@ -282,7 +283,7 @@ def pending(
 ):
     """Mis pendientes: proximas acciones de hoy y vencidas, de la mas atrasada a la de hoy.
     Por defecto solo las propias; quien ve todo el embudo puede pedir las de todo el equipo (everyone=true)."""
-    today = date.today()
+    today = cr_today()  # la misma fecha que la tarjeta del inicio (_opp_pending_cond)
     stmt = select(Opportunity).where(*opp_pending_where("seguimientos_hoy", p, everyone))
     rows = db.scalars(stmt.order_by(Opportunity.next_action_date, Opportunity.id)).all()
     out = []
@@ -660,13 +661,13 @@ OPP_PENDIENTES = ("seguimientos_hoy", "sin_proxima_accion")
 
 
 def _opp_pending_cond(key: str) -> list:
+    # Fecha de Costa Rica (el servidor corre en UTC: despues de las 18:00 CR, date.today() ya es manana). Las dos
+    # tarjetas no se cruzan: "seguimientos_hoy" es lo que tiene fecha (hoy o vencida) y "sin_proxima_accion" lo que no
+    # tiene fecha programada (aunque tenga el texto de la accion): una oportunidad nunca cuenta en las dos.
     if key == "seguimientos_hoy":  # proxima accion de hoy o vencida
-        return [Opportunity.next_action_date.is_not(None), Opportunity.next_action_date <= date.today()]
-    if key == "sin_proxima_accion":  # abierta y sin nada programado: ni accion ni fecha
-        return [
-            Opportunity.status.in_(OPEN_STATES),
-            or_(Opportunity.next_action_date.is_(None), Opportunity.next_action.is_(None), func.trim(Opportunity.next_action) == ""),
-        ]
+        return [Opportunity.next_action_date.is_not(None), Opportunity.next_action_date <= cr_today()]
+    if key == "sin_proxima_accion":  # abierta y sin nada programado (sin fecha)
+        return [Opportunity.status.in_(OPEN_STATES), Opportunity.next_action_date.is_(None)]
     raise HTTPException(422, "Filtro de pendientes desconocido")
 
 

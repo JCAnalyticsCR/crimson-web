@@ -5,8 +5,10 @@
 - 13: el responsable de cada oportunidad va en la lista y en el detalle (nombre e iniciales); el admin filtra por el.
 """
 
-from datetime import date, timedelta
+from datetime import timedelta
 
+from app.models import Quote
+from app.services.invoice_states import cr_today
 from tests.test_rol_vendedor import _entrar, _uid
 
 
@@ -30,17 +32,23 @@ def _opp(client, h, **kw):
 def test_inicio_del_vendedor_con_sus_acciones_pendientes(client, auth, db_session):
     a, ua, b, _ub = _vendedores(client, db_session, auth)
     cust = client.get("/customers").json()["items"][0]
-    hoy = date.today()
+    hoy = cr_today()  # la fecha de Costa Rica, la misma de las tarjetas
     # cotizaciones: por vencer (dentro de 7 dias) la de A; la de B y la que vence en un mes no cuentan para A
     q_a = client.post("/quotes", headers=a, json={"customer_id": cust["id"], "due_date": (hoy + timedelta(days=3)).isoformat(), "lines": _linea()}).json()
     client.post("/quotes", headers=a, json={"customer_id": cust["id"], "due_date": (hoy + timedelta(days=30)).isoformat(), "lines": _linea()})
     client.post("/quotes", headers=b, json={"customer_id": cust["id"], "due_date": (hoy + timedelta(days=2)).isoformat(), "lines": _linea()})
+    # la que el cliente ya rechazo tiene respuesta: no es "por vencer"
+    q_rech = client.post("/quotes", headers=a, json={"customer_id": cust["id"], "due_date": (hoy + timedelta(days=4)).isoformat(), "lines": _linea()}).json()
+    db_session.get(Quote, q_rech["id"]).acceptance_status = "rechazada"
+    db_session.commit()
     # oportunidades: seguimiento vencido, de hoy, futuro y sin proxima accion
     o_late = _opp(client, a, title="Vencida", next_action="Llamar", next_action_date=(hoy - timedelta(days=2)).isoformat())
     o_hoy = _opp(client, a, title="Hoy", next_action="Visitar", next_action_date=hoy.isoformat())
     _opp(client, a, title="Futura", next_action="Enviar", next_action_date=(hoy + timedelta(days=5)).isoformat())
     o_sin = _opp(client, a, title="Sin accion")
     o_sin_fecha = _opp(client, a, title="Sin fecha", next_action="Pensarlo")
+    # con fecha de hoy pero sin el texto de la accion: es un seguimiento de hoy, no "sin proxima accion" (nunca en las dos)
+    o_sin_texto = _opp(client, a, title="Sin texto", next_action_date=hoy.isoformat())
     _opp(client, b, title="De B sin accion")
     _opp(client, b, title="De B vencida", next_action="Llamar", next_action_date=(hoy - timedelta(days=1)).isoformat())
 
@@ -48,15 +56,15 @@ def test_inicio_del_vendedor_con_sus_acciones_pendientes(client, auth, db_sessio
     assert d["scope"] == "mine"
     pend = d["acciones_pendientes"]
     assert pend["cotizaciones_por_vencer"] == 1
-    assert pend["seguimientos_hoy"] == 2
+    assert pend["seguimientos_hoy"] == 3
     assert pend["sin_proxima_accion"] == 2
-    assert "pedidos_web" in pend  # pedidos por atender: la cola sin encargado y los suyos
+    assert "pedidos_web" in pend and "pedidos_sin_encargado" in pend  # los suyos y, aparte, la cola sin encargado
 
     # cada tarjeta lleva a la lista con exactamente esas filas
     qs = client.get("/quotes", params={"pendiente": "cotizaciones_por_vencer"}, headers=a).json()["items"]
     assert [x["id"] for x in qs] == [q_a["id"]]
     seg = client.get("/opportunities/pending", headers=a).json()
-    assert {x["id"] for x in seg} == {o_late["id"], o_hoy["id"]}
+    assert {x["id"] for x in seg} == {o_late["id"], o_hoy["id"], o_sin_texto["id"]}
     sin = client.get("/opportunities", params={"pendiente": "sin_proxima_accion"}, headers=a).json()
     assert {x["id"] for x in sin} == {o_sin["id"], o_sin_fecha["id"]}
     assert client.get("/opportunities", params={"pendiente": "otra"}, headers=a).status_code == 422

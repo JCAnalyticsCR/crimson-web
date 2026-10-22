@@ -27,6 +27,8 @@ function Kpi({ label, data, light, cur }: { label: string; data: NonNullable<D["
 const PENDING: { key: string; label: string; to: string; need: string; hot?: boolean }[] = [
   /* 21/10 (item 35): lo primero que se ve al entrar son los pedidos web por atender */
   { key: "pedidos_web", label: "Pedidos web y comprobantes por atender", to: "/ordenes?pendiente=por_atender", need: "sales.ver", hot: true },
+  /* reunion 2 (item 10): en el inicio personal, la cola sin encargado (de nadie todavia) va aparte de los suyos */
+  { key: "pedidos_sin_encargado", label: "Pedidos web sin encargado para tomar", to: "/ordenes?pendiente=por_atender&vendedor=sin_asignar", need: "sales.ver", hot: true },
   /* reunion 2 (item 10): lo que el vendedor tiene que mover hoy, solo lo suyo (en el inicio de la empresa, del equipo) */
   { key: "seguimientos_hoy", label: "Seguimientos de hoy y vencidos", to: "/oportunidades?pendiente=seguimientos_hoy", need: "crm_pipeline.ver", hot: true },
   { key: "cotizaciones_por_vencer", label: "Cotizaciones por vencer (7 días)", to: "/cotizaciones?pendiente=cotizaciones_por_vencer", need: "sales.ver", hot: true },
@@ -46,6 +48,8 @@ const PENDING: { key: string; label: string; to: string; need: string; hot?: boo
 /** Las tarjetas de oportunidades cuentan lo propio en el inicio personal y lo del equipo en el de la empresa: el
     enlace abre la vista con ese mismo alcance (Mis pendientes con "Todo el equipo", o la lista con "Solo las mías"). */
 function scoped(p: (typeof PENDING)[number], scope?: string) {
+  /* en el inicio personal, "Pedidos web por atender" son solo los suyos: abre la lista con "Mis pedidos" */
+  if (p.key === "pedidos_web") return scope === "mine" ? { ...p, to: `${p.to}&vendedor=mios` } : p;
   if (p.key !== "seguimientos_hoy" && p.key !== "sin_proxima_accion") return p;
   return { ...p, to: `${p.to}${scope === "company" ? "&equipo=1" : "&mias=1"}` };
 }

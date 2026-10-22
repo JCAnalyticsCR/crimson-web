@@ -523,24 +523,31 @@ def test_la_factura_automatica_comisiona_solo_al_vendedor_que_atendio(client, au
 
 
 def test_el_cliente_elige_en_el_checkout_al_vendedor_que_lo_atendio(client, auth, db_session):
-    """Mi Tienda -> "el cliente elige al vendedor que lo atendio" (apagado por defecto): lista de vendedores activos
-    (solo nombres), opcional; el elegido es el que comisiona y el admin lo puede cambiar."""
+    """Mi Tienda -> "el cliente elige al vendedor que lo atendio" (apagado por defecto): lista del equipo comercial
+    (solo nombres y una referencia opaca), opcional. La eleccion del cliente es una SUGERENCIA: no comisiona ni se lleva
+    la factura hasta que el admin la confirma en el pedido."""
+    from app.services.store_orders import _seller_ref
+
+    tid = auth["tenant"]["id"]
     a, ua, _b, ub = _vendedores(client, db_session, auth)
     prods = _shop(client)
     assert client.post("/commissions/rules", json={"name": "Vendedores 10%", "percent": 10}).status_code == 201
     # apagado: el checkout no muestra la lista y lo que mande se ignora (lo asigna el admin)
     assert client.get(f"{SLUG}/checkout-config").json()["sellers"] == []
-    o = _checkout(client, prods, attended_by=ua)
+    o = _checkout(client, prods, attended_by=_seller_ref(tid, ua))
     assert db_session.get(Order, _oid(client, o["number"])).attended_by_id is None
 
     assert _ck_cfg(client, seller_choice=True)["seller_choice"] is True
     vend = client.get(f"{SLUG}/checkout-config").json()["sellers"]
-    assert {ua, ub} <= {v["id"] for v in vend} and all(set(v) == {"id", "name"} for v in vend)
-    admin_id = _uid(client, {})
-    assert admin_id not in {v["id"] for v in vend}  # solo el rol Ventas
-    r = client.post(f"{SLUG}/checkout", json=_body(prods[0]["id"], idempotency_key=f"ck-reu-{next(_n):04d}", attended_by=admin_id))
+    assert all(set(v) == {"id", "name"} for v in vend)
+    refs = {v["id"] for v in vend}
+    # el id interno nunca sale: referencias opacas; el mismo equipo que el admin ve en el pedido (admin incluido)
+    assert {_seller_ref(tid, ua), _seller_ref(tid, ub), _seller_ref(tid, _uid(client, {}))} <= refs
+    assert not {str(ua), str(ub)} & refs
+    assert len(vend) == len(client.get("/store-orders").json()["sellers"])
+    r = client.post(f"{SLUG}/checkout", json=_body(prods[0]["id"], idempotency_key=f"ck-reu-{next(_n):04d}", attended_by="abc123"))
     assert r.status_code == 422 and "vendedor" in r.json()["detail"]
-    o = _checkout(client, prods, attended_by=ua)
+    o = _checkout(client, prods, attended_by=_seller_ref(tid, ua))
     oid = _oid(client, o["number"])
     det = client.get(f"/store-orders/{oid}").json()
     assert det["attended_by_id"] == ua and det["attended_source"] == "cliente" and det["seller_id"] is None
@@ -548,8 +555,93 @@ def test_el_cliente_elige_en_el_checkout_al_vendedor_que_lo_atendio(client, auth
     # sin elegir: opcional
     o3 = _checkout(client, prods)
     assert db_session.get(Order, _oid(client, o3["number"])).attended_by_id is None
-    # la elegida ve el pedido de su cliente y comisiona
+    # la elegida ve el pedido de su cliente, pero sin confirmar no comisiona ni es suya la factura
     assert oid in {x["id"] for x in client.get("/store-orders", headers=a).json()["items"]}
     assert _st(client, oid, "pagado").status_code == 200
-    inv = db_session.get(Invoice, client.post(f"/orders/{oid}/invoice", params={"doc_type": "FE", "register_payment": True}).json()["invoice_id"])
-    assert inv.seller_id == ua and [c.user_id for c in _vendor_commissions(db_session, inv.id)] == [ua]
+    inv_id = client.post(f"/orders/{oid}/invoice", params={"doc_type": "FE", "register_payment": True}).json()["invoice_id"]
+    assert db_session.get(Invoice, inv_id).seller_id is None and _vendor_commissions(db_session, inv_id) == []
+    # el admin confirma la sugerencia (la misma vendedora): ahora si comisiona, una vez
+    r = _attend(client, oid, ua)
+    assert r.status_code == 200 and r.json()["attended_source"] == "admin"
+    db_session.expire_all()
+    assert db_session.get(Invoice, inv_id).seller_id == ua and [c.user_id for c in _vendor_commissions(db_session, inv_id)] == [ua]
+    assert _attend(client, oid, ua).status_code == 200
+    assert len(_vendor_commissions(db_session, inv_id)) == 1
+
+
+def test_el_vendedor_que_atendio_es_del_equipo_comercial(client, auth, db_session):
+    """El admin pone como vendedor que atendio solo a alguien del equipo comercial (la misma lista del checkout): ni un
+    tecnico ni alguien de otra empresa."""
+    _vendedores(client, db_session, auth)
+    tec = _entrar(client, db_session, auth["tenant"]["id"], "tecnico.web@ejemplo.com", "tecnico")
+    prods = _shop(client)
+    oid = _oid(client, _checkout(client, prods)["number"])
+    r = _attend(client, oid, _uid(client, tec))
+    assert r.status_code == 422 and "vendedor" in r.json()["detail"]
+    assert _uid(client, tec) not in {x["id"] for x in client.get("/store-orders").json()["sellers"]}
+
+
+def test_el_vendedor_que_atendio_ve_pero_no_mueve_el_pedido_de_otro(client, auth, db_session):
+    """El vendedor del cliente ve el pedido que atiende otra persona, pero no lo mueve (estado, notas, correos,
+    factura): eso es del encargado o del admin."""
+    a, ua, b, ub = _vendedores(client, db_session, auth)
+    prods = _shop(client)
+    oid = _oid(client, _checkout(client, prods)["number"])
+    assert _assign(client, oid, ua, a).status_code == 200
+    assert _attend(client, oid, ub).status_code == 200
+    det = client.get(f"/store-orders/{oid}", headers=b)
+    assert det.status_code == 200 and det.json()["can_edit"] is False
+    assert client.get(f"/store-orders/{oid}", headers=a).json()["can_edit"] is True
+    assert _st(client, oid, "cancelado", b).status_code == 403
+    assert client.post(f"/store-orders/{oid}/note", json={"note": "Hola"}, headers=b).status_code == 403
+    assert client.post(f"/store-orders/{oid}/resend", headers=b).status_code == 403
+    assert client.patch(f"/orders/{oid}", json={"status": "cancelado"}, headers=b).status_code == 403
+    assert client.post(f"/orders/{oid}/invoice", params={"doc_type": "FE"}, headers=b).status_code == 403
+    db_session.expire_all()
+    assert db_session.get(Order, oid).status != "cancelado"
+    # el encargado si lo mueve
+    assert _st(client, oid, "pagado", a, payment_ref="SINPE 9").status_code == 200
+
+
+def test_mis_comisiones_no_proyecta_el_pedido_web_que_solo_atiende(client, auth, db_session):
+    """Inicio / Mis comisiones (por cobrar): la factura abierta de un pedido web que el vendedor solo atiende no le
+    proyecta comision; cuando el admin lo pone como vendedor que atendio, si."""
+    a, ua, _b, _ub = _vendedores(client, db_session, auth)
+    prods = _shop(client)
+    assert client.post("/commissions/rules", json={"name": "Vendedores 10%", "percent": 10}).status_code == 201
+    oid = _oid(client, _checkout(client, prods)["number"])
+    assert _assign(client, oid, ua, a).status_code == 200
+    r = client.post(f"/orders/{oid}/invoice", params={"doc_type": "FE"})
+    assert r.status_code == 201, r.text
+    inv = db_session.get(Invoice, r.json()["invoice_id"])
+    assert inv.seller_id == ua and inv.balance > 0
+    assert float(client.get("/dashboard", headers=a).json()["comisiones"]["por_cobrar"]) == 0
+    assert _attend(client, oid, ua).status_code == 200
+    assert float(client.get("/dashboard", headers=a).json()["comisiones"]["por_cobrar"]) > 0
+
+
+def test_inicio_del_vendedor_cuenta_solo_sus_pedidos_y_la_cola_aparte(client, auth, db_session):
+    """Reunion 2, item 10: en el Inicio del vendedor, "Pedidos web por atender" son solo los suyos (los que atiende y
+    los de sus clientes); la cola sin encargado va en su propia tarjeta. Cada numero es el de la lista a la que lleva."""
+    a, ua, b, ub = _vendedores(client, db_session, auth)
+    prods = _shop(client)
+    ef = {"payment_method": "efectivo", "delivery": {"type": "retiro"}, "shipping_method": "Retiro en tienda"}  # por atender desde ya
+    o_a = _oid(client, _checkout(client, prods, **ef)["number"])
+    o_b = _oid(client, _checkout(client, prods[1:], **ef)["number"])  # otro producto: las existencias de la prueba son pocas
+    o_cola = _oid(client, _checkout(client, prods, **ef)["number"])
+    o_cliente = _oid(client, _checkout(client, prods[1:], **ef)["number"])
+    assert _assign(client, o_a, ua, a).status_code == 200
+    assert _assign(client, o_b, ub, b).status_code == 200
+    assert _assign(client, o_cliente, ub).status_code == 200 and _attend(client, o_cliente, ua).status_code == 200
+    pend = client.get("/dashboard", headers=a).json()["acciones_pendientes"]
+    mios = client.get("/store-orders", params={"pendiente": "por_atender", "vendedor": "mios"}, headers=a).json()["items"]
+    cola = client.get("/store-orders", params={"pendiente": "por_atender", "vendedor": "sin_asignar"}, headers=a).json()["items"]
+    assert {x["id"] for x in mios} == {o_a, o_cliente}
+    assert o_cola in {x["id"] for x in cola} and o_b not in {x["id"] for x in cola}
+    proofs = client.get("/store-orders", headers=a).json()["comprobantes_facturas"] or 0
+    assert pend["pedidos_web"] == len(mios) + proofs
+    assert pend["pedidos_sin_encargado"] == len(cola)
+    # el inicio de la empresa (admin): todos en una sola tarjeta
+    adm = client.get("/dashboard").json()["acciones_pendientes"]
+    assert "pedidos_sin_encargado" not in adm
+    assert adm["pedidos_web"] >= 4

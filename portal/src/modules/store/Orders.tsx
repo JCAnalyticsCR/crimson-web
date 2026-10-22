@@ -39,6 +39,8 @@ type Order = {
   notify_email?: string | null;
   /* los datos del cliente del pedido los edita solo el administrador (el API rechaza al vendedor) */
   can_edit_contact?: boolean;
+  /* el vendedor que atendió un pedido que atiende otra persona solo lo ve: no lo mueve (el API lo rechaza) */
+  can_edit?: boolean;
 };
 type Seller = { id: number; name: string };
 type Meta = { me: number; can_assign: boolean; can_take: boolean; sellers: Seller[]; carriers: string[] };
@@ -91,7 +93,8 @@ function WebOrders() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [q, setQ] = useState("");
-  const [seller, setSeller] = useState("");
+  /* el inicio abre "Por atender" con "Mis pedidos" o "Sin encargado" (reunion 2, item 10) */
+  const [seller, setSeller] = useState(() => { const v = sp.get("vendedor"); return v === "mios" || v === "sin_asignar" ? v : ""; });
   const [sel, setSel] = useState<Order | null>(null);
   const load = useCallback(() => {
     const s = new URLSearchParams();
@@ -330,10 +333,13 @@ function Detail({ o, labels, meta, onClose, onChange }: { o: Order; labels: Reco
     try {
       const r = await api<Order>(`/store-orders/${o.id}/attended-by`, { method: "POST", json: { seller_id } });
       toast(seller_id ? `Vendedor que atendió: ${r.attended_by_name || "asignado"}. La venta comisiona a su nombre.` : "Sin vendedor que atendió: el pedido no comisiona");
+      /* confirmar la sugerencia del cliente es volver a elegir al mismo vendedor (source pasa a "admin") */
       onChange(r);
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
   const mailTo = o.notify_email || c.email;
+  const ro = o.can_edit === false;  /* solo lo ve: lo atiende otra persona del equipo */
+  const pending = o.attended_source === "cliente";  /* sugerencia del cliente: no comisiona hasta confirmarla */
   const copyLink = async () => { if (!o.track_url) return; try { await navigator.clipboard.writeText(o.track_url); toast("Enlace de seguimiento copiado"); } catch { toast("No se pudo copiar", "bad"); } };
   const waUrl = c.phone ? `https://wa.me/${(c.phone.replace(/\D/g, "").length === 8 ? "506" : "") + c.phone.replace(/\D/g, "")}?text=${encodeURIComponent(`Hola ${c.name || ""}, le escribimos por su pedido ${o.number}.${o.track_url ? ` Estado: ${o.track_url}` : ""}`)}` : null;
 
@@ -343,11 +349,11 @@ function Detail({ o, labels, meta, onClose, onChange }: { o: Order; labels: Reco
         <button className="btn btn--ghost btn--sm" onClick={() => openFile(`/store-orders/${o.id}/print`).catch((e) => toast(e.message, "bad"))}><Icon d={I.invoice} />Imprimir</button>
         {o.track_url && <button className="btn btn--ghost btn--sm" onClick={copyLink}><Icon d={I.link} />Enlace de seguimiento</button>}
         {waUrl && <a className="btn btn--ghost btn--sm" href={waUrl} target="_blank" rel="noopener noreferrer"><Icon d={I.whatsapp} />WhatsApp</a>}
-        {mailTo && <button className="btn btn--ghost btn--sm" onClick={resend} title={`Se envía a ${mailTo}`}><Icon d={I.refresh} />Reenviar correo</button>}
+        {mailTo && !ro && <button className="btn btn--ghost btn--sm" onClick={resend} title={`Se envía a ${mailTo}`}><Icon d={I.refresh} />Reenviar correo</button>}
         {o.invoice_id ? (o.invoice_visible === false
           ? <span className="muted" style={{ fontSize: 13 }} title="La facturó otra persona del equipo">Facturado · comprobante #{o.invoice_id}</span>
           : <Link className="btn btn--crimson btn--sm" to={`/facturas/${o.invoice_id}`}>Ver comprobante #{o.invoice_id}</Link>) : (
-          <>
+          ro ? <span className="muted" style={{ fontSize: 12.5 }}>Lo atiende otra persona del equipo: usted solo lo puede ver.</span> : <>
             {o.paid_at && <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={withPay} onChange={(e) => setWithPay(e.target.checked)} />Aplicar el cobro</label>}
             <button className="btn btn--soft btn--sm" onClick={() => invoice("TE")}>Emitir tiquete</button>
             <button className="btn btn--crimson btn--sm" onClick={() => invoice("FE")} disabled={!c.id_number} title={c.id_number ? "" : "El cliente no indicó cédula"}>Factura electrónica</button>
@@ -393,8 +399,9 @@ function Detail({ o, labels, meta, onClose, onChange }: { o: Order; labels: Reco
                 {meta.sellers.map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}
               </select>
             ) : o.attended_by_id ? <b>{o.attended_by_id === meta.me ? `${o.attended_by_name} (yo)` : o.attended_by_name}</b> : <span className="muted">Nadie</span>}
+            {meta.can_assign && pending && o.attended_by_id && <button className="btn btn--soft btn--sm" style={{ justifySelf: "start" }} onClick={() => attend(o.attended_by_id!)}><Icon d={I.check} />Confirmar: el cliente es de {o.attended_by_name || "este vendedor"}</button>}
             <span className="muted" style={{ fontSize: 12 }}>
-              {o.attended_source === "cliente" ? "Lo eligió el cliente al comprar. " : ""}
+              {pending ? "Lo eligió el cliente al comprar: no comisiona hasta que el administrador lo confirme. " : ""}
               {meta.can_assign ? "Si el cliente es de un vendedor, elíjalo aquí: es el único que comisiona este pedido (siempre uno solo)." : "El vendedor del cliente: es el único que comisiona este pedido. Lo define el administrador."}
             </span>
           </div>
@@ -407,7 +414,7 @@ function Detail({ o, labels, meta, onClose, onChange }: { o: Order; labels: Reco
           </div>
         )}
 
-        {(o.next?.length ?? 0) > 0 && (
+        {!ro && (o.next?.length ?? 0) > 0 && (
           <div className="wo-act">
             <div className="wo-act__row">{o.next!.map((s) => (
               <button key={s} className={`btn btn--sm ${act === s ? "btn--crimson" : s === "cancelado" || (s === "nuevo" && o.status === "en_revision") ? "btn--ghost" : "btn--soft"}`} onClick={() => setAct(act === s ? null : s)}>{ACTION[s] || labels[s] || s}</button>
@@ -472,7 +479,7 @@ function Detail({ o, labels, meta, onClose, onChange }: { o: Order; labels: Reco
                 {h.client_note && <span className="wo-cnote" title="La ve el cliente en su página de seguimiento">Al cliente: «{h.client_note}»</span>}
               </span></li>
             ))}</ul>
-            {o.channel === "tienda" && (
+            {o.channel === "tienda" && !ro && (
               <div className="wo-note">
                 <input className="input" value={freeNote} onChange={(e) => setFreeNote(e.target.value)} maxLength={500} placeholder="Agregar una nota…" aria-label="Nota del pedido" onKeyDown={(e) => { if (e.key === "Enter") addNote(); }} />
                 <label style={{ fontSize: 12.5, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={freeClient} onChange={(e) => setFreeClient(e.target.checked)} />La ve el cliente</label>

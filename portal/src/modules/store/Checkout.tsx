@@ -20,7 +20,8 @@ type Cfg = {
   /* el servidor revisa el dominio del correo (MX); sin el dato (API viejo) se asume que si */
   verify_email?: boolean;
   /* reunion 2 (item 12): vendedores activos para "Vendedor que lo atendió" (vacia = Mi Tienda no lo habilita) */
-  sellers?: { id: number; name: string }[];
+  /* id: referencia opaca (el id interno del usuario nunca sale a la página pública) */
+  sellers?: { id: string; name: string }[];
 };
 /* respuesta de /email-check: formato, error de dedo (gmial.com) o dominio sin correo; ok=true si el DNS no respondio */
 type MailCheck = { email: string; ok: boolean; message: string | null; suggestion: string | null };
@@ -261,7 +262,7 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
     try {
       const { data } = await api<Placed>("/checkout", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lines, contact, delivery, shipping_method: f.rate || null, payment_method: f.method, coupon_code: coupon, notes: f.notes.trim() || null, accept_terms: f.terms, attended_by: cfg?.sellers?.some((x) => String(x.id) === f.seller) ? Number(f.seller) : null, idempotency_key: keyRef.current, expected_total: String(quote.total), website: f.website || null }),
+        body: JSON.stringify({ lines, contact, delivery, shipping_method: f.rate || null, payment_method: f.method, coupon_code: coupon, notes: f.notes.trim() || null, accept_terms: f.terms, attended_by: cfg?.sellers?.some((x) => x.id === f.seller) ? f.seller : null, idempotency_key: keyRef.current, expected_total: String(quote.total), website: f.website || null }),
       });
       if (!data.number) { setErr("No pudimos registrar el pedido. Escribinos por WhatsApp."); return; }
       session.del(DRAFT); // pedido hecho: el proximo checkout arranca limpio (o con "mis datos" si los guardo)
@@ -338,7 +339,7 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
                 <Field label="Vendedor que lo atendió (opcional)" hint="Si alguien de nuestro equipo le ayudó con esta compra, elíjalo aquí.">
                   <select value={f.seller || ""} onChange={(e) => set("seller", e.target.value)}>
                     <option value="">Nadie en particular</option>
-                    {cfg.sellers.map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}
+                    {cfg.sellers.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
                   </select>
                 </Field>
               )}

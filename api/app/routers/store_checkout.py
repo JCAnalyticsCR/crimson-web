@@ -273,7 +273,7 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
     # la confirmacion va al correo que el comprador acaba de escribir (la pantalla le dice a cual); los avisos
     # siguientes y los reenvios, al correo actual de la ficha (so.notify_email, 21/10 item 43)
     if attended:
-        # el vendedor que eligio el cliente (reunion 2, item 12): es el que comisiona el pedido; el admin lo puede cambiar
+        # el vendedor que eligio el cliente (reunion 2, item 12): una sugerencia; comisiona cuando el admin la confirma
         so.set_attended_by(db, t, o, attended, by=None, source="cliente", ip=ip)
     so.notify_customer(db, t, o, "recibido", to=(o.contact or {}).get("email"))
     so.notify_team(db, t, o, "nuevo")
@@ -287,12 +287,14 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
     return _checkout_out(db, t, o, pay=pay, stock=stock)
 
 
-def _attended_choice(db: Session, t: Tenant, uid: int | None) -> int | None:
-    """El vendedor que el cliente dice que lo atendio. Solo si Mi Tienda lo habilita (si no, se ignora: el admin lo
-    asigna al cerrar la venta) y solo uno de la lista publica (vendedores activos)."""
-    if uid is None or not so.seller_choice(t):
+def _attended_choice(db: Session, t: Tenant, ref: str | None) -> int | None:
+    """El vendedor que el cliente dice que lo atendio (referencia opaca de la lista publica). Solo si Mi Tienda lo
+    habilita (si no, se ignora: el admin lo asigna al cerrar la venta). Queda como sugerencia: no comisiona hasta que
+    el admin la confirme en el pedido (so.confirmed_attended)."""
+    if not ref or not so.seller_choice(t):
         return None
-    if uid not in {x["id"] for x in so.public_sellers(db, t)}:
+    uid = so.resolve_public_seller(db, t, ref)
+    if uid is None:
         raise HTTPException(422, "Ese vendedor ya no está disponible. Elija otro o deje la opción en blanco.")
     return uid
 
@@ -567,6 +569,7 @@ def _staff_out(db: Session, o: Order, p: Principal | None = None) -> dict:
     out["carriers"] = list(so.checkout_cfg(db.get(Tenant, o.tenant_id)).get("carriers") or [])
     # los datos del cliente del pedido los edita solo el administrador; el vendedor los ve (PUT .../contact lo rechaza)
     out["can_edit_contact"] = can_edit_contact(p)
+    out["can_edit"] = p is not None and so.edits_order(o, p)  # el vendedor que atendio sin atenderlo solo lo ve
     return out
 
 
@@ -584,15 +587,9 @@ def _seller_names(db: Session, ids) -> dict[int, str]:
 
 
 def _team(db: Session, tid: int) -> list[dict]:
-    """A quien se le puede asignar un pedido web: el equipo comercial activo (mismo criterio que el responsable de
-    una oportunidad, pipeline.meta), filtrado por ownership.eligible_seller."""
-    from ..models import TenantUser
-    from ..services.ownership import eligible_seller
-
-    rows = db.scalars(
-        select(TenantUser).where(TenantUser.tenant_id == tid, TenantUser.active, TenantUser.role_code.in_(("admin", "ventas", "supervisor")))
-    ).all()
-    return sorted(({"id": m.user.id, "name": m.user.full_name} for m in rows if eligible_seller(db, tid, m.user_id)), key=lambda x: x["name"].lower())
+    """A quien se le puede asignar un pedido web o ponerlo como vendedor que atendio: el equipo comercial activo
+    (so.sales_team, la misma lista que ve el cliente en el checkout)."""
+    return so.sales_team(db, tid)
 
 
 def _filters(
@@ -690,11 +687,14 @@ def list_orders(
     }
 
 
-def _get(db: Session, p: Principal, oid: int, scoped: bool = True) -> Order:
-    """El pedido de esta empresa. scoped: sin sales.ver_todo, el pedido de OTRO vendedor es un 404 (so.order_scope)."""
+def _get(db: Session, p: Principal, oid: int, scoped: bool = True, write: bool = False) -> Order:
+    """El pedido de esta empresa. scoped: sin sales.ver_todo, el pedido de OTRO vendedor es un 404 (so.order_scope).
+    write: para moverlo hay que atenderlo (so.edits_order); el vendedor que atendio un pedido que atiende otro solo lo ve."""
     o = db.get(Order, oid)
     if not o or o.tenant_id != p.tenant.id or (scoped and not so.sees_order(o, p)):
         raise HTTPException(404, "Pedido no encontrado")
+    if write and scoped and not so.edits_order(o, p):
+        raise HTTPException(403, "Este pedido lo atiende otra persona del equipo: usted solo lo puede ver")
     return o
 
 
@@ -724,7 +724,7 @@ class StatusIn(BaseModel):
 
 @router.post("/store-orders/{oid}/status")
 def set_status(oid: int, data: StatusIn, p: Principal = Depends(require("sales", "editar")), db: Session = Depends(get_db)):
-    o = _get(db, p, oid)
+    o = _get(db, p, oid, write=True)
     if o.channel != "tienda":
         raise HTTPException(409, "Solo pedidos de la tienda en línea")
     if data.payment_ref and data.status == "pagado":
@@ -800,7 +800,7 @@ class NoteIn(BaseModel):
 @router.post("/store-orders/{oid}/note")
 def add_note(oid: int, data: NoteIn, p: Principal = Depends(require("sales", "editar")), db: Session = Depends(get_db)):
     """Nota sin cambiar el estado: interna (solo el equipo) o para el cliente (sale en su historial)."""
-    o = _get(db, p, oid)
+    o = _get(db, p, oid, write=True)
     if o.channel != "tienda":
         raise HTTPException(409, "Solo pedidos de la tienda en línea")
     if data.client:
@@ -871,7 +871,7 @@ def set_contact(oid: int, data: OrderContactIn, p: Principal = Depends(require("
     """Corrige los datos del cliente del pedido (nombre, correo, telefono, cedula, empresa). Solo el administrador: el
     vendedor los ve y le pide el cambio. No toca el historial de correos del pedido; los avisos que salgan despues van
     al correo que corresponda (so.notify_email)."""
-    o = _get(db, p, oid)
+    o = _get(db, p, oid, write=True)
     if not can_edit_contact(p):
         raise HTTPException(403, "Solo el administrador edita los datos del cliente del pedido")
     cambios = data.model_dump(exclude_unset=True)
@@ -904,7 +904,7 @@ def set_contact(oid: int, data: OrderContactIn, p: Principal = Depends(require("
 @router.post("/store-orders/{oid}/resend")
 def resend(oid: int, p: Principal = Depends(require("sales", "editar")), db: Session = Depends(get_db)):
     """Reenvia al cliente el correo del estado actual (o la confirmacion si sigue pendiente)."""
-    o = _get(db, p, oid)
+    o = _get(db, p, oid, write=True)
     # el aviso del estado actual; tras un rechazo del comprobante, el del rechazo con el motivo (item 47)
     mail = so.resend_mail(db, p.tenant, o)
     if not mail:
@@ -953,16 +953,24 @@ def print_order(oid: int, p: Principal = Depends(require("sales", "ver")), db: S
     )
 
 
-def pending_count(db: Session, p: Principal) -> int:
+def pending_count(db: Session, p: Principal, mine: bool = False) -> int:
     """Tarjeta "Pedidos web por atender" del inicio: misma definicion que el contador "Por atender" de Pedidos de la
-    tienda (/store-orders?pendiente=por_atender, con el alcance del vendedor: order_scope): los pedidos por atender mas
-    los comprobantes de facturas (/pagar) que el que mira puede revisar (payments.ver, solo los de sus facturas si no ve
-    todas)."""
+    tienda (/store-orders?pendiente=por_atender, con el alcance del vendedor: order_scope) mas los comprobantes de
+    facturas (/pagar) que el que mira puede revisar (payments.ver, solo los de sus facturas si no ve todas).
+    mine (inicio personal, reunion 2 item 10): solo los suyos (los que atiende y los de sus clientes), la misma lista
+    que "Por atender" con "Mis pedidos"; la cola sin encargado va aparte (queue_count)."""
     from ..services.invoice_proofs import pending_count as proofs_pending
 
-    return _orders_attention(db, p) + (proofs_pending(db, p.tenant.id, p) if p.can("payments", "ver") else 0)
+    pedidos = _orders_attention(db, p, [or_(Order.seller_id == p.user.id, Order.attended_by_id == p.user.id)] if mine else [])
+    return pedidos + (proofs_pending(db, p.tenant.id, p) if p.can("payments", "ver") else 0)
 
 
-def _orders_attention(db: Session, p: Principal) -> int:
+def queue_count(db: Session, p: Principal) -> int:
+    """Tarjeta "Pedidos web sin encargado" del inicio personal: la cola comun que cualquiera del equipo puede tomar
+    (/store-orders?pendiente=por_atender&vendedor=sin_asignar). No es de nadie todavia: va en su propia tarjeta."""
+    return _orders_attention(db, p, [Order.seller_id.is_(None)])
+
+
+def _orders_attention(db: Session, p: Principal, extra: list | None = None) -> int:
     """Pedidos web por atender que el que mira puede ver (sin sales.ver_todo: los sin vendedor y los suyos)."""
-    return db.scalar(select(func.count()).select_from(Order).where(*so.attention_where(p.tenant.id), so.order_scope(p))) or 0
+    return db.scalar(select(func.count()).select_from(Order).where(*so.attention_where(p.tenant.id), so.order_scope(p), *(extra or []))) or 0

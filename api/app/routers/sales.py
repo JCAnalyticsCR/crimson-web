@@ -247,10 +247,10 @@ def pending_where(key: str, p: Principal) -> list:
     elif key == "cotizaciones_sin_respuesta":
         out.append(Quote.status.in_(("creado", "enviada")))
     elif key == "cotizaciones_por_vencer":
-        # sin respuesta y con la validez entre hoy y DIAS_POR_VENCER (las aceptadas ya estan en "por convertir")
+        # sin respuesta del cliente y con la validez entre hoy y DIAS_POR_VENCER
         out += [
             Quote.status.in_(("creado", "enviada")),
-            Quote.acceptance_status != "aceptada",
+            Quote.acceptance_status == "pendiente",  # la aceptada esta en "por convertir"; la rechazada ya tiene respuesta
             Quote.due_date.is_not(None),
             Quote.due_date >= today,
             Quote.due_date <= today + timedelta(days=DIAS_POR_VENCER),
@@ -1036,9 +1036,13 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
         pend["costos_aliados"] = cost_pending_count(db, p)
     if p.can("sales", "ver"):
         from .store_checkout import pending_count as web_orders_pending
+        from .store_checkout import queue_count as web_orders_queue
 
-        # misma definicion que Pedidos de la tienda -> Por atender (services.store_orders.attention_where)
-        pend["pedidos_web"] = web_orders_pending(db, p)
+        # misma definicion que Pedidos de la tienda -> Por atender (services.store_orders.attention_where). En el inicio
+        # personal (reunion 2, item 10), solo los suyos; la cola sin encargado (de nadie todavia) en su propia tarjeta
+        pend["pedidos_web"] = web_orders_pending(db, p, mine=mine)
+        if mine:
+            pend["pedidos_sin_encargado"] = web_orders_queue(db, p)
     if p.can("commissions", "aprobar"):
         from ..services.commissions import approvals_count
 
