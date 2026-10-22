@@ -421,8 +421,14 @@ def _created(p: Product) -> float:
 
 
 def _rank_default(p: Product) -> tuple:
-    """'Relevancia' sin busqueda: primero lo que se puede comprar ya (con foto y con precio)."""
-    return (not p.images, not (p.price and Decimal(str(p.price)) > 0), p.name.lower())
+    """'Relevancia' sin búsqueda: destacados primero, luego Hikvision, luego lo que se puede comprar ya."""
+    return (
+        not bool(p.web_featured),                      # 1. destacados (Hikvision y los que Andrés marcó)
+        (p.brand or "").lower() != "hikvision",        # 2. Hikvision no marcado explícitamente
+        not p.images,                                  # 3. con foto
+        not (p.price and Decimal(str(p.price)) > 0),   # 4. con precio
+        p.name.lower(),                                # 5. alfabético
+    )
 
 
 @pub.get("/site")
@@ -501,7 +507,7 @@ def showcase_public(slug: str, response: Response, db: Session = Depends(get_db)
         "banners": sorted([b for b in sc["banners"] if b.get("active", True) and (b.get("image") or b.get("title"))], key=lambda b: b.get("position", 0)),
         "trust": sc["trust"],
         "categories": _cat_tree(ctx, counts, images),
-        "brands": [{"name": b, "count": n} for b, n in sorted(brands.items(), key=lambda x: -x[1])[:14]],
+        "brands": [{"name": b, "count": n} for b, n in sorted(brands.items(), key=lambda x: (x[0].lower() != "hikvision", -x[1]))[:14]],
         "featured": [ctx.card(p, stock.get(p.id)) for p in featured[:8]],
         "fresh": [ctx.card(p, stock.get(p.id)) for p in fresh],
         "kits": kits,
@@ -620,7 +626,8 @@ def catalog(
     if sort == "relevance":  # primero lo que se puede comprar ya (lo propio), luego bajo pedido
         rows.sort(key=lambda p: (-scores.get(p.id, 0), sort_key(stock_all.get(p.id)), _rank_default(p)))
     elif sort == "name":
-        rows.sort(key=lambda p: p.name.lower())
+        # destacados y Hikvision primero, luego alfabético dentro de cada grupo
+        rows.sort(key=lambda p: (not bool(p.web_featured), (p.brand or "").lower() != "hikvision", p.name.lower()))
     elif sort in ("price_asc", "price_desc"):
         con = sorted([p for p in rows if disp[p.id] > 0], key=lambda p: disp[p.id], reverse=sort == "price_desc")
         rows = con + [p for p in rows if disp[p.id] <= 0]  # "precio a consultar" siempre al final
@@ -650,7 +657,7 @@ def catalog(
             else None
         ),
         "facets": {
-            "brands": [{"name": b, "count": n} for b, n in sorted(facet_brand.items(), key=lambda x: (-x[1], x[0]))[:30]],
+            "brands": [{"name": b, "count": n} for b, n in sorted(facet_brand.items(), key=lambda x: (x[0].lower() != "hikvision", -x[1], x[0]))[:30]],
             "types": [{"name": k, "count": n} for k, n in sorted(facet_type.items(), key=lambda x: (-x[1], x[0]))],
             "availability": facet_av,
             "price": {"min": min(priced) if priced else 0, "max": max(priced) if priced else 0},

@@ -48,6 +48,15 @@ type Preview = {
 };
 type Named = { id: number; name: string };
 type CatFilter = { category: string | null; subcategory: string | null } | null;
+type AutoCfg = { enabled: boolean; publish_web: boolean; families: string[] };
+type RunResult = {
+  task_id?: string | null;
+  result?: { creados?: number; skip_borrado?: number; skip_sin_costo?: number; publicados?: number; skipped?: string };
+  message?: string;
+  creados?: number; skip_borrado?: number; skip_sin_costo?: number; publicados?: number; skipped?: string;
+};
+
+const AC_FAMILIES = ["Seguridad", "Redes y conectividad", "Respaldo eléctrico", "Smart home"] as const;
 
 const n = (v: Num) => Number(v ?? 0);
 const crc = (v: Num) => (v == null || v === "" ? "—" : fmtMoney(Math.round(n(v)), "CRC"));
@@ -178,6 +187,8 @@ export default function SupplierCatalog() {
           ))}
         </div>
       )}
+
+      {canAdd && apiSup && sid === apiSup.id && <AutoCatalogCard supplierId={apiSup.id} />}
 
       {sup && sup.items > 0 && (
         <div className="prv-layout">
@@ -514,6 +525,124 @@ function AddModal({ item, onClose, onDone }: { item: Detail; onClose: () => void
       </div>
       <p className="muted" style={{ marginTop: 10, fontSize: 12.5 }}>IVA 13 % y CABYS vacío para completar en Productos → Completar CABYS. No se publica en la tienda hasta que lo actives. Queda vinculado: cada lista nueva actualiza su costo y la existencia del proveedor.</p>
     </Modal>
+  );
+}
+
+/* ---------- catálogo automático (Eurocomp → productos propios) ---------- */
+function AutoCatalogCard({ supplierId }: { supplierId: number }) {
+  const { toast } = useSession();
+  const [cfg, setCfg] = useState<AutoCfg | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [runMsg, setRunMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<AutoCfg>(`/supplier-catalog/suppliers/${supplierId}/auto-catalog`)
+      .then(setCfg)
+      .catch(() => setCfg({ enabled: false, publish_web: false, families: [...AC_FAMILIES] }));
+  }, [supplierId]);
+
+  const save = async (next: AutoCfg) => {
+    setSaving(true);
+    try {
+      const r = await api<AutoCfg>(`/supplier-catalog/suppliers/${supplierId}/auto-catalog`, {
+        method: "PUT",
+        json: { enabled: next.enabled, publish_web: next.publish_web, families: next.families },
+      });
+      setCfg(r);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Error al guardar", "bad");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggle = (key: "enabled" | "publish_web") => {
+    if (!cfg) return;
+    const next = { ...cfg, [key]: !cfg[key] };
+    setCfg(next);
+    save(next);
+  };
+
+  const toggleFamily = (fam: string) => {
+    if (!cfg) return;
+    const families = cfg.families.includes(fam)
+      ? cfg.families.filter((f) => f !== fam)
+      : [...cfg.families, fam];
+    const next = { ...cfg, families };
+    setCfg(next);
+    save(next);
+  };
+
+  const run = async () => {
+    setRunning(true);
+    setRunMsg(null);
+    try {
+      const r = await api<RunResult>(`/supplier-catalog/suppliers/${supplierId}/auto-catalog/run`, { method: "POST" });
+      if (r.task_id) {
+        setRunMsg("Tarea encolada en el worker — los productos estarán disponibles en unos minutos.");
+      } else {
+        const res = r.result ?? r;
+        if (res.skipped) {
+          setRunMsg(`Omitido: ${res.skipped}`);
+        } else {
+          const c = res.creados ?? 0;
+          const parts: string[] = [`${c} producto${c !== 1 ? "s" : ""} creado${c !== 1 ? "s" : ""}`];
+          if ((res.publicados ?? 0) > 0) parts.push(`${res.publicados} publicado${(res.publicados ?? 0) !== 1 ? "s" : ""} en la tienda`);
+          if ((res.skip_borrado ?? 0) > 0) parts.push(`${res.skip_borrado} omitido${(res.skip_borrado ?? 0) !== 1 ? "s" : ""} (borrado por el admin)`);
+          if ((res.skip_sin_costo ?? 0) > 0) parts.push(`${res.skip_sin_costo} sin costo`);
+          setRunMsg(parts.join(" · "));
+        }
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Error al ejecutar", "bad");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  if (!cfg) return null;
+
+  return (
+    <Card title="Catálogo automático">
+      <p className="muted" style={{ fontSize: 13, marginTop: 0, lineHeight: 1.5 }}>
+        Crea un producto propio por cada artículo del proveedor en las familias seleccionadas que todavía no tenga uno vinculado.
+        Los artículos que se agoten quedan ocultos en la tienda hasta que Eurocomp reporte existencia nuevamente;
+        lo que usted borre u oculte a propósito no vuelve a crearse ni a publicarse.
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+          <input type="checkbox" style={{ marginTop: 2, flexShrink: 0 }} checked={cfg.enabled} disabled={saving} onChange={() => toggle("enabled")} />
+          <span><b>Activo</b> — crea productos automáticamente en cada sincronización semanal de Eurocomp</span>
+        </label>
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+          <input type="checkbox" style={{ marginTop: 2, flexShrink: 0 }} checked={cfg.publish_web} disabled={saving} onChange={() => toggle("publish_web")} />
+          <span><b>Publicar en la tienda</b> — los productos nuevos aparecen visibles al público al crearse; si está desactivado, se crean ocultos para que los revise antes de publicar</span>
+        </label>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Familias a incluir</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+            {AC_FAMILIES.map((fam) => (
+              <label key={fam} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+                <input type="checkbox" checked={cfg.families.includes(fam)} disabled={saving} onChange={() => toggleFamily(fam)} />
+                {fam}
+              </label>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button className="btn btn--crimson btn--sm" onClick={run} disabled={running}>
+            {running ? <><span className="spinner" />{" "}Creando…</> : <><Icon d={I.plus} size={14} />Agregar al catálogo ahora</>}
+          </button>
+          {saving && <span className="muted" style={{ fontSize: 12 }}>Guardando…</span>}
+        </div>
+        {runMsg && (
+          <div className="prv-banner" role="status">
+            <span>{runMsg}</span>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
