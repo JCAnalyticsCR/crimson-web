@@ -94,6 +94,8 @@ def checkout_config(slug: str, db: Session = Depends(get_db)):
         "auto_invoice": bool(ck.get("auto_invoice", True)),
         "whatsapp": cfg.get("whatsapp") or "",
         "verify_email": bool(ck.get("verify_email", True)),
+        # reunion 2, item 12: lista opcional "¿Lo atendió alguno de nuestros vendedores?" (solo nombres)
+        "sellers": so.public_sellers(db, t) if ck.get("seller_choice") else [],
     }
 
 
@@ -181,6 +183,7 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
     if delivery and delivery.type == "envio" and not (c.phone and len(so.digits(c.phone)) >= 8):
         raise HTTPException(422, "Para el envío necesitamos un teléfono de contacto")
 
+    attended = _attended_choice(db, t, data.attended_by)
     items, calc, coupon, ship, shipping, discount_total = _quote_cart(db, t, data)
     # existencias: las decide hold_for_order al reservar (rechaza solo si Ajustes bloquea ventas sin existencia)
     if data.expected_total is not None and abs(Decimal(data.expected_total) - calc.total) > Decimal("0.01"):
@@ -269,6 +272,9 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
             pay = {"error": ex.detail}
     # la confirmacion va al correo que el comprador acaba de escribir (la pantalla le dice a cual); los avisos
     # siguientes y los reenvios, al correo actual de la ficha (so.notify_email, 21/10 item 43)
+    if attended:
+        # el vendedor que eligio el cliente (reunion 2, item 12): es el que comisiona el pedido; el admin lo puede cambiar
+        so.set_attended_by(db, t, o, attended, by=None, source="cliente", ip=ip)
     so.notify_customer(db, t, o, "recibido", to=(o.contact or {}).get("email"))
     so.notify_team(db, t, o, "nuevo")
     if kind == "efectivo":  # contra entrega: el envio sale sin pago previo, el aviso del mensajero va desde ya
@@ -279,6 +285,16 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
         "bajo_pedido": [{"name": b["name"], "quantity": b["quantity"], "plazo": b["plazo"]} for b in hold.get("bajo_pedido", [])],
     }
     return _checkout_out(db, t, o, pay=pay, stock=stock)
+
+
+def _attended_choice(db: Session, t: Tenant, uid: int | None) -> int | None:
+    """El vendedor que el cliente dice que lo atendio. Solo si Mi Tienda lo habilita (si no, se ignora: el admin lo
+    asigna al cerrar la venta) y solo uno de la lista publica (vendedores activos)."""
+    if uid is None or not so.seller_choice(t):
+        return None
+    if uid not in {x["id"] for x in so.public_sellers(db, t)}:
+        raise HTTPException(422, "Ese vendedor ya no está disponible. Elija otro o deje la opción en blanco.")
+    return uid
 
 
 # ---------- Mi pedido ----------
@@ -458,8 +474,10 @@ class CheckoutCfgIn(_Cfg):
     notify_roles: list[str] = Field(default_factory=lambda: ["admin", "ventas"], max_length=40)  # tambien los roles creados
     verify_email: bool = True
     delivery_notice: bool = True
-    # 21/10, items 24/42: la factura de un pedido web asignado comisiona como una venta propia del vendedor
-    web_orders_commission: bool = True
+    # reunion 2, item 12: el cliente elige en el checkout al vendedor que lo atendio (opcional; apagado por defecto)
+    seller_choice: bool = False
+    # opcion vieja ("atender comisiona"): ya no existe; se acepta y se ignora para que una pestana vieja pueda guardar
+    web_orders_commission: bool | None = None
     # 21/10, item 45: transportistas para "Marcar enviado" (ademas se puede escribir otro)
     carriers: list[str] = Field(default_factory=lambda: list(so.CHECKOUT_DEFAULTS["carriers"]), max_length=12)
 
@@ -504,7 +522,7 @@ def put_checkout_cfg(data: CheckoutCfgIn, p: Principal = Depends(require("settin
     t = db.get(Tenant, p.tenant.id)
     st = {**(t.settings or {})}
     store = {**(st.get("store") or {})}
-    store["checkout"] = data.model_dump(mode="json")
+    store["checkout"] = data.model_dump(mode="json", exclude={"web_orders_commission"})
     st["store"] = store
     t.settings = st
     audit(db, t.id, p.user.id, "update", "store_checkout", t.id, {"methods": [k for k, v in data.methods.model_dump().items() if v.get("active")]}, ip=p.ip)
@@ -540,7 +558,9 @@ def _staff_out(db: Session, o: Order, p: Principal | None = None) -> dict:
         out["customer_name"] = c.name if c else None
     # a donde van los avisos y "Reenviar correo": el correo ACTUAL de la ficha si hay cliente (21/10, item 43)
     out["notify_email"] = so.notify_email(db, o) or None
-    out["seller_name"] = _seller_names(db, [o.seller_id]).get(o.seller_id) if o.seller_id else None
+    names = _seller_names(db, [o.seller_id, o.attended_by_id])
+    out["seller_name"] = names.get(o.seller_id)
+    out["attended_by_name"] = names.get(o.attended_by_id)  # "Vendedor que atendio" (reunion 2, item 12)
     # "Tomar" solo en pedidos por atender y sin factura (so.TAKEABLE); el transportista, de Mi Tienda tal cual (vacia =
     # se escribe a mano). Vienen en el detalle para que el pedido abierto desde un enlace no dependa de la lista.
     out["takeable"] = o.id in so.takeable_ids(db, [o])
@@ -602,14 +622,14 @@ def _filters(
     if q and q.strip():
         like = f"%{q.strip()}%"
         w.append(or_(Order.number.ilike(like), func.lower(cast(Order.contact, String)).like(like.lower())))
-    if vendedor == "mios":
-        w.append(Order.seller_id == me)
+    if vendedor == "mios":  # los que atiende y los de sus clientes (vendedor que atendio)
+        w.append(or_(Order.seller_id == me, Order.attended_by_id == me))
     elif vendedor == "sin_asignar":
         w.append(Order.seller_id.is_(None))
     elif vendedor:
         if not re.fullmatch(r"[0-9]{1,10}", vendedor):  # isdigit() acepta "²" y int() reventaria (500)
             raise HTTPException(422, "Filtro de vendedor desconocido")
-        w.append(Order.seller_id == int(vendedor))
+        w.append(or_(Order.seller_id == int(vendedor), Order.attended_by_id == int(vendedor)))
     return w
 
 
@@ -638,13 +658,14 @@ def list_orders(
     from ..services.ownership import visible_invoice_ids
 
     mias = visible_invoice_ids(db, p, [o.invoice_id for o in rows])  # una consulta para toda la pagina
-    names = _seller_names(db, [o.seller_id for o in rows])
+    names = _seller_names(db, [x for o in rows for x in (o.seller_id, o.attended_by_id)])
     tomables = so.takeable_ids(db, rows)
     items = [
         {
             **_order_out(o),
             "invoice_visible": (o.invoice_id in mias) if o.invoice_id else None,
             "seller_name": names.get(o.seller_id),
+            "attended_by_name": names.get(o.attended_by_id),
             "takeable": o.id in tomables,
         }
         for o in rows
@@ -812,6 +833,16 @@ def set_seller(oid: int, data: SellerIn, p: Principal = Depends(require("sales",
     if not admin and o.seller_id is None and o.id not in so.takeable_ids(db, [o]):
         raise HTTPException(409, "Este pedido ya no se puede tomar (está facturado, entregado o cerrado): pedile al administrador que te lo asigne")
     so.assign_seller(db, p.tenant, o, data.seller_id, by=p.user.id, ip=p.ip)
+    db.commit()
+    return _staff_out(db, o, p)
+
+
+@router.post("/store-orders/{oid}/attended-by")
+def set_attended_by(oid: int, data: SellerIn, p: Principal = Depends(require("sales", "asignar")), db: Session = Depends(get_db)):
+    """"Vendedor que atendio" (reunion 2, item 12): el vendedor del cliente, el unico que comisiona el pedido web.
+    Solo el admin (sales.asignar) lo pone, lo cambia o lo quita; siempre uno solo."""
+    o = so.lock_order(db, _get(db, p, oid, scoped=False))
+    so.set_attended_by(db, p.tenant, o, data.seller_id, by=p.user.id, source="admin", ip=p.ip)
     db.commit()
     return _staff_out(db, o, p)
 

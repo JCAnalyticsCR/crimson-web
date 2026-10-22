@@ -152,9 +152,14 @@ PENDIENTES = {
     "documentos_rechazados": "invoices",
     "enlaces_abiertos": "invoices",
     "cotizaciones_sin_respuesta": "quotes",
+    "cotizaciones_por_vencer": "quotes",  # reunion 2, item 10
     "cotizaciones_por_aprobar": "quotes",
     "cotizaciones_aceptadas": "quotes",
 }
+
+# "Por vencer": la validez de la cotizacion (due_date) cae entre hoy y estos dias. Al pasarla, tasks/cobranza la marca
+# "vencida" y ya no se puede convertir: es lo que el vendedor tiene que mover primero (reunion 2, item 10).
+DIAS_POR_VENCER = 7
 
 # Quien aprueba puede decir que no (POST /quotes/{id}/reject): la cotizacion sigue retenida (no se envia ni se
 # convierte) pero ya no espera a quien aprueba, espera a la vendedora. Vive en la bitacora: la ultima de estas dos
@@ -241,6 +246,15 @@ def pending_where(key: str, p: Principal) -> list:
         out.append(Invoice.id.in_(abiertos))
     elif key == "cotizaciones_sin_respuesta":
         out.append(Quote.status.in_(("creado", "enviada")))
+    elif key == "cotizaciones_por_vencer":
+        # sin respuesta y con la validez entre hoy y DIAS_POR_VENCER (las aceptadas ya estan en "por convertir")
+        out += [
+            Quote.status.in_(("creado", "enviada")),
+            Quote.acceptance_status != "aceptada",
+            Quote.due_date.is_not(None),
+            Quote.due_date >= today,
+            Quote.due_date <= today + timedelta(days=DIAS_POR_VENCER),
+        ]
     elif key == "cotizaciones_por_aprobar":
         # las rechazadas siguen retenidas pero ya no esperan a quien aprueba (esperan cambios de la vendedora)
         out += [Quote.status == "por_aprobar", ~_devuelta(tid)]
@@ -1029,6 +1043,14 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
         from ..services.commissions import approvals_count
 
         pend["comisiones_por_aprobar"] = approvals_count(db, p)
+    if p.can("crm_pipeline", "ver"):
+        from .pipeline import OPP_PENDIENTES, opp_pending_count
+
+        # reunion 2, item 10: seguimientos de hoy y oportunidades sin proxima accion; las mismas definiciones que
+        # Oportunidades -> Mis pendientes y la lista filtrada (pipeline.opp_pending_where). En el inicio personal,
+        # solo las propias; en el de la empresa (quien ve todo el embudo), las de todo el equipo.
+        for k in OPP_PENDIENTES:
+            pend[k] = opp_pending_count(db, k, p, everyone=not mine)
     comisiones = None
     if p.can("commissions", "ver") and not p.can("commissions", "ver_todo") and p.ally_company_id is None:
         from ..services.commissions import summary_for_user

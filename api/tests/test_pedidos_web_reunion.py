@@ -1,8 +1,10 @@
 """Reunion 21/10 · pedidos web: vendedor del pedido y correos del pedido.
 
-- 24/42: el pedido web se asigna a un vendedor (el admin lo asigna; el vendedor "toma" uno sin vendedor). La factura
-  que nace del pedido queda a su nombre (la ve en sus Facturas) y comisiona como una venta propia, salvo que Mi Tienda
-  lo apague. Asignar despues de facturar pasa la factura y comisiona lo ya cobrado, sin pagarle la venta a dos.
+- 24/42: el pedido web se asigna a un encargado (el admin lo asigna; el vendedor "toma" uno sin encargado). La factura
+  que nace del pedido queda a su nombre (la ve en sus Facturas).
+- Reunion 2, item 12: atender el pedido NO comisiona. Solo comisiona el "Vendedor que atendio" (el vendedor del
+  cliente), que pone el admin o elige el cliente en el checkout si Mi Tienda lo habilita; la factura pasa a su nombre.
+  Ponerlo despues de facturar comisiona lo ya cobrado, sin pagarle la venta a dos.
 - 43: avisos y reenvios van al correo ACTUAL de la ficha del cliente (si no hay ficha o no tiene correo, al del pedido).
 - 45: al marcar "Enviado" se elige el transportista ("Mensajería Crimson" incluido) y el correo lo dice sin guia.
 - 47: rechazar el comprobante manda un correo con el motivo y como volver a subirlo (dedupe_key por rechazo).
@@ -46,6 +48,10 @@ def _vendedores(client, db_session, auth):
     a = _entrar(client, db_session, tid, "vendedora.web@ejemplo.com", "ventas")
     b = _entrar(client, db_session, tid, "vendedor.web@ejemplo.com", "ventas")
     return a, _uid(client, a), b, _uid(client, b)
+
+
+def _attend(client, oid, seller_id, h=None):
+    return client.post(f"/store-orders/{oid}/attended-by", json={"seller_id": seller_id}, headers=h or {})
 
 
 def _ck_cfg(client, **patch):
@@ -109,41 +115,67 @@ def test_admin_asigna_y_el_vendedor_toma_un_pedido_sin_vendedor(client, auth, db
     assert "Asignado" not in str(pub)
 
 
-def test_factura_del_pedido_asignado_es_del_vendedor_y_comisiona(client, auth, db_session):
+def test_atender_el_pedido_no_comisiona_y_el_vendedor_que_atendio_si(client, auth, db_session):
+    """Reunion 2, item 12: el vendedor que toma el pedido lo atiende (la factura es suya) pero no comisiona; comisiona
+    solo cuando el admin lo pone como "Vendedor que atendio" (el cliente es suyo)."""
     a, ua, _b, _ub = _vendedores(client, db_session, auth)
     prods = _shop(client)
     assert client.post("/commissions/rules", json={"name": "Vendedores 10%", "percent": 10}).status_code == 201
     o = _checkout(client, prods)
     oid = _oid(client, o["number"])
-    assert _assign(client, oid, ua).status_code == 200
+    assert _assign(client, oid, ua, a).status_code == 200  # lo toma
     assert _st(client, oid, "pagado", payment_ref="SINPE 1").status_code == 200
     r = client.post(f"/orders/{oid}/invoice", params={"doc_type": "FE", "register_payment": True})
     assert r.status_code == 201, r.text
     inv = db_session.get(Invoice, r.json()["invoice_id"])
-    assert inv.seller_id == ua
-    com = _vendor_commissions(db_session, inv.id)
-    assert len(com) == 1 and com[0].user_id == ua
+    assert inv.seller_id == ua and _vendor_commissions(db_session, inv.id) == []  # suya, pero sin comision
     # la vendedora ve la factura en sus Facturas y enlazada desde el pedido (item 24)
     assert client.get(f"/invoices/{inv.id}", headers=a).status_code == 200
     assert inv.id in {x["id"] for x in client.get("/invoices", headers=a).json()["items"]}
     assert client.get(f"/store-orders/{oid}", headers=a).json()["invoice_visible"] is True
+    # el vendedor no se pone a si mismo como el que atendio: es del admin
+    assert _attend(client, oid, ua, a).status_code == 403
+    r = _attend(client, oid, ua)
+    assert r.status_code == 200, r.text
+    assert r.json()["attended_by_id"] == ua and r.json()["attended_by_name"] and r.json()["attended_source"] == "admin"
+    db_session.expire_all()
+    assert [c.user_id for c in _vendor_commissions(db_session, inv.id)] == [ua]
+    assert _attend(client, oid, ua).status_code == 200  # repetir no duplica
+    assert len(_vendor_commissions(db_session, inv.id)) == 1
 
 
-def test_mi_tienda_apaga_la_comision_de_los_pedidos_web(client, auth, db_session):
-    a, ua, _b, _ub = _vendedores(client, db_session, auth)
+def test_comisiona_el_vendedor_que_atendio_aunque_otro_atienda_el_pedido(client, auth, db_session):
+    a, ua, b, ub = _vendedores(client, db_session, auth)
     prods = _shop(client)
-    assert _ck_cfg(client, web_orders_commission=False)["web_orders_commission"] is False
     assert client.post("/commissions/rules", json={"name": "Vendedores 10%", "percent": 10}).status_code == 201
     o = _checkout(client, prods)
     oid = _oid(client, o["number"])
-    assert _assign(client, oid, ua).status_code == 200
+    assert _assign(client, oid, ua, a).status_code == 200  # A lo atiende
+    assert _attend(client, oid, ub).status_code == 200  # el cliente es de B
+    assert _attend(client, oid, 999999).status_code == 422  # no es del equipo
+    # B ve el pedido de su cliente (vendedor que atendio) y A el que atiende
+    assert oid in {x["id"] for x in client.get("/store-orders", headers=b).json()["items"]}
+    assert oid in {x["id"] for x in client.get("/store-orders", params={"vendedor": "mios"}, headers=b).json()["items"]}
+    assert client.get(f"/store-orders/{oid}", headers=a).status_code == 200
     assert _st(client, oid, "pagado").status_code == 200
     inv = db_session.get(Invoice, client.post(f"/orders/{oid}/invoice", params={"doc_type": "FE", "register_payment": True}).json()["invoice_id"])
-    assert inv.seller_id == ua and _vendor_commissions(db_session, inv.id) == []  # suya, pero sin comision
-    assert client.get(f"/invoices/{inv.id}", headers=a).status_code == 200
+    assert inv.seller_id == ub and [c.user_id for c in _vendor_commissions(db_session, inv.id)] == [ub]
+    # cambiar el encargado no mueve la factura ni la comision
+    assert _assign(client, oid, None).status_code == 200
+    db_session.expire_all()
+    assert db_session.get(Invoice, inv.id).seller_id == ub and len(_vendor_commissions(db_session, inv.id)) == 1
+    # quitar al que atendio con la comision viva: primero se anula en Comisiones
+    r = _attend(client, oid, None)
+    assert r.status_code == 409 and "Comisiones" in r.json()["detail"]
 
 
-def test_asignar_despues_de_facturar_pasa_la_factura_y_comisiona_una_vez(client, auth, db_session):
+def test_la_opcion_vieja_de_mi_tienda_ya_no_existe(client, auth, db_session):
+    """La opcion de antes ("atender comisiona"): una pestana vieja que la manda puede guardar, y no vuelve."""
+    ck = _ck_cfg(client, web_orders_commission=True)
+    assert "web_orders_commission" not in ck and ck["seller_choice"] is False
+
+
+def test_el_que_atendio_despues_de_facturar_recibe_la_factura_y_comisiona_una_vez(client, auth, db_session):
     _a, ua, _b, ub = _vendedores(client, db_session, auth)
     prods = _shop(client)
     assert client.post("/commissions/rules", json={"name": "Vendedores 10%", "percent": 10}).status_code == 201
@@ -152,14 +184,14 @@ def test_asignar_despues_de_facturar_pasa_la_factura_y_comisiona_una_vez(client,
     assert _st(client, oid, "pagado").status_code == 200
     inv_id = client.post(f"/orders/{oid}/invoice", params={"doc_type": "FE", "register_payment": True}).json()["invoice_id"]
     assert db_session.get(Invoice, inv_id).seller_id is None and _vendor_commissions(db_session, inv_id) == []
-    assert _assign(client, oid, ua).status_code == 200
+    assert _attend(client, oid, ua).status_code == 200
     db_session.expire_all()
     assert db_session.get(Invoice, inv_id).seller_id == ua
     assert [c.user_id for c in _vendor_commissions(db_session, inv_id)] == [ua]
-    # ya comisiono a la vendedora: reasignar no le paga la misma venta a otro
-    r = _assign(client, oid, ub)
+    # ya comisiono a la vendedora: cambiar al que atendio no le paga la misma venta a otro
+    r = _attend(client, oid, ub)
     assert r.status_code == 409 and "Comisiones" in r.json()["detail"]
-    assert _assign(client, oid, ua).status_code == 200  # el mismo vendedor: nada cambia
+    assert _attend(client, oid, ua).status_code == 200  # el mismo vendedor: nada cambia
     assert len(_vendor_commissions(db_session, inv_id)) == 1
 
 
@@ -187,8 +219,11 @@ def test_el_vendedor_no_toma_ventas_facturadas_ni_cerradas(client, auth, db_sess
     assert _st(client, oid2, "pagado").status_code == 200
     assert client.post(f"/orders/{oid2}/invoice", params={"doc_type": "FE", "register_payment": True}).status_code == 201
     assert _assign(client, oid2, ua, a).status_code == 409
-    # el admin si lo asigna (y comisiona lo cobrado)
+    # el admin si lo asigna como encargado (sin comision) y como vendedor que atendio (comisiona lo cobrado)
     assert _assign(client, oid, ua).status_code == 200
+    db_session.expire_all()
+    assert db_session.get(Invoice, inv_id).seller_id == ua and _vendor_commissions(db_session, inv_id) == []
+    assert _attend(client, oid, ua).status_code == 200
     db_session.expire_all()
     assert [c.user_id for c in _vendor_commissions(db_session, inv_id)] == [ua]
 
@@ -199,15 +234,15 @@ def test_reasignar_tras_anular_la_comision_le_comisiona_al_nuevo(client, auth, d
     assert client.post("/commissions/rules", json={"name": "Vendedores 10%", "percent": 10}).status_code == 201
     o = _checkout(client, prods)
     oid = _oid(client, o["number"])
-    assert _assign(client, oid, ua).status_code == 200
+    assert _attend(client, oid, ua).status_code == 200
     assert _st(client, oid, "pagado").status_code == 200
     inv_id = client.post(f"/orders/{oid}/invoice", params={"doc_type": "FE", "register_payment": True}).json()["invoice_id"]
     (com_a,) = _vendor_commissions(db_session, inv_id)
     assert com_a.user_id == ua
-    assert _assign(client, oid, ub).status_code == 409
+    assert _attend(client, oid, ub).status_code == 409
     r = client.patch("/commissions", json={"ids": [com_a.id], "status": "anulada", "reason": "Pedido de otro vendedor"})
     assert r.status_code == 200, r.text
-    assert _assign(client, oid, ub).status_code == 200
+    assert _attend(client, oid, ub).status_code == 200
     db_session.expire_all()
     assert [c.user_id for c in _vendor_commissions(db_session, inv_id)] == [ub]
 
@@ -217,18 +252,18 @@ def test_reasignar_a_b_y_de_vuelta_a_a_le_vuelve_a_comisionar(client, auth, db_s
     prods = _shop(client)
     assert client.post("/commissions/rules", json={"name": "Vendedores 10%", "percent": 10}).status_code == 201
     oid = _oid(client, _checkout(client, prods)["number"])
-    assert _assign(client, oid, ua).status_code == 200
+    assert _attend(client, oid, ua).status_code == 200
     assert _st(client, oid, "pagado").status_code == 200
     inv_id = client.post(f"/orders/{oid}/invoice", params={"doc_type": "FE", "register_payment": True}).json()["invoice_id"]
     for actual, siguiente in ((ua, ub), (ub, ua)):
         (com,) = _vendor_commissions(db_session, inv_id)
         assert com.user_id == actual
         assert client.patch("/commissions", json={"ids": [com.id], "status": "anulada", "reason": "Reasignado"}).status_code == 200
-        assert _assign(client, oid, siguiente).status_code == 200
+        assert _attend(client, oid, siguiente).status_code == 200
         db_session.expire_all()
     vivas = _vendor_commissions(db_session, inv_id)
     assert [c.user_id for c in vivas] == [ua] and vivas[0].source_key.endswith(":re1")
-    assert _assign(client, oid, ua).status_code == 200  # repetir no duplica
+    assert _attend(client, oid, ua).status_code == 200  # repetir no duplica
     db_session.expire_all()
     assert len(_vendor_commissions(db_session, inv_id)) == 1
 
@@ -467,9 +502,9 @@ def test_la_factura_automatica_sale_en_las_facturas_de_quien_confirmo_el_pago(cl
     assert inv2.id in {x["id"] for x in client.get("/invoices", headers=a).json()["items"]}
 
 
-def test_la_factura_automatica_del_pedido_asignado_comisiona_segun_mi_tienda(client, auth, db_session):
-    """El camino normal en produccion (auto_invoice): el cobro aplicado a la factura automatica comisiona al vendedor
-    asignado; con "comisiona como venta propia" apagado en Mi Tienda, la factura es suya pero sin comision."""
+def test_la_factura_automatica_comisiona_solo_al_vendedor_que_atendio(client, auth, db_session):
+    """El camino normal en produccion (auto_invoice): el cobro aplicado a la factura automatica de un pedido que el
+    vendedor solo atiende no le comisiona; el del pedido de su cliente (vendedor que atendio) si."""
     a, ua, _b, _ub = _vendedores(client, db_session, auth)
     client.put("/settings", json={"einvoice_provider": "sandbox"})
     prods = _shop(client, auto_invoice=True)
@@ -478,12 +513,43 @@ def test_la_factura_automatica_del_pedido_asignado_comisiona_segun_mi_tienda(cli
     oid = _oid(client, o["number"])
     assert _assign(client, oid, ua, a).status_code == 200
     inv = db_session.get(Invoice, _st(client, oid, "pagado").json()["invoice_id"])
-    assert inv.seller_id == ua
-    assert [c.user_id for c in _vendor_commissions(db_session, inv.id)] == [ua]
+    assert inv.seller_id == ua and _vendor_commissions(db_session, inv.id) == []
 
-    assert _ck_cfg(client, web_orders_commission=False)["web_orders_commission"] is False
     o2 = _checkout(client, prods)
     oid2 = _oid(client, o2["number"])
-    assert _assign(client, oid2, ua, a).status_code == 200
+    assert _attend(client, oid2, ua).status_code == 200
     inv2 = db_session.get(Invoice, _st(client, oid2, "pagado").json()["invoice_id"])
-    assert inv2.seller_id == ua and _vendor_commissions(db_session, inv2.id) == []
+    assert inv2.seller_id == ua and [c.user_id for c in _vendor_commissions(db_session, inv2.id)] == [ua]
+
+
+def test_el_cliente_elige_en_el_checkout_al_vendedor_que_lo_atendio(client, auth, db_session):
+    """Mi Tienda -> "el cliente elige al vendedor que lo atendio" (apagado por defecto): lista de vendedores activos
+    (solo nombres), opcional; el elegido es el que comisiona y el admin lo puede cambiar."""
+    a, ua, _b, ub = _vendedores(client, db_session, auth)
+    prods = _shop(client)
+    assert client.post("/commissions/rules", json={"name": "Vendedores 10%", "percent": 10}).status_code == 201
+    # apagado: el checkout no muestra la lista y lo que mande se ignora (lo asigna el admin)
+    assert client.get(f"{SLUG}/checkout-config").json()["sellers"] == []
+    o = _checkout(client, prods, attended_by=ua)
+    assert db_session.get(Order, _oid(client, o["number"])).attended_by_id is None
+
+    assert _ck_cfg(client, seller_choice=True)["seller_choice"] is True
+    vend = client.get(f"{SLUG}/checkout-config").json()["sellers"]
+    assert {ua, ub} <= {v["id"] for v in vend} and all(set(v) == {"id", "name"} for v in vend)
+    admin_id = _uid(client, {})
+    assert admin_id not in {v["id"] for v in vend}  # solo el rol Ventas
+    r = client.post(f"{SLUG}/checkout", json=_body(prods[0]["id"], idempotency_key=f"ck-reu-{next(_n):04d}", attended_by=admin_id))
+    assert r.status_code == 422 and "vendedor" in r.json()["detail"]
+    o = _checkout(client, prods, attended_by=ua)
+    oid = _oid(client, o["number"])
+    det = client.get(f"/store-orders/{oid}").json()
+    assert det["attended_by_id"] == ua and det["attended_source"] == "cliente" and det["seller_id"] is None
+    assert "atendió" not in str(client.get(f"{SLUG}/orders/{o['track_token']}").json())  # nota interna
+    # sin elegir: opcional
+    o3 = _checkout(client, prods)
+    assert db_session.get(Order, _oid(client, o3["number"])).attended_by_id is None
+    # la elegida ve el pedido de su cliente y comisiona
+    assert oid in {x["id"] for x in client.get("/store-orders", headers=a).json()["items"]}
+    assert _st(client, oid, "pagado").status_code == 200
+    inv = db_session.get(Invoice, client.post(f"/orders/{oid}/invoice", params={"doc_type": "FE", "register_payment": True}).json()["invoice_id"])
+    assert inv.seller_id == ua and [c.user_id for c in _vendor_commissions(db_session, inv.id)] == [ua]

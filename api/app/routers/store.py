@@ -262,7 +262,9 @@ def _order_out(o: Order):
         "proofs": o.proofs or [],
         "expires_at": aware(o.expires_at),
         "inventory_state": o.inventory_state,
-        "seller_id": o.seller_id,  # vendedor del pedido web (21/10, items 24/42)
+        "seller_id": o.seller_id,  # encargado del pedido web (21/10, items 24/42): atenderlo no comisiona
+        "attended_by_id": o.attended_by_id,  # vendedor que atendio (reunion 2, item 12): el que comisiona
+        "attended_source": o.attended_source,
         "assigned_at": aware(o.assigned_at),
         "lines": [
             {
@@ -695,6 +697,8 @@ class CheckoutIn(BaseModel):
     # el total que el comprador vio: si el servidor calcula otro, no se crea el pedido
     expected_total: Decimal | None = Field(None, ge=0)
     website: str | None = Field(None, max_length=200)  # honeypot
+    # "¿Lo atendió alguno de nuestros vendedores?" (reunion 2, item 12): solo cuenta si Mi Tienda lo habilita
+    attended_by: int | None = Field(None, ge=1)
 
 
 def rate_zone(r: dict) -> str | None:

@@ -84,6 +84,11 @@ class Order(TenantMixin, TimestampMixin, Base):
     # pedido queda a su nombre (seller_id) y comisiona como una venta propia salvo que Mi Tienda lo apague.
     seller_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), index=True)
     assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # "Vendedor que atendio" (reunion 2, item 12): el vendedor del CLIENTE, el unico que comisiona el pedido web. Lo
+    # pone el admin (o el cliente en el checkout, si Mi Tienda lo habilita). Atender el pedido (seller_id, "Tomar") es
+    # parte del trabajo y no comisiona. attended_source: "admin" | "cliente".
+    attended_by_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), index=True)
+    attended_source: Mapped[str | None] = mapped_column(String(8))
     # como se ligo a la ficha del cliente (21/10, item 43): "email" (la ficha tenia el correo del comprador o no tenia
     # correo) o "cedula" (solo coincidio la cedula; la ficha tenia OTRO correo). customer_link_email: el correo que
     # tenia la ficha al ligarla (interno, nunca sale al comprador). Con "cedula" los avisos siguen al correo del pedido
