@@ -37,10 +37,19 @@ from ..models import (
     Invoice,
     JournalEntry,
     QboAccount,
+    Tenant,
     bank_role,
     expense_cat_role,
 )
 from ..services import journal as js
+
+# Formatos de fecha soportados para la importación en QBO
+QBO_DATE_FORMATS = {
+    "dd/mm/aaaa": "%d/%m/%Y",    # predeterminado (empresas en español)
+    "mm/dd/aaaa": "%m/%d/%Y",    # empresas con QBO en inglés (US)
+    "aaaa-mm-dd": "%Y-%m-%d",    # ISO 8601
+}
+_DEFAULT_DATE_FMT = "dd/mm/aaaa"
 
 router = APIRouter(prefix="/qb", tags=["quickbooks"])
 
@@ -321,6 +330,44 @@ def list_periods(p: Principal = Depends(require("accounting", "ver")), db: Sessi
     ]
 
 
+# ---------------------------------------------------------------------------
+# Configuración QBO de la empresa (fecha + opciones futuras)
+# ---------------------------------------------------------------------------
+
+class QbConfigIn(BaseModel):
+    date_format: str = _DEFAULT_DATE_FMT   # "dd/mm/aaaa" | "mm/dd/aaaa" | "aaaa-mm-dd"
+
+
+@router.get("/config")
+def get_config(p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):
+    """Devuelve la configuración QBO de la empresa (formato de fecha, etc.)."""
+    t = db.get(Tenant, p.tenant.id)
+    settings = t.settings or {} if t else {}
+    return {
+        "date_format": settings.get("qbo_date_format", _DEFAULT_DATE_FMT),
+        "date_format_options": list(QBO_DATE_FORMATS.keys()),
+    }
+
+
+@router.put("/config")
+def save_config(
+    data: QbConfigIn,
+    p: Principal = Depends(require("accounting", "editar")),
+    db: Session = Depends(get_db),
+):
+    """Guarda la configuración QBO en tenant.settings."""
+    if data.date_format not in QBO_DATE_FORMATS:
+        raise HTTPException(422, f"Formato de fecha inválido. Opciones: {list(QBO_DATE_FORMATS.keys())}")
+    t = db.get(Tenant, p.tenant.id)
+    if t is None:
+        raise HTTPException(404, "Empresa no encontrada")
+    settings = dict(t.settings or {})
+    settings["qbo_date_format"] = data.date_format
+    t.settings = settings
+    db.commit()
+    return {"ok": True, "date_format": data.date_format}
+
+
 @router.get("/review/{month}")
 def review_month(
     month: str,
@@ -474,6 +521,12 @@ def export_month(
     tid = p.tenant.id
     period = _get_or_create_period(db, tid, month)
 
+    # Formato de fecha configurado por la empresa
+    tenant_obj = db.get(Tenant, tid)
+    tenant_settings = (tenant_obj.settings or {}) if tenant_obj else {}
+    date_fmt_key = tenant_settings.get("qbo_date_format", _DEFAULT_DATE_FMT)
+    date_strfmt = QBO_DATE_FORMATS.get(date_fmt_key, QBO_DATE_FORMATS[_DEFAULT_DATE_FMT])
+
     is_reexport = period.status == "exportado"
     if is_reexport:
         if not data.reexport_reason:
@@ -522,7 +575,7 @@ def export_month(
         for jl in je.lines:
             row: dict[str, str] = {
                 "Journal No": je.number,
-                "Journal Date": je.date.strftime("%d/%m/%Y"),
+                "Journal Date": je.date.strftime(date_strfmt),
                 "Account": _account_name(jl.role_key),
                 "Debits": f"{jl.amount:.2f}" if jl.side == "debe" else "",
                 "Credits": f"{jl.amount:.2f}" if jl.side == "haber" else "",

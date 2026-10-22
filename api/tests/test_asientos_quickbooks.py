@@ -385,11 +385,30 @@ def test_iva_acreditable_separado(db_session):
 # ---------------------------------------------------------------------------
 
 def test_pago_proveedor_cuadra(db_session):
+    from app.models import SupplierPayment, SupplierPaymentApplication
     tid = _tid(db_session)
     cat = _cat(db_session, tid)
     bank = _bank(db_session, tid)
-    exp = _expense(db_session, tid, cat.id, purchase_type="credito", bank_id=bank.id, status="pagado")
-    entry = js.build_supplier_payment_entry(db_session, exp)
+    exp = _expense(db_session, tid, cat.id, purchase_type="credito", bank_id=bank.id, status="registrado")
+    s = db_session.query(__import__("app.models", fromlist=["Supplier"]).Supplier).filter_by(tenant_id=tid).first()
+    if not s:
+        from app.models import Supplier
+        s = Supplier(tenant_id=tid, name="Proveedor Test")
+        db_session.add(s)
+        db_session.flush()
+    sp = SupplierPayment(
+        tenant_id=tid, supplier_id=s.id, date=HOY, amount=exp.total,
+        currency="CRC", fx_rate=1, method="transferencia",
+        bank_account_id=bank.id, status="registrado",
+        created_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+        updated_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+    )
+    db_session.add(sp)
+    db_session.flush()
+    db_session.add(SupplierPaymentApplication(payment_id=sp.id, expense_id=exp.id, amount=exp.total))
+    db_session.commit()
+    sp = db_session.get(SupplierPayment, sp.id)
+    entry = js.build_supplier_payment_entry(db_session, sp)
     assert entry is not None
     je = js.upsert_entry(db_session, entry)
     assert _balanced(je)

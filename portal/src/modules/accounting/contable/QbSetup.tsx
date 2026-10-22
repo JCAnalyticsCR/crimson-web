@@ -296,6 +296,8 @@ function StepRevision({ toast, month, setMonth }: { toast: (msg: string, tone?: 
 // Paso 4: Exportar
 // ---------------------------------------------------------------------------
 
+type QbConfig = { date_format: string; date_format_options: string[] };
+
 function StepExportar({ toast, month, setMonth }: { toast: (msg: string, tone?: "ok" | "bad", action?: ToastAction) => void; month: string; setMonth: (m: string) => void }) {
   const { allows } = useSession();
   const [periods, setPeriods] = useState<Period[] | null>(null);
@@ -304,18 +306,35 @@ function StepExportar({ toast, month, setMonth }: { toast: (msg: string, tone?: 
   const [reopenModal, setReopenModal] = useState<string | null>(null);
   const [reopenReason, setReopenReason] = useState("");
   const [reexportReason, setReexportReason] = useState("");
+  const [config, setConfig] = useState<QbConfig | null>(null);
+  const [savingConfig, setSavingConfig] = useState(false);
   const canExport = allows("accounting.exportar");
   const canAdmin = allows("settings.configurar");  // solo admin
+  const canEdit = allows("accounting.editar");
 
   const load = async () => {
-    const [p, e] = await Promise.all([
+    const [p, e, cfg] = await Promise.all([
       api<Period[]>("/qb/periods").catch(() => [] as Period[]),
       api<Export[]>("/qb/exports").catch(() => [] as Export[]),
+      api<QbConfig>("/qb/config").catch(() => null),
     ]);
     setPeriods(p);
     setExports(e);
+    if (cfg) setConfig(cfg);
   };
   useEffect(() => { load(); }, []); // eslint-disable-line
+
+  const saveDateFormat = async (fmt: string) => {
+    if (!canEdit) return;
+    setSavingConfig(true);
+    try {
+      await api("/qb/config", { method: "PUT", json: { date_format: fmt } });
+      setConfig((c) => c ? { ...c, date_format: fmt } : c);
+      toast("Formato de fecha guardado");
+    } catch (ex) {
+      toast(ex instanceof Error ? ex.message : "Error al guardar", "bad");
+    } finally { setSavingConfig(false); }
+  };
 
   const currentPeriod = periods?.find((p) => p.month === month);
 
@@ -361,6 +380,32 @@ function StepExportar({ toast, month, setMonth }: { toast: (msg: string, tone?: 
 
   return (
     <div>
+      {/* Configuración: formato de fecha para QBO */}
+      {config && (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div className="card__body">
+            <p style={{ fontWeight: 600, marginBottom: 8 }}>Configuración de exportación</p>
+            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <Field label="Formato de fecha en QBO">
+                <select
+                  className="input"
+                  value={config.date_format}
+                  disabled={!canEdit || savingConfig}
+                  onChange={(e) => saveDateFormat(e.target.value)}
+                  style={{ width: 180 }}
+                >
+                  {config.date_format_options.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              </Field>
+              <p className="meta" style={{ marginTop: 20 }}>
+                Debe coincidir con el formato de fecha configurado en su empresa de QuickBooks Online.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 20, flexWrap: "wrap" }}>
         <div style={{ margin: 0 }}>
           <Field label="Mes a exportar">

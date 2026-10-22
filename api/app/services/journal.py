@@ -40,6 +40,7 @@ from ..models import (
     Project,
     StockMovement,
     Supplier,
+    SupplierPayment,
     bank_role,
     expense_cat_role,
 )
@@ -529,39 +530,113 @@ def supplier_payment_lines(
     return lines
 
 
-def build_supplier_payment_entry(db: Session, expense: Expense) -> _Entry | None:
-    """Pago de un gasto de crédito (purchase_type='credito', status='pagado').
+def build_supplier_payment_entry(db: Session, sp: SupplierPayment) -> _Entry | None:
+    """Pago a proveedor (SupplierPayment).
 
-    El frente "Cuentas por pagar" (SupplierPayment) llamará a supplier_payment_lines()
-    con su propia interfaz cuando esté listo. Hoy alimentamos desde gastos marcados pagados.
+    Estructura del asiento:
+      - Normal (status='registrado'):
+          DR  cxp_proveedores_<moneda>  por cada gasto aplicado (a la moneda del gasto)
+          CR  banco_<id> / método       por el monto total del pago
+          DR/CR diferencial_cambiario   si el tipo de cambio del pago difiere del gasto (USD)
+      - Anulado (status='anulado'):
+          Todas las líneas con debe↔haber invertidos (reverso exacto).
+
+    Si no hay aplicaciones registradas aún, usa el monto total del pago como un único
+    débito a cxp en la moneda del pago.
     """
-    if expense.purchase_type != "credito":
-        return None
-    if expense.status != "pagado":
-        return None
+    if sp.status == "anulado" and sp.voided_at is None:
+        return None  # registro inconsistente: marcado anulado sin fecha
 
-    currency = expense.currency.upper()
-    fx = D(expense.fx_rate) if currency == "USD" and D(expense.fx_rate) > 1 else None
-    supplier_name = _supplier_name(db, expense.supplier_id)
-    bank_acc_id = expense.bank_account_id  # puede ser None
+    pay_currency = sp.currency.upper()
+    pay_amount = D(sp.amount)
+    pay_fx = D(sp.fx_rate) if pay_currency == "USD" and D(sp.fx_rate) > 1 else None
+    supplier_name = _supplier_name(db, sp.supplier_id)
+    contra_role = bank_role(sp.bank_account_id) if sp.bank_account_id else _payment_method_role(sp.method, None)
 
-    lines = supplier_payment_lines(
-        supplier_name=supplier_name,
-        amount=D(expense.total),
-        currency=currency,
-        fx=fx,
-        bank_account_id=bank_acc_id,
-    )
+    lines: list[_Line] = []
+    pos = 0
 
-    # La fecha de pago: usamos expense.date (cuando se marcó pagado no queda en el modelo;
-    # usamos la fecha del gasto como aproximación hasta que SupplierPayment tenga paid_date)
+    # ---- Lado débito: CxP por gasto aplicado (o total si sin aplicaciones) ----
+    if sp.applications:
+        for app in sp.applications:
+            exp = db.get(Expense, app.expense_id)
+            if exp is None:
+                continue
+            exp_currency = exp.currency.upper()
+            app_amount = D(app.amount)
+            exp_fx = D(exp.fx_rate) if exp_currency == "USD" and D(exp.fx_rate) > 1 else None
+
+            lines.append(_Line(
+                role_key=_cxp_role(exp_currency),
+                side="debe",
+                amount=app_amount,
+                currency=exp_currency,
+                fx=exp_fx,
+                description=f"Pago gasto {exp.description[:80]}",
+                name=supplier_name,
+                position=pos,
+            ))
+            pos += 1
+
+            # Diferencial cambiario: si pago en USD y gasto en USD a distinto TC
+            if pay_currency == "USD" and exp_currency == "USD" and pay_fx and exp_fx and pay_fx != exp_fx:
+                # valor CRC del gasto - valor CRC del pago para ese monto
+                crc_exp = (app_amount * exp_fx).quantize(Q2, rounding=ROUND_HALF_UP)
+                crc_pay = (app_amount * pay_fx).quantize(Q2, rounding=ROUND_HALF_UP)
+                diff = crc_exp - crc_pay
+                if diff != 0:
+                    # diff > 0 → pagamos menos (ganancia cambiaria → haber en diferencial)
+                    # diff < 0 → pagamos más (pérdida cambiaria → debe en diferencial)
+                    lines.append(_Line(
+                        role_key="diferencial_cambiario",
+                        side="haber" if diff > 0 else "debe",
+                        amount=abs(diff),
+                        currency="CRC",
+                        description="Diferencial cambiario pago proveedor",
+                        name=supplier_name,
+                        position=pos,
+                    ))
+                    pos += 1
+    else:
+        # Sin aplicaciones: asiento simple contra CxP en la moneda del pago
+        lines.append(_Line(
+            role_key=_cxp_role(pay_currency),
+            side="debe",
+            amount=pay_amount,
+            currency=pay_currency,
+            fx=pay_fx,
+            description="Pago a proveedor",
+            name=supplier_name,
+            position=pos,
+        ))
+        pos += 1
+
+    # ---- Lado crédito: banco / método ----
+    lines.append(_Line(
+        role_key=contra_role,
+        side="haber",
+        amount=pay_amount,
+        currency=pay_currency,
+        fx=pay_fx,
+        description="Pago a proveedor",
+        name=supplier_name,
+        position=pos,
+    ))
+
+    _add_rounding(lines)
+
+    # Anulación: invertir todas las líneas
+    if sp.status == "anulado":
+        for ln in lines:
+            ln.side = "haber" if ln.side == "debe" else "debe"
+
     return _Entry(
         source_type="supplier_payment",
-        source_id=expense.id,
-        tenant_id=expense.tenant_id,
-        date=expense.date,
-        description=f"Pago a proveedor: {expense.description[:200]}",
-        currency=currency,
+        source_id=sp.id,
+        tenant_id=sp.tenant_id,
+        date=sp.voided_at.date() if sp.status == "anulado" and sp.voided_at else sp.date,
+        description=f"Pago proveedor {supplier_name[:200]} ({sp.date})",
+        currency=pay_currency,
         lines=lines,
     )
 
@@ -978,8 +1053,16 @@ def regenerate_all(db: Session, tenant_id: int, month: str) -> dict:
         select(Expense).where(Expense.tenant_id == tenant_id, Expense.date >= a, Expense.date <= b)
     ):
         _try(build_expense_entry, exp)
-        if exp.purchase_type == "credito" and exp.status == "pagado":
-            _try(build_supplier_payment_entry, exp)
+
+    # Pagos a proveedor (SupplierPayment) — incluye anulados (asiento reverso)
+    for sp in db.scalars(
+        select(SupplierPayment).where(
+            SupplierPayment.tenant_id == tenant_id,
+            SupplierPayment.date >= a,
+            SupplierPayment.date <= b,
+        )
+    ):
+        _try(build_supplier_payment_entry, sp)
 
     # Planillas
     for run in db.scalars(

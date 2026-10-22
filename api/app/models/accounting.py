@@ -93,7 +93,6 @@ class QboAccount(TenantMixin, Base):
     __tablename__ = "qbo_account"
     __table_args__ = (
         UniqueConstraint("tenant_id", "full_name", name="uq_qbo_account_name"),
-        Index("ix_qbo_account_tenant", "tenant_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

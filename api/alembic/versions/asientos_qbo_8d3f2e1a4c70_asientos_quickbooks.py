@@ -1,7 +1,7 @@
 """asientos de diario para exportar a QuickBooks Online
 
 Revision ID: 8d3f2e1a4c70
-Revises: f3a8b1c92d45
+Revises: a9f2c3d4e5b6
 Create Date: 2026-10-22
 
 Tablas nuevas:
@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "8d3f2e1a4c70"
-down_revision = "f3a8b1c92d45"
+down_revision = "a9f2c3d4e5b6"
 branch_labels = None
 depends_on = None
 
@@ -44,7 +44,8 @@ def upgrade() -> None:
         sa.Column("import_batch", sa.String(40)),
         sa.UniqueConstraint("tenant_id", "full_name", name="uq_qbo_account_name"),
     )
-    op.create_index("ix_qbo_account_tenant", "qbo_account", ["tenant_id"])
+    # TenantMixin genera ix_qbo_account_tenant_id vía index=True
+    op.create_index("ix_qbo_account_tenant_id", "qbo_account", ["tenant_id"])
 
     # ------------------------------------------------------------------ #
     # accounting_role_mapping                                              #
@@ -60,6 +61,8 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True)),
         sa.UniqueConstraint("tenant_id", "role_key", name="uq_arm_role"),
     )
+    # TenantMixin genera ix_accounting_role_mapping_tenant_id vía index=True
+    op.create_index("ix_accounting_role_mapping_tenant_id", "accounting_role_mapping", ["tenant_id"])
 
     # ------------------------------------------------------------------ #
     # accounting_period                                                    #
@@ -77,7 +80,10 @@ def upgrade() -> None:
         sa.Column("reopen_reason", sa.String(300)),
         sa.UniqueConstraint("tenant_id", "month", name="uq_acc_period_month"),
     )
-    op.create_index("ix_accounting_period_month", "accounting_period", ["tenant_id", "month"])
+    # month: index=True → ix_accounting_period_month (solo month)
+    # TenantMixin: index=True → ix_accounting_period_tenant_id
+    op.create_index("ix_accounting_period_month", "accounting_period", ["month"])
+    op.create_index("ix_accounting_period_tenant_id", "accounting_period", ["tenant_id"])
 
     # ------------------------------------------------------------------ #
     # accounting_export                                                    #
@@ -98,7 +104,10 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
-    op.create_index("ix_accounting_export_month", "accounting_export", ["tenant_id", "month"])
+    # month: index=True → ix_accounting_export_month (solo month)
+    # TenantMixin: index=True → ix_accounting_export_tenant_id
+    op.create_index("ix_accounting_export_month", "accounting_export", ["month"])
+    op.create_index("ix_accounting_export_tenant_id", "accounting_export", ["tenant_id"])
 
     # ------------------------------------------------------------------ #
     # journal_entry                                                        #
@@ -123,9 +132,13 @@ def upgrade() -> None:
         sa.Column("generated_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint("tenant_id", "source_type", "source_id", "kind", name="uq_jentry_source"),
     )
+    # number, date: index=True → nombres automáticos
     op.create_index("ix_journal_entry_number", "journal_entry", ["number"])
     op.create_index("ix_journal_entry_date", "journal_entry", ["date"])
+    # composite explícito desde __table_args__
     op.create_index("ix_jentry_month", "journal_entry", ["tenant_id", "month"])
+    # TenantMixin: index=True → ix_journal_entry_tenant_id
+    op.create_index("ix_journal_entry_tenant_id", "journal_entry", ["tenant_id"])
 
     # ------------------------------------------------------------------ #
     # journal_line                                                         #
@@ -145,13 +158,30 @@ def upgrade() -> None:
         sa.Column("name", sa.String(160)),
         sa.Column("position", sa.Integer(), nullable=False, server_default="0"),
     )
-    op.create_index("ix_journal_line_entry", "journal_line", ["entry_id"])
+    # entry_id: index=True → ix_journal_line_entry_id
+    op.create_index("ix_journal_line_entry_id", "journal_line", ["entry_id"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_journal_line_entry_id", "journal_line")
     op.drop_table("journal_line")
+
+    op.drop_index("ix_journal_entry_tenant_id", "journal_entry")
+    op.drop_index("ix_jentry_month", "journal_entry")
+    op.drop_index("ix_journal_entry_date", "journal_entry")
+    op.drop_index("ix_journal_entry_number", "journal_entry")
     op.drop_table("journal_entry")
+
+    op.drop_index("ix_accounting_export_tenant_id", "accounting_export")
+    op.drop_index("ix_accounting_export_month", "accounting_export")
     op.drop_table("accounting_export")
+
+    op.drop_index("ix_accounting_period_tenant_id", "accounting_period")
+    op.drop_index("ix_accounting_period_month", "accounting_period")
     op.drop_table("accounting_period")
+
+    op.drop_index("ix_accounting_role_mapping_tenant_id", "accounting_role_mapping")
     op.drop_table("accounting_role_mapping")
+
+    op.drop_index("ix_qbo_account_tenant_id", "qbo_account")
     op.drop_table("qbo_account")

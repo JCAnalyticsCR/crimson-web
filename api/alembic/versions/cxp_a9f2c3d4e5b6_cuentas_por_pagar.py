@@ -31,7 +31,8 @@ def upgrade() -> None:
     op.create_table(
         "supplier_payment",
         sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("tenant_id", sa.Integer(), sa.ForeignKey("tenant.id"), nullable=False),
+        # TenantMixin: ondelete=RESTRICT, index=True → ix_supplier_payment_tenant_id
+        sa.Column("tenant_id", sa.Integer(), sa.ForeignKey("tenant.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("supplier_id", sa.Integer(), sa.ForeignKey("supplier.id"), nullable=False),
         sa.Column("date", sa.Date(), nullable=False),
         sa.Column("amount", sa.Numeric(16, 5), nullable=False),
@@ -56,12 +57,16 @@ def upgrade() -> None:
             sa.ForeignKey("user.id", name="fk_supplier_payment_created_by"),
             nullable=True,
         ),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+        # TimestampMixin: nullable=False
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_supplier_payment_tenant", "supplier_payment", ["tenant_id"])
-    op.create_index("ix_supplier_payment_supplier", "supplier_payment", ["supplier_id"])
+    # TenantMixin index=True → ix_supplier_payment_tenant_id
+    op.create_index("ix_supplier_payment_tenant_id", "supplier_payment", ["tenant_id"])
+    # supplier_id index=True → ix_supplier_payment_supplier_id
+    op.create_index("ix_supplier_payment_supplier_id", "supplier_payment", ["supplier_id"])
+    # date index=True → ix_supplier_payment_date
     op.create_index("ix_supplier_payment_date", "supplier_payment", ["date"])
 
     # --- supplier_payment_application -------------------------------------------
@@ -83,8 +88,10 @@ def upgrade() -> None:
         sa.Column("amount", sa.Numeric(16, 5), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_spa_payment", "supplier_payment_application", ["payment_id"])
-    op.create_index("ix_spa_expense", "supplier_payment_application", ["expense_id"])
+    # payment_id index=True → ix_supplier_payment_application_payment_id
+    op.create_index("ix_supplier_payment_application_payment_id", "supplier_payment_application", ["payment_id"])
+    # expense_id index=True → ix_supplier_payment_application_expense_id
+    op.create_index("ix_supplier_payment_application_expense_id", "supplier_payment_application", ["expense_id"])
 
     # --- ampliar matched_type de String(10) a String(20) ------------------------
     with op.batch_alter_table("bank_statement_line") as batch_op:
@@ -97,11 +104,11 @@ def downgrade() -> None:
     with op.batch_alter_table("bank_statement_line") as batch_op:
         batch_op.alter_column("matched_type", type_=sa.String(10), existing_nullable=True)
 
-    op.drop_index("ix_spa_expense", "supplier_payment_application")
-    op.drop_index("ix_spa_payment", "supplier_payment_application")
+    op.drop_index("ix_supplier_payment_application_expense_id", "supplier_payment_application")
+    op.drop_index("ix_supplier_payment_application_payment_id", "supplier_payment_application")
     op.drop_table("supplier_payment_application")
 
     op.drop_index("ix_supplier_payment_date", "supplier_payment")
-    op.drop_index("ix_supplier_payment_supplier", "supplier_payment")
-    op.drop_index("ix_supplier_payment_tenant", "supplier_payment")
+    op.drop_index("ix_supplier_payment_supplier_id", "supplier_payment")
+    op.drop_index("ix_supplier_payment_tenant_id", "supplier_payment")
     op.drop_table("supplier_payment")
