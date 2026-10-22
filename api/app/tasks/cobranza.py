@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 from ..models import AllyCompany, CollectionReminder, Customer, Invoice, Payment, Quote, Tenant, TenantUser
 from ..services.ally_access import PLAN_ORDER, SUSPEND_DAYS, mora_where
 from ..services.invoice_states import cobrable_where, cr_today, vencible_where
-from ..services.mail import mail_configured
+from ..services.mail import mail_configured, member_inbox
 from ..services.render import money
 
 log = logging.getLogger("crimson.cobranza")
@@ -483,7 +483,7 @@ def weekly_summary(db: Session, today: date | None = None) -> int:
         asunto = f"Cartera de la semana · {today:%d/%m/%Y}"
         vistos: set[str] = set()
         for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.active, TenantUser.role_code == "admin")):
-            correo = (m.user.email or "").strip().lower()
+            correo = member_inbox(m)
             if not correo or correo in vistos or queued_before(db, t.id, correo, asunto):
                 continue  # doble disparo del beat: el resumen de esta semana ya salio
             vistos.add(correo)

@@ -76,7 +76,9 @@ class User(TimestampMixin, Base):
 
 
 class Role(Base):
-    """Roles predefinidos: admin, ventas, caja, inventario, contabilidad, lectura. permissions = {modulo: [acciones]}."""
+    """Roles predefinidos: admin, ventas, caja, inventario, contabilidad, lectura. permissions = {modulo: [acciones]}.
+    Roles personalizados (reunion 21/10, pedido 20): los crea el admin de una empresa a partir de otro rol; llevan
+    tenant_id (los predefinidos, nulo) y base_code (el rol del que se copiaron). Sus permisos son los de esta fila."""
 
     __tablename__ = "role"
 
@@ -84,6 +86,8 @@ class Role(Base):
     code: Mapped[str] = mapped_column(String(40), unique=True)
     name: Mapped[str] = mapped_column(String(80))
     permissions: Mapped[dict] = mapped_column(JSON, default=dict)
+    tenant_id: Mapped[int | None] = mapped_column(ForeignKey("tenant.id", ondelete="CASCADE", name="fk_role_tenant"), index=True)
+    base_code: Mapped[str | None] = mapped_column(String(40))
 
 
 class TenantUser(TimestampMixin, Base):
@@ -103,6 +107,9 @@ class TenantUser(TimestampMixin, Base):
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id", ondelete="RESTRICT"), index=True)
     # Solo usuarios de una empresa aliada (roles aliado/tecnico_aliado): su portal (/aliado). Interno = None.
     ally_company_id: Mapped[int | None] = mapped_column(ForeignKey("ally_company.id", ondelete="RESTRICT", name="fk_tenant_user_ally_company"), index=True)
+    # Correo de avisos (reunion 21/10, pedido 22): si esta, las notificaciones internas le llegan aqui en vez de a su
+    # correo de entrada. Lo edita solo el admin. Lo de su cuenta (contrasena, invitacion, seguridad) va al de entrada.
+    notify_email: Mapped[str | None] = mapped_column(String(200))
 
     tenant: Mapped[Tenant] = relationship(back_populates="users")
     user: Mapped[User] = relationship(back_populates="memberships")

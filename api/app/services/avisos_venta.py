@@ -35,7 +35,7 @@ from ..core.config import settings
 from ..core.deps import EXTERNAL_ROLES, _role_permissions, effective_permissions
 from ..models import Customer, EmailOutbox, Opportunity, Quote, Survey, TenantUser, User
 from .documents import local_date
-from .mail import queue_email
+from .mail import internal_inboxes, member_inbox, queue_email
 
 # ventanas en que el mismo aviso a la misma persona no se repite (minutos)
 VENTANA_ACEPTADA = 24 * 60  # deshacer y volver a registrar la aceptacion el mismo dia no avisa dos veces
@@ -55,6 +55,8 @@ class Miembro:
     user: User
     role: str
     perms: dict
+    # a donde le llegan los avisos: su correo de avisos (Ajustes -> Usuarios, pedido 22) o, sin el, el de entrada
+    inbox: str = ""
 
     def can(self, module: str, action: str) -> bool:
         if "*" in self.perms:
@@ -90,7 +92,7 @@ def miembros(db: Session, tenant, *, roles: Iterable[str] | None = None, user_id
     for m in db.scalars(stmt.order_by(TenantUser.id)):
         if m.role_code not in cache:
             cache[m.role_code] = effective_permissions(tenant, m.role_code, _role_permissions(db, m.role_code))
-        out.append(Miembro(m.user, m.role_code, cache[m.role_code]))
+        out.append(Miembro(m.user, m.role_code, cache[m.role_code], member_inbox(m)))
     return out
 
 
@@ -134,7 +136,7 @@ def avisar(
     vistos: set[str] = set()
     n = 0
     for m in destinos:
-        correo = (m.user.email or "").strip().lower()
+        correo = (m.inbox or m.user.email or "").strip().lower()
         if not correo or correo in vistos or (excluir is not None and m.user.id == excluir):
             continue
         vistos.add(correo)
@@ -221,7 +223,20 @@ def cotizacion_aceptada(db: Session, tenant, q: Quote, *, version: int | None, q
             texto=texto,
         )
 
-    return avisar(db, tenant, destinos, f"Cotización aceptada: {q.number} · {cliente}", cuerpo, "quote", q.id, minutos=VENTANA_ACEPTADA, excluir=actor_id)
+    asunto = f"Cotización aceptada: {q.number} · {cliente}"
+    n = avisar(db, tenant, destinos, asunto, cuerpo, "quote", q.id, minutos=VENTANA_ACEPTADA, excluir=actor_id)
+    # el buzon interno de ventas (Ajustes -> "Correo para avisos internos", pedido 48) tambien se entera de la venta,
+    # con el enlace a la cotizacion (lo abre quien entre con permiso) y la misma ventana: no se repite el mismo dia
+    vistos = {(m.inbox or m.user.email or "").strip().lower() for m in destinos}
+    cuerpo_buzon = _html(
+        f"<b>{_e(cliente)}</b> aceptó la cotización <b>{_e(q.number)}</b>.", f"Siguiente paso: {siguiente}.", url=enlace(f"/cotizaciones/{q.id}"), texto=f"Abrir {q.number}"
+    )
+    for correo in internal_inboxes(tenant):
+        if correo in vistos or ya_avisado(db, tenant.id, correo, "quote", q.id, asunto[:300], VENTANA_ACEPTADA):
+            continue
+        queue_email(db, tenant, correo, asunto[:300], cuerpo_buzon, "quote", q.id, company_bcc=False)
+        n += 1
+    return n
 
 
 # la frase del tope de discounts.approval_reasons, con el total de la cotizacion y el tope interno de la empresa

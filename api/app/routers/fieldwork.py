@@ -31,7 +31,7 @@ from ..services import inventory as invsvc
 from ..services.archive import live
 from ..services.documents import audit
 from ..services.fx import rate_or_none
-from ..services.mail import notify_roles, queue_email
+from ..services.mail import notify_roles, queue_email, user_inbox
 from ..services.refs import check_refs
 from ..services.sequences import next_number
 from ..services.survey_specs import (
@@ -844,11 +844,12 @@ def survey_assign(sid: int, data: SurveyAssignIn, p: Principal = Depends(require
     audit(db, p.tenant.id, p.user.id, "assign", "survey", s.id, {"de": antes, "a": {"technician_id": s.technician_id, "ally_company_id": aliada}}, ip=p.ip)
     if data.technician_id != antes["technician_id"]:
         u = db.get(User, data.technician_id)
-        if u and u.email and aliada is None:
+        correo_tec = user_inbox(db, p.tenant.id, u) if u else ""
+        if correo_tec and aliada is None:
             queue_email(
                 db,
                 p.tenant,
-                u.email,
+                correo_tec,
                 f"Tiene un levantamiento nuevo: {s.number}",
                 f"<p>Se le asignó el levantamiento <b>{html.escape(s.number)}</b> ({html.escape(s.site or 'sin sitio')}).</p>"
                 f'<p><a href="{html.escape(avisos.enlace(f"/levantamientos?id={s.id}"))}">Abrir el levantamiento</a></p>',
@@ -1245,7 +1246,7 @@ def _notify_returned(db: Session, p: Principal, s: Survey, obs: list[Observation
     destinos: list[str] = []
     for uid in dict.fromkeys(x for x in (s.technician_id, s.sent_by) if x):
         u = db.get(User, uid)
-        correo = (u.email or "").strip().lower() if u else ""
+        correo = user_inbox(db, p.tenant.id, u) if u else ""
         if correo and correo not in destinos:
             destinos.append(correo)
     filas = "".join(f"<li>{html.escape(o.point_code or 'General')}: {html.escape(o.text)}</li>" for o in obs[:30])
@@ -1586,7 +1587,7 @@ def _notify_quote_ready(db: Session, p: Principal, o: Opportunity, q) -> None:
     from ..core.config import settings
 
     u = db.get(User, o.owner_id)
-    correo = (u.email or "").strip() if u and u.active else ""
+    correo = user_inbox(db, p.tenant.id, u) if u and u.active else ""
     if not correo:
         return
     enlace = f"{settings.public_base_url}/cotizaciones/{q.id}"

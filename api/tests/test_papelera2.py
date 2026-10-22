@@ -222,7 +222,7 @@ def test_solicitud_de_compra_recibida_no_y_permisos(client, auth, db_session):
     client.patch(f"/purchase-requests/{r2['id']}", json={"status": "recibida"})
     r = client.post(f"/archive/purchase/{r2['id']}/trash")
     assert r.status_code == 409 and "recibi" in r.json()["detail"]
-    # un vendedor no maneja compras ni productos; si maneja clientes (crm.editar)
+    # un vendedor no maneja compras ni productos (y desde el 21/10 la ficha de un cliente existente es de solo lectura)
     v = _login_as(client, db_session, tid, "vend-pap@ejemplo.com", "ventas")
     assert client.post(f"/archive/purchase/{r1['id']}/trash", headers=v).status_code == 403
     p = client.post("/products", json={"name": "Ajeno", "code": "PAP-09", "price": 1}).json()

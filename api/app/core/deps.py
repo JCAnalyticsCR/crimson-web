@@ -27,7 +27,10 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
     # "Lo suyo" en cotizaciones, facturas y cobros = vendedor responsable (services/ownership.py), no quien tecleo.
     "ventas": {
         "dashboard": ["ver"],
-        "crm": ["ver", "crear", "editar"],  # clientes compartidos: los necesita para cotizar
+        # clientes compartidos: los necesita para cotizar. Crea clientes nuevos (tambien el alta rapida desde la
+        # cotizacion) y anota, pero la ficha de un cliente que ya existe es de solo lectura (reunion 21/10, pedido 23:
+        # que nadie desvie las notificaciones a otro correo). Editar un cliente: admin y roles con crm.editar.
+        "crm": ["ver", "crear", "notas"],
         "crm_pipeline": ["ver", "crear", "editar"],  # oportunidades propias
         "catalog": ["ver", "precios"],
         "sales": ["ver", "crear", "editar", "enviar"],
@@ -199,6 +202,40 @@ ASSIGNABLE_ROLES = [r for r in ROLE_PERMISSIONS if r != "soporte" and r not in E
 COST_ROLE_CHOICES = ("supervisor", "contabilidad", "inventario", "lectura")
 
 
+# Roles predefinidos cuyos permisos el admin puede cambiar desde Ajustes -> Usuarios -> Roles (reunion 21/10, pedido
+# 20). El administrador no se edita (siempre "*"); soporte, clientes y aliados tienen sus propias pantallas.
+EDITABLE_ROLES = tuple(r for r in ASSIGNABLE_ROLES if r != "admin")
+
+
+def role_overrides(tenant) -> dict[str, dict[str, list[str]]]:
+    """Lo que la empresa cambio de los roles predefinidos (tenant.settings["role_overrides"]), ya limpio: solo roles
+    editables y solo permisos del catalogo, nunca los de solo administrador (core/permisos.py)."""
+    from .permisos import clean
+
+    raw = (getattr(tenant, "settings", None) or {}).get("role_overrides") or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {code: clean(perms) for code, perms in raw.items() if code in EDITABLE_ROLES and isinstance(perms, dict)}
+
+
+def base_permissions(tenant, code: str) -> dict:
+    """Permisos de un rol predefinido en esta empresa antes de "Quien ve costos": el ajuste del admin o el del codigo."""
+    ov = role_overrides(tenant).get(code)
+    return ov if ov is not None else ROLE_PERMISSIONS.get(code, {})
+
+
+def custom_roles(db: Session, tenant) -> list[Role]:
+    """Roles que el admin de esta empresa creo (Ajustes -> Usuarios -> Roles), en orden de creacion."""
+    if tenant is None:
+        return []
+    return list(db.scalars(select(Role).where(Role.tenant_id == tenant.id).order_by(Role.id)))
+
+
+def assignable_roles(db: Session, tenant) -> list[str]:
+    """Roles que se asignan en Ajustes -> Usuarios en esta empresa: los internos predefinidos y los que creo el admin."""
+    return [*ASSIGNABLE_ROLES, *(r.code for r in custom_roles(db, tenant))]
+
+
 def cost_roles(tenant) -> tuple[str, ...]:
     """Roles que, ademas del admin, ven costos en esta empresa (Ajustes). Ignora lo que no sea elegible."""
     raw = (getattr(tenant, "settings", None) or {}).get("cost_roles") or []
@@ -206,8 +243,12 @@ def cost_roles(tenant) -> tuple[str, ...]:
 
 
 def effective_permissions(tenant, code: str, base: dict) -> dict:
-    """Permisos del rol mas lo que la empresa habilito en Ajustes (hoy: ver costos).
+    """Permisos del rol mas lo que la empresa cambio en Ajustes: los permisos editados de un rol predefinido (Usuarios ->
+    Roles, reemplazan a `base`) y ver costos ("Quien ve costos y margenes").
     Devuelve una COPIA cuando agrega algo: ROLE_PERMISSIONS es compartido por todas las empresas y nunca se muta."""
+    ov = role_overrides(tenant).get(code)
+    if ov is not None:
+        base = ov
     if "*" in base or "catalog" not in base or code not in cost_roles(tenant):
         return base
     perms = {k: list(v) for k, v in base.items()}
@@ -280,12 +321,19 @@ def perms_allow(perms: dict, module: str, action: str) -> bool:
 
 
 def _role_permissions(db: Session, code: str) -> dict:
-    """Roles predefinidos: manda el codigo (asi los permisos nuevos llegan a empresas ya creadas).
-    Roles personalizados: los permisos guardados en la tabla role."""
+    """Roles predefinidos: manda el codigo (asi los permisos nuevos llegan a empresas ya creadas); lo que la empresa les
+    cambio lo aplica effective_permissions. Roles personalizados: los permisos guardados en la tabla role, limpios (nunca
+    lo de solo administrador en los creados desde Ajustes; nunca anular ni publicar en ninguno)."""
     if code in ROLE_PERMISSIONS:
         return ROLE_PERMISSIONS[code]
+    from .permisos import clean, sin_anular_ni_publicar
+
     r = db.scalar(select(Role).where(Role.code == code))
-    return r.permissions if r and r.permissions else {}
+    if not r or not r.permissions:
+        return {}
+    # los creados en Ajustes (con empresa) solo con lo del catalogo; una fila vieja cargada a mano conserva lo suyo,
+    # pero ningun rol que no sea el admin anula facturas ni publica en la tienda
+    return clean(r.permissions) if r.tenant_id is not None else sin_anular_ni_publicar(r.permissions)
 
 
 def roles_that_can(db: Session, tenant: Tenant, *needs: tuple[str, str]) -> tuple[str, ...]:

@@ -899,7 +899,7 @@ def store_contact(slug: str, data: ContactIn, request: Request, db: Session = De
     import html
 
     from ..models import CustomerNote, TenantUser
-    from ..services.mail import queue_email
+    from ..services.mail import copy_internal, member_inbox, queue_email
 
     public_limiter.hit(f"contact:{ip_key(request.client.host if request.client else None)}")
     t = _tenant(db, slug)
@@ -911,8 +911,14 @@ def store_contact(slug: str, data: ContactIn, request: Request, db: Session = De
         db.flush()
     db.add(CustomerNote(tenant_id=t.id, customer_id=c.id, body=f"Mensaje desde la tienda: {data.message}"))
     body = f"<p><b>{html.escape(data.name)}</b> ({html.escape(email)}{' · ' + html.escape(data.phone) if data.phone else ''}) escribió desde la tienda:</p><blockquote>{html.escape(data.message)}</blockquote>"
+    asunto = f"Nuevo mensaje de {data.name} · {t.name}"
+    vistos: set[str] = set()
     for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.role_code == "admin", TenantUser.active)):
-        queue_email(db, t, m.user.email, f"Nuevo mensaje de {data.name} · {t.name}", body, "customer", c.id)
+        correo = member_inbox(m)
+        if correo and correo not in vistos:
+            vistos.add(correo)
+            queue_email(db, t, correo, asunto, body, "customer", c.id)
+    copy_internal(db, t, asunto, body, "customer", c.id, skip=vistos)  # el buzon de ventas (pedido 48)
     audit(db, t.id, None, "contact", "customer", c.id)
     db.commit()
     return {"ok": True}

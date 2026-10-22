@@ -41,7 +41,7 @@ from ..models import (
 from ..services import sla as slasvc
 from ..services.archive import live
 from ..services.documents import audit
-from ..services.mail import notify_roles, queue_email
+from ..services.mail import notify_roles, queue_email, user_inbox
 from ..services.refs import check_refs
 from ..services.sequences import next_number
 from ..services.totals import d
@@ -987,10 +987,11 @@ def _avisar_asignado(db: Session, p: Principal, t: SupportTicket, nuevo: bool = 
         f"<p>Primera respuesta antes de {(t.sla or {}).get('respuesta', SLA_HORAS.get(t.priority, 8))} h"
         f" · resolucion antes de {(t.sla or {}).get('resolucion', '?')} h.</p>"
     )
-    if u and u.email:
-        if not nuevo and _ya_avisado(db, t, u.email):
+    correo = user_inbox(db, p.tenant.id, u) if u else ""  # su correo de avisos, si tiene (pedido 22)
+    if correo:
+        if not nuevo and _ya_avisado(db, t, correo):
             return  # el responsable va y vuelve (Tomar, selector, autoguardado del PUT): un aviso basta
-        queue_email(db, p.tenant, u.email, f"Ticket {t.number} · {t.subject[:60]}", cuerpo, "support_ticket", t.id)
+        queue_email(db, p.tenant, correo, f"Ticket {t.number} · {t.subject[:60]}", cuerpo, "support_ticket", t.id)
     elif nuevo:
         notify_roles(db, p.tenant, ("admin", "supervisor"), f"Ticket {t.number} sin asignar · {t.subject[:50]}", cuerpo, "support_ticket", t.id)
 

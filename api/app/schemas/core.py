@@ -70,6 +70,10 @@ class MeOut(BaseModel):
     user: UserOut
     tenant: TenantOut
     role: str
+    # Ajustes -> Usuarios -> Roles (reunion 21/10): nombre de un rol creado por el admin, y si el admin cambio los
+    # permisos del rol (el portal deja de usar el menu fijo del rol y lo arma solo con los permisos)
+    role_label: str | None = None
+    role_customized: bool = False
     permissions: dict
     memberships: list[MembershipOut]
     # solo usuarios de una empresa aliada: {id, name, state, suspended_reason, features: {ganancias}}

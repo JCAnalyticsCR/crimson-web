@@ -48,6 +48,10 @@ DEFAULTS = {
     "bcc": [],
     # nunca reciben nada del sistema (ni avisos, ni copias, ni resumenes): p. ej. la cuenta de quien desarrolla la plataforma
     "mail_blocklist": [],
+    # "Correo para avisos internos" (reunion 21/10, pedido 48; p. ej. el buzon de ventas): recibe los avisos internos de
+    # pedidos web y ventas ademas de los usuarios (services/mail.internal_inboxes). El cliente nunca lo ve: todo le sale
+    # desde el remitente de la empresa (info@).
+    "internal_notify_emails": [],
     "manual_payment_methods": [
         {"name": "SINPE Móvil", "instructions": "Envíe el pago al número indicado y comparta el comprobante.", "active": True},
         {"name": "Transferencia", "instructions": "Cuenta IBAN indicada en la factura.", "active": True},
@@ -123,6 +127,13 @@ class SettingsIn(BaseModel):
     notify_supervisor_equipment_sale: bool | None = None
     bcc: list[EmailStr] | None = None
     mail_blocklist: list[EmailStr] | None = None
+    internal_notify_emails: list[EmailStr] | None = Field(None, max_length=5)
+
+    @field_validator("internal_notify_emails")
+    @classmethod
+    def _internos(cls, v):
+        return None if v is None else list(dict.fromkeys(str(x).strip().lower() for x in v))
+
     manual_payment_methods: list[dict] | None = None
     activity_codes: list[str] | None = None
     einvoice_provider: str | None = Field(None, pattern="^(none|sandbox|alanube|gti)$")
@@ -230,6 +241,9 @@ def put_settings(data: SettingsIn, p: Principal = Depends(require("settings", "c
     if cobro:
         # encender los recordatorios o mover la fecha de corte decide a quien se le cobra: queda en la bitacora
         audit(db, t.id, p.user.id, "update", "tenant_settings", t.id, {"seccion": "cobranza", **{k: t.settings.get(k) for k in sorted(cobro)}}, ip=p.ip)
+    if "internal_notify_emails" in data.model_fields_set:
+        # a donde van los avisos internos de pedidos y ventas: queda en la bitacora (como cobranza)
+        audit(db, t.id, p.user.id, "update", "tenant_settings", t.id, {"seccion": "avisos internos", "internal_notify_emails": t.settings.get("internal_notify_emails")}, ip=p.ip)
     if "cost_roles" in data.model_fields_set:
         # quien ve costos es un permiso: queda en la bitacora con antes/despues (solo si cambio). Aplica en la
         # siguiente peticion: los permisos se calculan en cada request, no hace falta cerrar sesiones.

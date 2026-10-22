@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from ..models import Customer, EInvoiceDocument, EmailOutbox, Invoice, Order, Tenant, TenantUser
 from .documents import audit
-from .mail import queue_email
+from .mail import member_inbox, queue_email
 
 KIND = {"FE": "factura electrónica", "TE": "tiquete electrónico", "NC": "nota de crédito", "ND": "nota de débito"}
 TEST_TAG = "AMBIENTE DE PRUEBAS · sin validez fiscal"
@@ -46,7 +46,7 @@ def _customer_email(db: Session, inv: Invoice) -> str | None:
 def _admins(db: Session, tenant_id: int) -> list[str]:
     out = []
     for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == tenant_id, TenantUser.active, TenantUser.role_code == "admin")):
-        e = (m.user.email or "").strip().lower()
+        e = member_inbox(m)
         if e and e not in out:
             out.append(e)
     return out

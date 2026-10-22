@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..core.config import settings
 from ..core.db import get_db
-from ..core.deps import Principal, require
+from ..core.deps import Principal, require, require_any
 from ..models import (
     Customer,
     CustomerAsset,
@@ -97,7 +97,8 @@ class NoteIn(BaseModel):
 
 
 @router.post("/customers/{cid}/notes", status_code=201)
-def note_create(cid: int, data: NoteIn, p: Principal = Depends(require("crm", "editar")), db: Session = Depends(get_db)):
+def note_create(cid: int, data: NoteIn, p: Principal = Depends(require_any("crm", "editar", "notas")), db: Session = Depends(get_db)):
+    # el vendedor anota en la ficha (crm.notas) aunque no la pueda editar (reunion 21/10, pedido 23)
     _customer(db, cid, p.tenant.id)
     n = CustomerNote(tenant_id=p.tenant.id, customer_id=cid, body=data.body, created_by=p.user.id)
     db.add(n)

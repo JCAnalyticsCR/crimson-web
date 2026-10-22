@@ -308,8 +308,8 @@ def test_corrida_diaria_con_la_fecha_de_costa_rica(client, auth, db_session, cor
 
 
 def test_pausa_por_cliente_es_de_quien_cobra_y_queda_en_bitacora(client, auth, db_session):
-    """La pausa por cliente apaga los recordatorios de TODAS sus facturas: un vendedor (crm.editar, clientes compartidos)
-    no la toca; el admin si, y queda en la bitacora con el antes y el despues."""
+    """La pausa por cliente apaga los recordatorios de TODAS sus facturas: un vendedor (clientes compartidos, ficha de
+    solo lectura desde el 21/10) no la toca; el admin si, y queda en la bitacora con el antes y el despues."""
     from app.models import AuditLog
     from tests.test_session4 import _user_with_role
 
@@ -321,9 +321,9 @@ def test_pausa_por_cliente_es_de_quien_cobra_y_queda_en_bitacora(client, auth, d
     h = {"Authorization": f"Bearer {tok}"}
     assert client.put(f"/customers/{cid}", json={"name": "Cliente Prueba Cobro S.A.", "no_reminders": True}, headers=h).status_code == 403
     assert client.post("/customers", json={"name": "Otro Cliente", "id_type": "fisica", "no_reminders": True}, headers=h).status_code == 403
-    # el formulario completo reenvia el valor de siempre: editar el telefono sigue pudiendo
+    # reunion 21/10 (pedido 23): la ficha de un cliente existente es de solo lectura para el vendedor
     r = client.put(f"/customers/{cid}", json={"name": "Cliente Prueba Cobro S.A.", "phone": "8888-0000", "no_reminders": False}, headers=h)
-    assert r.status_code == 200
+    assert r.status_code == 403
     assert client.put(f"/customers/{cid}", json={"name": "Cliente Prueba Cobro S.A.", "no_reminders": True}).json()["no_reminders"] is True
     log = db_session.scalars(select(AuditLog).where(AuditLog.entity == "customer", AuditLog.entity_id == cid, AuditLog.action == "reminders")).one()
     assert log.diff == {"antes": False, "despues": True}

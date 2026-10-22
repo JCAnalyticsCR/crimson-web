@@ -44,7 +44,7 @@ from ..core.security import (
     verify_password,
     verify_totp,
 )
-from ..models import AuditLog, RefreshToken, Tenant, TenantUser, User
+from ..models import AuditLog, RefreshToken, Role, Tenant, TenantUser, User
 from ..schemas.core import (
     LoginIn,
     MembershipOut,
@@ -392,10 +392,16 @@ def me(p: Principal = Depends(get_session_principal), db: Session = Depends(get_
                 "suspended_reason": c.suspended_reason if c.suspended_at else None,
                 "features": {"ganancias": ganancias_disponibles()},
             }
+    from ..core.deps import role_overrides
+
+    custom = None if p.role in ROLE_PERMISSIONS else db.scalar(select(Role).where(Role.code == p.role))
     return MeOut(
         user=p.user,
         tenant=p.tenant,
         role=p.role,
+        # rol creado por el admin: su nombre; rol predefinido con permisos cambiados: el menu sale solo de los permisos
+        role_label=custom.name if custom is not None else None,
+        role_customized=custom is not None or p.role in role_overrides(p.tenant),
         permissions=p.permissions,
         memberships=[MembershipOut(tenant=m.tenant, role=m.role_code) for m in ms],
         ally_company=ally,
@@ -642,8 +648,15 @@ def password_reset_request(data: ResetRequestIn, request: Request, db: Session =
 
 
 @router.get("/roles")
-def roles(p: Principal = Depends(get_principal)):
-    # matriz de roles internos (vista previa del admin) con lo que la empresa habilito (Ajustes -> Quien ve costos);
-    # los de cliente tienen su propia interfaz. Aliado y tecnico de aliado salen aqui: aparecen en "Ver como".
+def roles(p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    # matriz de roles internos (vista previa del admin) con lo que la empresa cambio (Ajustes -> Usuarios -> Roles y
+    # Quien ve costos); los de cliente tienen su propia interfaz. Aliado y tecnico de aliado salen aqui: aparecen en
+    # "Ver como". Los roles que creo el admin van al final, con su nombre (labels).
+    from ..core.deps import _role_permissions, custom_roles, role_overrides
+
     m = {k: effective_permissions(p.tenant, k, v) for k, v in ROLE_PERMISSIONS.items() if k not in CLIENT_ROLES}
-    return {"roles": list(m.keys()), "matrix": m}
+    propios = custom_roles(db, p.tenant)
+    for r in propios:
+        m[r.code] = effective_permissions(p.tenant, r.code, _role_permissions(db, r.code))
+    customized = sorted({*role_overrides(p.tenant), *(r.code for r in propios)})
+    return {"roles": list(m.keys()), "matrix": m, "labels": {r.code: r.name for r in propios}, "customized": customized}

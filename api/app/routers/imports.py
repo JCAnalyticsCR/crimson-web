@@ -153,7 +153,10 @@ def _warehouse(db: Session, tid: int, name, cache: dict, commit: bool) -> tuple[
 
 
 # ---------- procesadores: devuelven (accion, detalle) y aplican si commit ----------
-def _customers(db: Session, tid: int, rows: list[dict], commit: bool):
+def _customers(db: Session, tid: int, rows: list[dict], commit: bool, opts: dict | None = None):
+    """opts["can_update"]: sin crm.editar (vendedor) solo se crean clientes nuevos; los que ya existen se omiten, no se
+    sobrescriben (reunion 21/10, pedido 23: el vendedor no cambia la ficha ni el correo de un cliente existente)."""
+    can_update = (opts or {}).get("can_update", True)
     out = []
     seen = set()
     for i, r in enumerate(rows, start=2):
@@ -174,6 +177,9 @@ def _customers(db: Session, tid: int, rows: list[dict], commit: bool):
             c = db.scalar(select(Customer).where(Customer.tenant_id == tid, Customer.id_number == idn))
         if not c and email:
             c = db.scalar(select(Customer).where(Customer.tenant_id == tid, func.lower(Customer.email) == email))
+        if c and not can_update:
+            out.append({"row": i, "action": "omitir", "detail": f"Ya existe: {c.name} (solo administración edita clientes existentes)"})
+            continue
         action = "actualizar" if c else "nuevo"
         if commit:
             if not c:
@@ -678,7 +684,9 @@ async def run_import(
     opts = {"margin": margin, "supplier": supplier, "brand": brand, "currency": currency}
     if kind == "products":
         opts = {"can_stock": p.can("inventory", "ajustar"), "user_id": p.user.id}
-    result = PROCESSORS[kind](db, p.tenant.id, rows, commit, opts) if kind in ("catalogo", "products") else PROCESSORS[kind](db, p.tenant.id, rows, commit)
+    if kind == "customers":
+        opts = {"can_update": p.can("crm", "editar")}
+    result = PROCESSORS[kind](db, p.tenant.id, rows, commit, opts) if kind in ("catalogo", "products", "customers") else PROCESSORS[kind](db, p.tenant.id, rows, commit)
     summary = {a: sum(1 for r in result if r["action"] == a) for a in ("nuevo", "actualizar", "omitir", "error")}
     if commit:
         audit(db, p.tenant.id, p.user.id, "import", kind, None, {"file": file.filename, **summary}, ip=p.ip)

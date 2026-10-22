@@ -272,7 +272,7 @@ def avisar_atrasos(db: Session, tenant: Tenant, ahora: datetime | None = None) -
     import html
 
     from ..models import User
-    from .mail import notify_roles, queue_email
+    from .mail import notify_roles, queue_email, user_inbox
 
     titulos = {"respuesta": "sin primera respuesta a tiempo", "resolucion": "con la resolucion atrasada"}
     n = 0
@@ -283,7 +283,8 @@ def avisar_atrasos(db: Session, tenant: Tenant, ahora: datetime | None = None) -
         notify_roles(db, tenant, ("admin", "supervisor"), f"{len(lista)} ticket(s) {titulos[tipo]}", f"<ul>{filas}</ul>", "support_ticket", lista[0].id)
         for x in lista:
             u = db.get(User, x.assigned_to) if x.assigned_to else None
-            if u and u.email:
-                queue_email(db, tenant, u.email, f"Ticket {x.number} {titulos[tipo]}", f"<p>{html.escape(x.subject)}</p>", "support_ticket", x.id)
+            correo = user_inbox(db, tenant.id, u) if u else ""
+            if correo:
+                queue_email(db, tenant, correo, f"Ticket {x.number} {titulos[tipo]}", f"<p>{html.escape(x.subject)}</p>", "support_ticket", x.id)
         n += len(lista)
     return n

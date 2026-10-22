@@ -21,7 +21,7 @@ from ..models import Customer, EmailOutbox, Tenant, TenantUser
 from ..providers.einvoice import CR, cr_now
 from ..services import fiscal_queue as fq
 from ..services import hacienda_config as hc
-from ..services.mail import queue_email
+from ..services.mail import member_inbox, queue_email
 from ..services.render import money
 
 log = logging.getLogger("crimson.fiscal")
@@ -42,7 +42,7 @@ def recipients(db: Session, t: Tenant) -> list[str]:
     for roles in (("contabilidad",), ("admin",)):
         out: list[str] = []
         for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.active, TenantUser.role_code.in_(roles))):
-            email = (m.user.email or "").strip().lower()
+            email = member_inbox(m)
             if email and email not in out and m.user.active:
                 out.append(email)
         if out:
