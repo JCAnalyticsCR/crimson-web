@@ -1,22 +1,29 @@
-/* Oportunidades en común (14:20-14:31): solo las de su empresa, sin montos ni probabilidad de Crimson. */
+/* Oportunidades en común (14:20-14:31): solo las de su empresa, sin montos ni probabilidad de Crimson. El aliado
+   también puede proponer una nueva (21/10, ítem 16): queda «Pendiente de aprobación de Crimson». */
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
-import { Empty } from "../../ui/components";
-import { ESTADO_OPP, ROL_PARTICIPACION, errorText, type OppRow } from "./shared";
+import { Empty, I, Icon } from "../../ui/components";
+import AllyNewOpportunity from "./AllyNewOpportunity";
+import { ESTADO_OPP, ROL_PARTICIPACION, TONO_APROBACION, errorText, useAlly, type OppRow } from "./shared";
 
 export default function AllyOpportunities() {
   const [estado, setEstado] = useState<"abiertas" | "cerradas" | "todas">("abiertas");
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<OppRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [nueva, setNueva] = useState(false);
+  const { readOnly, isTech } = useAlly();
   useEffect(() => {
     const t = setTimeout(() => api<OppRow[]>(`/aliado/oportunidades?estado=${estado}&q=${encodeURIComponent(q)}`).then(setRows).catch((e) => setErr(errorText(e))), 200);
     return () => clearTimeout(t);
   }, [estado, q]);
   return (
     <>
-      <div className="cp-h"><h1 className="h1">Oportunidades</h1></div>
+      <div className="cp-h">
+        <h1 className="h1">Oportunidades</h1>
+        {!isTech && <button className="btn btn--crimson" disabled={readOnly} title={readOnly ? "Vista previa: solo lectura" : "Proponer una oportunidad a Crimson"} onClick={() => setNueva(true)}><Icon d={I.plus} />Nueva oportunidad</button>}
+      </div>
       <div className="cp-seg">
         {(["abiertas", "cerradas", "todas"] as const).map((k) => <button key={k} className={estado === k ? "is-on" : ""} onClick={() => setEstado(k)}>{k === "abiertas" ? "Abiertas" : k === "cerradas" ? "Cerradas" : "Todas"}</button>)}
       </div>
@@ -32,13 +39,16 @@ export default function AllyOpportunities() {
                 <div className="cp-row__meta">Su papel: {o.my_roles.map((r) => ROL_PARTICIPACION[r] || r).join(", ")}{o.crimson_owner ? ` · En Crimson: ${o.crimson_owner}` : ""}</div>
               </div>
               <div className="cp-row__side">
-                <span className="badge badge--info">{ESTADO_OPP[o.status] || o.status}</span>
+                {o.approval && o.approval !== "aprobada"
+                  ? <span className={`badge badge--${TONO_APROBACION[o.approval] || "muted"}`}>{o.approval_label}</span>
+                  : <span className="badge badge--info">{ESTADO_OPP[o.status] || o.status}</span>}
                 {o.pending_requests > 0 && <span className="badge badge--warn">{o.pending_requests} precio(s) pedido(s)</span>}
               </div>
             </Link>
           ))}
         </div>
-      ) : <Empty title="Aún no hay oportunidades en común con Crimson" hint="Cuando Crimson lo sume a una oportunidad, aparece aquí." />}
+      ) : <Empty title="Aún no hay oportunidades en común con Crimson" hint="Cuando Crimson lo sume a una oportunidad, aparece aquí. También puede proponer una con «Nueva oportunidad»." />}
+      {nueva && <AllyNewOpportunity onClose={() => setNueva(false)} />}
     </>
   );
 }

@@ -6,7 +6,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { Badge, I, Icon } from "../../ui/components";
 import QuoteForm from "./QuoteForm";
-import { ESTADO_OPP, ESTADO_PRECIO, ROL_PARTICIPACION, errorText, useAlly, type OppFull, type Req } from "./shared";
+import { ESTADO_OPP, ESTADO_PRECIO, ROL_PARTICIPACION, TONO_APROBACION, errorText, useAlly, type OppFull, type Req } from "./shared";
 
 export function RequestList({ rows, onRespond }: { rows: Req[]; onRespond?: (r: Req) => void }) {
   if (!rows.length) return <p className="muted">Crimson no le ha pedido precios aquí.</p>;
@@ -52,9 +52,15 @@ export default function AllyOpportunity() {
         <div><div className="meta">{o.number} · {ESTADO_OPP[o.status] || o.status}</div><h1 className="h1">{o.title}</h1></div>
         <div className="al-actions">
           {precios && <button className="btn btn--soft" onClick={() => setEnviar(true)}><Icon d={I.plus} />Enviar mis precios</button>}
-          {o.can_survey && !readOnly && <button className="btn btn--crimson" onClick={() => nav(`/levantamientos?nuevo=1&oportunidad=${o.id}`)}><Icon d={I.ruler} />Hacer levantamiento</button>}
+          {o.can_survey && <button className="btn btn--crimson" disabled={readOnly} title={readOnly ? "Vista previa: solo lectura. El aliado empieza aquí el levantamiento y elige a su técnico." : undefined} onClick={() => nav(`/levantamientos?nuevo=1&oportunidad=${o.id}`)}><Icon d={I.ruler} />Hacer levantamiento</button>}
         </div>
       </div>
+      {o.approval && o.approval !== "aprobada" && (
+        // propuesta por su empresa (21/10, ítem 16): hasta que Crimson la apruebe no se levanta
+        <p className={`badge badge--${TONO_APROBACION[o.approval] || "muted"}`} style={{ display: "block", whiteSpace: "normal", padding: "10px 14px", borderRadius: 10, marginBottom: 12 }}>
+          {o.approval_label}{o.approval === "pendiente" ? ": cuando Crimson la apruebe podrá hacer el levantamiento." : "."}
+        </p>
+      )}
       <div className="cp-grid cp-grid--2">
         <div className="cp-card">
           <dl className="al-kv">

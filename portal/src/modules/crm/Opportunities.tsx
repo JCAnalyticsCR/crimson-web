@@ -9,6 +9,7 @@ import { Lookup, searchCustomers } from "../../ui/Lookup";
 import { ArchiveActions } from "../../ui/ArchiveActions";
 import { TrashButton } from "../../ui/TrashButton";
 import { AlliesPanel, PendingCosts, partyLine, type Ally, type PendingCost } from "./OpportunityAllies";
+import { AllyProposalBanner } from "./AllyProposal";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
 import "./opportunities.css";
 
@@ -458,6 +459,7 @@ export default function Opportunities() {
             </section>
 
             <div className="opp-main">
+              <AllyProposalBanner key={open.id} oppId={open.id} sellers={meta?.sellers || []} onChange={() => { show(open.id).catch(() => undefined); load(); }} />
               {canEdit && touchOpen && (
                 <Card title="Registrar seguimiento" extra={<button className="btn btn--ghost btn--sm" onClick={() => { if (segAuto.isDirty() && !confirm("¿Descartar lo escrito?")) return; segAuto.discard(); setTouchOpen(false); setTouch(blankTouch); }}>Cancelar</button>}>
                   <Field label="¿Qué pasó?" hint="Llamada, visita, correo… Queda con fecha y tu nombre en la bitácora.">

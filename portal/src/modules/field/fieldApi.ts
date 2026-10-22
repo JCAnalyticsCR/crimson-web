@@ -12,6 +12,8 @@ export type FieldApi = {
   specs: string; specsCommon: string; system: (id: number) => string; technicians: string;
   orders: string; order: (id: number) => string; orderAction: (id: number, a: string) => string; today: string;
   productSearch: string; mediaUpload: string;
+  /** «Sugerir materiales» sin precios ni proveedores, agregar lo elegido e informe preliminar (21/10, ítem 19) */
+  suggest: (id: number) => string; suggestApply: (id: number) => string; report: (id: number) => string;
 };
 
 export const ALLY_FIELD_API: FieldApi = {
@@ -32,4 +34,7 @@ export const ALLY_FIELD_API: FieldApi = {
   today: "/aliado/mi-dia",
   productSearch: "/aliado/productos/buscar",
   mediaUpload: "/aliado/media",
+  suggest: (id) => `/aliado/levantamientos/${id}/sugerir`,
+  suggestApply: (id) => `/aliado/levantamientos/${id}/sugerir/agregar`,
+  report: (id) => `/aliado/levantamientos/${id}/informe.pdf`,
 };

@@ -1,33 +1,39 @@
 /* Levantamientos del aliado (14:53-15:27): los de su empresa. El aliado crea uno en una oportunidad (o proyecto) en
-   común y lo asigna a sus técnicos; el técnico llena los suyos (borrador o devueltos) y los envía a revisión.
-   ?nuevo=1&oportunidad=<id> abre directo el alta (botón "Hacer levantamiento" de la oportunidad). */
+   común y lo asigna a su técnico o a sí mismo (21/10, ítem 16); el técnico llena los suyos (borrador o devueltos) y
+   los envía a revisión. ?nuevo=1&oportunidad=<id> abre directo el alta (botón "Hacer levantamiento" de la
+   oportunidad). En la vista previa del admin (solo lectura) el botón se ve deshabilitado y dice por qué. */
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Empty, Field, I, Icon, Modal } from "../../ui/components";
 import { ALLY_FIELD_API } from "../field/fieldApi";
-import { errorText, useAlly, type OppRow, type SurveyRow } from "./shared";
+import { errorText, useAlly, type OppRow, type SurveyRow, type Tech } from "./shared";
 
 const KINDS: Record<string, string> = { cctv: "CCTV", redes: "Redes", acceso: "Control de acceso", asistencia: "Asistencia", ups: "UPS", cableado: "Cableado", anpr: "Lectura de placas", otro: "Otro" };
 
 function NewSurvey({ oppId, onClose }: { oppId: number | null; onClose: () => void }) {
   const nav = useNavigate();
-  const { toast } = useSession();
+  const { toast, me } = useSession();
+  const { can } = useAlly();
   const [opps, setOpps] = useState<OppRow[]>([]);
   const [q, setQ] = useState("");
   const [sel, setSel] = useState<number | null>(oppId);
   const [kind, setKind] = useState("cctv");
   const [busy, setBusy] = useState(false);
+  const [techs, setTechs] = useState<Tech[]>([]);
+  const [tec, setTec] = useState<number | null>(null); // null = usted mismo
   useEffect(() => {
-    const t = setTimeout(() => api<OppRow[]>(`/aliado/oportunidades?estado=abiertas&q=${encodeURIComponent(q)}`).then((r) => setOpps(r.filter((o) => o.kind !== "venta"))).catch(() => setOpps([])), 200);
+    // las que esperan la aprobación de Crimson (o no se aprobaron) todavía no se levantan
+    const t = setTimeout(() => api<OppRow[]>(`/aliado/oportunidades?estado=abiertas&q=${encodeURIComponent(q)}`).then((r) => setOpps(r.filter((o) => o.kind !== "venta" && o.approval !== "pendiente" && o.approval !== "rechazada"))).catch(() => setOpps([])), 200);
     return () => clearTimeout(t);
   }, [q]);
+  useEffect(() => { if (can("asignar")) api<Tech[]>(ALLY_FIELD_API.technicians).then(setTechs).catch(() => setTechs([])); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const crear = async () => {
     if (!sel) return;
     setBusy(true);
     try {
-      const s = await api<{ id: number }>(ALLY_FIELD_API.createSurvey, { method: "POST", json: { opportunity_id: sel, kind } });
+      const s = await api<{ id: number }>(ALLY_FIELD_API.createSurvey, { method: "POST", json: { opportunity_id: sel, kind, ...(tec ? { technician_id: tec } : {}) } });
       onClose();
       nav(`/levantamientos/${s.id}`);
     } catch (e) { toast(e instanceof Error ? e.message : "No se pudo crear", "bad"); }
@@ -49,6 +55,14 @@ function NewSurvey({ oppId, onClose }: { oppId: number | null; onClose: () => vo
       <Field label="Tipo de levantamiento">
         <select className="select" value={kind} onChange={(e) => setKind(e.target.value)}>{Object.entries(KINDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
       </Field>
+      {techs.length > 0 && (
+        <Field label="¿Quién lo hace?" hint="Le llega el aviso «Tiene un trabajo nuevo». Se puede cambiar después en el levantamiento.">
+          <select className="select" value={tec ?? ""} onChange={(e) => setTec(e.target.value ? Number(e.target.value) : null)}>
+            <option value="">Usted mismo</option>
+            {techs.filter((t) => t.id !== me?.user.id).map((t) => <option key={t.id} value={t.id}>{t.name}{t.role === "tecnico_aliado" ? " · técnico" : ""}</option>)}
+          </select>
+        </Field>
+      )}
     </Modal>
   );
 }
@@ -68,7 +82,9 @@ export default function AllySurveys() {
     <>
       <div className="cp-h">
         <h1 className="h1">Levantamientos</h1>
-        {can("levantamientos_crear") && !readOnly && <button className="btn btn--crimson" onClick={() => setParams({ nuevo: "1" })}><Icon d={I.plus} />Nuevo</button>}
+        {can("levantamientos_crear") && (readOnly
+          ? <button className="btn btn--crimson" disabled title="Vista previa: solo lectura. El aliado ve este botón y desde aquí empieza el levantamiento."><Icon d={I.plus} />Nuevo</button>
+          : <button className="btn btn--crimson" onClick={() => setParams({ nuevo: "1" })}><Icon d={I.plus} />Nuevo</button>)}
       </div>
       <div className="cp-seg">
         {[["", "Todos"], ["pendiente", "En revisión"], ["devuelto", "Devueltos"], ["aprobado", "Aprobados"]].map(([k, l]) => <button key={k} className={review === k ? "is-on" : ""} onClick={() => setReview(k)}>{l}</button>)}
@@ -89,7 +105,7 @@ export default function AllySurveys() {
             </Link>
           ))}
         </div>
-      ) : <Empty title="Aún no hay levantamientos de su empresa" hint="Se hacen sobre una oportunidad o un proyecto en común con Crimson." />}
+      ) : <Empty title="Aún no hay levantamientos de su empresa" hint={can("levantamientos_crear") ? "Se hacen sobre una oportunidad en común con Crimson: toque «Nuevo» o «Hacer levantamiento» en la oportunidad." : "Se hacen sobre una oportunidad o un proyecto en común con Crimson."} />}
       {nuevo && <NewSurvey oppId={Number(params.get("oportunidad")) || null} onClose={() => setParams({})} />}
     </>
   );
