@@ -3,10 +3,11 @@
    empresa (aliado comercial o técnico de aliado): desde ese momento solo ve lo que su empresa tiene en común con
    Crimson. Pide la contraseña de quien lo hace; no cambia nada más (sus órdenes o levantamientos internos se revisan
    aparte). */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Field, Modal } from "../../ui/components";
+import { Lookup, searchAllies } from "../../ui/Lookup";
 
 export type AllyMatch = { company_id: number; company: string; reason: "correo" | "dominio" | "nombre" };
 type Who = { id: number; name: string; email: string; ally_match?: AllyMatch | null };
@@ -23,19 +24,13 @@ export function AllyMatchChip({ m }: { m: AllyMatch }) {
 
 export default function AllyConvert({ user, onClose, onDone }: { user: Who; onClose: () => void; onDone: () => void }) {
   const { toast } = useSession();
-  const [allies, setAllies] = useState<{ id: number; name: string }[] | null>(null);
-  const [cid, setCid] = useState(user.ally_match ? String(user.ally_match.company_id) : "");
+  // empresa elegida: arranca en la detectada; si no hay, se busca por nombre o cédula (las opciones vienen de a 20)
+  const [sel, setSel] = useState<{ id: number; name: string } | null>(user.ally_match ? { id: user.ally_match.company_id, name: user.ally_match.company } : null);
   const [role, setRole] = useState("tecnico_aliado");
   const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    api<{ id: number; name: string }[]>("/allies/options").then((rows) => {
-      // la empresa detectada siempre aparece, aunque no salga entre las primeras 20
-      const m = user.ally_match;
-      setAllies(m && !rows.some((r) => r.id === m.company_id) ? [{ id: m.company_id, name: m.company }, ...rows] : rows);
-    }).catch(() => setAllies([]));
-  }, [user.ally_match]);
-  const nombre = allies?.find((a) => String(a.id) === cid)?.name || "la empresa aliada";
+  const cid = sel ? String(sel.id) : "";
+  const nombre = sel?.name || "la empresa aliada";
   const pasar = async () => {
     setBusy(true);
     try {
@@ -55,11 +50,9 @@ export default function AllyConvert({ user, onClose, onDone }: { user: Who; onCl
       <p className="muted" style={{ fontSize: 13, margin: 0 }}>
         {user.email} deja de ser usuario interno: ya no entra al panel de Crimson. Entra con el mismo correo y contraseña al portal de aliados y ve solo lo que su empresa tiene en común con Crimson. Se cierran sus sesiones abiertas y le avisamos por correo.
       </p>
-      <Field label="Empresa aliada">
-        <select className="select" value={cid} onChange={(e) => setCid(e.target.value)}>
-          <option value="">{allies === null ? "Cargando…" : "Elija la empresa"}</option>
-          {(allies || []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
+      <Field label="Empresa aliada" hint="Solo aparecen las empresas aliadas activas y sin suspender.">
+        <Lookup value={sel?.name || ""} placeholder="Busque la empresa por nombre o cédula" fetcher={searchAllies}
+          onSelect={(it) => setSel(it ? { id: it.id, name: it.label } : null)} />
       </Field>
       <Field label="Rol en el portal" hint={role === "aliado" ? "Gerencia del aliado: oportunidades y proyectos en común, precios, su equipo y sus ganancias." : "Técnico: su trabajo asignado (levantamientos, órdenes y tickets) y las oportunidades en común en resumen. Sin precios."}>
         <select className="select" value={role} onChange={(e) => setRole(e.target.value)}>
