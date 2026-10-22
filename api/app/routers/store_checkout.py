@@ -15,7 +15,7 @@ from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, field_validator
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -232,7 +232,9 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
             pay = so.card_intent(db, t, o)
         except HTTPException as ex:  # el pedido queda; puede reintentar el pago desde "Mi pedido"
             pay = {"error": ex.detail}
-    so.notify_customer(db, t, o, "recibido")
+    # la confirmacion va al correo que el comprador acaba de escribir (la pantalla le dice a cual); los avisos
+    # siguientes y los reenvios, al correo actual de la ficha (so.notify_email, 21/10 item 43)
+    so.notify_customer(db, t, o, "recibido", to=(o.contact or {}).get("email"))
     so.notify_team(db, t, o, "nuevo")
     db.commit()
     stock = {
@@ -383,6 +385,20 @@ class CheckoutCfgIn(_Cfg):
     auto_invoice: bool = True
     pickup: PickupCfg = PickupCfg()
     notify_roles: list[str] = Field(default_factory=lambda: ["admin", "ventas"], max_length=8)
+    # 21/10, items 24/42: la factura de un pedido web asignado comisiona como una venta propia del vendedor
+    web_orders_commission: bool = True
+    # 21/10, item 45: transportistas para "Marcar enviado" (ademas se puede escribir otro)
+    carriers: list[str] = Field(default_factory=lambda: list(so.CHECKOUT_DEFAULTS["carriers"]), max_length=12)
+
+    @field_validator("carriers")
+    @classmethod
+    def _carriers(cls, v: list[str]) -> list[str]:
+        out: list[str] = []
+        for c in v:
+            c = (c or "").strip()[:80]
+            if c and c.lower() not in {x.lower() for x in out}:
+                out.append(c)
+        return out
 
 
 def _cfg_out(db: Session, t: Tenant) -> dict:
@@ -443,10 +459,42 @@ def _staff_out(db: Session, o: Order, p: Principal | None = None) -> dict:
 
         c = db.get(Customer, o.customer_id)
         out["customer_name"] = c.name if c else None
+    # a donde van los avisos y "Reenviar correo": el correo ACTUAL de la ficha si hay cliente (21/10, item 43)
+    out["notify_email"] = so.notify_email(db, o) or None
+    out["seller_name"] = _seller_names(db, [o.seller_id]).get(o.seller_id) if o.seller_id else None
     return out
 
 
-def _filters(tid: int, status: str | None, method: str | None, date_from: date | None, date_to: date | None, q: str | None, pendiente: str | None) -> list:
+def _seller_names(db: Session, ids) -> dict[int, str]:
+    from ..models import User
+
+    ids = {i for i in ids if i}
+    return {u.id: u.full_name for u in db.scalars(select(User).where(User.id.in_(ids)))} if ids else {}
+
+
+def _team(db: Session, tid: int) -> list[dict]:
+    """A quien se le puede asignar un pedido web: el equipo comercial activo (mismo criterio que el responsable de
+    una oportunidad, pipeline.meta), filtrado por ownership.eligible_seller."""
+    from ..models import TenantUser
+    from ..services.ownership import eligible_seller
+
+    rows = db.scalars(
+        select(TenantUser).where(TenantUser.tenant_id == tid, TenantUser.active, TenantUser.role_code.in_(("admin", "ventas", "supervisor")))
+    ).all()
+    return sorted(({"id": m.user.id, "name": m.user.full_name} for m in rows if eligible_seller(db, tid, m.user_id)), key=lambda x: x["name"].lower())
+
+
+def _filters(
+    tid: int,
+    status: str | None,
+    method: str | None,
+    date_from: date | None,
+    date_to: date | None,
+    q: str | None,
+    pendiente: str | None,
+    vendedor: str | None = None,
+    me: int | None = None,
+) -> list:
     w = [Order.tenant_id == tid, Order.channel == "tienda"]
     if pendiente == "por_atender":
         w = so.attention_where(tid)
@@ -463,6 +511,14 @@ def _filters(tid: int, status: str | None, method: str | None, date_from: date |
     if q and q.strip():
         like = f"%{q.strip()}%"
         w.append(or_(Order.number.ilike(like), func.lower(cast(Order.contact, String)).like(like.lower())))
+    if vendedor == "mios":
+        w.append(Order.seller_id == me)
+    elif vendedor == "sin_asignar":
+        w.append(Order.seller_id.is_(None))
+    elif vendedor:
+        if not vendedor.isdigit():
+            raise HTTPException(422, "Filtro de vendedor desconocido")
+        w.append(Order.seller_id == int(vendedor))
     return w
 
 
@@ -474,19 +530,35 @@ def list_orders(
     date_to: date | None = Query(None, alias="to"),
     q: str | None = Query(None, max_length=80),
     pendiente: str | None = None,
+    vendedor: str | None = Query(None, max_length=20),  # mios | sin_asignar | id del vendedor
     limit: int = Query(100, ge=1, le=300),
     p: Principal = Depends(require("sales", "ver")),
     db: Session = Depends(get_db),
 ):
-    w = _filters(p.tenant.id, status, method, date_from, date_to, q, pendiente)
+    w = _filters(p.tenant.id, status, method, date_from, date_to, q, pendiente, vendedor, p.user.id)
     rows = db.scalars(select(Order).where(*w).order_by(Order.id.desc()).limit(limit)).all()
     counts = dict(db.execute(select(Order.status, func.count()).where(Order.tenant_id == p.tenant.id, Order.channel == "tienda").group_by(Order.status)).all())
     attention = db.scalar(select(func.count()).select_from(Order).where(*so.attention_where(p.tenant.id))) or 0
     from ..services.ownership import visible_invoice_ids
 
     mias = visible_invoice_ids(db, p, [o.invoice_id for o in rows])  # una consulta para toda la pagina
-    items = [{**_order_out(o), "invoice_visible": (o.invoice_id in mias) if o.invoice_id else None} for o in rows]
-    return {"items": items, "counts": counts, "por_atender": attention, "labels": so.STATUS_LABEL}
+    names = _seller_names(db, [o.seller_id for o in rows])
+    items = [
+        {**_order_out(o), "invoice_visible": (o.invoice_id in mias) if o.invoice_id else None, "seller_name": names.get(o.seller_id)} for o in rows
+    ]
+    can_assign = p.can("sales", "asignar")
+    return {
+        "items": items,
+        "counts": counts,
+        "por_atender": attention,
+        "labels": so.STATUS_LABEL,
+        # 21/10, items 24/42: el admin asigna a cualquiera del equipo; el vendedor "toma" los que no tienen vendedor
+        "me": p.user.id,
+        "can_assign": can_assign,
+        "can_take": p.can("sales", "editar"),
+        "sellers": _team(db, p.tenant.id) if can_assign else [],
+        "carriers": so.checkout_cfg(p.tenant).get("carriers") or [],
+    }
 
 
 def _get(db: Session, p: Principal, oid: int) -> Order:
@@ -577,12 +649,34 @@ def set_status(oid: int, data: StatusIn, p: Principal = Depends(require("sales",
     return out
 
 
+class SellerIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    seller_id: int | None = None  # None = quitar el vendedor
+
+
+@router.post("/store-orders/{oid}/seller")
+def set_seller(oid: int, data: SellerIn, p: Principal = Depends(require("sales", "editar")), db: Session = Depends(get_db)):
+    """Asignar el pedido web a un vendedor (21/10, items 24/42). El admin (sales.asignar) asigna, reasigna o quita;
+    el vendedor solo "toma" para si un pedido que todavia no tiene vendedor."""
+    o = _get(db, p, oid)
+    if not p.can("sales", "asignar") and data.seller_id != p.user.id:
+        raise HTTPException(403, "Solo el administrador asigna pedidos a otra persona")
+    o = so.lock_order(db, o)  # dos vendedores tocando "Tomar" a la vez: gana el primero
+    if not p.can("sales", "asignar") and o.seller_id is not None and o.seller_id != p.user.id:
+        raise HTTPException(409, "Este pedido ya lo tomó otra persona del equipo")
+    so.assign_seller(db, p.tenant, o, data.seller_id, by=p.user.id, ip=p.ip)
+    db.commit()
+    return _staff_out(db, o, p)
+
+
 @router.post("/store-orders/{oid}/resend")
 def resend(oid: int, p: Principal = Depends(require("sales", "editar")), db: Session = Depends(get_db)):
     """Reenvia al cliente el correo del estado actual (o la confirmacion si sigue pendiente)."""
     o = _get(db, p, oid)
-    kind = {"nuevo": "recibido", "en_revision": "recibido"}.get(o.status, o.status)
-    mail = so.notify_customer(db, p.tenant, o, kind)
+    # "preparando" no tiene correo propio: se reenvia el de pago confirmado ("ya lo estamos preparando")
+    kind = {"nuevo": "recibido", "en_revision": "recibido", "preparando": "pagado"}.get(o.status, o.status)
+    mail = so.notify_customer(db, p.tenant, o, kind, so.status_extra(p.tenant, o, kind))
     if not mail:
         raise HTTPException(409, "El pedido no tiene correo del cliente")
     audit(db, p.tenant.id, p.user.id, "resend", "order", o.id, {"status": mail.status}, ip=p.ip)

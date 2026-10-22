@@ -21,7 +21,7 @@ from decimal import Decimal
 
 import jwt
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, true
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
@@ -77,6 +77,10 @@ CHECKOUT_DEFAULTS: dict = {
     "auto_invoice": True,  # comprobante electronico automatico al confirmarse el pago
     "pickup": {"address": "", "hours": ""},
     "notify_roles": ["admin", "ventas"],
+    # 21/10, items 24/42: la factura de un pedido web asignado a un vendedor comisiona como una venta propia
+    "web_orders_commission": True,
+    # 21/10, item 45: transportistas que se eligen al marcar "Enviado" (ademas se puede escribir otro)
+    "carriers": ["Mensajería Crimson", "Correos de Costa Rica"],
 }
 
 
@@ -420,72 +424,225 @@ CUSTOMER_SUBJECT = {
     "por_vencer": "Tu pedido {n} sigue pendiente de pago",
     "vencido": "Tu pedido {n} venció sin pago",
 }
-SHOW_INSTRUCTIONS = ("recibido", "por_vencer")  # correos que llevan "Cómo pagar"
+SHOW_INSTRUCTIONS = ("recibido", "por_vencer", "rechazado")  # correos que llevan "Cómo pagar"
+# titulo grande de cada correo (el asunto dice el numero; el titulo dice que paso)
+CUSTOMER_TITLE = {
+    "recibido": "¡Gracias por tu compra!",
+    "pagado": "Pago confirmado",
+    "rechazado": "No pudimos validar tu comprobante",
+    "listo": "Tu pedido está listo para retiro",
+    "enviado": "Tu pedido va en camino",
+    "entregado": "Pedido entregado",
+    "cancelado": "Pedido cancelado",
+    "reembolsado": "Reembolso registrado",
+    "por_vencer": "Tu pedido sigue pendiente de pago",
+    "vencido": "Tu pedido venció sin pago",
+}
+CUSTOMER_INTRO = {
+    "recibido": "Recibimos tu pedido. Este es el resumen; con el botón de abajo seguís su estado en cualquier momento.",
+    "pagado": "Confirmamos el pago de tu pedido. Ya lo estamos preparando.",
+    "rechazado": "Revisamos el comprobante que subiste y no lo pudimos validar. Subí el comprobante correcto con el botón de abajo y lo revisamos de nuevo.",
+    "listo": "Tu pedido ya está listo. Podés pasar a retirarlo con el número de pedido.",
+    "enviado": "Tu pedido salió hacia la dirección de entrega.",
+    "entregado": "Tu pedido fue entregado. ¡Gracias por comprar con nosotros!",
+    "cancelado": "Tu pedido fue cancelado.",
+    "reembolsado": "Registramos el reembolso de tu pedido.",
+    "por_vencer": "Tu pedido sigue pendiente de pago.",
+    "vencido": "El plazo para pagar tu pedido venció y lo cancelamos: los productos volvieron a la venta.",
+}
+TRACK_LABEL = "Rastrear mi pedido"  # el boton de siempre (21/10, item 40): lleva al seguimiento del pedido
+EMAIL_GREY, EMAIL_INK, EMAIL_LINE = "#6b6570", "#15131a", "#ebe7e3"
+
+
+def notify_email(db: Session, o: Order) -> str:
+    """Correo al que van los avisos del pedido (21/10, item 43): el ACTUAL de la ficha del cliente si el pedido esta
+    ligado a uno (el admin lo corrigio despues de la compra); si no, o la ficha no tiene correo, el del pedido."""
+    if o.customer_id:
+        c = db.get(Customer, o.customer_id)
+        if c is not None and c.tenant_id == o.tenant_id and (c.email or "").strip():
+            return c.email.strip()
+    return ((o.contact or {}).get("email") or "").strip()
+
+
+def store_logo(t: Tenant) -> str | None:
+    """Logo de la tienda (Mi Tienda) o el de la empresa, como URL absoluta: un correo no resuelve rutas relativas."""
+    from ..routers.store import store_cfg
+
+    for raw in (store_cfg(t).get("logo_url"), getattr(t, "logo_url", None)):
+        u = str(raw or "").strip()
+        if u.startswith("/") and not u.startswith("//"):
+            u = f"{settings.public_base_url.rstrip('/')}{u}"
+        if u.startswith(("https://", "http://")):
+            return u
+    return None
+
+
+def _steps(o: Order) -> list[tuple[str, bool]]:
+    """Linea de avance del pedido para el correo: (paso, completado). Retiro termina en "Listo para retiro"."""
+    retiro = (o.delivery or {}).get("type") == "retiro" or o.status == "listo"
+    names = ["Pedido recibido", "Pago confirmado", "Preparando", "Listo para retiro" if retiro else "Enviado", "Entregado"]
+    pos = {"nuevo": 0, "en_revision": 0, "pagado": 1, "preparando": 2, "listo": 3, "enviado": 3, "entregado": 4}.get(o.status, -1)
+    if o.payment_kind == "efectivo" and not o.paid_at and pos > 0:
+        names[1] = "Pago al retirar"  # efectivo: avanza sin pago confirmado
+    return [(n, i <= pos) for i, n in enumerate(names)]
+
+
+def email_button(url: str, label: str, color: str) -> str:
+    """Boton "a prueba de Outlook": una tabla con fondo (Outlook ignora el padding de un <a> en linea)."""
+    e = html.escape
+    return (
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 8px"><tr>'
+        f'<td align="center" bgcolor="{e(color)}" style="border-radius:10px;background:{e(color)}">'
+        f'<a href="{e(url)}" target="_blank" style="display:inline-block;padding:13px 22px;font-family:Arial,Helvetica,sans-serif;'
+        f'font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px">{e(label)}</a></td></tr></table>'
+    )
+
+
+def email_shell(t: Tenant, *, title: str, body: str, foot: str = "") -> str:
+    """Marco comun de los correos del pedido (21/10, items 40 y 49): logo de la tienda, titulo, contenido y pie.
+    Tablas y estilos en linea: Outlook y Hotmail no leen hojas de estilo ni flexbox. `body` y `foot` ya vienen escapados."""
+    from ..routers.store import store_cfg
+
+    e = html.escape
+    cfg = store_cfg(t)
+    primary = cfg.get("primary") or "#e2233a"
+    name = cfg.get("name") or t.name
+    logo = store_logo(t)
+    brand = (
+        f'<img src="{e(logo)}" alt="{e(name)}" height="40" style="display:block;height:40px;max-width:220px;border:0">'
+        if logo
+        else f'<span style="font-size:20px;font-weight:700;color:{EMAIL_INK}">{e(name)}</span>'
+    )
+    wa = (cfg.get("whatsapp") or "").strip()
+    contacto = f" · WhatsApp {e(wa)}" if wa else ""
+    return f"""<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f4f2f0" style="background:#f4f2f0">
+<tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:560px;background:#ffffff;border:1px solid {EMAIL_LINE};border-radius:12px;font-family:Arial,Helvetica,sans-serif;color:{EMAIL_INK}">
+<tr><td style="padding:20px 24px;border-bottom:3px solid {e(primary)}">{brand}</td></tr>
+<tr><td style="padding:24px 24px 8px">
+<h1 style="margin:0 0 10px;font-size:21px;line-height:1.3;color:{EMAIL_INK}">{e(title)}</h1>
+{body}
+</td></tr>
+<tr><td style="padding:16px 24px 22px;border-top:1px solid {EMAIL_LINE};font-size:12px;line-height:1.5;color:{EMAIL_GREY}">{foot}{e(name)}{contacto}</td></tr>
+</table></td></tr></table>"""
+
+
+def _status_pill(o: Order, primary: str) -> str:
+    e = html.escape
+    tono = "#b42318" if o.status in ("cancelado", "reembolsado") else primary
+    return (
+        f'<p style="margin:0 0 16px;font-size:13px;color:{EMAIL_GREY}">Pedido <b style="color:{EMAIL_INK}">{e(o.number)}</b> · '
+        f'<span style="display:inline-block;padding:3px 10px;border-radius:999px;border:1px solid {e(tono)};color:{e(tono)};font-weight:700">'
+        f"Estado: {e(STATUS_LABEL.get(o.status, o.status))}</span></p>"
+    )
+
+
+def _steps_html(o: Order, primary: str) -> str:
+    """Pasos del pedido unidos por la linea de avance (como el seguimiento). No va en cancelados ni reembolsados."""
+    if o.status not in ("nuevo", "en_revision", "pagado", "preparando", "listo", "enviado", "entregado"):
+        return ""
+    e = html.escape
+    cells = []
+    for name, done in _steps(o):
+        color = primary if done else "#d6d1cc"
+        mark = "&#10003;" if done else "&nbsp;"
+        cells.append(
+            f'<td align="center" valign="top" width="20%" style="padding:0 2px;border-top:3px solid {e(color)}">'
+            f'<div style="margin:-12px auto 4px;width:20px;height:20px;line-height:20px;border-radius:10px;background:{e(color)};color:#fff;font-size:12px;font-weight:700">{mark}</div>'
+            f'<div style="font-size:11px;line-height:1.3;color:{EMAIL_INK if done else EMAIL_GREY}">{e(name)}</div></td>'
+        )
+    return f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:22px 0 10px"><tr>{"".join(cells)}</tr></table>'
+
+
+def _summary_html(o: Order) -> str:
+    """Resumen: productos, descuento, envio, IVA y total."""
+    e = html.escape
+    rows = "".join(
+        f'<tr><td style="padding:8px 0;border-bottom:1px solid {EMAIL_LINE}">{e(ln.name)} <span style="color:{EMAIL_GREY}">× {d(ln.quantity):g}</span></td>'
+        f'<td align="right" style="padding:8px 0;border-bottom:1px solid {EMAIL_LINE};white-space:nowrap">{fmt_money(ln.total, o.currency)}</td></tr>'
+        for ln in o.lines
+        if not _is_ship(ln)
+    )
+    sub = f'style="padding:4px 0;color:{EMAIL_GREY}"'
+    extra = ""
+    if d(o.discount_total) > 0:
+        cupon = f" ({e(o.coupon_code)})" if o.coupon_code else ""
+        extra += f'<tr><td {sub}>Descuento{cupon}</td><td align="right" {sub}>−{fmt_money(o.discount_total, o.currency)}</td></tr>'
+    envio = f" · {e(o.shipping_method)}" if o.shipping_method else ""
+    extra += f'<tr><td {sub}>Envío (sin IVA){envio}</td><td align="right" {sub}>{fmt_money(o.shipping, o.currency)}</td></tr>'
+    extra += f'<tr><td {sub}>IVA</td><td align="right" {sub}>{fmt_money(o.tax_total, o.currency)}</td></tr>'
+    extra += (
+        '<tr><td style="padding:8px 0 0;font-size:17px;font-weight:700">Total</td>'
+        f'<td align="right" style="padding:8px 0 0;font-size:17px;font-weight:700;white-space:nowrap">{fmt_money(o.total, o.currency)}</td></tr>'
+    )
+    return (
+        f'<p style="margin:16px 0 4px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:{EMAIL_GREY}">Resumen</p>'
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;border-top:1px solid {EMAIL_LINE}">{rows}{extra}</table>'
+    )
 
 
 def _email_html(t: Tenant, o: Order, kind: str, extra: str = "") -> str:
     from ..routers.store import store_cfg
 
     e = html.escape
-    cfg = store_cfg(t)
-    primary = cfg.get("primary") or "#e2233a"
-    intro = {
-        "recibido": "¡Gracias por tu compra! Este es el resumen de tu pedido.",
-        "pagado": "Confirmamos el pago de tu pedido. Ya lo estamos preparando.",
-        "rechazado": "No pudimos validar el comprobante que subiste. Revisá el monto y el detalle y volvé a subirlo, o escribinos.",
-        "listo": "Tu pedido ya está listo. Podés pasar a retirarlo.",
-        "enviado": "Tu pedido salió hacia la dirección de entrega.",
-        "entregado": "Tu pedido fue entregado. ¡Gracias por comprar con nosotros!",
-        "cancelado": "Tu pedido fue cancelado.",
-        "reembolsado": "Registramos el reembolso de tu pedido.",
-        "por_vencer": "Tu pedido sigue pendiente de pago.",
-        "vencido": "El plazo para pagar tu pedido venció y lo cancelamos: los productos volvieron a la venta.",
-    }[kind]
-    rows = "".join(
-        f"<tr><td style='padding:6px 0'>{e(ln.name)} × {d(ln.quantity):g}</td><td style='padding:6px 0;text-align:right'>{fmt_money(ln.total, o.currency)}</td></tr>"
-        for ln in o.lines
-        if not _is_ship(ln)
-    )
+    primary = store_cfg(t).get("primary") or "#e2233a"
     instr = pay_instructions(t, o) if kind in SHOW_INSTRUCTIONS and o.status in ("nuevo", "en_revision") else None
     url = track_url(t, o)
-    boton = "Subir el comprobante" if kind == "por_vencer" and o.payment_kind in NEEDS_PROOF else "Ver mi pedido"
+    main_url, boton = url, TRACK_LABEL
+    if kind in ("por_vencer", "rechazado") and o.payment_kind in NEEDS_PROOF:
+        boton = "Subir el comprobante"
     pie = "Guardá este correo: el botón te lleva al estado de tu pedido."
     if kind == "vencido":
         # un SINPE puede haberse pagado sin subir el comprobante: nunca se afirma que "no se cobro nada"
-        url, boton, pie = store_base(t), "Volver a la tienda", "Si ya habías pagado, respondé a este correo con el comprobante y lo resolvemos."
-    return f"""<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#15131a">
-<div style="border-bottom:3px solid {primary};padding:12px 0;font-size:18px;font-weight:700">{e(cfg.get("name") or t.name)}</div>
-<p style="font-size:15px">{intro}</p>
-<p style="font-size:13px;color:#5a5560">Pedido <b>{e(o.number)}</b> · Estado: <b>{e(STATUS_LABEL.get(o.status, o.status))}</b></p>
-{extra}
-<table style="width:100%;border-collapse:collapse;font-size:14px;border-top:1px solid #eee;border-bottom:1px solid #eee">{rows}</table>
-<p style="text-align:right;font-size:13px;color:#5a5560;margin:8px 0 0">Envío (sin IVA) {fmt_money(o.shipping, o.currency)} · IVA {fmt_money(o.tax_total, o.currency)}</p>
-<p style="text-align:right;font-size:18px;font-weight:700;margin:4px 0 16px">Total {fmt_money(o.total, o.currency)}</p>
-{f'<div style="background:#f6f2ee;border-radius:8px;padding:12px 14px;white-space:pre-wrap;font-size:14px"><b>Cómo pagar · {e(o.payment_method or "")}</b><br>{e(instr)}</div>' if instr else ""}
-<p><a href="{e(url)}" style="display:inline-block;background:{primary};color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700">{boton}</a></p>
-<p style="color:#8a858f;font-size:12px">{e(pie)} Cualquier consulta, respondé a este correo.</p></div>"""
+        main_url, boton, pie = store_base(t), "Volver a la tienda", "Si ya habías pagado, respondé a este correo con el comprobante y lo resolvemos."
+    pay_box = (
+        '<div style="margin:16px 0 0;background:#f6f2ee;border-radius:10px;padding:14px 16px;font-size:14px;line-height:1.5;white-space:pre-wrap">'
+        f"<b>Cómo pagar · {e(o.payment_method or '')}</b><br>{e(instr)}</div>"
+        if instr
+        else ""
+    )
+    # boton principal; si no es el de seguimiento, "Rastrear mi pedido" queda como enlace debajo (items 40/49)
+    track_link = (
+        f'<p style="margin:0 0 6px;font-size:13px"><a href="{e(url)}" style="color:{e(primary)};font-weight:700">{TRACK_LABEL} →</a></p>'
+        if boton != TRACK_LABEL
+        else ""
+    )
+    body = (
+        f'<p style="margin:0 0 12px;font-size:15px;line-height:1.5">{e(CUSTOMER_INTRO[kind])}</p>'
+        f"{_status_pill(o, primary)}{_steps_html(o, primary)}{extra}{_summary_html(o)}{pay_box}"
+        f"{email_button(main_url, boton, primary)}{track_link}"
+        f'<p style="margin:10px 0 0;font-size:12px;line-height:1.5;color:{EMAIL_GREY}">Si el botón no abre, copiá este enlace en el navegador:<br>'
+        f'<a href="{e(url)}" style="color:{EMAIL_GREY};word-break:break-all">{e(url)}</a></p>'
+    )
+    return email_shell(t, title=CUSTOMER_TITLE[kind], body=body, foot=f"{e(pie)} Cualquier consulta, respondé a este correo.<br>")
 
 
-def notify_customer(db: Session, t: Tenant, o: Order, kind: str, extra: str = "", dedupe_key: str | None = None) -> EmailOutbox | None:
-    """dedupe_key (plan 1.2, regla 6): la llave estable de un correo automatico (recordatorio, vencido). Se le pasa a
-    queue_email cuando la outbox ya la tiene (al fusionar 1.2 queda cableado solo; el integrador puede pasarla siempre).
-    Mientras tanto la barrera es la nota con clave del historial del pedido."""
-    import inspect
-
+def notify_customer(
+    db: Session, t: Tenant, o: Order, kind: str, extra: str = "", dedupe_key: str | None = None, to: str | None = None
+) -> EmailOutbox | None:
+    """dedupe_key (plan 1.2, regla 6): la llave estable de un correo automatico (recordatorio, vencido, rechazo).
+    Va al correo ACTUAL del cliente si el pedido esta ligado a uno (notify_email, item 43); si no, al del pedido.
+    `to`: solo la confirmacion del checkout, que va al correo que el comprador acaba de escribir."""
     from .mail import queue_email
 
-    to = ((o.contact or {}).get("email") or "").strip()
+    to = (to or "").strip() or notify_email(db, o)
     if not to or kind not in CUSTOMER_SUBJECT:
         return None
-    kw = {"dedupe_key": dedupe_key} if dedupe_key and "dedupe_key" in inspect.signature(queue_email).parameters else {}
-    return queue_email(db, t, to, CUSTOMER_SUBJECT[kind].format(n=o.number), _email_html(t, o, kind, extra), "order", o.id, **kw)
+    return queue_email(db, t, to, CUSTOMER_SUBJECT[kind].format(n=o.number), _email_html(t, o, kind, extra), "order", o.id, dedupe_key=dedupe_key)
+
+
+def panel_order_url(o: Order) -> str:
+    """El pedido en el panel (Pedidos de la tienda lo abre con ?pedido=)."""
+    return f"{settings.public_base_url.rstrip('/')}/ordenes?pedido={o.id}"
 
 
 def notify_team(db: Session, t: Tenant, o: Order, kind: str, detail: str | None = None) -> int:
+    from ..routers.store import store_cfg
     from .mail import notify_roles
 
     e = html.escape
     c = o.contact or {}
+    primary = store_cfg(t).get("primary") or "#e2233a"
     titulo = {
         "nuevo": f"Pedido web {o.number} · {fmt_money(o.total, o.currency)}",
         "comprobante": f"Comprobante subido · pedido {o.number}",
@@ -493,11 +650,22 @@ def notify_team(db: Session, t: Tenant, o: Order, kind: str, detail: str | None 
         "revisar": f"Revisar pago ONVO · pedido {o.number}",
         "revision": f"Comprobante sin revisar · pedido {o.number}",
     }[kind]
-    cuerpo = (
-        f"<p><b>{e(titulo)}</b></p>{f'<p>{e(detail)}</p>' if detail else ''}<p>{e(c.get('name') or '')} · {e(c.get('email') or '')} · {e(c.get('phone') or '')}</p>"
-        f"<p>Pago: {e(o.payment_method or '—')} · Entrega: {e(o.shipping_method or '—')}</p>"
-        f"<p>Estado: {e(STATUS_LABEL.get(o.status, o.status))}. Revisalo en Pedidos de la tienda.</p>"
+    vendedor = ""
+    if o.seller_id:
+        from ..models import User
+
+        u = db.get(User, o.seller_id)
+        vendedor = f"<br>Vendedor: <b>{e(u.full_name)}</b>" if u else ""
+    datos = (
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;line-height:1.5;margin:0 0 6px">'
+        '<tr><td style="padding:10px 12px;background:#f6f2ee;border-radius:10px">'
+        f"<b>{e(c.get('name') or '')}</b> · {e(c.get('email') or '')} · {e(c.get('phone') or '')}<br>"
+        f"Pago: {e(o.payment_method or '—')} · Entrega: {e(o.shipping_method or '—')}{vendedor}</td></tr></table>"
     )
+    body = (f'<p style="margin:0 0 12px;font-size:15px;line-height:1.5">{e(detail)}</p>' if detail else "") + (
+        f"{_status_pill(o, primary)}{datos}{_summary_html(o)}{email_button(panel_order_url(o), 'Abrir en Pedidos de la tienda', primary)}"
+    )
+    cuerpo = email_shell(t, title=titulo, body=body, foot="Aviso interno de la tienda en línea. ")
     roles = tuple(checkout_cfg(t).get("notify_roles") or ("admin",))
     return notify_roles(db, t, roles, titulo, cuerpo, "order", o.id)
 
@@ -583,7 +751,9 @@ def transition(
     _inventory(db, o, old, new, by if isinstance(by, int) else None)
     _hist(o, new, by, note)
     if new == "pagado":
-        auto_invoice(db, t, o)
+        # quien confirma el pago queda como quien "tecleo" la factura (created_by): sin vendedor asignado, la ve en sus
+        # Facturas (services/ownership.doc_mine). Con vendedor, la factura es del vendedor (21/10, item 24).
+        auto_invoice(db, t, o, by if isinstance(by, int) else None)
     from ..routers.events import on_order_status
 
     on_order_status(db, o, new)  # entradas de evento ligadas al pedido (si las hay)
@@ -600,18 +770,48 @@ def transition(
     if not notify:
         return None
     kind = "rechazado" if (new == "nuevo" and old == "en_revision") else new
-    extra = ""
-    if new == "enviado" and o.tracking_number:
-        extra = f"<p style='font-size:14px'>Número de guía: <b>{html.escape(o.tracking_number)}</b>{' · ' + html.escape(o.carrier) if o.carrier else ''}</p>"
-    if new == "cancelado" and o.cancel_reason:
-        extra = f"<p style='font-size:14px'>Motivo: {html.escape(o.cancel_reason)}</p>"
-    if new == "reembolsado" and o.refund:
-        extra = f"<p style='font-size:14px'>Monto: <b>{fmt_money(o.refund['amount'], o.currency)}</b></p>"
-    if new == "listo":
+    key = None
+    if kind == "rechazado":
+        # 21/10, item 47: el cliente sabe por que y como volver a subirlo. Una llave por rechazo (el n.o de rechazos
+        # del historial): un reintento del mismo rechazo no manda dos correos; un rechazo posterior si sale.
+        n = sum(1 for h in (o.history or []) if h.get("status") == "nuevo" and h.get("kind") != "nota")
+        key = f"tienda-rech:{o.id}:{n}"
+    return notify_customer(db, t, o, kind, status_extra(t, o, kind, note), dedupe_key=key)
+
+
+def status_extra(t: Tenant, o: Order, kind: str, note: str | None = None) -> str:
+    """Lo propio de cada aviso de estado (transportista y guia, motivo, donde retirar, como volver a subir el
+    comprobante). Lo usan el cambio de estado y "Reenviar correo", asi el reenvio dice lo mismo."""
+    e = html.escape
+    if kind == "enviado" and (o.tracking_number or o.carrier):
+        partes = []
+        if o.carrier:
+            partes.append(f"Lo lleva: <b>{e(o.carrier)}</b>")
+        if o.tracking_number:
+            partes.append(f"Número de guía: <b>{e(o.tracking_number)}</b>")
+        return _note_box("<br>".join(partes))
+    if kind == "cancelado" and o.cancel_reason:
+        return _note_box(f"Motivo: {e(o.cancel_reason)}")
+    if kind == "reembolsado" and o.refund:
+        return _note_box(f"Monto: <b>{fmt_money(o.refund['amount'], o.currency)}</b>")
+    if kind == "listo":
         pk = checkout_cfg(t).get("pickup") or {}
-        if pk.get("address"):
-            extra = f"<p style='font-size:14px'>Dónde: {html.escape(pk['address'])}{' · ' + html.escape(pk['hours']) if pk.get('hours') else ''}</p>"
-    return notify_customer(db, t, o, kind, extra)
+        donde = f"Dónde: {e(pk['address'])}{' · ' + e(pk['hours']) if pk.get('hours') else ''}<br>" if pk.get("address") else ""
+        return _note_box(f"{donde}Presentá el número de pedido <b>{e(o.number)}</b> al retirar.")
+    if kind == "rechazado":
+        motivo = f"<b>Qué revisar:</b> {e(note.strip())}<br>" if (note or "").strip() else ""
+        return _note_box(
+            f"{motivo}<b>Cómo volver a subirlo:</b> tocá «Subir el comprobante», elegí la foto o el PDF del comprobante "
+            f"correcto (que se lean el monto y el detalle <b>{e(o.number)}</b>) y envialo. Lo revisamos apenas llegue.",
+            warn=True,
+        )
+    return ""
+
+
+def _note_box(inner_html: str, warn: bool = False) -> str:
+    """Recuadro de nota dentro del correo (motivo, guia, donde retirar). `inner_html` ya viene escapado."""
+    fondo, borde = ("#fff4f2", "#f1b8ae") if warn else ("#f6f2ee", "#ebe7e3")
+    return f'<div style="margin:6px 0 4px;background:{fondo};border:1px solid {borde};border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.5">{inner_html}</div>'
 
 
 def next_states(o: Order) -> list[str]:
@@ -936,8 +1136,90 @@ def save_proof(db: Session, t: Tenant, o: Order, data: bytes, filename: str | No
     return m
 
 
+# ---------- vendedor del pedido (21/10, items 24/42) ----------
+def order_seller(db: Session, o: Order) -> int | None:
+    """El vendedor del pedido si todavia puede serlo (activo, del equipo). Si no, la factura nace sin vendedor."""
+    from .ownership import eligible_seller
+
+    return o.seller_id if o.seller_id and eligible_seller(db, o.tenant_id, o.seller_id) else None
+
+
+def web_orders_commission(t: Tenant) -> bool:
+    """Mi Tienda -> Pagos: la factura de un pedido web asignado comisiona como una venta propia (por defecto si)."""
+    return bool(checkout_cfg(t).get("web_orders_commission", True))
+
+
+def is_web_order_invoice(db: Session, invoice_id: int, tenant_id: int) -> bool:
+    return (
+        db.scalar(select(Order.id).where(Order.tenant_id == tenant_id, Order.invoice_id == invoice_id, Order.channel == "tienda").limit(1))
+        is not None
+    )
+
+
+def assign_seller(db: Session, t: Tenant, o: Order, seller_id: int | None, *, by: int, ip: str | None = None) -> bool:
+    """Asigna (o quita) el vendedor del pedido web. Si el pedido ya tiene factura, la factura pasa al vendedor y los
+    cobros que ya tenga comisionan (idempotente: commissions.on_payment no repite lo devengado). Una factura que ya
+    comisiono a otro vendedor no se reasigna sola: la comision se anula primero en Comisiones (sin dobles pagos).
+    Devuelve False si no cambia nada."""
+    from ..models import Commission, Invoice, Payment
+    from .ownership import eligible_seller
+
+    if o.channel != "tienda":
+        raise HTTPException(409, "Solo pedidos de la tienda en línea")
+    if seller_id is not None and not eligible_seller(db, t.id, seller_id):
+        raise HTTPException(422, "Ese vendedor no es un usuario activo de la empresa")
+    if seller_id == o.seller_id:
+        return False
+    inv = db.get(Invoice, o.invoice_id) if o.invoice_id else None
+    live_inv = inv is not None and inv.tenant_id == t.id and inv.status != "anulada"
+    if live_inv:
+        otro = db.scalar(
+            select(Commission.user_id)
+            .where(
+                Commission.tenant_id == t.id,
+                Commission.invoice_id == inv.id,
+                Commission.beneficiary == "vendedor",
+                Commission.status != "anulada",
+                Commission.user_id.is_not(None),
+                Commission.user_id != seller_id if seller_id is not None else true(),
+            )
+            .limit(1)
+        )
+        if otro is not None:
+            raise HTTPException(409, "La factura de este pedido ya comisionó a otro vendedor: anulá esa comisión en Comisiones antes de reasignarlo")
+    antes = o.seller_id
+    o.seller_id = seller_id
+    o.assigned_at = datetime.now(UTC) if seller_id else None
+    from ..models import User
+
+    nombre = (db.get(User, seller_id).full_name if seller_id else None) or ""
+    # nota interna (nunca la ve el comprador en el seguimiento: kind=nota + internal)
+    _note(o, by, f"Asignado a {nombre}" if seller_id else "Sin vendedor asignado")
+    o.history = [*o.history[:-1], {**o.history[-1], "internal": True}]
+    if live_inv:
+        inv.seller_id = seller_id
+        db.flush()
+        if seller_id:
+            from . import commissions
+
+            pagos = db.scalars(
+                select(Payment)
+                .where(
+                    Payment.tenant_id == t.id,
+                    Payment.invoice_id == inv.id,
+                    Payment.status == "confirmado",
+                    Payment.kind.in_(("captura", "devolucion", "reembolso")),
+                )
+                .order_by(Payment.paid_at, Payment.id)
+            ).all()
+            for pay in pagos:
+                commissions.on_payment(db, pay)
+    audit(db, t.id, by, "assign_seller", "order", o.id, {"from": antes, "to": seller_id, "invoice_id": inv.id if live_inv else None}, ip=ip)
+    return True
+
+
 # ---------- factura del pedido ----------
-PAY_METHOD = {"tarjeta": "onvo", "sinpe": "sinpe", "transferencia": "transferencia", "efectivo": "efectivo"}
+PAY_METHOD ={"tarjeta": "onvo", "sinpe": "sinpe", "transferencia": "transferencia", "efectivo": "efectivo"}
 
 
 def invoice_order(db: Session, t: Tenant, o: Order, user_id: int | None, doc_type: str, register_payment: bool, ip: str | None = None):
@@ -990,8 +1272,9 @@ def invoice_order(db: Session, t: Tenant, o: Order, user_id: int | None, doc_typ
             for ln in o.lines
         ],
     )
-    # venta de la tienda en linea: sin vendedor (no comisiona). Si la factura la vendedora, la ve por created_by.
-    invoice = docsvc.create_invoice(db, t.id, user_id, payload, doc_type, seller_id=None)
+    # 21/10, items 24/42: la factura es del vendedor asignado al pedido (comisiona como venta propia salvo que Mi Tienda
+    # lo apague: commissions._beneficiaries). Sin vendedor no comisiona; si la factura la vendedora, la ve por created_by.
+    invoice = docsvc.create_invoice(db, t.id, user_id, payload, doc_type, seller_id=order_seller(db, o))
     # la capa de inventario de la tienda descuenta solo lo que falte (nunca dos veces si ya se despacho)
     store_inventory.deduct_for_order_invoice(db, o, invoice, user_id)
     o.invoice_id = invoice.id
@@ -1016,7 +1299,7 @@ def invoice_order(db: Session, t: Tenant, o: Order, user_id: int | None, doc_typ
     return invoice
 
 
-def auto_invoice(db: Session, t: Tenant, o: Order) -> str | None:
+def auto_invoice(db: Session, t: Tenant, o: Order, user_id: int | None = None) -> str | None:
     """Al confirmarse el pago: comprobante electronico + cobro aplicado + correo al cliente, como hacia Fygaro.
     Nunca tumba la confirmacion del pago: si algo falla queda anotado en el historial para hacerlo a mano."""
     from ..core.config import settings as cfg
@@ -1031,7 +1314,7 @@ def auto_invoice(db: Session, t: Tenant, o: Order) -> str | None:
     doc_type = "FE" if (o.contact or {}).get("id_number") else "TE"
     sp = db.begin_nested()
     try:
-        invoice = invoice_order(db, t, o, None, doc_type, register_payment=True)
+        invoice = invoice_order(db, t, o, user_id, doc_type, register_payment=True)
         db.flush()
         if mode == "ninguno":
             note = f"{invoice.number} creada; sin proveedor fiscal configurado: queda sin emitir ante Hacienda"

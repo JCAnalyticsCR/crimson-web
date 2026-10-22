@@ -260,6 +260,8 @@ def _order_out(o: Order):
         "proofs": o.proofs or [],
         "expires_at": aware(o.expires_at),
         "inventory_state": o.inventory_state,
+        "seller_id": o.seller_id,  # vendedor del pedido web (21/10, items 24/42)
+        "assigned_at": aware(o.assigned_at),
         "lines": [
             {
                 "id": ln.id,

@@ -483,11 +483,24 @@ def _beneficiaries(db: Session, deal: Deal, cfg: dict) -> list[tuple[str, str, i
     """(beneficiario, clave, user_id, rol, participacion): el vendedor del negocio y cada aliado que participa."""
     out = []
     role = member_role(db, deal.tenant_id, deal.seller_id)
-    if deal.seller_id and role is not None:
+    if deal.seller_id and role is not None and not _web_order_without_commission(db, deal):
         out.append(("vendedor", f"v:{deal.seller_id}", deal.seller_id, role, None))
     for part in participations_of(db, deal):
         out.append(("aliado", f"a:{part.id}", None, None, part))
     return out
+
+
+def _web_order_without_commission(db: Session, deal: Deal) -> bool:
+    """Factura de un pedido web asignado a un vendedor (21/10, items 24/42) con "comisiona como venta propia" apagado
+    en Mi Tienda: la venta es suya (la ve en sus Facturas) pero no le genera comision."""
+    if deal.invoice is None or deal.quote is not None:
+        return False  # un pedido web no tiene cotizacion
+    from . import store_orders
+
+    tenant = db.get(Tenant, deal.tenant_id)
+    if tenant is None or store_orders.web_orders_commission(tenant):
+        return False
+    return store_orders.is_web_order_invoice(db, deal.invoice.id, deal.tenant_id)
 
 
 def _pick(rules, cfg, deal, on, ben, kind="comision"):

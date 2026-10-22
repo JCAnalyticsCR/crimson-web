@@ -80,6 +80,10 @@ class Order(TenantMixin, TimestampMixin, Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # plazo para pagar
     inventory_state: Mapped[str | None] = mapped_column(String(12))  # held | released | fulfilled
     terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # vendedor del pedido web (21/10, items 24/42): lo asigna el admin o lo "toma" el vendedor. La factura que nace del
+    # pedido queda a su nombre (seller_id) y comisiona como una venta propia salvo que Mi Tienda lo apague.
+    seller_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), index=True)
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     lines: Mapped[list["OrderLine"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 
