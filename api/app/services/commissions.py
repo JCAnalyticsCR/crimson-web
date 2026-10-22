@@ -491,16 +491,18 @@ def _beneficiaries(db: Session, deal: Deal, cfg: dict) -> list[tuple[str, str, i
 
 
 def _web_order_without_commission(db: Session, deal: Deal) -> bool:
-    """Factura de un pedido web asignado a un vendedor (21/10, items 24/42) con "comisiona como venta propia" apagado
-    en Mi Tienda: la venta es suya (la ve en sus Facturas) pero no le genera comision."""
+    """Factura de un pedido web (reunion 2, item 12): atender pedidos web es parte del trabajo del vendedor y NO
+    comisiona. Solo comisiona el "Vendedor que atendio" (el vendedor del cliente, que pone el admin o elige el cliente
+    en el checkout) y solo si la factura esta a su nombre. Al encargado la venta le queda en sus Facturas, sin comision."""
     if deal.invoice is None or deal.quote is not None:
         return False  # un pedido web no tiene cotizacion
     from . import store_orders
 
-    tenant = db.get(Tenant, deal.tenant_id)
-    if tenant is None or store_orders.web_orders_commission(tenant):
+    o = store_orders.web_order_of_invoice(db, deal.invoice.id, deal.tenant_id)
+    if o is None:
         return False
-    return store_orders.is_web_order_invoice(db, deal.invoice.id, deal.tenant_id)
+    quien = store_orders.commissionable_seller(o)
+    return quien is None or quien != deal.seller_id
 
 
 def _pick(rules, cfg, deal, on, ben, kind="comision"):
@@ -1759,6 +1761,8 @@ def summary_for_user(db: Session, tenant, user_id: int, a: date, b: date, viewer
         if total <= 0 or net <= 0:
             continue
         deal = deal_of(db, invoice=inv)
+        if _web_order_without_commission(db, deal):
+            continue  # pedido web que solo atiende: no le comisiona (reunion 2, item 12)
         ben = ("vendedor", f"v:{user_id}", user_id, role, None)
         rule = _pick(rules, cfg, deal, date.today(), ben)
         if rule is None or trigger_of(rule, deal) != "cobro":

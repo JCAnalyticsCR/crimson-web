@@ -27,6 +27,12 @@ function Kpi({ label, data, light, cur }: { label: string; data: NonNullable<D["
 const PENDING: { key: string; label: string; to: string; need: string; hot?: boolean }[] = [
   /* 21/10 (item 35): lo primero que se ve al entrar son los pedidos web por atender */
   { key: "pedidos_web", label: "Pedidos web y comprobantes por atender", to: "/ordenes?pendiente=por_atender", need: "sales.ver", hot: true },
+  /* reunion 2 (item 10): en el inicio personal, la cola sin encargado (de nadie todavia) va aparte de los suyos */
+  { key: "pedidos_sin_encargado", label: "Pedidos web sin encargado para tomar", to: "/ordenes?pendiente=por_atender&vendedor=sin_asignar", need: "sales.ver", hot: true },
+  /* reunion 2 (item 10): lo que el vendedor tiene que mover hoy, solo lo suyo (en el inicio de la empresa, del equipo) */
+  { key: "seguimientos_hoy", label: "Seguimientos de hoy y vencidos", to: "/oportunidades?pendiente=seguimientos_hoy", need: "crm_pipeline.ver", hot: true },
+  { key: "cotizaciones_por_vencer", label: "Cotizaciones por vencer (7 días)", to: "/cotizaciones?pendiente=cotizaciones_por_vencer", need: "sales.ver", hot: true },
+  { key: "sin_proxima_accion", label: "Oportunidades sin próxima acción", to: "/oportunidades?pendiente=sin_proxima_accion", need: "crm_pipeline.ver" },
   { key: "facturas_vencidas", label: "Facturas vencidas", to: "/facturas?pendiente=facturas_vencidas", need: "sales.ver", hot: true },
   { key: "facturas_por_cobrar", label: "Facturas por cobrar", to: "/facturas?pendiente=facturas_por_cobrar", need: "sales.ver" },
   { key: "cotizaciones_sin_respuesta", label: "Cotizaciones sin respuesta", to: "/cotizaciones?pendiente=cotizaciones_sin_respuesta", need: "sales.ver" },
@@ -38,6 +44,15 @@ const PENDING: { key: string; label: string; to: string; need: string; hot?: boo
   { key: "costos_aliados", label: "Costos de aliados pendientes", to: "/oportunidades?pendiente=costos_aliados", need: "crm_pipeline.ver", hot: true },
   { key: "comisiones_por_aprobar", label: "Comisiones por aprobar", to: "/comisiones?tab=bandeja", need: "commissions.aprobar", hot: true },
 ];
+
+/** Las tarjetas de oportunidades cuentan lo propio en el inicio personal y lo del equipo en el de la empresa: el
+    enlace abre la vista con ese mismo alcance (Mis pendientes con "Todo el equipo", o la lista con "Solo las mías"). */
+function scoped(p: (typeof PENDING)[number], scope?: string) {
+  /* en el inicio personal, "Pedidos web por atender" son solo los suyos: abre la lista con "Mis pedidos" */
+  if (p.key === "pedidos_web") return scope === "mine" ? { ...p, to: `${p.to}&vendedor=mios` } : p;
+  if (p.key !== "seguimientos_hoy" && p.key !== "sin_proxima_accion") return p;
+  return { ...p, to: `${p.to}${scope === "company" ? "&equipo=1" : "&mias=1"}` };
+}
 
 /** Una tarjeta de pendientes: en 0 se ve apagada pero igual navega; sin permiso para la lista queda como dato. */
 function pendingCard(p: (typeof PENDING)[number], n: number, can: boolean) {
@@ -97,10 +112,10 @@ export default function Dashboard() {
 
       {/* 21/10 (item 35): las acciones pendientes van arriba de todo, antes de los accesos y los números */}
       {d && (
-        <Card title="Acciones pendientes" extra={<span className="meta">tocá una para ver cuáles son</span>}>
+        <Card title="Acciones pendientes" extra={<span className="meta">{d.scope === "mine" ? "solo lo suyo · toque una para ver cuáles son" : "toque una para ver cuáles son"}</span>}>
           <div className="pending">
             {PENDING.filter((p) => d.acciones_pendientes[p.key] !== undefined).map((p) =>
-              pendingCard(p.key === "cotizaciones_por_aprobar" && !allows("sales.aprobar") ? { ...p, label: "Esperando aprobación" } : p, d.acciones_pendientes[p.key] ?? 0, allows(p.need)))}
+              pendingCard(scoped(p.key === "cotizaciones_por_aprobar" && !allows("sales.aprobar") ? { ...p, label: "Esperando aprobación" } : p, d.scope), d.acciones_pendientes[p.key] ?? 0, allows(p.need)))}
           </div>
         </Card>
       )}

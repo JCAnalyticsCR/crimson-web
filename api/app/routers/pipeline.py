@@ -11,7 +11,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
@@ -21,6 +21,7 @@ from ..services.archive import live
 from ..services.documents import CR, audit
 from ..services.email_layout import cta
 from ..services.fx import rate_or_none
+from ..services.invoice_states import cr_today
 from ..services.mail import notify_roles
 from ..services.ownership import opportunity_seller
 from ..services.totals import d
@@ -136,12 +137,15 @@ def opportunities(
     mine: bool = False,
     owner_id: int | None = None,
     kind: str | None = Query(None, pattern="^(venta|proyecto)$"),
+    pendiente: str | None = Query(None, pattern="^sin_proxima_accion$"),  # tarjeta del inicio (reunion 2, item 10)
     limit: int = Query(100, le=300),
     p: Principal = Depends(require("crm_pipeline", "ver")),
     db: Session = Depends(get_db),
 ):
     stmt = select(Opportunity).where(Opportunity.tenant_id == p.tenant.id, live(Opportunity))
     stmt = _scope(stmt, p, owner_id, mine)
+    if pendiente:
+        stmt = stmt.where(*_opp_pending_cond(pendiente))
     if kind:
         stmt = stmt.where(Opportunity.kind == kind)
     if status == "abiertas":
@@ -282,16 +286,8 @@ def pending(
 ):
     """Mis pendientes: proximas acciones de hoy y vencidas, de la mas atrasada a la de hoy.
     Por defecto solo las propias; quien ve todo el embudo puede pedir las de todo el equipo (everyone=true)."""
-    today = date.today()
-    stmt = select(Opportunity).where(
-        Opportunity.tenant_id == p.tenant.id,
-        Opportunity.status.in_(OPEN_STATES),
-        live(Opportunity),
-        Opportunity.next_action_date.is_not(None),
-        Opportunity.next_action_date <= today,
-    )
-    if not (everyone and p.can("crm_pipeline", "ver_todo")):
-        stmt = stmt.where(Opportunity.owner_id == p.user.id)
+    today = cr_today()  # la misma fecha que la tarjeta del inicio (_opp_pending_cond)
+    stmt = select(Opportunity).where(*opp_pending_where("seguimientos_hoy", p, everyone))
     rows = db.scalars(stmt.order_by(Opportunity.next_action_date, Opportunity.id)).all()
     out = []
     for o in rows:
@@ -663,3 +659,33 @@ def stale_followups(db: Session, tenant_id: int, days: int = 5) -> list[Opportun
         if (o.next_action_date and o.next_action_date <= date.today()) or last < cutoff:
             out.append(o)
     return out
+
+
+# ---------- Acciones pendientes del inicio (reunion 2, item 10) ----------
+# Cada tarjeta lleva a la vista con exactamente esas filas: "seguimientos_hoy" a Mis pendientes (GET
+# /opportunities/pending) y "sin_proxima_accion" a la lista (GET /opportunities?pendiente=sin_proxima_accion).
+OPP_PENDIENTES = ("seguimientos_hoy", "sin_proxima_accion")
+
+
+def _opp_pending_cond(key: str) -> list:
+    # Fecha de Costa Rica (el servidor corre en UTC: despues de las 18:00 CR, date.today() ya es manana). Las dos
+    # tarjetas no se cruzan: "seguimientos_hoy" es lo que tiene fecha (hoy o vencida) y "sin_proxima_accion" lo que no
+    # tiene fecha programada (aunque tenga el texto de la accion): una oportunidad nunca cuenta en las dos.
+    if key == "seguimientos_hoy":  # proxima accion de hoy o vencida
+        return [Opportunity.next_action_date.is_not(None), Opportunity.next_action_date <= cr_today()]
+    if key == "sin_proxima_accion":  # abierta y sin nada programado (sin fecha)
+        return [Opportunity.status.in_(OPEN_STATES), Opportunity.next_action_date.is_(None)]
+    raise HTTPException(422, "Filtro de pendientes desconocido")
+
+
+def opp_pending_where(key: str, p: Principal, everyone: bool = False) -> list:
+    """Abiertas, vivas y con el alcance de quien mira: las propias, o las de todo el equipo si lo pide quien ve todo
+    el embudo (everyone)."""
+    out = [Opportunity.tenant_id == p.tenant.id, Opportunity.status.in_(OPEN_STATES), live(Opportunity), *_opp_pending_cond(key)]
+    if not (everyone and p.can("crm_pipeline", "ver_todo")):
+        out.append(Opportunity.owner_id == p.user.id)
+    return out
+
+
+def opp_pending_count(db: Session, key: str, p: Principal, everyone: bool = False) -> int:
+    return db.scalar(select(func.count()).select_from(Opportunity).where(*opp_pending_where(key, p, everyone))) or 0

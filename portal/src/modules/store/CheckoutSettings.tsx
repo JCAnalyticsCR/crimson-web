@@ -18,8 +18,9 @@ type Ck = {
   /* verify_email: revisar que el dominio del correo del comprador reciba correo; delivery_notice: aviso interno por cada
      envio a domicilio para coordinar el mensajero (pedido 21/10) */
   verify_email?: boolean; delivery_notice?: boolean;
-  /* 21/10 (24/42): la factura de un pedido web asignado comisiona como una venta propia del vendedor */
-  web_orders_commission?: boolean;
+  /* reunion 2 (item 12): atender pedidos web no comisiona; solo el "Vendedor que atendió". Encendido, el cliente lo
+     elige en el checkout (lista opcional de vendedores activos). Apagado por defecto: lo asigna el admin en el pedido. */
+  seller_choice?: boolean;
   /* 21/10 (45): transportistas para "Marcar enviado" */
   carriers?: string[];
 };
@@ -55,7 +56,7 @@ export default function CheckoutSettings({ rates, onRates }: { rates: ZoneRate[]
         auto_invoice: ck.auto_invoice,
         verify_email: ck.verify_email !== false,
         delivery_notice: ck.delivery_notice !== false,
-        web_orders_commission: ck.web_orders_commission !== false,
+        seller_choice: !!ck.seller_choice,
         carriers: carriersText.split("\n").map((x) => x.trim()).filter(Boolean),
       };
       const r = await api<Resp>("/store/checkout", { method: "PUT", json: body });
@@ -119,7 +120,8 @@ export default function CheckoutSettings({ rates, onRates }: { rates: ZoneRate[]
         <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={ck.auto_invoice} onChange={(e) => setCk({ ...ck, auto_invoice: e.target.checked })} />Emitir la factura electrónica automáticamente al confirmarse el pago (con cédula: FE; sin cédula: tiquete) y enviarla al cliente</label>
         <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={ck.verify_email !== false} onChange={(e) => setCk({ ...ck, verify_email: e.target.checked })} />Revisar que el correo del comprador exista (el dominio tiene que recibir correo; si la revisión no responde, la compra sigue). Los errores de dedo como «gmial.com» siempre se corrigen.</label>
         <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={ck.delivery_notice !== false} onChange={(e) => setCk({ ...ck, delivery_notice: e.target.checked })} />Avisarle al administrador por correo de cada envío a domicilio (al confirmarse el pago, o al crearse si es contra entrega) para coordinar el mensajero</label>
-        <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={ck.web_orders_commission !== false} onChange={(e) => setCk({ ...ck, web_orders_commission: e.target.checked })} />Los pedidos web asignados a un vendedor (o que él toma) comisionan igual que una venta propia</label>
+        <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={!!ck.seller_choice} onChange={(e) => setCk({ ...ck, seller_choice: e.target.checked })} />Que el cliente elija en la compra al vendedor que lo atendió (lista opcional con los vendedores activos)</label>
+        <p className="muted" style={{ fontSize: 12, margin: "-4px 0 0 24px" }}>Atender pedidos web no genera comisión. Solo comisiona el «Vendedor que atendió» (el vendedor del cliente, siempre uno solo): lo asigna usted en el pedido. Lo que elija el cliente con esta opción queda como sugerencia y comisiona cuando usted lo confirma en el pedido.</p>
         <Field label="Transportistas al marcar «Enviado»" hint="Uno por línea. Al marcar un pedido como enviado se elige de esta lista (o se escribe otro).">
           <textarea className="input" rows={3} value={carriersText} onChange={(e) => setCarriersText(e.target.value)} placeholder={"Mensajería Crimson\nCorreos de Costa Rica"} />
         </Field>

@@ -262,7 +262,9 @@ def _order_out(o: Order):
         "proofs": o.proofs or [],
         "expires_at": aware(o.expires_at),
         "inventory_state": o.inventory_state,
-        "seller_id": o.seller_id,  # vendedor del pedido web (21/10, items 24/42)
+        "seller_id": o.seller_id,  # encargado del pedido web (21/10, items 24/42): atenderlo no comisiona
+        "attended_by_id": o.attended_by_id,  # vendedor que atendio (reunion 2, item 12): el que comisiona
+        "attended_source": o.attended_source,
         "assigned_at": aware(o.assigned_at),
         "lines": [
             {
@@ -309,6 +311,8 @@ def order_status(oid: int, data: OrderStatusIn, p: Principal = Depends(require("
     o = db.get(Order, oid)
     if not o or o.tenant_id != p.tenant.id or not so.sees_order(o, p):
         raise HTTPException(404, "Orden no encontrada")
+    if not so.edits_order(o, p):  # el vendedor que atendio un pedido que atiende otro solo lo ve (reunion 2, item 12)
+        raise HTTPException(403, "Este pedido lo atiende otra persona del equipo: usted solo lo puede ver")
     old = o.status
     o.status = data.status
     if data.status == "pagado":
@@ -335,11 +339,13 @@ def order_to_invoice(
 ):
     """Convierte la orden en tiquete (TE, consumidor final) o factura (FE, requiere cliente con identificacion).
     register_payment: si el pedido ya se pago, deja el cobro aplicado a la factura (asi no queda "por cobrar")."""
-    from ..services.store_orders import invoice_order, sees_order
+    from ..services.store_orders import edits_order, invoice_order, sees_order
 
     o = db.get(Order, oid)
     if not o or o.tenant_id != p.tenant.id or not sees_order(o, p):
         raise HTTPException(404, "Orden no encontrada")
+    if not edits_order(o, p):
+        raise HTTPException(403, "Este pedido lo atiende otra persona del equipo: usted solo lo puede ver")
     invoice = invoice_order(db, p.tenant, o, p.user.id, doc_type, register_payment, ip=p.ip)
     db.commit()
     return {"invoice_id": invoice.id, "number": invoice.number}
@@ -695,6 +701,9 @@ class CheckoutIn(BaseModel):
     # el total que el comprador vio: si el servidor calcula otro, no se crea el pedido
     expected_total: Decimal | None = Field(None, ge=0)
     website: str | None = Field(None, max_length=200)  # honeypot
+    # "¿Lo atendió alguno de nuestros vendedores?" (reunion 2, item 12): solo cuenta si Mi Tienda lo habilita
+    # referencia opaca de la lista publica (so.public_sellers): el id interno del usuario nunca sale a la pagina
+    attended_by: str | None = Field(None, max_length=40, pattern="^[0-9a-f]*$")
 
 
 def rate_zone(r: dict) -> str | None:

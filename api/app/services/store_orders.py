@@ -12,6 +12,7 @@ Reglas:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import html
 import logging
 import re
@@ -85,8 +86,9 @@ CHECKOUT_DEFAULTS: dict = {
     "verify_email": True,
     # aviso interno por cada pedido con envio a domicilio, para coordinar el mensajero (pedido 21/10, item 33)
     "delivery_notice": True,
-    # 21/10, items 24/42: la factura de un pedido web asignado a un vendedor comisiona como una venta propia
-    "web_orders_commission": True,
+    # reunion 2, item 12: atender un pedido web no comisiona; solo el "Vendedor que atendio" (el vendedor del cliente).
+    # Encendido, el checkout le deja al cliente elegir (opcional) al vendedor que lo atendio, de los vendedores activos.
+    "seller_choice": False,
     # 21/10, item 45: transportistas que se eligen al marcar "Enviado" (ademas se puede escribir otro)
     "carriers": ["Mensajería Crimson", "Correos de Costa Rica"],
 }
@@ -139,7 +141,8 @@ def checkout_cfg(t: Tenant) -> dict:
                 methods[k].update(v)
     return {
         **CHECKOUT_DEFAULTS,
-        **{k: v for k, v in raw.items() if k != "methods"},
+        # web_orders_commission: opcion vieja (atender comisionaba); desde la reunion 2 (item 12) ya no existe
+        **{k: v for k, v in raw.items() if k not in ("methods", "web_orders_commission")},
         "methods": methods,
     }
 
@@ -674,11 +677,14 @@ def notify_team(db: Session, t: Tenant, o: Order, kind: str, detail: str | None 
         "revision": f"Comprobante sin revisar · pedido {o.number}",
     }[kind]
     vendedor = ""
-    if o.seller_id:
-        from ..models import User
+    from ..models import User
 
+    if o.seller_id:
         u = db.get(User, o.seller_id)
-        vendedor = f"<br>Vendedor: <b>{e(u.full_name)}</b>" if u else ""
+        vendedor = f"<br>Encargado: <b>{e(u.full_name)}</b>" if u else ""
+    if o.attended_by_id:
+        u = db.get(User, o.attended_by_id)
+        vendedor += f"<br>Vendedor que atendió: <b>{e(u.full_name)}</b>" if u else ""
     datos = email_layout.note(
         html=f"<b>{e(c.get('name') or '')}</b> · {e(c.get('email') or '')} · {e(c.get('phone') or '')}<br>"
         f"Pago: {e(o.payment_method or '—')} · Entrega: {e(o.shipping_method or '—')}{vendedor}"
@@ -710,7 +716,7 @@ def _team_filter(db: Session, t: Tenant, o: Order):
     cache: dict[str, bool] = {}
 
     def keep(m) -> bool:
-        if m.user_id == o.seller_id:
+        if m.user_id in (o.seller_id, o.attended_by_id):  # el encargado y el vendedor del cliente
             return True
         if m.role_code not in cache:
             cache[m.role_code] = perms_allow(effective_permissions(t, m.role_code, _role_permissions(db, m.role_code)), "sales", "ver_todo")
@@ -1345,23 +1351,56 @@ def save_proof(db: Session, t: Tenant, o: Order, data: bytes, filename: str | No
     return m
 
 
-# ---------- vendedor del pedido (21/10, items 24/42) ----------
-def order_seller(db: Session, o: Order) -> int | None:
-    """El vendedor del pedido si todavia puede serlo (activo, del equipo). Si no, la factura nace sin vendedor."""
+# ---------- vendedor del pedido (21/10, items 24/42; reunion 2, item 12) ----------
+# Dos papeles distintos:
+# - seller_id, "Encargado del pedido": quien lo atiende (el admin lo asigna o el vendedor lo "toma"). Atender pedidos
+#   web es parte del trabajo del vendedor: NO comisiona.
+# - attended_by_id, "Vendedor que atendio": el vendedor del cliente (siempre uno solo). Lo pone el admin, o el cliente
+#   en el checkout si Mi Tienda lo habilita. Es el unico que comisiona el pedido web.
+# La factura del pedido queda a nombre del vendedor que atendio; sin el, del encargado (la ve en sus Facturas, sin
+# comision: commissions._web_order_without_commission).
+def _eligible(db: Session, tid: int, uid: int | None) -> int | None:
     from .ownership import eligible_seller
 
-    return o.seller_id if o.seller_id and eligible_seller(db, o.tenant_id, o.seller_id) else None
+    return uid if uid and eligible_seller(db, tid, uid) else None
+
+
+def confirmed_attended(o: Order | None) -> int | None:
+    """El vendedor que atendio CONFIRMADO: el que puso el admin. El que elige el cliente en el checkout
+    (attended_source="cliente") es solo una sugerencia: no comisiona ni se lleva la factura hasta que el admin lo
+    confirme en el pedido (asi nadie desde la pagina publica dirige una comision)."""
+    if o is None or o.attended_by_id is None or o.attended_source == "cliente":
+        return None
+    return o.attended_by_id
+
+
+def order_seller(db: Session, o: Order) -> int | None:
+    """El vendedor de la factura del pedido: el que atendio confirmado (si todavia puede ser vendedor) o, si no hay, el
+    encargado. Si ninguno puede serlo (inactivo, de otra empresa), la factura nace sin vendedor."""
+    return _eligible(db, o.tenant_id, confirmed_attended(o)) or _eligible(db, o.tenant_id, o.seller_id)
+
+
+def commissionable_seller(o: Order | None) -> int | None:
+    """A quien le comisiona la factura de este pedido web: solo al vendedor que atendio confirmado (None: a nadie)."""
+    return confirmed_attended(o)
 
 
 def order_scope(p):
     """Que pedidos web ve el que mira (21/10, items 24/42; services/ownership.py): con sales.ver_todo, todos; si no,
-    los sin vendedor (la cola que se puede tomar) y los suyos. Los de otro vendedor no aparecen en ningun lado."""
+    los sin encargado (la cola que se puede tomar), los que atiende y los de sus clientes (vendedor que atendio). Los
+    de otro vendedor no aparecen en ningun lado."""
     if p.sees_all_sales:
         return true()
-    return or_(Order.seller_id.is_(None), Order.seller_id == p.user.id)
+    return or_(Order.seller_id.is_(None), Order.seller_id == p.user.id, Order.attended_by_id == p.user.id)
 
 
 def sees_order(o: Order, p) -> bool:
+    return bool(p.sees_all_sales or o.seller_id is None or p.user.id in (o.seller_id, o.attended_by_id))
+
+
+def edits_order(o: Order, p) -> bool:
+    """Quien puede MOVER el pedido (estado, notas, correos, factura): con sales.ver_todo, todos; si no, los sin
+    encargado y los que atiende. El vendedor que atendio un pedido que atiende OTRO solo lo ve (reunion 2, item 12)."""
     return bool(p.sees_all_sales or o.seller_id is None or o.seller_id == p.user.id)
 
 
@@ -1375,24 +1414,134 @@ def takeable_ids(db: Session, orders) -> set[int]:
     return {o.id for o in cand if o.invoice_id not in vivas}
 
 
-def web_orders_commission(t: Tenant) -> bool:
-    """Mi Tienda -> Pagos: la factura de un pedido web asignado comisiona como una venta propia (por defecto si)."""
-    return bool(checkout_cfg(t).get("web_orders_commission", True))
+def web_order_of_invoice(db: Session, invoice_id: int, tenant_id: int) -> Order | None:
+    return db.scalar(select(Order).where(Order.tenant_id == tenant_id, Order.invoice_id == invoice_id, Order.channel == "tienda").limit(1))
 
 
 def is_web_order_invoice(db: Session, invoice_id: int, tenant_id: int) -> bool:
-    return (
-        db.scalar(select(Order.id).where(Order.tenant_id == tenant_id, Order.invoice_id == invoice_id, Order.channel == "tienda").limit(1))
-        is not None
+    return web_order_of_invoice(db, invoice_id, tenant_id) is not None
+
+
+def seller_choice(t: Tenant) -> bool:
+    """Mi Tienda -> Pagos: el cliente elige en el checkout al vendedor que lo atendio (apagado por defecto)."""
+    return bool(checkout_cfg(t).get("seller_choice", False))
+
+
+# El equipo comercial de los pedidos web: a quien se le asigna un pedido, quien puede ser "Vendedor que atendio" y la
+# lista que ve el cliente en el checkout. Un solo criterio para los tres (mismo que el responsable de una
+# oportunidad, pipeline.meta), filtrado por ownership.eligible_seller.
+SALES_TEAM_ROLES = ("admin", "ventas", "supervisor")
+
+
+def sales_team(db: Session, tid: int) -> list[dict]:
+    from . import team
+    from .ownership import eligible_seller
+
+    # sin inactivos, eliminados ni duplicados (reunion 2, pedido 26)
+    return [x for x in team.options(db, tid, SALES_TEAM_ROLES) if eligible_seller(db, tid, x["id"])]
+
+
+def in_sales_team(db: Session, tid: int, uid: int | None) -> bool:
+    return bool(uid) and any(x["id"] == uid for x in sales_team(db, tid))
+
+
+def _seller_ref(tid: int, uid: int) -> str:
+    """Identificador opaco del vendedor en la pagina publica: el id interno (secuencial) nunca sale."""
+    key = hmac.new(settings.jwt_secret.encode(), b"crimson-checkout-seller-v1", hashlib.sha256).digest()
+    return hmac.new(key, f"{tid}:{uid}".encode(), hashlib.sha256).hexdigest()[:20]
+
+
+def public_sellers(db: Session, t: Tenant) -> list[dict]:
+    """Vendedores que el cliente puede elegir en el checkout: el mismo equipo comercial que el admin ve en el pedido
+    (sales_team). Solo el nombre y una referencia opaca: nada de ids, correos ni telefonos en la pagina publica."""
+    return [{"id": _seller_ref(t.id, x["id"]), "name": x["name"]} for x in sales_team(db, t.id)]
+
+
+def resolve_public_seller(db: Session, t: Tenant, ref: str) -> int | None:
+    """La referencia opaca del checkout -> el vendedor (None si ya no esta en la lista)."""
+    for x in sales_team(db, t.id):
+        if hmac.compare_digest(_seller_ref(t.id, x["id"]), ref):
+            return x["id"]
+    return None
+
+
+def _live_invoice(db: Session, t: Tenant, o: Order):
+    from ..models import Invoice
+
+    inv = db.get(Invoice, o.invoice_id) if o.invoice_id else None
+    return inv if inv is not None and inv.tenant_id == t.id and inv.status != "anulada" else None
+
+
+def _check_invoice_move(db: Session, t: Tenant, inv, target: int | None) -> None:
+    """Una factura que ya comisiono a otro vendedor no cambia de vendedor sola: la comision se anula primero en
+    Comisiones (sin pagarle la misma venta a dos)."""
+    from ..models import Commission
+
+    if inv is None or inv.seller_id == target:
+        return
+    otro = db.scalar(
+        select(Commission.user_id)
+        .where(
+            Commission.tenant_id == t.id,
+            Commission.invoice_id == inv.id,
+            Commission.beneficiary == "vendedor",
+            Commission.status != "anulada",
+            Commission.user_id.is_not(None),
+            Commission.user_id != target if target is not None else true(),
+        )
+        .limit(1)
     )
+    if otro is not None:
+        raise HTTPException(409, "La factura de este pedido ya comisionó a otro vendedor: anule esa comisión en Comisiones antes de cambiarlo")
+
+
+def _sync_invoice(db: Session, t: Tenant, o: Order, inv) -> None:
+    """La factura del pedido sigue al vendedor del pedido (order_seller) y, si ese es el que atendio, comisiona lo ya
+    cobrado (idempotente: commissions.on_payment no repite lo devengado)."""
+    from ..models import Payment
+
+    if inv is None:
+        return
+    target = order_seller(db, o)
+    if inv.seller_id != target:
+        inv.seller_id = target
+        db.flush()
+    if target is None or target != commissionable_seller(o):
+        return
+    from . import commissions
+
+    pagos = db.scalars(
+        select(Payment)
+        .where(
+            Payment.tenant_id == t.id,
+            Payment.invoice_id == inv.id,
+            Payment.status == "confirmado",
+            Payment.kind.in_(("captura", "devolucion", "reembolso")),
+        )
+        .order_by(Payment.paid_at, Payment.id)
+    ).all()
+    for pay in pagos:
+        # reassign: la comision ANULADA de otro vendedor sobre este cobro no bloquea al nuevo (el 409 de
+        # _check_invoice_move pide anularla justamente para poder cambiarlo)
+        commissions.on_payment(db, pay, reassign=True)
+
+
+def _target_after(db: Session, o: Order, *, seller_id: int | None, attended_by_id: int | None, attended_source: str | None) -> int | None:
+    """El vendedor que tendria la factura despues del cambio (misma regla que order_seller)."""
+    confirmado = attended_by_id if attended_source != "cliente" else None
+    return _eligible(db, o.tenant_id, confirmado) or _eligible(db, o.tenant_id, seller_id)
+
+
+def _internal_note(o: Order, by, text: str) -> None:
+    # nota interna (nunca la ve el comprador en el seguimiento: kind=nota + internal)
+    _note(o, by, text)
+    o.history = [*o.history[:-1], {**o.history[-1], "internal": True}]
 
 
 def assign_seller(db: Session, t: Tenant, o: Order, seller_id: int | None, *, by: int, ip: str | None = None) -> bool:
-    """Asigna (o quita) el vendedor del pedido web. Si el pedido ya tiene factura, la factura pasa al vendedor y los
-    cobros que ya tenga comisionan (idempotente: commissions.on_payment no repite lo devengado). Una factura que ya
-    comisiono a otro vendedor no se reasigna sola: la comision se anula primero en Comisiones (sin dobles pagos).
-    Devuelve False si no cambia nada."""
-    from ..models import Commission, Invoice, Payment
+    """Asigna (o quita) el encargado del pedido web. Sin vendedor que atendio, la factura pasa al encargado (la ve en
+    sus Facturas) pero no comisiona. Devuelve False si no cambia nada."""
+    from ..models import User
     from .ownership import eligible_seller
 
     if o.channel != "tienda":
@@ -1401,53 +1550,43 @@ def assign_seller(db: Session, t: Tenant, o: Order, seller_id: int | None, *, by
         raise HTTPException(422, "Ese vendedor no es un usuario activo de la empresa")
     if seller_id == o.seller_id:
         return False
-    inv = db.get(Invoice, o.invoice_id) if o.invoice_id else None
-    live_inv = inv is not None and inv.tenant_id == t.id and inv.status != "anulada"
-    if live_inv:
-        otro = db.scalar(
-            select(Commission.user_id)
-            .where(
-                Commission.tenant_id == t.id,
-                Commission.invoice_id == inv.id,
-                Commission.beneficiary == "vendedor",
-                Commission.status != "anulada",
-                Commission.user_id.is_not(None),
-                Commission.user_id != seller_id if seller_id is not None else true(),
-            )
-            .limit(1)
-        )
-        if otro is not None:
-            raise HTTPException(409, "La factura de este pedido ya comisionó a otro vendedor: anulá esa comisión en Comisiones antes de reasignarlo")
+    inv = _live_invoice(db, t, o)
+    _check_invoice_move(db, t, inv, _target_after(db, o, seller_id=seller_id, attended_by_id=o.attended_by_id, attended_source=o.attended_source))
     antes = o.seller_id
     o.seller_id = seller_id
     o.assigned_at = datetime.now(UTC) if seller_id else None
+    nombre = (db.get(User, seller_id).full_name if seller_id else None) or ""
+    _internal_note(o, by, f"Asignado a {nombre}" if seller_id else "Sin vendedor asignado")
+    _sync_invoice(db, t, o, inv)
+    audit(db, t.id, by, "assign_seller", "order", o.id, {"from": antes, "to": seller_id, "invoice_id": inv.id if inv else None}, ip=ip)
+    return True
+
+
+def set_attended_by(
+    db: Session, t: Tenant, o: Order, uid: int | None, *, by: int | None, source: str = "admin", ip: str | None = None
+) -> bool:
+    """Pone (o quita) el "Vendedor que atendio" (reunion 2, item 12): el vendedor del cliente, el unico que comisiona el
+    pedido. Siempre uno solo. Si el pedido ya tiene factura, pasa a su nombre y comisiona lo ya cobrado. Devuelve False
+    si no cambia nada."""
     from ..models import User
 
-    nombre = (db.get(User, seller_id).full_name if seller_id else None) or ""
-    # nota interna (nunca la ve el comprador en el seguimiento: kind=nota + internal)
-    _note(o, by, f"Asignado a {nombre}" if seller_id else "Sin vendedor asignado")
-    o.history = [*o.history[:-1], {**o.history[-1], "internal": True}]
-    if live_inv:
-        inv.seller_id = seller_id
-        db.flush()
-        if seller_id:
-            from . import commissions
-
-            pagos = db.scalars(
-                select(Payment)
-                .where(
-                    Payment.tenant_id == t.id,
-                    Payment.invoice_id == inv.id,
-                    Payment.status == "confirmado",
-                    Payment.kind.in_(("captura", "devolucion", "reembolso")),
-                )
-                .order_by(Payment.paid_at, Payment.id)
-            ).all()
-            for pay in pagos:
-                # reassign: la comision ANULADA de otro vendedor sobre este cobro no bloquea al nuevo (el 409 de arriba
-                # pide anularla justamente para poder reasignar)
-                commissions.on_payment(db, pay, reassign=True)
-    audit(db, t.id, by, "assign_seller", "order", o.id, {"from": antes, "to": seller_id, "invoice_id": inv.id if live_inv else None}, ip=ip)
+    if o.channel != "tienda":
+        raise HTTPException(409, "Solo pedidos de la tienda en línea")
+    if uid is not None and not in_sales_team(db, t.id, uid):  # el mismo equipo que la lista del checkout
+        raise HTTPException(422, "Ese usuario no es un vendedor activo de la empresa")
+    source = source if uid else None
+    if uid == o.attended_by_id and source == o.attended_source:
+        return False  # el admin que vuelve a elegir al que sugirio el cliente lo CONFIRMA (source pasa a "admin")
+    inv = _live_invoice(db, t, o)
+    _check_invoice_move(db, t, inv, _target_after(db, o, seller_id=o.seller_id, attended_by_id=uid, attended_source=source))
+    antes = o.attended_by_id
+    o.attended_by_id = uid
+    o.attended_source = source
+    nombre = (db.get(User, uid).full_name if uid else None) or ""
+    quien = " (lo eligió el cliente: sin comisión hasta que el administrador lo confirme)" if source == "cliente" else ""
+    _internal_note(o, by or "cliente", f"Vendedor que atendió: {nombre}{quien}" if uid else "Sin vendedor que atendió")
+    _sync_invoice(db, t, o, inv)
+    audit(db, t.id, by, "set_attended_by", "order", o.id, {"from": antes, "to": uid, "source": source, "invoice_id": inv.id if inv else None}, ip=ip)
     return True
 
 
