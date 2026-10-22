@@ -279,6 +279,52 @@ def test_16_motivo_del_rechazo_aprobar_despues_y_ajuste_desde_aliados(client, au
     assert _proponer(client, s, titulo="Ya sin aprobación").json()["approval"] == "aprobada"
 
 
+def test_16_aprobar_liga_el_cliente_y_el_levantamiento_lo_hereda(client, auth, db_session):
+    """Hallazgo de revision: la propuesta nace sin cliente; al aprobarla Crimson liga uno de la cartera y el
+    levantamiento del aliado lo toma (y el sitio y el contacto de la oportunidad). Editar la oportunidad desde el
+    embudo no borra el cliente que escribio el aliado ni el motivo del rechazo."""
+    from app.models import Opportunity, Survey, Tenant
+
+    s = escenario(client, dict(client.headers), db_session)
+    o = _proponer(client, s, titulo="Propuesta con cliente por ligar", contact={"name": "Ana Sitio", "phone": "8888-0000"}).json()
+    pr = client.get(f"/opportunities/{o['id']}/ally-proposal").json()["proposal"]
+    assert pr["contact"] == {"name": "Cliente Final Demo", "contact_name": "Ana Sitio", "phone": "8888-0000"} and pr["customer_id"] is None
+    # el autoguardado del formulario (sin contact ni lost_reason) no borra lo que escribio el aliado
+    form = {"title": "Propuesta con cliente por ligar", "kind": "proyecto", "customer_id": None, "site": "San José", "amount": 0, "probability": 30, "status": "nuevo"}
+    assert client.put(f"/opportunities/{o['id']}", json=form).status_code == 200
+    db_session.expire_all()
+    assert db_session.get(Opportunity, o["id"]).contact.get("name") == "Cliente Final Demo"
+
+    assert client.post(f"/opportunities/{o['id']}/ally-proposal/approve", json={"customer_id": 999999}).status_code == 404
+    r = client.post(f"/opportunities/{o['id']}/ally-proposal/approve", json={"customer_id": s.c1})
+    assert r.status_code == 200, r.text
+    lev = client.post("/aliado/levantamientos", json={"opportunity_id": o["id"], "kind": "cctv"}, headers=s.a_jefe)
+    assert lev.status_code == 201, lev.text
+    db_session.expire_all()
+    sv = db_session.get(Survey, lev.json()["id"])
+    assert sv.customer_id == s.c1 and sv.site == "San José" and sv.contact.get("name") == "Ana Sitio" and sv.contact.get("phone") == "8888-0000"
+
+    # nace aprobada (ajuste apagado) sin cliente: el levantamiento hereda el que Crimson liga despues desde el embudo
+    t = db_session.get(Tenant, s.tid)
+    t.settings = {**(t.settings or {}), "ally_opportunity_approval": False}
+    db_session.commit()
+    o2 = _proponer(client, s, titulo="Aprobada sin cliente").json()
+    lev2 = client.post("/aliado/levantamientos", json={"opportunity_id": o2["id"], "kind": "cctv"}, headers=s.a_jefe).json()
+    assert db_session.get(Survey, lev2["id"]).customer_id is None
+    assert client.put(f"/opportunities/{o2['id']}", json={**form, "title": "Aprobada sin cliente", "customer_id": s.c2, "status": "levantamiento"}).status_code == 200
+    db_session.expire_all()
+    assert db_session.get(Survey, lev2["id"]).customer_id == s.c2
+
+    # el motivo del rechazo sobrevive a una edicion que no lo manda
+    o3 = _proponer(client, s, titulo="Propuesta rechazada y editada").json()
+    db_session.get(Opportunity, o3["id"]).ally_approval = "pendiente"
+    db_session.commit()
+    assert client.post(f"/opportunities/{o3['id']}/ally-proposal/reject", json={"reason": "Fuera de zona"}).status_code == 200
+    assert client.put(f"/opportunities/{o3['id']}", json={**form, "title": "Propuesta rechazada y editada", "status": "perdida"}).status_code == 200
+    det = client.get(f"/aliado/oportunidades/{o3['id']}", headers=s.a_jefe).json()
+    assert "Fuera de zona" in (det["approval_reason"] or "")
+
+
 def test_16_tecnico_elegido_al_crear_recibe_el_aviso(client, auth, db_session):
     from app.models import EmailOutbox
 

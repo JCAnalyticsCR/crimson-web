@@ -1066,6 +1066,12 @@ def levantamiento_crear(data: AllySurveyIn, ctx: AllyCtx = Depends(need("levanta
     _team_member(ctx, tec)
     _survey_photos_check(db, ctx, data, None)
     customer_id = o.end_customer_id or o.customer_id  # nunca del cuerpo
+    # sin sitio ni contacto en el cuerpo, los de la oportunidad (la que propuso el aliado trae el cliente como contacto)
+    if not (data.site or "").strip() and o.site:
+        data.site = o.site
+    if not data.contact and o.contact:
+        oc = o.contact or {}
+        data.contact = {k: v for k, v in {"name": oc.get("contact_name") or oc.get("name"), "phone": oc.get("phone"), "email": oc.get("email")}.items() if v}
     number, _ = next_number(db, ctx.p.tenant.id, "LEV")
     s = Survey(tenant_id=ctx.p.tenant.id, number=number, technician_id=tec, template_version=fw.TEMPLATE_VERSION, ally_company_id=ctx.company.id)
     fw.apply_survey_payload(db, s, _to_survey_in(data, customer_id), ctx.p.tenant.id, valid_user_ids=ctx.scope.team_user_ids())

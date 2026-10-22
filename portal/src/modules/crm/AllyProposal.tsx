@@ -5,13 +5,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtDate } from "../../lib/api";
 import { useSession } from "../../app/session";
+import { Lookup, searchCustomers } from "../../ui/Lookup";
 
-type Proposal = { status: "pendiente" | "aprobada" | "rechazada"; label: string; company: string; by: string | null; created_at: string; lost_reason: string | null };
+type Proposal = { status: "pendiente" | "aprobada" | "rechazada"; label: string; company: string; by: string | null; created_at: string; lost_reason: string | null;
+  contact: { name?: string; contact_name?: string; phone?: string; email?: string }; customer_id: number | null };
 
 export function AllyProposalBanner({ oppId, sellers, onChange }: { oppId: number; sellers: { id: number; name: string }[]; onChange: () => void }) {
   const { allows, toast } = useSession();
   const [p, setP] = useState<Proposal | null>(null);
   const [owner, setOwner] = useState("");
+  const [cust, setCust] = useState<{ id: string; name: string }>({ id: "", name: "" });
   const [rechazo, setRechazo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const load = useCallback(() => {
@@ -42,14 +45,27 @@ export function AllyProposalBanner({ oppId, sellers, onChange }: { oppId: number
         <span className={`badge badge--${tono}`}>{p.label}</span>{" "}
         Propuesta por <b>{p.company}</b>{p.by ? ` (${p.by})` : ""} desde el portal de aliados · {fmtDate(p.created_at.slice(0, 10))}
         {p.lost_reason && <div className="muted">{p.lost_reason}</div>}
+        {/* el cliente que escribió el aliado (no ve la cartera): a quién ligar al aprobarla */}
+        {p.contact?.name && (
+          <div className="muted">
+            Cliente según el aliado: <b>{p.contact.name}</b>
+            {p.contact.contact_name ? ` · contacto en sitio ${p.contact.contact_name}` : ""}
+            {p.contact.phone ? ` · ${p.contact.phone}` : ""}{p.contact.email ? ` · ${p.contact.email}` : ""}
+          </div>
+        )}
       </div>
       {decide && rechazo === null && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {!p.customer_id && (
+            <div style={{ flex: "1 1 220px", maxWidth: 280 }} title="El cliente de la cartera que corresponde (opcional): lo heredan los levantamientos">
+              <Lookup value={cust.name} placeholder="Ligar cliente de la cartera…" fetcher={searchCustomers} onSelect={(it, text) => setCust({ id: it ? String(it.id) : "", name: text })} />
+            </div>
+          )}
           <select className="select select--sm" style={{ maxWidth: 240 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Responsable en Crimson">
             <option value="">Sin responsable por ahora</option>
             {sellers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
-          <button className="btn btn--crimson btn--sm" disabled={busy} onClick={() => go("approve", owner ? { owner_id: Number(owner) } : {})}>{busy ? "Guardando…" : "Aprobar"}</button>
+          <button className="btn btn--crimson btn--sm" disabled={busy} onClick={() => go("approve", { ...(owner ? { owner_id: Number(owner) } : {}), ...(cust.id ? { customer_id: Number(cust.id) } : {}) })}>{busy ? "Guardando…" : "Aprobar"}</button>
           <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => setRechazo("")}>Rechazar</button>
         </div>
       )}

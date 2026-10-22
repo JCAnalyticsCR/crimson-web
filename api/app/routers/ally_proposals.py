@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from ..core.config import settings as cfg
 from ..core.db import get_db
 from ..core.deps import Principal, require
-from ..models import AllyCompany, Opportunity, TenantUser, User
+from ..models import AllyCompany, Customer, Opportunity, Survey, TenantUser, User
 from ..services.documents import audit
 
 router = APIRouter(tags=["oportunidades"])
@@ -48,8 +48,21 @@ def _proposal_out(db: Session, o: Opportunity) -> dict:
             "by": autor.full_name if autor else None,
             "created_at": o.created_at,
             "lost_reason": o.lost_reason if o.ally_approval == "rechazada" else None,
+            # el cliente que escribio el aliado (no ve la cartera): con esto Crimson sabe a quien ligar al aprobarla
+            "contact": {k: (o.contact or {}).get(k) for k in ("name", "contact_name", "phone", "email") if (o.contact or {}).get(k)},
+            "customer_id": o.customer_id,
         }
     }
+
+
+def heredar_cliente(db: Session, o: Opportunity) -> None:
+    """Los levantamientos de la oportunidad que nacieron sin cliente (el aliado la propuso sin ficha) toman el que
+    Crimson le ligo. Los que ya tienen cliente no se tocan."""
+    cid = o.end_customer_id or o.customer_id
+    if not cid:
+        return
+    for s in db.scalars(select(Survey).where(Survey.tenant_id == o.tenant_id, Survey.opportunity_id == o.id, Survey.customer_id.is_(None))):
+        s.customer_id = cid
 
 
 @router.get("/opportunities/{oid}/ally-proposal")
@@ -60,6 +73,7 @@ def proposal(oid: int, p: Principal = Depends(require("crm_pipeline", "ver")), d
 
 class ApproveIn(BaseModel):
     owner_id: int | None = None  # responsable de Crimson (opcional; se puede asignar despues)
+    customer_id: int | None = None  # el cliente de la cartera que corresponde al que escribio el aliado (opcional)
 
 
 class RejectIn(BaseModel):
@@ -112,6 +126,14 @@ def approve(oid: int, data: ApproveIn, p: Principal = Depends(require("crm_pipel
     o = _decide_guard(db, oid, p, ("pendiente", "rechazada"))
     if o.ally_approval == "rechazada" and o.status == "perdida":
         o.status, o.lost_reason = "nuevo", None  # el rechazo la habia cerrado: vuelve a abrirse (closed_at lo borra el listener)
+    if data.customer_id:
+        c = db.get(Customer, data.customer_id)
+        if not c or c.tenant_id != p.tenant.id:
+            raise HTTPException(404, "Cliente no encontrado")
+        if o.end_customer_id == c.id:
+            o.end_customer_id = None  # contratante y cliente final iguales: no hay cliente final aparte
+        o.customer_id = c.id
+        heredar_cliente(db, o)
     o.ally_approval = "aprobada"
     if data.owner_id and data.owner_id != o.owner_id:
         _reassign(db, p, o, data.owner_id)
