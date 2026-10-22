@@ -375,7 +375,7 @@ function StockCells({ a }: { a?: Avail | null }) {
     <>
       <td className="num mono" style={{ fontWeight: own > 0 ? 700 : undefined, color: own > 0 ? undefined : "var(--text-3)" }} title={Number(a.own_reserved ?? 0) > 0 ? `${qty(a.own_reserved)} reservado` : undefined}>{qty(own)}</td>
       <td className="num mono" title={a.supplier_name || undefined}>{a.supplier_linked ? qty(a.supplier_qty) : a.supplier_unlinked_qty ? <span className="muted" title="Proveedor sin vincular: no cuenta">s/v</span> : <span className="muted">—</span>}</td>
-      <td className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap", color: a.supplier_linked && !a.supplier_fresh ? "var(--bad)" : undefined }}>{a.supplier_linked ? `${a.supplier_age || "sin fecha"}${a.supplier_fresh ? "" : " · viejo"}` : "—"}</td>
+      <td className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap", color: a.supplier_linked && !a.supplier_fresh ? "var(--bad)" : undefined }}>{a.supplier_linked ? `consultado ${a.supplier_age || "sin fecha"}${a.supplier_fresh ? "" : " · viejo"}${a.supplier_changed_age ? ` · cambió ${a.supplier_changed_age}` : ""}` : "—"}</td>
     </>
   );
 }

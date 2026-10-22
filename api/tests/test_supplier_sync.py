@@ -195,3 +195,102 @@ def test_without_credentials_nothing_runs(client, auth, db_session, monkeypatch)
     assert ss.sync_all(db_session) == {"skipped": "sin credenciales de Eurocomp"}
     sup = next(x for x in client.get("/supplier-catalog/suppliers").json() if x["name"] == "Eurocomp")
     assert sup["api"]["status"] == "pendiente" and "SiReTT" in sup["api"]["label"]
+
+
+def test_semanal_solo_precio_y_existencia_de_lo_que_ya_esta(client, auth, db_session, eurocomp):
+    """Pedido 21/10 (item 9): la sincronizacion semanal no vuelve a traer fotos ni descripciones de lo ya creado."""
+    tid = auth["tenant"]["id"]
+    prod = Product(tenant_id=tid, code="HIK-1047", name="Cámara 4MP ColorVu", price=Decimal("45000"), supplier_sku="SG2104")
+    db_session.add(prod)
+    db_session.commit()
+    ss.sync_all(db_session)
+    db_session.refresh(prod)
+    assert len(prod.images) == 2
+    # alguien quita las fotos del producto; Eurocomp cambia la descripcion, la foto, el precio y la existencia
+    prod.images = []
+    db_session.commit()
+    eurocomp["items"] = [
+        dict(CAMARA, descripcion="CAMARA IP NUEVA DESCRIPCION", img1="upload/items/otra.jpg", image_url="upload/items/otra2.jpg", precio="51.00", stock="9.000"),
+        BALUN,
+        UTP,
+        PURPLE,
+        UPS,
+    ]
+    out = ss.sync_all(db_session)[tid]
+    assert out["fotos_completadas"] == 0 and out["cabys_completados"] == 0
+    it = db_session.scalar(select(SupplierItem).where(SupplierItem.code == "SG2104"))
+    assert it.description.startswith("CAMARA IP HIKVISION") and it.raw["image_url"] == "upload/items/2026/8/1_2.jpg"
+    assert it.cost == Decimal("51") and it.stock == 9 and it.raw["precio"] == "51.00" and it.raw["stock"] == "9.000"
+    db_session.refresh(prod)
+    assert prod.images == [] and prod.cost == Decimal("51") and prod.supplier_stock == 9
+    # lo nuevo si entra completo
+    eurocomp["items"] = [*eurocomp["items"], item("SG9999", "GRABADORA NVR HIKVISION DS-7608NI", "SEGURIDAD", "Grabadoras", "HIKVISION", "80.00")]
+    assert ss.sync_all(db_session)[tid]["nuevo"] == 1
+    nuevo = db_session.scalar(select(SupplierItem).where(SupplierItem.code == "SG9999"))
+    assert nuevo.description.startswith("GRABADORA NVR") and nuevo.raw.get("image_url") and nuevo.changed_at is not None
+
+
+def test_cambio_real_aparte_de_la_consulta(client, auth, db_session, eurocomp):
+    """Pedido 21/10 (item 12): "actualizado hace 3 h" era la hora de la consulta; el ultimo cambio real va aparte."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.services.availability import availability_many
+
+    tid = auth["tenant"]["id"]
+    prod = Product(tenant_id=tid, code="HIK-1047", name="Cámara 4MP ColorVu", price=Decimal("45000"), supplier_sku="SG2104")
+    db_session.add(prod)
+    db_session.commit()
+    ss.sync_all(db_session)
+    it = db_session.scalar(select(SupplierItem).where(SupplierItem.code == "SG2104"))
+    hace_dos_dias = datetime.now(UTC) - timedelta(days=2)
+    it.changed_at = hace_dos_dias
+    db_session.commit()
+    # el refresco de 6 h consulta pero nada cambia: el ultimo cambio sigue siendo de hace 2 dias
+    out = ss.refresh_linked(db_session)[tid]
+    assert out["cambios"] == 0
+    db_session.refresh(it)
+    assert abs((it.changed_at.replace(tzinfo=UTC) if it.changed_at.tzinfo is None else it.changed_at) - hace_dos_dias) < timedelta(seconds=1)
+    row = availability_many(db_session, tid, [prod.id], audience="interno")[prod.id]
+    assert row["supplier_age"] == "hace menos de 1 h" and row["supplier_changed_age"] == "hace 2 días"
+    assert "consultado hace menos de 1 h · último cambio hace 2 días" in row["label"]
+    st = next(x for x in client.get("/supplier-catalog/suppliers").json() if x["name"].lower().startswith("eurocomp"))["api"]
+    assert st["last_stock_at"] and not st.get("last_stock_change_at")
+    # cambia la existencia: ahora si
+    eurocomp["items"] = [dict(CAMARA, stock="1.000"), UTP]
+    assert ss.refresh_linked(db_session)[tid]["cambios"] == 1
+    row = availability_many(db_session, tid, [prod.id], audience="interno")[prod.id]
+    assert row["supplier_changed_age"] == "hace menos de 1 h"
+    st = next(x for x in client.get("/supplier-catalog/suppliers").json() if x["name"].lower().startswith("eurocomp"))["api"]
+    assert st["last_stock_change_at"]
+
+
+def test_agotado_en_eurocomp_sale_de_la_tienda_y_sigue_en_el_panel(client, auth, db_session, eurocomp):
+    """Pedido 21/10 (item 10): agotado en Eurocomp (y sin existencia propia) sale de la tienda en la siguiente
+    sincronizacion; sigue en el panel. Con Ajustes "mostrar" queda visible como agotado."""
+    assert client.put("/store", json={"kind": "tienda", "published": True, "whatsapp": "+50688889892"}).status_code == 200
+    r = client.post("/products", json={"name": "Cámara 4MP ColorVu", "code": "HIK-1047", "price": 45000, "show_on_web": True, "supplier_sku": "SG2104"})
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    ss.sync_all(db_session)
+    pub = lambda: {p["id"] for p in client.get("/public/store/crimson/products").json()}  # noqa: E731
+    assert pid in pub()  # bajo pedido
+    eurocomp["items"] = [dict(CAMARA, stock="0.000"), BALUN, UTP, PURPLE, UPS]
+    ss.sync_all(db_session)
+    assert pid not in pub()
+    # sigue en el panel: Inventario web, Disponibilidad y el producto activo y publicado
+    panel = {x["id"]: x for x in client.get("/store/inventory", params={"todos": True}).json()["items"]}
+    assert panel[pid]["estado"] == "agotado" and panel[pid]["oculto_en_tienda"] is True
+    disp = {x["id"]: x for x in client.get("/stock/availability").json()["items"]}
+    assert disp[pid]["agotado_proveedor"] is True and disp[pid]["ocultar"] is True
+    prod = client.get(f"/products/{pid}").json()
+    assert prod["active"] and prod["show_on_web"]
+    # la ficha directa sigue abriendo
+    assert client.get(f"/public/store/crimson/products/{pid}").status_code == 200
+    # Ajustes: mostrarlo como agotado
+    assert client.put("/store/inventory/settings", json={"supplier_out_of_stock": "mostrar"}).status_code == 200
+    assert pid in pub()
+    # vuelve a haber en Eurocomp: vuelve a la tienda
+    client.put("/store/inventory/settings", json={"supplier_out_of_stock": "ocultar"})
+    eurocomp["items"] = [CAMARA, UTP]
+    ss.refresh_linked(db_session)
+    assert pid in pub()

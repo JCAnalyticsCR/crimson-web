@@ -486,7 +486,11 @@ def list_orders(
 
     mias = visible_invoice_ids(db, p, [o.invoice_id for o in rows])  # una consulta para toda la pagina
     items = [{**_order_out(o), "invoice_visible": (o.invoice_id in mias) if o.invoice_id else None} for o in rows]
-    return {"items": items, "counts": counts, "por_atender": attention, "labels": so.STATUS_LABEL}
+    # misma revision: los comprobantes que los clientes suben desde la pagina de pago de una factura (/pagar)
+    from ..services.invoice_proofs import pending_count
+
+    facturas = pending_count(db, p.tenant.id) if p.can("payments", "ver") else None
+    return {"items": items, "counts": counts, "por_atender": attention, "labels": so.STATUS_LABEL, "comprobantes_facturas": facturas}
 
 
 def _get(db: Session, p: Principal, oid: int) -> Order:

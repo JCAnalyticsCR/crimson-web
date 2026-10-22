@@ -75,6 +75,10 @@ DEFAULTS: dict = {
     "backorder_lead": "3-5 días hábiles",  # plazo de "bajo pedido" que ve el cliente
     "supplier_max_age_hours": 48,  # dato del proveedor mas viejo -> "Consultar disponibilidad" (SiReTT refresca cada 6 h)
     "out_of_stock": "mostrar",  # mostrar | ocultar (agotados en el catalogo, destacados y kits)
+    # agotado en el proveedor (Eurocomp) y sin existencia propia: "ocultar" lo saca de la tienda (lista, busqueda,
+    # destacados y kits) desde la sincronizacion siguiente y sigue en el panel; "mostrar" lo deja visible como agotado.
+    # Pedido 21/10 (item 10, pregunta 2 abierta): por defecto sale de la tienda. out_of_stock="ocultar" oculta todos.
+    "supplier_out_of_stock": "ocultar",
     "out_of_stock_action": "whatsapp",  # whatsapp | avisarme | ninguna
     "hold_hours_manual": 48,  # SINPE, transferencia, efectivo
     "hold_minutes_card": 30,  # tarjeta
@@ -310,7 +314,16 @@ def supplier_status(db: Session, tenant, products: Iterable[Product], cfg: dict 
     ids = [p.id for p in prods]
     by_pid: dict[int, list] = defaultdict(list)
     # solo las columnas que hacen falta: la fila cruda de SiReTT (raw) y la descripcion pesan y aca no se usan
-    cols = (SupplierItem.id, SupplierItem.product_id, SupplierItem.supplier_id, SupplierItem.stock, SupplierItem.active, SupplierItem.source, SupplierItem.list_date)
+    cols = (
+        SupplierItem.id,
+        SupplierItem.product_id,
+        SupplierItem.supplier_id,
+        SupplierItem.stock,
+        SupplierItem.active,
+        SupplierItem.source,
+        SupplierItem.list_date,
+        SupplierItem.changed_at,
+    )
     for it in db.execute(select(*cols).where(SupplierItem.tenant_id == t.id, SupplierItem.product_id.in_(ids))):
         by_pid[it.product_id].append(it)
     names = (
@@ -334,6 +347,7 @@ def supplier_status(db: Session, tenant, products: Iterable[Product], cfg: dict 
                 "name": None,
                 "source": None,
                 "unlinked_qty": unlinked,
+                "changed_at": None,
             }
             continue
         best = _pick(items)
@@ -345,6 +359,10 @@ def supplier_status(db: Session, tenant, products: Iterable[Product], cfg: dict 
         else:
             at = pa
         fresh = at is not None and now - at <= limit
+        # desde cuando el dato es el mismo: el ultimo cambio real de existencia o costo de lo vinculado (nunca despues
+        # de la consulta). Sin fecha de cambio (datos de antes del 21/10) no se inventa: solo se dice cuando se consulto
+        changes = [c for c in (_aware(i.changed_at) for i in items if i.active) if c is not None]
+        changed_at = (min(max(changes), at) if at else max(changes)) if changes else None
         comm = committed.get(p.id, ZERO)
         avail = max(qty - comm, ZERO) if (fresh and backorder) else ZERO
         out[p.id] = {
@@ -357,6 +375,7 @@ def supplier_status(db: Session, tenant, products: Iterable[Product], cfg: dict 
             "name": names.get(best.supplier_id) if best else None,
             "source": best.source if best else None,
             "unlinked_qty": None,
+            "changed_at": changed_at,
         }
     return out
 
@@ -410,7 +429,9 @@ def _internal_label(state: str, own_free: Decimal, own_res: Decimal, s: dict, no
         return STATES["servicio"]
     parts = [f"Propio: {qty_text(own_free)}" + (f" ({qty_text(own_res)} reservado)" if own_res > 0 else "")]
     if s["linked"]:
-        txt = f"{s['name'] or 'Proveedor'}: {qty_text(s['qty'])} · actualizado {age_text(s['at'], now)}"
+        txt = f"{s['name'] or 'Proveedor'}: {qty_text(s['qty'])} · consultado {age_text(s['at'], now)}"
+        if s.get("changed_at"):
+            txt += f" · último cambio {age_text(s['changed_at'], now)}"
         if not s["fresh"]:
             txt += " (dato viejo)"
         if s["committed"] > 0:
@@ -419,6 +440,22 @@ def _internal_label(state: str, own_free: Decimal, own_res: Decimal, s: dict, no
     elif s.get("unlinked_qty"):
         parts.append("Proveedor sin vincular (no cuenta)")
     return " · ".join(parts)
+
+
+def hide(state: str, s: dict, cfg: dict) -> bool:
+    """Sale de la tienda: agotado y Ajustes oculta los agotados, o agotado con el proveedor vinculado (Eurocomp) sin
+    existencia y Ajustes saca de la tienda lo que el proveedor agoto (supplier_out_of_stock, por defecto). En el panel
+    sigue siempre (el producto no se desactiva ni se despublica)."""
+    if state != "agotado":
+        return False
+    if cfg.get("out_of_stock") == "ocultar":
+        return True
+    return bool(s.get("linked")) and (cfg.get("supplier_out_of_stock") or DEFAULTS["supplier_out_of_stock"]) == "ocultar"
+
+
+def hides_any(cfg: dict) -> bool:
+    """Con estos Ajustes algun agotado puede salir de la tienda (si no, filtrar no hace falta)."""
+    return cfg.get("out_of_stock") == "ocultar" or (cfg.get("supplier_out_of_stock") or DEFAULTS["supplier_out_of_stock"]) == "ocultar"
 
 
 def availability_many(
@@ -466,6 +503,7 @@ def availability_many(
             "name": None,
             "source": None,
             "unlinked_qty": None,
+            "changed_at": None,
         }
         if p.item_type != "producto":
             state = "servicio"
@@ -502,7 +540,7 @@ def availability_many(
             "disponible": state in SELLABLE_STATES,
             "accion": _action(state, cfg),
             "ultimas": bool(ultimas),
-            "ocultar": state == "agotado" and cfg.get("out_of_stock") == "ocultar",
+            "ocultar": hide(state, s, cfg),
         }
         if audience == "publico":
             exact = mode == "exacta"
@@ -534,6 +572,10 @@ def availability_many(
                     "supplier_updated_at": s["at"],
                     "supplier_fresh": bool(s["fresh"]),
                     "supplier_age": age_text(s["at"], now) if s["linked"] else None,
+                    # el ultimo cambio REAL del dato del proveedor (existencia o costo), aparte de la consulta
+                    "supplier_changed_at": s.get("changed_at") if s["linked"] else None,
+                    "supplier_changed_age": age_text(s.get("changed_at"), now) if (s["linked"] and s.get("changed_at")) else None,
+                    "agotado_proveedor": bool(state == "agotado" and s["linked"]),
                     "supplier_unlinked_qty": s["unlinked_qty"],
                     "max_qty": _num(max_qty),
                     "label_publico": _public_label(state, own_free, ultimas, lead, cfg),

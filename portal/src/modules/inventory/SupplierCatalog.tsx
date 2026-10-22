@@ -18,6 +18,8 @@ type Sup = {
   api: {
     status: string; label: string | null; last_ok_at?: string; last_try_at?: string; last_summary?: Record<string, number>;
     last_stock_at?: string; last_stock_error?: string | null; last_stock_summary?: Record<string, number>;
+    /* ultimo cambio REAL (algo entro, cambio de precio o de existencia); last_*_at es la ultima consulta exitosa */
+    last_change_at?: string; last_stock_change_at?: string;
   };
 };
 type LinkedProduct = { id: number; code: string; name: string; active: boolean; price?: Num; currency?: string };
@@ -160,8 +162,13 @@ export default function SupplierCatalog() {
               {s.api.label && <span className="prv-api" data-status={s.api.status}><i />{s.api.label}</span>}
               {s.api.label && (s.api.last_ok_at || s.api.last_stock_at) && (
                 <span className="meta">
-                  {s.api.last_ok_at ? `Catálogo: ${when(s.api.last_ok_at)}` : "Catálogo: sin sincronizar"}
-                  {s.api.last_stock_at ? ` · Existencias: ${hace(s.api.last_stock_at)} (${when(s.api.last_stock_at)})` : " · Existencias: sin refrescar"}
+                  {s.api.last_ok_at ? `Catálogo consultado: ${when(s.api.last_ok_at)}` : "Catálogo: sin sincronizar"}
+                  {s.api.last_stock_at ? ` · Existencias consultadas ${hace(s.api.last_stock_at)} (${when(s.api.last_stock_at)})` : " · Existencias: sin refrescar"}
+                </span>
+              )}
+              {s.api.label && (s.api.last_change_at || s.api.last_stock_change_at) && (
+                <span className="meta" title="La última vez que algo cambió de verdad en la lista del proveedor (no la última consulta)">
+                  {(() => { const c = [s.api.last_change_at, s.api.last_stock_change_at].filter(Boolean).sort().pop()!; return `Último cambio real de precios o existencias: ${hace(c)} (${when(c)})`; })()}
                 </span>
               )}
               {!!s.unlinked_products && <span className="meta" style={{ color: "var(--warn)" }}>{s.unlinked_products} producto{s.unlinked_products !== 1 ? "s" : ""} con este proveedor sin vincular: su existencia no cuenta</span>}

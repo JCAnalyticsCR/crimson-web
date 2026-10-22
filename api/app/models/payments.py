@@ -80,3 +80,27 @@ class PaymentLink(TenantMixin, TimestampMixin, Base):
     opened_count: Mapped[int] = mapped_column(default=0)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     provider_ref: Mapped[str | None] = mapped_column(String(120))  # ultima sesion de Checkout ONVO abierta desde el enlace
+
+
+class InvoicePaymentProof(TenantMixin, TimestampMixin, Base):
+    """Comprobante de pago (SINPE o transferencia) que el cliente sube desde la pagina publica de la factura (/pagar).
+
+    Entra a la misma revision que los comprobantes de pedidos web (Pedidos de la tienda -> Por atender). Aprobarlo
+    registra el pago en la factura (payment_id); rechazarlo deja el motivo y no toca la factura. Pedido 21/10 (item 16).
+    """
+
+    __tablename__ = "invoice_payment_proof"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("invoice.id", ondelete="CASCADE", name="fk_invoice_payment_proof_invoice"), index=True)
+    media_id: Mapped[int] = mapped_column(ForeignKey("media.id", name="fk_invoice_payment_proof_media"))
+    method: Mapped[str] = mapped_column(String(20))  # sinpe | transferencia
+    amount: Mapped[float | None] = mapped_column(Numeric(16, 5))  # lo que el cliente dice que pago (vacio = el saldo)
+    currency: Mapped[str] = mapped_column(String(3), default="CRC")
+    reference: Mapped[str | None] = mapped_column(String(120))  # numero de comprobante que escribe el cliente
+    payer_name: Mapped[str | None] = mapped_column(String(160))
+    status: Mapped[str] = mapped_column(String(12), default="pendiente", index=True)  # pendiente | aprobado | rechazado
+    reviewed_by: Mapped[int | None] = mapped_column(Integer)  # sin FK: la bitacora guarda quien fue
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    note: Mapped[str | None] = mapped_column(String(300))  # motivo del rechazo
+    payment_id: Mapped[int | None] = mapped_column(ForeignKey("payment.id", ondelete="SET NULL", name="fk_invoice_payment_proof_payment"))

@@ -367,6 +367,10 @@ def stock_availability(
                         "supplier_updated_at",
                         "supplier_fresh",
                         "supplier_age",
+                        "supplier_changed_at",
+                        "supplier_changed_age",
+                        "agotado_proveedor",
+                        "ocultar",
                         "supplier_unlinked_qty",
                         "max_qty",
                     )

@@ -38,6 +38,8 @@ class StoreInventorySettingsIn(BaseModel):
     supplier_max_age_days: int | None = Field(None, ge=0, le=365)
     sell_when_unknown: bool | None = None
     out_of_stock: str | None = Field(None, pattern="^(mostrar|ocultar)$")
+    # agotado en el proveedor (Eurocomp): sale de la tienda (ocultar, defecto) o queda visible como agotado
+    supplier_out_of_stock: str | None = Field(None, pattern="^(mostrar|ocultar)$")
     out_of_stock_action: str | None = Field(None, pattern="^(avisarme|whatsapp|ninguna)$")
     hold_hours_manual: int | None = Field(None, ge=1, le=720)
     hold_minutes_card: int | None = Field(None, ge=5, le=1440)
@@ -142,6 +144,8 @@ def web_inventory(
             "proveedor_viejo": a.get("proveedor_viejo"),
             "proveedor_nombre": a.get("supplier_name"),
             "proveedor_hace": a.get("supplier_age"),
+            "proveedor_cambio_hace": a.get("supplier_changed_age"),
+            "oculto_en_tienda": bool(a.get("ocultar")),  # agotado que Ajustes saca de la tienda (sigue aqui)
             "proveedor_sin_vincular": a.get("supplier_unlinked_qty"),
             "max_qty": a.get("max_qty"),
             "alerta": alerta,

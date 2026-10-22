@@ -299,6 +299,10 @@ def resolve_supplier(db: Session, tenant_id: int, supplier_id: int | None, name:
     return s, True
 
 
+# lo unico que la sincronizacion semanal actualiza de lo que ya existe (only_price_stock)
+PRICE_STOCK = ("stock", "cost", "currency")
+RAW_PRICE_STOCK = ("stock", "precio", "currency_code")
+
 API_VIGENTE_DAYS = 8  # el catalogo por API se aplica cada semana (y lo vinculado cada 6 h): mas viejo ya no manda
 
 
@@ -327,10 +331,16 @@ def apply_list(
     source: str = "excel",
     source_file: str | None = None,
     user_id: int | None = None,
+    only_price_stock: bool = False,
 ) -> dict:
     """Aplica la lista (flush, sin commit): el router hace commit (confirmar) o rollback (vista previa).
-    Asi la vista previa es exactamente lo que va a pasar."""
+    Asi la vista previa es exactamente lo que va a pasar.
+
+    only_price_stock (la sincronizacion semanal de Eurocomp, pedido 21/10): de lo que YA existe solo se actualizan
+    precio (costo), moneda y existencia; nombre, descripcion, marca, modelo, categoria y la fila cruda (con las fotos)
+    quedan como estaban. Lo nuevo entra completo."""
     tid = tenant.id
+    now = datetime.now(UTC)
     fx = sc.usd_rate(db)
     existing = {
         i.code.strip().upper(): i for i in db.scalars(select(SupplierItem).where(SupplierItem.tenant_id == tid, SupplierItem.supplier_id == supplier.id))
@@ -399,6 +409,8 @@ def apply_list(
             "currency": r.currency or "USD",
             "tax_rate": r.tax_rate,
         }
+        if only_price_stock and item is not None:
+            new_vals = {k: new_vals[k] for k in PRICE_STOCK}
         prev_cost = None
         if item is None:
             base = "nuevo"
@@ -414,6 +426,11 @@ def apply_list(
                     pct = (d(r.cost) - prev_cost) / prev_cost * 100
                     if abs(pct) >= COST_JUMP_PCT:
                         warnings.append(f"costo cambió {pct:+.0f} %")
+        keep_raw = only_price_stock and item is not None
+        if item is None or {"stock", "cost"} & set(changed):
+            changed_at = now  # entro o cambio de verdad su existencia o su costo
+        else:
+            changed_at = None
         if item is None:
             item = SupplierItem(tenant_id=tid, supplier_id=supplier.id, code=r.code.strip())
             db.add(item)
@@ -422,11 +439,17 @@ def apply_list(
             item.prev_cost = prev_cost
         for k, v in new_vals.items():
             setattr(item, k, v)
+        if changed_at is not None:
+            item.changed_at = changed_at
         item.active = True
         item.source = source
         item.source_file = (source_file or "")[:200] or None
         item.list_date = list_date
-        item.raw = r.raw
+        if keep_raw:
+            # solo el precio y la existencia de la fila nueva; el resto (fotos, descripcion) se queda como estaba
+            item.raw = {**(item.raw or {}), **{k: r.raw[k] for k in RAW_PRICE_STOCK if k in (r.raw or {})}}
+        else:
+            item.raw = r.raw
         out.append(
             {
                 "row": r.row,

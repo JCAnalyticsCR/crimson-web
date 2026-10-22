@@ -126,9 +126,12 @@ def availability(db: Session, tenant, product_ids, public: bool = True) -> dict[
 
 
 def visible(db: Session, tenant, products: list[Product]) -> list[Product]:
-    """Quita del catalogo los agotados cuando Ajustes dice "ocultar" (la ficha directa sigue abriendo)."""
+    """Quita del catalogo los agotados cuando Ajustes dice "ocultar", y los agotados en el proveedor (Eurocomp) si
+    Ajustes los saca de la tienda (por defecto). La ficha directa sigue abriendo y en el panel siguen todos."""
+    from .availability import hides_any
+
     t = _tenant(db, tenant)
-    if settings_of(t).get("out_of_stock") != "ocultar" or not products:
+    if not products or not hides_any(settings_of(t)):
         return products
     av = availability(db, t, [p.id for p in products])
     return [p for p in products if not av.get(p.id, {}).get("ocultar")]
