@@ -67,6 +67,13 @@ const oppBody = (f: OppForm) => ({
   ...(f.id ? { status: f.status } : {}),
 });
 
+/** Responsable a la vista (reunion 2, item 13): iniciales en un círculo y el nombre. */
+function OwnerChip({ name, initials }: { name: string | null; initials?: string | null }) {
+  if (!name) return <span className="muted">Sin responsable</span>;
+  const fallback = name.split(" ").filter(Boolean).slice(0, 2).map((x) => x[0]).join("").toUpperCase();
+  return <span className="opp-owner" title={`Responsable: ${name}`}><i aria-hidden>{initials || fallback}</i><span>{name}</span></span>;
+}
+
 /** Días que faltan para la próxima acción (negativo = ya venció). */
 const dueIn = (s: string | null) => (s ? Math.round((new Date(s + "T12:00:00").getTime() - Date.now()) / 86400000) : null);
 
@@ -81,18 +88,22 @@ export default function Opportunities() {
   const { toast, allows } = useSession();
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
-  // ?pendiente=costos_aliados: la tarjeta del inicio abre Mis pendientes, donde están esas mismas solicitudes
-  const [view, setView] = useState<"board" | "list" | "pending">(params.get("pendiente") === "costos_aliados" ? "pending" : "board");
+  // ?pendiente=costos_aliados | seguimientos_hoy: la tarjeta del inicio abre Mis pendientes, donde están esas mismas
+  // filas; ?pendiente=sin_proxima_accion abre la lista filtrada (reunion 2, item 10). &equipo=1 / &mias=1: el alcance
+  // con que contó la tarjeta (inicio de la empresa o personal)
+  const desde = params.get("pendiente");
+  const [view, setView] = useState<"board" | "list" | "pending">(desde === "costos_aliados" || desde === "seguimientos_hoy" ? "pending" : desde === "sin_proxima_accion" ? "list" : "board");
+  const [sinAccion, setSinAccion] = useState(desde === "sin_proxima_accion");
   const [costs, setCosts] = useState<PendingCost[] | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
   const [listSt, setList] = useState<Opp[] | null>(null); // null = cargando
   const list = listSt ?? [];
   const [pendingSt, setPending] = useState<Pending[] | null>(null); // null = cargando
   const pending = pendingSt ?? [];
-  const [team, setTeam] = useState(false);
+  const [team, setTeam] = useState(params.get("equipo") === "1");
   const [meta, setMeta] = useState<Meta | null>(null);
   const [q, setQ] = useState("");
-  const [mine, setMine] = useState(false);
+  const [mine, setMine] = useState(params.get("mias") === "1");
   const [open, setOpen] = useState<Detail | null>(null);
   const [form, setForm] = useState<OppForm | null>(null);
   const [touch, setTouch] = useState(blankTouch);
@@ -120,10 +131,10 @@ export default function Opportunities() {
     // filtro por responsable: solo lo usa quien ve todo el embudo (el servidor igual limita al vendedor a lo suyo)
     const own = owner ? `owner_id=${owner}` : "";
     api<Board>(`/opportunities/board${own ? `?${own}` : ""}`).then(setBoard).catch(() => setBoard(null));
-    api<Opp[]>(`/opportunities?limit=200${mine ? "&mine=true" : ""}${own ? `&${own}` : ""}${q ? `&q=${encodeURIComponent(q)}` : ""}`).then(setList);
+    api<Opp[]>(`/opportunities?limit=200${mine ? "&mine=true" : ""}${own ? `&${own}` : ""}${sinAccion ? "&pendiente=sin_proxima_accion" : ""}${q ? `&q=${encodeURIComponent(q)}` : ""}`).then(setList);
     api<Pending[]>(`/opportunities/pending${team ? "?everyone=true" : ""}`).then(setPending).catch(() => setPending([]));
     api<PendingCost[]>("/opportunity-allies/pending").then(setCosts).catch(() => setCosts([]));
-  }, [q, mine, team, owner]);
+  }, [q, mine, team, owner, sinAccion]);
   useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); }, [load]);
   useEffect(() => {
     api<Meta>("/opportunities/meta/config").then(setMeta);
@@ -292,7 +303,7 @@ export default function Opportunities() {
         <TrashButton kind="opportunity" id={o.id} number={o.number} onDone={load} />
         <div className="opp__tags">
           <span className={`opp__kind opp__kind--${o.kind}`}>{KIND_SHORT[o.kind] || o.kind}</span>
-          {o.owner && <span className="opp__owner" title={`Responsable: ${o.owner}`}><i aria-hidden>{o.owner_initials}</i>{o.owner.split(" ")[0]}</span>}
+          {o.owner ? <span className="opp__owner" title={`Responsable: ${o.owner}`}><i aria-hidden>{o.owner_initials}</i>{o.owner.split(" ")[0]}</span> : <span className="opp__owner muted">Sin responsable</span>}
         </div>
         <div className="opp__meta"><span className="opp__parties" title={partyLine(o)}>{partyLine(o)}</span><span className="money">{fmtMoney(o.amount, o.currency)}</span></div>
         {!!o.ally_pending && <div className="opp__ally-pend">{o.ally_pending === 1 ? "1 costo de aliado pendiente" : `${o.ally_pending} costos de aliados pendientes`}</div>}
@@ -384,7 +395,7 @@ export default function Opportunities() {
                   <td style={{ fontWeight: 600 }}>{o.next_action || "—"}</td>
                   <td><span className="mono muted">{o.number}</span> · {o.title}</td>
                   <td className="muted">{o.customer || "—"}</td>
-                  <td className="muted">{o.owner || "—"}</td>
+                  <td><OwnerChip name={o.owner} initials={o.owner_initials} /></td>
                   <td className="num"><button className="btn btn--ghost btn--sm" onClick={(e) => { e.stopPropagation(); show(o.id); }}>Abrir</button></td>
                 </tr>
               ))}</tbody>
@@ -393,6 +404,12 @@ export default function Opportunities() {
         </Card>
       ) : (
         <Card flush>
+          {sinAccion && (
+            <div className="list-head opp-from-home">
+              <span>Desde el inicio: <b>oportunidades abiertas sin próxima acción</b>{listSt !== null && ` · ${list.length}`}. Registre un seguimiento con la próxima acción y su fecha.</span>
+              <button className="btn btn--ghost btn--sm" onClick={() => { setSinAccion(false); const n = new URLSearchParams(params); n.delete("pendiente"); setParams(n, { replace: true }); }}>Ver todas</button>
+            </div>
+          )}
           <div className="list-head">
             <div className="search" style={{ maxWidth: 380 }}><Icon d={I.search} size={16} /><input placeholder="Título o número…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
             {meta?.can_see_all && <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} />Solo las mías</label>}
@@ -412,7 +429,7 @@ export default function Opportunities() {
                     <td><span className="badge badge--info">{OPP_STATES[o.status] || o.status}</span></td>
                     <td className="num money">{fmtMoney(o.amount, o.currency)}</td>
                     <td style={{ fontSize: 13, color: dias !== null && dias < 0 ? "var(--bad)" : undefined }}>{o.next_action ? `${o.next_action}${o.next_action_date ? ` · ${fmtDate(o.next_action_date)}` : ""}` : "—"}</td>
-                    <td className="muted">{o.owner || "—"}</td>
+                    <td><OwnerChip name={o.owner} initials={o.owner_initials} /></td>
                     <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => show(o.id)}>Ver</button><TrashButton kind="opportunity" id={o.id} number={o.number} onDone={load} /></span></td>
                   </tr>
                 );
@@ -477,6 +494,7 @@ export default function Opportunities() {
                 <div className="eco__box"><span className="meta">Probabilidad</span><b>{open.probability}%</b></div>
                 <div className="eco__box"><span className="meta">Ponderado</span><b className="money">{fmtMoney(open.weighted, open.currency)}</b></div>
                 <div className="eco__box"><span className="meta">Estado</span><b style={{ fontSize: 15 }}>{OPP_STATES[open.status] || open.status}</b></div>
+                <div className="eco__box"><span className="meta">Responsable</span><b style={{ fontSize: 15 }}><OwnerChip name={open.owner} initials={open.owner_initials} /></b></div>
               </div>
               <div className="opp-next">
                 <span className="meta">Partes</span>

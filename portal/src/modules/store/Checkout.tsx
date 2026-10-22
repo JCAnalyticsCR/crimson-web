@@ -19,6 +19,8 @@ type Cfg = {
   free_shipping_from: string | number | null; auto_invoice: boolean;
   /* el servidor revisa el dominio del correo (MX); sin el dato (API viejo) se asume que si */
   verify_email?: boolean;
+  /* reunion 2 (item 12): vendedores activos para "Vendedor que lo atendió" (vacia = Mi Tienda no lo habilita) */
+  sellers?: { id: number; name: string }[];
 };
 /* respuesta de /email-check: formato, error de dedo (gmial.com) o dominio sin correo; ok=true si el DNS no respondio */
 type MailCheck = { email: string; ok: boolean; message: string | null; suggestion: string | null };
@@ -56,6 +58,7 @@ type Form = {
   name: string; email: string; phone: string; inv: Inv; id_number: string; company: string;
   dtype: "envio" | "retiro"; province: string; canton: string; district: string; address: string; rate: string;
   method: string; coupon: string; notes: string; terms: boolean; save: boolean; website: string;
+  seller?: string;
 };
 const digits = (s: string) => s.replace(/\D/g, "");
 const okEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim());
@@ -258,7 +261,7 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
     try {
       const { data } = await api<Placed>("/checkout", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lines, contact, delivery, shipping_method: f.rate || null, payment_method: f.method, coupon_code: coupon, notes: f.notes.trim() || null, accept_terms: f.terms, idempotency_key: keyRef.current, expected_total: String(quote.total), website: f.website || null }),
+        body: JSON.stringify({ lines, contact, delivery, shipping_method: f.rate || null, payment_method: f.method, coupon_code: coupon, notes: f.notes.trim() || null, accept_terms: f.terms, attended_by: cfg?.sellers?.some((x) => String(x.id) === f.seller) ? Number(f.seller) : null, idempotency_key: keyRef.current, expected_total: String(quote.total), website: f.website || null }),
       });
       if (!data.number) { setErr("No pudimos registrar el pedido. Escribinos por WhatsApp."); return; }
       session.del(DRAFT); // pedido hecho: el proximo checkout arranca limpio (o con "mis datos" si los guardo)
@@ -331,6 +334,14 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
               </div>
               {f.inv === "juridica" && <Field label="Razón social"><input autoComplete="organization" value={f.company} onChange={(e) => set("company", e.target.value)} /></Field>}
               {f.inv !== "consumidor" && <Field label={f.inv === "fisica" ? "Cédula física (9 dígitos)" : "Cédula jurídica (10 dígitos)"}><input inputMode="numeric" value={f.id_number} onChange={(e) => set("id_number", e.target.value)} placeholder={f.inv === "fisica" ? "1 2345 6789" : "3 101 123456"} /></Field>}
+              {!!cfg?.sellers?.length && (
+                <Field label="Vendedor que lo atendió (opcional)" hint="Si alguien de nuestro equipo le ayudó con esta compra, elíjalo aquí.">
+                  <select value={f.seller || ""} onChange={(e) => set("seller", e.target.value)}>
+                    <option value="">Nadie en particular</option>
+                    {cfg.sellers.map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}
+                  </select>
+                </Field>
+              )}
               <label className="ck-check"><input type="checkbox" checked={f.save} onChange={(e) => set("save", e.target.checked)} /><span>Guardar mis datos en este dispositivo para la próxima compra <small>(no necesitás cuenta)</small></span></label>
             </fieldset>
           )}

@@ -26,8 +26,11 @@ type Order = {
   stock_out?: string | number;
   /* la factura del pedido es del que mira (services/ownership.py); si no, se muestra el numero sin enlace */
   invoice_visible?: boolean | null;
-  /* 21/10 (24/42): vendedor del pedido web; la factura que nace del pedido queda a su nombre */
+  /* 21/10 (24/42): encargado del pedido web (lo atiende; atender no comisiona) */
   seller_id?: number | null; seller_name?: string | null; assigned_at?: string | null;
+  /* reunion 2 (item 12): "Vendedor que atendió", el vendedor del cliente y el único que comisiona; lo pone el admin
+     o lo eligió el cliente en el checkout (attended_source) */
+  attended_by_id?: number | null; attended_by_name?: string | null; attended_source?: "admin" | "cliente" | null;
   /* "Tomar" solo en pedidos por atender y sin factura (lo decide el servidor: store_orders.TAKEABLE) */
   takeable?: boolean;
   /* transportistas de Mi Tienda, tal cual (vacia = se escribe a mano); vienen en el detalle del pedido */
@@ -109,7 +112,7 @@ function WebOrders() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const take = async (o: Order) => {
     if (!data) return;
-    try { await api(`/store-orders/${o.id}/seller`, { method: "POST", json: { seller_id: data.me } }); toast(`Tomaste el pedido ${o.number}: la venta queda a tu nombre`); load(); }
+    try { await api(`/store-orders/${o.id}/seller`, { method: "POST", json: { seller_id: data.me } }); toast(`Usted quedó como encargado del pedido ${o.number}`); load(); }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); load(); }
   };
   const meta: Meta = { me: data?.me ?? 0, can_assign: !!data?.can_assign, can_take: !!data?.can_take, sellers: data?.sellers || [], carriers: data?.carriers || [] };
@@ -134,7 +137,7 @@ function WebOrders() {
           <input className="input input--search" type="search" placeholder="Buscar número, nombre, correo o teléfono" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar pedidos" />
           <select className="select" value={method} onChange={(e) => setMethod(e.target.value)} aria-label="Método de pago"><option value="">Todos los métodos</option>{Object.entries(METHODS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
           <select className="select" value={seller} onChange={(e) => setSeller(e.target.value)} aria-label="Vendedor">
-            <option value="">Todos los vendedores</option><option value="mios">Mis pedidos</option><option value="sin_asignar">Sin vendedor</option>
+            <option value="">Todos los vendedores</option><option value="mios">Mis pedidos</option><option value="sin_asignar">Sin encargado</option>
             {meta.sellers.filter((x) => x.id !== meta.me).map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}
           </select>
           <label className="muted" style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}>Desde<input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
@@ -144,7 +147,7 @@ function WebOrders() {
         {data === null ? <Loading /> : items.length === 0 ? <Empty hint={status === "atender" ? "No hay pedidos esperando acción. ¡Al día!" : "Cuando alguien compre en la tienda, el pedido aparece aquí."} /> : (
           <>
             <table className="table wo-table">
-              <thead><tr><th>Pedido</th><th>Fecha</th><th>Cliente</th><th>Entrega</th><th>Pago</th><th>Vendedor</th><th className="num">Total</th><th>Estado</th><th /></tr></thead>
+              <thead><tr><th>Pedido</th><th>Fecha</th><th>Cliente</th><th>Entrega</th><th>Pago</th><th>Encargado</th><th className="num">Total</th><th>Estado</th><th /></tr></thead>
               <tbody>{items.map((o) => (
                 <tr key={o.id}>
                   <td className="mono" style={{ fontWeight: 600 }}>{o.number}</td>
@@ -153,7 +156,8 @@ function WebOrders() {
                   <td className="muted">{o.delivery?.type === "retiro" ? "Retiro" : o.shipping_method || "—"}{o.delivery?.canton ? <div className="meta" style={{ textTransform: "none" }}>{o.delivery.canton}, {o.delivery.province}</div> : null}</td>
                   <td className="muted">{o.payment_kind ? METHODS[o.payment_kind] : o.payment_method || "—"}{o.proofs.length > 0 && <div className="meta" style={{ textTransform: "none" }}>{o.proofs.length} comprobante(s)</div>}</td>
                   <td>{o.seller_name ? <span className={o.seller_id === meta.me ? "wo-seller is-me" : "wo-seller"}>{o.seller_id === meta.me ? "Yo" : o.seller_name}</span>
-                    : meta.can_take && o.takeable ? <button className="btn btn--soft btn--sm" onClick={() => take(o)} title="La venta y la comisión quedan a tu nombre">Tomar</button> : <span className="muted">—</span>}</td>
+                    : meta.can_take && o.takeable ? <button className="btn btn--soft btn--sm" onClick={() => take(o)} title="Queda como encargado del pedido. Atender pedidos web no genera comisión.">Tomar</button> : <span className="muted">—</span>}
+                    {o.attended_by_name && <div className="meta" style={{ textTransform: "none" }} title="Vendedor que atendió al cliente: el que comisiona">Atendió: {o.attended_by_id === meta.me ? "yo" : o.attended_by_name}</div>}</td>
                   <td className="num money">{fmtMoney(o.total, o.currency)}</td>
                   <td><span className="wo-badge" data-s={o.status}>{o.status_label}</span></td>
                   <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => open(o)}>Ver</button><TrashLocked reason={LOCKED.order} /></span></td>
@@ -165,7 +169,7 @@ function WebOrders() {
                 <b>{o.number}</b><span className="wo-badge" data-s={o.status}>{o.status_label}</span>
                 <span>{o.contact.name}</span><span className="money">{fmtMoney(o.total, o.currency)}</span>
                 <span className="muted">{when(o.created_at)} · {o.payment_kind ? METHODS[o.payment_kind] : "—"}</span><span className="muted">{o.delivery?.type === "retiro" ? "Retiro" : "Envío"}</span>
-                <span className="muted">{o.seller_name ? `Vendedor: ${o.seller_id === meta.me ? "yo" : o.seller_name}` : "Sin vendedor"}</span>
+                <span className="muted">{o.seller_name ? `Encargado: ${o.seller_id === meta.me ? "yo" : o.seller_name}` : "Sin encargado"}{o.attended_by_name ? ` · Atendió: ${o.attended_by_id === meta.me ? "yo" : o.attended_by_name}` : ""}</span>
               </button>
             ))}</div>
           </>
@@ -317,7 +321,15 @@ function Detail({ o, labels, meta, onClose, onChange }: { o: Order; labels: Reco
   const assign = async (seller_id: number | null) => {
     try {
       const r = await api<Order>(`/store-orders/${o.id}/seller`, { method: "POST", json: { seller_id } });
-      toast(seller_id ? (seller_id === meta.me ? "Tomaste el pedido: la venta queda a tu nombre" : `Pedido asignado a ${r.seller_name || "el vendedor"}`) : "Pedido sin vendedor");
+      toast(seller_id ? (seller_id === meta.me ? "Usted quedó como encargado del pedido" : `${r.seller_name || "El vendedor"} quedó como encargado del pedido`) : "Pedido sin encargado");
+      onChange(r);
+    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
+  /* "Vendedor que atendió" (reunion 2, item 12): solo el admin; es el único que comisiona el pedido */
+  const attend = async (seller_id: number | null) => {
+    try {
+      const r = await api<Order>(`/store-orders/${o.id}/attended-by`, { method: "POST", json: { seller_id } });
+      toast(seller_id ? `Vendedor que atendió: ${r.attended_by_name || "asignado"}. La venta comisiona a su nombre.` : "Sin vendedor que atendió: el pedido no comisiona");
       onChange(r);
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
@@ -361,16 +373,31 @@ function Detail({ o, labels, meta, onClose, onChange }: { o: Order; labels: Reco
             {o.refund && <span>Reembolso registrado: {fmtMoney(o.refund.amount, o.currency)}</span>}
           </div>
         </div>
-        <div className="wo-box"><span className="meta">Vendedor del pedido</span>
-          {meta.can_assign ? (
-            <select className="select" value={o.seller_id ? String(o.seller_id) : ""} aria-label="Vendedor del pedido" onChange={(e) => assign(e.target.value ? Number(e.target.value) : null)}>
-              <option value="">Sin vendedor</option>
-              {o.seller_id && !meta.sellers.some((x) => x.id === o.seller_id) && <option value={String(o.seller_id)}>{o.seller_name || `Usuario ${o.seller_id}`}</option>}
-              {meta.sellers.map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}
-            </select>
-          ) : o.seller_id ? <b>{o.seller_id === meta.me ? `${o.seller_name} (yo)` : o.seller_name}</b>
-            : meta.can_take && o.takeable ? <button className="btn btn--soft btn--sm" style={{ justifySelf: "start" }} onClick={() => assign(meta.me)}>Tomar este pedido</button> : <span className="muted">Sin vendedor</span>}
-          <span className="muted" style={{ fontSize: 12 }}>{o.seller_id ? "La factura del pedido queda a su nombre y cuenta para sus comisiones." : "Sin vendedor, la venta no comisiona."}</span>
+        <div className="wo-grid">
+          <div className="wo-box"><span className="meta">Encargado del pedido</span>
+            {meta.can_assign ? (
+              <select className="select" value={o.seller_id ? String(o.seller_id) : ""} aria-label="Encargado del pedido" onChange={(e) => assign(e.target.value ? Number(e.target.value) : null)}>
+                <option value="">Sin encargado</option>
+                {o.seller_id && !meta.sellers.some((x) => x.id === o.seller_id) && <option value={String(o.seller_id)}>{o.seller_name || `Usuario ${o.seller_id}`}</option>}
+                {meta.sellers.map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}
+              </select>
+            ) : o.seller_id ? <b>{o.seller_id === meta.me ? `${o.seller_name} (yo)` : o.seller_name}</b>
+              : meta.can_take && o.takeable ? <button className="btn btn--soft btn--sm" style={{ justifySelf: "start" }} onClick={() => assign(meta.me)}>Tomar este pedido</button> : <span className="muted">Sin encargado</span>}
+            <span className="muted" style={{ fontSize: 12 }}>Quien atiende el pedido. Atender pedidos web es parte del trabajo: no genera comisión.</span>
+          </div>
+          <div className="wo-box"><span className="meta">Vendedor que atendió</span>
+            {meta.can_assign ? (
+              <select className="select" value={o.attended_by_id ? String(o.attended_by_id) : ""} aria-label="Vendedor que atendió" onChange={(e) => attend(e.target.value ? Number(e.target.value) : null)}>
+                <option value="">Nadie (no comisiona)</option>
+                {o.attended_by_id && !meta.sellers.some((x) => x.id === o.attended_by_id) && <option value={String(o.attended_by_id)}>{o.attended_by_name || `Usuario ${o.attended_by_id}`}</option>}
+                {meta.sellers.map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}
+              </select>
+            ) : o.attended_by_id ? <b>{o.attended_by_id === meta.me ? `${o.attended_by_name} (yo)` : o.attended_by_name}</b> : <span className="muted">Nadie</span>}
+            <span className="muted" style={{ fontSize: 12 }}>
+              {o.attended_source === "cliente" ? "Lo eligió el cliente al comprar. " : ""}
+              {meta.can_assign ? "Si el cliente es de un vendedor, elíjalo aquí: es el único que comisiona este pedido (siempre uno solo)." : "El vendedor del cliente: es el único que comisiona este pedido. Lo define el administrador."}
+            </span>
+          </div>
         </div>
         {o.notes && <div className="wo-box"><span className="meta">Nota del cliente</span>“{o.notes}”</div>}
         {o.cancel_reason && <div className="wo-box"><span className="meta">Motivo de cancelación</span>{o.cancel_reason}</div>}
