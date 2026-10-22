@@ -456,11 +456,12 @@ def config_get(p: Principal = Depends(require("commissions", "ver_todo"))):
 
 @router.put("/commissions/config")
 def config_put(data: ConfigIn, p: Principal = Depends(require("commissions", "configurar")), db: Session = Depends(get_db)):
-    from ..core.deps import ASSIGNABLE_ROLES
+    from ..core.deps import assignable_roles
 
     cambios = data.model_dump(exclude_unset=True, exclude_none=True)
     if "general_rule_roles" in cambios:
-        malos = [r for r in cambios["general_rule_roles"] if r not in ASSIGNABLE_ROLES]
+        validos = assignable_roles(db, p.tenant)  # tambien los roles que creo el admin (p. ej. "Vendedor senior")
+        malos = [r for r in cambios["general_rule_roles"] if r not in validos]
         if malos:
             raise HTTPException(422, f"Rol no válido para comisionar: {', '.join(malos)}")
         cambios["general_rule_roles"] = list(dict.fromkeys(cambios["general_rule_roles"]))

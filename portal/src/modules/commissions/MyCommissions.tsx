@@ -30,7 +30,7 @@ export default function MyCommissions() {
   return (
     <>
       <div className="com-cards">
-        <div className="com-card is-good"><span className="meta">Ganado este mes</span><b className="money">{fmtMoney(s.ganado.total)}</b><small>{s.ganado.en_espera ? `${s.ganado.en_espera} en cálculo · ` : ""}pendiente {fmtMoney(s.ganado.pendiente)}</small></div>
+        <div className="com-card is-good"><span className="meta">Ganado este mes</span><b className="money">{fmtMoney(s.ganado.total)}</b><small>{s.ganado.en_espera ? `${s.ganado.en_espera} en cálculo · ` : ""}{Number(s.ganado.pendiente) > 0 ? <>de eso, <b>{fmtMoney(s.ganado.pendiente)} pendiente de aprobación</b></> : "todo aprobado"}</small></div>
         <div className="com-card"><span className="meta">Pagado este mes</span><b className="money">{fmtMoney(s.pagado)}</b><small>lo que ya te depositaron</small></div>
         <div className="com-card is-warn"><span className="meta">Por cobrar</span><b className="money">{fmtMoney(s.por_cobrar.total)}</b><small>si te pagan tus {s.por_cobrar.facturas} factura{s.por_cobrar.facturas !== 1 ? "s" : ""} abierta{s.por_cobrar.facturas !== 1 ? "s" : ""}{s.por_cobrar.estimado ? " · estimado" : ""}</small></div>
         <div className="com-card"><span className="meta">En el embudo</span><b className="money">{fmtMoney(s.embudo.total)}</b><small>estimado según la probabilidad de {s.embudo.oportunidades} oportunidad{s.embudo.oportunidades !== 1 ? "es" : ""}</small></div>
@@ -49,7 +49,7 @@ export default function MyCommissions() {
           {s.reglas.length === 0 ? <p className="muted" style={{ margin: 0 }}>Todavía no tenés una regla de comisión. Pedísela a administración.</p> : (
             <ul style={{ margin: 0, paddingLeft: 18 }}>{s.reglas.map((r) => <li key={r.id} style={{ marginBottom: 4 }}>{r.summary}{r.general ? <span className="muted"> · regla de todos los vendedores</span> : null}</li>)}</ul>
           )}
-          <p className="com-note">Montos sin IVA. La comisión nace con el cobro (o con el evento de tu regla) y pasa por aprobación.</p>
+          <p className="com-note">Montos sin IVA. La comisión nace con el cobro (o con el evento de tu regla) y la ves desde ese momento, marcada «pendiente de aprobación» hasta que administración la apruebe.</p>
         </Card>
       </div>
       <Card title="Mis movimientos" flush>
@@ -63,7 +63,7 @@ export default function MyCommissions() {
                   <td>{r.description || "Comisión"}{r.base === "margen" && r.base_amount == null ? <div className="meta">Sobre la utilidad (confidencial)</div> : null}{r.hold_reason ? <div className="meta">{r.hold_reason}</div> : null}</td>
                   <td className="mono muted">{r.invoice_id ? <Link className="row-link" to={`/facturas/${r.invoice_id}`}>{r.invoice}</Link> : r.quote || r.project || "—"}</td>
                   <td className={`num money ${Number(r.amount) < 0 ? "com-neg" : ""}`} style={{ fontWeight: 700 }}>{fmtMoney(r.amount, r.currency)}</td>
-                  <td><span className={`badge badge--${ESTADO[r.status]?.tone || "muted"}`}>{ESTADO[r.status]?.label || r.status}</span></td>
+                  <td><span className={`badge badge--${ESTADO[r.status]?.tone || "muted"}`} title={r.status === "pendiente" ? "Ya la ganaste: falta que administración la apruebe" : undefined}>{r.status === "pendiente" ? "Pendiente de aprobación" : ESTADO[r.status]?.label || r.status}</span></td>
                 </tr>
               ))}</tbody>
             </table>

@@ -10,6 +10,8 @@ export type RuleForm = {
   id?: number; beneficiary: "vendedor" | "aliado"; who: string; kind: "comision" | "bono_fin"; name: string; base: "venta" | "margen";
   mode: "percent" | "fixed"; percent: string; fixed_amount: string; fixed_currency: string; trigger: string;
   deal_kind: string; solution: string; valid_from: string; valid_to: string; active: boolean; notes: string;
+  /* Reunión 21/10 (pedido 25): al guardar, aplicarla también a lo ya cobrado desde esta fecha */
+  apply?: boolean; apply_from?: string;
   whoName?: string | null; // nombre guardado: la persona puede estar desactivada y ya no salir en la lista
 };
 
@@ -20,8 +22,14 @@ export function blankRule(cfg: Config | null, beneficiary: "vendedor" | "aliado"
     mode: kind === "bono_fin" ? "fixed" : "percent", percent: "", fixed_amount: "", fixed_currency: "CRC",
     trigger: kind === "bono_fin" ? "proyecto_completado" : (beneficiary === "aliado" ? cfg?.default_trigger_aliado : cfg?.default_trigger_vendedor) || "cobro",
     deal_kind: "", solution: "", valid_from: "", valid_to: "", active: true, notes: "",
+    apply: true, apply_from: primeroDelMes(),
   };
 }
+
+/* hoy en Costa Rica (la API corta con esa fecha) y el primer día del mes */
+const hoyCR = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Costa_Rica" });
+const primeroDelMes = () => `${hoyCR().slice(0, 8)}01`;
+const haceUnAnio = () => { const d = new Date(`${hoyCR()}T12:00:00`); d.setFullYear(d.getFullYear() - 1); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); };
 
 export function ruleToForm(r: Rule): RuleForm {
   const fixed = r.fixed_amount != null && Number(r.fixed_amount) > 0;
@@ -30,6 +38,7 @@ export function ruleToForm(r: Rule): RuleForm {
     name: r.name, base: r.base as "venta" | "margen", mode: fixed ? "fixed" : "percent", percent: r.percent ?? "", fixed_amount: r.fixed_amount ?? "",
     fixed_currency: r.fixed_currency || "CRC", trigger: r.trigger, deal_kind: r.deal_kind || "", solution: r.solution || "",
     valid_from: r.valid_from || "", valid_to: r.valid_to || "", active: r.active, notes: r.notes || "",
+    apply: false, apply_from: primeroDelMes(),
     whoName: r.beneficiary === "aliado" ? r.ally : r.user,
   };
 }
@@ -64,9 +73,15 @@ export default function RuleModal({ initial, ben, defaultMargin, onClose, onSave
       trigger: f.kind === "bono_fin" ? "proyecto_completado" : f.trigger,
       deal_kind: f.deal_kind || null, solution: f.solution || null,
       valid_from: f.valid_from || null, valid_to: f.valid_to || null, active: f.active, notes: f.notes || null,
+      apply_from: f.apply && f.active && f.apply_from ? f.apply_from : null,
     };
     setBusy(true);
-    try { await api(f.id ? `/commissions/rules/${f.id}` : "/commissions/rules", { method: f.id ? "PUT" : "POST", json: body }); toast("Regla guardada"); onSaved(); }
+    try {
+      const r = await api<{ id: number; backfill?: { creados: number; por_beneficiario: { name: string; count: number; total_crc: string }[] } }>(f.id ? `/commissions/rules/${f.id}` : "/commissions/rules", { method: f.id ? "PUT" : "POST", json: body });
+      const b = r.backfill;
+      toast(!b ? "Regla guardada" : b.creados ? `Regla guardada · ${b.creados} comisión(es) de ventas anteriores por ${fmtMoney(b.por_beneficiario.reduce((s, x) => s + Number(x.total_crc), 0))}, pendientes de aprobación en la Bandeja` : "Regla guardada · no había ventas anteriores que le correspondan");
+      onSaved();
+    }
     catch (e) { toast(errText(e), "bad"); } finally { setBusy(false); }
   };
 
@@ -119,7 +134,15 @@ export default function RuleModal({ initial, ben, defaultMargin, onClose, onSave
       {ejemplo && <div className="com-example">{ejemplo}</div>}
       <label className="com-check"><input type="checkbox" checked={f.active} onChange={(e) => set({ active: e.target.checked })} />Activa</label>
       <Field label="Notas"><input className="input" maxLength={2000} value={f.notes} onChange={(e) => set({ notes: e.target.value })} /></Field>
-      <p className="com-note">No es retroactiva: lo ya devengado guarda la regla con que nació. Para ventas anteriores usá «Aplicar reglas a fechas anteriores» en la Bandeja.</p>
+      <div className="com-example" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <label className="com-check" style={{ margin: 0 }}><input type="checkbox" checked={!!f.apply} disabled={!f.active} onChange={(e) => set({ apply: e.target.checked })} />Aplicarla también a ventas anteriores (lo ya cobrado, aceptado o completado)</label>
+        {f.apply && f.active && (
+          <Field label="Desde" hint="Máximo un año hacia atrás. Lo que ya tenía comisión no se toca; lo nuevo queda pendiente de aprobación y el vendedor ya lo ve.">
+            <input className="input" type="date" value={f.apply_from || ""} min={haceUnAnio()} max={hoyCR()} onChange={(e) => set({ apply_from: e.target.value })} style={{ maxWidth: 200 }} />
+          </Field>
+        )}
+      </div>
+      <p className="com-note">Cambiar una regla no recalcula lo ya devengado: guarda la regla con que nació. También podés usar «Aplicar reglas a fechas anteriores» en la Bandeja.</p>
     </Modal>
   );
 }

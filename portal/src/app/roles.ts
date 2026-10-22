@@ -110,11 +110,36 @@ export const isAllyRole = (code: string | undefined) => code === "aliado" || cod
 /** Cliente o aliado: tienen su propio portal y nunca el panel interno. */
 export const isExternalRole = (code: string | undefined) => isClientRole(code) || isAllyRole(code);
 
+/* Ajustes → Usuarios → Roles (reunión 21/10, pedido 20): roles que creó el administrador (con su nombre) y roles cuyos
+   permisos cambió. La API los manda (/auth/me, /auth/roles, /settings/users) y aquí se registran. Un rol cambiado deja de
+   usar su `menu` fijo: el menú sale solo de los permisos (si no, un permiso que el admin le sumó no se vería). */
+const CUSTOM_LABELS: Record<string, string> = {};
+const CUSTOMIZED = new Set<string>();
+
+export function registerRoles(info: { labels?: Record<string, string> | null; customized?: string[] | null; replace?: boolean }) {
+  if (info.labels) Object.assign(CUSTOM_LABELS, info.labels);
+  if (info.customized) {
+    if (info.replace) CUSTOMIZED.clear();
+    info.customized.forEach((c) => CUSTOMIZED.add(c));
+  }
+}
+
+/** Códigos de los roles creados por el administrador que ya se conocen (en el orden en que llegaron). */
+export const customRoleCodes = () => Object.keys(CUSTOM_LABELS).filter((c) => !ROLES[c]);
+
 /** La sección (o una ruta dentro de ella, p. ej. /cotizaciones/nueva) está en el menú de ese rol. Sin lista: sí. */
 export const inRoleMenu = (code: string | undefined, to: string) => {
+  if (CUSTOMIZED.has(code || "")) return true;
   const menu = ROLES[code || ""]?.menu;
   if (!menu) return true;
   return menu.some((m) => (m === "/" ? to === "/" : to === m || to.startsWith(`${m}/`)));
 };
 
-export const roleMeta = (code: string | undefined): RoleMeta => ROLES[code || ""] ?? { label: code || "—", tone: "#6b6570", glyph: "?", summary: "", can: [], cannot: [] };
+export const roleMeta = (code: string | undefined): RoleMeta => {
+  const base = ROLES[code || ""];
+  if (base) return base;
+  const label = CUSTOM_LABELS[code || ""];
+  return label
+    ? { label, tone: "#7c5c3b", glyph: label.charAt(0).toUpperCase(), summary: "Rol creado por el administrador: puede lo que se marcó en Ajustes → Usuarios → Roles.", can: [], cannot: [] }
+    : { label: code || "—", tone: "#6b6570", glyph: "?", summary: "", can: [], cannot: [] };
+};

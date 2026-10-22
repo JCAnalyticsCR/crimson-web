@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ALLY_PREVIEW_KEY, TWOFA_EVENT, api, auth, bootstrap, readAllyPreview, type AllyPreview, type Me } from "../lib/api";
-import { canAny, inRoleMenu, type Perms } from "./roles";
+import { canAny, inRoleMenu, registerRoles, type Perms } from "./roles";
 
 type Session = {
   me: Me | null; loading: boolean;
@@ -35,7 +35,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [allyPv, setAllyPv] = useState<AllyPreview | null>(() => readAllyPreview());
 
   const reload = useCallback(async () => {
-    try { setMe(await api<Me>("/auth/me")); } catch { setMe(null); }
+    try {
+      const m = await api<Me>("/auth/me");
+      // rol creado por el admin (su nombre) o con permisos cambiados (el menú sale de los permisos)
+      registerRoles({ labels: m.role_label ? { [m.role]: m.role_label } : null, customized: m.role_customized ? [m.role] : [] });
+      setMe(m);
+    } catch { setMe(null); }
   }, []);
 
   useEffect(() => {
@@ -53,7 +58,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // con la gracia del 2FA vencida /auth/roles da 403: se pide cuando termina la pantalla forzada (blocked pasa a false)
   const matrixReady = me?.role === "admin" && !me?.twofa?.blocked;
   const reloadMatrix = useCallback(() => {
-    if (matrixReady) api<{ matrix: Record<string, Perms> }>("/auth/roles").then((r) => setMatrix(r.matrix)).catch(() => {});
+    if (matrixReady) api<{ matrix: Record<string, Perms>; labels?: Record<string, string>; customized?: string[] }>("/auth/roles").then((r) => { registerRoles({ labels: r.labels, customized: r.customized, replace: true }); setMatrix(r.matrix); }).catch(() => {});
   }, [matrixReady]);
   useEffect(() => { reloadMatrix(); }, [reloadMatrix]);
 
