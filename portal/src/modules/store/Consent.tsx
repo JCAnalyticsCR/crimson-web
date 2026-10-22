@@ -1,9 +1,13 @@
 /* Medicion (Google Analytics 4) SOLO con consentimiento explicito. Si Mi Tienda -> Vitrina no tiene un id de GA4,
    no aparece nada y no se descarga nada. Con id: un aviso pequeno; hasta que la persona acepta, cero scripts de
-   terceros. La decision queda en este navegador. */
+   terceros. La decision queda en este navegador.
+   El enlace de seguimiento (?pedido=<token firmado>) nunca llega a GA4: cada hit lleva page_location, page_referrer y
+   page_path limpios (cleanUrl), y el "set" global evita que gtag use document.location.href. En la propiedad GA4,
+   "Cambios de pagina segun el historial" (medicion mejorada) debe quedar apagado: el page_view lo manda esta pieza. */
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { safeStore, usePath, useStore } from "./storeKit";
+import { cleanPage, cleanPath } from "./analytics";
 
 type GtagWin = Window & { dataLayer?: unknown[]; gtag?: (...a: unknown[]) => void };
 const KEY = "crimson-shop:medicion";
@@ -14,7 +18,8 @@ function loadGa(id: string) {
   w.dataLayer = w.dataLayer || [];
   w.gtag = function gtag() { w.dataLayer!.push(arguments); }; // eslint-disable-line prefer-rest-params
   w.gtag("js", new Date());
-  w.gtag("config", id, { anonymize_ip: true, send_page_view: false });
+  w.gtag("set", cleanPage());
+  w.gtag("config", id, { anonymize_ip: true, send_page_view: false, ...cleanPage() });
   const s = document.createElement("script");
   s.async = true;
   s.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(id)}`;
@@ -31,7 +36,10 @@ export default function Consent() {
   useEffect(() => { if (ga && choice === "si") loadGa(ga); }, [ga, choice]);
   useEffect(() => {
     const w = window as GtagWin;
-    if (ga && choice === "si" && w.gtag) w.gtag("event", "page_view", { page_path: loc.pathname + loc.search, page_title: document.title });
+    if (!(ga && choice === "si" && w.gtag)) return;
+    const page = cleanPage();
+    w.gtag("set", page);
+    w.gtag("event", "page_view", { ...page, page_path: cleanPath(loc.pathname, loc.search), page_title: document.title });
   }, [loc.pathname, loc.search, ga, choice]);
   if (!ga || choice) return null;
   const decide = (v: "si" | "no") => { safeStore.set(KEY, v); setChoice(v); };

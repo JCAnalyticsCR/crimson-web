@@ -316,11 +316,42 @@ def track_token(o: Order) -> str:
     return sign_purpose_token("pedido", {"o": o.id, "t": o.tenant_id}, 400)
 
 
+TRACK_LEEWAY = 300  # s de tolerancia de reloj entre contenedores (el que firma el enlace y el que lo lee)
+_JWT_RE = re.compile(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
+_SIG_LEN = {"HS256": 43, "HS384": 64, "HS512": 86}  # largo base64url (sin relleno) de la firma HMAC
+
+
+def track_token_candidates(raw: str) -> list[str]:
+    """Reunion 21/10 (item 39): "No encontramos ese pedido" con un enlace bueno. El enlace llega por correo, WhatsApp o
+    copiado del panel y a veces trae basura pegada: una letra de mas al final (pegar + tecla), un punto o parentesis
+    de la oracion, espacios o saltos de linea del cliente de correo, %-codificado. Se limpia y, si la firma quedo mas
+    larga de lo que mide una firma HMAC, se prueba recortada. La firma SIGUE teniendo que validar: esto no abre nada
+    que el enlace original no abriera."""
+    from urllib.parse import unquote
+
+    s = re.sub(r"\s+", "", unquote(raw or ""))
+    m = _JWT_RE.search(s)
+    if not m:
+        return []
+    tok = m.group(0)
+    out = [tok]
+    n = _SIG_LEN.get(settings.jwt_algorithm)
+    head, body, sig = tok.split(".")
+    if n and len(sig) > n:
+        out.append(f"{head}.{body}.{sig[:n]}")
+    return out
+
+
 def read_track_token(db: Session, t: Tenant, token: str) -> Order:
-    try:
-        p = read_purpose_token("pedido", token)
-    except jwt.InvalidTokenError:
-        raise HTTPException(404, "Pedido no encontrado") from None
+    p = None
+    for cand in track_token_candidates(token):
+        try:
+            p = read_purpose_token("pedido", cand, leeway=TRACK_LEEWAY)
+            break
+        except jwt.InvalidTokenError:
+            continue
+    if p is None:
+        raise HTTPException(404, "Pedido no encontrado")
     o = db.get(Order, int(p.get("o") or 0))
     if not o or o.tenant_id != t.id or int(p.get("t") or 0) != t.id:
         raise HTTPException(404, "Pedido no encontrado")
@@ -378,18 +409,18 @@ def order_public(db: Session, t: Tenant, o: Order) -> dict:
         "payment_kind": o.payment_kind,
         "instructions": pay_instructions(t, o) if o.status in ("nuevo", "en_revision") else None,
         "needs_proof": o.payment_kind in NEEDS_PROOF and o.status == "nuevo",
-        "proofs": [{"filename": p.get("filename"), "at": p.get("at")} for p in (o.proofs or [])],
+        # el comprobante que subio el cliente lo puede volver a ver con su enlace (por posicion, sin ids internos)
+        "proofs": [
+            {"n": i, "filename": p.get("filename"), "at": p.get("at"), "pdf": p.get("content_type") == "application/pdf", "open": proof_viewable(o, p)}
+            for i, p in enumerate(o.proofs or [])
+        ],
         "card": {"pending": card_pending, "simulated": card_pending and not onvo_secret(db, t) and simulation_allowed()}
         if o.payment_kind == "tarjeta"
         else None,
         "tracking_number": o.tracking_number,
         "carrier": o.carrier,
         "cancel_reason": o.cancel_reason if o.status == "cancelado" else None,
-        "history": [
-            {"status": h.get("status"), "label": STATUS_LABEL.get(h.get("status"), h.get("status")), "at": h.get("at")}
-            for h in (o.history or [])
-            if h.get("kind") != "nota"
-        ],
+        "history": _public_history(o),
         "whatsapp": cfg.get("whatsapp") or "",
         "store_name": cfg.get("name"),
     }
@@ -510,8 +541,18 @@ def email_status(db: Session, o: Order) -> list[dict]:
 
 
 # ---------- estados ----------
-def _hist(o: Order, status: str, by, note: str | None = None) -> None:
-    o.history = [*(o.history or []), {"status": status, "at": datetime.now(UTC).isoformat(), "by": by, **({"note": note} if note else {})}]
+def _hist(o: Order, status: str, by, note: str | None = None, client_note: str | None = None) -> None:
+    """`note` = nota interna (solo el equipo). `client_note` = nota que el cliente ve en su seguimiento."""
+    o.history = [
+        *(o.history or []),
+        {
+            "status": status,
+            "at": datetime.now(UTC).isoformat(),
+            "by": by,
+            **({"note": note} if note else {}),
+            **({"client_note": client_note} if client_note else {}),
+        },
+    ]
 
 
 def _note(o: Order, by, note: str, key: str | None = None) -> None:
@@ -521,6 +562,56 @@ def _note(o: Order, by, note: str, key: str | None = None) -> None:
         *(o.history or []),
         {"status": o.status, "at": datetime.now(UTC).isoformat(), "by": by, "note": note, "kind": "nota", **({"key": key} if key else {})},
     ]
+
+
+def add_client_note(o: Order, by, text: str) -> None:
+    """Nota para el cliente sin cambio de estado (sale en el historial de su pagina de seguimiento)."""
+    o.history = [*(o.history or []), {"status": o.status, "at": datetime.now(UTC).isoformat(), "by": by, "client_note": text, "kind": "nota"}]
+
+
+def public_note(h: dict) -> str | None:
+    """Lo que el cliente ve de una entrada del historial: solo `client_note`. Las notas internas (y las del sistema:
+    factura creada, ONVO, inventario) nunca salen. El motivo de una cancelacion sin `client_note` (pedidos viejos o
+    "Vencio sin pago") lo pone order_public desde `o.cancel_reason`, que ya era publico."""
+    return h.get("client_note") or None
+
+
+def _public_history(o: Order) -> list[dict]:
+    """Cambios de estado + notas que la empresa marco "para el cliente" (las internas nunca salen)."""
+    rows = [h for h in (o.history or []) if h.get("kind") != "nota" or h.get("client_note")]
+    out = [
+        {
+            "status": h.get("status"),
+            "label": STATUS_LABEL.get(h.get("status"), h.get("status")),
+            "at": h.get("at"),
+            "note": public_note(h),
+            **({"kind": "nota"} if h.get("kind") == "nota" else {}),
+        }
+        for h in rows
+    ]
+    if o.status == "cancelado" and o.cancel_reason:
+        last = next((x for x in reversed(out) if x["status"] == "cancelado" and x.get("kind") != "nota"), None)
+        if last and not last["note"]:
+            last["note"] = o.cancel_reason
+    return out
+
+
+PROOF_VIEW_DAYS = 30  # el cliente reabre su comprobante (item 34) mientras el pedido siga abierto y por 30 dias
+PROOF_VIEW_CLOSED = ("entregado", "cancelado", "reembolsado")
+
+
+def proof_viewable(o: Order, p: dict) -> bool:
+    """El comprobante (cuenta, telefono SINPE, titular) no queda colgado del enlace de 400 dias: solo mientras el
+    pedido siga abierto y dentro de PROOF_VIEW_DAYS desde que se subio."""
+    if o.status in PROOF_VIEW_CLOSED:
+        return False
+    try:
+        at = datetime.fromisoformat(p.get("at") or "")
+    except ValueError:
+        return False
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=UTC)
+    return datetime.now(UTC) - at <= timedelta(days=PROOF_VIEW_DAYS)
 
 
 def has_note(o: Order, key: str) -> bool:
@@ -553,8 +644,12 @@ def transition(
     carrier: str | None = None,
     refund_amount: Decimal | None = None,
     notify: bool = True,
+    client_note: str | None = None,
 ) -> EmailOutbox | None:
-    """Unico camino para cambiar el estado de un pedido de la tienda. Devuelve el correo al cliente (o None)."""
+    """Unico camino para cambiar el estado de un pedido de la tienda. Devuelve el correo al cliente (o None).
+    `note` es interna; `client_note` sale en el seguimiento del cliente. Aqui nunca se promueve `note` a publica: quien
+    quiera que el cliente vea un texto lo pasa en `client_note` (el panel lo hace con el motivo de cancelar y lo que
+    fallo en un comprobante, que el portal rotula "lo ve el cliente")."""
     old = o.status
     if new == old:
         raise HTTPException(409, "El pedido ya está en ese estado")
@@ -581,7 +676,8 @@ def transition(
     if carrier is not None:
         o.carrier = carrier.strip()[:80] or None
     _inventory(db, o, old, new, by if isinstance(by, int) else None)
-    _hist(o, new, by, note)
+    client_note = (client_note or "").strip()[:500] or None
+    _hist(o, new, by, note, client_note)
     if new == "pagado":
         auto_invoice(db, t, o)
     from ..routers.events import on_order_status
@@ -925,14 +1021,26 @@ def save_proof(db: Session, t: Tenant, o: Order, data: bytes, filename: str | No
         raise HTTPException(409, "Ya hay varios comprobantes para este pedido. Escribinos por WhatsApp.")
     digest = hashlib.sha256(data).hexdigest()
     m = db.scalar(select(Media).where(Media.tenant_id == t.id, Media.sha256 == digest, Media.visibility == "private", Media.module == "sales"))
+    # el nombre que subio ESTE cliente: la multimedia se deduplica por sha256 en toda la empresa y su nombre puede
+    # ser el que puso otro cliente con el mismo archivo
+    name = "".join(ch if (ch.isascii() and ch.isalnum()) or ch in "._- " else "_" for ch in (filename or "comprobante"))[:120] or "comprobante"
     if not m:
-        name = "".join(ch if (ch.isascii() and ch.isalnum()) or ch in "._- " else "_" for ch in (filename or "comprobante"))[:120] or "comprobante"
-        m = Media(tenant_id=t.id, key=secrets.token_urlsafe(18), filename=name, content_type=kind, size=len(data), sha256=digest, data=data, visibility="private", module="sales")
+        m = Media(
+            tenant_id=t.id,
+            key=secrets.token_urlsafe(18),
+            filename=name,
+            content_type=kind,
+            size=len(data),
+            sha256=digest,
+            data=data,
+            visibility="private",
+            module="sales",
+        )
         db.add(m)
         db.flush()
     if any(p.get("media_id") == m.id for p in (o.proofs or [])):
         raise HTTPException(409, "Ese comprobante ya estaba subido")
-    o.proofs = [*(o.proofs or []), {"media_id": m.id, "filename": m.filename, "size": m.size, "content_type": kind, "at": datetime.now(UTC).isoformat()}]
+    o.proofs = [*(o.proofs or []), {"media_id": m.id, "filename": name, "size": m.size, "content_type": kind, "at": datetime.now(UTC).isoformat()}]
     return m
 
 

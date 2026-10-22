@@ -10,7 +10,8 @@ import { TrashLocked } from "../../ui/TrashButton";
 import { LOCKED } from "../../ui/trash";
 import "./orders.css";
 
-type Hist = { status: string; at: string; by: number | string | null; note?: string };
+/* note = interna (solo el equipo); client_note = la ve el cliente en su pagina de seguimiento (reunion 21/10, item 36) */
+type Hist = { status: string; at: string; by: number | string | null; note?: string; client_note?: string; kind?: string };
 type Proof = { media_id: number; filename: string; size: number; content_type: string; at: string };
 type Mail = { to: string; subject: string; status: string; error: string | null; at: string };
 type Order = {
@@ -134,6 +135,9 @@ function Detail({ o, labels, onClose, onChange }: { o: Order; labels: Record<str
   const { toast, allows } = useSession();
   const [act, setAct] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [clientNote, setClientNote] = useState("");
+  const [freeNote, setFreeNote] = useState("");
+  const [freeClient, setFreeClient] = useState(false);
   const [guide, setGuide] = useState(o.tracking_number || "");
   const [carrier, setCarrier] = useState(o.carrier || "Correos de Costa Rica");
   const [ref, setRef] = useState("");
@@ -168,11 +172,11 @@ function Detail({ o, labels, onClose, onChange }: { o: Order; labels: Record<str
     try {
       const r = await api<Order>(`/store-orders/${o.id}/status`, {
         method: "POST",
-        json: { status: act, note: note.trim() || null, notify, ...(act === "enviado" ? { tracking_number: guide, carrier } : {}), ...(act === "pagado" && ref ? { payment_ref: ref } : {}), ...(act === "reembolsado" ? { refund_amount: refund.trim() || null, ...(canOnvoRefund ? { refund_via_onvo: refundViaOnvo } : {}) } : {}), ...(needRestock ? { restock: restock as boolean } : {}) },
+        json: { status: act, note: note.trim() || null, ...(!needNote && clientNote.trim() ? { client_note: clientNote.trim() } : {}), notify, ...(act === "enviado" ? { tracking_number: guide, carrier } : {}), ...(act === "pagado" && ref ? { payment_ref: ref } : {}), ...(act === "reembolsado" ? { refund_amount: refund.trim() || null, ...(canOnvoRefund ? { refund_via_onvo: refundViaOnvo } : {}) } : {}), ...(needRestock ? { restock: restock as boolean } : {}) },
       });
       const m = r.email_result;
       toast(`${labels[act] || act}${m ? ` · correo al cliente ${MAIL[m.status] || m.status}` : notify ? " · sin correo del cliente" : ""}`, m && m.status !== "enviado" ? "bad" : undefined);
-      setAct(null); setNote(""); onChange(r);
+      setAct(null); setNote(""); setClientNote(""); onChange(r);
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } finally { setBusy(false); }
   };
   const invoice = async (doc_type: "TE" | "FE") => {
@@ -186,6 +190,16 @@ function Detail({ o, labels, onClose, onChange }: { o: Order; labels: Record<str
     try { const r = await api<{ status: string }>(`/store-orders/${o.id}/resend`, { method: "POST" }); toast(`Correo ${MAIL[r.status] || r.status}`, r.status !== "enviado" ? "bad" : undefined); onChange(await api<Order>(`/store-orders/${o.id}`)); }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
+  const addNote = async () => {
+    if (busy || !freeNote.trim()) return; // Enter dos veces antes de la respuesta no duplica la nota
+    setBusy(true);
+    try {
+      const r = await api<Order>(`/store-orders/${o.id}/note`, { method: "POST", json: { note: freeNote.trim(), client: freeClient } });
+      toast(freeClient ? "Nota agregada: el cliente la ve en su seguimiento" : "Nota interna agregada");
+      // la casilla vuelve a desmarcarse: cada nota para el cliente se marca a proposito (la siguiente no se filtra)
+      setFreeNote(""); setFreeClient(false); onChange(r);
+    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } finally { setBusy(false); }
+  };
   const copyLink = async () => { if (!o.track_url) return; try { await navigator.clipboard.writeText(o.track_url); toast("Enlace de seguimiento copiado"); } catch { toast("No se pudo copiar", "bad"); } };
   const waUrl = c.phone ? `https://wa.me/${(c.phone.replace(/\D/g, "").length === 8 ? "506" : "") + c.phone.replace(/\D/g, "")}?text=${encodeURIComponent(`Hola ${c.name || ""}, le escribimos por su pedido ${o.number}.${o.track_url ? ` Estado: ${o.track_url}` : ""}`)}` : null;
 
@@ -193,7 +207,7 @@ function Detail({ o, labels, onClose, onChange }: { o: Order; labels: Record<str
     <Modal title={<>Pedido {o.number} <span className="wo-badge" data-s={o.status} style={{ verticalAlign: "middle", marginLeft: 6 }}>{o.status_label}</span></>} onClose={onClose} wide foot={
       <div className="wo-foot">
         <button className="btn btn--ghost btn--sm" onClick={() => openFile(`/store-orders/${o.id}/print`).catch((e) => toast(e.message, "bad"))}><Icon d={I.invoice} />Imprimir</button>
-        {o.track_url && <button className="btn btn--ghost btn--sm" onClick={copyLink}><Icon d={I.link} />Enlace del cliente</button>}
+        {o.track_url && <button className="btn btn--ghost btn--sm" onClick={copyLink}><Icon d={I.link} />Enlace de seguimiento</button>}
         {waUrl && <a className="btn btn--ghost btn--sm" href={waUrl} target="_blank" rel="noopener noreferrer"><Icon d={I.whatsapp} />WhatsApp</a>}
         {c.email && <button className="btn btn--ghost btn--sm" onClick={resend}><Icon d={I.refresh} />Reenviar correo</button>}
         {o.invoice_id ? (o.invoice_visible === false
@@ -239,7 +253,12 @@ function Detail({ o, labels, onClose, onChange }: { o: Order; labels: Record<str
                   {act === "pagado" && <Field label="Referencia del pago (opcional)"><input className="input" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="N.º de comprobante SINPE / transferencia" /></Field>}
                   {act === "enviado" && <><Field label="Número de guía (opcional)"><input className="input input--mono" style={{ textAlign: "left" }} value={guide} onChange={(e) => setGuide(e.target.value)} /></Field><Field label="Transportista"><input className="input" value={carrier} onChange={(e) => setCarrier(e.target.value)} /></Field></>}
                   {act === "reembolsado" && <><Field label={`Monto (${o.currency})`} hint={canOnvoRefund && refundViaOnvo ? "Monto a devolver por ONVO (vacío = total)." : "Solo registro: el dinero se devuelve por el banco o por ONVO."}><input className="input input--mono" value={refund} onChange={(e) => setRefund(e.target.value)} /></Field>{canOnvoRefund && <label style={{ fontSize: 12.5, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={refundViaOnvo} onChange={(e) => setRefundViaOnvo(e.target.checked)} />Devolver el dinero por ONVO a la tarjeta del cliente</label>}</>}
-                  <Field label={needNote ? (act === "cancelado" ? "Motivo (lo ve el cliente)" : "Qué falló (lo ve el cliente)") : "Nota (opcional)"}><input className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} /></Field>
+                  {needNote
+                    ? <Field label={act === "cancelado" ? "Motivo (lo ve el cliente)" : "Qué falló (lo ve el cliente)"}><input className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} /></Field>
+                    : <>
+                      <Field label="Nota para el cliente (opcional)" hint="Sale en su página de seguimiento. Ej.: presentar el comprobante con el número de pedido."><input className="input" value={clientNote} onChange={(e) => setClientNote(e.target.value)} maxLength={500} /></Field>
+                      <Field label="Nota interna (opcional)" hint="Solo la ve el equipo."><input className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} /></Field>
+                    </>}
                 </div>
                 {needRestock && (
                   <div className="wo-act__row" style={{ flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
@@ -271,7 +290,19 @@ function Detail({ o, labels, onClose, onChange }: { o: Order; labels: Record<str
 
         <div className="grid-2">
           <div><div className="meta" style={{ marginBottom: 6 }}>Historial</div>
-            <ul className="wo-hist">{[...o.history].reverse().map((h, i) => <li key={i}><time>{when(h.at)}</time><span><b>{labels[h.status] || h.status}</b>{typeof h.by === "string" ? ` · ${h.by}` : ""}{h.note ? ` — ${h.note}` : ""}</span></li>)}</ul>
+            <ul className="wo-hist">{[...o.history].reverse().map((h, i) => (
+              <li key={i}><time>{when(h.at)}</time><span>
+                <b>{h.kind === "nota" ? (h.client_note ? "Nota al cliente" : "Nota") : labels[h.status] || h.status}</b>{typeof h.by === "string" ? ` · ${h.by}` : ""}{h.note && h.note !== h.client_note ? ` — ${h.note}` : ""}
+                {h.client_note && <span className="wo-cnote" title="La ve el cliente en su página de seguimiento">Al cliente: «{h.client_note}»</span>}
+              </span></li>
+            ))}</ul>
+            {o.channel === "tienda" && (
+              <div className="wo-note">
+                <input className="input" value={freeNote} onChange={(e) => setFreeNote(e.target.value)} maxLength={500} placeholder="Agregar una nota…" aria-label="Nota del pedido" onKeyDown={(e) => { if (e.key === "Enter") addNote(); }} />
+                <label style={{ fontSize: 12.5, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={freeClient} onChange={(e) => setFreeClient(e.target.checked)} />La ve el cliente</label>
+                <button className="btn btn--soft btn--sm" onClick={addNote} disabled={busy || !freeNote.trim()}>Agregar</button>
+              </div>
+            )}
           </div>
           <div><div className="meta" style={{ marginBottom: 6 }}>Correos al cliente y al equipo</div>
             {(o.emails?.length ?? 0) === 0 ? <span className="muted" style={{ fontSize: 12.5 }}>Sin correos.</span> : o.emails!.map((m, i) => <div key={i} className="wo-mail" data-s={m.status}><b>{MAIL[m.status] || m.status}</b><span className="muted">{m.subject} → {m.to}</span></div>)}
