@@ -218,4 +218,4 @@ class StoreSnapshot(Base):
     version: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     built_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     gz: Mapped[bytes | None] = mapped_column(deferred=True)
-    n_products: Mapped[int] = mapped_column(Integer, default=0)
+    n_products: Mapped[int] = mapped_column(Integer, default=0, server_default="0")

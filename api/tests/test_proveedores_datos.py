@@ -74,7 +74,8 @@ def test_excel_no_inactiva_ni_pisa_items_api_vigentes(client, auth, db_session):
 
 def test_refresco_de_existencias_deja_el_error_visible(client, auth, db_session, eurocomp, monkeypatch):  # noqa: F811
     tid = auth["tenant"]["id"]
-    prod = Product(tenant_id=tid, code="HIK-1047", name="Cámara 4MP ColorVu", price=Decimal("45000"), supplier_sku="SG2104")
+    # publicado: el refresco de cada 6 h solo consulta lo que se ve en la tienda o esta en documentos abiertos
+    prod = Product(tenant_id=tid, code="HIK-1047", name="Cámara 4MP ColorVu", price=Decimal("45000"), supplier_sku="SG2104", show_on_web=True)
     db_session.add(prod)
     db_session.commit()
     ss.sync_all(db_session)
@@ -83,7 +84,7 @@ def test_refresco_de_existencias_deja_el_error_visible(client, auth, db_session,
         raise SirettError(99, "Eurocomp no respondió")
 
     monkeypatch.setattr(SirettClient, "items_list", falla)
-    assert ss.refresh_linked(db_session) == {"error": "Eurocomp no respondió", "code": 99}
+    assert ss.refresh_linked(db_session)[tid] == {"error": "Eurocomp no respondió", "code": 99}
     sup = next(x for x in client.get("/supplier-catalog/suppliers").json() if x["name"].lower().startswith("eurocomp"))
     st = sup["api"]
     assert st["status"] == "error" and "refresco de existencias falló" in st["label"] and st["last_stock_error"] == "Eurocomp no respondió"

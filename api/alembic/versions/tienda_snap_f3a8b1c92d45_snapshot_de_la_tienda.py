@@ -28,7 +28,7 @@ def upgrade() -> None:
         sa.Column("version", sa.String(64), nullable=False, server_default=""),
         sa.Column("built_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("gz", sa.LargeBinary(), nullable=True),
-        sa.Column("n_products", sa.Integer(), nullable=True, server_default="0"),
+        sa.Column("n_products", sa.Integer(), nullable=False, server_default="0"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenant.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("tenant_id"),
     )
