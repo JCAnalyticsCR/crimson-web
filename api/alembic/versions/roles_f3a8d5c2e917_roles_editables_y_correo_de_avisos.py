@@ -9,7 +9,7 @@
   entrada). Nulo para todos los que ya existen: nada cambia con el despliegue.
 
 Revision ID: f3a8d5c2e917
-Revises: e4c9b1f7a2d6
+Revises: a8d3f5c2e9b1
 Create Date: 2026-10-21 18:00:00
 """
 
@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "f3a8d5c2e917"
-down_revision: str | None = "e4c9b1f7a2d6"
+down_revision: str | None = "a8d3f5c2e9b1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
