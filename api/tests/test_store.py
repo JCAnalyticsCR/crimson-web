@@ -65,7 +65,7 @@ def test_store_checkout_coupon_and_order_to_ticket(client, auth):
         "coupon_code": "BIENVENIDA",
     }
     q = client.post("/public/store/crimson/quote", json=body).json()
-    assert Decimal(q["shipping"]) == Decimal(3500) and Decimal(q["discount_total"]) > 0
+    assert Decimal(q["shipping"]) == Decimal(4000) and Decimal(q["discount_total"]) > 0
     assert Decimal(q["total"]) == Decimal(q["subtotal"]) - Decimal(q["discount_total"]) + Decimal(q["tax_total"]) + Decimal(q["shipping"])
     assert client.post("/public/store/crimson/quote", json={**body, "coupon_code": "NOEXISTE"}).status_code == 422
 

@@ -71,6 +71,14 @@ class TrustIn(BaseModel):
     text: str = Field(default="", max_length=200)
 
 
+class KitPhotoIn(BaseModel):
+    """Foto fija de la tarjeta del kit que elige Andres: un producto y, si tiene varias, cual de sus fotos."""
+
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+    product_id: int = Field(ge=1)
+    image: str = Field(default="", max_length=500, pattern=r"^(|/[^\s]*|https://[^\s]+)$")
+
+
 class KitIn(BaseModel):
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
     id: str = Field(max_length=40, pattern=r"^[a-z0-9-]{1,40}$")
@@ -78,6 +86,8 @@ class KitIn(BaseModel):
     text: str = Field(default="", max_length=200)
     answers: dict = Field(default_factory=dict)
     active: bool = True
+    # vacio = las fotos de los equipos que el kit arma hoy (camara, grabador, disco, switch)
+    photos: list[KitPhotoIn] = Field(default_factory=list, max_length=sv.MAX_KIT_PHOTOS)
 
 
 class FaqIn(BaseModel):
@@ -110,6 +120,24 @@ class ShowcaseIn(BaseModel):
         return {k: str(x)[:20000] for k, x in v.items()}
 
 
+def _photo_ids(kits: list[dict]) -> set[int]:
+    ids: set[int] = set()
+    for k in kits or []:
+        for ph in k.get("photos") or []:
+            try:
+                ids.add(int((ph or {}).get("product_id") or 0))
+            except (TypeError, ValueError):
+                continue
+    ids.discard(0)
+    return ids
+
+
+def _kit_products(db: Session, tid: int, kits: list[dict]) -> dict[int, Product]:
+    """Los productos de las fotos que Andres eligio para los kits (una consulta para todos)."""
+    ids = _photo_ids(kits)
+    return {p.id: p for p in db.scalars(select(Product).where(Product.tenant_id == tid, Product.id.in_(ids)))} if ids else {}
+
+
 def _admin_out(t: Tenant, db: Session) -> dict:
     """Mi Tienda -> Vitrina, con la disponibilidad de la funcion unica en los destacados y en lo que arma cada kit
     (los kits proponen primero lo que se puede comprar; lo que no, se ve marcado)."""
@@ -124,11 +152,17 @@ def _admin_out(t: Tenant, db: Session) -> dict:
     pool = [p for p in published if not (av.get(p.id) or {}).get("ocultar")]
     sellable = {p.id for p in pool if _sellable(av.get(p.id))}
     kits_preview = []
+    photo_prods = _kit_products(db, t.id, sc["kits"])
     for k in sc["kits"]:
         kit = sv.build_kit(pool, k.get("answers") or {}, prefer=sellable)
+        photos = sv.kit_photos(kit["lines"], k.get("photos"), photo_prods)
         kits_preview.append(
             {
                 "id": k.get("id"),
+                # lo que hoy muestra la tarjeta: lo elegido a mano (manual) o los equipos del kit; con todas las
+                # fotos de cada producto elegido para cambiar cual se ve
+                "photos": [{**ph, "images": sv.product_images(photo_prods.get(ph["product_id"]))} for ph in photos],
+                "photos_manual": bool(k.get("photos")) and any(ph["product_id"] in photo_prods for ph in photos),
                 "lines": [
                     {
                         "product_id": ln["product"].id,
@@ -180,6 +214,18 @@ def showcase_put(data: ShowcaseIn, p: Principal = Depends(require("settings", "c
         patch["featured"] = [i for i in dict.fromkeys(patch["featured"] or []) if i in own]
     if "banners" in patch:
         patch["banners"] = [{**b, "id": b.get("id") or f"b{i + 1}"} for i, b in enumerate(patch["banners"] or [])]
+    if "kits" in patch and patch["kits"] is not None:
+        # fotos fijas: solo productos activos de esta empresa con foto; la foto elegida tiene que ser de ese producto
+        prods = {p.id: p for p in db.scalars(select(Product).where(Product.tenant_id == t.id, Product.active, Product.id.in_(_photo_ids(patch["kits"]))))}
+        for k in patch["kits"]:
+            fotos, vistos = [], set()
+            for ph in k.get("photos") or []:
+                p_ = prods.get(ph["product_id"])
+                if p_ is None or ph["product_id"] in vistos or not sv.product_images(p_):
+                    continue
+                vistos.add(ph["product_id"])
+                fotos.append({"product_id": ph["product_id"], "image": ph["image"] if ph.get("image") in sv.product_images(p_) else ""})
+            k["photos"] = fotos
     if "pages" in patch:
         patch["pages"] = {**(sc.get("pages") or {}), **(patch["pages"] or {})}
     sc.update(patch)
@@ -406,6 +452,7 @@ def showcase_public(slug: str, response: Response, db: Session = Depends(get_db)
         featured = sv.default_featured(pool, prefer=sellable)
     fresh = [p for p in sorted(pool, key=lambda p: (_created(p), p.id), reverse=True) if p.images and p not in featured][:8]
     kits = []
+    photo_prods = _kit_products(db, t.id, sc["kits"])
     for k in sc["kits"]:
         if not k.get("active", True):
             continue
@@ -422,7 +469,7 @@ def showcase_public(slug: str, response: Response, db: Session = Depends(get_db)
             ),
             Decimal(0),
         )
-        cam = next((ln["product"] for ln in lines if ln["role"].startswith("Cámaras")), None)
+        photos = sv.kit_photos(lines, k.get("photos"), photo_prods)
         kits.append(
             {
                 "id": k.get("id"),
@@ -431,7 +478,9 @@ def showcase_public(slug: str, response: Response, db: Session = Depends(get_db)
                 "answers": kit["answers"],
                 "items": sum(ln["quantity"] for ln in lines),
                 "total": total.quantize(Decimal("1")) if ctx.pricer.currency == "CRC" else total.quantize(Decimal("0.01")),
-                "image": ((cam.images or [{}])[0].get("url") if cam and cam.images else None),
+                "image": photos[0]["image"] if photos else None,
+                # fotos fijas de los equipos reales del kit (o las que eligio Andres): {image, label, name}
+                "photos": [{k_: ph[k_] for k_ in ("image", "label", "name")} for ph in photos],
                 "cameras": kit["cameras"],
             }
         )
@@ -732,13 +781,22 @@ def kit(slug: str, data: KitAnswers, request: Request, db: Session = Depends(get
     # el armador propone primero lo que se puede comprar (en bodega o bajo pedido) y nunca lo oculto por agotado
     pool = [p for p in prods if not (stock.get(p.id) or {}).get("ocultar")]
     k = sv.build_kit(pool, data.model_dump(), prefer={p.id for p in pool if _sellable(stock.get(p.id))})
+    # las mismas fotos fijas que la tarjeta del kit (si estas respuestas son las de un kit de la vitrina)
+    preset = sv.preset_for(sv.showcase_cfg(ctx.cfg)["kits"], data.model_dump())
+    photos = sv.kit_photos(k["lines"], (preset or {}).get("photos"), _kit_products(db, t.id, [preset] if preset else []))
     lines, total = [], Decimal(0)
     for ln in k["lines"]:
         c = ctx.card(ln["product"], stock.get(ln["product"].id))
         sub = Decimal(str(c["display_price"])) * ln["quantity"]
         total += sub
         lines.append({"role": ln["role"], "reason": ln["reason"], "quantity": ln["quantity"], "subtotal": sub, "product": c})
-    return {**{k_: v for k_, v in k.items() if k_ != "lines"}, "lines": lines, "total": total, "currency": ctx.pricer.currency}
+    return {
+        **{k_: v for k_, v in k.items() if k_ != "lines"},
+        "lines": lines,
+        "total": total,
+        "currency": ctx.pricer.currency,
+        "photos": [{k_: ph[k_] for k_ in ("image", "label", "name")} for ph in photos],
+    }
 
 
 # ---------------------------------------------------------------- asesoria personalizada -> oportunidad en el CRM

@@ -70,6 +70,18 @@ def _aislar_hacienda(monkeypatch):
     hclient.reset_cache()
 
 
+@pytest.fixture(autouse=True)
+def _sin_dns(monkeypatch):
+    """La revision del correo del checkout (services/email_check) consulta el MX del dominio: en las pruebas nunca sale
+    a la red. Por defecto el DNS "no responde" (no bloquea); las pruebas del correo instalan su propia respuesta."""
+    from app.services import email_check
+
+    email_check.reset_cache()
+    monkeypatch.setattr(email_check, "_query_mx", lambda domain: "unknown")
+    yield
+    email_check.reset_cache()
+
+
 @pytest.fixture
 def db_session():
     pg = os.environ.get("TEST_DATABASE_URL")  # opcional: correr la suite contra Postgres real

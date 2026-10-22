@@ -34,7 +34,9 @@ STORE_DEFAULTS = {
     "domain": None,
     "published": False,
     "kind": "catalogo",  # catalogo | tienda (carrito y checkout)
-    "shipping_rates": [{"name": "Retiro en tienda", "amount": 0, "active": True}, {"name": "Envío GAM", "amount": 3500, "active": True}],
+    # envio GAM: tarifa fija de 4 000 colones sin IVA (pedido 21/10). Es solo el valor por defecto: la tarifa que la
+    # tienda ya guardo en Mi Tienda manda y se edita ahi.
+    "shipping_rates": [{"name": "Retiro en tienda", "amount": 0, "active": True}, {"name": "Envío GAM", "amount": 4000, "active": True}],
     "legal": {"privacy": "", "terms": ""},
     "whatsapp": "",
     "currency": "CRC",

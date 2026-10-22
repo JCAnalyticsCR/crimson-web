@@ -528,6 +528,87 @@ def _first(pools: list[list[Product]], fn, *args):
     return r
 
 
+def normalize_answers(answers: dict | None) -> dict:
+    """Las 4 respuestas del configurador con sus topes (lo que build_kit usa y lo que se compara con los kits de Andres)."""
+    a = answers or {}
+    indoor = max(0, min(32, int(a.get("indoor") or 0)))
+    outdoor = max(0, min(32, int(a.get("outdoor") or 0)))
+    if indoor + outdoor == 0:
+        indoor = 1
+    return {
+        "place": a.get("place") if a.get("place") in PLACES else "casa",
+        "indoor": indoor,
+        "outdoor": outdoor,
+        "days": max(1, min(90, int(a.get("days") or 15))),
+        "remote": bool(a.get("remote", True)),
+    }
+
+
+# ---------------------------------------------------------------- fotos fijas del kit (pedido 21/10, item 28)
+# La tarjeta del kit muestra los equipos reales que lo forman (camara, grabador, disco, switch), no la misma camara
+# repetida con celdas vacias. Lo de instalacion (conectores, cable, cajas) no es "el equipo" y no sale en la foto.
+KIT_PHOTO_ROLES = {
+    "Cámaras exteriores": "Cámara exterior",
+    "Cámaras interiores": "Cámara interior",
+    "Grabador": "Grabador",
+    "Almacenamiento": "Disco duro",
+    "Red": "Switch PoE",
+}
+MAX_KIT_PHOTOS = 4
+
+
+def product_images(p: Product | None) -> list[str]:
+    return [i["url"] for i in (p.images or []) if isinstance(i, dict) and i.get("url")] if p is not None else []
+
+
+def product_image(p: Product | None, prefer: str | None = None) -> str | None:
+    """La foto elegida (si sigue siendo del producto) o la principal; None si el producto no tiene fotos."""
+    urls = product_images(p)
+    if not urls:
+        return None
+    if prefer and prefer in urls:
+        return prefer
+    return next((i["url"] for i in (p.images or []) if isinstance(i, dict) and i.get("main") and i.get("url")), urls[0])
+
+
+def kit_photos(lines: list[dict], manual: list | None = None, products: dict[int, Product] | None = None) -> list[dict]:
+    """Fotos de la tarjeta del kit. manual = lo que Andres eligio en Mi Tienda -> Vitrina ([{product_id, image}]): manda
+    si alguna sigue valida (producto activo con foto). Si no, los equipos que el kit arma hoy, sin repetir producto."""
+    out: list[dict] = []
+    for m in manual or []:
+        try:
+            pid = int((m or {}).get("product_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        p = (products or {}).get(pid)
+        img = product_image(p, (m or {}).get("image")) if p is not None and p.active else None
+        if img and all(x["product_id"] != pid for x in out):
+            out.append({"product_id": pid, "image": img, "label": product_type(p) or "Equipo", "name": p.name})
+    if out:
+        return out[:MAX_KIT_PHOTOS]
+    seen: set[int] = set()
+    for ln in lines:
+        label = KIT_PHOTO_ROLES.get(ln.get("role"))
+        p = ln.get("product")
+        if not label or p is None or p.id in seen:
+            continue
+        img = product_image(p)
+        if not img:
+            continue
+        seen.add(p.id)
+        out.append({"product_id": p.id, "image": img, "label": label, "name": p.name})
+        if len(out) >= MAX_KIT_PHOTOS:
+            break
+    return out
+
+
+def preset_for(kits: list[dict], answers: dict) -> dict | None:
+    """El kit de la vitrina (activo) que tiene exactamente estas respuestas: "Arma tu sistema" abierto desde su tarjeta
+    muestra las mismas fotos que Andres eligio para ella."""
+    na = normalize_answers(answers)
+    return next((k for k in kits if k.get("active", True) and normalize_answers(k.get("answers")) == na), None)
+
+
 def build_kit(prods: list[Product], answers: dict, prefer: set[int] | None = None) -> dict:
     """Kit sugerido con productos reales del catalogo. Las cantidades salen de las MISMAS reglas que usa el
     levantamiento tecnico (survey_specs.suggest_materials); aqui solo se eligen los productos. Lo que no se
@@ -538,14 +619,9 @@ def build_kit(prods: list[Product], answers: dict, prefer: set[int] | None = Non
 
     pools = [[p for p in prods if p.id in prefer], prods] if prefer is not None else [prods]
 
-    place = answers.get("place") if answers.get("place") in PLACES else "casa"
-    indoor = max(0, min(32, int(answers.get("indoor") or 0)))
-    outdoor = max(0, min(32, int(answers.get("outdoor") or 0)))
-    if indoor + outdoor == 0:
-        indoor = 1
+    na = normalize_answers(answers)
+    place, indoor, outdoor, days, remote = na["place"], na["indoor"], na["outdoor"], na["days"], na["remote"]
     n = indoor + outdoor
-    days = max(1, min(90, int(answers.get("days") or 15)))
-    remote = bool(answers.get("remote", True))
     meters = PLACES[place]["meters"]
     points = [
         {"code": f"C{i + 1}", "data": {"alimentacion": "PoE", "ambiente": "Exterior" if i < outdoor else "Interior", "distancia_m": meters}} for i in range(n)

@@ -149,11 +149,11 @@ def test_storefront_shows_imported_catalog_in_store_currency(client, auth, db_se
     body = {"lines": [{"product_id": p["id"], "quantity": 1}], "contact": {"name": "Ana", "email": "ana@crimsonapp.com"}}
     q = client.post("/public/store/crimson/quote", json=body).json()
     assert q["currency"] == "USD" and Decimal(str(q["total"])).quantize(Decimal("0.01")) == Decimal("267.02")
-    # las tarifas de envio estan en colones: en una tienda en dolares se convierten (3500 / 512.35)
+    # las tarifas de envio estan en colones: en una tienda en dolares se convierten (4000 / 512.35)
     ship = client.post("/public/store/crimson/quote", json={**body, "shipping_method": "Envío GAM"}).json()
-    assert Decimal(str(ship["shipping"])) == Decimal("6.83")
+    assert Decimal(str(ship["shipping"])) == Decimal("7.81")
     gam = next(r for r in client.get("/public/store/crimson").json()["shipping_rates"] if r["name"] == "Envío GAM")
-    assert Decimal(str(gam["display_amount"])) == Decimal("7.72")  # 6.831 x 1.13, con IVA
+    assert Decimal(str(gam["display_amount"])) == Decimal("8.82")  # 7.807 x 1.13, con IVA
     # en linea solo se vende lo disponible (services/availability): con 1 en bodega el pedido entra
     main = next(w for w in client.get("/warehouses").json() if w["is_default"])
     client.post("/stock/movements", json={"product_id": p["id"], "warehouse_id": main["id"], "kind": "entrada", "quantity": 1})
