@@ -15,6 +15,7 @@ from ..core.config import settings
 from ..core.deps import CLIENT_ROLES
 from ..core.security import hash_token
 from ..models import AccessRequest, Customer, CustomerContact, Invitation, Tenant, TenantUser, User
+from .accounts import access_email_html
 from .mail import queue_email
 
 INVITE_DAYS = 7
@@ -70,10 +71,17 @@ def invite_client(db: Session, tenant: Tenant, customer: Customer, email: str, r
         tenant,
         email,
         f"Su acceso al portal de clientes de {tenant.name}",
-        f"<p>Hola{(' ' + e(name)) if name else ''}:</p>"
-        f"<p>{e(tenant.name)} le dio acceso al portal de clientes de <b>{e(customer.name)}</b> "
-        f"({e(ROLE_LABEL[role])}). Ahí puede reportar fallas, ver el avance de sus tickets y sus equipos instalados.</p>"
-        f'<p><a href="{link}">Crear mi contraseña</a> (el enlace vence en {INVITE_DAYS} días y sirve una sola vez)</p>',
+        access_email_html(
+            tenant,
+            title="Su acceso al portal de clientes",
+            name=name or "",
+            intro_html=f"{e(tenant.name)} le dio acceso al portal de clientes de <b>{e(customer.name)}</b> "
+            f"({e(ROLE_LABEL[role])}). Ahí puede reportar fallas, ver el avance de sus tickets y sus equipos instalados.",
+            link=link,
+            label="Crear mi contraseña",
+            note=f"El enlace vence en {INVITE_DAYS} días y sirve una sola vez. Si no esperaba este acceso, ignore este correo.",
+            vos=False,
+        ),
         "invitation",
         inv.id,
     )

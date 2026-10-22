@@ -267,42 +267,56 @@ def set_password(user: User, raw: str) -> None:
 _e = html.escape
 
 
-def _shell(tenant: Tenant, inner: str) -> str:
-    """Mismo estilo que doc_email_html: encabezado con la empresa y borde carmesi."""
-    return f"""<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#15131a">
-<div style="border-bottom:3px solid #e2233a;padding:12px 0;font-size:18px;font-weight:700">{_e(tenant.name)}</div>
-{inner}
-<p style="color:#8a858f;font-size:12px">Crimson nunca te va a pedir tu contraseña por correo, por teléfono ni por WhatsApp.</p></div>"""
+SECURITY_NOTE = "Crimson nunca te va a pedir tu contraseña por correo, por teléfono ni por WhatsApp."
 
 
-def _button(link: str, label: str) -> str:
-    return (
-        f'<p><a href="{_e(link)}" style="display:inline-block;background:#e2233a;color:#fff;padding:12px 18px;'
-        f'border-radius:10px;text-decoration:none;font-weight:700">{_e(label)}</a></p>'
-    )
+def _shell(tenant: Tenant, inner: str, *, title: str, preheader: str | None = None, action: tuple[str, str] | None = None) -> str:
+    """Diseno base de los correos (email_layout) con la nota de seguridad de las cuentas en el pie."""
+    from . import email_layout
+
+    return email_layout.render(tenant, title=title, body=inner, preheader=preheader, action=action, foot=_e(SECURITY_NOTE), vos=True)
+
+
+def access_email_html(
+    tenant: Tenant, *, title: str, intro_html: str, link: str, label: str, note: str, name: str | None = None, vos: bool = True
+) -> str:
+    """Correo con la llave de entrada (invitacion al panel, a los portales de aliados y de clientes, contrasena nueva):
+    saludo, que paso, UN boton y el enlace en texto. `intro_html` ya viene escapado; `note` es texto."""
+    from . import email_layout as el
+
+    saludo = el.p_html(f"Hola{(' ' + _e(name)) if name else ''}:") if name is not None else ""
+    body = saludo + el.p_html(intro_html) + el.p(note, muted=True)
+    foot = _e(SECURITY_NOTE) if vos else "Nunca le vamos a pedir su contraseña por correo, por teléfono ni por WhatsApp."
+    return el.render(tenant, title=title, body=body, preheader=f"{title}. {note}", action=(link, label), foot=foot, vos=vos)
 
 
 def invite_email_html(tenant: Tenant, role_code: str, link: str, days: int) -> str:
-    return _shell(
+    return access_email_html(
         tenant,
-        f"<p>Te invitaron a <b>{_e(tenant.name)}</b> en la plataforma de Crimson como <b>{_e(role_label(role_code))}</b>.</p>"
-        f"{_button(link, 'Aceptar invitación')}"
-        f'<p style="color:#5a5560">El enlace vence en {days} días y sirve una sola vez. Si no esperabas esta invitación, ignorá este correo.</p>',
+        title=f"Te invitaron a {tenant.name}",
+        intro_html=f"Te invitaron a <b>{_e(tenant.name)}</b> en la plataforma de Crimson como <b>{_e(role_label(role_code))}</b>.",
+        link=link,
+        label="Aceptar invitación",
+        note=f"El enlace vence en {days} días y sirve una sola vez. Si no esperabas esta invitación, ignorá este correo.",
     )
 
 
 def reset_email_html(tenant: Tenant, name: str | None, link: str, vence: str) -> str:
-    return _shell(
+    return access_email_html(
         tenant,
-        f"<p>Hola{(' ' + _e(name)) if name else ''}:</p>"
-        f"<p>Para crear tu contraseña nueva de Crimson usá este botón:</p>"
-        f"{_button(link, 'Crear mi contraseña nueva')}"
-        f'<p style="color:#5a5560">El enlace vence en {_e(vence)} y sirve una sola vez. Si no lo pediste, ignorá este correo: '
-        f"tu contraseña actual sigue igual.</p>",
+        title="Creá tu contraseña nueva",
+        name=name or "",
+        intro_html="Para crear tu contraseña nueva de Crimson usá este botón.",
+        link=link,
+        label="Restablecer contraseña",
+        note=f"El enlace vence en {vence} y sirve una sola vez. Si no lo pediste, ignorá este correo: tu contraseña actual sigue igual.",
     )
 
 
 def notify_security(db: Session, tenant: Tenant, user: User, subject: str, body_html: str, to: str | None = None) -> EmailOutbox:
     """Aviso de un cambio de credenciales (sin enlaces ni contrasenas). Sensible: sin BCC de la empresa."""
-    inner = f"<p>Hola {_e(user.full_name or '')}:</p>{body_html}"
-    return queue_email(db, tenant, to or user.email, subject, _shell(tenant, inner), "user_security", user.id)
+    from . import email_layout as el
+
+    inner = el.p_html(f"Hola {_e(user.full_name or '')}:") + f'<div style="font-family:{el.FONT};font-size:15px;line-height:1.55;color:{el.INK}">{body_html}</div>'
+    html_ = _shell(tenant, inner, title=subject.split(" · ")[0], preheader=subject)
+    return queue_email(db, tenant, to or user.email, subject, html_, "user_security", user.id)

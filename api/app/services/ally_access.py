@@ -23,6 +23,7 @@ from ..core.config import settings
 from ..core.deps import ALLY_USER_ROLES
 from ..core.security import hash_token
 from ..models import AllyCompany, Invitation, Invoice, Recurrence, Tenant, TenantUser, User
+from .accounts import access_email_html
 from .mail import queue_email
 from .totals import d, net_sale
 
@@ -179,10 +180,17 @@ def invite_ally_user(
         tenant,
         email,
         f"Su acceso al portal de aliados de {tenant.name}",
-        f"<p>Hola{(' ' + e(name)) if name else ''}:</p>"
-        f"<p>{e(tenant.name)} le dio acceso al portal de aliados como {e(ROLE_LABEL[role])} de <b>{e(company.name)}</b>. "
-        "Ahí ve los proyectos y trabajos que llevan en común.</p>"
-        f'<p><a href="{link}">Crear mi contraseña</a> (el enlace vence en {INVITE_DAYS} días y sirve una sola vez)</p>',
+        access_email_html(
+            tenant,
+            title="Su acceso al portal de aliados",
+            name=name or "",
+            intro_html=f"{e(tenant.name)} le dio acceso al portal de aliados como {e(ROLE_LABEL[role])} de <b>{e(company.name)}</b>. "
+            "Ahí ve los proyectos y trabajos que llevan en común.",
+            link=link,
+            label="Entrar al portal",
+            note=f"Con el botón crea su contraseña y entra. El enlace vence en {INVITE_DAYS} días y sirve una sola vez.",
+            vos=False,
+        ),
         "invitation",
         inv.id,
     )

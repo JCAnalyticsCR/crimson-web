@@ -201,7 +201,7 @@ def test_corrida_en_seco_no_escribe_nada(client, auth, db_session, correo):
     assert any("fecha de corte" in w for w in pv["warnings"])  # sin corte: muestra todas y avisa
     assert [x["invoice_id"] for x in pv["items"]] == [a] and pv["items"][0]["stage"] == "D+3"
     assert pv["skipped"][0]["invoice_id"] == b and pv["skipped"][0]["reason"] == "El cliente no tiene correo"
-    assert pv["ejemplo"]["subject"] == pv["items"][0]["subject"] and "Pagar en línea" in pv["ejemplo"]["html"]
+    assert pv["ejemplo"]["subject"] == pv["items"][0]["subject"] and "Pagar factura" in pv["ejemplo"]["html"]
     assert Decimal(str(pv["cartera"]["vencida"])) > 0 and pv["baseline"] is None
     # otra fecha
     pv2 = client.get("/collections/preview", params={"fecha": (HOY + timedelta(days=7)).isoformat()}).json()

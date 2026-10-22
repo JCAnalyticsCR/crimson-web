@@ -30,6 +30,11 @@ def _accepts_dedupe() -> bool:
         return False
 
 
+def _fecha(v) -> str | None:
+    """Fecha del documento para el correo (dd/mm/aaaa); None si no tiene."""
+    return v.strftime("%d/%m/%Y") if hasattr(v, "strftime") else None
+
+
 def queue_once(
     db: Session,
     tenant: Tenant,
@@ -132,6 +137,8 @@ def send_document(
             link,
             message or (tenant.settings or {}).get("invoice_footer" if is_inv else "quote_footer"),
             attached=pdf is not None,
+            issued=_fecha(getattr(doc, "issue_date", None)),
+            due=_fecha(doc.due_date),
         ),
         entity,
         doc.id,

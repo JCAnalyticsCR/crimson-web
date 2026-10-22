@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from ..core.config import settings
 from ..core.security import read_purpose_token, sign_purpose_token
 from ..models import Customer, EmailOutbox, Media, Order, Tenant
-from . import store_inventory
+from . import email_layout, store_inventory
 from .documents import audit
 from .totals import d
 
@@ -459,7 +459,7 @@ CUSTOMER_INTRO = {
     "vencido": "El plazo para pagar tu pedido venció y lo cancelamos: los productos volvieron a la venta.",
 }
 TRACK_LABEL = "Rastrear mi pedido"  # el boton de siempre (21/10, item 40): lleva al seguimiento del pedido
-EMAIL_GREY, EMAIL_INK, EMAIL_LINE = "#6b6570", "#15131a", "#ebe7e3"
+EMAIL_GREY, EMAIL_INK, EMAIL_LINE = email_layout.GREY, email_layout.INK, email_layout.LINE
 
 
 def link_kind(c: Customer, contact: dict) -> str:
@@ -497,16 +497,8 @@ def notify_email(db: Session, o: Order) -> str:
 
 
 def store_logo(t: Tenant) -> str | None:
-    """Logo de la tienda (Mi Tienda) o el de la empresa, como URL absoluta: un correo no resuelve rutas relativas."""
-    from ..routers.store import store_cfg
-
-    for raw in (store_cfg(t).get("logo_url"), getattr(t, "logo_url", None)):
-        u = str(raw or "").strip()
-        if u.startswith("/") and not u.startswith("//"):
-            u = f"{settings.public_base_url.rstrip('/')}{u}"
-        if u.startswith(("https://", "http://")):
-            return u
-    return None
+    """Logo de la tienda (Mi Tienda) o el de la empresa, como URL absoluta (ahora en email_layout)."""
+    return email_layout.logo_url(t)
 
 
 def _steps(o: Order) -> list[tuple[str, bool]]:
@@ -521,43 +513,8 @@ def _steps(o: Order) -> list[tuple[str, bool]]:
 
 
 def email_button(url: str, label: str, color: str) -> str:
-    """Boton "a prueba de Outlook": una tabla con fondo (Outlook ignora el padding de un <a> en linea)."""
-    e = html.escape
-    return (
-        '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 8px"><tr>'
-        f'<td align="center" bgcolor="{e(color)}" style="border-radius:10px;background:{e(color)}">'
-        f'<a href="{e(url)}" target="_blank" style="display:inline-block;padding:13px 22px;font-family:Arial,Helvetica,sans-serif;'
-        f'font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px">{e(label)}</a></td></tr></table>'
-    )
-
-
-def email_shell(t: Tenant, *, title: str, body: str, foot: str = "") -> str:
-    """Marco comun de los correos del pedido (21/10, items 40 y 49): logo de la tienda, titulo, contenido y pie.
-    Tablas y estilos en linea: Outlook y Hotmail no leen hojas de estilo ni flexbox. `body` y `foot` ya vienen escapados."""
-    from ..routers.store import store_cfg
-
-    e = html.escape
-    cfg = store_cfg(t)
-    primary = cfg.get("primary") or "#e2233a"
-    name = cfg.get("name") or t.name
-    logo = store_logo(t)
-    brand = (
-        f'<img src="{e(logo)}" alt="{e(name)}" height="40" style="display:block;height:40px;max-width:220px;border:0">'
-        if logo
-        else f'<span style="font-size:20px;font-weight:700;color:{EMAIL_INK}">{e(name)}</span>'
-    )
-    wa = (cfg.get("whatsapp") or "").strip()
-    contacto = f" · WhatsApp {e(wa)}" if wa else ""
-    return f"""<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f4f2f0" style="background:#f4f2f0">
-<tr><td align="center" style="padding:24px 12px">
-<table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:560px;background:#ffffff;border:1px solid {EMAIL_LINE};border-radius:12px;font-family:Arial,Helvetica,sans-serif;color:{EMAIL_INK}">
-<tr><td style="padding:20px 24px;border-bottom:3px solid {e(primary)}">{brand}</td></tr>
-<tr><td style="padding:24px 24px 8px">
-<h1 style="margin:0 0 10px;font-size:21px;line-height:1.3;color:{EMAIL_INK}">{e(title)}</h1>
-{body}
-</td></tr>
-<tr><td style="padding:16px 24px 22px;border-top:1px solid {EMAIL_LINE};font-size:12px;line-height:1.5;color:{EMAIL_GREY}">{foot}{e(name)}{contacto}</td></tr>
-</table></td></tr></table>"""
+    """Boton "a prueba de Outlook" del diseno base de los correos (email_layout.button)."""
+    return email_layout.button(url, label, color)
 
 
 def _status_pill(o: Order, primary: str) -> str:
@@ -615,10 +572,8 @@ def _summary_html(o: Order) -> str:
 
 
 def _email_html(t: Tenant, o: Order, kind: str, extra: str = "") -> str:
-    from ..routers.store import store_cfg
-
     e = html.escape
-    primary = store_cfg(t).get("primary") or "#e2233a"
+    primary = email_layout.brand(t).primary
     instr = pay_instructions(t, o) if kind in SHOW_INSTRUCTIONS and o.status in ("nuevo", "en_revision") else None
     url = track_url(t, o)
     main_url, boton = url, TRACK_LABEL
@@ -628,26 +583,29 @@ def _email_html(t: Tenant, o: Order, kind: str, extra: str = "") -> str:
     if kind == "vencido":
         # un SINPE puede haberse pagado sin subir el comprobante: nunca se afirma que "no se cobro nada"
         main_url, boton, pie = store_base(t), "Volver a la tienda", "Si ya habías pagado, respondé a este correo con el comprobante y lo resolvemos."
-    pay_box = (
-        '<div style="margin:16px 0 0;background:#f6f2ee;border-radius:10px;padding:14px 16px;font-size:14px;line-height:1.5;white-space:pre-wrap">'
-        f"<b>Cómo pagar · {e(o.payment_method or '')}</b><br>{e(instr)}</div>"
-        if instr
-        else ""
-    )
+    pay_box = email_layout.note(html=f"<b>Cómo pagar · {e(o.payment_method or '')}</b><br>{e(instr).replace(chr(10), '<br>')}") if instr else ""
     # boton principal; si no es el de seguimiento, "Rastrear mi pedido" queda como enlace debajo (items 40/49)
     track_link = (
-        f'<p style="margin:0 0 6px;font-size:13px"><a href="{e(url)}" style="color:{e(primary)};font-weight:700">{TRACK_LABEL} →</a></p>'
+        f'<p style="margin:0 0 6px;font-size:13px">{email_layout.link(url, TRACK_LABEL + " →", primary)}</p>'
         if boton != TRACK_LABEL
         else ""
     )
     body = (
         f'<p style="margin:0 0 12px;font-size:15px;line-height:1.5">{e(CUSTOMER_INTRO[kind])}</p>'
         f"{_status_pill(o, primary)}{_steps_html(o, primary)}{extra}{_summary_html(o)}{pay_box}"
-        f"{email_button(main_url, boton, primary)}{track_link}"
-        f'<p style="margin:10px 0 0;font-size:12px;line-height:1.5;color:{EMAIL_GREY}">Si el botón no abre, copiá este enlace en el navegador:<br>'
-        f'<a href="{e(url)}" style="color:{EMAIL_GREY};word-break:break-all">{e(url)}</a></p>'
     )
-    return email_shell(t, title=CUSTOMER_TITLE[kind], body=body, foot=f"{e(pie)} Cualquier consulta, respondé a este correo.<br>")
+    # el enlace en texto es siempre el del seguimiento (tambien cuando el boton lleva a la tienda o a subir el comprobante)
+    return email_layout.render(
+        t,
+        title=CUSTOMER_TITLE[kind],
+        body=body,
+        preheader=f"Pedido {o.number} · {STATUS_LABEL.get(o.status, o.status)}. {CUSTOMER_INTRO[kind]}",
+        action=(main_url, boton),
+        after_action=track_link + email_layout.fallback(url, vos=True),
+        foot=f"{e(pie)} Cualquier consulta, respondé a este correo.",
+        vos=True,
+        show_link=False,
+    )
 
 
 def notify_customer(
@@ -670,12 +628,11 @@ def panel_order_url(o: Order) -> str:
 
 
 def notify_team(db: Session, t: Tenant, o: Order, kind: str, detail: str | None = None) -> int:
-    from ..routers.store import store_cfg
     from .mail import notify_roles
 
     e = html.escape
     c = o.contact or {}
-    primary = store_cfg(t).get("primary") or "#e2233a"
+    primary = email_layout.brand(t).primary
     titulo = {
         "nuevo": f"Pedido web {o.number} · {fmt_money(o.total, o.currency)}",
         "comprobante": f"Comprobante subido · pedido {o.number}",
@@ -689,16 +646,19 @@ def notify_team(db: Session, t: Tenant, o: Order, kind: str, detail: str | None 
 
         u = db.get(User, o.seller_id)
         vendedor = f"<br>Vendedor: <b>{e(u.full_name)}</b>" if u else ""
-    datos = (
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;line-height:1.5;margin:0 0 6px">'
-        '<tr><td style="padding:10px 12px;background:#f6f2ee;border-radius:10px">'
-        f"<b>{e(c.get('name') or '')}</b> · {e(c.get('email') or '')} · {e(c.get('phone') or '')}<br>"
-        f"Pago: {e(o.payment_method or '—')} · Entrega: {e(o.shipping_method or '—')}{vendedor}</td></tr></table>"
+    datos = email_layout.note(
+        html=f"<b>{e(c.get('name') or '')}</b> · {e(c.get('email') or '')} · {e(c.get('phone') or '')}<br>"
+        f"Pago: {e(o.payment_method or '—')} · Entrega: {e(o.shipping_method or '—')}{vendedor}"
     )
-    body = (f'<p style="margin:0 0 12px;font-size:15px;line-height:1.5">{e(detail)}</p>' if detail else "") + (
-        f"{_status_pill(o, primary)}{datos}{_summary_html(o)}{email_button(panel_order_url(o), 'Abrir en Pedidos de la tienda', primary)}"
+    body = (email_layout.p(detail) if detail else "") + f"{_status_pill(o, primary)}{datos}{_summary_html(o)}"
+    cuerpo = email_layout.render(
+        t,
+        title=titulo,
+        body=body,
+        preheader=f"{titulo}. {c.get('name') or ''}".strip(),
+        action=(panel_order_url(o), "Abrir en Pedidos de la tienda"),
+        foot="Aviso interno de la tienda en línea.",
     )
-    cuerpo = email_shell(t, title=titulo, body=body, foot="Aviso interno de la tienda en línea. ")
     roles = tuple(checkout_cfg(t).get("notify_roles") or ("admin",))
     return notify_roles(db, t, roles, titulo, cuerpo, "order", o.id, keep=_team_filter(db, t, o))
 

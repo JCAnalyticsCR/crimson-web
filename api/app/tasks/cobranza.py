@@ -173,16 +173,32 @@ def reminder_email(t: Tenant, inv: Invoice, stage: int, today: date, link: str |
     else:
         subject = f"{kind[:1].upper()}{kind[1:]} {inv.number} con {dias} día{'s' if dias != 1 else ''} de atraso"
         intro = f"{que[:1].upper()}{que[1:]} venció el <b>{_fmt(inv.due_date)}</b> y tiene un saldo pendiente de <b>{saldo}</b>."
-    boton = (
-        f'<p><a href="{e(link)}" style="display:inline-block;background:#e2233a;color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700">Pagar en línea</a></p>'
-        if link
-        else ""
+    from ..services import email_layout as el
+
+    if dias < 0:
+        titulo = "Recordatorio de pago"
+    elif dias == 0:
+        titulo = "Hoy vence su pago"
+    else:
+        titulo = f"Pago con {dias} día{'s' if dias != 1 else ''} de atraso"
+    boton = {"factura": "Pagar factura", "mensualidad": "Pagar mensualidad"}.get(kind, "Pagar en línea")
+    body = (
+        el.p_html(intro)
+        + el.data_rows(
+            [("Documento", f"{kind[:1].upper()}{kind[1:]} {inv.number}"), ("Venció el" if dias > 0 else "Vence el", _fmt(inv.due_date))],
+            total=("Saldo pendiente", saldo),
+        )
+        + el.p("Si ya realizó el pago, le agradecemos ignorar este mensaje o responderlo con el comprobante para aplicarlo.", muted=True)
+        + (el.p("El documento va adjunto en PDF.", small=True) if attached else "")
     )
-    body = f"""<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#15131a">
-<div style="border-bottom:3px solid #e2233a;padding:12px 0;font-size:18px;font-weight:700">{e(t.name)}</div>
-<p>{intro}</p>{boton}
-<p style="color:#5a5560">Si ya realizó el pago, le agradecemos ignorar este mensaje o responderlo con el comprobante para aplicarlo.</p>
-<p style="color:#8a858f;font-size:12px">{"El documento va adjunto en PDF. " if attached else ""}Cualquier consulta, responda a este correo.</p></div>"""
+    body = el.render(
+        t,
+        title=titulo,
+        body=body,
+        preheader=f"{subject}. Saldo pendiente: {saldo}.",
+        action=(link, boton) if link else None,
+        foot="Cualquier consulta, responda a este correo.",
+    )
     return f"{subject} · {t.name}", body
 
 
@@ -262,13 +278,25 @@ def run_reminders(db: Session, today: date | None = None) -> dict:
                 out["fallidos"] += 1
                 fallidas.append(numero)
         if fallidas:
-            filas = "".join(f"<li>{html.escape(n)}</li>" for n in fallidas[:30])
+            from ..core.config import settings
+            from ..services import email_layout as el
+
+            asunto = f"Cobranza: {len(fallidas)} recordatorio(s) no salieron"
             notify_roles(
                 db,
                 t,
                 ("admin",),
-                f"Cobranza: {len(fallidas)} recordatorio(s) no salieron",
-                f"<p>Estos recordatorios de cobro no salieron hoy:</p><ul>{filas}</ul><p>Revisá el correo del cliente y reenviá desde la factura.</p>",
+                asunto,
+                el.render(
+                    t,
+                    title="Recordatorios de cobro sin salir",
+                    body=el.p("Estos recordatorios de cobro no salieron hoy:")
+                    + el.items(fallidas[:30])
+                    + el.p("Revisá el correo del cliente y reenviá desde la factura."),
+                    preheader=asunto,
+                    action=(f"{settings.public_base_url.rstrip('/')}/facturas", "Abrir Facturas"),
+                    foot="Aviso interno de cobranza.",
+                ),
                 "invoice",
                 0,
             )
@@ -455,30 +483,48 @@ def weekly_summary(db: Session, today: date | None = None) -> int:
             else f"Día 0 ({e(base.get('date') or '')}): {money(dia0, cur)} vencidos · hoy {money(p['vencida'], cur)} "
             f"({'+' if dif > 0 else ''}{money(dif, cur)}{f', {dif / dia0 * 100:+.1f} %' if dia0 else ''})."
         )
-        filas = "".join(
-            f"<tr><td>{e(inv.number)}</td><td>{e(_customer_name(db, inv))}</td><td align=right>{dias}</td><td align=right>{money(monto, cur)}</td></tr>"
-            for dias, inv, monto in p["top"]
-        )
-        tramos = "".join(f"<tr><td>{lbl}</td><td align=right>{money(p['buckets'][k], cur)}</td></tr>" for k, lbl in BUCKETS)
+        from ..core.config import settings
+        from ..services import email_layout as el
+
+        filas = [[inv.number, _customer_name(db, inv), str(dias), money(monto, cur)] for dias, inv, monto in p["top"]]
         aliados = db.scalars(select(AllyCompany).where(*mora_where(t.id, today, start=config(t)["start_date"])).order_by(AllyCompany.name)).all()
         mora = (
-            f"<p><b>Aliados con {SUSPEND_DAYS} días o más de atraso</b> (propuesta de suspensión en Aprobaciones): "
-            f"{e(', '.join(a.name for a in aliados))}.</p>"
+            el.p_html(
+                f"<b>Aliados con {SUSPEND_DAYS} días o más de atraso</b> (propuesta de suspensión en Aprobaciones): "
+                f"{e(', '.join(a.name for a in aliados))}."
+            )
             if aliados
             else ""
         )
+        otros = (
+            f" Por otros medios después de un aviso (SINPE, transferencia o efectivo, no cuenta como recuperado): {money(recuperado['otros'], cur)}."
+            if recuperado["otros"]
+            else ""
+        )
         body = (
-            f"<h3>Cartera por cobrar · {e(t.name)} · {today:%d/%m/%Y}</h3>"
-            f"<p>Por cobrar: <b>{money(p['total'], cur)}</b> en {p['n']} factura(s). Vencida: <b>{money(p['vencida'], cur)}</b> en {p['n_vencidas']}.</p>"
-            f"<p>{comparacion}</p>"
-            f"<p>Últimos 7 días: {enviados} recordatorio(s) enviados{f', {fallidos} sin salir' if fallidos else ''}; "
-            f"cobranza recuperada (cobrado por el enlace de pago después de un recordatorio): <b>{money(recuperado['enlace'], cur)}</b>."
-            + (f" Por otros medios después de un aviso (SINPE, transferencia o efectivo, no cuenta como recuperado): {money(recuperado['otros'], cur)}." if recuperado["otros"] else "")
-            + "</p>"
-            + f"<table border=0 cellpadding=6><tr><th align=left>Antigüedad</th><th align=right>Saldo</th></tr>{tramos}</table>"
-            + (f"<p><b>Las 10 vencidas más grandes</b></p><table border=0 cellpadding=6><tr><th>Factura</th><th>Cliente</th><th>Días</th><th>Saldo</th></tr>{filas}</table>" if filas else "")
+            el.data_rows(
+                [
+                    ("Por cobrar", f"{money(p['total'], cur)} · {p['n']} factura(s)"),
+                    ("Vencida", f"{money(p['vencida'], cur)} · {p['n_vencidas']} factura(s)"),
+                ]
+            )
+            + el.p_html(comparacion)
+            + el.p_html(
+                f"Últimos 7 días: {enviados} recordatorio(s) enviados{f', {fallidos} sin salir' if fallidos else ''}; "
+                f"cobranza recuperada (cobrado por el enlace de pago después de un recordatorio): <b>{money(recuperado['enlace'], cur)}</b>.{otros}"
+            )
+            + el.heading("Antigüedad")
+            + el.table(["Tramo", "Saldo"], [[lbl, money(p["buckets"][k], cur)] for k, lbl in BUCKETS], right=(1,))
+            + (el.heading("Las 10 vencidas más grandes") + el.table(["Factura", "Cliente", "Días", "Saldo"], filas, right=(2, 3)) if filas else "")
             + mora
-            + "<p>Detalle en Facturas → Vencidas.</p>"
+        )
+        body = el.render(
+            t,
+            title=f"Cartera por cobrar · {today:%d/%m/%Y}",
+            body=body,
+            preheader=f"Por cobrar {money(p['total'], cur)}; vencida {money(p['vencida'], cur)}.",
+            action=(f"{settings.public_base_url.rstrip('/')}/facturas", "Ver facturas vencidas"),
+            foot="Resumen semanal de cartera para administración.",
         )
         asunto = f"Cartera de la semana · {today:%d/%m/%Y}"
         vistos: set[str] = set()
