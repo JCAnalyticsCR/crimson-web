@@ -566,13 +566,11 @@ def _seller_names(db: Session, ids) -> dict[int, str]:
 def _team(db: Session, tid: int) -> list[dict]:
     """A quien se le puede asignar un pedido web: el equipo comercial activo (mismo criterio que el responsable de
     una oportunidad, pipeline.meta), filtrado por ownership.eligible_seller."""
-    from ..models import TenantUser
+    from ..services import team
     from ..services.ownership import eligible_seller
 
-    rows = db.scalars(
-        select(TenantUser).where(TenantUser.tenant_id == tid, TenantUser.active, TenantUser.role_code.in_(("admin", "ventas", "supervisor")))
-    ).all()
-    return sorted(({"id": m.user.id, "name": m.user.full_name} for m in rows if eligible_seller(db, tid, m.user_id)), key=lambda x: x["name"].lower())
+    # sin inactivos, eliminados ni duplicados (reunion 2, pedido 26)
+    return [x for x in team.options(db, tid, ("admin", "ventas", "supervisor")) if eligible_seller(db, tid, x["id"])]
 
 
 def _filters(

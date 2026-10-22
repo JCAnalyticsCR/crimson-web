@@ -3,7 +3,7 @@
    cambian por empresa y se pueden restablecer. Un rol nuevo se crea a partir de uno existente.
    Lo que es solo del administrador (anular facturas, publicar en la tienda, ver costos, configurar la empresa…) no sale
    en la lista y la API lo rechaza aunque alguien lo mande. Todo cambio queda en la bitácora. */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { registerRoles, roleMeta } from "../../app/roles";
@@ -26,7 +26,7 @@ const same = (a: Perms, b: Perms) => {
   return ka.length === kb.length && ka.every((k) => (b[k] || []).length === a[k].length && a[k].every((x) => b[k].includes(x)));
 };
 
-export default function RolesEditor({ onChanged }: { onChanged: () => void }) {
+export default function RolesEditor({ onChanged, focus }: { onChanged: () => void; focus?: { code: string; n: number } | null }) {
   const { toast, reloadMatrix } = useSession();
   const [data, setData] = useState<Resp | null>(null);
   const [sel, setSel] = useState<string>("ventas");
@@ -45,10 +45,17 @@ export default function RolesEditor({ onChanged }: { onChanged: () => void }) {
     } catch (e) { toast(errMsg(e), "bad"); }
   }, [toast]);
   useEffect(() => { load(); }, [load]);
+  /* «Qué ve cada rol» pide abrir un rol (reunión 2, pedido 29) */
+  useEffect(() => {
+    if (!focus) return;
+    setSel((cur) => (cur !== focus.code && dirtyRef.current && !confirm("Hay cambios sin guardar. ¿Descartarlos?") ? cur : focus.code));
+  }, [focus]);
 
   const role = data?.roles.find((r) => r.code === sel) ?? null;
   useEffect(() => { if (role) { setDraft(JSON.parse(JSON.stringify(role.permissions))); setReason(""); setPw(""); } }, [role?.code, role?.permissions]); // eslint-disable-line react-hooks/exhaustive-deps
   const dirty = useMemo(() => !!role && !same(draft, role.permissions), [draft, role]);
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
   const needPw = useMemo(() => {
     if (!role) return false;
     const antes = sensitive(role.permissions);

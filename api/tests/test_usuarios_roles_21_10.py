@@ -127,10 +127,9 @@ def test_eliminar_usuario_sin_actividad_y_desactivar_al_que_tiene(client, auth, 
     c = client.get("/customers").json()["items"][0]
     assert client.post("/quotes", json={"customer_id": c["id"], "lines": [{"name": "X", "quantity": 1, "unit_price": 100, "tax_rate": 0}]}, headers=h_activo).status_code == 201
 
+    # reunion 2, pedido 28: con actividad ya no se rechaza; se anonimiza y desactiva (tests/test_reunion2_cuentas.py)
     a = client.get(f"/settings/users/{activo}/activity").json()
-    assert a["can_delete"] is False and "actividad" in a["reason"] and any(x["what"] == "Cotizaciones" for x in a["activity"])
-    r = client.post(f"/settings/users/{activo}/delete", json={"admin_password": ADMIN_PW})
-    assert r.status_code == 409 and "desactiv" in r.json()["detail"]
+    assert a["can_delete"] is True and a["mode"] == "anonimizar" and any(x["what"] == "Cotizaciones" for x in a["activity"])
 
     assert client.get(f"/settings/users/{prueba}/activity").json()["can_delete"] is True
     assert client.post(f"/settings/users/{prueba}/delete", json={"admin_password": "otra-cosa-123"}).status_code == 403

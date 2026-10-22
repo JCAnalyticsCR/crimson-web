@@ -87,8 +87,12 @@ def hacienda_state(db: Session, p: Principal) -> dict:
     prof = hc.profile(db, p.tenant)
     effective, blocked = hc.production_state(db, p.tenant)
     st = inbox_status(db, p.tenant)
+    mode = hc.hacienda_mode(db, p.tenant)
     out = {
-        "mode": hc.hacienda_mode(db, p.tenant),
+        "mode": mode,
+        # con que credenciales se emite HOY (reunion 2, pedido 8: se creyo que lo cargado era produccion). None: no se
+        # emite a Hacienda (Desactivada, Simulado o produccion bloqueada por el servidor)
+        "emission_environment": mode if mode in ENVS else None,
         "einvoice_provider": {"alanube": "none", "gti": "none"}.get(hc.provider_setting(p.tenant), hc.provider_setting(p.tenant)),
         "environment": prof.environment,
         "profile": _profile_out(db, p),
@@ -348,8 +352,10 @@ async def put_credentials(
     require_reauth(p, admin_password or None)
     if not secretbox.available():
         raise HTTPException(503, "Falta configurar FISCAL_KEYS en el servidor")
-    if len(pin) > 64:
+    if len(pin.strip()) > 64:
         raise HTTPException(422, "El PIN admite hasta 64 caracteres")
+    if pin and not pin.strip():
+        pin = ""  # solo espacios: como si viniera vacio (se conserva el guardado)
     if len(atv_user) > 200 or len(atv_password) > 200:
         raise HTTPException(422, "Usuario o contraseña demasiado largos")
     p12_bytes = None
@@ -392,7 +398,8 @@ async def put_credentials(
         row.p12_enc = secretbox.seal(p12_bytes, aad("p12"))
         fields.append("p12")
     if pin:
-        row.p12_pin_enc = secretbox.seal_text(pin, aad("p12_pin"))
+        # se guarda el PIN que de verdad abrio el .p12 (sin los espacios que suelen colarse al pegarlo)
+        row.p12_pin_enc = secretbox.seal_text((info.pin_ok if info is not None and info.pin_ok is not None else pin.strip()) or pin, aad("p12_pin"))
         fields.append("p12_pin")
     if info is not None:
         row.cert_subject, row.cert_issuer, row.cert_serial = info.subject, info.issuer, info.serial

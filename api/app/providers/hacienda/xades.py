@@ -11,7 +11,7 @@ import base64
 import hashlib
 import os
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from cryptography import x509
@@ -33,7 +33,25 @@ NS_DS = "http://www.w3.org/2000/09/xmldsig#"
 
 
 class CertError(Exception):
-    """El certificado no sirve (PIN, vencido, llave debil). Mensaje legible, sin secretos."""
+    """El certificado no sirve (PIN, vencido, llave debil). Mensaje legible, sin secretos.
+    code: "pin" (el PIN no lo abre), "archivo" (danado o no es un .p12), "vencido", "llave" (RSA < 2048) o
+    "incompleto" (sin llave privada o sin certificado)."""
+
+    def __init__(self, message: str, code: str = "archivo"):
+        super().__init__(message)
+        self.code = code
+
+
+# Mensajes distintos para cada causa (reunion 2, pedido 6: con el PIN correcto salia "PIN incorrecto / archivo danado")
+MSG_PIN = (
+    "El PIN no abre el certificado. Es el PIN que se definió al generar la llave criptográfica en ATV/TRIBU-CR "
+    "(las nuevas: 14 caracteres), no la contraseña de ATV ni de TRIBU-CR. Revise mayúsculas, minúsculas y que no falte "
+    "ningún carácter."
+)
+MSG_ARCHIVO = (
+    "El archivo está dañado o no es una llave criptográfica .p12. Descárguela de nuevo desde ATV/TRIBU-CR y súbala tal "
+    "cual, sin abrirla, comprimirla ni cambiarle la extensión."
+)
 
 
 @dataclass
@@ -48,6 +66,8 @@ class CertInfo:
     not_after: datetime
     sha256: str
     key_bits: int
+    # el PIN que de verdad abrio el .p12 (sin espacios de los extremos si asi abrio): es el que se guarda
+    pin_ok: str | None = field(default=None, repr=False, compare=False)
 
     @property
     def days_left(self) -> int:
@@ -89,25 +109,50 @@ def _cn(name: x509.Name) -> str | None:
     return str(attrs[0].value) if attrs else None
 
 
-def _load(p12: bytes, pin: str):
-    # El PIN tal cual y, si no abre, sin espacios ni saltos de linea en los extremos: al copiarlo y pegarlo es
-    # comun que venga con uno de mas, y la llave lo rechaza igual que a un PIN incorrecto.
-    intentos = list(dict.fromkeys([pin or "", (pin or "").strip()]))
+def _pins(pin: str | None) -> list[str]:
+    # Primero sin espacios ni saltos de linea en los extremos (al copiar y pegar es comun que venga uno de mas, y la
+    # llave lo rechaza igual que a un PIN incorrecto) y despues tal cual, por si el PIN de verdad los lleva.
+    return list(dict.fromkeys([(pin or "").strip(), pin or ""]))
+
+
+def _open(p12: bytes, pin: str | None):
+    """(llave, certificado, cadena, PIN que abrio). Primero OpenSSL (via cryptography); si no abre, la lectura propia
+    (p12legacy), que no depende del proveedor "legacy" de OpenSSL para RC2-40/3DES y distingue un PIN incorrecto de un
+    archivo danado: OpenSSL responde lo mismo para las dos cosas."""
+    from . import p12legacy
+
     err: Exception | None = None
-    for intento in intentos:
+    for intento in _pins(pin):
         try:
             key, cert, extra = pkcs12.load_key_and_certificates(p12, intento.encode("utf-8"))
-            break
-        except Exception as e:  # noqa: BLE001 - ValueError del PIN o del archivo: mismo mensaje, sin detalles
+            return key, cert, list(extra or []), intento
+        except Exception as e:  # noqa: BLE001 - ValueError del PIN, del archivo o de un cifrado viejo
             err = e
-    else:
-        raise CertError(
-            "El PIN no abre el certificado (o el archivo no es la llave criptográfica .p12). Es el PIN que se definió al "
-            "generar la llave en TRIBU-CR/ATV (las nuevas: 14 caracteres), no la contraseña de ATV ni de TRIBU-CR."
-        ) from err
+    try:
+        p12legacy.parse(p12)
+    except p12legacy.P12Format as e:
+        raise CertError(MSG_ARCHIVO, "archivo") from e
+    except p12legacy.P12Unsupported as e:
+        raise CertError(MSG_ARCHIVO, "archivo") from e
+    malo_pin = False
+    for intento in _pins(pin):
+        try:
+            key, cert, extra = p12legacy.open_p12(p12, intento)
+            return key, cert, list(extra or []), intento
+        except p12legacy.P12Password:
+            malo_pin = True
+        except (p12legacy.P12Format, p12legacy.P12Unsupported) as e:
+            err = e
+    if malo_pin:
+        raise CertError(MSG_PIN, "pin") from None
+    raise CertError(MSG_ARCHIVO, "archivo") from err
+
+
+def _load(p12: bytes, pin: str):
+    key, cert, extra, _ = _open(p12, pin)
     if key is None or cert is None:
-        raise CertError("El archivo .p12 no trae llave privada y certificado")
-    return key, cert, list(extra or [])
+        raise CertError("El archivo .p12 no trae la llave privada y su certificado: descargue la llave completa desde ATV/TRIBU-CR", "incompleto")
+    return key, cert, extra
 
 
 def info_of(cert: x509.Certificate) -> CertInfo:
@@ -129,12 +174,19 @@ def info_of(cert: x509.Certificate) -> CertInfo:
 
 def load_p12(p12: bytes, pin: str) -> CertInfo:
     """Valida el .p12 con su PIN: RSA >= 2048 y vigente. Devuelve los metadatos (nunca la llave)."""
-    key, cert, _ = _load(p12, pin)
+    key, cert, _, pin_ok = _open(p12, pin)
+    if key is None or cert is None:
+        raise CertError("El archivo .p12 no trae la llave privada y su certificado: descargue la llave completa desde ATV/TRIBU-CR", "incompleto")
     if not isinstance(key, rsa.RSAPrivateKey) or key.key_size < 2048:
-        raise CertError("La llave del certificado debe ser RSA de al menos 2048 bits")
+        raise CertError("La llave del certificado debe ser RSA de al menos 2048 bits", "llave")
     info = info_of(cert)
     if info.not_after <= datetime.now(UTC):
-        raise CertError(f"El certificado venció el {info.not_after:%d/%m/%Y}")
+        raise CertError(
+            f"El certificado venció el {info.not_after:%d/%m/%Y}: el PIN y el archivo están bien, pero hay que generar una llave "
+            "criptográfica nueva en ATV/TRIBU-CR y cargarla aquí",
+            "vencido",
+        )
+    info.pin_ok = pin_ok
     return info
 
 

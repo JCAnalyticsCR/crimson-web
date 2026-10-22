@@ -14,9 +14,11 @@ Reglas que no se negocian:
 - Aqui solo se gestionan usuarios internos: los de clientes, soporte y empresas aliadas tienen su propia pantalla.
 - Aceptar una invitacion con una cuenta que ya existe pide la contrasena de esa cuenta (la propia, no una temporal):
   el enlace solo no basta. Al entrar a otra empresa sus enlaces de contrasena vivos dejan de servir.
-- Un usuario con actividad (documentos o registros a su nombre) no se borra: se desactiva. El admin solo elimina a
-  quien nunca hizo nada (p. ej. una cuenta de prueba; reunion 21/10, pedido 21), con su contrasena. Todo queda en la
-  bitacora, sin contrasenas, tokens ni enlaces.
+- Eliminar (reunion 21/10, pedido 21; reunion 2, pedido 28), solo un admin y con su contrasena: quien nunca hizo
+  nada (p. ej. una cuenta de prueba) se borra de verdad; quien tiene actividad (documentos o registros a su nombre, o
+  bitacora mas alla de su propia cuenta) se ANONIMIZA y desactiva: la cuenta queda como "Usuario eliminado #id" para
+  que sus documentos y la bitacora sigan apuntando a alguien, sin nombre, correo, contrasena ni 2FA, y sale de la
+  lista. Nunca a si mismo ni al ultimo admin activo. Todo queda en la bitacora, sin contrasenas, tokens ni enlaces.
 - Correo de avisos (pedido 22): opcional; las notificaciones internas le llegan ahi en vez de a su correo de entrada.
   Lo cambia el admin con su contrasena y se le avisa a la persona en su correo de entrada.
 - Sin correo activo (Resend), cada accion devuelve el enlace para mandarlo por WhatsApp.
@@ -226,7 +228,7 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
     # los usuarios del portal del cliente se administran desde Accesos de clientes, los de soporte en su pestana y
     # los de empresas aliadas desde su empresa aliada
     internos = db.scalars(select(TenantUser).where(TenantUser.tenant_id == tid, TenantUser.customer_id.is_(None), TenantUser.ally_company_id.is_(None))).all()
-    rows = [m for m in internos if m.role_code not in NOT_HERE]
+    rows = [m for m in internos if m.role_code not in NOT_HERE and not is_deleted(m.user)]
     support_members = sum(1 for m in internos if m.role_code == "soporte" and m.active)
     ids = [m.user_id for m in rows]
     shared = shared_ids(db, ids, tid)
@@ -506,7 +508,7 @@ class AcceptIn(BaseModel):
 
 
 @router.post("/invitations/accept", tags=["publico"])
-def accept(data: AcceptIn, request: Request, db: Session = Depends(get_db)):
+def accept(data: AcceptIn, request: Request, response: Response, db: Session = Depends(get_db)):
     ip = _ip(request)
     token_limiter.hit(f"inv:{ip_key(ip)}")
     inv = _live_invitation(db, data.token)
@@ -603,9 +605,29 @@ def accept(data: AcceptIn, request: Request, db: Session = Depends(get_db)):
     if not inv.customer_id and not inv.ally_company_id:
         # las demas invitaciones internas del mismo correo ya no tienen sentido
         _supersede(db, inv.tenant_id, inv.email.lower(), u.id, ip, {"reemplazada_por": inv.id}, exclude_id=inv.id)
-    audit(db, inv.tenant_id, u.id, "invite_accept", "invitation", inv.id, {"email": inv.email, "role": inv.role_code, "cuenta_existente": existing}, ip=ip)
+    cerrada = _close_browser_session(db, request, response, now)
+    audit(
+        db, inv.tenant_id, u.id, "invite_accept", "invitation", inv.id, {"email": inv.email, "role": inv.role_code, "cuenta_existente": existing, "cerro_sesion_anterior": cerrada}, ip=ip
+    )
     db.commit()
-    return {"ok": True, "email": u.email, "existing_account": existing}
+    return {"ok": True, "email": u.email, "existing_account": existing, "previous_session_closed": cerrada}
+
+
+def _close_browser_session(db: Session, request: Request, response: Response, now: datetime) -> bool:
+    """Reunion 2, pedido 27: aceptar una invitacion en un navegador con otra sesion abierta entraba con la sesion vieja
+    (cargo "Ventas" en vez de la cuenta nueva). La sesion de ESE navegador (su cookie) se cierra al aceptar: despues se
+    entra con la cuenta de la invitacion. Las demas sesiones de esa persona en otros equipos no se tocan."""
+    from ..models import RefreshToken
+    from .auth import COOKIE
+
+    raw = request.cookies.get(COOKIE)
+    if not raw:
+        return False
+    rt = db.scalar(select(RefreshToken).where(RefreshToken.token_hash == hash_token(raw)))
+    if rt is not None and rt.revoked_at is None:
+        rt.revoked_at = now
+    response.delete_cookie(COOKIE, path="/", domain=cfg.cookie_domain)
+    return True
 
 
 # ---------- Editar un usuario ----------
@@ -835,7 +857,53 @@ def sessions_revoke(uid: int, p: Principal = Depends(ADMIN), db: Session = Depen
     return {"ok": True, "revoked": n}
 
 
-# ---------- Eliminar un usuario sin actividad (reunion 21/10, pedido 21) ----------
+# ---------- Eliminar un usuario (reunion 21/10, pedido 21; reunion 2, pedido 28) ----------
+DELETED_DOMAIN = "eliminado.invalid"
+
+
+def _correo_eliminado(uid: int) -> str:
+    return f"eliminado.{uid}.{secrets.token_hex(4)}@{DELETED_DOMAIN}"
+
+
+def email_digest(correo: str) -> str:
+    import hashlib
+
+    return hashlib.sha256((correo or "").strip().lower().encode()).hexdigest()
+
+
+def _enmascarar(correo: str) -> str:
+    local, _, dom = correo.partition("@")
+    return f"{local[:2]}***@{dom}" if dom else "***"
+
+
+def is_deleted(u: User) -> bool:
+    """Cuenta eliminada que se conserva como rastro (anonimizada o nombrada por la bitacora): no sale en las listas."""
+    return (u.email or "").lower().endswith("@" + DELETED_DOMAIN)
+
+
+def _anonimizar(db: Session, m: TenantUser, now: datetime) -> None:
+    """Con actividad no se borra la fila (documentos, pagos, comisiones y bitacora apuntan a ella): se le quita todo
+    lo personal y el acceso. La membresia queda inactiva (las comisiones y reportes viejos siguen viendo su rol) y sin
+    correo de avisos; sus sesiones y enlaces mueren."""
+    from ..models import RefreshToken
+
+    u = m.user
+    u.email = _correo_eliminado(u.id)
+    u.full_name = f"Usuario eliminado #{u.id}"
+    u.active = False
+    u.password_hash = hash_password(secrets.token_urlsafe(32))
+    u.must_change_password, u.temp_password_expires_at, u.temp_password_by, u.temp_password_tenant_id = False, None, None, None
+    u.totp_enabled, u.totp_secret, u.totp_recovery, u.totp_pending_secret = False, None, [], None
+    u.failed_logins, u.locked_until = 0, None
+    u.session_version = int(u.session_version or 0) + 1
+    m.active = False
+    m.notify_email = None
+    for rt in db.scalars(select(RefreshToken).where(RefreshToken.user_id == u.id)):
+        db.delete(rt)
+    for pr in db.scalars(select(PasswordReset).where(PasswordReset.user_id == u.id)):
+        db.delete(pr)
+
+
 # Columnas que apuntan a un usuario y NO son actividad: su membresia, sus sesiones y enlaces de contrasena, y quien le
 # genero una temporal. La bitacora se mira aparte (ver _actividad).
 _NO_ES_ACTIVIDAD = {
@@ -925,21 +993,20 @@ def _guard_delete(db: Session, p: Principal, uid: int) -> TenantUser:
 
 @router.get("/users/{uid}/activity")
 def user_activity(uid: int, p: Principal = Depends(ADMIN), db: Session = Depends(get_db)):
-    """¿Se puede eliminar? Solo si no tiene nada a su nombre; si no, se desactiva (y se dice por que)."""
+    """¿Se puede eliminar y como? mode "borrar" (sin actividad: se borra de verdad) o "anonimizar" (con actividad: se
+    conserva lo que hizo a nombre de "Usuario eliminado"). reason: por que no se puede."""
     m = _member(db, p, uid)
     act = _actividad(db, uid)
     motivo = None
     if p.role != "admin":
         motivo = "Solo un administrador elimina usuarios"
     elif uid == p.user.id:
-        motivo = "No podés eliminar tu propia cuenta"
+        motivo = "No puede eliminar su propia cuenta"
     elif is_shared(db, uid, p.tenant.id):
         motivo = "También entra a otra empresa: aquí solo se puede desactivar"
-    elif act:
-        motivo = "Tiene actividad a su nombre: se desactiva para conservar quién hizo qué"
     elif m.role_code == "admin" and m.active and count_active_admins(db, p.tenant.id) <= 1:
         motivo = "Es el único administrador activo"
-    return {"can_delete": motivo is None, "reason": motivo, "activity": act}
+    return {"can_delete": motivo is None, "reason": motivo, "activity": act, "mode": "anonimizar" if act else "borrar"}
 
 
 class DeleteIn(BaseModel):
@@ -949,23 +1016,31 @@ class DeleteIn(BaseModel):
 
 @router.post("/users/{uid}/delete")
 def user_delete(uid: int, data: DeleteIn, p: Principal = Depends(ADMIN), db: Session = Depends(get_db)):
-    """Elimina a un usuario que nunca hizo nada (p. ej. una cuenta de prueba). Con actividad: 409 y se desactiva.
-    La cuenta se borra; si la bitacora ya la nombra (entro alguna vez) y esa tabla no admite borrados, se deja la
-    cuenta inactiva, sin acceso y con el correo liberado (se puede invitar de nuevo con el mismo correo)."""
+    """Elimina a un usuario. Sin actividad (p. ej. una cuenta de prueba): la cuenta se borra; si la bitacora ya la nombra
+    (entro alguna vez) y esa tabla no admite borrados, se deja inactiva, sin acceso y con el correo liberado. Con
+    actividad: se anonimiza y desactiva (_anonimizar). En los dos casos el correo queda libre para invitarlo de nuevo."""
     from ..models import AuditLog, RefreshToken
 
     m = _guard_delete(db, p, uid)
     admin_users_limiter.hit(_actor_key(p))
     _reauth(p, data.admin_password)
     act = _actividad(db, uid)
-    if act:
-        detalle = ", ".join(f"{a['what']} ({a['count']})" for a in act[:4])
-        raise HTTPException(409, f"Tiene actividad a su nombre ({detalle}): no se elimina, desactivalo")
     u = m.user
-    antes = {"email": u.email, "name": u.full_name, "role": m.role_code, "active": m.active}
+    correo = u.email or ""
+    # en la bitacora (que no se borra) el correo va enmascarado y con su huella (bootstrap.extra_invites la usa para no
+    # volver a invitar una cuenta eliminada); el nombre basta para saber a quien se elimino
+    antes = {"email": _enmascarar(correo), "email_sha256": email_digest(correo), "name": u.full_name, "role": m.role_code, "active": m.active}
     tid, now = p.tenant.id, datetime.now(UTC)
-    for inv in _pending_internal(db, tid, (u.email or "").lower()):
+    for inv in _pending_internal(db, tid, correo.lower()):
         _revoke_inv(inv, p.user.id, now)
+    if act:
+        _anonimizar(db, m, now)
+        db.flush()
+        detalle = {a["what"]: a["count"] for a in act[:8]}
+        audit(db, tid, p.user.id, "user_delete", "user", uid, {**antes, "modo": "anonimizada", "actividad": detalle}, ip=p.ip, before=antes, reason=data.reason)
+        login_limiter.forget_account(correo)
+        db.commit()
+        return {"ok": True, "mode": "anonimizada"}
     db.delete(m)
     for rt in db.scalars(select(RefreshToken).where(RefreshToken.user_id == uid)):
         db.delete(rt)
@@ -975,7 +1050,7 @@ def user_delete(uid: int, data: DeleteIn, p: Principal = Depends(ADMIN), db: Ses
     en_bitacora = db.scalar(select(AuditLog.id).where(AuditLog.user_id == uid).limit(1)) is not None
     if en_bitacora:
         # la bitacora no se toca (en Postgres no admite UPDATE ni DELETE): la cuenta queda como rastro, sin acceso
-        u.email = f"eliminado.{uid}.{secrets.token_hex(4)}@eliminado.invalid"
+        u.email = _correo_eliminado(uid)
         u.full_name = f"{(u.full_name or '').strip()[:140]} (eliminado)"
         u.active = False
         u.password_hash = hash_password(secrets.token_urlsafe(32))
@@ -988,6 +1063,6 @@ def user_delete(uid: int, data: DeleteIn, p: Principal = Depends(ADMIN), db: Ses
         modo = "borrada"
     db.flush()
     audit(db, tid, p.user.id, "user_delete", "user", uid, {**antes, "modo": modo}, ip=p.ip, before=antes, reason=data.reason)
-    login_limiter.forget_account(antes["email"] or "")
+    login_limiter.forget_account(correo)
     db.commit()
     return {"ok": True, "mode": "borrada" if not en_bitacora else "inactiva"}

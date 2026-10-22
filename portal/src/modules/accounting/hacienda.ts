@@ -76,6 +76,8 @@ export type InboxStatus = { source: "env" | "ajustes" | "ninguno"; mailbox: stri
 
 export type HaciendaState = {
   mode: Mode; einvoice_provider: string; environment: "pruebas" | "produccion"; can_configure: boolean;
+  /* con qué credenciales se emite hoy (null: no se emite a Hacienda) */
+  emission_environment?: "pruebas" | "produccion" | null;
   profile: { id_type: string; tax_id: string | null; legal_name: string | null; commercial_name: string | null; email: string | null; phone_country: string; phone: string | null; province: string | null; canton: string | null; district: string | null; district_name: string | null; barrio: string | null; other_signs: string | null };
   activities: { id: number; code: string; description: string | null; is_default: boolean; active: boolean }[];
   credentials: Record<"pruebas" | "produccion", CredBlock>;
@@ -85,7 +87,9 @@ export type HaciendaState = {
   imap: { source: string; mailbox: string | null; last_run_at: string | null; last_result: unknown };
 };
 export type CredBlock = {
-  source: "ajustes" | "entorno" | "ninguna"; atv_user_set: boolean; atv_password_set: boolean; p12_set: boolean; pin_set: boolean; readable: boolean;
+  source: "ajustes" | "entorno" | "ninguna"; atv_user_set: boolean;
+  /* de qué ambiente parece el usuario ATV (stag = pruebas, prod = producción) y el aviso si no corresponde */
+  atv_user_env?: "pruebas" | "produccion" | null; atv_user_warning?: string | null; atv_password_set: boolean; p12_set: boolean; pin_set: boolean; readable: boolean;
   cert: { subject_cn: string | null; issuer_cn: string | null; serial: string | null; not_after: string | null; days_left: number | null; sha256: string | null } | null;
   last_test_at: string | null; last_test_ok: boolean | null; last_test_detail: string | null;
 };
