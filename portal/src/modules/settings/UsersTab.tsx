@@ -161,20 +161,20 @@ export default function UsersTab() {
         {filtro !== "invitaciones" && (
           shownUsers.length === 0 ? <Empty title="Sin usuarios" hint={needle ? "Nadie coincide con la búsqueda." : "No hay usuarios en este filtro."} /> : (
             <div style={{ overflowX: "auto" }}>
-              <table className="table">
+              <table className="table table--stack">
                 <thead><tr><th>Usuario</th><th>Rol</th><th>Seguridad</th><th>Último acceso</th><th>Estado</th><th /></tr></thead>
                 <tbody>
                   {shownUsers.map((u) => {
                     const lockedAdmin = u.role === "admin" && !viewerIsAdmin;
                     return (
                       <tr key={u.id}>
-                        <td><b>{u.name}</b>{u.is_self && <> <Chip tone="info">Vos</Chip></>}<div className="meta" style={{ textTransform: "none" }}>{u.email}</div>{u.notify_email && <div className="meta" style={{ textTransform: "none" }} title="Las notificaciones internas le llegan a este correo">avisos: {u.notify_email}</div>}{u.ally_match && <div style={{ marginTop: 4 }}><AllyMatchChip m={u.ally_match} /></div>}</td>
-                        <td>
-                          <select className="select" style={{ height: 32, width: 165 }} value={u.role} disabled={u.is_self || !canEdit || lockedAdmin} title={u.is_self ? "Tu propio rol no se cambia desde aquí" : lockedAdmin ? "Solo un administrador puede cambiar a otro administrador" : undefined} onChange={(e) => changeRole(u, e.target.value)}>
+                        <td className="stack-full"><b>{u.name}</b>{u.is_self && <> <Chip tone="info">Vos</Chip></>}<div className="meta" style={{ textTransform: "none" }}>{u.email}</div>{u.notify_email && <div className="meta" style={{ textTransform: "none" }} title="Las notificaciones internas le llegan a este correo">avisos: {u.notify_email}</div>}{u.ally_match && <div style={{ marginTop: 4 }}><AllyMatchChip m={u.ally_match} /></div>}</td>
+                        <td data-label="Rol">
+                          <select className="select" style={{ height: 32, width: 165, maxWidth: "100%" }} value={u.role} disabled={u.is_self || !canEdit || lockedAdmin} title={u.is_self ? "Tu propio rol no se cambia desde aquí" : lockedAdmin ? "Solo un administrador puede cambiar a otro administrador" : undefined} onChange={(e) => changeRole(u, e.target.value)}>
                             {roleOptions(data.roles, u.role, viewerIsAdmin).map((r) => <option key={r} value={r}>{roleMeta(r).label}</option>)}
                           </select>
                         </td>
-                        <td style={{ minWidth: 160 }}>
+                        <td style={{ minWidth: 160 }} data-label="Seguridad">
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, maxWidth: 240 }}>
                             {u.totp && <Chip tone="ok" title="Verificación en dos pasos activa">2FA</Chip>}
                             {!u.totp && u.active && data.twofa_roles?.includes(u.role) && <Chip tone="warn" title="Su rol exige la verificación en dos pasos: al vencer la gracia, el panel solo le deja configurarla">Sin 2FA · obligatoria</Chip>}
@@ -185,9 +185,9 @@ export default function UsersTab() {
                             {!u.totp && !(u.active && data.twofa_roles?.includes(u.role)) && !u.must_change_password && !u.locked_until && !u.login_failures_until && !u.reset_link_expires_at && <span className="muted">—</span>}
                           </div>
                         </td>
-                        <td className="muted" style={{ whiteSpace: "nowrap" }}>{u.last_login ? fechaHora(u.last_login) : "nunca"}</td>
-                        <td>{u.active ? <Chip tone="ok">Activo</Chip> : <Chip tone="muted">Inactivo</Chip>}</td>
-                        <td className="num">{canConvert(u) && u.ally_match && <button className="btn btn--soft btn--sm" onClick={() => setToAlly(u)}>Pasar al portal de aliados</button>}{canEdit && <button className="btn btn--ghost btn--sm" onClick={() => setManageId(u.id)}>Gestionar</button>}</td>
+                        <td className="muted" style={{ whiteSpace: "nowrap" }} data-label="Último acceso">{u.last_login ? fechaHora(u.last_login) : "nunca"}</td>
+                        <td data-label="Estado">{u.active ? <Chip tone="ok">Activo</Chip> : <Chip tone="muted">Inactivo</Chip>}</td>
+                        <td className="num stack-actions">{canConvert(u) && u.ally_match && <button className="btn btn--soft btn--sm" onClick={() => setToAlly(u)}>Pasar al portal de aliados</button>}{canEdit && <button className="btn btn--ghost btn--sm" onClick={() => setManageId(u.id)}>Gestionar</button>}</td>
                       </tr>
                     );
                   })}
@@ -216,24 +216,24 @@ export default function UsersTab() {
         <Card title="Invitaciones" flush extra={<span className="meta">pendientes y vencidas (30 días)</span>}>
           {shownInvs.length === 0 ? <Empty title="Sin invitaciones" hint="Nadie coincide con la búsqueda." /> : (
             <div style={{ overflowX: "auto" }}>
-              <table className="table">
+              <table className="table table--stack">
                 <thead><tr><th>Correo</th><th>Rol</th><th>Estado</th><th>Envío</th><th /></tr></thead>
                 <tbody>
                   {shownInvs.map((i) => (
                     <tr key={i.id}>
-                      <td><b>{i.email}</b>{i.invited_by && <div className="meta" style={{ textTransform: "none" }}>invitó {i.invited_by}</div>}</td>
-                      <td className="muted">{roleMeta(i.role).label}</td>
-                      <td>
+                      <td className="stack-full"><b>{i.email}</b>{i.invited_by && <div className="meta" style={{ textTransform: "none" }}>invitó {i.invited_by}</div>}</td>
+                      <td className="muted" data-label="Rol">{roleMeta(i.role).label}</td>
+                      <td data-label="Estado">
                         {i.status === "pendiente" ? <span>Pendiente · vence {fecha(i.expires_at)}</span> : <span style={{ color: "var(--bad)" }}>Vencida el {fecha(i.expires_at)}</span>}
                         {i.sent_count > 1 && <div className="meta" style={{ textTransform: "none" }}>enviada {i.sent_count} veces</div>}
                       </td>
-                      <td style={{ fontSize: 12.5 }}>
+                      <td style={{ fontSize: 12.5 }} data-label="Envío">
                         {i.email_status === "enviado" ? <span style={{ color: "var(--ok)" }}>Enviado</span>
                           : i.email_status === "simulado" ? <span className="muted">No salió: el correo no está activo</span>
                           : i.email_status === "error" ? <span style={{ color: "var(--bad)" }}>No salió: {i.email_error}</span>
                           : <span className="muted">—</span>}
                       </td>
-                      <td className="num" style={{ whiteSpace: "nowrap" }}>
+                      <td className="num stack-actions" style={{ whiteSpace: "nowrap" }}>
                         {canEdit && (() => {
                           /* una invitación de Administrador solo la toca otro administrador (la API responde 403) */
                           const bloqueada = i.role === "admin" && !viewerIsAdmin;
