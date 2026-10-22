@@ -286,6 +286,8 @@ def deliver(m: EmailOutbox, files: list[tuple[str, bytes]] | None = None) -> Non
     reintenta. Con adjuntos o si es una invitacion queda sin hora: mail.retry_outbox no reenvia lo primero (lo deja
     "fallido" y avisa al dueño en su siguiente pasada) ni toca lo segundo (el admin usa "Reenviar").
     Si sale, se borra el error de un intento anterior (Ajustes lo mostraba en rojo debajo de un correo confirmado)."""
+    from . import email_layout
+
     key, sender = os.getenv("RESEND_API_KEY"), _sender()
     if not key:
         m.status, m.sent_at = "simulado", datetime.now(UTC)
@@ -301,6 +303,8 @@ def deliver(m: EmailOutbox, files: list[tuple[str, bytes]] | None = None) -> Non
                 "bcc": [b for b in (m.bcc or "").split(",") if b],
                 "subject": m.subject,
                 "html": m.html,
+                # version en texto plano: el correo que trae solo HTML puntua peor en los filtros de spam (22/10)
+                "text": email_layout.html_to_text(m.html),
                 # las respuestas del cliente llegan al buzon real de Crimson, no a una direccion que nadie lee
                 **({"reply_to": [os.getenv("MAIL_REPLY_TO")]} if os.getenv("MAIL_REPLY_TO") else {}),
                 # Antes el correo decia "va adjunto en PDF" y no se mandaba nada: el cliente no recibia el documento.

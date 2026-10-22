@@ -28,6 +28,7 @@ from __future__ import annotations
 import html as _html
 import re
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -414,3 +415,69 @@ def ensure(t: Tenant, subject: str, html: str | None) -> str:
     return render(
         t, title=titulo, body=f'<div style="font-family:{FONT};font-size:15px;line-height:1.55;color:{INK}">{body}</div>', preheader=subject, action=action
     )
+
+
+# ---------- version en texto plano (22/10: los correos salian solo en HTML) ----------
+class _Text(HTMLParser):
+    """HTML del diseno -> texto legible: parrafos y filas en lineas, enlaces como "texto (url)", sin lo oculto (el
+    preheader va en un div display:none) ni estilos. Gmail/Outlook puntuan peor el correo que trae solo HTML."""
+
+    BLOCK = {"p", "div", "tr", "h1", "h2", "h3", "li", "table", "br", "hr"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.out: list[str] = []
+        self.hidden = 0  # profundidad dentro de un bloque oculto
+        self.skip = 0  # <style>/<head>
+        self.href: list[str | None] = []
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag in ("style", "head", "title"):
+            self.skip += 1
+        if self.hidden or "display:none" in (a.get("style") or "").replace(" ", ""):
+            self.hidden += 1 if tag not in ("br", "img", "hr") else 0
+            return
+        if tag in self.BLOCK:
+            self.out.append("\n")
+        if tag == "li":
+            self.out.append("- ")
+        if tag == "td":
+            self.out.append("  ")
+        if tag == "a":
+            self.href.append(a.get("href"))
+
+    def handle_endtag(self, tag):
+        if tag in ("style", "head", "title"):
+            self.skip = max(0, self.skip - 1)
+        if self.hidden:
+            self.hidden -= 1
+            return
+        if tag == "a" and self.href:
+            url = self.href.pop()
+            if url and url.startswith(("http://", "https://")) and url not in "".join(self.out[-3:]):
+                self.out.append(f" ({url})")
+        if tag in ("p", "tr", "table", "h1", "h2", "h3"):
+            self.out.append("\n")
+
+    def handle_data(self, data):
+        if not self.hidden and not self.skip:
+            self.out.append(data)
+
+
+def html_to_text(html: str | None) -> str:
+    if not html:
+        return ""
+    p = _Text()
+    try:
+        p.feed(html)
+        p.close()
+    except Exception:  # noqa: BLE001 - un HTML raro nunca impide enviar el correo
+        return re.sub(r"<[^>]+>", " ", html)
+    lines = [" ".join(x.split()) for x in "".join(p.out).splitlines()]
+    out, blank = [], 0
+    for ln in lines:
+        blank = blank + 1 if not ln else 0
+        if blank <= 1:
+            out.append(ln)
+    return "\n".join(out).strip()
