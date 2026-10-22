@@ -844,7 +844,12 @@ def status_extra(t: Tenant, o: Order, kind: str, note: str | None = None) -> str
 def _note_box(inner_html: str, warn: bool = False) -> str:
     """Recuadro de nota dentro del correo (motivo, guia, donde retirar). `inner_html` ya viene escapado."""
     fondo, borde = ("#fff4f2", "#f1b8ae") if warn else ("#f6f2ee", "#ebe7e3")
-    return f'<div style="margin:6px 0 4px;background:{fondo};border:1px solid {borde};border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.5">{inner_html}</div>'
+    # una tabla y no un <div>: Outlook (motor de Word) no pinta fondo ni borde redondeado en un div
+    return (
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:6px 0 4px"><tr>'
+        f'<td bgcolor="{fondo}" style="background:{fondo};border:1px solid {borde};border-radius:10px;padding:12px 14px;'
+        f'font-family:{email_layout.FONT};font-size:14px;line-height:1.5;color:{EMAIL_INK}">{inner_html}</td></tr></table>'
+    )
 
 
 def next_states(o: Order) -> list[str]:

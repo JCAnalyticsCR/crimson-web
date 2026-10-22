@@ -33,6 +33,8 @@ type Order = {
   carriers?: string[];
   /* 21/10 (43): correo al que van los avisos y "Reenviar correo" (el actual de la ficha del cliente) */
   notify_email?: string | null;
+  /* los datos del cliente del pedido los edita solo el administrador (el API rechaza al vendedor) */
+  can_edit_contact?: boolean;
 };
 type Seller = { id: number; name: string };
 type Meta = { me: number; can_assign: boolean; can_take: boolean; sellers: Seller[]; carriers: string[] };
@@ -187,6 +189,7 @@ function Detail({ o, labels, meta, onClose, onChange }: { o: Order; labels: Reco
   const [withPay, setWithPay] = useState(true);
   const canOnvoRefund = !!(o.onvo_refundable && allows("sales.anular"));
   const [refundViaOnvo, setRefundViaOnvo] = useState(canOnvoRefund);
+  const [editContact, setEditContact] = useState(false);
   const c = o.contact || {};
   const dv = o.delivery || {};
   const needNote = act === "cancelado" || (act === "nuevo" && o.status === "en_revision");
@@ -261,7 +264,12 @@ function Detail({ o, labels, meta, onClose, onChange }: { o: Order; labels: Reco
     }>
       <div className="wo-detail">
         <div className="wo-grid">
-          <div className="wo-box"><span className="meta">Cliente</span><b>{c.name}</b>{c.company && <span>{c.company}</span>}<span>{c.email}</span>{o.notify_email && o.notify_email.toLowerCase() !== (c.email || "").toLowerCase() && <span className="muted" style={{ fontSize: 12 }} title="Correo actual de la ficha del cliente">Avisos a: <b>{o.notify_email}</b></span>}<span>{c.phone}</span>{c.id_number && <span className="mono">Céd. {c.id_number}</span>}{o.customer_id && <Link to={`/clientes/${o.customer_id}`} className="row-link">Ficha del cliente →</Link>}</div>
+          {editContact ? <ContactForm o={o} onCancel={() => setEditContact(false)} onSaved={(r) => { setEditContact(false); onChange(r); }} /> : (
+          <div className="wo-box"><span className="meta">Cliente</span><b>{c.name}</b>{c.company && <span>{c.company}</span>}<span>{c.email}</span>{o.notify_email && o.notify_email.toLowerCase() !== (c.email || "").toLowerCase() && <span className="muted" style={{ fontSize: 12 }} title="Correo actual de la ficha del cliente">Avisos a: <b>{o.notify_email}</b></span>}<span>{c.phone}</span>{c.id_number && <span className="mono">Céd. {c.id_number}</span>}{o.customer_id && <Link to={`/clientes/${o.customer_id}`} className="row-link">Ficha del cliente →</Link>}
+            {o.can_edit_contact
+              ? <button className="btn btn--ghost btn--sm" style={{ alignSelf: "flex-start", marginTop: 4 }} onClick={() => setEditContact(true)}>Editar datos</button>
+              : <span className="muted" style={{ fontSize: 12 }}>Solo el administrador edita estos datos.</span>}
+          </div>)}
           <div className="wo-box"><span className="meta">Entrega</span>
             {dv.type === "retiro" ? <b>Retiro en sitio</b> : <><b>{o.shipping_method || "Envío"}</b><span>{[dv.address, dv.district, dv.canton, dv.province].filter(Boolean).join(", ") || c.address || "—"}</span></>}
             {o.tracking_number && <span>Guía <b className="mono">{o.tracking_number}</b>{o.carrier ? ` · ${o.carrier}` : ""}</span>}
@@ -353,6 +361,45 @@ function Detail({ o, labels, meta, onClose, onChange }: { o: Order; labels: Reco
         </div>
       </div>
     </Modal>
+  );
+}
+
+/* Datos del cliente del pedido: solo el administrador los corrige (nombre, correo, teléfono, cédula, empresa).
+   El historial de correos del pedido no cambia; los avisos que salgan después van al correo corregido. */
+function ContactForm({ o, onCancel, onSaved }: { o: Order; onCancel: () => void; onSaved: (o: Order) => void }) {
+  const { toast } = useSession();
+  const c = o.contact || {};
+  const [f, setF] = useState({ name: c.name || "", email: c.email || "", phone: c.phone || "", id_type: c.id_type || "", id_number: c.id_number || "", company: c.company || "" });
+  const [busy, setBusy] = useState(false);
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }));
+  const save = async () => {
+    if (f.name.trim().length < 2) { toast("Escribí el nombre del cliente", "bad"); return; }
+    setBusy(true);
+    try {
+      const r = await api<Order>(`/store-orders/${o.id}/contact`, { method: "PUT", json: { ...f, id_type: f.id_number.trim() ? f.id_type || null : null } });
+      toast("Datos del cliente actualizados"); onSaved(r);
+    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } finally { setBusy(false); }
+  };
+  return (
+    <div className="wo-box" style={{ gap: 6 }}>
+      <span className="meta">Cliente · editar</span>
+      <Field label="Nombre"><input className="input" value={f.name} onChange={set("name")} maxLength={160} /></Field>
+      <Field label="Correo" hint="Los avisos del pedido van a este correo (o al de la ficha del cliente)."><input className="input" type="email" value={f.email} onChange={set("email")} maxLength={200} /></Field>
+      <Field label="Teléfono"><input className="input" value={f.phone} onChange={set("phone")} maxLength={25} /></Field>
+      <Field label="Cédula">
+        <div style={{ display: "flex", gap: 6 }}>
+          <select className="input" style={{ maxWidth: 120 }} value={f.id_type} onChange={set("id_type")}>
+            <option value="">Tipo</option><option value="fisica">Física</option><option value="juridica">Jurídica</option><option value="dimex">DIMEX</option><option value="nite">NITE</option>
+          </select>
+          <input className="input input--mono" value={f.id_number} onChange={set("id_number")} maxLength={30} />
+        </div>
+      </Field>
+      <Field label="Empresa"><input className="input" value={f.company} onChange={set("company")} maxLength={160} /></Field>
+      <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+        <button className="btn btn--crimson btn--sm" onClick={save} disabled={busy}>Guardar</button>
+        <button className="btn btn--ghost btn--sm" onClick={onCancel} disabled={busy}>Cancelar</button>
+      </div>
+    </div>
   );
 }
 

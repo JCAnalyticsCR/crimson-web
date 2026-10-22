@@ -471,7 +471,15 @@ def _staff_out(db: Session, o: Order, p: Principal | None = None) -> dict:
     # se escribe a mano). Vienen en el detalle para que el pedido abierto desde un enlace no dependa de la lista.
     out["takeable"] = o.id in so.takeable_ids(db, [o])
     out["carriers"] = list(so.checkout_cfg(db.get(Tenant, o.tenant_id)).get("carriers") or [])
+    # los datos del cliente del pedido los edita solo el administrador; el vendedor los ve (PUT .../contact lo rechaza)
+    out["can_edit_contact"] = can_edit_contact(p)
     return out
+
+
+def can_edit_contact(p: Principal | None) -> bool:
+    """Datos del cliente del pedido (nombre, correo, telefono, cedula): solo el administrador. Mismo criterio que la
+    ficha del cliente para el vendedor (21/10, item 23): asi nadie desvia los avisos del pedido a otro correo."""
+    return p is not None and p.role == "admin"
 
 
 def _seller_names(db: Session, ids) -> dict[int, str]:
@@ -693,6 +701,52 @@ def set_seller(oid: int, data: SellerIn, p: Principal = Depends(require("sales",
         raise HTTPException(409, "Este pedido ya no se puede tomar (está facturado, entregado o cerrado): pedile al administrador que te lo asigne")
     so.assign_seller(db, p.tenant, o, data.seller_id, by=p.user.id, ip=p.ip)
     db.commit()
+    return _staff_out(db, o, p)
+
+
+class OrderContactIn(BaseModel):
+    """Lo que el administrador corrige de los datos del cliente del pedido. Lo que no se envia no cambia; "" lo borra
+    (salvo el nombre, que es obligatorio)."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str | None = Field(None, min_length=2, max_length=160)
+    email: EmailStr | None = Field(None, max_length=200)
+    phone: str | None = Field(None, max_length=25)
+    id_type: str | None = Field(None, pattern="^(fisica|juridica|dimex|nite)?$")
+    id_number: str | None = Field(None, max_length=30)
+    company: str | None = Field(None, max_length=160)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _vacio(cls, v):
+        return None if isinstance(v, str) and not v.strip() else v
+
+
+@router.put("/store-orders/{oid}/contact")
+def set_contact(oid: int, data: OrderContactIn, p: Principal = Depends(require("sales", "editar")), db: Session = Depends(get_db)):
+    """Corrige los datos del cliente del pedido (nombre, correo, telefono, cedula, empresa). Solo el administrador: el
+    vendedor los ve y le pide el cambio. No toca el historial de correos del pedido; los avisos que salgan despues van
+    al correo que corresponda (so.notify_email)."""
+    o = _get(db, p, oid)
+    if not can_edit_contact(p):
+        raise HTTPException(403, "Solo el administrador edita los datos del cliente del pedido")
+    cambios = data.model_dump(exclude_unset=True)
+    if "name" in cambios and not cambios["name"]:
+        raise HTTPException(422, "El nombre del cliente es obligatorio")
+    antes = dict(o.contact or {})
+    nuevo = dict(antes)
+    for k, v in cambios.items():
+        v = (str(v).lower() if k == "email" and v else v) or None
+        nuevo[k] = v
+    if not nuevo.get("id_number"):
+        nuevo["id_type"] = None
+    diff = {k: {"de": antes.get(k), "a": nuevo.get(k)} for k in nuevo if antes.get(k) != nuevo.get(k)}
+    if diff:
+        o.contact = nuevo  # JSON: se reasigna (una mutacion en sitio no se guarda)
+        so._note(o, p.user.id, "Datos del cliente corregidos: " + ", ".join(sorted(diff)))
+        audit(db, p.tenant.id, p.user.id, "contact", "order", o.id, diff, ip=p.ip)
+        db.commit()
     return _staff_out(db, o, p)
 
 
