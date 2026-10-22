@@ -116,7 +116,7 @@ export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {
             <thead><tr><th>Código</th><th>Cliente</th>{todo && <th>Vendedor</th>}<th>Fecha</th><th>Vence</th><th className="num">Monto</th>{!isQ && <th className="num">Saldo</th>}<th>Estado</th><th /></tr></thead>
             <tbody>{items.map((d) => (
               <tr key={d.id}>
-                <td><Link className="row-link mono" to={`${base}/${d.id}`}>{d.number}</Link></td>
+                <td><Link className="row-link mono" to={`${base}/${d.id}`}>{d.number}</Link>{d.number_provisional && <> <span className="badge badge--warn" title="Número provisional: toma su número fiscal al emitir ante Hacienda">Provisional</span></>}</td>
                 <td>{d.customer_name || <span className="muted">Sin cliente</span>}</td>
                 {todo && <td className="muted">{d.seller_name || "—"}</td>}
                 <td className="muted">{fmtDate(d.issue_date)}</td>

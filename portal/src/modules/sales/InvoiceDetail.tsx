@@ -85,7 +85,7 @@ export default function InvoiceDetail() {
       {inv && (
         <div className="doc" style={{ marginTop: -4 }}>
           <Card title="Pagos" flush extra={<div style={{ display: "flex", gap: 8 }}>
-            {allows("sales.enviar") && <button className="btn btn--ghost btn--sm" onClick={getLink}><Icon d={I.link} />Enlace de pago</button>}
+            {allows("sales.enviar") && <button className="btn btn--ghost btn--sm" disabled={!!inv.number_provisional} title={inv.number_provisional ? "Número provisional: emitila ante Hacienda primero; el enlace le muestra al cliente el número fiscal." : undefined} onClick={getLink}><Icon d={I.link} />Enlace de pago</button>}
             {allows("payments.crear") && <button className="btn btn--crimson btn--sm" disabled={inv.status === "anulada" || Number(inv.balance) <= 0} onClick={() => setPay(true)}><Icon d={I.plus} />Agregar pago</button>}
           </div>}>
             {inv.payments.length === 0 ? <div className="empty" style={{ padding: 26 }}><span className="meta">Sin pagos</span><div className="h3">Saldo pendiente {fmtMoney(inv.balance, inv.currency)}</div><p className="muted">Registrá un pago manual o compartí el enlace de pago por WhatsApp.</p></div> : (
@@ -97,7 +97,7 @@ export default function InvoiceDetail() {
           </Card>
           <Card title="Cobranza" extra={allows("sales.enviar") && inv.status !== "anulada" && Number(inv.balance) > 0 && <button className="btn btn--ghost btn--sm" onClick={togglePause}>{inv.reminders_paused ? "Reanudar recordatorios" : "Pausar recordatorios"}</button>}>
             <p className="muted" style={{ fontSize: 13, margin: 0 }}>
-              {inv.sent_at ? `Le llegó al cliente el ${when(inv.sent_at)}.` : "Borrador: todavía no le llegó al cliente (envíela por correo o comparta el enlace de pago). No vence ni recibe recordatorios."}
+              {inv.sent_at ? `Le llegó al cliente el ${when(inv.sent_at)}.` : (inv.number_provisional ? "Borrador con número provisional: emitila ante Hacienda y después enviala o compartí el enlace de pago. No vence ni recibe recordatorios." : "Borrador: todavía no le llegó al cliente (envíela por correo o comparta el enlace de pago). No vence ni recibe recordatorios.")}
               {inv.reminders_paused ? " Los recordatorios automáticos están en pausa." : ""}
             </p>
             {(inv.reminders || []).length > 0 && (

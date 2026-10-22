@@ -161,6 +161,10 @@ class InvoiceOut(DocBaseOut):
     sent_at: datetime | None = None
     reminders_paused: bool = False
     reminders: list[dict] = []
+    # pedido 21/10: numero provisional (BOR-...) hasta emitir; expected_number = el que tomaria si fuera la proxima en
+    # emitirse (orientativo: si otra se emite antes, sigue a esa)
+    number_provisional: bool = False
+    expected_number: str | None = None
 
 
 class PaymentLinkOut(BaseModel):
@@ -184,3 +188,4 @@ class DocListItem(BaseModel):
     acceptance_status: str | None = None  # solo cotizaciones
     seller_id: int | None = None
     seller_name: str | None = None
+    number_provisional: bool = False  # solo facturas: numero BOR-... hasta emitir (pedido 21/10)

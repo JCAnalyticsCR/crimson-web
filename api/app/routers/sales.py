@@ -31,6 +31,7 @@ from ..services import inventory as invsvc
 from ..services import quote_versions as qv
 from ..services.documents import audit
 from ..services.ownership import doc_mine, doc_scope, eligible_seller, owns_doc, payment_scope
+from ..services.sequences import expected_number, pending_provisional, provisional_prefix
 from ..services.totals import compute_document, d
 
 router = APIRouter(tags=["ventas"])
@@ -136,6 +137,9 @@ def _inv_out(db: Session, i: Invoice, p: Principal) -> InvoiceOut:
         {"stage": stage_label(r.stage), "sent_on": r.sent_on, "status": r.status}
         for r in db.scalars(select(CollectionReminder).where(CollectionReminder.invoice_id == i.id).order_by(CollectionReminder.sent_on, CollectionReminder.id))
     ]
+    if pending_provisional(i, provisional_prefix(db, i.tenant_id)):
+        o.number_provisional = True
+        o.expected_number = expected_number(db, p.tenant, i.doc_type)
     return o
 
 
@@ -295,8 +299,10 @@ def _list(
         n = int(txt)
         page.sort(key=lambda r: 0 if _seq_of(r.number) == n else 1)
     items = []
+    bor = provisional_prefix(db, tenant_id) if model is Invoice else None
     for r in page:
         it = DocListItem.model_validate(r)
+        it.number_provisional = pending_provisional(r, bor)
         it.customer_name = _cust_name(db, r.customer_id)
         it.seller_name = _user_name(db, r.seller_id)
         items.append(it)
@@ -463,13 +469,18 @@ def update_quote(qid: int, data: DocumentIn, p: Principal = Depends(require("sal
     return _quote_out(db, q, p)
 
 
+class ConvertIn(BaseModel):
+    # solo cuando la cotizacion no tiene cliente (una aceptada ya no se edita): la factura sale a su nombre
+    customer_id: int | None = Field(None, ge=1)
+
+
 @router.post("/quotes/{qid}/convert", response_model=InvoiceOut, status_code=201)
-def convert_quote(qid: int, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
+def convert_quote(qid: int, data: ConvertIn | None = None, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
     q = _own(db, Quote, qid, p.tenant.id, p)
     if q.status == "por_aprobar":
         raise HTTPException(409, "La cotización tiene un descuento pendiente de aprobación")
     _use_accepted(db, p, q)
-    inv = svc.convert_quote(db, p.tenant.id, p.user.id, q)
+    inv = svc.convert_quote(db, p.tenant.id, p.user.id, q, customer_id=data.customer_id if data else None, ip=p.ip)
     invsvc.deduct_for_invoice(db, inv, p.user.id)
     from ..models import Opportunity
 
@@ -855,6 +866,7 @@ def payment_link(iid: int, p: Principal = Depends(require("sales", "enviar")), d
     inv = _own(db, Invoice, iid, p.tenant.id, p)
     if inv.status == "anulada":
         raise HTTPException(409, "La factura está anulada")
+    svc.check_not_provisional(db, inv)  # el enlace muestra el numero: primero se emite (pedido 21/10)
     link = svc.get_or_create_payment_link(db, p.tenant.id, inv)
     invoice_states.mark_sent(inv)  # el enlace es para compartirlo: desde aqui la factura esta por cobrar (plan 1.3)
     db.commit()

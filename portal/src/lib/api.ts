@@ -163,8 +163,11 @@ export type Invoice = Doc & { doc_type: string; consecutive: string | null; clav
   /* con produccion activa, lo creado antes de activarla se puede marcar emitido en Fygaro (el corte) */
   created_at?: string | null;
   /* cobranza (plan 1.3): cuando le llego al cliente, pausa de la secuencia y recordatorios ya enviados */
-  sent_at?: string | null; reminders_paused?: boolean; reminders?: { stage: string; sent_on: string; status: string }[] };
-export type DocListItem = { id: number; number: string; customer_name: string | null; currency: string; total: string; balance: string | null; status: string; issue_date: string; due_date: string | null; acceptance_status?: string | null; seller_name?: string | null };
+  sent_at?: string | null; reminders_paused?: boolean; reminders?: { stage: string; sent_on: string; status: string }[];
+  /* pedido 21/10: con Produccion y "numero = consecutivo fiscal", BOR-... hasta emitir; expected_number = el que tomaria
+     si fuera la proxima en emitirse (orientativo). Mientras sea provisional no se envia ni se comparte el enlace de pago */
+  number_provisional?: boolean; expected_number?: string | null };
+export type DocListItem = { id: number; number: string; customer_name: string | null; currency: string; total: string; balance: string | null; status: string; issue_date: string; due_date: string | null; acceptance_status?: string | null; seller_name?: string | null; number_provisional?: boolean };
 export type Ceo = {
   pipeline: string; pipeline_weighted: string; opportunities: number; receivable: string; sold_month: string;
   /* utilidad del mes: null para quien no ve costos (solo el admin, salvo Ajustes -> Quien ve costos) */

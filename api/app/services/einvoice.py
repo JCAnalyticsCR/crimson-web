@@ -21,14 +21,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
-from ..models import Customer, EInvoiceDocument, Invoice, Product, Tenant
+from ..models import Commission, Customer, EInvoiceDocument, Invoice, Product, StockMovement, Tenant
 from ..providers.einvoice import NoneProvider, build_clave, cr_now, security_code
 from ..providers.hacienda import xml44
 from ..providers.hacienda.provider import HaciendaDirectProvider, InvalidXml, SimulatedHacienda
 from . import hacienda_config as hc
 from .documents import audit
 from .fx import doc_rate
-from .sequences import next_fiscal_consecutive, next_number
+from .sequences import is_provisional, next_fiscal_consecutive, next_number, number_from_fiscal_on, number_taken, visible_from_fiscal
 from .units import hacienda_unit
 
 ROOT = {
@@ -291,11 +291,49 @@ def emit(db: Session, tenant: Tenant, user_id: int | None, inv: Invoice) -> EInv
     return doc
 
 
+def number_from_fiscal(db: Session, tenant: Tenant, user_id: int | None, inv: Invoice, doc_type: str, consecutive: str, mode: str) -> None:
+    """Pedido 21/10 (seguir la numeracion de Fygaro): en produccion, con Ajustes -> Numeracion -> "Numero de la factura
+    = consecutivo fiscal" encendido, el numero visible pasa a ser la secuencia del consecutivo (FEC-000087). Va dentro
+    del savepoint de emit(): si la emision falla, el numero (y lo que se reetiqueto) vuelve al que tenia.
+    - Nunca repite: si otra factura del tenant ya tiene ese numero (p. ej. una del historico importado o una numerada
+      antes de activar el ajuste), la factura toma como numero el consecutivo de 20 digitos, que es unico.
+    - Reemitir tras un rechazo de Hacienda toma consecutivo nuevo y el numero lo sigue: el rechazado no tiene validez.
+    - Fuera de produccion (o con el ajuste apagado) una factura con numero provisional recibe su numero de siempre
+      (FEC-000123 del contador visible): un comprobante emitido nunca sale como BOR-.
+    Todo cambio queda en la bitacora y se copia al kardex y a las comisiones de esa factura."""
+    if mode != "produccion" or not number_from_fiscal_on(tenant.settings):
+        if is_provisional(db, tenant.id, inv.number):
+            _renumber(db, tenant, user_id, inv, next_number(db, tenant.id, doc_type)[0], "numero definitivo al emitir")
+        return
+    nuevo = visible_from_fiscal(db, tenant.id, doc_type, consecutive)
+    if nuevo != inv.number and number_taken(db, tenant.id, nuevo, inv.id):
+        audit(db, tenant.id, user_id, "renumber_conflict", "invoice", inv.id, {"ocupado": nuevo, "consecutivo": consecutive})
+        nuevo = consecutive if not number_taken(db, tenant.id, consecutive, inv.id) else inv.number
+    _renumber(db, tenant, user_id, inv, nuevo, "consecutivo fiscal")
+
+
+def _renumber(db: Session, tenant: Tenant, user_id: int | None, inv: Invoice, nuevo: str, motivo: str) -> None:
+    antes = inv.number
+    if nuevo == antes:
+        return
+    audit(db, tenant.id, user_id, "renumber", "invoice", inv.id, {"antes": antes, "despues": nuevo, "motivo": motivo})
+    inv.number = nuevo
+    # las copias del numero que ya se guardaron con el provisional (kardex de deduct_for_invoice, conceptos de
+    # comisiones) pasan al definitivo: la trazabilidad no puede decir BOR-000004 si la factura es FEC-000087
+    for m in db.scalars(select(StockMovement).where(StockMovement.tenant_id == tenant.id, StockMovement.invoice_id == inv.id, StockMovement.reference == antes)):
+        m.reference = nuevo
+    for c in db.scalars(select(Commission).where(Commission.tenant_id == tenant.id, Commission.invoice_id == inv.id)):
+        if c.description and antes in c.description:
+            c.description = c.description.replace(antes, nuevo)[:240]
+    db.flush()
+
+
 def _emit_numbered(db: Session, tenant: Tenant, user_id: int | None, inv: Invoice, mode: str, doc_type: str, prev: list) -> EInvoiceDocument:
     fecha = cr_now()
     consecutive = next_fiscal_consecutive(db, tenant.id, FISCAL_CODE[doc_type], mode)
     if prev:
         audit(db, tenant.id, user_id, "einvoice_renumber", "invoice", inv.id, {"antes": inv.consecutive, "despues": consecutive})
+    number_from_fiscal(db, tenant, user_id, inv, doc_type, consecutive, mode)
     clave = build_clave("506", fecha, tenant.tax_id or "0", consecutive, "1", security_code())
     if mode == "simulado":
         res = _simulate(direct_payload(db, tenant, inv, doc_type, consecutive, clave, fecha, lenient=True))

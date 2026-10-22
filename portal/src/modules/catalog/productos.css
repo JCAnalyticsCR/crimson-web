@@ -12,3 +12,23 @@
   .prd-filtros.is-open { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }
   .prd-filtros.is-open .select { flex: 1 1 180px; }
 }
+
+/* Telefono: resultados como tarjetas con la foto del producto (pedido 21/10). En tablet y escritorio, la tabla. */
+.prd-cards { display: none; list-style: none; margin: 0; padding: 0; }
+@media (max-width: 640px) {
+  .prd-tabla { display: none; }
+  .prd-cards { display: block; }
+}
+.prd-card { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--hair); }
+.prd-card__sel { flex: none; width: 18px; height: 18px; }
+.prd-card__main { flex: 1; min-width: 0; display: flex; gap: 12px; align-items: center; background: none; border: 0; padding: 0; text-align: left; color: inherit; cursor: pointer; font: inherit; }
+.prd-card__foto { flex: none; width: 64px; height: 64px; border-radius: 10px; border: 1px solid var(--hair); background: #fff; object-fit: contain; }
+.prd-card__foto--none { display: grid; place-items: center; background: var(--bg-2); color: var(--text-3); }
+.prd-card__txt { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.prd-card__txt b { font-size: 14px; line-height: 1.3; overflow-wrap: anywhere; }
+.prd-card__txt small { font-size: 12px; color: var(--text-3); }
+.prd-card__precio { font-weight: 700; font-size: 13.5px; }
+.prd-card__acc { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.prd-card__costos { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 6px 16px; padding-left: 28px; font-size: 12.5px; }
+.prd-card__costos > span { display: flex; flex-direction: column; gap: 1px; }
+.prd-card__costos small { font-size: 11px; color: var(--text-3); }

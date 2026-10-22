@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { I, Icon } from "../ui/components";
 
-type Hit = { kind: string; id: number; title: string; sub: string; to: string };
+type Hit = { kind: string; id: number; title: string; sub: string; to: string; img?: string | null };
 
 export default function GlobalSearch() {
   const nav = useNavigate();
@@ -40,7 +40,10 @@ export default function GlobalSearch() {
             <button key={`${h.kind}-${h.id}-${i}`} type="button" onMouseEnter={() => setIdx(i)} onClick={() => go(h)}
               style={{ display: "grid", gridTemplateColumns: "92px 1fr", gap: 10, width: "100%", textAlign: "left", padding: "9px 10px", borderRadius: 8, border: 0, cursor: "pointer", background: i === idx ? "var(--crimson-soft)" : "transparent", color: "var(--text)" }}>
               <span className="meta" style={{ alignSelf: "center" }}>{h.kind}</span>
-              <span><b style={{ fontSize: 13.5 }}>{h.title}</b><span className="muted" style={{ display: "block", fontSize: 12 }}>{h.sub}</span></span>
+              <span style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
+                {h.kind === "producto" && (h.img ? <img src={h.img} alt="" loading="lazy" style={{ width: 40, height: 40, flex: "none", objectFit: "contain", borderRadius: 8, border: "1px solid var(--hair)", background: "#fff" }} /> : <span aria-hidden style={{ display: "grid", placeItems: "center", width: 40, height: 40, flex: "none", borderRadius: 8, background: "var(--bg-2)", color: "var(--text-3)" }}><Icon d={I.products} size={18} /></span>)}
+                <span style={{ minWidth: 0 }}><b style={{ fontSize: 13.5 }}>{h.title}</b><span className="muted" style={{ display: "block", fontSize: 12 }}>{h.sub}</span></span>
+              </span>
             </button>
           ))}
         </div>

@@ -35,6 +35,8 @@ DEFAULTS = {
     "quote_valid_days": 15,
     "invoice_footer": "",
     "quote_footer": "",
+    # numero visible de la factura = secuencia del consecutivo fiscal al emitir en produccion (services/sequences.py)
+    "invoice_number_fiscal": True,
     "notify_due": True,
     "remind_days_before": 3,  # compatibilidad: la secuencia de cobro usa collections_stages (plan 1.3)
     # Cobranza (plan 1.3): fecha de corte de cartera (sin ella no sale ningun recordatorio) y etapas en dias respecto
@@ -93,6 +95,7 @@ class SettingsIn(BaseModel):
     quote_valid_days: int | None = Field(None, ge=0, le=365)
     invoice_footer: str | None = None
     quote_footer: str | None = None
+    invoice_number_fiscal: bool | None = None
     notify_due: bool | None = None
     remind_days_before: int | None = Field(None, ge=0, le=60)
     collections_start_date: date | None = None
@@ -230,6 +233,9 @@ def put_settings(data: SettingsIn, p: Principal = Depends(require("settings", "c
     if cobro:
         # encender los recordatorios o mover la fecha de corte decide a quien se le cobra: queda en la bitacora
         audit(db, t.id, p.user.id, "update", "tenant_settings", t.id, {"seccion": "cobranza", **{k: t.settings.get(k) for k in sorted(cobro)}}, ip=p.ip)
+    if "invoice_number_fiscal" in data.model_fields_set:
+        # como se numeran las facturas que salen a Hacienda: queda en la bitacora
+        audit(db, t.id, p.user.id, "update", "tenant_settings", t.id, {"seccion": "numeracion", "invoice_number_fiscal": t.settings.get("invoice_number_fiscal")}, ip=p.ip)
     if "cost_roles" in data.model_fields_set:
         # quien ve costos es un permiso: queda en la bitacora con antes/despues (solo si cambio). Aplica en la
         # siguiente peticion: los permisos se calculan en cada request, no hace falta cerrar sesiones.

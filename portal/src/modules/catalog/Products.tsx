@@ -271,7 +271,31 @@ export default function Products() {
           </div>
         )}
         {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Nada con esos filtros. Probá limpiarlos o creá el producto." /> : (
-          <div className={verCostos ? "prd-dense" : undefined} style={{ overflowX: "auto" }}>
+          <>
+          {/* Telefono (pedido 21/10): tarjetas con la foto grande del producto en vez de la tabla ancha, donde la
+              miniatura de 36 px quedaba fuera de vista al deslizar. La tabla sigue igual en tablet y escritorio. */}
+          <ul className="prd-cards">{items.map((p) => (
+            <li key={p.id} className="prd-card">
+              {cotiza && <input type="checkbox" className="prd-card__sel" aria-label={`Agregar ${p.name} a una cotización`} checked={sel.has(p.id)} onChange={() => marcar(p.id)} />}
+              <button type="button" className="prd-card__main" onClick={() => open(p.id)}>
+                {thumb(p) ? <img className="prd-card__foto" src={thumb(p)} alt="" loading="lazy" /> : <span className="prd-card__foto prd-card__foto--none"><Icon d={I.products} size={22} /></span>}
+                <span className="prd-card__txt">
+                  <b>{p.name}</b>
+                  <small className="mono">{p.code}{p.item_type === "servicio" ? " · servicio" : ""}</small>
+                  <small>{p.item_type === "producto" ? availText(p.availability) : "Servicio"}</small>
+                  <small>CABYS <span className="mono">{p.cabys_code || "—"}</span> · {whName(p.warehouse_id)}</small>
+                  {verPrecios && <span className="money prd-card__precio">{fmtMoney(p.price, p.currency)}</span>}
+                </span>
+              </button>
+              {/* lo mismo que la tabla deja hacer (con los mismos permisos): costo y margen, publicar en la web y papelera */}
+              <span className="prd-card__acc">
+                {publica && <button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-label="Publicar en la web" aria-pressed={p.show_on_web}><i /></button>}
+                <TrashButton kind="product" id={p.id} number={p.code || p.name} onDone={load} />
+              </span>
+              {verCostos && <div className="prd-card__costos"><span><small>Costo</small><CostCell p={p} /></span><span><small>Margen</small><MarginCell p={p} /></span><span><small>Aliado</small>{p.ally_price != null ? <span className="money">{fmtMoney(p.ally_price, p.currency)}</span> : <span className="muted">—</span>}</span></div>}
+            </li>
+          ))}</ul>
+          <div className={`prd-tabla${verCostos ? " prd-dense" : ""}`} style={{ overflowX: "auto" }}>
           <table className="table">
             <thead><tr>{cotiza && <th style={{ width: 32 }} title="Marcá para agregar a una cotización" />}<th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th>Bodega</th><th className="num" title="Libre en bodegas de venta (sin las de garantías) menos lo reservado">Propio</th><th className="num" title="Existencia del proveedor vinculado (Eurocomp)">Proveedor</th><th title="Cuándo se actualizó la existencia del proveedor">Actualizado</th>{verCostos && <th className="num" title="Costo sin IVA: del proveedor vinculado (con la fecha de su lista) o propio">Costo</th>}{verPrecios && <th className="num" title="Sin IVA">Precio de venta</th>}{verCostos && <th className="num" title="Margen sobre la venta: (precio − costo) ÷ precio">Margen</th>}{verCostos && <th className="num" title="Precio general para aliados, sin IVA (recargo sobre el costo o precio fijo)">Precio aliado</th>}<th>IVA</th>{publica && <th>Web</th>}<th /></tr></thead>
             <tbody>{items.map((p) => (
@@ -284,6 +308,7 @@ export default function Products() {
             ))}</tbody>
           </table>
           </div>
+          </>
         )}
       </Card>
       {aCot && <AgregarACotizacion ids={[...sel]} onClose={() => setACot(false)} />}

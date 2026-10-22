@@ -23,6 +23,8 @@ DEFAULT_GROUPS = {
     "TCK": ("TCK", "Tickets de soporte"),
     "CTR": ("CTR", "Contratos de mantenimiento"),
     "GAR": ("GAR", "Garantias"),
+    # numero provisional de la factura o el tiquete que todavia no se emite en produccion (ver mas abajo)
+    "BOR": ("BOR", "Facturas por emitir (numero provisional)"),
 }
 
 DOC_TYPE_CODE = {"FE": "01", "ND": "02", "NC": "03", "TE": "04", "FEE": "09", "COT": "00"}
@@ -114,3 +116,100 @@ def next_fiscal_consecutive(db: Session, tenant_id: int, code: str, mode: str) -
     locked.current += 1
     db.flush()
     return f"{locked.branch}{locked.terminal}{code}{locked.current:010d}"
+
+
+# ---------- Numero visible de la factura = consecutivo fiscal (pedido 21/10, seguir la numeracion de Fygaro) ----------
+# Ajustes -> Numeracion: "invoice_number_fiscal" (por defecto encendido; solo actua con Produccion activa en Ajustes ->
+# Hacienda). Al emitir en PRODUCCION, la factura o el tiquete toma como numero visible la secuencia de su consecutivo de
+# 20 digitos (F01 ...0000000087 -> FEC-000087). El consecutivo de Hacienda no cambia: se calcula igual que siempre y
+# solo se copia su secuencia. Simulado y pruebas (T0x) no tocan el numero: no es numeracion real.
+# Para que dos facturas nunca compartan numero visible, mientras no se emiten las FE/TE llevan un numero PROVISIONAL de
+# su propio contador (BOR-000123), que no comparte espacio con FEC/TE: emitir en otro orden, anular un borrador o una
+# factura que nunca se emite (aviso de cobro, emitida fuera) no deja un FEC repetido ni un hueco en el FEC visible.
+NUMBER_FROM_FISCAL_DEFAULT = True
+FISCAL_VISIBLE = ("FE", "TE")
+PROVISIONAL = "BOR"
+
+
+def number_from_fiscal_on(settings: dict | None) -> bool:
+    v = (settings or {}).get("invoice_number_fiscal")
+    return NUMBER_FROM_FISCAL_DEFAULT if v is None else bool(v)
+
+
+def provisional_on(db: Session, tenant) -> bool:
+    """Las FE/TE nuevas llevan numero provisional: el ajuste encendido y Produccion activa (el interruptor, aunque el
+    servidor la bloquee en ese momento: cuando se desbloquee se emiten con su consecutivo)."""
+    from . import hacienda_config as hc  # import local: hacienda_config importa modelos y servicios
+
+    return number_from_fiscal_on(tenant.settings) and hc.production_on(db, tenant)
+
+
+def is_provisional(db: Session, tenant_id: int, number: str | None) -> bool:
+    """El numero viene del contador provisional (con el prefijo que tenga hoy; sin grupo, nunca hubo provisionales)."""
+    if not number:
+        return False
+    prefix = db.scalar(select(BillingGroup.prefix).where(BillingGroup.tenant_id == tenant_id, BillingGroup.doc_type == PROVISIONAL, BillingGroup.is_default))
+    return prefix is not None and number.startswith(f"{prefix}-")
+
+
+def provisional_prefix(db: Session, tenant_id: int) -> str | None:
+    """Prefijo del contador provisional (None: el tenant nunca tuvo provisionales). Para marcar una lista sin consultar
+    por fila."""
+    return db.scalar(select(BillingGroup.prefix).where(BillingGroup.tenant_id == tenant_id, BillingGroup.doc_type == PROVISIONAL, BillingGroup.is_default))
+
+
+def pending_provisional(inv, prefix: str | None) -> bool:
+    """La factura todavia lleva el numero provisional y su numero definitivo llega al emitir. Una anulada nunca se emite
+    y una "emitida fuera" (Fygaro) ya tiene su comprobante con el numero de alla: ninguna espera numero."""
+    return (
+        prefix is not None
+        and bool(inv.number)
+        and inv.number.startswith(f"{prefix}-")
+        and inv.status != "anulada"
+        and inv.einvoice_status != "emitida_fuera"
+    )
+
+
+_FISCAL_CODE_OF = {"FE": "01", "TE": "04"}
+
+
+def expected_number(db: Session, tenant, doc_type: str) -> str | None:
+    """El numero que tomaria la factura si fuera la proxima en emitirse (solo para mostrarlo: el definitivo lo da la
+    emision, y si otra se emite antes, sigue a esa). No crea grupos ni sube contadores."""
+    from . import hacienda_config as hc  # import local: hacienda_config importa modelos y servicios
+
+    if doc_type not in FISCAL_VISIBLE:
+        return None
+    prefix = db.scalar(select(BillingGroup.prefix).where(BillingGroup.tenant_id == tenant.id, BillingGroup.doc_type == doc_type, BillingGroup.is_default))
+    prefix = prefix or DEFAULT_GROUPS[doc_type][0]
+    if number_from_fiscal_on(tenant.settings) and hc.production_on(db, tenant):
+        gtype = fiscal_group_type(_FISCAL_CODE_OF[doc_type], "produccion")
+        cur = db.scalar(select(BillingGroup.current).where(BillingGroup.tenant_id == tenant.id, BillingGroup.doc_type == gtype))
+    else:
+        cur = db.scalar(select(BillingGroup.current).where(BillingGroup.tenant_id == tenant.id, BillingGroup.doc_type == doc_type, BillingGroup.is_default))
+    return f"{prefix}-{(cur or 0) + 1:06d}"
+
+
+def number_taken(db: Session, tenant_id: int, number: str, exclude_id: int | None = None) -> bool:
+    """Otra factura del mismo tenant (incluido el historico importado de Fygaro) ya usa ese numero visible."""
+    from ..models import Invoice
+
+    stmt = select(Invoice.id).where(Invoice.tenant_id == tenant_id, Invoice.number == number)
+    if exclude_id is not None:
+        stmt = stmt.where(Invoice.id != exclude_id)
+    return db.scalar(stmt.limit(1)) is not None
+
+
+def visible_from_fiscal(db: Session, tenant_id: int, doc_type: str, consecutive: str) -> str:
+    """Numero visible con el prefijo del grupo visible (FEC, TE) y la secuencia del consecutivo fiscal. Sube el contador
+    visible del grupo hasta esa secuencia (nunca lo baja): si despues se apaga el ajuste, las facturas nuevas siguen
+    despues del ultimo numero que ya salio a Hacienda en vez de repetirlo."""
+    if not (consecutive and len(consecutive) == 20 and consecutive.isdigit()):
+        raise ValueError("Consecutivo fiscal invalido")
+    seq = int(consecutive[-10:])
+    g = get_or_create_group(db, tenant_id, doc_type)
+    locked = db.execute(select(BillingGroup).where(BillingGroup.id == g.id).with_for_update()).scalar_one()
+    if locked.current < seq:
+        locked.current = seq
+    db.flush()
+    return f"{locked.prefix}-{seq:06d}"

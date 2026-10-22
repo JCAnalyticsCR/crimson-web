@@ -971,7 +971,12 @@ def search(q: str = Query(min_length=1), p: Principal = Depends(require("dashboa
         st = (av.get(pr.id) or {}).get("state")
         if st and st != "servicio":
             sub += f" · {STATES[st]}"
-        out.append({"kind": "producto", "id": pr.id, "title": pr.name, "sub": sub, "to": f"/productos?q={pr.code}"})
+        ims = pr.images or []
+        foto = next((im.get("url") for im in ims if isinstance(im, dict) and im.get("main")), None) or next(
+            (im.get("url") for im in ims if isinstance(im, dict) and im.get("url")), None
+        )
+        # la foto en el resultado (pedido 21/10): en el telefono es lo que reconoce la vendedora
+        out.append({"kind": "producto", "id": pr.id, "title": pr.name, "sub": sub, "to": f"/productos?q={pr.code}", "img": foto})
     for o in db.scalars(select(Order).where(Order.tenant_id == tid, Order.number.ilike(like)).limit(5)) if can_sales else []:
         out.append({"kind": "orden", "id": o.id, "title": o.number, "sub": o.status, "to": "/ordenes"})
     return out[:20]

@@ -932,7 +932,7 @@ def project_invoice(pid: int, p: Principal = Depends(require("sales", "crear")),
     from ..services import documents as svc
 
     ya_convertida = q.status == "convertida"
-    inv = db.get(Invoice, q.converted_invoice_id) if ya_convertida else svc.convert_quote(db, p.tenant.id, p.user.id, q)
+    inv = db.get(Invoice, q.converted_invoice_id) if ya_convertida else svc.convert_quote(db, p.tenant.id, p.user.id, q, customer_id=pr.customer_id, ip=p.ip)
     antes = pr.status
     pr.invoice_id, pr.status = inv.id, "facturado"
     # el material sale UNA vez: lo que las ordenes ya sacaron no vuelve a salir y lo que ninguna orden saco sale ahora
