@@ -16,6 +16,11 @@ export type Availability = {
   supplier_source?: string | null;
   supplier_fresh?: boolean;
   supplier_age?: string | null;
+  /* ultimo cambio REAL de existencia o costo del proveedor (supplier_age es cuando se consulto) */
+  supplier_changed_age?: string | null;
+  supplier_changed_at?: string | null;
+  agotado_proveedor?: boolean;
+  ocultar?: boolean;
   supplier_updated_at?: string | null;
   supplier_unlinked_qty?: number | null;
   max_qty?: number | string | null;
@@ -40,7 +45,7 @@ export function availText(a?: Availability | null): string {
   if (!a) return "—";
   if (a.state === "servicio") return "Servicio";
   const parts = [`Propio: ${qty(a.own_free)}${num(a.own_reserved) > 0 ? ` (${qty(a.own_reserved)} reservado)` : ""}`];
-  if (a.supplier_linked) parts.push(`${a.supplier_name || "Proveedor"}: ${qty(a.supplier_qty)}${a.supplier_age ? ` · ${a.supplier_age}` : ""}${a.supplier_fresh ? "" : " (dato viejo)"}`);
+  if (a.supplier_linked) parts.push(`${a.supplier_name || "Proveedor"}: ${qty(a.supplier_qty)}${a.supplier_age ? ` · consultado ${a.supplier_age}` : ""}${a.supplier_changed_age ? ` · último cambio ${a.supplier_changed_age}` : ""}${a.supplier_fresh ? "" : " (dato viejo)"}`);
   else if (a.supplier_unlinked_qty) parts.push("proveedor sin vincular");
   return parts.join(" · ");
 }

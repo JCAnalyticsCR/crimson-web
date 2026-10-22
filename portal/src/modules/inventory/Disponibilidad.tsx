@@ -60,15 +60,15 @@ export default function Disponibilidad({ onKardex }: { onKardex?: (p: { id: numb
         {err ? <Empty title="No se pudo cargar" hint={err} /> : data === null ? <Loading /> : data.items.length === 0 ? <Empty hint={filtro ? "Ningún producto con ese filtro." : "Todavía no hay productos en el catálogo."} /> : (
           <div style={{ overflowX: "auto" }}>
             <table className="table">
-              <thead><tr><th>Producto</th><th className="num" title="Libre en bodegas de venta (sin garantías)">Propio libre</th><th className="num" title="Reservas confirmadas y vigentes">Reservado</th><th className="num">Proveedor</th><th>Actualizado</th><th>Estado</th><th /></tr></thead>
+              <thead><tr><th>Producto</th><th className="num" title="Libre en bodegas de venta (sin garantías)">Propio libre</th><th className="num" title="Reservas confirmadas y vigentes">Reservado</th><th className="num">Proveedor</th><th title="Cuándo se consultó al proveedor y cuándo cambió de verdad su existencia o su costo">Proveedor consultado</th><th>Estado</th><th /></tr></thead>
               <tbody>{data.items.map((r) => (
                 <tr key={r.id}>
                   <td style={{ minWidth: 200 }}><b>{r.name}</b>{!r.show_on_web && <span className="badge badge--muted" style={{ marginLeft: 6 }}>No publicado</span>}<div className="meta mono">{r.code}{r.brand ? ` · ${r.brand}` : ""}</div></td>
                   <td className="num mono" style={{ fontWeight: Number(r.own_free ?? 0) > 0 ? 700 : undefined }}>{qty(r.own_free)}</td>
                   <td className="num mono" style={{ color: Number(r.own_reserved ?? 0) > 0 ? "var(--warn)" : "var(--text-3)" }}>{Number(r.own_reserved ?? 0) > 0 ? qty(r.own_reserved) : "—"}</td>
                   <td className="num mono">{r.supplier_linked ? <span title={r.supplier_name || undefined}>{qty(r.supplier_qty)}{Number(r.supplier_qty ?? 0) > Number(r.supplier_available ?? 0) && r.supplier_fresh ? <div className="meta">{qty(r.supplier_available)} vendibles</div> : null}</span> : r.supplier_unlinked_qty ? <Link to="/inventario?tab=proveedores" title="Tiene proveedor pero ningún ítem de su lista vinculado: su existencia no cuenta">vincular</Link> : <span className="muted">—</span>}</td>
-                  <td className="muted" style={{ whiteSpace: "nowrap", color: r.supplier_old ? "var(--bad)" : undefined }}>{r.supplier_linked ? <>{r.supplier_name ? `${r.supplier_name} · ` : ""}{r.supplier_age || "sin fecha"}{r.supplier_old ? " · viejo" : ""}</> : "—"}</td>
-                  <td><AvailBadge a={r} />{r.label_publico && <div className="meta" style={{ textTransform: "none" }}>Tienda: {r.label_publico}</div>}</td>
+                  <td className="muted" style={{ whiteSpace: "nowrap", color: r.supplier_old ? "var(--bad)" : undefined }}>{r.supplier_linked ? <>{r.supplier_name ? `${r.supplier_name} · ` : ""}consultado {r.supplier_age || "sin fecha"}{r.supplier_old ? " · viejo" : ""}{r.supplier_changed_age && <div className="meta" style={{ textTransform: "none" }} title="Último cambio real de existencia o costo">último cambio {r.supplier_changed_age}</div>}</> : "—"}</td>
+                  <td><AvailBadge a={r} />{r.label_publico && <div className="meta" style={{ textTransform: "none" }}>Tienda: {r.ocultar ? "oculto (agotado)" : r.label_publico}</div>}</td>
                   <td className="num">{onKardex && <button className="btn btn--ghost btn--sm" onClick={() => onKardex({ id: r.id, code: r.code, name: r.name })}>Movimientos</button>}</td>
                 </tr>
               ))}</tbody>

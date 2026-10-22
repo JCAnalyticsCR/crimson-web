@@ -297,7 +297,7 @@ export default function Products() {
           ))}</ul>
           <div className={`prd-tabla${verCostos ? " prd-dense" : ""}`} style={{ overflowX: "auto" }}>
           <table className="table">
-            <thead><tr>{cotiza && <th style={{ width: 32 }} title="Marcá para agregar a una cotización" />}<th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th>Bodega</th><th className="num" title="Libre en bodegas de venta (sin las de garantías) menos lo reservado">Propio</th><th className="num" title="Existencia del proveedor vinculado (Eurocomp)">Proveedor</th><th title="Cuándo se actualizó la existencia del proveedor">Actualizado</th>{verCostos && <th className="num" title="Costo sin IVA: del proveedor vinculado (con la fecha de su lista) o propio">Costo</th>}{verPrecios && <th className="num" title="Sin IVA">Precio de venta</th>}{verCostos && <th className="num" title="Margen sobre la venta: (precio − costo) ÷ precio">Margen</th>}{verCostos && <th className="num" title="Precio general para aliados, sin IVA (recargo sobre el costo o precio fijo)">Precio aliado</th>}<th>IVA</th>{publica && <th>Web</th>}<th /></tr></thead>
+            <thead><tr>{cotiza && <th style={{ width: 32 }} title="Marcá para agregar a una cotización" />}<th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th>Bodega</th><th className="num" title="Libre en bodegas de venta (sin las de garantías) menos lo reservado">Propio</th><th className="num" title="Existencia del proveedor vinculado (Eurocomp)">Proveedor</th><th title="Cuándo se consultó al proveedor y cuándo cambió de verdad su existencia o su costo">Proveedor consultado</th>{verCostos && <th className="num" title="Costo sin IVA: del proveedor vinculado (con la fecha de su lista) o propio">Costo</th>}{verPrecios && <th className="num" title="Sin IVA">Precio de venta</th>}{verCostos && <th className="num" title="Margen sobre la venta: (precio − costo) ÷ precio">Margen</th>}{verCostos && <th className="num" title="Precio general para aliados, sin IVA (recargo sobre el costo o precio fijo)">Precio aliado</th>}<th>IVA</th>{publica && <th>Web</th>}<th /></tr></thead>
             <tbody>{items.map((p) => (
               <tr key={p.id}>
                 {cotiza && <td><input type="checkbox" aria-label={`Agregar ${p.name} a una cotización`} checked={sel.has(p.id)} onChange={() => marcar(p.id)} /></td>}
@@ -392,7 +392,7 @@ export default function Products() {
   );
 }
 
-/* Propio (libre en bodegas de venta) · Proveedor · Actualizado: la funcion unica del API */
+/* Propio (libre en bodegas de venta) · Proveedor · Proveedor consultado: la funcion unica del API */
 function StockCells({ a }: { a?: Avail | null }) {
   if (!a || a.state === "servicio") return <><td className="num muted">—</td><td className="num muted">—</td><td className="muted">—</td></>;
   const own = Number(a.own_free ?? 0);
@@ -400,7 +400,7 @@ function StockCells({ a }: { a?: Avail | null }) {
     <>
       <td className="num mono" style={{ fontWeight: own > 0 ? 700 : undefined, color: own > 0 ? undefined : "var(--text-3)" }} title={Number(a.own_reserved ?? 0) > 0 ? `${qty(a.own_reserved)} reservado` : undefined}>{qty(own)}</td>
       <td className="num mono" title={a.supplier_name || undefined}>{a.supplier_linked ? qty(a.supplier_qty) : a.supplier_unlinked_qty ? <span className="muted" title="Proveedor sin vincular: no cuenta">s/v</span> : <span className="muted">—</span>}</td>
-      <td className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap", color: a.supplier_linked && !a.supplier_fresh ? "var(--bad)" : undefined }}>{a.supplier_linked ? `${a.supplier_age || "sin fecha"}${a.supplier_fresh ? "" : " · viejo"}` : "—"}</td>
+      <td className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap", color: a.supplier_linked && !a.supplier_fresh ? "var(--bad)" : undefined }}>{a.supplier_linked ? `consultado ${a.supplier_age || "sin fecha"}${a.supplier_fresh ? "" : " · viejo"}${a.supplier_changed_age ? ` · cambió ${a.supplier_changed_age}` : ""}` : "—"}</td>
     </>
   );
 }

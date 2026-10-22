@@ -1047,7 +1047,9 @@ def _installments(t: Tenant) -> dict:
 MAX_PROOF = 5 * 1024 * 1024
 
 
-def save_proof(db: Session, t: Tenant, o: Order, data: bytes, filename: str | None) -> Media:
+def proof_media(db: Session, t: Tenant, data: bytes, filename: str | None) -> Media:
+    """Guarda un comprobante (foto o PDF, hasta 5 MB) como archivo PRIVADO de ventas, sin duplicar el mismo archivo.
+    Lo usan los pedidos web y la pagina de pago de la factura (services/invoice_proofs)."""
     from ..routers.media import sniff
 
     if len(data) > MAX_PROOF:
@@ -1055,8 +1057,6 @@ def save_proof(db: Session, t: Tenant, o: Order, data: bytes, filename: str | No
     kind = sniff(data)
     if kind not in ("image/png", "image/jpeg", "image/webp", "application/pdf"):
         raise HTTPException(415, "Subí una foto (JPG, PNG, WEBP) o un PDF")
-    if len(o.proofs or []) >= 5:
-        raise HTTPException(409, "Ya hay varios comprobantes para este pedido. Escribinos por WhatsApp.")
     digest = hashlib.sha256(data).hexdigest()
     m = db.scalar(select(Media).where(Media.tenant_id == t.id, Media.sha256 == digest, Media.visibility == "private", Media.module == "sales"))
     # el nombre que subio ESTE cliente: la multimedia se deduplica por sha256 en toda la empresa y su nombre puede
@@ -1076,6 +1076,14 @@ def save_proof(db: Session, t: Tenant, o: Order, data: bytes, filename: str | No
         )
         db.add(m)
         db.flush()
+    return m
+
+
+def save_proof(db: Session, t: Tenant, o: Order, data: bytes, filename: str | None) -> Media:
+    if len(o.proofs or []) >= 5:
+        raise HTTPException(409, "Ya hay varios comprobantes para este pedido. Escribinos por WhatsApp.")
+    m = proof_media(db, t, data, filename)
+    kind = m.content_type
     if any(p.get("media_id") == m.id for p in (o.proofs or [])):
         raise HTTPException(409, "Ese comprobante ya estaba subido")
     o.proofs = [*(o.proofs or []), {"media_id": m.id, "filename": name, "size": m.size, "content_type": kind, "at": datetime.now(UTC).isoformat()}]

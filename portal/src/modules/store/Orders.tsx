@@ -27,7 +27,15 @@ type Order = {
   /* la factura del pedido es del que mira (services/ownership.py); si no, se muestra el numero sin enlace */
   invoice_visible?: boolean | null;
 };
-type List = { items: Order[]; counts: Record<string, number>; por_atender: number; labels: Record<string, string> };
+type List = { items: Order[]; counts: Record<string, number>; por_atender: number; labels: Record<string, string>; comprobantes_facturas?: number | null };
+/* comprobante que un cliente subio desde la pagina de pago de una factura (/pagar): misma revision que los pedidos */
+type InvProof = {
+  id: number; invoice_id: number; invoice_number: string | null; invoice_status: string | null; customer_name: string | null; currency: string;
+  balance: string | null; total: string | null; method: string; method_label: string; amount: string | null; reference: string | null;
+  filename: string | null; status: string; status_label: string; note: string | null; created_at: string;
+  /* el mismo archivo ya se subio en otra factura o en un pedido web: aprobar pide confirmarlo */
+  reused_in?: string[];
+};
 
 const TABS = ["en_revision", "nuevo", "pagado", "preparando", "listo", "enviado", "entregado", "cancelado", "reembolsado"];
 const METHODS: Record<string, string> = { sinpe: "SINPE Móvil", transferencia: "Transferencia", tarjeta: "Tarjeta", efectivo: "Efectivo" };
@@ -82,12 +90,14 @@ function WebOrders() {
   const items = data?.items || [];
   const total = Object.values(data?.counts || {}).reduce((a, b) => a + b, 0);
 
+  const facturas = data?.comprobantes_facturas ?? null;
   return (
     <>
+      {facturas !== null && (facturas > 0 || status === "atender" || status === "en_revision") && <InvoiceProofs onChange={load} />}
       <Card flush>
         <div className="wo-tabs">
           <div className="tabs" role="tablist" aria-label="Estado">
-            <button className={status === "atender" ? "is-active" : ""} onClick={() => pick("atender")}>Por atender<i>{data?.por_atender ?? ""}</i></button>
+            <button className={status === "atender" ? "is-active" : ""} onClick={() => pick("atender")}>Por atender<i>{data ? (data.por_atender + (facturas ?? 0)) || "" : ""}</i></button>
             <button className={status === "" ? "is-active" : ""} onClick={() => pick("")}>Todos<i>{total || ""}</i></button>
             {TABS.map((s) => <button key={s} className={status === s ? "is-active" : ""} onClick={() => pick(s)}>{labels[s] || s}<i>{data?.counts[s] || ""}</i></button>)}
           </div>
@@ -128,6 +138,63 @@ function WebOrders() {
       </Card>
       {sel && <Detail o={sel} labels={labels} onClose={() => setSel(null)} onChange={(o) => { setSel(o); load(); }} />}
     </>
+  );
+}
+
+function InvoiceProofs({ onChange }: { onChange: () => void }) {
+  const { toast, allows } = useSession();
+  const [rows, setRows] = useState<InvProof[] | null>(null);
+  const [busy, setBusy] = useState<number | null>(null);
+  const load = useCallback(() => api<{ items: InvProof[] }>("/payment-proofs").then((r) => setRows(r.items)).catch((e) => toast(e instanceof Error ? e.message : "Error", "bad")), [toast]);
+  useEffect(() => { load(); }, [load]);
+  const done = () => { load(); onChange(); };
+  const approve = async (r: InvProof) => {
+    const sug = r.amount != null ? Number(r.amount) : Number(r.balance ?? 0);
+    const txt = window.prompt(`Monto a registrar en ${r.invoice_number} (${r.currency}). Saldo: ${fmtMoney(r.balance ?? 0, r.currency)}`, String(sug));
+    if (txt === null) return;
+    const amount = Number(txt.replace(/[^\d.]/g, ""));
+    if (!(amount > 0)) { toast("Monto inválido", "bad"); return; }
+    const reused = r.reused_in || [];
+    if (reused.length && !window.confirm(`Este mismo comprobante ya se subió en ${reused.join(", ")}. ¿Lo aprobás igual para ${r.invoice_number}?`)) return;
+    setBusy(r.id);
+    try { await api(`/payment-proofs/${r.id}/approve`, { method: "POST", json: { amount, confirm_reused: reused.length > 0 } }); toast(`Pago registrado en ${r.invoice_number}`); done(); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } finally { setBusy(null); }
+  };
+  const reject = async (r: InvProof) => {
+    const note = (window.prompt("¿Por qué se rechaza? El cliente lo ve en la página de pago.") || "").trim();
+    if (!note) return;
+    setBusy(r.id);
+    try { await api(`/payment-proofs/${r.id}/reject`, { method: "POST", json: { note } }); toast("Comprobante rechazado"); done(); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } finally { setBusy(null); }
+  };
+  const canReview = allows("payments.crear");
+  return (
+    <Card title="Comprobantes de facturas" extra={<span className="muted" style={{ fontSize: 12.5 }}>Subidos por clientes desde el enlace de pago de una factura</span>} flush>
+      {rows === null ? <Loading /> : rows.length === 0 ? <Empty hint="No hay comprobantes de facturas por revisar." /> : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="table">
+            <thead><tr><th>Factura</th><th>Cliente</th><th>Método</th><th className="num">Dice que pagó</th><th className="num">Saldo</th><th>Subido</th><th /></tr></thead>
+            <tbody>{rows.map((r) => (
+              <tr key={r.id}>
+                <td className="mono" style={{ fontWeight: 600 }}><Link to={`/facturas/${r.invoice_id}`}>{r.invoice_number}</Link></td>
+                <td>{r.customer_name || "—"}</td>
+                <td className="muted">{r.method_label}{r.reference && <div className="meta" style={{ textTransform: "none" }}>Ref. {r.reference}</div>}{!!r.reused_in?.length && <div className="meta" style={{ textTransform: "none", color: "var(--bad)" }}>Ya se subió en {r.reused_in.join(", ")}</div>}</td>
+                <td className="num money">{r.amount != null ? fmtMoney(r.amount, r.currency) : "—"}</td>
+                <td className="num money">{fmtMoney(r.balance ?? 0, r.currency)}</td>
+                <td className="muted">{when(r.created_at)}</td>
+                <td className="num" style={{ whiteSpace: "nowrap" }}>
+                  <button className="btn btn--ghost btn--sm" onClick={() => openFile(`/payment-proofs/${r.id}/file`).catch((e) => toast(e.message, "bad"))}><Icon d={I.upload} />Ver</button>
+                  {canReview && <>
+                    <button className="btn btn--soft btn--sm" disabled={busy === r.id} onClick={() => approve(r)}>Aprobar</button>
+                    <button className="btn btn--ghost btn--sm" disabled={busy === r.id} onClick={() => reject(r)}>Rechazar</button>
+                  </>}
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </Card>
   );
 }
 

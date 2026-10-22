@@ -545,8 +545,8 @@ def catalog(
         by_id = {p.id: p for p in prods}
         rows = [by_id[i] for i in want if i in by_id]
         return {"items": [ctx.card(p, stock_all.get(p.id), full=True) | {"specs": sv.derive_specs(p)} for p in rows], "total": len(rows)}
-    if ctx.cfg_inv.get("out_of_stock") == "ocultar":  # Ajustes: los agotados no se listan (la ficha directa abre)
-        prods = [p for p in prods if not (stock_all.get(p.id) or {}).get("ocultar")]
+    # Ajustes: los agotados ocultos (todos, o los que agoto el proveedor) no se listan; la ficha directa abre
+    prods = [p for p in prods if not (stock_all.get(p.id) or {}).get("ocultar")]
 
     all_counts: dict[int, int] = {}
     for p in prods:

@@ -1443,7 +1443,7 @@ def _availability(db: Session, ctx: AllyCtx, prods) -> dict[int, dict]:
     return availability_many(db, ctx.p.tenant, prods, audience="aliado")
 
 
-ALLY_AVAIL_KEYS = ("state", "label", "en_bodega", "bajo_pedido_cantidad", "actualizado_al", "dato_vigente", "plazo")
+ALLY_AVAIL_KEYS = ("state", "label", "en_bodega", "bajo_pedido_cantidad", "actualizado_al", "cambio_al", "dato_vigente", "plazo")
 
 
 def _catalog_out(db: Session, ctx: AllyCtx, pr: Product, fx: Decimal | None, fixed: dict, av: dict, cats: dict, full: bool = False) -> dict:
@@ -1579,6 +1579,7 @@ def inventario(q: str = "", con_existencia: bool = True, ctx: AllyCtx = Depends(
                 "bajo_pedido": bajo > 0,
                 "bajo_pedido_cantidad": bajo,
                 "actualizado_al": a.get("actualizado_al"),
+                "cambio_al": a.get("cambio_al"),
                 "estado": a.get("state"),
                 "etiqueta": a.get("label"),
             }

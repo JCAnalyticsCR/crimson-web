@@ -631,9 +631,9 @@ def test_correos_automaticos_llevan_dedupe_key_y_respetan_pausa_y_tienda(client,
     llaves: list[str | None] = []
     real = mail.queue_email
 
-    def con_dedupe(db, tenant, to, subject, html, entity, entity_id, attachments=None, files=None, dedupe_key=None):
+    def con_dedupe(db, tenant, to, subject, html, entity, entity_id, attachments=None, files=None, dedupe_key=None, *, company_bcc=True):
         llaves.append(dedupe_key)
-        return real(db, tenant, to, subject, html, entity, entity_id, attachments, files)
+        return real(db, tenant, to, subject, html, entity, entity_id, attachments, files, company_bcc=company_bcc)
 
     monkeypatch.setattr(mail, "queue_email", con_dedupe)  # como queda queue_email con el item 1.2
     _publish(client)

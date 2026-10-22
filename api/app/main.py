@@ -54,6 +54,7 @@ from .routers import (
 )
 from .routers import bitacora as bitacora_router
 from .routers import fiscal_queue as fiscal_queue_router
+from .routers import invoice_proofs as invoice_proofs_router
 from .routers import settings as settings_router
 from .routers import store_inventory as store_inventory_router
 
@@ -130,6 +131,7 @@ def create_app() -> FastAPI:
     app.include_router(store.router)
     app.include_router(store_inventory_router.router)
     app.include_router(store_checkout.router)
+    app.include_router(invoice_proofs_router.router)  # comprobantes de la pagina de pago de facturas (/pagar)
     app.include_router(store_showcase.router)
     app.include_router(store_showcase.pub)
     app.include_router(store_showcase.seo)

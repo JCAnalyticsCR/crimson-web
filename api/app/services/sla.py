@@ -267,23 +267,95 @@ def revisar_atrasos(db: Session, tenant: Tenant, ahora: datetime | None = None) 
     return out
 
 
-def avisar_atrasos(db: Session, tenant: Tenant, ahora: datetime | None = None) -> int:
-    """Manda los avisos de atraso por el mecanismo de siempre (outbox de correo). Devuelve cuantos tickets avisaron."""
+PRIORIDAD_TXT = {"critica": "crítica", "alta": "alta", "media": "media", "baja": "baja"}
+
+
+def vencido_texto(delta: timedelta) -> str:
+    """Cuanto lleva vencido, para leer: '25 min', '3 h 20 min', '2 días 4 h'."""
+    mins = max(int(delta.total_seconds() // 60), 0)
+    if mins < 60:
+        return f"{mins} min"
+    h, m = divmod(mins, 60)
+    if h < 48:
+        return f"{h} h" + (f" {m} min" if m else "")
+    d, hh = divmod(h, 24)
+    return f"{d} días" + (f" {hh} h" if hh else "")
+
+
+def _cliente(db: Session, t: SupportTicket) -> str:
+    """Nombre del cliente de la ficha o, si no hay ficha, de quien reporto."""
+    from ..models import Customer
+
+    c = db.get(Customer, t.customer_id) if t.customer_id else None
+    if c is not None and c.name:
+        return c.name
+    contacto = t.contact or {}
+    return (contacto.get("name") or contacto.get("company") or "").strip() or "Sin cliente"
+
+
+def enlace_ticket(t: SupportTicket) -> str:
+    """El ticket abierto en la bandeja del panel (Tickets abre el detalle con ?id=)."""
+    from ..core.config import settings
+
+    return f"{settings.public_base_url.rstrip('/')}/tickets?id={t.id}"
+
+
+def detalle_atraso(db: Session, t: SupportTicket, tipo: str, ahora: datetime) -> dict:
+    """Lo que dice el aviso de un ticket atrasado: cliente, asunto, desde cuando vencio y el enlace."""
+    vence = _aware(t.due_at if tipo == "respuesta" else t.resolve_due_at) or ahora
+    return {
+        "numero": t.number,
+        "cliente": _cliente(db, t),
+        "asunto": t.subject,
+        "prioridad": PRIORIDAD_TXT.get(t.priority, t.priority),
+        "vencio": vence.astimezone(CR).strftime("%d/%m/%Y %H:%M"),
+        "vencido": vencido_texto(ahora - vence),
+        "enlace": enlace_ticket(t),
+    }
+
+
+def _fila_html(d: dict) -> str:
     import html
 
+    e = html.escape
+    return (
+        f'<li style="margin-bottom:10px"><b>{e(d["numero"])}</b> · {e(d["cliente"])}<br>'
+        f'Asunto: {e(d["asunto"])}<br>'
+        f'Prioridad {e(d["prioridad"])} · venció el {e(d["vencio"])} · <b>lleva {e(d["vencido"])} vencido</b><br>'
+        f'<a href="{e(d["enlace"])}">Abrir el ticket</a></li>'
+    )
+
+
+def avisar_atrasos(db: Session, tenant: Tenant, ahora: datetime | None = None) -> int:
+    """Manda los avisos de atraso por el mecanismo de siempre (outbox de correo). Devuelve cuantos tickets avisaron.
+
+    Cada aviso dice de quien es el ticket (cliente), el asunto, cuanto lleva vencido y el enlace para abrirlo (antes
+    llegaba casi vacio: solo el numero y el asunto). Es un aviso interno con datos del cliente: no va en copia a la
+    lista de la empresa de Ajustes (company_bcc=False), igual que los demas avisos internos."""
     from ..models import User
     from .mail import notify_roles, queue_email
 
+    ahora = _aware(ahora) or datetime.now(UTC)
     titulos = {"respuesta": "sin primera respuesta a tiempo", "resolucion": "con la resolucion atrasada"}
+    plazos = {"respuesta": "la primera respuesta", "resolucion": "la resolución"}
     n = 0
     for tipo, lista in revisar_atrasos(db, tenant, ahora).items():
         if not lista:
             continue
-        filas = "".join(f"<li>{x.number} · {html.escape(x.subject)} · prioridad {x.priority}</li>" for x in lista[:20])
-        notify_roles(db, tenant, ("admin", "supervisor"), f"{len(lista)} ticket(s) {titulos[tipo]}", f"<ul>{filas}</ul>", "support_ticket", lista[0].id)
-        for x in lista:
+        detalles = [(x, detalle_atraso(db, x, tipo, ahora)) for x in lista]
+        filas = "".join(_fila_html(d) for _, d in detalles[:20])
+        mas = f"<p>… y {len(lista) - 20} más en Tickets.</p>" if len(lista) > 20 else ""
+        intro = f"<p>Se venció el plazo de {plazos[tipo]} de {'este ticket' if len(lista) == 1 else f'{len(lista)} tickets'}:</p>"
+        asunto = (
+            f"Ticket {detalles[0][1]['numero']} {titulos[tipo]} · {detalles[0][1]['cliente']}"
+            if len(lista) == 1
+            else f"{len(lista)} ticket(s) {titulos[tipo]}"
+        )
+        notify_roles(db, tenant, ("admin", "supervisor"), asunto, f"{intro}<ul>{filas}</ul>{mas}", "support_ticket", lista[0].id, company_bcc=False)
+        for x, d in detalles:
             u = db.get(User, x.assigned_to) if x.assigned_to else None
             if u and u.email:
-                queue_email(db, tenant, u.email, f"Ticket {x.number} {titulos[tipo]}", f"<p>{html.escape(x.subject)}</p>", "support_ticket", x.id)
+                cuerpo = f"<p>Se venció el plazo de {plazos[tipo]} de un ticket asignado a vos:</p><ul>{_fila_html(d)}</ul>"
+                queue_email(db, tenant, u.email, f"Ticket {x.number} {titulos[tipo]} · {d['cliente']}", cuerpo, "support_ticket", x.id, company_bcc=False)
         n += len(lista)
     return n

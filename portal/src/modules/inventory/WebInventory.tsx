@@ -10,12 +10,13 @@ type Row = {
   id: number; code: string; name: string; show_on_web: boolean; web_featured: boolean; web_price: string | null; price: string | null; currency: string; serialized: boolean;
   estado: string; mensaje: string; propio: string; reservado: string; reservado_pedidos: string; libre: string;
   proveedor: number | null; proveedor_al: string | null; proveedor_viejo: boolean; proveedor_nombre?: string | null; proveedor_hace?: string | null;
+  proveedor_cambio_hace?: string | null; oculto_en_tienda?: boolean;
   proveedor_sin_vincular?: number | null; max_qty?: number | null; alerta: boolean; avisos: number;
 };
 type WhRow = { id: number; name: string; is_default: boolean; web: boolean };
 type Settings = {
   enabled: boolean; warehouse_ids: number[]; quantity_display: string; low_threshold: number; backorder_enabled: boolean;
-  backorder_lead: string; supplier_max_age_hours: number; out_of_stock: string; out_of_stock_action: string;
+  backorder_lead: string; supplier_max_age_hours: number; out_of_stock: string; supplier_out_of_stock?: string; out_of_stock_action: string;
   hold_hours_manual: number; hold_minutes_card: number; cancel_unpaid_on_expiry: boolean; warehouses: WhRow[];
 };
 type Hold = { id: number; order_id: number | null; order: string | null; order_status: string | null; product_id: number; name: string; warehouse: string; quantity: string; expires_at: string | null };
@@ -128,11 +129,11 @@ export default function WebInventory() {
                         {r.serialized && <span className="badge badge--muted" style={{ marginLeft: 6 }}>Serie</span>}
                         <div className="meta mono">{r.code}{r.avisos > 0 ? ` · ${r.avisos} esperan aviso` : ""}</div>
                       </td>
-                      <td><span className={`badge badge--${st.tone}`}>{st.label}</span><div className="meta">{r.mensaje}</div></td>
+                      <td><span className={`badge badge--${st.tone}`}>{st.label}</span>{r.oculto_en_tienda && <span className="badge badge--muted" style={{ marginLeft: 6 }} title="Agotado: no sale en la tienda (lista, búsqueda, destacados ni kits); sigue aquí">Oculto en la tienda</span>}<div className="meta">{r.mensaje}</div></td>
                       <td className="num mono">{n(r.propio)}</td>
                       <td className="num mono" style={{ color: n(r.reservado_pedidos) > 0 ? "var(--warn)" : "var(--text-3)" }}>{n(r.reservado_pedidos) || "—"}{n(r.reservado) > n(r.reservado_pedidos) && <div className="meta">total {n(r.reservado)}</div>}</td>
                       <td className="num mono" style={{ fontWeight: 700 }}>{n(r.libre)}</td>
-                      <td className="muted" style={{ whiteSpace: "nowrap" }}>{r.proveedor != null ? <>{r.proveedor_nombre ? `${r.proveedor_nombre}: ` : ""}{r.proveedor} u.<div className="meta" style={{ color: r.proveedor_viejo ? "var(--bad)" : undefined }} title={r.proveedor_al ? fmtDate(r.proveedor_al.slice(0, 10)) : undefined}>{r.proveedor_al ? `actualizado ${r.proveedor_hace || fmtDate(r.proveedor_al.slice(0, 10))}` : "sin fecha"}{r.proveedor_viejo ? " · dato viejo" : ""}</div></> : r.proveedor_sin_vincular ? <span title="Tiene proveedor pero ningún ítem del catálogo vinculado: su existencia no cuenta">sin vincular</span> : "—"}</td>
+                      <td className="muted" style={{ whiteSpace: "nowrap" }}>{r.proveedor != null ? <>{r.proveedor_nombre ? `${r.proveedor_nombre}: ` : ""}{r.proveedor} u.<div className="meta" style={{ color: r.proveedor_viejo ? "var(--bad)" : undefined }} title={r.proveedor_al ? fmtDate(r.proveedor_al.slice(0, 10)) : undefined}>{r.proveedor_al ? `consultado ${r.proveedor_hace || fmtDate(r.proveedor_al.slice(0, 10))}` : "sin fecha"}{r.proveedor_viejo ? " · dato viejo" : ""}</div>{r.proveedor_cambio_hace && <div className="meta" title="Último cambio real de existencia o costo en el proveedor">cambió {r.proveedor_cambio_hace}</div>}</> : r.proveedor_sin_vincular ? <span title="Tiene proveedor pero ningún ítem del catálogo vinculado: su existencia no cuenta">sin vincular</span> : "—"}</td>
                       {verPrecio && <td className="num mono">{r.web_price != null ? fmtMoney(r.web_price, r.currency) : <span className="muted">{r.price != null ? fmtMoney(r.price, r.currency) : "—"}</span>}</td>}
                       <td className="num">{canEdit && <button className="btn btn--ghost btn--sm" onClick={() => setEdit({ row: r, web_price: r.web_price != null ? String(n(r.web_price)) : "", web_featured: r.web_featured, show_on_web: r.show_on_web })}>Publicación</button>}</td>
                     </tr>
@@ -165,6 +166,7 @@ export default function WebInventory() {
             <Field label="Cantidad en la tienda"><select className="select" value={cfg.quantity_display} onChange={(e) => setCfg({ ...cfg, quantity_display: e.target.value })}><option value="exacta">Número exacto</option><option value="umbral">«Últimas unidades» bajo el umbral</option><option value="oculta">Solo «Disponible»</option></select></Field>
             <Field label="Umbral de últimas unidades"><input className="input input--mono" type="number" min={0} value={cfg.low_threshold} onChange={(e) => setCfg({ ...cfg, low_threshold: Number(e.target.value) })} /></Field>
             <Field label="Agotados"><select className="select" value={cfg.out_of_stock} onChange={(e) => setCfg({ ...cfg, out_of_stock: e.target.value })}><option value="mostrar">Mostrar como agotado</option><option value="ocultar">Ocultar del catálogo</option></select></Field>
+            <Field label="Agotados en el proveedor" hint="Eurocomp sin existencia y sin existencia propia. Siempre siguen en el panel."><select className="select" value={cfg.supplier_out_of_stock || "ocultar"} onChange={(e) => setCfg({ ...cfg, supplier_out_of_stock: e.target.value })} disabled={cfg.out_of_stock === "ocultar"}><option value="ocultar">Sacar de la tienda en la siguiente sincronización</option><option value="mostrar">Mostrar como agotado</option></select></Field>
             <Field label="Botón en agotados"><select className="select" value={cfg.out_of_stock_action} onChange={(e) => setCfg({ ...cfg, out_of_stock_action: e.target.value })}><option value="whatsapp">Consultar por WhatsApp</option><option value="avisarme">Avisarme cuando haya</option><option value="ninguna">Ninguno</option></select></Field>
             <Field label="Plazo bajo pedido"><input className="input" value={cfg.backorder_lead} onChange={(e) => setCfg({ ...cfg, backorder_lead: e.target.value })} /></Field>
             <Field label="Dato del proveedor vigente (horas)" hint="Eurocomp se refresca cada 6 h. Más viejo: «Consultar disponibilidad» y no se vende en línea."><input className="input input--mono" type="number" min={1} value={cfg.supplier_max_age_hours} onChange={(e) => setCfg({ ...cfg, supplier_max_age_hours: Number(e.target.value) })} /></Field>

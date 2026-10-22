@@ -8,7 +8,7 @@ import { errorText } from "./shared";
 
 type Row = {
   product_id: number; code: string; name: string; unit: string; disponible_total: string; bodegas: { nombre: string; disponible: string }[]; bajo_pedido: boolean;
-  bajo_pedido_cantidad?: string | number; actualizado_al?: string | null; estado?: string; etiqueta?: string;
+  bajo_pedido_cantidad?: string | number; actualizado_al?: string | null; cambio_al?: string | null; estado?: string; etiqueta?: string;
 };
 const fecha = (s?: string | null) => (s ? new Date(s).toLocaleString("es-CR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
 
@@ -39,7 +39,7 @@ export default function AllyInventory() {
                   <td><b>{r.name}</b><div className="meta">{r.code}</div></td>
                   <td className="num">{Number(r.disponible_total)} {r.unit}</td>
                   <td>{r.bodegas.length ? r.bodegas.map((b) => <div key={b.nombre}>{b.nombre}: {Number(b.disponible)}</div>) : "—"}</td>
-                  <td>{r.bajo_pedido ? <><span className="badge badge--info">Bajo pedido: {Number(r.bajo_pedido_cantidad ?? 0)}</span>{r.actualizado_al && <div className="meta">actualizado {fecha(r.actualizado_al)}</div>}</> : r.estado === "consultar" ? <span className="badge badge--muted">Consultar con Crimson</span> : "—"}</td>
+                  <td>{r.bajo_pedido ? <><span className="badge badge--info">Bajo pedido: {Number(r.bajo_pedido_cantidad ?? 0)}</span>{r.actualizado_al && <div className="meta">consultado {fecha(r.actualizado_al)}{r.cambio_al ? ` · último cambio ${fecha(r.cambio_al)}` : ""}</div>}</> : r.estado === "consultar" ? <span className="badge badge--muted">Consultar con Crimson</span> : "—"}</td>
                 </tr>
               ))}
             </tbody>

@@ -12,7 +12,11 @@ PROPIA de Crimson (eso solo lo mueve el kardex). Ademas, al producto vinculado q
 (13 digitos, lo recomienda el propio SiReTT) y las fotos.
 
 Cuando corre: el catalogo completo UNA vez por semana (lunes 03:17); es la consulta pesada (34 MB) y solo hace falta
-para descubrir articulos nuevos, CABYS y fotos. Las existencias y costos de lo que Crimson YA vende (los vinculados)
+para descubrir articulos nuevos, CABYS y fotos. De lo que YA estaba solo actualiza precio y existencia (pedido 21/10:
+nunca vuelve a traer fotos ni descripciones; apply_list(only_price_stock=True)), y el CABYS y las fotos se completan
+una sola vez por vinculo (lo recien vinculado o creado desde el panel, si le faltan). Lo que se agota en Eurocomp sale de la tienda en la
+sincronizacion siguiente (Ajustes de la tienda: "supplier_out_of_stock", ver services/availability) y sigue en el
+panel: nunca se desactiva ni se despublica el producto. Las existencias y costos de lo que Crimson YA vende (los vinculados)
 se refrescan cada 6 horas con la consulta por lista de codigos (`refresh_linked`): unas pocas llamadas chicas, sin
 limite de frecuencia en Eurocomp. Asi la tienda sigue diciendo "bajo pedido" con datos de horas, no de dias.
 
@@ -172,7 +176,11 @@ def status(t: Tenant, supplier: Supplier | None) -> dict:
     if s.get("last_error") and (s.get("last_try_at") or "") > (s.get("last_ok_at") or ""):
         return {"status": "error", "label": f"Conectado por API (SiReTT) · la última sincronización falló: {s['last_error']}", **s}
     if s.get("last_ok_at") or s.get("last_stock_at"):
-        return {"status": "conectado", "label": "Conectado por API (SiReTT) · catálogo cada semana, existencias de lo vinculado cada 6 horas", **s}
+        return {
+            "status": "conectado",
+            "label": "Conectado por API (SiReTT) · catálogo cada semana (solo precios y existencias de lo que ya está), existencias de lo vinculado cada 6 horas",
+            **s,
+        }
     return {"status": "listo", "label": "Conectado por API (SiReTT) · todavía no se sincroniza", **s}
 
 
@@ -230,6 +238,7 @@ def apply(db: Session, t: Tenant, items: list[dict], *, user_id: int | None = No
         source="api",
         source_file=f"SiReTT · bodega {settings.eurocomp_bodega}",
         user_id=user_id,
+        only_price_stock=True,
     )
     enriched = enrich_products(db, t, supplier, now)
     db.flush()
@@ -238,8 +247,15 @@ def apply(db: Session, t: Tenant, items: list[dict], *, user_id: int | None = No
     return out
 
 
+def _aware(dt: datetime | None) -> datetime | None:
+    return dt.replace(tzinfo=UTC) if dt is not None and dt.tzinfo is None else dt
+
+
 def enrich_products(db: Session, t: Tenant, supplier: Supplier, now: datetime) -> dict:
-    """A los productos vinculados: fecha real de la consulta (no solo el dia) y, si les falta, CABYS y fotos."""
+    """A los productos vinculados: fecha real de la consulta (no solo el dia). CABYS y fotos (si les faltan) UNA sola
+    vez por vinculo (enriched_at): lo recien vinculado o creado desde el panel ("Agregar a mi catalogo") los recibe en
+    la corrida siguiente; lo que ya se completo no vuelve a traer fotos (pedido 21/10; si alguien borro las fotos de un
+    producto, la sincronizacion no se las devuelve)."""
     cabys = images = 0
     linked = db.scalars(
         select(SupplierItem).where(
@@ -253,6 +269,9 @@ def enrich_products(db: Session, t: Tenant, supplier: Supplier, now: datetime) -
         raw = it.raw or {}
         if p.supplier_id == supplier.id:
             p.supplier_updated_at = now  # la tienda decide "bajo pedido" con la hora real de la consulta
+        if it.enriched_at is not None and (it.linked_at is None or _aware(it.linked_at) <= _aware(it.enriched_at)):
+            continue  # este vinculo ya se completo: solo precio y existencia
+        it.enriched_at = datetime.now(UTC)  # despues del vinculo de esta misma corrida (sc.link marca su propia hora)
         code = (raw.get("cod_hacienda") or "").strip()
         if not p.cabys_code and re.fullmatch(r"\d{13}", code):
             p.cabys_code, p.cabys_set_at = code, now  # cabys_set_by queda vacio: lo puso el proveedor, no una persona
@@ -299,7 +318,8 @@ def sync_tenant(
         db.commit()
         log.warning("Eurocomp (empresa %s): %s", t.id, msg)
         raise
-    _save_state(t, last_try_at=now, last_ok_at=now, last_error=None, last_code=0, last_summary=out)
+    changed = {"last_change_at": now} if out.get("cambios_reales") else {}
+    _save_state(t, last_try_at=now, last_ok_at=now, last_error=None, last_code=0, last_summary=out, **changed)
     db.commit()
     log.info(
         "Eurocomp (empresa %s): %s utiles de %s, %s nuevos, %s actualizados", t.id, out["utiles"], out["recibidos"], out.get("nuevo"), out.get("actualizado")
@@ -394,6 +414,8 @@ def refresh_linked(db: Session, client: SirettClient | None = None) -> dict:
                 cambios += 1
             if new_cost is not None and it.cost is not None and Decimal(str(it.cost)) != new_cost:
                 it.prev_cost = it.cost
+            if new_stock != it.stock or (new_cost is not None and (it.cost is None or Decimal(str(it.cost)) != new_cost)):
+                it.changed_at = now  # cambio de verdad (no solo se consulto)
             it.stock, it.cost = new_stock, new_cost
             if r:
                 it.raw = {**(it.raw or {}), "stock": r.get("stock"), "precio": r.get("precio")}
@@ -409,6 +431,8 @@ def refresh_linked(db: Session, client: SirettClient | None = None) -> dict:
         res = {"vinculados": len(items), "cambios": cambios, "sin_dato": sin_dato}
         prev = _state(t)
         clear = {"last_error": None} if prev.get("last_error") and prev.get("last_error") == prev.get("last_stock_error") else {}
+        if cambios:
+            clear["last_stock_change_at"] = now
         _save_state(t, last_stock_at=now, last_stock_try_at=now, last_stock_summary=res, last_stock_error=None, **clear)
         out[t.id] = res
     db.commit()

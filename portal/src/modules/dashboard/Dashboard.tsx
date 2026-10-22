@@ -33,7 +33,7 @@ const PENDING: { key: string; label: string; to: string; need: string; hot?: boo
   { key: "stock_bajo", label: "Productos con stock bajo", to: "/inventario?stock=bajo", need: "inventory.ver", hot: true },
   { key: "cotizaciones_por_aprobar", label: "Descuentos por aprobar", to: "/cotizaciones?pendiente=cotizaciones_por_aprobar", need: "sales.ver", hot: true },
   { key: "cotizaciones_aceptadas", label: "Aceptadas por convertir", to: "/cotizaciones?pendiente=cotizaciones_aceptadas", need: "sales.ver", hot: true },
-  { key: "pedidos_web", label: "Pedidos web por atender", to: "/ordenes?pendiente=por_atender", need: "sales.ver", hot: true },
+  { key: "pedidos_web", label: "Pedidos web y comprobantes por atender", to: "/ordenes?pendiente=por_atender", need: "sales.ver", hot: true },
   { key: "costos_aliados", label: "Costos de aliados pendientes", to: "/oportunidades?pendiente=costos_aliados", need: "crm_pipeline.ver", hot: true },
   { key: "comisiones_por_aprobar", label: "Comisiones por aprobar", to: "/comisiones?tab=bandeja", need: "commissions.aprobar", hot: true },
 ];

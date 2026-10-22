@@ -61,7 +61,7 @@ from .ops import (
     Warehouse,
     WebhookEvent,
 )
-from .payments import BankAccount, BankInstrument, Payment, PaymentLink
+from .payments import BankAccount, BankInstrument, InvoicePaymentProof, Payment, PaymentLink
 from .sales import BillingGroup, CollectionReminder, Invoice, InvoiceLine, Quote, QuoteAcceptance, QuoteLine, QuoteVersion
 from .store import ApiCredential, Coupon, Order, OrderLine, ReceivedDocument, StorePage, StoreStockAlert
 from .supplier_catalog import SupplierItem, SupplierListImport
@@ -115,6 +115,7 @@ __all__ = [
     "ReceptionResponse",
     "Payment",
     "PaymentLink",
+    "InvoicePaymentProof",
     "Warehouse",
     "StockMovement",
     "StockUnit",

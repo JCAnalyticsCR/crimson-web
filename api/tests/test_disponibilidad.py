@@ -113,7 +113,7 @@ def test_proveedor_fresco_viejo_sin_fecha_y_excel_sin_vincular(db_session):
     rows = av.availability_many(db_session, _tid(db_session), [fresco, viejo, sin_fecha, excel], audience="interno")
     f, v, s, e = rows[fresco.id], rows[viejo.id], rows[sin_fecha.id], rows[excel.id]
     assert f["state"] == "bajo_pedido" and f["supplier_fresh"] and f["supplier_qty"] == 12 and f["max_qty"] == 12
-    assert f["supplier_name"] == EUROCOMP and f["supplier_source"] == "api" and "actualizado hace 5 h" in f["label"]
+    assert f["supplier_name"] == EUROCOMP and f["supplier_source"] == "api" and "consultado hace 5 h" in f["label"]
     assert v["state"] == "consultar" and not v["supplier_fresh"] and v["max_qty"] == 0 and "dato viejo" in v["label"]
     assert s["state"] == "consultar" and s["supplier_updated_at"] is None  # sin fecha = viejo
     assert e["state"] == "agotado" and not e["supplier_linked"] and e["supplier_unlinked_qty"] == 40 and e["supplier_qty"] is None
@@ -191,7 +191,7 @@ def test_audiencias_publico_y_aliado_sin_proveedor_ni_costo(db_session):
     assert pub["label"] == "En bodega · 1 disponible" and pub["cantidad"] == 1 and pub["max_qty"] == 7
     assert ali["en_bodega"] == 1 and ali["bajo_pedido_cantidad"] == 6 and ali["actualizado_al"] and ali["label"] == "En bodega: 1 · bajo pedido: 6"
     assert not {k for k in ali["bodegas"][0] if "warehouse" in k}
-    assert interno["label"].startswith("Propio: 1 · Eurocomp Costa Rica: 6 · actualizado hace 2 h")
+    assert interno["label"].startswith("Propio: 1 · Eurocomp Costa Rica: 6 · consultado hace 2 h")
     assert "cost" not in str(sorted(interno))  # ni el panel recibe costos de esta funcion
     # la tienda en modo umbral no publica cantidades (ni max_qty)
     tt = db_session.scalar(select(Tenant))

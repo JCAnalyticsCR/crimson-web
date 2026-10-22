@@ -1,7 +1,11 @@
 """Endpoints publicos (sin sesion): pagina de pago por enlace firmado, con cobro en linea por ONVO.
 
 El regreso desde ONVO (?onvo=volver) nunca confirma por si solo: /onvo/sync le pregunta a ONVO por la sesion que se
-abrio desde este enlace y solo aplica el pago si ONVO dice que esta pagada (mismo camino que el webhook)."""
+abrio desde este enlace y solo aplica el pago si ONVO dice que esta pagada (mismo camino que el webhook).
+
+SINPE Movil y transferencia (pedido 21/10, item 16): la pagina muestra los datos de Mi Tienda -> Pagos y el cliente
+sube el comprobante (/proof); entra a la misma revision que los pedidos web y el pago se registra al aprobarlo
+(services/invoice_proofs)."""
 
 from __future__ import annotations
 
@@ -9,16 +13,16 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.clientip import ip_key
 from ..core.db import get_db
-from ..core.ratelimit import public_limiter
+from ..core.ratelimit import order_proof_ip_limiter, order_proof_limiter, public_limiter
 from ..core.security import read_purpose_token
 from ..models import Customer, Invoice, PaymentLink, Tenant
-from ..services import onvo
+from ..services import invoice_proofs, onvo
 from .auth import client_ip
 
 router = APIRouter(prefix="/public", tags=["publico"])
@@ -68,15 +72,42 @@ def pay_onvo_sync(token: str, request: Request, db: Session = Depends(get_db)):
     return _pay_out(db, t, inv)
 
 
+@router.post("/pay/{token}/proof", status_code=201)
+async def pay_proof(
+    token: str,
+    request: Request,
+    file: UploadFile = File(...),
+    method: str = Form(..., pattern="^(sinpe|transferencia)$"),
+    reference: str | None = Form(None, max_length=120),
+    amount: Decimal | None = Form(None, gt=0),
+    payer_name: str | None = Form(None, max_length=160),
+    db: Session = Depends(get_db),
+):
+    """Comprobante de SINPE o transferencia: queda en revision (Pedidos de la tienda) y el pago se aplica al aprobarlo."""
+    ip = client_ip(request)
+    order_proof_ip_limiter.hit(f"proof-ip:{ip_key(ip)}")  # mismo tope por IP que los comprobantes de pedidos web
+    t, inv, _link_row = _link(db, token)
+    order_proof_limiter.hit(f"proof-inv:{inv.id}:{ip_key(ip)}")
+    data = await file.read(invoice_proofs.so.MAX_PROOF + 1)  # el tope de 5 MB lo valida proof_media
+    invoice_proofs.upload(db, t, inv, data, file.filename, method, reference=reference, amount=amount, payer_name=payer_name, ip=ip)
+    db.commit()
+    db.refresh(inv)
+    return _pay_out(db, t, inv)
+
+
+def _store_logo(t: Tenant) -> str | None:
+    from .store import store_cfg
+
+    return store_cfg(t).get("logo_url") or None
+
+
 def _pay_out(db: Session, t: Tenant, inv: Invoice) -> dict:
     c = db.get(Customer, inv.customer_id) if inv.customer_id else None
     online = bool(onvo.secret_key(db, t.id)) and inv.status != "anulada" and Decimal(str(inv.balance)) > 0
-    manual = (t.settings or {}).get("manual_payment_methods") or [
-        {"name": "SINPE Movil", "instructions": "Envie el pago al numero indicado y comparta el comprobante."},
-        {"name": "Transferencia", "instructions": "Cuenta IBAN indicada en la factura."},
-    ]
+    lista = invoice_proofs.methods(db, t, inv)
     return {
-        "business": {"name": t.name, "logo_url": t.logo_url},
+        # el logo de la empresa (Ajustes) o, si no hay, el de Mi Tienda
+        "business": {"name": t.name, "logo_url": t.logo_url or _store_logo(t)},
         "invoice": {
             "number": inv.number,
             "date": inv.issue_date,
@@ -88,5 +119,11 @@ def _pay_out(db: Session, t: Tenant, inv: Invoice) -> dict:
             "lines": [{"name": ln.name, "quantity": ln.quantity, "unit_price": ln.unit_price, "total": ln.total} for ln in inv.lines],
         },
         "customer": {"name": c.name} if c else None,
-        "methods": {"online": {"onvo": online, "paypal": False}, "manual": manual},
+        "methods": {
+            "online": {"onvo": online, "paypal": False},
+            # los de siempre (pantallas abiertas antes de esta version): nombre + instrucciones, sin tarjeta
+            "manual": [{"name": m["label"], "instructions": m["instructions"]} for m in lista if m["code"] != "tarjeta"],
+            "list": lista,
+        },
+        "proofs": invoice_proofs.public_proofs(db, inv),
     }

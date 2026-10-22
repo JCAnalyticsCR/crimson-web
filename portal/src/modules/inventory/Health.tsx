@@ -1,5 +1,8 @@
 /* Salud del inventario: compara cada documento contra el kardex y lista discrepancias corregibles. Tambien lista
-   los productos con proveedor de catalogo (Eurocomp) sin item vinculado: su existencia del proveedor no cuenta. */
+   los productos con proveedor de catalogo (Eurocomp) sin item vinculado: su existencia del proveedor no cuenta.
+   Existencias negativas: se corrigen con un AJUSTE documentado (motivo obligatorio, queda en el kardex); si hay una
+   compra del producto sin recibir, el API pide confirmar (recibirla es la correccion). Pedidos con salida adelantada
+   (la factura del pago saco lo bajo pedido antes de que llegara): corregir devuelve esa salida. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
@@ -7,16 +10,17 @@ import { useSession } from "../../app/session";
 import { Card, Empty, I, Icon, Loading } from "../../ui/components";
 
 type Issue = {
-  kind: "negativo" | "factura" | "proyecto" | "pedido" | "pedido_sin_decidir" | "garantia" | "garantia_vieja" | "sin_vincular";
+  kind: "negativo" | "factura" | "proyecto" | "pedido" | "pedido_adelantado" | "pedido_sin_decidir" | "garantia" | "garantia_vieja" | "sin_vincular";
   ref_id: number; doc: string; product: string; detail: string; fixable: boolean; action?: string; code?: string | null;
+  warehouse_id?: number; qty?: string;
 };
 type HealthData = { checked_at: string; days: number; total: number; counts: Record<string, number>; issues: Issue[] };
 
 const KIND_LABEL: Record<Issue["kind"], string> = {
-  negativo: "Existencias negativas", factura: "Facturas", proyecto: "Proyectos", pedido: "Pedidos web", pedido_sin_decidir: "Devoluciones sin decidir",
+  negativo: "Existencias negativas", factura: "Facturas", proyecto: "Proyectos", pedido: "Pedidos web", pedido_adelantado: "Salidas adelantadas", pedido_sin_decidir: "Devoluciones sin decidir",
   garantia: "Garantías", garantia_vieja: "Garantías de más de 30 días", sin_vincular: "Proveedor sin vincular",
 };
-const KIND_ORDER: Issue["kind"][] = ["negativo", "factura", "proyecto", "pedido", "pedido_sin_decidir", "garantia", "garantia_vieja", "sin_vincular"];
+const KIND_ORDER: Issue["kind"][] = ["pedido_adelantado", "negativo", "factura", "proyecto", "pedido", "pedido_sin_decidir", "garantia", "garantia_vieja", "sin_vincular"];
 
 export default function Health() {
   const { toast, allows } = useSession();
@@ -35,9 +39,25 @@ export default function Health() {
   useEffect(() => { load(); }, [load]);
 
   const fix = async (issue: Issue) => {
+    let extra: Record<string, unknown> = {};
+    if (issue.kind === "negativo") {
+      const motivo = (window.prompt(`Ajuste de +${issue.qty ?? ""} para dejar ${issue.product} en cero en ${issue.doc}.
+¿Por qué? (queda en el kardex: conteo físico, venta sin entrada registrada…)`) || "").trim();
+      if (!motivo) return;
+      extra = { warehouse_id: issue.warehouse_id, motivo };
+    }
     setBusy(issue.ref_id);
+    const send = (force: boolean) => api<{ movimientos: number }>("/stock/health/fix", { method: "POST", json: { kind: issue.kind, ref_id: issue.ref_id, ...extra, ...(force ? { force: true } : {}) } });
     try {
-      const r = await api<{ movimientos: number }>("/stock/health/fix", { method: "POST", json: { kind: issue.kind, ref_id: issue.ref_id } });
+      let r: { movimientos: number };
+      try { r = await send(false); }
+      catch (e) {
+        const msg = e instanceof Error ? e.message : "Error";
+        if (issue.kind !== "negativo" || !/sin recibir/.test(msg) || !window.confirm(`${msg}
+
+¿Ajustar igual?`)) throw e;
+        r = await send(true);
+      }
       toast(`Corregido: ${r.movimientos} movimiento${r.movimientos !== 1 ? "s" : ""} en el kardex`);
       setBusy(null);
       load();
@@ -75,7 +95,7 @@ export default function Health() {
                       {iss.action === "vincular"
                         ? <Link className="btn btn--soft btn--sm" to="/inventario?tab=proveedores" title={iss.code ? `Buscá ${iss.code} en el catálogo del proveedor y vinculalo` : undefined}>Vincular</Link>
                         : iss.fixable && allows("inventory.editar")
-                        ? <button className="btn btn--soft btn--sm" disabled={busy === iss.ref_id} onClick={() => fix(iss)}>{busy === iss.ref_id ? "Corrigiendo…" : "Corregir"}</button>
+                        ? <button className="btn btn--soft btn--sm" disabled={busy === iss.ref_id} onClick={() => fix(iss)} title={iss.kind === "negativo" ? "Ajuste documentado que deja la bodega en cero (pide el motivo)" : undefined}>{busy === iss.ref_id ? "Corrigiendo…" : iss.kind === "negativo" ? "Ajustar a cero" : iss.kind === "pedido_adelantado" ? "Devolver salida" : "Corregir"}</button>
                         : <span className="muted" style={{ fontSize: 12.5 }}>{iss.kind === "negativo" ? "Revisá con un conteo o un ajuste" : iss.kind === "pedido_sin_decidir" ? "Decidí en el pedido si volvió" : iss.kind === "garantia_vieja" ? "Dale seguimiento en Garantías" : null}</span>}
                     </td>
                   </tr>
