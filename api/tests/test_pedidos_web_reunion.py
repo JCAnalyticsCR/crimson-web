@@ -12,6 +12,7 @@
 from sqlalchemy import select
 
 from app.models import Commission, EmailOutbox, Invoice, Order
+from tests.conftest import ADMIN
 from tests.test_rol_vendedor import _entrar, _uid
 from tests.test_tienda_checkout import PNG, SLUG, _body, _shop
 
@@ -211,6 +212,41 @@ def test_reasignar_tras_anular_la_comision_le_comisiona_al_nuevo(client, auth, d
     assert [c.user_id for c in _vendor_commissions(db_session, inv_id)] == [ub]
 
 
+def test_reasignar_a_b_y_de_vuelta_a_a_le_vuelve_a_comisionar(client, auth, db_session):
+    _a, ua, _b, ub = _vendedores(client, db_session, auth)
+    prods = _shop(client)
+    assert client.post("/commissions/rules", json={"name": "Vendedores 10%", "percent": 10}).status_code == 201
+    oid = _oid(client, _checkout(client, prods)["number"])
+    assert _assign(client, oid, ua).status_code == 200
+    assert _st(client, oid, "pagado").status_code == 200
+    inv_id = client.post(f"/orders/{oid}/invoice", params={"doc_type": "FE", "register_payment": True}).json()["invoice_id"]
+    for actual, siguiente in ((ua, ub), (ub, ua)):
+        (com,) = _vendor_commissions(db_session, inv_id)
+        assert com.user_id == actual
+        assert client.patch("/commissions", json={"ids": [com.id], "status": "anulada", "reason": "Reasignado"}).status_code == 200
+        assert _assign(client, oid, siguiente).status_code == 200
+        db_session.expire_all()
+    vivas = _vendor_commissions(db_session, inv_id)
+    assert [c.user_id for c in vivas] == [ua] and vivas[0].source_key.endswith(":re1")
+    assert _assign(client, oid, ua).status_code == 200  # repetir no duplica
+    db_session.expire_all()
+    assert len(_vendor_commissions(db_session, inv_id)) == 1
+
+
+def test_aviso_del_pedido_asignado_no_le_llega_a_otro_vendedor(client, auth, db_session):
+    a, ua, _b, ub = _vendedores(client, db_session, auth)
+    prods = _shop(client)
+    o = _checkout(client, prods)
+    oid = _oid(client, o["number"])
+    nuevo = {m.to for m in _mails(db_session, oid) if m.subject.startswith("Pedido web")}
+    assert {"vendedora.web@ejemplo.com", "vendedor.web@ejemplo.com"} <= nuevo  # sin vendedor: la cola de todos
+    assert _assign(client, oid, ua, a).status_code == 200
+    assert client.post(f"{SLUG}/orders/{o['track_token']}/proof", files={"file": ("a.png", PNG, "image/png")}).status_code == 201
+    aviso = {m.to for m in _mails(db_session, oid) if m.subject.startswith("Comprobante subido")}
+    assert "vendedora.web@ejemplo.com" in aviso and "vendedor.web@ejemplo.com" not in aviso
+    assert ADMIN[0].lower() in aviso  # el admin (sales.ver_todo) si
+
+
 # ---------- 43 ----------
 def test_avisos_y_reenvios_van_al_correo_actual_del_cliente(client, auth, db_session):
     prods = _shop(client)
@@ -259,6 +295,52 @@ def test_ligado_solo_por_cedula_los_avisos_siguen_al_correo_del_pedido(client, a
     al_cliente = {m.to for m in _mails(db_session, oid) if not m.subject.startswith(("Pedido web", "Comprobante"))}
     assert "titular@ejemplo.com" not in al_cliente and "comprador@ejemplo.com" in al_cliente
     assert client.post(f"{SLUG}/orders/lookup", json={"number": o["number"], "email": "titular@ejemplo.com"}).status_code == 404
+
+
+def test_ficha_por_cedula_sin_correo_o_corregida_despues_los_avisos_la_siguen(client, auth, db_session):
+    """Item 43: el correo que el equipo le pone (o le corrige) a la ficha despues de la compra manda en los avisos."""
+    prods = _shop(client)
+    r = client.post("/customers", json={"name": "Ficha sin correo", "id_type": "fisica", "id_number": "1-3333-0444"})
+    assert r.status_code in (200, 201), r.text
+    cid = r.json()["id"]
+    contacto = {"name": "Comprador", "email": "compra.sin@ejemplo.com", "phone": "8888-1111", "id_type": "fisica", "id_number": "1-3333-0444"}
+    oid = _oid(client, _checkout(client, prods, contact=contacto)["number"])
+    det = client.get(f"/store-orders/{oid}").json()
+    assert det["customer_id"] == cid and det["notify_email"] == "compra.sin@ejemplo.com"
+    assert client.put(f"/customers/{cid}", json={"name": "Ficha sin correo", "email": "agregado@ejemplo.com"}).status_code == 200
+    assert client.get(f"/store-orders/{oid}").json()["notify_email"] == "agregado@ejemplo.com"
+    assert client.post(f"/store-orders/{oid}/resend").json()["to"] == "agregado@ejemplo.com"
+
+    # ficha con OTRO correo: sigue al del pedido hasta que el equipo cambie el de la ficha
+    r = client.post("/customers", json={"name": "Titular", "id_type": "fisica", "id_number": "1-3333-0555", "email": "titular.dos@ejemplo.com"})
+    cid2 = r.json()["id"]
+    contacto = {**contacto, "email": "compra.otra@ejemplo.com", "id_number": "1-3333-0555"}
+    oid2 = _oid(client, _checkout(client, prods, contact=contacto)["number"])
+    assert client.get(f"/store-orders/{oid2}").json()["notify_email"] == "compra.otra@ejemplo.com"
+    assert client.put(f"/customers/{cid2}", json={"name": "Titular", "email": "corregido@ejemplo.com"}).status_code == 200
+    assert client.get(f"/store-orders/{oid2}").json()["notify_email"] == "corregido@ejemplo.com"
+
+
+def test_pedido_sin_marca_de_vinculo_no_se_desvia_a_la_ficha_de_otra_cedula(client, auth, db_session):
+    """Pedidos de antes de customer_link (NULL): la ficha solo si su correo es el de la compra."""
+    prods = _shop(client)
+    r = client.post("/customers", json={"name": "Titular", "id_type": "fisica", "id_number": "1-4444-0666", "email": "titular.tres@ejemplo.com"})
+    contacto = {"name": "Comprador", "email": "compra.vieja@ejemplo.com", "phone": "8888-1111", "id_type": "fisica", "id_number": "1-4444-0666"}
+    o = _checkout(client, prods, contact=contacto)
+    oid = _oid(client, o["number"])
+    ord_ = db_session.get(Order, oid)
+    ord_.customer_link, ord_.customer_link_email = None, None
+    db_session.commit()
+    assert client.get(f"/store-orders/{oid}").json()["customer_id"] == r.json()["id"]
+    assert client.get(f"/store-orders/{oid}").json()["notify_email"] == "compra.vieja@ejemplo.com"
+    assert client.post(f"{SLUG}/orders/lookup", json={"number": o["number"], "email": "titular.tres@ejemplo.com"}).status_code == 404
+    # el de la compra en la ficha: la sigue
+    o2 = _checkout(client, prods)
+    oid2 = _oid(client, o2["number"])
+    ord2 = db_session.get(Order, oid2)
+    ord2.customer_link = None
+    db_session.commit()
+    assert client.get(f"/store-orders/{oid2}").json()["notify_email"].lower() == "ana@correo.com"
 
 
 def test_reenviar_en_efectivo_sin_pagar_no_dice_pago_confirmado(client, auth, db_session):

@@ -464,21 +464,36 @@ EMAIL_GREY, EMAIL_INK, EMAIL_LINE = "#6b6570", "#15131a", "#ebe7e3"
 
 def link_kind(c: Customer, contact: dict) -> str:
     """Como quedo ligado el pedido a la ficha (Order.customer_link): "email" si la ficha tenia el correo del comprador
-    (ligada por correo o creada por este pedido), "cedula" si solo coincidio la cedula y la ficha tenia otro correo."""
+    (ligada por correo o creada por este pedido) o no tenia correo (no hay otro dueno que proteger); "cedula" si solo
+    coincidio la cedula y la ficha tenia OTRO correo. El correo de la ficha al ligar va en Order.customer_link_email."""
     mail = ((contact or {}).get("email") or "").strip().lower()
-    return "email" if mail and (c.email or "").strip().lower() == mail else "cedula"
+    ficha = (c.email or "").strip().lower()
+    return "email" if not ficha or ficha == mail else "cedula"
+
+
+def link_email(c: Customer) -> str | None:
+    """El correo que tenia la ficha al ligar el pedido (Order.customer_link_email): notify_email lo compara despues."""
+    return (c.email or "").strip().lower() or None
 
 
 def notify_email(db: Session, o: Order) -> str:
     """Correo al que van los avisos del pedido (21/10, item 43): el ACTUAL de la ficha del cliente si el pedido esta
-    ligado a uno (el admin lo corrigio despues de la compra); si no, o la ficha no tiene correo, el del pedido.
+    ligado a uno (el admin lo corrigio o lo agrego despues de la compra); si no, o la ficha no tiene correo, el del pedido.
     Un pedido ligado solo por cedula a una ficha con OTRO correo (customer_link="cedula") sigue al correo del pedido:
-    la cedula es publica y escribirla no hace a nadie dueno de esa ficha (sus avisos llevan el enlace del pedido)."""
-    if o.customer_id and o.customer_link != "cedula":
-        c = db.get(Customer, o.customer_id)
-        if c is not None and c.tenant_id == o.tenant_id and (c.email or "").strip():
-            return c.email.strip()
-    return ((o.contact or {}).get("email") or "").strip()
+    la cedula es publica y escribirla no hace a nadie dueno de esa ficha (sus avisos llevan el enlace del pedido). Si el
+    equipo cambia despues el correo de esa ficha (distinto del que tenia al ligar), los avisos lo siguen.
+    customer_link NULL (pedido sin la marca): la ficha solo si su correo es el de la compra."""
+    mail = ((o.contact or {}).get("email") or "").strip()
+    c = db.get(Customer, o.customer_id) if o.customer_id else None
+    ficha = (c.email or "").strip() if c is not None and c.tenant_id == o.tenant_id else ""
+    if not ficha:
+        return mail
+    if o.customer_link == "email":
+        return ficha
+    if o.customer_link == "cedula":
+        antes = (o.customer_link_email or "").strip().lower()
+        return ficha if antes and ficha.lower() != antes else mail
+    return ficha if ficha.lower() == mail.lower() else mail
 
 
 def store_logo(t: Tenant) -> str | None:
@@ -685,7 +700,26 @@ def notify_team(db: Session, t: Tenant, o: Order, kind: str, detail: str | None 
     )
     cuerpo = email_shell(t, title=titulo, body=body, foot="Aviso interno de la tienda en línea. ")
     roles = tuple(checkout_cfg(t).get("notify_roles") or ("admin",))
-    return notify_roles(db, t, roles, titulo, cuerpo, "order", o.id)
+    return notify_roles(db, t, roles, titulo, cuerpo, "order", o.id, keep=_team_filter(db, t, o))
+
+
+def _team_filter(db: Session, t: Tenant, o: Order):
+    """Con vendedor asignado, el aviso le llega a quien ve todos los pedidos (sales.ver_todo) y al propio vendedor:
+    a otro vendedor el pedido no le aparece en ningun lado (order_scope), tampoco por correo."""
+    if not o.seller_id:
+        return None
+    from ..core.deps import _role_permissions, effective_permissions, perms_allow
+
+    cache: dict[str, bool] = {}
+
+    def keep(m) -> bool:
+        if m.user_id == o.seller_id:
+            return True
+        if m.role_code not in cache:
+            cache[m.role_code] = perms_allow(effective_permissions(t, m.role_code, _role_permissions(db, m.role_code)), "sales", "ver_todo")
+        return cache[m.role_code]
+
+    return keep
 
 
 def email_status(db: Session, o: Order) -> list[dict]:

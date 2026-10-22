@@ -684,10 +684,15 @@ def _on_capture(db: Session, payment: Payment, inv: Invoice, only: set[str] | No
         else:
             base_amount = base_sale
         amount = ZERO if hold else _rule_amount(db, rule, base_amount, base_sale / net, inv.currency)
+        sk = f"cobro:{payment.id}:{key}"
+        if ignore_void and beneficiary == "vendedor":
+            # reasignacion (A -> B -> A con las anuladas de por medio): la clave anulada de este vendedor ya existe y
+            # _accrue la descartaria; aqui no hay ninguna viva (_payment_commissioned), se devenga con key:re{n}
+            sk = _fresh_key(db, inv.tenant_id, sk)
         c = _accrue(
             db,
             deal=deal,
-            source_key=f"cobro:{payment.id}:{key}",
+            source_key=sk,
             beneficiary=beneficiary,
             user_id=uid,
             participation=part,

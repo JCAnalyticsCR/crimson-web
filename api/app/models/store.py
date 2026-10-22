@@ -84,10 +84,12 @@ class Order(TenantMixin, TimestampMixin, Base):
     # pedido queda a su nombre (seller_id) y comisiona como una venta propia salvo que Mi Tienda lo apague.
     seller_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), index=True)
     assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # como se ligo a la ficha del cliente (21/10, item 43): "email" (la ficha tenia el correo del comprador) o "cedula"
-    # (solo coincidio la cedula; la ficha tenia otro correo). Con "cedula" los avisos siguen al correo del pedido.
-    # NULL = pedido anterior a esta marca: los avisos van a la ficha.
+    # como se ligo a la ficha del cliente (21/10, item 43): "email" (la ficha tenia el correo del comprador o no tenia
+    # correo) o "cedula" (solo coincidio la cedula; la ficha tenia OTRO correo). customer_link_email: el correo que
+    # tenia la ficha al ligarla (interno, nunca sale al comprador). Con "cedula" los avisos siguen al correo del pedido
+    # hasta que el equipo cambie el correo de la ficha (store_orders.notify_email).
     customer_link: Mapped[str | None] = mapped_column(String(8))
+    customer_link_email: Mapped[str | None] = mapped_column(String(254))
 
     lines: Mapped[list["OrderLine"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 

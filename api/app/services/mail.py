@@ -18,6 +18,7 @@ import os
 import re
 from datetime import UTC, datetime, timedelta
 from html import escape
+from typing import TYPE_CHECKING
 
 import httpx
 from sqlalchemy import select
@@ -25,6 +26,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..models import EmailOutbox, Tenant
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from ..models import TenantUser
 
 RETRY_BASE = timedelta(minutes=15)  # espera tras el 1er fallo; se duplica con cada intento
 MAX_ATTEMPTS = 6  # al 6.o envio fallido el correo queda "fallido" (~8 h de intentos)
@@ -136,16 +142,27 @@ def blocked_recipients(tenant: Tenant) -> set[str]:
 
 
 def notify_roles(
-    db: Session, tenant: Tenant, roles: tuple[str, ...], subject: str, html: str, entity: str, entity_id: int, dedupe_key: str | None = None
+    db: Session,
+    tenant: Tenant,
+    roles: tuple[str, ...],
+    subject: str,
+    html: str,
+    entity: str,
+    entity_id: int,
+    dedupe_key: str | None = None,
+    keep: Callable[[TenantUser], bool] | None = None,
 ) -> int:
     """Avisa a todos los usuarios activos con esos roles. Lo que en las notas de Andres es
     'Administracion recibe: nuevo levantamiento' o 'proyecto terminado, listo para facturacion'.
-    Con dedupe_key, cada destinatario lleva la suya (llave|correo): un aviso repetido no le llega dos veces a nadie."""
+    Con dedupe_key, cada destinatario lleva la suya (llave|correo): un aviso repetido no le llega dos veces a nadie.
+    keep: filtro por membresia (p. ej. un pedido web de un vendedor no le llega a otro vendedor)."""
     from ..models import TenantUser
 
     n = 0
     vistos: set[str] = set()
     for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.active, TenantUser.role_code.in_(roles))):
+        if keep is not None and not keep(m):
+            continue
         correo = (m.user.email or "").strip().lower()
         if not correo or correo in vistos:
             continue

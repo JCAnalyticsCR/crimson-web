@@ -178,6 +178,7 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
         channel="tienda",
         customer_id=customer.id,
         customer_link=so.link_kind(customer, contact),  # item 43: a que correo van los avisos (so.notify_email)
+        customer_link_email=so.link_email(customer),
         contact={k: v for k, v in contact.items() if v},
         currency=Pricer(db, t).currency,
         subtotal=calc.subtotal + discount_total - shipping,
