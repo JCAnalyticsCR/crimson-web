@@ -153,11 +153,11 @@ def avisar_cotizaciones_frias(db: Session, tenant, ahora: datetime | None = None
             intro = (
                 f"Llevan {FRIA_DIAS} días o más desde el último envío y el cliente no ha respondido:"
                 if uid
-                else "Estas cotizaciones están frías y su vendedora ya no está activa (o ya no las puede ver): reasignalas o dales seguimiento:"
+                else "Estas cotizaciones están frías y su vendedora ya no está activa (o ya no las puede ver): reasígnelas o deles seguimiento:"
             )
             return (
                 f"<p>{intro}</p><ul>{filas}</ul>{mas}"
-                "<p>Una llamada a tiempo es la diferencia. Si el cliente ya respondió, registralo en Versiones de la cotización: "
+                "<p>Una llamada a tiempo es la diferencia. Si el cliente ya respondió, regístrelo en Versiones de la cotización: "
                 "así no vuelve a aparecer aquí.</p>"
                 + (  # el boton principal del correo (email_layout)
                     cta(f"/cotizaciones/{items[0][0].id}", f"Abrir la cotización {items[0][0].number}")

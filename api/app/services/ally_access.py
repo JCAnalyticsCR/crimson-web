@@ -189,7 +189,6 @@ def invite_ally_user(
             link=link,
             label="Entrar al portal",
             note=f"Con el botón crea su contraseña y entra. El enlace vence en {INVITE_DAYS} días y sirve una sola vez.",
-            vos=False,
         ),
         "invitation",
         inv.id,

@@ -200,7 +200,7 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
         return _queued(
             db,
             lambda: accounts.notify_security(
-                db, t, admin, "Tu contraseña de Crimson cambió", "<p>Si no fuiste vos, avisá de inmediato a la administración.</p>"
+                db, t, admin, "Su contraseña de Crimson cambió", "<p>Si no fue usted, avise de inmediato a la administración.</p>"
             ),
         )
 
@@ -216,7 +216,7 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
 
         filas = [
             ("Monitoreo mensual", "Cliente Ejemplo S.A.", "₡45,000.00", "Sale sola con su PDF y enlace de pago"),
-            ("Mantenimiento de cámaras", "Cliente Ejemplo S.A.", "₡120,000.00", "Espera tu «Aprobar y enviar» en Aprobaciones"),
+            ("Mantenimiento de cámaras", "Cliente Ejemplo S.A.", "₡120,000.00", "Espera su «Aprobar y enviar» en Aprobaciones"),
         ]
         asunto = "En 3 días (24/10/2026): 2 cobro(s) recurrente(s) · Empresa Ejemplo"
         return _queued(db, lambda: queue_email(db, t, "admin@ejemplo.com", asunto, preview_html(HOY + timedelta(days=3), filas), "recurrence", 0))
@@ -343,7 +343,6 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
             link="https://panel.ejemplo.com/invitacion/TOKEN-DE-EJEMPLO",
             label="Entrar al portal",
             note="Con el botón crea su contraseña y entra. El enlace vence en 7 días y sirve una sola vez.",
-            vos=False,
         ),
         "acceso-portal-clientes": lambda: accounts.access_email_html(
             t,
@@ -353,7 +352,6 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
             link="https://panel.ejemplo.com/invitacion/TOKEN-DE-EJEMPLO",
             label="Crear mi contraseña",
             note="El enlace vence en 7 días y sirve una sola vez. Si no esperaba este acceso, ignore este correo.",
-            vos=False,
         ),
         "comprobante-electronico": lambda: einvoice_html(
             t,
@@ -513,7 +511,7 @@ def avisos_internos(db, t, admin, c, inv) -> dict[str, Callable[[], str]]:
         from ..routers.fieldwork import ObservationIn, _notify_returned
 
         s = levantamiento(23)
-        obs = [ObservationIn(point_code="C1", text="Falta la altura de montaje."), ObservationIn(text="Agregá una foto del rack.")]
+        obs = [ObservationIn(point_code="C1", text="Falta la altura de montaje."), ObservationIn(text="Agregue una foto del rack.")]
         return _queued(db, lambda: _notify_returned(db, p_admin, s, obs))
 
     def oportunidad() -> Opportunity:
@@ -626,7 +624,7 @@ def avisos_internos(db, t, admin, c, inv) -> dict[str, Callable[[], str]]:
     def recurrencia_alerta() -> str:
         from ..routers.ops import _rec_alert
 
-        cuerpo = "La factura del periodo no salió: el cliente no tiene correo. Agregalo en su ficha y reenviala desde Aprobaciones."
+        cuerpo = "La factura del periodo no salió: el cliente no tiene correo. Agréguelo en su ficha y reenvíela desde Aprobaciones."
         return _queued(db, lambda: _rec_alert(db, recurrencia(), inv, "Factura recurrente sin enviar", cuerpo))
 
     def recurrencia_atrasada() -> str:

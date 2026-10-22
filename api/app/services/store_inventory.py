@@ -344,14 +344,14 @@ def _notify_paid_purchase(db: Session, t: Tenant, o: Order, reqs: list[PurchaseR
     quien = " y ".join(proveedores) if proveedores else "el proveedor"
     items = "".join(
         f"<li><b>{e(ln.name)}</b> × {_fmt(_dec(ln.quantity))}"
-        + (f" · código {e(codes[ln.product_id][0])}" + (f" ({e(codes[ln.product_id][1])})" if codes[ln.product_id][1] else "") if ln.product_id in codes else " · sin código del proveedor: buscalo a mano")
+        + (f" · código {e(codes[ln.product_id][0])}" + (f" ({e(codes[ln.product_id][1])})" if codes[ln.product_id][1] else "") if ln.product_id in codes else " · sin código del proveedor: búsquelo a mano")
         + "</li>"
         for ln in lines
     )
     numeros = ", ".join(r.number for r in reqs)
     tarde = ""
     if o.expires_at is not None and o.paid_at is not None and _aware(o.paid_at) > _aware(o.expires_at):
-        tarde = "<p><b>Ojo:</b> el pago llegó después del plazo; lo apartado ya había vuelto a la venta. Confirmá la existencia con el proveedor antes de prometer fecha.</p>"
+        tarde = "<p><b>Ojo:</b> el pago llegó después del plazo; lo apartado ya había vuelto a la venta. Confirme la existencia con el proveedor antes de prometer fecha.</p>"
     if o.paid_at is not None:
         asunto = f"PAGADO: comprar hoy a {quien} · pedido {o.number} ({numeros})"
         estado = f"<p>El pedido web <b>{e(o.number)}</b> ya está <b>pagado</b>. Hay que comprarle hoy a {e(quien)}:</p>"
@@ -366,7 +366,7 @@ def _notify_paid_purchase(db: Session, t: Tenant, o: Order, reqs: list[PurchaseR
         ("admin", "supervisor"),
         asunto,
         f"{estado}<ul>{items}</ul>{tarde}"
-        f"<p>La solicitud de compra <b>{e(numeros)}</b> quedó en borrador: marcala «solicitada» al hacer el pedido. Al recibir la compra queda reservada para este pedido.</p>"
+        f"<p>La solicitud de compra <b>{e(numeros)}</b> quedó en borrador: márquela «solicitada» al hacer el pedido. Al recibir la compra queda reservada para este pedido.</p>"
         + email_layout.cta("/compras", "Abrir Compras"),
         "purchase_request",
         reqs[0].id,
@@ -987,8 +987,7 @@ def back_in_stock_html(t: Tenant, name: str, mensaje: str, url: str) -> str:
         body=email_layout.p_html(f"¡Buenas noticias! <b>{html.escape(name)}</b> ya está {html.escape(mensaje.lower())}."),
         preheader=f"{name} ya está {mensaje.lower()}.",
         action=(url, "Ver el producto"),
-        foot="Te escribimos porque pediste que te avisáramos. La existencia puede cambiar: si lo querés, no esperés mucho.",
-        vos=True,
+        foot="Le escribimos porque pidió que le avisáramos. La existencia puede cambiar: si lo quiere, no espere mucho.",
     )
 
 

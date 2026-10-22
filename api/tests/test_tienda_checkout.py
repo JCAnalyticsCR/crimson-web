@@ -159,7 +159,7 @@ def test_sinpe_full_flow_idempotency_proof_and_tracking(client, auth, inv_calls,
     # el equipo recibe aviso de pedido nuevo y de comprobante subido
     asuntos = [e.subject for e in db_session.query(EmailOutbox).filter(EmailOutbox.entity == "order", EmailOutbox.entity_id == order["id"])]
     assert any(a.startswith("Pedido web") for a in asuntos) and any(a.startswith("Comprobante subido") for a in asuntos)
-    assert any(a.startswith("Recibimos tu pedido") for a in asuntos)
+    assert any(a.startswith("Recibimos su pedido") for a in asuntos)
     # un archivo publico identico NO reutiliza el comprobante privado
     pub_up = client.post("/media", files={"file": ("sinpe.png", PNG, "image/png")}).json()
     assert pub_up["id"] != mid

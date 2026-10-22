@@ -49,7 +49,7 @@ class Check:
     @property
     def message(self) -> str:
         where = f" en «{self.line}»" if self.line else ""
-        return f"El descuento{where} es de {self.worst:.1f} % y tu límite es {self.limit:.0f} %."
+        return f"El descuento{where} es de {self.worst:.1f} % y su límite es {self.limit:.0f} %."
 
 
 def check(db: Session, p: Principal, payload: DocumentIn) -> Check:
@@ -163,7 +163,7 @@ def public_reason(text: str | None, sees_costs: bool) -> str | None:
     puesto (PROBE_REASON) ni siquiera se dice si tambien fue el margen: todas se ven iguales."""
     if not text or sees_costs:
         return text
-    if PROBE_REASON in text:
+    if PROBE_REASON in text or PROBE_REASON_OLD in text:
         return " ".join(MARGIN_REASON.sub("", text).split())
     return MARGIN_REASON.sub("El margen queda por debajo del mínimo de la empresa.", text)
 
@@ -241,7 +241,9 @@ MARGIN_PROBE_LIMIT = 5
 MARGIN_PROBE_HOURS = 24
 MARGIN_PROBE_BAND = Decimal(5)  # puntos de margen sobre el minimo
 PROBE_ACTIONS = ("margin_hold", "margin_probe")
-PROBE_REASON = "Por un tiempo, cada cotización tuya pasa por la aprobación de administración antes de enviarse."
+PROBE_REASON = "Por un tiempo, cada cotización suya pasa por la aprobación de administración antes de enviarse."
+# el mismo motivo como se guardaba antes de que los correos trataran de usted (cotizaciones ya retenidas)
+PROBE_REASON_OLD = "Por un tiempo, cada cotización tuya pasa por la aprobación de administración antes de enviarse."
 
 
 def near_min(tenant, margin: Decimal | None) -> bool:
@@ -267,7 +269,7 @@ def margin_probe(db: Session, p: Principal, quote, margin: Decimal | None, held:
                 f"<p>{quien} guardó en las últimas {MARGIN_PROBE_HOURS} horas {MARGIN_PROBE_LIMIT} cotizaciones con márgenes distintos "
                 f"por debajo del mínimo o muy cerca de él (la última, <b>{html.escape(quote.number)}</b>).</p>"
                 "<p>Puede ser trabajo normal con productos de margen bajo o alguien probando precios para deducir el costo "
-                "(el detalle está en la bitácora). Mientras tanto, todas sus cotizaciones quedan esperando tu aprobación, "
+                "(el detalle está en la bitácora). Mientras tanto, todas sus cotizaciones quedan esperando su aprobación, "
                 "sin decirle si fue por el margen.</p>"
                 + cta("/aprobaciones", "Abrir Aprobaciones")
             )

@@ -70,7 +70,7 @@ def test_queue_email_guarda_el_marco_y_oculta_los_enlaces_sensibles(client, db_s
     m = queue_email(db_session, t, "x@ejemplo.com", "Aviso", "<p>hola</p>", "preview", 0)
     assert el.MARKER in m.html
     tok = "A" * 40
-    r = queue_email(db_session, t, "y@ejemplo.com", "Creá tu contraseña", reset_email_html(t, "Ana", f"https://p.ejemplo.com/restablecer/{tok}", "1 hora"), "password_reset", 1)
+    r = queue_email(db_session, t, "y@ejemplo.com", "Cree su contraseña", reset_email_html(t, "Ana", f"https://p.ejemplo.com/restablecer/{tok}", "1 hora"), "password_reset", 1)
     assert tok not in r.html and r.html.count("/restablecer/[oculto]") == 3  # boton y enlace en texto, todos ocultos
     assert "Restablecer contraseña" in r.html
 

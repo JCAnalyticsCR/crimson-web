@@ -246,11 +246,10 @@ def link(url: str, label: str, color: str = PRIMARY) -> str:
     return f'<a href="{e(url)}" target="_blank" style="color:{e(color)};font-weight:700;text-decoration:underline">{e(label)}</a>'
 
 
-def fallback(url: str, vos: bool = False) -> str:
+def fallback(url: str) -> str:
     """El enlace del boton en texto, por si el boton no abre (algunos buzones bloquean los botones)."""
-    copie = "copiá" if vos else "copie"
     return (
-        f'<p style="margin:10px 0 0;font-family:{FONT};font-size:12px;line-height:1.5;color:{GREY}">Si el botón no abre, {copie} este enlace en el navegador:<br>'
+        f'<p style="margin:10px 0 0;font-family:{FONT};font-size:12px;line-height:1.5;color:{GREY}">Si el botón no abre, copie este enlace en el navegador:<br>'
         f'<a href="{e(url)}" target="_blank" style="color:{GREY};word-break:break-all">{e(url)}</a></p>'
     )
 
@@ -317,7 +316,6 @@ def render(
     action: tuple[str, str] | None = None,
     after_action: str = "",
     foot: str = "",
-    vos: bool = False,
     show_link: bool = True,
 ) -> str:
     """El correo completo.
@@ -325,8 +323,8 @@ def render(
     action: (url, texto) del UN boton principal; su enlace va tambien en texto debajo (show_link).
     after_action: HTML que va entre el boton y el enlace en texto (p. ej. un enlace secundario).
     foot: nota del pie (HTML ya escapado), encima del contacto de la empresa.
-    vos: el correo trata de "vos" (pedido web, cuentas); por defecto de "usted" (documentos y cobro)."""
-    return _frame(brand(t), title=title, body=body, preheader=preheader, action=action, after_action=after_action, foot=foot, vos=vos, show_link=show_link)
+    Todo correo trata al lector de usted (decision del cliente): cliente, aliado o equipo, nunca de vos ni de tu."""
+    return _frame(brand(t), title=title, body=body, preheader=preheader, action=action, after_action=after_action, foot=foot, show_link=show_link)
 
 
 def render_static(*, title: str, body: str, preheader: str | None = None, name: str = "Crimson Consulting", foot: str = "") -> str:
@@ -334,7 +332,7 @@ def render_static(*, title: str, body: str, preheader: str | None = None, name: 
     del respaldo diario, que tiene que salir aunque la base o las variables sean lo que fallo. Colores por defecto,
     el nombre en el encabezado y info@crimsoncr.com en el pie."""
     b = Brand(name=name, primary=PRIMARY, logo=None, email=CONTACT_EMAIL, phone=None, whatsapp=None, address=None)
-    return _frame(b, title=title, body=body, preheader=preheader, action=None, after_action="", foot=foot, vos=False, show_link=False)
+    return _frame(b, title=title, body=body, preheader=preheader, action=None, after_action="", foot=foot, show_link=False)
 
 
 def _frame(
@@ -346,11 +344,10 @@ def _frame(
     action: tuple[str, str] | None,
     after_action: str,
     foot: str,
-    vos: bool,
     show_link: bool,
 ) -> str:
     if action and action[0]:
-        boton = button(action[0], action[1], b.primary) + after_action + (fallback(action[0], vos) if show_link else "")
+        boton = button(action[0], action[1], b.primary) + after_action + (fallback(action[0]) if show_link else "")
     else:
         boton = after_action
     pre = _preheader(preheader if preheader is not None else title)

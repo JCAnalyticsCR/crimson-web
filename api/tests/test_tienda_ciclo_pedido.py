@@ -109,16 +109,16 @@ def test_sinpe_sin_pagar_vence_libera_y_nunca_avisa_compra(client, auth, db_sess
     assert _avail(client, p["id"]).json()[str(p["id"])]["estado"] == "bajo_pedido"
     assert _purchase_mails(db_session) == []
     # el cliente recibe el aviso con el enlace para rehacer la compra (la ficha del producto)
-    venc = _order_mails(db_session, o, "Tu pedido")
+    venc = _order_mails(db_session, o, "Su pedido")
     assert len(venc) == 1 and "venció sin pago" in venc[0].subject and f"/p/grabador-nvr-{p['id']}" in venc[0].html
     # otra corrida no hace nada
     assert sinv.expire_holds(db_session) == 0
-    assert len(_order_mails(db_session, o, "Tu pedido")) == 1
+    assert len(_order_mails(db_session, o, "Su pedido")) == 1
 
 
 def test_al_encender_cancelar_los_pedidos_viejos_se_cancelan_sin_correo(client, auth, db_session):
     """cancel_unpaid_on_expiry se enciende una semana despues del despliegue: lo abandonado de antes se cancela (y
-    libera) pero el cliente no recibe "tu pedido venció" por un pedido de hace dias; uno recien vencido si."""
+    libera) pero el cliente no recibe "su pedido venció" por un pedido de hace dias; uno recien vencido si."""
     _publish(client)
     _pagos(client)
     p = _bajo_pedido(client, db_session, "CIC-12", "Gabinete de rack", qty=4)
@@ -134,8 +134,8 @@ def test_al_encender_cancelar_los_pedidos_viejos_se_cancelan_sin_correo(client, 
     db_session.refresh(viejo)
     db_session.refresh(nuevo)
     assert viejo.status == nuevo.status == "cancelado" and _req(db_session, viejo).status == "cancelada"
-    assert _order_mails(db_session, viejo, "Tu pedido") == [] and any("Sin correo al cliente" in (h.get("note") or "") for h in viejo.history)
-    assert len(_order_mails(db_session, nuevo, "Tu pedido")) == 1
+    assert _order_mails(db_session, viejo, "Su pedido") == [] and any("Sin correo al cliente" in (h.get("note") or "") for h in viejo.history)
+    assert len(_order_mails(db_session, nuevo, "Su pedido")) == 1
 
 
 def test_pagado_pasa_a_borrador_con_un_solo_aviso_de_compra(client, auth, db_session):
@@ -343,7 +343,7 @@ def test_tarjeta_pagada_en_onvo_sin_webhook_queda_pagada(client, auth, db_sessio
     _wait_aged(db_session, caido, 20)
     sinv.expire_holds(db_session)
     db_session.refresh(caido)
-    assert caido.status == "cancelado" and len(_order_mails(db_session, caido, "Tu pedido")) == 1
+    assert caido.status == "cancelado" and len(_order_mails(db_session, caido, "Su pedido")) == 1
 
     # pago en proceso (esperando al banco): tampoco se cancela
     proceso = _card(client, db_session, p)
@@ -368,7 +368,7 @@ def test_tarjeta_no_se_cancela_dentro_del_margen_y_un_pago_tardio_se_aplica(clie
     fake_onvo.pay(o.payment_ref)  # el comprador termino de llenar la tarjeta despues del plazo
     assert tienda.sync_card_orders(db_session) == 1
     db_session.refresh(o)
-    assert o.status == "pagado" and _order_mails(db_session, o, "Tu pedido") == []
+    assert o.status == "pagado" and _order_mails(db_session, o, "Su pedido") == []
 
     # 3-D Secure sin completar pasado el margen: es un abandono, se cancela
     abandono = _card(client, db_session, p)
@@ -395,7 +395,7 @@ def test_tarjeta_pagada_en_una_sesion_anterior_no_se_cancela(client, auth, db_se
     sinv.expire_holds(db_session)
     db_session.refresh(o)
     assert o.status == "pagado" and o.payment_ref == f"pi_{primera}"
-    assert _order_mails(db_session, o, "Tu pedido") == []
+    assert _order_mails(db_session, o, "Su pedido") == []
 
     # la consulta automatica tambien mira las sesiones anteriores
     r2 = _buy(client, [{"product_id": p["id"], "quantity": 1}], "Tarjeta (ONVO)")
@@ -444,7 +444,7 @@ def test_cancelar_al_vencer_con_onvo_lento_igual_lleva_correo(client, auth, db_s
     db_session.commit()
     sinv.expire_holds(db_session)
     db_session.refresh(o)
-    assert o.status == "cancelado" and len(_order_mails(db_session, o, "Tu pedido")) == 1
+    assert o.status == "cancelado" and len(_order_mails(db_session, o, "Su pedido")) == 1
 
 
 def test_consulta_a_onvo_cada_15_min_aplica_el_pago(client, auth, db_session, fake_onvo):
@@ -573,14 +573,14 @@ def test_recordatorio_24h_antes_una_sola_vez(client, auth, db_session):
     otro.created_at, otro.expires_at = now - timedelta(hours=1), now + timedelta(hours=5)  # plazo corto: espera a la mitad
     db_session.commit()
     assert tienda.payment_reminders(db_session, now) == 1
-    mails = _order_mails(db_session, o, "Tu pedido")
-    assert len(mails) == 1 and mails[0].subject == f"Tu pedido {o.number} sigue pendiente de pago"
+    mails = _order_mails(db_session, o, "Su pedido")
+    assert len(mails) == 1 and mails[0].subject == f"Su pedido {o.number} sigue pendiente de pago"
     html = mails[0].html
     assert "20/10/2026 a las 22:30" in html  # la hora de Costa Rica, no la fecha UTC
     assert "8888-7777" in html and "Subir el comprobante" in html and "?pedido=" in html
     # dos corridas (o dos procesos beat): un solo correo
     assert tienda.payment_reminders(db_session, now) == 0
-    assert len(_order_mails(db_session, o, "Tu pedido")) == 1 and _order_mails(db_session, otro, "Tu pedido") == []
+    assert len(_order_mails(db_session, o, "Su pedido")) == 1 and _order_mails(db_session, otro, "Su pedido") == []
     # pasada la mitad del plazo corto, el otro si recibe el suyo
     assert tienda.payment_reminders(db_session, now + timedelta(hours=3)) == 1
 
@@ -602,7 +602,7 @@ def test_recordatorio_respeta_la_pausa_del_cliente(client, auth, db_session):
     db_session.commit()
     assert tienda.payment_reminders(db_session, now) == 0
     db_session.refresh(o)
-    assert _order_mails(db_session, o, "Tu pedido") == [] and so.has_note(o, so.REMINDER_NOTE)
+    assert _order_mails(db_session, o, "Su pedido") == [] and so.has_note(o, so.REMINDER_NOTE)
 
 
 def test_recordatorio_no_va_a_tarjeta_ni_a_comprobante_en_revision(client, auth, db_session):
@@ -660,7 +660,7 @@ def test_correos_automaticos_llevan_dedupe_key_y_respetan_pausa_y_tienda(client,
     _vencer(db_session, b)
     sinv.expire_holds(db_session)
     db_session.refresh(b)
-    assert b.status == "cancelado" and [m for m in _order_mails(db_session, b, "Tu pedido") if "venció" in m.subject] == []
+    assert b.status == "cancelado" and [m for m in _order_mails(db_session, b, "Su pedido") if "venció" in m.subject] == []
     assert any("pausados" in (h.get("note") or "") for h in b.history)
     cb.no_reminders = False
 
@@ -673,7 +673,7 @@ def test_correos_automaticos_llevan_dedupe_key_y_respetan_pausa_y_tienda(client,
     _vencer(db_session, c)
     sinv.expire_holds(db_session)
     db_session.refresh(c)
-    assert c.status == "cancelado" and [m for m in _order_mails(db_session, c, "Tu pedido")] == []
+    assert c.status == "cancelado" and [m for m in _order_mails(db_session, c, "Su pedido")] == []
     assert any("no está publicada" in (h.get("note") or "") for h in c.history)
 
 
@@ -806,7 +806,7 @@ def test_efectivo_sin_plazo_no_se_cancela_y_lo_bajo_pedido_vence_con_su_reserva(
     db_session.refresh(propio)
     assert propio.status == "nuevo" and [h.get("key") for h in propio.history].count(sinv.HOLD_NOTE) == 1
     assert not so.has_note(propio, sinv.EXPIRED_NOTE)
-    assert [m for m in _order_mails(db_session, propio, "Tu pedido") if "venció" in m.subject] == []
+    assert [m for m in _order_mails(db_session, propio, "Su pedido") if "venció" in m.subject] == []
     assert _avail(client, p["id"]).json()[str(p["id"])]["disponible"] is True  # lo propio volvio a la venta
     # todo bajo pedido: aparta lo del proveedor mientras duraria la reserva (48 h desde el pedido), despues no
     assert _avail(client, q["id"]).json()[str(q["id"])]["disponible"] is False

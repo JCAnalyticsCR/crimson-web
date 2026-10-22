@@ -1156,7 +1156,7 @@ def send_survey(db: Session, tenant, s: Survey, sender: User, ip: str | None, se
         f"<p><b>{html.escape(spec['label'])}</b> levantado por {html.escape(sender_label or sender.full_name)}.</p>"
         f"<p>Cliente: {html.escape(cliente)}<br>Sitio: {html.escape(s.site or '—')}<br>"
         f"{len(s.points)} {html.escape(spec['point_label'].lower())}(s) · {len(s.items)} materiales y equipos<br>{html.escape(personal or 'sin personal')}</p>"
-        f"<ul>{filas}</ul><p>{'El técnico resolvió las observaciones. ' if reenvio else ''}Abrí el levantamiento para revisarlo: aprobalo o devolvelo con observaciones antes del costeo.</p>"
+        f"<ul>{filas}</ul><p>{'El técnico resolvió las observaciones. ' if reenvio else ''}Abra el levantamiento para revisarlo: apruébelo o devuélvalo con observaciones antes del costeo.</p>"
         f'<p><a href="{base}/levantamientos?id={s.id}">Abrir el levantamiento</a></p>'  # el boton principal (email_layout)
         f'<p>Todo lo pendiente está en <a href="{base}/aprobaciones">Aprobaciones</a>.</p>',
         "survey",
@@ -1233,7 +1233,7 @@ def _notify_returned(db: Session, p: Principal, s: Survey, obs: list[Observation
     base = cfg.public_base_url.rstrip("/")
     cuerpo = (
         f"<p>{html.escape(p.user.full_name)} revisó el levantamiento <b>{html.escape(s.number)}</b> y lo devolvió con "
-        f"{len(obs)} observación(es):</p><ul>{filas}</ul><p>Corregí, marcá cada observación como resuelta y reenvialo a revisión.</p>"
+        f"{len(obs)} observación(es):</p><ul>{filas}</ul><p>Corrija, marque cada observación como resuelta y reenvíelo a revisión.</p>"
         f'<p><a href="{base}/levantamientos?id={s.id}">Abrir el levantamiento</a></p>'
     )
     for correo in destinos:
@@ -1572,11 +1572,11 @@ def _notify_quote_ready(db: Session, p: Principal, o: Opportunity, q) -> None:
         return
     enlace = f"{settings.public_base_url}/cotizaciones/{q.id}"
     cuerpo = (
-        f"<p>La cotización <b>{html.escape(q.number)}</b> de tu oportunidad <b>{html.escape(o.number)}</b> · {html.escape(o.title)} "
-        f"ya está lista, con las líneas del levantamiento. Revisala y enviala al cliente.</p>"
+        f"<p>La cotización <b>{html.escape(q.number)}</b> de su oportunidad <b>{html.escape(o.number)}</b> · {html.escape(o.title)} "
+        f"ya está lista, con las líneas del levantamiento. Revísela y envíela al cliente.</p>"
         f'<p><a href="{html.escape(enlace)}">Abrir la cotización</a></p>'
     )
-    queue_email(db, p.tenant, correo, f"Tu cotización {q.number} está lista · {o.number}", cuerpo, "quote", q.id)
+    queue_email(db, p.tenant, correo, f"Su cotización {q.number} está lista · {o.number}", cuerpo, "quote", q.id)
 
 
 def avisar_levantamiento_asignado(db: Session, tenant, correo: str, s: Survey, visit_date: date | None = None) -> None:

@@ -195,9 +195,9 @@ def cotizacion_aceptada(db: Session, tenant, q: Quote, *, version: int | None, q
     lev = db.scalar(select(Survey.id).where(Survey.tenant_id == q.tenant_id, Survey.quote_id == q.id).limit(1))
     cliente = _cliente(db, q)
     siguiente = (
-        "convertila a proyecto (o a factura) para programar la instalación y arrancar el cobro"
+        "conviértala a proyecto (o a factura) para programar la instalación y arrancar el cobro"
         if instalacion
-        else "convertila a factura para cobrarla y despachar el equipo"
+        else "conviértala a factura para cobrarla y despachar el equipo"
     )
 
     def cuerpo(m: Miembro) -> str:
@@ -264,9 +264,9 @@ def descuento_por_aprobar(db: Session, tenant, q: Quote, actor_id: int | None, *
     def cuerpo(m: Miembro) -> str:
         url, texto = (enlace(f"/cotizaciones/{q.id}"), "Revisar y aprobar") if ve_cotizacion(m, q) else (enlace("/aprobaciones"), "Abrir Aprobaciones")
         return _html(
-            f"{_e(vendedora.full_name if vendedora else 'Alguien del equipo')} pide tu aprobación para la cotización <b>{_e(q.number)}</b> de {_e(cliente)}.",
+            f"{_e(vendedora.full_name if vendedora else 'Alguien del equipo')} pide su aprobación para la cotización <b>{_e(q.number)}</b> de {_e(cliente)}.",
             f"Motivo: {_e(motivo)}" if motivo else "",
-            "No se puede enviar ni convertir hasta que la apruebes o la rechaces con un motivo.",
+            "No se puede enviar ni convertir hasta que la apruebe o la rechace con un motivo.",
             url=url,
             texto=texto,
         )
@@ -285,16 +285,16 @@ def descuento_resuelto(db: Session, tenant, q: Quote, actor_id: int | None, *, a
         destinos = miembros(db, tenant, roles=("admin",))
     quien = db.get(User, actor_id) if actor_id else None
     nombre = _e(quien.full_name if quien else "Administración")
-    reasignar = "Su vendedora ya no la puede abrir: reasignala para que le dé seguimiento." if sin_duena else ""
+    reasignar = "Su vendedora ya no la puede abrir: reasígnela para que le dé seguimiento." if sin_duena else ""
     if aprobado:
         asunto = f"Cotización aprobada: {q.number}"
-        parrafos = (f"{nombre} aprobó la cotización <b>{_e(q.number)}</b>.", reasignar or "Ya la podés enviar al cliente o convertir.")
+        parrafos = (f"{nombre} aprobó la cotización <b>{_e(q.number)}</b>.", reasignar or "Ya la puede enviar al cliente o convertir.")
     else:
         asunto = f"Cotización rechazada: {q.number}"
         parrafos = (
             f"{nombre} rechazó el descuento de la cotización <b>{_e(q.number)}</b>.",
             f"Motivo: {_e(motivo)}" if motivo else "",
-            reasignar or "Ajustá el descuento o los precios y guardala: si queda dentro de tu límite se libera; si no, vuelve a aprobación.",
+            reasignar or "Ajuste el descuento o los precios y guárdela: si queda dentro de su límite se libera; si no, vuelve a aprobación.",
         )
 
     def cuerpo(_m: Miembro) -> str:
@@ -317,7 +317,7 @@ def ot_asignada(db: Session, tenant, o, user_ids: Iterable[int | None], actor_id
     def cuerpo(_m: Miembro) -> str:
         datos = "<br>".join(x for x in (f"Cliente: {_e(cliente)}" if cliente else "", f"Sitio: {_e(o.site)}" if o.site else "", f"Fecha: {fecha}") if x)
         return _html(
-            f"Se te asignó la orden de trabajo <b>{_e(o.number)}</b> · {_e(o.title)}.",
+            f"Se le asignó la orden de trabajo <b>{_e(o.number)}</b> · {_e(o.title)}.",
             datos,
             url=enlace(f"/ordenes-trabajo?id={o.id}"),
             texto=f"Abrir {o.number}",
@@ -347,7 +347,7 @@ def precio_aliado(db: Session, tenant, o: Opportunity, r, empresa: str, texto: s
         url, boton = (enlace(f"/oportunidades?id={o.id}"), "Abrir la oportunidad") if abre else (enlace("/aprobaciones"), "Abrir Aprobaciones")
         return _html(
             f"<b>{_e(empresa)}</b> {_e(texto)} en <b>{_e(o.number)}</b> · {_e(o.title)}.",
-            "Aprobalo o rechazalo en la oportunidad; también está en Aprobaciones → Costos de aliados recibidos.",
+            "Apruébelo o rechácelo en la oportunidad; también está en Aprobaciones → Costos de aliados recibidos.",
             url=url,
             texto=boton,
         )

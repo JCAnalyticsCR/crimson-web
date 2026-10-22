@@ -207,9 +207,9 @@ def avisar_contrasena_temporal(db: Session, tenant: Tenant, u: User, admin: str,
         db,
         tenant,
         u,
-        f"Se restableció tu contraseña · {tenant.name}",
-        f"<p>El administrador {_esc(admin)} restableció tu contraseña de Crimson el {fecha_cr(now)}. "
-        "Te va a pasar una contraseña temporal; al entrar vas a crear una propia. Si no lo esperabas, avisale.</p>",
+        f"Se restableció su contraseña · {tenant.name}",
+        f"<p>El administrador {_esc(admin)} restableció su contraseña de Crimson el {fecha_cr(now)}. "
+        "Le va a pasar una contraseña temporal; al entrar va a crear una propia. Si no lo esperaba, avísele.</p>",
     )
 
 
@@ -700,24 +700,24 @@ def member_update(uid: int, data: MemberIn, p: Principal = Depends(ADMIN), db: S
         # persona): dejan de servir. Si hace falta, el admin pide uno nuevo y va al correo nuevo.
         invalidate_resets(db, uid)
         cuerpo = (
-            f"<p>Tu correo para entrar a Crimson ({_esc(p.tenant.name)}) cambió de <b>{_esc(old_email)}</b> a <b>{_esc(new_email)}</b>. "
+            f"<p>Su correo para entrar a Crimson ({_esc(p.tenant.name)}) cambió de <b>{_esc(old_email)}</b> a <b>{_esc(new_email)}</b>. "
             f"Lo cambió {_esc(p.user.full_name)} el {fecha_cr(datetime.now(UTC))}.</p>"
-            "<p>Si no lo pediste, avisale a tu administrador.</p>"
+            "<p>Si no lo pidió, avísele a su administrador.</p>"
         )
         for destino in dict.fromkeys([old_email, new_email]):
-            notify_security(db, p.tenant, u, "Cambió tu correo para entrar a Crimson", cuerpo, to=destino)
+            notify_security(db, p.tenant, u, "Cambió su correo para entrar a Crimson", cuerpo, to=destino)
         # una invitacion pendiente para el correo nuevo ya no tiene sentido: esa persona ya es usuaria
         _supersede(db, tid, new_email, p.user.id, p.ip, {"correo_de_usuario": uid})
     if notify_change:
         # la persona se entera en su correo de entrada (y en el nuevo buzon, si hay): nadie le desvia los avisos callado
-        destino = _esc(new_notify) if new_notify else "tu correo de entrada"
+        destino = _esc(new_notify) if new_notify else "su correo de entrada"
         cuerpo = (
-            f"<p>Desde ahora los avisos internos de Crimson ({_esc(p.tenant.name)}) te llegan a <b>{destino}</b>. "
+            f"<p>Desde ahora los avisos internos de Crimson ({_esc(p.tenant.name)}) le llegan a <b>{destino}</b>. "
             f"Lo cambió {_esc(p.user.full_name)} el {fecha_cr(datetime.now(UTC))}.</p>"
-            "<p>Tu correo para entrar no cambia. Si no lo pediste, avisale a tu administrador.</p>"
+            "<p>Su correo para entrar no cambia. Si no lo pidió, avísele a su administrador.</p>"
         )
         for destino_correo in dict.fromkeys([u.email, *([new_notify] if new_notify else [])]):
-            notify_security(db, p.tenant, u, "Cambió tu correo de avisos en Crimson", cuerpo, to=destino_correo)
+            notify_security(db, p.tenant, u, "Cambió su correo de avisos en Crimson", cuerpo, to=destino_correo)
     db.commit()
     return {"ok": True}
 
@@ -788,7 +788,7 @@ def reset_password(uid: int, data: ResetIn, response: Response, p: Principal = D
     raw, pr = issue_reset(db, u, tid, "admin", p.user.id, timedelta(hours=ADMIN_LINK_HOURS), p.ip, reset_2fa=quita_2fa)
     link = f"{_base()}/restablecer/{raw}"
     mail = queue_email(
-        db, p.tenant, u.email, f"Creá tu nueva contraseña · {p.tenant.name}", reset_email_html(p.tenant, u.full_name, link, "24 horas"), "password_reset", pr.id
+        db, p.tenant, u.email, f"Cree su nueva contraseña · {p.tenant.name}", reset_email_html(p.tenant, u.full_name, link, "24 horas"), "password_reset", pr.id
     )
     u.failed_logins, u.locked_until = 0, None
     login_limiter.forget_account(u.email)  # como el desbloqueo de siempre: el admin lo pidio

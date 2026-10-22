@@ -275,18 +275,18 @@ def set_password(user: User, raw: str) -> None:
 _e = html.escape
 
 
-SECURITY_NOTE = "Crimson nunca te va a pedir tu contraseña por correo, por teléfono ni por WhatsApp."
+SECURITY_NOTE = "Crimson nunca le va a pedir su contraseña por correo, por teléfono ni por WhatsApp."
 
 
 def _shell(tenant: Tenant, inner: str, *, title: str, preheader: str | None = None, action: tuple[str, str] | None = None) -> str:
     """Diseno base de los correos (email_layout) con la nota de seguridad de las cuentas en el pie."""
     from . import email_layout
 
-    return email_layout.render(tenant, title=title, body=inner, preheader=preheader, action=action, foot=_e(SECURITY_NOTE), vos=True)
+    return email_layout.render(tenant, title=title, body=inner, preheader=preheader, action=action, foot=_e(SECURITY_NOTE))
 
 
 def access_email_html(
-    tenant: Tenant, *, title: str, intro_html: str, link: str, label: str, note: str, name: str | None = None, vos: bool = True
+    tenant: Tenant, *, title: str, intro_html: str, link: str, label: str, note: str, name: str | None = None
 ) -> str:
     """Correo con la llave de entrada (invitacion al panel, a los portales de aliados y de clientes, contrasena nueva):
     saludo, que paso, UN boton y el enlace en texto. `intro_html` ya viene escapado; `note` es texto."""
@@ -294,8 +294,7 @@ def access_email_html(
 
     saludo = el.p_html(f"Hola{(' ' + _e(name)) if name else ''}:") if name is not None else ""
     body = saludo + el.p_html(intro_html) + el.p(note, muted=True)
-    foot = _e(SECURITY_NOTE) if vos else "Nunca le vamos a pedir su contraseña por correo, por teléfono ni por WhatsApp."
-    return el.render(tenant, title=title, body=body, preheader=f"{title}. {note}", action=(link, label), foot=foot, vos=vos)
+    return el.render(tenant, title=title, body=body, preheader=f"{title}. {note}", action=(link, label), foot=_e(SECURITY_NOTE))
 
 
 def invite_email_html(tenant: Tenant, role_code: str, link: str, days: int) -> str:
@@ -307,23 +306,23 @@ def invite_email_html(tenant: Tenant, role_code: str, link: str, days: int) -> s
         db = None
     return access_email_html(
         tenant,
-        title=f"Te invitaron a {tenant.name}",
-        intro_html=f"Te invitaron a <b>{_e(tenant.name)}</b> en la plataforma de Crimson como <b>{_e(role_label(role_code, db))}</b>.",
+        title=f"Lo invitaron a {tenant.name}",
+        intro_html=f"Lo invitaron a <b>{_e(tenant.name)}</b> en la plataforma de Crimson como <b>{_e(role_label(role_code, db))}</b>.",
         link=link,
         label="Aceptar invitación",
-        note=f"El enlace vence en {days} días y sirve una sola vez. Si no esperabas esta invitación, ignorá este correo.",
+        note=f"El enlace vence en {days} días y sirve una sola vez. Si no esperaba esta invitación, ignore este correo.",
     )
 
 
 def reset_email_html(tenant: Tenant, name: str | None, link: str, vence: str) -> str:
     return access_email_html(
         tenant,
-        title="Creá tu contraseña nueva",
+        title="Cree su contraseña nueva",
         name=name or "",
-        intro_html="Para crear tu contraseña nueva de Crimson usá este botón.",
+        intro_html="Para crear su contraseña nueva de Crimson use este botón.",
         link=link,
         label="Restablecer contraseña",
-        note=f"El enlace vence en {vence} y sirve una sola vez. Si no lo pediste, ignorá este correo: tu contraseña actual sigue igual.",
+        note=f"El enlace vence en {vence} y sirve una sola vez. Si no lo pidió, ignore este correo: su contraseña actual sigue igual.",
     )
 
 

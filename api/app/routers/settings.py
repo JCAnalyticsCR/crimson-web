@@ -315,7 +315,7 @@ def _avisar_admins_2fa(db: Session, p: Principal, t: Tenant, antes: dict, despue
         f"<p>{e(p.user.full_name or p.user.email)} cambió la verificación en dos pasos obligatoria de {e(t.name)} el "
         f"{fecha_cr(datetime.now(UTC))}.</p><p>Antes: {e(roles(antes['twofa_roles']))}, con {antes['twofa_grace_days']} días de gracia.<br>"
         f"Ahora: {e(roles(despues['twofa_roles']))}, con {despues['twofa_grace_days']} días de gracia.</p>"
-        "<p>Si no fue alguien de tu equipo, cambiá tu contraseña y revisá Ajustes → Usuarios.</p>"
+        "<p>Si no fue alguien de su equipo, cambie su contraseña y revise Ajustes → Usuarios.</p>"
     )
     for a in admins:
         notify_security(db, t, a, "Cambió la verificación en dos pasos obligatoria", cuerpo)

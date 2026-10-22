@@ -252,7 +252,7 @@ def test_aprobada_o_rechazada_sin_vendedora_que_la_abra_va_a_administracion(clie
     assert client.post(f"/quotes/{q['id']}/reject", json={"reason": "Muy alto"}).status_code == 200
     mails = _correos(db_session, "quote", q["id"], "Cotización rechazada")
     # la otra administradora (quien rechazo no se avisa a si mismo), para reasignarla
-    assert _para(mails) == ["otra-admin@ejemplo.com"] and "reasignala" in mails[0].html
+    assert _para(mails) == ["otra-admin@ejemplo.com"] and "reasígnela" in mails[0].html
 
 
 def test_avisos_internos_no_van_al_bcc_de_la_empresa_ni_llevan_el_monto(client, auth, db_session):

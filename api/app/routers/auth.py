@@ -477,9 +477,9 @@ def totp_verify(data: TotpVerifyIn, p: Principal = Depends(get_session_principal
         db,
         p.tenant,
         u,
-        "Cambió tu verificación en dos pasos",
-        f"<p>La verificación en dos pasos de tu cuenta de Crimson {que} el {fecha_cr(datetime.now(UTC))}. "
-        "Los códigos de recuperación anteriores ya no sirven. Si no fuiste vos, avisale a tu administrador.</p>",
+        "Cambió su verificación en dos pasos",
+        f"<p>La verificación en dos pasos de su cuenta de Crimson {que} el {fecha_cr(datetime.now(UTC))}. "
+        "Los códigos de recuperación anteriores ya no sirven. Si no fue usted, avísele a su administrador.</p>",
     )
     db.commit()
     return RecoveryCodesOut(codes=codigos)
@@ -512,9 +512,9 @@ def totp_recovery_codes(data: RecoveryCodesIn, p: Principal = Depends(get_sessio
         p.tenant,
         u,
         "Se generaron códigos de recuperación nuevos",
-        "<p>Se generaron códigos de recuperación nuevos para la verificación en dos pasos de tu cuenta de Crimson el "
-        f"{fecha_cr(datetime.now(UTC))}. Los anteriores ya no sirven. Si no fuiste vos, cambiá tu contraseña y avisale "
-        "a tu administrador.</p>",
+        "<p>Se generaron códigos de recuperación nuevos para la verificación en dos pasos de su cuenta de Crimson el "
+        f"{fecha_cr(datetime.now(UTC))}. Los anteriores ya no sirven. Si no fue usted, cambie su contraseña y avísele "
+        "a su administrador.</p>",
     )
     db.commit()
     return RecoveryCodesOut(codes=codigos)
@@ -556,9 +556,9 @@ def totp_disable(data: TotpDisableIn, p: Principal = Depends(get_session_princip
         db,
         p.tenant,
         p.user,
-        "Cambió tu verificación en dos pasos",
-        f"<p>Se desactivó la verificación en dos pasos de tu cuenta de Crimson el {fecha_cr(datetime.now(UTC))}. "
-        "Si no fuiste vos, cambiá tu contraseña y avisale a tu administrador.</p>",
+        "Cambió su verificación en dos pasos",
+        f"<p>Se desactivó la verificación en dos pasos de su cuenta de Crimson el {fecha_cr(datetime.now(UTC))}. "
+        "Si no fue usted, cambie su contraseña y avísele a su administrador.</p>",
     )
     db.commit()
 
@@ -600,13 +600,13 @@ def password_reset_confirm(data: ResetConfirmIn, request: Request, response: Res
         audit(db, pr.tenant_id, user.id, "2fa_reset", "user", user.id, {"origen": "enlace", "pedido_por": pr.created_by}, ip=ip)
     tenant = db.get(Tenant, pr.tenant_id)
     if tenant:
-        extra = " También se quitó la verificación en dos pasos: activala de nuevo en Mi cuenta." if sin_2fa else ""
+        extra = " También se quitó la verificación en dos pasos: actívela de nuevo en Mi cuenta." if sin_2fa else ""
         notify_security(
             db,
             tenant,
             user,
-            "Tu contraseña de Crimson cambió",
-            f"<p>Tu contraseña de Crimson se cambió el {fecha_cr(now)}.{extra} Si no fuiste vos, avisale a tu administrador.</p>",
+            "Su contraseña de Crimson cambió",
+            f"<p>Su contraseña de Crimson se cambió el {fecha_cr(now)}.{extra} Si no fue usted, avísele a su administrador.</p>",
         )
     db.commit()
     # el enlace llego a su correo: este navegador queda de confianza para la cuenta (aunque un tercero este disparando
@@ -642,7 +642,7 @@ def password_reset_request(data: ResetRequestIn, request: Request, db: Session =
         db,
         m.tenant,
         user.email,
-        f"Creá tu nueva contraseña · {m.tenant.name}",
+        f"Cree su nueva contraseña · {m.tenant.name}",
         reset_email_html(m.tenant, user.full_name, link, "1 hora"),
         "password_reset",
         pr.id,

@@ -439,9 +439,9 @@ def _brake_alert(db: Session, t: Tenant, out: dict, patch: dict) -> None:
         f"<p>La revisión de margen ({html.escape(out.get('reason') or 'automática')}) encontró productos bajo el margen "
         f"mínimo, pero <b>{html.escape(out['frenada'])}</b>: puede ser un error del tipo de cambio o de la lista del "
         f"proveedor. Para no vaciar la tienda por un error se sacaron de venta {out['nuevos_retenidos']} y "
-        f"<b>{out['frenados']} siguen a la venta bajo el mínimo</b> hasta que lo revisés.</p>"
-        "<p>Si el dato está mal, corregilo (tipo de cambio en Ajustes → Facturación) y se libera solo. Si está bien, "
-        f'tocá «Sacar de venta todo» en <a href="{html.escape(link)}">Aprobaciones → Precios por revisar</a>.</p>'
+        f"<b>{out['frenados']} siguen a la venta bajo el mínimo</b> hasta que lo revise.</p>"
+        "<p>Si el dato está mal, corríjalo (tipo de cambio en Ajustes → Facturación) y se libera solo. Si está bien, "
+        f'toque «Sacar de venta todo» en <a href="{html.escape(link)}">Aprobaciones → Precios por revisar</a>.</p>'
         "<p>El sistema nunca cambia un precio solo.</p>"
         f'<p><a href="{html.escape(link)}">Revisar precios</a></p>'
     )
@@ -538,9 +538,9 @@ def dudoso_txt(r: dict) -> str:
     """Por que se marco dudoso, para la bandeja y el resumen."""
     out = []
     if "costo" in r["dudoso_por"]:
-        out.append(f"el costo cambió {str(r['jump_pct']).replace('.', ',')} %, verificalo con el proveedor")
+        out.append(f"el costo cambió {str(r['jump_pct']).replace('.', ',')} %, verifíquelo con el proveedor")
     if "tipo_de_cambio" in r["dudoso_por"]:
-        out.append(f"el tipo de cambio de {r['fx_jump_currency']} saltó {str(r['fx_jump_pct']).replace('.', ',')} %, verificalo en Ajustes → Facturación")
+        out.append(f"el tipo de cambio de {r['fx_jump_currency']} saltó {str(r['fx_jump_pct']).replace('.', ',')} %, verifíquelo en Ajustes → Facturación")
     return " y ".join(out)
 
 
@@ -642,13 +642,13 @@ def fx_alerts(db: Session, t: Tenant) -> list[str]:
         if i is None:
             out.append(
                 f"No hay tipo de cambio de {cur} cargado: lo que tiene precio en {cur} sale «Consultar» en la tienda y el "
-                "guardián no puede revisar el margen de lo que cuesta en esa moneda. Cargalo en Ajustes → Facturación."
+                "guardián no puede revisar el margen de lo que cuesta en esa moneda. Cárguelo en Ajustes → Facturación."
             )
         elif i["stale"]:
             fecha = i["date"].strftime("%d/%m/%Y") if i["date"] else "?"
             out.append(
                 f"El tipo de cambio de {cur} es del {fecha} ({i['source_label']}, {i['business_days_old']} días hábiles): "
-                "los precios y márgenes en esa moneda se calculan con una tasa vieja. Cargá la de hoy en Ajustes → Facturación."
+                "los precios y márgenes en esa moneda se calculan con una tasa vieja. Cargue la de hoy en Ajustes → Facturación."
             )
     return out
 
@@ -681,7 +681,7 @@ def summary_html(db: Session, t: Tenant, base_url: str) -> tuple[str, str] | Non
         mas = f"<p>… y {len(dud) - 30} más.</p>" if len(dud) > 30 else ""
         dud_html = (
             f"<p>{len(dud)} producto(s) con un salto de costo o de tipo de cambio <b>dudoso</b> siguen a la venta porque su margen "
-            f"está sobre el mínimo. Verificá que el dato sea correcto (posible error de la lista del proveedor):</p><ul>{''.join(li)}</ul>{mas}"
+            f"está sobre el mínimo. Verifique que el dato sea correcto (posible error de la lista del proveedor):</p><ul>{''.join(li)}</ul>{mas}"
         )
     if not rows:
         subject = f"Margen: {len(dud)} costo(s) dudoso(s)" if dud else f"Tipo de cambio viejo o faltante ({len(alerts)})"
@@ -703,14 +703,14 @@ def summary_html(db: Session, t: Tenant, base_url: str) -> tuple[str, str] | Non
     modo = "activo: lo que queda bajo el mínimo sale de venta" if cfg["mode"] == "activo" else "informe: no se saca nada de venta"
     freno = (
         f"<p><b>Revisión frenada:</b> {html.escape(last['frenada'])}. {last.get('frenados', 0)} producto(s) bajo el mínimo "
-        "siguen a la venta hasta que corrijás el dato o toqués «Sacar de venta todo» en Aprobaciones.</p>"
+        "siguen a la venta hasta que corrija el dato o toque «Sacar de venta todo» en Aprobaciones.</p>"
         if last.get("frenada")
         else ""
     )
     body = (
         f"{fx_html}{freno}<p>{len(rows)} producto(s) de la tienda están bajo el margen mínimo de {_s(cfg['min_pct'])} % "
         f"({n_held} fuera de venta, {n_dud} con un salto dudoso). Modo {modo}.</p><ul>{''.join(li)}</ul>{mas}{dud_html}"
-        f"<p>El sistema nunca cambia un precio solo: revisalos y aplicá el sugerido con un clic en "
+        f"<p>El sistema nunca cambia un precio solo: revíselos y aplique el sugerido con un clic en "
         f'<a href="{html.escape(link)}">Aprobaciones → Precios por revisar</a>.</p>'
         f'<p><a href="{html.escape(link)}">Revisar precios</a></p>'  # el boton principal del correo (email_layout)
     )

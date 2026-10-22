@@ -146,7 +146,7 @@ def daily_close_email() -> int:
     from app.core.db import SessionLocal
     from app.core.timeutil import cr_today
     from app.models import Tenant, TenantUser
-    from app.services.mail import queue_email
+    from app.services.mail import member_inbox, queue_email
     from app.services.reports import cierre_diario
 
     n = 0
@@ -162,8 +162,11 @@ def daily_close_email() -> int:
             )
             html = f"<h3>Cierre de caja {hoy}</h3><table border=0 cellpadding=6><tr><th>Método</th><th>Divisa</th><th>Monto</th><th>Pagos</th></tr>{rows}</table><p><b>Total: {rep.totals['total'] if rep.totals else 0}</b></p>"
             for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.role_code == "admin", TenantUser.active)):
+                correo = member_inbox(m)  # su correo de avisos si el admin le puso uno
+                if not correo:
+                    continue
                 # un solo cierre por dia y persona aunque la tarea corra dos veces
-                queue_email(db, t, m.user.email, f"Cierre de caja · {t.name} · {hoy}", html, "report", 0, dedupe_key=f"cierre:{hoy}:{m.user_id}")
+                queue_email(db, t, correo, f"Cierre de caja · {t.name} · {hoy}", html, "report", 0, dedupe_key=f"cierre:{hoy}:{m.user_id}")
                 n += 1
         db.commit()
     return n
@@ -227,7 +230,7 @@ def stale_followups() -> int:
     from app.core.db import SessionLocal
     from app.models import Tenant, User
     from app.routers.pipeline import stale_followups as find
-    from app.services.mail import queue_email
+    from app.services.mail import queue_email, user_inbox
 
     n = 0
     with SessionLocal() as db:
@@ -237,7 +240,8 @@ def stale_followups() -> int:
                 por_persona.setdefault(o.owner_id or 0, []).append(o)
             for uid, items in por_persona.items():
                 u = db.get(User, uid) if uid else None
-                if not u or not u.email:
+                correo = user_inbox(db, t.id, u) if u else ""
+                if not correo:
                     continue
                 filas = "".join(
                     f"<li><b>{o.number}</b> · {o.title} · {o.status}{' · vence ' + o.next_action_date.isoformat() if o.next_action_date else ''}</li>"
@@ -246,9 +250,9 @@ def stale_followups() -> int:
                 queue_email(
                     db,
                     t,
-                    u.email,
+                    correo,
                     f"{len(items)} oportunidades esperan seguimiento",
-                    f"<p>Estas oportunidades tienen la próxima acción para hoy, vencida o llevan días sin movimiento:</p><ul>{filas}</ul><p>Abrí el panel y registrá el siguiente paso.</p>",
+                    f"<p>Estas oportunidades tienen la próxima acción para hoy, vencida o llevan días sin movimiento:</p><ul>{filas}</ul><p>Abra el panel y registre el siguiente paso.</p>",
                     "opportunity",
                     items[0].id,
                 )
@@ -376,7 +380,7 @@ def warranty_alerts() -> int:
 
     from app.core.db import SessionLocal
     from app.models import Customer, CustomerAsset, Tenant, TenantUser
-    from app.services.mail import queue_email
+    from app.services.mail import member_inbox, queue_email
 
     n = 0
     with SessionLocal() as db:
@@ -396,7 +400,10 @@ def warranty_alerts() -> int:
                 for a in avisos[:30]
             )
             for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.role_code.in_(("admin", "supervisor")), TenantUser.active)):
-                queue_email(db, t, m.user.email, f"{len(avisos)} garantías vencen en los próximos 45 días", f"<ul>{filas}</ul>", "asset", avisos[0].id)
+                correo = member_inbox(m)  # su correo de avisos si el admin le puso uno
+                if not correo:
+                    continue
+                queue_email(db, t, correo, f"{len(avisos)} garantías vencen en los próximos 45 días", f"<ul>{filas}</ul>", "asset", avisos[0].id)
                 n += 1
         db.commit()
     return n

@@ -1319,7 +1319,7 @@ def _rec_alert_once(db: Session, r: Recurrence, invoice: Invoice, title: str, bo
         _rec_alert(db, r, invoice, title, body)
 
 
-PRODUCCION_SIN_EMITIR = "Emitila antes de enviarla: Hacienda está en producción y la entrega fiscal le manda el XML al cliente."
+PRODUCCION_SIN_EMITIR = "Emítala antes de enviarla: Hacienda está en producción y la entrega fiscal le manda el XML al cliente."
 
 
 def _unemitted_in_production(db: Session, tenant, invoice: Invoice) -> bool:
@@ -1362,7 +1362,7 @@ def deliver_recurrence(db: Session, r: Recurrence, invoice: Invoice, user_id: in
                 r,
                 invoice,
                 por_aprobar,
-                f"{que} quedó generada y espera tu visto bueno: revisala y tocá «Aprobar y enviar» en Aprobaciones. "
+                f"{que} quedó generada y espera su visto bueno: revísela y toque «Aprobar y enviar» en Aprobaciones. "
                 + ("Desde la siguiente, sale sola con su PDF y enlace de pago." if r.first_run_requires_approval else "La generó alguien que no envía facturas."),
             )
             return {"status": "por_aprobar", "sent": False, "note": r.last_send_note}
@@ -1377,7 +1377,7 @@ def deliver_recurrence(db: Session, r: Recurrence, invoice: Invoice, user_id: in
     c = db.get(Customer, invoice.customer_id) if invoice.customer_id else None
     if c is None or c.tenant_id != r.tenant_id or not (c.email or "").strip():
         r.last_send_status, r.last_send_note = "sin_correo", "El cliente no tiene correo"
-        _rec_alert(db, r, invoice, sin_enviar, f"{que} no salió: el cliente no tiene correo. Agregalo en su ficha y reenviala desde Aprobaciones.")
+        _rec_alert(db, r, invoice, sin_enviar, f"{que} no salió: el cliente no tiene correo. Agréguelo en su ficha y reenvíela desde Aprobaciones.")
         return {"status": "sin_correo", "sent": False, "note": r.last_send_note}
     try:
         # el envio automatico lleva llave (una factura, un correo); "Aprobar y enviar" o "Reenviar" no
@@ -1388,7 +1388,7 @@ def deliver_recurrence(db: Session, r: Recurrence, invoice: Invoice, user_id: in
         r.last_send_status, r.last_send_note = "enviada", None
     else:
         r.last_send_status, r.last_send_note = "fallida", (res.get("note") or "El correo no salió")[:240]
-        _rec_alert(db, r, invoice, sin_enviar, f"{que} no salió: {res.get('note') or 'el correo falló'} Reenviala desde Aprobaciones o desde la factura.")
+        _rec_alert(db, r, invoice, sin_enviar, f"{que} no salió: {res.get('note') or 'el correo falló'} Reenvíela desde Aprobaciones o desde la factura.")
     return {"status": r.last_send_status, "sent": bool(res["sent"]), "note": r.last_send_note}
 
 
@@ -1440,8 +1440,8 @@ def settle_invoice_sent(db: Session, invoice: Invoice) -> None:
 
 def _pending_message(r: Recurrence, last: Invoice) -> str:
     if r.last_send_status == "por_aprobar":
-        return f"La factura anterior ({last.number}) espera «Aprobar y enviar». Aprobala o anulala antes de generar otra."
-    return f"La factura anterior ({last.number}) no le llegó al cliente. Reenviala o anulala antes de generar otra."
+        return f"La factura anterior ({last.number}) espera «Aprobar y enviar». Apruébela o anúlela antes de generar otra."
+    return f"La factura anterior ({last.number}) no le llegó al cliente. Reenvíela o anúlela antes de generar otra."
 
 
 @router.post("/recurrences/{rid}/run", status_code=201)
@@ -1504,7 +1504,7 @@ def _deliver_or_fail(db: Session, rid: int, invoice_id: int, user_id: int | None
         r, factura = db.get(Recurrence, rid), db.get(Invoice, invoice_id)
         r.last_send_status, r.last_send_note = "fallida", nota
         titulo = "Mensualidad sin enviar" if factura.external_order == PLAN_ORDER else "Factura recurrente sin enviar"
-        _rec_alert(db, r, factura, titulo, "No salió por un error interno. Reenviala desde Aprobaciones o desde la factura.")
+        _rec_alert(db, r, factura, titulo, "No salió por un error interno. Reenvíela desde Aprobaciones o desde la factura.")
         db.commit()
     except Exception:  # noqa: BLE001
         db.rollback()
@@ -1533,7 +1533,7 @@ def recover_interrupted_sends(db: Session, now: datetime | None = None) -> int:
         r.last_send_status, r.last_send_note = "fallida", "El envío automático se interrumpió"
         if last is not None and last.status != "anulada" and Decimal(str(last.balance or 0)) > 0:
             titulo = "Mensualidad sin enviar" if last.external_order == PLAN_ORDER else "Factura recurrente sin enviar"
-            _rec_alert(db, r, last, titulo, "El envío automático se interrumpió y no se sabe si le llegó. Revisala y reenviala desde Aprobaciones o desde la factura.")
+            _rec_alert(db, r, last, titulo, "El envío automático se interrumpió y no se sabe si le llegó. Revísela y reenvíela desde Aprobaciones o desde la factura.")
         n += 1
     db.commit()
     return n
@@ -1582,7 +1582,7 @@ def run_due_recurrences(db: Session, today: date | None = None) -> int:
                         r,
                         previa,
                         f"Recurrencia detenida ({r.next_date:%d/%m/%Y})",
-                        f"El periodo del {r.next_date:%d/%m/%Y} no se generó. {_pending_message(r, previa)} Se genera en la primera corrida después de que la envíes o la anules.",
+                        f"El periodo del {r.next_date:%d/%m/%Y} no se generó. {_pending_message(r, previa)} Se genera en la primera corrida después de que la envíe o la anule.",
                     )
                     db.commit()
                     continue

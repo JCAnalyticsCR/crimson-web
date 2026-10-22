@@ -253,7 +253,7 @@ def failed_reminders_html(t: Tenant, fallidas: list[str]) -> tuple[str, str]:
     cuerpo = el.render(
         t,
         title="Recordatorios de cobro sin salir",
-        body=el.p("Estos recordatorios de cobro no salieron hoy:") + el.items(fallidas[:30]) + el.p("Revisá el correo del cliente y reenviá desde la factura."),
+        body=el.p("Estos recordatorios de cobro no salieron hoy:") + el.items(fallidas[:30]) + el.p("Revise el correo del cliente y reenvíe desde la factura."),
         preheader=asunto,
         action=(f"{settings.public_base_url.rstrip('/')}/facturas", "Abrir Facturas"),
         foot="Aviso interno de cobranza.",

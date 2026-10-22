@@ -383,22 +383,22 @@ def test_rechazar_el_comprobante_avisa_con_motivo_y_como_volver_a_subirlo(client
     assert client.post(f"{SLUG}/orders/{tok}/proof", files={"file": ("a.png", PNG, "image/png")}).status_code == 201
     r = _st(client, oid, "nuevo", note="Ilegible: no se lee el monto")
     assert r.status_code == 200 and r.json()["email_result"]["status"] == "simulado"
-    rech = [m for m in _mails(db_session, oid) if m.subject.startswith("Revisamos tu comprobante")]
+    rech = [m for m in _mails(db_session, oid) if m.subject.startswith("Revisamos su comprobante")]
     assert len(rech) == 1
     html = rech[0].html
     assert "Ilegible: no se lee el monto" in html and "Cómo volver a subirlo" in html and "Subir el comprobante" in html
     assert "Rastrear mi pedido" in html and "?pedido=" in html and "8888-7777" in html  # como pagar, otra vez
     assert rech[0].dedupe_key == f"tienda-rech:{oid}:2"
-    # "Reenviar correo" tras el rechazo reenvia el rechazo con el motivo (no "¡Gracias por tu compra!"), sin llave
+    # "Reenviar correo" tras el rechazo reenvia el rechazo con el motivo (no "¡Gracias por su compra!"), sin llave
     r = client.post(f"/store-orders/{oid}/resend")
     assert r.status_code == 200
     ultimo = _mails(db_session, oid)[-1]
-    assert ultimo.subject.startswith("Revisamos tu comprobante") and "Ilegible: no se lee el monto" in ultimo.html
-    assert ultimo.dedupe_key is None and "¡Gracias por tu compra!" not in ultimo.html
+    assert ultimo.subject.startswith("Revisamos su comprobante") and "Ilegible: no se lee el monto" in ultimo.html
+    assert ultimo.dedupe_key is None and "¡Gracias por su compra!" not in ultimo.html
     # un segundo comprobante rechazado: otro correo (otra llave)
     assert client.post(f"{SLUG}/orders/{tok}/proof", files={"file": ("b.png", PNG + b"1", "image/png")}).status_code == 201
     assert _st(client, oid, "nuevo", note="Falta otro comprobante").status_code == 200
-    rech = [m for m in _mails(db_session, oid) if m.subject.startswith("Revisamos tu comprobante")]
+    rech = [m for m in _mails(db_session, oid) if m.subject.startswith("Revisamos su comprobante")]
     assert [m.dedupe_key for m in rech] == [f"tienda-rech:{oid}:2", None, f"tienda-rech:{oid}:3"]
     assert "Falta otro comprobante" in rech[2].html
 
@@ -415,7 +415,7 @@ def test_enviado_con_mensajeria_y_correos_presentables(client, auth, db_session)
     oid = _oid(client, o["number"])
     # el detalle trae la lista de Mi Tienda (el pedido abierto desde el enlace del aviso no depende del listado)
     assert client.get(f"/store-orders/{oid}").json()["carriers"] == ["Mensajería Crimson", "Moto Express"]
-    recibido = next(m for m in _mails(db_session, oid) if m.subject.startswith("Recibimos tu pedido"))
+    recibido = next(m for m in _mails(db_session, oid) if m.subject.startswith("Recibimos su pedido"))
     for txt in ("Rastrear mi pedido", "?pedido=", "logo-tienda.png", o["number"], "Pendiente de pago", "Resumen", "Total", "Cómo pagar"):
         assert txt in recibido.html, txt
     equipo = next(m for m in _mails(db_session, oid) if m.subject.startswith("Pedido web"))
@@ -442,7 +442,7 @@ def test_listo_para_retiro_dice_donde_y_que_presentar(client, auth, db_session):
     assert _st(client, oid, "pagado").status_code == 200
     assert _st(client, oid, "listo").status_code == 200
     listo = next(m for m in _mails(db_session, oid) if m.subject.endswith("listo para retiro"))
-    assert "Oficinas Crimson, Escazú" in listo.html and "Presentá el número de pedido" in listo.html and "Rastrear mi pedido" in listo.html
+    assert "Oficinas Crimson, Escazú" in listo.html and "Presente el número de pedido" in listo.html and "Rastrear mi pedido" in listo.html
 
 
 def test_la_factura_automatica_sale_en_las_facturas_de_quien_confirmo_el_pago(client, auth, db_session):

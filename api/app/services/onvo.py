@@ -273,7 +273,7 @@ def _paid_invoice(db: Session, t: Tenant, iid: int, obj: dict, amount_cents, cur
                 t,
                 inv,
                 f"Dinero por devolver · factura {inv.number} anulada",
-                f"ONVO cobró {_m(amount, inv.currency)} (intención {intent_id}) por una factura anulada. Devolvé el dinero desde el panel de ONVO o aplicalo a otra factura.",
+                f"ONVO cobró {_m(amount, inv.currency)} (intención {intent_id}) por una factura anulada. Devuelva el dinero desde el panel de ONVO o aplíquelo a otra factura.",
                 red=True,
             )
         return f"factura {inv.number} anulada: ONVO cobró {amount}, devolver el dinero"
@@ -297,7 +297,7 @@ def _paid_invoice(db: Session, t: Tenant, iid: int, obj: dict, amount_cents, cur
             t,
             inv,
             f"Sobrepago ONVO · factura {inv.number}",
-            f"ONVO cobró {_m(amount, inv.currency)} y la factura quedó con saldo a favor del cliente de {_m(-saldo, inv.currency)}. Devolvé la diferencia o aplicala a otra factura.",
+            f"ONVO cobró {_m(amount, inv.currency)} y la factura quedó con saldo a favor del cliente de {_m(-saldo, inv.currency)}. Devuelva la diferencia o aplíquela a otra factura.",
             red=True,
         )
     else:
@@ -640,7 +640,7 @@ def webhook_alert_html(t: Tenant, status: int, detail: str) -> tuple[str, str]:
         que = (
             "El panel rechazó (401) un aviso con formato de ONVO porque el secreto del webhook no coincide. "
             "Si los pagos con tarjeta se están confirmando solos, puede ser un intento ajeno: no hace falta cambiar nada. "
-            "Si no, compará el secreto del webhook de Ajustes → Pasarelas → ONVO con el que muestra el panel de ONVO "
+            "Si no, compare el secreto del webhook de Ajustes → Pasarelas → ONVO con el que muestra el panel de ONVO "
             "(Desarrolladores → Webhooks). Mientras tanto los pagos con tarjeta se confirman cuando el comprador vuelve a "
             "la tienda o en la consulta automática."
         )
@@ -648,7 +648,7 @@ def webhook_alert_html(t: Tenant, status: int, detail: str) -> tuple[str, str]:
         titulo = "ONVO avisó un pago que no se pudo confirmar"
         que = (
             "Llegó un aviso de ONVO que el panel no pudo confirmar consultando a ONVO (503). ONVO lo reintenta solo; "
-            "si se repite, revisá el pedido o la factura en el panel de ONVO y la llave en Ajustes → Pasarelas."
+            "si se repite, revise el pedido o la factura en el panel de ONVO y la llave en Ajustes → Pasarelas."
         )
     from . import email_layout as el
 
@@ -657,10 +657,9 @@ def webhook_alert_html(t: Tenant, status: int, detail: str) -> tuple[str, str]:
         t,
         title=titulo,
         body=el.p(que) + el.note(f"Detalle: {detail[:300]}", warn=True),
-        preheader=f"{titulo}. Revisá Ajustes → Pasarelas → ONVO.",
+        preheader=f"{titulo}. Revise Ajustes → Pasarelas → ONVO.",
         action=(el.panel_url("/ajustes?tab=pagos"), "Revisar las pasarelas en Ajustes"),
         foot="Aviso interno de pagos en línea (ONVO). Sale como máximo una vez por día.",
-        vos=True,
     )
     return titulo, cuerpo
 

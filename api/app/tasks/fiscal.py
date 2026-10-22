@@ -29,12 +29,12 @@ ENTITY = "fiscal_queue"  # entity_id = dia de Costa Rica como AAAAMMDD: la llave
 MAX_ROWS = 40
 STATUS = {"enviada": "enviada", "pagada": "pagada", "parcial": "pago parcial", "vencida": "vencida"}
 INSTRUCTION = {
-    "ninguno": "La conexión con Hacienda todavía no está en producción: emití cada una en Fygaro hoy mismo y marcala "
+    "ninguno": "La conexión con Hacienda todavía no está en producción: emita cada una en Fygaro hoy mismo y márquela "
     "«Emitida en Fygaro» con su número. Lo marcado no se vuelve a emitir.",
-    "simulado": "El modo fiscal es Simulado (sin validez fiscal): emití cada una en Fygaro y marcala «Emitida en Fygaro» con su número.",
-    "pruebas": "El modo fiscal es Pruebas (sin validez fiscal): emití cada una en Fygaro y marcala «Emitida en Fygaro» con su número.",
-    "produccion": "Lo vendido antes de activar producción: confirmá primero en Fygaro que no se emitió ahí (si ya se emitió, "
-    "marcala «Emitida en Fygaro»: emitirla de nuevo duplicaría el comprobante). Lo demás se emite desde la factura con «Emitir a Hacienda».",
+    "simulado": "El modo fiscal es Simulado (sin validez fiscal): emita cada una en Fygaro y márquela «Emitida en Fygaro» con su número.",
+    "pruebas": "El modo fiscal es Pruebas (sin validez fiscal): emita cada una en Fygaro y márquela «Emitida en Fygaro» con su número.",
+    "produccion": "Lo vendido antes de activar producción: confirme primero en Fygaro que no se emitió ahí (si ya se emitió, "
+    "márquela «Emitida en Fygaro»: emitirla de nuevo duplicaría el comprobante). Lo demás se emite desde la factura con «Emitir a Hacienda».",
 }
 
 

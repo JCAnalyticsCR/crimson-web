@@ -236,27 +236,27 @@ def pay_instructions(t: Tenant, o: Order) -> str | None:
     if code == "sinpe":
         if m.get("phone"):
             return (
-                f"Enviá {total} por SINPE Móvil al {m['phone']}" + (f" a nombre de {m['holder']}" if m.get("holder") else "") + ".\n"
-                f"En el detalle escribí el número de pedido {o.number}.\nLuego subí el comprobante aquí o envialo por WhatsApp."
+                f"Envíe {total} por SINPE Móvil al {m['phone']}" + (f" a nombre de {m['holder']}" if m.get("holder") else "") + ".\n"
+                f"En el detalle escriba el número de pedido {o.number}.\nLuego suba el comprobante aquí o envíelo por WhatsApp."
                 + (f"\n{m['note']}" if m.get("note") else "")
             )
-        return (m.get("note") or "Te enviamos el número de SINPE Móvil para pagar.") + f"\nMonto: {total} · Detalle: {o.number}"
+        return (m.get("note") or "Le enviamos el número de SINPE Móvil para pagar.") + f"\nMonto: {total} · Detalle: {o.number}"
     if code == "transferencia":
         if m.get("iban"):
-            parts = [f"Transferí {total} a la cuenta IBAN {m['iban']}"]
+            parts = [f"Transfiera {total} a la cuenta IBAN {m['iban']}"]
             if m.get("bank"):
                 parts.append(f"Banco: {m['bank']}")
             if m.get("holder"):
                 parts.append(f"A nombre de: {m['holder']}" + (f" (céd. {m['holder_id']})" if m.get("holder_id") else ""))
-            parts.append(f"Detalle: {o.number}. Luego subí el comprobante.")
+            parts.append(f"Detalle: {o.number}. Luego suba el comprobante.")
             if m.get("note"):
                 parts.append(m["note"])
             return "\n".join(parts)
-        return (m.get("note") or "Te enviamos los datos de la cuenta para transferir.") + f"\nMonto: {total} · Detalle: {o.number}"
+        return (m.get("note") or "Le enviamos los datos de la cuenta para transferir.") + f"\nMonto: {total} · Detalle: {o.number}"
     if code == "efectivo":
-        return (m.get("note") or "Pagás en efectivo al recibir o retirar el pedido.") + f"\nMonto: {total}"
+        return (m.get("note") or "Paga en efectivo al recibir o retirar el pedido.") + f"\nMonto: {total}"
     if code == "tarjeta":
-        return "Pagá con tarjeta en la página segura de ONVO. Te confirmamos apenas el banco apruebe el pago."
+        return "Pague con tarjeta en la página segura de ONVO. Le confirmamos apenas el banco apruebe el pago."
     return None
 
 
@@ -452,45 +452,45 @@ def _mask_email(e: str | None) -> str | None:
 
 # ---------- avisos ----------
 CUSTOMER_SUBJECT = {
-    "recibido": "Recibimos tu pedido {n}",
+    "recibido": "Recibimos su pedido {n}",
     "pagado": "Pago confirmado · pedido {n}",
-    "rechazado": "Revisamos tu comprobante · pedido {n}",
-    "preparando": "Estamos preparando tu pedido {n}",  # solo "Reenviar correo" (pasar a preparando no avisa)
-    "listo": "Tu pedido {n} está listo para retiro",
-    "enviado": "Tu pedido {n} va en camino",
+    "rechazado": "Revisamos su comprobante · pedido {n}",
+    "preparando": "Estamos preparando su pedido {n}",  # solo "Reenviar correo" (pasar a preparando no avisa)
+    "listo": "Su pedido {n} está listo para retiro",
+    "enviado": "Su pedido {n} va en camino",
     "entregado": "Pedido {n} entregado",
     "cancelado": "Pedido {n} cancelado",
     "reembolsado": "Reembolso registrado · pedido {n}",
-    "por_vencer": "Tu pedido {n} sigue pendiente de pago",
-    "vencido": "Tu pedido {n} venció sin pago",
+    "por_vencer": "Su pedido {n} sigue pendiente de pago",
+    "vencido": "Su pedido {n} venció sin pago",
 }
 SHOW_INSTRUCTIONS = ("recibido", "por_vencer", "rechazado")  # correos que llevan "Cómo pagar"
 # titulo grande de cada correo (el asunto dice el numero; el titulo dice que paso)
 CUSTOMER_TITLE = {
-    "recibido": "¡Gracias por tu compra!",
+    "recibido": "¡Gracias por su compra!",
     "pagado": "Pago confirmado",
-    "rechazado": "No pudimos validar tu comprobante",
-    "preparando": "Estamos preparando tu pedido",
-    "listo": "Tu pedido está listo para retiro",
-    "enviado": "Tu pedido va en camino",
+    "rechazado": "No pudimos validar su comprobante",
+    "preparando": "Estamos preparando su pedido",
+    "listo": "Su pedido está listo para retiro",
+    "enviado": "Su pedido va en camino",
     "entregado": "Pedido entregado",
     "cancelado": "Pedido cancelado",
     "reembolsado": "Reembolso registrado",
-    "por_vencer": "Tu pedido sigue pendiente de pago",
-    "vencido": "Tu pedido venció sin pago",
+    "por_vencer": "Su pedido sigue pendiente de pago",
+    "vencido": "Su pedido venció sin pago",
 }
 CUSTOMER_INTRO = {
-    "recibido": "Recibimos tu pedido. Este es el resumen; con el botón de abajo seguís su estado en cualquier momento.",
-    "pagado": "Confirmamos el pago de tu pedido. Ya lo estamos preparando.",
-    "rechazado": "Revisamos el comprobante que subiste y no lo pudimos validar. Subí el comprobante correcto con el botón de abajo y lo revisamos de nuevo.",
-    "preparando": "Ya estamos preparando tu pedido. Te avisamos cuando salga o cuando esté listo para retiro.",
-    "listo": "Tu pedido ya está listo. Podés pasar a retirarlo con el número de pedido.",
-    "enviado": "Tu pedido salió hacia la dirección de entrega.",
-    "entregado": "Tu pedido fue entregado. ¡Gracias por comprar con nosotros!",
-    "cancelado": "Tu pedido fue cancelado.",
-    "reembolsado": "Registramos el reembolso de tu pedido.",
-    "por_vencer": "Tu pedido sigue pendiente de pago.",
-    "vencido": "El plazo para pagar tu pedido venció y lo cancelamos: los productos volvieron a la venta.",
+    "recibido": "Recibimos su pedido. Este es el resumen; con el botón de abajo puede seguir su estado en cualquier momento.",
+    "pagado": "Confirmamos el pago de su pedido. Ya lo estamos preparando.",
+    "rechazado": "Revisamos el comprobante que subió y no lo pudimos validar. Suba el comprobante correcto con el botón de abajo y lo revisamos de nuevo.",
+    "preparando": "Ya estamos preparando su pedido. Le avisamos cuando salga o cuando esté listo para retiro.",
+    "listo": "Su pedido ya está listo. Puede pasar a retirarlo con el número de pedido.",
+    "enviado": "Su pedido salió hacia la dirección de entrega.",
+    "entregado": "Su pedido fue entregado. ¡Gracias por comprar con nosotros!",
+    "cancelado": "Su pedido fue cancelado.",
+    "reembolsado": "Registramos el reembolso de su pedido.",
+    "por_vencer": "Su pedido sigue pendiente de pago.",
+    "vencido": "El plazo para pagar su pedido venció y lo cancelamos: los productos volvieron a la venta.",
 }
 TRACK_LABEL = "Rastrear mi pedido"  # el boton de siempre (21/10, item 40): lleva al seguimiento del pedido
 EMAIL_GREY, EMAIL_INK, EMAIL_LINE = email_layout.GREY, email_layout.INK, email_layout.LINE
@@ -613,10 +613,10 @@ def _email_html(t: Tenant, o: Order, kind: str, extra: str = "") -> str:
     main_url, boton = url, TRACK_LABEL
     if kind in ("por_vencer", "rechazado") and o.payment_kind in NEEDS_PROOF:
         boton = "Subir el comprobante"
-    pie = "Guardá este correo: el botón te lleva al estado de tu pedido."
+    pie = "Guarde este correo: el botón lo lleva al estado de su pedido."
     if kind == "vencido":
         # un SINPE puede haberse pagado sin subir el comprobante: nunca se afirma que "no se cobro nada"
-        main_url, boton, pie = store_base(t), "Volver a la tienda", "Si ya habías pagado, respondé a este correo con el comprobante y lo resolvemos."
+        main_url, boton, pie = store_base(t), "Volver a la tienda", "Si ya había pagado, responda a este correo con el comprobante y lo resolvemos."
     pay_box = email_layout.note(html=f"<b>Cómo pagar · {e(o.payment_method or '')}</b><br>{e(instr).replace(chr(10), '<br>')}") if instr else ""
     # boton principal; si no es el de seguimiento, "Rastrear mi pedido" queda como enlace debajo (items 40/49)
     track_link = (
@@ -635,9 +635,8 @@ def _email_html(t: Tenant, o: Order, kind: str, extra: str = "") -> str:
         body=body,
         preheader=f"Pedido {o.number} · {STATUS_LABEL.get(o.status, o.status)}. {CUSTOMER_INTRO[kind]}",
         action=(main_url, boton),
-        after_action=track_link + email_layout.fallback(url, vos=True),
-        foot=f"{e(pie)} Cualquier consulta, respondé a este correo.",
-        vos=True,
+        after_action=track_link + email_layout.fallback(url),
+        foot=f"{e(pie)} Cualquier consulta, responda a este correo.",
         show_link=False,
     )
 
@@ -980,12 +979,12 @@ def status_extra(t: Tenant, o: Order, kind: str, note: str | None = None) -> str
     if kind == "listo":
         pk = checkout_cfg(t).get("pickup") or {}
         donde = f"Dónde: {e(pk['address'])}{' · ' + e(pk['hours']) if pk.get('hours') else ''}<br>" if pk.get("address") else ""
-        return _note_box(f"{donde}Presentá el número de pedido <b>{e(o.number)}</b> al retirar.")
+        return _note_box(f"{donde}Presente el número de pedido <b>{e(o.number)}</b> al retirar.")
     if kind == "rechazado":
         motivo = f"<b>Qué revisar:</b> {e(note.strip())}<br>" if (note or "").strip() else ""
         return _note_box(
-            f"{motivo}<b>Cómo volver a subirlo:</b> tocá «Subir el comprobante», elegí la foto o el PDF del comprobante "
-            f"correcto (que se lean el monto y el detalle <b>{e(o.number)}</b>) y envialo. Lo revisamos apenas llegue.",
+            f"{motivo}<b>Cómo volver a subirlo:</b> toque «Subir el comprobante», elija la foto o el PDF del comprobante "
+            f"correcto (que se lean el monto y el detalle <b>{e(o.number)}</b>) y envíelo. Lo revisamos apenas llegue.",
             warn=True,
         )
     return ""
@@ -1156,8 +1155,8 @@ def _redo_html(db: Session, t: Tenant, o: Order) -> str:
         if (p := prods.get(pid)) is not None and p.active and p.show_on_web
     )
     if not items:
-        return "<p style='font-size:14px'>Si todavía lo querés, podés hacer el pedido de nuevo en la tienda.</p>"
-    return f"<p style='font-size:14px'>Si todavía lo querés, podés hacer el pedido de nuevo:</p><ul style='font-size:14px'>{items}</ul>"
+        return "<p style='font-size:14px'>Si todavía lo quiere, puede hacer el pedido de nuevo en la tienda.</p>"
+    return f"<p style='font-size:14px'>Si todavía lo quiere, puede hacer el pedido de nuevo:</p><ul style='font-size:14px'>{items}</ul>"
 
 
 def expire_unpaid(db: Session, t: Tenant, o: Order, now: datetime | None = None, ask_onvo: bool = True) -> str:
@@ -1229,9 +1228,9 @@ def remind_unpaid(db: Session, t: Tenant, o: Order) -> EmailOutbox | None:
         return None
     cancela = store_inventory.settings_of(t).get("cancel_unpaid_on_expiry")
     extra = (
-        f"<p style='font-size:14px'>Pagá antes del <b>{html.escape(_cr_when(o.expires_at))}</b> para confirmar tu pedido."
+        f"<p style='font-size:14px'>Pague antes del <b>{html.escape(_cr_when(o.expires_at))}</b> para confirmar su pedido."
         + (" Después de esa hora se cancela y los productos vuelven a la venta." if cancela else "")
-        + " Si ya pagaste, subí el comprobante con el botón de abajo.</p>"
+        + " Si ya pagó, suba el comprobante con el botón de abajo.</p>"
     )
     m = notify_customer(db, t, o, "por_vencer", extra, dedupe_key=f"tienda-rem:{o.id}")
     _note(o, "sistema", "Recordatorio de pago al cliente" + (f" ({m.status})" if m else ": el pedido no tiene correo"), key=REMINDER_NOTE)

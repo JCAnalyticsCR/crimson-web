@@ -49,13 +49,13 @@ def template_total_of(db: Session, tenant_id: int, customer_id: int | None, temp
 def what_happens(r: Recurrence, c: Customer | None, previa=None, produccion: bool = False) -> str:
     """Lo mismo que van a hacer run_due_recurrences y deliver_recurrence ese dia (routers/ops.py)."""
     if previa is not None:
-        return f"Detenida: la anterior ({previa.number}) todavía no le llegó al cliente; se genera cuando la envíes o la anules"
+        return f"Detenida: la anterior ({previa.number}) todavía no le llegó al cliente; se genera cuando la envíe o la anule"
     if not r.auto_send:
-        return "Se genera; el envío automático está apagado (enviala a mano)"
+        return "Se genera; el envío automático está apagado (envíela a mano)"
     if r.first_run_requires_approval:
-        return "Espera tu «Aprobar y enviar» en Aprobaciones"
+        return "Espera su «Aprobar y enviar» en Aprobaciones"
     if produccion:
-        return "Espera que la emitas (Hacienda en producción)"
+        return "Espera que la emita (Hacienda en producción)"
     if c is None or not (c.email or "").strip():
         return "No va a salir: el cliente no tiene correo"
     return "Sale sola con su PDF y enlace de pago"
@@ -81,7 +81,7 @@ def preview_html(on: date, filas: list[tuple[str, str, str, str]]) -> str:
         f"<p>El <b>{on:%d/%m/%Y}</b> se generan {len(filas)} factura(s) recurrente(s):</p>"
         "<table border=0 cellpadding=6><tr><th align=left>Recurrencia</th><th align=left>Cliente</th><th align=right>Total</th><th align=left>Qué pasa</th></tr>"
         + "".join(f"<tr><td>{e(a)}</td><td>{e(b)}</td><td align=right>{e(c)}</td><td>{e(d)}</td></tr>" for a, b, c, d in filas)
-        + "</table><p>Si algo no corresponde, cambialo en Facturación → Recurrencias antes de esa fecha.</p>"
+        + "</table><p>Si algo no corresponde, cámbielo en Facturación → Recurrencias antes de esa fecha.</p>"
         + cta("/recurrencias", "Abrir Recurrencias")
     )
 

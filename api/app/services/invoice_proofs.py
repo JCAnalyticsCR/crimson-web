@@ -174,7 +174,7 @@ def notify_team(db: Session, t: Tenant, inv: Invoice, pr: InvoicePaymentProof) -
     contabilidad...), mas el vendedor responsable de ESA factura (o quien la tecleo si no tiene vendedor) si puede ver
     cobros. Nunca a todo el rol ventas ni en copia a la lista de la empresa: lleva cliente, monto y referencia."""
     from ..models import TenantUser
-    from .mail import queue_email
+    from .mail import member_inbox, queue_email
 
     e = html.escape
     c = db.get(Customer, inv.customer_id) if inv.customer_id else None
@@ -183,7 +183,7 @@ def notify_team(db: Session, t: Tenant, inv: Invoice, pr: InvoicePaymentProof) -
     cuerpo = (
         f"<p><b>{e(titulo)}</b></p><p>{e(c.name if c else 'Cliente sin ficha')} · {e(LABEL.get(pr.method, pr.method))} · {e(monto)}"
         + (f" · ref. {e(pr.reference)}" if pr.reference else "")
-        + "</p><p>Revisalo en Pedidos de la tienda → Por atender → Comprobantes de facturas. Al aprobarlo se registra el pago en la factura.</p>"
+        + "</p><p>Revíselo en Pedidos de la tienda → Por atender → Comprobantes de facturas. Al aprobarlo se registra el pago en la factura.</p>"
     )
     roles = [r for r in (so.checkout_cfg(t).get("notify_roles") or ("admin",)) if _can_payments(db, t, r, ("sales", "ver_todo"), ("payments", "ver"))]
     roles = roles or ["admin"]
@@ -195,7 +195,7 @@ def notify_team(db: Session, t: Tenant, inv: Invoice, pr: InvoicePaymentProof) -
     for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.active, who)):
         if m.role_code not in roles and not _can_payments(db, t, m.role_code, ("payments", "ver")):
             continue  # el vendedor de la factura sin permiso de cobros: no lo puede revisar
-        correo = (m.user.email or "").strip().lower()
+        correo = member_inbox(m)  # su correo de avisos si el admin le puso uno (como el resto de los avisos internos)
         if not correo or correo in vistos or not m.user.active:
             continue
         vistos.add(correo)

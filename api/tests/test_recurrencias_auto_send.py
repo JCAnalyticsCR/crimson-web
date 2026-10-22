@@ -452,11 +452,11 @@ def test_produccion_sin_emitir_no_sale_como_aviso(client, auth, db_session, corr
     assert run_due_recurrences(db_session, today=HOY) == 1
     db_session.expire_all()
     r = db_session.get(Recurrence, rec["id"])
-    assert r.last_send_status == "por_aprobar" and "Emitila" in r.last_send_note and not _al(correo, CLIENTE)
+    assert r.last_send_status == "por_aprobar" and "Emítala" in r.last_send_note and not _al(correo, CLIENTE)
     assert any("por aprobar" in m.subject and "producción" in m.html for m in _admin(correo))
     assert not _por_aprobar(client)[r.last_invoice_id].get("action")  # se abre la factura para emitirla
     res = client.post(f"/recurrences/{rec['id']}/approve-send")
-    assert res.status_code == 409 and "Emitila" in res.json()["detail"] and not _al(correo, CLIENTE)
+    assert res.status_code == 409 and "Emítala" in res.json()["detail"] and not _al(correo, CLIENTE)
 
 
 def test_enlace_compartido_tambien_la_registra(client, auth, db_session, correo):

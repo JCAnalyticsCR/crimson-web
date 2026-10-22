@@ -80,7 +80,6 @@ def invite_client(db: Session, tenant: Tenant, customer: Customer, email: str, r
             link=link,
             label="Crear mi contraseña",
             note=f"El enlace vence en {INVITE_DAYS} días y sirve una sola vez. Si no esperaba este acceso, ignore este correo.",
-            vos=False,
         ),
         "invitation",
         inv.id,

@@ -357,7 +357,7 @@ def avisar_atrasos(db: Session, tenant: Tenant, ahora: datetime | None = None) -
             u = db.get(User, x.assigned_to) if x.assigned_to else None
             correo = user_inbox(db, tenant.id, u) if u else ""
             if correo:
-                cuerpo = f"<p>Se venció el plazo de {plazos[tipo]} de un ticket asignado a vos:</p><ul>{_fila_html(d)}</ul>" + cta(f"/tickets?id={x.id}", f"Abrir el ticket {x.number}")
+                cuerpo = f"<p>Se venció el plazo de {plazos[tipo]} de un ticket asignado a usted:</p><ul>{_fila_html(d)}</ul>" + cta(f"/tickets?id={x.id}", f"Abrir el ticket {x.number}")
                 queue_email(db, tenant, correo, f"Ticket {x.number} {titulos[tipo]} · {d['cliente']}", cuerpo, "support_ticket", x.id, company_bcc=False)
         n += len(lista)
     return n

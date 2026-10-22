@@ -333,8 +333,8 @@ def _email_tickets(db: Session, tenant: Tenant, e: Event, items: list[Ticket]) -
             db,
             tenant,
             mail,
-            f"Tus entradas · {e.name}",
-            f"<p>¡Listo! Estas son tus entradas para <b>{e.name}</b> ({when}{' · ' + e.venue if e.venue else ''}).</p>{links}<p>Presentá el código QR de cada entrada al ingresar. Cada entrada se puede usar una sola vez.</p>",
+            f"Sus entradas · {e.name}",
+            f"<p>¡Listo! Estas son sus entradas para <b>{e.name}</b> ({when}{' · ' + e.venue if e.venue else ''}).</p>{links}<p>Presente el código QR de cada entrada al ingresar. Cada entrada se puede usar una sola vez.</p>",
             "ticket",
             ts[0].id,
         )
