@@ -14,9 +14,10 @@ type Tax = {
   iva: { debito_crc: string; credito_xml_crc: string; credito_por_confirmar_crc: string; credito_sin_respaldo_crc: string; credito_manual_crc: string; credito_crc: string; proporcional_crc: string; prorrata_pct: string | null; credito_prorrata_crc: string; a_pagar_crc: string };
   credito_por_confirmar: { id: number; issuer_name: string | null; clave: string; credit_crc: string }[];
   recepciones: { recibidas: number; por_revisar: number; vencen_pronto: { id: number; issuer_name: string | null; total: string; currency: string; deadline: string | null; business_days_left: number | null }[]; vencidas: number; respondidas: number; total_crc: string };
+  por_aprobar?: number;
   mensajes: { rechazados: { id: number; issuer_name: string | null; detail: string | null }[]; errores: number; por_enviar: number };
   emision: { pendientes: number; rechazadas: number; aceptadas: number };
-  hacienda: { mode: Mode; environment: string; cert_not_after: string | null; cert_days_left: number | null; imap_last_run_at: string | null };
+  hacienda: { mode: Mode; environment: string; cert_not_after: string | null; cert_days_left: number | null; imap_last_run_at: string | null; buzon?: { state: string; label: string } };
 };
 
 const REPORTS: [string, string][] = [["iva", "IVA (borrador D-104)"], ["d151", "D-270 / D-151 (sin comprobante electrónico)"], ["recepciones", "Recepciones"], ["compras", "Libro de compras"], ["gastos", "Gastos"]];
@@ -66,7 +67,7 @@ export default function TaxPanel() {
             )}
           </Card>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <Card title="Por responder" extra={<span className="meta">{t.recepciones.por_revisar} por revisar · {t.recepciones.vencidas} vencidos</span>}>
+            <Card title="Por responder" extra={<span className="meta">{t.recepciones.por_revisar} por revisar{t.por_aprobar ? ` · ${t.por_aprobar} listas para aprobar` : ""} · {t.recepciones.vencidas} vencidos</span>}>
               {t.recepciones.vencen_pronto.length === 0 ? <p className="muted" style={{ margin: 0 }}>Nada vence en los próximos 2 días hábiles.</p> : (
                 <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>{t.recepciones.vencen_pronto.map((r) => <li key={r.id}><Link to={`/contabilidad/facturas/${r.id}`}>{r.issuer_name || "—"}</Link> · {fmtMoney(r.total, r.currency)} · {fmtDate(r.deadline)} · <b style={{ color: "var(--bad)" }}>{plazo(r.business_days_left)}</b></li>)}</ul>
               )}
@@ -88,7 +89,7 @@ export default function TaxPanel() {
                 <dt>Modo</dt><dd><b>{MODE_LABEL[t.hacienda.mode] || t.hacienda.mode}</b></dd>
                 <dt>Ambiente</dt><dd>{t.hacienda.environment}</dd>
                 <dt>Certificado</dt><dd>{t.hacienda.cert_not_after ? `vence el ${fmtDate(t.hacienda.cert_not_after.slice(0, 10))} · ${t.hacienda.cert_days_left} días` : "sin cargar"}</dd>
-                <dt>Buzón</dt><dd>{t.hacienda.imap_last_run_at ? `revisado ${parseTs(t.hacienda.imap_last_run_at).toLocaleString("es-CR")}` : "sin revisar"}</dd>
+                <dt>Buzón</dt><dd style={t.hacienda.buzon && t.hacienda.buzon.state !== "ok" ? { color: "var(--warn)" } : undefined}>{t.hacienda.buzon?.label ?? "—"}{t.hacienda.imap_last_run_at ? ` · revisado ${parseTs(t.hacienda.imap_last_run_at).toLocaleString("es-CR")}` : ""}</dd>
               </dl>
               {allows("settings.configurar") && <Link className="btn btn--ghost btn--sm" style={{ marginTop: 10 }} to="/ajustes?tab=hacienda">Ajustes → Hacienda</Link>}
             </Card>

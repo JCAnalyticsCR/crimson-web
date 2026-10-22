@@ -22,6 +22,10 @@ class Report:
     columns: list[str]
     rows: list[list]
     totals: dict | None = None
+    # hojas extra del Excel: (titulo, columnas, filas). La primera hoja siempre es la del reporte.
+    sheets: list[tuple[str, list[str], list[list]]] | None = None
+    # Excel propio (estado de resultados): recibe el nombre de la empresa y devuelve los bytes
+    xlsx: object | None = None
 
 
 def _cust(db: Session, cid: int | None) -> str:
@@ -333,29 +337,20 @@ def gastos(db: Session, tid: int, a: date, b: date) -> Report:
     )
 
 
-def estado_resultados(db: Session, tid: int, a: date, b: date) -> Report:
-    """Ventas y gastos en colones. Gasto = gasto aplicable (total - IVA acreditable): con condicion 04 el IVA no
-    acreditable ES gasto, y los impuestos que no son IVA tambien (subtotal lo subestimaba)."""
-    from ..models import Tenant
+def estado_resultados(db: Session, tid: int, a: date, b: date, base: str = "CRC") -> Report:
+    """Estado de resultados completo (reunion 2, pedido 1): ver services/profit_loss.py. Gasto = gasto aplicable
+    (total - IVA acreditable): con condicion 04 el IVA no acreditable ES gasto. Excel con formato propio."""
+    from . import profit_loss
 
-    ventas = Decimal(0)
-    for inv in db.scalars(select(Invoice).where(Invoice.tenant_id == tid, Invoice.issue_date >= a, Invoice.issue_date <= b, Invoice.status != "anulada")):
-        ventas += _to_crc(Decimal(str(inv.subtotal or 0)) - Decimal(str(inv.discount_total or 0)), inv.currency, _orate(db, inv))
-    t = db.get(Tenant, tid)
-    pct = (t.settings or {}).get("iva_prorrata_pct") if t else None
-    gastos_ = Decimal(0)
-    for e in db.scalars(select(Expense).where(Expense.tenant_id == tid, Expense.date >= a, Expense.date <= b, Expense.status != "anulado")):
-        c = _expense_credit(e)
-        if c is None:
-            c = Decimal(str(e.tax_amount or 0)) * Decimal(str(pct or 0)) / Decimal(100)
-        gastos_ += _to_crc(Decimal(str(e.total or 0)) - c, e.currency, _orate(db, e))
-    ventas, gastos_ = _q2(ventas), _q2(gastos_)
+    pl = profit_loss.build(db, tid, a, b, base)
+    simbolo = "₡" if pl["currency"] == "CRC" else "US$"
     return Report(
         "resultados",
-        "Estado de resultados (sin IVA acreditable, en colones)",
-        ["Concepto", "Monto"],
-        [["Ventas netas", ventas], ["Gastos", gastos_], ["Resultado", ventas - gastos_]],
-        {"resultado": ventas - gastos_},
+        f"Estado de resultados (en {'colones' if pl['currency'] == 'CRC' else 'dólares'})",
+        ["Concepto", f"Monto {simbolo}"],
+        profit_loss.rows_of(pl),
+        {"resultado": pl["utilidad_neta"], "Utilidad bruta": pl["utilidad_bruta"], "Utilidad neta": pl["utilidad_neta"]},
+        xlsx=lambda tenant_name: profit_loss.to_xlsx(pl, tenant_name),
     )
 
 
@@ -383,15 +378,75 @@ def inventario(db: Session, tid: int, a: date, b: date) -> Report:
 
 
 def venta_productos(db: Session, tid: int, a: date, b: date) -> Report:
-    q = (
-        select(InvoiceLine.code, InvoiceLine.name, func.sum(InvoiceLine.quantity), func.sum(InvoiceLine.subtotal), func.count(func.distinct(Invoice.id)))
-        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
-        .where(Invoice.tenant_id == tid, Invoice.issue_date >= a, Invoice.issue_date <= b, Invoice.status != "anulada")
-        .group_by(InvoiceLine.code, InvoiceLine.name)
-        .order_by(func.sum(InvoiceLine.subtotal).desc())
+    """Venta de productos (reunion 2, pedido 3: el Excel quedo "muy basico"): una fila por linea facturada con cliente,
+    vendedor, cantidad, precio, descuento (de linea y global), impuesto, total y moneda, mas el total en colones con el
+    tipo de cambio de la factura. El Excel trae ademas el resumen por producto (el ranking de antes)."""
+    from ..models import User
+    from .profit_loss import Converter
+
+    invs = db.scalars(
+        select(Invoice).where(Invoice.tenant_id == tid, Invoice.issue_date >= a, Invoice.issue_date <= b, Invoice.status != "anulada").order_by(Invoice.issue_date, Invoice.id)
+    ).all()
+    conv = Converter(db, "CRC")
+    pids = {ln.product_id for i in invs for ln in i.lines if ln.product_id}
+    kinds = dict(db.execute(select(Product.id, Product.item_type).where(Product.id.in_(pids))).all()) if pids else {}
+    sellers = {i.seller_id for i in invs if i.seller_id}
+    names = dict(db.execute(select(User.id, User.full_name).where(User.id.in_(sellers))).all()) if sellers else {}
+    custs = {c.id: c.name for c in db.scalars(select(Customer).where(Customer.id.in_({i.customer_id for i in invs if i.customer_id})))} if invs else {}
+    rows, resumen = [], {}
+    tot = {"sub": Decimal(0), "desc": Decimal(0), "iva": Decimal(0), "crc": Decimal(0)}
+    for inv in invs:
+        for ln in inv.lines:
+            qty, price = Decimal(str(ln.quantity or 0)), Decimal(str(ln.unit_price or 0))
+            sub, tax, total = Decimal(str(ln.subtotal or 0)), Decimal(str(ln.tax_amount or 0)), Decimal(str(ln.total or 0))
+            desc = _q2(max(Decimal(0), qty * price - sub))
+            crc = _q2(conv(total, inv.currency, inv.fx_sell, inv.issue_date))
+            tipo = {"servicio": "Servicio", "producto": "Producto"}.get(kinds.get(ln.product_id) or "", "Sin catálogo")
+            rows.append(
+                [
+                    inv.issue_date.isoformat(),
+                    inv.number,
+                    custs.get(inv.customer_id, "—"),
+                    names.get(inv.seller_id, "Sin vendedor"),
+                    ln.code or "",
+                    ln.name,
+                    tipo,
+                    qty,
+                    price,
+                    desc,
+                    sub,
+                    tax,
+                    total,
+                    inv.currency,
+                    crc,
+                ]
+            )
+            sub_crc = conv(sub, inv.currency, inv.fx_sell, inv.issue_date)
+            tot["sub"] += sub_crc
+            tot["desc"] += conv(desc, inv.currency, inv.fx_sell, inv.issue_date)
+            tot["iva"] += conv(tax, inv.currency, inv.fx_sell, inv.issue_date)
+            tot["crc"] += crc
+            k = (ln.code or "", ln.name)
+            r = resumen.setdefault(k, [ln.code or "", ln.name, tipo, Decimal(0), Decimal(0), Decimal(0), set()])
+            r[3] += qty
+            r[4] += sub_crc
+            r[5] += crc
+            r[6].add(inv.id)
+    ranking = sorted(resumen.values(), key=lambda r: -r[4])
+    return Report(
+        "productos",
+        "Venta de productos",
+        ["Fecha", "Factura", "Cliente", "Vendedor", "Código", "Producto", "Tipo", "Cantidad", "Precio unitario", "Descuento", "Subtotal", "Impuesto", "Total", "Moneda", "Total ₡"],
+        rows,
+        {"Subtotal ₡": _q2(tot["sub"]), "Descuento ₡": _q2(tot["desc"]), "Impuesto ₡": _q2(tot["iva"]), "Total ₡": _q2(tot["crc"]), "Líneas": len(rows)},
+        sheets=[
+            (
+                "Resumen por producto",
+                ["Código", "Producto", "Tipo", "Cantidad", "Venta sin IVA ₡", "Total con IVA ₡", "Facturas"],
+                [[r[0], r[1], r[2], r[3], _q2(r[4]), _q2(r[5]), len(r[6])] for r in ranking],
+            )
+        ],
     )
-    rows = [[r[0] or "", r[1], r[2], r[3], r[4]] for r in db.execute(q)]
-    return Report("productos", "Venta de productos", ["Código", "Producto", "Cantidad", "Venta neta", "Facturas"], rows, {"n": len(rows)})
 
 
 def movimientos(db: Session, tid: int, a: date, b: date) -> Report:
@@ -719,8 +774,24 @@ def tax_summary(db: Session, tenant, month: str) -> dict:
             "cert_not_after": cred.cert_not_after if cred else None,
             "cert_days_left": hc.cert_days_left(cred),
             "imap_last_run_at": mbox.last_run_at if mbox else None,
+            # reunion 2, pedido 4: el estado del buzon en palabras (antes solo "sin revisar")
+            "buzon": _buzon(db, tenant),
         },
+        "por_aprobar": _ready_count(db, tenant, pend),
     }
+
+
+def _buzon(db: Session, tenant) -> dict:
+    from .reception_proposal import inbox_state
+
+    st = inbox_state(db, tenant)
+    return {"state": st["state"], "label": st["label"]}
+
+
+def _ready_count(db: Session, tenant, docs) -> int:
+    from .reception_proposal import ready_count
+
+    return ready_count(db, tenant, list(docs))
 
 
 def planilla(db: Session, tid: int, a: date, b: date) -> Report:
@@ -1028,13 +1099,13 @@ CATALOG = [
     ("facturacion", "Facturación", "Todas las facturas del periodo con totales y saldo"),
     ("pendientes", "Facturas pendientes", "Por cobrar, con días de atraso"),
     ("impuesto", "Impuesto facturado", "Base e IVA por tarifa"),
-    ("resultados", "Estado de resultados", "Ventas netas menos gastos"),
+    ("resultados", "Estado de resultados", "Ingresos por tipo y vendedor, costo de ventas, gastos por categoría, IVA y utilidad"),
     ("cierre", "Cierre diario", "Cobros por día y método"),
     ("transacciones", "Transacciones", "Cada pago con método, tipo y referencia"),
     ("gastos", "Gastos", "Egresos registrados en contabilidad"),
     ("iva", "IVA", "Débito, crédito (de facturas electrónicas y de gastos sin XML) y prorrata · borrador D-104 en colones"),
     ("inventario", "Inventario", "Existencias por ubicación y alertas"),
-    ("productos", "Venta de productos", "Ranking de productos y servicios"),
+    ("productos", "Venta de productos", "Cada línea vendida: cliente, vendedor, precio, descuento, impuesto y total; resumen por producto"),
     ("movimientos", "Movimientos", "Ledger de inventario"),
     ("ordenes", "Órdenes", "Pedidos de la tienda y del punto de venta"),
     ("recepciones", "Recepciones", "Comprobantes de proveedores recibidos, su respuesta y el estado ante Hacienda"),
@@ -1052,37 +1123,81 @@ CATALOG = [
 FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
-def to_xlsx(rep: Report, a: date, b: date, tenant_name: str) -> bytes:
-    from openpyxl import Workbook
+# columnas de dinero en el Excel (formato #,##0.00): por el nombre, como la vista del portal
+MONEY_COL = re.compile(r"subtotal|descuento|impuesto|total|saldo|monto|iva|base|venta|precio|gasto|utilidad|costo|propina|bruto|neto|ccss|provisi|₡", re.I)
+NOT_MONEY_COL = re.compile(r"%|margen|horas|cantidad|facturas|pagos|líneas|proyectos|^tc$|tasa|condici|estado|respaldo|tipo|crédito iva", re.I)
+MONEY_FMT = "#,##0.00;[Red]-#,##0.00"
+
+
+def _sheet_name(title: str) -> str:
+    return re.sub(r"[\[\]:*?/\\]", "-", title)[:30]  # Excel no admite []:*?/\ en el nombre de la hoja
+
+
+def _is_money(col: str) -> bool:
+    return bool(MONEY_COL.search(col)) and not NOT_MONEY_COL.search(col)
+
+
+def _sheet(ws, title: str, columns: list[str], rows: list[list], header_row: int) -> None:
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 
+    ws.append(columns)
+    for c in ws[header_row]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="15131A")
+        c.alignment = Alignment(vertical="center", wrap_text=True)
+    money = [_is_money(str(col)) for col in columns]
+    for r in rows:
+        ws.append([float(v) if isinstance(v, Decimal) else v for v in r])
+        # Inyeccion de formulas: nombres y descripciones vienen de XML recibidos por correo sin autenticar (un "proveedor"
+        # llamado =HYPERLINK(...) o una formula DDE). openpyxl convierte en formula todo texto que empiece por "=": cualquier
+        # texto con un prefijo peligroso se escribe como texto literal (y con quotePrefix, para que Excel no lo evalue al editar).
+        for i, c in enumerate(ws[ws.max_row]):
+            if isinstance(c.value, str) and c.value[:1] in FORMULA_PREFIXES:
+                c.data_type = "s"
+                c.quotePrefix = True
+            elif i < len(money) and money[i] and isinstance(c.value, (int, float)) and not isinstance(c.value, bool):
+                c.number_format = MONEY_FMT
+    for i, col in enumerate(columns, 1):
+        width = max(len(str(col)), *(len(str(r[i - 1])) for r in rows[:200] if i - 1 < len(r))) if rows else len(col)
+        ws.column_dimensions[get_column_letter(i)].width = min(48, width + 3)
+    if rows:
+        ws.auto_filter.ref = f"A{header_row}:{get_column_letter(len(columns))}{ws.max_row}"
+    ws.freeze_panes = f"A{header_row + 1}"
+
+
+def to_xlsx(rep: Report, a: date, b: date, tenant_name: str) -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+
+    if callable(rep.xlsx):
+        return rep.xlsx(tenant_name)
     wb = Workbook()
     ws = wb.active
-    ws.title = re.sub(r"[\[\]:*?/\\]", "-", rep.title)[:30]  # Excel no admite []:*?/\ en el nombre de la hoja
+    ws.title = _sheet_name(rep.title)  # Excel no admite []:*?/\ en el nombre de la hoja
     ws["A1"] = f"{tenant_name} · {rep.title}"
     ws["A1"].font = Font(bold=True, size=14)
     ws["A2"] = f"Periodo {a.isoformat()} a {b.isoformat()}"
     ws["A2"].font = Font(color="8A858F")
     ws.append([])
-    ws.append(rep.columns)
-    for c in ws[4]:
-        c.font = Font(bold=True, color="FFFFFF")
-        c.fill = PatternFill("solid", fgColor="15131A")
-        c.alignment = Alignment(vertical="center")
-    for r in rep.rows:
-        ws.append([float(v) if isinstance(v, Decimal) else v for v in r])
-        # Inyeccion de formulas: nombres y descripciones vienen de XML recibidos por correo sin autenticar (un "proveedor"
-        # llamado =HYPERLINK(...) o una formula DDE). openpyxl convierte en formula todo texto que empiece por "=": cualquier
-        # texto con un prefijo peligroso se escribe como texto literal (y con quotePrefix, para que Excel no lo evalue al editar).
-        for c in ws[ws.max_row]:
-            if isinstance(c.value, str) and c.value[:1] in FORMULA_PREFIXES:
-                c.data_type = "s"
-                c.quotePrefix = True
-    for i, col in enumerate(rep.columns, 1):
-        width = max(len(str(col)), *(len(str(r[i - 1])) for r in rep.rows[:200])) if rep.rows else len(col)
-        ws.column_dimensions[get_column_letter(i)].width = min(48, width + 3)
-    ws.freeze_panes = "A5"
+    _sheet(ws, rep.title, rep.columns, rep.rows, 4)
+    if rep.totals:
+        # totales al pie: etiqueta en la primera columna y el valor al lado, en negrita y con formato de moneda
+        ws.append([])
+        soft = PatternFill("solid", fgColor="F3EEF0")
+        for k, v in rep.totals.items():
+            if k == "n":
+                k = "Registros"
+            ws.append([str(k), float(v) if isinstance(v, Decimal) else v])
+            for c in ws[ws.max_row][:2]:
+                c.font = Font(bold=True)
+                c.fill = soft
+            val = ws.cell(ws.max_row, 2)
+            if isinstance(val.value, float) and not any(w in str(k) for w in ("%", "Registros", "Líneas", "Órdenes", "Pagadas", "Provisionales", "Pendientes", "Conciliados")):
+                val.number_format = MONEY_FMT
+    for title, cols, rows in rep.sheets or []:
+        extra = wb.create_sheet(_sheet_name(title))
+        _sheet(extra, title, cols, rows, 1)
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()

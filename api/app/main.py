@@ -56,6 +56,7 @@ from .routers import (
 from .routers import bitacora as bitacora_router
 from .routers import fiscal_queue as fiscal_queue_router
 from .routers import invoice_proofs as invoice_proofs_router
+from .routers import report_board as report_board_router
 from .routers import settings as settings_router
 from .routers import store_inventory as store_inventory_router
 
@@ -123,6 +124,7 @@ def create_app() -> FastAPI:
     app.include_router(cabys_masivo.router)
     app.include_router(sales.router)
     app.include_router(ops.router)
+    app.include_router(report_board_router.router)  # tablero y estado de resultados completo (reunion 2)
     app.include_router(bitacora_router.router)  # antes que ajustes: /settings/audit
     app.include_router(hacienda_settings.router)  # antes que ajustes: /settings/hacienda
     app.include_router(fiscal_queue_router.router)  # cola "Por emitir" (plan 1.7)

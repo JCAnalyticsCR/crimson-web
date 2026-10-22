@@ -2,7 +2,9 @@
    actividad y condicion del IVA), con el calculo en vivo del IVA acreditable y el gasto aplicable. Despues de responder:
    linea de tiempo por intento y acciones (consultar, enviar, responder de nuevo, reabrir, gasto, vincular un gasto que
    ya existia, descartar). Se puede adjuntar el PDF o la respuesta de Hacienda de esa clave cuando llegan aparte.
-   Aceptada una factura de compra, quien maneja inventario le da entrada al inventario (StockIn). */
+   Aceptada una factura de compra, quien maneja inventario le da entrada al inventario (StockIn).
+   Reunion 2, pedido 4: la respuesta llega preparada ("Respuesta sugerida"): se aprueba con un clic y sale por el mismo
+   flujo; el formulario arranca con esa sugerencia por si hay que cambiar algo. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, downloadFile, fmtDate, fmtMoney, openFile, parseTs, uploadFile } from "../../../lib/api";
@@ -49,13 +51,17 @@ export default function ReceptionDetail() {
     if (!d) return;
     const def = acts.find((a) => a.is_default)?.code || acts[0]?.code || "";
     const cand = d.expense_candidates[0];
+    const p = d.proposal;
+    // el gasto como lo sugiere la plataforma: vincular el que ya existe, registrar uno (con su categoria) o ninguno (NC)
+    const exp = p ? (p.link_expense_id ? "link" : p.create_expense ? (cand ? "link" : "create") : "none") : cand ? "link" : "create";
     setF((x) => ({
       ...x,
-      activity: x.activity || def,
-      expense: d.proposal ? "none" : cand ? "link" : "create",
-      link: cand ? String(cand.id) : "",
-      action: d.proposal?.action || x.action,
-      cond: (d.proposal?.iva_condition as IvaCondition) || x.cond,
+      activity: x.activity || p?.activity_code || def,
+      expense: exp,
+      link: p?.link_expense_id ? String(p.link_expense_id) : cand ? String(cand.id) : "",
+      category: x.category || (p?.category_id ? String(p.category_id) : ""),
+      action: p?.action || x.action,
+      cond: (p?.iva_condition as IvaCondition) || x.cond,
       accepted_total: x.accepted_total || String(n(d.total)),
       accepted_tax: x.accepted_tax || String(n(d.iva_total)),
     }));
@@ -90,6 +96,16 @@ export default function ReceptionDetail() {
       const r = await api<Detail>(`/reception/${d.id}/respond`, { method: "POST", json: body });
       setD(r);
       toast(r.hacienda_status === "simulado" ? "Respuesta guardada (simulado: no se envió a Hacienda)" : `Respuesta guardada · Hacienda: ${r.hacienda_status}`);
+    } catch (e) { setError(e instanceof Error ? e.message : "Error"); }
+    finally { setBusy(false); }
+  };
+  const approve = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      const r = await api<Detail>(`/reception/${d.id}/approve`, { method: "POST", json: { fingerprint: d.proposal?.fingerprint ?? null } });
+      setD(r);
+      toast(r.hacienda_status === "simulado" ? "Respuesta aprobada (simulado: no se envió a Hacienda)" : `Respuesta aprobada y enviada · Hacienda: ${r.hacienda_status}`);
     } catch (e) { setError(e instanceof Error ? e.message : "Error"); }
     finally { setBusy(false); }
   };
@@ -194,6 +210,20 @@ export default function ReceptionDetail() {
 
         <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
           {showForm && d.responses.length > 0 && <Card title="Intentos anteriores">{timeline}</Card>}
+          {showForm && d.proposal && (
+            <Card title="Respuesta sugerida" extra={<span className={`badge badge--${d.proposal.ready ? "ok" : "warn"}`}>{d.proposal.ready ? "Lista para aprobar" : "Revísela a mano"}</span>}>
+              <dl className="acc-kv">
+                <dt>Respuesta</dt><dd><b>{ACTION_LABEL[d.proposal.action]}</b></dd>
+                <dt>Condición del IVA</dt><dd>{ivaLabel(d.proposal.iva_condition)}</dd>
+                {d.proposal.activity_code && <><dt>Actividad</dt><dd className="mono">{d.proposal.activity_code}</dd></>}
+                <dt>Gasto</dt><dd>{d.proposal.link_expense_id ? "Se vincula al gasto ya registrado" : d.proposal.create_expense ? `Se registra${d.proposal.category ? ` en «${d.proposal.category}»` : " (sin categoría)"}` : "Sin gasto"}</dd>
+              </dl>
+              <ul className="muted" style={{ fontSize: 12.5, margin: "10px 0 0", paddingLeft: 18 }}>{d.proposal.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
+              {d.proposal.blockers.length > 0 && <div className="acc-warn" style={{ marginTop: 10 }}>{d.proposal.blockers.map((b) => <div key={b}>⚠ {b}</div>)}</div>}
+              {d.proposal.ready && <button className="btn btn--crimson" style={{ marginTop: 12 }} disabled={busy} onClick={approve}>{busy ? "Enviando…" : real ? "Aprobar y enviar a Hacienda" : "Aprobar (simulado)"}</button>}
+              <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>¿Algo no calza? Cámbielo abajo y use «Guardar y enviar».</p>
+            </Card>
+          )}
           {showForm ? (
             <Card title="Respuesta">
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

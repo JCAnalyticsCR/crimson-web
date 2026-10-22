@@ -1,10 +1,12 @@
-/* Facturas de proveedores: "Por revisar" (con plazo) y "Recibidas" (todo, con filtros y paginacion). */
+/* Facturas de proveedores: "Por revisar" (con plazo) y "Recibidas" (todo, con filtros y paginacion). En "Por revisar"
+   cada comprobante trae su respuesta a Hacienda ya preparada (reunion 2, pedido 4): se aprueba con un clic, una por una
+   o todas las listas, y sale por el mismo flujo que "Responder". El estado del buzon se dice en palabras. */
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, fmtDate, fmtMoney } from "../../../lib/api";
+import { api, fmtDate, fmtMoney, parseTs } from "../../../lib/api";
 import { useSession } from "../../../app/session";
 import { Badge, Card, Empty, I, Icon, Loading } from "../../../ui/components";
-import { ACTION_LABEL, DOC_TYPES, ivaLabel, plazo, type InboxStatus, type Reception } from "../hacienda";
+import { ACTION_LABEL, DOC_TYPES, ivaLabel, plazo, type InboxStatus, type Proposal, type Reception } from "../hacienda";
 import type { ReceptionSummary } from "../useReceptionCount";
 import UploadDialog from "./UploadDialog";
 
@@ -16,6 +18,17 @@ function Files({ r }: { r: Reception }) {
   return (
     <span className="mono" style={{ fontSize: 11.5, whiteSpace: "nowrap" }} title="XML · PDF · respuesta de Hacienda al proveedor">
       XML ✓ · PDF {r.has_pdf ? "✓" : "—"} · Resp. <span style={{ color: sup === "✗" ? "var(--bad)" : undefined }}>{sup}</span>
+    </span>
+  );
+}
+
+function Sugerida({ p }: { p: Proposal | null | undefined }) {
+  if (!p) return <span className="muted">—</span>;
+  const txt = `${ACTION_LABEL[p.action] || p.action} · ${ivaLabel(p.iva_condition)}${p.link_expense_id ? " · vincula su gasto" : p.create_expense ? ` · gasto${p.category ? ` en ${p.category}` : ""}` : " · sin gasto"}`;
+  return (
+    <span style={{ fontSize: 12.5 }} title={[...p.reasons, ...p.blockers].join(" · ")}>
+      {txt}
+      {!p.ready && <div className="meta" style={{ textTransform: "none", color: "var(--warn)" }}>{p.blockers[0] || "Revísela a mano"}</div>}
     </span>
   );
 }
@@ -66,7 +79,27 @@ export default function Inbox({ all = false }: { all?: boolean }) {
     finally { setBusy(false); }
   };
 
+  // la huella de la sugerencia que se ve en la bandeja (si cambio, el servidor no la envia)
+  const huella = (id: number) => page?.items.find((r) => r.id === id)?.proposal?.fingerprint ?? null;
+  const approve = async (ids: number[]) => {
+    if (!ids.length) return;
+    setBusy(true);
+    try {
+      if (ids.length === 1) {
+        const r = await api<Reception>(`/reception/${ids[0]}/approve`, { method: "POST", json: { fingerprint: huella(ids[0]) } });
+        toast(r.hacienda_status === "simulado" ? "Respuesta aprobada (simulado: no se envió a Hacienda)" : `Respuesta aprobada y enviada · Hacienda: ${r.hacienda_status}`);
+      } else {
+        const r = await api<{ aprobadas: { id: number }[]; omitidas: { id: number; motivo: string }[] }>("/reception/approve-batch", { method: "POST", json: { ids, fingerprints: Object.fromEntries(ids.map((id) => [id, huella(id)]).filter(([, h]) => h)) } });
+        toast(`${r.aprobadas.length} respuesta(s) aprobada(s)${r.omitidas.length ? ` · ${r.omitidas.length} quedaron para revisar a mano: ${r.omitidas[0].motivo}` : ""}`, r.omitidas.length ? "bad" : undefined);
+      }
+      load();
+    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+    finally { setBusy(false); }
+  };
+
   const items = page?.items ?? [];
+  const listas = !all ? items.filter((r) => r.proposal?.ready).map((r) => r.id) : [];
+  const puedeAprobar = allows("accounting.editar");
   return (
     <>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end" }}>
@@ -78,6 +111,18 @@ export default function Inbox({ all = false }: { all?: boolean }) {
         )}
         {allows("accounting.crear") && <button className="btn btn--crimson btn--sm" onClick={() => setUpload(true)}><Icon d={I.plus} />Cargar archivos</button>}
       </div>
+
+      {!all && sum?.buzon && (
+        <div className={`acc-warn`} role="status" style={sum.buzon.state === "ok" ? { borderColor: "var(--hair)", background: "transparent", color: "var(--text-2)" } : undefined}>
+          <b>Buzón:</b> {sum.buzon.label}{sum.buzon.last_run_at ? ` · última revisión ${parseTs(sum.buzon.last_run_at).toLocaleString("es-CR")}` : ""}
+        </div>
+      )}
+      {!all && puedeAprobar && listas.length > 0 && (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <span className="muted" style={{ fontSize: 13, flex: 1, minWidth: 220 }}>{listas.length} comprobante(s) con la respuesta lista: revise la sugerencia y apruébela; sale a Hacienda por el flujo de siempre.</span>
+          <button className="btn btn--crimson btn--sm" disabled={busy} onClick={() => approve(listas)}>Aprobar las {listas.length} sugeridas</button>
+        </div>
+      )}
 
       {!all && sum && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10 }}>
@@ -103,7 +148,7 @@ export default function Inbox({ all = false }: { all?: boolean }) {
         {page === null ? <Loading /> : items.length === 0 ? <Empty title={all ? "Sin comprobantes" : "Nada por revisar"} hint="Los comprobantes llegan solos por el buzón o se cargan con «Cargar archivos»." /> : (
           <div style={{ overflowX: "auto" }}>
             <table className="table">
-              <thead><tr><th>Proveedor</th><th>Tipo</th><th>Documento</th><th className="num">Impuesto</th><th className="num">Total</th>{all && <><th>Acción</th><th>Condición</th><th className="num">IVA acreditable</th><th className="num">Gasto aplicable</th><th>Hacienda</th></>}<th>Archivos</th><th>{all ? "Estado" : "Plazo"}</th><th /></tr></thead>
+              <thead><tr><th>Proveedor</th><th>Tipo</th><th>Documento</th><th className="num">Impuesto</th><th className="num">Total</th>{all && <><th>Acción</th><th>Condición</th><th className="num">IVA acreditable</th><th className="num">Gasto aplicable</th><th>Hacienda</th></>}{!all && <th>Respuesta sugerida</th>}<th>Archivos</th><th>{all ? "Estado" : "Plazo"}</th><th /></tr></thead>
               <tbody>{items.map((r) => (
                 <tr key={r.id}>
                   <td><b>{r.issuer_name || "—"}</b><div className="meta" style={{ textTransform: "none" }}>{r.issuer_id}{r.issuer_email ? ` · ${r.issuer_email}` : ""}</div></td>
@@ -118,9 +163,13 @@ export default function Inbox({ all = false }: { all?: boolean }) {
                     <td className="num money">{r.applicable_amount !== null ? fmtMoney(r.applicable_amount, r.currency) : "—"}</td>
                     <td><Badge status={r.hacienda_status} /></td>
                   </>}
+                  {!all && <td><Sugerida p={r.proposal} /></td>}
                   <td><Files r={r} /></td>
                   <td>{all ? <Badge status={r.status} /> : <Deadline r={r} />}</td>
-                  <td className="num"><button className={`btn btn--sm ${r.status === "por_revisar" ? "btn--crimson" : "btn--ghost"}`} onClick={() => nav(`/contabilidad/facturas/${r.id}`)}>{r.status === "por_revisar" ? "Revisar" : "Ver"}</button></td>
+                  <td className="num" style={{ whiteSpace: "nowrap" }}>
+                    {!all && puedeAprobar && r.proposal?.ready && <button className="btn btn--sm btn--crimson" style={{ marginRight: 6 }} disabled={busy} onClick={() => approve([r.id])}>Aprobar y enviar</button>}
+                    <button className={`btn btn--sm ${r.status === "por_revisar" && !r.proposal?.ready ? "btn--crimson" : "btn--ghost"}`} onClick={() => nav(`/contabilidad/facturas/${r.id}`)}>{r.status === "por_revisar" ? "Revisar" : "Ver"}</button>
+                  </td>
                 </tr>
               ))}</tbody>
             </table>

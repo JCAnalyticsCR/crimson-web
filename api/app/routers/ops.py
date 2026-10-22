@@ -444,6 +444,15 @@ class CategoryIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     active: bool = True
     d151_kind: str | None = Field(None, pattern=D151_KINDS)
+    # estado de resultados: costo_ventas | operativo (vacio = por el nombre, services/profit_loss.group_of)
+    pnl_group: str | None = Field(None, pattern="^(costo_ventas|operativo)$")
+
+
+def _cat_out(c: ExpenseCategory) -> dict:
+    from ..services.profit_loss import group_of
+
+    g, auto = group_of(c)
+    return {"id": c.id, "name": c.name, "active": c.active, "d151_kind": c.d151_kind, "pnl_group": c.pnl_group, "pnl_group_effective": g, "pnl_group_auto": auto}
 
 
 @router.get("/expense-categories")
@@ -451,7 +460,7 @@ def exp_cats(active: int = 0, p: Principal = Depends(require("accounting", "ver"
     q = select(ExpenseCategory).where(ExpenseCategory.tenant_id == p.tenant.id)
     if active:
         q = q.where(ExpenseCategory.active)  # los selectores solo ofrecen las activas
-    return [{"id": c.id, "name": c.name, "active": c.active, "d151_kind": c.d151_kind} for c in db.scalars(q.order_by(ExpenseCategory.name))]
+    return [_cat_out(c) for c in db.scalars(q.order_by(ExpenseCategory.name))]
 
 
 @router.post("/expense-categories", status_code=201)
@@ -469,9 +478,11 @@ def exp_cat_update(cid: int, data: CategoryIn, p: Principal = Depends(require("a
         raise HTTPException(404, "Categoría no encontrada")
     antes = snapshot(c)
     c.name, c.active, c.d151_kind = data.name, data.active, data.d151_kind  # desactivar no borra
+    if "pnl_group" in data.model_fields_set:  # un cliente viejo que no lo manda no lo borra
+        c.pnl_group = data.pnl_group
     audit_change(db, p, "update", "expense_category", c.id, antes, snapshot(c))
     db.commit()
-    return {"id": c.id, "name": c.name, "active": c.active, "d151_kind": c.d151_kind}
+    return _cat_out(c)
 
 
 IVA_CONDITIONS = "^(credito|credito_parcial|bienes_capital|no_credito|proporcional)$"
@@ -613,7 +624,14 @@ def _exp_out(e: Expense, db: Session, bank_ids: set[int] | None = None):
         "bank_instrument_id": e.bank_instrument_id,
         "check_number": e.check_number,
         "locked": e.received_document_id is not None,
+        "from_commission": _from_commission(e),  # lo registro Comisiones al marcarla pagada: se ajusta desde alli
     }
+
+
+def _from_commission(e: Expense) -> bool:
+    from ..services.commission_expense import is_commission_ref
+
+    return is_commission_ref(e.reference) and not e.received_document_id
 
 
 def _expense_query(p: Principal, from_, to, category_id, supplier_id, currency, status, q):
@@ -754,6 +772,10 @@ def _check_instrument(db: Session, p: Principal, e: Expense) -> None:
 
 @router.post("/expenses", status_code=201)
 def expense_create(data: ExpenseIn, p: Principal = Depends(require("accounting", "crear")), db: Session = Depends(get_db)):
+    from ..services.commission_expense import is_commission_ref
+
+    if is_commission_ref(data.reference):
+        raise HTTPException(422, "La referencia COMISION- es de los gastos que registra Comisiones al marcar una comisión pagada")
     _check_refs(db, p.tenant.id, data.supplier_id, data.category_id, data.bank_account_id)
     e = Expense(tenant_id=p.tenant.id, created_by=p.user.id)
     warnings = _apply_expense(e, data, db)
@@ -780,8 +802,34 @@ def expense_update(eid: int, data: ExpenseIn, p: Principal = Depends(require("ac
     if not e or e.tenant_id != p.tenant.id:
         raise HTTPException(404, "Gasto no encontrado")
     _check_refs(db, p.tenant.id, None if e.received_document_id else data.supplier_id, data.category_id, data.bank_account_id)
+    from ..services.commission_expense import is_commission_ref
+
     antes = snapshot(e)
     warnings: list[str] = []
+    if _from_commission(e):
+        # reunion 2, pedido 2: el gasto de una comision pagada cuadra con el libro de comisiones. Monto, fecha, estado
+        # y referencia solo cambian desde Comisiones (pagar / deshacer el pago); aqui, categoria, notas y pago.
+        cambios = [
+            not _same(data.subtotal, e.subtotal),
+            not _same(data.tax_rate, e.tax_rate),
+            data.currency != e.currency,
+            data.date != e.date,
+            data.iva_credit != e.iva_credit,
+            data.status != e.status,
+            (data.reference or "") != (e.reference or ""),
+            data.fx_rate is not None and not _same(data.fx_rate, e.fx_rate),
+        ]
+        if any(cambios):
+            raise HTTPException(409, "Este gasto lo registró Comisiones: el monto, la fecha y el estado se ajustan desde Comisiones")
+        for k in (*LOCKED_EDITABLE, "supplier_id"):
+            if k != "status":
+                setattr(e, k, getattr(data, k))
+        _check_instrument(db, p, e)
+        _audit_expense(db, p, e, antes, "update", data.reason)
+        db.commit()
+        return {**_exp_out(e, db), "warnings": warnings}
+    if is_commission_ref(data.reference):
+        raise HTTPException(422, "La referencia COMISION- es de los gastos que registra Comisiones al marcar una comisión pagada")
     if e.received_document_id:
         # montos, divisa, fecha, tasa y condicion salen del XML: nunca se recalculan (tarifas mixtas, otros cargos)
         cambios = [
@@ -879,8 +927,8 @@ REPORT_NEEDS = {
 
 def report_allowed(p: Principal, key: str) -> bool:
     mod, act = REPORT_NEEDS.get(key, ("settings", "configurar"))
-    if mod == "payments" and not p.sees_all_sales:
-        return False  # cierres y transacciones son de toda la empresa
+    if (mod == "payments" or key == "productos") and not p.sees_all_sales:
+        return False  # cierres, transacciones y la venta por linea (cliente y vendedor) son de toda la empresa
     if key.startswith("rentabilidad") and not p.sees_costs:
         return False  # el margen por proyecto es informacion de costos
     return p.can(mod, act)

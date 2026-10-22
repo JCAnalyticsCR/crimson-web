@@ -324,7 +324,9 @@ def test_nc_que_ajusta_parcial_se_propone_sin_gasto(client, auth):
     nc_clave = clave(fecha=DDMMAA, consecutivo="00100001030000000042")
     nc = up(client, fe_xml(nc_clave, tipo="NotaCreditoElectronica", referencia=cl(42), total=56500, iva=6500, fecha=FECHA_HOY)).json()
     det = client.get(f"/reception/{nc['id']}").json()
-    assert det["proposal"] == {"action": "aceptada", "iva_condition": "no_credito", "create_expense": False, "reference_id": f["id"]}
+    prop = det["proposal"]  # reunion 2 (pedido 4): la sugerencia trae ademas su motivo y si se aprueba con un clic
+    assert {k: prop[k] for k in ("action", "iva_condition", "create_expense", "reference_id")} == {"action": "aceptada", "iva_condition": "no_credito", "create_expense": False, "reference_id": f["id"]}
+    assert prop["link_expense_id"] is None and prop["source"] == "nota_credito"
     assert any("corrige una factura" in w for w in det["warnings"])
     r = respond(client, nc["id"], iva_condition="no_credito", create_expense=False)
     assert r.status_code == 200 and r.json()["expense_id"] is None

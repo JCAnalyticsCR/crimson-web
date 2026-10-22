@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import zipfile
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -26,8 +27,11 @@ from ..models import Media, ReceivedDocument, ReceptionMessage, ReceptionRespons
 from ..providers.hacienda import xml44
 from ..services import hacienda_config as hc
 from ..services import reception as rsvc
+from ..services import reception_proposal as rprop
 from ..services.documents import audit
 from ..services.reception_calc import business_days_left
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/reception", tags=["recepcion"])
 
@@ -165,13 +169,11 @@ def detail(db: Session, p: Principal, doc: ReceivedDocument, extra_warnings: lis
     if not p.tenant.tax_id and doc.status == "por_revisar":
         warnings.append("Configure la cédula en Ajustes → Hacienda")
     nc_ref = rsvc.nc_adjustment(db, doc)
-    proposal = None
     if nc_ref is not None:
         what = "rechazaste" if nc_ref.action == "rechazada" else "aceptaste parcialmente"
-        warnings.append(
-            f"Esta nota de crédito corrige una factura que {what}: el gasto y el crédito ya quedaron por el monto aceptado"
-        )
-        proposal = {"action": "aceptada", "iva_condition": "no_credito", "create_expense": False, "reference_id": nc_ref.id}
+        warnings.append(f"Esta nota de crédito corrige una factura que {what}: el gasto y el crédito ya quedaron por el monto aceptado")
+    # reunion 2, pedido 4: la respuesta queda preparada para aprobarla con un clic (services/reception_proposal.py)
+    proposal = rprop.propose(db, p.tenant, doc)
     msg = db.get(ReceptionMessage, doc.message_id) if doc.message_id else None
     mode = hc.reception_mode(db, p.tenant)
     last = rs[-1] if rs else None
@@ -192,7 +194,12 @@ def detail(db: Session, p: Principal, doc: ReceivedDocument, extra_warnings: lis
             "can_reopen": can_reopen,
             "can_send": bool(last and last.status == "por_enviar"),
             "can_refresh": bool(last and last.status in ("enviado", "procesando", "enviando")),
-            "can_expense": not doc.expense_id and (doc.doc_type == "TE" or (doc.status in ("respondido", "historico") and doc.action in ("aceptada", "parcial")) or (doc.status == "ajeno" and not doc.receiver_id)),
+            "can_expense": not doc.expense_id
+            and (
+                doc.doc_type == "TE"
+                or (doc.status in ("respondido", "historico") and doc.action in ("aceptada", "parcial"))
+                or (doc.status == "ajeno" and not doc.receiver_id)
+            ),
             "warnings": list(dict.fromkeys(warnings)),
             "expense_candidates": rsvc.expense_candidates(db, doc)
             if doc.status == "por_revisar" or (doc.status in ("respondido", "historico") and doc.action in ("aceptada", "parcial") and not doc.expense_id)
@@ -268,18 +275,35 @@ def documents(
         total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery()))
         page = _list_rows(db, query.offset(offset).limit(limit))
     rs = _responses_by_doc(db, [d.id for d, _ in page])
-    return {"items": [item(d, rs.get(d.id), flags=f) for d, f in page], "total": total, "counts": {s: counts.get(s, 0) for s in STATUSES}}
+    items = []
+    ctx = rprop.Ctx(db, p.tenant)
+    for d, f in page:
+        it = item(d, rs.get(d.id), flags=f)
+        if status == "por_revisar" and d.status == "por_revisar":
+            # la respuesta sugerida, para aprobarla desde la bandeja (en "Recibidas" no se usa: no se calcula)
+            it["proposal"] = rprop.propose(db, p.tenant, d, ctx)
+        items.append(it)
+    return {"items": items, "total": total, "counts": {s: counts.get(s, 0) for s in STATUSES}}
 
 
 @router.get("/summary")
-def summary(p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):
+def summary(
+    listas: bool = False,
+    p: Principal = Depends(require("accounting", "ver")),
+    db: Session = Depends(get_db),
+):
+    """El menu lo pide cada 5 minutos: "listas para aprobar" (varias consultas por comprobante) solo con ?listas=1."""
     today = date.today()
     pend = db.scalars(select(ReceivedDocument).where(ReceivedDocument.tenant_id == p.tenant.id, ReceivedDocument.status == "por_revisar")).all()
     left = [business_days_left(today, d.deadline) for d in pend]
     last_ids = select(func.max(ReceptionResponse.id)).where(ReceptionResponse.tenant_id == p.tenant.id).group_by(ReceptionResponse.received_document_id)
     last = db.scalars(select(ReceptionResponse).where(ReceptionResponse.id.in_(last_ids))).all()
+    n_listas = rprop.ready_count(db, p.tenant, pend) if listas else None
+    buzon = rprop.inbox_state(db, p.tenant)
     return {
         "por_revisar": len(pend),
+        "listas_para_aprobar": n_listas,
+        "buzon": {"state": buzon["state"], "label": buzon["label"], "last_run_at": buzon["last_run_at"]},
         "vencen_pronto": sum(1 for x in left if x is not None and 0 <= x <= 2),
         "vencidos": sum(1 for x in left if x is not None and x < 0),
         "mensajes_rechazados": sum(1 for r in last if r.status == "rechazado"),
@@ -543,6 +567,91 @@ def respond(rid: int, data: rsvc.RespondIn, p: Principal = Depends(require("acco
     return detail(db, p, doc, warnings)
 
 
+class ApproveIn(BaseModel):
+    # la huella de la sugerencia que la persona vio (services/reception_proposal.fingerprint)
+    fingerprint: str | None = Field(None, max_length=64)
+
+
+CHANGED = "La sugerencia cambió desde que la abrió: revísela de nuevo antes de aprobarla"
+
+
+@router.post("/{rid}/approve")
+def approve(rid: int, data: ApproveIn | None = None, p: Principal = Depends(require("accounting", "editar")), db: Session = Depends(get_db)):
+    """Aprueba la respuesta sugerida y la envia por el flujo de siempre. La sugerencia se recalcula aqui (nunca se
+    confia en lo que mande el navegador) y, si el portal manda la huella de lo que se vio y no coincide, no se envia
+    nada (409): el mensaje receptor es irreversible."""
+    doc = rsvc.get_doc(db, p.tenant.id, rid)
+    prop = rprop.propose(db, p.tenant, doc)
+    if prop is None:
+        raise HTTPException(409, "Este comprobante ya no está por revisar")
+    if not prop["ready"]:
+        raise HTTPException(409, "Respóndalo desde el detalle: " + "; ".join(prop["blockers"]))
+    if data is not None and data.fingerprint and data.fingerprint != prop["fingerprint"]:
+        raise HTTPException(409, CHANGED)
+    doc, _r, warnings = rsvc.respond(db, p, rid, rprop.respond_in(prop))
+    audit(
+        db,
+        p.tenant.id,
+        p.user.id,
+        "reception_approve",
+        "received_document",
+        doc.id,
+        {"sugerencia": prop["source"], "condicion": prop["iva_condition"]},
+        ip=p.ip,
+    )
+    db.commit()
+    return detail(db, p, doc, warnings)
+
+
+class ApproveBatchIn(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=50)
+    fingerprints: dict[int, str] | None = None  # id -> huella de la sugerencia que se vio en la bandeja
+
+
+@router.post("/approve-batch")
+def approve_batch(data: ApproveBatchIn, p: Principal = Depends(require("accounting", "editar")), db: Session = Depends(get_db)):
+    """ "Aprobar todas las sugeridas": cada una por su cuenta (una que falle no deshace las demas)."""
+    from ..services.fx import FxMissing
+
+    ok, omitidas = [], []
+    seen = data.fingerprints or {}
+    for rid in dict.fromkeys(data.ids):
+        try:
+            doc = rsvc.get_doc(db, p.tenant.id, rid)
+            prop = rprop.propose(db, p.tenant, doc)
+            if prop is None or not prop["ready"]:
+                omitidas.append({"id": rid, "motivo": "Ya no está por revisar" if prop is None else "; ".join(prop["blockers"])})
+                continue
+            if seen.get(rid) and seen[rid] != prop["fingerprint"]:
+                omitidas.append({"id": rid, "motivo": CHANGED})
+                continue
+            doc, r, _w = rsvc.respond(db, p, rid, rprop.respond_in(prop))
+            audit(
+                db,
+                p.tenant.id,
+                p.user.id,
+                "reception_approve",
+                "received_document",
+                doc.id,
+                {"sugerencia": prop["source"], "condicion": prop["iva_condition"], "lote": True},
+                ip=p.ip,
+            )
+            db.commit()
+            ok.append({"id": rid, "hacienda_status": doc.hacienda_status})
+        except HTTPException as e:
+            db.rollback()
+            omitidas.append({"id": rid, "motivo": str(e.detail)})
+        except FxMissing as e:
+            # comprobante en dolares sin tipo de cambio cargado: este queda; los ya aprobados siguen aprobados
+            db.rollback()
+            omitidas.append({"id": rid, "motivo": str(e)})
+        except Exception as e:  # noqa: BLE001 - uno que falle no corta el lote ni esconde los que ya salieron
+            db.rollback()
+            log.warning("aprobar en lote: el comprobante %s fallo (%s)", rid, type(e).__name__)
+            omitidas.append({"id": rid, "motivo": "No se pudo aprobar: respóndalo desde el detalle"})
+    return {"aprobadas": ok, "omitidas": omitidas}
+
+
 @router.post("/{rid}/send")
 def send_now(rid: int, p: Principal = Depends(require("accounting", "editar")), db: Session = Depends(get_db)):
     from ..services.hacienda_sync import send_response
@@ -668,7 +777,16 @@ async def attach(rid: int, file: UploadFile = File(...), p: Principal = Depends(
         doc.xml_supplier_response = None
         apply_supplier_response(db, doc, root, xml44.to_utf8_text(data, root))
         if antes != (doc.status, doc.supplier_hacienda_status):
-            audit(db, p.tenant.id, p.user.id, "supplier_response_replaced", "received_document", doc.id, {"antes": list(antes), "despues": [doc.status, doc.supplier_hacienda_status]}, ip=p.ip)
+            audit(
+                db,
+                p.tenant.id,
+                p.user.id,
+                "supplier_response_replaced",
+                "received_document",
+                doc.id,
+                {"antes": list(antes), "despues": [doc.status, doc.supplier_hacienda_status]},
+                ip=p.ip,
+            )
     else:
         raise HTTPException(422, "Suba un PDF o un XML de respuesta de Hacienda")
     audit(db, p.tenant.id, p.user.id, "reception_attach", "received_document", doc.id, {"tipo": kind}, ip=p.ip)

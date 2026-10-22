@@ -4,7 +4,11 @@ import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
 
-export type ReceptionSummary = { por_revisar: number; vencen_pronto: number; vencidos: number; mensajes_rechazados: number; errores: number };
+export type ReceptionSummary = {
+  por_revisar: number; vencen_pronto: number; vencidos: number; mensajes_rechazados: number; errores: number;
+  /** reunion 2, pedido 4: cuantas tienen la respuesta lista para aprobar y el estado del buzon en palabras */
+  listas_para_aprobar?: number; buzon?: { state: "apagado" | "pendiente" | "error" | "ok"; label: string; last_run_at: string | null };
+};
 
 export function useReceptionCount(): { count: number; urgent: boolean } | null {
   const { me, realAllows } = useSession();
