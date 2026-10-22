@@ -985,10 +985,26 @@ def survey_suggest_apply(sid: int, data: list[SuggestionIn], p: Principal = Depe
     """Agrega las sugerencias elegidas a lo que ya estaba. Si el material ya existe (mismo producto o mismo
     nombre) suma la cantidad en vez de duplicar la linea. Nunca borra nada."""
     s = _survey(db, sid, p)
+    added, summed = apply_suggestions(s, data)
+    audit(db, p.tenant.id, p.user.id, "suggest_apply", "survey", s.id, {"agregados": added, "sumados": summed}, ip=p.ip)
+    db.commit()
+    return {"added": added, "summed": summed, "survey": _survey_out(db, s)}
+
+
+def apply_suggestions(s: Survey, data: list[SuggestionIn]) -> tuple[int, int]:
+    """Suma o agrega las sugerencias elegidas (lo usa tambien el portal de aliados despues de su control de alcance).
+    Sin commit. Una linea repetida en la misma lista (doble clic que mando dos veces la misma) cuenta una sola vez."""
     if s.status in ("cotizado", "cerrado"):
         raise HTTPException(409, "El levantamiento ya fue cotizado")
-    added, summed = 0, 0
+    vistos: set[tuple] = set()
+    uniq = []
     for sg in data:
+        k = (sg.item_id, sg.product_id, sg.name.strip().lower())
+        if k not in vistos:
+            vistos.add(k)
+            uniq.append(sg)
+    added, summed = 0, 0
+    for sg in uniq:
         match = next((it for it in s.items if sg.item_id and it.id == sg.item_id), None) or next(
             (it for it in s.items if (sg.product_id and it.product_id == sg.product_id) or (it.name or "").strip().lower() == sg.name.strip().lower()),
             None,
@@ -1004,9 +1020,7 @@ def survey_suggest_apply(sid: int, data: list[SuggestionIn], p: Principal = Depe
             kind, unit = normalize_item(sg.name, sg.kind, sg.unit)
             s.items.append(SurveyItem(product_id=sg.product_id, name=sg.name, quantity=sg.quantity, unit=unit, note=sg.note, kind=kind))
             added += 1
-    audit(db, p.tenant.id, p.user.id, "suggest_apply", "survey", s.id, {"agregados": added, "sumados": summed}, ip=p.ip)
-    db.commit()
-    return {"added": added, "summed": summed, "survey": _survey_out(db, s)}
+    return added, summed
 
 
 class ApplyProductIn(BaseModel):
@@ -2603,3 +2617,8 @@ def survey_report_send(sid: int, data: ReportSendIn, p: Principal = Depends(requ
 from .archive import router as _archive_router  # noqa: E402
 
 router.include_router(_archive_router)
+
+# Oportunidades que propone un aliado (aprobar o rechazar, item 16 del 21/10): tambien aqui, sin tocar main.py
+from .ally_proposals import router as _ally_proposals_router  # noqa: E402
+
+router.include_router(_ally_proposals_router)

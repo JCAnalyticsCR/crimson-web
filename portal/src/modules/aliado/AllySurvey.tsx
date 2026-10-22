@@ -1,15 +1,16 @@
 /* Levantamiento del aliado: el mismo contenido que el del técnico de Crimson (puntos con los campos de la plantilla,
    materiales, fotos y la sección común), con las rutas del portal de aliados (fieldApi.ALLY_FIELD_API). Sin costeo,
-   márgenes, recomendación de equipos ni informe: eso lo hace Crimson. Lo que el aliado guarda conserva lo que Crimson
+   márgenes ni recomendación de equipos: eso lo hace Crimson. Sí «Sugerir materiales» (sin precios ni proveedores) y
+   el informe preliminar, que no lleva ni un monto (21/10, ítem 19). Lo que el aliado guarda conserva lo que Crimson
    ya costeó (la API no lo toca). Al terminar: "Enviar a revisión". Si vuelve con observaciones, se marcan resueltas.
    El personal requerido y quienes hicieron la visita solo se mandan si el aliado los cambió (la API conserva lo demás,
    incluidos los técnicos de Crimson de la visita, que aquí no se ven).
    Autoguardado (como el levantamiento interno): lo escrito sube solo tras cada pausa, al cambiar de pestaña o de
    pantalla y al cerrar; sin red queda una copia en el dispositivo que se ofrece al volver. En la vista previa del
    admin (solo lectura) no se guarda nada. */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api } from "../../lib/api";
+import { api, openFile } from "../../lib/api";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
 import { useSession } from "../../app/session";
 import { Field, I, Icon } from "../../ui/components";
@@ -17,6 +18,7 @@ import { Lookup, type LookupItem } from "../../ui/Lookup";
 import { PhotoStrip } from "../../ui/MediaPicker";
 import { ALLY_FIELD_API } from "../field/fieldApi";
 import { CommonSection, PointFields, initialStatus, type Common, type CommonSpec, type DataStatus, type V2Field } from "../field/SurveyV2";
+import { SuggestionsModal, sugPayload, toSugRow, type SugBase, type SugRow } from "../field/SuggestionsModal";
 import { errorText, useAlly, type Item, type Point, type SurveyFull, type Tech } from "./shared";
 
 type KindSpec = { label: string; point_prefix: string; point_label: string; fields: V2Field[]; materials: string[] };
@@ -77,6 +79,12 @@ export default function AllySurvey() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [sugs, setSugs] = useState<SugRow<SugBase>[] | null>(null);
+  const [sugErr, setSugErr] = useState<string | null>(null);
+  // cada botón que va al servidor muestra que trabaja y no se dispara dos veces (21/10, ítem 25)
+  const [pending, setPending] = useState<null | "sugerir" | "agregar" | "informe">(null);
+  const dRef = useRef<Draft | null>(null);
+  dRef.current = d;
 
   const load = useCallback(() => {
     api<SurveyFull>(ALLY_FIELD_API.survey(sid)).then((x) => { setS(x); setD(toDraft(x)); setDirty(false); }).catch((e) => setErr(errorText(e)));
@@ -147,6 +155,47 @@ export default function AllySurvey() {
     catch (e) { toast(e instanceof Error ? e.message : "No se pudo enviar", "bad"); }
     finally { setBusy(false); }
   };
+  const errText = (e: unknown) => (e instanceof Error ? e.message : "Error de conexión");
+  /* «Sugerir materiales»: lo pendiente se sube antes (la sugerencia lee los puntos guardados). */
+  const sugerir = async () => {
+    if (pending) return;
+    setPending("sugerir");
+    try {
+      if (dirty && !(await guardar(true))) return;
+      const list = await api<SugBase[]>(ALLY_FIELD_API.suggest(sid), { method: "POST" });
+      if (!list.length) { toast("No hay materiales habituales para este tipo de solución: agregue puntos o cárguelos a mano.", "bad"); return; }
+      setSugErr(null);
+      setSugs(list.map((x) => toSugRow(x)));
+    } catch (e) { toast(`No se pudieron sugerir materiales: ${errText(e)}. Pruebe de nuevo.`, "bad"); }
+    finally { setPending(null); }
+  };
+  /* Agregar lo elegido: en la misma fila que el autoguardado (un guardado con la lista vieja no lo borra) y la lista
+     nueva sale de la respuesta del servidor. */
+  const agregarSugs = async () => {
+    if (!sugs || pending) return;
+    const json = sugPayload(sugs);
+    if (!json.length) { setSugs(null); return; }
+    setPending("agregar");
+    setSugErr(null);
+    try {
+      // lo pendiente tiene que llegar antes: si no, exclusive lo daría por guardado y se perdería al recargar
+      if (!(await auto.flush())) throw new Error("No se pudo guardar lo pendiente del levantamiento; revise el aviso de guardado");
+      const cur = dRef.current;
+      const go = () => api<{ added: number; summed: number; survey: SurveyFull }>(ALLY_FIELD_API.suggestApply(sid), { method: "POST", json });
+      const r = cur ? await auto.exclusive(cur, go) : await go();
+      auto.fromServer(); setS(r.survey); setD(toDraft(r.survey)); setDirty(false); setSugs(null);
+      toast(`${r.added} agregado${r.added !== 1 ? "s" : ""}${r.summed ? ` · ${r.summed} con cantidad sumada` : ""}. Nada de lo anterior se borró.`);
+    } catch (e) { setSugErr(`No se agregaron: ${errText(e)}. El levantamiento no cambió; pruebe de nuevo.`); }
+    finally { setPending(null); }
+  };
+  /* Informe preliminar sin montos: la pestaña dice que se está preparando y antes se sube lo pendiente. */
+  const informe = () => {
+    if (pending) return;
+    setPending("informe");
+    openFile(ALLY_FIELD_API.report(sid), ro ? undefined : () => auto.flush())
+      .catch((e) => toast(`No se pudo armar el informe preliminar: ${errText(e)}. Pruebe de nuevo.`, "bad"))
+      .finally(() => setPending(null));
+  };
   const resolver = async (oid: number) => {
     const resolution = window.prompt("¿Qué se corrigió? (opcional)") ?? "";
     try { const x = await api<SurveyFull>(ALLY_FIELD_API.resolveObs(sid, oid), { method: "POST", json: { resolution } }); setS(x); } catch (e) { toast(e instanceof Error ? e.message : "No se pudo marcar", "bad"); }
@@ -158,6 +207,8 @@ export default function AllySurvey() {
         <div><div className="meta">{s.number} · {s.kind_label}{s.opportunity ? ` · ${s.opportunity.number} ${s.opportunity.title}` : ""}</div><h1 className="h1">{s.customer || "Levantamiento"}</h1></div>
         <div className="al-actions">
           {s.pending_review ? <span className="badge badge--info">{s.pending_review.label}</span> : <span className="badge badge--muted">{s.review_label || s.status}</span>}
+          <button className="btn btn--ghost" disabled={!!pending} aria-busy={pending === "informe"} title="PDF sin precios ni costos" onClick={informe}><Icon d={I.reports} />{pending === "informe" ? "Preparando informe…" : "Informe preliminar"}</button>
+          {!ro && <button className="btn btn--ghost" disabled={busy || !!pending} aria-busy={pending === "sugerir"} title="Propone equipos y materiales según los puntos; usted elige cuáles agregar" onClick={sugerir}>{pending === "sugerir" ? "Sugiriendo…" : "Sugerir materiales"}</button>}
           {!ro && <button className="btn btn--soft" disabled={busy || !dirty} onClick={() => guardar()}><Icon d={I.check} />Guardar</button>}
           {!ro && <button className="btn btn--crimson" disabled={busy} onClick={enviar}><Icon d={I.arrow} />Enviar a revisión</button>}
         </div>
@@ -258,6 +309,19 @@ export default function AllySurvey() {
         {!ro && <button type="button" className="btn btn--soft btn--sm" style={{ alignSelf: "flex-start" }} onClick={() => up({ items: [...d.items, { product_id: null, name: "", quantity: "1", unit: "Unid", note: null, kind: null }] })}><Icon d={I.plus} size={14} />Agregar material</button>}
       </div>
       {ro && !readOnly && s.pending_review && <p className="muted" style={{ marginTop: 12 }}>Está en revisión de Crimson: si lo devuelven con observaciones, se vuelve a poder editar.</p>}
+      {!readOnly && !s.can_edit && !s.pending_review && !["cotizado", "cerrado"].includes(s.status) && <p className="muted" style={{ marginTop: 12 }}>Este levantamiento lo lleva Crimson: usted lo ve porque alguien de su empresa participó en la visita.</p>}
+      {sugs && (
+        <SuggestionsModal
+          rows={sugs}
+          onRows={setSugs}
+          onApply={agregarSugs}
+          onClose={() => { setSugs(null); setSugErr(null); }}
+          busy={pending === "agregar"}
+          error={sugErr}
+          solutionLabel={s.kind_label}
+          noPoints={d.points.length === 0}
+        />
+      )}
     </>
   );
 }

@@ -1,0 +1,17 @@
+/* «Materiales y equipos sugeridos» (SuggestionsModal.tsx): lista compacta, sin fotos (21/10, ítem 24).
+   .sug-flow repite lo de survey-summary.css: el portal de aliados no carga esa hoja. */
+.sug-flow { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.sug-flow li { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px; background: var(--bg-2); color: var(--text-2); }
+.sug-flow b { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--surface); color: var(--text); font-size: 11.5px; }
+.sug-note { font-size: 13px; margin: 0; }
+.sug-note--warn { background: var(--warn-soft, rgba(230, 160, 40, .12)); border: 1px solid var(--warn); border-radius: 10px; padding: 10px 14px; }
+.sug-note--bad { background: var(--bad-soft, rgba(226, 35, 58, .1)); border: 1px solid var(--bad); border-radius: 10px; padding: 10px 14px; color: var(--bad); }
+.sug-tools { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.sug-table td { padding-top: 6px; padding-bottom: 6px; vertical-align: top; }
+.sug-table td b { font-size: 13px; }
+.sug-table .badge { margin-left: 6px; }
+.sug-table img { display: none; } /* nada de fotos en esta lista: ocupan mucho espacio */
+.sug-why { font-size: 12px; line-height: 1.35; }
+.sug-why .sug__warn { color: var(--warn); margin-top: 4px; }
+.sug-why .sug__alts { margin: 4px 0 0; padding-left: 16px; font-family: var(--mono); font-size: 11.5px; }
+.sug-table .reco-sum { margin-top: 3px; }

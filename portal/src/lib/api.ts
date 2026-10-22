@@ -75,9 +75,12 @@ export async function downloadFile(path: string, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
-export async function openFile(path: string) {
+export async function openFile(path: string, before?: () => Promise<unknown>) {
   const win = window.open("about:blank", "_blank"); // abrir antes del await evita el bloqueador de ventanas
+  // mientras el servidor arma el PDF la pestaña dice que está trabajando (antes quedaba en blanco: 21/10, ítem 25)
+  try { if (win) { win.document.title = "Preparando…"; win.document.body.innerHTML = '<p style="font:15px system-ui,sans-serif;color:#5a5560;padding:32px">Preparando el documento…</p>'; } } catch { /* otra pestaña ya navegó */ }
   try {
+    if (before) await before(); // p. ej. subir lo pendiente del formulario antes de armar el informe
     const blob = await fetchBlob(path);
     const url = URL.createObjectURL(blob);
     if (win) win.location.href = url; else window.location.href = url;

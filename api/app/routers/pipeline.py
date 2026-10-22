@@ -103,6 +103,9 @@ def _out(db: Session, o: Opportunity) -> dict:
         "project_id": o.project_id,
         "created_at": o.created_at,
         "weighted": (d(o.amount) * o.probability / 100).quantize(Decimal("0.01")),
+        # propuesta desde el portal de aliados (item 16): la lista y el embudo la marcan mientras espera aprobacion
+        "ally_approval": o.ally_approval,
+        "ally_proposed_by": o.ally_proposed_by,
     }
 
 
@@ -351,8 +354,16 @@ def update(oid: int, data: OpportunityIn, p: Principal = Depends(require("crm_pi
     partes = _parties_text(db, o)
     # el responsable no se cambia por accidente al editar: sin dato queda el que estaba, y cambiarlo pasa por _reassign
     new_owner = data.owner_id
-    for k, v in data.model_dump(exclude={"owner_id"}).items():
+    # lo que el cuerpo no trae se conserva: el formulario no manda el contacto (el cliente que escribio un aliado al
+    # proponerla) ni el motivo de perdida (el del rechazo lo ve el aliado); el autoguardado no los debe borrar
+    for k, v in data.model_dump(exclude={"owner_id"}, exclude_unset=True).items():
         setattr(o, k, v)
+    if before == "perdida" and o.status != "perdida" and "lost_reason" not in data.model_fields_set:
+        o.lost_reason = None  # reabierta: el motivo viejo ya no aplica
+    if o.customer_id or o.end_customer_id:
+        from .ally_proposals import heredar_cliente
+
+        heredar_cliente(db, o)
     if _parties_text(db, o) != partes:
         _log(o, p.user.full_name, f"Partes: {_parties_text(db, o)}")
     if o.status != before:

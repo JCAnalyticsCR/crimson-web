@@ -18,6 +18,8 @@ export type AllyRow = {
 type PlanDefault = { amount: string | number | null; currency: "CRC" | "USD"; mode: "fija" | "por_usuario" };
 type Config = {
   markup_pct: string | null; plan_product_id: number | null; assets_scope: "proyectos" | "clientes";
+  /* pregunta abierta 8 (21/10): la oportunidad que propone un aliado espera la aprobación de Crimson */
+  opportunity_approval?: boolean;
   /* plan 1.4: servicio facturado y mensualidad por defecto de los planes nuevos */
   plan_product?: { id: number; code: string; name: string; cabys_code: string | null } | null; plan_default?: PlanDefault;
 };
@@ -117,6 +119,14 @@ function Ajustes() {
             <option value="clientes">De clientes en común</option>
           </select>
         </Field>
+        {allows("aliados.editar") && (
+          <Field label="Oportunidades que propone un aliado" hint="Si se apaga, quedan aprobadas al crearlas y el aliado puede levantar de una vez.">
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+              <input type="checkbox" checked={c.opportunity_approval !== false} onChange={(e) => guardar({ opportunity_approval: e.target.checked })} />
+              Esperan la aprobación de Crimson
+            </label>
+          </Field>
+        )}
       </div>
     </Card>
   );

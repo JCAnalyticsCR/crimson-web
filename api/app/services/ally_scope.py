@@ -6,7 +6,9 @@ Nada interno gana filtros "en comun": los endpoints internos siguen cerrados al 
 En comun =
 - oportunidades: con una participacion de ESTA empresa visible para el aliado (visible_to_ally);
 - proyectos: los de esas participaciones (la participacion queda ligada al proyecto al crearlo);
-- levantamientos, ordenes y tickets: los asignados explicitamente a la empresa (ally_company_id);
+- levantamientos: los asignados a la empresa (ally_company_id) y los de Crimson en una oportunidad en comun hechos
+  por alguien de su equipo (tecnico, quien lo envio o quien visito; esos solo los edita si el tecnico es suyo);
+- ordenes y tickets: los asignados explicitamente a la empresa (ally_company_id);
 - contratos: asignados a la empresa o de un proyecto en comun (17:27 "lo que ya hemos instalado en comun");
 - activos: de proyectos en comun (por defecto) o de clientes en comun (tenant.settings.ally_assets_scope).
 El tecnico del aliado (tecnico_aliado) solo ve lo suyo de HOY: nada de oportunidades, proyectos, contratos ni activos
@@ -49,6 +51,7 @@ class AllyScope:
         self.today = local_date(datetime.now(UTC))
         self.assets_mode = (p.tenant.settings or {}).get("ally_assets_scope", "proyectos")
         self._team: set[int] | None = None
+        self._shared: list[int] | None = None
 
     # ---------- subconsultas (Select), nunca listas en memoria ----------
     def participations(self):
@@ -112,11 +115,48 @@ class AllyScope:
             return [false()]
         return [Project.tenant_id == self.tid, Project.id.in_(self.project_ids()), live(Project)]
 
+    def shared_survey_ids(self) -> list[int]:
+        """Levantamientos de Crimson (sin empresa asignada) en oportunidades en comun que hizo alguien de SU equipo: el
+        tecnico a cargo, quien lo envio a revision o uno de los que hicieron la visita. visit_tech_ids es JSON: se cruza
+        en Python sobre los pocos levantamientos de esas oportunidades.
+
+        Diagnostico del item 18 (reunion 21/10, LEV-2026-0011): el criterio anterior solo contaba
+        Survey.ally_company_id, y un levantamiento creado desde el panel de Crimson nace sin empresa aunque el tecnico
+        sea del aliado; por eso el portal decia "Todavia no hay levantamientos de su empresa". Ahora cuenta tambien la
+        gente del equipo, que es quien tiene TenantUser.ally_company_id = la empresa (team_user_ids), sea cual sea su
+        rol. Depende de ese dato: si el tecnico existe como usuario interno SIN empresa aliada (item 20: estaba con rol
+        "Tecnico instalador"), no hay nada que lo ligue al aliado y el levantamiento sigue sin salirle. Hay que pasar
+        su membresia a la empresa aliada (Administracion -> Aliados) y entonces aparece sin tocar el levantamiento."""
+        if self._shared is None:
+            team = self.team_user_ids()
+            out: list[int] = []
+            if team:
+                opps = select(Opportunity.id).where(Opportunity.tenant_id == self.tid, Opportunity.id.in_(self.opp_ids()), live(Opportunity))
+                rows = self.db.execute(
+                    select(Survey.id, Survey.technician_id, Survey.sent_by, Survey.visit_tech_ids).where(
+                        Survey.tenant_id == self.tid, Survey.ally_company_id.is_(None), Survey.opportunity_id.in_(opps)
+                    )
+                )
+                for sid, tec, sent, visit in rows:
+                    vis = {int(x) for x in (visit or []) if str(x).isdigit()}
+                    if tec in team or sent in team or vis & team:
+                        out.append(sid)
+            self._shared = out
+        return self._shared
+
     def surveys(self) -> list:
-        conds = [Survey.tenant_id == self.tid, Survey.ally_company_id == self.cid, live(Survey)]
+        # de la empresa = asignado a ella, o de Crimson en una oportunidad en comun y hecho por su gente (item 18)
+        conds = [Survey.tenant_id == self.tid, live(Survey), or_(Survey.ally_company_id == self.cid, Survey.id.in_(self.shared_survey_ids()))]
         if self.is_tech:
             conds += [Survey.technician_id == self.uid, or_(Survey.status == "borrador", Survey.review_status == "devuelto")]
         return conds
+
+    def own_surveys(self) -> list:
+        """Los que la empresa puede cambiar (routers/ally_portal._survey_is_ours): asignados a ella o con el tecnico a
+        cargo de su equipo. Para lo "por hacer" y "devueltos" del inicio y de Mi dia: uno de Crimson que su gente solo
+        visito o envio se ve, pero no es trabajo pendiente del aliado."""
+        team = list(self.team_user_ids())
+        return [*self.surveys(), or_(Survey.ally_company_id == self.cid, Survey.technician_id.in_(team))]
 
     def work_orders(self) -> list:
         """El tecnico ademas filtra con is_today_for_tech en Python (sin limit antes del filtro)."""

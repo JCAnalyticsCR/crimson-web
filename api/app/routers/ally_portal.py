@@ -25,7 +25,7 @@ import secrets
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Response, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 from sqlalchemy import func, or_, select
@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from ..core.ally import AllyCtx, get_ally, need
 from ..core.config import settings as cfg
 from ..core.db import get_db
-from ..core.ratelimit import ally_assign_limiter, ally_invite_limiter, ally_media_limiter, ally_notify_limiter, ally_ticket_limiter
+from ..core.ratelimit import SlidingWindow, ally_assign_limiter, ally_invite_limiter, ally_media_limiter, ally_notify_limiter, ally_ticket_limiter
 from ..models import (
     AllyCostRequest,
     AllyParticipation,
@@ -74,7 +74,13 @@ from .media import MAX_IMAGE, MAX_PDF, public_url, sniff
 router = APIRouter(prefix="/aliado", tags=["portal de aliados"], dependencies=[Depends(get_ally)])
 
 OPEN_TICKET = slasvc.ABIERTOS
+# informe preliminar del levantamiento (item 19): arma un PDF con todas las fotos, tope por persona. Aqui y no en
+# core/ratelimit.py para no tocar un archivo compartido
+ally_report_limiter = SlidingWindow(limit=30, seconds=600)
 OPP_CLOSED = ("ganada", "perdida")
+# oportunidad propuesta por el aliado (item 16): mientras Crimson no la aprueba no se levanta sobre ella
+APPROVAL_BLOCKS = ("pendiente", "rechazada")
+APPROVAL_LABEL = {"pendiente": "Pendiente de aprobación de Crimson", "aprobada": "Aprobada por Crimson", "rechazada": "No aprobada por Crimson"}
 MAX_PHOTOS = 8
 TICKET_KINDS = ("soporte", "garantia", "mantenimiento", "visita", "consulta")
 # cancelar es de Crimson. pause = "Terminar jornada" (cierra el tiempo corriendo de SU equipo)
@@ -235,6 +241,12 @@ def _opp_out(db: Session, ctx: AllyCtx, o: Opportunity, full: bool = False) -> d
         "pending_requests": sum(1 for a in parts for r in a.requests if r.status == "solicitado"),
         "project": {"id": pr.id, "number": pr.number, "status": pr.status} if pr else None,
         "created_at": o.created_at,
+        # propuesta por un aliado (item 16): solo la propia; de otra empresa no dice nada
+        "approval": o.ally_approval if o.ally_proposed_by == ctx.company.id else None,
+        "approval_label": APPROVAL_LABEL.get(o.ally_approval) if o.ally_proposed_by == ctx.company.id else None,
+        "proposed_by_me": o.ally_proposed_by == ctx.company.id,
+        # el motivo con el que Crimson no la aprobo (lo pidio como "lo ve el aliado"): solo a quien la propuso
+        "approval_reason": o.lost_reason if o.ally_proposed_by == ctx.company.id and o.ally_approval == "rechazada" else None,
     }
     if full:
         contact = o.contact or {}
@@ -243,7 +255,12 @@ def _opp_out(db: Session, ctx: AllyCtx, o: Opportunity, full: bool = False) -> d
             {"id": a.id, "role": a.role, "scope": a.scope, "scope_lines": a.scope_lines or [], "contacts": a.contacts or {}} for a in parts
         ]
         out["requests"] = _requests_of(db, ctx, parts)
-        out["can_survey"] = (o.kind or "proyecto") != "venta" and o.status not in OPP_CLOSED and ctx.p.can("aliado", "levantamientos_crear")
+        out["can_survey"] = (
+            (o.kind or "proyecto") != "venta"
+            and o.status not in OPP_CLOSED
+            and o.ally_approval not in APPROVAL_BLOCKS
+            and ctx.p.can("aliado", "levantamientos_crear")
+        )
         out.update(_opp_extra(db, ctx, o, pr))
     return out
 
@@ -394,8 +411,14 @@ def _who_for_ally(db: Session, ctx: AllyCtx, uid: int | None) -> str | None:
     return "Crimson"
 
 
+def _survey_is_ours(ctx: AllyCtx, s: Survey) -> bool:
+    """Lo puede cambiar: asignado a su empresa, o de Crimson en comun con el tecnico a cargo de su equipo (item 18). Uno
+    de Crimson donde su gente solo visito o lo envio lo ve, pero no lo cambia."""
+    return s.ally_company_id == ctx.company.id or s.technician_id in ctx.scope.team_user_ids()
+
+
 def _survey_can_edit(ctx: AllyCtx, s: Survey) -> bool:
-    if ctx.preview_by is not None or s.status in ("cotizado", "cerrado"):
+    if ctx.preview_by is not None or s.status in ("cotizado", "cerrado") or not _survey_is_ours(ctx, s):
         return False
     return not (s.status == "enviado" and s.review_status == "pendiente")
 
@@ -406,6 +429,9 @@ def _survey_ally_out(db: Session, ctx: AllyCtx, s: Survey, full: bool = False) -
     team = ctx.scope.team_user_ids()
     out["photos"] = _sign(ctx, s.photos or [])
     out["sent_by"] = _who_for_ally(db, ctx, s.sent_by)
+    if s.technician_id not in team:
+        # uno de Crimson que el aliado solo ve (item 18): de su tecnico, el nombre de pila y sin su id interno
+        out["technician"], out["technician_id"] = _first(out.get("technician")), None
     out["visit_tech_ids"] = [i for i in raw.get("visit_tech_ids") or [] if i in team]
     out["visit_techs"] = [n for n in (_user_name(db, i) for i in out["visit_tech_ids"]) if n]
     obs = sorted(s.observations, key=lambda o: (o.resolved_at is not None, -o.review_round, o.id))
@@ -592,7 +618,8 @@ def _tech_orders(db: Session, ctx: AllyCtx, uid_filter: int | None = None) -> li
 def _my_day(db: Session, ctx: AllyCtx) -> dict:
     orders = _tech_orders(db, ctx)
     names = fw._names(db, orders, ctx.p.tenant.id) if orders else {}
-    surveys_q = select(Survey).where(*ctx.scope.surveys())
+    # solo lo que es trabajo suyo: uno de Crimson que su gente solo visito no es pendiente del aliado (item 18)
+    surveys_q = select(Survey).where(*ctx.scope.own_surveys())
     if not ctx.scope.is_tech:
         surveys_q = surveys_q.where(or_(Survey.status == "borrador", Survey.review_status == "devuelto"))
     surveys = db.scalars(surveys_q.order_by(Survey.id.desc()).limit(50)).all()
@@ -706,9 +733,9 @@ def inicio(ctx: AllyCtx = Depends(need("ver")), db: Session = Depends(get_db)):
             "ot_hoy_equipo": len(_tech_orders(db, ctx)),
             "tickets_abiertos": len(tickets),
             "tickets_fuera_de_tiempo": sum(1 for t in tickets if slasvc.fuera_de_tiempo(t, ahora)),
-            "levantamientos_devueltos": db.scalar(select(func.count()).select_from(Survey).where(*sc.surveys(), Survey.review_status == "devuelto")) or 0,
-            # lo que el aliado puede hacer ya: levantamientos de su empresa todavia sin enviar a Crimson
-            "levantamientos_por_hacer": db.scalar(select(func.count()).select_from(Survey).where(*sc.surveys(), Survey.status == "borrador")) or 0,
+            "levantamientos_devueltos": db.scalar(select(func.count()).select_from(Survey).where(*sc.own_surveys(), Survey.review_status == "devuelto")) or 0,
+            # lo que el aliado puede hacer ya: levantamientos suyos (que puede cambiar) todavia sin enviar a Crimson
+            "levantamientos_por_hacer": db.scalar(select(func.count()).select_from(Survey).where(*sc.own_surveys(), Survey.status == "borrador")) or 0,
             "mantenimientos_30_dias": sum(1 for k in contratos if k.next_date and k.next_date <= hoy + timedelta(days=30)),
         },
         "precios_pedidos": [_request_out(db, ctx, r) for r in sorted(pend, key=lambda r: (r.due_date is None, r.due_date or date.max, r.id))[:10]],
@@ -758,6 +785,106 @@ def oportunidades(
 @router.get("/oportunidades/{oid}")
 def oportunidad(oid: int, ctx: AllyCtx = Depends(need("oportunidades")), db: Session = Depends(get_db)):
     o = ctx.scope.one(Opportunity, oid, ctx.scope.opportunities(), "Oportunidad")
+    return _opp_out(db, ctx, o, full=True)
+
+
+class AllyContactIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str | None = Field(None, max_length=160)
+    phone: str | None = Field(None, max_length=40)
+    email: EmailStr | None = None
+
+
+class AllyOppIn(BaseModel):
+    """Oportunidad que propone el aliado (item 16). Sin cliente de Crimson (no ve la cartera): el cliente va como
+    contacto y Crimson lo liga al aprobarla. Sin montos."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    title: str = Field(min_length=3, max_length=200)
+    kind: str = Field("proyecto", pattern="^(proyecto|venta)$")
+    solution: str | None = Field(None, pattern="^(cctv|redes|acceso|asistencia|ups|cableado|anpr|otro)$")
+    site: str | None = Field(None, max_length=300)
+    customer_name: str = Field(min_length=2, max_length=160)  # quien recibe la solucion
+    contact: AllyContactIn = Field(default_factory=AllyContactIn)
+    role: str = Field("subcontratista", pattern="^(referido|subcontratista|suministro|configuracion|software)$")
+    description: str | None = Field(None, max_length=4000)
+
+
+def approval_required(tenant) -> bool:
+    """Pregunta abierta 8 (21/10): la oportunidad que crea un aliado espera la aprobacion de Crimson. Es el default;
+    Administracion -> Aliados -> Ajustes la puede apagar (PUT /allies/config opportunity_approval = false, que guarda
+    tenant.settings["ally_opportunity_approval"]): entonces queda aprobada al crearla."""
+    return (tenant.settings or {}).get("ally_opportunity_approval", True) is not False
+
+
+@router.post("/oportunidades", status_code=201)
+def oportunidad_crear(data: AllyOppIn, ctx: AllyCtx = Depends(need("oportunidades")), db: Session = Depends(get_db)):
+    """El aliado propone una oportunidad "por si a Crimson se le pasa" (21/10, 1:37). Nace con su participacion visible
+    (su papel), sin responsable de Crimson y, por defecto, pendiente de aprobacion: al admin le llega el aviso y la
+    aprueba o la rechaza desde la oportunidad. Mientras tanto el aliado la ve con ese estado y no puede levantar."""
+    from ..models import AllyParticipation as Part
+    from .pipeline import _log
+
+    _tope_avisos(ctx)
+    t = ctx.p.tenant
+    pendiente = approval_required(t)
+    number, _ = next_number(db, t.id, "OPO")
+    contacto = {k: v for k, v in {"name": data.customer_name, "phone": data.contact.phone, "email": data.contact.email}.items() if v}
+    if data.contact.name and data.contact.name != data.customer_name:
+        contacto["contact_name"] = data.contact.name
+    o = Opportunity(
+        tenant_id=t.id,
+        number=number,
+        title=data.title,
+        kind=data.kind,
+        solution=data.solution,
+        site=data.site,
+        contact=contacto,
+        source="aliado",
+        status="nuevo",
+        amount=0,
+        owner_id=None,
+        created_by=ctx.p.user.id,
+        ally_approval="pendiente" if pendiente else "aprobada",
+        ally_proposed_by=ctx.company.id,
+    )
+    db.add(o)
+    db.flush()
+    db.add(
+        Part(
+            tenant_id=t.id,
+            opportunity_id=o.id,
+            ally_company_id=ctx.company.id,
+            name=ctx.company.name,
+            role=data.role,
+            visible_to_ally=True,
+            contacts={},
+            scope_lines=[],
+            created_by=ctx.p.user.id,
+        )
+    )
+    quien = f"{ctx.p.user.full_name} ({ctx.company.name})"
+    _log(o, quien, f"propuso la oportunidad desde el portal de aliados{': ' + data.description if data.description else ''}"[:1500])
+    audit(db, t.id, ctx.p.user.id, "ally_propose", "opportunity", o.id, {"ally_company_id": ctx.company.id, "pendiente": pendiente}, ip=ctx.p.ip)
+    base = cfg.public_base_url.rstrip("/")
+    esc = html.escape
+    notify_roles(
+        db,
+        t,
+        ("admin",),
+        f"Oportunidad propuesta por {ctx.company.name}: {number}" + (" · pendiente de su aprobación" if pendiente else ""),
+        f"<p>{esc(quien)} propuso la oportunidad <b>{esc(number)} · {esc(data.title)}</b> desde el portal de aliados.</p>"
+        f"<p>Cliente: {esc(data.customer_name)}<br>Sitio: {esc(data.site or '—')}<br>Papel del aliado: {esc(data.role)}</p>"
+        + (f"<p>{esc(data.description)}</p>" if data.description else "")
+        + ("<p>Revísela y apruébela o recházela desde la oportunidad. Mientras tanto el aliado la ve como pendiente.</p>" if pendiente else "")
+        + f'<p><a href="{base}/oportunidades?id={o.id}">Abrir la oportunidad</a></p>',
+        "opportunity",
+        o.id,
+        like=False,
+    )
+    db.commit()
     return _opp_out(db, ctx, o, full=True)
 
 
@@ -1074,10 +1201,23 @@ def levantamiento_crear(data: AllySurveyIn, ctx: AllyCtx = Depends(need("levanta
         o = ctx.scope.one(Opportunity, data.opportunity_id, ctx.scope.opportunities(), "Oportunidad")
         if o.status in OPP_CLOSED:
             raise HTTPException(409, "La oportunidad ya está cerrada")
+        if o.ally_approval in APPROVAL_BLOCKS:
+            raise HTTPException(409, "La oportunidad espera la aprobación de Crimson: el levantamiento se hace cuando la aprueben")
     tec = data.technician_id or ctx.p.user.id
+    if tec != ctx.p.user.id:
+        # «¿Quién lo hace?»: dejarselo a otro de su equipo es asignar (y le escribe "Tiene un trabajo nuevo")
+        if not ctx.p.can("aliado", "asignar"):
+            raise HTTPException(403, "Asignar el levantamiento a otro técnico lo hace el aliado")
+        _tope_asignar(ctx)
     _team_member(ctx, tec)
     _survey_photos_check(db, ctx, data, None)
     customer_id = o.end_customer_id or o.customer_id  # nunca del cuerpo
+    # sin sitio ni contacto en el cuerpo, los de la oportunidad (la que propuso el aliado trae el cliente como contacto)
+    if not (data.site or "").strip() and o.site:
+        data.site = o.site
+    if not data.contact and o.contact:
+        oc = o.contact or {}
+        data.contact = {k: v for k, v in {"name": oc.get("contact_name") or oc.get("name"), "phone": oc.get("phone"), "email": oc.get("email")}.items() if v}
     number, _ = next_number(db, ctx.p.tenant.id, "LEV")
     s = Survey(tenant_id=ctx.p.tenant.id, number=number, technician_id=tec, template_version=fw.TEMPLATE_VERSION, ally_company_id=ctx.company.id)
     fw.apply_survey_payload(db, s, _to_survey_in(data, customer_id), ctx.p.tenant.id, valid_user_ids=ctx.scope.team_user_ids())
@@ -1087,12 +1227,24 @@ def levantamiento_crear(data: AllySurveyIn, ctx: AllyCtx = Depends(need("levanta
     if o.status in fw.ESPERA_LEVANTAMIENTO:
         o.status = "levantamiento"
     audit(db, ctx.p.tenant.id, ctx.p.user.id, "create", "survey", s.id, {"aliado": ctx.company.id}, ip=ctx.p.ip)
+    if tec != ctx.p.user.id:
+        # el tecnico elegido al crearlo se entera como en una reasignacion (la pista del alta lo promete)
+        _avisar_reasignacion(db, ctx, s, None)
     db.commit()
     return _survey_ally_out(db, ctx, s, full=True)
 
 
 def _my_survey(db: Session, ctx: AllyCtx, sid: int) -> Survey:
     return ctx.scope.one(Survey, sid, ctx.scope.surveys(), "Levantamiento")
+
+
+def _my_survey_rw(db: Session, ctx: AllyCtx, sid: int) -> Survey:
+    """El levantamiento para cambiarlo (guardar, enviar, observaciones, asignar, sugerencias): ademas de verlo, tiene que
+    ser suyo (_survey_is_ours)."""
+    s = _my_survey(db, ctx, sid)
+    if not _survey_is_ours(ctx, s):
+        raise HTTPException(409, "Este levantamiento lo lleva Crimson: puede verlo, pero no cambiarlo")
+    return s
 
 
 @router.get("/levantamientos/{sid}")
@@ -1102,7 +1254,7 @@ def levantamiento(sid: int, ctx: AllyCtx = Depends(need("levantamientos")), db: 
 
 @router.put("/levantamientos/{sid}")
 def levantamiento_guardar(sid: int, data: AllySurveyEditIn, ctx: AllyCtx = Depends(need("levantamientos")), db: Session = Depends(get_db)):
-    s = _my_survey(db, ctx, sid)
+    s = _my_survey_rw(db, ctx, sid)
     if s.status in ("cotizado", "cerrado"):
         raise HTTPException(409, "El levantamiento ya fue cotizado")
     if s.status == "enviado" and s.review_status == "pendiente":
@@ -1143,10 +1295,83 @@ def levantamiento_sistema(sid: int, ctx: AllyCtx = Depends(need("levantamientos"
     return out
 
 
+# Lo que el aliado ve de cada sugerencia de materiales: que, cuanto y por que. Nunca candidatos de catalogo o de
+# proveedor (traen proveedor, existencias y, segun el rol, costo o precio): "sin precios" (item 19)
+ALLY_SUGGEST_KEYS = (
+    "name", "quantity", "unit", "kind", "reason", "action", "existing_quantity", "add_quantity", "item_id", "matched_name",
+    "missing", "estimated", "warnings", "alternatives", "reference",
+)  # fmt: skip
+
+
+@router.post("/levantamientos/{sid}/sugerir")
+def levantamiento_sugerir(sid: int, ctx: AllyCtx = Depends(need("levantamientos")), db: Session = Depends(get_db)):
+    """«Sugerir materiales» del aliado (21/10, 1:50: "el aliado deberia poderlo hacer, sin precios"): la misma sugerencia
+    que el levantamiento interno a partir de sus puntos, sin equipos recomendados, proveedores, costos ni precios. No
+    cambia nada: el aliado elige y agrega con /sugerir/agregar."""
+    from ..services.survey_specs import suggest_materials
+
+    s = _my_survey_rw(db, ctx, sid)
+    lines = suggest_materials(s.kind, list(s.points), list(s.items), common=s.common)
+    return [{k: x[k] for k in ALLY_SUGGEST_KEYS if k in x} for x in lines]
+
+
+class AllySuggestionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    quantity: Decimal = Field(gt=0, le=100000)
+    unit: str = Field("Unid", max_length=10)
+    kind: str | None = Field(None, pattern="^(equipo|material|servicio)$")
+    item_id: int | None = None
+
+
+@router.post("/levantamientos/{sid}/sugerir/agregar")
+def levantamiento_sugerir_agregar(
+    sid: int, data: list[AllySuggestionIn] = Body(..., max_length=200), ctx: AllyCtx = Depends(need("levantamientos")), db: Session = Depends(get_db)
+):
+    """Agrega o suma las sugerencias elegidas (como el interno: nunca borra ni duplica). Solo en lo que puede editar.
+    Como el guardado (levantamiento_guardar): queda en la bitacora y, si ya estaba aprobado, vuelve a revision."""
+    from ..services import bitacora
+
+    s = _my_survey_rw(db, ctx, sid)
+    if not _survey_can_edit(ctx, s):
+        raise HTTPException(409, "Está en revisión de Crimson" if s.status == "enviado" else "El levantamiento ya fue cotizado")
+    antes = bitacora.survey_state(s)
+    added, summed = fw.apply_suggestions(s, [fw.SuggestionIn(**x.model_dump()) for x in data])
+    audit(db, ctx.p.tenant.id, ctx.p.user.id, "suggest_apply", "survey", s.id, {"agregados": added, "sumados": summed, "aliado": ctx.company.id}, ip=ctx.p.ip)
+    if added or summed:
+        bitacora.audit_survey_update(db, ctx.p, s, antes, company=ctx.company.name)
+        if s.review_status == "aprobado" and not s.quote_id:
+            s.review_status = "pendiente"  # lo aprobado ya no es lo mismo: Crimson lo vuelve a revisar
+            audit(db, ctx.p.tenant.id, ctx.p.user.id, "review_reset", "survey", s.id, {"motivo": "sugerencias del aliado tras aprobarlo"}, ip=ctx.p.ip)
+    db.commit()
+    return {"added": added, "summed": summed, "survey": _survey_ally_out(db, ctx, s, full=True)}
+
+
+@router.get("/levantamientos/{sid}/informe.pdf")
+def levantamiento_informe(sid: int, ctx: AllyCtx = Depends(need("levantamientos")), db: Session = Depends(get_db)):
+    """Informe preliminar del levantamiento para el aliado: el mismo de Crimson, que por regla no lleva ni un monto (ni
+    costos, ni precios, ni tarifas: services/survey_report.py). Sin WeasyPrint, el HTML imprimible (X-PDF-Fallback)."""
+    from fastapi.responses import HTMLResponse
+
+    from ..services.survey_report import render_survey_html
+
+    s = _my_survey(db, ctx, sid)
+    # cada informe firma y arma todas las fotos (WeasyPrint): tope por persona, como las fotos y los tickets
+    ally_report_limiter.hit(f"{ctx.p.tenant.id}:{ctx.p.user.id}")
+    team = ctx.scope.team_user_ids()
+    # visitantes como en el resto del portal: su equipo con nombre completo; de Crimson, solo el nombre de pila
+    page = render_survey_html(db, s, ctx.p.tenant, visitor_name=lambda uid, name: name if uid in team else _first(name))
+    pdf = render_pdf(page)
+    if pdf is None:
+        return HTMLResponse(page, headers={"X-PDF-Fallback": "html"})
+    return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="Informe-{s.number}.pdf"'})
+
+
 @router.post("/levantamientos/{sid}/enviar")
 def levantamiento_enviar(sid: int, ctx: AllyCtx = Depends(need("levantamientos")), db: Session = Depends(get_db)):
     _tope_avisos(ctx)
-    s = _my_survey(db, ctx, sid)
+    s = _my_survey_rw(db, ctx, sid)
     if s.status == "enviado" and s.review_status == "pendiente":
         # ya esta en la cola de revision: reenviarlo solo volveria a escribirles a los revisores
         raise HTTPException(409, "Ya está en revisión de Crimson")
@@ -1168,7 +1393,7 @@ class ResolveIn(BaseModel):
 def levantamiento_observacion(
     sid: int, obs_id: int, data: ResolveIn | None = None, ctx: AllyCtx = Depends(need("levantamientos")), db: Session = Depends(get_db)
 ):
-    s = _my_survey(db, ctx, sid)
+    s = _my_survey_rw(db, ctx, sid)
     data = data or ResolveIn()
     fw.resolve_observation(db, s, obs_id, ctx.p.user, data.resolution, resolved=data.resolved, ip=ctx.p.ip)
     db.commit()
@@ -1195,7 +1420,7 @@ def _avisar_reasignacion(db: Session, ctx: AllyCtx, s: Survey, antes: int | None
 @router.patch("/levantamientos/{sid}/asignar")
 def levantamiento_asignar(sid: int, data: AssignTechIn, ctx: AllyCtx = Depends(need("asignar")), db: Session = Depends(get_db)):
     _tope_asignar(ctx)
-    s = _my_survey(db, ctx, sid)
+    s = _my_survey_rw(db, ctx, sid)
     if s.status in ("cotizado", "cerrado"):
         raise HTTPException(409, "El levantamiento ya fue cotizado")
     _team_member(ctx, data.technician_id)

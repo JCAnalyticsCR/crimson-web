@@ -10,6 +10,7 @@ import { ArchiveActions } from "../../ui/ArchiveActions";
 import { TrashButton } from "../../ui/TrashButton";
 import { AlliesPanel, PendingCosts, partyLine, type Ally, type PendingCost } from "./OpportunityAllies";
 import { ShareToggle, rawLine, useAllyLog } from "./AllyLogShare";
+import { AllyProposalBanner } from "./AllyProposal";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
 import "./opportunities.css";
 
@@ -20,6 +21,8 @@ export type Opp = {
   next_action: string | null; next_action_date: string | null; lost_reason: string | null; notes: string | null;
   quote_id: number | null; project_id: number | null; weighted: string; created_at: string;
   archived_at?: string | null; trashed_at?: string | null;
+  /* propuesta desde el portal de aliados (ítem 16): mientras espera, la tarjeta y la fila lo dicen */
+  ally_approval?: "pendiente" | "aprobada" | "rechazada" | null; ally_proposed_by?: number | null;
 };
 type Detail = Opp & {
   surveys: { id: number; number: string; kind: string; status: string }[];
@@ -296,6 +299,7 @@ export default function Opportunities() {
           {o.owner && <span className="opp__owner" title={`Responsable: ${o.owner}`}><i aria-hidden>{o.owner_initials}</i>{o.owner.split(" ")[0]}</span>}
         </div>
         <div className="opp__meta"><span className="opp__parties" title={partyLine(o)}>{partyLine(o)}</span><span className="money">{fmtMoney(o.amount, o.currency)}</span></div>
+        {o.ally_approval === "pendiente" && <div className="opp__ally-pend">Propuesta por un aliado · pendiente de aprobación</div>}
         {!!o.ally_pending && <div className="opp__ally-pend">{o.ally_pending === 1 ? "1 costo de aliado pendiente" : `${o.ally_pending} costos de aliados pendientes`}</div>}
         <div className="opp__meta">
           <span>{o.next_action ? `${o.next_action}${o.next_action_date ? ` · ${fmtDate(o.next_action_date)}` : ""}` : "Sin próxima acción"}</span>
@@ -411,7 +415,7 @@ export default function Opportunities() {
                     <td style={{ fontWeight: 600 }}>{o.title}</td>
                     <td><span className={`opp__kind opp__kind--${o.kind}`}>{KIND_SHORT[o.kind] || o.kind}</span></td>
                     <td className="muted">{partyLine(o)}</td>
-                    <td><span className="badge badge--info">{OPP_STATES[o.status] || o.status}</span></td>
+                    <td><span className="badge badge--info">{OPP_STATES[o.status] || o.status}</span>{o.ally_approval === "pendiente" && <> <span className="badge badge--warn" title="Propuesta por un aliado desde su portal">Pendiente de aprobación</span></>}</td>
                     <td className="num money">{fmtMoney(o.amount, o.currency)}</td>
                     <td style={{ fontSize: 13, color: dias !== null && dias < 0 ? "var(--bad)" : undefined }}>{o.next_action ? `${o.next_action}${o.next_action_date ? ` · ${fmtDate(o.next_action_date)}` : ""}` : "—"}</td>
                     <td className="muted">{o.owner || "—"}</td>
@@ -460,6 +464,7 @@ export default function Opportunities() {
             </section>
 
             <div className="opp-main">
+              <AllyProposalBanner key={open.id} oppId={open.id} sellers={meta?.sellers || []} onChange={() => { show(open.id).catch(() => undefined); load(); }} />
               {canEdit && touchOpen && (
                 <Card title="Registrar seguimiento" extra={<button className="btn btn--ghost btn--sm" onClick={() => { if (segAuto.isDirty() && !confirm("¿Descartar lo escrito?")) return; segAuto.discard(); setTouchOpen(false); setTouch(blankTouch); }}>Cancelar</button>}>
                   <Field label="¿Qué pasó?" hint="Llamada, visita, correo… Queda con fecha y tu nombre en la bitácora.">

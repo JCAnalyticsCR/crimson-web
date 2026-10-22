@@ -26,6 +26,10 @@ export type Req = {
 export type OppRow = {
   id: number; number: string; title: string; kind: string; status: string; solution: string | null; customer: string | null; end_customer: string | null;
   site: string | null; crimson_owner: string | null; my_roles: string[]; pending_requests: number; project: { id: number; number: string; status: string } | null; created_at: string;
+  /** propuesta por su empresa (21/10, ítem 16): pendiente | aprobada | rechazada; null si la abrió Crimson */
+  approval?: "pendiente" | "aprobada" | "rechazada" | null; approval_label?: string | null; proposed_by_me?: boolean;
+  /** el motivo con el que Crimson no la aprobó (solo en la que propuso su empresa) */
+  approval_reason?: string | null;
 };
 export type Contact = { name?: string | null; email?: string | null; phone?: string | null };
 /** Reunión 2, pedido 17: la ejecución del proyecto en común. Las OT de su equipo se abren (id); las de Crimson, solo el resumen. */
@@ -102,6 +106,7 @@ export const ESTADO_PRECIO: Record<string, { label: string; tone: "ok" | "warn" 
   aprobado: { label: "Aprobado", tone: "ok" },
   rechazado: { label: "No aprobado", tone: "muted" },
 };
+export const TONO_APROBACION: Record<string, "ok" | "warn" | "muted"> = { pendiente: "warn", aprobada: "ok", rechazada: "muted" };
 export const ESTADO_TICKET: Record<string, string> = {
   nuevo: "Nuevo", asignado: "Asignado", en_proceso: "En proceso", esperando_cliente: "Esperando al cliente", resuelto: "Resuelto", cerrado: "Cerrado",
 };
