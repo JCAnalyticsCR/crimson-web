@@ -1580,6 +1580,9 @@ def entry_out(db: Session, c: Commission, p, cfg: dict, names: Names | None = No
         "void_reason": c.void_reason,
         "reverses_id": c.reverses_id,
         "can_approve": bool(p.can("commissions", "aprobar") and TRANSITIONS_OK(c.status) and can_touch(p, c)),
+        # reunion 2, pedido 2: el gasto que se registro al pagarla (Contabilidad) y si el admin puede deshacer el pago
+        "expense_id": c.expense_id if p.can("accounting", "ver") else None,
+        "can_undo_payment": c.status == "pagada" and p.role == "admin",
     }
 
 

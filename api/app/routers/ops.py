@@ -444,6 +444,15 @@ class CategoryIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     active: bool = True
     d151_kind: str | None = Field(None, pattern=D151_KINDS)
+    # estado de resultados: costo_ventas | operativo (vacio = por el nombre, services/profit_loss.group_of)
+    pnl_group: str | None = Field(None, pattern="^(costo_ventas|operativo)$")
+
+
+def _cat_out(c: ExpenseCategory) -> dict:
+    from ..services.profit_loss import group_of
+
+    g, auto = group_of(c)
+    return {"id": c.id, "name": c.name, "active": c.active, "d151_kind": c.d151_kind, "pnl_group": c.pnl_group, "pnl_group_effective": g, "pnl_group_auto": auto}
 
 
 @router.get("/expense-categories")
@@ -451,7 +460,7 @@ def exp_cats(active: int = 0, p: Principal = Depends(require("accounting", "ver"
     q = select(ExpenseCategory).where(ExpenseCategory.tenant_id == p.tenant.id)
     if active:
         q = q.where(ExpenseCategory.active)  # los selectores solo ofrecen las activas
-    return [{"id": c.id, "name": c.name, "active": c.active, "d151_kind": c.d151_kind} for c in db.scalars(q.order_by(ExpenseCategory.name))]
+    return [_cat_out(c) for c in db.scalars(q.order_by(ExpenseCategory.name))]
 
 
 @router.post("/expense-categories", status_code=201)
@@ -469,9 +478,11 @@ def exp_cat_update(cid: int, data: CategoryIn, p: Principal = Depends(require("a
         raise HTTPException(404, "Categoría no encontrada")
     antes = snapshot(c)
     c.name, c.active, c.d151_kind = data.name, data.active, data.d151_kind  # desactivar no borra
+    if "pnl_group" in data.model_fields_set:  # un cliente viejo que no lo manda no lo borra
+        c.pnl_group = data.pnl_group
     audit_change(db, p, "update", "expense_category", c.id, antes, snapshot(c))
     db.commit()
-    return {"id": c.id, "name": c.name, "active": c.active, "d151_kind": c.d151_kind}
+    return _cat_out(c)
 
 
 IVA_CONDITIONS = "^(credito|credito_parcial|bienes_capital|no_credito|proporcional)$"

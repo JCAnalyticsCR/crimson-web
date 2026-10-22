@@ -158,6 +158,8 @@ class ExpenseCategory(TenantMixin, Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     # gasto especifico del D-151/D-270: alquiler | servicios_profesionales | comisiones | intereses (None = ninguno)
     d151_kind: Mapped[str | None] = mapped_column(String(24))
+    # estado de resultados (reunion 2, pedido 1): costo_ventas | operativo. None = por el nombre (services/profit_loss)
+    pnl_group: Mapped[str | None] = mapped_column(String(16))
 
 
 class Expense(TenantMixin, TimestampMixin, Base):

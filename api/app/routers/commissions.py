@@ -33,6 +33,7 @@ from ..models import (
 )
 from ..models.support import SOLUTIONS, TRANSITIONS
 from ..services import bitacora
+from ..services import commission_expense as comm_expense
 from ..services import commissions as svc
 from ..services.documents import audit, local_date
 from ..services.totals import d, net_sale
@@ -183,7 +184,8 @@ def commission_status(data: CommissionStatusIn, p: Principal = Depends(require("
         e = db.get(Expense, data.expense_id)
         if not e or e.tenant_id != p.tenant.id:
             raise HTTPException(404, "Gasto no encontrado")
-    found = {c.id: c for c in db.scalars(select(Commission).where(Commission.tenant_id == p.tenant.id, Commission.id.in_(data.ids)))}
+    # con bloqueo: dos "Marcar pagado" a la vez no registran dos gastos (el segundo ve la comision ya pagada)
+    found = {c.id: c for c in db.scalars(select(Commission).where(Commission.tenant_id == p.tenant.id, Commission.id.in_(data.ids)).with_for_update())}
     now = datetime.now(UTC)
     n, omitidas = 0, []
     for cid in dict.fromkeys(data.ids):
@@ -211,6 +213,8 @@ def commission_status(data: CommissionStatusIn, p: Principal = Depends(require("
                 c.expense_id = data.expense_id
             if antes == "pendiente":
                 c.approved_by, c.approved_at = p.user.id, now
+            # reunion 2, pedido 2: la comision pagada queda sola como gasto en Contabilidad (una vez; los aliados no)
+            comm_expense.record_paid(db, c, p.user.id, p.ip)
         elif data.status == "anulada":
             c.void_reason = data.reason.strip()[:240]
             svc.mark_manual_void(c)  # el motor no la vuelve a devengar sola (convertir, crear el proyecto)
@@ -222,6 +226,61 @@ def commission_status(data: CommissionStatusIn, p: Principal = Depends(require("
         raise HTTPException(409, omitidas[0]["motivo"] if len(omitidas) == 1 else "Ningún movimiento cambió: " + "; ".join({o["motivo"] for o in omitidas}))
     db.commit()
     return {"actualizadas": n, "omitidas": omitidas}
+
+
+# ---------- 2b. Deshacer un pago (reunion 2, pedido 2) ----------
+class UndoPaymentIn(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=200)
+    reason: str = Field(min_length=3, max_length=240)
+
+
+@router.post("/commissions/undo-payment")
+def commission_undo_payment(data: UndoPaymentIn, p: Principal = Depends(require("commissions", "aprobar")), db: Session = Depends(get_db)):
+    """Un pago marcado por error vuelve a "aprobada" y su gasto en Contabilidad se anula (no se borra). Solo el admin:
+    lo normal es corregir con un ajuste; deshacer el pago es para el que nunca salio del banco."""
+    if p.role != "admin":
+        raise HTTPException(403, "Solo el administrador puede deshacer un pago")
+    found = {c.id: c for c in db.scalars(select(Commission).where(Commission.tenant_id == p.tenant.id, Commission.id.in_(data.ids)).with_for_update())}
+    motivo = data.reason.strip()[:240]
+    n, omitidas = 0, []
+    for cid in dict.fromkeys(data.ids):
+        c = found.get(cid)
+        if c is None:
+            omitidas.append({"id": cid, "motivo": "No existe"})
+            continue
+        if c.status != "pagada":
+            omitidas.append({"id": cid, "motivo": f"No está pagada (está {STATE_LABEL.get(c.status, c.status)})"})
+            continue
+        rev = db.scalar(select(Commission.id).where(Commission.tenant_id == p.tenant.id, Commission.reverses_id == c.id, Commission.status != "anulada"))
+        if rev:
+            omitidas.append({"id": cid, "motivo": "Ya tiene un ajuste que la corrige: anule primero ese ajuste"})
+            continue
+        antes = {"paid_on": str(c.paid_on), "ref": c.paid_ref}
+        comm_expense.void_for(db, c, p.user.id, motivo, p.ip)
+        c.status, c.paid_on, c.paid_by, c.paid_ref = "aprobada", None, None, None
+        if not c.approved_at:
+            c.approved_by, c.approved_at = p.user.id, datetime.now(UTC)
+        audit(db, p.tenant.id, p.user.id, "status", "commission", c.id, {"de": "pagada", "a": "aprobada", "pago_deshecho": antes, "motivo": motivo}, ip=p.ip)
+        n += 1
+    if n == 0:
+        raise HTTPException(409, omitidas[0]["motivo"] if len(omitidas) == 1 else "Ningún pago se deshizo: " + "; ".join({o["motivo"] for o in omitidas}))
+    db.commit()
+    return {"actualizadas": n, "omitidas": omitidas}
+
+
+class BackfillExpensesIn(BaseModel):
+    from_: date | None = Field(None, alias="from")
+    to: date | None = None
+
+
+@router.post("/commissions/paid-expenses")
+def commission_paid_expenses(data: BackfillExpensesIn, p: Principal = Depends(require("commissions", "aprobar")), db: Session = Depends(get_db)):
+    """Comisiones de vendedor pagadas antes del registro automatico: les crea su gasto (una vez cada una)."""
+    if not p.can("accounting", "crear"):
+        raise HTTPException(403, "Sin permiso para registrar gastos")
+    n = comm_expense.backfill(db, p.tenant.id, p.user.id, data.from_, data.to, p.ip)
+    db.commit()
+    return {"registrados": n}
 
 
 # ---------- 3-6. Reglas ----------
