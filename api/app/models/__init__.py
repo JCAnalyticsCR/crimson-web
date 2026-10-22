@@ -17,6 +17,7 @@ from .core import (
     User,
 )
 from .crm import Customer
+from .cxp import SupplierPayment, SupplierPaymentApplication
 from .extra import (
     BankStatementLine,
     CustomerContact,
@@ -175,4 +176,6 @@ __all__ = [
     "Vehicle",
     "FuelLoad",
     "VehicleCost",
+    "SupplierPayment",
+    "SupplierPaymentApplication",
 ]

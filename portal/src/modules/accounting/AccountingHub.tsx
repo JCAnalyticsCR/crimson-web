@@ -25,6 +25,7 @@ const SUBS: Record<string, { to: string; label: string; end?: boolean }[]> = {
     { to: "/contabilidad/contable/categorias", label: "Categorías" },
     { to: "/contabilidad/contable/proveedores", label: "Proveedores" },
     { to: "/contabilidad/contable/bancos", label: "Bancos" },
+    { to: "/contabilidad/contable/cuentas-por-pagar", label: "Cuentas por pagar" },
   ],
   tributario: [{ to: "/contabilidad/tributario", label: "Panel del mes", end: true }],
 };

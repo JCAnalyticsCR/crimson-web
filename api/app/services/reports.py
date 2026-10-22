@@ -1072,6 +1072,118 @@ def comisiones(db: Session, tid: int, a: date, b: date, hide_payouts: bool = Fal
     )
 
 
+def cxp_antigüedad(db: Session, tid: int, a: date, b: date) -> Report:
+    """Antigüedad de saldos CxP al día de hoy (los parámetros de fecha se ignoran: es una foto actual)."""
+    from decimal import Decimal
+
+    from ..models import Supplier, SupplierPayment, SupplierPaymentApplication
+
+    today = b  # usar "hasta" como fecha de referencia
+
+    open_q = select(Expense).where(
+        Expense.tenant_id == tid,
+        Expense.purchase_type == "credito",
+        Expense.status != "anulado",
+    )
+    expenses = list(db.scalars(open_q))
+    if not expenses:
+        return Report("cxp_antigüedad", "CxP · Antigüedad de saldos", ["Proveedor", "Moneda", "Corriente", "1-30 días", "31-60 días", "61-90 días", ">90 días", "Vencido total", "Total por pagar"], [])
+
+    eids = [e.id for e in expenses]
+    am_rows = db.execute(
+        select(SupplierPaymentApplication.expense_id, func.sum(SupplierPaymentApplication.amount))
+        .join(SupplierPayment, SupplierPayment.id == SupplierPaymentApplication.payment_id)
+        .where(SupplierPaymentApplication.expense_id.in_(eids), SupplierPayment.status == "registrado")
+        .group_by(SupplierPaymentApplication.expense_id)
+    ).all()
+    am = {r[0]: Decimal(str(r[1])) for r in am_rows}
+
+    sups = {s.id: s.name for s in db.scalars(select(Supplier).where(Supplier.tenant_id == tid))}
+
+    by_key: dict[tuple, list] = {}
+    for e in expenses:
+        bal = max(Decimal(0), Decimal(str(e.total)) - am.get(e.id, Decimal(0)))
+        if bal <= 0:
+            continue
+        due = e.due_date or e.date
+        days = (today - due).days
+        key = (e.supplier_id, e.currency)
+        if key not in by_key:
+            by_key[key] = [sups.get(e.supplier_id, "(sin proveedor)"), e.currency, Decimal(0), Decimal(0), Decimal(0), Decimal(0), Decimal(0)]
+        r = by_key[key]
+        if days <= 0:
+            r[2] += bal
+        elif days <= 30:
+            r[3] += bal
+        elif days <= 60:
+            r[4] += bal
+        elif days <= 90:
+            r[5] += bal
+        else:
+            r[6] += bal
+
+    rows = []
+    tot = [Decimal(0)] * 5
+    for r in sorted(by_key.values(), key=lambda x: -sum(x[2:])):
+        vencido = r[3] + r[4] + r[5] + r[6]
+        total = r[2] + vencido
+        rows.append([r[0], r[1], _q2(r[2]), _q2(r[3]), _q2(r[4]), _q2(r[5]), _q2(r[6]), _q2(vencido), _q2(total)])
+        for i, v in enumerate([r[2], r[3], r[4], r[5], r[6]]):
+            tot[i] += v
+
+    return Report(
+        "cxp_antigüedad",
+        "CxP · Antigüedad de saldos",
+        ["Proveedor", "Moneda", "Corriente", "1-30 días", "31-60 días", "61-90 días", ">90 días", "Vencido total", "Total por pagar"],
+        rows,
+        {"Total por pagar": _q2(tot[0] + tot[1] + tot[2] + tot[3] + tot[4]), "Vencido": _q2(tot[1] + tot[2] + tot[3] + tot[4])},
+    )
+
+
+def cxp_vencimientos(db: Session, tid: int, a: date, b: date) -> Report:
+    """Próximos vencimientos CxP en el periodo indicado."""
+    from ..models import Supplier, SupplierPayment, SupplierPaymentApplication
+
+    q = select(Expense).where(
+        Expense.tenant_id == tid,
+        Expense.purchase_type == "credito",
+        Expense.status != "anulado",
+    ).order_by(Expense.due_date.nullsfirst(), Expense.date)
+    expenses = list(db.scalars(q))
+    if not expenses:
+        return Report("cxp_vencimientos", "CxP · Vencimientos próximos", ["Proveedor", "Descripción", "Fecha doc.", "Vence", "Moneda", "Total", "Saldo"], [])
+
+    eids = [e.id for e in expenses]
+    am_rows = db.execute(
+        select(SupplierPaymentApplication.expense_id, func.sum(SupplierPaymentApplication.amount))
+        .join(SupplierPayment, SupplierPayment.id == SupplierPaymentApplication.payment_id)
+        .where(SupplierPaymentApplication.expense_id.in_(eids), SupplierPayment.status == "registrado")
+        .group_by(SupplierPaymentApplication.expense_id)
+    ).all()
+    am = {r[0]: Decimal(str(r[1])) for r in am_rows}
+    sups = {s.id: s.name for s in db.scalars(select(Supplier).where(Supplier.tenant_id == tid))}
+
+    rows = []
+    total = Decimal(0)
+    for e in expenses:
+        bal = max(Decimal(0), Decimal(str(e.total)) - am.get(e.id, Decimal(0)))
+        if bal <= 0:
+            continue
+        due = e.due_date or e.date
+        if due < a or due > b:
+            continue
+        rows.append([sups.get(e.supplier_id, "(sin proveedor)"), e.description, e.date.isoformat(), due.isoformat(), e.currency, e.total, _q2(bal)])
+        total += bal
+
+    return Report(
+        "cxp_vencimientos",
+        "CxP · Vencimientos próximos",
+        ["Proveedor", "Descripción", "Fecha doc.", "Vence", "Moneda", "Total", "Saldo"],
+        rows,
+        {"Saldo total": _q2(total), "n": len(rows)},
+    )
+
+
 REPORTS = {
     "facturacion": facturacion,
     "pendientes": pendientes,
@@ -1094,6 +1206,8 @@ REPORTS = {
     "rentabilidad": rentabilidad,
     "rentabilidad_tipo": rentabilidad_tipo,
     "comisiones": comisiones,
+    "cxp_antigüedad": cxp_antigüedad,
+    "cxp_vencimientos": cxp_vencimientos,
 }
 CATALOG = [
     ("facturacion", "Facturación", "Todas las facturas del periodo con totales y saldo"),
@@ -1117,6 +1231,8 @@ CATALOG = [
     ("rentabilidad", "Rentabilidad por proyecto", "Cuánto dejó cada instalación: venta contra costo real"),
     ("rentabilidad_tipo", "Rentabilidad por tipo de solución", "En qué tipo de trabajo gana Crimson: CCTV, redes, acceso…"),
     ("comisiones", "Comisiones del periodo", "Comisiones, bonos y pagos a aliados devengados, con su estado y referencia de pago"),
+    ("cxp_antigüedad", "CxP · Antigüedad de saldos", "Saldo por proveedor en rangos de vencimiento (corriente, 1-30, 31-60, 61-90, >90 días)"),
+    ("cxp_vencimientos", "CxP · Vencimientos próximos", "Facturas de proveedor que vencen en el periodo indicado con su saldo pendiente"),
 ]
 
 

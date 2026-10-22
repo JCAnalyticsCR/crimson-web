@@ -23,6 +23,7 @@ from .routers import (
     commissions,
     core,
     crm_extra,
+    cxp,
     data_export,
     events,
     fieldwork,
@@ -171,6 +172,7 @@ def create_app() -> FastAPI:
     app.include_router(ally_portal.router)  # portal de aliados (/aliado): solo get_ally
     app.include_router(vehicles.router)
     app.include_router(data_export.router)
+    app.include_router(cxp.router)  # cuentas por pagar
     return app
 
 

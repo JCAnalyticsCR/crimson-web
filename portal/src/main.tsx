@@ -30,6 +30,7 @@ const Expenses = lazy(() => import("./modules/accounting/contable/Expenses"));
 const Categories = lazy(() => import("./modules/accounting/contable/Categories"));
 const Suppliers = lazy(() => import("./modules/accounting/contable/Suppliers"));
 const Banks = lazy(() => import("./modules/accounting/contable/Banks"));
+const CxP = lazy(() => import("./modules/accounting/contable/CxP"));
 const TaxPanel = lazy(() => import("./modules/accounting/tributario/TaxPanel"));
 const Reports = lazy(() => import("./modules/reports/Reports"));
 const Recurrences = lazy(() => import("./modules/sales/Recurrences"));
@@ -224,6 +225,7 @@ function App() {
           <Route path="contable/proveedores" element={<Suppliers />} />
           <Route path="contable/bancos" element={<Banks />} />
           <Route path="contable/bancos/:id/conciliacion" element={<Banking />} />
+          <Route path="contable/cuentas-por-pagar" element={<CxP />} />
           <Route path="tributario" element={<TaxPanel />} />
         </Route>
         <Route path="/ajustes" element={<Settings />} />

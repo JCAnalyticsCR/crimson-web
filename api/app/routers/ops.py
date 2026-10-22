@@ -922,6 +922,8 @@ REPORT_NEEDS = {
     "rentabilidad": ("projects", "ver_todo"),
     "rentabilidad_tipo": ("projects", "ver_todo"),
     "comisiones": ("commissions", "ver_todo"),  # contabilidad lo baja para la planilla
+    "cxp_antigüedad": ("accounting", "ver"),
+    "cxp_vencimientos": ("accounting", "ver"),
 }
 
 

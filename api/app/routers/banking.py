@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
-from ..models import BankAccount, BankStatementLine, Expense, ExpenseCategory, Invoice, Payment
+from ..models import BankAccount, BankStatementLine, Expense, ExpenseCategory, Invoice, Payment, Supplier, SupplierPayment
 from ..services import tabular as tb
 from ..services.documents import audit
 from ..services.totals import d
@@ -92,6 +92,18 @@ def _line_out(ln: BankStatementLine, db: Session) -> dict:
         e = db.get(Expense, ln.matched_id)
         if e:
             match = {"type": "expense", "id": e.id, "label": f"Gasto · {e.description}", "amount": e.total, "date": e.date, "to": f"/contabilidad/contable?expense={e.id}"}
+    elif ln.matched_type == "supplier_payment" and ln.matched_id:
+        sp = db.get(SupplierPayment, ln.matched_id)
+        if sp:
+            sup = db.get(Supplier, sp.supplier_id)
+            match = {
+                "type": "supplier_payment",
+                "id": sp.id,
+                "label": f"Pago prov. {sup.name if sup else ''} · {sp.method}",
+                "amount": sp.amount,
+                "date": sp.date,
+                "to": f"/contabilidad/contable/cuentas-por-pagar?supplier={sp.supplier_id}",
+            }
     return {
         "id": ln.id,
         "date": ln.date,
@@ -152,12 +164,12 @@ def candidates(db: Session, ln: BankStatementLine, acct: BankAccount, strict: bo
                 }
             )
     else:
-        taken = _taken(db, ln.tenant_id, "expense")
+        taken_exp = _taken(db, ln.tenant_id, "expense")
         q = select(Expense).where(
             Expense.tenant_id == ln.tenant_id, Expense.status != "anulado", Expense.currency == acct.currency, Expense.date >= lo, Expense.date <= hi
         )
         for e in db.scalars(q):
-            if e.id in taken or (e.bank_account_id and e.bank_account_id != acct.id):
+            if e.id in taken_exp or (e.bank_account_id and e.bank_account_id != acct.id):
                 continue
             diff = abs(d(e.total) + amount)
             if strict and diff > TOL_AMOUNT:
@@ -172,6 +184,35 @@ def candidates(db: Session, ln: BankStatementLine, acct: BankAccount, strict: bo
                     "date": e.date,
                     "diff": diff,
                     "days": abs((e.date - ln.date).days),
+                    "ref": ref_hit,
+                }
+            )
+        # también casar débitos contra pagos a proveedor registrados
+        taken_sp = _taken(db, ln.tenant_id, "supplier_payment")
+        sp_q = select(SupplierPayment).where(
+            SupplierPayment.tenant_id == ln.tenant_id,
+            SupplierPayment.status == "registrado",
+            SupplierPayment.currency == acct.currency,
+            SupplierPayment.date >= lo,
+            SupplierPayment.date <= hi,
+        )
+        for sp in db.scalars(sp_q):
+            if sp.id in taken_sp:
+                continue
+            diff = abs(d(sp.amount) + amount)
+            if strict and diff > TOL_AMOUNT:
+                continue
+            ref_hit = bool(ln.reference and sp.reference and (ln.reference in sp.reference or sp.reference in ln.reference))
+            sup = db.get(Supplier, sp.supplier_id)
+            out.append(
+                {
+                    "type": "supplier_payment",
+                    "id": sp.id,
+                    "label": f"Pago prov. {sup.name if sup else ''} · {sp.method}",
+                    "amount": sp.amount,
+                    "date": sp.date,
+                    "diff": diff,
+                    "days": abs((sp.date - ln.date).days),
                     "ref": ref_hit,
                 }
             )
@@ -409,7 +450,7 @@ def line_candidates(lid: int, p: Principal = Depends(require("accounting", "ver"
 
 
 class MatchIn(BaseModel):
-    type: str = Field(pattern="^(payment|expense)$")
+    type: str = Field(pattern="^(payment|expense|supplier_payment)$")
     id: int
 
 
@@ -418,7 +459,16 @@ def match(lid: int, data: MatchIn, p: Principal = Depends(require("accounting", 
     ln, acct = _line(db, lid, p.tenant.id)
     if ln.status == "conciliado":
         raise HTTPException(409, "El movimiento ya esta conciliado")
-    if not any(c["type"] == data.type and c["id"] == data.id for c in candidates(db, ln, acct, strict=False)):
+    if data.type == "supplier_payment":
+        # validación directa de tenant para pagos a proveedor
+        sp = db.get(SupplierPayment, data.id)
+        if not sp or sp.tenant_id != p.tenant.id:
+            raise HTTPException(404, "Pago a proveedor no encontrado")
+        if sp.status == "anulado":
+            raise HTTPException(422, "El pago está anulado")
+        if d(ln.amount) >= 0:
+            raise HTTPException(422, "Solo se puede casar un pago a proveedor contra un débito")
+    elif not any(c["type"] == data.type and c["id"] == data.id for c in candidates(db, ln, acct, strict=False)):
         raise HTTPException(422, "Esa contrapartida no corresponde a este movimiento (signo, divisa, fecha o ya conciliada)")
     ln.status, ln.matched_type, ln.matched_id, ln.matched_by = "conciliado", data.type, data.id, "manual"
     audit(db, p.tenant.id, p.user.id, "match", "bank_line", ln.id, data.model_dump(), ip=p.ip)
@@ -499,6 +549,59 @@ def expense_from_line(lid: int, data: ExpenseFromLineIn, p: Principal = Depends(
     audit(db, p.tenant.id, p.user.id, "expense_from_line", "bank_line", ln.id, {"expense_id": e.id}, ip=p.ip)
     db.commit()
     return {**_line_out(ln, db), "warnings": warnings}
+
+
+class PaySupplierFromLineIn(BaseModel):
+    """Registrar un pago a proveedor desde un débito del extracto bancario."""
+    supplier_id: int
+    applications: list[dict] = Field(default_factory=list)  # [{expense_id, amount}]
+    reference: str | None = Field(None, max_length=120)
+    note: str | None = None
+    method: str = "transferencia"
+
+
+@router.post("/lines/{lid}/pay-supplier", status_code=201)
+def pay_supplier_from_line(lid: int, data: PaySupplierFromLineIn, p: Principal = Depends(require("accounting", "crear")), db: Session = Depends(get_db)):
+    """Desde un débito del extracto: crea el pago a proveedor y concilia la línea.
+    El monto, moneda y fecha salen de la línea bancaria.
+    Las sugerencias de facturas abiertas del proveedor se sirven en GET /cxp/suppliers/{sid}/open-expenses."""
+    ln, acct = _line(db, lid, p.tenant.id)
+    if d(ln.amount) >= 0 or ln.status == "conciliado":
+        raise HTTPException(409, "Solo débitos pendientes")
+    if data.method not in ("transferencia", "sinpe", "cheque", "tarjeta", "efectivo"):
+        raise HTTPException(422, "Método inválido")
+    sup = db.get(Supplier, data.supplier_id)
+    if not sup or sup.tenant_id != p.tenant.id:
+        raise HTTPException(404, "Proveedor no encontrado")
+
+    from pydantic import ValidationError
+
+    from ..routers.cxp import ApplicationIn, PaymentIn, create_payment
+
+    currency = acct.currency or "CRC"
+    amount = float(-d(ln.amount))
+    apps = [{"expense_id": a["expense_id"], "amount": a["amount"]} for a in data.applications]
+    try:
+        pay_in = PaymentIn(
+            supplier_id=data.supplier_id,
+            date=ln.date,
+            amount=amount,
+            currency=currency,
+            method=data.method,
+            bank_account_id=acct.id,
+            reference=data.reference or ln.reference,
+            note=data.note,
+            applications=[ApplicationIn(**a) for a in apps],
+        )
+    except ValidationError as e:
+        raise HTTPException(422, str(e)) from e
+
+    pay = create_payment(pay_in, p, db)
+    # conciliar la línea contra el pago recién creado
+    ln.status, ln.matched_type, ln.matched_id, ln.matched_by = "conciliado", "supplier_payment", pay["id"], "manual"
+    audit(db, p.tenant.id, p.user.id, "pay_supplier_from_line", "bank_line", ln.id, {"payment_id": pay["id"]}, ip=p.ip)
+    db.commit()
+    return {**_line_out(ln, db), "payment": pay}
 
 
 def summary(db: Session, tid: int, a: date, b: date) -> list[list]:

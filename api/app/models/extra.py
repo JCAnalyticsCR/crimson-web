@@ -139,7 +139,7 @@ class BankStatementLine(TenantMixin, Base):
     batch: Mapped[str] = mapped_column(String(40), index=True)
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)  # evita importar dos veces la misma linea
     status: Mapped[str] = mapped_column(String(12), default="pendiente")  # pendiente | conciliado | ignorado
-    matched_type: Mapped[str | None] = mapped_column(String(10))  # payment | expense
+    matched_type: Mapped[str | None] = mapped_column(String(20))  # payment | expense | supplier_payment
     matched_id: Mapped[int | None] = mapped_column(Integer)
     matched_by: Mapped[str | None] = mapped_column(String(10))  # auto | manual
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
