@@ -143,11 +143,14 @@ function TrustEditor({ value, onSave }: { value: Trust[]; onSave: (v: Trust[]) =
   );
 }
 
-function ProductPicker({ onPick, placeholder = "Buscar producto por nombre o código" }: { onPick: (p: Product) => void; placeholder?: string }) {
+/* accept: lo que este buscador deja elegir (p. ej. las fotos de un kit: solo publicados con foto); rejectNote explica
+   por que no aparece lo demas */
+function ProductPicker({ onPick, placeholder = "Buscar producto por nombre o código", accept, rejectNote }: { onPick: (p: Product) => void; placeholder?: string; accept?: (p: Product) => boolean; rejectNote?: string }) {
   const [q, setQ] = useState("");
   const [res, setRes] = useState<Product[]>([]);
   const [todos, setTodos] = useState(false); // por defecto solo propone lo que se puede comprar
-  const shown = todos ? res : res.filter((p) => p.item_type !== "producto" || vendible(p.availability?.state));
+  const ok = accept ? res.filter(accept) : res;
+  const shown = todos ? ok : ok.filter((p) => p.item_type !== "producto" || vendible(p.availability?.state));
   useEffect(() => {
     if (q.trim().length < 2) { setRes([]); return; }
     const t = window.setTimeout(() => api<{ items: Product[] }>(`/products?q=${encodeURIComponent(q.trim())}&limit=8`).then((r) => setRes(r.items)).catch(() => setRes([])), 250);
@@ -159,7 +162,8 @@ function ProductPicker({ onPick, placeholder = "Buscar producto por nombre o có
         <input className="input" style={{ flex: "1 1 220px" }} value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} />
         <label style={{ fontSize: 12.5, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={todos} onChange={(e) => setTodos(e.target.checked)} />Incluir lo que no se puede comprar</label>
       </div>
-      {q.trim().length >= 2 && res.length > 0 && shown.length === 0 && <p className="meta" style={{ margin: "6px 0 0" }}>Nada vendible con esa búsqueda (sin existencia ni proveedor vigente). Marcá «Incluir lo que no se puede comprar» para verlo igual.</p>}
+      {q.trim().length >= 2 && res.length > 0 && ok.length < res.length && rejectNote && <p className="meta" style={{ margin: "6px 0 0" }}>{rejectNote}</p>}
+      {q.trim().length >= 2 && ok.length > 0 && shown.length === 0 && <p className="meta" style={{ margin: "6px 0 0" }}>Nada vendible con esa búsqueda (sin existencia ni proveedor vigente). Marcá «Incluir lo que no se puede comprar» para verlo igual.</p>}
       {shown.length > 0 && (
         <div style={{ position: "absolute", zIndex: 5, left: 0, right: 0, top: 40, background: "var(--surface)", border: "1px solid var(--hair-2)", borderRadius: 10, boxShadow: "0 12px 30px -16px rgba(0,0,0,.4)" }}>
           {shown.map((p) => <button key={p.id} className="nav__link" style={{ width: "100%", textAlign: "left", border: 0, background: "none", cursor: "pointer", color: "var(--text)", display: "block", padding: "8px 12px" }} onClick={() => { onPick(p); setQ(""); setRes([]); }}><b style={{ fontSize: 13 }}>{p.name}</b> <span className="meta">{p.code}{!p.show_on_web ? " · no publicado" : ""}</span> {p.item_type === "producto" && <AvailBadge a={p.availability} />}</button>)}
@@ -241,17 +245,23 @@ function KitsEditor({ value, preview, onSave }: { value: Kit[]; preview: NonNull
   );
 }
 
+/* las fotos que trae /products (el tipo Product del portal no las declara), la principal primero como en la tienda */
+const photosOf = (p: Product): string[] => {
+  const imgs = ((p as Product & { images?: { url?: string; main?: boolean }[] }).images || []).filter((i) => !!i?.url);
+  return [...imgs.filter((i) => i.main), ...imgs.filter((i) => !i.main)].map((i) => i.url as string);
+};
+
 /** Fotos fijas de la tarjeta del kit (pedido 21/10): Andres elige que equipos se ven y, si el producto tiene varias
     fotos, cual. Sin elegir, la tarjeta muestra los equipos que el kit arma hoy (camaras, grabador, disco, switch). */
 function KitPhotosEditor({ value, pv, onChange }: { value: KitPhotoSel[]; pv?: NonNullable<Showcase["kits_preview"]>[number]; onChange: (v: KitPhotoSel[]) => void }) {
-  const [names, setNames] = useState<Record<number, string>>({}); // elegidos en esta sesion (aun sin fotos del API)
+  const [picked, setPicked] = useState<Record<number, { name: string; images: string[] }>>({}); // elegidos en esta sesion (aun sin guardar)
   const saved: Record<number, KitPhotoPv> = Object.fromEntries((pv?.photos_manual ? pv.photos || [] : []).map((x) => [x.product_id, x]));
   const thumb = (on = false): React.CSSProperties => ({ width: 46, height: 46, objectFit: "contain", background: "#f3f1ee", borderRadius: 6, border: `2px solid ${on ? "var(--crimson)" : "var(--hair)"}`, padding: 2 });
   return (
     <div style={{ display: "grid", gap: 6 }}>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <b style={{ fontSize: 12.5 }}>Fotos de la tarjeta</b>
-        <span className="meta">{value.length ? `${value.length} de 4 elegidas a mano (solo cuentan productos con foto)` : "Automáticas: los equipos que el kit arma hoy"}</span>
+        <span className="meta">{value.length ? `${value.length} de 4 elegidas a mano (solo cuentan productos publicados con foto)` : "Automáticas: los equipos que el kit arma hoy"}</span>
         {value.length > 0 && <button className="btn btn--ghost btn--sm" onClick={() => onChange([])}>Volver a automáticas</button>}
       </div>
       {value.length === 0 && !!pv?.photos?.length && (
@@ -261,12 +271,12 @@ function KitPhotosEditor({ value, pv, onChange }: { value: KitPhotoSel[]; pv?: N
       )}
       {value.map((ph, j) => {
         const info = saved[ph.product_id];
-        const imgs = info?.images || [];
-        const cur = ph.image || info?.image || "";
+        const imgs = info?.images || picked[ph.product_id]?.images || [];
+        const cur = ph.image || info?.image || imgs[0] || "";
         return (
           <div key={ph.product_id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
             <span className="meta" style={{ width: 18 }}>{j + 1}</span>
-            <span style={{ flex: "1 1 180px", minWidth: 0 }}>{info?.name || names[ph.product_id] || `Producto ${ph.product_id}`}{!info && <span className="meta"> · la foto se ve al guardar</span>}</span>
+            <span style={{ flex: "1 1 180px", minWidth: 0 }}>{info?.name || picked[ph.product_id]?.name || `Producto ${ph.product_id}`}{!info && !imgs.length && <span className="meta"> · sin foto publicada: no se mostrará</span>}</span>
             {imgs.length > 1 ? imgs.map((src) => (
               <button key={src} type="button" onClick={() => onChange(value.map((x) => (x.product_id === ph.product_id ? { ...x, image: src } : x)))} aria-label="Usar esta foto" aria-pressed={src === cur} style={{ border: 0, background: "none", padding: 0, cursor: "pointer" }}>
                 <img src={src} alt="" style={thumb(src === cur)} />
@@ -279,7 +289,9 @@ function KitPhotosEditor({ value, pv, onChange }: { value: KitPhotoSel[]; pv?: N
       {value.length < 4 && (
         <ProductPicker
           placeholder="Agregar un equipo a la foto del kit (nombre o código)"
-          onPick={(p) => { if (value.some((x) => x.product_id === p.id)) return; setNames((n) => ({ ...n, [p.id]: p.name })); onChange([...value, { product_id: p.id, image: "" }]); }}
+          accept={(p) => p.show_on_web && photosOf(p).length > 0}
+          rejectNote="Solo se pueden elegir productos publicados en la web y con foto: los demás no aparecen aquí."
+          onPick={(p) => { if (value.some((x) => x.product_id === p.id)) return; setPicked((n) => ({ ...n, [p.id]: { name: p.name, images: photosOf(p) } })); onChange([...value, { product_id: p.id, image: "" }]); }}
         />
       )}
     </div>

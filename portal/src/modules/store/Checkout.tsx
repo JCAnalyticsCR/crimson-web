@@ -163,17 +163,27 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
 
   // correo: el servidor revisa formato, errores de dedo (gmial.com) y que el dominio reciba correo (MX). Si la
   // revision falla (red, tope), no se frena la compra: el checkout la repite al confirmar.
-  const checkMail = async (raw: string): Promise<MailCheck | null> => {
+  // La revision en vuelo se comparte: el blur del correo la lanza al tocar "Continuar" y next() espera esa misma
+  // (el boton no se deshabilita mientras tanto: si no, ese primer clic se perderia entre el mousedown y el mouseup).
+  const mailReq = useRef<{ email: string; p: Promise<MailCheck | null> } | null>(null);
+  const checkMail = (raw: string): Promise<MailCheck | null> => {
     const email = raw.trim();
-    if (!okEmail(email)) return null;
-    if (mail && mail.email === email) return mail;
+    if (!okEmail(email)) return Promise.resolve(null);
+    if (mail && mail.email === email) return Promise.resolve(mail);
+    if (mailReq.current && mailReq.current.email === email) return mailReq.current.p;
     setCheckingMail(true);
-    try {
-      const { data } = await api<Omit<MailCheck, "email">>("/email-check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
-      const r = { ...data, email };
-      setMail(r);
-      return r;
-    } catch { return null; } finally { setCheckingMail(false); }
+    const p = Promise.resolve().then(async () => {
+      try {
+        const { data } = await api<Omit<MailCheck, "email">>("/email-check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+        const r = { ...data, email };
+        setMail(r);
+        return r;
+      } catch { return null; } finally {
+        if (mailReq.current?.email === email) { mailReq.current = null; setCheckingMail(false); }
+      }
+    });
+    mailReq.current = { email, p };
+    return p;
   };
   const mailBad = !!mail && mail.email === f.email.trim() && !mail.ok;
   const takeSuggestion = (sug: string) => { set("email", sug); setMail(null); void checkMail(sug); };
@@ -403,7 +413,7 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
           {err && <p className="sh-err" role="alert" style={{ margin: 0 }}>{err}</p>}
           <div className="ck-actions">
             {step > 0 && <button type="button" className="sh-btn sh-btn--ghost" onClick={() => goStep(step - 1)}><Ico d={IC.back} size={16} />Atrás</button>}
-            <button type="submit" className="sh-btn sh-btn--crimson ck-go" disabled={busy || (step === 0 && checkingMail) || (step === 3 && (!quote || cart.some((l) => !!lineProblem(quote, l, cart))))}>
+            <button type="submit" className="sh-btn sh-btn--crimson ck-go" aria-busy={(step === 0 && checkingMail) || undefined} disabled={busy || (step === 3 && (!quote || cart.some((l) => !!lineProblem(quote, l, cart))))}>
               {step < 3 ? <>Continuar<Ico d={IC.next} size={16} /></> : busy ? "Enviando…" : <>Confirmar pedido · {totalTxt}</>}
             </button>
           </div>

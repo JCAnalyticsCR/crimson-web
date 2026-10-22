@@ -314,6 +314,8 @@ def order_status(oid: int, data: OrderStatusIn, p: Principal = Depends(require("
     from .events import on_order_status
 
     tickets = on_order_status(db, o, data.status)  # entradas de evento: pagado activa y envia, cancelado anula
+    if data.status == "pagado" and old != "pagado":
+        so.notify_delivery(db, p.tenant, o)  # envio a domicilio pagado por esta via tambien avisa al mensajero (una vez)
     audit(db, p.tenant.id, p.user.id, "status", "order", o.id, {"status": data.status, "tickets": tickets}, ip=p.ip)
     db.commit()
     return _order_out(o)

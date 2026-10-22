@@ -133,9 +133,12 @@ def _photo_ids(kits: list[dict]) -> set[int]:
 
 
 def _kit_products(db: Session, tid: int, kits: list[dict]) -> dict[int, Product]:
-    """Los productos de las fotos que Andres eligio para los kits (una consulta para todos)."""
+    """Los productos de las fotos que Andres eligio para los kits (una consulta para todos). Solo los publicados en la
+    web, como el resto de la vitrina: uno que se oculta despues de elegido deja la tarjeta con sus fotos automaticas."""
     ids = _photo_ids(kits)
-    return {p.id: p for p in db.scalars(select(Product).where(Product.tenant_id == tid, Product.id.in_(ids)))} if ids else {}
+    if not ids:
+        return {}
+    return {p.id: p for p in db.scalars(select(Product).where(Product.tenant_id == tid, Product.active, Product.show_on_web, Product.id.in_(ids)))}
 
 
 def _admin_out(t: Tenant, db: Session) -> dict:
@@ -215,8 +218,14 @@ def showcase_put(data: ShowcaseIn, p: Principal = Depends(require("settings", "c
     if "banners" in patch:
         patch["banners"] = [{**b, "id": b.get("id") or f"b{i + 1}"} for i, b in enumerate(patch["banners"] or [])]
     if "kits" in patch and patch["kits"] is not None:
-        # fotos fijas: solo productos activos de esta empresa con foto; la foto elegida tiene que ser de ese producto
-        prods = {p.id: p for p in db.scalars(select(Product).where(Product.tenant_id == t.id, Product.active, Product.id.in_(_photo_ids(patch["kits"]))))}
+        # fotos fijas: solo productos de esta empresa publicados en la web (activos y visibles) con foto; la foto elegida
+        # tiene que ser de ese producto
+        prods = {
+            p.id: p
+            for p in db.scalars(
+                select(Product).where(Product.tenant_id == t.id, Product.active, Product.show_on_web, Product.id.in_(_photo_ids(patch["kits"])))
+            )
+        }
         for k in patch["kits"]:
             fotos, vistos = [], set()
             for ph in k.get("photos") or []:

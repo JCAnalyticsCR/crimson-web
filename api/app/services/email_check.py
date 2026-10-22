@@ -20,7 +20,12 @@ from difflib import get_close_matches
 
 from email_validator import EmailNotValidError, validate_email
 
-DNS_TIMEOUT = 2.5  # segundos para toda la consulta (el comprador espera al tocar "Continuar")
+DNS_TIMEOUT = 1.5  # segundos para toda la consulta (el comprador espera al tocar "Continuar"; ocupa un hilo del API)
+# Resolver publico explicito: la consulta nunca toca el DNS privado del servidor (nombres internos del hosting)
+PUBLIC_NAMESERVERS = ("1.1.1.1", "8.8.8.8", "9.9.9.9")
+# terminaciones de redes privadas: no son correos de compradores y no se consultan (ni se distingue "no existe" de
+# "no recibe": asi nadie enumera nombres internos desde la pagina publica)
+PRIVATE_SUFFIXES = ("internal", "intranet", "lan", "home", "corp", "localdomain", "private", "home.arpa")
 
 # proveedores comunes en Costa Rica: base de las sugerencias por parecido
 COMMON_DOMAINS = (
@@ -90,7 +95,7 @@ TYPOS = {
 _TLD_FIX = ((".con", ".com"), (".cmo", ".com"), (".comm", ".com"), (".vom", ".com"), (".xom", ".com"), (".co.c", ".co.cr"))
 
 # cache por proceso: el mismo dominio no se consulta en cada clic (gmail.com, hotmail.com...)
-_TTL = {"ok": 6 * 3600, "nomx": 1800, "nodomain": 1800}
+_TTL = {"ok": 6 * 3600, "nomx": 1800, "nodomain": 1800, "unknown": 60}  # "sin respuesta" poco: el DNS se recupera
 _MAX_CACHE = 5000
 _cache: dict[str, tuple[str, float]] = {}
 _lock = threading.Lock()
@@ -107,7 +112,8 @@ def _query_mx(domain: str) -> str:
     import dns.resolver
 
     try:
-        r = dns.resolver.Resolver()
+        r = dns.resolver.Resolver(configure=False)
+        r.nameservers = list(PUBLIC_NAMESERVERS)
         r.timeout = DNS_TIMEOUT
         r.lifetime = DNS_TIMEOUT
         ans = r.resolve(domain, "MX")
@@ -133,12 +139,17 @@ def mx_status(domain: str) -> str:
         if hit and hit[1] > now:
             return hit[0]
     st = _query_mx(domain)
-    if st in _TTL:  # "unknown" no se guarda: el siguiente intento vuelve a preguntar
+    if st in _TTL:  # "unknown" se guarda un minuto: un dominio cuyo DNS no responde no ocupa un hilo en cada clic
         with _lock:
             if len(_cache) >= _MAX_CACHE:
                 _cache.clear()
             _cache[domain] = (st, now + _TTL[st])
     return st
+
+
+def is_private(domain: str) -> bool:
+    d = domain.lower().rstrip(".")
+    return any(d == x or d.endswith("." + x) for x in PRIVATE_SUFFIXES)
 
 
 def suggest_domain(domain: str) -> str | None:
@@ -163,6 +174,8 @@ def check_email(raw: str | None, dns: bool = True) -> dict:
     except EmailNotValidError:
         return {"ok": False, "reason": "formato", "message": "Escribí un correo válido: ahí te llega la confirmación", "suggestion": None, "email": s}
     local, domain = v.local_part, v.domain.lower()
+    if is_private(domain):
+        return {"ok": False, "reason": "formato", "message": "Escribí un correo válido: ahí te llega la confirmación", "suggestion": None, "email": s}
     email = f"{local}@{domain}"
     fix = suggest_domain(domain)
     sug = f"{local}@{fix}" if fix else None

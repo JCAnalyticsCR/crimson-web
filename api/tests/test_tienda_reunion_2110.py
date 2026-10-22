@@ -7,7 +7,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from app.models import EmailOutbox, Order
+from app.models import EmailOutbox, Order, Product
 from tests.test_store_vitrina import _catalogo, _publicar
 from tests.test_tienda_checkout import SLUG, _body, inv_calls  # noqa: F401 (fixture)
 
@@ -88,6 +88,23 @@ def test_kits_con_fotos_de_sus_equipos_y_elegidas_a_mano(client, auth, db_sessio
     otro = client.post("/public/store/crimson/kit", json={"place": "condominio", "indoor": 1, "outdoor": 1, "days": 7, "remote": False}).json()
     assert otro["photos"] and otro["photos"][0]["label"] == "Cámara exterior"
 
+    # un producto oculto de la web no se puede elegir (se descarta al guardar)...
+    oculto = db_session.scalar(select(Product).where(Product.code == "OCULTO"))
+    oculto.images = [{"url": "https://cdn.example.com/oculta.jpg", "main": True}]
+    db_session.commit()
+    r = client.put("/store/showcase", json={"kits": [{**kits[0], "photos": [{"product_id": oculto.id}, *guardado]}, *kits[1:]]})
+    assert r.status_code == 200, r.text
+    assert r.json()["kits"][0]["photos"] == guardado and all(f["product_id"] != oculto.id for f in r.json()["kits"][0]["photos"])
+    # ...y uno elegido que se oculta despues no sale en la vitrina publica ni en "Arma tu sistema"
+    cam.show_on_web = False
+    db_session.commit()
+    k0 = next(x for x in client.get("/public/store/crimson/showcase").json()["kits"] if x["id"] == kits[0]["id"])
+    assert [f["image"] for f in k0["photos"]] == ["https://cdn.example.com/wd4.jpg"]
+    r = client.post("/public/store/crimson/kit", json=kits[0]["answers"]).json()
+    assert r["photos"] and all(f["image"] != "https://cdn.example.com/bullet-lado.jpg" for f in r["photos"])
+    cam.show_on_web = True
+    db_session.commit()
+
     # un producto elegido que se desactiva: la tarjeta vuelve a las fotos de sus equipos
     cam.active = False
     prods["WD44PURZ"].active = False
@@ -126,10 +143,14 @@ def test_revisar_correo_formato_dedo_y_dominio(client, auth, dns):
     assert not r["ok"] and r["reason"] == "sin_correo"
     assert chk("ana@gmail.com")["ok"] is True
     assert chk("ana@caido.com") == {"ok": True, "reason": None, "message": None, "suggestion": None}  # DNS sin respuesta: no se bloquea
-    # el mismo dominio no se consulta dos veces (cache); "sin respuesta" si se vuelve a preguntar
+    # el mismo dominio no se consulta dos veces (cache); "sin respuesta" tambien se guarda, pero solo un minuto
     chk("otra@gmail.com")
     chk("otra@caido.com")
-    assert dns.count("gmail.com") == 1 and dns.count("caido.com") == 2
+    assert dns.count("gmail.com") == 1 and dns.count("caido.com") == 1
+    # nombres de redes privadas (los del hosting): no se consultan ni se distingue "no existe" de "no recibe"
+    for e in ("x@postgres.railway.internal", "x@nas.lan", "x@srv.corp", "x@router.home.arpa"):
+        assert chk(e)["reason"] == "formato", e
+    assert not any(d.endswith((".internal", ".lan", ".corp", ".arpa")) for d in dns)
 
 
 def test_checkout_rechaza_correo_sin_dominio_y_respeta_el_ajuste(client, auth, dns, inv_calls):  # noqa: F811
@@ -148,12 +169,25 @@ def test_checkout_rechaza_correo_sin_dominio_y_respeta_el_ajuste(client, auth, d
     assert client.get(f"{SLUG}/checkout-config").json()["verify_email"] is False
     assert client.post(f"{SLUG}/email-check", json={"email": "x@noexiste.cr"}).json()["ok"] is True
     assert client.post(f"{SLUG}/checkout", json=_body(pid, contact=contacto("ana@noexiste.cr"), idempotency_key="ck-mail-0004")).status_code == 201
+    # ...pero los errores de dedo se corrigen siempre, tambien en el servidor (un cliente viejo o una llamada directa)
+    r = client.post(f"{SLUG}/checkout", json=_body(pid, contact=contacto("ana@gmial.com"), idempotency_key="ck-mail-0005"))
+    assert r.status_code == 422 and "ana@gmail.com" in r.json()["detail"]
+    assert client.post(f"{SLUG}/email-check", json={"email": "ana@gmial.com"}).json()["reason"] == "error_de_dedo"
 
 
 def test_revisar_correo_tiene_tope_por_ip(client, auth):
     _tienda(client)
     codes = [client.post(f"{SLUG}/email-check", json={"email": f"a{i}@correo.com"}).status_code for i in range(42)]
     assert codes[0] == 200 and codes[-1] == 429
+
+
+def test_revisar_correo_tiene_tope_global(client, auth, from_ip, monkeypatch):
+    from app.core.ratelimit import email_check_global_limiter
+
+    _tienda(client)
+    monkeypatch.setattr(email_check_global_limiter, "limit", 3)  # muchas IPs distintas: frena el tope global
+    codes = [client.post(f"{SLUG}/email-check", json={"email": f"a{i}@correo.com"}, headers=from_ip(f"190.10.0.{i + 1}")).status_code for i in range(4)]
+    assert codes == [200, 200, 200, 429]
 
 
 # ---------------------------------------------------------------- item 33: envio GAM 4 000 y aviso del mensajero
@@ -183,6 +217,13 @@ def test_aviso_interno_por_cada_envio_a_domicilio(client, auth, db_session, inv_
     assert "Pagado" in avisos[0].html
     assert st("preparando").status_code == 200 and st("enviado", tracking_number="X1").status_code == 200
     assert len(_avisos_envio(db_session, oid)) == 1  # uno solo por pedido
+
+    # el endpoint generico de ordenes (eventos, POS, integraciones) tambien avisa, una sola vez
+    o = client.post(f"{SLUG}/checkout", json=_body(pid, idempotency_key="ck-envio-0005"))
+    gid = db_session.scalar(select(Order.id).where(Order.number == o.json()["number"]))
+    assert client.patch(f"/orders/{gid}", json={"status": "pagado"}).status_code == 200
+    assert client.patch(f"/orders/{gid}", json={"status": "pagado"}).status_code == 200
+    assert len(_avisos_envio(db_session, gid)) == 1
 
     # retiro en sitio: no hay mensajero que coordinar
     r = client.post(f"{SLUG}/checkout", json=_body(pid, delivery={"type": "retiro"}, shipping_method="Retiro en tienda", idempotency_key="ck-envio-0002"))

@@ -573,7 +573,7 @@ def product_image(p: Product | None, prefer: str | None = None) -> str | None:
 
 def kit_photos(lines: list[dict], manual: list | None = None, products: dict[int, Product] | None = None) -> list[dict]:
     """Fotos de la tarjeta del kit. manual = lo que Andres eligio en Mi Tienda -> Vitrina ([{product_id, image}]): manda
-    si alguna sigue valida (producto activo con foto). Si no, los equipos que el kit arma hoy, sin repetir producto."""
+    si alguna sigue valida (producto activo, publicado en la web y con foto). Si no, los equipos que el kit arma hoy, sin repetir producto."""
     out: list[dict] = []
     for m in manual or []:
         try:
@@ -581,7 +581,7 @@ def kit_photos(lines: list[dict], manual: list | None = None, products: dict[int
         except (TypeError, ValueError):
             continue
         p = (products or {}).get(pid)
-        img = product_image(p, (m or {}).get("image")) if p is not None and p.active else None
+        img = product_image(p, (m or {}).get("image")) if p is not None and p.active and p.show_on_web else None
         if img and all(x["product_id"] != pid for x in out):
             out.append({"product_id": pid, "image": img, "label": product_type(p) or "Equipo", "name": p.name})
     if out:

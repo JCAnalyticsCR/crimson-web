@@ -25,6 +25,7 @@ from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..core.ratelimit import (
     checkout_global_limiter,
+    email_check_global_limiter,
     email_check_limiter,
     order_card_limiter,
     order_lookup_limiter,
@@ -107,6 +108,7 @@ def email_check_public(slug: str, data: EmailCheckIn, request: Request, db: Sess
     """El checkout revisa el correo al salir del paso "Tus datos": formato, errores de dedo y que el dominio tenga MX
     (pedido 21/10, item 32). Si el DNS no responde, ok=True: no se frena una compra por una falla del DNS."""
     email_check_limiter.hit(f"email:{ip_key(client_ip(request))}")
+    email_check_global_limiter.hit("email:*")  # muchas IPs con dominios que no responden no acaparan los hilos
     t = _tenant(db, slug)
     r = email_check.check_email(data.email, dns=bool(so.checkout_cfg(t).get("verify_email", True)))
     return {k: r[k] for k in ("ok", "reason", "message", "suggestion")}
@@ -160,9 +162,10 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
     c = _contact(data.contact)
     if not c.email and len(so.digits(c.phone)) < 8:
         raise HTTPException(422, "Indicá un correo para enviarte la confirmación")
-    if c.email and so.checkout_cfg(t).get("verify_email", True):
-        # el mismo chequeo del paso "Tus datos" (cacheado): un dominio que no existe o sin MX no recibe la confirmacion
-        chk = email_check.check_email(str(c.email))
+    if c.email:
+        # el mismo chequeo del paso "Tus datos" (cacheado): un dominio que no existe o sin MX no recibe la confirmacion.
+        # Los errores de dedo (gmial.com) se corrigen siempre; Mi Tienda solo apaga la consulta del DNS.
+        chk = email_check.check_email(str(c.email), dns=bool(so.checkout_cfg(t).get("verify_email", True)))
         if not chk["ok"]:
             raise HTTPException(422, chk["message"])
     id_type, id_number = so.check_id(c.id_type, c.id_number)
