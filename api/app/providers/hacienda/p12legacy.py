@@ -25,7 +25,6 @@ from cryptography.hazmat.primitives.ciphers import Cipher, modes
 from cryptography.hazmat.primitives.ciphers import algorithms as alg
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-
 # Tope de iteraciones que se aceptan del propio archivo (KDF, MAC y PBES2). Los .p12 de ATV usan 2048 y los de
 # OpenSSL moderno 2048 o 10000; un archivo con millones de iteraciones (armado a proposito o raro) dejaria el servidor
 # derivando llaves por minutos en cada intento de PIN: se rechaza como archivo no valido.
