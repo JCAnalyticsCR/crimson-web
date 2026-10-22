@@ -134,6 +134,13 @@ def _crear(db: Session, data: IncidentIn, ip: str) -> str:
     db.add(tk)
     db.flush()
     audit(db, t.id, None, "create_web", "support_ticket", tk.id, {"ligado_a_cliente": bool(c)}, ip=ip)
+    avisar_ticket_web(db, t, tk, data, c, resumen)
+    db.commit()
+    return tk.number
+
+
+def avisar_ticket_web(db: Session, t, tk: SupportTicket, data, c, resumen: str) -> None:
+    """Aviso a administracion y supervision: entro un reporte desde la pagina web (tambien lo usa la vista previa)."""
     e = html.escape
     cuerpo = (
         f"<p>Entró un reporte desde la página web: <b>{e(tk.number)}</b></p>"
@@ -147,8 +154,6 @@ def _crear(db: Session, data: IncidentIn, ip: str) -> str:
         + cta(f"/tickets?id={tk.id}", f"Abrir el ticket {tk.number}")
     )
     notify_roles(db, t, ("admin", "supervisor"), f"Ticket web {tk.number} · {resumen[:50]}", cuerpo, "support_ticket", tk.id)
-    db.commit()
-    return tk.number
 
 
 @router.post("/incidents", status_code=201)

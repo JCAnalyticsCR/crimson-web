@@ -265,21 +265,25 @@ def ticket_create(data: TicketIn, p: Principal = Depends(need("tickets")), db: S
     db.add(t)
     db.flush()
     audit(db, p.tenant.id, p.user.id, "create_portal", "support_ticket", t.id, {"prioridad": t.priority}, ip=p.ip)
-    c = db.get(Customer, p.customer_id)
+    avisar_ticket_portal(db, p.tenant, db.get(Customer, p.customer_id), t, data.description)
+    db.commit()
+    return _ticket_out(db, t, p, full=True)
+
+
+def avisar_ticket_portal(db: Session, tenant, c: Customer, t: SupportTicket, descripcion: str) -> None:
+    """Aviso a administracion y supervision: un cliente abrio un ticket desde su portal (tambien lo usa la vista previa)."""
     e = html.escape
     notify_roles(
         db,
-        p.tenant,
+        tenant,
         ("admin", "supervisor"),
         f"Ticket del portal {t.number} · {c.name[:40]}",
         f"<p><b>{e(c.name)}</b> abrió <b>{e(t.number)}</b> desde el portal de clientes.</p>"
-        f"<p>{e(t.subject)} · prioridad indicada: {e(t.priority)}</p><blockquote>{e(data.description)}</blockquote>"
+        f"<p>{e(t.subject)} · prioridad indicada: {e(t.priority)}</p><blockquote>{e(descripcion)}</blockquote>"
         f"<p>Primera respuesta antes de {t.sla['respuesta']} h.</p>" + cta(f"/tickets?id={t.id}", f"Abrir el ticket {t.number}"),
         "support_ticket",
         t.id,
     )
-    db.commit()
-    return _ticket_out(db, t, p, full=True)
 
 
 class CommentIn(BaseModel):
@@ -308,18 +312,23 @@ def comment(tid: int, data: CommentIn, p: Principal = Depends(need("tickets")), 
         t.status = "en_proceso"  # el cliente contesto o dice que sigue fallando: vuelve a la cola
         t.resolved_at = None
     audit(db, p.tenant.id, p.user.id, "comment_portal", "support_ticket", t.id, ip=p.ip)
+    avisar_respuesta_cliente(db, p.tenant, t, p.user.full_name, data.body)
+    db.commit()
+    return _ticket_out(db, t, p, full=True)
+
+
+def avisar_respuesta_cliente(db: Session, tenant, t: SupportTicket, autor: str, texto: str) -> None:
+    """El cliente escribio en su ticket: aviso al responsable o, sin responsable, a administracion y supervision."""
     destino = db.get(User, t.assigned_to) if t.assigned_to else None
     asunto = f"El cliente respondió en {t.number}"
     cuerpo = (
-        f"<p><b>{html.escape(p.user.full_name)}</b> escribió en <b>{html.escape(t.number)}</b>:</p><blockquote>{html.escape(data.body)}</blockquote>"
+        f"<p><b>{html.escape(autor)}</b> escribió en <b>{html.escape(t.number)}</b>:</p><blockquote>{html.escape(texto)}</blockquote>"
         + cta(f"/tickets?id={t.id}", f"Responder en {t.number}")
     )
     if destino and destino.email:
-        queue_email(db, p.tenant, destino.email, asunto, cuerpo, "support_ticket", t.id)
+        queue_email(db, tenant, destino.email, asunto, cuerpo, "support_ticket", t.id)
     else:
-        notify_roles(db, p.tenant, ("admin", "supervisor"), asunto, cuerpo, "support_ticket", t.id)
-    db.commit()
-    return _ticket_out(db, t, p, full=True)
+        notify_roles(db, tenant, ("admin", "supervisor"), asunto, cuerpo, "support_ticket", t.id)
 
 
 @router.post("/media", status_code=201)

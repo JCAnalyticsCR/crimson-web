@@ -117,6 +117,21 @@ def approve(rid: int, data: ApproveIn, p: Principal = Depends(require("portal_cl
     return {**inv, "customer_id": c.id, "customer": c.name}
 
 
+def avisar_rechazo(db: Session, tenant, r: AccessRequest, motivo: str):
+    """A quien pidio acceso: la solicitud no se aprobo, con el motivo (tambien lo usa la vista previa)."""
+    e = html.escape
+    return queue_email(
+        db,
+        tenant,
+        r.email,
+        f"Su solicitud de acceso a {tenant.name}",
+        f"<p>Hola {e(r.name)}:</p><p>No pudimos aprobar su solicitud de acceso al portal de clientes.</p>"
+        f"<p>{e(motivo)}</p><p>Si cree que es un error, escríbanos y lo revisamos.</p>",
+        "access_request",
+        r.id,
+    )
+
+
 class RejectIn(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
     notify: bool = True
@@ -132,18 +147,7 @@ def reject(rid: int, data: RejectIn, p: Principal = Depends(require("portal_clie
     audit(db, p.tenant.id, p.user.id, "reject", "access_request", r.id, ip=p.ip)
     emailed = False
     if data.notify:
-        e = html.escape
-        m = queue_email(
-            db,
-            p.tenant,
-            r.email,
-            f"Su solicitud de acceso a {p.tenant.name}",
-            f"<p>Hola {e(r.name)}:</p><p>No pudimos aprobar su solicitud de acceso al portal de clientes.</p>"
-            f"<p>{e(data.reason)}</p><p>Si cree que es un error, escríbanos y lo revisamos.</p>",
-            "access_request",
-            r.id,
-        )
-        emailed = m.status == "enviado"
+        emailed = avisar_rechazo(db, p.tenant, r, data.reason).status == "enviado"
     db.commit()
     return {"ok": True, "emailed": emailed}
 

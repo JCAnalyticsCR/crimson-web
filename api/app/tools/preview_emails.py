@@ -7,7 +7,8 @@ Uso:  python -m app.tools.preview_emails CARPETA
   correo, todo queda "simulado" en esa base desechable.
 - Los datos son inventados (Empresa Ejemplo, Cliente Ejemplo, correos @ejemplo.com): nada de clientes reales.
 - Llama a las mismas funciones que arman los correos reales (doc_email_html, reminder_email, el correo del pedido web,
-  invitaciones, avisos internos...), asi que lo que se ve es lo que sale.
+  invitaciones, avisos internos de tickets, campo, compras, margen, salud...) y, cuando la funcion encola, toma el
+  HTML de la cola: lo que se ve es lo que sale.
 - Al final escribe index.html con un enlace a cada uno.
 """
 
@@ -47,19 +48,21 @@ def _seed(db):
         settings={
             "phones": [{"number": "2222-0000", "kind": "whatsapp", "main": True}],
             "addresses": ["San José, Costa Rica"],
-            "store": {"whatsapp": "8888-0000"},
+            "store": {"whatsapp": "8888-0000", "published": True},
         },
     )
     db.add(t)
     db.flush()
     admin = User(email="admin@ejemplo.com", full_name="Ana Administradora", password_hash="x")
     vend = User(email="vendedor@ejemplo.com", full_name="Víctor Vendedor", password_hash="x")
-    db.add_all([admin, vend])
+    tec = User(email="tecnico@ejemplo.com", full_name="Tomás Técnico", password_hash="x")
+    db.add_all([admin, vend, tec])
     db.flush()
     db.add_all(
         [
             TenantUser(tenant_id=t.id, user_id=admin.id, role_code="admin", active=True),
             TenantUser(tenant_id=t.id, user_id=vend.id, role_code="ventas", active=True),
+            TenantUser(tenant_id=t.id, user_id=tec.id, role_code="tecnico", active=True),
         ]
     )
     c = Customer(tenant_id=t.id, name="Cliente Ejemplo S.A.", email="cliente@ejemplo.com", id_type="juridica", id_number="3101000000")
@@ -126,12 +129,15 @@ def _order(t, status: str = "nuevo", **kw):
     return o
 
 
-def _outbox_html(db, before: int) -> str:
+def _outbox_html(db, before: int, to: str | None = None) -> str:
     from sqlalchemy import select
 
     from ..models import EmailOutbox
 
-    m = db.scalars(select(EmailOutbox).where(EmailOutbox.id > before).order_by(EmailOutbox.id)).first()
+    q = select(EmailOutbox).where(EmailOutbox.id > before)
+    if to:
+        q = q.where(EmailOutbox.to == to)
+    m = db.scalars(q.order_by(EmailOutbox.id)).first()
     if m is None:
         raise RuntimeError("no se encolo ningun correo")
     return m.html
@@ -145,19 +151,20 @@ def _last_id(db) -> int:
     return db.scalar(select(func.max(EmailOutbox.id))) or 0
 
 
-def _queued(db, fn: Callable[[], object]) -> str:
-    """Corre una funcion que encola un correo y devuelve el HTML que quedo en la cola (lo que sale de verdad)."""
+def _queued(db, fn: Callable[[], object], to: str | None = None) -> str:
+    """Corre una funcion que encola un correo y devuelve el HTML que quedo en la cola (lo que sale de verdad). Con `to`,
+    el primero que fue a esa direccion (una funcion que avisa a varios: el resumen al equipo y el aviso al responsable)."""
     antes = _last_id(db)
     fn()
     db.flush()
-    return _outbox_html(db, antes)
+    return _outbox_html(db, antes, to)
 
 
 def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
     from sqlalchemy import select
 
     from ..models import User
-    from ..services import accounts, avisos_venta, email_layout, onvo
+    from ..services import accounts, avisos_venta, onvo
     from ..services import store_orders as so
     from ..services.einvoice_delivery import _html as einvoice_html
     from ..services.mail import doc_email_html, queue_email
@@ -192,7 +199,9 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
     def seguridad() -> str:
         return _queued(
             db,
-            lambda: accounts.notify_security(db, t, admin, "Tu contraseña de Crimson cambió", "<p>Si no fuiste vos, avisá de inmediato a la administración.</p>"),
+            lambda: accounts.notify_security(
+                db, t, admin, "Tu contraseña de Crimson cambió", "<p>Si no fuiste vos, avisá de inmediato a la administración.</p>"
+            ),
         )
 
     def por_emitir() -> str:
@@ -217,7 +226,13 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
         from ..tasks.correo import _notify_owners
 
         fallido = EmailOutbox(
-            id=9001, tenant_id=t.id, to="cliente@ejemplo.com", subject="Factura FEC-000501 · Empresa Ejemplo", entity="invoice", entity_id=999, error="550 buzón inexistente"
+            id=9001,
+            tenant_id=t.id,
+            to="cliente@ejemplo.com",
+            subject="Factura FEC-000501 · Empresa Ejemplo",
+            entity="invoice",
+            entity_id=999,
+            error="550 buzón inexistente",
         )
         return _queued(db, lambda: _notify_owners(db, [fallido]))
 
@@ -232,7 +247,9 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
         from ..services.hacienda_tasks import daily_alert_html
 
         items = ["2 comprobante(s) recibido(s) sin aceptar: el plazo vence en 3 días hábiles", "1 factura emitida rechazada por Hacienda: FEC-000501"]
-        return _queued(db, lambda: queue_email(db, t, "admin@ejemplo.com", "Hacienda: 2 pendiente(s) · Empresa Ejemplo", daily_alert_html(items), "hacienda", 0))
+        return _queued(
+            db, lambda: queue_email(db, t, "admin@ejemplo.com", "Hacienda: 2 pendiente(s) · Empresa Ejemplo", daily_alert_html(items), "hacienda", 0)
+        )
 
     def onvo_webhook(status: int) -> Callable[[], str]:
         detalle = "X-Webhook-Secret no coincide" if status == 401 else "ONVO no respondió al consultar la sesión cs_EJEMPLO"
@@ -251,7 +268,13 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
         from ..models import WorkOrder
 
         o = WorkOrder(
-            id=31, tenant_id=t.id, customer_id=c.id, number="OT-000031", title="Instalación de 4 cámaras", site="Bodega central", scheduled_at=datetime(2026, 10, 23, 15, tzinfo=UTC)
+            id=31,
+            tenant_id=t.id,
+            customer_id=c.id,
+            number="OT-000031",
+            title="Instalación de 4 cámaras",
+            site="Bodega central",
+            scheduled_at=datetime(2026, 10, 23, 15, tzinfo=UTC),
         )
         return avisos_venta.ot_asignada(db, t, o, [admin.id], None)
 
@@ -280,12 +303,10 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
         boleto = Ticket(id=41, tenant_id=t.id, event_id=3, code="ABCDE-12345", holder_name="Carla Compradora", holder_email="carla@ejemplo.com")
         return _email_tickets(db, t, ev, [boleto])
 
-    def aviso_fragmento(asunto: str, cuerpo: str) -> Callable[[], str]:
-        # un aviso interno armado como fragmento (notify_roles / queue_email): queue_email le pone el diseno base
-        return lambda: _queued(db, lambda: queue_email(db, t, "admin@ejemplo.com", asunto, cuerpo, "preview", 0))
-
     return {
-        "cotizacion": lambda: doc_email_html(t, "cotización", "COT-000188", "₡226,000.00", None, "Gracias por su interés. Quedamos atentos.", issued="21/10/2026", due="05/11/2026"),
+        "cotizacion": lambda: doc_email_html(
+            t, "cotización", "COT-000188", "₡226,000.00", None, "Gracias por su interés. Quedamos atentos.", issued="21/10/2026", due="05/11/2026"
+        ),
         "cotizacion-con-portal": lambda: doc_email_html(
             t, "cotización", "COT-000188", "₡226,000.00", None, None, issued="21/10/2026", due="05/11/2026", view_link="https://panel.ejemplo.com/documentos"
         ),
@@ -310,7 +331,9 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
         "entradas-evento": encolado(entradas),
         "pedido-aviso-interno": interno_pedido,
         "invitacion-panel": lambda: accounts.invite_email_html(t, "ventas", "https://panel.ejemplo.com/invitacion/TOKEN-DE-EJEMPLO", 7),
-        "restablecer-contrasena": lambda: accounts.reset_email_html(t, "Ana Administradora", "https://panel.ejemplo.com/restablecer/TOKEN-DE-EJEMPLO", "24 horas"),
+        "restablecer-contrasena": lambda: accounts.reset_email_html(
+            t, "Ana Administradora", "https://panel.ejemplo.com/restablecer/TOKEN-DE-EJEMPLO", "24 horas"
+        ),
         "aviso-de-seguridad": seguridad,
         "acceso-portal-aliados": lambda: accounts.access_email_html(
             t,
@@ -335,7 +358,10 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
         "comprobante-electronico": lambda: einvoice_html(
             t,
             f"Factura electrónica {inv.number}",
-            [f"Le compartimos la <b>factura electrónica {inv.number}</b> (clave 506000000000000000000000000000000000000000000000).", "Adjuntamos el XML y el PDF."],
+            [
+                f"Le compartimos la <b>factura electrónica {inv.number}</b> (clave 506000000000000000000000000000000000000000000000).",
+                "Adjuntamos el XML y el PDF.",
+            ],
             True,
         ),
         "recibo-pago-en-linea": recibo_onvo,
@@ -357,27 +383,388 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
             t, "LEV-000014", "Cliente Ejemplo S.A.", "Bodega central", "Adjuntamos el informe del recorrido. Quedamos atentos.", attached_pdf=True
         ),
         "respaldo-diario-falla": lambda: html_falla([Fallo(5, "subida", "rclone: el destino no respondió")], {"subido": False}, HOY),
-        "aviso-interno-ticket-sla": aviso_fragmento(
-            "2 ticket(s) sin primera respuesta a tiempo",
-            "<p>Estos tickets están sin primera respuesta a tiempo:</p><ul><li>TCK-0012 · Cámara sin imagen · prioridad alta</li>"
-            "<li>TCK-0015 · Grabador reinicia · prioridad media</li></ul>" + email_layout.cta("/tickets", "Abrir Tickets"),
-        ),
-        "aviso-interno-compras": aviso_fragmento(
-            "PAGADO: comprar hoy a Proveedor Ejemplo · pedido TW-000077 (SC-0003)",
-            "<p>El pedido web <b>TW-000077</b> ya está <b>pagado</b>. Hay que comprarle hoy a Proveedor Ejemplo:</p>"
-            "<ul><li><b>Cámara IP 4 MP</b> × 2 · código CAM-4MP</li></ul>" + email_layout.cta("/compras", "Abrir Compras"),
-        ),
-        "aviso-interno-salud": aviso_fragmento(
-            "Salud de la plataforma · 2026-10-21 · Todo en orden",
-            "<p>Estado general: <b>Todo en orden</b>.</p><table border=0 cellpadding=4><tr><td>Latido del worker</td><td>hace 1 min</td></tr>"
-            "<tr><td>Correos de las últimas 24 h</td><td>42 enviados</td></tr></table>"
-            + email_layout.cta("/ajustes?tab=correo", "Revisar los correos en Ajustes"),
-        ),
-        "aviso-interno-margen": aviso_fragmento(
-            "Margen: 1 producto(s) bajo el 25 %",
-            "<p>1 producto(s) de la tienda están bajo el margen mínimo de 25 %.</p><ul><li><b>Cámara IP 4 MP</b> (CAM-4MP) · margen 18 %</li></ul>"
-            '<p><a href="https://panel.ejemplo.com/aprobaciones?seccion=precios_por_revisar">Revisar precios</a></p>',
-        ),
+        **avisos_internos(db, t, admin, c, inv),
+    }
+
+
+def avisos_internos(db, t, admin, c, inv) -> dict[str, Callable[[], str]]:
+    """Avisos al equipo (tickets, campo, compras, margen, salud, recurrencias, Hacienda, accesos, tienda...). Cada uno
+    llama a la funcion que arma ese correo en la plataforma, con datos de ejemplo sembrados en la base en memoria."""
+    from types import SimpleNamespace
+
+    from sqlalchemy import select
+
+    from ..models import (
+        AccessRequest,
+        AllyCompany,
+        EInvoiceDocument,
+        Opportunity,
+        Product,
+        Project,
+        Quote,
+        Supplier,
+        SupplierItem,
+        SupportTicket,
+        Survey,
+        SurveyPoint,
+        User,
+    )
+
+    ahora = datetime.now(UTC)
+    vend = db.scalar(select(User).where(User.email == "vendedor@ejemplo.com"))
+    tec = db.scalar(select(User).where(User.email == "tecnico@ejemplo.com"))
+    p_admin = SimpleNamespace(tenant=t, user=admin, ip=None)
+
+    def ticket(id: int, number: str, subject: str, **kw) -> SupportTicket:
+        base = {
+            "tenant_id": t.id,
+            "customer_id": c.id,
+            "kind": "soporte",
+            "channel": "portal",
+            "level": 1,
+            "priority": "alta",
+            "status": "nuevo",
+            "description": "La cámara del portón no da imagen desde anoche.",
+            "sla": {"respuesta": 4, "resolucion": 24},
+        }
+        base.update(kw)
+        tk = SupportTicket(id=id, number=number, subject=subject, **base)
+        db.add(tk)
+        db.flush()
+        return tk
+
+    def sla_atrasos(to: str | None = None) -> Callable[[], str]:
+        def run() -> str:
+            from ..services import sla
+
+            # cada ticket avisa una sola vez por plazo: el segundo tipo (el aviso al responsable) usa sus propios tickets
+            base = 812 if to is None else 816
+            ticket(base, f"TCK-0{base}", "Cámara sin imagen", due_at=ahora - timedelta(hours=3), assigned_to=tec.id)
+            ticket(base + 1, f"TCK-0{base + 1}", "Grabador reinicia solo", priority="media", due_at=ahora - timedelta(hours=1))
+            return _queued(db, lambda: sla.avisar_atrasos(db, t, ahora), to)
+
+        return run
+
+    def asignado(con_responsable: bool) -> str:
+        from ..routers.support_desk import _avisar_asignado
+
+        n = 821 if con_responsable else 820
+        tk = ticket(n, f"TCK-0{n}", "Mantenimiento preventivo de cámaras", assigned_to=tec.id if con_responsable else None)
+        return _queued(db, lambda: _avisar_asignado(db, p_admin, tk, nuevo=True))
+
+    def ticket_portal() -> str:
+        from ..routers.client_portal import avisar_ticket_portal
+
+        tk = ticket(830, "TCK-0830", "Falla · Cámara del portón sin imagen")
+        return _queued(db, lambda: avisar_ticket_portal(db, t, c, tk, tk.description))
+
+    def ticket_aliado() -> str:
+        from ..routers.ally_portal import avisar_ticket_aliado
+
+        aliada = db.scalar(select(AllyCompany).where(AllyCompany.tenant_id == t.id))
+        tk = ticket(831, "TCK-0831", "Cable dañado en la bodega", ally_company_id=aliada.id)
+        return _queued(db, lambda: avisar_ticket_aliado(db, t, aliada, proyecto(), tk))
+
+    def respuesta_cliente() -> str:
+        from ..routers.client_portal import avisar_respuesta_cliente
+
+        tk = ticket(832, "TCK-0832", "Grabador sin acceso remoto", status="esperando_cliente", assigned_to=tec.id)
+        return _queued(db, lambda: avisar_respuesta_cliente(db, t, tk, "Carla Cliente", "Ya reinicié el grabador y sigue igual."))
+
+    def ticket_web() -> str:
+        from ..routers.public_incidents import IncidentIn, avisar_ticket_web
+
+        texto = "Las cámaras de la entrada no graban desde ayer."
+        data = IncidentIn(
+            name="Carla Compradora",
+            company="Cliente Ejemplo S.A.",
+            phone="8800-0000",
+            email="carla@ejemplo.com",
+            kind="falla",
+            severity="alta",
+            description=texto,
+            location="Bodega central",
+        )
+        tk = ticket(833, "TCK-0833", f"Falla · {texto}", channel="web")
+        return _queued(db, lambda: avisar_ticket_web(db, t, tk, data, c, texto))
+
+    def levantamiento(id: int, **kw) -> Survey:
+        s = Survey(id=id, tenant_id=t.id, number=f"LEV-0000{id}", customer_id=c.id, site="Bodega central", technician_id=tec.id, kind="cctv", **kw)
+        db.add(s)
+        db.flush()
+        return s
+
+    def lev_asignado() -> str:
+        from ..routers.fieldwork import avisar_levantamiento_asignado
+
+        s = levantamiento(21)
+        return _queued(db, lambda: avisar_levantamiento_asignado(db, t, tec.email, s, HOY + timedelta(days=2)))
+
+    def lev_enviado() -> str:
+        from ..routers.fieldwork import send_survey
+
+        s = levantamiento(22)
+        db.add_all([SurveyPoint(survey_id=s.id, code="C1", label="Portón principal"), SurveyPoint(survey_id=s.id, code="C2", label="Bodega")])
+        db.flush()
+        db.refresh(s)
+        return _queued(db, lambda: send_survey(db, t, s, tec, None))
+
+    def lev_devuelto() -> str:
+        from ..routers.fieldwork import ObservationIn, _notify_returned
+
+        s = levantamiento(23)
+        obs = [ObservationIn(point_code="C1", text="Falta la altura de montaje."), ObservationIn(text="Agregá una foto del rack.")]
+        return _queued(db, lambda: _notify_returned(db, p_admin, s, obs))
+
+    def oportunidad() -> Opportunity:
+        o = db.get(Opportunity, 40)
+        if o is None:
+            o = Opportunity(
+                id=40,
+                tenant_id=t.id,
+                number="OPO-000040",
+                title="Videovigilancia para bodega",
+                customer_id=c.id,
+                owner_id=vend.id,
+                site="Bodega central",
+                solution="cctv",
+            )
+            db.add(o)
+            db.flush()
+        return o
+
+    def lev_solicitado() -> str:
+        from ..routers.pipeline import avisar_solicitud_levantamiento
+
+        o = oportunidad()
+        return _queued(db, lambda: avisar_solicitud_levantamiento(db, t, o, vend.full_name, HOY + timedelta(days=3), "El cliente prefiere en la mañana."))
+
+    def cotizacion_lista() -> str:
+        from ..routers.fieldwork import _notify_quote_ready
+
+        o = oportunidad()
+        q = SimpleNamespace(id=190, number="COT-000190")
+        return _queued(db, lambda: _notify_quote_ready(db, p_admin, o, q))
+
+    def proyecto() -> Project:
+        pr = db.get(Project, 9)
+        if pr is None:
+            pr = Project(id=9, tenant_id=t.id, number="PRY-000009", name="Instalación de videovigilancia · Bodega central", customer_id=c.id)
+            db.add(pr)
+            db.flush()
+        return pr
+
+    def proyecto_terminado() -> str:
+        from ..routers.fieldwork import avisar_proyecto_terminado
+
+        pr = proyecto()
+        return _queued(db, lambda: avisar_proyecto_terminado(db, t, ("admin",), pr, 12.5))
+
+    def compras_proyecto() -> str:
+        from ..routers.projects import avisar_compra_proyecto
+
+        faltan = [
+            {"name": "Cámara IP 4 MP", "to_buy": Decimal("2"), "supplier_stock": 15},
+            {"name": "Cable UTP Cat 6 (caja)", "to_buy": Decimal("1"), "supplier_stock": None},
+        ]
+        return _queued(db, lambda: avisar_compra_proyecto(db, t, proyecto(), faltan, {"id": 4, "number": "SC-0004"}))
+
+    def producto() -> Product:
+        prod = db.get(Product, 70)
+        if prod is None:
+            prov = Supplier(tenant_id=t.id, name="Proveedor Ejemplo")
+            prod = Product(id=70, tenant_id=t.id, name="Cámara IP 4 MP", code="CAM-4MP", currency="CRC", price=Decimal("45000"), active=True, show_on_web=True)
+            db.add_all([prov, prod])
+            db.flush()
+            db.add(SupplierItem(tenant_id=t.id, supplier_id=prov.id, product_id=prod.id, code="EJ-CAM4", name="Cámara IP 4 MP"))
+            db.flush()
+        return prod
+
+    def compras_pedido() -> str:
+        from ..services.store_inventory import _notify_paid_purchase
+
+        prod = producto()
+        o = _order(t, "pagado", paid_at=ahora)
+        req = SimpleNamespace(id=3, number="SC-0003", lines=[SimpleNamespace(product_id=prod.id, name=prod.name, quantity=Decimal("2"))])
+        return _queued(db, lambda: _notify_paid_purchase(db, t, o, [req]))
+
+    def margen_resumen() -> str:
+        from ..tasks.margen import daily_summary
+
+        prod = producto()
+        prod.margin_flagged_at = ahora
+        prod.margin_info = {"margin_pct": "18", "min_pct": "25", "price": "45000", "suggested": "52000", "currency": "CRC", "flagged": True}
+        db.flush()
+        return _queued(db, lambda: daily_summary(db))
+
+    def margen_frenado() -> str:
+        from ..services.margin_guard import _brake_alert
+
+        out = {"reason": "revisión diaria", "frenada": "el tipo de cambio del dólar saltó 12 % de un día al otro", "nuevos_retenidos": 0, "frenados": 3}
+        return _queued(db, lambda: _brake_alert(db, t, out, {}))
+
+    def margen_sonda() -> str:
+        from ..services.discounts import MARGIN_PROBE_LIMIT, margin_probe
+
+        p_vend = SimpleNamespace(tenant=t, user=vend, ip=None)
+        q = SimpleNamespace(id=191, number="COT-000191")
+
+        def run() -> None:
+            for i in range(MARGIN_PROBE_LIMIT):
+                margin_probe(db, p_vend, q, Decimal(20 + i), False)
+
+        return _queued(db, run)
+
+    def salud_diaria() -> str:
+        from ..tasks.salud import daily_report
+
+        return _queued(db, lambda: daily_report(db, ahora), "admin@ejemplo.com")
+
+    def recurrencia():
+        return SimpleNamespace(id=6, tenant_id=t.id, name="Monitoreo mensual", next_date=HOY - timedelta(days=31))
+
+    def recurrencia_alerta() -> str:
+        from ..routers.ops import _rec_alert
+
+        cuerpo = "La factura del periodo no salió: el cliente no tiene correo. Agregalo en su ficha y reenviala desde Aprobaciones."
+        return _queued(db, lambda: _rec_alert(db, recurrencia(), inv, "Factura recurrente sin enviar", cuerpo))
+
+    def recurrencia_atrasada() -> str:
+        from ..routers.ops import _rec_behind_alert
+
+        return _queued(db, lambda: _rec_behind_alert(db, recurrencia()))
+
+    def hacienda_rechazo() -> str:
+        from ..services.hacienda_sync import _alert_admins
+
+        detalle = "La factura queda como estaba. Detalle: el monto supera el de la factura de referencia."
+        return _queued(db, lambda: _alert_admins(db, t, "Hacienda rechazó la nota de crédito 00100001030000000012", detalle))
+
+    def nc_por_recepcion() -> str:
+        from ..services.reception_intake import _alert_client_rejection
+
+        doc = EInvoiceDocument(
+            tenant_id=t.id,
+            invoice_id=601,
+            doc_type="FE",
+            consecutive="00100001010000000601",
+            provider="hacienda",
+            clave="506000000000000000000000000000000000000000000000",
+            receiver_message="3",
+            receiver_detail="El monto no corresponde a lo acordado.",
+        )
+        return _queued(db, lambda: _alert_client_rejection(db, t, doc))
+
+    def cotizaciones_frias() -> str:
+        from ..tasks.ventas import avisar_cotizaciones_frias
+
+        q = Quote(
+            id=192,
+            tenant_id=t.id,
+            customer_id=c.id,
+            number="COT-000192",
+            status="enviada",
+            acceptance_status="pendiente",
+            seller_id=vend.id,
+            created_by=vend.id,
+            currency="CRC",
+            total=Decimal("480000"),
+            issue_date=HOY - timedelta(days=12),
+        )
+        db.add(q)
+        db.flush()
+        return _queued(db, lambda: avisar_cotizaciones_frias(db, t, ahora))
+
+    def acceso_solicitud() -> AccessRequest:
+        r = db.get(AccessRequest, 8)
+        if r is None:
+            r = AccessRequest(
+                id=8,
+                tenant_id=t.id,
+                name="Carla Cliente",
+                email="carla@ejemplo.com",
+                phone="8800-0000",
+                company="Cliente Ejemplo S.A.",
+                id_number="3101000000",
+                status="pendiente",
+            )
+            db.add(r)
+            db.flush()
+        return r
+
+    def acceso_nueva() -> str:
+        from ..routers.public_access import avisar_solicitud_acceso
+
+        return _queued(db, lambda: avisar_solicitud_acceso(db, t, acceso_solicitud()))
+
+    def acceso_rechazada() -> str:
+        from ..routers.client_access import avisar_rechazo
+
+        return _queued(db, lambda: avisar_rechazo(db, t, acceso_solicitud(), "No encontramos su empresa entre nuestros clientes con contrato vigente."))
+
+    def mensaje_tienda() -> str:
+        from ..routers.store import avisar_mensaje_tienda
+
+        return _queued(db, lambda: avisar_mensaje_tienda(db, t, c, "Carla Compradora", "carla@ejemplo.com", "8800-0000", "¿Hacen instalación en Cartago?"))
+
+    def asesoria_web() -> str:
+        from ..routers.store_showcase import AdvisoryIn, _crear_oportunidad
+
+        data = AdvisoryIn(
+            name="Carla Compradora",
+            party="empresa",
+            company="Cliente Ejemplo S.A.",
+            phone="8800-0000",
+            email="carla@ejemplo.com",
+            solution="cctv",
+            description="Necesitamos cámaras para la bodega y la entrada principal.",
+            location="Heredia",
+            install=True,
+        )
+        return _queued(db, lambda: _crear_oportunidad(db, t.slug, data, "127.0.0.1"))
+
+    def contrasena_temporal() -> str:
+        from ..routers.users_admin import avisar_contrasena_temporal
+
+        return _queued(db, lambda: avisar_contrasena_temporal(db, t, vend, admin.full_name, ahora))
+
+    def prueba_correo() -> str:
+        from ..routers.settings import mail_test
+
+        return _queued(db, lambda: mail_test(p_admin, db))
+
+    return {
+        "aviso-interno-ticket-sla": sla_atrasos(),
+        "ticket-sla-al-responsable": sla_atrasos("tecnico@ejemplo.com"),
+        "ticket-asignado": lambda: asignado(True),
+        "ticket-sin-asignar": lambda: asignado(False),
+        "ticket-portal-clientes": ticket_portal,
+        "ticket-portal-aliados": ticket_aliado,
+        "ticket-respuesta-del-cliente": respuesta_cliente,
+        "ticket-web": ticket_web,
+        "levantamiento-asignado": lev_asignado,
+        "levantamiento-enviado-a-revision": lev_enviado,
+        "levantamiento-devuelto": lev_devuelto,
+        "levantamiento-solicitado": lev_solicitado,
+        "cotizacion-lista": cotizacion_lista,
+        "proyecto-terminado": proyecto_terminado,
+        "proyecto-compras": compras_proyecto,
+        "aviso-interno-compras": compras_pedido,
+        "aviso-interno-margen": margen_resumen,
+        "margen-revision-frenada": margen_frenado,
+        "margen-sonda-de-cotizaciones": margen_sonda,
+        "aviso-interno-salud": salud_diaria,
+        "recurrencia-sin-enviar": recurrencia_alerta,
+        "recurrencia-periodos-atrasados": recurrencia_atrasada,
+        "hacienda-rechazo": hacienda_rechazo,
+        "nota-de-credito-por-recepcion": nc_por_recepcion,
+        "cotizaciones-frias": cotizaciones_frias,
+        "acceso-portal-solicitud": acceso_nueva,
+        "acceso-portal-rechazado": acceso_rechazada,
+        "mensaje-desde-la-tienda": mensaje_tienda,
+        "asesoria-web": asesoria_web,
+        "contrasena-temporal": contrasena_temporal,
+        "prueba-de-correo": prueba_correo,
     }
 
 

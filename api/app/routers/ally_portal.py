@@ -1314,19 +1314,24 @@ def ticket_crear(data: AllyTicketIn, ctx: AllyCtx = Depends(need("tickets_crear"
     db.add(t)
     db.flush()
     audit(db, ctx.p.tenant.id, ctx.p.user.id, "create", "support_ticket", t.id, {"prioridad": t.priority, "aliado": ctx.company.id}, ip=ctx.p.ip)
+    avisar_ticket_aliado(db, ctx.p.tenant, ctx.company, pr, t)
+    db.commit()
+    return _ticket_out(db, ctx, t, full=True)
+
+
+def avisar_ticket_aliado(db: Session, tenant, company, pr: Project, t: SupportTicket) -> None:
+    """Aviso a administracion y supervision: una empresa aliada abrio un ticket (tambien lo usa la vista previa)."""
     e = html.escape
     notify_roles(
         db,
-        ctx.p.tenant,
+        tenant,
         ("admin", "supervisor"),
-        f"Ticket del aliado {t.number} · {ctx.company.name[:40]}",
-        f"<p><b>{e(ctx.company.name)}</b> abrió <b>{e(t.number)}</b> en el proyecto {e(pr.number)}.</p><p>{e(t.subject)} · prioridad {e(t.priority)}</p>"
+        f"Ticket del aliado {t.number} · {company.name[:40]}",
+        f"<p><b>{e(company.name)}</b> abrió <b>{e(t.number)}</b> en el proyecto {e(pr.number)}.</p><p>{e(t.subject)} · prioridad {e(t.priority)}</p>"
         + cta(f"/tickets?id={t.id}", f"Abrir el ticket {t.number}"),
         "support_ticket",
         t.id,
     )
-    db.commit()
-    return _ticket_out(db, ctx, t, full=True)
 
 
 @router.get("/tickets/{tid}")

@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from ..core.clientip import ip_key
 from ..core.db import get_db
 from ..core.ratelimit import access_request_global_limiter, access_request_limiter
-from ..models import AccessRequest
+from ..models import AccessRequest, Tenant
 from ..services.documents import audit
 from ..services.email_layout import cta
 from ..services.mail import notify_roles
@@ -85,17 +85,22 @@ def _crear(db: Session, data: AccessRequestIn, ip: str) -> None:
     db.add(r)
     db.flush()
     audit(db, t.id, None, "create_web", "access_request", r.id, ip=ip)
+    avisar_solicitud_acceso(db, t, r)
+    db.commit()
+
+
+def avisar_solicitud_acceso(db: Session, t: Tenant, r: AccessRequest) -> None:
+    """Aviso a administracion y supervision: alguien pidio acceso al portal de clientes (tambien lo usa la vista previa)."""
     e = html.escape
     cuerpo = (
         "<p>Alguien pidió acceso al portal de clientes. <b>No tiene acceso todavía</b>: revise quién es, "
         "líguelo al cliente correcto y apruebe o rechace en <b>Accesos de clientes</b>.</p>"
-        f"<p><b>{e(data.name)}</b> · {e(data.company)}<br>{e(email)} {e(data.phone or '')}"
-        f"{'<br>Cédula indicada: ' + e(data.id_number) if data.id_number else ''}</p>"
-        f"{'<blockquote>' + e(data.message) + '</blockquote>' if data.message else ''}"
+        f"<p><b>{e(r.name)}</b> · {e(r.company)}<br>{e(r.email)} {e(r.phone or '')}"
+        f"{'<br>Cédula indicada: ' + e(r.id_number) if r.id_number else ''}</p>"
+        f"{'<blockquote>' + e(r.message) + '</blockquote>' if r.message else ''}"
         + cta("/accesos-clientes", "Revisar la solicitud")
     )
-    notify_roles(db, t, ("admin", "supervisor"), f"Solicitud de acceso al portal · {data.company[:50]}", cuerpo, "access_request", r.id)
-    db.commit()
+    notify_roles(db, t, ("admin", "supervisor"), f"Solicitud de acceso al portal · {r.company[:50]}", cuerpo, "access_request", r.id)
 
 
 @router.post("/access-requests", status_code=202)

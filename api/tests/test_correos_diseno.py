@@ -184,8 +184,43 @@ def test_vista_previa_genera_un_html_por_tipo(tmp_path, monkeypatch):
         "cola-por-emitir",
         "informe-preliminar",
         "respaldo-diario-falla",
+        # avisos internos armados por la funcion real de cada uno (no fragmentos escritos en la herramienta)
+        "aviso-interno-ticket-sla",
+        "ticket-sla-al-responsable",
+        "aviso-interno-compras",
+        "aviso-interno-salud",
+        "aviso-interno-margen",
+        "margen-revision-frenada",
+        "ticket-asignado",
+        "ticket-portal-clientes",
+        "ticket-portal-aliados",
+        "ticket-respuesta-del-cliente",
+        "ticket-web",
+        "levantamiento-enviado-a-revision",
+        "levantamiento-devuelto",
+        "cotizacion-lista",
+        "proyecto-terminado",
+        "proyecto-compras",
+        "acceso-portal-solicitud",
+        "acceso-portal-rechazado",
+        "mensaje-desde-la-tienda",
+        "recurrencia-sin-enviar",
+        "recurrencia-periodos-atrasados",
+        "hacienda-rechazo",
+        "nota-de-credito-por-recepcion",
+        "cotizaciones-frias",
+        "margen-sonda-de-cotizaciones",
+        "asesoria-web",
+        "contrasena-temporal",
+        "prueba-de-correo",
     )
     faltan = [k for k in esperados if k not in hechos]
     assert not faltan, faltan
     assert "index" in hechos
     assert all(el.MARKER in (tmp_path / f"{k}.html").read_text(encoding="utf-8") for k in hechos - {"index"})
+    # salen de la funcion real con los datos sembrados: el codigo del proveedor, los tickets atrasados, el bloque de Salud
+    leer = lambda k: (tmp_path / f"{k}.html").read_text(encoding="utf-8")  # noqa: E731
+    assert "EJ-CAM4" in leer("aviso-interno-compras")
+    assert "TCK-0812" in leer("aviso-interno-ticket-sla") and "TCK-0816" in leer("ticket-sla-al-responsable")
+    assert "Tareas automáticas" in leer("aviso-interno-salud")
+    assert "sugerido" in leer("aviso-interno-margen")

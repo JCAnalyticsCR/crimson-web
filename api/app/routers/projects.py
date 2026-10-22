@@ -490,24 +490,29 @@ def _reservar(db: Session, p: Principal, pr: Project, order: WorkOrder) -> list[
             faltan.append({"product_id": m.product_id, "name": m.name, "to_buy": falta, "supplier_stock": a.get("supplier_qty") if a.get("supplier_fresh") else None})
     if faltan:
         req = _new_request(db, p, faltan, reason="proyecto", project_id=pr.id, note=f"Material que falta para arrancar {pr.number}")
-        filas = "".join(
-            f"<li>{html.escape(x['name'])} · faltan {x['to_buy']:g}"
-            + (f" · el proveedor reporta {x['supplier_stock']}" if x.get("supplier_stock") is not None else "")
-            + "</li>"
-            for x in faltan[:25]
-        )
-        notify_roles(
-            db,
-            p.tenant,
-            ("admin", "inventario"),
-            f"{pr.number}: hay que comprar {len(faltan)} material(es) antes de instalar",
-            f"<p>El proyecto <b>{html.escape(pr.name)}</b> arrancó y esto no está en bodega:</p><ul>{filas}</ul>"
-            f"<p>Quedó la solicitud de compra <b>{req['number']}</b>. Los proveedores no dan crédito, así que conviene pedirlo hoy.</p>"
-            + cta("/compras", "Abrir Compras"),
-            "purchase_request",
-            req["id"],
-        )
+        avisar_compra_proyecto(db, p.tenant, pr, faltan, req)
     return faltan
+
+
+def avisar_compra_proyecto(db: Session, tenant, pr: Project, faltan: list[dict], req: dict) -> None:
+    """A administracion e inventario: el proyecto arranco y falta material en bodega (quedo la solicitud de compra)."""
+    filas = "".join(
+        f"<li>{html.escape(x['name'])} · faltan {x['to_buy']:g}"
+        + (f" · el proveedor reporta {x['supplier_stock']}" if x.get("supplier_stock") is not None else "")
+        + "</li>"
+        for x in faltan[:25]
+    )
+    notify_roles(
+        db,
+        tenant,
+        ("admin", "inventario"),
+        f"{pr.number}: hay que comprar {len(faltan)} material(es) antes de instalar",
+        f"<p>El proyecto <b>{html.escape(pr.name)}</b> arrancó y esto no está en bodega:</p><ul>{filas}</ul>"
+        f"<p>Quedó la solicitud de compra <b>{req['number']}</b>. Los proveedores no dan crédito, así que conviene pedirlo hoy.</p>"
+        + cta("/compras", "Abrir Compras"),
+        "purchase_request",
+        req["id"],
+    )
 
 
 @router.get("/projects/{pid}")

@@ -775,18 +775,7 @@ def survey_create_and_assign(oid: int, data: SurveyFromRequestIn, p: Principal =
     _log(o, p.user.full_name, f"Creó el levantamiento {s.number} y se lo asignó a {tecnico.full_name if tecnico else 'un técnico'}")
     audit(db, p.tenant.id, p.user.id, "create", "survey", s.id, {"desde": "solicitud", "opportunity": o.number, "technician_id": data.technician_id}, ip=p.ip)
     if aliada is None and data.technician_id != p.user.id and tecnico and tecnico.email:
-        queue_email(
-            db,
-            p.tenant,
-            tecnico.email,
-            f"Tiene un levantamiento nuevo: {s.number}",
-            f"<p>Se le asignó el levantamiento <b>{html.escape(s.number)}</b> ({html.escape(s.site or 'sin sitio')})"
-            f"{f' para el {data.visit_date:%d/%m/%Y}' if data.visit_date else ''}.</p>"
-            f'<p><a href="{html.escape(avisos.enlace(f"/levantamientos?id={s.id}"))}">Abrir el levantamiento</a></p>',
-            "survey",
-            s.id,
-            company_bcc=False,  # aviso interno: no va al BCC de las facturas
-        )
+        avisar_levantamiento_asignado(db, p.tenant, tecnico.email, s, data.visit_date)
     notify_ally_work(db, p.tenant, {data.technician_id}, s.number, f"Levantamiento {s.site or ''}".strip(), s.visit_date, entity_id=s.id)
     db.commit()
     return _survey_out(db, s)
@@ -845,17 +834,7 @@ def survey_assign(sid: int, data: SurveyAssignIn, p: Principal = Depends(require
     if data.technician_id != antes["technician_id"]:
         u = db.get(User, data.technician_id)
         if u and u.email and aliada is None:
-            queue_email(
-                db,
-                p.tenant,
-                u.email,
-                f"Tiene un levantamiento nuevo: {s.number}",
-                f"<p>Se le asignó el levantamiento <b>{html.escape(s.number)}</b> ({html.escape(s.site or 'sin sitio')}).</p>"
-                f'<p><a href="{html.escape(avisos.enlace(f"/levantamientos?id={s.id}"))}">Abrir el levantamiento</a></p>',
-                "survey",
-                s.id,
-                company_bcc=False,
-            )
+            avisar_levantamiento_asignado(db, p.tenant, u.email, s)
         notify_ally_work(db, p.tenant, {data.technician_id}, s.number, f"Levantamiento {s.site or ''}".strip(), s.visit_date, entity_id=s.id)
     db.commit()
     return _survey_out(db, s)
@@ -1596,6 +1575,38 @@ def _notify_quote_ready(db: Session, p: Principal, o: Opportunity, q) -> None:
         f'<p><a href="{html.escape(enlace)}">Abrir la cotización</a></p>'
     )
     queue_email(db, p.tenant, correo, f"Tu cotización {q.number} está lista · {o.number}", cuerpo, "quote", q.id)
+
+
+def avisar_levantamiento_asignado(db: Session, tenant, correo: str, s: Survey, visit_date: date | None = None) -> None:
+    """Al tecnico interno: se le asigno un levantamiento (aviso interno: no va al BCC de las facturas)."""
+    queue_email(
+        db,
+        tenant,
+        correo,
+        f"Tiene un levantamiento nuevo: {s.number}",
+        f"<p>Se le asignó el levantamiento <b>{html.escape(s.number)}</b> ({html.escape(s.site or 'sin sitio')})"
+        f"{f' para el {visit_date:%d/%m/%Y}' if visit_date else ''}.</p>"
+        f'<p><a href="{html.escape(avisos.enlace(f"/levantamientos?id={s.id}"))}">Abrir el levantamiento</a></p>',
+        "survey",
+        s.id,
+        company_bcc=False,
+    )
+
+
+def avisar_proyecto_terminado(db: Session, tenant, roles, pr: Project, horas: float) -> None:
+    """A quien puede facturar el proyecto: quedo terminado y listo para facturacion."""
+    notify_roles(
+        db,
+        tenant,
+        roles,
+        f"Proyecto {pr.number} terminado · listo para facturación",
+        f"<p><b>{html.escape(pr.name)}</b> quedó terminado.</p>"
+        f"<p>{len(pr.orders)} orden(es) de trabajo · {round(horas, 1)} horas de campo.</p>"
+        "<p>El informe técnico de entrega ya se puede imprimir desde la ficha del proyecto.</p>"
+        f'<p><a href="{cfg.public_base_url.rstrip("/")}/proyectos/{pr.id}">Abrir el proyecto</a></p>',
+        "project",
+        pr.id,
+    )
 
 
 # ---------- Resumen para la vendedora (solo lectura, sin un solo costo) ----------
@@ -2459,18 +2470,7 @@ def apply_order_progress(db: Session, o: WorkOrder, data: ProgressIn, action: st
 
                 # solo a quien puede facturar el proyecto (POST /projects/{id}/invoice: sales.crear y ver todos los
                 # proyectos). Contabilidad ya no crea ventas (plan 1.7): la factura le llega despues por "Por emitir"
-                notify_roles(
-                    db,
-                    tenant,
-                    roles_that_can(db, tenant, ("sales", "crear"), ("projects", "ver_todo")),
-                    f"Proyecto {pr.number} terminado · listo para facturación",
-                    f"<p><b>{html.escape(pr.name)}</b> quedó terminado.</p>"
-                    f"<p>{len(pr.orders)} orden(es) de trabajo · {round(horas, 1)} horas de campo.</p>"
-                    "<p>El informe técnico de entrega ya se puede imprimir desde la ficha del proyecto.</p>"
-                    f'<p><a href="{cfg.public_base_url.rstrip("/")}/proyectos/{pr.id}">Abrir el proyecto</a></p>',
-                    "project",
-                    pr.id,
-                )
+                avisar_proyecto_terminado(db, tenant, roles_that_can(db, tenant, ("sales", "crear"), ("projects", "ver_todo")), pr, horas)
     elif action == "cancel":
         _close_running(o, now)
         o.status = "cancelada"
