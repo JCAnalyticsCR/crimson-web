@@ -1,12 +1,14 @@
-/* Detalle de un proyecto en común: estado, fechas, avance, órdenes de SU equipo, "Lo que recibo en este proyecto"
+/* Detalle de un proyecto en común: estado, fechas, avance, la ejecución (órdenes de su equipo y de Crimson, con quién
+   va a cada una: reunión 2, pedido 17), "Lo que recibo en este proyecto"
    (lo calcula economía) y sus precios. Sin precio de venta ni cotización: eso es entre Crimson y el cliente. */
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { Badge, I, Icon } from "../../ui/components";
 import { RequestList } from "./AllyOpportunity";
 import QuoteForm from "./QuoteForm";
-import { errorText, fmtWhen, useAlly, type ProjectFull, type Req } from "./shared";
+import AllyExecution from "./AllyExecution";
+import { errorText, useAlly, type ProjectFull, type Req } from "./shared";
 
 export default function AllyProject() {
   const { id } = useParams();
@@ -53,17 +55,9 @@ export default function AllyProject() {
           <span className="meta">Montos sin IVA.</span>
         </div>
       </div>
-      <h2 className="h3 al-sec">Órdenes de mi equipo</h2>
-      {p.orders.length ? (
-        <div className="cp-list">
-          {p.orders.map((o) => (
-            <Link key={o.id} to={`/ordenes/${o.id}`} className="cp-row">
-              <div className="cp-row__main"><b>{o.number} · {o.title}</b><div className="cp-row__meta">{o.technician || "Sin técnico"} · {o.scheduled_at ? fmtWhen(o.scheduled_at) : "Sin fecha"}</div></div>
-              <div className="cp-row__side"><Badge status={o.status} /></div>
-            </Link>
-          ))}
-        </div>
-      ) : <p className="muted">Crimson todavía no le asignó órdenes en este proyecto.</p>}
+      {/* reunión 2, pedido 17: la ejecución completa (su equipo y Crimson), no solo sus órdenes */}
+      <h2 className="h3 al-sec">Ejecución del proyecto</h2>
+      {p.ejecucion ? <AllyExecution e={p.ejecucion} /> : <p className="muted">Crimson todavía no programó órdenes en este proyecto.</p>}
       <h2 className="h3 al-sec">Mis precios</h2>
       <RequestList rows={p.requests} onRespond={precios ? setResp : undefined} />
       {resp && <div style={{ marginTop: 12 }}><QuoteForm path={`/aliado/solicitudes/${resp.id}`} method="PUT" onCancel={() => setResp(null)} onDone={() => { setResp(null); load(); }} /></div>}

@@ -143,10 +143,18 @@ def test_aliado_no_entra_como_usuario_interno(client, auth, db_session):
 
     admin_h = dict(client.headers)
     s = escenario(client, admin_h, db_session)
+    # una invitacion interna de antes de que existiera la empresa aliada
+    vieja = client.post("/settings/invitations", json={"email": "jefe@instala-prueba.ejemplo.com", "role": "tecnico"})
+    assert vieja.status_code == 201, vieja.text
     # empresa aliada de una persona fisica, con correo de dominio propio
     r = client.post("/allies", json={"name": "Rolando Prueba Mora", "email": "rolando@instala-prueba.ejemplo.com"})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]
+    # ...ya no lo hace usuario interno al aceptarla
+    keep = client.headers.pop("Authorization")
+    r = client.post("/settings/invitations/accept", json={"token": vieja.json()["link"].rsplit("/", 1)[-1], "full_name": "Jefe Instala", "password": PW})
+    client.headers["Authorization"] = keep
+    assert r.status_code == 409 and "portal de aliados" in r.json()["detail"], r.text
     # invitar como interno su correo o uno de su dominio: no
     for correo in ("rolando@instala-prueba.ejemplo.com", "otro@instala-prueba.ejemplo.com"):
         r = client.post("/settings/invitations", json={"email": correo, "role": "tecnico"})

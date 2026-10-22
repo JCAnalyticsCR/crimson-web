@@ -9,6 +9,7 @@ import { Lookup, searchCustomers } from "../../ui/Lookup";
 import { ArchiveActions } from "../../ui/ArchiveActions";
 import { TrashButton } from "../../ui/TrashButton";
 import { AlliesPanel, PendingCosts, partyLine, type Ally, type PendingCost } from "./OpportunityAllies";
+import { ShareToggle, rawLine, useAllyLog } from "./AllyLogShare";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
 import "./opportunities.css";
 
@@ -311,6 +312,7 @@ export default function Opportunities() {
   };
 
   const log = open ? logLines(open.notes) : [];
+  const [allyLog, setAllyLog] = useAllyLog(open?.id ?? null, open?.notes ?? null); // reunión 2, pedido 15
 
   return (
     <>
@@ -451,7 +453,7 @@ export default function Opportunities() {
               {log.length === 0 ? <p className="muted" style={{ fontSize: 13, margin: 0 }}>Sin seguimientos todavía.</p> : (
                 <ol className="opp-log__list">
                   {log.map((l, i) => (
-                    <li key={i}>{l.when && <span className="meta">{l.when} · {l.who}</span>}<p>{l.text}</p></li>
+                    <li key={i}>{l.when && <span className="meta">{l.when} · {l.who}</span>}<p>{l.text}</p><ShareToggle oppId={open.id} line={rawLine(l)} st={allyLog} onChange={setAllyLog} canEdit={canEdit} /></li>
                   ))}
                 </ol>
               )}

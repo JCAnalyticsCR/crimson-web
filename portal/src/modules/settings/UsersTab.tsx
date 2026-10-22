@@ -11,9 +11,10 @@ import { useSession } from "../../app/session";
 import { registerRoles, roleMeta } from "../../app/roles";
 import RoleMatrix from "../../app/RoleMatrix";
 import RolesEditor from "./RolesEditor";
+import AllyConvert, { AllyMatchChip, type AllyMatch } from "./AllyConvert";
 import { Card, Empty, Field, I, Icon, Loading, Modal } from "../../ui/components";
 
-type U = { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null; is_self: boolean; shared: boolean; must_change_password: boolean; temp_password_expires_at: string | null; locked_until: string | null; login_failures_until?: string | null; reset_link_expires_at: string | null; password_changed_at: string | null; member_since: string | null; notify_email?: string | null };
+type U = { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null; is_self: boolean; shared: boolean; must_change_password: boolean; temp_password_expires_at: string | null; locked_until: string | null; login_failures_until?: string | null; reset_link_expires_at: string | null; password_changed_at: string | null; member_since: string | null; notify_email?: string | null; ally_match?: AllyMatch | null };
 type Inv = { id: number; email: string; role: string; expires_at: string; status: "pendiente" | "vencida"; sent_count: number; last_sent_at: string | null; invited_by: string | null; email_status: string | null; email_error: string | null };
 type UsersResp = { users: U[]; invitations: Inv[]; roles: string[]; role_labels?: Record<string, string>; reauth_roles?: string[]; mail_configured: boolean; support_members: number; cost_roles: string[]; cost_role_choices: string[]; twofa_roles?: string[]; twofa_grace_days?: number; twofa_role_choices?: string[] };
 type InviteOut = { id: number; link: string; emailed: boolean; email_error: string | null; expires_at: string };
@@ -53,6 +54,7 @@ export default function UsersTab() {
   const [resetFor, setResetFor] = useState<U | null>(null);
   const [resetOut, setResetOut] = useState<(ResetOut & { user: U }) | null>(null);
   /* Cambios que involucran al rol admin (o desactivar a un admin): piden la contraseña de quien actúa. */
+  const [toAlly, setToAlly] = useState<U | null>(null); // reunión 2, pedido 20
   const [pwAsk, setPwAsk] = useState<{ title: string; text: string; cta: string; run: (pw: string) => Promise<void> } | null>(null);
 
   /* los roles que creó el administrador llegan con su nombre: se registran antes de dibujar la lista */
@@ -138,6 +140,12 @@ export default function UsersTab() {
               <button key={k} type="button" className={`chip ${filtro === k ? "is-on" : ""}`} onClick={() => setFiltro(k)} aria-pressed={filtro === k}>{l}</button>
             ))}
           </div>
+          {canEdit && users.some((u) => u.ally_match) && (
+            /* reunión 2, pedido 20: una persona de un aliado no debe tener acceso al panel de Crimson */
+            <div style={{ padding: "10px 12px", borderRadius: 10, background: "var(--warn-soft)", color: "var(--warn)", fontSize: 13 }}>
+              <b>{users.filter((u) => u.ally_match).length === 1 ? "Un usuario parece" : `${users.filter((u) => u.ally_match).length} usuarios parecen`} de una empresa aliada.</b> Las personas de un aliado entran solo al portal de aliados (ven lo que su empresa tiene en común con Crimson), no al panel. Revíselos y use «Pasar al portal de aliados».
+            </div>
+          )}
           {!data.mail_configured && (
             <div style={{ padding: "10px 12px", borderRadius: 10, background: "var(--warn-soft)", color: "var(--warn)", fontSize: 13 }}>
               <b>El envío de correos todavía no está activo.</b> Las invitaciones y los enlaces de contraseña no llegan solos: al crearlos te damos el enlace para mandarlo por WhatsApp.{" "}
@@ -155,7 +163,7 @@ export default function UsersTab() {
                     const lockedAdmin = u.role === "admin" && !viewerIsAdmin;
                     return (
                       <tr key={u.id}>
-                        <td><b>{u.name}</b>{u.is_self && <> <Chip tone="info">Vos</Chip></>}<div className="meta" style={{ textTransform: "none" }}>{u.email}</div>{u.notify_email && <div className="meta" style={{ textTransform: "none" }} title="Las notificaciones internas le llegan a este correo">avisos: {u.notify_email}</div>}</td>
+                        <td><b>{u.name}</b>{u.is_self && <> <Chip tone="info">Vos</Chip></>}<div className="meta" style={{ textTransform: "none" }}>{u.email}</div>{u.notify_email && <div className="meta" style={{ textTransform: "none" }} title="Las notificaciones internas le llegan a este correo">avisos: {u.notify_email}</div>}{u.ally_match && <div style={{ marginTop: 4 }}><AllyMatchChip m={u.ally_match} /></div>}</td>
                         <td>
                           <select className="select" style={{ height: 32, width: 165 }} value={u.role} disabled={u.is_self || !canEdit || lockedAdmin} title={u.is_self ? "Tu propio rol no se cambia desde aquí" : lockedAdmin ? "Solo un administrador puede cambiar a otro administrador" : undefined} onChange={(e) => changeRole(u, e.target.value)}>
                             {roleOptions(data.roles, u.role, viewerIsAdmin).map((r) => <option key={r} value={r}>{roleMeta(r).label}</option>)}
@@ -174,7 +182,7 @@ export default function UsersTab() {
                         </td>
                         <td className="muted" style={{ whiteSpace: "nowrap" }}>{u.last_login ? fechaHora(u.last_login) : "nunca"}</td>
                         <td>{u.active ? <Chip tone="ok">Activo</Chip> : <Chip tone="muted">Inactivo</Chip>}</td>
-                        <td className="num">{canEdit && <button className="btn btn--ghost btn--sm" onClick={() => setManageId(u.id)}>Gestionar</button>}</td>
+                        <td className="num">{canEdit && u.ally_match && !u.is_self && u.role !== "admin" && allows("aliados.usuarios") && <button className="btn btn--soft btn--sm" onClick={() => setToAlly(u)}>Pasar al portal de aliados</button>}{canEdit && <button className="btn btn--ghost btn--sm" onClick={() => setManageId(u.id)}>Gestionar</button>}</td>
                       </tr>
                     );
                   })}
@@ -249,6 +257,7 @@ export default function UsersTab() {
         </Card>
       )}
 
+      {toAlly && <AllyConvert user={toAlly} onClose={() => setToAlly(null)} onDone={() => { setToAlly(null); load(); }} />}
       {invite && (
         <Modal title="Invitar usuario" onClose={() => setInvite(null)} foot={<><button className="btn btn--ghost" onClick={() => setInvite(null)}>Cancelar</button><button className="btn btn--crimson" onClick={sendInvite} disabled={inviteBusy || !invite.email.includes("@") || ((invite.role === "admin" || reauth.includes(invite.role)) && !invite.admin_password)}>{inviteBusy ? "Enviando…" : "Enviar invitación"}</button></>}>
           <Field label="Correo"><input className="input" type="email" autoFocus value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} placeholder="nombre@empresa.com" /></Field>

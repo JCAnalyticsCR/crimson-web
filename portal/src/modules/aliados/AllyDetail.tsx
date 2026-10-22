@@ -15,6 +15,8 @@ type Contact = { name?: string | null; email?: string | null; phone?: string | n
 type Detail = AllyRow & {
   legal_name: string | null; contacts: Record<string, Contact>; active: boolean; suspended_at: string | null; customer_id: number | null; customer: { id: number; name: string } | null;
   supplier_id: number | null; supplier: { id: number; name: string } | null; max_users: number | null; notes: string | null; markup_pct: string | null;
+  /** reunión 2, pregunta 8: si ve el monto total de la cotización en las oportunidades en común (por defecto no) */
+  show_quote_total?: boolean;
   participations: { id: number; role: string; visible_to_ally: boolean; opportunity: { id: number; number: string; title: string; status: string } | null; project: { id: number; number: string; status: string } | null }[];
 };
 type Users = { users: { id: number; name: string; email: string; role: string; active: boolean; last_login: string | null }[]; invitations: { id: number; email: string; role: string; expires_at: string }[]; seats: { used: number; max: number | null } };
@@ -33,6 +35,29 @@ const ROL: Record<string, string> = { aliado: "Aliado comercial", tecnico_aliado
 type Tab = "datos" | "usuarios" | "comun" | "precios" | "mensualidad" | "numeros";
 const TABS: Tab[] = ["datos", "usuarios", "comun", "precios", "mensualidad", "numeros"];
 type FirstInvite = { invite: InviteOut; email: string };
+
+/* Reunión 2 (pedido 14 y pregunta 8): lo que ve el aliado en el detalle de una oportunidad en común. Siempre: etapa,
+   próxima acción, su alcance, los seguimientos que se marquen «Visible para el aliado», sus levantamientos y la
+   ejecución del proyecto. Nunca costos ni márgenes. El total de la cotización, solo si se habilita aquí. */
+function PortalVisibility({ a, edita, reload }: { a: Detail; edita: boolean; reload: () => void }) {
+  const { toast } = useSession();
+  const [busy, setBusy] = useState(false);
+  const cambiar = async (v: boolean) => {
+    setBusy(true);
+    try { await api(`/allies/${a.id}`, { method: "PUT", json: { show_quote_total: v } }); toast(v ? "Ahora ve el monto total de la cotización" : "Ya no ve el monto de la cotización"); reload(); }
+    catch (e) { toast(e instanceof Error ? e.message : "No se pudo guardar", "bad"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Card title="Qué ve en su portal">
+      <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>En cada oportunidad en común ve la etapa, la próxima acción y su fecha, su alcance, los seguimientos que se marquen «Visible para el aliado» en la bitácora, sus levantamientos y la ejecución del proyecto (órdenes y técnicos). Nunca costos, márgenes ni datos de otros aliados.</p>
+      <label className="com-check" style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13.5 }}>
+        <input type="checkbox" disabled={!edita || busy} checked={!!a.show_quote_total} onChange={(e) => cambiar(e.target.checked)} />
+        Ver el monto total de la cotización de sus oportunidades en común
+      </label>
+    </Card>
+  );
+}
 
 function Datos({ a, reload }: { a: Detail; reload: () => void }) {
   const { toast, allows } = useSession();
@@ -77,6 +102,7 @@ function Datos({ a, reload }: { a: Detail; reload: () => void }) {
         <Field label="Notas internas (el aliado no las ve)"><textarea className="textarea" rows={2} disabled={!edita} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
         {edita && <button className="btn btn--crimson" onClick={guardar}><Icon d={I.check} />Guardar</button>}
       </Card>
+      <PortalVisibility a={a} edita={edita} reload={reload} />
       {edita && (
         <Card title="Acceso al portal">
           <p className="muted" style={{ marginTop: 0 }}>Estado: <span className={`badge badge--${STATE_TONE[a.state]}`}>{STATE_LABEL[a.state]}</span>{a.suspended_reason ? ` · ${a.suspended_reason}` : ""}</p>

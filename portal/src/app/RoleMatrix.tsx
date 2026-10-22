@@ -2,7 +2,7 @@
    (roles.ts) con los permisos que manda la API (/auth/roles, ya con "Quién ve costos"). Andrés preguntó si
    "Técnico", "Catálogo" o "Administración" eran roles (22:30-22:45): aquí se ve que son grupos del menú y qué
    sección le sale a cada rol. Nunca queda desactualizada como un texto escrito a mano. */
-import { Fragment, type CSSProperties } from "react";
+import { Fragment, type CSSProperties, type ReactNode } from "react";
 import { NAV } from "./nav";
 import { ROLES, canAny, customRoleCodes, inRoleMenu, isExternalRole, roleMeta } from "./roles";
 import { useSession } from "./session";
@@ -62,7 +62,15 @@ export default function RoleMatrix() {
 }
 
 /* Los dos roles de empresa aliada no entran al panel: usan el portal de aliados. Se asignan desde Administración ->
-   Aliados -> ficha -> Usuarios (o el aliado comercial invita a sus técnicos desde «Mi equipo»). */
+   Aliados -> ficha -> Usuarios (o el aliado comercial invita a sus técnicos desde «Mi equipo»).
+   Reunión 2 (21/10, pedido 20): la tabla dice también QUÉ ve cada uno dentro de su portal (DETALLE). */
+const DETALLE: { label: string; aliado: ReactNode; tecnico: ReactNode }[] = [
+  { label: "Oportunidades en común: etapa, próxima acción, su alcance y los seguimientos que Crimson comparta", aliado: "✓", tecnico: "Solo la lista en su inicio" },
+  { label: "Ejecución del proyecto en común (órdenes y técnicos, sin precios)", aliado: "✓", tecnico: "Solo sus órdenes" },
+  { label: "Levantamientos", aliado: "Los de su empresa", tecnico: "Los asignados a él" },
+  { label: "Monto total de la cotización", aliado: "Solo si se habilita en la ficha del aliado", tecnico: "—" },
+  { label: "Precios del catálogo", aliado: "Precio de aliado", tecnico: "—" },
+];
 function AllyMatrix({ cell, first }: { cell: CSSProperties; first: CSSProperties }) {
   const { matrix } = useSession();
   const roles = (["aliado", "tecnico_aliado"] as const).filter((r) => matrix[r]);
@@ -77,11 +85,21 @@ function AllyMatrix({ cell, first }: { cell: CSSProperties; first: CSSProperties
         <tbody>
           {ALLY_ITEMS.map((it) => (
             <tr key={it.to}>
-              <td style={first}>{it.to === "/" ? "Inicio (técnico: «Hoy», su trabajo del día)" : it.label}</td>
+              <td style={first}>{it.to === "/" ? "Inicio (técnico: «Hoy», sus próximas órdenes y las oportunidades en común)" : it.label}</td>
               {roles.map((r) => {
                 // el técnico entra solo por «Hoy»: ve levantamientos, órdenes y tickets asignados a él, nada más
                 const ok = r === "tecnico_aliado" ? it.to === "/" || (["levantamientos", "ordenes", "tickets"].includes(it.need || "") && tiene(r, it.need)) : tiene(r, it.need);
                 return <td key={r} style={cell}>{ok ? yes : no}</td>;
+              })}
+            </tr>
+          ))}
+          <tr><td colSpan={roles.length + 1} className="meta" style={{ padding: "10px 12px 4px", background: "var(--bg-2)" }}>Qué ve dentro de su portal</td></tr>
+          {DETALLE.map((x) => (
+            <tr key={x.label}>
+              <td style={{ ...first, whiteSpace: "normal", maxWidth: 320 }}>{x.label}</td>
+              {roles.map((r) => {
+                const v = r === "aliado" ? x.aliado : x.tecnico;
+                return <td key={r} style={{ ...cell, fontSize: 12 }}>{v === "✓" ? yes : v === "—" ? no : v}</td>;
               })}
             </tr>
           ))}

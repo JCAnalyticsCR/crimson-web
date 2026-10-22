@@ -47,3 +47,9 @@
 .al-labor__u { font-size: 12px; color: var(--text-3); white-space: nowrap; }
 .al-labor__row .input { min-width: 0; }
 .al-stale { padding: 10px 12px; border-radius: 12px; border: 1px solid var(--warn); background: var(--warn-soft); display: flex; flex-direction: column; gap: 8px; }
+/* Reunión 2, pedido 14: avance de la oportunidad (sin montos) y seguimientos compartidos */
+.al-steps { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin-top: 10px; }
+.al-steps span { height: 6px; border-radius: 3px; background: var(--hair); }
+.al-steps span.is-done { background: var(--crimson); }
+.al-log { list-style: none; margin: 0; padding: 0; }
+.al-log .cp-row__main span { white-space: pre-wrap; overflow-wrap: anywhere; }

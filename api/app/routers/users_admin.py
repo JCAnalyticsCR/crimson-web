@@ -535,6 +535,12 @@ def accept(data: AcceptIn, request: Request, db: Session = Depends(get_db)):
         company = db.get(AllyCompany, inv.ally_company_id)
         if not company or company.tenant_id != inv.tenant_id or not company.active:
             raise HTTPException(409, "Esa empresa aliada ya no está activa. Escríbanos.")
+    elif not inv.customer_id and inv.role_code not in NOT_HERE:
+        # pedido 20 (reunion 2): una invitacion interna vieja no convierte a la persona de un aliado en usuario interno
+        from ..services import ally_people
+
+        if ally_people.match_email(db, inv.tenant_id, inv.email) is not None:
+            raise HTTPException(409, "Su correo es de una empresa aliada: su acceso es por el portal de aliados. Pídale a Crimson que lo invite desde ahí.")
     now = datetime.now(UTC)
     u = db.scalar(select(User).where(User.email == inv.email.lower()))
     existing = u is not None

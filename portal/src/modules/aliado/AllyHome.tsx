@@ -1,17 +1,17 @@
 /* Inicio del aliado (Andrés, 21/10): primero lo que va a ganar, después los proyectos y oportunidades en común y los
    levantamientos que puede hacer; luego precios que Crimson le pidió, tickets y el trabajo de hoy de su equipo.
-   El técnico ve "Hoy". */
+   El técnico ve "Hoy" con sus próximas órdenes y las oportunidades en común (reunión 2, pedido 21). */
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import AllyToday from "./AllyToday";
-import { ESTADO_PRECIO, errorText, fmtWhen, useAlly, type MyDay, type OrderRow, type Req } from "./shared";
+import { ESTADO_PRECIO, errorText, fmtWhen, useAlly, type MyDay, type OrderRow, type Req, type TechHome } from "./shared";
 import { Badge } from "../../ui/components";
 
 type Inicio = {
   company: { name: string; state: string; suspended_reason: string | null }; role: string; preview: boolean;
   counters?: Record<string, number> & { precio_mas_proximo?: string | null };
-  precios_pedidos?: Req[]; hoy?: OrderRow[] | MyDay; dinero?: { recibido: string; por_recibir: string; proyectado: string; moneda: string } | null;
+  precios_pedidos?: Req[]; hoy?: OrderRow[] | MyDay; tecnico?: TechHome; dinero?: { recibido: string; por_recibir: string; proyectado: string; moneda: string } | null;
 };
 
 export default function AllyHome() {
@@ -21,7 +21,7 @@ export default function AllyHome() {
   useEffect(() => { api<Inicio>("/aliado/inicio").then(setD).catch((e) => setErr(errorText(e))); }, []);
   if (err) return <p className="muted">{err}</p>;
   if (!d) return <div style={{ minHeight: "40vh", display: "grid", placeItems: "center" }}><span className="spinner" /></div>;
-  if (isTech) return <AllyToday data={d.hoy as MyDay | undefined} />;
+  if (isTech) return <AllyToday data={d.hoy as MyDay | undefined} tech={d.tecnico} company={d.company.name} />;
   const c = d.counters;
   if (!c) {
     return (

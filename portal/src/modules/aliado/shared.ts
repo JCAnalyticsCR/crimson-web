@@ -28,10 +28,19 @@ export type OppRow = {
   site: string | null; crimson_owner: string | null; my_roles: string[]; pending_requests: number; project: { id: number; number: string; status: string } | null; created_at: string;
 };
 export type Contact = { name?: string | null; email?: string | null; phone?: string | null };
+/** Reunión 2, pedido 17: la ejecución del proyecto en común. Las OT de su equipo se abren (id); las de Crimson, solo el resumen. */
+export type ExecOrder = { id: number | null; number: string; title: string; kind: string; status: string; scheduled_at: string | null; finished_at: string | null; team: "aliado" | "crimson"; technicians: string[] };
+export type Ejecucion = { project: { id: number; number: string; name: string; status: string; start_date: string | null; end_date: string | null }; orders: ExecOrder[]; total: number; finalizadas: number };
+/** Seguimiento de la bitácora que Crimson marcó «Visible para el aliado» (pedido 15). */
+export type Seguimiento = { when: string | null; author: string | null; text: string };
 export type OppFull = OppRow & {
   contact: { name: string | null; phone: string | null };
   participations: { id: number; role: string; scope: string | null; scope_lines: string[]; contacts: Record<string, Contact> }[];
-  requests: Req[]; surveys: { id: number; number: string; kind: string; status: string; review_status: string | null }[]; can_survey: boolean;
+  requests: Req[]; can_survey: boolean;
+  surveys: { id: number; number: string; kind: string; status: string; review_status: string | null; visit_date: string | null; technician: string | null; sent_at: string | null }[];
+  /* pedido 14: etapa con su próxima acción, seguimientos compartidos y ejecución; el total de la cotización solo si Crimson lo habilitó */
+  next_action: string | null; next_action_date: string | null; seguimientos: Seguimiento[];
+  cotizacion: { number: string; status: string; total: string; currency: string } | null; ejecucion: Ejecucion | null;
 };
 export type ProjectRow = {
   id: number; number: string; name: string; status: string; customer: string | null; end_customer: string | null; site: string | null;
@@ -40,7 +49,7 @@ export type ProjectRow = {
 export type Earnings = { moneda?: string; totales: Record<string, string | number>; movimientos?: { concepto?: string; monto?: string; estado?: string; fecha?: string }[] } | null;
 export type ProjectFull = ProjectRow & {
   scope: string | null; my_scope_lines: string[]; orders: { id: number; number: string; title: string; kind: string; status: string; scheduled_at: string | null; technician: string | null }[];
-  requests: Req[]; lo_que_recibo: Earnings; assets_count: number; my_participations: { id: number; role: string }[];
+  requests: Req[]; lo_que_recibo: Earnings; assets_count: number; my_participations: { id: number; role: string }[]; ejecucion: Ejecucion;
 };
 export type Obs = { id: number; round: number; point_code: string | null; text: string; created_by: string; created_at: string; resolved: boolean; resolved_at: string | null; resolved_by: string | null; resolution: string | null };
 export type Point = { id?: number; code: string; kind?: string | null; label: string | null; data: Record<string, unknown>; data_status: Record<string, string> | null; photos: string[]; notes: string | null };
@@ -73,6 +82,12 @@ export type TicketNote = { id: number; body: string; author: string; team: "crim
 export type TicketFull = TicketRow & { description: string | null; contact: { name: string | null; phone: string | null }; photos: string[]; solution: string | null; hours: string; notes: TicketNote[] };
 export type Tech = { id: number; name: string; role: string; active: boolean };
 export type MyDay = { ordenes: OrderRow[]; levantamientos: SurveyRow[]; tickets: TicketRow[] };
+/** Inicio del técnico aliado (pedido 21): además de hoy, sus próximas órdenes, las oportunidades en común y quién le asigna trabajo. */
+export type TechHome = {
+  proximas: { number: string; title: string; customer: string | null; site: string | null; scheduled_at: string; status: string }[];
+  oportunidades: { number: string; title: string; customer: string | null; site: string | null; status: string; solution: string | null; mine: boolean }[];
+  asignan: string[];
+};
 
 export const ROL_PARTICIPACION: Record<string, string> = {
   contratante: "Contratante", referido: "Referido", subcontratista: "Subcontratista", suministro: "Suministro", configuracion: "Configuración", software: "Software",
