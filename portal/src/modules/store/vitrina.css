@@ -500,6 +500,15 @@
 .vt-q__step legend i { font-style: normal; font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: .1em; color: #fff; background: var(--crimson); border-radius: 6px; padding: 4px 7px; }
 .vt-q__step legend + * { clear: both; }
 .vt-q__hint { margin: 0; font-size: 13px; color: var(--text-2); line-height: 1.5; }
+/* reunion 22/10 (feedback de la tienda): alarma opcional y aviso del levantamiento tecnico */
+.vt-q__extra { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border: 1px dashed var(--hair-2); border-radius: var(--vt-r2); background: var(--surface); cursor: pointer; }
+.vt-q__extra input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--crimson); flex: none; }
+.vt-q__extra span { display: grid; gap: 3px; }
+.vt-q__extra small { font-size: 13px; color: var(--text-2); line-height: 1.45; }
+.vt-kitres__visit { margin: 14px 0 4px; padding: 12px 14px; border-radius: var(--vt-r2); border: 1px solid var(--hair-2); }
+.vt-kitres__visit b { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+.vt-kitres__visit b svg { color: var(--crimson); }
+.vt-kitres__visit p { margin: 6px 0 0; font-size: 13px; line-height: 1.5; opacity: .85; }
 .vt-q__places { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .vt-opt { position: relative; display: block; cursor: pointer; }
 .vt-opt input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }

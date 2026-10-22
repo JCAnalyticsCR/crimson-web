@@ -174,7 +174,7 @@ export default function StoreHome() {
       <section className="sh-wrap">
         <div className="vt-band">
           <div>
-            <span className="sh-eyebrow">4 preguntas · 1 minuto</span>
+            <span className="sh-eyebrow">4 pasos · 1 minuto</span>
             <h2>¿No sabés qué cámaras comprar?</h2>
             <p>Decinos qué querés proteger y te armamos el sistema con equipo real de la tienda: cámaras, grabador, disco y cableado. Un técnico lo revisa antes de instalarlo.</p>
           </div>

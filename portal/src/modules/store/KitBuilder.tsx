@@ -1,4 +1,4 @@
-/* "Arma tu sistema": 4 preguntas -> kit con productos reales de la tienda. Las cantidades salen de las mismas
+/* "Arma tu sistema": 4 pasos -> kit con productos reales de la tienda. Las cantidades salen de las mismas
    reglas del levantamiento tecnico (API /kit). Honesto: "kit sugerido, un tecnico lo valida". El resultado se
    recalcula al cambiar una respuesta (sin boton extra) y se puede llevar al carrito o mandar como asesoria. */
 import { useEffect, useMemo, useState } from "react";
@@ -38,9 +38,10 @@ export default function KitBuilder() {
   const [busy, setBusy] = useState(false);
   const [added, setAdded] = useState(false);
   const [inCart, setInCart] = useState(false); // ya agrego algo: "Ir al carrito" queda a mano (pedido 21/10)
+  const [alarm, setAlarm] = useState(false); // tambien le interesa una alarma: va en la asesoria y en el WhatsApp (se cotiza aparte)
   const total = ans.indoor + ans.outdoor;
 
-  useHead({ title: `Arma tu sistema de cámaras · ${ctx.store.name}`, description: "Respondé 4 preguntas y te armamos un kit de videovigilancia con productos reales, validado por un técnico.", path: "/arma-tu-sistema" });
+  useHead({ title: `Arma tu sistema de cámaras · ${ctx.store.name}`, description: "En 4 pasos te cotizamos al instante un kit de videovigilancia con productos reales, validado por un técnico.", path: "/arma-tu-sistema" });
 
   useEffect(() => {
     if (total === 0) { setKit(null); setErr("Elegí al menos una cámara."); return; }
@@ -77,6 +78,7 @@ export default function KitBuilder() {
     ...kit.lines.map((l) => `• ${l.quantity} × ${l.product.name} (${l.product.code})`),
     ...kit.missing.map((m) => `• ${m.quantity} × ${m.name} (por cotizar)`),
     `Total de referencia: ${money(kit.total, kit.currency)} IVA incluido.`,
+    ...(alarm ? ["También me interesa cotizar una alarma (sensores, sirena y panel)."] : []),
   ].join("\n") : "";
 
   const addAll = () => {
@@ -92,7 +94,7 @@ export default function KitBuilder() {
     try {
       sessionStorage.setItem(KIT_STORAGE, JSON.stringify({
         items: kit.lines.map((l) => ({ product_id: l.product.id, quantity: l.quantity, name: l.product.name })),
-        text: `Kit sugerido desde "Arma tu sistema": ${kit.place_label}, ${kit.answers.indoor} cámara(s) adentro y ${kit.answers.outdoor} afuera, ${kit.answers.days} días de grabación${kit.answers.remote ? ", ver desde el celular" : ""}.`,
+        text: `Kit sugerido desde "Arma tu sistema": ${kit.place_label}, ${kit.answers.indoor} cámara(s) adentro y ${kit.answers.outdoor} afuera, ${kit.answers.days} días de grabación${kit.answers.remote ? ", ver desde el celular" : ""}${alarm ? ". También le interesa una alarma (sensores, sirena y panel)" : ""}.`,
       }));
     } catch { /* sin almacenamiento: la asesoria igual se abre */ }
     nav(to("/asesoria?origen=arma-tu-sistema&solucion=cctv&instalar=1"));
@@ -102,9 +104,9 @@ export default function KitBuilder() {
     <div className="sh-wrap vt-kitb">
       <Crumbs items={[{ name: "Tienda", path: "/" }, { name: "Arma tu sistema" }]} />
       <header className="vt-cathead">
-        <span className="sh-eyebrow">Configurador · 4 preguntas</span>
-        <h1>Arma tu sistema de cámaras</h1>
-        <p>Respondé y te mostramos al instante un kit con equipo real de la tienda. Es una sugerencia: antes de instalar, un técnico de Crimson revisa que se ajuste a tu sitio.</p>
+        <span className="sh-eyebrow">Configurador · 4 pasos · 1 minuto</span>
+        <h1>Arma tu sistema de cámaras en 4 pasos</h1>
+        <p>Respondé 4 pasos rápidos y te cotizamos al instante un kit con equipo real de la tienda. Es una sugerencia: antes de instalar, un técnico de Crimson visita tu sitio y confirma que todo calce.</p>
       </header>
       <div className="vt-kitb__grid">
         <form className="vt-q" onSubmit={(e) => e.preventDefault()} aria-label="Preguntas del configurador">
@@ -116,6 +118,7 @@ export default function KitBuilder() {
           </ol>
           <fieldset className="vt-q__step" id="q1">
             <legend><i>01</i>¿Qué querés proteger?</legend>
+            <p className="vt-q__hint">Así sabemos qué tipo de equipo conviene y qué zonas suelen cubrirse en un lugar como el tuyo.</p>
             <div className="vt-q__places">
               {PLACES.map(([k, l, s, ic]) => (
                 <label key={k} className="vt-opt">
@@ -135,17 +138,23 @@ export default function KitBuilder() {
           </fieldset>
           <fieldset className="vt-q__step" id="q3">
             <legend><i>03</i>¿Cuántos días de grabación?</legend>
+            <p className="vt-q__hint">Son los días que el grabador guarda los videos antes de borrar los más viejos para seguir grabando encima. Más días, más disco. Para una casa, 15 días suele alcanzar.</p>
             <div className="vt-seg" role="radiogroup" aria-label="Días de grabación">
               {DAYS.map((n) => <label key={n} className="vt-seg__opt"><input type="radio" name="days" checked={ans.days === n} onChange={() => set("days", n)} /><span>{n} días</span></label>)}
             </div>
           </fieldset>
           <fieldset className="vt-q__step" id="q4">
             <legend><i>04</i>¿Querés verlas desde el celular?</legend>
+            <p className="vt-q__hint">Mirá tus cámaras en vivo y recibí alertas al instante en la palma de tu mano, aunque no estés en casa. Si no hace falta, igual graban y podés revisar todo en el grabador.</p>
             <div className="vt-seg" role="radiogroup" aria-label="Ver desde el celular">
               <label className="vt-seg__opt"><input type="radio" name="remote" checked={ans.remote} onChange={() => set("remote", true)} /><span>Sí</span></label>
               <label className="vt-seg__opt"><input type="radio" name="remote" checked={!ans.remote} onChange={() => set("remote", false)} /><span>No hace falta</span></label>
             </div>
           </fieldset>
+          <label className="vt-q__extra">
+            <input type="checkbox" checked={alarm} onChange={(e) => setAlarm(e.target.checked)} />
+            <span><b>También me interesa una alarma</b><small>Sensores de puertas y movimiento, sirena y panel que avisan al celular. La incluimos en tu cotización.</small></span>
+          </label>
         </form>
 
         <section className="vt-kitres" id="mi-kit" aria-labelledby="vt-kit-title" aria-busy={busy}>
@@ -188,8 +197,12 @@ export default function KitBuilder() {
               </dl>
               <div className="vt-kitres__total"><span>Total de referencia del equipo</span><PriceTag p={{ display_price: kit.total, display_currency: kit.currency }} big /></div>
               <ul className="vt-kitres__notes">{kit.notes.map((n) => <li key={n}>{n}</li>)}</ul>
+              <div className="vt-kitres__visit">
+                <b><Ico d={IC.tool} size={16} />Recomendado: levantamiento técnico</b>
+                <p>Un técnico de Crimson visita tu sitio, mide distancias, revisa dónde hay corriente e internet y confirma el kit exacto antes de instalar. Así no pagás de más ni te falta equipo.</p>
+              </div>
               <div className="vt-kitres__cta">
-                <button className="sh-btn sh-btn--crimson sh-btn--block" onClick={toAdvice}><Ico d={IC.tool} />Quiero que Crimson lo instale</button>
+                <button className="sh-btn sh-btn--crimson sh-btn--block" onClick={toAdvice}><Ico d={IC.tool} />Pedir levantamiento e instalación</button>
                 <button className="sh-btn sh-btn--block" data-done={added} onClick={addAll} disabled={!priced.length}>
                   <Ico d={added ? IC.check : IC.bag} />{added ? `Agregado (${priced.length} productos)` : `Agregar el equipo al ${ctx.isShop ? "carrito" : "pedido de cotización"}`}
                 </button>
