@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -76,12 +77,41 @@ def _reminders_guard(p: Principal) -> None:
         raise HTTPException(403, "Sin permiso: pausar la cobranza de un cliente es de quien envía y ve toda la cartera (sales.enviar y sales.ver_todo)")
 
 
+def _duplicate_customer(db: Session, tenant_id: int, id_number: str | None, email: str | None) -> Customer | None:
+    """Cliente activo de la empresa con la misma cedula (solo digitos y letras, sin guiones ni espacios) o el mismo correo."""
+    import re
+
+    ced = re.sub(r"[^0-9A-Za-z]", "", id_number or "").upper()
+    correo = (email or "").strip().lower()
+    if not ced and not correo:
+        return None
+    conds = []
+    if correo:
+        conds.append(func.lower(func.trim(Customer.email)) == correo)
+    if ced:
+        # tal como la escribio, sin guiones ni espacios (como la guarda el formulario) o con la cedula fisica con guiones
+        variantes = {(id_number or "").strip(), ced, ced.lower()}
+        if ced.isdigit() and len(ced) == 9:
+            variantes.add(f"{ced[0]}-{ced[1:5]}-{ced[5:]}")
+        conds.append(Customer.id_number.in_(variantes))
+    return db.scalar(select(Customer).where(Customer.tenant_id == tenant_id, Customer.active, or_(*conds)).order_by(Customer.id).limit(1))
+
+
 @router.post("/customers", response_model=CustomerOut, status_code=201)
 def create_customer(data: CustomerIn, p: Principal = Depends(require("crm", "crear")), db: Session = Depends(get_db)):
     from ..services.documents import audit
 
     if data.no_reminders:
         _reminders_guard(p)
+    if not p.can("crm", "editar"):
+        dup = _duplicate_customer(db, p.tenant.id, data.id_number, data.email)
+        if dup is not None:
+            # quien no edita clientes (el vendedor, pedido 23) no arma una segunda ficha con la misma cedula o el mismo
+            # correo y su propio correo: la factura y los enlaces de pago le llegarian a el. Se usa la ficha existente.
+            return JSONResponse(
+                status_code=409,
+                content={"detail": f"Ya existe el cliente «{dup.name}» con esa cédula o ese correo: usá esa ficha", "existing": {"id": dup.id, "name": dup.name}},
+            )
     c = Customer(tenant_id=p.tenant.id, **data.model_dump())
     db.add(c)
     db.flush()

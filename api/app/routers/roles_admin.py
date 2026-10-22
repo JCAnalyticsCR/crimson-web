@@ -7,6 +7,9 @@ Reglas:
   tenant.settings["role_overrides"]; "Restablecer" la borra y vuelve al de fabrica. El administrador no se edita.
 - Un rol nuevo se crea a partir de uno existente (copia sus permisos de esta empresa) y vive en la tabla role con
   tenant_id. Se borra solo si nadie lo tiene ni hay invitaciones pendientes con el.
+- Lo que hace el rol de origen lo hace el nuevo: lo que el codigo decide por rol (quien recibe ordenes, tickets,
+  oportunidades y avisos) usa deps.roles_like; y lo que en Ajustes se marca por rol (2FA obligatorio, regla de «todos
+  los vendedores», avisos de pedidos web) nace marcado si el de origen lo estaba (_heredar).
 - Un rol editado o creado nunca recibe lo de solo administrador (core/permisos.py: anular facturas, publicar en la
   tienda, ver costos, asignar vendedor, descuento libre, saltar la revision, configurar la empresa): 422.
 - Todo cambio queda en la bitacora con el antes y el despues. Aplica en la siguiente peticion de cada persona (los
@@ -250,9 +253,59 @@ def role_create(data: RoleNewIn, p: Principal = Depends(solo_admin), db: Session
     r = Role(code=code, name=data.name, permissions=perms, tenant_id=p.tenant.id, base_code=data.from_code)
     db.add(r)
     db.flush()
-    audit_change(db, p, "create", "role", r.id, {}, {"nombre": r.name, "a_partir_de": data.from_code, "permisos": perms}, always=True)
+    heredado = _heredar(db, p, data.from_code, code)
+    audit_change(db, p, "create", "role", r.id, {}, {"nombre": r.name, "a_partir_de": data.from_code, "permisos": perms, "hereda": heredado}, always=True)
     db.commit()
-    return {"code": r.code, "name": r.name}
+    return {"code": r.code, "name": r.name, "inherited": heredado}
+
+
+def _heredar(db: Session, p: Principal, origen: str, code: str) -> list[str]:
+    """Lo que en Ajustes se decide POR ROL y el rol de origen ya tenia, el nuevo lo trae marcado (el admin lo puede
+    desmarcar despues en cada pantalla): la verificacion en dos pasos obligatoria, la regla de comision de «todos los
+    vendedores» y los avisos de pedidos web. Asi un «Vendedor senior» hecho a partir de Vendedor comisiona y recibe lo
+    mismo, y una copia de Contador sigue exigiendo 2FA. Devuelve que heredo (para la bitacora)."""
+    from ..core import twofa
+    from ..services.commissions import settings_of as commission_cfg
+    from ..services.store_orders import checkout_cfg
+
+    t = db.get(Tenant, p.tenant.id)
+    st = dict(t.settings or {})
+    out: list[str] = []
+    if twofa.is_required(t, origen):
+        st["twofa_roles"] = [*dict.fromkeys([*twofa.required_roles(t), code])]
+        out.append("2fa_obligatorio")
+    generales = list(commission_cfg(t).get("general_rule_roles") or [])
+    if origen in generales:
+        st["commissions"] = {**(st.get("commissions") or {}), "general_rule_roles": [*generales, code]}
+        out.append("regla_general_de_comision")
+    avisos = list(checkout_cfg(t).get("notify_roles") or [])
+    if origen in avisos:
+        store = dict(st.get("store") or {})
+        store["checkout"] = {**(store.get("checkout") or {}), "notify_roles": [*avisos, code]}
+        st["store"] = store
+        out.append("avisos_de_pedidos_web")
+    if out:
+        t.settings = st
+    return out
+
+
+def _olvidar(db: Session, p: Principal, code: str) -> None:
+    """Al borrar un rol creado: sale de las listas por rol de Ajustes (2FA, comisiones, avisos de pedidos web)."""
+    t = db.get(Tenant, p.tenant.id)
+    st = dict(t.settings or {})
+    if code in (st.get("twofa_roles") or []):
+        st["twofa_roles"] = [x for x in st["twofa_roles"] if x != code]
+    com = dict(st.get("commissions") or {})
+    if code in (com.get("general_rule_roles") or []):
+        com["general_rule_roles"] = [x for x in com["general_rule_roles"] if x != code]
+        st["commissions"] = com
+    store = dict(st.get("store") or {})
+    ck = dict(store.get("checkout") or {})
+    if code in (ck.get("notify_roles") or []):
+        ck["notify_roles"] = [x for x in ck["notify_roles"] if x != code]
+        store["checkout"] = ck
+        st["store"] = store
+    t.settings = st
 
 
 @router.delete("/{code}")
@@ -266,6 +319,7 @@ def role_delete(code: str, p: Principal = Depends(solo_admin), db: Session = Dep
         raise HTTPException(409, "Hay invitaciones pendientes con este rol: revocalas antes de borrarlo")
     audit_change(db, p, "delete", "role", r.id, {"nombre": r.name, "permisos": clean(r.permissions)}, {}, always=True)
     # las invitaciones viejas (aceptadas o revocadas) guardan el codigo como texto, sin llave foranea
+    _olvidar(db, p, code)
     db.delete(r)
     db.commit()
     return {"ok": True}

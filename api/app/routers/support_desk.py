@@ -22,7 +22,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
-from ..core.deps import CLIENT_ROLES, Principal, require, require_any
+from ..core.deps import CLIENT_ROLES, Principal, require, require_any, roles_like
 from ..models import (
     AllyCompany,
     AllyParticipation,
@@ -80,7 +80,7 @@ def _writable(t: SupportTicket) -> None:
 
 
 # Quien atiende soporte: los mismos que salen en meta.agents (el responsable de un ticket)
-AGENT_ROLES = ("admin", "supervisor", "tecnico")
+AGENT_ROLES = ("admin", "supervisor", "tecnico")  # y los roles creados a partir de esos (roles_like)
 ESTADO_LABEL = {
     "nuevo": "Nuevo",
     "asignado": "Asignado",
@@ -717,7 +717,7 @@ def ticket_assign(tid: int, data: AssignIn, p: Principal = Depends(require("supp
         m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.user_id == data.assigned_to, TenantUser.active))
         u = db.get(User, data.assigned_to) if m else None
         aliado = bool(m and m.ally_company_id)
-        if not m or not u or not u.active or (not aliado and m.role_code not in AGENT_ROLES):
+        if not m or not u or not u.active or (not aliado and m.role_code not in roles_like(db, p.tenant, AGENT_ROLES)):
             raise HTTPException(422, "Esa persona no atiende soporte")
         if aliado and data.assigned_to != t.assigned_to:
             # un usuario de una empresa aliada: el ticket queda asignado a su empresa (que participe en el proyecto)
@@ -886,7 +886,9 @@ def ticket_to_work_order(tid: int, data: VisitIn, p: Principal = Depends(require
 def ticket_meta(p: Principal = Depends(require("support_desk", "ver")), db: Session = Depends(get_db)):
     agentes = [
         {"id": m.user.id, "name": m.user.full_name, "role": m.role_code}
-        for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(AGENT_ROLES)))
+        for m in db.scalars(
+            select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(roles_like(db, p.tenant, AGENT_ROLES)))
+        )
     ]
     ahora = datetime.now(UTC)
     # mismo alcance que la lista y la misma funcion que cada filtro (services/sla.py): el contador = las tarjetas
@@ -941,7 +943,10 @@ def ticket_agents(ally_company_id: int | None = None, p: Principal = Depends(req
         {"id": m.user.id, "name": m.user.full_name, "role": m.role_code, "company": None}
         for m in db.scalars(
             select(TenantUser).where(
-                TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(AGENT_ROLES), TenantUser.ally_company_id.is_(None)
+                TenantUser.tenant_id == p.tenant.id,
+                TenantUser.active,
+                TenantUser.role_code.in_(roles_like(db, p.tenant, AGENT_ROLES)),
+                TenantUser.ally_company_id.is_(None),
             )
         )
         if m.user.active

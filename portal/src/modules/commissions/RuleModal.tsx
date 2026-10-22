@@ -22,7 +22,7 @@ export function blankRule(cfg: Config | null, beneficiary: "vendedor" | "aliado"
     mode: kind === "bono_fin" ? "fixed" : "percent", percent: "", fixed_amount: "", fixed_currency: "CRC",
     trigger: kind === "bono_fin" ? "proyecto_completado" : (beneficiary === "aliado" ? cfg?.default_trigger_aliado : cfg?.default_trigger_vendedor) || "cobro",
     deal_kind: "", solution: "", valid_from: "", valid_to: "", active: true, notes: "",
-    apply: true, apply_from: primeroDelMes(),
+    apply: false, apply_from: primeroDelMes(), // se ofrece, no se aplica solo: lo marca el admin
   };
 }
 
@@ -137,7 +137,7 @@ export default function RuleModal({ initial, ben, defaultMargin, onClose, onSave
       <div className="com-example" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <label className="com-check" style={{ margin: 0 }}><input type="checkbox" checked={!!f.apply} disabled={!f.active} onChange={(e) => set({ apply: e.target.checked })} />Aplicarla también a ventas anteriores (lo ya cobrado, aceptado o completado)</label>
         {f.apply && f.active && (
-          <Field label="Desde" hint="Máximo un año hacia atrás. Lo que ya tenía comisión no se toca; lo nuevo queda pendiente de aprobación y el vendedor ya lo ve.">
+          <Field label="Desde" hint="Máximo un año hacia atrás. Solo devenga lo que le toca a ESTA regla; lo que ya tenía comisión no se toca y lo nuevo queda pendiente de aprobación (el vendedor ya lo ve). Para todas las reglas: «Aplicar reglas a fechas anteriores» en la Bandeja.">
             <input className="input" type="date" value={f.apply_from || ""} min={haceUnAnio()} max={hoyCR()} onChange={(e) => set({ apply_from: e.target.value })} style={{ maxWidth: 200 }} />
           </Field>
         )}

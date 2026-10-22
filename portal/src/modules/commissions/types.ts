@@ -22,6 +22,8 @@ export type Rule = {
 export type Config = {
   default_trigger_vendedor: string; default_trigger_aliado: string; default_base_vendedor: string; default_base_aliado: string;
   ally_payout_trigger: string; general_rule_roles: string[]; show_margin_base: boolean; auto_approve: boolean;
+  /** roles que se pueden marcar (predefinidos y los que creó el admin) y el nombre de los creados */
+  role_choices?: string[]; role_labels?: Record<string, string>;
 };
 
 export type Beneficiaries = { users: { id: number; name: string; role: string; role_label: string; general: boolean }[]; allies: { id: number; name: string }[] };

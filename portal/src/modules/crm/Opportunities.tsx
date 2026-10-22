@@ -2,7 +2,7 @@
    Lo que importa aqui no es el monto sino la proxima accion con fecha: es lo que evita que un negocio se enfrie. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api, fmtDate, fmtMoney } from "../../lib/api";
+import { ApiError, api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { Lookup, searchCustomers } from "../../ui/Lookup";
@@ -260,7 +260,12 @@ export default function Opportunities() {
       setForm({ ...form, customer_id: String(c.id), customer_name: c.name });
       setNewCust(null);
       toast(`Cliente ${c.name} creado`);
-    } catch (e) { toast(e instanceof Error ? e.message : "No se pudo crear el cliente", "bad"); }
+    } catch (e) {
+      /* ya existe un cliente con esa cédula o ese correo (y no podés editar clientes): queda elegida esa ficha */
+      const ex = e instanceof ApiError && e.status === 409 ? (e.data as { existing?: { id: number; name: string } } | undefined)?.existing : undefined;
+      if (ex) { setForm({ ...form, customer_id: String(ex.id), customer_name: ex.name }); setNewCust(null); toast(`Ya existía: se usa la ficha de ${ex.name}`); return; }
+      toast(e instanceof Error ? e.message : "No se pudo crear el cliente", "bad");
+    }
   };
 
   const card = (o: Opp) => {

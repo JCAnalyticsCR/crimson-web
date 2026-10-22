@@ -2,7 +2,7 @@
    Los totales se recalculan en vivo contra /documents/preview (misma logica que el guardado). */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { api, fmtDate, fmtMoney, type Customer, type Invoice, type Line, type Product, type Quote } from "../../lib/api";
+import { ApiError, api, fmtDate, fmtMoney, type Customer, type Invoice, type Line, type Product, type Quote } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Field, I, Icon, Loading, Modal } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
@@ -489,7 +489,14 @@ function NuevoCliente({ onClose, onCreated }: { onClose: () => void; onCreated: 
     try {
       const c = await api<Customer>("/customers", { method: "POST", json: { name: f.name.trim(), id_type: f.id_type, id_number: f.id_number.trim() || null, email: f.email.trim() || null, phone: f.phone.trim() || null } });
       toast(`Cliente ${c.name} creado`); onCreated(c);
-    } catch (e) { toast(e instanceof Error ? e.message : "No se pudo crear el cliente", "bad"); }
+    } catch (e) {
+      /* ya existe un cliente con esa cédula o ese correo (y no podés editar clientes): se usa esa ficha */
+      const ex = e instanceof ApiError && e.status === 409 ? (e.data as { existing?: { id: number } } | undefined)?.existing : undefined;
+      if (ex) {
+        try { const c = await api<Customer>(`/customers/${ex.id}`); toast(`Ya existía: se usa la ficha de ${c.name}`); onCreated(c); return; } catch { /* abajo */ }
+      }
+      toast(e instanceof Error ? e.message : "No se pudo crear el cliente", "bad");
+    }
     finally { setBusy(false); }
   };
   return (

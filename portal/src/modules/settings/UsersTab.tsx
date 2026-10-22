@@ -15,7 +15,7 @@ import { Card, Empty, Field, I, Icon, Loading, Modal } from "../../ui/components
 
 type U = { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null; is_self: boolean; shared: boolean; must_change_password: boolean; temp_password_expires_at: string | null; locked_until: string | null; login_failures_until?: string | null; reset_link_expires_at: string | null; password_changed_at: string | null; member_since: string | null; notify_email?: string | null };
 type Inv = { id: number; email: string; role: string; expires_at: string; status: "pendiente" | "vencida"; sent_count: number; last_sent_at: string | null; invited_by: string | null; email_status: string | null; email_error: string | null };
-type UsersResp = { users: U[]; invitations: Inv[]; roles: string[]; role_labels?: Record<string, string>; mail_configured: boolean; support_members: number; cost_roles: string[]; cost_role_choices: string[]; twofa_roles?: string[]; twofa_grace_days?: number; twofa_role_choices?: string[] };
+type UsersResp = { users: U[]; invitations: Inv[]; roles: string[]; role_labels?: Record<string, string>; reauth_roles?: string[]; mail_configured: boolean; support_members: number; cost_roles: string[]; cost_role_choices: string[]; twofa_roles?: string[]; twofa_grace_days?: number; twofa_role_choices?: string[] };
 type InviteOut = { id: number; link: string; emailed: boolean; email_error: string | null; expires_at: string };
 type ResetOut =
   | { mode: "temporal"; temp_password: string; expires_at: string; email: string; name: string; login_url: string }
@@ -71,13 +71,15 @@ export default function UsersTab() {
   const patch = (uid: number, body: Record<string, unknown>) => api<{ ok: boolean }>(`/settings/users/${uid}`, { method: "PATCH", json: body });
   const copy = (text: string, msg = "Copiado") => { navigator.clipboard.writeText(text).then(() => toast(msg)).catch(() => toast("No se pudo copiar: seleccionalo y copialo a mano", "bad")); };
 
+  /* roles creados con acceso a contabilidad, planillas, Ajustes o usuarios: asignarlos pide la contraseña, como el de administrador */
+  const reauth = data?.reauth_roles ?? [];
   const changeRole = (u: U, next: string) => {
     if (next === u.role) return;
     const label = roleMeta(next).label;
-    if (u.role === "admin" || next === "admin") {
+    if (u.role === "admin" || next === "admin" || reauth.includes(next)) {
       setPwAsk({
         title: "Confirmá con tu contraseña",
-        text: next === "admin" ? `${u.name} va a pasar a Administrador: verá y podrá cambiar todo, incluidos costos, usuarios y pasarelas.` : `${u.name} deja de ser Administrador y pasa a ${label}.`,
+        text: next === "admin" ? `${u.name} va a pasar a Administrador: verá y podrá cambiar todo, incluidos costos, usuarios y pasarelas.` : reauth.includes(next) ? `${u.name} pasa a ${label}, un rol con acceso a contabilidad, planillas, Ajustes o usuarios.` : `${u.name} deja de ser Administrador y pasa a ${label}.`,
         cta: "Cambiar rol",
         run: async (pw) => { await patch(u.id, { role: next, admin_password: pw }); toast(`Rol actualizado: ${label}`); load(); },
       });
@@ -92,7 +94,7 @@ export default function UsersTab() {
     try {
       /* invitar como Administrador es crear uno: pide la contraseña de quien invita (igual que ascender a alguien) */
       const json: Record<string, unknown> = { email: invite.email.trim(), role: invite.role };
-      if (invite.role === "admin") json.admin_password = invite.admin_password;
+      if (invite.role === "admin" || reauth.includes(invite.role)) json.admin_password = invite.admin_password;
       const r = await api<InviteOut>("/settings/invitations", { method: "POST", json });
       setInviteOut({ ...r, email: invite.email.trim().toLowerCase(), role: invite.role, resent: false });
       setInvite(null);
@@ -248,12 +250,12 @@ export default function UsersTab() {
       )}
 
       {invite && (
-        <Modal title="Invitar usuario" onClose={() => setInvite(null)} foot={<><button className="btn btn--ghost" onClick={() => setInvite(null)}>Cancelar</button><button className="btn btn--crimson" onClick={sendInvite} disabled={inviteBusy || !invite.email.includes("@") || (invite.role === "admin" && !invite.admin_password)}>{inviteBusy ? "Enviando…" : "Enviar invitación"}</button></>}>
+        <Modal title="Invitar usuario" onClose={() => setInvite(null)} foot={<><button className="btn btn--ghost" onClick={() => setInvite(null)}>Cancelar</button><button className="btn btn--crimson" onClick={sendInvite} disabled={inviteBusy || !invite.email.includes("@") || ((invite.role === "admin" || reauth.includes(invite.role)) && !invite.admin_password)}>{inviteBusy ? "Enviando…" : "Enviar invitación"}</button></>}>
           <Field label="Correo"><input className="input" type="email" autoFocus value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} placeholder="nombre@empresa.com" /></Field>
           <Field label="Rol"><select className="select" value={invite.role} onChange={(e) => setInvite({ ...invite, role: e.target.value })}>{roleOptions(data.roles, invite.role, viewerIsAdmin).map((r) => <option key={r} value={r}>{roleMeta(r).label}</option>)}</select></Field>
           <RoleSummary code={invite.role} />
-          {invite.role === "admin" && (
-            <Field label="Confirmá con tu contraseña" hint="Invitar a un Administrador pide tu contraseña: va a ver y poder cambiar todo, incluidos costos, usuarios y pasarelas.">
+          {(invite.role === "admin" || reauth.includes(invite.role)) && (
+            <Field label="Confirmá con tu contraseña" hint={invite.role === "admin" ? "Invitar a un Administrador pide tu contraseña: va a ver y poder cambiar todo, incluidos costos, usuarios y pasarelas." : "Este rol tiene acceso a contabilidad, planillas, Ajustes o usuarios: invitar con él pide tu contraseña."}>
               <input className="input" type="password" autoComplete="current-password" value={invite.admin_password} onChange={(e) => setInvite({ ...invite, admin_password: e.target.value })} />
             </Field>
           )}
@@ -280,6 +282,7 @@ export default function UsersTab() {
         <ManageModal
           u={manage}
           roles={data.roles}
+          reauthRoles={reauth}
           viewerIsAdmin={viewerIsAdmin}
           onClose={() => setManageId(null)}
           onChanged={load}
@@ -331,8 +334,8 @@ function PasswordAsk({ title, text, cta, run, onClose }: Ask & { onClose: () => 
   );
 }
 
-function ManageModal({ u, roles, viewerIsAdmin, onClose, onChanged, onReset, onDeleted, askPassword, patch }: {
-  u: U; roles: string[]; viewerIsAdmin: boolean; onClose: () => void; onChanged: () => void; onReset: () => void; onDeleted: () => void;
+function ManageModal({ u, roles, reauthRoles, viewerIsAdmin, onClose, onChanged, onReset, onDeleted, askPassword, patch }: {
+  u: U; roles: string[]; reauthRoles: string[]; viewerIsAdmin: boolean; onClose: () => void; onChanged: () => void; onReset: () => void; onDeleted: () => void;
   askPassword: (a: Ask) => void; patch: (uid: number, body: Record<string, unknown>) => Promise<{ ok: boolean }>;
 }) {
   const { toast } = useSession();
@@ -347,7 +350,7 @@ function ManageModal({ u, roles, viewerIsAdmin, onClose, onChanged, onReset, onD
   const notifyChange = f.notify_email.trim().toLowerCase() !== (u.notify_email || "").toLowerCase();
   const roleChange = f.role !== u.role;
   /* desviar los avisos a otro buzón pide tu contraseña (quitarlo no): nadie se lleva las notificaciones callado */
-  const needPw = emailChange || (notifyChange && !!f.notify_email.trim()) || (roleChange && (u.role === "admin" || f.role === "admin"));
+  const needPw = emailChange || (notifyChange && !!f.notify_email.trim()) || (roleChange && (u.role === "admin" || f.role === "admin" || reauthRoles.includes(f.role)));
   const dirty = nameChange || emailChange || notifyChange || roleChange;
 
   const save = async () => {

@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.core.deps import ROLE_PERMISSIONS
 from app.core.permisos import LOCKED, problems
-from app.models import AuditLog, EmailOutbox, Role, Tenant, TenantUser, User
+from app.models import AuditLog, Customer, EmailOutbox, Invitation, Role, Tenant, TenantUser, User
 from app.providers.einvoice import cr_now
 from tests.aliados_helpers import ADMIN_PW, interno, login, uid
 
@@ -248,8 +248,16 @@ def test_regla_nueva_se_aplica_a_fechas_anteriores_y_el_vendedor_la_ve_pendiente
 def test_correo_para_avisos_internos_recibe_pedidos_y_ventas(client, auth, db_session):
     from app.services.store_orders import notify_team
 
-    assert client.put("/settings", json={"internal_notify_emails": ["Ventas.Buzon@ejemplo.com"]}).status_code == 200
+    # un buzon nuevo pide la contrasena (recibe datos de clientes y de sus pagos)
+    assert client.put("/settings", json={"internal_notify_emails": ["Ventas.Buzon@ejemplo.com"]}).status_code == 403
+    r = client.put("/settings", json={"internal_notify_emails": ["Ventas.Buzon@ejemplo.com"], "admin_password": ADMIN_PW})
+    assert r.status_code == 200, r.text
     assert client.get("/settings").json()["internal_notify_emails"] == ["ventas.buzon@ejemplo.com"]
+    # guardar lo mismo otra vez no escribe otra fila en la bitacora ni pide contrasena
+    n_log = len(db_session.scalars(select(AuditLog).where(AuditLog.reason == "Correo para avisos internos")).all())
+    assert n_log == 1
+    assert client.put("/settings", json={"internal_notify_emails": ["ventas.buzon@ejemplo.com"]}).status_code == 200
+    assert len(db_session.scalars(select(AuditLog).where(AuditLog.reason == "Correo para avisos internos")).all()) == 1
     t = db_session.get(Tenant, auth["tenant"]["id"])
     db_session.refresh(t)
     o = SimpleNamespace(
@@ -274,3 +282,188 @@ def test_login_helper_sigue_sirviendo(client, auth, db_session):
     """Sanidad: un usuario creado directo en la base entra (los helpers de arriba dependen de esto)."""
     interno(client, db_session, auth["tenant"]["id"], "sanidad.roles@ejemplo.com", "lectura")
     assert login(client, "sanidad.roles@ejemplo.com")
+
+
+# ---------- Revision: lo que el codigo decide por rol tambien alcanza a los roles creados ----------
+def _rol(client, nombre: str, desde: str) -> str:
+    r = client.post("/settings/roles", json={"name": nombre, "from_code": desde})
+    assert r.status_code == 201, r.text
+    return r.json()["code"]
+
+
+def test_rol_creado_desde_ventas_comisiona_recibe_avisos_y_sale_como_vendedor(client, auth, db_session):
+    from app.services.commissions import rules_for_user
+    from app.services.mail import notify_roles
+    from app.services.store_orders import checkout_cfg, notify_team
+
+    tid = auth["tenant"]["id"]
+    code = _rol(client, "Vendedor senior", "ventas")
+    t = db_session.get(Tenant, tid)
+    db_session.refresh(t)
+    # hereda lo que en Ajustes se decide por rol: la regla de «todos los vendedores» y los avisos de pedidos web
+    cfg = client.get("/commissions/config").json()
+    assert code in cfg["general_rule_roles"] and code in cfg["role_choices"] and cfg["role_labels"][code] == "Vendedor senior"
+    assert code in checkout_cfg(t)["notify_roles"]
+    assert code in client.get("/store/checkout").json()["role_choices"]
+    h = interno(client, db_session, tid, "senior.hereda@ejemplo.com", code)
+    u = uid(client, h)
+    # la regla general le alcanza
+    assert client.post("/commissions/rules", json={"name": "General", "percent": 3}).status_code == 201
+    assert any(r.user_id is None for r in rules_for_user(db_session, t, u, code))
+    # sale en la lista de responsables de oportunidades
+    assert u in [x["id"] for x in client.get("/opportunities/meta/config").json()["sellers"]]
+    # aviso de pedido web y avisos a "ventas" escritos en el codigo (p. ej. la asesoria web de la tienda)
+    o = SimpleNamespace(
+        id=7, number="WEB-0007", total=Decimal("1000"), currency="CRC", contact={"name": "Cliente Web", "email": "cliente@ejemplo.com"},
+        payment_method="SINPE Móvil", shipping_method="Retiro", status="nuevo",
+    )
+    notify_team(db_session, t, o, "nuevo")
+    notify_roles(db_session, t, ("ventas",), "Asesoría web de prueba", "<p>x</p>", "opportunity", 1)
+    db_session.commit()
+    asuntos = [m.subject for m in _ids_por_correo(db_session, "senior.hereda@ejemplo.com")]
+    assert any(a.startswith("Pedido web WEB-0007") for a in asuntos) and "Asesoría web de prueba" in asuntos
+    # el correo de invitacion dice el nombre del rol, no el codigo
+    assert client.post("/settings/invitations", json={"email": "otro.senior@ejemplo.com", "role": code}).status_code == 201
+    inv = _ids_por_correo(db_session, "otro.senior@ejemplo.com")[-1]
+    assert "Vendedor senior" in inv.html and code not in inv.html
+    # borrar el rol (sin nadie que lo tenga) lo saca de esas listas
+    db_session.execute(TenantUser.__table__.delete().where(TenantUser.user_id == u))
+    for i in db_session.scalars(select(Invitation).where(Invitation.role_code == code)):
+        i.revoked_at = cr_now()
+    db_session.commit()
+    assert client.delete(f"/settings/roles/{code}").status_code == 200
+    assert code not in client.get("/commissions/config").json()["general_rule_roles"]
+
+
+def test_role_label_usa_el_nombre_del_rol_creado(client, auth, db_session):
+    from app.services.accounts import role_label
+
+    code = _rol(client, "Bodega senior", "inventario")
+    assert role_label(code, db_session) == "Bodega senior"
+    assert role_label("ventas", db_session) == "Vendedor"
+
+
+def test_rol_creado_desde_tecnico_recibe_ordenes_y_tickets(client, auth, db_session):
+    from tests.test_portal_cliente import _crear_cliente_portal
+
+    tid = auth["tenant"]["id"]
+    code = _rol(client, "Técnico senior", "tecnico")
+    h = interno(client, db_session, tid, "tec.senior@ejemplo.com", code)
+    u = uid(client, h)
+    assert u in [x["id"] for x in client.get("/field/technicians").json()]
+    assert u in [x["id"] for x in client.get("/tickets/meta/config").json()["agents"]]
+    # su correo de avisos recibe la respuesta del cliente en un ticket que atiende
+    r = client.patch(f"/settings/users/{u}", json={"notify_email": "buzon.tecnico@ejemplo.com", "admin_password": ADMIN_PW})
+    assert r.status_code == 200, r.text
+    c = db_session.scalars(select(Customer).order_by(Customer.id)).first()
+    hc = _crear_cliente_portal(client, dict(client.headers), c.id, "cliente.senior@ejemplo.com", "cliente_usuario", "Cliente Prueba")
+    t = client.post("/cliente/tickets", json={"kind": "falla", "subject": "Cámara", "description": "No graba desde ayer en la noche"}, headers=hc)
+    assert t.status_code == 201, t.text
+    t = t.json()
+    r = client.post(f"/tickets/{t['id']}/assign", json={"assigned_to": u})
+    assert r.status_code == 200, r.text
+    assert client.post(f"/cliente/tickets/{t['id']}/comments", json={"body": "Sigue igual"}, headers=hc).status_code == 201
+    assert any(m.subject.startswith("El cliente respondió") for m in _ids_por_correo(db_session, "buzon.tecnico@ejemplo.com"))
+    assert not any(m.subject.startswith("El cliente respondió") for m in _ids_por_correo(db_session, "tec.senior@ejemplo.com"))
+
+
+def test_rol_creado_desde_contabilidad_exige_2fa(client, auth, db_session):
+    from app.core import twofa
+
+    code = _rol(client, "Contador senior", "contabilidad")
+    t = db_session.get(Tenant, auth["tenant"]["id"])
+    db_session.refresh(t)
+    assert twofa.is_required(t, code)
+    assert code in client.get("/settings/users").json()["twofa_role_choices"]
+    # quitarselo es aflojar: pide la contrasena; volver a exigirlo se puede
+    roles = [r for r in twofa.required_roles(t) if r != code]
+    assert client.put("/settings", json={"twofa_roles": roles}).status_code == 403
+    assert client.put("/settings", json={"twofa_roles": roles, "admin_password": ADMIN_PW}).status_code == 200
+    assert client.put("/settings", json={"twofa_roles": [*roles, code]}).status_code == 200
+    db_session.refresh(t)
+    assert twofa.is_required(t, code)
+    # un codigo que no es de esta empresa no se acepta
+    assert client.put("/settings", json={"twofa_roles": [*roles, "t999_inventado"]}).status_code == 422
+
+
+def test_asignar_un_rol_creado_desde_admin_pide_la_contrasena(client, auth, db_session):
+    tid = auth["tenant"]["id"]
+    code = _rol(client, "Casi admin", "admin")
+    assert code in client.get("/settings/users").json()["reauth_roles"]
+    h = interno(client, db_session, tid, "casi.admin@ejemplo.com", "lectura")
+    u = uid(client, h)
+    assert client.patch(f"/settings/users/{u}", json={"role": code}).status_code == 403
+    assert client.patch(f"/settings/users/{u}", json={"role": code, "admin_password": ADMIN_PW}).status_code == 200
+    assert client.post("/settings/invitations", json={"email": "casi.otro@ejemplo.com", "role": code}).status_code == 403
+    # uno copiado de ventas no la pide
+    ventas2 = _rol(client, "Ventas dos", "ventas")
+    assert ventas2 not in client.get("/settings/users").json()["reauth_roles"]
+
+
+def test_aprobar_cotizaciones_es_solo_del_admin(client, auth, db_session):
+    nuevos = {**{k: list(v) for k, v in ROLE_PERMISSIONS["ventas"].items()}, "sales": [*ROLE_PERMISSIONS["ventas"]["sales"], "aprobar"]}
+    r = client.put("/settings/roles/ventas", json={"permissions": nuevos})
+    assert r.status_code == 422 and "administrador" in r.json()["detail"]
+    assert "sales.aprobar" in LOCKED
+
+
+def test_eliminar_cuenta_de_prueba_no_revive_por_bootstrap(client, auth, db_session):
+    from app.bootstrap import extra_invites
+
+    t = db_session.get(Tenant, auth["tenant"]["id"])
+    if t.slug != "crimson":  # extra_invites solo invita en la empresa "crimson"
+        t.slug = "crimson"
+        db_session.commit()
+    h = interno(client, db_session, t.id, "cuenta.prueba@ejemplo.com", "ventas")
+    u = uid(client, h)
+    assert client.post(f"/settings/users/{u}/delete", json={"admin_password": ADMIN_PW}).status_code == 200
+    db_session.expire_all()
+    emitidas = extra_invites(db_session, "cuenta.prueba@ejemplo.com:ventas,nueva.prueba@ejemplo.com:lectura", base_url="https://ejemplo.invalid")
+    assert [e for e, _r, _l in emitidas] == ["nueva.prueba@ejemplo.com"]
+    vivas = db_session.scalars(select(Invitation).where(Invitation.email == "cuenta.prueba@ejemplo.com", Invitation.accepted_at.is_(None), Invitation.revoked_at.is_(None))).all()
+    assert vivas == []
+
+
+def test_vendedor_no_duplica_un_cliente_existente(client, auth, db_session):
+    h = interno(client, db_session, auth["tenant"]["id"], "vende.dup@ejemplo.com", "ventas")
+    c = client.get("/customers").json()["items"][0]
+    assert c["email"]
+    r = client.post("/customers", json={"name": "Copia", "id_type": "fisica", "email": c["email"].upper()}, headers=h)
+    assert r.status_code == 409 and r.json()["existing"]["id"] == c["id"]
+    if c.get("id_number"):
+        r = client.post("/customers", json={"name": "Copia", "id_type": c["id_type"], "id_number": c["id_number"], "email": "mio@ejemplo.com"}, headers=h)
+        assert r.status_code == 409 and r.json()["existing"]["id"] == c["id"]
+    # uno de verdad nuevo si se crea; y el admin (crm.editar) puede crear una ficha aparte
+    assert client.post("/customers", json={"name": "Otro Cliente", "id_type": "fisica", "email": "otro.cliente@ejemplo.com"}, headers=h).status_code == 201
+    assert client.post("/customers", json={"name": "Copia admin", "id_type": "fisica", "email": c["email"]}).status_code == 201
+
+
+def test_correo_de_avisos_solo_lo_ve_el_admin(client, auth, db_session):
+    tid = auth["tenant"]["id"]
+    h = interno(client, db_session, tid, "vende.oculto@ejemplo.com", "ventas")
+    u = uid(client, h)
+    assert client.patch(f"/settings/users/{u}", json={"notify_email": "personal@ejemplo.com", "admin_password": ADMIN_PW}).status_code == 200
+    assert next(x for x in client.get("/settings/users").json()["users"] if x["id"] == u)["notify_email"] == "personal@ejemplo.com"
+    assert client.put("/settings/roles/lectura", json={"permissions": {"dashboard": ["ver"], "settings": ["ver"]}}).status_code == 200
+    hl = interno(client, db_session, tid, "lee.ajustes@ejemplo.com", "lectura")
+    r = client.get("/settings/users", headers=hl)
+    assert r.status_code == 200, r.text
+    assert all(x["notify_email"] is None for x in r.json()["users"])
+
+
+def test_regla_aplicada_hacia_atras_solo_devenga_esa_regla(client, auth, db_session):
+    tid = auth["tenant"]["id"]
+    h1 = interno(client, db_session, tid, "vende.uno@ejemplo.com", "ventas")
+    h2 = interno(client, db_session, tid, "vende.dos@ejemplo.com", "ventas")
+    v1, v2 = uid(client, h1), uid(client, h2)
+    c = client.get("/customers").json()["items"][0]
+    for h in (h1, h2):
+        inv = client.post("/invoices", json={"customer_id": c["id"], "lines": [{"name": "X", "quantity": 1, "unit_price": 100000, "tax_rate": 0}]}, headers=h).json()
+        assert client.post(f"/invoices/{inv['id']}/payments", json={"method": "transferencia", "amount": 100000, "kind": "captura"}).status_code == 201
+    # regla de la primera persona sin aplicarla hacia atras: no devenga nada
+    assert client.post("/commissions/rules", json={"user_id": v1, "name": "Uno", "percent": 5}).status_code == 201
+    # la de la segunda, hacia atras: solo devenga la suya, no la de la primera
+    r = client.post("/commissions/rules", json={"user_id": v2, "name": "Dos", "percent": 5, "apply_from": str(HOY.replace(day=1))})
+    assert r.status_code == 201 and r.json()["backfill"]["creados"] == 1
+    assert len(client.get("/commissions", headers=h1).json()["rows"]) == 0
+    assert len(client.get("/commissions", headers=h2).json()["rows"]) == 1

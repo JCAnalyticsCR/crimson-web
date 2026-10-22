@@ -74,6 +74,10 @@ class MeOut(BaseModel):
     # permisos del rol (el portal deja de usar el menu fijo del rol y lo arma solo con los permisos)
     role_label: str | None = None
     role_customized: bool = False
+    # con el rol cambiado o creado: el predefinido del que sale y sus permisos de fabrica. El portal conserva el menu
+    # fijo de ese rol y solo suma las secciones de lo que el admin le agrego (nunca destapa lo que el menu ocultaba)
+    role_base: str | None = None
+    role_defaults: dict | None = None
     permissions: dict
     memberships: list[MembershipOut]
     # solo usuarios de una empresa aliada: {id, name, state, suspended_reason, features: {ganancias}}

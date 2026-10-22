@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from ..core.config import settings as cfg
 from ..core.db import get_db
-from ..core.deps import ALLY_USER_ROLES, CLIENT_ROLES, EXTERNAL_ROLES, Principal, require
+from ..core.deps import ALLY_USER_ROLES, CLIENT_ROLES, EXTERNAL_ROLES, Principal, require, roles_like
 from ..models import Customer, Opportunity, Product, Project, Survey, SurveyItem, SurveyObservation, SurveyPoint, User, Warehouse, WorkOrder, WorkOrderMaterial
 from ..schemas.sales import DocumentIn, LineInSchema
 from ..services import approvals as aprob
@@ -557,7 +557,7 @@ def technicians(
         select(TenantUser).where(
             TenantUser.tenant_id == p.tenant.id,
             TenantUser.active,
-            TenantUser.role_code.in_(("tecnico", "supervisor", "admin")),
+            TenantUser.role_code.in_(roles_like(db, p.tenant, CREW_ROLES)),  # tambien los roles creados a partir de esos
             TenantUser.ally_company_id.is_(None),
             TenantUser.customer_id.is_(None),
         )
@@ -774,11 +774,12 @@ def survey_create_and_assign(oid: int, data: SurveyFromRequestIn, p: Principal =
     tecnico = db.get(User, data.technician_id)
     _log(o, p.user.full_name, f"Creó el levantamiento {s.number} y se lo asignó a {tecnico.full_name if tecnico else 'un técnico'}")
     audit(db, p.tenant.id, p.user.id, "create", "survey", s.id, {"desde": "solicitud", "opportunity": o.number, "technician_id": data.technician_id}, ip=p.ip)
-    if aliada is None and data.technician_id != p.user.id and tecnico and tecnico.email:
+    correo_tec = user_inbox(db, p.tenant.id, tecnico) if tecnico else ""  # su correo de avisos (pedido 22)
+    if aliada is None and data.technician_id != p.user.id and correo_tec:
         queue_email(
             db,
             p.tenant,
-            tecnico.email,
+            correo_tec,
             f"Tiene un levantamiento nuevo: {s.number}",
             f"<p>Se le asignó el levantamiento <b>{html.escape(s.number)}</b> ({html.escape(s.site or 'sin sitio')})"
             f"{f' para el {data.visit_date:%d/%m/%Y}' if data.visit_date else ''}.</p>"
@@ -1822,12 +1823,13 @@ def _crew(o: WorkOrder) -> set[int]:
     return {i for i in [o.technician_id, *(o.helpers or [])] if i}
 
 
-def _crew_member():
-    """Rol que recibe ordenes: tecnico, supervisor o admin del equipo interno, o un usuario de una empresa aliada
-    (siempre ligado a su empresa; que la empresa participe en el proyecto lo valida check_ally_assignment)."""
+def _crew_member(db: Session, tenant_id: int):
+    """Rol que recibe ordenes: tecnico, supervisor o admin del equipo interno (o un rol que el admin creo a partir de
+    uno de esos, p. ej. "Tecnico senior"), o un usuario de una empresa aliada (siempre ligado a su empresa; que la
+    empresa participe en el proyecto lo valida check_ally_assignment)."""
     from ..models import TenantUser
 
-    interno = TenantUser.role_code.in_(CREW_ROLES) & TenantUser.ally_company_id.is_(None) & TenantUser.customer_id.is_(None)
+    interno = TenantUser.role_code.in_(roles_like(db, tenant_id, CREW_ROLES)) & TenantUser.ally_company_id.is_(None) & TenantUser.customer_id.is_(None)
     aliado = TenantUser.role_code.in_(ALLY_USER_ROLES) & TenantUser.ally_company_id.is_not(None)
     return or_(interno, aliado)
 
@@ -1838,7 +1840,7 @@ def _eligible(db: Session, tenant_id: int, user_id: int | None) -> bool:
 
     if not user_id:
         return False
-    m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == tenant_id, TenantUser.user_id == user_id, TenantUser.active, _crew_member()))
+    m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == tenant_id, TenantUser.user_id == user_id, TenantUser.active, _crew_member(db, tenant_id)))
     u = db.get(User, user_id) if m else None
     return bool(m and u and u.active)
 
@@ -1861,7 +1863,7 @@ def _activos(db: Session, tenant_id: int, ids) -> set[int]:
     stmt = (
         select(TenantUser.user_id)
         .join(User, User.id == TenantUser.user_id)
-        .where(TenantUser.tenant_id == tenant_id, TenantUser.user_id.in_(ids), TenantUser.active, _crew_member(), User.active)
+        .where(TenantUser.tenant_id == tenant_id, TenantUser.user_id.in_(ids), TenantUser.active, _crew_member(db, tenant_id), User.active)
     )
     return set(db.scalars(stmt))
 

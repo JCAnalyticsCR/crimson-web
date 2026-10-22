@@ -302,7 +302,8 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
                 "reset_link_expires_at": resets.get(m.user_id),
                 "password_changed_at": m.user.password_changed_at,
                 "member_since": m.created_at,
-                "notify_email": m.notify_email,
+                # correo de avisos: suele ser un buzon personal o externo; solo lo ve quien lo cambia (el admin)
+                "notify_email": m.notify_email if p.can("settings", "configurar") else None,
             }
             for m in rows
         ],
@@ -310,16 +311,36 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
         "roles": assignable_roles(db, p.tenant),
         # nombres de los roles que creo el admin (los predefinidos los nombra el portal)
         "role_labels": {r.code: r.name for r in custom_roles(db, p.tenant)},
+        # roles creados que piden la contrasena al asignarlos o invitar con ellos (como el de administrador)
+        "reauth_roles": [r.code for r in custom_roles(db, p.tenant) if _sensitive_custom(db, r.code)],
         # "Quien ve costos": lo habilitado hoy y los roles que se pueden habilitar (el resto nunca)
         "cost_roles": list(cost_roles(p.tenant)),
         "cost_role_choices": list(COST_ROLE_CHOICES),
         # 2FA obligatorio (core/twofa.py): roles que lo exigen, dias de gracia y los roles que se pueden elegir
         "twofa_roles": list(twofa.required_roles(p.tenant)),
         "twofa_grace_days": twofa.grace_days(p.tenant),
-        "twofa_role_choices": twofa.role_choices(),
+        "twofa_role_choices": twofa.role_choices(db, p.tenant),  # tambien los roles que creo el admin
         "mail_configured": mail_configured(),
         "support_members": support_members,
     }
+
+
+# Permisos que hacen "sensible" a un rol creado por el admin: dar ese rol pide la contrasena, como dar el de admin
+_SENSITIVE = (("settings", None), ("accounting", None), ("payroll", None), ("aliados", "usuarios"), ("portal_clientes", "aprobar"))
+
+
+def _sensitive_custom(db: Session, code: str | None) -> bool:
+    """Rol creado en Ajustes -> Roles copiado del administrador o con acceso a Ajustes, contabilidad, planillas,
+    usuarios de aliados o aprobar accesos de clientes. Asignarlo (o invitar con el) pide la contrasena de quien lo hace: con una
+    sesion robada no se crea un "casi administrador" sin reautenticar."""
+    from ..core.deps import ROLE_PERMISSIONS, _role_permissions, role_root
+
+    if not code or code in ROLE_PERMISSIONS:
+        return False
+    if role_root(db, code) == "admin":
+        return True
+    perms = _role_permissions(db, code)
+    return any((perms.get(mod) if act is None else act in (perms.get(mod) or [])) for mod, act in _SENSITIVE)
 
 
 # ---------- Invitaciones ----------
@@ -345,7 +366,7 @@ def invite(data: InviteIn, response: Response, p: Principal = Depends(ADMIN), db
     if data.role not in assignable_roles(db, p.tenant):
         raise HTTPException(422, "Rol invalido")
     _guard_admin_invite(p, data.role)
-    if data.role == "admin":
+    if data.role == "admin" or _sensitive_custom(db, data.role):
         _reauth(p, data.admin_password)
     tid = p.tenant.id
     email = str(data.email).strip().lower()
@@ -615,6 +636,7 @@ def member_update(uid: int, data: MemberIn, p: Principal = Depends(ADMIN), db: S
         email_change
         or (notify_change and new_notify)  # desviar los avisos a otro buzon pide la contrasena; quitarlo no
         or (role_change and "admin" in (m.role_code, data.role))
+        or (role_change and _sensitive_custom(db, data.role))  # un rol creado con contabilidad, planillas, Ajustes o usuarios
         or (active_change and m.role_code == "admin")
     ):
         _reauth(p, data.admin_password)

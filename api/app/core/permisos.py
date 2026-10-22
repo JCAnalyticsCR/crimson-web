@@ -7,8 +7,10 @@ Lo que NUNCA recibe un rol editado o creado (solo el administrador, "*"):
 - sales.anular (anular facturas y cotizaciones, pedido 18) y catalog.publicar (publicar en la tienda): ya hay pruebas
   que lo exigen (tests/test_anular_solo_admin.py, tests/test_publicar_solo_admin.py).
 - catalog.costos: el costo se reparte solo en "Quien ve costos y margenes" (y nunca a ventas, caja ni tecnicos).
-- sales.asignar (elegir el vendedor de un documento), sales.descuento_libre (descontar sin aprobacion) y
-  field.saltar_revision (cotizar sin revision aprobada): decisiones del administrador.
+- sales.asignar (elegir el vendedor de un documento), sales.descuento_libre (descontar sin aprobacion),
+  sales.aprobar (aprobar cotizaciones retenidas por descuento o margen: dado a un vendedor, aprobaria las suyas y el
+  tope de descuento y el margen minimo quedarian sin efecto) y field.saltar_revision (cotizar sin revision aprobada):
+  decisiones del administrador.
 - settings.configurar: configurar la empresa, usuarios, pasarelas y Hacienda es del administrador.
 """
 
@@ -21,7 +23,7 @@ CATALOG: list[tuple[str, str, list[tuple[str, str]]]] = [
     ("crm_pipeline", "Oportunidades", [("ver", "Ver"), ("ver_todo", "Ver las de todos"), ("crear", "Crear"), ("editar", "Editar")]),
     ("sales", "Cotizaciones y facturas", [
         ("ver", "Ver"), ("ver_todo", "Ver las de toda la empresa"), ("crear", "Crear"), ("editar", "Editar"), ("enviar", "Enviar"),
-        ("aprobar", "Aprobar cotizaciones retenidas"), ("exportar", "Exportar"), ("recurrencias", "Recurrencias"),
+        ("exportar", "Exportar"), ("recurrencias", "Recurrencias"),
         ("emitir_fuera", "Marcar emitidas en Fygaro"),
     ]),
     ("payments", "Pagos", [("ver", "Ver"), ("crear", "Registrar cobros"), ("editar", "Editar cobros"), ("exportar", "Exportar")]),
@@ -53,7 +55,16 @@ CATALOG: list[tuple[str, str, list[tuple[str, str]]]] = [
 
 # Solo el administrador: ningun rol editado o creado los recibe (ver el docstring)
 LOCKED: frozenset[str] = frozenset(
-    {"sales.anular", "catalog.publicar", "catalog.costos", "sales.asignar", "sales.descuento_libre", "field.saltar_revision", "settings.configurar"}
+    {
+        "sales.anular",
+        "catalog.publicar",
+        "catalog.costos",
+        "sales.asignar",
+        "sales.descuento_libre",
+        "sales.aprobar",
+        "field.saltar_revision",
+        "settings.configurar",
+    }
 )
 
 GRANTABLE: dict[str, tuple[str, ...]] = {m: tuple(a for a, _ in acts) for m, _, acts in CATALOG}

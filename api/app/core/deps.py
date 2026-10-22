@@ -225,15 +225,59 @@ def base_permissions(tenant, code: str) -> dict:
 
 
 def custom_roles(db: Session, tenant) -> list[Role]:
-    """Roles que el admin de esta empresa creo (Ajustes -> Usuarios -> Roles), en orden de creacion."""
+    """Roles que el admin de esta empresa creo (Ajustes -> Usuarios -> Roles), en orden de creacion. `tenant`: la
+    empresa o su id."""
     if tenant is None:
         return []
-    return list(db.scalars(select(Role).where(Role.tenant_id == tenant.id).order_by(Role.id)))
+    tid = tenant if isinstance(tenant, int) else tenant.id
+    return list(db.scalars(select(Role).where(Role.tenant_id == tid).order_by(Role.id)))
 
 
 def assignable_roles(db: Session, tenant) -> list[str]:
     """Roles que se asignan en Ajustes -> Usuarios en esta empresa: los internos predefinidos y los que creo el admin."""
     return [*ASSIGNABLE_ROLES, *(r.code for r in custom_roles(db, tenant))]
+
+
+def _root_of(code: str, bases: dict[str, str | None]) -> str:
+    """El rol predefinido del que sale `code` siguiendo base_code (un rol creado a partir de otro creado)."""
+    seen: set[str] = set()
+    while code not in ROLE_PERMISSIONS and code in bases and code not in seen:
+        seen.add(code)
+        nxt = bases.get(code)
+        if not nxt:
+            break
+        code = nxt
+    return code
+
+
+def role_root(db: Session, code: str | None) -> str | None:
+    """Rol predefinido de origen de un rol creado por el admin ("Vendedor senior" -> "ventas"); un predefinido es el
+    suyo. Para lo que el codigo decide por el rol (quien recibe ordenes, tickets, avisos, 2FA obligatorio)."""
+    if not code or code in ROLE_PERMISSIONS:
+        return code
+    bases: dict[str, str | None] = {}
+    cur: str | None = code
+    for _ in range(8):  # cadenas cortas; nunca un ciclo
+        if not cur or cur in ROLE_PERMISSIONS or cur in bases:
+            break
+        r = db.scalar(select(Role).where(Role.code == cur))
+        if r is None:
+            break
+        bases[cur] = r.base_code
+        cur = r.base_code
+    return _root_of(code, bases)
+
+
+def roles_like(db: Session, tenant, codes) -> tuple[str, ...]:
+    """Esos roles y los que el admin de esta empresa creo a partir de ellos (reunion 21/10, pedido 20: crear un rol a
+    partir de otro reproduce lo que hace el de origen). P. ej. ("tecnico",) -> ("tecnico", "t1_tecnico_senior")."""
+    want = tuple(dict.fromkeys(codes))
+    if tenant is None:
+        return want
+    propios = custom_roles(db, tenant)
+    bases = {r.code: r.base_code for r in propios}
+    extra = [r.code for r in propios if r.code not in want and _root_of(r.code, bases) in want]
+    return (*want, *extra)
 
 
 def cost_roles(tenant) -> tuple[str, ...]:

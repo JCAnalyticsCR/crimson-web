@@ -1,5 +1,6 @@
 /* Roles: nombre visible, color, que puede hacer y a donde lo lleva el inicio.
    La API es la que manda (cada endpoint exige modulo.accion); el portal solo esconde lo que el rol no puede usar. */
+import { NAV } from "./nav";
 
 export type Perms = Record<string, string[]>;
 
@@ -111,28 +112,77 @@ export const isAllyRole = (code: string | undefined) => code === "aliado" || cod
 export const isExternalRole = (code: string | undefined) => isClientRole(code) || isAllyRole(code);
 
 /* Ajustes → Usuarios → Roles (reunión 21/10, pedido 20): roles que creó el administrador (con su nombre) y roles cuyos
-   permisos cambió. La API los manda (/auth/me, /auth/roles, /settings/users) y aquí se registran. Un rol cambiado deja de
-   usar su `menu` fijo: el menú sale solo de los permisos (si no, un permiso que el admin le sumó no se vería). */
+   permisos cambió. La API los manda (/auth/me, /auth/roles, /settings/users) y aquí se registran. Un rol cambiado
+   CONSERVA el `menu` fijo de su rol (o, si lo creó el admin, el del rol del que salió) y solo suma las secciones de lo
+   que el admin le agregó respecto de los permisos de fábrica: quitarle algo nunca destapa lo que el menú ocultaba a
+   propósito (p. ej. el técnico tiene crm.ver solo para los buscadores y Clientes no sale en su menú). */
+type RoleInfo = { base?: string | null; defaults?: Perms | null; perms?: Perms | null };
 const CUSTOM_LABELS: Record<string, string> = {};
 const CUSTOMIZED = new Set<string>();
+const INFO: Record<string, RoleInfo> = {};
 
-export function registerRoles(info: { labels?: Record<string, string> | null; customized?: string[] | null; replace?: boolean }) {
-  if (info.labels) Object.assign(CUSTOM_LABELS, info.labels);
+/** replace: lo que llega es la lista completa (p. ej. /auth/roles): se olvida lo que ya no viene (un rol borrado o
+    restablecido de fábrica no sigue en «Ver como» ni con el menú armado de antes). */
+export function registerRoles(info: {
+  labels?: Record<string, string> | null; customized?: string[] | null; replace?: boolean;
+  bases?: Record<string, string | null> | null; defaults?: Record<string, Perms> | null; perms?: Record<string, Perms> | null;
+}) {
+  if (info.labels) {
+    if (info.replace) Object.keys(CUSTOM_LABELS).forEach((k) => { delete CUSTOM_LABELS[k]; });
+    Object.assign(CUSTOM_LABELS, info.labels);
+  }
   if (info.customized) {
     if (info.replace) CUSTOMIZED.clear();
     info.customized.forEach((c) => CUSTOMIZED.add(c));
   }
+  Object.entries(info.bases || {}).forEach(([c, b]) => { INFO[c] = { ...INFO[c], base: b }; });
+  Object.entries(info.defaults || {}).forEach(([c, d]) => { INFO[c] = { ...INFO[c], defaults: d }; });
+  Object.entries(info.perms || {}).forEach(([c, x]) => { INFO[c] = { ...INFO[c], perms: x }; });
+}
+
+/** El rol propio según /auth/me: se pone o se saca (restablecido de fábrica) sin esperar a recargar la página. */
+export function registerOwnRole(code: string, r: { label?: string | null; customized?: boolean; base?: string | null; defaults?: Perms | null; perms?: Perms | null }) {
+  if (!code) return;
+  if (r.label) CUSTOM_LABELS[code] = r.label;
+  if (r.customized) CUSTOMIZED.add(code); else CUSTOMIZED.delete(code);
+  INFO[code] = { ...INFO[code], base: r.base ?? null, defaults: r.defaults ?? null, perms: r.perms ?? null };
 }
 
 /** Códigos de los roles creados por el administrador que ya se conocen (en el orden en que llegaron). */
 export const customRoleCodes = () => Object.keys(CUSTOM_LABELS).filter((c) => !ROLES[c]);
 
+const inList = (menu: string[], to: string) => menu.some((m) => (m === "/" ? to === "/" : to === m || to.startsWith(`${m}/`)));
+const NAV_ITEMS = NAV.flatMap((g) => g.items);
+const navNeed = (to: string) => {
+  const it = NAV_ITEMS.filter((x) => (x.to === "/" ? to === "/" : to === x.to || to.startsWith(`${x.to}/`))).sort((a, b) => b.to.length - a.to.length)[0];
+  return it ? it.need : undefined;
+};
+/** Lo que tiene de más respecto de los permisos de fábrica de su rol. */
+const added = (perms: Perms, defaults: Perms): Perms => {
+  const out: Perms = {};
+  for (const [m, acts] of Object.entries(perms)) {
+    const extra = acts.filter((a) => !(defaults[m] || []).includes(a));
+    if (extra.length) out[m] = extra;
+  }
+  return out;
+};
+/* el menú fijo de un rol: el suyo o, si lo creó el admin, el del rol del que salió */
+const menuOf = (code: string) => {
+  if (ROLES[code]) return ROLES[code].menu;
+  const base = INFO[code]?.base;
+  return base && ROLES[base] ? ROLES[base].menu : undefined;
+};
+
 /** La sección (o una ruta dentro de ella, p. ej. /cotizaciones/nueva) está en el menú de ese rol. Sin lista: sí. */
 export const inRoleMenu = (code: string | undefined, to: string) => {
-  if (CUSTOMIZED.has(code || "")) return true;
-  const menu = ROLES[code || ""]?.menu;
-  if (!menu) return true;
-  return menu.some((m) => (m === "/" ? to === "/" : to === m || to.startsWith(`${m}/`)));
+  const c = code || "";
+  const menu = menuOf(c);
+  if (!menu || inList(menu, to)) return true;
+  if (ROLES[c] && !CUSTOMIZED.has(c)) return false;
+  const info = INFO[c];
+  if (!info?.perms) return false;
+  const need = navNeed(to);
+  return !!need && canAny(added(info.perms, info.defaults || {}), need);
 };
 
 export const roleMeta = (code: string | undefined): RoleMeta => {

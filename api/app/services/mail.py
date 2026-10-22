@@ -196,13 +196,19 @@ def notify_roles(
     dedupe_key: str | None = None,
     *,
     internal_copy: bool = False,
+    like: bool = True,
 ) -> int:
     """Avisa a todos los usuarios activos con esos roles (a su correo de avisos, member_inbox). Lo que en las notas de
     Andres es 'Administracion recibe: nuevo levantamiento' o 'proyecto terminado, listo para facturacion'.
     Con dedupe_key, cada destinatario lleva la suya (llave|correo): un aviso repetido no le llega dos veces a nadie.
-    internal_copy: tambien al "Correo para avisos internos" (avisos de pedidos y ventas)."""
+    internal_copy: tambien al "Correo para avisos internos" (avisos de pedidos y ventas).
+    like: tambien a los roles que el admin creo a partir de esos (un "Vendedor senior" recibe lo de ventas). False
+    cuando la lista viene de un ajuste que el admin arma a mano (p. ej. quien recibe los pedidos web)."""
+    from ..core.deps import roles_like
     from ..models import TenantUser
 
+    if like:
+        roles = roles_like(db, tenant, roles)
     n = 0
     vistos: set[str] = set()
     for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.active, TenantUser.role_code.in_(roles))):

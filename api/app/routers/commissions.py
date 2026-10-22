@@ -374,7 +374,7 @@ def rule_create(data: RuleIn, p: Principal = Depends(require("commissions", "con
     db.commit()
     out: dict = {"id": r.id}
     if data.apply_from is not None:
-        out["backfill"] = _run_backfill(db, p, data.apply_from, dry_run=False)
+        out["backfill"] = _run_backfill(db, p, data.apply_from, dry_run=False, rule_id=r.id)  # solo esta regla
     return out
 
 
@@ -396,7 +396,7 @@ def rule_update(rid: int, data: RuleIn, p: Principal = Depends(require("commissi
     db.commit()
     out: dict = {"id": r.id}
     if data.apply_from is not None:
-        out["backfill"] = _run_backfill(db, p, data.apply_from, dry_run=False)
+        out["backfill"] = _run_backfill(db, p, data.apply_from, dry_run=False, rule_id=r.id)  # solo esta regla
     return out
 
 
@@ -427,7 +427,13 @@ def beneficiaries(p: Principal = Depends(require("commissions", "configurar")), 
         if internal_member(db, p.tenant.id, u.id) is None:
             continue
         users.append(
-            {"id": u.id, "name": u.full_name, "role": m.role_code, "role_label": role_label(m.role_code), "general": m.role_code in cfg["general_rule_roles"]}
+            {
+                "id": u.id,
+                "name": u.full_name,
+                "role": m.role_code,
+                "role_label": role_label(m.role_code, db),
+                "general": m.role_code in cfg["general_rule_roles"],
+            }
         )
     users.sort(key=lambda x: (x["role"] != "ventas", x["name"] or ""))
     allies = [
@@ -449,9 +455,21 @@ class ConfigIn(BaseModel):
     auto_approve: bool | None = None
 
 
+def _config_out(db: Session, t) -> dict:
+    """La configuracion y los roles que se pueden marcar en «todos los vendedores»: los predefinidos y los que creo el
+    admin (con su nombre), para que un «Vendedor senior» se pueda sumar o quitar desde la pantalla."""
+    from ..core.deps import assignable_roles, custom_roles
+
+    return {
+        **svc.settings_of(t),
+        "role_choices": assignable_roles(db, t),
+        "role_labels": {r.code: r.name for r in custom_roles(db, t)},
+    }
+
+
 @router.get("/commissions/config")
-def config_get(p: Principal = Depends(require("commissions", "ver_todo"))):
-    return svc.settings_of(p.tenant)
+def config_get(p: Principal = Depends(require("commissions", "ver_todo")), db: Session = Depends(get_db)):
+    return _config_out(db, p.tenant)
 
 
 @router.put("/commissions/config")
@@ -473,7 +491,7 @@ def config_put(data: ConfigIn, p: Principal = Depends(require("commissions", "co
     despues = svc.settings_of(t)
     bitacora.audit_change(db, p, "update", "commission_config", t.id, antes, despues, reason="Comisiones -> Configuración")
     db.commit()
-    return despues
+    return _config_out(db, t)
 
 
 # ---------- 9. Tiempo real del vendedor ----------
@@ -674,9 +692,10 @@ def backfill(data: BackfillIn, p: Principal = Depends(require("commissions", "co
     return _run_backfill(db, p, data.from_, dry_run=data.dry_run)
 
 
-def _run_backfill(db: Session, p: Principal, desde: date, *, dry_run: bool) -> dict:
+def _run_backfill(db: Session, p: Principal, desde: date, *, dry_run: bool, rule_id: int | None = None) -> dict:
+    """rule_id: solo lo que devenga esa regla (al crearla o editarla); sin el, todas las reglas."""
     db.commit()  # lo pendiente de la sesion queda fuera de la simulacion
-    creados = svc.backfill(db, p.tenant, desde)
+    creados = svc.backfill(db, p.tenant, desde, rule_id=rule_id)
     names = svc.Names(db)
     por: dict[str, dict] = {}
     for c in creados:
@@ -692,7 +711,7 @@ def _run_backfill(db: Session, p: Principal, desde: date, *, dry_run: bool) -> d
     if dry_run:
         db.rollback()
     else:
-        audit(db, p.tenant.id, p.user.id, "backfill", "commission", None, {"desde": str(desde), "creados": len(creados)}, ip=p.ip)
+        audit(db, p.tenant.id, p.user.id, "backfill", "commission", None, {"desde": str(desde), "creados": len(creados), "regla": rule_id}, ip=p.ip)
         db.commit()
     return out
 

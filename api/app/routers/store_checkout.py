@@ -382,12 +382,17 @@ class CheckoutCfgIn(_Cfg):
     free_shipping_from: Decimal = Field(Decimal(0), ge=0)
     auto_invoice: bool = True
     pickup: PickupCfg = PickupCfg()
-    notify_roles: list[str] = Field(default_factory=lambda: ["admin", "ventas"], max_length=8)
+    notify_roles: list[str] = Field(default_factory=lambda: ["admin", "ventas"], max_length=40)  # tambien los roles creados
 
 
 def _cfg_out(db: Session, t: Tenant) -> dict:
+    from ..core.deps import assignable_roles, custom_roles
+
     return {
         "checkout": so.checkout_cfg(t),
+        # quien recibe el aviso de cada pedido web: los roles internos, tambien los que creo el admin (con su nombre)
+        "role_choices": assignable_roles(db, t),
+        "role_labels": {r.code: r.name for r in custom_roles(db, t)},
         "onvo": {"configured": bool(key := so.onvo_secret(db, t)), "simulation": so.simulation_allowed(), "mode": key_mode(key)},
     }
 

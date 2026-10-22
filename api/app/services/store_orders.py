@@ -500,7 +500,7 @@ def notify_team(db: Session, t: Tenant, o: Order, kind: str, detail: str | None 
     )
     roles = tuple(checkout_cfg(t).get("notify_roles") or ("admin",))
     # tambien al "Correo para avisos internos" de Ajustes (pedido 48: p. ej. el buzon de ventas), ademas de los usuarios
-    return notify_roles(db, t, roles, titulo, cuerpo, "order", o.id, internal_copy=True)
+    return notify_roles(db, t, roles, titulo, cuerpo, "order", o.id, internal_copy=True, like=False)  # la lista la arma el admin
 
 
 def email_status(db: Session, o: Order) -> list[dict]:

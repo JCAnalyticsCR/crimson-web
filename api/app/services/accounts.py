@@ -40,8 +40,16 @@ ROLE_LABELS = {
 }
 
 
-def role_label(code: str | None) -> str:
-    return ROLE_LABELS.get(code or "", code or "")
+def role_label(code: str | None, db: Session | None = None) -> str:
+    """Nombre del rol para un correo o una lista. Un rol creado por el admin (Ajustes -> Usuarios -> Roles) sale con el
+    nombre que le puso («Vendedor senior»), nunca con su codigo interno: con `db` se busca en la tabla role."""
+    c = code or ""
+    if c in ROLE_LABELS or db is None:
+        return ROLE_LABELS.get(c, c)
+    from ..models import Role
+
+    name = db.scalar(select(Role.name).where(Role.code == c))
+    return name or c
 
 
 def aware(dt: datetime | None) -> datetime | None:
@@ -283,9 +291,15 @@ def _button(link: str, label: str) -> str:
 
 
 def invite_email_html(tenant: Tenant, role_code: str, link: str, days: int) -> str:
+    from sqlalchemy.orm import object_session
+
+    try:
+        db = object_session(tenant)  # para el nombre de un rol creado por el admin
+    except Exception:  # noqa: BLE001  (una empresa de prueba que no es de la base)
+        db = None
     return _shell(
         tenant,
-        f"<p>Te invitaron a <b>{_e(tenant.name)}</b> en la plataforma de Crimson como <b>{_e(role_label(role_code))}</b>.</p>"
+        f"<p>Te invitaron a <b>{_e(tenant.name)}</b> en la plataforma de Crimson como <b>{_e(role_label(role_code, db))}</b>.</p>"
         f"{_button(link, 'Aceptar invitación')}"
         f'<p style="color:#5a5560">El enlace vence en {days} días y sirve una sola vez. Si no esperabas esta invitación, ignorá este correo.</p>',
     )

@@ -195,7 +195,8 @@ class SettingsIn(BaseModel):
     def _twofa_roles(cls, v):
         if v is None:
             return None
-        malos = [r for r in v if r not in twofa.role_choices()]
+        # los roles que creo el admin se validan contra la empresa en put_settings (aqui no hay base de datos)
+        malos = [r for r in v if r not in twofa.role_choices() and not (isinstance(r, str) and r.startswith("t"))]
         if malos:
             raise ValueError(f"Roles que no existen en el panel: {', '.join(malos)}")
         return list(dict.fromkeys(v))
@@ -221,16 +222,27 @@ def put_settings(data: SettingsIn, p: Principal = Depends(require("settings", "c
     from ..services import hacienda_config as hc
 
     t = db.get(Tenant, p.tenant.id)
+    if data.twofa_roles is not None:
+        malos = [r for r in data.twofa_roles if r not in twofa.role_choices(db, t)]
+        if malos:
+            raise HTTPException(422, f"Roles que no existen en el panel: {', '.join(malos)}")
     antes = list((t.settings or {}).get("cost_roles") or [])
+    internos_antes = list((t.settings or {}).get("internal_notify_emails") or [])
     twofa_antes = _twofa_policy(t)
     prov_antes = hc.provider_setting(t)
     nuevos = {**DEFAULTS, **(t.settings or {}), **data.model_dump(exclude_unset=True, exclude={"admin_password"}, mode="json")}
-    twofa_despues = _twofa_policy(SimpleNamespace(settings=nuevos))
+    twofa_despues = _twofa_policy(SimpleNamespace(settings=nuevos, id=t.id))
     afloja = bool(set(twofa_antes["twofa_roles"]) - set(twofa_despues["twofa_roles"])) or (twofa_despues["twofa_grace_days"] > twofa_antes["twofa_grace_days"])
     if afloja:
         # politica de seguridad: con una sesion de admin secuestrada no se le quita el 2FA obligatorio a nadie. Antes de
         # tocar nada (un raise despues de mutar dejaria el cambio pendiente en la sesion de BD)
         require_reauth(p, data.admin_password, "Confirmá con tu contraseña para aflojar la verificación en dos pasos obligatoria")
+    internos_despues = list(nuevos.get("internal_notify_emails") or [])
+    internos_cambio = "internal_notify_emails" in data.model_fields_set and internos_despues != internos_antes
+    if internos_cambio and set(internos_despues) - set(internos_antes):
+        # un buzon nuevo recibe copia de los pedidos web (datos del cliente y de sus pagos) y de las ventas: como el
+        # correo de avisos de un usuario, desviarlos pide la contrasena (con una sesion robada no se desvia nada)
+        require_reauth(p, data.admin_password, "Confirmá con tu contraseña para mandar los avisos internos a un correo nuevo")
     t.settings = nuevos
     if "einvoice_provider" in data.model_fields_set and data.einvoice_provider != prov_antes:
         # cualquier cambio de modo por la ruta generica apaga produccion (entrar a produccion: solo el interruptor)
@@ -241,9 +253,9 @@ def put_settings(data: SettingsIn, p: Principal = Depends(require("settings", "c
     if cobro:
         # encender los recordatorios o mover la fecha de corte decide a quien se le cobra: queda en la bitacora
         audit(db, t.id, p.user.id, "update", "tenant_settings", t.id, {"seccion": "cobranza", **{k: t.settings.get(k) for k in sorted(cobro)}}, ip=p.ip)
-    if "internal_notify_emails" in data.model_fields_set:
-        # a donde van los avisos internos de pedidos y ventas: queda en la bitacora (como cobranza)
-        audit(db, t.id, p.user.id, "update", "tenant_settings", t.id, {"seccion": "avisos internos", "internal_notify_emails": t.settings.get("internal_notify_emails")}, ip=p.ip)
+    if internos_cambio:
+        # a donde van los avisos internos de pedidos y ventas: queda en la bitacora con antes/despues (solo si cambio)
+        audit_change(db, p, "update", "tenant", t.id, {"internal_notify_emails": internos_antes}, {"internal_notify_emails": internos_despues}, reason="Correo para avisos internos")
     if "cost_roles" in data.model_fields_set:
         # quien ve costos es un permiso: queda en la bitacora con antes/despues (solo si cambio). Aplica en la
         # siguiente peticion: los permisos se calculan en cada request, no hace falta cerrar sesiones.

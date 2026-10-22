@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ALLY_PREVIEW_KEY, TWOFA_EVENT, api, auth, bootstrap, readAllyPreview, type AllyPreview, type Me } from "../lib/api";
-import { canAny, inRoleMenu, registerRoles, type Perms } from "./roles";
+import { canAny, inRoleMenu, registerOwnRole, registerRoles, type Perms } from "./roles";
 
 type Session = {
   me: Me | null; loading: boolean;
@@ -37,8 +37,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const reload = useCallback(async () => {
     try {
       const m = await api<Me>("/auth/me");
-      // rol creado por el admin (su nombre) o con permisos cambiados (el menú sale de los permisos)
-      registerRoles({ labels: m.role_label ? { [m.role]: m.role_label } : null, customized: m.role_customized ? [m.role] : [] });
+      // rol creado por el admin (su nombre) o con permisos cambiados (su menú fijo más lo agregado); restablecido de
+      // fábrica: vuelve a su menú fijo sin recargar la página
+      registerOwnRole(m.role, { label: m.role_label, customized: !!m.role_customized, base: m.role_base, defaults: m.role_defaults, perms: m.permissions });
       setMe(m);
     } catch { setMe(null); }
   }, []);
@@ -58,7 +59,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // con la gracia del 2FA vencida /auth/roles da 403: se pide cuando termina la pantalla forzada (blocked pasa a false)
   const matrixReady = me?.role === "admin" && !me?.twofa?.blocked;
   const reloadMatrix = useCallback(() => {
-    if (matrixReady) api<{ matrix: Record<string, Perms>; labels?: Record<string, string>; customized?: string[] }>("/auth/roles").then((r) => { registerRoles({ labels: r.labels, customized: r.customized, replace: true }); setMatrix(r.matrix); }).catch(() => {});
+    if (matrixReady) api<{ matrix: Record<string, Perms>; labels?: Record<string, string>; customized?: string[]; bases?: Record<string, string | null>; defaults?: Record<string, Perms> }>("/auth/roles").then((r) => { registerRoles({ labels: r.labels || {}, customized: r.customized || [], replace: true, bases: r.bases, defaults: r.defaults, perms: r.matrix }); setMatrix(r.matrix); }).catch(() => {});
   }, [matrixReady]);
   useEffect(() => { reloadMatrix(); }, [reloadMatrix]);
 

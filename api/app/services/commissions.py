@@ -2252,9 +2252,12 @@ def _money_row(f: dict, keys) -> dict:
 
 
 # ---------- 7.10 Aplicar reglas a fechas anteriores ----------
-def backfill(db: Session, tenant, desde: date) -> list[Commission]:
+def backfill(db: Session, tenant, desde: date, rule_id: int | None = None) -> list[Commission]:
     """Reprocesa en orden cronologico cobros, devoluciones, cotizaciones aceptadas o convertidas y proyectos
-    completados desde `desde`. Idempotente por source_key: repetirlo no crea nada."""
+    completados desde `desde`. Idempotente por source_key: repetirlo no crea nada.
+    rule_id (al crear o editar una regla con "aplicarla a ventas anteriores", pedido 25): solo queda lo que devenga
+    ESA regla (y sus reversiones). Cada movimiento se decide igual que siempre (la regla que mejor aplica), pero lo que
+    tocaria a otra regla no se devenga aqui: eso es de "Aplicar reglas a fechas anteriores", que reprocesa todas."""
     tid = tenant.id
     creados: list[Commission] = []
     eventos: list[tuple[date, int, str, object]] = []
@@ -2297,7 +2300,19 @@ def backfill(db: Session, tenant, desde: date) -> list[Commission]:
             creados += _accrue_quote(db, obj, _accepted_count(db, obj), _f, only_missing=True)
         else:
             creados += _accrue_project(db, obj)
-    return creados
+    if rule_id is None:
+        return creados
+    quedan: list[Commission] = []
+    ids: set[int] = set()
+    for c in creados:  # en orden: una reversion viene despues de lo que revierte
+        if c.rule_id == rule_id or (c.reverses_id is not None and c.reverses_id in ids):
+            quedan.append(c)
+            ids.add(c.id)
+    for c in reversed(creados):
+        if c.id not in ids:
+            db.delete(c)
+    db.flush()
+    return quedan
 
 
 def manual_key() -> str:
