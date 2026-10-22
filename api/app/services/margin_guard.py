@@ -443,6 +443,7 @@ def _brake_alert(db: Session, t: Tenant, out: dict, patch: dict) -> None:
         "<p>Si el dato está mal, corregilo (tipo de cambio en Ajustes → Facturación) y se libera solo. Si está bien, "
         f'tocá «Sacar de venta todo» en <a href="{html.escape(link)}">Aprobaciones → Precios por revisar</a>.</p>'
         "<p>El sistema nunca cambia un precio solo.</p>"
+        f'<p><a href="{html.escape(link)}">Revisar precios</a></p>'
     )
     notify_roles(db, t, ("admin",), f"Margen: revisión frenada, {out['frenados']} producto(s) bajo el mínimo a la venta · {t.name}", body, "margin_summary", 0)
     patch["margin_guard_brake_alert_on"] = hoy
@@ -684,7 +685,7 @@ def summary_html(db: Session, t: Tenant, base_url: str) -> tuple[str, str] | Non
         )
     if not rows:
         subject = f"Margen: {len(dud)} costo(s) dudoso(s)" if dud else f"Tipo de cambio viejo o faltante ({len(alerts)})"
-        return subject, fx_html + dud_html
+        return subject, fx_html + dud_html + f'<p><a href="{html.escape(link)}">Revisar precios</a></p>'
     n_held = sum(1 for p in rows if p.margin_hold)
     n_dud = sum(1 for p in rows if (p.margin_info or {}).get("dudoso"))
     li = []
@@ -711,5 +712,6 @@ def summary_html(db: Session, t: Tenant, base_url: str) -> tuple[str, str] | Non
         f"({n_held} fuera de venta, {n_dud} con un salto dudoso). Modo {modo}.</p><ul>{''.join(li)}</ul>{mas}{dud_html}"
         f"<p>El sistema nunca cambia un precio solo: revisalos y aplicá el sugerido con un clic en "
         f'<a href="{html.escape(link)}">Aprobaciones → Precios por revisar</a>.</p>'
+        f'<p><a href="{html.escape(link)}">Revisar precios</a></p>'  # el boton principal del correo (email_layout)
     )
     return f"Margen: {len(rows)} producto(s) bajo el {_s(cfg['min_pct'])} %", body

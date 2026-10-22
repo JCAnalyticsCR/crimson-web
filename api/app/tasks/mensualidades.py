@@ -74,6 +74,7 @@ def preview_upcoming(db: Session, today: date | None = None, days: int = PREVIEW
     """Correo a los administradores con lo que se cobra en `days` dias. Devuelve cuantos correos salieron."""
     from ..routers.ops import pending_send
     from ..services.documents_send import queue_once, queued_before
+    from ..services.email_layout import cta
     from ..services.hacienda_config import hacienda_mode
 
     today = today or cr_today()
@@ -100,6 +101,7 @@ def preview_upcoming(db: Session, today: date | None = None, days: int = PREVIEW
             "<table border=0 cellpadding=6><tr><th align=left>Recurrencia</th><th align=left>Cliente</th><th align=right>Total</th><th align=left>Qué pasa</th></tr>"
             + "".join(filas)
             + "</table><p>Si algo no corresponde, cambialo en Facturación → Recurrencias antes de esa fecha.</p>"
+            + cta("/recurrencias", "Abrir Recurrencias")
         )
         asunto = f"En {days} días ({on:%d/%m/%Y}):"
         vistos: set[str] = set()

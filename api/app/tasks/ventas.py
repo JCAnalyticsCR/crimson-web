@@ -155,9 +155,9 @@ def avisar_cotizaciones_frias(db: Session, tenant, ahora: datetime | None = None
                 else "Estas cotizaciones están frías y su vendedora ya no está activa (o ya no las puede ver): reasignalas o dales seguimiento:"
             )
             return (
-                f'<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;color:#15131a"><p>{intro}</p><ul>{filas}</ul>{mas}'
+                f"<p>{intro}</p><ul>{filas}</ul>{mas}"
                 "<p>Una llamada a tiempo es la diferencia. Si el cliente ya respondió, registralo en Versiones de la cotización: "
-                "así no vuelve a aparecer aquí.</p></div>"
+                "así no vuelve a aparecer aquí.</p>"
             )
 
         asunto = f"{len(items)} cotización{'es' if len(items) != 1 else ''} sin respuesta del cliente"

@@ -29,6 +29,7 @@ from ..services import fygaro_legacy
 from ..services import store_showcase as sv
 from ..services.availability import settings_of, sort_key
 from ..services.documents import audit
+from ..services.email_layout import cta
 from ..services.fx import FxMissing
 from ..services.mail import notify_roles
 from .auth import client_ip
@@ -887,6 +888,7 @@ def _crear_oportunidad(db: Session, slug: str, data: AdvisoryIn, ip: str) -> Non
         + (f"<p>Equipo de interés:<br>{'<br>'.join(e(x) for x in lineas)}</p>" if lineas else "")
         + ("<p><b>Pide instalación.</b></p>" if data.install else "")
         + f"<p>{'Cliente registrado: ' + e(cliente.name) if cliente else 'Prospecto nuevo (sin ficha de cliente)'} · Oportunidades → {e(number)}</p>"
+        + cta(f"/oportunidades?id={o.id}", f"Abrir {number}")
     )
     notify_roles(db, t, ("admin", "supervisor", "ventas"), f"Asesoría web {number} · {etiqueta} · {quien[:40]}", cuerpo, "opportunity", o.id)
     db.commit()

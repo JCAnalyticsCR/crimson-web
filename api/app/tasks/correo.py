@@ -103,6 +103,18 @@ def owners(db: Session, m: EmailOutbox) -> tuple[str, list[str]]:
     return "", []
 
 
+_DOC_PATH = {"invoice": ("/facturas/{id}", "Abrir la factura"), "quote": ("/cotizaciones/{id}", "Abrir la cotización"), "order": ("/ordenes?pedido={id}", "Abrir el pedido")}
+
+
+def _doc_cta(items: list[tuple[str, EmailOutbox]]) -> str:
+    """Boton del aviso: el documento del primer correo que fallo (desde ahi se reenvia)."""
+    from ..services.email_layout import cta
+
+    m = items[0][1]
+    ruta = _DOC_PATH.get(m.entity or "")
+    return cta(ruta[0].format(id=m.entity_id), ruta[1]) if ruta and m.entity_id else ""
+
+
 def _notify_owners(db: Session, failed: list[EmailOutbox]) -> int:
     """Un solo correo por dueño con todo lo que quedo fallido en esta pasada."""
     groups: dict[tuple[int, str], list[tuple[str, EmailOutbox]]] = {}
@@ -129,7 +141,8 @@ def _notify_owners(db: Session, failed: list[EmailOutbox]) -> int:
             f"{len(items)} correo(s) no le llegaron al cliente · {t.name}",
             "<p>Estos correos no salieron y ya no se reintentan:</p>"
             f"<ul>{filas}</ul>"
-            "<p>Revise el correo del cliente y vuelva a enviarlo desde el documento (Enviar por correo).</p>",
+            "<p>Revise el correo del cliente y vuelva a enviarlo desde el documento (Enviar por correo).</p>"
+            + _doc_cta(items),
             "outbox",
             items[0][1].id,
             dedupe_key=f"outbox:fallido:{ids}:{addr}",

@@ -1261,6 +1261,7 @@ def _rec_alert(db: Session, r: Recurrence, invoice: Invoice, title: str, body: s
     from html import escape
 
     from ..models import Tenant
+    from ..services.email_layout import cta
     from ..services.mail import notify_roles
     from ..services.render import money
 
@@ -1272,7 +1273,8 @@ def _rec_alert(db: Session, r: Recurrence, invoice: Invoice, title: str, body: s
         t,
         ("admin",),
         f"{title} · {invoice.number}",
-        f"<p><b>{escape(r.name or '')}</b> · {escape(quien)} · {escape(invoice.number)} por {money(invoice.total, invoice.currency)}.</p><p>{escape(body)}</p>",
+        f"<p><b>{escape(r.name or '')}</b> · {escape(quien)} · {escape(invoice.number)} por {money(invoice.total, invoice.currency)}.</p><p>{escape(body)}</p>"
+        + cta(f"/facturas/{invoice.id}", f"Abrir la factura {invoice.number}"),
         "recurrence",
         r.id,
     )
@@ -1564,6 +1566,7 @@ def run_due_recurrences(db: Session, today: date | None = None) -> int:
                     from html import escape
 
                     from ..models import Tenant
+                    from ..services.email_layout import cta
                     from ..services.mail import notify_roles
 
                     t = db.get(Tenant, r.tenant_id)
@@ -1573,7 +1576,8 @@ def run_due_recurrences(db: Session, today: date | None = None) -> int:
                         ("admin",),
                         f"Recurrencia «{r.name}» con periodos atrasados",
                         f"<p>La recurrencia de factura <b>{escape(r.name or '')}</b> tiene periodos atrasados (siguiente: {r.next_date}). "
-                        "Se generó una sola factura; revísela antes de generar las demás.</p>",
+                        "Se generó una sola factura; revísela antes de generar las demás.</p>"
+                        + cta("/recurrencias", "Abrir Recurrencias"),
                         "recurrence",
                         r.id,
                     )

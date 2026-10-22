@@ -37,6 +37,7 @@ from ..services import inventory as invsvc
 from ..services import pricing
 from ..services.archive import live
 from ..services.documents import audit, local_date, today_fx
+from ..services.email_layout import cta
 from ..services.fx import doc_rate, rate_or_none
 from ..services.mail import notify_roles
 from ..services.refs import check_refs
@@ -501,7 +502,8 @@ def _reservar(db: Session, p: Principal, pr: Project, order: WorkOrder) -> list[
             ("admin", "inventario"),
             f"{pr.number}: hay que comprar {len(faltan)} material(es) antes de instalar",
             f"<p>El proyecto <b>{html.escape(pr.name)}</b> arrancó y esto no está en bodega:</p><ul>{filas}</ul>"
-            f"<p>Quedó la solicitud de compra <b>{req['number']}</b>. Los proveedores no dan crédito, así que conviene pedirlo hoy.</p>",
+            f"<p>Quedó la solicitud de compra <b>{req['number']}</b>. Los proveedores no dan crédito, así que conviene pedirlo hoy.</p>"
+            + cta("/compras", "Abrir Compras"),
             "purchase_request",
             req["id"],
         )

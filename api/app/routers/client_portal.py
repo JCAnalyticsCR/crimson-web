@@ -41,6 +41,7 @@ from ..services import invoice_states
 from ..services import sla as slasvc
 from ..services.client_access import invite_client
 from ..services.documents import audit
+from ..services.email_layout import cta
 from ..services.mail import notify_roles, queue_email
 from ..services.media_access import sign_urls
 from ..services.render import render_html, render_pdf
@@ -273,7 +274,7 @@ def ticket_create(data: TicketIn, p: Principal = Depends(need("tickets")), db: S
         f"Ticket del portal {t.number} · {c.name[:40]}",
         f"<p><b>{e(c.name)}</b> abrió <b>{e(t.number)}</b> desde el portal de clientes.</p>"
         f"<p>{e(t.subject)} · prioridad indicada: {e(t.priority)}</p><blockquote>{e(data.description)}</blockquote>"
-        f"<p>Primera respuesta antes de {t.sla['respuesta']} h.</p>",
+        f"<p>Primera respuesta antes de {t.sla['respuesta']} h.</p>" + cta(f"/tickets?id={t.id}", f"Abrir el ticket {t.number}"),
         "support_ticket",
         t.id,
     )
@@ -309,7 +310,10 @@ def comment(tid: int, data: CommentIn, p: Principal = Depends(need("tickets")), 
     audit(db, p.tenant.id, p.user.id, "comment_portal", "support_ticket", t.id, ip=p.ip)
     destino = db.get(User, t.assigned_to) if t.assigned_to else None
     asunto = f"El cliente respondió en {t.number}"
-    cuerpo = f"<p><b>{html.escape(p.user.full_name)}</b> escribió en <b>{html.escape(t.number)}</b>:</p><blockquote>{html.escape(data.body)}</blockquote>"
+    cuerpo = (
+        f"<p><b>{html.escape(p.user.full_name)}</b> escribió en <b>{html.escape(t.number)}</b>:</p><blockquote>{html.escape(data.body)}</blockquote>"
+        + cta(f"/tickets?id={t.id}", f"Responder en {t.number}")
+    )
     if destino and destino.email:
         queue_email(db, p.tenant, destino.email, asunto, cuerpo, "support_ticket", t.id)
     else:

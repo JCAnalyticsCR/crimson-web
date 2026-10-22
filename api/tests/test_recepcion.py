@@ -366,7 +366,8 @@ def test_mensaje_receptor_de_un_cliente(client, auth, db_session, monkeypatch):
     assert doc.receiver_message == "3" and doc.receiver_detail == detalle
     alertas = db_session.query(EmailOutbox).order_by(EmailOutbox.id).all()[antes:]
     assert alertas  # alerta: hay que emitir la NC
-    assert all("<a href" not in m.html and "firma no verificada" in m.html for m in alertas)  # escapado y rotulado
+    # escapado y rotulado (el unico enlace del correo es el boton propio a la factura, nunca el del XML)
+    assert all('<a href="https://phish' not in m.html and "firma no verificada" in m.html for m in alertas)
     # el primero no se sobrescribe: un segundo mensaje (aceptacion) queda en la bitacora, no en la factura
     r = up(client, mensaje_receptor(em["clave"], emisor=EMPRESA, receptor=receptor, mensaje="1"), name="mr2.xml")
     assert r.status_code == 422 and "se conserva el primero" in r.json()["detail"]
@@ -632,7 +633,7 @@ def test_alerta_diaria_escapa_lo_del_xml_y_avisa_el_ultimo_dia(client, auth, db_
     antes = db_session.query(EmailOutbox).count()
     assert hacienda_tasks.daily_alerts(db_session) >= 1
     nuevos = db_session.query(EmailOutbox).order_by(EmailOutbox.id).all()[antes:]
-    assert nuevos and all("<a href" not in m.html for m in nuevos) and any("&lt;a href=" in m.html for m in nuevos)
+    assert nuevos and all('<a href="https://phish' not in m.html for m in nuevos) and any("&lt;a href=" in m.html for m in nuevos)
 
 
 def test_respuesta_del_proveedor_de_otras_cedulas_se_ignora_y_adjuntar_la_buena_corrige(client, auth, db_session):

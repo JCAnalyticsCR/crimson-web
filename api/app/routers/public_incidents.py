@@ -29,6 +29,7 @@ from ..core.ratelimit import incident_global_limiter, incident_limiter
 from ..models import Customer, SupportTicket, Tenant
 from ..services import sla as slasvc
 from ..services.documents import audit
+from ..services.email_layout import cta
 from ..services.mail import notify_roles
 from ..services.sequences import next_number
 from .auth import client_ip
@@ -143,6 +144,7 @@ def _crear(db: Session, data: IncidentIn, ip: str) -> str:
         f"<blockquote>{e(data.description)}</blockquote>"
         f"{'<p>Ubicación: ' + e(data.location) + '</p>' if data.location else ''}"
         f"<p>Primera respuesta antes de {tk.sla['respuesta']} h.</p>"
+        + cta(f"/tickets?id={tk.id}", f"Abrir el ticket {tk.number}")
     )
     notify_roles(db, t, ("admin", "supervisor"), f"Ticket web {tk.number} · {resumen[:50]}", cuerpo, "support_ticket", tk.id)
     db.commit()

@@ -66,6 +66,7 @@ from ..models import (
     Tenant,
     Warehouse,
 )
+from . import email_layout
 from . import inventory as invsvc
 from . import reservations as rsv
 
@@ -361,7 +362,8 @@ def _notify_paid_purchase(db: Session, t: Tenant, o: Order, reqs: list[PurchaseR
         ("admin", "supervisor"),
         asunto,
         f"{estado}<ul>{items}</ul>{tarde}"
-        f"<p>La solicitud de compra <b>{e(numeros)}</b> quedó en borrador: marcala «solicitada» al hacer el pedido. Al recibir la compra queda reservada para este pedido.</p>",
+        f"<p>La solicitud de compra <b>{e(numeros)}</b> quedó en borrador: marcala «solicitada» al hacer el pedido. Al recibir la compra queda reservada para este pedido.</p>"
+        + email_layout.cta("/compras", "Abrir Compras"),
         "purchase_request",
         reqs[0].id,
     )
@@ -886,12 +888,15 @@ def back_in_stock(db: Session) -> int:
                     t,
                     a.email,
                     f"Ya hay {p.name} · {t.name}",
-                    f"<div style='font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#15131a'>"
-                    f"<p>¡Buenas noticias! <b>{html.escape(p.name)}</b> ya está {html.escape(st['mensaje'].lower())}.</p>"
-                    f"<p><a href='{html.escape(url)}' style='display:inline-block;background:#e2233a;color:#fff;padding:12px 18px;border-radius:10px;"
-                    f"text-decoration:none;font-weight:700'>Ver el producto</a></p>"
-                    f"<p style='color:#8a858f;font-size:12px'>Te escribimos porque pediste que te avisáramos. La existencia puede cambiar: si lo querés, "
-                    f"no esperés mucho.</p></div>",
+                    email_layout.render(
+                        t,
+                        title=f"Ya hay {p.name}",
+                        body=email_layout.p_html(f"¡Buenas noticias! <b>{html.escape(p.name)}</b> ya está {html.escape(st['mensaje'].lower())}."),
+                        preheader=f"{p.name} ya está {st['mensaje'].lower()}.",
+                        action=(url, "Ver el producto"),
+                        foot="Te escribimos porque pediste que te avisáramos. La existencia puede cambiar: si lo querés, no esperés mucho.",
+                        vos=True,
+                    ),
                     "stock_alert",
                     a.id,
                 )

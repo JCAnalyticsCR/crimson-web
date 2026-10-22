@@ -15,6 +15,7 @@ validez fiscal" (los clientes reales no deben recibir comprobantes de prueba). E
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -69,12 +70,13 @@ def _pdf(db: Session, inv: Invoice, t: Tenant) -> bytes | None:
 
 
 def _html(t: Tenant, title: str, lines: list[str], test: bool) -> str:
-    banner = f'<p style="background:#fff4d6;color:#7a5a00;padding:8px 12px;border-radius:8px;font-weight:700">{TEST_TAG}</p>' if test else ""
-    body = "".join(f"<p>{x}</p>" for x in lines)
-    return f"""<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#15131a">
-<div style="border-bottom:3px solid #e2233a;padding:12px 0;font-size:18px;font-weight:700">{t.name}</div>{banner}
-<h3 style="margin:14px 0 6px">{title}</h3>{body}
-<p style="color:#8a858f;font-size:12px">Cualquier consulta, responda a este correo.</p></div>"""
+    """Entrega del comprobante electronico (XML y PDF) y de la respuesta de Hacienda: diseno base (email_layout).
+    `lines` ya vienen como HTML escapado (negritas con el numero)."""
+    from . import email_layout as el
+
+    banner = el.note(html=f"<b>{TEST_TAG}</b>", warn=True) if test else ""
+    body = banner + "".join(el.p_html(x) for x in lines)
+    return el.render(t, title=title, body=body, preheader=re.sub(r"<[^>]+>", "", lines[0]) if lines else title, foot="Cualquier consulta, responda a este correo.")
 
 
 def _aware(dt: datetime | None) -> datetime | None:

@@ -272,18 +272,21 @@ def avisar_atrasos(db: Session, tenant: Tenant, ahora: datetime | None = None) -
     import html
 
     from ..models import User
+    from .email_layout import cta
     from .mail import notify_roles, queue_email
 
-    titulos = {"respuesta": "sin primera respuesta a tiempo", "resolucion": "con la resolucion atrasada"}
+    titulos = {"respuesta": "sin primera respuesta a tiempo", "resolucion": "con la resolución atrasada"}
     n = 0
     for tipo, lista in revisar_atrasos(db, tenant, ahora).items():
         if not lista:
             continue
         filas = "".join(f"<li>{x.number} · {html.escape(x.subject)} · prioridad {x.priority}</li>" for x in lista[:20])
-        notify_roles(db, tenant, ("admin", "supervisor"), f"{len(lista)} ticket(s) {titulos[tipo]}", f"<ul>{filas}</ul>", "support_ticket", lista[0].id)
+        cuerpo = f"<p>Estos tickets están {titulos[tipo]}:</p><ul>{filas}</ul>" + cta("/tickets", "Abrir Tickets")
+        notify_roles(db, tenant, ("admin", "supervisor"), f"{len(lista)} ticket(s) {titulos[tipo]}", cuerpo, "support_ticket", lista[0].id)
         for x in lista:
             u = db.get(User, x.assigned_to) if x.assigned_to else None
             if u and u.email:
-                queue_email(db, tenant, u.email, f"Ticket {x.number} {titulos[tipo]}", f"<p>{html.escape(x.subject)}</p>", "support_ticket", x.id)
+                cuerpo = f"<p><b>{html.escape(x.subject)}</b> · prioridad {x.priority}</p>" + cta(f"/tickets?id={x.id}", f"Abrir el ticket {x.number}")
+                queue_email(db, tenant, u.email, f"Ticket {x.number} {titulos[tipo]}", cuerpo, "support_ticket", x.id)
         n += len(lista)
     return n

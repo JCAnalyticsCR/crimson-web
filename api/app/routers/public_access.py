@@ -29,6 +29,7 @@ from ..core.db import get_db
 from ..core.ratelimit import access_request_global_limiter, access_request_limiter
 from ..models import AccessRequest
 from ..services.documents import audit
+from ..services.email_layout import cta
 from ..services.mail import notify_roles
 from .auth import client_ip
 from .public_incidents import _CONTROL, _tenant
@@ -91,6 +92,7 @@ def _crear(db: Session, data: AccessRequestIn, ip: str) -> None:
         f"<p><b>{e(data.name)}</b> · {e(data.company)}<br>{e(email)} {e(data.phone or '')}"
         f"{'<br>Cédula indicada: ' + e(data.id_number) if data.id_number else ''}</p>"
         f"{'<blockquote>' + e(data.message) + '</blockquote>' if data.message else ''}"
+        + cta("/accesos-clientes", "Revisar la solicitud")
     )
     notify_roles(db, t, ("admin", "supervisor"), f"Solicitud de acceso al portal · {data.company[:50]}", cuerpo, "access_request", r.id)
     db.commit()

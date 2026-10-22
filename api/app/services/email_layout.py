@@ -252,6 +252,20 @@ def fallback(url: str, vos: bool = False) -> str:
     )
 
 
+def panel_url(path: str) -> str:
+    """Una pantalla del panel como URL absoluta (los correos no resuelven rutas relativas)."""
+    from ..core.config import settings
+
+    return f"{settings.public_base_url.rstrip('/')}{path}"
+
+
+def cta(path_or_url: str, label: str) -> str:
+    """La llamada a la accion de un aviso armado como fragmento: un parrafo que es solo un enlace. ensure() lo convierte
+    en el boton principal del correo (y su enlace en texto)."""
+    url = path_or_url if path_or_url.startswith(("http://", "https://")) else panel_url(path_or_url)
+    return f'<p><a href="{e(url)}">{e(label)}</a></p>'
+
+
 def _preheader(text: str) -> str:
     # oculto en el cuerpo, visible en la lista del buzon; el relleno evita que el buzon complete con el texto del correo
     return (
@@ -343,7 +357,7 @@ _TAGS = (
         f'<blockquote style="margin:4px 0 16px;padding:12px 16px;background:{SOFT};border-left:3px solid {LINE};'
         f'font-family:{FONT};font-size:14px;line-height:1.55;color:{INK};white-space:pre-wrap">',
     ),
-    (re.compile(r"<table border=0 cellpadding=6>", re.I), f'<table role="presentation" width="100%" cellpadding="6" cellspacing="0" border="0" style="width:100%;margin:4px 0 16px;font-family:{FONT};font-size:13px;color:{INK}">'),
+    (re.compile(r"<table border=0 cellpadding=\d+>", re.I), f'<table role="presentation" width="100%" cellpadding="6" cellspacing="0" border="0" style="width:100%;margin:4px 0 16px;font-family:{FONT};font-size:13px;color:{INK}">'),
     (re.compile(r"<th(?=[ >])", re.I), f'<th style="font-family:{FONT};font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:{GREY};border-bottom:2px solid {LINE}"'),
     (re.compile(r"<td(?=[ >])(?![^>]*style=)", re.I), f'<td style="border-bottom:1px solid {LINE};font-family:{FONT};font-size:13px"'),
 )

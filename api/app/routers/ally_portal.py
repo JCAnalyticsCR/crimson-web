@@ -60,6 +60,7 @@ from ..services import ally_access, ally_pricing
 from ..services import media_access as ma
 from ..services import sla as slasvc
 from ..services.documents import audit, local_date
+from ..services.email_layout import cta
 from ..services.fx import rate_or_none
 from ..services.mail import notify_roles
 from ..services.render import render_html, render_pdf
@@ -1319,7 +1320,8 @@ def ticket_crear(data: AllyTicketIn, ctx: AllyCtx = Depends(need("tickets_crear"
         ctx.p.tenant,
         ("admin", "supervisor"),
         f"Ticket del aliado {t.number} · {ctx.company.name[:40]}",
-        f"<p><b>{e(ctx.company.name)}</b> abrió <b>{e(t.number)}</b> en el proyecto {e(pr.number)}.</p><p>{e(t.subject)} · prioridad {e(t.priority)}</p>",
+        f"<p><b>{e(ctx.company.name)}</b> abrió <b>{e(t.number)}</b> en el proyecto {e(pr.number)}.</p><p>{e(t.subject)} · prioridad {e(t.priority)}</p>"
+        + cta(f"/tickets?id={t.id}", f"Abrir el ticket {t.number}"),
         "support_ticket",
         t.id,
     )

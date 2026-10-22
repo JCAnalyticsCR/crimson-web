@@ -903,6 +903,7 @@ def store_contact(slug: str, data: ContactIn, request: Request, db: Session = De
     import html
 
     from ..models import CustomerNote, TenantUser
+    from ..services.email_layout import cta
     from ..services.mail import queue_email
 
     public_limiter.hit(f"contact:{ip_key(request.client.host if request.client else None)}")
@@ -914,7 +915,7 @@ def store_contact(slug: str, data: ContactIn, request: Request, db: Session = De
         db.add(c)
         db.flush()
     db.add(CustomerNote(tenant_id=t.id, customer_id=c.id, body=f"Mensaje desde la tienda: {data.message}"))
-    body = f"<p><b>{html.escape(data.name)}</b> ({html.escape(email)}{' · ' + html.escape(data.phone) if data.phone else ''}) escribió desde la tienda:</p><blockquote>{html.escape(data.message)}</blockquote>"
+    body = f"<p><b>{html.escape(data.name)}</b> ({html.escape(email)}{' · ' + html.escape(data.phone) if data.phone else ''}) escribió desde la tienda:</p><blockquote>{html.escape(data.message)}</blockquote>" + cta(f"/clientes/{c.id}", "Abrir la ficha del cliente")
     for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.role_code == "admin", TenantUser.active)):
         queue_email(db, t, m.user.email, f"Nuevo mensaje de {data.name} · {t.name}", body, "customer", c.id)
     audit(db, t.id, None, "contact", "customer", c.id)
