@@ -204,3 +204,18 @@ class StoreStockAlert(TenantMixin, Base):
     phone: Mapped[str | None] = mapped_column(String(40))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class StoreSnapshot(Base):
+    """JSON comprimido (gzip) de la tienda publica por empresa.
+    El endpoint /snapshot lo devuelve directamente como application/json con Content-Encoding: gzip
+    sin deserializar ni pasar por ORM: cero RAM de productos por peticion.
+    El campo gz se defiere para que leer la fila de version no cargue el blob."""
+
+    __tablename__ = "store_snapshot"
+
+    tenant_id: Mapped[int] = mapped_column(Integer, ForeignKey("tenant.id", ondelete="CASCADE"), primary_key=True)
+    version: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    built_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    gz: Mapped[bytes | None] = mapped_column(deferred=True)
+    n_products: Mapped[int] = mapped_column(Integer, default=0)

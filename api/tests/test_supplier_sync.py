@@ -158,7 +158,8 @@ def test_suspicious_or_throttled_response_changes_nothing(client, auth, db_sessi
 def test_stock_refresh_updates_only_linked_products(client, auth, db_session, eurocomp):
     """Cada 6 horas: existencia y costo de lo vinculado, sin la consulta masiva; lo que Eurocomp ya no devuelve queda en 0."""
     tid = auth["tenant"]["id"]
-    prod = Product(tenant_id=tid, code="HIK-1047", name="Cámara 4MP ColorVu", price=Decimal("45000"), supplier_sku="SG2104")
+    # show_on_web=True: refresh_linked solo procesa productos publicados o en documentos abiertos
+    prod = Product(tenant_id=tid, code="HIK-1047", name="Cámara 4MP ColorVu", price=Decimal("45000"), supplier_sku="SG2104", show_on_web=True)
     db_session.add(prod)
     db_session.commit()
     ss.sync_all(db_session)
@@ -239,7 +240,8 @@ def test_cambio_real_aparte_de_la_consulta(client, auth, db_session, eurocomp):
     from app.services.availability import availability_many
 
     tid = auth["tenant"]["id"]
-    prod = Product(tenant_id=tid, code="HIK-1047", name="Cámara 4MP ColorVu", price=Decimal("45000"), supplier_sku="SG2104")
+    # show_on_web=True: refresh_linked solo procesa productos publicados o en documentos abiertos
+    prod = Product(tenant_id=tid, code="HIK-1047", name="Cámara 4MP ColorVu", price=Decimal("45000"), supplier_sku="SG2104", show_on_web=True)
     db_session.add(prod)
     db_session.commit()
     ss.sync_all(db_session)

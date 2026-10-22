@@ -807,3 +807,33 @@ def _q(s: str) -> str:
     from urllib.parse import quote
 
     return quote(s, safe="")
+
+
+# ---------------------------------------------------------------- version del catalogo (ETag / LRU)
+
+def get_catalog_version(t) -> str:
+    """Version del catalogo para ETag: se lee de tenant.settings['catalog_v'] (entero unix-ms).
+    Devuelve '0' si nunca se ha guardado (primera carga del tenant)."""
+    return str((t.settings or {}).get("catalog_v") or 0)
+
+
+def bump_catalog_version(db, t) -> str:
+    """Sube la version del catalogo cuando cambia algo visible en la tienda: producto, categoria,
+    precio, existencias o ajustes de tienda. Solo flush; el llamador hace el commit.
+    Tambien encola store.rebuild_snapshot con debounce de 30 s para no apilar cambios rapidos.
+    Devuelve la nueva version como string."""
+    from datetime import UTC, datetime
+
+    v = int(datetime.now(UTC).timestamp() * 1000)
+    s = dict(t.settings or {})
+    s["catalog_v"] = v
+    t.settings = s
+    db.flush()
+    # debounce: el snapshot se rearma ~30 s despues del ultimo cambio, no por cada guardado individual
+    try:
+        from .store_snapshot import enqueue_rebuild
+
+        enqueue_rebuild(t.id, countdown=30)
+    except Exception:  # noqa: BLE001
+        pass
+    return str(v)

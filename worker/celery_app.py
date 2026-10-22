@@ -96,29 +96,55 @@ def fx_bccr_daily() -> dict:
     return {"sell": str(fx.sell), "buy": str(fx.buy)}
 
 
+def _run_tool(module: str, timeout: int) -> dict:
+    """Lanza python -m <module> en un proceso hijo con subprocess.run y devuelve la ultima linea JSON.
+    El SO recupera TODA la RAM del hijo al terminar: el worker no crece con el catalogo.
+    Si el proceso falla, levanta RuntimeError con el final de stderr."""
+    import json
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-m", module],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        cwd=None,  # hereda el cwd del worker (donde PYTHONPATH=../api esta seteado)
+    )
+    if result.returncode != 0:
+        stderr_tail = (result.stderr or "").strip()[-500:]
+        raise RuntimeError(f"{module} fallo (codigo {result.returncode}): {stderr_tail}")
+    last_line = (result.stdout.strip().splitlines() or ["{}"])[-1]
+    try:
+        return json.loads(last_line)
+    except Exception:  # noqa: BLE001
+        return {"raw": last_line}
+
+
 @celery.task(name="suppliers.sync_eurocomp")
 def suppliers_sync_eurocomp() -> dict:
-    """Catalogo completo de Eurocomp por SiReTT, una vez por semana (articulos nuevos, CABYS, fotos). Sin credenciales
-    no hace nada; un fallo queda en el estado que ve el catalogo de proveedores (se reintenta con el boton
-    "Sincronizar")."""
-    from app.core.db import SessionLocal
-    from app.services import supplier_sync
-
-    try:
-        with SessionLocal() as db:
-            return {str(k): v for k, v in supplier_sync.sync_all(db).items()}
-    finally:
-        supplier_sync.trim_memory()
+    """Catalogo completo de Eurocomp en proceso hijo (lunes 03:17). El SO recupera la RAM al terminar.
+    Sin credenciales no hace nada; un fallo queda en el estado que ve el catalogo de proveedores."""
+    return _run_tool("app.tools.eurocomp_sync", timeout=3600)
 
 
 @celery.task(name="suppliers.eurocomp_stock")
 def suppliers_eurocomp_stock() -> dict:
-    """Cada 6 horas: existencia y costo al momento de lo que Crimson ya vende de Eurocomp (consulta liviana)."""
+    """Cada 6 horas: existencia y costo de lo que Crimson ya vende, en proceso hijo."""
+    return _run_tool("app.tools.eurocomp_stock", timeout=900)
+
+
+@celery.task(name="store.rebuild_snapshot")
+def rebuild_snapshot(tenant_id: int) -> dict:
+    """Rearma el snapshot de la tienda para una empresa. Se encola con countdown 30 s para debounce:
+    si llegan varios cambios seguidos solo se ejecuta el ultimo. El snapshot es el JSON gz que sirve
+    el endpoint /snapshot sin tocar ningun producto ORM por peticion."""
     from app.core.db import SessionLocal
-    from app.services import supplier_sync
+    from app.services import store_snapshot
 
     with SessionLocal() as db:
-        return {str(k): v for k, v in supplier_sync.refresh_linked(db).items()}
+        store_snapshot.rebuild(db, tenant_id)
+    return {"tenant_id": tenant_id, "ok": True}
 
 
 @celery.task(name="sales.run_recurrences")

@@ -29,11 +29,11 @@ from __future__ import annotations
 import ctypes
 import logging
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
@@ -94,8 +94,14 @@ def to_row(n: int, i: dict, why: str) -> sl.Row:
     corta = " ".join((i.get("desc_corta") or "").split())
     marca = (i.get("marca") or "").strip()
     stock = _dec(i.get("stock"))
-    raw = {k: v for k, v in i.items() if v not in (None, "")}
-    raw["_regla"] = why
+    # Solo los campos que el codigo usa: CABYS, hasta 6 fotos, precio, existencia y la regla.
+    # El resto (descripcion, desc_corta, marca, modelo, familias) queda en columnas propias del item.
+    raw: dict = {"_regla": why}
+    for k in ("cod_hacienda", "stock", "precio", "image_url",
+              "image_url_1", "image_url_2", "image_url_3", "image_url_4", "image_url_5"):
+        v = i.get(k)
+        if v not in (None, ""):
+            raw[k] = v
     return sl.Row(
         row=n,
         code=(i.get("codigo") or "").strip() or None,
@@ -322,6 +328,21 @@ def sync_tenant(
 
     margin_guard.run_safe(db, t, reason="catálogo de Eurocomp")
 
+    # version del catalogo sube: la tarea del snapshot la lee con debounce
+    from .store_showcase import bump_catalog_version
+
+    t_fresh = db.get(Tenant, t.id) or t  # re-leer por si margin_guard lo expiro de la sesion
+    bump_catalog_version(db, t_fresh)
+    db.commit()
+
+    # purgar supplier_item inactivos viejos sin producto vinculado
+    sup = find_supplier(db, t.id)
+    if sup:
+        purged = purge_old_inactive(db, t, sup)
+        if purged:
+            log.info("Eurocomp (empresa %s): %s supplier_item inactivos purgados", t.id, purged)
+        db.commit()
+
     # auto_catalog: si está activo, crea productos para las familias configuradas con los artículos recién sincronizados
     t_fresh = db.get(Tenant, t.id)
     if t_fresh and ac_settings(t_fresh).get("enabled"):
@@ -366,92 +387,158 @@ def sync_all(db: Session, client: SirettClient | None = None) -> dict:
 
 
 # ---------- existencias de lo vinculado (cada 6 horas) ----------
+
+def _priority_product_ids(db: Session, tid: int) -> set[int]:
+    """IDs de productos que deben refrescarse en el ciclo de 6h: activos y publicados en la tienda,
+    o usados en cotizaciones/pedidos abiertos. El resto espera al semanal."""
+    from ..models.sales import Quote, QuoteLine
+    from ..models.store import Order, OrderLine
+
+    pub = set(db.scalars(
+        select(Product.id).where(Product.tenant_id == tid, Product.active, Product.show_on_web)
+    ))
+    open_q = set(db.scalars(
+        select(QuoteLine.product_id)
+        .join(Quote, Quote.id == QuoteLine.quote_id)
+        .where(Quote.tenant_id == tid, Quote.status.in_(("creado", "enviada")), QuoteLine.product_id.is_not(None))
+    ))
+    open_o = set(db.scalars(
+        select(OrderLine.product_id)
+        .join(Order, Order.id == OrderLine.order_id)
+        .where(
+            Order.tenant_id == tid,
+            Order.status.not_in(("cancelado", "entregado", "reembolsado")),
+            OrderLine.product_id.is_not(None),
+        )
+    ))
+    return pub | open_q | open_o
+
+
+def purge_old_inactive(db: Session, t: Tenant, supplier: Supplier) -> int:
+    """Borra supplier_item inactivos sin producto vinculado con mas de 60 dias: reducen la RAM y el
+    espacio en Postgres sin perder ningun vinculo vivo."""
+    cutoff = datetime.now(UTC) - timedelta(days=60)
+    result = db.execute(
+        delete(SupplierItem).where(
+            SupplierItem.tenant_id == t.id,
+            SupplierItem.supplier_id == supplier.id,
+            SupplierItem.active.is_(False),
+            SupplierItem.product_id.is_(None),
+            SupplierItem.updated_at < cutoff,
+        )
+    )
+    return result.rowcount
+
+
 def refresh_linked(db: Session, client: SirettClient | None = None) -> dict:
-    """Existencia y costo al momento de los articulos de Eurocomp que Crimson YA vende (vinculados a un producto), con
-    la consulta por lista de codigos (de a 50, sin limite de frecuencia). No crea ni inactiva articulos: eso es del
-    catalogo semanal. Un codigo que Eurocomp ya no devuelve queda con existencia 0 (no se vende "bajo pedido" lo que el
-    proveedor no confirma). Hace commit."""
+    """Existencia y costo de los articulos de Eurocomp vinculados a un producto, consultando en lotes
+    de 50 codigos (items_list, sin limite de frecuencia en Eurocomp). Solo refresca los activos y
+    publicados en la tienda o usados en cotizaciones/pedidos abiertos; el resto espera al semanal.
+    Procesa y hace commit por lote para liberar memoria al terminar cada uno. No crea ni inactiva
+    articulos: eso es del catalogo semanal. Un codigo que Eurocomp ya no devuelve queda en stock=0."""
     tenants = targets(db)
     if not tenants:
         return {"skipped": "ninguna empresa con el proveedor"}
     client = client or SirettClient.from_settings()
     if client is None:
         return {"skipped": "sin credenciales de Eurocomp"}
-    linked: dict[int, list[SupplierItem]] = {}
+    now = datetime.now(UTC)
+    fx = sc.usd_rate(db)
+    out: dict = {}
+
     for t in tenants:
         sup = find_supplier(db, t.id)
-        if sup is not None:
-            linked[t.id] = list(
-                db.scalars(
-                    select(SupplierItem).where(
-                        SupplierItem.tenant_id == t.id,
-                        SupplierItem.supplier_id == sup.id,
-                        SupplierItem.active,
-                        SupplierItem.product_id.is_not(None),
-                    )
+        if sup is None:
+            continue
+
+        # Todos los items activos vinculados
+        all_items = list(
+            db.scalars(
+                select(SupplierItem).where(
+                    SupplierItem.tenant_id == t.id,
+                    SupplierItem.supplier_id == sup.id,
+                    SupplierItem.active,
+                    SupplierItem.product_id.is_not(None),
                 )
             )
-    codes = sorted({i.code for items in linked.values() for i in items if i.code})
-    if not codes:
-        return {"skipped": "nada vinculado"}
-    now = datetime.now(UTC)
-    try:
-        fresh = {(r.get("codigo") or "").strip(): r for r in client.items_list(settings.eurocomp_bodega, codes)}
-    except SirettError as e:
-        # como sync_all: el error queda a la vista en Inventarios -> Proveedores (antes solo iba al log y la tienda
-        # seguia diciendo "bajo pedido" con un dato que ya no se refrescaba)
-        for t in tenants:
-            _save_state(t, last_stock_try_at=now, last_stock_error=e.message, last_try_at=now, last_error=e.message, last_code=e.code)
-        db.commit()
-        log.warning("Eurocomp (existencias): %s", e.message)
-        return {"error": e.message, "code": e.code}
-    fx = sc.usd_rate(db)
-    out = {}
-    for t in tenants:
-        items = linked.get(t.id) or []
+        )
+
+        # Solo los prioritarios (publicados o en documentos abiertos)
+        priority = _priority_product_ids(db, t.id)
+        items = [i for i in all_items if i.product_id in priority]
+        if not items:
+            out[t.id] = {"vinculados": 0, "cambios": 0, "sin_dato": 0}
+            _save_state(t, last_stock_at=now, last_stock_try_at=now, last_stock_summary=out[t.id], last_stock_error=None)
+            db.commit()
+            continue
+
         cambios = sin_dato = 0
-        for it in items:
-            r = fresh.get(it.code)
-            if r is None:
-                sin_dato += 1
-            stock = _dec(r.get("stock")) if r else Decimal(0)
-            new_stock = int(stock) if stock is not None else it.stock
-            cost = _dec(r.get("precio")) if r else None
-            new_cost = cost if cost is not None and cost > 0 else it.cost
-            if new_stock != it.stock or (new_cost is not None and (it.cost is None or Decimal(str(it.cost)) != new_cost)):
-                cambios += 1
-            if new_cost is not None and it.cost is not None and Decimal(str(it.cost)) != new_cost:
-                it.prev_cost = it.cost
-            if new_stock != it.stock or (new_cost is not None and (it.cost is None or Decimal(str(it.cost)) != new_cost)):
-                it.changed_at = now  # cambio de verdad (no solo se consulto)
-            it.stock, it.cost = new_stock, new_cost
-            if r:
-                it.raw = {**(it.raw or {}), "stock": r.get("stock"), "precio": r.get("precio")}
-            it.list_date = now.astimezone(CR).date()
-        db.flush()
-        for pid in sorted({i.product_id for i in items}):
-            p = db.get(Product, pid)
-            if p is None or p.tenant_id != t.id:
-                continue
-            sc.sync_product(db, p, fx=fx)
-            if any(i.product_id == pid and i.supplier_id == p.supplier_id for i in items):
-                p.supplier_updated_at = now  # la tienda decide "bajo pedido" con la hora real de la consulta
-        res = {"vinculados": len(items), "cambios": cambios, "sin_dato": sin_dato}
-        prev = _state(t)
-        clear = {"last_error": None} if prev.get("last_error") and prev.get("last_error") == prev.get("last_stock_error") else {}
-        if cambios:
-            clear["last_stock_change_at"] = now
-        _save_state(t, last_stock_at=now, last_stock_try_at=now, last_stock_summary=res, last_stock_error=None, **clear)
-        out[t.id] = res
-    db.commit()
+        batch_size = 50
+
+        for batch_start in range(0, len(items), batch_size):
+            batch = items[batch_start : batch_start + batch_size]
+            batch_codes = [i.code for i in batch if i.code]
+
+            try:
+                fresh = {(r.get("codigo") or "").strip(): r for r in client.items_list(settings.eurocomp_bodega, batch_codes)}
+            except SirettError as e:
+                # Error en este lote: guardar estado y abortar los demas lotes de esta empresa
+                _save_state(t, last_stock_try_at=now, last_stock_error=e.message, last_try_at=now, last_error=e.message, last_code=e.code)
+                db.commit()
+                log.warning("Eurocomp (existencias, empresa %s): %s", t.id, e.message)
+                out[t.id] = {"error": e.message, "code": e.code}
+                break
+
+            for it in batch:
+                r = fresh.get(it.code)
+                if r is None:
+                    sin_dato += 1
+                stock = _dec(r.get("stock")) if r else Decimal(0)
+                new_stock = int(stock) if stock is not None else it.stock
+                cost = _dec(r.get("precio")) if r else None
+                new_cost = cost if cost is not None and cost > 0 else it.cost
+                if new_stock != it.stock or (new_cost is not None and (it.cost is None or Decimal(str(it.cost)) != new_cost)):
+                    cambios += 1
+                if new_cost is not None and it.cost is not None and Decimal(str(it.cost)) != new_cost:
+                    it.prev_cost = it.cost
+                if new_stock != it.stock or (new_cost is not None and (it.cost is None or Decimal(str(it.cost)) != new_cost)):
+                    it.changed_at = now
+                it.stock, it.cost = new_stock, new_cost
+                if r:
+                    it.raw = {**(it.raw or {}), "stock": r.get("stock"), "precio": r.get("precio")}
+                it.list_date = now.astimezone(CR).date()
+
+            db.flush()
+            for pid in sorted({i.product_id for i in batch}):
+                p = db.get(Product, pid)
+                if p is None or p.tenant_id != t.id:
+                    continue
+                sc.sync_product(db, p, fx=fx)
+                if any(i.product_id == pid and i.supplier_id == p.supplier_id for i in batch):
+                    p.supplier_updated_at = now
+            # Commit por lote: libera memoria de las instancias del lote anterior
+            db.commit()
+        else:
+            # El bucle termino sin break: todos los lotes procesados correctamente
+            res = {"vinculados": len(items), "cambios": cambios, "sin_dato": sin_dato}
+            prev = _state(t)
+            clear = {"last_error": None} if prev.get("last_error") and prev.get("last_error") == prev.get("last_stock_error") else {}
+            if cambios:
+                clear["last_stock_change_at"] = now
+            _save_state(t, last_stock_at=now, last_stock_try_at=now, last_stock_summary=res, last_stock_error=None, **clear)
+            from .store_showcase import bump_catalog_version
+
+            bump_catalog_version(db, t)
+            db.commit()
+            out[t.id] = res
+
     log.info("Eurocomp (existencias): %s", out)
-    # costo nuevo -> margen nuevo: el guardian revisa la tienda de cada empresa refrescada (nunca reprecia; saca de
-    # venta lo que quede bajo el minimo y propone el precio en Aprobaciones). Su propio commit; un error suyo no
-    # deshace este refresco.
+    # costo nuevo -> margen nuevo: su propio commit; un error suyo no deshace el refresco.
     from . import margin_guard
 
     for t in tenants:
-        margin_guard.run_safe(db, t, reason="costos de Eurocomp")
+        if t.id in out and "error" not in out.get(t.id, {}):
+            margin_guard.run_safe(db, t, reason="costos de Eurocomp")
     return out
 
 

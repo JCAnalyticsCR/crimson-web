@@ -18,7 +18,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, field_validator, model_validator
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, load_only, selectinload
 
 from ..core.clientip import ip_key
 from ..core.db import get_db
@@ -319,6 +319,49 @@ def _published(db: Session, tid: int) -> list[Product]:
     )
 
 
+# Columnas livianas para filtrar/ordenar/contar facetas: sin texto largo ni specs.
+# description_store se incluye porque build_kit/_pick_camera lo usa para detectar PoE.
+_LIGHT_COLS = (
+    Product.id, Product.name, Product.code, Product.brand, Product.model,
+    Product.supplier_sku, Product.category_id, Product.price, Product.currency,
+    Product.web_price, Product.web_featured, Product.created_at, Product.item_type,
+    Product.active, Product.show_on_web, Product.tenant_id, Product.margin_hold,
+    Product.images, Product.compare_price, Product.description_store,
+)
+
+
+def _published_light(db: Session, tid: int) -> list[Product]:
+    """Productos publicados con solo columnas livianas: sin description_invoice, specs ni margin_info.
+    Suficiente para filtrar, ordenar y contar facetas en el catalogo y la portada.
+    Los productos de la pagina se cargan completos con _load_full antes de pasarlos a ctx.card."""
+    return list(
+        db.scalars(
+            select(Product)
+            .where(Product.tenant_id == tid, Product.active, Product.show_on_web)
+            .options(
+                load_only(*_LIGHT_COLS),
+                selectinload(Product.taxes).selectinload(ProductTax.tax),
+            )
+            .order_by(Product.name)
+        )
+    )
+
+
+def _load_full(db: Session, ids: list[int]) -> list[Product]:
+    """Carga completa (description_invoice, specs, etc.) para los IDs dados.
+    populate_existing=True sobreescribe instancias livianas ya en la sesion."""
+    if not ids:
+        return []
+    return list(
+        db.scalars(
+            select(Product)
+            .where(Product.id.in_(ids))
+            .options(selectinload(Product.taxes).selectinload(ProductTax.tax)),
+            execution_options={"populate_existing": True},
+        )
+    )
+
+
 def _categories(db: Session, tid: int) -> list[Category]:
     return list(db.scalars(select(Category).where(Category.tenant_id == tid, Category.show_on_web).order_by(Category.name)))
 
@@ -431,6 +474,32 @@ def _rank_default(p: Product) -> tuple:
     )
 
 
+@pub.get("/snapshot")
+def store_snapshot_endpoint(slug: str, response: Response, if_none_match: str | None = Header(None), db: Session = Depends(get_db)):
+    """Snapshot pre-armado de la tienda: JSON comprimido (gzip) con todos los productos visibles y su
+    disponibilidad. El cliente lo descarga una vez (~60-200 KB) y filtra/busca/ordena sin mas peticiones.
+    ETag = sha256[:16] del contenido; 304 si If-None-Match coincide.
+    Content-Encoding: gzip + application/json: el navegador lo descomprime automaticamente."""
+    from ..services import store_snapshot as snap
+
+    t = _tenant(db, slug)
+    # Leer solo (tenant_id, version) sin cargar el blob gz
+    from sqlalchemy.orm import load_only as _lo
+
+    from ..models import StoreSnapshot as _SS
+
+    row = db.scalar(
+        select(_SS).where(_SS.tenant_id == t.id).options(_lo(_SS.version, _SS.built_at, _SS.n_products))
+    )
+    if row is not None and if_none_match and if_none_match == f'"{row.version}"':
+        return Response(status_code=304)
+    gz, version = snap.get_or_rebuild(db, t.id)
+    response.headers["ETag"] = f'"{version}"'
+    response.headers["Cache-Control"] = "public, max-age=120, stale-while-revalidate=86400"
+    response.headers["Content-Encoding"] = "gzip"
+    return Response(content=gz, media_type="application/json", headers=dict(response.headers))
+
+
 @pub.get("/site")
 def site(slug: str, response: Response, db: Session = Depends(get_db)):
     """Datos livianos que toda vista necesita: por ahora la medicion (GA4), que el navegador solo activa con
@@ -442,12 +511,17 @@ def site(slug: str, response: Response, db: Session = Depends(get_db)):
 
 
 @pub.get("/showcase")
-def showcase_public(slug: str, response: Response, db: Session = Depends(get_db)):
+def showcase_public(slug: str, response: Response, if_none_match: str | None = Header(None), db: Session = Depends(get_db)):
     """Portada de la tienda en un solo viaje: banners, categorias con conteo, destacados, novedades, kits y sellos."""
     t = _tenant(db, slug)
+    _ver = sv.get_catalog_version(t)
+    _etag = f'"{_ver}"'
+    if if_none_match and if_none_match == _etag:
+        return Response(status_code=304)
     ctx = Ctx(db, t)
     sc = sv.showcase_cfg(ctx.cfg)
-    prods = _published(db, t.id)
+    # Carga liviana: sin description_invoice ni specs. description_store incluida para build_kit (PoE).
+    prods = _published_light(db, t.id)
     counts: dict[int, int] = {}
     images: dict[int, str] = {}
     brands: dict[str, int] = {}
@@ -500,7 +574,11 @@ def showcase_public(slug: str, response: Response, db: Session = Depends(get_db)
                 "cameras": kit["cameras"],
             }
         )
-    response.headers["Cache-Control"] = "public, max-age=60"
+    # Carga completa para los productos que se renderizan como tarjeta (featured + fresh).
+    _render_ids = list({p.id for p in featured[:8]} | {p.id for p in fresh})
+    _full = {p.id: p for p in _load_full(db, _render_ids)}
+    response.headers["ETag"] = _etag
+    response.headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=300"
     return {
         "headline": sc["headline"],
         "subline": sc["subline"],
@@ -508,8 +586,8 @@ def showcase_public(slug: str, response: Response, db: Session = Depends(get_db)
         "trust": sc["trust"],
         "categories": _cat_tree(ctx, counts, images),
         "brands": [{"name": b, "count": n} for b, n in sorted(brands.items(), key=lambda x: (x[0].lower() != "hikvision", -x[1]))[:14]],
-        "featured": [ctx.card(p, stock.get(p.id)) for p in featured[:8]],
-        "fresh": [ctx.card(p, stock.get(p.id)) for p in fresh],
+        "featured": [ctx.card(_full.get(p.id, p), stock.get(p.id)) for p in featured[:8]],
+        "fresh": [ctx.card(_full.get(p.id, p), stock.get(p.id)) for p in fresh],
         "kits": kits,
         "product_count": len(prods),
         "currency": ctx.pricer.currency,
@@ -539,18 +617,26 @@ def catalog(
     ids: str | None = Query(None, max_length=200),
     limit: int = Query(24, ge=1, le=60),
     offset: int = Query(0, ge=0),
+    if_none_match: str | None = Header(None),
     db: Session = Depends(get_db),
 ):
     """Catalogo con filtros (categoria con sus subcategorias, marca, tipo, precio con IVA, disponibilidad), orden y
     paginacion. Devuelve tambien las facetas calculadas sobre el resultado (sin el filtro de la propia faceta)."""
     t = _tenant(db, slug)
+    _ver = sv.get_catalog_version(t)
+    _etag = f'"{_ver}"'
+    if if_none_match and if_none_match == _etag:
+        return Response(status_code=304)
     ctx = Ctx(db, t)
-    prods = _published(db, t.id)
+    # Carga liviana para todo el catalogo; description_invoice y specs se cargan solo para la pagina.
+    prods = _published_light(db, t.id)
     stock_all = _stock_map(db, t.id, prods)
     if ids:
         want = [int(x) for x in ids.split(",") if x.strip().isdigit()][:12]
         by_id = {p.id: p for p in prods}
-        rows = [by_id[i] for i in want if i in by_id]
+        wanted = [i for i in want if i in by_id]
+        full_ids = {p.id: p for p in _load_full(db, wanted)}
+        rows = [full_ids[i] for i in wanted if i in full_ids]
         return {"items": [ctx.card(p, stock_all.get(p.id), full=True) | {"specs": sv.derive_specs(p)} for p in rows], "total": len(rows)}
     # Ajustes: los agotados ocultos (todos, o los que agoto el proveedor) no se listan; la ficha directa abre
     prods = [p for p in prods if not (stock_all.get(p.id) or {}).get("ocultar")]
@@ -636,10 +722,15 @@ def catalog(
 
     total = len(rows)
     page = rows[offset : offset + limit]
-    vmap = _variants(db, [p.id for p in page])
+    page_ids = [p.id for p in page]
+    # Carga completa solo para los productos de esta pagina (description_invoice, specs, etc.)
+    full_page = {p.id: p for p in _load_full(db, page_ids)}
+    vmap = _variants(db, page_ids)
     response.headers["X-Total-Count"] = str(total)
+    response.headers["ETag"] = _etag
+    response.headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=300"
     return {
-        "items": [ctx.card(p, stock_all.get(p.id), vmap.get(p.id)) for p in page],
+        "items": [ctx.card(full_page.get(p.id, p), stock_all.get(p.id), vmap.get(p.id)) for p in page],
         "total": total,
         "offset": offset,
         "category": (

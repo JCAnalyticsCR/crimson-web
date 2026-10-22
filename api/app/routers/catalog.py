@@ -25,6 +25,7 @@ from ..schemas.crm import (
     TaxOut,
 )
 from ..services import cabys as cabys_svc
+from ..services import store_showcase as _sv_cache
 from ..services import supplier_catalog as supcat
 
 router = APIRouter(tags=["catalogo"])
@@ -177,6 +178,7 @@ def categories(p: Principal = Depends(require("catalog", "ver")), db: Session = 
 def create_category(data: CategoryIn, p: Principal = Depends(require("catalog", "crear")), db: Session = Depends(get_db)):
     c = Category(tenant_id=p.tenant.id, **data.model_dump())
     db.add(c)
+    _sv_cache.bump_catalog_version(db, p.tenant)
     db.commit()
     db.refresh(c)
     return c
@@ -347,6 +349,7 @@ def create_product(data: ProductIn, p: Principal = Depends(require("catalog", "c
         _own(db, Tax, tid, p.tenant.id)
         pr.taxes.append(ProductTax(tax_id=tid))
     db.add(pr)
+    _sv_cache.bump_catalog_version(db, p.tenant)
     db.commit()
     db.refresh(pr)
     return _product_out(pr, p)
@@ -371,6 +374,7 @@ def toggle_web(pid: int, data: WebIn, p: Principal = Depends(require("catalog", 
     pr = _own(db, Product, pid, p.tenant.id)
     pr.show_on_web = data.show_on_web
     _margin_recheck(db, p, pr)
+    _sv_cache.bump_catalog_version(db, p.tenant)
     db.commit()
     db.refresh(pr)
     return _product_out(pr, p)
@@ -433,6 +437,7 @@ def update_product(pid: int, data: ProductIn, p: Principal = Depends(require("ca
             _own(db, Tax, tid, p.tenant.id)
             pr.taxes.append(ProductTax(tax_id=tid))
     _margin_recheck(db, p, pr)
+    _sv_cache.bump_catalog_version(db, p.tenant)
     db.commit()
     db.refresh(pr)
     return _product_out(pr, p)
