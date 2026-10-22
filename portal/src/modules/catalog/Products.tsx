@@ -271,7 +271,24 @@ export default function Products() {
           </div>
         )}
         {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Nada con esos filtros. Probá limpiarlos o creá el producto." /> : (
-          <div className={verCostos ? "prd-dense" : undefined} style={{ overflowX: "auto" }}>
+          <>
+          {/* Telefono (pedido 21/10): tarjetas con la foto grande del producto en vez de la tabla ancha, donde la
+              miniatura de 36 px quedaba fuera de vista al deslizar. La tabla sigue igual en tablet y escritorio. */}
+          <ul className="prd-cards">{items.map((p) => (
+            <li key={p.id} className="prd-card">
+              {cotiza && <input type="checkbox" className="prd-card__sel" aria-label={`Agregar ${p.name} a una cotización`} checked={sel.has(p.id)} onChange={() => marcar(p.id)} />}
+              <button type="button" className="prd-card__main" onClick={() => open(p.id)}>
+                {thumb(p) ? <img className="prd-card__foto" src={thumb(p)} alt="" loading="lazy" /> : <span className="prd-card__foto prd-card__foto--none"><Icon d={I.products} size={22} /></span>}
+                <span className="prd-card__txt">
+                  <b>{p.name}</b>
+                  <small className="mono">{p.code}{p.item_type === "servicio" ? " · servicio" : ""}</small>
+                  <small>{p.item_type === "producto" ? availText(p.availability) : "Servicio"}</small>
+                  {verPrecios && <span className="money prd-card__precio">{fmtMoney(p.price, p.currency)}</span>}
+                </span>
+              </button>
+            </li>
+          ))}</ul>
+          <div className={`prd-tabla${verCostos ? " prd-dense" : ""}`} style={{ overflowX: "auto" }}>
           <table className="table">
             <thead><tr>{cotiza && <th style={{ width: 32 }} title="Marcá para agregar a una cotización" />}<th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th>Bodega</th><th className="num" title="Libre en bodegas de venta (sin las de garantías) menos lo reservado">Propio</th><th className="num" title="Existencia del proveedor vinculado (Eurocomp)">Proveedor</th><th title="Cuándo se actualizó la existencia del proveedor">Actualizado</th>{verCostos && <th className="num" title="Costo sin IVA: del proveedor vinculado (con la fecha de su lista) o propio">Costo</th>}{verPrecios && <th className="num" title="Sin IVA">Precio de venta</th>}{verCostos && <th className="num" title="Margen sobre la venta: (precio − costo) ÷ precio">Margen</th>}{verCostos && <th className="num" title="Precio general para aliados, sin IVA (recargo sobre el costo o precio fijo)">Precio aliado</th>}<th>IVA</th>{publica && <th>Web</th>}<th /></tr></thead>
             <tbody>{items.map((p) => (
@@ -284,6 +301,7 @@ export default function Products() {
             ))}</tbody>
           </table>
           </div>
+          </>
         )}
       </Card>
       {aCot && <AgregarACotizacion ids={[...sel]} onClose={() => setACot(false)} />}

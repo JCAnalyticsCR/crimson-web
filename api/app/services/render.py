@@ -22,6 +22,18 @@ def money(v, cur="CRC") -> str:
 env.filters["money"] = money
 env.filters["unidad"] = unit_label
 
+
+def parrafos(texto) -> list[str]:
+    """Clausulas y notas en parrafos: las lineas en blanco repetidas (que en el PDF eran media pagina de aire) se
+    vuelven un solo corte. No recorta texto: todo lo escrito sale."""
+    import re
+
+    t = str(texto or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    return [p.strip() for p in re.split(r"\n\s*\n", t) if p.strip()]
+
+
+env.filters["parrafos"] = parrafos
+
 TEMPLATE = env.from_string("""<!doctype html><html lang="es"><head><meta charset="utf-8"><title>{{ kind }} {{ d.number }}</title>
 <style>
 @page { size: Letter; margin: 18mm 16mm; }
@@ -35,7 +47,9 @@ body{font-family:Arial,Helvetica,sans-serif;color:#15131a;font-size:12px;line-he
 table{width:100%;border-collapse:collapse;margin-top:6px}th{text-align:left;font-family:Consolas,monospace;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#8a858f;border-bottom:1px solid #e6e1db;padding:6px 4px}
 td{padding:8px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-align:right;font-family:Consolas,monospace;white-space:nowrap}
 .desc{color:#5a5560;font-size:11px}.tot{width:46%;margin-left:auto;margin-top:12px}.tot td{padding:5px 4px;border:0}.tot .grand td{border-top:2px solid #15131a;font-size:15px;font-weight:700;padding-top:8px}
-.notes{margin-top:18px;padding:10px 12px;background:#f6f2ee;border-radius:8px;color:#5a5560;font-size:11px;white-space:pre-wrap}
+.notes{margin-top:14px;padding:8px 10px;background:#f6f2ee;border-radius:8px;color:#5a5560;font-size:10px;line-height:1.35;white-space:pre-wrap}
+.legal{margin-top:10px;padding:6px 9px;border:1px solid #ece7e1;border-radius:6px;color:#6b6670;font-size:8px;line-height:1.3}
+.legal p{margin:0 0 3px;white-space:pre-line;overflow-wrap:anywhere}.legal p:last-child{margin-bottom:0}
 .foot{margin-top:24px;padding-top:10px;border-top:1px solid #e6e1db;font-size:10px;color:#8a858f;display:flex;justify-content:space-between}
 .stamp{display:inline-block;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:#f6f2ee;color:#5a5560}
 .tag{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;font-size:9.5px;font-weight:700;letter-spacing:.04em;background:#f6f2ee;color:#5a5560;vertical-align:1px}
@@ -67,7 +81,7 @@ td{padding:8px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}.num{text-
 <tr class="grand"><td>Total</td><td class="num">{{ d.total|money(d.currency) }}</td></tr>
 {% if balance is not none %}<tr><td>Saldo</td><td class="num">{{ balance|money(d.currency) }}</td></tr>{% endif %}</table>
 {% if d.external_notes %}<div class="notes">{{ d.external_notes }}</div>{% endif %}
-{% if footer %}<div class="notes">{{ footer }}</div>{% endif %}
+{% if footer %}<div class="legal">{% for par in footer|parrafos %}<p>{{ par }}</p>{% endfor %}</div>{% endif %}
 <div class="foot"><span>{{ t.name }}{% if t.tax_id %} · {{ t.tax_id }}{% endif %}</span><span>Generado por Crimson · plataforma de facturación</span></div>
 </body></html>""")
 

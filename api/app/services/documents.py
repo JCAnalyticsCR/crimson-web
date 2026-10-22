@@ -271,9 +271,21 @@ def quote_to_payload(q: Quote) -> DocumentIn:
     )
 
 
-def convert_quote(db: Session, tenant_id: int, user_id: int, q: Quote) -> Invoice:
+NEEDS_CUSTOMER = "La cotización no tiene cliente: elegí el cliente antes de convertirla en factura (la factura sale a su nombre y después no se edita)."
+
+
+def convert_quote(db: Session, tenant_id: int, user_id: int, q: Quote, customer_id: int | None = None) -> Invoice:
+    """customer_id: el cliente que se elige al convertir cuando la cotizacion no tiene (p. ej. una aceptada, que ya no
+    se edita). Nunca reemplaza al que ya tiene: la factura hereda el de la cotizacion."""
     if q.status in ("convertida", "anulada"):
         raise HTTPException(409, f"La cotizacion esta {q.status}")
+    # Pedido 21/10: una factura sin cliente no se corrige despues (las facturas no se editan); sin cliente no se convierte
+    if q.customer_id is None and customer_id:
+        check_customer(db, tenant_id, customer_id)
+        q.customer_id = customer_id
+        audit(db, tenant_id, user_id, "update", "quote", q.id, {"customer_id": [None, customer_id], "motivo": "cliente elegido al convertir"})
+    if q.customer_id is None:
+        raise HTTPException(409, NEEDS_CUSTOMER)
     units.check_ready(q, "convertir la cotización")
     # la factura hereda el vendedor de su cotizacion (y con el, la comision), la convierta quien la convierta. Tal cual:
     # "Sin vendedor" (lo eligio el admin) sigue sin vendedor; no vuelve a quien la tecleo. Las cotizaciones de antes

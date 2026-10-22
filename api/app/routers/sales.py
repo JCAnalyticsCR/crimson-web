@@ -463,13 +463,18 @@ def update_quote(qid: int, data: DocumentIn, p: Principal = Depends(require("sal
     return _quote_out(db, q, p)
 
 
+class ConvertIn(BaseModel):
+    # solo cuando la cotizacion no tiene cliente (una aceptada ya no se edita): la factura sale a su nombre
+    customer_id: int | None = Field(None, ge=1)
+
+
 @router.post("/quotes/{qid}/convert", response_model=InvoiceOut, status_code=201)
-def convert_quote(qid: int, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
+def convert_quote(qid: int, data: ConvertIn | None = None, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
     q = _own(db, Quote, qid, p.tenant.id, p)
     if q.status == "por_aprobar":
         raise HTTPException(409, "La cotización tiene un descuento pendiente de aprobación")
     _use_accepted(db, p, q)
-    inv = svc.convert_quote(db, p.tenant.id, p.user.id, q)
+    inv = svc.convert_quote(db, p.tenant.id, p.user.id, q, customer_id=data.customer_id if data else None)
     invsvc.deduct_for_invoice(db, inv, p.user.id)
     from ..models import Opportunity
 

@@ -114,3 +114,31 @@ def next_fiscal_consecutive(db: Session, tenant_id: int, code: str, mode: str) -
     locked.current += 1
     db.flush()
     return f"{locked.branch}{locked.terminal}{code}{locked.current:010d}"
+
+
+# ---------- Numero visible de la factura = consecutivo fiscal (pedido 21/10, seguir la numeracion de Fygaro) ----------
+# Ajustes -> Numeracion: "invoice_number_fiscal" (por defecto encendido). Al emitir en PRODUCCION, la factura o el
+# tiquete toma como numero visible la secuencia de su consecutivo de 20 digitos (F01 ...0000000087 -> FEC-000087).
+# El consecutivo de Hacienda no cambia: se calcula igual que siempre y solo se copia su secuencia. Simulado y pruebas
+# (T0x) no tocan el numero: no es numeracion real.
+NUMBER_FROM_FISCAL_DEFAULT = True
+
+
+def number_from_fiscal_on(settings: dict | None) -> bool:
+    v = (settings or {}).get("invoice_number_fiscal")
+    return NUMBER_FROM_FISCAL_DEFAULT if v is None else bool(v)
+
+
+def visible_from_fiscal(db: Session, tenant_id: int, doc_type: str, consecutive: str) -> str:
+    """Numero visible con el prefijo del grupo visible (FEC, TE) y la secuencia del consecutivo fiscal. Sube el contador
+    visible del grupo hasta esa secuencia (nunca lo baja): los borradores que se creen despues no reusan un numero que
+    ya salio a Hacienda."""
+    if not (consecutive and len(consecutive) == 20 and consecutive.isdigit()):
+        raise ValueError("Consecutivo fiscal invalido")
+    seq = int(consecutive[-10:])
+    g = get_or_create_group(db, tenant_id, doc_type)
+    locked = db.execute(select(BillingGroup).where(BillingGroup.id == g.id).with_for_update()).scalar_one()
+    if locked.current < seq:
+        locked.current = seq
+    db.flush()
+    return f"{locked.prefix}-{seq:06d}"

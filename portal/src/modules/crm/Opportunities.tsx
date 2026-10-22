@@ -100,6 +100,11 @@ export default function Opportunities() {
   const [drag, setDrag] = useState<number | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const [newCust, setNewCust] = useState<typeof blankCust | null>(null);
+  /* Pedido 21/10: el "cliente final" confundia a la vendedora. Queda escondido detras de "Otro destinatario" y solo
+     se abre si la solucion la usa otra empresa distinta de la que paga (o si la oportunidad ya tiene uno). */
+  const [otroDest, setOtroDest] = useState(false);
+  const formAbierto = form ? form.id ?? "nueva" : null;
+  useEffect(() => { setOtroDest(false); }, [formAbierto]);
   const [owner, setOwner] = useState("");
   const [quoteCust, setQuoteCust] = useState<{ id: string; name: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -499,7 +504,7 @@ export default function Opportunities() {
                   ) : <input className="input" readOnly value={open.owner || "—"} />}
                 </Field>
                 <Field label="Contratante (paga)"><input className="input" readOnly value={open.customer || "—"} title="Quien contrata y paga: a quien se cotiza y factura" /></Field>
-                <Field label="Cliente final"><input className="input" readOnly value={open.end_customer || "El mismo contratante"} /></Field>
+                <Field label="Destinatario"><input className="input" readOnly value={open.end_customer || "El mismo contratante"} title="Para quién es la instalación, si no es el contratante" /></Field>
                 <Field label="Sitio"><input className="input" readOnly value={open.site || "—"} title={open.site || undefined} /></Field>
                 <Field label="Solución"><input className="input" readOnly value={SOLUTIONS[open.solution || ""] || "—"} /></Field>
                 <Field label="Origen"><input className="input" readOnly value={open.source || "—"} /></Field>
@@ -561,10 +566,19 @@ export default function Opportunities() {
             <Field label="Origen"><select className="select" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })}><option value="">—</option>{(meta?.sources || []).map((s) => <option key={s} value={s}>{s}</option>)}</select></Field>
           </div>
           <div className="grid-2">
-            <Field label="Cliente final (opcional)" hint="Quien recibe la solución, si no es el contratante. Ej.: Nodo Latam contrata, Yobel recibe.">
-              <Lookup value={form.end_customer_name} placeholder="Buscar cliente…" fetcher={searchCustomers} onSelect={(it, text) => setForm({ ...form, end_customer_id: it ? String(it.id) : "", end_customer_name: text })} />
-            </Field>
-            <Field label="Sitio (opcional)" hint="Dirección o sede donde se instala."><input className="input" value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value })} placeholder="CEDI Yobel, Heredia" /></Field>
+            <Field label="Sitio (opcional)" hint="Dirección o sede donde se instala."><input className="input" value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value })} placeholder="Ej.: Oficinas centrales, San José" /></Field>
+            {otroDest || form.end_customer_id || form.end_customer_name ? (
+              <Field label="Otro destinatario (opcional)" hint="Solo si la instalación es para otra empresa distinta de la que paga. Ej.: una constructora contrata y el sistema queda en el condominio de su cliente.">
+                <div style={{ display: "flex", gap: 6 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}><Lookup value={form.end_customer_name} placeholder="Buscar cliente…" fetcher={searchCustomers} onSelect={(it, text) => setForm({ ...form, end_customer_id: it ? String(it.id) : "", end_customer_name: text })} /></div>
+                  <button type="button" className="btn btn--ghost btn--sm" title="Quitar: la solución es para el mismo contratante" onClick={() => { setForm({ ...form, end_customer_id: "", end_customer_name: "" }); setOtroDest(false); }}><Icon d={I.x} size={14} />Quitar</button>
+                </div>
+              </Field>
+            ) : (
+              <Field label="¿Para quién es la instalación?" hint="Normalmente es el mismo contratante: no hay que llenar nada.">
+                <button type="button" className="btn btn--ghost btn--sm" style={{ alignSelf: "flex-start" }} onClick={() => setOtroDest(true)}><Icon d={I.plus} />Otro destinatario</button>
+              </Field>
+            )}
           </div>
           {newCust && (
             <div className="opp-newcust">

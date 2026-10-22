@@ -1,6 +1,6 @@
 /* Editor de documento (cotizacion o factura): contenido + columna derecha fija con totales/acciones/tipo de cambio.
    Los totales se recalculan en vivo contra /documents/preview (misma logica que el guardado). */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney, type Customer, type Invoice, type Line, type Product, type Quote } from "../../lib/api";
 import { useSession } from "../../app/session";
@@ -17,6 +17,14 @@ const blankLine = (): Line => ({ product_id: null, code: null, name: "", descrip
 /* Una linea en 0 sin tratamiento no explica nada: hay que decir si es pendiente, aportada, cortesia o exclusion. */
 const zeroUnexplained = (l: Line) => (l.treatment || "normal") === "normal" && !(Number(l.unit_price) > 0);
 const nameRows = (s: string) => Math.min(4, Math.max(1, Math.ceil((s || "").length / 44)));
+/* Imagen principal del producto (o la primera); undefined = la respuesta no trae imagenes */
+type ConFotos = { images?: { url: string; main?: boolean }[] };
+const fotoDe = (p: Product): string | undefined => { const ims = (p as Product & ConFotos).images; return ims ? ims.find((im) => im.main)?.url || ims[0]?.url || "" : undefined; };
+function Miniatura({ url, size = 36 }: { url?: string; size?: number }) {
+  return url
+    ? <img src={url} alt="" loading="lazy" style={{ width: size, height: size, flex: "none", objectFit: "contain", borderRadius: 8, border: "1px solid var(--hair)", background: "#fff" }} />
+    : <span aria-hidden style={{ display: "grid", placeItems: "center", width: size, height: size, flex: "none", borderRadius: 8, background: "var(--bg-2)", color: "var(--text-3)" }}><Icon d={I.products} size={Math.round(size * 0.45)} /></span>;
+}
 /* Precio del producto en la moneda del documento con el tipo de cambio de venta: antes se copiaba el numero tal cual
    (un producto de USD 50 entraba a una factura en colones como 50 colones). Solo CRC y USD en el sistema. */
 const inCurrency = (price: number, from: string | null | undefined, to: string | null | undefined, usd: number) => {
@@ -121,15 +129,56 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   }, [payload, isNew, doc.id]);
 
   const setLine = (i: number, patch: Partial<Line>) => setLines((ls) => ls.map((l, k) => (k === i ? { ...l, ...patch } : l)));
-  const addProducts = (ps: Product[]) => {
+  /* Producto del catalogo -> campos de la linea (precio en la moneda del documento). Lo usan el buscador del modal
+     y las sugerencias que salen al escribir el concepto: una sola conversion. */
+  const fromProduct = (ps: Product[]) => {
     const to = doc.currency || "CRC";
     const usd = Number(to === "USD" ? (doc.fx_sell ?? fx?.sell) : fx?.sell) || 0;
     const otra = ps.filter((p) => (p.currency || "CRC") !== to);
     if (otra.length && !usd) toast("Sin tipo de cambio del día: revisá el precio de los productos en otra moneda", "bad");
-    setLines((ls) => [...ls, ...ps.map((p) => ({ ...blankLine(), product_id: p.id, code: p.code, name: p.name, unit: p.unit, unit_price: num(inCurrency(Number(p.price), p.currency, to, usd)), tax_rate: String(p.tax_rate ?? 13) }))]);
     const sin = ps.filter((p) => sinExistencia(p.availability));
     if (sin.length) toast(`${sin.length === 1 ? sin[0].name : `${sin.length} productos`}: sin existencia propia ni del proveedor (se venden sin respaldo)`, "bad");
+    const conFoto = ps.filter((p) => fotoDe(p) !== undefined);
+    if (conFoto.length) setFotos((f0) => { const n = { ...f0 }; conFoto.forEach((p) => { n[p.id] = fotoDe(p) || ""; }); return n; });
+    return ps.map((p) => ({ product_id: p.id, code: p.code, name: p.name, unit: p.unit, unit_price: num(inCurrency(Number(p.price), p.currency, to, usd)), tax_rate: String(p.tax_rate ?? 13) }));
+  };
+  const addProducts = (ps: Product[]) => {
+    const nuevas = fromProduct(ps);
+    setLines((ls) => [...ls, ...nuevas.map((x) => ({ ...blankLine(), ...x }))]);
     setPick(false);
+  };
+  /* Sugerencias del catalogo al escribir el concepto (pedido 21/10, como en Fygaro): con 2 letras o mas busca nombre,
+     codigo, modelo o CABYS; si no hay coincidencia la linea sigue siendo libre y se escribe a mano. La linea que ya
+     tiene producto no sugiere (se puede renombrar); si se borra el concepto, vuelve a ser libre. */
+  const [sug, setSug] = useState<{ i: number; q: string; items: Product[]; idx: number } | null>(null);
+  const sugTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sugSeq = useRef(0);
+  const onLineName = (i: number, text: string) => {
+    const l = lines[i];
+    const libre = !l?.product_id || !text.trim();
+    setLine(i, !text.trim() ? { name: text, product_id: null, code: null } : { name: text });
+    if (sugTimer.current) clearTimeout(sugTimer.current);
+    const q = text.trim();
+    if (!libre || q.length < 2) { setSug(null); return; }
+    const seq = ++sugSeq.current;
+    sugTimer.current = setTimeout(() => {
+      api<{ items: Product[] }>(`/products?limit=8&q=${encodeURIComponent(q)}`)
+        .then((r) => { if (seq === sugSeq.current) setSug({ i, q, items: r.items, idx: 0 }); })
+        .catch(() => { if (seq === sugSeq.current) setSug(null); });
+    }, 220);
+  };
+  const pickSug = (i: number, p: Product) => {
+    const [x] = fromProduct([p]);
+    setLine(i, x);
+    sugSeq.current++;
+    setSug(null);
+  };
+  const onLineKey = (i: number, e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!sug || sug.i !== i || !sug.items.length) { if (e.key === "Escape") setSug(null); return; }
+    if (e.key === "ArrowDown") { e.preventDefault(); setSug({ ...sug, idx: Math.min(sug.idx + 1, sug.items.length - 1) }); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setSug({ ...sug, idx: Math.max(sug.idx - 1, 0) }); }
+    else if (e.key === "Enter" || e.key === "Tab") { if (e.key === "Enter") e.preventDefault(); pickSug(i, sug.items[sug.idx]); }
+    else if (e.key === "Escape") setSug(null);
   };
 
   /* ?productos=1,2,3: vienen de Productos & Servicios ("Agregar a cotización"). Se agregan una sola vez, cuando el documento
@@ -160,8 +209,13 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cargado, fxLoaded, search]);
 
+  /* Pedido 21/10: sin cliente no se convierte a factura (la factura no se corrige despues) y la factura hereda el de
+     la cotizacion. En una aceptada (bloqueada) el cliente se elige en el momento de convertir. */
+  const [clienteFactura, setClienteFactura] = useState(false);
+  const SIN_CLIENTE = "Elegí el cliente antes de convertir: la factura sale a su nombre y después no se puede editar.";
   const save = useCallback(async (then?: "send" | "convert") => {
     if (payload.lines.length === 0) return toast("Agregá al menos una línea", "bad");
+    if (then === "convert" && !payload.customer_id) { toast(SIN_CLIENTE, "bad"); document.getElementById("doc-cliente")?.focus(); return; }
     setBusy(true);
     try {
       const path = isQ ? "quotes" : "invoices";
@@ -212,11 +266,15 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   };
 
   /* Aceptada: no se guarda nada antes (esta bloqueada); la API convierte la version aceptada. */
-  const convertAccepted = async () => {
+  const convertAccepted = async (customerId?: number) => {
+    if (!doc.customer_id && !customerId) { setClienteFactura(true); return; }
     setBusy(true);
-    try { const inv = await api<Invoice>(`/quotes/${id}/convert`, { method: "POST" }); toast(`Factura ${inv.number} creada con la v${(doc as Quote).accepted_version}`); nav(`/facturas/${inv.id}`); }
+    try {
+      const inv = await api<Invoice>(`/quotes/${id}/convert`, { method: "POST", json: customerId ? { customer_id: customerId } : {} });
+      toast(`Factura ${inv.number} creada con la v${(doc as Quote).accepted_version}`); nav(`/facturas/${inv.id}`);
+    }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setClienteFactura(false); }
   };
 
   const act = async (action: "void" | "duplicate") => {
@@ -290,6 +348,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
             <Field label="Cliente">
               <div style={{ display: "flex", gap: 6 }}>
               <select
+                id="doc-cliente"
                 className="select"
                 style={{ flex: 1, minWidth: 0 }}
                 value={doc.customer_id ?? ""}
@@ -327,7 +386,24 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                       <tr key={i} className="line">
                         <td className="c-name">
                           {l.product_id && fotos[l.product_id] ? <img src={fotos[l.product_id]} alt="" loading="lazy" style={{ float: "left", width: 44, height: 44, objectFit: "contain", borderRadius: 8, border: "1px solid var(--hair)", background: "#fff", marginRight: 8 }} /> : null}
-                          <textarea className="input line-name" rows={nameRows(l.name)} placeholder="Nombre del producto o servicio" value={l.name} disabled={ro} onChange={(e) => setLine(i, { name: e.target.value })} />
+                          <div className="lookup">
+                            <textarea className="input line-name" rows={nameRows(l.name)} placeholder={l.product_id ? "Nombre del producto o servicio" : "Escribí para buscar en el catálogo o una línea libre"} value={l.name} disabled={ro}
+                              aria-autocomplete="list" aria-expanded={sug?.i === i && sug.items.length > 0}
+                              onChange={(e) => onLineName(i, e.target.value)} onKeyDown={(e) => onLineKey(i, e)} onBlur={() => setSug((s) => (s && s.i === i ? null : s))} />
+                            {sug?.i === i && !ro && (
+                              <ul className="lookup__list line-sug" role="listbox">
+                                {sug.items.map((p, k) => (
+                                  <li key={p.id} role="option" aria-selected={k === sug.idx}>
+                                    <button type="button" className={k === sug.idx ? "is-active" : undefined} onMouseDown={(e) => e.preventDefault()} onMouseEnter={() => setSug({ ...sug, idx: k })} onClick={() => pickSug(i, p)}>
+                                      <Miniatura url={fotoDe(p)} size={34} />
+                                      <span style={{ minWidth: 0 }}><b>{p.name}</b><small>{p.code}{p.price != null ? ` · ${fmtMoney(p.price, p.currency)}` : ""}{p.item_type === "producto" && p.availability ? ` · ${availText(p.availability)}` : ""}</small></span>
+                                    </button>
+                                  </li>
+                                ))}
+                                {sug.items.length === 0 && <li className="line-sug__none">Sin coincidencias en el catálogo: seguí escribiendo la línea a mano.</li>}
+                              </ul>
+                            )}
+                          </div>
                           <textarea className="line-desc" rows={1} placeholder="Descripción (click para editar)" value={l.description || ""} disabled={ro} onChange={(e) => setLine(i, { description: e.target.value })} />
                           <div className="line-meta">
                             <select className={`select select--sm line-treat${zero ? " is-warn" : ""}${t !== "normal" ? " is-set" : ""}`} value={t} disabled={ro} title={TREATMENTS.find((x) => x.value === t)?.hint} onChange={(e) => setLine(i, { treatment: e.target.value })} aria-label="Tratamiento de la línea">
@@ -445,7 +521,8 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               {!pending && !accepted && canSend && (canEdit
                 ? <button className="btn" disabled={busy || blocked} onClick={() => save("send")}><Icon d={I.whatsapp} />Guardar & enviar al cliente</button>
                 : !isNew && <button className="btn" disabled={busy || blocked} onClick={sendOnly}><Icon d={I.whatsapp} />Enviar al cliente</button>)}
-              {isQ && !pending && allows("sales.crear") && (accepted || canEdit) && <button className="btn btn--soft" disabled={busy || blocked} onClick={() => (accepted ? convertAccepted() : save("convert"))}><Icon d={I.invoice} />Convertir a factura</button>}
+              {isQ && !pending && allows("sales.crear") && (accepted || canEdit) && <button className="btn btn--soft" disabled={busy || blocked} title={doc.customer_id ? undefined : "Primero elegí el cliente"} onClick={() => (accepted ? convertAccepted() : save("convert"))}><Icon d={I.invoice} />Convertir a factura</button>}
+              {isQ && !pending && allows("sales.crear") && (accepted || canEdit) && !doc.customer_id && <p className="muted" style={{ fontSize: 12, margin: 0, color: "var(--warn)" }}>Sin cliente no se convierte a factura: la factura sale a su nombre y después no se edita.</p>}
               {isQ && !isNew && !pending && !proyecto && allows("projects.crear") && (
                 /* Instalaciones: la cotización aprobada arranca el proyecto con su primera orden de trabajo. */
                 opp?.kind === "venta"
@@ -474,6 +551,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
       </div>
 
       {nuevoCliente && <NuevoCliente onClose={() => setNuevoCliente(false)} onCreated={(c) => { setCustomers((cs) => [c, ...cs.filter((x) => x.id !== c.id)]); setDoc({ ...doc, customer_id: c.id, currency: c.currency || doc.currency || "CRC" }); setNuevoCliente(false); }} />}
+      {clienteFactura && <ClienteParaFactura customers={customers} busy={busy} onClose={() => setClienteFactura(false)} onCreated={(c) => setCustomers((cs) => [c, ...cs.filter((x) => x.id !== c.id)])} onPick={(cid) => convertAccepted(cid)} />}
       {pick && <ProductPicker onClose={() => setPick(false)} onPick={addProducts} docCurrency={cur} />}
     </>
   );
@@ -505,6 +583,27 @@ function NuevoCliente({ onClose, onCreated }: { onClose: () => void; onCreated: 
   );
 }
 
+/* Cotizacion aceptada sin cliente (ya no se edita): el cliente de la factura se elige al convertir. */
+function ClienteParaFactura({ customers, busy, onClose, onPick, onCreated }: { customers: Customer[]; busy: boolean; onClose: () => void; onPick: (id: number) => void; onCreated: (c: Customer) => void }) {
+  const { allows } = useSession();
+  const [cid, setCid] = useState<number | null>(null);
+  const [nuevo, setNuevo] = useState(false);
+  if (nuevo) return <NuevoCliente onClose={() => setNuevo(false)} onCreated={(c) => { onCreated(c); setCid(c.id); setNuevo(false); }} />;
+  return (
+    <Modal title="¿A nombre de quién sale la factura?" onClose={onClose} foot={<><button className="btn btn--ghost" onClick={onClose}>Cancelar</button><button className="btn btn--crimson" disabled={busy || !cid} onClick={() => cid && onPick(cid)}><Icon d={I.invoice} />Convertir a factura</button></>}>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>La cotización no tiene cliente. La factura sale a su nombre y después no se puede editar: elegilo antes de convertir.</p>
+      <Field label="Cliente">
+        <div style={{ display: "flex", gap: 6 }}>
+          <select className="select" style={{ flex: 1, minWidth: 0 }} autoFocus value={cid ?? ""} onChange={(e) => setCid(e.target.value ? Number(e.target.value) : null)}>
+            <option value="">Seleccione…</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          {allows("crm.crear") && <button type="button" className="btn btn--soft btn--sm" onClick={() => setNuevo(true)}><Icon d={I.plus} />Nuevo</button>}
+        </div>
+      </Field>
+    </Modal>
+  );
+}
+
 function ProductPicker({ onClose, onPick, docCurrency }: { onClose: () => void; onPick: (ps: Product[]) => void; docCurrency: string }) {
   const [q, setQ] = useState("");
   const [items, setItems] = useState<Product[]>([]);
@@ -523,10 +622,10 @@ function ProductPicker({ onClose, onPick, docCurrency }: { onClose: () => void; 
       <div className="search" style={{ maxWidth: "none" }}><Icon d={I.search} size={16} /><input autoFocus placeholder="Buscar por nombre, código o CABYS…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
       {items.length === 0 ? <Empty hint="Creá el producto desde Productos & Servicios." /> : (
         <table className="table">
-          <thead><tr><th /><th>Código</th><th>Nombre</th><th>Disponibilidad</th><th className="num">Precio</th><th>IVA</th></tr></thead>
+          <thead><tr><th /><th style={{ width: 52 }} /><th>Código</th><th>Nombre</th><th>Disponibilidad</th><th className="num">Precio</th><th>IVA</th></tr></thead>
           <tbody>{items.map((p) => (
             <tr key={p.id} onClick={() => setSel((s) => { const c = { ...s }; if (c[p.id]) delete c[p.id]; else c[p.id] = p; return c; })} style={{ cursor: "pointer" }}>
-              <td><input type="checkbox" readOnly checked={!!sel[p.id]} /></td><td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}<div className="meta" style={{ marginTop: 2 }}>{p.item_type}{p.cabys_code ? ` · CABYS ${p.cabys_code}` : ""}</div></td><td style={{ minWidth: 150 }}>{p.item_type === "producto" ? <><AvailBadge a={p.availability} /><div className="meta">{availText(p.availability)}</div></> : <span className="muted">—</span>}</td><td className="num money">{fmtMoney(p.price, p.currency)}{(p.currency || "CRC") !== docCurrency && <div className="meta">se convierte a {docCurrency}</div>}</td><td className="muted">{p.tax_rate ?? 13}%</td>
+              <td><input type="checkbox" readOnly checked={!!sel[p.id]} /></td><td><Miniatura url={fotoDe(p)} size={40} /></td><td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}<div className="meta" style={{ marginTop: 2 }}>{p.item_type}{p.cabys_code ? ` · CABYS ${p.cabys_code}` : ""}</div></td><td style={{ minWidth: 150 }}>{p.item_type === "producto" ? <><AvailBadge a={p.availability} /><div className="meta">{availText(p.availability)}</div></> : <span className="muted">—</span>}</td><td className="num money">{fmtMoney(p.price, p.currency)}{(p.currency || "CRC") !== docCurrency && <div className="meta">se convierte a {docCurrency}</div>}</td><td className="muted">{p.tax_rate ?? 13}%</td>
             </tr>
           ))}</tbody>
         </table>

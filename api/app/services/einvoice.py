@@ -28,7 +28,7 @@ from ..providers.hacienda.provider import HaciendaDirectProvider, InvalidXml, Si
 from . import hacienda_config as hc
 from .documents import audit
 from .fx import doc_rate
-from .sequences import next_fiscal_consecutive, next_number
+from .sequences import next_fiscal_consecutive, next_number, number_from_fiscal_on, visible_from_fiscal
 from .units import hacienda_unit
 
 ROOT = {
@@ -291,11 +291,24 @@ def emit(db: Session, tenant: Tenant, user_id: int | None, inv: Invoice) -> EInv
     return doc
 
 
+def number_from_fiscal(db: Session, tenant: Tenant, user_id: int | None, inv: Invoice, doc_type: str, consecutive: str, mode: str) -> None:
+    """Pedido 21/10 (seguir la numeracion de Fygaro): en produccion, con Ajustes -> Numeracion -> "Numero de la factura
+    = consecutivo fiscal" encendido, el numero visible pasa a ser la secuencia del consecutivo (FEC-000087). Va dentro
+    del savepoint de emit(): si la emision falla, el numero vuelve al que tenia. Queda en la bitacora."""
+    if mode != "produccion" or not number_from_fiscal_on(tenant.settings):
+        return
+    nuevo = visible_from_fiscal(db, tenant.id, doc_type, consecutive)
+    if inv.number != nuevo:
+        audit(db, tenant.id, user_id, "renumber", "invoice", inv.id, {"antes": inv.number, "despues": nuevo, "motivo": "consecutivo fiscal"})
+        inv.number = nuevo
+
+
 def _emit_numbered(db: Session, tenant: Tenant, user_id: int | None, inv: Invoice, mode: str, doc_type: str, prev: list) -> EInvoiceDocument:
     fecha = cr_now()
     consecutive = next_fiscal_consecutive(db, tenant.id, FISCAL_CODE[doc_type], mode)
     if prev:
         audit(db, tenant.id, user_id, "einvoice_renumber", "invoice", inv.id, {"antes": inv.consecutive, "despues": consecutive})
+    number_from_fiscal(db, tenant, user_id, inv, doc_type, consecutive, mode)
     clave = build_clave("506", fecha, tenant.tax_id or "0", consecutive, "1", security_code())
     if mode == "simulado":
         res = _simulate(direct_payload(db, tenant, inv, doc_type, consecutive, clave, fecha, lenient=True))
