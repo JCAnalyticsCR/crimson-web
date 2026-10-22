@@ -276,8 +276,9 @@ def test_tablero_indicadores_y_margen_solo_admin(client, auth, db_session):
     assert t["margen"] is not None and "margen_bruto_pct" in t["margen"]
     conta = interno(client, db_session, tid, "conta.tb@ejemplo.com", "contabilidad")
     tc = client.get("/reports/tablero/indicadores", params={"from": A, "to": B}, headers=conta).json()
-    # una sola regla: el margen sale a quien ve el estado de resultados (admin y contabilidad)
-    assert tc["margen"] is not None and D(str(tc["ventas"]["total"])) == D("300000.00")
+    # contabilidad ve el tablero y el estado de resultados, pero el margen del tablero es solo del admin
+    assert tc["margen"] is None and tc["can_pnl"] is True and D(str(tc["ventas"]["total"])) == D("300000.00")
+    assert client.get("/reports/resultados/completo", params={"from": A, "to": B}, headers=conta).status_code == 200
     ventas = interno(client, db_session, tid, "ventas.tb@ejemplo.com", "ventas")
     assert client.get("/reports/tablero/indicadores", headers=ventas).status_code == 403
     # caja ve todas las facturas para cobrar, pero no los reportes de ventas: tampoco el tablero
@@ -294,8 +295,15 @@ def test_excel_venta_de_productos_completo(client, auth, db_session):
         [{"product_id": eq, "name": "Disco duro", "quantity": 2, "unit_price": 50000, "discount_type": "percent", "discount_value": 10, "tax_rate": 13}],
         seller_id=vid,
     )
+    # descuento global de 10 000 sobre 100 000: las lineas guardan su parte (totals.compute_document), cuadra con resultados
+    _inv(client, [{"product_id": eq, "name": "Memoria", "quantity": 1, "unit_price": 100000, "tax_rate": 13}], discount_type="amount", discount_value=10000)
     rep = client.get("/reports/productos", params={"from": A, "to": B}).json()
     cols = rep["columns"]
+    mem = next(r for r in rep["rows"] if r[cols.index("Producto")] == "Memoria")
+    assert D(str(mem[cols.index("Descuento")])) == D("10000.00") and D(str(mem[cols.index("Subtotal")])) == D("90000")
+    assert D(str(mem[cols.index("Total")])) == D("101700")
+    assert D(str(rep["totals"]["Subtotal ₡"])) == D("180000.00") and D(str(rep["totals"]["Descuento ₡"])) == D("20000.00")
+    assert D(str(_pnl(client)["ingresos"]["total"])) == D("180000.00")
     for c in ("Cliente", "Vendedor", "Cantidad", "Precio unitario", "Descuento", "Impuesto", "Total", "Moneda"):
         assert c in cols
     fila = next(r for r in rep["rows"] if r[cols.index("Producto")] == "Disco duro")
