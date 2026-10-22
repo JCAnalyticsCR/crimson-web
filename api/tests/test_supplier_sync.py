@@ -64,8 +64,9 @@ def test_relevance_rules():
     assert ss.relevant(BALUN) == "marca:HIKVISION"
     assert ss.relevant(UTP).startswith("clave:") and ss.relevant(HDMI) is None
     assert ss.relevant(PURPLE).startswith("clave:") and ss.relevant(BLUE) is None
-    assert ss.relevant(UPS) and ss.relevant(POWERBANK) is None
-    assert ss.relevant(LAPTOP) is None and ss.relevant(ENCHUFE) is None  # marca de seguridad, familia de hogar
+    # RESPALDO ELÉCTRICO y SMART HOME ahora entran completos (Power Banks, Corriente Inteligente, etc.)
+    assert ss.relevant(UPS) and ss.relevant(POWERBANK)
+    assert ss.relevant(LAPTOP) is None and ss.relevant(ENCHUFE)  # SMART HOME ya entra; LAPTOPS sigue fuera
     assert image_url("upload/items/a.jpg", "https://eurocompcr.com/webservice.php") == "https://eurocompcr.com/upload/items/a.jpg"
 
 
@@ -106,12 +107,12 @@ def test_sync_links_enriches_and_never_touches_own_stock(client, auth, db_sessio
     sup = client.get("/supplier-catalog/suppliers").json()
     assert not [s for s in sup if s["name"].lower().startswith("eurocomp")]  # todavia no existe: lo crea la sincronizacion
     out = ss.sync_all(db_session)[tid]
-    assert out["recibidos"] == 10 and out["utiles"] == 5  # camara, balun, UTP, disco Purple, UPS
+    assert out["recibidos"] == 10 and out["utiles"] == 7  # + Power Bank (RESPALDO ELÉCTRICO) y Enchufe (SMART HOME)
     assert out["vinculos"] == 1 and out["cabys_completados"] == 1 and out["fotos_completadas"] == 1
 
     s = db_session.scalar(select(Supplier).where(Supplier.tenant_id == tid))
     codes = {i.code for i in db_session.scalars(select(SupplierItem).where(SupplierItem.supplier_id == s.id))}
-    assert codes == {"SG2104", "AC1104", "CB0001", "HD0001", "UP0001"}
+    assert codes == {"SG2104", "AC1104", "CB0001", "HD0001", "SH0001", "UP0001", "PB0001"}
     db_session.refresh(prod)
     assert prod.cost == Decimal("48.5") and prod.cost_currency == "USD" and prod.supplier_stock == 5
     assert prod.cabys_code == "4526100000200" and prod.images[0] == {"url": "https://eurocompcr.com/upload/items/2026/8/1_2.jpg", "main": True}
@@ -123,7 +124,8 @@ def test_sync_links_enriches_and_never_touches_own_stock(client, auth, db_sessio
     db_session.commit()
     eurocomp["items"] = [dict(CAMARA, stock="0.000"), UTP, PURPLE, UPS]
     out = ss.sync_all(db_session)[tid]
-    assert out["inactivar"] == 1
+    # BALUN, ENCHUFE y POWERBANK no están en la lista → 3 inactivados
+    assert out["inactivar"] == 3
     db_session.refresh(prod)
     assert prod.supplier_stock == 0 and prod.cabys_code == "1111111111111"  # nunca pisa un CABYS que ya estaba
 
@@ -137,11 +139,11 @@ def test_suspicious_or_throttled_response_changes_nothing(client, auth, db_sessi
     ss.sync_all(db_session)
     s = db_session.scalar(select(Supplier).where(Supplier.tenant_id == tid))
     active = lambda: db_session.scalar(select(func.count()).where(SupplierItem.supplier_id == s.id, SupplierItem.active))  # noqa: E731
-    assert active() == 5
+    assert active() == 7  # camara, balun, UTP, purple, enchufe, UPS, powerbank
     # respuesta cortada (nada util): no se aplica y queda el error visible
     eurocomp["items"] = [LAPTOP]
     assert "error" in ss.sync_all(db_session)[tid]
-    assert active() == 5
+    assert active() == 7
     st = next(x for x in client.get("/supplier-catalog/suppliers").json() if x["id"] == s.id)["api"]
     assert st["status"] == "error" and "no se aplica" in st["label"]
     # "sincronizar ahora" dentro de la misma hora: Eurocomp responde 20 -> 429 con el motivo
@@ -150,7 +152,7 @@ def test_suspicious_or_throttled_response_changes_nothing(client, auth, db_sessi
     assert r.status_code == 429 and "por hora" in r.json()["detail"]
     eurocomp["error"] = None
     r = client.post(f"/supplier-catalog/suppliers/{s.id}/sync")
-    assert r.status_code == 200 and r.json()["utiles"] == 5
+    assert r.status_code == 200 and r.json()["utiles"] == 7
 
 
 def test_stock_refresh_updates_only_linked_products(client, auth, db_session, eurocomp):
@@ -332,7 +334,8 @@ def test_salto_de_costo_dudoso_cuenta_como_cambio_real(client, auth, db_session,
     antes = ss._state(db_session.get(Tenant, tid))["last_change_at"]
     eurocomp["items"] = [dict(CAMARA, precio="97.00"), BALUN, UTP, PURPLE, UPS]  # +100 %
     out = ss.sync_all(db_session)[tid]
-    assert out["dudoso"] == 1 and out["actualizado"] == 0 and out["cambios_reales"] == 1
+    # dudoso=1 (CAMARA costo +100 %); ENCHUFE y POWERBANK faltan en la lista → 2 inactivados (= 2 cambios_reales extra)
+    assert out["dudoso"] == 1 and out["actualizado"] == 0 and out["cambios_reales"] == 3
     assert ss._state(db_session.get(Tenant, tid))["last_change_at"] > antes
     it = db_session.scalar(select(SupplierItem).where(SupplierItem.code == "SG2104"))
     assert it.changed_at is not None

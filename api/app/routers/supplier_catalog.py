@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
-from ..models import Category, Product, ProductTax, Supplier, SupplierItem, SupplierListImport, Tax
+from ..models import Category, Product, ProductTax, Supplier, SupplierItem, SupplierListImport, Tax, Tenant
 from ..providers.sirett import SirettError
 from ..services import pricing, product_names, supplier_sync
 from ..services import supplier_catalog as sc
@@ -210,6 +210,65 @@ def supplier_sync_now(sid: int, p: Principal = Depends(require("catalog", "crear
     finally:
         supplier_sync.trim_memory()  # la API no se queda con el pico de la descarga
     return out
+
+
+# ---------- auto_catalog: publicación automática configurable ----------
+
+class AutoCatalogIn(BaseModel):
+    enabled: bool | None = None
+    families: list[str] | None = Field(None, max_length=20)
+    publish_web: bool | None = None
+
+
+@router.get("/suppliers/{sid}/auto-catalog")
+def get_auto_catalog(sid: int, p: Principal = Depends(require("catalog", "ver")), db: Session = Depends(get_db)):
+    """Lee la configuración de publicación automática (auto_catalog) para Eurocomp."""
+    s = db.get(Supplier, sid)
+    if not s or s.tenant_id != p.tenant.id:
+        raise HTTPException(404, "Proveedor no encontrado")
+    if not supplier_sync.is_eurocomp(s):
+        raise HTTPException(409, "La publicación automática solo aplica para Eurocomp")
+    return supplier_sync.ac_settings(p.tenant)
+
+
+@router.put("/suppliers/{sid}/auto-catalog")
+def put_auto_catalog(sid: int, data: AutoCatalogIn, p: Principal = Depends(require("catalog", "crear")), db: Session = Depends(get_db)):
+    """Guarda la configuración de publicación automática del catálogo de Eurocomp. Solo admin."""
+    _need_costs(p)
+    s = db.get(Supplier, sid)
+    if not s or s.tenant_id != p.tenant.id:
+        raise HTTPException(404, "Proveedor no encontrado")
+    if not supplier_sync.is_eurocomp(s):
+        raise HTTPException(409, "La publicación automática solo aplica para Eurocomp")
+    t = db.get(Tenant, p.tenant.id)
+    supplier_sync.ac_save(t, data.model_dump(exclude_unset=True))
+    db.commit()
+    return supplier_sync.ac_settings(t)
+
+
+@router.post("/suppliers/{sid}/auto-catalog/run", status_code=202)
+def run_auto_catalog(sid: int, p: Principal = Depends(require("catalog", "crear")), db: Session = Depends(get_db)):
+    """Encola la creación automática de productos para las familias configuradas. Solo admin.
+    La operación se ejecuta en el worker (puede crear cientos de productos: no corre en la petición HTTP)."""
+    _need_costs(p)
+    s = db.get(Supplier, sid)
+    if not s or s.tenant_id != p.tenant.id:
+        raise HTTPException(404, "Proveedor no encontrado")
+    if not supplier_sync.is_eurocomp(s):
+        raise HTTPException(409, "Solo aplica para Eurocomp")
+    cfg = supplier_sync.ac_settings(p.tenant)
+    if not cfg.get("enabled"):
+        raise HTTPException(409, "La publicación automática no está habilitada (actívela primero en la configuración)")
+    try:
+        from ..tasks.catalogo import auto_catalog_task
+        task = auto_catalog_task.delay(p.tenant.id, p.user.id)
+        return {"task_id": str(task.id), "message": "Publicación automática encolada en el worker"}
+    except Exception:
+        # Celery no disponible (entorno local o de pruebas): ejecutar en línea
+        sup = supplier_sync.find_supplier(db, p.tenant.id)
+        result = supplier_sync.auto_catalog_run(db, p.tenant, sup, commit_batches=True)
+        supplier_sync.trim_memory()
+        return {"task_id": None, "result": result, "message": "Ejecutado en línea (Celery no disponible)"}
 
 
 @router.get("/imports")

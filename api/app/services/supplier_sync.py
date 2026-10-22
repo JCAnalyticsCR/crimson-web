@@ -49,18 +49,10 @@ MIN_RATIO = 0.5  # la lista nueva debe traer al menos la mitad de los articulos 
 MAX_IMAGES = 6
 
 # ---------- que le sirve a Crimson ----------
-FAMILIAS_COMPLETAS = {"SEGURIDAD", "REDES Y CONECTIVDAD"}  # asi, con la errata, viene de SiReTT
-SUBFAMILIAS = {
-    ("RESPALDO ELÉCTRICO", "UPS"),
-    ("RESPALDO ELÉCTRICO", "Baterias"),
-    ("RESPALDO ELÉCTRICO", "Reguladores de Voltaje"),
-    ("RESPALDO ELÉCTRICO", "Regletas"),
-    ("RESPALDO ELÉCTRICO", "Protectores de Voltaje"),
-    ("RESPALDO ELÉCTRICO", "Inversores/Conversores de Energía"),
-    ("RESPALDO ELÉCTRICO", "Paneles Solares"),
-}
+FAMILIAS_COMPLETAS = {"SEGURIDAD", "REDES Y CONECTIVDAD", "RESPALDO ELÉCTRICO", "SMART HOME"}  # con la errata de SiReTT
+SUBFAMILIAS: set = set()  # todo lo de esas familias entra completo; antes solo subfamilias de RESPALDO ELÉCTRICO
 MARCAS = {"HIKVISION", "HILOOK", "EZVIZ", "HIKMICRO", "UBIQUITI", "APC", "GRANDSTREAM", "ZKTECO", "DAHUA", "PARADOX", "RUIJIE", "REYEE", "MIKROTIK"}
-SIN_MARCA_EN = {"SMART HOME", "ELECTRODOMESTICOS", "COMPONENTES DE PC", "VENTAS FOB/SERVICIOS"}  # familia padre o sub
+SIN_MARCA_EN = {"ELECTRODOMESTICOS", "COMPONENTES DE PC", "VENTAS FOB/SERVICIOS"}  # familia padre o sub
 CLAVES = {
     ("ACCESORIOS", "Cables"): r"\b(UTP|FTP|STP|CAT ?5E?|CAT ?6A?|CAT ?7|PATCH|RJ ?45|COAXIAL|COAX|RG ?59|FIBRA|SIAMES|POE|ETHERNET|DE RED)\b",
     ("ACCESORIOS", "Adaptadores"): r"\b(BALUN|RJ ?45|POE|INYECTOR|CONECTOR|ACOPLE|COUPLER|ETHERNET|LAN|FIBRA|DE RED)\b",
@@ -329,6 +321,22 @@ def sync_tenant(
     from . import margin_guard
 
     margin_guard.run_safe(db, t, reason="catálogo de Eurocomp")
+
+    # auto_catalog: si está activo, crea productos para las familias configuradas con los artículos recién sincronizados
+    t_fresh = db.get(Tenant, t.id)
+    if t_fresh and ac_settings(t_fresh).get("enabled"):
+        sup = find_supplier(db, t.id)
+        if sup:
+            try:
+                ac_out = auto_catalog_run(db, t_fresh, sup, commit_batches=True)
+                if ac_out.get("creados"):
+                    log.info(
+                        "Eurocomp auto_catalog (empresa %s): %s creados, %s Hikvision destacados",
+                        t.id, ac_out["creados"], ac_out.get("destacados_hik", 0),
+                    )
+            except Exception as exc:
+                log.warning("Eurocomp auto_catalog (empresa %s): error no crítico: %s", t.id, exc)
+
     return out
 
 
@@ -445,3 +453,191 @@ def refresh_linked(db: Session, client: SirettClient | None = None) -> dict:
     for t in tenants:
         margin_guard.run_safe(db, t, reason="costos de Eurocomp")
     return out
+
+
+# ---------- catálogo automático (auto_catalog) ----------
+# Marcas de la familia Hikvision que se destacan (web_featured=True) al crearse
+HIKVISION_BRANDS = frozenset({"HIKVISION", "HILOOK", "HIKMICRO"})
+
+AC_DEFAULT: dict = {
+    "enabled": False,
+    "families": ["Seguridad", "Redes y conectividad", "Respaldo eléctrico", "Smart home"],
+    "publish_web": False,
+}
+
+
+def ac_settings(t: Tenant) -> dict:
+    """Configuración de publicación automática (tenant.settings.supplier_sync.eurocomp.auto_catalog)."""
+    return {**AC_DEFAULT, **(_state(t).get("auto_catalog") or {})}
+
+
+def ac_save(t: Tenant, vals: dict) -> None:
+    """Guarda (merge) la configuración de auto_catalog en tenant.settings sin pisar las demás claves."""
+    _save_state(t, auto_catalog={**ac_settings(t), **vals})
+
+
+def _make_code(db: Session, tid: int, it: SupplierItem, supplier_name: str | None) -> str:
+    """Código propio sugerido: igual que el cajón 'Agregar a mi catálogo' del router."""
+    pref = re.sub(r"[^A-Z0-9]", "", (supplier_name or "PRV").upper())[:3] or "PRV"
+    base = (it.model or f"{pref}-{it.code}")[:56]
+    cand, n = base, 2
+    while db.scalar(select(func.count()).select_from(Product).where(Product.tenant_id == tid, Product.code == cand)):
+        cand, n = f"{base}-{n}", n + 1
+    return cand
+
+
+def _suggest_cat(db: Session, tid: int, it: SupplierItem) -> int | None:
+    """Categoría propia cuyo nombre coincide con la subcategoría (o categoría) del ítem del proveedor."""
+    from ..models import Category
+
+    for name in (it.subcategory, it.category):
+        if not name:
+            continue
+        c = db.scalar(
+            select(Category).where(Category.tenant_id == tid, func.lower(Category.name) == name.lower())
+        )
+        if c:
+            return c.id
+    return None
+
+
+def auto_catalog_run(
+    db: Session,
+    t: Tenant,
+    supplier: Supplier | None = None,
+    *,
+    batch_size: int = 50,
+    dry_run: bool = False,
+    commit_batches: bool = False,
+) -> dict:
+    """Crea productos para los artículos de Eurocomp de las familias configuradas en auto_catalog
+    que todavía no tienen producto vinculado.
+
+    Idempotente: nunca duplica; respeta lo borrado (link_method set + product_id NULL = el admin lo
+    borró) y lo ocultado/inactivo (product_id no es NULL = ya existe, no se toca).
+    Hikvision/HiLook/HiMicro se crean con web_featured=True para que sobresalgan en la tienda.
+
+    commit_batches=True: commit después de cada lote (uso desde el worker o CLI).
+    False (default): solo flush, el llamador hace el commit (uso dentro de sync_tenant).
+    """
+    from ..models import ProductTax, Tax
+    from . import pricing, product_names
+    from .fx import FxMissing
+
+    supplier = supplier or find_supplier(db, t.id)
+    if supplier is None:
+        return {"skipped": "proveedor Eurocomp no encontrado"}
+    cfg = ac_settings(t)
+    if not cfg.get("enabled"):
+        return {"skipped": "auto_catalog no habilitado"}
+    families = list(cfg.get("families") or [])
+    if not families:
+        return {"skipped": "sin familias configuradas"}
+    publish_web = bool(cfg.get("publish_web"))
+
+    items = list(
+        db.scalars(
+            select(SupplierItem).where(
+                SupplierItem.tenant_id == t.id,
+                SupplierItem.supplier_id == supplier.id,
+                SupplierItem.active,
+                SupplierItem.category.in_(families),
+                SupplierItem.product_id.is_(None),
+            )
+        )
+    )
+
+    fx = sc.usd_rate(db)
+    margin = pricing.default_margin(t)
+    iva_obj = db.scalar(select(Tax).where(Tax.tenant_id == t.id, Tax.rate_code == "08", Tax.active))
+    sup_name = supplier.name
+
+    creados = skip_borrado = skip_sin_costo = 0
+    destacados = 0
+
+    to_create = []
+    for it in items:
+        if it.link_method is not None:
+            # link_method set pero product_id NULL → el producto fue borrado; respetamos la decisión del admin
+            skip_borrado += 1
+            continue
+        if it.cost is None or Decimal(str(it.cost)) <= 0:
+            skip_sin_costo += 1
+            continue
+        to_create.append(it)
+
+    if dry_run:
+        for it in to_create:
+            if (it.brand or "").upper() in HIKVISION_BRANDS:
+                destacados += 1
+            creados += 1
+        return {
+            "creados": creados,
+            "skip_borrado": skip_borrado,
+            "skip_sin_costo": skip_sin_costo,
+            "destacados_hik": destacados,
+            "dry_run": True,
+            "total_candidatos": len(to_create),
+        }
+
+    for i in range(0, len(to_create), batch_size):
+        batch = to_create[i : i + batch_size]
+        for it in batch:
+            code = _make_code(db, t.id, it, sup_name)
+            try:
+                price = pricing.sale_price(db, Decimal(str(it.cost)), it.currency or "USD", "CRC", margin, fx)
+            except FxMissing:
+                price = Decimal(0)  # sin tipo de cambio: "precio a consultar" (el guardián de margen lo revisa)
+            except Exception:
+                skip_sin_costo += 1
+                continue
+            featured = (it.brand or "").upper() in HIKVISION_BRANDS
+            specs = "\n".join((it.description or "").splitlines()[1:]).strip() or None
+            cat_id = _suggest_cat(db, t.id, it)
+            prod = Product(
+                tenant_id=t.id,
+                code=code,
+                name=(product_names.tidy(it.name) or it.name)[:200],
+                item_type="producto",
+                unit="Unid",
+                price=price,
+                currency="CRC",
+                cost=it.cost,
+                cost_currency=it.currency or "USD",
+                margin_pct=margin,
+                brand=it.brand,
+                model=it.model,
+                supplier_id=it.supplier_id,
+                supplier_sku=it.code,
+                supplier_stock=it.stock,
+                supplier_updated_at=sc.list_datetime(it.list_date),
+                description_invoice=it.name[:2000],
+                description_store=specs,
+                category_id=cat_id,
+                show_on_web=publish_web,
+                web_featured=featured,
+                cabys_code=None,
+            )
+            db.add(prod)
+            db.flush()
+            if iva_obj:
+                prod.taxes.append(ProductTax(tax_id=iva_obj.id))
+            sc.link(db, it, prod, "creado", None, fx=fx)
+            if featured:
+                destacados += 1
+            creados += 1
+        db.flush()
+        if commit_batches:
+            db.commit()
+        trim_memory()
+
+    if not commit_batches:
+        db.flush()
+
+    return {
+        "creados": creados,
+        "skip_borrado": skip_borrado,
+        "skip_sin_costo": skip_sin_costo,
+        "destacados_hik": destacados,
+        "publicados": creados if publish_web else 0,
+    }
