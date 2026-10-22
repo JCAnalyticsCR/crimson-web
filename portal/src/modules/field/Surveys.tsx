@@ -680,7 +680,7 @@ export default function Surveys() {
             <button className="btn btn--ghost" onClick={close}>Cerrar</button>
             {!readOnly && <>
               <button className="btn btn--ghost" onClick={recommend} disabled={busy || !!pending || !draft.points.length} aria-busy={pending === "recomendar"} title="Equipos reales del catálogo para lo levantado: cámaras, grabador, discos, switch…">{pending === "recomendar" ? "Buscando equipos…" : "Recomendar equipos"}</button>
-              <button className="btn btn--ghost" onClick={suggest} disabled={busy || !!pending} aria-busy={pending === "sugerir"} title={draft.points.length ? "Propone equipos y materiales según los puntos; vos elegís cuáles agregar al levantamiento." : "Sin puntos: los materiales habituales del tipo de solución; vos elegís cuáles agregar al levantamiento."}>{pending === "sugerir" ? "Sugiriendo…" : "Sugerir materiales"}</button>
+              <button className="btn btn--ghost" onClick={suggest} disabled={busy || !!pending} aria-busy={pending === "sugerir"} title={draft.points.length ? "Propone equipos y materiales según los puntos; vos elijas cuáles agregar al levantamiento." : "Sin puntos: los materiales habituales del tipo de solución; vos elijas cuáles agregar al levantamiento."}>{pending === "sugerir" ? "Sugiriendo…" : "Sugerir materiales"}</button>
               <button className="btn btn--ghost" onClick={() => save()} disabled={busy}>Guardar</button>
               <button className="btn btn--crimson" onClick={send} disabled={busy || !draft.points.length} title="Lo revisa el supervisor (o el administrador) en Aprobaciones antes del costeo">{draft.status === "enviado" ? "Reenviar a revisión" : "Enviar a revisión"}</button>
             </>}
@@ -821,7 +821,7 @@ export default function Surveys() {
         </>}>
           {draft.review?.review_status !== "aprobado" && (
             <p className="review__hint" style={{ background: "var(--warn-soft)", border: "1px solid var(--warn)", borderRadius: 10, padding: "10px 14px" }}>
-              Revisión del supervisor: <b>{draft.review?.review_label || "sin enviar"}</b>. La cotización se genera cuando el supervisor la apruebe{allows("field.saltar_revision") ? " (como administrador podés saltarla confirmándolo)" : ""}.
+              Revisión del supervisor: <b>{draft.review?.review_label || "sin enviar"}</b>. La cotización se genera cuando el supervisor la apruebe{allows("field.saltar_revision") ? " (como administrador puede saltarla confirmándolo)" : ""}.
             </p>
           )}
           {live.missing.length > 0 && (

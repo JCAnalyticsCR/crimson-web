@@ -146,7 +146,7 @@ export function FollowComposer({ ticket, onSaved, autoFocus, focusNext, onCancel
           </select>
         )}
       </div>
-      {!canEdit && <p className="tk-compose__hint">Podés registrar seguimiento; resolver, reasignar o cambiar el estado lo hace soporte.</p>}
+      {!canEdit && <p className="tk-compose__hint">Puede registrar seguimiento; resolver, reasignar o cambiar el estado lo hace soporte.</p>}
       <div className="tk-compose__row" style={{ justifyContent: "flex-end" }}>
         {(onCancel || escrito) && <button type="button" className="btn btn--ghost btn--sm" onClick={cancelar}>Cancelar</button>}
         <button type="button" className="btn btn--crimson btn--sm" onClick={guardar} disabled={!puede}>{busy ? "Guardando…" : "Guardar seguimiento"}</button>

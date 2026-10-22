@@ -282,7 +282,7 @@ export default function UsersTab() {
           {inviteOut.resent && <p style={{ fontSize: 13, margin: 0, fontWeight: 600 }}>El enlace anterior dejó de servir.</p>}
           <p className="muted" style={{ fontSize: 13, margin: 0 }}>
             {inviteOut.emailed
-              ? <>Le enviamos un correo a <b>{inviteOut.email}</b>. También podés mandarle el enlace por WhatsApp; vence el {fecha(inviteOut.expires_at)}.</>
+              ? <>Le enviamos un correo a <b>{inviteOut.email}</b>. También puede mandarle el enlace por WhatsApp; vence el {fecha(inviteOut.expires_at)}.</>
               : <>El correo no salió ({inviteOut.email_error || "el envío de correos todavía no está activo"}). Mandale este enlace a <b>{inviteOut.email}</b> por WhatsApp; vence el {fecha(inviteOut.expires_at)} y sirve una sola vez.</>}
           </p>
           <div className="search" style={{ maxWidth: "none" }}><Icon d={I.link} size={16} /><input readOnly value={inviteOut.link} onFocus={(e) => e.currentTarget.select()} aria-label="Enlace de invitación" /></div>
@@ -394,7 +394,7 @@ function ManageModal({ u, roles, reauthRoles, viewerIsAdmin, onClose, onChanged,
   };
   const toggleActive = async () => {
     const next = !u.active;
-    const texto = next ? `${u.name} vuelve a entrar a la empresa con su contraseña de siempre.` : "Ya no podrá entrar a la empresa. Lo que hizo (cotizaciones, levantamientos, bitácora) se conserva y podés reactivarlo cuando quieras. No se borran usuarios.";
+    const texto = next ? `${u.name} vuelve a entrar a la empresa con su contraseña de siempre.` : "Ya no podrá entrar a la empresa. Lo que hizo (cotizaciones, levantamientos, bitácora) se conserva y puede reactivarlo cuando quieras. No se borran usuarios.";
     if (u.role === "admin") {
       askPassword({ title: next ? "Activar administrador" : "Desactivar administrador", text: texto, cta: next ? "Activar" : "Desactivar", run: async (pw) => { await patch(u.id, { active: next, admin_password: pw }); toast(next ? "Usuario activado" : "Usuario desactivado"); onChanged(); } });
       return;
@@ -414,7 +414,7 @@ function ManageModal({ u, roles, reauthRoles, viewerIsAdmin, onClose, onChanged,
           <div className="meta">Datos</div>
           <Field label="Nombre"><input className="input" value={f.full_name} disabled={u.shared || lockedAdmin} onChange={(e) => setF({ ...f, full_name: e.target.value })} /></Field>
           <Field label="Correo" hint={u.shared ? undefined : "Con este correo entra a la plataforma. Le avisamos al correo viejo y al nuevo."}><input className="input" type="email" value={f.email} disabled={u.shared || lockedAdmin} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
-          <Field label="Correo de avisos (opcional)" hint="Si lo llenás, las notificaciones internas (pedidos, cotizaciones, tickets…) le llegan aquí en vez de a su correo de entrada. Lo de su cuenta (contraseña y seguridad) sigue yendo al de entrada.">
+          <Field label="Correo de avisos (opcional)" hint="Si lo llena, las notificaciones internas (pedidos, cotizaciones, tickets…) le llegan aquí en vez de a su correo de entrada. Lo de su cuenta (contraseña y seguridad) sigue yendo al de entrada.">
             <input className="input" type="email" placeholder={u.email} value={f.notify_email} disabled={lockedAdmin} onChange={(e) => setF({ ...f, notify_email: e.target.value })} />
           </Field>
           {u.shared && <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Este usuario también entra a otra empresa: su nombre, correo y contraseña no se cambian desde aquí. El rol y el estado sí (son de esta empresa).</p>}

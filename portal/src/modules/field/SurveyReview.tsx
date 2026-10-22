@@ -70,7 +70,7 @@ export function ReviewPanel({ surveyId, status, info, pointCodes, onChange }: {
         </span>
       </div>
       {info.review_status === "devuelto" && open.length > 0 && <p className="review__hint">Corregí lo que pide el supervisor, marcá cada observación como resuelta y reenviá a revisión.</p>}
-      {info.review_status === "devuelto" && open.length === 0 && <p className="review__hint">Todas las observaciones están resueltas: ya podés reenviar a revisión.</p>}
+      {info.review_status === "devuelto" && open.length === 0 && <p className="review__hint">Todas las observaciones están resueltas: ya puede reenviar a revisión.</p>}
 
       {open.length > 0 && <ul className="review__list">{open.map((o) => (
         <li key={o.id}>

@@ -44,6 +44,16 @@ def _cust_name(db: Session, cid: int | None) -> str | None:
     return c.name if c else None
 
 
+def _cust_phone(db: Session, cid: int | None) -> str | None:
+    """Número de WhatsApp del cliente (o teléfono si no tiene wa específico); None si no hay cliente o teléfono."""
+    if not cid:
+        return None
+    c = db.get(Customer, cid)
+    if not c:
+        return None
+    return c.whatsapp or c.phone or None
+
+
 def _user_name(db: Session, uid: int | None) -> str | None:
     from ..models import User
 
@@ -790,9 +800,12 @@ def create_invoice(data: DocumentIn, doc_type: str = "FE", p: Principal = Depend
     _no_pending(data)
     chk = discounts.check(db, p, data)
     if chk.exceeds:
-        raise HTTPException(422, f"{chk.message} Hacé una cotización para que un administrador apruebe el descuento.")
+        raise HTTPException(422, f"{chk.message} Haga una cotización para que un administrador apruebe el descuento.")
     cambia, vendedor = _seller_from_body(db, p, data)
     inv = svc.create_invoice(db, p.tenant.id, p.user.id, data, doc_type, **({"seller_id": vendedor} if cambia else {}))
+    razones = discounts.approval_reasons(db, p, inv)
+    if razones:
+        raise HTTPException(422, f"Esta venta necesita aprobación: hágala como cotización. Motivo: {razones[0]}")
     invsvc.deduct_for_invoice(db, inv, p.user.id)
     db.commit()
     return _inv_out(db, inv, p)
@@ -816,8 +829,11 @@ def update_invoice(iid: int, data: DocumentIn, p: Principal = Depends(require("s
 
     chk = discounts.check(db, p, data)
     if chk.exceeds:
-        raise HTTPException(422, f"{chk.message} Hacé una cotización para que un administrador apruebe el descuento.")
+        raise HTTPException(422, f"{chk.message} Haga una cotización para que un administrador apruebe el descuento.")
     svc.apply_document(db, inv, data, InvoiceLine, p.tenant.id)
+    razones = discounts.approval_reasons(db, p, inv)
+    if razones:
+        raise HTTPException(422, f"Esta venta necesita aprobación: hágala como cotización. Motivo: {razones[0]}")
     # las lineas cambiaron: el inventario sigue a la factura (antes se quedaba con las lineas viejas)
     invsvc.reconcile_invoice(db, inv, p.user.id, reason="factura editada")
     # con pagos o emitida ya respondio 409 arriba: el vendedor (y su comision) no se mueve en una factura cobrada
@@ -886,7 +902,7 @@ def payment_link(iid: int, p: Principal = Depends(require("sales", "enviar")), d
     db.commit()
     return PaymentLinkOut(
         url=link.url,
-        whatsapp_url=svc.whatsapp_share_url(inv, link.url, _cust_name(db, inv.customer_id), p.tenant.name),
+        whatsapp_url=svc.whatsapp_share_url(inv, link.url, _cust_name(db, inv.customer_id), p.tenant.name, _cust_phone(db, inv.customer_id)),
         expires_at=link.expires_at.isoformat(),
         opened_count=link.opened_count,
     )

@@ -11,7 +11,7 @@ from io import BytesIO
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import Customer, Expense, Invoice, InvoiceLine, Payment, Product, StockMovement, Warehouse
+from ..models import Customer, Expense, Invoice, InvoiceLine, Opportunity, Payment, Product, StockMovement, User, Warehouse
 from .inventory import stock_levels
 
 
@@ -1184,6 +1184,42 @@ def cxp_vencimientos(db: Session, tid: int, a: date, b: date) -> Report:
     )
 
 
+def motivos_perdida(db: Session, tid: int, a: date, b: date) -> Report:
+    """Oportunidades perdidas en el periodo, agrupadas por motivo y vendedor."""
+    from datetime import datetime, timezone
+
+    a_dt = datetime(a.year, a.month, a.day, tzinfo=timezone.utc)
+    b_dt = datetime(b.year, b.month, b.day, 23, 59, 59, tzinfo=timezone.utc)
+    rows_q = (
+        db.execute(
+            select(
+                Opportunity.lost_reason,
+                func.coalesce(User.full_name, "—").label("vendedor"),
+                Opportunity.lost_competitor,
+                func.count().label("total"),
+            )
+            .join(User, User.id == Opportunity.owner_id, isouter=True)
+            .where(
+                Opportunity.tenant_id == tid,
+                Opportunity.status == "perdida",
+                Opportunity.closed_at >= a_dt,
+                Opportunity.closed_at <= b_dt,
+            )
+            .group_by(Opportunity.lost_reason, User.full_name, Opportunity.lost_competitor)
+            .order_by(func.count().desc())
+        )
+        .all()
+    )
+    rows = [[r.lost_reason or "Sin motivo", r.vendedor, r.lost_competitor or "—", r.total] for r in rows_q]
+    return Report(
+        "motivos_perdida",
+        "Motivos de pérdida",
+        ["Motivo", "Vendedor", "Competidor", "Total"],
+        rows,
+        {"total": sum(r[3] for r in rows)},
+    )
+
+
 REPORTS = {
     "facturacion": facturacion,
     "pendientes": pendientes,
@@ -1208,6 +1244,7 @@ REPORTS = {
     "comisiones": comisiones,
     "cxp_antigüedad": cxp_antigüedad,
     "cxp_vencimientos": cxp_vencimientos,
+    "motivos_perdida": motivos_perdida,
 }
 CATALOG = [
     ("facturacion", "Facturación", "Todas las facturas del periodo con totales y saldo"),
@@ -1233,6 +1270,7 @@ CATALOG = [
     ("comisiones", "Comisiones del periodo", "Comisiones, bonos y pagos a aliados devengados, con su estado y referencia de pago"),
     ("cxp_antigüedad", "CxP · Antigüedad de saldos", "Saldo por proveedor en rangos de vencimiento (corriente, 1-30, 31-60, 61-90, >90 días)"),
     ("cxp_vencimientos", "CxP · Vencimientos próximos", "Facturas de proveedor que vencen en el periodo indicado con su saldo pendiente"),
+    ("motivos_perdida", "Motivos de pérdida", "Oportunidades perdidas por motivo, vendedor y competidor"),
 ]
 
 

@@ -72,7 +72,7 @@ function CrearYAsignar({ it, onClose, onDone }: { it: ApprovalItem; onClose: () 
       <div className="grid-2">
         <Field label="Técnico">
           <select className="select" value={sel} onChange={(e) => setSel(e.target.value)} disabled={techs === null}>
-            <option value="">{techs === null ? "Cargando…" : "Elegí…"}</option>
+            <option value="">{techs === null ? "Cargando…" : "Elija…"}</option>
             {(techs || []).map((t) => <option key={t.id} value={t.id}>{t.company ? `${t.name} · ${t.company}` : t.name}</option>)}
           </select>
         </Field>

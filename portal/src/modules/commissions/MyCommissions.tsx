@@ -46,7 +46,7 @@ export default function MyCommissions() {
           <MonthBars rows={s.historial} a="ganado" b="pagado" labelA="Ganado" labelB="Pagado" />
         </Card>
         <Card title="Tu regla">
-          {s.reglas.length === 0 ? <p className="muted" style={{ margin: 0 }}>Todavía no tenés una regla de comisión. Pedísela a administración.</p> : (
+          {s.reglas.length === 0 ? <p className="muted" style={{ margin: 0 }}>Todavía no tiene una regla de comisión. Pedísela a administración.</p> : (
             <ul style={{ margin: 0, paddingLeft: 18 }}>{s.reglas.map((r) => <li key={r.id} style={{ marginBottom: 4 }}>{r.summary}{r.general ? <span className="muted"> · regla de todos los vendedores</span> : null}</li>)}</ul>
           )}
           <p className="com-note">Montos sin IVA. La comisión nace con el cobro (o con el evento de tu regla) y la ves desde ese momento, marcada «pendiente de aprobación» hasta que administración la apruebe.</p>

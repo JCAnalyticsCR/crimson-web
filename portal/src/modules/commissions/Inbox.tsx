@@ -92,7 +92,7 @@ export default function Inbox({ onChange }: { onChange?: () => void }) {
                   <td>{e.can_approve ? <input type="checkbox" aria-label={`Elegir ${e.description || e.id}`} checked={!!sel[e.id]} onChange={(ev) => setSel({ ...sel, [e.id]: ev.target.checked })} /> : null}</td>
                   <td className="muted">{fmtDate(e.earned_on)}</td>
                   <td>{KIND[e.kind] || e.kind}</td>
-                  <td>{e.description}{!e.can_approve && <div className="com-own">No podés aprobar tu propia comisión</div>}</td>
+                  <td>{e.description}{!e.can_approve && <div className="com-own">No puede aprobar tu propia comisión</div>}</td>
                   <td className="mono muted">{e.project || e.invoice || "—"}</td>
                   <td className={`num money ${Number(e.amount) < 0 ? "com-neg" : ""}`} style={{ fontWeight: 700 }}>{fmtMoney(e.amount, e.currency)}</td>
                 </tr>
@@ -155,8 +155,8 @@ export default function Inbox({ onChange }: { onChange?: () => void }) {
           <div className="grid-2">
             <Field label="Para"><select className="select" value={adj.beneficiary} onChange={(e) => setAdj({ ...adj, beneficiary: e.target.value as AdjForm["beneficiary"] })}><option value="vendedor">Una persona del equipo</option><option value="aliado">Una empresa aliada</option></select></Field>
             {adj.beneficiary === "vendedor"
-              ? <Field label="Persona"><select className="select" value={adj.user_id} onChange={(e) => setAdj({ ...adj, user_id: e.target.value })}><option value="">Elegí…</option>{ben?.users.map((u) => <option key={u.id} value={u.id}>{u.name} · {u.role_label}</option>)}</select></Field>
-              : <Field label="Aliado"><select className="select" value={adj.ally_company_id} onChange={(e) => setAdj({ ...adj, ally_company_id: e.target.value })}><option value="">Elegí…</option>{ben?.allies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>}
+              ? <Field label="Persona"><select className="select" value={adj.user_id} onChange={(e) => setAdj({ ...adj, user_id: e.target.value })}><option value="">Elija…</option>{ben?.users.map((u) => <option key={u.id} value={u.id}>{u.name} · {u.role_label}</option>)}</select></Field>
+              : <Field label="Aliado"><select className="select" value={adj.ally_company_id} onChange={(e) => setAdj({ ...adj, ally_company_id: e.target.value })}><option value="">Elija…</option>{ben?.allies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>}
             <Field label="Monto" hint="Negativo = descuento; positivo = bono."><input className="input input--mono" inputMode="decimal" value={adj.amount} onChange={(e) => setAdj({ ...adj, amount: e.target.value })} /></Field>
             <Field label="Moneda"><select className="select" value={adj.currency} onChange={(e) => setAdj({ ...adj, currency: e.target.value })}><option>CRC</option><option>USD</option></select></Field>
           </div>

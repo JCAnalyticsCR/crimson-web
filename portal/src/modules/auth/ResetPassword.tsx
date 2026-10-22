@@ -42,7 +42,7 @@ export default function ResetPassword() {
             <>
               <div>
                 <h2 className="h1">Listo</h2>
-                <p className="muted" style={{ marginTop: 6 }}>Ya podés entrar con tu contraseña nueva.</p>
+                <p className="muted" style={{ marginTop: 6 }}>Ya puede entrar con tu contraseña nueva.</p>
                 <p className="muted" style={{ marginTop: 4, fontSize: 12.5 }}>Por seguridad se cerraron todas tus sesiones abiertas.</p>
               </div>
               <button type="button" className="btn btn--crimson" onClick={() => nav("/login", { replace: true, state: { notice: "Contraseña actualizada. Entrá con la nueva." } })}><Icon d={I.arrow} />Ir a iniciar sesión</button>

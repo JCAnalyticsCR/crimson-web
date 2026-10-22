@@ -43,7 +43,7 @@ export default function TwoFactorSetup({ change = false, onDone, onCancel }: { c
         {change ? <>
           <p className="muted" style={{ fontSize: 13, margin: 0 }}>Para pasar la verificación a otro teléfono o app, confirmá que sos vos. Tu app actual sigue sirviendo hasta que termines.</p>
           <Field label="Tu contraseña"><input className="input" type="password" autoComplete="current-password" value={cred.password} onChange={(e) => setCred({ ...cred, password: e.target.value })} /></Field>
-          <Field label="Código de tu app actual" hint="Si ya no tenés la app, usá uno de tus códigos de recuperación."><input className="input input--mono" autoComplete="one-time-code" maxLength={9} placeholder="000000" value={cred.code} onChange={(e) => setCred({ ...cred, code: e.target.value.toUpperCase() })} style={{ width: 160 }} /></Field>
+          <Field label="Código de tu app actual" hint="Si ya no tiene la app, usá uno de tus códigos de recuperación."><input className="input input--mono" autoComplete="one-time-code" maxLength={9} placeholder="000000" value={cred.code} onChange={(e) => setCred({ ...cred, code: e.target.value.toUpperCase() })} style={{ width: 160 }} /></Field>
         </> : (
           <p className="muted" style={{ fontSize: 13, margin: 0 }}>Necesitás una app de autenticación en el teléfono (Google Authenticator, Microsoft Authenticator, Authy o la de tu gestor de contraseñas). Al entrar, además de la contraseña, vas a escribir el código de seis dígitos que muestra.</p>
         )}

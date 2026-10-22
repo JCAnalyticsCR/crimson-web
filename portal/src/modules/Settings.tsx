@@ -324,7 +324,7 @@ export default function Settings() {
             <button className="btn btn--crimson" onClick={() => setRecovery(null)}>Ya los guardé</button>
           </>}
         >
-          <p style={{ fontSize: 14, marginTop: 0 }}>Esta es la <b>única vez</b> que se muestran. Si perdés el teléfono, con uno de estos entrás al panel; después podés desactivar el 2FA desde esta misma pantalla.</p>
+          <p style={{ fontSize: 14, marginTop: 0 }}>Esta es la <b>única vez</b> que se muestran. Si perdés el teléfono, con uno de estos entrás al panel; después puede desactivar el 2FA desde esta misma pantalla.</p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8, margin: "14px 0" }}>
             {recovery.map((c) => <code key={c} className="mono" style={{ padding: "10px 12px", background: "var(--bg-2)", borderRadius: 8, textAlign: "center", fontSize: 15, letterSpacing: ".05em" }}>{c}</code>)}
           </div>
@@ -345,7 +345,7 @@ export default function Settings() {
         >
           <p className="muted" style={{ fontSize: 13.5, marginTop: 0 }}>
             {apagar.regenerar
-              ? "Los códigos que tenías dejan de servir en el momento en que se generan los nuevos. Si ya no tenés la app, usá «Cambiar de teléfono» con un código de recuperación: al terminar te da códigos nuevos."
+              ? "Los códigos que tenías dejan de servir en el momento en que se generan los nuevos. Si ya no tiene la app, usá «Cambiar de teléfono» con un código de recuperación: al terminar te da códigos nuevos."
               : "La cuenta vuelve a entrar solo con la contraseña. Si esa contraseña ya circuló por algún lado, mejor cambiala primero."}
           </p>
           <Field label="Confirmá con tu contraseña"><input className="input" type="password" autoComplete="current-password" autoFocus value={apagar.password} onChange={(e) => setApagar({ ...apagar, password: e.target.value })} /></Field>
@@ -354,7 +354,7 @@ export default function Settings() {
               <input className="input input--mono" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="000000" value={apagar.code} onChange={(e) => setApagar({ ...apagar, code: e.target.value.replace(/\D/g, "") })} onKeyDown={(e) => { if (e.key === "Enter" && apagar.password && apagar.code.length === 6) regen2fa(); }} style={{ width: 140 }} />
             </Field>
           ) : (
-            <Field label="Código de tu app" hint="Si ya no tenés la app, usá uno de tus códigos de recuperación.">
+            <Field label="Código de tu app" hint="Si ya no tiene la app, usá uno de tus códigos de recuperación.">
               <input className="input input--mono" autoComplete="one-time-code" maxLength={9} placeholder="000000" value={apagar.code} onChange={(e) => setApagar({ ...apagar, code: e.target.value.toUpperCase() })} onKeyDown={(e) => { if (e.key === "Enter" && apagar.password && apagar.code.trim().length >= 6) disable2fa(); }} style={{ width: 160 }} />
             </Field>
           )}
@@ -480,7 +480,7 @@ function InboxSettings() {
         <li>Para <b>recibir</b> solas las facturas electrónicas (XML) que te mandan tus <b>proveedores</b>: lo que Crimson compra (equipos, materiales, servicios).</li>
         <li>La plataforma revisa cada 15 minutos un buzón de correo dedicado; cada comprobante que llega (XML, PDF y la respuesta de Hacienda) aparece en <b>Contabilidad → Facturas</b>, listo para responderlo ante Hacienda y registrarlo como gasto. Nunca marca los correos como leídos.</li>
         <li><b>No envía correos ni tiene que ver con Resend.</b> El correo que sale de la plataforma (invitaciones, cotizaciones, facturas) se configura en la pestaña <b>Correo</b>.</li>
-        <li><b>Es opcional.</b> Mientras no lo configurés, podés cargar los archivos a mano en Contabilidad → Facturas.</li>
+        <li><b>Es opcional.</b> Mientras no lo configurés, puede cargar los archivos a mano en Contabilidad → Facturas.</li>
       </ol>
       {allows("accounting.ver") && <button className="btn btn--soft btn--sm" style={{ marginTop: 12 }} onClick={() => navigate("/contabilidad/facturas")}>Abrir Contabilidad → Facturas</button>}
     </Card>
@@ -558,8 +558,8 @@ function SupportAccess() {
         <ol className="muted" style={{ fontSize: 13, lineHeight: 1.7, paddingLeft: 18, margin: 0 }}>
           <li><b>No es una conexión con Fygaro ni con ningún otro sistema.</b> Desde aquí no se conecta nada.</li>
           <li>Sirve para que, cuando reportés un problema, una persona del equipo técnico que mantiene la plataforma (por ejemplo, JC Analytics) entre a revisarlo <b>sin que le prestés tu contraseña</b>.</li>
-          <li>Es de <b>solo lectura</b>, dura las horas que elijas y lo podés revocar cuando quieras. Cada pantalla que abra queda en la bitácora con fecha, ruta e IP.</li>
-          <li><b>Si no lo necesitás, no tenés que hacer nada</b>: mientras no concedas un acceso aquí, nadie externo puede entrar a tu información.</li>
+          <li>Es de <b>solo lectura</b>, dura las horas que elijas y lo puede revocar cuando quieras. Cada pantalla que abra queda en la bitácora con fecha, ruta e IP.</li>
+          <li><b>Si no lo necesitás, no tiene que hacer nada</b>: mientras no concedas un acceso aquí, nadie externo puede entrar a tu información.</li>
           <li>No es la mesa de ayuda de tus clientes: los tickets de tus clientes están en el menú <b>Soporte</b>.</li>
         </ol>
       </Card>

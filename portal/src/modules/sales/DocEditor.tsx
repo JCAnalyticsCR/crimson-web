@@ -223,9 +223,9 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   /* Pedido 21/10: sin cliente no se convierte a factura (la factura no se corrige despues) y la factura hereda el de
      la cotizacion. En una aceptada (bloqueada) el cliente se elige en el momento de convertir. */
   const [clienteFactura, setClienteFactura] = useState(false);
-  const SIN_CLIENTE = "Elegí el cliente antes de convertir: la factura sale a su nombre y después no se puede editar.";
+  const SIN_CLIENTE = "Elija el cliente antes de convertir: la factura sale a su nombre y después no se puede editar.";
   const save = useCallback(async (then?: "send" | "convert") => {
-    if (payload.lines.length === 0) return toast("Agregá al menos una línea", "bad");
+    if (payload.lines.length === 0) return toast("Agregue al menos una línea", "bad");
     if (then === "convert" && !payload.customer_id) { toast(SIN_CLIENTE, "bad"); document.getElementById("doc-cliente")?.focus(); return; }
     setBusy(true);
     try {
@@ -444,7 +444,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                             )}
                             {l.code && <span className="meta">{l.code}</span>}
                           </div>
-                          {zero && <div className="line-warn">Línea en {fmtMoney(0, cur)}: elegí si es pendiente, aportada, cortesía o exclusión.</div>}
+                          {zero && <div className="line-warn">Línea en {fmtMoney(0, cur)}: elija si es pendiente, aportada, cortesía o exclusión.</div>}
                           {t !== "normal" && <div className="line-note">{TREATMENTS.find((x) => x.value === t)?.hint}</div>}
                         </td>
                         <td className="c-qty" data-label="Cant. · unidad">
@@ -474,12 +474,13 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
             <div className="card"><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div className="meta">Otros ajustes</div>
               <Field label="Orden externa #"><input className="input" value={doc.external_order || ""} disabled={ro} onChange={(e) => setDoc({ ...doc, external_order: e.target.value })} /></Field>
-              <Field label="Código de actividad" hint="Vacío = la actividad por defecto de Ajustes → Hacienda."><select className="select" value={doc.activity_code || ""} disabled={ro} onChange={(e) => setDoc({ ...doc, activity_code: e.target.value })}><option value="">Por defecto{acts.find((a) => a.is_default) ? ` (${acts.find((a) => a.is_default)!.code})` : ""}</option>{acts.map((a) => <option key={a.id} value={a.code}>{a.code}{a.description ? ` · ${a.description}` : ""}</option>)}{doc.activity_code && !acts.some((a) => a.code === doc.activity_code) && <option value={doc.activity_code}>{doc.activity_code}</option>}</select></Field>
+              {/* Campos fiscales: solo para quien gestiona la facturación (admin/contabilidad); el vendedor no los necesita */}
+              {allows("sales.ver_todo") && <Field label="Código de actividad" hint="Vacío = la actividad por defecto de Ajustes → Hacienda."><select className="select" value={doc.activity_code || ""} disabled={ro} onChange={(e) => setDoc({ ...doc, activity_code: e.target.value })}><option value="">Por defecto{acts.find((a) => a.is_default) ? ` (${acts.find((a) => a.is_default)!.code})` : ""}</option>{acts.map((a) => <option key={a.id} value={a.code}>{a.code}{a.description ? ` · ${a.description}` : ""}</option>)}{doc.activity_code && !acts.some((a) => a.code === doc.activity_code) && <option value={doc.activity_code}>{doc.activity_code}</option>}</select></Field>}
               {!isQ && (fmode === "pruebas" || fmode === "produccion" || ((doc as Invoice).einvoice_status && (doc as Invoice).einvoice_status !== "sin_emitir")) && (
                 <Field label="Fecha" hint="La fecha la pone la emisión (Hacienda no admite fechas anteriores ni posteriores)."><div className="input" style={{ display: "flex", alignItems: "center", background: "var(--bg-2)" }}>{doc.issue_date || "al emitir"}</div></Field>
               )}
-              {/* La exoneracion medica no aplica a las cotizaciones de Crimson (pedido de Andres); el campo es compartido y sigue en facturas. */}
-              {!isQ && <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={!!doc.medical_exemption_card} disabled={ro} onChange={(e) => setDoc({ ...doc, medical_exemption_card: e.target.checked })} />Exoneración médica IVA (tarjeta de crédito)</label>}
+              {/* La exoneracion medica no aplica a las cotizaciones de Crimson (pedido de Andres); el campo es compartido y sigue en facturas. Solo para quien factura. */}
+              {!isQ && allows("sales.ver_todo") && <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={!!doc.medical_exemption_card} disabled={ro} onChange={(e) => setDoc({ ...doc, medical_exemption_card: e.target.checked })} />Exoneración médica IVA (tarjeta de crédito)</label>}
             </div></div>
           </div>
         </div>
@@ -534,8 +535,8 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
             <div className="card" style={{ borderColor: "var(--warn)" }}><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <div className="meta" style={{ color: "var(--warn)" }}>No se puede enviar ni convertir todavía</div>
               {pendLines.length > 0 && <p style={{ fontSize: 13, margin: 0 }}>{pendLines.length} línea(s) pendientes de costo o precio del proveedor: {pendLines.slice(0, 4).map((l) => l.name).join(", ")}{pendLines.length > 4 ? "…" : ""}.</p>}
-              {zeroLines.length > 0 && <p style={{ fontSize: 13, margin: 0 }}>{zeroLines.length} línea(s) en {fmtMoney(0, cur)} sin tratamiento: {zeroLines.slice(0, 4).map((l) => l.name).join(", ")}{zeroLines.length > 4 ? "…" : ""}. Elegí si son pendientes, aportadas, cortesía o exclusiones.</p>}
-              <p className="muted" style={{ fontSize: 12, margin: 0 }}>Podés guardarla mientras tanto.</p>
+              {zeroLines.length > 0 && <p style={{ fontSize: 13, margin: 0 }}>{zeroLines.length} línea(s) en {fmtMoney(0, cur)} sin tratamiento: {zeroLines.slice(0, 4).map((l) => l.name).join(", ")}{zeroLines.length > 4 ? "…" : ""}. Elija si son pendientes, aportadas, cortesía o exclusiones.</p>}
+              <p className="muted" style={{ fontSize: 12, margin: 0 }}>Puede guardarla mientras tanto.</p>
             </div></div>
           )}
           {(!locked || (accepted && doc.status !== "convertida" && doc.status !== "anulada")) && (canEdit || canSend || allows("sales.crear") || allows("projects.crear") || allows("sales.anular")) && (
@@ -544,10 +545,20 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               {canEdit && <div>{auto.bar}</div>}
               {canEdit && !accepted && <button className="btn btn--crimson" disabled={busy} onClick={() => save()}><Icon d={I.check} />Guardar</button>}
               {!pending && !accepted && canSend && (canEdit
-                ? <button className="btn" disabled={busy || blocked || provisional} title={provisional ? PROVISIONAL_ENVIO : undefined} onClick={() => save("send")}><Icon d={I.whatsapp} />Guardar & enviar al cliente</button>
-                : !isNew && <button className="btn" disabled={busy || blocked || provisional} title={provisional ? PROVISIONAL_ENVIO : undefined} onClick={sendOnly}><Icon d={I.whatsapp} />Enviar al cliente</button>)}
+                ? <button className="btn" disabled={busy || blocked || provisional} title={provisional ? PROVISIONAL_ENVIO : undefined} onClick={() => save("send")}><Icon d={I.mail} />Guardar & enviar al cliente</button>
+                : !isNew && <button className="btn" disabled={busy || blocked || provisional} title={provisional ? PROVISIONAL_ENVIO : undefined} onClick={sendOnly}><Icon d={I.mail} />Enviar al cliente</button>)}
+              {!pending && !accepted && !isNew && (() => {
+                const cust = customers.find((c) => c.id === doc.customer_id);
+                const rawPhone = cust?.whatsapp || cust?.phone || null;
+                if (!rawPhone) return null;
+                const digits = rawPhone.replace(/\D/g, "");
+                const wa = digits.length === 8 ? `506${digits}` : digits;
+                const docLabel = isQ ? `cotización ${doc.number ?? ""}` : `factura ${doc.number ?? ""}`;
+                const text = encodeURIComponent(`Hola ${cust?.name ?? ""}, le comparte ${me?.tenant.name ?? ""}: ${docLabel}. Cualquier consulta con gusto le atendemos.`);
+                return <a className="btn btn--soft" href={`https://wa.me/${wa}?text=${text}`} target="_blank" rel="noreferrer"><Icon d={I.whatsapp} />Enviar por WhatsApp</a>;
+              })()}
               {!pending && !accepted && canSend && provisional && <p className="muted" style={{ fontSize: 12, margin: 0, color: "var(--warn)" }}>{PROVISIONAL_ENVIO}</p>}
-              {isQ && !pending && allows("sales.crear") && (accepted || canEdit) && <button className="btn btn--soft" disabled={busy || blocked} title={doc.customer_id ? undefined : "Primero elegí el cliente"} onClick={() => (accepted ? convertAccepted() : save("convert"))}><Icon d={I.invoice} />Convertir a factura</button>}
+              {isQ && !pending && allows("sales.crear") && (accepted || canEdit) && <button className="btn btn--soft" disabled={busy || blocked} title={doc.customer_id ? undefined : "Primero elija el cliente"} onClick={() => (accepted ? convertAccepted() : save("convert"))}><Icon d={I.invoice} />Convertir a factura</button>}
               {isQ && !pending && allows("sales.crear") && (accepted || canEdit) && !doc.customer_id && <p className="muted" style={{ fontSize: 12, margin: 0, color: "var(--warn)" }}>Sin cliente no se convierte a factura: la factura sale a su nombre y después no se edita.</p>}
               {isQ && !isNew && !pending && !proyecto && allows("projects.crear") && (
                 /* Instalaciones: la cotización aprobada arranca el proyecto con su primera orden de trabajo. */
@@ -594,7 +605,7 @@ function NuevoCliente({ onClose, onCreated }: { onClose: () => void; onCreated: 
       const c = await api<Customer>("/customers", { method: "POST", json: { name: f.name.trim(), id_type: f.id_type, id_number: f.id_number.trim() || null, email: f.email.trim() || null, phone: f.phone.trim() || null } });
       toast(`Cliente ${c.name} creado`); onCreated(c);
     } catch (e) {
-      /* ya existe un cliente con esa cédula o ese correo (y no podés editar clientes): se usa esa ficha */
+      /* ya existe un cliente con esa cédula o ese correo (y no puede editar clientes): se usa esa ficha */
       const ex = e instanceof ApiError && e.status === 409 ? (e.data as { existing?: { id: number } } | undefined)?.existing : undefined;
       if (ex) {
         try { const c = await api<Customer>(`/customers/${ex.id}`); toast(`Ya existía: se usa la ficha de ${c.name}`); onCreated(c); return; } catch { /* abajo */ }

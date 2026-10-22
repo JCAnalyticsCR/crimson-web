@@ -33,6 +33,23 @@ OPEN_STATES = STATES[:7]
 # venta: solo equipo, sin instalacion (camino: cotizacion -> factura) | proyecto: levantamiento -> cotizacion -> proyecto
 KINDS = ("venta", "proyecto")
 
+# Lista cerrada de motivos de perdida (spec v1 control de ventas 22/10)
+LOST_REASONS = (
+    "Precio",
+    "Eligió a la competencia",
+    "Sin presupuesto",
+    "Sin respuesta del cliente",
+    "No era viable técnicamente",
+    "Otro",
+)
+
+
+def _valid_lost_reason(reason: str | None) -> bool:
+    """El motivo es valido si coincide exactamente con uno de LOST_REASONS o empieza por "Otro: " (texto libre)."""
+    if not reason:
+        return False
+    return reason in LOST_REASONS or reason.startswith("Otro: ")
+
 
 def advance_status(o: Opportunity, to: str) -> str | None:
     """Mueve la oportunidad hacia adelante en el embudo y nunca hacia atras: si ya estaba "enviada" o en
@@ -99,6 +116,7 @@ def _out(db: Session, o: Opportunity) -> dict:
         "next_action": o.next_action,
         "next_action_date": o.next_action_date,
         "lost_reason": o.lost_reason,
+        "lost_competitor": getattr(o, "lost_competitor", None),
         "notes": o.notes,
         "quote_id": o.quote_id,
         "project_id": o.project_id,
@@ -127,6 +145,7 @@ class OpportunityIn(BaseModel):
     next_action: str | None = Field(None, max_length=200)
     next_action_date: date | None = None
     lost_reason: str | None = Field(None, max_length=200)
+    lost_competitor: str | None = Field(None, max_length=100)  # empresa que ganó (opcional, libre)
     notes: str | None = None
 
 
@@ -356,6 +375,14 @@ def update(oid: int, data: OpportunityIn, p: Principal = Depends(require("crm_pi
         setattr(o, k, v)
     if before == "perdida" and o.status != "perdida" and "lost_reason" not in data.model_fields_set:
         o.lost_reason = None  # reabierta: el motivo viejo ya no aplica
+    # "ganada" solo si hay cotizacion o proyecto ligado, o lo hace quien ve todo el embudo (admin/gerencia)
+    if o.status == "ganada" and before != "ganada":
+        if not o.quote_id and not o.project_id and not p.can("crm_pipeline", "ver_todo"):
+            raise HTTPException(422, "Para marcar como ganada, cree primero la cotización o el proyecto ligado. Solo administración puede marcarla ganada sin ellos.")
+    # "perdida" exige motivo de la lista cerrada
+    if o.status == "perdida" and before != "perdida":
+        if not _valid_lost_reason(o.lost_reason):
+            raise HTTPException(422, f"Indique el motivo de pérdida. Opciones: {', '.join(LOST_REASONS)}. Para otro motivo use «Otro: descripción».")
     if o.customer_id or o.end_customer_id:
         from .ally_proposals import heredar_cliente
 
@@ -487,6 +514,8 @@ class TouchIn(BaseModel):
     next_action: str | None = Field(None, max_length=200)
     next_action_date: date | None = None
     status: str | None = Field(None, pattern="^(" + "|".join(STATES) + ")$")
+    lost_reason: str | None = Field(None, max_length=200)
+    lost_competitor: str | None = Field(None, max_length=100)
 
 
 @router.post("/opportunities/{oid}/touch")
@@ -499,9 +528,21 @@ def touch(oid: int, data: TouchIn, p: Principal = Depends(require("crm_pipeline"
         o.next_action = data.next_action
     if data.next_action_date is not None:
         o.next_action_date = data.next_action_date
+    if data.lost_reason is not None:
+        o.lost_reason = data.lost_reason
+    if data.lost_competitor is not None:
+        o.lost_competitor = data.lost_competitor
     before = o.status
     if data.status:
         o.status = data.status
+    # "ganada" solo si hay cotizacion o proyecto ligado, o lo hace quien ve todo el embudo
+    if o.status == "ganada" and before != "ganada":
+        if not o.quote_id and not o.project_id and not p.can("crm_pipeline", "ver_todo"):
+            raise HTTPException(422, "Para marcar como ganada, cree primero la cotización o el proyecto ligado.")
+    # "perdida" exige motivo de la lista cerrada
+    if o.status == "perdida" and before != "perdida":
+        if not _valid_lost_reason(o.lost_reason):
+            raise HTTPException(422, f"Indique el motivo de pérdida. Opciones: {', '.join(LOST_REASONS)}. Para otro motivo use «Otro: descripción».")
     audit(db, p.tenant.id, p.user.id, "touch", "opportunity", o.id, {"note": data.note[:120]}, ip=p.ip)
     if o.status != before:
         # El arrastre entre columnas del embudo llega por aqui: queda en bitacora (notes) y en auditoria como cambio de etapa
@@ -518,6 +559,7 @@ def meta(p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = D
     equipo = team.options(db, p.tenant.id, roles_like(db, p.tenant, ("admin", "ventas", "supervisor"), admin=True))
     return {
         "states": list(STATES),
+        "lost_reasons": list(LOST_REASONS),
         "sources": ["Referido", "Sitio web", "WhatsApp", "Llamada", "Cliente actual", "Feria", "Alianza"],
         "solutions": ["cctv", "redes", "acceso", "asistencia", "ups", "cableado", "anpr", "otro"],
         "kinds": list(KINDS),

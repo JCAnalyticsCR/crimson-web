@@ -23,8 +23,9 @@ function Kpi({ label, data, light, cur }: { label: string; data: NonNullable<D["
 }
 
 /* Acciones pendientes: cada tarjeta lleva a la lista con exactamente esos registros. La clave es la misma que usa
-   el servidor para contar (sales.PENDIENTES), asi el numero y las filas no pueden diferir. "hot" = pide atencion. */
-const PENDING: { key: string; label: string; to: string; need: string; hot?: boolean }[] = [
+   el servidor para contar (sales.PENDIENTES), asi el numero y las filas no pueden diferir. "hot" = pide atencion.
+   "admin_only" = se oculta si el usuario no tiene ese permiso adicional (tarjetas no relevantes para el vendedor). */
+const PENDING: { key: string; label: string; to: string; need: string; hot?: boolean; admin_only?: string }[] = [
   /* 21/10 (item 35): lo primero que se ve al entrar son los pedidos web por atender */
   { key: "pedidos_web", label: "Pedidos web y comprobantes por atender", to: "/ordenes?pendiente=por_atender", need: "sales.ver", hot: true },
   /* reunion 2 (item 10): en el inicio personal, la cola sin encargado (de nadie todavia) va aparte de los suyos */
@@ -37,11 +38,11 @@ const PENDING: { key: string; label: string; to: string; need: string; hot?: boo
   { key: "facturas_por_cobrar", label: "Facturas por cobrar", to: "/facturas?pendiente=facturas_por_cobrar", need: "sales.ver" },
   { key: "cotizaciones_sin_respuesta", label: "Cotizaciones sin respuesta", to: "/cotizaciones?pendiente=cotizaciones_sin_respuesta", need: "sales.ver" },
   { key: "enlaces_abiertos", label: "Enlaces de pago abiertos", to: "/facturas?pendiente=enlaces_abiertos", need: "sales.ver" },
-  { key: "documentos_rechazados", label: "Rechazados o con error en Hacienda", to: "/facturas?pendiente=documentos_rechazados", need: "sales.ver", hot: true },
-  { key: "stock_bajo", label: "Productos con stock bajo", to: "/inventario?stock=bajo", need: "inventory.ver", hot: true },
+  { key: "documentos_rechazados", label: "Rechazados o con error en Hacienda", to: "/facturas?pendiente=documentos_rechazados", need: "sales.ver", hot: true, admin_only: "sales.ver_todo" },
+  { key: "stock_bajo", label: "Productos con stock bajo", to: "/inventario?stock=bajo", need: "inventory.ver", hot: true, admin_only: "inventory.editar" },
   { key: "cotizaciones_por_aprobar", label: "Descuentos por aprobar", to: "/cotizaciones?pendiente=cotizaciones_por_aprobar", need: "sales.ver", hot: true },
   { key: "cotizaciones_aceptadas", label: "Aceptadas por convertir", to: "/cotizaciones?pendiente=cotizaciones_aceptadas", need: "sales.ver", hot: true },
-  { key: "costos_aliados", label: "Costos de aliados pendientes", to: "/oportunidades?pendiente=costos_aliados", need: "crm_pipeline.ver", hot: true },
+  { key: "costos_aliados", label: "Costos de aliados pendientes", to: "/oportunidades?pendiente=costos_aliados", need: "crm_pipeline.ver", hot: true, admin_only: "sales.ver_todo" },
   { key: "comisiones_por_aprobar", label: "Comisiones por aprobar", to: "/comisiones?tab=bandeja", need: "commissions.aprobar", hot: true },
 ];
 
@@ -78,6 +79,7 @@ export default function Dashboard() {
   const rm = roleMeta(role);
   const [d, setD] = useState<D | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [showZero, setShowZero] = useState(false);
   const [low, setLow] = useState<{ product_id: number; name: string; code: string; quantity: string; min_stock: number }[] | null>(null);
   const [day, setDay] = useState<{ today: Job[]; next: Job[]; surveys: { id: number; number: string; kind_label: string; site: string | null }[] } | null>(null);
   const salesHome = allows("sales.ver");
@@ -102,7 +104,7 @@ export default function Dashboard() {
           <h1 className="h1">{saludo}, {me?.user.full_name.split(" ")[0]}.</h1>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
             <span className="badge" style={{ background: `color-mix(in srgb, ${rm.tone} 14%, transparent)`, color: rm.tone, fontWeight: 700 }}>{rm.label}</span>
-            {d?.scope === "mine" && <span className="muted" style={{ fontSize: 13 }}>{allows("sales.crear") ? "Estás viendo solo lo tuyo: tus oportunidades, tus ventas y tus cobros." : "Estás viendo solo lo tuyo."}</span>}
+            {d?.scope === "mine" && <span className="muted" style={{ fontSize: 13 }}>{allows("sales.crear") ? "Está viendo solo lo suyo: sus oportunidades, sus ventas y sus cobros." : "Está viendo solo lo suyo."}</span>}
           </div>
         </div>
         <div className="page-head__actions">
@@ -111,21 +113,38 @@ export default function Dashboard() {
       </div>
 
       {/* 21/10 (item 35): las acciones pendientes van arriba de todo, antes de los accesos y los números */}
-      {d && (
-        <Card title="Acciones pendientes" extra={<span className="meta">{d.scope === "mine" ? "solo lo suyo · toque una para ver cuáles son" : "toque una para ver cuáles son"}</span>}>
-          <div className="pending">
-            {PENDING.filter((p) => d.acciones_pendientes[p.key] !== undefined).map((p) =>
-              pendingCard(scoped(p.key === "cotizaciones_por_aprobar" && !allows("sales.aprobar") ? { ...p, label: "Esperando aprobación" } : p, d.scope), d.acciones_pendientes[p.key] ?? 0, allows(p.need)))}
-          </div>
-        </Card>
-      )}
+      {d && (() => {
+        const visible = PENDING.filter((p) => {
+          if (d.acciones_pendientes[p.key] === undefined) return false;
+          if (p.admin_only && !allows(p.admin_only)) return false;
+          if (!showZero && (d.acciones_pendientes[p.key] ?? 0) === 0) return false;
+          return true;
+        });
+        const zeroCount = PENDING.filter((p) => {
+          if (d.acciones_pendientes[p.key] === undefined) return false;
+          if (p.admin_only && !allows(p.admin_only)) return false;
+          return (d.acciones_pendientes[p.key] ?? 0) === 0;
+        }).length;
+        return (
+          <Card title="Acciones pendientes" extra={
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {zeroCount > 0 && <button className="btn btn--ghost btn--sm" onClick={() => setShowZero((v) => !v)}>{showZero ? `Ocultar ${zeroCount} en cero` : `Ver ${zeroCount} en cero`}</button>}
+              <span className="meta">{d.scope === "mine" ? "solo lo suyo" : "toque una para ver cuáles son"}</span>
+            </div>
+          }>
+            <div className="pending">
+              {visible.map((p) => pendingCard(scoped(p.key === "cotizaciones_por_aprobar" && !allows("sales.aprobar") ? { ...p, label: "Esperando aprobación" } : p, d.scope), d.acciones_pendientes[p.key] ?? 0, allows(p.need)))}
+            </div>
+          </Card>
+        );
+      })()}
 
       <div className="actions-grid">
         {allows("crm.crear") && <Link className="action" to="/clientes?nuevo=1"><i><Icon d={I.customers} /></i><div><b>Crear cliente</b><span>Ficha con cédula, correo y WhatsApp</span></div></Link>}
         {allows("catalog.crear") && <Link className="action" to="/productos?nuevo=1"><i><Icon d={I.products} /></i><div><b>Crear producto</b><span>Precio, CABYS e impuesto</span></div></Link>}
         {allows("sales.crear") && <Link className="action" to="/cotizaciones/nueva"><i><Icon d={I.quote} /></i><div><b>Crear cotización</b><span>Y convertirla a factura en un clic</span></div></Link>}
         {allows("sales.crear") && !allows("catalog.crear") && inMenu("/pos") && <Link className="action" to="/pos"><i><Icon d={I.wallet} /></i><div><b>Punto de venta</b><span>Cobro de mostrador con vuelto</span></div></Link>}
-        {allows("inventory.ajustar") && <Link className="action" to="/inventario"><i><Icon d={I.inventory} /></i><div><b>Ajuste de inventario</b><span>Entradas, salidas y transferencias</span></div></Link>}
+        {allows("inventory.editar") && <Link className="action" to="/inventario"><i><Icon d={I.inventory} /></i><div><b>Ajuste de inventario</b><span>Entradas, salidas y transferencias</span></div></Link>}
         {allows("reports.ver") && <Link className="action" to="/reportes"><i><Icon d={I.reports} /></i><div><b>Reportes</b><span>Los reportes de tu rol, con Excel</span></div></Link>}
       </div>
 

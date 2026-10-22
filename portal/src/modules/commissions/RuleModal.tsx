@@ -142,7 +142,7 @@ export default function RuleModal({ initial, ben, defaultMargin, onClose, onSave
           </Field>
         )}
       </div>
-      <p className="com-note">Cambiar una regla no recalcula lo ya devengado: guarda la regla con que nació. También podés usar «Aplicar reglas a fechas anteriores» en la Bandeja.</p>
+      <p className="com-note">Cambiar una regla no recalcula lo ya devengado: guarda la regla con que nació. También puede usar «Aplicar reglas a fechas anteriores» en la Bandeja.</p>
     </Modal>
   );
 }

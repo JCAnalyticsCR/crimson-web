@@ -89,7 +89,7 @@ function StepCuentas({ toast }: { toast: (msg: string, tone?: "ok" | "bad", acti
       <p className="muted" style={{ marginBottom: 16 }}>
         Exportá el reporte <b>Lista de cuentas</b> de QuickBooks Online (Informes → Lista de cuentas) en CSV o Excel y
         subilo aquí. El sistema importa la jerarquía completa <code>Padre:Hijo</code> tal como QBO la muestra.
-        Podés reimportarlo las veces que necesités sin perder el mapeo.
+        Puede reimportarlo las veces que necesités sin perder el mapeo.
       </p>
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 20 }}>
         <label className="btn btn--crimson btn--sm" style={{ cursor: "pointer" }}>
@@ -269,7 +269,7 @@ function StepRevision({ toast, month, setMonth }: { toast: (msg: string, tone?: 
           </div>
 
           {data.issues.length === 0 ? (
-            <div className="notice notice--ok">Sin problemas. Podés exportar este mes.</div>
+            <div className="notice notice--ok">Sin problemas. Puede exportar este mes.</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {data.issues.map((issue, i) => (

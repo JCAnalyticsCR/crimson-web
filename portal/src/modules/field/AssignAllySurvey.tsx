@@ -25,7 +25,7 @@ export function AssignAllySurvey({ surveyId, opportunityId, current, onDone }: {
         <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
           <Field label="Técnico">
             <select className="select" value={sel} onChange={(e) => setSel(e.target.value)}>
-              <option value="">Elegí…</option>
+              <option value="">Elija…</option>
               {techs.map((t) => <option key={t.id} value={t.id}>{t.company ? `${t.name} · ${t.company}` : `${t.name} · Crimson`}</option>)}
             </select>
           </Field>

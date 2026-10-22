@@ -149,6 +149,9 @@ def sale(data: SaleIn, p: Principal = Depends(require("sales", "crear")), db: Se
     if chk.exceeds:
         raise HTTPException(422, f"{chk.message} Un administrador debe aprobar descuentos mayores.")
     inv = docsvc.create_invoice(db, p.tenant.id, p.user.id, payload, data.doc_type)
+    razones = discounts.approval_reasons(db, p, inv)
+    if razones:
+        raise HTTPException(422, f"Esta venta necesita aprobación: hágala como cotización. Motivo: {razones[0]}")
     total = d(inv.total)
     paid = sum((pay.amount for pay in data.payments), Decimal(0))
     if paid < total:

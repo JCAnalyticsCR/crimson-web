@@ -961,7 +961,7 @@ def _crear_oportunidad(db: Session, slug: str, data: AdvisoryIn, ip: str) -> Non
     # doble envio (doble clic, reintento del navegador): misma persona y mismo texto en 10 minutos -> nada nuevo
     hace = datetime.now(UTC) - timedelta(minutes=10)
     recientes = db.scalars(
-        select(Opportunity).where(Opportunity.tenant_id == t.id, Opportunity.source == "tienda web").order_by(Opportunity.id.desc()).limit(20)
+        select(Opportunity).where(Opportunity.tenant_id == t.id, Opportunity.source.in_(("Sitio web", "tienda web"))).order_by(Opportunity.id.desc()).limit(20)
     ).all()
     for o in recientes:
         c, cuando = o.contact or {}, o.created_at
@@ -1030,7 +1030,7 @@ def _crear_oportunidad(db: Session, slug: str, data: AdvisoryIn, ip: str) -> Non
         },
         title=f"Tienda web · {etiqueta} · {quien}"[:200],
         kind="venta" if lineas and not data.install else "proyecto",
-        source="tienda web",
+        source="Sitio web",
         solution=data.solution,
         amount=monto.quantize(Decimal("0.01")),
         currency=ctx.pricer.currency,

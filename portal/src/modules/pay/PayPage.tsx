@@ -62,7 +62,7 @@ export default function PayPage() {
       const newUrl = [window.location.pathname, sp.toString()].filter(Boolean).join("?");
       window.history.replaceState(null, "", newUrl);
       if (ret === "cancelado") {
-        setOnvoNotice("Cancelaste el pago. Podés intentarlo de nuevo cuando quieras.");
+        setOnvoNotice("Cancelaste el pago. Puede intentarlo de nuevo cuando quieras.");
       } else if (ret === "volver") {
         setOnvoNotice("Estamos confirmando tu pago con ONVO…");
         startSync();
@@ -111,7 +111,7 @@ export default function PayPage() {
                     <div key={p.id} className="pay__proof" data-s={p.status}>
                       <span><b>{p.status_label}</b> · {p.method} · {p.filename} · {when(p.at)}</span>
                       {p.status === "pendiente" && <span className="muted">Lo estamos revisando: te avisamos al aplicar el pago.</span>}
-                      {p.status === "rechazado" && p.note && <span>Motivo: {p.note}. Podés subir otro.</span>}
+                      {p.status === "rechazado" && p.note && <span>Motivo: {p.note}. Puede subir otro.</span>}
                     </div>
                   ))}
                 </div>
@@ -142,7 +142,7 @@ export default function PayPage() {
                 </>
               )}
               {!pending && <p className="muted" style={{ margin: 0 }}>{d.invoice.status === "anulada" ? "Esta factura está anulada." : "Esta factura no tiene saldo pendiente. ¡Gracias!"}</p>}
-              <p className="muted" style={{ fontSize: 12, margin: 0 }}>Este enlace es único y expira automáticamente. Si tenés dudas, escribinos a {d.business.name}.</p>
+              <p className="muted" style={{ fontSize: 12, margin: 0 }}>Este enlace es único y expira automáticamente. Si tiene dudas, escribinos a {d.business.name}.</p>
             </div>
           </>
         )}

@@ -4,12 +4,22 @@ Quien no tenga "sales.descuento_libre" (solo el administrador lo tiene) puede de
 configurado en Ajustes -> Facturacion (max_discount_pct, 10 % por defecto). Cuenta como descuento:
 - el descuento por linea (porcentaje o monto),
 - el descuento global del documento (prorrateado),
-- bajar el precio unitario por debajo del precio de catalogo (misma divisa).
+- bajar el precio unitario por debajo del precio de catalogo en la moneda del documento (convertido con el tipo
+  de cambio vigente cuando el producto esta en otra moneda).
+- lineas de cortesia/aportado/excluido con precio de catalogo: se cuentan como 100 % de descuento porque el
+  documento las muestra en 0 al cliente.
 
 Cotizacion que excede -> queda "por_aprobar" (un administrador la aprueba). Factura o POS que excede -> se rechaza.
 
-Ademas del descuento hay otras dos razones para pedir aprobacion, que Andres pidio en la reunion del 22/09:
-una cotizacion por encima de cierto monto y una con margen por debajo del minimo. Viven en approval_reasons().
+Ademas del descuento hay otras razones para pedir aprobacion (approval_reasons):
+- cotizacion por encima de cierto monto (Andres, 22/09),
+- margen por debajo del minimo (Andres, 22/09),
+- lineas libres (sin producto del catalogo): todo vendedor que agregue una linea sin producto_id pide
+  aprobacion cuando el subtotal supera el tope free_line_limit_amount (default 0 = siempre). Lineas de
+  mano de obra o servicio marcadas con product_id siguen la regla normal de descuento.
+
+Las facturas directas y el POS NO pueden quedar "por_aprobar": si approval_reasons devuelve algo, el endpoint
+las rechaza con "Esta venta necesita aprobacion: hagala como cotizacion."
 """
 
 from __future__ import annotations
@@ -32,6 +42,8 @@ from .mail import notify_roles
 from .totals import d
 
 DEFAULT_MAX = Decimal(10)
+# Treatments que hacen que la linea salga en 0 en el documento (100 % de descuento efectivo)
+_NO_SUMA = frozenset(("aportado", "cortesia", "excluido"))
 
 
 def max_discount(tenant) -> Decimal:
@@ -52,18 +64,57 @@ class Check:
         return f"El descuento{where} es de {self.worst:.1f} % y su límite es {self.limit:.0f} %."
 
 
+def _list_price_in_doc_currency(prod, doc_currency: str, fx_rate) -> Decimal:
+    """Precio de catalogo del producto convertido a la moneda del documento.
+    fx_rate: tasa USD->CRC (la unica conversion soportada; None si no hay tasa cargada)."""
+    pc = (prod.currency or "CRC").upper()
+    dc = (doc_currency or "CRC").upper()
+    price = d(prod.price)
+    if pc == dc:
+        return price
+    if pc == "USD" and dc == "CRC" and fx_rate:
+        return price * d(fx_rate)
+    if pc == "CRC" and dc == "USD" and fx_rate and d(fx_rate) > 0:
+        return price / d(fx_rate)
+    # conversion no disponible: sin referencia de precio, no se puede medir el descuento
+    return Decimal(-1)  # sentinel: caller lo detecta y omite la linea del calculo
+
+
 def check(db: Session, p: Principal, payload: DocumentIn) -> Check:
     limit = max_discount(p.tenant)
     if p.can("sales", "descuento_libre"):
         return Check(False, limit, Decimal(0), None)
-    rows = []  # (nombre, neto de linea, valor de lista)
+
+    from .fx import rate_or_none
+
+    _fx = None  # cargado solo si hay productos en moneda distinta (evita consulta innecesaria)
+    rows = []  # (nombre, neto de linea, valor de lista en moneda doc)
     for ln in payload.lines:
         qty = d(ln.quantity)
         prod = db.get(Product, ln.product_id) if ln.product_id else None
         if prod and prod.tenant_id != p.tenant.id:
             prod = None
         unit = d(ln.unit_price) if ln.unit_price is not None else (d(prod.price) if prod else Decimal(0))
-        list_price = d(prod.price) if prod and prod.currency == payload.currency else unit
+
+        # Precio de catalogo en la moneda del documento
+        if prod is None:
+            list_price = unit  # linea libre: sin catalogo, el check no puede medir descuento
+        elif prod.currency == payload.currency:
+            list_price = d(prod.price)
+        else:
+            if _fx is None:
+                _fx = rate_or_none(db, "USD")
+            list_price = _list_price_in_doc_currency(prod, payload.currency, _fx)
+            if list_price < 0:
+                list_price = unit  # tipo de cambio no disponible: fallback sin bloquear
+
+        # Cortesia/aportado/excluido: el documento los muestra en 0 -> 100 % de descuento efectivo
+        trt = (ln.treatment or "normal")
+        if trt in _NO_SUMA:
+            if list_price > 0:
+                rows.append((ln.name or (prod.name if prod else "línea"), Decimal(0), qty * list_price))
+            continue
+
         base = qty * unit
         disc = base * d(ln.discount_value) / 100 if ln.discount_type == "percent" else min(d(ln.discount_value), base)
         rows.append((ln.name or (prod.name if prod else "línea"), base - disc, qty * list_price))
@@ -83,9 +134,10 @@ def check(db: Session, p: Principal, payload: DocumentIn) -> Check:
     return Check(worst > limit, limit, worst, worst_line)
 
 
-# ---------- Aprobacion de cotizaciones (monto y margen) ----------
+# ---------- Aprobacion de cotizaciones (monto, margen y lineas libres) ----------
 DEFAULT_APPROVAL_AMOUNT = Decimal(2_000_000)  # "cotizacion mayor de 2 millones requiere aprobacion del CEO"
 DEFAULT_MIN_MARGIN = Decimal(25)  # "margen menor a 25 % -> bloquear y solicitar autorizacion"
+DEFAULT_FREE_LINE_LIMIT: Decimal | None = None  # None = sin limite (desactivado hasta que el admin lo configure)
 
 
 def approval_amount(tenant) -> Decimal:
@@ -96,6 +148,16 @@ def approval_amount(tenant) -> Decimal:
 def min_margin(tenant) -> Decimal:
     v = (tenant.settings or {}).get("min_margin_pct")
     return d(v) if v is not None else DEFAULT_MIN_MARGIN
+
+
+def free_line_limit(tenant) -> Decimal | None:
+    """Subtotal maximo que una linea sin producto del catalogo puede tener sin pedir aprobacion.
+    None = sin limite (por defecto). El administrador lo activa poniendo free_line_limit_amount
+    en los ajustes del tenant (ej. 50 000 = toda linea libre de mas de 50 000 CRC pide aprobacion)."""
+    v = (tenant.settings or {}).get("free_line_limit_amount")
+    if v is None:
+        return DEFAULT_FREE_LINE_LIMIT  # None = desactivado
+    return d(v)
 
 
 def _cost_lines(db: Session, tenant_id: int, quote):
@@ -129,13 +191,15 @@ def quote_margin(db: Session, tenant_id: int, quote) -> Decimal | None:
 
 
 def approval_reasons(db: Session, p: Principal, quote) -> list[str]:
-    """Por que esta cotizacion necesita el visto bueno de un administrador. Vacia = sale sola."""
+    """Por que este documento necesita el visto bueno de un administrador. Vacia = sale solo.
+    Funciona tanto con cotizaciones (ORM Quote) como con facturas recien creadas (ORM Invoice):
+    ambas tienen .total, .currency y .lines con los mismos atributos necesarios."""
     if p.can("sales", "aprobar"):
         return []  # quien aprueba no se pide permiso a si mismo
     razones = []
     tope = approval_amount(p.tenant)
     if tope > 0 and d(quote.total) > tope:
-        razones.append(f"El monto ({quote.currency} {d(quote.total):,.0f}) supera el tope de {tope:,.0f} para cotizar sin aprobación.")
+        razones.append(f"El monto ({quote.currency} {d(quote.total):,.0f}) supera el tope de {tope:,.0f} para vender sin aprobación.")
     minimo = min_margin(p.tenant)
     m = quote_margin(db, p.tenant.id, quote)
     if m is not None and minimo > 0 and m < minimo:
@@ -143,6 +207,21 @@ def approval_reasons(db: Session, p: Principal, quote) -> list[str]:
         razones.append(
             f"El margen queda en {m:.1f} % y el mínimo es {minimo:.0f} %." if p.sees_costs else f"El margen queda por debajo del mínimo ({minimo:.0f} %)."
         )
+    # Lineas libres (sin producto del catalogo): solo si el admin configuro un tope (free_line_limit_amount).
+    tope_libre = free_line_limit(p.tenant)
+    if tope_libre is not None:
+        for ln in quote.lines:
+            pid = getattr(ln, "product_id", None)
+            trt = (getattr(ln, "treatment", None) or "normal")
+            if pid is not None or trt != "normal":
+                continue  # tiene producto (cubierto por check) o es cortesia/aportado/excluido
+            subtotal = d(getattr(ln, "subtotal", None) or 0)
+            if subtotal <= 0:
+                subtotal = d(getattr(ln, "unit_price", 0)) * d(getattr(ln, "quantity", 1))
+            if subtotal > tope_libre:
+                nombre = (getattr(ln, "name", None) or "sin nombre")[:60]
+                razones.append(f"La línea «{nombre}» no tiene producto del catálogo: necesita revisión del administrador.")
+                break  # una sola razon es suficiente para retener
     return razones
 
 

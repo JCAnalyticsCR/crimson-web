@@ -91,7 +91,7 @@ export function RecommendModal({ surveyId, lines, focus, onClose, onApplied, com
     <Modal title={focus ? `Equipos para «${focus}»` : "Equipos recomendados"} onClose={onClose} wide foot={<button className="btn btn--ghost" onClick={onClose}>Cerrar</button>}>
       <p className="reco-intro">
         Hasta 3 equipos del catálogo por línea, según lo levantado en los puntos. Primero los que cumplen todo, después los que hay en bodega,
-        luego con el proveedor y al final sin existencias. <b>Nada se agrega hasta que tocás «Usar este».</b>
+        luego con el proveedor y al final sin existencias. <b>Nada se agrega hasta que toques «Usar este».</b>
       </p>
       {shown.length === 0 && <p className="muted" style={{ margin: 0, fontSize: 13 }}>No hay líneas con equipo del catálogo para recomendar. Agregá puntos (cámaras, puertas…) y volvé a intentar.</p>}
       {block("Equipos", equipos)}

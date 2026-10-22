@@ -372,7 +372,7 @@ export default function EventDetail() {
                   value={courtesy.ticket_type_id}
                   onChange={(e) => setCourtesy((f) => ({ ...f, ticket_type_id: Number(e.target.value) }))}
                 >
-                  <option value={0}>Seleccioná…</option>
+                  <option value={0}>Seleccione…</option>
                   {event.ticket_types.map((tt) => (
                     <option key={tt.id} value={tt.id}>{tt.name}</option>
                   ))}
@@ -460,7 +460,7 @@ export default function EventDetail() {
             )}
             {!getBarcodeDetector() && !cameraActive && (
               <p className="muted" style={{ fontSize: 12 }}>
-                Tu navegador no incluye BarcodeDetector nativo. Podés escribir el código manualmente o usar un lector USB/Bluetooth.
+                Tu navegador no incluye BarcodeDetector nativo. Puede escribir el código manualmente o usar un lector USB/Bluetooth.
               </p>
             )}
 

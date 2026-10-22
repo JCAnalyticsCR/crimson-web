@@ -369,9 +369,17 @@ def get_or_create_payment_link(db: Session, tenant_id: int, inv: Invoice) -> Pay
     return link
 
 
-def whatsapp_share_url(inv: Invoice, link_url: str, customer_name: str | None, business: str) -> str:
+def whatsapp_share_url(inv: Invoice, link_url: str, customer_name: str | None, business: str, phone: str | None = None) -> str:
     from urllib.parse import quote as urlquote
 
     amount = f"{d(inv.balance):,.2f}"
-    text = f"Hola {customer_name or ''}, le comparte {business}: factura {inv.number} por {inv.currency} {amount}. Puede pagar en linea aqui: {link_url}"
-    return "https://wa.me/?text=" + urlquote(text)
+    text = f"Hola {customer_name or ''}, le comparte {business}: factura {inv.number} por {inv.currency} {amount}. Puede pagar en línea aquí: {link_url}"
+    # normalizar el numero: solo digitos (wa.me lo exige sin espacios ni simbolos); agregar 506 si son 8 digitos (CR)
+    if phone:
+        digits = "".join(c for c in phone if c.isdigit())
+        if len(digits) == 8:
+            digits = "506" + digits
+        base = f"https://wa.me/{digits}" if digits else "https://wa.me/"
+    else:
+        base = "https://wa.me/"
+    return base + "?text=" + urlquote(text)

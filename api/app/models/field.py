@@ -44,6 +44,7 @@ class Opportunity(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     next_action: Mapped[str | None] = mapped_column(String(200))
     next_action_date: Mapped[date | None] = mapped_column(Date, index=True)
     lost_reason: Mapped[str | None] = mapped_column(String(200))
+    lost_competitor: Mapped[str | None] = mapped_column(String(100))  # empresa que ganó la licitación (migración ventas_ctrl_e5b3c2d1f408)
     notes: Mapped[str | None] = mapped_column(Text)
     quote_id: Mapped[int | None] = mapped_column(ForeignKey("quote.id"))
     project_id: Mapped[int | None] = mapped_column(ForeignKey("project.id", use_alter=True, name="fk_opportunity_project"))

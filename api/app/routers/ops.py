@@ -83,6 +83,12 @@ def doc_send(kind: str, id_: int, data: SendIn, p: Principal = Depends(require("
             raise HTTPException(409, "La cotización tiene un descuento pendiente de aprobación")
         if d.status in ("convertida", "anulada"):
             raise HTTPException(409, f"La cotización está {d.status}")
+    # el vendedor solo puede enviar al correo registrado del cliente (nunca desviar notificaciones)
+    if data.to and not p.can("sales", "ver_todo"):
+        c = db.get(Customer, d.customer_id) if d.customer_id else None
+        cliente_email = (c.email or "").strip().lower() if c else ""
+        if data.to.strip().lower() != cliente_email:
+            raise HTTPException(403, "Solo puede enviar al correo registrado del cliente. Un administrador puede enviar a otra dirección.")
     r = send_document(db, p.tenant, d, data.to, data.message, data.with_payment_link, p.user.id, ip=p.ip)
     db.commit()
     return {k: r[k] for k in ("status", "sent", "to", "note", "version")}
@@ -405,6 +411,9 @@ class MoveIn(BaseModel):
 def stock_move(data: MoveIn, p: Principal = Depends(require("inventory", "ajustar")), db: Session = Depends(get_db)):
     """Entrada, salida o ajuste manual (sin documento que lo respalde): inventory.ajustar, que hoy tienen solo los
     vendedores y el administrador (Andres, 19/10). Lo que nace de un documento (factura, compra, orden) no pasa por aca."""
+    # salidas y ajustes manuales deben llevar motivo cuando quien los hace no gestiona bodegas (el vendedor)
+    if data.kind in ("salida", "ajuste") and not data.note and not p.can("inventory", "editar"):
+        raise HTTPException(422, "Indique el motivo en el campo 'nota' (por qué sale o se ajusta el inventario).")
     qty = abs(data.quantity) if data.kind == "entrada" else -abs(data.quantity) if data.kind == "salida" else data.quantity
     if data.project_id:
         from ..models import Project

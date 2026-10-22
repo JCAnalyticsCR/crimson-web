@@ -18,9 +18,10 @@ export type Opp = {
   id: number; number: string; title: string; customer_id: number | null; customer: string | null; source: string | null; solution: string | null;
   end_customer_id?: number | null; end_customer?: string | null; site?: string | null; ally_pending?: number;
   owner_id: number | null; owner: string | null; owner_initials?: string | null; kind: "venta" | "proyecto"; amount: string; currency: string; probability: number; status: string;
-  next_action: string | null; next_action_date: string | null; lost_reason: string | null; notes: string | null;
+  next_action: string | null; next_action_date: string | null; lost_reason: string | null; lost_competitor: string | null; notes: string | null;
   quote_id: number | null; project_id: number | null; weighted: string; created_at: string;
   archived_at?: string | null; trashed_at?: string | null;
+  contact?: Record<string, string> | null;
   /* propuesta desde el portal de aliados (ítem 16): mientras espera, la tarjeta y la fila lo dicen */
   ally_approval?: "pendiente" | "aprobada" | "rechazada" | null; ally_proposed_by?: number | null;
 };
@@ -41,7 +42,7 @@ type Board = {
 };
 type Pending = Opp & { days_late: number };
 /* sellers: responsables que se eligen al reasignar (solo quien ve todo el embudo); assignees: el equipo, para tareas como la solicitud de costo a un aliado. */
-type Meta = { states: string[]; sources: string[]; solutions: string[]; kinds?: string[]; sellers: { id: number; name: string }[]; assignees?: { id: number; name: string }[]; can_see_all: boolean };
+type Meta = { states: string[]; sources: string[]; solutions: string[]; kinds?: string[]; sellers: { id: number; name: string }[]; assignees?: { id: number; name: string }[]; can_see_all: boolean; lost_reasons?: string[] };
 
 export const OPP_STATES: Record<string, string> = {
   nuevo: "Nuevo", contactado: "Contactado", requiere_visita: "Requiere visita", levantamiento: "En levantamiento",
@@ -57,8 +58,8 @@ export const OPP_KINDS: Record<string, string> = { proyecto: "Proyecto con insta
 const KIND_SHORT: Record<string, string> = { proyecto: "Proyecto", venta: "Venta" };
 const ID_TYPES: Record<string, string> = { fisica: "Física", juridica: "Jurídica", dimex: "DIMEX", nite: "NITE", extranjero: "Extranjero" };
 
-const blank = { title: "", kind: "proyecto", customer_id: "", customer_name: "", end_customer_id: "", end_customer_name: "", site: "", source: "", solution: "", amount: "0", probability: 30, next_action: "", next_action_date: "", owner_id: "", notes: "" };
-const blankTouch = { note: "", next_action: "", next_action_date: "", status: "" };
+const blank = { title: "", kind: "proyecto", customer_id: "", customer_name: "", end_customer_id: "", end_customer_name: "", site: "", source: "", solution: "", amount: "0", probability: 30, next_action: "", next_action_date: "", owner_id: "", notes: "", lost_reason: "", lost_competitor: "" };
+const blankTouch = { note: "", next_action: "", next_action_date: "", status: "", lost_reason: "", lost_competitor: "" };
 const blankCust = { name: "", id_type: "fisica", id_number: "", phone: "", email: "" };
 type OppForm = typeof blank & { id?: number; status?: string };
 type Touch = typeof blankTouch & { opp: number; num: string };
@@ -69,6 +70,7 @@ const oppBody = (f: OppForm) => ({
   owner_id: f.owner_id ? Number(f.owner_id) : null, amount: Number(f.amount || 0), probability: Number(f.probability),
   next_action: f.next_action || null, next_action_date: f.next_action_date || null, notes: f.notes || null,
   ...(f.id ? { status: f.status } : {}),
+  ...(f.lost_reason ? { lost_reason: f.lost_reason, lost_competitor: f.lost_competitor?.trim() || null } : {}),
 });
 
 /** Responsable a la vista (reunion 2, item 13): iniciales en un círculo y el nombre. */
@@ -177,14 +179,14 @@ export default function Opportunities() {
     if (!open) return;
     let o: Detail = open;
     if (guardando.current) { await guardando.current.catch(() => undefined); o = (await refrescarDetalle(open.id)) || open; }
-    setForm({ id: o.id, status: o.status, title: o.title, kind: o.kind || "proyecto", customer_id: o.customer_id ? String(o.customer_id) : "", customer_name: o.customer || "", end_customer_id: o.end_customer_id ? String(o.end_customer_id) : "", end_customer_name: o.end_customer || "", site: o.site || "", source: o.source || "", solution: o.solution || "", amount: String(o.amount), probability: o.probability, next_action: o.next_action || "", next_action_date: o.next_action_date || "", owner_id: o.owner_id ? String(o.owner_id) : "", notes: o.notes || "" });
+    setForm({ id: o.id, status: o.status, title: o.title, kind: o.kind || "proyecto", customer_id: o.customer_id ? String(o.customer_id) : "", customer_name: o.customer || "", end_customer_id: o.end_customer_id ? String(o.end_customer_id) : "", end_customer_name: o.end_customer || "", site: o.site || "", source: o.source || "", solution: o.solution || "", amount: String(o.amount), probability: o.probability, next_action: o.next_action || "", next_action_date: o.next_action_date || "", owner_id: o.owner_id ? String(o.owner_id) : "", notes: o.notes || "", lost_reason: o.lost_reason || "", lost_competitor: o.lost_competitor || "" });
   };
   const cancelarForm = () => { if (oppAuto.isDirty() && !confirm("¿Descartar los cambios?")) return; oppAuto.discard(); setForm(null); setNewCust(null); };
   /* Seguimiento (P3): borrador por oportunidad en este dispositivo; se publica solo con "Guardar seguimiento". */
   const segAuto = useRecordAutosave<Touch>({
     ns: "opp-seg", mode: "never", value: open && touchOpen && canEdit ? { ...touch, opp: open.id, num: open.number } : null,
-    idOf: (t) => t.opp, body: (t) => ({ note: t.note, next_action: t.next_action, next_action_date: t.next_action_date, status: t.status }),
-    enabled: canEdit, label: (t) => t.num, apply: (t) => setTouch({ note: t.note, next_action: t.next_action, next_action_date: t.next_action_date, status: t.status }),
+    idOf: (t) => t.opp, body: (t) => ({ note: t.note, next_action: t.next_action, next_action_date: t.next_action_date, status: t.status, lost_reason: t.lost_reason || null, lost_competitor: t.lost_competitor?.trim() || null }),
+    enabled: canEdit, label: (t) => t.num, apply: (t) => setTouch({ note: t.note, next_action: t.next_action, next_action_date: t.next_action_date, status: t.status, lost_reason: t.lost_reason || "", lost_competitor: t.lost_competitor || "" }),
   });
 
   const save = async () => {
@@ -199,7 +201,7 @@ export default function Opportunities() {
   const sendTouch = async () => {
     if (!open || touch.note.trim().length < 2) return;
     try {
-      await segAuto.exclusive({ ...touch, opp: open.id, num: open.number }, () => api(`/opportunities/${open.id}/touch`, { method: "POST", json: { note: touch.note.trim(), next_action: touch.next_action || null, next_action_date: touch.next_action_date || null, status: touch.status || null } }));
+      await segAuto.exclusive({ ...touch, opp: open.id, num: open.number }, () => api(`/opportunities/${open.id}/touch`, { method: "POST", json: { note: touch.note.trim(), next_action: touch.next_action || null, next_action_date: touch.next_action_date || null, status: touch.status || null, lost_reason: touch.lost_reason || null, lost_competitor: touch.lost_competitor?.trim() || null } }));
       segAuto.fromServer();
       toast("Seguimiento registrado"); await show(open.id); load();
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
@@ -281,7 +283,7 @@ export default function Opportunities() {
       setNewCust(null);
       toast(`Cliente ${c.name} creado`);
     } catch (e) {
-      /* ya existe un cliente con esa cédula o ese correo (y no podés editar clientes): queda elegida esa ficha */
+      /* ya existe un cliente con esa cédula o ese correo: queda elegida esa ficha */
       const ex = e instanceof ApiError && e.status === 409 ? (e.data as { existing?: { id: number; name: string } } | undefined)?.existing : undefined;
       if (ex) { setForm({ ...form, customer_id: String(ex.id), customer_name: ex.name }); setNewCust(null); toast(`Ya existía: se usa la ficha de ${ex.name}`); return; }
       toast(e instanceof Error ? e.message : "No se pudo crear el cliente", "bad");
@@ -492,6 +494,19 @@ export default function Opportunities() {
                     <Field label="Fecha"><input className="input" type="date" value={touch.next_action_date} onChange={(e) => setTouch({ ...touch, next_action_date: e.target.value })} /></Field>
                     <Field label="Mover a"><select className="select" value={touch.status} onChange={(e) => setTouch({ ...touch, status: e.target.value })}><option value="">Dejar igual</option>{(meta?.states || []).map((s) => <option key={s} value={s}>{OPP_STATES[s] || s}</option>)}</select></Field>
                   </div>
+                  {touch.status === "perdida" && (
+                    <div className="grid-2">
+                      <Field label="Motivo de pérdida" hint="Requerido para marcarla como perdida.">
+                        <select className="select" value={touch.lost_reason} onChange={(e) => setTouch({ ...touch, lost_reason: e.target.value })}>
+                          <option value="">— Seleccione —</option>
+                          {(meta?.lost_reasons || []).map((r) => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                      </Field>
+                      <Field label="Competidor (opcional)" hint="Empresa que ganó la licitación.">
+                        <input className="input" value={touch.lost_competitor} onChange={(e) => setTouch({ ...touch, lost_competitor: e.target.value })} placeholder="Ej.: Securitas, Axis…" maxLength={100} />
+                      </Field>
+                    </div>
+                  )}
                   <div><button className="btn btn--crimson btn--sm" onClick={sendTouch} disabled={touch.note.trim().length < 2}>Guardar seguimiento</button></div>
                   {segAuto.bar}
                 </Card>
@@ -538,6 +553,8 @@ export default function Opportunities() {
                 <Field label="Sitio"><input className="input" readOnly value={open.site || "—"} title={open.site || undefined} /></Field>
                 <Field label="Solución"><input className="input" readOnly value={SOLUTIONS[open.solution || ""] || "—"} /></Field>
                 <Field label="Origen"><input className="input" readOnly value={open.source || "—"} /></Field>
+                {open.status === "perdida" && open.lost_reason && <Field label="Motivo de pérdida"><input className="input" readOnly value={open.lost_reason} /></Field>}
+                {open.status === "perdida" && open.lost_competitor && <Field label="Competidor"><input className="input" readOnly value={open.lost_competitor} /></Field>}
               </div>
               <AlliesPanel
                 oppId={open.id}
@@ -588,7 +605,10 @@ export default function Opportunities() {
                 placeholder="Buscar cliente…"
                 fetcher={searchCustomers}
                 onSelect={(it, text) => setForm({ ...form, customer_id: it ? String(it.id) : "", customer_name: text })}
-                onCreate={allows("crm.crear") ? (text) => setNewCust({ ...blankCust, name: text }) : undefined}
+                onCreate={allows("crm.crear") ? (text) => {
+                  const c = open?.contact || {};
+                  setNewCust({ ...blankCust, name: text || (c.name as string) || text, phone: (c.phone as string) || (c.whatsapp as string) || "", email: (c.email as string) || "" });
+                } : undefined}
                 createLabel="Crear cliente"
               />
             </Field>

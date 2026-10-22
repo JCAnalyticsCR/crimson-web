@@ -39,7 +39,7 @@ export function InviteTechButton({ label = "Técnico" }: { label?: string }) {
           {link ? (
             <>
               {emailed
-                ? <p style={{ fontSize: 13.5, margin: 0 }}>Le llegó un correo a <b>{email}</b>. Cuando cree su contraseña aparece en la lista de técnicos. También podés mandarle el enlace por WhatsApp:</p>
+                ? <p style={{ fontSize: 13.5, margin: 0 }}>Le llegó un correo a <b>{email}</b>. Cuando cree su contraseña aparece en la lista de técnicos. También puede mandarle el enlace por WhatsApp:</p>
                 : <p style={{ fontSize: 13.5, margin: 0 }}><b>El correo no salió</b>: el envío de correos todavía no está activo. Mandale este enlace a <b>{email}</b> por WhatsApp; cuando cree su contraseña aparece en la lista de técnicos.</p>}
               <div className="search" style={{ maxWidth: "none" }}><Icon d={I.link} size={16} /><input readOnly value={link} onFocus={(e) => e.currentTarget.select()} /></div>
               <button className="btn btn--soft" style={{ alignSelf: "flex-start" }} onClick={() => { navigator.clipboard.writeText(link); toast("Enlace copiado"); }}><Icon d={I.copy} />Copiar</button>

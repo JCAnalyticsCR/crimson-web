@@ -37,7 +37,7 @@ function AgregarACotizacion({ ids, onClose }: { ids: number[]; onClose: () => vo
                 </button>
               ))}
             </div>
-          ) : <p className="muted" style={{ margin: 0 }}>No tenés cotizaciones abiertas.</p>}
+          ) : <p className="muted" style={{ margin: 0 }}>No tiene cotizaciones abiertas.</p>}
         </>
       )}
     </Modal>
@@ -212,7 +212,7 @@ export default function Products() {
       if (!rows.length) return [{ id: -1, label: "Sin resultados en el CABYS", hint: "Probá con otra palabra (cámara, cable, switch…)" }];
       return rows.map((r) => ({ id: Number(r.code), label: r.description, hint: `${r.code} · IVA ${r.tax_rate ?? "?"}%` }));
     } catch (e) {
-      return [{ id: -1, label: e instanceof Error ? e.message : "Hacienda no respondió", hint: "Podés escribir el código de 13 dígitos a mano" }];
+      return [{ id: -1, label: e instanceof Error ? e.message : "Hacienda no respondió", hint: "Puede escribir el código de 13 dígitos a mano" }];
     }
   }, []);
   const pickCabys = (it: LookupItem) => {
@@ -441,7 +441,7 @@ function SupplierOffers({ offers, info }: { offers: Offer[] | null; info: CostIn
         </p>
       )}
       {offers === null ? <p className="meta">Cargando…</p> : offers.length === 0 ? (
-        <p className="muted" style={{ fontSize: 12.5, margin: "6px 0 0" }}>Sin ofertas vinculadas. En <Link to="/inventario?tab=proveedores">Inventarios → Proveedores</Link> podés vincular este producto con el ítem de la lista del proveedor: el costo y la existencia del proveedor se actualizan solos con cada lista.</p>
+        <p className="muted" style={{ fontSize: 12.5, margin: "6px 0 0" }}>Sin ofertas vinculadas. En <Link to="/inventario?tab=proveedores">Inventarios → Proveedores</Link> puede vincular este producto con el ítem de la lista del proveedor: el costo y la existencia del proveedor se actualizan solos con cada lista.</p>
       ) : (
         <table className="table" style={{ marginTop: 6 }}>
           <thead><tr><th>Proveedor</th><th>Código</th><th className="num">Existencia</th><th className="num">Costo</th><th className="num">Costo ₡</th><th>Lista</th></tr></thead>
