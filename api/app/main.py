@@ -39,6 +39,7 @@ from .routers import (
     public_access,
     public_api,
     public_incidents,
+    quickbooks,
     reception,
     roles_admin,
     sales,
@@ -142,6 +143,7 @@ def create_app() -> FastAPI:
     app.include_router(store_showcase.seo)
     app.include_router(reception.router)
     app.include_router(accounting.router)
+    app.include_router(quickbooks.router)  # asientos QBO (conta-asientos)
     app.include_router(public_api.admin)
     app.include_router(public_api.v1)
     app.include_router(media.router)

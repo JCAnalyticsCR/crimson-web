@@ -32,6 +32,7 @@ const Suppliers = lazy(() => import("./modules/accounting/contable/Suppliers"));
 const Banks = lazy(() => import("./modules/accounting/contable/Banks"));
 const CxP = lazy(() => import("./modules/accounting/contable/CxP"));
 const TaxPanel = lazy(() => import("./modules/accounting/tributario/TaxPanel"));
+const QbSetup = lazy(() => import("./modules/accounting/contable/QbSetup"));
 const Reports = lazy(() => import("./modules/reports/Reports"));
 const Recurrences = lazy(() => import("./modules/sales/Recurrences"));
 const Invite = lazy(() => import("./modules/auth/Invite"));
@@ -227,6 +228,7 @@ function App() {
           <Route path="contable/bancos/:id/conciliacion" element={<Banking />} />
           <Route path="contable/cuentas-por-pagar" element={<CxP />} />
           <Route path="tributario" element={<TaxPanel />} />
+          <Route path="quickbooks" element={<QbSetup />} />
         </Route>
         <Route path="/ajustes" element={<Settings />} />
         <Route path="/accesos-clientes" element={g("portal_clientes.ver", <AccessRequests />)} />

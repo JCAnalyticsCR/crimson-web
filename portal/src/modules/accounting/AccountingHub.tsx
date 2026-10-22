@@ -11,6 +11,7 @@ const PARTS = [
   { key: "facturas", to: "/contabilidad/facturas", label: "Facturas", hint: "Lo que llega de los proveedores y lo que respondemos a Hacienda" },
   { key: "contable", to: "/contabilidad/contable", label: "Contable", hint: "El dinero: gastos, recurrentes, categorías, proveedores y bancos" },
   { key: "tributario", to: "/contabilidad/tributario", label: "Tributario", hint: "Lo que se declara: IVA del mes, plazos, rechazos y reportes" },
+  { key: "quickbooks", to: "/contabilidad/quickbooks", label: "QuickBooks", hint: "Asientos de diario listos para importar en QuickBooks Online" },
 ] as const;
 
 const SUBS: Record<string, { to: string; label: string; end?: boolean }[]> = {
@@ -28,13 +29,14 @@ const SUBS: Record<string, { to: string; label: string; end?: boolean }[]> = {
     { to: "/contabilidad/contable/cuentas-por-pagar", label: "Cuentas por pagar" },
   ],
   tributario: [{ to: "/contabilidad/tributario", label: "Panel del mes", end: true }],
+  quickbooks: [{ to: "/contabilidad/quickbooks", label: "Asientos QBO", end: true }],
 };
 
 export default function AccountingHub() {
   const loc = useLocation();
   const [mode, setMode] = useState<Mode | null>(null);
   useEffect(() => { api<HaciendaState>("/settings/hacienda").then((s) => setMode(s.mode)).catch(() => setMode(null)); }, []);
-  const part = loc.pathname.startsWith("/contabilidad/contable") ? "contable" : loc.pathname.startsWith("/contabilidad/tributario") ? "tributario" : "facturas";
+  const part = loc.pathname.startsWith("/contabilidad/contable") ? "contable" : loc.pathname.startsWith("/contabilidad/tributario") ? "tributario" : loc.pathname.startsWith("/contabilidad/quickbooks") ? "quickbooks" : "facturas";
   const band = mode ? MODE_BAND[mode] : undefined;
   return (
     <>
