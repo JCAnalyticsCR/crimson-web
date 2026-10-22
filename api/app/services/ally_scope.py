@@ -111,9 +111,16 @@ class AllyScope:
 
     def shared_survey_ids(self) -> list[int]:
         """Levantamientos de Crimson (sin empresa asignada) en oportunidades en comun que hizo alguien de SU equipo: el
-        tecnico a cargo, quien lo envio a revision o uno de los que hicieron la visita (reunion 21/10, item 18: el
-        LEV hecho con el tecnico del aliado no le salia porque solo contaba ally_company_id). visit_tech_ids es JSON:
-        se cruza en Python sobre los pocos levantamientos de esas oportunidades."""
+        tecnico a cargo, quien lo envio a revision o uno de los que hicieron la visita. visit_tech_ids es JSON: se cruza
+        en Python sobre los pocos levantamientos de esas oportunidades.
+
+        Diagnostico del item 18 (reunion 21/10, LEV-2026-0011): el criterio anterior solo contaba
+        Survey.ally_company_id, y un levantamiento creado desde el panel de Crimson nace sin empresa aunque el tecnico
+        sea del aliado; por eso el portal decia "Todavia no hay levantamientos de su empresa". Ahora cuenta tambien la
+        gente del equipo, que es quien tiene TenantUser.ally_company_id = la empresa (team_user_ids), sea cual sea su
+        rol. Depende de ese dato: si el tecnico existe como usuario interno SIN empresa aliada (item 20: estaba con rol
+        "Tecnico instalador"), no hay nada que lo ligue al aliado y el levantamiento sigue sin salirle. Hay que pasar
+        su membresia a la empresa aliada (Administracion -> Aliados) y entonces aparece sin tocar el levantamiento."""
         if self._shared is None:
             team = self.team_user_ids()
             out: list[int] = []
@@ -137,6 +144,13 @@ class AllyScope:
         if self.is_tech:
             conds += [Survey.technician_id == self.uid, or_(Survey.status == "borrador", Survey.review_status == "devuelto")]
         return conds
+
+    def own_surveys(self) -> list:
+        """Los que la empresa puede cambiar (routers/ally_portal._survey_is_ours): asignados a ella o con el tecnico a
+        cargo de su equipo. Para lo "por hacer" y "devueltos" del inicio y de Mi dia: uno de Crimson que su gente solo
+        visito o envio se ve, pero no es trabajo pendiente del aliado."""
+        team = list(self.team_user_ids())
+        return [*self.surveys(), or_(Survey.ally_company_id == self.cid, Survey.technician_id.in_(team))]
 
     def work_orders(self) -> list:
         """El tecnico ademas filtra con is_today_for_tech en Python (sin limit antes del filtro)."""

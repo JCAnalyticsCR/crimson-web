@@ -285,6 +285,8 @@ def config_get(p: Principal = Depends(require("aliados", "ver")), db: Session = 
         "plan_product": {"id": prod.id, "code": prod.code, "name": prod.name, "cabys_code": prod.cabys_code} if prod else None,
         "plan_default": plan_defaults(p.tenant),
         "assets_scope": st.get("ally_assets_scope", "proyectos"),
+        # pregunta abierta 8 (21/10): la oportunidad que crea un aliado espera la aprobacion de Crimson (default si)
+        "opportunity_approval": st.get("ally_opportunity_approval", True) is not False,
     }
 
 
@@ -298,6 +300,7 @@ class ConfigIn(BaseModel):
     plan_default_amount: Decimal | None = Field(None, ge=0)
     plan_default_currency: str | None = Field(None, pattern="^(CRC|USD)$")
     plan_default_mode: str | None = Field(None, pattern="^(fija|por_usuario)$")
+    opportunity_approval: bool | None = None  # las oportunidades que propone un aliado esperan aprobacion (item 16)
 
 
 @router.put("/config")
@@ -308,8 +311,13 @@ def config_put(data: ConfigIn, p: Principal = Depends(require("aliados", "ver"))
     plan_keys = {"plan_product_id", "plan_default_amount", "plan_default_currency", "plan_default_mode"}
     if sent & plan_keys and not p.can("aliados", "mensualidad"):
         raise HTTPException(403, "Sin permiso: aliados.mensualidad")
+    if "opportunity_approval" in sent and not p.can("aliados", "editar"):
+        raise HTTPException(403, "Sin permiso: aliados.editar")
     st = dict(p.tenant.settings or {})
-    llaves = ("ally_markup_pct", "ally_plan_product_id", "ally_assets_scope", "ally_plan_default_amount", "ally_plan_default_currency", "ally_plan_default_mode")
+    llaves = (
+        "ally_markup_pct", "ally_plan_product_id", "ally_assets_scope", "ally_plan_default_amount", "ally_plan_default_currency", "ally_plan_default_mode",
+        "ally_opportunity_approval",
+    )  # fmt: skip
     antes = {k: st.get(k) for k in llaves}
     if "markup_pct" in sent:
         st["ally_markup_pct"] = None if data.markup_pct is None else str(data.markup_pct)
@@ -325,6 +333,8 @@ def config_put(data: ConfigIn, p: Principal = Depends(require("aliados", "ver"))
         st["ally_plan_default_currency"] = data.plan_default_currency
     if "plan_default_mode" in sent and data.plan_default_mode:
         st["ally_plan_default_mode"] = data.plan_default_mode
+    if "opportunity_approval" in sent and data.opportunity_approval is not None:
+        st["ally_opportunity_approval"] = data.opportunity_approval
     p.tenant.settings = st  # se mezcla sin pisar otras llaves
     audit_change(db, p, "update", "tenant_settings", p.tenant.id, antes, {k: st.get(k) for k in antes}, extra={"seccion": "aliados"})
     db.commit()

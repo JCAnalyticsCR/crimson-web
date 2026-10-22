@@ -178,7 +178,8 @@ export default function AllySurvey() {
     setPending("agregar");
     setSugErr(null);
     try {
-      await auto.flush();
+      // lo pendiente tiene que llegar antes: si no, exclusive lo daría por guardado y se perdería al recargar
+      if (!(await auto.flush())) throw new Error("No se pudo guardar lo pendiente del levantamiento; revise el aviso de guardado");
       const cur = dRef.current;
       const go = () => api<{ added: number; summed: number; survey: SurveyFull }>(ALLY_FIELD_API.suggestApply(sid), { method: "POST", json });
       const r = cur ? await auto.exclusive(cur, go) : await go();

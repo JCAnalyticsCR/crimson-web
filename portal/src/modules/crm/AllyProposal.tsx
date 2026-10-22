@@ -1,7 +1,7 @@
 /* Oportunidad propuesta por un aliado desde su portal (21/10, ítem 16; pregunta abierta 8). Llega «Pendiente de
    aprobación de Crimson» y sin responsable: quien ve todo el embudo la aprueba (y de paso le asigna responsable) o la
-   rechaza con un motivo que el aliado ve. Al aliado le llega un correo con la decisión. En una oportunidad de Crimson
-   no muestra nada. */
+   rechaza con un motivo que el aliado ve; una rechazada se puede aprobar después. Al aliado le llega un correo con la
+   decisión. En una oportunidad de Crimson no muestra nada. */
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtDate } from "../../lib/api";
 import { useSession } from "../../app/session";
@@ -19,7 +19,10 @@ export function AllyProposalBanner({ oppId, sellers, onChange }: { oppId: number
   }, [oppId]);
   useEffect(load, [load]);
   if (!p) return null;
-  const decide = allows("crm_pipeline.ver_todo") && allows("crm_pipeline.editar") && p.status === "pendiente";
+  const puede = allows("crm_pipeline.ver_todo") && allows("crm_pipeline.editar");
+  const decide = puede && p.status === "pendiente";
+  // una rechazada se puede aprobar después (vuelve a abrirse): si no, quedaría trabada para el aliado
+  const reconsider = puede && p.status === "rechazada";
   const go = async (path: "approve" | "reject", json: Record<string, unknown>) => {
     if (busy) return;
     setBusy(true);
@@ -48,6 +51,11 @@ export function AllyProposalBanner({ oppId, sellers, onChange }: { oppId: number
           </select>
           <button className="btn btn--crimson btn--sm" disabled={busy} onClick={() => go("approve", owner ? { owner_id: Number(owner) } : {})}>{busy ? "Guardando…" : "Aprobar"}</button>
           <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => setRechazo("")}>Rechazar</button>
+        </div>
+      )}
+      {reconsider && (
+        <div>
+          <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => { if (confirm("¿Aprobar esta oportunidad? Se reabre y el aliado podrá hacer el levantamiento.")) go("approve", {}); }}>{busy ? "Guardando…" : "Aprobar de todos modos"}</button>
         </div>
       )}
       {decide && rechazo !== null && (

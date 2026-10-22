@@ -59,6 +59,7 @@ export default function AllyOpportunity() {
         // propuesta por su empresa (21/10, ítem 16): hasta que Crimson la apruebe no se levanta
         <p className={`badge badge--${TONO_APROBACION[o.approval] || "muted"}`} style={{ display: "block", whiteSpace: "normal", padding: "10px 14px", borderRadius: 10, marginBottom: 12 }}>
           {o.approval_label}{o.approval === "pendiente" ? ": cuando Crimson la apruebe podrá hacer el levantamiento." : "."}
+          {o.approval === "rechazada" && o.approval_reason && <><br />{o.approval_reason}</>}
         </p>
       )}
       <div className="cp-grid cp-grid--2">

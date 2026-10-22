@@ -139,9 +139,10 @@ def _point_data(kind: str, data: dict) -> list[tuple[str, str]]:
     return out
 
 
-def context(db: Session, s: Survey, tenant: Tenant, ttl: int | None = None) -> dict:
+def context(db: Session, s: Survey, tenant: Tenant, ttl: int | None = None, visitor_name=None) -> dict:
     """Todo lo que ve el cliente, y nada mas. La prueba de no-montos se hace sobre esto y sobre el HTML.
-    Las fotos privadas salen con enlace firmado (ttl en segundos; None = el corto del portal)."""
+    Las fotos privadas salen con enlace firmado (ttl en segundos; None = el corto del portal). visitor_name(uid,
+    nombre) -> nombre a mostrar de cada tecnico de la visita (el portal de aliados: los de Crimson, solo el de pila)."""
     from .media_access import sign_urls
 
     def fotos(v) -> list[str]:
@@ -152,7 +153,7 @@ def context(db: Session, s: Survey, tenant: Tenant, ttl: int | None = None) -> d
     c = db.get(Customer, s.customer_id) if s.customer_id else None
     contact = s.contact or {}
     ids = [int(x) for x in (s.visit_tech_ids or []) if str(x).isdigit()] or ([s.technician_id] if s.technician_id else [])
-    visitors = [u.full_name for u in (db.get(User, i) for i in ids) if u]
+    visitors = [n for n in ((visitor_name(u.id, u.full_name) if visitor_name else u.full_name) for u in (db.get(User, i) for i in ids) if u) if n]
     spec = SPECS.get(s.kind, SPECS["otro"])
     # puntos de otro tipo (una puerta en un levantamiento de CCTV): cada uno con sus campos y su nombre
     mixed = any(p.kind and p.kind != s.kind for p in s.points)
@@ -189,9 +190,9 @@ def context(db: Session, s: Survey, tenant: Tenant, ttl: int | None = None) -> d
     }
 
 
-def render_survey_html(db: Session, s: Survey, tenant: Tenant, ttl: int | None = None) -> str:
+def render_survey_html(db: Session, s: Survey, tenant: Tenant, ttl: int | None = None, visitor_name=None) -> str:
     """ttl: vida de los enlaces de fotos privadas. El PDF se arma al instante (corto); el correo, largo."""
-    return TEMPLATE.render(**context(db, s, tenant, ttl))
+    return TEMPLATE.render(**context(db, s, tenant, ttl, visitor_name))
 
 
 def report_email_html(tenant: Tenant, number: str, customer: str | None, site: str | None, message: str | None, *, attached_pdf: bool) -> str:

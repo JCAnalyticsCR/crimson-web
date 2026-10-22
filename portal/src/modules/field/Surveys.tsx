@@ -306,7 +306,9 @@ export default function Surveys() {
      pendiente y despues corre en la misma fila que el autoguardado, nunca a la par. Un autoguardado con la lista vieja
      que llegaba despues reescribia los materiales y borraba lo recien agregado (21/10, ítem 25). */
   const serverStep = async <R,>(fn: () => Promise<R>): Promise<R> => {
-    await auto.flush();
+    // si lo pendiente no llegó al servidor, no se sigue: exclusive lo tomaría como guardado y borraría la copia del
+    // dispositivo, y al recargar se perdería lo escrito sin aviso
+    if (!(await auto.flush())) throw new Error("No se pudo guardar lo pendiente del levantamiento; revise el aviso de guardado y pruebe de nuevo");
     const cur = draftRef.current;
     if (!cur) return fn();
     const out = await auto.exclusive(cur, async () => ({ id: cur.id, r: await fn() }));

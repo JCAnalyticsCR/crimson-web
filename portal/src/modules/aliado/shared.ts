@@ -28,6 +28,8 @@ export type OppRow = {
   site: string | null; crimson_owner: string | null; my_roles: string[]; pending_requests: number; project: { id: number; number: string; status: string } | null; created_at: string;
   /** propuesta por su empresa (21/10, ítem 16): pendiente | aprobada | rechazada; null si la abrió Crimson */
   approval?: "pendiente" | "aprobada" | "rechazada" | null; approval_label?: string | null; proposed_by_me?: boolean;
+  /** el motivo con el que Crimson no la aprobó (solo en la que propuso su empresa) */
+  approval_reason?: string | null;
 };
 export type Contact = { name?: string | null; email?: string | null; phone?: string | null };
 export type OppFull = OppRow & {

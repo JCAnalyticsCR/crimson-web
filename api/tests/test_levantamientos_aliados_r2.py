@@ -134,7 +134,7 @@ def test_crimson_rechaza_la_propuesta_y_ajuste_sin_aprobacion(client, auth, db_s
     assert op.status == "perdida" and "Ya la lleva otro canal" in (op.lost_reason or "")
     cerradas = client.get("/aliado/oportunidades?estado=cerradas", headers=s.a_jefe).json()
     fila = next(x for x in cerradas if x["id"] == o["id"])
-    assert fila["approval_label"] == "No aprobada por Crimson"
+    assert fila["approval_label"] == "No aprobada por Crimson" and "Ya la lleva otro canal" in fila["approval_reason"]
     # una de Crimson no es propuesta
     assert client.get(f"/opportunities/{s.O1}/ally-proposal").json() == {"proposal": None}
     assert client.post(f"/opportunities/{s.O1}/ally-proposal/approve", json={}).status_code == 409
@@ -206,3 +206,106 @@ def test_sugerencias_internas_no_duplican_con_doble_envio(client, auth, db_sessi
     assert r.status_code == 200 and r.json()["added"] == 1
     its = [x for x in r.json()["survey"]["items"] if x["name"] == "Conector RJ45"]
     assert len(its) == 1 and float(its[0]["quantity"]) == 2
+
+
+# ---------- hallazgos de revision ----------
+def test_18_tecnico_con_rol_interno_de_la_empresa_aliada_y_lo_de_crimson_no_es_pendiente(client, auth, db_session):
+    """LEV-2026-0011: el tecnico tenia rol interno ("Técnico instalador", item 20). Con su membresia en la empresa
+    aliada el levantamiento le sale; sin empresa (dato sin corregir) no hay nada que lo ligue. Lo de Crimson que su
+    gente solo visito no cuenta como "por hacer" ni sale en Mi dia, y del tecnico de Crimson solo va el nombre de pila."""
+    from app.models import Survey, TenantUser, User
+
+    s = escenario(client, dict(client.headers), db_session)
+    o = _opp_abierta(client, s)
+    interno(client, db_session, s.tid, "instalador.r2@ejemplo.com", "tecnico")
+    inst = db_session.scalar(select(User).where(User.email == "instalador.r2@ejemplo.com"))
+    sv = Survey(tenant_id=s.tid, number="LEV-T18-INST", kind="cctv", opportunity_id=o, customer_id=s.c1, technician_id=inst.id, status="borrador")
+    db_session.add(sv)
+    db_session.commit()
+    assert sv.id not in ids(client.get("/aliado/levantamientos", headers=s.a_jefe).json())  # sin empresa: no hay como ligarlo
+    m = db_session.scalar(select(TenantUser).where(TenantUser.tenant_id == s.tid, TenantUser.user_id == inst.id))
+    m.ally_company_id = s.A  # corregir el dato (item 20): su membresia pasa a la empresa aliada
+    db_session.commit()
+    assert sv.id in ids(client.get("/aliado/levantamientos", headers=s.a_jefe).json())
+
+    antes = client.get("/aliado/inicio", headers=s.a_jefe).json()["counters"]
+    r = client.post("/surveys", json={"kind": "cctv", "customer_id": s.c1, "opportunity_id": o, "visit_tech_ids": [s.uid_a_tec, s.admin_id]})
+    sid = r.json()["id"]
+    assert db_session.get(Survey, sid).status == "borrador"
+    despues = client.get("/aliado/inicio", headers=s.a_jefe).json()["counters"]
+    assert despues["levantamientos_por_hacer"] == antes["levantamientos_por_hacer"]
+    assert sid not in ids(client.get("/aliado/mi-dia", headers=s.a_jefe).json()["levantamientos"])
+
+    admin = db_session.get(User, s.admin_id)
+    det = client.get(f"/aliado/levantamientos/{sid}", headers=s.a_jefe)
+    assert det.status_code == 200
+    assert det.json()["technician_id"] is None and det.json()["technician"] == admin.full_name.split()[0]
+    if " " in admin.full_name:
+        assert admin.full_name not in det.text
+    rep = client.get(f"/aliado/levantamientos/{sid}/informe.pdf", headers=s.a_jefe)
+    assert rep.status_code == 200
+    if rep.headers.get("X-PDF-Fallback") == "html":
+        assert "Tomas Tecnico Uno" in rep.text  # su equipo, con nombre completo
+        if " " in admin.full_name:
+            assert admin.full_name not in rep.text
+
+
+def test_16_motivo_del_rechazo_aprobar_despues_y_ajuste_desde_aliados(client, auth, db_session):
+    from app.models import Opportunity, Tenant
+
+    s = escenario(client, dict(client.headers), db_session)
+    o = _proponer(client, s, titulo="Propuesta que se reconsidera").json()
+    fila = next(x for x in client.get("/opportunities").json() if x["id"] == o["id"])
+    assert fila["ally_approval"] == "pendiente" and fila["ally_proposed_by"] == s.A
+    assert client.post(f"/opportunities/{o['id']}/ally-proposal/reject", json={"reason": "Falta el sitio exacto"}).status_code == 200
+    det = client.get(f"/aliado/oportunidades/{o['id']}", headers=s.a_jefe).json()
+    assert "Falta el sitio exacto" in (det["approval_reason"] or "") and det["can_survey"] is False
+    assert client.post(f"/opportunities/{o['id']}/ally-proposal/reject", json={"reason": "Otra vez"}).status_code == 409
+    # Crimson cambia de opinion: se aprueba y se reabre
+    r = client.post(f"/opportunities/{o['id']}/ally-proposal/approve", json={})
+    assert r.status_code == 200, r.text
+    db_session.expire_all()
+    op = db_session.get(Opportunity, o["id"])
+    assert op.ally_approval == "aprobada" and op.status == "nuevo" and op.lost_reason is None and op.closed_at is None
+    det = client.get(f"/aliado/oportunidades/{o['id']}", headers=s.a_jefe).json()
+    assert det["can_survey"] is True and det["approval_reason"] is None
+
+    # Ajustes de aliados: el interruptor de la aprobacion
+    assert client.get("/allies/config").json()["opportunity_approval"] is True
+    r = client.put("/allies/config", json={"opportunity_approval": False})
+    assert r.status_code == 200 and r.json()["opportunity_approval"] is False
+    db_session.expire_all()
+    assert db_session.get(Tenant, s.tid).settings["ally_opportunity_approval"] is False
+    assert _proponer(client, s, titulo="Ya sin aprobación").json()["approval"] == "aprobada"
+
+
+def test_16_tecnico_elegido_al_crear_recibe_el_aviso(client, auth, db_session):
+    from app.models import EmailOutbox
+
+    s = escenario(client, dict(client.headers), db_session)
+    o = _opp_abierta(client, s)
+    r = client.post("/aliado/levantamientos", json={"opportunity_id": o, "kind": "cctv", "technician_id": s.uid_a_tec}, headers=s.a_jefe)
+    assert r.status_code == 201, r.text
+    avisos = db_session.scalars(select(EmailOutbox).where(EmailOutbox.entity == "ally_work", EmailOutbox.entity_id == r.json()["id"])).all()
+    assert [a.to for a in avisos] == ["tec@aliado-uno.ejemplo.com"]
+    # para si mismo: sin aviso
+    r = client.post("/aliado/levantamientos", json={"opportunity_id": o, "kind": "cctv"}, headers=s.a_jefe)
+    assert not db_session.scalars(select(EmailOutbox).where(EmailOutbox.entity == "ally_work", EmailOutbox.entity_id == r.json()["id"])).all()
+
+
+def test_19_agregar_sugerencias_a_uno_aprobado_lo_devuelve_a_revision(client, auth, db_session):
+    from app.models import Survey
+
+    s = escenario(client, dict(client.headers), db_session)
+    o = _opp_abierta(client, s)
+    r = client.post("/aliado/levantamientos", json={"opportunity_id": o, "kind": "cctv", "points": [{"code": "CAM-01", "data": {}}]}, headers=s.a_jefe)
+    sid = r.json()["id"]
+    sv = db_session.get(Survey, sid)
+    sv.status, sv.review_status = "enviado", "aprobado"
+    db_session.commit()
+    linea = {"name": "Conector RJ45 de prueba", "quantity": 2, "unit": "Unid", "kind": "material"}
+    r = client.post(f"/aliado/levantamientos/{sid}/sugerir/agregar", json=[linea], headers=s.a_jefe)
+    assert r.status_code == 200, r.text
+    assert r.json()["survey"]["review_status"] == "pendiente"
+    db_session.expire_all()
+    assert db_session.get(Survey, sid).review_status == "pendiente"

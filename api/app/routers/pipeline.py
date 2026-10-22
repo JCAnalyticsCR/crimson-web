@@ -103,6 +103,9 @@ def _out(db: Session, o: Opportunity) -> dict:
         "project_id": o.project_id,
         "created_at": o.created_at,
         "weighted": (d(o.amount) * o.probability / 100).quantize(Decimal("0.01")),
+        # propuesta desde el portal de aliados (item 16): la lista y el embudo la marcan mientras espera aprobacion
+        "ally_approval": o.ally_approval,
+        "ally_proposed_by": o.ally_proposed_by,
     }
 
 

@@ -2,7 +2,8 @@
 
 El aliado las crea con POST /aliado/oportunidades (routers/ally_portal.py): nacen sin responsable, con su
 participacion visible y, por defecto, "pendiente" de aprobacion. Aqui Crimson (quien ve todo el embudo) las aprueba
-(puede asignar el responsable en el mismo paso) o las rechaza con un motivo que el aliado ve. Al aliado que la propuso
+(puede asignar el responsable en el mismo paso) o las rechaza con un motivo que el aliado ve. Una rechazada se puede
+aprobar despues (vuelve a abrirse). Al aliado que la propuso
 le llega un correo (de usted) con la decision. Se monta desde fieldwork.py, como el archivo y la papelera, para no tocar
 main.py.
 """
@@ -65,13 +66,13 @@ class RejectIn(BaseModel):
     reason: str = Field(min_length=3, max_length=200)
 
 
-def _decide_guard(db: Session, oid: int, p: Principal) -> Opportunity:
+def _decide_guard(db: Session, oid: int, p: Principal, allowed=("pendiente",)) -> Opportunity:
     if not p.can("crm_pipeline", "ver_todo"):
         raise HTTPException(403, "Aprobar oportunidades de aliados es de quien ve todo el embudo")
     o = _opp(db, oid, p)
     if not o.ally_proposed_by:
         raise HTTPException(409, "Esta oportunidad no la propuso un aliado")
-    if o.ally_approval != "pendiente":
+    if o.ally_approval not in allowed:
         raise HTTPException(409, f"Ya está resuelta ({LABEL.get(o.ally_approval or '', o.ally_approval)})")
     return o
 
@@ -106,7 +107,11 @@ def _avisar_aliado(db: Session, p: Principal, o: Opportunity, aprobada: bool, mo
 def approve(oid: int, data: ApproveIn, p: Principal = Depends(require("crm_pipeline", "editar")), db: Session = Depends(get_db)):
     from .pipeline import _log, _out, _reassign
 
-    o = _decide_guard(db, oid, p)
+    # una rechazada se puede aprobar despues (Crimson cambio de opinion): si no, no habria camino para desbloquearla,
+    # porque el portal no deja levantar sobre una rechazada aunque la reabran desde el embudo
+    o = _decide_guard(db, oid, p, ("pendiente", "rechazada"))
+    if o.ally_approval == "rechazada" and o.status == "perdida":
+        o.status, o.lost_reason = "nuevo", None  # el rechazo la habia cerrado: vuelve a abrirse (closed_at lo borra el listener)
     o.ally_approval = "aprobada"
     if data.owner_id and data.owner_id != o.owner_id:
         _reassign(db, p, o, data.owner_id)
