@@ -1,8 +1,11 @@
 /* "Mi pedido": estado, productos, totales, instrucciones de pago y subida del comprobante. Se abre con el enlace
    firmado del correo (?pedido=<token>) o buscando numero + correo. Nunca muestra otros pedidos: el API valida el
-   token contra la tienda y la busqueda responde igual exista o no el pedido. */
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { Field, IC, Ico, fmtWhen, money, session, wa, type ApiFn, type StoreInfo } from "./shopkit";
+   token contra la tienda y la busqueda responde igual exista o no el pedido.
+   Reunion 21/10: linea que une los pasos cumplidos (41), historial con las notas que la empresa pone para el cliente
+   (36), el comprobante que subio el cliente se puede volver a abrir (34), "Rastrear mi pedido" en la confirmacion
+   (40) y una caida pasajera del API ya no se presenta como "No encontramos ese pedido" (39). */
+import { useCallback, useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
+import { Field, IC, Ico, fmtWhen, local, money, session, wa, type ApiFn, type StoreInfo } from "./shopkit";
 import "./checkout.css";
 
 type Pub = {
@@ -11,25 +14,62 @@ type Pub = {
   lines: { name: string; quantity: number; unit_price: number; tax_rate: number; total: number; shipping?: boolean }[];
   contact: { name: string | null; email: string | null }; shipping_method: string | null;
   delivery: { type: "envio" | "retiro"; province?: string; canton?: string; district?: string } | null; pickup: { address?: string; hours?: string } | null;
-  payment_method: string | null; payment_kind: string | null; instructions: string | null; needs_proof: boolean; proofs: { filename: string; at: string }[];
+  payment_method: string | null; payment_kind: string | null; instructions: string | null; needs_proof: boolean; proofs: { n?: number; filename: string; at: string; pdf?: boolean }[];
   card: { pending: boolean; simulated: boolean } | null; tracking_number: string | null; carrier: string | null; cancel_reason: string | null;
-  history: { status: string; label: string; at: string }[]; whatsapp: string; store_name: string;
+  /* cambios de estado + notas que la empresa marco para el cliente (kind "nota"); las internas no llegan */
+  history: { status: string; label: string; at: string; note?: string | null; kind?: string }[]; whatsapp: string; store_name: string;
 };
 type Placed = { email: { to: string | null; status: string } | null; pay: { checkout_url?: string | null; simulated?: boolean; error?: string } | null };
 
 const MAX = 5 * 1024 * 1024;
+
+/* Pedidos abiertos en este navegador (los ultimos 5): "Mi pedido" los ofrece sin buscar el correo. */
+export type Recent = { number: string; token: string; at: string };
+const recentKey = (slug: string) => `crimson-shop:pedidos:${slug}`;
+export function recentOrders(slug: string): Recent[] {
+  try {
+    const v = JSON.parse(local.get(recentKey(slug)) || "[]");
+    return Array.isArray(v) ? v.filter((x) => x && typeof x.number === "string" && typeof x.token === "string") : [];
+  } catch { return []; }
+}
+export function rememberOrder(slug: string, r: { number: string | null; token: string }) {
+  if (!r.number || !r.token) return;
+  const list = [{ number: r.number, token: r.token, at: new Date().toISOString() }, ...recentOrders(slug).filter((x) => x.number !== r.number)].slice(0, 5);
+  local.set(recentKey(slug), JSON.stringify(list));
+}
 const ORDER = ["nuevo", "en_revision", "pagado", "preparando", "listo", "enviado", "entregado"];
 
-export default function OrderStatus({ api, token, store, onBack }: { api: ApiFn; token: string; store: StoreInfo; onBack: () => void }) {
+export default function OrderStatus({ api, token, store, slug, trackHref, onBack, onLookup }: {
+  api: ApiFn; token: string; store: StoreInfo; slug: string; trackHref: string; onBack: () => void; onLookup?: () => void;
+}) {
   const [o, setO] = useState<Pub | null>(null);
-  const [missing, setMissing] = useState<string | null>(null);
+  const [missing, setMissing] = useState<{ notFound: boolean; text: string } | null>(null);
+  const hasO = useRef(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const path = `/orders/${encodeURIComponent(token)}`;
-  const load = useCallback(() => api<Pub>(path).then(({ data }) => { setO(data); setMissing(null); }).catch((e) => setMissing((e as Error).message)), [api, path]);
-  useEffect(() => { load(); }, [load]);
+  /* Solo un 404 es "no encontramos ese pedido". Red caida, 502 mientras se publica una version o un 429: se reintenta
+     solo (hasta 3 veces) y, si sigue, se dice eso y se ofrece reintentar. Con el pedido ya en pantalla, un refresco que
+     falla no lo borra. */
+  const load = useCallback(async (retry = false) => {
+    for (let i = 0; ; i++) {
+      try {
+        const { data } = await api<Pub>(path);
+        hasO.current = true; setO(data); setMissing(null);
+        rememberOrder(slug, { number: data.number, token });
+        return;
+      } catch (e) {
+        const notFound = (e as { status?: number }).status === 404;
+        if (!notFound && retry && i < 2) { await new Promise((r) => window.setTimeout(r, 1200 * (i + 1))); continue; }
+        if (!notFound && hasO.current) return;
+        setMissing({ notFound, text: (e as Error).message });
+        return;
+      }
+    }
+  }, [api, path, slug, token]);
+  useEffect(() => { load(true); }, [load]);
   // al volver de ONVO el webhook puede tardar: se llama card/sync de inmediato y cada 10 s hasta 12 veces.
   // Depende de un booleano (no de `o`): cada respuesta hace setO y, atado a `o`, el efecto se relanzaria sin fin.
   const cardPending = !!o && o.payment_kind === "tarjeta" && o.status === "nuevo" && !o.card?.simulated;
@@ -47,7 +87,13 @@ export default function OrderStatus({ api, token, store, onBack }: { api: ApiFn;
 
   const placed: Placed | null = o ? (() => { try { return JSON.parse(session.get(`crimson-shop:placed:${o.number}`) || "null"); } catch { return null; } })() : null;
 
-  if (missing) return <div className="sh-wrap sh-empty"><b>No encontramos ese pedido.</b><span>El enlace puede estar incompleto. Buscalo con tu número de pedido y correo.</span><button className="sh-btn sh-btn--ghost" onClick={onBack}>Volver a la tienda</button></div>;
+  if (missing) return missing.notFound ? (
+    <div className="sh-wrap sh-empty"><b>No encontramos ese pedido.</b><span>El enlace puede estar incompleto. Buscalo con tu número de pedido y correo.</span>
+      <div className="ck-row" style={{ justifyContent: "center" }}>{onLookup && <button className="sh-btn sh-btn--crimson" onClick={onLookup}>Buscar mi pedido</button>}<button className="sh-btn sh-btn--ghost" onClick={onBack}>Volver a la tienda</button></div></div>
+  ) : (
+    <div className="sh-wrap sh-empty" role="alert"><b>No pudimos cargar tu pedido en este momento.</b><span>Tu pedido está bien: es la conexión. Probá de nuevo en unos segundos.</span>
+      <div className="ck-row" style={{ justifyContent: "center" }}><button className="sh-btn sh-btn--crimson" onClick={() => { setMissing(null); load(true); }}>Reintentar</button><button className="sh-btn sh-btn--ghost" onClick={onBack}>Volver a la tienda</button></div></div>
+  );
   if (!o) return <div className="sh-wrap" style={{ paddingTop: 24 }}><div className="sh-skel" style={{ height: 360 }} /></div>;
 
   const cur = o.currency;
@@ -68,6 +114,20 @@ export default function OrderStatus({ api, token, store, onBack }: { api: ApiFn;
     return reached >= ORDER.indexOf(k);
   };
 
+  const proofHref = (n: number) => `/api/public/store/${encodeURIComponent(slug)}${path}/proofs/${n}`;
+  const proofList = o.proofs.length > 0 && (
+    <ul className="ck-files">{o.proofs.map((p, i) => (
+      <li key={p.at + i}><Ico d={IC.check} size={14} /><a href={proofHref(p.n ?? i)} target="_blank" rel="noopener noreferrer" title="Ver el comprobante que subiste">{p.filename}</a> · {fmtWhen(p.at)}</li>
+    ))}</ul>
+  );
+  const payBox = !!o.instructions;
+  const proofInPay = payBox && (o.needs_proof || o.status === "en_revision") && o.payment_kind !== "tarjeta" && o.payment_kind !== "efectivo";
+  const goTrack = (e: MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    const el = document.getElementById("ck-seguimiento");
+    el?.scrollIntoView({ behavior: "smooth", block: "start" });
+    el?.focus({ preventScroll: true });
+  };
   const copy = async (text: string, what: string) => { try { await navigator.clipboard.writeText(text); setCopied(what); window.setTimeout(() => setCopied(null), 1800); } catch { /* sin permiso */ } };
   const upload = async (file: File | undefined) => {
     if (!file) return;
@@ -106,7 +166,11 @@ export default function OrderStatus({ api, token, store, onBack }: { api: ApiFn;
           <span className="sh-eyebrow">¡Gracias{o.contact.name ? `, ${o.contact.name.split(" ")[0]}` : ""}!</span>
           <b>Recibimos tu pedido.</b>
           {mailNote && <span>{mailNote}</span>}
-          <button type="button" className="sh-btn sh-btn--ghost sh-btn--sm" onClick={() => copy(window.location.href, "link")}><Ico d={IC.copy} size={16} />{copied === "link" ? "Enlace copiado" : "Copiar enlace de este pedido"}</button>
+          <div className="ck-row">
+            <a className="sh-btn sh-btn--crimson sh-btn--sm" href={trackHref} onClick={goTrack}><Ico d={IC.truck} size={16} />Rastrear mi pedido</a>
+            <button type="button" className="sh-btn sh-btn--ghost sh-btn--sm" onClick={() => copy(new URL(trackHref, window.location.href).href, "link")}><Ico d={IC.copy} size={16} />{copied === "link" ? "Enlace copiado" : "Copiar enlace de seguimiento"}</button>
+          </div>
+          <small>Guardá el enlace: ahí ves el estado de tu pedido sin buscar el correo. Desde este navegador también lo encontrás en «Mi pedido».</small>
         </div>
       )}
       <header className="ck-ohead">
@@ -117,12 +181,14 @@ export default function OrderStatus({ api, token, store, onBack }: { api: ApiFn;
       {closed ? (
         <div className="ck-closed" role="status"><b>{o.status === "cancelado" ? "Pedido cancelado" : "Reembolso registrado"}</b>{o.cancel_reason && <span>Motivo: {o.cancel_reason}</span>}</div>
       ) : (
-        <ol className="ck-track" aria-label="Avance del pedido">
+        <ol className="ck-track" id="ck-seguimiento" tabIndex={-1} aria-label="Avance del pedido">
           {steps.map((s, i) => {
             const done = doneStep(s.k);
-            const now = done && !(steps[i + 1] && doneStep(steps[i + 1].k));
-            const when = o.history.find((h) => h.status === s.k)?.at;
-            return <li key={s.k} data-done={done} aria-current={now ? "step" : undefined}><i aria-hidden="true">{done ? <Ico d={IC.check} size={12} /> : null}</i><span>{s.t}{o.status === "en_revision" && s.k === "pagado" ? <small>Comprobante en revisión</small> : when ? <small>{fmtWhen(when)}</small> : null}</span></li>;
+            const next = steps[i + 1];
+            const now = done && !(next && doneStep(next.k));
+            const when = o.history.find((h) => h.status === s.k && h.kind !== "nota")?.at;
+            // linea hacia el paso siguiente: llena si los dos se cumplieron
+            return <li key={s.k} data-done={done} data-line={next ? (done && doneStep(next.k) ? "done" : "todo") : undefined} aria-current={now ? "step" : undefined}><i aria-hidden="true">{done ? <Ico d={IC.check} size={12} /> : null}</i><span>{s.t}{o.status === "en_revision" && s.k === "pagado" ? <small>Comprobante en revisión</small> : when ? <small>{fmtWhen(when)}</small> : null}</span></li>;
           })}
         </ol>
       )}
@@ -143,7 +209,7 @@ export default function OrderStatus({ api, token, store, onBack }: { api: ApiFn;
                   <input ref={fileRef} id="ck-proof" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(e) => upload(e.target.files?.[0])} hidden />
                   <label htmlFor="ck-proof" className="sh-btn sh-btn--crimson" aria-disabled={busy === "proof"}><Ico d={IC.upload} size={16} />{busy === "proof" ? "Subiendo…" : o.proofs.length ? "Subir otro comprobante" : "Subir comprobante"}</label>
                   <small>Foto o PDF, máximo 5 MB. Solo lo ve el equipo de {o.store_name || store.name}.</small>
-                  {o.proofs.length > 0 && <ul className="ck-files">{o.proofs.map((p) => <li key={p.at}><Ico d={IC.check} size={14} />{p.filename} · {fmtWhen(p.at)}</li>)}</ul>}
+                  {proofList}
                 </div>
               )}
               {o.card?.pending && !o.card.simulated && <button className="sh-btn sh-btn--crimson sh-btn--block" onClick={payCard} disabled={busy === "card"}><Ico d={IC.card} />{busy === "card" ? "Abriendo…" : "Pagar con tarjeta"}</button>}
@@ -154,6 +220,13 @@ export default function OrderStatus({ api, token, store, onBack }: { api: ApiFn;
             </section>
           )}
           {msg && <p className={msg.ok ? "ck-ok" : "sh-err"} role={msg.ok ? "status" : "alert"}>{msg.text}</p>}
+          {!proofInPay && proofList && (
+            <section className="sh-panel ck-proofs" aria-labelledby="ck-proofs-h">
+              <h2 id="ck-proofs-h">{o.proofs.length > 1 ? "Tus comprobantes" : "Tu comprobante"}</h2>
+              {proofList}
+              <small>Lo ven solo vos (con este enlace) y el equipo de {o.store_name || store.name}.</small>
+            </section>
+          )}
 
           <section className="sh-panel ck-info">
             <div><span className="sh-meta">Entrega</span>
@@ -163,6 +236,18 @@ export default function OrderStatus({ api, token, store, onBack }: { api: ApiFn;
             </div>
             <div><span className="sh-meta">Pago</span><b>{o.payment_method || "A coordinar"}</b><span>{o.paid_at ? `Confirmado el ${fmtWhen(o.paid_at)}` : o.status === "en_revision" ? "Comprobante en revisión" : "Pendiente"}</span></div>
           </section>
+
+          {o.history.length > 0 && (
+            <section className="sh-panel ck-hist" aria-labelledby="ck-hist-h">
+              <h2 id="ck-hist-h">Historial del pedido</h2>
+              <ol>{[...o.history].reverse().map((h, i) => (
+                <li key={`${h.at}-${i}`} data-kind={h.kind === "nota" ? "nota" : "estado"}>
+                  <time dateTime={h.at}>{fmtWhen(h.at)}</time>
+                  <div><b>{h.kind === "nota" ? `Mensaje de ${o.store_name || store.name}` : h.label}</b>{h.note && <p>{h.note}</p>}</div>
+                </li>
+              ))}</ol>
+            </section>
+          )}
 
           <div className="ck-row">
             {wsp && <a className="sh-btn sh-btn--wa" href={wa(wsp, waText)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Escribir por WhatsApp</a>}
@@ -187,8 +272,9 @@ export default function OrderStatus({ api, token, store, onBack }: { api: ApiFn;
 }
 
 /** Buscar un pedido con numero + correo. Misma respuesta si no existe o si el correo no coincide. */
-export function OrderLookup({ api, onFound, onBack }: { api: ApiFn; onFound: (token: string) => void; onBack: () => void }) {
+export function OrderLookup({ api, slug, onFound, onBack }: { api: ApiFn; slug: string; onFound: (token: string) => void; onBack: () => void }) {
   const [f, setF] = useState({ number: "", email: "", website: "" });
+  const [recent, setRecent] = useState<Recent[]>(() => recentOrders(slug));
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const submit = async (e: FormEvent) => {
@@ -205,6 +291,13 @@ export function OrderLookup({ api, onFound, onBack }: { api: ApiFn; onFound: (to
       <nav className="sh-crumbs" aria-label="Ruta"><button onClick={onBack}><span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Ico d={IC.back} size={14} />Volver a la tienda</span></button></nav>
       <form className="sh-panel ck-lookup" onSubmit={submit} noValidate>
         <h1>Mi pedido</h1>
+        {recent.length > 0 && (
+          <div className="ck-recent" aria-label="Pedidos abiertos en este navegador">
+            <span className="sh-meta">Tus pedidos en este navegador</span>
+            {recent.map((r) => <button key={r.number} type="button" className="sh-btn sh-btn--ghost sh-btn--block" onClick={() => onFound(r.token)}><Ico d={IC.truck} size={16} />Rastrear {r.number}</button>)}
+            <button type="button" className="ck-link" onClick={() => { local.del(recentKey(slug)); setRecent([]); }}>Olvidar estos pedidos</button>
+          </div>
+        )}
         <p className="sh-note" style={{ margin: 0, fontSize: 14 }}>Escribí el número de pedido (está en el correo de confirmación) y el correo con el que compraste.</p>
         <div className="ck-hp" aria-hidden="true"><label>Sitio web<input tabIndex={-1} autoComplete="off" value={f.website} onChange={(e) => setF({ ...f, website: e.target.value })} /></label></div>
         <Field label="Número de pedido"><input value={f.number} onChange={(e) => setF({ ...f, number: e.target.value.toUpperCase() })} placeholder="ORD-000123" autoCapitalize="characters" /></Field>

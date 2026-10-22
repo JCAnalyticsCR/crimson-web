@@ -13,7 +13,7 @@ import { Link, Route, Routes, useLocation, useNavigate, useParams, useSearchPara
 import { type PubProduct } from "./Blocks";
 import CategoryPage from "./CategoryPage";
 import Checkout from "./Checkout";
-import OrderStatus, { OrderLookup } from "./OrderStatus";
+import OrderStatus, { OrderLookup, rememberOrder } from "./OrderStatus";
 import Consent from "./Consent";
 import { track } from "./analytics";
 import ProductPage from "./ProductPage";
@@ -83,7 +83,11 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
 
   const api = useCallback(async <T,>(path: string, init?: RequestInit): Promise<{ data: T; total: number | null }> => {
     const r = await fetch(`/api/public/store/${slug}${path}`, init);
-    if (!r.ok) { let m = "No se pudo cargar"; try { m = (await r.json()).detail || m; } catch { /* sin cuerpo */ } throw new Error(typeof m === "string" ? m : "No se pudo cargar"); }
+    if (!r.ok) {
+      let m = "No se pudo cargar"; try { m = (await r.json()).detail || m; } catch { /* sin cuerpo */ }
+      // el estado viaja con el error: "Mi pedido" distingue un 404 (enlace malo) de una caida pasajera (502, 429, red)
+      throw Object.assign(new Error(typeof m === "string" ? m : "No se pudo cargar"), { status: r.status });
+    }
     const t = r.headers.get("X-Total-Count");
     return { data: (await r.json()) as T, total: t ? Number(t) : null };
   }, [slug]);
@@ -239,11 +243,18 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
 
       <main id="contenido" tabIndex={-1} style={{ outline: "none" }}>
         {pedido ? (
-          <OrderStatus key={pedido} api={api} token={pedido} store={S} onBack={() => go({})} />
+          <OrderStatus key={pedido} api={api} token={pedido} store={S} slug={slug} trackHref={`${L("/")}?pedido=${encodeURIComponent(pedido)}`} onBack={() => go({})} onLookup={() => go({ v: "mi-pedido" })} />
         ) : v === "mi-pedido" ? (
-          <OrderLookup api={api} onFound={(t) => go({ pedido: t })} onBack={() => go({})} />
+          <OrderLookup api={api} slug={slug} onFound={(t) => go({ pedido: t })} onBack={() => go({})} />
         ) : v === "pagar" || v === "cotizar" ? (
-          <Checkout api={api} store={S} cart={cart} mode={v === "pagar" && isShop ? "pedido" : "cotizacion"} onPlaced={(o) => { setCart([]); go({ pedido: o.track_token }); }} onBack={() => go({})} setQty={setQty} remove={remove} quoteText={quoteText} onTerms={() => navigate(L("/info/terminos"))} />
+          <Checkout api={api} store={S} cart={cart} mode={v === "pagar" && isShop ? "pedido" : "cotizacion"} onPlaced={(o) => {
+            setCart([]);
+            if (!o.track_token) { go({}); return; }
+            rememberOrder(slug, { number: o.number, token: o.track_token });
+            // la confirmacion se abre en la direccion de seguimiento (la raiz de la tienda), no en la del producto donde
+            // se estaba: "Copiar enlace" y "Rastrear mi pedido" llevan al mismo lugar que el boton del correo
+            navigate(`${L("/")}?pedido=${encodeURIComponent(o.track_token)}`);
+          }} onBack={() => go({})} setQty={setQty} remove={remove} quoteText={quoteText} onTerms={() => navigate(L("/info/terminos"))} />
         ) : (
           <Suspense fallback={<Spin />}>
             <Routes>

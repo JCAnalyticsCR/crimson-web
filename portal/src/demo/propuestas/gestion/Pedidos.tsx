@@ -251,7 +251,7 @@ function Detalle({ o, onCerrar, onAplicar, aviso }: { o: PedidoGes; onCerrar: ()
   const pie = (
     <div className="wo-foot">
       <button type="button" className="btn btn--ghost btn--sm" onClick={() => demo("Imprimir", "En la plataforma real se abre la hoja del pedido lista para imprimir. En la vista previa no se genera ningún archivo.")}><Ico d={IC.print} />Imprimir</button>
-      <button type="button" className="btn btn--ghost btn--sm" onClick={() => demo("Enlace del cliente", "En la plataforma real se copia el enlace firmado de «Mi pedido» para mandárselo al cliente.")}><Ico d={IC.link} />Enlace del cliente</button>
+      <button type="button" className="btn btn--ghost btn--sm" onClick={() => demo("Enlace de seguimiento", "En la plataforma real se copia el enlace firmado de «Mi pedido» para mandárselo al cliente.")}><Ico d={IC.link} />Enlace de seguimiento</button>
       <button type="button" className="btn btn--ghost btn--sm" onClick={() => demo("WhatsApp", "En la plataforma real se abre WhatsApp con un mensaje para el cliente sobre su pedido. Desde la vista previa no se envía nada.")}><Ico d={IC.wa} />WhatsApp</button>
       <button type="button" className="btn btn--ghost btn--sm" onClick={() => demo("Reenviar correo", "En la plataforma real se reenvía al cliente el correo con el estado de su pedido. En la vista previa no se envía ningún correo.")}><Ico d={IC.mail} />Reenviar correo</button>
       {o.factura ? (
