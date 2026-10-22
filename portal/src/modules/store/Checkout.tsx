@@ -5,6 +5,7 @@
    Modo "cotizacion" (tienda solo catalogo): un formulario corto que llega al equipo como mensaje. */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Field, IC, Ico, local, money, newKey, session, wa, type ApiFn, type StoreInfo } from "./shopkit";
+import { Prose } from "./storeKit";
 import { track, type GaItem } from "./analytics";
 import "./checkout.css";
 
@@ -16,7 +17,11 @@ type Cfg = {
   currency: string; methods: Method[]; shipping_rates: Rate[]; provinces: Record<string, string[]>;
   outside_gam: { provinces: string[]; cantons: string[] }; terms_required: boolean; pickup: { address?: string; hours?: string }; whatsapp: string;
   free_shipping_from: string | number | null; auto_invoice: boolean;
+  /* el servidor revisa el dominio del correo (MX); sin el dato (API viejo) se asume que si */
+  verify_email?: boolean;
 };
+/* respuesta de /email-check: formato, error de dedo (gmial.com) o dominio sin correo; ok=true si el DNS no respondio */
+type MailCheck = { email: string; ok: boolean; message: string | null; suggestion: string | null };
 type Quote = {
   subtotal: number; discount_total: number; tax_total: number; shipping: number; total: number; currency: string; coupon: string | null;
   taxes: { rate: string; amount: number }[]; lines: { name: string; quantity: number; total: number; shipping: boolean }[];
@@ -40,6 +45,11 @@ export type Placed = {
 };
 
 const SAVED = "crimson-shop:mis-datos";
+/* lo que se lleva llenado del checkout, solo en esta pestana: abrir los terminos, recargar o ir atras y volver no
+   borra nada (pedido 21/10). Se borra al confirmar el pedido. Va por tienda (como el carrito): todas las tiendas
+   viven en el mismo origen y el borrador de una (paso, tarifa, metodo, cupon, terminos aceptados) no puede
+   aparecer en el checkout de otra. */
+const draftKey = (slug: string) => `crimson-shop:checkout-borrador:${slug}`;
 const STEPS = ["Tus datos", "Entrega", "Pago", "Confirmar"] as const;
 type Inv = "consumidor" | "fisica" | "juridica";
 type Form = {
@@ -50,27 +60,33 @@ type Form = {
 const digits = (s: string) => s.replace(/\D/g, "");
 const okEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim());
 
-export default function Checkout({ api, store, cart, mode, onPlaced, onBack, setQty, remove, quoteText, onTerms }: {
-  api: ApiFn; store: StoreInfo; cart: CartItem[]; mode: "pedido" | "cotizacion"; onPlaced: (p: Placed) => void; onBack: () => void;
-  setQty: (k: string, n: number) => void; remove: (k: string) => void; quoteText: (l: CartItem[]) => string; onTerms: () => void;
+export default function Checkout({ api, slug, store, cart, mode, onPlaced, onBack, setQty, remove, quoteText, termsHref }: {
+  api: ApiFn; slug: string; store: StoreInfo; cart: CartItem[]; mode: "pedido" | "cotizacion"; onPlaced: (p: Placed) => void; onBack: () => void;
+  setQty: (k: string, n: number) => void; remove: (k: string) => void; quoteText: (l: CartItem[]) => string; termsHref: string;
 }) {
   if (mode === "cotizacion") return <QuoteRequest api={api} store={store} cart={cart} onBack={onBack} quoteText={quoteText} />;
-  return <OrderCheckout api={api} store={store} cart={cart} onPlaced={onPlaced} onBack={onBack} setQty={setQty} remove={remove} onTerms={onTerms} />;
+  return <OrderCheckout api={api} slug={slug} store={store} cart={cart} onPlaced={onPlaced} onBack={onBack} setQty={setQty} remove={remove} termsHref={termsHref} />;
 }
 
-function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, onTerms }: {
-  api: ApiFn; store: StoreInfo; cart: CartItem[]; onPlaced: (p: Placed) => void; onBack: () => void;
-  setQty: (k: string, n: number) => void; remove: (k: string) => void; onTerms: () => void;
+function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, remove, termsHref }: {
+  api: ApiFn; slug: string; store: StoreInfo; cart: CartItem[]; onPlaced: (p: Placed) => void; onBack: () => void;
+  setQty: (k: string, n: number) => void; remove: (k: string) => void; termsHref: string;
 }) {
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [cfgErr, setCfgErr] = useState<string | null>(null);
-  const [step, setStep] = useState(0);
+  const DRAFT = draftKey(slug);
   const saved = useMemo(() => { try { return JSON.parse(local.get(SAVED) || "null") as Partial<Form> | null; } catch { return null; } }, []);
+  // borrador de esta pestana (manda sobre "mis datos" guardados: es lo ultimo que la persona escribio)
+  const draft = useMemo(() => { try { return JSON.parse(session.get(DRAFT) || "null") as { f?: Partial<Form>; step?: number; coupon?: string | null } | null; } catch { return null; } }, []);
+  const [step, setStep] = useState(() => Math.max(0, Math.min(3, Number(draft?.step) || 0)));
   const [f, setF] = useState<Form>({
     name: "", email: "", phone: "", inv: "consumidor", id_number: "", company: "", dtype: "envio", province: "", canton: "", district: "", address: "", rate: "",
-    method: "", coupon: "", notes: "", terms: false, website: "", ...(saved || {}), save: !!saved,
+    method: "", coupon: "", notes: "", terms: false, website: "", ...(saved || {}), save: !!saved, ...(draft?.f || {}),
   });
-  const [coupon, setCoupon] = useState<string | null>(null); // cupon aplicado (el que valido el servidor)
+  const [coupon, setCoupon] = useState<string | null>(draft?.coupon || null); // cupon aplicado (el que valido el servidor)
+  const [mail, setMail] = useState<MailCheck | null>(null); // ultima revision del correo (formato, dedo, dominio)
+  const [checkingMail, setCheckingMail] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [qErr, setQErr] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -141,6 +157,39 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
 
   // cualquier cambio en lo que se manda = intento nuevo (clave nueva)
   useEffect(() => { keyRef.current = null; }, [f, cart, coupon]);
+  // borrador en sessionStorage: nada de lo llenado se pierde al abrir los terminos, recargar o volver
+  useEffect(() => {
+    const rest: Partial<Form> = { ...f };
+    delete rest.website; // el honeypot no se guarda
+    session.set(DRAFT, JSON.stringify({ f: rest, step, coupon }));
+  }, [DRAFT, f, step, coupon]);
+
+  // correo: el servidor revisa formato, errores de dedo (gmial.com) y que el dominio reciba correo (MX). Si la
+  // revision falla (red, tope), no se frena la compra: el checkout la repite al confirmar.
+  // La revision en vuelo se comparte: el blur del correo la lanza al tocar "Continuar" y next() espera esa misma
+  // (el boton no se deshabilita mientras tanto: si no, ese primer clic se perderia entre el mousedown y el mouseup).
+  const mailReq = useRef<{ email: string; p: Promise<MailCheck | null> } | null>(null);
+  const checkMail = (raw: string): Promise<MailCheck | null> => {
+    const email = raw.trim();
+    if (!okEmail(email)) return Promise.resolve(null);
+    if (mail && mail.email === email) return Promise.resolve(mail);
+    if (mailReq.current && mailReq.current.email === email) return mailReq.current.p;
+    setCheckingMail(true);
+    const p = Promise.resolve().then(async () => {
+      try {
+        const { data } = await api<Omit<MailCheck, "email">>("/email-check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+        const r = { ...data, email };
+        setMail(r);
+        return r;
+      } catch { return null; } finally {
+        if (mailReq.current?.email === email) { mailReq.current = null; setCheckingMail(false); }
+      }
+    });
+    mailReq.current = { email, p };
+    return p;
+  };
+  const mailBad = !!mail && mail.email === f.email.trim() && !mail.ok;
+  const takeSuggestion = (sug: string) => { set("email", sug); setMail(null); void checkMail(sug); };
 
   const cur = quote?.currency || cfg?.currency || cart[0]?.currency || S.currency || "CRC";
   const idLen = f.inv === "fisica" ? 9 : 10;
@@ -149,6 +198,7 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
     if (s === 0) {
       if (f.name.trim().length < 2) e.push("Escribí tu nombre completo");
       if (!okEmail(f.email)) e.push("Escribí un correo válido: ahí te llega la confirmación");
+      else if (mailBad && mail?.message) e.push(mail.message);
       if (digits(f.phone).length < 8) e.push("Escribí un teléfono de 8 dígitos");
       if (f.inv !== "consumidor" && digits(f.id_number).length !== idLen) e.push(f.inv === "fisica" ? "La cédula física tiene 9 dígitos" : "La cédula jurídica tiene 10 dígitos");
       if (f.inv === "juridica" && f.company.trim().length < 2) e.push("Escribí la razón social");
@@ -166,7 +216,15 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
   };
   const errs = stepErrors(step);
   const goStep = (n: number) => { setStep(n); setTouched(false); setErr(null); window.setTimeout(() => formTop.current?.focus({ preventScroll: false }), 0); window.scrollTo({ top: 0 }); };
-  const next = () => { if (errs.length) { setTouched(true); window.setTimeout(() => errRef.current?.scrollIntoView({ block: "center" }), 0); return; } goStep(Math.min(3, step + 1)); };
+  const showErrs = () => { setTouched(true); window.setTimeout(() => errRef.current?.scrollIntoView({ block: "center" }), 0); };
+  const next = async () => {
+    if (errs.length) { showErrs(); return; }
+    if (step === 0) {
+      const r = await checkMail(f.email);
+      if (r && !r.ok) { showErrs(); return; }
+    }
+    goStep(Math.min(3, step + 1));
+  };
 
   const applyCoupon = async () => {
     const code = f.coupon.trim().toUpperCase();
@@ -179,7 +237,7 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
 
   const submit = async (e?: FormEvent) => {
     e?.preventDefault();
-    if (step < 3) { next(); return; }
+    if (step < 3) { await next(); return; }
     for (let s = 0; s < 4; s++) {
       if (!stepErrors(s).length) continue;
       if (s !== step) goStep(s);
@@ -203,6 +261,7 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
         body: JSON.stringify({ lines, contact, delivery, shipping_method: f.rate || null, payment_method: f.method, coupon_code: coupon, notes: f.notes.trim() || null, accept_terms: f.terms, idempotency_key: keyRef.current, expected_total: String(quote.total), website: f.website || null }),
       });
       if (!data.number) { setErr("No pudimos registrar el pedido. Escribinos por WhatsApp."); return; }
+      session.del(DRAFT); // pedido hecho: el proximo checkout arranca limpio (o con "mis datos" si los guardo)
       if (!data.duplicate) track("purchase", { transaction_id: data.number, currency: data.currency, value: Number(data.total), items: gaItems() });
       session.set(`crimson-shop:placed:${data.number}`, JSON.stringify({ email: data.email, pay: data.pay }));
       if (data.pay?.checkout_url) { onPlaced(data); window.location.assign(data.pay.checkout_url); return; }
@@ -251,7 +310,16 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
             <fieldset className="sh-fieldset"><legend>Contacto</legend>
               <Field label="Nombre completo"><input autoComplete="name" value={f.name} onChange={(e) => set("name", e.target.value)} required /></Field>
               <div className="sh-2">
-                <Field label="Correo" hint="Ahí te llega la confirmación y el enlace para seguir tu pedido."><input type="email" inputMode="email" autoComplete="email" value={f.email} onChange={(e) => set("email", e.target.value)} required /></Field>
+                <div>
+                  <Field label="Correo" hint="Ahí te llega la confirmación y el enlace para seguir tu pedido."><input type="email" inputMode="email" autoComplete="email" value={f.email} onChange={(e) => set("email", e.target.value)} onBlur={(e) => void checkMail(e.target.value)} aria-invalid={mailBad || undefined} required /></Field>
+                  {checkingMail && <p className="sh-note ck-mail" role="status">Revisando el correo…</p>}
+                  {!checkingMail && mail && mail.email === f.email.trim() && (mailBad || mail.suggestion) && (
+                    <p className={`ck-mail${mailBad ? " ck-mail--bad" : ""}`} role="status">
+                      {mailBad ? mail.message : "¿Escribiste bien el correo?"}
+                      {mail.suggestion && <> <button type="button" className="ck-link" onClick={() => takeSuggestion(mail.suggestion!)}>Usar {mail.suggestion}</button></>}
+                    </p>
+                  )}
+                </div>
                 <Field label="Teléfono / WhatsApp"><input type="tel" inputMode="tel" autoComplete="tel" value={f.phone} onChange={(e) => set("phone", e.target.value)} placeholder="8888 8888" required /></Field>
               </div>
               <div className="sh-field"><span className="ck-label">Factura electrónica</span>
@@ -339,7 +407,7 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
               </fieldset>
               <label className="ck-check">
                 <input type="checkbox" checked={f.terms} onChange={(e) => set("terms", e.target.checked)} />
-                <span>Acepto los {S.legal?.terms ? <button type="button" className="ck-link" onClick={onTerms}>términos y condiciones</button> : "términos y condiciones"} de compra{cfg.terms_required ? "" : " (opcional)"}</span>
+                <span>Acepto los {S.legal?.terms ? <button type="button" className="ck-link" onClick={() => setShowTerms(true)} aria-haspopup="dialog">términos y condiciones</button> : "términos y condiciones"} de compra{cfg.terms_required ? "" : " (opcional)"}</span>
               </label>
             </>
           )}
@@ -348,13 +416,47 @@ function OrderCheckout({ api, store: S, cart, onPlaced, onBack, setQty, remove, 
           {err && <p className="sh-err" role="alert" style={{ margin: 0 }}>{err}</p>}
           <div className="ck-actions">
             {step > 0 && <button type="button" className="sh-btn sh-btn--ghost" onClick={() => goStep(step - 1)}><Ico d={IC.back} size={16} />Atrás</button>}
-            <button type="submit" className="sh-btn sh-btn--crimson ck-go" disabled={busy || (step === 3 && (!quote || cart.some((l) => !!lineProblem(quote, l, cart))))}>
+            <button type="submit" className="sh-btn sh-btn--crimson ck-go" aria-busy={(step === 0 && checkingMail) || undefined} disabled={busy || (step === 3 && (!quote || cart.some((l) => !!lineProblem(quote, l, cart))))}>
               {step < 3 ? <>Continuar<Ico d={IC.next} size={16} /></> : busy ? "Enviando…" : <>Confirmar pedido · {totalTxt}</>}
             </button>
           </div>
         </div>
         <aside className="sh-summary sh-panel ck-aside" aria-label="Resumen del pedido">{summary}</aside>
       </form>
+      {showTerms && S.legal?.terms && <TermsModal text={S.legal.terms} href={termsHref} onClose={() => setShowTerms(false)} onAccept={() => { set("terms", true); setShowTerms(false); }} />}
+    </div>
+  );
+}
+
+/** Terminos y condiciones encima del checkout (pedido 21/10): antes el enlace navegaba fuera y se perdia lo llenado.
+    Tambien se pueden abrir en otra pestana. Escape o el fondo cierran; el foco vuelve al enlace. */
+function TermsModal({ text, href, onClose, onAccept }: { text: string; href: string; onClose: () => void; onAccept: () => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  useEffect(() => { close.current = onClose; });
+  useEffect(() => {
+    const back = document.activeElement as HTMLElement | null;
+    box.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close.current(); };
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = prev; back?.focus?.(); };
+  }, []);
+  return (
+    <div className="sh-modal ck-terms" onClick={onClose}>
+      <div className="sh-modal__box" role="dialog" aria-modal="true" aria-labelledby="ck-terms-t" tabIndex={-1} ref={box} onClick={(e) => e.stopPropagation()}>
+        <div className="ck-terms__head">
+          <h2 id="ck-terms-t">Términos y condiciones</h2>
+          <button type="button" className="sh-x" onClick={onClose} aria-label="Cerrar"><Ico d={IC.x} /></button>
+        </div>
+        <div className="ck-terms__body"><Prose text={text} /></div>
+        <div className="ck-terms__foot">
+          <a className="ck-link" href={href} target="_blank" rel="noopener">Abrir en otra pestaña</a>
+          <button type="button" className="sh-btn sh-btn--ghost" onClick={onClose}>Cerrar</button>
+          <button type="button" className="sh-btn sh-btn--crimson" onClick={onAccept}><Ico d={IC.check} size={16} />Leí y acepto</button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -22,6 +22,8 @@ export default function ProductPage() {
   const [variant, setVariant] = useState<Variant | undefined>();
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
+  // ya lo agrego: "Ir al carrito" queda a mano hasta salir de la ficha (pedido 21/10; antes el enlace se iba a los 2 s)
+  const [inCart, setInCart] = useState(false);
   const [shared, setShared] = useState(false);
   const [zoom, setZoom] = useState(false);
   const addT = useRef<number | undefined>(undefined);
@@ -33,6 +35,7 @@ export default function ProductPage() {
     ctx.api<Detail>(`/item/${encodeURIComponent(ref)}`).then((x) => { if (!alive) return; setD(x); setVariant(x.variants?.[0]); }).catch(() => alive && setMissing(true));
     return () => { alive = false; };
   }, [ref, ctx]);
+  useEffect(() => setInCart(false), [ref]);
   // el nombre cambio -> direccion canonica sin recargar
   useEffect(() => { if (d && `/p/${ref}` !== d.path) nav(to(d.path), { replace: true }); }, [d]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -71,6 +74,7 @@ export default function ProductPage() {
   const add = () => {
     ctx.addToCart(d, qty, variant);
     setAdded(true);
+    setInCart(true);
     window.clearTimeout(addT.current);
     addT.current = window.setTimeout(() => setAdded(false), 1800);
   };
@@ -125,7 +129,7 @@ export default function ProductPage() {
                 </div>
                 {a && (a.state === "disponible" || a.state === "ultimas") && a.cantidad != null && a.cantidad > 0 && a.cantidad < 999 ? <p className="vt-buybox__note">Quedan {a.cantidad} en bodega{a.max_qty && a.max_qty > a.cantidad ? `; ${a.max_qty - a.cantidad} más bajo pedido` : ""}.</p> : null}
                 {soldOut && <p className="vt-buybox__note">No lo podemos vender en línea en este momento: escribinos y te confirmamos disponibilidad y plazo.</p>}
-                {added && <button className="vt-link vt-buy__view" onClick={ctx.openCart}>Ver {ctx.isShop ? "carrito" : "cotización"} →</button>}
+                {inCart && <button className="sh-btn sh-btn--block vt-buy__go" onClick={ctx.openCart}><Ico d={IC.bag} />Ir {ctx.isShop ? "al carrito" : "a la cotización"}</button>}
                 <Link className="vt-install" to={installHref}>
                   <Ico d={IC.tool} /><span><b>¿Lo instalamos nosotros?</b><small>Técnicos de Crimson · te cotizamos la instalación sin compromiso</small></span><Ico d={IC.next} />
                 </Link>
@@ -188,7 +192,8 @@ export default function ProductPage() {
       <div className="vt-stickybuy" aria-hidden={false}>
         <div><PriceTag p={shown} /></div>
         {ask ? <a className="sh-btn sh-btn--crimson" href="#comprar">Pedir precio</a>
-          : <button className="sh-btn sh-btn--crimson" data-done={added} onClick={add} disabled={soldOut}><Ico d={added ? IC.check : IC.bag} />{soldOut ? (a?.state === "agotado" ? "Agotado" : "Sin existencias") : added ? "Agregado" : "Agregar"}</button>}
+          : inCart && !added ? <button className="sh-btn" onClick={ctx.openCart}><Ico d={IC.bag} />Ir {ctx.isShop ? "al carrito" : "a la cotización"}</button>
+            : <button className="sh-btn sh-btn--crimson" data-done={added} onClick={add} disabled={soldOut}><Ico d={added ? IC.check : IC.bag} />{soldOut ? (a?.state === "agotado" ? "Agotado" : "Sin existencias") : added ? "Agregado" : "Agregar"}</button>}
       </div>
 
       {zoom && <Lightbox imgs={imgs} start={photo} name={d.name} onClose={(i) => { setPhoto(i); setZoom(false); }} />}

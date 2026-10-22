@@ -22,10 +22,19 @@ from sqlalchemy.orm import Session
 from ..core.clientip import ip_key
 from ..core.db import get_db
 from ..core.deps import Principal, require
-from ..core.ratelimit import checkout_global_limiter, order_card_limiter, order_lookup_limiter, order_proof_ip_limiter, order_proof_limiter, public_limiter
+from ..core.ratelimit import (
+    checkout_global_limiter,
+    email_check_global_limiter,
+    email_check_limiter,
+    order_card_limiter,
+    order_lookup_limiter,
+    order_proof_ip_limiter,
+    order_proof_limiter,
+    public_limiter,
+)
 from ..models import Media, Order, OrderLine, Tenant
 from ..providers.payments import key_mode
-from ..services import cr_geo, onvo, store_inventory
+from ..services import cr_geo, email_check, onvo, store_inventory
 from ..services import inventory as invsvc
 from ..services import store_orders as so
 from ..services.documents import audit
@@ -83,7 +92,25 @@ def checkout_config(slug: str, db: Session = Depends(get_db)):
         "free_shipping_from": free_shipping_threshold(t, pricer),
         "auto_invoice": bool(ck.get("auto_invoice", True)),
         "whatsapp": cfg.get("whatsapp") or "",
+        "verify_email": bool(ck.get("verify_email", True)),
     }
+
+
+class EmailCheckIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    email: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/public/store/{slug}/email-check")
+def email_check_public(slug: str, data: EmailCheckIn, request: Request, db: Session = Depends(get_db)):
+    """El checkout revisa el correo al salir del paso "Tus datos": formato, errores de dedo y que el dominio tenga MX
+    (pedido 21/10, item 32). Si el DNS no responde, ok=True: no se frena una compra por una falla del DNS."""
+    email_check_limiter.hit(f"email:{ip_key(client_ip(request))}")
+    email_check_global_limiter.hit("email:*")  # muchas IPs con dominios que no responden no acaparan los hilos
+    t = _tenant(db, slug)
+    r = email_check.check_email(data.email, dns=bool(so.checkout_cfg(t).get("verify_email", True)))
+    return {k: r[k] for k in ("ok", "reason", "message", "suggestion")}
 
 
 def _checkout_out(db: Session, t: Tenant, o: Order, pay: dict | None = None, duplicate: bool = False, stock: dict | None = None) -> dict:
@@ -134,6 +161,12 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
     c = _contact(data.contact)
     if not c.email and len(so.digits(c.phone)) < 8:
         raise HTTPException(422, "Indicá un correo para enviarte la confirmación")
+    if c.email:
+        # el mismo chequeo del paso "Tus datos" (cacheado): un dominio que no existe o sin MX no recibe la confirmacion.
+        # Los errores de dedo (gmial.com) se corrigen siempre; Mi Tienda solo apaga la consulta del DNS.
+        chk = email_check.check_email(str(c.email), dns=bool(so.checkout_cfg(t).get("verify_email", True)))
+        if not chk["ok"]:
+            raise HTTPException(422, chk["message"])
     id_type, id_number = so.check_id(c.id_type, c.id_number)
     if id_type == "juridica" and id_number and not c.company:
         raise HTTPException(422, "Para factura a nombre de una empresa, escribí la razón social")
@@ -233,6 +266,8 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
             pay = {"error": ex.detail}
     so.notify_customer(db, t, o, "recibido")
     so.notify_team(db, t, o, "nuevo")
+    if kind == "efectivo":  # contra entrega: el envio sale sin pago previo, el aviso del mensajero va desde ya
+        so.notify_delivery(db, t, o)
     db.commit()
     stock = {
         "reserva_vence": hold.get("vence"),
@@ -414,6 +449,8 @@ class CheckoutCfgIn(_Cfg):
     auto_invoice: bool = True
     pickup: PickupCfg = PickupCfg()
     notify_roles: list[str] = Field(default_factory=lambda: ["admin", "ventas"], max_length=8)
+    verify_email: bool = True
+    delivery_notice: bool = True
 
 
 def _cfg_out(db: Session, t: Tenant) -> dict:

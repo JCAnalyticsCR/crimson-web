@@ -324,6 +324,10 @@ survey_request_limiter = SlidingWindow(limit=10, seconds=3600)
 quote_limiter = SlidingWindow(limit=300, seconds=600)
 checkout_global_limiter = SlidingWindow(limit=300, seconds=3600)
 order_lookup_limiter = SlidingWindow(limit=10, seconds=600)
+# "Revisar el correo" del checkout (consulta DNS del dominio): por IP; el checkout lo vuelve a revisar al confirmar
+email_check_limiter = SlidingWindow(limit=40, seconds=600)
+# tope global de la misma revision: cada consulta puede ocupar un hilo hasta DNS_TIMEOUT
+email_check_global_limiter = SlidingWindow(limit=600, seconds=3600)
 # Comprobantes de pago: 10 por hora por pedido y por IP (subir el 11.o de OTRO pedido sigue entrando); el tope por
 # IP frena a quien prueba con muchos enlaces de pedido
 order_proof_limiter = SlidingWindow(limit=10, seconds=3600)

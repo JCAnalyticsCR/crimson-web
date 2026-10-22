@@ -77,6 +77,11 @@ CHECKOUT_DEFAULTS: dict = {
     "auto_invoice": True,  # comprobante electronico automatico al confirmarse el pago
     "pickup": {"address": "", "hours": ""},
     "notify_roles": ["admin", "ventas"],
+    # correo del comprador: formato, errores de dedo y dominio con MX (services/email_check; si el DNS no responde,
+    # no se bloquea). Pedido 21/10, item 32.
+    "verify_email": True,
+    # aviso interno por cada pedido con envio a domicilio, para coordinar el mensajero (pedido 21/10, item 33)
+    "delivery_notice": True,
 }
 
 
@@ -533,6 +538,38 @@ def notify_team(db: Session, t: Tenant, o: Order, kind: str, detail: str | None 
     return notify_roles(db, t, roles, titulo, cuerpo, "order", o.id)
 
 
+DELIVERY_NOTICE_ROLES = ("admin",)  # quien coordina el mensajero (pedido 21/10: el aviso le llega a Andres)
+
+
+def notify_delivery(db: Session, t: Tenant, o: Order) -> int:
+    """Aviso interno por cada pedido con envio a domicilio para coordinar el mensajero (pedido 21/10, item 33; por
+    correo, sin WhatsApp). Sale cuando el envio ya es un hecho: al confirmarse el pago, o al crearse si es efectivo
+    contra entrega (ese avanza sin pago). Una sola vez por pedido (llave de la bitacora de salida). No deja nota en el
+    historial: el historial lo ve el cliente en el seguimiento y este aviso es interno."""
+    from .mail import notify_roles
+
+    dv = o.delivery or {}
+    if dv.get("type") != "envio" or not checkout_cfg(t).get("delivery_notice", True):
+        return 0
+    e = html.escape
+    c = o.contact or {}
+    zona = ", ".join(x for x in (dv.get("district"), dv.get("canton"), dv.get("province")) if x)
+    titulo = f"Envío a domicilio por coordinar · pedido {o.number}" + (f" · {dv.get('canton')}" if dv.get("canton") else "")
+    articulos = "".join(f"<li>{d(ln.quantity).normalize():f} × {e(ln.name)}</li>" for ln in o.lines if not _is_ship(ln))
+    pago = "Pagado" if o.paid_at else ("Efectivo contra entrega: cobrar al entregar" if o.payment_kind == "efectivo" else STATUS_LABEL.get(o.status, o.status))
+    cuerpo = (
+        f"<p><b>{e(titulo)}</b></p>"
+        f"<p>Hay que coordinar el mensajero para este pedido.</p>"
+        f"<p><b>Recibe:</b> {e(c.get('name') or '—')} · Tel. {e(c.get('phone') or '—')}</p>"
+        f"<p><b>Dirección:</b> {e(dv.get('address') or '—')}{f'<br>{e(zona)}' if zona else ''}</p>"
+        f"<p><b>Tarifa:</b> {e(o.shipping_method or '—')} · <b>Total del pedido:</b> {e(fmt_money(o.total, o.currency))} · <b>Pago:</b> {e(pago)}</p>"
+        f"{f'<p><b>Nota del cliente:</b> {e(o.notes)}</p>' if o.notes else ''}"
+        f"{f'<ul>{articulos}</ul>' if articulos else ''}"
+        f"<p>Detalle en Pedidos de la tienda.</p>"
+    )
+    return notify_roles(db, t, DELIVERY_NOTICE_ROLES, titulo, cuerpo, "order", o.id, dedupe_key=f"envio-domicilio:{o.id}")
+
+
 def email_status(db: Session, o: Order) -> list[dict]:
     rows = db.scalars(
         select(EmailOutbox).where(EmailOutbox.tenant_id == o.tenant_id, EmailOutbox.entity == "order", EmailOutbox.entity_id == o.id).order_by(EmailOutbox.id)
@@ -680,6 +717,7 @@ def transition(
     _hist(o, new, by, note, client_note)
     if new == "pagado":
         auto_invoice(db, t, o)
+        notify_delivery(db, t, o)  # envio a domicilio pagado: aviso interno para coordinar el mensajero
     from ..routers.events import on_order_status
 
     on_order_status(db, o, new)  # entradas de evento ligadas al pedido (si las hay)

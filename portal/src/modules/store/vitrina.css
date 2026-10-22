@@ -272,6 +272,18 @@
 .vt-kit__cell i { position: absolute; left: 5px; bottom: 3px; font-style: normal; font-family: var(--mono); font-size: 8px; letter-spacing: .12em; color: rgba(255, 255, 255, .5); white-space: nowrap; display: inline-flex; align-items: center; }
 .vt-kit__cell:first-child i { top: 5px; bottom: auto; color: rgba(21, 19, 26, .6); }
 .vt-kit__cell .vt-rec { width: 6px; height: 6px; margin-right: 5px; animation: none; }
+/* fotos fijas de los equipos reales del kit (pedido 21/10): 1 a 4 en mosaico; con 3, la primera (las camaras) manda */
+.vt-kit__photos { display: grid; gap: 3px; padding: 3px; background: #0d0c10; overflow: hidden; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.vt-kit__photos[data-n="1"] { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+.vt-kit__photos[data-n="2"] { grid-template-rows: 1fr; }
+.vt-kit__photos[data-n="3"] > :first-child { grid-row: span 2; }
+.vt-kit__photo { position: relative; min-width: 0; min-height: 0; border-radius: 3px; background: var(--vt-tile); overflow: hidden; }
+.vt-kit__photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; padding: 9% 9% 16%; mix-blend-mode: multiply; }
+.vt-kit__photo i { position: absolute; left: 6px; right: 6px; bottom: 4px; font-style: normal; font-family: var(--mono); font-size: 8.5px; letter-spacing: .12em; text-transform: uppercase; color: rgba(21, 19, 26, .62); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; }
+.vt-kit__photo .vt-rec { width: 6px; height: 6px; margin-right: 5px; animation: none; flex: none; }
+/* tarjeta en espera mientras carga la portada (los kits van arriba de las categorias: nada salta) */
+.vt-kit--skel { min-height: 380px; }
+.vt-kit--skel .vt-kit__img { background: #232129; }
 .vt-kit__body { display: flex; flex-direction: column; gap: 8px; padding: 16px 18px 18px; flex: 1; min-width: 0; }
 .vt-kit__body > b { font-family: var(--serif); font-size: 22px; letter-spacing: -.015em; line-height: 1.08; color: #fff; }
 .vt-kit__body > span:not([class]) { color: var(--muted-dark); font-size: 14px; line-height: 1.45; }
@@ -650,3 +662,10 @@ span.vt-kitres__img { display: grid; place-items: center; background: var(--vt-i
 }
 
 .vt-results[data-loading="true"] .vt-grid { opacity: .55; transition: opacity var(--dur-micro); }
+
+/* "Arma tu sistema": fotos fijas de los equipos del kit sugerido (las mismas de la tarjeta en la portada) */
+.vt-kitres__photos { transition: opacity var(--dur-micro); }
+.vt-kitres__photos[data-busy="true"] { opacity: .55; }
+.vt-kitres__photos .vt-kit__img { margin: 0; }
+/* "Ir al carrito" despues de agregar (pedido 21/10): queda a mano, no se esconde a los 2 segundos */
+.vt-buy__go { min-height: 48px; }
