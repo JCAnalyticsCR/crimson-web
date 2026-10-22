@@ -14,7 +14,7 @@ type Pub = {
   lines: { name: string; quantity: number; unit_price: number; tax_rate: number; total: number; shipping?: boolean }[];
   contact: { name: string | null; email: string | null }; shipping_method: string | null;
   delivery: { type: "envio" | "retiro"; province?: string; canton?: string; district?: string } | null; pickup: { address?: string; hours?: string } | null;
-  payment_method: string | null; payment_kind: string | null; instructions: string | null; needs_proof: boolean; proofs: { n?: number; filename: string; at: string; pdf?: boolean }[];
+  payment_method: string | null; payment_kind: string | null; instructions: string | null; needs_proof: boolean; proofs: { n?: number; filename: string; at: string; pdf?: boolean; open?: boolean }[];
   card: { pending: boolean; simulated: boolean } | null; tracking_number: string | null; carrier: string | null; cancel_reason: string | null;
   /* cambios de estado + notas que la empresa marco para el cliente (kind "nota"); las internas no llegan */
   history: { status: string; label: string; at: string; note?: string | null; kind?: string }[]; whatsapp: string; store_name: string;
@@ -23,13 +23,17 @@ type Placed = { email: { to: string | null; status: string } | null; pay: { chec
 
 const MAX = 5 * 1024 * 1024;
 
-/* Pedidos abiertos en este navegador (los ultimos 5): "Mi pedido" los ofrece sin buscar el correo. */
+/* Pedidos comprados en este navegador (los ultimos 5): "Mi pedido" los ofrece sin buscar el correo. El enlace es la
+   unica llave del pedido, asi que se guarda SOLO al confirmar la compra (no cada vez que alguien abre un enlace, p. ej.
+   el equipo desde el panel), vence a los RECENT_DAYS y sale de la lista cuando el pedido se entrega o se cierra. */
 export type Recent = { number: string; token: string; at: string };
+const RECENT_DAYS = 30;
 const recentKey = (slug: string) => `crimson-shop:pedidos:${slug}`;
 export function recentOrders(slug: string): Recent[] {
   try {
     const v = JSON.parse(local.get(recentKey(slug)) || "[]");
-    return Array.isArray(v) ? v.filter((x) => x && typeof x.number === "string" && typeof x.token === "string") : [];
+    const limit = Date.now() - RECENT_DAYS * 86_400_000;
+    return Array.isArray(v) ? v.filter((x) => x && typeof x.number === "string" && typeof x.token === "string" && Date.parse(x.at) > limit) : [];
   } catch { return []; }
 }
 export function rememberOrder(slug: string, r: { number: string | null; token: string }) {
@@ -37,6 +41,13 @@ export function rememberOrder(slug: string, r: { number: string | null; token: s
   const list = [{ number: r.number, token: r.token, at: new Date().toISOString() }, ...recentOrders(slug).filter((x) => x.number !== r.number)].slice(0, 5);
   local.set(recentKey(slug), JSON.stringify(list));
 }
+function forgetOrder(slug: string, number: string) {
+  const all = recentOrders(slug);
+  const list = all.filter((x) => x.number !== number);
+  if (list.length === all.length) return;
+  if (list.length) local.set(recentKey(slug), JSON.stringify(list)); else local.del(recentKey(slug));
+}
+const CLOSED = ["entregado", "cancelado", "reembolsado"];
 const ORDER = ["nuevo", "en_revision", "pagado", "preparando", "listo", "enviado", "entregado"];
 
 export default function OrderStatus({ api, token, store, slug, trackHref, onBack, onLookup }: {
@@ -58,7 +69,7 @@ export default function OrderStatus({ api, token, store, slug, trackHref, onBack
       try {
         const { data } = await api<Pub>(path);
         hasO.current = true; setO(data); setMissing(null);
-        rememberOrder(slug, { number: data.number, token });
+        if (CLOSED.includes(data.status)) forgetOrder(slug, data.number);
         return;
       } catch (e) {
         const notFound = (e as { status?: number }).status === 404;
@@ -68,7 +79,7 @@ export default function OrderStatus({ api, token, store, slug, trackHref, onBack
         return;
       }
     }
-  }, [api, path, slug, token]);
+  }, [api, path, slug]);
   useEffect(() => { load(true); }, [load]);
   // al volver de ONVO el webhook puede tardar: se llama card/sync de inmediato y cada 10 s hasta 12 veces.
   // Depende de un booleano (no de `o`): cada respuesta hace setO y, atado a `o`, el efecto se relanzaria sin fin.
@@ -117,7 +128,9 @@ export default function OrderStatus({ api, token, store, slug, trackHref, onBack
   const proofHref = (n: number) => `/api/public/store/${encodeURIComponent(slug)}${path}/proofs/${n}`;
   const proofList = o.proofs.length > 0 && (
     <ul className="ck-files">{o.proofs.map((p, i) => (
-      <li key={p.at + i}><Ico d={IC.check} size={14} /><a href={proofHref(p.n ?? i)} target="_blank" rel="noopener noreferrer" title="Ver el comprobante que subiste">{p.filename}</a> · {fmtWhen(p.at)}</li>
+      <li key={p.at + i}><Ico d={IC.check} size={14} />{p.open === false
+        ? <span title="Por seguridad el archivo ya no se abre desde este enlace">{p.filename}</span>
+        : <a href={proofHref(p.n ?? i)} target="_blank" rel="noopener noreferrer" title="Ver el comprobante que subiste">{p.filename}</a>} · {fmtWhen(p.at)}</li>
     ))}</ul>
   );
   const payBox = !!o.instructions;
@@ -170,7 +183,7 @@ export default function OrderStatus({ api, token, store, slug, trackHref, onBack
             <a className="sh-btn sh-btn--crimson sh-btn--sm" href={trackHref} onClick={goTrack}><Ico d={IC.truck} size={16} />Rastrear mi pedido</a>
             <button type="button" className="sh-btn sh-btn--ghost sh-btn--sm" onClick={() => copy(new URL(trackHref, window.location.href).href, "link")}><Ico d={IC.copy} size={16} />{copied === "link" ? "Enlace copiado" : "Copiar enlace de seguimiento"}</button>
           </div>
-          <small>Guardá el enlace: ahí ves el estado de tu pedido sin buscar el correo. Desde este navegador también lo encontrás en «Mi pedido».</small>
+          <small>Guardá el enlace: ahí ves el estado de tu pedido sin buscar el correo. Desde este navegador también lo encontrás en «Mi pedido» durante {RECENT_DAYS} días.</small>
         </div>
       )}
       <header className="ck-ohead">
@@ -208,7 +221,7 @@ export default function OrderStatus({ api, token, store, slug, trackHref, onBack
                 <div className="ck-proof">
                   <input ref={fileRef} id="ck-proof" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(e) => upload(e.target.files?.[0])} hidden />
                   <label htmlFor="ck-proof" className="sh-btn sh-btn--crimson" aria-disabled={busy === "proof"}><Ico d={IC.upload} size={16} />{busy === "proof" ? "Subiendo…" : o.proofs.length ? "Subir otro comprobante" : "Subir comprobante"}</label>
-                  <small>Foto o PDF, máximo 5 MB. Solo lo ve el equipo de {o.store_name || store.name}.</small>
+                  <small>Foto o PDF, máximo 5 MB. Lo ven solo vos (con este enlace) y el equipo de {o.store_name || store.name}.</small>
                   {proofList}
                 </div>
               )}

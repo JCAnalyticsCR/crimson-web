@@ -297,26 +297,34 @@ async def order_proof(slug: str, token: str, request: Request, file: UploadFile 
 
 _PROOF_HEADERS = {
     "Cache-Control": "private, no-store",
-    "Content-Security-Policy": "default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; sandbox",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
 }
+# imagen: documento sandbox sin nada que ejecutar. PDF: sin `sandbox` ni CSP, porque el visor integrado de
+# Chrome/Firefox no abre un PDF dentro de un documento sandbox (sale en blanco o "bloqueado"); el archivo ya se
+# olfateo como PDF al subirlo (%PDF) y nosniff impide que el navegador lo trate como otra cosa.
+_PROOF_CSP_IMG = "default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; sandbox"
 
 
 @router.get("/public/store/{slug}/orders/{token}/proofs/{n}")
 def order_proof_file(slug: str, token: str, n: int, request: Request, db: Session = Depends(get_db)):
     """Reunion 21/10 (item 34): el cliente vuelve a ver el comprobante que subio. Solo con el enlace firmado de SU
-    pedido y solo los archivos colgados de ese pedido (por posicion: nunca un id de multimedia que se pueda probar)."""
+    pedido, solo los archivos colgados de ese pedido (por posicion: nunca un id de multimedia que se pueda probar) y
+    solo mientras el pedido siga abierto y dentro de so.PROOF_VIEW_DAYS (el enlace dura 400 dias y se reenvia)."""
     public_limiter.hit(f"proofview:{ip_key(client_ip(request))}")
     t, o = _public_order(db, slug, token)
     proofs = o.proofs or []
-    if n < 0 or n >= len(proofs):
+    if n < 0 or n >= len(proofs) or not so.proof_viewable(o, proofs[n]):
         raise HTTPException(404, "Comprobante no encontrado")
     m = db.get(Media, proofs[n].get("media_id"))
     if not m or m.tenant_id != t.id:
         raise HTTPException(404, "Comprobante no encontrado")
-    name = "".join(ch if (ch.isascii() and ch.isalnum()) or ch in "._-" else "_" for ch in (m.filename or "comprobante"))[:120] or "comprobante"
-    return Response(m.data, media_type=m.content_type, headers={**_PROOF_HEADERS, "Content-Disposition": f'inline; filename="{name}"'})
+    raw = proofs[n].get("filename") or "comprobante"
+    name = "".join(ch if (ch.isascii() and ch.isalnum()) or ch in "._-" else "_" for ch in raw)[:120] or "comprobante"
+    headers = {**_PROOF_HEADERS, "Content-Disposition": f'inline; filename="{name}"'}
+    if m.content_type != "application/pdf":
+        headers["Content-Security-Policy"] = _PROOF_CSP_IMG
+    return Response(m.data, media_type=m.content_type, headers=headers)
 
 
 @router.post("/public/store/{slug}/orders/{token}/card")
@@ -551,6 +559,11 @@ def set_status(oid: int, data: StatusIn, p: Principal = Depends(require("sales",
     if data.payment_ref and data.status == "pagado":
         o.payment_ref = data.payment_ref
     note = data.note
+    # el motivo de cancelar y lo que fallo en un comprobante rechazado el portal los rotula "lo ve el cliente": aqui
+    # (y solo aqui) ese texto escrito por la persona pasa a ser la nota publica. transition() nunca lo promueve.
+    client_note = data.client_note
+    if not (client_note or "").strip() and (data.note or "").strip() and (data.status == "cancelado" or (data.status == "nuevo" and o.status == "en_revision")):
+        client_note = data.note
     afuera = store_inventory.out_for_order(db, o) if data.status in ("cancelado", "reembolsado") else {}
     if afuera and data.restock is None:
         raise HTTPException(422, "Este pedido ya sacó mercadería de bodega: indicá si el producto volvió (restock) y a qué bodega")
@@ -588,7 +601,7 @@ def set_status(oid: int, data: StatusIn, p: Principal = Depends(require("sales",
         carrier=data.carrier,
         refund_amount=data.refund_amount,
         notify=data.notify,
-        client_note=data.client_note,
+        client_note=client_note,
     )
     if afuera:
         if data.restock:

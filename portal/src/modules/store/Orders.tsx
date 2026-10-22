@@ -191,12 +191,13 @@ function Detail({ o, labels, onClose, onChange }: { o: Order; labels: Record<str
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
   const addNote = async () => {
-    if (!freeNote.trim()) return;
+    if (busy || !freeNote.trim()) return; // Enter dos veces antes de la respuesta no duplica la nota
     setBusy(true);
     try {
       const r = await api<Order>(`/store-orders/${o.id}/note`, { method: "POST", json: { note: freeNote.trim(), client: freeClient } });
       toast(freeClient ? "Nota agregada: el cliente la ve en su seguimiento" : "Nota interna agregada");
-      setFreeNote(""); onChange(r);
+      // la casilla vuelve a desmarcarse: cada nota para el cliente se marca a proposito (la siguiente no se filtra)
+      setFreeNote(""); setFreeClient(false); onChange(r);
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } finally { setBusy(false); }
   };
   const copyLink = async () => { if (!o.track_url) return; try { await navigator.clipboard.writeText(o.track_url); toast("Enlace de seguimiento copiado"); } catch { toast("No se pudo copiar", "bad"); } };

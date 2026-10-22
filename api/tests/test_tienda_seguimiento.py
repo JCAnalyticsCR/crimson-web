@@ -52,7 +52,9 @@ def test_enlace_firmado_con_reloj_adelantado_abre(client, auth):
     pub = _ver(client, o["track_token"]).json()
     payload = jwt.decode(o["track_token"], settings.jwt_secret, algorithms=[settings.jwt_algorithm])
     now = datetime.now(UTC)
-    adelantado = jwt.encode({**payload, "iat": now + timedelta(seconds=90), "exp": now + timedelta(days=400)}, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    adelantado = jwt.encode(
+        {**payload, "iat": now + timedelta(seconds=90), "exp": now + timedelta(days=400)}, settings.jwt_secret, algorithm=settings.jwt_algorithm
+    )
     r = _ver(client, adelantado)
     assert r.status_code == 200 and r.json()["number"] == pub["number"]
     # demasiado en el futuro no: no es reloj, es un token raro
@@ -110,7 +112,9 @@ def test_historial_muestra_notas_para_el_cliente_y_esconde_las_internas(client, 
     assert all(x["note"] is None for x in pub["history"] if x["status"] in ("nuevo", "pagado", "preparando"))
     # el panel ve ambas
     hist = client.get(f"/store-orders/{oid}").json()["history"]
-    assert any(x.get("kind") == "nota" and x.get("client_note") for x in hist) and any(x.get("note") == "Cliente frecuente, ofrecer garantía extendida" for x in hist)
+    assert any(x.get("kind") == "nota" and x.get("client_note") for x in hist) and any(
+        x.get("note") == "Cliente frecuente, ofrecer garantía extendida" for x in hist
+    )
 
 
 def test_motivo_de_rechazo_y_cancelacion_los_ve_el_cliente(client, auth):
@@ -128,6 +132,29 @@ def test_motivo_de_rechazo_y_cancelacion_los_ve_el_cliente(client, auth):
     assert notas["cancelado"] == "Cliente desistió"
 
 
+def test_transition_no_publica_la_nota_interna(client, auth, db_session):
+    """La frontera interna/publica la marca `client_note`, no el estado: un llamador del servicio (worker, webhook,
+    integracion) que rechaza un comprobante con una nota operativa no la publica."""
+    from app.models import Order, Tenant
+    from app.services import store_orders as so
+
+    o, oid = _pedido(client, key="ck-seg-0004")
+    tok = o["track_token"]
+    assert client.post(f"{SLUG}/orders/{tok}/proof", files={"file": ("sinpe.png", PNG + b"x", "image/png")}).status_code == 201
+    ped = db_session.get(Order, oid)
+    t = db_session.get(Tenant, ped.tenant_id)
+    so.transition(db_session, t, ped, "nuevo", by="sistema", note="Revision automatica: cargo ch_interno_123", notify=False)
+    db_session.commit()
+    pub = client.get(f"{SLUG}/orders/{tok}").json()
+    assert "ch_interno_123" not in json.dumps(pub, ensure_ascii=False)
+    # el vencimiento del sistema sigue diciendo por que se cancelo (cancel_reason, que ya era publico)
+    so.transition(db_session, t, ped, "cancelado", by="sistema", note="Venció sin pago", notify=False)
+    db_session.commit()
+    pub = client.get(f"{SLUG}/orders/{tok}").json()
+    assert [x["note"] for x in pub["history"] if x["status"] == "cancelado"] == ["Venció sin pago"]
+    assert "client_note" not in next(h for h in db_session.get(Order, oid).history if h.get("status") == "cancelado")
+
+
 # ---------- 34: el cliente ve su comprobante ----------
 def test_cliente_ve_su_comprobante_solo_con_su_enlace(client, auth):
     a, _ = _pedido(client, key="ck-seg-000A")
@@ -142,8 +169,13 @@ def test_cliente_ve_su_comprobante_solo_con_su_enlace(client, auth):
     f = client.get(f"{SLUG}/orders/{ta}/proofs/0", headers={"Authorization": ""})
     assert f.status_code == 200 and f.content == PNG + b"a" and f.headers["content-type"] == "image/png"
     assert "no-store" in f.headers["cache-control"] and "sandbox" in f.headers["content-security-policy"]
+    assert f.headers["x-content-type-options"] == "nosniff"
     fb = client.get(f"{SLUG}/orders/{tb}/proofs/0", headers={"Authorization": ""})
     assert fb.status_code == 200 and fb.content.startswith(b"%PDF") and fb.headers["content-type"] == "application/pdf"
+    # el PDF se abre en una pestana nueva (enlace directo): con CSP `sandbox` el visor de Chrome lo deja en blanco
+    assert "sandbox" not in fb.headers.get("content-security-policy", "")
+    assert fb.headers["x-content-type-options"] == "nosniff" and "no-store" in fb.headers["cache-control"]
+    assert fb.headers["content-disposition"] == 'inline; filename="pago-b.pdf"'
     # el enlace de A no alcanza el comprobante de B (solo hay uno en A) ni posiciones raras
     for n in (1, 5, -1):
         assert client.get(f"{SLUG}/orders/{ta}/proofs/{n}", headers={"Authorization": ""}).status_code == 404
@@ -153,8 +185,47 @@ def test_cliente_ve_su_comprobante_solo_con_su_enlace(client, auth):
     oid = next(x["id"] for x in client.get("/store-orders").json()["items"] if x["number"] == a["number"])
     assert client.post(f"/store-orders/{oid}/status", json={"status": "pagado", "notify": False}).status_code == 200
     pa = client.get(f"{SLUG}/orders/{ta}").json()
-    assert pa["instructions"] is None and len(pa["proofs"]) == 1
+    assert pa["instructions"] is None and len(pa["proofs"]) == 1 and pa["proofs"][0]["open"] is True
     assert client.get(f"{SLUG}/orders/{ta}/proofs/0", headers={"Authorization": ""}).status_code == 200
+
+
+def test_comprobante_no_queda_colgado_del_enlace(client, auth, db_session):
+    """El enlace dura 400 dias y se reenvia: el comprobante (cuenta, telefono SINPE, titular) solo se sirve mientras
+    el pedido siga abierto y por so.PROOF_VIEW_DAYS desde que se subio."""
+    from app.models import Order
+    from app.services import store_orders as so
+
+    a, oid = _pedido(client, key="ck-seg-000C")
+    ta = a["track_token"]
+    assert client.post(f"{SLUG}/orders/{ta}/proof", files={"file": ("sinpe-c.png", PNG + b"c", "image/png")}).status_code == 201
+    assert client.get(f"{SLUG}/orders/{ta}/proofs/0", headers={"Authorization": ""}).status_code == 200
+    # subido hace mas de 30 dias: el nombre sigue en la pagina, el archivo no
+    o = db_session.get(Order, oid)
+    viejo = (datetime.now(UTC) - timedelta(days=so.PROOF_VIEW_DAYS + 1)).isoformat()
+    o.proofs = [{**o.proofs[0], "at": viejo}]
+    db_session.commit()
+    pa = client.get(f"{SLUG}/orders/{ta}").json()
+    assert pa["proofs"][0]["open"] is False and pa["proofs"][0]["filename"] == "sinpe-c.png"
+    assert client.get(f"{SLUG}/orders/{ta}/proofs/0", headers={"Authorization": ""}).status_code == 404
+    # reciente pero el pedido ya se cerro (cancelado): tampoco
+    o.proofs = [{**o.proofs[0], "at": datetime.now(UTC).isoformat()}]
+    db_session.commit()
+    assert client.post(f"/store-orders/{oid}/status", json={"status": "cancelado", "note": "Cliente desistió", "notify": False}).status_code == 200
+    assert client.get(f"{SLUG}/orders/{ta}").json()["proofs"][0]["open"] is False
+    assert client.get(f"{SLUG}/orders/{ta}/proofs/0", headers={"Authorization": ""}).status_code == 404
+
+
+def test_comprobante_repetido_muestra_el_nombre_que_subio_cada_cliente(client, auth):
+    """La multimedia se deduplica por sha256 en toda la empresa: el nombre del pedido B no puede ser el que puso A."""
+    a, _ = _pedido(client, key="ck-seg-000D")
+    b, _ = _pedido(client, key="ck-seg-000E", contact={"name": "Cliente Dos", "email": "dos@correo.com", "phone": "88886666"})
+    mismo = PNG + b"mismo-archivo"
+    assert client.post(f"{SLUG}/orders/{a['track_token']}/proof", files={"file": ("otro-cliente.png", mismo, "image/png")}).status_code == 201
+    assert client.post(f"{SLUG}/orders/{b['track_token']}/proof", files={"file": ("mi-pago.png", mismo, "image/png")}).status_code == 201
+    pb = client.get(f"{SLUG}/orders/{b['track_token']}").json()
+    assert pb["proofs"][0]["filename"] == "mi-pago.png"
+    fb = client.get(f"{SLUG}/orders/{b['track_token']}/proofs/0", headers={"Authorization": ""})
+    assert fb.status_code == 200 and fb.headers["content-disposition"] == 'inline; filename="mi-pago.png"'
 
 
 # ---------- 38: version impresa ----------
@@ -174,7 +245,19 @@ def test_version_impresa_presentable(client, auth, db_session):
     assert pr.status_code == 200 and pr.headers["content-type"].startswith("text/html")
     h = pr.text
     assert "data:image/png;base64," in h  # logo incrustado (dentro del blob una ruta relativa no carga)
-    for txt in (o["number"], "Crimson Consulting SA", "3-101-000000", "Ana &lt;b&gt;Vega&lt;/b&gt;", "Precio s/IVA", "Subtotal (sin IVA)", "IVA", "Total", "Pagado", "SINPE 998877", "Firma"):
+    for txt in (
+        o["number"],
+        "Crimson Consulting SA",
+        "3-101-000000",
+        "Ana &lt;b&gt;Vega&lt;/b&gt;",
+        "Precio s/IVA",
+        "Subtotal (sin IVA)",
+        "IVA",
+        "Total",
+        "Pagado",
+        "SINPE 998877",
+        "Firma",
+    ):
         assert txt in h, txt
     assert "img-src data: https:" in pr.headers["content-security-policy"]
     # sin logo igual sale (con el nombre)
@@ -184,3 +267,15 @@ def test_version_impresa_presentable(client, auth, db_session):
     assert "data:image" not in h2 and o["number"] in h2
     # los datos del cliente van escapados
     assert "<b>Vega</b>" not in h2
+
+
+def test_version_impresa_no_repite_el_metodo_de_entrega(client, auth):
+    o, oid = _pedido(client, key="ck-seg-0005", delivery={"type": "retiro"}, shipping_method="Retiro en tienda")
+    h = client.get(f"/store-orders/{oid}/print").text
+    caja = h.split("<div class=k>Entrega</div>", 1)[1].split("</div>", 1)[0]
+    assert caja.count("Retiro en sitio") == 1, caja
+    o2, oid2 = _pedido(client, key="ck-seg-0006")
+    h2 = client.get(f"/store-orders/{oid2}/print").text
+    caja2 = h2.split("<div class=k>Entrega</div>", 1)[1].split("</div>", 1)[0]
+    metodo = caja2.split("<b>", 1)[1].split("</b>", 1)[0]
+    assert metodo and caja2.count(metodo) == 1, caja2

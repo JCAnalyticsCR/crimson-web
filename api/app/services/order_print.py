@@ -59,10 +59,10 @@ def render(db: Session, t: Tenant, o: Order) -> str:
     retiro = dv.get("type") == "retiro"
     if retiro:
         pk = so.checkout_cfg(t).get("pickup") or {}
-        entrega = "Retiro en sitio" + (f" · {pk['address']}" if pk.get("address") else "") + (f" · {pk['hours']}" if pk.get("hours") else "")
+        # el titulo de la caja ya dice "Retiro en sitio" / el metodo de envio: aqui solo el donde y el cuando
+        entrega = " · ".join(x for x in (pk.get("address"), pk.get("hours")) if x)
     else:
-        lugar = ", ".join(x for x in (dv.get("address"), dv.get("district"), dv.get("canton"), dv.get("province")) if x) or (c.get("address") or "")
-        entrega = " — ".join(x for x in (o.shipping_method or "Envío", lugar) if x)
+        entrega = ", ".join(x for x in (dv.get("address"), dv.get("district"), dv.get("canton"), dv.get("province")) if x) or (c.get("address") or "")
     estado = so.STATUS_LABEL.get(o.status, o.status)
     tono = "ok" if o.status in so.PAID_STATES else "bad" if o.status in ("cancelado", "reembolsado") else ""
     fecha = o.created_at.strftime("%d/%m/%Y %H:%M") if o.created_at else ""
@@ -138,7 +138,7 @@ td{{padding:8px 4px;border-bottom:1px solid #f0ece7;vertical-align:top}}.num{{te
 </div>
 <div class=meta>
   <div class=box><div class=k>Cliente</div>{cliente}</div>
-  <div class=box><div class=k>Entrega</div><b>{"Retiro en sitio" if retiro else e(o.shipping_method or "Envío")}</b><br>{e(entrega)}{guia}</div>
+  <div class=box><div class=k>Entrega</div><b>{"Retiro en sitio" if retiro else e(o.shipping_method or "Envío")}</b>{"<br>" + e(entrega) if entrega else ""}{guia}</div>
   <div class=box><div class=k>Pago</div>{pago}</div>
 </div>
 <table><thead><tr><th>Producto</th><th class=num>Cant.</th><th class=num>Precio s/IVA</th><th class=num>IVA</th><th class=num>Total</th></tr></thead><tbody>{rows}</tbody></table>

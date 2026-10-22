@@ -411,7 +411,8 @@ def order_public(db: Session, t: Tenant, o: Order) -> dict:
         "needs_proof": o.payment_kind in NEEDS_PROOF and o.status == "nuevo",
         # el comprobante que subio el cliente lo puede volver a ver con su enlace (por posicion, sin ids internos)
         "proofs": [
-            {"n": i, "filename": p.get("filename"), "at": p.get("at"), "pdf": p.get("content_type") == "application/pdf"} for i, p in enumerate(o.proofs or [])
+            {"n": i, "filename": p.get("filename"), "at": p.get("at"), "pdf": p.get("content_type") == "application/pdf", "open": proof_viewable(o, p)}
+            for i, p in enumerate(o.proofs or [])
         ],
         "card": {"pending": card_pending, "simulated": card_pending and not onvo_secret(db, t) and simulation_allowed()}
         if o.payment_kind == "tarjeta"
@@ -419,18 +420,7 @@ def order_public(db: Session, t: Tenant, o: Order) -> dict:
         "tracking_number": o.tracking_number,
         "carrier": o.carrier,
         "cancel_reason": o.cancel_reason if o.status == "cancelado" else None,
-        # cambios de estado + notas que la empresa marco "para el cliente" (las internas nunca salen)
-        "history": [
-            {
-                "status": h.get("status"),
-                "label": STATUS_LABEL.get(h.get("status"), h.get("status")),
-                "at": h.get("at"),
-                "note": public_note(h),
-                **({"kind": "nota"} if h.get("kind") == "nota" else {}),
-            }
-            for h in (o.history or [])
-            if h.get("kind") != "nota" or h.get("client_note")
-        ],
+        "history": _public_history(o),
         "whatsapp": cfg.get("whatsapp") or "",
         "store_name": cfg.get("name"),
     }
@@ -580,13 +570,48 @@ def add_client_note(o: Order, by, text: str) -> None:
 
 
 def public_note(h: dict) -> str | None:
-    """Lo que el cliente ve de una entrada del historial. Las notas internas (y las del sistema: factura creada,
-    ONVO, inventario) nunca salen. El motivo de una cancelacion ya era publico (cancel_reason)."""
-    if h.get("client_note"):
-        return h["client_note"]
-    if h.get("status") == "cancelado" and h.get("kind") != "nota" and h.get("note"):
-        return h["note"]
-    return None
+    """Lo que el cliente ve de una entrada del historial: solo `client_note`. Las notas internas (y las del sistema:
+    factura creada, ONVO, inventario) nunca salen. El motivo de una cancelacion sin `client_note` (pedidos viejos o
+    "Vencio sin pago") lo pone order_public desde `o.cancel_reason`, que ya era publico."""
+    return h.get("client_note") or None
+
+
+def _public_history(o: Order) -> list[dict]:
+    """Cambios de estado + notas que la empresa marco "para el cliente" (las internas nunca salen)."""
+    rows = [h for h in (o.history or []) if h.get("kind") != "nota" or h.get("client_note")]
+    out = [
+        {
+            "status": h.get("status"),
+            "label": STATUS_LABEL.get(h.get("status"), h.get("status")),
+            "at": h.get("at"),
+            "note": public_note(h),
+            **({"kind": "nota"} if h.get("kind") == "nota" else {}),
+        }
+        for h in rows
+    ]
+    if o.status == "cancelado" and o.cancel_reason:
+        last = next((x for x in reversed(out) if x["status"] == "cancelado" and x.get("kind") != "nota"), None)
+        if last and not last["note"]:
+            last["note"] = o.cancel_reason
+    return out
+
+
+PROOF_VIEW_DAYS = 30  # el cliente reabre su comprobante (item 34) mientras el pedido siga abierto y por 30 dias
+PROOF_VIEW_CLOSED = ("entregado", "cancelado", "reembolsado")
+
+
+def proof_viewable(o: Order, p: dict) -> bool:
+    """El comprobante (cuenta, telefono SINPE, titular) no queda colgado del enlace de 400 dias: solo mientras el
+    pedido siga abierto y dentro de PROOF_VIEW_DAYS desde que se subio."""
+    if o.status in PROOF_VIEW_CLOSED:
+        return False
+    try:
+        at = datetime.fromisoformat(p.get("at") or "")
+    except ValueError:
+        return False
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=UTC)
+    return datetime.now(UTC) - at <= timedelta(days=PROOF_VIEW_DAYS)
 
 
 def has_note(o: Order, key: str) -> bool:
@@ -622,8 +647,9 @@ def transition(
     client_note: str | None = None,
 ) -> EmailOutbox | None:
     """Unico camino para cambiar el estado de un pedido de la tienda. Devuelve el correo al cliente (o None).
-    `note` es interna; `client_note` sale en el seguimiento del cliente. El motivo de cancelar y lo que fallo en un
-    comprobante rechazado los ve el cliente por definicion (el portal ya lo decia: "lo ve el cliente")."""
+    `note` es interna; `client_note` sale en el seguimiento del cliente. Aqui nunca se promueve `note` a publica: quien
+    quiera que el cliente vea un texto lo pasa en `client_note` (el panel lo hace con el motivo de cancelar y lo que
+    fallo en un comprobante, que el portal rotula "lo ve el cliente")."""
     old = o.status
     if new == old:
         raise HTTPException(409, "El pedido ya está en ese estado")
@@ -651,8 +677,6 @@ def transition(
         o.carrier = carrier.strip()[:80] or None
     _inventory(db, o, old, new, by if isinstance(by, int) else None)
     client_note = (client_note or "").strip()[:500] or None
-    if client_note is None and note and (new == "cancelado" or (new == "nuevo" and old == "en_revision")):
-        client_note = note.strip()[:500] or None
     _hist(o, new, by, note, client_note)
     if new == "pagado":
         auto_invoice(db, t, o)
@@ -997,8 +1021,10 @@ def save_proof(db: Session, t: Tenant, o: Order, data: bytes, filename: str | No
         raise HTTPException(409, "Ya hay varios comprobantes para este pedido. Escribinos por WhatsApp.")
     digest = hashlib.sha256(data).hexdigest()
     m = db.scalar(select(Media).where(Media.tenant_id == t.id, Media.sha256 == digest, Media.visibility == "private", Media.module == "sales"))
+    # el nombre que subio ESTE cliente: la multimedia se deduplica por sha256 en toda la empresa y su nombre puede
+    # ser el que puso otro cliente con el mismo archivo
+    name = "".join(ch if (ch.isascii() and ch.isalnum()) or ch in "._- " else "_" for ch in (filename or "comprobante"))[:120] or "comprobante"
     if not m:
-        name = "".join(ch if (ch.isascii() and ch.isalnum()) or ch in "._- " else "_" for ch in (filename or "comprobante"))[:120] or "comprobante"
         m = Media(
             tenant_id=t.id,
             key=secrets.token_urlsafe(18),
@@ -1014,7 +1040,7 @@ def save_proof(db: Session, t: Tenant, o: Order, data: bytes, filename: str | No
         db.flush()
     if any(p.get("media_id") == m.id for p in (o.proofs or [])):
         raise HTTPException(409, "Ese comprobante ya estaba subido")
-    o.proofs = [*(o.proofs or []), {"media_id": m.id, "filename": m.filename, "size": m.size, "content_type": kind, "at": datetime.now(UTC).isoformat()}]
+    o.proofs = [*(o.proofs or []), {"media_id": m.id, "filename": name, "size": m.size, "content_type": kind, "at": datetime.now(UTC).isoformat()}]
     return m
 
 
