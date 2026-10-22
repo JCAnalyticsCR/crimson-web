@@ -7,7 +7,7 @@ import re
 
 from sqlalchemy import select
 
-from app.models import EmailOutbox, Tenant
+from app.models import Tenant
 from app.services import email_layout as el
 
 
