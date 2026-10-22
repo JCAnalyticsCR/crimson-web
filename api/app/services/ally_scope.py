@@ -9,7 +9,8 @@ En comun =
 - levantamientos, ordenes y tickets: los asignados explicitamente a la empresa (ally_company_id);
 - contratos: asignados a la empresa o de un proyecto en comun (17:27 "lo que ya hemos instalado en comun");
 - activos: de proyectos en comun (por defecto) o de clientes en comun (tenant.settings.ally_assets_scope).
-El tecnico del aliado (tecnico_aliado) solo ve lo suyo de HOY: nada de oportunidades, proyectos, contratos ni activos.
+El tecnico del aliado (tecnico_aliado) solo ve lo suyo de HOY: nada de oportunidades, proyectos, contratos ni activos
+(su inicio lista las oportunidades en comun en resumen, company_opportunities, y sus proximas ordenes sin abrirlas).
 Lo de otra empresa o interno responde 404 ("... no encontrado"), sin confirmar que existe.
 """
 
@@ -99,6 +100,11 @@ class AllyScope:
     def opportunities(self) -> list:
         if self.is_tech:
             return [false()]
+        return [Opportunity.tenant_id == self.tid, Opportunity.id.in_(self.opp_ids()), live(Opportunity)]
+
+    def company_opportunities(self) -> list:
+        """Las oportunidades en comun de la empresa SIN mirar el rol. Solo para el resumen del inicio del tecnico
+        (reunion 2, pedido 21: numero, titulo, cliente, sitio y etapa); el detalle sigue cerrado al tecnico."""
         return [Opportunity.tenant_id == self.tid, Opportunity.id.in_(self.opp_ids()), live(Opportunity)]
 
     def projects(self) -> list:

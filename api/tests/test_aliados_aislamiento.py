@@ -325,8 +325,10 @@ def test_oportunidades_solo_en_comun(client, auth, db_session):
     r = client.get(f"/aliado/oportunidades/{s.O3}", headers=s.a_jefe)
     assert r.status_code == 200 and "Aliado Dos" not in r.text and "lectoras para B" not in r.text
     det = r.json()
-    assert not {"amount", "currency", "probability", "weighted", "notes", "next_action", "lost_reason", "quote_id", "owner_id"} & set(det)
-    assert not {"probability", "weighted", "notes", "next_action", "next_action_date", "lost_reason", "quote_id", "owner_id"} & keys_rec(det)
+    # reunion 2, pedido 14: la proxima accion y su fecha si salen; la bitacora (notes) solo por lo compartido
+    assert not {"amount", "currency", "probability", "weighted", "notes", "lost_reason", "quote_id", "owner_id"} & set(det)
+    assert not {"probability", "weighted", "notes", "lost_reason", "quote_id", "owner_id"} & keys_rec(det)
+    assert det["seguimientos"] == [] and det["cotizacion"] is None
     assert {x["role"] for x in det["participations"]} == {"subcontratista", "suministro"}
 
 

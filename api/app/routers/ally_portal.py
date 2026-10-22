@@ -242,12 +242,92 @@ def _opp_out(db: Session, ctx: AllyCtx, o: Opportunity, full: bool = False) -> d
             {"id": a.id, "role": a.role, "scope": a.scope, "scope_lines": a.scope_lines or [], "contacts": a.contacts or {}} for a in parts
         ]
         out["requests"] = _requests_of(db, ctx, parts)
-        out["surveys"] = [
-            {"id": s.id, "number": s.number, "kind": s.kind, "status": s.status, "review_status": s.review_status}
-            for s in db.scalars(select(Survey).where(Survey.opportunity_id == o.id, *ctx.scope.surveys()).order_by(Survey.id.desc()))
-        ]
         out["can_survey"] = (o.kind or "proyecto") != "venta" and o.status not in OPP_CLOSED and ctx.p.can("aliado", "levantamientos_crear")
+        out.update(_opp_extra(db, ctx, o, pr))
     return out
+
+
+def _opp_extra(db: Session, ctx: AllyCtx, o: Opportunity, pr: Project | None) -> dict:
+    """Reunion 2 (21/10), pedido 14: el detalle "muy basico" ahora trae la etapa con su proxima accion y fecha, los
+    seguimientos que Crimson compartio (pedido 15), los levantamientos con su tecnico y la ejecucion del proyecto en
+    comun (pedido 17). Sin montos de la oportunidad, probabilidad, costos ni margenes. El total de la cotizacion solo
+    si Crimson lo habilito para ESTA empresa (pregunta abierta 8: por defecto no)."""
+    from ..models import Quote
+    from ..services import ally_log
+
+    team = ctx.scope.team_user_ids()
+    surveys = db.scalars(select(Survey).where(Survey.opportunity_id == o.id, *ctx.scope.surveys()).order_by(Survey.id.desc())).all()
+    out: dict = {
+        "next_action": o.next_action,
+        "next_action_date": o.next_action_date,
+        "seguimientos": ally_log.for_ally(db, o, ctx.company.name),
+        "surveys": [
+            {
+                "id": s.id,
+                "number": s.number,
+                "kind": s.kind,
+                "status": s.status,
+                "review_status": s.review_status,
+                "visit_date": s.visit_date,
+                "technician": _user_name(db, s.technician_id) if s.technician_id in team else None,
+                "sent_at": s.sent_at,
+            }
+            for s in surveys
+        ],
+        "cotizacion": None,
+        "ejecucion": _ejecucion(db, ctx, pr) if pr else None,
+    }
+    if ctx.company.show_quote_total and o.quote_id:
+        q = db.get(Quote, o.quote_id)
+        if q is not None and q.tenant_id == ctx.p.tenant.id and q.status != "anulada":
+            out["cotizacion"] = {"number": q.number, "status": q.status, "total": q.total, "currency": q.currency}
+    return out
+
+
+def _ejecucion(db: Session, ctx: AllyCtx, pr: Project) -> dict:
+    """Pedido 17: la ejecucion del proyecto en comun. Las OT de su equipo (se abren) y las de Crimson (solo el
+    resumen), con quien va a cada una: de su equipo el nombre completo, de Crimson el nombre de pila. Las de otra
+    empresa aliada no salen. Sin precios, horas de costo ni materiales."""
+    rows = db.scalars(
+        select(WorkOrder)
+        .where(
+            WorkOrder.tenant_id == ctx.p.tenant.id,
+            WorkOrder.project_id == pr.id,
+            *fw._live_orders(),
+            or_(WorkOrder.ally_company_id.is_(None), WorkOrder.ally_company_id == ctx.company.id),
+        )
+        .order_by(WorkOrder.scheduled_at.is_(None), WorkOrder.scheduled_at, WorkOrder.id)
+    ).all()
+    names = fw._names(db, list(rows), ctx.p.tenant.id) if rows else {}
+    team = ctx.scope.team_user_ids()
+
+    def quien(uid: int | None) -> str | None:
+        n = names.get(uid) if uid else None
+        return n if uid in team else _first(n)
+
+    orders = []
+    for x in rows:
+        mia = x.ally_company_id == ctx.company.id
+        gente = [n for n in (quien(i) for i in dict.fromkeys([x.technician_id, *(x.helpers or [])]) if i) if n]
+        orders.append(
+            {
+                "id": x.id if mia else None,  # las de Crimson no se abren desde el portal
+                "number": x.number,
+                "title": x.title,
+                "kind": x.kind,
+                "status": x.status,
+                "scheduled_at": x.scheduled_at,
+                "finished_at": x.finished_at,
+                "team": "aliado" if mia else "crimson",
+                "technicians": gente,
+            }
+        )
+    return {
+        "project": {"id": pr.id, "number": pr.number, "name": pr.name, "status": pr.status, "start_date": pr.start_date, "end_date": pr.end_date},
+        "orders": orders,
+        "total": len(orders),
+        "finalizadas": sum(1 for x in rows if x.status == "finalizada"),
+    }
 
 
 def _orders_of_project(db: Session, ctx: AllyCtx, pid: int) -> list[WorkOrder]:
@@ -295,6 +375,7 @@ def _project_out(db: Session, ctx: AllyCtx, pr: Project, full: bool = False) -> 
         econ = _economia()
         out["lo_que_recibo"] = econ.ally_project_earnings(db, ctx.p.tenant, ctx.company.id, pr.id, for_ally=True) if econ else None
         out["assets_count"] = db.scalar(select(func.count()).select_from(CustomerAsset).where(CustomerAsset.project_id == pr.id, *ctx.scope.assets())) or 0
+        out["ejecucion"] = _ejecucion(db, ctx, pr)  # pedido 17: tambien lo que hace Crimson en el proyecto
     return out
 
 
@@ -521,6 +602,51 @@ def _my_day(db: Session, ctx: AllyCtx) -> dict:
     }
 
 
+def _tech_home(db: Session, ctx: AllyCtx) -> dict:
+    """Reunion 2, pedido 21: el tecnico entraba a "Nada asignado para hoy". Ademas de lo de hoy (_my_day: sus
+    ordenes de hoy, sus levantamientos en borrador o devueltos y sus tickets) ve sus proximas ordenes (sin abrirlas
+    hasta el dia), las oportunidades en comun de su empresa en resumen (sin montos, sin detalle) y quien de su
+    empresa le asigna trabajo, para que el inicio vacio diga a quien acudir."""
+    uid = ctx.p.user.id
+    hoy = ctx.scope.today
+    rows = db.scalars(
+        select(WorkOrder)
+        .where(*ctx.scope.work_orders(), WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")), WorkOrder.scheduled_at.is_not(None))
+        .order_by(WorkOrder.scheduled_at, WorkOrder.id)
+        .limit(200)
+    ).all()
+    proximas = [
+        {
+            "number": o.number,
+            "title": o.title,
+            "customer": _customer_name(db, o.customer_id),
+            "site": o.site,
+            "scheduled_at": o.scheduled_at,
+            "status": o.status,
+        }
+        for o in rows
+        if (o.technician_id == uid or uid in (o.helpers or [])) and local_date(o.scheduled_at) > hoy
+    ][:20]
+    mis_opps = set(db.scalars(select(Survey.opportunity_id).where(*ctx.scope.surveys(), Survey.opportunity_id.is_not(None))))
+    opps = db.scalars(
+        select(Opportunity).where(*ctx.scope.company_opportunities(), Opportunity.status.not_in(OPP_CLOSED)).order_by(Opportunity.id.desc()).limit(30)
+    ).all()
+    oportunidades = [
+        {
+            "number": o.number,
+            "title": o.title,
+            "customer": _customer_name(db, o.end_customer_id or o.customer_id, o.contact),
+            "site": o.site,
+            "status": o.status,
+            "solution": o.solution,
+            "mine": o.id in mis_opps,  # tiene un levantamiento suyo ahi
+        }
+        for o in opps
+    ]
+    asignan = sorted({m.user.full_name for m in ctx.scope.active_team() if m.role_code == "aliado" and m.user_id != uid and m.user.full_name})
+    return {"proximas": proximas, "oportunidades": oportunidades, "asignan": asignan}
+
+
 @router.get("/inicio")
 def inicio(ctx: AllyCtx = Depends(need("ver")), db: Session = Depends(get_db)):
     c = ctx.company
@@ -532,7 +658,7 @@ def inicio(ctx: AllyCtx = Depends(need("ver")), db: Session = Depends(get_db)):
     if c.suspended_at and ctx.preview_by is None:
         return base  # suspendida: solo su suscripcion y facturas
     if ctx.scope.is_tech:
-        return {**base, "hoy": _my_day(db, ctx)}
+        return {**base, "hoy": _my_day(db, ctx), "tecnico": _tech_home(db, ctx)}
     sc = ctx.scope
     opps = db.scalars(select(Opportunity).where(*sc.opportunities(), Opportunity.status.not_in(OPP_CLOSED))).all()
     pend = db.scalars(

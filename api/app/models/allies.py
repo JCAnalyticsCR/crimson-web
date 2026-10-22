@@ -12,6 +12,7 @@ Crimson (services/ally_scope.py). El dinero que recibe el aliado (comisiones, pa
 from datetime import date, datetime
 
 from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import false as sa_false
 from sqlalchemy import true as sa_true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -50,6 +51,9 @@ class AllyCompany(TenantMixin, TimestampMixin, Base):
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id", ondelete="RESTRICT", name="fk_ally_company_customer"), index=True)
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("supplier.id", ondelete="RESTRICT", name="fk_ally_company_supplier"))
     max_users: Mapped[int | None] = mapped_column(Integer)  # usuarios activos + invitaciones vivas; NULL = sin tope
+    # reunion 2 (21/10), pedido 14 y pregunta 8: el aliado NO ve el monto total de la cotizacion de una oportunidad en
+    # comun salvo que Crimson lo habilite para esta empresa (Administracion -> Aliados -> ficha -> Que ve en su portal)
+    show_quote_total: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
     plan_amount: Mapped[float | None] = mapped_column(Numeric(16, 2))  # mensualidad sin IVA (por empresa o por usuario)
     plan_currency: Mapped[str] = mapped_column(String(3), default="CRC", server_default="CRC")
     plan_mode: Mapped[str] = mapped_column(String(12), default="fija", server_default="fija")  # fija | por_usuario
@@ -143,3 +147,20 @@ class AllyCostRequest(TenantMixin, TimestampMixin, Base):
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     participation: Mapped[AllyParticipation] = relationship(back_populates="requests")
+
+
+class AllySharedNote(TenantMixin, TimestampMixin, Base):
+    """Entrada de la bitacora de una oportunidad que Crimson comparte con el aliado (reunion 2, pedido 15).
+
+    La bitacora sigue siendo texto (Opportunity.notes, una linea por entrada, la mas nueva arriba): aqui solo vive la
+    huella (sha256 de la linea) de cada entrada marcada "Visible para el aliado". Por defecto nada se comparte; una
+    linea que se borre o se edite deja de verse sola (su huella ya no coincide con ninguna). Lo ven los aliados con
+    una participacion visible en la oportunidad."""
+
+    __tablename__ = "ally_shared_note"
+    __table_args__ = (UniqueConstraint("opportunity_id", "line_key", name="uq_ally_shared_note"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunity.id", ondelete="CASCADE", name="fk_ally_shared_note_opportunity"), index=True)
+    line_key: Mapped[str] = mapped_column(String(64))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("user.id", name="fk_ally_shared_note_created_by"))

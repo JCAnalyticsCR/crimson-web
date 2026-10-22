@@ -114,6 +114,15 @@ def _member(db: Session, p: Principal, uid: int) -> TenantUser:
     return m
 
 
+def _guard_ally_email(db: Session, tenant_id: int, email: str | None) -> None:
+    """Reunion 2 (21/10), pedido 20: el correo de una persona de una empresa aliada no queda como usuario interno."""
+    from ..services import ally_people
+
+    c = ally_people.match_email(db, tenant_id, email)
+    if c is not None:
+        raise HTTPException(409, ally_people.blocked_msg(c))
+
+
 def _guard_admin(p: Principal, m: TenantUser, new_role: str | None = None) -> None:
     """Un rol personalizado con settings.configurar no toca administradores ni crea uno."""
     if (m.role_code == "admin" or new_role == "admin") and p.role != "admin":
@@ -239,6 +248,9 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
         ):
             resets[pr.user_id] = pr.expires_at  # el mas reciente gana
     rows.sort(key=lambda m: (not m.active, (m.user.full_name or "").lower()))
+    from ..services import ally_people
+
+    de_aliado = ally_people.matches(db, tid, [m.user for m in rows])  # pedido 20: aviso en la lista
 
     def locked(u: User):
         lu = aware(u.locked_until)
@@ -316,6 +328,8 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
                 "member_since": m.created_at,
                 # correo de avisos: suele ser un buzon personal o externo; solo lo ve quien lo cambia (el admin)
                 "notify_email": m.notify_email if p.can("settings", "configurar") else None,
+                # parece de una empresa aliada: {company_id, company, reason: correo|nombre} (Pasar al portal de aliados)
+                "ally_match": de_aliado.get(m.user_id),
             }
             for m in rows
         ],
@@ -392,6 +406,7 @@ def invite(data: InviteIn, response: Response, p: Principal = Depends(ADMIN), db
         if m.ally_company_id or m.role_code in ALLY_USER_ROLES:
             raise HTTPException(409, "Esa persona es usuaria de una empresa aliada: se gestiona desde su empresa aliada.")
         raise HTTPException(409, "Ese correo ya es usuario de la empresa. Si está inactivo, activalo desde la lista.")
+    _guard_ally_email(db, tid, email)  # reunion 2, pedido 20: una persona de un aliado no entra al panel
     now = datetime.now(UTC)
     ajena = db.scalar(
         select(Invitation.role_code).where(
@@ -659,6 +674,10 @@ def member_update(uid: int, data: MemberIn, p: Principal = Depends(ADMIN), db: S
             raise HTTPException(409, "Ese correo ya lo usa otra cuenta")
         _guard_admin_supersede(db, p, new_email)  # el cambio revoca las invitaciones pendientes de ese correo (abajo)
         admin_users_limiter.hit(_actor_key(p))
+    if email_change:
+        _guard_ally_email(db, tid, new_email)
+    if role_change or (active_change and data.active):
+        _guard_ally_email(db, tid, u.email)  # pedido 20: se pasa al portal de aliados, no se le da otro rol interno
     if m.role_code == "admin" and m.active:
         pierde = (role_change and data.role != "admin") or (active_change and data.active is False)
         if pierde and count_active_admins(db, tid) <= 1:

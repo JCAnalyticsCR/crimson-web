@@ -48,7 +48,9 @@ from ..services.totals import d
 router = APIRouter(prefix="/allies", tags=["aliados"])
 
 OPEN_OPP = ("nuevo", "contactado", "requiere_visita", "levantamiento", "cotizando", "enviada", "negociacion")
-EDIT_FIELDS = ("name", "legal_name", "tax_id", "email", "phone", "contacts", "customer_id", "supplier_id", "markup_pct", "max_users", "notes")
+EDIT_FIELDS = (
+    "name", "legal_name", "tax_id", "email", "phone", "contacts", "customer_id", "supplier_id", "markup_pct", "max_users", "notes", "show_quote_total",
+)  # fmt: skip
 
 
 # ---------- Ayudantes ----------
@@ -193,6 +195,7 @@ def detail_out(db: Session, c: AllyCompany, p: Principal) -> dict:
         supplier={"id": sup.id, "name": sup.name} if sup else None,
         max_users=c.max_users,
         notes=c.notes,
+        show_quote_total=bool(c.show_quote_total),  # reunion 2, pregunta 8: por defecto el aliado no ve el total
         created_at=c.created_at,
         # el recargo es dato de costos: solo quien ve costos
         markup_pct=c.markup_pct if p.sees_costs else None,
@@ -485,6 +488,8 @@ class CompanyIn(BaseModel):
     markup_pct: Decimal | None = Field(None, gt=0, le=100)  # 0 % seria vender al costo exacto
     max_users: int | None = Field(None, ge=1, le=10000)
     notes: str | None = Field(None, max_length=4000)
+    # que ve en su portal: el monto total de la cotizacion de las oportunidades en comun (por defecto no)
+    show_quote_total: bool | None = None
 
     @field_validator("contacts")
     @classmethod
@@ -571,6 +576,8 @@ def ally_update(cid: int, data: CompanyIn, p: Principal = Depends(require("aliad
             v = nueva_tax
         elif k == "email":
             v = str(v).lower() if v else None
+        elif k == "show_quote_total":
+            v = bool(v)
         setattr(c, k, v)
     audit_change(db, p, "update", "ally_company", c.id, antes, _snapshot(c), company=c.name)
     db.commit()
@@ -698,6 +705,108 @@ def ally_member(cid: int, uid: int, data: AllyMemberIn, p: Principal = Depends(r
     audit_change(db, p, "permissions", "user", uid, antes, {"role": m.role_code, "active": m.active}, company=c.name)
     db.commit()
     return ally_access.users_out(db, c)
+
+
+class FromInternalIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: int
+    role: str = Field("tecnico_aliado", pattern="^(" + "|".join(ALLY_USER_ROLES) + ")$")
+    admin_password: str | None = Field(None, max_length=200)
+
+
+@router.post("/{cid}/users/from-internal")
+def ally_from_internal(cid: int, data: FromInternalIn, p: Principal = Depends(require("aliados", "usuarios")), db: Session = Depends(get_db)):
+    """Reunion 2 (21/10), pedido 20: una persona de una empresa aliada quedo como usuario interno (con todo el panel).
+    Pasa SU membresia de esta empresa al portal de aliados de `cid`, con rol aliado o tecnico de aliado: desde el
+    siguiente request ve solo lo de su empresa en comun (get_session_principal relee la membresia) y sus sesiones de
+    aqui se cierran. Toca usuarios internos: ademas pide settings.configurar y la contrasena de quien actua.
+    No toca a un administrador, a si mismo, ni a quien todavia lleva oportunidades abiertas (se reasignan primero)."""
+    from ..core.reauth import require_reauth
+    from ..models import SupportTicket, Survey, WorkOrder
+    from ..services.accounts import drop_stale_credentials, notify_security, revoke_refresh_tokens
+
+    if not p.can("settings", "configurar"):
+        raise HTTPException(403, "Pasar un usuario interno al portal de aliados lo hace quien administra los usuarios")
+    require_reauth(p, data.admin_password)
+    admin_users_limiter.hit(f"{p.tenant.id}:{p.user.id}")
+    c = company(db, cid, p)
+    if not c.active or c.suspended_at:
+        raise HTTPException(409, "Esa empresa aliada está suspendida o inactiva")
+    m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.user_id == data.user_id))
+    if not m or m.customer_id or m.ally_company_id or m.role_code in ("soporte", *ALLY_USER_ROLES):
+        raise HTTPException(404, "Usuario interno no encontrado")
+    if m.user_id == p.user.id:
+        raise HTTPException(409, "No puede pasarse a sí mismo al portal de aliados")
+    if m.role_code == "admin":
+        raise HTTPException(409, "Es administrador: primero cámbiele el rol en Ajustes → Usuarios")
+    abiertas = db.scalar(
+        select(func.count()).select_from(Opportunity).where(Opportunity.tenant_id == p.tenant.id, Opportunity.owner_id == m.user_id, Opportunity.status.in_(OPEN_OPP), live(Opportunity))
+    ) or 0
+    if abiertas:
+        raise HTTPException(409, f"Tiene {abiertas} oportunidad(es) abierta(s) a su cargo: reasígnelas a alguien de Crimson primero")
+    if m.active and c.max_users is not None and ally_access.seats(db, c)["used"] >= c.max_users:
+        raise HTTPException(409, f"El plan de {c.name} permite {c.max_users} usuarios")
+    antes = {"role": m.role_code, "active": m.active, "ally_company_id": None}
+    m.ally_company_id, m.role_code = c.id, data.role
+    db.flush()
+    revoke_refresh_tokens(db, m.user_id, p.tenant.id)  # el panel interno se cierra ya; entra de nuevo al portal
+    drop_stale_credentials(db, p.tenant.id, m.user_id)
+    # invitaciones internas pendientes de ese correo: ya no tienen sentido
+    now = datetime.now(UTC)
+    for inv in db.scalars(
+        select(Invitation).where(
+            Invitation.tenant_id == p.tenant.id,
+            func.lower(Invitation.email) == (m.user.email or "").lower(),
+            Invitation.customer_id.is_(None),
+            Invitation.ally_company_id.is_(None),
+            Invitation.accepted_at.is_(None),
+            Invitation.revoked_at.is_(None),
+        )
+    ):
+        inv.revoked_at, inv.revoked_by = now, p.user.id
+    ally_access.refresh_plan_quantity(db, c)
+    audit_change(
+        db, p, "permissions", "user", m.user_id, antes, {"role": m.role_code, "active": m.active, "ally_company_id": c.id}, company=c.name, always=True
+    )
+    notify_security(
+        db,
+        p.tenant,
+        m.user,
+        f"Su acceso cambió: portal de aliados de {c.name}",
+        f"<p>Desde hoy usted entra a Crimson por el <b>portal de aliados</b> de {html_escape(c.name)}, con su mismo correo y contraseña. "
+        "Ahí ve los proyectos, levantamientos y órdenes que su empresa tiene en común con Crimson.</p>"
+        "<p>Si no lo esperaba, escríbanos.</p>",
+    )
+    # trabajo interno que todavia tiene a su nombre (sin empresa aliada): Crimson lo revisa; aqui no se mueve nada
+    pendientes = {
+        "ordenes": db.scalar(
+            select(func.count()).select_from(WorkOrder).where(
+                WorkOrder.tenant_id == p.tenant.id, WorkOrder.technician_id == m.user_id, WorkOrder.ally_company_id.is_(None), WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso"))
+            )
+        )
+        or 0,
+        "levantamientos": db.scalar(
+            select(func.count()).select_from(Survey).where(
+                Survey.tenant_id == p.tenant.id, Survey.technician_id == m.user_id, Survey.ally_company_id.is_(None), Survey.status.in_(("borrador", "enviado"))
+            )
+        )
+        or 0,
+        "tickets": db.scalar(
+            select(func.count()).select_from(SupportTicket).where(
+                SupportTicket.tenant_id == p.tenant.id, SupportTicket.assigned_to == m.user_id, SupportTicket.ally_company_id.is_(None), SupportTicket.status != "cerrado"
+            )
+        )
+        or 0,
+    }
+    db.commit()
+    return {**ally_access.users_out(db, c), "pendientes": pendientes}
+
+
+def html_escape(s: str | None) -> str:
+    import html
+
+    return html.escape(s or "")
 
 
 # ---------- "Ver como este aliado" ----------

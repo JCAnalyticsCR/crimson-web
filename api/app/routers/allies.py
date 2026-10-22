@@ -233,6 +233,37 @@ def list_allies(oid: int, p: Principal = Depends(require("crm_pipeline", "ver"))
     return _list(db, _own(db, oid, p), p)
 
 
+# ---------- Bitacora compartida con el aliado (reunion 2, pedido 15) ----------
+@router.get("/opportunities/{oid}/bitacora-aliado")
+def shared_log(oid: int, p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = Depends(get_db)):
+    """Que entradas de la bitacora ve el aliado hoy (por defecto ninguna) y que empresas las verian."""
+    from ..services import ally_log
+
+    return ally_log.state(db, _own(db, oid, p))
+
+
+class SharedLogIn(BaseModel):
+    line: str = Field(min_length=1, max_length=4000)  # la entrada tal como sale en la bitacora
+    visible: bool
+
+
+@router.put("/opportunities/{oid}/bitacora-aliado")
+def shared_log_set(oid: int, data: SharedLogIn, p: Principal = Depends(require("crm_pipeline", "editar")), db: Session = Depends(get_db)):
+    """Interruptor "Visible para el aliado" de UNA entrada. La linea tiene que estar hoy en la bitacora."""
+    from ..services import ally_log
+
+    o = _own(db, oid, p)
+    line = data.line.strip()
+    if line not in ally_log.lines_of(o.notes):
+        raise HTTPException(404, "Esa entrada ya no está en la bitácora")
+    if data.visible and not ally_log.ally_companies(db, o):
+        raise HTTPException(409, "Esta oportunidad no tiene un aliado que la vea en su portal")
+    if ally_log.set_visible(db, o, line, data.visible, p.user.id):
+        audit(db, p.tenant.id, p.user.id, "ally_log_share" if data.visible else "ally_log_hide", "opportunity", o.id, {"entrada": line[:120]}, ip=p.ip)
+        db.commit()
+    return ally_log.state(db, o)
+
+
 @router.post("/opportunities/{oid}/allies", status_code=201)
 def add_ally(oid: int, data: AllyIn, p: Principal = Depends(require("crm_pipeline", "editar")), db: Session = Depends(get_db)):
     o = _own(db, oid, p)
