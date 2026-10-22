@@ -106,8 +106,9 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
     return () => { alive = false; };
   }, [qs, ctx, snapResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // otra categoria u otra busqueda: eso si es otra pagina
-  useEffect(() => { setRes(null); setItems([]); }, [mode, cat]);
+  // otra categoria u otra busqueda: eso si es otra pagina (en modo API; con snapshot el efecto de arriba ya pinta la
+  // categoria nueva en este mismo render y limpiarla aqui la dejaba en "Cargando…" para siempre)
+  useEffect(() => { if (!snapResult) { setRes(null); setItems([]); } }, [mode, cat]); // eslint-disable-line react-hooks/exhaustive-deps
   // /c/5 (enlace viejo por id) -> /c/<slug> en modo API
   useEffect(() => {
     if (snapResult) return; // ya lo maneja el efecto del snapshot
