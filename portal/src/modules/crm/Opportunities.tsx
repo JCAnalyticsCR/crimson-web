@@ -510,7 +510,7 @@ export default function Opportunities() {
                   {meta?.can_see_all && canEdit ? (
                     <select className="select" value={open.owner_id ? String(open.owner_id) : ""} onChange={(e) => reassign(e.target.value)} aria-label="Reasignar responsable">
                       {!open.owner_id && <option value="">Sin responsable</option>}
-                      {open.owner_id && !meta.sellers.some((s) => s.id === open.owner_id) && <option value={open.owner_id}>{open.owner}</option>}
+                      {open.owner_id && !meta.sellers.some((s) => s.id === open.owner_id) && <option value={open.owner_id}>{open.owner} (actual · inactivo o sin rol comercial)</option>}
                       {meta.sellers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                   ) : <input className="input" readOnly value={open.owner || "—"} />}

@@ -4,7 +4,7 @@
    Las contraseñas NO se ven nunca, ni el administrador: se guardan cifradas de una sola vía; se restablecen.
    Los secretos (contraseña temporal, enlaces) viven solo en el estado de React y se borran al cerrar la ventana:
    nada en localStorage ni sessionStorage, y nunca en una URL de terceros (sin wa.me): solo portapapeles. */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, parseTs } from "../../lib/api";
 import { useSession } from "../../app/session";
@@ -56,6 +56,9 @@ export default function UsersTab() {
   /* Cambios que involucran al rol admin (o desactivar a un admin): piden la contraseña de quien actúa. */
   const [toAlly, setToAlly] = useState<U | null>(null); // reunión 2, pedido 20
   const [pwAsk, setPwAsk] = useState<{ title: string; text: string; cta: string; run: (pw: string) => Promise<void> } | null>(null);
+  /* rol que se tocó en «Qué ve cada rol»: se abre en el editor (n fuerza el cambio aunque sea el mismo) */
+  const [focusRole, setFocusRole] = useState<{ code: string; n: number } | null>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
 
   /* los roles que creó el administrador llegan con su nombre: se registran antes de dibujar la lista */
   const load = () => api<UsersResp>("/settings/users").then((d) => { registerRoles({ labels: d.role_labels }); setData(d); setLoadErr(null); }).catch((e) => setLoadErr(errMsg(e)));
@@ -251,11 +254,12 @@ export default function UsersTab() {
       {canEdit && data.twofa_roles && data.twofa_role_choices && (
         <TwoFactorPolicy key={`${data.twofa_roles.join(",")}|${data.twofa_grace_days}`} current={data.twofa_roles} grace={data.twofa_grace_days ?? 7} choices={data.twofa_role_choices} onSaved={load} askPassword={setPwAsk} />
       )}
-      {me?.role === "admin" && <RolesEditor onChanged={load} />}
+      {me?.role === "admin" && <div ref={editorRef}><RolesEditor onChanged={load} focus={focusRole} /></div>}
       {me?.role === "admin" && (
-        <Card title="Qué ve cada rol" extra={<span className="meta">menú y permisos de cada rol</span>}>
-          <p className="muted" style={{ fontSize: 12.5, marginTop: 0 }}>Operación, Técnico, Catálogo y Administración son grupos del menú, no roles. Para ver el panel exactamente como lo ve una persona, usá «Ver como» arriba a la derecha.</p>
-          <RoleMatrix />
+        <Card title="Qué ve cada rol" extra={<span className="meta">se edita en «Roles y permisos»</span>}>
+          {/* reunión 2, pedido 29: la matriz se edita desde aquí. Tocar el nombre de un rol lo abre en «Roles y permisos». */}
+          <p className="muted" style={{ fontSize: 12.5, marginTop: 0 }}>Operación, Técnico, Catálogo y Administración son grupos del menú, no roles. Para cambiar lo que ve un rol, toque su nombre: se abre en «Roles y permisos», arriba. El Administrador siempre ve todo y no se recorta. Para ver el panel exactamente como lo ve una persona, use «Ver como» arriba a la derecha.</p>
+          <RoleMatrix onPickRole={(code) => { setFocusRole({ code, n: Date.now() }); editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }} />
         </Card>
       )}
 
@@ -620,13 +624,15 @@ function CostRoles({ current, choices, onSaved }: { current: string[]; choices: 
   );
 }
 
-/* Eliminar un usuario (reunión 21/10, pedido 21: cuentas de prueba). Solo si no tiene nada a su nombre; con actividad
-   se desactiva y aquí se dice por qué. Pide la contraseña de quien elimina. */
-type Activity = { can_delete: boolean; reason: string | null; activity: { what: string; count: number }[] };
+/* Eliminar un usuario (reunión 21/10, pedido 21; reunión 2, pedido 28). Solo el administrador, con su contraseña y
+   escribiendo ELIMINAR. Sin actividad se borra de verdad; con actividad se anonimiza y desactiva: sus documentos y la
+   bitácora quedan a nombre de «Usuario eliminado #id» y sale de la lista. Nunca a sí mismo ni al último administrador. */
+type Activity = { can_delete: boolean; reason: string | null; activity: { what: string; count: number }[]; mode?: "borrar" | "anonimizar" };
 function DeleteUser({ u, onDeleted }: { u: U; onDeleted: () => void }) {
   const { toast } = useSession();
   const [act, setAct] = useState<Activity | null>(null);
   const [pw, setPw] = useState("");
+  const [confirmTxt, setConfirmTxt] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const check = async () => {
@@ -634,33 +640,49 @@ function DeleteUser({ u, onDeleted }: { u: U; onDeleted: () => void }) {
     try { setAct(await api<Activity>(`/settings/users/${u.id}/activity`)); }
     catch (e) { toast(errMsg(e), "bad"); }
   };
+  const anonimizar = (act?.mode ?? (act?.activity.length ? "anonimizar" : "borrar")) === "anonimizar";
+  const listo = !!pw && confirmTxt.trim().toUpperCase() === "ELIMINAR";
   const go = async () => {
+    if (!listo) return;
     setBusy(true); setErr(null);
-    try { await api(`/settings/users/${u.id}/delete`, { method: "POST", json: { admin_password: pw } }); toast(`${u.name} fue eliminado`); onDeleted(); }
+    try {
+      const r = await api<{ mode: string }>(`/settings/users/${u.id}/delete`, { method: "POST", json: { admin_password: pw } });
+      toast(r.mode === "anonimizada" ? `${u.name} fue eliminado: lo que hizo queda a nombre de «Usuario eliminado»` : `${u.name} fue eliminado`);
+      onDeleted();
+    }
     catch (e) { setErr(errMsg(e)); }
     finally { setBusy(false); }
   };
+  const cancelar = () => { setAct(null); setPw(""); setConfirmTxt(""); setErr(null); };
   return (
     <div style={{ borderTop: "1px solid var(--hair)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
       <div className="meta">Eliminar</div>
       {!act && (
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <button className="btn btn--ghost btn--sm" onClick={check}>Eliminar usuario…</button>
-          <span className="muted" style={{ fontSize: 12.5 }}>Solo se elimina a quien no tiene nada a su nombre (p. ej. una cuenta de prueba). Si tiene actividad, se desactiva.</span>
+          <span className="muted" style={{ fontSize: 12.5 }}>Sin actividad se borra por completo (p. ej. una cuenta de prueba). Con actividad se anonimiza: deja de entrar, sale de la lista y lo que hizo se conserva sin su nombre ni su correo.</span>
         </div>
       )}
       {act && !act.can_delete && (
         <div style={{ fontSize: 13 }}>
-          <p style={{ margin: 0, color: "var(--warn)" }}><b>No se puede eliminar:</b> {act.reason}.{u.active ? " Usá «Desactivar»: deja de entrar y lo que hizo se conserva." : ""}</p>
-          {act.activity.length > 0 && <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>{act.activity.slice(0, 8).map((a) => <li key={a.what}>{a.what}: {a.count}</li>)}</ul>}
+          <p style={{ margin: 0, color: "var(--warn)" }}><b>No se puede eliminar:</b> {act.reason}.{u.active ? " Use «Desactivar»: deja de entrar y lo que hizo se conserva." : ""}</p>
+          <button className="btn btn--ghost btn--sm" style={{ marginTop: 8 }} onClick={cancelar}>Cerrar</button>
         </div>
       )}
       {act && act.can_delete && (
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <p style={{ fontSize: 13, margin: 0, flexBasis: "100%" }}>{u.name} no tiene actividad a su nombre. Se elimina su acceso y su cuenta; no se puede deshacer (se puede volver a invitar con el mismo correo).</p>
-          <div style={{ flex: "1 1 220px" }}><Field label="Confirmá con tu contraseña"><input className="input" type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && pw && !busy) go(); }} /></Field></div>
-          <button className="btn btn--danger" onClick={go} disabled={busy || !pw}>{busy ? "Eliminando…" : "Eliminar definitivamente"}</button>
-          <button className="btn btn--ghost" onClick={() => { setAct(null); setPw(""); }} disabled={busy}>Cancelar</button>
+          {anonimizar ? (
+            <div style={{ fontSize: 13, margin: 0, flexBasis: "100%" }}>
+              <p style={{ margin: 0 }}><b>{u.name}</b> tiene actividad a su nombre, así que no se borra del todo: se <b>anonimiza y desactiva</b>. Sus documentos y la bitácora quedan a nombre de «Usuario eliminado», se borran su nombre, su correo, su contraseña y su verificación en dos pasos, y sale de esta lista. No se puede deshacer (se puede volver a invitar con el mismo correo).</p>
+              {act.activity.length > 0 && <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>{act.activity.slice(0, 8).map((a) => <li key={a.what}>{a.what}: {a.count}</li>)}</ul>}
+            </div>
+          ) : (
+            <p style={{ fontSize: 13, margin: 0, flexBasis: "100%" }}><b>{u.name}</b> no tiene actividad a su nombre. Se borran su acceso y su cuenta; no se puede deshacer (se puede volver a invitar con el mismo correo).</p>
+          )}
+          <div style={{ flex: "1 1 160px" }}><Field label="Escriba ELIMINAR"><input className="input" value={confirmTxt} onChange={(e) => setConfirmTxt(e.target.value)} autoComplete="off" /></Field></div>
+          <div style={{ flex: "1 1 220px" }}><Field label="Confirme con su contraseña"><input className="input" type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && listo && !busy) go(); }} /></Field></div>
+          <button className="btn btn--danger" onClick={go} disabled={busy || !listo}>{busy ? "Eliminando…" : anonimizar ? "Anonimizar y eliminar" : "Eliminar definitivamente"}</button>
+          <button className="btn btn--ghost" onClick={cancelar} disabled={busy}>Cancelar</button>
           {err && <p style={{ color: "var(--bad)", fontSize: 13, margin: 0, flexBasis: "100%" }} role="alert">{err}</p>}
         </div>
       )}

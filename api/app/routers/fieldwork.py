@@ -552,17 +552,12 @@ def technicians(
     Sin parametros: solo el equipo interno (como siempre). Con project_id (u opportunity_id, para levantamientos): ademas
     los usuarios activos de las empresas aliadas que participan ahi; con ally_company_id: solo los de esa empresa."""
     from ..models import AllyCompany, AllyParticipation, TenantUser
+    from ..services import team
 
-    rows = db.scalars(
-        select(TenantUser).where(
-            TenantUser.tenant_id == p.tenant.id,
-            TenantUser.active,
-            TenantUser.role_code.in_(roles_like(db, p.tenant, CREW_ROLES)),  # tambien los roles creados a partir de esos
-            TenantUser.ally_company_id.is_(None),
-            TenantUser.customer_id.is_(None),
-        )
-    )
-    internos = [{"id": m.user.id, "name": m.user.full_name, "role": m.role_code, "ally_company_id": None, "company": None} for m in rows]
+    # tambien los roles creados a partir de esos; sin inactivos, eliminados ni duplicados (reunion 2, pedido 26)
+    rows = team.active_members(db, p.tenant.id, roles_like(db, p.tenant, CREW_ROLES))
+    nombres = team.labels(rows)
+    internos = [{"id": m.user.id, "name": nombres[m.user_id], "role": m.role_code, "ally_company_id": None, "company": None} for m in rows]
     if project_id is None and opportunity_id is None and ally_company_id is None:
         return [{k: v for k, v in x.items() if k in ("id", "name", "role")} for x in internos]
     q = select(AllyParticipation.ally_company_id).where(AllyParticipation.tenant_id == p.tenant.id, AllyParticipation.ally_company_id.is_not(None))

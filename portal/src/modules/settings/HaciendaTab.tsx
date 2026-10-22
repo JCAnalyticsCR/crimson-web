@@ -11,6 +11,17 @@ type Geo = { code: string; name: string; cantons: { code: string; name: string }
 type Lookup = { code: string; description: string | null; registered: boolean }[];
 const ID_TYPES = [["01", "Física"], ["02", "Jurídica"], ["03", "DIMEX"], ["04", "NITE"]];
 const ENVS = [["pruebas", "Pruebas"], ["produccion", "Producción"]] as const;
+const ENV_NAME = { pruebas: "Pruebas", produccion: "Producción" } as const;
+/* lo mismo que hacienda_config.atv_user_env: el usuario de pruebas termina en "stag" y el de producción en "prod" */
+const atvEnv = (u: string): "pruebas" | "produccion" | null => {
+  const s = u.trim().toLowerCase();
+  if (!s) return null;
+  const dom = s.includes("@") ? s.slice(s.lastIndexOf("@") + 1) : "";
+  for (const [marca, env] of [["stag", "pruebas"], ["prod", "produccion"]] as const) {
+    if (dom.startsWith(`${marca}.`) || dom === marca || s.endsWith(marca)) return env;
+  }
+  return null;
+};
 
 export default function HaciendaTab() {
   const { toast } = useSession();
@@ -30,7 +41,12 @@ export default function HaciendaTab() {
   const [delPw, setDelPw] = useState<string | null>(null);
   const [groups, setGroups] = useState<HaciendaState["consecutives"]>([]);
 
-  const apply = (s: HaciendaState) => { setSt(s); setProf(s.profile); setGroups(s.consecutives); };
+  const first = useRef(true);
+  const apply = (s: HaciendaState) => {
+    setSt(s); setProf(s.profile); setGroups(s.consecutives);
+    // la primera vez se abre la pestaña del ambiente con el que se emite
+    if (first.current) { first.current = false; if (s.emission_environment === "produccion" || s.mode === "produccion") setEnv("produccion"); }
+  };
   const load = () => api<HaciendaState>("/settings/hacienda").then(apply).catch((e) => toast(e.message, "bad"));
   useEffect(() => { load(); api<Geo>("/fiscal/geo").then(setGeo).catch(() => setGeo([])); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   if (!st || !prof) return <Loading />;
@@ -44,6 +60,12 @@ export default function HaciendaTab() {
   };
   const prov = geo.find((p) => p.code === prof.province);
   const c: CredBlock = st.credentials[env];
+  const emite = st.emission_environment !== undefined ? st.emission_environment : st.mode === "produccion" || st.mode === "pruebas" ? st.mode : null;
+  /* Producción encendida pero el servidor no la deja emitir: el botón no hace nada, así que se apaga y dice por qué */
+  const prodBloq = !!st.production.enabled_at && emite !== "produccion";
+  const prodBloqMsg = `Producción está activada, pero hoy no se emite con ella${st.production.blocked_reason ? `: ${st.production.blocked_reason}` : ". Revise la lista de verificación de producción."}`;
+  const typed = atvEnv(cred.atv_user);
+  const typedWarn = typed && typed !== env ? `Este usuario termina en «${typed === "pruebas" ? "stag" : "prod"}», que es de ${ENV_NAME[typed]}, y lo está cargando en ${ENV_NAME[env]}. Revise que no esté cruzado (se puede guardar igual).` : null;
 
   const setMode = (mode: string, confirm_text?: string) => call(() => api("/settings/hacienda/mode", { method: "PUT", json: { mode, confirm_text } }), "Modo actualizado");
   /* Pruebas en la empresa real manda cada venta al ambiente de pruebas: se confirma escribiendo PRUEBAS. Para probar
@@ -132,12 +154,37 @@ export default function HaciendaTab() {
         {lookup && <div style={{ padding: "10px 18px", fontSize: 13 }}><div className="meta">Registradas en Hacienda</div>{lookup.length === 0 ? <p className="muted">Hacienda no devolvió actividades.</p> : <ul style={{ margin: 0, paddingLeft: 18 }}>{lookup.map((l) => <li key={l.code}><span className="mono">{l.code}</span> · {l.description}{!l.registered && " (inactiva)"} {!ro && l.code.length === 6 && !st.activities.some((a) => a.code === l.code && a.active) && <button className="btn btn--ghost btn--sm" onClick={() => setNewAct({ code: l.code, description: l.description || "" })}>Usar</button>}</li>)}</ul>}</div>}
       </Card>
 
-      <Card title="Credenciales" extra={<div className="tabs">{ENVS.map(([k, l]) => <button key={k} className={env === k ? "is-active" : ""} onClick={() => setEnv(k)}>{l}</button>)}</div>}>
-        <p style={{ fontSize: 13, marginTop: 0 }}><b>Cargá aquí el usuario ATV, la contraseña, el certificado y el PIN. Se guardan cifrados y nunca se vuelven a mostrar. No los mandés por chat ni por correo a nadie, tampoco al equipo de desarrollo.</b></p>
-        {c.source === "entorno" && <div className="acc-warn">Configuradas en el servidor (variables de entorno). Si cargás aquí unas propias, mandan sobre las del servidor.</div>}
+      <Card title="Ambiente para emitir" extra={<span className={`badge ${emite === "produccion" ? "badge--bad" : emite === "pruebas" ? "badge--warn" : "badge--muted"}`} style={{ fontSize: 13 }}>{emite ? ENV_NAME[emite] : "No se emite"}</span>}>
+        {/* reunión 2, pedido 8: quedó cargado Pruebas y se creyó que era Producción. Aquí se dice sin ambigüedad con qué se emite. */}
+        <p style={{ fontSize: 14, margin: 0 }}>
+          {emite === "produccion" && <>Hoy las facturas se emiten en <b>Producción</b> (con validez fiscal), con las credenciales de Producción.</>}
+          {emite === "pruebas" && <>Hoy las facturas se emiten en <b>Pruebas</b> (ambiente de pruebas de Hacienda, <b>sin validez fiscal</b>), con las credenciales de Pruebas.</>}
+          {!emite && <>Hoy <b>no se emite</b> a Hacienda (modo {MODE_LABEL[st.mode]}){st.production.blocked_reason ? `: ${st.production.blocked_reason}` : ""}. Las credenciales cargadas no se usan para emitir.</>}
+        </p>
+        {!ro && (
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
+            <span className="muted" style={{ fontSize: 13 }}>Emitir con:</span>
+            <div className="acc-seg" role="group" aria-label="Ambiente para emitir">
+              <button type="button" disabled={busy} className={emite === "pruebas" ? "is-active" : ""} onClick={() => { if (emite !== "pruebas") pickMode("pruebas"); }}>Pruebas</button>
+              <button type="button" disabled={busy || prodBloq} title={prodBloq ? prodBloqMsg : undefined} className={emite === "produccion" ? "is-active" : ""} onClick={() => { if (!st.production.enabled_at) setProdModal("on"); }}>Producción</button>
+            </div>
+            <span className="muted" style={{ fontSize: 12 }}>Pruebas pide escribir PRUEBAS; Producción pide la lista de verificación completa y escribir PRODUCCIÓN.</span>
+            {prodBloq && <div className="acc-warn" role="status" style={{ width: "100%", margin: 0, fontSize: 13 }}>{prodBloqMsg}</div>}
+          </div>
+        )}
+      </Card>
+
+      <Card title="Credenciales" extra={<div className="tabs" role="tablist" aria-label="Ambiente de las credenciales">{ENVS.map(([k, l]) => <button key={k} role="tab" aria-selected={env === k} className={env === k ? "is-active" : ""} onClick={() => setEnv(k)}>{l}{emite === k ? " · se usa para emitir" : ""}</button>)}</div>}>
+        <div className="acc-warn" style={{ marginTop: 0, marginBottom: 10, fontSize: 13.5, borderColor: env === "produccion" ? "var(--bad)" : undefined }}>
+          Está viendo las credenciales de <b>{ENV_NAME[env]}</b>. {env === "pruebas" ? "El usuario ATV de Pruebas termina en «stag» (…@stag.comprobanteselectronicos.go.cr)." : "El usuario ATV de Producción termina en «prod» (…@prod.comprobanteselectronicos.go.cr)."}{" "}
+          {emite === env ? <b>Estas son las que se usan hoy para emitir.</b> : <>Hoy <b>no</b> se usan para emitir{emite ? ` (se emite con ${ENV_NAME[emite]})` : ""}.</>}
+        </div>
+        <p style={{ fontSize: 13, marginTop: 0 }}><b>Cargue aquí el usuario ATV, la contraseña, el certificado y el PIN de este ambiente. Se guardan cifrados y nunca se vuelven a mostrar. No los envíe por chat ni por correo a nadie, tampoco al equipo de desarrollo.</b></p>
+        {c.source === "entorno" && <div className="acc-warn">Configuradas en el servidor (variables de entorno). Si carga aquí unas propias, mandan sobre las del servidor.</div>}
         {!c.readable && <div className="acc-warn" style={{ borderColor: "var(--bad)" }}>Ilegibles con la llave actual del servidor: vuelva a cargarlas.</div>}
+        {c.atv_user_warning && <div className="acc-warn" role="alert">{c.atv_user_warning}</div>}
         <dl className="acc-kv" style={{ margin: "10px 0" }}>
-          <dt>Usuario ATV</dt><dd>{c.atv_user_set ? "✓ cargado" : "—"}</dd>
+          <dt>Usuario ATV</dt><dd>{c.atv_user_set ? `✓ cargado${c.atv_user_env ? ` · de ${ENV_NAME[c.atv_user_env]} (termina en «${c.atv_user_env === "pruebas" ? "stag" : "prod"}»)` : ""}` : "—"}</dd>
           <dt>Contraseña</dt><dd>{c.atv_password_set ? "✓ cargada" : "—"}</dd>
           <dt>Certificado</dt><dd>{c.cert ? `Cargado · vence el ${fmtDate(c.cert.not_after ? c.cert.not_after.slice(0, 10) : null)}${c.cert.days_left !== null ? ` (${c.cert.days_left} días)` : ""} · emitido a ${c.cert.subject_cn || "—"}` : c.p12_set ? "✓ cargado" : "—"}</dd>
           <dt>PIN</dt><dd>{c.pin_set ? "✓ cargado" : "—"}</dd>
@@ -146,15 +193,16 @@ export default function HaciendaTab() {
         {!ro && (
           <>
             <div className="grid-2">
-              <Field label="Usuario ATV" hint="Dejá vacío para conservar."><input className="input" autoComplete="off" value={cred.atv_user} onChange={(e) => setCred({ ...cred, atv_user: e.target.value })} /></Field>
-              <Field label="Contraseña ATV" hint="Dejá vacío para conservar."><input className="input" type="password" autoComplete="new-password" value={cred.atv_password} onChange={(e) => setCred({ ...cred, atv_password: e.target.value })} /></Field>
-              <Field label="Certificado (.p12)" hint="Dejá vacío para conservar. Máx. 64 KB."><input ref={p12} className="input" type="file" accept=".p12,.pfx,application/x-pkcs12" /></Field>
-              <Field label="PIN del certificado" hint="Hasta 64 caracteres. Dejá vacío para conservar."><input className="input" type="password" autoComplete="new-password" maxLength={64} value={cred.pin} onChange={(e) => setCred({ ...cred, pin: e.target.value })} /></Field>
-              <Field label="Tu contraseña de administrador"><input className="input" type="password" autoComplete="new-password" value={cred.admin_password} onChange={(e) => setCred({ ...cred, admin_password: e.target.value })} /></Field>
+              <Field label={`Usuario ATV de ${ENV_NAME[env]}`} hint={`Deje vacío para conservar. Termina en «${env === "pruebas" ? "stag" : "prod"}».`}><input className="input" autoComplete="off" value={cred.atv_user} onChange={(e) => setCred({ ...cred, atv_user: e.target.value })} /></Field>
+              <Field label="Contraseña ATV" hint="Deje vacío para conservar."><input className="input" type="password" autoComplete="new-password" value={cred.atv_password} onChange={(e) => setCred({ ...cred, atv_password: e.target.value })} /></Field>
+              <Field label="Certificado (.p12)" hint="Deje vacío para conservar. Máx. 64 KB."><input ref={p12} className="input" type="file" accept=".p12,.pfx,application/x-pkcs12" /></Field>
+              <Field label="PIN del certificado" hint="Hasta 64 caracteres. Los espacios al inicio o al final se quitan. Deje vacío para conservar."><input className="input" type="password" autoComplete="new-password" maxLength={80} value={cred.pin} onChange={(e) => setCred({ ...cred, pin: e.target.value })} /></Field>
+              <Field label="Su contraseña de administrador"><input className="input" type="password" autoComplete="new-password" value={cred.admin_password} onChange={(e) => setCred({ ...cred, admin_password: e.target.value })} /></Field>
             </div>
+            {typedWarn && <div className="acc-warn" role="alert">{typedWarn}</div>}
             <label className="acc-check"><input type="checkbox" checked={cred.allow_other_id} onChange={(e) => setCred({ ...cred, allow_other_id: e.target.checked })} />El certificado es de otra cédula a propósito</label>
             <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-              <button className="btn btn--crimson btn--sm" disabled={busy || !cred.admin_password} onClick={saveCred}>Guardar</button>
+              <button className="btn btn--crimson btn--sm" disabled={busy || !cred.admin_password} onClick={saveCred}>Guardar credenciales de {ENV_NAME[env]}</button>
               <button className="btn btn--soft btn--sm" disabled={busy || c.source === "ninguna"} onClick={test}>Probar conexión</button>
               {c.source === "ajustes" && <button className="btn btn--ghost btn--sm" onClick={() => setDelPw("")}>Eliminar</button>}
             </div>
@@ -175,34 +223,34 @@ export default function HaciendaTab() {
               <td className="num">{!ro && <button className="btn btn--ghost btn--sm" onClick={() => saveGroup(g)}>Guardar</button>}</td>
             </tr>)}</tbody></table>
         </div>
-        <p className="muted" style={{ padding: "10px 18px", fontSize: 12, margin: 0 }}>Si venís de Fygaro, poné aquí el último número que usó Fygaro para cada tipo (Hacienda exige continuar la numeración). Si los dos sistemas van a convivir, usá otra terminal. Solo sube, nunca baja. {st.consecutives_confirmed_at ? `Confirmados el ${parseTs(st.consecutives_confirmed_at).toLocaleString("es-CR")} (vale 24 h).` : "Sin confirmar."} Lo simulado y las pruebas usan otra numeración (T01…T07) que no gasta esta.</p>
+        <p className="muted" style={{ padding: "10px 18px", fontSize: 12, margin: 0 }}>Si viene de Fygaro, ponga aquí el último número que usó Fygaro para cada tipo (Hacienda exige continuar la numeración). Si los dos sistemas van a convivir, use otra terminal. Solo sube, nunca baja. {st.consecutives_confirmed_at ? `Confirmados el ${parseTs(st.consecutives_confirmed_at).toLocaleString("es-CR")} (vale 24 h).` : "Sin confirmar."} Lo simulado y las pruebas usan otra numeración (T01…T07) que no gasta esta.</p>
       </Card>
 
       {prodModal && (
         <Modal title={prodModal === "on" ? "Activar producción" : "Apagar producción"} onClose={() => setProdModal(null)} foot={<><button className="btn btn--ghost" onClick={() => setProdModal(null)}>Cancelar</button><button className={`btn ${prodModal === "on" ? "btn--danger" : "btn--crimson"}`} disabled={busy || !prodForm.admin_password || (prodModal === "on" && !/^PRODUCCI[OÓ]N$/i.test(prodForm.confirm_text.trim()))} onClick={async () => { await call(() => api("/settings/hacienda/production", { method: "POST", json: { enabled: prodModal === "on", ...prodForm } }), prodModal === "on" ? "Producción activada" : "Producción desactivada"); setProdModal(null); setProdForm({ admin_password: "", confirm_text: "" }); }}>{prodModal === "on" ? "Activar" : "Desactivar"}</button></>}>
-          {prodModal === "on" && <p style={{ fontSize: 13, marginTop: 0 }}>Desde ahora los comprobantes y los mensajes receptor van a Hacienda <b>con validez fiscal</b>. Escribí <b>PRODUCCIÓN</b> para confirmar.</p>}
+          {prodModal === "on" && <p style={{ fontSize: 13, marginTop: 0 }}>Desde ahora los comprobantes y los mensajes receptor van a Hacienda <b>con validez fiscal</b>. Escriba <b>PRODUCCIÓN</b> para confirmar.</p>}
           {prodModal === "on" && <Field label="Confirmación"><input className="input" value={prodForm.confirm_text} onChange={(e) => setProdForm({ ...prodForm, confirm_text: e.target.value })} /></Field>}
           {/* apagar deja la empresa en Desactivada, nunca en Pruebas (cada venta real iria al ambiente de pruebas) */}
           {prodModal === "off" && <p style={{ fontSize: 13, marginTop: 0 }}>La empresa queda en modo <b>Desactivada</b>: no se emite nada hasta volver a activar producción y lo vendido entra a la lista «Por emitir».</p>}
-          <Field label="Tu contraseña de administrador"><input className="input" type="password" autoComplete="new-password" value={prodForm.admin_password} onChange={(e) => setProdForm({ ...prodForm, admin_password: e.target.value })} /></Field>
+          <Field label="Su contraseña de administrador"><input className="input" type="password" autoComplete="new-password" value={prodForm.admin_password} onChange={(e) => setProdForm({ ...prodForm, admin_password: e.target.value })} /></Field>
         </Modal>
       )}
       {pruebasTxt !== null && (
         <Modal title="Pasar a modo Pruebas" onClose={() => setPruebasTxt(null)} foot={<><button className="btn btn--ghost" onClick={() => setPruebasTxt(null)}>Cancelar</button><button className="btn btn--danger" disabled={busy || pruebasTxt.trim().toUpperCase() !== "PRUEBAS"} onClick={async () => { await setMode("pruebas", pruebasTxt.trim()); setPruebasTxt(null); }}>Pasar a Pruebas</button></>}>
           <div className="acc-warn" style={{ marginTop: 0 }}>Con el modo Pruebas, <b>cada venta real se emitiría al ambiente de pruebas y después no se podría emitir en producción</b>.</div>
-          <p className="muted" style={{ fontSize: 13 }}>Para probar la conexión con Hacienda sin tocar las ventas no hace falta cambiar el modo: cargá las credenciales de Pruebas abajo y usá «Probar conexión»; la prueba completa la corre el equipo técnico sin cambiar el modo. Si igual querés pasar a Pruebas, escribí <b>PRUEBAS</b>.</p>
+          <p className="muted" style={{ fontSize: 13 }}>Para probar la conexión con Hacienda sin tocar las ventas no hace falta cambiar el modo: cargue las credenciales de Pruebas abajo y use «Probar conexión»; la prueba completa la corre el equipo técnico sin cambiar el modo. Si igual quiere pasar a Pruebas, escriba <b>PRUEBAS</b>.</p>
           <Field label="Confirmación"><input className="input" autoFocus value={pruebasTxt} onChange={(e) => setPruebasTxt(e.target.value)} /></Field>
         </Modal>
       )}
       {confirmPw !== null && (
         <Modal title="Confirmar consecutivos" onClose={() => setConfirmPw(null)} foot={<><button className="btn btn--ghost" onClick={() => setConfirmPw(null)}>Cancelar</button><button className="btn btn--crimson" disabled={!confirmPw} onClick={async () => { await call(() => api("/settings/hacienda/consecutives/confirm", { method: "POST", json: { admin_password: confirmPw } }), "Consecutivos confirmados"); setConfirmPw(null); }}>Confirmar</button></>}>
-          <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Confirmás que los números de arriba siguen la numeración que usaba Fygaro. La confirmación vale 24 h.</p>
-          <Field label="Tu contraseña de administrador"><input className="input" type="password" autoComplete="new-password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} /></Field>
+          <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Confirma que los números de arriba siguen la numeración que usaba Fygaro. La confirmación vale 24 h.</p>
+          <Field label="Su contraseña de administrador"><input className="input" type="password" autoComplete="new-password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} /></Field>
         </Modal>
       )}
       {delPw !== null && (
         <Modal title={`Eliminar credenciales de ${env}`} onClose={() => setDelPw(null)} foot={<><button className="btn btn--ghost" onClick={() => setDelPw(null)}>Cancelar</button><button className="btn btn--danger" disabled={!delPw} onClick={async () => { await call(() => api(`/settings/hacienda/credentials/${env}`, { method: "DELETE", json: { admin_password: delPw } }), "Credenciales eliminadas"); setDelPw(null); }}>Eliminar</button></>}>
-          <Field label="Tu contraseña de administrador"><input className="input" type="password" autoComplete="new-password" value={delPw} onChange={(e) => setDelPw(e.target.value)} /></Field>
+          <Field label="Su contraseña de administrador"><input className="input" type="password" autoComplete="new-password" value={delPw} onChange={(e) => setDelPw(e.target.value)} /></Field>
         </Modal>
       )}
     </div>

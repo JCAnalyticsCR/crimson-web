@@ -177,8 +177,45 @@ def cert_cn(rfc4514: str | None) -> str | None:
     return m.group(1).replace("\\,", ",") if m else None
 
 
+ENV_LABEL = {"pruebas": "Pruebas", "produccion": "Producción"}
+
+
+def atv_user_env(user: str | None) -> str | None:
+    """De que ambiente parece el usuario ATV (reunion 2, pedido 8): el de pruebas termina en "stag"
+    (...@stag.comprobanteselectronicos.go.cr) y el de produccion en "prod". None si no se reconoce."""
+    u = (user or "").strip().lower()
+    if not u:
+        return None
+    dominio = u.rsplit("@", 1)[1] if "@" in u else ""
+    for marca, env in (("stag", "pruebas"), ("prod", "produccion")):
+        if dominio.startswith(marca + ".") or dominio == marca or u.endswith(marca):
+            return env
+    return None
+
+
+def atv_user_warning(environment: str, detected: str | None) -> str | None:
+    """Aviso (no bloquea) si el usuario ATV parece de otro ambiente que el que se esta cargando."""
+    if detected is None or detected == environment:
+        return None
+    marca = "stag" if detected == "pruebas" else "prod"
+    return (
+        f"El usuario ATV termina en «{marca}», que es de {ENV_LABEL[detected]}, pero está cargado en {ENV_LABEL[environment]}. "
+        f"Revise que no estén cruzados: con el usuario de otro ambiente Hacienda rechaza la conexión."
+    )
+
+
+def _stored_atv_user(tenant_id: int, environment: str, c: FiscalCredential | None) -> str | None:
+    if not c or not c.atv_user_enc:
+        return None
+    try:
+        return secretbox.unseal_text(c.atv_user_enc, secretbox.aad_for(tenant_id, environment, "atv_user"))
+    except secretbox.SecretUnavailable:
+        return None
+
+
 def credentials_block(db: Session, tenant: Tenant, environment: str) -> dict:
-    """Bloque credentials[env] de GET /settings/hacienda. NUNCA usuario, contrasena, PIN, .p12 ni texto cifrado."""
+    """Bloque credentials[env] de GET /settings/hacienda. NUNCA usuario, contrasena, PIN, .p12 ni texto cifrado: del
+    usuario ATV solo sale de que ambiente parece (stag/prod) y el aviso si no corresponde."""
     c = _cred_row(db, tenant.id, environment)
     if _row_has_any(c):
         source = "ajustes"
@@ -201,8 +238,17 @@ def credentials_block(db: Session, tenant: Tenant, environment: str) -> dict:
             "sha256": c.cert_sha256,
         }
     env = source == "entorno"
+    if source == "ajustes":
+        detected = atv_user_env(_stored_atv_user(tenant.id, environment, c))
+    elif env:
+        detected = atv_user_env(settings.hacienda_username.get_secret_value() if settings.hacienda_username else None)
+    else:
+        detected = None
     return {
         "source": source,
+        "environment": environment,
+        "atv_user_env": detected,
+        "atv_user_warning": atv_user_warning(environment, detected),
         "atv_user_set": env or bool(c and c.atv_user_enc),
         "atv_password_set": env or bool(c and c.atv_password_enc),
         "p12_set": env or bool(c and c.p12_enc),

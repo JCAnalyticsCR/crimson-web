@@ -17,7 +17,7 @@ const MONEY: { label: string; need: string }[] = [
 const yes = <span style={{ color: "var(--ok)", fontWeight: 700 }} aria-label="sí">✓</span>;
 const no = <span className="muted" aria-label="no">—</span>;
 
-export default function RoleMatrix() {
+export default function RoleMatrix({ onPickRole }: { onPickRole?: (code: string) => void } = {}) {
   const { matrix } = useSession();
   // mismo orden que Ajustes y "Ver como"; sin soporte ni roles de cliente o aliado (tienen su propio portal)
   const roles = [...Object.keys(ROLES), ...customRoleCodes()].filter((r) => r !== "soporte" && !isExternalRole(r) && matrix[r]);
@@ -32,7 +32,15 @@ export default function RoleMatrix() {
         <thead>
           <tr>
             <th style={first}>Sección</th>
-            {roles.map((r) => <th key={r} style={{ ...cell, whiteSpace: "normal", lineHeight: 1.25 }} title={roleMeta(r).summary}>{roleMeta(r).label}</th>)}
+            {roles.map((r) => (
+              <th key={r} style={{ ...cell, whiteSpace: "normal", lineHeight: 1.25 }} title={roleMeta(r).summary}>
+                {onPickRole ? (
+                  <button type="button" className="btn btn--ghost btn--sm" style={{ padding: "2px 6px", whiteSpace: "normal", lineHeight: 1.25, fontWeight: 600 }} onClick={() => onPickRole(r)} title={r === "admin" ? "El Administrador siempre ve todo: no se edita" : `Cambiar lo que ve ${roleMeta(r).label}`}>
+                    {roleMeta(r).label}{r !== "admin" && <span aria-hidden> ✎</span>}
+                  </button>
+                ) : roleMeta(r).label}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>

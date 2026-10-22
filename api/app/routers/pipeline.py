@@ -516,14 +516,10 @@ def touch(oid: int, data: TouchIn, p: Principal = Depends(require("crm_pipeline"
 
 @router.get("/opportunities/meta/config")
 def meta(p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = Depends(get_db)):
-    from ..models import TenantUser
+    from ..services import team
 
-    equipo = [
-        {"id": m.user.id, "name": m.user.full_name}
-        for m in db.scalars(
-            select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(roles_like(db, p.tenant, ("admin", "ventas", "supervisor"), admin=True)))
-        )
-    ]
+    # sin inactivos, eliminados ni duplicados (reunion 2, pedido 26)
+    equipo = team.options(db, p.tenant.id, roles_like(db, p.tenant, ("admin", "ventas", "supervisor"), admin=True))
     return {
         "states": list(STATES),
         "sources": ["Referido", "Sitio web", "WhatsApp", "Llamada", "Cliente actual", "Feria", "Alianza"],

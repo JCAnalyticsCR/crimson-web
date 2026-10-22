@@ -62,8 +62,10 @@ const strongEnough = (pw: string) => pw.length >= 10 && /\d/.test(pw) && /\p{L}/
 
 export default function Login() {
   const { login } = useSession();
-  const notice = (useLocation().state as { notice?: string } | null)?.notice;
-  const [email, setEmail] = useState("");
+  const navState = useLocation().state as { notice?: string; email?: string } | null;
+  const notice = navState?.notice;
+  /* al venir de aceptar una invitación llega el correo de la cuenta nueva (reunión 2, pedido 27) */
+  const [email, setEmail] = useState(navState?.email || "");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [totp, setTotp] = useState("");

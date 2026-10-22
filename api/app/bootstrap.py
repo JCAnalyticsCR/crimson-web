@@ -70,17 +70,34 @@ def extra_invites(db: Session, spec: str | None, base_url: str | None = None) ->
     if not t:
         return out
     now = datetime.now(UTC)
-    retirados = {
-        str((a.diff or {}).get("email") or (a.before or {}).get("email") or "").strip().lower()
-        for a in db.scalars(select(AuditLog).where(AuditLog.tenant_id == t.id, AuditLog.action == "user_delete"))
-    }
+    from .routers.users_admin import DIGEST_LEGACY_KID, email_digest, email_digests
+
+    retirados: set[str] = set()  # correos en claro (bitacora de antes de la reunion 2)
+    huellas: dict[tuple[str, str], int | None] = {}  # (kid, huella) -> id del usuario eliminado
+    for a in db.scalars(select(AuditLog).where(AuditLog.tenant_id == t.id, AuditLog.action.in_(("user_delete", "user_delete_digest")))):
+        d, b = a.diff or {}, a.before or {}
+        retirados.add(str(d.get("email") or b.get("email") or "").strip().lower())
+        # desde la reunion 2 (pedido 28) la bitacora guarda el correo enmascarado y su huella con clave (email_digest);
+        # sin kid es la primera version, hecha con la llave derivada de JWT_SECRET
+        h = str(d.get("email_hmac") or b.get("email_hmac") or "")
+        if h:
+            huellas[(str(d.get("email_hmac_kid") or b.get("email_hmac_kid") or DIGEST_LEGACY_KID), h)] = a.entity_id
     for item in [x.strip() for x in spec.split(",") if x.strip()]:
         email, _, role = item.partition(":")
         email, role = email.strip().lower(), (role.strip() or "lectura")
         if role not in ASSIGNABLE_ROLES or "@" not in email:
             print(f"[bootstrap] Invitacion omitida (rol o correo invalido): {item}", flush=True)
             continue
-        if email in retirados:
+        mias = email_digests(email)
+        coinciden = [(k, h) for k, h in mias.items() if (k, h) in huellas]
+        if email in retirados or coinciden:
+            nueva = email_digest(email)
+            if coinciden and (nueva["email_hmac_kid"], nueva["email_hmac"]) not in huellas:
+                # reconocida con una llave que ya no es la principal: se anota la huella con la principal (la bitacora
+                # no se edita, se agrega un registro) para que la llave vieja se pueda quitar de FISCAL_KEYS sin que
+                # esta cuenta vuelva a recibir invitacion
+                db.add(AuditLog(tenant_id=t.id, user_id=None, at=now, action="user_delete_digest", entity="user", entity_id=huellas[coinciden[0]], diff=nueva))
+                huellas[(nueva["email_hmac_kid"], nueva["email_hmac"])] = huellas[coinciden[0]]
             print(f"[bootstrap] Invitacion omitida (la cuenta fue eliminada en Ajustes): {email}", flush=True)
             continue
         if db.scalar(select(User).where(User.email == email)):

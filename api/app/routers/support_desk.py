@@ -885,12 +885,12 @@ def ticket_to_work_order(tid: int, data: VisitIn, p: Principal = Depends(require
 
 @router.get("/tickets/meta/config")
 def ticket_meta(p: Principal = Depends(require("support_desk", "ver")), db: Session = Depends(get_db)):
-    agentes = [
-        {"id": m.user.id, "name": m.user.full_name, "role": m.role_code}
-        for m in db.scalars(
-            select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(roles_like(db, p.tenant, AGENT_ROLES, admin=True)))
-        )
-    ]
+    from ..services import team
+
+    # sin inactivos, eliminados ni duplicados (reunion 2, pedido 26)
+    _ag = team.active_members(db, p.tenant.id, roles_like(db, p.tenant, AGENT_ROLES, admin=True))
+    _nombres = team.labels(_ag)
+    agentes = [{"id": m.user.id, "name": _nombres[m.user_id], "role": m.role_code} for m in _ag]
     ahora = datetime.now(UTC)
     # mismo alcance que la lista y la misma funcion que cada filtro (services/sla.py): el contador = las tarjetas
     abiertos = db.scalars(select(SupportTicket).where(*ticket_scope(p), SupportTicket.status.in_(slasvc.ABIERTOS))).all()
@@ -940,18 +940,11 @@ def ticket_meta(p: Principal = Depends(require("support_desk", "ver")), db: Sess
 def ticket_agents(ally_company_id: int | None = None, p: Principal = Depends(require("support_desk", "ver")), db: Session = Depends(get_db)):
     """Responsables posibles: el equipo interno que atiende soporte y, con ally_company_id, los usuarios activos de esa
     empresa aliada."""
-    out = [
-        {"id": m.user.id, "name": m.user.full_name, "role": m.role_code, "company": None}
-        for m in db.scalars(
-            select(TenantUser).where(
-                TenantUser.tenant_id == p.tenant.id,
-                TenantUser.active,
-                TenantUser.role_code.in_(roles_like(db, p.tenant, AGENT_ROLES, admin=True)),
-                TenantUser.ally_company_id.is_(None),
-            )
-        )
-        if m.user.active
-    ]
+    from ..services import team
+
+    _ag = team.active_members(db, p.tenant.id, roles_like(db, p.tenant, AGENT_ROLES, admin=True))
+    _nombres = team.labels(_ag)
+    out = [{"id": m.user.id, "name": _nombres[m.user_id], "role": m.role_code, "company": None} for m in _ag]
     if ally_company_id:
         c = db.get(AllyCompany, ally_company_id)
         if not c or c.tenant_id != p.tenant.id:
