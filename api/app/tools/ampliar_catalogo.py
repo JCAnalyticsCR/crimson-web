@@ -3,18 +3,22 @@ configuradas en auto_catalog, partiendo de los supplier_items ya guardados en la
 a Eurocomp). Imprime conteos por familia y totales.
 
 Uso:
-    python -m app.tools.ampliar_catalogo [--dry-run] [--sync] [--tenant-id N]
+    python -m app.tools.ampliar_catalogo [--dry-run] [--sync] [--activar] [--publicar] [--tenant-id N]
 
 Flags:
     --dry-run   Muestra qué se crearía sin escribir nada en la base.
     --sync      Descarga primero el catálogo completo de Eurocomp (requiere EUROCOMP_WS_* en el
-                entorno) y luego crea. Necesario si la base solo tiene los artículos del filtro
-                viejo (antes de la ampliación a 4 familias).
+                entorno) y luego crea. La descarga filtra al vuelo (keep=relevant) y el proveedor
+                solo devuelve ~1650 artículos útiles; trim_memory() se llama después de cada lote.
+    --activar   Guarda auto_catalog {enabled: true, families: las 4} en la base antes de crear,
+                de forma que las sincronizaciones automáticas futuras lo respeten.
+    --publicar  Como --activar, pero además publish_web=true (los productos nuevos quedan visibles
+                en la tienda al crearse). Implica --activar.
     --tenant-id El id de la empresa. Por defecto la primera empresa activa.
 
 Producción (Railway):
-    railway run python -m app.tools.ampliar_catalogo --sync
-    railway run python -m app.tools.ampliar_catalogo --dry-run --sync  # primero en seco
+    railway run python -m app.tools.ampliar_catalogo --dry-run --sync        # primero en seco
+    railway run python -m app.tools.ampliar_catalogo --activar --publicar --sync  # ejecución real
 """
 
 from __future__ import annotations
@@ -29,7 +33,7 @@ from ..models import Product, SupplierItem, Tenant
 from ..services import supplier_sync as ss
 
 
-def _run(tenant_id: int | None, dry_run: bool, sync_first: bool) -> None:
+def _run(tenant_id: int | None, dry_run: bool, sync_first: bool, activar: bool, publicar: bool) -> None:
     with SessionLocal() as db:
         # --- empresa objetivo ---
         if tenant_id:
@@ -45,13 +49,34 @@ def _run(tenant_id: int | None, dry_run: bool, sync_first: bool) -> None:
             t = tenants[0]
         print(f"Empresa: {t.name!r} (id={t.id})")
 
-        # --- configuración auto_catalog ---
+        # --- --activar / --publicar: persiste la configuración ANTES de crear ---
+        # (implica que las sincronizaciones automáticas futuras también usarán estos valores)
+        if activar or publicar:
+            new_cfg: dict = {
+                "enabled": True,
+                "families": list(ss.AC_DEFAULT["families"]),
+                "publish_web": bool(publicar),
+            }
+            ss.ac_save(t, new_cfg)
+            if not dry_run:
+                db.commit()
+            print(
+                f"[{'--activar' if not publicar else '--publicar'}] Configuración guardada:"
+                f" enabled=True, familias={new_cfg['families']}, publish_web={new_cfg['publish_web']}"
+            )
+            if dry_run:
+                print("  [dry-run: el commit de configuración fue omitido]")
+            else:
+                print("  Esta configuración quedará activa en futuras sincronizaciones automáticas.")
+
+        # --- configuración auto_catalog (ya actualizada si se usó --activar/--publicar) ---
         cfg = ss.ac_settings(t)
         print(f"auto_catalog: enabled={cfg['enabled']}, familias={cfg['families']}, publish_web={cfg['publish_web']}")
-        if not cfg.get("enabled"):
+        if not cfg.get("enabled") and not (activar or publicar):
             print("AVISO: auto_catalog no está habilitado en esta empresa. Activándolo para esta ejecución...")
 
         # --- sync opcional: descarga el catálogo completo antes de crear ---
+        # fetch() filtra al vuelo (keep=relevant), manteniendo en memoria solo ~1650 artículos útiles
         if sync_first:
             print("\n[--sync] Descargando catálogo completo de Eurocomp...")
             from ..providers.sirett import SirettClient, SirettError
@@ -99,21 +124,16 @@ def _run(tenant_id: int | None, dry_run: bool, sync_first: bool) -> None:
             )
             print(f"  {fam}: {sin_prod} sin producto, {con_prod} ya vinculados")
 
-        # --- activar temporalmente si está deshabilitado ---
+        # --- activar temporalmente en memoria si todavía no está habilitado (sin --activar/--publicar) ---
         enabled_orig = cfg.get("enabled", False)
-        if not enabled_orig:
-            # activar solo para esta ejecución (en memoria, sin commit)
-            t.settings = {**(t.settings or {})}
+        if not enabled_orig and not (activar or publicar):
+            # solo para esta ejecución: no se persiste (el admin decide si lo deja activo)
             ss.ac_save(t, {"enabled": True})
 
         # --- ejecutar en seco o de verdad ---
         mode = "DRY-RUN" if dry_run else "CREANDO"
         print(f"\n[{mode}] auto_catalog_run...")
         result = ss.auto_catalog_run(db, t, sup, batch_size=50, dry_run=dry_run, commit_batches=not dry_run)
-
-        if not enabled_orig and not dry_run:
-            # restablecer enabled=False después de la ejecución
-            db.refresh(t) if not dry_run else None
 
         # --- resumen ---
         print("\nResultado:")
@@ -139,10 +159,12 @@ def _run(tenant_id: int | None, dry_run: bool, sync_first: bool) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Amplía el catálogo de Crimson con los artículos de Eurocomp")
     parser.add_argument("--dry-run", action="store_true", help="Mostrar conteos sin crear nada")
-    parser.add_argument("--sync", action="store_true", help="Descargar catálogo de Eurocomp primero")
+    parser.add_argument("--sync", action="store_true", help="Descargar catálogo de Eurocomp primero (filtra al vuelo)")
+    parser.add_argument("--activar", action="store_true", help="Persiste auto_catalog {enabled: true, familias: las 4} antes de crear")
+    parser.add_argument("--publicar", action="store_true", help="Como --activar pero además publish_web=true (implica --activar)")
     parser.add_argument("--tenant-id", type=int, default=None, help="ID de la empresa (por defecto la única activa)")
     args = parser.parse_args()
-    _run(args.tenant_id, args.dry_run, args.sync)
+    _run(args.tenant_id, args.dry_run, args.sync, args.activar or args.publicar, args.publicar)
 
 
 if __name__ == "__main__":
