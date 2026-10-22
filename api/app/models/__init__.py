@@ -1,5 +1,16 @@
 """Importa todos los modelos para que Alembic y Base.metadata los vean."""
 
+from .accounting import (
+    ACCOUNTING_ROLES,
+    AccountingExport,
+    AccountingPeriod,
+    AccountingRoleMapping,
+    JournalEntry,
+    JournalLine,
+    QboAccount,
+    bank_role,
+    expense_cat_role,
+)
 from .allies import AllyCompany, AllyCostRequest, AllyParticipation, AllyProductPrice, AllySharedNote
 from .base import TenantMixin, TimestampMixin
 from .catalog import Category, Product, ProductTax, Supplier, Tax
@@ -76,6 +87,15 @@ from .support import (
 from .vehicles import FuelLoad, Vehicle, VehicleCost
 
 __all__ = [
+    "ACCOUNTING_ROLES",
+    "AccountingExport",
+    "AccountingPeriod",
+    "AccountingRoleMapping",
+    "JournalEntry",
+    "JournalLine",
+    "QboAccount",
+    "bank_role",
+    "expense_cat_role",
     "TenantMixin",
     "TimestampMixin",
     "Tenant",
