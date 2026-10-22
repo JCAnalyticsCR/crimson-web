@@ -632,14 +632,44 @@ def _queue_admins(db: Session, t: Tenant, subject: str, html_body: str, entity: 
     return len(vistos)
 
 
+def webhook_alert_html(t: Tenant, status: int, detail: str) -> tuple[str, str]:
+    """(asunto, cuerpo) del aviso al admin por un 401 o un 503 del webhook de ONVO."""
+    if status == 401:
+        titulo = "ONVO no puede avisar los pagos: el secreto del webhook no coincide"
+        que = (
+            "El panel rechazó (401) un aviso con formato de ONVO porque el secreto del webhook no coincide. "
+            "Si los pagos con tarjeta se están confirmando solos, puede ser un intento ajeno: no hace falta cambiar nada. "
+            "Si no, compará el secreto del webhook de Ajustes → Pasarelas → ONVO con el que muestra el panel de ONVO "
+            "(Desarrolladores → Webhooks). Mientras tanto los pagos con tarjeta se confirman cuando el comprador vuelve a "
+            "la tienda o en la consulta automática."
+        )
+    else:
+        titulo = "ONVO avisó un pago que no se pudo confirmar"
+        que = (
+            "Llegó un aviso de ONVO que el panel no pudo confirmar consultando a ONVO (503). ONVO lo reintenta solo; "
+            "si se repite, revisá el pedido o la factura en el panel de ONVO y la llave en Ajustes → Pasarelas."
+        )
+    from . import email_layout as el
+
+    # diseno base: este correo no pasa por mail.queue_email (lo encola _queue_admins), asi que se arma aqui con render
+    cuerpo = el.render(
+        t,
+        title=titulo,
+        body=el.p(que) + el.note(f"Detalle: {detail[:300]}", warn=True),
+        preheader=f"{titulo}. Revisá Ajustes → Pasarelas → ONVO.",
+        action=(el.panel_url("/ajustes?tab=pagos"), "Revisar las pasarelas en Ajustes"),
+        foot="Aviso interno de pagos en línea (ONVO). Sale como máximo una vez por día.",
+        vos=True,
+    )
+    return titulo, cuerpo
+
+
 def webhook_alert(db: Session, t: Tenant, status: int, detail: str) -> bool:
     """401 (secreto que no coincide) o 503 (no se pudo confirmar con ONVO) en /webhooks/onvo: correo al admin, como
     maximo UNO por tipo y por dia de Costa Rica (despues de las 18:00 la fecha UTC ya es otra): un 401 falso no tapa
     el aviso de un 503 real. Sin ONVO conectado no avisa (una sonda a la URL no es un pago perdido). El cupo se revisa
     otra vez con la empresa bloqueada (dos peticiones a la vez: un solo aviso) y el correo queda encolado, no se
     entrega dentro de la peticion. No hace commit. Devuelve True si aviso."""
-    import html
-
     from ..models import EmailOutbox
 
     g = gateway(db, t.id)
@@ -657,25 +687,7 @@ def webhook_alert(db: Session, t: Tenant, status: int, detail: str) -> bool:
     db.execute(select(Tenant.id).where(Tenant.id == t.id).with_for_update())  # hasta el commit del aviso
     if ya():
         return False
-    if status == 401:
-        titulo = "ONVO no puede avisar los pagos: el secreto del webhook no coincide"
-        que = (
-            "El panel rechazó (401) un aviso con formato de ONVO porque el secreto del webhook no coincide. "
-            "Si los pagos con tarjeta se están confirmando solos, puede ser un intento ajeno: no hace falta cambiar nada. "
-            "Si no, compará el secreto del webhook de Ajustes → Pasarelas → ONVO con el que muestra el panel de ONVO "
-            "(Desarrolladores → Webhooks). Mientras tanto los pagos con tarjeta se confirman cuando el comprador vuelve a "
-            "la tienda o en la consulta automática."
-        )
-    else:
-        titulo = "ONVO avisó un pago que no se pudo confirmar"
-        que = (
-            "Llegó un aviso de ONVO que el panel no pudo confirmar consultando a ONVO (503). ONVO lo reintenta solo; "
-            "si se repite, revisá el pedido o la factura en el panel de ONVO y la llave en Ajustes → Pasarelas."
-        )
-    cuerpo = (
-        f"<p><b>{html.escape(titulo)}</b></p><p>{html.escape(que)}</p><p style='color:#5a5560;font-size:13px'>Detalle: {html.escape(detail[:300])}</p>"
-        "<p style='color:#8a858f;font-size:12px'>Este aviso sale como máximo una vez por día.</p>"
-    )
+    titulo, cuerpo = webhook_alert_html(t, status, detail)
     return _queue_admins(db, t, titulo, cuerpo, entity) > 0
 
 

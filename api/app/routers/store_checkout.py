@@ -739,6 +739,14 @@ def set_contact(oid: int, data: OrderContactIn, p: Principal = Depends(require("
     for k, v in cambios.items():
         v = (str(v).lower() if k == "email" and v else v) or None
         nuevo[k] = v
+    if cambios.keys() & {"id_type", "id_number", "company"}:
+        # la misma regla del checkout (so.check_id): solo digitos, largo segun el tipo, "fisica" si no viene tipo y
+        # razon social si es juridica. La factura del pedido (so.invoice_order) arma el receptor con estos datos.
+        tipo, num = so.check_id(nuevo.get("id_type"), nuevo.get("id_number"))
+        nuevo["id_number"] = num
+        nuevo["id_type"] = tipo if num else None
+        if tipo == "juridica" and num and not nuevo.get("company"):
+            raise HTTPException(422, "Para factura a nombre de una empresa, escribí la razón social")
     if not nuevo.get("id_number"):
         nuevo["id_type"] = None
     diff = {k: {"de": antes.get(k), "a": nuevo.get(k)} for k in nuevo if antes.get(k) != nuevo.get(k)}

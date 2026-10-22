@@ -2559,10 +2559,13 @@ class ReportSendIn(BaseModel):
 
 @router.post("/surveys/{sid}/report/email")
 def survey_report_send(sid: int, data: ReportSendIn, p: Principal = Depends(require("sales", "enviar")), db: Session = Depends(get_db)):
-    """Manda el informe preliminar al cliente (el informe va en el cuerpo del correo). Igual que las cotizaciones:
-    solo cuenta como enviado si el proveedor acepto el correo; simulado o error no."""
+    """Manda el informe preliminar al cliente: un correo con el diseno base (email_layout) y el informe adjunto en PDF
+    (sin WeasyPrint, el informe imprimible en .html). La pagina del informe no va como cuerpo: trae <style> y clases
+    que Outlook y Hotmail descartan. Igual que las cotizaciones: solo cuenta como enviado si el proveedor acepto el
+    correo; simulado o error no, y un rechazo con el adjunto queda "fallido" (el reintento no lo mandaria sin el)."""
     from ..services.mail import queue_email
-    from ..services.survey_report import render_survey_html
+    from ..services.render import render_pdf
+    from ..services.survey_report import render_survey_html, report_email_html
 
     s = _survey(db, sid, p)
     c = db.get(Customer, s.customer_id) if s.customer_id else None
@@ -2572,15 +2575,21 @@ def survey_report_send(sid: int, data: ReportSendIn, p: Principal = Depends(requ
     from ..services.media_access import email_ttl  # fotos privadas: el cliente abre el correo dias despues
 
     page = render_survey_html(db, s, p.tenant, ttl=email_ttl())
-    if data.message:
-        page = page.replace("<body>", f'<body><p style="white-space:pre-wrap">{html.escape(data.message)}</p>', 1)
-    m = queue_email(db, p.tenant, to, f"Informe preliminar {s.number} · {p.tenant.name}", page, "survey", s.id)
+    try:
+        pdf = render_pdf(page)
+    except Exception:  # noqa: BLE001 - un PDF que falla no frena el envio: va el informe imprimible
+        pdf = None
+    archivo = (f"Informe-{s.number}.pdf", pdf) if pdf else (f"Informe-{s.number}.html", page.encode("utf-8"))
+    correo = report_email_html(p.tenant, s.number, c.name if c else None, s.site, data.message, attached_pdf=pdf is not None)
+    m = queue_email(db, p.tenant, to, f"Informe preliminar {s.number} · {p.tenant.name}", correo, "survey", s.id, files=[archivo])
+    if m.status == "error":
+        m.status = "fallido"  # fuera de mail.retry_outbox: nunca le llega al cliente sin el informe
     sent = m.status == "enviado"
     audit(db, p.tenant.id, p.user.id, "send_report", "survey", s.id, {"to": to, "mail": m.status}, ip=p.ip)
     db.commit()
     if m.status == "simulado":
         note = "El correo NO salió: no hay servicio de correo configurado (falta la llave de Resend). No se registró como enviado."
-    elif m.status == "error":
+    elif m.status in ("error", "fallido"):
         note = f"El correo NO salió ({(m.error or 'error del proveedor')[:160]}). No se registró como enviado."
     else:
         note = None

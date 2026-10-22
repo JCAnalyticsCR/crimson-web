@@ -41,3 +41,23 @@ def test_solo_el_admin_edita_los_datos_del_cliente_del_pedido(client, auth, db_s
     assert client.put(f"/store-orders/{oid}/contact", json={"name": ""}).status_code == 422
     assert client.put(f"/store-orders/{oid}/contact", json={"email": "no-es-correo"}).status_code == 422
     assert client.put(f"/store-orders/{oid}/contact", json={"address": "x"}).status_code == 422
+
+
+def test_la_cedula_corregida_pasa_por_la_misma_regla_del_checkout(client, auth, db_session):
+    prods = _shop(client)
+    oid = _oid(client, _checkout(client, prods)["number"])
+    put = lambda body: client.put(f"/store-orders/{oid}/contact", json=body)  # noqa: E731
+    # con guiones: quedan solo los digitos; sin tipo: fisica (lo que la factura del pedido usa como receptor)
+    r = put({"id_number": "1-0234-0567", "id_type": None})
+    assert r.status_code == 200, r.text
+    assert r.json()["contact"]["id_number"] == "102340567" and r.json()["contact"]["id_type"] == "fisica"
+    # largo incorrecto para el tipo: 422 y nada cambia
+    assert put({"id_number": "12345"}).status_code == 422
+    assert put({"id_type": "juridica"}).status_code == 422  # 9 digitos guardados no son una juridica
+    db_session.expire_all()
+    assert db_session.get(Order, oid).contact["id_number"] == "102340567"
+    # juridica pide la razon social
+    r = put({"id_type": "juridica", "id_number": "3-101-123456", "company": ""})
+    assert r.status_code == 422 and "razón social" in r.json()["detail"]
+    r = put({"id_type": "juridica", "id_number": "3-101-123456", "company": "Empresa de Ejemplo S.A."})
+    assert r.status_code == 200 and r.json()["contact"]["id_number"] == "3101123456"

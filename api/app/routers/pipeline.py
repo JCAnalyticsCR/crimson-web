@@ -19,6 +19,7 @@ from ..core.deps import Principal, require
 from ..models import Customer, Opportunity, Project, Quote, Survey, User
 from ..services.archive import live
 from ..services.documents import CR, audit
+from ..services.email_layout import cta
 from ..services.fx import rate_or_none
 from ..services.mail import notify_roles
 from ..services.ownership import opportunity_seller
@@ -551,7 +552,6 @@ def request_survey(oid: int, data: SurveyRequestIn, p: Principal = Depends(requi
     alguien la atienda (fieldwork.pending_survey_request) el equipo de campo interno (supervisor, tecnico) puede crear
     y ligar ese levantamiento aunque la oportunidad no le salga en el embudo, en cualquier etapa abierta: la regla es
     la misma en los dos lados."""
-    from ..core.config import settings
     from ..core.ratelimit import survey_request_limiter
     from ..models import AuditLog
     from .fieldwork import reviewer_roles  # import local: fieldwork ya importa de aqui
@@ -597,14 +597,15 @@ def request_survey(oid: int, data: SurveyRequestIn, p: Principal = Depends(requi
     c = db.get(Customer, o.customer_id) if o.customer_id else None
     cliente = c.name if c else (o.contact or {}).get("name") or "sin cliente"
     solucion = SOLUCIONES.get(o.solution or "", o.solution or "—")
-    enlace = f"{settings.public_base_url}/levantamientos?nuevo={o.id}"
+    enlace = f"/levantamientos?nuevo={o.id}"
     cuerpo = (
         f"<p>{html.escape(p.user.full_name)} pide un levantamiento técnico para la oportunidad <b>{html.escape(o.number)}</b> "
         f"· {html.escape(o.title)}.</p>"
         f"<p>Cliente: {html.escape(cliente)}<br>Sitio: {html.escape(o.site or '—')}<br>Solución: {html.escape(solucion)}<br>"
         f"Fecha preferida: {html.escape(data.preferred_date.strftime('%d/%m/%Y') if data.preferred_date else 'sin preferencia')}</p>"
         + (f"<p>Nota: {html.escape(nota)}</p>" if nota else "")
-        + f'<p><a href="{html.escape(enlace)}">Crear el levantamiento</a> (ya viene con el cliente de la oportunidad).</p>'
+        + "<p>El levantamiento ya viene con el cliente de la oportunidad.</p>"
+        + cta(enlace, "Crear el levantamiento")  # el boton principal del correo (email_layout)
     )
     n = notify_roles(db, p.tenant, reviewer_roles(p.tenant), f"Solicitud de levantamiento {o.number} · {cliente}", cuerpo, "opportunity", o.id)
     audit(

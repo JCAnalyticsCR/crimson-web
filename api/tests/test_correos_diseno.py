@@ -31,7 +31,8 @@ def test_marco_completo(client, db_session):
     html = el.render(t, title="Pasó algo", body=el.data_rows([("Número", "FEC-1"), ("Vacío", "")], total=("Total", "₡1.00")), action=("https://x.ejemplo.com/a?b=1&c=2", "Ver"))
     assert el.MARKER in html and "max-width:600px" in html and 'width="600"' in html  # 600 px, tambien en Outlook
     assert "#123456" in html  # el primario de Mi Tienda
-    assert re.search(r'<img src="https?://[^"]+/media/logo.png" alt="[^"]+" width="\d+"', html)  # logo absoluto, con alt y ancho
+    # logo absoluto, con alt y alto fijo (Outlook ignora height:auto: un logo cuadrado nunca sale de 160 px de alto)
+    assert re.search(r'<img src="https?://[^"]+/media/logo.png" alt="[^"]+" height="40" style="[^"]*height:40px;width:auto;max-width:220px', html)
     assert "display:none" in html and "mso-hide:all" in html  # preheader oculto
     assert "info@crimsoncr.com" in html and "2222-0000" in html and "8888-0000" in html and "San José, Costa Rica" in html
     assert "Vacío" not in html  # las filas sin valor no salen
@@ -83,6 +84,66 @@ def test_correo_de_documento_escapa_el_mensaje(client, db_session):
     assert "Ver y pagar en línea" in html and "Vence" in html and "01/11/2026" in html
     cot = doc_email_html(t, "cotización", "COT-1", "₡10.00", None, None, due="01/11/2026")
     assert "Válida hasta" in cot and "Ver y pagar" not in cot  # la cotizacion va en PDF: sin boton de pago
+    # con acceso al portal de clientes: "Ver cotización" (y "Ver factura" sin enlace de pago), con su enlace en texto
+    con = doc_email_html(t, "cotización", "COT-1", "₡10.00", None, None, view_link="https://p.ejemplo.com/documentos")
+    assert ">Ver cotización</a>" in con and con.count("https://p.ejemplo.com/documentos") == 3
+    fac = doc_email_html(t, "factura", "FEC-1", "₡10.00", None, None, view_link="https://p.ejemplo.com/documentos")
+    assert ">Ver factura</a>" in fac
+    # el enlace de pago manda sobre el del portal
+    pago = doc_email_html(t, "factura", "FEC-1", "₡10.00", "https://p.ejemplo.com/pagar/t", None, view_link="https://p.ejemplo.com/documentos")
+    assert "Ver y pagar en línea" in pago and "/documentos" not in pago
+
+
+def test_boton_ver_documento_solo_con_acceso_al_portal(client, db_session):
+    from app.core.config import settings
+    from app.models import Customer, Invoice, Quote, TenantUser, User
+    from app.services.documents_send import portal_link
+
+    t = _tenant(db_session)
+    c = Customer(tenant_id=t.id, name="Cliente Portal", email="portal@ejemplo.com")
+    db_session.add(c)
+    db_session.flush()
+    q = Quote(tenant_id=t.id, customer_id=c.id, number="COT-P1")
+    assert portal_link(db_session, t, q, c) is None  # sin usuario del portal: sin boton (va en PDF)
+    u = User(email="portal-usuario@ejemplo.com", full_name="Usuario Portal", password_hash="x")
+    db_session.add(u)
+    db_session.flush()
+    m = TenantUser(tenant_id=t.id, user_id=u.id, role_code="cliente_usuario", active=True, customer_id=c.id)
+    db_session.add(m)
+    db_session.flush()
+    assert portal_link(db_session, t, q, c) is None  # cliente_usuario no ve documentos
+    m.role_code = "cliente_admin"
+    db_session.flush()
+    assert portal_link(db_session, t, q, c) == f"{settings.public_base_url.rstrip('/')}/documentos"
+    assert portal_link(db_session, t, Invoice(tenant_id=t.id, customer_id=c.id, number="FEC-P1", status="anulada"), c) is None
+    m.active = False
+    db_session.flush()
+    assert portal_link(db_session, t, q, c) is None
+
+
+def test_marco_sin_base_para_el_respaldo(client):
+    from app.tools.respaldo_diario import Fallo, html_falla
+
+    html = html_falla([Fallo(5, "subida", "rclone <falló>")], {"subido": True, "archivo": "x.zip.age"}, __import__("datetime").date(2026, 10, 21))
+    assert el.MARKER in html and "max-width:600px" in html and "info@crimsoncr.com" in html and "display:none" in html
+    assert "rclone &lt;falló&gt;" in html and "sí se subió" in html
+    _sin_css_raro(html)
+
+
+def test_aviso_del_webhook_de_onvo_con_el_diseno_base(client, db_session):
+    from app.services import onvo
+
+    t = _tenant(db_session)
+    titulo, html = onvo.webhook_alert_html(t, 401, "detalle <b>x</b>")
+    assert "secreto" in titulo and el.MARKER in html and "&lt;b&gt;x&lt;/b&gt;" in html
+    assert "/ajustes?tab=pagos" in html and "#5a5560" not in html
+    _sin_css_raro(html)
+
+
+def test_lone_link_con_punto_final_es_el_boton(client, db_session):
+    t = _tenant(db_session)
+    html = el.ensure(t, "Aviso", '<p>Hola.</p><p><a href="https://p.ejemplo.com/x">Crear</a> (ya viene listo).</p>')
+    assert html.count("https://p.ejemplo.com/x") == 3 and "(ya viene listo)" in html
 
 
 def test_vista_previa_genera_un_html_por_tipo(tmp_path, monkeypatch):
@@ -91,7 +152,40 @@ def test_vista_previa_genera_un_html_por_tipo(tmp_path, monkeypatch):
     monkeypatch.setenv("RESEND_API_KEY", "no-se-usa")
     assert preview_emails.main([str(tmp_path)]) == 0
     hechos = {p.stem for p in tmp_path.glob("*.html")}
-    for k in ("cotizacion", "factura-con-pago", "cobro-atraso", "pedido-recibido", "invitacion-panel", "restablecer-contrasena", "acceso-portal-aliados", "cola-por-emitir"):
-        assert k in hechos
+    esperados = (
+        "cotizacion",
+        "cotizacion-con-portal",
+        "factura-con-pago",
+        "cobro-atraso",
+        "cobro-recordatorios-sin-salir",
+        "cartera-semanal",
+        "pedido-recibido",
+        "pedido-por-vencer",
+        "pedido-preparando",
+        "pedido-listo-para-retiro",
+        "pedido-entregado",
+        "pedido-cancelado",
+        "pedido-reembolsado",
+        "ya-hay-existencia",
+        "entradas-evento",
+        "invitacion-panel",
+        "restablecer-contrasena",
+        "acceso-portal-aliados",
+        "aliado-trabajo-asignado",
+        "aliado-solicitud-de-precios",
+        "venta-cotizacion-aceptada",
+        "venta-orden-asignada",
+        "recurrencias-proximas",
+        "correos-que-no-llegaron",
+        "comprobante-entrega-fallida",
+        "hacienda-alerta-diaria",
+        "onvo-webhook-secreto",
+        "onvo-webhook-sin-confirmar",
+        "cola-por-emitir",
+        "informe-preliminar",
+        "respaldo-diario-falla",
+    )
+    faltan = [k for k in esperados if k not in hechos]
+    assert not faltan, faltan
     assert "index" in hechos
     assert all(el.MARKER in (tmp_path / f"{k}.html").read_text(encoding="utf-8") for k in hechos - {"index"})

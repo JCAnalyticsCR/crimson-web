@@ -244,6 +244,23 @@ def send_reminder(db: Session, t: Tenant, cand: Candidate, today: date) -> str |
     return row.status
 
 
+def failed_reminders_html(t: Tenant, fallidas: list[str]) -> tuple[str, str]:
+    """(asunto, cuerpo) del aviso al admin con los recordatorios de cobro que no salieron hoy."""
+    from ..core.config import settings
+    from ..services import email_layout as el
+
+    asunto = f"Cobranza: {len(fallidas)} recordatorio(s) no salieron"
+    cuerpo = el.render(
+        t,
+        title="Recordatorios de cobro sin salir",
+        body=el.p("Estos recordatorios de cobro no salieron hoy:") + el.items(fallidas[:30]) + el.p("Revisá el correo del cliente y reenviá desde la factura."),
+        preheader=asunto,
+        action=(f"{settings.public_base_url.rstrip('/')}/facturas", "Abrir Facturas"),
+        foot="Aviso interno de cobranza.",
+    )
+    return asunto, cuerpo
+
+
 def run_reminders(db: Session, today: date | None = None) -> dict:
     """Corrida diaria de la secuencia. Cada factura en su propia transaccion: una que falla no frena a las demas."""
     from ..services.mail import notify_roles
@@ -278,28 +295,8 @@ def run_reminders(db: Session, today: date | None = None) -> dict:
                 out["fallidos"] += 1
                 fallidas.append(numero)
         if fallidas:
-            from ..core.config import settings
-            from ..services import email_layout as el
-
-            asunto = f"Cobranza: {len(fallidas)} recordatorio(s) no salieron"
-            notify_roles(
-                db,
-                t,
-                ("admin",),
-                asunto,
-                el.render(
-                    t,
-                    title="Recordatorios de cobro sin salir",
-                    body=el.p("Estos recordatorios de cobro no salieron hoy:")
-                    + el.items(fallidas[:30])
-                    + el.p("Revisá el correo del cliente y reenviá desde la factura."),
-                    preheader=asunto,
-                    action=(f"{settings.public_base_url.rstrip('/')}/facturas", "Abrir Facturas"),
-                    foot="Aviso interno de cobranza.",
-                ),
-                "invoice",
-                0,
-            )
+            asunto, cuerpo = failed_reminders_html(t, fallidas)
+            notify_roles(db, t, ("admin",), asunto, cuerpo, "invoice", 0)
             db.commit()
     return out
 

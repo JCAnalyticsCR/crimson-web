@@ -77,6 +77,24 @@ def fiscal_files(db: Session, inv: Invoice, real_only: bool = False) -> list[tup
     return attachments_for_invoice(db, inv, ("produccion",) if real_only else ("pruebas", "produccion"))
 
 
+def portal_link(db: Session, tenant: Tenant, doc: Quote | Invoice, c: Customer | None) -> str | None:
+    """El boton "Ver cotización" / "Ver factura" del correo: Documentos del portal de clientes, solo si ese cliente tiene
+    un usuario activo que ve documentos (cliente_admin) y el documento le va a aparecer ahi (una factura anulada no)."""
+    from ..core.config import settings
+    from ..core.deps import CLIENT_ROLES, ROLE_PERMISSIONS
+    from ..models import TenantUser
+
+    if c is None or (isinstance(doc, Invoice) and doc.status == "anulada"):
+        return None
+    roles = [r for r in CLIENT_ROLES if "documentos" in (ROLE_PERMISSIONS.get(r, {}).get("portal") or [])]
+    q = select(TenantUser.id).where(
+        TenantUser.tenant_id == tenant.id, TenantUser.customer_id == c.id, TenantUser.active, TenantUser.role_code.in_(roles)
+    )
+    if db.scalar(q.limit(1)) is None:
+        return None
+    return f"{settings.public_base_url.rstrip('/')}/documentos"
+
+
 # ---------- envio ----------
 def send_document(
     db: Session,
@@ -139,6 +157,7 @@ def send_document(
             attached=pdf is not None,
             issued=_fecha(getattr(doc, "issue_date", None)),
             due=_fecha(doc.due_date),
+            view_link=None if link else portal_link(db, tenant, doc, c),
         ),
         entity,
         doc.id,

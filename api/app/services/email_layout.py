@@ -9,7 +9,7 @@ Reglas de construccion (Outlook de escritorio usa el motor de Word y Hotmail lim
 - ancho maximo 600 px (tabla "fantasma" para Outlook) y 100 % en el telefono;
 - solo Arial (la marca usa solo Arial);
 - colores de la empresa: el primario de Mi Tienda (por defecto #e2233a) y el oscuro #15131a;
-- encabezado con el logo (Mi Tienda o el de la empresa) con alt y ancho; si no hay logo, el nombre;
+- encabezado con el logo (Mi Tienda o el de la empresa) con alt y alto fijo; si no hay logo, el nombre;
 - UN boton principal por correo (una tabla con fondo: Outlook ignora el padding de un <a>) y el mismo enlace en texto
   como respaldo debajo;
 - texto "preheader" oculto (lo que el buzon muestra junto al asunto);
@@ -44,7 +44,10 @@ DANGER = "#b42318"
 FONT = "Arial,Helvetica,sans-serif"
 WIDTH = 600
 CONTACT_EMAIL = "info@crimsoncr.com"
-LOGO_WIDTH = 160  # ancho del logo en el encabezado (Outlook necesita el atributo; el alto queda proporcional)
+# logo del encabezado: alto fijo (atributo y estilo: Outlook de escritorio ignora height:auto y max-width) y ancho
+# proporcional con tope. Un logo cuadrado o vertical queda de 40 px de alto, nunca de 160 px.
+LOGO_HEIGHT = 40
+LOGO_MAX_WIDTH = 220
 # marca del marco: ensure() no envuelve dos veces un correo que ya salio de render()
 MARKER = "data-crimson-email"
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -277,8 +280,8 @@ def _preheader(text: str) -> str:
 def _header(b: Brand) -> str:
     if b.logo:
         marca = (
-            f'<img src="{e(b.logo)}" alt="{e(b.name)}" width="{LOGO_WIDTH}" '
-            f'style="display:block;width:{LOGO_WIDTH}px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">'
+            f'<img src="{e(b.logo)}" alt="{e(b.name)}" height="{LOGO_HEIGHT}" '
+            f'style="display:block;height:{LOGO_HEIGHT}px;width:auto;max-width:{LOGO_MAX_WIDTH}px;border:0;outline:none;text-decoration:none">'
         )
     else:
         marca = f'<span style="font-family:{FONT};font-size:20px;font-weight:700;color:{INK}">{e(b.name)}</span>'
@@ -323,8 +326,29 @@ def render(
     after_action: HTML que va entre el boton y el enlace en texto (p. ej. un enlace secundario).
     foot: nota del pie (HTML ya escapado), encima del contacto de la empresa.
     vos: el correo trata de "vos" (pedido web, cuentas); por defecto de "usted" (documentos y cobro)."""
-    b = brand(t)
-    boton = ""
+    return _frame(brand(t), title=title, body=body, preheader=preheader, action=action, after_action=after_action, foot=foot, vos=vos, show_link=show_link)
+
+
+def render_static(*, title: str, body: str, preheader: str | None = None, name: str = "Crimson Consulting", foot: str = "") -> str:
+    """El mismo marco sin empresa ni base de datos (no carga la configuracion de la app): lo usa el aviso de falla
+    del respaldo diario, que tiene que salir aunque la base o las variables sean lo que fallo. Colores por defecto,
+    el nombre en el encabezado y info@crimsoncr.com en el pie."""
+    b = Brand(name=name, primary=PRIMARY, logo=None, email=CONTACT_EMAIL, phone=None, whatsapp=None, address=None)
+    return _frame(b, title=title, body=body, preheader=preheader, action=None, after_action="", foot=foot, vos=False, show_link=False)
+
+
+def _frame(
+    b: Brand,
+    *,
+    title: str,
+    body: str,
+    preheader: str | None,
+    action: tuple[str, str] | None,
+    after_action: str,
+    foot: str,
+    vos: bool,
+    show_link: bool,
+) -> str:
     if action and action[0]:
         boton = button(action[0], action[1], b.primary) + after_action + (fallback(action[0], vos) if show_link else "")
     else:
@@ -346,7 +370,7 @@ def render(
 </td></tr></table></div>"""
 
 
-_LONE_LINK = re.compile(r"<p>\s*<a href=\"([^\"]+)\"[^>]*>([^<]{1,80})</a>\s*(?:\(([^<]{0,160})\))?\s*</p>", re.I)
+_LONE_LINK = re.compile(r"<p>\s*<a href=\"([^\"]+)\"[^>]*>([^<]{1,80})</a>\s*(?:\(([^<]{0,160})\))?\s*\.?\s*</p>", re.I)
 _TAGS = (
     (re.compile(r"<p>", re.I), f'<p style="margin:0 0 12px;font-family:{FONT};font-size:15px;line-height:1.55;color:{INK}">'),
     (re.compile(r"<h3>", re.I), f'<h3 style="margin:16px 0 8px;font-family:{FONT};font-size:16px;line-height:1.3;color:{INK}">'),

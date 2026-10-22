@@ -844,13 +844,27 @@ def expire_holds(db: Session) -> int:
     return n
 
 
+def back_in_stock_html(t: Tenant, name: str, mensaje: str, url: str) -> str:
+    """Correo "ya hay existencia" al que pidio que le avisaran (diseno base)."""
+    import html
+
+    return email_layout.render(
+        t,
+        title=f"Ya hay {name}",
+        body=email_layout.p_html(f"¡Buenas noticias! <b>{html.escape(name)}</b> ya está {html.escape(mensaje.lower())}."),
+        preheader=f"{name} ya está {mensaje.lower()}.",
+        action=(url, "Ver el producto"),
+        foot="Te escribimos porque pediste que te avisáramos. La existencia puede cambiar: si lo querés, no esperés mucho.",
+        vos=True,
+    )
+
+
 def back_in_stock(db: Session) -> int:
     """Avisos "Avisarme cuando haya": producto otra vez disponible -> correo a quien lo pidio, con el enlace a la ficha.
     Se marca avisado SOLO cuando el correo quedo "enviado": si fallo, el worker de correo lo reintenta y la proxima
     corrida lo marca (sin encolar otro: el correo va ligado al aviso). Uno "simulado" (sin proveedor de correo) se
     vuelve a mandar cuando el correo ya esta configurado. Sin correo (solo telefono) se marca como siempre: el
     aviso por WhatsApp lo hace el equipo desde el panel."""
-    import html
 
     from ..models import EmailOutbox, StoreStockAlert
     from . import store_orders as so
@@ -888,15 +902,7 @@ def back_in_stock(db: Session) -> int:
                     t,
                     a.email,
                     f"Ya hay {p.name} · {t.name}",
-                    email_layout.render(
-                        t,
-                        title=f"Ya hay {p.name}",
-                        body=email_layout.p_html(f"¡Buenas noticias! <b>{html.escape(p.name)}</b> ya está {html.escape(st['mensaje'].lower())}."),
-                        preheader=f"{p.name} ya está {st['mensaje'].lower()}.",
-                        action=(url, "Ver el producto"),
-                        foot="Te escribimos porque pediste que te avisáramos. La existencia puede cambiar: si lo querés, no esperés mucho.",
-                        vos=True,
-                    ),
+                    back_in_stock_html(t, p.name, st["mensaje"], url),
                     "stock_alert",
                     a.id,
                 )

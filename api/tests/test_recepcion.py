@@ -26,6 +26,16 @@ FECHA_HOY = f"{HOY.isoformat()}T10:00:00-06:00"
 DDMMAA = HOY.strftime("%d%m%y")
 
 
+def _solo_enlaces_propios(html: str) -> bool:
+    """Todo href del correo apunta al panel (el boton del diseno base): un enlace que venga del XML de un tercero no."""
+    import re
+
+    from app.core.config import settings
+
+    base = settings.public_base_url.rstrip("/") + "/"
+    return all(h.startswith(base) for h in re.findall(r'href="([^"]+)"', html or ""))
+
+
 def cl(n: int = 1, emisor: str = "003101000001") -> str:
     return clave(fecha=DDMMAA, emisor=emisor, consecutivo=f"0010000101{n:010d}")
 
@@ -366,8 +376,8 @@ def test_mensaje_receptor_de_un_cliente(client, auth, db_session, monkeypatch):
     assert doc.receiver_message == "3" and doc.receiver_detail == detalle
     alertas = db_session.query(EmailOutbox).order_by(EmailOutbox.id).all()[antes:]
     assert alertas  # alerta: hay que emitir la NC
-    # escapado y rotulado (el unico enlace del correo es el boton propio a la factura, nunca el del XML)
-    assert all('<a href="https://phish' not in m.html and "firma no verificada" in m.html for m in alertas)
+    # escapado y rotulado: los unicos enlaces del correo son los propios del panel (el boton), nunca uno del XML
+    assert all(_solo_enlaces_propios(m.html) and "&lt;a href=" in m.html and "firma no verificada" in m.html for m in alertas)
     # el primero no se sobrescribe: un segundo mensaje (aceptacion) queda en la bitacora, no en la factura
     r = up(client, mensaje_receptor(em["clave"], emisor=EMPRESA, receptor=receptor, mensaje="1"), name="mr2.xml")
     assert r.status_code == 422 and "se conserva el primero" in r.json()["detail"]
@@ -633,7 +643,7 @@ def test_alerta_diaria_escapa_lo_del_xml_y_avisa_el_ultimo_dia(client, auth, db_
     antes = db_session.query(EmailOutbox).count()
     assert hacienda_tasks.daily_alerts(db_session) >= 1
     nuevos = db_session.query(EmailOutbox).order_by(EmailOutbox.id).all()[antes:]
-    assert nuevos and all('<a href="https://phish' not in m.html for m in nuevos) and any("&lt;a href=" in m.html for m in nuevos)
+    assert nuevos and all(_solo_enlaces_propios(m.html) for m in nuevos) and any("&lt;a href=" in m.html for m in nuevos)
 
 
 def test_respuesta_del_proveedor_de_otras_cedulas_se_ignora_y_adjuntar_la_buena_corrige(client, auth, db_session):

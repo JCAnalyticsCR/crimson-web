@@ -192,3 +192,29 @@ def context(db: Session, s: Survey, tenant: Tenant, ttl: int | None = None) -> d
 def render_survey_html(db: Session, s: Survey, tenant: Tenant, ttl: int | None = None) -> str:
     """ttl: vida de los enlaces de fotos privadas. El PDF se arma al instante (corto); el correo, largo."""
     return TEMPLATE.render(**context(db, s, tenant, ttl))
+
+
+def report_email_html(tenant: Tenant, number: str, customer: str | None, site: str | None, message: str | None, *, attached_pdf: bool) -> str:
+    """El correo del informe preliminar al cliente (diseno base: email_layout). El informe va ADJUNTO (PDF, o el
+    imprimible .html si el servidor no arma PDF): la pagina del informe trae <style> y clases que Outlook y Hotmail
+    descartan, asi que no va como cuerpo. El mensaje de quien envia va como texto, nunca como HTML."""
+    import html as _h
+    from datetime import datetime as _dt
+
+    from . import email_layout as el
+    from .documents import CR
+
+    titulo = f"Informe preliminar {number}"
+    cuerpo = (
+        el.p_html(f"Le compartimos el <b>informe preliminar {_h.escape(number)}</b> del levantamiento técnico, antes de la cotización.")
+        + el.data_rows([("Informe", number), ("Cliente", customer), ("Sitio", site), ("Fecha", _dt.now(CR).strftime("%d/%m/%Y"))])
+        + (el.note(message) if message else "")
+        + el.p("El informe va adjunto en PDF." if attached_pdf else "El informe va adjunto: ábralo en el navegador para verlo o imprimirlo.", small=True)
+    )
+    return el.render(
+        tenant,
+        title=titulo,
+        body=cuerpo,
+        preheader=titulo + (f" · {site}" if site else "") + ". El informe va adjunto.",
+        foot="Cualquier consulta, responda a este correo.",
+    )

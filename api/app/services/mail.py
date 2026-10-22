@@ -262,9 +262,12 @@ def doc_email_html(
     *,
     due: str | None = None,
     issued: str | None = None,
+    view_link: str | None = None,
 ) -> str:
     """Cotizacion, factura o aviso de cobro al cliente (diseno base: email_layout). Con enlace de pago, el boton es
-    "Ver y pagar en línea"; una cotizacion no tiene enlace publico (va en PDF) y sale sin boton.
+    "Ver y pagar en línea". Sin enlace de pago (una cotizacion, una factura sin saldo), view_link es el portal de
+    clientes (Documentos) cuando el cliente tiene acceso: el boton es "Ver cotización" / "Ver factura". Sin ninguno de
+    los dos el documento va solo en PDF y el correo sale sin boton (no hay enlace publico de un documento).
     El mensaje lo escribe quien envia (POST /{kind}/{id}/email, sales.enviar): va como texto, nunca como HTML (un
     enlace o un formulario inyectado saldria con la marca y el dominio de la empresa)."""
     from . import email_layout as el
@@ -283,6 +286,6 @@ def doc_email_html(
         title=titulo,
         body=body,
         preheader=f"{titulo} por {total}" + (f" · {vence.lower()} {due}" if due else "") + ".",
-        action=(link, "Ver y pagar en línea") if link else None,
+        action=(link, "Ver y pagar en línea") if link else ((view_link, f"Ver {kind}") if view_link else None),
         foot="Cualquier consulta, responda a este correo.",
     )

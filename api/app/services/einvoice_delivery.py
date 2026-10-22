@@ -154,6 +154,7 @@ def _close(db: Session, t: Tenant, doc: EInvoiceDocument, inv: Invoice, stage: s
 def _alert_undeliverable(db: Session, t: Tenant, doc: EInvoiceDocument, inv: Invoice, stage: str, given_up: list[str]) -> None:
     from html import escape
 
+    from .email_layout import cta
     from .mail import notify_roles
 
     kind = KIND.get(doc.doc_type, "comprobante electrónico")
@@ -162,6 +163,7 @@ def _alert_undeliverable(db: Session, t: Tenant, doc: EInvoiceDocument, inv: Inv
         f"<p>No se pudo entregar {what} de la {escape(kind)} <b>{escape(inv.number or '')}</b> a {escape(', '.join(given_up))}: "
         f"el correo falló {MAX_FAILS} veces y ya no se reintenta.</p>"
         "<p>Revise el correo del cliente y reenvíe desde la factura (Enviar por correo).</p>"
+        + cta(f"/facturas/{inv.id}", f"Abrir la factura {inv.number or ''}".strip())  # el boton principal (email_layout)
     )
     notify_roles(db, t, ("admin",), f"Entrega fallida · {kind} {inv.number}", html, "invoice", inv.id)
 
