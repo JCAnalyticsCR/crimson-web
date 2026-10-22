@@ -4,7 +4,7 @@
  * y se comparte entre todos los componentes de la tienda sin refetch al navegar.
  */
 import { useEffect, useState } from "react";
-import type { Snapshot } from "./catalogFilter";
+import type { SnapCategory, Snapshot } from "./catalogFilter";
 
 // ── Caché con triple fallback ─────────────────────────────────────────────────
 
@@ -76,7 +76,24 @@ const _states: Record<string, SnapState> = {};
 const _listeners: Record<string, Set<(s: SnapState) => void>> = {};
 const _started: Record<string, boolean> = {};
 
+/* El servidor manda las categorias como arbol (cada una con sus hijas en children); el filtro trabaja con una lista
+   plana con parent_id. Sin esto, una categoria padre (p. ej. Redes y conectividad) solo mostraba sus productos
+   directos y no los de sus subcategorias. Acepta tambien el formato plano (cache vieja o servidor futuro). */
+type TreeCat = SnapCategory & { children?: TreeCat[] };
+function flatCats(cats: TreeCat[], parent: number | null = null, out: SnapCategory[] = []): SnapCategory[] {
+  for (const c of cats || []) {
+    const { children, ...rest } = c;
+    out.push({ ...rest, parent_id: rest.parent_id ?? parent });
+    if (children?.length) flatCats(children, c.id, out);
+  }
+  return out;
+}
+function norm(snap: Snapshot | null): Snapshot | null {
+  return snap ? { ...snap, categories: flatCats(snap.categories as TreeCat[]) } : snap;
+}
+
 function emit(slug: string, s: SnapState) {
+  s = { ...s, snap: norm(s.snap) };
   _states[slug] = s;
   _listeners[slug]?.forEach((fn) => fn(s));
 }
