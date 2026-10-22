@@ -51,8 +51,8 @@ def create_access_token(user_id: int, tenant_id: int, role: str, sv: int = 0) ->
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def decode_token(token: str) -> dict:
-    return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+def decode_token(token: str, leeway: int = 0) -> dict:
+    return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm], leeway=leeway)
 
 
 def new_refresh_token() -> tuple[str, str]:
@@ -106,8 +106,10 @@ def sign_purpose_token(purpose: str, data: dict, days: int) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def read_purpose_token(purpose: str, token: str) -> dict:
-    payload = decode_token(token)
+def read_purpose_token(purpose: str, token: str, leeway: int = 0) -> dict:
+    """`leeway` (segundos): tolerancia de reloj para iat/exp. PyJWT rechaza un token con iat en el futuro, asi que un
+    enlace firmado por otro contenedor con el reloj un poco adelantado (worker vs api) fallaba al abrirlo enseguida."""
+    payload = decode_token(token, leeway)
     if payload.get("typ") != purpose:
         raise jwt.InvalidTokenError("proposito incorrecto")
     return payload

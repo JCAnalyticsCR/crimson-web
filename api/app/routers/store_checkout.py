@@ -10,7 +10,6 @@ Publico (sin sesion, todo lo que entra se trata como hostil):
 
 from __future__ import annotations
 
-import html
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
@@ -296,6 +295,30 @@ async def order_proof(slug: str, token: str, request: Request, file: UploadFile 
     return so.order_public(db, t, o)
 
 
+_PROOF_HEADERS = {
+    "Cache-Control": "private, no-store",
+    "Content-Security-Policy": "default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; sandbox",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+@router.get("/public/store/{slug}/orders/{token}/proofs/{n}")
+def order_proof_file(slug: str, token: str, n: int, request: Request, db: Session = Depends(get_db)):
+    """Reunion 21/10 (item 34): el cliente vuelve a ver el comprobante que subio. Solo con el enlace firmado de SU
+    pedido y solo los archivos colgados de ese pedido (por posicion: nunca un id de multimedia que se pueda probar)."""
+    public_limiter.hit(f"proofview:{ip_key(client_ip(request))}")
+    t, o = _public_order(db, slug, token)
+    proofs = o.proofs or []
+    if n < 0 or n >= len(proofs):
+        raise HTTPException(404, "Comprobante no encontrado")
+    m = db.get(Media, proofs[n].get("media_id"))
+    if not m or m.tenant_id != t.id:
+        raise HTTPException(404, "Comprobante no encontrado")
+    name = "".join(ch if (ch.isascii() and ch.isalnum()) or ch in "._-" else "_" for ch in (m.filename or "comprobante"))[:120] or "comprobante"
+    return Response(m.data, media_type=m.content_type, headers={**_PROOF_HEADERS, "Content-Disposition": f'inline; filename="{name}"'})
+
+
 @router.post("/public/store/{slug}/orders/{token}/card")
 def order_card(slug: str, token: str, request: Request, db: Session = Depends(get_db)):
     public_limiter.hit(f"card:{ip_key(client_ip(request))}")
@@ -507,7 +530,8 @@ class StatusIn(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     status: str = Field(pattern="^(nuevo|en_revision|pagado|preparando|listo|enviado|entregado|cancelado|reembolsado)$")
-    note: str | None = Field(None, max_length=500)
+    note: str | None = Field(None, max_length=500)  # interna (solo el equipo)
+    client_note: str | None = Field(None, max_length=500)  # la ve el cliente en su seguimiento
     tracking_number: str | None = Field(None, max_length=80)
     carrier: str | None = Field(None, max_length=80)
     refund_amount: Decimal | None = Field(None, gt=0)
@@ -564,17 +588,44 @@ def set_status(oid: int, data: StatusIn, p: Principal = Depends(require("sales",
         carrier=data.carrier,
         refund_amount=data.refund_amount,
         notify=data.notify,
+        client_note=data.client_note,
     )
     if afuera:
         if data.restock:
             store_inventory.return_for_order(db, o, wh, p.user.id)
         else:
             unidades = sum(afuera.values())
-            so._note(o, p.user.id, f"Producto no devuelto: {unidades.normalize():f} unidad(es) quedan fuera de bodega (decidido al pasar a «{so.STATUS_LABEL.get(o.status, o.status)}»)")
+            so._note(
+                o,
+                p.user.id,
+                f"Producto no devuelto: {unidades.normalize():f} unidad(es) quedan fuera de bodega (decidido al pasar a «{so.STATUS_LABEL.get(o.status, o.status)}»)",
+            )
     db.commit()
     out = _staff_out(db, o, p)
     out["email_result"] = {"to": mail.to, "status": mail.status, "error": mail.error} if mail else None
     return out
+
+
+class NoteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    note: str = Field(min_length=1, max_length=500)
+    client: bool = False  # True = la ve el cliente en su pagina de seguimiento; False = interna
+
+
+@router.post("/store-orders/{oid}/note")
+def add_note(oid: int, data: NoteIn, p: Principal = Depends(require("sales", "editar")), db: Session = Depends(get_db)):
+    """Nota sin cambiar el estado: interna (solo el equipo) o para el cliente (sale en su historial)."""
+    o = _get(db, p, oid)
+    if o.channel != "tienda":
+        raise HTTPException(409, "Solo pedidos de la tienda en línea")
+    if data.client:
+        so.add_client_note(o, p.user.id, data.note)
+    else:
+        so._note(o, p.user.id, data.note)
+    audit(db, p.tenant.id, p.user.id, "note", "order", o.id, {"client": data.client}, ip=p.ip)
+    db.commit()
+    return _staff_out(db, o, p)
 
 
 @router.post("/store-orders/{oid}/resend")
@@ -614,34 +665,18 @@ def proof_file(oid: int, mid: int, p: Principal = Depends(require("sales", "ver"
 
 @router.get("/store-orders/{oid}/print")
 def print_order(oid: int, p: Principal = Depends(require("sales", "ver")), db: Session = Depends(get_db)):
-    """Hoja de despacho imprimible (HTML): datos de entrega, productos y totales."""
+    """Version impresa del pedido (HTML): logo y datos de la empresa, cliente, entrega, pago, lineas, totales y estado."""
+    from ..services import order_print
+
     o = _get(db, p, oid)
-    e = html.escape
-    c, dv = o.contact or {}, o.delivery or {}
-    rows = "".join(
-        f"<tr><td>{e(ln.name)}</td><td class=n>{Decimal(str(ln.quantity)):g}</td><td class=n>{so.fmt_money(ln.total, o.currency)}</td></tr>" for ln in o.lines
-    )
-    entrega = (
-        "Retiro en sitio"
-        if dv.get("type") == "retiro"
-        else ", ".join(x for x in (dv.get("address"), dv.get("district"), dv.get("canton"), dv.get("province")) if x) or (c.get("address") or "—")
-    )
-    doc = f"""<!doctype html><html lang="es"><meta charset="utf-8"><title>Pedido {e(o.number)}</title>
-<style>body{{font-family:Arial,sans-serif;max-width:720px;margin:24px auto;color:#15131a;font-size:14px}}h1{{font-size:22px;margin:0}}
-table{{width:100%;border-collapse:collapse;margin-top:12px}}td,th{{border-bottom:1px solid #ddd;padding:6px 4px;text-align:left}}.n{{text-align:right}}
-.box{{border:1px solid #ccc;border-radius:6px;padding:10px 12px;margin-top:12px}}@media print{{button{{display:none}}}}</style>
-<button onclick="print()">Imprimir</button>
-<h1>Pedido {e(o.number)}</h1><p>{e(o.created_at.strftime("%d/%m/%Y %H:%M") if o.created_at else "")} · {e(so.STATUS_LABEL.get(o.status, o.status))}</p>
-<div class=box><b>{e(c.get("name") or "")}</b>{" · " + e(c.get("company")) if c.get("company") else ""}<br>{e(c.get("phone") or "")} · {e(c.get("email") or "")}
-{"<br>Céd. " + e(c.get("id_number")) if c.get("id_number") else ""}<br><b>Entrega:</b> {e(o.shipping_method or "")} — {e(entrega)}
-{"<br><b>Guía:</b> " + e(o.tracking_number) if o.tracking_number else ""}<br><b>Pago:</b> {e(o.payment_method or "")}{" · pagado" if o.paid_at else " · pendiente"}</div>
-{"<div class=box><b>Nota del cliente:</b> " + e(o.notes) + "</div>" if o.notes else ""}
-<table><tr><th>Producto</th><th class=n>Cant.</th><th class=n>Total</th></tr>{rows}</table>
-<p class=n>IVA {so.fmt_money(o.tax_total, o.currency)} · Envío {so.fmt_money(o.shipping, o.currency)}</p><p class=n style="font-size:18px"><b>Total {so.fmt_money(o.total, o.currency)}</b></p></html>"""
+    doc = order_print.render(db, db.get(Tenant, o.tenant_id), o)
     return Response(
         doc,
         media_type="text/html",
-        headers={"Cache-Control": "private, no-store", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"},
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Security-Policy": "default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+        },
     )
 
 
