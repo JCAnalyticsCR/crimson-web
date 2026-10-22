@@ -480,17 +480,25 @@ def stock_health(days: int = Query(180, ge=7, le=730), p: Principal = Depends(re
 
 
 class HealthFixIn(BaseModel):
-    kind: str = Field(pattern="^(factura|proyecto|pedido|garantia)$")
+    kind: str = Field(pattern="^(factura|proyecto|pedido|garantia|negativo|pedido_adelantado)$")
     ref_id: int
+    # existencia negativa: bodega, motivo del ajuste (obligatorio, queda en el kardex) y forzar si hay compra sin recibir
+    warehouse_id: int | None = None
+    motivo: str | None = Field(None, max_length=240)
+    force: bool = False
 
 
 @router.post("/stock/health/fix")
 def stock_health_fix(data: HealthFixIn, p: Principal = Depends(require("inventory", "editar")), db: Session = Depends(get_db)):
-    """Corrige un descuadre con la conciliacion de su documento: escribe solo la diferencia, con documento y usuario."""
+    """Corrige un descuadre con la conciliacion de su documento: escribe solo la diferencia, con documento y usuario.
+    Existencia negativa: ajuste documentado (motivo obligatorio) que deja la bodega en cero."""
     from ..services import inventory_health
 
-    n = inventory_health.fix(db, p.tenant, data.kind, data.ref_id, p.user.id)
-    audit(db, p.tenant.id, p.user.id, "health_fix", "stock", data.ref_id, {"documento": data.kind, "movimientos": n}, ip=p.ip)
+    n = inventory_health.fix(db, p.tenant, data.kind, data.ref_id, p.user.id, warehouse_id=data.warehouse_id, motivo=data.motivo, force=data.force)
+    info = {"documento": data.kind, "movimientos": n}
+    if data.kind == "negativo":
+        info.update(bodega=data.warehouse_id, motivo=data.motivo, forzado=data.force)
+    audit(db, p.tenant.id, p.user.id, "health_fix", "stock", data.ref_id, info, ip=p.ip)
     db.commit()
     return {"movimientos": n}
 

@@ -36,7 +36,8 @@ API para el checkout (todas reciben la sesion; las que dicen "hace commit" lo ha
 - activate_requests(db, order, user_id=None) -> list   (sin commit; reservada -> borrador + aviso de compra)
 - order_alive(order, now=None, hold_hours=None) -> bool (lo bajo pedido de un pedido sin pagar todavia aparta)
 - release_for_order(db, order, note=None, user_id=None) -> int   (sin commit)
-- fulfill_for_order(db, order, user_id=None, invoice=None) -> int (sin commit)
+- fulfill_for_order(db, order, user_id=None, invoice=None) -> int (sin commit; facturar no saca lo bajo pedido sin recibir)
+- awaiting_purchase(db, order) / early_exit(db, order) / undo_early_exit(db, order, user_id=None) (salud del inventario)
 - deduct_for_order_invoice(db, order, invoice, user_id=None) -> int (sin commit; reemplaza deduct_for_invoice)
 - on_order_status(db, order, old, new, user_id=None) -> dict (sin commit, salvo la re-reserva al pagar)
 - on_review(db, order, under_review) -> None     (sin commit; comprobante subido o rechazado)
@@ -570,12 +571,99 @@ def _fallback_wh(db: Session, p: Product) -> int | None:
     return w.id if w else None
 
 
+AWAITING = (RESERVED_REQUEST, "borrador", "solicitada")  # compra del pedido que todavia no entra a bodega
+DISPATCHED = ("enviado", "entregado")
+
+
+def awaiting_purchase(db: Session, o: Order) -> dict[int, Decimal]:
+    """Lo que el pedido espera del proveedor (bajo pedido): lineas de sus solicitudes de compra que todavia no se
+    reciben, por producto. Al recibirse, reserve_received lo deja en bodega reservado para este pedido."""
+    rows = db.execute(
+        select(PurchaseRequestLine.product_id, func.coalesce(func.sum(PurchaseRequestLine.quantity), 0))
+        .join(PurchaseRequest, PurchaseRequest.id == PurchaseRequestLine.request_id)
+        .where(
+            PurchaseRequest.tenant_id == o.tenant_id,
+            PurchaseRequest.order_id == o.id,
+            PurchaseRequest.status.in_(AWAITING),
+            PurchaseRequestLine.product_id.is_not(None),
+        )
+        .group_by(PurchaseRequestLine.product_id)
+    )
+    return {pid: _dec(q) for pid, q in rows if _dec(q) > 0}
+
+
+def early_exit(db: Session, o: Order) -> dict[int, Decimal]:
+    """Salida ADELANTADA (el error de Kardex del 21/10): pedido pagado y facturado pero sin despachar cuya factura
+    saco de bodega lo que se compra bajo pedido y todavia no llega. Antes de esta correccion la factura automatica
+    del pago sacaba todo de una vez: sin la compra recibida, la bodega quedaba en negativo ("salio mas de lo que
+    entro"). Por producto, lo que salio de mas."""
+    if o.status in DISPATCHED or o.status in ("cancelado", "reembolsado") or not o.invoice_id:
+        return {}
+    waiting = awaiting_purchase(db, o)
+    if not waiting:
+        return {}
+    moved = _moved(db, o)
+    held = {}
+    for r in _order_reservations(db, o, ("confirmada", "consumida")):
+        held[r.product_id] = held.get(r.product_id, ZERO) + _dec(r.quantity)
+    out = {}
+    for pid, q in waiting.items():
+        # lo que salio por encima de lo que el pedido tenia apartado en bodega es la parte bajo pedido
+        extra = min(max(moved.get(pid, ZERO) - held.get(pid, ZERO), ZERO), q)
+        if extra > 0:
+            out[pid] = extra
+    return out
+
+
+def undo_early_exit(db: Session, o: Order, user_id: int | None = None, note: str | None = None) -> int:
+    """Correccion documentada de una salida adelantada: devuelve a la bodega de donde salio lo que la factura saco
+    antes de tiempo (ligado al pedido y a su factura). Al recibirse la compra queda reservado para el pedido y sale al
+    despachar, una sola vez. Sin commit. Devuelve cuantos movimientos creo."""
+    n = 0
+    for pid, q in early_exit(db, o).items():
+        rows = db.execute(
+            select(StockMovement.warehouse_id, func.coalesce(func.sum(StockMovement.quantity), 0))
+            .where(StockMovement.tenant_id == o.tenant_id, StockMovement.product_id == pid, or_(StockMovement.order_id == o.id, StockMovement.invoice_id == o.invoice_id))
+            .group_by(StockMovement.warehouse_id)
+        ).all()
+        back = q
+        for wid, net in sorted(rows, key=lambda r: _dec(r[1])):
+            take = min(back, -_dec(net))
+            if take <= 0:
+                continue
+            invsvc.move(
+                db,
+                o.tenant_id,
+                user_id,
+                pid,
+                wid,
+                "devolucion",
+                take,
+                o.number,
+                note or f"Pedido {o.number}: salida adelantada por la factura (bajo pedido, la compra no ha llegado); sale al despachar",
+                None,
+                o.invoice_id,
+                movement_type="ajuste",
+                order_id=o.id,
+            )
+            back -= take
+            n += 1
+    if n:
+        audit(db, o.tenant_id, user_id, "undo_early_exit", "order", o.id, {"movimientos": n})
+    return n
+
+
 def fulfill_for_order(db: Session, o: Order, user_id: int | None = None, invoice: Invoice | None = None) -> int:
     """Despacho (o factura): saca del inventario lo que falte por sacar de cada linea, consumiendo primero las
     reservas del pedido (de su bodega) y luego la bodega de origen / predeterminada. Idempotente: lo que ya
     salio por este pedido o por su factura no se vuelve a descontar. Con invoice, las salidas previas del
-    pedido quedan ligadas a esa factura. Devuelve cuantos movimientos creo."""
+    pedido quedan ligadas a esa factura. Devuelve cuantos movimientos creo.
+
+    Factura de un pedido SIN despachar (la automatica al confirmarse el pago): lo que se compra bajo pedido y todavia
+    no llega (awaiting_purchase) NO sale todavia: sale al despachar, consumiendo la reserva que deja la compra al
+    recibirse. Antes salia al facturar desde una bodega vacia y dejaba la existencia en negativo (Kardex, 21/10)."""
     need, prods = _needs(db, o)
+    awaiting = awaiting_purchase(db, o) if (invoice is not None and o.status not in DISPATCHED) else {}
     inv_id = invoice.id if invoice is not None else o.invoice_id
     if invoice is not None:
         db.execute(
@@ -603,6 +691,8 @@ def fulfill_for_order(db: Session, o: Order, user_id: int | None = None, invoice
             r.consumed_quantity = _dec(r.consumed_quantity) + take
             if _dec(r.consumed_quantity) >= _dec(r.quantity):
                 r.status, r.closed_note = "consumida", f"Despachado en {o.number}"
+        if falta > 0 and awaiting.get(pid):
+            falta -= min(falta, awaiting[pid])  # bajo pedido sin recibir: sale al despachar, no al facturar
         if falta > 0:
             w = _fallback_wh(db, p)
             if w is None:

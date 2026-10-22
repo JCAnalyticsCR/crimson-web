@@ -4,7 +4,11 @@ Encuentra lo que descuadra sin que nadie lo note y deja corregirlo con un clic (
 conciliacion que corre al crear, editar o anular el documento: escribe solo la diferencia, con su documento).
 
 Revisa:
-- existencias negativas por bodega;
+- existencias negativas por bodega, con la causa probable (la ultima salida y la compra que no se ha recibido) y su
+  correccion documentada: un AJUSTE con motivo obligatorio que deja la bodega en cero (fix "negativo");
+- pedidos web facturados sin despachar cuya factura saco antes de tiempo lo que se compra bajo pedido (la causa del
+  descuadre del 21/10: "salio mas de lo que entro" en una bodega vacia). Corregir devuelve esa salida adelantada; la
+  mercaderia sale al despachar, cuando la compra ya entro (store_inventory.undo_early_exit);
 - facturas (sueltas) cuyo kardex no coincide con sus lineas, o anuladas que no devolvieron;
 - proyectos donde lo que salio no es max(facturado, instalado);
 - pedidos web despachados que no sacaron todo, y cancelados/reembolsados con mercaderia afuera sin decidir
@@ -59,14 +63,26 @@ def check(db: Session, tenant_id: int, days: int = DAYS) -> dict:
     whs = {w.id: w.name for w in db.scalars(select(Warehouse).where(Warehouse.tenant_id == tenant_id))}
     for lv in invsvc.stock_levels(db, tenant_id):
         if lv["quantity"] < 0:
+            issues.append(negative_issue(db, tenant_id, lv["product_id"], lv["warehouse_id"], lv["quantity"], whs, name(lv["product_id"])))
+
+    # 1b) pedidos web facturados sin despachar que sacaron antes de tiempo lo bajo pedido
+    for o in db.scalars(
+        select(Order).where(
+            Order.tenant_id == tenant_id,
+            Order.channel == "tienda",
+            Order.invoice_id.is_not(None),
+            Order.status.not_in(("enviado", "entregado", "cancelado", "reembolsado")),
+        )
+    ):
+        for pid, q in store_inventory.early_exit(db, o).items():
             issues.append(
                 {
-                    "kind": "negativo",
-                    "ref_id": lv["product_id"],
-                    "doc": whs.get(lv["warehouse_id"], "Bodega"),
-                    "product": name(lv["product_id"]),
-                    "detail": f"Existencia {_fmt(lv['quantity'])} en {whs.get(lv['warehouse_id'], 'la bodega')}: salió más de lo que entró",
-                    "fixable": False,
+                    "kind": "pedido_adelantado",
+                    "ref_id": o.id,
+                    "doc": f"Pedido {o.number}",
+                    "product": name(pid),
+                    "detail": f"La factura sacó {_fmt(q)} que todavía se espera del proveedor (bajo pedido): devolverlo a bodega; sale al despachar",
+                    "fixable": True,
                 }
             )
 
@@ -244,8 +260,102 @@ def unlinked(db: Session, tenant_id: int) -> list[dict]:
     return out
 
 
-def fix(db: Session, tenant: Tenant, kind: str, ref_id: int, user_id: int | None) -> int:
+def _open_purchases(db: Session, tenant_id: int, product_id: int) -> list[str]:
+    """Solicitudes de compra con el producto que todavia no se reciben (lo que deberia entrar a bodega)."""
+    from ..models import PurchaseRequest, PurchaseRequestLine
+
+    rows = db.scalars(
+        select(PurchaseRequest)
+        .join(PurchaseRequestLine, PurchaseRequestLine.request_id == PurchaseRequest.id)
+        .where(PurchaseRequest.tenant_id == tenant_id, PurchaseRequestLine.product_id == product_id, PurchaseRequest.status.in_(store_inventory.AWAITING))
+        .order_by(PurchaseRequest.id)
+    ).unique()
+    return [f"{r.number} ({r.status})" for r in rows]
+
+
+def _last_exit(db: Session, tenant_id: int, product_id: int, warehouse_id: int) -> str | None:
+    m = db.scalar(
+        select(StockMovement)
+        .where(StockMovement.tenant_id == tenant_id, StockMovement.product_id == product_id, StockMovement.warehouse_id == warehouse_id, StockMovement.quantity < 0)
+        .order_by(StockMovement.id.desc())
+        .limit(1)
+    )
+    if m is None:
+        return None
+    return f"{m.kind} {_fmt(-_d(m.quantity))}" + (f" · {m.reference}" if m.reference else "")
+
+
+def negative_issue(db: Session, tenant_id: int, product_id: int, warehouse_id: int, qty: Decimal, whs: dict, label: str) -> dict:
+    """Existencia negativa con su causa probable: la ultima salida y, si la hay, la compra que no se ha recibido."""
+    lugar = whs.get(warehouse_id, "la bodega")
+    detail = f"Existencia {_fmt(qty)} en {lugar}: salió más de lo que entró"
+    ultima = _last_exit(db, tenant_id, product_id, warehouse_id)
+    if ultima:
+        detail += f". Última salida: {ultima}"
+    compras = _open_purchases(db, tenant_id, product_id)
+    if compras:
+        detail += f". Compra sin recibir: {', '.join(compras[:3])}: si la mercadería llegó, recibila en vez de ajustar"
+    return {
+        "kind": "negativo",
+        "ref_id": product_id,
+        "warehouse_id": warehouse_id,
+        "doc": whs.get(warehouse_id, "Bodega"),
+        "product": label,
+        "detail": detail,
+        "fixable": True,
+        "action": "ajuste",
+        "qty": _fmt(-qty),
+        "pending_purchases": compras,
+    }
+
+
+AJUSTE_REF = "AJ-SALUD"
+
+
+def fix_negative(db: Session, tenant_id: int, product_id: int, warehouse_id: int, motivo: str, user_id: int | None, *, force: bool = False) -> int:
+    """Correccion documentada de una existencia negativa (sin commit): un movimiento de AJUSTE que lleva la bodega a
+    cero, con el motivo obligatorio en la nota, referencia AJ-SALUD-<fecha> y el usuario. Si hay una compra del
+    producto sin recibir, se rechaza salvo force (recibirla es la correccion correcta: ajustar y despues recibir
+    dejaria existencia de mas). Devuelve 1 si ajusto."""
+    motivo = (motivo or "").strip()
+    if len(motivo) < 5:
+        raise HTTPException(422, "Escribí el motivo del ajuste (queda en el kardex)")
+    w = db.get(Warehouse, warehouse_id)
+    p = db.get(Product, product_id)
+    if not w or w.tenant_id != tenant_id or not p or p.tenant_id != tenant_id:
+        raise HTTPException(404, "Producto o bodega no encontrados")
+    saldo = invsvc.on_hand(db, tenant_id, product_id, warehouse_id)
+    if saldo >= 0:
+        raise HTTPException(409, f"{p.name} ya no está en negativo en {w.name} (hay {_fmt(saldo)})")
+    compras = _open_purchases(db, tenant_id, product_id)
+    if compras and not force:
+        raise HTTPException(409, f"Hay compras de {p.name} sin recibir ({', '.join(compras[:3])}): si la mercadería llegó, recibila. Para ajustar igual, confirmá.")
+    invsvc.move(
+        db,
+        tenant_id,
+        user_id,
+        product_id,
+        warehouse_id,
+        "ajuste",
+        -saldo,
+        f"{AJUSTE_REF}-{datetime.now(UTC):%Y%m%d}",
+        f"Ajuste por existencia negativa (salud del inventario): {motivo[:240]}",
+        movement_type="ajuste",
+    )
+    return 1
+
+
+def fix(db: Session, tenant: Tenant, kind: str, ref_id: int, user_id: int | None, *, warehouse_id: int | None = None, motivo: str | None = None, force: bool = False) -> int:
     """Corrige un descuadre con la misma conciliacion del documento (sin commit)."""
+    if kind == "negativo":
+        if not warehouse_id:
+            raise HTTPException(422, "Indicá la bodega")
+        return fix_negative(db, tenant.id, ref_id, warehouse_id, motivo or "", user_id, force=force)
+    if kind == "pedido_adelantado":
+        o = db.get(Order, ref_id)
+        if not o or o.tenant_id != tenant.id:
+            raise HTTPException(404, "Pedido no encontrado")
+        return store_inventory.undo_early_exit(db, o, user_id)
     if kind == "factura":
         inv = db.get(Invoice, ref_id)
         if not inv or inv.tenant_id != tenant.id:
