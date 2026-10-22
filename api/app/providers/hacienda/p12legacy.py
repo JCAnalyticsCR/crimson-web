@@ -26,6 +26,12 @@ from cryptography.hazmat.primitives.ciphers import algorithms as alg
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 
+# Tope de iteraciones que se aceptan del propio archivo (KDF, MAC y PBES2). Los .p12 de ATV usan 2048 y los de
+# OpenSSL moderno 2048 o 10000; un archivo con millones de iteraciones (armado a proposito o raro) dejaria el servidor
+# derivando llaves por minutos en cada intento de PIN: se rechaza como archivo no valido.
+MAX_ITERS = 200_000
+
+
 class P12Format(Exception):
     """El archivo no tiene la forma de un .p12 (danado, truncado o de otro tipo)."""
 
@@ -338,7 +344,7 @@ def pbe_decrypt(alg_node: Node, pin: str, data: bytes) -> bytes:
         name, klen = PKCS12_PBE[oid]
         params = kids[1].kids(2)
         salt, iters = params[0].octets(), params[1].integer()
-        if not 1 <= iters <= 10_000_000:
+        if not 1 <= iters <= MAX_ITERS:
             raise P12Format("iteraciones invalidas")
         pw = bmp_password(pin)
         key = pkcs12_kdf("sha1", pw, salt, 1, iters, klen)
@@ -359,7 +365,7 @@ def pbe_decrypt(alg_node: Node, pin: str, data: bytes) -> bytes:
             raise P12Unsupported("derivacion de llave desconocida")
         kp = kdf[1].kids(2)
         salt, iters = kp[0].octets(), kp[1].integer()
-        if not 1 <= iters <= 10_000_000:
+        if not 1 <= iters <= MAX_ITERS:
             raise P12Format("iteraciones invalidas")
         prf = "sha1"
         for extra in kp[2:]:
@@ -411,7 +417,7 @@ def parse(data: bytes) -> Pfx:
             if not hname:
                 raise P12Unsupported("MAC con un algoritmo desconocido")
             iters = md[2].integer() if len(md) > 2 else 1
-            if not 1 <= iters <= 10_000_000:
+            if not 1 <= iters <= MAX_ITERS:
                 raise P12Format("iteraciones invalidas")
             mac = (hname, di[1].octets(), md[1].octets(), iters)
         decode(auth_safe)  # la lista de contenidos tiene que leerse

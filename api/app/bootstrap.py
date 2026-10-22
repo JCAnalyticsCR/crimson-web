@@ -70,21 +70,21 @@ def extra_invites(db: Session, spec: str | None, base_url: str | None = None) ->
     if not t:
         return out
     now = datetime.now(UTC)
-    import hashlib
+    from .routers.users_admin import email_digest
 
     retirados: set[str] = set()
     for a in db.scalars(select(AuditLog).where(AuditLog.tenant_id == t.id, AuditLog.action == "user_delete")):
         d, b = a.diff or {}, a.before or {}
         retirados.add(str(d.get("email") or b.get("email") or "").strip().lower())
-        # desde la reunion 2 (pedido 28) la bitacora guarda el correo enmascarado y su huella sha256
-        retirados.add(str(d.get("email_sha256") or b.get("email_sha256") or ""))
+        # desde la reunion 2 (pedido 28) la bitacora guarda el correo enmascarado y su huella con clave (email_digest)
+        retirados.add(str(d.get("email_hmac") or b.get("email_hmac") or ""))
     for item in [x.strip() for x in spec.split(",") if x.strip()]:
         email, _, role = item.partition(":")
         email, role = email.strip().lower(), (role.strip() or "lectura")
         if role not in ASSIGNABLE_ROLES or "@" not in email:
             print(f"[bootstrap] Invitacion omitida (rol o correo invalido): {item}", flush=True)
             continue
-        if email in retirados or hashlib.sha256(email.encode()).hexdigest() in retirados:
+        if email in retirados or email_digest(email) in retirados:
             print(f"[bootstrap] Invitacion omitida (la cuenta fue eliminada en Ajustes): {email}", flush=True)
             continue
         if db.scalar(select(User).where(User.email == email)):

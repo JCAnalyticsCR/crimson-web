@@ -61,6 +61,9 @@ export default function HaciendaTab() {
   const prov = geo.find((p) => p.code === prof.province);
   const c: CredBlock = st.credentials[env];
   const emite = st.emission_environment !== undefined ? st.emission_environment : st.mode === "produccion" || st.mode === "pruebas" ? st.mode : null;
+  /* Producción encendida pero el servidor no la deja emitir: el botón no hace nada, así que se apaga y dice por qué */
+  const prodBloq = !!st.production.enabled_at && emite !== "produccion";
+  const prodBloqMsg = `Producción está activada, pero hoy no se emite con ella${st.production.blocked_reason ? `: ${st.production.blocked_reason}` : ". Revise la lista de verificación de producción."}`;
   const typed = atvEnv(cred.atv_user);
   const typedWarn = typed && typed !== env ? `Este usuario termina en «${typed === "pruebas" ? "stag" : "prod"}», que es de ${ENV_NAME[typed]}, y lo está cargando en ${ENV_NAME[env]}. Revise que no esté cruzado (se puede guardar igual).` : null;
 
@@ -163,9 +166,10 @@ export default function HaciendaTab() {
             <span className="muted" style={{ fontSize: 13 }}>Emitir con:</span>
             <div className="acc-seg" role="group" aria-label="Ambiente para emitir">
               <button type="button" disabled={busy} className={emite === "pruebas" ? "is-active" : ""} onClick={() => { if (emite !== "pruebas") pickMode("pruebas"); }}>Pruebas</button>
-              <button type="button" disabled={busy} className={emite === "produccion" ? "is-active" : ""} onClick={() => { if (!st.production.enabled_at) setProdModal("on"); }}>Producción</button>
+              <button type="button" disabled={busy || prodBloq} title={prodBloq ? prodBloqMsg : undefined} className={emite === "produccion" ? "is-active" : ""} onClick={() => { if (!st.production.enabled_at) setProdModal("on"); }}>Producción</button>
             </div>
             <span className="muted" style={{ fontSize: 12 }}>Pruebas pide escribir PRUEBAS; Producción pide la lista de verificación completa y escribir PRODUCCIÓN.</span>
+            {prodBloq && <div className="acc-warn" role="status" style={{ width: "100%", margin: 0, fontSize: 13 }}>{prodBloqMsg}</div>}
           </div>
         )}
       </Card>

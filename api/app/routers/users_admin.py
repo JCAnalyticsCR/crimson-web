@@ -866,9 +866,21 @@ def _correo_eliminado(uid: int) -> str:
 
 
 def email_digest(correo: str) -> str:
+    """Huella CON CLAVE del correo para la bitacora (que no se borra): HMAC-SHA256 con una llave derivada del secreto del
+    servidor. Un sha256 sin sal se revierte probando correos del dominio de la empresa; esta no, sin el secreto.
+    bootstrap.extra_invites compara con la misma funcion."""
     import hashlib
+    import hmac
 
-    return hashlib.sha256((correo or "").strip().lower().encode()).hexdigest()
+    from ..core.config import settings
+
+    llave = hashlib.sha256(b"crimson:huella-correo-eliminado:" + settings.jwt_secret.encode()).digest()
+    return hmac.new(llave, (correo or "").strip().lower().encode(), hashlib.sha256).hexdigest()
+
+
+def _iniciales(nombre: str | None) -> str:
+    partes = [x for x in (nombre or "").split() if x[:1].isalpha()]
+    return " ".join(f"{x[0].upper()}." for x in partes[:3]) or "—"
 
 
 def _enmascarar(correo: str) -> str:
@@ -983,7 +995,7 @@ def _guard_delete(db: Session, p: Principal, uid: int) -> TenantUser:
         raise HTTPException(403, "Solo un administrador elimina usuarios")
     m = _member(db, p, uid)
     if uid == p.user.id:
-        raise HTTPException(409, "No podés eliminar tu propia cuenta")
+        raise HTTPException(409, "No puede eliminar su propia cuenta")
     if is_shared(db, uid, p.tenant.id):
         raise HTTPException(409, "Este usuario también entra a otra empresa: aquí solo se puede desactivar")
     if m.role_code == "admin" and m.active and count_active_admins(db, p.tenant.id) <= 1:
@@ -1027,9 +1039,9 @@ def user_delete(uid: int, data: DeleteIn, p: Principal = Depends(ADMIN), db: Ses
     act = _actividad(db, uid)
     u = m.user
     correo = u.email or ""
-    # en la bitacora (que no se borra) el correo va enmascarado y con su huella (bootstrap.extra_invites la usa para no
-    # volver a invitar una cuenta eliminada); el nombre basta para saber a quien se elimino
-    antes = {"email": _enmascarar(correo), "email_sha256": email_digest(correo), "name": u.full_name, "role": m.role_code, "active": m.active}
+    # en la bitacora (que no se borra) no queda nada que identifique a la persona: correo enmascarado, iniciales y una
+    # huella con clave del correo (bootstrap.extra_invites la usa para no volver a invitar una cuenta eliminada)
+    antes = {"email": _enmascarar(correo), "email_hmac": email_digest(correo), "name": _iniciales(u.full_name), "role": m.role_code, "active": m.active}
     tid, now = p.tenant.id, datetime.now(UTC)
     for inv in _pending_internal(db, tid, correo.lower()):
         _revoke_inv(inv, p.user.id, now)
@@ -1051,13 +1063,13 @@ def user_delete(uid: int, data: DeleteIn, p: Principal = Depends(ADMIN), db: Ses
     if en_bitacora:
         # la bitacora no se toca (en Postgres no admite UPDATE ni DELETE): la cuenta queda como rastro, sin acceso
         u.email = _correo_eliminado(uid)
-        u.full_name = f"{(u.full_name or '').strip()[:140]} (eliminado)"
+        u.full_name = f"Usuario eliminado #{uid}"  # como con historial: no queda su nombre ni su correo
         u.active = False
         u.password_hash = hash_password(secrets.token_urlsafe(32))
         u.must_change_password, u.temp_password_expires_at = False, None
         u.totp_enabled, u.totp_secret, u.totp_recovery, u.totp_pending_secret = False, None, [], None
         u.session_version = int(u.session_version or 0) + 1
-        modo = "cuenta inactiva (la bitácora la nombra)"
+        modo = "anonimizada (la bitácora la nombra)"
     else:
         db.delete(u)
         modo = "borrada"
@@ -1065,4 +1077,4 @@ def user_delete(uid: int, data: DeleteIn, p: Principal = Depends(ADMIN), db: Ses
     audit(db, tid, p.user.id, "user_delete", "user", uid, {**antes, "modo": modo}, ip=p.ip, before=antes, reason=data.reason)
     login_limiter.forget_account(correo)
     db.commit()
-    return {"ok": True, "mode": "borrada" if not en_bitacora else "inactiva"}
+    return {"ok": True, "mode": "anonimizada" if en_bitacora else "borrada"}

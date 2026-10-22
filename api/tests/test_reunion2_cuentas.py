@@ -189,6 +189,23 @@ def test_errores_distintos_pin_archivo_y_vencido(legacy, sin_legacy):
     assert e.value.code == "vencido"
 
 
+def test_p12_con_iteraciones_desmedidas_se_rechaza_rapido(sin_legacy):
+    """Un .p12 con millones de iteraciones dejaria al servidor derivando llaves en Python por minutos en cada intento de
+    PIN: se rechaza como archivo no valido sin derivar nada."""
+    import time
+
+    pin = "1234"
+    # mismas bolsas, pero la MAC dice 5 millones de iteraciones (el archivo trae el numero: no hace falta calcularlas)
+    pfx = L.decode(legacy_p12(pin, iters=1))
+    mac = pfx.children[2]
+    malo = _seq(_int(3), L._reencode(pfx.children[1]), _seq(L._reencode(mac.children[0]), _oct(mac.children[1].octets()), _int(5_000_000)))
+    t0 = time.monotonic()
+    with pytest.raises(CertError, match="dañado o no es") as e:
+        load_p12(malo, pin)
+    assert e.value.code == "archivo" and time.monotonic() - t0 < 5
+    assert L.MAX_ITERS <= 200_000
+
+
 def test_p12_moderno_tambien_distingue_pin_y_archivo(p12_empresa):
     p12, pin = p12_empresa
     with pytest.raises(CertError) as e:
@@ -376,6 +393,45 @@ def test_sin_historial_se_borra_de_verdad_y_nunca_a_si_mismo(client, auth, db_se
     me = client.get("/auth/me").json()["user"]["id"]
     assert client.get(f"/settings/users/{me}/activity").json()["can_delete"] is False
     assert client.post(f"/settings/users/{me}/delete", json={"admin_password": ADMIN_PW}).status_code == 409
+
+
+def test_invitado_que_acepto_y_se_elimina_no_deja_nombre_ni_correo(client, auth, db_session):
+    """Sin historial pero con la bitacora de su invitacion (invite_accept): la cuenta queda como rastro, anonimizada igual
+    que con historial, y en la bitacora no queda ni su nombre ni su correo (ni una huella sin clave)."""
+    import json
+
+    correo, nombre = "persona.invitada@ejemplo.com", "Persona Invitada Prueba"
+    link = client.post("/settings/invitations", json={"email": correo, "role": "lectura"}).json()["link"]
+    keep = client.headers.pop("Authorization")
+    raw = client.cookies.get("crimson_refresh")
+    try:
+        client.cookies.clear()
+        r = client.post("/settings/invitations/accept", json={"token": link.rsplit("/", 1)[-1], "full_name": nombre, "password": PW})
+        assert r.status_code == 200, r.text
+    finally:
+        client.headers["Authorization"] = keep
+        if raw:
+            client.cookies.set("crimson_refresh", raw)
+    u_id = db_session.scalar(select(User.id).where(User.email == correo))
+    assert db_session.scalar(select(AuditLog.id).where(AuditLog.user_id == u_id, AuditLog.action == "invite_accept"))
+    assert client.get(f"/settings/users/{u_id}/activity").json()["mode"] == "borrar"
+    r = client.post(f"/settings/users/{u_id}/delete", json={"admin_password": ADMIN_PW})
+    assert r.status_code == 200 and r.json()["mode"] == "anonimizada", r.text
+    db_session.expire_all()
+    u = db_session.get(User, u_id)
+    assert u is not None and not u.active and u.full_name == f"Usuario eliminado #{u_id}" and u.email.endswith("@eliminado.invalid")
+    log = db_session.scalars(select(AuditLog).where(AuditLog.action == "user_delete", AuditLog.entity_id == u_id)).one()
+    texto = json.dumps([log.diff, log.before], ensure_ascii=False).lower()
+    assert "persona" not in texto and "invitada" not in texto and correo not in texto
+    assert hashlib.sha256(correo.encode()).hexdigest() not in texto  # la huella lleva clave del servidor
+    assert (log.diff or {}).get("name") == "P. I. P."
+    assert client.post(f"/settings/users/{u_id}/delete", json={"admin_password": ADMIN_PW}).status_code in (404, 409)
+
+
+def test_no_se_elimina_a_si_mismo_de_usted(client, auth):
+    me = client.get("/auth/me").json()["user"]["id"]
+    r = client.post(f"/settings/users/{me}/delete", json={"admin_password": ADMIN_PW})
+    assert r.status_code == 409 and r.json()["detail"] == "No puede eliminar su propia cuenta"
 
 
 def test_un_invitado_pendiente_se_revoca_al_eliminar(client, auth, db_session):

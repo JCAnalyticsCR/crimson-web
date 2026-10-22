@@ -12,6 +12,7 @@ import re
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -379,7 +380,9 @@ async def put_credentials(
         if final_pin is None:
             raise HTTPException(422, "Falta el PIN del certificado")
         try:
-            info = load_p12(final_p12, final_pin)
+            # fuera del event loop: abrir un .p12 deriva llaves (y con cifrado viejo lo hace en Python), no debe frenar
+            # al resto de las empresas mientras tanto
+            info = await run_in_threadpool(load_p12, final_p12, final_pin)
         except CertError as e:
             raise HTTPException(422, str(e)) from e
         if not allow_other_id and _cedula_mismatch(info.serial_number_attr, p.tenant.tax_id):

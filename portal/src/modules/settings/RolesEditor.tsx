@@ -30,6 +30,8 @@ export default function RolesEditor({ onChanged, focus }: { onChanged: () => voi
   const { toast, reloadMatrix } = useSession();
   const [data, setData] = useState<Resp | null>(null);
   const [sel, setSel] = useState<string>("ventas");
+  const selRef = useRef(sel);
+  selRef.current = sel;
   const [draft, setDraft] = useState<Perms>({});
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -48,7 +50,9 @@ export default function RolesEditor({ onChanged, focus }: { onChanged: () => voi
   /* «Qué ve cada rol» pide abrir un rol (reunión 2, pedido 29) */
   useEffect(() => {
     if (!focus) return;
-    setSel((cur) => (cur !== focus.code && dirtyRef.current && !confirm("Hay cambios sin guardar. ¿Descartarlos?") ? cur : focus.code));
+    // se pregunta aquí y no dentro de setSel: React puede correr dos veces esa función (StrictMode) y el aviso saldría doble
+    if (focus.code !== selRef.current && dirtyRef.current && !confirm("Hay cambios sin guardar. ¿Descartarlos?")) return;
+    setSel(focus.code);
   }, [focus]);
 
   const role = data?.roles.find((r) => r.code === sel) ?? null;
