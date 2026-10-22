@@ -262,7 +262,7 @@ def _reviewers(db: Session, tenant) -> list[dict]:
     """Personas que reciben el aviso de "nuevo levantamiento": lo que el tecnico necesita ver al enviar."""
     from ..models import TenantUser
 
-    roles = reviewer_roles(tenant)
+    roles = roles_like(db, tenant, reviewer_roles(tenant))  # los mismos que notify_roles avisa (roles creados incluidos)
     rows = db.scalars(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.active, TenantUser.role_code.in_(roles)))
     return [{"id": m.user.id, "name": m.user.full_name, "role": m.role_code} for m in rows]
 

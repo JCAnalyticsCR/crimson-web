@@ -108,9 +108,9 @@ export default function UsersTab() {
     load();
   };
   const resend = async (i: Inv) => {
-    if (i.role === "admin") {
-      /* reenviar devuelve un enlace vivo para crear un administrador: pide la contraseña */
-      setPwAsk({ title: "Confirmá con tu contraseña", text: `Vas a reenviar la invitación de ${i.email} como Administrador. El enlace anterior deja de servir.`, cta: "Reenviar", run: (pw) => doResend(i, pw) });
+    if (i.role === "admin" || reauth.includes(i.role)) {
+      /* reenviar devuelve un enlace vivo para entrar como administrador (o con un rol con contabilidad, planillas, Ajustes o usuarios): pide la contraseña */
+      setPwAsk({ title: "Confirmá con tu contraseña", text: `Vas a reenviar la invitación de ${i.email} como ${roleMeta(i.role).label}. El enlace anterior deja de servir.`, cta: "Reenviar", run: (pw) => doResend(i, pw) });
       return;
     }
     try { await doResend(i); } catch (e) { toast(errMsg(e), "bad"); load(); }

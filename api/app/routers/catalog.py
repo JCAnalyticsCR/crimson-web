@@ -78,7 +78,8 @@ def _reminders_guard(p: Principal) -> None:
 
 
 def _duplicate_customer(db: Session, tenant_id: int, id_number: str | None, email: str | None) -> Customer | None:
-    """Cliente activo de la empresa con la misma cedula (solo digitos y letras, sin guiones ni espacios) o el mismo correo."""
+    """Cliente activo de la empresa con la misma cedula (comparada sin guiones, espacios ni puntos) o el mismo correo.
+    Lo usan el alta de clientes y la importacion de quien no edita clientes existentes (pedido 23)."""
     import re
 
     ced = re.sub(r"[^0-9A-Za-z]", "", id_number or "").upper()
@@ -89,11 +90,10 @@ def _duplicate_customer(db: Session, tenant_id: int, id_number: str | None, emai
     if correo:
         conds.append(func.lower(func.trim(Customer.email)) == correo)
     if ced:
-        # tal como la escribio, sin guiones ni espacios (como la guarda el formulario) o con la cedula fisica con guiones
-        variantes = {(id_number or "").strip(), ced, ced.lower()}
-        if ced.isdigit() and len(ced) == 9:
-            variantes.add(f"{ced[0]}-{ced[1:5]}-{ced[5:]}")
-        conds.append(Customer.id_number.in_(variantes))
+        # normalizada de los dos lados: "3-101-123456", "3101123456" y "3 101 123456" son la misma cedula (fisica,
+        # juridica o DIMEX), se haya guardado como se haya guardado
+        guardada = func.upper(func.replace(func.replace(func.replace(func.trim(Customer.id_number), "-", ""), " ", ""), ".", ""))
+        conds.append(guardada == ced)
     return db.scalar(select(Customer).where(Customer.tenant_id == tenant_id, Customer.active, or_(*conds)).order_by(Customer.id).limit(1))
 
 

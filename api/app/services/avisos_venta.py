@@ -32,7 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
-from ..core.deps import EXTERNAL_ROLES, _role_permissions, effective_permissions
+from ..core.deps import EXTERNAL_ROLES, _role_permissions, effective_permissions, roles_like
 from ..models import Customer, EmailOutbox, Opportunity, Quote, Survey, TenantUser, User
 from .documents import local_date
 from .mail import internal_inboxes, member_inbox, queue_email
@@ -194,7 +194,8 @@ def cotizacion_aceptada(db: Session, tenant, q: Quote, *, version: int | None, q
     supervisor queda fuera solo si la empresa lo apago en Ajustes (supervisor_en_venta_de_equipo)."""
     instalacion, _opp = _lleva_instalacion(db, q)
     roles = ("admin", "supervisor") if instalacion or supervisor_en_venta_de_equipo(tenant) else ("admin",)
-    destinos = miembros(db, tenant, roles=roles) + miembros(db, tenant, user_ids=[quote_owner(q)])
+    # tambien los roles creados a partir de esos (un «Supervisor senior»; una copia del admin no: deps.roles_like)
+    destinos = miembros(db, tenant, roles=roles_like(db, tenant, roles)) + miembros(db, tenant, user_ids=[quote_owner(q)])
     lev = db.scalar(select(Survey.id).where(Survey.tenant_id == q.tenant_id, Survey.quote_id == q.id).limit(1))
     cliente = _cliente(db, q)
     siguiente = (

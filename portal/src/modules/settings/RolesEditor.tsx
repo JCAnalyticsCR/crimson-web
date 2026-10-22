@@ -18,6 +18,9 @@ type Catalog = { module: string; label: string; actions: { action: string; label
 type Resp = { roles: RoleRow[]; catalog: Catalog; locked: string[] };
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : "Error");
+/* lo mismo que core/permisos.SENSITIVE: sumarle esto a un rol pide la contraseña (quienes ya lo tienen lo ganan) */
+const SENSITIVE: [string, string | null][] = [["settings", null], ["accounting", null], ["payroll", null], ["aliados", "usuarios"], ["portal_clientes", "aprobar"]];
+const sensitive = (p: Perms) => new Set(SENSITIVE.filter(([m, a]) => (a == null ? (p[m] || []).length > 0 : (p[m] || []).includes(a))).map(([m, a]) => (a ? `${m}.${a}` : m)));
 const same = (a: Perms, b: Perms) => {
   const ka = Object.keys(a).filter((k) => a[k]?.length), kb = Object.keys(b).filter((k) => b[k]?.length);
   return ka.length === kb.length && ka.every((k) => (b[k] || []).length === a[k].length && a[k].every((x) => b[k].includes(x)));
@@ -30,6 +33,7 @@ export default function RolesEditor({ onChanged }: { onChanged: () => void }) {
   const [draft, setDraft] = useState<Perms>({});
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pw, setPw] = useState("");
   const [nuevo, setNuevo] = useState<{ name: string; from_code: string } | null>(null);
 
   const load = useCallback(async (focus?: string) => {
@@ -43,8 +47,13 @@ export default function RolesEditor({ onChanged }: { onChanged: () => void }) {
   useEffect(() => { load(); }, [load]);
 
   const role = data?.roles.find((r) => r.code === sel) ?? null;
-  useEffect(() => { if (role) { setDraft(JSON.parse(JSON.stringify(role.permissions))); setReason(""); } }, [role?.code, role?.permissions]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (role) { setDraft(JSON.parse(JSON.stringify(role.permissions))); setReason(""); setPw(""); } }, [role?.code, role?.permissions]); // eslint-disable-line react-hooks/exhaustive-deps
   const dirty = useMemo(() => !!role && !same(draft, role.permissions), [draft, role]);
+  const needPw = useMemo(() => {
+    if (!role) return false;
+    const antes = sensitive(role.permissions);
+    return [...sensitive(draft)].some((x) => !antes.has(x));
+  }, [draft, role]);
 
   const toggle = (mod: string, act: string, on: boolean) => {
     setDraft((cur) => {
@@ -62,7 +71,7 @@ export default function RolesEditor({ onChanged }: { onChanged: () => void }) {
   const save = async () => {
     if (!role) return;
     setBusy(true);
-    try { await api(`/settings/roles/${role.code}`, { method: "PUT", json: { permissions: draft, reason: reason.trim() || undefined } }); done(`Listo: ${role.name} actualizado. Aplica en la siguiente acción de cada persona.`); }
+    try { await api(`/settings/roles/${role.code}`, { method: "PUT", json: { permissions: draft, reason: reason.trim() || undefined, admin_password: needPw ? pw : undefined } }); setPw(""); done(`Listo: ${role.name} actualizado. Aplica en la siguiente acción de cada persona.`); }
     catch (e) { toast(errMsg(e), "bad"); } finally { setBusy(false); }
   };
   const reset = async () => {
@@ -127,7 +136,8 @@ export default function RolesEditor({ onChanged }: { onChanged: () => void }) {
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 12 }}>
             <div style={{ flex: "1 1 240px" }}><Field label="Motivo (queda en la bitácora)"><input className="input" maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Opcional" /></Field></div>
-            <button className="btn btn--crimson" onClick={save} disabled={busy || !dirty || !Object.keys(draft).length}>{busy ? "Guardando…" : "Guardar permisos"}</button>
+            {needPw && <div style={{ flex: "1 1 220px" }}><Field label="Confirmá con tu contraseña" hint="Darle a un rol acceso a Ajustes, contabilidad, planillas, usuarios de aliados o accesos de clientes pide tu contraseña."><input className="input" type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} /></Field></div>}
+            <button className="btn btn--crimson" onClick={save} disabled={busy || !dirty || !Object.keys(draft).length || (needPw && !pw)}>{busy ? "Guardando…" : "Guardar permisos"}</button>
             {dirty && <button className="btn btn--ghost" onClick={() => setDraft(JSON.parse(JSON.stringify(role.permissions)))} disabled={busy}>Deshacer</button>}
             {role.kind === "predefinido" && role.customized && <button className="btn btn--ghost" onClick={reset} disabled={busy}>Restablecer de fábrica</button>}
             {role.kind === "personalizado" && <button className="btn btn--danger btn--sm" onClick={remove} disabled={busy || role.members > 0} title={role.members > 0 ? "Cambiales el rol a las personas que lo tienen antes de borrarlo" : undefined}>Borrar rol</button>}

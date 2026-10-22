@@ -509,7 +509,7 @@ def meta(p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = D
     equipo = [
         {"id": m.user.id, "name": m.user.full_name}
         for m in db.scalars(
-            select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(roles_like(db, p.tenant, ("admin", "ventas", "supervisor"))))
+            select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(roles_like(db, p.tenant, ("admin", "ventas", "supervisor"), admin=True)))
         )
     ]
     return {

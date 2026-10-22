@@ -268,15 +268,22 @@ def role_root(db: Session, code: str | None) -> str | None:
     return _root_of(code, bases)
 
 
-def roles_like(db: Session, tenant, codes) -> tuple[str, ...]:
+def roles_like(db: Session, tenant, codes, *, admin: bool = False) -> tuple[str, ...]:
     """Esos roles y los que el admin de esta empresa creo a partir de ellos (reunion 21/10, pedido 20: crear un rol a
-    partir de otro reproduce lo que hace el de origen). P. ej. ("tecnico",) -> ("tecnico", "t1_tecnico_senior")."""
+    partir de otro reproduce lo que hace el de origen). P. ej. ("tecnico",) -> ("tecnico", "t1_tecnico_senior").
+    Un rol copiado del administrador NO es el administrador (nunca tiene costos ni lo de solo admin): por defecto no
+    entra por "admin", asi no recibe lo que el codigo le manda solo al admin (resumen y freno de margen, salud de la
+    plataforma, alertas de Hacienda). admin=True solo para listas operativas donde decide su permiso (agentes de
+    tickets, responsables de oportunidades)."""
     want = tuple(dict.fromkeys(codes))
     if tenant is None:
         return want
+    raices = set(want) if admin else set(want) - {"admin"}
+    if not raices:
+        return want
     propios = custom_roles(db, tenant)
     bases = {r.code: r.base_code for r in propios}
-    extra = [r.code for r in propios if r.code not in want and _root_of(r.code, bases) in want]
+    extra = [r.code for r in propios if r.code not in want and _root_of(r.code, bases) in raices]
     return (*want, *extra)
 
 

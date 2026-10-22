@@ -311,8 +311,8 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
         "roles": assignable_roles(db, p.tenant),
         # nombres de los roles que creo el admin (los predefinidos los nombra el portal)
         "role_labels": {r.code: r.name for r in custom_roles(db, p.tenant)},
-        # roles creados que piden la contrasena al asignarlos o invitar con ellos (como el de administrador)
-        "reauth_roles": [r.code for r in custom_roles(db, p.tenant) if _sensitive_custom(db, r.code)],
+        # roles que piden la contrasena al asignarlos o invitar con ellos (como el de administrador)
+        "reauth_roles": [c for c in assignable_roles(db, p.tenant) if _sensitive_role(db, p.tenant, c)],
         # "Quien ve costos": lo habilitado hoy y los roles que se pueden habilitar (el resto nunca)
         "cost_roles": list(cost_roles(p.tenant)),
         "cost_role_choices": list(COST_ROLE_CHOICES),
@@ -325,22 +325,23 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
     }
 
 
-# Permisos que hacen "sensible" a un rol creado por el admin: dar ese rol pide la contrasena, como dar el de admin
-_SENSITIVE = (("settings", None), ("accounting", None), ("payroll", None), ("aliados", "usuarios"), ("portal_clientes", "aprobar"))
+def _sensitive_role(db: Session, tenant, code: str | None) -> bool:
+    """Rol que pide la contrasena al asignarlo o invitar con el, como el de administrador (con una sesion robada no se
+    crea un "casi administrador" sin reautenticar): un rol creado en Ajustes -> Roles copiado del administrador o con
+    acceso a Ajustes, contabilidad, planillas, usuarios de aliados o aprobar accesos de clientes (core/permisos.SENSITIVE),
+    y un predefinido al que la empresa le AGREGO algo de eso (darle planillas a "ventas"; lo que trae de fabrica, como la
+    contabilidad del Contador, no la pide). El administrador se trata aparte."""
+    from ..core.deps import ROLE_PERMISSIONS, _role_permissions, effective_permissions, role_root
+    from ..core.permisos import sensitive_hits
 
-
-def _sensitive_custom(db: Session, code: str | None) -> bool:
-    """Rol creado en Ajustes -> Roles copiado del administrador o con acceso a Ajustes, contabilidad, planillas,
-    usuarios de aliados o aprobar accesos de clientes. Asignarlo (o invitar con el) pide la contrasena de quien lo hace: con una
-    sesion robada no se crea un "casi administrador" sin reautenticar."""
-    from ..core.deps import ROLE_PERMISSIONS, _role_permissions, role_root
-
-    if not code or code in ROLE_PERMISSIONS:
+    if not code or code == "admin":
         return False
+    if code in ROLE_PERMISSIONS:
+        fabrica = ROLE_PERMISSIONS[code]
+        return bool(sensitive_hits(effective_permissions(tenant, code, fabrica)) - sensitive_hits(fabrica))
     if role_root(db, code) == "admin":
         return True
-    perms = _role_permissions(db, code)
-    return any((perms.get(mod) if act is None else act in (perms.get(mod) or [])) for mod, act in _SENSITIVE)
+    return bool(sensitive_hits(_role_permissions(db, code)))
 
 
 # ---------- Invitaciones ----------
@@ -357,7 +358,7 @@ class InviteIn(BaseModel):
 
 
 class ResendIn(BaseModel):
-    admin_password: str | None = Field(None, max_length=MAX_PASSWORD)  # solo invitaciones de admin
+    admin_password: str | None = Field(None, max_length=MAX_PASSWORD)  # invitaciones de admin o de un rol sensible
 
 
 @router.post("/invitations", status_code=201)
@@ -366,7 +367,7 @@ def invite(data: InviteIn, response: Response, p: Principal = Depends(ADMIN), db
     if data.role not in assignable_roles(db, p.tenant):
         raise HTTPException(422, "Rol invalido")
     _guard_admin_invite(p, data.role)
-    if data.role == "admin" or _sensitive_custom(db, data.role):
+    if data.role == "admin" or _sensitive_role(db, p.tenant, data.role):
         _reauth(p, data.admin_password)
     tid = p.tenant.id
     email = str(data.email).strip().lower()
@@ -443,7 +444,8 @@ def invite_check(data: TokenIn, request: Request, db: Session = Depends(get_db))
 @router.post("/invitations/{iid}/resend")
 def invite_resend(iid: int, response: Response, data: ResendIn | None = None, p: Principal = Depends(ADMIN), db: Session = Depends(get_db)):
     """Reenviar rota el token (el enlace anterior deja de servir) y renueva el vencimiento: sirve para las vencidas.
-    Una invitacion de admin devuelve un enlace vivo para crear un admin: solo otro admin, con su contrasena."""
+    Una invitacion de admin (o de un rol sensible, _sensitive_role) devuelve un enlace vivo para entrar con ese rol: pide
+    la contrasena de quien reenvia, como al invitar."""
     inv = _invitation(db, p, iid)
     _guard_admin_invite(p, inv.role_code)
     if inv.accepted_at:
@@ -453,7 +455,7 @@ def invite_resend(iid: int, response: Response, data: ResendIn | None = None, p:
     if _member_by_email(db, p.tenant.id, inv.email.lower()):
         raise HTTPException(409, "Ese correo ya es usuario de la empresa")
     admin_users_limiter.hit(_actor_key(p))
-    if inv.role_code == "admin":
+    if inv.role_code == "admin" or _sensitive_role(db, p.tenant, inv.role_code):  # el enlace vivo entra con ese rol
         _reauth(p, data.admin_password if data else None)
     now = datetime.now(UTC)
     raw = secrets.token_urlsafe(32)
@@ -636,7 +638,7 @@ def member_update(uid: int, data: MemberIn, p: Principal = Depends(ADMIN), db: S
         email_change
         or (notify_change and new_notify)  # desviar los avisos a otro buzon pide la contrasena; quitarlo no
         or (role_change and "admin" in (m.role_code, data.role))
-        or (role_change and _sensitive_custom(db, data.role))  # un rol creado con contabilidad, planillas, Ajustes o usuarios
+        or (role_change and _sensitive_role(db, p.tenant, data.role))  # un rol con contabilidad, planillas, Ajustes o usuarios agregados
         or (active_change and m.role_code == "admin")
     ):
         _reauth(p, data.admin_password)

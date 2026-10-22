@@ -125,3 +125,28 @@ def sin_anular_ni_publicar(perms: dict) -> dict:
         if sel:
             out[mod] = sel
     return out
+
+
+# Permisos que hacen "sensible" a un rol: darlo (o agregarselo a un rol) pide la contrasena de quien lo hace, como dar el
+# de administrador. (modulo, accion); None = cualquier accion del modulo.
+SENSITIVE: tuple[tuple[str, str | None], ...] = (
+    ("settings", None),
+    ("accounting", None),
+    ("payroll", None),
+    ("aliados", "usuarios"),
+    ("portal_clientes", "aprobar"),
+)
+
+
+def sensitive_hits(perms: dict | None) -> set[str]:
+    """Que permisos sensibles trae un mapa ("accounting", "aliados.usuarios"...). "*" los trae todos."""
+    if not isinstance(perms, dict):
+        return set()
+    if "*" in perms:
+        return {mod if act is None else f"{mod}.{act}" for mod, act in SENSITIVE}
+    out: set[str] = set()
+    for mod, act in SENSITIVE:
+        acts = perms.get(mod) or []
+        if (act is None and acts) or (act is not None and (act in acts or "*" in acts)):
+            out.add(mod if act is None else f"{mod}.{act}")
+    return out

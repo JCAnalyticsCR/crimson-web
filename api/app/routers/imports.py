@@ -177,6 +177,12 @@ def _customers(db: Session, tid: int, rows: list[dict], commit: bool, opts: dict
             c = db.scalar(select(Customer).where(Customer.tenant_id == tid, Customer.id_number == idn))
         if not c and email:
             c = db.scalar(select(Customer).where(Customer.tenant_id == tid, func.lower(Customer.email) == email))
+        if not c and not can_update:
+            # la misma regla que el alta por formulario: la cedula con o sin guiones ("3-101-123456" = "3101123456")
+            # tambien es un cliente que ya existe; el vendedor no arma una segunda ficha con su correo
+            from .catalog import _duplicate_customer
+
+            c = _duplicate_customer(db, tid, idn, email)
         if c and not can_update:
             out.append({"row": i, "action": "omitir", "detail": f"Ya existe: {c.name} (solo administración edita clientes existentes)"})
             continue

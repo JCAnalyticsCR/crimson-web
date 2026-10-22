@@ -717,7 +717,7 @@ def ticket_assign(tid: int, data: AssignIn, p: Principal = Depends(require("supp
         m = db.scalar(select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.user_id == data.assigned_to, TenantUser.active))
         u = db.get(User, data.assigned_to) if m else None
         aliado = bool(m and m.ally_company_id)
-        if not m or not u or not u.active or (not aliado and m.role_code not in roles_like(db, p.tenant, AGENT_ROLES)):
+        if not m or not u or not u.active or (not aliado and m.role_code not in roles_like(db, p.tenant, AGENT_ROLES, admin=True)):
             raise HTTPException(422, "Esa persona no atiende soporte")
         if aliado and data.assigned_to != t.assigned_to:
             # un usuario de una empresa aliada: el ticket queda asignado a su empresa (que participe en el proyecto)
@@ -887,7 +887,7 @@ def ticket_meta(p: Principal = Depends(require("support_desk", "ver")), db: Sess
     agentes = [
         {"id": m.user.id, "name": m.user.full_name, "role": m.role_code}
         for m in db.scalars(
-            select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(roles_like(db, p.tenant, AGENT_ROLES)))
+            select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.active, TenantUser.role_code.in_(roles_like(db, p.tenant, AGENT_ROLES, admin=True)))
         )
     ]
     ahora = datetime.now(UTC)
@@ -945,7 +945,7 @@ def ticket_agents(ally_company_id: int | None = None, p: Principal = Depends(req
             select(TenantUser).where(
                 TenantUser.tenant_id == p.tenant.id,
                 TenantUser.active,
-                TenantUser.role_code.in_(roles_like(db, p.tenant, AGENT_ROLES)),
+                TenantUser.role_code.in_(roles_like(db, p.tenant, AGENT_ROLES, admin=True)),
                 TenantUser.ally_company_id.is_(None),
             )
         )

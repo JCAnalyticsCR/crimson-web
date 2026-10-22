@@ -12,6 +12,9 @@ Reglas:
   los vendedores», avisos de pedidos web) nace marcado si el de origen lo estaba (_heredar).
 - Un rol editado o creado nunca recibe lo de solo administrador (core/permisos.py: anular facturas, publicar en la
   tienda, ver costos, asignar vendedor, descuento libre, saltar la revision, configurar la empresa): 422.
+- Agregarle a un rol (predefinido o creado) algo sensible (Ajustes, contabilidad, planillas, usuarios de aliados o
+  aprobar accesos de clientes: core/permisos.SENSITIVE) pide la contrasena del administrador, como asignar un rol asi:
+  si no, con una sesion robada se crearia un rol inocente, se asignaria sin contrasena y despues se le sumaria eso.
 - Todo cambio queda en la bitacora con el antes y el despues. Aplica en la siguiente peticion de cada persona (los
   permisos se calculan en cada request): no hace falta cerrar sesiones.
 """
@@ -28,7 +31,9 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import EDITABLE_ROLES, ROLE_PERMISSIONS, Principal, custom_roles, get_principal, role_overrides
-from ..core.permisos import CATALOG, LOCKED, clean, expand, problems
+from ..core.permisos import CATALOG, LOCKED, clean, expand, problems, sensitive_hits
+from ..core.reauth import require_reauth
+from ..core.security import MAX_PASSWORD
 from ..models import Invitation, Role, Tenant, TenantUser
 from ..services.bitacora import audit_change
 
@@ -147,11 +152,20 @@ class RoleEditIn(BaseModel):
     name: str | None = Field(None, min_length=2, max_length=80)
     permissions: dict[str, list[str]] | None = None
     reason: str | None = Field(None, max_length=500)
+    # solo si los permisos nuevos agregan algo sensible (_guard_sensitive)
+    admin_password: str | None = Field(None, max_length=MAX_PASSWORD)
 
     @field_validator("name", mode="before")
     @classmethod
     def _strip(cls, v):
         return v.strip() if isinstance(v, str) else v
+
+
+def _guard_sensitive(p: Principal, antes: dict, nuevos: dict, password: str | None) -> None:
+    """Sumarle a un rol Ajustes, contabilidad, planillas, usuarios de aliados o aprobar accesos de clientes pide la
+    contrasena: todas las personas que ya lo tienen lo ganan sin que nadie mas reautentique. Quitar no la pide."""
+    if sensitive_hits(nuevos) - sensitive_hits(antes):
+        require_reauth(p, password, "Darle a un rol acceso a Ajustes, contabilidad, planillas, usuarios de aliados o accesos de clientes pide tu contraseña")
 
 
 @router.put("/{code}")
@@ -166,6 +180,7 @@ def role_update(code: str, data: RoleEditIn, p: Principal = Depends(solo_admin),
         nuevos = _validate(data.permissions)
         t = db.get(Tenant, p.tenant.id)
         antes = role_overrides(t).get(code, clean(ROLE_PERMISSIONS[code]))
+        _guard_sensitive(p, antes, nuevos, data.admin_password)
         ov = dict((t.settings or {}).get("role_overrides") or {})
         if nuevos == clean(ROLE_PERMISSIONS[code]):
             ov.pop(code, None)  # igual al de fabrica: no se guarda una copia que despues no recibiria los permisos nuevos
@@ -184,7 +199,9 @@ def role_update(code: str, data: RoleEditIn, p: Principal = Depends(solo_admin),
         _unique_name(db, p, data.name, exclude=r.code)
         r.name = data.name
     if data.permissions is not None:
-        r.permissions = _validate(data.permissions)
+        nuevos = _validate(data.permissions)
+        _guard_sensitive(p, antes["permisos"], nuevos, data.admin_password)
+        r.permissions = nuevos
     audit_change(db, p, "permissions", "role", r.id, antes, {"nombre": r.name, "permisos": clean(r.permissions)}, reason=data.reason)
     db.commit()
     return {"ok": True, "customized": True}

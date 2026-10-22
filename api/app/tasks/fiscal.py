@@ -39,7 +39,10 @@ INSTRUCTION = {
 
 
 def recipients(db: Session, t: Tenant) -> list[str]:
-    for roles in (("contabilidad",), ("admin",)):
+    """Contabilidad (y los roles creados a partir de Contador); si no hay nadie, el administrador."""
+    from ..core.deps import roles_like
+
+    for roles in (roles_like(db, t, ("contabilidad",)), ("admin",)):
         out: list[str] = []
         for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.active, TenantUser.role_code.in_(roles))):
             email = member_inbox(m)

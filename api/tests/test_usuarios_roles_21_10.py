@@ -444,7 +444,7 @@ def test_correo_de_avisos_solo_lo_ve_el_admin(client, auth, db_session):
     u = uid(client, h)
     assert client.patch(f"/settings/users/{u}", json={"notify_email": "personal@ejemplo.com", "admin_password": ADMIN_PW}).status_code == 200
     assert next(x for x in client.get("/settings/users").json()["users"] if x["id"] == u)["notify_email"] == "personal@ejemplo.com"
-    assert client.put("/settings/roles/lectura", json={"permissions": {"dashboard": ["ver"], "settings": ["ver"]}}).status_code == 200
+    assert client.put("/settings/roles/lectura", json={"permissions": {"dashboard": ["ver"], "settings": ["ver"]}, "admin_password": ADMIN_PW}).status_code == 200
     hl = interno(client, db_session, tid, "lee.ajustes@ejemplo.com", "lectura")
     r = client.get("/settings/users", headers=hl)
     assert r.status_code == 200, r.text
@@ -467,3 +467,102 @@ def test_regla_aplicada_hacia_atras_solo_devenga_esa_regla(client, auth, db_sess
     assert r.status_code == 201 and r.json()["backfill"]["creados"] == 1
     assert len(client.get("/commissions", headers=h1).json()["rows"]) == 0
     assert len(client.get("/commissions", headers=h2).json()["rows"]) == 1
+
+
+# ---------- Revision 2: copias del admin, roles sensibles y cedulas con guiones ----------
+def _quote_q(client, db_session):
+    from app.models import Quote
+
+    c = client.get("/customers").json()["items"][0]
+    q = client.post("/quotes", json={"customer_id": c["id"], "lines": [{"name": "X", "quantity": 1, "unit_price": 100, "tax_rate": 0}]})
+    assert q.status_code == 201, q.text
+    return db_session.get(Quote, q.json()["id"])
+
+
+def test_rol_creado_desde_supervisor_y_contador_reciben_lo_de_su_rol(client, auth, db_session):
+    from app.routers.fieldwork import _reviewers
+    from app.services.avisos_venta import cotizacion_aceptada
+    from app.tasks.fiscal import recipients
+
+    tid = auth["tenant"]["id"]
+    sup = _rol(client, "Supervisor senior", "supervisor")
+    con = _rol(client, "Contador senior", "contabilidad")
+    hs = interno(client, db_session, tid, "sup.senior@ejemplo.com", sup)
+    interno(client, db_session, tid, "conta.senior@ejemplo.com", con)
+    t = db_session.get(Tenant, tid)
+    db_session.refresh(t)
+    q = _quote_q(client, db_session)
+    assert cotizacion_aceptada(db_session, t, q, version=1, quien="Cliente", medio="portal", actor_id=None) >= 1
+    db_session.commit()
+    assert _ids_por_correo(db_session, "sup.senior@ejemplo.com")
+    assert "conta.senior@ejemplo.com" in recipients(db_session, t)
+    assert uid(client, hs) in [x["id"] for x in _reviewers(db_session, t)]
+
+
+def test_rol_creado_desde_admin_no_recibe_lo_que_es_solo_del_admin(client, auth, db_session):
+    from app.core.deps import roles_like
+    from app.services.mail import notify_roles
+
+    tid = auth["tenant"]["id"]
+    code = _rol(client, "Jefe de bodega", "admin")
+    hj = interno(client, db_session, tid, "jefe.bodega@ejemplo.com", "lectura")
+    assert client.patch(f"/settings/users/{uid(client, hj)}", json={"role": code, "admin_password": ADMIN_PW}).status_code == 200
+    t = db_session.get(Tenant, tid)
+    # resumen de margen (margin_summary): precios y margenes, de donde se deduce el costo
+    notify_roles(db_session, t, ("admin",), "Resumen de margen de prueba", "<p>x</p>", "margin_summary", 0)
+    notify_roles(db_session, t, ("admin", "supervisor"), "Ticket de prueba", "<p>x</p>", "support_ticket", 0)
+    db_session.commit()
+    assert _ids_por_correo(db_session, "jefe.bodega@ejemplo.com") == []
+    assert code not in roles_like(db_session, t, ("admin",))
+    # en las listas operativas (agentes de tickets, responsables) si cuenta, por lo que puede hacer
+    assert code in roles_like(db_session, t, ("admin",), admin=True)
+
+
+def test_sumarle_algo_sensible_a_un_rol_pide_la_contrasena(client, auth, db_session):
+    tid = auth["tenant"]["id"]
+    code = _rol(client, "Inocente", "lectura")
+    h = interno(client, db_session, tid, "inocente@ejemplo.com", "lectura")
+    u = uid(client, h)
+    assert client.patch(f"/settings/users/{u}", json={"role": code}).status_code == 200  # no es sensible: sin contrasena
+    base = {k: list(v) for k, v in ROLE_PERMISSIONS["lectura"].items()}
+    for extra in ({"payroll": ["ver"]}, {"accounting": ["ver"]}, {"settings": ["ver"]}, {"aliados": ["ver", "usuarios"]}, {"portal_clientes": ["ver", "aprobar"]}):
+        assert client.put(f"/settings/roles/{code}", json={"permissions": {**base, **extra}}).status_code == 403, extra
+        assert client.put("/settings/roles/lectura", json={"permissions": {**base, **extra}}).status_code == 403, extra
+    assert "payroll" not in client.get("/auth/me", headers=h).json()["permissions"]
+    # con la contrasena si; quitarlo despues no la pide
+    assert client.put(f"/settings/roles/{code}", json={"permissions": {**base, "payroll": ["ver"]}, "admin_password": ADMIN_PW}).status_code == 200
+    assert client.get("/auth/me", headers=h).json()["permissions"]["payroll"] == ["ver"]
+    assert client.put(f"/settings/roles/{code}", json={"permissions": base}).status_code == 200
+    # un predefinido al que se le agrego algo sensible tambien pide la contrasena al asignarlo
+    assert client.put("/settings/roles/lectura", json={"permissions": {**base, "payroll": ["ver"]}, "admin_password": ADMIN_PW}).status_code == 200
+    assert "lectura" in client.get("/settings/users").json()["reauth_roles"]
+    assert client.patch(f"/settings/users/{u}", json={"role": "lectura"}).status_code == 403
+    assert client.patch(f"/settings/users/{u}", json={"role": "lectura", "admin_password": ADMIN_PW}).status_code == 200
+    # lo que el Contador trae de fabrica no la pide
+    assert "contabilidad" not in client.get("/settings/users").json()["reauth_roles"]
+
+
+def test_reenviar_invitacion_de_un_rol_sensible_pide_la_contrasena(client, auth, db_session):
+    code = _rol(client, "Casi admin dos", "admin")
+    r = client.post("/settings/invitations", json={"email": "casi.dos@ejemplo.com", "role": code, "admin_password": ADMIN_PW})
+    assert r.status_code == 201, r.text
+    iid = db_session.scalar(select(Invitation.id).where(Invitation.email == "casi.dos@ejemplo.com"))
+    assert client.post(f"/settings/invitations/{iid}/resend").status_code == 403
+    assert client.post(f"/settings/invitations/{iid}/resend", json={"admin_password": ADMIN_PW}).status_code == 200
+
+
+def test_vendedor_no_duplica_un_cliente_por_la_cedula_con_o_sin_guiones(client, auth, db_session):
+    tid = auth["tenant"]["id"]
+    for guardada, escrita in (("3-101-778812", "3101778812"), ("3102445523", "3-102-445523")):
+        c = Customer(tenant_id=tid, name=f"Empresa {guardada}", id_type="juridica", id_number=guardada, email=f"e{guardada[-3:]}@ejemplo.com")
+        db_session.add(c)
+        db_session.commit()
+        h = interno(client, db_session, tid, f"vende.ced{guardada[-3:]}@ejemplo.com", "ventas")
+        r = client.post("/customers", json={"name": "Copia", "id_type": "juridica", "id_number": escrita, "email": f"mio{guardada[-3:]}@ejemplo.com"}, headers=h)
+        assert r.status_code == 409 and r.json()["existing"]["id"] == c.id, r.text
+        # por importacion: la fila se omite, no se crea una segunda ficha con el correo del vendedor
+        csv = ("Nombre,Identificación,Correo electrónico" + chr(10) + f"Copia,{escrita},mio{guardada[-3:]}@ejemplo.com" + chr(10)).encode()
+        r = client.post("/import/customers?commit=true", files={"file": ("clientes.csv", csv, "text/csv")}, headers=h)
+        assert r.status_code == 200, r.text
+        assert r.json()["summary"]["omitir"] == 1 and r.json()["summary"]["nuevo"] == 0, r.json()
+        assert db_session.scalar(select(Customer).where(Customer.email == f"mio{guardada[-3:]}@ejemplo.com")) is None
