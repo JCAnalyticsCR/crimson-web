@@ -97,6 +97,7 @@ export const IC = {
   building: "M5 21V4h9v17M14 9h5v12M8 8h3M8 12h3M8 16h3M3 21h18",
   factory: "M3 21V10l5 3V10l5 3V7l8 4v10zM7 17h2M12 17h2M17 17h2",
   phone: "M8 2h8v20H8zM11 18h2",
+  appliance: "M6 2h12v20H6zM6 9h12M9 5v1.5M9 12v3",
 };
 
 /** icono por nombre de categoria (los nombres los pone Crimson; si no calza ninguno, la camara de la marca) */
@@ -104,6 +105,8 @@ const CAT_IC: [RegExp, string][] = [
   [/vigil|c[aá]mara|cctv|video/i, IC.cctv],
   [/acceso|seguridad|alarma|cerradura/i, IC.lock],
   [/red|wifi|switch|cable/i, IC.net],
+  [/electrodom|refri|lavad|secador|cocina|horno|microond|licuad|freidor|cafeter|ventilad|aspirad/i, IC.appliance],
+  [/smart|hogar|inteligente/i, IC.home],
   [/energ|ups|respaldo|el[eé]ctric/i, IC.bolt],
   [/almacen|disco|memoria/i, IC.disk],
   [/colabor|audio|reuni|confer/i, IC.people],

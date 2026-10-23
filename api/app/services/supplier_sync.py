@@ -1,7 +1,7 @@
 """Sincronizacion del catalogo de Eurocomp por su WebService SiReTT (providers/sirett.py) -> catalogo de proveedores.
 
 Que entra: SOLO lo que Crimson vende o instala (ver `relevant`): seguridad (camaras, grabadoras, control de acceso,
-alarmas), redes, respaldo electrico, y de las familias mixtas el cableado, conectores, soportes, herramientas de red y
+alarmas), redes, respaldo electrico, smart home, electrodomesticos (23/10, lo pidio ventas), y de las familias mixtas el cableado, conectores, soportes, herramientas de red y
 discos de videovigilancia; mas todo lo de marcas de seguridad (Hikvision, Ezviz, Ubiquiti...) en cualquier familia.
 De 11.538 articulos de Eurocomp quedan ~1.650 (2026-10-15), incluidos los 218 que Crimson ya tenia.
 
@@ -49,10 +49,10 @@ MIN_RATIO = 0.5  # la lista nueva debe traer al menos la mitad de los articulos 
 MAX_IMAGES = 6
 
 # ---------- que le sirve a Crimson ----------
-FAMILIAS_COMPLETAS = {"SEGURIDAD", "REDES Y CONECTIVDAD", "RESPALDO ELÉCTRICO", "SMART HOME"}  # con la errata de SiReTT
+FAMILIAS_COMPLETAS = {"SEGURIDAD", "REDES Y CONECTIVDAD", "RESPALDO ELÉCTRICO", "SMART HOME", "ELECTRODOMESTICOS", "ELECTRODOMÉSTICOS"}  # con la errata de SiReTT
 SUBFAMILIAS: set = set()  # todo lo de esas familias entra completo; antes solo subfamilias de RESPALDO ELÉCTRICO
 MARCAS = {"HIKVISION", "HILOOK", "EZVIZ", "HIKMICRO", "UBIQUITI", "APC", "GRANDSTREAM", "ZKTECO", "DAHUA", "PARADOX", "RUIJIE", "REYEE", "MIKROTIK"}
-SIN_MARCA_EN = {"ELECTRODOMESTICOS", "COMPONENTES DE PC", "VENTAS FOB/SERVICIOS"}  # familia padre o sub
+SIN_MARCA_EN = {"COMPONENTES DE PC", "VENTAS FOB/SERVICIOS"}  # familia padre o sub
 CLAVES = {
     ("ACCESORIOS", "Cables"): r"\b(UTP|FTP|STP|CAT ?5E?|CAT ?6A?|CAT ?7|PATCH|RJ ?45|COAXIAL|COAX|RG ?59|FIBRA|SIAMES|POE|ETHERNET|DE RED)\b",
     ("ACCESORIOS", "Adaptadores"): r"\b(BALUN|RJ ?45|POE|INYECTOR|CONECTOR|ACOPLE|COUPLER|ETHERNET|LAN|FIBRA|DE RED)\b",
@@ -548,19 +548,27 @@ HIKVISION_BRANDS = frozenset({"HIKVISION", "HILOOK", "HIKMICRO"})
 
 AC_DEFAULT: dict = {
     "enabled": False,
-    "families": ["Seguridad", "Redes y conectividad", "Respaldo eléctrico", "Smart home"],
+    "families": ["Seguridad", "Redes y conectividad", "Respaldo eléctrico", "Smart home", "Electrodomésticos"],
     "publish_web": False,
 }
+# Familias que se agregaron despues de que la config ya estaba guardada: entran una sola vez; si el admin las quita
+# despues, quedan en familias_vistas y no vuelven a aparecer.
+AC_NUEVAS = ("Electrodomésticos",)
 
 
 def ac_settings(t: Tenant) -> dict:
     """Configuración de publicación automática (tenant.settings.supplier_sync.eurocomp.auto_catalog)."""
-    return {**AC_DEFAULT, **(_state(t).get("auto_catalog") or {})}
+    cfg = {**AC_DEFAULT, **(_state(t).get("auto_catalog") or {})}
+    vistas = set(cfg.get("familias_vistas") or [])
+    nuevas = [f for f in AC_NUEVAS if f not in vistas and f not in (cfg.get("families") or [])]
+    if nuevas:
+        cfg["families"] = [*(cfg.get("families") or []), *nuevas]
+    return cfg
 
 
 def ac_save(t: Tenant, vals: dict) -> None:
     """Guarda (merge) la configuración de auto_catalog en tenant.settings sin pisar las demás claves."""
-    _save_state(t, auto_catalog={**ac_settings(t), **vals})
+    _save_state(t, auto_catalog={**ac_settings(t), **vals, "familias_vistas": list(AC_NUEVAS)})
 
 
 def _make_code(db: Session, tid: int, it: SupplierItem, supplier_name: str | None) -> str:

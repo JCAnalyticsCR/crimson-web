@@ -76,6 +76,36 @@ def test_familias_completas_cubren_las_4():
     assert "REDES Y CONECTIVDAD" in ss.FAMILIAS_COMPLETAS  # errata incluida
     assert "RESPALDO ELÉCTRICO" in ss.FAMILIAS_COMPLETAS
     assert "SMART HOME" in ss.FAMILIAS_COMPLETAS
+    assert "ELECTRODOMESTICOS" in ss.FAMILIAS_COMPLETAS
+
+
+def test_electrodomesticos_entran_completos_con_categoria_propia(client, auth, db_session, eurocomp_ampliado):
+    """23/10: ventas pidió los electrodomésticos de Eurocomp. Entran completos (cualquier marca), con la categoría
+    «Electrodomésticos» (con tilde) y su subfamilia, y se agregan una sola vez a una config de auto_catalog ya guardada."""
+    from app.models import Category
+
+    refri = item("EL0001", "REFRIGERADORA WHIRLPOOL 14 PIES", "ELECTRODOMESTICOS", "REFRIGERADORAS", "WHIRLPOOL", "450.00",
+                 cabys="4471200000000", img="upload/items/2026/1/el0001.jpg")
+    assert ss.relevant(refri)
+    eurocomp_ampliado["items"] = [refri]
+    tid = auth["tenant"]["id"]
+    ss.sync_all(db_session)
+    t = db_session.get(ss.Tenant, tid)
+    ss._save_state(t, auto_catalog={"enabled": True, "families": ["Seguridad"], "publish_web": True})  # config vieja
+    db_session.commit()
+    t = db_session.get(ss.Tenant, tid)
+    assert "Electrodomésticos" in ss.ac_settings(t)["families"]
+    assert ss.auto_catalog_run(db_session, t, ss.find_supplier(db_session, tid), commit_batches=True)["creados"] == 1
+    it = db_session.scalar(select(SupplierItem).where(SupplierItem.tenant_id == tid, SupplierItem.code == "EL0001"))
+    assert it.category == "Electrodomésticos"
+    p = db_session.get(Product, it.product_id)
+    hija = db_session.get(Category, p.category_id)
+    assert db_session.get(Category, hija.parent_id).name == "Electrodomésticos"
+    # si el admin la quita, no vuelve a aparecer
+    t = db_session.get(ss.Tenant, tid)
+    ss.ac_save(t, {"families": ["Seguridad"]})
+    db_session.commit()
+    assert "Electrodomésticos" not in ss.ac_settings(db_session.get(ss.Tenant, tid))["families"]
 
 
 # ---------- 2. auto_catalog: creación y configuración ----------

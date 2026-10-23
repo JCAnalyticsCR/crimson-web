@@ -97,7 +97,7 @@ GROUPS = (
     "TELEFONIA",
     "ENERGIA",
 )
-FIX = {"redes_y_conectivdad": "Redes y conectividad"}  # errata de la lista de Eurocomp
+FIX = {"redes_y_conectivdad": "Redes y conectividad", "electrodomesticos": "Electrodomésticos"}  # errata y tilde de la lista de Eurocomp
 COST_JUMP_PCT = Decimal(25)  # cambio de costo que se marca como dudoso
 
 

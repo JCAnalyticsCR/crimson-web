@@ -56,7 +56,7 @@ type RunResult = {
   creados?: number; skip_borrado?: number; skip_sin_costo?: number; publicados?: number; skipped?: string;
 };
 
-const AC_FAMILIES = ["Seguridad", "Redes y conectividad", "Respaldo eléctrico", "Smart home"] as const;
+const AC_FAMILIES = ["Seguridad", "Redes y conectividad", "Respaldo eléctrico", "Smart home", "Electrodomésticos"] as const;
 
 const n = (v: Num) => Number(v ?? 0);
 const crc = (v: Num) => (v == null || v === "" ? "—" : fmtMoney(Math.round(n(v)), "CRC"));
