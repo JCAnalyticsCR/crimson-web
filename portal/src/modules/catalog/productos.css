@@ -32,3 +32,10 @@
 .prd-card__costos { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 6px 16px; padding-left: 28px; font-size: 12.5px; }
 .prd-card__costos > span { display: flex; flex-direction: column; gap: 1px; }
 .prd-card__costos small { font-size: 11px; color: var(--text-3); }
+
+/* Precio editable en la lista (pedido 23/10): parece texto, se toca y pasa a campo */
+.prd-precio-btn { display: inline-flex; align-items: center; gap: 6px; background: none; border: 1px dashed transparent; border-radius: 6px; padding: 2px 6px; color: inherit; font: inherit; cursor: pointer; white-space: nowrap; }
+.prd-precio-btn svg { opacity: .35; }
+.prd-precio-btn:hover, .prd-precio-btn:focus-visible { border-color: var(--hair); }
+.prd-precio-btn:hover svg { opacity: .8; }
+.prd-precio-input { width: 130px; min-height: 34px; padding: 4px 8px; }

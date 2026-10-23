@@ -291,7 +291,13 @@ def sync_product(db: Session, product: Product, fx: Decimal | None = None) -> di
     best = _best(items, fx)
     dates = [i.list_date for i in items if i.list_date]
     newest = max(dates) if dates else None
-    if best is None:
+    sin_costo = [i for i in items if i.active and i.cost is None]
+    if best is None and sin_costo:
+        # el proveedor lo sigue ofreciendo pero sin publicar su costo (Articulos por completar: el admin le puso el
+        # precio a mano). La existencia cuenta igual; el costo que haya (propio o cargado a mano) no se toca.
+        product.supplier_stock = sum(int(i.stock or 0) for i in sin_costo if (i.stock or 0) > 0)
+        product.supplier_updated_at = list_datetime(max((i.list_date for i in sin_costo if i.list_date), default=None) or newest) or product.supplier_updated_at
+    elif best is None:
         # ninguna oferta vigente: el proveedor ya no lo tiene (no queda "Bajo pedido")
         product.supplier_stock = 0
         if newest:

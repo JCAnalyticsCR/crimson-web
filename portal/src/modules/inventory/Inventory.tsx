@@ -15,6 +15,8 @@ import WebInventory from "./WebInventory";
 import SupplierCatalog from "./SupplierCatalog";
 import Kardex, { type KardexProduct } from "./Kardex";
 import Health from "./Health";
+import PorCompletar from "./PorCompletar";
+import { useCompletarCount } from "./useCompletarCount";
 
 type Wh = { id: number; name: string; location: string | null; is_default: boolean; active: boolean; kind?: "venta" | "revision" | "proveedor" };
 /* revisión y distribuidor: equipos de clientes en garantía; nunca se venden ni cuentan para el mínimo */
@@ -69,6 +71,9 @@ export default function Inventory() {
   const [kardexProduct, setKardexProduct] = useState<KardexProduct | null>(null);
   const [modal, setModal] = useState<"move" | "transfer" | "wh" | null>(null);
   const [healthCount, setHealthCount] = useState(0);
+  const completar = useCompletarCount(); // articulos que no estan a la venta por falta de datos
+  const [completarN, setCompletarN] = useState<number | null>(null);
+  const nCompletar = completarN ?? completar;
   const [vista, setVista] = useState<"disponibilidad" | "ubicacion">(params.get("vista") === "ubicacion" || params.get("stock") === "bajo" ? "ubicacion" : "disponibilidad");
   const [mvLabel, setMvLabel] = useState("");
   const [trLabel, setTrLabel] = useState("");
@@ -123,7 +128,7 @@ export default function Inventory() {
       </div>
 
       <div className="tabs" style={{ alignSelf: "flex-start" }} role="tablist">
-        {[["existencias", "Existencias"], ["movimientos", "Movimientos"], ["salud", healthCount > 0 ? `Salud · ${healthCount}` : "Salud"], ["reservas", "Reservas"], ["seriales", "Seriales"], ...(allows("catalog.precios") ? [["web", "Inventario web"]] : []), ...(allows("catalog.ver") ? [["proveedores", "Proveedores"]] : [])].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "is-active" : ""} onClick={() => setTab(k)}>{l}</button>)}
+        {[["existencias", "Existencias"], ["movimientos", "Movimientos"], ["salud", healthCount > 0 ? `Salud · ${healthCount}` : "Salud"], ["reservas", "Reservas"], ["seriales", "Seriales"], ...(allows("catalog.editar") ? [["completar", nCompletar ? `Por completar · ${nCompletar}` : "Por completar"]] : []), ...(allows("catalog.precios") ? [["web", "Inventario web"]] : []), ...(allows("catalog.ver") ? [["proveedores", "Proveedores"]] : [])].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "is-active" : ""} onClick={() => setTab(k)}>{l}</button>)}
       </div>
 
       {tab === "existencias" && <>
@@ -169,6 +174,7 @@ export default function Inventory() {
       {tab === "reservas" && <Reservations products={products} whs={whs} projects={projects} onChange={load} />}
       {tab === "seriales" && <Units products={products} whs={whs} projects={projects} onChange={load} />}
       {/* la tienda es precio: el tecnico (inventory.ver sin precios) no tiene esta pestaña */}
+      {tab === "completar" && allows("catalog.editar") && <PorCompletar onCount={setCompletarN} />}
       {tab === "web" && allows("catalog.precios") && <WebInventory />}
       {tab === "proveedores" && allows("catalog.ver") && <SupplierCatalog />}
 

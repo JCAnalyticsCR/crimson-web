@@ -4,8 +4,9 @@
    sumar la ruta a su `menu` en roles.ts. La API sigue siendo la frontera de seguridad. */
 import { I } from "../ui/components";
 
-/* badge: numero junto a la entrada ("approvals": pendientes de Aprobaciones; "recepcion": comprobantes por revisar) */
-export type NavItem = { to: string; label: string; icon: string; end?: boolean; need?: string; badge?: "approvals" | "recepcion" };
+/* badge: numero junto a la entrada ("approvals": pendientes de Aprobaciones; "recepcion": comprobantes por revisar;
+   "completar": articulos que no estan a la venta por falta de datos, Inventarios -> Por completar) */
+export type NavItem = { to: string; label: string; icon: string; end?: boolean; need?: string; badge?: "approvals" | "recepcion" | "completar" };
 export type NavGroup = { group: string; items: NavItem[] };
 
 export const NAV: NavGroup[] = [
@@ -38,7 +39,7 @@ export const NAV: NavGroup[] = [
     { to: "/clientes", label: "Clientes", icon: I.customers, need: "crm.ver" },
     { to: "/accesos-clientes", label: "Accesos de clientes", icon: I.shield, need: "portal_clientes.ver" },
     { to: "/productos", label: "Productos & Servicios", icon: I.products, need: "catalog.ver" },
-    { to: "/inventario", label: "Inventarios", icon: I.inventory, need: "inventory.ver" },
+    { to: "/inventario", label: "Inventarios", icon: I.inventory, need: "inventory.ver", badge: "completar" },
     { to: "/cupones", label: "Cupones", icon: I.wallet, need: "catalog.editar" },
     { to: "/mi-tienda", label: "Mi Tienda", icon: I.store, need: "settings.configurar" },
     { to: "/ordenes", label: "Pedidos de la tienda", icon: I.box, need: "sales.ver" },

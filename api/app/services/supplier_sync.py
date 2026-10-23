@@ -37,8 +37,9 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
-from ..models import Product, Supplier, SupplierItem, Tenant
+from ..models import Product, ProductTax, Supplier, SupplierItem, Tenant
 from ..providers.sirett import SirettClient, SirettError, image_url
+from . import product_names
 from . import supplier_catalog as sc
 from . import supplier_lists as sl
 from .documents import audit
@@ -582,9 +583,10 @@ def _make_code(db: Session, tid: int, it: SupplierItem, supplier_name: str | Non
 
 
 def _suggest_cat(db: Session, tid: int, it: SupplierItem) -> int | None:
-    """Categoría propia del ítem del proveedor: la que ya se llame como su subcategoría (o categoría); si no hay, se
-    crea la familia del proveedor como categoría padre y la subfamilia como hija (22/10: Smart Home no tenía ninguna y
-    sus productos quedaban fuera del menú de la tienda)."""
+    """Categoría propia del ítem del proveedor: la que ya se llame como su subcategoría (o como su categoría, si no trae
+    subcategoría); si no hay, se crea la familia del proveedor como categoría padre y la subfamilia como hija (22/10:
+    Smart Home no tenía ninguna y sus productos quedaban fuera del menú de la tienda). 23/10: una subfamilia nueva de
+    una familia que ya existe entra como hija suya (antes caía en la categoría padre)."""
     from ..models import Category
 
     def find(name: str, parent_id: int | None | bool = False) -> Category | None:
@@ -593,11 +595,12 @@ def _suggest_cat(db: Session, tid: int, it: SupplierItem) -> int | None:
             q = q.where(Category.parent_id.is_(None) if parent_id is None else Category.parent_id == parent_id)
         return db.scalars(q.order_by(Category.id)).first()
 
-    for name in (it.subcategory, it.category):
-        if name and (c := find(name)):
-            return c.id
+    if it.subcategory and (c := find(it.subcategory)):
+        return c.id
     if not it.category:
         return None
+    if not it.subcategory and (c := find(it.category)):
+        return c.id
     parent = find(it.category, None)
     if parent is None:
         parent = Category(tenant_id=tid, name=it.category[:120], show_on_web=True)
@@ -611,6 +614,69 @@ def _suggest_cat(db: Session, tid: int, it: SupplierItem) -> int | None:
         db.add(child)
         db.flush()
     return child.id
+
+
+def product_from_item(
+    db: Session,
+    t: Tenant,
+    it: SupplierItem,
+    supplier_name: str | None,
+    *,
+    price: Decimal,
+    margin: Decimal | None,
+    publish: bool,
+    iva=None,
+    fx: Decimal | None = None,
+    user_id: int | None = None,
+    currency: str = "CRC",
+    category_id: int | None = None,
+    cabys_code: str | None = None,
+    description_store: str | None = None,
+    images: list | None = None,
+    cost: Decimal | None = None,
+) -> Product:
+    """El UNICO camino para crear un producto desde un articulo de Eurocomp (auto_catalog y el panel "Articulos por
+    completar"): codigo propio sin choques, nombre legible, categoria padre/hija del proveedor, IVA 13 %, Hikvision
+    destacado y el vínculo "creado" (que el borrado del admin respeta). Lo que el panel ya completo (precio, CABYS,
+    fotos, descripcion, categoria, costo) entra tal cual; lo que no, queda como lo dejaria auto_catalog. Solo flush."""
+    featured = (it.brand or "").upper() in HIKVISION_BRANDS
+    specs = description_store if description_store is not None else ("\n".join((it.description or "").splitlines()[1:]).strip() or None)
+    cost_v = cost if cost is not None else it.cost
+    prod = Product(
+        tenant_id=t.id,
+        code=_make_code(db, t.id, it, supplier_name),
+        name=(product_names.tidy(it.name) or it.name)[:200],
+        item_type="producto",
+        unit="Unid",
+        price=price,
+        currency=currency,
+        cost=cost_v,
+        cost_currency=it.currency or "USD",
+        margin_pct=margin,
+        brand=it.brand,
+        model=it.model,
+        supplier_id=it.supplier_id,
+        supplier_sku=it.code,
+        supplier_stock=it.stock,
+        supplier_updated_at=sc.list_datetime(it.list_date),
+        description_invoice=it.name[:2000],
+        description_store=specs,
+        category_id=category_id or _suggest_cat(db, t.id, it),
+        show_on_web=publish,
+        web_featured=featured,
+        cabys_code=cabys_code or None,
+        images=list(images or []),
+    )
+    if cabys_code:
+        prod.cabys_set_at, prod.cabys_set_by = datetime.now(UTC), user_id
+    db.add(prod)
+    db.flush()
+    if iva is not None:
+        prod.taxes.append(ProductTax(tax_id=iva.id))
+    sc.link(db, it, prod, "creado", user_id, fx=fx)
+    if cost is not None and it.cost is None:
+        prod.cost = cost  # costo cargado a mano: sync_product no lo pisa mientras el proveedor no publique el suyo
+    return prod
 
 
 def auto_catalog_run(
@@ -632,8 +698,8 @@ def auto_catalog_run(
     commit_batches=True: commit después de cada lote (uso desde el worker o CLI).
     False (default): solo flush, el llamador hace el commit (uso dentro de sync_tenant).
     """
-    from ..models import ProductTax, Tax
-    from . import pricing, product_names
+    from ..models import Tax
+    from . import pricing
     from .fx import FxMissing
 
     supplier = supplier or find_supplier(db, t.id)
@@ -695,7 +761,6 @@ def auto_catalog_run(
     for i in range(0, len(to_create), batch_size):
         batch = to_create[i : i + batch_size]
         for it in batch:
-            code = _make_code(db, t.id, it, sup_name)
             try:
                 price = pricing.sale_price(db, Decimal(str(it.cost)), it.currency or "USD", "CRC", margin, fx)
             except FxMissing:
@@ -703,38 +768,8 @@ def auto_catalog_run(
             except Exception:
                 skip_sin_costo += 1
                 continue
-            featured = (it.brand or "").upper() in HIKVISION_BRANDS
-            specs = "\n".join((it.description or "").splitlines()[1:]).strip() or None
-            cat_id = _suggest_cat(db, t.id, it)
-            prod = Product(
-                tenant_id=t.id,
-                code=code,
-                name=(product_names.tidy(it.name) or it.name)[:200],
-                item_type="producto",
-                unit="Unid",
-                price=price,
-                currency="CRC",
-                cost=it.cost,
-                cost_currency=it.currency or "USD",
-                margin_pct=margin,
-                brand=it.brand,
-                model=it.model,
-                supplier_id=it.supplier_id,
-                supplier_sku=it.code,
-                supplier_stock=it.stock,
-                supplier_updated_at=sc.list_datetime(it.list_date),
-                description_invoice=it.name[:2000],
-                description_store=specs,
-                category_id=cat_id,
-                show_on_web=publish_web,
-                web_featured=featured,
-                cabys_code=None,
-            )
-            db.add(prod)
-            db.flush()
-            if iva_obj:
-                prod.taxes.append(ProductTax(tax_id=iva_obj.id))
-            sc.link(db, it, prod, "creado", None, fx=fx)
+            prod = product_from_item(db, t, it, sup_name, price=price, margin=margin, publish=publish_web, iva=iva_obj, fx=fx)
+            featured = bool(prod.web_featured)
             if featured:
                 destacados += 1
             creados += 1

@@ -107,6 +107,10 @@ export default function Products() {
   const publica = allows("catalog.publicar"); // la tienda en línea es solo del administrador
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [aCot, setACot] = useState(false);
+  const [ajuste, setAjuste] = useState(false);
+  /* precio en linea (pedido 23/10): el admin lo corrige desde la lista; mismo permiso que la ficha (catalog.editar) */
+  const editaPrecio = verPrecios && allows("catalog.editar");
+  const onPrice = (row: Row) => setItems((xs) => xs && xs.map((x) => (x.id === row.id ? { ...x, ...row } : x)));
   /* tablet y teléfono: los filtros se pliegan detrás de un botón (en escritorio siempre a la vista) */
   const [verFiltros, setVerFiltros] = useState(false);
   const marcar = (id: number) => setSel((s0) => { const n = new Set(s0); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -244,7 +248,7 @@ export default function Products() {
     <>
       <div className="page-head">
         <div><div className="meta">05 · Catálogo</div><h1 className="h1">Productos & Servicios</h1></div>
-        <div className="page-head__actions">{allows("catalog.editar") && !!opts?.sin_cabys && <Link className="btn btn--soft" to="/productos/cabys" title="Sugerencias de CABYS para confirmar en bloque">Completar CABYS ({opts.sin_cabys})</Link>}{allows("catalog.crear") && <button className="btn btn--crimson" onClick={() => { setEdit({ ...blank, tax_ids: taxes[0] ? [taxes[0].id] : [] }); setVariants([]); setTab("general"); }}><Icon d={I.plus} />Crear producto</button>}</div>
+        <div className="page-head__actions">{allows("catalog.editar") && !!opts?.sin_cabys && <Link className="btn btn--soft" to="/productos/cabys" title="Sugerencias de CABYS para confirmar en bloque">Completar CABYS ({opts.sin_cabys})</Link>}{verCostos && allows("catalog.editar") && <button className="btn btn--soft" onClick={() => setAjuste(true)} title="Subir o bajar precios de lo filtrado o marcado, con vista previa">Ajustar precios</button>}{allows("catalog.crear") && <button className="btn btn--crimson" onClick={() => { setEdit({ ...blank, tax_ids: taxes[0] ? [taxes[0].id] : [] }); setVariants([]); setTab("general"); }}><Icon d={I.plus} />Crear producto</button>}</div>
       </div>
       <Card flush>
         <div className="list-head" style={{ flexWrap: "wrap" }}>
@@ -284,9 +288,10 @@ export default function Products() {
                   <small className="mono">{p.code}{p.item_type === "servicio" ? " · servicio" : ""}</small>
                   <small>{p.item_type === "producto" ? availText(p.availability) : "Servicio"}</small>
                   <small>CABYS <span className="mono">{p.cabys_code || "—"}</span> · {whName(p.warehouse_id)}</small>
-                  {verPrecios && <span className="money prd-card__precio">{fmtMoney(p.price, p.currency)}</span>}
+                  {verPrecios && !editaPrecio && <span className="money prd-card__precio">{fmtMoney(p.price, p.currency)}</span>}
                 </span>
               </button>
+              {editaPrecio && <span className="prd-card__precio"><PriceInline p={p} onSaved={onPrice} /></span>}
               {/* lo mismo que la tabla deja hacer (con los mismos permisos): costo y margen, publicar en la web y papelera */}
               <span className="prd-card__acc">
                 {publica && <button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-label="Publicar en la web" aria-pressed={p.show_on_web}><i /></button>}
@@ -302,7 +307,7 @@ export default function Products() {
               <tr key={p.id}>
                 {cotiza && <td><input type="checkbox" aria-label={`Agregar ${p.name} a una cotización`} checked={sel.has(p.id)} onChange={() => marcar(p.id)} /></td>}
                 <td>{thumb(p) ? <span style={{ display: "block", width: 36, height: 36, borderRadius: 8, background: `center/cover no-repeat url("${thumb(p)}")`, border: "1px solid var(--hair)" }} /> : <span style={{ display: "grid", placeItems: "center", width: 36, height: 36, borderRadius: 8, background: "var(--bg-2)", color: "var(--text-3)" }}><Icon d={I.products} size={16} /></span>}</td>
-                <td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.item_type}</td><td className="mono muted">{p.cabys_code || "—"}</td><td className="muted" style={{ fontSize: 13 }}>{whName(p.warehouse_id)}</td><StockCells a={p.availability} />{verCostos && <td className="num"><CostCell p={p} /></td>}{verPrecios && <td className="num money">{fmtMoney(p.price, p.currency)}</td>}{verCostos && <td className="num" style={{ whiteSpace: "nowrap" }}><MarginCell p={p} /></td>}{verCostos && <td className="num money">{p.ally_price != null ? fmtMoney(p.ally_price, p.currency) : <span className="muted">—</span>}</td>}<td className="muted">{p.tax_rate ?? "—"}%</td>{publica && <td><button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-pressed={p.show_on_web}><i /></button></td>}
+                <td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}</td><td className="muted" style={{ textTransform: "capitalize" }}>{p.item_type}</td><td className="mono muted">{p.cabys_code || "—"}</td><td className="muted" style={{ fontSize: 13 }}>{whName(p.warehouse_id)}</td><StockCells a={p.availability} />{verCostos && <td className="num"><CostCell p={p} /></td>}{verPrecios && <td className="num money">{editaPrecio ? <PriceInline p={p} onSaved={onPrice} /> : fmtMoney(p.price, p.currency)}</td>}{verCostos && <td className="num" style={{ whiteSpace: "nowrap" }}><MarginCell p={p} /></td>}{verCostos && <td className="num money">{p.ally_price != null ? fmtMoney(p.ally_price, p.currency) : <span className="muted">—</span>}</td>}<td className="muted">{p.tax_rate ?? "—"}%</td>{publica && <td><button className={`switch${p.show_on_web ? " is-on" : ""}`} disabled={toggling === p.id} onClick={() => toggleWeb(p)} title={p.show_on_web ? "Visible en la tienda · clic para quitarlo" : "Oculto · clic para publicarlo"} aria-pressed={p.show_on_web}><i /></button></td>}
                 <td className="num row-actions"><span className="row-actions__in"><button className="btn btn--ghost btn--sm" onClick={() => open(p.id)}>Ver</button><TrashButton kind="product" id={p.id} number={p.code || p.name} onDone={load} /></span></td>
               </tr>
             ))}</tbody>
@@ -312,6 +317,7 @@ export default function Products() {
         )}
       </Card>
       {aCot && <AgregarACotizacion ids={[...sel]} onClose={() => setACot(false)} />}
+      {ajuste && <AjustePrecios filtro={{ q, ...f }} ids={[...sel]} cats={opts?.categories || cats} onClose={() => setAjuste(false)} onDone={() => { setAjuste(false); load(); }} />}
       {edit && (
         <Modal title={edit.id ? edit.name || "Producto" : "Nuevo producto"} onClose={() => { setEdit(null); setParams({}); }} wide foot={<>
           {edit.id && <button className="btn btn--ghost" style={{ marginRight: "auto" }} onClick={copyLink} title="Link directo al producto en la tienda"><Icon d={I.link} />Copiar link</button>}
@@ -325,7 +331,7 @@ export default function Products() {
               <Field label="Nombre"><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
               <Field label="Código"><input className="input" value={edit.code} onChange={(e) => setEdit({ ...edit, code: e.target.value })} /></Field>
               <Field label="Tipo de ítem"><select className="select" value={edit.item_type} onChange={(e) => setEdit({ ...edit, item_type: e.target.value })}><option value="producto">Producto</option><option value="servicio">Servicio</option></select></Field>
-              {verPrecios && <Field label="Precio (sin IVA)"><input className="input input--mono" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} /></Field>}
+              {verPrecios && <Field label="Precio (sin IVA)" hint={verCostos ? marginHint(edit.price, edit.currency, costOf) : undefined}><input className="input input--mono" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} /></Field>}
               <Field label="Divisa"><select className="select" value={edit.currency} onChange={(e) => setEdit({ ...edit, currency: e.target.value })}><option>CRC</option><option>USD</option></select></Field>
               <Field label="Impuesto"><select className="select" value={edit.tax_ids[0] ?? ""} onChange={(e) => setEdit({ ...edit, tax_ids: e.target.value ? [Number(e.target.value)] : [] })}><option value="">Sin impuesto</option>{taxes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></Field>
               <Field label="Buscar CABYS" hint="Por descripción (ej. cámara de video): trae el código y el impuesto sugerido."><Lookup value={edit.cabys_description} placeholder="Buscar en el catálogo de Hacienda…" fetcher={searchCabys} disabled={!canEdit} onSelect={(it, text) => { if (it) pickCabys(it); else setEdit({ ...edit, cabys_description: text }); }} /></Field>
@@ -458,5 +464,116 @@ function SupplierOffers({ offers, info }: { offers: Offer[] | null; info: CostIn
         </table>
       )}
     </div>
+  );
+}
+
+/* Margen que deja el precio que se está escribiendo, contra el costo del proveedor (solo quien ve costos). */
+function marginHint(price: string, currency: string, info: CostInfo | null): string | undefined {
+  if (!info || info.cost == null) return "Sin costo registrado: no hay margen que calcular.";
+  const v = Number(String(price).replace(",", "."));
+  if (!Number.isFinite(v) || v <= 0) return `Costo ${fmtMoney(info.cost, info.cost_currency || "USD")}.`;
+  const cost = currency === "CRC" ? (info.cost_crc != null ? Number(info.cost_crc) : null) : (info.cost_currency || "USD") === currency ? Number(info.cost) : null;
+  if (cost == null) return `Costo ${fmtMoney(info.cost, info.cost_currency || "USD")} · el margen se recalcula al guardar.`;
+  const m = ((v - cost) / v) * 100;
+  return `Costo ${fmtMoney(cost, currency)} · margen sobre la venta ${m.toFixed(1)} %${m < 20 ? " (bajo)" : ""}`;
+}
+
+const PENCIL = "M4 20h4L19 9l-4-4L4 16z|M13 7l4 4";
+
+/* Precio de venta editable en la lista: clic, escribir, Enter (o salir del campo) guarda; Esc cancela. */
+function PriceInline({ p, onSaved }: { p: Row; onSaved: (r: Row) => void }) {
+  const { toast } = useSession();
+  const [val, setVal] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (val === null || saving) return;
+    const n = Number(val.replace(/\s/g, "").replace(",", "."));
+    if (!Number.isFinite(n) || n < 0) { toast("Precio no válido", "bad"); return; }
+    if (n === Number(p.price)) { setVal(null); return; }
+    setSaving(true);
+    try { const r = await api<Row>(`/products/${p.id}/price`, { method: "PATCH", json: { price: n } }); onSaved(r); toast(`Precio de ${p.code} actualizado`); setVal(null); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+    finally { setSaving(false); }
+  };
+  if (val === null) {
+    return <button type="button" className="prd-precio-btn money" onClick={() => setVal(Number(p.price) ? String(Number(p.price)) : "")} title="Clic para cambiar el precio de venta (sin IVA)">{fmtMoney(p.price, p.currency)}<Icon d={PENCIL} size={12} /></button>;
+  }
+  return (
+    <input className="input input--mono prd-precio-input" autoFocus inputMode="decimal" disabled={saving} value={val} aria-label={`Precio de ${p.name} sin IVA (${p.currency})`}
+      onChange={(e) => setVal(e.target.value)} onBlur={save} onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setVal(null); }} />
+  );
+}
+
+type AdjRow = { id: number; code: string; name: string; currency: string; price_before: number | string; price_after: number | string | null; cost_crc: number | string | null; margin_before: number | string | null; margin_after: number | string | null; skip: string | null };
+
+/* Ajuste de precios en bloque (solo quien ve costos): % sobre el precio o margen objetivo sobre el costo, para lo
+   marcado o lo filtrado. Primero la vista previa; "Aplicar" deja una entrada en la bitácora con cada cambio. */
+function AjustePrecios({ filtro, ids, cats, onClose, onDone }: {
+  filtro: { q: string; category_id: string; brand: string; supplier_id: string; web: string }; ids: number[]; cats: { id: number; name: string }[];
+  onClose: () => void; onDone: () => void;
+}) {
+  const { toast } = useSession();
+  const [mode, setMode] = useState<"pct" | "margen">("pct");
+  const [value, setValue] = useState("10");
+  const [cat, setCat] = useState(filtro.category_id);
+  const [prev, setPrev] = useState<{ items: AdjRow[]; changes: number; skipped: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const usarMarcados = ids.length > 0;
+  const body = (confirm: boolean) => {
+    const b: Record<string, unknown> = { mode, value: Number(value.replace(",", ".")), confirm };
+    if (usarMarcados) b.ids = ids;
+    else {
+      if (filtro.q) b.q = filtro.q;
+      if (cat) b.category_id = Number(cat);
+      if (filtro.brand) b.brand = filtro.brand;
+      if (filtro.supplier_id) b.supplier_id = Number(filtro.supplier_id);
+      if (filtro.web) b.web = filtro.web === "true";
+    }
+    return b;
+  };
+  const run = async (confirm: boolean) => {
+    setBusy(true);
+    try {
+      const r = await api<{ items: AdjRow[]; changes: number; skipped: number; applied: boolean }>("/products/price-adjust", { method: "POST", json: body(confirm) });
+      if (confirm) { toast(`${r.changes} precio(s) actualizado(s)`); onDone(); } else setPrev(r);
+    } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+    finally { setBusy(false); }
+  };
+  const catName = cats.find((c) => String(c.id) === cat)?.name || "";
+  const alcance = usarMarcados
+    ? `${ids.length} producto(s) marcado(s)`
+    : [filtro.q && `búsqueda «${filtro.q}»`, cat && `categoría ${catName} (con sus subcategorías)`, filtro.brand && `marca ${filtro.brand}`, filtro.web && (filtro.web === "true" ? "publicados" : "ocultos")].filter(Boolean).join(" · ") || "todo el catálogo activo";
+  return (
+    <Modal title="Ajustar precios" onClose={onClose} wide foot={<>
+      <button className="btn btn--ghost" onClick={onClose}>Cancelar</button>
+      <button className="btn btn--soft" disabled={busy} onClick={() => run(false)}>Vista previa</button>
+      <button className="btn btn--crimson" disabled={busy || !prev || prev.changes === 0} onClick={() => run(true)}>{prev ? `Aplicar a ${prev.changes}` : "Aplicar"}</button>
+    </>}>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Se aplica a: <b>{alcance}</b>. Hasta 500 productos por ajuste; en colones se redondea a la centena hacia arriba. La sincronización con Eurocomp nunca cambia estos precios.</p>
+      <div className="grid-3">
+        <Field label="Tipo de ajuste"><select className="select" value={mode} onChange={(e) => { const m = e.target.value as "pct" | "margen"; setMode(m); setPrev(null); setValue(m === "pct" ? "10" : "35"); }}><option value="pct">Subir o bajar un porcentaje</option><option value="margen">Margen objetivo sobre la venta</option></select></Field>
+        <Field label={mode === "pct" ? "Porcentaje (negativo baja)" : "Margen objetivo %"} hint={mode === "pct" ? "Ej.: 10 sube 10 %; -5 baja 5 %." : "precio = costo ÷ (1 − margen). Sin costo no se toca."}><input className="input input--mono" inputMode="decimal" value={value} onChange={(e) => { setValue(e.target.value); setPrev(null); }} /></Field>
+        {!usarMarcados && <Field label="Categoría"><select className="select" value={cat} onChange={(e) => { setCat(e.target.value); setPrev(null); }}><option value="">Toda categoría</option>{cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>}
+      </div>
+      {prev && (
+        <>
+          <p style={{ fontSize: 13 }}><b>{prev.changes}</b> cambian · {prev.skipped} sin cambio</p>
+          <div style={{ maxHeight: 360, overflowY: "auto" }}>
+            <table className="table table--sm table--stack">
+              <thead><tr><th>Producto</th><th className="num">Precio actual</th><th className="num">Precio nuevo</th><th className="num">Margen actual</th><th className="num">Margen nuevo</th></tr></thead>
+              <tbody>{prev.items.map((r) => (
+                <tr key={r.id} style={r.skip ? { opacity: 0.6 } : undefined}>
+                  <td data-label="Producto" className="stack-full"><b>{r.name}</b> <span className="muted mono" style={{ fontSize: 12 }}>{r.code}</span>{r.skip && <div className="muted" style={{ fontSize: 12 }}>{r.skip}</div>}</td>
+                  <td data-label="Precio actual" className="num mono">{fmtMoney(r.price_before, r.currency)}</td>
+                  <td data-label="Precio nuevo" className="num mono" style={{ fontWeight: 700 }}>{r.price_after != null ? fmtMoney(r.price_after, r.currency) : "—"}</td>
+                  <td data-label="Margen actual" className="num mono">{r.margin_before != null ? `${Number(r.margin_before).toFixed(1)} %` : "—"}</td>
+                  <td data-label="Margen nuevo" className="num mono" style={r.margin_after != null ? { color: marginTone(Number(r.margin_after)), fontWeight: 700 } : undefined}>{r.margin_after != null ? `${Number(r.margin_after).toFixed(1)} %` : "—"}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }

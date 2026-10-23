@@ -18,6 +18,7 @@ from .routers import (
     banking,
     cabys_masivo,
     catalog,
+    catalog_completar,
     client_access,
     client_portal,
     commissions,
@@ -127,6 +128,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(catalog.router)
     app.include_router(cabys_masivo.router)
+    app.include_router(catalog_completar.router)
     app.include_router(sales.router)
     app.include_router(ops.router)
     app.include_router(report_board_router.router)  # tablero y estado de resultados completo (reunion 2)

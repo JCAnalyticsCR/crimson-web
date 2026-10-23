@@ -13,6 +13,7 @@ import PreviewBand from "./PreviewBand";
 import AllyPreviewPicker from "./AllyPreviewPicker";
 import { useApprovalCount } from "../modules/approvals/useApprovalCount";
 import { useReceptionCount } from "../modules/accounting/useReceptionCount";
+import { useCompletarCount } from "../modules/inventory/useCompletarCount";
 
 /* El menu vive en nav.ts (lo extienden otros frentes sin tocar este archivo). Se reexporta por compatibilidad. */
 export { NAV } from "./nav";
@@ -25,6 +26,7 @@ export default function AppShell() {
   const loc = useLocation();
   const aprob = useApprovalCount(); // numero junto a "Aprobaciones"
   const recep = useReceptionCount(); // comprobantes por revisar junto a "Contabilidad"
+  const completar = useCompletarCount(); // articulos por completar junto a "Inventarios"
   const [clock, setClock] = useState("");
   const [welcome, setWelcome] = useState(() => { try { return sessionStorage.getItem("crimson-welcome") === "1"; } catch { return false; } });
   // "Ver como" un rol aliado: se elige la empresa (y la persona) y se abre su portal con datos reales, solo lectura
@@ -64,6 +66,7 @@ export default function AppShell() {
               <NavLink key={it.to} to={it.to} end={it.end} className={({ isActive }) => `nav__link ${isActive ? "is-active" : ""}`}>
                 <Icon d={it.icon} /><span>{it.label}</span>
                 {it.badge === "approvals" && aprob ? <span className="nav__badge" aria-label={`${aprob} pendientes`}>{aprob > 99 ? "99+" : aprob}</span> : null}
+                {it.badge === "completar" && completar ? <span className="nav__badge" style={{ background: "var(--warn)" }} aria-label={`${completar} artículos por completar`} title={`${completar} artículos por completar`}>{completar > 99 ? "99+" : completar}</span> : null}
                 {it.badge === "recepcion" && recep ? <span className="nav__badge" style={recep.urgent ? undefined : { background: "var(--warn)" }} aria-label={`${recep.count} comprobantes por revisar`}>{recep.count > 99 ? "99+" : recep.count}</span> : null}
               </NavLink>
             ))}

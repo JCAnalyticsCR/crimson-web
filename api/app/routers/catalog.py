@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
+from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
@@ -25,8 +26,10 @@ from ..schemas.crm import (
     TaxOut,
 )
 from ..services import cabys as cabys_svc
+from ..services import pricing
 from ..services import store_showcase as _sv_cache
 from ..services import supplier_catalog as supcat
+from ..services.documents import audit
 
 router = APIRouter(tags=["catalogo"])
 log = logging.getLogger("crimson.catalogo")
@@ -462,12 +465,158 @@ def toggle_web(pid: int, data: WebIn, p: Principal = Depends(require("catalog", 
     """Publica o quita el producto de la tienda desde la lista, sin abrir la ficha. Solo el administrador (catalog.publicar
     no lo tiene ningun otro rol): ventas e inventario editan la ficha pero no deciden que se vende en linea."""
     pr = _own(db, Product, pid, p.tenant.id)
+    antes = bool(pr.show_on_web)
     pr.show_on_web = data.show_on_web
     _margin_recheck(db, p, pr)
     _sv_cache.bump_catalog_version(db, p.tenant)
+    if antes != bool(data.show_on_web):
+        audit(
+            db, p.tenant.id, p.user.id, "publish" if data.show_on_web else "unpublish", "product", pr.id, {"code": pr.code}, ip=p.ip,
+            before={"show_on_web": antes}, after={"show_on_web": bool(data.show_on_web)},
+        )  # fmt: skip
     db.commit()
     db.refresh(pr)
     return _product_out(pr, p)
+
+
+class PriceIn(BaseModel):
+    price: Decimal = Field(ge=0, le=Decimal("999999999"))
+
+
+@router.patch("/products/{pid}/price", response_model=ProductOut)
+def set_price(pid: int, data: PriceIn, p: Principal = Depends(require("catalog", "editar")), db: Session = Depends(get_db)):
+    """Precio de venta sin IVA desde la lista (sin abrir la ficha). Mismo permiso que editar la ficha (catalog.editar) y
+    hay que ver el precio (catalog.precios). El precio que pone una persona nunca lo toca la sincronizacion de Eurocomp
+    (apply_list y auto_catalog solo mueven costo y existencias). Queda en la bitacora con el antes y el despues."""
+    if not p.sees_prices:
+        raise HTTPException(403, "Sin permiso: catalog.precios")
+    pr = _own(db, Product, pid, p.tenant.id)
+    antes = pr.price
+    pr.price = data.price
+    if Decimal(str(antes or 0)) != data.price:
+        _margin_recheck(db, p, pr)
+        _sv_cache.bump_catalog_version(db, p.tenant)
+        audit(
+            db, p.tenant.id, p.user.id, "update", "product", pr.id, {"code": pr.code, "campo": "precio"}, ip=p.ip,
+            before={"price": str(antes) if antes is not None else None}, after={"price": str(data.price)},
+        )  # fmt: skip
+    db.commit()
+    db.refresh(pr)
+    out = _with_costs(db, p, [pr])
+    _with_availability(db, p, [pr], out)
+    return out[0]
+
+
+class PriceAdjustIn(BaseModel):
+    """Ajuste de precios en bloque: +/- un porcentaje o un margen objetivo sobre la venta, para lo filtrado o marcado."""
+
+    mode: str = Field(pattern="^(pct|margen)$")
+    value: Decimal = Field(ge=Decimal("-90"), le=Decimal("500"))
+    ids: list[int] | None = Field(None, max_length=500)
+    q: str | None = Field(None, max_length=120)
+    category_id: int | None = None
+    brand: str | None = Field(None, max_length=60)
+    supplier_id: int | None = None
+    web: bool | None = None
+    confirm: bool = False
+
+
+ADJUST_MAX = 500
+
+
+def _round_price(v: Decimal, currency: str) -> Decimal:
+    if currency == "CRC":
+        return (v / pricing.ROUND_TO).quantize(Decimal(1), rounding=ROUND_CEILING) * pricing.ROUND_TO
+    return v.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _adjust_products(db: Session, p: Principal, data: PriceAdjustIn) -> list[Product]:
+    stmt = select(Product).where(Product.tenant_id == p.tenant.id, Product.active)
+    if data.ids:
+        stmt = stmt.where(Product.id.in_(data.ids))
+    if data.q:
+        like = f"%{data.q}%"
+        stmt = stmt.where(or_(Product.name.ilike(like), Product.code.ilike(like), Product.model.ilike(like), Product.supplier_sku.ilike(like)))
+    if data.category_id:
+        cats = list(db.scalars(select(Category).where(Category.tenant_id == p.tenant.id)))
+        keep, todo = {data.category_id}, [data.category_id]
+        while todo:  # la categoria y sus hijas: "+10 % a Electrodomesticos" incluye refrigeradoras y lavadoras
+            cur = todo.pop()
+            for c in cats:
+                if c.parent_id == cur and c.id not in keep:
+                    keep.add(c.id)
+                    todo.append(c.id)
+        stmt = stmt.where(Product.category_id.in_(keep))
+    if data.brand:
+        stmt = stmt.where(Product.brand == data.brand)
+    if data.supplier_id:
+        stmt = stmt.where(Product.supplier_id == data.supplier_id)
+    if data.web is not None:
+        stmt = stmt.where(Product.show_on_web.is_(data.web))
+    return list(db.scalars(stmt.order_by(Product.name).limit(ADJUST_MAX + 1)))
+
+
+@router.post("/products/price-adjust")
+def price_adjust(data: PriceAdjustIn, p: Principal = Depends(require("catalog", "editar")), db: Session = Depends(get_db)):
+    """Vista previa (confirm=false) y aplicacion (confirm=true) del ajuste en bloque. Solo quien ve costos (el admin):
+    la vista previa muestra costo y margen. "pct": precio x (1 + valor/100). "margen": precio = costo / (1 - margen),
+    redondeado como la politica de precios (centena hacia arriba en colones); sin costo no se toca. Una sola entrada
+    en la bitacora con cada producto, su precio anterior y el nuevo."""
+    from ..services.fx import FxMissing
+
+    if not p.sees_costs:
+        raise HTTPException(403, "Sin permiso: catalog.costos")
+    if data.mode == "margen" and not (Decimal(0) < data.value < Decimal(95)):
+        raise HTTPException(422, "El margen objetivo va de 0 % a 95 %")
+    prods = _adjust_products(db, p, data)
+    if not prods:
+        raise HTTPException(422, "Ningún producto coincide con el filtro")
+    if len(prods) > ADJUST_MAX:
+        raise HTTPException(422, f"El filtro abarca más de {ADJUST_MAX} productos: acótelo (categoría, marca o búsqueda)")
+    fx = supcat.usd_rate(db)
+    rows, cambios = [], []
+    for pr in prods:
+        antes = Decimal(str(pr.price or 0))
+        nuevo, motivo = None, None
+        if data.mode == "pct":
+            if antes <= 0:
+                motivo = "Sin precio: use el margen objetivo o póngale precio"
+            else:
+                nuevo = _round_price(antes * (1 + data.value / 100), pr.currency or "CRC")
+        elif pr.cost is None or Decimal(str(pr.cost)) <= 0:
+            motivo = "Sin costo: no se puede calcular el margen"
+        else:
+            try:
+                nuevo = pricing.sale_price(db, Decimal(str(pr.cost)), pr.cost_currency or "USD", pr.currency or "CRC", data.value, fx)
+            except FxMissing:
+                motivo = "Sin tipo de cambio del día"
+        if nuevo is not None and nuevo == antes:
+            motivo, nuevo = "Ya tiene ese precio", None
+        cost_crc = supcat.to_crc(pr.cost, pr.cost_currency, fx) if pr.cost is not None else None
+        m_before, m_after = (
+            pricing.margin_of(v_crc, cost_crc) if (v_crc := supcat.to_crc(v, pr.currency, fx) if v is not None else None) and cost_crc else None
+            for v in (antes, nuevo)
+        )
+        rows.append({
+            "id": pr.id, "code": pr.code, "name": pr.name, "currency": pr.currency, "price_before": antes, "price_after": nuevo,
+            "cost_crc": cost_crc, "margin_before": m_before, "margin_after": m_after, "skip": motivo,
+        })  # fmt: skip
+        if nuevo is not None:
+            cambios.append((pr, antes, nuevo))
+    if data.confirm and cambios:
+        for pr, _a, nuevo in cambios:
+            pr.price = nuevo
+            _margin_recheck(db, p, pr)
+        _sv_cache.bump_catalog_version(db, p.tenant)
+        filtro = data.model_dump(exclude={"confirm", "mode", "value"}, exclude_none=True)
+        audit(
+            db, p.tenant.id, p.user.id, "price_adjust", "product", None,
+            {"modo": data.mode, "valor": str(data.value), "filtro": filtro, "n": len(cambios),
+             "cambios": [(pr.id, pr.code, str(a), str(n)) for pr, a, n in cambios]},
+            ip=p.ip,
+        )  # fmt: skip
+        db.commit()
+    return {"items": rows, "changes": len(cambios), "skipped": len(rows) - len(cambios), "applied": bool(data.confirm and cambios)}
 
 
 def _margin_recheck(db: Session, p: Principal, pr: Product) -> None:
