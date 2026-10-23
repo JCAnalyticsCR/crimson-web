@@ -23,6 +23,7 @@ from ..models import AuditLog, Customer, Opportunity, Project, Quote, QuoteVersi
 from ..services import avisos_venta as avisos
 from ..services.documents import CR, audit, local_date
 from ..services.email_layout import cta
+from ..services.sale_assignment import WEB_SOURCES
 
 log = logging.getLogger(__name__)
 
@@ -194,7 +195,7 @@ def avisar_consultas_sin_responsable(db: Session, tenant) -> int:
         select(Opportunity).where(
             Opportunity.tenant_id == tenant.id,
             Opportunity.owner_id.is_(None),
-            Opportunity.source == "tienda web",
+            Opportunity.source.in_(WEB_SOURCES),
             Opportunity.status.not_in(("ganada", "perdida", "archivada")),
         ).order_by(Opportunity.id)
     ).all()

@@ -70,7 +70,8 @@ def test_inicio_del_vendedor_con_sus_acciones_pendientes(client, auth, db_sessio
     assert client.get("/opportunities", params={"pendiente": "otra"}, headers=a).status_code == 422
 
     # cerrada: ya no es pendiente
-    assert client.post(f"/opportunities/{o_sin['id']}/touch", headers=a, json={"note": "Se perdió", "status": "perdida"}).status_code in (200, 201)
+    # ventas-control: "perdida" requiere lost_reason de la lista cerrada
+    assert client.post(f"/opportunities/{o_sin['id']}/touch", headers=a, json={"note": "Se perdió", "status": "perdida", "lost_reason": "Precio"}).status_code in (200, 201)
     assert client.get("/dashboard", headers=a).json()["acciones_pendientes"]["sin_proxima_accion"] == 1
 
     # el admin (inicio de la empresa) ve las de todo el equipo, con la misma definicion que sus listas

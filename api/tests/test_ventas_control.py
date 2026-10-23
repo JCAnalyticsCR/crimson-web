@@ -479,8 +479,9 @@ def test_reporte_motivos_perdida_disponible_y_con_datos(client, auth, db_session
     catalog = client.get("/reports").json()
     assert any(r["key"] == "motivos_perdida" for r in catalog), "motivos_perdida no aparece en el catálogo del admin"
 
-    from datetime import date, timedelta
-    hoy = date.today()
+    from datetime import date, datetime, timedelta, timezone
+    # usar la fecha UTC para coincidir con closed_at (DateTime timezone=True se almacena en UTC)
+    hoy = datetime.now(timezone.utc).date()
     ayer = hoy - timedelta(days=1)
     r = client.get("/reports/motivos_perdida", params={"from": str(ayer), "to": str(hoy)})
     assert r.status_code == 200, r.text
@@ -507,8 +508,9 @@ def test_reporte_ajustes_inventario_disponible_y_con_datos(client, auth, db_sess
     catalog = client.get("/reports").json()
     assert any(r["key"] == "ajustes_inventario" for r in catalog), "ajustes_inventario no aparece en el catálogo del admin"
 
-    from datetime import date, timedelta
-    hoy = date.today()
+    from datetime import date, datetime, timedelta, timezone
+    # usar la fecha UTC para coincidir con StockMovement.at (DateTime timezone=True se almacena en UTC)
+    hoy = datetime.now(timezone.utc).date()
     ayer = hoy - timedelta(days=1)
     r = client.get("/reports/ajustes_inventario", params={"from": str(ayer), "to": str(hoy)})
     assert r.status_code == 200, r.text

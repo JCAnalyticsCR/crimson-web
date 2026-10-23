@@ -169,8 +169,10 @@ def test_vendedor_solo_ve_y_aprueba_los_de_sus_facturas(client, auth, db_session
 
     _pagos(client)  # avisar a: admin y ventas (el defecto de Mi Tienda -> Pagos)
     a, b = _vendedores(client, db_session, auth)
+    a_id = client.get("/auth/me", headers=a).json()["user"]["id"]
     cid = _cliente(client)
-    mia = client.post("/invoices", json={"customer_id": cid, "lines": LINEA}, headers=a)
+    # admin crea con seller_id=a_id (ventas-control: vendedor no puede crear líneas libres >₡25k)
+    mia = client.post("/invoices", json={"customer_id": cid, "lines": LINEA, "seller_id": a_id})
     assert mia.status_code == 201, mia.text
     mia = mia.json()
     ajena = _factura(client, cid)  # del admin

@@ -56,10 +56,6 @@ class _DocBase(TenantMixin, TimestampMixin):
     # siendo quien tecleo el documento. NULL = venta sin vendedor (tienda en linea, API, recurrencias).
     # Ver services/ownership.py: es la unica definicion de "lo mio".
     seller_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), index=True)
-    # house_sale: "venta de la casa" — el admin la marco explicitamente sin vendedor/comision (bandeja de asignacion).
-    # NULL / False = normal; True = no comisiona aunque despues se asigne un vendedor (la decision es permanente salvo
-    # que el admin la revierta desde la misma bandeja).
-    house_sale: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False, server_default=sa_false())
 
 
 class _LineBase:
@@ -130,6 +126,10 @@ class Invoice(_DocBase, Base):
     # Plan 1.4: la genero esta recurrencia. Sin comprobante fiscal aceptado sale como "aviso de cobro" (render.doc_kind):
     # contabilidad emite el comprobante real aparte y el mismo cobro no circula como dos "facturas".
     recurrence_id: Mapped[int | None] = mapped_column(ForeignKey("recurrence.id", use_alter=True, name="fk_invoice_recurrence"))
+    # house_sale: "venta de la casa" — el admin la marcó explícitamente sin vendedor/comisión (bandeja de asignación).
+    # NULL / False = normal; True = no comisiona aunque después se asigne un vendedor (decisión permanente salvo
+    # que el admin la revierta desde la misma bandeja). Solo en Invoice, no en Quote.
+    house_sale: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False, server_default=sa_false())
 
     lines: Mapped[list["InvoiceLine"]] = relationship(cascade="all, delete-orphan", order_by="InvoiceLine.position", lazy="selectin")
     payments: Mapped[list["Payment"]] = relationship(back_populates="invoice", lazy="selectin")  # noqa: F821

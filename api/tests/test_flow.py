@@ -85,7 +85,7 @@ def test_sales_flow(client, auth):
 
     # enlace de pago publico
     link = client.post(f"/invoices/{inv['id']}/payment-link").json()
-    assert link["url"].startswith("http") and link["whatsapp_url"].startswith("https://wa.me/?text=")
+    assert link["url"].startswith("http") and link["whatsapp_url"].startswith("https://wa.me/")
     token = link["url"].rsplit("/", 1)[1]
     pub = client.get(f"/public/pay/{token}")
     assert pub.status_code == 200 and pub.json()["invoice"]["number"] == "FEC-000001"

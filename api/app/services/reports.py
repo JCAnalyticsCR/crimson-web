@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date
 from decimal import Decimal
 from io import BytesIO
 
@@ -1186,10 +1186,10 @@ def cxp_vencimientos(db: Session, tid: int, a: date, b: date) -> Report:
 
 def motivos_perdida(db: Session, tid: int, a: date, b: date) -> Report:
     """Oportunidades perdidas en el periodo, agrupadas por motivo, vendedor y competidor."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    a_dt = datetime(a.year, a.month, a.day, tzinfo=timezone.utc)
-    b_dt = datetime(b.year, b.month, b.day, 23, 59, 59, tzinfo=timezone.utc)
+    a_dt = datetime(a.year, a.month, a.day, tzinfo=UTC)
+    b_dt = datetime(b.year, b.month, b.day, 23, 59, 59, tzinfo=UTC)
     rows_q = (
         db.execute(
             select(
@@ -1226,10 +1226,10 @@ def motivos_perdida(db: Session, tid: int, a: date, b: date) -> Report:
 
 def ajustes_inventario(db: Session, tid: int, a: date, b: date) -> Report:
     """Movimientos manuales de inventario (salidas y ajustes) por usuario en el periodo."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    a_dt = datetime(a.year, a.month, a.day, tzinfo=timezone.utc)
-    b_dt = datetime(b.year, b.month, b.day, 23, 59, 59, tzinfo=timezone.utc)
+    a_dt = datetime(a.year, a.month, a.day, tzinfo=UTC)
+    b_dt = datetime(b.year, b.month, b.day, 23, 59, 59, tzinfo=UTC)
     rows_q = (
         db.execute(
             select(

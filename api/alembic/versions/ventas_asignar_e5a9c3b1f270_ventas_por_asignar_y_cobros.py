@@ -11,7 +11,7 @@ Reversible: down() quita las columnas. Sin relleno: filas anteriores quedan con
 NULL (house_sale FALSE por defecto en el servidor, confirmed_by NULL idem).
 
 Revision ID: e5a9c3b1f270
-Revises: c7d2e94b1a60
+Revises: e5b3c2d1f408
 Create Date: 2026-10-22 12:00:00
 """
 
@@ -22,7 +22,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "e5a9c3b1f270"
-down_revision: str | None = "c7d2e94b1a60"
+down_revision: str | None = "e5b3c2d1f408"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 

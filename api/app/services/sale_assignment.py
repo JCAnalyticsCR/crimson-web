@@ -41,6 +41,9 @@ from ..models import (
 )
 from .documents import audit, recompute_balance
 
+# origen de las consultas de la tienda: "Sitio web" desde el 22/10 (antes "tienda web")
+WEB_SOURCES = ("Sitio web", "tienda web")
+
 # ---------- Configuración "Ventas" de la empresa ----------
 
 VENTAS_DEFAULTS: dict = {
@@ -49,7 +52,7 @@ VENTAS_DEFAULTS: dict = {
     "ventana_sugerencia_dias": 90,             # dias de historial para sugerir vendedor
     "asignacion_consultas_web": "manual",      # "manual" | "turno" | "solucion"
     "asignacion_consultas_web_solucion_map": {},  # {solution_code: user_id}
-    "quienes_confirman_cobros": ["admin", "contabilidad", "caja"],  # roles con payments.confirmar
+    "quienes_confirman_cobros": ["admin", "contabilidad"],  # roles con payments.confirmar
 }
 
 
@@ -165,7 +168,7 @@ def unassigned_opportunities_count(db: Session, tenant_id: int) -> int:
             select(func.count(Opportunity.id)).where(
                 Opportunity.tenant_id == tenant_id,
                 Opportunity.owner_id.is_(None),
-                Opportunity.source == "tienda web",
+                Opportunity.source.in_(WEB_SOURCES),
                 Opportunity.status.not_in(("ganada", "perdida", "archivada")),
             )
         )
@@ -180,7 +183,7 @@ def unassigned_opportunities(db: Session, tenant_id: int) -> list[dict]:
         .where(
             Opportunity.tenant_id == tenant_id,
             Opportunity.owner_id.is_(None),
-            Opportunity.source == "tienda web",
+            Opportunity.source.in_(WEB_SOURCES),
             Opportunity.status.not_in(("ganada", "perdida", "archivada")),
         )
         .order_by(Opportunity.id.desc())

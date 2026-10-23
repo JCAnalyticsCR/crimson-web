@@ -130,6 +130,9 @@ def test_inicio_del_vendedor_coincide_con_el_embudo(client, auth, db_session):
     assert emb["abiertas"] == sum(c["count"] for c in board["columns"]) == 2
     assert emb["ganadas_mes"] == 0 and board["won_month"]["count"] == 0 and emb["moneda"] == "CRC" and emb["convertido"] is False
 
+    # ventas-control: para marcar "ganada" el vendedor necesita cotización ligada (o crm_pipeline.ver_todo)
+    cust_q = _cliente(client)
+    assert client.post(f"/opportunities/{o1['id']}/quote", json={"customer_id": cust_q["id"]}, headers=a).status_code == 201
     r = client.post(f"/opportunities/{o1['id']}/touch", json={"note": "Firmó el contrato", "status": "ganada"}, headers=a)
     assert r.status_code == 200 and r.json()["closed_at"]
     dash = client.get("/dashboard", headers=a).json()["mi_embudo"]
@@ -241,7 +244,8 @@ def test_reasignar_mueve_cotizacion_abierta_no_la_factura(client, auth, db_sessi
 
     facturada = client.post("/opportunities", json={"title": "Facturada", "kind": "venta", "customer_id": cust["id"]}, headers=a).json()
     q2 = client.post(f"/opportunities/{facturada['id']}/quote", json={}, headers=a).json()
-    assert client.put(f"/quotes/{q2['quote_id']}", json={"customer_id": cust["id"], "lines": _linea()}, headers=a).status_code == 200
+    # ₡5 000: por debajo del tope ₡25k (ventas-control) para que la cotización quede "creado" y se pueda convertir
+    assert client.put(f"/quotes/{q2['quote_id']}", json={"customer_id": cust["id"], "lines": _linea(5000)}, headers=a).status_code == 200
     inv = client.post(f"/quotes/{q2['quote_id']}/convert", headers=a).json()
     assert client.post(f"/opportunities/{facturada['id']}/assign", json={"owner_id": b_id}).status_code == 200
     assert db_session.get(Invoice, inv["id"]).seller_id == a_id  # lo facturado no se mueve (ni su comision)
@@ -251,9 +255,11 @@ def test_reasignar_mueve_cotizacion_abierta_no_la_factura(client, auth, db_sessi
 
 def test_busqueda_solo_lo_suyo(client, auth, db_session):
     a, _ = _vendedores(client, db_session, auth)
+    a_id = _uid(client, a)
     uno = _cliente(client, "Cliente Uno")
     dos = _cliente(client, "Cliente Dos")
-    mia = client.post("/invoices", json={"customer_id": uno["id"], "lines": _linea()}, headers=a).json()
+    # admin crea con seller_id=a_id (ventas-control: vendedor no puede crear líneas libres >₡25k)
+    mia = client.post("/invoices", json={"customer_id": uno["id"], "lines": _linea(), "seller_id": a_id}).json()
     ajena = client.post("/invoices", json={"customer_id": uno["id"], "lines": _linea()}).json()
     client.post("/invoices", json={"customer_id": dos["id"], "lines": _linea()})
 
@@ -276,10 +282,11 @@ def test_busqueda_solo_lo_suyo(client, auth, db_session):
 def test_consecutivo_global_entre_vendedores(client, auth, db_session):
     a, b = _vendedores(client, db_session, auth)
     cust = _cliente(client)
+    # ₡20 000: por debajo del tope libre ₡25k (ventas-control) para que el vendedor pueda crear facturas directas
     for path in ("/quotes", "/invoices"):
-        n1 = client.post(path, json={"customer_id": cust["id"], "lines": _linea()}, headers=a).json()["number"]
-        n2 = client.post(path, json={"customer_id": cust["id"], "lines": _linea()}, headers=b).json()["number"]
-        n3 = client.post(path, json={"customer_id": cust["id"], "lines": _linea()}, headers=a).json()["number"]
+        n1 = client.post(path, json={"customer_id": cust["id"], "lines": _linea(20000)}, headers=a).json()["number"]
+        n2 = client.post(path, json={"customer_id": cust["id"], "lines": _linea(20000)}, headers=b).json()["number"]
+        n3 = client.post(path, json={"customer_id": cust["id"], "lines": _linea(20000)}, headers=a).json()["number"]
         assert _seq(n2) == _seq(n1) + 1 and _seq(n3) == _seq(n1) + 2, (path, n1, n2, n3)
 
 
@@ -469,9 +476,11 @@ def test_vendedor_no_ve_oportunidades_ajenas_en_cliente_ni_archivo(client, auth,
 def test_cobros_de_mis_facturas(client, auth, db_session):
     tid = auth["tenant"]["id"]
     a, _ = _vendedores(client, db_session, auth)
+    a_id = _uid(client, a)
     caja = _entrar(client, db_session, tid, "caja.mostrador@ejemplo.com", "caja")
     cust = _cliente(client)
-    mia = client.post("/invoices", json={"customer_id": cust["id"], "lines": _linea()}, headers=a).json()
+    # admin crea con seller_id=a_id (ventas-control: vendedor no puede crear líneas libres >₡25k)
+    mia = client.post("/invoices", json={"customer_id": cust["id"], "lines": _linea(), "seller_id": a_id}).json()
     del_admin = client.post("/invoices", json={"customer_id": cust["id"], "lines": _linea()}).json()
     p1 = client.post(f"/invoices/{mia['id']}/payments", json={"method": "efectivo", "amount": 5000}, headers=caja)
     p2 = client.post(f"/invoices/{del_admin['id']}/payments", json={"method": "efectivo", "amount": 7000}, headers=caja)
@@ -735,8 +744,10 @@ def test_otros_canales_factura_sin_enlace_si_es_ajena(client, auth, db_session):
     from app.models import Order
 
     a, b = _vendedores(client, db_session, auth)
+    a_id = _uid(client, a)
     cust = _cliente(client)
-    inv = client.post("/invoices", json={"customer_id": cust["id"], "lines": _linea()}, headers=a).json()
+    # admin crea la factura con seller_id de "a" (ventas-control: vendedor no puede crear líneas libres >₡25k)
+    inv = client.post("/invoices", json={"customer_id": cust["id"], "lines": _linea(), "seller_id": a_id}).json()
     db_session.add(Order(tenant_id=auth["tenant"]["id"], number="POS-ENL-1", channel="pos", invoice_id=inv["id"], total=1, currency="CRC"))
     db_session.commit()
     vista = lambda h: next(o for o in client.get("/orders", headers=h).json() if o["number"] == "POS-ENL-1")  # noqa: E731
@@ -842,7 +853,8 @@ def test_sondeo_del_margen_tiene_freno(client, auth, db_session, monkeypatch):
         return client.post("/quotes", headers=a, json={"customer_id": cust["id"], "lines": [ln]}).json()
 
     def sana():
-        return client.post("/quotes", headers=a, json={"customer_id": cust["id"], "lines": _linea()}).json()
+        # linea de texto libre por debajo del tope ₡25k (ventas-control) para que no quede retenida antes del freno
+        return client.post("/quotes", headers=a, json={"customer_id": cust["id"], "lines": _linea(5000)}).json()
 
     def aviso():
         return db_session.scalars(select(EmailOutbox).where(EmailOutbox.subject.like("Cotizaciones cerca del margen mínimo%"))).all()

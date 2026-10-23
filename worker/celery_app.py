@@ -520,6 +520,8 @@ celery.conf.beat_schedule = {
     "maintenance-due": {"task": "support.maintenance_due", "schedule": crontab(hour=6, minute=30)},
     "sla-breaches": {"task": "support.sla_breaches", "schedule": crontab(minute=0)},
     "stale-quotes": {"task": "crm.stale_quotes", "schedule": crontab(hour=7, minute=45, day_of_week="mon-fri")},
+    # consultas de la tienda sin responsable: resumen al admin con su antiguedad (ventas por asignar, 22/10)
+    "consultas-sin-responsable": {"task": "crm.consultas_sin_responsable", "schedule": crontab(hour=7, minute=50, day_of_week="mon-fri")},
     "reminders": {"task": "sales.reminders", "schedule": crontab(hour=8, minute=0)},
     "daily-close": {"task": "sales.daily_close_email", "schedule": crontab(hour=21, minute=0)},
     "run-recurrences": {"task": "sales.run_recurrences", "schedule": crontab(hour=5, minute=0)},

@@ -95,7 +95,7 @@ def test_regla_general_solo_alcanza_roles_configurados(client, auth, db_session)
     admin_inv = _inv(client)
     _pay(client, admin_inv["id"], 1130000)
     assert _rows(client) == []  # el admin no comisiona con la regla general
-    v_inv = _inv(client, vh)
+    v_inv = _inv(client, seller_id=_vid)
     _pay(client, v_inv["id"], 565000)
     assert len(_rows(client)) == 1
     s_inv = _inv(client, seller_id=sid)
@@ -132,7 +132,7 @@ def test_atribucion_al_dueno_de_la_oportunidad(client, auth, db_session):
 def test_sobrepago_no_comisiona_de_mas(client, auth, db_session):
     vh, vid = _vendedora(client, db_session, auth)
     _rule(client, user_id=vid, name="Vendedora", percent=5)
-    inv = _inv(client, vh)
+    inv = _inv(client, seller_id=vid)
     _pay(client, inv["id"], 1130000)
     _pay(client, inv["id"], 1130000)  # pagada dos veces por error
     assert sum(D(str(f["base_amount"])) for f in _rows(client)) == D("1000000.00")
@@ -142,7 +142,7 @@ def test_sobrepago_no_comisiona_de_mas(client, auth, db_session):
 def test_devolucion_revierte_y_nunca_suma(client, auth, db_session):
     vh, vid = _vendedora(client, db_session, auth)
     _rule(client, user_id=vid, name="Vendedora", percent=5)
-    inv = _inv(client, vh)
+    inv = _inv(client, seller_id=vid)
     _pay(client, inv["id"], 1130000)
     _pay(client, inv["id"], 565000, kind="devolucion")
     filas = _rows(client)
@@ -150,7 +150,7 @@ def test_devolucion_revierte_y_nunca_suma(client, auth, db_session):
     assert len(ajustes) == 1 and D(str(ajustes[0]["amount"])) == D("-25000.00") and ajustes[0]["status"] == "pendiente"
     assert ajustes[0]["reverses_id"] and "devolución" in ajustes[0]["description"]
     assert sum(1 for f in filas if D(str(f["amount"])) > 0) == 1
-    inv2 = _inv(client, vh)
+    inv2 = _inv(client, seller_id=vid)
     _pay(client, inv2["id"], 1130000, kind="autorizacion")
     assert not [f for f in _rows(client) if f["invoice_id"] == inv2["id"]]
 
@@ -159,12 +159,12 @@ def test_devolucion_revierte_y_nunca_suma(client, auth, db_session):
 def test_factura_anulada(client, auth, db_session):
     vh, vid = _vendedora(client, db_session, auth)
     _rule(client, user_id=vid, name="Vendedora", percent=5)
-    inv = _inv(client, vh)
+    inv = _inv(client, seller_id=vid)
     _pay(client, inv["id"], 565000)
     assert client.post(f"/invoices/{inv['id']}/void").status_code == 200
     f = _rows(client)[0]
     assert f["status"] == "anulada" and "anulada" in f["void_reason"]
-    inv2 = _inv(client, vh)
+    inv2 = _inv(client, seller_id=vid)
     _pay(client, inv2["id"], 565000)
     pagada = next(x for x in _rows(client) if x["invoice_id"] == inv2["id"])
     assert client.patch("/commissions", json={"ids": [pagada["id"]], "status": "pagada", "paid_ref": "Planilla oct-2026"}).status_code == 200
@@ -309,7 +309,7 @@ def test_transiciones_y_segregacion(client, auth, db_session):
     tid = auth["tenant"]["id"]
     vh, vid = _vendedora(client, db_session, auth)
     _rule(client, user_id=vid, name="Vendedora", percent=5)
-    inv = _inv(client, vh)
+    inv = _inv(client, seller_id=vid)
     _pay(client, inv["id"], 565000)
     f = _rows(client)[0]
     assert client.patch("/commissions", json={"ids": [f["id"]], "status": "pagada"}).status_code == 200
@@ -366,7 +366,7 @@ def test_totales_en_colones(client, auth, db_session):
 def test_resumen_tiempo_real(client, auth, db_session):
     vh, vid = _vendedora(client, db_session, auth)
     _rule(client, user_id=vid, name="Vendedora", percent=5)
-    inv = _inv(client, vh)
+    inv = _inv(client, seller_id=vid)
     _pay(client, inv["id"], 565000)
     client.post("/opportunities", json={"title": "Embudo", "customer_id": _cust(client)["id"], "amount": 1000000, "probability": 50}, headers=vh)
     s = client.get("/commissions/summary", headers=vh).json()
@@ -405,7 +405,7 @@ def test_validaciones_de_regla(client, auth, db_session):
     fixed = client.post("/commissions/rules", json={"name": "Fijo", "fixed_amount": 5000})
     assert fixed.status_code == 201
     assert client.get("/commissions/rules").json()[-1]["fixed_currency"] == "CRC"
-    inv = _inv(client, vh)
+    inv = _inv(client, seller_id=vid)
     _pay(client, inv["id"], 565000)
     assert client.delete(f"/commissions/rules/{rid}").status_code == 409
     assert client.delete(f"/commissions/rules/{fixed.json()['id']}").status_code == 200
@@ -417,7 +417,7 @@ def test_validaciones_de_regla(client, auth, db_session):
 # ---------- 17. backfill ----------
 def test_backfill_idempotente(client, auth, db_session):
     vh, vid = _vendedora(client, db_session, auth)
-    inv = _inv(client, vh)
+    inv = _inv(client, seller_id=vid)
     _pay(client, inv["id"], 565000)  # sin reglas: no comisiona
     assert _rows(client) == []
     _rule(client, user_id=vid, name="Vendedora", percent=5)
@@ -444,7 +444,7 @@ def test_backfill_idempotente(client, auth, db_session):
 def test_bandeja_y_contador(client, auth, db_session):
     vh, vid = _vendedora(client, db_session, auth)
     _rule(client, user_id=vid, name="Vendedora", percent=5)
-    inv = _inv(client, vh)
+    inv = _inv(client, seller_id=vid)
     _pay(client, inv["id"], 1130000)
     _pay(client, inv["id"], 565000, kind="devolucion")
     tid = auth["tenant"]["id"]
@@ -499,14 +499,14 @@ def test_factura_anulada_por_nota_de_credito(client, auth, db_session):
     client.put("/settings", json={"einvoice_provider": "sandbox"})
     vh, vid = _vendedora(client, db_session, auth)
     _rule(client, user_id=vid, name="Vendedora", percent=5)
-    inv = _inv(client, vh)
+    inv = _inv(client, seller_id=vid)
     _pay(client, inv["id"], 565000)
     assert client.post(f"/invoices/{inv['id']}/emit").json()["status"] == "aceptada"
     assert client.post(f"/invoices/{inv['id']}/void").status_code == 409  # aceptada: solo NC
     assert client.post(f"/invoices/{inv['id']}/credit-note", json={"reason": "Error en cantidad"}).status_code == 200
     f = next(x for x in _rows(client) if x["invoice_id"] == inv["id"])
     assert f["status"] == "anulada" and "anulada" in f["void_reason"]
-    inv2 = _inv(client, vh)
+    inv2 = _inv(client, seller_id=vid)
     _pay(client, inv2["id"], 565000)
     pagada = next(x for x in _rows(client) if x["invoice_id"] == inv2["id"])
     assert client.patch("/commissions", json={"ids": [pagada["id"]], "status": "pagada", "paid_ref": "Planilla oct-2026"}).status_code == 200
@@ -558,7 +558,7 @@ def test_regla_de_vendedor_desactivado(client, auth, db_session):
 
     vh, vid = _vendedora(client, db_session, auth)
     rid = _rule(client, user_id=vid, name="Vendedora", percent=5)
-    inv = _inv(client, vh)
+    inv = _inv(client, seller_id=vid)
     _pay(client, inv["id"], 565000)
     m = db_session.scalar(select(TenantUser).where(TenantUser.tenant_id == auth["tenant"]["id"], TenantUser.user_id == vid))
     m.active = False
