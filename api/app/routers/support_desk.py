@@ -776,7 +776,7 @@ def ticket_status(tid: int, data: StatusIn, p: Principal = Depends(require("supp
     t = _own(db, tid, p)
     _writable(t)
     if data.status in ("resuelto", "cerrado") and not (data.solution or t.solution):
-        raise HTTPException(422, "Escribí qué se hizo antes de cerrar el ticket")
+        raise HTTPException(422, "Escriba qué se hizo antes de cerrar el ticket")
     if data.solution is not None:
         t.solution = data.solution
     if data.hours is not None:

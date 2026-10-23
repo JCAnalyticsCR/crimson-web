@@ -82,7 +82,7 @@ def check_ready(doc, accion: str) -> None:
         raise HTTPException(
             409,
             f"No se puede {accion}: {len(ceros)} línea(s) en 0 sin explicar ({_names(ceros)}). "
-            "Elegí si son pendientes, aportadas por el cliente/aliado, cortesía o exclusiones.",
+            "Elija si son pendientes, aportadas por el cliente/aliado, cortesía o exclusiones.",
         )
     # P = 0: todo cortesia/aportado/excluido. Sin precio de venta no hay margen que defender
     if net_sale(doc) <= 0:

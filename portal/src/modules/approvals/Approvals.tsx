@@ -174,7 +174,7 @@ function Section({ s, onDone, whole }: { s: ApprovalSection; onDone: () => void;
         {s.brake && <Brake b={s.brake} onDone={onDone} />}
         <ul className="aprob-list">{s.items.map((it) => <Row key={it.id} it={it} onDone={onDone} />)}</ul>
         {rest > 0 && (whole
-          ? <p className="aprob-more">y {rest} más: aplicá o revisá estos y tocá Actualizar.</p>
+          ? <p className="aprob-more">y {rest} más: aplique o revise estos y toque Actualizar.</p>
           : <p className="aprob-more">y {rest} más · <Link to={s.to}>Ver todos</Link></p>)}
       </Card>
     </div>
@@ -221,10 +221,10 @@ export default function Approvals() {
           <button className="btn btn--ghost" onClick={load} disabled={busy}><Icon d={I.refresh} />Actualizar</button>
         </div>
       </div>
-      <p className="muted aprob-intro">Lo que espera tu visto bueno, en un solo lugar. Tocá un elemento para abrirlo donde se aprueba.</p>
+      <p className="muted aprob-intro">Lo que espera su visto bueno, en un solo lugar. Toque un elemento para abrirlo donde se aprueba.</p>
 
       {data === null ? (
-        failed ? <Card><Empty title="No se pudo cargar la bandeja" hint="Revisá la conexión y tocá Actualizar." /></Card> : <Loading />
+        failed ? <Card><Empty title="No se pudo cargar la bandeja" hint="Revise la conexión y toque Actualizar." /></Card> : <Loading />
       ) : conPend.length === 0 ? (
         <Card><Empty title="Nada pendiente de aprobar" hint="Cuando una vendedora pida un levantamiento, un técnico envíe uno a revisión, un cliente acepte una cotización, o una cotización, reserva, planilla, comisión, mensualidad o precio de la tienda necesite tu visto bueno, aparece aquí." /></Card>
       ) : (

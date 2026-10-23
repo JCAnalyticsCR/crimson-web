@@ -500,8 +500,8 @@ def totp_recovery_codes(data: RecoveryCodesIn, p: Principal = Depends(get_sessio
     if step is None:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "El código de tu app no es válido (o ya se usó). Si ya no tenés la app, usá «Cambiar de teléfono» con un "
-            "código de recuperación: al terminar te da códigos nuevos.",
+            "El código de su app no es válido (o ya se usó). Si ya no tiene la app, use «Cambiar de teléfono» con un "
+            "código de recuperación: al terminar le da códigos nuevos.",
         )
     u.totp_last_step = step
     codigos = new_recovery_codes()
@@ -536,7 +536,7 @@ def totp_disable(data: TotpDisableIn, p: Principal = Depends(get_session_princip
     if _twofa_required_somewhere(db, p.user):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "Tu rol exige la verificación en dos pasos: no se puede desactivar. Si cambiaste de teléfono, usá «Cambiar de teléfono».",
+            "Su rol exige la verificación en dos pasos: no se puede desactivar. Si cambió de teléfono, use «Cambiar de teléfono».",
         )
     require_reauth(p, data.password, "Contraseña incorrecta")  # cada intento cuenta (reauth_limiter, tambien el codigo)
     u = p.user
@@ -585,7 +585,7 @@ def password_reset_confirm(data: ResetConfirmIn, request: Request, response: Res
     if not password_is_strong(data.new_password):
         raise HTTPException(422, "Mínimo 10 caracteres con letras y números")
     if verify_password(data.new_password, user.password_hash):
-        raise HTTPException(422, "Usá una contraseña distinta a la anterior")
+        raise HTTPException(422, "Use una contraseña distinta a la anterior")
     now = datetime.now(UTC)
     set_password(user, data.new_password)
     pr.used_at = now

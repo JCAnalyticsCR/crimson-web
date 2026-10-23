@@ -524,7 +524,7 @@ def ally_create(data: CompanyIn, p: Principal = Depends(require("aliados", "crea
         email = email or ((src.email or "").lower() or None)
         phone = phone or src.phone
     if not name:
-        raise HTTPException(422, "Escribí el nombre del aliado o elegí el cliente o proveedor de donde sale")
+        raise HTTPException(422, "Escriba el nombre del aliado o elija el cliente o proveedor de donde sale")
     tax = clean_tax(tax)
     dup = find_duplicate(db, p.tenant.id, name, tax)
     if dup:
@@ -669,7 +669,7 @@ def ally_invite_revoke(cid: int, iid: int, p: Principal = Depends(require("aliad
     if not inv or inv.tenant_id != p.tenant.id or inv.ally_company_id != c.id:
         raise HTTPException(404, "Invitación no encontrada")
     if inv.accepted_at:
-        raise HTTPException(409, "Ya fue aceptada: desactivá al usuario")
+        raise HTTPException(409, "Ya fue aceptada: desactive al usuario")
     if not inv.revoked_at:
         now = datetime.now(UTC)
         inv.revoked_at, inv.revoked_by = now, p.user.id
@@ -877,7 +877,7 @@ def ally_preview(cid: int, data: PreviewIn | None = None, p: Principal = Depends
 def _plan_product(db: Session, p: Principal, pid: int | None) -> Product:
     prod = db.get(Product, pid) if pid else None
     if not prod or prod.tenant_id != p.tenant.id or prod.item_type != "servicio" or not prod.cabys_code:
-        raise HTTPException(422, "Elegí el servicio «Mensualidad de la plataforma» con su CABYS (Productos y servicios)")
+        raise HTTPException(422, "Elija el servicio «Mensualidad de la plataforma» con su CABYS (Productos y servicios)")
     return prod
 
 

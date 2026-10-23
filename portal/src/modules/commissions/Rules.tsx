@@ -46,7 +46,7 @@ export default function Rules() {
         {!rules ? <div style={{ padding: 24, textAlign: "center" }}><span className="spinner" /></div> : rules.length === 0 ? (
           <Empty
             title="Sin reglas: nadie comisiona todavía"
-            hint={configura ? "Empezá con una plantilla: solo prellena el formulario, el porcentaje lo decidís vos." : "Administración carga las reglas."}
+            hint={configura ? "Empiece con una plantilla: solo prellena el formulario, el porcentaje lo decide usted." : "Administración carga las reglas."}
             action={configura ? <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>{plantillas.map(([l, mk]) => <button key={l} className="btn btn--soft btn--sm" onClick={() => setForm(mk())}>{l}</button>)}</div> : undefined}
           />
         ) : (

@@ -32,7 +32,7 @@ export default function Vehicles() {
         <div><div className="meta">14 · Administración</div><h1 className="h1">Vehículos y combustible</h1></div>
         <div className="page-head__actions">
           {allows("vehicles.crear") && <button className="btn btn--ghost" onClick={() => setVehForm(blankVehicle())}><Icon d={I.plus} />Vehículo</button>}
-          {allows("vehicles.crear") && <button className="btn btn--crimson" onClick={() => setLoadForm(blankLoad())} disabled={!lookups?.vehicles.length} title={lookups?.vehicles.length ? undefined : "Primero agregá un vehículo"}><Icon d={I.plus} />Registrar carga</button>}
+          {allows("vehicles.crear") && <button className="btn btn--crimson" onClick={() => setLoadForm(blankLoad())} disabled={!lookups?.vehicles.length} title={lookups?.vehicles.length ? undefined : "Primero agregue un vehículo"}><Icon d={I.plus} />Registrar carga</button>}
         </div>
       </div>
       <div className="veh-tabs" role="tablist">{tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "is-active" : ""} onClick={() => setParams({ tab: k })}>{l}</button>)}</div>

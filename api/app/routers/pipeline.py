@@ -475,7 +475,7 @@ def create_quote(oid: int, data: OppQuoteIn, p: Principal = Depends(require("sal
     from ..services import documents as docsvc
 
     if not p.can("crm_pipeline", "editar"):
-        raise HTTPException(403, "No tenés permiso para editar oportunidades")
+        raise HTTPException(403, "No tiene permiso para editar oportunidades")
     o = _own(db, oid, p)
     if o.status in ("ganada", "perdida"):
         raise HTTPException(409, "La oportunidad ya está cerrada")
@@ -485,7 +485,7 @@ def create_quote(oid: int, data: OppQuoteIn, p: Principal = Depends(require("sal
             raise HTTPException(409, f"La oportunidad ya tiene la cotización {q.number}")
     cid = o.customer_id or data.customer_id
     if not cid:
-        raise HTTPException(422, "Elegí el cliente antes de cotizar")
+        raise HTTPException(422, "Elija el cliente antes de cotizar")
     c = db.get(Customer, cid)
     if not c or c.tenant_id != p.tenant.id:
         raise HTTPException(404, "Cliente no encontrado")

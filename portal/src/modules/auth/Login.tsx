@@ -92,7 +92,7 @@ export default function Login() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setErr(null);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setErr("Escribí tu correo completo (ejemplo: nombre@empresa.com)."); setShake((n) => n + 1); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setErr("Escriba su correo completo (ejemplo: nombre@empresa.com)."); setShake((n) => n + 1); return; }
     if (needNew && !need2fa) {
       const local = !strongEnough(newPw) ? "Mínimo 10 caracteres con letras y números." : newPw !== newPw2 ? "Las dos contraseñas no coinciden." : newPw === password ? "La contraseña nueva no puede ser la temporal." : null;
       if (local) { setErr(local); setShake((n) => n + 1); return; }
@@ -141,8 +141,8 @@ export default function Login() {
           <span className="lg-corners" aria-hidden="true" />
           <div className="lg-card__strip"><span><i className="rec-dot" />Pase de acceso</span><span>{need2fa ? "Paso 2 / 2" : needNew ? "Paso de seguridad" : "Panel · CR"}</span></div>
           <div>
-            <h2 className="lg-card__title">{need2fa ? "Verificación en dos pasos" : needNew ? "Creá tu contraseña nueva" : "Iniciar sesión"}</h2>
-            <p className="lg-card__sub">{needNew && !need2fa ? "Entraste con una contraseña temporal. Creá una propia para continuar." : !need2fa ? "Usá el correo con el que te invitaron." : recuperacion ? "Escribí uno de los códigos que guardaste al activar el 2FA. Cada uno sirve una sola vez." : "Escribí el código de 6 dígitos de tu app de autenticación."}</p>
+            <h2 className="lg-card__title">{need2fa ? "Verificación en dos pasos" : needNew ? "Cree su contraseña nueva" : "Iniciar sesión"}</h2>
+            <p className="lg-card__sub">{needNew && !need2fa ? "Entró con una contraseña temporal. Cree una propia para continuar." : !need2fa ? "Use el correo con el que le invitaron." : recuperacion ? "Escriba uno de los códigos que guardó al activar el 2FA. Cada uno sirve una sola vez." : "Escriba el código de 6 dígitos de su app de autenticación."}</p>
           </div>
           {notice && !needNew && !need2fa && <p className="lg-card__sub" role="status" style={{ color: "#7ee2b8", margin: 0 }}>{notice}</p>}
 

@@ -148,7 +148,7 @@ export default function SupplierCatalog() {
     <>
       <div className="prv-banner" role="note">
         <span className="prv-banner__tag">Catálogo del proveedor</span>
-        <span>Esto <b>no es inventario propio</b>: es lo que cada proveedor tiene para vendernos (bajo pedido), con sus códigos y sus categorías. Tus existencias en bodega están en <b>Existencias</b>. Un ítem del proveedor solo pasa a tu catálogo cuando lo vinculás o lo agregás.</span>
+        <span>Esto <b>no es inventario propio</b>: es lo que cada proveedor tiene para vendernos (bajo pedido), con sus códigos y sus categorías. Las existencias en bodega están en <b>Existencias</b>. Un ítem del proveedor solo pasa al catálogo cuando se vincula o se agrega.</span>
       </div>
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -162,7 +162,7 @@ export default function SupplierCatalog() {
       </div>
 
       {withItems.length === 0 ? (
-        <Card><Empty title="Todavía no hay catálogos de proveedor" hint="Subí la lista de precios de Eurocomp tal como la manda el proveedor (Excel). Se ve primero una vista previa y nada se mezcla con tu inventario." action={canAdd ? <button className="btn btn--crimson" onClick={() => setImporting(true)}><Icon d={I.upload} />Importar lista</button> : undefined} /></Card>
+        <Card><Empty title="Todavía no hay catálogos de proveedor" hint="Suba la lista de precios de Eurocomp tal como la manda el proveedor (Excel). Se ve primero una vista previa y nada se mezcla con el inventario." action={canAdd ? <button className="btn btn--crimson" onClick={() => setImporting(true)}><Icon d={I.upload} />Importar lista</button> : undefined} /></Card>
       ) : (
         <div className="prv-sups">
           {withItems.map((s) => (
@@ -283,7 +283,7 @@ function ImportModal({ sups, current, onClose, onDone }: { sups: Sup[]; current:
     return p.toString();
   };
   const preview = async (fl: File, maps = mapping) => {
-    if (form.supplier_id === "__new" && !form.supplier.trim()) { toast("Escribí el nombre del proveedor", "bad"); return; }
+    if (form.supplier_id === "__new" && !form.supplier.trim()) { toast("Escriba el nombre del proveedor", "bad"); return; }
     setBusy(true);
     try { const r = await uploadFile<Preview>(`/supplier-catalog/import?${qs(false, maps)}`, fl); setPrev(r); setShow(""); }
     catch (e) { toast(e instanceof Error ? e.message : "No se pudo leer la lista", "bad"); }
@@ -312,7 +312,7 @@ function ImportModal({ sups, current, onClose, onDone }: { sups: Sup[]; current:
       {prev && <button className="btn btn--crimson" onClick={confirm} disabled={busy || toImport === 0}>{busy ? <span className="spinner" /> : `Importar lista (${toImport} ítems)`}</button>}
     </>}>
       {!prev && <>
-        <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Subí el archivo tal como lo manda el proveedor. El formato de Eurocomp (títulos arriba, filas de categoría) se reconoce solo; para otros proveedores podés indicar qué columna es cada dato. Primero ves qué va a cambiar; nada se guarda hasta confirmar.</p>
+        <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Suba el archivo tal como lo manda el proveedor. El formato de Eurocomp (títulos arriba, filas de categoría) se reconoce solo; para otros proveedores puede indicar qué columna es cada dato. Primero se ve qué va a cambiar; nada se guarda hasta confirmar.</p>
         <div className="grid-2">
           <Field label="Proveedor">
             <select className="select" value={form.supplier_id} onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}>
@@ -458,7 +458,7 @@ function LinkModal({ item, canLink, onClose, onDone }: { item: Detail; canLink: 
         )}
         <Field label="Buscar en mi catálogo" hint="Nombre, código o modelo del producto propio.">
           <div style={{ display: "flex", gap: 8 }}>
-            <div style={{ flex: 1 }}><Lookup value={pick?.label || ""} placeholder="Escribí para buscar…" fetcher={searchProducts} onSelect={(it) => setPick(it)} /></div>
+            <div style={{ flex: 1 }}><Lookup value={pick?.label || ""} placeholder="Escriba para buscar…" fetcher={searchProducts} onSelect={(it) => setPick(it)} /></div>
             <button className="btn btn--crimson btn--sm" disabled={!pick || busy} onClick={() => pick && link(pick.id)}>Vincular</button>
           </div>
         </Field>

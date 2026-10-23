@@ -65,7 +65,7 @@ export function AutosaveBar({ status, recovery, enabled, onRecover, onDiscard, m
     : state === "draft" && at ? `Borrador guardado en este dispositivo ${ago(at, now)}${mode === "close" ? " · se guarda en el sistema al cerrar" : ""}`
     : mode === "close" ? "Se guarda al cerrar · mientras tanto queda copia en este dispositivo"
     : mode === "never" ? "Borrador en este dispositivo · se guarda en el sistema al tocar Guardar"
-    : "Se guarda solo mientras escribís";
+    : "Se guarda solo mientras escribe";
   return (
     <div className={`autosave autosave--${state}`} role="status" aria-live="polite">
       <span className="autosave__dot" aria-hidden="true" />

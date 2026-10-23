@@ -283,7 +283,7 @@ export default function Surveys() {
       const s = await save(true);
       if (!s) return; // save ya avisó por qué no se guardó
       const list = await api<Suggestion[]>(`/surveys/${s.id}/suggest?candidates=true`, { method: "POST" });
-      if (!list.length) { toast("No hay materiales habituales para este tipo de solución: agregá puntos o cargalos a mano.", "bad"); return; }
+      if (!list.length) { toast("No hay materiales habituales para este tipo de solución: agregue puntos o cárguelos a mano.", "bad"); return; }
       setSugErr(null);
       setSugs(list.map((x) => toSugRow(x)));
     } catch (e) { toast(`No se pudieron sugerir materiales: ${errText(e)}. Pruebe de nuevo.`, "bad"); }
@@ -826,7 +826,7 @@ export default function Surveys() {
           )}
           {live.missing.length > 0 && (
             <p style={{ background: "var(--bad-soft, rgba(226,35,58,.1))", border: "1px solid var(--bad)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "var(--bad)" }}>
-              Sin costo de proveedor: {live.missing.slice(0, 4).join(", ")}{live.missing.length > 4 ? ` y ${live.missing.length - 4} más` : ""}. Escribí el costo en la línea; mientras tanto el margen real va a ser menor al que ves.
+              Sin costo de proveedor: {live.missing.slice(0, 4).join(", ")}{live.missing.length > 4 ? ` y ${live.missing.length - 4} más` : ""}. Escriba el costo en la línea; mientras tanto el margen real va a ser menor al que ve.
             </p>
           )}
           <Field label={`Margen sobre venta (objetivo) · ${margin} % = recargo de ${markupOf(margin).toFixed(2)} % sobre el costo`} hint="Precio = costo ÷ (1 − margen). No es un recargo: con recargo sería costo × (1 + recargo). Solo cambia el precio sugerido; el costo es el del proveedor. Los precios en colones se redondean hacia arriba a la centena.">

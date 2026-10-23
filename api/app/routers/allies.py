@@ -85,7 +85,7 @@ def _company(db: Session, p: Principal, data: AllyIn, current: AllyParticipation
     """(ally_company_id, customer_id, supplier_id, nombre): exactamente una de las tres. Una empresa aliada inactiva no
     entra a una participacion nueva, pero la que ya tenia (current) se sigue editando (papel, alcance, visibilidad)."""
     if sum(1 for x in (data.ally_company_id, data.customer_id, data.supplier_id) if x) != 1:
-        raise HTTPException(422, "Elegí la empresa aliada")
+        raise HTTPException(422, "Elija la empresa aliada")
     if data.ally_company_id:
         a = db.get(AllyCompany, data.ally_company_id)
         if not a or a.tenant_id != p.tenant.id:

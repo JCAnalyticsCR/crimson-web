@@ -130,6 +130,62 @@ def test_no_suma_cuenta_como_100_pct_descuento(client, auth, db_session):
     assert q["status"] == "por_aprobar"
 
 
+def test_linea_libre_bajo_tope_no_bloquea(client, auth, db_session):
+    """Línea libre (sin producto) bajo ₡25 000 no bloquea al vendedor."""
+    prod = _prod_crc(client)
+    v = _vendor_headers(client, db_session, "v-libre-ok@ejemplo.com")
+    c = _cust(client)
+    q = client.post(
+        "/quotes",
+        json={
+            "customer_id": c["id"],
+            "lines": [
+                {"product_id": prod["id"], "name": prod["name"], "quantity": 1, "unit_price": 50000, "tax_rate": 13},
+                {"name": "Flete", "quantity": 1, "unit_price": 20000, "tax_rate": 13},  # libre, bajo ₡25 000
+            ],
+        },
+        headers=v,
+    ).json()
+    assert q["status"] == "creado", f"Línea libre bajo el tope no debería bloquear: {q['status']}"
+
+
+def test_linea_libre_sobre_tope_bloquea(client, auth, db_session):
+    """Línea libre (sin producto) sobre ₡25 000 pide aprobación al vendedor."""
+    prod = _prod_crc(client)
+    v = _vendor_headers(client, db_session, "v-libre-block@ejemplo.com")
+    c = _cust(client)
+    q = client.post(
+        "/quotes",
+        json={
+            "customer_id": c["id"],
+            "lines": [
+                {"product_id": prod["id"], "name": prod["name"], "quantity": 1, "unit_price": 50000, "tax_rate": 13},
+                {"name": "Mano de obra especial", "quantity": 1, "unit_price": 30000, "tax_rate": 13},  # libre, sobre ₡25 000
+            ],
+        },
+        headers=v,
+    ).json()
+    assert q["status"] == "por_aprobar", f"Línea libre sobre el tope debería bloquear: {q['status']}"
+
+
+def test_linea_libre_admin_no_bloquea(client, auth, db_session):
+    """El admin (descuento_libre) puede agregar líneas libres de cualquier monto sin aprobación."""
+    prod = _prod_crc(client)
+    c = _cust(client)
+    # admin usa client directamente (sin vendor headers)
+    q = client.post(
+        "/quotes",
+        json={
+            "customer_id": c["id"],
+            "lines": [
+                {"product_id": prod["id"], "name": prod["name"], "quantity": 1, "unit_price": 50000, "tax_rate": 13},
+                {"name": "Servicio sin catálogo", "quantity": 1, "unit_price": 500000, "tax_rate": 13},  # libre, monto alto
+            ],
+        },
+    ).json()
+    assert q["status"] == "creado", f"El admin no debería bloquearse: {q['status']}"
+
+
 def test_factura_directa_con_descuento_excesivo_rechazada(client, auth, db_session):
     """Factura directa con descuento mayor al límite → 422 (no puede quedar por_aprobar)."""
     prod = _prod_crc(client)
@@ -395,3 +451,74 @@ def test_oportunidad_fuente_sitio_web_normalizada(client, auth, db_session):
         json={"title": "Web test", "kind": "venta", "customer_id": c["id"], "amount": 50000, "probability": 20, "source": "Sitio web"},
     ).json()
     assert o.get("source") == "Sitio web"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REPORTES: motivos_perdida y ajustes_inventario
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_reporte_motivos_perdida_disponible_y_con_datos(client, auth, db_session):
+    """El reporte motivos_perdida aparece en el catálogo (admin) y retorna filas con monto."""
+    from app.models import Opportunity
+
+    # Crear oportunidad perdida con datos completos
+    c = _cust(client)
+    o = client.post(
+        "/opportunities",
+        json={"title": "Perdida con motivo", "kind": "venta", "customer_id": c["id"], "amount": 200000, "probability": 0},
+    ).json()
+    oobj = db_session.get(Opportunity, o["id"])
+    oobj.status = "perdida"
+    oobj.lost_reason = "Precio"
+    oobj.lost_competitor = "Axis"
+    from datetime import datetime, timezone
+    oobj.closed_at = datetime.now(timezone.utc)
+    db_session.commit()
+
+    catalog = client.get("/reports").json()
+    assert any(r["key"] == "motivos_perdida" for r in catalog), "motivos_perdida no aparece en el catálogo del admin"
+
+    from datetime import date, timedelta
+    hoy = date.today()
+    ayer = hoy - timedelta(days=1)
+    r = client.get("/reports/motivos_perdida", params={"from": str(ayer), "to": str(hoy)})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "columns" in data and "Monto estimado" in data["columns"]
+    # debe haber al menos una fila con "Precio"
+    filas_precio = [row for row in data["rows"] if row[0] == "Precio"]
+    assert filas_precio, f"No encontré fila con motivo 'Precio': {data['rows']}"
+    assert float(filas_precio[0][4]) == 200000.0, "Monto estimado incorrecto"
+
+
+def test_reporte_ajustes_inventario_disponible_y_con_datos(client, auth, db_session):
+    """El reporte ajustes_inventario aparece en el catálogo y muestra los movimientos."""
+    from app.models import Product
+
+    prod = client.post("/products", json={"name": "Prd Reporte", "code": "PRD-RPT-VC", "price": 5000}).json()
+    obj = db_session.get(Product, prod["id"])
+    obj.quantity = 50
+    db_session.commit()
+
+    wid = _warehouse(client)
+    client.post("/stock/movements", json={"product_id": prod["id"], "warehouse_id": wid, "kind": "ajuste", "quantity": -5, "note": "Dañado en bodega"})
+
+    catalog = client.get("/reports").json()
+    assert any(r["key"] == "ajustes_inventario" for r in catalog), "ajustes_inventario no aparece en el catálogo del admin"
+
+    from datetime import date, timedelta
+    hoy = date.today()
+    ayer = hoy - timedelta(days=1)
+    r = client.get("/reports/ajustes_inventario", params={"from": str(ayer), "to": str(hoy)})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "columns" in data and "Motivo" in data["columns"]
+    assert any("Dañado en bodega" in str(row) for row in data["rows"]), f"No encontré la nota en los datos: {data['rows']}"
+
+
+def test_reporte_motivos_perdida_no_visible_para_vendedor(client, auth, db_session):
+    """El vendedor no tiene acceso al reporte motivos_perdida (no tiene reports.ver)."""
+    v = _vendor_headers(client, db_session, "v-rep@ejemplo.com")
+    r = client.get("/reports/motivos_perdida", params={"from": "2026-01-01", "to": "2026-12-31"}, headers=v)
+    assert r.status_code == 403, f"El vendedor no debería ver el reporte: {r.status_code}"

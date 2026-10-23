@@ -107,7 +107,7 @@ export default function RolesEditor({ onChanged, focus }: { onChanged: () => voi
   if (!data) return <Card title="Roles y permisos"><div style={{ padding: 16, textAlign: "center" }}><span className="spinner" /></div></Card>;
   return (
     <Card title="Roles y permisos" extra={<button className="btn btn--soft btn--sm" onClick={() => setNuevo({ name: "", from_code: sel === "admin" ? "ventas" : sel })}><Icon d={I.plus} />Crear rol</button>}>
-      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Elegí un rol para ver y cambiar lo que puede hacer. Aplica en la siguiente acción de cada persona, sin cerrar sesión, y queda en la bitácora. Anular facturas, publicar en la tienda, ver costos (eso va en «Quién ve costos») y configurar la empresa son solo del administrador.</p>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Elija un rol para ver y cambiar lo que puede hacer. Aplica en la siguiente acción de cada persona, sin cerrar sesión, y queda en la bitácora. Anular facturas, publicar en la tienda, ver costos (eso va en «Quién ve costos») y configurar la empresa son solo del administrador.</p>
       <div className="chips" role="group" aria-label="Roles" style={{ marginBottom: 12, flexWrap: "wrap" }}>
         {data.roles.map((r) => (
           <button key={r.code} type="button" className={`chip ${sel === r.code ? "is-on" : ""}`} aria-pressed={sel === r.code} onClick={() => { if (dirty && !confirm("Hay cambios sin guardar. ¿Descartarlos?")) return; setSel(r.code); }}>

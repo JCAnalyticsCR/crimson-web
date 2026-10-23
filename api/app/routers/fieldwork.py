@@ -1039,7 +1039,7 @@ def survey_apply_product(sid: int, data: ApplyProductIn, p: Principal = Depends(
     if s.status in ("cotizado", "cerrado"):
         raise HTTPException(409, "El levantamiento ya fue cotizado")
     if not data.product_id and not data.supplier_item_id:
-        raise HTTPException(422, "Elegí un producto del catálogo o una oferta del proveedor")
+        raise HTTPException(422, "Elija un producto del catálogo o una oferta del proveedor")
     it = next((x for x in s.items if data.item_id and x.id == data.item_id), None)
     if data.item_id and it is None:
         raise HTTPException(404, "Esa línea no pertenece a este levantamiento")
@@ -1500,7 +1500,7 @@ def survey_to_quote(sid: int, data: ToQuoteIn, p: Principal = Depends(require("s
     if s.review_status != "aprobado":
         estado = REVIEW_LABEL.get(s.review_status, s.review_status).lower()
         if not data.skip_review:
-            extra = " Como administrador podés cotizar sin revisión confirmándolo." if p.can("field", "saltar_revision") else ""
+            extra = " Como administrador puede cotizar sin revisión confirmándolo." if p.can("field", "saltar_revision") else ""
             raise HTTPException(409, f"El levantamiento necesita la revisión aprobada del supervisor antes de cotizar (estado: {estado}).{extra}")
         if not p.can("field", "saltar_revision"):
             raise HTTPException(403, "Sin permiso: field.saltar_revision")
@@ -2279,7 +2279,7 @@ def _time_entry(db: Session, o: WorkOrder, eid: int, p: Principal):
         raise HTTPException(404, "Entrada de tiempo no encontrada")
     if not p.can("field", "asignar"):
         if e.user_id != p.user.id:
-            raise HTTPException(403, "Solo podés corregir tu propio tiempo")
+            raise HTTPException(403, "Solo puede corregir su propio tiempo")
         if o.status in CERRADAS:
             raise HTTPException(409, f"La orden está {o.status}; el tiempo lo corrige el supervisor")
     return e

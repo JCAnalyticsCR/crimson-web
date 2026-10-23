@@ -209,7 +209,7 @@ export default function Products() {
     try {
       const rows = await api<Cabys[]>(`/cabys?${onlyDigits ? `codigo=${t}` : `q=${encodeURIComponent(t)}&top=20`}`);
       rows.forEach((r) => { cabysHits.current[r.code] = r; });
-      if (!rows.length) return [{ id: -1, label: "Sin resultados en el CABYS", hint: "Probá con otra palabra (cámara, cable, switch…)" }];
+      if (!rows.length) return [{ id: -1, label: "Sin resultados en el CABYS", hint: "Pruebe con otra palabra (cámara, cable, switch…)" }];
       return rows.map((r) => ({ id: Number(r.code), label: r.description, hint: `${r.code} · IVA ${r.tax_rate ?? "?"}%` }));
     } catch (e) {
       return [{ id: -1, label: e instanceof Error ? e.message : "Hacienda no respondió", hint: "Puede escribir el código de 13 dígitos a mano" }];
@@ -270,7 +270,7 @@ export default function Products() {
             <button className="btn btn--ghost btn--sm" onClick={() => setSel(new Set())}>Quitar selección</button>
           </div>
         )}
-        {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Nada con esos filtros. Probá limpiarlos o creá el producto." /> : (
+        {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Nada con esos filtros. Pruebe limpiarlos o cree el producto." /> : (
           <>
           {/* Telefono (pedido 21/10): tarjetas con la foto grande del producto en vez de la tabla ancha, donde la
               miniatura de 36 px quedaba fuera de vista al deslizar. La tabla sigue igual en tablet y escritorio. */}

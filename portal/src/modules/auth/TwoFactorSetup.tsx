@@ -33,7 +33,7 @@ export default function TwoFactorSetup({ change = false, onDone, onCancel }: { c
       const r = await api<{ codes: string[] }>("/auth/2fa/verify", { method: "POST", json: { code } });
       toast(change ? "Listo: la verificación en dos pasos ya usa la app nueva" : "Verificación en dos pasos activada");
       onDone(r.codes);
-    } catch { setErr("Código inválido o vencido. Escribí el que muestra la app en este momento."); }
+    } catch { setErr("Código inválido o vencido. Escriba el que muestra la app en este momento."); }
     finally { setBusy(false); }
   };
 
@@ -41,11 +41,11 @@ export default function TwoFactorSetup({ change = false, onDone, onCancel }: { c
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {change ? <>
-          <p className="muted" style={{ fontSize: 13, margin: 0 }}>Para pasar la verificación a otro teléfono o app, confirmá que sos vos. Tu app actual sigue sirviendo hasta que termines.</p>
-          <Field label="Tu contraseña"><input className="input" type="password" autoComplete="current-password" value={cred.password} onChange={(e) => setCred({ ...cred, password: e.target.value })} /></Field>
-          <Field label="Código de tu app actual" hint="Si ya no tiene la app, usá uno de tus códigos de recuperación."><input className="input input--mono" autoComplete="one-time-code" maxLength={9} placeholder="000000" value={cred.code} onChange={(e) => setCred({ ...cred, code: e.target.value.toUpperCase() })} style={{ width: 160 }} /></Field>
+          <p className="muted" style={{ fontSize: 13, margin: 0 }}>Para pasar la verificación a otro teléfono o app, confirme su identidad. Su app actual sigue sirviendo hasta que termine.</p>
+          <Field label="Su contraseña"><input className="input" type="password" autoComplete="current-password" value={cred.password} onChange={(e) => setCred({ ...cred, password: e.target.value })} /></Field>
+          <Field label="Código de su app actual" hint="Si ya no tiene la app, use uno de sus códigos de recuperación."><input className="input input--mono" autoComplete="one-time-code" maxLength={9} placeholder="000000" value={cred.code} onChange={(e) => setCred({ ...cred, code: e.target.value.toUpperCase() })} style={{ width: 160 }} /></Field>
         </> : (
-          <p className="muted" style={{ fontSize: 13, margin: 0 }}>Necesitás una app de autenticación en el teléfono (Google Authenticator, Microsoft Authenticator, Authy o la de tu gestor de contraseñas). Al entrar, además de la contraseña, vas a escribir el código de seis dígitos que muestra.</p>
+          <p className="muted" style={{ fontSize: 13, margin: 0 }}>Necesita una app de autenticación en el teléfono (Google Authenticator, Microsoft Authenticator, Authy o la de su gestor de contraseñas). Al entrar, además de la contraseña, escribirá el código de seis dígitos que muestra.</p>
         )}
         {err && <p role="alert" style={{ color: "var(--bad)", fontSize: 13, margin: 0 }}>{err}</p>}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -57,20 +57,20 @@ export default function TwoFactorSetup({ change = false, onDone, onCancel }: { c
   }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <p className="muted" style={{ fontSize: 13, margin: 0 }}>1. En la app, agregá una cuenta nueva con esta clave (o tocá «Abrir en la app» desde el teléfono).</p>
+      <p className="muted" style={{ fontSize: 13, margin: 0 }}>1. En la app, agregue una cuenta nueva con esta clave (o toque «Abrir en la app» desde el teléfono).</p>
       <code className="mono" style={{ padding: 10, background: "var(--bg-2)", borderRadius: 8, wordBreak: "break-all" }}>{sec.secret}</code>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button className="btn btn--ghost btn--sm" onClick={() => { navigator.clipboard.writeText(sec.secret); toast("Clave copiada"); }}><Icon d={I.copy} />Copiar la clave</button>
         <a className="btn btn--ghost btn--sm" href={sec.otpauth_uri}>Abrir en la app</a>
       </div>
-      <p className="muted" style={{ fontSize: 13, margin: "4px 0 0" }}>2. Escribí el código de seis dígitos que muestra la app.</p>
+      <p className="muted" style={{ fontSize: 13, margin: "4px 0 0" }}>2. Escriba el código de seis dígitos que muestra la app.</p>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <input className="input input--mono" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="000000" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} onKeyDown={(e) => { if (e.key === "Enter" && code.length === 6) confirmar(); }} style={{ width: 140 }} autoFocus />
         <button className="btn btn--crimson" onClick={confirmar} disabled={busy || code.length !== 6}>{busy ? "Verificando…" : change ? "Confirmar la app nueva" : "Activar"}</button>
         {onCancel && <button className="btn btn--ghost" onClick={onCancel} disabled={busy}>Cancelar</button>}
       </div>
       {err && <p role="alert" style={{ color: "var(--bad)", fontSize: 13, margin: 0 }}>{err}</p>}
-      {change && <p className="muted" style={{ fontSize: 12, margin: 0 }}>Hasta que confirmes, tu app anterior sigue siendo la que vale para entrar.</p>}
+      {change && <p className="muted" style={{ fontSize: 12, margin: 0 }}>Hasta que confirme, su app anterior sigue siendo la que vale para entrar.</p>}
     </div>
   );
 }
@@ -87,7 +87,7 @@ export function RecoveryCodes({ codes, email, onDone }: { codes: string[]; email
   };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <p style={{ fontSize: 14, margin: 0 }}>Guardá estos códigos ahora: es la <b>única vez</b> que se muestran. Si perdés el teléfono, con uno de ellos entrás al panel.</p>
+      <p style={{ fontSize: 14, margin: 0 }}>Guarde estos códigos ahora: es la <b>única vez</b> que se muestran. Si pierde el teléfono, con uno de ellos entra al panel.</p>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
         {codes.map((c) => <code key={c} className="mono" style={{ padding: "10px 12px", background: "var(--bg-2)", borderRadius: 8, textAlign: "center", fontSize: 15, letterSpacing: ".05em" }}>{c}</code>)}
       </div>

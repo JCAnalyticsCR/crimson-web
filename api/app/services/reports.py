@@ -1185,7 +1185,7 @@ def cxp_vencimientos(db: Session, tid: int, a: date, b: date) -> Report:
 
 
 def motivos_perdida(db: Session, tid: int, a: date, b: date) -> Report:
-    """Oportunidades perdidas en el periodo, agrupadas por motivo y vendedor."""
+    """Oportunidades perdidas en el periodo, agrupadas por motivo, vendedor y competidor."""
     from datetime import datetime, timezone
 
     a_dt = datetime(a.year, a.month, a.day, tzinfo=timezone.utc)
@@ -1196,7 +1196,8 @@ def motivos_perdida(db: Session, tid: int, a: date, b: date) -> Report:
                 Opportunity.lost_reason,
                 func.coalesce(User.full_name, "—").label("vendedor"),
                 Opportunity.lost_competitor,
-                func.count().label("total"),
+                func.count().label("cantidad"),
+                func.coalesce(func.sum(Opportunity.amount), 0).label("monto"),
             )
             .join(User, User.id == Opportunity.owner_id, isouter=True)
             .where(
@@ -1210,13 +1211,66 @@ def motivos_perdida(db: Session, tid: int, a: date, b: date) -> Report:
         )
         .all()
     )
-    rows = [[r.lost_reason or "Sin motivo", r.vendedor, r.lost_competitor or "—", r.total] for r in rows_q]
+    rows = [
+        [r.lost_reason or "Sin motivo", r.vendedor, r.lost_competitor or "—", r.cantidad, Decimal(str(r.monto or 0))]
+        for r in rows_q
+    ]
     return Report(
         "motivos_perdida",
         "Motivos de pérdida",
-        ["Motivo", "Vendedor", "Competidor", "Total"],
+        ["Motivo", "Vendedor", "Competidor", "Cantidad", "Monto estimado"],
         rows,
-        {"total": sum(r[3] for r in rows)},
+        {"total": sum(r[3] for r in rows), "monto_total": sum(r[4] for r in rows)},
+    )
+
+
+def ajustes_inventario(db: Session, tid: int, a: date, b: date) -> Report:
+    """Movimientos manuales de inventario (salidas y ajustes) por usuario en el periodo."""
+    from datetime import datetime, timezone
+
+    a_dt = datetime(a.year, a.month, a.day, tzinfo=timezone.utc)
+    b_dt = datetime(b.year, b.month, b.day, 23, 59, 59, tzinfo=timezone.utc)
+    rows_q = (
+        db.execute(
+            select(
+                func.coalesce(User.full_name, "—").label("usuario"),
+                Product.name.label("producto"),
+                Product.code.label("codigo"),
+                StockMovement.kind,
+                StockMovement.quantity,
+                StockMovement.note,
+                StockMovement.at,
+            )
+            .join(User, User.id == StockMovement.created_by, isouter=True)
+            .join(Product, Product.id == StockMovement.product_id)
+            .where(
+                StockMovement.tenant_id == tid,
+                StockMovement.kind.in_(("salida", "ajuste")),
+                StockMovement.at >= a_dt,
+                StockMovement.at <= b_dt,
+            )
+            .order_by(StockMovement.at.desc())
+        )
+        .all()
+    )
+    rows = [
+        [
+            r.usuario,
+            r.producto,
+            r.codigo,
+            r.kind,
+            Decimal(str(r.quantity or 0)),
+            r.note or "—",
+            r.at.strftime("%d/%m/%Y %H:%M") if r.at else "—",
+        ]
+        for r in rows_q
+    ]
+    return Report(
+        "ajustes_inventario",
+        "Ajustes de inventario por usuario",
+        ["Usuario", "Producto", "Código", "Tipo", "Cantidad", "Motivo", "Fecha"],
+        rows,
+        {"total": len(rows)},
     )
 
 
@@ -1245,6 +1299,7 @@ REPORTS = {
     "cxp_antigüedad": cxp_antigüedad,
     "cxp_vencimientos": cxp_vencimientos,
     "motivos_perdida": motivos_perdida,
+    "ajustes_inventario": ajustes_inventario,
 }
 CATALOG = [
     ("facturacion", "Facturación", "Todas las facturas del periodo con totales y saldo"),
@@ -1270,7 +1325,8 @@ CATALOG = [
     ("comisiones", "Comisiones del periodo", "Comisiones, bonos y pagos a aliados devengados, con su estado y referencia de pago"),
     ("cxp_antigüedad", "CxP · Antigüedad de saldos", "Saldo por proveedor en rangos de vencimiento (corriente, 1-30, 31-60, 61-90, >90 días)"),
     ("cxp_vencimientos", "CxP · Vencimientos próximos", "Facturas de proveedor que vencen en el periodo indicado con su saldo pendiente"),
-    ("motivos_perdida", "Motivos de pérdida", "Oportunidades perdidas por motivo, vendedor y competidor"),
+    ("motivos_perdida", "Motivos de pérdida", "Oportunidades perdidas por motivo, vendedor y competidor, con monto estimado"),
+    ("ajustes_inventario", "Ajustes de inventario por usuario", "Salidas y ajustes manuales: quién, qué producto, cantidad, motivo y fecha"),
 ]
 
 

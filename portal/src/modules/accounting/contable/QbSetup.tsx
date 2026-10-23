@@ -444,9 +444,9 @@ function StepExportar({ toast, month, setMonth }: { toast: (msg: string, tone?: 
         <summary style={{ cursor: "pointer", fontWeight: 600 }}>¿Cómo importar en QuickBooks Online?</summary>
         <ol style={{ marginTop: 10, paddingLeft: 20, lineHeight: 2 }}>
           <li>En QBO: <b>Configuración ⚙ → Importar datos → Asientos de diario</b></li>
-          <li>Subí el archivo <code>asientos_YYYY-MM.csv</code> del ZIP descargado.</li>
-          <li>Si hay varios archivos numerados (<code>_1, _2…</code>), importalos en orden.</li>
-          <li>Usá el archivo <code>contactos_YYYY-MM.csv</code> si hay clientes o proveedores nuevos
+          <li>Suba el archivo <code>asientos_YYYY-MM.csv</code> del ZIP descargado.</li>
+          <li>Si hay varios archivos numerados (<code>_1, _2…</code>), impórtelos en orden.</li>
+          <li>Use el archivo <code>contactos_YYYY-MM.csv</code> si hay clientes o proveedores nuevos
             (<b>Configuración ⚙ → Importar datos → Clientes</b> o <b>Proveedores</b>).</li>
         </ol>
       </details>

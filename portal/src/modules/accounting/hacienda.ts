@@ -25,7 +25,7 @@ export type IvaCondition = "credito" | "credito_parcial" | "bienes_capital" | "n
 /* Condicion del IVA con su codigo de Hacienda y la explicacion de una linea (Nota de la resolucion). */
 export const IVA_CONDITIONS: { key: IvaCondition; code: string; label: string; hint: string }[] = [
   { key: "credito", code: "01", label: "01 · Genera crédito", hint: "Genera crédito: el IVA se acredita completo" },
-  { key: "credito_parcial", code: "02", label: "02 · Crédito parcial", hint: "Crédito parcial: indicá cuánto se acredita" },
+  { key: "credito_parcial", code: "02", label: "02 · Crédito parcial", hint: "Crédito parcial: indique cuánto se acredita" },
   { key: "bienes_capital", code: "03", label: "03 · Bienes de capital", hint: "Bienes de capital" },
   { key: "no_credito", code: "04", label: "04 · Gasto corriente", hint: "Gasto corriente: el IVA pasa a ser gasto" },
   { key: "proporcional", code: "05", label: "05 · Proporcionalidad", hint: "Proporcionalidad: se aplica la prorrata del periodo" },

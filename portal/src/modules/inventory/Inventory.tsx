@@ -175,7 +175,7 @@ export default function Inventory() {
       {modal === "move" && (
         <Modal title="Movimiento de inventario" onClose={() => setModal(null)} foot={<><button className="btn btn--ghost" onClick={() => setModal(null)}>Cancelar</button><button className="btn btn--crimson" disabled={!mv.product_id || !mv.warehouse_id} onClick={submit}>Registrar</button></>}>
           <div className="grid-2">
-            <Field label="Producto" hint="Escribí código, nombre o modelo."><Lookup value={mvLabel} placeholder="Buscar producto…" fetcher={searchGoods} onSelect={(it, text) => { setMvLabel(text); setMv({ ...mv, product_id: it ? String(it.id) : "" }); }} /></Field>
+            <Field label="Producto" hint="Escriba código, nombre o modelo."><Lookup value={mvLabel} placeholder="Buscar producto…" fetcher={searchGoods} onSelect={(it, text) => { setMvLabel(text); setMv({ ...mv, product_id: it ? String(it.id) : "" }); }} /></Field>
             <Field label="Ubicación"><select className="select" value={mv.warehouse_id} onChange={(e) => setMv({ ...mv, warehouse_id: e.target.value })}><option value="">Seleccione…</option>{whs.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></Field>
             <Field label="Tipo"><select className="select" value={mv.kind} onChange={(e) => setMv({ ...mv, kind: e.target.value })}><option value="entrada">Entrada (compra)</option><option value="salida">Salida</option><option value="ajuste">Ajuste (+/−)</option></select></Field>
             <Field label="Cantidad"><input className="input input--mono" value={mv.quantity} onChange={(e) => setMv({ ...mv, quantity: e.target.value })} /></Field>

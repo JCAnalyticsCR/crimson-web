@@ -235,7 +235,7 @@ export default function Dashboard() {
               )}
             </Card>}
             <Card title="Facturas recientes" flush extra={<Link className="btn btn--ghost btn--sm" to="/facturas">Ver todas</Link>}>
-              {d.facturas_recientes.length === 0 ? (allows("sales.crear") ? <Empty hint="Creá tu primera factura desde una cotización." action={<Link className="btn btn--crimson btn--sm" to="/cotizaciones/nueva">Nueva cotización</Link>} /> : <Empty hint="Todavía no hay facturas tuyas." />) : (
+              {d.facturas_recientes.length === 0 ? (allows("sales.crear") ? <Empty hint="Cree su primera factura desde una cotización." action={<Link className="btn btn--crimson btn--sm" to="/cotizaciones/nueva">Nueva cotización</Link>} /> : <Empty hint="Todavía no hay facturas suyas." />) : (
                 <table className="table">
                   <thead><tr><th>Código</th><th>Cliente</th><th className="num">Importe</th><th>Estado</th></tr></thead>
                   <tbody>{d.facturas_recientes.map((f) => (

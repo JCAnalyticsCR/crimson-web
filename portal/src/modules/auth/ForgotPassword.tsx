@@ -14,7 +14,7 @@ export default function ForgotPassword() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setErr(null);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setErr("Escribí tu correo completo (ejemplo: nombre@empresa.com)."); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setErr("Escriba su correo completo (ejemplo: nombre@empresa.com)."); return; }
     setBusy(true);
     try { await api("/auth/password-reset/request", { method: "POST", json: { email: email.trim() } }); setSent(true); }
     catch (ex) { setErr(ex instanceof ApiError && ex.status === 429 ? "Demasiados intentos desde esta conexión. Esperá unos minutos." : ex instanceof Error ? ex.message : "No se pudo enviar"); }
@@ -28,10 +28,10 @@ export default function ForgotPassword() {
           <img className="login__logo" src="/logo.png" alt="Crimson" />
           <div>
             <h2 className="h1">¿Olvidaste tu contraseña?</h2>
-            <p className="muted" style={{ marginTop: 6 }}>{sent ? "Revisá tu correo." : "Escribí el correo con el que entrás a la plataforma."}</p>
+            <p className="muted" style={{ marginTop: 6 }}>{sent ? "Revise su correo." : "Escriba el correo con el que entra a la plataforma."}</p>
           </div>
           {sent ? (
-            <p style={{ fontSize: 14, margin: 0 }} role="status">Si ese correo tiene acceso, en unos minutos te llega un enlace para crear una contraseña nueva (vence en 1 hora). Si no te llega, pedile a tu administrador que te la restablezca desde Ajustes → Usuarios.</p>
+            <p style={{ fontSize: 14, margin: 0 }} role="status">Si ese correo tiene acceso, en unos minutos le llega un enlace para crear una contraseña nueva (vence en 1 hora). Si no le llega, pídale a su administrador que la restablezca desde Ajustes → Usuarios.</p>
           ) : (
             <>
               <div className="field"><label>Correo</label><input className="input" type="email" inputMode="email" autoComplete="username" autoFocus value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nombre@empresa.com" required /></div>

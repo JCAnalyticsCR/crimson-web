@@ -1007,12 +1007,12 @@ def _offer(db: Session, ctx: AllyCtx, o: Opportunity, parts: list[AllyParticipat
         raise HTTPException(404, "Oportunidad no encontrada")
     if data.participation_id is None:
         if len(parts) > 1:
-            raise HTTPException(422, "Elegí en qué papel envía el precio")
+            raise HTTPException(422, "Elija en qué papel envía el precio")
         a = parts[0]
     else:
         a = next((x for x in parts if x.id == data.participation_id), None)
         if a is None:
-            raise HTTPException(422, "Elegí en qué papel envía el precio")
+            raise HTTPException(422, "Elija en qué papel envía el precio")
     r = AllyCostRequest(
         tenant_id=ctx.p.tenant.id,
         participation_id=a.id,
@@ -1189,7 +1189,7 @@ def _survey_photos_check(db: Session, ctx: AllyCtx, data: AllySurveyEditIn, s: S
 @router.post("/levantamientos", status_code=201)
 def levantamiento_crear(data: AllySurveyIn, ctx: AllyCtx = Depends(need("levantamientos_crear")), db: Session = Depends(get_db)):
     if bool(data.opportunity_id) == bool(data.project_id):
-        raise HTTPException(422, "Elegí la oportunidad o el proyecto en común")
+        raise HTTPException(422, "Elija la oportunidad o el proyecto en común")
     if data.project_id:
         pr = ctx.scope.one(Project, data.project_id, ctx.scope.projects(), "Proyecto")
         if not pr.opportunity_id:
@@ -1778,7 +1778,7 @@ def ticket_editar(tid: int, data: AllyTicketPatchIn, ctx: AllyCtx = Depends(need
         t.hours = data.hours
     if data.status and data.status != t.status:
         if data.status == "resuelto" and not (data.solution or t.solution):
-            raise HTTPException(422, "Escribí qué se hizo antes de resolver el ticket")
+            raise HTTPException(422, "Escriba qué se hizo antes de resolver el ticket")
         _mover(db, ctx.p, t, data.status)
     db.commit()
     return _ticket_out(db, ctx, t, full=True)
@@ -2211,7 +2211,7 @@ def usuario(uid: int, data: UsuarioIn, ctx: AllyCtx = Depends(need("usuarios")),
     if not m:
         raise HTTPException(404, "Usuario no encontrado")
     if uid == ctx.p.user.id:
-        raise HTTPException(409, "No podés desactivarte a vos mismo")
+        raise HTTPException(409, "No puede desactivarse a sí mismo")
     if m.role_code != "tecnico_aliado":
         raise HTTPException(403, "Ese usuario lo administra Crimson. Escríbanos si necesita cambiarlo.")
     if m.active != data.active:

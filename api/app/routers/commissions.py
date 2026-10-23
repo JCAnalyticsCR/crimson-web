@@ -54,7 +54,7 @@ def _today_cr() -> date:
 
 def _not_ally(p: Principal) -> None:
     if ally_scope(p) is not None:
-        raise HTTPException(403, "Usá Mis ganancias")
+        raise HTTPException(403, "Use Mis ganancias")
 
 
 # ---------- 1. Movimientos ----------
@@ -194,7 +194,7 @@ def commission_status(data: CommissionStatusIn, p: Principal = Depends(require("
             omitidas.append({"id": cid, "motivo": "No existe"})
             continue
         if not svc.can_touch(p, c):
-            omitidas.append({"id": cid, "motivo": "No podés aprobar ni pagar tu propia comisión"})
+            omitidas.append({"id": cid, "motivo": "No puede aprobar ni pagar su propia comisión"})
             continue
         motivo = _why_not(c, data.status)
         if motivo:
@@ -575,7 +575,7 @@ def summary(
     uid = p.user.id
     if user_id and user_id != p.user.id:
         if not p.can("commissions", "ver_todo"):
-            raise HTTPException(403, "Solo podés ver tus comisiones")
+            raise HTTPException(403, "Solo puede ver sus comisiones")
         if internal_member(db, p.tenant.id, user_id) is None:
             raise HTTPException(404, "Usuario no encontrado")
         uid = user_id
@@ -687,7 +687,7 @@ def adjustment(data: AdjustmentIn, p: Principal = Depends(require("commissions",
         raise HTTPException(422, "El monto no puede ser cero")
     if data.beneficiary == "vendedor":
         if not data.user_id or internal_member(db, p.tenant.id, data.user_id) is None:
-            raise HTTPException(422, "Elegí una persona activa del equipo")
+            raise HTTPException(422, "Elija una persona activa del equipo")
         data.ally_company_id = None
     else:
         comp = db.get(AllyCompany, data.ally_company_id) if data.ally_company_id else None
@@ -788,7 +788,7 @@ def _company(db: Session, p: Principal, ally_company_id: int | None) -> AllyComp
         # "lo que pusiste" y el pago acordado son los precios del aliado: costo de Crimson (spec 0.9 y 08:07)
         raise HTTPException(403, "Las ganancias de los aliados traen sus precios: información de costos")
     if not ally_company_id:
-        raise HTTPException(422, "Elegí la empresa aliada")
+        raise HTTPException(422, "Elija la empresa aliada")
     comp = db.get(AllyCompany, ally_company_id)
     if not comp or comp.tenant_id != p.tenant.id:
         raise HTTPException(404, "Empresa aliada no encontrada")

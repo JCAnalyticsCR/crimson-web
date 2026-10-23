@@ -152,7 +152,7 @@ export default function EventDetail() {
 
     const BD = getBarcodeDetector();
     if (!BD) {
-      setCameraError("Tu navegador no soporta BarcodeDetector. Escribí o escaneá con un lector USB.");
+      setCameraError("Su navegador no soporta BarcodeDetector. Escriba o escanee con un lector USB.");
       setCameraActive(false);
       return;
     }
@@ -214,8 +214,8 @@ export default function EventDetail() {
   /* ---------- Courtesy ---------- */
   const sendCourtesy = async () => {
     if (!id) return;
-    if (!courtesy.holder_name.trim()) { toast("Ingresá el nombre del titular", "bad"); return; }
-    if (!courtesy.ticket_type_id) { toast("Seleccioná el tipo de entrada", "bad"); return; }
+    if (!courtesy.holder_name.trim()) { toast("Ingrese el nombre del titular", "bad"); return; }
+    if (!courtesy.ticket_type_id) { toast("Seleccione el tipo de entrada", "bad"); return; }
     setCourtesyBusy(true);
     try {
       const body = {
@@ -390,7 +390,7 @@ export default function EventDetail() {
             <Field label="Nombre del titular">
               <input className="input" value={courtesy.holder_name} onChange={(e) => setCourtesy((f) => ({ ...f, holder_name: e.target.value }))} placeholder="Nombre completo" />
             </Field>
-            <Field label="Correo (opcional)" hint="Si lo agregás, se le envía la entrada automáticamente.">
+            <Field label="Correo (opcional)" hint="Si lo agrega, se le envía la entrada automáticamente.">
               <input className="input" type="email" value={courtesy.holder_email} onChange={(e) => setCourtesy((f) => ({ ...f, holder_email: e.target.value }))} placeholder="correo@ejemplo.com" />
             </Field>
             <button className="btn btn--crimson" onClick={sendCourtesy} disabled={courtesyBusy} style={{ alignSelf: "flex-start" }}>
@@ -426,7 +426,7 @@ export default function EventDetail() {
                     value={checkCode}
                     onChange={(e) => setCheckCode(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") void handleCheckin(checkCode); }}
-                    placeholder="Escribí, pegá o escaneá…"
+                    placeholder="Escriba, pegue o escanee…"
                     autoFocus={tab === "acceso"}
                   />
                 </Field>

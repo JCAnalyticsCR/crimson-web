@@ -123,7 +123,7 @@ export default function CabysBulk() {
     try {
       const rows = await api<Cab[]>(`/cabys?${byCode ? `codigo=${t}` : `q=${encodeURIComponent(t)}&top=20`}`);
       rows.forEach((r) => { hits.current[r.code] = r; });
-      if (!rows.length) return [{ id: -1, label: "Sin resultados en el CABYS", hint: "Probá con otra palabra (cámara, cable, fuente…)" }];
+      if (!rows.length) return [{ id: -1, label: "Sin resultados en el CABYS", hint: "Pruebe con otra palabra (cámara, cable, fuente…)" }];
       return rows.map((r) => ({ id: Number(r.code), label: r.description, hint: `${r.code} · ${iva(r)}` }));
     } catch (e) {
       return [{ id: -1, label: e instanceof Error ? e.message : "Hacienda no respondió", hint: "Intentá de nuevo" }];

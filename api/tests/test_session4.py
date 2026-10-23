@@ -489,23 +489,24 @@ def test_each_role_sees_only_what_it_needs(client, auth, db_session):
     assert client.get("/dashboard", headers=k).json()["scope"] == "mine"
     assert client.get("/expenses", headers=k).status_code == 403
 
-    # Bodega: inventario y nada de dinero
+    # Bodega: inventario y nada de dinero (+ajustes_inventario que también requiere inventory.ver)
     b = login("b@ejemplo.com", "inventario")
-    assert report_keys(b) == {"inventario", "movimientos"}
+    assert report_keys(b) == {"inventario", "movimientos", "ajustes_inventario"}
     assert client.get("/invoices", headers=b).status_code == 403
     assert client.get("/customers", headers=b).status_code == 403
 
     # Contabilidad: todo el dinero de la empresa, sin ajustes. Sin rentabilidad: el costo es solo del admin (13/10, 08:07)
     a = login("a@ejemplo.com", "contabilidad")
-    # 21: comisiones (economia), el libro de compras (facturacion) y cuentas por pagar (antiguedad y vencimientos, 22/10)
-    assert len(report_keys(a)) == 21 and {"cxp_antigüedad", "cxp_vencimientos"} <= report_keys(a) and not report_keys(a) & {"rentabilidad", "rentabilidad_tipo"}
+    # 22: +ajustes_inventario (inventory.ver); motivos_perdida requiere crm_pipeline.ver que contabilidad no tiene
+    assert len(report_keys(a)) == 22 and {"cxp_antigüedad", "cxp_vencimientos", "ajustes_inventario"} <= report_keys(a) and not report_keys(a) & {"rentabilidad", "rentabilidad_tipo", "motivos_perdida"}
     assert client.get("/dashboard", headers=a).json()["scope"] == "company"
     assert client.get("/settings", headers=a).status_code == 403
 
     # Solo lectura: ventas y cobros de la empresa, sin gastos, planillas ni exportar
     lec = login("l@ejemplo.com", "lectura")
     # comisiones: lectura ya ve todos los movimientos (commissions.ver_todo), el reporte es la misma lista
-    assert report_keys(lec) == {"facturacion", "pendientes", "productos", "ordenes", "cierre", "transacciones", "propinas", "comisiones"}
+    # +motivos_perdida (crm_pipeline.ver que lectura tiene)
+    assert report_keys(lec) == {"facturacion", "pendientes", "productos", "ordenes", "cierre", "transacciones", "propinas", "comisiones", "motivos_perdida"}
     assert client.get("/reports/facturacion", params={"format": "xlsx"}, headers=lec).status_code == 403
     assert client.get("/expenses", headers=lec).status_code == 403
     assert client.post("/customers", json={"name": "No"}, headers=lec).status_code == 403

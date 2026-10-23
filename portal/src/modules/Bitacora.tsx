@@ -128,7 +128,7 @@ export function Bitacora() {
           <input className="input" type="date" aria-label="Hasta" style={{ width: "auto" }} value={f.to} onChange={set("to")} />
           <input className="input" aria-label="Contexto" placeholder="Cliente o proveedor" style={{ width: "auto", minWidth: 160 }} value={f.company} onChange={set("company")} />
         </div>
-        {rows === null ? <Loading /> : rows.length === 0 ? <Empty title="Sin movimientos" hint="Probá con otros filtros." /> : (
+        {rows === null ? <Loading /> : rows.length === 0 ? <Empty title="Sin movimientos" hint="Pruebe con otros filtros." /> : (
           <div style={{ overflowX: "auto" }}>
             <table className="table"><thead><tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Registro</th><th>Contexto</th><th className="num">Cambios</th><th /></tr></thead>
               <tbody>{rows.map((r) => (

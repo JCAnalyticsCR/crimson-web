@@ -13,8 +13,8 @@ export function VehicleForm({ initial, onClose, onSaved }: { initial: Form; onCl
   const [f, setF] = useState(initial);
   const set = (p: Partial<Form>) => setF((x) => ({ ...x, ...p }));
   const save = async () => {
-    if (!f.name.trim()) return toast("Poné un nombre o alias", "bad");
-    if (f.excluded_from_analysis && !f.exclusion_reason.trim()) return toast("Indicá por qué se excluye", "bad");
+    if (!f.name.trim()) return toast("Ponga un nombre o alias", "bad");
+    if (f.excluded_from_analysis && !f.exclusion_reason.trim()) return toast("Indique por qué se excluye", "bad");
     const { id, ...b } = f;
     try {
       await api(id ? `/vehicles/${id}` : "/vehicles", { method: id ? "PUT" : "POST", json: { ...b, plate: b.plate || null, kind: b.kind || null, driver: b.driver || null, notes: b.notes || null, exclusion_reason: b.excluded_from_analysis ? b.exclusion_reason : null } });

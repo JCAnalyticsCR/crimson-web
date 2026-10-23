@@ -251,7 +251,7 @@ export default function Opportunities() {
     setBusy(true);
     try {
       const r = await api<{ quote_id: number; number: string }>(`/opportunities/${open.id}/quote`, { method: "POST", json: { customer_id: open.customer_id || Number(quoteCust!.id) } });
-      toast(`Cotización ${r.number} creada: completala y guardala`);
+      toast(`Cotización ${r.number} creada: complétela y guárdela`);
       nav(`/cotizaciones/${r.quote_id}`);
     } catch (e) { toast(e instanceof Error ? e.message : "No se pudo crear la cotización", "bad"); }
     finally { setBusy(false); }

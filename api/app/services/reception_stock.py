@@ -168,6 +168,6 @@ def stock_in(db: Session, doc: ReceivedDocument, items: list[dict], warehouse_id
         )
         n += 1
     if not n:
-        raise HTTPException(422, "Elegí al menos una línea con su producto")
+        raise HTTPException(422, "Elija al menos una línea con su producto")
     audit(db, doc.tenant_id, user_id, "stock_in", "received_document", doc.id, {"movimientos": n, "bodega": w.id}, ip=ip)
     return n

@@ -144,7 +144,7 @@ export default function Banking() {
       </div>
 
       {accounts.length === 0 ? (
-        <Empty title="Sin cuentas bancarias" hint="Creá una cuenta bancaria en Ajustes → Pagos y cobros para poder conciliar." />
+        <Empty title="Sin cuentas bancarias" hint="Cree una cuenta bancaria en Ajustes → Pagos y cobros para poder conciliar." />
       ) : (
         <>
           {/* selector de cuentas */}
@@ -198,7 +198,7 @@ export default function Banking() {
                 ))}</div>
               }>
                 {linesLoading ? <span className="spinner" style={{ margin: "20px auto", display: "block" }} /> : lines.length === 0 ? (
-                  <Empty hint={statusFilter === "pendiente" ? "Sin movimientos pendientes. Importá un estado de cuenta o usá la conciliación automática." : "Sin movimientos para este filtro."} />
+                  <Empty hint={statusFilter === "pendiente" ? "Sin movimientos pendientes. Importe un estado de cuenta o use la conciliación automática." : "Sin movimientos para este filtro."} />
                 ) : (
                   <table className="table">
                     <thead>

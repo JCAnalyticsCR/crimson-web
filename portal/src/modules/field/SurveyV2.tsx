@@ -178,7 +178,7 @@ export function SystemCalcs({ surveyId, refresh }: { surveyId?: number; refresh:
   const a = sys.acceso, c = sys.cctv;
   return (
     <Card title="Cálculos del sistema" extra={<span className="meta" title="Versión de la plantilla con que se llenó este levantamiento">Plantilla v{sys.survey_template_version}</span>}>
-      <p className="muted sys__hint">Estimaciones a partir de lo guardado, cada una con su fórmula. No cambian la lista de materiales: sirven para revisarla. Guardá para recalcular.</p>
+      <p className="muted sys__hint">Estimaciones a partir de lo guardado, cada una con su fórmula. No cambian la lista de materiales: sirven para revisarla. Guarde para recalcular.</p>
       {sys.dependencias.length > 0 && (
         <div className="sys__alert sys__alert--bad">
           <b>Dependencia técnica pendiente</b>

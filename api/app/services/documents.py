@@ -288,7 +288,7 @@ def quote_to_payload(q: Quote) -> DocumentIn:
     )
 
 
-NEEDS_CUSTOMER = "La cotización no tiene cliente: elegí el cliente antes de convertirla en factura (la factura sale a su nombre y después no se edita)."
+NEEDS_CUSTOMER = "La cotización no tiene cliente: elija el cliente antes de convertirla en factura (la factura sale a su nombre y después no se edita)."
 
 
 def convert_quote(db: Session, tenant_id: int, user_id: int, q: Quote, customer_id: int | None = None, ip: str | None = None) -> Invoice:

@@ -137,7 +137,7 @@ def check(db: Session, p: Principal, payload: DocumentIn) -> Check:
 # ---------- Aprobacion de cotizaciones (monto, margen y lineas libres) ----------
 DEFAULT_APPROVAL_AMOUNT = Decimal(2_000_000)  # "cotizacion mayor de 2 millones requiere aprobacion del CEO"
 DEFAULT_MIN_MARGIN = Decimal(25)  # "margen menor a 25 % -> bloquear y solicitar autorizacion"
-DEFAULT_FREE_LINE_LIMIT: Decimal | None = None  # None = sin limite (desactivado hasta que el admin lo configure)
+DEFAULT_FREE_LINE_LIMIT = Decimal(25_000)  # ₡25 000 = lineas libres sobre este monto piden aprobacion al vendedor
 
 
 def approval_amount(tenant) -> Decimal:
@@ -150,14 +150,11 @@ def min_margin(tenant) -> Decimal:
     return d(v) if v is not None else DEFAULT_MIN_MARGIN
 
 
-def free_line_limit(tenant) -> Decimal | None:
+def free_line_limit(tenant) -> Decimal:
     """Subtotal maximo que una linea sin producto del catalogo puede tener sin pedir aprobacion.
-    None = sin limite (por defecto). El administrador lo activa poniendo free_line_limit_amount
-    en los ajustes del tenant (ej. 50 000 = toda linea libre de mas de 50 000 CRC pide aprobacion)."""
+    Default ₡25 000. Con 0 = toda linea libre pide aprobacion. Configurable con free_line_limit_amount."""
     v = (tenant.settings or {}).get("free_line_limit_amount")
-    if v is None:
-        return DEFAULT_FREE_LINE_LIMIT  # None = desactivado
-    return d(v)
+    return d(v) if v is not None else DEFAULT_FREE_LINE_LIMIT
 
 
 def _cost_lines(db: Session, tenant_id: int, quote):
@@ -207,21 +204,27 @@ def approval_reasons(db: Session, p: Principal, quote) -> list[str]:
         razones.append(
             f"El margen queda en {m:.1f} % y el mínimo es {minimo:.0f} %." if p.sees_costs else f"El margen queda por debajo del mínimo ({minimo:.0f} %)."
         )
-    # Lineas libres (sin producto del catalogo): solo si el admin configuro un tope (free_line_limit_amount).
-    tope_libre = free_line_limit(p.tenant)
-    if tope_libre is not None:
+    # Lineas libres (sin producto del catalogo): el vendedor sin descuento_libre necesita aprobacion cuando el
+    # subtotal supera el tope (default ₡25 000). Las cortesias SIN producto siempre piden aprobacion (son un regalo).
+    if not p.can("sales", "descuento_libre"):
+        tope_libre = free_line_limit(p.tenant)
         for ln in quote.lines:
             pid = getattr(ln, "product_id", None)
             trt = (getattr(ln, "treatment", None) or "normal")
-            if pid is not None or trt != "normal":
-                continue  # tiene producto (cubierto por check) o es cortesia/aportado/excluido
+            if pid is not None:
+                continue  # tiene producto de catalogo: ya lo cubre check()
+            nombre = (getattr(ln, "name", None) or "sin nombre")[:60]
+            if trt in _NO_SUMA:
+                # cortesia/aportado/excluido sin producto de catalogo siempre pide aprobacion
+                razones.append(f"La línea «{nombre}» ({trt}) no tiene producto del catálogo: necesita revisión del administrador.")
+                break
+            # linea normal sin producto: pide aprobacion si supera el tope
             subtotal = d(getattr(ln, "subtotal", None) or 0)
             if subtotal <= 0:
                 subtotal = d(getattr(ln, "unit_price", 0)) * d(getattr(ln, "quantity", 1))
             if subtotal > tope_libre:
-                nombre = (getattr(ln, "name", None) or "sin nombre")[:60]
-                razones.append(f"La línea «{nombre}» no tiene producto del catálogo: necesita revisión del administrador.")
-                break  # una sola razon es suficiente para retener
+                razones.append(f"La línea «{nombre}» no tiene producto del catálogo y supera ₡{tope_libre:,.0f}: necesita revisión del administrador.")
+                break
     return razones
 
 

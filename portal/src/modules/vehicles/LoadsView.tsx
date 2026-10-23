@@ -20,9 +20,9 @@ export function LoadForm({ lookups, initial, onClose, onSaved }: { lookups: Look
   const [busy, setBusy] = useState(false);
   const set = (p: Partial<Form>) => setF((x) => ({ ...x, ...p }));
   const save = async () => {
-    if (!f.vehicle_id) return toast("Elegí el vehículo", "bad");
-    if (!f.amount) return toast("Indicá el importe", "bad");
-    if (f.excluded && !f.exclusion_reason.trim()) return toast("Indicá por qué se excluye", "bad");
+    if (!f.vehicle_id) return toast("Elija el vehículo", "bad");
+    if (!f.amount) return toast("Indique el importe", "bad");
+    if (f.excluded && !f.exclusion_reason.trim()) return toast("Indique por qué se excluye", "bad");
     setBusy(true);
     const body = {
       vehicle_id: Number(f.vehicle_id), date: f.date, driver: f.driver || null, liters: f.liters ? Number(f.liters) : null, amount: Number(f.amount), currency: f.currency,

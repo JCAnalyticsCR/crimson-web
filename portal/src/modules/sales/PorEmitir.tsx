@@ -18,7 +18,7 @@ type Row = {
 type Queue = { mode: string; production_since: string | null; today: string; total: number; items: Row[]; oldest_issue_date: string | null; emitidas_fuera_mes: number; mes: string; can_mark: boolean };
 
 /** Con produccion activa: lo creado antes de activarla puede ya estar emitido en Fygaro. */
-export const CORTE_AVISO = "Hacienda ya está en producción y esta factura es de antes de activarla: confirmá en Fygaro si ya se emitió. Si se emitió, marcala aquí; emitirla de nuevo duplicaría el comprobante.";
+export const CORTE_AVISO = "Hacienda ya está en producción y esta factura es de antes de activarla: confirme en Fygaro si ya se emitió. Si se emitió, márquela aquí; emitirla de nuevo duplicaría el comprobante.";
 
 /** Hoy en Costa Rica (AAAA-MM-DD): despues de las 18:00 la fecha UTC ya es la de manana. */
 export const hoyCR = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Costa_Rica" });
@@ -56,7 +56,7 @@ export default function PorEmitir() {
   const [mark, setMark] = useState<Row | null>(null);
   const load = useCallback(() => { api<Queue>("/fiscal/queue").then((r) => { setQ(r); setFailed(false); }).catch(() => setFailed(true)); }, []);
   useEffect(() => { load(); }, [load]);
-  if (failed) return <Empty title="No se pudo cargar la lista" hint="Probá con Refrescar." />;
+  if (failed) return <Empty title="No se pudo cargar la lista" hint="Pruebe con Refrescar." />;
   if (!q) return <Loading />;
   const fygaro = q.mode !== "produccion";
   const puede = q.can_mark && allows("sales.emitir_fuera"); // contabilidad: la vendedora ve lo suyo pero no lo marca

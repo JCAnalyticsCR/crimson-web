@@ -547,7 +547,7 @@ export default function Pos() {
       {/* ===== Variant chooser modal ===== */}
       {variantItem && (
         <Modal title={variantItem.name} onClose={() => setVariantItem(null)}>
-          <p className="muted" style={{ fontSize: 13 }}>Elegí una variante para agregar al carrito:</p>
+          <p className="muted" style={{ fontSize: 13 }}>Elija una variante para agregar al carrito:</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {variantItem.variants.map((v) => (
               <button

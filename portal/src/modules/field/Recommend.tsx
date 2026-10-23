@@ -63,7 +63,7 @@ export function RecommendModal({ surveyId, lines, focus, onClose, onApplied, com
   const use = async (line: RecoLine, c: Candidate) => {
     const k = `${line.name}|${c.key}`;
     const q = n(qty[k] ?? c.quantity);
-    if (q <= 0) { toast("Escribí la cantidad antes de usar este equipo", "bad"); return; }
+    if (q <= 0) { toast("Escriba la cantidad antes de usar este equipo", "bad"); return; }
     setBusy(k);
     try {
       const go = () => api(`/surveys/${surveyId}/suggest/apply-product`, {
@@ -154,7 +154,7 @@ function CandidateCard({ c, value, onQty, busy, disabled, onUse, verCostos, verP
       <div className="reco-card__meta">{[c.brand, c.model || c.code, origen].filter(Boolean).join(" · ")}</div>
       {Number(c.stock_proveedor ?? 0) > 0 && (
         <div className="reco-card__meta" style={{ color: c.supplier_fresh === false ? "var(--bad)" : undefined }}>
-          {c.supplier || "Proveedor"}: {Number(c.stock_proveedor)} · {c.supplier_age && c.supplier_age !== "sin fecha" ? `consultado ${c.supplier_age}${c.supplier_changed_age ? ` · último cambio ${c.supplier_changed_age}` : ""}` : c.updated_at ? `lista del ${new Date(String(c.updated_at).length === 10 ? `${c.updated_at}T12:00:00` : String(c.updated_at)).toLocaleDateString("es-CR", { day: "2-digit", month: "short" })}` : "sin fecha"}{c.supplier_fresh === false ? " (dato viejo: confirmá con el proveedor)" : ""}
+          {c.supplier || "Proveedor"}: {Number(c.stock_proveedor)} · {c.supplier_age && c.supplier_age !== "sin fecha" ? `consultado ${c.supplier_age}${c.supplier_changed_age ? ` · último cambio ${c.supplier_changed_age}` : ""}` : c.updated_at ? `lista del ${new Date(String(c.updated_at).length === 10 ? `${c.updated_at}T12:00:00` : String(c.updated_at)).toLocaleDateString("es-CR", { day: "2-digit", month: "short" })}` : "sin fecha"}{c.supplier_fresh === false ? " (dato viejo: confirme con el proveedor)" : ""}
         </div>
       )}
       <div className="reco-card__chips">

@@ -752,7 +752,7 @@ def reject_quote(qid: int, data: RejectIn, p: Principal = Depends(require("sales
         raise HTTPException(409, "Ya la rechazaste: espera los cambios de la vendedora")
     motivo = " ".join(data.reason.split())
     if len(motivo) < 3:
-        raise HTTPException(422, "Escribí el motivo del rechazo")
+        raise HTTPException(422, "Escriba el motivo del rechazo")
     audit(db, p.tenant.id, p.user.id, "reject_discount", "quote", q.id, {"motivo": motivo, "razones": q.approval_reason}, ip=p.ip)
     avisos.descuento_resuelto(db, p.tenant, q, p.user.id, aprobado=False, motivo=motivo)
     db.commit()

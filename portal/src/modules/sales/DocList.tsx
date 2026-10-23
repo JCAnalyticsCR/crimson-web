@@ -109,9 +109,9 @@ export default function DocList({ kind }: { kind: "quotes" | "invoices" }) {
         {porEmitir ? <PorEmitir key={tick} /> : items.length === 0 && loading ? <Loading /> : items.length === 0 ? (
           q
             /* sin sugerir que exista en otro lado: lo ajeno no existe para el vendedor (13/10 35:50) */
-            ? <Empty title={`No encontramos «${q}» entre ${todo ? "las" : "tus"} ${isQ ? "cotizaciones" : "facturas"}.`} hint="Probá con otro número, el nombre del cliente o parte de él." />
+            ? <Empty title={`No encontramos «${q}» entre ${todo ? "las" : "sus"} ${isQ ? "cotizaciones" : "facturas"}.`} hint="Pruebe con otro número, el nombre del cliente o parte de él." />
             /* "Crear" solo a quien crea ventas: contabilidad envia y cobra pero no crea (plan 1.7) */
-            : <Empty hint={isQ ? "Creá una cotización y enviala por WhatsApp o correo." : "Las facturas nacen de una cotización convertida o directo."} action={allows("sales.crear") ? <Link className="btn btn--crimson btn--sm" to={`${base}/nueva`}>Crear</Link> : undefined} />
+            : <Empty hint={isQ ? "Cree una cotización y envíela por WhatsApp o correo." : "Las facturas nacen de una cotización convertida o directo."} action={allows("sales.crear") ? <Link className="btn btn--crimson btn--sm" to={`${base}/nueva`}>Crear</Link> : undefined} />
         ) : (
           <table className="table">
             <thead><tr><th>Código</th><th>Cliente</th>{todo && <th>Vendedor</th>}<th>Fecha</th><th>Vence</th><th className="num">Monto</th>{!isQ && <th className="num">Saldo</th>}<th>Estado</th><th /></tr></thead>

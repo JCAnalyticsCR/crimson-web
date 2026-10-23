@@ -138,7 +138,7 @@ export default function Importer() {
       {step === 2 && kind && (
         <Card title={`Importar ${currentKindMeta?.label}`}>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <p className="muted" style={{ fontSize: 13 }}>{currentKindMeta?.desc}{kind === "catalogo" ? " Subí el archivo tal como lo manda el proveedor: no hay plantilla que llenar." : " Descargá la plantilla, completala y subila aquí."}</p>
+            <p className="muted" style={{ fontSize: 13 }}>{currentKindMeta?.desc}{kind === "catalogo" ? " Suba el archivo tal como lo manda el proveedor: no hay plantilla que llenar." : " Descargue la plantilla, complétela y súbala aquí."}</p>
             {kind === "recepciones" && (
               <div className="muted" style={{ fontSize: 13 }}>
                 <p style={{ margin: "0 0 6px" }}>Lo normal es subir el <b>.zip</b> que baja Fygaro con «Download All» (o un zip de zips). Si un comprobante ya está aquí y solo se respondió en simulado o pruebas, <b>gana el mensaje de Fygaro</b> (fue el que valió).</p>

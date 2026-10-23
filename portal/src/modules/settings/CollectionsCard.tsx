@@ -52,12 +52,12 @@ export default function CollectionsCard({ cfg, save }: { cfg: CollectionsCfg; sa
   const corte = (v: string) => {
     if (v === (cfg.collections_start_date || "")) return;
     const y = v ? Number(v.slice(0, 4)) : 0;
-    if (v && (y < 2020 || y > new Date().getFullYear() + 1)) { toast("Fecha de corte: escribí una fecha entre 2020 y el año que viene", "bad"); return; }
+    if (v && (y < 2020 || y > new Date().getFullYear() + 1)) { toast("Fecha de corte: escriba una fecha entre 2020 y el año que viene", "bad"); return; }
     save({ collections_start_date: v || null });
   };
   const stages = (key: "collections_stages" | "collections_ally_stages", text: string) => {
     const v = parse(text);
-    if (!v.length || v.some((x) => Number.isNaN(x))) { toast("Escribí días separados por coma, por ejemplo -3, 0, 3, 10", "bad"); return; }
+    if (!v.length || v.some((x) => Number.isNaN(x))) { toast("Escriba días separados por coma, por ejemplo -3, 0, 3, 10", "bad"); return; }
     save({ [key]: v });
   };
 

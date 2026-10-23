@@ -61,7 +61,7 @@ export default function ResetPassword() {
             <>
               <div>
                 <h2 className="h1">Contraseña nueva</h2>
-                <p className="muted" style={{ marginTop: 6 }}>Creá tu contraseña nueva para <b>{email}</b>.</p>
+                <p className="muted" style={{ marginTop: 6 }}>Cree su contraseña nueva para <b>{email}</b>.</p>
               </div>
               <div className="field">
                 <label>Contraseña nueva</label>

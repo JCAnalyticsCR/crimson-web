@@ -52,7 +52,7 @@ def test_pendiente_bloquea_enviar_y_convertir_pero_guarda(client, auth):
 def test_linea_en_cero_sin_tratamiento_pide_elegirlo(client, auth):
     q = _quote(client, [{"name": "Fortinet", "quantity": 1, "unit_price": 0, "tax_rate": 13}])
     r = client.post(f"/quotes/{q['id']}/send")
-    assert r.status_code == 409 and "Elegí" in r.json()["detail"]
+    assert r.status_code == 409 and "Elija" in r.json()["detail"]
 
 
 def test_factura_no_acepta_pendiente(client, auth):

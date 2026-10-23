@@ -933,6 +933,8 @@ REPORT_NEEDS = {
     "comisiones": ("commissions", "ver_todo"),  # contabilidad lo baja para la planilla
     "cxp_antigüedad": ("accounting", "ver"),
     "cxp_vencimientos": ("accounting", "ver"),
+    "motivos_perdida": ("crm_pipeline", "ver"),
+    "ajustes_inventario": ("inventory", "ver"),
 }
 
 

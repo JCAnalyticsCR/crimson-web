@@ -123,7 +123,7 @@ export function EventEditor({
 
   const save = async () => {
     if (!form.name.trim()) { toast("El nombre del evento es obligatorio", "bad"); return; }
-    if (!form.starts_at) { toast("Indicá la fecha de inicio", "bad"); return; }
+    if (!form.starts_at) { toast("Indique la fecha de inicio", "bad"); return; }
     setBusy(true);
     try {
       const body = {
@@ -275,7 +275,7 @@ export default function Events() {
           <div style={{ padding: 44, display: "grid", placeItems: "center" }}><span className="spinner" /></div>
         ) : items.length === 0 ? (
           <Empty
-            hint="Creá el primer evento para empezar a vender entradas."
+            hint="Cree el primer evento para empezar a vender entradas."
             action={<button className="btn btn--crimson" onClick={() => setShowEditor(true)}><Icon d={I.plus} />Crear evento</button>}
           />
         ) : (

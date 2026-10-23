@@ -313,7 +313,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const reject = async () => {
     const motivo = (prompt("¿Por qué no se aprueba? La vendedora recibe este motivo por correo.") || "").trim();
     if (!motivo) return;
-    if (motivo.length < 3) return toast("Escribí un motivo un poco más claro", "bad");
+    if (motivo.length < 3) return toast("Escriba un motivo un poco más claro", "bad");
     try { const r = await api<Quote>(`/quotes/${id}/reject`, { method: "POST", json: { reason: motivo } }); setDoc((d) => ({ ...d, rejection: r.rejection ?? null })); toast("Descuento rechazado: la vendedora ya recibió el motivo"); }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
@@ -412,7 +412,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                         <td className="c-name">
                           {l.product_id && fotos[l.product_id] ? <img src={fotos[l.product_id]} alt="" loading="lazy" style={{ float: "left", width: 44, height: 44, objectFit: "contain", borderRadius: 8, border: "1px solid var(--hair)", background: "#fff", marginRight: 8 }} /> : null}
                           <div className="lookup">
-                            <textarea className="input line-name" rows={nameRows(l.name)} placeholder={l.product_id ? "Nombre del producto o servicio" : "Escribí para buscar en el catálogo o una línea libre"} value={l.name} disabled={ro}
+                            <textarea className="input line-name" rows={nameRows(l.name)} placeholder={l.product_id ? "Nombre del producto o servicio" : "Escriba para buscar en el catálogo o una línea libre"} value={l.name} disabled={ro}
                               aria-autocomplete="list" aria-expanded={sug?.i === i && sug.items.length > 0}
                               onChange={(e) => onLineName(i, e.target.value)} onKeyDown={(e) => onLineKey(i, e)} onBlur={closeSug} />
                             {sug?.i === i && !ro && (
@@ -459,7 +459,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                       </tr>
                     );
                   })}
-                  {lines.length === 0 && <tr><td colSpan={7}><div className="empty" style={{ padding: 28 }}><span className="meta">Sin líneas</span><div className="h3">{ro ? "El documento no tiene líneas" : "Agregá productos o escribí una línea libre"}</div>{!ro && <button className="btn btn--ghost btn--sm" onClick={() => setLines([blankLine()])}>Línea libre</button>}</div></td></tr>}
+                  {lines.length === 0 && <tr><td colSpan={7}><div className="empty" style={{ padding: 28 }}><span className="meta">Sin líneas</span><div className="h3">{ro ? "El documento no tiene líneas" : "Agregue productos o escriba una línea libre"}</div>{!ro && <button className="btn btn--ghost btn--sm" onClick={() => setLines([blankLine()])}>Línea libre</button>}</div></td></tr>}
                 </tbody>
               </table>
               {lines.length > 0 && !ro && <div style={{ padding: 10 }}><button className="btn btn--ghost btn--sm" onClick={() => setLines((ls) => [...ls, blankLine()])}><Icon d={I.plus} />Línea libre</button></div>}
@@ -664,7 +664,7 @@ function ProductPicker({ onClose, onPick, docCurrency }: { onClose: () => void; 
   return (
     <Modal title="Productos & Servicios" onClose={onClose} wide foot={<><button className="btn btn--ghost" onClick={onClose}>Cancelar</button>{sinRespaldo > 0 && <span className="muted" style={{ fontSize: 12.5, color: "var(--warn)", marginRight: "auto" }}>{sinRespaldo} sin existencia propia ni del proveedor</span>}<button className="btn btn--crimson" disabled={!n} onClick={() => onPick(Object.values(sel))}>Seleccionar{n ? ` (${n})` : ""}</button></>}>
       <div className="search" style={{ maxWidth: "none" }}><Icon d={I.search} size={16} /><input autoFocus placeholder="Buscar por nombre, código o CABYS…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-      {items.length === 0 ? <Empty hint="Creá el producto desde Productos & Servicios." /> : (
+      {items.length === 0 ? <Empty hint="Cree el producto desde Productos & Servicios." /> : (
         <table className="table">
           <thead><tr><th /><th style={{ width: 52 }} /><th>Código</th><th>Nombre</th><th>Disponibilidad</th><th className="num">Precio</th><th>IVA</th></tr></thead>
           <tbody>{items.map((p) => (

@@ -41,7 +41,7 @@ export function ReviewPanel({ surveyId, status, info, pointCodes, onChange }: {
 
   const review = async (action: "aprobar" | "devolver") => {
     const obs = (rows || []).filter((r) => r.text.trim()).map((r) => ({ point_code: r.point_code || null, text: r.text.trim() }));
-    if (action === "devolver" && !obs.length) return toast("Escribí al menos una observación para devolverlo", "bad");
+    if (action === "devolver" && !obs.length) return toast("Escriba al menos una observación para devolverlo", "bad");
     setBusy(true);
     try {
       const s = await api<Partial<ReviewInfo> & { status: string }>(`/surveys/${surveyId}/review`, { method: "POST", json: { action, observations: action === "devolver" ? obs : [] } });

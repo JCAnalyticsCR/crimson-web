@@ -256,7 +256,7 @@ def role_create(data: RoleNewIn, p: Principal = Depends(solo_admin), db: Session
     _unique_name(db, p, data.name)
     if data.from_code in ROLE_PERMISSIONS:
         if data.from_code != "admin" and data.from_code not in EDITABLE_ROLES:
-            raise HTTPException(422, "Ese rol no sirve de base: elegí uno del equipo interno")
+            raise HTTPException(422, "Ese rol no sirve de base: elija uno del equipo interno")
         # el administrador ("*") pasa a todo lo que se puede repartir; los demas, con lo que esta empresa les cambio
         base = expand(ROLE_PERMISSIONS["admin"] if data.from_code == "admin" else role_overrides(p.tenant).get(data.from_code, ROLE_PERMISSIONS[data.from_code]))
     else:
@@ -330,7 +330,7 @@ def role_delete(code: str, p: Principal = Depends(solo_admin), db: Session = Dep
     r = _custom(db, p, code)
     usados = db.scalar(select(func.count()).select_from(TenantUser).where(TenantUser.role_code == code)) or 0
     if usados:
-        raise HTTPException(409, f"{usados} usuario(s) tienen este rol (activos o no): cambiales el rol antes de borrarlo")
+        raise HTTPException(409, f"{usados} usuario(s) tienen este rol (activos o no): cámbieles el rol antes de borrarlo")
     pend = db.scalar(select(func.count()).select_from(Invitation).where(Invitation.role_code == code, Invitation.accepted_at.is_(None), Invitation.revoked_at.is_(None))) or 0
     if pend:
         raise HTTPException(409, "Hay invitaciones pendientes con este rol: revocalas antes de borrarlo")

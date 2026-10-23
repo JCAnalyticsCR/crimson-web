@@ -111,7 +111,7 @@ def create_customer(data: CustomerIn, p: Principal = Depends(require("crm", "cre
             # correo y su propio correo: la factura y los enlaces de pago le llegarian a el. Se usa la ficha existente.
             return JSONResponse(
                 status_code=409,
-                content={"detail": f"Ya existe el cliente «{dup.name}» con esa cédula o ese correo: usá esa ficha", "existing": {"id": dup.id, "name": dup.name}},
+                content={"detail": f"Ya existe el cliente «{dup.name}» con esa cédula o ese correo: use esa ficha", "existing": {"id": dup.id, "name": dup.name}},
             )
     c = Customer(tenant_id=p.tenant.id, **data.model_dump())
     db.add(c)
@@ -324,7 +324,7 @@ def cabys(
 ):
     """Proxy al buscador CABYS de Hacienda (por descripcion o por codigo de 13 digitos)."""
     if not codigo and len((q or "").strip()) < 3:
-        raise HTTPException(422, "Escribí al menos 3 letras para buscar en el CABYS")
+        raise HTTPException(422, "Escriba al menos 3 letras para buscar en el CABYS")
     try:
         return cabys_svc.search(q=q, codigo=codigo, top=top)
     except cabys_svc.CabysUnavailable as e:

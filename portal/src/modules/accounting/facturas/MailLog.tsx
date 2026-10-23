@@ -88,7 +88,7 @@ export default function MailLog() {
           <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>{assign.name}</p>
           <Field label="Comprobante">
             <select className="select" value={target} onChange={(e) => setTarget(e.target.value)}>
-              <option value="">Elegí el comprobante…</option>
+              <option value="">Elija el comprobante…</option>
               {docs.map((x) => <option key={x.id} value={x.id}>{x.issuer_name} · {x.consecutive || x.clave.slice(-10)} · {x.total}</option>)}
             </select>
           </Field>

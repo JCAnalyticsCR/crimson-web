@@ -164,7 +164,7 @@ function ProofForm({ token, method, balance, currency, onDone, onCancel }: { tok
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const send = async () => {
-    if (!file) { setMsg("Elegí la foto o el PDF del comprobante."); return; }
+    if (!file) { setMsg("Elija la foto o el PDF del comprobante."); return; }
     setBusy(true); setMsg(null);
     const fd = new FormData();
     fd.append("file", file);

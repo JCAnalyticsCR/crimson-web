@@ -141,7 +141,7 @@ def warranty_create(data: WarrantyIn, p: Principal = Depends(require("garantias"
     prod = db.get(Product, product_id) if product_id else None
     equipment = (data.equipment or "").strip() or (asset.name if asset else None) or (prod.name if prod else None)
     if not equipment:
-        raise HTTPException(422, "Indicá qué equipo es (o elegí el equipo del cliente o un producto)")
+        raise HTTPException(422, "Indique qué equipo es (o elija el equipo del cliente o un producto)")
     number, _ = next_number(db, p.tenant.id, "GAR")
     c = WarrantyCase(
         tenant_id=p.tenant.id,

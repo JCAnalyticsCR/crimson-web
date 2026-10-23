@@ -126,7 +126,7 @@ export default function Settings() {
                 <Field label="Cédula jurídica"><input className="input input--mono" style={{ textAlign: "left" }} value={company.tax_id} onChange={(e) => setCompany({ ...company, tax_id: e.target.value })} /></Field>
                 <Field label="Divisa predeterminada"><select className="select" value={company.default_currency} onChange={(e) => setCompany({ ...company, default_currency: e.target.value })}><option>CRC</option><option>USD</option></select></Field>
               </div>
-              <Field label="Logo" hint="Aparece en cotizaciones, facturas y la página de pago. Guardá para aplicarlo."><ImageField value={company.logo_url || null} label="Logo" onChange={(url) => setCompany({ ...company, logo_url: url || "" })} /></Field>
+              <Field label="Logo" hint="Aparece en cotizaciones, facturas y la página de pago. Guarde para aplicarlo."><ImageField value={company.logo_url || null} label="Logo" onChange={(url) => setCompany({ ...company, logo_url: url || "" })} /></Field>
               <button className="btn btn--crimson" style={{ alignSelf: "flex-start" }} onClick={saveCompany}><Icon d={I.check} />Guardar</button>
             </div>
           </Card>
@@ -310,7 +310,7 @@ export default function Settings() {
 
       {recovery && (
         <Modal
-          title="Guardá estos códigos ahora"
+          title="Guarde estos códigos ahora"
           onClose={() => setRecovery(null)}
           foot={<>
             <button className="btn btn--ghost" onClick={() => { navigator.clipboard.writeText(recovery.join("\n")); toast("Códigos copiados"); }}><Icon d={I.copy} />Copiar</button>
@@ -502,8 +502,8 @@ function InboxSettings() {
       </Card>
       <Card title="Cómo funciona">
         <ol className="muted" style={{ fontSize: 13, lineHeight: 1.7, paddingLeft: 18, margin: 0 }}>
-          <li>Creá un buzón dedicado (p. ej. <span className="mono">facturas@tuempresa.com</span>) y pedile a tus proveedores que envíen ahí sus facturas electrónicas.</li>
-          <li>En Gmail o Microsoft 365 generá una <b>contraseña de aplicación</b>; no uses la contraseña principal.</li>
+          <li>Cree un buzón dedicado (p. ej. <span className="mono">facturas@suempresa.com</span>) y pídale a sus proveedores que envíen ahí sus facturas electrónicas.</li>
+          <li>En Gmail o Microsoft 365 genere una <b>contraseña de aplicación</b>; no use la contraseña principal.</li>
           <li>Cada correo nuevo con XML, PDF o zip crea el comprobante en <b>Contabilidad → Facturas</b>, listo para aceptar y convertir en gasto. La respuesta de Hacienda y el PDF se emparejan con su comprobante y los duplicados no se repiten.</li>
         </ol>
         {cfg.last_run && cfg.last_result && (

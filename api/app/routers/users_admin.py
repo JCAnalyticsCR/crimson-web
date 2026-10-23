@@ -505,7 +505,7 @@ def invite_revoke(iid: int, p: Principal = Depends(ADMIN), db: Session = Depends
     inv = _invitation(db, p, iid)
     _guard_admin_invite(p, inv.role_code)
     if inv.accepted_at:
-        raise HTTPException(409, "Ya fue aceptada: desactivá al usuario")
+        raise HTTPException(409, "Ya fue aceptada: desactive al usuario")
     if inv.revoked_at:
         return {"ok": True}  # idempotente: sin otra fila de bitacora
     _revoke_inv(inv, p.user.id, datetime.now(UTC))
@@ -549,7 +549,7 @@ def accept(data: AcceptIn, request: Request, response: Response, db: Session = D
     if not u:
         nombre = (data.full_name or "").strip()
         if len(nombre) < 2:
-            raise HTTPException(422, "Escribí tu nombre completo")
+            raise HTTPException(422, "Escriba su nombre completo")
         if not data.password or not password_is_strong(data.password):
             raise HTTPException(422, "Mínimo 10 caracteres con letras y números")
         u = User(email=inv.email.lower(), full_name=nombre, password_hash=hash_password(data.password), password_changed_at=now)
@@ -562,7 +562,7 @@ def accept(data: AcceptIn, request: Request, response: Response, db: Session = D
         # otra persona (veria sus datos de seguridad y le trabaria la gestion en su empresa). Los intentos cuentan
         # y bloquean como en el login. Respuestas 403/423, nunca 401.
         if not data.password:
-            raise HTTPException(422, "Escribí la contraseña de tu cuenta para aceptar")
+            raise HTTPException(422, "Escriba la contraseña de su cuenta para aceptar")
         locked = aware(u.locked_until)
         if locked and locked > now:
             raise HTTPException(423, "Cuenta bloqueada temporalmente por intentos fallidos")
@@ -680,7 +680,7 @@ def member_update(uid: int, data: MemberIn, p: Principal = Depends(ADMIN), db: S
     tid = p.tenant.id
     m = _member(db, p, uid)
     if uid == p.user.id and (data.active is False or (data.role and data.role != "admin")):
-        raise HTTPException(409, "No podés quitarte el acceso de administrador a vos mismo")
+        raise HTTPException(409, "No puede quitarse el acceso de administrador a sí mismo")
     u = m.user
     role_change = bool(data.role) and data.role != m.role_code
     active_change = data.active is not None and data.active != m.active
@@ -788,7 +788,7 @@ def reset_password(uid: int, data: ResetIn, response: Response, p: Principal = D
     tid = p.tenant.id
     m = _member(db, p, uid)
     if uid == p.user.id:
-        raise HTTPException(409, "Para tu propia cuenta usá Mi cuenta → Cambiar contraseña")
+        raise HTTPException(409, "Para su propia cuenta use Mi cuenta → Cambiar contraseña")
     _guard_admin(p, m)
     u = m.user
     if not m.active or not u.active:
