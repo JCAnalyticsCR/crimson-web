@@ -345,6 +345,11 @@ def test_permisos_y_alcance(client, auth, db_session):
     vend = role_headers(client, db_session, tid, "vend.cola@ejemplo.com", "ventas")
     del_admin = _pagar(client, _factura(client))
     del_vendedor = _pagar(client, _factura(client, headers=vend), headers=vend)
+    # el cobro que registra el vendedor queda "por_confirmar" (no baja saldo): administracion lo confirma
+    from app.models import Payment
+
+    pago = db_session.query(Payment).filter(Payment.invoice_id == del_vendedor["id"], Payment.status == "por_confirmar").one()
+    assert client.post(f"/invoices/{del_vendedor['id']}/payments/{pago.id}/confirm").status_code == 200
 
     # contabilidad ve toda la cola y marca (duena de la emision); solo lectura ve pero no marca
     assert set(_ids(client, conta)) == {del_admin["id"], del_vendedor["id"]}

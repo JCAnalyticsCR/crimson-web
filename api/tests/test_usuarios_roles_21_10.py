@@ -15,6 +15,13 @@ from tests.aliados_helpers import ADMIN_PW, interno, login, uid
 HOY = cr_now().date()
 
 
+def _catalogo(client, code, price):
+    """Producto del catalogo (como admin): una linea libre del vendedor sobre el tope pide cotizacion con aprobacion."""
+    r = client.post("/products", json={"name": f"Servicio {code}", "code": code, "price": price})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
 def _ids_por_correo(db_session, correo: str) -> list[EmailOutbox]:
     return list(db_session.scalars(select(EmailOutbox).where(EmailOutbox.to == correo)))
 
@@ -229,7 +236,7 @@ def test_regla_nueva_se_aplica_a_fechas_anteriores_y_el_vendedor_la_ve_pendiente
     vid = uid(client, vh)
     c = client.get("/customers").json()["items"][0]
     inv = client.post(
-        "/invoices", json={"customer_id": c["id"], "lines": [{"name": "Instalación", "quantity": 1, "unit_price": 1000000, "tax_rate": 13}]}, headers=vh
+        "/invoices", json={"customer_id": c["id"], "lines": [{"product_id": _catalogo(client, "INST-1", 1000000), "quantity": 1, "unit_price": 1000000, "tax_rate": 13}]}, headers=vh
     ).json()
     assert client.post(f"/invoices/{inv['id']}/payments", json={"method": "transferencia", "amount": 1130000, "kind": "captura"}).status_code == 201
     assert client.get("/commissions/summary", headers=vh).json()["ganado"]["total"] in (0, "0", "0.00")
@@ -542,9 +549,10 @@ def test_regla_aplicada_hacia_atras_solo_devenga_esa_regla(client, auth, db_sess
     h2 = interno(client, db_session, tid, "vende.dos@ejemplo.com", "ventas")
     v1, v2 = uid(client, h1), uid(client, h2)
     c = client.get("/customers").json()["items"][0]
+    pid = _catalogo(client, "X-1", 100000)
     for h in (h1, h2):
         inv = client.post(
-            "/invoices", json={"customer_id": c["id"], "lines": [{"name": "X", "quantity": 1, "unit_price": 100000, "tax_rate": 0}]}, headers=h
+            "/invoices", json={"customer_id": c["id"], "lines": [{"product_id": pid, "quantity": 1, "unit_price": 100000, "tax_rate": 0}]}, headers=h
         ).json()
         assert client.post(f"/invoices/{inv['id']}/payments", json={"method": "transferencia", "amount": 100000, "kind": "captura"}).status_code == 201
     # regla de la primera persona sin aplicarla hacia atras: no devenga nada

@@ -237,7 +237,8 @@ def cotizacion_aceptada(db: Session, tenant, q: Quote, *, version: int | None, q
 
 
 # la frase del tope de discounts.approval_reasons, con el total de la cotizacion y el tope interno de la empresa
-_MONTO_TOPE = re.compile(r"El monto \([^)]*\) supera el tope de [\d.,]+ para cotizar sin aprobación\.")
+# ("para vender" desde el 22/10; "para cotizar" en los motivos guardados antes)
+_MONTO_TOPE = re.compile(r"El monto \([^)]*\) supera el tope de [\d.,]+ para (?:cotizar|vender) sin aprobación\.")
 
 
 def _motivo_sin_cifras(texto: str | None) -> str | None:
@@ -245,7 +246,7 @@ def _motivo_sin_cifras(texto: str | None) -> str | None:
     from .discounts import public_reason
 
     motivo = public_reason(texto, False)
-    return _MONTO_TOPE.sub("El monto supera el tope para cotizar sin aprobación.", motivo) if motivo else motivo
+    return _MONTO_TOPE.sub("El monto supera el tope para vender sin aprobación.", motivo) if motivo else motivo
 
 
 def descuento_por_aprobar(db: Session, tenant, q: Quote, actor_id: int | None, *, tras_decision: bool = False) -> int:

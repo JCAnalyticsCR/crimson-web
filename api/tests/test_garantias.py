@@ -135,7 +135,7 @@ def test_only_sellers_and_admin_adjust_stock(client, auth, db_session):
     admin_h = dict(client.headers)
     cam = _product(client, "AJ-1")
     wid = _wh(client)["id"]
-    body = {"product_id": cam["id"], "warehouse_id": wid, "kind": "ajuste", "quantity": 3}
+    body = {"product_id": cam["id"], "warehouse_id": wid, "kind": "ajuste", "quantity": 3, "note": "conteo fisico"}
     ven = _login(client, db_session, tid, "ven-aj@ejemplo.com", "ventas", admin_h)
     bod = _login(client, db_session, tid, "bod-aj@ejemplo.com", "inventario", admin_h)
     sup = _login(client, db_session, tid, "sup-aj@ejemplo.com", "supervisor", admin_h)

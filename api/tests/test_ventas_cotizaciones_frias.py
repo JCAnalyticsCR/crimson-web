@@ -24,10 +24,23 @@ def _avisos(db, to: str) -> list[EmailOutbox]:
     return list(db.scalars(select(EmailOutbox).where(EmailOutbox.to == to, EmailOutbox.subject.contains("sin respuesta del cliente")).order_by(EmailOutbox.id)))
 
 
+def _camara(db) -> int:
+    """Camara del catalogo: una linea libre del vendedor sobre el tope (₡25 000) deja la cotizacion por aprobar y no sale."""
+    from app.models import Product
+
+    tid = db.scalar(select(Tenant.id).order_by(Tenant.id))
+    prod = db.scalar(select(Product).where(Product.tenant_id == tid, Product.code == "CAM-FRIA"))
+    if prod is None:
+        prod = Product(tenant_id=tid, code="CAM-FRIA", name="Cámara IP", price=50000)
+        db.add(prod)
+        db.commit()
+    return prod.id
+
+
 def _enviada(client, db, h, cust_id: int, hace_dias: float, **extra) -> dict:
     """Cotizacion enviada (marcada a mano) cuyo ultimo envio fue hace `hace_dias`."""
     q = client.post(
-        "/quotes", headers=h, json={"customer_id": cust_id, "lines": [{"name": "Cámara IP", "quantity": 1, "unit_price": 50000, "tax_rate": 13}], **extra}
+        "/quotes", headers=h, json={"customer_id": cust_id, "lines": [{"product_id": _camara(db), "quantity": 1, "unit_price": 50000, "tax_rate": 13}], **extra}
     )
     assert q.status_code == 201, q.text
     q = q.json()

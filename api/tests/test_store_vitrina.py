@@ -329,7 +329,7 @@ def test_asesoria_crea_oportunidad_y_avisa_a_ventas(client, auth, db_session):
     assert r.status_code == 202, r.text
     assert r.json()["ok"] is True and "number" not in r.json()
     o = db_session.scalar(select(Opportunity).order_by(Opportunity.id.desc()))
-    assert o.source == "tienda web" and o.solution == "cctv" and o.status == "nuevo" and o.kind == "proyecto"
+    assert o.source == "Sitio web" and o.solution == "cctv" and o.status == "nuevo" and o.kind == "proyecto"
     assert o.contact["company"] == "Ferretería El Roble" and o.site == "Alajuela centro"
     assert "8 × Cámara IP Hikvision Bullet" in o.notes and "instalación" in o.notes.lower()
     assert Decimal(str(o.amount)) > 0 and o.next_action_date is not None

@@ -12,6 +12,13 @@ from tests.test_session6 import _login, _uid
 D = Decimal
 
 
+def _catalogo(client, code, price):
+    """Producto del catalogo (como admin): una linea libre del vendedor sobre el tope pide cotizacion con aprobacion."""
+    r = client.post("/products", json={"name": f"Equipo {code}", "code": code, "price": price})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
 def _cust(client):
     return client.get("/customers").json()["items"][0]
 
@@ -91,7 +98,7 @@ def test_comision_venta_se_calcula_sin_iva_y_no_toca_las_viejas(client, auth, db
     uid = _uid(db_session, "comi-iva@ejemplo.com")
     client.post("/commissions/rules", json={"user_id": uid, "name": "Vendedor", "base": "venta", "percent": 5})
     inv = client.post(
-        "/invoices", headers=v, json={"customer_id": _cust(client)["id"], "lines": [{"name": "CCTV", "quantity": 1, "unit_price": 1000000, "tax_rate": 13}]}
+        "/invoices", headers=v, json={"customer_id": _cust(client)["id"], "lines": [{"product_id": _catalogo(client, "CCTV-IVA", 1000000), "quantity": 1, "unit_price": 1000000, "tax_rate": 13}]}
     ).json()
     assert D(str(inv["total"])) == D("1130000")
 

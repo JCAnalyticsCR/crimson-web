@@ -68,6 +68,13 @@ def test_ticket_de_soporte_de_punta_a_punta(client, auth, db_session):
     assert t["id"] in mios and otro["id"] not in mios
 
 
+def _catalogo(client, code, price):
+    """Producto del catalogo (como admin): una linea libre del vendedor sobre el tope pide cotizacion con aprobacion."""
+    r = client.post("/products", json={"name": f"Servicio {code}", "code": code, "price": price})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
 def _uid(db, email):
     from sqlalchemy import select
 
@@ -109,7 +116,7 @@ def test_comision_nace_con_el_cobro_no_con_la_factura(client, auth, db_session):
 
     client.post("/commissions/rules", json={"user_id": uid, "name": "Vendedora", "base": "venta", "percent": 5})
     inv = client.post(
-        "/invoices", headers=v, json={"customer_id": cust["id"], "lines": [{"name": "Instalación CCTV", "quantity": 1, "unit_price": 1000000, "tax_rate": 13}]}
+        "/invoices", headers=v, json={"customer_id": cust["id"], "lines": [{"product_id": _catalogo(client, "INST-CCTV", 1000000), "quantity": 1, "unit_price": 1000000, "tax_rate": 13}]}
     ).json()
 
     assert client.get("/commissions").json()["rows"] == []  # facturar no comisiona: hay que cobrar

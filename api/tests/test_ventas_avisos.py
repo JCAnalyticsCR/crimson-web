@@ -5,6 +5,7 @@ cotizacion y la OT de un ticket sin tecnico que queda "por programar"."""
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import select
 
 from app.core.config import settings
@@ -34,8 +35,25 @@ def _cliente(client) -> dict:
     return client.get("/customers").json()["items"][0]
 
 
+_CAMARA: dict = {}
+
+
+@pytest.fixture(autouse=True)
+def _camara_del_catalogo(db_session, auth):
+    """La camara de las cotizaciones es del catalogo: una linea libre del vendedor sobre el tope (₡25 000) ya pide
+    aprobacion por si sola y taparia el descuento, que es lo que se prueba aca."""
+    from app.models import Product
+
+    prod = Product(tenant_id=auth["tenant"]["id"], code="CAM-4MP-AV", name="Cámara IP 4 MP", price=100000)
+    db_session.add(prod)
+    db_session.commit()
+    _CAMARA["id"] = prod.id
+    yield
+    _CAMARA.clear()
+
+
 def _linea(precio=100000, descuento=0) -> dict:
-    return {"name": "Cámara IP 4 MP", "quantity": 2, "unit_price": precio, "tax_rate": 13, "discount_value": descuento}
+    return {"product_id": _CAMARA["id"], "quantity": 2, "unit_price": precio, "tax_rate": 13, "discount_value": descuento}
 
 
 def _sec(client, key, h=None) -> dict:
@@ -268,7 +286,7 @@ def test_avisos_internos_no_van_al_bcc_de_la_empresa_ni_llevan_el_monto(client, 
     q = client.post("/quotes", headers=ven, json={"customer_id": cust["id"], "lines": [_linea()]}).json()
     assert q["status"] == "por_aprobar"
     pedido = _correos(db_session, "quote", q["id"], "Cotización por aprobar")
-    assert len(pedido) == 1 and "supera el tope para cotizar sin aprobación" in pedido[0].html
+    assert len(pedido) == 1 and "supera el tope para vender sin aprobación" in pedido[0].html
     assert "CRC" not in pedido[0].html and "226" not in pedido[0].html and "1,000" not in pedido[0].html
     assert client.post(f"/quotes/{q['id']}/approve").status_code == 200
     assert client.post(f"/quotes/{q['id']}/send", json={"channel": "whatsapp"}, headers=ven).status_code == 200
