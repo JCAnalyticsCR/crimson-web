@@ -191,6 +191,9 @@ class QuoteAcceptance(TenantMixin, Base):
     version: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(12))  # aceptada | rechazada | pendiente (deshacer)
     contact_name: Mapped[str | None] = mapped_column(String(160))  # quien respondio del lado del cliente
+    # aceptacion en linea (ventas etapa 3): cedula de quien acepto y la IP desde donde lo hizo
+    contact_id_number: Mapped[str | None] = mapped_column(String(30))
+    ip: Mapped[str | None] = mapped_column(String(64))
     channel: Mapped[str | None] = mapped_column(String(16))  # correo | whatsapp | firma | portal | telefono | presencial
     decided_on: Mapped[date | None] = mapped_column(Date)  # fecha en que el cliente respondio
     notes: Mapped[str | None] = mapped_column(Text)

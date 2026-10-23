@@ -6,6 +6,7 @@ import { useSession } from "../../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
 import { AccountOwner } from "./AccountOwner";
+import { TaskModal } from "./Agenda";
 
 type Cust = { id: number; name: string; id_type: string; id_number: string | null; email: string | null; phone: string | null; whatsapp: string | null; currency: string; notes: string | null; address: Record<string, string> | null; active: boolean; no_reminders?: boolean; created_at: string; account_owner_id?: number | null; account_owner_name?: string | null };
 type Ev = { at: string; kind: string; title: string; amount?: string; currency?: string; status: string | null; to?: string; id?: number; author?: string | null };
@@ -27,6 +28,7 @@ const KIND: Record<string, { label: string; color: string; icon: string }> = {
   pago: { label: "Pago", color: "var(--ok)", icon: I.pay },
   orden: { label: "Pedido", color: "var(--warn)", icon: I.box },
   nota: { label: "Nota", color: "var(--text-3)", icon: I.quote },
+  tarea: { label: "Tarea", color: "var(--warn)", icon: I.check },
 };
 
 export default function CustomerDetail() {
@@ -42,6 +44,7 @@ export default function CustomerDetail() {
   const [edit, setEdit] = useState<Cust | null>(null);
   // insignia "Empresa aliada": este cliente es el de facturacion de una empresa aliada (solo con aliados.ver)
   const [aliada, setAliada] = useState<{ id: number; name: string } | null>(null);
+  const [tarea, setTarea] = useState(false); // ventas etapa 3: agendar una llamada, visita o recordatorio
 
   const load = useCallback(() => {
     api<Overview>(`/customers/${id}/overview`).then(setOv).catch((e) => toast(e.message, "bad"));
@@ -116,11 +119,13 @@ export default function CustomerDetail() {
         <div className="page-head__actions">
           {wa && <a className="btn btn--ghost btn--sm" href={`https://wa.me/${wa.length === 8 ? "506" + wa : wa}`} target="_blank" rel="noopener"><Icon d={I.whatsapp} />WhatsApp</a>}
           {editaCrm && <button className="btn btn--ghost btn--sm" onClick={() => setEdit({ ...c })}>Editar datos</button>}
+          {allows("crm_pipeline.editar") && <button className="btn btn--ghost btn--sm" onClick={() => setTarea(true)}><Icon d={I.check} />Agendar</button>}
           {vende && <button className="btn btn--soft btn--sm" onClick={() => nav(`/cotizaciones/nueva?cliente=${c.id}`)}><Icon d={I.quote} />Cotizar</button>}
           {vende && <button className="btn btn--crimson btn--sm" onClick={() => nav(`/facturas/nueva?cliente=${c.id}`)}><Icon d={I.invoice} />Facturar</button>}
         </div>
       </div>
 
+      {tarea && <TaskModal link={{ customer_id: c.id, label: c.name }} onClose={() => setTarea(false)} onDone={load} />}
       <AccountOwner customerId={c.id} ownerId={c.account_owner_id ?? null} ownerName={c.account_owner_name ?? null} onChanged={load} />
 
       {!editaCrm && allows("crm.crear") && (

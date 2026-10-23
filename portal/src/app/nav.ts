@@ -20,6 +20,7 @@ export const NAV: NavGroup[] = [
     { to: "/ordenes-trabajo", label: "Órdenes de trabajo", icon: I.check, need: "field.ver" },
     { to: "/facturas", label: "Facturas", icon: I.invoice, need: "sales.ver" },
     { to: "/pagos", label: "Pagos", icon: I.pay, need: "payments.ver" },
+    { to: "/metas", label: "Metas del equipo", icon: I.trend, need: "crm.cartera" },
     { to: "/pos", label: "Punto de venta", icon: I.wallet, need: "sales.crear" },
     { to: "/recurrencias", label: "Recurrencias", icon: I.refresh, need: "sales.recurrencias" },
   ]},

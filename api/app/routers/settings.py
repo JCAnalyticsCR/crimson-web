@@ -225,6 +225,22 @@ class SettingsIn(BaseModel):
             if monto < 0:
                 raise ValueError("El tope de monto del jefe de ventas no puede ser negativo")
             v["jefe_ventas_tope_monto"] = monto
+        # ventas etapa 3
+        meta = v.get("meta_mensual_default")
+        if meta is not None:
+            try:
+                meta = float(meta)
+            except (TypeError, ValueError):
+                raise ValueError("La meta mensual por defecto debe ser un número") from None
+            if meta < 0:
+                raise ValueError("La meta mensual por defecto no puede ser negativa")
+            v["meta_mensual_default"] = meta
+        for k in ("resumen_diario_vendedores", "aceptacion_en_linea"):
+            if k in v and not isinstance(v[k], bool):
+                raise ValueError(f"{k} debe ser verdadero o falso")
+        dias = v.get("enlace_cotizacion_dias")
+        if dias is not None and not (isinstance(dias, int) and 1 <= dias <= 120):
+            raise ValueError("La vigencia del enlace debe estar entre 1 y 120 días")
         quienes = v.get("quienes_asignan_ventas")
         if quienes is not None:
             if not isinstance(quienes, list) or any(q not in ("admin", "jefe_ventas") for q in quienes):

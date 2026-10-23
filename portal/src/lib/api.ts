@@ -162,6 +162,8 @@ export type Quote = Doc & {
   rejection?: { by: string | null; at: string; reason: string | null } | null;
   /* jefe de ventas: si puede aprobarla (dentro de sus topes) y, si no, por qué la aprueba administración */
   team_approval?: { can: boolean; reason: string | null } | null;
+  /* ventas etapa 3: enlace público de aceptación en línea y cuándo lo abrió el cliente */
+  online_link?: { url: string; expires_at: string; first_opened_at: string | null; last_opened_at: string | null; open_count: number } | null;
 };
 export type Payment = { id: number; invoice_id?: number | null; invoice_number?: string | null; customer?: string | null; method: string; kind: string; currency: string; amount: string; tip: string; external_ref: string | null; provider: string; paid_at: string; status: string };
 export type Invoice = Doc & { doc_type: string; consecutive: string | null; clave: string | null; balance: string; quote_id: number | null; einvoice_status: string; payments: Payment[]; sale_condition: string; credit_days: number; payment_method: string;
@@ -195,6 +197,9 @@ export type Dashboard = {
   mi_embudo?: { abiertas: number; monto: string; ponderado: string; ganadas_mes: number; ganado_mes: string; perdidas_mes: number; moneda: string; convertido: boolean; sin_tipo_de_cambio?: boolean } | null;
   /* Mis comisiones (vendedor, sin ver_todo): la misma cuenta que /commissions/summary, en colones y sin IVA */
   comisiones?: { ganado_mes: string; pagado_mes: string; por_cobrar: string; moneda: string } | null;
+  /* ventas etapa 3: avance contra la meta del mes y la lista «Hoy» de la agenda */
+  meta?: { mes: string; meta: string | null; vendido: string; avance_pct: number | null; falta: string | null; sin_meta?: boolean } | null;
+  agenda?: import("../modules/crm/Agenda").Task[] | null;
   /* jefe de ventas (ventas etapa 2): aprobaciones del equipo y embudo del equipo, sin costos */
   equipo?: {
     por_aprobar: number;

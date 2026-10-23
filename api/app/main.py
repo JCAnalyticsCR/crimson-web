@@ -59,9 +59,11 @@ from .routers import bitacora as bitacora_router
 from .routers import cartera as cartera_router
 from .routers import fiscal_queue as fiscal_queue_router
 from .routers import invoice_proofs as invoice_proofs_router
+from .routers import public_quotes as public_quotes_router
 from .routers import report_board as report_board_router
 from .routers import settings as settings_router
 from .routers import store_inventory as store_inventory_router
+from .routers import ventas3 as ventas3_router
 
 log = logging.getLogger("crimson")
 
@@ -150,6 +152,8 @@ def create_app() -> FastAPI:
     app.include_router(media.router)
     app.include_router(crm_extra.router)
     app.include_router(cartera_router.router)  # traspaso de cartera (ventas etapa 2)
+    app.include_router(ventas3_router.router)  # metas, agenda, kits y plantillas (ventas etapa 3)
+    app.include_router(public_quotes_router.router)  # aceptacion en linea (ventas etapa 3)
     app.include_router(payroll.router)
     app.include_router(banking.router)
     app.include_router(events.router)

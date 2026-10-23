@@ -420,6 +420,17 @@ function ManageModal({ u, roles, reauthRoles, viewerIsAdmin, onClose, onChanged,
   const topeActual = u.discount_limit_pct == null ? "" : String(Number(u.discount_limit_pct));
   const [tope, setTope] = useState(topeActual);
   useEffect(() => { setTope(topeActual); }, [topeActual]);
+  /* ventas etapa 3: meta del mes en colones (también en Metas del equipo) */
+  const [meta, setMeta] = useState<{ actual: string; v: string } | null>(null);
+  useEffect(() => {
+    if (!vendeRol) return;
+    api<{ vendedores: { id: number; meta: string | null }[] }>("/goals/board").then((b) => { const r = b.vendedores.find((x) => x.id === u.id); const a = r?.meta != null ? String(Number(r.meta)) : ""; setMeta({ actual: a, v: a }); }).catch(() => setMeta(null));
+  }, [u.id, vendeRol]);
+  const saveMeta = async () => {
+    if (!meta || !(Number(meta.v) >= 0) || meta.v.trim() === "") { toast("Escriba un monto válido", "bad"); return; }
+    try { await api("/goals", { method: "PUT", json: { user_id: u.id, amount: Number(meta.v) } }); setMeta({ actual: meta.v, v: meta.v }); toast("Meta del mes guardada"); }
+    catch (e) { toast(errMsg(e), "bad"); }
+  };
   const saveTope = async () => {
     const v = tope.trim();
     if (v !== "" && (!(Number(v) >= 0) || Number(v) > 100)) { toast("El tope debe estar entre 0 y 100 %", "bad"); return; }
@@ -486,6 +497,16 @@ function ManageModal({ u, roles, reauthRoles, viewerIsAdmin, onClose, onChanged,
             </div>
             <button className="btn btn--soft btn--sm" onClick={saveTope} disabled={tope.trim() === topeActual}>Guardar tope</button>
           </div>
+          {meta && (
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 220px" }}>
+                <Field label="Meta de este mes (₡)" hint="Lo cobrado y confirmado, sin IVA. Se mantiene en los meses siguientes hasta que la cambie (también en Metas del equipo).">
+                  <input className="input" type="number" min={0} step="50000" inputMode="numeric" value={meta.v} onChange={(e) => setMeta({ ...meta, v: e.target.value })} placeholder="Sin meta" />
+                </Field>
+              </div>
+              <button className="btn btn--soft btn--sm" onClick={saveMeta} disabled={meta.v.trim() === meta.actual}>Guardar meta</button>
+            </div>
+          )}
           <p className="muted" style={{ fontSize: 13, margin: 0 }}>{u.clientes_cartera ? `Tiene ${u.clientes_cartera} cliente(s) en su cartera.` : "No tiene clientes en su cartera."}</p>
           <div><button className="btn btn--ghost btn--sm" onClick={() => onTransfer()}>Traspasar su cartera a otro vendedor</button></div>
         </div>

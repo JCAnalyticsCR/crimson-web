@@ -373,3 +373,6 @@ inbox_run_limiter = SlidingWindow(limit=4, seconds=300)
 # Guardian de margen (plan 1.12): cada tasa manual, "Actualizar desde el BCCR" y "Revisar ahora" recorre todos los
 # productos publicados de la empresa. Por empresa; holgado para una persona, frena el martilleo.
 margin_run_limiter = SlidingWindow(limit=10, seconds=60)
+# ventas etapa 3: pagina publica de la cotizacion (abrirla o su PDF) y aceptarla, por IP
+quote_view_limiter = SlidingWindow(limit=60, seconds=600)
+quote_accept_limiter = SlidingWindow(limit=8, seconds=3600)

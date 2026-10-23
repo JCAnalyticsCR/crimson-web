@@ -510,6 +510,8 @@ celery.conf.beat_schedule = {
     "expire-support": {"task": "support.expire_grants", "schedule": crontab(minute=5)},
     "stale-followups": {"task": "crm.stale_followups", "schedule": crontab(hour=7, minute=30, day_of_week="mon-fri")},
     "low-stock-requests": {"task": "inventory.low_stock_requests", "schedule": crontab(hour=6, minute=45)},
+    # ventas etapa 3: agenda del dia a cada vendedor, antes de la franja 07:00-09:00 de los demas avisos
+    "agenda-diaria": {"task": "crm.agenda_diaria", "schedule": crontab(hour=6, minute=45, day_of_week="mon-sat")},
     "inventory-health": {"task": "inventory.health_check", "schedule": crontab(hour=6, minute=50)},
     # cada 5 min: las reservas de pago con tarjeta duran 30 min
     "expire-reservations": {"task": "inventory.expire_reservations", "schedule": crontab(minute="*/5")},

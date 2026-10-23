@@ -255,3 +255,22 @@ def consultas_sin_responsable() -> int:
                 db.rollback()
                 log.exception("consultas sin responsable (empresa %s)", t.id)
     return n
+
+
+@shared_task(name="crm.agenda_diaria")
+def agenda_diaria() -> int:
+    """06:45 de lunes a sabado (beat "agenda-diaria"): a cada vendedor su agenda de hoy y lo atrasado (ventas etapa 3)."""
+    from ..core.db import SessionLocal
+    from ..models import Tenant
+    from ..services import agenda
+
+    n = 0
+    with SessionLocal() as db:
+        for t in db.scalars(select(Tenant).where(Tenant.active)).all():
+            try:
+                n += agenda.digest(db, t)
+                db.commit()
+            except Exception:  # noqa: BLE001  una empresa con datos raros no frena a las demas
+                db.rollback()
+                log.exception("agenda diaria (empresa %s)", t.id)
+    return n

@@ -242,6 +242,15 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
         )
     for n in notes:
         events.append({"at": _ts(n.created_at), "kind": "nota", "id": n.id, "title": n.body, "author": authors.get(n.created_by), "status": None})
+    if p.can("crm_pipeline", "ver"):
+        # ventas etapa 3: llamadas, visitas y recordatorios del cliente (el vendedor, solo los suyos)
+        from ..models.ventas3 import SalesTask
+        from ..services import agenda
+
+        for t in db.scalars(select(SalesTask).where(SalesTask.tenant_id == tid, SalesTask.customer_id == cid, agenda.scope(p)).order_by(SalesTask.due_at.desc()).limit(50)):
+            o = agenda.out(db, t)
+            estado = "hecha" if t.done_at else ("atrasada" if o["overdue"] else "pendiente")
+            events.append({"at": _ts(o["due_at"]), "kind": "tarea", "id": t.id, "title": f"{o['kind_label']}: {t.title}", "author": o["assigned_name"], "status": estado})
     events.sort(key=lambda e: e["at"], reverse=True)
 
     return {

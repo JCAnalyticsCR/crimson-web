@@ -111,6 +111,8 @@ class QuoteOut(DocBaseOut):
     rejection: dict | None = None
     # jefe de ventas (ventas etapa 2): si puede aprobar esta cotizacion retenida y, si no, por que (la aprueba el admin)
     team_approval: dict | None = None
+    # ventas etapa 3: enlace publico de aceptacion en linea y sus aperturas
+    online_link: dict | None = None
 
 
 class PaymentIn(BaseModel):

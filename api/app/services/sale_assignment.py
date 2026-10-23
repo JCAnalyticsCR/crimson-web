@@ -58,6 +58,11 @@ VENTAS_DEFAULTS: dict = {
     "jefe_ventas_tope_descuento_pct": 15,
     "jefe_ventas_tope_monto": 10_000_000,
     "quienes_asignan_ventas": ["admin"],
+    # Ventas etapa 3
+    "meta_mensual_default": 0,             # colones; 0 = sin meta hasta que el admin o el jefe le ponga una
+    "resumen_diario_vendedores": True,     # correo de la mañana (06:45, lunes a sábado) con la agenda de cada vendedor
+    "aceptacion_en_linea": True,           # la cotizacion lleva un enlace para que el cliente la acepte en linea
+    "enlace_cotizacion_dias": 30,          # vigencia del enlace cuando la cotizacion no tiene fecha de validez
 }
 
 

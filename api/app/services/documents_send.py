@@ -144,6 +144,12 @@ def send_document(
     if is_inv:
         files += fiscal_files(db, doc)
     entity = "invoice" if is_inv else "quote"
+    accept_link = None
+    if not is_inv:
+        from . import quote_links
+
+        ql = quote_links.get_or_create(db, tenant, doc)
+        accept_link = quote_links.url_of(ql) if ql else None
     m = queue_once(
         db,
         tenant,
@@ -160,6 +166,7 @@ def send_document(
             issued=_fecha(getattr(doc, "issue_date", None)),
             due=_fecha(doc.due_date),
             view_link=None if link else portal_link(db, tenant, doc, c),
+            accept_link=accept_link,
         ),
         entity,
         doc.id,

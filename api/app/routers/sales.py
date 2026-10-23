@@ -132,6 +132,9 @@ def _quote_out(db: Session, q: Quote, p: Principal) -> QuoteOut:
     if rech is not None:
         quien = _user_name(db, rech.user_id)
         o.rejection = {"by": quien, "at": rech.at, "reason": (rech.diff or {}).get("motivo")}
+    from ..services import quote_links
+
+    o.online_link = quote_links.link_info(db, q)
     if q.status == "por_aprobar" and p.approves_team:
         motivo = discounts.team_approval(db, p, q)
         o.team_approval = {"can": motivo is None, "reason": motivo}
@@ -582,6 +585,9 @@ def send_quote(qid: int, data: MarkSentIn | None = None, p: Principal = Depends(
     units.check_ready(q, "enviar la cotización")
     if q.status == "creado":
         q.status = "enviada"
+    from ..services import quote_links
+
+    quote_links.get_or_create(db, p.tenant, q)  # el enlace de aceptacion en linea (va en el WhatsApp)
     v, _ = qv.record_send(db, p.tenant, p.user.id, q, data.channel, data.to or _cust_name(db, q.customer_id), ip=p.ip)
     audit(db, p.tenant.id, p.user.id, "send", "quote", q.id, {"version": v.version, "canal": data.channel}, ip=p.ip)
     db.commit()
@@ -1278,7 +1284,28 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
         "comisiones": comisiones,
         # jefe de ventas (ventas etapa 2): aprobaciones del equipo y el embudo del equipo por vendedor
         "equipo": equipo,
+        # ventas etapa 3: avance contra la meta del mes (quien vende) y la lista "Hoy" de su agenda
+        "meta": _my_goal(db, p),
+        "agenda": _my_agenda(db, p),
     }
+
+
+def _my_goal(db: Session, p: Principal) -> dict | None:
+    from ..services import metas
+    from ..services.ownership import eligible_seller
+
+    if not p.can("sales", "crear") or not eligible_seller(db, p.tenant.id, p.user.id):
+        return None
+    r = metas.progress(db, p.tenant, p.user.id, metas.parse_month(None))
+    return r if r["meta"] is not None or r["vendido"] > 0 else {**r, "sin_meta": True}
+
+
+def _my_agenda(db: Session, p: Principal) -> list | None:
+    from ..services import agenda
+
+    if not p.can("crm_pipeline", "ver"):
+        return None
+    return [agenda.out(db, t) for t in agenda.pending_today(db, p.tenant.id, p.user.id)[:15]]
 
 
 def _team_block(db: Session, p: Principal) -> dict:

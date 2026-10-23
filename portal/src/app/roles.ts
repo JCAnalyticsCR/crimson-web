@@ -97,7 +97,7 @@ export const ROLES: Record<string, RoleMeta> = {
     summary: "Dirige al equipo de ventas: ve las oportunidades, cotizaciones, facturas y cobros de todos, aprueba descuentos y cotizaciones grandes hasta sus topes y reparte la cartera. Nunca ve el costo ni el margen.",
     can: ["Ver lo que vende todo el equipo y el embudo del equipo", "Aprobar descuentos y montos hasta sus topes (Ajustes → Ventas)", "Cambiar el vendedor de la cuenta de un cliente", "Traspasar la cartera de un vendedor a otro", "Asignar ventas por asignar, si el administrador lo habilita"],
     cannot: ["Ver el costo, el margen o la utilidad", "Aprobar lo que pase de sus topes, el margen bajo el mínimo o sus propias cotizaciones", "Anular facturas", "Configurar la empresa o los usuarios"],
-    menu: ["/", "/aprobaciones", "/oportunidades", "/cotizaciones", "/facturas", "/pagos", "/clientes", "/productos", "/inventario", "/ordenes", "/comisiones", "/archivo", "/ajustes"],
+    menu: ["/", "/aprobaciones", "/oportunidades", "/cotizaciones", "/facturas", "/pagos", "/metas", "/clientes", "/productos", "/inventario", "/ordenes", "/comisiones", "/archivo", "/ajustes"],
   },
   // Roles de cliente: no entran al panel interno, tienen su propio portal (modules/cliente)
   cliente_admin: {

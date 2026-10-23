@@ -332,6 +332,7 @@ def doc_email_html(
     due: str | None = None,
     issued: str | None = None,
     view_link: str | None = None,
+    accept_link: str | None = None,
 ) -> str:
     """Cotizacion, factura o aviso de cobro al cliente (diseno base: email_layout). Con enlace de pago, el boton es
     "Ver y pagar en línea". Sin enlace de pago (una cotizacion, una factura sin saldo), view_link es el portal de
@@ -355,6 +356,7 @@ def doc_email_html(
         title=titulo,
         body=body,
         preheader=f"{titulo} por {total}" + (f" · {vence.lower()} {due}" if due else "") + ".",
-        action=(link, "Ver y pagar en línea") if link else ((view_link, f"Ver {kind}") if view_link else None),
+        # ventas etapa 3: la cotizacion lleva su enlace publico para verla y aceptarla en linea (services/quote_links)
+        action=(link, "Ver y pagar en línea") if link else ((accept_link, "Ver y aceptar en línea") if accept_link else ((view_link, f"Ver {kind}") if view_link else None)),
         foot="Cualquier consulta, responda a este correo.",
     )

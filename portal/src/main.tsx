@@ -19,6 +19,9 @@ const Products = lazy(() => import("./modules/catalog/Products"));
 const CabysBulk = lazy(() => import("./modules/catalog/CabysBulk"));
 const Settings = lazy(() => import("./modules/Settings"));
 const PayPage = lazy(() => import("./modules/pay/PayPage"));
+const QuotePage = lazy(() => import("./modules/pay/QuotePage"));
+const Metas = lazy(() => import("./modules/sales/Metas"));
+const PorAsignar = lazy(() => import("./modules/sales/PorAsignar"));
 const Payments = lazy(() => import("./modules/payments/Payments"));
 const Inventory = lazy(() => import("./modules/inventory/Inventory"));
 // Contabilidad en tres partes (Facturas, Contable, Tributario): hub con rutas anidadas
@@ -132,6 +135,7 @@ function App() {
     <Routes>
       <Route path="/login" element={<LoginRoute />} />
       <Route path="/pagar/:token" element={<PayPage />} />
+      <Route path="/cotizacion/:token" element={<QuotePage />} />
       <Route path="/invitacion/:token" element={<Invite />} />
       <Route path="/restablecer/:token" element={<ResetPassword />} />
       <Route path="/recuperar" element={<ForgotPassword />} />
@@ -185,6 +189,8 @@ function App() {
         <Route path="/facturas/nueva" element={g("sales.crear", <DocEditor kind="invoice" />)} />
         <Route path="/facturas/:id" element={g("sales.ver", <InvoiceDetail />)} />
         <Route path="/pagos" element={g("payments.ver", <Payments />)} />
+        <Route path="/metas" element={g("crm.cartera", <Metas />)} />
+        <Route path="/ventas/por-asignar" element={g("sales.asignar_venta", <PorAsignar />)} />
         <Route path="/recurrencias" element={g("sales.recurrencias", <Recurrences />)} />
         <Route path="/clientes" element={g("crm.ver", <Customers />)} />
         <Route path="/clientes/:id" element={g("crm.ver", <CustomerDetail />)} />

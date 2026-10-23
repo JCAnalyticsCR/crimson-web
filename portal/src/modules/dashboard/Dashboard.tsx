@@ -4,6 +4,9 @@ import { api, fmtDate, fmtMoney, parseTs, type Dashboard as D } from "../../lib/
 import { useSession } from "../../app/session";
 import { roleMeta } from "../../app/roles";
 import { Badge, Card, Empty, I, Icon, Spark } from "../../ui/components";
+import { TodayCard } from "../crm/Agenda";
+import PorAsignar from "../sales/PorAsignar";
+import { Progress } from "../sales/Metas";
 
 function Kpi({ label, data, light, cur }: { label: string; data: NonNullable<D["pagos"]>; light?: boolean; cur: string }) {
   const v = data.variacion;
@@ -227,6 +230,24 @@ export default function Dashboard() {
             {d.pagos && <Kpi label={d.scope === "mine" ? "Mis cobros" : "Pagos"} data={d.pagos} cur={cur} />}
             <Kpi label={d.scope === "mine" ? "Mi facturación" : "Facturado"} data={d.facturado} cur={cur} light />
           </div>
+
+          {/* ventas etapa 3: la meta del mes, la agenda de hoy y (admin) las ventas por asignar */}
+          {d.meta && (
+            <Card title="Mi meta del mes" extra={<span className="meta">cobrado y confirmado, sin IVA</span>}>
+              {d.meta.meta == null ? <p className="muted" style={{ margin: 0, fontSize: 13 }}>Todavía no tiene meta para este mes. Lo vendido va en {fmtMoney(d.meta.vendido, "CRC")}.</p> : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", fontSize: 14 }}>
+                    <span><b className="money">{fmtMoney(d.meta.vendido, "CRC")}</b> de <span className="money">{fmtMoney(d.meta.meta, "CRC")}</span></span>
+                    <b>{d.meta.avance_pct ?? 0} %</b>
+                  </div>
+                  <Progress pct={d.meta.avance_pct} />
+                  {d.meta.falta != null && Number(d.meta.falta) > 0 && <span className="muted" style={{ fontSize: 12.5 }}>Le faltan {fmtMoney(d.meta.falta, "CRC")} para llegar.</span>}
+                </div>
+              )}
+            </Card>
+          )}
+          {d.agenda && <TodayCard tasks={d.agenda} onChanged={load} />}
+          {allows("sales.asignar_venta") && <PorAsignar compact />}
 
           {d.mi_embudo && (
             /* misma cuenta que Oportunidades (pipeline_summary): el número del inicio y el del embudo no pueden diferir */

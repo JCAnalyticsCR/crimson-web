@@ -8,6 +8,7 @@ import { Badge, Field, I, Icon, Loading, Modal } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
 import { NO_SUMA, TREATMENTS, unitOptions, type Treatment } from "../../lib/units";
 import QuoteVersions from "./QuoteVersions";
+import { KitPicker, QuoteShare } from "./QuoteExtras";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
 import { AvailBadge, availText, sinExistencia } from "../../ui/Availability";
 
@@ -61,6 +62,8 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [prev, setPrev] = useState<Preview | null>(null);
   const [pick, setPick] = useState(false);
+  const [kit, setKit] = useState(false); // ventas etapa 3: insertar un kit
+  const [emailMsg, setEmailMsg] = useState(""); // ventas etapa 3: texto de la plantilla de correo elegida
   const [busy, setBusy] = useState(false);
   /* tasa vigente (services/fx en la API): con su fecha, su fuente y si tiene mas de 2 dias habiles */
   const [fx, setFx] = useState<FxToday | null>(null);
@@ -248,7 +251,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
       if (then === "send") {
         /* Solo queda "enviada" (y su oportunidad en "Cotización enviada") si el correo salió de verdad;
            si quedó simulado o con error, se guarda el documento pero se avisa claro que el cliente no lo recibió. */
-        const r = await api<{ status: string; sent: boolean; to: string; note: string | null; version?: number | null }>(`/${path}/${saved.id}/email`, { method: "POST", json: {} });
+        const r = await api<{ status: string; sent: boolean; to: string; note: string | null; version?: number | null }>(`/${path}/${saved.id}/email`, { method: "POST", json: isQ && emailMsg ? { message: emailMsg } : {} });
         if (!r.sent) {
           toast(`${isQ ? "Cotización" : "Factura"} ${saved.number} guardada. ${r.note || "El correo no salió."}`, "bad");
           nav(`/${isQ ? "cotizaciones" : "facturas"}/${saved.id}`, { replace: true });
@@ -267,14 +270,14 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
       if (!isNew) setDoc(saved);
     } catch (e) { toast(e instanceof Error ? e.message : "Error al guardar", "bad"); }
     finally { setBusy(false); }
-  }, [payload, isQ, isNew, id, nav, toast, auto, doc, lines]);
+  }, [payload, isQ, isNew, id, nav, toast, auto, doc, lines, emailMsg]);
 
   /* Enviar sin guardar: para quien envia pero no edita ventas (contabilidad, plan 1.7). El mismo correo que
      "Guardar & enviar": PDF y enlace de pago; solo queda "enviada" si el correo salio de verdad. */
   const sendOnly = async () => {
     setBusy(true);
     try {
-      const r = await api<{ status: string; sent: boolean; to: string; note: string | null; version?: number | null }>(`/${isQ ? "quotes" : "invoices"}/${id}/email`, { method: "POST", json: {} });
+      const r = await api<{ status: string; sent: boolean; to: string; note: string | null; version?: number | null }>(`/${isQ ? "quotes" : "invoices"}/${id}/email`, { method: "POST", json: isQ && emailMsg ? { message: emailMsg } : {} });
       if (!r.sent) { toast(`${isQ ? "Cotización" : "Factura"} ${doc.number}: ${r.note || "el correo no salió."}`, "bad"); return; }
       toast(`${isQ ? "Cotización" : "Factura"} ${doc.number} enviada a ${r.to}${r.version ? ` · v${r.version}` : ""}`);
       if (isQ) api<Quote & Invoice>(`/quotes/${id}`).then(hydrate).catch(() => {});
@@ -398,7 +401,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
           </div></div>
 
           <div className="card">
-            <div className="card__head"><h3 className="h3">Productos & Servicios</h3><button className="btn btn--soft btn--sm" disabled={ro} onClick={() => setPick(true)}><Icon d={I.plus} />Agregar Productos & Servicios</button></div>
+            <div className="card__head"><h3 className="h3">Productos & Servicios</h3><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{isQ && <button className="btn btn--ghost btn--sm" disabled={ro} onClick={() => setKit(true)}><Icon d={I.box} />Insertar kit</button>}<button className="btn btn--soft btn--sm" disabled={ro} onClick={() => setPick(true)}><Icon d={I.plus} />Agregar Productos & Servicios</button></div></div>
             <div className="card__body" style={{ padding: 0 }}>
               <table className="lines">
                 <thead><tr><th>Concepto</th><th style={{ width: 118 }}>Cant. · unidad</th><th style={{ width: 128 }}>Precio</th><th style={{ width: 72 }}>Desc. %</th><th style={{ width: 82 }}>IVA</th><th className="num" style={{ width: 120 }}>Subtotal</th><th style={{ width: 34 }} /></tr></thead>
@@ -549,7 +552,8 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               {!pending && !accepted && canSend && (canEdit
                 ? <button className="btn" disabled={busy || blocked || provisional} title={provisional ? PROVISIONAL_ENVIO : undefined} onClick={() => save("send")}><Icon d={I.mail} />Guardar & enviar al cliente</button>
                 : !isNew && <button className="btn" disabled={busy || blocked || provisional} title={provisional ? PROVISIONAL_ENVIO : undefined} onClick={sendOnly}><Icon d={I.mail} />Enviar al cliente</button>)}
-              {!pending && !accepted && !isNew && (() => {
+              {isQ && !pending && !accepted && !isNew && canSend && doc.status !== "por_aprobar" && <QuoteShare quote={doc} emailTpl={emailMsg} setEmailTpl={setEmailMsg} onSent={() => api<Quote & Invoice>(`/quotes/${id}`).then(hydrate).catch(() => {})} />}
+              {!isQ && !pending && !accepted && !isNew && (() => {
                 const cust = customers.find((c) => c.id === doc.customer_id);
                 const rawPhone = cust?.whatsapp || cust?.phone || null;
                 if (!rawPhone) return null;
@@ -592,6 +596,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
       {nuevoCliente && <NuevoCliente onClose={() => setNuevoCliente(false)} onCreated={(c) => { setCustomers((cs) => [c, ...cs.filter((x) => x.id !== c.id)]); setDoc({ ...doc, customer_id: c.id, currency: c.currency || doc.currency || "CRC" }); setNuevoCliente(false); }} />}
       {clienteFactura && <ClienteParaFactura customers={customers} busy={busy} onClose={() => setClienteFactura(false)} onCreated={(c) => setCustomers((cs) => [c, ...cs.filter((x) => x.id !== c.id)])} onPick={(cid) => convertAccepted(cid)} />}
       {pick && <ProductPicker onClose={() => setPick(false)} onPick={addProducts} docCurrency={cur} />}
+      {kit && <KitPicker currency={cur} onClose={() => setKit(false)} onPick={(ls) => { setLines((x) => [...x, ...ls.map((l) => ({ ...blankLine(), ...l }) as Line)]); setKit(false); }} />}
     </>
   );
 }

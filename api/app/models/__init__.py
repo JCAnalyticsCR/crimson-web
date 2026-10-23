@@ -86,6 +86,7 @@ from .support import (
     WarrantyCase,
 )
 from .vehicles import FuelLoad, Vehicle, VehicleCost
+from .ventas3 import MessageTemplate, QuoteKit, QuoteKitLine, QuoteLink, SalesGoal, SalesTask
 
 __all__ = [
     "ACCOUNTING_ROLES",
@@ -198,4 +199,10 @@ __all__ = [
     "VehicleCost",
     "SupplierPayment",
     "SupplierPaymentApplication",
+    "SalesGoal",
+    "SalesTask",
+    "QuoteKit",
+    "QuoteKitLine",
+    "MessageTemplate",
+    "QuoteLink",
 ]
