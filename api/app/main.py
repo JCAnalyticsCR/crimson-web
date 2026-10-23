@@ -56,6 +56,7 @@ from .routers import (
     webhooks,
 )
 from .routers import bitacora as bitacora_router
+from .routers import cartera as cartera_router
 from .routers import fiscal_queue as fiscal_queue_router
 from .routers import invoice_proofs as invoice_proofs_router
 from .routers import report_board as report_board_router
@@ -148,6 +149,7 @@ def create_app() -> FastAPI:
     app.include_router(public_api.v1)
     app.include_router(media.router)
     app.include_router(crm_extra.router)
+    app.include_router(cartera_router.router)  # traspaso de cartera (ventas etapa 2)
     app.include_router(payroll.router)
     app.include_router(banking.router)
     app.include_router(events.router)

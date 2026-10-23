@@ -153,8 +153,13 @@ def companies(q: str = "", todos: bool = False, p: Principal = Depends(require("
     hits = [_ally_hit(a) for a in allies]
     if not todos:
         return hits
+    from ..services.cartera import customer_scope  # cartera con dueno: el vendedor solo ve sus clientes
+
     custs = db.scalars(
-        select(Customer).where(Customer.tenant_id == p.tenant.id, Customer.name.ilike(like), Customer.trashed_at.is_(None)).order_by(Customer.name).limit(10)
+        select(Customer)
+        .where(Customer.tenant_id == p.tenant.id, customer_scope(p), Customer.name.ilike(like), Customer.trashed_at.is_(None))
+        .order_by(Customer.name)
+        .limit(10)
     )
     sups = db.scalars(
         select(Supplier)

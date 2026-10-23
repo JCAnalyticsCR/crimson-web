@@ -164,6 +164,23 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "commissions": ["ver", "ver_todo"],
         "reports": ["ver"],
     },
+    # Jefe de ventas (ventas etapa 2): ve las oportunidades, cotizaciones, facturas y cobros de todo el equipo y el
+    # embudo del equipo; nunca el costo ni el margen (como el vendedor). Aprueba descuentos y cotizaciones grandes hasta
+    # SUS topes (Ajustes -> Ventas: jefe_ventas_tope_descuento_pct y jefe_ventas_tope_monto); lo que pase de ahi lo
+    # sigue aprobando el admin (sales.aprobar_equipo, services/discounts.team_approval). Reasigna clientes y traspasa
+    # carteras (crm.cartera). Asignar "ventas por asignar" depende de Ajustes -> Ventas -> quienes_asignan_ventas
+    # (effective_permissions). No se edita en Ajustes -> Roles: lo suyo son permisos de solo admin (core/permisos.LOCKED).
+    "jefe_ventas": {
+        "dashboard": ["ver"],
+        "crm": ["ver", "crear", "notas", "editar", "cartera"],
+        "crm_pipeline": ["ver", "ver_todo", "crear", "editar"],
+        "catalog": ["ver", "precios"],
+        "sales": ["ver", "ver_todo", "crear", "editar", "enviar", "exportar", "aprobar_equipo"],
+        "payments": ["ver", "crear"],
+        "commissions": ["ver"],
+        "inventory": ["ver"],
+        "approvals": ["ver"],
+    },
     # Acceso temporal concedido por el admin (Ajustes -> Acceso de soporte): solo lectura, cada request queda auditado
     "soporte": {
         "dashboard": ["ver", "empresa"],
@@ -204,7 +221,9 @@ COST_ROLE_CHOICES = ("supervisor", "contabilidad", "inventario", "lectura")
 
 # Roles predefinidos cuyos permisos el admin puede cambiar desde Ajustes -> Usuarios -> Roles (reunion 21/10, pedido
 # 20). El administrador no se edita (siempre "*"); soporte, clientes y aliados tienen sus propias pantallas.
-EDITABLE_ROLES = tuple(r for r in ASSIGNABLE_ROLES if r != "admin")
+# El jefe de ventas tampoco: aprueba hasta sus topes y maneja la cartera, permisos que ningun rol editado recibe (sus
+# topes y quien asigna ventas se configuran en Ajustes -> Ventas).
+EDITABLE_ROLES = tuple(r for r in ASSIGNABLE_ROLES if r not in ("admin", "jefe_ventas"))
 
 
 def role_overrides(tenant) -> dict[str, dict[str, list[str]]]:
@@ -300,6 +319,13 @@ def effective_permissions(tenant, code: str, base: dict) -> dict:
     ov = role_overrides(tenant).get(code)
     if ov is not None:
         base = ov
+    if code == "jefe_ventas" and "sales" in base:
+        # Ajustes -> Ventas -> "Quien asigna las ventas por asignar" (default solo el admin)
+        from ..services.sale_assignment import ventas_settings
+
+        if "jefe_ventas" in (ventas_settings(tenant).get("quienes_asignan_ventas") or []) and "asignar_venta" not in base["sales"]:
+            base = {k: list(v) for k, v in base.items()}
+            base["sales"].append("asignar_venta")
     if "*" in base or "catalog" not in base or code not in cost_roles(tenant):
         return base
     perms = {k: list(v) for k, v in base.items()}
@@ -318,6 +344,7 @@ class Principal:
     customer_id: int | None = None  # solo roles de cliente: la empresa cliente a la que pertenece
     ally_company_id: int | None = None  # solo roles aliados: la empresa aliada a la que pertenece
     preview_by: int | None = None  # "Ver como este aliado": id del admin que mira (solo lectura, core/ally.py)
+    discount_limit: object | None = None  # Decimal: tope de descuento propio (Ajustes -> Usuarios); None = el general
 
     @property
     def is_client(self) -> bool:
@@ -352,6 +379,22 @@ class Principal:
         sus cobros. "sales.asignar_venta" (bandeja de ventas sin vendedor) lo tiene admin por defecto; configurable
         desde el editor de roles para un "Jefe de ventas" personalizado."""
         return self.can("sales", "ver_todo")
+
+    @property
+    def sees_all_customers(self) -> bool:
+        """Cartera con dueno (ventas etapa 2): quien vende sin ver las ventas de todos (el vendedor) solo ve los clientes
+        de su cartera (services/cartera.py). Admin, jefe de ventas, contabilidad, caja y el resto ven todos."""
+        return self.sees_all_sales or not self.can("sales", "crear")
+
+    @property
+    def manages_portfolio(self) -> bool:
+        """Cambia el vendedor de la cuenta y traspasa carteras: admin y jefe de ventas."""
+        return self.can("crm", "cartera")
+
+    @property
+    def approves_team(self) -> bool:
+        """Jefe de ventas: aprueba cotizaciones del equipo hasta sus topes (el admin, con sales.aprobar, todas)."""
+        return self.can("sales", "aprobar_equipo") and not self.can("sales", "aprobar")
 
     @property
     def can_assign_sales(self) -> bool:
@@ -461,6 +504,7 @@ def get_session_principal(
         ip=ip,
         customer_id=m.customer_id,
         ally_company_id=m.ally_company_id,
+        discount_limit=m.discount_limit_pct,
     )
 
 

@@ -25,6 +25,11 @@ class CustomerOut(CustomerIn):
     id: int
     # insignia "Empresa aliada": la empresa aliada que se factura a este cliente (solo con aliados.ver)
     ally_company: dict | None = None
+    # cartera con dueno (ventas etapa 2): "Vendedor de la cuenta"
+    account_owner_id: int | None = None
+    account_owner_name: str | None = None
+    # el vendedor lo encontro por su cedula o correo exactos y no tiene dueno: lo puede tomar (POST /customers/{id}/claim)
+    claimable: bool = False
 
 
 class TaxIn(BaseModel):

@@ -125,6 +125,8 @@ def test_buscador_solo_aliados_y_alta_rapida(client, auth, db_session):
     vend = interno(client, db_session, tid, "vend.buscador@ejemplo.com", "ventas")
     hits = client.get("/opportunity-allies/companies?q=", headers=vend).json()
     assert hits and {x["kind"] for x in hits} == {"ally"} and hits[0]["tax_id"] == "3-101-000001"
+    # cartera con dueno (ventas etapa 2): la vendedora solo ve sus clientes; crea uno para su oportunidad
+    assert client.post("/customers", json={"name": "Cliente de la vendedora", "id_type": "fisica"}, headers=vend).status_code == 201
     todos = client.get("/opportunity-allies/companies?q=&todos=true", headers=vend).json()
     assert {x["kind"] for x in todos} == {"ally", "customer", "supplier"}
     r = client.post(

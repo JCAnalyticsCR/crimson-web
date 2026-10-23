@@ -5,8 +5,9 @@ import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
+import { AccountOwner } from "./AccountOwner";
 
-type Cust = { id: number; name: string; id_type: string; id_number: string | null; email: string | null; phone: string | null; whatsapp: string | null; currency: string; notes: string | null; address: Record<string, string> | null; active: boolean; no_reminders?: boolean; created_at: string };
+type Cust = { id: number; name: string; id_type: string; id_number: string | null; email: string | null; phone: string | null; whatsapp: string | null; currency: string; notes: string | null; address: Record<string, string> | null; active: boolean; no_reminders?: boolean; created_at: string; account_owner_id?: number | null; account_owner_name?: string | null };
 type Ev = { at: string; kind: string; title: string; amount?: string; currency?: string; status: string | null; to?: string; id?: number; author?: string | null };
 type Asset = { id: number; name: string; model: string | null; serial: string | null; location: string | null; installed_at: string | null; warranty_until: string | null; warranty_days: number | null };
 type Proj = { id: number; number: string; name: string; status: string; end_date: string | null };
@@ -119,6 +120,8 @@ export default function CustomerDetail() {
           {vende && <button className="btn btn--crimson btn--sm" onClick={() => nav(`/facturas/nueva?cliente=${c.id}`)}><Icon d={I.invoice} />Facturar</button>}
         </div>
       </div>
+
+      <AccountOwner customerId={c.id} ownerId={c.account_owner_id ?? null} ownerName={c.account_owner_name ?? null} onChanged={load} />
 
       {!editaCrm && allows("crm.crear") && (
         /* Reunión 21/10 (pedido 23): el vendedor ve las compras y los datos, pero no los cambia (en especial el correo,

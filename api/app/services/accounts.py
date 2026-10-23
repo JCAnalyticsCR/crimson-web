@@ -37,6 +37,7 @@ ROLE_LABELS = {
     "inventario": "Bodega",
     "contabilidad": "Contabilidad",
     "lectura": "Solo lectura",
+    "jefe_ventas": "Jefe de ventas",
 }
 
 

@@ -36,11 +36,22 @@ from ..services.totals import d
 router = APIRouter(tags=["crm"])
 
 
-def _customer(db: Session, cid: int, tid: int) -> Customer:
+def _customer(db: Session, cid: int, tid: int, p: Principal | None = None) -> Customer:
     c = db.get(Customer, cid)
     if not c or c.tenant_id != tid:
         raise HTTPException(404, "Cliente no encontrado")
+    if p is not None:
+        from ..services.cartera import can_see
+
+        if not can_see(db, p, c):  # cartera con dueno: el cliente de otro vendedor no existe para el
+            raise HTTPException(404, "Cliente no encontrado")
     return c
+
+
+def _owner_name(db: Session, uid: int | None) -> str | None:
+    from ..services.cartera import owner_name
+
+    return owner_name(db, uid)
 
 
 # ---------- Contactos ----------
@@ -58,13 +69,13 @@ def _contact_out(c: CustomerContact) -> dict:
 
 @router.get("/customers/{cid}/contacts")
 def contacts(cid: int, p: Principal = Depends(require("crm", "ver")), db: Session = Depends(get_db)):
-    _customer(db, cid, p.tenant.id)
+    _customer(db, cid, p.tenant.id, p)
     return [_contact_out(c) for c in db.scalars(select(CustomerContact).where(CustomerContact.customer_id == cid).order_by(CustomerContact.id))]
 
 
 @router.post("/customers/{cid}/contacts", status_code=201)
 def contact_create(cid: int, data: ContactIn, p: Principal = Depends(require("crm", "editar")), db: Session = Depends(get_db)):
-    _customer(db, cid, p.tenant.id)
+    _customer(db, cid, p.tenant.id, p)
     c = CustomerContact(tenant_id=p.tenant.id, customer_id=cid, **data.model_dump())
     db.add(c)
     db.commit()
@@ -99,7 +110,7 @@ class NoteIn(BaseModel):
 @router.post("/customers/{cid}/notes", status_code=201)
 def note_create(cid: int, data: NoteIn, p: Principal = Depends(require_any("crm", "editar", "notas")), db: Session = Depends(get_db)):
     # el vendedor anota en la ficha (crm.notas) aunque no la pueda editar (reunion 21/10, pedido 23)
-    _customer(db, cid, p.tenant.id)
+    _customer(db, cid, p.tenant.id, p)
     n = CustomerNote(tenant_id=p.tenant.id, customer_id=cid, body=data.body, created_by=p.user.id)
     db.add(n)
     db.commit()
@@ -118,7 +129,7 @@ def note_delete(cid: int, nid: int, p: Principal = Depends(require("crm", "edita
 @router.delete("/customers/{cid}", status_code=204)
 def customer_archive(cid: int, p: Principal = Depends(require("crm", "editar")), db: Session = Depends(get_db)):
     """Archiva (no borra): el cliente puede tener documentos fiscales que deben conservarse 5 anos."""
-    c = _customer(db, cid, p.tenant.id)
+    c = _customer(db, cid, p.tenant.id, p)
     c.active = False
     audit(db, p.tenant.id, p.user.id, "archive", "customer", cid, ip=p.ip)
     db.commit()
@@ -136,7 +147,7 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
     from .projects import sees_project  # una sola definicion del alcance de proyectos
     from .support_desk import ticket_scope  # una sola definicion del alcance de tickets (la de la pantalla de soporte)
 
-    c = _customer(db, cid, p.tenant.id)
+    c = _customer(db, cid, p.tenant.id, p)
     tid = p.tenant.id
     from ..services.ownership import doc_scope
 
@@ -248,6 +259,9 @@ def overview(cid: int, p: Principal = Depends(require("crm", "ver")), db: Sessio
             "active": c.active,
             "no_reminders": bool(c.no_reminders),
             "created_at": c.created_at,
+            # cartera con dueno (ventas etapa 2): "Vendedor de la cuenta"
+            "account_owner_id": c.account_owner_id,
+            "account_owner_name": _owner_name(db, c.account_owner_id),
         },
         "kpis": {
             "billed": billed,

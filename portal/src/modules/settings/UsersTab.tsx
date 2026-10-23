@@ -12,11 +12,12 @@ import { registerRoles, roleMeta } from "../../app/roles";
 import RoleMatrix from "../../app/RoleMatrix";
 import RolesEditor from "./RolesEditor";
 import AllyConvert, { AllyMatchChip, type AllyMatch } from "./AllyConvert";
+import PortfolioTransfer from "../crm/PortfolioTransfer";
 import { Card, Empty, Field, I, Icon, Loading, Modal } from "../../ui/components";
 
-type U = { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null; is_self: boolean; shared: boolean; must_change_password: boolean; temp_password_expires_at: string | null; locked_until: string | null; login_failures_until?: string | null; reset_link_expires_at: string | null; password_changed_at: string | null; member_since: string | null; notify_email?: string | null; ally_match?: AllyMatch | null };
+type U = { id: number; email: string; name: string; role: string; active: boolean; totp: boolean; last_login: string | null; is_self: boolean; shared: boolean; must_change_password: boolean; temp_password_expires_at: string | null; locked_until: string | null; login_failures_until?: string | null; reset_link_expires_at: string | null; password_changed_at: string | null; member_since: string | null; notify_email?: string | null; ally_match?: AllyMatch | null; discount_limit_pct?: string | number | null; clientes_cartera?: number };
 type Inv = { id: number; email: string; role: string; expires_at: string; status: "pendiente" | "vencida"; sent_count: number; last_sent_at: string | null; invited_by: string | null; email_status: string | null; email_error: string | null };
-type UsersResp = { users: U[]; invitations: Inv[]; roles: string[]; role_labels?: Record<string, string>; reauth_roles?: string[]; mail_configured: boolean; support_members: number; cost_roles: string[]; cost_role_choices: string[]; twofa_roles?: string[]; twofa_grace_days?: number; twofa_role_choices?: string[] };
+type UsersResp = { users: U[]; invitations: Inv[]; roles: string[]; role_labels?: Record<string, string>; reauth_roles?: string[]; mail_configured: boolean; support_members: number; cost_roles: string[]; cost_role_choices: string[]; twofa_roles?: string[]; twofa_grace_days?: number; twofa_role_choices?: string[]; max_discount_pct?: string | number };
 type InviteOut = { id: number; link: string; emailed: boolean; email_error: string | null; expires_at: string };
 type ResetOut =
   | { mode: "temporal"; temp_password: string; expires_at: string; email: string; name: string; login_url: string }
@@ -59,6 +60,8 @@ export default function UsersTab() {
   /* rol que se tocó en «Qué ve cada rol»: se abre en el editor (n fuerza el cambio aunque sea el mismo) */
   const [focusRole, setFocusRole] = useState<{ code: string; n: number } | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+  /* ventas etapa 2: traspaso de cartera (también se ofrece solo al desactivar a un vendedor que todavía tiene cartera) */
+  const [transferFor, setTransferFor] = useState<{ id: number; intro?: string } | null>(null);
 
   /* los roles que creó el administrador llegan con su nombre: se registran antes de dibujar la lista */
   const load = () => api<UsersResp>("/settings/users").then((d) => { registerRoles({ labels: d.role_labels }); setData(d); setLoadErr(null); }).catch((e) => setLoadErr(errMsg(e)));
@@ -75,7 +78,7 @@ export default function UsersTab() {
   const shownInvs = invs.filter((i) => (filtro === "todos" || filtro === "invitaciones") && match(i.email, roleMeta(i.role).label, i.role));
   const activos = users.filter((u) => u.active).length;
 
-  const patch = (uid: number, body: Record<string, unknown>) => api<{ ok: boolean }>(`/settings/users/${uid}`, { method: "PATCH", json: body });
+  const patch = (uid: number, body: Record<string, unknown>) => api<{ ok: boolean; cartera?: { clientes: number; oportunidades: number; cotizaciones: number } }>(`/settings/users/${uid}`, { method: "PATCH", json: body });
   const copy = (text: string, msg = "Copiado") => { navigator.clipboard.writeText(text).then(() => toast(msg)).catch(() => toast("No se pudo copiar: seleccionalo y copialo a mano", "bad")); };
 
   /* roles creados con acceso a contabilidad, planillas, Ajustes o usuarios: asignarlos pide la contraseña, como el de administrador */
@@ -306,8 +309,11 @@ export default function UsersTab() {
           askPassword={setPwAsk}
           patch={patch}
           onToAlly={canConvert(manage) ? () => { setManageId(null); setToAlly(manage); } : undefined}
+          maxDiscount={data.max_discount_pct}
+          onTransfer={(intro) => setTransferFor({ id: manage.id, intro })}
         />
       )}
+      {transferFor && <PortfolioTransfer userId={transferFor.id} intro={transferFor.intro} onClose={() => setTransferFor(null)} onDone={load} />}
       {resetFor && (
         <ResetModal u={resetFor} mailConfigured={data.mail_configured} onClose={() => setResetFor(null)} onDone={(r) => { setResetFor(null); setResetOut({ ...r, user: resetFor }); load(); }} />
       )}
@@ -350,9 +356,10 @@ function PasswordAsk({ title, text, cta, run, onClose }: Ask & { onClose: () => 
   );
 }
 
-function ManageModal({ u, roles, reauthRoles, viewerIsAdmin, onClose, onChanged, onReset, onDeleted, askPassword, patch, onToAlly }: {
+function ManageModal({ u, roles, reauthRoles, viewerIsAdmin, onClose, onChanged, onReset, onDeleted, askPassword, patch, onToAlly, maxDiscount, onTransfer }: {
   u: U; roles: string[]; reauthRoles: string[]; viewerIsAdmin: boolean; onClose: () => void; onChanged: () => void; onReset: () => void; onDeleted: () => void;
-  askPassword: (a: Ask) => void; patch: (uid: number, body: Record<string, unknown>) => Promise<{ ok: boolean }>; onToAlly?: () => void;
+  askPassword: (a: Ask) => void; patch: (uid: number, body: Record<string, unknown>) => Promise<{ ok: boolean; cartera?: { clientes: number; oportunidades: number; cotizaciones: number } }>; onToAlly?: () => void;
+  maxDiscount?: string | number; onTransfer: (intro?: string) => void;
 }) {
   const { toast } = useSession();
   const blank = { full_name: u.name, email: u.email, notify_email: u.notify_email || "", role: u.role, reason: "", admin_password: "" };
@@ -400,7 +407,23 @@ function ManageModal({ u, roles, reauthRoles, viewerIsAdmin, onClose, onChanged,
       return;
     }
     if (!confirm(texto)) return;
-    try { await patch(u.id, { active: next }); toast(next ? "Usuario activado" : "Usuario desactivado"); onChanged(); }
+    try {
+      const r = await patch(u.id, { active: next });
+      toast(next ? "Usuario activado" : "Usuario desactivado"); onChanged();
+      /* desactivar a un vendedor que todavía tiene cartera: se ofrece el traspaso de un clic */
+      if (!next && r.cartera) onTransfer(`${u.name} quedó desactivado y todavía tiene cartera. ¿A quién se la pasa?`);
+    }
+    catch (e) { toast(errMsg(e), "bad"); }
+  };
+  /* ventas etapa 2: tope de descuento propio (vacío = el general de la empresa) */
+  const vendeRol = u.role === "ventas" || u.role === "jefe_ventas" || (u.clientes_cartera ?? 0) > 0;
+  const topeActual = u.discount_limit_pct == null ? "" : String(Number(u.discount_limit_pct));
+  const [tope, setTope] = useState(topeActual);
+  useEffect(() => { setTope(topeActual); }, [topeActual]);
+  const saveTope = async () => {
+    const v = tope.trim();
+    if (v !== "" && (!(Number(v) >= 0) || Number(v) > 100)) { toast("El tope debe estar entre 0 y 100 %", "bad"); return; }
+    try { await patch(u.id, { discount_limit_pct: v === "" ? "" : Number(v) }); toast(v === "" ? "Usa el tope general de la empresa" : `Tope de descuento: ${Number(v)} %`); onChanged(); }
     catch (e) { toast(errMsg(e), "bad"); }
   };
 
@@ -452,6 +475,21 @@ function ManageModal({ u, roles, reauthRoles, viewerIsAdmin, onClose, onChanged,
         </div>
         {u.is_self && <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Para tu cuenta usá Mi cuenta: cambiar contraseña, verificación en dos pasos y cerrar en todos los dispositivos.</p>}
       </div>
+      {vendeRol && (
+        <div style={{ borderTop: "1px solid var(--hair)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div className="meta">Ventas</div>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 220px" }}>
+              <Field label="Tope de descuento propio (%)" hint={`Vacío = el tope general de la empresa${maxDiscount != null ? ` (${Number(maxDiscount)} %)` : ""}. Lo que pase de aquí pide aprobación.`}>
+                <input className="input" type="number" min={0} max={100} step="0.5" inputMode="decimal" value={tope} onChange={(e) => setTope(e.target.value)} placeholder={maxDiscount != null ? String(Number(maxDiscount)) : ""} />
+              </Field>
+            </div>
+            <button className="btn btn--soft btn--sm" onClick={saveTope} disabled={tope.trim() === topeActual}>Guardar tope</button>
+          </div>
+          <p className="muted" style={{ fontSize: 13, margin: 0 }}>{u.clientes_cartera ? `Tiene ${u.clientes_cartera} cliente(s) en su cartera.` : "No tiene clientes en su cartera."}</p>
+          <div><button className="btn btn--ghost btn--sm" onClick={() => onTransfer()}>Traspasar su cartera a otro vendedor</button></div>
+        </div>
+      )}
       {onToAlly && (
         /* reunión 2, pedido 20: también para quien el sistema no detecta (p. ej. un técnico del aliado con correo gratuito) */
         <div style={{ borderTop: "1px solid var(--hair)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>

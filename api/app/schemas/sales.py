@@ -109,6 +109,8 @@ class QuoteOut(DocBaseOut):
     project_number: str | None = None
     # descuento rechazado por quien aprueba y todavia sin cambios de la vendedora: {by, at, reason}
     rejection: dict | None = None
+    # jefe de ventas (ventas etapa 2): si puede aprobar esta cotizacion retenida y, si no, por que (la aprueba el admin)
+    team_approval: dict | None = None
 
 
 class PaymentIn(BaseModel):

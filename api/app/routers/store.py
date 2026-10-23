@@ -961,6 +961,7 @@ def search(q: str = Query(min_length=1), p: Principal = Depends(require("dashboa
     like = f"%{q}%"
     tid = p.tenant.id
     out = []
+    from ..services.cartera import customer_scope  # cartera con dueno: el vendedor solo encuentra sus clientes
     from ..services.ownership import doc_scope
 
     # mismo alcance que Facturas y Cotizaciones (vendedor responsable): lo ajeno no aparece
@@ -974,7 +975,7 @@ def search(q: str = Query(min_length=1), p: Principal = Depends(require("dashboa
     for c in (
         db.scalars(
             select(Customer)
-            .where(Customer.tenant_id == tid, or_(Customer.name.ilike(like), Customer.id_number.ilike(like), Customer.email.ilike(like)))
+            .where(Customer.tenant_id == tid, customer_scope(p), or_(Customer.name.ilike(like), Customer.id_number.ilike(like), Customer.email.ilike(like)))
             .limit(5)
         )
         if can_crm

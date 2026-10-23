@@ -13,7 +13,7 @@ from sqlalchemy import and_, case, func, or_, select, true
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
-from ..core.deps import Principal, require
+from ..core.deps import Principal, require, require_any
 from ..models import BillingGroup, Customer, Invoice, Payment, PaymentLink, Quote
 from ..schemas.sales import (
     DocListItem,
@@ -25,7 +25,7 @@ from ..schemas.sales import (
     QuoteOut,
 )
 from ..services import avisos_venta as avisos
-from ..services import discounts, invoice_states, units
+from ..services import cartera, discounts, invoice_states, units
 from ..services import documents as svc
 from ..services import inventory as invsvc
 from ..services import quote_versions as qv
@@ -132,6 +132,9 @@ def _quote_out(db: Session, q: Quote, p: Principal) -> QuoteOut:
     if rech is not None:
         quien = _user_name(db, rech.user_id)
         o.rejection = {"by": quien, "at": rech.at, "reason": (rech.diff or {}).get("motivo")}
+    if q.status == "por_aprobar" and p.approves_team:
+        motivo = discounts.team_approval(db, p, q)
+        o.team_approval = {"can": motivo is None, "reason": motivo}
     return o
 
 
@@ -241,7 +244,8 @@ def pending_where(key: str, p: Principal) -> list:
     tid = p.tenant.id
     model = Invoice if PENDIENTES[key] == "invoices" else Quote
     out = [model.tenant_id == tid]
-    if _pend_mine(p):
+    # el jefe de ventas aprueba las del equipo: su lista de por aprobar es la del equipo (aunque su inicio sea personal)
+    if _pend_mine(p) and not (key == "cotizaciones_por_aprobar" and p.approves_team):
         out.append(doc_mine(model, p.user.id))
     today = invoice_states.cr_today()
     if key == "facturas_vencidas":
@@ -400,6 +404,7 @@ def quotes(
 
 @router.post("/quotes", response_model=QuoteOut, status_code=201)
 def create_quote(data: DocumentIn, p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
+    cartera.guard_customer(db, p, data.customer_id)  # el cliente de otro vendedor no se cotiza (cartera con dueno)
     chk = discounts.check(db, p, data)
     cambia, vendedor = _seller_from_body(db, p, data)
     q = svc.create_quote(db, p.tenant.id, p.user.id, data, **({"seller_id": vendedor} if cambia else {}))
@@ -455,7 +460,7 @@ def _hold(db: Session, p: Principal, q, chk) -> list[str]:
         motivo = q.approval_reason
         q.status = "creado"  # quedo dentro de los limites (o lo edito quien aprueba)
         q.approval_reason = None
-        if p.can("sales", "aprobar"):
+        if p.can("sales", "aprobar") or (p.approves_team and q.seller_id not in (None, p.user.id)):
             # la abrio quien aprueba, la ajusto y la guardo: es su aprobacion (antes la vendedora no se enteraba y el
             # boton "Aprobar descuento" ya no salia porque el estado habia cambiado)
             audit(db, p.tenant.id, p.user.id, "approve_quote", "quote", q.id, {"motivo": motivo, "al_guardar": True}, ip=p.ip)
@@ -473,6 +478,8 @@ def update_quote(qid: int, data: DocumentIn, p: Principal = Depends(require("sal
     q = _own(db, Quote, qid, p.tenant.id, p)
     if q.status in ("convertida", "anulada"):
         raise HTTPException(409, f"La cotizacion esta {q.status} y no se puede editar")
+    if data.customer_id != q.customer_id:
+        cartera.guard_customer(db, p, data.customer_id)
     if q.acceptance_status == "aceptada":
         raise HTTPException(
             409,
@@ -716,19 +723,35 @@ def quote_acceptance(qid: int, data: AcceptanceIn, p: Principal = Depends(requir
     return _quote_out(db, q, p)
 
 
+def _approver(p: Principal = Depends(require_any("sales", "aprobar", "aprobar_equipo"))) -> Principal:
+    """Aprueba el admin (sales.aprobar, todo) o el jefe de ventas (sales.aprobar_equipo, hasta sus topes)."""
+    return p
+
+
+def _team_guard(db: Session, p: Principal, q: Quote) -> None:
+    """El jefe de ventas solo decide lo que esta dentro de sus topes (discounts.team_approval); el resto, el admin."""
+    if p.approves_team:
+        motivo = discounts.team_approval(db, p, q)
+        if motivo:
+            raise HTTPException(403, motivo)
+
+
 @router.post("/quotes/{qid}/approve", response_model=QuoteOut)
-def approve_quote(qid: int, p: Principal = Depends(require("sales", "aprobar")), db: Session = Depends(get_db)):
-    """Un administrador aprueba el descuento que excede el limite del vendedor."""
+def approve_quote(qid: int, p: Principal = Depends(_approver), db: Session = Depends(get_db)):
+    """Un administrador (o el jefe de ventas, dentro de sus topes) aprueba el descuento que excede el limite del vendedor."""
     q = _own(db, Quote, qid, p.tenant.id, p)
     if q.status != "por_aprobar":
         raise HTTPException(409, "La cotización no está pendiente de aprobación")
+    _team_guard(db, p, q)
     q.status = "creado"
     motivo, q.approval_reason = q.approval_reason, None
     diff = {"motivo": motivo}
     # con el margen bajo el minimo: queda aprobado a estos precios (volver a guardarla sin bajarlos no la retiene otra vez)
-    ok = discounts.margin_approval(db, p.tenant, q)
+    ok = discounts.margin_approval(db, p.tenant, q) if p.can("sales", "aprobar") else None
     if ok:
         diff["margen_aprobado"] = ok
+    if p.approves_team:
+        diff["por"] = "jefe_ventas"
     audit(db, p.tenant.id, p.user.id, "approve_quote", "quote", q.id, diff, ip=p.ip)
     avisos.descuento_resuelto(db, p.tenant, q, p.user.id, aprobado=True)
     db.commit()
@@ -740,7 +763,7 @@ class RejectIn(BaseModel):
 
 
 @router.post("/quotes/{qid}/reject", response_model=QuoteOut)
-def reject_quote(qid: int, data: RejectIn, p: Principal = Depends(require("sales", "aprobar")), db: Session = Depends(get_db)):
+def reject_quote(qid: int, data: RejectIn, p: Principal = Depends(_approver), db: Session = Depends(get_db)):
     """Quien aprueba dice que no, con un motivo. La cotizacion sigue retenida (no se envia ni se convierte: el estado no
     cambia y el motivo guardado de la retencion tampoco, asi la retencion por margen sigue en pie) y vuelve a la
     vendedora: sale de la bandeja de quien aprueba y ella recibe el aviso. Si la vuelve a guardar fuera del limite, pide
@@ -750,6 +773,7 @@ def reject_quote(qid: int, data: RejectIn, p: Principal = Depends(require("sales
         raise HTTPException(409, "La cotización no está pendiente de aprobación")
     if _rechazo_vigente(db, q) is not None:
         raise HTTPException(409, "Ya la rechazaste: espera los cambios de la vendedora")
+    _team_guard(db, p, q)
     motivo = " ".join(data.reason.split())
     if len(motivo) < 3:
         raise HTTPException(422, "Escriba el motivo del rechazo")
@@ -762,13 +786,15 @@ def reject_quote(qid: int, data: RejectIn, p: Principal = Depends(require("sales
 @router.get("/sales/discount-limit")
 def discount_limit(p: Principal = Depends(require("sales", "ver"))):
     return {
-        "limit": discounts.max_discount(p.tenant),
+        # el tope de quien pregunta: el suyo propio (Ajustes -> Usuarios), el del jefe de ventas o el de la empresa
+        "limit": discounts.limit_for(p),
         "free": p.can("sales", "descuento_libre"),
-        "max_amount": discounts.approval_amount(p.tenant),
+        "max_amount": max(discounts.approval_amount(p.tenant), discounts.team_limits(p.tenant)[1]) if p.approves_team else discounts.approval_amount(p.tenant),
         # el margen minimo solo a quien ve costos: con el y el precio donde una cotizacion empieza a quedar retenida
         # por margen se saca el costo (precio x (1 - minimo))
         "min_margin": discounts.min_margin(p.tenant) if p.sees_costs else None,
         "approves": p.can("sales", "aprobar"),
+        "approves_team": p.approves_team,
     }
 
 
@@ -798,6 +824,7 @@ def create_invoice(data: DocumentIn, doc_type: str = "FE", p: Principal = Depend
     if doc_type not in ("FE", "TE", "FEE"):
         raise HTTPException(422, "doc_type debe ser FE, TE o FEE")
     _no_pending(data)
+    cartera.guard_customer(db, p, data.customer_id)
     chk = discounts.check(db, p, data)
     if chk.exceeds:
         raise HTTPException(422, f"{chk.message} Haga una cotización para que un administrador apruebe el descuento.")
@@ -825,6 +852,8 @@ def update_invoice(iid: int, data: DocumentIn, p: Principal = Depends(require("s
     if inv.payments:
         raise HTTPException(409, "La factura tiene pagos registrados")
     _no_pending(data)
+    if data.customer_id != inv.customer_id:
+        cartera.guard_customer(db, p, data.customer_id)
     from ..models import InvoiceLine
 
     chk = discounts.check(db, p, data)
@@ -1180,10 +1209,15 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
         comisiones = {"ganado_mes": r["ganado"]["total"], "pagado_mes": r["pagado"], "por_cobrar": r["por_cobrar"]["total"], "moneda": "CRC"}
     ceo = _ceo_row(db, p) if p.can("dashboard", "empresa") else None
     mi_embudo = None
+    equipo = None
     if mine and p.can("crm_pipeline", "ver"):
         from .pipeline import pipeline_summary  # la misma cuenta que el embudo: no pueden diferir
 
-        mi_embudo = pipeline_summary(db, p)
+        # quien ve todo el embudo con un inicio personal (el jefe de ventas): el suyo aparte y el del equipo abajo
+        team_view = p.can("crm_pipeline", "ver_todo")
+        mi_embudo = pipeline_summary(db, p, owner_id=p.user.id) if team_view else pipeline_summary(db, p)
+        if team_view and p.approves_team:
+            equipo = _team_block(db, p)
     receivable = []
     if mine:
         for x in db.scalars(
@@ -1242,6 +1276,42 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
             "stock_bajo": len(invsvc.low_stock(db, tid)),
         },
         "comisiones": comisiones,
+        # jefe de ventas (ventas etapa 2): aprobaciones del equipo y el embudo del equipo por vendedor
+        "equipo": equipo,
+    }
+
+
+def _team_block(db: Session, p: Principal) -> dict:
+    """Inicio del jefe de ventas: lo que el equipo espera que apruebe y el embudo del equipo (total y por vendedor).
+    Sin costos ni margenes: los montos son de venta, igual que el embudo."""
+    from ..services.approvals import team_quotes_where
+    from ..services.store_orders import sales_team
+    from .pipeline import pipeline_summary
+
+    pend = db.scalars(select(Quote).where(*team_quotes_where(p)).order_by(Quote.updated_at, Quote.id).limit(6)).all()
+    total_pend = db.scalar(select(func.count()).select_from(Quote).where(*team_quotes_where(p))) or 0
+    por_vendedor = []
+    for x in sales_team(db, p.tenant.id):
+        r = pipeline_summary(db, p, owner_id=x["id"])
+        if r["abiertas"] or r["ganadas_mes"]:
+            por_vendedor.append({"id": x["id"], "name": x["name"], "abiertas": r["abiertas"], "monto": r["monto"], "ponderado": r["ponderado"], "ganado_mes": r["ganado_mes"]})
+    por_vendedor.sort(key=lambda r: r["monto"], reverse=True)
+    return {
+        "por_aprobar": total_pend,
+        "aprobaciones": [
+            {
+                "id": q.id,
+                "number": q.number,
+                "customer": _cust_name(db, q.customer_id),
+                "seller": _user_name(db, q.seller_id or q.created_by),
+                "total": q.total,
+                "currency": q.currency,
+                "can_approve": discounts.team_approval(db, p, q) is None,
+            }
+            for q in pend
+        ],
+        "embudo": pipeline_summary(db, p),
+        "por_vendedor": por_vendedor,
     }
 
 

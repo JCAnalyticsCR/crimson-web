@@ -139,7 +139,9 @@ export type AllyCompanyMe = { id: number; name: string; state: "activo" | "suspe
 /** twofa: el rol exige verificacion en dos pasos (deadline = fin de la gracia; blocked = vencio y no la activo). */
 export type TwoFactorState = { required: boolean; deadline: string | null; blocked: boolean };
 export type Me = { user: User; tenant: Tenant; role: string; role_label?: string | null; role_customized?: boolean; role_base?: string | null; role_defaults?: Record<string, string[]> | null; permissions: Record<string, string[]>; memberships: { tenant: Tenant; role: string }[]; ally_company?: AllyCompanyMe | null; twofa?: TwoFactorState | null };
-export type Customer = { id: number; id_type: string; id_number: string | null; name: string; email: string | null; phone: string | null; whatsapp: string | null; currency: string; active: boolean };
+export type Customer = { id: number; id_type: string; id_number: string | null; name: string; email: string | null; phone: string | null; whatsapp: string | null; currency: string; active: boolean;
+  /* cartera con dueño (ventas etapa 2): «Vendedor de la cuenta»; claimable = sin dueño y encontrado por cédula o correo exactos */
+  account_owner_id?: number | null; account_owner_name?: string | null; claimable?: boolean };
 /* availability: la disponibilidad de la funcion unica del API (propio / proveedor / fecha), ver ui/Availability */
 export type Product = { id: number; name: string; code: string; item_type: string; price: number; currency: string; cabys_code: string | null; unit: string; tax_rate: number | null; category_id: number | null; show_on_web: boolean; tax_ids?: number[]; brand?: string | null; supplier_stock?: number | null; availability?: import("../ui/Availability").Availability | null };
 export type Line = { id?: number; product_id: number | null; code: string | null; name: string; description: string | null; cabys_code?: string | null; unit: string; quantity: string; unit_price: string; discount_type: string; discount_value: string; tax_rate: string; subtotal?: string; tax_amount?: string; total?: string; treatment?: string; supplied_by?: string | null };
@@ -158,6 +160,8 @@ export type Quote = Doc & {
   project_id?: number | null; project_number?: string | null;
   /* descuento rechazado por quien aprueba, todavia sin cambios de la vendedora */
   rejection?: { by: string | null; at: string; reason: string | null } | null;
+  /* jefe de ventas: si puede aprobarla (dentro de sus topes) y, si no, por qué la aprueba administración */
+  team_approval?: { can: boolean; reason: string | null } | null;
 };
 export type Payment = { id: number; invoice_id?: number | null; invoice_number?: string | null; customer?: string | null; method: string; kind: string; currency: string; amount: string; tip: string; external_ref: string | null; provider: string; paid_at: string; status: string };
 export type Invoice = Doc & { doc_type: string; consecutive: string | null; clave: string | null; balance: string; quote_id: number | null; einvoice_status: string; payments: Payment[]; sale_condition: string; credit_days: number; payment_method: string;
@@ -191,6 +195,13 @@ export type Dashboard = {
   mi_embudo?: { abiertas: number; monto: string; ponderado: string; ganadas_mes: number; ganado_mes: string; perdidas_mes: number; moneda: string; convertido: boolean; sin_tipo_de_cambio?: boolean } | null;
   /* Mis comisiones (vendedor, sin ver_todo): la misma cuenta que /commissions/summary, en colones y sin IVA */
   comisiones?: { ganado_mes: string; pagado_mes: string; por_cobrar: string; moneda: string } | null;
+  /* jefe de ventas (ventas etapa 2): aprobaciones del equipo y embudo del equipo, sin costos */
+  equipo?: {
+    por_aprobar: number;
+    aprobaciones: { id: number; number: string; customer: string | null; seller: string | null; total: string; currency: string; can_approve: boolean }[];
+    embudo: NonNullable<Dashboard["mi_embudo"]>;
+    por_vendedor: { id: number; name: string; abiertas: number; monto: string; ponderado: string; ganado_mes: string }[];
+  } | null;
 };
 
 /* Levantamiento en resumen para la vendedora (GET /surveys/{id}/summary): solo lectura y sin un solo costo. */

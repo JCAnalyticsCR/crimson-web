@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from ..core.db import get_db
 from ..core.deps import Principal, require, roles_like
 from ..models import Customer, Opportunity, Project, Quote, Survey, User
+from ..services import cartera
 from ..services.archive import live
 from ..services.documents import CR, audit
 from ..services.email_layout import cta
@@ -321,6 +322,7 @@ def create(data: OpportunityIn, p: Principal = Depends(require("crm_pipeline", "
     from ..services.sequences import next_number
 
     _check_parties(db, p, data)
+    cartera.guard_customer(db, p, data.customer_id)  # el cliente de otro vendedor (cartera con dueno)
     number, _ = next_number(db, p.tenant.id, "OPO")
     o = Opportunity(tenant_id=p.tenant.id, number=number, created_by=p.user.id, **data.model_dump())
     # asignar a otra persona es de quien ve todo el embudo; el vendedor crea las suyas
@@ -365,6 +367,9 @@ def get_one(oid: int, p: Principal = Depends(require("crm_pipeline", "ver")), db
 def update(oid: int, data: OpportunityIn, p: Principal = Depends(require("crm_pipeline", "editar")), db: Session = Depends(get_db)):
     o = _own(db, oid, p)
     _check_parties(db, p, data)
+    cliente_antes = o.customer_id
+    if "customer_id" in data.model_fields_set and data.customer_id != o.customer_id:
+        cartera.guard_customer(db, p, data.customer_id)
     before = o.status
     partes = _parties_text(db, o)
     # el responsable no se cambia por accidente al editar: sin dato queda el que estaba, y cambiarlo pasa por _reassign
@@ -393,6 +398,9 @@ def update(oid: int, data: OpportunityIn, p: Principal = Depends(require("crm_pi
         audit(db, p.tenant.id, p.user.id, "status", "opportunity", o.id, {"de": before, "a": o.status}, ip=p.ip)
     if new_owner is not None and new_owner != o.owner_id:
         _reassign(db, p, o, new_owner)
+    if o.customer_id and not cliente_antes:
+        # el prospecto se convirtio en cliente: queda en la cartera del responsable (si no tenia vendedor)
+        cartera.ensure_owner(db, p.tenant.id, db.get(Customer, o.customer_id), o.owner_id, p.user.id, f"Prospecto convertido ({o.number})", ip=p.ip)
     db.commit()
     return _out(db, o)
 
@@ -489,7 +497,11 @@ def create_quote(oid: int, data: OppQuoteIn, p: Principal = Depends(require("sal
     c = db.get(Customer, cid)
     if not c or c.tenant_id != p.tenant.id:
         raise HTTPException(404, "Cliente no encontrado")
+    if not o.customer_id:
+        cartera.guard_customer(db, p, cid)
     o.customer_id = cid
+    # el prospecto que se cotiza queda en la cartera del vendedor de la oportunidad (si el cliente no tenia vendedor)
+    cartera.ensure_owner(db, p.tenant.id, c, opportunity_seller(db, o) or p.user.id, p.user.id, f"Prospecto convertido ({o.number})", ip=p.ip)
     q = docsvc.create_quote(
         db,
         p.tenant.id,
@@ -556,7 +568,7 @@ def meta(p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = D
     from ..services import team
 
     # sin inactivos, eliminados ni duplicados (reunion 2, pedido 26)
-    equipo = team.options(db, p.tenant.id, roles_like(db, p.tenant, ("admin", "ventas", "supervisor"), admin=True))
+    equipo = team.options(db, p.tenant.id, roles_like(db, p.tenant, ("admin", "ventas", "jefe_ventas", "supervisor"), admin=True))
     return {
         "states": list(STATES),
         "lost_reasons": list(LOST_REASONS),

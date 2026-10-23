@@ -59,11 +59,44 @@ def customers(
     p: Principal = Depends(require("crm", "ver")),
     db: Session = Depends(get_db),
 ):
-    stmt = select(Customer).where(Customer.tenant_id == p.tenant.id, Customer.active)
+    from ..services import cartera
+
+    # cartera con dueno (ventas etapa 2): el vendedor solo ve sus clientes
+    stmt = select(Customer).where(Customer.tenant_id == p.tenant.id, Customer.active, cartera.customer_scope(p))
     if q:
         like = f"%{q}%"
         stmt = stmt.where(or_(Customer.name.ilike(like), Customer.id_number.ilike(like), Customer.email.ilike(like)))
-    return _page(db, stmt, cursor, limit, Customer, CustomerOut.model_validate)
+    page = _page(db, stmt, cursor, limit, Customer, lambda c: _customer_out(db, c))
+    txt = (q or "").strip()
+    if txt and not cursor and not p.sees_all_customers:
+        # un cliente SIN dueno solo se encuentra por su cedula o su correo exactos: sale para tomarlo (claim)
+        ya = {x.id for x in page.items}
+        cand = select(Customer).where(Customer.tenant_id == p.tenant.id, Customer.active, Customer.account_owner_id.is_(None))
+        cand = cand.where(or_(func.lower(Customer.email) == txt.lower(), Customer.id_number.ilike(f"%{txt[-4:]}%")))
+        for c in db.scalars(cand.limit(50)):
+            if c.id not in ya and cartera.exact_match(c, txt):
+                out = _customer_out(db, c)
+                out.claimable = True
+                page.items.insert(0, out)
+    return page
+
+
+def _customer_out(db: Session, c: Customer) -> CustomerOut:
+    from ..services.cartera import owner_name
+
+    out = CustomerOut.model_validate(c)
+    out.account_owner_name = owner_name(db, c.account_owner_id)
+    return out
+
+
+def _visible_customer(db: Session, p: Principal, cid: int) -> Customer:
+    """El cliente si quien mira lo puede ver (cartera con dueno); si no, 404 (lo ajeno no existe)."""
+    from ..services import cartera
+
+    c = _own(db, Customer, cid, p.tenant.id)
+    if not cartera.can_see(db, p, c):
+        raise HTTPException(404, "Customer no encontrado")
+    return c
 
 
 def can_pause_collections(p: Principal) -> bool:
@@ -104,6 +137,16 @@ def create_customer(data: CustomerIn, p: Principal = Depends(require("crm", "cre
 
     if data.no_reminders:
         _reminders_guard(p)
+    from ..services import cartera
+
+    if not p.sees_all_customers:
+        # cartera con dueno: el mismo cliente (cedula, correo o telefono) de otro vendedor no se duplica
+        otro = cartera.find_duplicate(db, p.tenant.id, data.id_number, data.email, data.phone or data.whatsapp)
+        if otro is not None and otro.account_owner_id and otro.account_owner_id != p.user.id:
+            return JSONResponse(status_code=409, content={"detail": cartera.busy_message(db, otro)})
+        if otro is not None and otro.account_owner_id is None and not (cartera.norm_id(data.id_number) or (data.email or "").strip()):
+            # coincide solo por telefono con un cliente sin dueno: se toma buscandolo por cedula o correo exactos
+            return JSONResponse(status_code=409, content={"detail": "Ya existe un cliente con ese teléfono. Búsquelo por su cédula o su correo exactos para tomarlo."})
     if not p.can("crm", "editar"):
         dup = _duplicate_customer(db, p.tenant.id, data.id_number, data.email)
         if dup is not None:
@@ -114,19 +157,23 @@ def create_customer(data: CustomerIn, p: Principal = Depends(require("crm", "cre
                 content={"detail": f"Ya existe el cliente «{dup.name}» con esa cédula o ese correo: use esa ficha", "existing": {"id": dup.id, "name": dup.name}},
             )
     c = Customer(tenant_id=p.tenant.id, **data.model_dump())
+    if not p.sees_all_customers:
+        c.account_owner_id = p.user.id  # el cliente que crea un vendedor queda en su cartera
     db.add(c)
     db.flush()
     if c.no_reminders:
         audit(db, p.tenant.id, p.user.id, "reminders", "customer", c.id, {"antes": False, "despues": True}, ip=p.ip)
+    if c.account_owner_id:
+        audit(db, p.tenant.id, p.user.id, "account_owner", "customer", c.id, before={"account_owner_id": None}, after={"account_owner_id": c.account_owner_id}, reason="Lo creó su vendedor", ip=p.ip)
     db.commit()
     db.refresh(c)
-    return c
+    return _customer_out(db, c)
 
 
 @router.get("/customers/{cid}", response_model=CustomerOut)
 def get_customer(cid: int, p: Principal = Depends(require("crm", "ver")), db: Session = Depends(get_db)):
-    c = _own(db, Customer, cid, p.tenant.id)
-    out = CustomerOut.model_validate(c)
+    c = _visible_customer(db, p, cid)
+    out = _customer_out(db, c)
     if p.can("aliados", "ver"):
         from ..models import AllyCompany
 
@@ -139,7 +186,7 @@ def get_customer(cid: int, p: Principal = Depends(require("crm", "ver")), db: Se
 def update_customer(cid: int, data: CustomerIn, p: Principal = Depends(require("crm", "editar")), db: Session = Depends(get_db)):
     from ..services.documents import audit
 
-    c = _own(db, Customer, cid, p.tenant.id)
+    c = _visible_customer(db, p, cid)
     cambios = data.model_dump(exclude_unset=True)  # lo que no se envia no se borra
     pausa = "no_reminders" in cambios and bool(cambios["no_reminders"]) != bool(c.no_reminders)
     if pausa:
@@ -150,7 +197,50 @@ def update_customer(cid: int, data: CustomerIn, p: Principal = Depends(require("
         audit(db, p.tenant.id, p.user.id, "reminders", "customer", c.id, {"antes": not c.no_reminders, "despues": bool(c.no_reminders)}, ip=p.ip)
     db.commit()
     db.refresh(c)
-    return c
+    return _customer_out(db, c)
+
+
+# ---------- Cartera con dueno (ventas etapa 2) ----------
+class OwnerIn(BaseModel):
+    owner_id: int | None = None  # None = sin vendedor
+    reason: str | None = None
+
+
+@router.put("/customers/{cid}/owner", response_model=CustomerOut)
+def set_customer_owner(cid: int, data: OwnerIn, p: Principal = Depends(require("crm", "cartera")), db: Session = Depends(get_db)):
+    """El admin o el jefe de ventas cambian el vendedor de la cuenta: queda en la bitacora y se le avisa al nuevo."""
+    from ..services import cartera
+
+    c = _own(db, Customer, cid, p.tenant.id)
+    cartera.set_owner(db, p, c, data.owner_id, data.reason)
+    db.commit()
+    db.refresh(c)
+    return _customer_out(db, c)
+
+
+class ClaimIn(BaseModel):
+    query: str  # la cedula o el correo exactos con que lo encontro
+
+
+@router.post("/customers/{cid}/claim", response_model=CustomerOut)
+def claim_customer(cid: int, data: ClaimIn, p: Principal = Depends(require("crm", "ver")), db: Session = Depends(get_db)):
+    """Un vendedor toma un cliente SIN dueno que encontro por su cedula o su correo exactos."""
+    from ..services import cartera
+    from ..services.ownership import eligible_seller
+
+    c = _own(db, Customer, cid, p.tenant.id)
+    if not c.active or not cartera.exact_match(c, data.query):
+        raise HTTPException(404, "Customer no encontrado")
+    if c.account_owner_id == p.user.id:
+        return _customer_out(db, c)
+    if c.account_owner_id:
+        raise HTTPException(409, cartera.busy_message(db, c))
+    if not p.can("sales", "crear") or not eligible_seller(db, p.tenant.id, p.user.id):
+        raise HTTPException(403, "Solo un vendedor toma clientes para su cartera")
+    cartera.ensure_owner(db, p.tenant.id, c, p.user.id, p.user.id, "Lo tomó buscando su cédula o correo", ip=p.ip)
+    db.commit()
+    db.refresh(c)
+    return _customer_out(db, c)
 
 
 # ---------- Impuestos ----------

@@ -22,6 +22,57 @@ function Kpi({ label, data, light, cur }: { label: string; data: NonNullable<D["
   );
 }
 
+/* Inicio del jefe de ventas (ventas etapa 2): lo que el equipo espera que apruebe y el embudo del equipo, por vendedor.
+   Montos de venta, nunca costos ni márgenes. En tablet la tabla pasa a tarjetas (table--stack). */
+function TeamBlock({ e }: { e: NonNullable<D["equipo"]> }) {
+  const m = e.embudo;
+  return (
+    <>
+      <Card title={`Aprobaciones del equipo · ${e.por_aprobar}`} extra={<Link className="btn btn--ghost btn--sm" to="/aprobaciones">Abrir Aprobaciones</Link>} flush>
+        {e.aprobaciones.length === 0 ? <Empty title="Nada por aprobar" hint="Cuando un vendedor se pase de su descuento o del monto, la cotización aparece aquí." /> : (
+          <table className="table table--sm table--stack">
+            <thead><tr><th>Cotización</th><th>Cliente</th><th>Vendedor</th><th style={{ textAlign: "right" }}>Total</th><th>Quién aprueba</th></tr></thead>
+            <tbody>
+              {e.aprobaciones.map((q) => (
+                <tr key={q.id}>
+                  <td data-label="Cotización"><Link to={`/cotizaciones/${q.id}`}><b className="mono">{q.number}</b></Link></td>
+                  <td data-label="Cliente">{q.customer || "—"}</td>
+                  <td data-label="Vendedor">{q.seller || "—"}</td>
+                  <td data-label="Total" style={{ textAlign: "right" }} className="money">{fmtMoney(q.total, q.currency)}</td>
+                  <td data-label="Quién aprueba">{q.can_approve ? <span className="badge badge--warn">Usted, dentro de su tope</span> : <span className="badge badge--muted">Administración</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+      <Card title="Embudo del equipo" extra={<span className="meta">{m.sin_tipo_de_cambio ? "Sin tipo de cambio: no suma lo que está en otra moneda" : m.convertido ? "≈ al tipo de cambio de hoy" : "todo el equipo"}</span>}>
+        <div className="eco">
+          <Link className="eco__box" to="/oportunidades"><span className="meta">Abiertas · {m.abiertas}</span><b className="money">{fmtMoney(m.monto, m.moneda)}</b></Link>
+          <Link className="eco__box" to="/oportunidades"><span className="meta">Ponderado por probabilidad</span><b className="money">{fmtMoney(m.ponderado, m.moneda)}</b></Link>
+          <Link className="eco__box is-good" to="/oportunidades"><span className="meta">Ganado este mes · {m.ganadas_mes}</span><b className="money">{fmtMoney(m.ganado_mes, m.moneda)}</b></Link>
+        </div>
+        {e.por_vendedor.length > 0 && (
+          <table className="table table--sm table--stack" style={{ marginTop: 12 }}>
+            <thead><tr><th>Vendedor</th><th style={{ textAlign: "right" }}>Abiertas</th><th style={{ textAlign: "right" }}>Monto</th><th style={{ textAlign: "right" }}>Ponderado</th><th style={{ textAlign: "right" }}>Ganado este mes</th></tr></thead>
+            <tbody>
+              {e.por_vendedor.map((v) => (
+                <tr key={v.id}>
+                  <td data-label="Vendedor" className="stack-full"><b>{v.name}</b></td>
+                  <td data-label="Abiertas" style={{ textAlign: "right" }}>{v.abiertas}</td>
+                  <td data-label="Monto" style={{ textAlign: "right" }} className="money">{fmtMoney(v.monto, m.moneda)}</td>
+                  <td data-label="Ponderado" style={{ textAlign: "right" }} className="money">{fmtMoney(v.ponderado, m.moneda)}</td>
+                  <td data-label="Ganado este mes" style={{ textAlign: "right" }} className="money">{fmtMoney(v.ganado_mes, m.moneda)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </>
+  );
+}
+
 /* Acciones pendientes: cada tarjeta lleva a la lista con exactamente esos registros. La clave es la misma que usa
    el servidor para contar (sales.PENDIENTES), asi el numero y las filas no pueden diferir. "hot" = pide atencion.
    "admin_only" = se oculta si el usuario no tiene ese permiso adicional (tarjetas no relevantes para el vendedor). */
@@ -133,7 +184,7 @@ export default function Dashboard() {
             </div>
           }>
             <div className="pending">
-              {visible.map((p) => pendingCard(scoped(p.key === "cotizaciones_por_aprobar" && !allows("sales.aprobar") ? { ...p, label: "Esperando aprobación" } : p, d.scope), d.acciones_pendientes[p.key] ?? 0, allows(p.need)))}
+              {visible.map((p) => pendingCard(scoped(p.key === "cotizaciones_por_aprobar" && !allows("sales.aprobar") ? { ...p, label: allows("sales.aprobar_equipo") ? "Del equipo por aprobar" : "Esperando aprobación" } : p, d.scope), d.acciones_pendientes[p.key] ?? 0, allows(p.need)))}
             </div>
           </Card>
         );
@@ -187,6 +238,8 @@ export default function Dashboard() {
               </div>
             </Card>
           )}
+
+          {d.equipo && <TeamBlock e={d.equipo} />}
 
           {d.comisiones && (
             /* 13/10 34:35: "va a poder ver cuanto esta ganando en tiempo real" (misma cuenta que Comisiones -> Mis comisiones) */

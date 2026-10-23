@@ -1430,7 +1430,7 @@ def seller_choice(t: Tenant) -> bool:
 # El equipo comercial de los pedidos web: a quien se le asigna un pedido, quien puede ser "Vendedor que atendio" y la
 # lista que ve el cliente en el checkout. Un solo criterio para los tres (mismo que el responsable de una
 # oportunidad, pipeline.meta), filtrado por ownership.eligible_seller.
-SALES_TEAM_ROLES = ("admin", "ventas", "supervisor")
+SALES_TEAM_ROLES = ("admin", "ventas", "jefe_ventas", "supervisor")
 
 
 def sales_team(db: Session, tid: int) -> list[dict]:

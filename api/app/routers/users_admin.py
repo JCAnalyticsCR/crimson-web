@@ -253,6 +253,14 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
     from ..services import ally_people
 
     de_aliado = ally_people.matches(db, tid, [m.user for m in rows])  # pedido 20: aviso en la lista
+    from ..models import Customer
+    from ..services.discounts import max_discount
+
+    cartera_n = dict(
+        db.execute(
+            select(Customer.account_owner_id, func.count(Customer.id)).where(Customer.tenant_id == tid, Customer.account_owner_id.is_not(None)).group_by(Customer.account_owner_id)
+        ).all()
+    )
 
     def locked(u: User):
         lu = aware(u.locked_until)
@@ -332,9 +340,14 @@ def users(p: Principal = Depends(VER), db: Session = Depends(get_db)):
                 "notify_email": m.notify_email if p.can("settings", "configurar") else None,
                 # parece de una empresa aliada: {company_id, company, reason: correo|nombre} (Pasar al portal de aliados)
                 "ally_match": de_aliado.get(m.user_id),
+                # ventas etapa 2: tope de descuento propio (None = el general) y clientes en su cartera
+                "discount_limit_pct": m.discount_limit_pct,
+                "clientes_cartera": cartera_n.get(m.user_id, 0),
             }
             for m in rows
         ],
+        # tope general de descuento (Ajustes -> Facturacion), para mostrarlo junto al propio
+        "max_discount_pct": max_discount(p.tenant),
         "invitations": [inv_out(i) for i in inv],
         "roles": assignable_roles(db, p.tenant),
         # nombres de los roles que creo el admin (los predefinidos los nombra el portal)
@@ -668,6 +681,15 @@ class MemberIn(BaseModel):
     notify_email: EmailStr | Literal[""] | None = None
     reason: str | None = Field(None, max_length=500)  # opcional: queda en la bitacora
     admin_password: str | None = Field(None, max_length=MAX_PASSWORD)
+    # ventas etapa 2: tope de descuento propio de este vendedor (%). "" lo quita (vuelve el tope general)
+    discount_limit_pct: float | Literal[""] | None = None
+
+    @field_validator("discount_limit_pct")
+    @classmethod
+    def _pct(cls, v):
+        if isinstance(v, (int, float)) and not (0 <= v <= 100):
+            raise ValueError("El tope de descuento debe estar entre 0 y 100 %")
+        return v
 
     @field_validator("full_name", "notify_email", mode="before")
     @classmethod
@@ -731,6 +753,19 @@ def member_update(uid: int, data: MemberIn, p: Principal = Depends(ADMIN), db: S
     if email_change:
         u.email = new_email
     audit_change(db, p, "user_profile", "user", uid, perfil, {"full_name": u.full_name, "email": u.email}, reason=data.reason)
+    if data.discount_limit_pct is not None:
+        from decimal import Decimal
+
+        nuevo_tope = None if data.discount_limit_pct == "" else Decimal(str(data.discount_limit_pct)).quantize(Decimal("0.01"))
+        antes_tope = m.discount_limit_pct
+        if (None if antes_tope is None else Decimal(antes_tope)) != nuevo_tope:
+            m.discount_limit_pct = nuevo_tope
+            audit_change(
+                db, p, "permissions", "user", uid,
+                {"tope_descuento_pct": None if antes_tope is None else str(antes_tope)},
+                {"tope_descuento_pct": None if nuevo_tope is None else str(nuevo_tope)},
+                reason=data.reason or "Tope de descuento del vendedor",
+            )
     if notify_change:
         antes_avisos = m.notify_email
         m.notify_email = new_notify
@@ -773,7 +808,14 @@ def member_update(uid: int, data: MemberIn, p: Principal = Depends(ADMIN), db: S
         for destino_correo in dict.fromkeys([u.email, *([new_notify] if new_notify else [])]):
             notify_security(db, p.tenant, u, "Cambió su correo de avisos en Crimson", cuerpo, to=destino_correo)
     db.commit()
-    return {"ok": True}
+    out: dict = {"ok": True}
+    if active_change and data.active is False:
+        from ..services import cartera
+
+        # desactivar a un vendedor con cartera: el portal ofrece el traspaso de un clic con estos conteos
+        if cartera.has_portfolio(db, tid, uid):
+            out["cartera"] = cartera.counts(db, tid, uid)
+    return out
 
 
 # ---------- Restablecer contrasena ----------

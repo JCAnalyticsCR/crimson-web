@@ -9,6 +9,7 @@ import { SlaSettings } from "./support/SlaTable";
 import { Bitacora } from "./Bitacora";
 import DataExport from "./tools/DataExport";
 import UsersTab from "./settings/UsersTab";
+import VentasTab from "./settings/VentasTab";
 import HaciendaTab from "./settings/HaciendaTab";
 import TwoFactorSetup from "./auth/TwoFactorSetup";
 import MarginGuardCard, { type MarginCfg } from "./settings/MarginGuardCard";
@@ -32,7 +33,7 @@ const mailError = (m: Mail) => m.error && m.status !== "enviado" && m.status !==
 
 /* Las claves no cambian (los enlaces ?tab= siguen sirviendo). "Soporte" chocaba con el menú Soporte (tickets) y
    Andrés creyó que era una conexión con Fygaro (03:31); la Bandeja XML la mezcló con el correo que sale (03:46). */
-const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["hacienda", "Hacienda"], ["pagos", "Pagos y cobros"], ["inventario", "Inventario"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"], ["bandeja", "XML de proveedores"], ["sla", "SLA"], ["soporte", "Acceso de soporte"], ["api", "API"], ["bitacora", "Bitácora"], ["respaldo", "Respaldo"]];
+const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["hacienda", "Hacienda"], ["pagos", "Pagos y cobros"], ["inventario", "Inventario"], ["ventas", "Ventas"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"], ["bandeja", "XML de proveedores"], ["sla", "SLA"], ["soporte", "Acceso de soporte"], ["api", "API"], ["bitacora", "Bitácora"], ["respaldo", "Respaldo"]];
 
 export default function Settings() {
   const { me, reload, toast, allows } = useSession();
@@ -257,6 +258,7 @@ export default function Settings() {
       )}
 
       {tab === "usuarios" && <UsersTab />}
+      {tab === "ventas" && <VentasTab />}
 
       {tab === "cuenta" && (
         <div className="grid-2">

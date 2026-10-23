@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     JSON,
@@ -110,6 +111,9 @@ class TenantUser(TimestampMixin, Base):
     # Correo de avisos (reunion 21/10, pedido 22): si esta, las notificaciones internas le llegan aqui en vez de a su
     # correo de entrada. Lo edita solo el admin. Lo de su cuenta (contrasena, invitacion, seguridad) va al de entrada.
     notify_email: Mapped[str | None] = mapped_column(String(200))
+    # Ventas etapa 2: tope de descuento propio de este vendedor (%). Vacio = el de la empresa (o el del jefe de ventas).
+    # Lo edita solo el admin en Ajustes -> Usuarios.
+    discount_limit_pct: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
 
     tenant: Mapped[Tenant] = relationship(back_populates="users")
     user: Mapped[User] = relationship(back_populates="memberships")

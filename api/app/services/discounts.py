@@ -51,6 +51,26 @@ def max_discount(tenant) -> Decimal:
     return d(v) if v is not None else DEFAULT_MAX
 
 
+# ---------- Jefe de ventas (ventas etapa 2) ----------
+def team_limits(tenant) -> tuple[Decimal, Decimal]:
+    """Topes del jefe de ventas (Ajustes -> Ventas): % de descuento y monto (colones) que puede aprobar."""
+    from .sale_assignment import ventas_settings
+
+    cfg = ventas_settings(tenant)
+    return d(cfg.get("jefe_ventas_tope_descuento_pct") or 0), d(cfg.get("jefe_ventas_tope_monto") or 0)
+
+
+def limit_for(p: Principal) -> Decimal:
+    """Tope de descuento de quien guarda: el suyo propio (Ajustes -> Usuarios), si no el del jefe de ventas para el
+    jefe (nunca menos que el general), si no el general de la empresa."""
+    if p.discount_limit is not None:
+        return d(p.discount_limit)
+    base = max_discount(p.tenant)
+    if p.approves_team:
+        return max(base, team_limits(p.tenant)[0])
+    return base
+
+
 @dataclass
 class Check:
     exceeds: bool
@@ -81,10 +101,16 @@ def _list_price_in_doc_currency(prod, doc_currency: str, fx_rate) -> Decimal:
 
 
 def check(db: Session, p: Principal, payload: DocumentIn) -> Check:
-    limit = max_discount(p.tenant)
+    limit = limit_for(p)
     if p.can("sales", "descuento_libre"):
         return Check(False, limit, Decimal(0), None)
+    worst, worst_line = worst_discount(db, p.tenant.id, payload)
+    return Check(worst > limit, limit, worst, worst_line)
 
+
+def worst_discount(db: Session, tenant_id: int, payload: DocumentIn) -> tuple[Decimal, str | None]:
+    """El % de descuento efectivo mas alto del documento y su linea (la misma cuenta para el tope de quien guarda y
+    para saber si el jefe de ventas puede aprobarlo)."""
     from .fx import rate_or_none
 
     _fx = None  # cargado solo si hay productos en moneda distinta (evita consulta innecesaria)
@@ -92,7 +118,7 @@ def check(db: Session, p: Principal, payload: DocumentIn) -> Check:
     for ln in payload.lines:
         qty = d(ln.quantity)
         prod = db.get(Product, ln.product_id) if ln.product_id else None
-        if prod and prod.tenant_id != p.tenant.id:
+        if prod and prod.tenant_id != tenant_id:
             prod = None
         unit = d(ln.unit_price) if ln.unit_price is not None else (d(prod.price) if prod else Decimal(0))
 
@@ -130,8 +156,7 @@ def check(db: Session, p: Principal, payload: DocumentIn) -> Check:
         eff = (1 - (net * ratio) / list_amt) * 100
         if eff > worst:
             worst, worst_line = eff, name
-    worst = worst.quantize(Decimal("0.1"))
-    return Check(worst > limit, limit, worst, worst_line)
+    return worst.quantize(Decimal("0.1")), worst_line
 
 
 # ---------- Aprobacion de cotizaciones (monto, margen y lineas libres) ----------
@@ -195,6 +220,8 @@ def approval_reasons(db: Session, p: Principal, quote) -> list[str]:
         return []  # quien aprueba no se pide permiso a si mismo
     razones = []
     tope = approval_amount(p.tenant)
+    if tope > 0 and p.approves_team:
+        tope = max(tope, team_limits(p.tenant)[1])  # el jefe de ventas no se pide permiso hasta su propio tope
     if tope > 0 and d(quote.total) > tope:
         razones.append(f"El monto ({quote.currency} {d(quote.total):,.0f}) supera el tope de {tope:,.0f} para vender sin aprobación.")
     minimo = min_margin(p.tenant)
@@ -357,3 +384,37 @@ def margin_probe(db: Session, p: Principal, quote, margin: Decimal | None, held:
             )
             notify_roles(db, p.tenant, ("admin",), f"Cotizaciones cerca del margen mínimo · {p.user.full_name}", cuerpo, "quote", quote.id)
     return n >= MARGIN_PROBE_LIMIT
+
+
+# ---------- Aprobacion del jefe de ventas ----------
+def team_approval(db: Session, p: Principal, quote) -> str | None:
+    """Por que el jefe de ventas NO puede aprobar esta cotizacion retenida (None = si puede). Lo que pase de sus topes,
+    el margen bajo el minimo, las lineas libres que piden revision y el freno de sondeo los sigue aprobando el admin."""
+    if not p.approves_team:
+        return "Sin permiso para aprobar"
+    if quote.status != "por_aprobar":
+        return "La cotización no está pendiente de aprobación"
+    if quote.seller_id == p.user.id or (quote.seller_id is None and quote.created_by == p.user.id):
+        return "Sus propias cotizaciones las aprueba administración"
+    motivo = quote.approval_reason or ""
+    if PROBE_REASON in motivo or PROBE_REASON_OLD in motivo:
+        return "La aprueba administración"
+    pct, monto = team_limits(p.tenant)
+    if d(quote.total) > monto:
+        return f"El monto supera su tope de aprobación ({monto:,.0f}): la aprueba administración"
+    from . import documents as docsvc
+
+    worst, _ = worst_discount(db, p.tenant.id, docsvc.quote_to_payload(quote))
+    if worst > pct:
+        return f"El descuento ({worst:.1f} %) supera su tope de aprobación ({pct:.0f} %): la aprueba administración"
+    minimo = min_margin(p.tenant)
+    m = quote_margin(db, p.tenant.id, quote)
+    if (m is not None and minimo > 0 and m < minimo and not margin_covered(db, p.tenant.id, quote)) or margin_sentence(motivo):
+        return "El margen queda por debajo del mínimo: la aprueba administración"
+    tope_libre = free_line_limit(p.tenant)
+    for ln in quote.lines:
+        if getattr(ln, "product_id", None) is not None:
+            continue
+        if (getattr(ln, "treatment", None) or "normal") in _NO_SUMA or d(getattr(ln, "subtotal", None) or 0) > tope_libre:
+            return "Tiene líneas sin producto del catálogo que revisa administración"
+    return None

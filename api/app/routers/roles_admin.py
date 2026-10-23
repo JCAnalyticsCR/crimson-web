@@ -49,6 +49,7 @@ LABELS = {
     "caja": "Caja",
     "inventario": "Bodega",
     "lectura": "Solo lectura",
+    "jefe_ventas": "Jefe de ventas",
 }
 MAX_CUSTOM = 30
 
@@ -105,7 +106,20 @@ def _out(db: Session, p: Principal, members: dict[str, int]) -> list[dict]:
             "permissions": {"*": ["*"]},
             "default_permissions": {"*": ["*"]},
             "members": members.get("admin", 0),
-        }
+        },
+        {
+            # ventas etapa 2: no se edita aqui (aprueba hasta sus topes y maneja la cartera); sus topes y si asigna
+            # ventas se configuran en Ajustes -> Ventas
+            "code": "jefe_ventas",
+            "name": LABELS["jefe_ventas"],
+            "kind": "predefinido",
+            "editable": False,
+            "customized": False,
+            "base_code": None,
+            "permissions": ROLE_PERMISSIONS["jefe_ventas"],
+            "default_permissions": ROLE_PERMISSIONS["jefe_ventas"],
+            "members": members.get("jefe_ventas", 0),
+        },
     ]
     for code in EDITABLE_ROLES:
         rows.append(

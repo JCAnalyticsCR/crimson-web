@@ -90,6 +90,15 @@ export const ROLES: Record<string, RoleMeta> = {
     can: ["Ver facturas, cotizaciones y clientes", "Reportes de ventas y de caja"],
     cannot: ["Crear o modificar cualquier dato", "Ver costos, gastos o planillas", "Exportar a Excel"],
   },
+  /* ventas etapa 2: no se edita en Roles (aprueba hasta sus topes y maneja la cartera); sus topes y si asigna ventas
+     se configuran en Ajustes → Ventas */
+  jefe_ventas: {
+    label: "Jefe de ventas", tone: "#1d4ed8", glyph: "JV",
+    summary: "Dirige al equipo de ventas: ve las oportunidades, cotizaciones, facturas y cobros de todos, aprueba descuentos y cotizaciones grandes hasta sus topes y reparte la cartera. Nunca ve el costo ni el margen.",
+    can: ["Ver lo que vende todo el equipo y el embudo del equipo", "Aprobar descuentos y montos hasta sus topes (Ajustes → Ventas)", "Cambiar el vendedor de la cuenta de un cliente", "Traspasar la cartera de un vendedor a otro", "Asignar ventas por asignar, si el administrador lo habilita"],
+    cannot: ["Ver el costo, el margen o la utilidad", "Aprobar lo que pase de sus topes, el margen bajo el mínimo o sus propias cotizaciones", "Anular facturas", "Configurar la empresa o los usuarios"],
+    menu: ["/", "/aprobaciones", "/oportunidades", "/cotizaciones", "/facturas", "/pagos", "/clientes", "/productos", "/inventario", "/ordenes", "/comisiones", "/archivo", "/ajustes"],
+  },
   // Roles de cliente: no entran al panel interno, tienen su propio portal (modules/cliente)
   cliente_admin: {
     label: "Cliente · administrador", tone: "#0e7490", glyph: "C",

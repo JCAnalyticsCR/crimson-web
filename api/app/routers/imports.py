@@ -189,7 +189,7 @@ def _customers(db: Session, tid: int, rows: list[dict], commit: bool, opts: dict
         action = "actualizar" if c else "nuevo"
         if commit:
             if not c:
-                c = Customer(tenant_id=tid, name=name)
+                c = Customer(tenant_id=tid, name=name, account_owner_id=(opts or {}).get("owner_id"))
                 db.add(c)
             c.name = name
             c.id_number = idn or c.id_number
@@ -691,7 +691,8 @@ async def run_import(
     if kind == "products":
         opts = {"can_stock": p.can("inventory", "ajustar"), "user_id": p.user.id}
     if kind == "customers":
-        opts = {"can_update": p.can("crm", "editar")}
+        # cartera con dueno (ventas etapa 2): lo que importa un vendedor queda en su cartera
+        opts = {"can_update": p.can("crm", "editar"), "owner_id": None if p.sees_all_customers else p.user.id}
     result = PROCESSORS[kind](db, p.tenant.id, rows, commit, opts) if kind in ("catalogo", "products", "customers") else PROCESSORS[kind](db, p.tenant.id, rows, commit)
     summary = {a: sum(1 for r in result if r["action"] == a) for a in ("nuevo", "actualizar", "omitir", "error")}
     if commit:

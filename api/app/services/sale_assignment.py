@@ -53,6 +53,11 @@ VENTAS_DEFAULTS: dict = {
     "asignacion_consultas_web": "manual",      # "manual" | "turno" | "solucion"
     "asignacion_consultas_web_solucion_map": {},  # {solution_code: user_id}
     "quienes_confirman_cobros": ["admin", "contabilidad"],  # roles con payments.confirmar
+    # Ventas etapa 2: jefe de ventas. Aprueba descuentos hasta este % y cotizaciones hasta este monto (colones); lo que
+    # pase de ahi lo aprueba el admin. Quien asigna "ventas por asignar": el admin siempre; el jefe si se agrega aqui.
+    "jefe_ventas_tope_descuento_pct": 15,
+    "jefe_ventas_tope_monto": 10_000_000,
+    "quienes_asignan_ventas": ["admin"],
 }
 
 
@@ -64,10 +69,16 @@ def ventas_settings(tenant) -> dict:
 # ---------- Sugerencia de vendedor ----------
 
 def suggest_seller(db: Session, tenant_id: int, customer_id: int | None) -> int | None:
-    """Quien atendió / cotizó antes a este cliente — el historial más reciente (últimos 90 días por defecto).
-    Si no hay historial de cotizaciones, el seller_id de su factura más reciente."""
+    """El vendedor de la cuenta (cartera con dueno, ventas etapa 2) si puede vender; si no, quien atendió / cotizó
+    antes a este cliente — el historial más reciente (últimos 90 días por defecto). Si no hay historial de
+    cotizaciones, el seller_id de su factura más reciente."""
     if not customer_id:
         return None
+    from .ownership import eligible_seller
+
+    cust = db.get(Customer, customer_id)
+    if cust is not None and cust.tenant_id == tenant_id and cust.account_owner_id and eligible_seller(db, tenant_id, cust.account_owner_id):
+        return cust.account_owner_id
     t = db.get(Tenant, tenant_id)
     dias = int(ventas_settings(t).get("ventana_sugerencia_dias") or 90)
     desde = datetime.now(UTC) - timedelta(days=dias)

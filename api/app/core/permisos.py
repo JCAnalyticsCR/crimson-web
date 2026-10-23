@@ -65,6 +65,9 @@ LOCKED: frozenset[str] = frozenset(
         "sales.aprobar",
         "field.saltar_revision",
         "settings.configurar",
+        # ventas etapa 2: aprobar hasta los topes del jefe de ventas y mover la cartera de clientes (solo jefe y admin)
+        "sales.aprobar_equipo",
+        "crm.cartera",
     }
 )
 

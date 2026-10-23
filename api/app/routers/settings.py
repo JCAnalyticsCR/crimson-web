@@ -206,6 +206,30 @@ class SettingsIn(BaseModel):
         ventana = v.get("ventana_sugerencia_dias")
         if ventana is not None and not (7 <= int(ventana) <= 365):
             raise ValueError("ventana_sugerencia_dias debe estar entre 7 y 365")
+        # ventas etapa 2: topes del jefe de ventas y quien asigna las ventas por asignar
+        pct = v.get("jefe_ventas_tope_descuento_pct")
+        if pct is not None:
+            try:
+                pct = float(pct)
+            except (TypeError, ValueError):
+                raise ValueError("El tope de descuento del jefe de ventas debe ser un número") from None
+            if not (0 <= pct <= 100):
+                raise ValueError("El tope de descuento del jefe de ventas debe estar entre 0 y 100 %")
+            v["jefe_ventas_tope_descuento_pct"] = pct
+        monto = v.get("jefe_ventas_tope_monto")
+        if monto is not None:
+            try:
+                monto = float(monto)
+            except (TypeError, ValueError):
+                raise ValueError("El tope de monto del jefe de ventas debe ser un número") from None
+            if monto < 0:
+                raise ValueError("El tope de monto del jefe de ventas no puede ser negativo")
+            v["jefe_ventas_tope_monto"] = monto
+        quienes = v.get("quienes_asignan_ventas")
+        if quienes is not None:
+            if not isinstance(quienes, list) or any(q not in ("admin", "jefe_ventas") for q in quienes):
+                raise ValueError("Quién asigna las ventas: solo «admin» y «jefe_ventas»")
+            v["quienes_asignan_ventas"] = ["admin", *(["jefe_ventas"] if "jefe_ventas" in quienes else [])]  # el admin siempre
         # Solo guardar llaves conocidas
         return {k: v[k] for k in VENTAS_DEFAULTS if k in v}
 
@@ -252,6 +276,7 @@ def put_settings(data: SettingsIn, p: Principal = Depends(require("settings", "c
         if malos:
             raise HTTPException(422, f"Roles que no existen en el panel: {', '.join(malos)}")
     antes = list((t.settings or {}).get("cost_roles") or [])
+    ventas_antes = dict((t.settings or {}).get("ventas") or {})
     internos_antes = list((t.settings or {}).get("internal_notify_emails") or [])
     twofa_antes = _twofa_policy(t)
     prov_antes = hc.provider_setting(t)
@@ -284,6 +309,9 @@ def put_settings(data: SettingsIn, p: Principal = Depends(require("settings", "c
     if internos_cambio:
         # a donde van los avisos internos de pedidos y ventas: queda en la bitacora con antes/despues (solo si cambio)
         audit_change(db, p, "update", "tenant", t.id, {"internal_notify_emails": internos_antes}, {"internal_notify_emails": internos_despues}, reason="Correo para avisos internos")
+    if "ventas" in data.model_fields_set and dict(t.settings.get("ventas") or {}) != ventas_antes:
+        # Ajustes -> Ventas decide quien aprueba y hasta cuanto (jefe de ventas) y quien asigna ventas: bitacora
+        audit_change(db, p, "permissions", "tenant", t.id, {"ventas": ventas_antes}, {"ventas": dict(t.settings.get("ventas") or {})}, reason="Ajustes de ventas")
     if "cost_roles" in data.model_fields_set:
         # quien ve costos es un permiso: queda en la bitacora con antes/despues (solo si cambio). Aplica en la
         # siguiente peticion: los permisos se calculan en cada request, no hace falta cerrar sesiones.

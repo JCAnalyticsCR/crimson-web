@@ -255,7 +255,16 @@ def descuento_por_aprobar(db: Session, tenant, q: Quote, actor_id: int | None, *
     Pasarse del limite, corregir y volver a pasarse no
     repite el aviso dentro de la ventana; volver a pedirlo despues de un rechazo o de una aprobacion si avisa (entre uno
     y otro hubo una decision de quien aprueba, no hay forma de inundarlo)."""
-    destinos = [m for m in miembros(db, tenant) if m.can("sales", "aprobar")]
+    from .discounts import team_limits
+
+    _, tope_jefe = team_limits(tenant)
+    duena = quote_owner(q)
+    # el jefe de ventas (ventas etapa 2) tambien se entera de lo de su equipo cuyo monto cabe en su tope
+    destinos = [
+        m
+        for m in miembros(db, tenant)
+        if m.can("sales", "aprobar") or (m.can("sales", "aprobar_equipo") and m.user.id != duena and q.total is not None and q.total <= tope_jefe)
+    ]
     if not destinos:
         return 0
     cliente = _cliente(db, q)

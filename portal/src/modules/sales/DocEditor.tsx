@@ -527,8 +527,10 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               ) : (
                 <p style={{ fontSize: 13, margin: 0 }}>El descuento supera el límite del vendedor{limit ? ` (${Number(limit.limit)} %)` : ""}. No se puede enviar ni convertir hasta que un administrador lo apruebe.</p>
               )}
-              {allows("sales.aprobar") && <button className="btn btn--crimson" onClick={approve}><Icon d={I.check} />Aprobar descuento</button>}
-              {allows("sales.aprobar") && !rechazo && <button className="btn btn--ghost btn--sm" onClick={reject}>Rechazar con un motivo</button>}
+              {/* jefe de ventas (ventas etapa 2): aprueba solo lo que cabe en sus topes; lo demás lo dice y va a administración */}
+              {!allows("sales.aprobar") && doc.team_approval && !doc.team_approval.can && <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>{doc.team_approval.reason}</p>}
+              {(allows("sales.aprobar") || !!doc.team_approval?.can) && <button className="btn btn--crimson" onClick={approve}><Icon d={I.check} />Aprobar descuento</button>}
+              {(allows("sales.aprobar") || !!doc.team_approval?.can) && !rechazo && <button className="btn btn--ghost btn--sm" onClick={reject}>Rechazar con un motivo</button>}
             </div></div>
           )}
           {!locked && blocked && (

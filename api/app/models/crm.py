@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Boolean, String, Text
+from sqlalchemy import JSON, Boolean, ForeignKey, String, Text
 from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,3 +25,6 @@ class Customer(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     # cobranza (plan 1.3): este cliente no recibe recordatorios automaticos de cobro (acuerdo de pago, cliente delicado)
     no_reminders: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    # Ventas etapa 2 (cartera con dueno): "Vendedor de la cuenta". El vendedor solo ve los clientes suyos; admin, jefe de
+    # ventas y contabilidad ven todos. Lo cambia el admin o el jefe (bitacora + aviso). No toca las comisiones.
+    account_owner_id: Mapped[int | None] = mapped_column(ForeignKey("user.id", ondelete="SET NULL", name="fk_customer_account_owner"), index=True)

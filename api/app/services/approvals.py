@@ -49,10 +49,11 @@ class Section:
     where: Callable[[Principal], list]
     order: Callable[[], list]
     item: Callable[[Session, Principal, object], dict]
+    unless: tuple[str, ...] = ()  # con cualquiera de estos permisos la seccion no sale (la cubre otra mas amplia)
 
 
 def allowed(p: Principal, s: Section) -> bool:
-    return all(p.can(*n.split(".", 1)) for n in s.needs)
+    return all(p.can(*n.split(".", 1)) for n in s.needs) and not any(p.can(*n.split(".", 1)) for n in s.unless)
 
 
 # ---------- helpers ----------
@@ -165,6 +166,30 @@ def _quote_item(db: Session, p: Principal, q: Quote) -> dict:
         currency=q.currency if precio else None,
         to=f"/cotizaciones/{q.id}",
     )
+
+
+def team_quotes_where(p: Principal) -> list:
+    """Jefe de ventas: cotizaciones retenidas del equipo (no las suyas) que no fueron devueltas y cuyo monto cabe en su
+    tope. Si el descuento o el margen se pasan, la fila lo dice y la aprueba el admin (discounts.team_approval)."""
+    from ..routers.sales import _devuelta
+    from .discounts import team_limits
+    from .ownership import doc_mine
+
+    _, monto = team_limits(p.tenant)
+    return [Quote.tenant_id == p.tenant.id, Quote.status == "por_aprobar", ~_devuelta(p.tenant.id), Quote.total <= monto, ~doc_mine(Quote, p.user.id)]
+
+
+def _team_quote_item(db: Session, p: Principal, q: Quote) -> dict:
+    from .discounts import team_approval
+
+    row = _quote_item(db, p, q)
+    row["who"] = _name(db, q.seller_id or q.created_by)
+    motivo = team_approval(db, p, q)
+    row["badge"] = "La aprueba administración" if motivo else "Dentro de su tope"
+    row["can_approve"] = motivo is None
+    if motivo:
+        row["subtitle"] = motivo
+    return row
 
 
 def _ally_where(p: Principal) -> list:
@@ -539,6 +564,18 @@ SECTIONS: tuple[Section, ...] = (
         _quotes_where,
         lambda: [Quote.updated_at, Quote.id],
         _quote_item,
+    ),
+    Section(
+        "cotizaciones_equipo",
+        "Cotizaciones del equipo por aprobar",
+        "Descuentos y montos de su equipo dentro de su tope; lo que pase de ahí lo aprueba administración.",
+        ("sales.aprobar_equipo",),
+        "/cotizaciones?pendiente=cotizaciones_por_aprobar",
+        Quote,
+        team_quotes_where,
+        lambda: [Quote.updated_at, Quote.id],
+        _team_quote_item,
+        unless=("sales.aprobar",),
     ),
     Section(
         "cotizaciones_aceptadas",

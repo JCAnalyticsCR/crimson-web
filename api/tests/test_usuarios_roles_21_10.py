@@ -204,7 +204,11 @@ def test_correo_de_avisos_recibe_las_notificaciones_internas(client, auth, db_se
 # ---------- 23. Ficha del cliente de solo lectura para el vendedor ----------
 def test_vendedor_crea_clientes_pero_no_edita_los_existentes(client, auth, db_session):
     h = interno(client, db_session, auth["tenant"]["id"], "vende.ficha@ejemplo.com", "ventas")
-    c = client.get("/customers", headers=h).json()["items"][0]
+    # cartera con dueno (ventas etapa 2): el vendedor solo ve los clientes de su cartera; el admin le asigna uno
+    c = client.get("/customers").json()["items"][0]
+    yo = client.get("/auth/me", headers=h).json()["user"]["id"]
+    assert client.put(f"/customers/{c['id']}/owner", json={"owner_id": yo}).status_code == 200
+    assert [x["id"] for x in client.get("/customers", headers=h).json()["items"]] == [c["id"]]
     assert client.get(f"/customers/{c['id']}", headers=h).status_code == 200
     assert client.get(f"/customers/{c['id']}/overview", headers=h).status_code == 200
     assert client.put(f"/customers/{c['id']}", json={"name": c["name"], "email": "otro@ejemplo.com"}, headers=h).status_code == 403

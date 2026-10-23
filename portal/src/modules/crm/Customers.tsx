@@ -31,6 +31,14 @@ export default function Customers() {
   });
   const cancelar = () => { if (auto.isDirty() && !confirm("¿Descartar los cambios?")) return; auto.discard(); setEdit(null); setParams({}); };
 
+  /* cartera con dueño (ventas etapa 2): el vendedor solo ve lo suyo; un cliente sin vendedor se toma por cédula o correo exactos */
+  const soloCartera = allows("sales.crear") && !allows("sales.ver_todo");
+  const claim = async (c: Customer) => {
+    if (!confirm(`¿Tomar a ${c.name} para su cartera? Desde ahora usted será su vendedor.`)) return;
+    try { await api(`/customers/${c.id}/claim`, { method: "POST", json: { query: q.trim() } }); toast("Cliente agregado a su cartera"); nav(`/clientes/${c.id}`); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+  };
+
   const save = async () => {
     if (!edit) return;
     try {
@@ -49,11 +57,22 @@ export default function Customers() {
       </div>
       <Card flush>
         <div className="list-head"><div className="search" style={{ maxWidth: 420 }}><Icon d={I.search} size={16} /><input placeholder="Nombre, cédula o correo…" value={q} onChange={(e) => setQ(e.target.value)} /></div><button className="btn btn--ghost btn--sm" onClick={load}><Icon d={I.refresh} /></button></div>
-        {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Creá el primer cliente para cotizar y facturar." /> : (
-          <table className="table">
-            <thead><tr><th>Nombre</th><th>Identificación</th><th>Correo</th><th>WhatsApp</th><th>Divisa</th><th /></tr></thead>
+        {soloCartera && <p className="muted" style={{ fontSize: 12.5, margin: "0 16px 10px" }}>Ve solo los clientes de su cartera. Para tomar un cliente que no tiene vendedor, búsquelo por su cédula o su correo exactos.</p>}
+        {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint={soloCartera ? "Todavía no tiene clientes en su cartera. Cree uno o búsquelo por su cédula o correo exactos." : "Creá el primer cliente para cotizar y facturar."} /> : (
+          <table className="table table--stack">
+            <thead><tr><th>Nombre</th><th>Identificación</th><th>Correo</th><th>WhatsApp</th><th>Vendedor de la cuenta</th><th>Divisa</th><th /></tr></thead>
             <tbody>{items.map((c) => (
-              <tr key={c.id}><td><Link className="row-link" to={`/clientes/${c.id}`}>{c.name}</Link></td><td className="mono muted">{c.id_type} · {c.id_number || "—"}</td><td className="muted">{c.email || "—"}</td><td className="muted">{c.whatsapp || c.phone || "—"}</td><td>{c.currency}</td><td className="num row-actions"><span className="row-actions__in"><Link className="btn btn--ghost btn--sm" to={`/clientes/${c.id}`}>Ver ficha</Link><TrashButton kind="customer" id={c.id} number={c.name} onDone={load} /></span></td></tr>
+              <tr key={c.id}>
+                <td data-label="Nombre" className="stack-full">{c.claimable ? <b>{c.name}</b> : <Link className="row-link" to={`/clientes/${c.id}`}>{c.name}</Link>}</td>
+                <td data-label="Identificación" className="mono muted">{c.id_type} · {c.id_number || "—"}</td>
+                <td data-label="Correo" className="muted">{c.email || "—"}</td>
+                <td data-label="WhatsApp" className="muted">{c.whatsapp || c.phone || "—"}</td>
+                <td data-label="Vendedor de la cuenta">{c.account_owner_name || <span className="muted">Sin vendedor</span>}</td>
+                <td data-label="Divisa">{c.currency}</td>
+                <td className="num row-actions stack-actions"><span className="row-actions__in">{c.claimable
+                  ? <button className="btn btn--crimson btn--sm" onClick={() => claim(c)}>Tomar para mi cartera</button>
+                  : <><Link className="btn btn--ghost btn--sm" to={`/clientes/${c.id}`}>Ver ficha</Link><TrashButton kind="customer" id={c.id} number={c.name} onDone={load} /></>}</span></td>
+              </tr>
             ))}</tbody>
           </table>
         )}
