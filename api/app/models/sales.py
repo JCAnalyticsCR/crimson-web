@@ -59,7 +59,7 @@ class _DocBase(TenantMixin, TimestampMixin):
     # house_sale: "venta de la casa" — el admin la marco explicitamente sin vendedor/comision (bandeja de asignacion).
     # NULL / False = normal; True = no comisiona aunque despues se asigne un vendedor (la decision es permanente salvo
     # que el admin la revierta desde la misma bandeja).
-    house_sale: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False, server_default="0")
+    house_sale: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False, server_default=sa_false())
 
 
 class _LineBase:

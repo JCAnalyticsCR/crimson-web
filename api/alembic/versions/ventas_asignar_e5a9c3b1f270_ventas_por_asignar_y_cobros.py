@@ -30,7 +30,7 @@ depends_on: Sequence[str] | None = None
 def upgrade() -> None:
     # Invoice: "venta de la casa" — no comisiona aunque se asigne un vendedor despues
     with op.batch_alter_table("invoice") as batch:
-        batch.add_column(sa.Column("house_sale", sa.Boolean(), nullable=True, server_default=sa.text("0")))
+        batch.add_column(sa.Column("house_sale", sa.Boolean(), nullable=True, server_default=sa.false()))
 
     # Payment: confirmacion diferida (vendedor registra, admin/conta confirma)
     with op.batch_alter_table("payment") as batch:
