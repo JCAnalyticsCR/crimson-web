@@ -187,7 +187,10 @@ def test_vendedor_solo_ve_y_aprueba_los_de_sus_facturas(client, auth, db_session
     assert client.get(f"/payment-proofs/{todos[ajena['id']]}/file", headers=a).status_code == 404
     assert client.post(f"/payment-proofs/{todos[ajena['id']]}/approve", json={}, headers=a).status_code == 404
     assert client.post(f"/payment-proofs/{todos[ajena['id']]}/reject", json={"note": "no es mio"}, headers=a).status_code == 404
-    assert client.post(f"/payment-proofs/{todos[mia['id']]}/approve", json={}, headers=a).status_code == 200
+    # el vendedor ya no puede aprobar el comprobante de su propia factura (regla ventas-asignar)
+    assert client.post(f"/payment-proofs/{todos[mia['id']]}/approve", json={}, headers=a).status_code == 403
+    # el admin sí puede
+    assert client.post(f"/payment-proofs/{todos[mia['id']]}/approve", json={}).status_code == 200
     # el aviso: al admin de las dos; a la vendedora solo el de su factura; al otro vendedor ninguno; sin copia
     avisos = db_session.scalars(select(EmailOutbox).where(EmailOutbox.id > antes, EmailOutbox.subject.like("Comprobante subido%"))).all()
     por = {(m.to, m.subject.rsplit(" ", 1)[1]) for m in avisos}

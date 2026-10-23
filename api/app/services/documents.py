@@ -318,7 +318,18 @@ def convert_quote(db: Session, tenant_id: int, user_id: int, q: Quote, customer_
     return inv
 
 
-def add_payment(db: Session, tenant_id: int, user_id: int | None, inv: Invoice, data) -> Payment:
+def add_payment(
+    db: Session,
+    tenant_id: int,
+    user_id: int | None,
+    inv: Invoice,
+    data,
+    *,
+    payment_status: str = "confirmado",
+) -> Payment:
+    """Registra un cobro en la factura.
+    payment_status: "confirmado" (default — rebaja saldo y devenga comision de inmediato) |
+    "por_confirmar" (el vendedor lo registra; admin/conta lo aprueba antes de que cuente)."""
     if inv.status == "anulada":
         raise HTTPException(409, "La factura esta anulada")
     p = Payment(
@@ -335,14 +346,19 @@ def add_payment(db: Session, tenant_id: int, user_id: int | None, inv: Invoice, 
         notify_customer=data.notify_customer,
         notes=data.notes,
         created_by=user_id or None,
+        status=payment_status,
     )
     db.add(p)
-    db.flush()  # aplica defaults (status=confirmado) antes de recalcular el saldo
+    db.flush()
     if p not in inv.payments:
         inv.payments.append(p)
+    # "por_confirmar" no modifica el saldo todavia (recompute_balance filtra por status=="confirmado")
     recompute_balance(inv)
     db.flush()
-    audit(db, tenant_id, user_id, "pay", "invoice", inv.id, {"payment_id": p.id, "amount": str(data.amount), "kind": data.kind})
+    audit(
+        db, tenant_id, user_id, "pay", "invoice", inv.id,
+        {"payment_id": p.id, "amount": str(data.amount), "kind": data.kind, "status": payment_status},
+    )
     if p.status == "confirmado":
         from . import commissions  # import local: evita ciclo
 

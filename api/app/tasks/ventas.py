@@ -181,6 +181,45 @@ def _cliente(db: Session, q: Quote) -> str:
     return c.name if c is not None and c.tenant_id == q.tenant_id else "sin cliente"
 
 
+def avisar_consultas_sin_responsable(db: Session, tenant) -> int:
+    """Correo diario al admin con las oportunidades de tienda web sin responsable y su antigüedad.
+    Solo se envía si hay al menos una. Incluye las de owner_id NULL (el hito exacto que el coordinator
+    menciona: 'hoy salta owner_id 0'). No hace commit."""
+    from ..models import Opportunity
+    from ..services.avisos_venta import miembros
+    from ..services.documents import local_date
+    from ..services.email_layout import cta
+
+    filas = db.scalars(
+        select(Opportunity).where(
+            Opportunity.tenant_id == tenant.id,
+            Opportunity.owner_id.is_(None),
+            Opportunity.source == "tienda web",
+            Opportunity.status.not_in(("ganada", "perdida", "archivada")),
+        ).order_by(Opportunity.id)
+    ).all()
+    if not filas:
+        return 0
+
+    hoy = local_date(datetime.now(UTC))
+    e = html.escape
+    items_html = "".join(
+        f'<li><a href="{e(avisos.enlace(f"/oportunidades?id={o.id}"))}">'
+        f"<b>{e(o.number)}</b></a> · {e(o.title[:80])} · "
+        f"{(hoy - local_date(o.created_at.replace(tzinfo=UTC) if o.created_at and not o.created_at.tzinfo else o.created_at)).days if o.created_at else '?'} días sin responsable</li>"
+        for o in filas[:20]
+    )
+    mas = f"<p>… y {len(filas) - 20} más.</p>" if len(filas) > 20 else ""
+    cuerpo = (
+        f"<p>Estas consultas de la tienda web llevan más de un día sin un vendedor responsable:</p>"
+        f"<ul>{items_html}</ul>{mas}"
+        + cta("/ventas/por-asignar", "Ir a Ventas por asignar")
+    )
+    destinos = miembros(db, tenant, roles=("admin",))
+    n = avisos.avisar(db, tenant, destinos, f"{len(filas)} consulta{'s' if len(filas) != 1 else ''} sin responsable · tienda web", lambda _m: cuerpo, "opportunity", filas[0].id)
+    return n
+
+
 @shared_task(name="crm.stale_quotes")
 def stale_quotes() -> int:
     """Lunes a viernes por la manana (beat "stale-quotes"): cotizaciones frias a su vendedora."""
@@ -196,4 +235,22 @@ def stale_quotes() -> int:
             except Exception:  # noqa: BLE001  una empresa con datos raros no frena a las demas
                 db.rollback()
                 log.exception("cotizaciones frias (empresa %s)", t.id)
+    return n
+
+
+@shared_task(name="crm.consultas_sin_responsable")
+def consultas_sin_responsable() -> int:
+    """Correo diario al admin con las consultas de la tienda web sin vendedor asignado."""
+    from ..core.db import SessionLocal
+    from ..models import Tenant
+
+    n = 0
+    with SessionLocal() as db:
+        for t in db.scalars(select(Tenant).where(Tenant.active)).all():
+            try:
+                n += avisar_consultas_sin_responsable(db, t)
+                db.commit()
+            except Exception:  # noqa: BLE001
+                db.rollback()
+                log.exception("consultas sin responsable (empresa %s)", t.id)
     return n

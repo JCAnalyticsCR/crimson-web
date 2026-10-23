@@ -25,8 +25,9 @@ CATALOG: list[tuple[str, str, list[tuple[str, str]]]] = [
         ("ver", "Ver"), ("ver_todo", "Ver las de toda la empresa"), ("crear", "Crear"), ("editar", "Editar"), ("enviar", "Enviar"),
         ("exportar", "Exportar"), ("recurrencias", "Recurrencias"),
         ("emitir_fuera", "Marcar emitidas en Fygaro"),
+        ("asignar_venta", "Asignar vendedor a ventas sin asignar"),
     ]),
-    ("payments", "Pagos", [("ver", "Ver"), ("crear", "Registrar cobros"), ("editar", "Editar cobros"), ("exportar", "Exportar")]),
+    ("payments", "Pagos", [("ver", "Ver"), ("crear", "Registrar cobros"), ("editar", "Editar cobros"), ("exportar", "Exportar"), ("confirmar", "Confirmar cobros del vendedor")]),
     ("catalog", "Productos y servicios", [("ver", "Ver"), ("precios", "Ver precio de venta"), ("crear", "Crear"), ("editar", "Editar")]),
     ("inventory", "Inventario", [
         ("ver", "Ver existencias"), ("ajustar", "Ajustes de inventario"), ("crear", "Movimientos"), ("editar", "Editar"),

@@ -885,7 +885,9 @@ def void_invoice(iid: int, p: Principal = Depends(require("sales", "anular")), d
 @router.post("/invoices/{iid}/payments", response_model=InvoiceOut, status_code=201)
 def pay_invoice(iid: int, data: PaymentIn, p: Principal = Depends(require("payments", "crear")), db: Session = Depends(get_db)):
     inv = _own(db, Invoice, iid, p.tenant.id, p)
-    svc.add_payment(db, p.tenant.id, p.user.id, inv, data)
+    # El vendedor registra "por_confirmar"; quien tiene payments.confirmar lo registra directo como confirmado.
+    pay_status = "confirmado" if p.can("payments", "confirmar") else "por_confirmar"
+    svc.add_payment(db, p.tenant.id, p.user.id, inv, data, payment_status=pay_status)
     db.commit()
     db.refresh(inv)
     return _inv_out(db, inv, p)
@@ -970,6 +972,95 @@ def payments(limit: int = Query(20, le=100), p: Principal = Depends(require("pay
         item.customer = _cust_name(db, inv.customer_id) if inv else None
         out.append(item)
     return out
+
+
+# ---------- Cobros por confirmar ----------
+
+class ConfirmPaymentRejectIn(BaseModel):
+    motivo: str = Field(min_length=3, max_length=300)
+
+
+@router.get("/payments/pending-confirmation")
+def payments_pending_confirmation(p: Principal = Depends(require("payments", "confirmar")), db: Session = Depends(get_db)):
+    """Lista de cobros registrados por el vendedor pendientes de confirmación."""
+    from ..services.sale_assignment import pending_confirmation_list
+
+    return {"items": pending_confirmation_list(db, p.tenant.id)}
+
+
+@router.post("/invoices/{iid}/payments/{pid}/confirm")
+def confirm_payment(iid: int, pid: int, p: Principal = Depends(require("payments", "confirmar")), db: Session = Depends(get_db)):
+    """Confirma un cobro 'por_confirmar': rebaja saldo y devenga comisión."""
+    from ..services.sale_assignment import confirm_payment as svc_confirm
+
+    pago = svc_confirm(db, p.tenant, iid, pid, p.user.id, p.ip)
+    db.commit()
+    db.refresh(pago)
+    inv = db.get(Invoice, iid)
+    return _inv_out(db, inv, p)
+
+
+@router.post("/invoices/{iid}/payments/{pid}/reject-payment")
+def reject_payment(iid: int, pid: int, data: ConfirmPaymentRejectIn, p: Principal = Depends(require("payments", "confirmar")), db: Session = Depends(get_db)):
+    """Rechaza un cobro 'por_confirmar': lo marca fallido y avisa al vendedor."""
+    from ..services.sale_assignment import reject_payment as svc_reject
+
+    svc_reject(db, p.tenant, iid, pid, data.motivo, p.user.id, p.ip)
+    db.commit()
+    inv = db.get(Invoice, iid)
+    return _inv_out(db, inv, p)
+
+
+# ---------- Ventas por asignar ----------
+
+class AssignSellerIn(BaseModel):
+    seller_id: int | None = None   # None = marcar venta de la casa
+    house_sale: bool = False        # True = marcar como venta de la casa explícitamente
+
+
+@router.get("/sales/unassigned")
+def unassigned_sales(p: Principal = Depends(require("sales", "asignar_venta")), db: Session = Depends(get_db)):
+    """Bandeja 'Ventas por asignar': facturas sin vendedor (tab 'Facturas') y consultas web sin responsable (tab 'Consultas').
+    También lista el equipo comercial activo y la configuración de reparto."""
+    from ..services.sale_assignment import unassigned_invoices, unassigned_opportunities
+    from ..services.store_orders import sales_team
+
+    facturas = unassigned_invoices(db, p.tenant.id)
+    consultas = unassigned_opportunities(db, p.tenant.id)
+    equipo = sales_team(db, p.tenant.id)
+    return {
+        "facturas": facturas,
+        "consultas": consultas,
+        "equipo": equipo,
+    }
+
+
+@router.post("/invoices/{iid}/assign-seller", response_model=InvoiceOut)
+def assign_seller(iid: int, data: AssignSellerIn, p: Principal = Depends(require("sales", "asignar_venta")), db: Session = Depends(get_db)):
+    """Asigna un vendedor a una factura sin vendedor, o la marca como 'venta de la casa' (sin comisión)."""
+    from ..services.sale_assignment import assign_invoice_seller, mark_invoice_house_sale
+
+    if data.house_sale or data.seller_id is None:
+        inv = mark_invoice_house_sale(db, p.tenant, iid, p.user.id, p.ip)
+    else:
+        inv = assign_invoice_seller(db, p.tenant, iid, data.seller_id, p.user.id, p.ip)
+    db.commit()
+    db.refresh(inv)
+    return _inv_out(db, inv, p)
+
+
+class AssignOppOwnerIn(BaseModel):
+    owner_id: int
+
+
+@router.post("/opportunities/{oid}/assign-owner")
+def assign_opp_owner(oid: int, data: AssignOppOwnerIn, p: Principal = Depends(require("sales", "asignar_venta")), db: Session = Depends(get_db)):
+    """Asigna responsable a una consulta web sin dueño (Oportunidades sin owner_id)."""
+    from ..services.sale_assignment import assign_opportunity_owner
+
+    o = assign_opportunity_owner(db, p.tenant, oid, data.owner_id, p.user.id, p.ip)
+    db.commit()
+    return {"id": o.id, "number": o.number, "owner_id": o.owner_id, "status": o.status}
 
 
 # ---------- Grupos de facturacion ----------
@@ -1063,6 +1154,15 @@ def dashboard(p: Principal = Depends(require("dashboard", "ver")), db: Session =
         from ..services.commissions import approvals_count
 
         pend["comisiones_por_aprobar"] = approvals_count(db, p)
+    if p.can("sales", "asignar_venta"):
+        from ..services.sale_assignment import unassigned_invoices_count, unassigned_opportunities_count
+
+        pend["ventas_por_asignar"] = unassigned_invoices_count(db, p.tenant.id)
+        pend["consultas_por_asignar"] = unassigned_opportunities_count(db, p.tenant.id)
+    if p.can("payments", "confirmar"):
+        from ..services.sale_assignment import pending_confirmation_count
+
+        pend["cobros_por_confirmar"] = pending_confirmation_count(db, p.tenant.id)
     if p.can("crm_pipeline", "ver"):
         from .pipeline import OPP_PENDIENTES, opp_pending_count
 

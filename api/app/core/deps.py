@@ -34,7 +34,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "crm_pipeline": ["ver", "crear", "editar"],  # oportunidades propias
         "catalog": ["ver", "precios"],
         "sales": ["ver", "crear", "editar", "enviar"],
-        "payments": ["ver", "crear"],  # registra el cobro de SUS facturas (la comision nace del cobro)
+        "payments": ["ver", "crear"],  # registra el cobro de SUS facturas; confirmar lo tiene admin/contabilidad
         # resumen: los levantamientos de SUS oportunidades en solo lectura (13/10 33:30). No los llena: los solicita
         # desde la oportunidad (POST /opportunities/{id}/request-survey). Sin crear ni editar.
         "field": ["ver", "resumen"],
@@ -53,7 +53,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "crm": ["ver"],
         "catalog": ["ver", "precios"],
         "sales": ["ver", "ver_todo", "exportar", "recurrencias", "enviar", "emitir_fuera"],
-        "payments": ["ver", "exportar", "crear"],
+        "payments": ["ver", "exportar", "crear", "confirmar"],  # confirmar: aprueba cobros del vendedor
         "accounting": ["ver", "crear", "editar", "exportar"],
         "inventory": ["ver", "exportar"],
         "projects": ["ver", "ver_todo"],
@@ -137,7 +137,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, list[str]]] = {
         "crm": ["ver", "crear"],
         "catalog": ["ver", "precios"],
         "sales": ["ver", "ver_todo", "crear"],
-        "payments": ["ver", "crear", "editar"],
+        "payments": ["ver", "crear", "editar", "confirmar"],  # caja confirma sus cobros en mostrador
         "reports": ["ver", "exportar"],
     },
     # Bodega: catalogo y existencias. Ni ventas ni dinero; reportes solo de inventario. Sin costos (08:07):
@@ -349,8 +349,19 @@ class Principal:
     @property
     def sees_all_sales(self) -> bool:
         """Sin "sales.ver_todo" (vendedor) solo ve sus documentos (vendedor responsable, services/ownership.py) y
-        sus cobros. "sales.asignar" (elegir el vendedor de un documento) no lo tiene ningun rol: solo el admin ("*")."""
+        sus cobros. "sales.asignar_venta" (bandeja de ventas sin vendedor) lo tiene admin por defecto; configurable
+        desde el editor de roles para un "Jefe de ventas" personalizado."""
         return self.can("sales", "ver_todo")
+
+    @property
+    def can_assign_sales(self) -> bool:
+        """Puede asignar ventas (bandeja "Ventas por asignar") y marcar "venta de la casa"."""
+        return self.can("sales", "asignar_venta")
+
+    @property
+    def can_confirm_payments(self) -> bool:
+        """Puede confirmar o rechazar cobros registrados por el vendedor."""
+        return self.can("payments", "confirmar")
 
     @property
     def sends_quotes(self) -> bool:
