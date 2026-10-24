@@ -79,15 +79,12 @@ export default function Login() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [shake, setShake] = useState(0);
-  const [clock, setClock] = useState("");
   const [portrait, setPortrait] = useState(() => window.matchMedia("(max-width: 767px)").matches);
   const card = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
-    const t = () => setClock(new Date().toLocaleTimeString("es-CR", { hour12: false, timeZone: "America/Costa_Rica" }));
-    t(); const id = setInterval(t, 1000);
     const mq = window.matchMedia("(max-width: 767px)"); const on = () => setPortrait(mq.matches); mq.addEventListener("change", on);
-    return () => { clearInterval(id); mq.removeEventListener("change", on); };
+    return () => mq.removeEventListener("change", on);
   }, []);
 
   const submit = async (e: FormEvent) => {
@@ -121,22 +118,9 @@ export default function Login() {
 
       <header className="lg-top">
         <a href={LANDING} className="lg-logo" aria-label="Crimson Consulting, volver al sitio"><img src="/logo.png" alt="Crimson Consulting" /></a>
-        <span className="lg-hud"><i className="rec-dot" />REC · CAM 00 · ACCESO · {clock}</span>
       </header>
 
       <main className="lg-main">
-        <section className="lg-copy">
-          <span className="lg-eyebrow">Panel financiero · Crimson</span>
-          <h1 className="lg-title">Tu operación, <em>bajo control</em>.</h1>
-          <p className="lg-lead">Cotizaciones, facturación electrónica, cobros por WhatsApp, inventario y contabilidad en un solo panel. Cada persona ve lo que su rol necesita.</p>
-          <ul className="lg-roles" aria-label="Perfiles de acceso">
-            <li><i style={{ background: "#e2233a" }} />Administrador</li>
-            <li><i style={{ background: "#2f6fed" }} />Vendedor</li>
-            <li><i style={{ background: "#0e9f6e" }} />Caja</li>
-            <li><i style={{ background: "#6b46c1" }} />Contabilidad</li>
-          </ul>
-        </section>
-
         <form ref={card} className={`lg-card ${busy ? "is-busy" : ""}`} onSubmit={submit} onPointerMove={glow} key={shake} data-shake={shake > 0 || undefined} noValidate>
           <span className="lg-corners" aria-hidden="true" />
           <div className="lg-card__strip"><span><i className="rec-dot" />Pase de acceso</span><span>{need2fa ? "Paso 2 / 2" : needNew ? "Paso de seguridad" : "Panel · CR"}</span></div>
@@ -192,9 +176,8 @@ export default function Login() {
           {(need2fa || needNew) && <button type="button" className="lg-link" onClick={() => { setNeed2fa(false); setRecuperacion(false); setTotp(""); setNeedNew(false); setNewPw(""); setNewPw2(""); setPassword(""); setErr(null); }}>← Usar otra cuenta</button>}
 
           <div className="lg-card__foot">
-            <span>Sesión cifrada · 2FA · bloqueo por intentos</span>
-            <span><a href="/recuperar" className="lg-link" style={{ display: "inline" }}>¿Olvidaste tu contraseña?</a></span>
-            <span>¿Sin acceso? Pedile una invitación a tu administrador. ¿Es cliente de Crimson? <a href="/solicitar-acceso" className="lg-link" style={{ display: "inline" }}>Solicite acceso al portal de clientes</a>.</span>
+            <span><a href="/recuperar" className="lg-link" style={{ display: "inline" }}>¿Olvidó su contraseña?</a></span>
+            <span>¿Sin acceso? Pida una invitación a tu administrador. ¿Es cliente de Crimson? <a href="/solicitar-acceso" className="lg-link" style={{ display: "inline" }}>Solicite acceso al portal de clientes</a>.</span>
           </div>
         </form>
       </main>

@@ -16,7 +16,7 @@
 .lg-hud { display: inline-flex; align-items: center; gap: 10px; padding: 7px 12px; border-radius: 999px; background: rgba(246,242,238,.8); border: 1px solid rgba(21,19,26,.1); backdrop-filter: blur(6px); }
 .lg-bottom a { color: #15131a; }
 .lg-bottom a:hover { color: #e2233a; }
-.lg-main { flex: 1; display: grid; grid-template-columns: 1.15fr minmax(340px, 440px); gap: clamp(28px, 6vw, 96px); align-items: center; width: min(1240px, 100%); margin: 0 auto; padding: 12px clamp(16px, 4vw, 48px) 32px; }
+.lg-main { flex: 1; display: grid; grid-template-columns: minmax(0, 440px); justify-content: center; gap: clamp(28px, 6vw, 96px); align-items: center; width: min(1240px, 100%); margin: 0 auto; padding: 12px clamp(16px, 4vw, 48px) 32px; }
 .lg-copy { position: relative; }
 .lg-copy::before { content: ""; position: absolute; inset: -40px -60px; z-index: -1; background: radial-gradient(closest-side, rgba(246,242,238,.92), rgba(246,242,238,.6) 60%, transparent); pointer-events: none; }
 .lg-eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .22em; text-transform: uppercase; color: #e2233a; font-weight: 500; }
