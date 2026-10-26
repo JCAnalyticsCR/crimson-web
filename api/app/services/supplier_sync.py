@@ -1,7 +1,7 @@
 """Sincronizacion del catalogo de Eurocomp por su WebService SiReTT (providers/sirett.py) -> catalogo de proveedores.
 
 Que entra: SOLO lo que Crimson vende o instala (ver `relevant`): seguridad (camaras, grabadoras, control de acceso,
-alarmas), redes, respaldo electrico, smart home, electrodomesticos (23/10, lo pidio ventas), y de las familias mixtas el cableado, conectores, soportes, herramientas de red y
+alarmas), redes, respaldo electrico, smart home, electrodomesticos (23/10, lo pidio ventas), audio y sonido (26/10: parlantes, microfonos, barras de sonido), y de las familias mixtas el cableado, conectores, soportes, herramientas de red y
 discos de videovigilancia; mas todo lo de marcas de seguridad (Hikvision, Ezviz, Ubiquiti...) en cualquier familia.
 De 11.538 articulos de Eurocomp quedan ~1.650 (2026-10-15), incluidos los 218 que Crimson ya tenia.
 
@@ -50,7 +50,7 @@ MIN_RATIO = 0.5  # la lista nueva debe traer al menos la mitad de los articulos 
 MAX_IMAGES = 6
 
 # ---------- que le sirve a Crimson ----------
-FAMILIAS_COMPLETAS = {"SEGURIDAD", "REDES Y CONECTIVDAD", "RESPALDO ELÉCTRICO", "SMART HOME", "ELECTRODOMESTICOS", "ELECTRODOMÉSTICOS"}  # con la errata de SiReTT
+FAMILIAS_COMPLETAS = {"SEGURIDAD", "REDES Y CONECTIVDAD", "RESPALDO ELÉCTRICO", "SMART HOME", "ELECTRODOMESTICOS", "ELECTRODOMÉSTICOS", "AUDIO Y SONIDO"}  # con la errata de SiReTT
 SUBFAMILIAS: set = set()  # todo lo de esas familias entra completo; antes solo subfamilias de RESPALDO ELÉCTRICO
 MARCAS = {"HIKVISION", "HILOOK", "EZVIZ", "HIKMICRO", "UBIQUITI", "APC", "GRANDSTREAM", "ZKTECO", "DAHUA", "PARADOX", "RUIJIE", "REYEE", "MIKROTIK"}
 SIN_MARCA_EN = {"COMPONENTES DE PC", "VENTAS FOB/SERVICIOS"}  # familia padre o sub
@@ -549,12 +549,12 @@ HIKVISION_BRANDS = frozenset({"HIKVISION", "HILOOK", "HIKMICRO"})
 
 AC_DEFAULT: dict = {
     "enabled": False,
-    "families": ["Seguridad", "Redes y conectividad", "Respaldo eléctrico", "Smart home", "Electrodomésticos"],
+    "families": ["Seguridad", "Redes y conectividad", "Respaldo eléctrico", "Smart home", "Electrodomésticos", "Audio y sonido"],
     "publish_web": False,
 }
 # Familias que se agregaron despues de que la config ya estaba guardada: entran una sola vez; si el admin las quita
 # despues, quedan en familias_vistas y no vuelven a aparecer.
-AC_NUEVAS = ("Electrodomésticos",)
+AC_NUEVAS = ("Electrodomésticos", "Audio y sonido")
 
 
 def ac_settings(t: Tenant) -> dict:

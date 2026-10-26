@@ -108,6 +108,31 @@ def test_electrodomesticos_entran_completos_con_categoria_propia(client, auth, d
     assert "Electrodomésticos" not in ss.ac_settings(db_session.get(ss.Tenant, tid))["families"]
 
 
+def test_audio_y_sonido_entra_completo_en_una_config_ya_guardada(client, auth, db_session, eurocomp_ampliado):
+    """26/10: la tienda suma Audio y sonido de Eurocomp (parlantes, micrófonos, barras de sonido), de cualquier marca.
+    La familia se agrega una vez a la config que ya tenía Electrodomésticos visto y queda como categoría padre."""
+    from app.models import Category
+
+    parlante = item("AU0001", "PARLANTE JBL FLIP 6 BLUETOOTH", "AUDIO Y SONIDO", "Parlantes", "JBL", "95.00",
+                    cabys="4521100000000", img="upload/items/2026/1/au0001.jpg")
+    assert ss.relevant(parlante)
+    eurocomp_ampliado["items"] = [parlante]
+    tid = auth["tenant"]["id"]
+    ss.sync_all(db_session)
+    t = db_session.get(ss.Tenant, tid)
+    ss._save_state(t, auto_catalog={"enabled": True, "families": ["Seguridad", "Electrodomésticos"], "publish_web": True,
+                                    "familias_vistas": ["Electrodomésticos"]})  # guardada el 23/10
+    db_session.commit()
+    t = db_session.get(ss.Tenant, tid)
+    assert "Audio y sonido" in ss.ac_settings(t)["families"]
+    assert ss.auto_catalog_run(db_session, t, ss.find_supplier(db_session, tid), commit_batches=True)["creados"] == 1
+    it = db_session.scalar(select(SupplierItem).where(SupplierItem.tenant_id == tid, SupplierItem.code == "AU0001"))
+    assert it.category == "Audio y sonido"
+    p = db_session.get(Product, it.product_id)
+    assert p.show_on_web
+    assert db_session.get(Category, db_session.get(Category, p.category_id).parent_id).name == "Audio y sonido"
+
+
 # ---------- 2. auto_catalog: creación y configuración ----------
 
 def test_auto_catalog_crea_productos(client, auth, db_session, eurocomp_ampliado):

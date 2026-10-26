@@ -98,6 +98,7 @@ export const IC = {
   factory: "M3 21V10l5 3V10l5 3V7l8 4v10zM7 17h2M12 17h2M17 17h2",
   phone: "M8 2h8v20H8zM11 18h2",
   appliance: "M6 2h12v20H6zM6 9h12M9 5v1.5M9 12v3",
+  speaker: "M4 9v6h4l5 4V5L8 9H4zM16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11",
 };
 
 /** icono por nombre de categoria (los nombres los pone Crimson; si no calza ninguno, la camara de la marca) */
@@ -109,7 +110,8 @@ const CAT_IC: [RegExp, string][] = [
   [/smart|hogar|inteligente/i, IC.home],
   [/energ|ups|respaldo|el[eé]ctric/i, IC.bolt],
   [/almacen|disco|memoria/i, IC.disk],
-  [/colabor|audio|reuni|confer/i, IC.people],
+  [/audio|sonido|parlant|bocina|micr[oó]fono/i, IC.speaker],
+  [/colabor|reuni|confer/i, IC.people],
   [/herramient|accesorio|instala/i, IC.tool],
 ];
 export const catIcon = (name: string) => CAT_IC.find(([re]) => re.test(name))?.[1] || IC.cam;
