@@ -634,21 +634,42 @@ function ProductPicker({ onClose, onPick, docCurrency }: { onClose: () => void; 
     setItems((p) => (append ? [...p, ...r.items] : r.items)); setCursor(r.next_cursor);
   }, [q]);
   useEffect(() => { const t = setTimeout(() => load(), 200); return () => clearTimeout(t); }, [load]);
+  const toggle = (p: Product) => setSel((s) => { const c = { ...s }; if (c[p.id]) delete c[p.id]; else c[p.id] = p; return c; });
   const n = Object.keys(sel).length;
   const sinRespaldo = Object.values(sel).filter((p) => sinExistencia(p.availability)).length;
   return (
     <Modal title="Productos & Servicios" onClose={onClose} wide foot={<><button className="btn btn--ghost" onClick={onClose}>Cancelar</button>{sinRespaldo > 0 && <span className="muted" style={{ fontSize: 12.5, color: "var(--warn)", marginRight: "auto" }}>{sinRespaldo} sin existencia propia ni del proveedor</span>}<button className="btn btn--crimson" disabled={!n} onClick={() => onPick(Object.values(sel))}>Seleccionar{n ? ` (${n})` : ""}</button></>}>
       <div className="search" style={{ maxWidth: "none" }}><Icon d={I.search} size={16} /><input autoFocus placeholder="Buscar por nombre, código o CABYS…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-      {items.length === 0 ? <Empty hint="Cree el producto desde Productos & Servicios." /> : (
-        <table className="table">
+      {items.length === 0 ? <Empty hint="Cree el producto desde Productos & Servicios." /> : (<>
+        <table className="table pick-table">
           <thead><tr><th /><th style={{ width: 52 }} /><th>Código</th><th>Nombre</th><th>Disponibilidad</th><th className="num">Precio</th><th>IVA</th></tr></thead>
           <tbody>{items.map((p) => (
-            <tr key={p.id} onClick={() => setSel((s) => { const c = { ...s }; if (c[p.id]) delete c[p.id]; else c[p.id] = p; return c; })} style={{ cursor: "pointer" }}>
+            <tr key={p.id} onClick={() => toggle(p)} style={{ cursor: "pointer" }}>
               <td><input type="checkbox" readOnly checked={!!sel[p.id]} /></td><td><Miniatura url={fotoDe(p)} size={40} /></td><td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}<div className="meta" style={{ marginTop: 2 }}>{p.item_type}{p.cabys_code ? ` · CABYS ${p.cabys_code}` : ""}</div></td><td style={{ minWidth: 150 }}>{p.item_type === "producto" ? <><AvailBadge a={p.availability} /><div className="meta">{availText(p.availability)}</div></> : <span className="muted">—</span>}</td><td className="num money">{fmtMoney(p.price, p.currency)}{(p.currency || "CRC") !== docCurrency && <div className="meta">se convierte a {docCurrency}</div>}</td><td className="muted">{p.tax_rate ?? 13}%</td>
             </tr>
           ))}</tbody>
         </table>
-      )}
+        {/* en el celular la tabla de 7 columnas no cabe: lista con foto, nombre completo, precio y existencia */}
+        <ul className="pick-list">{items.map((p) => (
+          <li key={p.id}>
+            <button type="button" className={`pick-item ${sel[p.id] ? "is-sel" : ""}`} aria-pressed={!!sel[p.id]} onClick={() => toggle(p)}>
+              <Miniatura url={fotoDe(p)} size={52} />
+              <span className="pick-item__main">
+                <b>{p.name}</b>
+                <span className="mono meta">{p.code}{p.cabys_code ? ` · CABYS ${p.cabys_code}` : ""}</span>
+                <span className="pick-item__row">
+                  <span className="money">{fmtMoney(p.price, p.currency)}</span>
+                  <span className="muted">IVA {p.tax_rate ?? 13}%</span>
+                  {p.item_type === "producto" ? <AvailBadge a={p.availability} /> : <span className="muted">{p.item_type}</span>}
+                </span>
+                {p.item_type === "producto" && <span className="meta">{availText(p.availability)}</span>}
+                {(p.currency || "CRC") !== docCurrency && <span className="meta">se convierte a {docCurrency}</span>}
+              </span>
+              <span className="pick-item__check" aria-hidden><Icon d={I.check} size={16} /></span>
+            </button>
+          </li>
+        ))}</ul>
+      </>)}
       {cursor && <button className="btn btn--soft btn--sm" style={{ alignSelf: "center" }} onClick={() => load(true, cursor)}>Más resultados</button>}
     </Modal>
   );

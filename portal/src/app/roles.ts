@@ -20,7 +20,9 @@ export const canAny = (perms: Perms | undefined, need?: string) =>
    lectura, soporte) el menú sale solo de los permisos. Andrés 23:18-24:48: "definir bien qué ve cada persona… lo
    único que tiene que mostrar". El menú NO es seguridad: la API manda. Una sección nueva para un rol con lista se
    suma aquí a su `menu` (p. ej. "/aprobaciones" ya está en el del supervisor). */
-export type RoleMeta = { label: string; tone: string; glyph: string; summary: string; can: string[]; cannot: string[]; menu?: string[] };
+/* `top` (opcional): secciones que suben al principio del menú, justo debajo de Inicio (lo que ese rol usa a diario).
+   `tabs` (opcional): barra inferior en el celular con esas secciones y un botón "Más" que abre el menú completo. */
+export type RoleMeta = { label: string; tone: string; glyph: string; summary: string; can: string[]; cannot: string[]; menu?: string[]; top?: string[]; tabs?: string[] };
 
 /* El orden es el de Ajustes y "Ver como" (el mismo que ROLE_PERMISSIONS en la API): primero los que Andrés pidió
    pulir (32:05): administrador, vendedor, contador, técnico instalador y aliados. */
@@ -37,6 +39,9 @@ export const ROLES: Record<string, RoleMeta> = {
     can: ["Cobrar en el punto de venta y crear ahí el cliente, que queda en su cartera", "Sus oportunidades y cotizaciones (el consecutivo es el de la empresa)", "Facturar y buscar sus facturas", "Ver en resumen los levantamientos de sus oportunidades y pedir uno nuevo", "Productos y servicios con el precio de venta", "Existencias y ajustes de inventario (entradas, salidas y ajustes)", "Pedidos de la tienda", "Ver en tiempo real cuánto lleva ganado en comisiones"],
     cannot: ["Ver el costo del proveedor, el margen o la utilidad", "Ver lo que venden los demás o el total de la empresa", "Llenar o editar levantamientos", "Descontar más del límite sin aprobación", "Anular facturas", "Marcar facturas emitidas en Fygaro (lo hace contabilidad)"],
     menu: ["/", "/oportunidades", "/cotizaciones", "/facturas", "/pagos", "/pos", "/levantamientos", "/clientes", "/productos", "/inventario", "/ordenes", "/comisiones", "/archivo", "/ajustes"],
+    // 26/10: vende desde el celular. Lo de todos los días arriba y en la barra inferior: vender, sus comisiones y sus clientes
+    top: ["/pos", "/comisiones"],
+    tabs: ["/", "/pos", "/cotizaciones", "/comisiones"],
   },
   contabilidad: {
     label: "Contador", tone: "#6b46c1", glyph: "K",

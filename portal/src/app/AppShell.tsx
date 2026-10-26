@@ -43,11 +43,24 @@ export default function AppShell() {
   const initials = (me?.user.full_name || "?").split(" ").map((s) => s[0]).slice(0, 2).join("").toUpperCase();
   const rm = roleMeta(role);
   // permisos del rol ∩ su menu explicito (roles.ts); sin lista, solo permisos
-  const groups = NAV.map((g) => ({ ...g, items: g.items.filter((it) => allows(it.need) && inMenu(it.to)) })).filter((g) => g.items.length);
+  const visibles = NAV.map((g) => ({ ...g, items: g.items.filter((it) => allows(it.need) && inMenu(it.to)) }));
+  // lo que el rol usa a diario sube al primer grupo, justo debajo de Inicio (p. ej. la vendedora: vender y sus comisiones)
+  const top = (rm.top || []).map((to) => visibles.flatMap((g) => g.items).find((it) => it.to === to)).filter((it): it is NonNullable<typeof it> => !!it);
+  const groups = visibles
+    .map((g, i) => {
+      const rest = g.items.filter((it) => !top.includes(it));
+      if (i !== 0 || !top.length) return { ...g, items: rest };
+      const home = rest.filter((it) => it.to === "/");
+      return { ...g, items: [...home, ...top, ...rest.filter((it) => it.to !== "/")] };
+    })
+    .filter((g) => g.items.length);
+  // barra inferior del celular: solo las secciones del rol que puede abrir
+  const TAB_LABEL: Record<string, string> = { "/": "Inicio", "/pos": "Vender", "/cotizaciones": "Cotizar", "/comisiones": "Comisiones", "/clientes": "Clientes" };
+  const tabs = (rm.tabs || []).map((to) => visibles.flatMap((g) => g.items).find((it) => it.to === to)).filter((it): it is NonNullable<typeof it> => !!it);
   const closeWelcome = () => { setWelcome(false); try { sessionStorage.removeItem("crimson-welcome"); } catch { /* privado */ } };
 
   return (
-    <div className="shell">
+    <div className={`shell ${tabs.length ? "has-tabbar" : ""}`}>
       <aside className={`nav ${open ? "is-open" : ""}`}>
         <div className="nav__brand">
           <img src="/logo.png" alt="Crimson Consulting" />
@@ -119,6 +132,18 @@ export default function AppShell() {
           </Suspense>
         </main>
       </div>
+      {tabs.length > 0 && (
+        <nav className="tabbar" aria-label="Accesos rápidos">
+          {tabs.map((it) => (
+            <NavLink key={it.to} to={it.to} end={it.end} className={({ isActive }) => `tabbar__item ${isActive ? "is-active" : ""}`}>
+              <Icon d={it.icon} /><span>{TAB_LABEL[it.to] || it.label}</span>
+            </NavLink>
+          ))}
+          <button type="button" className={`tabbar__item ${open ? "is-active" : ""}`} onClick={() => setOpen((o) => !o)} aria-label="Todo el menú">
+            <Icon d={I.menu} /><span>Más</span>
+          </button>
+        </nav>
+      )}
       {welcome && me && <RoleWelcome onClose={closeWelcome} />}
       {pickAlly && <AllyPreviewPicker role={pickAlly} onClose={() => setPickAlly(null)} />}
       <style>{`@media (max-width:900px){#burger{display:inline-flex!important}}`}</style>

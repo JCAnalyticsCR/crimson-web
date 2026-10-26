@@ -137,6 +137,8 @@ export default function Dashboard() {
   const [low, setLow] = useState<{ product_id: number; name: string; code: string; quantity: string; min_stock: number }[] | null>(null);
   const [day, setDay] = useState<{ today: Job[]; next: Job[]; surveys: { id: number; number: string; kind_label: string; site: string | null }[] } | null>(null);
   const salesHome = allows("sales.ver");
+  // la vendedora (rol con el punto de venta arriba de su menu) ve el boton grande "Vender ahora"
+  const vendeEnCaja = allows("sales.crear") && inMenu("/pos") && !!rm.top?.includes("/pos");
   const fieldHome = !salesHome && allows("field.ver"); // el técnico entra a ver su día, no el inventario
   // utilidad del mes: dato de costos (13/10, 08:07). La API la manda en null a quien no los ve
   const verUtilidad = d?.gerencia?.profit_month != null && allows("catalog.costos");
@@ -162,9 +164,18 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="page-head__actions">
-          <button className="btn btn--ghost btn--sm" onClick={load}><Icon d={I.refresh} />Refrescar</button>
+          <button className="btn btn--ghost btn--sm" onClick={load} aria-label="Refrescar" title="Refrescar"><Icon d={I.refresh} /><span className="hide-sm">Refrescar</span></button>
         </div>
       </div>
+
+      {/* 26/10: la vendedora entra a vender. Un solo toque al punto de venta, arriba de todo */}
+      {vendeEnCaja && (
+        <Link to="/pos" className="sell-now">
+          <span className="sell-now__icon"><Icon d={I.wallet} size={26} /></span>
+          <span className="sell-now__text"><b>Vender ahora</b><small>Cobrar en el punto de venta, con tiquete o factura</small></span>
+          <Icon d={I.arrow} size={20} />
+        </Link>
+      )}
 
       {/* 21/10 (item 35): las acciones pendientes van arriba de todo, antes de los accesos y los números */}
       {d && (() => {
@@ -182,22 +193,36 @@ export default function Dashboard() {
         return (
           <Card title="Acciones pendientes" extra={
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {zeroCount > 0 && <button className="btn btn--ghost btn--sm" onClick={() => setShowZero((v) => !v)}>{showZero ? `Ocultar ${zeroCount} en cero` : `Ver ${zeroCount} en cero`}</button>}
-              <span className="meta">{d.scope === "mine" ? "solo lo suyo" : "toque una para ver cuáles son"}</span>
+              {zeroCount > 0 && (visible.length > 0 || showZero) && <button className="btn btn--ghost btn--sm" onClick={() => setShowZero((v) => !v)}>{showZero ? `Ocultar ${zeroCount} en cero` : `Ver ${zeroCount} en cero`}</button>}
+              <span className="meta hide-sm">{d.scope === "mine" ? "solo lo suyo" : "toque una para ver cuáles son"}</span>
             </div>
           }>
-            <div className="pending">
-              {visible.map((p) => pendingCard(scoped(p.key === "cotizaciones_por_aprobar" && !allows("sales.aprobar") ? { ...p, label: allows("sales.aprobar_equipo") ? "Del equipo por aprobar" : "Esperando aprobación" } : p, d.scope), d.acciones_pendientes[p.key] ?? 0, allows(p.need)))}
-            </div>
+            {visible.length === 0 && <p className="muted" style={{ margin: 0, fontSize: 13.5 }}>Todo al día: no hay nada pendiente.</p>}
+            {visible.length > 0 && (
+              <div className="pending">
+                {visible.map((p) => pendingCard(scoped(p.key === "cotizaciones_por_aprobar" && !allows("sales.aprobar") ? { ...p, label: allows("sales.aprobar_equipo") ? "Del equipo por aprobar" : "Esperando aprobación" } : p, d.scope), d.acciones_pendientes[p.key] ?? 0, allows(p.need)))}
+              </div>
+            )}
           </Card>
         );
       })()}
+
+      {d?.comisiones && (
+        /* 13/10 34:35: "va a poder ver cuanto esta ganando en tiempo real". 26/10: arriba, es lo que la vendedora mira primero */
+        <Card title="Mis comisiones" extra={<Link className="btn btn--ghost btn--sm" to="/comisiones">Ver detalle</Link>}>
+          <div className="eco eco--hero">
+            <Link className="eco__box is-good" to="/comisiones"><span className="meta">Ganado este mes</span><b className="money">{fmtMoney(d.comisiones.ganado_mes, d.comisiones.moneda)}</b></Link>
+            <Link className="eco__box" to="/comisiones"><span className="meta">Por cobrar · si te pagan tus facturas</span><b className="money">{fmtMoney(d.comisiones.por_cobrar, d.comisiones.moneda)}</b></Link>
+            <Link className="eco__box" to="/comisiones"><span className="meta">Pagado este mes</span><b className="money">{fmtMoney(d.comisiones.pagado_mes, d.comisiones.moneda)}</b></Link>
+          </div>
+        </Card>
+      )}
 
       <div className="actions-grid">
         {allows("crm.crear") && <Link className="action" to="/clientes?nuevo=1"><i><Icon d={I.customers} /></i><div><b>Crear cliente</b><span>Ficha con cédula, correo y WhatsApp</span></div></Link>}
         {allows("catalog.crear") && <Link className="action" to="/productos?nuevo=1"><i><Icon d={I.products} /></i><div><b>Crear producto</b><span>Precio, CABYS e impuesto</span></div></Link>}
         {allows("sales.crear") && <Link className="action" to="/cotizaciones/nueva"><i><Icon d={I.quote} /></i><div><b>Crear cotización</b><span>Y convertirla a factura en un clic</span></div></Link>}
-        {allows("sales.crear") && !allows("catalog.crear") && inMenu("/pos") && <Link className="action" to="/pos"><i><Icon d={I.wallet} /></i><div><b>Punto de venta</b><span>Cobro de mostrador con vuelto</span></div></Link>}
+        {allows("sales.crear") && !allows("catalog.crear") && inMenu("/pos") && !vendeEnCaja && <Link className="action" to="/pos"><i><Icon d={I.wallet} /></i><div><b>Punto de venta</b><span>Cobro de mostrador con vuelto</span></div></Link>}
         {allows("inventory.editar") && <Link className="action" to="/inventario"><i><Icon d={I.inventory} /></i><div><b>Ajuste de inventario</b><span>Entradas, salidas y transferencias</span></div></Link>}
         {allows("reports.ver") && <Link className="action" to="/reportes"><i><Icon d={I.reports} /></i><div><b>Reportes</b><span>Los reportes de tu rol, con Excel</span></div></Link>}
       </div>
@@ -252,7 +277,7 @@ export default function Dashboard() {
           {d.mi_embudo && (
             /* misma cuenta que Oportunidades (pipeline_summary): el número del inicio y el del embudo no pueden diferir */
             <Card title="Mi embudo" extra={<span className="meta" style={d.mi_embudo.sin_tipo_de_cambio ? { color: "var(--bad)" } : undefined}>{d.mi_embudo.sin_tipo_de_cambio ? "Sin tipo de cambio: no suma lo que está en otra moneda" : d.mi_embudo.convertido ? "≈ al tipo de cambio de hoy" : "lo que llevás vendido"}</span>}>
-              <div className="eco">
+              <div className="eco eco--hero">
                 <Link className="eco__box" to="/oportunidades"><span className="meta">Abiertas · {d.mi_embudo.abiertas}</span><b className="money">{fmtMoney(d.mi_embudo.monto, d.mi_embudo.moneda)}</b></Link>
                 <Link className="eco__box" to="/oportunidades"><span className="meta">Ponderado por probabilidad</span><b className="money">{fmtMoney(d.mi_embudo.ponderado, d.mi_embudo.moneda)}</b></Link>
                 <Link className="eco__box is-good" to="/oportunidades"><span className="meta">Ganado este mes · {d.mi_embudo.ganadas_mes}</span><b className="money">{fmtMoney(d.mi_embudo.ganado_mes, d.mi_embudo.moneda)}</b></Link>
@@ -261,17 +286,6 @@ export default function Dashboard() {
           )}
 
           {d.equipo && <TeamBlock e={d.equipo} />}
-
-          {d.comisiones && (
-            /* 13/10 34:35: "va a poder ver cuanto esta ganando en tiempo real" (misma cuenta que Comisiones -> Mis comisiones) */
-            <Card title="Mis comisiones" extra={<Link className="btn btn--ghost btn--sm" to="/comisiones">Ver detalle</Link>}>
-              <div className="eco">
-                <Link className="eco__box is-good" to="/comisiones"><span className="meta">Ganado este mes</span><b className="money">{fmtMoney(d.comisiones.ganado_mes, d.comisiones.moneda)}</b></Link>
-                <Link className="eco__box" to="/comisiones"><span className="meta">Por cobrar · si te pagan tus facturas</span><b className="money">{fmtMoney(d.comisiones.por_cobrar, d.comisiones.moneda)}</b></Link>
-                <Link className="eco__box" to="/comisiones"><span className="meta">Pagado este mes</span><b className="money">{fmtMoney(d.comisiones.pagado_mes, d.comisiones.moneda)}</b></Link>
-              </div>
-            </Card>
-          )}
 
           {d.gerencia && (
             <Card title="Cómo va Crimson" extra={<span className="meta">{verUtilidad ? "pipeline, obra y utilidad" : "pipeline y obra"}</span>}>

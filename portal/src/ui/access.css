@@ -148,4 +148,5 @@ html[data-preview] .viewas { border-color: var(--preview); box-shadow: 0 0 0 2px
 .umenu__out:hover { background: var(--crimson-soft) !important; }
 .welcome__can { list-style: none; margin: 4px 0 0; padding: 14px 18px; border-radius: 12px; background: var(--bg-2); display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; font-size: 13.5px; }
 .welcome__can li { display: flex; gap: 8px; align-items: flex-start; }
+.welcome__can li svg { flex: none; margin-top: 3px; }
 @media (max-width: 560px) { .welcome__can { grid-template-columns: 1fr; } }
