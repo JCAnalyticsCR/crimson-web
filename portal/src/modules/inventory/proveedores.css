@@ -63,3 +63,13 @@
   .prv-layout { grid-template-columns: 1fr; }
   .prv-cats { position: static; max-height: 220px; }
 }
+
+/* Productos / selector de la cotizacion sin resultados: lo que el proveedor si tiene (EnProveedor.tsx) */
+.en-prov { border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--hair)); background: var(--warn-soft); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; text-align: left; }
+.en-prov__head { display: flex; flex-direction: column; gap: 2px; margin: 0; font-size: 13.5px; }
+.en-prov ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.en-prov li { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--hair); }
+.en-prov__main { display: flex; flex-direction: column; gap: 2px; flex: 1 1 260px; min-width: 0; }
+.en-prov__main b { font-size: 13.5px; overflow-wrap: anywhere; }
+.en-prov__stock { font-size: 12.5px; font-weight: 700; color: var(--text-3); white-space: nowrap; }
+.en-prov__stock.is-ok { color: var(--ok); }

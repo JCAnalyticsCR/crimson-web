@@ -7,6 +7,7 @@ import { GalleryField, type GalleryImage } from "../../ui/MediaPicker";
 import { Lookup, type LookupItem } from "../../ui/Lookup";
 import { TrashButton } from "../../ui/TrashButton";
 import { AvailBadge, availText, qty, type Availability as Avail } from "../../ui/Availability";
+import EnProveedor from "../inventory/EnProveedor";
 import "./productos.css";
 
 /* "Agregar a cotización" (pedido 21/10): la vendedora marca artículos en el catálogo y los manda a una cotización nueva
@@ -274,7 +275,7 @@ export default function Products() {
             <button className="btn btn--ghost btn--sm" onClick={() => setSel(new Set())}>Quitar selección</button>
           </div>
         )}
-        {itemsSt === null ? <Loading /> : items.length === 0 ? <Empty hint="Nada con esos filtros. Pruebe limpiarlos o cree el producto." /> : (
+        {itemsSt === null ? <Loading /> : items.length === 0 ? <><Empty hint="Nada con esos filtros. Pruebe limpiarlos o cree el producto." />{q.trim().length >= 3 && <div style={{ padding: "0 18px 18px" }}><EnProveedor q={q.trim()} onCreated={() => load()} /></div>}</> : (
           <>
           {/* Telefono (pedido 21/10): tarjetas con la foto grande del producto en vez de la tabla ancha, donde la
               miniatura de 36 px quedaba fuera de vista al deslizar. La tabla sigue igual en tablet y escritorio. */}

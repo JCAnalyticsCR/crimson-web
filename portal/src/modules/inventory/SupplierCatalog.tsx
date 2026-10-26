@@ -25,7 +25,7 @@ type Sup = {
   };
 };
 type LinkedProduct = { id: number; code: string; name: string; active: boolean; price?: Num; currency?: string };
-type Item = {
+export type Item = {
   id: number; supplier_id: number; supplier: string | null; code: string; name: string; description: string | null; brand: string | null; model: string | null;
   category: string | null; subcategory: string | null; stock: number | null; currency: string; list_date: string | null; active: boolean; source: string;
   source_file: string | null; link_method: string | null; linked_at: string | null; product: LinkedProduct | null; cost?: Num; prev_cost?: Num; cost_crc?: Num;
@@ -33,7 +33,7 @@ type Item = {
 type Page = { items: Item[]; total: number; offset: number; next_offset: number | null; fx: Num };
 type Suggestion = { product_id: number; code: string; name: string; model: string | null; reason: string; label: string; score: number; already_linked?: boolean };
 type Proposal = { code: string; margin_pct: Num; currency: string; price: Num; category_id: number | null; fx: Num };
-type Detail = Item & { suggestions: Suggestion[]; raw: Record<string, unknown> | null; proposal?: Proposal };
+export type Detail = Item & { suggestions: Suggestion[]; raw: Record<string, unknown> | null; proposal?: Proposal };
 type PRow = {
   row: number; action: string; base?: string; code: string | null; name?: string; model?: string | null; category?: string | null; subcategory?: string | null;
   stock?: number | null; cost?: Num; prev_cost?: Num; currency?: string; changed?: string[]; warnings: string[]; detail: string | null;
@@ -484,7 +484,7 @@ function ItemHead({ item }: { item: Detail }) {
 }
 
 /* ---------- agregar a mi catalogo (precio con margen sobre venta) ---------- */
-function AddModal({ item, onClose, onDone }: { item: Detail; onClose: () => void; onDone: () => void }) {
+export function AddModal({ item, onClose, onDone }: { item: Detail; onClose: () => void; onDone: () => void }) {
   const { toast } = useSession();
   const pr = item.proposal;
   const [cats, setCats] = useState<Named[]>([]);

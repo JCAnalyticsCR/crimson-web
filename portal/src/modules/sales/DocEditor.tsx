@@ -12,6 +12,7 @@ import { KitPicker, QuoteShare } from "./QuoteExtras";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
 import { AvailBadge, availText, sinExistencia } from "../../ui/Availability";
 import NuevoCliente from "../../ui/NuevoCliente";
+import EnProveedor from "../inventory/EnProveedor";
 
 type Preview = { subtotal: string; discount_total: string; tax_total: string; total: string; lines: { subtotal: string; tax_amount: string; total: string; unit_price: string; name: string; tax_rate: string }[] };
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? String(Number(n.toFixed(5))) : String(v ?? ""); };
@@ -640,7 +641,7 @@ function ProductPicker({ onClose, onPick, docCurrency }: { onClose: () => void; 
   return (
     <Modal title="Productos & Servicios" onClose={onClose} wide foot={<><button className="btn btn--ghost" onClick={onClose}>Cancelar</button>{sinRespaldo > 0 && <span className="muted" style={{ fontSize: 12.5, color: "var(--warn)", marginRight: "auto" }}>{sinRespaldo} sin existencia propia ni del proveedor</span>}<button className="btn btn--crimson" disabled={!n} onClick={() => onPick(Object.values(sel))}>Seleccionar{n ? ` (${n})` : ""}</button></>}>
       <div className="search" style={{ maxWidth: "none" }}><Icon d={I.search} size={16} /><input autoFocus placeholder="Buscar por nombre, código o CABYS…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-      {items.length === 0 ? <Empty hint="Cree el producto desde Productos & Servicios." /> : (<>
+      {items.length === 0 ? <><Empty hint="Cree el producto desde Productos & Servicios." />{q.trim().length >= 3 && <EnProveedor q={q.trim()} onCreated={(code) => setQ(code)} />}</> : (<>
         <table className="table pick-table">
           <thead><tr><th /><th style={{ width: 52 }} /><th>Código</th><th>Nombre</th><th>Disponibilidad</th><th className="num">Precio</th><th>IVA</th></tr></thead>
           <tbody>{items.map((p) => (
