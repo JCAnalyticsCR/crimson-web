@@ -25,7 +25,7 @@
 <!-- Sin preload de fotogramas: la escena CAM 01 ya no es lo primero que se ve (la portada con tienda y soporte manda el LCP).
      Sus fotogramas esperan a que la escena se acerque (IntersectionObserver en main.js). -->
 <script>(function(){var f=new URLSearchParams(location.search).get("font");if(f)document.documentElement.dataset.font=f})()</script>
-<link rel="stylesheet" href="assets/styles.css?v=75">
+<link rel="stylesheet" href="assets/styles.css?v=76">
 <script>document.documentElement.classList.add('js')</script>
 <!-- Telefonos: "tel" = linea 1, "tel2" = linea 2 (formato libre: "+506 8888 9892", "88889892"...). Mientras "tel2" este vacio la linea 2 no se muestra.
      main.js los aplica a todo [data-tel]/[data-wa] (contacto y pie). "waLink" es el enlace de WhatsApp Business de la linea 1. -->
@@ -397,6 +397,23 @@
         <a class="p2-link p2-link--light" href="#contacto" data-tipo="IoT: alertas de dispositivos" data-sol="IoT y espacios inteligentes">Consultar por este proceso</a>
       </article>
     </div>
+
+    <!-- Aliados: el mismo bloque que tenia la portada anterior (pedido 26/10: tiene que mostrarse como antes) -->
+    <div class="brands reveal p2-brands">
+      <span class="meta brands__label">Nuestros aliados · marcas líderes y respaldo local</span>
+      <div class="brands__row">
+        <span class="brands__item"><img src="assets/img/marca-hikvision-mono.png" alt="Hikvision" loading="lazy" width="600" height="120"><span class="meta">Distribuidor autorizado</span></span>
+        <span class="brands__item"><img src="assets/img/marca-ubiquiti-mono.png" alt="Ubiquiti" loading="lazy" width="412" height="120"></span>
+        <span class="brands__item"><img src="assets/img/marca-apc-mono.png" alt="APC by Schneider Electric" loading="lazy" width="505" height="120"></span>
+        <span class="brands__item"><img class="brands__img--sq" src="assets/img/marca-nodolatam-mono.png" alt="Nodo Latam" loading="lazy" width="112" height="120"></span>
+        <span class="brands__item"><img src="assets/img/marca-hauset-mono.png" alt="HAUSET · automatización, seguridad y redes" loading="lazy" width="484" height="120"></span>
+      </div>
+      <!-- Andres: solo las marcas; JC Analytics aparte, abajo y al centro -->
+      <div class="brands__jc">
+        <a href="https://jcanalytic.com" target="_blank" rel="noopener" aria-label="JC Analytics (abre jcanalytic.com)"><img src="assets/img/marca-jcanalytics-mono.png" alt="JC Analytics" loading="lazy" width="551" height="120"></a>
+        <span class="meta">Analítica y automatización</span>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -417,11 +434,6 @@
         <li>Garantía de fábrica gestionada por Crimson</li>
         <li>Técnicos en Costa Rica</li>
       </ul>
-      <div class="p2-proc__marcas" aria-label="Marcas con las que trabajamos">
-        <img src="assets/img/marca-hikvision-mono.png" alt="Hikvision" loading="lazy" width="600" height="120">
-        <img src="assets/img/marca-ubiquiti-mono.png" alt="Ubiquiti" loading="lazy" width="412" height="120">
-        <img src="assets/img/marca-apc-mono.png" alt="APC by Schneider Electric" loading="lazy" width="505" height="120">
-      </div>
       <p class="p2-proc__sop"><span>¿Ya tenés un sistema instalado?</span> <a href="#soporte">Reportá una falla →</a> <a href="ayuda/">Centro de ayuda →</a></p>
     </div>
   </div>

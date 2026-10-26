@@ -1411,6 +1411,7 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
 .p2-ej__pasos li{padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.06)}
 .p2-ej__pasos li+li::before{content:"→ ";color:var(--crimson)}
 .p2-ej__item>.p2-link{align-self:flex-start}
+.p2-brands{margin-top:clamp(36px,4vw,56px);padding-top:clamp(28px,3vw,40px);border-top:1px solid var(--hair-dark)}
 
 /* ---------- 6 · Proceso y respaldo ---------- */
 .p2-proc{background:linear-gradient(180deg,var(--ink) 0,var(--bg) 110px);padding-top:calc(var(--space) + 16px)}
