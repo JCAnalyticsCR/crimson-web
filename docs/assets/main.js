@@ -166,8 +166,9 @@
     const LERP = 0.09;
     let tx = 0, ty = 0, cx = 0, cy = 0, mx = -100, my = -100, px = -100, py = -100, raf = 0, lastNear = -1;
     const nodeEls = $$('.net-node', heroSvg), glowEls = $$('.net-glow', heroSvg);
-    let heroVisible = true;
-    new IntersectionObserver(([en]) => heroVisible = en.isIntersecting, { rootMargin: '35%' }).observe(netHero);
+    // sin la red del hero (seccion quitada el 26/10) el cursor sigue; solo se apaga el parallax de la red
+    let heroVisible = !!netHero;
+    netHero && new IntersectionObserver(([en]) => heroVisible = en.isIntersecting, { rootMargin: '35%' }).observe(netHero);
     const nearest = () => {
       const r = netHero.getBoundingClientRect(), sx = 1440 / r.width, sy = 810 / r.height;
       let best = -1, bd = 150 * 150;
@@ -374,7 +375,7 @@
     window.__scene = { go: p => { stop(); target = current = p; lastLow = -1; lastP = -1; draw(p); applyCopy(p); }, loaded: () => settled };
   };
   if (isMobile.matches && $('#hero-m.scene')) mountScene($('#hero-m.scene'), 'assets/frames/hero', 88, '?v=2'); // v2: etiquetas con el nombre del lugar difuminadas
-  else if (useWide) mountScene($('#hero-d.scene'), wideSet.path, wideSet.frames, wideSet.ver);
+  else if (useWide && $('#hero-d.scene')) mountScene($('#hero-d.scene'), wideSet.path, wideSet.frames, wideSet.ver);
   // Titular de la escena (ya no esta arriba): la entrada por lineas corre cuando el borde superior de la escena
   // cruza el 20 % superior de la pantalla, no al cargar la pagina (si no, terminaria sin que nadie la viera)
   {
