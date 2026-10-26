@@ -2,7 +2,7 @@
    Los totales se recalculan en vivo contra /documents/preview (misma logica que el guardado). */
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ApiError, api, fmtDate, fmtMoney, type Customer, type Invoice, type Line, type Product, type Quote } from "../../lib/api";
+import { api, fmtDate, fmtMoney, type Customer, type Invoice, type Line, type Product, type Quote } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Badge, Field, I, Icon, Loading, Modal } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
@@ -11,6 +11,7 @@ import QuoteVersions from "./QuoteVersions";
 import { KitPicker, QuoteShare } from "./QuoteExtras";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
 import { AvailBadge, availText, sinExistencia } from "../../ui/Availability";
+import NuevoCliente from "../../ui/NuevoCliente";
 
 type Preview = { subtotal: string; discount_total: string; tax_total: string; total: string; lines: { subtotal: string; tax_amount: string; total: string; unit_price: string; name: string; tax_rate: string }[] };
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? String(Number(n.toFixed(5))) : String(v ?? ""); };
@@ -598,39 +599,6 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
       {pick && <ProductPicker onClose={() => setPick(false)} onPick={addProducts} docCurrency={cur} />}
       {kit && <KitPicker currency={cur} onClose={() => setKit(false)} onPick={(ls) => { setLines((x) => [...x, ...ls.map((l) => ({ ...blankLine(), ...l }) as Line)]); setKit(false); }} />}
     </>
-  );
-}
-
-/* Cliente nuevo sin salir de la cotización (pedido 21/10): lo mínimo para cotizar; la ficha se completa después en Clientes */
-function NuevoCliente({ onClose, onCreated }: { onClose: () => void; onCreated: (c: Customer) => void }) {
-  const { toast } = useSession();
-  const [f, setF] = useState({ name: "", id_type: "fisica", id_number: "", email: "", phone: "" });
-  const [busy, setBusy] = useState(false);
-  const crear = async () => {
-    setBusy(true);
-    try {
-      const c = await api<Customer>("/customers", { method: "POST", json: { name: f.name.trim(), id_type: f.id_type, id_number: f.id_number.trim() || null, email: f.email.trim() || null, phone: f.phone.trim() || null } });
-      toast(`Cliente ${c.name} creado`); onCreated(c);
-    } catch (e) {
-      /* ya existe un cliente con esa cédula o ese correo (y no puede editar clientes): se usa esa ficha */
-      const ex = e instanceof ApiError && e.status === 409 ? (e.data as { existing?: { id: number } } | undefined)?.existing : undefined;
-      if (ex) {
-        try { const c = await api<Customer>(`/customers/${ex.id}`); toast(`Ya existía: se usa la ficha de ${c.name}`); onCreated(c); return; } catch { /* abajo */ }
-      }
-      toast(e instanceof Error ? e.message : "No se pudo crear el cliente", "bad");
-    }
-    finally { setBusy(false); }
-  };
-  return (
-    <Modal title="Cliente nuevo" onClose={onClose} foot={<><button className="btn btn--ghost" onClick={onClose}>Cancelar</button><button className="btn btn--crimson" disabled={busy || f.name.trim().length < 2} onClick={crear}><Icon d={I.check} />Crear y usar</button></>}>
-      <div className="grid-2">
-        <Field label="Nombre o razón social"><input className="input" autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
-        <Field label="Tipo de identificación"><select className="select" value={f.id_type} onChange={(e) => setF({ ...f, id_type: e.target.value })}><option value="fisica">Física</option><option value="juridica">Jurídica</option><option value="dimex">DIMEX</option><option value="nite">NITE</option><option value="extranjero">Extranjero</option></select></Field>
-        <Field label="Cédula (opcional)"><input className="input" value={f.id_number} onChange={(e) => setF({ ...f, id_number: e.target.value })} /></Field>
-        <Field label="Correo (opcional)" hint="Para mandarle la cotización"><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
-        <Field label="Teléfono (opcional)"><input className="input" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
-      </div>
-    </Modal>
   );
 }
 

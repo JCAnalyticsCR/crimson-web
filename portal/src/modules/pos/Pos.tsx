@@ -6,6 +6,7 @@ import { useSession } from "../../app/session";
 import { Card, Empty, I, Icon, Modal } from "../../ui/components";
 import AuthLink from "../../ui/AuthLink";
 import { availText, sinExistencia, type Availability } from "../../ui/Availability";
+import NuevoCliente from "../../ui/NuevoCliente";
 
 /* ---------- Types ---------- */
 type Variant = { id: number; name: string; code: string; price: number | null };
@@ -41,7 +42,8 @@ const lineTotal = (l: CartLine) =>
   l.unit_price * l.quantity * (1 - l.discount / 100) * (1 + l.tax_rate / 100);
 
 export default function Pos() {
-  const { toast } = useSession();
+  const { toast, allows } = useSession();
+  const [nuevoCliente, setNuevoCliente] = useState(false);
 
   /* catalog */
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
@@ -326,12 +328,13 @@ export default function Pos() {
               </div>
             </div>
 
-            {docType === "FE" && (
+            {/* el cliente: obligatorio en factura, opcional en tiquete. El que crea un vendedor queda en su cartera. */}
               <div style={{ marginTop: 10, position: "relative" }}>
-                <div className="search">
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <div className="search" style={{ flex: 1, minWidth: 0 }}>
                   <Icon d={I.customers} size={15} />
                   <input
-                    placeholder="Buscar cliente…"
+                    placeholder={docType === "FE" ? "Buscar cliente…" : "Cliente (opcional)…"}
                     value={customer ? customer.name : custQ}
                     onChange={(e) => { setCustomer(null); setCustQ(e.target.value); }}
                     onFocus={() => { if (customer) { setCustomer(null); setCustQ(""); } }}
@@ -341,6 +344,12 @@ export default function Pos() {
                       <Icon d={I.x} size={13} />
                     </button>
                   )}
+                </div>
+                {allows("crm.crear") && !customer && (
+                  <button className="btn btn--soft btn--sm" style={{ flex: "none" }} title="Crear el cliente sin salir de la caja" onClick={() => setNuevoCliente(true)}>
+                    <Icon d={I.plus} size={14} />Nuevo
+                  </button>
+                )}
                 </div>
                 {!customer && custResults.length > 0 && (
                   <div style={{
@@ -363,7 +372,6 @@ export default function Pos() {
                   </div>
                 )}
               </div>
-            )}
           </Card>
 
           {/* Cart lines */}
@@ -543,6 +551,15 @@ export default function Pos() {
           )}
         </div>
       </div>
+
+      {nuevoCliente && (
+        <NuevoCliente
+          needId={docType === "FE"}
+          emailHint={docType === "FE" ? "Ahí le llega la factura electrónica" : "Para mandarle el comprobante"}
+          onClose={() => setNuevoCliente(false)}
+          onCreated={(c) => { setCustomer({ id: c.id, name: c.name, id_number: c.id_number ?? null }); setCustQ(""); setCustResults([]); setNuevoCliente(false); }}
+        />
+      )}
 
       {/* ===== Variant chooser modal ===== */}
       {variantItem && (

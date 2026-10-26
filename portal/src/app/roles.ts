@@ -34,9 +34,9 @@ export const ROLES: Record<string, RoleMeta> = {
   ventas: {
     label: "Vendedor", tone: "#2f6fed", glyph: "V",
     summary: "Cotiza y factura con el precio de venta. Ve solo sus oportunidades, cotizaciones, facturas y comisiones; nunca el costo.",
-    can: ["Sus oportunidades y cotizaciones (el consecutivo es el de la empresa)", "Facturar y buscar sus facturas", "Ver en resumen los levantamientos de sus oportunidades y pedir uno nuevo", "Productos y servicios con el precio de venta", "Existencias y ajustes de inventario (entradas, salidas y ajustes)", "Pedidos de la tienda", "Ver en tiempo real cuánto lleva ganado en comisiones"],
+    can: ["Cobrar en el punto de venta y crear ahí el cliente, que queda en su cartera", "Sus oportunidades y cotizaciones (el consecutivo es el de la empresa)", "Facturar y buscar sus facturas", "Ver en resumen los levantamientos de sus oportunidades y pedir uno nuevo", "Productos y servicios con el precio de venta", "Existencias y ajustes de inventario (entradas, salidas y ajustes)", "Pedidos de la tienda", "Ver en tiempo real cuánto lleva ganado en comisiones"],
     cannot: ["Ver el costo del proveedor, el margen o la utilidad", "Ver lo que venden los demás o el total de la empresa", "Llenar o editar levantamientos", "Descontar más del límite sin aprobación", "Anular facturas", "Marcar facturas emitidas en Fygaro (lo hace contabilidad)"],
-    menu: ["/", "/oportunidades", "/cotizaciones", "/facturas", "/pagos", "/levantamientos", "/clientes", "/productos", "/inventario", "/ordenes", "/comisiones", "/archivo", "/ajustes"],
+    menu: ["/", "/oportunidades", "/cotizaciones", "/facturas", "/pagos", "/pos", "/levantamientos", "/clientes", "/productos", "/inventario", "/ordenes", "/comisiones", "/archivo", "/ajustes"],
   },
   contabilidad: {
     label: "Contador", tone: "#6b46c1", glyph: "K",

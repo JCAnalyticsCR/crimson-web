@@ -113,7 +113,15 @@ def sale(data: SaleIn, p: Principal = Depends(require("sales", "crear")), db: Se
             raise HTTPException(422, "La factura electrónica requiere un cliente con identificación; use tiquete para consumidor final")
     if any(ln.unit_price is not None for ln in data.lines) and not p.can("sales", "editar"):
         raise HTTPException(403, "Sin permiso para cambiar precios en caja")
-    from ..services import pricing
+    from ..services import cartera, pricing
+
+    # cartera con dueno: una vendedora no cobra a un cliente de otro vendedor; el cliente sin dueno al que ella le
+    # cobra queda en su cartera (igual que el que crea desde la caja)
+    cartera.guard_customer(db, p, data.customer_id)
+    if data.customer_id and not p.sees_all_customers:
+        c = db.get(Customer, data.customer_id)
+        if c is not None and c.tenant_id == p.tenant.id:
+            cartera.ensure_owner(db, p.tenant.id, c, p.user.id, p.user.id, "Le cobró en el punto de venta", ip=p.ip)
 
     cur = p.tenant.default_currency or "CRC"
     fx = rate_or_none(db, "USD")  # None: se consulta (y da 422 claro) solo si una linea necesita convertirse
