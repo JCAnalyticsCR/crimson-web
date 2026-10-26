@@ -126,6 +126,11 @@ def test_caso_de_negocio_informe_activo_dudoso_y_aplicar(client, auth, db_sessio
     assert "Fuera de venta" in it["badge"] and "dudoso" in it["badge"] and "Margen 7,1 %" in it["subtitle"]
     assert it["action"]["path"] == f"/approvals/prices/{p.id}/apply" and Decimal(str(it["action"]["body"]["price"])) == Decimal(112800)
     assert it["to"] == f"/productos?q=HIK-QA&ficha={p.id}"  # abre la ficha para verificar el costo
+    # 26/10: la fila muestra el costo de antes y el de ahora, cuanto cambio, el precio, el margen y el sugerido
+    f = {x["label"]: x for x in it["facts"]}
+    assert f["Costo anterior"]["value"] == "$100,00" and f["Costo nuevo"]["value"] == "$130,00"
+    assert f["Cambio del costo"]["value"] == "+30 %" and f["Cambio del costo"]["tone"] == "bad"
+    assert f["Sugerido"]["value"] == "₡112 800" and f["Margen"]["value"].startswith("7,1 % (mín.")
 
     # aplicar el sugerido lo vuelve a publicar
     r = _aplicar(client, it)

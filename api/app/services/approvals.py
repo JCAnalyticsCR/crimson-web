@@ -319,6 +319,37 @@ def _pct(v) -> str:
     return f"{Decimal(str(v or 0)).normalize():f}".replace(".", ",")
 
 
+def _price_facts(prod: Product, r: dict) -> list[dict]:
+    """Los numeros de la fila (pedido 26/10: "que se vea el costo de antes, el de ahora y cuanto cambio"): costo anterior
+    y actual del proveedor con su % de cambio, precio actual, margen contra el minimo y el sugerido. El costo anterior es
+    la referencia de saltos (ultimo costo revisado o la lista anterior del proveedor); si ya se igualo al actual, sale del %
+    guardado. Sin IVA; la seccion exige ver costos."""
+    from .margin_guard import money_txt
+
+    i = prod.margin_info or {}
+    cur_c = i.get("cost_currency") or prod.cost_currency or "CRC"
+    out: list[dict] = []
+    cost = Decimal(str(i["cost"])) if i.get("cost") not in (None, "") else None
+    jump = Decimal(str(i.get("jump_pct") or 0))
+    ref = Decimal(str(i["cost_ref"])) if i.get("cost_ref") not in (None, "") and i.get("cost_ref_currency") in (None, cur_c) else None
+    if cost is not None and (ref is None or ref == cost) and jump and jump > -100:
+        ref = cost / (1 + jump / 100)
+    if cost is not None and ref is not None and ref > 0 and ref != cost:
+        pct = ((cost - ref) / ref * 100).quantize(Decimal("0.1"))
+        out.append({"label": "Costo anterior", "value": money_txt(ref, cur_c)})
+        out.append({"label": "Costo nuevo", "value": money_txt(cost, cur_c), "tone": "bad" if pct > 0 else "ok"})
+        out.append({"label": "Cambio del costo", "value": f"{'+' if pct > 0 else ''}{_pct(pct)} %", "tone": "bad" if r["dudoso"] else ("warn" if pct > 0 else "ok")})
+    elif cost is not None:
+        out.append({"label": "Costo", "value": money_txt(cost, cur_c)})
+    if r.get("price") is not None:
+        out.append({"label": "Precio actual", "value": money_txt(r["price"], r["currency"])})
+    if r.get("margin_pct") is not None:
+        out.append({"label": "Margen", "value": f"{_pct(r['margin_pct'])} % (mín. {_pct(r['min_pct'])} %)", "tone": "bad"})
+    if r.get("suggested") is not None:
+        out.append({"label": "Sugerido", "value": money_txt(r["suggested"], r["currency"]), "tone": "ok"})
+    return out
+
+
 def _price_review_item(db: Session, p: Principal, prod: Product) -> dict:
     from urllib.parse import quote
 
@@ -330,6 +361,7 @@ def _price_review_item(db: Session, p: Principal, prod: Product) -> dict:
         sub += f" · {r['low_variants']} variante(s) con precio propio bajo el mínimo"
     if r["dudoso"]:
         sub += f" · dudoso: {dudoso_txt(r)} antes de aplicar"
+    facts = _price_facts(prod, r)
     badge = "Fuera de venta" if r["held"] else ("Frenado: sigue a la venta" if r["over_cap"] else "Solo informe: sigue a la venta")
     row = _row(
         prod.id,
@@ -342,6 +374,7 @@ def _price_review_item(db: Session, p: Principal, prod: Product) -> dict:
         currency=r["currency"],
         to=f"/productos?q={quote(prod.code, safe='')}&ficha={prod.id}",  # abre la ficha para verificar el costo
     )
+    row["facts"] = facts
     que = (("el precio y " if r["base_low"] else "") + f"{r['low_variants']} variante(s)") if r["low_variants"] else "el precio"
     # el unico pendiente que se resuelve aqui mismo: aplicar el precio sugerido con un clic (nunca se reprecia solo).
     # body = el precio que se muestra: si el sugerido de hoy es otro, la API responde 409 y no aplica otro monto

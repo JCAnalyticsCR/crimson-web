@@ -127,7 +127,12 @@ function Row({ it, onDone }: { it: ApprovalItem; onDone: () => void }) {
         <span className="aprob-item__ref mono">{it.ref}</span>
         <span className="aprob-item__main">
           <b>{it.title}</b>
-          {it.subtitle && <small>{it.subtitle}</small>}
+          {it.facts?.length ? (
+            <>
+              <span className="aprob-facts">{it.facts.map((f) => <span key={f.label} className={`aprob-fact${f.tone ? ` is-${f.tone}` : ""}`}><i>{f.label}</i><b className="money">{f.value}</b></span>)}</span>
+              {it.subtitle?.includes("dudoso") && <small className="aprob-facts__warn">{it.subtitle.slice(it.subtitle.indexOf("dudoso"))}</small>}
+            </>
+          ) : it.subtitle && <small>{it.subtitle}</small>}
           {(it.who || when) && <span className="aprob-item__meta">{[it.who, when].filter(Boolean).join(" · ")}</span>}
         </span>
         <span className="aprob-item__side">

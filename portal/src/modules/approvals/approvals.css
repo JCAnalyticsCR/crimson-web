@@ -43,3 +43,14 @@
   .aprob-row--act { flex-direction: column; align-items: stretch; }
   .aprob-act { margin: 0 14px 12px; }
 }
+
+/* Precios por revisar: los numeros de la fila (costo de antes y de ahora, % de cambio, precio, margen y sugerido) */
+.aprob-facts { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 2px; }
+.aprob-fact { display: inline-flex; flex-direction: column; gap: 1px; padding: 5px 9px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--hair); min-width: 0; }
+.aprob-fact i { font-style: normal; font-size: 10.5px; letter-spacing: .04em; color: var(--text-3); }
+.aprob-fact b { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.aprob-fact.is-bad b { color: var(--bad); }
+.aprob-fact.is-warn b { color: var(--warn); }
+.aprob-fact.is-ok b { color: var(--ok); }
+.aprob-facts__warn { color: var(--warn) !important; font-weight: 600; }
+@media (max-width: 640px) { .aprob-fact { flex: 1 1 calc(50% - 6px); } }

@@ -13,6 +13,8 @@ export type ApprovalItem = {
   since: string | null; badge: string | null;
   /** solo donde el permiso de la seccion ya implica ver ese dinero (cotizaciones con precios, aliados con costos, comisiones) */
   amount: string | number | null; currency: string | null; to: string;
+  /** solo "precios_por_revisar": costo anterior y nuevo, % de cambio, precio actual, margen y sugerido (sin IVA) */
+  facts?: { label: string; value: string; tone?: "ok" | "warn" | "bad" }[];
   /** acciones directas en la fila. "precios_por_revisar" (plan 1.12): el precio sugerido se aplica aqui con un clic
       (POST a `path` con `body`; si el de hoy es otro la API responde 409 y no aplica otro monto). "mensualidades_por_aprobar"
       (plan 1.4): "Aprobar y enviar" (POST a `path` sin `body`). "crear_levantamiento" (plan 1.6: Levantamientos
