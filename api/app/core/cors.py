@@ -7,13 +7,15 @@
   arrancar, main.py). Fuera de produccion (desarrollo local) con cookies van todos los de CORS_ORIGINS. En produccion el
   panel llama al API por su propio nginx (mismo origen), asi que esto cubre sobre todo el desarrollo local.
 - La landing (LANDING_ORIGINS) llama al API directo y solo para reportar una incidencia o pedir acceso al portal del
-  cliente: sin cookies y solo en esas rutas. En cualquier otra ruta su origen no recibe ninguna cabecera CORS.
+  cliente, y para LEER la ficha publica de un producto de la tienda (precio vigente de sus destacados, 26/10): sin
+  cookies y solo en esas rutas (la ficha, solo GET). En cualquier otra ruta su origen no recibe ninguna cabecera CORS.
 - /auth/refresh usa la misma lista de origenes con cookies (routers/auth.py, _portal_only).
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -21,12 +23,16 @@ from starlette.middleware.cors import CORSMiddleware
 
 # rutas que la landing puede llamar desde el navegador (sin cookies)
 LANDING_PATHS = ("/public/incidents", "/public/access-requests")
+# lectura del catalogo publico (lo mismo que muestra la tienda a cualquiera): solo GET
+LANDING_READ = re.compile(r"^/public/store/[a-z0-9-]+/products/\d+$")
 PORTAL_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 # X-View-As-Ally / X-View-As-User: "Ver como este aliado" del admin (solo lectura, core/ally.py)
 PORTAL_HEADERS = ["Authorization", "Content-Type", "X-Requested-With", "X-View-As-Ally", "X-View-As-User"]
 
 
-def landing_path(path: str) -> bool:
+def landing_path(path: str, method: str = "POST") -> bool:
+    if method in ("GET", "HEAD") and LANDING_READ.match(path):
+        return True
     return any(path == p or path.startswith(p + "/") for p in LANDING_PATHS)
 
 
@@ -95,7 +101,7 @@ class SplitCORSMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http" and (self.landing_only or self.plain_only):
             origin = next((v for k, v in scope.get("headers") or [] if k == b"origin"), b"").decode("latin1")
-            if origin in self.landing_only and landing_path(scope.get("path") or ""):
+            if origin in self.landing_only and landing_path(scope.get("path") or "", scope.get("method") or ""):
                 await self.landing(scope, receive, send)
                 return
             if origin in self.plain_only:

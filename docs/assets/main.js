@@ -65,8 +65,7 @@
   // Fuera de vista se pausan las animaciones SMIL (las CSS se pausan solas por visibilidad del compositor).
   {
     // Movil: las mismas redes en las secciones (variante vertical), sin tocar el hero movil
-    const hosts = [['#hero-d .scene__pin', true], ['#monitoreo', true], ['#servicios', true], ['#porque', false], ['#proceso', false], ['#casos', false], ['#tienda', true], ['#portada', true]];
-    if (isMobile.matches) hosts.shift();
+    const hosts = [['#destacados', true], ['#ejemplos', true], ['#portada', true]];
     const netIO = new IntersectionObserver(entries => entries.forEach(en => { const s = en.target.firstElementChild; if (!s) return; en.isIntersecting && !s.closest('.is-paused') ? s.unpauseAnimations() : s.pauseAnimations(); }), { rootMargin: '25% 0px' });
     const armar = ([sel, dark], i) => {
       const host = $(sel); if (!host) return;
@@ -627,7 +626,7 @@
     const urlDe = (f, k) => { const a = anchosDe(f.ancho); return `${DIR}${f.archivo}-${a[Math.min(k, a.length - 1)]}.webp`; };
     const mqTablet = matchMedia('(max-width:1023px)');
     const cols = () => isMobile.matches ? 2 : mqTablet.matches ? 3 : 4;
-    const limite = () => isMobile.matches ? 7 : 9;
+    const limite = () => 5; // galeria compacta dentro de Proyectos: el monitor grande + 4 (las demas con "Ver todas")
     const filtros = $('#galFiltros'), cuenta = $('#galCuenta'), mas = $('#galMas');
     let filtro = '', todas = false;
     const visibles = () => fotos.filter(f => !filtro || f.categoria === filtro);
@@ -791,8 +790,45 @@
   }
   /* ===================== fin bloque GALERÍA / OBRA / VISOR ===================== */
 
-  /* ---------- Formulario → WhatsApp ---------- */
+  /* ---------- "Consultar" / "Cotizar" de toda la pagina: llegan al formulario con el tema elegido ----------
+     data-tipo = una de las opciones del formulario o un detalle (producto, caso) que viaja en el mensaje; data-sol, la
+     opcion que se marca para ese detalle. */
   const form = $('#form');
+  if (form) $$('[data-tipo]').forEach(a => a.addEventListener('click', () => {
+    const t = a.dataset.tipo, sol = a.dataset.sol || t, radio = $$('input[name=tipo]', form).find(r => r.value === sol);
+    const det = $('input[name=detalle]', form);
+    if (radio) radio.checked = true;
+    if (det) det.value = radio && sol === t ? '' : /cotizar una soluci/i.test(t) ? '' : t;
+  }));
+
+  /* ---------- Destacados: precio vigente desde la tienda (la ficha publica, sin cookies) ----------
+     Se pide cuando la seccion se acerca; si la tienda no responde o el producto ya no se vende, queda el texto
+     "Ver precio en la tienda" y la tarjeta sigue llevando a su ficha. */
+  const dest = $$('[data-pid]');
+  if (dest.length && CFG.api) {
+    const api = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && CFG.apiLocal ? CFG.apiLocal : CFG.api;
+    const crc = new Intl.NumberFormat('es-CR', { style: 'currency', currency: 'CRC', maximumFractionDigits: 0 });
+    const precio = card => fetch(`${api}/public/store/crimson/products/${card.dataset.pid}`, { credentials: 'omit' })
+      .then(r => r.ok ? r.json() : null)
+      .then(p => {
+        const out = $('[data-price]', card); if (!p || !out) return;
+        const vende = p.availability?.accion === 'comprar' && !p.price_on_request && Number(p.display_price) > 0;
+        if (!vende) { out.textContent = 'Consultá disponibilidad'; return; }
+        const cur = p.display_currency || 'CRC';
+        out.textContent = (cur === 'CRC' ? crc : new Intl.NumberFormat('es-CR', { style: 'currency', currency: cur })).format(p.display_price);
+        out.classList.add('is-live');
+        out.insertAdjacentHTML('beforeend', '<small> IVA incluido</small>');
+      })
+      .catch(() => {});
+    const io = new IntersectionObserver(es => es.forEach(en => { if (en.isIntersecting) { io.unobserve(en.target); precio(en.target); } }), { rootMargin: '50%' });
+    dest.forEach(d => io.observe(d));
+  }
+
+  /* ---------- Movil: acceso fijo a tienda y cotizar cuando la portada ya paso (deja su espacio abajo) ---------- */
+  const dock = $('.p2-dock'), hero = $('#portada');
+  if (dock && hero) new IntersectionObserver(([en]) => document.body.classList.toggle('dock-on', !en.isIntersecting), { rootMargin: '0px 0px -40% 0px' }).observe(hero);
+
+  /* ---------- Formulario → WhatsApp ---------- */
   form?.addEventListener('submit', e => {
     e.preventDefault();
     if (!form.reportValidity()) return;
@@ -801,7 +837,8 @@
     const msg = [
       `Hola Crimson, soy ${f.get('nombre')}.`,
       `Tel: ${f.get('telefono')}${f.get('email') ? ` · Email: ${f.get('email')}` : ''}`,
-      `Proyecto: ${f.get('tipo')}${ctx ? ` (${ctx})` : ''}`,
+      `Necesito: ${f.get('tipo')}${ctx ? ` (${ctx})` : ''}`,
+      f.get('detalle') ? `Me interesa: ${f.get('detalle')}` : '',
       f.get('mensaje') ? `\n${f.get('mensaje')}` : ''
     ].join('\n');
     const a = Object.assign(document.createElement('a'), { href: `https://wa.me/${CFG.wa}?text=${encodeURIComponent(msg)}`, target: '_blank', rel: 'noopener' });

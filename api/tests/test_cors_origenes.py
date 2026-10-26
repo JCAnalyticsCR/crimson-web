@@ -131,3 +131,12 @@ def test_en_produccion_el_panel_con_cookies_aunque_no_figure_en_cors_origins(db_
     # fuera de produccion, todos los de CORS_ORIGINS con cookies (desarrollo local)
     o = split_origins([PANEL, "HTTP://localhost:5173/"], [LANDING], PANEL, prod=False)
     assert o.credentials == (PANEL, "http://localhost:5173") and o.plain == ()
+
+
+def test_la_landing_lee_la_ficha_publica_de_un_producto(c):
+    """26/10: los destacados de la portada muestran el precio vigente: GET de la ficha publica, sin cookies. Nada mas."""
+    r = c.get("/public/store/crimson/products/152", headers={"Origin": LANDING})
+    assert r.headers.get("access-control-allow-origin") == LANDING and "access-control-allow-credentials" not in r.headers
+    for path, m in (("/public/store/crimson/products/152", "POST"), ("/public/store/crimson/products", "GET"), ("/public/store/crimson/checkout-config", "GET")):
+        r = _pre(c, path, LANDING, m) if m != "GET" else c.get(path, headers={"Origin": LANDING})
+        assert "access-control-allow-origin" not in r.headers, (path, m)

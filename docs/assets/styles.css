@@ -1277,3 +1277,242 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
    Antes, en 4G lenta se veia un cuadro negro varios segundos aunque el poster ya estaba cargado. */
 .scene__canvas{opacity:0;transition:opacity var(--dur-drawer)}
 .scene__canvas.is-drawn{opacity:1}
+
+/* =====================================================================
+   PORTADA NUEVA (26/10, criterio de Andres): entender que resuelve Crimson, comprar un producto y consultar por
+   una solucion, rapido. Orden: portada con dos botones, cinco soluciones, destacados con su ficha, proyectos
+   (problema, solucion, resultado), ejemplos de IA, software e IoT, proceso y respaldo, contacto.
+   Movimiento: solo las entradas de siempre (.reveal / .lines); nada se mueve en las tarjetas de decision.
+   ===================================================================== */
+.p2-head{display:grid;grid-template-columns:1.4fr 1fr;gap:28px 48px;align-items:end;margin-bottom:clamp(28px,3vw,44px)}
+.p2-head__aside{display:flex;flex-direction:column;gap:20px;align-items:flex-start}
+.p2-link{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;border-radius:999px;font-weight:700;font-size:14px;
+  box-shadow:inset 0 0 0 1.5px rgba(21,19,26,.22);color:var(--ink);transition:background var(--dur-micro),color var(--dur-micro),box-shadow var(--dur-micro)}
+.p2-link--fill{background:var(--ink);color:#fff;box-shadow:none}
+.p2-link--light{color:#fff;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.3)}
+@media (hover:hover){
+  .p2-link:hover{background:var(--crimson);color:#fff;box-shadow:none}
+}
+
+/* ---------- Nav: cuatro secciones + utilidades ---------- */
+.nav__util{display:flex;align-items:center;gap:18px}
+.nav__util-link{font-size:13px;opacity:.75}
+@media (hover:hover){.nav__util-link:hover{opacity:1;color:var(--crimson)}}
+
+/* ---------- 1 · Portada ---------- */
+.p2-hero{position:relative;overflow:hidden;background:var(--ink);color:var(--white);padding-top:clamp(36px,5vw,72px);padding-bottom:clamp(44px,5vw,80px)}
+.p2-hero .sec-net{position:absolute;inset:0;pointer-events:none;opacity:.35}
+.p2-hero .sec-net svg{width:100%;height:100%}
+.p2-hero__grid{position:relative;display:grid;grid-template-columns:1.05fr 1fr;gap:clamp(28px,4vw,64px);align-items:center}
+.p2-hero__copy{display:flex;flex-direction:column;gap:20px;align-items:flex-start}
+.p2-hero__eyebrow{display:inline-flex;align-items:center;gap:10px;color:rgba(244,241,238,.7)}
+.p2-hero__title{font-size:clamp(40px,4.2vw,64px);line-height:1.02;max-width:17ch}
+.p2-hero__lead{font-size:clamp(16px,1.2vw,19px);line-height:1.55;color:rgba(244,241,238,.82);max-width:52ch;font-weight:500}
+.p2-hero__ask{font-size:clamp(16px,1.15vw,18px);font-weight:700;color:#fff}
+.p2-hero__ctas{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;max-width:560px}
+.p2-hero__btn{justify-content:flex-start;gap:12px;padding:18px 22px;font-size:16px}
+.p2-hero__btn svg{width:22px;height:22px;flex:none;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.p2-hero__note{color:rgba(244,241,238,.6)}
+/* Titular: entra al cargar (no espera al scroll); en el celular y con reduced-motion ya esta escrito (LCP) */
+.js .p2-hero .lines .ln>span{animation:lineUp var(--dur-section) var(--ease-enter) forwards}
+.js .p2-hero .lines em{animation:inkIn var(--dur-drawer) .3s both}
+@media (max-width:767px),(prefers-reduced-motion:reduce){
+  .js .p2-hero .lines .ln>span{opacity:1;transform:none;animation:none}
+  .js .p2-hero .lines em{color:var(--crimson);animation:none}
+}
+/* Composicion: instalacion real + pantalla de software + automatizacion */
+.p2-mosaic{position:relative;display:grid;grid-template-columns:repeat(6,1fr);grid-template-rows:auto auto;gap:12px}
+.p2-mosaic__foto{grid-column:1 / -1;aspect-ratio:16/10;border-radius:14px}
+.p2-mosaic__foto>img{position:absolute;inset:0}
+.p2-screen{grid-column:1 / 4;margin-top:-64px;margin-left:-18px;position:relative;z-index:4;border-radius:12px;background:#f6f2ee;color:var(--ink);
+  box-shadow:0 26px 50px -24px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.08);overflow:hidden}
+.p2-screen__bar{display:flex;align-items:center;gap:5px;padding:8px 12px;background:#e7e1da}
+.p2-screen__bar i{width:7px;height:7px;border-radius:50%;background:#c9c1b8}
+.p2-screen__bar i:first-child{background:var(--crimson)}
+.p2-screen__bar .meta{margin-left:auto;font-size:9px}
+.p2-screen__body{padding:12px;display:flex;flex-direction:column;gap:10px}
+.p2-screen__kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.p2-screen__kpis span{display:flex;flex-direction:column;gap:2px;padding:8px;border-radius:8px;background:#fff;border:1px solid var(--hair)}
+.p2-screen__kpis b{font-size:15px;line-height:1;font-variant-numeric:tabular-nums}
+.p2-screen__kpis small{font-size:9.5px;color:var(--muted)}
+.p2-screen__rows{display:flex;flex-direction:column;gap:6px;font-size:11.5px;font-weight:600}
+.p2-screen__rows li{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;background:#fff}
+.p2-screen__rows i{width:8px;height:8px;border-radius:50%;flex:none;background:var(--ok)}
+.p2-screen__rows i.warn{background:#d48a13}
+.p2-flow{grid-column:4 / -1;margin-top:-64px;margin-right:-18px;position:relative;z-index:4;padding:12px 14px;border-radius:12px;background:var(--ink-2);
+  border:1px solid rgba(255,255,255,.1);box-shadow:0 26px 50px -24px rgba(0,0,0,.8);display:flex;flex-direction:column;gap:10px}
+.p2-flow__tag{color:#ff7d8c;font-size:9.5px}
+.p2-flow__steps{display:flex;flex-direction:column;gap:6px}
+.p2-flow__steps li{position:relative;display:flex;align-items:center;gap:10px;font-size:12.5px;font-weight:700;line-height:1.2}
+.p2-flow__steps li+li::before{content:"";position:absolute;left:15px;top:-6px;width:1.5px;height:6px;background:var(--crimson)}
+.p2-flow__steps svg{width:32px;height:32px;padding:7px;border-radius:9px;background:rgba(255,255,255,.07);flex:none;fill:none;stroke:#fff;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.p2-flow__steps li:last-child svg{background:var(--crimson)}
+.p2-flow__steps small{display:block;font-size:10.5px;font-weight:500;color:rgba(244,241,238,.6);margin-top:2px}
+
+/* ---------- 2 · Soluciones ---------- */
+.p2-sol{background:var(--bg)}
+.p2-sol__grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.p2-card{display:flex;flex-direction:column;gap:10px;padding:22px;border-radius:16px;background:#fff;border:1px solid var(--hair);scroll-margin-top:calc(var(--navh,72px) + 20px)}
+.p2-card__ico{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;background:var(--crimson-soft);color:var(--crimson)}
+.p2-card__ico svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.p2-card__brand{color:var(--muted);font-size:9.5px}
+.p2-card h3{font-size:clamp(22px,1.7vw,26px)}
+.p2-card>p{color:var(--muted);line-height:1.5;font-size:15px}
+.p2-card__ej{display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:600;margin:2px 0 4px}
+.p2-card__ej li{position:relative;padding-left:18px}
+.p2-card__ej li::before{content:"";position:absolute;left:0;top:.55em;width:8px;height:8px;border-radius:2px;background:var(--crimson)}
+.p2-card__ctas{display:flex;flex-wrap:wrap;gap:8px;margin-top:auto;padding-top:8px}
+.p2-card--arma{background:var(--ink);color:var(--white);border-color:var(--ink);justify-content:center}
+.p2-card--arma .p2-card__brand{color:#ff7d8c}
+.p2-card--arma>p{color:rgba(244,241,238,.75)}
+.p2-card:target,.p2-caso:target{box-shadow:0 0 0 2px var(--crimson)}
+
+/* ---------- 3 · Destacados ---------- */
+.p2-dest{background:linear-gradient(180deg,var(--bg) 0,var(--ink) 110px);color:var(--white);padding-top:calc(var(--space) + 16px)}
+.p2-dest__grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.p2-prod{display:flex;flex-direction:column;border-radius:16px;overflow:hidden;background:var(--ink-2);border:1px solid var(--hair-dark)}
+.p2-prod__media{display:block;aspect-ratio:1;background:radial-gradient(80% 80% at 50% 40%,#fff 0,#f1eeea 100%)}
+.p2-prod__media img{width:100%;height:100%;object-fit:contain;padding:9%}
+.p2-prod__body{display:flex;flex-direction:column;gap:8px;padding:16px 16px 18px;flex:1}
+.p2-prod__sol{color:#ff7d8c;font-size:9.5px}
+.p2-prod__claim{font-size:20px;line-height:1.12;color:#fff;text-wrap:balance}
+.p2-prod__name{font-size:13px;line-height:1.4;color:rgba(244,241,238,.65)}
+.p2-prod__price{font-size:20px;font-weight:700;color:#fff;margin-top:auto;padding-top:6px;font-variant-numeric:tabular-nums}
+.p2-prod__price:not(.is-live){font-size:14px;color:rgba(244,241,238,.7)}
+.p2-prod__price small{font-size:11px;font-weight:500;color:rgba(244,241,238,.55)}
+.p2-prod__ctas{display:flex;flex-wrap:wrap;gap:8px}
+.p2-prod__ctas .p2-link--fill{background:#fff;color:var(--ink)}
+@media (hover:hover){.p2-prod__media img{transition:transform var(--dur-scene) var(--ease-enter)}.p2-prod:hover .p2-prod__media img{transform:scale(1.04)}}
+
+/* ---------- 4 · Proyectos ---------- */
+.p2-casos .wrap{gap:0}
+.p2-casos__grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.p2-caso{display:flex;flex-direction:column;gap:14px;padding:12px 12px 18px;border-radius:16px;background:#fff;border:1px solid var(--hair);scroll-margin-top:calc(var(--navh,72px) + 20px)}
+.p2-caso .obra__tile{flex:none;width:100%;aspect-ratio:4/5;border-radius:12px}
+.p2-caso__psr{display:flex;flex-direction:column;gap:10px;padding:0 6px}
+.p2-caso__psr div{display:grid;grid-template-columns:86px 1fr;gap:10px;align-items:baseline}
+.p2-caso__psr dt{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;color:var(--crimson)}
+.p2-caso__psr dd{margin:0;font-size:14.5px;line-height:1.45}
+.p2-caso>.p2-link{align-self:flex-start;margin:4px 6px 0}
+.p2-prensa{margin-top:16px}
+.p2-gal{margin-top:16px;padding:clamp(18px,2.4vw,30px);border-radius:16px;background:var(--ink);color:var(--white);display:flex;flex-direction:column;gap:30px}
+.p2-gal__title{font-size:clamp(22px,1.8vw,28px);margin-right:auto}
+
+/* ---------- 5 · Ejemplos ---------- */
+.p2-ej{background:linear-gradient(180deg,var(--bg-2) 0,var(--ink) 110px);color:var(--white);padding-top:calc(var(--space) + 16px)}
+.p2-ej__grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.p2-ej__item{display:flex;flex-direction:column;gap:12px;padding:22px;border-radius:16px;border:1px solid var(--hair-dark);background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.015))}
+.p2-ej__badge{align-self:flex-start;padding:5px 10px;border-radius:999px;font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;
+  background:rgba(255,255,255,.08);color:rgba(244,241,238,.8)}
+.p2-ej__badge--real{background:rgba(31,163,90,.18);color:#5fd38f}
+.p2-ej__item h3{font-size:clamp(22px,1.7vw,26px)}
+.p2-ej__item p{color:rgba(244,241,238,.75);line-height:1.55;font-size:15px}
+.p2-ej__pasos{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto;color:rgba(244,241,238,.85)}
+.p2-ej__pasos li{padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.06)}
+.p2-ej__pasos li+li::before{content:"→ ";color:var(--crimson)}
+.p2-ej__item>.p2-link{align-self:flex-start}
+
+/* ---------- 6 · Proceso y respaldo ---------- */
+.p2-proc{background:linear-gradient(180deg,var(--ink) 0,var(--bg) 110px);padding-top:calc(var(--space) + 16px)}
+.p2-proc__pasos{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:1px solid var(--hair);border-radius:16px;background:#fff;overflow:hidden}
+.p2-proc__pasos li{display:flex;flex-direction:column;gap:6px;padding:22px;border-left:1px solid var(--hair)}
+.p2-proc__pasos li:first-child{border-left:0}
+.p2-proc__pasos .meta{color:var(--crimson)}
+.p2-proc__pasos b{font-size:19px}
+.p2-proc__pasos span:last-child{color:var(--muted);font-size:14.5px;line-height:1.45}
+.p2-proc__resp{display:grid;grid-template-columns:1.3fr 1fr;gap:18px 40px;align-items:center;margin-top:22px}
+.p2-proc__sellos{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;font-weight:700;font-size:14.5px}
+.p2-proc__sellos li{position:relative;padding-left:24px}
+.p2-proc__sellos li::before{content:"";position:absolute;left:0;top:.2em;width:14px;height:8px;border-left:2px solid var(--ok);border-bottom:2px solid var(--ok);transform:rotate(-45deg)}
+.p2-proc__marcas{display:flex;align-items:center;gap:28px;flex-wrap:wrap;justify-content:flex-end}
+.p2-proc__marcas img{height:24px;width:auto;filter:brightness(0);opacity:.6}
+.p2-proc__sop{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:6px 18px;align-items:baseline;padding-top:18px;border-top:1px solid var(--hair);font-size:15px;color:var(--muted)}
+.p2-proc__sop a{font-weight:700;color:var(--ink);border-bottom:1.5px solid var(--crimson)}
+
+/* ---------- Acceso fijo del celular (tienda / cotizar) ---------- */
+.p2-dock{display:none}
+
+@media (min-width:768px) and (max-width:1100px){
+  .p2-hero__grid{grid-template-columns:1fr}
+  .p2-mosaic{max-width:640px}
+  .p2-sol__grid,.p2-ej__grid{grid-template-columns:repeat(2,1fr)}
+  .p2-dest__grid{grid-template-columns:repeat(2,1fr)}
+  .p2-casos__grid{gap:10px}
+  .p2-caso__psr div{grid-template-columns:1fr;gap:2px}
+  .p2-proc__pasos{grid-template-columns:repeat(2,1fr)}
+  .p2-proc__pasos li:nth-child(3){border-left:0}
+  .p2-proc__pasos li:nth-child(n+3){border-top:1px solid var(--hair)}
+  .p2-proc__resp{grid-template-columns:1fr}.p2-proc__marcas{justify-content:flex-start}
+}
+@media (max-width:767px){
+  .p2-head{grid-template-columns:1fr;gap:14px}
+  .nav__util{flex-direction:row;gap:12px;margin-top:22px;width:100%}
+  .nav__util-link{font-family:var(--sans);font-size:16px;font-weight:700;opacity:1;padding:13px 18px;border-radius:999px;box-shadow:inset 0 0 0 1.5px var(--hair);flex:1;text-align:center}
+  .nav__util .btn{margin-top:0;flex:1;background:transparent!important;color:var(--ink)!important;box-shadow:inset 0 0 0 1.5px var(--hair)}
+  .nav__util .nav__login-txt{display:inline}
+  /* Portada: los dos botones visibles al abrir, la composicion debajo */
+  .p2-hero{padding-top:26px;padding-bottom:40px}
+  .p2-hero__grid{grid-template-columns:1fr;gap:28px}
+  .p2-hero__copy{gap:14px}
+  .p2-hero__title{font-size:clamp(34px,10vw,44px);max-width:none}
+  .p2-hero__lead{font-size:15px}
+  .p2-hero__ask{font-size:15.5px}
+  .p2-hero__ctas{grid-template-columns:1fr;gap:10px;max-width:none}
+  .p2-hero__btn{justify-content:center;padding:16px 20px;min-height:56px}
+  .p2-hero__note{font-size:10px}
+  .p2-mosaic{grid-template-columns:1fr 1fr;gap:10px}
+  .p2-mosaic__foto{aspect-ratio:16/11}
+  .p2-screen{grid-column:1 / -1;margin:-40px 10px 0}
+  .p2-flow{grid-column:1 / -1;margin:0 10px}
+  .p2-flow__steps{flex-direction:row;gap:8px}
+  .p2-flow__steps li{flex:1;flex-direction:column;align-items:flex-start;gap:6px;font-size:11.5px}
+  .p2-flow__steps li+li::before{display:none}
+  /* Listas en vez de rejillas */
+  .p2-sol__grid,.p2-ej__grid{grid-template-columns:1fr;gap:10px}
+  /* Soluciones como lista: icono a la izquierda, lo esencial y los dos caminos (los ejemplos quedan para escritorio) */
+  .p2-card{display:grid;grid-template-columns:40px 1fr;gap:4px 14px;padding:16px}
+  .p2-card>*{grid-column:2}
+  .p2-card__ico{grid-column:1;grid-row:1 / span 3;width:40px;height:40px;border-radius:10px}
+  .p2-card__ico svg{width:20px;height:20px}
+  .p2-card__brand,.p2-card__ej{display:none}
+  .p2-card h3{font-size:19px}
+  .p2-card>p{font-size:14px}
+  .p2-card__ctas{padding-top:6px;gap:6px}
+  .p2-card__ctas .p2-link{flex:1;min-height:42px;padding:8px 12px;font-size:13.5px}
+  .p2-card--arma{grid-template-columns:1fr}
+  .p2-card--arma>*{grid-column:1}
+  .p2-card--arma .p2-card__brand{display:block}
+  .p2-dest__grid{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:10px;margin:0 calc(var(--pad)*-1);padding:0 var(--pad) 4px;scroll-padding-inline:var(--pad);scrollbar-width:none}
+  .p2-dest__grid::-webkit-scrollbar{display:none}
+  .p2-prod{flex:0 0 78vw;scroll-snap-align:start}
+  .p2-prod__media{aspect-ratio:4/3}
+  .p2-prod__media img{padding:6%}
+  .p2-prod__ctas .p2-link{flex:1}
+  .p2-casos__grid{grid-template-columns:1fr;gap:12px}
+  .p2-caso{display:grid;grid-template-columns:120px 1fr;gap:12px;align-items:start}
+  .p2-caso .obra__tile{aspect-ratio:9/14;grid-row:span 2}
+  .p2-caso__psr{padding:0;gap:8px}
+  .p2-caso__psr div{grid-template-columns:1fr;gap:1px}
+  .p2-caso__psr dd{font-size:13.5px}
+  .p2-caso>.p2-link{margin:0;align-self:end;justify-self:start}
+  .p2-caso .obra__info{padding:40px 10px 12px}.p2-caso .obra__info strong{font-size:13px}.p2-caso .obra__nota,.p2-caso .obra__osd{display:none}
+  .p2-caso .obra__play{width:44px;height:44px;margin:-22px 0 0 -22px}.p2-caso .obra__play::before{left:17px;top:13px;border-width:9px 0 9px 14px}
+  .p2-gal{margin-left:calc(var(--pad)*-1);margin-right:calc(var(--pad)*-1);border-radius:0;padding:24px var(--pad)}
+  .p2-proc__pasos{grid-template-columns:1fr}
+  .p2-proc__pasos li{border-left:0;border-top:1px solid var(--hair);padding:16px 18px;display:grid;grid-template-columns:30px 1fr;gap:2px 10px}
+  .p2-proc__pasos li:first-child{border-top:0}
+  .p2-proc__pasos .meta{grid-row:span 2;padding-top:4px}
+  .p2-proc__resp{grid-template-columns:1fr}
+  .p2-proc__sellos{grid-template-columns:1fr}
+  .p2-proc__marcas{justify-content:flex-start;gap:20px}
+  /* Acceso fijo: aparece cuando la portada ya paso; el pie deja su espacio para no tapar nada */
+  .p2-dock{display:grid;grid-template-columns:1fr 1.4fr;gap:8px;position:fixed;left:0;right:0;bottom:0;z-index:36;
+    padding:8px var(--pad) calc(8px + env(safe-area-inset-bottom));background:rgba(21,19,26,.96);border-top:1px solid var(--hair-dark);
+    transform:translateY(110%);transition:transform var(--dur-drawer) var(--ease-enter)}
+  .p2-dock a{display:flex;align-items:center;justify-content:center;min-height:48px;border-radius:999px;font-weight:700;font-size:15px;color:#fff;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.3)}
+  .p2-dock .p2-dock__main{background:var(--crimson);box-shadow:none}
+  body.dock-on .p2-dock{transform:none}
+  body.menu-open .p2-dock{display:none}
+  .footer{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+}
+@media (prefers-reduced-motion:reduce){.p2-dock{transition:none}}
