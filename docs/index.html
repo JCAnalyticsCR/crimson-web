@@ -1,14 +1,15 @@
 <!DOCTYPE html>
+<!-- GENERADO por docs/inicio/armar.py: no editar a mano (editar docs/inicio/parts/ y volver a armar) -->
 <html lang="es-CR">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Crimson Consulting · Seguridad, redes, IA y software en Costa Rica</title>
-<meta name="description" content="Seguridad electrónica, redes, dispositivos conectados y software a la medida. Comprá tecnología en nuestra tienda o cotizá una solución con respaldo técnico en Costa Rica.">
-<meta name="theme-color" content="#15131a" id="themeColor">
+<meta name="description" content="Seguridad electrónica, redes y software a la medida. Comprá tecnología en nuestra tienda o cotizá una solución con respaldo técnico en Costa Rica.">
+<meta name="theme-color" content="#0d0c11">
 <link rel="canonical" href="https://crimsoncr.com/">
 <meta property="og:title" content="Crimson Consulting · Seguridad, IA y software para una operación más inteligente">
-<meta property="og:description" content="Seguridad electrónica, redes, IoT y software a la medida, con respaldo técnico local. Comprá en línea o cotizá una solución.">
+<meta property="og:description" content="Seguridad electrónica, redes y software a la medida, con respaldo técnico local. Comprá en línea o cotizá una solución.">
 <meta property="og:url" content="https://crimsoncr.com/">
 <meta property="og:image" content="https://crimsoncr.com/assets/img/og-crimson-v3.jpg">
 <meta property="og:image:alt" content="Crimson Consulting · Seguridad, IA y software para una operación más inteligente">
@@ -22,579 +23,888 @@
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="apple-mobile-web-app-title" content="Crimson">
 <meta name="format-detection" content="telephone=yes">
-<!-- Sin preload de fotogramas: la escena CAM 01 ya no es lo primero que se ve (la portada con tienda y soporte manda el LCP).
-     Sus fotogramas esperan a que la escena se acerque (IntersectionObserver en main.js). -->
-<script>(function(){var f=new URLSearchParams(location.search).get("font");if(f)document.documentElement.dataset.font=f})()</script>
-<link rel="stylesheet" href="assets/styles.css?v=85">
 <script>document.documentElement.classList.add('js')</script>
-<!-- Telefonos: "tel" = linea 1, "tel2" = linea 2 (formato libre: "+506 8888 9892", "88889892"...). Mientras "tel2" este vacio la linea 2 no se muestra.
-     main.js los aplica a todo [data-tel]/[data-wa] (contacto y pie). "waLink" es el enlace de WhatsApp Business de la linea 1. -->
-<script type="application/json" id="site-config">{"tel":"+50688889892","tel2":"","wa":"50688889892","mail":"info@crimsoncr.com","waLink":"https://wa.me/message/5YQKXZFUPHWLA1","place":"Alajuela, Costa Rica","api":"https://api-production-f07a.up.railway.app","apiLocal":"http://127.0.0.1:8000"}</script>
+<link rel="stylesheet" href="inicio/base.css?v=17930672711793071740">
+<link rel="stylesheet" href="inicio/parts/1-portada.css?v=1793068317">
+<link rel="stylesheet" href="inicio/parts/2-tienda.css?v=1793067969">
+<link rel="stylesheet" href="inicio/parts/3-soluciones.css?v=1793068035">
+<link rel="stylesheet" href="inicio/parts/4-proyectos.css?v=1793068240">
+<link rel="stylesheet" href="inicio/parts/5-cierre.css?v=1793069888">
+<script type="application/json" id="site-config">{"tel":"+50688889892","wa":"50688889892","waLink":"https://wa.me/message/5YQKXZFUPHWLA1","mail":"info@crimsoncr.com","place":"Alajuela, Costa Rica","api":"https://api-production-f07a.up.railway.app","apiLocal":"http://127.0.0.1:8000","store":"crimson","tienda":"https://tienda.crimsoncr.com","panel":"https://panel.crimsoncr.com"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"LocalBusiness","name":"Crimson Consulting","url":"https://crimsoncr.com/","logo":"https://crimsoncr.com/assets/img/icon-512.png","image":"https://crimsoncr.com/assets/img/og-crimson-v3.jpg","telephone":"+506 8888 9892","email":"info@crimsoncr.com","address":{"@type":"PostalAddress","addressLocality":"Alajuela","addressCountry":"CR"},"sameAs":["https://www.instagram.com/cr.crimsoncr/","https://www.facebook.com/crimsonconcr"]}</script>
 </head>
-<body data-tone="ink">
-<a class="skip" href="#top">Saltar al contenido</a>
+<body>
+<a class="nv-skip" href="#contenido">Saltar al contenido</a>
+<!-- ===== parte 1-portada.html (docs/inicio/parts) ===== -->
+<!-- 1 · PORTADA: encabezado fijo + menu movil + portada. Abre <main id="contenido"> (lo cierra 5-cierre).
+     Foto: videovigilancia comunitaria instalada por Crimson (galeria/comunidad-rotulo-noche), al anochecer.
+     Movil: la foto de fondo a pantalla completa y el texto abajo (titulo + bajada + los dos botones en 375x812).
+     Escritorio: texto a la izquierda, foto a sangre a la derecha con marco de camara; red de nodos muy tenue encima. -->
+<header class="nvh-bar" id="nvhBar">
+  <div class="nvh-bar__in">
+    <a class="nvh-logo" href="#contenido" aria-label="Crimson Consulting, inicio">
+      <img src="assets/img/logo.png" alt="Crimson Consulting" width="1024" height="237">
+    </a>
 
-<!-- Capa consola (solo PC con puntero) -->
-<div class="grain" aria-hidden="true"></div>
-<div class="cursor" aria-hidden="true"><span class="cursor__ring"></span><span class="cursor__dot"></span><span class="cursor__label"></span></div>
-<div class="hud hud--tr meta" aria-hidden="true"><span id="hudClock">00:00:00</span> · CR</div>
+    <nav class="nvh-nav" aria-label="Principal">
+      <a href="#soluciones">Soluciones</a>
+      <a href="https://tienda.crimsoncr.com/" data-nvh-tienda>Tienda</a>
+      <a href="#proyectos">Proyectos</a>
+      <a href="#soporte">Soporte</a>
+      <a href="https://panel.crimsoncr.com/login" rel="noopener">Portal</a>
+    </nav>
 
-<!-- NAV · Andres (26/10): Soluciones, Tienda, Proyectos y Contacto; Soporte y Portal como accesos de utilidad -->
-<header class="nav" id="nav">
-  <a class="nav__logo" href="#top" aria-label="Crimson Consulting, inicio">
-    <img src="assets/img/logo.png" alt="Crimson Consulting" width="1024" height="237">
-  </a>
-  <nav class="nav__links" id="navLinks" aria-label="Principal">
-    <a href="#soluciones">Soluciones</a>
-    <a href="https://tienda.crimsoncr.com/" rel="noopener">Tienda</a>
-    <a href="#proyectos">Proyectos</a>
-    <a href="#contacto">Contacto</a>
-    <span class="nav__util">
-      <a class="nav__util-link" href="#soporte">Soporte</a>
-      <a class="btn btn--ghost nav__login" href="https://panel.crimsoncr.com/login" rel="noopener" data-cursor="Entrar" aria-label="Ingresar al portal de clientes y equipo"><svg class="nav__lock" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M6 11V8a6 6 0 0 1 12 0v3M5 11h14v10H5zM12 15v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="nav__login-txt">Portal</span></a>
-    </span>
-    <a class="btn btn--ink nav__cta" href="#contacto" data-tipo="Cotizar una solución"><span class="nav__cta-dot"></span>Cotizar</a>
-    <div class="nav__mobile-extra">
-      <a href="tel:+50688889892">Llamar · +506 8888 9892</a>
-      <a href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener">WhatsApp</a>
-      <a href="mailto:info@crimsoncr.com">info@crimsoncr.com</a>
-      <span>Alajuela, Costa Rica</span>
+    <div class="nvh-tools">
+      <button class="nvh-icon" type="button" id="nvhSearchBtn" aria-label="Buscar en la tienda" aria-expanded="false" aria-controls="nvhSearch">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+      </button>
+      <a class="nvh-icon" href="https://tienda.crimsoncr.com/" data-nvh-tienda aria-label="Ir a la tienda en línea">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14l-1.2 12H6.2z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/></svg>
+      </a>
+      <a class="nv-btn nv-btn--red nvh-cta" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20una%20soluci%C3%B3n." target="_blank" rel="noopener" data-nvh-wa="Hola Crimson, quiero cotizar una solución.">Cotizar</a>
+      <button class="nvh-icon nvh-burger" type="button" id="nvhBurger" aria-label="Abrir menú" aria-expanded="false" aria-controls="nvhMenu">
+        <span></span><span></span><span></span>
+      </button>
     </div>
-  </nav>
-  <button class="nav__burger" id="burger" aria-label="Abrir menú" aria-expanded="false" aria-controls="navLinks"><span></span><span></span><span></span></button>
+  </div>
+
+  <!-- Buscar: un formulario GET de verdad (sirve aun sin JS); el JS solo lo abre, enfoca y cierra con Escape -->
+  <div class="nvh-search" id="nvhSearch" hidden>
+    <form class="nvh-search__in" action="https://tienda.crimsoncr.com/buscar" method="get" role="search" data-nvh-buscar>
+      <label class="nv-sr" for="nvhQ">Buscar productos en la tienda</label>
+      <svg class="nvh-search__ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+      <input id="nvhQ" name="q" type="search" placeholder="Buscá cámaras, routers…" autocomplete="off" enterkeyhint="search" required>
+      <button class="nvh-search__go" type="submit" aria-label="Buscar">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+    </form>
+  </div>
 </header>
 
-<main id="top" tabindex="-1">
-
-<!-- 1 · PORTADA de antes (26/10: el cliente pidio volver a esta vista). que es Crimson + las dos puertas de negocio (TIENDA y SOPORTE) en el primer pantallazo.
-     Pedido de Andres (oct 2026, tras hablar con "el patron"): "esto no dice nada en los primeros 12 segundos; mas
-     movimiento a la tienda y al soporte especializado, y eso arriba; despues lo demas".
-     Movimiento solo de compositor (transform/opacity). El reloj de la vitrina es UNA animacion CSS de 2.2 s
-     (--dur-scene): main.js avanza producto y fila de prioridad en cada "animationiteration", asi que todo se
-     detiene solo fuera de cuadro (.is-offscreen), con la pestana oculta, con "Pausar" y bajo reduced-motion. -->
-<section class="portada" id="portada" data-cam="01" data-label="INICIO" data-tone="ink" aria-labelledby="portadaTitulo">
-  <div class="wrap portada__grid">
-    <div class="portada__copy">
-      <p class="meta portada__eyebrow"><span class="portada__dot" aria-hidden="true"></span>Seguridad · Redes · IA · Software</p>
-      <h1 class="display lines" id="portadaTitulo"><span class="ln"><span>Seguridad, IA y software</span></span><span class="ln"><span>para una operación</span></span><span class="ln"><span><em>más inteligente</em>.</span></span></h1>
-      <p class="lead lead--dark portada__lead">Integramos seguridad electrónica, redes y software a la medida para proteger tu espacio, automatizar tareas y mejorar el control de tu operación.</p>
-      <p class="portada__mas hide-mobile"><a href="#contacto" data-tipo="Proyecto a la medida" data-cursor="Ir">¿Un proyecto a la medida? <b>Hablemos de tu proyecto →</b></a></p>
-    </div>
-
-    <div class="puertas">
-      <!-- PUERTA 1 · TIENDA: productos reales del catalogo rotando (mismas fotos que el estante de CAM 07) -->
-      <article class="puerta puerta--tienda" aria-labelledby="puertaTienda">
-        <div class="puerta__media vitrina feed is-active">
-          <ul class="vitrina__lista" aria-label="Algunos productos de la tienda">
-            <li class="vitrina__item is-on"><img src="assets/img/cat-camara-colorvu-480.webp" srcset="assets/img/cat-camara-colorvu-480.webp 480w, assets/img/cat-camara-colorvu-800.webp 800w" sizes="(max-width:767px) 44vw, 340px" alt="" width="800" height="600" fetchpriority="high" decoding="async"><span class="vitrina__cap"><span class="meta">Hikvision</span><b>Cámara ColorVu 2MP</b></span><span class="vitrina__n meta" aria-hidden="true">01 / 06</span></li>
-            <li class="vitrina__item"><img src="assets/img/cat-control-acceso-480.webp" srcset="assets/img/cat-control-acceso-480.webp 480w, assets/img/cat-control-acceso-800.webp 800w" sizes="(max-width:767px) 44vw, 340px" alt="" width="800" height="600" decoding="async"><span class="vitrina__cap"><span class="meta">Hikvision</span><b>Control de acceso facial</b></span><span class="vitrina__n meta" aria-hidden="true">02 / 06</span></li>
-            <li class="vitrina__item"><img src="assets/img/cat-switch-pro-max-480.webp" srcset="assets/img/cat-switch-pro-max-480.webp 480w, assets/img/cat-switch-pro-max-800.webp 800w" sizes="(max-width:767px) 44vw, 340px" alt="" width="800" height="600" decoding="async"><span class="vitrina__cap"><span class="meta">Ubiquiti</span><b>Switch Pro Max 24 PoE</b></span><span class="vitrina__n meta" aria-hidden="true">03 / 06</span></li>
-            <li class="vitrina__item"><img src="assets/img/cat-router-480.webp" srcset="assets/img/cat-router-480.webp 480w, assets/img/cat-router-800.webp 800w" sizes="(max-width:767px) 44vw, 340px" alt="" width="800" height="600" decoding="async"><span class="vitrina__cap"><span class="meta">Redes</span><b>Router empresarial</b></span><span class="vitrina__n meta" aria-hidden="true">04 / 06</span></li>
-            <li class="vitrina__item"><img src="assets/img/cat-ups-nova-480.webp" srcset="assets/img/cat-ups-nova-480.webp 480w, assets/img/cat-ups-nova-800.webp 800w" sizes="(max-width:767px) 44vw, 340px" alt="" width="800" height="600" decoding="async"><span class="vitrina__cap"><span class="meta">Nova</span><b>UPS 600VA</b></span><span class="vitrina__n meta" aria-hidden="true">05 / 06</span></li>
-            <li class="vitrina__item"><img src="assets/img/cat-hd-purple-480.webp" srcset="assets/img/cat-hd-purple-480.webp 480w, assets/img/cat-hd-purple-800.webp 800w" sizes="(max-width:767px) 44vw, 340px" alt="" width="800" height="600" decoding="async"><span class="vitrina__cap"><span class="meta">Western Digital</span><b>Disco Purple 1TB</b></span><span class="vitrina__n meta" aria-hidden="true">06 / 06</span></li>
-          </ul>
-          <span class="puerta__tag meta">01 · Tienda</span>
-          <span class="feed__corners"></span>
-          <span class="vitrina__bar" aria-hidden="true"><i></i></span>
-          <a class="puerta__hit" href="https://tienda.crimsoncr.com/products" target="_blank" rel="noopener" tabindex="-1" aria-hidden="true" data-cursor="Tienda"></a>
-        </div>
-        <div class="puerta__body">
-          <h2 class="puerta__title" id="puertaTienda">Tienda en línea</h2>
-          <p class="puerta__txt">Equipo profesional de marcas líderes, con garantía y soporte local.</p>
-          <ul class="puerta__lista">
-            <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/></svg>Precio a la vista</li>
-            <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>Factura electrónica</li>
-            <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h11v10H3z"/><path d="M14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>Envío o retiro</li>
-          </ul>
-          <div class="puerta__ctas">
-            <a class="btn btn--crimson puerta__cta" href="https://tienda.crimsoncr.com/products" target="_blank" rel="noopener" data-cursor="Tienda"><span>Comprar<span class="hide-mobile"> en la tienda</span></span><i class="btn__arrow" aria-hidden="true"></i></a>
-            <span class="puerta__nota meta">Distribuidor autorizado Hikvision</span>
-          </div>
-        </div>
-      </article>
-
-      <!-- PUERTA 2 · SOPORTE ESPECIALIZADO: consola en vivo (hora de CR, ticker y relojes por prioridad, SIN horas publicadas) -->
-      <article class="puerta puerta--soporte" aria-labelledby="puertaSoporte">
-        <div class="puerta__media monitor feed is-rec">
-          <div class="monitor__top meta"><span class="monitor__tag">02 · Soporte</span><span class="rec"><i></i>CAM · En vivo</span><span class="feed__clock" aria-hidden="true">--:--:--</span></div>
-          <div class="monitor__ticker meta" aria-hidden="true"><div class="monitor__track"><span>Mesa de ayuda en línea ● Técnicos locales · Alajuela ● Crítica → respuesta inmediata ● Alta → respuesta prioritaria ● Media → respuesta programada ● Baja → respuesta planificada ● Mantenimiento preventivo y correctivo ●&nbsp;</span><span>Mesa de ayuda en línea ● Técnicos locales · Alajuela ● Crítica → respuesta inmediata ● Alta → respuesta prioritaria ● Media → respuesta programada ● Baja → respuesta planificada ● Mantenimiento preventivo y correctivo ●&nbsp;</span></div></div>
-          <ol class="monitor__sla" aria-label="Atención según prioridad: mientras más crítico, más rápida la respuesta">
-            <li class="is-on"><span class="sla__p sla__p--critica">Crítica</span><span class="monitor__r">Respuesta inmediata</span><span class="sla__reloj" style="--p:.15" aria-hidden="true"><i></i></span></li>
-            <li><span class="sla__p sla__p--alta">Alta</span><span class="monitor__r">Respuesta prioritaria</span><span class="sla__reloj" style="--p:.35" aria-hidden="true"><i></i></span></li>
-            <li><span class="sla__p">Media</span><span class="monitor__r">Respuesta programada</span><span class="sla__reloj" style="--p:.6" aria-hidden="true"><i></i></span></li>
-            <li><span class="sla__p">Baja</span><span class="monitor__r">Respuesta planificada</span><span class="sla__reloj" style="--p:.85" aria-hidden="true"><i></i></span></li>
-          </ol>
-          <span class="feed__corners"></span>
-          <a class="puerta__hit" href="#incidentForm" tabindex="-1" aria-hidden="true" data-cursor="Reportar"></a>
-        </div>
-        <div class="puerta__body">
-          <h2 class="puerta__title" id="puertaSoporte">Soporte especializado</h2>
-          <p class="puerta__txt">Reportá la falla y te atendemos según la prioridad: mientras más crítico, más rápida la respuesta.</p>
-          <ul class="puerta__lista">
-            <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13a8 8 0 0 1 16 0"/><rect x="3" y="12" width="4" height="6" rx="1.5"/><rect x="17" y="12" width="4" height="6" rx="1.5"/><path d="M19 18a3 3 0 0 1-3 3h-3"/></svg>Técnicos locales</li>
-            <li><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Atención por prioridad</li>
-            <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1"/><path d="M8 20h8M12 16v4"/></svg>Tickets en línea</li>
-          </ul>
-          <div class="puerta__ctas">
-            <a class="btn btn--white puerta__cta" href="#incidentForm" data-cursor="Reportar"><span>Reportar<span class="hide-mobile"> una</span> falla</span><i class="btn__arrow" aria-hidden="true"></i></a>
-            <a class="puerta__link" href="ayuda/">Centro de ayuda <span aria-hidden="true">→</span></a>
-          </div>
-        </div>
-      </article>
-    </div>
-      <!-- Atencion preferencial (26/10): el camino de "cotizar una solucion" bajo las dos puertas, con el boton de la
-         portada anterior. Lleva al formulario de contacto con el tema ya elegido. -->
-    <div class="portada__cotiza">
-      <p><b>¿Necesitás atención preferencial?</b><span>Te preparamos una propuesta a la medida.</span></p>
-      <a class="btn btn--white btn--lg portada__cotiza-btn" href="#contacto" data-tipo="Cotizar una solución" data-cursor="Cotizar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h7M9 16h5"/></svg><span>Cotizar una solución</span></a>
+<!-- Menu (movil y tableta): pantalla completa en el celular, panel lateral en tableta -->
+<div class="nvh-menu" id="nvhMenu" role="dialog" aria-modal="true" aria-label="Menú" hidden>
+  <div class="nvh-menu__scrim" data-nvh-close></div>
+  <div class="nvh-menu__panel">
+    <svg class="nvh-menu__net" viewBox="0 0 400 400" aria-hidden="true">
+      <path d="M40 330L150 250L290 290L360 170M150 250L210 120L360 170M210 120L330 60"/>
+      <circle cx="40" cy="330" r="3"/><circle cx="150" cy="250" r="3"/><circle cx="290" cy="290" r="3"/><circle cx="360" cy="170" r="3"/><circle cx="210" cy="120" r="3"/><circle cx="330" cy="60" r="3"/>
+    </svg>
+    <nav class="nvh-menu__nav" aria-label="Menú principal">
+      <a href="#soluciones" style="--i:0"><span class="nvh-menu__n" aria-hidden="true">01</span>Soluciones</a>
+      <a href="https://tienda.crimsoncr.com/" data-nvh-tienda style="--i:1"><span class="nvh-menu__n" aria-hidden="true">02</span>Tienda</a>
+      <a href="#proyectos" style="--i:2"><span class="nvh-menu__n" aria-hidden="true">03</span>Proyectos</a>
+      <a href="#soporte" style="--i:3"><span class="nvh-menu__n" aria-hidden="true">04</span>Soporte</a>
+      <a href="https://panel.crimsoncr.com/login" rel="noopener" style="--i:4"><span class="nvh-menu__n" aria-hidden="true">05</span>Portal de clientes</a>
+    </nav>
+    <div class="nvh-menu__foot" style="--i:5">
+      <a class="nv-btn nv-btn--red nvh-menu__wa" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20una%20soluci%C3%B3n." target="_blank" rel="noopener" data-nvh-wa="Hola Crimson, quiero cotizar una solución.">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.3-4A8 8 0 1 1 8 18.7z"/><path d="M9 9.5c.3 2 2.5 4.2 4.5 4.5l1-1.2 2 .9c-.2 1-1 1.8-2 1.8A6.5 6.5 0 0 1 8 9c0-1 .8-1.8 1.8-2l.9 2z"/></svg>
+        Escribinos por WhatsApp
+      </a>
+      <a class="nvh-menu__tel" href="tel:+50688889892" data-nvh-tel>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>
+        <span>Llamanos <b>+506 8888 9892</b></span>
+      </a>
+      <p class="nvh-menu__place">Alajuela, Costa Rica</p>
     </div>
   </div>
-  <button class="portada__pausa meta" id="portadaPausa" type="button"><span class="portada__pausa-ico" aria-hidden="true"></span><span class="portada__pausa-txt">Pausar movimiento</span></button>
+</div>
+
+<main id="contenido" tabindex="-1">
+
+<section class="nvh-hero" id="inicio" aria-labelledby="nvhTitulo">
+  <span class="nvh-sentinel" aria-hidden="true"></span>
+
+  <div class="nvh-media">
+    <img class="nvh-media__img"
+      src="assets/img/galeria/comunidad-rotulo-noche-960.webp"
+      srcset="assets/img/galeria/comunidad-rotulo-noche-480.webp 480w, assets/img/galeria/comunidad-rotulo-noche-960.webp 960w, assets/img/galeria/comunidad-rotulo-noche-1600.webp 1600w"
+      sizes="(min-width:1024px) 54vw, 70vw"
+      width="1600" height="2133" alt="Cámara de videovigilancia y rótulo de Crimson en un poste, al anochecer"
+      fetchpriority="high" decoding="async">
+    <span class="nvh-media__scan" aria-hidden="true"></span>
+    <span class="nvh-media__frame" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+    <p class="nvh-media__cap"><span class="nvh-media__dot" aria-hidden="true"></span>Instalación Crimson · videovigilancia comunitaria</p>
+  </div>
+
+  <!-- Red de nodos: dos dibujos livianos (vertical para movil, horizontal para escritorio); solo uno se muestra -->
+  <svg class="nvh-net nvh-net--v" viewBox="0 0 400 860" preserveAspectRatio="xMidYMin slice" aria-hidden="true" focusable="false">
+    <g class="nvh-net__l"><path d="M34 128L132 92L250 150L360 96M132 92L104 236L250 150L318 268M104 236L196 330L318 268M360 96L318 268"/></g>
+    <g class="nvh-net__p">
+      <circle r="3" cx="34" cy="128" style="--dx:98px;--dy:-36px;--t:9s;--d:-2s"/>
+      <circle r="3" cx="250" cy="150" style="--dx:68px;--dy:118px;--t:11s;--d:-7s"/>
+    </g>
+    <g class="nvh-net__n"><circle cx="34" cy="128" r="2.5"/><circle cx="132" cy="92" r="2.5"/><circle cx="250" cy="150" r="2.5"/><circle cx="360" cy="96" r="2.5"/><circle cx="104" cy="236" r="2.5"/><circle cx="318" cy="268" r="2.5"/><circle cx="196" cy="330" r="2.5"/></g>
+    <g class="nvh-net__g"><circle cx="250" cy="150" r="9" style="--d:0s"/><circle cx="104" cy="236" r="9" style="--d:-3s"/></g>
+  </svg>
+  <svg class="nvh-net nvh-net--h" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+    <g class="nvh-net__l"><path d="M60 760L250 820M250 820L560 846M760 170L980 120L1180 210L1380 140M980 120L930 380L1180 210L1300 470M930 380L1080 560L1300 470M1080 560L1010 760L1250 790L1300 470M560 846L1010 760M1380 140L1300 470"/></g>
+    <g class="nvh-net__p">
+      <circle r="3.5" cx="760" cy="170" style="--dx:220px;--dy:-50px;--t:10s;--d:-1s"/>
+      <circle r="3.5" cx="1180" cy="210" style="--dx:120px;--dy:260px;--t:12s;--d:-6s"/>
+      <circle r="3.5" cx="560" cy="846" style="--dx:450px;--dy:-86px;--t:14s;--d:-4s"/>
+      <circle r="3.5" cx="930" cy="380" style="--dx:150px;--dy:180px;--t:11s;--d:-9s"/>
+    </g>
+    <g class="nvh-net__n"><circle cx="60" cy="760" r="3"/><circle cx="250" cy="820" r="3"/><circle cx="560" cy="846" r="3"/><circle cx="760" cy="170" r="3"/><circle cx="980" cy="120" r="3"/><circle cx="1180" cy="210" r="3"/><circle cx="1380" cy="140" r="3"/><circle cx="930" cy="380" r="3"/><circle cx="1300" cy="470" r="3"/><circle cx="1080" cy="560" r="3"/><circle cx="1010" cy="760" r="3"/><circle cx="1250" cy="790" r="3"/></g>
+    <g class="nvh-net__g"><circle cx="1180" cy="210" r="12" style="--d:0s"/><circle cx="1080" cy="560" r="12" style="--d:-2.5s"/><circle cx="250" cy="820" r="12" style="--d:-4s"/></g>
+  </svg>
+
+  <div class="nv-wrap nvh-hero__in">
+    <div class="nvh-copy">
+      <p class="nv-eyebrow nvh-eyebrow" style="--i:0">Seguridad · Redes · IA · Software</p>
+      <h1 class="nvh-title" id="nvhTitulo" style="--i:1">Seguridad, IA y software para una operación <em>más inteligente.</em></h1>
+      <p class="nvh-lead" style="--i:2">Integramos seguridad electrónica, redes y software a la medida para proteger tu espacio y automatizar tu operación.</p>
+      <div class="nvh-ctas" style="--i:3">
+        <a class="nv-btn nv-btn--red nvh-btn" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20un%20proyecto." target="_blank" rel="noopener" data-nvh-wa="Hola Crimson, quiero cotizar un proyecto.">
+          Cotizar un proyecto
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="nv-btn nv-btn--line nvh-btn" href="#soluciones">Ver soluciones</a>
+      </div>
+      <p class="nvh-trust" style="--i:4"><span>Distribuidor autorizado Hikvision</span><span>Respaldo técnico local</span></p>
+    </div>
+  </div>
 </section>
 
-<!-- 2 · LINEAS DE SOLUCION: la consola de antes (26/10: "volvamos a esta vista"). Las anclas de los videos (#seguridad,
-     #redes, #iot, #ia, #software) abren su pestana (main.js, bloque Consola). Sin las cifras de relleno; los aliados van al
-     final de Ejemplos. -->
-<section class="servicios" id="soluciones" data-cam="02" data-label="SOLUCIONES" data-tone="ink">
-  <div class="wrap">
-    <div class="sec-idx meta reveal" aria-hidden="true"><span>02</span><i></i><span>Líneas de solución</span></div>
-    <div class="servicios__head">
-      <h2 class="display-2 lines reveal"><span class="ln"><span>Verticales que protegen,</span></span><span class="ln"><span>conectan y <em>optimizan</em></span></span></h2>
-      <p class="lead lead--dark reveal" style="--d:1">Soluciones integrales de seguridad, conectividad y gestión para comunidades, condominios y empresas: cinco líneas que trabajan juntas bajo un solo responsable.</p>
+<!-- ===== parte 2-tienda.html (docs/inicio/parts) ===== -->
+<!-- 2 · TIENDA (prefijo nvt-): fila de 4 accesos (pegada a la portada) + tienda: tarjeta protagonista con collage de
+     productos reales sobre blanco, 4 destacados reales con precio vigente (2-tienda.js) y "Armá tu sistema".
+     Para cambiar un destacado: data-pid = id del producto en la tienda y href = su direccion /p/... -->
+<nav class="nvt-quick" aria-label="Accesos rápidos a soluciones">
+  <div class="nv-wrap">
+    <div class="nvt-quick__row" data-nv-in>
+      <span class="nvt-pulse" aria-hidden="true"></span>
+      <ul class="nvt-quick__list">
+      <li><a class="nvt-q" href="#sol-seguridad">
+        <span class="nvt-q__ico" aria-hidden="true"><svg class="nv-ico" viewBox="0 0 24 24"><path d="M12 2.8 19.5 5.6v5.6c0 4.6-3.1 8.3-7.5 10-4.4-1.7-7.5-5.4-7.5-10V5.6z"/><circle cx="12" cy="11.4" r="3.4"/><circle cx="12" cy="11.4" r=".9"/></svg></span>
+        <span class="nvt-q__t">Seguridad y video</span>
+      </a></li>
+      <li><a class="nvt-q" href="#sol-redes">
+        <span class="nvt-q__ico" aria-hidden="true"><svg class="nv-ico" viewBox="0 0 24 24"><path d="M2.6 9.2a13.5 13.5 0 0 1 18.8 0"/><path d="M5.8 12.6a9 9 0 0 1 12.4 0"/><path d="M9 16a4.5 4.5 0 0 1 6 0"/><circle cx="12" cy="19.4" r=".9"/></svg></span>
+        <span class="nvt-q__t">Redes y Wi-Fi</span>
+      </a></li>
+      <li><a class="nvt-q" href="#sol-software">
+        <span class="nvt-q__ico" aria-hidden="true"><svg class="nv-ico" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.4"/><path d="M9.6 14.4v-3.2a1.6 1.6 0 0 1 3.2 0v3.2M9.6 12.8h3.2M14.6 9.6v4.8"/><path d="M9 2.8V6M15 2.8V6M9 18v3.2M15 18v3.2M2.8 9H6M2.8 15H6M18 9h3.2M18 15h3.2"/></svg></span>
+        <span class="nvt-q__t">IA y software</span>
+      </a></li>
+      <li><a class="nvt-q" href="#sol-iot">
+        <span class="nvt-q__ico" aria-hidden="true"><svg class="nv-ico" viewBox="0 0 24 24"><path d="M3.6 11 12 4l8.4 7"/><path d="M5.8 9.4V20h12.4V9.4"/><circle cx="12" cy="13.6" r="1.7"/><circle cx="8.6" cy="17.2" r=".9"/><circle cx="15.4" cy="17.2" r=".9"/><path d="m10.8 14.8-1.5 1.6M13.2 14.8l1.5 1.6"/></svg></span>
+        <span class="nvt-q__t">IoT y automatización</span>
+      </a></li>
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<section id="tienda" class="nv-sec nvt" aria-labelledby="nvt-title">
+  <div class="nv-wrap">
+    <div class="nv-head">
+      <div class="nv-head__t">
+        <h2 id="nvt-title">Tienda en línea</h2>
+        <p>Equipo original, con garantía y factura electrónica.</p>
+      </div>
+      <a class="nv-head__more nvt-more" href="https://tienda.crimsoncr.com/" rel="noopener">Ver todo<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
     </div>
 
-    <ul class="pillars reveal" aria-label="Pilares">
-      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg><div><b>Seguridad</b><span>confiable</span></div></li>
-      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9a14 14 0 0 1 18 0"/><path d="M6.5 12.5a9 9 0 0 1 11 0"/><path d="M10 16a4 4 0 0 1 4 0"/><circle cx="12" cy="19" r="1"/></svg><div><b>Conectividad</b><span>estable</span></div></li>
-      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg><div><b>Operación</b><span>eficiente</span></div></li>
-      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13a8 8 0 0 1 16 0"/><rect x="3" y="12" width="4" height="6" rx="1.5"/><rect x="17" y="12" width="4" height="6" rx="1.5"/><path d="M19 18a3 3 0 0 1-3 3h-3"/></svg><div><b>Servicio</b><span>cercano</span></div></li>
+    <!-- Tarjeta protagonista: texto corto + vitrina blanca con productos reales del catalogo (ilustrativos) -->
+    <article class="nvt-feat nv-card" data-nv-in>
+      <svg class="nvt-feat__net" viewBox="0 0 400 220" aria-hidden="true" focusable="false">
+        <path d="M24 186 92 128l78 34 70-74 88 26 48-62"/>
+        <path d="M92 128 116 52l124 36"/>
+        <g><circle cx="24" cy="186" r="2.6"/><circle cx="92" cy="128" r="2.6"/><circle cx="170" cy="162" r="2.6"/><circle cx="240" cy="88" r="3.2" class="nvt-hot"/><circle cx="328" cy="114" r="2.6"/><circle cx="376" cy="52" r="2.6"/><circle cx="116" cy="52" r="2.6"/></g>
+      </svg>
+      <div class="nvt-feat__txt">
+        <span class="nv-eyebrow">Distribuidor autorizado Hikvision</span>
+        <h3 class="nvt-feat__h">Equipos de las <em>mejores marcas</em></h3>
+        <ul class="nvt-brands" aria-label="Marcas: Hikvision, Ubiquiti, APC y más">
+          <li><img src="assets/img/marca-hikvision-mono.png" alt="Hikvision" width="600" height="120" loading="lazy" decoding="async"></li>
+          <li><img src="assets/img/marca-ubiquiti-mono.png" alt="Ubiquiti" width="412" height="120" loading="lazy" decoding="async"></li>
+          <li><img src="assets/img/marca-apc-mono.png" alt="APC" width="505" height="120" loading="lazy" decoding="async"></li>
+          <li class="nvt-brands__more" aria-hidden="true">y más</li>
+        </ul>
+        <a class="nv-btn nv-btn--red nvt-feat__cta" href="https://tienda.crimsoncr.com/" rel="noopener">Comprar ahora<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+      </div>
+      <div class="nvt-vit" role="img" aria-label="Productos de la tienda: control de acceso, cámara, UPS, router y switch">
+        <div class="nvt-vit__stage">
+          <span class="nvt-pz nvt-pz--acc" style="--x:309;--y:112;--w:183;--h:381;--o:1"><span class="nvt-pz__c"><img src="assets/img/cat-control-acceso-480.webp" srcset="assets/img/cat-control-acceso-480.webp 480w, assets/img/cat-control-acceso-800.webp 800w" sizes="(max-width:767px) 90vw, 560px" alt="" width="800" height="600" loading="lazy" decoding="async"></span></span>
+          <span class="nvt-pz nvt-pz--ups" style="--x:200;--y:120;--w:400;--h:360;--o:2"><span class="nvt-pz__c"><img src="assets/img/cat-ups-nova-480.webp" srcset="assets/img/cat-ups-nova-480.webp 480w, assets/img/cat-ups-nova-800.webp 800w" sizes="(max-width:767px) 90vw, 560px" alt="" width="800" height="600" loading="lazy" decoding="async"></span></span>
+          <span class="nvt-pz nvt-pz--cam" style="--x:219;--y:106;--w:362;--h:388;--o:0"><span class="nvt-pz__c"><img src="assets/img/cat-camara-colorvu-480.webp" srcset="assets/img/cat-camara-colorvu-480.webp 480w, assets/img/cat-camara-colorvu-800.webp 800w" sizes="(max-width:767px) 120vw, 760px" alt="" width="800" height="600" loading="lazy" decoding="async"></span></span>
+          <span class="nvt-pz nvt-pz--rtr" style="--x:244;--y:242;--w:312;--h:116;--o:3"><span class="nvt-pz__c"><img src="assets/img/cat-router-480.webp" srcset="assets/img/cat-router-480.webp 480w, assets/img/cat-router-800.webp 800w" sizes="(max-width:767px) 90vw, 560px" alt="" width="800" height="600" loading="lazy" decoding="async"></span></span>
+          <span class="nvt-pz nvt-pz--sw" style="--x:205;--y:263;--w:391;--h:72;--o:4"><span class="nvt-pz__c"><img src="assets/img/cat-switch-pro-max-480.webp" srcset="assets/img/cat-switch-pro-max-480.webp 480w, assets/img/cat-switch-pro-max-800.webp 800w" sizes="(max-width:767px) 90vw, 560px" alt="" width="800" height="600" loading="lazy" decoding="async"></span></span>
+        </div>
+      </div>
+    </article>
+
+    <!-- Destacados: 4 equipos reales; el precio vigente lo pone 2-tienda.js (respaldo: "Ver precio") -->
+    <div class="nvt-dest">
+      <h3 class="nvt-dest__h">Destacados</h3>
+      <ul class="nvt-rail" data-nvt-rail>
+        <li data-nv-in style="--i:0"><a class="nvt-p" data-pid="152" href="https://tienda.crimsoncr.com/p/control-de-acceso-reconocimiento-facial-lector-de-tarjeta-em-152" rel="noopener">
+          <span class="nvt-p__img"><img src="assets/img/dest-acceso-480.webp" srcset="assets/img/dest-acceso-480.webp 480w, assets/img/dest-acceso-600.webp 600w" sizes="(max-width:767px) 64vw, 280px" alt="Terminal de reconocimiento facial Hikvision" width="600" height="600" loading="lazy" decoding="async"></span>
+          <span class="nvt-p__b">
+            <span class="nvt-p__ben">Controlá quién entra</span>
+            <span class="nvt-p__n">Acceso facial Hikvision</span>
+            <span class="nvt-p__foot"><span class="nvt-p__pr" data-price>Ver precio</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
+          </span>
+        </a></li>
+        <li data-nv-in style="--i:1"><a class="nvt-p" data-pid="90" href="https://tienda.crimsoncr.com/p/camara-dome-hikvision-ds-2cd2143g2-lis2u-2-8mm-4mp-acusense-smart-90" rel="noopener">
+          <span class="nvt-p__img"><img src="assets/img/dest-camara-480.webp" srcset="assets/img/dest-camara-480.webp 480w, assets/img/dest-camara-600.webp 600w" sizes="(max-width:767px) 64vw, 280px" alt="Cámara domo Hikvision AcuSense" width="600" height="600" loading="lazy" decoding="async"></span>
+          <span class="nvt-p__b">
+            <span class="nvt-p__ben">Distingue personas y autos</span>
+            <span class="nvt-p__n">Cámara domo 4 MP AcuSense</span>
+            <span class="nvt-p__foot"><span class="nvt-p__pr" data-price>Ver precio</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
+          </span>
+        </a></li>
+        <li data-nv-in style="--i:2"><a class="nvt-p" data-pid="497" href="https://tienda.crimsoncr.com/p/punto-de-acceso-tp-link-omada-eap610-ax1800-ceiling-mount-wifi-6-497" rel="noopener">
+          <span class="nvt-p__img"><img src="assets/img/dest-wifi-480.webp" srcset="assets/img/dest-wifi-480.webp 480w, assets/img/dest-wifi-600.webp 600w" sizes="(max-width:767px) 64vw, 280px" alt="Punto de acceso Wi-Fi 6 de techo TP-Link Omada" width="600" height="600" loading="lazy" decoding="async"></span>
+          <span class="nvt-p__b">
+            <span class="nvt-p__ben">Wi-Fi en todo el local</span>
+            <span class="nvt-p__n">Wi-Fi 6 de techo Omada</span>
+            <span class="nvt-p__foot"><span class="nvt-p__pr" data-price>Ver precio</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
+          </span>
+        </a></li>
+        <li data-nv-in style="--i:3"><a class="nvt-p" data-pid="1682" href="https://tienda.crimsoncr.com/p/enchufe-inteligente-ezviz-cs-t30-10b-us-wifi-2-4ghz-control-por-voz-1682" rel="noopener">
+          <span class="nvt-p__img"><img src="assets/img/dest-enchufe-480.webp" srcset="assets/img/dest-enchufe-480.webp 480w, assets/img/dest-enchufe-600.webp 600w" sizes="(max-width:767px) 64vw, 280px" alt="Enchufe inteligente Ezviz T30" width="600" height="600" loading="lazy" decoding="async"></span>
+          <span class="nvt-p__b">
+            <span class="nvt-p__ben">Controlá desde el celular</span>
+            <span class="nvt-p__n">Enchufe inteligente Ezviz</span>
+            <span class="nvt-p__foot"><span class="nvt-p__pr" data-price>Ver precio</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
+          </span>
+        </a></li>
+      </ul>
+    </div>
+
+    <!-- Configurador de la tienda (KitBuilder: 4 preguntas, kit con productos reales y precio) -->
+    <a class="nvt-kit" href="https://tienda.crimsoncr.com/arma-tu-sistema" rel="noopener" data-nv-in>
+      <span class="nvt-kit__ico" aria-hidden="true"><svg class="nv-ico" viewBox="0 0 24 24"><rect x="3" y="3.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3.5" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13" width="7.5" height="7.5" rx="1.6"/><path d="M17.25 14v6M14.25 17h6"/></svg></span>
+      <span class="nvt-kit__t"><strong>Armá tu sistema de cámaras</strong><span>4 preguntas y te cotizamos el kit al instante.</span></span>
+      <span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+    </a>
+  </div>
+</section>
+
+<!-- ===== parte 3-soluciones.html (docs/inicio/parts) ===== -->
+<!-- 3 · SOLUCIONES (26/10). Tarjetas simples (2 columnas en celular, 3 en tableta y escritorio) y el detalle de cada
+     una en una hoja <dialog> que solo aparece si se pide: la pagina queda limpia. Los id sol-* los usan los accesos de la
+     parte 2: un enlace a #sol-x abre su hoja directo (3-soluciones.js). Los puntos salen de la consola de la pagina actual. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="nvs-i-cctv" viewBox="0 0 24 24"><path d="M3 7.6 14.4 4.5l1.7 6.1L4.7 13.7z"/><path d="m16.1 7.9 4.4-1.3.6 4.4-4.3.6"/><path d="M7.4 13v4.5H3.5"/><path d="M3.5 15.5v4"/><circle cx="6.6" cy="9.3" r=".5"/></symbol>
+  <symbol id="nvs-i-acceso" viewBox="0 0 24 24"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8"/><path d="M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8"/><path d="M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16"/><path d="M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><circle cx="12" cy="10" r="2.6"/><path d="M8 16.8c.8-1.8 2.3-2.8 4-2.8s3.2 1 4 2.8"/></symbol>
+  <symbol id="nvs-i-redes" viewBox="0 0 24 24"><path d="M3 9a14 14 0 0 1 18 0"/><path d="M6.5 12.5a9 9 0 0 1 11 0"/><path d="M10 16a4 4 0 0 1 4 0"/><circle cx="12" cy="19" r="1"/></symbol>
+  <symbol id="nvs-i-soft" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2.2"/><path d="M10 3v3.5M14 3v3.5M10 17.5V21M14 17.5V21M3 10h3.5M3 14h3.5M17.5 10H21M17.5 14H21"/><path d="m10 14.2 2-4.4 2 4.4M10.7 12.8h2.6"/></symbol>
+  <symbol id="nvs-i-iot" viewBox="0 0 24 24"><path d="M4 10.8 12 4.5l8 6.3V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M9.2 14.2a4 4 0 0 1 5.6 0"/><circle cx="12" cy="17" r=".9"/></symbol>
+  <symbol id="nvs-i-ask" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 0 1-12.3 7.6L3.5 20.5l1-4.4A8.5 8.5 0 1 1 20.5 12z"/><path d="M9.8 9.6a2.3 2.3 0 1 1 3.2 2.1c-.6.3-1 .8-1 1.4v.4"/><circle cx="12" cy="16.2" r=".5"/></symbol>
+  <symbol id="nvs-i-go" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="nvs-i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="nvs-i-wa" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 0 1-12.6 7.4L3.5 20.5l1.2-4.2A8.5 8.5 0 1 1 20.5 12z"/><path d="M9 8.6c.2-.4.6-.4.9-.4l.6 1.5-.6.8a5.6 5.6 0 0 0 2.7 2.7l.8-.6 1.5.6c0 .3 0 .7-.4.9-.9.6-2.4.5-4.2-1.2S8.4 9.5 9 8.6z"/></symbol>
+  <symbol id="nvs-i-tienda" viewBox="0 0 24 24"><path d="M3 4h2l2.4 11h11l2-7H7"/><circle cx="9" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/></symbol>
+  <symbol id="nvs-i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+</svg>
+
+<section id="soluciones" class="nv-sec nvs" aria-labelledby="nvs-h">
+  <div class="nv-wrap">
+    <header class="nv-head" data-nv-in>
+      <div class="nv-head__t">
+        <h2 id="nvs-h">Nuestras soluciones</h2>
+        <p>Tecnología para cada necesidad</p>
+      </div>
+    </header>
+
+    <ul class="nvs-grid">
+      <li data-nv-in style="--i:0">
+        <button type="button" class="nvs-card" id="sol-seguridad" data-nvs-open="nvs-d-seguridad" aria-haspopup="dialog" aria-controls="nvs-d-seguridad">
+          <span class="nvs-card__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-cctv"/></svg></span>
+          <span class="nv-go" aria-hidden="true"><svg><use href="#nvs-i-go"/></svg></span>
+          <span class="nvs-card__t">Videovigilancia (CCTV)</span>
+          <svg class="nvs-card__mark" aria-hidden="true"><use href="#nvs-i-cctv"/></svg>
+        </button>
+      </li>
+      <li data-nv-in style="--i:1">
+        <button type="button" class="nvs-card" id="sol-acceso" data-nvs-open="nvs-d-acceso" aria-haspopup="dialog" aria-controls="nvs-d-acceso">
+          <span class="nvs-card__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-acceso"/></svg></span>
+          <span class="nv-go" aria-hidden="true"><svg><use href="#nvs-i-go"/></svg></span>
+          <span class="nvs-card__t">Control de acceso y asistencia</span>
+          <svg class="nvs-card__mark" aria-hidden="true"><use href="#nvs-i-acceso"/></svg>
+        </button>
+      </li>
+      <li data-nv-in style="--i:2">
+        <button type="button" class="nvs-card" id="sol-redes" data-nvs-open="nvs-d-redes" aria-haspopup="dialog" aria-controls="nvs-d-redes">
+          <span class="nvs-card__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-redes"/></svg></span>
+          <span class="nv-go" aria-hidden="true"><svg><use href="#nvs-i-go"/></svg></span>
+          <span class="nvs-card__t">Redes, Wi-Fi y conectividad</span>
+          <svg class="nvs-card__mark" aria-hidden="true"><use href="#nvs-i-redes"/></svg>
+        </button>
+      </li>
+      <li data-nv-in style="--i:3">
+        <button type="button" class="nvs-card" id="sol-software" data-nvs-open="nvs-d-software" aria-haspopup="dialog" aria-controls="nvs-d-software">
+          <span class="nvs-card__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-soft"/></svg></span>
+          <span class="nv-go" aria-hidden="true"><svg><use href="#nvs-i-go"/></svg></span>
+          <span class="nvs-card__t">IA y software a la medida</span>
+          <svg class="nvs-card__mark" aria-hidden="true"><use href="#nvs-i-soft"/></svg>
+        </button>
+      </li>
+      <li data-nv-in style="--i:4">
+        <button type="button" class="nvs-card" id="sol-iot" data-nvs-open="nvs-d-iot" aria-haspopup="dialog" aria-controls="nvs-d-iot">
+          <span class="nvs-card__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-iot"/></svg></span>
+          <span class="nv-go" aria-hidden="true"><svg><use href="#nvs-i-go"/></svg></span>
+          <span class="nvs-card__t">IoT y espacios inteligentes</span>
+          <svg class="nvs-card__mark" aria-hidden="true"><use href="#nvs-i-iot"/></svg>
+        </button>
+      </li>
+      <li data-nv-in style="--i:5">
+        <a class="nvs-card nvs-card--ask" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20no%20s%C3%A9%20por%20d%C3%B3nde%20empezar%3A%20les%20cuento%20mi%20caso." target="_blank" rel="noopener" data-nvs-wa="ask">
+          <span class="nvs-card__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-ask"/></svg></span>
+          <span class="nv-go" aria-hidden="true"><svg><use href="#nvs-i-go"/></svg></span>
+          <span class="nvs-card__t">¿No sabés por dónde empezar?<small>Contanos tu caso<span class="nv-sr"> por WhatsApp (abre en otra pestaña)</span></small></span>
+        </a>
+      </li>
     </ul>
 
-    <div class="consola reveal" data-consola>
-      <nav class="consola__tabs" role="tablist" aria-label="Líneas de solución">
-      <button class="consola__tab is-active" role="tab" data-anclas="seguridad" id="ctab-01" aria-controls="cpan-01" aria-selected="true" tabindex="0"><span class="meta consola__n">01</span><span class="consola__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></span><span class="consola__name"><small>Crimson</small>Security</span><span class="consola__bar" aria-hidden="true"><i></i></span></button>
-      <button class="consola__tab" role="tab" data-anclas="redes" id="ctab-02" aria-controls="cpan-02" aria-selected="false" tabindex="-1"><span class="meta consola__n">02</span><span class="consola__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9a14 14 0 0 1 18 0"/><path d="M6.5 12.5a9 9 0 0 1 11 0"/><path d="M10 16a4 4 0 0 1 4 0"/><circle cx="12" cy="19" r="1"/></svg></span><span class="consola__name"><small>Crimson</small>Networks</span><span class="consola__bar" aria-hidden="true"><i></i></span></button>
-      <button class="consola__tab" role="tab" data-anclas="iot" id="ctab-03" aria-controls="cpan-03" aria-selected="false" tabindex="-1"><span class="meta consola__n">03</span><span class="consola__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 19c0-3 2.7-5 6-5s6 2 6 5"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.5 0 4.5 1.6 4.5 4"/></svg></span><span class="consola__name"><small>Crimson</small>Smart Communities</span><span class="consola__bar" aria-hidden="true"><i></i></span></button>
-      <button class="consola__tab" role="tab" data-anclas="ia software" id="ctab-04" aria-controls="cpan-04" aria-selected="false" tabindex="-1"><span class="meta consola__n">04</span><span class="consola__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16"/><path d="M7 16v-4"/><path d="M12 16V8"/><path d="M17 16v-6"/><path d="M4 7l4-2 4 3 5-4 3 2"/></svg></span><span class="consola__name"><small>Crimson</small>Operations</span><span class="consola__bar" aria-hidden="true"><i></i></span></button>
-      <button class="consola__tab" role="tab" data-anclas="equipos" id="ctab-05" aria-controls="cpan-05" aria-selected="false" tabindex="-1"><span class="meta consola__n">05</span><span class="consola__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h2l2.4 11h11l2-7H7"/><circle cx="9" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/></svg></span><span class="consola__name"><small>Crimson</small>Supply</span><span class="consola__bar" aria-hidden="true"><i></i></span></button>
-      </nav>
-      <div class="consola__stage">
-      <article class="consola__panel is-active" role="tabpanel" id="cpan-01" aria-labelledby="ctab-01">
-        <div class="feed consola__media" data-cursor="CAM 03"><img src="assets/img/foto-camara-residencia-h-800.webp" srcset="assets/img/foto-camara-residencia-h-480.webp 480w, assets/img/foto-camara-residencia-h-800.webp 800w" sizes="(max-width:767px) 92vw, 520px" alt="Cámara de videovigilancia en una residencia" loading="lazy" width="1200" height="800"><span class="feed__corners"></span><span class="feed__meta"><span class="rec"><i></i>REC</span><span>CAM 03</span></span></div>
-        <div class="consola__body">
-          <h3><small>Crimson</small>Security</h3>
-          <ul class="linea__list consola__list"><li>Videovigilancia (CCTV)</li><li>Control de acceso</li><li>Videoporteros</li><li>Alarmas</li><li>Monitoreo</li><li>Mantenimiento preventivo y correctivo</li></ul>
-          <p class="linea__tag linea__tag--crimson">Protegemos lo que más te importa.</p>
+    <!-- Hojas de detalle: una por solucion. Movil: hoja que sube desde abajo; >=768: panel centrado. -->
+    <dialog class="nvs-sheet" id="nvs-d-seguridad" aria-labelledby="nvs-d-seguridad-t" aria-describedby="nvs-d-seguridad-p">
+      <div class="nvs-sheet__in">
+        <span class="nvs-sheet__grab" aria-hidden="true"></span>
+        <div class="nvs-sheet__top">
+          <span class="nvs-sheet__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-cctv"/></svg></span>
+          <div class="nvs-sheet__tt"><span class="nv-eyebrow">Solución</span><h3 id="nvs-d-seguridad-t">Videovigilancia (CCTV)</h3></div>
+          <button type="button" class="nvs-x" data-nvs-close aria-label="Cerrar"><svg aria-hidden="true"><use href="#nvs-i-x"/></svg></button>
         </div>
-      </article>
-      <article class="consola__panel" role="tabpanel" id="cpan-02" aria-labelledby="ctab-02">
-        <div class="feed consola__media" data-cursor="CAM 09"><img src="assets/img/obra-ubiquiti-h-899.webp" srcset="assets/img/obra-ubiquiti-h-480.webp 480w, assets/img/obra-ubiquiti-h-899.webp 899w" sizes="(max-width:900px) 100vw, 46vw" loading="lazy" decoding="async" alt="Punto de acceso Ubiquiti instalado en cielo raso"><span class="feed__corners"></span><span class="feed__meta"><span class="rec"><i></i>REC</span><span>ENLACE · OK</span></span></div>
-        <div class="consola__body">
-          <h3><small>Crimson</small>Networks</h3>
-          <ul class="linea__list consola__list"><li>Redes empresariales</li><li>WiFi corporativo</li><li>Enlaces inalámbricos</li><li>Fibra óptica</li><li>Cableado estructurado</li><li>UPS y energía</li></ul>
-          <p class="linea__tag linea__tag--ink">Conectividad estable para un mundo que no se detiene.</p>
+        <p class="nvs-sheet__p" id="nvs-d-seguridad-p">Mirá lo que pasa en tu casa, comercio o comunidad, en vivo y grabado, desde el celular.</p>
+        <ul class="nvs-pts">
+          <li>Cámaras Hikvision: somos distribuidor autorizado</li>
+          <li>Videoporteros y alarmas</li>
+          <li>Monitoreo desde el celular</li>
+          <li>Mantenimiento preventivo y correctivo</li>
+        </ul>
+        <div class="nvs-sheet__act">
+          <a class="nv-btn nv-btn--line" href="https://tienda.crimsoncr.com/c/camaras" data-nvs-cat="/c/camaras"><svg aria-hidden="true"><use href="#nvs-i-tienda"/></svg>Ver equipos</a>
+          <a class="nv-btn nv-btn--red" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20Videovigilancia%20(CCTV)." target="_blank" rel="noopener" data-nvs-wa="Videovigilancia (CCTV)"><svg aria-hidden="true"><use href="#nvs-i-wa"/></svg>Cotizar<span class="nv-sr"> por WhatsApp (abre en otra pestaña)</span></a>
         </div>
-      </article>
-      <article class="consola__panel" role="tabpanel" id="cpan-03" aria-labelledby="ctab-03">
-        <div class="feed consola__media" data-cursor="CAM 10"><img src="assets/img/obra-camara-solar-h-720.webp" srcset="assets/img/obra-camara-solar-h-480.webp 480w, assets/img/obra-camara-solar-h-720.webp 720w" sizes="(max-width:900px) 100vw, 46vw" loading="lazy" decoding="async" alt="Poste con cámara y panel solar en zona comunal"><span class="feed__corners"></span><span class="feed__meta"><span class="rec"><i></i>REC</span><span>ACCESO · OK</span></span></div>
-        <div class="consola__body">
-          <h3><small>Crimson</small>Smart Communities</h3>
-          <ul class="linea__list consola__list"><li>Gestión de visitantes</li><li>Control de residentes</li><li>Reservas de áreas comunes</li><li>Notificaciones y comunicación</li><li>Integración de accesos y cámaras</li><li>Plataforma Nodo Latam</li></ul>
-          <p class="linea__tag linea__tag--crimson">Comunidades más seguras, organizadas y conectadas.</p>
-        </div>
-      </article>
-      <article class="consola__panel" role="tabpanel" id="cpan-04" aria-labelledby="ctab-04">
-        <!-- Vista previa de JC Analytics (26/10): su sitio en miniatura con su lema, sus tres pilares y un tablero como los que
-             arman (Power BI / a la medida). Colores de su marca (verde oscuro + turquesa). Todo el recuadro abre jcanalytic.com/es. -->
-        <a class="feed consola__media jcp" href="https://www.jcanalytic.com/es/" target="_blank" rel="noopener" data-cursor="Visitar" aria-label="JC Analytics: software, datos e inteligencia (abre jcanalytic.com)">
-          <span class="jcp__win" aria-hidden="true">
-            <span class="jcp__bar"><i></i><i></i><i></i><span class="jcp__url">jcanalytic.com</span></span>
-            <span class="jcp__body">
-              <span class="jcp__top"><img src="assets/img/marca-jcanalytics-mono.png" alt="" width="551" height="120" loading="lazy"><span class="jcp__tag">Software · datos · inteligencia</span></span>
-              <span class="jcp__claim">Software con <em>carácter</em>.</span>
-              <span class="jcp__pilares"><span><b>01</b>Diseño</span><span><b>02</b>Ingeniería</span><span><b>03</b>Inteligencia</span></span>
-              <span class="jcp__dash">
-                <span class="jcp__kpis"><span><small>Flujo de caja</small><b>+12,4 %</b></span><span><small>Rentabilidad</small><b>31 %</b></span><span><small>Procesos automatizados</small><b>18</b></span></span>
-                <span class="jcp__chart"><i style="--h:38%"></i><i style="--h:52%"></i><i style="--h:46%"></i><i style="--h:64%"></i><i style="--h:58%"></i><i style="--h:76%"></i><i style="--h:70%"></i><i style="--h:88%"></i></span>
-              </span>
-            </span>
-          </span>
-          <span class="feed__corners"></span><span class="feed__meta"><span>JC ANALYTICS · EJEMPLO</span><span>VISITAR ↗</span></span>
-        </a>
-        <div class="consola__body">
-          <h3><small>Crimson</small>Operations</h3><span class="linea__by">En colaboración con JC Analytics</span>
-          <ul class="linea__list consola__list"><li>Tableros de operación (Power BI)</li><li>Reportes ejecutivos automáticos</li><li>Automatización de procesos y alertas</li><li>Integración de datos: accesos, cámaras y sistemas</li><li>Control de calidad de la información</li><li>Software y apps a la medida</li></ul>
-          <p class="linea__tag linea__tag--ink">Operaciones más eficientes y transparentes.</p>
-        </div>
-      </article>
-      <article class="consola__panel" role="tabpanel" id="cpan-05" aria-labelledby="ctab-05">
-        <div class="feed consola__media" data-cursor="EQUIPO"><img src="assets/img/foto-tecnico-rack-h-800.webp" srcset="assets/img/foto-tecnico-rack-h-480.webp 480w, assets/img/foto-tecnico-rack-h-800.webp 800w, assets/img/foto-tecnico-rack-h-1200.webp 1200w" sizes="(max-width:900px) 100vw, 46vw" loading="lazy" decoding="async" alt="Técnico de Crimson instalando equipos en un rack"><span class="feed__corners"></span><span class="feed__meta"><span class="rec"><i></i>REC</span><span>STOCK · OK</span></span></div>
-        <div class="consola__body">
-          <h3><small>Crimson</small>Supply</h3>
-          <ul class="linea__list consola__list"><li>Venta de equipos</li><li>Suministro tecnológico</li><li>Distribución para proyectos</li><li>Cotizaciones empresariales</li><li>Asesoría en selección de productos</li><li>Garantía y soporte</li></ul>
-          <p class="linea__tag linea__tag--crimson">Los mejores productos, disponibilidad y respaldo para tu proyecto.</p>
-        </div>
-      </article>
       </div>
-    </div>
+    </dialog>
 
+    <dialog class="nvs-sheet" id="nvs-d-acceso" aria-labelledby="nvs-d-acceso-t" aria-describedby="nvs-d-acceso-p">
+      <div class="nvs-sheet__in">
+        <span class="nvs-sheet__grab" aria-hidden="true"></span>
+        <div class="nvs-sheet__top">
+          <span class="nvs-sheet__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-acceso"/></svg></span>
+          <div class="nvs-sheet__tt"><span class="nv-eyebrow">Solución</span><h3 id="nvs-d-acceso-t">Control de acceso y asistencia</h3></div>
+          <button type="button" class="nvs-x" data-nvs-close aria-label="Cerrar"><svg aria-hidden="true"><use href="#nvs-i-x"/></svg></button>
+        </div>
+        <p class="nvs-sheet__p" id="nvs-d-acceso-p">Decidí quién entra y cuándo, y llevá la asistencia del personal sin papeles.</p>
+        <ul class="nvs-pts">
+          <li>Lectores de rostro y de tarjeta</li>
+          <li>Registro de asistencia del personal</li>
+          <li>Gestión de visitantes y residentes</li>
+          <li>Accesos integrados con las cámaras</li>
+        </ul>
+        <div class="nvs-sheet__act">
+          <a class="nv-btn nv-btn--line" href="https://tienda.crimsoncr.com/c/control-de-acceso" data-nvs-cat="/c/control-de-acceso"><svg aria-hidden="true"><use href="#nvs-i-tienda"/></svg>Ver equipos</a>
+          <a class="nv-btn nv-btn--red" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20Control%20de%20acceso%20y%20asistencia." target="_blank" rel="noopener" data-nvs-wa="Control de acceso y asistencia"><svg aria-hidden="true"><use href="#nvs-i-wa"/></svg>Cotizar<span class="nv-sr"> por WhatsApp (abre en otra pestaña)</span></a>
+        </div>
+      </div>
+    </dialog>
 
+    <dialog class="nvs-sheet" id="nvs-d-redes" aria-labelledby="nvs-d-redes-t" aria-describedby="nvs-d-redes-p">
+      <div class="nvs-sheet__in">
+        <span class="nvs-sheet__grab" aria-hidden="true"></span>
+        <div class="nvs-sheet__top">
+          <span class="nvs-sheet__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-redes"/></svg></span>
+          <div class="nvs-sheet__tt"><span class="nv-eyebrow">Solución</span><h3 id="nvs-d-redes-t">Redes, Wi-Fi y conectividad</h3></div>
+          <button type="button" class="nvs-x" data-nvs-close aria-label="Cerrar"><svg aria-hidden="true"><use href="#nvs-i-x"/></svg></button>
+        </div>
+        <p class="nvs-sheet__p" id="nvs-d-redes-p">Internet estable en cada rincón, para trabajar sin cortes.</p>
+        <ul class="nvs-pts">
+          <li>Redes empresariales y Wi-Fi corporativo</li>
+          <li>Enlaces inalámbricos y fibra óptica</li>
+          <li>Cableado estructurado</li>
+          <li>UPS y respaldo de energía</li>
+        </ul>
+        <div class="nvs-sheet__act">
+          <a class="nv-btn nv-btn--line" href="https://tienda.crimsoncr.com/c/redes-y-conectividad" data-nvs-cat="/c/redes-y-conectividad"><svg aria-hidden="true"><use href="#nvs-i-tienda"/></svg>Ver equipos</a>
+          <a class="nv-btn nv-btn--red" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20Redes%2C%20Wi-Fi%20y%20conectividad." target="_blank" rel="noopener" data-nvs-wa="Redes, Wi-Fi y conectividad"><svg aria-hidden="true"><use href="#nvs-i-wa"/></svg>Cotizar<span class="nv-sr"> por WhatsApp (abre en otra pestaña)</span></a>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="nvs-sheet" id="nvs-d-software" aria-labelledby="nvs-d-software-t" aria-describedby="nvs-d-software-p">
+      <div class="nvs-sheet__in">
+        <span class="nvs-sheet__grab" aria-hidden="true"></span>
+        <div class="nvs-sheet__top">
+          <span class="nvs-sheet__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-soft"/></svg></span>
+          <div class="nvs-sheet__tt"><span class="nv-eyebrow">Solución</span><h3 id="nvs-d-software-t">IA y software a la medida</h3></div>
+          <button type="button" class="nvs-x" data-nvs-close aria-label="Cerrar"><svg aria-hidden="true"><use href="#nvs-i-x"/></svg></button>
+        </div>
+        <p class="nvs-sheet__p" id="nvs-d-software-p">Convertimos los datos de tu operación en tableros, alertas y apps que ahorran tiempo.</p>
+        <ul class="nvs-pts">
+          <li>Tableros de operación (Power BI)</li>
+          <li>Reportes ejecutivos automáticos</li>
+          <li>Automatización de procesos y alertas</li>
+          <li>Datos de accesos, cámaras y sistemas en un solo lugar</li>
+          <li>Software y apps a la medida</li>
+        </ul>
+        <div class="nvs-sheet__act">
+          <a class="nv-btn nv-btn--red" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20IA%20y%20software%20a%20la%20medida." target="_blank" rel="noopener" data-nvs-wa="IA y software a la medida"><svg aria-hidden="true"><use href="#nvs-i-wa"/></svg>Cotizar<span class="nv-sr"> por WhatsApp (abre en otra pestaña)</span></a>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="nvs-sheet" id="nvs-d-iot" aria-labelledby="nvs-d-iot-t" aria-describedby="nvs-d-iot-p">
+      <div class="nvs-sheet__in">
+        <span class="nvs-sheet__grab" aria-hidden="true"></span>
+        <div class="nvs-sheet__top">
+          <span class="nvs-sheet__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-iot"/></svg></span>
+          <div class="nvs-sheet__tt"><span class="nv-eyebrow">Solución</span><h3 id="nvs-d-iot-t">IoT y espacios inteligentes</h3></div>
+          <button type="button" class="nvs-x" data-nvs-close aria-label="Cerrar"><svg aria-hidden="true"><use href="#nvs-i-x"/></svg></button>
+        </div>
+        <p class="nvs-sheet__p" id="nvs-d-iot-p">Tu casa, oficina o condominio conectados: se manejan desde el celular y avisan solos.</p>
+        <ul class="nvs-pts">
+          <li>Enchufes y equipos inteligentes con control por voz</li>
+          <li>Reservas de áreas comunes y avisos a residentes</li>
+          <li>Plataforma Nodo Latam para comunidades</li>
+          <li>Accesos y cámaras integrados</li>
+        </ul>
+        <div class="nvs-sheet__act">
+          <a class="nv-btn nv-btn--line" href="https://tienda.crimsoncr.com/c/smart-home" data-nvs-cat="/c/smart-home"><svg aria-hidden="true"><use href="#nvs-i-tienda"/></svg>Ver equipos</a>
+          <a class="nv-btn nv-btn--red" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20IoT%20y%20espacios%20inteligentes." target="_blank" rel="noopener" data-nvs-wa="IoT y espacios inteligentes"><svg aria-hidden="true"><use href="#nvs-i-wa"/></svg>Cotizar<span class="nv-sr"> por WhatsApp (abre en otra pestaña)</span></a>
+        </div>
+      </div>
+    </dialog>
   </div>
 </section>
 
-<!-- 3 · DESTACADOS: cuatro equipos reales de la tienda (con existencia en Eurocomp al 26/10). Cada tarjeta lleva a SU
-     ficha; el precio vigente lo pone main.js desde la tienda (si no carga, queda "Ver precio en la tienda").
-     Para cambiar uno: data-pid = id del producto en la tienda y href = su direccion /p/... -->
-<section class="p2-dest" id="destacados" data-cam="03" data-label="TIENDA" data-tone="ink">
-  <div class="wrap">
-    <div class="sec-idx meta reveal" aria-hidden="true"><span>03</span><i></i><span>Tienda</span></div>
-    <div class="p2-head">
-      <h2 class="display-2 lines reveal"><span class="ln"><span>Equipos que</span></span><span class="ln"><span><em>resuelven</em> algo concreto</span></span></h2>
-      <div class="p2-head__aside">
-        <p class="lead lead--dark reveal" style="--d:1">Con garantía, factura electrónica y soporte local. Si querés, también te lo instalamos.</p>
-        <a class="btn btn--white reveal" style="--d:2" href="https://tienda.crimsoncr.com/" rel="noopener" data-cursor="Tienda"><span>Ver toda la tienda</span><i class="btn__arrow" aria-hidden="true"></i></a>
+<!-- COMO TRABAJAMOS, version minima: cuatro nodos en una linea y una senal que la recorre (la red de la marca).
+     Movil: vertical. La senal se pausa fuera de pantalla y no existe con reduced-motion. -->
+<section id="proceso" class="nv-sec nvs-proc" aria-labelledby="nvs-proc-h">
+  <div class="nv-wrap">
+    <header class="nv-head" data-nv-in>
+      <div class="nv-head__t">
+        <h2 id="nvs-proc-h">Cómo trabajamos</h2>
+        <p>Un solo responsable, de principio a fin</p>
       </div>
-    </div>
-    <div class="p2-dest__grid" data-snap>
-      <article class="p2-prod reveal" style="--d:0" data-pid="152">
-        <a class="p2-prod__media" href="https://tienda.crimsoncr.com/p/control-de-acceso-reconocimiento-facial-lector-de-tarjeta-em-152" rel="noopener" tabindex="-1" aria-hidden="true"><img src="assets/img/dest-acceso-600.webp" srcset="assets/img/dest-acceso-480.webp 480w, assets/img/dest-acceso-600.webp 600w" sizes="(max-width:767px) 70vw, 280px" alt="" width="600" height="600" loading="lazy" decoding="async"></a>
-        <div class="p2-prod__body">
-          <span class="meta p2-prod__sol">Control de acceso y asistencia</span>
-          <h3 class="p2-prod__claim">Controlá quién entra a tu negocio</h3>
-          <p class="p2-prod__name">Terminal de reconocimiento facial y tarjeta · Hikvision DS-K1T343MWX</p>
-          <p class="p2-prod__price" data-price>Ver precio en la tienda</p>
-          <div class="p2-prod__ctas"><a class="p2-link p2-link--fill" href="https://tienda.crimsoncr.com/p/control-de-acceso-reconocimiento-facial-lector-de-tarjeta-em-152" rel="noopener">Ver ficha</a><a class="p2-link p2-link--light" href="#contacto" data-tipo="Instalación: control de acceso facial DS-K1T343MWX" data-sol="Seguridad y control de acceso">Consultar instalación</a></div>
-        </div>
-      </article>
-      <article class="p2-prod reveal" style="--d:1" data-pid="90">
-        <a class="p2-prod__media" href="https://tienda.crimsoncr.com/p/camara-dome-hikvision-ds-2cd2143g2-lis2u-2-8mm-4mp-acusense-smart-90" rel="noopener" tabindex="-1" aria-hidden="true"><img src="assets/img/dest-camara-600.webp" srcset="assets/img/dest-camara-480.webp 480w, assets/img/dest-camara-600.webp 600w" sizes="(max-width:767px) 70vw, 280px" alt="" width="600" height="600" loading="lazy" decoding="async"></a>
-        <div class="p2-prod__body">
-          <span class="meta p2-prod__sol">Videovigilancia inteligente</span>
-          <h3 class="p2-prod__claim">Alertas de personas y vehículos, no de hojas</h3>
-          <p class="p2-prod__name">Cámara domo 4 MP AcuSense con audio · Hikvision DS-2CD2143G2-LIS2U</p>
-          <p class="p2-prod__price" data-price>Ver precio en la tienda</p>
-          <div class="p2-prod__ctas"><a class="p2-link p2-link--fill" href="https://tienda.crimsoncr.com/p/camara-dome-hikvision-ds-2cd2143g2-lis2u-2-8mm-4mp-acusense-smart-90" rel="noopener">Ver ficha</a><a class="p2-link p2-link--light" href="#contacto" data-tipo="Instalación: cámaras AcuSense" data-sol="Seguridad y control de acceso">Consultar instalación</a></div>
-        </div>
-      </article>
-      <article class="p2-prod reveal" style="--d:2" data-pid="497">
-        <a class="p2-prod__media" href="https://tienda.crimsoncr.com/p/punto-de-acceso-tp-link-omada-eap610-ax1800-ceiling-mount-wifi-6-497" rel="noopener" tabindex="-1" aria-hidden="true"><img src="assets/img/dest-wifi-600.webp" srcset="assets/img/dest-wifi-480.webp 480w, assets/img/dest-wifi-600.webp 600w" sizes="(max-width:767px) 70vw, 280px" alt="" width="600" height="600" loading="lazy" decoding="async"></a>
-        <div class="p2-prod__body">
-          <span class="meta p2-prod__sol">Conectividad para comercios y oficinas</span>
-          <h3 class="p2-prod__claim">Wi-Fi estable en todo tu local</h3>
-          <p class="p2-prod__name">Punto de acceso Wi-Fi 6 de techo · TP-Link Omada EAP610</p>
-          <p class="p2-prod__price" data-price>Ver precio en la tienda</p>
-          <div class="p2-prod__ctas"><a class="p2-link p2-link--fill" href="https://tienda.crimsoncr.com/p/punto-de-acceso-tp-link-omada-eap610-ax1800-ceiling-mount-wifi-6-497" rel="noopener">Ver ficha</a><a class="p2-link p2-link--light" href="#contacto" data-tipo="Instalación: Wi-Fi para comercio u oficina" data-sol="Redes y conectividad">Consultar instalación</a></div>
-        </div>
-      </article>
-      <article class="p2-prod reveal" style="--d:3" data-pid="1682">
-        <a class="p2-prod__media" href="https://tienda.crimsoncr.com/p/enchufe-inteligente-ezviz-cs-t30-10b-us-wifi-2-4ghz-control-por-voz-1682" rel="noopener" tabindex="-1" aria-hidden="true"><img src="assets/img/dest-enchufe-600.webp" srcset="assets/img/dest-enchufe-480.webp 480w, assets/img/dest-enchufe-600.webp 600w" sizes="(max-width:767px) 70vw, 280px" alt="" width="600" height="600" loading="lazy" decoding="async"></a>
-        <div class="p2-prod__body">
-          <span class="meta p2-prod__sol">Automatización de espacios</span>
-          <h3 class="p2-prod__claim">Encendé y apagá equipos desde el celular</h3>
-          <p class="p2-prod__name">Enchufe inteligente Wi-Fi con medición de consumo · Ezviz T30</p>
-          <p class="p2-prod__price" data-price>Ver precio en la tienda</p>
-          <div class="p2-prod__ctas"><a class="p2-link p2-link--fill" href="https://tienda.crimsoncr.com/p/enchufe-inteligente-ezviz-cs-t30-10b-us-wifi-2-4ghz-control-por-voz-1682" rel="noopener">Ver ficha</a><a class="p2-link p2-link--light" href="#contacto" data-tipo="Automatización de espacios" data-sol="IoT y espacios inteligentes">Consultar</a></div>
-        </div>
-      </article>
+    </header>
+    <div class="nvs-ruta" data-nvs-ruta>
+      <span class="nvs-ruta__track" aria-hidden="true"><span class="nvs-ruta__sig"><i></i></span></span>
+      <ol class="nvs-ruta__list">
+        <li class="nvs-ruta__step" data-nv-in style="--i:0;--at:.04">
+          <span class="nvs-ruta__node"><svg class="nv-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></span>
+          <span class="nvs-ruta__txt"><b>Diagnóstico</b><span>Visitamos y entendemos qué resolver.</span></span>
+        </li>
+        <li class="nvs-ruta__step" data-nv-in style="--i:1;--at:.28">
+          <span class="nvs-ruta__node"><svg class="nv-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h7M9 16h5"/></svg></span>
+          <span class="nvs-ruta__txt"><b>Propuesta</b><span>Cotización clara, con plazos.</span></span>
+        </li>
+        <li class="nvs-ruta__step" data-nv-in style="--i:2;--at:.52">
+          <span class="nvs-ruta__node"><svg class="nv-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-.5-.5-2.5z"/></svg></span>
+          <span class="nvs-ruta__txt"><b>Implementación</b><span>Instalamos y te enseñamos a usarlo.</span></span>
+        </li>
+        <li class="nvs-ruta__step" data-nv-in style="--i:3;--at:.76">
+          <span class="nvs-ruta__node"><svg class="nv-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></span>
+          <span class="nvs-ruta__txt"><b>Respaldo</b><span>Garantía y soporte técnico local.</span></span>
+        </li>
+      </ol>
     </div>
   </div>
 </section>
 
-<!-- 4 · PROYECTOS: tres casos reales, cada uno problema → solucion → resultado, y la nota de prensa. Las anclas
-     (#caso-residencial, #caso-acceso, #caso-bodega) son el destino de los videos de cada proyecto.
-     VALIDAR CON ANDRES: el resultado de cada caso (si hay una cifra comprobable, va en "Resultado"). -->
-<section class="casos p2-casos" id="proyectos" data-cam="04" data-label="PROYECTOS" data-tone="bone">
-  <div class="wrap">
-    <div class="sec-idx meta reveal" aria-hidden="true"><span>04</span><i></i><span>Proyectos</span></div>
-    <div class="p2-head">
-      <h2 class="display-2 lines reveal"><span class="ln"><span>Proyectos reales,</span></span><span class="ln"><span>problemas <em>resueltos</em></span></span></h2>
-      <p class="lead reveal" style="--d:1">Lo que pidió el cliente, lo que instalamos y lo que cambió.</p>
-    </div>
-
-    <div class="p2-casos__grid" id="obraWall">
-      <article class="p2-caso reveal" id="caso-residencial" style="--d:0">
-        <div class="feed obra__tile" data-cursor="Ampliar">
-          <video class="obra__media" data-clip="assets/video/obra-domo" data-poster="assets/img/obra-domo-poster.webp" muted loop playsinline preload="none" disablepictureinpicture aria-hidden="true" tabindex="-1"></video>
-          <span class="feed__corners"></span>
-          <div class="obra__osd meta"><span class="rec"><i></i>Residencial</span><span>Videovigilancia</span></div>
-          <div class="obra__info"><span class="meta obra__tag">Videovigilancia</span><strong>Acceso residencial vigilado</strong><span class="obra__nota">Grabación continua, vista desde el celular</span></div>
-          <button class="obra__abrir" type="button" aria-label="Ver en grande: acceso residencial vigilado"><span class="obra__play" aria-hidden="true"></span></button>
-        </div>
-        <dl class="p2-caso__psr">
-          <div><dt>Problema</dt><dd>El acceso no tenía registro: cuando pasaba algo, nadie podía revisar qué ocurrió.</dd></div>
-          <div><dt>Solución</dt><dd>Domo en el acceso con grabación continua y vista remota desde el celular.</dd></div>
-          <div><dt>Resultado</dt><dd>Cada entrada queda grabada y se revisa desde cualquier lugar.</dd></div>
-        </dl>
-        <a class="p2-link" href="#contacto" data-tipo="Proyecto similar: videovigilancia residencial" data-sol="Seguridad y control de acceso">Quiero algo similar</a>
-      </article>
-      <article class="p2-caso reveal" id="caso-acceso" style="--d:1">
-        <div class="feed obra__tile" data-cursor="Ampliar">
-          <video class="obra__media" data-clip="assets/video/obra-biometrico" data-poster="assets/img/obra-biometrico-poster.webp" muted loop playsinline preload="none" disablepictureinpicture aria-hidden="true" tabindex="-1"></video>
-          <span class="feed__corners"></span>
-          <div class="obra__osd meta"><span class="rec"><i></i>Empresa</span><span>Accesos</span></div>
-          <div class="obra__info"><span class="meta obra__tag">Control de acceso</span><strong>Acceso biométrico de personal</strong><span class="obra__nota">Solo entra quien está autorizado</span></div>
-          <button class="obra__abrir" type="button" aria-label="Ver en grande: acceso biométrico de personal"><span class="obra__play" aria-hidden="true"></span></button>
-        </div>
-        <dl class="p2-caso__psr">
-          <div><dt>Problema</dt><dd>Llaves prestadas: no se sabía quién entraba ni a qué hora.</dd></div>
-          <div><dt>Solución</dt><dd>Lector biométrico en la puerta, con permisos por persona y horario.</dd></div>
-          <div><dt>Resultado</dt><dd>Solo entra el personal autorizado y cada apertura queda registrada.</dd></div>
-        </dl>
-        <a class="p2-link" href="#contacto" data-tipo="Proyecto similar: control de acceso" data-sol="Seguridad y control de acceso">Quiero algo similar</a>
-      </article>
-      <article class="p2-caso reveal" id="caso-bodega" style="--d:2">
-        <div class="feed obra__tile" data-cursor="Ampliar">
-          <video class="obra__media" data-clip="assets/video/obra-bodega" data-poster="assets/img/obra-bodega-poster.webp" muted loop playsinline preload="none" disablepictureinpicture aria-hidden="true" tabindex="-1"></video>
-          <span class="feed__corners"></span>
-          <div class="obra__osd meta"><span class="rec"><i></i>Comercio</span><span>Monitoreo</span></div>
-          <div class="obra__info"><span class="meta obra__tag">Videovigilancia</span><strong>Centro de monitoreo en bodega</strong><span class="obra__nota">Toda la operación desde un solo lugar</span></div>
-          <button class="obra__abrir" type="button" aria-label="Ver en grande: centro de monitoreo en bodega"><span class="obra__play" aria-hidden="true"></span></button>
-        </div>
-        <dl class="p2-caso__psr">
-          <div><dt>Problema</dt><dd>La bodega tenía puntos ciegos y las cámaras se revisaban una por una.</dd></div>
-          <div><dt>Solución</dt><dd>Cámaras en caja, pasillos y andenes, con grabación centralizada en un monitor.</dd></div>
-          <div><dt>Resultado</dt><dd>Toda la operación se ve y se revisa desde un solo lugar.</dd></div>
-        </dl>
-        <a class="p2-link" href="#contacto" data-tipo="Proyecto similar: monitoreo de bodega" data-sol="Seguridad y control de acceso">Quiero algo similar</a>
-      </article>
-    </div>
-
-    <aside class="prensa p2-prensa reveal" aria-label="Cobertura en prensa">
-      <figure class="feed prensa__media" data-cursor="TV">
-        <img src="assets/img/prensa-noticiero.webp" alt="Noticiero nacional: 20 cámaras con inteligencia artificial vigilan un barrio" loading="lazy" width="640" height="436">
-        <span class="feed__corners"></span>
-        <figcaption class="feed__meta"><span class="rec"><i></i>EN PRENSA</span><span>NOTICIERO · CR</span></figcaption>
-      </figure>
-      <div class="prensa__body">
-        <span class="meta prensa__tag">Comunidad · IA</span>
-        <p class="prensa__quote">"20 cámaras con IA vigilan el barrio"</p>
-        <p class="prensa__text">Videovigilancia comunitaria con analítica de inteligencia artificial, monitoreada por los propios vecinos. Un proyecto de Crimson que llegó al noticiero nacional.</p>
-        <a class="btn btn--ghost btn--ghost-light" href="https://www.instagram.com/cr.crimsoncr/" target="_blank" rel="noopener" data-cursor="Ver">Ver la nota en Instagram</a>
+<!-- ===== parte 4-proyectos.html (docs/inicio/parts) ===== -->
+<!-- 4 · PROYECTOS DESTACADOS (prefijo nvp-)
+     Carrusel con scroll-snap: 3 casos reales con video, la nota de prensa y 3 fotos reales de obra.
+     Nada de video corre en las tarjetas: el clip se descarga SOLO al abrir el visor (-640 en movil, -960 en escritorio).
+     Sin JS cada tarjeta es un enlace normal al video, la foto o la nota. Sin nombres de clientes ni lugares. -->
+<section class="nv-sec nvp" id="proyectos" aria-labelledby="nvp-titulo">
+  <div class="nv-wrap">
+    <div class="nv-head nvp-head" data-nv-in>
+      <div class="nv-head__t">
+        <h2 id="nvp-titulo">Proyectos destacados</h2>
+        <p>Instalaciones reales en Costa Rica</p>
       </div>
-    </aside>
-
-    <!-- Las demas instalaciones, en una sola galeria compacta (antes era una seccion aparte) -->
-    <div class="gal p2-gal" id="monitoreo">
-      <div class="gal__bar">
-        <h3 class="p2-gal__title">Más instalaciones</h3>
-        <div class="gal__filtros" id="galFiltros" role="group" aria-label="Filtrar instalaciones por tipo"></div>
-        <p class="meta gal__cuenta" id="galCuenta" aria-live="polite"></p>
+      <div class="nvp-head__acc">
+        <div class="nvp-nav" role="group" aria-label="Mover el carrusel de proyectos">
+          <button class="nvp-arrow" type="button" data-nvp-prev aria-controls="nvp-rail" aria-label="Proyectos anteriores" aria-disabled="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <button class="nvp-arrow" type="button" data-nvp-next aria-controls="nvp-rail" aria-label="Proyectos siguientes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+        </div>
+        <button class="nv-head__more nvp-all" type="button" data-nvp-all aria-haspopup="dialog">Ver todos<span class="nv-sr">: fotos de obra</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
       </div>
-      <div class="gal__wall"><ul class="gal__grid" id="galGrid"></ul></div>
-      <div class="gal__pie"><button class="btn btn--ghost btn--ghost-light gal__mas" id="galMas" type="button" hidden>Ver todas las instalaciones</button></div>
-      <noscript><p class="lead">Activá JavaScript para ver la galería de instalaciones.</p></noscript>
-      <!-- LISTA DE FOTOS DE LA GALERÍA — el único lugar que hay que tocar.
-           Agregar una foto:
-             1. Foto de 1600 px o más (horizontal o vertical), sin nombres de clientes, condominios,
-                lugares, placas ni caras reconocibles.
-             2. Desde la raíz del repo:
-                  python scripts/medios/optimizar-foto.py FOTO.jpg residencia-porton --rotulo "..." --categoria Residencias
-                (redimensiona a 480/960/1600, genera WebP + JPG y QUITA EXIF/GPS/XMP; deja todo en
-                docs/assets/img/galeria/ e imprime la línea lista para pegar).
-             3. Pegar esa línea en esta lista. El ORDEN es el de la página: la primera es el monitor grande.
-           Campos: archivo (nombre sin -480.webp), rotulo (genérico: qué se ve, nunca de quién es),
-           categoria (Residencias, Condominios, Comunidades, Comercios, Control de acceso,
-           Perímetro y enlaces, Redes y cableado; los filtros salen solos de aquí),
-           ancho/alto (los imprime el script), foco (opcional: qué parte se ve en la miniatura, "50% 30%").
-           Quitar una foto: borrar su línea (y sus archivos en img/galeria/). -->
-      <script type="application/json" id="galeria-data">
-      [
-        {"archivo": "comunidad-rotulo-noche",        "rotulo": "Videovigilancia comunitaria con rótulo de zona protegida", "categoria": "Comunidades",         "ancho": 1600, "alto": 2133, "foco": "50% 60%"},
-        {"archivo": "residencia-camara-exterior",    "rotulo": "Cámara exterior en residencia de lujo",                    "categoria": "Residencias",         "ancho": 1125, "alto": 2000, "foco": "50% 42%"},
-        {"archivo": "red-switch-unifi-pro",          "rotulo": "Switch UniFi Pro en rack de comunicaciones",               "categoria": "Redes y cableado",    "ancho": 1280, "alto": 720},
-        {"archivo": "comunidad-gabinete-poste",      "rotulo": "Gabinete y enlace inalámbrico instalados en poste",        "categoria": "Comunidades",         "ancho": 1600, "alto": 2842, "foco": "50% 35%"},
-        {"archivo": "residencia-camara-perimetro",   "rotulo": "Cámara domo en poste perimetral de residencia",            "categoria": "Residencias",         "ancho": 1600, "alto": 1200, "foco": "40% 40%"},
-        {"archivo": "red-rack-datos",                "rotulo": "Rack de datos con cableado estructurado",                  "categoria": "Redes y cableado",    "ancho": 1125, "alto": 2000, "foco": "50% 38%"},
-        {"archivo": "comunidad-vecindario-vigilado", "rotulo": "Vecindario con cámaras de vigilancia comunitaria",          "categoria": "Comunidades",         "ancho": 1600, "alto": 1200, "foco": "60% 45%"},
-        {"archivo": "perimetro-enlace-camaras",      "rotulo": "Enlace punto a punto con cámaras de perímetro",            "categoria": "Perímetro y enlaces", "ancho": 1126, "alto": 2000, "foco": "50% 52%"},
-        {"archivo": "red-gateway-unifi",             "rotulo": "Gateway UniFi en gabinete de red",                         "categoria": "Redes y cableado",    "ancho": 1280, "alto": 720},
-        {"archivo": "comunidad-camara-enlace",       "rotulo": "Videovigilancia comunitaria con enlace inalámbrico",       "categoria": "Comunidades",         "ancho": 1600, "alto": 900,  "foco": "50% 70%"},
-        {"archivo": "perimetro-antena-enlace",       "rotulo": "Antena de enlace punto a punto en techo",                  "categoria": "Perímetro y enlaces", "ancho": 900,  "alto": 1600, "foco": "50% 35%"},
-        {"archivo": "red-patch-panel",               "rotulo": "Patch panel y cableado ordenado",                          "categoria": "Redes y cableado",    "ancho": 1600, "alto": 900},
-        {"archivo": "red-punto-acceso",              "rotulo": "Punto de acceso Wi-Fi en cielo raso",                      "categoria": "Redes y cableado",    "ancho": 899,  "alto": 690},
-        {"archivo": "perimetro-camara-solar",        "rotulo": "Cámara con alimentación solar",                            "categoria": "Perímetro y enlaces", "ancho": 720,  "alto": 540}
-      ]
-      </script>
     </div>
   </div>
 
-  <!-- Visor ampliado: uno solo para las fotos de la galeria y los videos de los proyectos (main.js · bloque GALERÍA) -->
-  <dialog class="visor" id="visor" aria-label="Visor de instalaciones">
-    <div class="visor__stage" id="visorStage"></div>
-    <div class="visor__bar">
-      <p class="visor__cap"><span class="meta visor__cat" id="visorCat"></span><strong id="visorTxt"></strong></p>
-      <span class="meta visor__n" id="visorN"></span>
+  <ul class="nvp-rail" id="nvp-rail" aria-label="Proyectos destacados" data-nv-in style="--i:1">
+    <li class="nvp-item">
+      <a class="nvp-card" href="assets/video/obra-domo-960.mp4" data-nvp-tipo="video" data-nvp-clip="assets/video/obra-domo" data-nvp-poster="assets/img/obra-domo-poster.webp"
+         data-nvp-pidio="Registro del acceso: cuando pasaba algo, nadie podía revisar qué ocurrió."
+         data-nvp-instalo="Domo en el acceso con grabación continua y vista remota desde el celular.">
+        <span class="nvp-card__media"><img class="nvp-card__img" src="assets/img/obra-domo-poster.webp" width="540" height="960" alt="Cámara domo instalada sobre el acceso de una residencia" loading="lazy" decoding="async"></span>
+        <span class="nvp-card__frame" aria-hidden="true"></span>
+        <span class="nvp-osd" aria-hidden="true"><span class="nvp-rec"><i></i>REC</span><span>CAM 01</span></span>
+        <span class="nvp-card__body">
+          <span class="nvp-tag">Videovigilancia</span>
+          <span class="nvp-card__t">Acceso residencial vigilado</span>
+          <span class="nvp-card__foot"><span class="nvp-card__r">Cada entrada queda grabada y se revisa desde cualquier lugar.</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
+        </span>
+        <span class="nv-sr">. Ver el video del caso</span>
+      </a>
+    </li>
+    <li class="nvp-item">
+      <a class="nvp-card" href="assets/video/obra-biometrico-960.mp4" data-nvp-tipo="video" data-nvp-clip="assets/video/obra-biometrico" data-nvp-poster="assets/img/obra-biometrico-poster.webp"
+         data-nvp-pidio="Saber quién entra y a qué hora: antes eran llaves prestadas."
+         data-nvp-instalo="Lector biométrico en la puerta, con permisos por persona y horario.">
+        <span class="nvp-card__media"><img class="nvp-card__img" src="assets/img/obra-biometrico-poster.webp" width="540" height="960" alt="Terminal biométrico de reconocimiento facial junto a una puerta" loading="lazy" decoding="async"></span>
+        <span class="nvp-card__frame" aria-hidden="true"></span>
+        <span class="nvp-osd" aria-hidden="true"><span class="nvp-rec"><i></i>REC</span><span>CAM 02</span></span>
+        <span class="nvp-card__body">
+          <span class="nvp-tag">Control de acceso</span>
+          <span class="nvp-card__t">Acceso biométrico de personal</span>
+          <span class="nvp-card__foot"><span class="nvp-card__r">Solo entra el personal autorizado y cada apertura queda registrada.</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
+        </span>
+        <span class="nv-sr">. Ver el video del caso</span>
+      </a>
+    </li>
+    <li class="nvp-item">
+      <a class="nvp-card" href="assets/video/obra-bodega-960.mp4" data-nvp-tipo="video" data-nvp-clip="assets/video/obra-bodega" data-nvp-poster="assets/img/obra-bodega-poster.webp"
+         data-nvp-pidio="Eliminar los puntos ciegos: las cámaras se revisaban una por una."
+         data-nvp-instalo="Cámaras en caja, pasillos y andenes, con grabación centralizada en un monitor.">
+        <span class="nvp-card__media"><img class="nvp-card__img" src="assets/img/obra-bodega-poster.webp" width="540" height="960" alt="Monitor con la vista de todas las cámaras de una bodega" loading="lazy" decoding="async"></span>
+        <span class="nvp-card__frame" aria-hidden="true"></span>
+        <span class="nvp-osd" aria-hidden="true"><span class="nvp-rec"><i></i>REC</span><span>CAM 03</span></span>
+        <span class="nvp-card__body">
+          <span class="nvp-tag">Videovigilancia</span>
+          <span class="nvp-card__t">Centro de monitoreo en bodega</span>
+          <span class="nvp-card__foot"><span class="nvp-card__r">Toda la operación se ve y se revisa desde un solo lugar.</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
+        </span>
+        <span class="nv-sr">. Ver el video del caso</span>
+      </a>
+    </li>
+    <li class="nvp-item">
+      <a class="nvp-card nvp-card--prensa" href="https://www.instagram.com/cr.crimsoncr/" target="_blank" rel="noopener" data-nvp-tipo="prensa" data-nvp-img="assets/img/prensa-noticiero.webp" data-nvp-w="640" data-nvp-h="436"
+         data-nvp-pidio="Videovigilancia para el barrio, monitoreada por los propios vecinos."
+         data-nvp-instalo="Cámaras con analítica de inteligencia artificial. El proyecto llegó al noticiero nacional.">
+        <span class="nvp-card__media"><img class="nvp-card__img" src="assets/img/prensa-noticiero.webp" width="640" height="436" alt="Noticiero nacional: 20 cámaras con IA vigilan el barrio" loading="lazy" decoding="async"></span>
+        <span class="nvp-card__frame" aria-hidden="true"></span>
+        <span class="nvp-osd" aria-hidden="true"><span class="nvp-rec"><i></i>En prensa</span><span>TV · CR</span></span>
+        <span class="nvp-card__body">
+          <span class="nvp-tag">Comunidad · IA</span>
+          <span class="nvp-card__t nvp-card__t--quote">“20 cámaras con IA vigilan el barrio”</span>
+          <span class="nvp-card__foot"><span class="nvp-card__r">Videovigilancia comunitaria, monitoreada por los vecinos.</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
+        </span>
+        <span class="nv-sr">. Ver la nota</span>
+      </a>
+    </li>
+    <li class="nvp-item">
+      <a class="nvp-card" href="assets/img/galeria/red-rack-datos-960.webp" data-nvp-tipo="foto" data-nvp-foto="red-rack-datos" data-nvp-w="1125" data-nvp-h="2000"
+         data-nvp-instalo="Rack de datos con cableado estructurado.">
+        <span class="nvp-card__media"><img class="nvp-card__img" src="assets/img/galeria/red-rack-datos-480.webp" srcset="assets/img/galeria/red-rack-datos-480.webp 480w, assets/img/galeria/red-rack-datos-960.webp 960w" sizes="(max-width:767px) 82vw, (max-width:1023px) 44vw, 380px" width="1125" height="2000" style="--foco:50% 38%" alt="Rack de datos con switch y cableado estructurado" loading="lazy" decoding="async"></span>
+        <span class="nvp-card__frame" aria-hidden="true"></span>
+        <span class="nvp-osd" aria-hidden="true"><span class="nvp-rec nvp-rec--foto"><i></i>Foto de obra</span><span>CAM 05</span></span>
+        <span class="nvp-card__body">
+          <span class="nvp-tag">Redes</span>
+          <span class="nvp-card__t">Rack de datos</span>
+          <span class="nvp-card__foot"><span class="nvp-card__r">Cableado estructurado, ordenado en su rack.</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
+        </span>
+        <span class="nv-sr">. Ver la foto en grande</span>
+      </a>
+    </li>
+    <li class="nvp-item">
+      <a class="nvp-card" href="assets/img/galeria/perimetro-enlace-camaras-960.webp" data-nvp-tipo="foto" data-nvp-foto="perimetro-enlace-camaras" data-nvp-w="1126" data-nvp-h="2000"
+         data-nvp-instalo="Enlace punto a punto con cámaras de perímetro.">
+        <span class="nvp-card__media"><img class="nvp-card__img" src="assets/img/galeria/perimetro-enlace-camaras-480.webp" srcset="assets/img/galeria/perimetro-enlace-camaras-480.webp 480w, assets/img/galeria/perimetro-enlace-camaras-960.webp 960w" sizes="(max-width:767px) 82vw, (max-width:1023px) 44vw, 380px" width="1126" height="2000" style="--foco:50% 52%" alt="Antena de enlace punto a punto y cámara bala en un poste" loading="lazy" decoding="async"></span>
+        <span class="nvp-card__frame" aria-hidden="true"></span>
+        <span class="nvp-osd" aria-hidden="true"><span class="nvp-rec nvp-rec--foto"><i></i>Foto de obra</span><span>CAM 06</span></span>
+        <span class="nvp-card__body">
+          <span class="nvp-tag">Redes · Perímetro</span>
+          <span class="nvp-card__t">Enlace de perímetro</span>
+          <span class="nvp-card__foot"><span class="nvp-card__r">Enlace punto a punto con cámaras de perímetro.</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
+        </span>
+        <span class="nv-sr">. Ver la foto en grande</span>
+      </a>
+    </li>
+    <li class="nvp-item">
+      <a class="nvp-card" href="assets/img/galeria/comunidad-gabinete-poste-960.webp" data-nvp-tipo="foto" data-nvp-foto="comunidad-gabinete-poste" data-nvp-w="1600" data-nvp-h="2842"
+         data-nvp-instalo="Gabinete y enlace inalámbrico instalados en poste.">
+        <span class="nvp-card__media"><img class="nvp-card__img" src="assets/img/galeria/comunidad-gabinete-poste-480.webp" srcset="assets/img/galeria/comunidad-gabinete-poste-480.webp 480w, assets/img/galeria/comunidad-gabinete-poste-960.webp 960w" sizes="(max-width:767px) 82vw, (max-width:1023px) 44vw, 380px" width="1600" height="2842" style="--foco:50% 35%" alt="Técnico instalando un gabinete y una antena de enlace en un poste" loading="lazy" decoding="async"></span>
+        <span class="nvp-card__frame" aria-hidden="true"></span>
+        <span class="nvp-osd" aria-hidden="true"><span class="nvp-rec nvp-rec--foto"><i></i>Foto de obra</span><span>CAM 07</span></span>
+        <span class="nvp-card__body">
+          <span class="nvp-tag">Redes · Enlaces</span>
+          <span class="nvp-card__t">Enlace en poste</span>
+          <span class="nvp-card__foot"><span class="nvp-card__r">Gabinete y enlace inalámbrico instalados en poste.</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
+        </span>
+        <span class="nv-sr">. Ver la foto en grande</span>
+      </a>
+    </li>
+  </ul>
+
+  <!-- Indicador: la red de nodos de Crimson hace de paginador (un nodo por tarjeta; los visibles se encienden) -->
+  <div class="nv-wrap nvp-pager" aria-hidden="true" data-nv-in style="--i:2">
+    <div class="nvp-nodes"><span class="nvp-nodes__line"><i></i></span></div>
+    <p class="nvp-count"><b>01</b><span>/ 07</span></p>
+  </div>
+
+  <!-- Fotos de obra para "Ver todos" (misma lista y rotulos que la galeria de la pagina actual).
+       anchos: 480 y 960 (o el ancho real si la foto es menor). -->
+  <script type="application/json" id="nvp-galeria">
+  [
+    {"archivo": "comunidad-rotulo-noche",        "rotulo": "Videovigilancia comunitaria con rótulo de zona protegida", "categoria": "Comunidades",         "ancho": 1600, "alto": 2133},
+    {"archivo": "residencia-camara-exterior",    "rotulo": "Cámara exterior en residencia",                            "categoria": "Residencias",         "ancho": 1125, "alto": 2000},
+    {"archivo": "red-switch-unifi-pro",          "rotulo": "Switch UniFi Pro en rack de comunicaciones",               "categoria": "Redes y cableado",    "ancho": 1280, "alto": 720},
+    {"archivo": "comunidad-gabinete-poste",      "rotulo": "Gabinete y enlace inalámbrico instalados en poste",        "categoria": "Comunidades",         "ancho": 1600, "alto": 2842},
+    {"archivo": "residencia-camara-perimetro",   "rotulo": "Cámara domo en poste perimetral de residencia",            "categoria": "Residencias",         "ancho": 1600, "alto": 1200},
+    {"archivo": "red-rack-datos",                "rotulo": "Rack de datos con cableado estructurado",                  "categoria": "Redes y cableado",    "ancho": 1125, "alto": 2000},
+    {"archivo": "comunidad-vecindario-vigilado", "rotulo": "Vecindario con cámaras de vigilancia comunitaria",          "categoria": "Comunidades",         "ancho": 1600, "alto": 1200},
+    {"archivo": "perimetro-enlace-camaras",      "rotulo": "Enlace punto a punto con cámaras de perímetro",            "categoria": "Perímetro y enlaces", "ancho": 1126, "alto": 2000},
+    {"archivo": "red-gateway-unifi",             "rotulo": "Gateway UniFi en gabinete de red",                         "categoria": "Redes y cableado",    "ancho": 1280, "alto": 720},
+    {"archivo": "comunidad-camara-enlace",       "rotulo": "Videovigilancia comunitaria con enlace inalámbrico",       "categoria": "Comunidades",         "ancho": 1600, "alto": 900},
+    {"archivo": "perimetro-antena-enlace",       "rotulo": "Antena de enlace punto a punto en techo",                  "categoria": "Perímetro y enlaces", "ancho": 900,  "alto": 1600},
+    {"archivo": "red-patch-panel",               "rotulo": "Patch panel y cableado ordenado",                          "categoria": "Redes y cableado",    "ancho": 1600, "alto": 900},
+    {"archivo": "red-punto-acceso",              "rotulo": "Punto de acceso Wi-Fi en cielo raso",                      "categoria": "Redes y cableado",    "ancho": 899,  "alto": 690},
+    {"archivo": "perimetro-camara-solar",        "rotulo": "Cámara con alimentación solar",                            "categoria": "Perímetro y enlaces", "ancho": 720,  "alto": 540}
+  ]
+  </script>
+
+  <!-- Visor a pantalla completa: uno solo para los proyectos (video/foto/prensa) y para la galeria de obra -->
+  <dialog class="nvp-v" id="nvp-visor" aria-label="Visor de proyectos">
+    <div class="nvp-v__top">
+      <p class="nvp-v__count" aria-hidden="true"><b data-nvp-vn>01</b><span data-nvp-vt>/ 07</span></p>
+      <span class="nvp-v__bar" aria-hidden="true"><i></i></span>
+      <button class="nvp-v__btn nvp-v__prev" type="button" data-nvp-vprev aria-label="Anterior"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <button class="nvp-v__btn nvp-v__next" type="button" data-nvp-vnext aria-label="Siguiente"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+      <button class="nvp-v__btn nvp-v__close" type="button" data-nvp-vclose aria-label="Cerrar visor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
-    <button class="visor__btn visor__prev" id="visorPrev" type="button" aria-label="Anterior"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
-    <button class="visor__btn visor__next" id="visorNext" type="button" aria-label="Siguiente"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
-    <button class="visor__close" id="visorClose" type="button" aria-label="Cerrar visor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div class="nvp-v__track" data-nvp-track></div>
   </dialog>
 </section>
 
-<!-- 5 · EJEMPLOS DE IA, SOFTWARE E IOT: lo nuevo, en concreto. El primero es real (la plataforma con la que opera
-     Crimson); los otros dos son demostraciones y lo dicen. -->
-<section class="p2-ej" id="ejemplos" data-cam="05" data-label="EJEMPLOS" data-tone="ink">
-  <div class="wrap">
-    <div class="sec-idx meta reveal" aria-hidden="true"><span>05</span><i></i><span>IA, software e IoT</span></div>
-    <div class="p2-ej__grid">
-      <article class="p2-ej__item reveal" style="--d:0">
-        <span class="p2-ej__badge p2-ej__badge--real">En uso</span>
-        <h3>Integración entre sistemas</h3>
-        <p>Cotización, factura electrónica, inventario y tienda en línea conectados: se cotiza, se factura ante Hacienda y el inventario se descuenta solo. Es la plataforma con la que hoy opera Crimson.</p>
-        <ul class="p2-ej__pasos meta"><li>Cotización</li><li>Factura electrónica</li><li>Inventario</li><li>Tienda</li></ul>
-        <a class="p2-link p2-link--light" href="#contacto" data-tipo="Software: integración entre sistemas" data-sol="Software a la medida">Consultar por este proceso</a>
-      </article>
-      <article class="p2-ej__item reveal" style="--d:1">
-        <span class="p2-ej__badge">Demostración</span>
-        <h3>Reportes automáticos</h3>
-        <p>Cada lunes llega a tu correo el resumen de la semana: accesos, alarmas, equipos sin conexión y tickets atendidos, sin que nadie lo arme a mano.</p>
-        <ul class="p2-ej__pasos meta"><li>Datos de equipos</li><li>Resumen</li><li>Correo</li></ul>
-        <a class="p2-link p2-link--light" href="#contacto" data-tipo="IA: reportes automáticos" data-sol="IA y automatización">Consultar por este proceso</a>
-      </article>
-      <article class="p2-ej__item reveal" style="--d:2">
-        <span class="p2-ej__badge">Demostración</span>
-        <h3>Alertas de dispositivos conectados</h3>
-        <p>Un sensor de puerta, agua o temperatura detecta algo fuera de lo normal y te avisa al celular con la imagen de la cámara más cercana.</p>
-        <ul class="p2-ej__pasos meta"><li>Sensor</li><li>Regla</li><li>Alerta</li></ul>
-        <a class="p2-link p2-link--light" href="#contacto" data-tipo="IoT: alertas de dispositivos" data-sol="IoT y espacios inteligentes">Consultar por este proceso</a>
-      </article>
+<!-- ===== parte 5-cierre.html (docs/inicio/parts) ===== -->
+<!-- 5 · CIERRE: soporte tecnico (banner + hoja con el reporte de fallas real), marcas, pie y barra fija movil.
+     El reporte usa el mismo contrato que la portada actual (POST {api}/public/incidents, honeypot "website").
+     La hoja es un <dialog>: hoja inferior en movil, panel lateral desde 768 px. -->
+<section id="soporte" class="nv-sec nvc-soporte" aria-labelledby="nvc-sop-t">
+  <div class="nv-wrap nvc-soporte__grid">
+    <div class="nvc-sop" data-nv-in>
+      <svg class="nvc-sop__net" viewBox="0 0 260 140" aria-hidden="true" focusable="false">
+        <g class="nvc-sop__lines">
+          <path d="M28 104 86 58l62 26 54-50 44 30M86 58l20-40 96 16M148 84l26 44M106 18l42 66"/>
+        </g>
+        <g class="nvc-sop__nodes">
+          <circle cx="28" cy="104" r="3"/><circle cx="86" cy="58" r="3.5"/><circle cx="148" cy="84" r="3"/>
+          <circle cx="202" cy="34" r="3.5"/><circle cx="246" cy="64" r="3"/><circle cx="106" cy="18" r="2.6"/><circle cx="174" cy="128" r="2.6"/>
+        </g>
+        <g class="nvc-sop__pulse">
+          <circle cx="86" cy="58" r="3.5"/><circle cx="202" cy="34" r="3.5" style="--d:1.1s"/><circle cx="148" cy="84" r="3" style="--d:2.2s"/>
+        </g>
+      </svg>
+      <span class="nvc-sop__ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4.5" height="6.5" rx="1.6"/><rect x="16.5" y="14" width="4.5" height="6.5" rx="1.6"/><path d="M19 20.5c0 1.2-1.2 2-3 2h-2.5"/></svg>
+      </span>
+      <div class="nvc-sop__t">
+        <h2 class="nvc-sop__eye" id="nvc-sop-t">Soporte técnico</h2>
+        <p class="nvc-sop__title">
+          <button class="nvc-sop__btn" type="button" aria-haspopup="dialog" aria-controls="nvc-reporte" data-nvc-open>Reportá una falla o solicitá asistencia</button>
+        </p>
+        <p class="nvc-sop__sub">Te damos un número de ticket para darle seguimiento.</p>
+      </div>
+      <span class="nvc-sop__go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
     </div>
 
-    <!-- Aliados: el mismo bloque que tenia la portada anterior (pedido 26/10: tiene que mostrarse como antes) -->
-    <div class="brands reveal p2-brands">
-      <span class="meta brands__label">Nuestros aliados · marcas líderes y respaldo local</span>
-      <div class="brands__row">
-        <span class="brands__item"><img src="assets/img/marca-hikvision-mono.png" alt="Hikvision" loading="lazy" width="600" height="120"><span class="meta">Distribuidor autorizado</span></span>
-        <span class="brands__item"><img src="assets/img/marca-ubiquiti-mono.png" alt="Ubiquiti" loading="lazy" width="412" height="120"></span>
-        <span class="brands__item"><img src="assets/img/marca-apc-mono.png" alt="APC by Schneider Electric" loading="lazy" width="505" height="120"></span>
-        <span class="brands__item"><img class="brands__img--sq" src="assets/img/marca-nodolatam-mono.png" alt="Nodo Latam" loading="lazy" width="112" height="120"></span>
-        <span class="brands__item"><img src="assets/img/marca-hauset-mono.png" alt="HAUSET · automatización, seguridad y redes" loading="lazy" width="484" height="120"></span>
-      </div>
-      <!-- Andres: solo las marcas; JC Analytics aparte, abajo y al centro -->
-      <div class="brands__jc">
-        <a href="https://jcanalytic.com" target="_blank" rel="noopener" aria-label="JC Analytics (abre jcanalytic.com)"><img src="assets/img/marca-jcanalytics-mono.png" alt="JC Analytics" loading="lazy" width="551" height="120"></a>
-        <span class="meta">Analítica y automatización</span>
+    <ul class="nvc-acc" aria-label="Más ayuda">
+      <li data-nv-in style="--i:1">
+        <a class="nvc-acc__a" href="ayuda/">
+          <span class="nvc-acc__ico" aria-hidden="true"><svg class="nv-ico" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/><path d="M9 8h7M9 11.5h5"/></svg></span>
+          <span class="nvc-acc__t"><b>Centro de ayuda</b><span>Manuales, firmware y programas</span></span>
+          <svg class="nvc-acc__arr" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+      </li>
+      <li data-nv-in style="--i:2">
+        <a class="nvc-acc__a" href="https://panel.crimsoncr.com/solicitar-acceso" rel="noopener">
+          <span class="nvc-acc__ico" aria-hidden="true"><svg class="nv-ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18"/><path d="M7 13.5h5M7 16.5h8"/></svg></span>
+          <span class="nvc-acc__t"><b>Portal de clientes</b><span>Abrí y seguí tus tickets en línea</span></span>
+          <svg class="nvc-acc__arr" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+      </li>
+    </ul>
+  </div>
+
+  <!-- Hoja del reporte de fallas -->
+  <dialog class="nvc-sheet" id="nvc-reporte" aria-labelledby="nvc-reporte-t" closedby="any">
+    <div class="nvc-sheet__in">
+      <header class="nvc-sheet__head" data-nvc-drag>
+        <span class="nvc-sheet__grab" aria-hidden="true"></span>
+        <div class="nvc-sheet__ht">
+          <span class="nv-eyebrow">Soporte técnico</span>
+          <h2 id="nvc-reporte-t">Reportar una falla</h2>
+        </div>
+        <button class="nvc-sheet__x" type="button" aria-label="Cerrar el reporte" data-nvc-close>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+
+      <div class="nvc-sheet__body">
+        <form class="nvc-form" id="nvc-form" novalidate>
+          <p class="nvc-form__intro">Contanos qué pasa. Mientras más crítico, más rápida la respuesta.</p>
+
+          <fieldset class="nvc-chips">
+            <legend class="nvc-lbl">Tipo de solicitud</legend>
+            <label><input type="radio" name="kind" value="falla" checked><span>Falla</span></label>
+            <label><input type="radio" name="kind" value="garantia"><span>Garantía</span></label>
+            <label><input type="radio" name="kind" value="mantenimiento"><span>Mantenimiento</span></label>
+            <label><input type="radio" name="kind" value="otro"><span>Otro</span></label>
+          </fieldset>
+
+          <fieldset class="nvc-sev">
+            <legend class="nvc-lbl">¿Qué tan grave es?</legend>
+            <label data-n="4"><input type="radio" name="severity" value="critica"><span class="nvc-sev__bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span><b>Crítica</b><small>Todo detenido</small></label>
+            <label data-n="3"><input type="radio" name="severity" value="alta"><span class="nvc-sev__bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span><b>Alta</b><small>Falla parcial</small></label>
+            <label data-n="2"><input type="radio" name="severity" value="media" checked><span class="nvc-sev__bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span><b>Media</b><small>Funciona con problemas</small></label>
+            <label data-n="1"><input type="radio" name="severity" value="baja"><span class="nvc-sev__bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span><b>Baja</b><small>Consulta o cambio</small></label>
+          </fieldset>
+
+          <div class="nvc-row">
+            <label class="nvc-field"><span class="nvc-lbl">Nombre</span><input name="name" type="text" autocomplete="name" autocapitalize="words" required minlength="2" maxlength="120" placeholder="Tu nombre"></label>
+            <label class="nvc-field"><span class="nvc-lbl">Empresa o particular <em>opcional</em></span><input name="company" type="text" autocomplete="organization" maxlength="160" placeholder="Nombre de la empresa"></label>
+          </div>
+          <div class="nvc-row">
+            <label class="nvc-field"><span class="nvc-lbl">Teléfono</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="25" placeholder="+506 0000 0000"></label>
+            <label class="nvc-field"><span class="nvc-lbl">Correo</span><input name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" maxlength="200" placeholder="nombre@empresa.com"></label>
+          </div>
+          <p class="nvc-hint">Dejanos al menos un teléfono o un correo.</p>
+          <label class="nvc-field"><span class="nvc-lbl">Ubicación <em>opcional</em></span><input name="location" type="text" maxlength="200" placeholder="Provincia, sitio o casa"></label>
+          <label class="nvc-field"><span class="nvc-lbl">¿Qué está pasando?</span><textarea name="description" rows="4" required minlength="10" maxlength="3000" placeholder="Ej.: la cámara del portón no graba desde anoche"></textarea></label>
+
+          <!-- honeypot: invisible para personas; si viene lleno, el API responde ok sin crear nada -->
+          <label class="nvc-hp" aria-hidden="true">Sitio web<input name="website" type="text" tabindex="-1" autocomplete="off"></label>
+
+          <button class="nv-btn nv-btn--red nvc-form__send" type="submit"><span>Enviar reporte</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+          <p class="nvc-status" id="nvc-status" role="status" aria-live="polite"></p>
+          <a class="nvc-urg" data-nvc-wa="Hola Crimson, tengo una falla urgente en mi sistema." href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20tengo%20una%20falla%20urgente%20en%20mi%20sistema." target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.6a8.5 8.5 0 0 1-12.6 7.5L3.5 20.5l1.4-4.2a8.5 8.5 0 1 1 15.6-4.7z"/><path d="M9 8.6c.2 2.9 2.6 5.6 5.7 6.1l1.1-1.6-1.9-1-1 .8c-1-.5-1.8-1.3-2.2-2.3l.8-.9-.8-2z"/></svg>
+            <span>¿Es urgente? <b>Escribinos por WhatsApp</b></span>
+          </a>
+        </form>
+
+        <div class="nvc-ok" id="nvc-ok" hidden>
+          <span class="nvc-ok__ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+          <h3 class="nvc-ok__t" tabindex="-1">Recibimos tu reporte</h3>
+          <p class="nvc-ok__num" data-nvc-num hidden>Ticket <b></b></p>
+          <p class="nvc-ok__p">Te contactamos según el nivel de atención. Guardá el número para darle seguimiento.</p>
+          <div class="nvc-ok__acts">
+            <button class="nv-btn nv-btn--white" type="button" data-nvc-close>Listo</button>
+            <button class="nv-btn nv-btn--line" type="button" data-nvc-again>Reportar otra falla</button>
+          </div>
+        </div>
       </div>
     </div>
-  </div>
+  </dialog>
 </section>
 
-<!-- 6 · PROCESO RESUMIDO Y RESPALDO -->
-<section class="p2-proc" id="proceso" data-cam="06" data-label="PROCESO" data-tone="cream">
-  <div class="wrap">
-    <div class="sec-idx meta reveal" aria-hidden="true"><span>06</span><i></i><span>Cómo trabajamos</span></div>
-    <!-- Ruta de trabajo (26/10, sin numeros): cuatro nodos unidos por una linea que se traza al llegar y un pulso que
-         la recorre, como la red de la marca. Movil: vertical. Reduced-motion: trazada y quieta. -->
-    <div class="p2-ruta">
-      <span class="p2-ruta__linea" aria-hidden="true"><i></i><em></em></span>
-      <ol class="p2-ruta__lista">
-        <li class="p2-ruta__paso" style="--d:0"><span class="p2-ruta__nodo"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></span><span class="p2-ruta__card"><b>Diagnóstico</b><span class="p2-ruta__txt">Visitamos o conversamos y entendemos qué hay que resolver.</span></span></li>
-        <li class="p2-ruta__paso" style="--d:1"><span class="p2-ruta__nodo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h7M9 16h5"/></svg></span><span class="p2-ruta__card"><b>Propuesta</b><span class="p2-ruta__txt">Cotización clara: equipos, instalación y plazos.</span></span></li>
-        <li class="p2-ruta__paso" style="--d:2"><span class="p2-ruta__nodo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-.5-.5-2.5z"/></svg></span><span class="p2-ruta__card"><b>Implementación</b><span class="p2-ruta__txt">Instalamos, configuramos y te enseñamos a usarlo.</span></span></li>
-        <li class="p2-ruta__paso" style="--d:3"><span class="p2-ruta__nodo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></span><span class="p2-ruta__card"><b>Respaldo</b><span class="p2-ruta__txt">Garantía, mantenimiento y soporte técnico local.</span></span></li>
-      </ol>
+<section class="nv-sec nvc-marcas" aria-labelledby="nvc-marcas-t">
+  <div class="nv-wrap">
+    <div class="nv-head" data-nv-in>
+      <div class="nv-head__t"><h2 id="nvc-marcas-t">Marcas con las que trabajamos</h2></div>
     </div>
-    <div class="p2-proc__resp reveal">
-      <ul class="p2-proc__sellos">
-        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z"/></svg><span>Distribuidor autorizado Hikvision</span></li>
-        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>Factura electrónica en cada compra</span></li>
-        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/></svg><span>Garantía de fábrica gestionada por Crimson</span></li>
-        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-5.6-6-10a6 6 0 0 1 12 0c0 4.4-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg><span>Técnicos en Costa Rica</span></li>
-      </ul>
-      <p class="p2-proc__sop"><span>¿Ya tenés un sistema instalado?</span> <a href="#soporte">Reportá una falla →</a> <a href="ayuda/">Centro de ayuda →</a></p>
-    </div>
-  </div>
-</section>
-
-<!-- CAM 09 · SOPORTE ESPECIALIZADO: clientes con un sistema ya instalado reportan una incidencia.
-     Va despues de CONTACTO (venta) a proposito: es postventa, y asi no se renumeran las camaras 04-08. -->
-<section class="soporte" id="soporte" data-cam="08" data-label="SOPORTE" data-tone="ink">
-  <div class="wrap">
-    <div class="sec-idx meta reveal" aria-hidden="true"><span>08</span><i></i><span>Soporte</span></div>
-    <div class="soporte__grid">
-      <div class="soporte__text">
-        <h2 class="display-2 lines reveal"><span class="ln"><span>Soporte</span></span><span class="ln"><span><em>especializado</em>.</span></span></h2>
-        <p class="lead lead--dark reveal" style="--d:1">Ofrecemos una plataforma centralizada de control y gestión de incidencias, donde los clientes pueden realizar sus solicitudes y, dependiendo de la complejidad, se les atiende según SLA definidos.</p>
-        <!-- VALIDAR CON ANDRES: tiempos = SLA por defecto de la plataforma (primera respuesta); si cambian en Ajustes, actualizar aqui -->
-        <div class="sla feed reveal" style="--d:2" aria-label="Niveles de atención">
-          <div class="sla__head meta"><span class="rec"><i></i>SLA</span><span>Primera respuesta</span></div>
-          <ol class="sla__lista">
-            <li data-pri="critica"><span class="sla__p sla__p--critica">Crítica</span><span class="sla__d">Sistema detenido o sitio sin protección</span><span class="sla__reloj" style="--p:.15" role="img" aria-label="Respuesta inmediata" title="Respuesta inmediata"><i></i></span></li>
-            <li data-pri="alta"><span class="sla__p sla__p--alta">Alta</span><span class="sla__d">Falla parcial: cámaras o accesos fuera</span><span class="sla__reloj" style="--p:.35" role="img" aria-label="Respuesta prioritaria" title="Respuesta prioritaria"><i></i></span></li>
-            <li data-pri="media"><span class="sla__p">Media</span><span class="sla__d">Funciona, pero con problemas</span><span class="sla__reloj" style="--p:.6" role="img" aria-label="Respuesta programada" title="Respuesta programada"><i></i></span></li>
-            <li data-pri="baja"><span class="sla__p">Baja</span><span class="sla__d">Consultas, cambios y mantenimiento</span><span class="sla__reloj" style="--p:.85" role="img" aria-label="Respuesta planificada" title="Respuesta planificada"><i></i></span></li>
-          </ol>
-          <p class="sla__nota meta">Mientras más crítico, más rápida la respuesta.</p>
-          <span class="feed__corners"></span>
-        </div>
-        <a class="ayuda-link" href="ayuda/"><span>¿Buscás manuales, firmware o programas de tus equipos?</span><b>Centro de ayuda →</b></a>
-        <a class="ayuda-link" href="https://panel.crimsoncr.com/solicitar-acceso" rel="noopener"><span>¿Tu empresa ya es cliente? Abrí y seguí tus tickets en línea.</span><b>Solicitar acceso al portal →</b></a>
-      </div>
-
-      <form class="form reveal" id="incidentForm" style="--d:2" novalidate>
-        <p class="meta form__label">Reportar una incidencia</p>
-        <fieldset class="chips">
-          <legend class="sr-only">Tipo de incidencia</legend>
-          <label><input type="radio" name="kind" value="falla" checked><span>Falla</span></label>
-          <label><input type="radio" name="kind" value="garantia"><span>Garantía</span></label>
-          <label><input type="radio" name="kind" value="mantenimiento"><span>Mantenimiento</span></label>
-          <label><input type="radio" name="kind" value="otro"><span>Otro</span></label>
-        </fieldset>
-        <div class="form__row">
-          <label class="field"><span>Nombre</span><input name="name" type="text" autocomplete="name" autocapitalize="words" required minlength="2" maxlength="120" placeholder="Tu nombre"></label>
-          <label class="field"><span>Empresa o particular</span><input name="company" type="text" autocomplete="organization" maxlength="160" placeholder="Opcional"></label>
-        </div>
-        <div class="form__row">
-          <label class="field"><span>Teléfono</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="25" placeholder="+506 0000 0000"></label>
-          <label class="field"><span>Correo</span><input name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" maxlength="200" placeholder="nombre@empresa.com"></label>
-        </div>
-        <div class="form__row">
-          <label class="field"><span>¿Qué tan grave es?</span>
-            <select name="severity"><option value="media">Media · funciona con problemas</option><option value="critica">Crítica · todo detenido</option><option value="alta">Alta · falla parcial</option><option value="baja">Baja · consulta</option></select>
-          </label>
-          <label class="field"><span>Ubicación</span><input name="location" type="text" maxlength="200" placeholder="Provincia, sitio o casa"></label>
-        </div>
-        <label class="field"><span>¿Qué está pasando?</span><textarea name="description" rows="3" required minlength="10" maxlength="3000" placeholder="Ej.: la cámara del portón no graba desde anoche"></textarea></label>
-        <!-- honeypot: invisible para personas; si viene lleno, el API responde ok sin crear nada -->
-        <label class="hp" aria-hidden="true">Sitio web<input name="website" type="text" tabindex="-1" autocomplete="off"></label>
-        <button class="btn btn--white btn--lg" type="submit" data-cursor="Enviar"><span>Enviar reporte</span><i class="btn__arrow" aria-hidden="true"></i></button>
-        <p class="form__status" id="incidentStatus" role="status" aria-live="polite"></p>
-        <p class="meta form__note">¿Es urgente? <a id="incidentWa" href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener">Escribinos por WhatsApp</a>.</p>
-      </form>
+    <ul class="nvc-logos" data-nv-in style="--i:1">
+      <li class="nvc-logos__c nvc-logos__c--hik">
+        <img src="assets/img/marca-hikvision-mono.png" alt="Hikvision" width="600" height="120" loading="lazy" decoding="async">
+        <span class="nvc-logos__tag">Distribuidor autorizado</span>
+      </li>
+      <li class="nvc-logos__c"><img src="assets/img/marca-ubiquiti-mono.png" alt="Ubiquiti" width="412" height="120" loading="lazy" decoding="async"></li>
+      <li class="nvc-logos__c"><img src="assets/img/marca-apc-mono.png" alt="APC by Schneider Electric" width="505" height="120" loading="lazy" decoding="async"></li>
+      <li class="nvc-logos__c nvc-logos__c--sq"><img src="assets/img/marca-nodolatam-mono.png" alt="Nodo Latam" width="112" height="120" loading="lazy" decoding="async"></li>
+      <li class="nvc-logos__c"><img src="assets/img/marca-hauset-mono.png" alt="HAUSET" width="484" height="120" loading="lazy" decoding="async"></li>
+    </ul>
+    <!-- Como en la portada anterior: JC Analytics aparte, abajo y al centro (aliado digital) -->
+    <div class="nvc-jc" data-nv-in style="--i:2">
+      <a class="nvc-jc__link" href="https://www.jcanalytic.com/es/" target="_blank" rel="noopener" aria-label="JC Analytics (abre jcanalytic.com)"><img src="assets/img/marca-jcanalytics-mono.png" alt="JC Analytics" width="551" height="120" loading="lazy" decoding="async"></a>
+      <span class="nvc-jc__txt">Analítica y automatización</span>
     </div>
   </div>
 </section>
 </main>
-<nav class="p2-dock" aria-label="Accesos rápidos"><a href="https://tienda.crimsoncr.com/" rel="noopener">Tienda</a><a class="p2-dock__main" href="#contacto" data-tipo="Cotizar una solución">Cotizar</a></nav>
 
-<!-- FOOTER -->
-<footer class="footer" id="contacto">
-  <div class="wrap">
-    <div class="footer__brand">
-      <img src="assets/img/logo.png" alt="Crimson Consulting" width="1024" height="237" loading="lazy">
-      <p class="footer__claim">Tecnología que impulsa, seguridad que permanece.</p>
+<footer class="nvc-pie" id="contacto">
+  <div class="nv-wrap">
+    <div class="nvc-pie__top">
+      <div class="nvc-pie__brand">
+        <a class="nvc-logo" href="#contenido" aria-label="Crimson Consulting, volver al inicio">
+          <img class="nvc-logo__full" src="assets/img/logo.png" alt="" width="1024" height="237" loading="lazy" decoding="async">
+          <img class="nvc-logo__ico" src="assets/img/logo-icon.png" alt="" width="244" height="237" loading="lazy" decoding="async">
+        </a>
+        <p class="nvc-pie__claim">Tecnología que impulsa, <span>seguridad que permanece.</span></p>
+      </div>
+      <div class="nvc-pie__cta">
+        <a class="nv-btn nv-btn--red" data-nvc-wa="Hola Crimson, quiero cotizar un proyecto." href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20un%20proyecto." target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.6a8.5 8.5 0 0 1-12.6 7.5L3.5 20.5l1.4-4.2a8.5 8.5 0 1 1 15.6-4.7z"/></svg><span>Cotizar por WhatsApp</span>
+        </a>
+        <a class="nv-btn nv-btn--line" href="tel:+50688889892" data-nvc-tel>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h3.5l2 5-2.4 1.6a11 11 0 0 0 5.3 5.3L15 13.5l5 2V19a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg><span>Llamar</span>
+        </a>
+      </div>
     </div>
-    <div class="footer__grid">
-      <div><span class="meta">Soluciones</span><a href="#seguridad">Seguridad y control de acceso</a><a href="#redes">Redes y conectividad</a><a href="#ia">IA y automatización</a><a href="#software">Software a la medida</a><a href="#iot">IoT y espacios inteligentes</a></div>
-      <div><span class="meta">Enlaces</span><a href="#top">Inicio</a><a href="ayuda/">Centro de ayuda</a><a href="https://panel.crimsoncr.com/solicitar-acceso" rel="noopener">Portal de clientes: solicitar acceso</a><a href="https://tienda.crimsoncr.com/" rel="noopener">Tienda</a><a href="https://tienda.crimsoncr.com/arma-tu-sistema" rel="noopener">Armá tu sistema de cámaras</a><a href="#contacto" data-tipo="Proyecto a la medida">Cotizar una solución</a></div>
-      <div><span class="meta">Contacto</span><a href="mailto:info@crimsoncr.com">info@crimsoncr.com</a><a href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener">WhatsApp</a><a href="https://www.facebook.com/crimsonconcr" target="_blank" rel="noopener">Facebook</a><a href="https://www.instagram.com/cr.crimsoncr/" target="_blank" rel="noopener">Instagram</a></div>
-      <div><span class="meta">Sede</span><span>Alajuela, Costa Rica</span><a href="tel:+50688889892" data-tel="1" data-tel-text>+506 8888 9892</a><a href="#" data-tel="2" data-tel-text data-tel-row="2" hidden></a><span>Grupo Empresarial Crimson SRL</span></div>
+
+    <nav class="nvc-pie__cols" aria-label="Pie de página">
+      <div class="nvc-col">
+        <h2 class="nvc-col__h">Soluciones</h2>
+        <ul>
+          <li><a href="#sol-seguridad">Videovigilancia</a></li>
+          <li><a href="#sol-acceso">Control de acceso</a></li>
+          <li><a href="#sol-redes">Redes y Wi-Fi</a></li>
+          <li><a href="#sol-software">IA y software</a></li>
+          <li><a href="#sol-iot">IoT y automatización</a></li>
+        </ul>
+      </div>
+      <div class="nvc-col">
+        <h2 class="nvc-col__h">Enlaces</h2>
+        <ul>
+          <li><a href="https://tienda.crimsoncr.com/" rel="noopener" data-nvc-tienda="/">Tienda</a></li>
+          <li><a href="https://tienda.crimsoncr.com/arma-tu-sistema" rel="noopener" data-nvc-tienda="/arma-tu-sistema">Armá tu sistema</a></li>
+          <li><a href="ayuda/">Centro de ayuda</a></li>
+          <li><a href="https://panel.crimsoncr.com/login" rel="noopener">Portal de clientes</a></li>
+        </ul>
+      </div>
+      <div class="nvc-col nvc-col--contacto">
+        <h2 class="nvc-col__h">Contacto</h2>
+        <ul class="nvc-ct">
+          <li><a href="mailto:info@crimsoncr.com"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7 8.5 6 8.5-6"/></svg>info@crimsoncr.com</a></li>
+          <li><a data-nvc-wa="Hola Crimson, quiero hacer una consulta." href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20hacer%20una%20consulta." target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.6a8.5 8.5 0 0 1-12.6 7.5L3.5 20.5l1.4-4.2a8.5 8.5 0 1 1 15.6-4.7z"/></svg>WhatsApp</a></li>
+          <li><a href="tel:+50688889892" data-nvc-tel><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h3.5l2 5-2.4 1.6a11 11 0 0 0 5.3 5.3L15 13.5l5 2V19a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>+506 8888 9892</a></li>
+        </ul>
+        <div class="nvc-social">
+          <a href="https://www.instagram.com/cr.crimsoncr/" target="_blank" rel="noopener" aria-label="Instagram de Crimson (abre en otra pestaña)"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="5"/><circle cx="12" cy="12" r="3.8"/><path d="M17 7h.01"/></svg></a>
+          <a href="https://www.facebook.com/crimsonconcr" target="_blank" rel="noopener" aria-label="Facebook de Crimson (abre en otra pestaña)"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="nvc-fill" d="M13.6 21v-7.2h2.5l.4-3h-2.9V9c0-.9.3-1.5 1.5-1.5h1.5V4.8c-.3 0-1.2-.1-2.2-.1-2.2 0-3.7 1.3-3.7 3.8v2.3H8.2v3h2.5V21z"/></svg></a>
+        </div>
+      </div>
+    </nav>
+
+    <div class="nvc-pie__legal">
+      <p class="nvc-pie__place"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-5.6-6-10a6 6 0 0 1 12 0c0 4.4-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg><span><span>Alajuela, Costa Rica</span><span class="nvc-pie__sep" aria-hidden="true"> · </span><span>Grupo Empresarial Crimson SRL</span></span></p>
+      <p class="nvc-pie__links">
+        <a href="https://tienda.crimsoncr.com/info/terminos" rel="noopener" data-nvc-tienda="/info/terminos">Términos y condiciones</a>
+        <a href="https://tienda.crimsoncr.com/info/privacidad" rel="noopener" data-nvc-tienda="/info/privacidad">Política de privacidad</a>
+      </p>
+      <p class="nvc-pie__copy">© 2026 Crimson Consulting</p>
     </div>
-    <div class="footer__bottom meta">
-      <span>© 2026 Crimson Consulting · Todos los derechos reservados</span>
-      <div><a href="https://tienda.crimsoncr.com/info/terminos" rel="noopener">Términos y condiciones</a><a href="https://tienda.crimsoncr.com/info/privacidad" rel="noopener">Política de privacidad</a></div>
-    </div>
-    <!-- Cierre: lo pidio Andres ("ustedes se merecen eso"). Discreto, centrado, sin competir con la marca Crimson.
-         Eslogan elegido: "Del dato a la decisión."
-         Alternativas: "Datos que se convierten en decisiones." · "Analítica que se traduce en resultados."
-         Enlace a la web de JC Analytics. -->
-    <div class="footer__jc">
-      <span class="meta footer__jc-lbl">Desarrollado en alianza con</span>
-      <a class="footer__jc-link" href="https://jcanalytic.com" target="_blank" rel="noopener" aria-label="JC Analytics (abre jcanalytic.com)"><img src="assets/img/marca-jcanalytics-mono.png" alt="JC Analytics" width="551" height="120" loading="lazy" decoding="async"></a>
-      <p class="footer__jc-claim">Del dato a la decisión.</p>
+
+    <div class="nvc-jc">
+      <span>Desarrollado en alianza con</span>
+      <a href="https://www.jcanalytic.com/es/" target="_blank" rel="noopener" aria-label="JC Analytics (abre en otra pestaña)"><img src="assets/img/marca-jcanalytics-mono.png" alt="JC Analytics" width="551" height="120" loading="lazy" decoding="async"></a>
     </div>
   </div>
 </footer>
-<script src="assets/main.js?v=52" defer></script>
+
+<!-- Barra fija solo movil: aparece cuando la portada ya paso; se esconde si hay un <dialog> abierto -->
+<nav class="nvc-dock" aria-label="Accesos rápidos" data-nvc-dock>
+  <a class="nvc-dock__b" href="https://tienda.crimsoncr.com/" rel="noopener" data-nvc-tienda="/">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 8h13l-1 12.5h-11z"/><path d="M9 8V7a3 3 0 0 1 6 0v1"/></svg><span>Tienda</span>
+  </a>
+  <a class="nvc-dock__b nvc-dock__b--main" data-nvc-wa="Hola Crimson, quiero cotizar un proyecto." href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20un%20proyecto." target="_blank" rel="noopener">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.6a8.5 8.5 0 0 1-12.6 7.5L3.5 20.5l1.4-4.2a8.5 8.5 0 1 1 15.6-4.7z"/></svg><span>Cotizar</span>
+  </a>
+</nav>
+
+<script src="inicio/base.js?v=17930672711793071740" defer></script>
+<script src="inicio/parts/1-portada.js?v=1793071688" defer></script>
+<script src="inicio/parts/2-tienda.js?v=1793071688" defer></script>
+<script src="inicio/parts/3-soluciones.js?v=1793071688" defer></script>
+<script src="inicio/parts/4-proyectos.js?v=1793071688" defer></script>
+<script src="inicio/parts/5-cierre.js?v=1793071688" defer></script>
 </body>
 </html>

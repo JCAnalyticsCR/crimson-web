@@ -28,7 +28,7 @@
   };
 
   /* ---------- Fotos de obra (misma regla de anchos que la galeria actual, tope 960) ---------- */
-  const DIR = '../assets/img/galeria/';
+  const DIR = 'assets/img/galeria/';
   const anchos = w => { const tope = Math.min(w || 960, 960); return [...new Set([480, 960].filter(a => a < tope).concat(tope))]; };
   const fotoSrc = (archivo, w) => {
     const a = anchos(w);
