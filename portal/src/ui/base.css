@@ -445,3 +445,13 @@ img { max-width: 100%; display: block; }
   }
   .pick-item.is-sel .pick-item__check { background: var(--crimson); border-color: var(--crimson); color: #fff; }
 }
+
+/* Punto de venta: filtros bajo el buscador (categoria, bodega, disponibilidad, tipo) */
+.pos-filtros { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 18px; border-bottom: 1px solid var(--hair); background: var(--surface-2); }
+.pos-filtros .select { width: auto; min-width: 0; flex: 0 1 190px; }
+.pos-filtros__n { margin-left: auto; white-space: nowrap; }
+@media (max-width: 760px) {
+  .pos-filtros { padding: 10px 12px; }
+  .pos-filtros .select { flex: 1 1 calc(50% - 8px); }
+  .pos-filtros__n { margin-left: 0; }
+}

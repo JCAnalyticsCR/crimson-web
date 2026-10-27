@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
-from ..models import Customer, Product, ProductVariant
+from ..models import Category, Customer, Product, ProductVariant, Warehouse
 from ..schemas.sales import DocumentIn, LineInSchema, PaymentIn
 from ..services import discounts
 from ..services import documents as docsvc
@@ -50,6 +50,12 @@ def catalog(p: Principal = Depends(require("sales", "crear")), db: Session = Dep
     av = avsvc.availability_many(db, p.tenant, prods, audience="interno")
     cur = p.tenant.default_currency or "CRC"
     fx = rate_or_none(db, "USD")  # sin tasa la caja abre igual: solo lo que hay que convertir queda sin precio
+    # existencia propia por bodega de venta activa (filtro "Bodega" de la caja, 26/10)
+    venta = {w.id for w in db.scalars(select(Warehouse).where(Warehouse.tenant_id == p.tenant.id, Warehouse.active, Warehouse.kind == "venta"))}
+    por_bodega: dict[int, dict[str, float]] = defaultdict(dict)
+    for lv in invsvc.stock_levels(db, p.tenant.id):
+        if lv["warehouse_id"] in venta and lv["quantity"] > 0:
+            por_bodega[lv["product_id"]][str(lv["warehouse_id"])] = float(lv["quantity"])
     variants: dict[int, list] = defaultdict(list)
     for v in db.scalars(select(ProductVariant).where(ProductVariant.tenant_id == p.tenant.id, ProductVariant.active).order_by(ProductVariant.position)):
         variants[v.product_id].append({"id": v.id, "name": v.name, "code": v.code, "price": v.price})
@@ -75,10 +81,26 @@ def catalog(p: Principal = Depends(require("sales", "crear")), db: Session = Dep
                     for k in ("state", "label", "own_free", "own_reserved", "supplier_qty", "supplier_available", "supplier_name", "supplier_fresh", "supplier_age", "max_qty")
                 },
                 "image": img,
+                "brand": pr.brand,
+                "stock_by_wh": por_bodega.get(pr.id, {}),
                 "variants": variants.get(pr.id, []),
             }
         )
     return out
+
+
+@router.get("/filters")
+def filters(p: Principal = Depends(require("sales", "crear")), db: Session = Depends(get_db)):
+    """Lo que la caja ofrece para filtrar el catalogo (26/10): categorias (con su padre) y bodegas de venta activas.
+    Con el permiso de vender: la vendedora no necesita ver el modulo de inventario ni el de catalogo para filtrar."""
+    cats = db.scalars(select(Category).where(Category.tenant_id == p.tenant.id).order_by(Category.name)).all()
+    whs = db.scalars(
+        select(Warehouse).where(Warehouse.tenant_id == p.tenant.id, Warehouse.active, Warehouse.kind == "venta").order_by(Warehouse.is_default.desc(), Warehouse.name)
+    ).all()
+    return {
+        "categories": [{"id": c.id, "name": c.name, "parent_id": c.parent_id} for c in cats],
+        "warehouses": [{"id": w.id, "name": w.name, "is_default": w.is_default} for w in whs],
+    }
 
 
 class PosLine(BaseModel):

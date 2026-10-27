@@ -53,3 +53,18 @@ def test_seller_charges_at_pos_with_a_customer_created_there(client, auth, db_se
     assert _venta(client, luis, prod["id"], libre.json()["id"]).status_code == 201
     db_session.expire_all()
     assert db_session.get(Customer, libre.json()["id"]).account_owner_id == uid(client, luis)
+
+
+def test_filtros_de_la_caja_con_el_permiso_de_vender(client, auth, db_session):
+    """26/10: la caja filtra por categoria y bodega; la vendedora los ve sin permisos de inventario ni de catalogo."""
+    tid = auth["tenant"]["id"]
+    admin_h = dict(client.headers)
+    prod = _producto(client)
+    ana = interno(client, db_session, tid, "ana.filtros@ejemplo.com", "ventas")
+    client.headers.clear()
+    client.headers.update(admin_h)
+    f = client.get("/pos/filters", headers=ana)
+    assert f.status_code == 200, f.text
+    assert {"categories", "warehouses"} <= set(f.json()) and all("parent_id" in c for c in f.json()["categories"])
+    item = next(i for i in client.get("/pos/catalog", headers=ana).json() if i["id"] == prod["id"])
+    assert "stock_by_wh" in item and "brand" in item

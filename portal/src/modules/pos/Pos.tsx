@@ -20,7 +20,13 @@ type CatalogItem = {
   stock: number | string | null; image: string | null; variants: Variant[];
   pos_price?: number | string; pos_currency?: string; availability?: Availability | null;
   sin_tc?: boolean; // en otra moneda y sin tipo de cambio: no se puede cobrar en la caja
+  brand?: string | null;
+  stock_by_wh?: Record<string, number>; // existencia propia por bodega de venta (filtro "Bodega")
 };
+type PosFilters = { categories: { id: number; name: string; parent_id: number | null }[]; warehouses: { id: number; name: string; is_default: boolean }[] };
+/* busqueda sin tildes ni mayusculas, con todas las palabras ("camara 4mp hik") */
+const fold = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const PAGINA = 120; // tarjetas por tanda: el catalogo trae ~1 800 productos y dibujarlos todos traba la caja
 type CartLine = {
   key: string; product_id: number; variant_id?: number;
   name: string; unit_price: number; tax_rate: number;
@@ -49,6 +55,13 @@ export default function Pos() {
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [catLoading, setCatLoading] = useState(true);
   const [q, setQ] = useState("");
+  /* filtros (26/10): categoria (con sus subcategorias), bodega, disponibilidad y tipo */
+  const [opts, setOpts] = useState<PosFilters | null>(null);
+  const [fCat, setFCat] = useState("");
+  const [fWh, setFWh] = useState("");
+  const [fDisp, setFDisp] = useState("");
+  const [fTipo, setFTipo] = useState("");
+  const [cuantos, setCuantos] = useState(PAGINA);
 
   /* cart */
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -78,6 +91,9 @@ export default function Pos() {
       .finally(() => setCatLoading(false));
   }, [toast]);
 
+  useEffect(() => { api<PosFilters>("/pos/filters").then(setOpts).catch(() => setOpts(null)); }, []);
+  useEffect(() => { setCuantos(PAGINA); }, [q, fCat, fWh, fDisp, fTipo]);
+
   /* "/" shortcut */
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -106,11 +122,34 @@ export default function Pos() {
   }, [custQ, searchCustomers]);
 
   /* ---------- Derived values ---------- */
+  const catSet = (() => {
+    if (!fCat || !opts) return null;
+    const ids = new Set([Number(fCat)]);
+    let creció = true;
+    while (creció) { creció = false; for (const c of opts.categories) if (c.parent_id != null && ids.has(c.parent_id) && !ids.has(c.id)) { ids.add(c.id); creció = true; } }
+    return ids;
+  })();
+  const palabras = fold(q).split(/\s+/).filter(Boolean);
+  const propia = (i: CatalogItem) => Number(i.stock) > 0;
+  const proveedor = (i: CatalogItem) => i.availability?.state === "bajo_pedido" || Number(i.availability?.supplier_available ?? 0) > 0;
   const filtered = catalog.filter((item) => {
-    if (!q) return true;
-    const lo = q.toLowerCase();
-    return item.name.toLowerCase().includes(lo) || item.code.toLowerCase().includes(lo);
+    if (palabras.length) {
+      const hay = fold(`${item.name} ${item.code} ${item.brand || ""}`);
+      if (!palabras.every((w) => hay.includes(w))) return false;
+    }
+    if (catSet && !(item.category_id != null && catSet.has(item.category_id))) return false;
+    if (fTipo && item.item_type !== fTipo) return false;
+    if (fWh === "proveedor" && !proveedor(item)) return false;
+    if (fWh && fWh !== "proveedor" && !(Number(item.stock_by_wh?.[fWh] ?? 0) > 0)) return false;
+    if (fDisp === "propia" && !propia(item)) return false;
+    if (fDisp === "proveedor" && !proveedor(item)) return false;
+    if (fDisp === "disponible" && !(propia(item) || proveedor(item) || item.item_type !== "producto")) return false;
+    if (fDisp === "sin" && (item.item_type !== "producto" || propia(item) || proveedor(item))) return false;
+    return true;
   });
+  const hayFiltro = !!(fCat || fWh || fDisp || fTipo);
+  const padres = (opts?.categories || []).filter((c) => c.parent_id == null);
+  const hijas = (id: number) => (opts?.categories || []).filter((c) => c.parent_id === id);
 
   const currency = cart[0]?.currency ?? "CRC";
   const grossTotal = cart.reduce((s, l) => s + lineTotal(l), 0) + tip;
@@ -244,6 +283,34 @@ export default function Pos() {
               {q && <button className="x" onClick={() => setQ("")}><Icon d={I.x} size={13} /></button>}
             </div>
           </div>
+          <div className="pos-filtros">
+            <select className="select select--sm" value={fCat} onChange={(e) => setFCat(e.target.value)} aria-label="Categoría">
+              <option value="">Todas las categorías</option>
+              {padres.map((c) => [
+                <option key={c.id} value={c.id}>{c.name}</option>,
+                ...hijas(c.id).map((h) => <option key={h.id} value={h.id}>{"  · "}{h.name}</option>),
+              ])}
+            </select>
+            <select className="select select--sm" value={fWh} onChange={(e) => setFWh(e.target.value)} aria-label="Bodega">
+              <option value="">Todas las bodegas</option>
+              {(opts?.warehouses || []).map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
+              <option value="proveedor">Proveedor (bajo pedido)</option>
+            </select>
+            <select className="select select--sm" value={fDisp} onChange={(e) => setFDisp(e.target.value)} aria-label="Disponibilidad">
+              <option value="">Toda existencia</option>
+              <option value="disponible">Disponible (propia o proveedor)</option>
+              <option value="propia">En bodega propia</option>
+              <option value="proveedor">Solo en el proveedor</option>
+              <option value="sin">Sin existencia</option>
+            </select>
+            <select className="select select--sm" value={fTipo} onChange={(e) => setFTipo(e.target.value)} aria-label="Tipo">
+              <option value="">Productos y servicios</option>
+              <option value="producto">Solo productos</option>
+              <option value="servicio">Solo servicios</option>
+            </select>
+            <span className="pos-filtros__n meta">{filtered.length} resultado{filtered.length !== 1 ? "s" : ""}</span>
+            {(hayFiltro || q) && <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setQ(""); setFCat(""); setFWh(""); setFDisp(""); setFTipo(""); }}><Icon d={I.x} size={13} />Limpiar</button>}
+          </div>
 
           {catLoading ? (
             <div style={{ padding: 44, display: "grid", placeItems: "center" }}>
@@ -260,7 +327,7 @@ export default function Pos() {
                 background: "var(--hair)",
               }}
             >
-              {filtered.map((item) => (
+              {filtered.slice(0, cuantos).map((item) => (
                 <button
                   key={item.id}
                   onClick={() => handleProductClick(item)}
@@ -308,6 +375,11 @@ export default function Pos() {
                   </div>
                 </button>
               ))}
+            </div>
+          )}
+          {!catLoading && filtered.length > cuantos && (
+            <div style={{ padding: 12, textAlign: "center" }}>
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => setCuantos((n) => n + PAGINA)}>Ver más ({filtered.length - cuantos})</button>
             </div>
           )}
         </Card>
