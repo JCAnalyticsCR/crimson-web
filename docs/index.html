@@ -25,7 +25,7 @@
 <!-- Sin preload de fotogramas: la escena CAM 01 ya no es lo primero que se ve (la portada con tienda y soporte manda el LCP).
      Sus fotogramas esperan a que la escena se acerque (IntersectionObserver en main.js). -->
 <script>(function(){var f=new URLSearchParams(location.search).get("font");if(f)document.documentElement.dataset.font=f})()</script>
-<link rel="stylesheet" href="assets/styles.css?v=81">
+<link rel="stylesheet" href="assets/styles.css?v=82">
 <script>document.documentElement.classList.add('js')</script>
 <!-- Telefonos: "tel" = linea 1, "tel2" = linea 2 (formato libre: "+506 8888 9892", "88889892"...). Mientras "tel2" este vacio la linea 2 no se muestra.
      main.js los aplica a todo [data-tel]/[data-wa] (contacto y pie). "waLink" es el enlace de WhatsApp Business de la linea 1. -->
@@ -141,6 +141,12 @@
           </div>
         </div>
       </article>
+    </div>
+      <!-- Atencion preferencial (26/10): el camino de "cotizar una solucion" bajo las dos puertas, con el boton de la
+         portada anterior. Lleva al formulario de contacto con el tema ya elegido. -->
+    <div class="portada__cotiza">
+      <p><b>¿Necesitás atención preferencial?</b><span>Te preparamos una propuesta a la medida.</span></p>
+      <a class="btn btn--white btn--lg portada__cotiza-btn" href="#contacto" data-tipo="Cotizar una solución" data-cursor="Cotizar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h7M9 16h5"/></svg><span>Cotizar una solución</span></a>
     </div>
   </div>
   <button class="portada__pausa meta" id="portadaPausa" type="button"><span class="portada__pausa-ico" aria-hidden="true"></span><span class="portada__pausa-txt">Pausar movimiento</span></button>

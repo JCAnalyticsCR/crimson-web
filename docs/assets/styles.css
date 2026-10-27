@@ -1120,6 +1120,14 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
 
 /* ---------- Las dos puertas ---------- */
 .puertas{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:stretch}
+/* Atencion preferencial: franja bajo las puertas con el boton "Cotizar una solucion" */
+.portada__cotiza{grid-column:2;display:flex;align-items:center;justify-content:space-between;gap:14px 24px;flex-wrap:wrap;margin-top:calc(clamp(32px,4vw,72px) * -1 + 16px);padding:16px 18px 16px 22px;border:1px solid var(--hair-dark);border-radius:14px;background:rgba(255,255,255,.035)}
+.portada__cotiza p{display:flex;flex-direction:column;gap:3px;margin:0;font-size:14px;color:rgba(244,241,238,.7);min-width:0;flex:1 1 260px}
+.portada__cotiza b{font-size:17px;color:#fff}
+.portada__cotiza-btn{gap:12px;padding:15px 24px}
+.portada__cotiza-btn svg{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+@media (max-width:1023px){.portada__cotiza{grid-column:1 / -1;margin-top:0}}
+@media (max-width:767px){.portada__cotiza{padding:14px;gap:12px}.portada__cotiza b{font-size:16px}.portada__cotiza p{font-size:13.5px}.portada__cotiza-btn{width:100%}}
 .puerta{position:relative;display:flex;flex-direction:column;min-width:0;border-radius:var(--r);overflow:hidden;background:var(--ink-2);border:1px solid rgba(255,255,255,.1);box-shadow:0 30px 60px -40px rgba(0,0,0,.9);transition:transform var(--dur-drawer) var(--ease-enter),border-color var(--dur-drawer)}
 .puerta__media{position:relative;aspect-ratio:16/11;border-radius:0;flex:none}
 .puerta__hit{position:absolute;inset:0;z-index:6}
