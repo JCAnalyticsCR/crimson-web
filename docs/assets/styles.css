@@ -1108,7 +1108,7 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
 .portada__eyebrow{display:flex;align-items:center;gap:10px;color:rgba(244,241,238,.62)}
 .portada__dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--crimson);box-shadow:0 0 0 3px rgba(226,35,58,.2);animation:blink 1.6s infinite}
 .portada .display{font-size:clamp(40px,3.35vw,60px);line-height:.98;color:var(--white)}
-.portada__lead{max-width:31ch}
+.portada__lead{max-width:38ch}
 .portada__mas a{display:inline-flex;flex-wrap:wrap;gap:6px;font-size:15px;color:rgba(244,241,238,.66)}
 .portada__mas b{color:#fff;font-weight:700;border-bottom:1px solid rgba(226,35,58,.7);transition:color var(--dur-micro)}
 @media (hover:hover){.portada__mas a:hover b{color:var(--crimson)}}
