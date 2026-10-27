@@ -1473,3 +1473,38 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
   .footer{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
 }
 @media (prefers-reduced-motion:reduce){.p2-dock{transition:none}}
+
+/* ---------- Operations: vista previa de JC Analytics (26/10) ----------
+   Su sitio en miniatura dentro del visor de la consola. Paleta de su marca: verde muy oscuro y turquesa. Las barras
+   crecen una vez al abrirse la pestana (transform, compositor); con reduced-motion ya estan en su altura. */
+.jcp{--jc-bg:#080c10;--jc-2:#11231b;--jc-line:rgba(111,158,125,.22);--jc-acc:#00a6b2;--jc-txt:#e8efe9;
+  display:flex;align-items:center;justify-content:center;padding:22px 18px 40px;background:radial-gradient(120% 90% at 20% 0,#12281b 0,#080c10 70%);color:var(--jc-txt);text-decoration:none}
+.jcp::before{display:none}
+.jcp__win{position:relative;z-index:2;display:flex;flex-direction:column;width:100%;max-width:440px;border-radius:12px;overflow:hidden;background:var(--jc-bg);border:1px solid var(--jc-line);box-shadow:0 30px 60px -30px rgba(0,0,0,.9);transition:transform var(--dur-drawer) var(--ease-enter)}
+.jcp__bar{display:flex;align-items:center;gap:5px;padding:8px 12px;background:#0d1612;border-bottom:1px solid var(--jc-line)}
+.jcp__bar i{width:7px;height:7px;border-radius:50%;background:#294c37}
+.jcp__bar i:first-child{background:var(--jc-acc)}
+.jcp__url{margin-left:10px;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-size:10px;letter-spacing:.04em;color:rgba(232,239,233,.7)}
+.jcp__body{display:flex;flex-direction:column;gap:12px;padding:16px}
+.jcp__top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.jcp__top img{height:20px;width:auto;opacity:.95}
+.jcp__tag{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:rgba(232,239,233,.6)}
+.jcp__claim{font-family:var(--serif);font-weight:var(--dw);font-size:clamp(22px,2vw,28px);line-height:1.05;letter-spacing:-.02em}
+.jcp__claim em{font-style:normal;color:var(--jc-acc)}
+.jcp__pilares{display:flex;gap:6px;flex-wrap:wrap}
+.jcp__pilares span{display:inline-flex;gap:6px;align-items:baseline;padding:5px 9px;border-radius:999px;border:1px solid var(--jc-line);font-size:11px;font-weight:600}
+.jcp__pilares b{font-size:9px;color:var(--jc-acc)}
+.jcp__dash{display:grid;grid-template-columns:1fr 1.1fr;gap:10px;padding:10px;border-radius:10px;background:var(--jc-2);border:1px solid var(--jc-line)}
+.jcp__kpis{display:flex;flex-direction:column;gap:6px}
+.jcp__kpis span{display:flex;flex-direction:column}
+.jcp__kpis small{font-size:9px;color:rgba(232,239,233,.55);letter-spacing:.04em}
+.jcp__kpis b{font-size:15px;font-variant-numeric:tabular-nums}
+.jcp__chart{display:flex;align-items:flex-end;gap:5px;height:84px;padding-top:6px;border-bottom:1px solid var(--jc-line)}
+.jcp__chart i{flex:1;height:var(--h);border-radius:3px 3px 0 0;background:linear-gradient(180deg,var(--jc-acc),#079eaa55);transform-origin:bottom;transform:scaleY(.12);transition:transform var(--dur-section) var(--ease-enter)}
+.jcp__chart i:nth-child(n){transition-delay:calc(var(--k,0) * 60ms)}
+.consola__panel.is-active .jcp__chart i{transform:none}
+.jcp__chart i:nth-child(2){--k:1}.jcp__chart i:nth-child(3){--k:2}.jcp__chart i:nth-child(4){--k:3}.jcp__chart i:nth-child(5){--k:4}.jcp__chart i:nth-child(6){--k:5}.jcp__chart i:nth-child(7){--k:6}.jcp__chart i:nth-child(8){--k:7}
+.jcp .feed__meta{color:rgba(232,239,233,.75)}
+@media (hover:hover){.jcp:hover .jcp__win{transform:translateY(-3px)}}
+@media (prefers-reduced-motion:reduce){.jcp__chart i{transform:none;transition:none}}
+@media (max-width:767px){.jcp{padding:16px 12px 36px}.jcp__body{padding:12px;gap:10px}.jcp__dash{grid-template-columns:1fr}.jcp__chart{height:60px}}

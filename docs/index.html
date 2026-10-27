@@ -25,7 +25,7 @@
 <!-- Sin preload de fotogramas: la escena CAM 01 ya no es lo primero que se ve (la portada con tienda y soporte manda el LCP).
      Sus fotogramas esperan a que la escena se acerque (IntersectionObserver en main.js). -->
 <script>(function(){var f=new URLSearchParams(location.search).get("font");if(f)document.documentElement.dataset.font=f})()</script>
-<link rel="stylesheet" href="assets/styles.css?v=82">
+<link rel="stylesheet" href="assets/styles.css?v=83">
 <script>document.documentElement.classList.add('js')</script>
 <!-- Telefonos: "tel" = linea 1, "tel2" = linea 2 (formato libre: "+506 8888 9892", "88889892"...). Mientras "tel2" este vacio la linea 2 no se muestra.
      main.js los aplica a todo [data-tel]/[data-wa] (contacto y pie). "waLink" es el enlace de WhatsApp Business de la linea 1. -->
@@ -204,17 +204,23 @@
         </div>
       </article>
       <article class="consola__panel" role="tabpanel" id="cpan-04" aria-labelledby="ctab-04">
-        <div class="feed consola__media linea__media--panel" data-cursor="DATA" aria-label="Panel de indicadores">
-          <svg class="panel" viewBox="0 0 260 180" aria-hidden="true">
-            <g stroke="rgba(255,255,255,.08)"><path d="M20 40h220M20 80h220M20 120h220M20 160h220"/></g>
-            <g class="panel__bars" fill="rgba(255,255,255,.18)"><rect x="34" y="118" width="18" height="42"/><rect x="70" y="96" width="18" height="64"/><rect x="106" y="106" width="18" height="54"/><rect x="142" y="72" width="18" height="88"/><rect x="178" y="84" width="18" height="76"/><rect x="214" y="52" width="18" height="108"/></g>
-            <path class="panel__line" d="M30 126 L79 100 L115 108 L151 70 L187 78 L223 46" fill="none" stroke="#e2233a" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
-            <circle class="panel__dot" cx="223" cy="46" r="4" fill="#e2233a"/>
-            <text x="20" y="24" fill="rgba(255,255,255,.75)" font-family="Arial, Helvetica, sans-serif" font-size="9" letter-spacing="1.5">INCIDENCIAS · MES</text>
-            <text x="240" y="24" fill="#e2233a" font-family="Arial, Helvetica, sans-serif" font-size="9" text-anchor="end" letter-spacing="1.5">-38%</text>
-          </svg>
-          <span class="feed__corners"></span><span class="feed__meta"><span>JC ANALYTICS</span><span>EN VIVO</span></span>
-        </div>
+        <!-- Vista previa de JC Analytics (26/10): su sitio en miniatura con su lema, sus tres pilares y un tablero como los que
+             arman (Power BI / a la medida). Colores de su marca (verde oscuro + turquesa). Todo el recuadro abre jcanalytic.com/es. -->
+        <a class="feed consola__media jcp" href="https://www.jcanalytic.com/es/" target="_blank" rel="noopener" data-cursor="Visitar" aria-label="JC Analytics: software, datos e inteligencia (abre jcanalytic.com)">
+          <span class="jcp__win" aria-hidden="true">
+            <span class="jcp__bar"><i></i><i></i><i></i><span class="jcp__url">jcanalytic.com</span></span>
+            <span class="jcp__body">
+              <span class="jcp__top"><img src="assets/img/marca-jcanalytics-mono.png" alt="" width="551" height="120" loading="lazy"><span class="jcp__tag">Software · datos · inteligencia</span></span>
+              <span class="jcp__claim">Software con <em>carácter</em>.</span>
+              <span class="jcp__pilares"><span><b>01</b>Diseño</span><span><b>02</b>Ingeniería</span><span><b>03</b>Inteligencia</span></span>
+              <span class="jcp__dash">
+                <span class="jcp__kpis"><span><small>Flujo de caja</small><b>+12,4 %</b></span><span><small>Rentabilidad</small><b>31 %</b></span><span><small>Procesos automatizados</small><b>18</b></span></span>
+                <span class="jcp__chart"><i style="--h:38%"></i><i style="--h:52%"></i><i style="--h:46%"></i><i style="--h:64%"></i><i style="--h:58%"></i><i style="--h:76%"></i><i style="--h:70%"></i><i style="--h:88%"></i></span>
+              </span>
+            </span>
+          </span>
+          <span class="feed__corners"></span><span class="feed__meta"><span>JC ANALYTICS · EJEMPLO</span><span>VISITAR ↗</span></span>
+        </a>
         <div class="consola__body">
           <h3><small>Crimson</small>Operations</h3><span class="linea__by">En colaboración con JC Analytics</span>
           <ul class="linea__list consola__list"><li>Tableros de operación (Power BI)</li><li>Reportes ejecutivos automáticos</li><li>Automatización de procesos y alertas</li><li>Integración de datos: accesos, cámaras y sistemas</li><li>Control de calidad de la información</li><li>Software y apps a la medida</li></ul>
