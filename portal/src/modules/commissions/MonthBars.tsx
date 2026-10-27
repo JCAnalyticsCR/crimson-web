@@ -4,9 +4,11 @@
 import { fmtMoney } from "../../lib/api";
 import { mesLbl } from "./types";
 
-export default function MonthBars({ rows, a, b, labelA, labelB, currency = "CRC", selected, onPick }: {
+export default function MonthBars({ rows, a, b, labelA, labelB, currency = "CRC", selected, onPick, lbl = mesLbl }: {
   rows: { mes: string; [k: string]: string | number | null | undefined }[]; a: string; b: string; labelA: string; labelB: string; currency?: string;
   selected?: string; onPick?: (mes: string) => void;
+  /** etiqueta de cada columna (por defecto el mes; Mis comisiones la usa tambien por semana) */
+  lbl?: (k: string) => string;
 }) {
   const val = (r: (typeof rows)[number], k: string) => Math.max(0, Number(r[k]) || 0);
   const max = Math.max(1, ...rows.map((r) => Math.max(val(r, a), val(r, b))));
@@ -14,14 +16,14 @@ export default function MonthBars({ rows, a, b, labelA, labelB, currency = "CRC"
     <div>
       <div className="com-bars" role={onPick ? "group" : "img"} aria-label={`${labelA} contra ${labelB} por mes; los montos exactos están en el detalle`}>
         {rows.map((r) => {
-          const title = `${mesLbl(r.mes)} · ${labelA}: ${fmtMoney(r[a] as string, currency)} · ${labelB}: ${fmtMoney(r[b] as string, currency)}`;
+          const title = `${lbl(r.mes)} · ${labelA}: ${fmtMoney(r[a] as string, currency)} · ${labelB}: ${fmtMoney(r[b] as string, currency)}`;
           const inner = (
             <>
               <div className="com-bars__pair">
                 <div className="com-bars__a" style={{ height: `${Math.max(2, (val(r, a) / max) * 120)}px` }} />
                 <div className="com-bars__b" style={{ height: `${Math.max(2, (val(r, b) / max) * 120)}px` }} />
               </div>
-              <span className="com-bars__lbl">{mesLbl(r.mes)}</span>
+              <span className="com-bars__lbl">{lbl(r.mes)}</span>
             </>
           );
           return onPick ? (

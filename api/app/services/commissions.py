@@ -1682,6 +1682,11 @@ def _month_key(v: date) -> str:
     return v.strftime("%Y-%m")
 
 
+def _week_start(v: date) -> date:
+    """Lunes de la semana de `v` (las semanas de la vendedora van de lunes a domingo)."""
+    return v - timedelta(days=v.weekday())
+
+
 def _months_back(end: date, n: int) -> list[str]:
     y, m, out = end.year, end.month, []
     for _ in range(n):
@@ -1840,6 +1845,16 @@ def summary_for_user(db: Session, tenant, user_id: int, a: date, b: date, viewer
             hist[k]["ganado"] += crc_of(db, c)
         if c.status == "pagada" and c.paid_on and _month_key(c.paid_on) in hist:
             hist[_month_key(c.paid_on)]["pagado"] += crc_of(db, c)
+    # 26/10: la vendedora ve su avance por semana (lunes a domingo, las ultimas 12): lo ganado, lo pagado y cuantas
+    lunes = _week_start(hoy)
+    sem = {lunes - timedelta(weeks=i): {"ganado": ZERO, "pagado": ZERO, "n": 0} for i in range(11, -1, -1)}
+    for c in mine:
+        w = _week_start(c.earned_on)
+        if w in sem:
+            sem[w]["ganado"] += crc_of(db, c)
+            sem[w]["n"] += 1
+        if c.status == "pagada" and c.paid_on and _week_start(c.paid_on) in sem:
+            sem[_week_start(c.paid_on)]["pagado"] += crc_of(db, c)
     hide = viewer is not None and hides_margin(viewer, cfg)
     reglas = []
     for r in rules_for_user(db, tenant, user_id, role):
@@ -1856,6 +1871,7 @@ def summary_for_user(db: Session, tenant, user_id: int, a: date, b: date, viewer
         "si_aceptan": {"total": q2(si_aceptan), "cotizaciones": n_q},
         "embudo": {"total": q2(embudo), "oportunidades": n_o, "estimado": est_emb},
         "historial": [{"mes": h["mes"], "ganado": q2(h["ganado"]), "pagado": q2(h["pagado"])} for h in hist.values()],
+        "semanas": [{"semana": w.isoformat(), "ganado": q2(v["ganado"]), "pagado": q2(v["pagado"]), "comisiones": v["n"]} for w, v in sem.items()],
         "reglas": reglas,
         "moneda": "CRC",
         "actualizado": datetime.now(UTC),

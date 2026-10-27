@@ -50,3 +50,31 @@
   .com-filter .select { max-width: none; }
   .com-bars { height: 140px; }
 }
+
+/* Mis comisiones por semana (26/10): barra de periodo, cifra grande contra el periodo anterior y datos del periodo */
+.mc { display: flex; flex-direction: column; gap: 16px; }
+.mc .com-cards { margin-bottom: 0; }
+.mc-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; }
+.mc-nav { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mc-nav__lbl { min-width: 150px; text-align: center; font-size: 15px; }
+.mc-hero { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 18px 28px; align-items: center; padding: 22px 24px; border-radius: var(--r-lg);
+  background: linear-gradient(135deg, var(--surface) 0%, color-mix(in srgb, var(--ok) 7%, var(--surface)) 100%); border: 1px solid var(--hair); }
+.mc-hero__main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.mc-hero__num { font-size: clamp(32px, 4vw, 46px); line-height: 1; color: var(--ok); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.mc-delta { align-self: flex-start; font-size: 13px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); }
+.mc-delta.is-up { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+.mc-delta.is-down { background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); }
+.mc-hero__facts { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mc-hero__facts li { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--hair); min-width: 0; }
+.mc-hero__facts b { font-size: 17px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.mc-hero__facts span { font-size: 11.5px; color: var(--text-3); }
+@media (max-width: 760px) {
+  .mc-hero { grid-template-columns: 1fr; padding: 18px; }
+  .mc-bar { flex-direction: column; align-items: stretch; }
+  .mc-bar .tabs { align-self: flex-start; }
+  .mc-nav { justify-content: space-between; }
+  .mc-nav__lbl { flex: 1; min-width: 0; }
+  .mc-hero__facts b { font-size: 15px; }
+  .mc .com-cards > :first-child { grid-column: auto; }
+  .mc .com-cards > :first-child b { font-size: 19px; }
+}

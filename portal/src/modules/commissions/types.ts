@@ -35,7 +35,9 @@ export type Summary = {
   ganado: { total: string; en_espera: number; pendiente: string; aprobada: string; pagada: string }; pagado: string;
   por_cobrar: { total: string; facturas: number; estimado: boolean }; en_curso: { total: string; proyectos: number; estimado: boolean };
   si_aceptan: { total: string; cotizaciones: number }; embudo: { total: string; oportunidades: number; estimado: boolean };
-  historial: { mes: string; ganado: string; pagado: string }[]; reglas: { id: number; summary: string; kind: string; general: boolean }[];
+  historial: { mes: string; ganado: string; pagado: string }[];
+  /** 26/10: las ultimas 12 semanas (lunes a domingo; `semana` = el lunes AAAA-MM-DD) */
+  semanas?: { semana: string; ganado: string; pagado: string; comisiones: number }[]; reglas: { id: number; summary: string; kind: string; general: boolean }[];
   moneda: string; actualizado: string;
 };
 

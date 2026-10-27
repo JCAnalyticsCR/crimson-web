@@ -374,6 +374,12 @@ def test_resumen_tiempo_real(client, auth, db_session):
     assert D(str(s["por_cobrar"]["total"])) == D("25000.00") and s["por_cobrar"]["facturas"] == 1 and s["por_cobrar"]["estimado"] is False
     assert D(str(s["embudo"]["total"])) == D("25000.00") and s["embudo"]["estimado"] is True
     assert s["reglas"] and "5 %" in s["reglas"][0]["summary"] and len(s["historial"]) == 12
+    # 26/10: por semana (lunes a domingo, las ultimas 12); la de hoy es la ultima y trae lo ganado hoy
+    from datetime import date, timedelta
+    lunes = date.today() - timedelta(days=date.today().weekday())
+    assert len(s["semanas"]) == 12 and s["semanas"][-1]["semana"] == lunes.isoformat()
+    assert D(str(s["semanas"][-1]["ganado"])) == D("25000.00") and s["semanas"][-1]["comisiones"] == 1
+    assert s["semanas"][0]["semana"] == (lunes - timedelta(weeks=11)).isoformat()
     dash = client.get("/dashboard", headers=vh).json()
     assert D(str(dash["comisiones"]["ganado_mes"])) == D("25000.00") and D(str(dash["comisiones"]["por_cobrar"])) == D("25000.00")
     assert client.get("/dashboard").json()["comisiones"] is None  # el admin ve la empresa, no "mis comisiones"
