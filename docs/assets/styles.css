@@ -1299,39 +1299,6 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
 .nav__util-link{font-size:13px;opacity:.75}
 @media (hover:hover){.nav__util-link:hover{opacity:1;color:var(--crimson)}}
 
-/* ---------- 1 · Portada ---------- */
-.p2-hero{position:relative;overflow:hidden;background:var(--ink);color:var(--white);padding-top:clamp(36px,5vw,72px);padding-bottom:clamp(44px,5vw,80px)}
-.p2-hero .sec-net{position:absolute;inset:0;pointer-events:none;opacity:.35}
-.p2-hero .sec-net svg{width:100%;height:100%}
-.p2-hero__grid{position:relative;display:grid;grid-template-columns:1.05fr 1fr;gap:clamp(28px,4vw,64px);align-items:center}
-.p2-hero__copy{display:flex;flex-direction:column;gap:20px;align-items:flex-start}
-.p2-hero__eyebrow{display:inline-flex;align-items:center;gap:10px;color:rgba(244,241,238,.7)}
-.p2-hero__title{font-size:clamp(40px,4.2vw,64px);line-height:1.02;max-width:17ch}
-.p2-hero__lead{font-size:clamp(16px,1.2vw,19px);line-height:1.55;color:rgba(244,241,238,.82);max-width:52ch;font-weight:500}
-.p2-hero__ask{font-size:clamp(16px,1.15vw,18px);font-weight:700;color:#fff}
-.p2-hero__ctas{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;max-width:560px}
-.p2-hero__btn{justify-content:flex-start;gap:12px;padding:18px 22px;font-size:16px}
-.p2-hero__btn svg{width:22px;height:22px;flex:none;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
-.p2-hero__note{color:rgba(244,241,238,.6)}
-/* Recuadro del catalogo que rota (mismo componente .vitrina de la portada anterior) */
-.p2-vitrina{display:flex;flex-direction:column;gap:12px;min-width:0}
-.p2-vitrina__box{aspect-ratio:4/3;border-radius:16px;box-shadow:0 30px 60px -30px rgba(0,0,0,.75)}
-.p2-vitrina__box .puerta__tag{left:18px;top:16px}
-.p2-vitrina__box .vitrina__n{right:18px;top:16px}
-.p2-vitrina__box .vitrina__cap{left:20px;right:20px;bottom:20px}
-.p2-vitrina__box .vitrina__cap b{font-size:clamp(18px,1.6vw,24px)}
-.p2-vitrina__box .vitrina__item img{left:8%;top:12%;width:84%;height:62%}
-.p2-vitrina__link{position:absolute;inset:0;display:block;color:inherit}
-.vitrina__item:not(.is-on) .p2-vitrina__link{pointer-events:none}
-.p2-vitrina__cta{align-self:flex-end;font-size:14px;font-weight:700;color:#fff;border-bottom:1.5px solid var(--crimson);padding-bottom:2px}
-@media (hover:hover){.p2-vitrina__cta:hover{color:var(--crimson)}}
-/* Titular: entra al cargar (no espera al scroll); en el celular y con reduced-motion ya esta escrito (LCP) */
-.js .p2-hero .lines .ln>span{animation:lineUp var(--dur-section) var(--ease-enter) forwards}
-.js .p2-hero .lines em{animation:inkIn var(--dur-drawer) .3s both}
-@media (max-width:767px),(prefers-reduced-motion:reduce){
-  .js .p2-hero .lines .ln>span{opacity:1;transform:none;animation:none}
-  .js .p2-hero .lines em{color:var(--crimson);animation:none}
-}
 
 /* ---------- 2 · Soluciones ---------- */
 .p2-sol{background:var(--bg)}
@@ -1374,7 +1341,7 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
 @media (prefers-reduced-motion:reduce){.p2-card.is-open .p2-card__body{animation:none}.p2-card__chev{transition:none}}
 
 /* ---------- 3 · Destacados ---------- */
-.p2-dest{background:linear-gradient(180deg,var(--bg) 0,var(--ink) 110px);color:var(--white);padding-top:calc(var(--space) + 16px)}
+.p2-dest{background:var(--ink);color:var(--white)}
 .p2-dest__grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
 .p2-prod{display:flex;flex-direction:column;border-radius:16px;overflow:hidden;background:var(--ink-2);border:1px solid var(--hair-dark)}
 .p2-prod__media{display:block;aspect-ratio:1;background:radial-gradient(80% 80% at 50% 40%,#fff 0,#f1eeea 100%)}
@@ -1440,7 +1407,6 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
 .p2-dock{display:none}
 
 @media (min-width:768px) and (max-width:1100px){
-  .p2-hero__grid{grid-template-columns:1fr}
   .p2-sol__grid,.p2-ej__grid{grid-template-columns:repeat(2,1fr)}
   .p2-dest__grid{grid-template-columns:repeat(2,1fr)}
   .p2-casos__grid{gap:10px}
@@ -1456,20 +1422,6 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
   .nav__util-link{font-family:var(--sans);font-size:16px;font-weight:700;opacity:1;padding:13px 18px;border-radius:999px;box-shadow:inset 0 0 0 1.5px var(--hair);flex:1;text-align:center}
   .nav__util .btn{margin-top:0;flex:1;background:transparent!important;color:var(--ink)!important;box-shadow:inset 0 0 0 1.5px var(--hair)}
   .nav__util .nav__login-txt{display:inline}
-  /* Portada: los dos botones visibles al abrir, la composicion debajo */
-  .p2-hero{padding-top:26px;padding-bottom:40px}
-  .p2-hero__grid{grid-template-columns:1fr;gap:28px}
-  .p2-hero__copy{gap:14px}
-  .p2-hero__title{font-size:clamp(34px,10vw,44px);max-width:none}
-  .p2-hero__lead{font-size:15px}
-  .p2-hero__ask{font-size:15.5px}
-  .p2-hero__ctas{grid-template-columns:1fr;gap:10px;max-width:none}
-  .p2-hero__btn{justify-content:center;padding:16px 20px;min-height:56px}
-  .p2-hero__note{font-size:10px}
-  .p2-vitrina__box{aspect-ratio:4/3}
-  .p2-vitrina__box .vitrina__item img{left:6%;top:14%;width:88%;height:58%}
-  .p2-vitrina__box .vitrina__cap{left:14px;right:14px;bottom:14px}
-  .p2-vitrina__cta{align-self:center}
   /* Listas en vez de rejillas */
   .p2-sol__grid,.p2-ej__grid{grid-template-columns:1fr;gap:10px}
   .p2-card__toggle{padding:14px 14px 14px 16px;min-height:72px;gap:12px}

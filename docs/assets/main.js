@@ -65,7 +65,7 @@
   // Fuera de vista se pausan las animaciones SMIL (las CSS se pausan solas por visibilidad del compositor).
   {
     // Movil: las mismas redes en las secciones (variante vertical), sin tocar el hero movil
-    const hosts = [['#destacados', true], ['#ejemplos', true], ['#portada', true]];
+    const hosts = [['#soluciones', true], ['#destacados', true], ['#ejemplos', true], ['#portada', true]];
     const netIO = new IntersectionObserver(entries => entries.forEach(en => { const s = en.target.firstElementChild; if (!s) return; en.isIntersecting && !s.closest('.is-paused') ? s.unpauseAnimations() : s.pauseAnimations(); }), { rootMargin: '25% 0px' });
     const armar = ([sel, dark], i) => {
       const host = $(sel); if (!host) return;
@@ -408,6 +408,17 @@
     stage.addEventListener('touchend', e => { const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy; if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.5) { auto = false; show(i + (dx < 0 ? 1 : -1)); } }, { passive: true });
     new IntersectionObserver(([en]) => { visible = en.isIntersecting; restart(); }, { threshold: .2 }).observe(con);
     show(0);
+    // Anclas de soluciones (#seguridad, #redes, #iot, #ia, #software: los enlaces de los videos y del pie) abren su
+    // pestana y llevan a la consola. Se atienden al cargar y con cada cambio de ancla.
+    const porAncla = h => tabs.findIndex(t => (t.dataset.anclas || '').split(' ').includes(h.replace('#', '')));
+    const irAncla = () => {
+      const k = porAncla(location.hash); if (k < 0) return;
+      auto = false; show(k);
+      const y = con.getBoundingClientRect().top + scrollY - (document.querySelector('#nav')?.offsetHeight || 0) - 20;
+      scrollTo({ top: Math.max(0, y), behavior: reduced ? 'instant' : 'smooth' });
+    };
+    addEventListener('hashchange', irAncla);
+    addEventListener('load', () => setTimeout(irAncla, 120));
   });
 
   /* ---------- Radar de cobertura: el barrido "detecta" cada sector (lectura + resalte); tocar un punto lo nombra ---------- */
@@ -800,19 +811,6 @@
     if (radio) radio.checked = true;
     if (det) det.value = radio && sol === t ? '' : /cotizar una soluci/i.test(t) ? '' : t;
   }));
-
-  /* ---------- Soluciones compactas: se abren al tocarlas, una a la vez ----------
-     Un ancla a una solucion (#seguridad, #redes... los enlaces de los videos y del pie) la abre al llegar. */
-  const solCards = $$('.p2-card[id]');
-  const abrirSol = (c, on) => { c.classList.toggle('is-open', on); $('.p2-card__toggle', c)?.setAttribute('aria-expanded', String(on)); };
-  solCards.forEach(c => $('.p2-card__toggle', c)?.addEventListener('click', () => {
-    const on = !c.classList.contains('is-open');
-    solCards.forEach(x => abrirSol(x, x === c && on));
-  }));
-  const solDesdeHash = h => { const c = solCards.find(x => '#' + x.id === h); if (c) solCards.forEach(x => abrirSol(x, x === c)); };
-  solDesdeHash(location.hash);
-  addEventListener('hashchange', () => solDesdeHash(location.hash));
-  $$('a[href^="#"]').forEach(a => a.addEventListener('click', () => solDesdeHash(a.getAttribute('href'))));
 
   /* ---------- Destacados: precio vigente desde la tienda (la ficha publica, sin cookies) ----------
      Se pide cuando la seccion se acerca; si la tienda no responde o el producto ya no se vende, queda el texto
