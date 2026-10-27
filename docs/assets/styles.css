@@ -1396,16 +1396,10 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
 
 /* ---------- 6 · Proceso y respaldo ---------- */
 .p2-proc{background:linear-gradient(180deg,var(--ink) 0,var(--bg) 110px);padding-top:calc(var(--space) + 16px)}
-.p2-proc__pasos{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:1px solid var(--hair);border-radius:16px;background:#fff;overflow:hidden}
-.p2-proc__pasos li{display:flex;flex-direction:column;gap:6px;padding:22px;border-left:1px solid var(--hair)}
-.p2-proc__pasos li:first-child{border-left:0}
-.p2-proc__pasos .meta{color:var(--crimson)}
-.p2-proc__pasos b{font-size:19px}
-.p2-proc__pasos span:last-child{color:var(--muted);font-size:14.5px;line-height:1.45}
-.p2-proc__resp{display:grid;grid-template-columns:1.3fr 1fr;gap:18px 40px;align-items:center;margin-top:22px}
-.p2-proc__sellos{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;font-weight:700;font-size:14.5px}
-.p2-proc__sellos li{position:relative;padding-left:24px}
-.p2-proc__sellos li::before{content:"";position:absolute;left:0;top:.2em;width:14px;height:8px;border-left:2px solid var(--ok);border-bottom:2px solid var(--ok);transform:rotate(-45deg)}
+.p2-proc__resp{display:grid;grid-template-columns:1fr;gap:18px;margin-top:clamp(28px,3vw,40px)}
+.p2-proc__sellos{display:flex;flex-wrap:wrap;gap:10px;list-style:none;margin:0;padding:0}
+.p2-proc__sellos li{display:inline-flex;align-items:center;gap:10px;padding:10px 16px 10px 12px;border-radius:999px;background:#fff;border:1px solid var(--hair);font-weight:700;font-size:14px}
+.p2-proc__sellos svg{width:20px;height:20px;flex:none;fill:none;stroke:var(--crimson);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .p2-proc__marcas{display:flex;align-items:center;gap:28px;flex-wrap:wrap;justify-content:flex-end}
 .p2-proc__marcas img{height:24px;width:auto;filter:brightness(0);opacity:.6}
 .p2-proc__sop{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:6px 18px;align-items:baseline;padding-top:18px;border-top:1px solid var(--hair);font-size:15px;color:var(--muted)}
@@ -1419,10 +1413,7 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
   .p2-dest__grid{grid-template-columns:repeat(2,1fr)}
   .p2-casos__grid{gap:10px}
   .p2-caso__psr div{grid-template-columns:1fr;gap:2px}
-  .p2-proc__pasos{grid-template-columns:repeat(2,1fr)}
-  .p2-proc__pasos li:nth-child(3){border-left:0}
-  .p2-proc__pasos li:nth-child(n+3){border-top:1px solid var(--hair)}
-  .p2-proc__resp{grid-template-columns:1fr}.p2-proc__marcas{justify-content:flex-start}
+        .p2-proc__resp{grid-template-columns:1fr}.p2-proc__marcas{justify-content:flex-start}
 }
 @media (max-width:767px){
   .p2-head{grid-template-columns:1fr;gap:14px}
@@ -1455,12 +1446,8 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
   .p2-caso .obra__info{padding:40px 10px 12px}.p2-caso .obra__info strong{font-size:13px}.p2-caso .obra__nota,.p2-caso .obra__osd{display:none}
   .p2-caso .obra__play{width:44px;height:44px;margin:-22px 0 0 -22px}.p2-caso .obra__play::before{left:17px;top:13px;border-width:9px 0 9px 14px}
   .p2-gal{margin-left:calc(var(--pad)*-1);margin-right:calc(var(--pad)*-1);border-radius:0;padding:24px var(--pad)}
-  .p2-proc__pasos{grid-template-columns:1fr}
-  .p2-proc__pasos li{border-left:0;border-top:1px solid var(--hair);padding:16px 18px;display:grid;grid-template-columns:30px 1fr;gap:2px 10px}
-  .p2-proc__pasos li:first-child{border-top:0}
-  .p2-proc__pasos .meta{grid-row:span 2;padding-top:4px}
-  .p2-proc__resp{grid-template-columns:1fr}
-  .p2-proc__sellos{grid-template-columns:1fr}
+          .p2-proc__resp{grid-template-columns:1fr}
+  .p2-proc__sellos li{font-size:13px;padding:8px 14px 8px 10px}
   .p2-proc__marcas{justify-content:flex-start;gap:20px}
   /* Acceso fijo: aparece cuando la portada ya paso; el pie deja su espacio para no tapar nada */
   .p2-dock{display:grid;grid-template-columns:1fr 1.4fr;gap:8px;position:fixed;left:0;right:0;bottom:0;z-index:36;
@@ -1508,3 +1495,43 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
 @media (hover:hover){.jcp:hover .jcp__win{transform:translateY(-3px)}}
 @media (prefers-reduced-motion:reduce){.jcp__chart i{transform:none;transition:none}}
 @media (max-width:767px){.jcp{padding:16px 12px 36px}.jcp__body{padding:12px;gap:10px}.jcp__dash{grid-template-columns:1fr}.jcp__chart{height:60px}}
+
+/* ---------- Como trabajamos: ruta (26/10) ----------
+   Cuatro nodos unidos por una linea que se traza en rojo al llegar (.in la pone main.js) y un pulso que la recorre.
+   Los nodos se encienden en orden. Movil: vertical. Reduced-motion: trazada, encendida y sin pulso. */
+.p2-ruta{position:relative;--nodo:64px}
+.p2-ruta__lista{position:relative;z-index:1;display:grid;grid-template-columns:repeat(4,1fr);gap:20px;list-style:none;margin:0;padding:0}
+.p2-ruta__paso{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:0 6px}
+.p2-ruta__paso b{font-size:19px;margin-top:10px}
+.p2-ruta__txt{color:var(--muted);font-size:14.5px;line-height:1.45;max-width:24ch}
+.p2-ruta__nodo{width:var(--nodo);height:var(--nodo);flex:none;border-radius:50%;display:grid;place-items:center;background:#fff;color:var(--ink);border:1.5px solid var(--hair);box-shadow:0 12px 26px -18px rgba(21,19,26,.5);
+  transition:background var(--dur-drawer) var(--ease-enter),color var(--dur-drawer),border-color var(--dur-drawer),box-shadow var(--dur-section) var(--ease-enter);transition-delay:calc(var(--d,0) * 380ms + 250ms)}
+.p2-ruta__nodo svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.p2-ruta.in .p2-ruta__nodo{background:var(--crimson);color:#fff;border-color:var(--crimson);box-shadow:0 0 0 7px var(--crimson-soft),0 14px 30px -16px rgba(226,35,58,.8)}
+.p2-ruta__linea{position:absolute;z-index:0;top:calc(var(--nodo) / 2 - 1px);left:12.5%;right:12.5%;height:2px;background:var(--hair)}
+.p2-ruta__linea i{position:absolute;inset:0;background:var(--crimson);transform-origin:left center;transform:scaleX(0);transition:transform 1.5s var(--ease-scene) .2s}
+.p2-ruta.in .p2-ruta__linea i{transform:none}
+.p2-ruta__linea em{position:absolute;inset:0;opacity:0;pointer-events:none}
+.p2-ruta__linea em::before{content:"";position:absolute;left:-6px;top:-5px;width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 0 0 3px var(--crimson),0 0 18px 4px rgba(226,35,58,.55)}
+.p2-ruta.in .p2-ruta__linea em{animation:rutaPulso 3.4s 1.9s var(--ease-scene) infinite}
+@keyframes rutaPulso{0%{transform:translateX(0);opacity:0}8%{opacity:1}88%{opacity:1}100%{transform:translateX(100%);opacity:0}}
+@media (hover:hover){.p2-ruta.in .p2-ruta__paso:hover .p2-ruta__nodo{transform:translateY(-3px);transition-delay:0s}.p2-ruta__nodo{will-change:auto}}
+@media (max-width:767px){
+  .p2-ruta{--nodo:52px}
+  .p2-ruta__lista{grid-template-columns:1fr;gap:22px}
+  .p2-ruta__paso{display:grid;grid-template-columns:var(--nodo) 1fr;column-gap:16px;row-gap:2px;align-items:start;text-align:left;padding:0}
+  .p2-ruta__nodo{grid-row:span 2}
+  .p2-ruta__nodo svg{width:22px;height:22px}
+  .p2-ruta__paso b{margin-top:4px;font-size:18px}
+  .p2-ruta__txt{max-width:none;font-size:14px}
+  .p2-ruta__linea{top:calc(var(--nodo) / 2);bottom:calc(var(--nodo) / 2);left:calc(var(--nodo) / 2 - 1px);right:auto;width:2px;height:auto}
+  .p2-ruta__linea i{transform-origin:center top;transform:scaleY(0)}
+  .p2-ruta__linea em::before{left:-5px;top:-6px}
+  .p2-ruta.in .p2-ruta__linea em{animation-name:rutaPulsoV}
+  @keyframes rutaPulsoV{0%{transform:translateY(0);opacity:0}8%{opacity:1}88%{opacity:1}100%{transform:translateY(100%);opacity:0}}
+}
+@media (prefers-reduced-motion:reduce){
+  .p2-ruta__linea i{transform:none!important;transition:none}
+  .p2-ruta__nodo{transition:none;background:var(--crimson);color:#fff;border-color:var(--crimson)}
+  .p2-ruta__linea em{display:none}
+}

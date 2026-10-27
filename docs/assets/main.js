@@ -511,6 +511,7 @@
   // En movil los carruseles se muestran ya visibles (CSS); en escritorio SI entran con el observer
   const reveals = $$('.reveal').filter(r => !(isMobile.matches && r.closest('[data-snap]')) && !(useNativeReveal && !r.classList.contains('lines') && !r.classList.contains('sec-idx')));
   $$('.steps').forEach(s => reveals.push(s));
+  $$('.p2-ruta').forEach(s => reveals.push(s)); // Como trabajamos: la ruta se traza al llegar (tambien en movil)
   if (reduced) reveals.forEach(r => r.classList.add('in'));
   else {
     const io = new IntersectionObserver(entries => entries.forEach(en => { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } }), { threshold: .12, rootMargin: '0px 0px -8% 0px' });

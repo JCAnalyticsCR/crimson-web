@@ -25,7 +25,7 @@
 <!-- Sin preload de fotogramas: la escena CAM 01 ya no es lo primero que se ve (la portada con tienda y soporte manda el LCP).
      Sus fotogramas esperan a que la escena se acerque (IntersectionObserver en main.js). -->
 <script>(function(){var f=new URLSearchParams(location.search).get("font");if(f)document.documentElement.dataset.font=f})()</script>
-<link rel="stylesheet" href="assets/styles.css?v=83">
+<link rel="stylesheet" href="assets/styles.css?v=84">
 <script>document.documentElement.classList.add('js')</script>
 <!-- Telefonos: "tel" = linea 1, "tel2" = linea 2 (formato libre: "+506 8888 9892", "88889892"...). Mientras "tel2" este vacio la linea 2 no se muestra.
      main.js los aplica a todo [data-tel]/[data-wa] (contacto y pie). "waLink" es el enlace de WhatsApp Business de la linea 1. -->
@@ -483,18 +483,23 @@
 <section class="p2-proc" id="proceso" data-cam="06" data-label="PROCESO" data-tone="cream">
   <div class="wrap">
     <div class="sec-idx meta reveal" aria-hidden="true"><span>06</span><i></i><span>Cómo trabajamos</span></div>
-    <ol class="p2-proc__pasos">
-      <li class="reveal" style="--d:0"><span class="meta">01</span><b>Diagnóstico</b><span>Visitamos o conversamos y entendemos qué hay que resolver.</span></li>
-      <li class="reveal" style="--d:1"><span class="meta">02</span><b>Propuesta</b><span>Cotización clara: equipos, instalación y plazos.</span></li>
-      <li class="reveal" style="--d:2"><span class="meta">03</span><b>Implementación</b><span>Instalamos, configuramos y te enseñamos a usarlo.</span></li>
-      <li class="reveal" style="--d:3"><span class="meta">04</span><b>Respaldo</b><span>Garantía, mantenimiento y soporte técnico local.</span></li>
-    </ol>
+    <!-- Ruta de trabajo (26/10, sin numeros): cuatro nodos unidos por una linea que se traza al llegar y un pulso que
+         la recorre, como la red de la marca. Movil: vertical. Reduced-motion: trazada y quieta. -->
+    <div class="p2-ruta">
+      <span class="p2-ruta__linea" aria-hidden="true"><i></i><em></em></span>
+      <ol class="p2-ruta__lista">
+        <li class="p2-ruta__paso" style="--d:0"><span class="p2-ruta__nodo"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></span><b>Diagnóstico</b><span class="p2-ruta__txt">Visitamos o conversamos y entendemos qué hay que resolver.</span></li>
+        <li class="p2-ruta__paso" style="--d:1"><span class="p2-ruta__nodo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h7M9 16h5"/></svg></span><b>Propuesta</b><span class="p2-ruta__txt">Cotización clara: equipos, instalación y plazos.</span></li>
+        <li class="p2-ruta__paso" style="--d:2"><span class="p2-ruta__nodo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-.5-.5-2.5z"/></svg></span><b>Implementación</b><span class="p2-ruta__txt">Instalamos, configuramos y te enseñamos a usarlo.</span></li>
+        <li class="p2-ruta__paso" style="--d:3"><span class="p2-ruta__nodo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></span><b>Respaldo</b><span class="p2-ruta__txt">Garantía, mantenimiento y soporte técnico local.</span></li>
+      </ol>
+    </div>
     <div class="p2-proc__resp reveal">
       <ul class="p2-proc__sellos">
-        <li>Distribuidor autorizado Hikvision</li>
-        <li>Factura electrónica en cada compra</li>
-        <li>Garantía de fábrica gestionada por Crimson</li>
-        <li>Técnicos en Costa Rica</li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z"/></svg><span>Distribuidor autorizado Hikvision</span></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>Factura electrónica en cada compra</span></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/></svg><span>Garantía de fábrica gestionada por Crimson</span></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-5.6-6-10a6 6 0 0 1 12 0c0 4.4-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg><span>Técnicos en Costa Rica</span></li>
       </ul>
       <p class="p2-proc__sop"><span>¿Ya tenés un sistema instalado?</span> <a href="#soporte">Reportá una falla →</a> <a href="ayuda/">Centro de ayuda →</a></p>
     </div>
@@ -657,6 +662,6 @@
     </div>
   </div>
 </footer>
-<script src="assets/main.js?v=50" defer></script>
+<script src="assets/main.js?v=51" defer></script>
 </body>
 </html>
