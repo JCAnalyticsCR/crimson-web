@@ -802,16 +802,15 @@
   }
   /* ===================== fin bloque GALERÍA / OBRA / VISOR ===================== */
 
-  /* ---------- "Consultar" / "Cotizar" de toda la pagina: llegan al formulario con el tema elegido ----------
-     data-tipo = una de las opciones del formulario o un detalle (producto, caso) que viaja en el mensaje; data-sol, la
-     opcion que se marca para ese detalle. */
-  const form = $('#form');
-  if (form) $$('[data-tipo]').forEach(a => a.addEventListener('click', () => {
-    const t = a.dataset.tipo, sol = a.dataset.sol || t, radio = $$('input[name=tipo]', form).find(r => r.value === sol);
-    const det = $('input[name=detalle]', form);
-    if (radio) radio.checked = true;
-    if (det) det.value = radio && sol === t ? '' : /cotizar una soluci/i.test(t) ? '' : t;
-  }));
+  /* ---------- "Cotizar" / "Consultar" de toda la pagina: WhatsApp con el mensaje armado ----------
+     26/10: sin formulario de contacto. data-tipo = el tema (una solucion, un producto o un caso); data-sol, la solucion
+     a la que pertenece. El enlace del HTML (#contacto, el pie) queda si no hay JS. */
+  $$('[data-tipo]').forEach(a => {
+    const t = a.dataset.tipo, sol = a.dataset.sol;
+    const msg = /cotizar una soluci/i.test(t) ? 'Hola Crimson, quiero cotizar una solución.' : `Hola Crimson, quiero cotizar: ${t}${sol && sol !== t ? ` (${sol})` : ''}.`;
+    a.href = `https://wa.me/${CFG.wa}?text=${encodeURIComponent(msg)}`;
+    a.target = '_blank'; a.rel = 'noopener';
+  });
 
   /* ---------- Destacados: precio vigente desde la tienda (la ficha publica, sin cookies) ----------
      Se pide cuando la seccion se acerca; si la tienda no responde o el producto ya no se vende, queda el texto
@@ -840,22 +839,6 @@
   const dock = $('.p2-dock'), hero = $('#portada');
   if (dock && hero) new IntersectionObserver(([en]) => document.body.classList.toggle('dock-on', !en.isIntersecting), { rootMargin: '0px 0px -40% 0px' }).observe(hero);
 
-  /* ---------- Formulario → WhatsApp ---------- */
-  form?.addEventListener('submit', e => {
-    e.preventDefault();
-    if (!form.reportValidity()) return;
-    const f = new FormData(form);
-    const ctx = [f.get('entorno'), f.get('plazo')].filter(Boolean).join(' · ');
-    const msg = [
-      `Hola Crimson, soy ${f.get('nombre')}.`,
-      `Tel: ${f.get('telefono')}${f.get('email') ? ` · Email: ${f.get('email')}` : ''}`,
-      `Necesito: ${f.get('tipo')}${ctx ? ` (${ctx})` : ''}`,
-      f.get('detalle') ? `Me interesa: ${f.get('detalle')}` : '',
-      f.get('mensaje') ? `\n${f.get('mensaje')}` : ''
-    ].join('\n');
-    const a = Object.assign(document.createElement('a'), { href: `https://wa.me/${CFG.wa}?text=${encodeURIComponent(msg)}`, target: '_blank', rel: 'noopener' });
-    document.body.append(a); a.click(); a.remove();
-  });
   // Feedback antes del salto a WhatsApp (en iOS tarda ~1 s)
   const waBtn = $('#waBtn');
   waBtn?.addEventListener('click', () => { const s = waBtn.querySelector('span'); if (!s || s.dataset.busy) return; const t = s.textContent; s.dataset.busy = '1'; s.textContent = 'Abriendo WhatsApp…'; setTimeout(() => { s.textContent = t; delete s.dataset.busy; }, 2500); });

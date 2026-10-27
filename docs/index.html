@@ -78,7 +78,7 @@
       <p class="meta portada__eyebrow"><span class="portada__dot" aria-hidden="true"></span>Seguridad · Redes · IA · Software</p>
       <h1 class="display lines" id="portadaTitulo"><span class="ln"><span>Seguridad, IA y software</span></span><span class="ln"><span>para una operación</span></span><span class="ln"><span><em>más inteligente</em>.</span></span></h1>
       <p class="lead lead--dark portada__lead">Integramos seguridad electrónica, redes y software a la medida para proteger tu espacio, automatizar tareas y mejorar el control de tu operación.</p>
-      <p class="portada__mas hide-mobile"><a href="#contacto" data-cursor="Ir">¿Un proyecto a la medida? <b>Hablemos de tu proyecto →</b></a></p>
+      <p class="portada__mas hide-mobile"><a href="#contacto" data-tipo="Proyecto a la medida" data-cursor="Ir">¿Un proyecto a la medida? <b>Hablemos de tu proyecto →</b></a></p>
     </div>
 
     <div class="puertas">
@@ -506,73 +506,6 @@
   </div>
 </section>
 
-<!-- 7 · CONTACTO sencillo: los botones "Consultar" / "Cotizar" de la pagina eligen el tema (data-tipo) -->
-<section class="contacto" id="contacto" data-cam="07" data-label="CONTACTO" data-tone="ink">
-  <div class="contacto__net" id="netContact" aria-hidden="true"></div>
-  <div class="wrap">
-    <div class="sec-idx meta reveal" aria-hidden="true"><span>07</span><i></i><span>Contacto</span></div>
-    <div class="contacto__grid">
-      <div class="contacto__text">
-        <h2 class="display-2 lines reveal"><span class="ln"><span>Contanos qué</span></span><span class="ln"><span>necesitás <em>resolver</em>.</span></span></h2>
-        <p class="lead lead--dark reveal" style="--d:1">Te respondemos con una propuesta clara: equipos, instalación y plazos.</p>
-
-        <div class="pass reveal" style="--d:2" aria-label="Tarjeta de contacto">
-          <div class="pass__top"><img src="assets/img/logo.png" alt="" width="1024" height="237"><span class="meta">Pase de acceso · 07</span></div>
-          <a class="pass__tel" href="tel:+50688889892" data-tel="1" data-tel-text>+506 8888 9892</a>
-          <div class="pass__bottom"><span class="meta">WhatsApp Business</span><span class="meta">Alajuela · CR</span></div>
-          <img class="pass__qr" src="assets/img/qr-whatsapp.webp" alt="" aria-hidden="true" loading="lazy" width="430" height="482">
-        </div>
-
-        <!-- Una fila por numero (salen de #site-config). Con un solo numero se ve igual que siempre;
-             cuando "tel2" tenga valor aparece la segunda fila y cada fila muestra su numero. -->
-        <div class="contacto__actions tels reveal" style="--d:3" data-tels>
-          <div class="tels__row" data-tel-row="1">
-            <a class="tels__num" href="tel:+50688889892" data-tel="1" data-tel-text tabindex="-1" aria-hidden="true">+506 8888 9892</a>
-            <a class="btn btn--crimson btn--lg" id="waBtn" href="https://wa.me/message/5YQKXZFUPHWLA1" data-wa="1" target="_blank" rel="noopener" data-cursor="Ir"><span>Escribinos por WhatsApp</span><i class="btn__arrow" aria-hidden="true"></i></a>
-            <a class="btn btn--ghost btn--ghost-light btn--lg" href="tel:+50688889892" data-tel="1">Llamar</a>
-          </div>
-          <div class="tels__row" data-tel-row="2" hidden>
-            <a class="tels__num" href="#" data-tel="2" data-tel-text tabindex="-1" aria-hidden="true"></a>
-            <a class="btn btn--crimson btn--lg" href="#" data-wa="2" target="_blank" rel="noopener" data-cursor="Ir"><span>WhatsApp</span><i class="btn__arrow" aria-hidden="true"></i></a>
-            <a class="btn btn--ghost btn--ghost-light btn--lg" href="#" data-tel="2">Llamar</a>
-          </div>
-        </div>
-        <p class="contacto__mail reveal" style="--d:4"><span class="meta">o escribinos a</span> <a href="mailto:info@crimsoncr.com">info@crimsoncr.com</a></p>
-      </div>
-
-      <form class="form reveal" id="form" style="--d:2" novalidate>
-        <p class="meta form__label">Cotizar una solución</p>
-        <fieldset class="chips">
-          <legend class="sr-only">¿Qué necesitás?</legend>
-          <label><input type="radio" name="tipo" value="Seguridad y control de acceso" checked><span>Seguridad</span></label>
-          <label><input type="radio" name="tipo" value="Redes y conectividad"><span>Redes</span></label>
-          <label><input type="radio" name="tipo" value="IA y automatización"><span>IA</span></label>
-          <label><input type="radio" name="tipo" value="Software a la medida"><span>Software</span></label>
-          <label><input type="radio" name="tipo" value="IoT y espacios inteligentes"><span>IoT</span></label>
-          <label><input type="radio" name="tipo" value="Comprar equipo"><span>Comprar equipo</span></label>
-          <input type="hidden" name="detalle" value="">
-        </fieldset>
-        <label class="field"><span>Nombre</span><input name="nombre" type="text" autocomplete="name" autocapitalize="words" required placeholder="Tu nombre"></label>
-        <label class="field"><span>Teléfono</span><input name="telefono" type="tel" inputmode="tel" autocomplete="tel" required placeholder="+506 0000 0000"></label>
-        <details class="form__more"><summary class="meta">Agregar detalle del proyecto</summary>
-          <label class="field"><span>Correo electrónico</span><input name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" placeholder="nombre@empresa.com"></label>
-          <div class="form__row">
-            <label class="field"><span>¿Dónde se implementaría?</span>
-              <select name="entorno"><option value="">Seleccionar</option><option>Casa</option><option>Negocio</option><option>Condominio</option><option>Oficina</option><option>Otro</option></select>
-            </label>
-            <label class="field"><span>¿En qué plazo?</span>
-              <select name="plazo"><option value="">Seleccionar</option><option>Inmediato</option><option>Próximas semanas</option><option>En evaluación</option><option>A futuro</option></select>
-            </label>
-          </div>
-          <label class="field"><span>Mensaje</span><textarea name="mensaje" rows="3" placeholder="Contanos qué necesitás o qué problema querés resolver"></textarea></label>
-        </details>
-        <button class="btn btn--white btn--lg" type="submit" data-cursor="Enviar"><span>Enviar por WhatsApp</span><i class="btn__arrow" aria-hidden="true"></i></button>
-        <p class="meta form__note">Al enviar se abre WhatsApp con tu mensaje listo.</p>
-      </form>
-    </div>
-  </div>
-</section>
-
 <!-- CAM 09 · SOPORTE ESPECIALIZADO: clientes con un sistema ya instalado reportan una incidencia.
      Va despues de CONTACTO (venta) a proposito: es postventa, y asi no se renumeran las camaras 04-08. -->
 <section class="soporte" id="soporte" data-cam="08" data-label="SOPORTE" data-tone="ink">
@@ -635,7 +568,7 @@
 <nav class="p2-dock" aria-label="Accesos rápidos"><a href="https://tienda.crimsoncr.com/" rel="noopener">Tienda</a><a class="p2-dock__main" href="#contacto" data-tipo="Cotizar una solución">Cotizar</a></nav>
 
 <!-- FOOTER -->
-<footer class="footer">
+<footer class="footer" id="contacto">
   <div class="wrap">
     <div class="footer__brand">
       <img src="assets/img/logo.png" alt="Crimson Consulting" width="1024" height="237" loading="lazy">
@@ -643,7 +576,7 @@
     </div>
     <div class="footer__grid">
       <div><span class="meta">Soluciones</span><a href="#seguridad">Seguridad y control de acceso</a><a href="#redes">Redes y conectividad</a><a href="#ia">IA y automatización</a><a href="#software">Software a la medida</a><a href="#iot">IoT y espacios inteligentes</a></div>
-      <div><span class="meta">Enlaces</span><a href="#top">Inicio</a><a href="ayuda/">Centro de ayuda</a><a href="https://panel.crimsoncr.com/solicitar-acceso" rel="noopener">Portal de clientes: solicitar acceso</a><a href="https://tienda.crimsoncr.com/" rel="noopener">Tienda</a><a href="https://tienda.crimsoncr.com/arma-tu-sistema" rel="noopener">Armá tu sistema de cámaras</a><a href="#contacto">Cotizar una solución</a></div>
+      <div><span class="meta">Enlaces</span><a href="#top">Inicio</a><a href="ayuda/">Centro de ayuda</a><a href="https://panel.crimsoncr.com/solicitar-acceso" rel="noopener">Portal de clientes: solicitar acceso</a><a href="https://tienda.crimsoncr.com/" rel="noopener">Tienda</a><a href="https://tienda.crimsoncr.com/arma-tu-sistema" rel="noopener">Armá tu sistema de cámaras</a><a href="#contacto" data-tipo="Proyecto a la medida">Cotizar una solución</a></div>
       <div><span class="meta">Contacto</span><a href="mailto:info@crimsoncr.com">info@crimsoncr.com</a><a href="https://wa.me/message/5YQKXZFUPHWLA1" target="_blank" rel="noopener">WhatsApp</a><a href="https://www.facebook.com/crimsonconcr" target="_blank" rel="noopener">Facebook</a><a href="https://www.instagram.com/cr.crimsoncr/" target="_blank" rel="noopener">Instagram</a></div>
       <div><span class="meta">Sede</span><span>Alajuela, Costa Rica</span><a href="tel:+50688889892" data-tel="1" data-tel-text>+506 8888 9892</a><a href="#" data-tel="2" data-tel-text data-tel-row="2" hidden></a><span>Grupo Empresarial Crimson SRL</span></div>
     </div>
@@ -662,6 +595,6 @@
     </div>
   </div>
 </footer>
-<script src="assets/main.js?v=51" defer></script>
+<script src="assets/main.js?v=52" defer></script>
 </body>
 </html>
