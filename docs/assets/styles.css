@@ -1496,42 +1496,83 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
 @media (prefers-reduced-motion:reduce){.jcp__chart i{transform:none;transition:none}}
 @media (max-width:767px){.jcp{padding:16px 12px 36px}.jcp__body{padding:12px;gap:10px}.jcp__dash{grid-template-columns:1fr}.jcp__chart{height:60px}}
 
-/* ---------- Como trabajamos: ruta (26/10) ----------
-   Cuatro nodos unidos por una linea que se traza en rojo al llegar (.in la pone main.js) y un pulso que la recorre.
-   Los nodos se encienden en orden. Movil: vertical. Reduced-motion: trazada, encendida y sin pulso. */
-.p2-ruta{position:relative;--nodo:64px}
-.p2-ruta__lista{position:relative;z-index:1;display:grid;grid-template-columns:repeat(4,1fr);gap:20px;list-style:none;margin:0;padding:0}
-.p2-ruta__paso{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:0 6px}
-.p2-ruta__paso b{font-size:19px;margin-top:10px}
-.p2-ruta__txt{color:var(--muted);font-size:14.5px;line-height:1.45;max-width:24ch}
-.p2-ruta__nodo{width:var(--nodo);height:var(--nodo);flex:none;border-radius:50%;display:grid;place-items:center;background:#fff;color:var(--ink);border:1.5px solid var(--hair);box-shadow:0 12px 26px -18px rgba(21,19,26,.5);
-  transition:background var(--dur-drawer) var(--ease-enter),color var(--dur-drawer),border-color var(--dur-drawer),box-shadow var(--dur-section) var(--ease-enter);transition-delay:calc(var(--d,0) * 380ms + 250ms)}
-.p2-ruta__nodo svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.p2-ruta.in .p2-ruta__nodo{background:var(--crimson);color:#fff;border-color:var(--crimson);box-shadow:0 0 0 7px var(--crimson-soft),0 14px 30px -16px rgba(226,35,58,.8)}
-.p2-ruta__linea{position:absolute;z-index:0;top:calc(var(--nodo) / 2 - 1px);left:12.5%;right:12.5%;height:2px;background:var(--hair)}
-.p2-ruta__linea i{position:absolute;inset:0;background:var(--crimson);transform-origin:left center;transform:scaleX(0);transition:transform 1.5s var(--ease-scene) .2s}
-.p2-ruta.in .p2-ruta__linea i{transform:none}
+/* ---------- Como trabajamos: ruta premium (26/10) ----------
+   Una sola coreografia, todo en compositor (transform/opacity) salvo el giro del anillo (@property, barato):
+   1) al llegar (.in, main.js) la linea se traza y las tarjetas entran en orden, de desenfocadas a nitidas;
+   2) despues, un cometa con estela recorre la linea en --vuelta y CADA nodo late (onda) justo cuando el cometa pasa
+      por el (retraso = inicio + d x vuelta/3); 3) el anillo de luz de cada nodo gira siempre, lento.
+   Fuera de cuadro todo se pausa (.is-offscreen). Movil: vertical. Reduced-motion: encendida y quieta. */
+@property --giro { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+.p2-ruta{position:relative;--nodo:76px;--vuelta:3.6s;--inicio:1.6s}
+.p2-ruta__lista{position:relative;z-index:1;display:grid;grid-template-columns:repeat(4,1fr);gap:18px;list-style:none;margin:0;padding:0}
+.p2-ruta__paso{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center}
+.p2-ruta__nodo{position:relative;z-index:2;width:var(--nodo);height:var(--nodo);flex:none;border-radius:50%;display:grid;place-items:center;color:#fff;
+  background:radial-gradient(circle at 35% 30%,#2a2732 0,var(--ink) 62%);box-shadow:0 18px 36px -18px rgba(21,19,26,.75),inset 0 1px 0 rgba(255,255,255,.08);
+  transform:scale(.6);opacity:0;transition:transform var(--dur-section) var(--ease-enter),opacity var(--dur-drawer);transition-delay:calc(var(--d,0) * 160ms + 150ms)}
+/* anillo de luz que gira (borde conico con mascara) */
+.p2-ruta__nodo::before{content:"";position:absolute;inset:-5px;border-radius:50%;padding:2px;
+  background:conic-gradient(from var(--giro),transparent 0 55%,rgba(226,35,58,.25) 70%,#ff5a6e 88%,#fff 92%,transparent 96%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);
+  animation:rutaGiro 6s linear infinite}
+/* onda que sale del nodo cuando lo alcanza el cometa */
+.p2-ruta__nodo::after{content:"";position:absolute;inset:0;border-radius:50%;border:2px solid var(--crimson);opacity:0;transform:scale(1)}
+.p2-ruta__nodo svg{position:relative;width:28px;height:28px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;transition:color var(--dur-drawer)}
+.p2-ruta.in .p2-ruta__nodo{transform:none;opacity:1}
+.p2-ruta.in .p2-ruta__nodo::after{animation:rutaOnda var(--vuelta) var(--ease-enter) infinite;animation-delay:calc(var(--inicio) + var(--d,0) * var(--vuelta) / 3)}
+.p2-ruta.in .p2-ruta__nodo svg{animation:rutaIcono var(--vuelta) linear infinite;animation-delay:calc(var(--inicio) + var(--d,0) * var(--vuelta) / 3)}
+@keyframes rutaGiro{to{--giro:360deg}}
+@keyframes rutaOnda{0%{opacity:.85;transform:scale(1)}22%{opacity:0;transform:scale(1.75)}100%{opacity:0;transform:scale(1.75)}}
+@keyframes rutaIcono{0%,14%{color:#ff7d8c}24%,100%{color:#fff}}
+/* tarjeta de vidrio de cada paso */
+.p2-ruta__card{position:relative;margin-top:-26px;padding:40px 18px 20px;width:100%;border-radius:18px;
+  background:linear-gradient(180deg,rgba(255,255,255,.92),rgba(255,255,255,.6));border:1px solid rgba(21,19,26,.08);
+  box-shadow:0 24px 48px -36px rgba(21,19,26,.55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  display:flex;flex-direction:column;gap:6px;align-items:center;
+  opacity:0;transform:translateY(18px);filter:blur(6px);
+  transition:opacity var(--dur-section) var(--ease-enter),transform var(--dur-section) var(--ease-enter),filter var(--dur-section) var(--ease-enter),box-shadow var(--dur-drawer),border-color var(--dur-drawer);
+  transition-delay:calc(var(--d,0) * 160ms + 320ms)}
+.p2-ruta.in .p2-ruta__card{opacity:1;transform:none;filter:none}
+.p2-ruta__paso b{font-size:19px;letter-spacing:-.01em}
+.p2-ruta__txt{color:var(--muted);font-size:14.5px;line-height:1.45;max-width:26ch}
+@media (hover:hover){
+  .p2-ruta.in .p2-ruta__paso:hover .p2-ruta__card{transform:translateY(-4px);border-color:rgba(226,35,58,.35);box-shadow:0 30px 56px -34px rgba(226,35,58,.55);transition-delay:0s}
+  .p2-ruta.in .p2-ruta__paso:hover .p2-ruta__nodo::before{animation-duration:1.6s}
+}
+/* linea: riel, trazo con brillo que corre y cometa con estela */
+.p2-ruta__linea{position:absolute;z-index:1;top:calc(var(--nodo) / 2 - 1.5px);left:12.5%;right:12.5%;height:3px;border-radius:3px;background:rgba(21,19,26,.08)}
+.p2-ruta__linea i{position:absolute;inset:0;border-radius:inherit;transform-origin:left center;transform:scaleX(0);
+  background:linear-gradient(90deg,var(--crimson) 0%,#ff6b7d 45%,var(--crimson) 55%,var(--crimson) 100%);background-size:220% 100%;
+  transition:transform 1.4s var(--ease-scene) .2s}
+.p2-ruta.in .p2-ruta__linea i{transform:none;animation:rutaBrillo 2.8s linear 1.6s infinite}
+@keyframes rutaBrillo{from{background-position:120% 0}to{background-position:-100% 0}}
 .p2-ruta__linea em{position:absolute;inset:0;opacity:0;pointer-events:none}
-.p2-ruta__linea em::before{content:"";position:absolute;left:-6px;top:-5px;width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 0 0 3px var(--crimson),0 0 18px 4px rgba(226,35,58,.55)}
-.p2-ruta.in .p2-ruta__linea em{animation:rutaPulso 3.4s 1.9s var(--ease-scene) infinite}
-@keyframes rutaPulso{0%{transform:translateX(0);opacity:0}8%{opacity:1}88%{opacity:1}100%{transform:translateX(100%);opacity:0}}
-@media (hover:hover){.p2-ruta.in .p2-ruta__paso:hover .p2-ruta__nodo{transform:translateY(-3px);transition-delay:0s}.p2-ruta__nodo{will-change:auto}}
+.p2-ruta__linea em::before{content:"";position:absolute;right:100%;top:50%;width:90px;height:3px;margin-top:-1.5px;margin-right:-4px;border-radius:3px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.9))}
+.p2-ruta__linea em::after{content:"";position:absolute;left:-7px;top:50%;width:14px;height:14px;margin-top:-7px;border-radius:50%;background:#fff;
+  box-shadow:0 0 0 3px var(--crimson),0 0 22px 6px rgba(226,35,58,.6)}
+.p2-ruta.in .p2-ruta__linea em{animation:rutaCometa var(--vuelta) linear var(--inicio) infinite}
+@keyframes rutaCometa{0%{transform:translateX(0);opacity:0}4%{opacity:1}96%{opacity:1}100%{transform:translateX(100%);opacity:0}}
+@media (min-width:768px) and (max-width:1023px){.p2-ruta{--nodo:64px}.p2-ruta__card{padding:34px 12px 16px}.p2-ruta__paso b{font-size:17px}.p2-ruta__txt{font-size:13.5px}}
 @media (max-width:767px){
-  .p2-ruta{--nodo:52px}
-  .p2-ruta__lista{grid-template-columns:1fr;gap:22px}
-  .p2-ruta__paso{display:grid;grid-template-columns:var(--nodo) 1fr;column-gap:16px;row-gap:2px;align-items:start;text-align:left;padding:0}
-  .p2-ruta__nodo{grid-row:span 2}
-  .p2-ruta__nodo svg{width:22px;height:22px}
-  .p2-ruta__paso b{margin-top:4px;font-size:18px}
+  .p2-ruta{--nodo:58px}
+  .p2-ruta__lista{grid-template-columns:1fr;gap:14px}
+  .p2-ruta__paso{flex-direction:row;align-items:center;text-align:left;gap:0}
+  .p2-ruta__nodo svg{width:24px;height:24px}
+  .p2-ruta__card{margin:0 0 0 -22px;padding:16px 16px 16px 36px;align-items:flex-start;transform:translateX(18px)}
+  .p2-ruta__paso b{font-size:17px}
   .p2-ruta__txt{max-width:none;font-size:14px}
-  .p2-ruta__linea{top:calc(var(--nodo) / 2);bottom:calc(var(--nodo) / 2);left:calc(var(--nodo) / 2 - 1px);right:auto;width:2px;height:auto}
-  .p2-ruta__linea i{transform-origin:center top;transform:scaleY(0)}
-  .p2-ruta__linea em::before{left:-5px;top:-6px}
-  .p2-ruta.in .p2-ruta__linea em{animation-name:rutaPulsoV}
-  @keyframes rutaPulsoV{0%{transform:translateY(0);opacity:0}8%{opacity:1}88%{opacity:1}100%{transform:translateY(100%);opacity:0}}
+  /* en vertical las tarjetas tienen alto distinto: un conector por paso (de su nodo al siguiente) en vez de la linea */
+  .p2-ruta__paso{align-items:flex-start}
+  .p2-ruta__card{margin-top:6px}
+  .p2-ruta__linea{display:none}
+  .p2-ruta__paso:not(:last-child)::before{content:"";position:absolute;z-index:1;left:calc(var(--nodo) / 2 - 1.5px);top:calc(var(--nodo) / 2);height:calc(100% + 14px);width:3px;border-radius:3px;
+    background:linear-gradient(180deg,var(--crimson),#ff6b7d);transform-origin:center top;transform:scaleY(0);transition:transform var(--dur-section) var(--ease-scene);transition-delay:calc(var(--d,0) * 220ms + 300ms)}
+  .p2-ruta.in .p2-ruta__paso:not(:last-child)::before{transform:none}
 }
 @media (prefers-reduced-motion:reduce){
-  .p2-ruta__linea i{transform:none!important;transition:none}
-  .p2-ruta__nodo{transition:none;background:var(--crimson);color:#fff;border-color:var(--crimson)}
+  .p2-ruta__paso::before{transform:none!important;transition:none!important}
+  .p2-ruta__nodo,.p2-ruta__card{opacity:1;transform:none;filter:none;transition:none}
+  .p2-ruta__nodo::before,.p2-ruta__nodo::after,.p2-ruta__nodo svg,.p2-ruta__linea i{animation:none!important}
+  .p2-ruta__linea i{transform:none;transition:none}
   .p2-ruta__linea em{display:none}
 }

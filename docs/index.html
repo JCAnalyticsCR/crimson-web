@@ -25,7 +25,7 @@
 <!-- Sin preload de fotogramas: la escena CAM 01 ya no es lo primero que se ve (la portada con tienda y soporte manda el LCP).
      Sus fotogramas esperan a que la escena se acerque (IntersectionObserver en main.js). -->
 <script>(function(){var f=new URLSearchParams(location.search).get("font");if(f)document.documentElement.dataset.font=f})()</script>
-<link rel="stylesheet" href="assets/styles.css?v=84">
+<link rel="stylesheet" href="assets/styles.css?v=85">
 <script>document.documentElement.classList.add('js')</script>
 <!-- Telefonos: "tel" = linea 1, "tel2" = linea 2 (formato libre: "+506 8888 9892", "88889892"...). Mientras "tel2" este vacio la linea 2 no se muestra.
      main.js los aplica a todo [data-tel]/[data-wa] (contacto y pie). "waLink" es el enlace de WhatsApp Business de la linea 1. -->
@@ -488,10 +488,10 @@
     <div class="p2-ruta">
       <span class="p2-ruta__linea" aria-hidden="true"><i></i><em></em></span>
       <ol class="p2-ruta__lista">
-        <li class="p2-ruta__paso" style="--d:0"><span class="p2-ruta__nodo"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></span><b>Diagnóstico</b><span class="p2-ruta__txt">Visitamos o conversamos y entendemos qué hay que resolver.</span></li>
-        <li class="p2-ruta__paso" style="--d:1"><span class="p2-ruta__nodo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h7M9 16h5"/></svg></span><b>Propuesta</b><span class="p2-ruta__txt">Cotización clara: equipos, instalación y plazos.</span></li>
-        <li class="p2-ruta__paso" style="--d:2"><span class="p2-ruta__nodo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-.5-.5-2.5z"/></svg></span><b>Implementación</b><span class="p2-ruta__txt">Instalamos, configuramos y te enseñamos a usarlo.</span></li>
-        <li class="p2-ruta__paso" style="--d:3"><span class="p2-ruta__nodo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></span><b>Respaldo</b><span class="p2-ruta__txt">Garantía, mantenimiento y soporte técnico local.</span></li>
+        <li class="p2-ruta__paso" style="--d:0"><span class="p2-ruta__nodo"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></span><span class="p2-ruta__card"><b>Diagnóstico</b><span class="p2-ruta__txt">Visitamos o conversamos y entendemos qué hay que resolver.</span></span></li>
+        <li class="p2-ruta__paso" style="--d:1"><span class="p2-ruta__nodo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h7M9 16h5"/></svg></span><span class="p2-ruta__card"><b>Propuesta</b><span class="p2-ruta__txt">Cotización clara: equipos, instalación y plazos.</span></span></li>
+        <li class="p2-ruta__paso" style="--d:2"><span class="p2-ruta__nodo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-.5-.5-2.5z"/></svg></span><span class="p2-ruta__card"><b>Implementación</b><span class="p2-ruta__txt">Instalamos, configuramos y te enseñamos a usarlo.</span></span></li>
+        <li class="p2-ruta__paso" style="--d:3"><span class="p2-ruta__nodo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></span><span class="p2-ruta__card"><b>Respaldo</b><span class="p2-ruta__txt">Garantía, mantenimiento y soporte técnico local.</span></span></li>
       </ol>
     </div>
     <div class="p2-proc__resp reveal">
