@@ -139,4 +139,33 @@
     kick();
   }, { passive: true });
   hero.addEventListener('pointerleave', () => { tx = 0; ty = 0; if (mqPC.matches) kick(); });
+
+  /* ---------- Secciones del encabezado (escritorio): pildora que se desliza y seccion activa al bajar ---------- */
+  const nav = document.querySelector('.nvh-nav'), pill = nav?.querySelector('.nvh-nav__pill');
+  if (nav && pill) {
+    const links = [...nav.querySelectorAll('a')];
+    let activo = null;
+    const ir = a => {
+      if (!a || !a.offsetWidth) { nav.classList.remove('has-pill'); return; }
+      pill.style.width = a.offsetWidth + 'px';
+      pill.style.transform = `translateX(${a.offsetLeft}px)`;
+      nav.classList.add('has-pill');
+    };
+    links.forEach(a => { a.addEventListener('mouseenter', () => ir(a)); a.addEventListener('focus', () => ir(a)); });
+    nav.addEventListener('mouseleave', () => ir(activo));
+    nav.addEventListener('focusout', e => { if (!nav.contains(e.relatedTarget)) ir(activo); });
+    const marcar = id => {
+      activo = links.find(a => a.dataset.spy === id) || null;
+      links.forEach(a => a.classList.toggle('is-active', a === activo));
+      if (!nav.matches(':hover')) ir(activo);
+    };
+    const secs = links.map(a => a.dataset.spy && document.getElementById(a.dataset.spy)).filter(Boolean);
+    if ('IntersectionObserver' in window && secs.length) {
+      const io = new IntersectionObserver(es => es.forEach(en => { if (en.isIntersecting) marcar(en.target.id); }), { rootMargin: '-45% 0px -50% 0px' });
+      secs.forEach(s => io.observe(s));
+      const portada = document.getElementById('inicio');
+      if (portada) new IntersectionObserver(([en]) => { if (en.isIntersecting && en.intersectionRatio > .4) marcar(null); }, { threshold: [0, .4, 1] }).observe(portada);
+    }
+    addEventListener('resize', () => ir(activo), { passive: true });
+  }
 })();

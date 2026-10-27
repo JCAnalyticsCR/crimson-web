@@ -46,13 +46,22 @@
 /* Escritorio: enlaces + Cotizar; sin hamburguesa */
 @media (min-width:1024px){
   .nvh-bar__in{gap:24px}
-  .nvh-nav{display:flex;align-items:center;gap:6px;margin:0 auto}
-  .nvh-nav a{position:relative;display:inline-flex;align-items:center;min-height:44px;padding:0 12px;font-size:15px;color:var(--nv-text-2);
-    transition:color var(--nv-dur-micro)}
-  .nvh-nav a::after{content:"";position:absolute;left:12px;right:12px;bottom:8px;height:2px;border-radius:2px;background:var(--nv-red);
-    transform:scaleX(0);transform-origin:left;transition:transform var(--nv-dur) var(--nv-ease)}
-  .nvh-nav a:hover,.nvh-nav a:focus-visible{color:var(--nv-text)}
-  .nvh-nav a:hover::after{transform:scaleX(1)}
+  .nvh-nav{position:relative;display:flex;align-items:center;gap:2px;margin:0 auto;padding:4px;border-radius:999px;
+    background:rgba(255,255,255,.045);border:1px solid var(--nv-line);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+  .nvh-nav a{position:relative;z-index:1;display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:0 15px;border-radius:999px;
+    font-size:14.5px;font-weight:600;color:var(--nv-text-2);transition:color var(--nv-dur-micro)}
+  .nvh-nav a svg{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;
+    opacity:.65;transition:opacity var(--nv-dur-micro),color var(--nv-dur-micro),transform var(--nv-dur) var(--nv-ease)}
+  .nvh-nav__ext{font-size:11px;opacity:.5;margin-left:-3px}
+  .nvh-nav a:hover,.nvh-nav a:focus-visible,.nvh-nav a.is-active{color:var(--nv-text)}
+  .nvh-nav a:hover svg,.nvh-nav a:focus-visible svg{opacity:1;transform:translateY(-1px)}
+  .nvh-nav a.is-active svg{opacity:1;color:var(--nv-red-2)}
+  /* pildora que se desliza (la posicion la pone 1-portada.js con transform y ancho) */
+  .nvh-nav__pill{position:absolute;z-index:0;top:4px;bottom:4px;left:0;width:0;border-radius:999px;opacity:0;pointer-events:none;
+    background:linear-gradient(180deg,rgba(226,35,58,.30),rgba(226,35,58,.12));box-shadow:inset 0 0 0 1px rgba(255,68,88,.45),0 10px 24px -12px rgba(226,35,58,.9);
+    transition:transform 480ms var(--nv-ease),width 480ms var(--nv-ease),opacity var(--nv-dur-micro)}
+  .nvh-nav.has-pill .nvh-nav__pill{opacity:1}
   .nvh-tools{margin-left:0}
   .nvh-burger{display:none}
   .nvh-cta{margin-right:10px}
@@ -226,8 +235,29 @@
   .nvh-menu:not([hidden]) .nvh-menu__panel,.nvh-menu:not([hidden]) .nvh-menu__scrim,
   .nvh-menu:not([hidden]) .nvh-menu__nav a,.nvh-menu:not([hidden]) .nvh-menu__foot,.nvh-menu.is-closing{animation:none}
   .nvh-media__img,.nvh-net--h{transform:none!important}
-  .nvh-burger span,.nvh-bar::before,.nvh-nav a::after{transition:none}
+  .nvh-burger span,.nvh-bar::before,.nvh-nav__pill,.nvh-nav a svg{transition:none}
 }
 
 /* Movil: el mensaje y los dos botones, usables desde el primer pintado (sin entrada; guia de la marca) */
 @media (max-width:767px){.nvh-copy > *{animation:none}}
+
+/* Mas movimiento en la red de la portada (26/10): lineas mas visibles y pulsos mas frecuentes */
+.nvh-net__l path{stroke:rgba(255,255,255,.2)}
+.nvh-net__n circle{fill:rgba(244,241,238,.75)}
+.nvh-net__p circle{animation-duration:calc(var(--t,10s) * .55)}
+.nvh-net__g circle{animation-name:nvh-glow2;animation-duration:4s}
+@keyframes nvh-glow2{0%,100%{transform:scale(.5);opacity:0}50%{transform:scale(1.4);opacity:.5}}
+
+/* Foto horizontal (opcion 1B): en escritorio a todo el ancho, el poste a la derecha y el lado izquierdo oscuro para el
+   texto; en el celular su corte vertical con el poste arriba. */
+.nvh-media--wide .nvh-media__img{object-position:50% 30%}
+.nvh-media--wide picture{display:contents}
+@media (min-width:1024px){
+  .nvh-media.nvh-media--wide{left:0;width:100%;-webkit-mask-image:none;mask-image:none}
+  .nvh-media--wide .nvh-media__img{object-position:74% 50%}
+  .nvh-media--wide::after{background:
+    linear-gradient(90deg,rgba(13,12,17,.94) 0,rgba(13,12,17,.78) 30%,rgba(13,12,17,.25) 58%,rgba(13,12,17,.1) 100%),
+    linear-gradient(180deg,rgba(13,12,17,.55) 0,transparent 20%,transparent 70%,var(--nv-bg) 100%)}
+  .nvh-media--wide .nvh-media__frame,.nvh-media--wide .nvh-media__scan{left:52%}
+  .nvh-media--wide .nvh-media__cap{left:calc(52% + 24px)}
+}

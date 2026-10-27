@@ -92,3 +92,12 @@ button{font:inherit;color:inherit}
 .js [data-nv-in]{opacity:0;transform:translateY(16px);transition:opacity var(--nv-dur-scene) var(--nv-ease),transform var(--nv-dur-scene) var(--nv-ease);transition-delay:calc(var(--i,0) * 70ms)}
 .js [data-nv-in].is-in{opacity:1;transform:none}
 @media (prefers-reduced-motion:reduce){.js [data-nv-in]{opacity:1;transform:none;transition:none}}
+
+/* Red de nodos de fondo (base.js): fija, detras de todo, sin capturar clics */
+.nv-bgnet{position:fixed;inset:0;width:100%;height:100%;z-index:-1;pointer-events:none;opacity:.7}
+/* Tarjetas con inclinacion y brillo (base.js, solo PC con mouse) */
+.nv-tilt{position:relative;will-change:transform}
+.nv-shine{position:absolute;inset:0;z-index:3;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity var(--nv-dur) var(--nv-ease);
+  background:radial-gradient(380px circle at var(--mx,50%) var(--my,50%),rgba(255,255,255,.10),rgba(226,35,58,.06) 35%,transparent 60%)}
+.nv-tilt:hover .nv-shine{opacity:1}
+@media (prefers-reduced-motion:reduce){.nv-bgnet{display:none}.nv-shine{display:none}}

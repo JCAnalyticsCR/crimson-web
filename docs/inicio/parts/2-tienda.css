@@ -170,3 +170,9 @@
   .nvt-p,.nvt-p__img img,.nvt-q__ico{transition:none}
   .nvt-p__pr.is-live{animation:none}
 }
+
+/* Mas vida (26/10): los productos de la vitrina flotan suave, cada uno a su ritmo */
+.nvt-pz__c{animation:nvt-flota 6.5s ease-in-out infinite;animation-delay:calc(var(--o,0) * -1.6s)}
+.nvt-pz:nth-child(2n) .nvt-pz__c{animation-duration:7.8s}
+@keyframes nvt-flota{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+@media (prefers-reduced-motion:reduce){.nvt-pz__c{animation:none}}
