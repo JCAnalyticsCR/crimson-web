@@ -242,7 +242,7 @@
 @media (max-width:767px){.nvh-copy > *{animation:none}}
 
 /* Mas movimiento en la red de la portada (26/10): lineas mas visibles y pulsos mas frecuentes */
-.nvh-net__l path{stroke:rgba(255,255,255,.2)}
+.nvh-net__l path{stroke:rgba(255,255,255,.3)}
 .nvh-net__n circle{fill:rgba(244,241,238,.75)}
 .nvh-net__p circle{animation-duration:calc(var(--t,10s) * .55)}
 .nvh-net__g circle{animation-name:nvh-glow2;animation-duration:4s}

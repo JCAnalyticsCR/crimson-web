@@ -32,22 +32,22 @@
      Canvas fijo detras del contenido: nodos que derivan, lineas entre los cercanos, pulsos rojos que viajan por ellas,
      profundidad al hacer scroll y, en PC con mouse, los nodos cerca del puntero se encienden. 30 cuadros/s, DPR max 2,
      se detiene con la pestana oculta y no existe con reduced-motion. */
-  const red = () => {
+  const red = (host = null) => {
     const cv = document.createElement('canvas');
-    cv.className = 'nv-bgnet'; cv.setAttribute('aria-hidden', 'true');
-    document.body.prepend(cv);
+    cv.className = host ? 'nv-bgnet nv-bgnet--host' : 'nv-bgnet'; cv.setAttribute('aria-hidden', 'true');
+    host ? host.appendChild(cv) : document.body.prepend(cv);
     const ctx = cv.getContext('2d'); if (!ctx) return;
     const movil = matchMedia('(max-width:767px)').matches;
     const fino = matchMedia('(hover:hover) and (pointer:fine)').matches;
-    const N = movil ? 28 : 62, DIST = movil ? 130 : 175, PASO = 1000 / 30;
+    const N = host ? (movil ? 24 : 46) : (movil ? 42 : 96), DIST = movil ? 140 : 190, PASO = 1000 / 30;
     let W = 0, H = 0, nodos = [], pulsos = [], mx = -1e4, my = -1e4, prev = 0, cuenta = 0, raf = 0;
     const medir = () => {
       const dpr = Math.min(2, devicePixelRatio || 1);
-      W = innerWidth; H = innerHeight;
+      W = host ? host.clientWidth : innerWidth; H = host ? host.clientHeight : innerHeight;
       cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      if (!nodos.length) nodos = Array.from({ length: N }, () => ({ x: Math.random() * W, y: Math.random() * H, vx: (Math.random() - .5) * .25, vy: (Math.random() - .5) * .25, z: .4 + Math.random() * .6, r: Math.random() < .14 }));
+      if (!nodos.length) nodos = Array.from({ length: N }, () => ({ x: Math.random() * W, y: Math.random() * H, vx: (Math.random() - .5) * .25, vy: (Math.random() - .5) * .25, z: .4 + Math.random() * .6, r: Math.random() < .18 }));
     };
-    const pos = n => ({ x: n.x, y: ((n.y - scrollY * .12 * n.z) % H + H) % H });
+    const pos = n => ({ x: n.x, y: host ? n.y : ((n.y - scrollY * .12 * n.z) % H + H) % H });
     const cuadro = ts => {
       raf = requestAnimationFrame(cuadro);
       if (ts - prev < PASO) return;
@@ -56,6 +56,7 @@
       const P = nodos.map(n => {
         n.x += n.vx * dt; n.y += n.vy * dt;
         if (n.x < -20) n.x = W + 20; if (n.x > W + 20) n.x = -20;
+        if (host) { if (n.y < -20) n.y = H + 20; if (n.y > H + 20) n.y = -20; }
         return pos(n);
       });
       const pares = [];
@@ -64,16 +65,16 @@
         if (d > DIST) continue;
         pares.push([i, j]);
         const cerca = fino && Math.hypot((P[i].x + P[j].x) / 2 - mx, (P[i].y + P[j].y) / 2 - my) < 170;
-        ctx.strokeStyle = cerca ? `rgba(255,68,88,${.55 * (1 - d / DIST)})` : `rgba(244,241,238,${.17 * (1 - d / DIST)})`;
+        ctx.strokeStyle = cerca ? `rgba(255,68,88,${.55 * (1 - d / DIST)})` : `rgba(244,241,238,${.26 * (1 - d / DIST)})`;
         ctx.lineWidth = cerca ? 1.2 : 1;
         ctx.beginPath(); ctx.moveTo(P[i].x, P[i].y); ctx.lineTo(P[j].x, P[j].y); ctx.stroke();
       }
       P.forEach((p, i) => {
         const n = nodos[i], cerca = fino && Math.hypot(p.x - mx, p.y - my) < 150;
-        ctx.fillStyle = n.r || cerca ? 'rgba(255,68,88,.9)' : 'rgba(244,241,238,.45)';
+        ctx.fillStyle = n.r || cerca ? 'rgba(255,68,88,.9)' : 'rgba(244,241,238,.62)';
         ctx.beginPath(); ctx.arc(p.x, p.y, (cerca ? 2.8 : 1.7) * n.z + .4, 0, 6.283); ctx.fill();
       });
-      if (++cuenta % (movil ? 24 : 14) === 0 && pares.length && pulsos.length < 9) {
+      if (++cuenta % (movil ? 14 : 7) === 0 && pares.length && pulsos.length < 18) {
         const [a, b] = pares[(Math.random() * pares.length) | 0];
         pulsos.push({ a, b, t: 0 });
       }
@@ -88,9 +89,14 @@
     };
     medir();
     addEventListener('resize', medir, { passive: true });
-    if (fino) addEventListener('pointermove', e => { mx = e.clientX; my = e.clientY; }, { passive: true });
-    const correr = () => { cancelAnimationFrame(raf); if (!document.hidden) raf = requestAnimationFrame(cuadro); };
+    if (fino) addEventListener('pointermove', e => {
+      if (host) { const r = host.getBoundingClientRect(); mx = e.clientX - r.left; my = e.clientY - r.top; } else { mx = e.clientX; my = e.clientY; }
+    }, { passive: true });
+    let visible = true;
+    const correr = () => { cancelAnimationFrame(raf); if (!document.hidden && visible) raf = requestAnimationFrame(cuadro); };
     document.addEventListener('visibilitychange', correr);
+    // la de la portada solo corre mientras la portada se ve
+    if (host && 'IntersectionObserver' in window) new IntersectionObserver(([en]) => { visible = en.isIntersecting; correr(); }).observe(host);
     correr();
   };
 
@@ -110,5 +116,5 @@
       el.addEventListener('pointerleave', () => { el.style.transition = 'transform 600ms cubic-bezier(.16,1,.3,1)'; el.style.transform = ''; });
     });
   };
-  red(); tarjetas(); // con reduced-motion el bloque de entradas ya salio antes de llegar aqui
+  red(); red(document.querySelector('.nvh-hero')); tarjetas(); // con reduced-motion el bloque de entradas ya salio antes de llegar aqui
 })();
