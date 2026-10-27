@@ -311,3 +311,11 @@ html:has(.nvc-sheet[open]){overflow:hidden}
   .nvc-sop__pulse{display:none}
   .nvc-sheet,.nvc-sheet::backdrop,.nvc-dock,.nvc-dock.is-on,.nvc-sop__go,.nvc-acc__arr{transition:none!important}
 }
+
+/* JC Analytics bajo las marcas: centrado y discreto, como en la portada anterior */
+.nvc-jc{display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;margin-top:22px;padding-top:22px;border-top:1px solid var(--nv-line)}
+.nvc-jc__link{display:inline-flex;align-items:center;min-height:44px;opacity:.9;transition:opacity var(--nv-dur-micro)}
+.nvc-jc__link img{height:28px;width:auto}
+.nvc-jc__txt{font-size:11px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--nv-text-3)}
+@media (hover:hover){.nvc-jc__link:hover{opacity:1}}
+@media (max-width:767px){.nvc-jc{flex-direction:column;gap:6px}.nvc-jc__link img{height:24px}}
