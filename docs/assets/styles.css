@@ -1313,6 +1313,18 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
 .p2-hero__btn{justify-content:flex-start;gap:12px;padding:18px 22px;font-size:16px}
 .p2-hero__btn svg{width:22px;height:22px;flex:none;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 .p2-hero__note{color:rgba(244,241,238,.6)}
+/* Recuadro del catalogo que rota (mismo componente .vitrina de la portada anterior) */
+.p2-vitrina{display:flex;flex-direction:column;gap:12px;min-width:0}
+.p2-vitrina__box{aspect-ratio:4/3;border-radius:16px;box-shadow:0 30px 60px -30px rgba(0,0,0,.75)}
+.p2-vitrina__box .puerta__tag{left:18px;top:16px}
+.p2-vitrina__box .vitrina__n{right:18px;top:16px}
+.p2-vitrina__box .vitrina__cap{left:20px;right:20px;bottom:20px}
+.p2-vitrina__box .vitrina__cap b{font-size:clamp(18px,1.6vw,24px)}
+.p2-vitrina__box .vitrina__item img{left:8%;top:12%;width:84%;height:62%}
+.p2-vitrina__link{position:absolute;inset:0;display:block;color:inherit}
+.vitrina__item:not(.is-on) .p2-vitrina__link{pointer-events:none}
+.p2-vitrina__cta{align-self:flex-end;font-size:14px;font-weight:700;color:#fff;border-bottom:1.5px solid var(--crimson);padding-bottom:2px}
+@media (hover:hover){.p2-vitrina__cta:hover{color:var(--crimson)}}
 /* Titular: entra al cargar (no espera al scroll); en el celular y con reduced-motion ya esta escrito (LCP) */
 .js .p2-hero .lines .ln>span{animation:lineUp var(--dur-section) var(--ease-enter) forwards}
 .js .p2-hero .lines em{animation:inkIn var(--dur-drawer) .3s both}
@@ -1320,34 +1332,6 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
   .js .p2-hero .lines .ln>span{opacity:1;transform:none;animation:none}
   .js .p2-hero .lines em{color:var(--crimson);animation:none}
 }
-/* Composicion: instalacion real + pantalla de software + automatizacion */
-.p2-mosaic{position:relative;display:grid;grid-template-columns:repeat(6,1fr);grid-template-rows:auto auto;gap:12px}
-.p2-mosaic__foto{grid-column:1 / -1;aspect-ratio:16/10;border-radius:14px}
-.p2-mosaic__foto>img{position:absolute;inset:0}
-.p2-screen{grid-column:1 / 4;margin-top:-64px;margin-left:-18px;position:relative;z-index:4;border-radius:12px;background:#f6f2ee;color:var(--ink);
-  box-shadow:0 26px 50px -24px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.08);overflow:hidden}
-.p2-screen__bar{display:flex;align-items:center;gap:5px;padding:8px 12px;background:#e7e1da}
-.p2-screen__bar i{width:7px;height:7px;border-radius:50%;background:#c9c1b8}
-.p2-screen__bar i:first-child{background:var(--crimson)}
-.p2-screen__bar .meta{margin-left:auto;font-size:9px}
-.p2-screen__body{padding:12px;display:flex;flex-direction:column;gap:10px}
-.p2-screen__kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-.p2-screen__kpis span{display:flex;flex-direction:column;gap:2px;padding:8px;border-radius:8px;background:#fff;border:1px solid var(--hair)}
-.p2-screen__kpis b{font-size:15px;line-height:1;font-variant-numeric:tabular-nums}
-.p2-screen__kpis small{font-size:9.5px;color:var(--muted)}
-.p2-screen__rows{display:flex;flex-direction:column;gap:6px;font-size:11.5px;font-weight:600}
-.p2-screen__rows li{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;background:#fff}
-.p2-screen__rows i{width:8px;height:8px;border-radius:50%;flex:none;background:var(--ok)}
-.p2-screen__rows i.warn{background:#d48a13}
-.p2-flow{grid-column:4 / -1;margin-top:-64px;margin-right:-18px;position:relative;z-index:4;padding:12px 14px;border-radius:12px;background:var(--ink-2);
-  border:1px solid rgba(255,255,255,.1);box-shadow:0 26px 50px -24px rgba(0,0,0,.8);display:flex;flex-direction:column;gap:10px}
-.p2-flow__tag{color:#ff7d8c;font-size:9.5px}
-.p2-flow__steps{display:flex;flex-direction:column;gap:6px}
-.p2-flow__steps li{position:relative;display:flex;align-items:center;gap:10px;font-size:12.5px;font-weight:700;line-height:1.2}
-.p2-flow__steps li+li::before{content:"";position:absolute;left:15px;top:-6px;width:1.5px;height:6px;background:var(--crimson)}
-.p2-flow__steps svg{width:32px;height:32px;padding:7px;border-radius:9px;background:rgba(255,255,255,.07);flex:none;fill:none;stroke:#fff;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.p2-flow__steps li:last-child svg{background:var(--crimson)}
-.p2-flow__steps small{display:block;font-size:10.5px;font-weight:500;color:rgba(244,241,238,.6);margin-top:2px}
 
 /* ---------- 2 · Soluciones ---------- */
 .p2-sol{background:var(--bg)}
@@ -1366,6 +1350,28 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
 .p2-card--arma .p2-card__brand{color:#ff7d8c}
 .p2-card--arma>p{color:rgba(244,241,238,.75)}
 .p2-card:target,.p2-caso:target{box-shadow:0 0 0 2px var(--crimson)}
+/* Soluciones compactas (26/10): icono + titulo; al tocar se abre ahi mismo (una a la vez) con lo que resuelve, ejemplos y acciones */
+.p2-sol__grid{align-items:start}
+.p2-card:not(.p2-card--arma){padding:0;gap:0;transition:border-color var(--dur-micro),box-shadow var(--dur-micro)}
+.p2-card__toggle{display:flex;align-items:center;gap:14px;width:100%;padding:18px 18px 18px 20px;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;border-radius:16px;min-height:84px}
+.p2-card__toggle .p2-card__ico{flex:none}
+.p2-card__tit{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
+.p2-card__tit h3{font-size:clamp(18px,1.4vw,21px);line-height:1.15}
+.p2-card__chev{flex:none;width:32px;height:32px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--hair);position:relative;transition:transform var(--dur-drawer) var(--ease-enter),background var(--dur-micro)}
+.p2-card__chev::before{content:"";position:absolute;left:50%;top:45%;width:8px;height:8px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:translate(-50%,-50%) rotate(45deg)}
+@media (hover:hover){.p2-card:not(.is-open) .p2-card__toggle:hover .p2-card__chev{background:var(--crimson-soft)}.p2-card:not(.p2-card--arma):hover{border-color:rgba(226,35,58,.35)}}
+.p2-card__body{display:flex;flex-direction:column;gap:14px;padding:0 20px 20px}
+.p2-card__txt{display:flex;flex-direction:column;gap:10px}
+.p2-card__txt>p{color:var(--muted);line-height:1.5;font-size:15px;max-width:60ch}
+.p2-card__body .p2-card__ctas{margin:0;padding:0}
+.js .p2-card:not(.is-open) .p2-card__body{display:none}
+.p2-card.is-open{border-color:var(--crimson);box-shadow:0 18px 40px -28px rgba(226,35,58,.55)}
+.p2-card.is-open .p2-card__chev{transform:rotate(180deg);background:var(--crimson);color:#fff;box-shadow:none}
+.p2-card.is-open .p2-card__body{animation:p2Abre var(--dur-drawer) var(--ease-enter) both}
+@keyframes p2Abre{from{opacity:0;transform:translateY(-6px)}}
+
+.p2-card--arma{min-height:84px}
+@media (prefers-reduced-motion:reduce){.p2-card.is-open .p2-card__body{animation:none}.p2-card__chev{transition:none}}
 
 /* ---------- 3 · Destacados ---------- */
 .p2-dest{background:linear-gradient(180deg,var(--bg) 0,var(--ink) 110px);color:var(--white);padding-top:calc(var(--space) + 16px)}
@@ -1435,7 +1441,6 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
 
 @media (min-width:768px) and (max-width:1100px){
   .p2-hero__grid{grid-template-columns:1fr}
-  .p2-mosaic{max-width:640px}
   .p2-sol__grid,.p2-ej__grid{grid-template-columns:repeat(2,1fr)}
   .p2-dest__grid{grid-template-columns:repeat(2,1fr)}
   .p2-casos__grid{gap:10px}
@@ -1461,28 +1466,19 @@ body.has-cursor .visor__stage,body.has-cursor .visor__bar{cursor:auto}
   .p2-hero__ctas{grid-template-columns:1fr;gap:10px;max-width:none}
   .p2-hero__btn{justify-content:center;padding:16px 20px;min-height:56px}
   .p2-hero__note{font-size:10px}
-  .p2-mosaic{grid-template-columns:1fr 1fr;gap:10px}
-  .p2-mosaic__foto{aspect-ratio:16/11}
-  .p2-screen{grid-column:1 / -1;margin:-40px 10px 0}
-  .p2-flow{grid-column:1 / -1;margin:0 10px}
-  .p2-flow__steps{flex-direction:row;gap:8px}
-  .p2-flow__steps li{flex:1;flex-direction:column;align-items:flex-start;gap:6px;font-size:11.5px}
-  .p2-flow__steps li+li::before{display:none}
+  .p2-vitrina__box{aspect-ratio:4/3}
+  .p2-vitrina__box .vitrina__item img{left:6%;top:14%;width:88%;height:58%}
+  .p2-vitrina__box .vitrina__cap{left:14px;right:14px;bottom:14px}
+  .p2-vitrina__cta{align-self:center}
   /* Listas en vez de rejillas */
   .p2-sol__grid,.p2-ej__grid{grid-template-columns:1fr;gap:10px}
-  /* Soluciones como lista: icono a la izquierda, lo esencial y los dos caminos (los ejemplos quedan para escritorio) */
-  .p2-card{display:grid;grid-template-columns:40px 1fr;gap:4px 14px;padding:16px}
-  .p2-card>*{grid-column:2}
-  .p2-card__ico{grid-column:1;grid-row:1 / span 3;width:40px;height:40px;border-radius:10px}
-  .p2-card__ico svg{width:20px;height:20px}
-  .p2-card__brand,.p2-card__ej{display:none}
-  .p2-card h3{font-size:19px}
-  .p2-card>p{font-size:14px}
-  .p2-card__ctas{padding-top:6px;gap:6px}
-  .p2-card__ctas .p2-link{flex:1;min-height:42px;padding:8px 12px;font-size:13.5px}
-  .p2-card--arma{grid-template-columns:1fr}
-  .p2-card--arma>*{grid-column:1}
-  .p2-card--arma .p2-card__brand{display:block}
+  .p2-card__toggle{padding:14px 14px 14px 16px;min-height:72px;gap:12px}
+  .p2-card__toggle .p2-card__ico{width:40px;height:40px;border-radius:10px}
+  .p2-card__toggle .p2-card__ico svg{width:20px;height:20px}
+  .p2-card__tit h3{font-size:18px}
+  .p2-card__body{padding:0 16px 16px}
+  .p2-card__ctas .p2-link{flex:1}
+  .p2-card--arma{padding:18px}
   .p2-dest__grid{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:10px;margin:0 calc(var(--pad)*-1);padding:0 var(--pad) 4px;scroll-padding-inline:var(--pad);scrollbar-width:none}
   .p2-dest__grid::-webkit-scrollbar{display:none}
   .p2-prod{flex:0 0 78vw;scroll-snap-align:start}

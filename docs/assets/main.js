@@ -801,6 +801,19 @@
     if (det) det.value = radio && sol === t ? '' : /cotizar una soluci/i.test(t) ? '' : t;
   }));
 
+  /* ---------- Soluciones compactas: se abren al tocarlas, una a la vez ----------
+     Un ancla a una solucion (#seguridad, #redes... los enlaces de los videos y del pie) la abre al llegar. */
+  const solCards = $$('.p2-card[id]');
+  const abrirSol = (c, on) => { c.classList.toggle('is-open', on); $('.p2-card__toggle', c)?.setAttribute('aria-expanded', String(on)); };
+  solCards.forEach(c => $('.p2-card__toggle', c)?.addEventListener('click', () => {
+    const on = !c.classList.contains('is-open');
+    solCards.forEach(x => abrirSol(x, x === c && on));
+  }));
+  const solDesdeHash = h => { const c = solCards.find(x => '#' + x.id === h); if (c) solCards.forEach(x => abrirSol(x, x === c)); };
+  solDesdeHash(location.hash);
+  addEventListener('hashchange', () => solDesdeHash(location.hash));
+  $$('a[href^="#"]').forEach(a => a.addEventListener('click', () => solDesdeHash(a.getAttribute('href'))));
+
   /* ---------- Destacados: precio vigente desde la tienda (la ficha publica, sin cookies) ----------
      Se pide cuando la seccion se acerca; si la tienda no responde o el producto ya no se vende, queda el texto
      "Ver precio en la tienda" y la tarjeta sigue llevando a su ficha. */

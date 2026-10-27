@@ -25,7 +25,7 @@
 <!-- Sin preload de fotogramas: la escena CAM 01 ya no es lo primero que se ve (la portada con tienda y soporte manda el LCP).
      Sus fotogramas esperan a que la escena se acerque (IntersectionObserver en main.js). -->
 <script>(function(){var f=new URLSearchParams(location.search).get("font");if(f)document.documentElement.dataset.font=f})()</script>
-<link rel="stylesheet" href="assets/styles.css?v=76">
+<link rel="stylesheet" href="assets/styles.css?v=78">
 <script>document.documentElement.classList.add('js')</script>
 <!-- Telefonos: "tel" = linea 1, "tel2" = linea 2 (formato libre: "+506 8888 9892", "88889892"...). Mientras "tel2" este vacio la linea 2 no se muestra.
      main.js los aplica a todo [data-tel]/[data-wa] (contacto y pie). "waLink" es el enlace de WhatsApp Business de la linea 1. -->
@@ -83,40 +83,33 @@
       <p class="meta p2-hero__note">Asesoría, implementación y respaldo técnico en Costa Rica.</p>
     </div>
 
-    <div class="p2-mosaic" aria-label="Lo que integra Crimson">
-      <figure class="feed p2-mosaic__foto">
-        <img src="assets/img/foto-camara-residencia-h-800.webp" srcset="assets/img/foto-camara-residencia-h-480.webp 480w, assets/img/foto-camara-residencia-h-800.webp 800w, assets/img/foto-camara-residencia-h-1200.webp 1200w" sizes="(max-width:767px) 92vw, 46vw" alt="Cámara de videovigilancia instalada por Crimson en una residencia" width="1200" height="800" fetchpriority="high" decoding="async">
+    <!-- Recuadro del catalogo como el de antes (pedido 26/10): productos de la tienda que rotan solos (una vuelta de
+         --dur-scene; main.js avanza el producto en cada "animationiteration"). Se detiene fuera de cuadro y con
+         reduced-motion queda el primero. Tocar el recuadro abre el producto que se esta viendo. -->
+    <div class="p2-vitrina">
+      <div class="puerta__media vitrina feed is-active p2-vitrina__box">
+        <ul class="vitrina__lista" aria-hidden="true">
+          <li class="vitrina__item is-on"><a class="p2-vitrina__link" href="https://tienda.crimsoncr.com/p/control-de-acceso-reconocimiento-facial-lector-de-tarjeta-em-152" rel="noopener" tabindex="-1"><img src="assets/img/dest-acceso-480.webp" srcset="assets/img/dest-acceso-480.webp 480w, assets/img/dest-acceso-600.webp 600w" sizes="(max-width:767px) 92vw, 520px" alt="" width="600" height="600" fetchpriority="high" decoding="async"><span class="vitrina__cap"><span class="meta">Hikvision</span><b>Control de acceso facial</b></span><span class="vitrina__n meta">01 / 08</span></a></li>
+          <li class="vitrina__item"><a class="p2-vitrina__link" href="https://tienda.crimsoncr.com/p/camara-dome-hikvision-ds-2cd2143g2-lis2u-2-8mm-4mp-acusense-smart-90" rel="noopener" tabindex="-1"><img src="assets/img/dest-camara-480.webp" srcset="assets/img/dest-camara-480.webp 480w, assets/img/dest-camara-600.webp 600w" sizes="(max-width:767px) 92vw, 520px" alt="" width="600" height="600" loading="lazy" decoding="async"><span class="vitrina__cap"><span class="meta">Hikvision</span><b>Cámara domo AcuSense 4 MP</b></span><span class="vitrina__n meta">02 / 08</span></a></li>
+          <li class="vitrina__item"><a class="p2-vitrina__link" href="https://tienda.crimsoncr.com/p/punto-de-acceso-tp-link-omada-eap610-ax1800-ceiling-mount-wifi-6-497" rel="noopener" tabindex="-1"><img src="assets/img/dest-wifi-480.webp" srcset="assets/img/dest-wifi-480.webp 480w, assets/img/dest-wifi-600.webp 600w" sizes="(max-width:767px) 92vw, 520px" alt="" width="600" height="600" loading="lazy" decoding="async"><span class="vitrina__cap"><span class="meta">TP-Link Omada</span><b>Wi-Fi 6 de techo</b></span><span class="vitrina__n meta">03 / 08</span></a></li>
+          <li class="vitrina__item"><a class="p2-vitrina__link" href="https://tienda.crimsoncr.com/p/enchufe-inteligente-ezviz-cs-t30-10b-us-wifi-2-4ghz-control-por-voz-1682" rel="noopener" tabindex="-1"><img src="assets/img/dest-enchufe-480.webp" srcset="assets/img/dest-enchufe-480.webp 480w, assets/img/dest-enchufe-600.webp 600w" sizes="(max-width:767px) 92vw, 520px" alt="" width="600" height="600" loading="lazy" decoding="async"><span class="vitrina__cap"><span class="meta">Ezviz</span><b>Enchufe inteligente</b></span><span class="vitrina__n meta">04 / 08</span></a></li>
+          <li class="vitrina__item"><a class="p2-vitrina__link" href="https://tienda.crimsoncr.com/c/camaras" rel="noopener" tabindex="-1"><img src="assets/img/cat-camara-colorvu-480.webp" srcset="assets/img/cat-camara-colorvu-480.webp 480w, assets/img/cat-camara-colorvu-800.webp 800w" sizes="(max-width:767px) 92vw, 520px" alt="" width="800" height="600" loading="lazy" decoding="async"><span class="vitrina__cap"><span class="meta">Hikvision</span><b>Cámara ColorVu</b></span><span class="vitrina__n meta">05 / 08</span></a></li>
+          <li class="vitrina__item"><a class="p2-vitrina__link" href="https://tienda.crimsoncr.com/c/respaldo-electrico" rel="noopener" tabindex="-1"><img src="assets/img/cat-ups-nova-480.webp" srcset="assets/img/cat-ups-nova-480.webp 480w, assets/img/cat-ups-nova-800.webp 800w" sizes="(max-width:767px) 92vw, 520px" alt="" width="800" height="600" loading="lazy" decoding="async"><span class="vitrina__cap"><span class="meta">Respaldo eléctrico</span><b>UPS para tus equipos</b></span><span class="vitrina__n meta">06 / 08</span></a></li>
+          <li class="vitrina__item"><a class="p2-vitrina__link" href="https://tienda.crimsoncr.com/c/routers" rel="noopener" tabindex="-1"><img src="assets/img/cat-router-480.webp" srcset="assets/img/cat-router-480.webp 480w, assets/img/cat-router-800.webp 800w" sizes="(max-width:767px) 92vw, 520px" alt="" width="800" height="600" loading="lazy" decoding="async"><span class="vitrina__cap"><span class="meta">Redes</span><b>Router empresarial</b></span><span class="vitrina__n meta">07 / 08</span></a></li>
+          <li class="vitrina__item"><a class="p2-vitrina__link" href="https://tienda.crimsoncr.com/c/almacenamiento" rel="noopener" tabindex="-1"><img src="assets/img/cat-hd-purple-480.webp" srcset="assets/img/cat-hd-purple-480.webp 480w, assets/img/cat-hd-purple-800.webp 800w" sizes="(max-width:767px) 92vw, 520px" alt="" width="800" height="600" loading="lazy" decoding="async"><span class="vitrina__cap"><span class="meta">Almacenamiento</span><b>Disco para videovigilancia</b></span><span class="vitrina__n meta">08 / 08</span></a></li>
+        </ul>
+        <span class="puerta__tag meta">Tienda en línea</span>
         <span class="feed__corners"></span>
-        <figcaption class="feed__meta"><span class="rec"><i></i>Instalación real</span><span class="feed__clock" aria-hidden="true">--:--:--</span></figcaption>
-      </figure>
-
-      <!-- Pantalla de software: la plataforma con la que opera Crimson (datos de ejemplo) -->
-      <div class="p2-screen" role="img" aria-label="Ejemplo de pantalla de software: cotizaciones, facturas electrónicas e inventario en un mismo panel">
-        <div class="p2-screen__bar"><i></i><i></i><i></i><span class="meta">Panel · ejemplo</span></div>
-        <div class="p2-screen__body">
-          <div class="p2-screen__kpis"><span><b>₡4,8 M</b><small>Ventas del mes</small></span><span><b>12</b><small>Cotizaciones</small></span><span><b>3</b><small>Por reponer</small></span></div>
-          <ul class="p2-screen__rows">
-            <li><i class="ok"></i>Factura electrónica aceptada</li>
-            <li><i class="ok"></i>Cotización aprobada por el cliente</li>
-            <li><i class="warn"></i>Inventario: cámara domo por reponer</li>
-          </ul>
-        </div>
+        <span class="vitrina__bar" aria-hidden="true"><i></i></span>
       </div>
-
-      <!-- Automatizacion: un sensor dispara una alerta (ejemplo) -->
-      <div class="p2-flow" role="img" aria-label="Ejemplo de automatización: un sensor de puerta abierta fuera de horario envía una alerta al celular">
-        <span class="meta p2-flow__tag">Automatización · ejemplo</span>
-        <ol class="p2-flow__steps">
-          <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="1"/><path d="M15 12h.01"/></svg><span>Puerta abierta<small>10:42 p. m.</small></span></li>
-          <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/></svg><span>Fuera de horario<small>regla activa</small></span></li>
-          <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg><span>Alerta al celular<small>con la imagen</small></span></li>
-        </ol>
-      </div>
+      <a class="p2-vitrina__cta" href="https://tienda.crimsoncr.com/" rel="noopener">Ver todo el catálogo <span aria-hidden="true">→</span></a>
     </div>
   </div>
 </section>
 
 <!-- 2 · SOLUCIONES: nombres que el cliente entiende; la division de marca queda como identidad secundaria.
+     Compactas (26/10): solo icono y titulo; al tocar una se abre ahi mismo (una a la vez) con lo que resuelve,
+     ejemplos y sus dos caminos. Sin JS se ven abiertas.
      Cada solucion tiene su ancla (#seguridad, #redes, #ia, #software, #iot) para que un video lleve directo a ella. -->
 <section class="p2-sol" id="soluciones" data-cam="02" data-label="SOLUCIONES" data-tone="cream">
   <div class="wrap">
@@ -127,44 +120,59 @@
     </div>
     <ul class="p2-sol__grid">
       <li class="p2-card reveal" id="seguridad" style="--d:0">
-        <span class="p2-card__ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></span>
-        <span class="meta p2-card__brand">Crimson Security</span>
-        <h3>Seguridad y control de acceso</h3>
-        <p>Protegé tus espacios y controlá quién entra: visitantes, residentes y personal.</p>
-        <ul class="p2-card__ej"><li>Cámaras que distinguen personas y vehículos</li><li>Accesos con rostro, huella o tarjeta</li><li>Registro de asistencia del personal</li></ul>
-        <div class="p2-card__ctas"><a class="p2-link p2-link--fill" href="https://tienda.crimsoncr.com/c/seguridad" rel="noopener">Ver equipos</a><a class="p2-link" href="#contacto" data-tipo="Seguridad y control de acceso">Consultar instalación</a></div>
+        <button type="button" class="p2-card__toggle" aria-expanded="false" aria-controls="seguridad-info">
+          <span class="p2-card__ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></span>
+          <span class="p2-card__tit"><span class="meta p2-card__brand">Crimson Security</span><h3>Seguridad y control de acceso</h3></span>
+          <span class="p2-card__chev" aria-hidden="true"></span>
+        </button>
+        <div class="p2-card__body" id="seguridad-info">
+          <div class="p2-card__txt"><p>Protegé tus espacios y controlá quién entra: visitantes, residentes y personal.</p><ul class="p2-card__ej"><li>Cámaras que distinguen personas y vehículos</li><li>Accesos con rostro, huella o tarjeta</li><li>Registro de asistencia del personal</li></ul></div>
+          <div class="p2-card__ctas"><a class="p2-link p2-link--fill" href="https://tienda.crimsoncr.com/c/seguridad" rel="noopener">Ver equipos</a><a class="p2-link" href="#contacto" data-tipo="Seguridad y control de acceso">Consultar instalación</a></div>
+        </div>
       </li>
       <li class="p2-card reveal" id="redes" style="--d:1">
-        <span class="p2-card__ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9a14 14 0 0 1 18 0"/><path d="M6.5 12.5a9 9 0 0 1 11 0"/><path d="M10 16a4 4 0 0 1 4 0"/><circle cx="12" cy="19" r="1"/></svg></span>
-        <span class="meta p2-card__brand">Crimson Networks</span>
-        <h3>Redes y conectividad</h3>
-        <p>Wi-Fi que llega a todo el lugar, sedes conectadas y equipos respaldados ante cortes.</p>
-        <ul class="p2-card__ej"><li>Wi-Fi para oficinas, comercios y casas</li><li>Enlaces inalámbricos entre edificios</li><li>Cableado, racks y UPS</li></ul>
-        <div class="p2-card__ctas"><a class="p2-link p2-link--fill" href="https://tienda.crimsoncr.com/c/redes-y-conectividad" rel="noopener">Comprar equipos</a><a class="p2-link" href="#contacto" data-tipo="Redes y conectividad">Cotizar proyecto</a></div>
+        <button type="button" class="p2-card__toggle" aria-expanded="false" aria-controls="redes-info">
+          <span class="p2-card__ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9a14 14 0 0 1 18 0"/><path d="M6.5 12.5a9 9 0 0 1 11 0"/><path d="M10 16a4 4 0 0 1 4 0"/><circle cx="12" cy="19" r="1"/></svg></span>
+          <span class="p2-card__tit"><span class="meta p2-card__brand">Crimson Networks</span><h3>Redes y conectividad</h3></span>
+          <span class="p2-card__chev" aria-hidden="true"></span>
+        </button>
+        <div class="p2-card__body" id="redes-info">
+          <div class="p2-card__txt"><p>Wi-Fi que llega a todo el lugar, sedes conectadas y equipos respaldados ante cortes.</p><ul class="p2-card__ej"><li>Wi-Fi para oficinas, comercios y casas</li><li>Enlaces inalámbricos entre edificios</li><li>Cableado, racks y UPS</li></ul></div>
+          <div class="p2-card__ctas"><a class="p2-link p2-link--fill" href="https://tienda.crimsoncr.com/c/redes-y-conectividad" rel="noopener">Comprar equipos</a><a class="p2-link" href="#contacto" data-tipo="Redes y conectividad">Cotizar proyecto</a></div>
+        </div>
       </li>
       <li class="p2-card reveal" id="ia" style="--d:2">
-        <span class="p2-card__ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4M10 10h4v4h-4z"/></svg></span>
-        <span class="meta p2-card__brand">Crimson Operations</span>
-        <h3>IA y automatización</h3>
-        <p>Menos tareas repetitivas y mejor uso de la información que ya tenés.</p>
-        <ul class="p2-card__ej"><li>Reportes que se arman y envían solos</li><li>Alertas cuando algo se sale de lo normal</li><li>Analítica de video que avisa lo importante</li></ul>
-        <div class="p2-card__ctas"><a class="p2-link p2-link--fill" href="#ejemplos">Ver aplicaciones</a><a class="p2-link" href="#contacto" data-tipo="IA y automatización">Consultar</a></div>
+        <button type="button" class="p2-card__toggle" aria-expanded="false" aria-controls="ia-info">
+          <span class="p2-card__ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4M10 10h4v4h-4z"/></svg></span>
+          <span class="p2-card__tit"><span class="meta p2-card__brand">Crimson Operations</span><h3>IA y automatización</h3></span>
+          <span class="p2-card__chev" aria-hidden="true"></span>
+        </button>
+        <div class="p2-card__body" id="ia-info">
+          <div class="p2-card__txt"><p>Menos tareas repetitivas y mejor uso de la información que ya tenés.</p><ul class="p2-card__ej"><li>Reportes que se arman y envían solos</li><li>Alertas cuando algo se sale de lo normal</li><li>Analítica de video que avisa lo importante</li></ul></div>
+          <div class="p2-card__ctas"><a class="p2-link p2-link--fill" href="#ejemplos">Ver aplicaciones</a><a class="p2-link" href="#contacto" data-tipo="IA y automatización">Consultar</a></div>
+        </div>
       </li>
       <li class="p2-card reveal" id="software" style="--d:3">
-        <span class="p2-card__ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="1.5"/><path d="M8 21h8M12 18v3M8 9l-2 2 2 2M16 9l2 2-2 2M13 8l-2 6"/></svg></span>
-        <span class="meta p2-card__brand">Crimson Operations</span>
-        <h3>Software a la medida</h3>
-        <p>Sistemas y portales hechos para tus procesos, no al revés.</p>
-        <ul class="p2-card__ej"><li>Cotizaciones, facturas e inventario en un lugar</li><li>Portales para clientes y proveedores</li><li>Integración entre los sistemas que ya usás</li></ul>
-        <div class="p2-card__ctas"><a class="p2-link p2-link--fill" href="#ejemplos">Ver ejemplos</a><a class="p2-link" href="#contacto" data-tipo="Software a la medida">Cotizar</a></div>
+        <button type="button" class="p2-card__toggle" aria-expanded="false" aria-controls="software-info">
+          <span class="p2-card__ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="1.5"/><path d="M8 21h8M12 18v3M8 9l-2 2 2 2M16 9l2 2-2 2M13 8l-2 6"/></svg></span>
+          <span class="p2-card__tit"><span class="meta p2-card__brand">Crimson Operations</span><h3>Software a la medida</h3></span>
+          <span class="p2-card__chev" aria-hidden="true"></span>
+        </button>
+        <div class="p2-card__body" id="software-info">
+          <div class="p2-card__txt"><p>Sistemas y portales hechos para tus procesos, no al revés.</p><ul class="p2-card__ej"><li>Cotizaciones, facturas e inventario en un lugar</li><li>Portales para clientes y proveedores</li><li>Integración entre los sistemas que ya usás</li></ul></div>
+          <div class="p2-card__ctas"><a class="p2-link p2-link--fill" href="#ejemplos">Ver ejemplos</a><a class="p2-link" href="#contacto" data-tipo="Software a la medida">Cotizar</a></div>
+        </div>
       </li>
       <li class="p2-card reveal" id="iot" style="--d:4">
-        <span class="p2-card__ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><circle cx="12" cy="14" r="2"/><path d="M8.5 11a5 5 0 0 1 7 0"/></svg></span>
-        <span class="meta p2-card__brand">Crimson Smart Communities</span>
-        <h3>IoT y espacios inteligentes</h3>
-        <p>Sensores y dispositivos conectados que avisan y actúan por vos.</p>
-        <ul class="p2-card__ej"><li>Sensores de puerta, movimiento, agua y humo</li><li>Luces y enchufes que se programan</li><li>Comunidades con visitas y reservas en línea</li></ul>
-        <div class="p2-card__ctas"><a class="p2-link p2-link--fill" href="https://tienda.crimsoncr.com/c/smart-home" rel="noopener">Explorar soluciones</a><a class="p2-link" href="#contacto" data-tipo="IoT y espacios inteligentes">Consultar</a></div>
+        <button type="button" class="p2-card__toggle" aria-expanded="false" aria-controls="iot-info">
+          <span class="p2-card__ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><circle cx="12" cy="14" r="2"/><path d="M8.5 11a5 5 0 0 1 7 0"/></svg></span>
+          <span class="p2-card__tit"><span class="meta p2-card__brand">Crimson Smart Communities</span><h3>IoT y espacios inteligentes</h3></span>
+          <span class="p2-card__chev" aria-hidden="true"></span>
+        </button>
+        <div class="p2-card__body" id="iot-info">
+          <div class="p2-card__txt"><p>Sensores y dispositivos conectados que avisan y actúan por vos.</p><ul class="p2-card__ej"><li>Sensores de puerta, movimiento, agua y humo</li><li>Luces y enchufes que se programan</li><li>Comunidades con visitas y reservas en línea</li></ul></div>
+          <div class="p2-card__ctas"><a class="p2-link p2-link--fill" href="https://tienda.crimsoncr.com/c/smart-home" rel="noopener">Explorar soluciones</a><a class="p2-link" href="#contacto" data-tipo="IoT y espacios inteligentes">Consultar</a></div>
+        </div>
       </li>
       <li class="p2-card p2-card--arma reveal" style="--d:5">
         <span class="meta p2-card__brand">Tienda · configurador</span>
@@ -595,6 +603,6 @@
     </div>
   </div>
 </footer>
-<script src="assets/main.js?v=48" defer></script>
+<script src="assets/main.js?v=49" defer></script>
 </body>
 </html>
