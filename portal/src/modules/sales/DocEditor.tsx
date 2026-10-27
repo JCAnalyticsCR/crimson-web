@@ -523,14 +523,19 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
           {isQ && !isNew && doc.id != null && <QuoteVersions quote={doc as Quote} onQuote={(q) => hydrate(q as Quote & Invoice)} />}
           {pending && (
             <div className="card" style={{ borderColor: rechazo ? "var(--bad)" : "var(--warn)" }}><div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <div className="meta" style={{ color: rechazo ? "var(--bad)" : "var(--warn)" }}>{rechazo ? "Descuento rechazado" : "Descuento por aprobar"}</div>
+              <div className="meta" style={{ color: rechazo ? "var(--bad)" : "var(--warn)" }}>{rechazo ? "Aprobación rechazada" : "Por aprobar"}</div>
               {rechazo ? (
                 <>
                   <p style={{ fontSize: 13, margin: 0 }}>{rechazo.by || "Administración"} no lo aprobó{rechazo.reason ? `: «${rechazo.reason}»` : ""}.</p>
                   <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Ajustá el descuento o los precios y guardala: si queda dentro del límite se libera; si no, vuelve a pedir aprobación.</p>
                 </>
               ) : (
-                <p style={{ fontSize: 13, margin: 0 }}>El descuento supera el límite del vendedor{limit ? ` (${Number(limit.limit)} %)` : ""}. No se puede enviar ni convertir hasta que un administrador lo apruebe.</p>
+                /* el motivo real que guardo la API (descuento, monto, margen o linea sin producto del catalogo): antes siempre
+                   decia "descuento" y una linea libre de instalacion parecia un descuento que nadie habia puesto (26/10) */
+                <>
+                  <p style={{ fontSize: 13, margin: 0 }}>{(doc as { approval_reason?: string | null }).approval_reason || `El descuento supera el límite del vendedor${limit ? ` (${Number(limit.limit)} %)` : ""}.`} No se puede enviar ni convertir hasta que un administrador la apruebe.</p>
+                  {/sin producto del cat|no tiene producto del cat/i.test((doc as { approval_reason?: string | null }).approval_reason || "") && <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Para que no pida aprobación, elegí el servicio desde «Agregar Productos & Servicios» en vez de escribir la línea a mano.</p>}
+                </>
               )}
               {/* jefe de ventas (ventas etapa 2): aprueba solo lo que cabe en sus topes; lo demás lo dice y va a administración */}
               {!allows("sales.aprobar") && doc.team_approval && !doc.team_approval.can && <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>{doc.team_approval.reason}</p>}
