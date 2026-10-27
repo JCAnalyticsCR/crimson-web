@@ -1,0 +1,115 @@
+<!-- 2 · TIENDA (prefijo nvt-): fila de 4 accesos (pegada a la portada) + tienda: tarjeta protagonista con collage de
+     productos reales sobre blanco, 4 destacados reales con precio vigente (2-tienda.js) y "Armá tu sistema".
+     Para cambiar un destacado: data-pid = id del producto en la tienda y href = su direccion /p/... -->
+<nav class="nvt-quick" aria-label="Accesos rápidos a soluciones">
+  <div class="nv-wrap">
+    <div class="nvt-quick__row" data-nv-in>
+      <span class="nvt-pulse" aria-hidden="true"></span>
+      <ul class="nvt-quick__list">
+      <li><a class="nvt-q" href="#sol-seguridad">
+        <span class="nvt-q__ico" aria-hidden="true"><svg class="nv-ico" viewBox="0 0 24 24"><path d="M12 2.8 19.5 5.6v5.6c0 4.6-3.1 8.3-7.5 10-4.4-1.7-7.5-5.4-7.5-10V5.6z"/><circle cx="12" cy="11.4" r="3.4"/><circle cx="12" cy="11.4" r=".9"/></svg></span>
+        <span class="nvt-q__t">Seguridad y video</span>
+      </a></li>
+      <li><a class="nvt-q" href="#sol-redes">
+        <span class="nvt-q__ico" aria-hidden="true"><svg class="nv-ico" viewBox="0 0 24 24"><path d="M2.6 9.2a13.5 13.5 0 0 1 18.8 0"/><path d="M5.8 12.6a9 9 0 0 1 12.4 0"/><path d="M9 16a4.5 4.5 0 0 1 6 0"/><circle cx="12" cy="19.4" r=".9"/></svg></span>
+        <span class="nvt-q__t">Redes y Wi-Fi</span>
+      </a></li>
+      <li><a class="nvt-q" href="#sol-software">
+        <span class="nvt-q__ico" aria-hidden="true"><svg class="nv-ico" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.4"/><path d="M9.6 14.4v-3.2a1.6 1.6 0 0 1 3.2 0v3.2M9.6 12.8h3.2M14.6 9.6v4.8"/><path d="M9 2.8V6M15 2.8V6M9 18v3.2M15 18v3.2M2.8 9H6M2.8 15H6M18 9h3.2M18 15h3.2"/></svg></span>
+        <span class="nvt-q__t">IA y software</span>
+      </a></li>
+      <li><a class="nvt-q" href="#sol-iot">
+        <span class="nvt-q__ico" aria-hidden="true"><svg class="nv-ico" viewBox="0 0 24 24"><path d="M3.6 11 12 4l8.4 7"/><path d="M5.8 9.4V20h12.4V9.4"/><circle cx="12" cy="13.6" r="1.7"/><circle cx="8.6" cy="17.2" r=".9"/><circle cx="15.4" cy="17.2" r=".9"/><path d="m10.8 14.8-1.5 1.6M13.2 14.8l1.5 1.6"/></svg></span>
+        <span class="nvt-q__t">IoT y automatización</span>
+      </a></li>
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<section id="tienda" class="nv-sec nvt" aria-labelledby="nvt-title">
+  <div class="nv-wrap">
+    <div class="nv-head">
+      <div class="nv-head__t">
+        <h2 id="nvt-title">Tienda en línea</h2>
+        <p>Equipo original, con garantía y factura electrónica.</p>
+      </div>
+      <a class="nv-head__more nvt-more" href="https://tienda.crimsoncr.com/" rel="noopener">Ver todo<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+    </div>
+
+    <!-- Tarjeta protagonista: texto corto + vitrina blanca con productos reales del catalogo (ilustrativos) -->
+    <article class="nvt-feat nv-card" data-nv-in>
+      <svg class="nvt-feat__net" viewBox="0 0 400 220" aria-hidden="true" focusable="false">
+        <path d="M24 186 92 128l78 34 70-74 88 26 48-62"/>
+        <path d="M92 128 116 52l124 36"/>
+        <g><circle cx="24" cy="186" r="2.6"/><circle cx="92" cy="128" r="2.6"/><circle cx="170" cy="162" r="2.6"/><circle cx="240" cy="88" r="3.2" class="nvt-hot"/><circle cx="328" cy="114" r="2.6"/><circle cx="376" cy="52" r="2.6"/><circle cx="116" cy="52" r="2.6"/></g>
+      </svg>
+      <div class="nvt-feat__txt">
+        <span class="nv-eyebrow">Distribuidor autorizado Hikvision</span>
+        <h3 class="nvt-feat__h">Equipos de las <em>mejores marcas</em></h3>
+        <ul class="nvt-brands" aria-label="Marcas: Hikvision, Ubiquiti, APC y más">
+          <li><img src="../assets/img/marca-hikvision-mono.png" alt="Hikvision" width="600" height="120" loading="lazy" decoding="async"></li>
+          <li><img src="../assets/img/marca-ubiquiti-mono.png" alt="Ubiquiti" width="412" height="120" loading="lazy" decoding="async"></li>
+          <li><img src="../assets/img/marca-apc-mono.png" alt="APC" width="505" height="120" loading="lazy" decoding="async"></li>
+          <li class="nvt-brands__more" aria-hidden="true">y más</li>
+        </ul>
+        <a class="nv-btn nv-btn--red nvt-feat__cta" href="https://tienda.crimsoncr.com/" rel="noopener">Comprar ahora<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+      </div>
+      <div class="nvt-vit" role="img" aria-label="Productos de la tienda: control de acceso, cámara, UPS, router y switch">
+        <div class="nvt-vit__stage">
+          <span class="nvt-pz nvt-pz--acc" style="--x:309;--y:112;--w:183;--h:381;--o:1"><span class="nvt-pz__c"><img src="../assets/img/cat-control-acceso-480.webp" srcset="../assets/img/cat-control-acceso-480.webp 480w, ../assets/img/cat-control-acceso-800.webp 800w" sizes="(max-width:767px) 90vw, 560px" alt="" width="800" height="600" loading="lazy" decoding="async"></span></span>
+          <span class="nvt-pz nvt-pz--ups" style="--x:200;--y:120;--w:400;--h:360;--o:2"><span class="nvt-pz__c"><img src="../assets/img/cat-ups-nova-480.webp" srcset="../assets/img/cat-ups-nova-480.webp 480w, ../assets/img/cat-ups-nova-800.webp 800w" sizes="(max-width:767px) 90vw, 560px" alt="" width="800" height="600" loading="lazy" decoding="async"></span></span>
+          <span class="nvt-pz nvt-pz--cam" style="--x:219;--y:106;--w:362;--h:388;--o:0"><span class="nvt-pz__c"><img src="../assets/img/cat-camara-colorvu-480.webp" srcset="../assets/img/cat-camara-colorvu-480.webp 480w, ../assets/img/cat-camara-colorvu-800.webp 800w" sizes="(max-width:767px) 120vw, 760px" alt="" width="800" height="600" loading="lazy" decoding="async"></span></span>
+          <span class="nvt-pz nvt-pz--rtr" style="--x:244;--y:242;--w:312;--h:116;--o:3"><span class="nvt-pz__c"><img src="../assets/img/cat-router-480.webp" srcset="../assets/img/cat-router-480.webp 480w, ../assets/img/cat-router-800.webp 800w" sizes="(max-width:767px) 90vw, 560px" alt="" width="800" height="600" loading="lazy" decoding="async"></span></span>
+          <span class="nvt-pz nvt-pz--sw" style="--x:205;--y:263;--w:391;--h:72;--o:4"><span class="nvt-pz__c"><img src="../assets/img/cat-switch-pro-max-480.webp" srcset="../assets/img/cat-switch-pro-max-480.webp 480w, ../assets/img/cat-switch-pro-max-800.webp 800w" sizes="(max-width:767px) 90vw, 560px" alt="" width="800" height="600" loading="lazy" decoding="async"></span></span>
+        </div>
+      </div>
+    </article>
+
+    <!-- Destacados: 4 equipos reales; el precio vigente lo pone 2-tienda.js (respaldo: "Ver precio") -->
+    <div class="nvt-dest">
+      <h3 class="nvt-dest__h">Destacados</h3>
+      <ul class="nvt-rail" data-nvt-rail>
+        <li data-nv-in style="--i:0"><a class="nvt-p" data-pid="152" href="https://tienda.crimsoncr.com/p/control-de-acceso-reconocimiento-facial-lector-de-tarjeta-em-152" rel="noopener">
+          <span class="nvt-p__img"><img src="../assets/img/dest-acceso-480.webp" srcset="../assets/img/dest-acceso-480.webp 480w, ../assets/img/dest-acceso-600.webp 600w" sizes="(max-width:767px) 64vw, 280px" alt="Terminal de reconocimiento facial Hikvision" width="600" height="600" loading="lazy" decoding="async"></span>
+          <span class="nvt-p__b">
+            <span class="nvt-p__ben">Controlá quién entra</span>
+            <span class="nvt-p__n">Acceso facial Hikvision</span>
+            <span class="nvt-p__foot"><span class="nvt-p__pr" data-price>Ver precio</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
+          </span>
+        </a></li>
+        <li data-nv-in style="--i:1"><a class="nvt-p" data-pid="90" href="https://tienda.crimsoncr.com/p/camara-dome-hikvision-ds-2cd2143g2-lis2u-2-8mm-4mp-acusense-smart-90" rel="noopener">
+          <span class="nvt-p__img"><img src="../assets/img/dest-camara-480.webp" srcset="../assets/img/dest-camara-480.webp 480w, ../assets/img/dest-camara-600.webp 600w" sizes="(max-width:767px) 64vw, 280px" alt="Cámara domo Hikvision AcuSense" width="600" height="600" loading="lazy" decoding="async"></span>
+          <span class="nvt-p__b">
+            <span class="nvt-p__ben">Distingue personas y autos</span>
+            <span class="nvt-p__n">Cámara domo 4 MP AcuSense</span>
+            <span class="nvt-p__foot"><span class="nvt-p__pr" data-price>Ver precio</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
+          </span>
+        </a></li>
+        <li data-nv-in style="--i:2"><a class="nvt-p" data-pid="497" href="https://tienda.crimsoncr.com/p/punto-de-acceso-tp-link-omada-eap610-ax1800-ceiling-mount-wifi-6-497" rel="noopener">
+          <span class="nvt-p__img"><img src="../assets/img/dest-wifi-480.webp" srcset="../assets/img/dest-wifi-480.webp 480w, ../assets/img/dest-wifi-600.webp 600w" sizes="(max-width:767px) 64vw, 280px" alt="Punto de acceso Wi-Fi 6 de techo TP-Link Omada" width="600" height="600" loading="lazy" decoding="async"></span>
+          <span class="nvt-p__b">
+            <span class="nvt-p__ben">Wi-Fi en todo el local</span>
+            <span class="nvt-p__n">Wi-Fi 6 de techo Omada</span>
+            <span class="nvt-p__foot"><span class="nvt-p__pr" data-price>Ver precio</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
+          </span>
+        </a></li>
+        <li data-nv-in style="--i:3"><a class="nvt-p" data-pid="1682" href="https://tienda.crimsoncr.com/p/enchufe-inteligente-ezviz-cs-t30-10b-us-wifi-2-4ghz-control-por-voz-1682" rel="noopener">
+          <span class="nvt-p__img"><img src="../assets/img/dest-enchufe-480.webp" srcset="../assets/img/dest-enchufe-480.webp 480w, ../assets/img/dest-enchufe-600.webp 600w" sizes="(max-width:767px) 64vw, 280px" alt="Enchufe inteligente Ezviz T30" width="600" height="600" loading="lazy" decoding="async"></span>
+          <span class="nvt-p__b">
+            <span class="nvt-p__ben">Controlá desde el celular</span>
+            <span class="nvt-p__n">Enchufe inteligente Ezviz</span>
+            <span class="nvt-p__foot"><span class="nvt-p__pr" data-price>Ver precio</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
+          </span>
+        </a></li>
+      </ul>
+    </div>
+
+    <!-- Configurador de la tienda (KitBuilder: 4 preguntas, kit con productos reales y precio) -->
+    <a class="nvt-kit" href="https://tienda.crimsoncr.com/arma-tu-sistema" rel="noopener" data-nv-in>
+      <span class="nvt-kit__ico" aria-hidden="true"><svg class="nv-ico" viewBox="0 0 24 24"><rect x="3" y="3.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3.5" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13" width="7.5" height="7.5" rx="1.6"/><path d="M17.25 14v6M14.25 17h6"/></svg></span>
+      <span class="nvt-kit__t"><strong>Armá tu sistema de cámaras</strong><span>4 preguntas y te cotizamos el kit al instante.</span></span>
+      <span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+    </a>
+  </div>
+</section>

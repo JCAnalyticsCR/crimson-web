@@ -1,0 +1,222 @@
+<!-- 3 · SOLUCIONES (26/10). Tarjetas simples (2 columnas en celular, 3 en tableta y escritorio) y el detalle de cada
+     una en una hoja <dialog> que solo aparece si se pide: la pagina queda limpia. Los id sol-* los usan los accesos de la
+     parte 2: un enlace a #sol-x abre su hoja directo (3-soluciones.js). Los puntos salen de la consola de la pagina actual. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="nvs-i-cctv" viewBox="0 0 24 24"><path d="M3 7.6 14.4 4.5l1.7 6.1L4.7 13.7z"/><path d="m16.1 7.9 4.4-1.3.6 4.4-4.3.6"/><path d="M7.4 13v4.5H3.5"/><path d="M3.5 15.5v4"/><circle cx="6.6" cy="9.3" r=".5"/></symbol>
+  <symbol id="nvs-i-acceso" viewBox="0 0 24 24"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8"/><path d="M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8"/><path d="M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16"/><path d="M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><circle cx="12" cy="10" r="2.6"/><path d="M8 16.8c.8-1.8 2.3-2.8 4-2.8s3.2 1 4 2.8"/></symbol>
+  <symbol id="nvs-i-redes" viewBox="0 0 24 24"><path d="M3 9a14 14 0 0 1 18 0"/><path d="M6.5 12.5a9 9 0 0 1 11 0"/><path d="M10 16a4 4 0 0 1 4 0"/><circle cx="12" cy="19" r="1"/></symbol>
+  <symbol id="nvs-i-soft" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2.2"/><path d="M10 3v3.5M14 3v3.5M10 17.5V21M14 17.5V21M3 10h3.5M3 14h3.5M17.5 10H21M17.5 14H21"/><path d="m10 14.2 2-4.4 2 4.4M10.7 12.8h2.6"/></symbol>
+  <symbol id="nvs-i-iot" viewBox="0 0 24 24"><path d="M4 10.8 12 4.5l8 6.3V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M9.2 14.2a4 4 0 0 1 5.6 0"/><circle cx="12" cy="17" r=".9"/></symbol>
+  <symbol id="nvs-i-ask" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 0 1-12.3 7.6L3.5 20.5l1-4.4A8.5 8.5 0 1 1 20.5 12z"/><path d="M9.8 9.6a2.3 2.3 0 1 1 3.2 2.1c-.6.3-1 .8-1 1.4v.4"/><circle cx="12" cy="16.2" r=".5"/></symbol>
+  <symbol id="nvs-i-go" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="nvs-i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="nvs-i-wa" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 0 1-12.6 7.4L3.5 20.5l1.2-4.2A8.5 8.5 0 1 1 20.5 12z"/><path d="M9 8.6c.2-.4.6-.4.9-.4l.6 1.5-.6.8a5.6 5.6 0 0 0 2.7 2.7l.8-.6 1.5.6c0 .3 0 .7-.4.9-.9.6-2.4.5-4.2-1.2S8.4 9.5 9 8.6z"/></symbol>
+  <symbol id="nvs-i-tienda" viewBox="0 0 24 24"><path d="M3 4h2l2.4 11h11l2-7H7"/><circle cx="9" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/></symbol>
+  <symbol id="nvs-i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+</svg>
+
+<section id="soluciones" class="nv-sec nvs" aria-labelledby="nvs-h">
+  <div class="nv-wrap">
+    <header class="nv-head" data-nv-in>
+      <div class="nv-head__t">
+        <h2 id="nvs-h">Nuestras soluciones</h2>
+        <p>Tecnología para cada necesidad</p>
+      </div>
+    </header>
+
+    <ul class="nvs-grid">
+      <li data-nv-in style="--i:0">
+        <button type="button" class="nvs-card" id="sol-seguridad" data-nvs-open="nvs-d-seguridad" aria-haspopup="dialog" aria-controls="nvs-d-seguridad">
+          <span class="nvs-card__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-cctv"/></svg></span>
+          <span class="nv-go" aria-hidden="true"><svg><use href="#nvs-i-go"/></svg></span>
+          <span class="nvs-card__t">Videovigilancia (CCTV)</span>
+          <svg class="nvs-card__mark" aria-hidden="true"><use href="#nvs-i-cctv"/></svg>
+        </button>
+      </li>
+      <li data-nv-in style="--i:1">
+        <button type="button" class="nvs-card" id="sol-acceso" data-nvs-open="nvs-d-acceso" aria-haspopup="dialog" aria-controls="nvs-d-acceso">
+          <span class="nvs-card__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-acceso"/></svg></span>
+          <span class="nv-go" aria-hidden="true"><svg><use href="#nvs-i-go"/></svg></span>
+          <span class="nvs-card__t">Control de acceso y asistencia</span>
+          <svg class="nvs-card__mark" aria-hidden="true"><use href="#nvs-i-acceso"/></svg>
+        </button>
+      </li>
+      <li data-nv-in style="--i:2">
+        <button type="button" class="nvs-card" id="sol-redes" data-nvs-open="nvs-d-redes" aria-haspopup="dialog" aria-controls="nvs-d-redes">
+          <span class="nvs-card__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-redes"/></svg></span>
+          <span class="nv-go" aria-hidden="true"><svg><use href="#nvs-i-go"/></svg></span>
+          <span class="nvs-card__t">Redes, Wi-Fi y conectividad</span>
+          <svg class="nvs-card__mark" aria-hidden="true"><use href="#nvs-i-redes"/></svg>
+        </button>
+      </li>
+      <li data-nv-in style="--i:3">
+        <button type="button" class="nvs-card" id="sol-software" data-nvs-open="nvs-d-software" aria-haspopup="dialog" aria-controls="nvs-d-software">
+          <span class="nvs-card__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-soft"/></svg></span>
+          <span class="nv-go" aria-hidden="true"><svg><use href="#nvs-i-go"/></svg></span>
+          <span class="nvs-card__t">IA y software a la medida</span>
+          <svg class="nvs-card__mark" aria-hidden="true"><use href="#nvs-i-soft"/></svg>
+        </button>
+      </li>
+      <li data-nv-in style="--i:4">
+        <button type="button" class="nvs-card" id="sol-iot" data-nvs-open="nvs-d-iot" aria-haspopup="dialog" aria-controls="nvs-d-iot">
+          <span class="nvs-card__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-iot"/></svg></span>
+          <span class="nv-go" aria-hidden="true"><svg><use href="#nvs-i-go"/></svg></span>
+          <span class="nvs-card__t">IoT y espacios inteligentes</span>
+          <svg class="nvs-card__mark" aria-hidden="true"><use href="#nvs-i-iot"/></svg>
+        </button>
+      </li>
+      <li data-nv-in style="--i:5">
+        <a class="nvs-card nvs-card--ask" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20no%20s%C3%A9%20por%20d%C3%B3nde%20empezar%3A%20les%20cuento%20mi%20caso." target="_blank" rel="noopener" data-nvs-wa="ask">
+          <span class="nvs-card__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-ask"/></svg></span>
+          <span class="nv-go" aria-hidden="true"><svg><use href="#nvs-i-go"/></svg></span>
+          <span class="nvs-card__t">¿No sabés por dónde empezar?<small>Contanos tu caso<span class="nv-sr"> por WhatsApp (abre en otra pestaña)</span></small></span>
+        </a>
+      </li>
+    </ul>
+
+    <!-- Hojas de detalle: una por solucion. Movil: hoja que sube desde abajo; >=768: panel centrado. -->
+    <dialog class="nvs-sheet" id="nvs-d-seguridad" aria-labelledby="nvs-d-seguridad-t" aria-describedby="nvs-d-seguridad-p">
+      <div class="nvs-sheet__in">
+        <span class="nvs-sheet__grab" aria-hidden="true"></span>
+        <div class="nvs-sheet__top">
+          <span class="nvs-sheet__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-cctv"/></svg></span>
+          <div class="nvs-sheet__tt"><span class="nv-eyebrow">Solución</span><h3 id="nvs-d-seguridad-t">Videovigilancia (CCTV)</h3></div>
+          <button type="button" class="nvs-x" data-nvs-close aria-label="Cerrar"><svg aria-hidden="true"><use href="#nvs-i-x"/></svg></button>
+        </div>
+        <p class="nvs-sheet__p" id="nvs-d-seguridad-p">Mirá lo que pasa en tu casa, comercio o comunidad, en vivo y grabado, desde el celular.</p>
+        <ul class="nvs-pts">
+          <li>Cámaras Hikvision: somos distribuidor autorizado</li>
+          <li>Videoporteros y alarmas</li>
+          <li>Monitoreo desde el celular</li>
+          <li>Mantenimiento preventivo y correctivo</li>
+        </ul>
+        <div class="nvs-sheet__act">
+          <a class="nv-btn nv-btn--line" href="https://tienda.crimsoncr.com/c/camaras" data-nvs-cat="/c/camaras"><svg aria-hidden="true"><use href="#nvs-i-tienda"/></svg>Ver equipos</a>
+          <a class="nv-btn nv-btn--red" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20Videovigilancia%20(CCTV)." target="_blank" rel="noopener" data-nvs-wa="Videovigilancia (CCTV)"><svg aria-hidden="true"><use href="#nvs-i-wa"/></svg>Cotizar<span class="nv-sr"> por WhatsApp (abre en otra pestaña)</span></a>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="nvs-sheet" id="nvs-d-acceso" aria-labelledby="nvs-d-acceso-t" aria-describedby="nvs-d-acceso-p">
+      <div class="nvs-sheet__in">
+        <span class="nvs-sheet__grab" aria-hidden="true"></span>
+        <div class="nvs-sheet__top">
+          <span class="nvs-sheet__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-acceso"/></svg></span>
+          <div class="nvs-sheet__tt"><span class="nv-eyebrow">Solución</span><h3 id="nvs-d-acceso-t">Control de acceso y asistencia</h3></div>
+          <button type="button" class="nvs-x" data-nvs-close aria-label="Cerrar"><svg aria-hidden="true"><use href="#nvs-i-x"/></svg></button>
+        </div>
+        <p class="nvs-sheet__p" id="nvs-d-acceso-p">Decidí quién entra y cuándo, y llevá la asistencia del personal sin papeles.</p>
+        <ul class="nvs-pts">
+          <li>Lectores de rostro y de tarjeta</li>
+          <li>Registro de asistencia del personal</li>
+          <li>Gestión de visitantes y residentes</li>
+          <li>Accesos integrados con las cámaras</li>
+        </ul>
+        <div class="nvs-sheet__act">
+          <a class="nv-btn nv-btn--line" href="https://tienda.crimsoncr.com/c/control-de-acceso" data-nvs-cat="/c/control-de-acceso"><svg aria-hidden="true"><use href="#nvs-i-tienda"/></svg>Ver equipos</a>
+          <a class="nv-btn nv-btn--red" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20Control%20de%20acceso%20y%20asistencia." target="_blank" rel="noopener" data-nvs-wa="Control de acceso y asistencia"><svg aria-hidden="true"><use href="#nvs-i-wa"/></svg>Cotizar<span class="nv-sr"> por WhatsApp (abre en otra pestaña)</span></a>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="nvs-sheet" id="nvs-d-redes" aria-labelledby="nvs-d-redes-t" aria-describedby="nvs-d-redes-p">
+      <div class="nvs-sheet__in">
+        <span class="nvs-sheet__grab" aria-hidden="true"></span>
+        <div class="nvs-sheet__top">
+          <span class="nvs-sheet__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-redes"/></svg></span>
+          <div class="nvs-sheet__tt"><span class="nv-eyebrow">Solución</span><h3 id="nvs-d-redes-t">Redes, Wi-Fi y conectividad</h3></div>
+          <button type="button" class="nvs-x" data-nvs-close aria-label="Cerrar"><svg aria-hidden="true"><use href="#nvs-i-x"/></svg></button>
+        </div>
+        <p class="nvs-sheet__p" id="nvs-d-redes-p">Internet estable en cada rincón, para trabajar sin cortes.</p>
+        <ul class="nvs-pts">
+          <li>Redes empresariales y Wi-Fi corporativo</li>
+          <li>Enlaces inalámbricos y fibra óptica</li>
+          <li>Cableado estructurado</li>
+          <li>UPS y respaldo de energía</li>
+        </ul>
+        <div class="nvs-sheet__act">
+          <a class="nv-btn nv-btn--line" href="https://tienda.crimsoncr.com/c/redes-y-conectividad" data-nvs-cat="/c/redes-y-conectividad"><svg aria-hidden="true"><use href="#nvs-i-tienda"/></svg>Ver equipos</a>
+          <a class="nv-btn nv-btn--red" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20Redes%2C%20Wi-Fi%20y%20conectividad." target="_blank" rel="noopener" data-nvs-wa="Redes, Wi-Fi y conectividad"><svg aria-hidden="true"><use href="#nvs-i-wa"/></svg>Cotizar<span class="nv-sr"> por WhatsApp (abre en otra pestaña)</span></a>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="nvs-sheet" id="nvs-d-software" aria-labelledby="nvs-d-software-t" aria-describedby="nvs-d-software-p">
+      <div class="nvs-sheet__in">
+        <span class="nvs-sheet__grab" aria-hidden="true"></span>
+        <div class="nvs-sheet__top">
+          <span class="nvs-sheet__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-soft"/></svg></span>
+          <div class="nvs-sheet__tt"><span class="nv-eyebrow">Solución</span><h3 id="nvs-d-software-t">IA y software a la medida</h3></div>
+          <button type="button" class="nvs-x" data-nvs-close aria-label="Cerrar"><svg aria-hidden="true"><use href="#nvs-i-x"/></svg></button>
+        </div>
+        <p class="nvs-sheet__p" id="nvs-d-software-p">Convertimos los datos de tu operación en tableros, alertas y apps que ahorran tiempo.</p>
+        <ul class="nvs-pts">
+          <li>Tableros de operación (Power BI)</li>
+          <li>Reportes ejecutivos automáticos</li>
+          <li>Automatización de procesos y alertas</li>
+          <li>Datos de accesos, cámaras y sistemas en un solo lugar</li>
+          <li>Software y apps a la medida</li>
+        </ul>
+        <div class="nvs-sheet__act">
+          <a class="nv-btn nv-btn--red" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20IA%20y%20software%20a%20la%20medida." target="_blank" rel="noopener" data-nvs-wa="IA y software a la medida"><svg aria-hidden="true"><use href="#nvs-i-wa"/></svg>Cotizar<span class="nv-sr"> por WhatsApp (abre en otra pestaña)</span></a>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="nvs-sheet" id="nvs-d-iot" aria-labelledby="nvs-d-iot-t" aria-describedby="nvs-d-iot-p">
+      <div class="nvs-sheet__in">
+        <span class="nvs-sheet__grab" aria-hidden="true"></span>
+        <div class="nvs-sheet__top">
+          <span class="nvs-sheet__ico"><svg class="nv-ico" aria-hidden="true"><use href="#nvs-i-iot"/></svg></span>
+          <div class="nvs-sheet__tt"><span class="nv-eyebrow">Solución</span><h3 id="nvs-d-iot-t">IoT y espacios inteligentes</h3></div>
+          <button type="button" class="nvs-x" data-nvs-close aria-label="Cerrar"><svg aria-hidden="true"><use href="#nvs-i-x"/></svg></button>
+        </div>
+        <p class="nvs-sheet__p" id="nvs-d-iot-p">Tu casa, oficina o condominio conectados: se manejan desde el celular y avisan solos.</p>
+        <ul class="nvs-pts">
+          <li>Enchufes y equipos inteligentes con control por voz</li>
+          <li>Reservas de áreas comunes y avisos a residentes</li>
+          <li>Plataforma Nodo Latam para comunidades</li>
+          <li>Accesos y cámaras integrados</li>
+        </ul>
+        <div class="nvs-sheet__act">
+          <a class="nv-btn nv-btn--line" href="https://tienda.crimsoncr.com/c/smart-home" data-nvs-cat="/c/smart-home"><svg aria-hidden="true"><use href="#nvs-i-tienda"/></svg>Ver equipos</a>
+          <a class="nv-btn nv-btn--red" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20IoT%20y%20espacios%20inteligentes." target="_blank" rel="noopener" data-nvs-wa="IoT y espacios inteligentes"><svg aria-hidden="true"><use href="#nvs-i-wa"/></svg>Cotizar<span class="nv-sr"> por WhatsApp (abre en otra pestaña)</span></a>
+        </div>
+      </div>
+    </dialog>
+  </div>
+</section>
+
+<!-- COMO TRABAJAMOS, version minima: cuatro nodos en una linea y una senal que la recorre (la red de la marca).
+     Movil: vertical. La senal se pausa fuera de pantalla y no existe con reduced-motion. -->
+<section id="proceso" class="nv-sec nvs-proc" aria-labelledby="nvs-proc-h">
+  <div class="nv-wrap">
+    <header class="nv-head" data-nv-in>
+      <div class="nv-head__t">
+        <h2 id="nvs-proc-h">Cómo trabajamos</h2>
+        <p>Un solo responsable, de principio a fin</p>
+      </div>
+    </header>
+    <div class="nvs-ruta" data-nvs-ruta>
+      <span class="nvs-ruta__track" aria-hidden="true"><span class="nvs-ruta__sig"><i></i></span></span>
+      <ol class="nvs-ruta__list">
+        <li class="nvs-ruta__step" data-nv-in style="--i:0;--at:.04">
+          <span class="nvs-ruta__node"><svg class="nv-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></span>
+          <span class="nvs-ruta__txt"><b>Diagnóstico</b><span>Visitamos y entendemos qué resolver.</span></span>
+        </li>
+        <li class="nvs-ruta__step" data-nv-in style="--i:1;--at:.28">
+          <span class="nvs-ruta__node"><svg class="nv-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h7M9 16h5"/></svg></span>
+          <span class="nvs-ruta__txt"><b>Propuesta</b><span>Cotización clara, con plazos.</span></span>
+        </li>
+        <li class="nvs-ruta__step" data-nv-in style="--i:2;--at:.52">
+          <span class="nvs-ruta__node"><svg class="nv-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-.5-.5-2.5z"/></svg></span>
+          <span class="nvs-ruta__txt"><b>Implementación</b><span>Instalamos y te enseñamos a usarlo.</span></span>
+        </li>
+        <li class="nvs-ruta__step" data-nv-in style="--i:3;--at:.76">
+          <span class="nvs-ruta__node"><svg class="nv-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></span>
+          <span class="nvs-ruta__txt"><b>Respaldo</b><span>Garantía y soporte técnico local.</span></span>
+        </li>
+      </ol>
+    </div>
+  </div>
+</section>

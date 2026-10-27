@@ -1,0 +1,219 @@
+/* =====================================================================
+   3 · Soluciones (prefijo nvs-). Tarjetas simples + hoja de detalle (<dialog>) + "Como trabajamos" minimo.
+   Solo tokens de base.css. Movimiento: transform/opacity; nada se mueve con reduced-motion.
+   ===================================================================== */
+
+/* ---------- tarjetas ---------- */
+.nvs-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.nvs-grid > li{display:flex;min-width:0}
+.nvs-card{position:relative;isolation:isolate;display:grid;grid-template-columns:auto 1fr auto;grid-template-rows:auto 1fr;align-items:start;
+  gap:18px 0;width:100%;min-height:142px;padding:16px;margin:0;text-align:left;cursor:pointer;overflow:hidden;
+  background:var(--nv-surface);border:1px solid var(--nv-line);border-radius:var(--nv-r);color:var(--nv-text);font:inherit;
+  scroll-margin:96px 0 32px;touch-action:manipulation;
+  transition:transform var(--nv-dur) var(--nv-ease),border-color var(--nv-dur-micro),background var(--nv-dur-micro)}
+.nvs-card:active{transform:scale(.98)}
+.nvs-card__ico{grid-column:1;grid-row:1;display:grid;place-items:center;width:46px;height:46px;border-radius:14px;
+  background:var(--nv-red-soft);color:var(--nv-red-2)}
+.nvs-card .nv-go{grid-column:3;grid-row:1}
+.nvs-card .nv-go svg{transition:transform var(--nv-dur-micro) var(--nv-ease)}
+.nvs-card__t{grid-column:1 / -1;grid-row:2;align-self:end;font-size:15px;font-weight:700;line-height:1.25;letter-spacing:-.005em;text-wrap:balance}
+.nvs-card__t small{display:block;margin-top:6px;font-size:13px;font-weight:700;color:var(--nv-red-2)}
+/* sello grande del icono, en trazo fino, solo como profundidad (tableta y escritorio) */
+.nvs-card__mark{display:none}
+/* brillo rojo que aparece al pasar (solo opacidad) */
+.nvs-card::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:inherit;opacity:0;pointer-events:none;
+  background:radial-gradient(120% 90% at 0% 0%,var(--nv-red-soft),transparent 60%);transition:opacity var(--nv-dur) var(--nv-ease)}
+/* anillo de resaltado al llegar por el ancla (#sol-x) */
+.nvs-card::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;
+  box-shadow:inset 0 0 0 2px var(--nv-red),0 0 0 4px var(--nv-red-soft)}
+.nvs-card.is-hl::after{animation:nvsHl 2.4s var(--nv-ease) both}
+.nvs-card.is-hl::before{opacity:1}
+@keyframes nvsHl{0%{opacity:0}12%{opacity:1}40%{opacity:.35}60%{opacity:1}100%{opacity:0}}
+
+/* la sexta: "No sabes por donde empezar" (completa la grilla, va directo a WhatsApp) */
+.nvs-card--ask{background:transparent;border:1px dashed var(--nv-line-2)}
+.nvs-card--ask .nvs-card__ico{background:transparent;box-shadow:inset 0 0 0 1.5px var(--nv-line-2);color:var(--nv-text)}
+
+@media (hover:hover){
+  .nvs-card:hover{transform:translateY(-3px);border-color:rgba(226,35,58,.4);background:var(--nv-surface-2)}
+  .nvs-card--ask:hover{background:transparent}
+  .nvs-card:hover::before{opacity:1}
+  .nvs-card:hover .nv-go svg{transform:translateX(3px)}
+  .nvs-card:hover .nvs-card__mark{opacity:.09;transform:translate(-6px,-6px)}
+}
+
+@media (min-width:768px){
+  .nvs-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+  .nvs-card{min-height:176px;padding:22px;gap:24px 0}
+  .nvs-card__ico{width:52px;height:52px;border-radius:16px}
+  .nvs-card__t{font-size:18px;max-width:16ch}
+  .nvs-card__t small{font-size:14px}
+  .nvs-card__mark{display:block;position:absolute;z-index:-1;right:-22px;bottom:-26px;width:132px;height:132px;opacity:.04;
+    fill:none;stroke:var(--nv-text);stroke-width:.9;stroke-linecap:round;stroke-linejoin:round;
+    transition:opacity var(--nv-dur) var(--nv-ease),transform var(--nv-dur) var(--nv-ease)}
+}
+@media (min-width:1024px){
+  .nvs-grid{gap:20px}
+  .nvs-card{min-height:212px;padding:28px}
+  .nvs-card__ico{width:58px;height:58px;border-radius:18px}
+  .nvs-card__ico .nv-ico{width:30px;height:30px}
+  .nvs-card__t{font-size:21px;letter-spacing:-.01em}
+  .nvs-card .nv-go{width:40px;height:40px}
+  .nvs-card__mark{width:168px;height:168px;right:-28px;bottom:-34px}
+}
+
+/* ---------- hoja de detalle (<dialog>) ---------- */
+.nvs-sheet{position:fixed;inset:0;margin:auto 0 0;padding:0;border:0;width:100%;max-width:100%;max-height:min(90svh,720px);
+  overflow:auto;overscroll-behavior:contain;background:var(--nv-bg-2);color:var(--nv-text);font-family:var(--nv-font);
+  border-radius:24px 24px 0 0;box-shadow:0 -1px 0 var(--nv-line-2),0 -30px 60px -20px rgba(0,0,0,.7);
+  transform:translateY(100%);transition:transform var(--nv-dur) var(--nv-ease)}
+.nvs-sheet:not([open]){display:none}
+.nvs-sheet.is-open{transform:none}
+.nvs-sheet.is-drag{transition:none}
+.nvs-sheet::backdrop{background:rgba(5,4,8,.72);opacity:0;transition:opacity var(--nv-dur) var(--nv-ease)}
+.nvs-sheet.is-open::backdrop{opacity:1}
+.nvs-sheet__in{position:relative;padding:8px var(--nv-pad) max(22px,env(safe-area-inset-bottom))}
+/* red de nodos de fondo, quieta y casi invisible (identidad, no protagonista) */
+.nvs-sheet__in::before{content:"";position:absolute;top:0;right:0;width:220px;height:160px;pointer-events:none;opacity:.5;
+  background:
+    radial-gradient(circle at 70% 30%,var(--nv-red) 0 2.5px,transparent 3.5px),
+    radial-gradient(circle at 40% 55%,var(--nv-line-2) 0 2px,transparent 3px),
+    radial-gradient(circle at 88% 70%,var(--nv-line-2) 0 2px,transparent 3px),
+    linear-gradient(140deg,transparent 47%,var(--nv-line) 47.5% 48.5%,transparent 49%),
+    radial-gradient(70% 80% at 100% 0%,var(--nv-red-soft),transparent 70%);
+  -webkit-mask:linear-gradient(to left,#000,transparent);mask:linear-gradient(to left,#000,transparent)}
+.nvs-sheet__grab{display:block;width:44px;height:5px;margin:4px auto 10px;border-radius:5px;background:var(--nv-line-2)}
+.nvs-sheet__top{position:relative;display:flex;align-items:center;gap:14px;padding:6px 0 0;touch-action:none}
+.nvs-sheet__ico{display:grid;place-items:center;flex:none;width:52px;height:52px;border-radius:16px;background:var(--nv-red-soft);color:var(--nv-red-2)}
+.nvs-sheet__tt{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}
+.nvs-sheet__tt .nv-eyebrow{font-size:10px}
+.nvs-sheet h3{font-size:21px;line-height:1.15;letter-spacing:-.01em;font-weight:700;margin:0}
+.nvs-x{display:grid;place-items:center;flex:none;align-self:flex-start;width:44px;height:44px;margin:-2px -8px 0 0;padding:0;border:0;border-radius:50%;
+  background:transparent;color:var(--nv-text-2);cursor:pointer;transition:background var(--nv-dur-micro),color var(--nv-dur-micro)}
+.nvs-x svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+@media (hover:hover){.nvs-x:hover{background:var(--nv-surface-2);color:var(--nv-text)}}
+.nvs-sheet__p{position:relative;margin:18px 0 0;font-size:16px;line-height:1.5;color:var(--nv-text-2);max-width:44ch}
+
+/* puntos como una ruta de nodos: punto rojo + linea fina que los une */
+.nvs-pts{position:relative;margin:18px 0 0;padding:0;list-style:none;display:flex;flex-direction:column}
+.nvs-pts li{position:relative;padding:9px 0 9px 26px;font-size:15px;line-height:1.4;color:var(--nv-text)}
+.nvs-pts li::before{content:"";position:absolute;left:4px;top:15px;width:8px;height:8px;border-radius:50%;
+  background:var(--nv-bg-2);box-shadow:inset 0 0 0 2px var(--nv-red)}
+.nvs-pts li:first-child::before{background:var(--nv-red);box-shadow:0 0 0 4px var(--nv-red-soft)}
+.nvs-pts li:not(:last-child)::after{content:"";position:absolute;left:7.5px;top:25px;bottom:-13px;width:1px;background:var(--nv-line-2)}
+.nvs-sheet__by{margin:10px 0 0;font-size:13px;color:var(--nv-text-3)}
+.nvs-sheet__act{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:22px 0 0}
+.nvs-sheet__act .nv-btn{width:100%;padding:14px 12px}
+
+@media (min-width:768px){
+  .nvs-sheet{margin:auto;width:min(560px,calc(100% - 64px));max-height:min(86svh,680px);border-radius:24px;
+    box-shadow:0 0 0 1px var(--nv-line-2),0 40px 90px -30px rgba(0,0,0,.85);
+    opacity:0;transform:translateY(14px) scale(.98);transition:transform var(--nv-dur) var(--nv-ease),opacity var(--nv-dur-micro) linear}
+  .nvs-sheet.is-open{opacity:1;transform:none}
+  .nvs-sheet__in{padding:28px 32px 32px}
+  .nvs-sheet__grab{display:none}
+  .nvs-sheet__top{padding:0;touch-action:auto}
+  .nvs-sheet__ico{width:60px;height:60px;border-radius:18px}
+  .nvs-sheet__ico .nv-ico{width:30px;height:30px}
+  .nvs-sheet h3{font-size:25px}
+  .nvs-x{margin:-10px -14px 0 0}
+  .nvs-sheet__p{font-size:17px}
+  .nvs-pts li{font-size:16px}
+  .nvs-sheet__act{display:flex;justify-content:flex-start}
+  .nvs-sheet__act .nv-btn{width:auto;padding:14px 24px}
+  .nvs-sheet__act .nv-btn--red{order:-1}
+}
+/* bloqueo del fondo mientras la hoja esta abierta */
+html.nvs-lock,html.nvs-lock body{overflow:hidden}
+
+/* ---------- Como trabajamos (minimo) ---------- */
+.nvs-ruta{position:relative;--node:46px;--gap:14px;--t:7s}
+.nvs-ruta__list{position:relative;z-index:1;display:grid;grid-template-columns:1fr;grid-auto-rows:1fr;gap:var(--gap);margin:0;padding:0;list-style:none}
+.nvs-ruta__step{display:flex;align-items:flex-start;gap:16px;min-width:0}
+.nvs-ruta__node{position:relative;flex:none;display:grid;place-items:center;width:var(--node);height:var(--node);border-radius:50%;
+  background:var(--nv-surface);box-shadow:inset 0 0 0 1px var(--nv-line-2);color:var(--nv-text)}
+.nvs-ruta__node .nv-ico{position:relative;z-index:1;width:22px;height:22px}
+/* encendido del nodo cuando llega la senal: una capa roja (opacidad) y una onda (transform) */
+.nvs-ruta__node::before,.nvs-ruta__node::after{content:"";position:absolute;inset:0;border-radius:50%;opacity:0;pointer-events:none}
+.nvs-ruta__node::before{background:var(--nv-red-soft);box-shadow:inset 0 0 0 1.5px var(--nv-red)}
+.nvs-ruta__node::after{box-shadow:0 0 0 1.5px var(--nv-red)}
+.nvs-ruta__txt{display:flex;flex-direction:column;gap:2px;padding-top:2px;min-width:0}
+.nvs-ruta__txt b{font-size:16px;line-height:1.3}
+.nvs-ruta__txt span{font-size:14px;line-height:1.4;color:var(--nv-text-2)}
+
+/* la linea: une el centro del primer nodo con el del ultimo (filas iguales => 3/4 de (alto + gap)) */
+.nvs-ruta__track{position:absolute;z-index:0;left:calc(var(--node) / 2 - .5px);top:calc(var(--node) / 2);width:1px;
+  height:calc((100% + var(--gap)) * .75);background:linear-gradient(to bottom,var(--nv-red),var(--nv-line-2) 30%,var(--nv-line-2))}
+/* la senal: un contenedor del largo de la linea que se traslada; el punto vive en su extremo */
+.nvs-ruta__sig{position:absolute;left:0;top:0;width:1px;height:100%;transform:translateY(-100%);opacity:0}
+.nvs-ruta__sig i{position:absolute;left:50%;bottom:0;width:9px;height:9px;margin:0 0 -4.5px -4.5px;border-radius:50%;background:#fff;
+  box-shadow:0 0 0 3px var(--nv-red-soft),0 0 14px 2px rgba(226,35,58,.85)}
+.nvs-ruta__sig i::before{content:"";position:absolute;left:3.5px;bottom:4.5px;width:2px;height:46px;border-radius:2px;
+  background:linear-gradient(to top,var(--nv-red),transparent)}
+
+@media (min-width:768px){
+  .nvs-ruta{--node:56px;--gap:20px}
+  .nvs-ruta__list{grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:auto}
+  .nvs-ruta__step{flex-direction:column;align-items:center;text-align:center;gap:16px}
+  .nvs-ruta__node .nv-ico{width:24px;height:24px}
+  .nvs-ruta__txt{align-items:center}
+  .nvs-ruta__txt b{font-size:17px}
+  .nvs-ruta__txt span{max-width:22ch}
+  /* columnas iguales: centro de la 1.a en (ancho - 3 gaps) / 8; largo = 3/4 de (ancho + gap) */
+  .nvs-ruta__track{top:calc(var(--node) / 2 - .5px);left:calc((100% - 3 * var(--gap)) / 8);width:calc((100% + var(--gap)) * .75);height:1px;
+    background:linear-gradient(to right,var(--nv-red),var(--nv-line-2) 30%,var(--nv-line-2))}
+  .nvs-ruta__sig{width:100%;height:1px;transform:translateX(-100%)}
+  .nvs-ruta__sig i{left:auto;right:0;top:50%;bottom:auto;margin:-4.5px -4.5px 0 0}
+  .nvs-ruta__sig i::before{left:auto;right:4.5px;bottom:auto;top:3.5px;width:56px;height:2px;background:linear-gradient(to left,var(--nv-red),transparent)}
+}
+@media (min-width:1024px){
+  .nvs-ruta{--node:64px;--gap:24px}
+  .nvs-ruta__node .nv-ico{width:26px;height:26px}
+  .nvs-ruta__txt b{font-size:18px}
+  .nvs-ruta__txt span{font-size:15px}
+}
+
+/* movimiento: declarado siempre (asi las piezas van sincronizadas) y pausado hasta que la ruta esta en pantalla */
+@media (prefers-reduced-motion:no-preference){
+  .nvs-ruta__sig{animation:nvsSigY var(--t) infinite paused}
+  .nvs-ruta__node::before{animation:nvsLit var(--t) linear infinite paused;animation-delay:calc(var(--at) * var(--t))}
+  .nvs-ruta__node::after{animation:nvsRing var(--t) var(--nv-ease) infinite paused;animation-delay:calc(var(--at) * var(--t))}
+  .nvs-ruta.is-run .nvs-ruta__sig,.nvs-ruta.is-run .nvs-ruta__node::before,.nvs-ruta.is-run .nvs-ruta__node::after{animation-play-state:running}
+}
+@media (prefers-reduced-motion:no-preference) and (min-width:768px){
+  .nvs-ruta__sig{animation-name:nvsSigX}
+}
+/* llega a cada nodo en 4 %, 28 %, 52 % y 76 % del ciclo (= --at de cada paso) y descansa un momento */
+@keyframes nvsSigY{
+  0%{transform:translateY(-100%);opacity:0;animation-timing-function:ease-out}
+  4%{transform:translateY(-100%);opacity:1}
+  12%{transform:translateY(-100%);animation-timing-function:cubic-bezier(.65,0,.35,1)}
+  28%{transform:translateY(-66.667%)}
+  36%{transform:translateY(-66.667%);animation-timing-function:cubic-bezier(.65,0,.35,1)}
+  52%{transform:translateY(-33.333%)}
+  60%{transform:translateY(-33.333%);animation-timing-function:cubic-bezier(.65,0,.35,1)}
+  76%{transform:translateY(0);opacity:1}
+  84%{transform:translateY(0);opacity:1}
+  92%,100%{transform:translateY(0);opacity:0}
+}
+@keyframes nvsSigX{
+  0%{transform:translateX(-100%);opacity:0;animation-timing-function:ease-out}
+  4%{transform:translateX(-100%);opacity:1}
+  12%{transform:translateX(-100%);animation-timing-function:cubic-bezier(.65,0,.35,1)}
+  28%{transform:translateX(-66.667%)}
+  36%{transform:translateX(-66.667%);animation-timing-function:cubic-bezier(.65,0,.35,1)}
+  52%{transform:translateX(-33.333%)}
+  60%{transform:translateX(-33.333%);animation-timing-function:cubic-bezier(.65,0,.35,1)}
+  76%{transform:translateX(0);opacity:1}
+  84%{transform:translateX(0);opacity:1}
+  92%,100%{transform:translateX(0);opacity:0}
+}
+@keyframes nvsLit{0%{opacity:0}2%{opacity:1}12%{opacity:1}22%,100%{opacity:0}}
+@keyframes nvsRing{0%{opacity:.8;transform:scale(1)}16%,100%{opacity:0;transform:scale(1.6)}}
+
+@media (prefers-reduced-motion:reduce){
+  .nvs-card,.nvs-card::before,.nvs-card .nv-go svg,.nvs-card__mark,.nvs-sheet,.nvs-sheet::backdrop{transition:none}
+  .nvs-card.is-hl::after{animation:none;opacity:1}
+  .nvs-card:active{transform:none}
+  .nvs-ruta__sig{display:none}
+}

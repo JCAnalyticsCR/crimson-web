@@ -1,0 +1,172 @@
+/* =====================================================================
+   2 · TIENDA (prefijo nvt-) — accesos rapidos + tienda.
+   Movil: fila de 4 accesos unida por una linea de red (un pulso rojo la recorre), tarjeta de tienda apilada,
+   destacados en carrusel con scroll-snap. Tableta: la tarjeta se parte en dos. Escritorio: accesos en fila
+   horizontal con flecha, destacados en fila de 4.
+   ===================================================================== */
+
+/* ---------- 1 · Accesos rapidos (pegados a la portada) ---------- */
+.nvt-quick{position:relative;z-index:3;margin-top:var(--nvt-lap,16px)}
+.nvt-quick__row{position:relative;
+  padding:14px 4px 12px;background:var(--nv-surface);border:1px solid var(--nv-line-2);border-radius:20px;box-shadow:var(--nv-shadow)}
+/* la red: una linea que une los 4 iconos y un pulso que la recorre (solo transform) */
+.nvt-quick__row::before{content:"";position:absolute;left:12.5%;right:12.5%;top:38px;height:1px;background:var(--nv-line-2)}
+.nvt-quick__list{position:relative;display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+.nvt-q{position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;min-height:44px;padding:0 2px;text-align:center;border-radius:14px}
+.nvt-q__ico{position:relative;z-index:1;display:grid;place-items:center;width:48px;height:48px;border-radius:14px;
+  background:var(--nv-bg);border:1px solid var(--nv-line-2);color:var(--nv-red-2);
+  transition:background var(--nv-dur-micro),border-color var(--nv-dur-micro),transform var(--nv-dur) var(--nv-ease)}
+.nvt-q__ico .nv-ico{width:26px;height:26px}
+.nvt-q__t{font-size:clamp(11px,3.1vw,13px);line-height:1.25;color:var(--nv-text);letter-spacing:-.005em}
+.nvt-q:active .nvt-q__ico{transform:scale(.94)}
+@media (hover:hover){
+  .nvt-q:hover .nvt-q__ico{background:var(--nv-red-soft);border-color:rgba(226,35,58,.55);transform:translateY(-2px)}
+}
+.nvt-pulse{position:absolute;left:12.5%;right:12.5%;top:37px;height:3px;overflow:hidden;pointer-events:none}
+.nvt-pulse::after{content:"";position:absolute;inset:0;transform:translateX(-100%);
+  background:linear-gradient(90deg,transparent 78%,var(--nv-red-soft) 92%,var(--nv-red) 100%);
+  animation:nvt-run 4.8s cubic-bezier(.45,0,.25,1) infinite;animation-play-state:paused}
+.nvt-quick.is-live .nvt-pulse::after{animation-play-state:running}
+@keyframes nvt-run{0%{transform:translateX(-100%)}70%,100%{transform:translateX(0)}}
+
+@media (min-width:768px){
+  .nvt-quick{--nvt-lap:-36px}
+  .nvt-quick__row{padding:18px 8px 16px}
+  .nvt-q__ico{width:56px;height:56px;border-radius:16px}
+  .nvt-quick__row::before{top:46px}
+  .nvt-pulse{top:45px}
+  .nvt-q__ico .nv-ico{width:28px;height:28px}
+  .nvt-q__t{font-size:14px}
+}
+/* escritorio: cada acceso en horizontal (icono, nombre, flecha), separados por lineas finas */
+@media (min-width:1024px){
+  .nvt-quick{--nvt-lap:-44px}
+  .nvt-quick__row{padding:10px;gap:0}
+  .nvt-quick__row::before,.nvt-pulse{display:none}
+  .nvt-quick__list li+li{border-left:1px solid var(--nv-line)}
+  .nvt-q{flex-direction:row;gap:14px;padding:12px 16px;text-align:left;height:100%;transition:background var(--nv-dur-micro)}
+  .nvt-q__t{flex:1;font-size:15px;font-weight:700}
+}
+@media (min-width:1024px) and (hover:hover){
+  .nvt-q:hover{background:var(--nv-surface-2)}
+}
+
+/* ---------- 2 · Tienda ---------- */
+.nvt-more svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;transition:transform var(--nv-dur-micro) var(--nv-ease)}
+@media (hover:hover){.nvt-more:hover svg{transform:translateX(3px)}}
+
+/* tarjeta protagonista */
+.nvt-feat{position:relative;overflow:hidden;display:grid;gap:24px;padding:26px 20px 20px;
+  background:radial-gradient(120% 70% at 100% 0%,var(--nv-red-soft),transparent 60%),var(--nv-surface)}
+.nvt-feat__net{position:absolute;top:0;right:-24px;width:78%;max-width:440px;height:auto;pointer-events:none;opacity:.55}
+.nvt-feat__net path{fill:none;stroke:var(--nv-line-2);stroke-width:1}
+.nvt-feat__net circle{fill:var(--nv-text-3)}
+.nvt-feat__net .nvt-hot{fill:var(--nv-red);transform-box:fill-box;transform-origin:center}
+.nvt-feat.is-live .nvt-hot{animation:nvt-ping 2.6s var(--nv-ease) infinite}
+@keyframes nvt-ping{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.9);opacity:.45}}
+.nvt-feat__txt{position:relative;display:flex;flex-direction:column;align-items:flex-start}
+.nvt-feat__h{margin-top:14px;font-size:clamp(28px,8vw,44px);line-height:1.06;font-weight:700;letter-spacing:-.02em;max-width:12ch}
+.nvt-feat__h em{font-style:normal;color:var(--nv-red-2)}
+.nvt-brands{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin-top:20px}
+.nvt-brands img{height:16px;width:auto;opacity:.82}
+.nvt-brands__more{font-size:13px;color:var(--nv-text-3)}
+.nvt-feat__cta{margin-top:26px;width:100%}
+
+/* vitrina blanca: productos reales recortados a su silueta, con sombra de piso */
+.nvt-vit{position:relative;border-radius:14px;overflow:hidden;
+  background:linear-gradient(180deg,transparent 58%,rgba(13,12,17,.07)),#fff}
+.nvt-vit__stage{position:relative;aspect-ratio:4/3;width:100%}
+.nvt-pz{position:absolute;display:block}
+.nvt-pz::before{content:"";position:absolute;left:8%;right:8%;bottom:-7px;height:14px;border-radius:50%;
+  background:radial-gradient(closest-side,rgba(13,12,17,.26),transparent)}
+.nvt-pz__c{position:relative;display:block;overflow:hidden;aspect-ratio:var(--w)/var(--h)}
+.nvt-pz__c img{position:absolute;max-width:none;height:auto;mix-blend-mode:multiply;
+  width:calc(100% * 800 / var(--w));left:calc(-100% * var(--x) / var(--w));top:calc(-100% * var(--y) / var(--h))}
+.nvt-pz--acc{left:6%;bottom:28%;width:16%}
+.nvt-pz--cam{left:24%;bottom:12%;width:45%}
+.nvt-pz--ups{left:71%;bottom:26%;width:25%}
+.nvt-pz--rtr{left:4%;bottom:5%;width:31%}
+.nvt-pz--sw{left:59%;bottom:7%;width:37%}
+/* entrada: los productos se asientan uno tras otro cuando la tarjeta aparece */
+.js .nvt-pz{opacity:0;transform:translateY(22px) scale(.96);
+  transition:opacity var(--nv-dur-scene) var(--nv-ease),transform 900ms var(--nv-ease);transition-delay:calc(240ms + var(--o,0) * 90ms)}
+.js .nvt-feat.is-in .nvt-pz{opacity:1;transform:none}
+@media (hover:hover){
+  .nvt-feat .nvt-pz--cam{transition:opacity var(--nv-dur-scene) var(--nv-ease),transform var(--nv-dur) var(--nv-ease)}
+  .js .nvt-feat.is-in:hover .nvt-pz--cam{transform:translateY(-6px);transition-delay:0s}
+}
+
+@media (min-width:768px){
+  .nvt-feat{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:center;gap:32px;padding:36px}
+  .nvt-feat__net{right:auto;left:-40px;top:auto;bottom:-20px;width:60%}
+  .nvt-feat__cta{width:auto}
+  .nvt-brands img{height:15px}
+}
+@media (min-width:1024px){
+  .nvt-feat{grid-template-columns:minmax(0,5fr) minmax(0,6fr);padding:48px 48px 48px 56px;gap:56px}
+  .nvt-brands{gap:10px 20px}
+  .nvt-vit{border-radius:16px}
+  .nvt-brands img{height:20px}
+}
+
+/* destacados */
+.nvt-dest{margin-top:40px}
+.nvt-dest__h{font-size:17px;font-weight:700;margin-bottom:14px;color:var(--nv-text)}
+.nvt-rail{display:grid;grid-auto-flow:column;grid-auto-columns:60%;gap:12px;
+  margin:0 calc(-1 * var(--nv-pad));padding:0 var(--nv-pad) 6px;scroll-padding-inline:var(--nv-pad);
+  overflow-x:auto;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.nvt-rail::-webkit-scrollbar{display:none}
+.nvt-rail>li{scroll-snap-align:start;min-width:0}
+.nvt-p{display:flex;flex-direction:column;height:100%;overflow:hidden;background:var(--nv-surface);border:1px solid var(--nv-line);border-radius:var(--nv-r);
+  transition:transform var(--nv-dur) var(--nv-ease),border-color var(--nv-dur-micro)}
+.nvt-p__img{display:block;background:#fff;overflow:hidden}
+.nvt-p__img img{width:100%;aspect-ratio:1;object-fit:contain;padding:14px;transition:transform var(--nv-dur-scene) var(--nv-ease)}
+.nvt-p__b{display:flex;flex-direction:column;flex:1;gap:4px;padding:14px 14px 14px}
+.nvt-p__ben{font-size:12.5px;line-height:1.3;color:var(--nv-text-2)}
+.nvt-p__n{font-size:15px;font-weight:700;line-height:1.25}
+.nvt-p__foot{display:flex;align-items:flex-end;justify-content:space-between;gap:8px;margin-top:auto;padding-top:12px}
+.nvt-p__pr{font-size:14px;color:var(--nv-text-2);line-height:1.2}
+.nvt-p__pr.is-live{font-size:18px;font-weight:700;color:var(--nv-text);animation:nvt-fade var(--nv-dur) var(--nv-ease)}
+.nvt-p__pr small{display:block;margin-top:3px;font-size:11px;font-weight:400;color:var(--nv-text-3)}
+@keyframes nvt-fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.nvt-p .nv-go{transition:background var(--nv-dur-micro),color var(--nv-dur-micro)}
+@media (hover:hover){
+  .nvt-p:hover{transform:translateY(-4px);border-color:var(--nv-line-2)}
+  .nvt-p:hover .nvt-p__img img{transform:scale(1.05)}
+  .nvt-p:hover .nv-go{background:var(--nv-red);color:#fff}
+}
+@media (min-width:600px){.nvt-rail{grid-auto-columns:40%}}
+@media (min-width:768px){
+  .nvt-dest{margin-top:48px}
+  .nvt-rail{grid-auto-flow:row;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:0;padding:0;overflow:visible}
+  .nvt-p__n{min-height:2.5em}
+}
+@media (min-width:1024px){
+  .nvt-dest__h{font-size:19px;margin-bottom:18px}
+  .nvt-rail{gap:20px}
+  .nvt-p__b{padding:18px}
+  .nvt-p__img img{padding:22px}
+  .nvt-p__n{font-size:16px}
+}
+
+/* armá tu sistema: acceso discreto pero visible */
+.nvt-kit{display:flex;align-items:center;gap:14px;margin-top:16px;padding:14px 16px;min-height:64px;
+  border:1px dashed var(--nv-line-2);border-radius:var(--nv-r);transition:background var(--nv-dur-micro),border-color var(--nv-dur-micro)}
+.nvt-kit__ico{display:grid;place-items:center;width:44px;height:44px;flex:none;border-radius:12px;background:var(--nv-red-soft);color:var(--nv-red-2)}
+.nvt-kit__ico .nv-ico{width:24px;height:24px}
+.nvt-kit__t{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.nvt-kit__t strong{font-size:15px}
+.nvt-kit__t span{font-size:13px;color:var(--nv-text-2)}
+@media (hover:hover){
+  .nvt-kit:hover{background:var(--nv-surface);border-color:rgba(226,35,58,.5)}
+  .nvt-kit:hover .nv-go{background:var(--nv-red);color:#fff}
+}
+@media (min-width:768px){.nvt-kit{margin-top:20px;padding:16px 20px}}
+
+@media (prefers-reduced-motion:reduce){
+  .nvt-pulse,.nvt-feat__net .nvt-hot{animation:none!important}
+  .nvt-pulse{display:none}
+  .js .nvt-pz{opacity:1;transform:none;transition:none}
+  .nvt-p,.nvt-p__img img,.nvt-q__ico{transition:none}
+  .nvt-p__pr.is-live{animation:none}
+}

@@ -1,0 +1,129 @@
+<!-- 1 · PORTADA: encabezado fijo + menu movil + portada. Abre <main id="contenido"> (lo cierra 5-cierre).
+     Foto: videovigilancia comunitaria instalada por Crimson (galeria/comunidad-rotulo-noche), al anochecer.
+     Movil: la foto de fondo a pantalla completa y el texto abajo (titulo + bajada + los dos botones en 375x812).
+     Escritorio: texto a la izquierda, foto a sangre a la derecha con marco de camara; red de nodos muy tenue encima. -->
+<header class="nvh-bar" id="nvhBar">
+  <div class="nvh-bar__in">
+    <a class="nvh-logo" href="#contenido" aria-label="Crimson Consulting, inicio">
+      <img src="../assets/img/logo.png" alt="Crimson Consulting" width="1024" height="237">
+    </a>
+
+    <nav class="nvh-nav" aria-label="Principal">
+      <a href="#soluciones">Soluciones</a>
+      <a href="https://tienda.crimsoncr.com/" data-nvh-tienda>Tienda</a>
+      <a href="#proyectos">Proyectos</a>
+      <a href="#soporte">Soporte</a>
+      <a href="https://panel.crimsoncr.com/login" rel="noopener">Portal</a>
+    </nav>
+
+    <div class="nvh-tools">
+      <button class="nvh-icon" type="button" id="nvhSearchBtn" aria-label="Buscar en la tienda" aria-expanded="false" aria-controls="nvhSearch">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+      </button>
+      <a class="nvh-icon" href="https://tienda.crimsoncr.com/" data-nvh-tienda aria-label="Ir a la tienda en línea">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14l-1.2 12H6.2z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/></svg>
+      </a>
+      <a class="nv-btn nv-btn--red nvh-cta" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20una%20soluci%C3%B3n." target="_blank" rel="noopener" data-nvh-wa="Hola Crimson, quiero cotizar una solución.">Cotizar</a>
+      <button class="nvh-icon nvh-burger" type="button" id="nvhBurger" aria-label="Abrir menú" aria-expanded="false" aria-controls="nvhMenu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Buscar: un formulario GET de verdad (sirve aun sin JS); el JS solo lo abre, enfoca y cierra con Escape -->
+  <div class="nvh-search" id="nvhSearch" hidden>
+    <form class="nvh-search__in" action="https://tienda.crimsoncr.com/buscar" method="get" role="search" data-nvh-buscar>
+      <label class="nv-sr" for="nvhQ">Buscar productos en la tienda</label>
+      <svg class="nvh-search__ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+      <input id="nvhQ" name="q" type="search" placeholder="Buscá cámaras, routers…" autocomplete="off" enterkeyhint="search" required>
+      <button class="nvh-search__go" type="submit" aria-label="Buscar">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+    </form>
+  </div>
+</header>
+
+<!-- Menu (movil y tableta): pantalla completa en el celular, panel lateral en tableta -->
+<div class="nvh-menu" id="nvhMenu" role="dialog" aria-modal="true" aria-label="Menú" hidden>
+  <div class="nvh-menu__scrim" data-nvh-close></div>
+  <div class="nvh-menu__panel">
+    <svg class="nvh-menu__net" viewBox="0 0 400 400" aria-hidden="true">
+      <path d="M40 330L150 250L290 290L360 170M150 250L210 120L360 170M210 120L330 60"/>
+      <circle cx="40" cy="330" r="3"/><circle cx="150" cy="250" r="3"/><circle cx="290" cy="290" r="3"/><circle cx="360" cy="170" r="3"/><circle cx="210" cy="120" r="3"/><circle cx="330" cy="60" r="3"/>
+    </svg>
+    <nav class="nvh-menu__nav" aria-label="Menú principal">
+      <a href="#soluciones" style="--i:0"><span class="nvh-menu__n" aria-hidden="true">01</span>Soluciones</a>
+      <a href="https://tienda.crimsoncr.com/" data-nvh-tienda style="--i:1"><span class="nvh-menu__n" aria-hidden="true">02</span>Tienda</a>
+      <a href="#proyectos" style="--i:2"><span class="nvh-menu__n" aria-hidden="true">03</span>Proyectos</a>
+      <a href="#soporte" style="--i:3"><span class="nvh-menu__n" aria-hidden="true">04</span>Soporte</a>
+      <a href="https://panel.crimsoncr.com/login" rel="noopener" style="--i:4"><span class="nvh-menu__n" aria-hidden="true">05</span>Portal de clientes</a>
+    </nav>
+    <div class="nvh-menu__foot" style="--i:5">
+      <a class="nv-btn nv-btn--red nvh-menu__wa" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20una%20soluci%C3%B3n." target="_blank" rel="noopener" data-nvh-wa="Hola Crimson, quiero cotizar una solución.">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.3-4A8 8 0 1 1 8 18.7z"/><path d="M9 9.5c.3 2 2.5 4.2 4.5 4.5l1-1.2 2 .9c-.2 1-1 1.8-2 1.8A6.5 6.5 0 0 1 8 9c0-1 .8-1.8 1.8-2l.9 2z"/></svg>
+        Escribinos por WhatsApp
+      </a>
+      <a class="nvh-menu__tel" href="tel:+50688889892" data-nvh-tel>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>
+        <span>Llamanos <b>+506 8888 9892</b></span>
+      </a>
+      <p class="nvh-menu__place">Alajuela, Costa Rica</p>
+    </div>
+  </div>
+</div>
+
+<main id="contenido" tabindex="-1">
+
+<section class="nvh-hero" id="inicio" aria-labelledby="nvhTitulo">
+  <span class="nvh-sentinel" aria-hidden="true"></span>
+
+  <div class="nvh-media">
+    <img class="nvh-media__img"
+      src="../assets/img/galeria/comunidad-rotulo-noche-960.webp"
+      srcset="../assets/img/galeria/comunidad-rotulo-noche-480.webp 480w, ../assets/img/galeria/comunidad-rotulo-noche-960.webp 960w, ../assets/img/galeria/comunidad-rotulo-noche-1600.webp 1600w"
+      sizes="(min-width:1024px) 54vw, 70vw"
+      width="1600" height="2133" alt="Cámara de videovigilancia y rótulo de Crimson en un poste, al anochecer"
+      fetchpriority="high" decoding="async">
+    <span class="nvh-media__scan" aria-hidden="true"></span>
+    <span class="nvh-media__frame" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+    <p class="nvh-media__cap"><span class="nvh-media__dot" aria-hidden="true"></span>Instalación Crimson · videovigilancia comunitaria</p>
+  </div>
+
+  <!-- Red de nodos: dos dibujos livianos (vertical para movil, horizontal para escritorio); solo uno se muestra -->
+  <svg class="nvh-net nvh-net--v" viewBox="0 0 400 860" preserveAspectRatio="xMidYMin slice" aria-hidden="true" focusable="false">
+    <g class="nvh-net__l"><path d="M34 128L132 92L250 150L360 96M132 92L104 236L250 150L318 268M104 236L196 330L318 268M360 96L318 268"/></g>
+    <g class="nvh-net__p">
+      <circle r="3" cx="34" cy="128" style="--dx:98px;--dy:-36px;--t:9s;--d:-2s"/>
+      <circle r="3" cx="250" cy="150" style="--dx:68px;--dy:118px;--t:11s;--d:-7s"/>
+    </g>
+    <g class="nvh-net__n"><circle cx="34" cy="128" r="2.5"/><circle cx="132" cy="92" r="2.5"/><circle cx="250" cy="150" r="2.5"/><circle cx="360" cy="96" r="2.5"/><circle cx="104" cy="236" r="2.5"/><circle cx="318" cy="268" r="2.5"/><circle cx="196" cy="330" r="2.5"/></g>
+    <g class="nvh-net__g"><circle cx="250" cy="150" r="9" style="--d:0s"/><circle cx="104" cy="236" r="9" style="--d:-3s"/></g>
+  </svg>
+  <svg class="nvh-net nvh-net--h" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+    <g class="nvh-net__l"><path d="M60 760L250 820M250 820L560 846M760 170L980 120L1180 210L1380 140M980 120L930 380L1180 210L1300 470M930 380L1080 560L1300 470M1080 560L1010 760L1250 790L1300 470M560 846L1010 760M1380 140L1300 470"/></g>
+    <g class="nvh-net__p">
+      <circle r="3.5" cx="760" cy="170" style="--dx:220px;--dy:-50px;--t:10s;--d:-1s"/>
+      <circle r="3.5" cx="1180" cy="210" style="--dx:120px;--dy:260px;--t:12s;--d:-6s"/>
+      <circle r="3.5" cx="560" cy="846" style="--dx:450px;--dy:-86px;--t:14s;--d:-4s"/>
+      <circle r="3.5" cx="930" cy="380" style="--dx:150px;--dy:180px;--t:11s;--d:-9s"/>
+    </g>
+    <g class="nvh-net__n"><circle cx="60" cy="760" r="3"/><circle cx="250" cy="820" r="3"/><circle cx="560" cy="846" r="3"/><circle cx="760" cy="170" r="3"/><circle cx="980" cy="120" r="3"/><circle cx="1180" cy="210" r="3"/><circle cx="1380" cy="140" r="3"/><circle cx="930" cy="380" r="3"/><circle cx="1300" cy="470" r="3"/><circle cx="1080" cy="560" r="3"/><circle cx="1010" cy="760" r="3"/><circle cx="1250" cy="790" r="3"/></g>
+    <g class="nvh-net__g"><circle cx="1180" cy="210" r="12" style="--d:0s"/><circle cx="1080" cy="560" r="12" style="--d:-2.5s"/><circle cx="250" cy="820" r="12" style="--d:-4s"/></g>
+  </svg>
+
+  <div class="nv-wrap nvh-hero__in">
+    <div class="nvh-copy">
+      <p class="nv-eyebrow nvh-eyebrow" style="--i:0">Seguridad · Redes · IA · Software</p>
+      <h1 class="nvh-title" id="nvhTitulo" style="--i:1">Seguridad, IA y software para una operación <em>más inteligente.</em></h1>
+      <p class="nvh-lead" style="--i:2">Integramos seguridad electrónica, redes y software a la medida para proteger tu espacio y automatizar tu operación.</p>
+      <div class="nvh-ctas" style="--i:3">
+        <a class="nv-btn nv-btn--red nvh-btn" href="https://wa.me/50688889892?text=Hola%20Crimson%2C%20quiero%20cotizar%20un%20proyecto." target="_blank" rel="noopener" data-nvh-wa="Hola Crimson, quiero cotizar un proyecto.">
+          Cotizar un proyecto
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="nv-btn nv-btn--line nvh-btn" href="#soluciones">Ver soluciones</a>
+      </div>
+      <p class="nvh-trust" style="--i:4"><span>Distribuidor autorizado Hikvision</span><span>Respaldo técnico local</span></p>
+    </div>
+  </div>
+</section>
