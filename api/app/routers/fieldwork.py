@@ -987,7 +987,7 @@ def survey_link_opportunity(sid: int, data: LinkOppIn, p: Principal = Depends(re
     from ..services.scope_items import attach_survey
 
     movidas = attach_survey(db, s, o.id)  # sus "Alcances y responsables" pasan a la oportunidad (una sola fuente)
-    ligado = f"se ligo el levantamiento {s.number}" + (f" ({movidas} alcance(s))" if movidas else "")
+    ligado = f"se ligo el levantamiento {s.number}" + (f" ({plural(movidas, 'alcance', 'alcances')})" if movidas else "")
     o.notes = f"{stamp} · {p.user.full_name}: {ligado}\n{o.notes or ''}".strip()
     audit(db, p.tenant.id, p.user.id, "link_opportunity", "survey", s.id, {"opportunity_id": o.id}, ip=p.ip)
     if o.status != antes:
