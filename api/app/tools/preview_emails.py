@@ -292,7 +292,9 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
 
         aliada = db.scalar(select(AllyCompany).where(AllyCompany.tenant_id == t.id))
         o = SimpleNamespace(id=12, title="Videovigilancia para bodega")
-        r = SimpleNamespace(id=5, what="Precio de instalación de 4 cámaras con cableado", due_date=HOY + timedelta(days=4))
+        r = SimpleNamespace(
+            id=5, what="Precio de instalación de 4 cámaras con cableado", scope="Montaje y cableado en bodega 1", due_date=HOY + timedelta(days=4)
+        )
         return _notify_ally_request(db, SimpleNamespace(tenant=t), SimpleNamespace(ally_company_id=aliada.id), o, r)
 
     def entradas() -> object:

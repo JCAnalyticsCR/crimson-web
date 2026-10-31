@@ -209,7 +209,7 @@ def test_aliado_responde_y_envia_precios(client, auth, db_session):
     lines = [{"concept": "Cámara instalada", "quantity": 8, "unit": "u", "unit_price": 1500.5}, {"concept": "Configuración", "quantity": 1, "unit_price": 3000}]
     r = client.put(f"/aliado/solicitudes/{rid}", json={"lines": lines, "currency": "CRC"}, headers=s.a_jefe)
     assert r.status_code == 200, r.text
-    assert r.json()["status"] == "recibido" and Decimal(str(r.json()["amount"])) == Decimal("15004.00")
+    assert r.json()["status"] == "respondido" and Decimal(str(r.json()["amount"])) == Decimal("15004.00")
     assert client.put(f"/aliado/solicitudes/{rid}", json={"amount": 1, "lines": lines, "currency": "CRC"}, headers=s.a_jefe).status_code == 422
     req = next(x for a in client.get(f"/opportunities/{o['id']}/allies", headers=vend).json() for x in a["requests"])
     assert "amount" not in req and "lines" not in req and req["responded_at"] and req["source"] == "crimson"
@@ -225,7 +225,7 @@ def test_aliado_responde_y_envia_precios(client, auth, db_session):
     nueva = db_session.get(AllyCostRequest, r.json()["id"])
     from app.models import Opportunity
 
-    assert nueva.source == "aliado" and nueva.status == "recibido" and nueva.responsible_id == db_session.get(Opportunity, s.O1).owner_id
+    assert nueva.source == "aliado" and nueva.status == "respondido" and nueva.responsible_id == db_session.get(Opportunity, s.O1).owner_id
     r = client.post(f"/aliado/proyectos/{s.P3}/precios", json={"what": "Precio sin papel", "amount": 100, "currency": "CRC"}, headers=s.a_jefe)
     assert r.status_code == 422 and "papel" in r.json()["detail"]
     r = client.post(

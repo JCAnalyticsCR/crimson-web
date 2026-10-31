@@ -1,5 +1,6 @@
-/* Precio del aliado (15:29-15:45: "no pueden cotizar, pueden darme los precios de ellos"): monto O desglose por
-   líneas (concepto, cantidad, unidad, precio unitario, total en vivo), moneda, vigencia, exclusiones y adjuntos.
+/* OFERTA del aliado (15:29-15:45: "no pueden cotizar, pueden darme los precios de ellos"; revisión 2: la petición de
+   Crimson y esta oferta son dos momentos): monto O desglose por líneas (concepto, cantidad, unidad, precio unitario,
+   total en vivo), moneda, vigencia, condiciones, sus exclusiones y adjuntos.
    Sirve para responder una solicitud de Crimson o para enviar un precio por iniciativa propia. */
 import { useState } from "react";
 import { api, fmtMoney } from "../../lib/api";
@@ -23,6 +24,7 @@ export default function QuoteForm({ path, method, ask, roles, onDone, onCancel }
   const [currency, setCurrency] = useState("CRC");
   const [validUntil, setValidUntil] = useState("");
   const [exclusions, setExclusions] = useState("");
+  const [conditions, setConditions] = useState("");
   const [files, setFiles] = useState<{ id: number; filename: string }[]>([]);
   const [part, setPart] = useState<number | "">(roles && roles.length === 1 ? roles[0].id : "");
   const [busy, setBusy] = useState(false);
@@ -32,12 +34,12 @@ export default function QuoteForm({ path, method, ask, roles, onDone, onCancel }
   const enviar = async () => {
     setBusy(true);
     try {
-      const body: Record<string, unknown> = { currency, valid_until: validUntil || null, exclusions: exclusions || null, attachment_ids: files.map((f) => f.id) };
+      const body: Record<string, unknown> = { currency, valid_until: validUntil || null, conditions: conditions || null, exclusions: exclusions || null, attachment_ids: files.map((f) => f.id) };
       if (modo === "monto") body.amount = amount;
       else body.lines = lines.filter((l) => l.concept.trim()).map((l) => ({ concept: l.concept.trim(), quantity: l.quantity, unit: l.unit || null, unit_price: l.unit_price || "0" }));
       if (ask) { body.what = what; if (part) body.participation_id = part; }
       await api(path, { method, json: body });
-      toast("Precio enviado a Crimson");
+      toast("Oferta enviada a Crimson");
       onDone();
     } catch (e) { toast(e instanceof Error ? e.message : "No se pudo enviar", "bad"); }
     finally { setBusy(false); }
@@ -46,6 +48,7 @@ export default function QuoteForm({ path, method, ask, roles, onDone, onCancel }
 
   return (
     <div className="cp-card cp-form">
+      <p className="meta" style={{ margin: 0 }}>Su oferta: precio, moneda, vigencia y condiciones. Crimson la revisa y, si la acepta, queda como acuerdo.</p>
       {ask && <Field label="¿Qué cotiza?"><input className="input" value={what} maxLength={300} onChange={(e) => setWhat(e.target.value)} placeholder="Ej.: instalación de 8 cámaras" /></Field>}
       {ask && roles && roles.length > 1 && (
         <Field label="Papel en el que envía el precio">
@@ -80,6 +83,7 @@ export default function QuoteForm({ path, method, ask, roles, onDone, onCancel }
         <Field label="Moneda"><select className="select" value={currency} onChange={(e) => setCurrency(e.target.value)}><option value="CRC">Colones (CRC)</option><option value="USD">Dólares (USD)</option></select></Field>
         <Field label="Vigencia del precio"><input className="input" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} /></Field>
       </div>
+      <Field label="Condiciones (forma de pago, plazos, garantía)"><textarea className="textarea" rows={2} value={conditions} maxLength={4000} onChange={(e) => setConditions(e.target.value)} /></Field>
       <Field label="Exclusiones (lo que no incluye)"><textarea className="textarea" rows={2} value={exclusions} maxLength={4000} onChange={(e) => setExclusions(e.target.value)} /></Field>
       <Field label="Adjuntos (PDF o fotos)">
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -91,7 +95,7 @@ export default function QuoteForm({ path, method, ask, roles, onDone, onCancel }
         </div>
       </Field>
       <div className="al-actions">
-        <button type="button" className="btn btn--crimson" disabled={!listo || busy} onClick={enviar}><Icon d={I.check} />Enviar a Crimson</button>
+        <button type="button" className="btn btn--crimson" disabled={!listo || busy} onClick={enviar}><Icon d={I.check} />Enviar mi oferta</button>
         {onCancel && <button type="button" className="btn btn--ghost" onClick={onCancel}>Cancelar</button>}
       </div>
     </div>

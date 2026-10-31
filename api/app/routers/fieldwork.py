@@ -97,15 +97,49 @@ def reviewer_roles(tenant) -> tuple[str, ...]:
     return tuple(roles) if roles else REVIEWER_ROLES
 
 
+# Quien aporta el personal (revision 2, A3: "2 personas por 3 dias" no queda sin responsable)
+LABOR_PROVIDERS = {"crimson": "Crimson", "aliado": "Aliado", "contratado": "Contratado"}
+
+
 def survey_labor(s: Survey) -> dict[str, dict]:
-    """Personal requerido por tipo. Levantamientos viejos (sin labor) toman techs/days como personal tecnico."""
+    """Personal requerido por tipo y quien lo aporta. Levantamientos viejos (sin labor) toman techs/days como personal
+    tecnico."""
     raw = s.labor or {}
     out = {}
     for k in LABOR_TYPES:
         row = raw.get(k) or {}
         if k == "tecnico" and not raw:
             row = {"people": s.techs, "days": s.days}
-        out[k] = {"people": int(row.get("people") or 0), "days": d(row.get("days") or 0)}
+        pid = row.get("participation_id")
+        out[k] = {
+            "people": int(row.get("people") or 0),
+            "days": d(row.get("days") or 0),
+            "provider": row.get("provider") if row.get("provider") in LABOR_PROVIDERS else None,
+            "participation_id": int(pid) if isinstance(pid, int) or (isinstance(pid, str) and pid.isdigit()) else None,
+        }
+    return out
+
+
+def labor_out(db: Session, s: Survey, mask=None) -> dict:
+    """Personal requerido para la salida: con quien lo aporta. mask(participation) -> nombre visible (portal aliado)."""
+    from ..models import AllyParticipation
+
+    out = {}
+    for k, v in survey_labor(s).items():
+        name = None
+        if v["provider"] == "aliado" and v["participation_id"]:
+            a = db.get(AllyParticipation, v["participation_id"])
+            if a is not None and a.tenant_id == s.tenant_id and a.opportunity_id == s.opportunity_id:
+                name = mask(a) if mask else a.name
+        prov = v["provider"]
+        out[k] = {
+            "label": LABOR_TYPES[k][0],
+            "people": v["people"],
+            "days": v["days"],
+            "provider": prov,
+            "participation_id": v["participation_id"] if name else None,
+            "provider_name": name or (LABOR_PROVIDERS.get(prov) if prov else None),
+        }
     return out
 
 
@@ -284,7 +318,6 @@ def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
     sender = db.get(User, s.sent_by) if s.sent_by else None
     visit_ids = [int(x) for x in (s.visit_tech_ids or []) if str(x).isdigit()]
     visitors = [u.full_name for u in (db.get(User, i) for i in visit_ids) if u]
-    labor = survey_labor(s)
     out = {
         "id": s.id,
         "number": s.number,
@@ -313,7 +346,7 @@ def _survey_out(db: Session, s: Survey, full: bool = True) -> dict:
         "sent_by": sender.full_name if sender else None,
         "visit_tech_ids": visit_ids,
         "visit_techs": visitors,
-        "labor": {k: {"label": LABOR_TYPES[k][0], "people": v["people"], "days": v["days"]} for k, v in labor.items()},
+        "labor": labor_out(db, s),
         "template_version": s.template_version or 1,
         "received_by": s.received_by,
         "ally_company_id": s.ally_company_id,
@@ -439,6 +472,10 @@ class ItemIn(BaseModel):
 class LaborIn(BaseModel):
     people: int = Field(0, ge=0, le=200)
     days: Decimal = Field(Decimal(0), ge=0, le=365)
+    # quien aporta el personal (A3): Crimson, un aliado de la oportunidad (participation_id) o contratado.
+    # Sin dato se conserva el que tenia (el portal del aliado y los clientes viejos no lo mandan)
+    provider: str | None = Field(None, pattern="^(crimson|aliado|contratado)$")
+    participation_id: int | None = None
 
 
 class SurveyIn(BaseModel):
@@ -473,7 +510,32 @@ def _labor_payload(data: SurveyIn) -> dict:
         if bad:
             raise HTTPException(422, f"Tipo de personal desconocido: {', '.join(sorted(bad))}")
         src = data.labor
-    return {k: {"people": (src.get(k) or LaborIn()).people, "days": str((src.get(k) or LaborIn()).days)} for k in LABOR_TYPES}
+    out = {}
+    for k in LABOR_TYPES:
+        row = src.get(k) or LaborIn()
+        out[k] = {"people": row.people, "days": str(row.days)}
+        if "provider" in row.model_fields_set:
+            out[k]["provider"] = row.provider
+            out[k]["participation_id"] = row.participation_id if row.provider == "aliado" else None
+    return out
+
+
+def _labor_providers(db: Session, s: Survey, labor: dict, tenant_id: int, opportunity_id: int | None) -> None:
+    """Conserva quien aporta el personal si el formulario no lo mando; valida que el aliado participe en la oportunidad."""
+    from ..models import AllyParticipation
+
+    prev = s.labor or {}
+    for k, row in labor.items():
+        if "provider" not in row:
+            old = prev.get(k) or {}
+            if old.get("provider"):
+                row["provider"], row["participation_id"] = old.get("provider"), old.get("participation_id")
+            continue
+        pid = row.get("participation_id")
+        if row.get("provider") == "aliado" and pid is not None:
+            a = db.get(AllyParticipation, pid)
+            if a is None or a.tenant_id != tenant_id or (opportunity_id is not None and a.opportunity_id != opportunity_id):
+                raise HTTPException(422, "Ese aliado no participa en la oportunidad del levantamiento")
 
 
 def _check_customer(db: Session, p: Principal | int, data: SurveyIn, s: Survey | None = None) -> None:
@@ -500,6 +562,7 @@ def _apply_fields(s: Survey, data: SurveyIn, db: Session, tenant_id: int, valid_
             raise HTTPException(422, str(e)) from e
     if "received_by" in data.model_fields_set:
         s.received_by = (data.received_by or "").strip() or None
+    _labor_providers(db, s, labor, tenant_id, s.opportunity_id or getattr(data, "opportunity_id", None))
     tarifas = (s.labor or {}).get("tarifas")  # las pone el costeo; el tecnico al guardar no las ve ni las borra
     s.labor = {**labor, "tarifas": tarifas} if tarifas else labor
     s.techs, s.days = labor["tecnico"]["people"], d(labor["tecnico"]["days"])
@@ -920,7 +983,11 @@ def survey_link_opportunity(sid: int, data: LinkOppIn, p: Principal = Depends(re
     if anterior and anterior.id != o.id:
         anterior.notes = f"{stamp} · {p.user.full_name}: el levantamiento {s.number} se movio a {o.number}\n{anterior.notes or ''}".strip()
     s.opportunity_id = o.id
-    o.notes = f"{stamp} · {p.user.full_name}: se ligo el levantamiento {s.number}\n{o.notes or ''}".strip()
+    from ..services.scope_items import attach_survey
+
+    movidas = attach_survey(db, s, o.id)  # sus "Alcances y responsables" pasan a la oportunidad (una sola fuente)
+    ligado = f"se ligo el levantamiento {s.number}" + (f" ({movidas} alcance(s))" if movidas else "")
+    o.notes = f"{stamp} · {p.user.full_name}: {ligado}\n{o.notes or ''}".strip()
     audit(db, p.tenant.id, p.user.id, "link_opportunity", "survey", s.id, {"opportunity_id": o.id}, ip=p.ip)
     if o.status != antes:
         audit(db, p.tenant.id, p.user.id, "status", "opportunity", o.id, {"de": antes, "a": o.status}, ip=p.ip)
@@ -1729,7 +1796,9 @@ def _summary_out(db: Session, s: Survey, p: Principal) -> dict:
         "notes": s.notes,
         "equipos": [{"name": i.name, "quantity": num(i.quantity), "unit": i.unit, "kind": i.kind or "material", "note": i.note} for i in items],
         "personal": [
-            {"label": LABOR_TYPES[k][0], "people": v["people"], "days": num(v["days"])} for k, v in survey_labor(s).items() if v["people"] and d(v["days"]) > 0
+            {"label": v["label"], "people": v["people"], "days": num(v["days"]), "provider_name": v["provider_name"]}
+            for v in labor_out(db, s).values()
+            if v["people"] and d(v["days"]) > 0
         ],
         "puntos": puntos,
         "fotos": fotos(s.photos),

@@ -36,7 +36,7 @@ export default function AllyOpportunities() {
               <div className="cp-row__main">
                 <b>{o.number} · {o.title}</b>
                 <div className="cp-row__meta">{o.customer || "—"}{o.end_customer ? ` → ${o.end_customer}` : ""}{o.site ? ` · ${o.site}` : ""}</div>
-                <div className="cp-row__meta">Su papel: {o.my_roles.map((r) => ROL_PARTICIPACION[r] || r).join(", ")}{o.crimson_owner ? ` · En Crimson: ${o.crimson_owner}` : ""}</div>
+                <div className="cp-row__meta">{o.my_relations?.length ? o.my_relations.join(", ") : `Su papel: ${o.my_roles.map((r) => ROL_PARTICIPACION[r] || r).join(", ")}`}{o.crimson_owner ? ` · En Crimson: ${o.crimson_owner}` : ""}</div>
               </div>
               <div className="cp-row__side">
                 {o.approval && o.approval !== "aprobada"

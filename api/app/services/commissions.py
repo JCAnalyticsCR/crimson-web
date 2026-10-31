@@ -718,7 +718,7 @@ def _on_capture(db: Session, payment: Payment, inv: Invoice, only: set[str] | No
         venta = convert(db, d(deal.project.price), deal.price_currency, inv.currency) if deal.project is not None else net
         for _b, _k, _u, _r, part in [b for b in bens if b[0] == "aliado"]:
             for r in part.requests:
-                if r.status != "aprobado" or d(r.amount) <= 0 or venta <= 0:
+                if r.status != "aceptado" or d(r.amount) <= 0 or venta <= 0:
                     continue
                 ya = _payout_accrued(db, r)
                 parte = min(d(r.amount) * raw / venta, d(r.amount) - ya)
@@ -951,7 +951,12 @@ def _accrue_quote(db: Session, q: Quote, n: int, on: date, only_missing: bool) -
             grupo = list(
                 db.scalars(
                     select(Commission)
-                    .where(Commission.tenant_id == q.tenant_id, Commission.quote_id == q.id, Commission.trigger == "cotizacion_aceptada", *_sale_filter(beneficiary, part))
+                    .where(
+                        Commission.tenant_id == q.tenant_id,
+                        Commission.quote_id == q.id,
+                        Commission.trigger == "cotizacion_aceptada",
+                        *_sale_filter(beneficiary, part),
+                    )
                     .order_by(Commission.id)
                 )
             )
@@ -1034,7 +1039,7 @@ def early_ok(rule, on: date) -> bool:
 
 
 def _accrue_payout(db: Session, deal: Deal, part: AllyParticipation, r: AllyCostRequest, on: date) -> Commission | None:
-    if r.status != "aprobado" or d(r.amount) <= 0:
+    if r.status != "aceptado" or d(r.amount) <= 0:
         return None
     # cuenta el neto, no que exista una fila: pagado y revertido (pagada + rev:) neto da 0 y al re-aprobar se debe otra vez
     falta = d(r.amount) - _payout_accrued(db, r)
@@ -1338,7 +1343,7 @@ def _accrue_paid_payout(db: Session, part: AllyParticipation, r: AllyCostRequest
     """Precio aprobado DESPUES de cobrar, cuando el pago acordado se devenga al cobrar (venta sin proyecto o
     ally_payout_trigger = cobro): devenga ya la parte cobrada (precio x cobrado sin IVA / venta), con la misma cuenta
     que _on_capture. Los cobros siguientes completan el resto; nunca pasa del precio (spec E5)."""
-    if r.status != "aprobado" or d(r.amount) <= 0:
+    if r.status != "aceptado" or d(r.amount) <= 0:
         return None
     inv = _participation_invoice(db, part)
     if inv is None or inv.status == "anulada":
@@ -1381,14 +1386,14 @@ def _accrue_paid_payout(db: Session, part: AllyParticipation, r: AllyCostRequest
 def on_cost_request_change(db: Session, r: AllyCostRequest, antes_status: str | None, antes_amount) -> list[Commission]:
     part = r.participation or db.get(AllyParticipation, r.participation_id)
     movs = _live(db, r.tenant_id, Commission.cost_request_id == r.id)
-    if antes_status == "aprobado" and r.status != "aprobado":
+    if antes_status == "aceptado" and r.status != "aceptado":
         reverse_or_void(db, movs, f"Precio del aliado «{r.what[:80]}» ya no está aprobado")
         return []
-    if r.status != "aprobado" or part is None:
+    if r.status != "aceptado" or part is None:
         return []
     pr = db.get(Project, part.project_id) if part.project_id else None
     cfg = _cfg(db, r.tenant_id)
-    if antes_status != "aprobado":
+    if antes_status != "aceptado":
         if pr is not None and pr.completed_at is not None and cfg["ally_payout_trigger"] == "proyecto_completado":
             c = _accrue_payout(db, deal_of(db, project=pr), part, r, date.today())  # aprobado despues de completar
             return [c] if c is not None else []
@@ -1918,7 +1923,7 @@ def _project_projection(db: Session, tenant, pr: Project, parts: list[AllyPartic
     abierto = pr.status in OPEN_PROJECT and pr.completed_at is None
     for part in parts:
         for r in part.requests:
-            if r.status == "aprobado" and d(r.amount) > 0:
+            if r.status == "aceptado" and d(r.amount) > 0:
                 falta = d(r.amount) - _payout_accrued(db, r)
                 if falta > 0:
                     out["pago_acordado"] += convert(db, falta, r.currency, "CRC")
@@ -1950,7 +1955,7 @@ def _what_you_put(parts: list[AllyParticipation]) -> list[dict]:
         {"what": r.what, "amount": r.amount, "currency": r.currency, "status": r.status}
         for part in parts
         for r in part.requests
-        if r.status in ("aprobado", "recibido") and r.amount is not None
+        if r.status in ("aceptado", "respondido") and r.amount is not None
     ]
 
 
@@ -2381,7 +2386,7 @@ def participation_rules(db: Session, part: AllyParticipation) -> dict[str, Commi
 def deal_summary(db: Session, part: AllyParticipation) -> dict:
     """Lectura liviana para la tarjeta del proyecto (solo quien ve costos): que recibe el aliado aqui."""
     own = participation_rules(db, part)
-    pago = sum((convert(db, d(r.amount), r.currency, "CRC") for r in part.requests if r.status == "aprobado" and r.amount), Decimal(0))
+    pago = sum((convert(db, d(r.amount), r.currency, "CRC") for r in part.requests if r.status == "aceptado" and r.amount), Decimal(0))
     com = own["comision"]
     if com is None:
         tenant = db.get(Tenant, part.tenant_id)

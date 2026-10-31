@@ -22,6 +22,7 @@ import { CommonSection, initialStatus, PointFields, SystemCalcs, useCommonSpec, 
 import { RecommendModal, RecoSummary, type RecoFields, type RecoLine } from "./Recommend";
 import { SuggestionsModal, sugPayload, toSugRow, type SugBase, type SugRow } from "./SuggestionsModal";
 import SurveySummary from "./SurveySummary";
+import ScopeItems, { type ScopeParty } from "../crm/ScopeItems";
 
 type FieldSpec = V2Field; // + hint, section, advanced, legacy (plantilla v2)
 type Spec = { label: string; point_prefix: string; point_label: string; fields: FieldSpec[]; materials: string[] };
@@ -34,7 +35,8 @@ type Item = {
   recommended_for?: string | null; supplier_item_id?: number | null; supplier?: string | null; offer_source?: string;
 };
 type LaborKey = "tecnico" | "civil" | "contratado";
-type Labor = Record<LaborKey, { people: string; days: string }>;
+/* provider: quién aporta el personal (A3): "" | "crimson" | "contratado" | "aliado:<participación>" */
+type Labor = Record<LaborKey, { people: string; days: string; provider: string }>;
 type Tech = { id: number; name: string; role: string };
 type Review = { roles: string[]; people: string[] };
 type Survey = {
@@ -42,7 +44,7 @@ type Survey = {
   site: string | null; opportunity_id: number | null; opportunity?: OppRef; technician: string | null; visit_date: string | null; techs: number; days: string;
   notes: string | null; photos: string[]; quote_id: number | null; points_count: number; created_at: string; archived_at?: string | null; trashed_at?: string | null;
   sent_at: string | null; sent_by: string | null; pending_review?: Review; visit_tech_ids: number[]; visit_techs: string[];
-  labor: Record<LaborKey, { label: string; people: number; days: string | number }>;
+  labor: Record<LaborKey, { label: string; people: number; days: string | number; provider?: string | null; participation_id?: number | null; provider_name?: string | null }>;
   points?: Point[]; items?: (Omit<Item, "quantity"> & { quantity: string | number })[];
   common?: Common | null; received_by?: string | null; template_version?: number;
   /** a cargo de una empresa aliada (lo llena desde su portal de aliados) */
@@ -75,7 +77,9 @@ const KINDS: [Kind, string, string][] = [
 /* Margen sobre venta m -> recargo sobre costo equivalente: m / (1 - m). */
 const markupOf = (m: number) => (m >= 100 ? 0 : (m / (100 - m)) * 100);
 
-const emptyLabor = (): Labor => ({ tecnico: { people: "2", days: "1" }, civil: { people: "0", days: "0" }, contratado: { people: "0", days: "0" } });
+const emptyLabor = (): Labor => ({ tecnico: { people: "2", days: "1", provider: "" }, civil: { people: "0", days: "0", provider: "" }, contratado: { people: "0", days: "0", provider: "" } });
+const providerKey = (l?: { provider?: string | null; participation_id?: number | null }) => (!l?.provider ? "" : l.provider === "aliado" ? (l.participation_id ? `aliado:${l.participation_id}` : "aliado") : l.provider);
+const providerBody = (k: string) => (k.startsWith("aliado") ? { provider: "aliado", participation_id: k.includes(":") ? Number(k.split(":")[1]) : null } : { provider: k || null, participation_id: null });
 const emptySurvey = (kind: string) => ({
   kind, customer_id: "", customer_name: "", opportunity_id: "", site: "", visit_date: "", labor: emptyLabor(), visit_tech_ids: [] as number[],
   notes: "", photos: [] as string[], points: [] as Point[], items: [] as Item[], common: null as Common | null, received_by: "",
@@ -104,6 +108,7 @@ export default function Surveys() {
   const draftRef = useRef<Draft | null>(null);
   draftRef.current = draft;
   const [costing, setCosting] = useState<Costing | null>(null);
+  const [allyOptions, setAllyOptions] = useState<ScopeParty[]>([]); // aliados de la oportunidad (quién aporta el personal)
   const [costEdits, setCostEdits] = useState<Record<number, { cost: string; save: boolean }>>({});
   const [sugs, setSugs] = useState<SugRow<Suggestion>[] | null>(null);
   const [sugErr, setSugErr] = useState<string | null>(null);
@@ -192,7 +197,7 @@ export default function Surveys() {
     const labor = emptyLabor();
     for (const [k] of LABOR) {
       const l = s.labor?.[k];
-      labor[k] = { people: String(l?.people ?? 0), days: String(Number(l?.days ?? 0)) };
+      labor[k] = { people: String(l?.people ?? 0), days: String(Number(l?.days ?? 0)), provider: providerKey(l) };
     }
     setDraft({
       id: s.id, number: s.number, status: s.status, quote_id: s.quote_id, kind: s.kind, customer_id: s.customer_id ? String(s.customer_id) : "", customer_name: s.customer || "",
@@ -228,7 +233,7 @@ export default function Surveys() {
   const body = (d: Draft) => ({
     kind: d.kind, customer_id: d.customer_id ? Number(d.customer_id) : null, opportunity_id: d.opportunity_id ? Number(d.opportunity_id) : null,
     site: d.site || null, visit_date: d.visit_date || null, notes: d.notes || null, photos: d.photos, visit_tech_ids: d.visit_tech_ids,
-    labor: Object.fromEntries(LABOR.map(([k]) => [k, { people: Math.max(0, Math.round(num(d.labor[k].people))), days: num(d.labor[k].days) }])),
+    labor: Object.fromEntries(LABOR.map(([k]) => [k, { people: Math.max(0, Math.round(num(d.labor[k].people))), days: num(d.labor[k].days), ...providerBody(d.labor[k].provider) }])),
     // los numeros del punto van tal cual (2,5 o 2.5): la API los valida y los guarda con decimales
     points: d.points.map((p) => ({ id: p.id, code: p.code, kind: p.kind && p.kind !== d.kind ? p.kind : null, label: p.label || null, data: p.data, data_status: p.data_status ?? null, photos: p.photos || [], notes: p.notes })),
     items: d.items.filter((i) => i.name.trim()).map((i) => ({ id: i.id, product_id: i.product_id, name: i.name, quantity: num(i.quantity), unit: i.unit || "Unid", note: i.note, kind: i.kind })),
@@ -729,18 +734,41 @@ export default function Surveys() {
           </Field>
 
           <Card title="Personal requerido para la obra" flush>
-            <p className="muted" style={{ fontSize: 12.5, padding: "0 18px", margin: "0 0 6px" }}>Cuántas personas y cuántos días necesita la instalación. De aquí salen la mano de obra y los viáticos del costeo.</p>
-            <table className="table">
-              <thead><tr><th>Tipo</th><th className="num">Personas</th><th className="num">Días</th></tr></thead>
+            <p className="muted" style={{ fontSize: 12.5, padding: "0 18px", margin: "0 0 6px" }}>Cuántas personas y cuántos días necesita la instalación, y quién aporta ese personal. De aquí salen la mano de obra y los viáticos del costeo.</p>
+            <table className="table table--stack">
+              <thead><tr><th>Tipo</th><th className="num">Personas</th><th className="num">Días</th><th>Quién aporta</th></tr></thead>
               <tbody>{LABOR.map(([k, label]) => (
                 <tr key={k}>
-                  <td style={{ fontWeight: 600 }}>{label}</td>
-                  <td className="num"><input className="input input--mono" type="number" min={0} step={1} inputMode="numeric" style={{ maxWidth: 100 }} disabled={readOnly} value={draft.labor[k].people} onChange={(e) => setLabor(k, { people: e.target.value })} /></td>
-                  <td className="num"><input className="input input--mono" inputMode="decimal" style={{ maxWidth: 100 }} disabled={readOnly} value={draft.labor[k].days} onChange={(e) => setLabor(k, { days: e.target.value })} /></td>
+                  <td data-label="Tipo" className="stack-full" style={{ fontWeight: 600 }}>{label}</td>
+                  <td data-label="Personas" className="num"><input className="input input--mono" type="number" min={0} step={1} inputMode="numeric" style={{ maxWidth: 100 }} disabled={readOnly} value={draft.labor[k].people} onChange={(e) => setLabor(k, { people: e.target.value })} /></td>
+                  <td data-label="Días" className="num"><input className="input input--mono" inputMode="decimal" style={{ maxWidth: 100 }} disabled={readOnly} value={draft.labor[k].days} onChange={(e) => setLabor(k, { days: e.target.value })} /></td>
+                  <td data-label="Quién aporta" className="stack-full">
+                    <select className="select" disabled={readOnly} value={draft.labor[k].provider} onChange={(e) => setLabor(k, { provider: e.target.value })} aria-label={`Quién aporta: ${label}`}>
+                      <option value="">Sin definir</option>
+                      <option value="crimson">Crimson</option>
+                      {allyOptions.map((o) => <option key={o.participation_id} value={`aliado:${o.participation_id}`}>Aliado: {o.name}</option>)}
+                      {draft.labor[k].provider.startsWith("aliado") && !allyOptions.some((o) => `aliado:${o.participation_id}` === draft.labor[k].provider) && <option value={draft.labor[k].provider}>Aliado</option>}
+                      <option value="contratado">Contratado</option>
+                    </select>
+                  </td>
                 </tr>
               ))}</tbody>
             </table>
+            {allyOptions.length === 0 && <p className="meta" style={{ padding: "0 18px 12px", margin: 0 }}>Para que lo aporte un aliado, ligá el levantamiento a una oportunidad con ese aliado.</p>}
           </Card>
+
+          {draft.id ? (
+            <ScopeItems
+              url={`/surveys/${draft.id}/scope`}
+              editBase={`/surveys/${draft.id}/scope-items`}
+              canEdit={allows("field.editar")}
+              reloadKey={draft.opportunity_id}
+              onLoaded={(d) => setAllyOptions(d.options.filter((o) => o.kind === "aliado"))}
+              hint={draft.opportunity_id ? "Son los mismos alcances de la oportunidad: se ven igual allá y en su proyecto." : "Sin oportunidad: se guardan en el levantamiento y pasan a la oportunidad al ligarlo."}
+            />
+          ) : (
+            <section className="ally-panel"><b>Alcances y responsables</b><p className="muted" style={{ fontSize: 13, margin: 0 }}>Se definen cuando el levantamiento ya está guardado.</p></section>
+          )}
 
           <Card title={`${pointTitle} · ${draft.points.length}`} extra={!readOnly && pointAdder(draft, "top")}>
             {draft.points.length === 0 ? <p className="muted" style={{ fontSize: 13, margin: 0 }}>Agregá un punto por cada cámara, puerta, terminal o salida de red que haya que instalar: de ahí salen los materiales y el precio. Si en el sitio hay algo de otro tipo (una puerta, un punto de red, una UPS), elegilo en «+ Otro tipo…».</p> : draft.points.map((pt, i) => {

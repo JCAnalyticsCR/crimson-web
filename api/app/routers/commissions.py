@@ -888,7 +888,7 @@ def deal_out(db: Session, p: Principal, part: AllyParticipation) -> dict:
     own = svc.participation_rules(db, part)
     names = svc.Names(db)
     price, cur = _deal_price(db, part)
-    pagos = [{"id": r.id, "what": r.what, "amount": r.amount, "currency": r.currency, "status": r.status} for r in part.requests if r.status == "aprobado"]
+    pagos = [{"id": r.id, "what": r.what, "amount": r.amount, "currency": r.currency, "status": r.status} for r in part.requests if r.status == "aceptado"]
     pago_crc = sum((svc.convert(db, d(r["amount"] or 0), r["currency"], "CRC") for r in pagos), Decimal(0))
     general = None
     if own["comision"] is None:

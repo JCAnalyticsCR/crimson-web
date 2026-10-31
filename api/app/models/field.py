@@ -6,7 +6,7 @@ El tecnico nunca ve costos ni margenes: eso vive en el levantamiento del lado de
 
 from datetime import UTC, date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, event
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, event, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -53,6 +53,10 @@ class Opportunity(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     # ally_proposed_by: la empresa aliada que la propuso (queda aunque se apruebe)
     ally_approval: Mapped[str | None] = mapped_column(String(12), index=True)
     ally_proposed_by: Mapped[int | None] = mapped_column(ForeignKey("ally_company.id", ondelete="SET NULL", name="fk_opportunity_ally_proposed_by"))
+    # revision 2, punto 10: "trabajar con costos abiertos". Por defecto (False) los aliados de la oportunidad ven los
+    # aportes, responsables, alcances, avances y montos ACORDADOS; con costos abiertos ven ademas el desglose de la
+    # oferta original de los demas participantes. Nunca los costos internos ni el margen de Crimson
+    ally_open_costs: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 @event.listens_for(Opportunity.status, "set", active_history=True)
@@ -306,7 +310,9 @@ class PurchaseRequest(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     number: Mapped[str] = mapped_column(String(40), index=True)
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("supplier.id"))
     project_id: Mapped[int | None] = mapped_column(ForeignKey("project.id"))
-    status: Mapped[str] = mapped_column(String(16), default="borrador", index=True)  # reservada (pedido web sin pagar) | borrador | solicitada | recibida | cancelada
+    status: Mapped[str] = mapped_column(
+        String(16), default="borrador", index=True
+    )  # reservada (pedido web sin pagar) | borrador | solicitada | recibida | cancelada
     reason: Mapped[str] = mapped_column(String(200), default="stock_bajo")  # stock_bajo | proyecto | manual | pedido_web
     order_id: Mapped[int | None] = mapped_column(ForeignKey("order.id", name="fk_purchase_request_order"), index=True)  # pedido web bajo pedido
     total_cost: Mapped[float] = mapped_column(Numeric(16, 2), default=0)

@@ -58,7 +58,7 @@ def test_permisos_de_administracion(client, auth, db_session):
     assert client.get("/allies", headers=conta).status_code == 200
     assert client.put("/allies/prices", json=[], headers=conta).status_code == 403
     assert client.get(f"/allies/{a}/plan", headers=conta).status_code == 200
-    plan = {"amount": 25000, "currency": "CRC", "mode": "fija", "next_date": "2026-11-01", "product_id": pid, "crear_cliente": True}
+    plan = {"amount": 25000, "currency": "CRC", "mode": "fija", "service": "Soporte prioritario", "accepted": True, "next_date": "2026-11-01", "product_id": pid, "crear_cliente": True}
     assert client.put(f"/allies/{a}/plan", json=plan, headers=conta).status_code == 200
     assert client.post(f"/allies/{a}/invitations", json={"email": "x@aliado-uno.ejemplo.com", "role": "aliado"}, headers=conta).status_code == 403
     assert client.get("/allies", headers=vend).status_code == 403

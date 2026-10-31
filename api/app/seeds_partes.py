@@ -99,7 +99,7 @@ def seed_ejemplo_yobel(db: Session, tenant_id: int, user_id: int) -> Opportunity
             what="Costo de fibra óptica (tendido y fusiones)",
             responsible_id=user_id,
             due_date=date.today() + timedelta(days=3),
-            status="solicitado",
+            status="enviado",
             currency="USD",
             attachments=[],
             created_by=user_id,

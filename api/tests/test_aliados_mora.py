@@ -26,7 +26,7 @@ def _aliado_con_mensualidad(client, db_session, vence_hace: int, enviada: bool =
     from app.models import AllyCompany, Invoice
 
     a = client.post("/allies", json={"name": "Aliado Mora S.A.", "tax_id": "3-101-000077", "email": PAGOS}).json()["id"]
-    body = {"amount": 30000, "currency": "CRC", "mode": "fija", "next_date": HOY.isoformat(), "crear_cliente": True}
+    body = {"amount": 30000, "currency": "CRC", "mode": "fija", "service": "Soporte prioritario", "accepted": True, "next_date": HOY.isoformat(), "crear_cliente": True}
     assert client.put(f"/allies/{a}/plan", json=body).status_code == 200
     comp = db_session.get(AllyCompany, a)
     r = client.post(f"/recurrences/{comp.recurrence_id}/run").json()

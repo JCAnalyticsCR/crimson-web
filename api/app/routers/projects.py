@@ -118,7 +118,7 @@ def ally_cost_of_project(db: Session, pr: Project, fx: Decimal | None = None) ->
     rows = db.scalars(
         select(AllyCostRequest)
         .join(AllyParticipation, AllyParticipation.id == AllyCostRequest.participation_id)
-        .where(AllyParticipation.tenant_id == pr.tenant_id, AllyParticipation.project_id == pr.id, AllyCostRequest.status == "aprobado")
+        .where(AllyParticipation.tenant_id == pr.tenant_id, AllyParticipation.project_id == pr.id, AllyCostRequest.status == "aceptado")
     ).all()
     for r in rows:
         if r.amount is None:

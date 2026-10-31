@@ -1,5 +1,5 @@
 /* Detalle de una oportunidad en común: partes, contacto del sitio, quién la lleva en Crimson, su participación
-   (papel, alcance, partidas, contactos), los precios que Crimson le pidió, "Enviar mis precios" y sus levantamientos.
+   (relaciones, alcance, partidas, contactos), los alcances y responsables, sus acuerdos, los precios que Crimson le pidió, "Enviar mis precios" y sus levantamientos.
    Reunión 2 (pedido 14, "muy básico"): además la etapa con la próxima acción y su fecha, el alcance como lista, los
    seguimientos que Crimson compartió (pedido 15) y la ejecución del proyecto en común (pedido 17).
    Nunca montos de Crimson, costos ni márgenes ni otros aliados; el total de la cotización solo si Crimson lo habilitó. */
@@ -9,7 +9,8 @@ import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { Badge, I, Icon } from "../../ui/components";
 import QuoteForm from "./QuoteForm";
 import AllyExecution from "./AllyExecution";
-import { ESTADO_OPP, ESTADO_PRECIO, ROL_PARTICIPACION, TONO_APROBACION, errorText, useAlly, type OppFull, type Req } from "./shared";
+import { AllyAgreements, AllyScopeList, RequestList } from "./AllyDeal";
+import { ESTADO_OPP, ROL_PARTICIPACION, TONO_APROBACION, errorText, useAlly, type OppFull, type Req } from "./shared";
 
 /* El embudo de Crimson en palabras del aliado: dónde va la oportunidad (sin probabilidad ni montos). */
 const ETAPAS = ["nuevo", "contactado", "requiere_visita", "levantamiento", "cotizando", "enviada", "negociacion", "ganada"];
@@ -18,30 +19,7 @@ const vence = (s: string | null) => (s ? Math.round((new Date(`${s}T12:00:00`).g
 /** El alcance llega como texto: una línea por punto (sin viñetas repetidas). */
 const lineas = (t: string | null) => (t || "").split("\n").map((x) => x.replace(/^[\s•\-*·]+/, "").trim()).filter(Boolean);
 
-export function RequestList({ rows, onRespond }: { rows: Req[]; onRespond?: (r: Req) => void }) {
-  if (!rows.length) return <p className="muted">Crimson no le ha pedido precios aquí.</p>;
-  return (
-    <div className="cp-list">
-      {rows.map((r) => (
-        <div key={r.id} className="cp-row">
-          <div className="cp-row__main">
-            <b>{r.what}</b>
-            <div className="cp-row__meta">
-              {r.source === "aliado" ? "Enviado por usted" : `Pedido por Crimson${r.responsible ? ` (${r.responsible})` : ""}`}
-              {r.due_date ? ` · antes del ${fmtDate(r.due_date)}` : ""}
-              {r.amount != null ? ` · su precio: ${fmtMoney(r.amount, r.currency)}` : ""}
-              {r.responded_at ? ` · respondido el ${fmtDate(r.responded_at.slice(0, 10))}` : ""}
-            </div>
-          </div>
-          <div className="cp-row__side">
-            <span className={`badge badge--${ESTADO_PRECIO[r.status]?.tone || "muted"}`}>{ESTADO_PRECIO[r.status]?.label || r.status}</span>
-            {r.can_respond && onRespond && <button className="btn btn--soft btn--sm" onClick={() => onRespond(r)}>{r.status === "recibido" ? "Corregir" : "Responder"}</button>}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
+export { RequestList };
 
 export default function AllyOpportunity() {
   const { id } = useParams();
@@ -93,7 +71,7 @@ export default function AllyOpportunity() {
       <div className="cp-grid cp-grid--2">
         <div className="cp-card">
           <dl className="al-kv">
-            <dt>Contratante</dt><dd>{o.customer || "—"}</dd>
+            <dt>Le paga a Crimson</dt><dd>{o.customer || "—"}</dd>
             {o.end_customer && <><dt>Cliente final</dt><dd>{o.end_customer}</dd></>}
             <dt>Sitio</dt><dd>{o.site || "—"}</dd>
             <dt>Contacto en sitio</dt><dd>{o.contact.name || "—"}{o.contact.phone ? ` · ${o.contact.phone}` : ""}</dd>
@@ -107,7 +85,7 @@ export default function AllyOpportunity() {
             const alcance = [...lineas(p.scope), ...p.scope_lines];
             return (
               <div key={p.id} style={{ marginTop: 8 }}>
-                <span className="badge badge--info">{ROL_PARTICIPACION[p.role] || p.role}</span>
+                {(p.relations && p.relations.length ? p.relations : [ROL_PARTICIPACION[p.role] || p.role]).map((x) => <span key={x} className="badge badge--info" style={{ marginRight: 4 }}>{x}</span>)}
                 {alcance.length ? <ul style={{ margin: "6px 0", paddingLeft: 18 }}>{alcance.map((l, i) => <li key={`${i}-${l}`}>{l}</li>)}</ul> : <p className="muted" style={{ margin: "6px 0" }}>Crimson todavía no detalló el alcance.</p>}
                 {Object.entries(p.contacts).map(([k, c]) => <div key={k} className="meta">{FUNCION[k] || k}: {c.name || "—"}{c.phone ? ` · ${c.phone}` : ""}{c.email ? ` · ${c.email}` : ""}</div>)}
               </div>
@@ -123,11 +101,16 @@ export default function AllyOpportunity() {
           ))}
         </ol>
       ) : <p className="muted">Crimson todavía no ha compartido seguimientos de esta oportunidad.</p>}
+      <h2 className="h3 al-sec">Alcances y responsables</h2>
+      <p className="meta" style={{ margin: "0 0 6px" }}>Lo que hace falta para la obra y quién lo hace. Confirme su alcance y después marque el avance; Crimson aprueba el acuerdo.</p>
+      <AllyScopeList scope={o.alcances} readOnly={readOnly} onChange={(a) => setO({ ...o, alcances: a })} />
+      <h2 className="h3 al-sec">Acuerdos</h2>
+      <AllyAgreements deals={o.acuerdos} />
       <h2 className="h3 al-sec">Precios que le pedimos</h2>
       <RequestList rows={o.requests} onRespond={precios ? setResp : undefined} />
       {resp && (
         <div style={{ marginTop: 12 }}>
-          <div className="meta" style={{ marginBottom: 6 }}>Responder: {resp.what}</div>
+          <div className="meta" style={{ marginBottom: 6 }}>Su oferta para: {resp.what}</div>
           <QuoteForm path={`/aliado/solicitudes/${resp.id}`} method="PUT" onCancel={() => setResp(null)} onDone={() => { setResp(null); load(); }} />
         </div>
       )}

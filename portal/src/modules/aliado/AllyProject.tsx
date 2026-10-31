@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { Badge, I, Icon } from "../../ui/components";
-import { RequestList } from "./AllyOpportunity";
+import { AllyAgreements, AllyScopeList, RequestList } from "./AllyDeal";
 import QuoteForm from "./QuoteForm";
 import AllyExecution from "./AllyExecution";
 import { errorText, useAlly, type ProjectFull, type Req } from "./shared";
@@ -34,7 +34,7 @@ export default function AllyProject() {
         <div className="cp-card">
           <dl className="al-kv">
             <dt>Estado</dt><dd><Badge status={p.status} /></dd>
-            <dt>Contratante</dt><dd>{p.customer || "—"}</dd>
+            <dt>Le paga a Crimson</dt><dd>{p.customer || "—"}</dd>
             {p.end_customer && <><dt>Cliente final</dt><dd>{p.end_customer}</dd></>}
             <dt>Sitio</dt><dd>{p.site || "—"}</dd>
             <dt>Fechas</dt><dd>{p.start_date ? fmtDate(p.start_date) : "—"} → {p.end_date ? fmtDate(p.end_date) : "—"}</dd>
@@ -58,6 +58,10 @@ export default function AllyProject() {
       {/* reunión 2, pedido 17: la ejecución completa (su equipo y Crimson), no solo sus órdenes */}
       <h2 className="h3 al-sec">Ejecución del proyecto</h2>
       {p.ejecucion ? <AllyExecution e={p.ejecucion} /> : <p className="muted">Crimson todavía no programó órdenes en este proyecto.</p>}
+      <h2 className="h3 al-sec">Alcances y responsables</h2>
+      <AllyScopeList scope={p.alcances} readOnly={readOnly} onChange={(a) => setP({ ...p, alcances: a })} />
+      <h2 className="h3 al-sec">Acuerdos</h2>
+      <AllyAgreements deals={p.acuerdos} />
       <h2 className="h3 al-sec">Mis precios</h2>
       <RequestList rows={p.requests} onRespond={precios ? setResp : undefined} />
       {resp && <div style={{ marginTop: 12 }}><QuoteForm path={`/aliado/solicitudes/${resp.id}`} method="PUT" onCancel={() => setResp(null)} onDone={() => { setResp(null); load(); }} /></div>}

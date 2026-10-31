@@ -11,7 +11,7 @@ from .accounting import (
     bank_role,
     expense_cat_role,
 )
-from .allies import AllyCompany, AllyCostRequest, AllyParticipation, AllyProductPrice, AllySharedNote
+from .allies import AllyAgreement, AllyCompany, AllyCostRequest, AllyParticipation, AllyProductPrice, AllySharedNote, ScopeItem
 from .base import TenantMixin, TimestampMixin
 from .catalog import Category, Product, ProductTax, Supplier, Tax
 from .core import (
@@ -173,7 +173,9 @@ __all__ = [
     "SupportGrant",
     "Opportunity",
     "AllyParticipation",
+    "AllyAgreement",
     "AllyCostRequest",
+    "ScopeItem",
     "AllySharedNote",
     "AllyCompany",
     "AllyProductPrice",

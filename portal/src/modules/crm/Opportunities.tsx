@@ -8,7 +8,8 @@ import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components
 import { Lookup, searchCustomers } from "../../ui/Lookup";
 import { ArchiveActions } from "../../ui/ArchiveActions";
 import { TrashButton } from "../../ui/TrashButton";
-import { AlliesPanel, PendingCosts, partyLine, type Ally, type PendingCost } from "./OpportunityAllies";
+import { AlliesPanel, PendingCosts, RelationsCard, partyLine, type Ally, type PendingCost, type Relations } from "./OpportunityAllies";
+import ScopeItems from "./ScopeItems";
 import { ShareToggle, rawLine, useAllyLog } from "./AllyLogShare";
 import { AllyProposalBanner } from "./AllyProposal";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
@@ -29,7 +30,7 @@ type Detail = Opp & {
   surveys: { id: number; number: string; kind: string; status: string }[];
   quote?: { id: number; number: string; status: string; total: string } | null;
   project?: { id: number; number: string; status: string } | null;
-  allies?: Ally[]; sees_costs?: boolean;
+  allies?: Ally[]; sees_costs?: boolean; relations?: Relations;
   /* «Solicitar levantamiento» pedido y sin atender todavía (lo decide la API, en cualquier etapa abierta) */
   survey_request?: { at: string } | null;
 };
@@ -548,8 +549,8 @@ export default function Opportunities() {
                     </select>
                   ) : <input className="input" readOnly value={open.owner || "—"} />}
                 </Field>
-                <Field label="Contratante (paga)"><input className="input" readOnly value={open.customer || "—"} title="Quien contrata y paga: a quien se cotiza y factura" /></Field>
-                <Field label="Destinatario"><input className="input" readOnly value={open.end_customer || "El mismo contratante"} title="Para quién es la instalación, si no es el contratante" /></Field>
+                <Field label="Le paga a Crimson"><input className="input" readOnly value={open.customer || "—"} title="Quien contrata y le paga a Crimson: a quien se cotiza y factura" /></Field>
+                <Field label="Cliente final"><input className="input" readOnly value={open.end_customer || open.customer || "—"} title="Para quién es la instalación (si no se indica, el mismo que paga)" /></Field>
                 <Field label="Sitio"><input className="input" readOnly value={open.site || "—"} title={open.site || undefined} /></Field>
                 <Field label="Solución"><input className="input" readOnly value={SOLUTIONS[open.solution || ""] || "—"} /></Field>
                 <Field label="Origen"><input className="input" readOnly value={open.source || "—"} /></Field>
@@ -563,7 +564,25 @@ export default function Opportunities() {
                 seesCosts={!!open.sees_costs}
                 sellers={meta?.assignees || meta?.sellers || []}
                 quoteId={open.quote?.id ?? null}
+                site={open.site}
                 onChange={(next) => { setOpen({ ...open, allies: next }); show(open.id).catch(() => undefined); load(); }}
+              />
+              {open.relations && (
+                <RelationsCard
+                  oppId={open.id}
+                  relations={open.relations}
+                  allies={open.allies || []}
+                  canEdit={canEdit}
+                  seesCosts={!!open.sees_costs}
+                  onChange={() => { show(open.id).catch(() => undefined); load(); }}
+                />
+              )}
+              <ScopeItems
+                url={`/opportunities/${open.id}/scope`}
+                editBase={`/opportunities/${open.id}/scope-items`}
+                canEdit={canEdit}
+                reloadKey={(open.allies || []).map((a) => a.id).join(",")}
+                hint="La misma lista se ve en el levantamiento y en el proyecto. El aliado asignado confirma su alcance desde su portal."
               />
               {open.surveys.length > 0 && (
                 <p style={{ fontSize: 13, margin: 0 }}>Levantamientos: {open.surveys.map((s) => <button key={s.id} className="btn btn--ghost btn--sm" style={{ marginRight: 6 }} onClick={() => nav(`/levantamientos?id=${s.id}`)}>{s.number} · {s.status}</button>)}</p>
@@ -599,7 +618,7 @@ export default function Opportunities() {
             </div>
           </Field>
           <div className="grid-3">
-            <Field label="Contratante" hint={`Quien contrata y paga a Crimson: a quien se cotiza y factura. ${allows("crm.crear") ? "Si no existe, crealo desde la lista. " : ""}Puede quedar vacío si todavía es un prospecto.`}>
+            <Field label="Quién le paga a Crimson (contratante)" hint={`Quien contrata y paga a Crimson: a quien se cotiza y factura. ${allows("crm.crear") ? "Si no existe, crealo desde la lista. " : ""}Puede quedar vacío si todavía es un prospecto.`}>
               <Lookup
                 value={form.customer_name}
                 placeholder="Buscar cliente…"

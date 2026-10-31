@@ -28,7 +28,7 @@ def _servicio(client) -> int:
 
 
 def _plan(client, ally_id, pid, **kw):
-    body = {"amount": 50000, "currency": "CRC", "mode": "fija", "next_date": date.today().isoformat(), "product_id": pid, "crear_cliente": True, **kw}
+    body = {"amount": 50000, "currency": "CRC", "mode": "fija", "service": "Soporte prioritario", "accepted": True, "next_date": date.today().isoformat(), "product_id": pid, "crear_cliente": True, **kw}
     return client.put(f"/allies/{ally_id}/plan", json=body)
 
 
@@ -51,7 +51,7 @@ def test_plan_crea_cliente_y_recurrencia(client, auth, db_session):
     ]
     assert _plan(client, a, sin_cabys).status_code == 422
     assert (
-        client.put(f"/allies/{a}/plan", json={"amount": 50000, "currency": "CRC", "mode": "fija", "next_date": "2026-11-01", "product_id": pid}).status_code
+        client.put(f"/allies/{a}/plan", json={"amount": 50000, "currency": "CRC", "mode": "fija", "service": "Soporte prioritario", "accepted": True, "next_date": "2026-11-01", "product_id": pid}).status_code
         == 422
     )
     r = _plan(client, a, pid)
@@ -191,7 +191,7 @@ def test_plan_usa_el_servicio_por_defecto(client, auth, db_session):
     prod = db_session.get(Product, cfg["plan_product_id"])
     assert prod.code == "SRV-PLATAFORMA" and prod.item_type == "servicio" and len(prod.cabys_code) == 13 and not prod.show_on_web
     a = client.post("/allies", json={"name": "Aliado Dos S.A.", "tax_id": "3-101-000002"}).json()["id"]
-    body = {"amount": 40000, "currency": "CRC", "mode": "fija", "next_date": date.today().isoformat(), "crear_cliente": True}
+    body = {"amount": 40000, "currency": "CRC", "mode": "fija", "service": "Soporte prioritario", "accepted": True, "next_date": date.today().isoformat(), "crear_cliente": True}
     assert client.put(f"/allies/{a}/plan", json=body).status_code == 200
     rec = db_session.get(Recurrence, db_session.get(AllyCompany, a).recurrence_id)
     assert rec.template["lines"][0]["product_id"] == prod.id and rec.first_run_requires_approval is True
@@ -282,7 +282,7 @@ def test_plan_revision_de_la_primera_y_cambio_de_monto(client, auth, db_session,
     tok = client.post("/auth/login", json={"email": "conta.mensualidad@ejemplo.com", "password": pw}).json()["access_token"]
     client.headers["Authorization"] = keep
     h = {"Authorization": f"Bearer {tok}"}
-    body = {"amount": 50000, "currency": "CRC", "mode": "fija", "next_date": date.today().isoformat(), "product_id": pid}
+    body = {"amount": 50000, "currency": "CRC", "mode": "fija", "service": "Soporte prioritario", "accepted": True, "next_date": date.today().isoformat(), "product_id": pid}
     assert client.put(f"/allies/{a}/plan", json={**body, "first_run_requires_approval": False}, headers=h).status_code == 403
     assert client.put(f"/allies/{a}/plan", json={**body, "first_run_requires_approval": True}, headers=h).status_code == 200
     # el admin la deja salir sola; despues sube el monto: la proxima vuelve a esperar la revision
@@ -316,7 +316,7 @@ def test_plan_contabilidad_adelanta_el_cobro_y_vuelve_la_revision(client, auth, 
     h = {"Authorization": f"Bearer {tok}"}
 
     def conta(**kw) -> bool:
-        body = {"amount": 50000, "currency": "CRC", "mode": "fija", "next_date": en(25), "product_id": pid, **kw}
+        body = {"amount": 50000, "currency": "CRC", "mode": "fija", "service": "Soporte prioritario", "accepted": True, "next_date": en(25), "product_id": pid, **kw}
         r = client.put(f"/allies/{a}/plan", json=body, headers=h)
         assert r.status_code == 200, r.text
         return r.json()["plan"]["first_run_requires_approval"]

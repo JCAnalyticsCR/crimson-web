@@ -7,6 +7,7 @@ import { api, fmtDate, openFile, type SurveySummary as Summary } from "../../lib
 import { useSession } from "../../app/session";
 import { I, Icon, Loading, Modal } from "../../ui/components";
 import { Lightbox, type Foto } from "../../ui/Lightbox";
+import ScopeItems from "../crm/ScopeItems";
 import "./survey-summary.css";
 
 const PASOS = ["Levantamiento", "Revisión", "Costeo", "Cotización"];
@@ -96,9 +97,12 @@ export default function SurveySummary({ id, onClose }: { id: number; onClose: ()
           {s.personal.length > 0 && (
             <section>
               <h4 className="ssum__h">Personal requerido</h4>
-              <ul className="ssum__list">{s.personal.map((x) => <li key={x.label}>{x.label}: {x.people} {x.people === 1 ? "persona" : "personas"} × {dias(x.days)} {Number(x.days) === 1 ? "día" : "días"}</li>)}</ul>
+              <ul className="ssum__list">{s.personal.map((x) => <li key={x.label}>{x.label}: {x.people} {x.people === 1 ? "persona" : "personas"} × {dias(x.days)} {Number(x.days) === 1 ? "día" : "días"}{x.provider_name ? ` · aporta ${x.provider_name}` : ""}</li>)}</ul>
             </section>
           )}
+
+          {/* revision 2 (A3): el mismo resumen de alcances que la oportunidad y su proyecto (solo lectura aquí) */}
+          <ScopeItems url={`/surveys/${s.id}/scope`} canEdit={false} />
 
           {s.puntos.length > 0 && (
             <section>

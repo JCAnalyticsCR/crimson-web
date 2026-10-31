@@ -344,6 +344,7 @@ def get_one(oid: int, p: Principal = Depends(require("crm_pipeline", "ver")), db
     out = _out(db, o)
     out["allies"] = [allysvc.ally_out(db, a, p) for a in allysvc.allies_of(db, p.tenant.id, opportunity_id=o.id)]
     out["parties"] = allysvc.party_names(db, o)
+    out["relations"] = allysvc.relations_out(db, o)  # A2: cliente final, aliado comercial, ejecucion y quien paga
     out["sees_costs"] = p.sees_costs
     out["surveys"] = [
         {"id": s.id, "number": s.number, "kind": s.kind, "status": s.status}

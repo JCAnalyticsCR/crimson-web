@@ -16,8 +16,12 @@ export function useAlly() {
   return { preview, readOnly: preview, isTech: role === "tecnico_aliado", role, company, can: (a: string) => allows(`aliado.${a}`), personName: allyPreview?.user_name ?? null };
 }
 
+type Att = { id: number; url: string; filename: string };
+/** Solicitud de precio: la PETICIÓN de Crimson (alcance, partidas, sitio, inclusiones, exclusiones, adjuntos) y SU oferta. */
 export type Req = {
-  id: number; participation_id: number; opportunity_id: number; what: string; due_date: string | null; status: string; source: "crimson" | "aliado";
+  id: number; participation_id: number; opportunity_id: number; what: string; due_date: string | null; status: string; status_label?: string; source: "crimson" | "aliado";
+  scope?: string | null; site?: string | null; req_lines?: { concept: string; quantity: string | null; unit: string | null }[]; inclusions?: string | null;
+  req_exclusions?: string | null; req_attachments?: Att[]; seen_at?: string | null; sent_at?: string | null; agreement_version?: number | null; conditions?: string | null;
   amount: string | null; currency: string; valid_until: string | null; exclusions: string | null;
   lines: { concept: string; quantity: string; unit: string | null; unit_price: string }[]; attachments: { id: number; url: string; filename: string }[];
   responded_at: string | null; responsible: string | null; can_respond: boolean; created_at: string;
@@ -30,6 +34,8 @@ export type OppRow = {
   approval?: "pendiente" | "aprobada" | "rechazada" | null; approval_label?: string | null; proposed_by_me?: boolean;
   /** el motivo con el que Crimson no la aprobó (solo en la que propuso su empresa) */
   approval_reason?: string | null;
+  /** A2: lo que es su empresa aquí (aliado comercial, responsable de ejecución, le paga a Crimson) */
+  my_relations?: string[];
 };
 export type Contact = { name?: string | null; email?: string | null; phone?: string | null };
 /** Reunión 2, pedido 17: la ejecución del proyecto en común. Las OT de su equipo se abren (id); las de Crimson, solo el resumen. */
@@ -37,9 +43,29 @@ export type ExecOrder = { id: number | null; number: string; title: string; kind
 export type Ejecucion = { project: { id: number; number: string; name: string; status: string; start_date: string | null; end_date: string | null }; orders: ExecOrder[]; total: number; finalizadas: number };
 /** Seguimiento de la bitácora que Crimson marcó «Visible para el aliado» (pedido 15). */
 export type Seguimiento = { when: string | null; author: string | null; text: string };
+/** Alcances y responsables que ve el aliado (revisión 2): los suyos (mine, con acciones) y los compartidos. */
+export type AllyScopeItem = {
+  id: number; kind: string; kind_label: string; description: string; quantity: string | null; unit: string | null;
+  supplier: { kind: string; name: string }; executor: { kind: string; name: string }; status: string; status_label: string; shared: boolean; notes: string | null;
+  confirmed_at: string | null; confirmed_by: string | null; mine: boolean; can_act: boolean;
+};
+export type AllyScope = { items: AllyScopeItem[]; summary: { total: number; por_estado: Record<string, number>; por_asignar: number; completados: number } };
+export type OfferLine = { concept: string; quantity: string; unit: string | null; unit_price: string };
+export type AllyAgreement = {
+  id: number; request_id: number; version: number; status: string; what: string; scope: string | null; amount: string | null; currency: string; valid_until: string | null;
+  conditions: string | null; exclusions: string | null; lines: OfferLine[] | null; shared: boolean; changes: string[]; note: string | null; created_at: string; versions?: AllyAgreement[];
+};
+/** Punto 10: sus acuerdos completos; de los demás, los montos acordados que Crimson comparte; con costos abiertos, sus ofertas originales. */
+export type AllyDeals = {
+  mine: AllyAgreement[];
+  shared: { ally: string; what: string; amount: string | null; currency: string; valid_until: string | null; version: number; lines: OfferLine[] | null }[];
+  open_costs: boolean;
+  open_offers: { ally: string; what: string; amount: string | null; currency: string; lines: OfferLine[]; status: string }[];
+};
 export type OppFull = OppRow & {
   contact: { name: string | null; phone: string | null };
-  participations: { id: number; role: string; scope: string | null; scope_lines: string[]; contacts: Record<string, Contact> }[];
+  participations: { id: number; role: string; relations?: string[]; scope: string | null; scope_lines: string[]; contacts: Record<string, Contact> }[];
+  alcances?: AllyScope; acuerdos?: AllyDeals;
   requests: Req[]; can_survey: boolean;
   surveys: { id: number; number: string; kind: string; status: string; review_status: string | null; visit_date: string | null; technician: string | null; sent_at: string | null }[];
   /* pedido 14: etapa con su próxima acción, seguimientos compartidos y ejecución; el total de la cotización solo si Crimson lo habilitó */
@@ -48,12 +74,13 @@ export type OppFull = OppRow & {
 };
 export type ProjectRow = {
   id: number; number: string; name: string; status: string; customer: string | null; end_customer: string | null; site: string | null;
-  start_date: string | null; end_date: string | null; delivered_at: string | null; orders_total: number; orders_done: number; my_roles: string[];
+  start_date: string | null; end_date: string | null; delivered_at: string | null; orders_total: number; orders_done: number; my_roles: string[]; my_relations?: string[];
 };
 export type Earnings = { moneda?: string; totales: Record<string, string | number>; movimientos?: { concepto?: string; monto?: string; estado?: string; fecha?: string }[] } | null;
 export type ProjectFull = ProjectRow & {
   scope: string | null; my_scope_lines: string[]; orders: { id: number; number: string; title: string; kind: string; status: string; scheduled_at: string | null; technician: string | null }[];
   requests: Req[]; lo_que_recibo: Earnings; assets_count: number; my_participations: { id: number; role: string }[]; ejecucion: Ejecucion;
+  alcances?: AllyScope; acuerdos?: AllyDeals;
 };
 export type Obs = { id: number; round: number; point_code: string | null; text: string; created_by: string; created_at: string; resolved: boolean; resolved_at: string | null; resolved_by: string | null; resolution: string | null };
 export type Point = { id?: number; code: string; kind?: string | null; label: string | null; data: Record<string, unknown>; data_status: Record<string, string> | null; photos: string[]; notes: string | null };
@@ -101,10 +128,16 @@ export const ESTADO_OPP: Record<string, string> = {
   negociacion: "Negociación", ganada: "Ganada", perdida: "Perdida",
 };
 export const ESTADO_PRECIO: Record<string, { label: string; tone: "ok" | "warn" | "bad" | "info" | "muted" }> = {
-  solicitado: { label: "Crimson espera su precio", tone: "warn" },
-  recibido: { label: "Enviado · en revisión de Crimson", tone: "info" },
-  aprobado: { label: "Aprobado", tone: "ok" },
-  rechazado: { label: "No aprobado", tone: "muted" },
+  enviado: { label: "Crimson espera su oferta", tone: "warn" },
+  visto: { label: "Crimson espera su oferta", tone: "warn" },
+  vencido: { label: "Vencida · Crimson espera su oferta", tone: "bad" },
+  respondido: { label: "Oferta enviada · en revisión de Crimson", tone: "info" },
+  aceptado: { label: "Aceptada", tone: "ok" },
+  rechazado: { label: "No aceptada", tone: "muted" },
+  /* de antes de la revisión 2 */
+  solicitado: { label: "Crimson espera su oferta", tone: "warn" },
+  recibido: { label: "Oferta enviada · en revisión de Crimson", tone: "info" },
+  aprobado: { label: "Aceptada", tone: "ok" },
 };
 export const TONO_APROBACION: Record<string, "ok" | "warn" | "muted"> = { pendiente: "warn", aprobada: "ok", rechazada: "muted" };
 export const ESTADO_TICKET: Record<string, string> = {

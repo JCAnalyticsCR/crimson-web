@@ -9,11 +9,13 @@ import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal } from "../../ui/components";
 import type { InviteOut } from "../cliente/InviteLink";
 import { Lookup, searchCustomers, searchProducts, type LookupItem } from "../../ui/Lookup";
+import { MarkupFormula } from "./markup";
+import "../crm/opportunities.css";
 
 export type AllyRow = {
   id: number; name: string; tax_id: string | null; email: string | null; phone: string | null; state: "activo" | "suspendido" | "inactivo"; suspended_reason: string | null;
   users_active: number; invitations_pending: number; last_login: string | null; seats_used: number; seats_max: number | null; proyectos_en_comun: number; oportunidades_abiertas: number;
-  plan: { amount: string | null; currency: string; mode: string; al_dia: boolean; activo: boolean };
+  plan: { amount: string | null; currency: string; mode: string; al_dia: boolean; activo: boolean; servicio?: string | null; servicio_aceptado?: boolean };
 };
 type PlanDefault = { amount: string | number | null; currency: "CRC" | "USD"; mode: "fija" | "por_usuario" };
 type Config = {
@@ -106,13 +108,20 @@ function Ajustes() {
     try { const x = await api<Config>("/allies/config", { method: "PUT", json }); setC(x); setMk(x.markup_pct ?? ""); toast("Guardado"); }
     catch (e) { toast(e instanceof Error ? e.message : "No se pudo guardar", "bad"); }
   };
-  const ej = 100 * (1 + (Number(mk) || 0) / 100);
+  const pct = mk === "" ? null : Number(String(mk).replace(",", "."));
   return (
-    <Card title="Precio y alcance para aliados">
+    <>
+    {/* punto 12A: el recargo del aliado va aparte del margen de la tienda */}
+    <Card title="Recargo del aliado (no es el margen de la tienda)">
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <Field label="Recargo del aliado sobre el costo (%)" hint={`Ejemplo: costo 100 → aliado ${ej.toLocaleString("es-CR", { maximumFractionDigits: 2 })}`}>
+        <Field label="Recargo del aliado sobre el costo (%)" hint="Por defecto para todos los aliados; cada ficha puede tener uno propio.">
           <input className="input input--mono" style={{ maxWidth: 120 }} inputMode="decimal" value={mk} onChange={(e) => setMk(e.target.value)} onBlur={() => mk !== (c.markup_pct ?? "") && guardar({ markup_pct: mk === "" ? null : mk })} />
         </Field>
+        <MarkupFormula pct={pct} />
+      </div>
+    </Card>
+    <Card title="Qué ve el aliado">
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
         <Field label="Activos que ve el aliado">
           <select className="select" value={c.assets_scope} onChange={(e) => guardar({ assets_scope: e.target.value as Config["assets_scope"] })}>
             <option value="proyectos">De proyectos en común</option>
@@ -129,6 +138,7 @@ function Ajustes() {
         )}
       </div>
     </Card>
+    </>
   );
 }
 
@@ -149,7 +159,8 @@ function MensualidadAjustes() {
   const pd: PlanDefault = c.plan_default || { amount: null, currency: "CRC", mode: "fija" };
   const actual = pd.amount == null ? "" : String(pd.amount);
   return (
-    <Card title="Mensualidad de la plataforma">
+    <Card title="Servicio adicional por defecto (opcional)">
+      <p className="meta" style={{ marginTop: 0 }}>El acceso básico al portal es parte del servicio compartido y no se cobra. Esto solo aplica a un servicio adicional que se define y el aliado acepta en su ficha.</p>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
         <Field label="Servicio facturado" hint={c.plan_product ? `${c.plan_product.code} · CABYS ${c.plan_product.cabys_code || "sin CABYS"}` : "Producto de tipo servicio con su CABYS"}>
           <Lookup value={prod?.label || c.plan_product?.name || ""} fetcher={searchProducts} onSelect={(it) => { if (!it) return; setProd(it); guardar({ plan_product_id: it.id }); }} placeholder="Buscar servicio" />
@@ -164,7 +175,7 @@ function MensualidadAjustes() {
           <select className="select" value={pd.mode} onChange={(e) => guardar({ plan_default_mode: e.target.value })}><option value="fija">Fija por empresa</option><option value="por_usuario">Por usuario activo</option></select>
         </Field>
       </div>
-      <p className="meta" style={{ marginBottom: 0 }}>Con esto arranca el cobro mensual de cada aliado nuevo (se puede cambiar en su ficha). La primera factura de cada plan espera tu «Aprobar y enviar» en Aprobaciones; las siguientes salen solas con su PDF y enlace de pago.</p>
+      <p className="meta" style={{ marginBottom: 0 }}>Con esto arranca el cobro del servicio adicional cuando se agrega en la ficha de un aliado. La primera factura de cada plan espera tu «Aprobar y enviar» en Aprobaciones; las siguientes salen solas con su PDF y enlace de pago.</p>
     </Card>
   );
 }
@@ -194,7 +205,7 @@ export default function Allies() {
       {!rows ? <div className="spinner" /> : rows.length ? (
         <div style={{ overflowX: "auto" }}>
           <table className="table">
-            <thead><tr><th>Aliado</th><th>Cédula</th><th>Estado</th><th>Acceso al portal</th><th>En común</th><th>Mensualidad</th></tr></thead>
+            <thead><tr><th>Aliado</th><th>Cédula</th><th>Estado</th><th>Acceso al portal</th><th>En común</th><th>Servicio adicional</th></tr></thead>
             <tbody>
               {rows.map((a) => (
                 <tr key={a.id}>
@@ -205,7 +216,7 @@ export default function Allies() {
                     ? <>{a.users_active} activo(s){a.seats_max ? ` de ${a.seats_max}` : ""}<div className="meta">{a.last_login ? `último ingreso ${fmtDate(a.last_login.slice(0, 10))}` : "todavía no entra"}{a.invitations_pending ? ` · ${a.invitations_pending} invitación(es) pendiente(s)` : ""}</div></>
                     : a.invitations_pending ? <span className="badge badge--warn">Invitación pendiente</span> : <span className="badge badge--muted">Sin usuarios</span>}</td>
                   <td>{a.proyectos_en_comun} proyecto(s) · {a.oportunidades_abiertas} oportunidad(es) abiertas</td>
-                  <td>{a.plan.activo ? <span className={`badge badge--${a.plan.al_dia ? "ok" : "bad"}`}>{a.plan.al_dia ? "Al día" : "Vencida"}</span> : <span className="muted">Sin plan</span>}</td>
+                  <td>{a.plan.activo ? <span className={`badge badge--${a.plan.al_dia ? "ok" : "bad"}`}>{a.plan.al_dia ? "Al día" : "Vencida"}</span> : <span className="muted">{a.plan.servicio ? "Esperando aceptación" : "Solo acceso básico"}</span>}{a.plan.activo && !a.plan.servicio && <div className="meta" style={{ color: "var(--warn)" }}>Sin servicio definido</div>}</td>
                 </tr>
               ))}
             </tbody>

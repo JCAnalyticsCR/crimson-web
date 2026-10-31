@@ -7,7 +7,8 @@ import { useSession } from "../../app/session";
 import { Badge, Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { ArchiveActions } from "../../ui/ArchiveActions";
 import { TrashButton } from "../../ui/TrashButton";
-import { ALLY_ROLES, CONTACT_FUNCS, partyLine, type Ally } from "../crm/OpportunityAllies";
+import { CONTACT_FUNCS, partyLine, relationsOf, type Ally } from "../crm/OpportunityAllies";
+import ScopeItems from "../crm/ScopeItems";
 import { ReservationRow, type Reservation } from "../inventory/Inventory";
 import DealTerms from "../commissions/DealTerms";
 
@@ -211,7 +212,7 @@ function Detail({ id }: { id: number }) {
           <div className="prj-allies">
             {(p.allies || []).map((a) => (
               <div key={a.id} className="prj-ally">
-                <b>{a.name}</b> <span className="badge badge--muted">{ALLY_ROLES[a.role] || a.role}</span>
+                <b>{a.name}</b> {relationsOf(a).map((x) => <span key={x} className="badge badge--muted" style={{ marginRight: 4 }}>{x}</span>)}
                 {a.scope && <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>{a.scope}</p>}
                 {Object.entries(a.contacts || {}).map(([k, c]) => <div key={k} className="meta" style={{ overflowWrap: "anywhere" }}>{CONTACT_FUNCS[k] || k}: {[c.name, c.phone, c.email].filter(Boolean).join(" · ")}</div>)}
                 {a.deal && (
@@ -226,6 +227,14 @@ function Detail({ id }: { id: number }) {
           </div>
         </Card>
       )}
+
+      {/* revision 2 (A3): el mismo resumen de "Alcances y responsables" que la oportunidad y el levantamiento */}
+      <ScopeItems
+        url={`/projects/${p.id}/scope`}
+        canEdit={false}
+        hint="Se definen en la oportunidad o en el levantamiento: aquí se ve el mismo resumen."
+        extra={p.opportunity_id && allows("crm_pipeline.ver") ? <Link className="btn btn--ghost btn--sm" to={`/oportunidades?id=${p.opportunity_id}`}>Editar en la oportunidad</Link> : undefined}
+      />
 
       <Card
         title="Materiales: planificado contra bodega"

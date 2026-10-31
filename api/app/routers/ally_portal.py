@@ -13,6 +13,15 @@ Aislamiento (las reglas que no se negocian, aliado_final §4):
 - El aliado nunca entra a un endpoint interno: get_principal lo rechaza (core/deps.py). Las escrituras usan las
   funciones publicas de fieldwork/support_desk DESPUES del control de alcance de aqui.
 - "Ver como este aliado" (admin, X-View-As-Ally): mismas reglas y datos reales, solo lectura (core/ally.py).
+
+Revision 2 (Andres, 30/10):
+- Solicitudes de precio: el aliado nunca ve un borrador. Al abrir la solicitud (o la oportunidad que la muestra) queda
+  "visto" con la fecha. Su OFERTA lleva precio o desglose, moneda, vigencia, condiciones, sus exclusiones y adjuntos.
+- Alcances y responsables: ve las partidas que le tocan y las compartidas (de otro responsable, solo el nombre de la
+  empresa y el estado); confirma y avanza las suyas (POST /alcances/{id}).
+- Transparencia por niveles (punto 10): sus acuerdos completos (con versiones) y, de los demas participantes, los
+  montos ACORDADOS que Crimson comparte; el desglose de la oferta original de otro solo con "costos abiertos".
+- Mensualidad (punto 13): el acceso basico no se cobra; un servicio adicional se acepta desde Suscripcion.
 """
 
 from __future__ import annotations
@@ -36,6 +45,7 @@ from ..core.config import settings as cfg
 from ..core.db import get_db
 from ..core.ratelimit import SlidingWindow, ally_assign_limiter, ally_invite_limiter, ally_media_limiter, ally_notify_limiter, ally_ticket_limiter
 from ..models import (
+    AllyAgreement,
     AllyCostRequest,
     AllyParticipation,
     Category,
@@ -48,6 +58,7 @@ from ..models import (
     Opportunity,
     Product,
     Project,
+    ScopeItem,
     SupportNote,
     SupportTicket,
     Survey,
@@ -55,9 +66,11 @@ from ..models import (
     User,
     WorkOrder,
 )
-from ..models.allies import COST_OPEN
+from ..models.allies import COST_WAITING
+from ..services import allies as costsvc
 from ..services import ally_access, ally_pricing
 from ..services import media_access as ma
+from ..services import scope_items as scopesvc
 from ..services import sla as slasvc
 from ..services.archive import live
 from ..services.documents import audit, local_date
@@ -189,30 +202,141 @@ def _my_parts(db: Session, ctx: AllyCtx, opportunity_id: int | None = None, proj
     return list(db.scalars(q.order_by(AllyParticipation.id)))
 
 
+ALLY_CAN_RESPOND = ("enviado", "visto", "respondido")  # vencida (enviado/visto con la fecha pasada) tambien
+
+
 def _request_out(db: Session, ctx: AllyCtx, r: AllyCostRequest) -> dict:
+    """La peticion de Crimson tal cual (sin montos de Crimson) y la oferta de SU empresa."""
+    st = costsvc.effective_status(r)
+    g = costsvc.current_agreement(db, r.id) if r.status == "aceptado" else None
     return {
         "id": r.id,
         "participation_id": r.participation_id,
         "opportunity_id": r.opportunity_id,
         "what": r.what,
+        # la peticion
+        "scope": r.scope,
+        "site": r.site,
+        "req_lines": [{k: x.get(k) for k in ("concept", "quantity", "unit")} for x in (r.req_lines or [])],
+        "inclusions": r.inclusions,
+        "req_exclusions": r.req_exclusions,
+        "req_attachments": _sign(ctx, r.req_attachments or []),
         "due_date": r.due_date,
-        "status": r.status,
+        "status": st,
+        "status_label": costsvc.STATE_LABEL.get(st, st),
         "source": r.source or "crimson",
+        "seen_at": r.seen_at,
+        # su oferta
         "amount": r.amount,
         "currency": r.currency,
         "valid_until": r.valid_until,
+        "conditions": r.conditions,
         "exclusions": r.exclusions,
         "lines": r.lines or [],
         "attachments": _sign(ctx, r.attachments or []),
         "responded_at": r.responded_at,
-        "responsible": _first(_user_name(db, r.responsible_id)),
-        "can_respond": r.status in COST_OPEN and ctx.preview_by is None,
+        "agreement_version": g.version if g is not None and g.status == "vigente" else None,
+        "responsible": _first(_user_name(db, r.responsible_id)),  # responsable interno de seguimiento (de pila)
+        "can_respond": r.status in ALLY_CAN_RESPOND and ctx.preview_by is None,
         "created_at": r.created_at,
+        "sent_at": r.sent_at,
     }
 
 
 def _requests_of(db: Session, ctx: AllyCtx, parts: list[AllyParticipation]) -> list[dict]:
-    return [_request_out(db, ctx, r) for a in parts for r in a.requests]
+    return [_request_out(db, ctx, r) for a in parts for r in a.requests if r.status != "borrador"]
+
+
+def _mark_seen(db: Session, ctx: AllyCtx, rows: list[AllyCostRequest]) -> bool:
+    """Punto 9: "si lo vio y cuando". La primera vez que el aliado (no la vista previa del admin) abre una solicitud
+    enviada queda "visto"; la bitacora de la oportunidad lo dice."""
+    if ctx.preview_by is not None or not ctx.p.can("aliado", "precios"):
+        return False
+    from .pipeline import _log
+
+    hubo = False
+    for r in rows:
+        if r.status == "borrador" or r.seen_at is not None:
+            continue
+        r.seen_at, r.seen_by = _now(), ctx.p.user.id
+        if r.status == "enviado":
+            r.status = "visto"
+        o = db.get(Opportunity, r.opportunity_id)
+        if o is not None:
+            _log(o, f"{ctx.p.user.full_name} ({ctx.company.name})", f"vio la solicitud de precio «{r.what[:120]}»")
+        hubo = True
+    return hubo
+
+
+def _name_for_ally(ctx: AllyCtx, a: AllyParticipation) -> str:
+    """De otra empresa de la oportunidad el aliado ve solo el nombre (punto 10: quien es responsable de que)."""
+    return a.name
+
+
+def _scope_for_ally(db: Session, ctx: AllyCtx, o: Opportunity, parts: list[AllyParticipation]) -> dict:
+    """Alcances y responsables que ve el aliado: los suyos (con acciones) y los compartidos."""
+    mine = {a.id for a in parts}
+    allp = scopesvc.participations(db, ctx.p.tenant.id, o.id)
+    rows = scopesvc.ally_items(db, ctx.p.tenant.id, o.id, mine)
+    team = ctx.scope.team_user_ids()
+
+    def who(uid: int | None) -> str | None:
+        return _user_name(db, uid) if uid in team else ("Crimson" if uid else None)
+
+    items = []
+    for it, es_mia in rows:
+        x = scopesvc.item_out(db, it, allp, mask=lambda pid: _name_for_ally(ctx, allp[pid]), who=who)
+        x.pop("position", None)
+        x["mine"] = es_mia
+        x["can_act"] = es_mia and ctx.preview_by is None and it.status != "completado" and ctx.p.can("aliado", "oportunidades")
+        items.append(x)
+    return {"items": items, "summary": scopesvc.summary([it for it, _ in rows], allp)}
+
+
+def _agreements_for_ally(db: Session, ctx: AllyCtx, o: Opportunity, parts: list[AllyParticipation]) -> dict:
+    """Punto 11 y 10: sus acuerdos (todas las versiones) y los montos acordados de los demas que Crimson comparte. El
+    desglose de la oferta original de otro participante solo con costos abiertos. Nunca costos internos ni margen."""
+    mine = {a.id for a in parts}
+    allp = scopesvc.participations(db, ctx.p.tenant.id, o.id)
+    rows = costsvc.agreements_of(db, opportunity_id=o.id)
+    by_req: dict[int, list[AllyAgreement]] = {}
+    for g in rows:
+        by_req.setdefault(g.request_id, []).append(g)
+    propios, comunes = [], []
+    for versions in by_req.values():
+        cur = versions[-1]
+        if cur.participation_id in mine:
+            item = costsvc.agreement_out(db, cur)
+            item.pop("created_by", None)
+            item["versions"] = [{k: v for k, v in costsvc.agreement_out(db, g).items() if k != "created_by"} for g in reversed(versions)]
+            propios.append(item)
+        elif cur.status == "vigente" and cur.shared and cur.participation_id in allp:
+            comunes.append(
+                {
+                    "ally": _name_for_ally(ctx, allp[cur.participation_id]),
+                    "what": cur.what,
+                    "amount": cur.amount,
+                    "currency": cur.currency,
+                    "valid_until": cur.valid_until,
+                    "version": cur.version,
+                    "lines": (cur.lines or []) if o.ally_open_costs else None,
+                }
+            )
+    abiertas = []
+    if o.ally_open_costs:
+        # la oferta original de los demas (respondida o aceptada y compartida): concepto, cantidad y precio unitario
+        otros = [a for pid, a in allp.items() if pid not in mine]
+        for a in otros:
+            for r in a.requests:
+                if r.status not in ("respondido", "aceptado") or r.amount is None:
+                    continue
+                g = costsvc.current_agreement(db, r.id)
+                if g is not None and not g.shared:
+                    continue
+                abiertas.append(
+                    {"ally": _name_for_ally(ctx, a), "what": r.what, "amount": r.amount, "currency": r.currency, "lines": r.lines or [], "status": r.status}
+                )
+    return {"mine": propios, "shared": comunes, "open_costs": bool(o.ally_open_costs), "open_offers": abiertas}
 
 
 def _customer_name(db: Session, cid: int | None, contact: dict | None = None) -> str | None:
@@ -238,7 +362,8 @@ def _opp_out(db: Session, ctx: AllyCtx, o: Opportunity, full: bool = False) -> d
         "site": o.site,
         "crimson_owner": owner.full_name if owner else None,
         "my_roles": sorted({a.role for a in parts}),
-        "pending_requests": sum(1 for a in parts for r in a.requests if r.status == "solicitado"),
+        "my_relations": sorted({x for a in parts for x in _my_relations(db, o, a)}),
+        "pending_requests": sum(1 for a in parts for r in a.requests if r.status in COST_WAITING),
         "project": {"id": pr.id, "number": pr.number, "status": pr.status} if pr else None,
         "created_at": o.created_at,
         # propuesta por un aliado (item 16): solo la propia; de otra empresa no dice nada
@@ -252,9 +377,21 @@ def _opp_out(db: Session, ctx: AllyCtx, o: Opportunity, full: bool = False) -> d
         contact = o.contact or {}
         out["contact"] = {"name": contact.get("name"), "phone": contact.get("phone")}
         out["participations"] = [
-            {"id": a.id, "role": a.role, "scope": a.scope, "scope_lines": a.scope_lines or [], "contacts": a.contacts or {}} for a in parts
+            {
+                "id": a.id,
+                "role": a.role,
+                "relations": _my_relations(db, o, a),
+                "scope": a.scope,
+                "scope_lines": a.scope_lines or [],
+                "contacts": a.contacts or {},
+            }
+            for a in parts
         ]
+        if _mark_seen(db, ctx, [r for a in parts for r in a.requests]):
+            db.commit()
         out["requests"] = _requests_of(db, ctx, parts)
+        out["alcances"] = _scope_for_ally(db, ctx, o, parts)
+        out["acuerdos"] = _agreements_for_ally(db, ctx, o, parts)
         out["can_survey"] = (
             (o.kind or "proyecto") != "venta"
             and o.status not in OPP_CLOSED
@@ -263,6 +400,16 @@ def _opp_out(db: Session, ctx: AllyCtx, o: Opportunity, full: bool = False) -> d
         )
         out.update(_opp_extra(db, ctx, o, pr))
     return out
+
+
+def _my_relations(db: Session, o: Opportunity, a: AllyParticipation) -> list[str]:
+    """A2: que es SU empresa en esta oportunidad (aliado comercial, responsable de ejecucion, le paga a Crimson)."""
+    comp_customer = db.get(Customer, o.customer_id) if o.customer_id else None
+    from ..models import AllyCompany
+
+    comp = db.get(AllyCompany, a.ally_company_id) if a.ally_company_id else None
+    payer = bool(comp_customer and comp and comp.customer_id == comp_customer.id)
+    return costsvc.relation_labels(a, payer)
 
 
 # pregunta 8: el total sale solo de una cotizacion que Crimson ya le envio al cliente (no un borrador "creado")
@@ -373,6 +520,7 @@ def _project_out(db: Session, ctx: AllyCtx, pr: Project, full: bool = False) -> 
         "orders_total": len(orders),
         "orders_done": sum(1 for x in orders if x.status == "finalizada"),
         "my_roles": sorted({a.role for a in parts}),
+        "my_relations": sorted({x for a in parts for x in _my_relations(db, db.get(Opportunity, a.opportunity_id), a)}),
     }
     if full:
         names = fw._names(db, orders, ctx.p.tenant.id) if orders else {}
@@ -394,6 +542,11 @@ def _project_out(db: Session, ctx: AllyCtx, pr: Project, full: bool = False) -> 
             for x in orders
         ]
         out["requests"] = _requests_of(db, ctx, parts)
+        o = db.scalar(select(Opportunity).where(Opportunity.id == parts[0].opportunity_id, Opportunity.tenant_id == ctx.p.tenant.id)) if parts else None
+        if o is not None:
+            mias = [a for a in parts if a.opportunity_id == o.id]
+            out["alcances"] = _scope_for_ally(db, ctx, o, mias)
+            out["acuerdos"] = _agreements_for_ally(db, ctx, o, mias)
         econ = _economia()
         out["lo_que_recibo"] = econ.ally_project_earnings(db, ctx.p.tenant, ctx.company.id, pr.id, for_ally=True) if econ else None
         out["assets_count"] = db.scalar(select(func.count()).select_from(CustomerAsset).where(CustomerAsset.project_id == pr.id, *ctx.scope.assets())) or 0
@@ -432,6 +585,7 @@ def _survey_ally_out(db: Session, ctx: AllyCtx, s: Survey, full: bool = False) -
     if s.technician_id not in team:
         # uno de Crimson que el aliado solo ve (item 18): de su tecnico, el nombre de pila y sin su id interno
         out["technician"], out["technician_id"] = _first(out.get("technician")), None
+    out["labor"] = fw.labor_out(db, s, mask=lambda a: a.name if a.ally_company_id == ctx.company.id else "Otro aliado")
     out["visit_tech_ids"] = [i for i in raw.get("visit_tech_ids") or [] if i in team]
     out["visit_techs"] = [n for n in (_user_name(db, i) for i in out["visit_tech_ids"]) if n]
     obs = sorted(s.observations, key=lambda o: (o.resolved_at is not None, -o.review_round, o.id))
@@ -711,7 +865,7 @@ def inicio(ctx: AllyCtx = Depends(need("ver")), db: Session = Depends(get_db)):
     pend = db.scalars(
         select(AllyCostRequest).where(
             AllyCostRequest.participation_id.in_(sc.participations().with_only_columns(AllyParticipation.id)),
-            AllyCostRequest.status == "solicitado",
+            AllyCostRequest.status.in_(COST_WAITING),
             AllyCostRequest.opportunity_id.in_(select(Opportunity.id).where(*sc.opportunities())),
         )
     ).all()
@@ -894,10 +1048,12 @@ def solicitudes(pendientes: bool = False, ctx: AllyCtx = Depends(need("precios")
     if not parts:
         return []
     q = select(AllyCostRequest).where(
-        AllyCostRequest.participation_id.in_(list(parts)), AllyCostRequest.opportunity_id.in_(select(Opportunity.id).where(*ctx.scope.opportunities()))
+        AllyCostRequest.participation_id.in_(list(parts)),
+        AllyCostRequest.opportunity_id.in_(select(Opportunity.id).where(*ctx.scope.opportunities())),
+        costsvc.not_draft(),
     )
     if pendientes:
-        q = q.where(AllyCostRequest.status == "solicitado")
+        q = q.where(AllyCostRequest.status.in_(COST_WAITING))
     rows = db.scalars(q.order_by(AllyCostRequest.due_date.is_(None), AllyCostRequest.due_date, AllyCostRequest.id.desc()).limit(300)).all()
     out = []
     for r in rows:
@@ -907,6 +1063,32 @@ def solicitudes(pendientes: bool = False, ctx: AllyCtx = Depends(need("precios")
         item["role"] = parts[r.participation_id].role
         out.append(item)
     return out
+
+
+def _my_request(db: Session, ctx: AllyCtx, rid: int) -> AllyCostRequest:
+    r = db.scalar(
+        select(AllyCostRequest).where(
+            AllyCostRequest.id == rid,
+            AllyCostRequest.participation_id.in_(ctx.scope.participations().with_only_columns(AllyParticipation.id)),
+            AllyCostRequest.opportunity_id.in_(select(Opportunity.id).where(*ctx.scope.opportunities())),
+            costsvc.not_draft(),
+        )
+    )
+    if r is None:
+        raise HTTPException(404, "Solicitud no encontrada")
+    return r
+
+
+@router.get("/solicitudes/{rid}")
+def solicitud(rid: int, ctx: AllyCtx = Depends(need("precios")), db: Session = Depends(get_db)):
+    """Abrir la solicitud la marca "vista" (la primera vez)."""
+    r = _my_request(db, ctx, rid)
+    if _mark_seen(db, ctx, [r]):
+        db.commit()
+    o = db.get(Opportunity, r.opportunity_id)
+    item = _request_out(db, ctx, r)
+    item["opportunity"] = {"id": o.id, "number": o.number, "title": o.title, "site": o.site} if o else None
+    return item
 
 
 class QuoteLineIn(BaseModel):
@@ -927,6 +1109,7 @@ class AllyQuoteIn(BaseModel):
     lines: list[QuoteLineIn] | None = Field(None, max_length=60)
     currency: str = Field("CRC", pattern="^[A-Z]{3}$")
     valid_until: date | None = None
+    conditions: str | None = Field(None, max_length=4000)  # forma de pago, plazos, garantia
     exclusions: str | None = Field(None, max_length=4000)
     attachment_ids: list[int] | None = Field(None, max_length=10)
 
@@ -952,10 +1135,15 @@ def _apply_quote(db: Session, ctx: AllyCtx, r: AllyCostRequest, data: AllyQuoteI
         r.amount = data.amount
     r.currency = data.currency
     r.valid_until = data.valid_until
+    r.conditions = data.conditions
     r.exclusions = data.exclusions
     if data.attachment_ids is not None:
         r.attachments = _attachments(db, ctx, data.attachment_ids)
-    r.status = "recibido"
+    r.status = "respondido"
+    r.sent_at = r.sent_at or _now()
+    r.seen_at = r.seen_at or _now()
+    r.seen_by = r.seen_by or ctx.p.user.id
+    r.response_channel = "portal"
     r.responded_by, r.responded_at = ctx.p.user.id, _now()
 
 
@@ -984,16 +1172,8 @@ def _tope_asignar(ctx: AllyCtx) -> None:
 @router.put("/solicitudes/{rid}")
 def responder(rid: int, data: AllyQuoteIn, ctx: AllyCtx = Depends(need("precios")), db: Session = Depends(get_db)):
     _tope_avisos(ctx)
-    r = db.scalar(
-        select(AllyCostRequest).where(
-            AllyCostRequest.id == rid,
-            AllyCostRequest.participation_id.in_(ctx.scope.participations().with_only_columns(AllyParticipation.id)),
-            AllyCostRequest.opportunity_id.in_(select(Opportunity.id).where(*ctx.scope.opportunities())),
-        )
-    )
-    if r is None:
-        raise HTTPException(404, "Solicitud no encontrada")
-    if r.status not in COST_OPEN:
+    r = _my_request(db, ctx, rid)
+    if r.status not in ALLY_CAN_RESPOND:
         raise HTTPException(409, "Crimson ya resolvió esta solicitud")
     _apply_quote(db, ctx, r, data)
     o = db.get(Opportunity, r.opportunity_id)
@@ -1035,6 +1215,56 @@ def oportunidad_precios(oid: int, data: AllyOfferIn, ctx: AllyCtx = Depends(need
     _tope_avisos(ctx)
     o = ctx.scope.one(Opportunity, oid, ctx.scope.opportunities(), "Oportunidad")
     return _offer(db, ctx, o, _my_parts(db, ctx, opportunity_id=o.id), data)
+
+
+# ---------- Alcances y responsables: el aliado confirma y avanza los suyos ----------
+SCOPE_NEXT = {"por_confirmar": ("confirmado",), "confirmado": ("en_curso", "completado"), "en_curso": ("completado",)}
+
+
+class AllyScopeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    status: str = Field(pattern="^(confirmado|en_curso|completado)$")
+    note: str | None = Field(None, max_length=500)
+
+
+@router.post("/alcances/{iid}")
+def alcance(iid: int, data: AllyScopeIn, ctx: AllyCtx = Depends(need("oportunidades")), db: Session = Depends(get_db)):
+    """El aliado asignado confirma su alcance (por confirmar -> confirmado) y despues marca el avance. Solo las partidas
+    que suministra o ejecuta SU empresa; las de otro responsable responden 404."""
+    from .pipeline import _log
+
+    mine = set(db.scalars(ctx.scope.participations().with_only_columns(AllyParticipation.id)))
+    it = db.get(ScopeItem, iid)
+    ok = (
+        it is not None
+        and it.tenant_id == ctx.p.tenant.id
+        and it.opportunity_id is not None
+        and ((it.supplier_kind == "aliado" and it.supplier_participation_id in mine) or (it.executor_kind == "aliado" and it.executor_participation_id in mine))
+    )
+    o = db.scalar(select(Opportunity).where(Opportunity.id == it.opportunity_id, *ctx.scope.opportunities())) if ok else None
+    if o is None:
+        raise HTTPException(404, "Alcance no encontrado")
+    if data.status not in SCOPE_NEXT.get(it.status, ()):
+        raise HTTPException(409, f"Este alcance está {scopesvc.STATE_LABEL.get(it.status, it.status).lower()}")
+    antes = it.status
+    it.status = data.status
+    it.updated_by = ctx.p.user.id
+    if data.status == "confirmado":
+        scopesvc.touch_confirmed(it, ctx.p.user.id)
+    if data.note:
+        linea = f"{ctx.company.name} ({local_date(_now()).strftime('%d/%m/%Y')}): {data.note}"
+        it.notes = f"{it.notes}\n{linea}" if it.notes else linea
+    verbo = {"confirmado": "confirmó", "en_curso": "puso en curso", "completado": "completó"}[data.status]
+    _log(
+        o,
+        f"{ctx.p.user.full_name} ({ctx.company.name})",
+        f"{verbo} el alcance «{scopesvc.KIND_LABEL.get(it.kind, it.kind)} · {it.description[:80]}»" + (f": {data.note}" if data.note else ""),
+    )
+    audit(db, ctx.p.tenant.id, ctx.p.user.id, "ally_scope", "scope_item", it.id, {"de": antes, "a": data.status}, ip=ctx.p.ip)
+    db.commit()
+    parts = _my_parts(db, ctx, opportunity_id=o.id)
+    return _scope_for_ally(db, ctx, o, parts)
 
 
 # ---------- Proyectos ----------
@@ -1163,6 +1393,11 @@ def _to_survey_in(data: AllySurveyEditIn, customer_id: int | None, s: Survey | N
         payload.pop("common", None)
     if "received_by" not in sent:
         payload.pop("received_by", None)
+    for row in (payload.get("labor") or {}).values():
+        # quien aporta el personal lo define Crimson: lo que mande el portal no lo cambia (se conserva el que tenia)
+        if isinstance(row, dict):
+            row.pop("provider", None)
+            row.pop("participation_id", None)
     if s is not None:
         if not ({"labor", "techs", "days"} & sent):
             # el que ya tiene, sin tarifas (esas las conserva apply_survey_payload)
@@ -2071,6 +2306,9 @@ def suscripcion(ctx: AllyCtx = Depends(need("suscripcion")), db: Session = Depen
     # el atraso tambien sale de lo emitido: un borrador que Crimson no ha enviado no le cuenta como vencido
     st = ally_access.plan_status(db, c, visible=_emitida)
     return {
+        # punto 13: el acceso basico al portal no se cobra; solo un servicio adicional definido y aceptado
+        "acceso_basico": "Incluido: el acceso al portal es parte del servicio compartido y no se cobra.",
+        "servicio": ally_access.service_out(c),
         "plan": {
             "monto": c.plan_amount,
             "moneda": c.plan_currency,
@@ -2087,6 +2325,34 @@ def suscripcion(ctx: AllyCtx = Depends(need("suscripcion")), db: Session = Depen
         "facturas": [_invoice_out(i) for i in facturas],
         "seats": {k: v for k, v in ally_access.seats(db, c).items() if k in ("used", "max")},
     }
+
+
+@router.post("/suscripcion/aceptar")
+def suscripcion_aceptar(ctx: AllyCtx = Depends(need("suscripcion")), db: Session = Depends(get_db)):
+    """El aliado acepta el servicio adicional que Crimson le propuso: desde ahi la mensualidad se activa."""
+    if ctx.p.role != "aliado":
+        raise HTTPException(403, "Aceptar un servicio lo hace el aliado")
+    c = ctx.company
+    if not c.extra_service:
+        raise HTTPException(409, "No hay un servicio adicional propuesto")
+    if c.extra_service_accepted_at is not None:
+        raise HTTPException(409, "El servicio adicional ya está aceptado")
+    ally_access.accept_service(db, c, f"{ctx.p.user.full_name} (portal de aliados)")
+    audit(db, ctx.p.tenant.id, ctx.p.user.id, "ally_service_accept", "ally_company", c.id, {"servicio": c.extra_service[:120]}, ip=ctx.p.ip)
+    esc = html.escape
+    notify_roles(
+        db,
+        ctx.p.tenant,
+        ("admin",),
+        f"{c.name} aceptó el servicio adicional",
+        f"<p>{esc(ctx.p.user.full_name)} ({esc(c.name)}) aceptó el servicio adicional: <b>{esc(c.extra_service)}</b>.</p>"
+        "<p>La mensualidad queda activa con el monto y la fecha que definieron en Administración → Aliados.</p>",
+        "ally_company",
+        c.id,
+        like=False,
+    )
+    db.commit()
+    return suscripcion(ctx, db)
 
 
 @router.get("/facturas")

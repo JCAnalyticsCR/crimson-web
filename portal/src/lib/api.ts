@@ -217,7 +217,7 @@ export type SurveySummary = {
   paso: "borrador" | "revision" | "devuelto" | "costeo" | "cotizado" | "cerrado"; paso_texto: string;
   notes: string | null;
   equipos: { name: string; quantity: string; unit: string; kind: string; note: string | null }[];
-  personal: { label: string; people: number; days: string }[];
+  personal: { label: string; people: number; days: string; provider_name?: string | null }[];
   puntos: { code: string; label: string | null; kind_label: string; notes: string | null; photos: string[] }[];
   fotos: string[];
   sugerencias_pendientes: { name: string; quantity: string; unit: string | null; kind: string | null; reason: string | null }[];

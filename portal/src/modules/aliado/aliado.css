@@ -53,3 +53,11 @@
 .al-steps span.is-done { background: var(--crimson); }
 .al-log { list-style: none; margin: 0; padding: 0; }
 .al-log .cp-row__main span { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Revision 2: peticion / oferta, alcances del aliado */
+.al-req .cp-row__main { min-width: 0; }
+.al-req__detail { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-top: 8px; }
+.al-req__block { border: 1px solid var(--hair); border-radius: 10px; padding: 8px 10px; font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.al-req__block p { margin: 4px 0; }
+.al-req__block ul { margin: 4px 0; padding-left: 18px; }
+.al-scope--mine { border-left: 3px solid var(--crimson); }

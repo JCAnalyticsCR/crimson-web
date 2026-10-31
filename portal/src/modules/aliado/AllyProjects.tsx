@@ -25,7 +25,7 @@ export default function AllyProjects() {
               <div className="cp-row__main">
                 <b>{p.number} · {p.name}</b>
                 <div className="cp-row__meta">{p.customer || "—"}{p.end_customer ? ` → ${p.end_customer}` : ""}{p.site ? ` · ${p.site}` : ""}</div>
-                <div className="cp-row__meta">Su papel: {p.my_roles.map((r) => ROL_PARTICIPACION[r] || r).join(", ")}{p.start_date ? ` · inicio ${fmtDate(p.start_date)}` : ""}</div>
+                <div className="cp-row__meta">{p.my_relations?.length ? p.my_relations.join(", ") : `Su papel: ${p.my_roles.map((r) => ROL_PARTICIPACION[r] || r).join(", ")}`}{p.start_date ? ` · inicio ${fmtDate(p.start_date)}` : ""}</div>
               </div>
               <div className="cp-row__side"><Badge status={p.status} /><span className="meta">{p.orders_done}/{p.orders_total} órdenes</span></div>
             </Link>

@@ -195,8 +195,8 @@ def _team_quote_item(db: Session, p: Principal, q: Quote) -> dict:
 def _ally_where(p: Principal) -> list:
     from .allies import cost_pending_where  # import local, como el resto de usos de allies
 
-    # Solo "recibido": "solicitado" espera al aliado, no a nosotros
-    return [*cost_pending_where(p), AllyCostRequest.status == "recibido"]
+    # Solo "respondido": "enviado" y "visto" esperan al aliado, no a nosotros
+    return [*cost_pending_where(p), AllyCostRequest.status == "respondido"]
 
 
 def _ally_item(db: Session, p: Principal, r: AllyCostRequest) -> dict:

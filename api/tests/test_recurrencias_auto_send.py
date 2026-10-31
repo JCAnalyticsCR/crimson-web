@@ -575,7 +575,7 @@ def test_mensualidad_no_se_edita_desde_recurrencias(client, auth, db_session, co
     a = client.post("/allies", json={"name": "Aliado Plantilla S.A.", "tax_id": "3-101-000088", "email": "pagos@aliado-plantilla.ejemplo.com"}).json()["id"]
     prod = {"name": "Mensualidad de la plataforma", "code": "SRV-PLAT-R", "item_type": "servicio", "price": 0, "currency": "CRC", "cabys_code": "8314100000000"}
     pid = client.post("/products", json=prod).json()["id"]
-    plan = {"amount": 40, "currency": "USD", "mode": "fija", "next_date": (HOY + timedelta(days=10)).isoformat(), "product_id": pid, "crear_cliente": True}
+    plan = {"amount": 40, "currency": "USD", "mode": "fija", "service": "Soporte prioritario", "accepted": True, "next_date": (HOY + timedelta(days=10)).isoformat(), "product_id": pid, "crear_cliente": True}
     assert client.put(f"/allies/{a}/plan", json=plan).status_code == 200
     rid = db_session.get(AllyCompany, a).recurrence_id
     filas = client.get("/recurrences").json()

@@ -400,9 +400,14 @@ def restore(db: Session, kind: str, obj, user_id: int, ip=None) -> None:
 def _detach(db: Session, kind: str, obj) -> None:
     """Suelta las referencias de registros que NO son suyos (se conservan, solo pierden el enlace)."""
     if kind == "survey":
+        from ..models import ScopeItem
+
         db.execute(update(Project).where(Project.survey_id == obj.id).values(survey_id=None))
+        # sus alcances sin oportunidad son solo suyos; los de la oportunidad se quedan en ella
+        db.execute(delete(ScopeItem).where(ScopeItem.survey_id == obj.id, ScopeItem.opportunity_id.is_(None)))
+        db.execute(update(ScopeItem).where(ScopeItem.survey_id == obj.id).values(survey_id=None))
     elif kind == "opportunity":
-        from ..models import AllyCostRequest, AllyParticipation
+        from ..models import AllyAgreement, AllyCostRequest, AllyParticipation, ScopeItem
         from . import commissions
 
         # el acuerdo economico de cada aliado (reglas por participacion) se va con el: los movimientos que usaron esas
@@ -411,6 +416,8 @@ def _detach(db: Session, kind: str, obj) -> None:
         for part in db.scalars(select(AllyParticipation).where(AllyParticipation.opportunity_id == obj.id)).all():
             commissions.drop_participation_rules(db, part)
         # aliados y solicitudes de costo son de la oportunidad: se van con ella (tambien en SQLite sin cascada)
+        db.execute(delete(ScopeItem).where(ScopeItem.opportunity_id == obj.id))
+        db.execute(delete(AllyAgreement).where(AllyAgreement.opportunity_id == obj.id))
         db.execute(delete(AllyCostRequest).where(AllyCostRequest.opportunity_id == obj.id))
         db.execute(delete(AllyParticipation).where(AllyParticipation.opportunity_id == obj.id))
         db.execute(update(Survey).where(Survey.opportunity_id == obj.id).values(opportunity_id=None))

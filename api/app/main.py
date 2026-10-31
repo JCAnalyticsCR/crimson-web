@@ -62,6 +62,7 @@ from .routers import fiscal_queue as fiscal_queue_router
 from .routers import invoice_proofs as invoice_proofs_router
 from .routers import public_quotes as public_quotes_router
 from .routers import report_board as report_board_router
+from .routers import scope_items as scope_items_router
 from .routers import settings as settings_router
 from .routers import store_inventory as store_inventory_router
 from .routers import ventas3 as ventas3_router
@@ -166,6 +167,7 @@ def create_app() -> FastAPI:
     app.include_router(support.router)
     app.include_router(pipeline.router)
     app.include_router(allies.router)
+    app.include_router(scope_items_router.router)  # alcances y responsables (revision 2, puntos 3 y A3)
     app.include_router(approvals.router)
     app.include_router(fieldwork.router)
     app.include_router(projects.router)

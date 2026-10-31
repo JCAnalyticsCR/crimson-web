@@ -10,6 +10,8 @@ import { Card, Field, I, Icon } from "../../ui/components";
 import { Lookup, searchCustomers, searchProducts, type LookupItem } from "../../ui/Lookup";
 import { InviteLink, type InviteOut } from "../cliente/InviteLink";
 import { STATE_LABEL, STATE_TONE, searchSuppliers, type AllyRow } from "./Allies";
+import { MarkupFormula } from "./markup";
+import "../crm/opportunities.css";
 
 type Contact = { name?: string | null; email?: string | null; phone?: string | null };
 type Detail = AllyRow & {
@@ -28,6 +30,9 @@ type Plan = {
   } | null;
   customer: { id: number; name: string } | null; estado: string; vencido: { monto: string; moneda: string; dias: number } | null;
   defaults?: { amount: string | number | null; currency: string; mode: string }; /* Ajustes -> Aliados (plan 1.4) */
+  /* punto 13: el acceso básico no se cobra; lo que se cobra es un servicio adicional definido y aceptado */
+  service?: { descripcion: string; aceptado: boolean; aceptado_at: string | null; aceptado_por: string | null } | null;
+  basic_access_free?: boolean; legacy_without_service?: boolean;
   facturas: { id: number; number: string; issue_date: string; due_date: string | null; total: string; balance: string; status: string; currency: string; sent_at: string | null }[];
 };
 const FUNCIONES: Record<string, string> = { comercial: "Comercial", tecnico: "Técnico", aprobador: "Aprobador", pagos: "Pagos" };
@@ -140,14 +145,14 @@ function Usuarios({ a, first, onPreview }: { a: Detail; first?: FirstInvite | nu
           <tbody>
             {d.users.map((u) => (
               <tr key={u.id}>
-                <td><b>{u.name}</b><div className="meta">{u.email}{u.last_login ? ` · último ingreso ${fmtDate(u.last_login.slice(0, 10))}` : ""}</div></td>
+                <td><b>{u.name}</b><div className="meta">{u.email}{u.last_login ? ` · último ingreso ${fmtDate(u.last_login)}` : ""}</div></td>
                 <td>{puede ? <select className="select" value={u.role} onChange={(e) => patch(u.id, { role: e.target.value })}>{Object.entries(ROL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select> : ROL[u.role]}</td>
                 <td><span className={`badge badge--${u.active ? "ok" : "muted"}`}>{u.active ? "Activo" : "Inactivo"}</span></td>
                 <td>{puede && <button className="btn btn--ghost btn--sm" onClick={() => patch(u.id, { active: !u.active })}>{u.active ? "Desactivar" : "Activar"}</button>}</td>
               </tr>
             ))}
             {d.invitations.map((i) => (
-              <tr key={`i${i.id}`}><td>{i.email}<div className="meta">Invitación pendiente · vence {fmtDate(i.expires_at.slice(0, 10))}</div></td><td>{ROL[i.role]}</td><td><span className="badge badge--warn">Pendiente</span></td><td>{puede && <button className="btn btn--ghost btn--sm" onClick={() => revocar(i.id)}>Revocar</button>}</td></tr>
+              <tr key={`i${i.id}`}><td>{i.email}<div className="meta">Invitación pendiente · vence {fmtDate(i.expires_at)}</div></td><td>{ROL[i.role]}</td><td><span className="badge badge--warn">Pendiente</span></td><td>{puede && <button className="btn btn--ghost btn--sm" onClick={() => revocar(i.id)}>Revocar</button>}</td></tr>
             ))}
           </tbody>
         </table>
@@ -177,14 +182,13 @@ function Usuarios({ a, first, onPreview }: { a: Detail; first?: FirstInvite | nu
 
 /* Incorporacion de un aliado nuevo: lo que falta para que trabaje en la plataforma. Se oculta cuando esta todo. */
 function Pasos({ a, go }: { a: Detail; go: (t: Tab) => void }) {
-  const { allows } = useSession();
   const pasos: { ok: boolean; parcial?: boolean; txt: string; hint: string; tab: Tab }[] = [
     { ok: !!(a.tax_id && a.email), txt: "Datos de la empresa", hint: a.tax_id && a.email ? "Cédula y correo" : "Falta la cédula jurídica o el correo", tab: "datos" },
     {
       ok: a.users_active > 0, parcial: a.invitations_pending > 0, txt: "Acceso al portal",
       hint: a.users_active > 0 ? `${a.users_active} usuario(s) activo(s)` : a.invitations_pending > 0 ? "Invitación enviada: falta que la acepte" : "Invitá a su primer usuario", tab: "usuarios",
     },
-    ...(allows("aliados.mensualidad") ? [{ ok: a.plan.activo, txt: "Mensualidad", hint: a.plan.activo ? "Cobro mensual configurado" : "Configurá el cobro mensual de la plataforma", tab: "mensualidad" as Tab }] : []),
+    /* punto 13: el servicio adicional es opcional (el acceso básico no se cobra): no es un paso pendiente */
     { ok: a.participations.length > 0, txt: "Trabajo en común", hint: a.participations.length > 0 ? `${a.participations.length} participación(es)` : "Sumalo a una oportunidad (Aliados y participación)", tab: "comun" },
   ];
   if (!a.active || pasos.every((x) => x.ok)) return null;
@@ -242,6 +246,9 @@ function Precios({ a, reload }: { a: Detail; reload: () => void }) {
   const [precio, setPrecio] = useState("");
   const [nota, setNota] = useState("");
   const [mk, setMk] = useState(a.markup_pct ?? "");
+  const [defPct, setDefPct] = useState<string | null>(null); // recargo por defecto de Aliados (si este no tiene propio)
+  useEffect(() => { api<{ markup_pct: string | null }>("/allies/config").then((x) => setDefPct(x.markup_pct)).catch(() => setDefPct(null)); }, []);
+  const pctEf = mk !== "" ? Number(String(mk).replace(",", ".")) : defPct != null ? Number(defPct) : null;
   const [prev, setPrev] = useState<{ cost: string | null; cost_currency: string; markup_pct: string; fuente: string | null; precio_aliado: string | null; precio_publico: string; currency: string; estado: string } | null>(null);
   const load = useCallback(() => { api<Price[]>(`/allies/prices?ally_company_id=${a.id}`).then(setRows).catch(() => setRows([])); }, [a.id]);
   useEffect(load, [load]);
@@ -254,9 +261,10 @@ function Precios({ a, reload }: { a: Detail; reload: () => void }) {
   const guardarMk = async () => { try { await api(`/allies/${a.id}`, { method: "PUT", json: { markup_pct: mk === "" ? null : mk } }); toast("Recargo guardado"); reload(); } catch (e) { toast(e instanceof Error ? e.message : "No se pudo", "bad"); } };
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <Card title="Recargo propio de este aliado">
-        <Field label="Recargo del aliado sobre el costo (%)" hint="Vacío = el recargo por defecto de Aliados"><input className="input input--mono" style={{ maxWidth: 140 }} inputMode="decimal" value={mk} onChange={(e) => setMk(e.target.value)} /></Field>
-        <button className="btn btn--soft btn--sm" onClick={guardarMk}>Guardar recargo</button>
+      <Card title="Recargo del aliado (no es el margen de la tienda)">
+        <Field label="Recargo propio de este aliado sobre el costo (%)" hint="Vacío = el recargo por defecto de Aliados"><input className="input input--mono" style={{ maxWidth: 140 }} inputMode="decimal" value={mk} onChange={(e) => setMk(e.target.value)} /></Field>
+        <MarkupFormula pct={pctEf} own={mk !== ""} />
+        <button className="btn btn--soft btn--sm" style={{ alignSelf: "flex-start" }} onClick={guardarMk}>Guardar recargo</button>
       </Card>
       <Card title="Precios fijos para este aliado">
         <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", alignItems: "end" }}>
@@ -265,7 +273,7 @@ function Precios({ a, reload }: { a: Detail; reload: () => void }) {
           <Field label="Nota"><input className="input" value={nota} onChange={(e) => setNota(e.target.value)} /></Field>
           <button className="btn btn--crimson" disabled={!prod || precio === ""} onClick={agregar}><Icon d={I.plus} />Guardar precio</button>
         </div>
-        {prev && <p className="meta">Costo {prev.cost != null ? fmtMoney(prev.cost, prev.cost_currency) : "—"} · recargo {Number(prev.markup_pct)} % · precio aliado {prev.precio_aliado != null ? fmtMoney(prev.precio_aliado, prev.currency) : "a consultar"} ({prev.fuente || "—"}) · público {fmtMoney(prev.precio_publico, prev.currency)}</p>}
+        {prev && <p className="meta">Costo {prev.cost != null ? fmtMoney(prev.cost, prev.cost_currency) : "—"} · recargo {Number(prev.markup_pct).toLocaleString("es-CR")} % (costo × {(1 + Number(prev.markup_pct) / 100).toLocaleString("es-CR", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}) · precio aliado {prev.precio_aliado != null ? fmtMoney(prev.precio_aliado, prev.currency) : "a consultar"} ({prev.fuente || "—"}) · público {fmtMoney(prev.precio_publico, prev.currency)}</p>}
         {!rows ? <div className="spinner" /> : rows.length ? (
           <table className="table">
             <thead><tr><th>Producto</th><th>Precio aliado</th><th>Público</th><th>Nota</th><th /></tr></thead>
@@ -285,17 +293,24 @@ function Mensualidad({ a, reload }: { a: Detail; reload: () => void }) {
   const { toast, allows } = useSession();
   const [d, setD] = useState<Plan | null>(null);
   const [f, setF] = useState({ amount: "", currency: "CRC", mode: "fija", next_date: new Date().toISOString().slice(0, 10), auto_send: true, active: true, first_run_requires_approval: true });
+  const [service, setService] = useState("");
+  const [accepted, setAccepted] = useState(false); // "el aliado ya lo aceptó por escrito" (registrarlo desde aquí)
+  const [abierto, setAbierto] = useState(false);
   const [prod, setProd] = useState<LookupItem | null>(null);
   const load = useCallback(() => {
     api<Plan>(`/allies/${a.id}/plan`).then((x) => {
       setD(x);
+      setService(x.service?.descripcion || "");
+      setAccepted(false);
       if (x.plan) setF({ amount: String(x.plan.amount ?? ""), currency: x.plan.currency, mode: x.plan.mode, next_date: x.plan.next_date, auto_send: x.plan.auto_send, active: x.plan.active, first_run_requires_approval: x.plan.first_run_requires_approval });
       else if (x.defaults) { const df = x.defaults; setF((f0) => ({ ...f0, amount: df.amount == null ? "" : String(df.amount), currency: df.currency, mode: df.mode })); }
     }).catch(() => setD(null));
   }, [a.id]);
   useEffect(load, [load]);
   const guardar = async () => {
-    try { await api(`/allies/${a.id}/plan`, { method: "PUT", json: { ...f, product_id: prod?.id ?? d?.plan?.product_id ?? null, crear_cliente: !a.customer_id } }); toast("Cobro mensual guardado"); load(); reload(); }
+    const json: Record<string, unknown> = { ...f, product_id: prod?.id ?? d?.plan?.product_id ?? null, crear_cliente: !a.customer_id, service: service.trim() || null };
+    if (accepted) json.accepted = true;
+    try { await api(`/allies/${a.id}/plan`, { method: "PUT", json }); toast("Servicio adicional guardado"); load(); reload(); }
     catch (e) { toast(e instanceof Error ? e.message : "No se pudo", "bad"); }
   };
   const aprobar = async () => {
@@ -306,10 +321,35 @@ function Mensualidad({ a, reload }: { a: Detail; reload: () => void }) {
     } catch (e) { toast(e instanceof Error ? e.message : "No se pudo", "bad"); }
   };
   if (!d) return <div className="spinner" />;
+  const sv = d.service;
+  const cambiaServicio = (sv?.descripcion || "") !== service.trim();
+  const falta = Number(f.amount.replace(",", ".")) > 0 && !service.trim();
   const pendienteEnvio = d.plan && ["por_aprobar", "enviando", "fallida", "sin_correo"].includes(d.plan.last_send_status || "") && d.facturas.some((x) => x.id === d.plan?.last_invoice_id && !x.sent_at && x.status !== "anulada" && Number(x.balance) > 0);
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <Card title="Mensualidad de la plataforma">
+      <Card title="Servicio adicional (opcional)">
+        <p style={{ margin: 0, fontSize: 13 }}><span className="badge badge--ok">Acceso básico incluido</span> El acceso básico al portal es parte del servicio compartido y no se cobra. Solo se cobra una mensualidad si hay un servicio adicional definido y aceptado por el aliado.</p>
+        {d.legacy_without_service && (
+          <p className="ally-alert" style={{ margin: 0 }}>Esta mensualidad viene de antes y cobra sin un servicio adicional definido. Describí el servicio que se cobra o desactivá el cobro.</p>
+        )}
+        {sv && (
+          <p style={{ margin: 0, fontSize: 13 }}>
+            {sv.aceptado
+              ? <><span className="badge badge--ok">Aceptado</span> por {sv.aceptado_por || "el aliado"}{sv.aceptado_at ? ` el ${fmtDate(sv.aceptado_at)}` : ""}</>
+              : <><span className="badge badge--warn">Esperando que el aliado lo acepte en su portal</span> Mientras tanto no se cobra nada.</>}
+          </p>
+        )}
+        {!d.plan && !sv && !abierto ? (
+          <div>
+            <p className="muted" style={{ fontSize: 13, margin: "0 0 8px" }}>Este aliado solo tiene el acceso básico (sin cobro).</p>
+            <button className="btn btn--soft btn--sm" onClick={() => setAbierto(true)}><Icon d={I.plus} />Agregar servicio adicional</button>
+          </div>
+        ) : (
+        <>
+        <Field label="Descripción del servicio adicional" hint="Obligatoria si hay monto. Es lo que acepta el aliado y el concepto de la factura.">
+          <textarea className="textarea" style={{ minHeight: 56 }} maxLength={1000} value={service} onChange={(e) => setService(e.target.value)} placeholder="Ej.: soporte técnico prioritario 24/7 y monitoreo de sus clientes" />
+        </Field>
+        {cambiaServicio && sv?.aceptado && <p className="meta" style={{ margin: 0, color: "var(--warn)" }}>Al cambiar la descripción, el aliado lo tiene que volver a aceptar.</p>}
         <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
           <Field label="Monto (sin IVA)"><input className="input input--mono" inputMode="decimal" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></Field>
           <Field label="Moneda"><select className="select" value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value })}><option>CRC</option><option>USD</option></select></Field>
@@ -321,9 +361,15 @@ function Mensualidad({ a, reload }: { a: Detail; reload: () => void }) {
         {/* quitar la revisión (que salgan solas) es de quien envía facturas; cambiar el monto o la moneda la vuelve a pedir */}
         {f.auto_send && <label className="pf-bool"><input type="checkbox" checked={f.first_run_requires_approval} disabled={!allows("sales.enviar") && f.first_run_requires_approval && (d.plan?.first_run_requires_approval ?? true)} onChange={(e) => setF({ ...f, first_run_requires_approval: e.target.checked })} />La próxima la reviso yo (Aprobaciones → Mensualidades por aprobar); después salen solas</label>}
         {f.auto_send && d.plan && <p className="meta" style={{ margin: 0 }}>Si cambiás el monto, la moneda o el cliente, la próxima vuelve a esperar tu «Aprobar y enviar».</p>}
-        <label className="pf-bool"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} />Cobro activo</label>
+        <label className="pf-bool"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} />Cobro activo (solo corre con el servicio aceptado)</label>
+        {(!sv?.aceptado || cambiaServicio) && (
+          <label className="pf-bool"><input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} />El aliado ya lo aceptó por escrito (registrarlo; si no, lo acepta en su portal)</label>
+        )}
         {!a.customer_id && <p className="meta">Se va a crear el cliente de facturación con los datos del aliado.</p>}
-        <button className="btn btn--crimson" disabled={f.amount === ""} onClick={guardar}><Icon d={I.check} />Crear o actualizar el cobro mensual</button>
+        {falta && <p className="meta" style={{ margin: 0, color: "var(--bad)" }}>Describí el servicio adicional: el acceso básico no se cobra.</p>}
+        <button className="btn btn--crimson" disabled={f.amount === "" || falta} onClick={guardar}><Icon d={I.check} />Guardar servicio adicional</button>
+        </>
+        )}
         <p className="meta">Nunca se cobra solo con tarjeta ni se suspende el acceso por atraso: con 30 días de atraso aparece la propuesta en Aprobaciones y la suspensión la decide una persona (Datos → Acceso al portal).</p>
         {d.plan?.last_send_status && <p style={{ margin: 0, fontSize: 13 }}>Último envío: <b>{SEND_TXT[d.plan.last_send_status] || d.plan.last_send_status}</b>{d.plan.last_send_note ? ` · ${d.plan.last_send_note}` : ""}
           {pendienteEnvio && allows("sales.enviar") && <> <button className="btn btn--crimson btn--sm" onClick={aprobar}>{d.plan.last_send_status === "por_aprobar" ? "Aprobar y enviar" : "Reenviar"}</button></>}</p>}
@@ -334,7 +380,7 @@ function Mensualidad({ a, reload }: { a: Detail; reload: () => void }) {
           <table className="table"><thead><tr><th>Factura</th><th>Emitida</th><th>Total</th><th>Saldo</th><th>Estado</th></tr></thead>
             <tbody>{d.facturas.map((x) => <tr key={x.id}><td><Link to={`/facturas/${x.id}`}>{x.number}</Link></td><td>{fmtDate(x.issue_date)}</td><td>{fmtMoney(x.total, x.currency)}</td><td>{fmtMoney(x.balance, x.currency)}</td><td>{facturaEstado(x)}</td></tr>)}</tbody>
           </table>
-        ) : <p className="muted">Todavía no hay facturas de mensualidad.</p>}
+        ) : <p className="muted">Todavía no hay facturas del servicio adicional.</p>}
       </Card>
     </div>
   );
@@ -358,7 +404,7 @@ export default function AllyDetail() {
     ["usuarios", "Usuarios", true],
     ["comun", "En común", true],
     ["precios", "Precios", allows("aliados.precios") && allows("catalog.costos")],
-    ["mensualidad", "Mensualidad", allows("aliados.mensualidad")],
+    ["mensualidad", "Servicio adicional", allows("aliados.mensualidad")],
     ["numeros", "Números", allows("commissions.ver_todo")],
   ];
   return (
@@ -380,7 +426,7 @@ export default function AllyDetail() {
       {tab === "mensualidad" && <Mensualidad a={a} reload={load} />}
       {tab === "numeros" && (
         <Card title="Números de la alianza">
-          <p className="muted" style={{ marginTop: 0 }}>Lo que recibe el aliado (acuerdos, comisiones, bonos y pagos) y lo que la alianza le deja a Crimson se ven en <Link to="/comisiones">Comisiones</Link>. Aquí: {a.proyectos_en_comun} proyecto(s) en común, mensualidad {a.plan.activo ? (a.plan.al_dia ? "al día" : "vencida") : "sin configurar"}.</p>
+          <p className="muted" style={{ marginTop: 0 }}>Lo que recibe el aliado (acuerdos, comisiones, bonos y pagos) y lo que la alianza le deja a Crimson se ven en <Link to="/comisiones">Comisiones</Link>. Aquí: {a.proyectos_en_comun} proyecto(s) en común, servicio adicional {a.plan.activo ? (a.plan.al_dia ? "al día" : "vencido") : "ninguno (solo acceso básico)"}.</p>
         </Card>
       )}
       {preview && <AllyPreviewPicker role="aliado" company={{ id: a.id, name: a.name }} onClose={() => setPreview(false)} />}

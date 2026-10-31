@@ -106,7 +106,10 @@ def _ref(db: Session, model, rid: int | None, p: Principal, msg: str):
 
 
 def _snapshot(c: AllyCompany) -> dict:
-    keys = (*EDIT_FIELDS, "active", "suspended_at", "suspended_reason", "plan_amount", "plan_currency", "plan_mode", "plan_since", "recurrence_id")
+    keys = (
+        *EDIT_FIELDS, "active", "suspended_at", "suspended_reason", "plan_amount", "plan_currency", "plan_mode", "plan_since", "recurrence_id",
+        "extra_service", "extra_service_accepted_at", "extra_service_accepted_by",
+    )  # fmt: skip
     return {k: jsonable(getattr(c, k)) for k in keys}
 
 
@@ -134,7 +137,16 @@ def common_counts(db: Session, tenant_id: int, ids: list[int]) -> dict[int, dict
 
 def _plan_brief(db: Session, c: AllyCompany) -> dict:
     st = ally_access.plan_status(db, c) if c.customer_id else {"estado": "al_dia", "vencido": None}
-    return {"amount": c.plan_amount, "currency": c.plan_currency, "mode": c.plan_mode, "al_dia": st["estado"] == "al_dia", "activo": bool(c.recurrence_id)}
+    return {
+        "amount": c.plan_amount,
+        "currency": c.plan_currency,
+        "mode": c.plan_mode,
+        "al_dia": st["estado"] == "al_dia",
+        "activo": bool(c.recurrence_id),
+        # punto 13: lo que se cobra es un servicio adicional (opcional); el acceso basico no
+        "servicio": c.extra_service,
+        "servicio_aceptado": c.extra_service_accepted_at is not None,
+    }
 
 
 def list_row(db: Session, c: AllyCompany, counts: dict) -> dict:
@@ -758,9 +770,14 @@ def ally_from_internal(cid: int, data: FromInternalIn, p: Principal = Depends(re
             raise HTTPException(403, "Solo un administrador puede pasar a otro administrador al portal de aliados")
         if m.active and active_admins(db, p.tenant.id) <= 1:
             raise HTTPException(409, "Es el único administrador activo: nombre otro administrador primero")
-    abiertas = db.scalar(
-        select(func.count()).select_from(Opportunity).where(Opportunity.tenant_id == p.tenant.id, Opportunity.owner_id == m.user_id, Opportunity.status.in_(OPEN_OPP), live(Opportunity))
-    ) or 0
+    abiertas = (
+        db.scalar(
+            select(func.count())
+            .select_from(Opportunity)
+            .where(Opportunity.tenant_id == p.tenant.id, Opportunity.owner_id == m.user_id, Opportunity.status.in_(OPEN_OPP), live(Opportunity))
+        )
+        or 0
+    )
     if abiertas:
         raise HTTPException(409, f"Tiene {abiertas} oportunidad(es) abierta(s) a su cargo: reasígnelas a alguien de Crimson primero")
     if m.active and c.max_users is not None and ally_access.seats(db, c)["used"] >= c.max_users:
@@ -799,20 +816,32 @@ def ally_from_internal(cid: int, data: FromInternalIn, p: Principal = Depends(re
     # trabajo interno que todavia tiene a su nombre (sin empresa aliada): Crimson lo revisa; aqui no se mueve nada
     pendientes = {
         "ordenes": db.scalar(
-            select(func.count()).select_from(WorkOrder).where(
-                WorkOrder.tenant_id == p.tenant.id, WorkOrder.technician_id == m.user_id, WorkOrder.ally_company_id.is_(None), WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso"))
+            select(func.count())
+            .select_from(WorkOrder)
+            .where(
+                WorkOrder.tenant_id == p.tenant.id,
+                WorkOrder.technician_id == m.user_id,
+                WorkOrder.ally_company_id.is_(None),
+                WorkOrder.status.in_(("asignada", "en_sitio", "en_proceso")),
             )
         )
         or 0,
         "levantamientos": db.scalar(
-            select(func.count()).select_from(Survey).where(
+            select(func.count())
+            .select_from(Survey)
+            .where(
                 Survey.tenant_id == p.tenant.id, Survey.technician_id == m.user_id, Survey.ally_company_id.is_(None), Survey.status.in_(("borrador", "enviado"))
             )
         )
         or 0,
         "tickets": db.scalar(
-            select(func.count()).select_from(SupportTicket).where(
-                SupportTicket.tenant_id == p.tenant.id, SupportTicket.assigned_to == m.user_id, SupportTicket.ally_company_id.is_(None), SupportTicket.status != "cerrado"
+            select(func.count())
+            .select_from(SupportTicket)
+            .where(
+                SupportTicket.tenant_id == p.tenant.id,
+                SupportTicket.assigned_to == m.user_id,
+                SupportTicket.ally_company_id.is_(None),
+                SupportTicket.status != "cerrado",
             )
         )
         or 0,
@@ -909,6 +938,11 @@ def plan_out(db: Session, c: AllyCompany) -> dict:
         "customer": {"id": cust.id, "name": cust.name} if cust else None,
         # con que arranca el formulario de un plan nuevo (Ajustes -> Aliados)
         "defaults": plan_defaults(db.get(Tenant, c.tenant_id)),
+        # punto 13: el acceso basico no se cobra; esto es el servicio adicional (opcional) y si el aliado lo acepto
+        "service": ally_access.service_out(c),
+        "basic_access_free": True,
+        # mensualidad de antes del cambio: cobra sin un servicio adicional definido (el acceso basico ya no se cobra)
+        "legacy_without_service": bool(r and r.active and not c.extra_service),
         **st,
         "facturas": [
             {
@@ -945,6 +979,10 @@ class PlanIn(BaseModel):
     crear_cliente: bool = False
     # la primera factura espera "Aprobar y enviar" (por defecto en planes nuevos); None al actualizar = no cambia
     first_run_requires_approval: bool | None = None
+    # punto 13: que servicio adicional se cobra (obligatorio con monto) y, si el aliado ya lo acepto por fuera del
+    # portal (por escrito), registrarlo. Sin aceptacion la mensualidad queda apagada hasta que la acepte en su portal
+    service: str | None = Field(None, max_length=1000)
+    accepted: bool | None = None
 
 
 @router.put("/{cid}/plan")
@@ -954,6 +992,9 @@ def plan_put(cid: int, data: PlanIn, p: Principal = Depends(require("aliados", "
     sola con tarjeta ni suspende al aliado."""
     c = company(db, cid, p)
     antes = _snapshot(c)
+    servicio = (data.service or "").strip() or None if "service" in data.model_fields_set else c.extra_service
+    if data.amount > 0 and not servicio:
+        raise HTTPException(422, "Describí el servicio adicional que se cobra: el acceso básico al portal es parte del servicio compartido y no se cobra")
     if not c.customer_id and not data.crear_cliente:
         raise HTTPException(422, "Ligá o creá el cliente de facturación del aliado")
     # el servicio se valida antes de crear nada (un 422 no deja un cliente a medias)
@@ -966,10 +1007,18 @@ def plan_put(cid: int, data: PlanIn, p: Principal = Depends(require("aliados", "
         c.customer_id = cust.id
     c.plan_mode = data.mode
     qty = 1 if data.mode == "fija" else max(len(ally_access.active_members(db, c)), 1)
+    if servicio != c.extra_service:
+        # otro servicio: lo que el aliado acepto ya no es esto (lo vuelve a aceptar, o Crimson registra que lo acepto)
+        c.extra_service, c.extra_service_accepted_at, c.extra_service_accepted_by = servicio, None, None
+    if data.accepted is True and servicio and c.extra_service_accepted_at is None:
+        ally_access.accept_service(db, c, f"Registrado por {p.user.full_name}")
+    elif data.accepted is False:
+        c.extra_service_accepted_at, c.extra_service_accepted_by = None, None
+    concepto = servicio or "Servicio adicional de la plataforma"
     template = DocumentIn(
         currency=data.currency,
         external_order=ally_access.PLAN_ORDER,
-        lines=[LineInSchema(product_id=prod.id, name=f"Acceso a la plataforma · {c.name}"[:200], quantity=Decimal(qty), unit_price=data.amount)],
+        lines=[LineInSchema(product_id=prod.id, name=f"{concepto} · {c.name}"[:200], quantity=Decimal(qty), unit_price=data.amount)],
     ).model_dump(mode="json", exclude={"customer_id"})
     DocumentIn(**template)  # validar antes de guardar
     from .ops import needs_rearm, schedule_of, send_flags, send_terms, set_send_approval
@@ -987,7 +1036,8 @@ def plan_put(cid: int, data: PlanIn, p: Principal = Depends(require("aliados", "
     r.frequency = "mensual"
     r.next_date = data.next_date
     r.auto_send = data.auto_send
-    r.active = data.active
+    # sin servicio aceptado no se cobra nada: queda lista y se activa cuando el aliado lo acepta en su portal
+    r.active = data.active and c.extra_service_accepted_at is not None
     r.auto_charge = False  # nunca se cobra solo
     # otro cliente, otra moneda u otro monto, o quien no envia facturas adelanto el cobro o volvio a encender el envio:
     # la proxima vuelve a esperar "Aprobar y enviar"; quitar la revision es de quien envia facturas (contabilidad tiene

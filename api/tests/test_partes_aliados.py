@@ -48,11 +48,11 @@ def test_oportunidad_yobel_partes_aliados_y_aportado(client, auth):
     r = client.post(f"/opportunity-allies/{ally['id']}/requests", json={"what": "Costo de fibra", "responsible_id": auth["user"]["id"], "due_date": ayer})
     assert r.status_code == 201, r.text
     req = r.json()[0]["requests"][0]
-    assert req["pending"] and req["overdue"] and req["status"] == "solicitado" and req["responsible"]
+    assert req["pending"] and req["overdue"] and req["status"] == "vencido" and req["stored_status"] == "enviado" and req["responsible"]
 
     det = client.get(f"/opportunities/{o['id']}").json()
     assert det["ally_pending"] == 1 and det["allies"][0]["requests"][0]["overdue"]
-    assert "Aliado Hauset agregado como subcontratista" in det["notes"] and "Solicitud de costo a Hauset: Costo de fibra" in det["notes"]
+    assert "Aliado Hauset agregado como subcontratista" in det["notes"] and "Solicitud de precio a Hauset: Costo de fibra" in det["notes"]
 
     # la tarjeta del inicio y la lista de pendientes salen de la misma definicion
     pend = client.get("/opportunity-allies/pending").json()
@@ -83,7 +83,7 @@ def test_oportunidad_yobel_partes_aliados_y_aportado(client, auth):
     r = client.put(f"/opportunity-allies/requests/{req['id']}", json={"what": "Costo de fibra", "status": "aprobado", "amount": "1234.50", "currency": "USD"})
     assert not r.json()[0]["requests"][0]["pending"]
     det = client.get(f"/opportunities/{o['id']}").json()
-    assert det["ally_pending"] == 0 and "recibido → aprobado" in det["notes"] and "1234" not in det["notes"]
+    assert det["ally_pending"] == 0 and "respondida → aceptada" in det["notes"] and "1234" not in det["notes"]
     assert client.get("/dashboard").json()["acciones_pendientes"]["costos_aliados"] == 0
 
     # proyecto desde la cotizacion: hereda cliente final, sitio y aliados
@@ -95,7 +95,7 @@ def test_oportunidad_yobel_partes_aliados_y_aportado(client, auth):
 
     # quitar el aliado deja linea en la bitacora
     client.delete(f"/opportunity-allies/{ally['id']}")
-    assert "Aliado Hauset quitado (con 1 solicitud(es) de costo)" in client.get(f"/opportunities/{o['id']}").json()["notes"]
+    assert "Aliado Hauset quitado (con 1 solicitud(es) de precio)" in client.get(f"/opportunities/{o['id']}").json()["notes"]
 
 
 def test_vendedora_no_ve_costos_ni_oportunidades_ajenas(client, auth, db_session):

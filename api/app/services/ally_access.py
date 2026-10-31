@@ -6,6 +6,9 @@ Espejo de services/client_access.py para el portal de aliados (aliado_final §7.
 - Cupos: usuarios activos + invitaciones vivas no pasan de max_users (NULL = sin tope).
 - Mensualidad: una Recurrence de factura al cliente de facturacion del aliado. Modo "por_usuario": la cantidad de la
   linea sigue a los usuarios activos (refresh_plan_quantity). Nunca auto_charge ni suspension automatica.
+- Revision 2, punto 13: el acceso basico al portal es parte del servicio compartido y no se cobra. La mensualidad solo
+  aplica a un servicio adicional definido (AllyCompany.extra_service) y aceptado (extra_service_accepted_at, por el
+  aliado en su portal o registrado por Crimson): sin aceptacion la recurrencia queda apagada y la mora no cuenta.
 """
 
 from __future__ import annotations
@@ -64,7 +67,34 @@ def mora_where(tenant_id: int, today: date, days: int = SUSPEND_DAYS, start: dat
         AllyCompany.suspended_at.is_(None),
         AllyCompany.customer_id.is_not(None),
         AllyCompany.customer_id.in_(atrasadas),
+        # revision 2, punto 13: el acceso basico no se cobra. Solo un servicio adicional ACEPTADO puede llevar a
+        # proponer una suspension; quien no tiene servicio adicional nunca queda bloqueado por la mensualidad
+        AllyCompany.extra_service_accepted_at.is_not(None),
     ]
+
+
+def service_out(company: AllyCompany) -> dict | None:
+    """Servicio adicional (opcional) de la empresa aliada: que es, si lo acepto y quien. None si no hay."""
+    if not company.extra_service:
+        return None
+    return {
+        "descripcion": company.extra_service,
+        "aceptado": company.extra_service_accepted_at is not None,
+        "aceptado_at": company.extra_service_accepted_at,
+        "aceptado_por": company.extra_service_accepted_by,
+        "monto": company.plan_amount,
+        "moneda": company.plan_currency,
+        "modo": company.plan_mode,
+    }
+
+
+def accept_service(db: Session, company: AllyCompany, by: str) -> None:
+    """El servicio adicional queda aceptado y, si ya hay mensualidad definida con monto, se activa."""
+    company.extra_service_accepted_at = datetime.now(UTC)
+    company.extra_service_accepted_by = by[:200]
+    r = db.get(Recurrence, company.recurrence_id) if company.recurrence_id else None
+    if r is not None and r.tenant_id == company.tenant_id and d(company.plan_amount) > 0:
+        r.active = True
 
 
 def _aware(dt: datetime | None) -> datetime | None:

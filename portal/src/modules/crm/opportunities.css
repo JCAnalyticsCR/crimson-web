@@ -94,3 +94,24 @@ button.opp-eco-link:hover { border-color: var(--crimson); }
 }
 .prj-allies { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .prj-ally { min-width: 0; }
+
+/* Revision 2: solicitud de precio (peticion / oferta), acuerdos con versiones, relaciones y alcances */
+.ally-dest { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; padding: 6px 10px; border-radius: 8px; background: var(--surface-2); }
+.ally-dest b { overflow-wrap: anywhere; }
+.req-lines { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.req-line { display: grid; grid-template-columns: minmax(0, 1fr) 90px 100px auto; gap: 6px; align-items: center; }
+.req-line--price { grid-template-columns: minmax(0, 1fr) 80px 90px 120px auto; }
+.req-detail summary { cursor: pointer; }
+.req-detail[open] summary { margin-bottom: 4px; }
+.req-offer { border: 1px solid var(--hair); border-radius: 8px; padding: 6px 10px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.agreement-versions { margin: 4px 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.agreement-versions .meta { overflow-wrap: anywhere; }
+.rel-grid { gap: 10px 14px; }
+.rel-transparency { border-top: 1px solid var(--hair); padding-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.scope-panel .table td { vertical-align: top; }
+@media (max-width: 600px) {
+  .req-line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .req-line > input:first-child { grid-column: 1 / -1; }
+  .req-line--price { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto; }
+}
+.markup-box { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; border: 1px dashed var(--hair-2); background: var(--surface-2); max-width: 640px; }
