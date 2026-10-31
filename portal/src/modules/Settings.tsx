@@ -33,7 +33,7 @@ const mailError = (m: Mail) => m.error && m.status !== "enviado" && m.status !==
 
 /* Las claves no cambian (los enlaces ?tab= siguen sirviendo). "Soporte" chocaba con el menú Soporte (tickets) y
    Andrés creyó que era una conexión con Fygaro (03:31); la Bandeja XML la mezcló con el correo que sale (03:46). */
-const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["hacienda", "Hacienda"], ["pagos", "Pagos y cobros"], ["inventario", "Inventario"], ["ventas", "Ventas"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"], ["bandeja", "XML de proveedores"], ["sla", "SLA"], ["soporte", "Acceso de soporte"], ["api", "API"], ["bitacora", "Bitácora"], ["respaldo", "Respaldo"]];
+const TABS = [["empresa", "Empresa"], ["facturacion", "Facturación"], ["hacienda", "Hacienda"], ["pagos", "Pagos y cobros"], ["inventario", "Inventario"], ["ventas", "Ventas"], ["usuarios", "Usuarios"], ["cuenta", "Mi cuenta"], ["correo", "Correo"], ["bandeja", "XML de proveedores"], ["sla", "SLA"], ["soporte", "Acceso de soporte"], ["bitacora", "Bitácora"], ["respaldo", "Respaldo"]];
 
 export default function Settings() {
   const { me, reload, toast, allows } = useSession();
@@ -302,7 +302,9 @@ export default function Settings() {
         </Card></>
       )}
 
-      {tab === "api" && <ApiCreds />}
+      {/* "API" (credenciales para integraciones externas) oculta por ahora (30/10, Andres: "no ocupamos integrar nada";
+          era la pantalla heredada de Fygaro). El componente queda para cuando haga falta. */}
+      {false && tab === "api" && <ApiCreds />}
       {tab === "hacienda" && <HaciendaTab />}
       {tab === "bandeja" && <InboxSettings />}
       {tab === "sla" && <SlaSettings />}

@@ -46,6 +46,7 @@ const toPayload = (doc: DocState, lines: Line[], asigna = false) => ({
   ...(asigna && doc.seller_id !== undefined ? { seller_id: doc.seller_id } : {}),
 });
 /* Al recuperar un borrador solo vuelve lo que el usuario escribe; numero, estado y versiones son del servidor. */
+const GRUPO: Record<string, string> = { FE: "FEC · Facturas electrónicas", TE: "TE · Tiquetes electrónicos", FEE: "FEE · Facturas de exportación", NC: "NC · Notas de crédito" };
 const EDITABLE = ["customer_id", "currency", "discount_type", "discount_value", "internal_notes", "external_notes", "external_order", "activity_code", "medical_exemption_card", "issue_date", "due_date"] as const;
 
 /* Pedido 21/10: la factura con numero provisional (BOR-...) no se envia: primero se emite y el cliente ve el fiscal. */
@@ -60,6 +61,9 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
   const isQ = kind === "quote";
   const preCustomer = isNew && search.get("cliente") ? Number(search.get("cliente")) : undefined;
   const [doc, setDoc] = useState<Partial<Quote & Invoice>>({ currency: "CRC", discount_type: "percent", discount_value: "0", status: "creado", lines: [], customer_id: preCustomer });
+  // tipo de la factura nueva (FE / TE / FEE); en una ya creada manda el suyo
+  const [tipoNuevo, setTipoDoc] = useState("FE");
+  const tipoDoc = isNew ? tipoNuevo : (doc.doc_type || "FE");
   const [lines, setLines] = useState<Line[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [prev, setPrev] = useState<Preview | null>(null);
@@ -235,7 +239,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     setBusy(true);
     try {
       const path = isQ ? "quotes" : "invoices";
-      const saved = await auto.exclusive({ doc, lines }, () => (isNew ? api<Quote & Invoice>(`/${path}`, { method: "POST", json: payload }) : api<Quote & Invoice>(`/${path}/${id}`, { method: "PUT", json: payload })));
+      const saved = await auto.exclusive({ doc, lines }, () => (isNew ? api<Quote & Invoice>(isQ ? `/${path}` : `/${path}?doc_type=${tipoDoc}`, { method: "POST", json: payload }) : api<Quote & Invoice>(`/${path}/${id}`, { method: "PUT", json: payload })));
       auto.fromServer();
       if (saved.status === "por_aprobar") {
         toast(`Cotización ${saved.number} guardada. El descuento supera tu límite: queda pendiente de aprobación de un administrador.`, "bad");
@@ -399,7 +403,18 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
             <Field label="Divisa" hint={doc.customer_id && customers.find((c) => c.id === doc.customer_id)?.currency !== cur ? `El cliente prefiere ${customers.find((c) => c.id === doc.customer_id)?.currency}; esta cambiada a mano.` : fx ? `Tipo de cambio (${fx.source_label}, ${fmtDate(fx.date)}): venta ${fx.sell} · compra ${fx.buy}${fx.stale ? " · tasa vieja" : ""}` : undefined}>
               <select className="select" value={cur} disabled={ro} onChange={(e) => setDoc({ ...doc, currency: e.target.value })}><option>CRC</option><option>USD</option></select>
             </Field>
-            <Field label="Grupo de facturación"><select className="select" disabled><option>{isQ ? "COT · Cotizaciones" : "FEC · Facturas electrónicas"}</option></select></Field>
+            {/* Tipo y grupo (30/10, Andres): un tiquete va en su grupo TE, no en el de facturas. Al crear se elige el tipo;
+                despues queda fijo (es el consecutivo de Hacienda). */}
+            {!isQ && (
+              <Field label="Tipo de documento" hint={tipoDoc === "TE" ? "Tiquete: para consumidor final, no requiere cédula del cliente." : tipoDoc === "FE" ? "Factura: el cliente necesita cédula y correo para Hacienda." : undefined}>
+                <select className="select" value={tipoDoc} disabled={!isNew || ro} onChange={(e) => setTipoDoc(e.target.value)}>
+                  <option value="FE">Factura electrónica</option>
+                  <option value="TE">Tiquete electrónico</option>
+                  <option value="FEE">Factura electrónica de exportación</option>
+                </select>
+              </Field>
+            )}
+            <Field label="Grupo de facturación"><select className="select" disabled><option>{isQ ? "COT · Cotizaciones" : GRUPO[tipoDoc] || `${tipoDoc}`}</option></select></Field>
           </div></div>
 
           <div className="card">

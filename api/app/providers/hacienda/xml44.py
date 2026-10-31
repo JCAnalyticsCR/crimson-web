@@ -527,7 +527,11 @@ def build_comprobante(p: dict) -> etree._Element:
         raise BuildError("La factura no tiene líneas")
     for i, ln in enumerate(p["lines"], start=1):
         if not ln.get("cabys") or not re.fullmatch(r"\d{13}", str(ln["cabys"])):
-            raise BuildError(f"La línea {i} no tiene CABYS")
+            detalle = str(ln.get("detail") or "")[:60]
+            raise BuildError(
+                f"La línea {i}{f' («{detalle}»)' if detalle else ''} no tiene CABYS: elegila desde Productos & Servicios"
+                " (el CABYS viene del producto) o ponele el código CABYS de 13 dígitos."
+            )
         qty, price = Decimal(str(ln["quantity"])), Decimal(str(ln["unit_price"]))
         monto_total = (qty * price).quantize(Q5, rounding=ROUND_HALF_UP)
         subtotal = Decimal(str(ln["subtotal"])).quantize(Q5, rounding=ROUND_HALF_UP)

@@ -189,7 +189,12 @@ TYPE_RULES = (
     ("Grabador NVR", ("grabador", "grabadora"), ("dvr", "analog")),
     ("Disco duro", ("disco duro", "hdd", "disco "), ("externo",)),
     ("Disco externo", ("disco duro externo", "disco externo"), ()),
-    ("Memoria microSD", ("micro sd", "microsd", "sdxc", "sdhc"), ()),
+    # la memoria es la tarjeta, no un aparato que la usa ("parlante bluetooth / micro SD", "camara wifi microsd")
+    (
+        "Memoria microSD",
+        ("memoria micro", "memoria sd", "tarjeta micro", "tarjeta de memoria", "tarjeta sd"),
+        ("parlante", "bocina", "camara", "camera", "audifono", "radio", "reproductor", "grabador", "lector", "dashcam"),
+    ),
     ("Cámara PTZ", ("ptz",), ()),
     ("Cámara WiFi", ("wifi", "wi-fi", "inalambric"), ("switch", "router", "punto de acceso", "access point", "nvr", "grabador", "teclado", "alarma")),
     ("Cámara IP", ("camara", "camera", "bullet", "domo", "dome", "turret"), ("dashcam", "burbuja", "soporte", "caja", "brazo", "montaje")),
@@ -210,6 +215,9 @@ TYPE_RULES = (
 
 def product_type(p: Product) -> str:
     n = " " + fold(p.name) + " "
+    # "Memoria micro SDXC 64GB ... para camaras": lo que manda es como empieza el nombre
+    if n.lstrip().startswith(("memoria", "tarjeta")) and any(w in n for w in ("sd", "micro")):
+        return "Memoria microSD"
     for label, must, never in TYPE_RULES:
         if any(w in n for w in must) and not any(w in n for w in never):
             if label == "Switch PoE" and "poe" not in n:

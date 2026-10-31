@@ -468,3 +468,21 @@ def test_seo_por_dominio_metas_datos_estructurados_sitemap_y_301(client, auth, d
     # el endpoint del portal (respaldo si nginx no lo atiende) resuelve igual
     assert client.get("/public/store/crimson/legacy/product/c2751caf-691d-494f-96e2-d34efdfe4de0").json() == {"product_id": prods["WD44PURZ"].id}
     assert client.get("/public/store/crimson/legacy/product/c65ca62b-9889-41cd-b648-50c06739f501").json() == {"search": "Cámara Smart"}
+
+
+def test_memoria_microsd_es_la_tarjeta_no_el_aparato_que_la_usa():
+    """30/10 (Andres): la ficha de una camara WiFi recomendaba "Memoria microSD" y mostraba parlantes y otra camara
+    porque sus nombres dicen "micro SD". La memoria es la tarjeta: empieza por Memoria/Tarjeta o lo dice el nombre."""
+    from types import SimpleNamespace as N
+
+    from app.services import store_showcase as sv
+
+    def tipo(n):
+        return sv.product_type(N(name=n))
+
+    assert tipo("Parlante unno tekno tempo bt SP9104 3W bluetooth / MICROSD/3.5MM") != "Memoria microSD"
+    assert tipo("Parlante unno tekno astro bt SP9208 6W bluetooth / micro SD / 3.5MM") != "Memoria microSD"
+    assert tipo("Cámara de seguridad PT tp link tapo C200 1080P WiFi 4MM audio bidireccional movimiento microsd") == "Cámara WiFi"
+    assert tipo("Cámara IP Hikvision DS-2CV1023G2-LIDW(B) bullet audio 2 vias WiFi micro SD para exteriores 2MP") == "Cámara WiFi"
+    assert tipo("Memoria micro SDXC 64GB Kingston clase 10 para cámaras de vigilancia") == "Memoria microSD"
+    assert tipo("Memoria micro SD 128GB Hiksemi HS-TF-E1 especializada para videovigilancia") == "Memoria microSD"

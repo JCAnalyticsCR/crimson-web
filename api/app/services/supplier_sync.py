@@ -33,7 +33,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
@@ -555,6 +555,9 @@ AC_DEFAULT: dict = {
 # Familias que se agregaron despues de que la config ya estaba guardada: entran una sola vez; si el admin las quita
 # despues, quedan en familias_vistas y no vuelven a aparecer.
 AC_NUEVAS = ("Electrodomésticos", "Audio y sonido")
+# Subfamilias que el catalogo automatico crea aunque su familia no este configurada completa (30/10: la ficha de una
+# camara WiFi recomienda "Memoria microSD" y no habia ninguna; solo entran las que pasan el filtro CLAVES)
+AC_SUBFAMILIAS = ("Memorias Micro SD",)
 
 
 def ac_settings(t: Tenant) -> dict:
@@ -719,7 +722,7 @@ def auto_catalog_run(
                 SupplierItem.tenant_id == t.id,
                 SupplierItem.supplier_id == supplier.id,
                 SupplierItem.active,
-                SupplierItem.category.in_(families),
+                or_(SupplierItem.category.in_(families), SupplierItem.subcategory.in_(AC_SUBFAMILIAS)),
                 SupplierItem.product_id.is_(None),
             )
         )

@@ -112,6 +112,12 @@ def _fill_line_from_product(db: Session, tenant_id: int, ln: LineInSchema, curre
                 "tax_rate": ln.tax_rate if ln.tax_rate is not None else (d(p.taxes[0].tax.rate) if p.taxes else Decimal(13)),
             }
         )
+    elif ln.product_id and not ln.cabys_code:
+        # 30/10: el editor manda nombre y precio, asi que arriba no se completaba y la linea quedaba sin CABYS (Hacienda
+        # rechaza la emision: "La linea 1 no tiene CABYS") aunque el producto lo tiene. El CABYS sale siempre del producto.
+        p = db.get(Product, ln.product_id)
+        if p and p.tenant_id == tenant_id and p.cabys_code:
+            ln = ln.model_copy(update={"cabys_code": p.cabys_code})
     return ln
 
 

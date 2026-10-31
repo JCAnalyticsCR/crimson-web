@@ -102,6 +102,13 @@ def _lines(db: Session, inv: Invoice, lenient: bool) -> list[dict]:
         if (ln.treatment or "normal") in ("aportado", "excluido"):
             continue  # aportado por el cliente y exclusiones no son parte de la venta: no viajan a Hacienda
         cabys = re.sub(r"\D", "", ln.cabys_code or "")
+        if len(cabys) != 13 and ln.product_id:
+            # documentos guardados antes del arreglo del 30/10: el CABYS del producto (el de Eurocomp, ya completado)
+            prod = db.get(Product, ln.product_id)
+            if prod is not None and prod.tenant_id == inv.tenant_id:
+                cabys = re.sub(r"\D", "", prod.cabys_code or "")
+                if len(cabys) == 13:
+                    ln.cabys_code = cabys
         if len(cabys) != 13 and lenient:
             cabys = "0" * 13  # simulado: el XML de prueba no se detiene por un CABYS faltante
         out.append(
