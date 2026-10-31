@@ -49,6 +49,7 @@ from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal, InvalidOperation
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.texto import forma, plural
 from ..models import Product, ProductVariant, SupplierItem, Tenant
 from . import fx as fxsvc
 from .discounts import min_margin
@@ -347,7 +348,7 @@ def _brake_signal(fx_flag: dict[str, Decimal], candidates: list) -> str | None:
         return f"el tipo de cambio de {cur} cambió {_s(j).replace('.', ',')} % contra el anterior"
     n_dud = sum(1 for x in candidates if x[3])
     if candidates and n_dud * 2 > len(candidates):
-        return f"{n_dud} de {len(candidates)} productos con un salto de costo dudoso"
+        return f"{n_dud} de {plural(len(candidates), 'producto', 'productos')} con un salto de costo dudoso"
     return None
 
 
@@ -438,14 +439,15 @@ def _brake_alert(db: Session, t: Tenant, out: dict, patch: dict) -> None:
     body = (
         f"<p>La revisión de margen ({html.escape(out.get('reason') or 'automática')}) encontró productos bajo el margen "
         f"mínimo, pero <b>{html.escape(out['frenada'])}</b>: puede ser un error del tipo de cambio o de la lista del "
-        f"proveedor. Para no vaciar la tienda por un error se sacaron de venta {out['nuevos_retenidos']} y "
-        f"<b>{out['frenados']} siguen a la venta bajo el mínimo</b> hasta que lo revise.</p>"
+        f"proveedor. Para no vaciar la tienda por un error {forma(out['nuevos_retenidos'], 'se sacó', 'se sacaron')} de venta "
+        f"{plural(out['nuevos_retenidos'], 'producto', 'productos')} y "
+        f"<b>{plural(out['frenados'], 'producto sigue', 'productos siguen')} a la venta bajo el mínimo</b> hasta que lo revise.</p>"
         "<p>Si el dato está mal, corríjalo (tipo de cambio en Ajustes → Facturación) y se libera solo. Si está bien, "
         f'toque «Sacar de venta todo» en <a href="{html.escape(link)}">Aprobaciones → Precios por revisar</a>.</p>'
         "<p>El sistema nunca cambia un precio solo.</p>"
         f'<p><a href="{html.escape(link)}">Revisar precios</a></p>'
     )
-    notify_roles(db, t, ("admin",), f"Margen: revisión frenada, {out['frenados']} producto(s) bajo el mínimo a la venta · {t.name}", body, "margin_summary", 0)
+    notify_roles(db, t, ("admin",), f"Margen: revisión frenada, {plural(out['frenados'], 'producto', 'productos')} bajo el mínimo a la venta · {t.name}", body, "margin_summary", 0)
     patch["margin_guard_brake_alert_on"] = hoy
 
 
@@ -680,11 +682,12 @@ def summary_html(db: Session, t: Tenant, base_url: str) -> tuple[str, str] | Non
             )
         mas = f"<p>… y {len(dud) - 30} más.</p>" if len(dud) > 30 else ""
         dud_html = (
-            f"<p>{len(dud)} producto(s) con un salto de costo o de tipo de cambio <b>dudoso</b> siguen a la venta porque su margen "
+            f"<p>{plural(len(dud), 'producto con un salto', 'productos con un salto')} de costo o de tipo de cambio <b>dudoso</b> "
+            f"{forma(len(dud), 'sigue', 'siguen')} a la venta porque su margen "
             f"está sobre el mínimo. Verifique que el dato sea correcto (posible error de la lista del proveedor):</p><ul>{''.join(li)}</ul>{mas}"
         )
     if not rows:
-        subject = f"Margen: {len(dud)} costo(s) dudoso(s)" if dud else f"Tipo de cambio viejo o faltante ({len(alerts)})"
+        subject = f"Margen: {plural(len(dud), 'costo dudoso', 'costos dudosos')}" if dud else f"Tipo de cambio viejo o faltante ({len(alerts)})"
         return subject, fx_html + dud_html + f'<p><a href="{html.escape(link)}">Revisar precios</a></p>'
     n_held = sum(1 for p in rows if p.margin_hold)
     n_dud = sum(1 for p in rows if (p.margin_info or {}).get("dudoso"))
@@ -702,16 +705,17 @@ def summary_html(db: Session, t: Tenant, base_url: str) -> tuple[str, str] | Non
     mas = f"<p>… y {len(rows) - 30} más.</p>" if len(rows) > 30 else ""
     modo = "activo: lo que queda bajo el mínimo sale de venta" if cfg["mode"] == "activo" else "informe: no se saca nada de venta"
     freno = (
-        f"<p><b>Revisión frenada:</b> {html.escape(last['frenada'])}. {last.get('frenados', 0)} producto(s) bajo el mínimo "
-        "siguen a la venta hasta que corrija el dato o toque «Sacar de venta todo» en Aprobaciones.</p>"
+        f"<p><b>Revisión frenada:</b> {html.escape(last['frenada'])}. "
+        f"{plural(last.get('frenados', 0), 'producto bajo el mínimo sigue', 'productos bajo el mínimo siguen')} "
+        "a la venta hasta que corrija el dato o toque «Sacar de venta todo» en Aprobaciones.</p>"
         if last.get("frenada")
         else ""
     )
     body = (
-        f"{fx_html}{freno}<p>{len(rows)} producto(s) de la tienda están bajo el margen mínimo de {_s(cfg['min_pct'])} % "
+        f"{fx_html}{freno}<p>{plural(len(rows), 'producto de la tienda está', 'productos de la tienda están')} bajo el margen mínimo de {_s(cfg['min_pct'])} % "
         f"({n_held} fuera de venta, {n_dud} con un salto dudoso). Modo {modo}.</p><ul>{''.join(li)}</ul>{mas}{dud_html}"
         f"<p>El sistema nunca cambia un precio solo: revíselos y aplique el sugerido con un clic en "
         f'<a href="{html.escape(link)}">Aprobaciones → Precios por revisar</a>.</p>'
         f'<p><a href="{html.escape(link)}">Revisar precios</a></p>'  # el boton principal del correo (email_layout)
     )
-    return f"Margen: {len(rows)} producto(s) bajo el {_s(cfg['min_pct'])} %", body
+    return f"Margen: {plural(len(rows), 'producto', 'productos')} bajo el {_s(cfg['min_pct'])} %", body

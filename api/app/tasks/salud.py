@@ -36,6 +36,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
+from ..core.texto import plural
 from ..core.timeutil import cr_today
 from ..models import EmailOutbox, TaskRun, Tenant
 from ..services import mail
@@ -228,7 +229,7 @@ def alert_failure(db: Session, task: str, err: str) -> int:
     hoy = cr_today()
     subject = f"Falló una tarea automática: {task}"
     body = (
-        f"<p>La tarea <b>{html.escape(task)}</b> falló hoy ({hoy}).</p>"
+        f"<p>La tarea <b>{html.escape(task)}</b> falló hoy ({hoy:%d/%m/%Y}).</p>"
         f"<p style='font-family:monospace;color:#7a1020'>{html.escape(err)}</p>"
         "<p>Se avisa una sola vez por día por tarea; las siguientes fallas quedan en las corridas del worker y en el "
         "correo diario de Salud.</p>"
@@ -271,7 +272,12 @@ def _badge(c: dict) -> str:
 
 
 def _detail(c: dict) -> str:
-    return ", ".join(f"{k}: {', '.join(map(str, v)) if isinstance(v, list) else v}" for k, v in c.items() if k not in ("ok", "critico")) or "—"
+    def valor(v) -> str:
+        if isinstance(v, bool):
+            return "sí" if v else "no"
+        return ", ".join(map(str, v)) if isinstance(v, list) else str(v)
+
+    return ", ".join(f"{k.replace('_', ' ')}: {valor(v)}" for k, v in c.items() if k not in ("ok", "critico")) or "—"
 
 
 def _runs_24h(db: Session, now: datetime) -> list[dict]:
@@ -330,7 +336,8 @@ def daily_report(db: Session, now: datetime | None = None) -> int:
         )
         bloque_t = f"<table border=0 cellpadding=4><tr><th>Tarea</th><th>Fallas</th><th>Sin terminar</th><th>Último error</th></tr>{filas_t}</table>"
     else:
-        bloque_t = f"<p>Ninguna tarea falló ({sum(x['total'] for x in tareas)} corridas de {len(tareas)} tareas).</p>"
+        corridas = sum(x["total"] for x in tareas)
+        bloque_t = f"<p>Ninguna tarea falló ({plural(corridas, 'corrida', 'corridas')} de {plural(len(tareas), 'tarea', 'tareas')}).</p>"
     # el asunto ya es el titulo del correo (email_layout): aqui solo el estado, sin repetirlo en un <h3>
     body = (
         f"<p>Estado general: <b>{html.escape(estado)}</b>.</p>"
@@ -338,12 +345,12 @@ def daily_report(db: Session, now: datetime | None = None) -> int:
         f"<h4 style='margin:16px 0 4px'>Tareas automáticas (24 h)</h4>{bloque_t}"
     )
     op = operator_tenant(db)
-    n = _send_ops(db, f"Salud de la plataforma · {hoy} · {estado}", body + (_tenant_block(db, op, now) if op else "") + _cta_correos(), f"salud:diario:{hoy}")
+    n = _send_ops(db, f"Salud de la plataforma · {hoy:%d/%m/%Y} · {estado}", body + (_tenant_block(db, op, now) if op else "") + _cta_correos(), f"salud:diario:{hoy}")
     for t in _tenants(db):
         if op is not None and t.id == op.id:
             continue
         n += mail.notify_roles(
-            db, t, ("admin",), f"Salud de su empresa · {t.name} · {hoy}", _tenant_block(db, t, now) + _cta_correos(), "salud", 0, dedupe_key=f"salud:empresa:{hoy}"
+            db, t, ("admin",), f"Salud de su empresa · {t.name} · {hoy:%d/%m/%Y}", _tenant_block(db, t, now) + _cta_correos(), "salud", 0, dedupe_key=f"salud:empresa:{hoy}"
         )
     db.commit()
     purge(db, now)

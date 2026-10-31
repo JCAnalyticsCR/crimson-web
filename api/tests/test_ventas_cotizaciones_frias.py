@@ -224,7 +224,7 @@ def test_vendedora_que_ya_no_ve_la_cotizacion_no_recibe_montos(client, auth, db_
     db_session.commit()
     assert _avisos(db_session, "vendedora-tecnico@ejemplo.com") == []
     admin = _avisos(db_session, auth["user"]["email"])
-    assert len(admin) == 1 and q["number"] in admin[0].html and "ya no las puede ver" in admin[0].html
+    assert len(admin) == 1 and q["number"] in admin[0].html and "ya no la puede ver" in admin[0].html
 
 
 def test_worker_programa_y_corre_las_cotizaciones_frias(db_session, monkeypatch):

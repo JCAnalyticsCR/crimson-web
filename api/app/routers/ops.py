@@ -1359,7 +1359,7 @@ def _rec_behind_alert(db: Session, r: Recurrence) -> None:
         t,
         ("admin",),
         f"Recurrencia «{r.name}» con periodos atrasados",
-        f"<p>La recurrencia de factura <b>{escape(r.name or '')}</b> tiene periodos atrasados (siguiente: {r.next_date}). "
+        f"<p>La recurrencia de factura <b>{escape(r.name or '')}</b> tiene periodos atrasados (siguiente: {r.next_date:%d/%m/%Y}). "
         "Se generó una sola factura; revísela antes de generar las demás.</p>"
         + cta("/recurrencias", "Abrir Recurrencias"),
         "recurrence",

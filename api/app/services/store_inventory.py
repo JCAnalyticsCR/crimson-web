@@ -983,7 +983,7 @@ def back_in_stock_html(t: Tenant, name: str, mensaje: str, url: str) -> str:
 
     return email_layout.render(
         t,
-        title=f"Ya hay {name}",
+        title=f"Ya hay existencia de {name}",
         body=email_layout.p_html(f"¡Buenas noticias! <b>{html.escape(name)}</b> ya está {html.escape(mensaje.lower())}."),
         preheader=f"{name} ya está {mensaje.lower()}.",
         action=(url, "Ver el producto"),
@@ -1033,7 +1033,7 @@ def back_in_stock(db: Session) -> int:
                     db,
                     t,
                     a.email,
-                    f"Ya hay {p.name} · {t.name}",
+                    f"Ya hay existencia de {p.name} · {t.name}",
                     back_in_stock_html(t, p.name, st["mensaje"], url),
                     "stock_alert",
                     a.id,

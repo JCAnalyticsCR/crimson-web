@@ -19,6 +19,7 @@ from celery import shared_task
 from sqlalchemy import exists, func, select, text
 from sqlalchemy.orm import Session
 
+from ..core.texto import forma, plural
 from ..models import AuditLog, Customer, Opportunity, Project, Quote, QuoteVersion
 from ..services import avisos_venta as avisos
 from ..services.documents import CR, audit, local_date
@@ -147,14 +148,14 @@ def avisar_cotizaciones_frias(db: Session, tenant, ahora: datetime | None = None
             filas = "".join(
                 f'<li><a href="{html.escape(avisos.enlace(f"/cotizaciones/{q.id}"))}"><b>{html.escape(q.number)}</b></a> · '
                 f"{html.escape(_cliente(db, q))} · {html.escape(q.currency)} {q.total:,.0f} · "
-                f"enviada hace {(hoy - local_date(desde)).days} días</li>"
+                f"enviada hace {plural((hoy - local_date(desde)).days, 'día', 'días')}</li>"
                 for q, desde in items[:MAX_FILAS]
             )
             mas = f"<p>… y {len(items) - MAX_FILAS} más.</p>" if len(items) > MAX_FILAS else ""
             intro = (
-                f"Llevan {FRIA_DIAS} días o más desde el último envío y el cliente no ha respondido:"
+                f"{forma(len(items), 'Lleva', 'Llevan')} {FRIA_DIAS} días o más desde el último envío y el cliente no ha respondido:"
                 if uid
-                else "Estas cotizaciones están frías y su vendedora ya no está activa (o ya no las puede ver): reasígnelas o deles seguimiento:"
+                else f"{forma(len(items), 'Esta cotización está fría y su vendedora ya no está activa (o ya no la puede ver): reasígnela o dele seguimiento', 'Estas cotizaciones están frías y su vendedora ya no está activa (o ya no las puede ver): reasígnelas o deles seguimiento')}:"
             )
             return (
                 f"<p>{intro}</p><ul>{filas}</ul>{mas}"
@@ -167,7 +168,7 @@ def avisar_cotizaciones_frias(db: Session, tenant, ahora: datetime | None = None
                 )
             )
 
-        asunto = f"{len(items)} cotización{'es' if len(items) != 1 else ''} sin respuesta del cliente"
+        asunto = f"{plural(len(items), 'cotización', 'cotizaciones')} sin respuesta del cliente"
         enviados = avisos.avisar(db, tenant, destinos, asunto, cuerpo, "quote", items[0][0].id)
         if not enviados:
             continue  # sin correo: se vuelve a intentar en la proxima corrida
@@ -180,6 +181,15 @@ def avisar_cotizaciones_frias(db: Session, tenant, ahora: datetime | None = None
 def _cliente(db: Session, q: Quote) -> str:
     c = db.get(Customer, q.customer_id) if q.customer_id else None
     return c.name if c is not None and c.tenant_id == q.tenant_id else "sin cliente"
+
+
+def _dias_sin_responsable(hoy, o) -> str:
+    """'3 días' (o '1 día') desde que entró la consulta; '?' si no tiene fecha."""
+    if not o.created_at:
+        return "? días"
+    creada = o.created_at if o.created_at.tzinfo else o.created_at.replace(tzinfo=UTC)
+    dias = (hoy - local_date(creada)).days
+    return plural(dias, "día", "días")
 
 
 def avisar_consultas_sin_responsable(db: Session, tenant) -> int:
@@ -207,17 +217,17 @@ def avisar_consultas_sin_responsable(db: Session, tenant) -> int:
     items_html = "".join(
         f'<li><a href="{e(avisos.enlace(f"/oportunidades?id={o.id}"))}">'
         f"<b>{e(o.number)}</b></a> · {e(o.title[:80])} · "
-        f"{(hoy - local_date(o.created_at.replace(tzinfo=UTC) if o.created_at and not o.created_at.tzinfo else o.created_at)).days if o.created_at else '?'} días sin responsable</li>"
+        f"{_dias_sin_responsable(hoy, o)} sin responsable</li>"
         for o in filas[:20]
     )
     mas = f"<p>… y {len(filas) - 20} más.</p>" if len(filas) > 20 else ""
     cuerpo = (
-        f"<p>Estas consultas de la tienda web llevan más de un día sin un vendedor responsable:</p>"
+        f"<p>{forma(len(filas), 'Esta consulta de la tienda web lleva', 'Estas consultas de la tienda web llevan')} más de un día sin un vendedor responsable:</p>"
         f"<ul>{items_html}</ul>{mas}"
         + cta("/ventas/por-asignar", "Ir a Ventas por asignar")
     )
     destinos = miembros(db, tenant, roles=("admin",))
-    n = avisos.avisar(db, tenant, destinos, f"{len(filas)} consulta{'s' if len(filas) != 1 else ''} sin responsable · tienda web", lambda _m: cuerpo, "opportunity", filas[0].id)
+    n = avisos.avisar(db, tenant, destinos, f"{plural(len(filas), 'consulta', 'consultas')} sin responsable · tienda web", lambda _m: cuerpo, "opportunity", filas[0].id)
     return n
 
 

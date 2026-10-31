@@ -17,6 +17,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.texto import plural
 from ..models import MaintenanceContract, SupportTicket, Tenant
 
 PRIORIDADES = ("critica", "alta", "media", "baja")
@@ -337,7 +338,7 @@ def avisar_atrasos(db: Session, tenant: Tenant, ahora: datetime | None = None) -
     from .mail import notify_roles, queue_email, user_inbox
 
     ahora = _aware(ahora) or datetime.now(UTC)
-    titulos = {"respuesta": "sin primera respuesta a tiempo", "resolucion": "con la resolucion atrasada"}
+    titulos = {"respuesta": "sin primera respuesta a tiempo", "resolucion": "con la resolución atrasada"}
     plazos = {"respuesta": "la primera respuesta", "resolucion": "la resolución"}
     n = 0
     for tipo, lista in revisar_atrasos(db, tenant, ahora).items():
@@ -350,7 +351,7 @@ def avisar_atrasos(db: Session, tenant: Tenant, ahora: datetime | None = None) -
         asunto = (
             f"Ticket {detalles[0][1]['numero']} {titulos[tipo]} · {detalles[0][1]['cliente']}"
             if len(lista) == 1
-            else f"{len(lista)} ticket(s) {titulos[tipo]}"
+            else f"{plural(len(lista), 'ticket', 'tickets')} {titulos[tipo]}"
         )
         notify_roles(db, tenant, ("admin", "supervisor"), asunto, f"{intro}<ul>{filas}</ul>{mas}" + cta("/tickets", "Abrir Tickets"), "support_ticket", lista[0].id, company_bcc=False)
         for x, d in detalles:

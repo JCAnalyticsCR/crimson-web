@@ -14,6 +14,7 @@ from celery.signals import setup_logging as celery_setup_logging
 
 from app.core.config import settings
 from app.core.logging import setup_logging
+from app.core.texto import forma, plural
 from app.tasks import fiscal as _tareas_fiscales  # noqa: F401  cola "Por emitir" (plan 1.7)
 from app.tasks.salud import connect_signals  # tambien registra las tareas salud.* (shared_task)
 
@@ -271,15 +272,15 @@ def stale_followups() -> int:
                 if not correo:
                     continue
                 filas = "".join(
-                    f"<li><b>{o.number}</b> · {o.title} · {o.status}{' · vence ' + o.next_action_date.isoformat() if o.next_action_date else ''}</li>"
+                    f"<li><b>{o.number}</b> · {o.title} · {o.status.replace('_', ' ')}{' · vence ' + o.next_action_date.strftime('%d/%m/%Y') if o.next_action_date else ''}</li>"
                     for o in items[:20]
                 )
                 queue_email(
                     db,
                     t,
                     correo,
-                    f"{len(items)} oportunidades esperan seguimiento",
-                    f"<p>Estas oportunidades tienen la próxima acción para hoy, vencida o llevan días sin movimiento:</p><ul>{filas}</ul><p>Abra el panel y registre el siguiente paso.</p>",
+                    f"{plural(len(items), 'oportunidad', 'oportunidades')} {forma(len(items), 'espera', 'esperan')} seguimiento",
+                    f"<p>{forma(len(items), 'Esta oportunidad tiene', 'Estas oportunidades tienen')} la próxima acción para hoy, vencida o {forma(len(items), 'lleva', 'llevan')} días sin movimiento:</p><ul>{filas}</ul><p>Abra el panel y registre el siguiente paso.</p>",
                     "opportunity",
                     items[0].id,
                 )
@@ -319,7 +320,7 @@ def inventory_health_check() -> dict:
                 db,
                 t,
                 ("admin",),
-                f"Inventario: {r['total']} descuadre(s) para revisar",
+                f"Inventario: {plural(r['total'], 'descuadre', 'descuadres')} para revisar",
                 f"<p>La revisión de esta mañana encontró diferencias entre los documentos y el kardex:</p><ul>{filas}</ul>{mas}"
                 "<p>Se corrigen desde Inventarios → Salud del inventario.</p>",
                 "inventory",
@@ -423,14 +424,14 @@ def warranty_alerts() -> int:
             if not avisos:
                 continue
             filas = "".join(
-                f"<li>{a.name} · {a.serial or 's/n'} · {db.get(Customer, a.customer_id).name if db.get(Customer, a.customer_id) else ''} · vence {a.warranty_until}</li>"
+                f"<li>{a.name} · {a.serial or 's/n'} · {db.get(Customer, a.customer_id).name if db.get(Customer, a.customer_id) else ''} · vence {a.warranty_until.strftime('%d/%m/%Y')}</li>"
                 for a in avisos[:30]
             )
             for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.role_code.in_(("admin", "supervisor")), TenantUser.active)):
                 correo = member_inbox(m)  # su correo de avisos si el admin le puso uno
                 if not correo:
                     continue
-                queue_email(db, t, correo, f"{len(avisos)} garantías vencen en los próximos 45 días", f"<ul>{filas}</ul>", "asset", avisos[0].id)
+                queue_email(db, t, correo, f"{plural(len(avisos), 'garantía vence', 'garantías vencen')} en los próximos 45 días", f"<ul>{filas}</ul>", "asset", avisos[0].id)
                 n += 1
         db.commit()
     return n
@@ -457,9 +458,9 @@ def maintenance_due() -> int:
                 abiertos.append((c, ticket))
                 n += 1
             if abiertos:
-                filas = "".join(f"<li>{tk.number} · {c.name} · cada {c.every_months} meses</li>" for c, tk in abiertos)
+                filas = "".join(f"<li>{tk.number} · {c.name} · {"cada mes" if c.every_months == 1 else f"cada {c.every_months} meses"}</li>" for c, tk in abiertos)
                 notify_roles(
-                    db, t, ("admin", "supervisor"), f"{len(abiertos)} mantenimiento(s) para programar", f"<ul>{filas}</ul>", "support_ticket", abiertos[0][1].id
+                    db, t, ("admin", "supervisor"), f"{plural(len(abiertos), 'mantenimiento', 'mantenimientos')} para programar", f"<ul>{filas}</ul>", "support_ticket", abiertos[0][1].id
                 )
         db.commit()
     return n

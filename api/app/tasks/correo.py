@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from ..core.texto import forma, plural
 from ..models import EmailOutbox, Invoice, Order, Quote, Tenant, TenantUser
 from ..services import mail
 
@@ -138,8 +139,8 @@ def _notify_owners(db: Session, failed: list[EmailOutbox]) -> int:
             db,
             t,
             addr,
-            f"{len(items)} correo(s) no le llegaron al cliente · {t.name}",
-            "<p>Estos correos no salieron y ya no se reintentan:</p>"
+            f"{plural(len(items), 'correo', 'correos')} no le {forma(len(items), 'llegó', 'llegaron')} al cliente · {t.name}",
+            f"<p>{forma(len(items), 'Este correo no salió y ya no se reintenta', 'Estos correos no salieron y ya no se reintentan')}:</p>"
             f"<ul>{filas}</ul>"
             "<p>Revise el correo del cliente y vuelva a enviarlo desde el documento (Enviar por correo).</p>"
             + _doc_cta(items),

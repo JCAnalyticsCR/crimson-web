@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
+from ..core.texto import plural
 from ..models import Customer, EmailOutbox, Tenant, TenantUser
 from ..providers.einvoice import CR, cr_now
 from ..services import fiscal_queue as fq
@@ -68,7 +69,7 @@ def digest_html(db: Session, t: Tenant, rows: list, total: int, today, fuera_mes
             f'<td style="{td}">{html.escape(c.name) if c else "Sin cliente"}</td>'
             f'<td align="right" style="{td};white-space:nowrap">{money(inv.total, inv.currency)}</td>'
             f'<td style="{td}">{STATUS.get(inv.status, html.escape(inv.status))}</td>'
-            f'<td style="{td}">{inv.issue_date.isoformat() if inv.issue_date else ""}{f" · {dias} día(s)" if dias else " · hoy"}</td></tr>'
+            f'<td style="{td}">{inv.issue_date.strftime("%d/%m/%Y") if inv.issue_date else ""}{f" · {plural(dias, 'día', 'días')}" if dias else " · hoy"}</td></tr>'
         )
     mas = el.p(f"… y {total - len(rows)} más en la lista.", muted=True) if total > len(rows) else ""
     tabla = (
@@ -79,9 +80,9 @@ def digest_html(db: Session, t: Tenant, rows: list, total: int, today, fuera_mes
     body = el.p_html(INSTRUCTION.get(mode, INSTRUCTION["ninguno"])) + tabla + mas + el.p(f"Emitidas fuera de la plataforma este mes: {fuera_mes}.", small=True)
     return el.render(
         t,
-        title=f"Facturas por emitir · {today.isoformat()}",
+        title=f"Facturas por emitir · {today:%d/%m/%Y}",
         body=body,
-        preheader=f"{total} factura(s) esperan su comprobante.",
+        preheader=f"{plural(total, 'factura espera', 'facturas esperan')} su comprobante.",
         action=(f"{base}/facturas?estado=por_emitir", f"Abrir la lista «Por emitir» ({total})"),
         foot="Aviso interno de contabilidad.",
     )
@@ -104,7 +105,7 @@ def send_queue_digest(db: Session, now: datetime | None = None) -> int:
             )
             if ya:
                 continue
-            queue_email(db, t, email, f"Por emitir: {total} factura(s) · {t.name}", body, ENTITY, key)
+            queue_email(db, t, email, f"Por emitir: {plural(total, 'factura', 'facturas')} · {t.name}", body, ENTITY, key)
             n += 1
         db.commit()
     return n

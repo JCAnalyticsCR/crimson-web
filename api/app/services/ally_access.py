@@ -223,11 +223,11 @@ def invite_ally_user(
             tenant,
             title="Su acceso al portal de aliados",
             name=name or "",
-            intro_html=f"{e(tenant.name)} le dio acceso al portal de aliados como {e(ROLE_LABEL[role])} de <b>{e(company.name)}</b>. "
-            "Ahí ve los proyectos y trabajos que llevan en común.",
+            intro_html=f"{e(tenant.name)} le dio acceso al portal de aliados como {e(ROLE_LABEL[role])} de <b>{e(company.name)}</b>"
+            f"{'' if company.name.rstrip().endswith('.') else '.'} Ahí ve los proyectos y trabajos que llevan en común.",
             link=link,
             label="Entrar al portal",
-            note=f"Con el botón crea su contraseña y entra. El enlace vence en {INVITE_DAYS} días y sirve una sola vez.",
+            note=f"Con el botón cree su contraseña y entre. El enlace vence en {INVITE_DAYS} días y sirve una sola vez.",
         ),
         "invitation",
         inv.id,

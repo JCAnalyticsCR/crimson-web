@@ -438,7 +438,7 @@ def test_resumen_diario_al_admin_una_vez_por_dia_y_sin_bcc(client, auth, db_sess
     assert tareas.daily_summary(db_session) == 1
     assert tareas.daily_summary(db_session) == 0  # el beat dispara dos veces: un solo correo
     correos = db_session.scalars(select(EmailOutbox).where(EmailOutbox.id > antes)).all()
-    assert correos and all(c.subject.startswith("Margen: 1 producto(s) bajo el 25") for c in correos)
+    assert correos and all(c.subject.startswith("Margen: 1 producto bajo el 25") for c in correos)
     assert all(c.bcc is None and c.entity == "margin_summary" for c in correos)
     assert p.name in correos[0].html and "Precios por revisar" in correos[0].html and "nunca cambia un precio solo" in correos[0].html
     assert "/aprobaciones?seccion=precios_por_revisar" in correos[0].html

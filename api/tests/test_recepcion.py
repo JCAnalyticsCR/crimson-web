@@ -27,13 +27,14 @@ DDMMAA = HOY.strftime("%d%m%y")
 
 
 def _solo_enlaces_propios(html: str) -> bool:
-    """Todo href del correo apunta al panel (el boton del diseno base): un enlace que venga del XML de un tercero no."""
+    """Todo href del correo apunta al panel (el boton del diseno base) o al contacto de la empresa del pie (mailto: y
+    WhatsApp): un enlace que venga del XML de un tercero no."""
     import re
 
     from app.core.config import settings
 
-    base = settings.public_base_url.rstrip("/") + "/"
-    return all(h.startswith(base) for h in re.findall(r'href="([^"]+)"', html or ""))
+    propios = (settings.public_base_url.rstrip("/") + "/", "mailto:", "https://wa.me/")
+    return all(h.startswith(propios) for h in re.findall(r'href="([^"]+)"', html or ""))
 
 
 def cl(n: int = 1, emisor: str = "003101000001") -> str:

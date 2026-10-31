@@ -10,6 +10,7 @@ from html import escape
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..core.texto import forma, plural
 from ..models import EInvoiceDocument, FiscalCredential, Invoice, ReceivedDocument, ReceptionResponse, Tenant, TenantUser
 from . import hacienda_config as hc
 from .reception_calc import business_days_left
@@ -52,7 +53,8 @@ def alerts_for(db: Session, t: Tenant, today: date | None = None) -> list[str]:
         if left == -1:
             out.append(f"Venció ayer el plazo para responder el comprobante de {d.issuer_name or d.issuer_id} ({d.consecutive or d.clave[-10:]})")
         elif 0 <= left <= 2:
-            out.append(f"Quedan {left} días hábiles para responder el comprobante de {d.issuer_name or d.issuer_id} ({d.consecutive or d.clave[-10:]})")
+            quedan = "Vence hoy el plazo" if left == 0 else f"{forma(left, 'Queda', 'Quedan')} {plural(left, 'día hábil', 'días hábiles')}"
+            out.append(f"{quedan} para responder el comprobante de {d.issuer_name or d.issuer_id} ({d.consecutive or d.clave[-10:]})")
     def recent(dt) -> bool:
         return bool(_aware(dt) and now - _aware(dt) <= timedelta(hours=24))
 
@@ -117,7 +119,7 @@ def alerts_for(db: Session, t: Tenant, today: date | None = None) -> list[str]:
     try:
         pend = tax_summary(db, t, m)["credito_por_confirmar"]
         if pend:
-            out.append(f"{len(pend)} comprobante(s) del mes con crédito por confirmar: pida al proveedor la respuesta de Hacienda")
+            out.append(f"{plural(len(pend), 'comprobante', 'comprobantes')} del mes con crédito por confirmar: pida al proveedor la respuesta de Hacienda")
     except Exception:  # noqa: BLE001
         pass
     return out
@@ -148,7 +150,7 @@ def daily_alerts(db: Session) -> int:
             email = member_inbox(mbr)
             if email and email not in seen and mbr.user.active:
                 seen.add(email)
-                queue_email(db, t, email, f"Hacienda: {len(items)} pendiente(s) · {t.name}", html, "hacienda", 0)
+                queue_email(db, t, email, f"Hacienda: {plural(len(items), 'pendiente', 'pendientes')} · {t.name}", html, "hacienda", 0)
                 n += 1
         db.commit()
     return n

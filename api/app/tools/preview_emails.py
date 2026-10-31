@@ -218,7 +218,7 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
             ("Monitoreo mensual", "Cliente Ejemplo S.A.", "₡45,000.00", "Sale sola con su PDF y enlace de pago"),
             ("Mantenimiento de cámaras", "Cliente Ejemplo S.A.", "₡120,000.00", "Espera su «Aprobar y enviar» en Aprobaciones"),
         ]
-        asunto = "En 3 días (24/10/2026): 2 cobro(s) recurrente(s) · Empresa Ejemplo"
+        asunto = "En 3 días (24/10/2026): 2 cobros recurrentes · Empresa Ejemplo"
         return _queued(db, lambda: queue_email(db, t, "admin@ejemplo.com", asunto, preview_html(HOY + timedelta(days=3), filas), "recurrence", 0))
 
     def no_llegaron() -> str:
@@ -246,9 +246,9 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
     def hacienda_diaria() -> str:
         from ..services.hacienda_tasks import daily_alert_html
 
-        items = ["2 comprobante(s) recibido(s) sin aceptar: el plazo vence en 3 días hábiles", "1 factura emitida rechazada por Hacienda: FEC-000501"]
+        items = ["Quedan 3 días hábiles para responder el comprobante de Proveedor Ejemplo (0010000101000000001)", "Hacienda rechazó el comprobante FE 00100001010000000002: el monto no coincide"]
         return _queued(
-            db, lambda: queue_email(db, t, "admin@ejemplo.com", "Hacienda: 2 pendiente(s) · Empresa Ejemplo", daily_alert_html(items), "hacienda", 0)
+            db, lambda: queue_email(db, t, "admin@ejemplo.com", "Hacienda: 2 pendientes · Empresa Ejemplo", daily_alert_html(items), "hacienda", 0)
         )
 
     def onvo_webhook(status: int) -> Callable[[], str]:
@@ -341,10 +341,10 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
             t,
             title="Su acceso al portal de aliados",
             name="Ernesto Aliado",
-            intro_html="Empresa Ejemplo le dio acceso al portal de aliados como Administrador de <b>Aliado Ejemplo S.A.</b>.",
+            intro_html="Empresa Ejemplo le dio acceso al portal de aliados como Administrador de <b>Aliado Ejemplo S.A.</b> Ahí ve los proyectos y trabajos que llevan en común.",
             link="https://panel.ejemplo.com/invitacion/TOKEN-DE-EJEMPLO",
             label="Entrar al portal",
-            note="Con el botón crea su contraseña y entra. El enlace vence en 7 días y sirve una sola vez.",
+            note="Con el botón cree su contraseña y entre. El enlace vence en 7 días y sirve una sola vez.",
         ),
         "acceso-portal-clientes": lambda: accounts.access_email_html(
             t,
@@ -360,7 +360,7 @@ def samples(db, t, admin, c) -> dict[str, Callable[[], str]]:
             f"Factura electrónica {inv.number}",
             [
                 f"Le compartimos la <b>factura electrónica {inv.number}</b> (clave 506000000000000000000000000000000000000000000000).",
-                "Adjuntamos el XML y el PDF.",
+                "Adjuntamos el comprobante electrónico (XML) y su representación gráfica (PDF). Cuando Hacienda lo confirme le enviaremos su respuesta.",
             ],
             True,
         ),

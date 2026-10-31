@@ -278,7 +278,7 @@ def test_resumen_semanal_con_linea_base_y_cobranza_recuperada(client, auth, db_s
     _pago(db_session, iid, Decimal("13000"), lunes + timedelta(days=3), provider="manual", method="sinpe")
     assert weekly_summary(db_session, today=lunes + timedelta(days=7)) == 1
     ultimo = db_session.scalars(select(EmailOutbox).where(EmailOutbox.subject.like("Cartera de la semana%")).order_by(EmailOutbox.id.desc())).first()
-    assert "₡113,000.00" in ultimo.html and "Día 0" in ultimo.html and "1 recordatorio(s) enviados" in ultimo.html
+    assert "₡113,000.00" in ultimo.html and "Día 0" in ultimo.html and "1 recordatorio enviado" in ultimo.html
     assert "después de un recordatorio): <b>₡50,000.00</b>" in ultimo.html
     assert "Por otros medios después de un aviso" in ultimo.html and "₡13,000.00" in ultimo.html
     # linea base manual desde Ajustes

@@ -77,7 +77,7 @@ def test_aviso_de_atraso_de_resolucion_una_sola_vez(client, auth, db_session):
     assert n == 1
     correos = db_session.scalars(select(EmailOutbox).order_by(EmailOutbox.id.desc())).all()
     assert db_session.scalar(select(func.count()).select_from(EmailOutbox)) > antes
-    assert any("resolucion atrasada" in m.subject for m in correos)
+    assert any("resolución atrasada" in m.subject for m in correos)
     # la siguiente corrida del worker no repite el mismo aviso
     assert avisar_atrasos(db_session, tenant, datetime.now(UTC) + timedelta(hours=10)) == 0
     tk = client.get(f"/tickets/{t['id']}").json()

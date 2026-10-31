@@ -20,6 +20,7 @@ from ..core.config import settings
 from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..core.ratelimit import public_limiter
+from ..core.texto import forma
 from ..models import Event, Order, OrderLine, Tenant, Ticket, TicketType
 from ..services.documents import audit
 from ..services.mail import queue_email
@@ -333,8 +334,9 @@ def _email_tickets(db: Session, tenant: Tenant, e: Event, items: list[Ticket]) -
             db,
             tenant,
             mail,
-            f"Sus entradas · {e.name}",
-            f"<p>¡Listo! Estas son sus entradas para <b>{e.name}</b> ({when}{' · ' + e.venue if e.venue else ''}).</p>{links}<p>Presente el código QR de cada entrada al ingresar. Cada entrada se puede usar una sola vez.</p>",
+            f"{forma(len(ts), 'Su entrada', 'Sus entradas')} · {e.name}",
+            f"<p>¡Listo! {forma(len(ts), 'Esta es su entrada', 'Estas son sus entradas')} para <b>{e.name}</b> ({when}{' · ' + e.venue if e.venue else ''}).</p>{links}"
+            f"<p>Presente el código QR de {forma(len(ts), 'la entrada', 'cada entrada')} al ingresar. {forma(len(ts), 'La entrada', 'Cada entrada')} se puede usar una sola vez.</p>",
             "ticket",
             ts[0].id,
         )

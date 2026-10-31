@@ -31,8 +31,9 @@ def test_marco_completo(client, db_session):
     html = el.render(t, title="Pasó algo", body=el.data_rows([("Número", "FEC-1"), ("Vacío", "")], total=("Total", "₡1.00")), action=("https://x.ejemplo.com/a?b=1&c=2", "Ver"))
     assert el.MARKER in html and "max-width:600px" in html and 'width="600"' in html  # 600 px, tambien en Outlook
     assert "#123456" in html  # el primario de Mi Tienda
-    # logo absoluto, con alt y alto fijo (Outlook ignora height:auto: un logo cuadrado nunca sale de 160 px de alto)
-    assert re.search(r'<img src="https?://[^"]+/media/logo.png" alt="[^"]+" height="40" style="[^"]*height:40px;width:auto;max-width:220px', html)
+    # logo absoluto, con alt y alto fijo (Outlook ignora height:auto: un logo cuadrado nunca sale de 160 px de alto); sin
+    # poder medirlo (http, sin red) va sin ancho; medido, con ancho fijo (test_logo_medido_y_en_linea)
+    assert re.search(r'<img data-logo="1" src="https?://[^"]+/media/logo.png" alt="[^"]+" height="40" style="[^"]*height:40px;width:auto;max-width:200px', html)
     assert "display:none" in html and "mso-hide:all" in html  # preheader oculto
     assert "info@crimsoncr.com" in html and "2222-0000" in html and "8888-0000" in html and "San José, Costa Rica" in html
     assert "Vacío" not in html  # las filas sin valor no salen
@@ -224,3 +225,29 @@ def test_vista_previa_genera_un_html_por_tipo(tmp_path, monkeypatch):
     assert "TCK-0812" in leer("aviso-interno-ticket-sla") and "TCK-0816" in leer("ticket-sla-al-responsable")
     assert "Tareas automáticas" in leer("aviso-interno-salud")
     assert "sugerido" in leer("aviso-interno-margen")
+
+
+def _png(w: int, h: int) -> bytes:
+    import struct
+
+    return bytes.fromhex("89504e470d0a1a0a0000000d49484452") + struct.pack(">II", w, h) + bytes.fromhex("0806000000")
+
+
+def test_logo_medido_y_en_linea(client, db_session, monkeypatch):
+    """30/10: Outlook ignora width:auto (el logo de 1024 px salia gigante) y bloquea las imagenes remotas (llegaba "sin
+    logo"): el logo lleva ancho y alto fijos y al enviar viaja dentro del correo (cid:)."""
+    url = "https://cdn.ejemplo.com/logo.png"
+    monkeypatch.setitem(el._LOGO_CACHE, url, (float("inf"), _png(1024, 237)))
+    assert el.logo_size(url) == (173, 40)
+    monkeypatch.setitem(el._LOGO_CACHE, "https://cdn.ejemplo.com/ancho.png", (float("inf"), _png(2000, 100)))
+    assert el.logo_size("https://cdn.ejemplo.com/ancho.png") == (200, 16)  # tope de ancho: baja el alto
+    t = _tenant(db_session)
+    t.settings = {**(t.settings or {}), "store": {**((t.settings or {}).get("store") or {}), "logo_url": url}}
+    db_session.flush()
+    html = el.render(t, title="Hola", body=el.p("x"), kicker="Cotización")
+    assert f'<img data-logo="1" src="{url}" alt="{t.name}" width="173" height="40" style="display:block;width:173px;height:40px' in html
+    assert ">Cotización</td>" in html
+    cuerpo, adj = el.inline_logo(html)
+    assert f'src="cid:{el.LOGO_CID}"' in cuerpo and url not in cuerpo
+    assert adj["content_id"] == el.LOGO_CID and adj["filename"] == "logo.png" and adj["content"]
+    assert el.inline_logo("<p>sin logo</p>") == ("<p>sin logo</p>", None)

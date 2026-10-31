@@ -32,6 +32,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ..core.texto import forma, plural
 from ..models import AllyCompany, CollectionReminder, Customer, Invoice, Payment, Quote, Tenant, TenantUser
 from ..services.ally_access import PLAN_ORDER, SUSPEND_DAYS, mora_where
 from ..services.invoice_states import cobrable_where, cr_today, vencible_where
@@ -249,11 +250,11 @@ def failed_reminders_html(t: Tenant, fallidas: list[str]) -> tuple[str, str]:
     from ..core.config import settings
     from ..services import email_layout as el
 
-    asunto = f"Cobranza: {len(fallidas)} recordatorio(s) no salieron"
+    asunto = f"Cobranza: {plural(len(fallidas), 'recordatorio no salió', 'recordatorios no salieron')}"
     cuerpo = el.render(
         t,
         title="Recordatorios de cobro sin salir",
-        body=el.p("Estos recordatorios de cobro no salieron hoy:") + el.items(fallidas[:30]) + el.p("Revise el correo del cliente y reenvíe desde la factura."),
+        body=el.p(f"{forma(len(fallidas), 'Este recordatorio de cobro no salió', 'Estos recordatorios de cobro no salieron')} hoy:") + el.items(fallidas[:30]) + el.p("Revise el correo del cliente y reenvíe desde la factura."),
         preheader=asunto,
         action=(f"{settings.public_base_url.rstrip('/')}/facturas", "Abrir Facturas"),
         foot="Aviso interno de cobranza.",
@@ -440,6 +441,14 @@ def _customer_name(db: Session, inv: Invoice) -> str:
     return c.name if c is not None and c.tenant_id == inv.tenant_id else ""
 
 
+def _fecha_iso(v) -> str:
+    """'2026-10-21' (como se guarda la línea base) -> '21/10/2026' para el correo."""
+    try:
+        return _fmt(date.fromisoformat(str(v)))
+    except ValueError:
+        return str(v or "")
+
+
 def set_baseline(t: Tenant, today: date, vencida: Decimal) -> dict:
     """Cartera vencida del dia 0 (linea base del cobro de JC): con ella se compara cada resumen."""
     base = {"date": today.isoformat(), "overdue": str(vencida), "currency": t.default_currency or "CRC"}
@@ -477,7 +486,7 @@ def weekly_summary(db: Session, today: date | None = None) -> int:
         comparacion = (
             "Línea base registrada hoy (día 0)."
             if nueva
-            else f"Día 0 ({e(base.get('date') or '')}): {money(dia0, cur)} vencidos · hoy {money(p['vencida'], cur)} "
+            else f"Día 0 ({e(_fecha_iso(base.get('date')))}): {money(dia0, cur)} de cartera vencida · hoy {money(p['vencida'], cur)} "
             f"({'+' if dif > 0 else ''}{money(dif, cur)}{f', {dif / dia0 * 100:+.1f} %' if dia0 else ''})."
         )
         from ..core.config import settings
@@ -501,13 +510,13 @@ def weekly_summary(db: Session, today: date | None = None) -> int:
         body = (
             el.data_rows(
                 [
-                    ("Por cobrar", f"{money(p['total'], cur)} · {p['n']} factura(s)"),
-                    ("Vencida", f"{money(p['vencida'], cur)} · {p['n_vencidas']} factura(s)"),
+                    ("Por cobrar", f"{money(p['total'], cur)} · {plural(p['n'], 'factura', 'facturas')}"),
+                    ("Vencida", f"{money(p['vencida'], cur)} · {plural(p['n_vencidas'], 'factura', 'facturas')}"),
                 ]
             )
             + el.p_html(comparacion)
             + el.p_html(
-                f"Últimos 7 días: {enviados} recordatorio(s) enviados{f', {fallidos} sin salir' if fallidos else ''}; "
+                f"Últimos 7 días: {plural(enviados, 'recordatorio enviado', 'recordatorios enviados')}{f', {fallidos} sin salir' if fallidos else ''}; "
                 f"cobranza recuperada (cobrado por el enlace de pago después de un recordatorio): <b>{money(recuperado['enlace'], cur)}</b>.{otros}"
             )
             + el.heading("Antigüedad")

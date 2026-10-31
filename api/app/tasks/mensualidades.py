@@ -19,6 +19,7 @@ from celery import shared_task
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.texto import forma, plural
 from ..models import Customer, Recurrence, Tenant, TenantUser
 from ..services.invoice_states import cr_today
 from ..services.mail import member_inbox
@@ -78,7 +79,7 @@ def preview_html(on: date, filas: list[tuple[str, str, str, str]]) -> str:
 
     e = html.escape
     return (
-        f"<p>El <b>{on:%d/%m/%Y}</b> se generan {len(filas)} factura(s) recurrente(s):</p>"
+        f"<p>El <b>{on:%d/%m/%Y}</b> {forma(len(filas), 'se genera', 'se generan')} {plural(len(filas), 'factura recurrente', 'facturas recurrentes')}:</p>"
         "<table border=0 cellpadding=6><tr><th align=left>Recurrencia</th><th align=left>Cliente</th><th align=right>Total</th><th align=left>Qué pasa</th></tr>"
         + "".join(f"<tr><td>{e(a)}</td><td>{e(b)}</td><td align=right>{e(c)}</td><td>{e(d)}</td></tr>" for a, b, c, d in filas)
         + "</table><p>Si algo no corresponde, cámbielo en Facturación → Recurrencias antes de esa fecha.</p>"
@@ -108,14 +109,14 @@ def preview_upcoming(db: Session, today: date | None = None, days: int = PREVIEW
             tot = template_total(db, r)
             filas.append((r.name or "", c.name if c else "sin cliente", money(*tot) if tot else "—", what_happens(r, c, pending_send(db, r, settle=False), produccion)))
         body = preview_html(on, filas)
-        asunto = f"En {days} días ({on:%d/%m/%Y}):"
+        asunto = f"En {plural(days, 'día', 'días')} ({on:%d/%m/%Y}):"
         vistos: set[str] = set()
         for m in db.scalars(select(TenantUser).where(TenantUser.tenant_id == t.id, TenantUser.active, TenantUser.role_code == "admin")):
             correo = member_inbox(m)
             if not correo or correo in vistos or queued_before(db, t.id, correo, asunto):
                 continue  # doble disparo del beat: la vista previa de ese dia ya salio
             vistos.add(correo)
-            queue_once(db, t, correo, f"{asunto} {len(recs)} cobro(s) recurrente(s) · {t.name}", body, "recurrence", recs[0].id, dedupe_key=f"prevista:{t.id}:{on}:{correo}")
+            queue_once(db, t, correo, f"{asunto} {plural(len(recs), 'cobro recurrente', 'cobros recurrentes')} · {t.name}", body, "recurrence", recs[0].id, dedupe_key=f"prevista:{t.id}:{on}:{correo}")
             n += 1
         db.commit()
     return n

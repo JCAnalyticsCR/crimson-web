@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import html as _html
 import re
+import struct
+import time
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import TYPE_CHECKING
@@ -45,10 +47,19 @@ DANGER = "#b42318"
 FONT = "Arial,Helvetica,sans-serif"
 WIDTH = 600
 CONTACT_EMAIL = "info@crimsoncr.com"
-# logo del encabezado: alto fijo (atributo y estilo: Outlook de escritorio ignora height:auto y max-width) y ancho
-# proporcional con tope. Un logo cuadrado o vertical queda de 40 px de alto, nunca de 160 px.
+# logo del encabezado: alto Y ancho fijos en atributos y estilo. Outlook de escritorio ignora height:auto, width:auto y
+# max-width: sin width pinta el PNG a su tamano real (el de Crimson mide 1024 px). El ancho sale de las medidas reales
+# de la imagen (logo_size); un logo cuadrado o vertical queda de 40 px de alto, nunca de 160 px.
 LOGO_HEIGHT = 40
-LOGO_MAX_WIDTH = 220
+LOGO_MAX_WIDTH = 200
+# 30/10: el logo viaja DENTRO del correo (imagen en linea, cid:) y no como imagen remota: Outlook y varios buzones
+# corporativos bloquean las imagenes remotas hasta que el lector las acepta y el correo llegaba "sin logo".
+# mail.deliver lo cambia al enviar; lo guardado en la bitacora conserva la URL.
+LOGO_CID = "logo-empresa"
+_LOGO_ATTR = 'data-logo="1"'
+_LOGO_IMG = re.compile(r'<img data-logo="1" src="([^"]+)"')
+_LOGO_CACHE: dict[str, tuple[float, bytes | None]] = {}
+_LOGO_TTL, _LOGO_TTL_FALLA, _LOGO_MAX_BYTES = 6 * 3600, 600, 600_000
 # marca del marco: ensure() no envuelve dos veces un correo que ya salio de render()
 MARKER = "data-crimson-email"
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -91,6 +102,86 @@ def logo_url(t: Tenant) -> str | None:
         if u:
             return u
     return None
+
+
+def _dims(b: bytes) -> tuple[int, int] | None:
+    """Ancho y alto de un PNG, GIF o JPEG leyendo su cabecera (sin Pillow)."""
+    try:
+        if b[:8] == b"\x89PNG\r\n\x1a\n":
+            return struct.unpack(">II", b[16:24])
+        if b[:6] in (b"GIF87a", b"GIF89a"):
+            return struct.unpack("<HH", b[6:10])
+        if b[:2] == b"\xff\xd8":
+            i = 2
+            while i + 9 < len(b):
+                if b[i] != 0xFF:
+                    i += 1
+                    continue
+                marca, largo = b[i + 1], struct.unpack(">H", b[i + 2 : i + 4])[0]
+                if marca in (0xC0, 0xC1, 0xC2):
+                    h, w = struct.unpack(">HH", b[i + 5 : i + 9])
+                    return w, h
+                i += 2 + largo
+    except struct.error:
+        return None
+    return None
+
+
+def logo_bytes(url: str | None) -> bytes | None:
+    """La imagen del logo, para mandarla dentro del correo y medirla. Cache por proceso (6 h); una falla se recuerda 10
+    min para no frenar cada correo. Solo https: en local y en las pruebas no sale a la red."""
+    if not url or not url.startswith("https://"):
+        return None
+    ahora = time.monotonic()
+    hit = _LOGO_CACHE.get(url)
+    if hit and ahora < hit[0]:
+        return hit[1]
+    data = None
+    try:
+        import httpx
+
+        r = httpx.get(url, timeout=4, follow_redirects=True)
+        tipo = r.headers.get("content-type", "")
+        if r.status_code == 200 and tipo.startswith("image/") and 0 < len(r.content) <= _LOGO_MAX_BYTES:
+            data = r.content
+    except Exception:  # noqa: BLE001 - sin logo en linea el correo usa la URL
+        data = None
+    _LOGO_CACHE[url] = (ahora + (_LOGO_TTL if data else _LOGO_TTL_FALLA), data)
+    return data
+
+
+def logo_size(url: str | None) -> tuple[int, int] | None:
+    """(ancho, alto) en pantalla: 40 px de alto y el ancho proporcional, con tope de 200 px (entonces baja el alto)."""
+    b = logo_bytes(url)
+    d = _dims(b) if b else None
+    if not d or not d[0] or not d[1]:
+        return None
+    w, h = round(LOGO_HEIGHT * d[0] / d[1]), LOGO_HEIGHT
+    if w > LOGO_MAX_WIDTH:
+        w, h = LOGO_MAX_WIDTH, max(16, round(LOGO_MAX_WIDTH * d[1] / d[0]))
+    return w, h
+
+
+def inline_logo(html: str) -> tuple[str, dict | None]:
+    """Para el envio: el logo remoto pasa a ser una imagen dentro del correo (cid:). Si no se pudo bajar, queda la URL."""
+    import base64
+
+    m = _LOGO_IMG.search(html or "")
+    if not m:
+        return html, None
+    data = logo_bytes(_html.unescape(m.group(1)))
+    if not data:
+        return html, None
+    ext = {b"\x89P": "png", b"GI": "gif", b"\xff\xd8": "jpg"}.get(data[:2], "png")
+    html = html[: m.start(1)] + f"cid:{LOGO_CID}" + html[m.end(1) :]
+    return html, {"filename": f"logo.{ext}", "content": base64.b64encode(data).decode(), "content_id": LOGO_CID}
+
+
+def _wa_link(num: str) -> str | None:
+    d = re.sub(r"\D", "", num or "")
+    if len(d) == 8:
+        d = "506" + d
+    return f"https://wa.me/{d}" if len(d) >= 10 else None
 
 
 def _phone(st: dict) -> str | None:
@@ -277,34 +368,53 @@ def _preheader(text: str) -> str:
     )
 
 
-def _header(b: Brand) -> str:
+def _header(b: Brand, kicker: str | None = None) -> str:
     if b.logo:
+        size = logo_size(b.logo)
+        if size:
+            w, h = size
+            medidas, estilo = f'width="{w}" height="{h}"', f"width:{w}px;height:{h}px"
+        else:
+            medidas, estilo = f'height="{LOGO_HEIGHT}"', f"height:{LOGO_HEIGHT}px;width:auto;max-width:{LOGO_MAX_WIDTH}px"
         marca = (
-            f'<img src="{e(b.logo)}" alt="{e(b.name)}" height="{LOGO_HEIGHT}" '
-            f'style="display:block;height:{LOGO_HEIGHT}px;width:auto;max-width:{LOGO_MAX_WIDTH}px;border:0;outline:none;text-decoration:none">'
+            f'<img {_LOGO_ATTR} src="{e(b.logo)}" alt="{e(b.name)}" {medidas} '
+            f'style="display:block;{estilo};border:0;outline:none;text-decoration:none">'
         )
     else:
-        marca = f'<span style="font-family:{FONT};font-size:20px;font-weight:700;color:{INK}">{e(b.name)}</span>'
-    return f'<tr><td style="padding:20px 28px;border-bottom:3px solid {e(b.primary)}">{marca}</td></tr>'
+        marca = f'<span style="font-family:{FONT};font-size:20px;font-weight:700;letter-spacing:-.01em;color:{INK}">{e(b.name)}</span>'
+    etiqueta = (
+        f'<td align="right" valign="middle" style="font-family:{FONT};font-size:11px;line-height:1.3;letter-spacing:.08em;'
+        f'text-transform:uppercase;font-weight:700;color:{GREY};padding-left:12px">{e(kicker)}</td>'
+        if kicker
+        else ""
+    )
+    return (
+        f'<tr><td height="4" style="height:4px;line-height:4px;font-size:0;background:{e(b.primary)};border-radius:12px 12px 0 0">&nbsp;</td></tr>'
+        f'<tr><td style="padding:22px 32px 18px;border-bottom:1px solid {LINE}">'
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%"><tr>'
+        f'<td valign="middle">{marca}</td>{etiqueta}</tr></table></td></tr>'
+    )
 
 
 def _footer(b: Brand, foot: str) -> str:
+    a = f"color:{GREY};text-decoration:none"
     tel = []
+    wa = _wa_link(b.whatsapp or "")
     if b.phone and b.whatsapp and b.phone.replace(" ", "") == b.whatsapp.replace(" ", ""):
-        tel.append(f"Tel. y WhatsApp {e(b.phone)}")
+        tel.append(f'Tel. y WhatsApp <a href="{e(wa)}" style="{a}">{e(b.phone)}</a>' if wa else f"Tel. y WhatsApp {e(b.phone)}")
     else:
         if b.phone:
             tel.append(f"Tel. {e(b.phone)}")
         if b.whatsapp:
-            tel.append(f"WhatsApp {e(b.whatsapp)}")
-    contacto = " · ".join([e(b.email), *tel])
-    lineas = [f'<b style="color:{INK}">{e(b.name)}</b>', contacto]
+            tel.append(f'WhatsApp <a href="{e(wa)}" style="{a}">{e(b.whatsapp)}</a>' if wa else f"WhatsApp {e(b.whatsapp)}")
+    contacto = " · ".join([f'<a href="mailto:{e(b.email)}" style="{a}">{e(b.email)}</a>', *tel])
+    lineas = [f'<b style="font-size:13px;color:{INK}">{e(b.name)}</b>', contacto]
     if b.address:
         lineas.append(e(b.address))
-    nota = f'<p style="margin:0 0 10px;font-family:{FONT};font-size:12px;line-height:1.5;color:{GREY}">{foot}</p>' if foot else ""
+    nota = f'<p style="margin:0 0 12px;font-family:{FONT};font-size:12px;line-height:1.5;color:{GREY}">{foot}</p>' if foot else ""
     return (
-        f'<tr><td style="padding:18px 28px 24px;border-top:1px solid {LINE};font-family:{FONT};font-size:12px;line-height:1.6;color:{GREY}">'
-        f'{nota}{"<br>".join(lineas)}</td></tr>'
+        f'<tr><td bgcolor="{SOFT}" style="background:{SOFT};padding:20px 32px 22px;border-top:1px solid {LINE};border-radius:0 0 12px 12px;'
+        f'font-family:{FONT};font-size:12px;line-height:1.65;color:{GREY}">{nota}{"<br>".join(lineas)}</td></tr>'
     )
 
 
@@ -318,14 +428,18 @@ def render(
     after_action: str = "",
     foot: str = "",
     show_link: bool = True,
+    kicker: str | None = None,
 ) -> str:
     """El correo completo.
     title: lo que paso, corto (va como h1). body: HTML ya armado con los bloques de este modulo.
     action: (url, texto) del UN boton principal; su enlace va tambien en texto debajo (show_link).
     after_action: HTML que va entre el boton y el enlace en texto (p. ej. un enlace secundario).
     foot: nota del pie (HTML ya escapado), encima del contacto de la empresa.
+    kicker: etiqueta corta arriba a la derecha, junto al logo ("Cotización", "Aviso interno").
     Todo correo trata al lector de usted (decision del cliente): cliente, aliado o equipo, nunca de vos ni de tu."""
-    return _frame(brand(t), title=title, body=body, preheader=preheader, action=action, after_action=after_action, foot=foot, show_link=show_link)
+    return _frame(
+        brand(t), title=title, body=body, preheader=preheader, action=action, after_action=after_action, foot=foot, show_link=show_link, kicker=kicker
+    )
 
 
 def render_static(*, title: str, body: str, preheader: str | None = None, name: str = "Crimson Consulting", foot: str = "") -> str:
@@ -346,6 +460,7 @@ def _frame(
     after_action: str,
     foot: str,
     show_link: bool,
+    kicker: str | None = None,
 ) -> str:
     if action and action[0]:
         boton = button(action[0], action[1], b.primary) + after_action + (fallback(action[0]) if show_link else "")
@@ -354,16 +469,18 @@ def _frame(
     pre = _preheader(preheader if preheader is not None else title)
     return f"""<div {MARKER}="1" style="margin:0;padding:0;background:{BG}">{pre}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="{BG}" style="width:100%;background:{BG}">
-<tr><td align="center" style="padding:24px 12px">
+<tr><td align="center" style="padding:28px 12px 32px">
 <!--[if mso]><table role="presentation" width="{WIDTH}" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:{WIDTH}px;background:#ffffff;border:1px solid {LINE};border-radius:12px;font-family:{FONT};color:{INK}">
-{_header(b)}
-<tr><td style="padding:26px 28px 14px;font-family:{FONT};color:{INK}">
-<h1 style="margin:0 0 14px;font-family:{FONT};font-size:22px;line-height:1.3;font-weight:700;color:{INK}">{e(title)}</h1>
+{_header(b, kicker)}
+<tr><td style="padding:30px 32px 16px;font-family:{FONT};color:{INK}">
+<h1 style="margin:0 0 16px;font-family:{FONT};font-size:24px;line-height:1.25;letter-spacing:-.01em;font-weight:700;color:{INK}">{e(title)}</h1>
 {body}{boton}
 </td></tr>
 {_footer(b, foot)}
 </table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:{WIDTH}px"><tr>
+<td align="center" style="padding:14px 16px 0;font-family:{FONT};font-size:11px;line-height:1.5;color:#9a949e">Mensaje enviado por {e(b.name)}.</td></tr></table>
 <!--[if mso]></td></tr></table><![endif]-->
 </td></tr></table></div>"""
 

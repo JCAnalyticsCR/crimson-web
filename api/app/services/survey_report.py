@@ -66,7 +66,7 @@ table.ph{table-layout:fixed;margin-top:8px}
 {% else %}<table class="ph" role="presentation">{% for fila in urls|batch(2) %}{% set n = loop.index0 * 2 %}<tr>{% for u in fila %}<td><div class="f"><img src="{{ u }}" alt="Foto {{ n + loop.index }} · {{ ref }}"></div><div class="cap">{{ ref|capitalize if ref == "general" else ref }} · foto {{ n + loop.index }}</div></td>{% endfor %}</tr>{% endfor %}</table>
 {% endif %}{% endmacro %}
 <div class="top">
-  <div class="brand">{% if t.logo_url %}<img src="{{ t.logo_url }}" style="height:34px;margin-bottom:6px">{% endif %}<b>{{ t.name }}</b><span>{{ t.legal_name or "" }}{% if t.tax_id %} · Cédula {{ t.tax_id }}{% endif %}</span></div>
+  <div class="brand">{% if logo %}<img src="{{ logo }}" alt="{{ t.name }}" style="display:block;height:42px;width:auto;max-width:220px;margin-bottom:8px">{% endif %}<b>{{ t.name }}</b><span>{{ t.legal_name or "" }}{% if t.tax_id %} · Cédula {{ t.tax_id }}{% endif %}</span></div>
   <div class="docid"><div class="k">Informe preliminar · {{ kind_label }}</div><div class="n">{{ s.number }}</div><span class="stamp">Preliminar</span></div>
 </div>
 <div class="meta">
@@ -192,7 +192,10 @@ def context(db: Session, s: Survey, tenant: Tenant, ttl: int | None = None, visi
 
 def render_survey_html(db: Session, s: Survey, tenant: Tenant, ttl: int | None = None, visitor_name=None) -> str:
     """ttl: vida de los enlaces de fotos privadas. El PDF se arma al instante (corto); el correo, largo."""
-    return TEMPLATE.render(**context(db, s, tenant, ttl, visitor_name))
+    from .render import brand_ctx
+
+    # el mismo logo que la cotizacion y la factura (incrustado; antes era t.logo_url, un dominio viejo de Railway)
+    return TEMPLATE.render(**context(db, s, tenant, ttl, visitor_name), logo=brand_ctx(tenant)["logo"])
 
 
 def report_email_html(tenant: Tenant, number: str, customer: str | None, site: str | None, message: str | None, *, attached_pdf: bool) -> str:

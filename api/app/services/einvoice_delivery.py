@@ -26,6 +26,7 @@ from .documents import audit
 from .mail import member_inbox, queue_email
 
 KIND = {"FE": "factura electrónica", "TE": "tiquete electrónico", "NC": "nota de crédito", "ND": "nota de débito"}
+ARTICULO = {"FE": "la", "TE": "el", "NC": "la", "ND": "la"}  # "la factura", "el tiquete": concuerda con KIND
 TEST_TAG = "AMBIENTE DE PRUEBAS · sin validez fiscal"
 SENT = ("enviado", "simulado")
 FAILED = "fallido"  # mail.retry_outbox solo toma pendiente|error: este no sale de nuevo sin sus adjuntos
@@ -158,9 +159,10 @@ def _alert_undeliverable(db: Session, t: Tenant, doc: EInvoiceDocument, inv: Inv
     from .mail import notify_roles
 
     kind = KIND.get(doc.doc_type, "comprobante electrónico")
+    art = ARTICULO.get(doc.doc_type, "el")
     what = "el XML y el PDF" if stage == "emitido" else "la respuesta de Hacienda"
     html = (
-        f"<p>No se pudo entregar {what} de la {escape(kind)} <b>{escape(inv.number or '')}</b> a {escape(', '.join(given_up))}: "
+        f"<p>No se pudo entregar {what} de {art} {escape(kind)} <b>{escape(inv.number or '')}</b> a {escape(', '.join(given_up))}: "
         f"el correo falló {MAX_FAILS} veces y ya no se reintenta.</p>"
         "<p>Revise el correo del cliente y reenvíe desde la factura (Enviar por correo).</p>"
         + cta(f"/facturas/{inv.id}", f"Abrir la factura {inv.number or ''}".strip())  # el boton principal (email_layout)
@@ -181,6 +183,7 @@ def deliver(db: Session, doc_id: int, stage: str) -> int:
         return 0
     test = doc.mode == "pruebas"
     kind = KIND.get(doc.doc_type, "comprobante electrónico")
+    art = ARTICULO.get(doc.doc_type, "el")
     tag = f" · {TEST_TAG}" if test else ""
     if stage == "emitido":
         if doc.delivered_at or doc.delivery_failed_at or not doc.xml_document:
@@ -194,7 +197,7 @@ def deliver(db: Session, doc_id: int, stage: str) -> int:
             pdf = _pdf(db, inv, t)
             if pdf:
                 files.append((f"{inv.number}.pdf", pdf))
-            lines = [f"Le compartimos la <b>{kind} {inv.number}</b> (clave {doc.clave}).", "Adjuntamos el comprobante electrónico (XML) y su representación gráfica (PDF). Cuando Hacienda lo confirme le enviaremos su respuesta."]
+            lines = [f"Le compartimos {art} <b>{kind} {inv.number}</b> (clave {doc.clave}).", "Adjuntamos el comprobante electrónico (XML) y su representación gráfica (PDF). Cuando Hacienda lo confirme le enviaremos su respuesta."]
             subject = f"{kind.capitalize()} {inv.number}{tag}"
             n, ok = _send(db, t, doc, inv, stage, ready, subject, _html(t, f"{kind.capitalize()} {inv.number}", lines, test), files)
         _close(db, t, doc, inv, stage, n, ok and not waiting, given_up)
@@ -209,9 +212,9 @@ def deliver(db: Session, doc_id: int, stage: str) -> int:
         if ready:
             files = [(f"{doc.clave}-respuesta-hacienda.xml", doc.xml_response.encode("utf-8"))]
             if doc.status == "aceptada":
-                lines = [f"Hacienda aceptó la <b>{kind} {inv.number}</b>. Adjuntamos su respuesta (MensajeHacienda)."]
+                lines = [f"Hacienda aceptó {art} <b>{kind} {inv.number}</b>. Adjuntamos su respuesta (MensajeHacienda)."]
             else:
-                lines = [f"Hacienda rechazó la <b>{kind} {inv.number}</b>: ese comprobante no tiene validez.", "Emitiremos uno nuevo y se lo enviaremos. Adjuntamos la respuesta de Hacienda."]
+                lines = [f"Hacienda rechazó {art} <b>{kind} {inv.number}</b>: ese comprobante no tiene validez.", "Emitiremos uno nuevo y se lo enviaremos. Adjuntamos la respuesta de Hacienda."]
             subject = f"Respuesta de Hacienda · {kind} {inv.number}{tag}"
             n, ok = _send(db, t, doc, inv, stage, ready, subject, _html(t, f"Respuesta de Hacienda · {inv.number}", lines, test), files)
         _close(db, t, doc, inv, stage, n, ok and not waiting, given_up)

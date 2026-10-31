@@ -257,7 +257,7 @@ def pay_instructions(t: Tenant, o: Order) -> str | None:
             return "\n".join(parts)
         return (m.get("note") or "Le enviamos los datos de la cuenta para transferir.") + f"\nMonto: {total} · Detalle: {o.number}"
     if code == "efectivo":
-        return (m.get("note") or "Paga en efectivo al recibir o retirar el pedido.") + f"\nMonto: {total}"
+        return (m.get("note") or "Pague en efectivo al recibir o retirar el pedido.") + f"\nMonto: {total}"
     if code == "tarjeta":
         return "Pague con tarjeta en la página segura de ONVO. Le confirmamos apenas el banco apruebe el pago."
     return None

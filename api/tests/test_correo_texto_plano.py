@@ -40,3 +40,35 @@ def test_resend_recibe_la_version_en_texto(monkeypatch):
                         entity="invoice", status=None, provider_id=None, sent_at=None, next_attempt_at=None, error=None)
     mail.deliver(m)
     assert m.status == "enviado" and enviado["text"] == "Gracias por su compra" and enviado["html"].startswith("<p>")
+
+
+def test_resend_recibe_el_logo_en_linea_y_la_bitacora_guarda_la_url(monkeypatch):
+    import struct
+
+    enviado = {}
+
+    class R:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"id": "x2"}
+
+    def post(url, headers=None, json=None, timeout=None):
+        enviado.update(json)
+        return R()
+
+    url = "https://cdn.ejemplo.com/logo.png"
+    monkeypatch.setitem(el._LOGO_CACHE, url, (float("inf"), b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + struct.pack(">II", 10, 5)))
+    monkeypatch.setenv("RESEND_API_KEY", "re_prueba")
+    monkeypatch.setattr(mail.httpx, "post", post)
+    html = f'<div><img data-logo="1" src="{url}" alt="X" height="40"><p>Hola</p></div>'
+    m = SimpleNamespace(to="c@ejemplo.com", bcc=None, subject="Hola", html=html, attempts=0,
+                        entity="invoice", status=None, provider_id=None, sent_at=None, next_attempt_at=None, error=None)
+    mail.deliver(m, [("FEC-1.pdf", b"%PDF")])
+    assert m.status == "enviado" and m.html == html  # lo guardado conserva la URL
+    assert 'src="cid:logo-empresa"' in enviado["html"]
+    nombres = [a["filename"] for a in enviado["attachments"]]
+    assert nombres == ["FEC-1.pdf", "logo.png"] and enviado["attachments"][1]["content_id"] == "logo-empresa"

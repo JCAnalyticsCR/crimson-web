@@ -51,9 +51,9 @@ def methods(db: Session, t: Tenant, inv: Invoice) -> list[dict]:
     m = cfg.get("sinpe") or {}
     if m.get("active"):
         txt = (
-            f"Enviá {saldo} por SINPE Móvil al {m['phone']}" + (f" a nombre de {m['holder']}" if m.get("holder") else "") + f". En el detalle escribí {inv.number}."
+            f"Envíe {saldo} por SINPE Móvil al {m['phone']}" + (f" a nombre de {m['holder']}" if m.get("holder") else "") + f". En el detalle escriba {inv.number}."
             if m.get("phone")
-            else (m.get("note") or "Te enviamos el número de SINPE Móvil para pagar.")
+            else (m.get("note") or "Le enviamos el número de SINPE Móvil para pagar.")
         )
         out.append(
             {
@@ -68,9 +68,9 @@ def methods(db: Session, t: Tenant, inv: Invoice) -> list[dict]:
     m = cfg.get("transferencia") or {}
     if m.get("active"):
         txt = (
-            f"Transferí {saldo} a la cuenta IBAN {m['iban']}. En el detalle escribí {inv.number}."
+            f"Transfiera {saldo} a la cuenta IBAN {m['iban']}. En el detalle escriba {inv.number}."
             if m.get("iban")
-            else (m.get("note") or "Te enviamos los datos de la cuenta para transferir.")
+            else (m.get("note") or "Le enviamos los datos de la cuenta para transferir.")
         )
         holder = (m.get("holder") or "") + (f" (céd. {m['holder_id']})" if m.get("holder") and m.get("holder_id") else "")
         out.append(

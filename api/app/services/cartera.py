@@ -25,6 +25,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select, true
 from sqlalchemy.orm import Session
 
+from ..core.texto import plural
 from ..models import Commission, Customer, Invoice, Opportunity, Quote, TenantUser, User
 from .documents import audit
 
@@ -247,7 +248,9 @@ def transfer(db: Session, p, from_uid: int, to_uid: int) -> dict:
         db, p.tenant, to_uid,
         f"Recibió la cartera de {owner_name(db, from_uid) or 'otro vendedor'} · {p.tenant.name}",
         f"<p>{e(p.user.full_name or 'Administración')} le traspasó la cartera de <b>{e(owner_name(db, from_uid) or 'otro vendedor')}</b>:</p>"
-        f"<ul><li>{n['clientes']} clientes</li><li>{n['oportunidades']} oportunidades abiertas</li><li>{n['cotizaciones']} cotizaciones abiertas</li></ul>"
+        f"<ul><li>{plural(n['clientes'], 'cliente', 'clientes')}</li>"
+        f"<li>{plural(n['oportunidades'], 'oportunidad abierta', 'oportunidades abiertas')}</li>"
+        f"<li>{plural(n['cotizaciones'], 'cotización abierta', 'cotizaciones abiertas')}</li></ul>"
         "<p>Desde ahora usted les da seguimiento.</p>" + cta("/clientes", "Abrir mis clientes"),
         "user", from_uid,
     )

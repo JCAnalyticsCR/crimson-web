@@ -280,6 +280,7 @@ def marco(titulo: str, cuerpo: str, preheader: str | None = None) -> str:
 
 
 def html_falla(fallos: list[Fallo], resumen: dict | None, fecha: date) -> str:
+    from ..core.texto import plural
     from ..services import email_layout as el
 
     filas = el.data_rows([(f.paso, f.detalle) for f in fallos])
@@ -287,7 +288,7 @@ def html_falla(fallos: list[Fallo], resumen: dict | None, fecha: date) -> str:
     if resumen and resumen.get("subido"):
         subido = el.p_html(f"El respaldo cifrado <b>sí se subió</b> ({escape(resumen['archivo'])}), pero algo más falló.")
     cuerpo = (
-        el.p_html(f"El respaldo diario de la plataforma del {fecha.isoformat()} <b>no terminó bien</b>.")
+        el.p_html(f"El respaldo diario de la plataforma del {fecha:%d/%m/%Y} <b>no terminó bien</b>.")
         + filas
         + subido
         + el.note(
@@ -296,7 +297,7 @@ def html_falla(fallos: list[Fallo], resumen: dict | None, fecha: date) -> str:
             warn=True,
         )
     )
-    return marco("El respaldo diario no terminó bien", cuerpo, f"Respaldo del {fecha.isoformat()}: {len(fallos)} paso(s) con falla.")
+    return marco("El respaldo diario no terminó bien", cuerpo, f"Respaldo del {fecha:%d/%m/%Y}: {plural(len(fallos), 'paso con falla', 'pasos con falla')}.")
 
 
 # ---------- corrida ----------
@@ -457,7 +458,7 @@ def revisar(env: Mapping[str, str]) -> int:
         return f.codigo
     avisos = "si" if (env.get("RESPALDO_AVISO_A") and env.get("RESEND_API_KEY")) else "NO (sin RESPALDO_AVISO_A o RESEND_API_KEY)"
     prueba = f"{len(cfg.prueba)} de prueba (solo diario/)" if cfg.prueba else "sin llave de prueba"
-    print(f"OK configuracion: destino {cfg.destino}, {len(cfg.recipients)} llave(s) publica(s) de custodios, {prueba}, verificacion {cfg.verificar}")
+    print(f"OK configuracion: destino {cfg.destino}, {len(cfg.recipients)} llaves publicas de custodios, {prueba}, verificacion {cfg.verificar}")
     print(f"   correo de falla: {avisos} · latido: {'si' if env.get('RESPALDO_PING_URL') else 'NO (sin RESPALDO_PING_URL)'}")
     return OK
 

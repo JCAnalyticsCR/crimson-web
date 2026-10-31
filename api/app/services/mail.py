@@ -293,6 +293,9 @@ def deliver(m: EmailOutbox, files: list[tuple[str, bytes]] | None = None) -> Non
         m.status, m.sent_at = "simulado", datetime.now(UTC)
         return
     m.attempts = (m.attempts or 0) + 1
+    # el logo va dentro del correo (cid:), no como imagen remota que Outlook bloquea; m.html guarda la URL
+    cuerpo, logo = email_layout.inline_logo(m.html)
+    adjuntos = [{"filename": n, "content": base64.b64encode(b).decode()} for n, b in files or []] + ([logo] if logo else [])
     try:
         r = httpx.post(
             "https://api.resend.com/emails",
@@ -302,13 +305,13 @@ def deliver(m: EmailOutbox, files: list[tuple[str, bytes]] | None = None) -> Non
                 "to": [m.to],
                 "bcc": [b for b in (m.bcc or "").split(",") if b],
                 "subject": m.subject,
-                "html": m.html,
+                "html": cuerpo,
                 # version en texto plano: el correo que trae solo HTML puntua peor en los filtros de spam (22/10)
                 "text": email_layout.html_to_text(m.html),
                 # las respuestas del cliente llegan al buzon real de Crimson, no a una direccion que nadie lee
                 **({"reply_to": [os.getenv("MAIL_REPLY_TO")]} if os.getenv("MAIL_REPLY_TO") else {}),
                 # Antes el correo decia "va adjunto en PDF" y no se mandaba nada: el cliente no recibia el documento.
-                **({"attachments": [{"filename": n, "content": base64.b64encode(b).decode()} for n, b in files]} if files else {}),
+                **({"attachments": adjuntos} if adjuntos else {}),
             },
             timeout=20,
         )

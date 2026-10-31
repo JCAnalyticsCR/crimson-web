@@ -481,7 +481,7 @@ def test_correo_diario_una_vez_por_dia_de_costa_rica(client, auth, db_session, c
     html = correos[0]["html"]
     assert f"https://panel.ejemplo.com/facturas/{inv['id']}" in html and inv["number"] in html
     assert "https://panel.ejemplo.com/facturas?estado=por_emitir" in html and "Fygaro" in html
-    assert "Facturas por emitir · 2026-10-20" in html and correos[0]["subject"].startswith("Por emitir: 1 factura")
+    assert "Facturas por emitir · 20/10/2026" in html and correos[0]["subject"].startswith("Por emitir: 1 factura")
     row = db_session.query(EmailOutbox).filter(EmailOutbox.entity == "fiscal_queue").one()
     assert row.entity_id == 20261020
     # doble disparo del beat el mismo dia de Costa Rica: no repite

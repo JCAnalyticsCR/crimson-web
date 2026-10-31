@@ -1056,7 +1056,7 @@ def _crear_oportunidad(db: Session, slug: str, data: AdvisoryIn, ip: str) -> Non
         + cta(f"/oportunidades?id={o.id}", f"Abrir {number}")
     )
     # Reparto de consultas web: auto-asignar según la configuración ("turno" o "solucion") antes de avisar.
-    from ..models import TenantUser
+    from ..models import TenantUser, User
     from ..services.mail import member_inbox, queue_email
     from ..services.sale_assignment import auto_assign_opportunity
 
@@ -1077,9 +1077,10 @@ def _crear_oportunidad(db: Session, slug: str, data: AdvisoryIn, ip: str) -> Non
                 company_bcc=False,
             )
         # Admin recibe el detalle completo siempre
+        responsable = db.get(User, assigned_uid)
         notify_roles(
             db, t, ("admin",),
-            f"Asesoría web {number} · {etiqueta} · {quien[:40]} (asignada a {assigned_uid})",
+            f"Asesoría web {number} · {etiqueta} · {quien[:40]} (asignada a {(responsable.full_name or responsable.email) if responsable else 'un vendedor'})",
             cuerpo, "opportunity", o.id, internal_copy=True,
         )
     else:

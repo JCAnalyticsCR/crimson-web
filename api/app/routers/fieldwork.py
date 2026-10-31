@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from ..core.config import settings as cfg
 from ..core.db import get_db
 from ..core.deps import ALLY_USER_ROLES, CLIENT_ROLES, EXTERNAL_ROLES, Principal, require, roles_like
+from ..core.texto import forma, plural, plural_de
 from ..models import Customer, Opportunity, Product, Project, Survey, SurveyItem, SurveyObservation, SurveyPoint, User, Warehouse, WorkOrder, WorkOrderMaterial
 from ..schemas.sales import DocumentIn, LineInSchema
 from ..services import approvals as aprob
@@ -1195,6 +1196,11 @@ def survey_send(sid: int, p: Principal = Depends(require("field", "crear")), db:
     return out
 
 
+def _dias(v) -> str:
+    """'1 día' / '2 días' / '1,5 días' (los días de personal de un levantamiento pueden ser fraccionarios)."""
+    return plural(float(d(v)), "día", "días")
+
+
 def send_survey(db: Session, tenant, s: Survey, sender: User, ip: str | None, sender_label: str | None = None) -> list[dict]:
     """Validaciones del envio, paso a revision, aviso a los revisores de hoy y bitacora. Devuelve a quien se aviso.
     No hace commit. sender_label: como se nombra al remitente en el aviso ("Nombre (Empresa aliada)")."""
@@ -1206,9 +1212,9 @@ def send_survey(db: Session, tenant, s: Survey, sender: User, ip: str | None, se
     if abiertas:
         raise HTTPException(
             409,
-            f"Marcá como resueltas las {len(abiertas)} observación(es) del supervisor antes de reenviar."
+            f"Marque como resueltas las {len(abiertas)} observaciones del supervisor antes de reenviar."
             if len(abiertas) > 1
-            else "Marcá como resuelta la observación del supervisor antes de reenviar.",
+            else "Marque como resuelta la observación del supervisor antes de reenviar.",
         )
     reenvio = s.review_status == "devuelto"
     s.status = "enviado"
@@ -1219,7 +1225,7 @@ def send_survey(db: Session, tenant, s: Survey, sender: User, ip: str | None, se
     spec = SPECS.get(s.kind, SPECS["otro"])
     filas = "".join(f"<li>{html.escape(x.code)} · {html.escape(x.label or '')}</li>" for x in s.points[:20])
     labor = survey_labor(s)
-    personal = " · ".join(f"{LABOR_TYPES[k][0]}: {v['people']} × {v['days']:g} día(s)" for k, v in labor.items() if v["people"])
+    personal = " · ".join(f"{LABOR_TYPES[k][0]}: {v['people']} × {_dias(v['days'])}" for k, v in labor.items() if v["people"])
     roles = reviewer_roles(tenant)
     # Andres (13/10, 21:05) no sabia quien recibia lo enviado ni donde: el aviso lleva directo al levantamiento
     # y a la bandeja de Aprobaciones. s.id es entero: no necesita escape.
@@ -1231,7 +1237,7 @@ def send_survey(db: Session, tenant, s: Survey, sender: User, ip: str | None, se
         f"{'Levantamiento corregido' if reenvio else 'Nuevo levantamiento'} {s.number} · {cliente}",
         f"<p><b>{html.escape(spec['label'])}</b> levantado por {html.escape(sender_label or sender.full_name)}.</p>"
         f"<p>Cliente: {html.escape(cliente)}<br>Sitio: {html.escape(s.site or '—')}<br>"
-        f"{len(s.points)} {html.escape(spec['point_label'].lower())}(s) · {len(s.items)} materiales y equipos<br>{html.escape(personal or 'sin personal')}</p>"
+        f"{html.escape(plural_de(len(s.points), spec['point_label'].lower()))} · {plural(len(s.items), 'material o equipo', 'materiales y equipos')}<br>{html.escape(personal or 'sin personal')}</p>"
         f"<ul>{filas}</ul><p>{'El técnico resolvió las observaciones. ' if reenvio else ''}Abra el levantamiento para revisarlo: apruébelo o devuélvalo con observaciones antes del costeo.</p>"
         f'<p><a href="{base}/levantamientos?id={s.id}">Abrir el levantamiento</a></p>'  # el boton principal (email_layout)
         f'<p>Todo lo pendiente está en <a href="{base}/aprobaciones">Aprobaciones</a>.</p>',
@@ -1276,7 +1282,7 @@ def survey_review(sid: int, data: ReviewIn, p: Principal = Depends(require("fiel
         obs.append(ObservationIn(text=data.note.strip()))
     bad = sorted({o.point_code for o in obs if o.point_code and o.point_code not in codes})
     if bad:
-        raise HTTPException(422, f"Punto(s) que no existen en el levantamiento: {', '.join(bad)}")
+        raise HTTPException(422, f"{forma(len(bad), 'Este punto no existe', 'Estos puntos no existen')} en el levantamiento: {', '.join(bad)}")
     if data.action == "devolver" and not obs:
         raise HTTPException(422, "Para devolver el levantamiento escribí al menos una observación")
     s.review_round = (s.review_round or 0) + 1
@@ -1309,7 +1315,7 @@ def _notify_returned(db: Session, p: Principal, s: Survey, obs: list[Observation
     base = cfg.public_base_url.rstrip("/")
     cuerpo = (
         f"<p>{html.escape(p.user.full_name)} revisó el levantamiento <b>{html.escape(s.number)}</b> y lo devolvió con "
-        f"{len(obs)} observación(es):</p><ul>{filas}</ul><p>Corrija, marque cada observación como resuelta y reenvíelo a revisión.</p>"
+        f"{plural(len(obs), 'observación', 'observaciones')}:</p><ul>{filas}</ul><p>Corrija, marque {'la observación como resuelta' if len(obs) == 1 else 'cada observación como resuelta'} y reenvíelo a revisión.</p>"
         f'<p><a href="{base}/levantamientos?id={s.id}">Abrir el levantamiento</a></p>'
     )
     for correo in destinos:
@@ -1590,7 +1596,7 @@ def survey_to_quote(sid: int, data: ToQuoteIn, p: Principal = Depends(require("s
         lines.append(
             LineInSchema(
                 name=f"{data.labor_label} · "
-                + (" · ".join(f"{t['label']} {t['people']} × {d(t['days']):g} día(s)" for t in costing["labor"]["types"] if t["people"]) or "sin personal"),
+                + (" · ".join(f"{t['label']} {t['people']} × {_dias(t['days'])}" for t in costing["labor"]["types"] if t["people"]) or "sin personal"),
                 quantity=Decimal(1),
                 unit_price=d(costing["labor"]["price"]),
                 unit="Sp",
@@ -1679,7 +1685,7 @@ def avisar_proyecto_terminado(db: Session, tenant, roles, pr: Project, horas: fl
         roles,
         f"Proyecto {pr.number} terminado · listo para facturación",
         f"<p><b>{html.escape(pr.name)}</b> quedó terminado.</p>"
-        f"<p>{len(pr.orders)} orden(es) de trabajo · {round(horas, 1)} horas de campo.</p>"
+        f"<p>{plural(len(pr.orders), 'orden de trabajo', 'órdenes de trabajo')} · {plural(round(horas, 1), 'hora', 'horas')} de campo.</p>"
         "<p>El informe técnico de entrega ya se puede imprimir desde la ficha del proyecto.</p>"
         f'<p><a href="{cfg.public_base_url.rstrip("/")}/proyectos/{pr.id}">Abrir el proyecto</a></p>',
         "project",
@@ -1691,7 +1697,7 @@ def avisar_proyecto_terminado(db: Session, tenant, roles, pr: Project, horas: fl
 _PASOS = {
     "borrador": "El técnico todavía lo está llenando.",
     "devuelto": "El supervisor lo devolvió con observaciones al técnico.",
-    "revision": "El supervisor lo está revisando. Después administración lo costea y sale tu cotización.",
+    "revision": "El supervisor lo está revisando. Después administración lo costea y sale su cotización.",
     "costeo": "Aprobado. Administración lo está costeando.",
     "cotizado": "Ya tiene cotización.",
     "cerrado": "El levantamiento está cerrado.",
@@ -1876,7 +1882,7 @@ def survey_estimate(s: Survey | None, tenant) -> tuple[float | None, str | None]
     for k, v in survey_labor(s).items():
         if v["people"] and v["days"]:
             persona_dias += v["people"] * v["days"]
-            partes.append(f"{LABOR_TYPES[k][0]} {v['people']} × {float(v['days']):g} día(s)")
+            partes.append(f"{LABOR_TYPES[k][0]} {v['people']} × {_dias(v['days'])}")
     if persona_dias <= 0:
         return None, None
     return float(persona_dias * horas_jornada(tenant)), " · ".join(partes)

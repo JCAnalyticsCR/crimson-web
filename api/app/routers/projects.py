@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
+from ..core.texto import forma, plural
 from ..models import (
     Customer,
     CustomerAsset,
@@ -497,7 +498,7 @@ def _reservar(db: Session, p: Principal, pr: Project, order: WorkOrder) -> list[
 def avisar_compra_proyecto(db: Session, tenant, pr: Project, faltan: list[dict], req: dict) -> None:
     """A administracion e inventario: el proyecto arranco y falta material en bodega (quedo la solicitud de compra)."""
     filas = "".join(
-        f"<li>{html.escape(x['name'])} · faltan {x['to_buy']:g}"
+        f"<li>{html.escape(x['name'])} · {forma(x['to_buy'], 'falta', 'faltan')} {x['to_buy']:g}"
         + (f" · el proveedor reporta {x['supplier_stock']}" if x.get("supplier_stock") is not None else "")
         + "</li>"
         for x in faltan[:25]
@@ -506,8 +507,8 @@ def avisar_compra_proyecto(db: Session, tenant, pr: Project, faltan: list[dict],
         db,
         tenant,
         ("admin", "inventario"),
-        f"{pr.number}: hay que comprar {len(faltan)} material(es) antes de instalar",
-        f"<p>El proyecto <b>{html.escape(pr.name)}</b> arrancó y esto no está en bodega:</p><ul>{filas}</ul>"
+        f"{pr.number}: hay que comprar {plural(len(faltan), 'material', 'materiales')} antes de instalar",
+        f"<p>El proyecto <b>{html.escape(pr.name)}</b> arrancó y {forma(len(faltan), 'este material no está', 'estos materiales no están')} en bodega:</p><ul>{filas}</ul>"
         f"<p>Quedó la solicitud de compra <b>{req['number']}</b>. Los proveedores no dan crédito, así que conviene pedirlo hoy.</p>"
         + cta("/compras", "Abrir Compras"),
         "purchase_request",

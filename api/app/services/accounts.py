@@ -8,6 +8,7 @@ ninguna contrasena, token o enlace en claro: de los enlaces solo queda el SHA-25
 from __future__ import annotations
 
 import html
+import re
 import secrets
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
@@ -331,6 +332,7 @@ def notify_security(db: Session, tenant: Tenant, user: User, subject: str, body_
     """Aviso de un cambio de credenciales (sin enlaces ni contrasenas). Sensible: sin BCC de la empresa."""
     from . import email_layout as el
 
+    body_html = re.sub(r"(?<=[ap]\. m\.)\.", "", body_html)  # "3:05 p. m." + el punto de la frase: un solo punto
     inner = el.p_html(f"Hola {_e(user.full_name or '')}:") + f'<div style="font-family:{el.FONT};font-size:15px;line-height:1.55;color:{el.INK}">{body_html}</div>'
     html_ = _shell(tenant, inner, title=subject.split(" · ")[0], preheader=subject)
     return queue_email(db, tenant, to or user.email, subject, html_, "user_security", user.id)
