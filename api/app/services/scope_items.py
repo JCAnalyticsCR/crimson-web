@@ -111,6 +111,40 @@ def item_out(db: Session, it: ScopeItem, parts: dict[int, AllyParticipation], ma
     }
 
 
+def offers_by_item(db: Session, tenant_id: int, opportunity_id: int | None, part_ids: set[int] | None = None) -> dict[int, dict]:
+    """04/11: lo que cobra el aliado por cada partida. La oferta del aliado (AllyCostRequest) liga sus lineas a la
+    partida (lines[].scope_item_id, o req_lines si la oferta fue un monto total por una sola partida). La ultima oferta
+    de cada partida gana; borradores fuera. part_ids limita a las ofertas de esas participaciones (el portal del
+    aliado: solo las suyas). Es costo: el panel lo muestra solo a quien ve costos."""
+    if opportunity_id is None:
+        return {}
+    from ..models import AllyCostRequest
+    from . import allies as costsvc
+
+    stmt = select(AllyCostRequest).where(AllyCostRequest.tenant_id == tenant_id, AllyCostRequest.opportunity_id == opportunity_id, costsvc.not_draft())
+    if part_ids is not None:
+        stmt = stmt.where(AllyCostRequest.participation_id.in_(part_ids or {0}))
+    out: dict[int, dict] = {}
+    for r in db.scalars(stmt.order_by(AllyCostRequest.id)):
+        if r.amount is None:
+            continue
+        st = costsvc.effective_status(r)
+        base = {"request_id": r.id, "currency": r.currency, "status": st, "status_label": costsvc.STATE_LABEL.get(st, st), "participation_id": r.participation_id}
+        por_linea = {}
+        for ln in r.lines or []:
+            sid = ln.get("scope_item_id")
+            if sid:
+                monto = Decimal(str(ln.get("quantity") or 0)) * Decimal(str(ln.get("unit_price") or 0))
+                por_linea[sid] = por_linea.get(sid, Decimal(0)) + monto
+        if not por_linea:
+            ligadas = {x.get("scope_item_id") for x in r.req_lines or [] if x.get("scope_item_id")}
+            if len(ligadas) == 1:  # monto total de una sola partida
+                por_linea = {ligadas.pop(): Decimal(str(r.amount))}
+        for sid, monto in por_linea.items():
+            out[sid] = {**base, "amount": str(monto.quantize(Decimal("0.01")))}
+    return out
+
+
 def summary(items: list[ScopeItem], parts: dict[int, AllyParticipation]) -> dict:
     """El mismo resumen en el levantamiento, la oportunidad y el proyecto."""
     por_estado = {k: 0 for k in SCOPE_STATES}
@@ -132,12 +166,14 @@ def options(parts: dict[int, AllyParticipation]) -> list[dict]:
     return out
 
 
-def scope_out(db: Session, tenant_id: int, opportunity_id: int | None, survey_id: int | None) -> dict:
+def scope_out(db: Session, tenant_id: int, opportunity_id: int | None, survey_id: int | None, offers: bool = False) -> dict:
+    """offers: con el precio que el aliado ofrecio por cada partida (solo para quien ve costos)."""
     items = items_of(db, tenant_id, opportunity_id, survey_id)
     parts = participations(db, tenant_id, opportunity_id)
+    precio = offers_by_item(db, tenant_id, opportunity_id) if offers else {}
     return {
         "source": {"opportunity_id": opportunity_id, "survey_id": survey_id},
-        "items": [item_out(db, it, parts) for it in items],
+        "items": [{**item_out(db, it, parts), **({"offer": precio.get(it.id)} if offers else {})} for it in items],
         "summary": summary(items, parts),
         "options": options(parts),
         "kinds": KIND_LABEL,

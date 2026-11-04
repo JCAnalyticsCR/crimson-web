@@ -283,11 +283,13 @@ def _scope_for_ally(db: Session, ctx: AllyCtx, o: Opportunity, parts: list[AllyP
     def who(uid: int | None) -> str | None:
         return _user_name(db, uid) if uid in team else ("Crimson" if uid else None)
 
+    precio = scopesvc.offers_by_item(db, ctx.p.tenant.id, o.id, part_ids=mine)  # solo SUS ofertas
     items = []
     for it, es_mia in rows:
         x = scopesvc.item_out(db, it, allp, mask=lambda pid: _name_for_ally(ctx, allp[pid]), who=who)
         x.pop("position", None)
         x["mine"] = es_mia
+        x["offer"] = precio.get(it.id) if es_mia else None
         x["can_act"] = es_mia and ctx.preview_by is None and it.status != "completado" and ctx.p.can("aliado", "oportunidades")
         items.append(x)
     return {"items": items, "summary": scopesvc.summary([it for it, _ in rows], allp)}
@@ -440,6 +442,7 @@ def _opp_extra(db: Session, ctx: AllyCtx, o: Opportunity, pr: Project | None) ->
                 "visit_date": s.visit_date,
                 "technician": _user_name(db, s.technician_id) if s.technician_id in team else None,
                 "sent_at": s.sent_at,
+                **_survey_owner(db, ctx, s),
             }
             for s in surveys
         ],
@@ -570,6 +573,18 @@ def _survey_is_ours(ctx: AllyCtx, s: Survey) -> bool:
     return s.ally_company_id == ctx.company.id or s.technician_id in ctx.scope.team_user_ids()
 
 
+def _survey_owner(db: Session, ctx: AllyCtx, s: Survey) -> dict:
+    """04/11: los levantamientos de la obra en comun se ven todos (ally_scope.surveys). Quien lo hizo y si es suyo."""
+    if _survey_is_ours(ctx, s):
+        return {"mine": True, "owner": "Su empresa"}
+    if s.ally_company_id:
+        from ..models import AllyCompany
+
+        comp = db.get(AllyCompany, s.ally_company_id)
+        return {"mine": False, "owner": comp.name if comp else "Otro aliado"}
+    return {"mine": False, "owner": "Crimson"}
+
+
 def _survey_can_edit(ctx: AllyCtx, s: Survey) -> bool:
     if ctx.preview_by is not None or s.status in ("cotizado", "cerrado") or not _survey_is_ours(ctx, s):
         return False
@@ -606,6 +621,10 @@ def _survey_ally_out(db: Session, ctx: AllyCtx, s: Survey, full: bool = False) -
     ]
     out["pending_review"] = {"label": "En revisión de Crimson"} if s.status == "enviado" else None
     out["can_edit"] = _survey_can_edit(ctx, s)
+    # las observaciones de revision son para quien lo hizo: en el de otro no salen
+    out.update(_survey_owner(db, ctx, s))
+    if not out["mine"]:
+        out["observations"] = []
     if full:
         out.update(_pick(raw, ALLY_SURVEY_FULL_KEYS))
         out["points"] = [{**_pick(x, ALLY_POINT_KEYS), "photos": _sign(ctx, x.get("photos") or [])} for x in raw.get("points") or []]
@@ -1098,6 +1117,7 @@ class QuoteLineIn(BaseModel):
     quantity: Decimal = Field(gt=0)
     unit: str | None = Field(None, max_length=10)
     unit_price: Decimal = Field(ge=0)
+    scope_item_id: int | None = None  # 04/11: el alcance que cotiza esta linea (uno de los suyos)
 
 
 class AllyQuoteIn(BaseModel):
@@ -1123,12 +1143,53 @@ class AllyQuoteIn(BaseModel):
 class AllyOfferIn(AllyQuoteIn):
     participation_id: int | None = None
     what: str = Field(min_length=2, max_length=300)
+    # 04/11: los alcances que cotiza con un monto total (con desglose, cada linea dice el suyo)
+    scope_item_ids: list[int] | None = Field(None, max_length=60)
+
+
+def _scope_items_quoted(db: Session, ctx: AllyCtx, o: Opportunity, parts: list[AllyParticipation], data: AllyQuoteIn) -> list[ScopeItem]:
+    """Los alcances que la oferta dice cotizar: tienen que ser de ESTA oportunidad y suyos (los suministra o los
+    ejecuta su empresa). Uno ajeno responde 404, sin confirmar que existe."""
+    ids = [ln.scope_item_id for ln in data.lines or [] if ln.scope_item_id] + list(getattr(data, "scope_item_ids", None) or [])
+    if not ids:
+        return []
+    mine = {a.id for a in parts}
+    out: list[ScopeItem] = []
+    for iid in dict.fromkeys(ids):
+        it = db.get(ScopeItem, iid)
+        ok = (
+            it is not None
+            and it.tenant_id == ctx.p.tenant.id
+            and it.opportunity_id == o.id
+            and ((it.supplier_kind == "aliado" and it.supplier_participation_id in mine) or (it.executor_kind == "aliado" and it.executor_participation_id in mine))
+        )
+        if not ok:
+            raise HTTPException(404, "Alcance no encontrado")
+        out.append(it)
+    return out
+
+
+def _link_scope(r: AllyCostRequest, items: list[ScopeItem]) -> None:
+    """La oferta queda ligada a las partidas que cotiza (Crimson ve el precio en cada alcance)."""
+    if not items:
+        return
+    previas = {x.get("scope_item_id") for x in r.req_lines or []}
+    extra = [
+        {"concept": f"{scopesvc.KIND_LABEL.get(it.kind, it.kind)} · {it.description}"[:200], "quantity": None if it.quantity is None else str(it.quantity), "unit": it.unit, "scope_item_id": it.id}
+        for it in items
+        if it.id not in previas
+    ]
+    if extra:
+        r.req_lines = [*(r.req_lines or []), *extra]
 
 
 def _apply_quote(db: Session, ctx: AllyCtx, r: AllyCostRequest, data: AllyQuoteIn) -> None:
     if data.lines:
         total = sum((ln.quantity * ln.unit_price for ln in data.lines), Decimal(0))
-        r.lines = [{"concept": ln.concept, "quantity": str(ln.quantity), "unit": ln.unit or None, "unit_price": str(ln.unit_price)} for ln in data.lines]
+        r.lines = [
+            {"concept": ln.concept, "quantity": str(ln.quantity), "unit": ln.unit or None, "unit_price": str(ln.unit_price), **({"scope_item_id": ln.scope_item_id} if ln.scope_item_id else {})}
+            for ln in data.lines
+        ]
         r.amount = total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     else:
         r.lines = []
@@ -1175,8 +1236,10 @@ def responder(rid: int, data: AllyQuoteIn, ctx: AllyCtx = Depends(need("precios"
     r = _my_request(db, ctx, rid)
     if r.status not in ALLY_CAN_RESPOND:
         raise HTTPException(409, "Crimson ya resolvió esta solicitud")
-    _apply_quote(db, ctx, r, data)
     o = db.get(Opportunity, r.opportunity_id)
+    items = _scope_items_quoted(db, ctx, o, _my_parts(db, ctx, opportunity_id=o.id), data)
+    _apply_quote(db, ctx, r, data)
+    _link_scope(r, items)
     _notify_offer(db, ctx, o, r, f"respondió la solicitud «{r.what}»")
     db.commit()
     return _request_out(db, ctx, r)
@@ -1185,6 +1248,12 @@ def responder(rid: int, data: AllyQuoteIn, ctx: AllyCtx = Depends(need("precios"
 def _offer(db: Session, ctx: AllyCtx, o: Opportunity, parts: list[AllyParticipation], data: AllyOfferIn) -> dict:
     if not parts:
         raise HTTPException(404, "Oportunidad no encontrada")
+    items = _scope_items_quoted(db, ctx, o, parts, data)
+    if data.participation_id is None and items and len(parts) > 1:
+        # el papel sale de los alcances que cotiza, si todos son de la misma participacion
+        de = {x for it in items for x in (it.supplier_participation_id, it.executor_participation_id) if x in {a.id for a in parts}}
+        if len(de) == 1:
+            data.participation_id = de.pop()
     if data.participation_id is None:
         if len(parts) > 1:
             raise HTTPException(422, "Elija en qué papel envía el precio")
@@ -1203,6 +1272,7 @@ def _offer(db: Session, ctx: AllyCtx, o: Opportunity, parts: list[AllyParticipat
         created_by=ctx.p.user.id,
     )
     _apply_quote(db, ctx, r, data)
+    _link_scope(r, items)
     a.requests.append(r)
     db.flush()
     _notify_offer(db, ctx, o, r, f"envió su precio: «{r.what}»")

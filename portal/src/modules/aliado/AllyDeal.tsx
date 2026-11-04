@@ -88,7 +88,9 @@ export function RequestList({ rows, onRespond }: { rows: Req[]; onRespond?: (r: 
 }
 
 /** Alcances y responsables: los suyos con acciones; los compartidos de otros, solo lectura. */
-export function AllyScopeList({ scope, onChange, readOnly }: { scope: AllyScope | undefined; onChange: (s: AllyScope) => void; readOnly: boolean }) {
+/* 04/11: en sus alcances, lo que su empresa cobra. "Cotizar" abre la oferta con ese alcance (o todos los suyos) ya
+   cargado: el aliado pone el precio y la oferta queda ligada a cada partida. */
+export function AllyScopeList({ scope, onChange, readOnly, onQuote }: { scope: AllyScope | undefined; onChange: (s: AllyScope) => void; readOnly: boolean; onQuote?: (items: AllyScopeItem[]) => void }) {
   const { toast } = useSession();
   const [busy, setBusy] = useState<number | null>(null);
   if (!scope || scope.items.length === 0) return <p className="muted">Crimson todavía no definió los alcances de esta obra.</p>;
@@ -104,9 +106,14 @@ export function AllyScopeList({ scope, onChange, readOnly }: { scope: AllyScope 
     finally { setBusy(null); }
   };
   const s = scope.summary;
+  const mios = scope.items.filter((it) => it.mine && it.status !== "completado");
+  const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
   return (
     <>
-      <p className="meta" style={{ margin: "0 0 6px" }}>{s.total} partida(s) · {s.completados} completada(s){s.por_estado.por_confirmar ? ` · ${s.por_estado.por_confirmar} por confirmar` : ""}</p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "0 0 6px" }}>
+        <p className="meta" style={{ margin: 0 }}>{plural(s.total, "partida", "partidas")} · {plural(s.completados, "completada", "completadas")}{s.por_estado.por_confirmar ? ` · ${s.por_estado.por_confirmar} por confirmar` : ""}</p>
+        {onQuote && !readOnly && mios.length > 1 && <button className="btn btn--soft btn--sm" onClick={() => onQuote(mios)}>Cotizar mis alcances ({mios.length})</button>}
+      </div>
       <div className="cp-list">
         {scope.items.map((it) => (
           <div key={it.id} className={`cp-row${it.mine ? " al-scope--mine" : ""}`}>
@@ -116,9 +123,17 @@ export function AllyScopeList({ scope, onChange, readOnly }: { scope: AllyScope 
                 {qty(it.quantity, it.unit) && `${qty(it.quantity, it.unit)} · `}Suministra: {it.supplier.name} · Ejecuta: {it.executor.name}{it.mine ? " · le toca a su empresa" : ""}
               </div>
               {it.notes && <div className="cp-row__meta" style={{ whiteSpace: "pre-wrap" }}>{it.notes}</div>}
+              {it.mine && (
+                <div className="cp-row__meta">
+                  {it.offer ? <>Su precio: <b>{fmtMoney(it.offer.amount, it.offer.currency)}</b> sin IVA · {it.offer.status_label}</> : "Todavía no ha enviado precio para este alcance."}
+                </div>
+              )}
             </div>
             <div className="cp-row__side">
               <span className={`badge badge--${SCOPE_TONE[it.status] || "muted"}`}>{it.status_label}</span>
+              {it.mine && onQuote && !readOnly && it.status !== "completado" && it.offer?.status !== "aceptado" && (
+                <button className="btn btn--ghost btn--sm" onClick={() => onQuote([it])}>{it.offer ? "Cambiar precio" : "Cotizar"}</button>
+              )}
               {it.can_act && !readOnly && (NEXT[it.status] || []).map((n) => (
                 <button key={n.status} className={`btn btn--sm ${n.status === "confirmado" ? "btn--crimson" : "btn--soft"}`} disabled={busy === it.id} onClick={() => act(it, n.status)}>{n.label}</button>
               ))}

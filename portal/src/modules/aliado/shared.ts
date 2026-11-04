@@ -48,6 +48,8 @@ export type AllyScopeItem = {
   id: number; kind: string; kind_label: string; description: string; quantity: string | null; unit: string | null;
   supplier: { kind: string; name: string }; executor: { kind: string; name: string }; status: string; status_label: string; shared: boolean; notes: string | null;
   confirmed_at: string | null; confirmed_by: string | null; mine: boolean; can_act: boolean;
+  /** 04/11: lo último que su empresa ofreció por este alcance (solo en los suyos). */
+  offer?: { request_id: number; amount: string; currency: string; status: string; status_label: string } | null;
 };
 export type AllyScope = { items: AllyScopeItem[]; summary: { total: number; por_estado: Record<string, number>; por_asignar: number; completados: number } };
 export type OfferLine = { concept: string; quantity: string; unit: string | null; unit_price: string };
@@ -67,7 +69,7 @@ export type OppFull = OppRow & {
   participations: { id: number; role: string; relations?: string[]; scope: string | null; scope_lines: string[]; contacts: Record<string, Contact> }[];
   alcances?: AllyScope; acuerdos?: AllyDeals;
   requests: Req[]; can_survey: boolean;
-  surveys: { id: number; number: string; kind: string; status: string; review_status: string | null; visit_date: string | null; technician: string | null; sent_at: string | null }[];
+  surveys: { id: number; number: string; kind: string; status: string; review_status: string | null; visit_date: string | null; technician: string | null; sent_at: string | null; mine?: boolean; owner?: string }[];
   /* pedido 14: etapa con su próxima acción, seguimientos compartidos y ejecución; el total de la cotización solo si Crimson lo habilitó */
   next_action: string | null; next_action_date: string | null; seguimientos: Seguimiento[];
   cotizacion: { number: string; status: string; total: string; currency: string } | null; ejecucion: Ejecucion | null;
@@ -89,6 +91,8 @@ export type SurveyRow = {
   id: number; number: string; kind: string; kind_label: string; status: string; customer: string | null; site: string | null; opportunity: { id: number; number: string; title: string; status: string } | null;
   technician_id: number | null; technician: string | null; visit_date: string | null; points_count: number; created_at: string; sent_at: string | null;
   review_status: string | null; review_label: string | null; open_observations: number; observations: Obs[]; pending_review: { label: string } | null; can_edit: boolean;
+  /** 04/11: quién lo hizo ("Su empresa", "Crimson" u otro participante de la obra) y si es suyo */
+  mine?: boolean; owner?: string;
   photos: string[]; notes: string | null; contact: Record<string, string> | null; received_by: string | null; labor: Record<string, { label: string; people: number; days: string }>;
   /** solo los de su equipo (los técnicos de Crimson de la visita no salen al portal; la API los conserva) */
   visit_tech_ids: number[]; visit_techs: string[];

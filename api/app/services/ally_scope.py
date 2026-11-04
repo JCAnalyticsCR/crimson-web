@@ -145,8 +145,13 @@ class AllyScope:
         return self._shared
 
     def surveys(self) -> list:
-        # de la empresa = asignado a ella, o de Crimson en una oportunidad en comun y hecho por su gente (item 18)
-        conds = [Survey.tenant_id == self.tid, live(Survey), or_(Survey.ally_company_id == self.cid, Survey.id.in_(self.shared_survey_ids()))]
+        """Lo que VE: de la empresa (asignado a ella, o de Crimson en una oportunidad en comun hecho por su gente, item
+        18) y, desde el 04/11, los demas levantamientos de sus oportunidades en comun (de Crimson o de otro aliado de la
+        misma obra) para trabajar en conjunto, si ya salieron de borrador. Esos son de solo lectura: cambiar sigue
+        pidiendo own_surveys / routers/ally_portal._survey_is_ours."""
+        opps = select(Opportunity.id).where(Opportunity.tenant_id == self.tid, Opportunity.id.in_(self.opp_ids()), live(Opportunity))
+        en_comun = Survey.opportunity_id.in_(opps) & (Survey.status != "borrador")
+        conds = [Survey.tenant_id == self.tid, live(Survey), or_(Survey.ally_company_id == self.cid, Survey.id.in_(self.shared_survey_ids()), en_comun)]
         if self.is_tech:
             conds += [Survey.technician_id == self.uid, or_(Survey.status == "borrador", Survey.review_status == "devuelto")]
         return conds

@@ -9,18 +9,22 @@ import { Field, I, Icon } from "../../ui/components";
 import { useUpload } from "../../ui/MediaPicker";
 import { ROL_PARTICIPACION } from "./shared";
 
-type Line = { concept: string; quantity: string; unit: string; unit_price: string };
+export type QuoteLine = { concept: string; quantity: string; unit: string; unit_price: string; scope_item_id?: number };
+type Line = QuoteLine;
 const nueva = (): Line => ({ concept: "", quantity: "1", unit: "u", unit_price: "" });
 
-export default function QuoteForm({ path, method, ask, roles, onDone, onCancel }: {
+/* prefill (04/11): "Cotizar" desde los alcances: una línea por alcance (concepto, cantidad y unidad de Crimson) ligada a
+   su partida; el aliado pone el precio unitario y Crimson lo ve en cada alcance. */
+export default function QuoteForm({ path, method, ask, roles, onDone, onCancel, prefill }: {
   path: string; method: "PUT" | "POST"; ask?: boolean; roles?: { id: number; role: string }[]; onDone: () => void; onCancel?: () => void;
+  prefill?: { what?: string; lines: Line[] };
 }) {
   const { toast } = useSession();
   const { upload, busy: subiendo } = useUpload("/aliado/media");
-  const [modo, setModo] = useState<"monto" | "lineas">("monto");
-  const [what, setWhat] = useState("");
+  const [modo, setModo] = useState<"monto" | "lineas">(prefill?.lines.length ? "lineas" : "monto");
+  const [what, setWhat] = useState(prefill?.what || "");
   const [amount, setAmount] = useState("");
-  const [lines, setLines] = useState<Line[]>([nueva()]);
+  const [lines, setLines] = useState<Line[]>(prefill?.lines.length ? prefill.lines : [nueva()]);
   const [currency, setCurrency] = useState("CRC");
   const [validUntil, setValidUntil] = useState("");
   const [exclusions, setExclusions] = useState("");
@@ -35,8 +39,8 @@ export default function QuoteForm({ path, method, ask, roles, onDone, onCancel }
     setBusy(true);
     try {
       const body: Record<string, unknown> = { currency, valid_until: validUntil || null, conditions: conditions || null, exclusions: exclusions || null, attachment_ids: files.map((f) => f.id) };
-      if (modo === "monto") body.amount = amount;
-      else body.lines = lines.filter((l) => l.concept.trim()).map((l) => ({ concept: l.concept.trim(), quantity: l.quantity, unit: l.unit || null, unit_price: l.unit_price || "0" }));
+      if (modo === "monto") { body.amount = amount; const ids = (prefill?.lines || []).map((l) => l.scope_item_id).filter(Boolean); if (ask && ids.length) body.scope_item_ids = ids; }
+      else body.lines = lines.filter((l) => l.concept.trim()).map((l) => ({ concept: l.concept.trim(), quantity: l.quantity, unit: l.unit || null, unit_price: l.unit_price || "0", ...(l.scope_item_id ? { scope_item_id: l.scope_item_id } : {}) }));
       if (ask) { body.what = what; if (part) body.participation_id = part; }
       await api(path, { method, json: body });
       toast("Oferta enviada a Crimson");
@@ -68,7 +72,7 @@ export default function QuoteForm({ path, method, ask, roles, onDone, onCancel }
         <div className="al-lines">
           {lines.map((l, i) => (
             <div className="al-line" key={i}>
-              <Field label="Concepto"><input className="input" value={l.concept} onChange={(e) => set(i, "concept", e.target.value)} /></Field>
+              <Field label={l.scope_item_id ? "Alcance" : "Concepto"}><input className="input" value={l.concept} onChange={(e) => set(i, "concept", e.target.value)} /></Field>
               <Field label="Cantidad"><input className="input input--mono" inputMode="decimal" value={l.quantity} onChange={(e) => set(i, "quantity", e.target.value)} /></Field>
               <Field label="Unidad"><input className="input" value={l.unit} maxLength={10} onChange={(e) => set(i, "unit", e.target.value)} /></Field>
               <Field label="Precio unitario"><input className="input input--mono" inputMode="decimal" value={l.unit_price} onChange={(e) => set(i, "unit_price", e.target.value)} /></Field>

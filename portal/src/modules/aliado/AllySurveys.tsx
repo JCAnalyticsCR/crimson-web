@@ -97,7 +97,7 @@ export default function AllySurveys() {
               <div className="cp-row__main">
                 <b>{s.number} · {s.kind_label}</b>
                 <div className="cp-row__meta">{s.customer || "—"}{s.site ? ` · ${s.site}` : ""}{s.opportunity ? ` · ${s.opportunity.number}` : ""}</div>
-                <div className="cp-row__meta">{s.technician || "Sin técnico"} · {s.points_count} punto(s)</div>
+                <div className="cp-row__meta">{s.mine === false ? `${s.owner} · solo lectura` : s.technician || "Sin técnico"} · {s.points_count === 1 ? "1 punto" : `${s.points_count} puntos`}</div>
               </div>
               <div className="cp-row__side">
                 {s.review_status === "devuelto" ? <span className="badge badge--warn">Devuelto · {s.open_observations}</span> : s.pending_review ? <span className="badge badge--info">{s.pending_review.label}</span> : <Badge status={s.review_status || s.status} />}

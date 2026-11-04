@@ -156,7 +156,7 @@ def _opp(db: Session, oid: int, p: Principal) -> Opportunity:
 @router.get("/opportunities/{oid}/scope")
 def opp_scope(oid: int, p: Principal = Depends(require("crm_pipeline", "ver")), db: Session = Depends(get_db)):
     o = _opp(db, oid, p)
-    return svc.scope_out(db, p.tenant.id, o.id, None)
+    return svc.scope_out(db, p.tenant.id, o.id, None, offers=p.sees_costs)
 
 
 @router.post("/opportunities/{oid}/scope-items", status_code=201)
@@ -164,7 +164,7 @@ def opp_scope_add(oid: int, data: ScopeItemIn, p: Principal = Depends(require("c
     o = _opp(db, oid, p)
     _create(db, p, o.id, None, data)
     db.commit()
-    return svc.scope_out(db, p.tenant.id, o.id, None)
+    return svc.scope_out(db, p.tenant.id, o.id, None, offers=p.sees_costs)
 
 
 @router.put("/opportunities/{oid}/scope-items/{iid}")
@@ -172,7 +172,7 @@ def opp_scope_put(oid: int, iid: int, data: ScopeItemIn, p: Principal = Depends(
     o = _opp(db, oid, p)
     _update(db, p, iid, o.id, None, data)
     db.commit()
-    return svc.scope_out(db, p.tenant.id, o.id, None)
+    return svc.scope_out(db, p.tenant.id, o.id, None, offers=p.sees_costs)
 
 
 @router.delete("/opportunities/{oid}/scope-items/{iid}")
@@ -180,7 +180,7 @@ def opp_scope_del(oid: int, iid: int, p: Principal = Depends(require("crm_pipeli
     o = _opp(db, oid, p)
     _delete(db, p, iid, o.id, None)
     db.commit()
-    return svc.scope_out(db, p.tenant.id, o.id, None)
+    return svc.scope_out(db, p.tenant.id, o.id, None, offers=p.sees_costs)
 
 
 # ---------- desde el levantamiento ----------
@@ -198,7 +198,7 @@ def _survey_container(s: Survey) -> tuple[int | None, int | None]:
 def survey_scope(sid: int, p: Principal = Depends(require("field", "ver")), db: Session = Depends(get_db)):
     s = _survey(db, sid, p)
     oid, ssid = _survey_container(s)
-    out = svc.scope_out(db, p.tenant.id, oid, ssid)
+    out = svc.scope_out(db, p.tenant.id, oid, ssid, offers=p.sees_costs)
     out["can_edit"] = p.can("field", "editar")
     return out
 
@@ -209,7 +209,7 @@ def survey_scope_add(sid: int, data: ScopeItemIn, p: Principal = Depends(require
     oid, ssid = _survey_container(s)
     _create(db, p, oid, ssid if oid is None else s.id, data)
     db.commit()
-    out = svc.scope_out(db, p.tenant.id, oid, ssid)
+    out = svc.scope_out(db, p.tenant.id, oid, ssid, offers=p.sees_costs)
     out["can_edit"] = True
     return out
 
@@ -220,7 +220,7 @@ def survey_scope_put(sid: int, iid: int, data: ScopeItemIn, p: Principal = Depen
     oid, ssid = _survey_container(s)
     _update(db, p, iid, oid, ssid, data)
     db.commit()
-    out = svc.scope_out(db, p.tenant.id, oid, ssid)
+    out = svc.scope_out(db, p.tenant.id, oid, ssid, offers=p.sees_costs)
     out["can_edit"] = True
     return out
 
@@ -231,7 +231,7 @@ def survey_scope_del(sid: int, iid: int, p: Principal = Depends(require("field",
     oid, ssid = _survey_container(s)
     _delete(db, p, iid, oid, ssid)
     db.commit()
-    out = svc.scope_out(db, p.tenant.id, oid, ssid)
+    out = svc.scope_out(db, p.tenant.id, oid, ssid, offers=p.sees_costs)
     out["can_edit"] = True
     return out
 
@@ -257,4 +257,4 @@ def project_scope(pid: int, p: Principal = Depends(require("projects", "ver")), 
             "states": svc.STATE_LABEL,
             "typical": [],
         }
-    return svc.scope_out(db, p.tenant.id, oid, sid)
+    return svc.scope_out(db, p.tenant.id, oid, sid, offers=p.sees_costs)

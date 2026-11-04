@@ -2,7 +2,7 @@
    levantamiento, la oportunidad y su proyecto muestran exactamente las mismas partidas (services/scope_items.py).
    Sin montos: lo económico vive en las solicitudes de precio y los acuerdos. */
 import { useCallback, useEffect, useState } from "react";
-import { api, fmtDate } from "../../lib/api";
+import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Field, I, Icon } from "../../ui/components";
 import "./opportunities.css";
@@ -12,6 +12,8 @@ export type ScopeItem = {
   id: number; kind: string; kind_label: string; description: string; quantity: string | null; unit: string | null;
   supplier: ScopeParty; executor: ScopeParty; status: string; status_label: string; shared: boolean; notes: string | null;
   position?: number; confirmed_at: string | null; confirmed_by: string | null; updated_at?: string;
+  /** 04/11: lo que el aliado ofreció por esta partida (solo llega a quien ve costos) */
+  offer?: { request_id: number; amount: string; currency: string; status: string; status_label: string } | null;
 };
 export type ScopeData = {
   source: { opportunity_id: number | null; survey_id: number | null };
@@ -137,6 +139,7 @@ export default function ScopeItems({ url, editBase, canEdit, title = "Alcances y
                   {it.description}
                   {!it.shared && <div className="meta">Solo la ve su responsable</div>}
                   {it.notes && <div className="meta" style={{ whiteSpace: "pre-wrap" }}>{it.notes}</div>}
+                  {it.offer && <div className="meta">Precio del aliado: <b>{fmtMoney(it.offer.amount, it.offer.currency)}</b> sin IVA · {it.offer.status_label}</div>}
                 </td>
                 <td data-label="Cantidad" className="mono">{it.quantity ? `${Number(it.quantity).toLocaleString("es-CR")} ${it.unit || ""}` : "—"}</td>
                 <td data-label="Suministra" style={{ color: it.supplier.kind === "por_asignar" ? "var(--warn)" : undefined }}>{it.supplier.name}</td>

@@ -309,7 +309,7 @@ export default function AllySurvey() {
         {!ro && <button type="button" className="btn btn--soft btn--sm" style={{ alignSelf: "flex-start" }} onClick={() => up({ items: [...d.items, { product_id: null, name: "", quantity: "1", unit: "Unid", note: null, kind: null }] })}><Icon d={I.plus} size={14} />Agregar material</button>}
       </div>
       {ro && !readOnly && s.pending_review && <p className="muted" style={{ marginTop: 12 }}>Está en revisión de Crimson: si lo devuelven con observaciones, se vuelve a poder editar.</p>}
-      {!readOnly && !s.can_edit && !s.pending_review && !["cotizado", "cerrado"].includes(s.status) && <p className="muted" style={{ marginTop: 12 }}>Este levantamiento lo lleva Crimson: usted lo ve porque alguien de su empresa participó en la visita.</p>}
+      {!readOnly && !s.can_edit && !s.pending_review && !["cotizado", "cerrado"].includes(s.status) && <p className="muted" style={{ marginTop: 12 }}>{s.mine === false ? `Este levantamiento lo hizo ${s.owner === "Crimson" ? "Crimson" : s.owner}: usted lo ve porque trabajan juntos en esta oportunidad, pero no lo puede cambiar.` : "Este levantamiento lo lleva Crimson: usted lo ve porque alguien de su empresa participó en la visita."}</p>}
       {sugs && (
         <SuggestionsModal
           rows={sugs}

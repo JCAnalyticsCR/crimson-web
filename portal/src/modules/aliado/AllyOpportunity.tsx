@@ -7,10 +7,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
 import { Badge, I, Icon } from "../../ui/components";
-import QuoteForm from "./QuoteForm";
+import QuoteForm, { type QuoteLine } from "./QuoteForm";
 import AllyExecution from "./AllyExecution";
 import { AllyAgreements, AllyScopeList, RequestList } from "./AllyDeal";
-import { ESTADO_OPP, ROL_PARTICIPACION, TONO_APROBACION, errorText, useAlly, type OppFull, type Req } from "./shared";
+import { ESTADO_OPP, ROL_PARTICIPACION, TONO_APROBACION, errorText, useAlly, type AllyScopeItem, type OppFull, type Req } from "./shared";
 
 /* El embudo de Crimson en palabras del aliado: dónde va la oportunidad (sin probabilidad ni montos). */
 const ETAPAS = ["nuevo", "contactado", "requiere_visita", "levantamiento", "cotizando", "enviada", "negociacion", "ganada"];
@@ -29,6 +29,7 @@ export default function AllyOpportunity() {
   const [err, setErr] = useState<string | null>(null);
   const [resp, setResp] = useState<Req | null>(null);
   const [enviar, setEnviar] = useState(false);
+  const [cotizar, setCotizar] = useState<AllyScopeItem[] | null>(null);
   const load = useCallback(() => { api<OppFull>(`/aliado/oportunidades/${id}`).then(setO).catch((e) => setErr(errorText(e))); }, [id]);
   useEffect(load, [load]);
   if (err) return <p className="muted">{err}</p>;
@@ -103,7 +104,25 @@ export default function AllyOpportunity() {
       ) : <p className="muted">Crimson todavía no ha compartido seguimientos de esta oportunidad.</p>}
       <h2 className="h3 al-sec">Alcances y responsables</h2>
       <p className="meta" style={{ margin: "0 0 6px" }}>Lo que hace falta para la obra y quién lo hace. Confirme su alcance y después marque el avance; Crimson aprueba el acuerdo.</p>
-      <AllyScopeList scope={o.alcances} readOnly={readOnly} onChange={(a) => setO({ ...o, alcances: a })} />
+      <AllyScopeList scope={o.alcances} readOnly={readOnly} onChange={(a) => setO({ ...o, alcances: a })} onQuote={precios ? (items) => { setEnviar(false); setCotizar(items); } : undefined} />
+      {cotizar && (
+        <div style={{ marginTop: 12 }}>
+          <div className="meta" style={{ marginBottom: 6 }}>Su precio para {cotizar.length === 1 ? "este alcance" : `${cotizar.length} alcances`}: ponga el precio unitario de cada línea.</div>
+          <QuoteForm
+            key={cotizar.map((x) => x.id).join("-")}
+            path={`/aliado/oportunidades/${o.id}/precios`}
+            method="POST"
+            ask
+            roles={o.participations.map((p) => ({ id: p.id, role: p.role }))}
+            prefill={{
+              what: cotizar.length === 1 ? `${cotizar[0].kind_label} · ${cotizar[0].description}`.slice(0, 300) : `Alcances de ${o.title}`.slice(0, 300),
+              lines: cotizar.map((x): QuoteLine => ({ concept: `${x.kind_label} · ${x.description}`.slice(0, 200), quantity: x.quantity || "1", unit: (x.unit || "u").slice(0, 10), unit_price: "", scope_item_id: x.id })),
+            }}
+            onCancel={() => setCotizar(null)}
+            onDone={() => { setCotizar(null); load(); }}
+          />
+        </div>
+      )}
       <h2 className="h3 al-sec">Acuerdos</h2>
       <AllyAgreements deals={o.acuerdos} />
       <h2 className="h3 al-sec">Precios que le pedimos</h2>
@@ -120,20 +139,21 @@ export default function AllyOpportunity() {
           <QuoteForm path={`/aliado/oportunidades/${o.id}/precios`} method="POST" ask roles={o.participations.map((p) => ({ id: p.id, role: p.role }))} onCancel={() => setEnviar(false)} onDone={() => { setEnviar(false); load(); }} />
         </div>
       )}
-      <h2 className="h3 al-sec">Levantamientos de mi empresa</h2>
+      <h2 className="h3 al-sec">Levantamientos de la oportunidad</h2>
+      <p className="meta" style={{ margin: "0 0 6px" }}>Los de su empresa y los de Crimson u otros participantes de esta obra. Los de otros se ven, pero no se cambian.</p>
       {o.surveys.length ? (
         <div className="cp-list">
           {o.surveys.map((s) => (
             <Link key={s.id} to={`/levantamientos/${s.id}`} className="cp-row">
               <div className="cp-row__main">
                 <b>{s.number}</b>
-                <div className="cp-row__meta">{s.kind}{s.technician ? ` · ${s.technician}` : ""}{s.visit_date ? ` · visita ${fmtDate(s.visit_date)}` : ""}</div>
+                <div className="cp-row__meta">{s.owner || "Su empresa"} · {s.kind}{s.technician ? ` · ${s.technician}` : ""}{s.visit_date ? ` · visita ${fmtDate(s.visit_date)}` : ""}</div>
               </div>
               <div className="cp-row__side"><Badge status={s.review_status || s.status} /></div>
             </Link>
           ))}
         </div>
-      ) : <p className="muted">Todavía no hay levantamientos de su empresa en esta oportunidad.</p>}
+      ) : <p className="muted">Todavía no hay levantamientos en esta oportunidad.</p>}
       {o.ejecucion && (
         <>
           <h2 className="h3 al-sec">Ejecución del proyecto</h2>
