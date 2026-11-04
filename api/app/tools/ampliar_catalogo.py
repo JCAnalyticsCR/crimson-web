@@ -78,22 +78,10 @@ def _run(tenant_id: int | None, dry_run: bool, sync_first: bool, activar: bool, 
         # --- sync opcional: descarga el catálogo completo antes de crear ---
         # fetch() filtra al vuelo (keep=relevant), manteniendo en memoria solo ~1650 artículos útiles
         if sync_first:
-            print("\n[--sync] Descargando catálogo completo de Eurocomp...")
-            from ..providers.sirett import SirettClient, SirettError
-            client = SirettClient.from_settings()
-            if client is None:
-                print("ERROR: faltan las credenciales de Eurocomp (EUROCOMP_WS_ID, EUROCOMP_WS_PASSWORD o EUROCOMP_WS_KEY)", file=sys.stderr)
-                sys.exit(1)
-            try:
-                items, received = ss.fetch(client)
-                print(f"  Recibidos de Eurocomp: {received}, útiles con el filtro nuevo: {len(items)}")
-                out_sync = ss.apply(db, t, items, received=received)
-                db.commit()
-                ss.trim_memory()
-                print(f"  Aplicado: {out_sync.get('nuevo', 0)} nuevos, {out_sync.get('actualizado', 0)} actualizados, {out_sync.get('inactivar', 0)} inactivados")
-            except SirettError as e:
-                print(f"ERROR al descargar de Eurocomp: {e.message}", file=sys.stderr)
-                sys.exit(1)
+            # 04/11 (decision del usuario): Eurocomp se consulta solo una vez por semana (lunes 03:17); no hay descarga
+            # manual, tampoco desde aqui. Esta herramienta trabaja con lo que trajo la ultima sincronizacion semanal.
+            print("ERROR: --sync ya no existe: Eurocomp se sincroniza solo los lunes a las 3:17 a. m.", file=sys.stderr)
+            sys.exit(1)
 
         # --- estadísticas por familia antes de crear ---
         sup = ss.find_supplier(db, t.id)

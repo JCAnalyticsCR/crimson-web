@@ -93,23 +93,15 @@ export default function SupplierCatalog() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [mode, setMode] = useState<"link" | "add" | null>(null);
   const [sugOpen, setSugOpen] = useState(false);
-  const [syncing, setSyncing] = useState(false);
 
   const loadSups = useCallback(() => api<Sup[]>("/supplier-catalog/suppliers").then((r) => {
     setSups(r);
     setSid((cur) => (cur && r.some((s) => s.id === cur) ? cur : (r.find((s) => s.items > 0)?.id ?? null)));
   }).catch((e) => { toastRef.current(e instanceof Error ? e.message : "Error", "bad"); setSups([]); }), []);
   useEffect(() => { loadSups(); }, [loadSups]);
-  /* Proveedor conectado por API (SiReTT de Eurocomp): se sincroniza solo una vez por semana (lunes); el boton adelanta la proxima (una por hora, una al dia si Eurocomp bloqueo el acceso). */
+  /* Proveedor conectado por API (SiReTT de Eurocomp): se sincroniza SOLO una vez por semana (lunes 3:17 a. m.). Sin
+     boton de sincronizar (04/11, decision del usuario): no se le llenan de solicitudes a Eurocomp ni de datos la tienda. */
   const apiSup = (sups || []).find((s) => ["conectado", "listo", "error"].includes(s.api.status));
-  const syncNow = () => {
-    if (!apiSup) return;
-    setSyncing(true);
-    api<Record<string, number>>(`/supplier-catalog/suppliers/${apiSup.id}/sync`, { method: "POST" })
-      .then((r) => toast(`Sincronizado: ${r.utiles} artículos útiles de ${r.recibidos} · ${r.nuevo} nuevos · ${r.actualizado} actualizados · ${r.vinculos} vínculos nuevos`))
-      .catch((e) => toast(e instanceof Error ? e.message : "Error", "bad"))
-      .finally(() => { setSyncing(false); loadSups(); });
-  };
 
   const query = useCallback((offset = 0) => {
     const p = new URLSearchParams({ limit: "60", offset: String(offset), estado: f.estado });
@@ -156,7 +148,7 @@ export default function SupplierCatalog() {
         <span className="muted" style={{ fontSize: 13 }}>{withItems.length ? `${withItems.length} con catálogo cargado` : "Ninguno con catálogo todavía"}</span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           {canLink && withItems.length > 0 && <button className="btn btn--soft btn--sm" onClick={() => setSugOpen(true)}><Icon d={I.link} />Sugerencias de vínculo</button>}
-          {canAdd && apiSup && <button className="btn btn--soft btn--sm" onClick={syncNow} disabled={syncing} title="Eurocomp permite una consulta del catálogo completo por hora"><Icon d={I.refresh} />{syncing ? "Sincronizando…" : `Sincronizar ${apiSup.name.split(" ")[0]}`}</button>}
+          {apiSup && <span className="muted" style={{ fontSize: 12, alignSelf: "center" }} title="Sin sincronización manual: una sola consulta por semana">{apiSup.name.split(" ")[0]} se actualiza solo los lunes, 3:17 a. m.</span>}
           {canAdd && <button className="btn btn--crimson btn--sm" onClick={() => setImporting(true)}><Icon d={I.upload} />Importar lista</button>}
         </div>
       </div>

@@ -149,13 +149,12 @@ def test_suspicious_or_throttled_response_changes_nothing(client, auth, db_sessi
     assert active() == 7
     st = next(x for x in client.get("/supplier-catalog/suppliers").json() if x["id"] == s.id)["api"]
     assert st["status"] == "error" and "no se aplica" in st["label"]
-    # "sincronizar ahora" dentro de la misma hora: Eurocomp responde 20 -> 429 con el motivo
+    # el limite por hora (20) tampoco cambia nada y queda visible
     eurocomp["items"], eurocomp["error"] = list(CATALOGO), 20
-    r = client.post(f"/supplier-catalog/suppliers/{s.id}/sync")
-    assert r.status_code == 429 and "por hora" in r.json()["detail"]
+    assert ss.sync_all(db_session)["code"] == 20
+    assert active() == 7
     eurocomp["error"] = None
-    r = client.post(f"/supplier-catalog/suppliers/{s.id}/sync")
-    assert r.status_code == 200 and r.json()["utiles"] == 7
+    assert ss.sync_all(db_session)[tid]["utiles"] == 7
 
 
 def test_stock_refresh_updates_only_linked_products(client, auth, db_session, eurocomp):
@@ -363,19 +362,12 @@ def test_freno_una_consulta_global_por_hora_y_el_bloqueo_27_explicado(client, au
     st = next(x for x in client.get("/supplier-catalog/suppliers").json() if x["id"] == s.id)["api"]
     assert "Solo Eurocomp puede desbloquearlo" in st["label"] and "Código 27" not in st["label"]
     calls = eurocomp["calls"]
-    # el boton dentro de la hora no llama a Eurocomp: explica el bloqueo y desde que hora se puede reintentar
-    r = client.post(f"/supplier-catalog/suppliers/{s.id}/sync")
-    assert r.status_code == 429 and "Solo Eurocomp puede desbloquearlo" in r.json()["detail"] and "desde las" in r.json()["detail"]
-    # el refresco de cada 6 h tampoco consulta si hubo una global hace menos de una hora
+    # el refresco viejo de existencias tampoco consulta si hubo una global hace menos de una hora
     assert ss.refresh_linked(db_session) == {"skipped": "consulta global reciente"}
     assert eurocomp["calls"] == calls
-    # pasado el dia (bloqueado se reintenta una vez al dia) y desbloqueado por Eurocomp, vuelve con UNA consulta
-    t = db_session.get(Tenant, tid)
-    ss._save_state(t, last_global_at=(datetime.now(UTC) - timedelta(hours=25)))
-    db_session.commit()
+    # desbloqueado por Eurocomp, el lunes siguiente vuelve con UNA consulta
     eurocomp["error"] = None
-    r = client.post(f"/supplier-catalog/suppliers/{s.id}/sync")
-    assert r.status_code == 200 and eurocomp["calls"] == calls + 1
+    assert "utiles" in ss.sync_all(db_session)[tid] and eurocomp["calls"] == calls + 1
 
 
 def test_servidor_ocupado_28_se_reintenta_y_no_cuenta_como_falta(monkeypatch):
@@ -398,27 +390,21 @@ def test_servidor_ocupado_28_se_reintenta_y_no_cuenta_como_falta(monkeypatch):
     assert e.value.code == 27 and "desbloquearlo" in e.value.message
 
 
-def test_bloqueado_por_eurocomp_el_boton_prueba_una_vez_al_dia(client, auth, db_session, eurocomp, monkeypatch):
-    """04/11: lo automatico es semanal y, mientras Eurocomp tenga bloqueado a Crimson (27), el boton no le insiste: un
-    intento al dia. Pasada la hora (sin bloqueo) vuelve el freno normal de una por hora."""
-    monkeypatch.setattr(ss, "GLOBAL_COOLDOWN", timedelta(minutes=65))
+def test_no_hay_sincronizacion_manual(client, auth, db_session, eurocomp):
+    """04/11 (decision del usuario): Eurocomp se consulta solo una vez por semana, los lunes. El boton ya no existe y la
+    ruta responde 409 siempre, sin llamar a Eurocomp, este o no bloqueado."""
     tid = auth["tenant"]["id"]
     ss.sync_all(db_session)
     s = db_session.scalar(select(Supplier).where(Supplier.tenant_id == tid))
-    t = db_session.get(Tenant, tid)
-    hace_2h = datetime.now(UTC) - timedelta(hours=2)
-    ss._save_state(t, last_global_at=hace_2h, last_code=27)
-    db_session.commit()
     calls = eurocomp["calls"]
-    r = client.post(f"/supplier-catalog/suppliers/{s.id}/sync")
-    assert r.status_code == 429 and "desbloquearlo" in r.json()["detail"] and eurocomp["calls"] == calls
-    ss._save_state(t, last_global_at=datetime.now(UTC) - timedelta(hours=25))
-    db_session.commit()
-    assert client.post(f"/supplier-catalog/suppliers/{s.id}/sync").status_code == 200 and eurocomp["calls"] == calls + 1
-    # sin bloqueo, 2 horas ya alcanzan
-    ss._save_state(t, last_global_at=hace_2h, last_code=0)
-    db_session.commit()
-    assert ss.global_wait(t) is None
+    for codigo in (0, 27):
+        t = db_session.get(Tenant, tid)
+        ss._save_state(t, last_global_at=datetime.now(UTC) - timedelta(days=30), last_code=codigo)
+        db_session.commit()
+        r = client.post(f"/supplier-catalog/suppliers/{s.id}/sync")
+        assert r.status_code == 409 and "solo una vez por semana" in r.json()["detail"]
+    assert eurocomp["calls"] == calls
+    assert client.post("/supplier-catalog/suppliers/999999/sync").status_code == 404
 
 
 def test_el_refresco_de_cada_6_horas_quedo_apagado():
