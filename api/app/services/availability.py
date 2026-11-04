@@ -73,7 +73,9 @@ DEFAULTS: dict = {
     "low_threshold": 3,  # "ultimas unidades" a partir de aqui
     "backorder_enabled": True,  # vender bajo pedido lo que el proveedor tiene (con dato vigente)
     "backorder_lead": "3-5 días hábiles",  # plazo de "bajo pedido" que ve el cliente
-    "supplier_max_age_hours": 48,  # dato del proveedor mas viejo -> "Consultar disponibilidad" (SiReTT refresca cada 6 h)
+    # dato del proveedor mas viejo -> "Consultar disponibilidad". 04/11 (decision del usuario): Eurocomp se sincroniza una
+    # vez por semana (lunes), asi que el dato vale 8 dias (192 h): la tienda vende toda la semana con el del lunes
+    "supplier_max_age_hours": 192,
     "out_of_stock": "mostrar",  # mostrar | ocultar (agotados en el catalogo, destacados y kits)
     # agotado en el proveedor por API (Eurocomp) y sin existencia propia: "ocultar" lo saca de la tienda (lista, busqueda,
     # destacados y kits) desde la sincronizacion siguiente y sigue en el panel; "mostrar" lo deja visible como agotado.

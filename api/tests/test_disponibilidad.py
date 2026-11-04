@@ -105,7 +105,7 @@ def test_proveedor_fresco_viejo_sin_fecha_y_excel_sin_vincular(db_session):
     sin_fecha = _prod(db_session, "AV-SINFECHA")
     excel = _prod(db_session, "AV-EXCEL")
     supplier_item(db_session, fresco.id, 12, hours_ago=5)
-    supplier_item(db_session, viejo.id, 12, hours_ago=60)  # mas de 48 h
+    supplier_item(db_session, viejo.id, 12, hours_ago=200)  # mas de 8 dias (192 h: Eurocomp es semanal)
     supplier_item(db_session, sin_fecha.id, 12, dated=False)
     # lo que dejaba el importador Excel viejo: existencia en el producto, sin item vinculado
     excel.supplier_stock, excel.supplier_updated_at = 40, datetime.now(UTC)
@@ -119,7 +119,7 @@ def test_proveedor_fresco_viejo_sin_fecha_y_excel_sin_vincular(db_session):
     assert e["state"] == "agotado" and not e["supplier_linked"] and e["supplier_unlinked_qty"] == 40 and e["supplier_qty"] is None
     # el umbral se configura en Ajustes de la tienda (horas)
     t = db_session.scalar(select(Tenant))
-    t.settings = {**(t.settings or {}), "store_inventory": {"supplier_max_age_hours": 72}}
+    t.settings = {**(t.settings or {}), "store_inventory": {"supplier_max_age_hours": 240}}
     db_session.commit()
     assert _one(db_session, viejo)["state"] == "bajo_pedido"
     # un item inactivo (ya no viene en la lista) no cuenta

@@ -30,7 +30,7 @@ def test_no_se_vende_lo_no_disponible_y_se_respeta_max_qty(client, auth, db_sess
     agotado = _prod(client, "CK-AGO", "Lector de huella")
     viejo = _prod(client, "CK-VIE", "Cerradura")
     bajo = _prod(client, "CK-BP", "Switch 8 puertos")
-    supplier_item(db_session, viejo["id"], 10, hours_ago=72)
+    supplier_item(db_session, viejo["id"], 10, hours_ago=200)
     supplier_item(db_session, bajo["id"], 2, hours_ago=2)
     antes = _orders(db_session)
     for p in (agotado, viejo):

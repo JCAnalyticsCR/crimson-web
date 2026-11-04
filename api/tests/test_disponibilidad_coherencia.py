@@ -93,7 +93,7 @@ def test_sin_propio_todas_dicen_bajo_pedido_y_con_dato_viejo_consultar(client, a
     assert {v[0] for v in got.values()} == {"bajo_pedido"}, got
     assert {D(str(v[1] or 0)) for v in got.values()} == {D(0)}, got
     # el dato del proveedor envejece (mas de 48 h): en todos lados "consultar", y la tienda no lo vende
-    supplier_item(db_session, s.prod, 4, hours_ago=50)
+    supplier_item(db_session, s.prod, 4, hours_ago=200)
     got = _all_surfaces(client, db_session, s)
     assert {v[0] for v in got.values()} == {"consultar"}, got
     viv = client.get("/public/store/crimson/availability", params={"ids": str(s.prod)}).json()[str(s.prod)]
