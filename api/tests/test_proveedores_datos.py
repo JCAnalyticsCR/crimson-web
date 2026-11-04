@@ -80,17 +80,17 @@ def test_refresco_de_existencias_deja_el_error_visible(client, auth, db_session,
     db_session.commit()
     ss.sync_all(db_session)
 
-    def falla(self, bid, codes):
+    def falla(self, bid, keep=None):
         raise SirettError(99, "Eurocomp no respondió")
 
-    monkeypatch.setattr(SirettClient, "items_list", falla)
+    monkeypatch.setattr(SirettClient, "bodega_items", falla)
     assert ss.refresh_linked(db_session)[tid] == {"error": "Eurocomp no respondió", "code": 99}
     sup = next(x for x in client.get("/supplier-catalog/suppliers").json() if x["name"].lower().startswith("eurocomp"))
     st = sup["api"]
     assert st["status"] == "error" and "refresco de existencias falló" in st["label"] and st["last_stock_error"] == "Eurocomp no respondió"
     assert st["last_error"] == "Eurocomp no respondió" and st["last_ok_at"]  # la hora del catalogo semanal sigue a la vista
 
-    monkeypatch.setattr(SirettClient, "items_list", lambda self, bid, codes: [dict(CAMARA, stock="3.000"), UTP])
+    monkeypatch.setattr(SirettClient, "bodega_items", lambda self, bid, keep=None: [r for r in (dict(CAMARA, stock="3.000"), UTP) if keep is None or keep(r)])
     assert ss.refresh_linked(db_session)[tid]["vinculados"] == 1
     st = next(x for x in client.get("/supplier-catalog/suppliers").json() if x["name"].lower().startswith("eurocomp"))["api"]
     assert st["status"] == "conectado" and st["last_stock_at"] and not st.get("last_stock_error") and not st.get("last_error")

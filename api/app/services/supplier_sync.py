@@ -188,6 +188,30 @@ class SyncRefused(Exception):
     pass
 
 
+# Una consulta global a Eurocomp (catalogo completo de la bodega) como maximo cada hora, venga de donde venga: el boton
+# "Sincronizar", el catalogo semanal o el refresco de existencias. Repetirla dentro de la hora da 20 y repetir faltas
+# escala a 26 y 27 (bloqueo que solo Eurocomp levanta). providers/sirett.py explica la politica de consumo.
+GLOBAL_COOLDOWN = timedelta(minutes=65)
+
+
+def _mark_global(tenants, now: datetime) -> None:
+    for t in tenants:
+        _save_state(t, last_global_at=now)
+
+
+def global_wait(t: Tenant, now: datetime | None = None) -> datetime | None:
+    """Desde cuando se puede volver a consultar Eurocomp, o None si ya se puede."""
+    raw = _state(t).get("last_global_at")
+    if not raw:
+        return None
+    try:
+        last = _aware(datetime.fromisoformat(raw))
+    except ValueError:
+        return None
+    nxt = last + GLOBAL_COOLDOWN
+    return nxt if nxt > (now or datetime.now(UTC)) else None
+
+
 def trim_memory() -> None:
     """Devuelve al sistema la memoria que Python ya libero (glibc la retiene si no se le pide). En Railway se paga la
     RAM tomada, no la usada: sin esto cada proceso queda con el pico de la ultima sincronizacion."""
@@ -305,6 +329,9 @@ def sync_tenant(
     """Descarga (si no viene ya descargado) y aplica para una empresa, guardando el estado (exito o error) aunque
     falle. Hace commit."""
     now = datetime.now(UTC)
+    if items is None:
+        _mark_global([t], now)
+        db.commit()
     try:
         if items is None:
             items, received = fetch(client)
@@ -370,6 +397,8 @@ def sync_all(db: Session, client: SirettClient | None = None) -> dict:
     if (client or SirettClient.from_settings()) is None:
         return {"skipped": "sin credenciales de Eurocomp"}
     now = datetime.now(UTC)
+    _mark_global(tenants, now)
+    db.commit()
     try:
         items, received = fetch(client)
     except SirettError as e:
@@ -432,11 +461,12 @@ def purge_old_inactive(db: Session, t: Tenant, supplier: Supplier) -> int:
 
 
 def refresh_linked(db: Session, client: SirettClient | None = None) -> dict:
-    """Existencia y costo de los articulos de Eurocomp vinculados a un producto, consultando en lotes
-    de 50 codigos (items_list, sin limite de frecuencia en Eurocomp). Solo refresca los activos y
-    publicados en la tienda o usados en cotizaciones/pedidos abiertos; el resto espera al semanal.
-    Procesa y hace commit por lote para liberar memoria al terminar cada uno. No crea ni inactiva
-    articulos: eso es del catalogo semanal. Un codigo que Eurocomp ya no devuelve queda en stock=0."""
+    """Existencia y costo de los articulos de Eurocomp vinculados a un producto (cada 6 horas). UNA consulta global de
+    la bodega, filtrada al vuelo a los codigos que interesan: antes eran listas de 50 (36 llamadas seguidas) y eso
+    rebasaba el techo por minuto de SiReTT hasta el bloqueo 27 del 26/10. Si hubo una consulta global hace menos de
+    una hora (boton o semanal), no consulta: esa ya trajo precio y existencia. Solo refresca los activos y publicados
+    en la tienda o usados en cotizaciones/pedidos abiertos; el resto espera al semanal. Commit por lote. No crea ni
+    inactiva articulos: eso es del catalogo semanal. Un codigo que Eurocomp ya no devuelve queda en stock=0."""
     tenants = targets(db)
     if not tenants:
         return {"skipped": "ninguna empresa con el proveedor"}
@@ -444,9 +474,13 @@ def refresh_linked(db: Session, client: SirettClient | None = None) -> dict:
     if client is None:
         return {"skipped": "sin credenciales de Eurocomp"}
     now = datetime.now(UTC)
+    if any(global_wait(t, now) for t in tenants):
+        log.info("Eurocomp (existencias): hubo una consulta global hace menos de una hora, no se consulta")
+        return {"skipped": "consulta global reciente"}
     fx = sc.usd_rate(db)
     out: dict = {}
 
+    plan: list[tuple[Tenant, list[SupplierItem]]] = []
     for t in tenants:
         sup = find_supplier(db, t.id)
         if sup is None:
@@ -472,24 +506,32 @@ def refresh_linked(db: Session, client: SirettClient | None = None) -> dict:
             _save_state(t, last_stock_at=now, last_stock_try_at=now, last_stock_summary=out[t.id], last_stock_error=None)
             db.commit()
             continue
+        plan.append((t, items))
+    if not plan:
+        return out
 
+    wanted = {i.code for _, items in plan for i in items if i.code}
+    _mark_global([t for t, _ in plan], now)
+    db.commit()
+    try:
+        fresh = {
+            (r.get("codigo") or "").strip(): r
+            for r in client.bodega_items(settings.eurocomp_bodega, keep=lambda r: (r.get("codigo") or "").strip() in wanted)
+        }
+    except SirettError as e:
+        for t, _ in plan:
+            _save_state(t, last_stock_try_at=now, last_stock_error=e.message, last_try_at=now, last_error=e.message, last_code=e.code)
+            out[t.id] = {"error": e.message, "code": e.code}
+        db.commit()
+        log.warning("Eurocomp (existencias): %s", e.message)
+        return out
+
+    for t, items in plan:
         cambios = sin_dato = 0
         batch_size = 50
 
         for batch_start in range(0, len(items), batch_size):
             batch = items[batch_start : batch_start + batch_size]
-            batch_codes = [i.code for i in batch if i.code]
-
-            try:
-                fresh = {(r.get("codigo") or "").strip(): r for r in client.items_list(settings.eurocomp_bodega, batch_codes)}
-            except SirettError as e:
-                # Error en este lote: guardar estado y abortar los demas lotes de esta empresa
-                _save_state(t, last_stock_try_at=now, last_stock_error=e.message, last_try_at=now, last_error=e.message, last_code=e.code)
-                db.commit()
-                log.warning("Eurocomp (existencias, empresa %s): %s", t.id, e.message)
-                out[t.id] = {"error": e.message, "code": e.code}
-                break
-
             for it in batch:
                 r = fresh.get(it.code)
                 if r is None:
@@ -519,19 +561,17 @@ def refresh_linked(db: Session, client: SirettClient | None = None) -> dict:
                     p.supplier_updated_at = now
             # Commit por lote: libera memoria de las instancias del lote anterior
             db.commit()
-        else:
-            # El bucle termino sin break: todos los lotes procesados correctamente
-            res = {"vinculados": len(items), "cambios": cambios, "sin_dato": sin_dato}
-            prev = _state(t)
-            clear = {"last_error": None} if prev.get("last_error") and prev.get("last_error") == prev.get("last_stock_error") else {}
-            if cambios:
-                clear["last_stock_change_at"] = now
-            _save_state(t, last_stock_at=now, last_stock_try_at=now, last_stock_summary=res, last_stock_error=None, **clear)
-            from .store_showcase import bump_catalog_version
+        res = {"vinculados": len(items), "cambios": cambios, "sin_dato": sin_dato}
+        prev = _state(t)
+        clear = {"last_error": None} if prev.get("last_error") and prev.get("last_error") == prev.get("last_stock_error") else {}
+        if cambios:
+            clear["last_stock_change_at"] = now
+        _save_state(t, last_stock_at=now, last_stock_try_at=now, last_stock_summary=res, last_stock_error=None, **clear)
+        from .store_showcase import bump_catalog_version
 
-            bump_catalog_version(db, t)
-            db.commit()
-            out[t.id] = res
+        bump_catalog_version(db, t)
+        db.commit()
+        out[t.id] = res
 
     log.info("Eurocomp (existencias): %s", out)
     # costo nuevo -> margen nuevo: su propio commit; un error suyo no deshace el refresco.

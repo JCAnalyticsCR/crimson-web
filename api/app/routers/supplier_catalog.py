@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..models import Category, Product, ProductTax, Supplier, SupplierItem, SupplierListImport, Tax, Tenant
+from ..providers.sirett import RESULT as SIRETT_RESULT
 from ..providers.sirett import SirettError
 from ..services import pricing, product_names, supplier_sync
 from ..services import supplier_catalog as sc
@@ -201,10 +202,18 @@ def supplier_sync_now(sid: int, p: Principal = Depends(require("catalog", "crear
         raise HTTPException(409, "Este proveedor no tiene conexión por API")
     if st["status"] == "pendiente":
         raise HTTPException(409, "Faltan las credenciales de Eurocomp en el servidor")
+    # nunca dos consultas globales en la misma hora: Eurocomp lo cuenta como falta y escala hasta bloquear (27)
+    nxt = supplier_sync.global_wait(p.tenant)
+    if nxt:
+        hora = nxt.astimezone(supplier_sync.CR).strftime("%H:%M")
+        bloqueo = f"{SIRETT_RESULT[27]}. " if st.get("last_code") == 27 else ""
+        raise HTTPException(
+            429, f"{bloqueo}Eurocomp permite una consulta del catálogo por hora y ya se consultó hace poco. Puede volver a sincronizar desde las {hora}."
+        )
     try:
         out = supplier_sync.sync_tenant(db, p.tenant, user_id=p.user.id)
     except SirettError as e:
-        raise HTTPException(429 if e.code == 20 else 502, e.message) from None
+        raise HTTPException(429 if e.code in (20, 26) else 502, e.message) from None
     except supplier_sync.SyncRefused as e:
         raise HTTPException(409, str(e)) from None
     finally:

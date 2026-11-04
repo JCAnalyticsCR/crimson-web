@@ -2,6 +2,7 @@
 completa CABYS y fotos sin tocar la existencia propia, y una respuesta sospechosa o el limite por hora no rompen nada.
 Eurocomp es falso (sin red): los articulos tienen la forma real de items_Row del WSDL."""
 
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -9,7 +10,7 @@ from pydantic import SecretStr
 from sqlalchemy import func, select
 
 from app.core.config import settings
-from app.models import Product, StockMovement, Supplier, SupplierItem
+from app.models import Product, StockMovement, Supplier, SupplierItem, Tenant
 from app.providers.sirett import SirettClient, SirettError, image_url
 from app.services import supplier_sync as ss
 
@@ -37,8 +38,10 @@ CATALOGO = [CAMARA, BALUN, UTP, HDMI, PURPLE, BLUE, LAPTOP, ENCHUFE, UPS, POWERB
 
 @pytest.fixture
 def eurocomp(monkeypatch):
-    """Credencial falsa + Eurocomp falso: `state["items"]` es lo que responde; `state["error"]` simula un result."""
+    """Credencial falsa + Eurocomp falso: `state["items"]` es lo que responde; `state["error"]` simula un result.
+    Sin el freno de una consulta global por hora (las pruebas simulan horas distintas); test_freno_* lo prueba."""
     state = {"items": list(CATALOGO), "error": None, "calls": 0}
+    monkeypatch.setattr(ss, "GLOBAL_COOLDOWN", timedelta(0))
     monkeypatch.setattr(settings, "eurocomp_ws_id", "123")
     monkeypatch.setattr(settings, "eurocomp_ws_password", SecretStr("x"))
     monkeypatch.setattr(settings, "eurocomp_ws_key", None)
@@ -156,7 +159,8 @@ def test_suspicious_or_throttled_response_changes_nothing(client, auth, db_sessi
 
 
 def test_stock_refresh_updates_only_linked_products(client, auth, db_session, eurocomp):
-    """Cada 6 horas: existencia y costo de lo vinculado, sin la consulta masiva; lo que Eurocomp ya no devuelve queda en 0."""
+    """Cada 6 horas: existencia y costo de lo vinculado con UNA consulta global (nunca listas de 50: llevaron al bloqueo
+    27 del 26/10); lo que Eurocomp ya no devuelve queda en 0."""
     tid = auth["tenant"]["id"]
     # show_on_web=True: refresh_linked solo procesa productos publicados o en documentos abiertos
     prod = Product(tenant_id=tid, code="HIK-1047", name="Cámara 4MP ColorVu", price=Decimal("45000"), supplier_sku="SG2104", show_on_web=True)
@@ -171,7 +175,7 @@ def test_stock_refresh_updates_only_linked_products(client, auth, db_session, eu
     eurocomp["items"] = [dict(CAMARA, stock="2.000", precio="50.00"), UTP]
     out = ss.refresh_linked(db_session)[tid]
     assert out == {"vinculados": 1, "cambios": 1, "sin_dato": 0}
-    assert eurocomp["calls"] == 1 and eurocomp["list_calls"] == 1  # nunca la consulta masiva
+    assert eurocomp["calls"] == 2 and "list_calls" not in eurocomp  # una consulta global, ninguna lista de 50
     db_session.refresh(prod)
     assert prod.supplier_stock == 2 and prod.cost == Decimal("50") and prod.price == Decimal("45000")
     assert prod.supplier_updated_at >= before
@@ -341,3 +345,54 @@ def test_salto_de_costo_dudoso_cuenta_como_cambio_real(client, auth, db_session,
     assert ss._state(db_session.get(Tenant, tid))["last_change_at"] > antes
     it = db_session.scalar(select(SupplierItem).where(SupplierItem.code == "SG2104"))
     assert it.changed_at is not None
+
+
+def test_freno_una_consulta_global_por_hora_y_el_bloqueo_27_explicado(client, auth, db_session, eurocomp, monkeypatch):
+    """04/11: Eurocomp respondia 27 ("bloqueado, solo se levanta a mano") y el panel decia "Código 27 de SiReTT". Ahora el
+    mensaje dice que paso y quien lo arregla, y Crimson nunca hace dos consultas globales en la misma hora (boton,
+    semanal o refresco de existencias): repetirlas cuenta como falta y escala hasta el bloqueo."""
+    tid = auth["tenant"]["id"]
+    monkeypatch.setattr(ss, "GLOBAL_COOLDOWN", timedelta(minutes=65))
+    prod = Product(tenant_id=tid, code="HIK-1047", name="Cámara", price=Decimal("45000"), supplier_sku="SG2104", show_on_web=True)
+    db_session.add(prod)
+    db_session.commit()
+    ss.sync_all(db_session)  # crea el proveedor
+    s = db_session.scalar(select(Supplier).where(Supplier.tenant_id == tid))
+    eurocomp["error"] = 27
+    ss.sync_all(db_session)  # el lunes siguiente Eurocomp responde 27
+    st = next(x for x in client.get("/supplier-catalog/suppliers").json() if x["id"] == s.id)["api"]
+    assert "Solo Eurocomp puede desbloquearlo" in st["label"] and "Código 27" not in st["label"]
+    calls = eurocomp["calls"]
+    # el boton dentro de la hora no llama a Eurocomp: explica el bloqueo y desde que hora se puede reintentar
+    r = client.post(f"/supplier-catalog/suppliers/{s.id}/sync")
+    assert r.status_code == 429 and "Solo Eurocomp puede desbloquearlo" in r.json()["detail"] and "desde las" in r.json()["detail"]
+    # el refresco de cada 6 h tampoco consulta si hubo una global hace menos de una hora
+    assert ss.refresh_linked(db_session) == {"skipped": "consulta global reciente"}
+    assert eurocomp["calls"] == calls
+    # pasada la hora (y desbloqueado por Eurocomp) vuelve a funcionar con UNA consulta
+    t = db_session.get(Tenant, tid)
+    ss._save_state(t, last_global_at=(datetime.now(UTC) - timedelta(hours=2)))
+    db_session.commit()
+    eurocomp["error"] = None
+    r = client.post(f"/supplier-catalog/suppliers/{s.id}/sync")
+    assert r.status_code == 200 and eurocomp["calls"] == calls + 1
+
+
+def test_servidor_ocupado_28_se_reintenta_y_no_cuenta_como_falta(monkeypatch):
+    import app.providers.sirett as sr
+
+    monkeypatch.setattr(sr.time, "sleep", lambda s: None)
+    respuestas = iter([28, 28, 0])
+
+    def once(self, op, **params):
+        code = next(respuestas)
+        if code:
+            raise SirettError(code)
+        return "ok"
+
+    monkeypatch.setattr(SirettClient, "_call_once", once)
+    assert SirettClient("https://x", 1, "y").call("wsc_request_preventa_status") == "ok"
+    monkeypatch.setattr(SirettClient, "_call_once", lambda self, op, **p: (_ for _ in ()).throw(SirettError(27)))
+    with pytest.raises(SirettError) as e:
+        SirettClient("https://x", 1, "y").call("wsc_request_preventa_status")
+    assert e.value.code == 27 and "desbloquearlo" in e.value.message

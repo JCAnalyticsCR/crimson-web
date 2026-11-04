@@ -5,8 +5,13 @@ verificadas contra el WSDL de Eurocomp (https://eurocompcr.com/webservice.php?ws
 
 - SOAP RPC (nusoap, namespace urn:server). Respuesta ISO-8859-1; el catalogo completo pesa ~34 MB.
 - Credencial: API Key (sirett_cli_ + 48 hex) con ws_cid=0, o la heredada ID + contrasena (obsoleta en SiReTT).
-- Cada respuesta trae `result` (0 = OK). Las consultas masivas (bodega completa) admiten UNA por hora por cliente
-  (result 20); un articulo o una lista de hasta 50 codigos no tiene limite.
+- Cada respuesta trae `result` (0 = OK). Codigos y politica de consumo: guia oficial "SiReTT-Guia-Webservices.pdf"
+  (sirettonline.net/descargas/guias), cap. 8 y 12.
+- Consumo (cap. 12, 04/11): cada peticion paga un peaje (~1000 articulos) + un credito por articulo; hay techo por
+  minuto y por hora. Una consulta global grande NO cuenta como falta; muchas llamadas seguidas que rebasan el techo SI.
+  Faltas repetidas: 26 (suspension de 5 min, 15 min, 1 h) y a la cuarta 27 (bloqueo sin fecha: solo Eurocomp lo
+  levanta). El 26/10 el refresco de existencias en listas de 50 (36 llamadas seguidas) llevo a Crimson al 27: por eso
+  todo se pide con UNA consulta global y nunca mas de una por hora (supplier_sync.GLOBAL_COOLDOWN).
 - Permisos reales de Crimson en Eurocomp: solo las variantes `_bodega_all_` (y el estado de preventas). Las demas
   responden 4 (sin permiso).
 Nunca se registra la credencial: ni en logs, ni en errores, ni en la respuesta guardada.
@@ -14,6 +19,7 @@ Nunca se registra la credencial: ni en logs, ni en errores, ni en la respuesta g
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Iterable
 from html import escape
 
@@ -32,7 +38,14 @@ RESULT = {
     6: "Artículo no encontrado",
     9: "Bodega no encontrada o no autorizada",
     20: "Eurocomp permite una consulta del catálogo completo por hora",
+    26: "Eurocomp suspendió por unos minutos el acceso de Crimson por exceso de consultas (se levanta solo)",
+    27: "Eurocomp bloqueó el acceso de Crimson a su servicio web. Solo Eurocomp puede desbloquearlo, desde la ficha de Crimson (Clientes → Crimson → WebService)",
+    28: "El servidor de Eurocomp está ocupado: intente de nuevo en unos segundos",
+    34: "Eurocomp rechazó un dato de la consulta",
+    35: "Eurocomp no autoriza el origen de la consulta para esta credencial",
 }
+BUSY = 28  # no es falta: se reintenta la misma llamada tras unos segundos (cap. 12.4)
+BUSY_RETRIES, BUSY_WAIT_MAX = 2, 10
 MAX_CODES = 50  # tope de *_items_list
 # sin DTD, sin entidades, sin red; huge_tree porque el catalogo completo es un solo documento grande
 PARSER = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False, huge_tree=True, remove_comments=True)
@@ -81,7 +94,21 @@ class SirettClient:
             f"<soapenv:Body><urn:{op}>{args}</urn:{op}></soapenv:Body></soapenv:Envelope>"
         ).encode()
 
+    @staticmethod
+    def _busy_retry(fn):
+        """El 28 (servidor ocupado con todos los integradores) no es falta: se reintenta la misma llamada."""
+        for intento in range(BUSY_RETRIES + 1):
+            try:
+                return fn()
+            except SirettError as e:
+                if e.code != BUSY or intento == BUSY_RETRIES:
+                    raise
+                time.sleep(min(BUSY_WAIT_MAX, 3 * (intento + 1)))
+
     def call(self, op: str, **params) -> etree._Element:
+        return self._busy_retry(lambda: self._call_once(op, **params))
+
+    def _call_once(self, op: str, **params) -> etree._Element:
         try:
             r = httpx.post(
                 self.url,
@@ -163,6 +190,9 @@ class SirettClient:
         return out
 
     def stream_rows(self, op: str, keep: Callable[[dict], bool] | None = None, **params) -> list[dict]:
+        return self._busy_retry(lambda: self._stream_once(op, keep, **params))
+
+    def _stream_once(self, op: str, keep: Callable[[dict], bool] | None = None, **params) -> list[dict]:
         try:
             with httpx.stream(
                 "POST",
@@ -180,11 +210,12 @@ class SirettClient:
     # ---------- consultas ----------
     def bodega_items(self, bid: int, keep: Callable[[dict], bool] | None = None) -> list[dict]:
         """Catalogo completo de la bodega (todos los articulos, con o sin existencia), leido por partes; `keep` decide
-        cuales se guardan. Eurocomp admite una consulta masiva por hora."""
+        cuales se guardan. Es la consulta mas barata por articulo y no cuenta como falta; maximo una por hora."""
         return self.stream_rows("wsc_request_bodega_all_items", keep, bid=bid)
 
     def items_list(self, bid: int, codes: list[str]) -> list[dict]:
-        """Articulos puntuales al momento (sin limite de frecuencia), de a 50 codigos."""
+        """Articulos puntuales, de a 50 codigos. OJO: cada lote paga el peaje completo; muchos lotes seguidos rebasan
+        el techo por minuto y cuentan como falta (asi se llego al 27). Para refrescar mucho, usar bodega_items."""
         out: list[dict] = []
         clean = [c.strip() for c in codes if c and c.strip() and "," not in c]
         for i in range(0, len(clean), MAX_CODES):
