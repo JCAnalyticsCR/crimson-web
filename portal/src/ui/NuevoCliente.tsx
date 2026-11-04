@@ -31,6 +31,12 @@ export default function NuevoCliente({
       const ex = e instanceof ApiError && e.status === 409 ? (e.data as { existing?: { id: number } } | undefined)?.existing : undefined;
       if (ex) {
         try { const c = await api<Customer>(`/customers/${ex.id}`); toast(`Ya existía: se usa la ficha de ${c.name}`); onCreated(c); return; } catch { /* abajo */ }
+        /* 04/11: existe y no tiene dueño (la vendedora no lo ve en su lista): se toma con la cédula o el correo exactos
+           que escribió y queda en su cartera. Antes decía "use esa ficha" y la ficha no aparecía en ningún lado. */
+        const query = f.id_number.trim() || f.email.trim();
+        if (query) {
+          try { const c = await api<Customer>(`/customers/${ex.id}/claim`, { method: "POST", json: { query } }); toast(`${c.name} ya existía: quedó en su cartera y se usa en este documento`); onCreated(c); return; } catch (e2) { toast(e2 instanceof Error ? e2.message : "No se pudo usar el cliente existente", "bad"); return; }
+        }
       }
       toast(e instanceof Error ? e.message : "No se pudo crear el cliente", "bad");
     }

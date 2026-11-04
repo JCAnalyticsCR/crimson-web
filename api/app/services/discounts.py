@@ -80,8 +80,10 @@ class Check:
 
     @property
     def message(self) -> str:
-        where = f" en «{self.line}»" if self.line else ""
-        return f"El descuento{where} es de {self.worst:.1f} % y su límite es {self.limit:.0f} %."
+        # 04/11: tambien cuenta bajar el precio de lista (no solo el campo Desc.): lo dice, porque la vendedora que solo
+        # cambio el precio leia "el descuento es de 97 %" y no entendia
+        where = f" «{self.line}»" if self.line else " la venta"
+        return f"Con el precio y el descuento que puso,{where} queda {self.worst:.1f} % por debajo del precio de lista y su límite es {self.limit:.0f} %."
 
 
 def _list_price_in_doc_currency(prod, doc_currency: str, fx_rate) -> Decimal:

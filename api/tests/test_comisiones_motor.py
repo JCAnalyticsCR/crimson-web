@@ -23,7 +23,7 @@ def _cust(client):
 
 
 def _inv(client, h=None, unit=1000000, lines=None, **extra):
-    body = {"customer_id": _cust(client)["id"], "lines": lines or [{"name": "Instalación CCTV", "quantity": 1, "unit_price": unit, "tax_rate": 13}], **extra}
+    body = {"customer_id": _cust(client)["id"], "lines": lines or [{"name": "Instalación CCTV", "cabys_code": "8713200000000", "quantity": 1, "unit_price": unit, "tax_rate": 13}], **extra}
     r = client.post("/invoices", json=body, headers=h or {})
     assert r.status_code == 201, r.text
     return r.json()

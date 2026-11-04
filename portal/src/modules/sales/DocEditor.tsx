@@ -428,6 +428,13 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                   <option value="TE">Tiquete electrónico</option>
                   <option value="FEE">Factura electrónica de exportación</option>
                 </select>
+                {/* 04/11: una FE a un cliente sin cédula se guardaba y fallaba recién al emitir */}
+                {(() => {
+                  const sel = customers.find((x) => x.id === doc.customer_id);
+                  return !ro && tipoDoc === "FE" && sel && !(sel.id_number || "").trim() ? (
+                    <div className="line-warn" role="alert">«{sel.name}» no tiene cédula: Hacienda rechaza la factura electrónica. Haga un tiquete o pida en la oficina que completen la ficha.</div>
+                  ) : null;
+                })()}
               </Field>
             )}
             <Field label="Grupo de facturación"><select className="select" disabled><option>{isQ ? "COT · Cotizaciones" : GRUPO[tipoDoc] || `${tipoDoc}`}</option></select></Field>
@@ -649,7 +656,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
         </aside>
       </div>
 
-      {nuevoCliente && <NuevoCliente onClose={() => setNuevoCliente(false)} onCreated={(c) => { setCustomers((cs) => [c, ...cs.filter((x) => x.id !== c.id)]); setDoc({ ...doc, customer_id: c.id, currency: c.currency || doc.currency || "CRC" }); setNuevoCliente(false); }} />}
+      {nuevoCliente && <NuevoCliente needId={!isQ && tipoDoc === "FE"} emailHint={isQ ? undefined : "Ahí le llega la factura"} onClose={() => setNuevoCliente(false)} onCreated={(c) => { setCustomers((cs) => [c, ...cs.filter((x) => x.id !== c.id)]); setDoc({ ...doc, customer_id: c.id, currency: c.currency || doc.currency || "CRC" }); setNuevoCliente(false); }} />}
       {clienteFactura && <ClienteParaFactura customers={customers} busy={busy} onClose={() => setClienteFactura(false)} onCreated={(c) => setCustomers((cs) => [c, ...cs.filter((x) => x.id !== c.id)])} onPick={(cid) => convertAccepted(cid)} />}
       {pick && <ProductPicker onClose={() => setPick(false)} onPick={addProducts} docCurrency={cur} />}
       {kit && <KitPicker currency={cur} onClose={() => setKit(false)} onPick={(ls) => { setLines((x) => [...x, ...ls.map((l) => ({ ...blankLine(), ...l }) as Line)]); setKit(false); }} />}

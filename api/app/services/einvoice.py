@@ -96,6 +96,21 @@ def _unit(ln, lenient: bool) -> str:
     return u
 
 
+def _missing_cabys(db: Session, inv: Invoice) -> str | None:
+    """El mismo aviso que da Hacienda real (xml44.build_comprobante) para la primera linea sin CABYS, o None."""
+    for i, ln in enumerate((x for x in inv.lines if (x.treatment or "normal") not in ("aportado", "excluido")), start=1):
+        cabys = re.sub(r"\D", "", ln.cabys_code or "")
+        if len(cabys) != 13 and ln.product_id:
+            prod = db.get(Product, ln.product_id)
+            cabys = re.sub(r"\D", "", (prod.cabys_code if prod is not None and prod.tenant_id == inv.tenant_id else "") or "")
+        if len(cabys) != 13:
+            return (
+                f"La línea {i} («{(ln.name or '')[:60]}») no tiene CABYS: "
+                + ("complételo en la ficha del producto." if ln.product_id else "escriba el código CABYS de 13 dígitos en la línea o búsquelo en el catálogo de Hacienda.")
+            )
+    return None
+
+
 def _lines(db: Session, inv: Invoice, lenient: bool) -> list[dict]:
     out = []
     for ln in inv.lines:
@@ -283,6 +298,13 @@ def emit(db: Session, tenant: Tenant, user_id: int | None, inv: Invoice) -> EInv
     doc_type = inv.doc_type or "FE"
     if doc_type not in ("FE", "TE"):
         raise HTTPException(422, f"{doc_type}: no soportado aún en emisión directa")
+    if mode == "simulado":
+        # 04/11: el simulado tambien pide el CABYS de cada linea (antes la rellenaba con ceros y la factura salia
+        # "aceptada": la vendedora creia que estaba bien y con Hacienda real se rechaza). Solo aqui, al emitir FE/TE:
+        # la nota de credito de un comprobante simulado viejo sigue saliendo como antes.
+        falta = _missing_cabys(db, inv)
+        if falta:
+            raise HTTPException(422, falta)
     prev = db.scalars(select(EInvoiceDocument).where(EInvoiceDocument.invoice_id == inv.id, EInvoiceDocument.doc_type == doc_type)).all()
     if any(d.status in LIVE and (d.mode or "simulado") == mode for d in prev):
         raise HTTPException(409, "La factura ya tiene un comprobante vivo")
