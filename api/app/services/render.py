@@ -34,6 +34,21 @@ def parrafos(texto) -> list[str]:
 
 env.filters["parrafos"] = parrafos
 
+
+def importe_linea(ln) -> Decimal:
+    """04/11: lo que se muestra en la columna Subtotal = cantidad x precio menos el descuento de ESA linea. El descuento
+    general del documento sale una sola vez, abajo en los totales. line.subtotal guardado lleva ademas su parte del
+    descuento general (el impuesto y el XML se calculan sobre eso) y pintarlo aqui confundia: la linea de 73 100 salia
+    60 452,94 y abajo se volvia a restar el descuento. Solo presentacion: no cambia ningun monto guardado."""
+    from .totals import LineIn, compute_line
+
+    g = ln.get if isinstance(ln, dict) else (lambda k, default=None: getattr(ln, k, default))
+    lo = compute_line(LineIn(Decimal(str(g("quantity") or 0)), Decimal(str(g("unit_price") or 0)), g("discount_type") or "percent", Decimal(str(g("discount_value") or 0))))
+    return lo.subtotal
+
+
+env.filters["importe"] = importe_linea
+
 # 30/10: diseno de la representacion grafica (PDF) de cotizacion y factura. Solo cambia la presentacion: todos los datos
 # fiscales siguen saliendo igual (clave, consecutivo, cedula, actividad, CABYS por linea, impuestos, franja de simulado o
 # pruebas y la leyenda legal de Ajustes). El XML que va a Hacienda no pasa por aqui.
@@ -95,11 +110,11 @@ table{width:100%;border-collapse:collapse;margin-top:4px}
 </div>
 <table class="lines"><thead><tr><th>Concepto</th><th class="num">Cant.</th><th class="num">Precio</th><th class="num">Desc.</th><th class="num">IVA</th><th class="num">Subtotal</th></tr></thead><tbody>
 {% for l in d.lines if (l.treatment or "normal") != "excluido" %}{% set nosuma = l.treatment in ("aportado", "cortesia") %}<tr><td><b>{{ l.name }}</b>{% if nosuma %} <span class="tag">{% if l.treatment == "aportado" and l.supplied_by %}Aportado por {{ l.supplied_by }}{% else %}{{ leyenda[l.treatment] }}{% endif %}</span>{% endif %}{% if l.description %}<div class="desc">{{ l.description }}</div>{% endif %}{% if l.cabys_code %}<div class="cabys">CABYS {{ l.cabys_code }}</div>{% endif %}</td>
-<td class="num">{{ "%g"|format(l.quantity|float) }} {{ l.unit|unidad }}</td>{% if nosuma %}<td class="num" colspan="3">—</td><td class="num">No suma</td>{% else %}<td class="num">{{ l.unit_price|money(d.currency) }}</td><td class="num">{% if l.discount_value|float > 0 %}{{ "%g"|format(l.discount_value|float) }}{{ "%" if l.discount_type == "percent" else "" }}{% else %}—{% endif %}</td><td class="num">{{ "%g"|format(l.tax_rate|float) }}%</td><td class="num">{{ l.subtotal|money(d.currency) }}</td>{% endif %}</tr>{% endfor %}
+<td class="num">{{ "%g"|format(l.quantity|float) }} {{ l.unit|unidad }}</td>{% if nosuma %}<td class="num" colspan="3">—</td><td class="num">No suma</td>{% else %}<td class="num">{{ l.unit_price|money(d.currency) }}</td><td class="num">{% if l.discount_value|float > 0 %}{{ "%g"|format(l.discount_value|float) }}{{ "%" if l.discount_type == "percent" else "" }}{% else %}—{% endif %}</td><td class="num">{{ "%g"|format(l.tax_rate|float) }}%</td><td class="num">{{ l|importe|money(d.currency) }}</td>{% endif %}</tr>{% endfor %}
 </tbody></table>
 {% set excl = d.lines|selectattr("treatment", "equalto", "excluido")|list %}{% if excl %}<div class="excl"><div class="lbl">Exclusiones · no incluidas en esta oferta</div><ul>{% for l in excl %}<li><b>{{ l.name }}</b>{% if l.quantity|float > 0 %} · {{ "%g"|format(l.quantity|float) }} {{ l.unit|unidad }}{% endif %}{% if l.description %} — {{ l.description }}{% endif %}</li>{% endfor %}</ul></div>{% endif %}
 <div class="sumrow"><div class="totbox"><table class="tot"><tr><td>Subtotal</td><td class="num">{{ d.subtotal|money(d.currency) }}</td></tr>
-{% if d.discount_total|float > 0 %}<tr><td>Descuento</td><td class="num">−{{ d.discount_total|money(d.currency) }}</td></tr>{% endif %}
+{% if d.discount_total|float > 0 %}<tr><td>Descuento general</td><td class="num">−{{ d.discount_total|money(d.currency) }}</td></tr>{% endif %}
 <tr><td>Impuestos</td><td class="num">{{ d.tax_total|money(d.currency) }}</td></tr>
 <tr class="grand"><td>Total</td><td class="num">{{ d.total|money(d.currency) }}</td></tr>
 {% if balance is not none %}<tr><td>Saldo</td><td class="num">{{ balance|money(d.currency) }}</td></tr>{% endif %}</table></div></div>

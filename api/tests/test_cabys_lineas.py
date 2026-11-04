@@ -51,3 +51,27 @@ def test_envio_de_la_tienda_lleva_cabys_de_servicio(client, auth, db_session):
     # Mi Tienda lo puede cambiar (lo confirma el contador)
     cfg = client.get("/store/checkout").json()["checkout"]
     assert cfg["shipping_cabys"] == "6803000000000"
+
+
+def test_descuento_general_sale_una_sola_vez_abajo(client, auth):
+    """04/11 (COT-000011): el descuento general se repartia en el Subtotal de cada linea (73 100 salia 60 452,94) y
+    abajo se volvia a restar: parecia doble. La linea muestra cantidad x precio menos SU descuento; el general, solo
+    en los totales. Los montos guardados (impuesto, XML) no cambian."""
+    c = _cust(client)
+    q = client.post(
+        "/quotes",
+        json={
+            "customer_id": c["id"],
+            "discount_type": "amount",
+            "discount_value": 20000,
+            "lines": [
+                {"name": "Disco duro 1 TB", "quantity": 1, "unit_price": 73100, "tax_rate": 13},
+                {"name": "Reemplazo de disco", "quantity": 1, "unit_price": 42500, "tax_rate": 13, "discount_type": "percent", "discount_value": 10},
+            ],
+        },
+    ).json()
+    html = client.get(f"/quotes/{q['id']}/html").text
+    assert html.count("₡73,100.00") == 2  # precio y subtotal de la linea, sin el descuento general
+    assert "₡38,250.00" in html  # 42 500 menos el 10 % de ESA linea
+    assert "60,452" not in html and "−₡20,000.00" in html  # el general, una vez, en los totales
+    assert Decimal(str(q["total"])) == Decimal(str(client.get(f"/quotes/{q['id']}").json()["total"]))  # el total no cambia
