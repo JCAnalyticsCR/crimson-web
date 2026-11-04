@@ -14,7 +14,7 @@ type Methods = {
   efectivo: { active: boolean; note?: string; pickup_only?: boolean };
 };
 type Ck = {
-  methods: Methods; pickup: { address?: string; hours?: string }; notify_roles: string[]; free_shipping_from: number | string; auto_invoice: boolean;
+  methods: Methods; pickup: { address?: string; hours?: string }; notify_roles: string[]; free_shipping_from: number | string; shipping_cabys?: string; auto_invoice: boolean;
   /* verify_email: revisar que el dominio del correo del comprador reciba correo; delivery_notice: aviso interno por cada
      envio a domicilio para coordinar el mensajero (pedido 21/10) */
   verify_email?: boolean; delivery_notice?: boolean;
@@ -53,6 +53,7 @@ export default function CheckoutSettings({ rates, onRates }: { rates: ZoneRate[]
         pickup: { address: ck.pickup?.address || null, hours: ck.pickup?.hours || null },
         notify_roles: ck.notify_roles,
         free_shipping_from: String(Number(ck.free_shipping_from) || 0),
+        shipping_cabys: ck.shipping_cabys || "6803000000000",
         auto_invoice: ck.auto_invoice,
         verify_email: ck.verify_email !== false,
         delivery_notice: ck.delivery_notice !== false,
@@ -105,6 +106,7 @@ export default function CheckoutSettings({ rates, onRates }: { rates: ZoneRate[]
         </div>
         <div className="grid-2">
           <Field label="Envío gratis desde (₡, con IVA)" hint="0 = nunca. Se convierte si la tienda vende en dólares."><input className="input input--mono" type="number" min={0} value={ck.free_shipping_from} onChange={(e) => setCk({ ...ck, free_shipping_from: e.target.value })} /></Field>
+          <Field label="CABYS del envío" hint="Va en la línea de envío del tiquete o la factura (13 dígitos). Por defecto 6803000000000, servicios de entrega local; confírmelo con su contador."><input className="input input--mono" inputMode="numeric" maxLength={13} value={ck.shipping_cabys ?? "6803000000000"} onChange={(e) => setCk({ ...ck, shipping_cabys: e.target.value.replace(/\D/g, "") })} /></Field>
           <Field label="Dirección de retiro"><input className="input" value={ck.pickup?.address || ""} onChange={(e) => setCk({ ...ck, pickup: { ...ck.pickup, address: e.target.value } })} placeholder="Oficinas, Escazú" /></Field>
           <Field label="Horario de retiro"><input className="input" value={ck.pickup?.hours || ""} onChange={(e) => setCk({ ...ck, pickup: { ...ck.pickup, hours: e.target.value } })} placeholder="L-V 8 a. m. a 5 p. m." /></Field>
         </div>

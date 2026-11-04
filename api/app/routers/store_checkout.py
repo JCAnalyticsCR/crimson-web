@@ -471,6 +471,8 @@ class PickupCfg(_Cfg):
 class CheckoutCfgIn(_Cfg):
     methods: MethodsCfg
     free_shipping_from: Decimal = Field(Decimal(0), ge=0)
+    # CABYS de la linea de envio del comprobante (13 digitos; services/store_orders.CHECKOUT_DEFAULTS)
+    shipping_cabys: str = Field(so.CHECKOUT_DEFAULTS["shipping_cabys"], pattern=r"^\d{13}$")
     auto_invoice: bool = True
     pickup: PickupCfg = PickupCfg()
     notify_roles: list[str] = Field(default_factory=lambda: ["admin", "ventas"], max_length=40)  # tambien los roles creados

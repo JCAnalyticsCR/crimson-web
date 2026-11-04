@@ -12,12 +12,16 @@ import { KitPicker, QuoteShare } from "./QuoteExtras";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
 import { AvailBadge, availText, sinExistencia } from "../../ui/Availability";
 import NuevoCliente from "../../ui/NuevoCliente";
+import { Lookup, type LookupItem } from "../../ui/Lookup";
 import EnProveedor from "../inventory/EnProveedor";
 
 type Preview = { subtotal: string; discount_total: string; tax_total: string; total: string; lines: { subtotal: string; tax_amount: string; total: string; unit_price: string; name: string; tax_rate: string }[] };
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? String(Number(n.toFixed(5))) : String(v ?? ""); };
 const blankLine = (): Line => ({ product_id: null, code: null, name: "", description: "", unit: "Unid", quantity: "1", unit_price: "0", discount_type: "percent", discount_value: "0", tax_rate: "13", treatment: "normal" });
 /* Una linea en 0 sin tratamiento no explica nada: hay que decir si es pendiente, aportada, cortesia o exclusion. */
+/* 04/11: el CABYS viaja con cada linea. Antes el editor no lo mandaba: una linea escrita a mano (o un servicio sin
+   producto) quedaba siempre sin CABYS y Hacienda la rechaza al emitir. La de producto lo toma del producto. */
+const cabysOk = (c?: string | null) => /^\d{13}$/.test((c || "").trim());
 const zeroUnexplained = (l: Line) => (l.treatment || "normal") === "normal" && !(Number(l.unit_price) > 0);
 const nameRows = (s: string) => Math.min(4, Math.max(1, Math.ceil((s || "").length / 44)));
 /* Imagen principal del producto (o la primera); undefined = la respuesta no trae imagenes */
@@ -41,7 +45,7 @@ const toPayload = (doc: DocState, lines: Line[], asigna = false) => ({
   customer_id: doc.customer_id ?? null, currency: doc.currency || "CRC", discount_type: doc.discount_type || "percent", discount_value: doc.discount_value || "0",
   internal_notes: doc.internal_notes || null, external_notes: doc.external_notes || null, external_order: doc.external_order || null, activity_code: doc.activity_code || null,
   medical_exemption_card: !!doc.medical_exemption_card, issue_date: doc.issue_date || null, due_date: doc.due_date || null,
-  lines: lines.filter((l) => l.name.trim()).map((l) => ({ product_id: l.product_id, code: l.code, name: l.name, description: l.description, unit: l.unit, quantity: l.quantity || "1", unit_price: l.unit_price || "0", discount_type: l.discount_type, discount_value: l.discount_value || "0", tax_rate: l.tax_rate || "13", treatment: l.treatment || "normal", supplied_by: l.treatment === "aportado" ? l.supplied_by || null : null })),
+  lines: lines.filter((l) => l.name.trim()).map((l) => ({ product_id: l.product_id, code: l.code, name: l.name, description: l.description, cabys_code: cabysOk(l.cabys_code) ? l.cabys_code : null, unit: l.unit, quantity: l.quantity || "1", unit_price: l.unit_price || "0", discount_type: l.discount_type, discount_value: l.discount_value || "0", tax_rate: l.tax_rate || "13", treatment: l.treatment || "normal", supplied_by: l.treatment === "aportado" ? l.supplied_by || null : null })),
   // sin dato (documento nuevo sin elegir) = quien lo crea; la API ignora el campo a quien no puede asignar
   ...(asigna && doc.seller_id !== undefined ? { seller_id: doc.seller_id } : {}),
 });
@@ -140,6 +144,18 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     return () => clearTimeout(t);
   }, [payload, isNew, doc.id]);
 
+  const searchCabys = useCallback(async (text: string): Promise<LookupItem[]> => {
+    const t = text.trim();
+    if (t.length < 3) return [];
+    const onlyDigits = /^\d{13}$/.test(t);
+    try {
+      const rows = await api<{ code: string; description: string; tax_rate: number | null }[]>(`/cabys?${onlyDigits ? `codigo=${t}` : `q=${encodeURIComponent(t)}&top=20`}`);
+      if (!rows.length) return [{ id: -1, label: "Sin resultados en el CABYS", hint: "Pruebe con otra palabra o escriba los 13 dígitos" }];
+      return rows.map((r) => ({ id: Number(r.code), label: `${r.code} · ${r.description}`, hint: `IVA ${r.tax_rate ?? "?"}%` }));
+    } catch (e) {
+      return [{ id: -1, label: e instanceof Error ? e.message : "Hacienda no respondió", hint: "Puede escribir los 13 dígitos a mano" }];
+    }
+  }, []);
   const setLine = (i: number, patch: Partial<Line>) => setLines((ls) => ls.map((l, k) => (k === i ? { ...l, ...patch } : l)));
   /* Producto del catalogo -> campos de la linea (precio en la moneda del documento). Lo usan el buscador del modal
      y las sugerencias que salen al escribir el concepto: una sola conversion. */
@@ -152,7 +168,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     if (sin.length) toast(`${sin.length === 1 ? sin[0].name : `${sin.length} productos`}: sin existencia propia ni del proveedor (se venden sin respaldo)`, "bad");
     const conFoto = ps.filter((p) => fotoDe(p) !== undefined);
     if (conFoto.length) setFotos((f0) => { const n = { ...f0 }; conFoto.forEach((p) => { n[p.id] = fotoDe(p) || ""; }); return n; });
-    return ps.map((p) => ({ product_id: p.id, code: p.code, name: p.name, unit: p.unit, unit_price: num(inCurrency(Number(p.price), p.currency, to, usd)), tax_rate: String(p.tax_rate ?? 13) }));
+    return ps.map((p) => ({ product_id: p.id, code: p.code, name: p.name, cabys_code: p.cabys_code, unit: p.unit, unit_price: num(inCurrency(Number(p.price), p.currency, to, usd)), tax_rate: String(p.tax_rate ?? 13) }));
   };
   const addProducts = (ps: Product[]) => {
     const nuevas = fromProduct(ps);
@@ -463,7 +479,25 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                               </select>
                             )}
                             {l.code && <span className="meta">{l.code}</span>}
+                            {l.product_id ? (
+                              <span className={`meta${cabysOk(l.cabys_code) ? "" : " line-cabys--falta"}`} title="Sale de la ficha del producto">{cabysOk(l.cabys_code) ? `CABYS ${l.cabys_code}` : "Producto sin CABYS"}</span>
+                            ) : (
+                              <span className="line-cabys">
+                                <Lookup
+                                  key={`cb${l.id ?? "n"}-${i}`}
+                                  value={l.cabys_code || ""}
+                                  placeholder="CABYS: buscar o 13 dígitos"
+                                  fetcher={searchCabys}
+                                  disabled={ro}
+                                  onSelect={(it, text) => {
+                                    if (it && it.id > 0) setLine(i, { cabys_code: String(it.id).padStart(13, "0") });
+                                    else if (!it) { const c = text.replace(/\D/g, ""); setLine(i, { cabys_code: c || null }); }
+                                  }}
+                                />
+                              </span>
+                            )}
                           </div>
+                          {!isQ && l.name.trim() !== "" && !cabysOk(l.cabys_code) && (l.treatment || "normal") !== "excluido" && <div className="line-warn">Sin CABYS: Hacienda rechaza la línea al emitir. {l.product_id ? "Complételo en la ficha del producto." : "Búsquelo aquí o escriba los 13 dígitos."}</div>}
                           {zero && <div className="line-warn">Línea en {fmtMoney(0, cur)}: elija si es pendiente, aportada, cortesía o exclusión.</div>}
                           {t !== "normal" && <div className="line-note">{TREATMENTS.find((x) => x.value === t)?.hint}</div>}
                         </td>

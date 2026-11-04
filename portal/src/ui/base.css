@@ -184,6 +184,9 @@ img { max-width: 100%; display: block; }
 .lines .c-tax .select { height: 34px; padding: 0 8px; }
 .lines .c-sub { padding-top: 14px; white-space: nowrap; }
 .line-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.line-cabys { flex: 1 1 210px; min-width: 0; max-width: 340px; }
+.line-cabys input { height: 30px; font-size: 12.5px; }
+.line-cabys--falta { color: var(--warn, #b45309); font-weight: 600; }
 .line-treat { width: auto; max-width: 100%; font-size: 12px; }
 .line-treat.is-set { border-color: var(--info, #3c82f0); }
 .line-treat.is-warn { border-color: var(--warn); background: var(--warn-soft, rgba(230,160,40,.12)); }

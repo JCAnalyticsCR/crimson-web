@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class LineInSchema(BaseModel):
@@ -20,6 +20,19 @@ class LineInSchema(BaseModel):
     tax_rate: Decimal | None = None
     treatment: str = Field("normal", pattern="^(normal|pendiente|aportado|cortesia|excluido)$")
     supplied_by: str | None = Field(None, max_length=160)  # quien aporta (solo con treatment "aportado")
+
+    @field_validator("cabys_code")
+    @classmethod
+    def _cabys(cls, v: str | None) -> str | None:
+        """13 digitos o nada (espacios y guiones se quitan). Una linea de producto sin CABYS lo toma del producto."""
+        if v is None:
+            return None
+        c = "".join(ch for ch in v if ch.isdigit())
+        if not c:
+            return None
+        if len(c) != 13:
+            raise ValueError("El CABYS tiene 13 dígitos")
+        return c
 
 
 class DocumentIn(BaseModel):

@@ -78,6 +78,10 @@ CHECKOUT_DEFAULTS: dict = {
         "efectivo": {"active": False, "note": "Pago en efectivo al retirar el pedido.", "pickup_only": True},
     },
     "free_shipping_from": 0,  # envio gratis desde este monto (en colones, con IVA); 0 = nunca
+    # 04/11: CABYS de la linea de envio del comprobante (sin el, Hacienda rechaza el tiquete de todo pedido con envio).
+    # 6803000000000 = "Servicios de entrega local" (IVA 13 %); alternativa: 6511600000000 "transporte terrestre de
+    # correspondencia y paquetes". Lo confirma el contador y se cambia en Mi Tienda -> Pagos y entrega.
+    "shipping_cabys": "6803000000000",
     "auto_invoice": True,  # comprobante electronico automatico al confirmarse el pago
     "pickup": {"address": "", "hours": ""},
     "notify_roles": ["admin", "ventas"],
@@ -1622,6 +1626,7 @@ def invoice_order(db: Session, t: Tenant, o: Order, user_id: int | None, doc_typ
     from ..models import Product
 
     prods = {p.id: p for p in db.scalars(select(Product).where(Product.id.in_([ln.product_id for ln in o.lines if ln.product_id] or [0])))}
+    ship_cabys = checkout_cfg(t).get("shipping_cabys") or None
     payload = DocumentIn(
         customer_id=customer_id,
         currency=o.currency,
@@ -1631,10 +1636,11 @@ def invoice_order(db: Session, t: Tenant, o: Order, user_id: int | None, doc_typ
             LineInSchema(
                 product_id=ln.product_id,
                 name=ln.name,
-                # el comprobante electronico necesita el CABYS (y la unidad) del producto
-                cabys_code=(prods.get(ln.product_id).cabys_code if prods.get(ln.product_id) else None),
+                # el comprobante electronico necesita el CABYS (y la unidad) del producto; el envio es un servicio
+                # (unidad "Os": en el XML suma como servicio, no como mercancia) con el CABYS de Mi Tienda
+                cabys_code=(prods.get(ln.product_id).cabys_code if prods.get(ln.product_id) else (ship_cabys if _is_ship(ln) else None)),
                 code=(prods.get(ln.product_id).code if prods.get(ln.product_id) else None),
-                unit=(prods.get(ln.product_id).unit if prods.get(ln.product_id) and prods.get(ln.product_id).unit else "Unid"),
+                unit=(prods.get(ln.product_id).unit if prods.get(ln.product_id) and prods.get(ln.product_id).unit else ("Os" if _is_ship(ln) else "Unid")),
                 quantity=d(ln.quantity),
                 unit_price=d(ln.unit_price),
                 discount_type=ln.discount_type,
