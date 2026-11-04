@@ -436,13 +436,38 @@ def delete_credentials(environment: str, data: AdminPasswordIn, p: Principal = D
 
 @router.post("/settings/hacienda/credentials/{environment}/test")
 def test_credentials(environment: str, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
+    """04/11: la prueba dice QUE probo, paso por paso (antes solo "Prueba terminada" y no se sabia si funcionaba):
+    credenciales, usuario del ambiente, certificado con su PIN, cedula del certificado e inicio de sesion en Hacienda.
+    No envia ningun comprobante: eso tambien se dice. Los pasos quedan guardados para verlos despues."""
     env = _env(environment)
     hacienda_test_limiter.hit(f"{p.tenant.id}:{env}")
+    amb = "Pruebas" if env == "pruebas" else "Producción"
+    steps: list[dict] = []
+
+    def paso(label: str, status: str, detail: str) -> None:
+        steps.append({"label": label, "status": status, "detail": detail})
+
     creds, err = hc.credentials_status(db, p.tenant, env)
     ok, detail = False, err or "Faltan credenciales"
-    if creds:
+    if not creds:
+        paso("Credenciales cargadas", "falla", detail)
+    else:
+        paso("Credenciales cargadas", "ok", f"Usuario, contraseña, certificado y PIN de {amb} ({'cargadas en Ajustes' if creds.source == 'ajustes' else 'del servidor'})")
+        visto = hc.atv_user_env(creds.username)
+        if visto == env:
+            paso("Usuario ATV del ambiente", "ok", f"El usuario es de {amb} (termina en «{'stag' if env == 'pruebas' else 'prod'}»)")
+        elif visto is None:
+            paso("Usuario ATV del ambiente", "aviso", "No se reconoce de qué ambiente es el usuario (no termina en «stag» ni en «prod»)")
+        else:
+            paso("Usuario ATV del ambiente", "aviso", hc.atv_user_warning(env, visto) or "El usuario parece de otro ambiente")
         try:
-            load_p12(creds.p12, creds.pin)
+            info = load_p12(creds.p12, creds.pin)
+            dias = (info.not_after - datetime.now(UTC)).days
+            paso("Certificado y PIN", "ok", f"El PIN abre el certificado · a nombre de {info.subject_cn or '—'} · vence el {info.not_after:%d/%m/%Y} ({dias} días)")
+            ced = re.sub(r"\D", "", info.serial_number_attr or "")
+            mia = re.sub(r"\D", "", p.tenant.tax_id or "")
+            if ced and mia:
+                paso("Cédula del certificado", "ok" if ced == mia else "aviso", "Es la cédula de la empresa" if ced == mia else f"El certificado es de la cédula {info.serial_number_attr}, no de la empresa ({mia})")
             instance = None
             if env == "produccion":
                 allowed, why = production_keys(instance_fingerprint())  # solo token y logout: no se envia ningun comprobante
@@ -452,11 +477,25 @@ def test_credentials(environment: str, p: Principal = Depends(require("settings"
             client = HaciendaClient(env, creds.username, creds.password, tenant_id=p.tenant.id, production_instance=instance)
             client.token(force=True)
             client.logout()
+            paso("Inicio de sesión en Hacienda", "ok", f"Hacienda aceptó el usuario y la contraseña en {amb} y cerró la sesión")
             ok, detail = True, f"Conectado al ambiente de {'pruebas' if env == 'pruebas' else 'producción'} de Hacienda"
         except CertError as e:
             detail = f"Certificado: {e}"
+            paso("Certificado y PIN", "falla", str(e))
+            paso("Inicio de sesión en Hacienda", "no_probado", "No se intentó: primero hay que corregir el certificado")
         except (HaciendaAuthError, HaciendaUnavailable, ProductionBlocked) as e:
             detail = str(e)
+            paso("Inicio de sesión en Hacienda", "falla", str(e))
+    paso(
+        "Envío de comprobantes",
+        "no_probado",
+        "Esta prueba no envía ningún comprobante: confirma credenciales, certificado y conexión. La emisión se confirma con la primera factura emitida en este ambiente.",
+    )
+    hist = dict(p.tenant.settings or {})
+    hist.setdefault("hacienda_tests", {})
+    hist["hacienda_tests"] = {**hist["hacienda_tests"], env: {"at": datetime.now(UTC).isoformat(), "ok": ok, "steps": steps}}
+    p.tenant.settings = hist
+    flag_modified(p.tenant, "settings")
     row = _row(db, p.tenant.id, env)
     if row is not None:
         row.last_test_at, row.last_test_ok, row.last_test_detail = datetime.now(UTC), ok, detail[:300]
@@ -465,7 +504,7 @@ def test_credentials(environment: str, p: Principal = Depends(require("settings"
         db.add(row)
     audit(db, p.tenant.id, p.user.id, "hacienda_test", "fiscal_credential", None, {"environment": env, "ok": ok}, ip=p.ip)
     db.commit()
-    return {"ok": ok, "detail": detail}
+    return {"ok": ok, "detail": detail, "environment": env, "steps": steps}
 
 
 # ---------------------------------------------------------------- consecutivos y produccion

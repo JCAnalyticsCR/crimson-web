@@ -315,9 +315,16 @@ def test_probar_conexion_con_fakehacienda(client, auth, monkeypatch, p12_empresa
     assert fake.tokens and fake.production_hits == []
     st = client.get("/settings/hacienda").json()["credentials"]["pruebas"]
     assert st["last_test_ok"] is True
+    # 04/11: dice que probo, paso por paso, y queda guardado (antes solo "Prueba terminada")
+    pasos = {x["label"]: x["status"] for x in r.json()["steps"]}
+    assert pasos["Credenciales cargadas"] == "ok" and pasos["Certificado y PIN"] == "ok" and pasos["Inicio de sesión en Hacienda"] == "ok"
+    assert pasos["Envío de comprobantes"] == "no_probado"  # no se manda ningun comprobante, y se dice
+    assert [x["label"] for x in st["last_test_steps"]] == [x["label"] for x in r.json()["steps"]]
     load_credentials(client, *p12_empresa, password="incorrecta")
     r = client.post("/settings/hacienda/credentials/pruebas/test").json()
     assert not r["ok"] and "incorrectos" in r["detail"] and "incorrecta" not in r["detail"]
+    falla = next(x for x in r["steps"] if x["label"] == "Inicio de sesión en Hacienda")
+    assert falla["status"] == "falla" and "incorrecta" not in str(r["steps"])  # nunca la contrasena
     assert EMPRESA in client.get("/settings/hacienda").json()["profile"]["tax_id"].replace("-", "")
 
 

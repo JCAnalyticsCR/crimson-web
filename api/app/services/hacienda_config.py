@@ -258,6 +258,8 @@ def credentials_block(db: Session, tenant: Tenant, environment: str) -> dict:
         "last_test_at": c.last_test_at if c else None,
         "last_test_ok": c.last_test_ok if c else None,
         "last_test_detail": c.last_test_detail if c else None,
+        # 04/11: los pasos de la ultima prueba (routers/hacienda_settings.test_credentials)
+        "last_test_steps": (((tenant.settings or {}).get("hacienda_tests") or {}).get(environment) or {}).get("steps") if c and c.last_test_at else None,
     }
 
 

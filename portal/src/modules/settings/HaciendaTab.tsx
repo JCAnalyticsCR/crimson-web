@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, fmtDate, parseTs } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Field, I, Icon, Loading, Modal } from "../../ui/components";
-import { MODE_LABEL, type CredBlock, type HaciendaState } from "../accounting/hacienda";
+import { MODE_LABEL, type CredBlock, type HaciendaState, type TestStep } from "../accounting/hacienda";
 
 type Geo = { code: string; name: string; cantons: { code: string; name: string }[] }[];
 type Lookup = { code: string; description: string | null; registered: boolean }[];
@@ -13,6 +13,30 @@ const ID_TYPES = [["01", "Física"], ["02", "Jurídica"], ["03", "DIMEX"], ["04"
 const ENVS = [["pruebas", "Pruebas"], ["produccion", "Producción"]] as const;
 const ENV_NAME = { pruebas: "Pruebas", produccion: "Producción" } as const;
 /* lo mismo que hacienda_config.atv_user_env: el usuario de pruebas termina en "stag" y el de producción en "prod" */
+/* 04/11: la prueba de conexión dice qué revisó y cómo salió cada paso (antes solo "Prueba terminada") */
+const PASO: Record<TestStep["status"], { icon: string; color: string; label: string }> = {
+  ok: { icon: "✓", color: "var(--ok)", label: "Bien" },
+  falla: { icon: "✗", color: "var(--bad)", label: "Falló" },
+  aviso: { icon: "!", color: "var(--warn)", label: "Revisar" },
+  no_probado: { icon: "–", color: "var(--muted, #8a858f)", label: "No se probó" },
+};
+function TestResult({ ok, at, steps, envName }: { ok: boolean | null; at: string | null; steps: TestStep[]; envName: string }) {
+  return (
+    <div role="status" style={{ border: `1px solid ${ok ? "var(--ok)" : "var(--bad)"}`, borderRadius: 10, padding: "10px 14px", margin: "10px 0" }}>
+      <b style={{ color: ok ? "var(--ok)" : "var(--bad)" }}>{ok ? `✓ La conexión con Hacienda (${envName}) funciona` : `✗ La conexión con Hacienda (${envName}) no funciona todavía`}</b>
+      {at && <span className="muted" style={{ fontSize: 12 }}> · {parseTs(at).toLocaleString("es-CR")}</span>}
+      <ol style={{ listStyle: "none", padding: 0, margin: "8px 0 0", display: "flex", flexDirection: "column", gap: 6, fontSize: 13 }}>
+        {steps.map((x, i) => (
+          <li key={i} style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+            <span aria-label={PASO[x.status].label} style={{ color: PASO[x.status].color, fontWeight: 700, width: 14, flexShrink: 0, textAlign: "center" }}>{PASO[x.status].icon}</span>
+            <span><b>{x.label}</b> · {x.detail}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 const atvEnv = (u: string): "pruebas" | "produccion" | null => {
   const s = u.trim().toLowerCase();
   if (!s) return null;
@@ -91,7 +115,15 @@ export default function HaciendaTab() {
     } catch (e) { err(e); }
     finally { setBusy(false); }
   };
-  const test = () => call(() => api<{ ok: boolean; detail: string }>(`/settings/hacienda/credentials/${env}/test`, { method: "POST" }).then((r) => { toast(r.detail, r.ok ? "ok" : "bad"); return null; }), "Prueba terminada");
+  const test = async () => {
+    setBusy(true);
+    try {
+      const r = await api<{ ok: boolean; detail: string; steps: TestStep[] }>(`/settings/hacienda/credentials/${env}/test`, { method: "POST" });
+      toast(r.ok ? "Conexión con Hacienda: funciona" : `Conexión con Hacienda: ${r.detail}`, r.ok ? "ok" : "bad");
+      await load(); // trae la prueba guardada con sus pasos
+    } catch (e) { err(e); }
+    finally { setBusy(false); }
+  };
   const saveGroup = (g: HaciendaState["consecutives"][number]) => call(() => api(`/settings/billing-groups/${g.group_id}`, { method: "PUT", json: { prefix: `F${g.code}`, branch: g.branch, terminal: g.terminal, current: g.current } }), "Consecutivo guardado");
 
   return (
@@ -188,8 +220,9 @@ export default function HaciendaTab() {
           <dt>Contraseña</dt><dd>{c.atv_password_set ? "✓ cargada" : "—"}</dd>
           <dt>Certificado</dt><dd>{c.cert ? `Cargado · vence el ${fmtDate(c.cert.not_after ? c.cert.not_after.slice(0, 10) : null)}${c.cert.days_left !== null ? ` (${c.cert.days_left} días)` : ""} · emitido a ${c.cert.subject_cn || "—"}` : c.p12_set ? "✓ cargado" : "—"}</dd>
           <dt>PIN</dt><dd>{c.pin_set ? "✓ cargado" : "—"}</dd>
-          <dt>Última prueba</dt><dd>{c.last_test_at ? `${parseTs(c.last_test_at).toLocaleString("es-CR")} · ${c.last_test_ok ? "✓" : "✗"} ${c.last_test_detail || ""}` : "sin probar"}</dd>
+          <dt>Última prueba</dt><dd>{c.last_test_at ? `${parseTs(c.last_test_at).toLocaleString("es-CR")} · ${c.last_test_ok ? "✓ funciona" : "✗ falló"}${c.last_test_steps?.length ? "" : ` · ${c.last_test_detail || ""}`}` : "sin probar"}</dd>
         </dl>
+        {c.last_test_at && !!c.last_test_steps?.length && <TestResult ok={c.last_test_ok} at={c.last_test_at} steps={c.last_test_steps} envName={ENV_NAME[env]} />}
         {!ro && (
           <>
             <div className="grid-2">
@@ -203,7 +236,7 @@ export default function HaciendaTab() {
             <label className="acc-check"><input type="checkbox" checked={cred.allow_other_id} onChange={(e) => setCred({ ...cred, allow_other_id: e.target.checked })} />El certificado es de otra cédula a propósito</label>
             <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
               <button className="btn btn--crimson btn--sm" disabled={busy || !cred.admin_password} onClick={saveCred}>Guardar credenciales de {ENV_NAME[env]}</button>
-              <button className="btn btn--soft btn--sm" disabled={busy || c.source === "ninguna"} onClick={test}>Probar conexión</button>
+              <button className="btn btn--soft btn--sm" disabled={busy || c.source === "ninguna"} onClick={test}>{busy ? "Probando…" : "Probar conexión"}</button>
               {c.source === "ajustes" && <button className="btn btn--ghost btn--sm" onClick={() => setDelPw("")}>Eliminar</button>}
             </div>
           </>

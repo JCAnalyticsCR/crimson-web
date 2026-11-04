@@ -97,12 +97,15 @@ export type HaciendaState = {
   production: { allowed_by_server: boolean; enabled_at: string | null; effective: boolean; blocked_reason: string | null; checks: { key: string; ok: boolean; detail: string }[] };
   imap: { source: string; mailbox: string | null; last_run_at: string | null; last_result: unknown };
 };
+export type TestStep = { label: string; status: "ok" | "falla" | "aviso" | "no_probado"; detail: string };
 export type CredBlock = {
   source: "ajustes" | "entorno" | "ninguna"; atv_user_set: boolean;
   /* de qué ambiente parece el usuario ATV (stag = pruebas, prod = producción) y el aviso si no corresponde */
   atv_user_env?: "pruebas" | "produccion" | null; atv_user_warning?: string | null; atv_password_set: boolean; p12_set: boolean; pin_set: boolean; readable: boolean;
   cert: { subject_cn: string | null; issuer_cn: string | null; serial: string | null; not_after: string | null; days_left: number | null; sha256: string | null } | null;
   last_test_at: string | null; last_test_ok: boolean | null; last_test_detail: string | null;
+  /** 04/11: lo que revisó la última prueba, paso por paso */
+  last_test_steps?: TestStep[] | null;
 };
 
 /** Plazo: "quedan N días hábiles" / "vence hoy" / "vencido". */
