@@ -190,7 +190,7 @@ def test_stock_refresh_updates_only_linked_products(client, auth, db_session, eu
     db_session.refresh(prod)
     assert prod.supplier_stock == 0
     st = next(x for x in client.get("/supplier-catalog/suppliers").json() if x["name"].lower().startswith("eurocomp"))["api"]
-    assert st["last_stock_at"] and "cada 6 horas" in st["label"]
+    assert st["last_stock_at"] and "una vez por semana" in st["label"]
 
 
 def test_without_credentials_nothing_runs(client, auth, db_session, monkeypatch):
@@ -369,9 +369,9 @@ def test_freno_una_consulta_global_por_hora_y_el_bloqueo_27_explicado(client, au
     # el refresco de cada 6 h tampoco consulta si hubo una global hace menos de una hora
     assert ss.refresh_linked(db_session) == {"skipped": "consulta global reciente"}
     assert eurocomp["calls"] == calls
-    # pasada la hora (y desbloqueado por Eurocomp) vuelve a funcionar con UNA consulta
+    # pasado el dia (bloqueado se reintenta una vez al dia) y desbloqueado por Eurocomp, vuelve con UNA consulta
     t = db_session.get(Tenant, tid)
-    ss._save_state(t, last_global_at=(datetime.now(UTC) - timedelta(hours=2)))
+    ss._save_state(t, last_global_at=(datetime.now(UTC) - timedelta(hours=25)))
     db_session.commit()
     eurocomp["error"] = None
     r = client.post(f"/supplier-catalog/suppliers/{s.id}/sync")
@@ -396,3 +396,37 @@ def test_servidor_ocupado_28_se_reintenta_y_no_cuenta_como_falta(monkeypatch):
     with pytest.raises(SirettError) as e:
         SirettClient("https://x", 1, "y").call("wsc_request_preventa_status")
     assert e.value.code == 27 and "desbloquearlo" in e.value.message
+
+
+def test_bloqueado_por_eurocomp_el_boton_prueba_una_vez_al_dia(client, auth, db_session, eurocomp, monkeypatch):
+    """04/11: lo automatico es semanal y, mientras Eurocomp tenga bloqueado a Crimson (27), el boton no le insiste: un
+    intento al dia. Pasada la hora (sin bloqueo) vuelve el freno normal de una por hora."""
+    monkeypatch.setattr(ss, "GLOBAL_COOLDOWN", timedelta(minutes=65))
+    tid = auth["tenant"]["id"]
+    ss.sync_all(db_session)
+    s = db_session.scalar(select(Supplier).where(Supplier.tenant_id == tid))
+    t = db_session.get(Tenant, tid)
+    hace_2h = datetime.now(UTC) - timedelta(hours=2)
+    ss._save_state(t, last_global_at=hace_2h, last_code=27)
+    db_session.commit()
+    calls = eurocomp["calls"]
+    r = client.post(f"/supplier-catalog/suppliers/{s.id}/sync")
+    assert r.status_code == 429 and "desbloquearlo" in r.json()["detail"] and eurocomp["calls"] == calls
+    ss._save_state(t, last_global_at=datetime.now(UTC) - timedelta(hours=25))
+    db_session.commit()
+    assert client.post(f"/supplier-catalog/suppliers/{s.id}/sync").status_code == 200 and eurocomp["calls"] == calls + 1
+    # sin bloqueo, 2 horas ya alcanzan
+    ss._save_state(t, last_global_at=hace_2h, last_code=0)
+    db_session.commit()
+    assert ss.global_wait(t) is None
+
+
+def test_el_refresco_de_cada_6_horas_quedo_apagado():
+    import importlib.util
+    import pathlib
+
+    ruta = pathlib.Path(__file__).resolve().parents[2] / "worker" / "celery_app.py"
+    texto = ruta.read_text(encoding="utf-8")
+    assert '"suppliers-eurocomp-stock"' not in texto  # fuera del horario
+    assert 'return {"skipped": "Eurocomp se sincroniza solo una vez por semana' in texto  # y sin efecto si redbeat lo dispara
+    assert importlib.util.find_spec("app.services.supplier_sync")

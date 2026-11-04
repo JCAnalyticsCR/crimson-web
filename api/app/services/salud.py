@@ -36,7 +36,7 @@ BEAT_TASK = "salud.beat"  # fila que deja el beat al despachar el latido (no es 
 HEARTBEAT_MAX = timedelta(minutes=15)
 BUSY_MAX = timedelta(hours=1)  # una corrida sin terminar de mas de 1 h ya no es "ocupado": el proceso murio
 DEEP_CACHE_SECONDS = 30
-EUROCOMP_STOCK_MAX = timedelta(hours=8)  # se refresca cada 6 h (05, 11, 17, 23 CR): 2 h de holgura
+EUROCOMP_STOCK_MAX = timedelta(days=8)  # 04/11: Eurocomp se sincroniza una vez por semana (lunes 03:17): 1 dia de holgura
 FX_MAX_BUSINESS_DAYS = 2
 POR_EMITIR_MAX = timedelta(hours=24)
 # "Por emitir" (plan 1.7): facturas pagadas o enviadas que no tienen comprobante electronico
@@ -128,11 +128,12 @@ def check_eurocomp(db: Session, now: datetime) -> dict:
     edades = []
     for t in db.scalars(select(Tenant).where(Tenant.active)):
         st = ((t.settings or {}).get("supplier_sync") or {}).get("eurocomp") or {}
-        # solo si el refresco de existencias corrio alguna vez: el catalogo semanal (last_ok_at) o un error de
-        # credenciales no lo son, y sin productos vinculados (o con la integracion pospuesta) no hay nada que refrescar
-        if not (st.get("last_stock_at") or st.get("last_stock_try_at")):
+        # 04/11: la sincronizacion es semanal (last_ok_at); la de existencias cada 6 h ya no corre. Solo si se
+        # sincronizo o se intento alguna vez (sin credenciales o pospuesta no hay nada que revisar)
+        if not (st.get("last_ok_at") or st.get("last_try_at") or st.get("last_stock_at")):
             continue
-        last = _parse(st.get("last_stock_at"))
+        hechas = [x for x in (_parse(st.get("last_ok_at")), _parse(st.get("last_stock_at"))) if x]
+        last = max(hechas) if hechas else None
         edades.append(now - last if last else None)
     if not edades:
         return {"ok": True, "critico": False, "aplica": False}

@@ -177,7 +177,7 @@ def status(t: Tenant, supplier: Supplier | None) -> dict:
     if s.get("last_ok_at") or s.get("last_stock_at"):
         return {
             "status": "conectado",
-            "label": "Conectado por API (SiReTT) · catálogo cada semana (solo precios y existencias de lo que ya está), existencias de lo vinculado cada 6 horas",
+            "label": "Conectado por API (SiReTT) · se sincroniza una vez por semana (lunes de madrugada): precios y existencias de lo que ya está",
             **s,
         }
     return {"status": "listo", "label": "Conectado por API (SiReTT) · todavía no se sincroniza", **s}
@@ -192,6 +192,10 @@ class SyncRefused(Exception):
 # "Sincronizar", el catalogo semanal o el refresco de existencias. Repetirla dentro de la hora da 20 y repetir faltas
 # escala a 26 y 27 (bloqueo que solo Eurocomp levanta). providers/sirett.py explica la politica de consumo.
 GLOBAL_COOLDOWN = timedelta(minutes=65)
+# Bloqueada o suspendida por Eurocomp (27 / 26): el boton prueba como maximo una vez al dia (04/11). Lo automatico ya es
+# semanal; mientras siga bloqueada no se le insiste a SiReTT.
+BLOCKED_COOLDOWN = timedelta(hours=24)
+BLOCKED_CODES = (26, 27)
 
 
 def _mark_global(tenants, now: datetime) -> None:
@@ -201,14 +205,15 @@ def _mark_global(tenants, now: datetime) -> None:
 
 def global_wait(t: Tenant, now: datetime | None = None) -> datetime | None:
     """Desde cuando se puede volver a consultar Eurocomp, o None si ya se puede."""
-    raw = _state(t).get("last_global_at")
+    st = _state(t)
+    raw = st.get("last_global_at")
     if not raw:
         return None
     try:
         last = _aware(datetime.fromisoformat(raw))
     except ValueError:
         return None
-    nxt = last + GLOBAL_COOLDOWN
+    nxt = last + (BLOCKED_COOLDOWN if st.get("last_code") in BLOCKED_CODES else GLOBAL_COOLDOWN)
     return nxt if nxt > (now or datetime.now(UTC)) else None
 
 

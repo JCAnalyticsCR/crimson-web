@@ -100,7 +100,7 @@ export default function SupplierCatalog() {
     setSid((cur) => (cur && r.some((s) => s.id === cur) ? cur : (r.find((s) => s.items > 0)?.id ?? null)));
   }).catch((e) => { toastRef.current(e instanceof Error ? e.message : "Error", "bad"); setSups([]); }), []);
   useEffect(() => { loadSups(); }, [loadSups]);
-  /* Proveedor conectado por API (SiReTT de Eurocomp): se sincroniza solo cada hora; el boton adelanta la proxima. */
+  /* Proveedor conectado por API (SiReTT de Eurocomp): se sincroniza solo una vez por semana (lunes); el boton adelanta la proxima (una por hora, una al dia si Eurocomp bloqueo el acceso). */
   const apiSup = (sups || []).find((s) => ["conectado", "listo", "error"].includes(s.api.status));
   const syncNow = () => {
     if (!apiSup) return;

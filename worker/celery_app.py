@@ -131,8 +131,11 @@ def suppliers_sync_eurocomp() -> dict:
 
 @celery.task(name="suppliers.eurocomp_stock")
 def suppliers_eurocomp_stock() -> dict:
-    """Cada 6 horas: existencia y costo de lo que Crimson ya vende, en proceso hijo."""
-    return _run_tool("app.tools.eurocomp_stock", timeout=900)
+    """APAGADA (04/11, decision del usuario): Eurocomp se consulta UNA vez por semana (suppliers.sync_eurocomp, que ya
+    trae precio y existencia de todo lo vinculado), para no saturar SiReTT (el 27/10 bloqueo a Crimson, codigo 27) ni
+    la tienda. Quedo sin efecto, y no solo fuera del horario, porque redbeat guarda el horario en Redis y una entrada
+    vieja podria seguir disparandose."""
+    return {"skipped": "Eurocomp se sincroniza solo una vez por semana (lunes 03:17)"}
 
 
 @celery.task(name="store.rebuild_snapshot")
@@ -530,10 +533,10 @@ celery.conf.beat_schedule = {
     "run-recurrences": {"task": "sales.run_recurrences", "schedule": crontab(hour=5, minute=0)},
     "retry-outbox": {"task": "mail.retry_outbox", "schedule": crontab(minute="*/15")},
     "fx-bccr-daily": {"task": "fx.bccr_daily", "schedule": crontab(hour=6, minute=15)},
-    # catalogo completo (34 MB) los lunes de madrugada; existencias de lo vinculado cada 6 horas. Minuto 17: lejos del
-    # :00 de las demas tareas y antes del :25 de back-in-stock (avisos de "volvio a haber")
+    # Eurocomp UNA vez por semana (04/11): catalogo completo los lunes de madrugada, que trae precio y existencia de todo
+    # lo vinculado. Ya no hay refresco cada 6 horas (saturaba SiReTT). Minuto 17: lejos del :00 de las demas tareas y
+    # antes del :25 de back-in-stock (avisos de "volvio a haber")
     "suppliers-sync-eurocomp": {"task": "suppliers.sync_eurocomp", "schedule": crontab(day_of_week=1, hour=3, minute=17)},
-    "suppliers-eurocomp-stock": {"task": "suppliers.eurocomp_stock", "schedule": crontab(hour="5,11,17,23", minute=17)},
     "mark-overdue": {"task": "sales.mark_overdue", "schedule": crontab(hour=0, minute=30)},
     # plan 1.8: latido cada 5 min (/health/deep da 503 si pasan 15 sin latido) y correo de Salud a las 07:00
     "salud-latido": {"task": "salud.latido", "schedule": crontab(minute="*/5")},

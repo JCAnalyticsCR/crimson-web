@@ -182,20 +182,21 @@ def test_avisos_de_eurocomp_tipo_de_cambio_y_por_emitir(db_session):
     t = _t(db_session)
     now = datetime(2026, 10, 20, 15, 0, tzinfo=UTC)
     assert svc.check_eurocomp(db_session, now) == {"ok": True, "critico": False, "aplica": False}
-    # solo el catalogo semanal o un error de credenciales (nada vinculado, integracion pospuesta): no hay existencias
-    # que refrescar, no es un aviso diario
-    t.settings = {**(t.settings or {}), "supplier_sync": {"eurocomp": {"last_ok_at": (now - timedelta(days=3)).isoformat(), "last_error": "credenciales"}}}
+    # 04/11: Eurocomp se sincroniza UNA vez por semana (lunes); la de existencias cada 6 h ya no corre. Hasta 8 dias: bien
+    t.settings = {**(t.settings or {}), "supplier_sync": {"eurocomp": {"last_ok_at": (now - timedelta(days=3)).isoformat()}}}
     db_session.commit()
-    assert svc.check_eurocomp(db_session, now) == {"ok": True, "critico": False, "aplica": False}
-    # el refresco de existencias se intento y nunca salio bien: eso si
-    t.settings = {**t.settings, "supplier_sync": {"eurocomp": {"last_stock_try_at": (now - timedelta(hours=1)).isoformat()}}}
+    assert svc.check_eurocomp(db_session, now)["ok"] is True
+    # se intento y nunca salio bien (credenciales, bloqueo de Eurocomp): eso si es aviso
+    t.settings = {**t.settings, "supplier_sync": {"eurocomp": {"last_try_at": (now - timedelta(hours=1)).isoformat(), "last_error": "credenciales"}}}
     db_session.commit()
     assert svc.check_eurocomp(db_session, now)["detalle"] == "existencias nunca refrescadas"
-    t.settings = {**(t.settings or {}), "supplier_sync": {"eurocomp": {"last_stock_at": (now - timedelta(hours=9)).isoformat()}}}
+    # mas de 8 dias sin sincronizar (se salto un lunes): aviso
+    t.settings = {**(t.settings or {}), "supplier_sync": {"eurocomp": {"last_ok_at": (now - timedelta(days=9)).isoformat()}}}
     db_session.commit()
     c = svc.check_eurocomp(db_session, now)
-    assert c["ok"] is False and c["edad_h"] == 9.0
-    t.settings = {**t.settings, "supplier_sync": {"eurocomp": {"last_stock_at": (now - timedelta(hours=2)).isoformat()}}}
+    assert c["ok"] is False and c["edad_h"] == 216.0
+    # lo ultimo que se refresco cuenta, venga del semanal o del refresco viejo de existencias
+    t.settings = {**t.settings, "supplier_sync": {"eurocomp": {"last_ok_at": (now - timedelta(days=9)).isoformat(), "last_stock_at": (now - timedelta(hours=2)).isoformat()}}}
     db_session.commit()
     assert svc.check_eurocomp(db_session, now)["ok"] is True
     # tipo de cambio: viernes -> martes son 2 dias habiles (ok); -> miercoles, 3 (vieja)
