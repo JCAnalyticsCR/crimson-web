@@ -747,3 +747,15 @@ def test_lista_pagina_en_sql_y_no_trae_los_xml(client, auth, db_session):
     assert listas and not [s for s in listas if "received_document.xml_document" in s or "received_document.xml_supplier_response," in s]
     pronto = client.get("/reception/documents", params={"due": "pronto"}).json()
     assert pronto["total"] == len(pronto["items"])
+
+
+def test_gasto_de_xml_dice_su_estado_ante_hacienda(client, auth):
+    """05/11: Contabilidad -> Gastos no mostraba nada de Hacienda. El gasto de un XML trae la respuesta de la empresa."""
+    d = up(client, xml_hoy(31)).json()
+    eid = respond(client, d["id"]).json()["expense_id"]
+    e = next(x for x in client.get("/expenses").json() if x["id"] == eid)
+    assert e["hacienda"] is not None and e["hacienda"]["label"] and e["hacienda"]["tone"] in ("ok", "warn", "bad", "muted")
+    assert client.get(f"/expenses/{eid}").status_code in (200, 404, 405)  # la ficha (si existe) no se rompe
+    manual = client.post("/expenses", json={"description": "Papeleria", "date": e["date"], "currency": "CRC", "subtotal": 1000, "tax_rate": 13, "iva_credit": "credito"})
+    assert manual.status_code in (200, 201), manual.text
+    assert manual.json()["hacienda"] is None

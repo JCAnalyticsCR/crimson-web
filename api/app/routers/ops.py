@@ -599,7 +599,50 @@ def _check_refs(db: Session, tenant_id: int, supplier_id: int | None, category_i
             raise HTTPException(404, msg)
 
 
-def _exp_out(e: Expense, db: Session, bank_ids: set[int] | None = None):
+RESP_UI = {  # ultima respuesta (mensaje receptor) de la empresa a la factura del proveedor
+    "aceptado": ("ok", "Respondida · aceptada por Hacienda"),
+    "rechazado": ("bad", "Su respuesta fue rechazada por Hacienda"),
+    "error": ("bad", "Error al enviar su respuesta a Hacienda"),
+    "por_enviar": ("warn", "Respuesta por enviar a Hacienda"),
+}
+
+
+def hacienda_de_gastos(db: Session, tid: int, rd_ids: list[int]) -> dict[int, dict]:
+    """Estado ante Hacienda de cada gasto con XML: la factura del proveedor y la respuesta de la empresa (su mensaje
+    receptor). De eso depende el credito de IVA. Una consulta para toda la lista."""
+    from ..models import ReceivedDocument, ReceptionResponse
+
+    ids = [i for i in set(rd_ids) if i]
+    if not ids:
+        return {}
+    docs = {d.id: d for d in db.scalars(select(ReceivedDocument).where(ReceivedDocument.tenant_id == tid, ReceivedDocument.id.in_(ids)))}
+    last: dict[int, ReceptionResponse] = {}
+    for r in db.scalars(select(ReceptionResponse).where(ReceptionResponse.tenant_id == tid, ReceptionResponse.received_document_id.in_(ids)).order_by(ReceptionResponse.id)):
+        last[r.received_document_id] = r
+    out: dict[int, dict] = {}
+    for i, d in docs.items():
+        r = last.get(i)
+        modo = r.mode if r else None
+        if d.supplier_hacienda_status == "rechazado":
+            tone, label, det = "bad", "Factura del proveedor rechazada por Hacienda", d.supplier_hacienda_detail
+        elif r is not None:
+            tone, label = RESP_UI.get(r.status, ("warn", "Respuesta en Hacienda, esperando resultado"))
+            det = r.hacienda_detail
+        elif d.status == "por_revisar":
+            tone, label, det = "warn", f"Por responder a Hacienda{f' (vence {d.deadline:%d/%m})' if d.deadline else ''}", None
+        else:
+            tone, label, det = "muted", "Sin respuesta a Hacienda", None
+        if modo == "pruebas":
+            label += " · pruebas"
+        elif modo == "simulado":
+            label += " · simulado"
+        out[i] = {"tone": tone, "label": label, "detail": (det or "")[:300] or None, "proveedor": d.supplier_hacienda_status}
+    return out
+
+
+def _exp_out(e: Expense, db: Session, bank_ids: set[int] | None = None, hmap: dict[int, dict] | None = None):
+    if hmap is None and e.received_document_id:
+        hmap = hacienda_de_gastos(db, e.tenant_id, [e.received_document_id])
     cat = _own_or_none(db, ExpenseCategory, e.category_id, e.tenant_id)
     sup = _own_or_none(db, Supplier, e.supplier_id, e.tenant_id)
     return {
@@ -633,6 +676,8 @@ def _exp_out(e: Expense, db: Session, bank_ids: set[int] | None = None):
         "bank_instrument_id": e.bank_instrument_id,
         "check_number": e.check_number,
         "locked": e.received_document_id is not None,
+        # sin XML no hay comprobante ante Hacienda (ni credito de IVA por factura electronica)
+        "hacienda": (hmap or {}).get(e.received_document_id) if e.received_document_id else None,
         "from_commission": _from_commission(e),  # lo registro Comisiones al marcarla pagada: se ajusta desde alli
     }
 
@@ -688,7 +733,8 @@ def expenses(
         rows = _origin_filter(db.scalars(query).all(), origin, bank_ids)[offset : offset + limit]
     else:
         rows = db.scalars(query.offset(offset).limit(limit)).all()
-    return [_exp_out(e, db, bank_ids) for e in rows]
+    hmap = hacienda_de_gastos(db, p.tenant.id, [e.received_document_id for e in rows if e.received_document_id])
+    return [_exp_out(e, db, bank_ids, hmap) for e in rows]
 
 
 @router.get("/expenses/summary")

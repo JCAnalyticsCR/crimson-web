@@ -19,7 +19,7 @@ export type Exp = {
   id: number; category_id: number | null; category: string | null; supplier_id: number | null; supplier_name: string | null; description: string; date: string; currency: string; fx_rate: string;
   subtotal: string; tax_rate: string; tax_amount: string; total: string; total_crc: string; iva_credit: string; tax_credit_amount: string | null; bank_account_id: number | null;
   reference: string | null; status: string; attachment_url: string | null; notes: string | null; payment_method: string | null; purchase_type: string; due_date: string | null;
-  origin: string; received_document_id: number | null; recurrence_id: number | null; bank_instrument_id: number | null; check_number: string | null; locked: boolean;
+  origin: string; received_document_id: number | null; hacienda?: { tone: string; label: string; detail: string | null } | null; recurrence_id: number | null; bank_instrument_id: number | null; check_number: string | null; locked: boolean;
   from_commission?: boolean;
 };
 type Sum = { count: number; total_crc: string; tax_crc: string; credit_crc: string };
@@ -27,7 +27,7 @@ type Res = { rows: (string | number)[][]; totals: { resultado: string } };
 const ORIGIN: Record<string, string> = { xml: "XML", recurrente: "Recurrente", banco: "Banco", planilla: "Planilla", manual: "Manual" };
 const PAY = [["", "—"], ["efectivo", "Efectivo"], ["tarjeta", "Tarjeta"], ["transferencia", "Transferencia"], ["sinpe", "SINPE"], ["cheque", "Cheque"], ["otro", "Otro"]];
 const blank = { category_id: "", supplier_id: "", attachment_url: "", description: "", date: new Date().toISOString().slice(0, 10), currency: "CRC", fx_rate: "", subtotal: "", tax_rate: "13", iva_credit: "credito", tax_credit_amount: "", bank_account_id: "", bank_instrument_id: "", check_number: "", payment_method: "", purchase_type: "contado", due_date: "", notes: "", reference: "", status: "registrado" };
-type Edit = typeof blank & { id?: number; locked?: boolean; received_document_id?: number | null; from_commission?: boolean };
+type Edit = typeof blank & { id?: number; locked?: boolean; received_document_id?: number | null; from_commission?: boolean; hacienda?: Exp["hacienda"] };
 const month = () => new Date().toISOString().slice(0, 7);
 // la tarjeta del mes solo lleva el resumen (el estado de resultados completo esta en Reportes)
 const RESUMEN = ["Ventas netas", "Gastos", "Utilidad neta (antes del impuesto sobre la renta)"];
@@ -72,15 +72,15 @@ export default function Expenses() {
   }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const open = (e: Exp) => setEdit({
-    id: e.id, locked: e.locked, from_commission: !!e.from_commission, received_document_id: e.received_document_id, category_id: String(e.category_id ?? ""), supplier_id: String(e.supplier_id ?? ""), attachment_url: e.attachment_url || "",
+    id: e.id, locked: e.locked, from_commission: !!e.from_commission, received_document_id: e.received_document_id, hacienda: e.hacienda, category_id: String(e.category_id ?? ""), supplier_id: String(e.supplier_id ?? ""), attachment_url: e.attachment_url || "",
     description: e.description, date: e.date, currency: e.currency, fx_rate: String(Number(e.fx_rate)), subtotal: String(Number(e.subtotal)), tax_rate: String(Number(e.tax_rate)), iva_credit: e.iva_credit,
     tax_credit_amount: e.tax_credit_amount === null ? "" : String(Number(e.tax_credit_amount)), bank_account_id: String(e.bank_account_id ?? ""), bank_instrument_id: String(e.bank_instrument_id ?? ""),
     check_number: e.check_number || "", payment_method: e.payment_method || "", purchase_type: e.purchase_type || "contado", due_date: e.due_date || "", notes: e.notes || "", reference: e.reference || "", status: e.status,
   });
   const save = async () => {
     if (!edit) return;
-    const { id, locked, received_document_id, from_commission, ...b } = edit;
-    void received_document_id; void from_commission;
+    const { id, locked, received_document_id, from_commission, hacienda, ...b } = edit;
+    void received_document_id; void from_commission; void hacienda;
     const body = {
       ...b,
       category_id: b.category_id ? Number(b.category_id) : null, supplier_id: b.supplier_id ? Number(b.supplier_id) : null, bank_account_id: b.bank_account_id ? Number(b.bank_account_id) : null,
@@ -133,7 +133,11 @@ export default function Expenses() {
                 <td className="num money">{e.tax_credit_amount === null ? "prorrata" : fmtMoney(e.tax_credit_amount, e.currency)}</td>
                 <td className="num money" style={{ fontWeight: 700 }}>{fmtMoney(e.total, e.currency)}</td>
                 <td className="num money">{fmtMoney(e.total_crc)}</td>
-                <td><Badge status={e.status === "registrado" ? "creado" : e.status === "pagado" ? "pagada" : "anulada"} /></td>
+                <td><Badge status={e.status === "registrado" ? "creado" : e.status === "pagado" ? "pagada" : "anulada"} />
+                  {/* ante Hacienda: la factura del proveedor y su respuesta (de eso depende el credito de IVA) */}
+                  {e.hacienda
+                    ? <div title={e.hacienda.detail || undefined} style={{ marginTop: 4 }}><span className={`badge badge--${e.hacienda.tone}`} style={{ whiteSpace: "normal", textAlign: "left" }}>{e.hacienda.label}</span></div>
+                    : <div className="meta" style={{ marginTop: 4, textTransform: "none" }} title="Gasto sin factura electrónica del proveedor: no tiene comprobante ante Hacienda ni crédito de IVA por XML">Sin factura electrónica</div>}</td>
                 <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => open(e)}>Ver</button></td>
               </tr>)}</tbody></table>
           </div>
@@ -144,6 +148,12 @@ export default function Expenses() {
         <Modal title={edit.id ? "Gasto" : "Registrar gasto"} wide onClose={() => setEdit(null)} foot={<><button className="btn btn--ghost" onClick={() => setEdit(null)}>Cancelar</button>{allows(edit.id ? "accounting.editar" : "accounting.crear") && <button className="btn btn--crimson" onClick={save}>Guardar</button>}</>}>
           {edit.from_commission && (
             <div className="acc-warn">Lo registró Comisiones al marcar pagada la comisión: el monto, la fecha y el estado se ajustan desde Comisiones (pagar o deshacer el pago).</div>
+          )}
+          {edit.hacienda && (
+            <div style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+              <span className="muted">Hacienda:</span><span className={`badge badge--${edit.hacienda.tone}`}>{edit.hacienda.label}</span>
+              {edit.hacienda.detail && <span className="muted">{edit.hacienda.detail}</span>}
+            </div>
           )}
           {edit.locked && (
             <div className="acc-warn">
