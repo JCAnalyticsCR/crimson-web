@@ -50,6 +50,19 @@ export function availText(a?: Availability | null): string {
   return parts.join(" · ");
 }
 
+/* "Eurocomp Costa Rica S.A." -> "Eurocomp": en listas el nombre largo no aporta */
+const shortName = (n?: string | null) => (n || "Proveedor").replace(/[,\s]+(costa rica|cr|s\.?\s?a\.?|s\.?r\.?l\.?|ltda\.?)\b\.?/gi, "").trim() || "Proveedor";
+
+/** Version corta para listas y selectores: "Propio 2 · Eurocomp 12", y la antiguedad solo si el dato esta viejo.
+ *  El detalle completo (consultado, ultimo cambio) va en el title con availText. */
+export function availShort(a?: Availability | null): string {
+  if (!a) return "—";
+  if (a.state === "servicio") return "Servicio";
+  const parts = [`Propio ${qty(a.own_free)}`];
+  if (a.supplier_linked) parts.push(`${shortName(a.supplier_name)} ${qty(a.supplier_qty)}${!a.supplier_fresh && a.supplier_age ? ` · ${a.supplier_age}` : ""}`);
+  return parts.join(" · ");
+}
+
 export function AvailBadge({ a }: { a?: Availability | null }) {
   if (!a) return <span className="muted">—</span>;
   const st = STATE_UI[a.state] || { label: a.state, tone: "muted" };

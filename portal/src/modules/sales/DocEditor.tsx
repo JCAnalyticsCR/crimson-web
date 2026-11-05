@@ -10,7 +10,7 @@ import { NO_SUMA, TREATMENTS, unitOptions, type Treatment } from "../../lib/unit
 import QuoteVersions from "./QuoteVersions";
 import { KitPicker, QuoteShare } from "./QuoteExtras";
 import { useRecordAutosave } from "../../lib/useRecordAutosave";
-import { AvailBadge, availText, sinExistencia } from "../../ui/Availability";
+import { AvailBadge, availShort, availText, sinExistencia } from "../../ui/Availability";
 import NuevoCliente from "../../ui/NuevoCliente";
 import { Lookup, type LookupItem } from "../../ui/Lookup";
 import EnProveedor from "../inventory/EnProveedor";
@@ -464,7 +464,7 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
                                   <li key={p.id} role="option" aria-selected={k === sug.idx}>
                                     <button type="button" className={k === sug.idx ? "is-active" : undefined} onMouseDown={(e) => e.preventDefault()} onClick={() => pickSug(i, p)}>
                                       <Miniatura url={fotoDe(p)} size={34} />
-                                      <span style={{ minWidth: 0 }}><b>{p.name}</b><small>{p.code}{p.price != null ? ` · ${fmtMoney(p.price, p.currency)}` : ""}{p.item_type === "producto" && p.availability ? ` · ${availText(p.availability)}` : ""}</small></span>
+                                      <span style={{ minWidth: 0 }}><b>{p.name}</b><small>{p.code}{p.price != null ? ` · ${fmtMoney(p.price, p.currency)}` : ""}{p.item_type === "producto" && p.availability ? ` · ${availShort(p.availability)}` : ""}</small></span>
                                     </button>
                                   </li>
                                 ))}
@@ -707,7 +707,7 @@ function ProductPicker({ onClose, onPick, docCurrency }: { onClose: () => void; 
           <thead><tr><th /><th style={{ width: 52 }} /><th>Código</th><th>Nombre</th><th>Disponibilidad</th><th className="num">Precio</th><th>IVA</th></tr></thead>
           <tbody>{items.map((p) => (
             <tr key={p.id} onClick={() => toggle(p)} style={{ cursor: "pointer" }}>
-              <td><input type="checkbox" readOnly checked={!!sel[p.id]} /></td><td><Miniatura url={fotoDe(p)} size={40} /></td><td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}<div className="meta" style={{ marginTop: 2 }}>{p.item_type}{p.cabys_code ? ` · CABYS ${p.cabys_code}` : ""}</div></td><td style={{ minWidth: 150 }}>{p.item_type === "producto" ? <><AvailBadge a={p.availability} /><div className="meta">{availText(p.availability)}</div></> : <span className="muted">—</span>}</td><td className="num money">{fmtMoney(p.price, p.currency)}{(p.currency || "CRC") !== docCurrency && <div className="meta">se convierte a {docCurrency}</div>}</td><td className="muted">{p.tax_rate ?? 13}%</td>
+              <td><input type="checkbox" readOnly checked={!!sel[p.id]} /></td><td><Miniatura url={fotoDe(p)} size={40} /></td><td className="mono muted">{p.code}</td><td style={{ fontWeight: 600 }}>{p.name}<div className="meta" style={{ marginTop: 2 }}>{p.item_type}{p.cabys_code ? ` · CABYS ${p.cabys_code}` : ""}</div></td><td style={{ minWidth: 150 }} title={p.item_type === "producto" ? availText(p.availability) : undefined}>{p.item_type === "producto" ? <><AvailBadge a={p.availability} /><div className="meta" style={{ textTransform: "none" }}>{availShort(p.availability)}</div></> : <span className="muted">—</span>}</td><td className="num money">{fmtMoney(p.price, p.currency)}{(p.currency || "CRC") !== docCurrency && <div className="meta">se convierte a {docCurrency}</div>}</td><td className="muted">{p.tax_rate ?? 13}%</td>
             </tr>
           ))}</tbody>
         </table>
@@ -724,7 +724,7 @@ function ProductPicker({ onClose, onPick, docCurrency }: { onClose: () => void; 
                   <span className="muted">IVA {p.tax_rate ?? 13}%</span>
                   {p.item_type === "producto" ? <AvailBadge a={p.availability} /> : <span className="muted">{p.item_type}</span>}
                 </span>
-                {p.item_type === "producto" && <span className="meta">{availText(p.availability)}</span>}
+                {p.item_type === "producto" && <span className="meta" style={{ textTransform: "none" }}>{availShort(p.availability)}</span>}
                 {(p.currency || "CRC") !== docCurrency && <span className="meta">se convierte a {docCurrency}</span>}
               </span>
               <span className="pick-item__check" aria-hidden><Icon d={I.check} size={16} /></span>
