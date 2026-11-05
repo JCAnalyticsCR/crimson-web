@@ -135,7 +135,10 @@ export default function ReceptionDetail() {
     <ol className="acc-timeline">
       {d.responses.map((r) => (
         <li key={r.id}>
-          <b>Intento {r.attempt}</b> · {ACTION_LABEL[{ "1": "aceptada", "2": "parcial", "3": "rechazada" }[r.message_code] || ""]} · {ivaLabel(r.iva_condition)} · <span className="mono">{r.consecutive}</span> · <span className="badge badge--muted">{r.mode}</span>
+          <b>Intento {r.attempt}</b> · {ACTION_LABEL[{ "1": "aceptada", "2": "parcial", "3": "rechazada" }[r.message_code] || ""]} · {ivaLabel(r.iva_condition)} · <span className="badge badge--muted">{r.mode}</span>
+          {/* 05/11: el consecutivo 05 se confundia con el numero de la factura del proveedor. Son dos cosas: la respuesta lleva
+             SU propio numero (lo exige Hacienda) y va sobre la CLAVE de la factura del proveedor, la misma del XML */}
+          <div className="muted" style={{ fontSize: 12.5 }}>Sobre la factura del proveedor con clave <span className="mono">{d.clave}</span> · número de esta respuesta <span className="mono" title="Consecutivo propio del mensaje receptor (tipo 05 aceptación, 06 parcial, 07 rechazo): no es el número de la factura">{r.consecutive}</span></div>
           <div className="muted">Respondido · {when(r.created_at)}{r.sent_at ? ` → Enviado · ${when(r.sent_at)}` : ""}</div>
           <div>Hacienda: <Badge status={r.status} />{r.hacienda_detail && !parseHacienda(r.hacienda_detail).items.length ? ` ${r.hacienda_detail}` : ""}{r.last_error ? <span style={{ color: "var(--bad)" }}> · {r.last_error}</span> : null}</div>
           {r.hacienda_detail && parseHacienda(r.hacienda_detail).items.length > 0 && <div style={{ marginTop: 6 }}><HaciendaMensaje msg={r.hacienda_detail} status={r.status === "aceptado" ? "aceptada" : r.status} /></div>}
