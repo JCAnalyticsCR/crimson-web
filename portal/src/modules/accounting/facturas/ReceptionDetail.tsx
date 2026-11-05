@@ -171,7 +171,10 @@ export default function ReceptionDetail() {
           <Card title="Documento">
             <dl className="acc-kv">
               <dt>Tipo</dt><dd>{DOC_TYPES[d.doc_type] || d.doc_type}{d.schema_version ? ` · v${d.schema_version}` : ""}</dd>
-              <dt>Clave</dt><dd className="mono" style={{ fontSize: 11.5 }}>{d.clave} <button className="btn btn--ghost btn--sm" onClick={() => { navigator.clipboard.writeText(d.clave); toast("Clave copiada"); }}><Icon d={I.copy} size={12} /></button></dd>
+              <dt>Clave</dt><dd style={{ display: "flex", gap: 6, alignItems: "flex-start", minWidth: 0 }}>
+                {/* 50 digitos no caben: por partes (pais+fecha, emisor, consecutivo, situacion, codigo); copiar va sin espacios */}
+                <span className="mono" style={{ fontSize: 11.5, wordBreak: "break-all", minWidth: 0 }} title="País y fecha · cédula del emisor · consecutivo · situación · código de seguridad">{/^\d{50}$/.test(d.clave) ? [d.clave.slice(0, 9), d.clave.slice(9, 21), d.clave.slice(21, 41), d.clave.slice(41, 42), d.clave.slice(42)].join(" ") : d.clave}</span>
+                <button className="btn btn--ghost btn--sm" style={{ flex: "none" }} aria-label="Copiar clave" onClick={() => { navigator.clipboard.writeText(d.clave); toast("Clave copiada"); }}><Icon d={I.copy} size={12} /></button></dd>
               <dt>Consecutivo</dt><dd className="mono">{d.consecutive || "—"}</dd>
               <dt>Fecha</dt><dd>{fmtDate(d.issue_date)}</dd>
               <dt>Moneda</dt><dd>{cur}{cur !== "CRC" ? ` · TC ${n(d.fx_rate)}` : ""}</dd>
