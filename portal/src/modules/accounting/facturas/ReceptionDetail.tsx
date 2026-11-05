@@ -192,6 +192,7 @@ export default function ReceptionDetail() {
           <><dt>Fecha límite</dt><dd style={{ color: (d.business_days_left ?? 9) <= 2 ? "var(--bad)" : undefined, fontWeight: (d.business_days_left ?? 9) <= 2 ? 700 : undefined }}>{fmtDate(d.deadline)} · {plazo(d.business_days_left)}</dd></>
         )}
       </dl>
+      {d.identificador?.bloquea && <div className="acc-warn" style={{ marginTop: 10, borderColor: "var(--bad)" }}><b>No se puede responder ni registrar el gasto:</b> {d.identificador.label.toLowerCase()}. {d.identificador.detalle}</div>}
       {d.notificacion.key === "pruebas_vencida" && allows("accounting.crear") && (
         <div style={{ marginTop: 10 }}><Link className="btn btn--soft btn--sm" to="/importar?kind=recepciones"><Icon d={I.upload} />Importar el mensaje de Fygaro</Link></div>
       )}
@@ -218,6 +219,11 @@ export default function ReceptionDetail() {
           <span className="mono" style={{ fontSize: 12, wordBreak: "break-all", minWidth: 0 }} title="Clave del comprobante del proveedor, tal cual viene en su XML">{d.clave}</span>
           <button className="btn btn--ghost btn--sm" style={{ flex: "none" }} aria-label="Copiar la clave" onClick={() => { navigator.clipboard.writeText(d.clave); toast("Clave copiada"); }}><Icon d={I.copy} size={12} />Copiar</button>
         </dd>
+        {d.identificador && (
+          /* 05/11: el identificador avalado por Hacienda (firma del sello en el acuse + clave coherente con el XML) */
+          <><dt className="acc-kv__full">Identificador ante Hacienda</dt>
+          <dd className="acc-kv__full"><span className={`badge badge--${d.identificador.tone}`}>{d.identificador.tone === "ok" ? "✓ " : ""}{d.identificador.label}</span>{d.identificador.detalle && <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>{d.identificador.detalle}</div>}</dd></>
+        )}
         <dt>{FYGARO.impuestos}</dt><dd className="money">{fmtMoney(d.tax_total, cur)}</dd>
         <dt>{FYGARO.total}</dt><dd className="money"><b>{fmtMoney(d.total, cur)}</b>{cur !== "CRC" && <span className="muted"> · {fmtMoney(d.total_crc)}</span>}</dd>
         {d.doc_type !== "TE" && <>

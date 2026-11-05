@@ -26,6 +26,7 @@ from ..core.ratelimit import inbox_run_limiter
 from ..models import Media, ReceivedDocument, ReceptionMessage, ReceptionResponse
 from ..providers.hacienda import xml44
 from ..services import hacienda_config as hc
+from ..services import identificador as idf
 from ..services import reception as rsvc
 from ..services import reception_proposal as rprop
 from ..services import reception_state as rstate
@@ -89,6 +90,8 @@ def item(doc: ReceivedDocument, rs: list[ReceptionResponse] | None = None, today
     return {
         # 05/11: «Acción realizada» y «Notificación a Hacienda» como en Fygaro, decididas en un solo lugar
         "accion": rstate.accion(doc, rs, today),
+        # el identificador (clave) coherente con su XML y avalado por el sello de Hacienda en el acuse (services/identificador)
+        "identificador": idf.aval(doc),
         "notificacion": rstate.notificacion(doc, rs, today),
         "hacienda_mode": last.mode if last is not None else None,
         "id": doc.id,

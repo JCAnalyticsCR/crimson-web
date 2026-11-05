@@ -80,6 +80,8 @@ export type Reception = {
   expense_id: number | null; receiver_ok: boolean | null; origin: string; created_at: string;
   /** «Acción realizada» y «Notificación a Hacienda» como en Fygaro; hacienda_mode = modo del último intento */
   accion: Estado; notificacion: Estado; hacienda_mode: string | null;
+  /* la clave coherente con su XML y avalada por el sello de Hacienda en el acuse del proveedor (services/identificador) */
+  identificador?: { estado: string; tone: Tone; label: string; detalle: string | null; bloquea: boolean };
   /** solo en la lista "por revisar": la respuesta sugerida (reunion 2, pedido 4) */
   proposal?: Proposal | null;
 };

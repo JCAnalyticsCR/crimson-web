@@ -33,11 +33,13 @@ export function EstadoCell({ e, hint = true }: { e: Estado | undefined; hint?: b
 function ClaveCell({ r }: { r: Reception }) {
   const faltan: string[] = [];
   if (!r.has_pdf) faltan.push("Falta el PDF");
-  if (["por_revisar", "respondido"].includes(r.status) && !r.has_supplier_response) faltan.push("Sin acuse de Hacienda");
+  if (!r.identificador && ["por_revisar", "respondido"].includes(r.status) && !r.has_supplier_response) faltan.push("Sin acuse de Hacienda");
+  const idf = r.identificador;
   return (
     <div style={{ minWidth: 0 }}>
       <div className="mono" style={{ fontSize: 11.5, wordBreak: "break-all", lineHeight: 1.35 }} title="Clave del comprobante del proveedor, tal cual viene en su XML">{r.clave}</div>
       <div className="meta" style={{ textTransform: "none" }}>{fmtDate(r.issue_date)} · {DOC_TYPES[r.doc_type] || r.doc_type}</div>
+      {idf && <div className="meta" title={idf.detalle || undefined} style={{ textTransform: "none", color: idf.tone === "ok" ? "var(--ok)" : idf.tone === "bad" ? "var(--bad)" : "var(--warn)", fontWeight: idf.tone === "ok" ? 400 : 600 }}>{idf.tone === "ok" ? "✓ " : idf.tone === "bad" ? "✗ " : ""}{idf.label}</div>}
       {faltan.length > 0 && <div className="meta" style={{ textTransform: "none", color: "var(--warn)" }}>{faltan.join(" · ")}</div>}
     </div>
   );

@@ -198,7 +198,7 @@ def test_gasto_con_proveedor_usd_bloqueado_y_nc(client, auth, db_session):
     ok = client.put(f"/expenses/{eid}", json={**body, "category_id": cat["id"], "subtotal": float(e["subtotal"])})
     assert ok.status_code == 200 and ok.json()["category_id"] == cat["id"] and Decimal(str(ok.json()["total"])) == Decimal("226")
     # NC del proveedor -> gasto negativo
-    nc = up(client, fe_xml(clave(fecha=DDMMAA, consecutivo="00100001030000000077"), tipo="NotaCreditoElectronica", referencia=cl(24), total=1130, iva=130, fecha=FECHA_HOY)).json()
+    nc = up(client, fe_xml(clave(fecha=DDMMAA, consecutivo="00100001030000000077"), consecutivo="00100001030000000077", tipo="NotaCreditoElectronica", referencia=cl(24), total=1130, iva=130, fecha=FECHA_HOY)).json()
     r = respond(client, nc["id"])
     g = next(x for x in client.get("/expenses").json() if x["id"] == r.json()["expense_id"])
     assert Decimal(str(g["total"])) == Decimal("-1130") and g["description"].startswith("Nota de crédito")
@@ -323,7 +323,7 @@ def test_nc_que_ajusta_parcial_se_propone_sin_gasto(client, auth):
     f = up(client, xml_hoy(42)).json()
     respond(client, f["id"], action="parcial", detail="Faltó un equipo", accepted_total=56500, accepted_tax=6500)
     nc_clave = clave(fecha=DDMMAA, consecutivo="00100001030000000042")
-    nc = up(client, fe_xml(nc_clave, tipo="NotaCreditoElectronica", referencia=cl(42), total=56500, iva=6500, fecha=FECHA_HOY)).json()
+    nc = up(client, fe_xml(nc_clave, consecutivo=nc_clave[21:41], tipo="NotaCreditoElectronica", referencia=cl(42), total=56500, iva=6500, fecha=FECHA_HOY)).json()
     det = client.get(f"/reception/{nc['id']}").json()
     prop = det["proposal"]  # reunion 2 (pedido 4): la sugerencia trae ademas su motivo y si se aprueba con un clic
     assert {k: prop[k] for k in ("action", "iva_condition", "create_expense", "reference_id")} == {"action": "aceptada", "iva_condition": "no_credito", "create_expense": False, "reference_id": f["id"]}
@@ -408,7 +408,6 @@ def test_proveedor_en_papelera_se_reutiliza(client, auth, db_session):
 # ---------------------------------------------------------------- modo pruebas con FakeHacienda
 def test_modo_pruebas_envio_consulta_y_reintento(client, auth, db_session, monkeypatch, p12_empresa):
     from app.models import Expense
-
     from app.services import reception as rsvc
 
     monkeypatch.setattr(rsvc, "PRUEBAS_ENSAYO", False)  # el envio al ambiente de Pruebas (hoy solo se ensaya)
@@ -466,7 +465,7 @@ def test_gasto_de_nc_se_edita_y_los_manuales_no_aceptan_negativos(client, auth, 
     from app.models import Expense, Supplier, Tenant
 
     nc_clave = clave(fecha=DDMMAA, consecutivo="00100001030000000078")
-    nc_xml = fe_xml(nc_clave, tipo="NotaCreditoElectronica", referencia=cl(60), total=1130, iva=130, fecha=FECHA_HOY)
+    nc_xml = fe_xml(nc_clave, consecutivo=nc_clave[21:41], tipo="NotaCreditoElectronica", referencia=cl(60), total=1130, iva=130, fecha=FECHA_HOY)
     nc = up(client, nc_xml).json()
     eid = respond(client, nc["id"]).json()["expense_id"]
     g = next(x for x in client.get("/expenses").json() if x["id"] == eid)
@@ -686,9 +685,8 @@ def test_reabrir_cierra_el_mensaje_de_pruebas_y_un_intento_viejo_no_pisa_al_nuev
     intento viejo quedara vivo, ni se manda, ni se consulta, ni pisa el estado del mensaje de produccion."""
     from app.models import ReceivedDocument, ReceptionResponse, Tenant
     from app.services import hacienda_config, hacienda_tasks
-    from app.services.hacienda_sync import SUPERSEDED, poll_status, refresh_response, send_response
-
     from app.services import reception as rsvc
+    from app.services.hacienda_sync import SUPERSEDED, poll_status, refresh_response, send_response
 
     monkeypatch.setattr(rsvc, "PRUEBAS_ENSAYO", False)  # el envio al ambiente de Pruebas (hoy solo se ensaya)
     fake = FakeHacienda(sequence=["procesando"]).install(monkeypatch)

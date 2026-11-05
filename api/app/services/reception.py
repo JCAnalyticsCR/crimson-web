@@ -325,6 +325,11 @@ def respond(db: Session, p: Principal, rid: int, data: RespondIn) -> tuple[Recei
     doc = get_doc(db, tenant.id, rid, lock=True)  # el estado se comprueba DESPUES del bloqueo
     if doc.status in BLOCKED:
         raise HTTPException(409, BLOCKED[doc.status])
+    from .identificador import aval
+
+    ident = aval(doc)
+    if ident["bloquea"]:  # el identificador no es de esta factura: ni respuesta ni gasto (05/11)
+        raise HTTPException(409, f"{ident['label']}: {ident['detalle']}. No se respondió.")
     if not can_respond(db, doc, tenant):
         raise HTTPException(409, (doc.status == "respondido" and retry_blocker(db, tenant, doc)) or f"Ya fue respondido como {doc.action or 'respondido'}")
     if doc.doc_type == "TE":
