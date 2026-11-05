@@ -67,7 +67,10 @@ def test_credito_de_xml_sin_doble_conteo_manual_y_rechazos(client, auth, db_sess
     client.post("/reception/upload", files={"file": ("r.xml", mensaje_hacienda(cl(2)).encode(), "application/xml")})
     x = iva(client)
     assert D(x["credito_sin_respaldo_crc"]) == Decimal("13000.00") and D(x["credito_xml_crc"]) == Decimal("13000.00")
-    assert D(x["credito_por_confirmar_crc"]) == 0
+    # 05/11: confirmado exige las DOS cosas (acuse del proveedor Y respuesta en Produccion): la respondida en simulado
+    # sigue por confirmar, ahora solo porque falta su respuesta en Produccion
+    assert D(x["credito_por_confirmar_crc"]) == Decimal("13000.00")
+    assert D(x["credito_falta_respuesta_produccion_crc"]) == Decimal("13000.00") and D(x["credito_falta_acuse_proveedor_crc"]) == 0
     rep = client.get("/reports/iva", params={"from": A, "to": B}).json()
     assert D(rep["totals"]["a_pagar"]) == D(x["a_pagar_crc"])
 

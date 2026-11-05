@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..models import Customer, Expense, Invoice, InvoiceLine, Opportunity, Payment, Product, StockMovement, User, Warehouse
+from . import reception_state
 from .inventory import stock_levels
 
 
@@ -230,11 +231,25 @@ def iva_breakdown(db: Session, tid: int, a: date, b: date, prorrata_pct=None) ->
         )
     ).all()
     last = _last_responses(db, [d.id for d in docs])
-    xml_c = por_confirmar = sin_respaldo = prop = Decimal(0)
+    xml_c = por_confirmar = sin_respaldo = prop = rech_prod = falta_resp = falta_acuse = sin_plazo = Decimal(0)
     sin_confirmar: list[dict] = []
+    l_falta_resp: list[dict] = []
+    l_falta_acuse: list[dict] = []
+    l_sin_plazo: list[dict] = []
+    l_rech_prod: list[dict] = []
+    hoy = date.today()
     for d in docs:
         r = last.get(d.id)
-        if r is not None and r.status in ("rechazado", "error"):
+        # error: solo cuenta como rechazo si Hacienda contesto (error_kind "hacienda"); un 400 que no llego, un ambiguo o un
+        # «ya fue recibido» (probablemente respondido en Fygaro) siguen por confirmar (revision 05/11)
+        if r is not None and r.mode == "produccion" and (r.status == "rechazado" or (r.status == "error" and reception_state.error_kind(r) == "hacienda")):
+            # solo un rechazo (o error) de la Hacienda REAL saca el credito: un -29 del ambiente de Pruebas o un ensayo
+            # siguen pendientes ante Hacienda, no rechazados (05/11)
+            c = _reception_credit(d)
+            if c is not None:
+                amt = _sign(d) * _to_crc(c, d.currency, _orate(db, d))
+                rech_prod += amt
+                l_rech_prod.append({"id": d.id, "issuer_name": d.issuer_name, "clave": d.clave, "credit_crc": _q2(amt)})
             continue
         fx = _orate(db, d)
         credit = _reception_credit(d)
@@ -247,10 +262,25 @@ def iva_breakdown(db: Session, tid: int, a: date, b: date, prorrata_pct=None) ->
             sin_respaldo += amount  # Hacienda se lo rechazo al proveedor: sin validez, no entra al "a pagar"
             continue
         xml_c += amount
-        confirmed = d.supplier_hacienda_status == "aceptado" or (r is not None and r.status in ("aceptado", "historico") and r.mode == "produccion")
-        if not confirmed:
+        # confirmado = las DOS cosas: la factura aceptada al proveedor Y su respuesta en Produccion aceptada (o el
+        # historico de Fygaro). Solo cambia la etiqueta "por confirmar", no el total acreditado (lo valida el contador)
+        acuse_ok = d.supplier_hacienda_status == "aceptado"
+        resp_ok = d.status == "historico" or (r is not None and (r.status == "historico" or (r.status == "aceptado" and r.mode == "produccion")))
+        row = {"id": d.id, "issuer_name": d.issuer_name, "clave": d.clave, "credit_crc": _q2(amount)}
+        if not (acuse_ok and resp_ok):
             por_confirmar += amount
-            sin_confirmar.append({"id": d.id, "issuer_name": d.issuer_name, "clave": d.clave, "credit_crc": _q2(amount)})
+            sin_confirmar.append({**row, "falta_respuesta": not resp_ok, "falta_acuse": not acuse_ok})
+        if not resp_ok:
+            if d.deadline and d.deadline < hoy and (r is None or r.mode != "produccion"):
+                # solo en Pruebas (o simulado) y ya no se puede enviar: aceptacion presunta, pero que conste en Fygaro
+                sin_plazo += amount
+                l_sin_plazo.append(row)
+            else:
+                falta_resp += amount
+                l_falta_resp.append(row)
+        if not acuse_ok:
+            falta_acuse += amount
+            l_falta_acuse.append(row)
 
     # ---- gastos manuales (sin comprobante electronico vinculado)
     manual = Decimal(0)
@@ -271,6 +301,14 @@ def iva_breakdown(db: Session, tid: int, a: date, b: date, prorrata_pct=None) ->
         "debito_crc": _q2(deb),
         "credito_xml_crc": _q2(xml_c),
         "credito_por_confirmar_crc": _q2(por_confirmar),
+        "credito_falta_respuesta_produccion_crc": _q2(falta_resp),
+        "credito_falta_acuse_proveedor_crc": _q2(falta_acuse),
+        "credito_sin_mensaje_en_plazo_crc": _q2(sin_plazo),
+        "rechazado_produccion_crc": _q2(rech_prod),
+        "falta_respuesta_produccion": l_falta_resp[:50],
+        "falta_acuse_proveedor": l_falta_acuse[:50],
+        "sin_mensaje_en_plazo": l_sin_plazo[:50],
+        "rechazado_produccion": l_rech_prod[:50],
         "credito_sin_respaldo_crc": _q2(sin_respaldo),
         "credito_manual_crc": _q2(manual),
         "credito_crc": _q2(credito),
@@ -290,10 +328,14 @@ def iva(db: Session, tid: int, a: date, b: date) -> Report:
     rows = [
         ["IVA débito (ventas)", x["debito_crc"]],
         ["IVA crédito de facturas electrónicas aceptadas", x["credito_xml_crc"]],
-        ["   · de ellas, sin respuesta de Hacienda al proveedor (por confirmar)", x["credito_por_confirmar_crc"]],
+        ["   · de ellas, por confirmar", x["credito_por_confirmar_crc"]],
+        ["      · falta su respuesta en Producción", x["credito_falta_respuesta_produccion_crc"]],
+        ["      · falta el acuse de Hacienda al proveedor", x["credito_falta_acuse_proveedor_crc"]],
+        ["      · sin mensaje receptor dentro del plazo: confirme que se respondió en Fygaro", x["credito_sin_mensaje_en_plazo_crc"]],
         ["IVA crédito de gastos sin factura electrónica vinculada (sin comprobante aceptado no hay crédito)", x["credito_manual_crc"]],
         ["IVA crédito (compras, genera crédito)", x["credito_crc"]],
         ["Excluido: comprobantes rechazados por Hacienda al proveedor", x["credito_sin_respaldo_crc"]],
+        ["Excluido: su respuesta fue rechazada por Hacienda (Producción)", x["rechazado_produccion_crc"]],
         ["IVA compras proporcional (prorrata)", x["proporcional_crc"]],
         [f"Crédito por prorrata ({x['prorrata_pct']} %)" if x["prorrata_pct"] is not None else "Crédito por prorrata (sin porcentaje)", x["credito_prorrata_crc"]],
         ["IVA a pagar (débito − crédito)", x["a_pagar_crc"]],
@@ -539,6 +581,22 @@ def propinas(db: Session, tid: int, a: date, b: date) -> Report:
     )
 
 
+def reception_rows_labels(db: Session, tid: int, docs: list) -> dict[int, tuple[str, str]]:
+    """«Acción realizada» y «Notificación a Hacienda» de cada recepcion, con las mismas palabras que la pantalla
+    (services/reception_state): el Excel que va al contador nunca dice "rechazado" por un -29 de Pruebas."""
+    from ..models import ReceptionResponse
+    from . import reception_state as rstate
+
+    ids = [d.id for d in docs]
+    by_doc: dict[int, list] = {}
+    if ids:
+        q = select(ReceptionResponse).where(ReceptionResponse.tenant_id == tid, ReceptionResponse.received_document_id.in_(ids))
+        for r in db.scalars(q.order_by(ReceptionResponse.attempt)):
+            by_doc.setdefault(r.received_document_id, []).append(r)
+    hoy = date.today()
+    return {d.id: (rstate.accion(d, by_doc.get(d.id), hoy)["label"], rstate.notificacion(d, by_doc.get(d.id), hoy)["label"]) for d in docs}
+
+
 def recepciones(db: Session, tid: int, a: date, b: date) -> Report:
     from ..models import ReceivedDocument
 
@@ -547,6 +605,7 @@ def recepciones(db: Session, tid: int, a: date, b: date) -> Report:
         .where(ReceivedDocument.tenant_id == tid, ReceivedDocument.issue_date >= a, ReceivedDocument.issue_date <= b)
         .order_by(ReceivedDocument.issue_date)
     ).all()
+    labels = reception_rows_labels(db, tid, rows)
     out_ = ("rechazada",)
     vivas = [r for r in rows if r.action not in out_ and r.status not in ("descartado", "ajeno", "invalido")]
     return Report(
@@ -567,9 +626,10 @@ def recepciones(db: Session, tid: int, a: date, b: date) -> Report:
             "IVA acreditable",
             "Gasto aplicable",
             "Respuesta",
-            "Estado",
-            "Hacienda",
+            "Acción realizada",
+            "Notificación a Hacienda",
             "Respuesta del proveedor",
+            "Clave del documento",
         ],
         [
             [
@@ -587,9 +647,10 @@ def recepciones(db: Session, tid: int, a: date, b: date) -> Report:
                 r.credit_amount if r.credit_amount is not None else "",
                 r.applicable_amount if r.applicable_amount is not None else "",
                 r.action or "pendiente",
-                r.status,
-                r.hacienda_status,
+                labels[r.id][0],
+                labels[r.id][1],
                 r.supplier_hacienda_status,
+                r.clave,
             ]
             for r in rows
         ],
@@ -740,11 +801,23 @@ def tax_summary(db: Session, tenant, month: str) -> dict:
     last_ids = select(func.max(ReceptionResponse.id)).where(ReceptionResponse.tenant_id == tid).group_by(ReceptionResponse.received_document_id)
     last = db.scalars(select(ReceptionResponse).where(ReceptionResponse.id.in_(last_ids))).all()
     docs_by_id = {d.id: d for d in db.scalars(select(ReceivedDocument).where(ReceivedDocument.id.in_([r.received_document_id for r in last] or [0])))}
+    # solo Produccion: el -29 del ambiente de Pruebas no es un rechazo de la Hacienda real (05/11)
     rech = [
         {"id": r.received_document_id, "issuer_name": docs_by_id[r.received_document_id].issuer_name if r.received_document_id in docs_by_id else None, "detail": r.hacienda_detail or r.last_error}
         for r in last
-        if r.status == "rechazado"
+        if r.status == "rechazado" and r.mode == "produccion"
     ]
+    solo_pruebas, solo_pruebas_vencidas = [], []
+    for r in last:
+        d = docs_by_id.get(r.received_document_id)
+        if r.mode != "pruebas" or d is None or d.status != "respondido":
+            continue
+        left = business_days_left(today, d.deadline)
+        row = {"id": d.id, "issuer_name": d.issuer_name, "clave": d.clave, "deadline": d.deadline, "business_days_left": left}
+        if d.deadline and d.deadline < today:
+            solo_pruebas_vencidas.append(row)
+        elif left is not None and left <= 2:
+            solo_pruebas.append(row)
     emit_docs = db.scalars(select(EInvoiceDocument).where(EInvoiceDocument.tenant_id == tid, EInvoiceDocument.mode.in_(("pruebas", "produccion")))).all()
     # rechazo pendiente = la factura no tiene, despues, un comprobante ACEPTADO del mismo tipo (se reemitio y paso)
     ok_after = {(d.invoice_id, d.doc_type): d.id for d in sorted(emit_docs, key=lambda d: d.id) if d.status == "aceptada"}
@@ -766,7 +839,14 @@ def tax_summary(db: Session, tenant, month: str) -> dict:
             "respondidas": sum(1 for d in del_mes if d.status in ("respondido", "historico")),
             "total_crc": _q2(sum((_sign(d) * _to_crc(d.total, d.currency, _orate(db, d)) for d in del_mes if d.status not in ("descartado", "ajeno", "invalido") and d.action != "rechazada"), Decimal(0))),
         },
-        "mensajes": {"rechazados": rech[:30], "errores": sum(1 for r in last if r.status == "error"), "por_enviar": sum(1 for r in last if r.status == "por_enviar")},
+        "mensajes": {
+            "rechazados": rech[:30],
+            "errores": sum(1 for r in last if r.status == "error" and r.mode == "produccion"),
+            "por_enviar": sum(1 for r in last if r.status == "por_enviar"),
+            # respondidas solo en Pruebas: vencen en <= 2 dias habiles, o ya vencieron (que consten en Fygaro)
+            "solo_pruebas_vencen_pronto": solo_pruebas[:30],
+            "solo_pruebas_vencidas": solo_pruebas_vencidas[:30],
+        },
         "emision": {
             "pendientes": sum(1 for d in emit_docs if d.status in ("por_enviar", "enviando", "enviado", "procesando")),
             "rechazadas": len({d.invoice_id for d in rech_emit}),

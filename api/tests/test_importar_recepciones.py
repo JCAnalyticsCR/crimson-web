@@ -160,6 +160,9 @@ def test_gana_fygaro_cierra_el_mensaje_de_pruebas_pendiente(client, auth, db_ses
     from app.services.hacienda_sync import poll_status, send_pending
     from tests.hacienda_utils import FakeHacienda, modo_pruebas
 
+    from app.services import reception as rsvc
+
+    monkeypatch.setattr(rsvc, "PRUEBAS_ENSAYO", False)  # mensajes de Pruebas enviados antes de que solo se ensayaran
     fake = FakeHacienda(sequence=["procesando"]).install(monkeypatch)
     modo_pruebas(client, *p12_empresa)
     ids = []

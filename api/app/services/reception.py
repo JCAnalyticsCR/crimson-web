@@ -38,6 +38,15 @@ BLOCKED = {
 }
 ACTION_LABEL = {"aceptada": "aceptado", "parcial": "aceptado parcialmente", "rechazada": "rechazado"}
 Q5 = Decimal("0.00001")
+# 05/11: en modo Pruebas la respuesta NO se envia. Las facturas del correo son de Produccion y el ambiente de Pruebas
+# siempre contesta -29 ("clave no registrada"): enviarlas no prueba nada, confunde y, rechazadas, sacaban el credito del
+# mes. Se guarda la decision y su mensaje armado (firmado con la llave simulada) como "ensayo", sin respuesta de Hacienda;
+# despues «Enviar en Producción» manda la misma decision. La conexion se prueba con «Prueba real con Hacienda».
+# False solo en las pruebas que ejercitan el envio al ambiente de Pruebas con FakeHacienda.
+PRUEBAS_ENSAYO = True
+ENSAYO_DETAIL = "Ensayo en Pruebas: no se envió a Hacienda"
+SOLO_PRUEBAS = "Esta respuesta solo se guardó en Pruebas: use «Enviar en Producción» (confirma que no se respondió en Fygaro)"
+RETRYABLE = ("rechazado", "error", "ensayo")
 
 
 class RespondIn(BaseModel):
@@ -280,12 +289,34 @@ def nc_adjustment(db: Session, doc: ReceivedDocument) -> ReceivedDocument | None
     return None
 
 
-def can_respond(db: Session, doc: ReceivedDocument) -> bool:
+def retry_blocker(db: Session, tenant: Tenant | None, doc: ReceivedDocument, last: ReceptionResponse | None = None) -> str | None:
+    """Motivo por el que un comprobante respondido NO se puede responder de nuevo (None = se puede). Nunca dos mensajes
+    de Produccion vivos para la misma clave: lo de Pruebas pasa por «Enviar en Producción» (con la casilla de Fygaro) y
+    un «ya fue recibido» en el primer envio (¿Fygaro?) no se responde nunca."""
+    from .reception_state import error_kind
+
+    last = last if last is not None else last_response(db, doc)
+    if doc.status != "respondido" or last is None or last.status not in RETRYABLE:
+        return "Solo se responde de nuevo si el último mensaje fue rechazado, dio error o fue un ensayo en Pruebas"
+    tenant = tenant or db.get(Tenant, doc.tenant_id)
+    if last.mode != "produccion" and hc.reception_mode(db, tenant) == "produccion":
+        return SOLO_PRUEBAS
+    if last.mode == "produccion" and error_kind(last) == "ya_recibido":
+        return "Hacienda ya tiene una respuesta para esta clave (¿se respondió en Fygaro?): verifíquelo e importe ese mensaje con «Importar histórico»"
+    return None
+
+
+def can_respond(db: Session, doc: ReceivedDocument, tenant: Tenant | None = None) -> bool:
+    from .reception_state import error_kind
+
     if doc.status == "por_revisar":
         return True
     if doc.status == "respondido":
         last = last_response(db, doc)
-        return bool(last and last.status in ("rechazado", "error"))
+        if retry_blocker(db, tenant, doc, last) is not None:
+            return False
+        # un error de Produccion que pudo haber llegado: primero «Responder de nuevo», que consulta a Hacienda
+        return not (last.mode == "produccion" and error_kind(last) == "ambiguo")
     return False
 
 
@@ -294,8 +325,8 @@ def respond(db: Session, p: Principal, rid: int, data: RespondIn) -> tuple[Recei
     doc = get_doc(db, tenant.id, rid, lock=True)  # el estado se comprueba DESPUES del bloqueo
     if doc.status in BLOCKED:
         raise HTTPException(409, BLOCKED[doc.status])
-    if not can_respond(db, doc):
-        raise HTTPException(409, f"Ya fue respondido como {doc.action or 'respondido'}")
+    if not can_respond(db, doc, tenant):
+        raise HTTPException(409, (doc.status == "respondido" and retry_blocker(db, tenant, doc)) or f"Ya fue respondido como {doc.action or 'respondido'}")
     if doc.doc_type == "TE":
         raise HTTPException(409, BLOCKED["sin_respuesta"])
     blocked = hc.production_blocked(db, tenant)
@@ -341,6 +372,7 @@ def respond(db: Session, p: Principal, rid: int, data: RespondIn) -> tuple[Recei
     if overdue(doc):
         warnings.append("Fuera de plazo: Hacienda presume la aceptación total y puede rechazar el mensaje")
     mode = hc.reception_mode(db, tenant)
+    ensayo = mode == "pruebas" and PRUEBAS_ENSAYO
     attempt = (db.scalar(select(func.max(ReceptionResponse.attempt)).where(ReceptionResponse.received_document_id == doc.id)) or 0) + 1
     consecutive = next_fiscal_consecutive(db, tenant.id, FISCAL_CODE[data.action], mode)
     r = ReceptionResponse(
@@ -358,17 +390,21 @@ def respond(db: Session, p: Principal, rid: int, data: RespondIn) -> tuple[Recei
         consecutive=consecutive,
         mode=mode,
         emitted_at=cr_now(),
-        status="simulado" if mode == "simulado" else "por_enviar",
+        status="simulado" if mode == "simulado" else ("ensayo" if ensayo else "por_enviar"),
         created_by=p.user.id,
         created_at=datetime.now(UTC),
     )
-    if mode == "simulado":
+    if mode == "simulado" or ensayo:
         try:
             sim = SimulatedHacienda()
             r.xml_signed = sim.sign_receptor(xml44.build_mensaje_receptor(r, doc, tenant, xml44.digits(tenant.tax_id) or "000000000"))
             r.xml_signed = r.xml_signed.decode("utf-8")
-            r.hacienda_xml = xml44.mensaje_hacienda_simulado(doc.clave, doc.issuer_id or "", xml44.digits(tenant.tax_id), doc.tax_total, doc.total)
-            r.hacienda_detail = "SIMULACIÓN · sin validez fiscal"
+            if ensayo:
+                # sin respuesta falsa de Hacienda: el ensayo nunca salio (hacienda_xml queda vacio)
+                r.hacienda_xml, r.hacienda_detail = None, ENSAYO_DETAIL
+            else:
+                r.hacienda_xml = xml44.mensaje_hacienda_simulado(doc.clave, doc.issuer_id or "", xml44.digits(tenant.tax_id), doc.tax_total, doc.total)
+                r.hacienda_detail = "SIMULACIÓN · sin validez fiscal"
         except (xml44.BuildError, InvalidXml) as e:
             db.rollback()
             raise HTTPException(422, f"No se pudo armar el mensaje receptor: {e}") from e
@@ -427,7 +463,7 @@ def respond(db: Session, p: Principal, rid: int, data: RespondIn) -> tuple[Recei
         ip=p.ip,
     )
     db.commit()
-    if data.send_now and mode in ("pruebas", "produccion"):
+    if data.send_now and r.status == "por_enviar":
         from .hacienda_sync import send_response
 
         try:
@@ -456,9 +492,23 @@ def expense_for_document(db: Session, p: Principal, doc: ReceivedDocument, categ
 
 
 def retry(db: Session, p: Principal, doc: ReceivedDocument) -> None:
+    from .reception_state import error_kind
+
     last = last_response(db, doc)
-    if not last or last.status not in ("rechazado", "error"):
-        raise HTTPException(409, "Solo se responde de nuevo si el último mensaje fue rechazado o dio error")
+    why = retry_blocker(db, p.tenant, doc, last)
+    if why:
+        raise HTTPException(409, why)
+    if last.mode == "produccion" and error_kind(last) == "ambiguo":
+        # pudo haber llegado: se consulta a Hacienda antes de crear un segundo mensaje con otro consecutivo
+        from .hacienda_sync import verify_response
+
+        kind = verify_response(db, last)
+        if kind == "aceptado":
+            db.commit()
+            raise HTTPException(409, "Hacienda sí recibió esa respuesta y la aprobó: no se responde de nuevo")
+        if kind not in ("not_found", "rechazado"):
+            db.commit()
+            raise HTTPException(409, "No se pudo confirmar con Hacienda si la respuesta llegó: inténtelo más tarde")
     doc.status = "por_revisar"
     audit(db, p.tenant.id, p.user.id, "reception_retry", "received_document", doc.id, {"intento_anterior": last.attempt, "estado": last.status}, ip=p.ip)
 
@@ -504,13 +554,67 @@ def reopen(db: Session, p: Principal, doc: ReceivedDocument, confirm: bool) -> N
     audit(db, p.tenant.id, p.user.id, "reception_reopen", "received_document", doc.id, {"confirmo_no_en_fygaro": True, "mensajes_cerrados": cerrados}, ip=p.ip)
 
 
+def production_input(doc: ReceivedDocument) -> RespondIn:
+    """La misma decision que ya se guardo (en Pruebas o simulado), lista para pasar otra vez por respond()."""
+    if not doc.action:
+        raise HTTPException(409, "No hay una decisión guardada: use «Cambiar la respuesta antes de enviarla»")
+    cond = doc.iva_condition or "credito"
+    return RespondIn(
+        action=doc.action,
+        iva_condition=cond,
+        activity_code=doc.activity_code,
+        detail=doc.response_detail,
+        accepted_total=doc.accepted_total if doc.action == "parcial" else None,
+        accepted_tax=doc.accepted_tax if doc.action == "parcial" else None,
+        credit_amount=doc.credit_amount if code_of(cond) in ("02", "03") else None,
+        create_expense=False,  # el gasto que ya existe se reutiliza (respond lo actualiza): nunca uno doble
+        send_now=True,
+    )
+
+
+def send_in_production(db: Session, p: Principal, doc: ReceivedDocument, confirm: bool) -> tuple[ReceivedDocument, ReceptionResponse, list[str]]:
+    """«Enviar en Producción»: la decision guardada en Pruebas (o simulado) sale a Hacienda sin responderla a mano otra
+    vez. Mismas reglas que reabrir (plazo, historico, sin otro mensaje de Produccion) y la casilla de Fygaro. Pasa por
+    respond() completo (actividad activa, produccion bloqueada, calculo) y el intento nuevo nace SIN firmar: lo firma
+    send_response con el .p12 de PRODUCCION (el del ensayo va con la llave simulada y nunca viaja)."""
+    if not confirm:
+        raise HTTPException(422, "Confirme que este comprobante NO se respondió en Fygaro")
+    rs = responses(db, doc)
+    why = reopen_blocker(db, p.tenant, doc, rs)
+    if why:
+        raise HTTPException(409, why)
+    data = production_input(doc)
+    from .hacienda_sync import close_superseded
+
+    cerrados = close_superseded(db, doc.id, "Reemplazado: se envió en Producción")
+    doc.status = "por_revisar"  # respond() lo exige; si algo falla se deshace (rollback)
+    db.flush()
+    try:
+        doc, r, warnings = respond(db, p, doc.id, data)
+    except HTTPException:
+        db.rollback()
+        raise
+    audit(
+        db,
+        p.tenant.id,
+        p.user.id,
+        "reception_send_production",
+        "received_document",
+        doc.id,
+        {"confirmo_no_en_fygaro": True, "mensajes_cerrados": cerrados, "intento": r.attempt},
+        ip=p.ip,
+    )
+    db.commit()
+    return doc, r, warnings
+
+
 def discard(db: Session, p: Principal, doc: ReceivedDocument, reason: str) -> None:
     if doc.status not in ("por_revisar", "ajeno", "invalido", "sin_respuesta"):
         raise HTTPException(409, "Solo se descarta lo que no tiene mensaje ante Hacienda (lo respondido y lo histórico se conservan)")
     if doc.expense_id:
         e = db.get(Expense, doc.expense_id)
         if e and e.status != "anulado":
-            raise HTTPException(409, "Anulá el gasto primero")
+            raise HTTPException(409, "Anule el gasto primero")
     doc.status_before_discard = doc.status
     doc.status = "descartado"
     doc.discarded_reason, doc.discarded_by, doc.discarded_at = reason, p.user.id, datetime.now(UTC)

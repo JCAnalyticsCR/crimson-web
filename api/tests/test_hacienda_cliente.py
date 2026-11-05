@@ -15,6 +15,15 @@ HOY = date.today()
 USER, PASS = "usuario-pruebas@ejemplo", "Clave-ATV-de-prueba!"
 
 
+@pytest.fixture(autouse=True)
+def _envio_a_pruebas(monkeypatch):
+    """Estas pruebas ejercitan el envio y la consulta en el ambiente de Pruebas: hoy la recepcion en Pruebas solo se
+    ensaya (services/reception.PRUEBAS_ENSAYO), asi que aqui se vuelve a enviar."""
+    from app.services import reception as rsvc
+
+    monkeypatch.setattr(rsvc, "PRUEBAS_ENSAYO", False)
+
+
 def cl(n: int) -> str:
     return clave(fecha=HOY.strftime("%d%m%y"), consecutivo=f"0010000101{n:010d}")
 

@@ -215,6 +215,50 @@ def candidate_parts(msg: Message) -> list[tuple[str, bytes]]:
     return out
 
 
+# la clave de 50 digitos en el CUERPO del correo, tolerante a un espacio, espacio duro o guion entre digitos (Gosocket
+# escribe «Identificador: 5060710...10292 6013»). Solo informa el motivo: nunca registra un documento.
+BODY_CLAVE_RE = re.compile(r"(?<!\d)506(?:[  \-]?\d){47}(?!\d)")
+BODY_MAX = 200 * 1024
+OTHER_MAX = 5
+
+
+def body_hints(msg: Message) -> dict:
+    """Por que un correo no traia comprobantes, sin guardar nada del cuerpo: {"clave": la primera clave 506... del texto
+    (sin espacios) o None, "enlace": si trae enlaces, "otros": nombres de adjuntos que no son XML, PDF ni zip (los
+    inline y las imagenes del HTML no cuentan; maximo 5), "otros_n": cuantos eran}. Lee solo text/plain y text/html, con
+    un tope de 200 KB; no abre enlaces, no guarda el texto ni las URL."""
+    import html as _html
+
+    texto, usado, otros, n_otros = [], 0, [], 0
+    for part in msg.walk():
+        if part.is_multipart():
+            continue
+        disp = (part.get("Content-Disposition") or "").lower()
+        ctype = (part.get_content_type() or "").lower()
+        name = part.get_filename() or ""
+        if disp.startswith("attachment"):
+            if not name.lower().endswith(CANDIDATE_EXT) and ctype not in CANDIDATE_TYPES:
+                n_otros += 1
+                if len(otros) < OTHER_MAX:
+                    otros.append(name[:120] or ctype)
+            continue
+        if ctype not in ("text/plain", "text/html") or usado >= BODY_MAX:
+            continue
+        raw = (part.get_payload(decode=True) or b"")[: BODY_MAX - usado]
+        usado += len(raw)
+        t = raw.decode(part.get_content_charset() or "utf-8", "replace")
+        if ctype == "text/html":
+            enlace_html = bool(re.search(r"<a\s[^>]*href", t, re.I))
+            # sin etiquetas (un <wbr> o </span> entre digitos rompe la clave) y con &nbsp; y compania en claro
+            t = _html.unescape(re.sub(r"<[^>]+>", "", t))
+            if enlace_html:
+                t += " http://"
+        texto.append(t)
+    full = "\n".join(texto)
+    m = BODY_CLAVE_RE.search(full)
+    return {"clave": re.sub(r"\D", "", m.group(0)) if m else None, "enlace": bool(re.search(r"https?://", full, re.I)), "otros": otros, "otros_n": n_otros}
+
+
 def _mailbox(db: Session, tenant: Tenant, cfg: MailboxConfig) -> ReceptionMailbox:
     m = db.scalar(select(ReceptionMailbox).where(ReceptionMailbox.tenant_id == tenant.id, ReceptionMailbox.key == cfg.key))
     if m is None:
@@ -387,6 +431,22 @@ def new_message(tenant: Tenant, raw: bytes, *, mailbox_id: int | None, uid: int 
     )
 
 
+def no_files_summary(db: Session, tenant: Tenant, msg: Message) -> list[dict]:
+    """Entradas del resumen de un correo sin XML, PDF ni zip, para decir el motivo en claro (MailLog)."""
+    from ..models import ReceivedDocument
+
+    h = body_hints(msg)
+    if h["clave"]:
+        doc = db.scalar(select(ReceivedDocument.id).where(ReceivedDocument.tenant_id == tenant.id, ReceivedDocument.clave == h["clave"]))
+        return [{"name": "Cuerpo del correo", "kind": "cuerpo", "result": "solo_enlace", "clave": h["clave"], "received_document_id": doc, "error": None}]
+    out = [{"name": n, "kind": "otro", "result": "no_fiscal", "clave": None, "received_document_id": None, "error": None} for n in h["otros"]]
+    if h["otros_n"] > len(h["otros"]):
+        out.append({"name": f"y {h['otros_n'] - len(h['otros'])} más", "kind": "otro", "result": "no_fiscal", "clave": None, "received_document_id": None, "error": None})
+    if not out and h["enlace"]:
+        out.append({"name": "Cuerpo del correo", "kind": "cuerpo", "result": "enlace", "clave": None, "received_document_id": None, "error": None})
+    return out
+
+
 def process_raw(db: Session, tenant: Tenant, raw: bytes, *, mailbox_id: int | None, uid: int | None, uidvalidity: int | None, user_id: int | None = None, message: ReceptionMessage | None = None) -> tuple[ReceptionMessage, dict]:
     """Procesa un .eml (del buzon o de "Reprocesar"). No hace commit."""
     from .reception_intake import ingest_files, new_result, status_of
@@ -398,7 +458,9 @@ def process_raw(db: Session, tenant: Tenant, raw: bytes, *, mailbox_id: int | No
         db.flush()
     files = candidate_parts(msg)
     if not files:
-        rm.status, rm.summary, rm.raw_eml, rm.error = "sin_comprobantes", [], None, None
+        rm.status, rm.summary, rm.raw_eml, rm.error = "sin_comprobantes", no_files_summary(db, tenant, msg), None, None
+        if any(x.get("result") == "solo_enlace" for x in rm.summary):
+            rm.status = "solo_enlace"  # trae la clave de una factura en el cuerpo: se ve en «Correos»
         return rm, new_result()
     res = ingest_files(db, tenant, files, source="imap", message=rm, user_id=user_id)
     rm.status = status_of(res)

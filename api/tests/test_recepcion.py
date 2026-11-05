@@ -409,6 +409,9 @@ def test_proveedor_en_papelera_se_reutiliza(client, auth, db_session):
 def test_modo_pruebas_envio_consulta_y_reintento(client, auth, db_session, monkeypatch, p12_empresa):
     from app.models import Expense
 
+    from app.services import reception as rsvc
+
+    monkeypatch.setattr(rsvc, "PRUEBAS_ENSAYO", False)  # el envio al ambiente de Pruebas (hoy solo se ensaya)
     fake = FakeHacienda(sequence=["procesando", "aceptado"]).install(monkeypatch)
     modo_pruebas(client, *p12_empresa)
     d = up(client, xml_hoy(50)).json()
@@ -685,6 +688,9 @@ def test_reabrir_cierra_el_mensaje_de_pruebas_y_un_intento_viejo_no_pisa_al_nuev
     from app.services import hacienda_config, hacienda_tasks
     from app.services.hacienda_sync import SUPERSEDED, poll_status, refresh_response, send_response
 
+    from app.services import reception as rsvc
+
+    monkeypatch.setattr(rsvc, "PRUEBAS_ENSAYO", False)  # el envio al ambiente de Pruebas (hoy solo se ensaya)
     fake = FakeHacienda(sequence=["procesando"]).install(monkeypatch)
     modo_pruebas(client, *p12_empresa)
     d = up(client, xml_hoy(73)).json()

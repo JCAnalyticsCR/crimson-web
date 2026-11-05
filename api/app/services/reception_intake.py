@@ -326,28 +326,83 @@ def _alert_client_rejection(db: Session, tenant: Tenant, doc: EInvoiceDocument) 
     audit(db, tenant.id, None, "client_receptor_message", "invoice", inv.id if inv else None, {"mensaje": doc.receiver_message, "clave": doc.clave})
 
 
-def _match_pdf(name: str, lote: list[ReceivedDocument]) -> ReceivedDocument | None:
-    if len(lote) == 1:
-        return lote[0]
-    nums = set(CLAVE_RE.findall(name)) | set(CONSEC_RE.findall(name))
-    for d in lote:
-        if d.clave in nums or (d.consecutive and d.consecutive in nums):
-            return d
-    return None
+# cedula (numerica o, desde nov-2026, alfanumerica) + consecutivo de 20 digitos: Comprobante_Electronico_<ced>_<consec>
+PAIR_RE = re.compile(r"(?<![0-9A-Za-z])([0-9A-Za-z]{9,12})[_\-. ]+(\d{20})(?!\d)")
+# el consecutivo pegado a un prefijo de letras (MFS00100001...) o suelto (Delta); nunca dentro de una clave de 50
+CONSEC_ANY_RE = re.compile(r"(?<!\d)(\d{20})(?!\d)")
+PDF_DB_DAYS = 60  # un correo no autenticado solo le pone PDF a una factura reciente que no lo tenga
 
 
-def _match_pdf_db(db: Session, tenant_id: int, name: str) -> ReceivedDocument | None:
-    claves = CLAVE_RE.findall(name)
-    if claves:
-        d = db.scalar(select(ReceivedDocument).where(ReceivedDocument.tenant_id == tenant_id, ReceivedDocument.clave.in_(claves)))
-        if d:
-            return d
-    cons = CONSEC_RE.findall(name)
-    if cons:
-        rows = db.scalars(select(ReceivedDocument).where(ReceivedDocument.tenant_id == tenant_id, ReceivedDocument.consecutive.in_(cons))).all()
-        if len(rows) == 1:
-            return rows[0]
-    return None
+@dataclass
+class NameKeys:
+    claves: set[str]
+    pares: set[tuple[str, str]]
+    consecs: set[str]
+
+    def __bool__(self) -> bool:
+        return bool(self.claves or self.consecs)
+
+
+def name_keys(name: str) -> NameKeys:
+    """Lo que el NOMBRE de un archivo dice de su comprobante, en orden de confianza: la clave de 50 digitos (Gosocket),
+    el par cedula + consecutivo (PriceSmart: Comprobante_/Acuse_Electronico_<ced>_<consec>) y el consecutivo solo
+    (MFS<consec>, Delta). Solo sirve para encontrarle pareja al PDF: la clave del documento sale SIEMPRE del <Clave>
+    del XML."""
+    base = PurePosixPath(name.replace("\\", "/")).name
+    pares = {(c, n) for c, n in PAIR_RE.findall(base) if sum(ch.isdigit() for ch in c) >= 6}
+    return NameKeys(set(CLAVE_RE.findall(base)), pares, set(CONSEC_ANY_RE.findall(base)))
+
+
+def _score(keys: NameKeys, d: ReceivedDocument) -> int:
+    if d.clave in keys.claves:
+        return 3
+    if d.consecutive and any(n == d.consecutive and xml44.same_id(c, d.issuer_id) for c, n in keys.pares):
+        return 2
+    if d.consecutive and d.consecutive in keys.consecs and not keys.claves:
+        # con un par en el nombre, el consecutivo solo cuenta si la cedula no contradice al emisor
+        if keys.pares and not any(n == d.consecutive and xml44.same_id(c, d.issuer_id) for c, n in keys.pares):
+            return 0
+        return 1
+    return 0
+
+
+def _best(keys: NameKeys, docs: list[ReceivedDocument]) -> ReceivedDocument | None:
+    """El de mayor puntaje, si es unico en ese puntaje (dos iguales: no se adivina)."""
+    scored = [(s, d) for d in docs if (s := _score(keys, d)) > 0]
+    if not scored:
+        return None
+    top = max(s for s, _ in scored)
+    winners = [d for s, d in scored if s == top]
+    return winners[0] if len(winners) == 1 else None
+
+
+def _match_pdf(name: str, lote: list[ReceivedDocument], *, generic_ok: bool = False) -> ReceivedDocument | None:
+    """Pareja del PDF dentro del mismo correo o lote. Un PDF con llaves en el nombre solo va al comprobante que esas
+    llaves nombran (el de una factura vieja o de publicidad con numeros no se le pega al unico del lote); uno sin llaves
+    solo si el lote tiene un comprobante y es el unico PDF generico (generic_ok, lo decide ingest_files)."""
+    keys = name_keys(name)
+    if keys:
+        return _best(keys, lote)
+    return lote[0] if generic_ok and len(lote) == 1 else None
+
+
+def _match_pdf_db(db: Session, tenant_id: int, name: str, *, recent_only: bool = False) -> tuple[ReceivedDocument | None, str | None]:
+    """Pareja del PDF entre lo ya registrado: (documento, llave que calzo: clave | par | consecutivo)."""
+    keys = name_keys(name)
+    if not keys:
+        return None, None
+    q = select(ReceivedDocument).where(ReceivedDocument.tenant_id == tenant_id)
+    if keys.claves:
+        rows = db.scalars(q.where(ReceivedDocument.clave.in_(keys.claves))).all()
+    else:
+        rows = db.scalars(q.where(ReceivedDocument.consecutive.in_(keys.consecs))).all()
+    d = _best(keys, rows)
+    if d is None:
+        return None, None
+    if recent_only and d.pdf_media_id is None and d.issue_date and (datetime.now(UTC).date() - d.issue_date).days > PDF_DB_DAYS:
+        return None, None
+    s = _score(keys, d)
+    return d, {3: "clave", 2: "par", 1: "consecutivo"}[s]
 
 
 def ingest_files(
@@ -381,7 +436,11 @@ def ingest_files(
         else:
             items.append(_classify(name, data))
     order = {"comprobante": 0, "mensaje_hacienda": 1, "mensaje_receptor": 2, "pdf": 3}
-    items.sort(key=lambda i: order.get(i.kind, 9))
+    # los PDF con llaves en el nombre van antes que los genericos (4): que el real gane sin importar el orden del correo
+    items.sort(key=lambda i: order.get(i.kind, 9) + (1 if i.kind == "pdf" and not name_keys(i.name) else 0))
+    generic_pdfs = sum(1 for i in items if i.kind == "pdf" and not name_keys(i.name))
+    total_pdfs = sum(1 for i in items if i.kind == "pdf")
+    keyed_hit = False  # algun PDF con llaves ya calzo con un comprobante de este correo
     lote: list[ReceivedDocument] = []
     for it in items:
         entry = {"name": it.name[:200], "kind": it.kind, "result": None, "clave": None, "received_document_id": None, "error": None}
@@ -439,9 +498,29 @@ def ingest_files(
                     res["ignorados"].append({"name": it.name, "reason": why})
                     entry.update(result="ignorado", error=why)
             elif it.kind == "pdf":
-                target = _match_pdf(it.name, lote) if lote else None
-                if target is None and not lote:
-                    target = _match_pdf_db(db, tenant.id, it.name)
+                keyed = bool(name_keys(it.name))
+                target = _match_pdf(it.name, lote, generic_ok=generic_pdfs == 1 and not keyed_hit) if lote else None
+                via = None
+                if target is not None and keyed:
+                    keyed_hit = True
+                if target is None and keyed:
+                    # tambien con lote: el PDF de una factura vieja va a la vieja; la cedula del nombre desempata
+                    target, via = _match_pdf_db(db, tenant.id, it.name, recent_only=source == "imap")
+                    if target is not None and target.pdf_media_id is None:
+                        audit(
+                            db,
+                            tenant.id,
+                            user_id,
+                            "reception_pdf_matched_db",
+                            "received_document",
+                            target.id,
+                            {"llave": via, "correo": message.id if message is not None else None, "origen": origin},
+                        )
+                if target is None and keyed and len(lote) == 1 and total_pdfs == 1 and lote[0].pdf_media_id is None:
+                    # el unico PDF de un correo con UNA factura, con numeros en el nombre que no son su clave ni su
+                    # consecutivo (p. ej. Delta, 06600019401000007772): se le pega como antes, con constancia
+                    target, via = lote[0], "unico_del_correo"
+                    audit(db, tenant.id, user_id, "reception_pdf_matched_single", "received_document", target.id, {"archivo": it.name[:120], "correo": message.id if message is not None else None, "origen": origin})
                 if target is not None and target.pdf_media_id:
                     res["ignorados"].append({"name": it.name, "reason": "el comprobante ya tenía PDF"})
                     entry.update(result="ignorado", received_document_id=target.id, error="ya tenía PDF")

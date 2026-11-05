@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { api } from "../../lib/api";
-import { MODE_BAND, type HaciendaState, type Mode } from "./hacienda";
+import { FYGARO, MODE_BAND, type HaciendaState, type Mode } from "./hacienda";
 import "./accounting.css";
 
 const PARTS = [
@@ -16,9 +16,10 @@ const PARTS = [
 
 const SUBS: Record<string, { to: string; label: string; end?: boolean }[]> = {
   facturas: [
-    { to: "/contabilidad/facturas", label: "Por revisar", end: true },
-    { to: "/contabilidad/facturas/recibidas", label: "Recibidas" },
-    { to: "/contabilidad/facturas/correos", label: "Correos" },
+    /* los dos menus de Fygaro (las URL no cambian) */
+    { to: "/contabilidad/facturas", label: FYGARO.bandeja, end: true },
+    { to: "/contabilidad/facturas/recibidas", label: FYGARO.recepcion },
+    { to: "/contabilidad/facturas/correos", label: FYGARO.correos },
   ],
   contable: [
     { to: "/contabilidad/contable", label: "Gastos", end: true },

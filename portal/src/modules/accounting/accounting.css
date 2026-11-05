@@ -19,6 +19,10 @@
 .acc-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13px; }
 .acc-kv dt { color: var(--text-3); }
 .acc-kv dd { margin: 0; overflow-wrap: anywhere; }
+.acc-kv .acc-kv__full { grid-column: 1 / -1; }
+.acc-kv dt.acc-kv__full { margin-bottom: -2px; }
+/* ficha de la recepcion: dos columnas en escritorio; en tablet y celular, una sola con los bloques en el orden de uso */
+.acc-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .acc-seg { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; border-radius: 10px; background: var(--bg-2); }
 .acc-seg button { flex: 1 1 auto; border: 0; background: transparent; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-weight: 600; color: var(--text-2); font-size: 13px; }
 .acc-seg button.is-active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
@@ -35,4 +39,10 @@
   .acc-part b { font-size: 14px; overflow-wrap: anywhere; }
   .acc-part span { display: none; }
   .acc-detail { grid-template-columns: 1fr; }
+  .acc-col { display: contents; }
+  .acc-col > * { order: var(--o, 10); }
+}
+@media (max-width: 520px) {
+  .acc-kv { grid-template-columns: 1fr; gap: 2px; }
+  .acc-kv dd { margin-bottom: 8px; }
 }

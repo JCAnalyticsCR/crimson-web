@@ -9,7 +9,7 @@ import { Badge, Card, Empty, Field, I, Icon, Loading, Modal } from "../../../ui/
 import AuthLink from "../../../ui/AuthLink";
 import { Dropzone } from "../../../ui/MediaPicker";
 import { VerArchivo } from "../../../ui/VerArchivo";
-import { IVA_CONDITIONS } from "../hacienda";
+import { FYGARO, IVA_CONDITIONS } from "../hacienda";
 import { hoyCR } from "../../../lib/fechaCR";
 
 type Named = { id: number; name: string };
@@ -19,7 +19,7 @@ export type Exp = {
   id: number; category_id: number | null; category: string | null; supplier_id: number | null; supplier_name: string | null; description: string; date: string; currency: string; fx_rate: string;
   subtotal: string; tax_rate: string; tax_amount: string; total: string; total_crc: string; iva_credit: string; tax_credit_amount: string | null; bank_account_id: number | null;
   reference: string | null; status: string; attachment_url: string | null; notes: string | null; payment_method: string | null; purchase_type: string; due_date: string | null;
-  origin: string; received_document_id: number | null; hacienda?: { tone: string; label: string; detail: string | null } | null; recurrence_id: number | null; bank_instrument_id: number | null; check_number: string | null; locked: boolean;
+  origin: string; received_document_id: number | null; hacienda?: { tone: string; label: string; detail: string | null; clave?: string | null } | null; recurrence_id: number | null; bank_instrument_id: number | null; check_number: string | null; locked: boolean;
   from_commission?: boolean;
 };
 type Sum = { count: number; total_crc: string; tax_crc: string; credit_crc: string };
@@ -158,10 +158,12 @@ export default function Expenses() {
           {edit.locked && (
             <div className="acc-warn">
               Viene de un comprobante electrónico: montos, divisa, fecha y condición salen del XML y no se editan.
+              {edit.hacienda?.clave && <div style={{ marginTop: 6 }}><span className="muted">{FYGARO.clave}: </span><span className="mono" style={{ fontSize: 11.5, wordBreak: "break-all" }}>{edit.hacienda.clave}</span></div>}
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-                <button className="btn btn--soft btn--sm" onClick={() => downloadFile(`/reception/${edit.received_document_id}/file/document`, "comprobante.xml").catch((e) => toast(e.message, "bad"))}>XML</button>
-                <button className="btn btn--soft btn--sm" onClick={() => openFile(`/reception/${edit.received_document_id}/file/pdf`).catch((e) => toast(e.message, "bad"))}>PDF</button>
-                <button className="btn btn--soft btn--sm" onClick={() => downloadFile(`/reception/${edit.received_document_id}/file/todo`, "comprobante.zip").catch((e) => toast(e.message, "bad"))}>Todo (.zip)</button>
+                <button className="btn btn--soft btn--sm" onClick={() => downloadFile(`/reception/${edit.received_document_id}/file/document`, `${edit.hacienda?.clave || "comprobante"}.xml`).catch((e) => toast(e.message, "bad"))}>{FYGARO.bajarXml}</button>
+                <button className="btn btn--soft btn--sm" onClick={() => downloadFile(`/reception/${edit.received_document_id}/file/hacienda`, `${edit.hacienda?.clave || "comprobante"}-respuesta-hacienda.xml`).catch((e) => toast(e.message === "No disponible" ? "Hacienda todavía no ha respondido su confirmación" : e.message, "bad"))}>{FYGARO.bajarRespuesta}</button>
+                <button className="btn btn--soft btn--sm" onClick={() => downloadFile(`/reception/${edit.received_document_id}/file/todo`, `${edit.hacienda?.clave || "comprobante"}.zip`).catch((e) => toast(e.message, "bad"))}>{FYGARO.bajarTodos}</button>
+                <button className="btn btn--ghost btn--sm" onClick={() => openFile(`/reception/${edit.received_document_id}/file/pdf`).catch((e) => toast(e.message, "bad"))}>Ver PDF</button>
                 <Link className="btn btn--ghost btn--sm" to={`/contabilidad/facturas/${edit.received_document_id}`}>Ver recepción</Link>
               </div>
             </div>

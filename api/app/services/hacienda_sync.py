@@ -33,7 +33,9 @@ SEND_BACKOFF = (1, 2, 5, 10, 30, 60)  # minutos; despues cada 60
 POLL_SCHEDULE = (1, 2, 5, 10, 20, 30)  # minutos desde el envio; despues cada 60
 STUCK = timedelta(minutes=10)
 GIVE_UP = timedelta(hours=72)
-FINAL_RESPONSE = ("aceptado", "rechazado", "error", "simulado", "historico")
+# documental: el worker solo reclama por_enviar y solo consulta enviado/procesando, asi que "ensayo" (la decision
+# guardada en Pruebas sin enviarla, services/reception.PRUEBAS_ENSAYO) nunca sale; tampoco esta en OPEN_RESPONSE
+FINAL_RESPONSE = ("aceptado", "rechazado", "error", "simulado", "historico", "ensayo")
 
 
 def now() -> datetime:
@@ -279,6 +281,35 @@ def refresh_response(db: Session, response_id: int) -> str | None:
     _copy_response_status(db, r)
     db.commit()
     return r.status
+
+
+def verify_response(db: Session, r: ReceptionResponse) -> str:
+    """Pregunta a Hacienda por un mensaje receptor SIN importar su estado (refresh_response solo consulta lo que sigue
+    vivo) y sin _apply_status (que con not_found pasaria otra vez a error). Para un error que pudo haber llegado, antes
+    de dejar responder de nuevo. Devuelve not_found | aceptado | rechazado | procesando | sin_conexion; con aceptado o
+    rechazado el intento toma ese estado final (y la recepcion, si es el ultimo)."""
+    doc = db.get(ReceivedDocument, r.received_document_id)
+    tenant = db.get(Tenant, r.tenant_id)
+    prov, _retry, _final = _provider(db, tenant, r.mode)
+    if prov is None or doc is None:
+        return "sin_conexion"
+    try:
+        st = prov.get_status(receptor_ref(doc, r))
+    except Exception as e:  # noqa: BLE001 - red, IdP o credenciales: no se sabe, no se deja responder
+        log.warning("verificar mensaje receptor %s: %s", r.id, type(e).__name__)
+        return "sin_conexion"
+    if st.kind in ("aceptado", "rechazado"):
+        r.status = st.kind
+        r.hacienda_xml = st.xml
+        r.hacienda_detail = (st.detail or "")[:500] or None
+        r.resolved_at = now()
+        _copy_response_status(db, r)
+        return st.kind
+    if st.kind == "error":
+        r.hacienda_xml = st.xml
+        r.hacienda_detail = (st.detail or "Hacienda devolvió error")[:500]
+        return "rechazado"  # Hacienda contesto con error: definitivo, se puede responder de nuevo
+    return st.kind if st.kind in ("not_found", "procesando") else "sin_conexion"
 
 
 def _apply_status(row, st, *, final_ok: str, final_bad: str) -> None:

@@ -80,7 +80,7 @@ export default function AppShell() {
                 <Icon d={it.icon} /><span>{it.label}</span>
                 {it.badge === "approvals" && aprob ? <span className="nav__badge" aria-label={`${aprob} pendientes`}>{aprob > 99 ? "99+" : aprob}</span> : null}
                 {it.badge === "completar" && completar ? <span className="nav__badge" style={{ background: "var(--warn)" }} aria-label={`${completar} artículos por completar`} title={`${completar} artículos por completar`}>{completar > 99 ? "99+" : completar}</span> : null}
-                {it.badge === "recepcion" && recep ? <span className="nav__badge" style={recep.urgent ? undefined : { background: "var(--warn)" }} aria-label={`${recep.count} comprobantes por revisar`}>{recep.count > 99 ? "99+" : recep.count}</span> : null}
+                {it.badge === "recepcion" && recep ? <span className="nav__badge" style={recep.urgent ? undefined : { background: "var(--warn)" }} aria-label={`${recep.count} comprobantes por revisar o pendientes en Producción`}>{recep.count > 99 ? "99+" : recep.count}</span> : null}
               </NavLink>
             ))}
           </div>

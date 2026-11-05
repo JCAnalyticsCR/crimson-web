@@ -287,6 +287,9 @@ export const STATUS: Record<string, { label: string; tone: "ok" | "warn" | "bad"
   descartado: { label: "Descartado", tone: "muted" },
   historico: { label: "Histórico (Fygaro)", tone: "muted" },
   simulado: { label: "Simulado", tone: "muted" },
+  // 05/11: la decision guardada en Pruebas sin enviarla, y el correo que trae solo un enlace (con la clave en el texto)
+  ensayo: { label: "Ensayo en Pruebas · no se envió", tone: "muted" },
+  solo_enlace: { label: "Solo un enlace", tone: "warn" },
   por_enviar: { label: "Por enviar", tone: "warn" },
   enviando: { label: "Enviando", tone: "info" },
   procesando: { label: "En proceso", tone: "info" },

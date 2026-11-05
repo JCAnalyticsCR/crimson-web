@@ -1,4 +1,5 @@
-/* Numero del menu "Contabilidad": comprobantes de proveedores por revisar (rojo si alguno vence en <= 2 dias habiles).
+/* Numero del menu "Contabilidad": comprobantes de proveedores por revisar MAS los respondidos solo en Pruebas (ante la
+   Hacienda real siguen pendientes); rojo si alguno vence en <= 2 dias habiles.
    Se pide cada 5 minutos con la cuenta real; un fallo de red no muestra error, solo no hay numero. */
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
@@ -8,6 +9,9 @@ export type ReceptionSummary = {
   por_revisar: number; vencen_pronto: number; vencidos: number; mensajes_rechazados: number; errores: number;
   /** reunion 2, pedido 4: cuantas tienen la respuesta lista para aprobar y el estado del buzon en palabras */
   listas_para_aprobar?: number; buzon?: { state: "apagado" | "pendiente" | "error" | "ok"; label: string; last_run_at: string | null };
+  /** modo de la recepcion y lo respondido solo en Pruebas (05/11) */
+  mode?: "simulado" | "pruebas" | "produccion" | "ninguno";
+  solo_pruebas?: { n: number; vencen_pronto: number; vencidos: number; primera_fecha_limite: string | null };
 };
 
 export function useReceptionCount(): { count: number; urgent: boolean } | null {
@@ -22,6 +26,8 @@ export function useReceptionCount(): { count: number; urgent: boolean } | null {
     const id = window.setInterval(() => { if (document.visibilityState === "visible") load(); }, 300_000);
     return () => { alive = false; window.clearInterval(id); };
   }, [can]);
-  if (!sum || !sum.por_revisar) return null;
-  return { count: sum.por_revisar, urgent: sum.vencen_pronto + sum.vencidos > 0 };
+  const sp = sum?.solo_pruebas;
+  const count = (sum?.por_revisar ?? 0) + (sp?.n ?? 0);
+  if (!sum || !count) return null;
+  return { count, urgent: sum.vencen_pronto + sum.vencidos + (sp?.vencen_pronto ?? 0) > 0 };
 }

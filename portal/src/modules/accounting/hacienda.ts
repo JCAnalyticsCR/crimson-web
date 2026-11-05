@@ -22,22 +22,54 @@ export const DOC_TYPES: Record<string, string> = {
 
 export type IvaCondition = "credito" | "credito_parcial" | "bienes_capital" | "no_credito" | "proporcional";
 
-/* Condicion del IVA con su codigo de Hacienda y la explicacion de una linea (Nota de la resolucion). */
+/* «Condición del Impuesto (IVA)» con el texto de Hacienda, como la muestra Fygaro («Genera Crédito IVA»); el codigo
+   (01 a 05) queda como dato secundario. Mismas palabras que services/reception_state.IVA_LABEL. */
 export const IVA_CONDITIONS: { key: IvaCondition; code: string; label: string; hint: string }[] = [
-  { key: "credito", code: "01", label: "01 · Genera crédito", hint: "Genera crédito: el IVA se acredita completo" },
-  { key: "credito_parcial", code: "02", label: "02 · Crédito parcial", hint: "Crédito parcial: indique cuánto se acredita" },
-  { key: "bienes_capital", code: "03", label: "03 · Bienes de capital", hint: "Bienes de capital" },
-  { key: "no_credito", code: "04", label: "04 · Gasto corriente", hint: "Gasto corriente: el IVA pasa a ser gasto" },
-  { key: "proporcional", code: "05", label: "05 · Proporcionalidad", hint: "Proporcionalidad: se aplica la prorrata del periodo" },
+  { key: "credito", code: "01", label: "Genera crédito IVA", hint: "Código 01: el IVA se acredita completo" },
+  { key: "credito_parcial", code: "02", label: "Genera crédito parcial del IVA", hint: "Código 02: indique cuánto se acredita" },
+  { key: "bienes_capital", code: "03", label: "Bienes de capital", hint: "Código 03: bienes de capital" },
+  { key: "no_credito", code: "04", label: "Gasto corriente no genera crédito", hint: "Código 04: el IVA pasa a ser gasto" },
+  { key: "proporcional", code: "05", label: "Proporcionalidad", hint: "Código 05: se aplica la prorrata del periodo" },
 ];
 export const ivaLabel = (k: string | null | undefined) => IVA_CONDITIONS.find((c) => c.key === k)?.label ?? (k || "—");
+export const ivaCode = (k: string | null | undefined) => IVA_CONDITIONS.find((c) => c.key === k)?.code ?? null;
+
+/* Los nombres de Fygaro en un solo lugar: si Andrés confirma que en Fygaro significan otra cosa (p. ej. que la
+   «Bandeja de entrada» es la lista de correos), se cambian aquí sin rehacer pantallas. */
+export const FYGARO = {
+  bandeja: "Bandeja de entrada",
+  recepcion: "Recepción de facturas",
+  correos: "Correos",
+  ficha: "Recepción de factura electrónica",
+  emisor: "Información del emisor",
+  estado: "Estado",
+  accion: "Acción realizada",
+  notificacion: "Notificación a Hacienda",
+  gasto: "Información del gasto",
+  clave: "Clave del documento",
+  impuestos: "Total de impuestos",
+  total: "Total",
+  condicion: "Condición del impuesto (IVA)",
+  actividad: "Código de actividad",
+  acreditar: "Total impuesto por acreditar",
+  aplicable: "Total de gasto aplicable",
+  xml: "Documentos XML",
+  bajarXml: "Descargar XML",
+  /* la respuesta de Hacienda a SU confirmación (pregunta abierta a Andrés: ¿o el acuse que trae el proveedor?) */
+  bajarRespuesta: "Descargar respuesta XML",
+  bajarTodos: "Descargar todos",
+} as const;
+
+/** Estado en palabras (services/reception_state): el portal solo pinta label y tone. */
+export type Tone = "ok" | "warn" | "bad" | "info" | "muted";
+export type Estado = { key: string; label: string; tone: Tone; hint: string | null; motivo: string | null; codigo: string | null; modo: string | null; vence: string | null; alerta: string | null };
 
 export const ACTIONS: { key: "aceptada" | "parcial" | "rechazada"; label: string }[] = [
   { key: "aceptada", label: "Aceptar" },
   { key: "parcial", label: "Aceptar parcialmente" },
   { key: "rechazada", label: "Rechazar" },
 ];
-export const ACTION_LABEL: Record<string, string> = { aceptada: "Aceptada", parcial: "Aceptada parcialmente", rechazada: "Rechazada" };
+export const ACTION_LABEL: Record<string, string> = { aceptada: "Aceptada", parcial: "Parcial", rechazada: "Rechazada" };
 
 export type Reception = {
   id: number; clave: string; consecutive: string | null; doc_type: string; issuer_name: string | null; issuer_id: string | null; issuer_email: string | null;
@@ -46,6 +78,8 @@ export type Reception = {
   credit_amount: string | null; applicable_amount: string | null; hacienda_status: string; supplier_hacienda_status: string; hacienda_detail?: string | null; supplier_hacienda_detail_short?: string | null;
   deadline: string | null; business_days_left: number | null; has_pdf: boolean; has_supplier_response: boolean; has_response: boolean; has_hacienda_answer: boolean;
   expense_id: number | null; receiver_ok: boolean | null; origin: string; created_at: string;
+  /** «Acción realizada» y «Notificación a Hacienda» como en Fygaro; hacienda_mode = modo del último intento */
+  accion: Estado; notificacion: Estado; hacienda_mode: string | null;
   /** solo en la lista "por revisar": la respuesta sugerida (reunion 2, pedido 4) */
   proposal?: Proposal | null;
 };
@@ -73,6 +107,8 @@ export type ReceptionDetail = Reception & {
   message: { id: number; sender: string | null; subject: string | null; received_at: string | null } | null;
   responses: ResponseAttempt[]; discarded_reason: string | null; response_detail: string | null; mode: Mode;
   can_respond: boolean; can_retry: boolean; can_reopen: boolean; can_send: boolean; can_refresh: boolean; can_expense: boolean;
+  /** «Enviar en Producción»: la misma decisión guardada en Pruebas; pending_production = su último intento es de Pruebas */
+  can_send_production: boolean; pending_production: boolean;
   warnings: string[]; expense_candidates: Candidate[]; proposal: Proposal | null;
   supplier_hacienda_detail: string | null;
 };

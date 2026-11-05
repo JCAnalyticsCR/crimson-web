@@ -599,44 +599,31 @@ def _check_refs(db: Session, tenant_id: int, supplier_id: int | None, category_i
             raise HTTPException(404, msg)
 
 
-RESP_UI = {  # ultima respuesta (mensaje receptor) de la empresa a la factura del proveedor
-    "aceptado": ("ok", "Respondida · aceptada por Hacienda"),
-    "rechazado": ("bad", "Su respuesta fue rechazada por Hacienda"),
-    "error": ("bad", "Error al enviar su respuesta a Hacienda"),
-    "por_enviar": ("warn", "Respuesta por enviar a Hacienda"),
-}
-
-
 def hacienda_de_gastos(db: Session, tid: int, rd_ids: list[int]) -> dict[int, dict]:
     """Estado ante Hacienda de cada gasto con XML: la factura del proveedor y la respuesta de la empresa (su mensaje
-    receptor). De eso depende el credito de IVA. Una consulta para toda la lista."""
+    receptor). De eso depende el credito de IVA. Una consulta para toda la lista. Las palabras y el tono salen de
+    services/reception_state (las mismas de la recepcion): un -29 de Pruebas es «Pendiente · solo en Pruebas», no rojo."""
     from ..models import ReceivedDocument, ReceptionResponse
+    from ..services import reception_state as rstate
 
     ids = [i for i in set(rd_ids) if i]
     if not ids:
         return {}
     docs = {d.id: d for d in db.scalars(select(ReceivedDocument).where(ReceivedDocument.tenant_id == tid, ReceivedDocument.id.in_(ids)))}
-    last: dict[int, ReceptionResponse] = {}
-    for r in db.scalars(select(ReceptionResponse).where(ReceptionResponse.tenant_id == tid, ReceptionResponse.received_document_id.in_(ids)).order_by(ReceptionResponse.id)):
-        last[r.received_document_id] = r
+    by_doc: dict[int, list[ReceptionResponse]] = {}
+    q = select(ReceptionResponse).where(ReceptionResponse.tenant_id == tid, ReceptionResponse.received_document_id.in_(ids))
+    for r in db.scalars(q.order_by(ReceptionResponse.attempt)):
+        by_doc.setdefault(r.received_document_id, []).append(r)
     out: dict[int, dict] = {}
+    hoy = date.today()
     for i, d in docs.items():
-        r = last.get(i)
-        modo = r.mode if r else None
+        rs = by_doc.get(i, [])
         if d.supplier_hacienda_status == "rechazado":
             tone, label, det = "bad", "Factura del proveedor rechazada por Hacienda", d.supplier_hacienda_detail
-        elif r is not None:
-            tone, label = RESP_UI.get(r.status, ("warn", "Respuesta en Hacienda, esperando resultado"))
-            det = r.hacienda_detail
-        elif d.status == "por_revisar":
-            tone, label, det = "warn", f"Por responder a Hacienda{f' (vence {d.deadline:%d/%m})' if d.deadline else ''}", None
         else:
-            tone, label, det = "muted", "Sin respuesta a Hacienda", None
-        if modo == "pruebas":
-            label += " · pruebas"
-        elif modo == "simulado":
-            label += " · simulado"
-        out[i] = {"tone": tone, "label": label, "detail": (det or "")[:300] or None, "proveedor": d.supplier_hacienda_status}
+            n = rstate.notificacion(d, rs, hoy)
+            tone, label, det = n["tone"], f"Notificación a Hacienda: {n['label']}", n["motivo"] or n["hint"]
+        out[i] = {"tone": tone, "label": label, "detail": (det or "")[:300] or None, "proveedor": d.supplier_hacienda_status, "clave": d.clave}
     return out
 
 

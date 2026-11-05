@@ -388,15 +388,17 @@ def test_sugerencia_no_lista_si_hay_un_gasto_parecido_y_lectura_no_aprueba(clien
     assert client.post(f"/reception/{d['id']}/approve", headers=ventas).status_code == 403
 
 
-def test_aprobar_en_pruebas_envia_a_hacienda(client, auth, db_session, monkeypatch, p12_empresa):
+def test_aprobar_en_pruebas_guarda_la_decision_sin_enviarla(client, auth, db_session, monkeypatch, p12_empresa):
+    """05/11: en Pruebas la aprobacion queda como ensayo (no sale a Hacienda: Pruebas no conoce las facturas reales)."""
     fake = FakeHacienda(sequence=["procesando", "aceptado"]).install(monkeypatch)
     modo_pruebas(client, *p12_empresa)
     d = _up(client, 76)
     r = client.post(f"/reception/{d['id']}/approve")
     assert r.status_code == 200, r.text
     out = r.json()
-    assert out["responses"][0]["mode"] == "pruebas" and out["hacienda_status"] in ("enviado", "procesando", "aceptado")
-    assert len(fake.posts) == 1 and fake.posts[0]["clave"] == _cl(76)
+    assert out["responses"][0]["mode"] == "pruebas" and out["hacienda_status"] == "ensayo"
+    assert out["notificacion"]["key"] == "solo_pruebas" and out["notificacion"]["tone"] == "warn"
+    assert fake.posts == []
 
 
 def test_sugerencia_no_acepta_un_comprobante_que_hacienda_rechazo_al_proveedor(client, auth, db_session):

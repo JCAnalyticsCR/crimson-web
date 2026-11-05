@@ -28,6 +28,7 @@ from ..providers.hacienda import xml44
 from ..services import hacienda_config as hc
 from ..services import reception as rsvc
 from ..services import reception_proposal as rprop
+from ..services import reception_state as rstate
 from ..services.documents import audit
 from ..services.reception_calc import business_days_left
 
@@ -84,7 +85,12 @@ def item(doc: ReceivedDocument, rs: list[ReceptionResponse] | None = None, today
     rs = rs or []
     last = rs[-1] if rs else None
     has_sr, has_xr = flags if flags is not None else (bool(doc.xml_supplier_response), bool(doc.xml_response))
+    today = today or date.today()
     return {
+        # 05/11: «Acción realizada» y «Notificación a Hacienda» como en Fygaro, decididas en un solo lugar
+        "accion": rstate.accion(doc, rs, today),
+        "notificacion": rstate.notificacion(doc, rs, today),
+        "hacienda_mode": last.mode if last is not None else None,
         "id": doc.id,
         "clave": doc.clave,
         "consecutive": doc.consecutive,
@@ -114,10 +120,11 @@ def item(doc: ReceivedDocument, rs: list[ReceptionResponse] | None = None, today
         "supplier_hacienda_status": doc.supplier_hacienda_status,
         "supplier_hacienda_detail_short": (doc.supplier_hacienda_detail or "")[:300] or None if doc.supplier_hacienda_status == "rechazado" else None,
         "deadline": doc.deadline,
-        "business_days_left": business_days_left(today or date.today(), doc.deadline),
+        "business_days_left": business_days_left(today, doc.deadline),
         "has_pdf": bool(doc.pdf_media_id),
         "has_supplier_response": has_sr,
-        "has_response": has_xr or any(r.xml_signed for r in rs),
+        # solo el ULTIMO intento (lo que baja «Descargar todos»): nunca el de Pruebas debajo de uno de Produccion
+        "has_response": bool(last.xml_signed) if last is not None else has_xr,
         "has_hacienda_answer": bool(last and last.hacienda_xml),
         "expense_id": doc.expense_id,
         "receiver_ok": doc.receiver_ok,
@@ -173,14 +180,18 @@ def detail(db: Session, p: Principal, doc: ReceivedDocument, extra_warnings: lis
         warnings.append("Configure la cédula en Ajustes → Hacienda")
     nc_ref = rsvc.nc_adjustment(db, doc)
     if nc_ref is not None:
-        what = "rechazaste" if nc_ref.action == "rechazada" else "aceptaste parcialmente"
-        warnings.append(f"Esta nota de crédito corrige una factura que {what}: el gasto y el crédito ya quedaron por el monto aceptado")
+        what = "rechazó" if nc_ref.action == "rechazada" else "aceptó parcialmente"
+        warnings.append(f"Esta nota de crédito corrige una factura que usted {what}: el gasto y el crédito ya quedaron por el monto aceptado")
     # reunion 2, pedido 4: la respuesta queda preparada para aprobarla con un clic (services/reception_proposal.py)
     proposal = rprop.propose(db, p.tenant, doc)
     msg = db.get(ReceptionMessage, doc.message_id) if doc.message_id else None
     mode = hc.reception_mode(db, p.tenant)
     last = rs[-1] if rs else None
     can_reopen = rsvc.reopen_blocker(db, p.tenant, doc, rs) is None
+    if last is not None and last.status == "ensayo" and doc.status == "respondido":
+        dec = rstate.accion(doc, rs)
+        cond = rstate.IVA_LABEL.get(doc.iva_condition or "", "")
+        warnings.insert(0, f"Su decisión quedó guardada ({dec['label']}{' · ' + cond if cond else ''}). No se envió a Hacienda porque Crimson está en Pruebas.")
     out.update(
         {
             "lines": lines,
@@ -192,9 +203,12 @@ def detail(db: Session, p: Principal, doc: ReceivedDocument, extra_warnings: lis
             "discarded_reason": doc.discarded_reason,
             "response_detail": doc.response_detail,
             "mode": mode,
-            "can_respond": rsvc.can_respond(db, doc) and doc.doc_type != "TE",
-            "can_retry": bool(last and last.status in ("rechazado", "error") and doc.status == "respondido"),
+            "can_respond": rsvc.can_respond(db, doc, p.tenant) and doc.doc_type != "TE",
+            "can_retry": rsvc.retry_blocker(db, p.tenant, doc, last) is None,
             "can_reopen": can_reopen,
+            # «Enviar en Producción»: la misma decision, sin responderla otra vez (services/reception.send_in_production)
+            "can_send_production": can_reopen and bool(doc.action),
+            "pending_production": rstate.pending_production(doc, rs),
             "can_send": bool(last and last.status == "por_enviar"),
             "can_refresh": bool(last and last.status in ("enviado", "procesando", "enviando")),
             "can_expense": not doc.expense_id
@@ -233,6 +247,7 @@ def documents(
     from_: date | None = Query(None, alias="from"),
     to: date | None = None,
     due: str | None = None,
+    pend_prod: int = 0,  # ?pend_prod=1: «Solo en Pruebas» (su ultimo intento es de Pruebas: falta en Produccion)
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     p: Principal = Depends(require("accounting", "ver")),
@@ -257,7 +272,9 @@ def documents(
         )
     sub = base.subquery()
     counts = dict(db.execute(select(sub.c.status, func.count()).group_by(sub.c.status)).all())
-    query = base
+    q_pruebas = base.where(ReceivedDocument.status == "respondido", ReceivedDocument.id.in_(_pruebas_last_ids(p.tenant.id)))
+    counts["solo_pruebas"] = db.scalar(select(func.count()).select_from(q_pruebas.subquery())) or 0
+    query = q_pruebas if pend_prod else base
     if status:
         query = query.where(ReceivedDocument.status == status)
     if due == "pronto":
@@ -286,7 +303,23 @@ def documents(
             # la respuesta sugerida, para aprobarla desde la bandeja (en "Recibidas" no se usa: no se calcula)
             it["proposal"] = rprop.propose(db, p.tenant, d, ctx)
         items.append(it)
-    return {"items": items, "total": total, "counts": {s: counts.get(s, 0) for s in STATUSES}}
+    return {"items": items, "total": total, "counts": {s: counts.get(s, 0) for s in (*STATUSES, "solo_pruebas")}}
+
+
+def _pruebas_last_ids(tenant_id: int):
+    """Ids de recepciones cuyo ULTIMO intento es de Pruebas (ensayo o enviado a Pruebas): ante la Hacienda real siguen
+    pendientes."""
+    last = (
+        select(ReceptionResponse.received_document_id.label("did"), func.max(ReceptionResponse.attempt).label("att"))
+        .where(ReceptionResponse.tenant_id == tenant_id)
+        .group_by(ReceptionResponse.received_document_id)
+        .subquery()
+    )
+    return (
+        select(ReceptionResponse.received_document_id)
+        .join(last, (ReceptionResponse.received_document_id == last.c.did) & (ReceptionResponse.attempt == last.c.att))
+        .where(ReceptionResponse.mode == "pruebas")
+    )
 
 
 @router.get("/summary")
@@ -303,18 +336,69 @@ def summary(
     last = db.scalars(select(ReceptionResponse).where(ReceptionResponse.id.in_(last_ids))).all()
     n_listas = rprop.ready_count(db, p.tenant, pend) if listas else None
     buzon = rprop.inbox_state(db, p.tenant)
+    prod = [r for r in last if r.mode == "produccion"]
     return {
+        "mode": hc.reception_mode(db, p.tenant),
         "por_revisar": len(pend),
         "listas_para_aprobar": n_listas,
         "buzon": {"state": buzon["state"], "label": buzon["label"], "last_run_at": buzon["last_run_at"]},
         "vencen_pronto": sum(1 for x in left if x is not None and 0 <= x <= 2),
         "vencidos": sum(1 for x in left if x is not None and x < 0),
-        "mensajes_rechazados": sum(1 for r in last if r.status == "rechazado"),
-        "errores": sum(1 for r in last if r.status == "error"),
+        # solo Produccion: un -29 del ambiente de Pruebas no es un rechazo de la Hacienda real
+        "mensajes_rechazados": sum(1 for r in prod if r.status == "rechazado" or rstate.error_kind(r) == "hacienda"),
+        "errores": sum(1 for r in prod if r.status == "error" and rstate.error_kind(r) != "hacienda"),
+        "solo_pruebas": solo_pruebas(db, p.tenant.id, [r for r in last if r.mode == "pruebas"], today),
+    }
+
+
+def solo_pruebas(db: Session, tenant_id: int, last_pruebas: list[ReceptionResponse], today: date) -> dict:
+    """Respondidas solo en Pruebas: siguen pendientes ante la Hacienda real (vencen como cualquier otra)."""
+    ids = [r.received_document_id for r in last_pruebas]
+    docs = (
+        db.scalars(select(ReceivedDocument).where(ReceivedDocument.tenant_id == tenant_id, ReceivedDocument.id.in_(ids), ReceivedDocument.status == "respondido")).all()
+        if ids
+        else []
+    )
+    vivas = [d for d in docs if not (d.deadline and d.deadline < today)]
+    left = [business_days_left(today, d.deadline) for d in vivas]
+    fechas = sorted(d.deadline for d in vivas if d.deadline)
+    return {
+        "n": len(vivas),
+        "vencen_pronto": sum(1 for x in left if x is not None and x <= 2),
+        "vencidos": len(docs) - len(vivas),
+        "primera_fecha_limite": fechas[0] if fechas else None,
     }
 
 
 # ---------------------------------------------------------------- correos y buzon
+UPLOAD_HINT = "descargue el XML y súbalo con «Cargar archivos»"
+
+
+def message_reason(m: ReceptionMessage) -> str | None:
+    """Por que un correo quedo como quedo, en claro (sin abrir nada: solo su resumen)."""
+    summ = m.summary or []
+    results = [x.get("result") for x in summ]
+    if m.status == "solo_enlace":
+        if summ and summ[0].get("received_document_id"):
+            return "Trae en el texto la clave de una factura que ya está registrada"
+        return f"Trae solo un enlace a la factura (su clave viene en el texto): {UPLOAD_HINT}"
+    if m.status in ("error", "parcial"):
+        return m.error or "Uno de los adjuntos no se pudo leer"
+    if m.status == "sin_comprobantes":
+        if "no_fiscal" in results:
+            return "Los adjuntos no son XML, PDF ni zip"
+        if "enlace" in results:
+            return f"Trae enlaces pero ningún adjunto de factura: si era una factura, {UPLOAD_HINT}"
+        if summ and all(x.get("kind") == "mensaje_hacienda" for x in summ):
+            return "Solo traía la respuesta de Hacienda: se une cuando llegue el XML de la factura"
+        if summ:
+            return "Ningún adjunto era una factura para la empresa"
+        return "No traía adjuntos XML, PDF ni zip"
+    if m.status == "procesado" and summ and all(r in ("sin_asignar", "ignorado") for r in results) and "sin_asignar" in results:
+        return "Solo traía el PDF: no se encontró su factura. Asígnelo a mano o espere el XML"
+    return None
+
+
 def _message_out(m: ReceptionMessage) -> dict:
     return {
         "id": m.id,
@@ -326,6 +410,7 @@ def _message_out(m: ReceptionMessage) -> dict:
         "status": m.status,
         "summary": m.summary or [],
         "error": m.error,
+        "motivo": message_reason(m),
         "created_at": m.created_at,
         "can_reprocess": m.status in ("error", "parcial") and m.source == "imap",
     }
@@ -344,7 +429,12 @@ def messages(
         q = q.where(ReceptionMessage.status != "sin_comprobantes")
     total = db.scalar(select(func.count()).select_from(q.subquery()))
     rows = db.scalars(q.order_by(ReceptionMessage.id.desc()).offset(offset).limit(limit)).all()
-    return {"items": [_message_out(m) for m in rows], "total": total}
+    ocultos = (
+        0
+        if all
+        else db.scalar(select(func.count()).where(ReceptionMessage.tenant_id == p.tenant.id, ReceptionMessage.status == "sin_comprobantes")) or 0
+    )
+    return {"items": [_message_out(m) for m in rows], "total": total, "sin_comprobantes": ocultos}
 
 
 @router.get("/inbox/status")
@@ -510,17 +600,29 @@ FILE_NAMES = {
 }
 
 
-def _file(db: Session, doc: ReceivedDocument, which: str) -> tuple[bytes, str] | None:
-    last = next((r for r in reversed(rsvc.responses(db, doc)) if r.xml_signed), None)
-    last_any = rsvc.last_response(db, doc)
+def file_name(doc: ReceivedDocument, which: str, last: ReceptionResponse | None) -> str:
+    """El nombre de descarga dice lo que es: el ensayo de Pruebas nunca salio (sin validez) y la respuesta del ambiente
+    de Pruebas (el -29) no es de la Hacienda real. Los XML van integros: solo cambia el nombre."""
+    name = FILE_NAMES[which].format(clave=doc.clave)
+    if last is not None and which == "mr" and last.status == "ensayo":
+        return f"{doc.clave}-mensaje-receptor-ENSAYO-sin-validez.xml"
+    if last is not None and which == "hacienda" and last.mode == "pruebas":
+        return f"{doc.clave}-respuesta-hacienda-PRUEBAS.xml"
+    return name
+
+
+def _file(db: Session, doc: ReceivedDocument, which: str, last: ReceptionResponse | None = None) -> tuple[bytes, str] | None:
+    # SOLO el ultimo intento: si el de Produccion aun no se firma, no se baja el de Pruebas (ni su -29) como si fuera el
+    # vigente. El mensaje heredado (xml_response) solo cuando no hay ningun intento.
+    last = last if last is not None else rsvc.last_response(db, doc)
     if which == "document":
         body = doc.xml_document
     elif which == "supplier_response":
         body = doc.xml_supplier_response
     elif which == "mr":
-        body = last.xml_signed if last else doc.xml_response
+        body = last.xml_signed if last is not None else doc.xml_response
     elif which == "hacienda":
-        body = last_any.hacienda_xml if last_any and last_any.hacienda_xml else (last.hacienda_xml if last else None)
+        body = last.hacienda_xml if last is not None else None
     elif which == "pdf":
         if not doc.pdf_media_id:
             return None
@@ -534,24 +636,25 @@ def _file(db: Session, doc: ReceivedDocument, which: str) -> tuple[bytes, str] |
 @router.get("/{rid}/file/{which}")
 def download(rid: int, which: str, p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):
     doc = rsvc.get_doc(db, p.tenant.id, rid)
+    last = rsvc.last_response(db, doc)
     if which == "todo":
         buf = io.BytesIO()
         n = 0
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-            for w, pattern in FILE_NAMES.items():
-                f = _file(db, doc, w)
+            for w in FILE_NAMES:
+                f = _file(db, doc, w, last)
                 if f:
-                    z.writestr(pattern.format(clave=doc.clave), f[0])
+                    z.writestr(file_name(doc, w, last), f[0])
                     n += 1
         if not n:
             raise HTTPException(404, "No disponible")
         return Response(buf.getvalue(), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{doc.clave}.zip"'})
     if which not in FILE_NAMES:
         raise HTTPException(404, "No disponible")
-    f = _file(db, doc, which)
+    f = _file(db, doc, which, last)
     if not f:
         raise HTTPException(404, "No disponible")
-    return Response(f[0], media_type=f[1], headers={"Content-Disposition": f'attachment; filename="{FILE_NAMES[which].format(clave=doc.clave)}"'})
+    return Response(f[0], media_type=f[1], headers={"Content-Disposition": f'attachment; filename="{file_name(doc, which, last)}"'})
 
 
 @router.get("/{rid}/xml/{which}")
@@ -702,6 +805,40 @@ def reopen(rid: int, data: ReopenIn, p: Principal = Depends(require("accounting"
     rsvc.reopen(db, p, doc, data.confirm_not_in_fygaro)
     db.commit()
     return detail(db, p, doc)
+
+
+@router.post("/{rid}/send-production")
+def send_production(rid: int, data: ReopenIn, p: Principal = Depends(require("accounting", "editar")), db: Session = Depends(get_db)):
+    """«Enviar en Producción»: la decision guardada en Pruebas sale a Hacienda sin responderla de nuevo."""
+    doc = rsvc.get_doc(db, p.tenant.id, rid, lock=True)
+    doc, _r, warnings = rsvc.send_in_production(db, p, doc, data.confirm_not_in_fygaro)
+    return detail(db, p, doc, warnings)
+
+
+class SendProductionBatchIn(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=10)  # cada una pide token y envia en linea: 10 caben en el tiempo de la peticion
+    confirm_not_in_fygaro: bool = False
+
+
+@router.post("/send-production")
+def send_production_batch(data: SendProductionBatchIn, p: Principal = Depends(require("accounting", "editar")), db: Session = Depends(get_db)):
+    """En lote: cada comprobante por su cuenta (uno que falle no deshace los demas), como approve-batch."""
+    if not data.confirm_not_in_fygaro:
+        raise HTTPException(422, "Confirme que estos comprobantes NO se respondieron en Fygaro")
+    ok, omitidas = [], []
+    for rid in dict.fromkeys(data.ids):
+        try:
+            doc = rsvc.get_doc(db, p.tenant.id, rid, lock=True)
+            doc, _r, _w = rsvc.send_in_production(db, p, doc, True)
+            ok.append({"id": rid, "hacienda_status": doc.hacienda_status})
+        except HTTPException as e:
+            db.rollback()
+            omitidas.append({"id": rid, "motivo": str(e.detail)})
+        except Exception as e:  # noqa: BLE001 - uno que falle no corta el lote
+            db.rollback()
+            log.warning("enviar en produccion en lote: el comprobante %s fallo (%s)", rid, type(e).__name__)
+            omitidas.append({"id": rid, "motivo": "No se pudo enviar: hágalo desde la ficha"})
+    return {"enviadas": ok, "omitidas": omitidas}
 
 
 class DiscardIn(BaseModel):

@@ -9,13 +9,20 @@ import { Card, Empty, Loading } from "../../../ui/components";
 import AuthLink from "../../../ui/AuthLink";
 import { MODE_LABEL, plazo, type Mode } from "../hacienda";
 
+type Pend = { id: number; issuer_name: string | null; clave: string; credit_crc: string };
+type Sp = { id: number; issuer_name: string | null; clave: string; deadline: string | null; business_days_left: number | null };
 type Tax = {
   month: string;
-  iva: { debito_crc: string; credito_xml_crc: string; credito_por_confirmar_crc: string; credito_sin_respaldo_crc: string; credito_manual_crc: string; credito_crc: string; proporcional_crc: string; prorrata_pct: string | null; credito_prorrata_crc: string; a_pagar_crc: string };
+  iva: {
+    debito_crc: string; credito_xml_crc: string; credito_por_confirmar_crc: string; credito_sin_respaldo_crc: string; credito_manual_crc: string; credito_crc: string; proporcional_crc: string; prorrata_pct: string | null; credito_prorrata_crc: string; a_pagar_crc: string;
+    /* 05/11: por confirmar, dividido; y solo los rechazos de la Hacienda REAL salen del credito */
+    credito_falta_respuesta_produccion_crc?: string; credito_falta_acuse_proveedor_crc?: string; credito_sin_mensaje_en_plazo_crc?: string; rechazado_produccion_crc?: string;
+    falta_respuesta_produccion?: Pend[]; falta_acuse_proveedor?: Pend[]; sin_mensaje_en_plazo?: Pend[]; rechazado_produccion?: Pend[];
+  };
   credito_por_confirmar: { id: number; issuer_name: string | null; clave: string; credit_crc: string }[];
   recepciones: { recibidas: number; por_revisar: number; vencen_pronto: { id: number; issuer_name: string | null; total: string; currency: string; deadline: string | null; business_days_left: number | null }[]; vencidas: number; respondidas: number; total_crc: string };
   por_aprobar?: number;
-  mensajes: { rechazados: { id: number; issuer_name: string | null; detail: string | null }[]; errores: number; por_enviar: number };
+  mensajes: { rechazados: { id: number; issuer_name: string | null; detail: string | null }[]; errores: number; por_enviar: number; solo_pruebas_vencen_pronto?: Sp[]; solo_pruebas_vencidas?: Sp[] };
   emision: { pendientes: number; rechazadas: number; aceptadas: number; rechazadas_facturas?: { invoice_id: number; number: string | null }[] };
   hacienda: { mode: Mode; environment: string; cert_not_after: string | null; cert_days_left: number | null; imap_last_run_at: string | null; buzon?: { state: string; label: string } };
 };
@@ -47,19 +54,28 @@ export default function TaxPanel() {
             <table className="table"><tbody>
               {row("IVA débito (ventas)", t.iva.debito_crc, { strong: true })}
               {row("Crédito de facturas electrónicas aceptadas", t.iva.credito_xml_crc, { minus: true })}
-              {Number(t.iva.credito_por_confirmar_crc) !== 0 && row("de ese, por confirmar: sin respuesta de Hacienda al proveedor", t.iva.credito_por_confirmar_crc, { muted: true })}
+              {Number(t.iva.credito_por_confirmar_crc) !== 0 && row("de ese, por confirmar", t.iva.credito_por_confirmar_crc, { muted: true })}
+              {Number(t.iva.credito_falta_respuesta_produccion_crc ?? 0) !== 0 && row("· falta su respuesta en Producción", t.iva.credito_falta_respuesta_produccion_crc!, { muted: true })}
+              {Number(t.iva.credito_falta_acuse_proveedor_crc ?? 0) !== 0 && row("· falta el acuse de Hacienda al proveedor", t.iva.credito_falta_acuse_proveedor_crc!, { muted: true })}
+              {Number(t.iva.credito_sin_mensaje_en_plazo_crc ?? 0) !== 0 && row("· sin mensaje receptor en el plazo: confirme que consta en Fygaro", t.iva.credito_sin_mensaje_en_plazo_crc!, { muted: true, warn: true })}
               {row("Crédito de gastos sin factura electrónica vinculada", t.iva.credito_manual_crc, { minus: true, warn: Number(t.iva.credito_manual_crc) !== 0 })}
               {Number(t.iva.credito_sin_respaldo_crc) !== 0 && row("Excluido: rechazados por Hacienda al proveedor (no entra)", t.iva.credito_sin_respaldo_crc, { muted: true })}
+              {Number(t.iva.rechazado_produccion_crc ?? 0) !== 0 && row("Excluido: su respuesta fue rechazada por Hacienda", t.iva.rechazado_produccion_crc!, { muted: true })}
               {row("Compras con proporcionalidad (IVA)", t.iva.proporcional_crc, { muted: true })}
               {row(`Crédito por prorrata${t.iva.prorrata_pct !== null ? ` (${Number(t.iva.prorrata_pct)} %)` : ""}`, t.iva.credito_prorrata_crc, { minus: true })}
               {row("IVA a pagar · borrador D-104", t.iva.a_pagar_crc, { strong: true })}
             </tbody></table>
-            {Number(t.iva.credito_manual_crc) !== 0 && <p className="muted" style={{ padding: "8px 18px", fontSize: 12, margin: 0 }}>⚠ Gastos sin factura electrónica vinculada: sin comprobante aceptado no hay crédito (Res. 0027-2024 art. 11). Se suman al «a pagar» para que decidás.</p>}
-            {t.credito_por_confirmar.length > 0 && (
-              <details style={{ padding: "8px 18px" }}><summary className="meta" style={{ cursor: "pointer" }}>Comprobantes sin respuesta de Hacienda ({t.credito_por_confirmar.length}): pedila al proveedor</summary>
-                <ul style={{ fontSize: 13 }}>{t.credito_por_confirmar.map((c) => <li key={c.id}><Link to={`/contabilidad/facturas/${c.id}`}>{c.issuer_name || c.clave.slice(-10)}</Link> · {fmtMoney(c.credit_crc)}</li>)}</ul>
+            {Number(t.iva.credito_manual_crc) !== 0 && <p className="muted" style={{ padding: "8px 18px", fontSize: 12, margin: 0 }}>⚠ Gastos sin factura electrónica vinculada: sin comprobante aceptado no hay crédito (Res. 0027-2024 art. 11). Se suman al «a pagar» para que usted decida.</p>}
+            {([
+              ["Falta su respuesta en Producción", t.iva.falta_respuesta_produccion, "envíela en Producción o respóndala en Fygaro"],
+              ["Falta el acuse de Hacienda al proveedor", t.iva.falta_acuse_proveedor, "pídalo al proveedor"],
+              ["Sin mensaje receptor dentro del plazo", t.iva.sin_mensaje_en_plazo, "confirme que se respondió en Fygaro (lo decide el contador)"],
+              ["Su respuesta fue rechazada por Hacienda", t.iva.rechazado_produccion, "revise el motivo en la ficha"],
+            ] as [string, Pend[] | undefined, string][]).filter(([, l]) => l && l.length).map(([titulo, l, hacer]) => (
+              <details key={titulo} style={{ padding: "8px 18px" }}><summary className="meta" style={{ cursor: "pointer" }}>{titulo} ({l!.length}): {hacer}</summary>
+                <ul style={{ fontSize: 13 }}>{l!.map((c) => <li key={c.id}><Link to={`/contabilidad/facturas/${c.id}`}>{c.issuer_name || "—"}</Link> · {fmtMoney(c.credit_crc)}</li>)}</ul>
               </details>
-            )}
+            ))}
             {allows("accounting.editar") && (
               <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "10px 18px", borderTop: "1px solid var(--hair)" }}>
                 <span className="meta">Prorrata del periodo %</span><input className="input input--mono" style={{ maxWidth: 100, height: 32 }} inputMode="decimal" value={pct} onChange={(e) => setPct(e.target.value)} placeholder="vacío" /><button className="btn btn--soft btn--sm" onClick={savePct}>Guardar</button>
@@ -74,9 +90,11 @@ export default function TaxPanel() {
               <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Del mes: {t.recepciones.recibidas} recibidos · {t.recepciones.respondidas} respondidos · {fmtMoney(t.recepciones.total_crc)}</p>
             </Card>
             <Card title="Rechazos y errores">
-              {t.mensajes.rechazados.length === 0 && !t.mensajes.errores && !t.emision.rechazadas && !t.mensajes.por_enviar ? <Empty title="Sin rechazos" /> : (
+              {t.mensajes.rechazados.length === 0 && !t.mensajes.errores && !t.emision.rechazadas && !t.mensajes.por_enviar && !(t.mensajes.solo_pruebas_vencen_pronto ?? []).length && !(t.mensajes.solo_pruebas_vencidas ?? []).length ? <Empty title="Sin rechazos" /> : (
                 <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
-                  {t.mensajes.rechazados.map((r) => <li key={r.id}>Mensaje rechazado: <Link to={`/contabilidad/facturas/${r.id}`}>{r.issuer_name || "—"}</Link>{r.detail ? ` · ${r.detail}` : ""}</li>)}
+                  {t.mensajes.rechazados.map((r) => <li key={r.id}>Respuesta rechazada por Hacienda: <Link to={`/contabilidad/facturas/${r.id}`}>{r.issuer_name || "—"}</Link>{r.detail ? ` · ${r.detail}` : ""}</li>)}
+                  {(t.mensajes.solo_pruebas_vencen_pronto ?? []).map((r) => <li key={`sp${r.id}`} style={{ color: "var(--warn)" }}>Respondida solo en Pruebas, vence {fmtDate(r.deadline)}: <Link to={`/contabilidad/facturas/${r.id}`}>{r.issuer_name || "—"}</Link></li>)}
+                  {(t.mensajes.solo_pruebas_vencidas ?? []).map((r) => <li key={`spv${r.id}`}>Solo en Pruebas y plazo vencido (confirme que consta en Fygaro): <Link to={`/contabilidad/facturas/${r.id}`}>{r.issuer_name || "—"}</Link></li>)}
                   {t.mensajes.errores > 0 && <li>{t.mensajes.errores} mensaje(s) con error</li>}
                   {t.mensajes.por_enviar > 0 && <li>{t.mensajes.por_enviar} mensaje(s) por enviar</li>}
                   {t.emision.rechazadas > 0 && <li>{t.emision.rechazadas === 1 ? "1 factura rechazada por Hacienda, sin reemitir" : `${t.emision.rechazadas} facturas rechazadas por Hacienda, sin reemitir`}{t.emision.rechazadas_facturas?.length ? ": " : ""}{t.emision.rechazadas_facturas?.map((f, i) => <span key={f.invoice_id}>{i ? ", " : ""}<Link to={`/facturas/${f.invoice_id}`}>{f.number || `#${f.invoice_id}`}</Link></span>)}</li>}

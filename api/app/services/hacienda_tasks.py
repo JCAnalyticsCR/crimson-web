@@ -50,15 +50,15 @@ def alerts_for(db: Session, t: Tenant, today: date | None = None) -> list[str]:
         left = business_days_left(today, d.deadline)
         if left is None:
             continue
-        if left == -1:
-            out.append(f"Venció ayer el plazo para responder el comprobante de {d.issuer_name or d.issuer_id} ({d.consecutive or d.clave[-10:]})")
+        if -3 <= left <= -1:  # rango: si el correo diario no corre un dia (o un feriado salta el -1), igual se avisa
+            out.append(f"{'Venció ayer' if left == -1 else 'Ya venció'} el plazo para responder el comprobante de {d.issuer_name or d.issuer_id} ({d.consecutive or d.clave[-10:]})")
         elif 0 <= left <= 2:
             quedan = "Vence hoy el plazo" if left == 0 else f"{forma(left, 'Queda', 'Quedan')} {plural(left, 'día hábil', 'días hábiles')}"
             out.append(f"{quedan} para responder el comprobante de {d.issuer_name or d.issuer_id} ({d.consecutive or d.clave[-10:]})")
     def recent(dt) -> bool:
         return bool(_aware(dt) and now - _aware(dt) <= timedelta(hours=24))
 
-    watched = ("por_enviar", "rechazado", "enviado", "procesando", "error")
+    watched = ("por_enviar", "rechazado", "enviado", "procesando", "error", "ensayo")
     # solo el ULTIMO mensaje de cada recepcion y solo si sigue respondida: un intento viejo (el de pruebas antes de
     # reabrir, uno que reemplazo el historico de Fygaro) o una recepcion que ya se reabrio o se respondio de nuevo no
     # piden nada a nadie
@@ -80,9 +80,18 @@ def alerts_for(db: Session, t: Tenant, today: date | None = None) -> list[str]:
         left = business_days_left(today, d.deadline)
         if r.status == "por_enviar" and left is not None and left <= 2:  # 0 = vence hoy: tambien se avisa
             out.append(f"Mensaje receptor sin enviar con plazo a punto de vencer ({d.issuer_name}): {r.last_error or 'revise las credenciales'}")
+        elif r.mode == "pruebas":
+            # 05/11: lo de Pruebas (ensayo o un -29) no es un rechazo: sigue pendiente ante la Hacienda real
+            if left is not None and 0 <= left <= 2:
+                fecha = d.deadline.strftime("%d/%m") if d.deadline else ""
+                out.append(f"Respondida solo en Pruebas: envíela en Producción o respóndala en Fygaro antes del {fecha} ({d.issuer_name or d.issuer_id})")
+            elif left is not None and -3 <= left <= -1:
+                out.append(f"{'Venció ayer' if left == -1 else 'Ya venció'} el plazo y solo se respondió en Pruebas: confirme que consta en Fygaro ({d.issuer_name or d.issuer_id})")
+        elif r.mode != "produccion":
+            continue
         elif r.status == "rechazado" and recent(r.resolved_at):
             out.append(f"Hacienda rechazó el mensaje receptor de {d.issuer_name if d else ''}: {r.hacienda_detail or ''}"[:300])
-        elif r.status == "error" and r.mode in ("pruebas", "produccion") and recent(r.resolved_at):
+        elif r.status == "error" and recent(r.resolved_at):
             # incluye "Sin respuesta de Hacienda en 72 h": la consulta horaria lo pasa a error antes del correo diario
             out.append(f"Mensaje receptor con error ante Hacienda ({d.issuer_name if d else ''}): {r.last_error or r.hacienda_detail or ''}"[:300])
         elif r.status in ("enviado", "procesando") and _aware(r.sent_at) and now - _aware(r.sent_at) > timedelta(hours=72):

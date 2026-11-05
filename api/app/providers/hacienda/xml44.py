@@ -328,6 +328,15 @@ def parse_comprobante(root, raw: bytes | None = None) -> ParsedDoc:
         p.warnings.append("IVA devuelto / asumido por fábrica: revisar el crédito con contabilidad")
     if p.issue_date and clave[3:9] != p.issue_date.strftime("%d%m%y"):
         p.warnings.append("La fecha de la clave no coincide con la fecha de emisión")
+    # 05/11: el identificador (la clave) tiene que ser coherente con su propio XML. Solo avisos: el XML no se toca y se
+    # registra igual. Con una cedula alfanumerica (desde nov-2026) no se compara: la clave sigue siendo de 50 digitos
+    ced = norm_id(p.issuer_id)
+    if ced and ced.isdigit() and not same_id(clave[9:21], ced):
+        p.warnings.append("La cédula del emisor no coincide con la de la clave")
+    if p.consecutive and clave[21:41] != p.consecutive:
+        p.warnings.append("El consecutivo del XML no coincide con el de la clave")
+    if clave[41] != "1":
+        p.warnings.append("Comprobante emitido en contingencia o sin internet: Hacienda puede tardar en conocerlo")
     return p
 
 
