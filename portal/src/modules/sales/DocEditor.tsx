@@ -107,6 +107,19 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
     api<{ limit: number; free: boolean }>("/sales/discount-limit").then(setLimit).catch(() => {});
     if (!isNew) api<Quote & Invoice>(`/${isQ ? "quotes" : "invoices"}/${id}`).then(hydrate);
   }, [id, isNew, isQ]);
+  /* Duplicar: el documento nuevo arranca con el cliente, las lineas, los descuentos y las notas del original. Numero,
+     fecha, estado, pagos y comprobante son del documento nuevo; el tipo de cambio es el del dia. Nada se guarda solo. */
+  const dupId = isNew ? Number(search.get("duplicar")) || null : null;
+  useEffect(() => {
+    if (!dupId) return;
+    api<Quote & Invoice>(`/${isQ ? "quotes" : "invoices"}/${dupId}`).then((d) => {
+      setDoc((cur) => ({ ...cur, customer_id: d.customer_id, currency: d.currency || "CRC", discount_type: d.discount_type || "percent", discount_value: num(d.discount_value), internal_notes: d.internal_notes, external_notes: d.external_notes, activity_code: d.activity_code, medical_exemption_card: d.medical_exemption_card }));
+      setLines(d.lines.map((l) => ({ ...blankLine(), product_id: l.product_id, code: l.code, name: l.name, description: l.description, cabys_code: l.cabys_code, unit: l.unit, quantity: num(l.quantity), unit_price: num(l.unit_price), discount_type: l.discount_type, discount_value: num(l.discount_value), tax_rate: num(l.tax_rate), treatment: l.treatment || "normal", supplied_by: l.supplied_by ?? null })));
+      if (!isQ && d.doc_type && d.doc_type !== "NC") setTipoDoc(d.doc_type);
+      toast(`Copia de ${d.number || (isQ ? "la cotización" : "la factura")}: revísela y guárdela. Lleva número y fecha nuevos.`);
+    }).catch((e) => toast(e instanceof Error ? e.message : "No se pudo cargar el documento a duplicar", "bad"))
+      .finally(() => { const s2 = new URLSearchParams(search); s2.delete("duplicar"); setSearch(s2, { replace: true }); });
+  }, [dupId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (asigna) api<{ sellers: { id: number; name: string }[] }>("/opportunities/meta/config").then((r) => setSellers(r.sellers)).catch(() => {});
   }, [asigna]);
@@ -637,6 +650,11 @@ export default function DocEditor({ kind }: { kind: "quote" | "invoice" }) {
               )}
               {!isNew && allows("sales.anular") && <button className="btn btn--danger" disabled={busy} onClick={() => act("void")}>Anular {isQ ? "cotización" : "factura"}</button>}
             </div></div>
+          )}
+          {!isNew && doc.id != null && allows("sales.crear") && (
+            <button className="btn btn--soft" style={{ alignSelf: "flex-start" }} onClick={() => nav(`/${isQ ? "cotizaciones" : "facturas"}/nueva?duplicar=${doc.id}`)} title="Abre una nueva con el mismo cliente, líneas, descuentos y notas">
+              <Icon d={I.copy} />Duplicar {isQ ? "cotización" : "factura"}
+            </button>
           )}
           {proyecto && (
             /* ya tiene proyecto: se va a el en vez de intentar crearlo otra vez */
