@@ -43,7 +43,7 @@ export type Reception = {
   id: number; clave: string; consecutive: string | null; doc_type: string; issuer_name: string | null; issuer_id: string | null; issuer_email: string | null;
   issue_date: string | null; currency: string; fx_rate: string; subtotal: string; tax_total: string; iva_total: string; other_charges: string; total: string; total_crc: string;
   status: string; action: string | null; iva_condition: string | null; activity_code: string | null; issuer_activity_code: string | null;
-  credit_amount: string | null; applicable_amount: string | null; hacienda_status: string; supplier_hacienda_status: string;
+  credit_amount: string | null; applicable_amount: string | null; hacienda_status: string; supplier_hacienda_status: string; hacienda_detail?: string | null; supplier_hacienda_detail_short?: string | null;
   deadline: string | null; business_days_left: number | null; has_pdf: boolean; has_supplier_response: boolean; has_response: boolean; has_hacienda_answer: boolean;
   expense_id: number | null; receiver_ok: boolean | null; origin: string; created_at: string;
   /** solo en la lista "por revisar": la respuesta sugerida (reunion 2, pedido 4) */

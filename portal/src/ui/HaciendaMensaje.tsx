@@ -6,7 +6,8 @@ type Item = { code: string; text: string };
 /* que hacer con cada codigo que ya vimos; los demas se muestran tal cual */
 const QUE_HACER: Record<string, string> = {
   "-37": "Es un aviso, no impide la factura. Revise que provincia, cantón y distrito en Ajustes → Hacienda → Ubicación sean los del domicilio fiscal en TRIBU-CR (el código postal los da: 20110 = provincia 2, cantón 01, distrito 10). Si ya coinciden y el aviso sigue, el registro de comprobantes de Hacienda no tiene aún su domicilio actualizado: consúltelo con Hacienda.",
-  "-111": "Los totales de servicios y mercancías no cuadran con las líneas. Lo corrige Crimson: si vuelve a salir, envíenos la clave del documento.",
+  "-29": "En el ambiente de Pruebas es normal: la factura del proveedor es real (de Producción) y Pruebas no la conoce. Su respuesta no tiene problema; en Producción se envía igual y Hacienda sí la encuentra.",
+  "-111":"Los totales de servicios y mercancías no cuadran con las líneas. Lo corrige Crimson: si vuelve a salir, envíenos la clave del documento.",
 };
 
 export function parseHacienda(msg?: string | null): { pruebas: boolean; items: Item[]; texto: string } {
@@ -19,6 +20,13 @@ export function parseHacienda(msg?: string | null): { pruebas: boolean; items: I
     ? ""
     : raw.replace(/Este comprobante fue recibido en el ambiente de pruebas, por lo cual no tiene validez para fines tributarios\.?/i, "").replace(/\s+/g, " ").trim();
   return { pruebas, items, texto };
+}
+
+/** El motivo en una linea, para listas: el primer error de Hacienda (y cuantos mas hay); el texto entero va en el title. */
+export function motivoCorto(msg?: string | null): { corto: string; completo: string } | null {
+  const { items, texto } = parseHacienda(msg);
+  if (items.length) return { corto: items[0].text + (items.length > 1 ? ` (+${items.length - 1} más)` : ""), completo: items.map((i) => `${i.text} (código ${i.code})`).join("\n") };
+  return texto ? { corto: texto, completo: texto } : null;
 }
 
 export function HaciendaMensaje({ msg, status }: { msg?: string | null; status?: string }) {

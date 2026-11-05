@@ -5,6 +5,7 @@
    Aceptada una factura de compra, quien maneja inventario le da entrada al inventario (StockIn).
    Reunion 2, pedido 4: la respuesta llega preparada ("Respuesta sugerida"): se aprueba con un clic y sale por el mismo
    flujo; el formulario arranca con esa sugerencia por si hay que cambiar algo. */
+import { HaciendaMensaje, parseHacienda } from "../../../ui/HaciendaMensaje";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, downloadFile, fmtDate, fmtMoney, openFile, parseTs, uploadFile } from "../../../lib/api";
@@ -136,7 +137,8 @@ export default function ReceptionDetail() {
         <li key={r.id}>
           <b>Intento {r.attempt}</b> · {ACTION_LABEL[{ "1": "aceptada", "2": "parcial", "3": "rechazada" }[r.message_code] || ""]} · {ivaLabel(r.iva_condition)} · <span className="mono">{r.consecutive}</span> · <span className="badge badge--muted">{r.mode}</span>
           <div className="muted">Respondido · {when(r.created_at)}{r.sent_at ? ` → Enviado · ${when(r.sent_at)}` : ""}</div>
-          <div>Hacienda: <Badge status={r.status} />{r.hacienda_detail ? ` ${r.hacienda_detail}` : ""}{r.last_error ? <span style={{ color: "var(--bad)" }}> · {r.last_error}</span> : null}</div>
+          <div>Hacienda: <Badge status={r.status} />{r.hacienda_detail && !parseHacienda(r.hacienda_detail).items.length ? ` ${r.hacienda_detail}` : ""}{r.last_error ? <span style={{ color: "var(--bad)" }}> · {r.last_error}</span> : null}</div>
+          {r.hacienda_detail && parseHacienda(r.hacienda_detail).items.length > 0 && <div style={{ marginTop: 6 }}><HaciendaMensaje msg={r.hacienda_detail} status={r.status === "aceptado" ? "aceptada" : r.status} /></div>}
           {r.credit_amount !== null && <div className="muted">IVA acreditable {fmtMoney(r.credit_amount, cur)} · gasto aplicable {fmtMoney(r.applicable_amount, cur)}</div>}
           {r.detail && <div className="muted">“{r.detail}”</div>}
         </li>

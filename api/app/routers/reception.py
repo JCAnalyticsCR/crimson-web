@@ -109,7 +109,10 @@ def item(doc: ReceivedDocument, rs: list[ReceptionResponse] | None = None, today
         "credit_amount": doc.credit_amount,
         "applicable_amount": doc.applicable_amount,
         "hacienda_status": doc.hacienda_status,
+        # el motivo de Hacienda, para verlo en la lista sin abrir el documento (05/11)
+        "hacienda_detail": ((last.hacienda_detail or last.last_error) if last is not None and last.status in ("rechazado", "error") else None),
         "supplier_hacienda_status": doc.supplier_hacienda_status,
+        "supplier_hacienda_detail_short": (doc.supplier_hacienda_detail or "")[:300] or None if doc.supplier_hacienda_status == "rechazado" else None,
         "deadline": doc.deadline,
         "business_days_left": business_days_left(today or date.today(), doc.deadline),
         "has_pdf": bool(doc.pdf_media_id),

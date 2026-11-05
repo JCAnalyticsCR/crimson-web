@@ -1,6 +1,7 @@
 /* Facturas de proveedores: "Por revisar" (con plazo) y "Recibidas" (todo, con filtros y paginacion). En "Por revisar"
    cada comprobante trae su respuesta a Hacienda ya preparada (reunion 2, pedido 4): se aprueba con un clic, una por una
    o todas las listas, y sale por el mismo flujo que "Responder". El estado del buzon se dice en palabras. */
+import { motivoCorto } from "../../../ui/HaciendaMensaje";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtMoney, parseTs } from "../../../lib/api";
@@ -161,7 +162,12 @@ export default function Inbox({ all = false }: { all?: boolean }) {
                     <td className="muted" style={{ fontSize: 12 }}>{r.action ? ivaLabel(r.iva_condition) : "—"}</td>
                     <td className="num money">{r.credit_amount !== null ? fmtMoney(r.credit_amount, r.currency) : "—"}</td>
                     <td className="num money">{r.applicable_amount !== null ? fmtMoney(r.applicable_amount, r.currency) : "—"}</td>
-                    <td><Badge status={r.hacienda_status} /></td>
+                    <td style={{ maxWidth: 240 }}><Badge status={r.hacienda_status} />
+                      {(() => {
+                        /* por que lo rechazo Hacienda (su respuesta) o el comprobante del proveedor, sin abrir el documento */
+                        const m = motivoCorto(r.hacienda_detail) || motivoCorto(r.supplier_hacienda_detail_short);
+                        return m && <div className="meta" title={m.completo} style={{ textTransform: "none", color: "var(--bad)", marginTop: 4, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{m.corto}</div>;
+                      })()}</td>
                   </>}
                   {!all && <td><Sugerida p={r.proposal} /></td>}
                   <td><Files r={r} /></td>
