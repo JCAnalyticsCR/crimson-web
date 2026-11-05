@@ -205,3 +205,28 @@ def test_tarifa_cero_sin_codigo_es_422(client, auth, db_session):
     with pytest.raises(HTTPException) as e:
         direct_payload(db_session, t, inv, "FE", "00100001010000000001", clave(), cr_now())
     assert e.value.status_code == 422
+
+
+def test_servicio_se_clasifica_por_cabys_no_por_unidad(client, auth, db_session):
+    """05/11, FE 5 rechazada con -111: «Instalacion» con CABYS de servicio (5...) en unidad «Unid» caia en mercancias."""
+    from app.models import Invoice, Tenant
+    from app.providers.einvoice import build_clave, cr_now
+    from app.services.einvoice import direct_payload
+
+    cust = client.get("/customers").json()["items"][0]
+    lines = [
+        {"name": "Parlante", "cabys_code": "4526100000200", "quantity": 1, "unit_price": 1500, "tax_rate": 13, "unit": "Unid"},
+        {"name": "Instalacion de parlante", "cabys_code": "5461900000000", "quantity": 1, "unit_price": 500, "tax_rate": 13, "unit": "Unid"},
+    ]
+    r = client.post("/invoices", json={"customer_id": cust["id"], "lines": lines})
+    assert r.status_code in (200, 201), r.text
+    inv = db_session.get(Invoice, r.json()["id"])
+    t = db_session.get(Tenant, auth["tenant"]["id"])
+    fecha = cr_now()
+    cons = "00100001010000000001"
+    p = direct_payload(db_session, t, inv, "FE", cons, build_clave("506", fecha, t.tax_id, cons, "1", "12345678"), fecha)
+    root = xml44.build_comprobante(p)
+    assert xml44.text(root, "ResumenFactura", "TotalServGravados") == "500.00000"
+    assert xml44.text(root, "ResumenFactura", "TotalMercanciasGravadas") == "1500.00000"
+    assert xml44.text(root, "ResumenFactura", "TotalGravado") == "2000.00000"
+    assert xsd.validate("FE", sign_simulated(root)) == []

@@ -35,6 +35,14 @@ SAFE_PARSER = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=
 Q5 = Decimal("0.00001")
 # unidades de servicio (para separar servicios de mercancias en el resumen). A confirmar con el validador de pruebas.
 SERVICE_UNITS = {"Sp", "Spe", "St", "Os", "h", "d", "Al", "Alc", "Cm", "I"}
+
+
+def _is_service(cabys, unit) -> bool:
+    """Servicio si el CABYS empieza con 5 a 9 (como lo valida Hacienda); sin CABYS valido, por la unidad."""
+    code = re.sub(r"\D", "", str(cabys or ""))
+    if len(code) == 13:
+        return code[0] in "56789"
+    return unit in SERVICE_UNITS
 # CodigoTarifaIVA (Nota 8.1) -> tarifa
 RATE_OF_CODE = {
     "01": Decimal(0),
@@ -566,7 +574,9 @@ def build_comprobante(p: dict) -> etree._Element:
         b.el(ld, "ImpuestoAsumidoEmisorFabrica", m5(0))
         b.el(ld, "ImpuestoNeto", m5(tax))
         b.el(ld, "MontoTotalLinea", m5(subtotal + tax))
-        service = ln["unit"] in SERVICE_UNITS
+        # Hacienda clasifica servicio/mercancia por el CABYS (secciones 5-9 de la CPC = servicios, 0-4 = bienes), no por la
+        # unidad: con la unidad, una «Instalacion» en «Unid» caia en mercancias y Hacienda rechazaba con -111 (05/11, FE 5)
+        service = _is_service(ln.get("cabys"), ln["unit"])
         exento = rcode == "10"
         tot[("s" if service else "m") + ("e" if exento else "g")] += monto_total
         tot["desc"] += descuento
