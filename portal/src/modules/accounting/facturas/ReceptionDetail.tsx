@@ -136,9 +136,9 @@ export default function ReceptionDetail() {
       {d.responses.map((r) => (
         <li key={r.id}>
           <b>Intento {r.attempt}</b> · {ACTION_LABEL[{ "1": "aceptada", "2": "parcial", "3": "rechazada" }[r.message_code] || ""]} · {ivaLabel(r.iva_condition)} · <span className="badge badge--muted">{r.mode}</span>
-          {/* 05/11: el consecutivo 05 se confundia con el numero de la factura del proveedor. Son dos cosas: la respuesta lleva
-             SU propio numero (lo exige Hacienda) y va sobre la CLAVE de la factura del proveedor, la misma del XML */}
-          <div className="muted" style={{ fontSize: 12.5 }}>Sobre la factura del proveedor con clave <span className="mono" style={{ wordBreak: "break-all" }}><ClaveVisible clave={d.clave} /></span> · número de esta respuesta <span className="mono" title="Consecutivo propio del mensaje receptor (tipo 05 aceptación, 06 parcial, 07 rechazo): no es el número de la factura">{r.consecutive}</span></div>
+          {/* 05/11: la clave del proveedor va DENTRO del archivo que se manda a Hacienda (campo Clave), no aqui; aqui solo el
+             numero propio de esta respuesta (NumeroConsecutivoReceptor: 05 aceptacion, 06 parcial, 07 rechazo) */}
+          <div className="muted" style={{ fontSize: 12.5 }}>Número de esta respuesta <span className="mono" title="Consecutivo propio del mensaje receptor (05 aceptación, 06 parcial, 07 rechazo). La clave de la factura del proveedor va dentro del archivo que se envía a Hacienda.">{r.consecutive}</span></div>
           <div className="muted">Respondido · {when(r.created_at)}{r.sent_at ? ` → Enviado · ${when(r.sent_at)}` : ""}</div>
           <div>Hacienda: <Badge status={r.status} />{r.hacienda_detail && !parseHacienda(r.hacienda_detail).items.length ? ` ${r.hacienda_detail}` : ""}{r.last_error ? <span style={{ color: "var(--bad)" }}> · {r.last_error}</span> : null}</div>
           {r.hacienda_detail && parseHacienda(r.hacienda_detail).items.length > 0 && <div style={{ marginTop: 6 }}><HaciendaMensaje msg={r.hacienda_detail} status={r.status === "aceptado" ? "aceptada" : r.status} /></div>}
@@ -176,9 +176,9 @@ export default function ReceptionDetail() {
               <dt>Tipo</dt><dd>{DOC_TYPES[d.doc_type] || d.doc_type}{d.schema_version ? ` · v${d.schema_version}` : ""}</dd>
               <dt>Clave</dt><dd style={{ display: "flex", gap: 6, alignItems: "flex-start", minWidth: 0 }}>
                 {/* 50 digitos no caben: por partes (pais+fecha, emisor, consecutivo, situacion, codigo); copiar va sin espacios */}
-                <span className="mono" style={{ fontSize: 11.5, wordBreak: "break-all", minWidth: 0 }} title="En negrita, el consecutivo del proveedor: va dentro de la clave"><ClaveVisible clave={d.clave} /></span>
+                <span className="mono" style={{ fontSize: 11.5, wordBreak: "break-all", minWidth: 0 }} title="Clave del comprobante del proveedor, tal cual viene en su XML"><ClaveVisible clave={d.clave} /></span>
                 <button className="btn btn--ghost btn--sm" style={{ flex: "none" }} aria-label="Copiar clave" onClick={() => { navigator.clipboard.writeText(d.clave); toast("Clave copiada"); }}><Icon d={I.copy} size={12} /></button></dd>
-              <dt>Consecutivo</dt><dd><span className="mono">{d.consecutive || "—"}</span>{d.consecutive && d.clave.slice(21, 41) === d.consecutive && <span className="muted" style={{ fontSize: 12 }}> · va dentro de la clave (en negrita)</span>}</dd>
+              <dt>Consecutivo</dt><dd><span className="mono">{d.consecutive || "—"}</span></dd>
               <dt>Fecha</dt><dd>{fmtDate(d.issue_date)}</dd>
               <dt>Moneda</dt><dd>{cur}{cur !== "CRC" ? ` · TC ${n(d.fx_rate)}` : ""}</dd>
               {d.reference_clave && <><dt>Referencia</dt><dd className="mono" style={{ fontSize: 11.5 }}>{d.reference_clave}</dd></>}
@@ -333,9 +333,8 @@ export default function ReceptionDetail() {
   );
 }
 
-/* La clave seguida (igual que en el XML y en la respuesta) con el consecutivo del proveedor en negrita: los digitos 22 a 41
-   de la clave SON su consecutivo, asi se ve que la respuesta va sobre la misma factura (05/11). */
+/* La clave tal cual viene en el XML del proveedor, sin marcas: resaltar una parte (05/11) hacia creer que Crimson le
+   habia metido el consecutivo; los 50 digitos se muestran y se envian a Hacienda exactamente como llegaron. */
 function ClaveVisible({ clave }: { clave: string }) {
-  if (!/^\d{50}$/.test(clave)) return <>{clave}</>;
-  return <>{clave.slice(0, 21)}<b style={{ color: "var(--text)" }}>{clave.slice(21, 41)}</b>{clave.slice(41)}</>;
+  return <>{clave}</>;
 }
