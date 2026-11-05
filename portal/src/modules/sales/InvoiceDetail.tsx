@@ -1,5 +1,5 @@
 /* Detalle de factura: editor + bloque de pagos + modal de pago + enlace de pago (WhatsApp / copiar / abrir). */
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney, parseTs, type Invoice } from "../../lib/api";
 import { useSession } from "../../app/session";
@@ -7,6 +7,7 @@ import { Badge, Card, Field, I, Icon, Modal } from "../../ui/components";
 import DocEditor from "./DocEditor";
 import { CORTE_AVISO, MarkExternal } from "./PorEmitir";
 import AuthLink from "../../ui/AuthLink";
+import { HaciendaMensaje } from "../../ui/HaciendaMensaje";
 import { hoyCR } from "../../lib/fechaCR";
 
 const METHODS = [["efectivo", "Efectivo"], ["sinpe", "SINPE Móvil"], ["transferencia", "Transferencia"], ["tarjeta", "Tarjeta"], ["onvo", "ONVO (en línea)"], ["paypal", "PayPal"]];
@@ -158,10 +159,11 @@ export default function InvoiceDetail() {
       )}
 
       {xmls && (
-        <Modal title="Documentos electrónicos (XML)" onClose={() => setXmls(null)} foot={<button className="btn btn--ghost" onClick={() => setXmls(null)}>Cerrar</button>}>
+        <Modal title="Documentos electrónicos (XML)" wide onClose={() => setXmls(null)} foot={<button className="btn btn--ghost" onClick={() => setXmls(null)}>Cerrar</button>}>
           {xmls.length === 0 ? <p className="muted">Aún no se ha emitido. Configurá el modo en Ajustes → Hacienda y presioná “Emitir a Hacienda”.</p> : (
             <table className="table"><thead><tr><th>Tipo</th><th>Consecutivo</th><th>Estado</th><th>Documento</th><th>Respuesta</th></tr></thead>
-              <tbody>{xmls.map((x) => <tr key={x.id}><td style={{ fontWeight: 600 }}>{x.doc_type}</td><td className="mono muted">{x.consecutive}</td><td><Badge status={x.status === "aceptada" ? "confirmado" : x.status === "rechazada" ? "fallido" : x.status === "error" ? "error" : "pendiente"} />{x.mode && <span className="badge badge--muted" style={{ marginLeft: 4 }}>{MODE_TAG[x.mode] || x.mode}</span>}{(x.last_error || x.message) && <div className="meta" style={{ textTransform: "none" }}>{x.last_error || x.message}</div>}</td><td>{x.has_document && <AuthLink path={`/invoices/${id}/xml/${x.id}/document`} download={`${x.doc_type}-${x.consecutive}.xml`}>Descargar</AuthLink>}</td><td>{x.has_response && <AuthLink path={`/invoices/${id}/xml/${x.id}/response`} download={`respuesta-${x.consecutive}.xml`}>Descargar</AuthLink>}</td></tr>)}</tbody></table>
+              <tbody>{xmls.map((x) => <Fragment key={x.id}><tr><td style={{ fontWeight: 600 }}>{x.doc_type}</td><td className="mono muted">{x.consecutive}</td><td><Badge status={x.status === "aceptada" ? "confirmado" : x.status === "rechazada" ? "fallido" : x.status === "error" ? "error" : "pendiente"} />{x.mode && <span className="badge badge--muted" style={{ marginLeft: 4 }}>{MODE_TAG[x.mode] || x.mode}</span>}</td><td>{x.has_document && <AuthLink path={`/invoices/${id}/xml/${x.id}/document`} download={`${x.doc_type}-${x.consecutive}.xml`}>Descargar</AuthLink>}</td><td>{x.has_response && <AuthLink path={`/invoices/${id}/xml/${x.id}/response`} download={`respuesta-${x.consecutive}.xml`}>Descargar</AuthLink>}</td></tr>
+                {(x.last_error || x.message) && <tr><td colSpan={5} style={{ paddingTop: 0 }}>{x.message ? <HaciendaMensaje msg={x.message} status={x.status} /> : <div style={{ fontSize: 13, color: "var(--bad)" }}>{x.last_error}</div>}</td></tr>}</Fragment>)}</tbody></table>
           )}
         </Modal>
       )}
