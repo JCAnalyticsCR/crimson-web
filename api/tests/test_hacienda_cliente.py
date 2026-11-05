@@ -220,3 +220,124 @@ def test_token_que_falla_no_cuenta_como_post(client, auth, db_session, monkeypat
     send_response(db_session, rid)
     db_session.refresh(r)
     assert r.status == "error" and r.attempts == 1 and "Fygaro" in r.last_error and len(fake.posts) == 1
+
+
+# ---------------------------------------------------------------- 05/11: ruta de Pruebas, guarda por host y sonda
+def test_is_production_url_por_host_exacto():
+    from app.providers.hacienda.endpoints import is_production_url
+
+    for url in (
+        "https://api.comprobanteselectronicos.go.cr/recepcion/v1/recepcion",
+        "https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/recepcion/123",  # la ruta muerta tambien es ese host
+        "https://idp.comprobanteselectronicos.go.cr/auth/realms/rut/protocol/openid-connect/token",
+        "https://API.Comprobanteselectronicos.GO.CR/recepcion/v1/",
+    ):
+        assert is_production_url(url), url
+    for url in (
+        "https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1/recepcion",
+        "https://idp.comprobanteselectronicos.go.cr/auth/realms/rut-stag/protocol/openid-connect/token",
+        "https://api-sandbox.comprobanteselectronicos.go.cr.evil.example/recepcion/v1/",
+        "https://api.hacienda.go.cr/fe/ae",
+    ):
+        assert not is_production_url(url), url
+
+
+def test_autocomprobacion_de_endpoints():
+    from app.providers.hacienda.endpoints import ENDPOINTS, is_production_url
+
+    for k in ("token", "logout", "api"):
+        assert not is_production_url(ENDPOINTS["pruebas"][k])
+        assert is_production_url(ENDPOINTS["produccion"][k])
+    assert ENDPOINTS["pruebas"]["api"] == "https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1/"
+    assert FakeHacienda.API == ENDPOINTS["pruebas"]["api"]
+
+
+def test_guarda_del_cliente_si_pruebas_apunta_a_produccion(monkeypatch):
+    from app.providers.hacienda import endpoints
+
+    fake = FakeHacienda()
+    monkeypatch.setitem(endpoints.ENDPOINTS["pruebas"], "api", "https://api.comprobanteselectronicos.go.cr/recepcion/v1/")
+    with pytest.raises(ProductionBlocked):
+        _client(fake)
+    assert fake.tokens == [] and fake.posts == [] and fake.gets == [] and fake.production_hits == []
+
+
+def test_400_no_ha_sido_recibido_sigue_siendo_retry():
+    from app.providers.hacienda.client import not_received
+
+    fake = FakeHacienda(not_found_style="400")
+    c = _client(fake)
+    k = cl(11)
+    st = c.get_estado(k)
+    assert st.kind == "retry" and st.http_status == 400 and "no ha sido recibido" in st.cause  # sync no cambia
+    assert not_received(st, k)
+    st2 = c.get_estado(f"{k}-00100001050000000001")
+    assert st2.kind == "retry" and not not_received(st2, f"{k}-00100001050000000001")
+    from app.providers.hacienda.client import StatusResult
+
+    assert not_received(StatusResult("retry", http_status=400, cause=f"El comprobante {k} no ha sido recibído"), k)
+    assert not not_received(StatusResult("retry", http_status=404, cause="no ha sido recibido"), k)
+    assert fake.production_hits == []
+
+
+def test_403_del_gateway_en_consulta_y_envio():
+    fake = FakeHacienda(gateway_403=True)
+    c = _client(fake)
+    st = c.get_estado(cl(12))
+    assert st.kind == "retry" and st.gateway and st.http_status == 403 and "entrada de Hacienda" in st.detail
+    assert st.retry_after is None
+    assert len(fake.gets) == 1
+    r = c.post_recepcion({"clave": cl(12), "fecha": "x", "emisor": {}, "comprobanteXml": "eA=="})
+    assert r.kind == "rejected" and r.gateway and r.http_status == 403 and "revise que las credenciales" not in r.cause and "no llegó" in r.cause
+    assert len(fake.posts) == 1 and fake.production_hits == []
+    # 403 sin la cabecera del gateway: el texto de siempre
+    fake2 = FakeHacienda()
+    fake2.post_plan = [(403, {})]
+    r2 = _client(fake2).post_recepcion({"clave": cl(13), "fecha": "x", "emisor": {}, "comprobanteXml": "eA=="})
+    assert r2.kind == "rejected" and not r2.gateway and "negó el acceso" in r2.cause
+
+
+def test_probe_estado_nunca_lanza():
+    k = cl(14)
+    fake = FakeHacienda()
+    assert _client(fake).probe_estado(k).status == "ok"
+    fake = FakeHacienda(not_found_style="400")
+    assert _client(fake).probe_estado(k).status == "ok"
+    fake = FakeHacienda(gateway_403=True)
+    p = _client(fake).probe_estado(k)
+    assert (p.status, p.motivo) == ("falla", "ruta")
+    fake = FakeHacienda()
+    fake.get_plan[k] = [403]
+    p = _client(fake).probe_estado(k)
+    assert (p.status, p.motivo) == ("falla", "acceso")
+    fake = FakeHacienda()
+    malo = HaciendaClient("pruebas", USER, "otra-clave", tenant_id=7, http=httpx.Client(transport=httpx.MockTransport(fake.handler)))
+    p = malo.probe_estado(k)
+    assert (p.status, p.motivo) == ("falla", "credenciales") and "otra-clave" not in p.detail and USER not in p.detail
+    fake = FakeHacienda()
+    fake.get_plan[k] = [401, 401]
+    p = _client(fake).probe_estado(k)
+    assert (p.status, p.motivo) == ("falla", "token")
+    fake = FakeHacienda()
+    fake.get_plan[k] = [429]
+    assert _client(fake).probe_estado(k).motivo == "esperar"
+    fake = FakeHacienda()
+    fake.get_plan[k] = [503]
+    p = _client(fake).probe_estado(k)
+    assert p.status == "aviso" and p.http_status == 503
+    fake = FakeHacienda()
+    fake.get_plan[k] = [(302, {"Location": "https://otra.example/"})]
+    assert _client(fake).probe_estado(k).motivo == "redireccion"
+    fake = FakeHacienda()
+    fake.get_plan[k] = [(400, {"X-Error-Cause": "Clave con formato invalido"})]
+    p = _client(fake).probe_estado(k)
+    assert p.status == "aviso" and "formato" in p.detail
+    assert fake.production_hits == []
+
+
+def test_actividades_siguen_con_el_doble(monkeypatch):
+    from app.providers.hacienda.client import lookup_activities
+
+    fake = FakeHacienda().install(monkeypatch)
+    assert lookup_activities("3102000000")[0]["code"] == "6202.0"
+    assert fake.production_hits == []

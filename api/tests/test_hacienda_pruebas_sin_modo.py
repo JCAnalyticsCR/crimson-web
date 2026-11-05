@@ -16,11 +16,19 @@ def test_cuando_corre_la_prueba():
     assert "--confirmo-pruebas" in mode_problem("ninguno", True, False)
 
 
+def _cabys_servicio(monkeypatch):
+    from app.services import cabys
+
+    monkeypatch.setattr(cabys, "find_code", lambda code: {"code": code, "description": "Servicio de prueba", "tax_rate": 13.0})
+
+
 def test_smoke_sin_modo_no_toca_ventas_ni_modo(client, auth, db_session, monkeypatch, p12_empresa):
     from app.models import BillingGroup, Invoice, Tenant
     from app.providers.hacienda.provider import HaciendaDirectProvider
     from app.services import hacienda_config as hc
     from app.tools.hacienda_smoke import smoke
+
+    _cabys_servicio(monkeypatch)
 
     fake = FakeHacienda(sequence=["aceptado"]).install(monkeypatch)
     assert load_credentials(client, *p12_empresa).status_code == 200  # Ajustes -> Hacienda -> Credenciales -> Pruebas
@@ -37,7 +45,7 @@ def test_smoke_sin_modo_no_toca_ventas_ni_modo(client, auth, db_session, monkeyp
     def esperar(prov, ref, label):
         return prov.get_status(ref).kind
 
-    assert smoke(db_session, t, "4321000000000", HaciendaDirectProvider(t, "pruebas", creds), wait=esperar) == 0
+    assert smoke(db_session, t, "8399000000000", HaciendaDirectProvider(t, "pruebas", creds), wait=esperar) == 0
     # FE de prueba y mensaje receptor aceptados en el ambiente de PRUEBAS (nunca produccion)
     assert len(fake.posts) == 2 and not fake.production_hits and fake.tokens
     db_session.refresh(t)
@@ -57,3 +65,45 @@ def test_modo_pruebas_pide_confirmacion(client, auth):
     assert r.status_code == 200 and r.json()["mode"] == "pruebas"
     assert client.put("/settings/hacienda/mode", json={"mode": "pruebas"}).status_code == 200  # ya estaba: no cambia nada
     assert client.put("/settings/hacienda/mode", json={"mode": "none"}).json()["mode"] == "ninguno"  # salir no pide nada
+
+
+def _smoke_listo(client, auth, db_session, monkeypatch, p12_empresa, **fake_kw):
+    from app.models import Tenant
+    from app.providers.hacienda.provider import HaciendaDirectProvider
+    from app.services import hacienda_config as hc
+
+    _cabys_servicio(monkeypatch)
+    fake = FakeHacienda(sequence=["aceptado"], **fake_kw).install(monkeypatch)
+    assert load_credentials(client, *p12_empresa).status_code == 200
+    t = db_session.get(Tenant, auth["tenant"]["id"])
+    creds, _ = hc.credentials_status(db_session, t, "pruebas")
+    return fake, t, HaciendaDirectProvider(t, "pruebas", creds)
+
+
+def _t01(db_session, tid):
+    from app.models import BillingGroup
+
+    return db_session.query(BillingGroup).filter(BillingGroup.tenant_id == tid, BillingGroup.doc_type == "T01").one().current
+
+
+def test_smoke_con_403_del_gateway_no_envia_ni_gasta(client, auth, db_session, monkeypatch, p12_empresa, capsys):
+    from app.tools.hacienda_smoke import smoke
+
+    fake, t, prov = _smoke_listo(client, auth, db_session, monkeypatch, p12_empresa, gateway_403=True)
+    antes = _t01(db_session, t.id)
+    assert smoke(db_session, t, "8399000000000", prov, wait=lambda p, r, label: "aceptado") == 1
+    assert fake.posts == [] and fake.production_hits == [] and _t01(db_session, t.id) == antes
+    assert "403" in capsys.readouterr().out
+
+
+def test_smoke_perfil_incompleto_da_mensaje(client, auth, db_session, monkeypatch, p12_empresa, capsys):
+    from app.models import FiscalProfile
+    from app.tools.hacienda_smoke import smoke
+
+    fake, t, prov = _smoke_listo(client, auth, db_session, monkeypatch, p12_empresa)
+    prof = db_session.query(FiscalProfile).one()
+    prof.other_signs = None
+    db_session.commit()
+    assert smoke(db_session, t, "8399000000000", prov, wait=lambda p, r, label: "aceptado") == 1  # sin TypeError
+    out = capsys.readouterr().out
+    assert "otras señas" in out and fake.posts == []

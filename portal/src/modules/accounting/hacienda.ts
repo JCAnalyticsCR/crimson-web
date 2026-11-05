@@ -108,6 +108,16 @@ export type CredBlock = {
   last_test_steps?: TestStep[] | null;
 };
 
+/** «Prueba real con Hacienda» (ambiente de Pruebas): una corrida, sin XML (solo banderas has_*) ni secretos. */
+export type TestRunState = "firmado" | "enviado" | "procesando" | "aceptado" | "rechazado" | "error" | "no_concluyente" | "sin_respuesta";
+export type TestRun = {
+  id: number; state: TestRunState; live: boolean; steps: TestStep[]; clave: string | null; consecutive: string | null; mr_consecutive: string | null;
+  cabys: string | null; con_mr: boolean; fe_estado: string | null; fe_detalle: string | null; fe_post_cause: string | null; fe_resent: boolean;
+  mr_estado: string | null; mr_detalle: string | null; mr_sent_at?: string | null; fe_llego?: boolean; created_at: string; fe_body_sent_at: string | null; finished_at: string | null; last_check_at: string | null;
+  polls: number; has_fe_xml: boolean; has_fe_respuesta: boolean; has_mr_xml: boolean; has_mr_respuesta: boolean; created_by_name: string | null;
+};
+export type TestRunList = { runs: TestRun[]; can_run: boolean; can_configure: boolean; blocked_reason: string | null; cabys_sugerido: string | null };
+
 /** Plazo: "quedan N días hábiles" / "vence hoy" / "vencido". */
 export const plazo = (d: number | null | undefined) => (d === null || d === undefined ? "—" : d < 0 ? "Vencido" : d === 0 ? "Vence hoy" : `Quedan ${d} día${d === 1 ? "" : "s"} hábil${d === 1 ? "" : "es"}`);
 

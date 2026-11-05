@@ -40,6 +40,7 @@ from ..services import hacienda_config as hc
 from ..services.bitacora import audit_change, snapshot
 from ..services.cr_geo import geo_catalog
 from ..services.documents import audit
+from ..services.hacienda_prueba import sonda_clave
 
 router = APIRouter(tags=["hacienda"])
 ENVS = ("pruebas", "produccion")
@@ -195,8 +196,9 @@ def put_mode(data: ModeIn, p: Principal = Depends(require("settings", "configura
     if data.mode == "produccion":
         raise HTTPException(422, "Producción se activa con el interruptor")
     antes = hc.hacienda_mode(db, p.tenant)
-    # Pruebas en la empresa real quema cada venta (plan 4.6): se confirma por escrito. Para probar la conexion sin
-    # tocar las ventas: python -m app.tools.hacienda_smoke --sin-modo (no cambia el modo)
+    # Pruebas en la empresa real quema cada venta (plan 4.6): se confirma por escrito. Para probar Hacienda sin tocar
+    # las ventas no hace falta cambiar el modo: «Probar conexion» y «Prueba real con Hacienda» (routers/
+    # hacienda_prueba_real.py) usan las credenciales de Pruebas con la empresa en su modo de siempre
     if data.mode == "pruebas" and antes != "pruebas" and (data.confirm_text or "").strip().upper() != "PRUEBAS":
         raise HTTPException(422, f"Escriba PRUEBAS para confirmar: {PRUEBAS_RIESGO}")
     st = dict(p.tenant.settings or {})
@@ -434,10 +436,52 @@ def delete_credentials(environment: str, data: AdminPasswordIn, p: Principal = D
     return hc.credentials_block(db, p.tenant, env)
 
 
+CONSULTA = "Consulta de estado en Hacienda"
+
+
+def _probe_step(client: HaciendaClient, tax_id: str | None, paso) -> str | None:
+    """Paso «Consulta de estado en Hacienda» (solo Pruebas). Devuelve el texto de la falla o None."""
+    pr = client.probe_estado(sonda_clave(tax_id))
+    if pr.status == "ok":
+        paso(
+            CONSULTA,
+            "ok",
+            "Hacienda respondió la consulta de una clave de prueba que no existe, como se esperaba: la dirección de envío y consulta de Pruebas funciona. No se envió ningún comprobante.",
+        )
+        return None
+    if pr.status == "falla":
+        if pr.motivo == "ruta":
+            m = re.search(r"\(403 ([^)]+)\)", pr.detail or "")
+            txt = (
+                f"La entrada de Hacienda rechazó la consulta antes de revisarla (403 {m.group(1) if m else 'gateway'}). No es un problema de su usuario, su contraseña ni su "
+                "certificado: la dirección del ambiente configurada en Crimson no es la que Hacienda atiende y con ella ningún comprobante llegaría. Avise a soporte de Crimson."
+            )
+        elif pr.motivo == "acceso":
+            txt = "Hacienda negó el acceso a la consulta (403). Revise que el usuario y la contraseña sean de Pruebas."
+        elif pr.motivo == "token":
+            txt = "Hacienda aceptó el inicio de sesión, pero no el permiso para consultar comprobantes (401). Revise en ATV que el usuario tenga habilitada la API de comprobantes de Pruebas."
+        else:
+            txt = pr.detail
+        paso(CONSULTA, "falla", txt)
+        return txt
+    if pr.motivo == "esperar":
+        txt = "Hacienda pidió esperar. Vuelva a probar en unos minutos."
+    elif pr.motivo == "sin_respuesta":
+        txt = f"Hacienda no respondió la consulta{f' (código {pr.http_status})' if pr.http_status else ''}. El inicio de sesión sí funcionó; vuelva a probar más tarde."
+    else:
+        txt = pr.detail
+    paso(CONSULTA, "aviso", txt)
+    return None
+
+
 @router.post("/settings/hacienda/credentials/{environment}/test")
 def test_credentials(environment: str, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
     """04/11: la prueba dice QUE probo, paso por paso (antes solo "Prueba terminada" y no se sabia si funcionaba):
     credenciales, usuario del ambiente, certificado con su PIN, cedula del certificado e inicio de sesion en Hacienda.
+    05/11: en Pruebas, despues del token, una consulta de estado de una clave de sonda que no existe (sin consecutivo,
+    sin enviar nada): asi se detecta una ruta de API que Hacienda no atiende (el 403 del gateway que solo iniciar sesion
+    no mostraba). En Produccion esa consulta no se hace. El logout va siempre (finally); ojo: saca del cache el token
+    que comparte el worker con la misma llave (como antes; en Simulado no afecta).
     No envia ningun comprobante: eso tambien se dice. Los pasos quedan guardados para verlos despues."""
     env = _env(environment)
     hacienda_test_limiter.hit(f"{p.tenant.id}:{env}")
@@ -476,9 +520,17 @@ def test_credentials(environment: str, p: Principal = Depends(require("settings"
                 instance = instance_fingerprint()
             client = HaciendaClient(env, creds.username, creds.password, tenant_id=p.tenant.id, production_instance=instance)
             client.token(force=True)
-            client.logout()
-            paso("Inicio de sesión en Hacienda", "ok", f"Hacienda aceptó el usuario y la contraseña en {amb} y cerró la sesión")
-            ok, detail = True, f"Conectado al ambiente de {'pruebas' if env == 'pruebas' else 'producción'} de Hacienda"
+            try:
+                paso("Inicio de sesión en Hacienda", "ok", f"Hacienda aceptó el usuario y la contraseña en {amb}")
+                ok, detail = True, f"Conectado al ambiente de {'pruebas' if env == 'pruebas' else 'producción'} de Hacienda"
+                if env == "pruebas":
+                    falla = _probe_step(client, p.tenant.tax_id, paso)
+                    if falla:
+                        ok, detail = False, falla
+                else:
+                    paso(CONSULTA, "no_probado", "En Producción esta prueba solo inicia y cierra sesión; la consulta de estado se prueba en Pruebas.")
+            finally:
+                client.logout()
         except CertError as e:
             detail = f"Certificado: {e}"
             paso("Certificado y PIN", "falla", str(e))
@@ -489,7 +541,7 @@ def test_credentials(environment: str, p: Principal = Depends(require("settings"
     paso(
         "Envío de comprobantes",
         "no_probado",
-        "Esta prueba no envía ningún comprobante: confirma credenciales, certificado y conexión. La emisión se confirma con la primera factura emitida en este ambiente.",
+        "Esta prueba no envía comprobantes. Para confirmar que Hacienda acepta una factura use «Prueba real con Hacienda» en esta misma página.",
     )
     hist = dict(p.tenant.settings or {})
     hist.setdefault("hacienda_tests", {})

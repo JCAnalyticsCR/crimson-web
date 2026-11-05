@@ -6,6 +6,7 @@ import { api, fmtDate, parseTs } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Field, I, Icon, Loading, Modal } from "../../ui/components";
 import { MODE_LABEL, type CredBlock, type HaciendaState, type TestStep } from "../accounting/hacienda";
+import HaciendaPruebaReal from "./HaciendaPruebaReal";
 
 type Geo = { code: string; name: string; cantons: { code: string; name: string }[] }[];
 type Lookup = { code: string; description: string | null; registered: boolean }[];
@@ -20,10 +21,12 @@ const PASO: Record<TestStep["status"], { icon: string; color: string; label: str
   aviso: { icon: "!", color: "var(--warn)", label: "Revisar" },
   no_probado: { icon: "–", color: "var(--muted, #8a858f)", label: "No se probó" },
 };
-function TestResult({ ok, at, steps, envName }: { ok: boolean | null; at: string | null; steps: TestStep[]; envName: string }) {
+/* también lo usa «Prueba real con Hacienda» (HaciendaPruebaReal.tsx) con su propio título */
+export function TestResult({ ok, at, steps, envName, title }: { ok: boolean | null; at: string | null; steps: TestStep[]; envName?: string; title?: string }) {
+  const amb = envName ? ` (${envName})` : "";
   return (
     <div role="status" style={{ border: `1px solid ${ok ? "var(--ok)" : "var(--bad)"}`, borderRadius: 10, padding: "10px 14px", margin: "10px 0" }}>
-      <b style={{ color: ok ? "var(--ok)" : "var(--bad)" }}>{ok ? `✓ La conexión con Hacienda (${envName}) funciona` : `✗ La conexión con Hacienda (${envName}) no funciona todavía`}</b>
+      <b style={{ color: ok ? "var(--ok)" : "var(--bad)" }}>{title ?? (ok ? `✓ La conexión con Hacienda${amb} funciona` : `✗ La conexión con Hacienda${amb} no funciona todavía`)}</b>
       {at && <span className="muted" style={{ fontSize: 12 }}> · {parseTs(at).toLocaleString("es-CR")}</span>}
       <ol style={{ listStyle: "none", padding: 0, margin: "8px 0 0", display: "flex", flexDirection: "column", gap: 6, fontSize: 13 }}>
         {steps.map((x, i) => (
@@ -93,7 +96,7 @@ export default function HaciendaTab() {
 
   const setMode = (mode: string, confirm_text?: string) => call(() => api("/settings/hacienda/mode", { method: "PUT", json: { mode, confirm_text } }), "Modo actualizado");
   /* Pruebas en la empresa real manda cada venta al ambiente de pruebas: se confirma escribiendo PRUEBAS. Para probar
-     la conexion sin tocar las ventas: credenciales de Pruebas + "Probar conexion" + hacienda_smoke --sin-modo. */
+     Hacienda sin tocar las ventas: credenciales de Pruebas + "Probar conexion" + "Prueba real con Hacienda". */
   const pickMode = (k: string) => (k === "pruebas" && st.mode !== "pruebas" ? setPruebasTxt("") : setMode(k));
   const saveProfile = () => call(() => api("/settings/hacienda/profile", { method: "PUT", json: { ...prof, commercial_name: prof.commercial_name || null, phone: prof.phone || null, district_name: prof.district_name || null, barrio: prof.barrio || null } }), "Identificación guardada");
   const addAct = () => call(() => api("/settings/hacienda/activities", { method: "POST", json: { code: newAct.code.trim(), description: newAct.description.trim() || null } }).then((r) => { setNewAct({ code: "", description: "" }); return r; }), "Actividad agregada");
@@ -243,6 +246,8 @@ export default function HaciendaTab() {
         )}
       </Card>
 
+      {st.credentials.pruebas.source !== "ninguna" && <HaciendaPruebaReal canConfigure={st.can_configure} />}
+
       <Card title="Consecutivos fiscales" flush extra={!ro && <button className="btn btn--soft btn--sm" onClick={() => setConfirmPw("")}>Confirmar consecutivos</button>}>
         <div style={{ overflowX: "auto" }}>
           <table className="table"><thead><tr><th>Tipo</th><th>Sucursal</th><th>Terminal</th><th className="num">Último usado</th><th>Siguiente</th><th>Fygaro</th><th /></tr></thead>
@@ -271,7 +276,7 @@ export default function HaciendaTab() {
       {pruebasTxt !== null && (
         <Modal title="Pasar a modo Pruebas" onClose={() => setPruebasTxt(null)} foot={<><button className="btn btn--ghost" onClick={() => setPruebasTxt(null)}>Cancelar</button><button className="btn btn--danger" disabled={busy || pruebasTxt.trim().toUpperCase() !== "PRUEBAS"} onClick={async () => { await setMode("pruebas", pruebasTxt.trim()); setPruebasTxt(null); }}>Pasar a Pruebas</button></>}>
           <div className="acc-warn" style={{ marginTop: 0 }}>Con el modo Pruebas, <b>cada venta real se emitiría al ambiente de pruebas y después no se podría emitir en producción</b>.</div>
-          <p className="muted" style={{ fontSize: 13 }}>Para probar la conexión con Hacienda sin tocar las ventas no hace falta cambiar el modo: cargue las credenciales de Pruebas abajo y use «Probar conexión»; la prueba completa la corre el equipo técnico sin cambiar el modo. Si igual quiere pasar a Pruebas, escriba <b>PRUEBAS</b>.</p>
+          <p className="muted" style={{ fontSize: 13 }}>Para probar Hacienda sin tocar las ventas no hace falta cambiar el modo: cargue las credenciales de Pruebas, use «Probar conexión» y luego «Prueba real con Hacienda». Si igual quiere pasar a Pruebas, escriba <b>PRUEBAS</b>.</p>
           <Field label="Confirmación"><input className="input" autoFocus value={pruebasTxt} onChange={(e) => setPruebasTxt(e.target.value)} /></Field>
         </Modal>
       )}

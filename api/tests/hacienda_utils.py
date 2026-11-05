@@ -10,7 +10,7 @@ import os
 import re
 import secrets
 from datetime import UTC, datetime, timedelta
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 from cryptography import x509
@@ -142,22 +142,34 @@ class FakeHacienda:
     """IdP + API de recepcion de Hacienda en memoria (httpx.MockTransport). Programable: respuestas del POST,
     secuencia de estados del GET, errores. Registra todo lo que recibe; falla ante cualquier URL de produccion."""
 
-    API = "https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/"
+    API = "https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1/"
     TOKEN = "https://idp.comprobanteselectronicos.go.cr/auth/realms/rut-stag/protocol/openid-connect/token"
 
-    def __init__(self, username: str = "usuario-pruebas@ejemplo", password: str = "Clave-ATV-de-prueba!", sequence=("recibido", "procesando", "aceptado")):
+    def __init__(
+        self,
+        username: str = "usuario-pruebas@ejemplo",
+        password: str = "Clave-ATV-de-prueba!",
+        sequence=("recibido", "procesando", "aceptado"),
+        *,
+        gateway_403: bool = False,
+        not_found_style: str = "404",
+    ):
         self.username, self.password = username, password
         self.sequence = list(sequence)
         self.tokens: list[dict] = []
         self.posts: list[dict] = []
         self.gets: list[str] = []
         self.post_plan: list = []  # cada item: (status, headers) o "timeout"
-        self.get_plan: dict[str, list] = {}  # ref -> estados o (status_code,)
+        self.get_plan: dict[str, list] = {}  # ref -> estados, status_code o (status_code, headers)
         self.known: dict[str, int] = {}  # ref -> cuantas consultas lleva
         self.final: dict[str, str] = {}  # ref -> estado final forzado (aceptado/rechazado)
         self.production_hits: list[str] = []
         self.activities: list[dict] = [{"estado": "A", "codigo": "6202.0", "descripcion": "Actividad de prueba"}]
         self.fail_token = 0
+        # 05/11: la ruta del anexo (recepcion-sandbox) responde 403 del gateway de AWS a todo: gateway_403 lo imita
+        self.gateway_403 = gateway_403
+        # '404' (por defecto) o '400': el sandbox real responde 400 "El comprobante <clave> no ha sido recibido."
+        self.not_found_style = not_found_style
 
     def install(self, monkeypatch):
         from app.providers.hacienda import client as hclient
@@ -171,9 +183,23 @@ class FakeHacienda:
         xml = mensaje_hacienda(ref[:50], mensaje="3" if estado == "rechazado" else "1", detalle=detalle)
         return base64.b64encode(xml.encode()).decode()
 
+    @staticmethod
+    def is_production(url: str) -> bool:
+        """Deteccion propia por host (no importa endpoints: si endpoints se equivoca, el doble igual lo ve)."""
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+        if host == "api.comprobanteselectronicos.go.cr":
+            return True
+        return host == "idp.comprobanteselectronicos.go.cr" and parts.path.lower().startswith("/auth/realms/rut/")
+
+    def _not_found(self, ref: str) -> httpx.Response:
+        if self.not_found_style == "400":
+            return httpx.Response(400, headers={"X-Error-Cause": f"El comprobante {ref} no ha sido recibido."})
+        return httpx.Response(404)
+
     def handler(self, request: httpx.Request) -> httpx.Response:
         url = str(request.url)
-        if "/realms/rut/" in url or "/recepcion/v1/" in url:
+        if self.is_production(url):
             self.production_hits.append(url)
             raise AssertionError(f"La prueba intentó hablar con PRODUCCIÓN: {url}")
         if url.startswith("https://api.hacienda.go.cr/fe/ae"):
@@ -190,6 +216,16 @@ class FakeHacienda:
             return httpx.Response(200, json={"access_token": f"tok-{n}", "expires_in": 300, "refresh_token": f"ref-{n}", "refresh_expires_in": 36000})
         if url.endswith("/logout"):
             return httpx.Response(204)
+        if self.gateway_403 and url.startswith(self.API + "recepcion"):
+            if request.method == "POST":
+                self.posts.append(json.loads(request.content))
+            else:
+                self.gets.append(url[len(self.API + "recepcion/") :])
+            return httpx.Response(
+                403,
+                headers={"x-amzn-ErrorType": "IncompleteSignatureException", "Content-Type": "application/json"},
+                json={"message": "Authorization header requires 'Credential' parameter. (IncompleteSignature)"},
+            )
         if url == self.API + "recepcion" and request.method == "POST":
             body = json.loads(request.content)
             self.posts.append(body)
@@ -216,9 +252,11 @@ class FakeHacienda:
                 item = self.get_plan[ref].pop(0)
                 if isinstance(item, int):
                     return httpx.Response(item)
+                if isinstance(item, tuple):  # (status, headers)
+                    return httpx.Response(item[0], headers=item[1])
                 estado = item
             elif ref not in self.known:
-                return httpx.Response(404)
+                return self._not_found(ref)
             else:
                 i = self.known[ref]
                 self.known[ref] = i + 1

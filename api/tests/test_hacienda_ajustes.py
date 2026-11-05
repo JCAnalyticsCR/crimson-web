@@ -341,3 +341,82 @@ def test_actividad_quitada_se_puede_volver_a_agregar(client, auth):
     got = next(a for a in client.get("/fiscal/activities").json() if a["code"] == "4653.0")
     assert got["description"] == "Venta de cable estructurado"
     assert "4653.0" in client.get("/settings").json()["activity_codes"]
+
+
+# ---------------------------------------------------------------- 05/11: consulta de estado en «Probar conexión»
+def _grupos(db_session, tid):
+    from app.models import BillingGroup
+
+    return {g.doc_type: g.current for g in db_session.query(BillingGroup).filter(BillingGroup.tenant_id == tid)}
+
+
+def test_probar_conexion_consulta_estado_sin_enviar(client, auth, db_session, monkeypatch, p12_empresa, caplog):
+    import logging
+
+    from tests.hacienda_utils import FakeHacienda
+
+    caplog.set_level(logging.DEBUG)
+    fake = FakeHacienda().install(monkeypatch)
+    load_credentials(client, *p12_empresa)
+    antes = _grupos(db_session, auth["tenant"]["id"])
+    r = client.post("/settings/hacienda/credentials/pruebas/test")
+    assert r.status_code == 200 and r.json()["ok"], r.text
+    paso = next(x for x in r.json()["steps"] if x["label"] == "Consulta de estado en Hacienda")
+    assert paso["status"] == "ok" and "No se envió ningún comprobante" in paso["detail"]
+    assert fake.posts == [] and fake.production_hits == []
+    assert len(fake.gets) == 1
+    ref = fake.gets[0]
+    assert len(ref) == 50 and ref.isdigit() and EMPRESA.zfill(12) in ref and "00199999019999999999" in ref
+    despues = _grupos(db_session, auth["tenant"]["id"])
+    assert despues == antes  # ni T01 ni F01: la sonda no gasta consecutivos
+    envio = next(x for x in r.json()["steps"] if x["label"] == "Envío de comprobantes")
+    assert "Prueba real con Hacienda" in envio["detail"]
+    assert USER not in caplog.text and PASS not in caplog.text
+
+
+def test_probar_conexion_con_403_del_gateway(client, auth, monkeypatch, p12_empresa):
+    from tests.hacienda_utils import FakeHacienda
+
+    fake = FakeHacienda(gateway_403=True)
+    pedidos = []
+    original = fake.handler
+
+    def espia(request):
+        pedidos.append(str(request.url))
+        return original(request)
+
+    fake.handler = espia
+    fake.install(monkeypatch)
+    load_credentials(client, *p12_empresa)
+    r = client.post("/settings/hacienda/credentials/pruebas/test").json()
+    assert r["ok"] is False
+    paso = next(x for x in r["steps"] if x["label"] == "Consulta de estado en Hacienda")
+    assert paso["status"] == "falla" and "403 IncompleteSignatureException" in paso["detail"]
+    assert "contraseña incorrecta" not in paso["detail"].lower() and "credenciales del ambiente" not in paso["detail"]
+    assert any(u.endswith("/logout") for u in pedidos)  # el logout va igual (finally)
+    assert len(fake.gets) == 1 and fake.posts == [] and fake.production_hits == []
+    assert client.get("/settings/hacienda").json()["credentials"]["pruebas"]["last_test_ok"] is False
+
+
+def test_probar_conexion_produccion_sin_consulta(client, auth, monkeypatch, p12_empresa):
+    from tests.hacienda_utils import FakeHacienda
+
+    fake = FakeHacienda().install(monkeypatch)
+    assert load_credentials(client, *p12_empresa, env="produccion").status_code == 200
+    r = client.post("/settings/hacienda/credentials/produccion/test")
+    assert r.status_code == 200 and not r.json()["ok"]  # conftest: produccion prohibida en el servidor
+    assert fake.gets == [] and fake.posts == [] and fake.production_hits == []
+
+
+def test_probar_conexion_401_en_la_consulta_no_da_500(client, auth, monkeypatch, p12_empresa):
+    from app.routers.hacienda_settings import sonda_clave
+    from tests.hacienda_utils import FakeHacienda
+
+    fake = FakeHacienda().install(monkeypatch)
+    load_credentials(client, *p12_empresa)
+    fake.get_plan[sonda_clave(EMPRESA)] = [401, 401]
+    r = client.post("/settings/hacienda/credentials/pruebas/test")
+    assert r.status_code == 200
+    paso = next(x for x in r.json()["steps"] if x["label"] == "Consulta de estado en Hacienda")
+    assert paso["status"] == "falla" and "(401)" in paso["detail"] and not r.json()["ok"]
+    assert fake.production_hits == []

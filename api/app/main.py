@@ -28,6 +28,7 @@ from .routers import (
     data_export,
     events,
     fieldwork,
+    hacienda_prueba_real,
     hacienda_settings,
     imports,
     media,
@@ -135,6 +136,7 @@ def create_app() -> FastAPI:
     app.include_router(report_board_router.router)  # tablero y estado de resultados completo (reunion 2)
     app.include_router(bitacora_router.router)  # antes que ajustes: /settings/audit
     app.include_router(hacienda_settings.router)  # antes que ajustes: /settings/hacienda
+    app.include_router(hacienda_prueba_real.router)  # «Prueba real con Hacienda» (/settings/hacienda/prueba-real)
     app.include_router(fiscal_queue_router.router)  # cola "Por emitir" (plan 1.7)
     app.include_router(settings_router.router)
     app.include_router(users_admin.router)  # Ajustes -> Usuarios (/settings/users, /settings/invitations)

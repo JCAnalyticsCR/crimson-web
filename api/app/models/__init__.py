@@ -57,7 +57,7 @@ from .field import (
     WorkOrderMaterial,
     WorkOrderTime,
 )
-from .fiscal import FiscalActivity, FiscalCredential, FiscalProfile, ReceptionMailbox, ReceptionMessage, ReceptionResponse
+from .fiscal import FiscalActivity, FiscalCredential, FiscalProfile, HaciendaTestRun, ReceptionMailbox, ReceptionMessage, ReceptionResponse
 from .ops import (
     EInvoiceDocument,
     EmailOutbox,
@@ -135,6 +135,7 @@ __all__ = [
     "ReceptionMailbox",
     "ReceptionMessage",
     "ReceptionResponse",
+    "HaciendaTestRun",
     "Payment",
     "PaymentLink",
     "InvoicePaymentProof",

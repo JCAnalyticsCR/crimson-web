@@ -3,7 +3,22 @@ mensajes receptor). Las credenciales nunca viven en tenant.settings: esa columna
 
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, deferred, mapped_column
 
 from ..core.db import Base
@@ -155,3 +170,57 @@ class ReceptionResponse(TenantMixin, Base):
     created_by: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
+
+
+# estados de una prueba real que todavia esperan a Hacienda (una sola a la vez por empresa: indice unico parcial)
+TEST_RUN_LIVE = ("firmado", "enviado", "procesando")
+_LIVE_WHERE = "state IN ('firmado', 'enviado', 'procesando')"
+
+
+class HaciendaTestRun(TenantMixin, Base):
+    """«Prueba real con Hacienda» (Ajustes -> Hacienda): una FE de 1 000 colones + IVA de la empresa a si misma, con
+    sus credenciales y su .p12 de PRUEBAS, sin cambiar el modo de la empresa, sin Invoice ni EInvoiceDocument y con los
+    consecutivos T01/T05. Solo el ambiente de pruebas (CHECK en la base) y montos de 2 000 colones o menos.
+
+    state: firmado | enviado | procesando (vivas) | aceptado | rechazado | error | no_concluyente | sin_respuesta.
+    Lo que no sale nunca: credenciales, token ni PIN (no se guardan aqui). El XML firmado si, para descargarlo."""
+
+    __tablename__ = "hacienda_test_run"
+    __table_args__ = (
+        CheckConstraint("environment = 'pruebas'", name="ck_hacienda_test_run_pruebas"),
+        CheckConstraint("amount <= 2000", name="ck_hacienda_test_run_amount"),
+        Index("ix_hacienda_test_run_tenant_created", "tenant_id", "created_at"),
+        Index("uq_hacienda_test_run_live", "tenant_id", unique=True, postgresql_where=text(_LIVE_WHERE), sqlite_where=text(_LIVE_WHERE)),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_by: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    environment: Mapped[str] = mapped_column(String(12), default="pruebas")
+    state: Mapped[str] = mapped_column(String(16), default="firmado")
+    steps: Mapped[list | None] = mapped_column(JSON)
+    cabys: Mapped[str | None] = mapped_column(String(13))
+    amount: Mapped[float] = mapped_column(Numeric(16, 5), default=0)
+    con_mr: Mapped[bool] = mapped_column(Boolean, default=True)
+    clave: Mapped[str | None] = mapped_column(String(50))
+    consecutive: Mapped[str | None] = mapped_column(String(20))
+    fe_xml: Mapped[str | None] = mapped_column(Text)
+    fe_body_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fe_resent: Mapped[bool] = mapped_column(Boolean, default=False)
+    fe_location: Mapped[str | None] = mapped_column(String(300))
+    fe_post_cause: Mapped[str | None] = mapped_column(String(300))
+    fe_estado: Mapped[str | None] = mapped_column(String(16))
+    fe_detalle: Mapped[str | None] = mapped_column(String(500))
+    fe_respuesta_xml: Mapped[str | None] = mapped_column(Text)
+    mr_consecutive: Mapped[str | None] = mapped_column(String(20))
+    mr_xml: Mapped[str | None] = mapped_column(Text)
+    mr_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    mr_location: Mapped[str | None] = mapped_column(String(300))
+    mr_estado: Mapped[str | None] = mapped_column(String(16))
+    mr_detalle: Mapped[str | None] = mapped_column(String(500))
+    mr_respuesta_xml: Mapped[str | None] = mapped_column(Text)
+    polls: Mapped[int] = mapped_column(Integer, default=0)
+    last_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    tax_id_at_run: Mapped[str | None] = mapped_column(String(30))
+    cert_sha256: Mapped[str | None] = mapped_column(String(64))
