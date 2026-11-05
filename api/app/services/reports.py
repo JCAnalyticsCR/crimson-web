@@ -746,6 +746,10 @@ def tax_summary(db: Session, tenant, month: str) -> dict:
         if r.status == "rechazado"
     ]
     emit_docs = db.scalars(select(EInvoiceDocument).where(EInvoiceDocument.tenant_id == tid, EInvoiceDocument.mode.in_(("pruebas", "produccion")))).all()
+    # rechazo pendiente = la factura no tiene, despues, un comprobante ACEPTADO del mismo tipo (se reemitio y paso)
+    ok_after = {(d.invoice_id, d.doc_type): d.id for d in sorted(emit_docs, key=lambda d: d.id) if d.status == "aceptada"}
+    rech_emit = [d for d in emit_docs if d.status == "rechazada" and ok_after.get((d.invoice_id, d.doc_type), 0) < d.id]
+    nums = {i.id: i.number for i in db.scalars(select(Invoice).where(Invoice.id.in_([d.invoice_id for d in rech_emit] or [0])))}
     prof = hc.profile(db, tenant)
     env = prof.environment if prof.environment in ("pruebas", "produccion") else "pruebas"
     cred = db.scalar(select(FiscalCredential).where(FiscalCredential.tenant_id == tid, FiscalCredential.environment == env))
@@ -765,7 +769,8 @@ def tax_summary(db: Session, tenant, month: str) -> dict:
         "mensajes": {"rechazados": rech[:30], "errores": sum(1 for r in last if r.status == "error"), "por_enviar": sum(1 for r in last if r.status == "por_enviar")},
         "emision": {
             "pendientes": sum(1 for d in emit_docs if d.status in ("por_enviar", "enviando", "enviado", "procesando")),
-            "rechazadas": sum(1 for d in emit_docs if d.status == "rechazada"),
+            "rechazadas": len({d.invoice_id for d in rech_emit}),
+            "rechazadas_facturas": [{"invoice_id": iid, "number": nums.get(iid)} for iid in sorted({d.invoice_id for d in rech_emit})][:20],
             "aceptadas": sum(1 for d in emit_docs if d.status == "aceptada"),
         },
         "hacienda": {

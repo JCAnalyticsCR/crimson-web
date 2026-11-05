@@ -148,3 +148,26 @@ def test_excel_no_ejecuta_formulas_que_vienen_del_xml(client, auth):
         ws = load_workbook(BytesIO(x.content)).active
         celdas = [c for row in ws.iter_rows(min_row=5) for c in row if isinstance(c.value, str) and c.value.startswith("=")]
         assert celdas and all(c.data_type == "s" and c.quotePrefix for c in celdas), rep
+
+
+def test_rechazo_reemitido_y_aceptado_no_cuenta_como_pendiente(client, auth, db_session):
+    """05/11: la factura 18 tuvo FE 4 y 5 rechazadas y la FE 6 aceptada: el panel decia «2 rechazadas» sin haber nada pendiente."""
+    from app.models import EInvoiceDocument, Invoice
+    from app.services.reports import tax_summary
+
+    tid = auth["tenant"]["id"]
+    cust = client.get("/customers").json()["items"][0]
+    ids = []
+    for _ in range(2):
+        r = client.post("/invoices", json={"customer_id": cust["id"], "lines": [{"name": "Servicio", "cabys_code": "8713000000000", "quantity": 1, "unit_price": 1000, "tax_rate": 13}]})
+        ids.append(r.json()["id"])
+    reemitida, sin_reemitir = ids
+    for n, (iid, st) in enumerate([(reemitida, "rechazada"), (reemitida, "rechazada"), (reemitida, "aceptada"), (sin_reemitir, "aceptada"), (sin_reemitir, "rechazada")], start=1):
+        db_session.add(EInvoiceDocument(tenant_id=tid, invoice_id=iid, doc_type="FE", consecutive=f"0010000101{n:010d}", provider="hacienda", status=st, mode="pruebas"))
+    db_session.commit()
+    tenant = db_session.get(Invoice, reemitida).tenant if hasattr(Invoice, "tenant") else None
+    from app.models import Tenant
+
+    e = tax_summary(db_session, tenant or db_session.get(Tenant, tid), date.today().strftime("%Y-%m"))["emision"]
+    assert e["rechazadas"] == 1
+    assert [f["invoice_id"] for f in e["rechazadas_facturas"]] == [sin_reemitir]

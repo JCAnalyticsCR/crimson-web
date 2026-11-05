@@ -16,7 +16,7 @@ type Tax = {
   recepciones: { recibidas: number; por_revisar: number; vencen_pronto: { id: number; issuer_name: string | null; total: string; currency: string; deadline: string | null; business_days_left: number | null }[]; vencidas: number; respondidas: number; total_crc: string };
   por_aprobar?: number;
   mensajes: { rechazados: { id: number; issuer_name: string | null; detail: string | null }[]; errores: number; por_enviar: number };
-  emision: { pendientes: number; rechazadas: number; aceptadas: number };
+  emision: { pendientes: number; rechazadas: number; aceptadas: number; rechazadas_facturas?: { invoice_id: number; number: string | null }[] };
   hacienda: { mode: Mode; environment: string; cert_not_after: string | null; cert_days_left: number | null; imap_last_run_at: string | null; buzon?: { state: string; label: string } };
 };
 
@@ -79,7 +79,7 @@ export default function TaxPanel() {
                   {t.mensajes.rechazados.map((r) => <li key={r.id}>Mensaje rechazado: <Link to={`/contabilidad/facturas/${r.id}`}>{r.issuer_name || "—"}</Link>{r.detail ? ` · ${r.detail}` : ""}</li>)}
                   {t.mensajes.errores > 0 && <li>{t.mensajes.errores} mensaje(s) con error</li>}
                   {t.mensajes.por_enviar > 0 && <li>{t.mensajes.por_enviar} mensaje(s) por enviar</li>}
-                  {t.emision.rechazadas > 0 && <li>{t.emision.rechazadas} factura(s) emitida(s) rechazada(s) por Hacienda</li>}
+                  {t.emision.rechazadas > 0 && <li>{t.emision.rechazadas === 1 ? "1 factura rechazada por Hacienda, sin reemitir" : `${t.emision.rechazadas} facturas rechazadas por Hacienda, sin reemitir`}{t.emision.rechazadas_facturas?.length ? ": " : ""}{t.emision.rechazadas_facturas?.map((f, i) => <span key={f.invoice_id}>{i ? ", " : ""}<Link to={`/facturas/${f.invoice_id}`}>{f.number || `#${f.invoice_id}`}</Link></span>)}</li>}
                 </ul>
               )}
               <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Emisión directa: {t.emision.aceptadas} aceptadas · {t.emision.pendientes} pendientes</p>
