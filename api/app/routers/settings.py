@@ -508,7 +508,7 @@ def _key_mask(g: PaymentGatewayConfig) -> str | None:
     """ONVO: prefijo + ultimos 4 (identifica la llave sin exponerla). Otras pasarelas: solo "configurado"."""
     if not g.secret_encrypted:
         return None
-    raw = onvo._dec(g.secret_encrypted) if g.provider == "onvo" else None
+    raw = onvo._dec(g.secret_encrypted, g.tenant_id, "secret") if g.provider == "onvo" else None
     if raw and key_mode(raw):
         return f"{raw[: raw.index('_key_') + 5]}••••{raw[-4:]}"
     return mask("configurado00")
@@ -552,11 +552,11 @@ def gateway_upsert(data: GatewayIn, p: Principal = Depends(require("settings", "
     antes = {"active": g.active, "mode": g.mode, "secret": bool(g.secret_encrypted), "webhook": bool(g.webhook_secret_encrypted)}
     g.client_id, g.is_primary, g.active, g.mode = data.client_id, data.is_primary, data.active, data.mode
     if data.secret:
-        g.secret_encrypted = encrypt(data.secret)
+        g.secret_encrypted = onvo.seal_secret(p.tenant.id, "secret", data.secret) if data.provider == "onvo" else encrypt(data.secret)
     if data.webhook_secret:
-        g.webhook_secret_encrypted = encrypt(data.webhook_secret)
+        g.webhook_secret_encrypted = onvo.seal_secret(p.tenant.id, "webhook", data.webhook_secret) if data.provider == "onvo" else encrypt(data.webhook_secret)
     if data.provider == "onvo":
-        g.mode = key_mode(onvo._dec(g.secret_encrypted)) or g.mode
+        g.mode = key_mode(onvo._dec(g.secret_encrypted, p.tenant.id, "secret")) or g.mode
         if g.active and not g.secret_encrypted:
             raise HTTPException(422, "Para activar ONVO falta la llave secreta")
     db.flush()
@@ -575,7 +575,9 @@ def gateway_onvo_status(p: Principal = Depends(require("settings", "ver")), db: 
 def gateway_onvo_test(p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
     """Prueba la llave guardada (aunque la pasarela este inactiva) con una lectura que no crea nada en ONVO."""
     g = onvo.gateway(db, p.tenant.id)
-    key = (onvo._dec(g.secret_encrypted) if g and g.secret_encrypted else None) or cfg.onvo_secret_key
+    key = (onvo._dec(g.secret_encrypted, g.tenant_id, "secret") if g and g.secret_encrypted else None) or cfg.onvo_secret_key
+    if not key and g and g.secret_encrypted:
+        return {"ok": False, "mode": None, "detail": "La llave guardada ya no se puede leer (se cambió la llave interna del servidor): genere una nueva en ONVO y cárguela aquí"}
     if not key:
         return {"ok": False, "mode": None, "detail": "No hay llave secreta de ONVO guardada"}
     if not key_mode(key):

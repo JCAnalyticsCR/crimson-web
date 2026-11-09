@@ -161,3 +161,35 @@ def test_late_payment_on_cancelled_order_is_flagged_once(client, auth, fake_onvo
     det = client.get(f"/store-orders/{oid}").json()
     notes = [h["note"] for h in det["history"] if "devolver el dinero" in (h.get("note") or "")]
     assert det["status"] == "cancelado" and len(notes) == 1 and "pi_cs_1" in notes[0]
+
+
+def test_llave_ilegible_tras_rotar_se_avisa_y_la_nueva_queda_en_fiscal_keys(client, auth, fake_onvo, db_session, monkeypatch):
+    """08/11: el JWT_SECRET se roto el 21/10 y las llaves de ONVO (cifrado heredado) quedaron ilegibles: la tarjeta se
+    apago sin aviso. Ahora el estado lo dice, «Probar» lo explica, y la llave nueva se guarda con FISCAL_KEYS."""
+    import base64
+    import hashlib
+
+    from cryptography.fernet import Fernet
+
+    from app.models import PaymentGatewayConfig
+    from app.services import onvo
+
+    fake_onvo.connect(client)
+    tid = auth["tenant"]["id"]
+    g = db_session.query(PaymentGatewayConfig).filter_by(tenant_id=tid, provider="onvo").one()
+    assert g.secret_encrypted.startswith("v1.") and g.webhook_secret_encrypted.startswith("v1.")  # llavero nuevo
+    # simula lo de produccion: tokens heredados que ya no descifran (otro JWT_SECRET)
+    viejo = Fernet(base64.urlsafe_b64encode(hashlib.sha256(b"tenant-secrets:JWT_SECRET-anterior-a-la-rotacion").digest()))
+    g.secret_encrypted = viejo.encrypt(fake_onvo.key.encode()).decode()
+    g.webhook_secret_encrypted = viejo.encrypt(fake_onvo.wh.encode()).decode()
+    db_session.commit()
+    st = client.get("/settings/gateways/onvo/status").json()
+    assert not st["configured"] and st["unreadable"] == {"secret": True, "webhook": True}
+    assert any("ya no se puede leer" in p for p in st["problems"])
+    assert "ya no se puede leer" in client.post("/settings/gateways/onvo/test").json()["detail"]
+    db_session.expire_all()
+    assert onvo.secret_key(db_session, tid) is None  # la tarjeta no se ofrece (nada simulado)
+    # se vuelve a cargar: queda en FISCAL_KEYS y se lee
+    fake_onvo.connect(client)
+    st = client.get("/settings/gateways/onvo/status").json()
+    assert st["configured"] and st["unreadable"] == {"secret": False, "webhook": False}

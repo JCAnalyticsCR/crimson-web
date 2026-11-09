@@ -71,6 +71,24 @@ def rotate(db: Session, dry_run: bool = False) -> dict:
             t.settings = st
             flag_modified(t, "settings")
         out["buzones"] += 1
+    # llaves de ONVO (08/11): las v1 con otra llave se vuelven a cifrar; las heredadas (JWT_SECRET) que aun se leen pasan
+    # a FISCAL_KEYS. Las ilegibles se cuentan: hay que volver a cargarlas en Ajustes -> Pagos.
+    from ..models import PaymentGatewayConfig
+    from ..services import onvo
+
+    out["onvo"] = 0
+    for g in db.scalars(select(PaymentGatewayConfig).where(PaymentGatewayConfig.provider == "onvo")).all():
+        for col, field in (("secret_encrypted", "secret"), ("webhook_secret_encrypted", "webhook")):
+            tok = getattr(g, col)
+            if not tok or secretbox.kid_of(tok) == kid:
+                continue
+            plain = onvo._dec(tok, g.tenant_id, field)
+            if plain is None:
+                out["ilegibles"] += 1
+                continue
+            if not dry_run:
+                setattr(g, col, secretbox.seal_text(plain, onvo._aad(g.tenant_id, field)))
+            out["onvo"] += 1
     if dry_run:
         db.rollback()
     else:

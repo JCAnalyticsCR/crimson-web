@@ -21,8 +21,9 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core import secretbox
 from ..core.config import settings
-from ..core.crypto import decrypt
+from ..core.crypto import decrypt, encrypt
 from ..models import Customer, Invoice, Order, Payment, PaymentGatewayConfig, PaymentLink, Tenant
 from ..providers.payments import OnvoAdapter, OnvoError, key_mode
 from .documents import audit
@@ -35,14 +36,36 @@ def gateway(db: Session, tenant_id: int) -> PaymentGatewayConfig | None:
     return db.scalar(select(PaymentGatewayConfig).where(PaymentGatewayConfig.tenant_id == tenant_id, PaymentGatewayConfig.provider == "onvo"))
 
 
-def _dec(token: str | None) -> str | None:
+def _aad(tenant_id: int, field: str) -> str:
+    return secretbox.aad_for(tenant_id, "onvo", field)
+
+
+def seal_secret(tenant_id: int, field: str, plain: str) -> str:
+    """Llaves de ONVO con el llavero FISCAL_KEYS (rotable: app.tools.rotate_fiscal_keys las vuelve a cifrar). 08/11: con
+    el cifrado heredado (derivado del JWT_SECRET) la rotacion del 21/10 las dejo ilegibles y la tarjeta se apago."""
+    return secretbox.seal_text(plain, _aad(tenant_id, field)) if secretbox.available() else encrypt(plain)
+
+
+def _dec(token: str | None, tenant_id: int | None = None, field: str = "secret") -> str | None:
     if not token:
         return None
     try:
-        return decrypt(token)
-    except Exception:  # noqa: BLE001  (JWT_SECRET rotado: el secreto guardado ya no se puede leer)
-        log.warning("secreto ONVO cifrado ilegible (¿cambió JWT_SECRET?)")
+        if token.startswith("v1.") and tenant_id is not None:
+            return secretbox.unseal_text(token, _aad(tenant_id, field))
+        return decrypt(token)  # heredado (JWT_SECRET)
+    except Exception:  # noqa: BLE001  (llave rotada o quitada: el secreto guardado ya no se puede leer)
+        log.warning("secreto ONVO cifrado ilegible: hay que volver a cargarlo en Ajustes -> Pagos")
         return None
+
+
+def unreadable(g: PaymentGatewayConfig | None) -> dict[str, bool]:
+    """Que llaves guardadas existen pero ya no se pueden leer."""
+    if g is None:
+        return {"secret": False, "webhook": False}
+    return {
+        "secret": bool(g.secret_encrypted) and _dec(g.secret_encrypted, g.tenant_id, "secret") is None,
+        "webhook": bool(g.webhook_secret_encrypted) and _dec(g.webhook_secret_encrypted, g.tenant_id, "webhook") is None,
+    }
 
 
 def env_applies(db: Session, tenant_id: int) -> bool:
@@ -59,7 +82,7 @@ def _stored_secret(db: Session, tenant_id: int) -> tuple[str | None, str | None]
     """(llave, origen). Ajustes activo manda; si no, la variable de entorno ONVO_SECRET_KEY (ver env_applies)."""
     g = gateway(db, tenant_id)
     if g and g.active and g.secret_encrypted:
-        return _dec(g.secret_encrypted), "ajustes"
+        return _dec(g.secret_encrypted, tenant_id, "secret"), "ajustes"
     if settings.onvo_secret_key and env_applies(db, tenant_id):
         return settings.onvo_secret_key, "entorno"
     return None, None
@@ -82,13 +105,13 @@ def verify_key(db: Session, tenant_id: int) -> str | None:
     key, _ = _stored_secret(db, tenant_id)
     if not usable(key):
         g = gateway(db, tenant_id)
-        key = _dec(g.secret_encrypted) if g else None
+        key = _dec(g.secret_encrypted, tenant_id, "secret") if g else None
     return key if usable(key) else None
 
 
 def webhook_secret(db: Session, tenant_id: int) -> str | None:
     g = gateway(db, tenant_id)
-    own = _dec(g.webhook_secret_encrypted) if g else None
+    own = _dec(g.webhook_secret_encrypted, tenant_id, "webhook") if g else None
     return own or (settings.onvo_webhook_secret if settings.onvo_webhook_secret and env_applies(db, tenant_id) else None)
 
 
@@ -105,6 +128,11 @@ def status(db: Session, t: Tenant) -> dict:
     wh = webhook_secret(db, t.id)
     url = webhook_url(t)
     problems: list[str] = []
+    bad = unreadable(g)
+    if bad["secret"]:
+        problems.append("La llave secreta guardada ya no se puede leer (se cambió la llave interna del servidor): la tienda y los enlaces de pago NO están ofreciendo tarjeta. Genere una llave nueva en ONVO y cárguela aquí.")
+    if bad["webhook"]:
+        problems.append("El secreto del webhook guardado tampoco se puede leer: cópielo de nuevo desde ONVO → Webhooks y cárguelo aquí.")
     if g and g.secret_encrypted and not g.active:
         problems.append("La pasarela ONVO está guardada pero inactiva: la tienda y los enlaces de pago no la ofrecen.")
     if key and not mode:
@@ -120,6 +148,7 @@ def status(db: Session, t: Tenant) -> dict:
     if "localhost" in url or "127.0.0.1" in url:
         problems.append("La URL del webhook es local: ONVO no puede llegar a ella. En este equipo el pago se confirma al volver de ONVO.")
     return {
+        "unreadable": bad,
         "configured": usable(key),
         "source": source,
         "mode": mode,
