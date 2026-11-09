@@ -193,3 +193,79 @@ def test_llave_ilegible_tras_rotar_se_avisa_y_la_nueva_queda_en_fiscal_keys(clie
     fake_onvo.connect(client)
     st = client.get("/settings/gateways/onvo/status").json()
     assert st["configured"] and st["unreadable"] == {"secret": False, "webhook": False}
+
+
+# ---------------------------------------------------------------- formato firmado de ONVO (09/11)
+WHSEC = "whsec_" + "s" * 32  # ficticio
+
+
+def _signed(client, tid, typ, obj, *, evt="evt_1", mode="test", secret=WHSEC, ts=None, body=None):
+    """Aviso con el formato firmado: X-Onvo-Signature t=..,v1=HMAC-SHA256(secreto, "t.cuerpo crudo")."""
+    import hashlib
+    import hmac
+    import time
+
+    raw = body if body is not None else json.dumps({"id": evt, "object": "event", "mode": mode, "type": typ, "data": {"object": obj}}).encode()
+    t = str(int(ts if ts is not None else time.time()))
+    sig = hmac.new(secret.encode(), t.encode() + b"." + raw, hashlib.sha256).hexdigest()
+    return client.post(f"/webhooks/onvo/{tid}", content=raw, headers={"Content-Type": "application/json; charset=utf-8", "X-Onvo-Signature": f"t={t},v1={sig}"})
+
+
+def test_formato_firmado_prueba_de_conexion_pago_duplicado_y_modo(client, auth, fake_onvo):
+    """El endpoint que crea ONVO hoy es firmado (whsec_ + X-Onvo-Signature): antes daba 401 a todo, incluida la prueba
+    del panel. Ahora: la prueba recibe 200 sin tocar pagos; el pago se aplica una vez (idempotente por evt_); firma
+    mala, vencida o de otro secreto -> 401; evento de otro modo -> 200 sin aplicar."""
+    import time
+
+    tid = auth["tenant"]["id"]
+    inv, token = _invoice(client)
+    fake_onvo.connect(client, webhook_secret=WHSEC)
+    st = client.get("/settings/gateways/onvo/status").json()
+    assert st["webhook_format"] == "firmado" and st["last_webhook"] is None
+    # «Probar conexion» del panel de ONVO
+    r = _signed(client, tid, "webhook_endpoint.test", {"object": "webhook_endpoint", "id": "we_1"}, evt="evt_test_1")
+    assert r.status_code == 200 and r.json()["test"] is True
+    st = client.get("/settings/gateways/onvo/status").json()
+    assert st["last_webhook"]["type"] == "webhook_endpoint.test"
+    assert client.get(f"/invoices/{inv['id']}").json()["payments"] == []
+    # firma mala / vencida / otro secreto: 401 y nada se aplica
+    client.post(f"/public/pay/{token}/onvo")
+    fake_onvo.pay("cs_1")
+    obj = {"object": "checkout_session", "id": "cs_1"}
+    assert _signed(client, tid, "checkout_session.succeeded", obj, secret="whsec_" + "x" * 32).status_code == 401
+    assert _signed(client, tid, "checkout_session.succeeded", obj, ts=time.time() - 400).status_code == 401
+    raw = json.dumps({"id": "evt_2", "object": "event", "mode": "test", "type": "checkout_session.succeeded", "data": {"object": obj}}).encode()
+    import hashlib
+    import hmac
+
+    t = str(int(time.time()))
+    sig = hmac.new(WHSEC.encode(), t.encode() + b"." + raw, hashlib.sha256).hexdigest()
+    tampered = raw.replace(b'"cs_1"', b'"cs_9"')  # el cuerpo cambiado invalida la firma
+    assert client.post(f"/webhooks/onvo/{tid}", content=tampered, headers={"X-Onvo-Signature": f"t={t},v1={sig}"}).status_code == 401
+    assert client.get(f"/invoices/{inv['id']}").json()["payments"] == []
+    # otro modo (live contra la llave de pruebas): 200 sin aplicar
+    r = _signed(client, tid, "checkout_session.succeeded", obj, evt="evt_live", mode="live")
+    assert r.status_code == 200 and r.json()["ignored"] == "modo distinto"
+    assert client.get(f"/invoices/{inv['id']}").json()["payments"] == []
+    # el bueno se aplica (confirmado con la API de ONVO) y el mismo evt_ no duplica
+    ok = _signed(client, tid, "checkout_session.succeeded", obj, evt="evt_2")
+    assert ok.status_code == 200 and ok.json() == {"ok": True}
+    assert _signed(client, tid, "checkout_session.succeeded", obj, evt="evt_2").json()["duplicate"] is True
+    i = client.get(f"/invoices/{inv['id']}").json()
+    assert i["status"] == "pagada" and len(i["payments"]) == 1
+
+
+def test_firma_con_dos_v1_durante_la_rotacion_del_secreto():
+    import hashlib
+    import hmac
+    import time
+
+    from app.providers.payments import OnvoAdapter
+
+    body = b'{"id":"evt_9"}'
+    t = str(int(time.time()))
+    good = hmac.new(WHSEC.encode(), t.encode() + b"." + body, hashlib.sha256).hexdigest()
+    assert OnvoAdapter.verify_signature(WHSEC, f"t={t},v1={'0' * 64},v1={good}", body)
+    assert not OnvoAdapter.verify_signature(WHSEC, f"t={t}", body)
+    assert not OnvoAdapter.verify_signature(None, f"t={t},v1={good}", body)
+    assert not OnvoAdapter.verify_signature(WHSEC, f"t=abc,v1={good}", body)

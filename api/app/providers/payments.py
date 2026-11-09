@@ -16,6 +16,7 @@ Sin llave secreta, create_checkout devuelve un intento 'simulated' (solo se ofre
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import re
 import time
@@ -23,6 +24,7 @@ from dataclasses import dataclass
 
 import httpx
 
+SIGNATURE_TOLERANCE = 300  # segundos (docs de ONVO: rechazar si t esta a mas de 300 s)
 KEY_RE = re.compile(r"^onvo_(test|live)_(secret|publishable)_key_\S{8,}$")
 
 
@@ -61,6 +63,12 @@ def key_problem(key: str, kind: str) -> str | None:
     if (key or "").startswith("webhook_secret_"):
         return "Ese es el secreto del webhook: va en su propio campo"
     return f"La llave {'secreta' if kind == 'secret' else 'publicable'} de ONVO empieza con onvo_test_{kind}_key_ u onvo_live_{kind}_key_"
+
+
+def webhook_format(secret: str | None) -> str | None:
+    """«firmado» (whsec_: X-Onvo-Signature, el que ONVO crea hoy) o «anterior» (webhook_secret_: X-Webhook-Secret)."""
+    s = secret or ""
+    return "firmado" if s.startswith("whsec_") else ("anterior" if s.startswith("webhook_secret_") else None)
 
 
 def webhook_secret_problem(secret: str) -> str | None:
@@ -165,6 +173,28 @@ class OnvoAdapter:
     def ping(self) -> dict:
         """Lectura minima para probar la llave (lista 1 intencion de pago; no crea nada)."""
         return self._req("GET", "/payment-intents/account", params={"limit": 1})
+
+    @staticmethod
+    def verify_signature(secret: str | None, header: str | None, body: bytes, now: float | None = None, tolerance: int = SIGNATURE_TOLERANCE) -> bool:
+        """Formato firmado de ONVO (docs.onvopay.com/webhooks/verify-signatures): X-Onvo-Signature "t=<unix>,v1=<hex>"
+        (dos v1 durante la rotacion del secreto). HMAC-SHA256 en hex de f"{t}.{cuerpo crudo}" con el secreto whsec_ del
+        endpoint; t a no mas de 5 minutos de la hora del servidor; comparacion en tiempo constante. El cuerpo NO se toca."""
+        if not secret or not header:
+            return False
+        ts: str | None = None
+        sigs: list[str] = []
+        for part in header.split(","):
+            k, _, v = part.strip().partition("=")
+            if k == "t" and v.isdigit():
+                ts = v
+            elif k == "v1" and v:
+                sigs.append(v.strip().lower())
+        if ts is None or not sigs:
+            return False
+        if abs((now if now is not None else time.time()) - int(ts)) > tolerance:
+            return False
+        want = hmac.new(secret.encode(), ts.encode() + b"." + body, hashlib.sha256).hexdigest()
+        return any(hmac.compare_digest(want, s) for s in sigs)
 
     @staticmethod
     def verify_webhook(expected: str | None, received: str | None) -> bool:

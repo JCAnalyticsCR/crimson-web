@@ -147,7 +147,14 @@ def status(db: Session, t: Tenant) -> dict:
         problems.append("Falta el secreto del webhook: los pagos solo se confirmarán cuando el comprador vuelva a la página.")
     if "localhost" in url or "127.0.0.1" in url:
         problems.append("La URL del webhook es local: ONVO no puede llegar a ella. En este equipo el pago se confirma al volver de ONVO.")
+    from ..models import WebhookEvent
+    from ..providers.payments import webhook_format
+
+    last = db.scalar(select(WebhookEvent).where(WebhookEvent.provider == "onvo", WebhookEvent.signature_ok).order_by(WebhookEvent.id.desc()).limit(1))
     return {
+        # 09/11: la API (llave secreta) y el webhook (avisos de ONVO) se ven por separado
+        "webhook_format": webhook_format(wh),
+        "last_webhook": {"at": last.received_at, "type": last.event_type, "result": (last.result or "")[:160]} if last else None,
         "unreadable": bad,
         "configured": usable(key),
         "source": source,
@@ -623,13 +630,44 @@ def order_payment(db: Session, t: Tenant, o: Order) -> str:
 # ---------- aviso al admin: ONVO no puede entregar sus eventos ----------
 ALERT_ENTITY = "onvo_webhook"  # entity del correo: onvo_webhook_401 / onvo_webhook_503 (un cupo diario por tipo)
 ONVO_EVENTS = ("checkout-session.succeeded", "payment-intent.succeeded", "payment-intent.failed", "payment-intent.deferred")
+# formato firmado: guion bajo en el objeto (payment_intent.succeeded); se traducen a los nombres de arriba
+SIGNED_OBJECTS = ("payment_intent", "checkout_session")
 
 
-def onvo_shaped(secret: str | None, body: bytes) -> bool:
-    """El 401 parece de ONVO (con el secreto viejo), no una sonda cualquiera a la URL: trae un secreto con la forma de
-    los de ONVO (webhook_secret_...) y un evento de ONVO. Solo entonces vale la pena avisar al admin."""
+def normalize_event(raw: dict) -> tuple[dict, str | None, str | None]:
+    """(evento con la forma de siempre {"type", "data"}, id del evento evt_ o None, modo live|test o None).
+    Firmado: {"id": "evt_..", "object": "event", "mode", "type": "payment_intent.succeeded", "data": {"object": {..}}}.
+    Anterior: {"type": "payment-intent.succeeded", "data": {..}} (sin id ni modo)."""
+    data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
+    if raw.get("object") == "event" or isinstance(data.get("object"), dict):
+        typ = str(raw.get("type") or "")
+        obj, _, rest = typ.partition(".")
+        if obj in SIGNED_OBJECTS:
+            typ = f"{obj.replace('_', '-')}.{rest}"
+        inner = data.get("object") if isinstance(data.get("object"), dict) else {}
+        mode = raw.get("mode") if raw.get("mode") in ("live", "test") else None
+        return {"type": typ, "data": inner}, (str(raw.get("id")) if raw.get("id") else None), mode
+    return raw, None, None
+
+
+def current_mode(db: Session, t: Tenant) -> str | None:
+    """live | test segun la llave guardada (para descartar eventos del otro modo)."""
+    return key_mode(verify_key(db, t.id))
+
+
+def onvo_shaped(secret: str | None, body: bytes, signature: str | None = None) -> bool:
+    """El 401 parece de ONVO, no una sonda cualquiera a la URL: firmado (X-Onvo-Signature con t= y v1=) o con un secreto
+    con la forma de los de ONVO (webhook_secret_...), y un evento de ONVO. Solo entonces vale la pena avisar al admin."""
     import json
 
+    if signature:
+        if "t=" not in signature or "v1=" not in signature:
+            return False
+        try:
+            raw = json.loads(body)
+        except ValueError:
+            return False
+        return isinstance(raw, dict) and raw.get("object") == "event" and isinstance(raw.get("type"), str)
     if not (secret or "").startswith("webhook_secret_") or len(secret or "") < 24:
         return False
     try:
