@@ -58,7 +58,7 @@ def key_problem(key: str, kind: str) -> str | None:
         return (
             "Esa es la llave publicable: en este campo va la llave secreta (onvo_test_secret_key_… u onvo_live_secret_key_…)"
             if kind == "secret"
-            else "Esa es la llave secreta: no la pongas en el campo publicable (ese valor llega al navegador)"
+            else "Esa es la llave secreta: no la ponga en el campo publicable (ese valor llega al navegador)"
         )
     if (key or "").startswith("webhook_secret_"):
         return "Ese es el secreto del webhook: va en su propio campo"
@@ -75,7 +75,7 @@ def webhook_secret_problem(secret: str) -> str | None:
     if KEY_RE.match(secret or ""):
         return "Ese valor es una llave de API, no el secreto del webhook (ONVO → Desarrolladores → Webhooks)"
     if len(secret or "") < 16:
-        return "El secreto del webhook es muy corto: copialo completo desde ONVO → Desarrolladores → Webhooks"
+        return "El secreto del webhook es muy corto: cópielo completo desde ONVO → Desarrolladores → Webhooks"
     return None
 
 
@@ -95,6 +95,10 @@ class OnvoAdapter:
 
     def __init__(self, secret_key: str | None, public_key: str | None = None):
         self.secret, self.public = secret_key, public_key
+
+    def __repr__(self) -> str:
+        """Nunca la llave: un log o una traza que imprima el adapter solo dice el modo."""
+        return f"OnvoAdapter(mode={self.mode!r})"
 
     @property
     def mode(self) -> str | None:

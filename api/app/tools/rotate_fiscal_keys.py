@@ -89,6 +89,25 @@ def rotate(db: Session, dry_run: bool = False) -> dict:
             if not dry_run:
                 setattr(g, col, secretbox.seal_text(plain, onvo._aad(g.tenant_id, field)))
             out["onvo"] += 1
+    # llaves de ONVO de PRUEBAS (09/11): su propia tabla y su propia AAD; contador aparte para saber cual recargar
+    from ..models import OnvoTestConfig
+    from ..services import onvo_test
+
+    out["onvo_pruebas"] = 0
+    out["onvo_pruebas_ilegibles"] = 0
+    for c in db.scalars(select(OnvoTestConfig)).all():
+        for col, field in (("secret_enc", "secret"), ("webhook_secret_enc", "webhook")):
+            tok = getattr(c, col)
+            if not tok or secretbox.kid_of(tok) == kid:
+                continue
+            plain = onvo_test._dec(tok, c.tenant_id, field)
+            if plain is None:
+                out["ilegibles"] += 1
+                out["onvo_pruebas_ilegibles"] += 1
+                continue
+            if not dry_run:
+                setattr(c, col, secretbox.seal_text(plain, onvo_test._aad(c.tenant_id, field)))
+            out["onvo_pruebas"] += 1
     if dry_run:
         db.rollback()
     else:

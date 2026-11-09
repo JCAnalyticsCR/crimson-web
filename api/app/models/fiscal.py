@@ -224,3 +224,6 @@ class HaciendaTestRun(TenantMixin, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     tax_id_at_run: Mapped[str | None] = mapped_column(String(30))
     cert_sha256: Mapped[str | None] = mapped_column(String(64))
+    # 09/11: de donde salio la corrida: «ajustes» (Prueba real con Hacienda) o «tienda_pruebas» (factura de prueba de
+    # un pedido de la Tienda de pruebas, services/test_shop.py). Las dos comparten topes, numeracion T01 y reglas.
+    origin: Mapped[str] = mapped_column(String(16), default="ajustes", server_default="ajustes")

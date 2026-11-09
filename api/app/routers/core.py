@@ -78,6 +78,11 @@ def update_tenant(data: TenantUpdate, p: Principal = Depends(require("settings",
                 # Si viene igual a lo guardado (alguien reenvia el dict completo) se ignora; si cambia, se rechaza.
                 if list(v.pop("cost_roles") or []) != list((p.tenant.settings or {}).get("cost_roles") or []):
                     raise HTTPException(422, "Quién ve costos se cambia en Ajustes → Usuarios (queda en la bitácora)")
+            if "store" in v and v["store"] != (p.tenant.settings or {}).get("store"):
+                # 09/11: la tienda (checkout publico y Tienda de pruebas) se configura en Mi Tienda, que valida cada
+                # campo; por aqui se podia encender la tarjeta de la tienda publica sin pasar por esas reglas
+                raise HTTPException(422, "La tienda se configura en Mi Tienda")
+            v.pop("store", None)
             from ..core import twofa
 
             vigente = {"twofa_roles": list(twofa.required_roles(p.tenant)), "twofa_grace_days": twofa.grace_days(p.tenant)}

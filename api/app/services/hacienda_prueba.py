@@ -95,8 +95,14 @@ def sonda_clave(tax_id: str | None) -> str:
 
 
 # ---------------------------------------------------------------- armado del XML (sin tocar el de las ventas)
-def armar_fe_prueba(db: Session, t: Tenant, cabys: str, clave: str, consecutive: str, fecha: datetime) -> tuple[dict, dict]:
+def armar_fe_prueba(
+    db: Session, t: Tenant, cabys: str, clave: str, consecutive: str, fecha: datetime, lineas: list[dict] | None = None, medio_pago: str = "01"
+) -> tuple[dict, dict]:
     """Payload de xml44.build_comprobante para la FE de prueba y sus montos (los toma el mensaje receptor).
+
+    Sin `lineas` ni `medio_pago` es la FE de siempre (1 000 + IVA, efectivo 01). La Tienda de pruebas (09/11) manda una
+    linea {"detail", "unit_price", "subtotal", "tax"} con el monto del pedido y el TipoMedioPago del pago (02 tarjeta, 06
+    SINPE Movil): mismo CABYS de servicio, unidad 'Sp' e IVA 13 %.
 
     unit 'Sp' (servicios profesionales): xml44 clasifica servicio/mercancia por SERVICE_UNITS (xml44.py, linea del
     `service = ln["unit"] in SERVICE_UNITS`) y no por el CABYS. Por eso la prueba exige un CABYS de servicio (primer digito
@@ -106,6 +112,40 @@ def armar_fe_prueba(db: Session, t: Tenant, cabys: str, clave: str, consecutive:
     act = hc.default_activity(db, t.id)
     iva = (SUBTOTAL * IVA_RATE / 100).quantize(Decimal("0.01"))
     montos = {"subtotal": SUBTOTAL, "iva": iva, "total": SUBTOTAL + iva}  # 1 000 + 130 = 1 130
+    lines = [
+        {
+            "cabys": cabys,
+            "code": "PRUEBA",
+            "quantity": "1",
+            "unit": "Sp",
+            "detail": "Servicio de prueba de facturación electrónica",
+            "unit_price": str(SUBTOTAL),
+            "subtotal": str(SUBTOTAL),
+            "tax": str(iva),
+            "rate": str(IVA_RATE),
+            "rate_code": "08",
+        }
+    ]
+    if lineas:
+        lines, sub, iva = [], Decimal(0), Decimal(0)
+        for ln in lineas:
+            ls, lt = Decimal(str(ln["subtotal"])), Decimal(str(ln["tax"]))
+            sub, iva = sub + ls, iva + lt
+            lines.append(
+                {
+                    "cabys": cabys,
+                    "code": "PRUEBA",
+                    "quantity": "1",
+                    "unit": "Sp",
+                    "detail": str(ln["detail"])[:160],
+                    "unit_price": str(Decimal(str(ln.get("unit_price", ls)))),
+                    "subtotal": str(ls),
+                    "tax": str(lt),
+                    "rate": str(IVA_RATE),
+                    "rate_code": "08",
+                }
+            )
+        montos = {"subtotal": sub, "iva": iva, "total": sub + iva}
     emisor = {
         "name": (t.legal_name or "").strip(),
         "id_type": prof.id_type,
@@ -130,24 +170,11 @@ def armar_fe_prueba(db: Session, t: Tenant, cabys: str, clave: str, consecutive:
         "emisor": emisor,
         "receptor": {"name": emisor["name"], "id_type": prof.id_type, "id_number": ced, "email": prof.email},
         "sale_condition": "01",
-        "lines": [
-            {
-                "cabys": cabys,
-                "code": "PRUEBA",
-                "quantity": "1",
-                "unit": "Sp",
-                "detail": "Servicio de prueba de facturación electrónica",
-                "unit_price": str(SUBTOTAL),
-                "subtotal": str(SUBTOTAL),
-                "tax": str(iva),
-                "rate": str(IVA_RATE),
-                "rate_code": "08",
-            }
-        ],
+        "lines": lines,
         "currency": "CRC",
         "fx": 1,
-        "payment_method": "01",
-        "tax_total": iva,
+        "payment_method": medio_pago or "01",
+        "tax_total": montos["iva"],
         "total": montos["total"],
     }
     return payload, montos
@@ -400,6 +427,38 @@ def _purge(db: Session, tid: int) -> None:
 def iniciar(db: Session, t: Tenant, user: User, cabys: str, con_mr: bool, ip: str | None = None) -> HaciendaTestRun:
     """Revisa, reserva la corrida, firma y envia la FE de prueba a Hacienda (PRUEBAS). Lanza HTTPException (409/429)
     o RequisitosFallan (422). Nunca 500 por Hacienda: los errores de token quedan en la corrida."""
+    return _iniciar(db, t, user, cabys, con_mr, ip)
+
+
+TIENDA_MEDIOS = ("02", "06")  # tarjeta y SINPE Movil (catalogo TipoMedioPago 4.4)
+
+
+def iniciar_desde_pedido_prueba(db: Session, t: Tenant, user: User, o, cabys: str, medio_pago: str = "02", ip: str | None = None) -> HaciendaTestRun:
+    """Factura de prueba de un pedido PAGADO de la Tienda de pruebas (services/test_shop.py): las MISMAS reglas que
+    iniciar() (produccion apagada, una corrida viva, 3 por hora y 10 por dia, requisitos, T01 de pruebas, firma, XSD,
+    un commit antes del POST y el modo sin cambiar), con una linea «Pedido de prueba PRB-xxxx», el monto del pedido y el
+    TipoMedioPago del pago. Sin mensaje receptor (con_mr=False: no gasta un T05). Receptor: la empresa misma."""
+    total = Decimal(str(o.total))
+    sub, tax = Decimal(str(o.subtotal)), Decimal(str(o.tax))
+    if total <= 0 or total > 2000 or sub + tax != total:
+        raise HTTPException(422, "El monto del pedido de prueba no sirve para una factura de prueba (debe ser de ₡2 000 o menos)")
+    lineas = [{"detail": f"Pedido de prueba {o.number}", "unit_price": sub, "subtotal": sub, "tax": tax}]
+    return _iniciar(db, t, user, cabys, False, ip, origin="tienda_pruebas", lineas=lineas, medio_pago=medio_pago if medio_pago in TIENDA_MEDIOS else "02", amount=total)
+
+
+def _iniciar(
+    db: Session,
+    t: Tenant,
+    user: User,
+    cabys: str,
+    con_mr: bool,
+    ip: str | None = None,
+    *,
+    origin: str = "ajustes",
+    lineas: list[dict] | None = None,
+    medio_pago: str = "01",
+    amount: Decimal | None = None,
+) -> HaciendaTestRun:
     if hc.production_on(db, t):  # aunque este bloqueada por el servidor: no se hace nada
         audit(db, t.id, user.id, "hacienda_test_refused", "tenant", t.id, {"motivo": "produccion"}, ip=ip)
         db.commit()
@@ -429,7 +488,8 @@ def iniciar(db: Session, t: Tenant, user: User, cabys: str, con_mr: bool, ip: st
         state="firmado",
         steps=steps,
         cabys=code,
-        amount=SUBTOTAL + (SUBTOTAL * IVA_RATE / 100),
+        amount=amount if amount is not None else SUBTOTAL + (SUBTOTAL * IVA_RATE / 100),
+        origin=origin,
         con_mr=bool(con_mr),
         fe_resent=False,
         polls=0,
@@ -446,7 +506,7 @@ def iniciar(db: Session, t: Tenant, user: User, cabys: str, con_mr: bool, ip: st
     cons = next_fiscal_consecutive(db, t.id, "01", ENV)
     fecha = cr_now()
     clave = build_clave("506", fecha, xml44.digits(t.tax_id), cons, "1", security_code())
-    payload, _montos = armar_fe_prueba(db, t, code, clave, cons, fecha)
+    payload, _montos = armar_fe_prueba(db, t, code, clave, cons, fecha, lineas=lineas, medio_pago=medio_pago)
     try:
         signed = prov.sign_document(payload)  # firma + XSD
     except (InvalidXml, xml44.BuildError, CertError) as e:
@@ -455,7 +515,7 @@ def iniciar(db: Session, t: Tenant, user: User, cabys: str, con_mr: bool, ip: st
         db.commit()
         raise HTTPException(422, f"El XML de prueba no se pudo firmar o no pasa el esquema de Hacienda (no se envió nada): {str(e)[:300]}") from e
     run.clave, run.consecutive, run.fe_xml = clave, cons, signed.decode("utf-8")
-    audit(db, t.id, user.id, "hacienda_test_send", "hacienda_test_run", run.id, {"consecutivo": cons, "clave_fin": _tail(clave), "con_mr": run.con_mr, "cabys": code}, ip=ip)
+    audit(db, t.id, user.id, "hacienda_test_send", "hacienda_test_run", run.id, {"consecutivo": cons, "clave_fin": _tail(clave), "con_mr": run.con_mr, "cabys": code, "origen": origin}, ip=ip)
     db.commit()  # UN commit: corrida + T01 + bytes firmados, antes del POST
     try:
         prov.client.token()
@@ -616,6 +676,7 @@ def out(db: Session, run: HaciendaTestRun) -> dict:
     by = db.get(User, run.created_by) if run.created_by else None
     return {
         "id": run.id,
+        "origin": run.origin or "ajustes",
         "state": run.state,
         "live": is_live(run),
         "steps": run.steps or [],

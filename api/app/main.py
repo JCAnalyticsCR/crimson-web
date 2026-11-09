@@ -49,6 +49,7 @@ from .routers import (
     store,
     store_checkout,
     store_showcase,
+    store_test,
     supplier_catalog,
     support,
     support_desk,
@@ -112,6 +113,18 @@ def create_app() -> FastAPI:
         # plan 1.12: sin tipo de cambio nunca se convierte con 1; lo que lo necesita responde un 422 claro
         return JSONResponse(status_code=422, content={"detail": exc.detail})
 
+    from fastapi.exception_handlers import request_validation_exception_handler
+    from fastapi.exceptions import RequestValidationError
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_without_input(request: Request, exc: RequestValidationError):
+        # 09/11: un 422 de Pasarelas (llave demasiado larga, campo de mas) devolvia el valor enviado en "input": sin el
+        # valor ni el contexto, solo donde esta el error y por que. El resto de la API responde como siempre.
+        if "/settings/gateways" in request.url.path:
+            errs = [{k: v for k, v in e.items() if k in ("type", "loc", "msg")} for e in exc.errors()]
+            return JSONResponse(status_code=422, content={"detail": errs})
+        return await request_validation_exception_handler(request, exc)
+
     @app.middleware("http")
     async def request_log(request: Request, call_next):
         t0 = time.perf_counter()
@@ -145,6 +158,7 @@ def create_app() -> FastAPI:
     app.include_router(store.router)
     app.include_router(store_inventory_router.router)
     app.include_router(store_checkout.router)
+    app.include_router(store_test.router)  # Tienda de pruebas (ONVO modo Test), solo panel y solo admin (/store/pruebas)
     app.include_router(invoice_proofs_router.router)  # comprobantes de la pagina de pago de facturas (/pagar)
     app.include_router(store_showcase.router)
     app.include_router(store_showcase.pub)

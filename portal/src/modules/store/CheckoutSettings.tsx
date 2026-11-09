@@ -93,6 +93,7 @@ export default function CheckoutSettings({ rates, onRates }: { rates: ZoneRate[]
               : "ONVO sin credenciales: en producción la tarjeta no se ofrece hasta conectarlo (Ajustes → Pasarelas)."}
           </p>
           {d.onvo.configured && d.onvo.mode === "test" && <p className="muted" style={{ fontSize: 12, margin: 0, color: "var(--warn)" }}>Modo Pruebas: los pagos no cobran tarjetas reales.</p>}
+          <p className="muted" style={{ fontSize: 12, margin: 0 }}>La Tienda de pruebas usa las llaves de Pruebas (Ajustes → Pagos); esta casilla es solo para la tienda pública.</p>
           <div className="grid-2">
             <label style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={!!m.tarjeta.installments} onChange={(e) => setM("tarjeta", { installments: e.target.checked })} />Ofrecer cuotas</label>
             <Field label="Máximo de cuotas" hint="ONVO Checkout no acepta un parámetro de cuotas; se habilitan en la cuenta ONVO (p. ej. Credix/tasa cero según contrato). Este campo es solo de referencia para el comprador."><input className="input input--mono" type="number" min={0} max={36} value={m.tarjeta.max_installments || 0} onChange={(e) => setM("tarjeta", { max_installments: Number(e.target.value) })} /></Field>

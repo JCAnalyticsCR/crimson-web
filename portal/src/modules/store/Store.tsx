@@ -1,5 +1,6 @@
 /* Mi Tienda: personalizacion + constructor de bloques con vista previa en vivo (mismo render que el sitio publico). */
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
@@ -26,7 +27,7 @@ const NEW_BLOCK: Record<string, Block> = {
 const LABELS: Record<string, string> = { hero: "Portada (hero)", text: "Texto", image_text: "Imagen + texto", cta: "Llamado a la acción", columns: "Columnas", products: "Productos", gallery: "Galería", form: "Formulario" };
 
 export default function Store() {
-  const { toast } = useSession();
+  const { toast, me } = useSession();
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [pagesSt, setPages] = useState<Page[] | null>(null); // null = cargando
   const pages = pagesSt ?? [];
@@ -49,6 +50,8 @@ export default function Store() {
       <div className="page-head">
         <div><div className="meta">10 · Mi Tienda</div><h1 className="h1">Mi Tienda</h1></div>
         <div className="page-head__actions">
+          {/* solo el administrador: la API de la Tienda de pruebas responde 404 a cualquier otro */}
+          {me?.role === "admin" && <Link className="btn btn--ghost btn--sm" to="/mi-tienda/pruebas">Tienda de pruebas</Link>}
           {cfg && <a className="btn btn--ghost btn--sm" href={publicUrl} target="_blank" rel="noopener"><Icon d={I.store} />Ver sitio</a>}
           {cfg && <button className={`btn btn--sm ${cfg.published ? "btn--soft" : "btn--crimson"}`} onClick={() => saveCfg({ published: !cfg.published })}>{cfg.published ? "Despublicar" : "Publicar tienda"}</button>}
         </div>

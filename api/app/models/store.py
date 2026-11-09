@@ -2,11 +2,11 @@
 
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
-from .base import ArchiveMixin, TenantMixin, TimestampMixin
+from .base import ArchiveMixin, TenantMixin, TimestampMixin, utcnow
 
 
 class StorePage(TenantMixin, TimestampMixin, Base):
@@ -219,3 +219,46 @@ class StoreSnapshot(Base):
     built_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     gz: Mapped[bytes | None] = mapped_column(deferred=True)
     n_products: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
+TEST_ORDER_STATES = ("nuevo", "en_onvo", "en_proceso", "pagado", "fallido", "cancelado", "vencido", "revisar")
+
+
+class StoreTestOrder(TenantMixin, Base):
+    """Pedido de la Tienda de pruebas (ONVO modo Test, services/test_shop.py). Tabla APARTE de `order` y sin llaves
+    foraneas a pedidos, clientes, productos, facturas ni secuencias: inventario, reportes, contabilidad, el worker, el
+    buscador y los correos leen `order` y no pueden ver estos pedidos. Numero PRB-0001 (nunca ORD), siempre en colones
+    y por 2 000 colones o menos (CHECK en la base). hacienda_test_run_id va sin FK: la corrida se purga por su lado."""
+
+    __tablename__ = "store_test_order"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "number", name="uq_store_test_order_number"),
+        CheckConstraint("currency = 'CRC'", name="ck_store_test_order_crc"),
+        CheckConstraint("total > 0 AND total <= 2000", name="ck_store_test_order_total"),
+        CheckConstraint(
+            "status IN ('nuevo', 'en_onvo', 'en_proceso', 'pagado', 'fallido', 'cancelado', 'vencido', 'revisar')", name="ck_store_test_order_status"
+        ),
+        Index("ix_store_test_order_tenant_created", "tenant_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    number: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(16), default="nuevo")
+    method: Mapped[str] = mapped_column(String(16), default="tarjeta")  # lo que el administrador quiere probar
+    currency: Mapped[str] = mapped_column(String(3), default="CRC")
+    subtotal: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    tax: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    total: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    lines: Mapped[list] = mapped_column(JSON, default=list)
+    buyer: Mapped[dict] = mapped_column(JSON, default=dict)  # siempre {"name": "Cliente de prueba"}
+    onvo_sessions: Mapped[list] = mapped_column(JSON, default=list)  # [{"id": "cs_..", "at": iso}] (tope 5)
+    onvo_intent_id: Mapped[str | None] = mapped_column(String(120))
+    paid_method: Mapped[str | None] = mapped_column(String(16))  # tarjeta | sinpe_onvo, segun la intencion pagada
+    checks: Mapped[dict] = mapped_column(JSON, default=dict)
+    timeline: Mapped[list] = mapped_column(JSON, default=list)
+    created_by: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hacienda_test_run_id: Mapped[int | None] = mapped_column(Integer)

@@ -160,11 +160,22 @@ def auth(client):
 
 
 class FakeOnvo:
-    """ONVO en memoria con la forma de la API real (sesiones de Checkout, intenciones, reembolsos). Sin red."""
+    """ONVO en memoria con la forma de la API real (sesiones de Checkout, intenciones, reembolsos). Sin red.
+
+    Modo Test / Live (09/11): cada sesion e intencion nace con el modo de la llave que la creo (como en ONVO) y la llave
+    queda anotada en fake.created[i]["key"]; consultarla con una llave del otro modo da 404, igual que ONVO. Todas las
+    llaves y secretos son FICTICIOS."""
 
     key = "onvo_test_secret_key_" + "k" * 24
     public = "onvo_test_publishable_key_" + "p" * 24
     wh = "webhook_secret_" + "w" * 24
+    # bloque de Pruebas (services/onvo_test) y llaves de produccion para las pruebas de aislamiento: ficticias
+    test_key = "onvo_test_secret_key_" + "t" * 24
+    test_public = "onvo_test_publishable_key_" + "u" * 24
+    test_wh = "whsec_" + "t" * 32
+    live_key = "onvo_live_secret_key_" + "L" * 24
+    live_public = "onvo_live_publishable_key_" + "M" * 24
+    live_wh = "whsec_" + "l" * 32
 
     def __init__(self):
         self.sessions: dict[str, dict] = {}
@@ -172,27 +183,34 @@ class FakeOnvo:
         self.created: list[dict] = []
         self.refunds: list[dict] = []
         self.fail_get = 0  # cuantas consultas siguientes fallan (ONVO caido)
+        self.reads: list[tuple[str, str]] = []  # (objeto consultado, llave usada)
+        self.pings: list[str] = []  # llaves con las que se probo la conexion
 
     def install(self, monkeypatch):
-        from app.providers.payments import Intent, OnvoAdapter, OnvoError
+        from app.providers.payments import Intent, OnvoAdapter, OnvoError, key_mode
 
         fake = self
 
         def create_checkout(self, **kw):
             sid = f"cs_{len(fake.sessions) + 1}"
-            fake.created.append(kw)
-            s = {"id": sid, "url": f"https://checkout.onvopay.com/pay/{sid}", "mode": "test", "status": "open", "paymentStatus": "unpaid",
+            fake.created.append({**kw, "key": self.secret})
+            mode = key_mode(self.secret) or "test"
+            s = {"id": sid, "url": f"https://checkout.onvopay.com/pay/{sid}", "mode": mode, "status": "open", "paymentStatus": "unpaid",
                  "amountTotal": kw["amount_cents"], "currency": kw["currency"], "paymentIntentId": None,
                  "metadata": {k: str(v) for k, v in kw["metadata"].items()}}
             fake.sessions[sid] = s
             return Intent(id=sid, checkout_url=s["url"], status="unpaid", raw=s)
 
-        def _get(store, oid):
+        def _get(adapter, store, oid):
             if fake.fail_get:
                 fake.fail_get -= 1
                 raise OnvoError(0, "sin respuesta de ONVO (ConnectTimeout)")
             if oid not in store:
                 raise OnvoError(404, "not found")
+            mine = key_mode(adapter.secret)
+            if mine and store[oid].get("mode") and store[oid]["mode"] != mine:
+                raise OnvoError(404, "not found")  # una llave de otro modo no ve el objeto (como ONVO)
+            fake.reads.append((oid, adapter.secret))
             return dict(store[oid])
 
         def refund(self, intent_id, amount_cents=None, reason="requested_by_customer", description=None):
@@ -201,21 +219,67 @@ class FakeOnvo:
             return r
 
         monkeypatch.setattr(OnvoAdapter, "create_checkout", create_checkout)
-        monkeypatch.setattr(OnvoAdapter, "get_checkout", lambda self, sid: _get(fake.sessions, sid))
-        monkeypatch.setattr(OnvoAdapter, "get_intent", lambda self, pid: _get(fake.intents, pid))
+        monkeypatch.setattr(OnvoAdapter, "get_checkout", lambda self, sid: _get(self, fake.sessions, sid))
+        monkeypatch.setattr(OnvoAdapter, "get_intent", lambda self, pid: _get(self, fake.intents, pid))
         monkeypatch.setattr(OnvoAdapter, "refund", refund)
-        monkeypatch.setattr(OnvoAdapter, "ping", lambda self: {"data": []})
+        def ping(self):
+            fake.pings.append(self.secret)
+            return {"data": []}
+
+        monkeypatch.setattr(OnvoAdapter, "ping", ping)
         return self
 
-    def pay(self, sid: str, amount: int | None = None, intent_meta: dict | None = None) -> dict:
-        """El comprador paga en ONVO: la sesion queda paid y nace su intencion succeeded."""
+    def pay(self, sid: str, amount: int | None = None, intent_meta: dict | None = None, method: str | None = None, currency: str | None = None) -> dict:
+        """El comprador paga en ONVO: la sesion queda paid y nace su intencion succeeded (por defecto SIN metadata, como
+        cuando la intencion no hereda la del Checkout)."""
         s = self.sessions[sid]
         pid = f"pi_{sid}"
         s.update(paymentStatus="paid", status="complete", paymentIntentId=pid)
         if amount is not None:
             s["amountTotal"] = amount
-        self.intents[pid] = {"id": pid, "status": "succeeded", "amount": s["amountTotal"], "currency": s["currency"], "metadata": intent_meta or {}}
+        if currency is not None:
+            s["currency"] = currency
+        self.intents[pid] = {"id": pid, "status": "succeeded", "amount": s["amountTotal"], "currency": s["currency"], "mode": s.get("mode"), "metadata": intent_meta or {}}
+        if method:
+            self.intents[pid]["paymentMethod"] = {"type": method}
         return s
+
+    def fail(self, sid: str, message: str = "Tarjeta rechazada") -> dict:
+        """Intento rechazado (p. ej. la 4000 0000 0000 0002): la sesion sigue sin pagar y su intencion queda con el error."""
+        s = self.sessions[sid]
+        pid = f"pi_{sid}"
+        s.update(paymentIntentId=pid)
+        self.intents[pid] = {"id": pid, "status": "requires_payment_method", "amount": s["amountTotal"], "currency": s["currency"], "mode": s.get("mode"),
+                             "metadata": {}, "lastPaymentError": {"message": message}}
+        return self.intents[pid]
+
+    def defer(self, sid: str) -> dict:
+        """SINPE de prueba: ONVO lo recibe y espera al banco (unos 15 s)."""
+        s = self.sessions[sid]
+        pid = f"pi_{sid}"
+        s.update(paymentIntentId=pid)
+        self.intents[pid] = {"id": pid, "status": "processing", "amount": s["amountTotal"], "currency": s["currency"], "mode": s.get("mode"), "metadata": {}}
+        return self.intents[pid]
+
+    def connect_test(self, client, **extra):
+        """Carga el bloque de Pruebas (Ajustes -> Pasarelas -> Pruebas) con las llaves ficticias de modo Test."""
+        body = {"secret": self.test_key, "publishable": self.test_public, "webhook_secret": self.test_wh, "enabled": True, **extra}
+        r = client.put("/settings/gateways/onvo-pruebas", json=body)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    @staticmethod
+    def signed(client, url: str, typ: str, obj: dict, secret: str, *, mode: str = "test", evt_id: str = "evt_1", ts: float | None = None, body: bytes | None = None, headers: dict | None = None):
+        """Aviso con el formato firmado real: X-Onvo-Signature t=..,v1=HMAC-SHA256(secreto, "t.cuerpo crudo")."""
+        import hashlib
+        import hmac
+        import json
+        import time
+
+        raw = body if body is not None else json.dumps({"id": evt_id, "object": "event", "mode": mode, "type": typ, "data": {"object": obj}}).encode()
+        t = str(int(ts if ts is not None else time.time()))
+        sig = hmac.new(secret.encode(), t.encode() + b"." + raw, hashlib.sha256).hexdigest()
+        return client.post(url, content=raw, headers={"Content-Type": "application/json", "X-Onvo-Signature": f"t={t},v1={sig}", **(headers or {})})
 
     def connect(self, client, **extra):
         body = {"provider": "onvo", "client_id": self.public, "secret": self.key, "webhook_secret": self.wh, "active": True, "is_primary": True, **extra}

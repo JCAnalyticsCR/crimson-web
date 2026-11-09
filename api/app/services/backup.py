@@ -50,7 +50,9 @@ def _mark(r: dict) -> str:
 REDACT_COLUMNS = {
     "user": {"password_hash": _mark, "totp_secret": None, "totp_pending_secret": None, "totp_recovery": [], "totp_enabled": False},
     "invitation": {"token_hash": _mark},
-    "payment_gateway_config": {"secret_encrypted": None},
+    # 09/11: tambien el whsec_ de produccion y las llaves de PRUEBAS (texto cifrado: igual no sale en la descarga)
+    "payment_gateway_config": {"secret_encrypted": None, "webhook_secret_encrypted": None},
+    "onvo_test_config": {"secret_enc": None, "webhook_secret_enc": None},
     "api_credential": {"secret_hash": _mark, "secret_encrypted": _mark},
     # credenciales de Hacienda: en el respaldo completo va solo texto cifrado (la llave FISCAL_KEYS nunca va)
     "fiscal_credential": {"atv_user_enc": None, "atv_password_enc": None, "p12_enc": None, "p12_pin_enc": None},

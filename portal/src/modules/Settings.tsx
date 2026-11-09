@@ -14,6 +14,8 @@ import HaciendaTab from "./settings/HaciendaTab";
 import TwoFactorSetup from "./auth/TwoFactorSetup";
 import MarginGuardCard, { type MarginCfg } from "./settings/MarginGuardCard";
 import CollectionsCard from "./settings/CollectionsCard";
+import OnvoTestCard from "./settings/OnvoTestCard";
+import "./settings/onvo-env.css";
 import { MODE_LABEL, type HaciendaState } from "./accounting/hacienda";
 
 type Group = { id: number; doc_type: string; prefix: string; branch: string; terminal: string; current: number; is_default: boolean };
@@ -106,7 +108,8 @@ export default function Settings() {
   };
   const saveGroup = (g: Group) => api(`/settings/billing-groups/${g.id}`, { method: "PUT", json: { prefix: g.prefix, branch: g.branch, terminal: g.terminal, current: g.current, is_default: g.is_default } }).then(() => ok("Grupo actualizado")).catch(err);
   const saveBank = () => { if (!bank) return; const { id, ...b } = bank; api(id ? `/settings/bank-accounts/${id}` : "/settings/bank-accounts", { method: id ? "PUT" : "POST", json: b }).then(() => { setBank(null); ok("Cuenta guardada"); }).catch(err); };
-  const saveGw = () => { if (!gw) return; api("/settings/gateways", { method: "PUT", json: { ...gw, secret: gw.secret || null, webhook_secret: gw.webhook_secret || null } }).then(() => { setGw(null); ok("Pasarela guardada"); }).catch(err); };
+  // los valores escritos se borran al guardar (setGw(null)): nunca vuelven a mostrarse
+  const saveGw = () => { if (!gw) return; api("/settings/gateways", { method: "PUT", json: { ...gw, client_id: gw.client_id || null, secret: gw.secret || null, webhook_secret: gw.webhook_secret || null } }).then(() => { setGw(null); setTestResult(null); ok("Pasarela guardada"); }).catch(err); };
   const done2fa = async (codes: string[]) => { await reload(); setSetup2fa(null); setRecovery(codes); };
   /* desactivar pide lo mismo que «Cambiar de teléfono»: contraseña y el código de la app (o uno de recuperación) */
   const disable2fa = () => { if (!apagar) return; api("/auth/2fa/disable", { method: "POST", json: { password: apagar.password, code: apagar.code.trim() } }).then(async () => { await reload(); setApagar(null); toast("2FA desactivado"); }).catch(err); };
@@ -245,20 +248,48 @@ export default function Settings() {
             </Card>
           </div>
         </div>
-        <Card title="Pasarelas de pago" flush extra={<button className="btn btn--ghost btn--sm" onClick={() => setGw({ provider: "onvo", client_id: "", secret: "", webhook_secret: "", is_primary: true, active: false, mode: "test" })}><Icon d={I.plus} />Agregar</button>}>
-              {gwsSt === null ? <Loading /> : gws.length === 0 ? <Empty hint="ONVO Pay (SINPE Móvil + tarjetas) y PayPal. El secreto se guarda cifrado y nunca vuelve al navegador." /> : <div style={{ overflowX: "auto" }}><table className="table"><thead><tr><th>Pasarela</th><th>Llave pública</th><th>Secreto</th><th>Modo</th><th>Webhook</th><th>Estado</th><th /></tr></thead><tbody>{gws.map((g) => <tr key={g.id}><td style={{ fontWeight: 600, textTransform: "uppercase" }}>{g.provider}{g.is_primary && <span className="meta"> · principal</span>}</td><td className="mono muted" title={g.client_id || undefined}>{shortKey(g.client_id)}</td><td className="mono muted" style={{ whiteSpace: "nowrap" }}>{g.secret_mask || "—"}</td><td className="muted">{g.mode === "live" ? "Producción" : "Pruebas"}</td><td className="muted">{g.webhook_secret_set ? "Webhook ✓" : "sin secreto"}</td><td><Badge status={g.active ? "confirmado" : "pendiente"} /></td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => setGw({ provider: g.provider, client_id: g.client_id || "", secret: "", webhook_secret: "", is_primary: g.is_primary, active: g.active, mode: g.mode })}>Editar</button></td></tr>)}</tbody></table></div>}
-              <div style={{ padding: "12px 18px", display: "flex", flexDirection: "column", gap: 8, fontSize: 12.5 }}>
-                <div><span className="meta">API de ONVO · </span>{onvoSt?.configured ? <span style={{ color: "var(--ok)" }}>Conectado en modo {onvoSt.mode === "live" ? "Producción" : "Pruebas"} · desde {onvoSt.source === "ajustes" ? "Ajustes" : "variable de entorno"}</span> : <span className="muted">Sin conectar</span>}</div>
-                {/* 09/11: el webhook por separado de la API (la API puede conectar y los avisos fallar) */}
-                <div><span className="meta">Webhook (avisos de ONVO) · </span>{!onvoSt?.webhook_secret ? <span className="muted">Sin secreto cargado</span> : <>
-                  <span>{onvoSt.webhook_format === "firmado" ? "Formato firmado (whsec_…)" : onvoSt.webhook_format === "anterior" ? "Formato anterior (webhook_secret_…)" : "Secreto cargado"}</span>
-                  {" · "}{onvoSt.last_webhook ? <span style={{ color: "var(--ok)" }}>último aviso recibido {parseTs(onvoSt.last_webhook.at).toLocaleString("es-CR", { timeZone: "America/Costa_Rica", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })} ({onvoSt.last_webhook.type === "webhook_endpoint.test" ? "prueba de conexión" : onvoSt.last_webhook.type})</span> : <span className="muted">todavía no ha llegado ningún aviso válido: en ONVO → Webhooks toque «Probar conexión»</span>}
-                </>}</div>
-                {onvoSt?.webhook_url && <div style={{ display: "flex", gap: 8, alignItems: "center" }}><input className="input input--mono" style={{ textAlign: "left", height: 32, fontSize: 12, flex: 1, minWidth: 0 }} readOnly value={onvoSt.webhook_url} /><button className="btn btn--ghost btn--sm" onClick={() => { navigator.clipboard.writeText(onvoSt!.webhook_url); toast("URL copiada"); }}>Copiar</button></div>}
-                <p className="muted" style={{ margin: 0 }}>Registrala en ONVO → Desarrolladores → Webhooks y pegue aquí su secreto (<span className="mono">whsec_…</span>; los webhooks del formato anterior usan <span className="mono">webhook_secret_…</span> y también sirven).</p>
-                {onvoSt?.problems.map((p, i) => <p key={i} style={{ color: "var(--warn)", margin: 0 }}>{p}</p>)}
-                {onvoSt?.configured && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}><button className="btn btn--soft btn--sm" onClick={testOnvo} disabled={testBusy}>{testBusy ? "Probando…" : "Probar conexión"}</button>{testResult && <span style={{ color: testResult.ok ? "var(--ok)" : "var(--bad)", fontSize: 12.5 }}>{testResult.ok ? `Conectado (modo ${testResult.mode === "live" ? "Producción" : "Pruebas"})` : testResult.detail}</span>}</div>}
-              </div>
+        <Card title="Pasarelas de pago" flush extra={allows("settings.configurar") ? <button className="btn btn--ghost btn--sm" onClick={() => setGw({ provider: "paypal", client_id: "", secret: "", webhook_secret: "", is_primary: false, active: false, mode: "test" })}><Icon d={I.plus} />Agregar PayPal</button> : undefined}>
+          {/* 09/11: ONVO por ambiente. Producción (lo de siempre) y Pruebas (llaves aparte, solo Tienda de pruebas) */}
+          <div className="gw-env">
+            <section className="gw-env__card" data-env="live" aria-label="ONVO · Producción">
+              <header className="gw-env__head">
+                <div><div className="gw-env__title">Producción · cobros reales</div><div className="meta">ONVO modo Live · tienda pública y enlaces de pago de facturas</div></div>
+                <span className="env-badge env-badge--live">En vivo</span>
+              </header>
+              {gwsSt === null ? <Loading /> : (() => {
+                const g = gws.find((x) => x.provider === "onvo");
+                return (<>
+                  <div className="gw-env__row"><span className="meta">Llave secreta · </span>{g?.secret_mask ? <span className="mono">{g.secret_mask}</span> : <span className="muted">Sin cargar</span>}{g && <> · <span style={{ color: g.active ? "var(--ok)" : "var(--warn)" }}>{g.active ? "activa" : "inactiva"}</span></>}</div>
+                  {g?.client_id && <div className="gw-env__row"><span className="meta">Publicable · </span><span className="mono" title={g.client_id}>{shortKey(g.client_id)}</span></div>}
+                  <div className="gw-env__row"><span className="meta">API · </span>{onvoSt?.configured ? <span style={{ color: "var(--ok)" }}>Conectado en modo {onvoSt.mode === "live" ? "Producción" : "Pruebas"} · desde {onvoSt.source === "ajustes" ? "Ajustes" : "variable de entorno"}</span> : <span className="muted">Sin conectar</span>}</div>
+                  {onvoSt?.configured && allows("settings.configurar") && <div className="gw-env__actions"><button className="btn btn--soft btn--sm" onClick={testOnvo} disabled={testBusy}>{testBusy ? "Probando…" : "Probar conexión"}</button>{testResult && <span style={{ color: testResult.ok ? "var(--ok)" : "var(--bad)" }}>{testResult.ok ? `Conectado (modo ${testResult.mode === "live" ? "Producción" : "Pruebas"})` : testResult.detail}</span>}</div>}
+                  {/* 09/11: el webhook por separado de la API (la API puede conectar y los avisos fallar) */}
+                  <div className="gw-env__row"><span className="meta">Webhook · </span>{!onvoSt?.webhook_secret ? <span className="muted">Sin secreto cargado</span> : <>
+                    <span>{onvoSt.webhook_format === "firmado" ? "Formato firmado (whsec_…)" : onvoSt.webhook_format === "anterior" ? "Formato anterior (webhook_secret_…)" : "Secreto cargado"}</span>
+                    {" · "}{onvoSt.last_webhook ? <span style={{ color: "var(--ok)" }}>último aviso {parseTs(onvoSt.last_webhook.at).toLocaleString("es-CR", { timeZone: "America/Costa_Rica", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })} ({onvoSt.last_webhook.type === "webhook_endpoint.test" ? "prueba de conexión" : onvoSt.last_webhook.type})</span> : <span className="muted">todavía no ha llegado ningún aviso válido: en ONVO → Webhooks toque «Probar conexión»</span>}
+                  </>}</div>
+                  {onvoSt?.webhook_url && <div className="gw-env__url"><input className="input input--mono" readOnly value={onvoSt.webhook_url} aria-label="URL del webhook de producción" /><button className="btn btn--ghost btn--sm" onClick={() => { navigator.clipboard.writeText(onvoSt!.webhook_url); toast("URL copiada"); }}>Copiar</button></div>}
+                  <p className="muted gw-env__help">Regístrela en ONVO (modo <b>Live</b>) → Desarrolladores → Webhooks y pegue aquí su secreto (<span className="mono">whsec_…</span>; los webhooks del formato anterior usan <span className="mono">webhook_secret_…</span> y también sirven).</p>
+                  {onvoSt?.problems.map((p, i) => <p key={i} className="gw-env__problem">{p}</p>)}
+                  {allows("settings.configurar") && <div className="gw-env__actions"><button className="btn btn--soft btn--sm" onClick={() => setGw({ provider: "onvo", client_id: g?.client_id || "", secret: "", webhook_secret: "", is_primary: g ? g.is_primary : true, active: g ? g.active : false, mode: g?.mode || "live" })}>{g ? "Cambiar llaves de producción" : "Cargar llaves de producción"}</button></div>}
+                </>);
+              })()}
+            </section>
+            <OnvoTestCard />
+          </div>
+          {gws.some((g) => g.provider !== "onvo") && (
+            <table className="table table--stack">
+              <thead><tr><th>Pasarela</th><th>Llave pública</th><th>Secreto</th><th>Modo</th><th>Estado</th><th /></tr></thead>
+              <tbody>{gws.filter((g) => g.provider !== "onvo").map((g) => <tr key={g.id}>
+                <td data-label="Pasarela" style={{ fontWeight: 600, textTransform: "uppercase" }}>{g.provider}{g.is_primary && <span className="meta"> · principal</span>}</td>
+                <td data-label="Llave pública" className="mono muted" title={g.client_id || undefined}>{shortKey(g.client_id)}</td>
+                <td data-label="Secreto" className="mono muted">{g.secret_mask || "—"}</td>
+                <td data-label="Modo" className="muted">{g.mode === "live" ? "Producción" : "Pruebas"}</td>
+                <td data-label="Estado"><Badge status={g.active ? "confirmado" : "pendiente"} /></td>
+                <td className="stack-actions num">{allows("settings.configurar") && <button className="btn btn--ghost btn--sm" onClick={() => setGw({ provider: g.provider, client_id: g.client_id || "", secret: "", webhook_secret: "", is_primary: g.is_primary, active: g.active, mode: g.mode })}>Editar</button>}</td>
+              </tr>)}</tbody>
+            </table>
+          )}
         </Card>
         </div>
       )}
@@ -380,13 +411,13 @@ export default function Settings() {
       {bank && <Modal title={bank.id ? "Cuenta bancaria" : "Nueva cuenta"} onClose={() => setBank(null)} foot={<><button className="btn btn--ghost" onClick={() => setBank(null)}>Cancelar</button><button className="btn btn--crimson" onClick={saveBank}>Guardar</button></>}>
         <div className="grid-2"><Field label="Nombre"><input className="input" value={bank.name} onChange={(e) => setBank({ ...bank, name: e.target.value })} /></Field><Field label="Banco"><input className="input" value={bank.bank} onChange={(e) => setBank({ ...bank, bank: e.target.value })} /></Field><Field label="Divisa"><select className="select" value={bank.currency} onChange={(e) => setBank({ ...bank, currency: e.target.value })}><option>CRC</option><option>USD</option></select></Field><Field label="Número / IBAN"><input className="input input--mono" style={{ textAlign: "left" }} value={bank.number} onChange={(e) => setBank({ ...bank, number: e.target.value })} /></Field></div>
       </Modal>}
-      {gw && <Modal title="Pasarela de pago" onClose={() => setGw(null)} foot={<><button className="btn btn--ghost" onClick={() => setGw(null)}>Cancelar</button><button className="btn btn--crimson" onClick={saveGw}>Guardar</button></>}>
+      {gw && <Modal title={gw.provider === "onvo" ? "ONVO · Producción (cobros reales)" : "Pasarela de pago"} onClose={() => setGw(null)} foot={<><button className="btn btn--ghost" onClick={() => setGw(null)}>Cancelar</button><button className="btn btn--crimson" onClick={saveGw}>Guardar</button></>}>
+        {gw.provider === "onvo" && <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>Llaves del modo <b>Live</b> de ONVO: cobran dinero real. Las de pruebas van en la tarjeta «Pruebas».</p>}
         <div className="grid-2">
-          <Field label="Pasarela"><select className="select" value={gw.provider} onChange={(e) => setGw({ ...gw, provider: e.target.value })}><option value="onvo">ONVO Pay</option><option value="paypal">PayPal</option></select></Field>
           {gw.provider === "onvo" ? (<>
-            <Field label="Llave secreta" hint="Se cifra en el servidor y nunca vuelve al navegador. Vacío = no cambiar."><input className="input" type="password" placeholder="onvo_test_secret_key_…" value={gw.secret} onChange={(e) => setGw({ ...gw, secret: e.target.value })} /></Field>
-            <Field label="Llave publicable (opcional)"><input className="input" placeholder="onvo_test_publishable_key_…" value={gw.client_id} onChange={(e) => setGw({ ...gw, client_id: e.target.value })} /></Field>
-            <Field label="Secreto del webhook" hint="Vacío = no cambiar."><input className="input" type="password" placeholder="webhook_secret_…" value={gw.webhook_secret} onChange={(e) => setGw({ ...gw, webhook_secret: e.target.value })} /></Field>
+            <Field label="Llave secreta" hint="Se cifra en el servidor y nunca vuelve al navegador. Vacío = no cambiar."><input className="input" type="password" autoComplete="off" placeholder="onvo_live_secret_key_…" value={gw.secret} onChange={(e) => setGw({ ...gw, secret: e.target.value })} /></Field>
+            <Field label="Llave publicable (opcional)" hint="Vacío = no cambiar."><input className="input" placeholder="onvo_live_publishable_key_…" value={gw.client_id} onChange={(e) => setGw({ ...gw, client_id: e.target.value })} /></Field>
+            <Field label="Secreto del webhook" hint="Vacío = no cambiar."><input className="input" type="password" autoComplete="off" placeholder="whsec_…" value={gw.webhook_secret} onChange={(e) => setGw({ ...gw, webhook_secret: e.target.value })} /></Field>
           </>) : (<>
             <Field label="Client ID"><input className="input" value={gw.client_id} onChange={(e) => setGw({ ...gw, client_id: e.target.value })} /></Field>
             <Field label="Client Secret" hint="Se cifra en el servidor. Dejar vacío para no cambiarlo."><input className="input" type="password" value={gw.secret} onChange={(e) => setGw({ ...gw, secret: e.target.value })} /></Field>

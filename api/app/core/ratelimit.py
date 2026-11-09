@@ -313,6 +313,9 @@ class LoginLimiter:
 login_limiter = LoginLimiter()
 public_limiter = SlidingWindow(limit=30, seconds=600)  # checkouts publicos por IP
 webhook_limiter = SlidingWindow(limit=240, seconds=60)  # webhooks de ONVO por empresa: holgado para rafagas reales
+# 09/11: el webhook de PRUEBAS tiene su propio limitador: una rafaga de pruebas nunca deja en 429 los avisos reales
+webhook_test_limiter = SlidingWindow(limit=120, seconds=60)
+test_shop_limiter = SlidingWindow(limit=20, seconds=3600)  # pedidos (y reaperturas) de la Tienda de pruebas por empresa
 # Reporte de incidencias desde la pagina web: una persona real no manda mas de 5 por hora; el tope global
 # frena una inundacion desde muchas IPs sin tumbar el resto de la API.
 incident_limiter = SlidingWindow(limit=5, seconds=3600)

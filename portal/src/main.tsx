@@ -40,6 +40,8 @@ const Reports = lazy(() => import("./modules/reports/Reports"));
 const Recurrences = lazy(() => import("./modules/sales/Recurrences"));
 const Invite = lazy(() => import("./modules/auth/Invite"));
 const Store = lazy(() => import("./modules/store/Store"));
+// Tienda de pruebas (ONVO modo Test): solo dentro del panel y solo el administrador; StoreHost nunca la monta
+const TestShop = lazy(() => import("./modules/store/TestShop"));
 const PublicStore = lazy(() => import("./modules/store/PublicStore"));
 const Orders = lazy(() => import("./modules/store/Orders"));
 const Coupons = lazy(() => import("./modules/catalog/Coupons"));
@@ -216,6 +218,7 @@ function App() {
         <Route path="/productos/cabys" element={g("catalog.editar", <CabysBulk />)} />
         <Route path="/inventario" element={g("inventory.ver", <Inventory />)} />
         <Route path="/mi-tienda" element={g("settings.configurar", <Store />)} />
+        <Route path="/mi-tienda/pruebas" element={g("settings.configurar", <TestShop />)} />
         <Route path="/ordenes" element={g("sales.ver", <Orders />)} />
         <Route path="/recepcion" element={<Navigate to="/contabilidad/facturas" replace />} />
         <Route path="/cupones" element={g("catalog.editar", <Coupons />)} />

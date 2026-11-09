@@ -63,6 +63,7 @@ from .ops import (
     EmailOutbox,
     Expense,
     ExpenseCategory,
+    OnvoTestConfig,
     PaymentGatewayConfig,
     Recurrence,
     StockLock,
@@ -75,7 +76,7 @@ from .ops import (
 )
 from .payments import BankAccount, BankInstrument, InvoicePaymentProof, Payment, PaymentLink
 from .sales import BillingGroup, CollectionReminder, Invoice, InvoiceLine, Quote, QuoteAcceptance, QuoteLine, QuoteVersion
-from .store import ApiCredential, Coupon, Order, OrderLine, ReceivedDocument, StorePage, StoreSnapshot, StoreStockAlert
+from .store import ApiCredential, Coupon, Order, OrderLine, ReceivedDocument, StorePage, StoreSnapshot, StoreStockAlert, StoreTestOrder
 from .supplier_catalog import SupplierItem, SupplierListImport
 from .support import (
     Commission,
@@ -152,6 +153,8 @@ __all__ = [
     "TaskRun",
     "WebhookEvent",
     "PaymentGatewayConfig",
+    "OnvoTestConfig",
+    "StoreTestOrder",
     "StorePage",
     "StoreSnapshot",
     "StoreStockAlert",

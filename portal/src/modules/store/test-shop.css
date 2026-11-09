@@ -1,0 +1,34 @@
+/* Tienda de pruebas: franja fija ámbar y negra para que nunca se confunda con la tienda real. Una columna en celular y a
+   768 px; tablas con table--stack. */
+.ts-band { position: sticky; top: 0; z-index: 30; margin: 0 0 14px; padding: 8px 12px; border-radius: 10px; text-align: center;
+  background: repeating-linear-gradient(-45deg, #f5b800 0 14px, #111 14px 28px); }
+.ts-band span { display: inline-block; padding: 4px 12px; border-radius: 6px; background: #111; color: #f5b800; font-weight: 800; letter-spacing: .06em; font-size: 13px; }
+.ts-grid { margin-bottom: 16px; }
+@media (max-width: 899px) { .ts-grid { grid-template-columns: minmax(0, 1fr); } }
+.ts-stack { display: flex; flex-direction: column; gap: 10px; font-size: 13px; min-width: 0; }
+.ts-note { margin: 0; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, #f5b800 18%, transparent); font-size: 12.5px; }
+.ts-warn { margin: 0; color: var(--warn); font-size: 12.5px; }
+.ts-small { font-size: 12px; }
+.ts-check { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.ts-buy { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: end; }
+@media (min-width: 900px) { .ts-buy { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr) auto; } }
+.ts-buy__total { display: flex; flex-direction: column; gap: 2px; font-size: 16px; }
+.ts-help { margin-top: 14px; font-size: 13px; }
+.ts-help summary { cursor: pointer; font-weight: 600; }
+.ts-help ul { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.ts-chip { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+.ts-chip--ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.ts-chip--bad { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
+.ts-chip--warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.ts-chip--info { background: color-mix(in srgb, #3b82f6 16%, transparent); color: #3b82f6; }
+.ts-chip--muted { background: color-mix(in srgb, var(--text-3) 16%, transparent); color: var(--text-3); }
+.ts-summary { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.ts-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ts-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+.ts-checks li { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--hair); overflow-wrap: anywhere; }
+.ts-checks li[data-ok="true"] b { color: var(--ok); }
+.ts-checks li[data-ok="false"] { border-color: var(--bad); }
+.ts-checks li[data-ok="false"] b { color: var(--bad); }
+.ts-link { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px dashed var(--hair-2, var(--hair)); border-radius: 10px; }
+.ts-chain { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; overflow-wrap: anywhere; }
+.ts-timeline { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; overflow-wrap: anywhere; }

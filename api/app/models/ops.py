@@ -318,7 +318,10 @@ class WebhookEvent(Base):
     """Evento crudo de proveedor (ONVO, PayPal, fiscal). Idempotente por (provider, external_id)."""
 
     __tablename__ = "webhook_event"
-    __table_args__ = (UniqueConstraint("provider", "external_id", name="uq_webhook_provider_event"),)
+    __table_args__ = (
+        UniqueConstraint("provider", "external_id", name="uq_webhook_provider_event"),
+        Index("ix_webhook_event_tenant_provider", "tenant_id", "provider", "id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     provider: Mapped[str] = mapped_column(String(20), index=True)
@@ -329,6 +332,9 @@ class WebhookEvent(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     result: Mapped[str | None] = mapped_column(Text)
+    # 09/11: empresa de la URL del webhook (sin FK a proposito: un rechazo guarda el id que trajo la URL aunque la empresa
+    # no exista). El estado de Ajustes filtra por aqui: una empresa ya no ve el ultimo aviso de otra.
+    tenant_id: Mapped[int | None] = mapped_column(Integer)
 
 
 class PaymentGatewayConfig(TenantMixin, Base):
@@ -347,3 +353,24 @@ class PaymentGatewayConfig(TenantMixin, Base):
     mode: Mapped[str] = mapped_column(String(10), default="test")  # test | live
 
     tenant = relationship("Tenant")
+
+
+class OnvoTestConfig(TenantMixin, Base):
+    """Llaves de ONVO de PRUEBAS (modo Test) de la empresa: una fila por empresa, APARTE de payment_gateway_config.
+
+    La tienda publica, los enlaces de pago de facturas, la consulta automatica y los reembolsos leen solo
+    payment_gateway_config (services/onvo.py) y no conocen esta tabla: una llave de pruebas no puede terminar cobrando
+    (ni "cobrando de mentira") a un cliente real ni por un olvido de filtro. La lee unicamente services/onvo_test.py.
+    Cifrado con FISCAL_KEYS y AAD propia («<empresa>:onvo_test:secret|webhook»): un token copiado a la tabla de
+    produccion (o al reves) no se descifra. Solo llaves onvo_test_ y secreto del webhook firmado (whsec_)."""
+
+    __tablename__ = "onvo_test_config"
+    __table_args__ = (UniqueConstraint("tenant_id", name="uq_onvo_test_config_tenant"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    publishable_key: Mapped[str | None] = mapped_column(String(200))
+    secret_enc: Mapped[str | None] = mapped_column(Text)
+    webhook_secret_enc: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_by: Mapped[int | None] = mapped_column(Integer)

@@ -213,7 +213,7 @@ export default function HaciendaPruebaReal({ canConfigure }: { canConfigure: boo
             <tbody>
               {list.runs.slice(0, 5).map((r) => (
                 <tr key={r.id}>
-                  <td data-label="Fecha" style={{ whiteSpace: "nowrap" }}>{parseTs(r.created_at).toLocaleString("es-CR")}</td>
+                  <td data-label="Fecha" style={{ whiteSpace: "nowrap" }}>{parseTs(r.created_at).toLocaleString("es-CR")}{r.origin === "tienda_pruebas" && <span className="meta"> · Tienda de pruebas</span>}</td>
                   <td data-label="Resultado">{STATE_LABEL[r.state]}{r.state === "rechazado" && r.fe_detalle ? ` · ${r.fe_detalle.length > 80 ? `${r.fe_detalle.slice(0, 80)}…` : r.fe_detalle}` : ""}</td>
                   <td data-label="Mensaje receptor">{r.con_mr ? (r.mr_estado ? MR_LABEL[r.mr_estado] || r.mr_estado : "—") : "no"}</td>
                   <td data-label="Clave" className="mono" style={{ fontSize: 11, wordBreak: "break-all" }}>{r.clave ? `…${r.clave.slice(-12)}` : "—"}</td>

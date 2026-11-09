@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..core import secretbox
@@ -150,7 +150,10 @@ def status(db: Session, t: Tenant) -> dict:
     from ..models import WebhookEvent
     from ..providers.payments import webhook_format
 
-    last = db.scalar(select(WebhookEvent).where(WebhookEvent.provider == "onvo", WebhookEvent.signature_ok).order_by(WebhookEvent.id.desc()).limit(1))
+    # 09/11: solo los avisos de ESTA empresa (antes se veia el ultimo de cualquiera) y solo los de produccion ("onvo")
+    last = db.scalar(
+        select(WebhookEvent).where(or_(WebhookEvent.tenant_id == t.id, WebhookEvent.tenant_id.is_(None)), WebhookEvent.provider == "onvo", WebhookEvent.signature_ok).order_by(WebhookEvent.id.desc()).limit(1)
+    )
     return {
         # 09/11: la API (llave secreta) y el webhook (avisos de ONVO) se ven por separado
         "webhook_format": webhook_format(wh),
@@ -190,7 +193,7 @@ def invoice_checkout(db: Session, t: Tenant, inv: Invoice, link: PaymentLink) ->
         )
     except OnvoError as e:
         log.warning("ONVO no abrió el checkout de la factura %s: %s", inv.number, e.message)
-        raise HTTPException(502, "No pudimos abrir la página de pago. Probá de nuevo en un momento.") from None
+        raise HTTPException(502, "No pudimos abrir la página de pago. Pruebe de nuevo en un momento.") from None
     link.provider_ref = it.id[:120]
     audit(db, t.id, None, "onvo_checkout", "invoice", inv.id, {"session": it.id, "monto": str(inv.balance)})
     return {"checkout_url": it.checkout_url}
@@ -223,7 +226,18 @@ def _amount(cts) -> Decimal:
     return Decimal(int(cts or 0)) / Decimal(100)
 
 
+TEST_SHOP_MSG = "evento de la tienda de pruebas: no se aplica"
+
+
+def is_test_meta(meta: dict | None) -> bool:
+    """Metadata de un checkout de la Tienda de pruebas (services/test_shop.py): nunca paga un pedido ni una factura reales."""
+    m = meta or {}
+    return str(m.get("crimson_env") or "") == "test" or bool(m.get("test_order_id"))
+
+
 def apply_paid(db: Session, t: Tenant, meta: dict, obj: dict, *, amount_cents, currency: str | None, intent_id: str, source: str) -> str:
+    if is_test_meta(meta):  # barrera inversa (09/11): un objeto de pruebas jamas paga algo real
+        return TEST_SHOP_MSG
     if meta.get("tenant_id") and str(meta["tenant_id"]) != str(t.id):
         return "metadata de otra empresa: no se aplica"
     try:
@@ -418,6 +432,8 @@ def _note_attempt(db: Session, t: Tenant, meta: dict, intent_id: str, text: str)
     """Intento rechazado o en proceso: solo deja rastro en el pedido (la factura no cambia)."""
     from . import store_orders as so
 
+    if is_test_meta(meta):
+        return f"{text}: {TEST_SHOP_MSG}"
     if not meta.get("order_id") or (meta.get("tenant_id") and str(meta["tenant_id"]) != str(t.id)):
         return f"{text}: sin pedido en metadata"
     try:

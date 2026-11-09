@@ -3,25 +3,26 @@ Usuarios e invitaciones viven en routers/users_admin.py."""
 
 from __future__ import annotations
 
+import hmac
 import html
 import logging
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..core import twofa
+from ..core import secretbox, twofa
 from ..core.config import settings as cfg
 from ..core.crypto import encrypt, mask
 from ..core.db import get_db
-from ..core.deps import COST_ROLE_CHOICES, Principal, require
+from ..core.deps import COST_ROLE_CHOICES, Principal, get_principal, require
 from ..core.reauth import require_reauth
 from ..models import BankAccount, BillingGroup, EmailOutbox, PaymentGatewayConfig, Tenant
-from ..providers.payments import OnvoAdapter, OnvoError, key_mode, key_problem, webhook_secret_problem
-from ..services import onvo
+from ..providers.payments import OnvoAdapter, OnvoError, key_mode, key_problem, webhook_format, webhook_secret_problem
+from ..services import onvo, onvo_test
 from ..services.bitacora import audit_change
 from ..services.documents import audit
 from ..services.mail import mail_status, queue_email
@@ -545,12 +546,21 @@ def gateway_upsert(data: GatewayIn, p: Principal = Depends(require("settings", "
             raise HTTPException(422, "La llave secreta y la publicable son de modos distintos (una de pruebas y otra de producción)")
         if data.secret and cfg.is_prod and key_mode(data.secret) == "test":
             raise HTTPException(422, "En producción va la llave de producción (onvo_live_secret_key_…): con la de pruebas nadie pagaría de verdad")
+        if data.client_id and cfg.is_prod and key_mode(data.client_id) == "test":
+            raise HTTPException(422, "En producción va la llave publicable de producción (onvo_live_publishable_key_…), no la de pruebas")
+        # 09/11: barrera inversa con el bloque de Pruebas (services/onvo_test): ni el whsec_ ni la llave de pruebas en Produccion
+        if data.webhook_secret and (tw := onvo_test.stored_webhook(db, p.tenant.id)) and hmac.compare_digest(tw.encode(), data.webhook_secret.encode()):
+            raise HTTPException(422, "Ese es el secreto del webhook de PRUEBAS: en Producción va el whsec_ del webhook del modo Live de ONVO")
+        if data.secret and (ts := onvo_test.stored_secret(db, p.tenant.id)) and hmac.compare_digest(ts.encode(), data.secret.encode()):
+            raise HTTPException(422, "Esa llave ya está cargada en el bloque de Pruebas: en Producción va la llave de producción")
     g = db.scalar(select(PaymentGatewayConfig).where(PaymentGatewayConfig.tenant_id == p.tenant.id, PaymentGatewayConfig.provider == data.provider))
     if not g:
         g = PaymentGatewayConfig(tenant_id=p.tenant.id, provider=data.provider)
         db.add(g)
     antes = {"active": g.active, "mode": g.mode, "secret": bool(g.secret_encrypted), "webhook": bool(g.webhook_secret_encrypted)}
-    g.client_id, g.is_primary, g.active, g.mode = data.client_id, data.is_primary, data.active, data.mode
+    # ONVO: la publicable vacia = no cambiar (como la secreta y el whsec_): un formulario que no la reenvia no la borra
+    g.client_id = g.client_id if (data.provider == "onvo" and data.client_id is None) else data.client_id
+    g.is_primary, g.active, g.mode = data.is_primary, data.active, data.mode
     if data.secret:
         g.secret_encrypted = onvo.seal_secret(p.tenant.id, "secret", data.secret) if data.provider == "onvo" else encrypt(data.secret)
     if data.webhook_secret:
@@ -575,7 +585,10 @@ def gateway_onvo_status(p: Principal = Depends(require("settings", "ver")), db: 
 def gateway_onvo_test(p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
     """Prueba la llave guardada (aunque la pasarela este inactiva) con una lectura que no crea nada en ONVO."""
     g = onvo.gateway(db, p.tenant.id)
-    key = (onvo._dec(g.secret_encrypted, g.tenant_id, "secret") if g and g.secret_encrypted else None) or cfg.onvo_secret_key
+    # la variable de entorno solo si es de ESTA empresa (onvo.env_applies): nunca la llave de otra
+    key = (onvo._dec(g.secret_encrypted, g.tenant_id, "secret") if g and g.secret_encrypted else None) or (
+        cfg.onvo_secret_key if cfg.onvo_secret_key and onvo.env_applies(db, p.tenant.id) else None
+    )
     if not key and g and g.secret_encrypted:
         return {"ok": False, "mode": None, "detail": "La llave guardada ya no se puede leer (se cambió la llave interna del servidor): genere una nueva en ONVO y cárguela aquí"}
     if not key:
@@ -585,9 +598,132 @@ def gateway_onvo_test(p: Principal = Depends(require("settings", "configurar")),
     try:
         OnvoAdapter(key).ping()
     except OnvoError as e:
-        hint = " (revisá que sea la llave secreta y que esté vigente)" if e.status in (401, 403) else ""
+        hint = " (revise que sea la llave secreta y que esté vigente)" if e.status in (401, 403) else ""
         return {"ok": False, "mode": key_mode(key), "detail": f"ONVO respondió {e.status or 'sin conexión'}: {e.message}{hint}"}
     return {"ok": True, "mode": key_mode(key), "detail": f"Conectado a ONVO en modo {'pruebas' if key_mode(key) == 'test' else 'producción'}"}
+
+
+# ---------- ONVO · Pruebas (modo Test): llaves aparte, solo para la Tienda de pruebas (services/onvo_test.py) ----------
+class OnvoTestIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    secret: str | None = Field(None, max_length=300)  # vacio = no cambiar
+    publishable: str | None = Field(None, max_length=200)  # vacio = no cambiar
+    webhook_secret: str | None = Field(None, max_length=300)  # vacio = no cambiar
+    enabled: bool = False
+
+    @field_validator("secret", "publishable", "webhook_secret")
+    @classmethod
+    def _strip(cls, v: str | None) -> str | None:
+        return (v or "").strip() or None
+
+
+ONLY_TEST = "En el bloque de Pruebas solo van llaves onvo_test_…: con una de producción se cobraría dinero real"
+
+
+def _onvo_test_problem(db: Session, tid: int, data: OnvoTestIn) -> str | None:
+    if data.secret:
+        if key_mode(data.secret) == "live":
+            return ONLY_TEST
+        if (why := key_problem(data.secret, "secret")) is not None or key_mode(data.secret) != "test":
+            return why or ONLY_TEST
+    if data.publishable:
+        if key_mode(data.publishable) == "live":
+            return ONLY_TEST
+        if (why := key_problem(data.publishable, "publishable")) is not None:
+            return why
+    if data.secret and data.publishable and key_mode(data.secret) != key_mode(data.publishable):
+        return "La llave secreta y la publicable son de modos distintos"
+    if data.webhook_secret:
+        if (why := webhook_secret_problem(data.webhook_secret)) is not None:
+            return why
+        if webhook_format(data.webhook_secret) != "firmado":
+            return "En Pruebas va el secreto del webhook firmado (whsec_…) que ONVO muestra en el modo Test → Desarrolladores → Webhooks"
+        live = onvo.webhook_secret(db, tid)  # incluye ONVO_WEBHOOK_SECRET cuando es de esta empresa
+        if live and hmac.compare_digest(live.encode(), data.webhook_secret.encode()):
+            return "Ese es el secreto del webhook de PRODUCCIÓN: el webhook del modo Test de ONVO tiene su propio whsec_"
+    return None
+
+
+def _admin_real(p: Principal = Depends(get_principal)) -> Principal:
+    """Las llaves de pruebas de ONVO las carga, prueba o quita solo un administrador real (como la Tienda de pruebas)."""
+    from .store_test import admin_real
+
+    return admin_real(p)
+
+
+@router.get("/gateways/onvo-pruebas")
+def onvo_test_get(p: Principal = Depends(require("settings", "ver")), db: Session = Depends(get_db)):
+    return onvo_test.status(db, p.tenant)
+
+
+@router.put("/gateways/onvo-pruebas")
+def onvo_test_put(data: OnvoTestIn, p: Principal = Depends(_admin_real), db: Session = Depends(get_db)):
+    from datetime import UTC, datetime
+
+    from ..models import OnvoTestConfig
+
+    if (why := _onvo_test_problem(db, p.tenant.id, data)) is not None:
+        raise HTTPException(422, why)
+    if (data.secret or data.webhook_secret) and not secretbox.available():
+        raise HTTPException(503, onvo_test.FISCAL_MSG)
+    c = onvo_test.config(db, p.tenant.id)
+    nueva = c is None
+    if c is None:
+        c = OnvoTestConfig(tenant_id=p.tenant.id, enabled=False)
+        db.add(c)
+    antes = {"habilitada": bool(c.enabled), "secreta": bool(c.secret_enc), "publicable": bool(c.publishable_key), "webhook": bool(c.webhook_secret_enc)}
+    if data.secret:
+        c.secret_enc = onvo_test.seal(p.tenant.id, "secret", data.secret)
+    if data.publishable:
+        c.publishable_key = data.publishable
+    if data.webhook_secret:
+        c.webhook_secret_enc = onvo_test.seal(p.tenant.id, "webhook", data.webhook_secret)
+    if c.publishable_key and c.secret_enc and (sec := onvo_test._dec(c.secret_enc, p.tenant.id, "secret")) and key_mode(sec) != key_mode(c.publishable_key):
+        db.rollback()
+        raise HTTPException(422, "La llave secreta y la publicable son de modos distintos")
+    if data.enabled and onvo_test.query_creds(db, p.tenant.id) is None and not data.secret:
+        db.rollback()
+        raise HTTPException(422, "Para habilitar la Tienda de pruebas falta la llave secreta de pruebas (onvo_test_secret_key_…)")
+    c.enabled = bool(data.enabled)
+    c.updated_at, c.updated_by = datetime.now(UTC), p.user.id
+    db.flush()
+    despues = {"habilitada": c.enabled, "secreta_nueva": bool(data.secret), "publicable_nueva": bool(data.publishable), "webhook_nuevo": bool(data.webhook_secret)}
+    audit(db, p.tenant.id, p.user.id, "onvo_test_update", "onvo_test", c.id, {"nueva": nueva, "antes": antes, "despues": despues}, ip=p.ip)  # solo booleanos
+    db.commit()
+    return onvo_test.status(db, p.tenant)
+
+
+@router.delete("/gateways/onvo-pruebas")
+def onvo_test_delete(p: Principal = Depends(_admin_real), db: Session = Depends(get_db)):
+    c = onvo_test.config(db, p.tenant.id)
+    if c is None:
+        raise HTTPException(404, "No hay llaves de pruebas cargadas")
+    cid = c.id
+    db.delete(c)
+    audit(db, p.tenant.id, p.user.id, "onvo_test_delete", "onvo_test", cid, {"quitadas": True}, ip=p.ip)
+    db.commit()
+    return onvo_test.status(db, p.tenant)
+
+
+@router.post("/gateways/onvo-pruebas/probar")
+def onvo_test_ping(p: Principal = Depends(_admin_real), db: Session = Depends(get_db)):
+    """Lectura minima con la llave de PRUEBAS (nunca la de produccion ni la del entorno). Mensajes fijos."""
+    c = onvo_test.config(db, p.tenant.id)
+    creds = onvo_test.query_creds(db, p.tenant.id)
+    if creds is None:
+        detail = "La llave de pruebas guardada ya no se puede leer: vuelva a cargarla" if c is not None and c.secret_enc else "No hay llave secreta de pruebas guardada"
+        return {"ok": False, "mode": None, "detail": detail}
+    ok, detail = True, "Conectado a ONVO en modo pruebas"
+    try:
+        onvo_test.adapter(creds.secret).ping()
+    except OnvoError as e:
+        ok = False
+        detail = "ONVO rechazó la llave de pruebas (401): revise que sea la secreta de modo Test" if e.status in (401, 403) else (
+            "Sin conexión con ONVO" if e.status == 0 else f"ONVO respondió con un error ({e.status})"
+        )
+    audit(db, p.tenant.id, p.user.id, "onvo_test_ping", "onvo_test", c.id if c else None, {"ok": ok})
+    db.commit()
+    return {"ok": ok, "mode": "test" if ok else None, "detail": detail}
 
 
 # ---------- Correo saliente ----------

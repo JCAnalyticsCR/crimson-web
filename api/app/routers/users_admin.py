@@ -1024,6 +1024,9 @@ _NO_ES_ACTIVIDAD = {
     ("password_reset", "created_by"),
     ("user", "temp_password_by"),
     ("invitation", "revoked_by"),
+    # Tienda de pruebas (09/11): quien hizo una compra de prueba o cargo las llaves de pruebas no es actividad real
+    ("store_test_order", "created_by"),
+    ("onvo_test_config", "updated_by"),
 }
 # Nombres visibles de lo que suele frenar el borrado (el resto sale con el nombre de la tabla)
 _ETIQUETAS = {
