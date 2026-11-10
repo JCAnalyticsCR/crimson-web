@@ -164,3 +164,78 @@ Solo cuando producción está caída o perdiendo dinero y el CI está rojo por a
   **volver a encenderlo** apenas el despliegue quede activo.
 - **Constancia:** un issue en GitHub con la etiqueta `despliegue-urgente`: commit, motivo, quién, hora, y el enlace al
   PR que deja el CI en verde (a más tardar en 24 h). Nunca para un cambio de dinero sin pruebas.
+
+## 6. Tienda: humo después de cada despliegue y cómo volver atrás
+
+Vale para todo lo que sale del plan de la tienda (olas 0 a 4). Cada tarea se publica sola y es reversible; esta
+sección dice qué se corre al terminar, cuándo se revierte, cómo y quién lo decide.
+
+### 6.1 Guion de humo (`scripts/humo_tienda.sh`)
+
+Se corre **una vez**, cuando los servicios desplegados quedan *Active* en Railway, desde cualquier máquina con
+`bash` y `curl` (Git Bash en Windows sirve):
+
+```bash
+bash scripts/humo_tienda.sh                      # https://tienda.crimsoncr.com, slug crimson
+```
+
+Solo hace GET (9 peticiones; el guion se corta solo si pasara de 12), cada una con 8 s de límite, y tiene que
+terminar en menos de 30 s. Sale con **0** si todo está bien y con **1** si algo falla; cada línea dice `OK`,
+`AVISO` o `FALLA` y qué vio. Revisa: portada 200 con el `<title>` esperado; `robots.txt` con la línea `Sitemap`;
+el sitemap y su cantidad de fichas `/p/` frente al `n` del snapshot (±5); `/api/public/store/crimson` 200 en JSON
+y con `X-Robots-Tag: noindex`; una ficha y una categoría del sitemap (200, indexables y con canónica a sí mismas);
+`/catalogo`; y una ficha inexistente con 404 real.
+
+Variables: `TIENDA_URL` (o el primer argumento), `TIENDA_SLUG`, `HUMO_TITULO` (texto que el `<title>` de la
+portada contiene; por defecto `Crimson`), `HUMO_TOLERANCIA` (5), `HUMO_EXIGIR_NOINDEX` (1; en 0 la falta de
+noindex en el JSON solo avisa: sirve únicamente mientras O0-05a no esté publicado) y `HUMO_HOST`.
+
+- **Fallas conocidas hoy (10/11/2026, única corrida contra producción, 9 GET en 11 s):** el sitemap trae 2 184
+  fichas y el snapshot `n=726` (el sitemap incluye los agotados ocultos; lo corrige O1-07 «Sitemap fiel al catálogo
+  visible»), y el JSON del API aún no lleva `noindex` (llega con O0-05a). Hasta que esas dos tareas estén
+  publicadas se corre con `HUMO_EXIGIR_NOINDEX=0 HUMO_TOLERANCIA=1500` y se compara la línea del sitemap con estos
+  números: si cambian mucho, es una falla nueva. Al publicar cada una, se quita su variable.
+- **Probar el propio guion** (tiene que salir con 1): `TIENDA_SLUG=crimsom bash scripts/humo_tienda.sh`.
+- **En local, contra nginx de verdad** (necesita Docker): con el entorno de «Compra real en local» levantado
+  (`infra/docker-compose.e2e.yml`, ver `portal/e2e/README.md`),
+  `TIENDA_SLUG=<slug que imprime la semilla> HUMO_TITULO=Ficticia bash scripts/humo_tienda.sh http://tienda.localhost:5301`.
+- **Sin Docker** no hay nginx local: el `nginx -t` de `portal/nginx.conf` lo hace el CI (trabajo «Portal · imagen
+  + nginx -t»), y el guion se prueba contra producción después de publicar, una sola vez.
+- No reemplaza al monitor (`scripts/monitor/tienda_check.py`, cada 30 min en GitHub Actions): el monitor vigila
+  que la tienda siga viva; el humo confirma que **este** despliegue no rompió nada.
+
+### 6.2 Cuándo se vuelve atrás
+
+| Resultado del humo | Qué se hace |
+|---|---|
+| Todo `OK` | Nada. Se anota en el PR: «humo OK, N s». |
+| `FALLA` en portada, `/catalogo`, ficha, categoría, JSON del API o la ficha inexistente da 200 | **Se revierte ya** (6.3), sin esperar a entender la causa. Se investiga con producción en la versión anterior. |
+| `FALLA` solo por sitemap frente a snapshot (fuera de ±5) | El worker puede estar rearmando el snapshot: se espera hasta 10 min y se corre el humo **una** vez más. Si sigue, se revierte. |
+| `FALLA` solo por tiempo (≥ 30 s) | Se repite una vez. Si sigue lento y el despliegue tocó consultas o caché, se revierte; si no, se abre un issue. |
+| Despliegue con **cambio de dinero** (precio, IVA, envío, total, pagos) | Además del humo, se compara el total de un carrito de prueba en local (`npm run e2e:compra`) con lo esperado antes de publicar. Ante cualquier `FALLA` o un total distinto en producción, se revierte de inmediato y se revisan los pedidos creados en la ventana. |
+
+### 6.3 Cómo se revierte, según el tipo de tarea
+
+- **Solo portal** (React, CSS, `nginx.conf`): Railway → servicio `portal` → Deployments → el despliegue anterior →
+  **Redeploy** (vuelve en un minuto). Después, `git revert <commit>` en un PR para que `main` quede igual a lo que
+  corre; el CI de ese PR también tiene que estar en verde.
+- **API o worker sin migración**: lo mismo en el servicio `api` (y en `worker` si el cambio lo tocó), y el
+  `git revert` en un PR.
+- **API con migración aditiva** (tabla o columna nueva): se revierte **el código** (Redeploy del anterior + `git
+  revert` del commit de código). **La migración no se baja**: es aditiva, el código anterior funciona con ella y
+  queda sin usar hasta el arreglo. Nunca `alembic downgrade` para salir de un apuro (sección 4).
+- **Cambio de contrato del API** (campo nuevo en un JSON): como todo cambio es aditivo y el navegador tolera que el
+  campo falte, se puede revertir el API sin revertir el portal, y al revés.
+- **Cambios de datos por lote** (nombres, fichas técnicas, categorías de la ola 3): no se revierten con git; se usa
+  el «deshacer» del lote (O3-11) desde el panel.
+- **Ajustes de la tienda guardados desde el panel**: se vuelven a dejar como estaban desde el panel; no requieren
+  despliegue.
+
+### 6.4 Quién decide
+
+- Quien despliega corre el humo y **revierte sin pedir permiso** cuando la tabla 6.2 lo dice: volver a la versión
+  anterior no cambia datos ni precios.
+- Avisa al responsable técnico de la plataforma y al administrador de Crimson: qué se publicó, qué falló (pegar la
+  salida del guion) y que ya está revertido.
+- Volver a publicar lo revertido lo decide el responsable técnico, con el arreglo y el CI en verde. Si el cambio era
+  de dinero, además con el visto bueno del administrador de Crimson.
