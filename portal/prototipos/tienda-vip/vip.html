@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="es-CR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Prototipo VIP · tokens</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
+<style>
+.shop {
+  --paper: #f7f5f2; --paper-2: #efebe6; --tile: #f1eeea; --surface: #ffffff;
+  --night: #121015; --night-2: #1c1a21;
+  --ink: #17141a; --text: #17141a; --text-2: #55505a; --text-3: #6b6670;
+  --on-night: #f4f1ee; --on-night-2: #b8b3ad;
+  --crimson: #e2233a; --crimson-press: #c21a30; --crimson-ink: #b3162a; --crimson-wash: #fbeaec; --rose: #ff8d9b;
+  --ok: #17703f; --ok-wash: #e6f3ec; --warn: #8a4b05; --warn-wash: #fbf0e0; --wa: #12804a;
+  --line: rgba(23, 20, 26, .10); --line-2: rgba(23, 20, 26, .18); --line-night: rgba(255, 255, 255, .12);
+  --font: "Archivo", Arial, Helvetica, sans-serif;
+  --w-display: 112%; --w-text: 100%; --w-data: 88%;
+  --fs-0: 12px; --fs-1: 13px; --fs-2: 15px; --fs-3: 17px; --fs-4: 20px;
+  --fs-5: clamp(24px, 2.4vw, 30px); --fs-6: clamp(30px, 3.6vw, 44px); --fs-7: clamp(36px, 5.4vw, 72px);
+  --r-1: 8px; --r-2: 14px; --r-pill: 999px;
+  --e-1: 0 1px 2px rgba(23, 20, 26, .06), 0 10px 28px -14px rgba(23, 20, 26, .22);
+  --e-2: 0 28px 64px -28px rgba(23, 20, 26, .40);
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px; --s-6: 32px; --s-7: 48px; --s-8: 72px;
+  --sec: clamp(56px, 7vw, 104px); --wrap: 1240px; --pad: max(16px, 4vw);
+  --dur-micro: 200ms; --dur-drawer: 380ms;
+  background: var(--paper); color: var(--text); font: 400 var(--fs-2)/1.5 var(--font); font-stretch: var(--w-text);
+  font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; min-height: 100vh;
+}
+* { box-sizing: border-box; } body { margin: 0; }
+.shop a { color: inherit; text-decoration: none; }
+.shop :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: var(--r-1); }
+.wrap { max-width: var(--wrap); margin: 0 auto; padding-inline: var(--pad); }
+.data { font-stretch: var(--w-data); font-weight: 500; font-size: var(--fs-0); letter-spacing: .02em; color: var(--text-3); }
+.h { font-stretch: var(--w-display); font-weight: 700; letter-spacing: -.02em; line-height: 1.06; margin: 0; }
+
+/* cabecera */
+.head { position: sticky; top: 0; z-index: 5; background: rgba(247, 245, 242, .96); border-bottom: 1px solid var(--line); }
+.head__row { display: flex; align-items: center; gap: 12px; min-height: 56px; }
+.logo { font-stretch: 118%; font-weight: 800; letter-spacing: -.01em; font-size: 18px; display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.logo i { width: 22px; height: 22px; border-radius: 50%; background: var(--crimson); display: inline-block; }
+.head__sp { margin-left: auto; display: flex; gap: 4px; }
+.icb { width: 44px; height: 44px; border-radius: 50%; border: 0; background: none; display: grid; place-items: center; color: var(--ink); position: relative; }
+.icb--ink { background: var(--ink); color: #fff; }
+.badge { position: absolute; top: 2px; right: 0; min-width: 18px; height: 18px; border-radius: 9px; background: var(--crimson); color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; padding: 0 4px; }
+.quick { display: flex; gap: 8px; overflow-x: auto; padding: 10px var(--pad); scrollbar-width: none; margin-inline: calc(var(--pad) * -1); }
+.chip { flex: none; min-height: 44px; display: inline-flex; align-items: center; padding: 0 16px; border-radius: var(--r-pill); border: 1px solid var(--line-2); background: var(--surface); font-weight: 550; font-size: var(--fs-1); white-space: nowrap; }
+.chip--on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.nav2 { display: none; }
+@media (min-width: 1024px) {
+  .head__row { min-height: 64px; gap: 24px; }
+  .search { flex: 1; max-width: 560px; height: 44px; border-radius: var(--r-pill); border: 1px solid var(--line-2); background: var(--surface); display: flex; align-items: center; padding: 0 16px; color: var(--text-3); font-size: var(--fs-2); }
+  .nav2 { display: flex; gap: 24px; min-height: 44px; align-items: center; font-size: var(--fs-1); font-weight: 550; color: var(--text-2); border-bottom: 1px solid var(--line); }
+  .nav2 a:last-child { margin-left: auto; color: var(--ink); }
+  .quick, .only-m { display: none; }
+}
+@media (max-width: 1023px) { .search { display: none; } }
+
+/* hero */
+.hero { background: var(--night); color: var(--on-night); }
+.hero__grid { display: grid; gap: var(--s-6); padding-block: clamp(28px, 6vw, 88px); align-items: center; }
+.hero h1 { font-size: var(--fs-7); max-width: 14ch; text-wrap: balance; }
+.hero p { margin: 0; color: var(--on-night-2); font-size: clamp(15px, 1.2vw, 18px); max-width: 46ch; }
+.hero__copy { display: grid; gap: var(--s-4); }
+.cta { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 0 22px; border-radius: var(--r-pill); border: 0; font: 650 var(--fs-2)/1 var(--font); cursor: pointer; background: var(--ink); color: #fff; white-space: nowrap; }
+.btn--primary { background: var(--crimson); }
+.btn--line { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--line-2); }
+.hero .btn--line { color: #fff; box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .35); }
+.btn--block { width: 100%; }
+.facts { display: flex; flex-wrap: wrap; gap: 6px 20px; color: var(--on-night-2); font-size: var(--fs-1); }
+.stage { position: relative; background: var(--tile); border-radius: 20px; aspect-ratio: 16 / 11; display: grid; place-items: center; overflow: hidden; color: var(--ink); }
+.stage img { width: 62%; height: 78%; object-fit: contain; mix-blend-mode: multiply; }
+.stage::before { content: ""; position: absolute; inset: 14px; pointer-events: none; opacity: .5;
+  background: linear-gradient(var(--ink), var(--ink)) top left / 18px 1.5px, linear-gradient(var(--ink), var(--ink)) top left / 1.5px 18px,
+    linear-gradient(var(--ink), var(--ink)) top right / 18px 1.5px, linear-gradient(var(--ink), var(--ink)) top right / 1.5px 18px,
+    linear-gradient(var(--ink), var(--ink)) bottom left / 18px 1.5px, linear-gradient(var(--ink), var(--ink)) bottom left / 1.5px 18px,
+    linear-gradient(var(--ink), var(--ink)) bottom right / 18px 1.5px, linear-gradient(var(--ink), var(--ink)) bottom right / 1.5px 18px;
+  background-repeat: no-repeat; }
+.stage__tag { color: var(--ink); position: absolute; left: 14px; right: 14px; bottom: 14px; background: var(--surface); border-radius: var(--r-2); padding: 12px 14px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; box-shadow: var(--e-1); }
+.stage__tag .data { color: var(--text-3); } .stage__tag b { font-weight: 650; font-size: var(--fs-2); line-height: 1.25; }
+.stage__tag strong { font-stretch: var(--w-display); font-size: var(--fs-4); grid-row: span 2; }
+@media (min-width: 900px) { .hero__grid { grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: clamp(32px, 5vw, 80px); } }
+
+/* tarjeta */
+.sec { padding-top: var(--sec); }
+.sec__head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: var(--s-5); }
+.sec__head h2 { font-size: var(--fs-5); }
+.more { font-weight: 650; font-size: var(--fs-1); text-decoration: underline !important; text-underline-offset: 4px; min-height: 44px; display: inline-flex; align-items: center; }
+.grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (min-width: 768px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; } }
+@media (min-width: 1180px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; } }
+.card { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-2); overflow: hidden; height: 100%; transition: border-color var(--dur-micro), box-shadow var(--dur-micro); }
+@media (hover: hover) { .card:hover { border-color: var(--line-2); box-shadow: var(--e-1); } }
+.card__media { position: relative; aspect-ratio: 1; background: var(--tile); display: grid; place-items: center; }
+.card__media img { width: 100%; height: 100%; object-fit: contain; padding: 13%; mix-blend-mode: multiply; filter: brightness(1.03) contrast(1.04); }
+.flag { position: absolute; left: 10px; top: 10px; background: var(--surface); border-radius: var(--r-pill); padding: 4px 10px; font-size: var(--fs-0); font-weight: 650; color: var(--warn); }
+.card__body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+.brand { text-transform: uppercase; letter-spacing: .06em; }
+.name { font-weight: 600; font-size: var(--fs-2); line-height: 1.3; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.6em; }
+.model { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.specs { color: var(--text-2); font-size: var(--fs-1); line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 12px; }
+.price { display: grid; line-height: 1.1; }
+.price b { font-stretch: var(--w-display); font-weight: 700; font-size: var(--fs-4); letter-spacing: -.01em; }
+.price b .cur { font-weight: 600; font-size: .8em; margin-right: 1px; }
+.price small { font-size: var(--fs-0); color: var(--text-3); margin-top: 3px; }
+.avail { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-0); font-weight: 550; color: var(--ok); margin-top: 6px; }
+.avail::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.avail--ask { color: var(--text-2); } .avail--order { color: var(--warn); }
+.add { width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--ink); color: #fff; display: grid; place-items: center; flex: none; cursor: pointer; }
+.add--ask { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--line-2); width: auto; padding: 0 14px; border-radius: var(--r-pill); font: 650 var(--fs-1)/1 var(--font); }
+@media (max-width: 520px) { .foot:has(.add--ask) { flex-direction: column; align-items: stretch; } .add--ask { min-height: 44px; } .card__body { padding: 10px 10px 12px; } .name { font-size: 14px; } .price b { font-size: var(--fs-3); } .specs { display: none; } }
+
+/* ficha: zona de compra */
+.pdp { display: grid; gap: var(--s-6); padding-block: var(--s-6); }
+@media (min-width: 900px) { .pdp { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: clamp(32px, 5vw, 72px); } }
+.gal { background: var(--tile); border-radius: var(--r-2); aspect-ratio: 1; display: grid; place-items: center; }
+.gal img { width: 100%; height: 100%; object-fit: contain; padding: 10%; mix-blend-mode: multiply; }
+.info { display: grid; gap: var(--s-4); align-content: start; }
+.info h1 { font-size: clamp(24px, 2.6vw, 36px); }
+.pricebig { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.pricebig b { font-stretch: var(--w-display); font-weight: 700; font-size: clamp(32px, 3.4vw, 44px); letter-spacing: -.02em; line-height: 1; }
+.pricebig b .cur { font-weight: 600; font-size: .8em; margin-right: 2px; }
+.pricebig span { color: var(--text-3); font-size: var(--fs-1); }
+.promise { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface); }
+.promise li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; padding: 12px 14px; border-top: 1px solid var(--line); font-size: var(--fs-1); color: var(--text-2); line-height: 1.4; }
+.promise li:first-child { border-top: 0; } .promise b { display: block; color: var(--ink); font-size: var(--fs-2); font-weight: 600; }
+.promise svg { margin-top: 2px; }
+.buy { display: flex; gap: 10px; }
+.qty { display: inline-flex; align-items: center; border: 1px solid var(--line-2); border-radius: var(--r-pill); height: 52px; background: var(--surface); }
+.qty button { width: 44px; height: 50px; border: 0; background: none; font-size: 18px; } .qty span { width: 28px; text-align: center; font-weight: 600; }
+.buy .btn { flex: 1; min-height: 52px; font-size: 16px; }
+.pay { display: flex; flex-wrap: wrap; gap: 6px; }
+.pay span { font-size: var(--fs-0); font-weight: 550; padding: 5px 10px; border-radius: var(--r-1); border: 1px solid var(--line); color: var(--text-2); background: var(--surface); }
+.walink { font-size: var(--fs-1); font-weight: 600; text-decoration: underline !important; text-underline-offset: 4px; display: inline-flex; min-height: 44px; align-items: center; gap: 8px; }
+ic { display: none; }
+</style>
+</head>
+<body>
+<div class="shop">
+  <header class="head">
+    <div class="wrap">
+      <div class="head__row">
+        <a class="logo" href="#"><i></i>CRIMSON</a>
+        <div class="search">Buscar producto, marca o modelo</div>
+        <div class="head__sp">
+          <button class="icb only-m" aria-label="Buscar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3"/></svg></button>
+          <button class="icb icb--ink" aria-label="Carrito: 1"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"><path d="M6 7h12l1 14H5L6 7zM9 7a3 3 0 0 1 6 0"/></svg><span class="badge">1</span></button>
+        </div>
+      </div>
+      <nav class="nav2"><a href="#">Seguridad</a><a href="#">Redes</a><a href="#">Respaldo eléctrico</a><a href="#">Hogar inteligente</a><a href="#">Audio</a><a href="#">Electrodomésticos</a><a href="#">Arma tu sistema</a></nav>
+    </div>
+  </header>
+  <div class="wrap"><nav class="quick"><a class="chip chip--on" href="#">Arma tu sistema</a><a class="chip" href="#">Seguridad</a><a class="chip" href="#">Redes</a><a class="chip" href="#">Respaldo eléctrico</a><a class="chip" href="#">Audio</a></nav></div>
+
+  <section class="hero">
+    <div class="wrap hero__grid">
+      <div class="hero__copy">
+        <h1 class="h" id="h1">Cámaras y redes que quedan bien instaladas.</h1>
+        <p>Equipo original con precio final, factura electrónica y técnicos de Crimson en Costa Rica.</p>
+        <div class="cta"><a class="btn btn--primary" href="#">Arma tu sistema</a><a class="btn btn--line" href="#">Ver catálogo</a></div>
+        <div class="facts"><span>2 184 productos</span><span>Precios con IVA incluido</span><span>Envío 1–2 días en la GAM</span></div>
+      </div>
+      <a class="stage" href="#">
+        <img src="https://eurocompcr.com/upload/items/2026/5/23514_21657.jpg" alt="Cámara solar 4G Hikvision" width="600" height="600">
+        <span class="stage__tag"><span class="data brand">Hikvision</span><strong id="p0"><span class="cur">₡</span>53 449</strong><b>Cámara solar 4G de 4 MP</b></span>
+      </a>
+    </div>
+  </section>
+
+  <section class="wrap sec">
+    <div class="sec__head"><h2 class="h">Recomendados por nuestros técnicos</h2><a class="more" href="#">Ver todo</a></div>
+    <ul class="grid">
+      <li><article class="card"><a class="card__media" href="#"><img src="https://eurocompcr.com/upload/items/2026/5/23514_21657.jpg" alt=""><span class="flag">Última unidad</span></a>
+        <div class="card__body"><span class="data brand">Hikvision</span><a class="name" href="#">Cámara solar 4G de 4 MP con panel</a><span class="data model">DS-2CFS04/4G</span><span class="specs">4 MP · 2.8 mm · IR 30 m</span>
+          <div class="foot"><span class="price"><b><span class="cur">₡</span>53 449</b><small>IVA incluido</small><span class="avail">En bodega</span></span><button class="add" aria-label="Agregar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button></div></div></article></li>
+      <li><article class="card"><a class="card__media" href="#"><img src="https://eurocompcr.com/upload/items/2026/3/23050_21117.jpg" alt=""></a>
+        <div class="card__body"><span class="data brand">Hikvision</span><a class="name" href="#">Terminal de acceso con reconocimiento facial</a><span class="data model">DS-K1T344MBWX-QRE1</span><span class="specs">PoE · WiFi · Bluetooth</span>
+          <div class="foot"><span class="price"><b><span class="cur">₡</span>138 425</b><small>IVA incluido</small><span class="avail avail--order">Bajo pedido · 3–5 días</span></span><button class="add" aria-label="Agregar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button></div></div></article></li>
+      <li><article class="card"><a class="card__media" href="#"><img src="https://eurocompcr.com/upload/items/2026/9/24149_22363.jpg" alt=""></a>
+        <div class="card__body"><span class="data brand">JBL</span><a class="name" href="#">Parlante Go 5 Bluetooth</a><span class="data model">JBLGO5SQUADAM</span><span class="specs">4.8 W · IP68</span>
+          <div class="foot"><span class="price"><b><span class="cur">₡</span>24 182</b><small>IVA incluido</small><span class="avail avail--ask">Confirmamos existencia</span></span><button class="add add--ask">Consultar</button></div></div></article></li>
+      <li><article class="card"><a class="card__media" href="#"><img src="https://eurocompcr.com/upload/items/2026/9/24157_22372.jpg" alt=""></a>
+        <div class="card__body"><span class="data brand">JBL</span><a class="name" href="#">Parlante PartyBox 330</a><span class="data model">JBLPB330BLKAM</span><span class="specs">280 W · Bluetooth · USB-C</span>
+          <div class="foot"><span class="price"><b><span class="cur">₡</span>315 044</b><small>IVA incluido</small><span class="avail avail--ask">Confirmamos existencia</span></span><button class="add add--ask">Consultar</button></div></div></article></li>
+    </ul>
+  </section>
+
+  <section class="wrap pdp">
+    <div class="gal"><img src="https://eurocompcr.com/upload/items/2026/5/23514_21657.jpg" alt=""></div>
+    <div class="info">
+      <span class="data brand">Hikvision · Cámaras</span>
+      <h1 class="h">Cámara solar 4G de 4 MP con panel</h1>
+      <span class="data">Modelo DS-2CFS04/4G(2.8MM) · SKU SG2041</span>
+      <div class="pricebig"><b><span class="cur">₡</span>53 449</b><span>IVA incluido · sin IVA ₡47 300</span></div>
+      <span class="avail" style="font-size:13px;margin:0">En bodega · queda 1</span>
+      <div class="buy"><span class="qty"><button aria-label="Quitar uno">−</button><span>1</span><button aria-label="Agregar uno">+</button></span><button class="btn btn--primary">Agregar al carrito</button></div>
+      <div class="pay"><span>SINPE Móvil</span><span>Tarjeta</span><span>Transferencia</span><span>Factura electrónica</span></div>
+      <ul class="promise">
+        <li><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7zM7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg><span><b>Envío 1–2 días en la GAM · ₡5 311</b>Resto del país por Correos de Costa Rica · ₡3 955</span></li>
+        <li><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z"/></svg><span><b>Garantía de fábrica</b>Si falla, Crimson hace el trámite con la marca.</span></li>
+        <li><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 0-5-5L14 6zM3 21l6-6"/></svg><span><b>¿Lo instalamos nosotros?</b>Cotizá la instalación con técnicos de Crimson.</span></li>
+      </ul>
+      <a class="walink" href="#">¿Dudas? Escribinos por WhatsApp</a>
+    </div>
+  </section>
+</div>
+</body>
+</html>
