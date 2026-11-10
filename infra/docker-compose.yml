@@ -1,4 +1,6 @@
 # Entorno local completo: docker compose -f infra/docker-compose.yml up --build
+# Para la compra de punta a punta de la tienda (base desechable, sin .env, tienda sembrada) se suma
+# infra/docker-compose.e2e.yml: ver portal/e2e/README.md, seccion «Compra real en local».
 services:
   postgres:
     image: postgres:16-alpine
@@ -16,7 +18,9 @@ services:
 
   api:
     build: ../api
-    env_file: ../.env
+    # el .env es opcional: sin el, el API arranca con los valores de desarrollo (ENV=local)
+    env_file:
+      - { path: ../.env, required: false }
     environment:
       DATABASE_URL: postgresql+psycopg://crimson:crimson_local_only@postgres:5432/crimson
       REDIS_URL: redis://redis:6379/0
@@ -25,19 +29,31 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_started }
+    # listo = ya migro y responde (la imagen no trae curl): el portal y la semilla esperan a esto
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
 
   worker:
     build: { context: .., dockerfile: worker/Dockerfile }
-    env_file: ../.env
+    env_file:
+      - { path: ../.env, required: false }
     environment:
       DATABASE_URL: postgresql+psycopg://crimson:crimson_local_only@postgres:5432/crimson
       REDIS_URL: redis://redis:6379/0
-    depends_on: [api, redis]
+      ENV: local
+    depends_on:
+      api: { condition: service_healthy }
+      redis: { condition: service_started }
 
   portal:
     build: ../portal
     ports: ["5173:80"]
-    depends_on: [api]
+    depends_on:
+      api: { condition: service_healthy }
 
 volumes:
   pgdata:

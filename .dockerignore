@@ -8,6 +8,7 @@ api/.pytest_cache
 api/.ruff_cache
 api/*.db
 api/tests
+api/scripts
 # respaldos, lo que se baja o se descifra a mano y las llaves (infra/RESPALDO.md): nunca dentro de una imagen
 api/respaldos
 api/.env*

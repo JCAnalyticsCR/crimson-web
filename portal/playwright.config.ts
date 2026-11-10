@@ -1,6 +1,7 @@
 /* Pruebas de pantalla de la tienda (`npm run e2e`). Corren contra la TIENDA DE PRUEBAS: la vitrina real con el API
    simulado en el navegador y un catalogo ficticio (e2e/app/, build propio en vite.e2e.config.ts). No hace falta API,
    base de datos ni Docker, y nada sale a internet. Guia completa: e2e/README.md.
+   La compra real contra el API local es otra configuracion: playwright.compra.config.ts (`npm run e2e:compra`).
 
    Un proyecto por ancho. Los cinco anchos son los del criterio de salida del plan de la tienda (sin scroll
    horizontal a 320, 360, 375, 768 y 1280 px); capturas y axe corren solo en los anchos que les tocan. */
@@ -13,6 +14,8 @@ const CI = !!process.env.CI;
 const ANCHOS: [number, number][] = [[320, 568], [360, 740], [375, 667], [768, 1024], [1280, 800]];
 const SOLO_CAPTURAS = [375, 768, 1280]; // capturas base (toHaveScreenshot)
 const SOLO_AXE = [375, 1280]; // informe de accesibilidad y recorrido de compra
+/* la compra real contra el API local (O0-03) tiene su propia configuracion y sus servidores: `npm run e2e:compra` */
+const COMPRA_REAL = "**/compra.spec.ts";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -44,6 +47,7 @@ export default defineConfig({
     name: `w${w}`,
     use: { viewport: { width: w, height: h }, isMobile: w < 1024, hasTouch: w < 1024 },
     testIgnore: [
+      COMPRA_REAL,
       ...(SOLO_CAPTURAS.includes(w) ? [] : ["**/capturas.spec.ts"]),
       ...(SOLO_AXE.includes(w) ? [] : ["**/axe.spec.ts", "**/compra-mock.spec.ts"]),
     ],

@@ -2,8 +2,8 @@
    del checkout -> «Mi pedido». Protege que el recorrido no se rompa al tocar la vitrina, el carrito o el checkout.
 
    NO es la prueba de compra real: aqui no hay API, inventario ni pago (el pedido lo inventa src/demo/mockApi.ts).
-   La compra de punta a punta contra el API local, a 375 y 768 px y solo con teclado, es la tarea O0-03
-   (e2e/compra.spec.ts). */
+   La compra de punta a punta contra el API local, a 375 y 768 px y solo con teclado, es e2e/compra.spec.ts
+   (`npm run e2e:compra`, tarea O0-03). */
 import { REF } from "./app/datos";
 import { rutaFicha } from "./soporte/pantallas";
 import { COMPRADORA, expect, test, tiendaLista } from "./soporte/tienda";

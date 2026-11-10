@@ -1,11 +1,13 @@
 # Pruebas del portal
 
-Dos juegos de pruebas, ninguno necesita API, base de datos, Docker ni internet:
+Tres juegos de pruebas. Los dos primeros no necesitan API, base de datos, Docker ni internet; el tercero levanta
+solo el API y el portal en esta máquina (tampoco necesita Docker ni internet):
 
 | Comando | Qué corre | Dónde viven |
 |---|---|---|
 | `npm test` | Vitest: módulos puros en Node (hoy `catalogFilter.ts`) | `src/**/__tests__/*.test.ts` |
-| `npm run e2e` | Playwright: la tienda en un navegador de verdad, a cinco anchos | `e2e/*.spec.ts` |
+| `npm run e2e` | Playwright: la tienda en un navegador de verdad, a cinco anchos, con el API simulado | `e2e/*.spec.ts` |
+| `npm run e2e:compra` | Playwright: una **compra real** contra el API local, a 375 y 768 px y solo con teclado | `e2e/compra.spec.ts` |
 | `npm run e2e:tipos` | `tsc` sobre las pruebas de pantalla y sus configuraciones | `e2e/tsconfig.json` |
 
 Primera vez en una máquina: `npm ci` y `npx playwright install --only-shell chromium`.
@@ -27,8 +29,8 @@ Contra la **tienda de pruebas** (`e2e/app/`): el mismo árbol que el dominio de 
 Cada prueba corre con el reloj fijo (10/11/2026 15:00, hora de Costa Rica) y **corta cualquier pedido a otro
 sitio**: si la tienda intenta bajar algo de afuera (fotos de un proveedor, fuentes, medición), la prueba falla.
 
-No es la compra real: aquí no hay inventario, pago ni correo. La compra de punta a punta contra el API local
-es la tarea O0-03.
+No es la compra real: aquí no hay inventario, pago ni correo. La compra de punta a punta contra el API local es
+`npm run e2e:compra` (más abajo, «Compra real en local»).
 
 ## Qué se prueba
 
@@ -38,11 +40,120 @@ es la tarea O0-03.
 | `capturas.spec.ts` | Capturas base de página completa (8 pantallas) | 375, 768, 1280 |
 | `axe.spec.ts` | Accesibilidad WCAG 2.1 A/AA en **modo informe**: no bloquea | 375, 1280 |
 | `compra-mock.spec.ts` | Recorrido ficha → carrito → 4 pasos del checkout → «Mi pedido», sobre el mock | 375, 1280 |
+| `compra.spec.ts` | La compra real contra el API local: **no** corre con `npm run e2e`, sino con `npm run e2e:compra` | 375, 768 |
 | `pendientes.spec.ts` | Fallos conocidos, como `test.fixme` con su tarea | todos |
 
 Agregar una pantalla: una entrada en `soporte/pantallas.ts` (con `base: true` entra también a capturas y axe).
 
 Al terminar, `e2e/informes/` (fuera de git) trae `axe.md` y `pendientes.md`; el resumen sale en la consola.
+
+## Compra real en local (`npm run e2e:compra`)
+
+Es el lugar para probar compras: **nunca con pedidos reales en producción** y no con la «Tienda de pruebas» del
+panel (esa no usa el checkout, el carrito ni el inventario; queda solo para ONVO en modo Test). Todo criterio del
+plan de la tienda que diga «en local» se verifica aquí.
+
+Qué corre (`compra.spec.ts`, en dos anchos: 375 y 768 px, táctiles):
+
+| Prueba | Qué hace |
+|---|---|
+| La tienda local está sembrada | Los seis productos en su estado, SINPE activo, tarjeta solo como pago simulado, sin medición |
+| Compra SINPE completa | Catálogo → ficha → agregar → aviso «Ir al carrito» → carrito → los cuatro pasos del checkout → pedido creado → «Mi pedido» con las instrucciones de SINPE; después lo vuelve a buscar por número y correo |
+| La misma compra solo con teclado | Tab, Enter, espacio y flechas; falla si la página recibe un solo evento de ratón, dedo o lápiz |
+
+Al final de cada compra se lee el pedido **en el servidor** (estado, método, tarifa, total de ₡7 006) y se revisa
+que apartó existencia (queda una unidad libre menos). La pantalla final de cada compra queda adjunta en
+`playwright-report/compra`.
+
+### Sin Docker (lo normal, y lo que corre el CI)
+
+```
+npm ci && npx playwright install --only-shell chromium      # una vez
+(cd ../api && uv sync --locked)                              # una vez
+npm run e2e:compra
+```
+
+Playwright levanta y apaga dos servidores, los dos solo en `127.0.0.1`:
+
+- **API** en el puerto 8101: `api/scripts/tienda_e2e_local.py` crea una SQLite **nueva en cada corrida** en la
+  carpeta temporal del sistema (fuera del repo), corre `alembic upgrade head`, siembra la tienda y arranca uvicorn.
+  Antes de cargar la aplicación limpia el entorno (fuera llaves de correo, ONVO, Eurocomp, Hacienda, BCCR, IMAP,
+  Railway) y no lee ningún `.env`: el correo queda «simulado», la tarjeta en modo de prueba y nada sale a internet.
+- **Portal** en el puerto 5301: el build de verdad (`vite.compra.config.ts`: el mismo `index.html` y `src/main.tsx`
+  de producción) con `/api` apuntando al API local. Se abre como `http://tienda.localhost:5301`: un nombre que
+  empieza con «tienda.» monta la tienda en la raíz, igual que el dominio propio.
+
+El navegador de la prueba no resuelve ningún nombre que no sea de esta máquina y cualquier pedido a otro sitio hace
+fallar la prueba. Si el puerto 8101 o el 5301 están ocupados, falla en vez de usar lo que haya ahí.
+
+Variables (todas opcionales):
+
+| Variable | Para qué |
+|---|---|
+| `E2E_COMPRA_PORTAL=dev` | Servidor de desarrollo de Vite en vez del build (depurar con el código sin empaquetar) |
+| `E2E_DATABASE_URL` | Otra base **local** para el API (el CI pasa una Postgres de servicio); remota se rechaza |
+| `E2E_PYTHON` | Intérprete con las dependencias del API si no se usa `uv` (por defecto `uv run --locked python`) |
+| `E2E_PUERTO`, `E2E_API_PUERTO` | Cambiar los puertos 5301 y 8101 |
+
+Para ver la tienda sembrada a mano: en `api/`, `uv run python -m scripts.tienda_e2e_local`; en `portal/`,
+`npx vite --config vite.compra.config.ts`; abrir `http://tienda.localhost:5301`.
+
+### La semilla (`api/scripts/seed_tienda_e2e.py`)
+
+Una empresa con la tienda publicada en `tienda.localhost`, en colones, con datos 100 % ficticios:
+
+| Código | Producto | Precio con IVA | Estado |
+|---|---|---|---|
+| `E2E-BOD-1` | Cable de red de prueba 1 m | ₡1 695 | En bodega (40) — el que se compra |
+| `E2E-BOD-2` | Conector RJ45 de prueba | ₡565 | En bodega (3: últimas unidades) |
+| `E2E-PED-1` | Soporte de pared de prueba | ₡1 356 | Bajo pedido, dato del proveedor vigente |
+| `E2E-PED-2` | Caja de paso de prueba | ₡904 | Bajo pedido, dato del proveedor vigente |
+| `E2E-CON-1` | Fuente 12 V de prueba | ₡1 921 | Por confirmar («Consultar»: dato de hace 30 días) |
+| `E2E-AGO-1` | Sirena interior de prueba | ₡1 808 | Agotado |
+
+- Envío: «Correos de Costa Rica» ₡3 955 a todo el país y «Fast Crimson» ₡5 311 en la GAM (con IVA), gratis desde
+  ₡50 000. Son las tarifas que documenta el plan (O1-09); **no se leyeron de producción**: si las reales son otras,
+  se cambian en `TIENDA["shipping_rates"]` y en `soporte/compra.ts`.
+- Pago: SINPE Móvil (número y titular inventados) y tarjeta **sin llave de ONVO**, que fuera de producción el API
+  ofrece solo como «Modo de prueba · pago simulado». Sin transferencia ni efectivo.
+- Sin comprobante electrónico automático, sin revisión del dominio del correo por DNS y sin medición.
+- No crea usuarios ni contraseñas. Es idempotente: repone la existencia y refresca la fecha del dato del proveedor.
+- Candados: solo con `ENV=local`, sin variables de Railway, y contra SQLite o una Postgres de esta máquina o del
+  docker-compose; si la empresa ya tiene productos propios en la web se niega (salvo `--forzar`, que no los toca).
+  El guion no entra a las imágenes Docker (`.dockerignore`).
+- `api/tests/test_seed_tienda_e2e.py` la prueba en el trabajo de la API (estados, idempotencia, compra SINPE y pago
+  simulado por la API pública, candados).
+
+Los montos de `soporte/compra.ts` están escritos a mano a propósito: si cambia un precio o una tarifa en la semilla,
+la prueba se pone en rojo hasta que alguien confirme el número nuevo.
+
+### Con Docker (api, worker, postgres, redis y portal con nginx)
+
+Lo mismo contra los contenedores, con nginx sirviendo la tienda como en producción (SSI, 404 reales, cabeceras).
+`infra/docker-compose.e2e.yml` lo vuelve un entorno aparte y desechable: proyecto `crimson-e2e` con su propia base,
+**sin leer el `.env`**, y solo publica el portal (5301) y el API (8101) en `127.0.0.1`. Desde la raíz del repo:
+
+```
+docker compose -f infra/docker-compose.yml -f infra/docker-compose.e2e.yml up --build -d --wait
+docker compose -f infra/docker-compose.yml -f infra/docker-compose.e2e.yml run --rm semilla
+cd portal
+E2E_COMPRA_URL=http://tienda.localhost:5301 npm run e2e:compra
+cd ..
+docker compose -f infra/docker-compose.yml -f infra/docker-compose.e2e.yml down -v
+```
+
+(En PowerShell la variable se pone antes: `$env:E2E_COMPRA_URL = "http://tienda.localhost:5301"`.)
+
+Con `E2E_COMPRA_URL` Playwright no levanta nada: usa lo que ya está arriba (solo acepta direcciones de esta máquina).
+Pendiente de verificar: el 10/11 el servicio de Docker de esta máquina estaba apagado; los dos archivos se validaron
+con `docker compose config`, pero **la compra contra los contenedores todavía no se ha corrido**. Requiere Docker
+Compose 2.24 o más nuevo.
+
+### En el CI
+
+Trabajo «Tienda · compra real en local (API + portal + Postgres)» de `.github/workflows/ci.yml`: el modo sin Docker
+con una Postgres de servicio (`E2E_DATABASE_URL`). Tarda pocos minutos; si un día pasa de 10, se mueve a un workflow
+nocturno y queda obligatoria antes de cada despliegue de dinero (`infra/DESPLIEGUE.md`).
 
 ## Capturas base
 

@@ -11,7 +11,7 @@ tumbe la plataforma. Complementa `infra/RESPALDO.md` (respaldos) y el runbook de
 ## 1. El camino de un cambio
 
 ```
-push a main ──► GitHub Actions "CI" (6 trabajos en paralelo, < 10 min)
+push a main ──► GitHub Actions "CI" (8 trabajos; la compra real espera a los de la API y el portal; < 10 min)
                    │  verde  ──► Railway despliega SOLO los servicios cuyas rutas vigiladas cambiaron
                    │  rojo   ──► Railway marca el despliegue SKIPPED: producción sigue con la versión anterior
 ```
@@ -24,9 +24,10 @@ push a main ──► GitHub Actions "CI" (6 trabajos en paralelo, < 10 min)
 
 | Trabajo | Qué hace | Falla si… |
 |---|---|---|
-| API · ruff + pytest | `uv sync --locked`, `ruff check app ../worker`, `pytest -n auto` (en paralelo, Argon2 barato solo en pruebas, reloj de Costa Rica hasta los ítems 2.1 y 3.4) | el lock no coincide con `pyproject.toml`, hay errores de lint o falla una prueba |
+| API · ruff + pytest | `uv sync --locked`, `ruff check app scripts ../worker`, `pytest -n auto` (en paralelo, Argon2 barato solo en pruebas, reloj de Costa Rica hasta los ítems 2.1 y 3.4) | el lock no coincide con `pyproject.toml`, hay errores de lint o falla una prueba |
 | Migraciones | Postgres 16 vacía: una sola cabeza de Alembic, `alembic upgrade head`, `alembic check`, la última migración se revierte y se vuelve a aplicar, y al final las carreras de inventario contra Postgres real (`SELECT … FOR UPDATE`) | hay dos cabezas, una migración no corre en Postgres, el modelo y las migraciones no coinciden, el `downgrade` no sirve, o dos pedidos pueden llevarse la última unidad |
 | Portal · tsc + vite build | `npm ci`, `tsc -b`, `vite build` | errores de tipos o de build |
+| Tienda · compra real en local | Después de los trabajos de la API y del portal: Playwright levanta el API (migraciones + semilla ficticia + uvicorn, sobre una Postgres de servicio) y el portal, y compra por SINPE a 375 y 768 px, con puntero y solo con teclado (`portal/e2e/README.md`, «Compra real en local»). Sin secretos y sin salir de la máquina | no se puede completar una compra: ficha, carrito, los cuatro pasos del checkout, pedido creado con el total correcto, existencia apartada o «Mi pedido» con las instrucciones de pago |
 | Portal · imagen + nginx -t | `docker build portal` (el Dockerfile arma `nginx.conf` con `envsubst` y corre `nginx -t`) | `nginx.conf` o el Dockerfile del portal tienen un error |
 | Respaldo · imagen + ciclo completo | construye `infra/respaldo/Dockerfile` y, dentro de la imagen, con `age` y `rclone` reales y nada real (`infra/respaldo/ciclo_ci.sh`): base con la semilla y un valor de cada tipo (binario, decimales, JSON, fechas con zona) → respaldo diario (verificado restaurando en una SQLite desechable) → bucket local → prueba mensual (bajar, hashes, descifrar) → `restore` en una base vacía. Dos veces: todo en SQLite, y **como producción**: desde una Postgres 16 con el rol de solo lectura de `RESPALDO.md` 4.3 (Postgres → SQLite en la verificación del cron) y con el `restore` final en otra Postgres vacía, como la prueba mensual (Postgres → Postgres) | la imagen no construye, el rol de solo lectura no alcanza para respaldar, la verificación del cron no da los mismos hashes al pasar de Postgres a SQLite, o cualquier paso del respaldo o de su restauración falla con las herramientas de verdad |
 | Dependencias · pip-audit + npm audit | vulnerabilidades conocidas en `uv.lock` y altas en `portal/package-lock.json` (sin las de desarrollo) | **en un PR**, si hay alguna que no esté en la lista de excepciones. En un push solo informa (el paso queda en rojo y el trabajo en verde) |
@@ -34,7 +35,7 @@ push a main ──► GitHub Actions "CI" (6 trabajos en paralelo, < 10 min)
 Lo mismo en local, antes de subir:
 
 ```bash
-cd api && uv sync --locked && uv run ruff check app ../worker && TZ=America/Costa_Rica uv run pytest -n auto -q
+cd api && uv sync --locked && uv run ruff check app scripts ../worker && TZ=America/Costa_Rica uv run pytest -n auto -q
 cd api && DATABASE_URL=postgresql+psycopg://crimson:crimson_local_only@localhost:5432/crimson \
           uv run alembic upgrade head && uv run alembic check      # con infra/docker-compose.yml levantado
 cd portal && npm ci && npx tsc -b && npx vite build

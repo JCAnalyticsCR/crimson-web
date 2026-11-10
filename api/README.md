@@ -17,6 +17,9 @@ uv run pytest -n auto -q                 # toda la suite en paralelo (pytest-xdi
 Portal: `cd portal && npm install && npm run dev` → http://localhost:5173 (proxy `/api` → `:8000`).
 Todo junto con Docker: `docker compose -f infra/docker-compose.yml up --build`.
 
+Compra de la tienda de punta a punta en local (base desechable, tienda sembrada con datos ficticios y pago simulado, sin
+Docker): `cd portal && npm run e2e:compra`. La semilla y el arranque viven en `api/scripts/`; guía en `portal/e2e/README.md`.
+
 ## Staging en Railway
 
 Proyecto `crimson-plataforma` (entorno `production` de Railway, datos de prueba): servicios `api` (raíz `/api`), `portal` (raíz `/portal`, nginx con proxy `/api` a la URL pública de la API), `worker` (raíz del repo, `RAILWAY_DOCKERFILE_PATH=worker/Dockerfile`), Postgres y Redis. Cada push a `main` redespliega **solo si el CI pasa** ("Wait for CI" y rutas vigiladas: `infra/DESPLIEGUE.md`). Respaldo diario cifrado fuera de Railway: servicio cron `respaldo` (`infra/RESPALDO.md` §4).

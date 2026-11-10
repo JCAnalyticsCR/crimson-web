@@ -8,6 +8,8 @@ crimson.db
 .env
 .env.*
 tests
+# guiones de desarrollo local (semilla y arranque de la tienda de pruebas): nunca dentro de la imagen
+scripts
 # respaldos, lo que se baja o se descifra a mano y las llaves (infra/RESPALDO.md): nunca dentro de la imagen
 respaldos
 **/*.zip

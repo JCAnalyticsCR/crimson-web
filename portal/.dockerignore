@@ -4,5 +4,6 @@ dist
 .env
 .env.*
 e2e/.dist
+e2e/.dist-compra
 test-results
 playwright-report

@@ -14,6 +14,6 @@
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "include": [".", "../playwright.config.ts", "../vite.e2e.config.ts", "../vitest.config.ts"],
-  "exclude": [".dist"]
+  "include": [".", "../playwright.config.ts", "../playwright.compra.config.ts", "../vite.e2e.config.ts", "../vite.compra.config.ts", "../vitest.config.ts"],
+  "exclude": [".dist", ".dist-compra"]
 }

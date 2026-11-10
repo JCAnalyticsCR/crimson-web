@@ -67,6 +67,7 @@ llave-privada*.txt
 # pruebas del portal (Playwright): build de la tienda de pruebas, resultados e informes de cada corrida.
 # Las capturas base SI se versionan (portal/e2e/capturas-base/).
 portal/e2e/.dist/
+portal/e2e/.dist-compra/
 portal/test-results/
 portal/playwright-report/
 portal/e2e/informes/

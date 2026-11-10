@@ -1,0 +1,53 @@
+# Compra de punta a punta de la tienda contra los contenedores (plan de la tienda, O0-03). Se usa SIEMPRE junto al
+# compose base y es un entorno aparte, desechable:
+#
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.e2e.yml up --build -d --wait
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.e2e.yml run --rm semilla
+#   (en portal/)  E2E_COMPRA_URL=http://tienda.localhost:5301 npm run e2e:compra
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.e2e.yml down -v
+#
+# Que cambia respecto del compose base:
+# - Proyecto propio (crimson-e2e): su base vive en un volumen aparte del de desarrollo y `down -v` la borra.
+# - NO lee el .env: ni llaves de correo, ni ONVO, ni Eurocomp, ni Hacienda. El correo queda "simulado", la tarjeta en
+#   modo de prueba y el proveedor de factura en "none". Nada sale a un servicio real.
+# - Solo publica el portal (5301) y el API (8101), y solo en esta maquina (127.0.0.1). La tienda se abre como
+#   http://tienda.localhost:5301: nginx la sirve como en produccion (SSI, 404 reales, cabeceras).
+# - Servicio `semilla` (se corre a mano con `run --rm`): publica la tienda de pruebas y sus 6 productos ficticios.
+#   El guion no esta en la imagen (api/.dockerignore): se monta desde el repo, solo lectura.
+# Requiere Docker Compose 2.24 o mas nuevo (!reset, !override y env_file opcional).
+name: crimson-e2e
+
+services:
+  postgres:
+    ports: !reset []
+
+  redis:
+    ports: !reset []
+
+  api:
+    env_file: !reset []
+    environment:
+      PUBLIC_BASE_URL: http://tienda.localhost:5301
+      EINVOICE_PROVIDER: none
+    ports: !override ["127.0.0.1:8101:8000"]
+
+  worker:
+    env_file: !reset []
+    environment:
+      EINVOICE_PROVIDER: none
+
+  portal:
+    ports: !override ["127.0.0.1:5301:80"]
+
+  semilla:
+    build: ../api
+    profiles: ["semilla"]
+    restart: "no"
+    command: ["python", "-m", "scripts.seed_tienda_e2e"]
+    volumes:
+      - ../api/scripts:/app/scripts:ro
+    environment:
+      DATABASE_URL: postgresql+psycopg://crimson:crimson_local_only@postgres:5432/crimson
+      ENV: local
+    depends_on:
+      api: { condition: service_healthy }

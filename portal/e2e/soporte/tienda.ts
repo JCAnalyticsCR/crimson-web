@@ -6,9 +6,11 @@ import { test as base, expect, type Page } from "@playwright/test";
 export const AHORA = new Date("2026-11-10T15:00:00-06:00");
 
 const SLUG = "crimson";
-const local = (url: string) => /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(url) || !/^https?:/.test(url);
+/* esta maquina: 127.0.0.1, localhost y sus subdominios (tienda.localhost es la tienda de la compra real, O0-03) */
+const local = (url: string) => /^https?:\/\/(127\.0\.0\.1|([a-z0-9-]+\.)*localhost)(:\d+)?\//.test(url) || !/^https?:/.test(url);
 
-export const test = base.extend<{ externas: string[] }>({
+/** Base de TODAS las pruebas de pantalla, con API simulado o real (soporte/compra.ts): nada sale de esta maquina. */
+export const sinInternet = base.extend<{ externas: string[] }>({
   /* Nada sale de esta maquina: cualquier pedido a otro sitio (fotos de un proveedor, fuentes, medicion) se corta y la
      prueba falla. La tienda de pruebas no necesita nada de afuera; si algo lo pide, es un cambio que hay que mirar. */
   externas: [async ({ context }, use) => {
@@ -17,7 +19,9 @@ export const test = base.extend<{ externas: string[] }>({
     await use(externas);
     expect.soft(externas, "la tienda de pruebas pidió algo fuera de esta máquina").toEqual([]);
   }, { auto: true }],
+});
 
+export const test = sinInternet.extend({
   page: async ({ page }, use) => {
     await page.clock.setFixedTime(AHORA); // fija Date.now(); los temporizadores siguen corriendo
     await use(page);
