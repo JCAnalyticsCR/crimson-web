@@ -231,10 +231,15 @@ def rebuild(db: Session, tid: int) -> None:
     row.built_at = now
     row.n_products = len(gz)  # sobreescribimos abajo
     # calcular n_products real sin deserializar el gz (leemos el campo n del JSON)
+    shown: set[int] | None = None
     try:
-        row.n_products = json.loads(gzip.decompress(gz)).get("n", 0)
+        data = json.loads(gzip.decompress(gz))
+        row.n_products = data.get("n", 0)
+        shown = {int(x["id"]) for x in data.get("products") or []}
     except Exception:  # noqa: BLE001
         pass
+    if shown is not None:
+        mark_hidden(db, tid, shown, now)
     # Armar el snapshot tarda (todo el catalogo) y `t` se cargo antes: lo que se haya guardado mientras tanto en los
     # ajustes (un guardado de la vitrina, por ejemplo) NO se pisa. Se relee la fila con candado y solo se anota la
     # marca. `cv` es la version con la que se armo: si hubo un guardado en el camino, catalog_v queda mayor y la
@@ -245,6 +250,26 @@ def rebuild(db: Session, tid: int) -> None:
     t.settings = st
     db.commit()
     log.info("Snapshot empresa %s: %s bytes gz", tid, len(gz))
+
+
+def mark_hidden(db: Session, tid: int, shown: set[int], now: datetime) -> None:
+    """hidden_since (O0-07, aun no se muestra): un producto publicado (activo y show_on_web) que no quedo en el
+    snapshot (agotado oculto u otra regla de la tienda) recibe la fecha del primer rearmado que lo oculto; vuelve a
+    nulo cuando reaparece o cuando deja de estar publicado (despublicar no es "oculto"). UPDATE por SQL: no toca
+    web_updated_at ni el historial de precios."""
+    from sqlalchemy import and_, not_, true, update
+
+    from ..models import Product
+
+    base = (Product.tenant_id == tid,)
+    published = (Product.active, Product.show_on_web)
+    keep = {"updated_at": Product.updated_at}  # marcar oculto no es editar el producto
+    db.execute(
+        update(Product).where(*base, *published, Product.hidden_since.is_(None), Product.id.not_in(shown) if shown else true()).values(hidden_since=now, **keep)
+    )
+    if shown:
+        db.execute(update(Product).where(*base, Product.hidden_since.is_not(None), Product.id.in_(shown)).values(hidden_since=None, **keep))
+    db.execute(update(Product).where(*base, Product.hidden_since.is_not(None), not_(and_(*published))).values(hidden_since=None, **keep))
 
 
 def get_or_rebuild(db: Session, tid: int) -> tuple[bytes, str]:

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, false
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -95,6 +95,12 @@ class Product(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     margin_hold: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     margin_flagged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     margin_info: Mapped[dict | None] = mapped_column(JSON)
+    # tienda (O0-07, aun no se muestra): web_updated_at = ultima vez que cambio algo que el cliente ve (nombre, precio,
+    # fotos, descripcion, publicacion); la sincronizacion de costo o existencia NO lo toca (services/price_history).
+    # hidden_since = desde cuando un producto publicado no sale en la tienda (lo fija y lo limpia el rearmado del
+    # snapshot, services/store_snapshot.rebuild). Nulas = sin dato.
+    web_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hidden_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     taxes: Mapped[list["ProductTax"]] = relationship(cascade="all, delete-orphan")
 
@@ -107,3 +113,28 @@ class ProductTax(Base):
     product_id: Mapped[int] = mapped_column(ForeignKey("product.id", ondelete="CASCADE"))
     tax_id: Mapped[int] = mapped_column(ForeignKey("tax.id"))
     tax: Mapped[Tax] = relationship()
+
+
+class ProductPriceHistory(TenantMixin, Base):
+    """Historial de precios (O0-07): una fila cada vez que cambia el precio de venta, el precio web o el IVA de un
+    producto. Solo registra: nunca cambia un precio. Lo escribe services/price_history al confirmar la transaccion,
+    cualquiera sea el camino (ficha, lista, ajuste en bloque, importacion, sincronizacion, guardian de margen).
+    La migracion deja una fila "inicial" por producto con el precio que tenia ese dia (antes no hay historial).
+
+    price_net: Product.price (sin IVA). web_price_net: Product.web_price (None = la tienda usa price).
+    price_final: lo que paga el cliente en la tienda, con IVA, en la moneda del producto (sin tipo de cambio).
+    source: manual | sync | lote | inicial. changed_by: usuario (entero sin FK, como los *_by del archivo)."""
+
+    __tablename__ = "product_price_history"
+    __table_args__ = (Index("ix_product_price_history_product_valid", "product_id", "valid_from"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("product.id", ondelete="CASCADE"))
+    price_net: Mapped[float] = mapped_column(Numeric(14, 5))
+    web_price_net: Mapped[float | None] = mapped_column(Numeric(14, 5))
+    currency: Mapped[str] = mapped_column(String(3))
+    tax_rate: Mapped[float] = mapped_column(Numeric(6, 3))
+    price_final: Mapped[float] = mapped_column(Numeric(14, 2))
+    source: Mapped[str] = mapped_column(String(10))
+    changed_by: Mapped[int | None] = mapped_column(Integer)
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))

@@ -693,6 +693,10 @@ async def run_import(
     if kind == "customers":
         # cartera con dueno (ventas etapa 2): lo que importa un vendedor queda en su cartera
         opts = {"can_update": p.can("crm", "editar"), "owner_id": None if p.sees_all_customers else p.user.id}
+    if commit and kind in ("products", "catalogo"):
+        from ..services import price_history
+
+        price_history.set_source(db, "lote")  # historial de precios (O0-07): lo que cambia el archivo
     result = PROCESSORS[kind](db, p.tenant.id, rows, commit, opts) if kind in ("catalogo", "products", "customers") else PROCESSORS[kind](db, p.tenant.id, rows, commit)
     summary = {a: sum(1 for r in result if r["action"] == a) for a in ("nuevo", "actualizar", "omitir", "error")}
     if commit:

@@ -494,6 +494,9 @@ def get_session_principal(
     if (m.customer_id and m.role_code not in CLIENT_ROLES) or (m.role_code in CLIENT_ROLES and not m.customer_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Su acceso no es válido. Escríbanos para revisarlo.")
     ip = request.client.host if request.client else None
+    from ..services.price_history import set_actor
+
+    set_actor(db, user.id)  # historial de precios (O0-07): quien cambio el precio en esta peticion
     if m.role_code == "soporte":
         _support_gate(db, user, tenant, request, ip)
     return Principal(

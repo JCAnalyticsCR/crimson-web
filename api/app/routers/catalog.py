@@ -604,6 +604,9 @@ def price_adjust(data: PriceAdjustIn, p: Principal = Depends(require("catalog", 
         if nuevo is not None:
             cambios.append((pr, antes, nuevo))
     if data.confirm and cambios:
+        from ..services import price_history
+
+        price_history.set_source(db, "lote")  # historial de precios (O0-07): ajuste en bloque
         for pr, _a, nuevo in cambios:
             pr.price = nuevo
             _margin_recheck(db, p, pr)

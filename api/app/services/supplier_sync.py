@@ -783,12 +783,13 @@ def auto_catalog_run(
     False (default): solo flush, el llamador hace el commit (uso dentro de sync_tenant).
     """
     from ..models import Tax
-    from . import pricing
+    from . import price_history, pricing
     from .fx import FxMissing
 
     supplier = supplier or find_supplier(db, t.id)
     if supplier is None:
         return {"skipped": "proveedor Eurocomp no encontrado"}
+    price_history.set_source(db, "sync")  # los productos que nacen aqui quedan en el historial como sincronizacion
     cfg = ac_settings(t)
     if not cfg.get("enabled"):
         return {"skipped": "auto_catalog no habilitado"}

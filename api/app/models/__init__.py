@@ -13,7 +13,7 @@ from .accounting import (
 )
 from .allies import AllyAgreement, AllyCompany, AllyCostRequest, AllyParticipation, AllyProductPrice, AllySharedNote, ScopeItem
 from .base import TenantMixin, TimestampMixin
-from .catalog import Category, Product, ProductTax, Supplier, Tax
+from .catalog import Category, Product, ProductPriceHistory, ProductTax, Supplier, Tax
 from .core import (
     AccessRequest,
     AuditLog,
@@ -114,6 +114,7 @@ __all__ = [
     "ExchangeRate",
     "Customer",
     "Product",
+    "ProductPriceHistory",
     "Category",
     "Tax",
     "ProductTax",
@@ -212,3 +213,6 @@ __all__ = [
     "MessageTemplate",
     "QuoteLink",
 ]
+
+# ganchos del historial de precios y de web_updated_at (O0-07): se registran al cargar los modelos
+from ..services import price_history as _price_history  # noqa: E402,F401
