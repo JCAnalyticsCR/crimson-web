@@ -579,6 +579,56 @@ span.vt-kitres__img { display: grid; place-items: center; background: var(--vt-i
 .vt-kitres__cta .vt-link { color: #ff8a98; justify-self: center; }
 @media (max-width: 420px) { .vt-kitres { padding: 16px 14px; margin-inline: calc(var(--pad) * -1 + 4px); } }
 
+/* ---------- piezas del kit: datos clave, "Cambiar" y "Que incluye tu kit" (panel oscuro) ---------- */
+.vt-kitres .vt-avail { color: #8fe0b0; }
+.vt-kitres .vt-avail[data-s="ultimas"] { color: #f5b45a; }
+.vt-kitres .vt-avail[data-s="agotado"] { color: #ff8a98; }
+.vt-kitres .vt-avail[data-s="consultar"], .vt-kitres .vt-avail[data-s="bajo_pedido"] { color: #d9d3cc; }
+.vt-kitres__from { display: inline-block; margin-top: 8px; padding: 3px 10px; border-radius: 999px; background: rgba(255, 255, 255, .1); color: #fff; font-size: 12px; font-weight: 600; max-width: 100%; overflow-wrap: anywhere; }
+.vt-kitres__lines > li > .vt-alts { grid-column: 1 / -1; }
+.vt-kitres__qty small { font-size: 11.5px; color: var(--muted-dark); white-space: nowrap; }
+.vt-kl__specs { list-style: none; margin: 3px 0 1px; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.vt-kl__specs li { font-size: 11px; line-height: 1.2; padding: 3px 7px; border-radius: 999px; background: var(--vt-ink-soft); color: #e9e4df; max-width: 100%; overflow-wrap: anywhere; }
+.vt-kl__row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 2px; }
+.vt-kl__link { display: inline-flex; align-items: center; min-height: 32px; padding: 0; border: 0; background: none; font: inherit; font-size: 12.5px; color: #ff8a98; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.vt-kl__swap { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 12px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .3); background: transparent; color: #fff; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; transition: background var(--dur-micro), color var(--dur-micro); }
+.vt-kl__swap:hover { border-color: rgba(255, 255, 255, .6); }
+.vt-kl__swap[aria-expanded="true"] { background: #fff; color: var(--ink); border-color: #fff; }
+.vt-alts { display: grid; gap: 6px; padding: 10px; margin-top: 2px; border-radius: 10px; background: var(--vt-ink-soft); min-width: 0; }
+.vt-alts > p { margin: 0 0 2px; font-size: 12px; color: var(--muted-dark); }
+.vt-alt { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 10px; align-items: center; width: 100%; min-width: 0; padding: 8px; border-radius: 8px; border: 1px solid var(--hair-dark); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: border-color var(--dur-micro), background var(--dur-micro); }
+.vt-alt:hover, .vt-alt:focus-visible { border-color: rgba(255, 255, 255, .55); background: rgba(255, 255, 255, .03); }
+.vt-alt__img { width: 48px; height: 48px; border-radius: 6px; background: #fff; display: grid; place-items: center; overflow: hidden; color: var(--ink); }
+.vt-alt__img img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
+.vt-alt__txt { display: grid; gap: 2px; min-width: 0; justify-items: start; }
+.vt-alt__txt b { font-size: 13px; line-height: 1.3; color: #fff; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.vt-alt__txt small { font-size: 11.5px; color: var(--muted-dark); overflow-wrap: anywhere; }
+.vt-alt__tag { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; background: rgba(255, 255, 255, .12); color: #fff; }
+.vt-alt__tag[data-l="Recomendada"] { background: var(--crimson); }
+.vt-alt__tag[data-l="Económica"] { background: rgba(143, 224, 176, .18); color: #8fe0b0; }
+.vt-alt__tag[data-l="Superior"] { background: rgba(245, 180, 90, .18); color: #f5b45a; }
+.vt-alt__price { display: grid; justify-items: end; gap: 2px; font-variant-numeric: tabular-nums; }
+.vt-alt__price b { font-size: 13.5px; color: #fff; white-space: nowrap; }
+.vt-alt__price small { font-size: 11.5px; color: var(--muted-dark); white-space: nowrap; }
+.vt-alt__diff[data-up="false"] { color: #8fe0b0 !important; }
+/* lo que el cambio arrastra en el resto del kit (un grabador sin PoE suma el switch) */
+.vt-alt__txt .vt-alt__note { color: #e9e4df; }
+/* mientras el kit se recalcula las acciones esperan: lo que hay en pantalla todavia es el kit anterior */
+.vt-kitres__cta a.sh-btn[aria-disabled="true"] { opacity: .45; pointer-events: none; }
+.vt-kitres .sh-err .vt-kl__link { margin-left: 6px; min-height: 0; font-weight: 700; }
+@media (max-width: 480px) {
+  .vt-alt { grid-template-columns: 40px minmax(0, 1fr); }
+  .vt-alt__img { width: 40px; height: 40px; }
+  .vt-alt__price { grid-column: 2; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+}
+.vt-incl { padding: 12px 14px; border-radius: 10px; border: 1px solid var(--hair-dark); }
+.vt-incl > b { display: block; margin-bottom: 8px; font-size: 13.5px; color: #fff; }
+.vt-incl ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 10px 14px; }
+.vt-incl li { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.35; color: #fff; min-width: 0; }
+.vt-incl li > span { min-width: 0; overflow-wrap: anywhere; }
+.vt-incl li svg { color: #ff8a98; flex: none; margin-top: 1px; }
+.vt-incl small { display: block; color: var(--muted-dark); font-size: 11.5px; }
+
 /* ---------- asesoria, paginas, comparador ---------- */
 .vt-advpage__grid { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: clamp(18px, 4vw, 56px); align-items: start; padding: 10px 0 20px; }
 @media (max-width: 899px) { .vt-advpage__grid { grid-template-columns: minmax(0, 1fr); } }

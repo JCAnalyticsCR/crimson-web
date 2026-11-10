@@ -2,7 +2,7 @@
    sellos), las paginas propias (envios, garantias, preguntas frecuentes, terminos y privacidad), la medicion
    (GA4, solo con consentimiento) y los datos de vitrina por producto (precio anterior, ficha PDF, especificaciones). */
 import { useEffect, useState } from "react";
-import { api, type Product } from "../../lib/api";
+import { api, fmtMoney, type Product } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Field, I, Icon, Loading } from "../../ui/components";
 import { ImageField } from "../../ui/MediaPicker";
@@ -11,8 +11,19 @@ import { AvailBadge } from "../../ui/Availability";
 type Banner = { id?: string; image: string; title: string; text: string; link: string; cta: string; position: number; active: boolean };
 /* photos: fotos fijas que Andres eligio para la tarjeta (vacio = los equipos que el kit arma hoy) */
 type KitPhotoSel = { product_id: number; image: string };
-type Kit = { id: string; title: string; text: string; answers: { place?: string; indoor?: number; outdoor?: number; days?: number; remote?: boolean }; active: boolean; photos?: KitPhotoSel[] };
+/* pins: producto fijo por pieza ({nvr: 123}); sin la llave = Automatico. extras: lineas adicionales (p. ej. una UPS) */
+type KitExtra = { product_id: number; quantity: number };
+type Kit = { id: string; title: string; text: string; answers: { place?: string; indoor?: number; outdoor?: number; days?: number; remote?: boolean }; active: boolean; photos?: KitPhotoSel[]; pins?: Record<string, number>; extras?: KitExtra[] };
 type KitPhotoPv = { product_id: number; image: string; label: string; name: string; images: string[] };
+/* vista previa de la composicion: cada pieza con su producto de hoy (source auto | pin | missing) y los candidatos que calzan */
+type KitRolePv = { key: string; label: string; product_id: number | null; name: string | null; source: string; options: { id: number; name: string; code: string; price: number | string }[] };
+type KitPinPv = { key: string; label: string; product_id: number; name: string | null; ok: boolean; used: boolean; reason: string | null };
+type KitExtraPv = { product_id: number; quantity: number; name: string | null; ok: boolean; reason: string | null };
+type KitPv = {
+  id: string; photos?: KitPhotoPv[]; photos_manual?: boolean; lines: { product_id: number; name: string; quantity: number; state: string | null; label: string | null; key?: string; source?: string }[]; missing: string[];
+  total?: number | string; currency?: string; roles?: KitRolePv[]; pins?: KitPinPv[]; extras?: KitExtraPv[];
+};
+const ROLE_NAMES: Record<string, string> = { cam_out: "Cámaras exteriores", cam_in: "Cámaras interiores", nvr: "Grabador (NVR)", disk: "Disco duro", switch: "Switch PoE", rj45: "Conectores RJ45", cable: "Cable UTP", box: "Caja de paso exterior" };
 type Trust = { icon: string; title: string; text: string };
 type Faq = { q: string; a: string };
 type Showcase = {
@@ -20,8 +31,10 @@ type Showcase = {
   faq: Faq[]; pages: { envios: string; garantias: string }; legal: { terms?: string; privacy?: string };
   /* state/label: disponibilidad de la funcion unica (lo que ve el cliente) */
   featured_products: { id: number; name: string; code: string; show_on_web: boolean; state?: string | null; label?: string | null }[];
-  kits_preview?: { id: string; photos?: KitPhotoPv[]; photos_manual?: boolean; lines: { product_id: number; name: string; quantity: number; state: string | null; label: string | null }[]; missing: string[] }[];
+  kits_preview?: KitPv[];
   slug: string; domain: string | null;
+  /* al guardar: lo que no se pudo fijar (de otra empresa o que nunca sirve para esa pieza) */
+  warnings?: string[];
 };
 /* se puede comprar en linea ya (en bodega o bajo pedido con dato vigente) */
 const vendible = (state?: string | null) => state === "en_bodega" || state === "bajo_pedido";
@@ -33,8 +46,16 @@ export default function StoreShowcaseAdmin() {
   const { toast } = useSession();
   const [d, setD] = useState<Showcase | null>(null);
   const [tab, setTab] = useState<(typeof TABS)[number]>("Portada");
+  const [avisos, setAvisos] = useState<string[]>([]); // lo que el ultimo guardado de kits no pudo fijar: queda a la vista hasta el siguiente
   useEffect(() => { api<Showcase>("/store/showcase").then(setD).catch((e) => toast(e.message, "bad")); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const save = (patch: Partial<Showcase>) => api<Showcase>("/store/showcase", { method: "PUT", json: patch }).then((r) => { setD(r); toast("Vitrina actualizada"); }).catch((e) => toast(e.message, "bad"));
+  const save = (patch: Partial<Showcase>) => api<Showcase>("/store/showcase", { method: "PUT", json: patch }).then((r) => {
+    setD(r);
+    // los avisos son oraciones largas (una por producto que no se fijo): quedan escritos junto a «Guardar kits»; el
+    // aviso flotante solo dice que los hay
+    if ("kits" in patch) setAvisos(r.warnings || []);
+    if (r.warnings?.length) toast(`Vitrina actualizada con ${r.warnings.length === 1 ? "1 aviso" : `${r.warnings.length} avisos`}: véalos sobre la lista de kits`, "bad");
+    else toast("Vitrina actualizada");
+  }).catch((e) => toast(e.message, "bad"));
   const saveLegal = (legal: { terms?: string; privacy?: string }) => api("/store", { method: "PUT", json: { legal: { ...d?.legal, ...legal } } }).then(() => { setD((x) => (x ? { ...x, legal: { ...x.legal, ...legal } } : x)); toast("Texto legal guardado"); }).catch((e) => toast(e.message, "bad"));
   const base = d?.domain ? `https://${d.domain.replace(/^https?:\/\//, "")}` : d ? `/tienda/${d.slug}` : "";
 
@@ -61,7 +82,7 @@ export default function StoreShowcaseAdmin() {
           {tab === "Destacados y kits" && (
             <div style={{ display: "grid", gap: 16 }}>
               <FeaturedEditor ids={d.featured} items={d.featured_products} onSave={(featured) => save({ featured })} />
-              <KitsEditor value={d.kits} preview={d.kits_preview || []} onSave={(kits) => save({ kits })} />
+              <KitsEditor value={d.kits} preview={d.kits_preview || []} avisos={avisos} onSave={(kits) => save({ kits })} />
             </div>
           )}
 
@@ -198,21 +219,39 @@ function FeaturedEditor({ ids, items, onSave }: { ids: number[]; items: Showcase
   );
 }
 
-function KitsEditor({ value, preview, onSave }: { value: Kit[]; preview: NonNullable<Showcase["kits_preview"]>; onSave: (v: Kit[]) => void }) {
+function KitsEditor({ value, preview, avisos, onSave }: { value: Kit[]; preview: NonNullable<Showcase["kits_preview"]>; avisos: string[]; onSave: (v: Kit[]) => void }) {
   const [list, setList] = useState<Kit[]>(value);
   useEffect(() => setList(value), [value]);
   const upd = (i: number, p: Partial<Kit>) => setList(list.map((k, j) => (j === i ? { ...k, ...p } : k)));
   const ans = (i: number, p: Kit["answers"]) => upd(i, { answers: { ...list[i].answers, ...p } });
+  // id propio para cada kit nuevo: con `kit-${largo + 1}` quitar uno y agregar otro repetia el id
+  const newId = () => { let n = list.length + 1; while (list.some((k) => k.id === `kit-${n}`)) n++; return `kit-${n}`; };
+  // De que kit guardado viene cada fila (null = nuevo, sin guardar). El API devuelve la vista previa en el orden de los
+  // kits guardados: se empareja por esa posicion y no por id, asi un kit nunca muestra los candidatos ni el estado de otro.
+  const [origin, setOrigin] = useState<(number | null)[]>(() => value.map((_, j) => j));
+  useEffect(() => setOrigin(value.map((_, j) => j)), [value]);
+  const pvOf = (i: number) => (origin[i] == null ? undefined : preview[origin[i] as number]);
   return (
     <div style={{ display: "grid", gap: 8 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <b style={{ fontSize: 13 }}>Kits por necesidad</b>
         <div style={{ display: "flex", gap: 6 }}>
-          <button className="btn btn--ghost btn--sm" onClick={() => setList([...list, { id: `kit-${list.length + 1}`, title: "Nuevo kit", text: "", answers: { place: "casa", indoor: 2, outdoor: 2, days: 15, remote: true }, active: true }])} disabled={list.length >= 8}><Icon d={I.plus} />Kit</button>
+          <button className="btn btn--ghost btn--sm" onClick={() => { setList([...list, { id: newId(), title: "Nuevo kit", text: "", answers: { place: "casa", indoor: 2, outdoor: 2, days: 15, remote: true }, active: true }]); setOrigin([...origin, null]); }} disabled={list.length >= 8}><Icon d={I.plus} />Kit</button>
           <button className="btn btn--crimson btn--sm" onClick={() => onSave(list)}><Icon d={I.check} />Guardar kits</button>
         </div>
       </div>
-      <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Cada kit se arma con el configurador “Arma tu sistema”: los productos y el precio salen del catálogo vigente, nunca quedan desactualizados. Primero propone lo que se puede comprar (en bodega o bajo pedido).</p>
+      {avisos.length > 0 && (
+        <div role="status" style={{ border: "1px solid var(--warn)", borderRadius: 10, padding: "8px 12px", display: "grid", gap: 4, minWidth: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "2px 8px", flexWrap: "wrap" }}>
+            <b style={{ fontSize: 12.5, color: "var(--warn)" }}>Se guardó, con {avisos.length === 1 ? "1 aviso" : `${avisos.length} avisos`}</b>
+            <span className="meta">Se quitan al volver a guardar los kits.</span>
+          </div>
+          <ul className="meta" style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 3 }}>
+            {avisos.map((w, j) => <li key={j} style={{ overflowWrap: "anywhere" }}>{w}</li>)}
+          </ul>
+        </div>
+      )}
+      <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Cada kit se arma con el configurador “Arma tu sistema”: los productos y el precio salen del catálogo vigente, nunca quedan desactualizados. Primero propone lo que se puede comprar (en bodega o bajo pedido). En cada pieza puede dejar “Automático” (entre equivalentes, el artículo varía de un día a otro) o fijar un producto, y sumar adicionales como una UPS. El cliente igual puede cambiar cada pieza al abrir el kit.</p>
       {list.map((k, i) => (
         <div key={i} style={row}>
           <div className="grid-2">
@@ -225,22 +264,109 @@ function KitsEditor({ value, preview, onSave }: { value: Kit[]; preview: NonNull
             <Field label="Afuera"><input className="input input--mono" type="number" min={0} max={32} style={{ width: 80 }} value={k.answers.outdoor ?? 0} onChange={(e) => ans(i, { outdoor: Number(e.target.value) })} /></Field>
             <Field label="Días"><select className="select" value={k.answers.days ?? 15} onChange={(e) => ans(i, { days: Number(e.target.value) })}>{[7, 15, 30, 60].map((x) => <option key={x}>{x}</option>)}</select></Field>
             <label style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={k.active} onChange={(e) => upd(i, { active: e.target.checked })} />Activo</label>
-            <button className="btn btn--danger btn--sm" onClick={() => setList(list.filter((_, j) => j !== i))}>Quitar</button>
+            <button className="btn btn--danger btn--sm" onClick={() => { setList(list.filter((_, j) => j !== i)); setOrigin(origin.filter((_, j) => j !== i)); }}>Quitar</button>
           </div>
-          <KitPhotosEditor value={k.photos || []} pv={preview.find((x) => x.id === k.id)} onChange={(photos) => upd(i, { photos })} />
+          <KitComposition kit={k} pv={pvOf(i)} onChange={(p) => upd(i, p)} />
+          <KitPhotosEditor value={k.photos || []} pv={pvOf(i)} onChange={(photos) => upd(i, { photos })} />
           {(() => {
-            const pv = preview.find((x) => x.id === k.id);
+            const pv = pvOf(i);
             if (!pv) return null;
             const malos = pv.lines.filter((ln) => !vendible(ln.state));
             return (
               <div className="meta" style={{ display: "grid", gap: 3 }}>
                 <span>Hoy arma: {pv.lines.length ? pv.lines.map((ln) => `${ln.quantity} × ${ln.name}`).join(" · ") : "nada (sin productos que calcen)"}{pv.missing.length ? ` · para cotizar: ${pv.missing.join(", ")}` : ""}</span>
+                {pv.total != null && Number(pv.total) > 0 && <span>Precio de la tarjeta hoy: <b>{fmtMoney(pv.total, pv.currency || "CRC")}</b> con IVA (cambia solo con el catálogo; los cambios sin guardar no cuentan)</span>}
                 {malos.length > 0 && <span style={{ color: "var(--warn)" }}>Sin existencia ni proveedor vigente: {malos.map((ln) => ln.name).join(", ")} (el cliente lo consulta por WhatsApp)</span>}
               </div>
             );
           })()}
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Productos del kit (pedido de Andres): por pieza, "Automático" (el configurador elige el que mejor calza hoy) o un
+    producto fijo; y adicionales con su cantidad. El API valida al guardar (de otra empresa o de otra pieza se descarta
+    con aviso) y al armar: un fijado que hoy no sirve (sin publicar, sin precio, pocos canales) vuelve a automático y
+    aquí se dice por qué. Los candidatos de cada lista son los que el configurador acepta para las respuestas del kit. */
+function KitComposition({ kit, pv, onChange }: { kit: Kit; pv?: KitPv; onChange: (p: Partial<Kit>) => void }) {
+  const [names, setNames] = useState<Record<number, string>>({}); // elegidos en esta sesion (aun sin guardar)
+  const [otherRole, setOtherRole] = useState("");
+  const pins = kit.pins || {};
+  const extras = kit.extras || [];
+  const setPin = (key: string, id: number | null) => { const n = { ...pins }; if (id) n[key] = id; else delete n[key]; onChange({ pins: n }); };
+  if (!pv?.roles) return <p className="meta" style={{ margin: 0 }}>Guarde el kit para elegir sus productos por pieza.</p>;
+  const cur = pv.currency || "CRC";
+  const keys = [...pv.roles.map((r) => r.key), ...Object.keys(pins).filter((k) => !pv.roles!.some((r) => r.key === k))];
+  const nameOf = (id: number) => names[id] || pv.pins?.find((x) => x.product_id === id)?.name || pv.extras?.find((x) => x.product_id === id)?.name || pv.roles?.flatMap((r) => r.options).find((o) => o.id === id)?.name || `Producto ${id}`;
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <b style={{ fontSize: 12.5 }}>Productos del kit</b>
+      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 260px), 1fr))" }}>
+        {keys.map((key) => {
+          const r = pv.roles!.find((x) => x.key === key);
+          const st = pv.pins?.find((x) => x.key === key);
+          const pinned = pins[key];
+          const opts = r?.options || [];
+          const auto = r?.source === "auto" && r.name ? ` · hoy: ${r.name}` : r?.source === "missing" ? " · no hay producto que calce (se cotiza)" : !r ? " · no va en este kit" : "";
+          return (
+            <label key={key} style={{ display: "grid", gap: 3, minWidth: 0, fontSize: 12.5 }}>
+              <span style={{ fontWeight: 600 }}>{r?.label || ROLE_NAMES[key] || key}</span>
+              <select className="select" style={{ minWidth: 0 }} value={pinned ? String(pinned) : ""} onChange={(e) => setPin(key, e.target.value ? Number(e.target.value) : null)}>
+                <option value="">Automático{auto}</option>
+                {!!pinned && !opts.some((o) => o.id === pinned) && <option value={String(pinned)}>{nameOf(pinned)} (fijado)</option>}
+                {opts.map((o) => <option key={o.id} value={String(o.id)}>{o.name} · {fmtMoney(o.price, cur)}</option>)}
+              </select>
+              {st && pinned === st.product_id && !st.ok && <span className="meta" style={{ color: "var(--warn)" }}>No se usa hoy: {st.reason} Va el automático.</span>}
+              {st && pinned === st.product_id && st.ok && !st.used && st.reason && <span className="meta">{st.reason}</span>}
+              {!!pinned && (!st || st.product_id !== pinned) && <span className="meta">Sin guardar.</span>}
+            </label>
+          );
+        })}
+      </div>
+      <details>
+        <summary className="meta" style={{ cursor: "pointer" }}>Fijar un producto que no está en la lista</summary>
+        <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
+          <select className="select" value={otherRole} onChange={(e) => setOtherRole(e.target.value)} aria-label="Pieza">
+            <option value="">Elija la pieza…</option>
+            {Object.entries(ROLE_NAMES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+          {otherRole && (
+            <ProductPicker
+              placeholder={`Producto para ${ROLE_NAMES[otherRole].toLowerCase()} (nombre o código)`}
+              accept={(p) => p.show_on_web}
+              rejectNote="Solo productos publicados en la web. Al guardar se revisa que sirvan para esa pieza."
+              onPick={(p) => { setNames((n) => ({ ...n, [p.id]: p.name })); setPin(otherRole, p.id); setOtherRole(""); }}
+            />
+          )}
+        </div>
+      </details>
+      <div style={{ display: "grid", gap: 6 }}>
+        <span style={{ fontSize: 12.5 }}><b>Adicionales</b> <span className="meta">Se suman al kit con su cantidad (por ejemplo una UPS o un videoportero). Hasta 6.</span></span>
+        {extras.map((e) => {
+          const st = pv.extras?.find((x) => x.product_id === e.product_id);
+          return (
+            <div key={e.product_id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
+              <span style={{ flex: "1 1 180px", minWidth: 0, overflowWrap: "anywhere" }}>
+                {nameOf(e.product_id)}
+                {st && !st.ok && <span className="meta" style={{ color: "var(--warn)" }}> · no se suma hoy: {st.reason}</span>}
+                {!st && <span className="meta"> · sin guardar</span>}
+              </span>
+              <input className="input input--mono" type="number" min={1} max={99} style={{ width: 76 }} aria-label="Cantidad" value={e.quantity} onChange={(ev) => onChange({ extras: extras.map((x) => (x.product_id === e.product_id ? { ...x, quantity: Math.max(1, Math.min(99, Number(ev.target.value) || 1)) } : x)) })} />
+              <button className="x" onClick={() => onChange({ extras: extras.filter((x) => x.product_id !== e.product_id) })} aria-label="Quitar adicional"><Icon d={I.x} size={14} /></button>
+            </div>
+          );
+        })}
+        {extras.length < 6 && (
+          <ProductPicker
+            placeholder="Agregar un adicional (nombre o código)"
+            accept={(p) => p.show_on_web}
+            rejectNote="Solo productos publicados en la web."
+            onPick={(p) => { if (extras.some((x) => x.product_id === p.id)) return; setNames((n) => ({ ...n, [p.id]: p.name })); onChange({ extras: [...extras, { product_id: p.id, quantity: 1 }] }); }}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -253,7 +379,7 @@ const photosOf = (p: Product): string[] => {
 
 /** Fotos fijas de la tarjeta del kit (pedido 21/10): Andres elige que equipos se ven y, si el producto tiene varias
     fotos, cual. Sin elegir, la tarjeta muestra los equipos que el kit arma hoy (camaras, grabador, disco, switch). */
-function KitPhotosEditor({ value, pv, onChange }: { value: KitPhotoSel[]; pv?: NonNullable<Showcase["kits_preview"]>[number]; onChange: (v: KitPhotoSel[]) => void }) {
+function KitPhotosEditor({ value, pv, onChange }: { value: KitPhotoSel[]; pv?: KitPv; onChange: (v: KitPhotoSel[]) => void }) {
   const [picked, setPicked] = useState<Record<number, { name: string; images: string[] }>>({}); // elegidos en esta sesion (aun sin guardar)
   const saved: Record<number, KitPhotoPv> = Object.fromEntries((pv?.photos_manual ? pv.photos || [] : []).map((x) => [x.product_id, x]));
   const thumb = (on = false): React.CSSProperties => ({ width: 46, height: 46, objectFit: "contain", background: "#f3f1ee", borderRadius: 6, border: `2px solid ${on ? "var(--crimson)" : "var(--hair)"}`, padding: 2 });

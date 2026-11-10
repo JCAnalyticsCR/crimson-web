@@ -235,6 +235,11 @@ def rebuild(db: Session, tid: int) -> None:
         row.n_products = json.loads(gzip.decompress(gz)).get("n", 0)
     except Exception:  # noqa: BLE001
         pass
+    # Armar el snapshot tarda (todo el catalogo) y `t` se cargo antes: lo que se haya guardado mientras tanto en los
+    # ajustes (un guardado de la vitrina, por ejemplo) NO se pisa. Se relee la fila con candado y solo se anota la
+    # marca. `cv` es la version con la que se armo: si hubo un guardado en el camino, catalog_v queda mayor y la
+    # siguiente visita rearma con lo nuevo.
+    db.refresh(t, attribute_names=["settings"], with_for_update=True)
     st = dict(t.settings or {})
     st["snapshot_cv"] = cv
     t.settings = st
@@ -271,12 +276,18 @@ def get_or_rebuild(db: Session, tid: int) -> tuple[bytes, str]:
 
 def enqueue_rebuild(tid: int, countdown: int = 30) -> None:
     """Encola store.rebuild_snapshot con debounce (countdown segundos) para no apilar llamadas.
-    Si Celery no esta disponible (tests o CLI), arma el snapshot de forma sincrona en su lugar.
+
+    Solo encola el proceso que tiene la cola configurada (el worker). La API no tiene broker: ahi no se intenta nada
+    (antes cada guardado esperaba varios segundos a un broker que no existe, con la fila de la empresa ya modificada y
+    sin confirmar) y el snapshot se rearma en la siguiente visita (get_or_rebuild: catalog_v > snapshot_cv).
+    Con cola, un solo intento sin reintentos: un broker caido no retiene al que llama.
     """
     try:
         from celery import current_app as celery_app  # type: ignore[import]
 
-        celery_app.send_task("store.rebuild_snapshot", args=[tid], countdown=countdown)
+        if not celery_app.conf.broker_url:
+            return
+        celery_app.send_task("store.rebuild_snapshot", args=[tid], countdown=countdown, retry=False)
     except Exception:  # noqa: BLE001
-        # fuera de contexto Celery (tests, CLI, scripts): ignorar silenciosamente
+        # sin Celery o con el broker caido: la siguiente visita rearma
         pass

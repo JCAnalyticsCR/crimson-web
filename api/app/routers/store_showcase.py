@@ -8,7 +8,9 @@ Lo publico vive bajo /public/store/{slug}/... (mismo criterio que store.py: solo
 from __future__ import annotations
 
 import html as htmllib
+import math
 import re
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from urllib.parse import parse_qs, quote, urlsplit
@@ -80,6 +82,20 @@ class KitPhotoIn(BaseModel):
     image: str = Field(default="", max_length=500, pattern=r"^(|/[^\s]*|https://[^\s]+)$")
 
 
+class KitExtraIn(BaseModel):
+    """Linea adicional del kit que agrega Andres (p. ej. una UPS): producto y cantidad."""
+
+    model_config = ConfigDict(extra="ignore")
+    product_id: int = Field(ge=1)
+    quantity: int = Field(1, ge=1, le=99)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _finitos(cls, v):
+        # Infinity / 1e999: un 422 normal (como si el campo viniera vacio), no un error interno
+        return {k: (None if _no_finito(x) else x) for k, x in v.items()} if isinstance(v, dict) else v
+
+
 class KitIn(BaseModel):
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
     id: str = Field(max_length=40, pattern=r"^[a-z0-9-]{1,40}$")
@@ -89,6 +105,28 @@ class KitIn(BaseModel):
     active: bool = True
     # vacio = las fotos de los equipos que el kit arma hoy (camara, grabador, disco, switch)
     photos: list[KitPhotoIn] = Field(default_factory=list, max_length=sv.MAX_KIT_PHOTOS)
+    # producto fijo por pieza ({"nvr": 123}); la pieza que no esta queda "Automatico" (sugerencia del configurador)
+    pins: dict[str, int] = Field(default_factory=dict)
+    extras: list[KitExtraIn] = Field(default_factory=list, max_length=sv.MAX_KIT_EXTRAS)
+
+    @field_validator("pins", mode="before")
+    @classmethod
+    def _pins_finitos(cls, v):
+        # Infinity / 1e999 no es un producto: se descarta aqui (el 422 no lo podria devolver: no es JSON)
+        return {k: x for k, x in v.items() if not _no_finito(x)} if isinstance(v, dict) else v
+
+    @field_validator("pins")
+    @classmethod
+    def _pins(cls, v):
+        bad = set(v) - set(sv.KIT_ROLES)
+        if bad:
+            raise ValueError(f"Pieza desconocida: {', '.join(sorted(bad))}")
+        return {k: int(x) for k, x in v.items() if int(x) > 0}
+
+
+def _no_finito(x) -> bool:
+    """Infinity, -Infinity o NaN: json.loads los acepta (tambien 1e999) pero no son un numero que se pueda usar ni devolver."""
+    return isinstance(x, float) and not math.isfinite(x)
 
 
 class FaqIn(BaseModel):
@@ -142,6 +180,63 @@ def _kit_products(db: Session, tid: int, kits: list[dict]) -> dict[int, Product]
     return {p.id: p for p in db.scalars(select(Product).where(Product.tenant_id == tid, Product.active, Product.show_on_web, Product.id.in_(ids)))}
 
 
+def _pins_ids(kits: list[dict]) -> set[int]:
+    ids: set[int] = set()
+    for k in kits or []:
+        ids |= set(sv.clean_pins(k.get("pins")).values())
+        ids |= {e["product_id"] for e in sv.clean_extras(k.get("extras"))}
+    return ids
+
+
+def _why_not_here(pr: Product | None) -> str:
+    """El motivo concreto de que un producto fijado en un kit no este en la tienda (para Mi Tienda)."""
+    if pr is None:
+        return "El producto ya no existe en el catálogo."
+    if not pr.active:
+        return "Está inactivo en el catálogo."
+    if not pr.show_on_web:
+        return "No está publicado en la web."
+    return "Está oculto en la tienda (agotado, según los ajustes de inventario)."
+
+
+def _tax_rate(p: Product) -> float:
+    return float(p.taxes[0].tax.rate) if p.taxes else 13
+
+
+def _kit_total(pricer: Pricer, lines: list[dict]) -> Decimal:
+    """Total con IVA de las lineas con precio de hoy: el precio web de cada pieza, el mismo de su tarjeta y del carrito,
+    asi la tarjeta del kit, la vista previa de Mi Tienda y "Arma tu sistema" dan el mismo monto."""
+    total = sum((_gross(pricer.of(ln["product"]), _tax_rate(ln["product"])) * ln["quantity"] for ln in lines), Decimal(0))
+    return total.quantize(Decimal("1")) if pricer.currency == "CRC" else total.quantize(Decimal("0.01"))
+
+
+def _kit_price(pricer: Pricer) -> Callable[[Product], Decimal]:
+    """El precio con el que el armador de kits COMPARA productos (orden, equivalentes hasta 18 %, rotulo «Económica»):
+    el que ve el cliente, o sea el precio web con IVA en la moneda de la tienda, el mismo de la tarjeta y del carrito.
+    0 = "a consultar" (retenido por margen o sin tipo de cambio): ese producto no se propone. No cambia precios."""
+    return lambda p: _gross(pricer.of(p), _tax_rate(p))
+
+
+def _unique_kit_ids(kits: list[dict]) -> None:
+    """Dos kits con el mismo id (los generaba «+ Kit») confunden la vista previa de Mi Tienda y el enlace de la tarjeta:
+    el repetido recibe un id propio al guardar."""
+    seen: set[str] = set()
+    todos = {k["id"] for k in kits}
+    for k in kits:
+        if k["id"] in seen:
+            n = 2
+            while f"{k['id'][:36]}-{n}" in todos:
+                n += 1
+            k["id"] = f"{k['id'][:36]}-{n}"
+            todos.add(k["id"])
+        seen.add(k["id"])
+
+
+def _priced_lines(pricer: Pricer, lines: list[dict]) -> list[dict]:
+    """solo piezas con precio de hoy (retenido por margen o sin tipo de cambio = "a consultar", fuera del total)"""
+    return [ln for ln in lines if pricer.of(ln["product"]) > 0]
+
+
 def _admin_out(t: Tenant, db: Session) -> dict:
     """Mi Tienda -> Vitrina, con la disponibilidad de la funcion unica en los destacados y en lo que arma cada kit
     (los kits proponen primero lo que se puede comprar; lo que no, se ve marcado)."""
@@ -157,9 +252,30 @@ def _admin_out(t: Tenant, db: Session) -> dict:
     sellable = {p.id for p in pool if _sellable(av.get(p.id))}
     kits_preview = []
     photo_prods = _kit_products(db, t.id, sc["kits"])
+    pricer = Pricer(db, t)
+    pin_ids = _pins_ids(sc["kits"])
+    pinned = {p.id: p for p in db.scalars(select(Product).where(Product.tenant_id == t.id, Product.id.in_(pin_ids)))} if pin_ids else {}
+
+    gross = _kit_price(pricer)
+
+    def reason(st: dict) -> str | None:
+        return _why_not_here(pinned.get(st["product_id"])) if st.get("reason") == sv.NOT_HERE else st.get("reason")
+
     for k in sc["kits"]:
-        kit = sv.build_kit(pool, k.get("answers") or {}, prefer=sellable)
+        kit = sv.build_kit(pool, k.get("answers") or {}, prefer=sellable, pins=k.get("pins"), extras=k.get("extras"), options=8, price_of=gross)
         photos = sv.kit_photos(kit["lines"], k.get("photos"), photo_prods)
+        roles = [
+            {
+                "key": ln["key"],
+                "label": sv.KIT_ROLE_NAMES[ln["key"]],
+                "product_id": ln["product"].id,
+                "name": ln["product"].name,
+                "source": ln["source"],
+                "options": [{"id": o.id, "name": o.name, "code": o.code, "price": gross(o)} for o in ln.get("options", [])],
+            }
+            for ln in kit["lines"]
+            if ln["key"] in sv.KIT_ROLES
+        ] + [{"key": m["key"], "label": sv.KIT_ROLE_NAMES[m["key"]], "product_id": None, "name": None, "source": "missing", "options": []} for m in kit["missing"]]
         kits_preview.append(
             {
                 "id": k.get("id"),
@@ -169,6 +285,9 @@ def _admin_out(t: Tenant, db: Session) -> dict:
                 "photos_manual": bool(k.get("photos")) and any(ph["product_id"] in photo_prods for ph in photos),
                 "lines": [
                     {
+                        "key": ln["key"],
+                        "role": ln["role"],
+                        "source": ln["source"],
                         "product_id": ln["product"].id,
                         "name": ln["product"].name,
                         "quantity": ln["quantity"],
@@ -178,6 +297,27 @@ def _admin_out(t: Tenant, db: Session) -> dict:
                     for ln in kit["lines"]
                 ],
                 "missing": [m["name"] for m in kit["missing"]],
+                # lo mismo que muestra la tarjeta de la portada: total con IVA de las piezas con precio de hoy
+                "total": _kit_total(pricer, _priced_lines(pricer, kit["lines"])),
+                "currency": pricer.currency,
+                # composicion editable: cada pieza con su producto de hoy y los candidatos que calzan
+                "roles": roles,
+                "pins": [
+                    {
+                        "key": key,
+                        "label": sv.KIT_ROLE_NAMES[key],
+                        "product_id": st["product_id"],
+                        "name": pinned[st["product_id"]].name if st["product_id"] in pinned else None,
+                        "ok": st["ok"],
+                        "used": st["used"],
+                        "reason": reason(st),
+                    }
+                    for key, st in kit["pin_status"].items()
+                ],
+                "extras": [
+                    {**e, "name": pinned[e["product_id"]].name if e["product_id"] in pinned else None, "reason": reason(e) if not e["ok"] else None}
+                    for e in kit["extra_status"]
+                ],
             }
         )
     return {
@@ -208,7 +348,10 @@ def showcase_get(p: Principal = Depends(require("settings", "ver")), db: Session
 
 @router.put("/store/showcase")
 def showcase_put(data: ShowcaseIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
-    t = db.get(Tenant, p.tenant.id)
+    # Se relee la fila con candado (populate_existing: la sesion ya la tenia cargada por los permisos): los ajustes se
+    # guardan enteros (JSON) y nunca desde una copia vieja. Otro guardado o el rearmado del snapshot pudieron escribir
+    # despues de que esta peticion cargo la empresa.
+    t = db.get(Tenant, p.tenant.id, with_for_update=True, populate_existing=True)
     st = {**(t.settings or {})}
     store = {**STORE_DEFAULTS, **(st.get("store") or {})}
     sc = dict(store.get("showcase") or {})
@@ -218,7 +361,34 @@ def showcase_put(data: ShowcaseIn, p: Principal = Depends(require("settings", "c
         patch["featured"] = [i for i in dict.fromkeys(patch["featured"] or []) if i in own]
     if "banners" in patch:
         patch["banners"] = [{**b, "id": b.get("id") or f"b{i + 1}"} for i, b in enumerate(patch["banners"] or [])]
+    warnings: list[str] = []
     if "kits" in patch and patch["kits"] is not None:
+        _unique_kit_ids(patch["kits"])
+        # productos fijos y adicionales: solo de esta empresa; uno que nunca sirve para la pieza (un disco como camara)
+        # se descarta con aviso. Lo pasajero (sin publicar, sin precio, pocos canales) se guarda y la vista previa
+        # dice por que hoy se usa la sugerencia automatica.
+        ids = _pins_ids(patch["kits"])
+        own = {x.id: x for x in db.scalars(select(Product).where(Product.tenant_id == t.id, Product.id.in_(ids)))} if ids else {}
+        for k in patch["kits"]:
+            pins: dict[str, int] = {}
+            for key, pid in sv.clean_pins(k.get("pins")).items():
+                pr = own.get(pid)
+                prob = "no existe en su catálogo" if pr is None else sv.pin_type_problem(key, pr)
+                if prob:
+                    quien = pr.name if pr is not None else f"El producto {pid}"
+                    motivo = prob.rstrip(".")
+                    motivo = motivo[:1].lower() + motivo[1:]  # solo la inicial: «no es un grabador NVR», «4TB», «PoE»
+                    warnings.append(f"«{k['title']}» · {sv.KIT_ROLE_NAMES[key]}: {quien} no se fijó ({motivo}); queda automático.")
+                    continue
+                pins[key] = pid
+            k["pins"] = pins
+            extras = []
+            for e in sv.clean_extras(k.get("extras")):
+                if e["product_id"] in own:
+                    extras.append(e)
+                else:
+                    warnings.append(f"«{k['title']}»: el adicional {e['product_id']} no existe en su catálogo y se quitó.")
+            k["extras"] = extras
         # fotos fijas: solo productos de esta empresa publicados en la web (activos y visibles) con foto; la foto elegida
         # tiene que ser de ese producto
         prods = {
@@ -242,9 +412,11 @@ def showcase_put(data: ShowcaseIn, p: Principal = Depends(require("settings", "c
     store["showcase"] = sc
     st["store"] = store
     t.settings = st
+    # la portada responde 304 mientras no cambie la version: un kit editado se ve de inmediato
+    sv.bump_catalog_version(db, t)
     audit(db, t.id, p.user.id, "update", "store_showcase", t.id, {"campos": sorted(patch)}, ip=p.ip)
     db.commit()
-    return _admin_out(t, db)
+    return {**_admin_out(t, db), "warnings": warnings}
 
 
 class ProductShowcaseIn(BaseModel):
@@ -513,9 +685,12 @@ def site(slug: str, response: Response, db: Session = Depends(get_db)):
 @pub.get("/showcase")
 def showcase_public(slug: str, response: Response, if_none_match: str | None = Header(None), db: Session = Depends(get_db)):
     """Portada de la tienda en un solo viaje: banners, categorias con conteo, destacados, novedades, kits y sellos."""
+    from ..core.timeutil import cr_today
+
     t = _tenant(db, slug)
     _ver = sv.get_catalog_version(t)
-    _etag = f'"{_ver}"'
+    # los kits rotan sus articulos equivalentes cada dia (sv._pick): el dia va en el ETag para no servir el de ayer
+    _etag = f'"{_ver}-{cr_today().toordinal()}"'
     if if_none_match and if_none_match == _etag:
         return Response(status_code=304)
     ctx = Ctx(db, t)
@@ -543,22 +718,15 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
     fresh = [p for p in sorted(pool, key=lambda p: (_created(p), p.id), reverse=True) if p.images and p not in featured][:8]
     kits = []
     photo_prods = _kit_products(db, t.id, sc["kits"])
+    kit_price = _kit_price(ctx.pricer)
     for k in sc["kits"]:
         if not k.get("active", True):
             continue
-        kit = sv.build_kit(pool, k.get("answers") or {}, prefer=sellable)  # cada pieza: primero lo que se puede comprar
-        # solo piezas con precio de hoy (retenido por margen o sin tipo de cambio = "a consultar", fuera del total)
-        lines = [ln for ln in kit["lines"] if ctx.pricer.of(ln["product"], ln["product"].price or 0) > 0]
+        # cada pieza: primero lo que se puede comprar; con los productos fijos y adicionales que eligio Andres
+        kit = sv.build_kit(pool, k.get("answers") or {}, prefer=sellable, pins=k.get("pins"), extras=k.get("extras"), price_of=kit_price)
+        lines = _priced_lines(ctx.pricer, kit["lines"])
         if not lines:
             continue
-        total = sum(
-            (
-                _gross(ctx.pricer.of(ln["product"], ln["product"].price), float(ln["product"].taxes[0].tax.rate) if ln["product"].taxes else 13)
-                * ln["quantity"]
-                for ln in lines
-            ),
-            Decimal(0),
-        )
         photos = sv.kit_photos(lines, k.get("photos"), photo_prods)
         kits.append(
             {
@@ -567,7 +735,7 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
                 "text": k.get("text"),
                 "answers": kit["answers"],
                 "items": sum(ln["quantity"] for ln in lines),
-                "total": total.quantize(Decimal("1")) if ctx.pricer.currency == "CRC" else total.quantize(Decimal("0.01")),
+                "total": _kit_total(ctx.pricer, lines),
                 "image": photos[0]["image"] if photos else None,
                 # fotos fijas de los equipos reales del kit (o las que eligio Andres): {image, label, name}
                 "photos": [{k_: ph[k_] for k_ in ("image", "label", "name")} for ph in photos],
@@ -868,6 +1036,22 @@ class KitAnswers(BaseModel):
     outdoor: int = Field(2, ge=0, le=32)
     days: int = Field(15, ge=1, le=90)
     remote: bool = True
+    # kit de la vitrina desde cuya tarjeta se abrio (aplica sus productos fijos y adicionales si las respuestas son las suyas)
+    kit: str | None = Field(None, pattern=r"^[a-z0-9-]{1,40}$")
+    # lo que el cliente cambio: {llave de la pieza: product_id}; lo que no calza se ignora (no da error: viene de un enlace)
+    choices: dict[str, int] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _finitos(cls, v):
+        # Infinity, NaN o 1e999 en el cuerpo: se validan como si el campo viniera vacio (422 normal en una respuesta,
+        # ignorado en `kit`). Sin esto el 422 no se podia serializar (no son JSON) y la peticion terminaba en 500.
+        return {k: (None if _no_finito(x) else x) for k, x in v.items()} if isinstance(v, dict) else v
+
+    @field_validator("choices", mode="before")
+    @classmethod
+    def _choices(cls, v):
+        return sv.clean_pins(v) if isinstance(v, dict) else {}
 
     @model_validator(mode="after")
     def _alguna(self):
@@ -888,22 +1072,91 @@ def kit(slug: str, data: KitAnswers, request: Request, db: Session = Depends(get
     stock = _stock_map(db, t.id, prods)
     # el armador propone primero lo que se puede comprar (en bodega o bajo pedido) y nunca lo oculto por agotado
     pool = [p for p in prods if not (stock.get(p.id) or {}).get("ocultar")]
-    k = sv.build_kit(pool, data.model_dump(), prefer={p.id for p in pool if _sellable(stock.get(p.id))})
-    # las mismas fotos fijas que la tarjeta del kit (si estas respuestas son las de un kit de la vitrina)
-    preset = sv.preset_for(sv.showcase_cfg(ctx.cfg)["kits"], data.model_dump())
+    answers = data.model_dump(exclude={"kit", "choices"})
+    shown = _kit_price(ctx.pricer)  # el precio que ve el cliente: con el se eligen y se rotulan las piezas
+
+    def side(adds: list[dict]) -> Decimal:
+        """lo que el kit suma por llevar un producto (el switch de un grabador sin PoE para todas las camaras)"""
+        return sum((shown(x["product"]) * x["quantity"] for x in adds), Decimal(0))
+
+    # el kit de la vitrina con estas respuestas (el de la tarjeta si vino su id): mismas fotos, productos fijos y
+    # adicionales que su tarjeta, para que el precio cuadre. El cliente igual puede cambiar cada pieza.
+    kits_cfg = sv.showcase_cfg(ctx.cfg)["kits"]
+    na = sv.normalize_answers(answers)
+    preset = next(
+        (x for x in kits_cfg if data.kit and x.get("id") == data.kit and x.get("active", True) and sv.normalize_answers(x.get("answers")) == na),
+        None,
+    ) or sv.preset_for(kits_cfg, answers)
+    k = sv.build_kit(
+        pool,
+        answers,
+        prefer={p.id for p in pool if _sellable(stock.get(p.id))},
+        pins=(preset or {}).get("pins"),
+        extras=(preset or {}).get("extras"),
+        choices=data.choices,
+        alternatives=True,
+        price_of=shown,
+    )
     photos = sv.kit_photos(k["lines"], (preset or {}).get("photos"), _kit_products(db, t.id, [preset] if preset else []))
     lines, total = [], Decimal(0)
     for ln in k["lines"]:
         c = ctx.card(ln["product"], stock.get(ln["product"].id))
-        sub = Decimal(str(c["display_price"])) * ln["quantity"]
+        unit = Decimal(str(c["display_price"]))
+        sub = unit * ln["quantity"]
         total += sub
-        lines.append({"role": ln["role"], "reason": ln["reason"], "quantity": ln["quantity"], "subtotal": sub, "product": c})
+        alts = []
+        cur_side = side(ln.get("adds") or [])
+        for a in ln.get("alternatives", []):
+            ac = ctx.card(a["product"], stock.get(a["product"].id))
+            au = Decimal(str(ac["display_price"]))
+            if au <= 0:  # la alternativa esta "a consultar": no se ofrece (la pieza actual si puede estarlo)
+                continue
+            asub = au * a["quantity"]
+            # la diferencia es la del KIT, no la de la linea: cambiar el grabador puede meter o sacar el switch
+            entra = [x["product"].name for x in a["adds"]] if a["adds"] and not ln["adds"] else []
+            sale = [x["product"].name for x in ln["adds"]] if ln["adds"] and not a["adds"] else []
+            note = None
+            if entra:
+                note = f"Sin PoE para todas las cámaras: suma {', '.join(entra)} (ya va en la diferencia)."
+            elif sale:
+                note = f"Con PoE integrado: ya no hace falta {', '.join(sale)} (ya va en la diferencia)."
+            alts.append(
+                {
+                    "label": a["label"],
+                    "auto": a["auto"],
+                    "quantity": a["quantity"],
+                    "subtotal": asub,
+                    "diff": (asub + side(a["adds"])) - (sub + cur_side),
+                    "note": note,
+                    "specs": sv.key_specs(a["product"]),
+                    "product": ac,
+                }
+            )
+        lines.append(
+            {
+                "key": ln["key"],
+                "role": ln["role"],
+                "reason": ln["reason"],
+                "source": ln["source"],
+                # pinned: el kit de la tienda fija esta pieza. suggested: es lo que el kit lleva sin elegir nada (una
+                # eleccion igual a la sugerencia de hoy, como las piezas de un enlace compartido, no es "un cambio")
+                "pinned": ln["pinned"],
+                "suggested": ln["suggested"],
+                "quantity": ln["quantity"],
+                "unit_price": unit,
+                "subtotal": sub,
+                "specs": sv.key_specs(ln["product"]),
+                "product": c,
+                "alternatives": alts,
+            }
+        )
     return {
-        **{k_: v for k_, v in k.items() if k_ != "lines"},
+        **{k_: v for k_, v in k.items() if k_ not in ("lines", "pin_status", "extra_status")},
         "lines": lines,
         "total": total,
         "currency": ctx.pricer.currency,
         "photos": [{k_: ph[k_] for k_ in ("image", "label", "name")} for ph in photos],
+        "kit": {"id": preset.get("id"), "title": preset.get("title")} if preset else None,
     }
 
 

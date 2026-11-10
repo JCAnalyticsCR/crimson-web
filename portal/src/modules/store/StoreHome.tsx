@@ -160,7 +160,7 @@ export default function StoreHome() {
             {/* ancla de precio: el kit mas chico (el espacio queda reservado mientras carga: nada salta) */}
             <div className="vt-hero__deal">
               {d?.kits[0] && (
-                <Link to={to(`/arma-tu-sistema?${new URLSearchParams(Object.entries(d.kits[0].answers).map(([a, b]) => [a, String(b)])).toString()}`)}>
+                <Link to={to(`/arma-tu-sistema?${new URLSearchParams(Object.entries({ ...d.kits[0].answers, kit: d.kits[0].id }).map(([a, b]) => [a, String(b)])).toString()}`)}>
                   <span className="sh-meta">Kit listo</span><b>{d.kits[0].title}</b><span>desde <strong>{money(d.kits[0].total, d.currency)}</strong></span><Ico d={IC.next} size={16} />
                 </Link>
               )}
@@ -229,7 +229,7 @@ export default function StoreHome() {
             </div>
             <ul className="vt-kits__list">
               {d.kits.map((k, i) => {
-                const qs = new URLSearchParams(Object.entries(k.answers).map(([a, b]) => [a, String(b)])).toString();
+                const qs = new URLSearchParams(Object.entries({ ...k.answers, kit: k.id }).map(([a, b]) => [a, String(b)])).toString();
                 return (
                   <li key={k.id}>
                     <Link to={to(`/arma-tu-sistema?${qs}`)} className="vt-kit">

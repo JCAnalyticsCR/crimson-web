@@ -598,8 +598,13 @@ export class Catalog {
       const c = this.card(l.product);
       const sub = round2(c.display_price * l.quantity);
       total += sub;
-      return { role: l.role, reason: l.reason, quantity: l.quantity, subtotal: sub, product: c };
+      // mismo contrato que POST /kit del API (KitBuilder): llave estable, origen, precio unitario, datos clave y
+      // alternativas. La demo no ofrece "Cambiar": sin alternativas el boton no aparece.
+      return {
+        key: `${l.role}-${c.id}`, role: l.role, reason: l.reason, source: "auto", pinned: false, suggested: true,
+        quantity: l.quantity, unit_price: c.display_price, subtotal: sub, specs: [] as string[], product: c, alternatives: [] as unknown[],
+      };
     });
-    return { ...k, lines, total: round2(total), currency: "CRC" };
+    return { ...k, lines, total: round2(total), currency: "CRC", choices: {}, kit: null };
   }
 }

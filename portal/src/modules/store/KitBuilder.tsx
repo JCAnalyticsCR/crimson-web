@@ -1,13 +1,31 @@
 /* "Arma tu sistema": 4 pasos -> kit con productos reales de la tienda. Las cantidades salen de las mismas
    reglas del levantamiento tecnico (API /kit). Honesto: "kit sugerido, un tecnico lo valida". El resultado se
-   recalcula al cambiar una respuesta (sin boton extra) y se puede llevar al carrito o mandar como asesoria. */
+   recalcula al cambiar una respuesta (sin boton extra) y se puede llevar al carrito o mandar como asesoria.
+   Cada pieza muestra sus datos clave y se puede "Cambiar" por una alternativa que tambien calza: la eleccion viaja al
+   API como choices (el servidor la valida y recalcula cantidades) y queda en la direccion del navegador (?nvr=123).
+   El enlace para compartir (WhatsApp, asesoria) lleva TODAS las piezas: las sugerencias automaticas rotan cada dia
+   entre equivalentes y asi el enlace arma el mismo kit otro dia. */
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useHref, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { AvailBadge, Crumbs, IC, Ico, KitPhotos, PriceTag, Viewfinder, cannotBuy, money, useHead, usePath, useStore, waLink, type KitPhoto, type VProd } from "./storeKit";
 
-type Line = { role: string; reason: string; quantity: number; subtotal: string | number; product: VProd };
-type Kit = { answers: Answers; place_label: string; cameras: number; storage_tb: string | number; lines: Line[]; missing: { name: string; quantity: number; reason: string; role: string }[]; notes: string[]; total: string | number; currency: string; photos?: KitPhoto[] };
+/* note: lo que el cambio arrastra en el resto del kit (un grabador sin PoE suma el switch); ya va contado en diff */
+type Alt = { label: string; auto?: boolean; quantity: number; subtotal: string | number; diff: string | number; note?: string | null; specs?: string[]; product: VProd };
+/* source: auto (sugerencia del configurador) | pin (fijado en el kit de la tienda) | choice (viene elegido) | extra.
+   pinned: el kit de la tienda fija esa pieza. suggested: es lo que el kit lleva sin elegir nada (una eleccion igual a
+   la sugerencia de hoy, como las piezas de un enlace compartido, no es "un cambio tuyo").
+   Lo opcional lo manda el API actual; el configurador igual pinta una respuesta que no lo traiga (la demo estatica o,
+   durante un despliegue, el portal nuevo contra el API anterior) en vez de quedar en blanco. */
+type Line = { key?: string; role: string; reason: string; source?: string; pinned?: boolean; suggested?: boolean; quantity: number; unit_price?: string | number; subtotal: string | number; specs?: string[]; product: VProd; alternatives?: Alt[] };
+type Summary = { indoor: number; outdoor: number; days: number; need_tb: string | number; installed_tb: string | number | null; poe: "grabador" | "switch" | null; switch_ports: number | null; remote: boolean };
+type Kit = {
+  answers: Answers; place_label: string; cameras: number; storage_tb: string | number; lines: Line[]; missing: { name: string; quantity: number; reason: string; role: string }[];
+  notes: string[]; total: string | number; currency: string; photos?: KitPhoto[]; summary?: Summary; choices?: Choices; kit?: { id: string; title: string } | null;
+};
 type Answers = { place: string; indoor: number; outdoor: number; days: number; remote: boolean };
+type Choices = Record<string, number>;
+/* llaves de las piezas que se pueden cambiar (las mismas del API: services/store_showcase.KIT_ROLES) */
+const ROLE_KEYS = ["cam_out", "cam_in", "nvr", "disk", "switch", "rj45", "cable", "box"];
 
 const PLACES: [string, string, string, string][] = [
   ["casa", "Casa", "Entradas, patio y cochera", IC.home],
@@ -26,16 +44,38 @@ const fromQuery = (sp: URLSearchParams): Answers => ({
   remote: sp.get("remote") !== "false",
 });
 function clampN(n: number) { return Math.max(0, Math.min(32, Number.isFinite(n) ? Math.round(n) : 0)); }
+const choicesFrom = (sp: URLSearchParams): Choices => Object.fromEntries(ROLE_KEYS.map((k) => [k, Number(sp.get(k))] as const).filter(([, v]) => Number.isInteger(v) && v > 0));
+/* lo que este configurador escribe en la direccion (lo demas, p. ej. una campaña, se conserva) */
+const OWN_KEYS = ["place", "indoor", "outdoor", "days", "remote", "kit", ...ROLE_KEYS];
+/* La consulta que reproduce el kit en pantalla: respuestas, el kit de la tienda (si aplica) y las piezas. Por defecto
+   solo las que valieron como eleccion (la direccion del navegador); con all, TODAS las piezas (el enlace para compartir). */
+const kitQuery = (k: Kit, all = false) => {
+  const q = new URLSearchParams(Object.entries(k.answers).map(([a, v]) => [a, String(v)]));
+  if (k.kit?.id) q.set("kit", k.kit.id);
+  if (all) k.lines.forEach((l) => { if (l.key && ROLE_KEYS.includes(l.key)) q.set(l.key, String(l.product.id)); });
+  else Object.entries(k.choices || {}).forEach(([a, v]) => q.set(a, String(v)));
+  return q;
+};
+/* llave estable de la linea (una respuesta sin `key` cae al rol + producto) */
+const lineKey = (l: Line) => l.key ?? `${l.role}-${l.product.id}`;
+/* lo cambiaste vos: una eleccion que no es lo que el kit sugiere hoy para esa pieza */
+const isMine = (l: Line) => l.source === "choice" && !l.suggested;
+const tb = (v: string | number | null | undefined) => { const n = Number(v); return Number.isInteger(n) ? String(n) : n.toLocaleString("es-CR", { maximumFractionDigits: 1 }); };
 
 export default function KitBuilder() {
   const ctx = useStore();
   const to = usePath();
   const nav = useNavigate();
+  const loc = useLocation();
   const [sp, setSp] = useSearchParams();
   const [ans, setAns] = useState<Answers>(() => fromQuery(sp));
+  const [choices, setChoices] = useState<Choices>(() => choicesFrom(sp)); // lo que cambiaste (sobrevive a otras respuestas si sigue calzando)
+  const [kitId, setKitId] = useState<string | null>(() => (/^[a-z0-9-]{1,40}$/.test(sp.get("kit") || "") ? sp.get("kit") : null)); // kit de la tarjeta
+  const [open, setOpen] = useState<string | null>(null); // pieza con las alternativas abiertas
   const [kit, setKit] = useState<Kit | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [retry, setRetry] = useState(0); // vuelve a pedir el kit aunque nada haya cambiado (tras un fallo)
   const [added, setAdded] = useState(false);
   const [inCart, setInCart] = useState(false); // ya agrego algo: "Ir al carrito" queda a mano (pedido 21/10)
   const [alarm, setAlarm] = useState(false); // tambien le interesa una alarma: va en la asesoria y en el WhatsApp (se cotiza aparte)
@@ -44,20 +84,48 @@ export default function KitBuilder() {
   useHead({ title: `Arma tu sistema de cámaras · ${ctx.store.name}`, description: "En 4 pasos te cotizamos al instante un kit de videovigilancia con productos reales, validado por un técnico.", path: "/arma-tu-sistema" });
 
   useEffect(() => {
-    if (total === 0) { setKit(null); setErr("Elegí al menos una cámara."); return; }
+    if (total === 0) { setKit(null); setBusy(false); setErr("Elegí al menos una cámara."); return; }
     setErr(null);
     setBusy(true);
+    // La respuesta solo cuenta si esta peticion sigue vigente: al cambiar otra respuesta o salir del configurador, una
+    // que llega tarde no pisa el kit nuevo, no apaga el "calculando" de la que sigue en camino ni toca la direccion.
+    let vivo = true;
     const t = window.setTimeout(() => {
-      ctx.api<Kit>("/kit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ans) })
-        .then((k) => { setKit(k); setErr(null); })
-        .catch((e) => setErr(e.message))
-        .finally(() => setBusy(false));
-      setSp(new URLSearchParams(Object.entries(ans).map(([k, v]) => [k, String(v)])), { replace: true });
+      // `choices` solo viaja si hay alguna (un API anterior, durante un despliegue, no conoce el campo)
+      ctx.api<Kit>("/kit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...ans, ...(Object.keys(choices).length ? { choices } : {}), ...(kitId ? { kit: kitId } : {}) }) })
+        .then((k) => { if (!vivo) return; setKit(k); setErr(null); })
+        .catch((e) => { if (vivo) setErr(e instanceof TypeError ? "No pudimos actualizar tu kit. Revisá tu conexión e intentá de nuevo." : e.message); })
+        .finally(() => { if (vivo) setBusy(false); });
     }, 280);
-    return () => window.clearTimeout(t);
-  }, [ans.place, ans.indoor, ans.outdoor, ans.days, ans.remote]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => { vivo = false; window.clearTimeout(t); };
+  }, [ans.place, ans.indoor, ans.outdoor, ans.days, ans.remote, JSON.stringify(choices), kitId, retry]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const set = <K extends keyof Answers>(k: K, v: Answers[K]) => setAns((a) => ({ ...a, [k]: v }));
+  // La direccion del navegador sigue al kit EN PANTALLA: respuestas, el kit de la tienda (si aplica) y solo las
+  // elecciones que valieron. Corre con el configurador montado (una respuesta tardia ya no navega) y tambien repone la
+  // direccion si un enlace del menu ("Arma tu sistema") la dejo sin parametros con el kit a la vista.
+  const spKey = sp.toString();
+  useEffect(() => {
+    if (!kit) return;
+    const q = new URLSearchParams(sp);
+    OWN_KEYS.forEach((k) => q.delete(k));
+    kitQuery(kit).forEach((v, k) => q.set(k, v));
+    if (q.toString() !== spKey) setSp(q, { replace: true });
+  }, [kit, spKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Enlace para compartir (WhatsApp y asesoria): sale del kit en pantalla, no de la barra de direcciones, y lleva
+  // TODAS sus piezas para que otro dia arme los mismos productos (las automaticas rotan a diario entre equivalentes).
+  const shareHref = useHref({ pathname: loc.pathname, search: kit ? `?${kitQuery(kit, true)}` : "" });
+  const shareUrl = typeof window !== "undefined" ? new URL(shareHref, window.location.href).toString() : shareHref;
+
+  // otra respuesta = otro kit: deja de ser "el de la tarjeta" (si las respuestas vuelven a ser las suyas, el API lo reconoce)
+  const set = <K extends keyof Answers>(k: K, v: Answers[K]) => { setKitId(null); setOpen(null); setAns((a) => ({ ...a, [k]: v })); };
+  const choose = (key: string, id: number | null) => {
+    setChoices((c) => { const n = { ...c }; if (id === null) delete n[key]; else n[key] = id; return n; });
+    setRetry((n) => n + 1); // tocar otra vez la misma opcion despues de un fallo vuelve a pedir el kit
+    setOpen(null);
+    // el panel de alternativas (y "Volver a la sugerida") desaparecen: el foco queda en "Cambiar" de esa pieza
+    document.getElementById(`swap-${key}`)?.focus({ preventScroll: true });
+  };
   const priced = useMemo(() => (kit?.lines || []).filter((l) => !l.product.price_on_request && Number(l.product.display_price) > 0), [kit]);
   // desglose del panel: articulos con precio, IVA contenido (por la tarifa de cada producto) y lo que queda por cotizar
   const sums = useMemo(() => {
@@ -79,10 +147,12 @@ export default function KitBuilder() {
     ...kit.missing.map((m) => `• ${m.quantity} × ${m.name} (por cotizar)`),
     `Total de referencia: ${money(kit.total, kit.currency)} IVA incluido.`,
     ...(alarm ? ["También me interesa cotizar una alarma (sensores, sirena y panel)."] : []),
+    `Mi kit: ${shareUrl}`,
   ].join("\n") : "";
 
+  // mientras se recalcula, lo que hay en pantalla es el kit ANTERIOR: nada se lleva al carrito ni se envia hasta que llegue
   const addAll = () => {
-    if (!kit) return;
+    if (!kit || busy) return;
     // lo que no se puede comprar en linea (sin existencia ni proveedor vigente) no entra al carrito: se consulta
     priced.filter((l) => !(ctx.isShop && cannotBuy(l.product.availability))).forEach((l) => ctx.addToCart(l.product, l.quantity));
     setAdded(true);
@@ -90,11 +160,11 @@ export default function KitBuilder() {
     window.setTimeout(() => setAdded(false), 2200);
   };
   const toAdvice = () => {
-    if (!kit) return;
+    if (!kit || busy) return;
     try {
       sessionStorage.setItem(KIT_STORAGE, JSON.stringify({
         items: kit.lines.map((l) => ({ product_id: l.product.id, quantity: l.quantity, name: l.product.name })),
-        text: `Kit sugerido desde "Arma tu sistema": ${kit.place_label}, ${kit.answers.indoor} cámara(s) adentro y ${kit.answers.outdoor} afuera, ${kit.answers.days} días de grabación${kit.answers.remote ? ", ver desde el celular" : ""}${alarm ? ". También le interesa una alarma (sensores, sirena y panel)" : ""}.`,
+        text: `Kit sugerido desde "Arma tu sistema"${kit.kit ? ` (kit «${kit.kit.title}»)` : ""}: ${kit.place_label}, ${kit.answers.indoor} cámara(s) adentro y ${kit.answers.outdoor} afuera, ${kit.answers.days} días de grabación${kit.answers.remote ? ", ver desde el celular" : ""}${alarm ? ". También le interesa una alarma (sensores, sirena y panel)" : ""}.${kit.lines.some(isMine) ? ` Productos que el cliente cambió: ${kit.lines.filter(isMine).map((l) => l.product.name).join(", ")}.` : ""} Enlace del kit: ${shareUrl}`,
       }));
     } catch { /* sin almacenamiento: la asesoria igual se abre */ }
     nav(to("/asesoria?origen=arma-tu-sistema&solucion=cctv&instalar=1"));
@@ -161,26 +231,76 @@ export default function KitBuilder() {
           <div className="vt-kitres__head">
             <span className="sh-meta"><i className="vt-rec" />Kit sugerido · {kit ? `${kit.cameras} CAM · ${kit.storage_tb} TB` : "calculando"}</span>
             <h2 id="vt-kit-title">{kit ? `${kit.place_label} · ${kit.cameras} cámara${kit.cameras === 1 ? "" : "s"}` : "Tu kit"}</h2>
+            {kit?.kit && <span className="vt-kitres__from">Kit de la tienda: {kit.kit.title}</span>}
           </div>
           {/* fotos fijas de los equipos reales que arma el kit (las mismas de su tarjeta en la portada) */}
           {kit && !!kit.photos?.length && <div className="vt-kitres__photos" data-busy={busy}><KitPhotos photos={kit.photos} cameras={kit.cameras} eager /></div>}
-          {err && <p className="sh-err" role="alert">{err}</p>}
+          {err && <p className="sh-err" role="alert">{err}{total > 0 && <> <button type="button" className="vt-kl__link" onClick={() => setRetry((n) => n + 1)}>Reintentar</button></>}</p>}
           {!kit && !err && <div className="sh-skel" style={{ height: 320 }} />}
           {kit && (
             <>
+              {kit.summary && <Includes s={kit.summary} />}
               <ul className="vt-kitres__lines" data-busy={busy}>
-                {kit.lines.map((l) => (
-                  <li key={l.role + l.product.id}>
-                    <Link to={to(l.product.path)} className="vt-kitres__img"><Viewfinder>{l.product.image ? <img src={l.product.image} alt="" loading="lazy" decoding="async" width={72} height={72} /> : <Ico d={IC.cam} />}</Viewfinder></Link>
-                    <div className="vt-kitres__txt">
-                      <span className="sh-meta">{l.role}</span>
-                      <Link to={to(l.product.path)} className="vt-kitres__name">{l.product.name}</Link>
-                      <small>{l.reason}</small>
-                      <AvailBadge a={l.product.availability} compact />
-                    </div>
-                    <div className="vt-kitres__qty"><b>×{l.quantity}</b>{Number(l.product.display_price) > 0 ? <span>{money(l.subtotal, kit.currency)}</span> : <span>a consultar</span>}</div>
-                  </li>
-                ))}
+                {kit.lines.map((l) => {
+                  const priced = Number(l.product.display_price) > 0;
+                  const k = lineKey(l);
+                  const specs = l.specs ?? [];
+                  const alts = l.alternatives ?? [];
+                  const mine = isMine(l);
+                  const fromKit = l.source === "pin" || (l.source === "choice" && !!l.suggested && !!l.pinned);
+                  const isOpen = open === k;
+                  return (
+                    <li key={k}>
+                      <Link to={to(l.product.path)} className="vt-kitres__img"><Viewfinder>{l.product.image ? <img src={l.product.image} alt="" loading="lazy" decoding="async" width={72} height={72} /> : <Ico d={IC.cam} />}</Viewfinder></Link>
+                      <div className="vt-kitres__txt">
+                        <span className="sh-meta">{l.role}{fromKit ? " · del kit" : mine ? " · elegido por vos" : ""}</span>
+                        <Link to={to(l.product.path)} className="vt-kitres__name">{l.product.name}</Link>
+                        {specs.length > 0 && <ul className="vt-kl__specs" aria-label="Datos clave">{specs.map((s) => <li key={s}>{s}</li>)}</ul>}
+                        <small>{l.reason}</small>
+                        <span className="vt-kl__row">
+                          <AvailBadge a={l.product.availability} compact />
+                          <Link to={to(l.product.path)} className="vt-kl__link">Ver ficha</Link>
+                          {alts.length > 0 && (
+                            <button type="button" id={`swap-${k}`} className="vt-kl__swap" aria-expanded={isOpen} aria-controls={`alt-${k}`} onClick={() => setOpen(isOpen ? null : k)}>
+                              <Ico d={isOpen ? IC.x : IC.compare} size={14} />{isOpen ? "Cerrar" : "Cambiar"}
+                            </button>
+                          )}
+                          {mine && <button type="button" className="vt-kl__link" onClick={() => choose(k, null)}>Volver a la sugerida</button>}
+                        </span>
+                      </div>
+                      <div className="vt-kitres__qty">
+                        <b>×{l.quantity}</b>
+                        {priced ? <>{l.quantity > 1 && l.unit_price != null && <small>{money(l.unit_price, kit.currency)} c/u</small>}<span>{money(l.subtotal, kit.currency)}</span></> : <span>a consultar</span>}
+                      </div>
+                      {isOpen && (
+                        <div className="vt-alts" id={`alt-${k}`} role="group" aria-label={`Alternativas para ${l.role}`}>
+                          <p>Elegí otra opción que también calza en tu sistema. El total se recalcula solo.</p>
+                          {alts.map((a) => {
+                            const diff = Number(a.diff);
+                            return (
+                              /* la "Recomendada" es la sugerencia de hoy: elegirla es quitar tu cambio (salvo que el kit fije otra pieza ahi) */
+                              <button key={a.product.id} type="button" className="vt-alt" onClick={() => choose(k, a.auto && !l.pinned ? null : a.product.id)}>
+                                <span className="vt-alt__img">{a.product.image ? <img src={a.product.image} alt="" loading="lazy" decoding="async" width={48} height={48} /> : <Ico d={IC.cam} />}</span>
+                                <span className="vt-alt__txt">
+                                  <span className="vt-alt__tag" data-l={a.label}>{a.label}</span>
+                                  <b>{a.product.name}</b>
+                                  {(a.specs ?? []).length > 0 && <small>{(a.specs ?? []).join(" · ")}</small>}
+                                  {a.note && <small className="vt-alt__note">{a.note}</small>}
+                                  <AvailBadge a={a.product.availability} compact />
+                                </span>
+                                <span className="vt-alt__price">
+                                  <b>{money(a.subtotal, kit.currency)}</b>
+                                  {a.quantity > 1 && <small>{a.quantity} × {money(a.product.display_price, kit.currency)}</small>}
+                                  <small className="vt-alt__diff" data-up={diff > 0}>{diff === 0 ? "Mismo precio" : `${diff > 0 ? "+" : "−"}${money(Math.abs(diff), kit.currency)}`}</small>
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
                 {kit.missing.map((m) => (
                   <li key={m.name} className="vt-kitres__missing">
                     <span className="vt-kitres__img"><Ico d={IC.tool} /></span>
@@ -195,19 +315,19 @@ export default function KitBuilder() {
                 {sums.pending > 0 && <div><dt>Materiales por cotizar</dt><dd>{sums.pending} ítem{sums.pending === 1 ? "" : "s"}</dd></div>}
                 <div><dt>Instalación</dt><dd>Se cotiza aparte</dd></div>
               </dl>
-              <div className="vt-kitres__total"><span>Total de referencia del equipo</span><PriceTag p={{ display_price: kit.total, display_currency: kit.currency }} big /></div>
+              <div className="vt-kitres__total" aria-live="polite" aria-atomic="true"><span>Total de referencia del equipo</span><PriceTag p={{ display_price: kit.total, display_currency: kit.currency }} big /></div>
               <ul className="vt-kitres__notes">{kit.notes.map((n) => <li key={n}>{n}</li>)}</ul>
               <div className="vt-kitres__visit">
                 <b><Ico d={IC.tool} size={16} />Recomendado: levantamiento técnico</b>
                 <p>Un técnico de Crimson visita tu sitio, mide distancias, revisa dónde hay corriente e internet y confirma el kit exacto antes de instalar. Así no pagás de más ni te falta equipo.</p>
               </div>
               <div className="vt-kitres__cta">
-                <button className="sh-btn sh-btn--crimson sh-btn--block" onClick={toAdvice}><Ico d={IC.tool} />Pedir levantamiento e instalación</button>
-                <button className="sh-btn sh-btn--block" data-done={added} onClick={addAll} disabled={!priced.length}>
+                <button className="sh-btn sh-btn--crimson sh-btn--block" onClick={toAdvice} disabled={busy}><Ico d={IC.tool} />Pedir levantamiento e instalación</button>
+                <button className="sh-btn sh-btn--block" data-done={added} onClick={addAll} disabled={busy || !priced.length}>
                   <Ico d={added ? IC.check : IC.bag} />{added ? `Agregado (${priced.length} productos)` : `Agregar el equipo al ${ctx.isShop ? "carrito" : "pedido de cotización"}`}
                 </button>
                 {inCart && <button className="sh-btn sh-btn--block vt-gocart" onClick={ctx.openCart}><Ico d={IC.bag} />Ir {ctx.isShop ? "al carrito" : "a la cotización"}</button>}
-                {ctx.store.whatsapp && <a className="sh-btn sh-btn--ghost sh-btn--block" href={waLink(ctx.store.whatsapp, kitText)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Enviar el kit por WhatsApp</a>}
+                {ctx.store.whatsapp && <a className="sh-btn sh-btn--ghost sh-btn--block" href={waLink(ctx.store.whatsapp, kitText)} target="_blank" rel="noopener noreferrer" aria-disabled={busy} onClick={(e) => { if (busy) e.preventDefault(); }}><Ico d={IC.wa} />Enviar el kit por WhatsApp</a>}
               </div>
             </>
           )}
@@ -220,6 +340,23 @@ export default function KitBuilder() {
           <a className="sh-btn sh-btn--crimson sh-btn--sm" href="#mi-kit">Ver mi kit</a>
         </div>
       )}
+    </div>
+  );
+}
+
+/** "Que incluye tu kit": lo esencial de un vistazo (camaras, dias, disco, PoE, celular). */
+function Includes({ s }: { s: Summary }) {
+  const poe = s.poe === "grabador" ? "PoE integrado en el grabador" : s.poe === "switch" ? `Switch PoE${s.switch_ports ? ` de ${s.switch_ports} puertos` : ""}` : "Alimentación por cotizar";
+  return (
+    <div className="vt-incl">
+      <b>Qué incluye tu kit</b>
+      <ul>
+        <li><Ico d={IC.cam} size={16} /><span>{s.outdoor} afuera · {s.indoor} adentro<small>cámaras IP con cable de red</small></span></li>
+        <li><Ico d={IC.clock} size={16} /><span>{s.days} días de grabación<small>continua, las 24 horas</small></span></li>
+        <li><Ico d={IC.disk} size={16} /><span>{s.installed_tb != null ? `${tb(s.installed_tb)} TB de disco` : "Disco por cotizar"}<small>necesitás ≈ {tb(s.need_tb)} TB</small></span></li>
+        <li><Ico d={IC.bolt} size={16} /><span>{poe}<small>un solo cable por cámara</small></span></li>
+        <li><Ico d={IC.phone} size={16} /><span>{s.remote ? "Vista desde el celular" : "Sin vista desde el celular"}<small>{s.remote ? "app gratuita del fabricante" : "se revisa en el grabador"}</small></span></li>
+      </ul>
     </div>
   );
 }

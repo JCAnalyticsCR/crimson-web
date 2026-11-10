@@ -36,6 +36,7 @@ PUBLICAS = {
     ("/health/deep", "GET"),  # monitor externo (plan 1.8): sin X-Health-Token solo el estado; nunca datos de nadie
     ("/media/f/{key}", "GET"),
     ("/webhooks/onvo/{tenant_id}", "POST"),
+    ("/webhooks/onvo/{tenant_id}/pruebas", "POST"),
 }
 # Prefijos publicos por diseno: tienda, vitrina, SEO, eventos, pagos e incidentes (/public) y la API con llave (/v1)
 PUBLIC_PREFIXES = ("/public/", "/v1/")
