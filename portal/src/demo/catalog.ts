@@ -588,7 +588,7 @@ export class Catalog {
       `Almacenamiento estimado con grabación continua a 4 MP en H.265+ (~${GB_PER_CAMERA_DAY} GB por cámara al día). Con grabación por movimiento rinde 2 a 3 veces más.`,
     ];
     if (remote) notes.push("Vista desde el celular: los grabadores sugeridos usan la app gratuita del fabricante; solo necesitás internet en el sitio.");
-    return { answers: { place, indoor, outdoor, days, remote }, place_label: PLACES[place].label, cameras: n, storage_tb: needTb.toFixed(1), lines, missing, notes };
+    return { answers: { quality: "4mp", night: "ir", audio: false, smart: false, record: "continuo", distance: "media", growth: false, ups: false, ...Object.fromEntries(Object.entries(answers).filter(([a]) => ["quality", "night", "audio", "smart", "record", "distance", "growth", "ups"].includes(a))), place, indoor, outdoor, days, remote }, place_label: PLACES[place].label, cameras: n, storage_tb: needTb.toFixed(1), lines, missing, notes };
   }
 
   kitResponse(answers: Record<string, unknown>) {

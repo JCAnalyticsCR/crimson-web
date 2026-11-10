@@ -88,7 +88,7 @@ def test_store_checkout_coupon_and_order_to_ticket(client, auth):
 def test_reception_of_supplier_xml(client, auth):
     client.put("/settings", json={"einvoice_provider": "sandbox"})
     xml = (
-        '<?xml version="1.0"?><FacturaElectronica><Clave>50601012600310200000000100001010000000123456789012</Clave>'
+        '<?xml version="1.0"?><FacturaElectronica><Clave>50601012600310199988800100001010000000123456789012</Clave>'
         "<NumeroConsecutivo>00100001010000000123</NumeroConsecutivo><FechaEmision>2026-09-10T10:00:00</FechaEmision>"
         "<Emisor><Nombre>Distribuidora Tech SA</Nombre><Identificacion><Numero>3-101-999888</Numero></Identificacion></Emisor>"
         "<Receptor><Nombre>Grupo Empresarial Crimson SRL</Nombre><Identificacion><Tipo>02</Tipo><Numero>3102000000</Numero></Identificacion></Receptor>"

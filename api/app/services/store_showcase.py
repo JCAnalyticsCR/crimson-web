@@ -428,6 +428,38 @@ PLACES = {
     "bodega": {"label": "Bodega o planta", "meters": 45},
 }
 GB_PER_CAMERA_DAY = Decimal(21)  # 4 MP H.265+ continuo ~2 Mbps -> ~21 GB por dia (por movimiento rinde 2-3x)
+# Calidad de imagen que pide el cliente: MP objetivo de las camaras y GB por camara al dia en H.265+ continuo
+# (2 MP ~1 Mbps, 4 MP ~2 Mbps, 8 MP/4K ~4 Mbps).
+QUALITIES = {
+    "2mp": {"label": "2 MP (Full HD)", "mp": 2, "gb": Decimal(11)},
+    "4mp": {"label": "4 MP (2K)", "mp": 4, "gb": GB_PER_CAMERA_DAY},
+    "8mp": {"label": "8 MP (4K)", "mp": 8, "gb": Decimal(42)},
+}
+MOTION_FACTOR = Decimal("0.4")  # grabando solo con movimiento el disco rinde 2 a 3 veces mas: se cuenta el 40 %
+# Distancia de la camara mas lejana al grabador (o switch). "media" usa la tipica del lugar (PLACES).
+DISTANCES = {"corta": 15, "media": None, "larga": 70}
+POE_MAX_M = 100  # tope de un tramo de cable de red con PoE
+# Consumo para dimensionar la UPS: camara IP con IR ~7 W, grabador ~15 W, switch PoE ~10 W propios
+CAM_W, NVR_W, SWITCH_W = 7, 15, 10
+UPS_POWER_FACTOR = Decimal("0.6")  # una UPS de linea interactiva entrega ~60 % de sus VA en W
+UPS_MARGIN = Decimal("1.3")  # la UPS no trabaja al tope: 30 % de holgura sobre el consumo
+# Lo que se lee del nombre de una camara para las preferencias del cliente
+COLOR_WORDS = ("colorvu", "full color", "a color", "color 24", "luz blanca", "smart hybrid", "hybrid light", "dual light", "luz hibrida", "color nocturn")
+AUDIO_WORDS = ("audio", "microfono", " mic ", "bidireccional")
+SMART_WORDS = ("acusense", "deteccion humana", "deteccion de personas", "humano y vehiculo", "personas y vehiculos", "vigi insight")
+# Marcas: el grabador de la misma marca que las camaras aprovecha sus funciones (AcuSense, ColorVu) y una sola app
+BRANDS = (
+    ("hikvision", "hikvision"),
+    ("hilook", "hikvision"),
+    ("ezviz", "ezviz"),
+    ("vigi", "tp-link"),
+    ("tp link", "tp-link"),
+    ("tp-link", "tp-link"),
+    ("dahua", "dahua"),
+    ("imou", "dahua"),
+    ("uniview", "uniview"),
+)
+BRAND_LABELS = {"hikvision": "Hikvision", "ezviz": "Ezviz", "tp-link": "TP-Link", "dahua": "Dahua", "uniview": "Uniview"}
 
 
 def _priced(prods: list[Product]) -> list[Product]:
@@ -445,6 +477,7 @@ KIT_ROLES = {
     "rj45": "Instalación",
     "cable": "Instalación",
     "box": "Instalación",
+    "ups": "Respaldo eléctrico",
 }
 # como se llama cada pieza en Mi Tienda (el rotulo del cliente repite "Instalación" en tres)
 KIT_ROLE_NAMES = {
@@ -456,6 +489,7 @@ KIT_ROLE_NAMES = {
     "rj45": "Conectores RJ45",
     "cable": "Cable UTP",
     "box": "Caja de paso exterior",
+    "ups": "UPS (respaldo eléctrico)",
 }
 EXTRA_ROLE = "Adicional"
 MAX_KIT_EXTRAS = 6
@@ -526,6 +560,78 @@ def nvr_poe_covers(p: Product | None, cameras: int) -> bool:
     return n is None or n >= cameras
 
 
+def brand_of(p: Product | None) -> str | None:
+    """Marca del producto (de su campo o del nombre), normalizada: HiLook cuenta como Hikvision, VIGI como TP-Link."""
+    if p is None:
+        return None
+    hay = " " + fold((p.brand or "") + " " + p.name) + " "
+    return next((b for w, b in BRANDS if w in hay), None)
+
+
+def cam_color(p: Product) -> bool:
+    """Imagen a color de noche (ColorVu, full color o luz hibrida/blanca que se enciende con movimiento)."""
+    return any(w in " " + fold(p.name) + " " for w in COLOR_WORDS)
+
+
+def cam_audio(p: Product) -> bool:
+    return any(w in " " + fold(p.name) + " " for w in AUDIO_WORDS)
+
+
+def cam_smart(p: Product) -> bool:
+    return any(w in fold(p.name) for w in SMART_WORDS)
+
+
+_BAYS = re.compile(r"(\d{1,2})\s?(?:x\s?)?(?:sata|hdd|bahias?|discos?)\b")
+_MAX_TB = re.compile(r"hasta\s?(\d{1,3})\s?tb\b")
+
+
+def nvr_bays(p: Product | None) -> int | None:
+    """Cuantos discos le caben al grabador ("2 SATA", "4 HDD (no incluidos)"); None si el nombre no lo dice."""
+    if p is None:
+        return None
+    m = _BAYS.search(fold(p.name))
+    return int(m.group(1)) if m and 1 <= int(m.group(1)) <= 16 else None
+
+
+def nvr_max_tb(p: Product | None) -> int | None:
+    """Capacidad total que admite el grabador ("hasta 20 TB"); None si el nombre no lo dice."""
+    if p is None:
+        return None
+    m = _MAX_TB.search(fold(p.name))
+    return int(m.group(1)) if m else None
+
+
+def nvr_smart(p: Product | None) -> bool:
+    """Grabador con analitica (AcuSense: la serie NXI de Hikvision o "AcuSense" en el nombre)."""
+    if p is None:
+        return False
+    n = fold((p.code or "") + " " + (p.model or "") + " " + p.name)
+    return "acusense" in n or bool(re.search(r"\bds-7\d{3}nxi", n))
+
+
+def ups_va(p: Product) -> int | None:
+    m = _RX["va"].search(fold(p.name))
+    return int(m.group(1)) if m else None
+
+
+_UPS_W = re.compile(r"(\d{3,4})\s?w\b")
+
+
+def ups_w(p: Product) -> int | None:
+    """Watts de la UPS: los del nombre ("600VA 330W") o, si no los dice, ~60 % de sus VA."""
+    m = _UPS_W.search(fold(p.name))
+    if m:
+        return int(m.group(1))
+    va = ups_va(p)
+    return int(va * UPS_POWER_FACTOR) if va else None
+
+
+def channel_size(n: int) -> int:
+    """Canales de grabador para n camaras con espacio para crecer: al menos la mitad mas (minimo 2 libres)."""
+    want = n + max(2, math.ceil(n / 2))
+    return next((s for s in (4, 8, 16, 32, 64) if s >= want), want)
+
+
 def disk_qty(p: Product, need_tb: Decimal) -> int:
     """Cuantos discos de esta capacidad hacen falta: uno si alcanza, si no los que sumen lo necesario."""
     c = capacity_tb(p) or Decimal(0)
@@ -563,11 +669,29 @@ def _cam_ok(p: Product, outdoor: bool) -> bool:
     return not (outdoor and any(w in n for w in ("interior", "indoor")))
 
 
-def _cam_tier(p: Product, outdoor: bool) -> tuple:
+def cam_misses(p: Product, c: dict) -> list[str]:
+    """Lo que el cliente pidio y esta camara no trae (color de noche, audio, deteccion de personas)."""
+    out = []
+    if c.get("color") and not cam_color(p):
+        out.append("color")
+    if c.get("audio") and not cam_audio(p):
+        out.append("audio")
+    if c.get("smart") and not cam_smart(p):
+        out.append("smart")
+    return out
+
+
+def _cam_tier(p: Product, outdoor: bool, c: dict | None = None) -> tuple:
+    """Nivel de ajuste de una camara (menor = calza mejor): formato del lugar (bullet afuera, domo/turret adentro),
+    cuantas preferencias del cliente no cumple y que tan lejos esta de la resolucion pedida (sin dato: al final)."""
+    c = c or {}
     n = fold(p.name)
     fmt_ok = ("bullet" in n) if outdoor else any(w in n for w in ("domo", "dome", "turret", "eyeball"))
     mp = _mp(p)
-    return (not fmt_ok, abs(mp - 4) if mp else 9)
+    target = c.get("mp", 4)
+    # una camara de menos MP que lo pedido calza peor que una de mas (8 MP pedidos: una de 6 antes que una de 4)
+    gap = (abs(mp - target) + (2 if mp < target else 0)) if mp else 9
+    return (not fmt_ok, len(cam_misses(p, c)), gap)
 
 
 def _role_scan(key: str, prods: list[Product], c: dict) -> list[tuple[tuple, Product]]:
@@ -577,24 +701,35 @@ def _role_scan(key: str, prods: list[Product], c: dict) -> list[tuple[tuple, Pro
     price = c["price_of"]  # 0 = "a consultar" (retenido por margen, sin tipo de cambio): nunca es candidato
     if key in ("cam_out", "cam_in"):
         out = key == "cam_out"
-        return [(_cam_tier(p, out), p) for p in prods if _cam_ok(p, out) and price(p) > 0]
+        return [(_cam_tier(p, out, c), p) for p in prods if _cam_ok(p, out) and price(p) > 0]
     if key == "nvr":
-        # NVR con canales suficientes; el de menos canales primero y, a igual canales, el que alimenta todas las
-        # camaras por PoE (ahorra el switch)
+        # NVR con canales suficientes (con espacio para crecer si el cliente lo pidio). Orden de ajuste:
+        # 1. que le quepa el almacenamiento (bahias x el disco mas grande de la tienda y su tope "hasta N TB");
+        # 2. la misma marca que las camaras (funciones inteligentes y una sola app);
+        # 3. el de menos canales; 4. con analitica si se pidio deteccion de personas;
+        # 5. el que alimenta todas las camaras por PoE (ahorra el switch).
         return [
-            ((channels(p), not nvr_poe_covers(p, c["n"])), p)
+            (
+                (
+                    not nvr_storage_ok(p, c),
+                    nvr_brand_miss(p, c),
+                    channels(p),
+                    bool(c.get("smart")) and not nvr_smart(p),
+                    not nvr_poe_covers(p, c["n"]),
+                ),
+                p,
+            )
             for p in prods
             if product_type(p) == "Grabador NVR"
             and "wifi" not in fold(p.name)
             and "inalambric" not in fold(p.name)
-            and (channels(p) or 0) >= c["n"]
+            and "kit" not in fold(p.name).split()[:3]
+            and (channels(p) or 0) >= c["need_ch"]
             and price(p) > 0
         ]
     if key == "disk":
         return [
-            ((any(w in fold(p.name) for w in SURVEILLANCE_WORDS),), p)
-            for p in prods
-            if product_type(p) == "Disco duro" and capacity_tb(p) and price(p) > 0
+            ((any(w in fold(p.name) for w in SURVEILLANCE_WORDS),), p) for p in prods if product_type(p) == "Disco duro" and capacity_tb(p) and price(p) > 0
         ]
     if key == "switch":
         return [((ports(p),), p) for p in prods if product_type(p) == "Switch PoE" and c["need_ports"] <= (ports(p) or 0) <= 24 and price(p) > 0]
@@ -625,7 +760,35 @@ def _role_scan(key: str, prods: list[Product], c: dict) -> list[tuple[tuple, Pro
         return found
     if key == "box":
         return [((0,), p) for p in _by_words(prods, ("caja", "exterior"), ("tapa", "fuerte", "carton")) if price(p) > 0]
+    if key == "ups":
+        # UPS con watts suficientes para la carga del sistema (la mas chica que alcanza); nunca una bateria suelta
+        found = []
+        for p in prods:
+            if product_type(p) != "UPS" or fold(p.name).startswith("bateria") or price(p) <= 0:
+                continue
+            w = ups_w(p)
+            if w and w >= c["ups_w"]:
+                found.append(((w,), p))
+        if found:  # solo las del tamano mas chico que alcanza (no una de 3000 VA para 4 camaras)
+            low = min(t[0] for t, _ in found)
+            found = [(t, p) for t, p in found if t[0] <= max(low * 2, c["ups_w"] * 2)]
+        return found
     return []
+
+
+def nvr_storage_ok(p: Product, c: dict) -> bool:
+    """Al grabador le cabe el almacenamiento que pide el kit: sus bahias con el disco mas grande de la tienda y su
+    tope ("hasta 20 TB"). Lo que el nombre no dice se da por bueno (lo confirma el tecnico)."""
+    need = c["need_tb"]
+    bays, top, biggest = nvr_bays(p), nvr_max_tb(p), c.get("max_disk_tb")
+    if top is not None and top < need:
+        return False
+    return not (bays and biggest and bays * biggest < need)
+
+
+def nvr_brand_miss(p: Product, c: dict) -> bool:
+    want = c.get("brand")
+    return bool(want) and brand_of(p) != want
 
 
 def _role_rank(key: str, found: list[tuple[tuple, Product]], c: dict) -> list[tuple[tuple, Product]]:
@@ -641,9 +804,9 @@ def _role_rank(key: str, found: list[tuple[tuple, Product]], c: dict) -> list[tu
     if key == "disk":
         surv = [p for t, p in found if t[0]] or [p for _, p in found]
         need = c["need_tb"]
-        # el mas chico que alcanza solo; si ninguno alcanza, el mas grande (en varios). Nada que pida mas de 4 discos
-        # salvo que no haya otra forma.
-        cap = max(4, min(disk_qty(p, need) for p in surv))
+        # el mas chico que alcanza solo; si ninguno alcanza, el mas grande (en varios). Nunca mas discos de los que le
+        # caben al grabador elegido (sus bahias; sin el dato, 4) salvo que no haya otra forma.
+        cap = max(c.get("bays") or 4, min(disk_qty(p, need) for p in surv))
         return [((0, capacity_tb(p)) if capacity_tb(p) >= need else (1, -capacity_tb(p)), p) for p in surv if disk_qty(p, need) <= cap]
     if key in ("rj45", "cable"):
         best = min(t[0] for t, _ in found)  # solo el mejor nivel que haya (conector antes que "RJ45"; bobina antes que metro)
@@ -731,6 +894,9 @@ def pin_type_problem(key: str, p: Product) -> str | None:
     elif key == "box":
         if "caja" not in n:
             return "No es una caja de paso."
+    elif key == "ups":
+        if t != "UPS" or not ups_w(p):
+            return "No es una UPS con su capacidad en el nombre (por ejemplo «600VA»)."
     return None
 
 
@@ -748,20 +914,25 @@ def pin_problem(key: str, p: Product | None, c: dict) -> str | None:
             return "No se sabe cuántos canales tiene (el nombre debería decirlo, por ejemplo «8CH»)."
         if ch < c["n"]:
             return f"Tiene {ch} canales y el kit lleva {c['n']} cámaras."
+        if ch < c.get("need_ch", c["n"]):
+            return f"Tiene {ch} canales y el cliente quiere espacio para {c['need_ch']} cámaras."
     if key == "switch" and ports(p) and ports(p) < c["need_ports"]:
         return f"Tiene {ports(p)} puertos y hacen falta {c['need_ports']}."
     if key == "rj45" and _consumable(p) is None:
         return "Cuesta demasiado por unidad para un conector (se cotiza aparte)."
+    if key == "ups" and (ups_w(p) or 0) < c.get("ups_w", 0):
+        return f"Da {ups_w(p)} W y el sistema necesita unos {c['ups_w']} W."
     return None
 
 
 def _spec_score(key: str, p: Product, c: dict) -> tuple:
     """Que tan "superior" es un producto dentro de su pieza (para rotular las alternativas)."""
-    n = fold(p.name)
     if key in ("cam_out", "cam_in"):
-        return (_mp(p), any(w in n for w in ("acusense", "colorvu", "smart hybrid")))
+        return (_mp(p), cam_smart(p) + cam_color(p) + cam_audio(p))
     if key == "nvr":
-        return (channels(p) or 0, nvr_poe_covers(p, c["n"]))
+        return (channels(p) or 0, nvr_smart(p), nvr_poe_covers(p, c["n"]))
+    if key == "ups":
+        return (ups_w(p) or 0,)
     if key == "disk":
         return (capacity_tb(p) or 0,)
     if key == "switch":
@@ -782,14 +953,24 @@ def key_specs(p: Product) -> list[str]:
     d = derive_specs(p)
     out: list[str] = []
     if t.startswith("Cámara"):
-        out = [d[k] for k in ("Resolución", "Formato", "Lente", "Visión nocturna") if d.get(k)]
+        out = [d[k] for k in ("Resolución", "Formato", "Visión nocturna") if d.get(k)]
+        if cam_color(p) and not d.get("Visión nocturna", "").startswith(("A color", "Luz")):
+            out.append("Color de noche")
+        if cam_smart(p):
+            out.append("Detecta personas y vehículos")
+        elif cam_audio(p):
+            out.append("Con audio")
+        elif d.get("Lente"):
+            out.append(d["Lente"])
     elif t.startswith("Grabador"):
         ch = channels(p)
         if ch:
             out.append(f"{ch} canales")
         pp = nvr_poe_ports(p)
         out.append((f"PoE integrado ({pp} puertos)" if pp else "PoE integrado") if nvr_poe(p) else "Sin PoE")
-        if d.get("Resolución"):
+        if nvr_bays(p):
+            out.append(f"{nvr_bays(p)} disco{'s' if nvr_bays(p) > 1 else ''}")
+        elif d.get("Resolución"):
             out.append(f"Hasta {d['Resolución']}")
     elif t in ("Disco duro", "Disco externo"):
         cap = capacity_tb(p)
@@ -804,6 +985,8 @@ def key_specs(p: Product) -> list[str]:
             out.append("PoE")
     elif t == "UPS" and d.get("Capacidad"):
         out.append(d["Capacidad"])
+        if ups_w(p):
+            out.append(f"{ups_w(p)} W")
     elif pack_size(p) > 1:
         out.append(f"Bolsa de {pack_size(p)}")
     elif reel_len(p):
@@ -864,7 +1047,7 @@ def default_featured(prods: list[Product], limit: int = 8, prefer: set[int] | No
 
 
 def normalize_answers(answers: dict | None) -> dict:
-    """Las 4 respuestas del configurador con sus topes (lo que build_kit usa y lo que se compara con los kits de Andres)."""
+    """Las respuestas del configurador con sus topes (lo que build_kit usa y lo que se compara con los kits de Andres)."""
     a = answers or {}
     indoor = max(0, min(32, int(a.get("indoor") or 0)))
     outdoor = max(0, min(32, int(a.get("outdoor") or 0)))
@@ -876,6 +1059,15 @@ def normalize_answers(answers: dict | None) -> dict:
         "outdoor": outdoor,
         "days": max(1, min(90, int(a.get("days") or 15))),
         "remote": bool(a.get("remote", True)),
+        # detalles (opcionales: un enlace o un kit de la tienda sin ellos toma lo de siempre)
+        "quality": a.get("quality") if a.get("quality") in QUALITIES else "4mp",
+        "night": a.get("night") if a.get("night") in ("ir", "color") else "ir",
+        "audio": bool(a.get("audio", False)),
+        "smart": bool(a.get("smart", False)),
+        "record": a.get("record") if a.get("record") in ("continuo", "movimiento") else "continuo",
+        "distance": a.get("distance") if a.get("distance") in DISTANCES else "media",
+        "growth": bool(a.get("growth", False)),
+        "ups": bool(a.get("ups", False)),
     }
 
 
@@ -1014,12 +1206,17 @@ def build_kit(
     na = normalize_answers(answers)
     place, indoor, outdoor, days, remote = na["place"], na["indoor"], na["outdoor"], na["days"], na["remote"]
     n = indoor + outdoor
-    meters = PLACES[place]["meters"]
+    quality = QUALITIES[na["quality"]]
+    motion = na["record"] == "movimiento"
+    # distancia de la camara mas lejana: la que dijo el cliente o la tipica del lugar
+    meters = DISTANCES[na["distance"]] or PLACES[place]["meters"]
+    gb_day = quality["gb"] * (MOTION_FACTOR if motion else 1)
+    need_ch = channel_size(n) if na["growth"] else n
     points = [
         {"code": f"C{i + 1}", "data": {"alimentacion": "PoE", "ambiente": "Exterior" if i < outdoor else "Interior", "distancia_m": meters}} for i in range(n)
     ]
     sug = {s["name"]: s for s in suggest_materials("cctv", points)}
-    need_tb = (Decimal(n) * Decimal(days) * GB_PER_CAMERA_DAY / 1000 * Decimal("1.1")).quantize(Decimal("0.1"))
+    need_tb = (Decimal(n) * Decimal(days) * gb_day / 1000 * Decimal("1.1")).quantize(Decimal("0.1"))
     sw_name = next((k for k in sug if k.startswith("Switch PoE")), None)
     rj = sug.get("Conectores RJ45")
     ext = sug.get("Caja de paso exterior")
@@ -1046,9 +1243,22 @@ def build_kit(
         "cable_m": cable_m,
         "box_qty": ext["quantity"] if ext else 0,
         "price_of": price,
+        # lo que el cliente pidio de las camaras y del grabador
+        "mp": quality["mp"],
+        "color": na["night"] == "color",
+        "audio": na["audio"],
+        "smart": na["smart"],
+        "need_ch": need_ch,
+        # se completan al elegir: la marca de las camaras (para el grabador), las bahias del grabador (para los discos)
+        # y la carga del sistema (para la UPS)
+        "brand": None,
+        "bays": None,
+        "max_disk_tb": None,
+        "ups_w": 0,
     }
     seed_day = (day or cr_today()).toordinal()
-    sig = f"{place}-{indoor}-{outdoor}-{days}"  # sin el id del kit: la tarjeta y la pagina con las mismas respuestas cuadran
+    # sin el id del kit: la tarjeta y la pagina con las mismas respuestas cuadran
+    sig = "-".join(str(na[k]) for k in ("place", "indoor", "outdoor", "days", "quality", "night", "audio", "smart", "record", "distance", "growth", "ups"))
     pins_ = clean_pins(pins)
     choices_ = clean_pins(choices)
     pin_status: dict[str, dict] = {}
@@ -1127,6 +1337,7 @@ def build_kit(
             "suggested": r["suggested"],
             # lo que el kit suma por llevar este producto (el switch de un grabador que no alimenta todas las camaras)
             "adds": adds(p) if adds else [],
+            "auto": r["auto"],  # la sugerencia de esa pieza (no viaja al cliente)
         }
         if alternatives:
             ln["alternatives"] = _alternatives(key, p, r["auto"], cands(key), prefer, c, adds)
@@ -1140,7 +1351,25 @@ def build_kit(
     if indoor:
         add("cam_in", indoor, f"{indoor} punto(s) adentro: formato domo, discreto", "Cámara IP interior PoE 4 MP")
 
+    cams = [ln for ln in lines if ln["key"] in ("cam_out", "cam_in")]
+    if cams:  # el grabador se busca de la marca de la mayoria de las camaras
+        c["brand"] = brand_of(max(cams, key=lambda ln: ln["quantity"])["product"])
+        # el disco se calcula con la resolucion de las camaras SUGERIDAS (pediste 2 MP y la de color que hay es de 4).
+        # Las que elige el cliente no lo mueven: la diferencia anunciada al cambiar una camara es la de esa linea;
+        # si elige una de mas resolucion, "Por que este kit" le dice que suba la calidad.
+        real = max((_mp(ln["auto"]) for ln in cams if ln.get("auto") is not None), default=0)
+        if real > quality["mp"]:
+            gb_real = next(q["gb"] for q in QUALITIES.values() if real <= q["mp"] + 1) if real <= 9 else QUALITIES["8mp"]["gb"]
+            if gb_real > quality["gb"]:
+                need_tb = (Decimal(n) * Decimal(days) * gb_real * (MOTION_FACTOR if motion else 1) / 1000 * Decimal("1.1")).quantize(Decimal("0.1"))
+                c["need_tb"] = need_tb
+    if "disk" not in scans:
+        scans["disk"] = _role_scan("disk", full, c)
+    c["max_disk_tb"] = max((capacity_tb(p) for _, p in scans["disk"] if capacity_tb(p)), default=None)
+
     nvr_label = next((k for k in sug if k.startswith("NVR")), f"NVR {n} canales")
+    if need_ch > n:
+        nvr_label = f"NVR {need_ch} canales"
     # El grabador decide si el kit lleva switch aparte (solo lo ahorra el que alimenta TODAS las camaras por PoE). Con
     # las alternativas se averigua tambien que switch entraria, para que la diferencia y el rotulo de cada grabador
     # cuenten el kit completo y no solo su linea.
@@ -1151,6 +1380,7 @@ def build_kit(
 
     nvr = add("nvr", 1, f"{n} cámara(s): {nvr_label.lower()}", nvr_label, adds=nvr_adds if alternatives else None)
     poe_in_nvr = nvr_poe_covers(nvr, n)
+    c["bays"] = nvr_bays(nvr)
     if poe_in_nvr:
         lines[-1]["reason"] += " con PoE integrado (no hace falta switch)"
     elif nvr_poe(nvr):
@@ -1159,13 +1389,26 @@ def build_kit(
     disk = add(
         "disk",
         1,
-        f"{days} días × {n} cámara(s) ≈ {need_tb} TB en grabación continua",
+        f"{days} días × {n} cámara(s) a {quality['label']} ≈ {_es(need_tb)} TB {'grabando solo con movimiento' if motion else 'en grabación continua'}",
         f"Disco de videovigilancia {math.ceil(need_tb)} TB",
     )
 
     switch = None
     if sw_name and not poe_in_nvr:
         switch = add("switch", 1, f"alimenta las {n} cámaras por el mismo cable (PoE)", sw_name)
+
+    # UPS: la carga del sistema (camaras, grabador y switch) con holgura; la mas chica que alcanza
+    load_w = NVR_W + CAM_W * n + (SWITCH_W if switch is not None else 0)
+    c["ups_w"] = math.ceil(load_w * UPS_MARGIN)
+    ups = None
+    if na["ups"]:
+        need_va = math.ceil(c["ups_w"] / UPS_POWER_FACTOR / 100) * 100
+        ups = add(
+            "ups",
+            1,
+            f"respaldo para ~{load_w} W (grabador, {n} cámara(s){' y switch' if switch is not None else ''}): sigue grabando en un corte de luz",
+            f"UPS de {max(600, need_va)} VA",
+        )
 
     if rj:
         conn = add("rj45", rj["quantity"], rj["reason"], "Conectores RJ45")
@@ -1207,14 +1450,21 @@ def build_kit(
     if disk is not None:
         dl = next(ln for ln in lines if ln["key"] == "disk")
         installed = (capacity_tb(disk) or Decimal(0)) * dl["quantity"]
+    why = _kit_why(lines, na, c, n=n, need_tb=need_tb, installed=installed, meters=meters, quality=quality, nvr=nvr, ups=ups, load_w=load_w)
     notes = [
         "Kit sugerido: antes de instalar, un técnico de Crimson revisa distancias, alturas y red del sitio.",
-        f"Almacenamiento estimado con grabación continua a 4 MP en H.265+ (~{GB_PER_CAMERA_DAY} GB por cámara al día). Con grabación por movimiento rinde 2 a 3 veces más.",
+        (
+            f"Almacenamiento estimado grabando solo con movimiento a {quality['label']} en H.265+ (el 40 % de la grabación continua). "
+            "Si hay movimiento casi todo el día (una calle, un parqueo), conviene grabación continua."
+            if motion
+            else f"Almacenamiento estimado con grabación continua a {quality['label']} en H.265+ (~{quality['gb']} GB por cámara al día). "
+            "Con grabación por movimiento rinde 2 a 3 veces más."
+        ),
     ]
     if remote:
         notes.append("Vista desde el celular: los grabadores sugeridos usan la app gratuita del fabricante; solo necesitás internet en el sitio.")
     return {
-        "answers": {"place": place, "indoor": indoor, "outdoor": outdoor, "days": days, "remote": remote},
+        "answers": dict(na),
         "place_label": PLACES[place]["label"],
         "cameras": n,
         "storage_tb": need_tb,
@@ -1231,11 +1481,130 @@ def build_kit(
             "poe": "grabador" if poe_in_nvr else ("switch" if switch is not None else None),
             "switch_ports": ports(switch) if switch is not None else None,
             "remote": remote,
+            "quality": quality["label"],
+            "night": na["night"],
+            "audio": na["audio"],
+            "smart": na["smart"],
+            "record": na["record"],
+            "meters": meters,
+            "channels": channels(nvr) if nvr is not None else None,
+            "free_channels": (channels(nvr) or n) - n if nvr is not None else None,
+            "brand": BRAND_LABELS.get(brand_of(nvr) or "") if nvr is not None else None,
+            "ups": {"va": ups_va(ups), "w": ups_w(ups), "load_w": load_w}
+            if ups is not None
+            else ({"va": None, "w": None, "load_w": load_w} if na["ups"] else None),
         },
+        # por que el kit es asi: lo que se eligio por cada respuesta y lo que no se pudo (en lenguaje del cliente)
+        "why": why,
         "pin_status": pin_status,
         "extra_status": extra_status,
         "choices": applied,
     }
+
+
+FEATURE_TEXT = {"color": "imagen a color de noche", "audio": "audio", "smart": "detección de personas y vehículos"}
+
+
+def _es(v) -> str:
+    """numero con coma decimal (1,4 TB)"""
+    return _fmt_tb(Decimal(str(v))).replace(".", ",")
+
+
+def _kit_why(lines: list[dict], na: dict, c: dict, *, n: int, need_tb, installed, meters: int, quality: dict, nvr, ups, load_w: int) -> list[dict]:
+    """Por que el kit es asi, pieza por pieza: {"tone": ok|warn, "text"}. ok = se cumplio lo que pidio el cliente;
+    warn = no se pudo del todo (y que hacer)."""
+    out: list[dict] = []
+    cams = [ln for ln in lines if ln["key"] in ("cam_out", "cam_in")]
+    for ln in cams:
+        p = ln["product"]
+        where = "afuera" if ln["key"] == "cam_out" else "adentro"
+        miss = cam_misses(p, c)
+        asked = [f for f in ("color", "audio", "smart") if c.get(f)]
+        got = [FEATURE_TEXT[f] for f in asked if f not in miss]
+        if got:
+            out.append({"tone": "ok", "text": f"Cámaras de {where} con {', '.join(got)}."})
+        if miss:
+            lacks = " ni ".join(FEATURE_TEXT[f] for f in miss)
+            out.append(
+                {
+                    "tone": "warn",
+                    "text": f"Hoy no hay cámaras de {where} con {lacks} que calcen en este kit: va la más parecida. Pedí asesoría y te buscamos otra.",
+                }
+            )
+        mp = _mp(p)
+        if mp and mp > quality["mp"] + 1 and ln.get("source") == "choice" and not ln.get("suggested"):
+            out.append(
+                {
+                    "tone": "warn",
+                    "text": f"Elegiste cámaras de {_es(mp)} MP para {where}: graban más que {quality['label']} y el disco puede no alcanzar. Subí la calidad en el paso 3.",
+                }
+            )
+        if mp and mp < quality["mp"]:
+            out.append(
+                {"tone": "warn", "text": f"Las cámaras de {where} de {quality['label']} no están disponibles hoy: van de {_fmt_tb(Decimal(str(mp)))} MP."}
+            )
+    if nvr is not None:
+        ch = channels(nvr) or n
+        free = ch - n
+        txt = f"Grabador de {ch} canales: tus {n} cámaras"
+        out.append({"tone": "ok", "text": txt + (f" y espacio para {free} más." if free > 0 else ", sin canales libres.")})
+        if na["growth"] and free < c["need_ch"] - n:
+            out.append({"tone": "warn", "text": f"Pediste espacio para crecer y no hay un grabador de {c['need_ch']} canales disponible: este se queda justo."})
+        b, want = brand_of(nvr), c.get("brand")
+        if want and b == want:
+            out.append(
+                {
+                    "tone": "ok",
+                    "text": f"Grabador de la misma marca que las cámaras ({BRAND_LABELS.get(b, b)}): una sola app y las funciones inteligentes de las cámaras se ven en el grabador.",
+                }
+            )
+        elif want and b and b != want:
+            out.append(
+                {
+                    "tone": "warn",
+                    "text": "El grabador es de otra marca que las cámaras: graban igual, pero algunas funciones inteligentes pueden no verse en el grabador. El técnico lo confirma.",
+                }
+            )
+        if c.get("smart") and not nvr_smart(nvr):
+            out.append(
+                {
+                    "tone": "warn",
+                    "text": "La detección de personas la hacen las cámaras; este grabador no tiene analítica propia para buscar por persona o vehículo.",
+                }
+            )
+        bays, top = nvr_bays(nvr), nvr_max_tb(nvr)
+        dl = next((ln for ln in lines if ln["key"] == "disk"), None)
+        if dl is not None and bays and dl["quantity"] > bays:
+            out.append(
+                {
+                    "tone": "warn",
+                    "text": f"Ese almacenamiento necesita {dl['quantity']} discos y al grabador le caben {bays}: bajá los días, grabá solo con movimiento o elegí un grabador más grande.",
+                }
+            )
+        elif top is not None and top < need_tb:
+            out.append(
+                {"tone": "warn", "text": f"El grabador admite hasta {top} TB y hacen falta ≈ {_es(need_tb)} TB: bajá los días o grabá solo con movimiento."}
+            )
+    if installed is not None and installed >= need_tb:
+        out.append({"tone": "ok", "text": f"{_es(installed)} TB de disco para ≈ {_es(need_tb)} TB que piden {na['days']} días de grabación."})
+    if meters > 50:
+        out.append(
+            {
+                "tone": "ok",
+                "text": f"Cable calculado para cámaras a unos {meters} m: cada tramo queda dentro de los {POE_MAX_M} m que admite el PoE. Si alguna queda más lejos, el técnico agrega un switch intermedio.",
+            }
+        )
+    if na["ups"]:
+        if ups is not None:
+            out.append(
+                {
+                    "tone": "ok",
+                    "text": f"UPS de {ups_va(ups) or ups_w(ups)} {'VA' if ups_va(ups) else 'W'} para ~{load_w} W: el sistema sigue grabando en un corte de luz y queda protegido de picos.",
+                }
+            )
+        else:
+            out.append({"tone": "warn", "text": f"No hay una UPS disponible para ~{load_w} W: la cotizamos aparte."})
+    return out
 
 
 def _alternatives(key: str, cur: Product, auto: Product | None, cands: list, prefer: set[int] | None, c: dict, adds=None) -> list[dict]:
@@ -1261,7 +1630,11 @@ def _alternatives(key: str, cur: Product, auto: Product | None, cands: list, pre
         if sell:
             pool = sell + ([auto] if auto is not None and auto.id != cur.id and auto not in sell else [])
     if not pool:
-        return [] if auto is None or auto.id == cur.id else [{"product": auto, "quantity": _role_qty(key, auto, c), "label": "Recomendada", "auto": True, "adds": adds(auto) if adds else []}]
+        return (
+            []
+            if auto is None or auto.id == cur.id
+            else [{"product": auto, "quantity": _role_qty(key, auto, c), "label": "Recomendada", "auto": True, "adds": adds(auto) if adds else []}]
+        )
     cur_cost, cur_score = cost(cur), _spec_score(key, cur, c)
     picked: list[Product] = []
 

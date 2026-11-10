@@ -1036,6 +1036,15 @@ class KitAnswers(BaseModel):
     outdoor: int = Field(2, ge=0, le=32)
     days: int = Field(15, ge=1, le=90)
     remote: bool = True
+    # detalles (opcionales, con lo de siempre por defecto: un enlace viejo arma el mismo kit)
+    quality: str = Field("4mp", pattern="^(2mp|4mp|8mp)$")
+    night: str = Field("ir", pattern="^(ir|color)$")
+    audio: bool = False
+    smart: bool = False
+    record: str = Field("continuo", pattern="^(continuo|movimiento)$")
+    distance: str = Field("media", pattern="^(corta|media|larga)$")
+    growth: bool = False
+    ups: bool = False
     # kit de la vitrina desde cuya tarjeta se abrio (aplica sus productos fijos y adicionales si las respuestas son las suyas)
     kit: str | None = Field(None, pattern=r"^[a-z0-9-]{1,40}$")
     # lo que el cliente cambio: {llave de la pieza: product_id}; lo que no calza se ignora (no da error: viene de un enlace)

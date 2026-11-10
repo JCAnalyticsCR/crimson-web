@@ -13,7 +13,7 @@ type Banner = { id?: string; image: string; title: string; text: string; link: s
 type KitPhotoSel = { product_id: number; image: string };
 /* pins: producto fijo por pieza ({nvr: 123}); sin la llave = Automatico. extras: lineas adicionales (p. ej. una UPS) */
 type KitExtra = { product_id: number; quantity: number };
-type Kit = { id: string; title: string; text: string; answers: { place?: string; indoor?: number; outdoor?: number; days?: number; remote?: boolean }; active: boolean; photos?: KitPhotoSel[]; pins?: Record<string, number>; extras?: KitExtra[] };
+type Kit = { id: string; title: string; text: string; answers: { place?: string; indoor?: number; outdoor?: number; days?: number; remote?: boolean; quality?: string; night?: string; record?: string; distance?: string; audio?: boolean; smart?: boolean; growth?: boolean; ups?: boolean }; active: boolean; photos?: KitPhotoSel[]; pins?: Record<string, number>; extras?: KitExtra[] };
 type KitPhotoPv = { product_id: number; image: string; label: string; name: string; images: string[] };
 /* vista previa de la composicion: cada pieza con su producto de hoy (source auto | pin | missing) y los candidatos que calzan */
 type KitRolePv = { key: string; label: string; product_id: number | null; name: string | null; source: string; options: { id: number; name: string; code: string; price: number | string }[] };
@@ -263,6 +263,13 @@ function KitsEditor({ value, preview, avisos, onSave }: { value: Kit[]; preview:
             <Field label="Adentro"><input className="input input--mono" type="number" min={0} max={32} style={{ width: 80 }} value={k.answers.indoor ?? 0} onChange={(e) => ans(i, { indoor: Number(e.target.value) })} /></Field>
             <Field label="Afuera"><input className="input input--mono" type="number" min={0} max={32} style={{ width: 80 }} value={k.answers.outdoor ?? 0} onChange={(e) => ans(i, { outdoor: Number(e.target.value) })} /></Field>
             <Field label="Días"><select className="select" value={k.answers.days ?? 15} onChange={(e) => ans(i, { days: Number(e.target.value) })}>{[7, 15, 30, 60].map((x) => <option key={x}>{x}</option>)}</select></Field>
+            <Field label="Calidad"><select className="select" value={k.answers.quality || "4mp"} onChange={(e) => ans(i, { quality: e.target.value })}><option value="2mp">2 MP</option><option value="4mp">4 MP</option><option value="8mp">8 MP (4K)</option></select></Field>
+            <Field label="De noche"><select className="select" value={k.answers.night || "ir"} onChange={(e) => ans(i, { night: e.target.value })}><option value="ir">Infrarrojo</option><option value="color">A color</option></select></Field>
+            <Field label="Grabación"><select className="select" value={k.answers.record || "continuo"} onChange={(e) => ans(i, { record: e.target.value })}><option value="continuo">Continua</option><option value="movimiento">Con movimiento</option></select></Field>
+            <Field label="Distancia"><select className="select" value={k.answers.distance || "media"} onChange={(e) => ans(i, { distance: e.target.value })}><option value="corta">Corta (15 m)</option><option value="media">Típica del lugar</option><option value="larga">Larga (70 m)</option></select></Field>
+            {([["audio", "Audio"], ["smart", "Detecta personas"], ["growth", "Espacio para crecer"], ["ups", "UPS"]] as const).map(([f, l]) => (
+              <label key={f} style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={!!k.answers[f]} onChange={(e) => ans(i, { [f]: e.target.checked })} />{l}</label>
+            ))}
             <label style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={k.active} onChange={(e) => upd(i, { active: e.target.checked })} />Activo</label>
             <button className="btn btn--danger btn--sm" onClick={() => { setList(list.filter((_, j) => j !== i)); setOrigin(origin.filter((_, j) => j !== i)); }}>Quitar</button>
           </div>
