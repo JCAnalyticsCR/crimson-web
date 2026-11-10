@@ -1,6 +1,26 @@
 /* Piezas compartidas de la vitrina: tipos, contexto de la tienda, precios, disponibilidad, tarjeta de producto,
    marco de visor (estetica "centro de monitoreo" de crimsoncr.com) y metas SEO del lado del navegador.
    El carrito NO vive aqui: la vitrina solo llama a ctx.addToCart (lo provee PublicStore / el modulo de pedidos). */
+/* QUIEN MAS USA ESTO, FUERA DE LA TIENDA (revisado el 10/11 con grep; tarea O0-02 del plan de la tienda).
+   `tsc -b` compila todo src/ con noUnusedLocals: renombrar algo, cambiar las props de un componente o quitar una clase
+   aqui puede poner el CI en rojo o mover una pantalla que no es la vitrina. Antes de tocar, buscar el nombre en src/.
+   - storeKit.tsx: ademas de la vitrina (PublicStore, StoreHome, CategoryPage, ProductPage, KitBuilder, StorePages,
+     Checkout, Consent) lo importa la demo de src/demo/propuestas: venta/A1Instalacion.tsx (AvailBadge, IC, Ico,
+     PriceTag, money), venta/A3Cotizacion.tsx (IC, Ico, PriceTag, money), venta/piezas.tsx (IC, Ico, Viewfinder) y
+     cliente/piezas.tsx (IC).
+   - catalogFilter.ts: CategoryPage, ProductPage, StoreHome y useSnapshot.ts; toma de aqui los tipos Avail y VProd.
+     Sus tipos del snapshot los usa tambien la tienda de pruebas de Playwright (portal/e2e/app/api.ts).
+   - shop.css y vitrina.css: PublicStore y, en la demo, propuestas/venta/A1Instalacion.tsx y A3Cotizacion.tsx,
+     propuestas/cliente/B2Plan.tsx (shop.css + checkout.css) y vip/preview/FakeStore.tsx.
+   - checkout.css: Checkout.tsx, OrderStatus.tsx y B2Plan.tsx. orders.css: Orders.tsx, CheckoutSettings.tsx,
+     modules/support/Warranties.tsx y la demo (propuestas/gestion/MiTienda.tsx y Pedidos.tsx).
+   - shopkit.tsx (otro archivo, con k minuscula): Checkout.tsx y OrderStatus.tsx. OrderStatus es la pantalla que abre
+     el enlace «?pedido=<token>» de los correos de pedido (api/app/services/store_orders.py, api/app/tasks/correo.py):
+     esa direccion y lo que muestra no se cambian sin revisar los correos ya enviados.
+   - TestShop.tsx (la «Tienda de pruebas» del panel) NO usa nada de esto: tiene su hoja (test-shop.css) y los
+     componentes del panel; no sirve para probar la vitrina ni el checkout.
+   - src/demo/mockApi.ts y catalog.ts imitan las respuestas del API publico que estas piezas leen; los usan la demo y
+     las pruebas de pantalla (portal/e2e). Un campo nuevo que la vitrina necesite tiene que poder faltar sin romper. */
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 

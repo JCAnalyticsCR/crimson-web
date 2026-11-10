@@ -318,11 +318,14 @@ async function route(path: string, sp: URLSearchParams, method: string, init?: R
   return fail(404, "No disponible en la demostración");
 }
 
-/** Instala el interceptor. Idempotente. */
-export function installMockApi() {
+/** Instala el interceptor. Idempotente.
+    `snapshot`: catalogo alterno ya cargado. Solo lo pasan las pruebas de Playwright (portal/e2e/app), que usan datos
+    ficticios y estables; la demo no lo pasa y sigue descargando snapshot.json como siempre. */
+export function installMockApi(opts: { snapshot?: Snapshot } = {}) {
   const w = window as Window & { __crimsonDemoApi?: boolean };
   if (w.__crimsonDemoApi) return;
   w.__crimsonDemoApi = true;
+  if (opts.snapshot) catalogP = Promise.resolve(new Catalog(opts.snapshot));
   catalog(); // la descarga del snapshot arranca ya, mientras se escribe el PIN
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
