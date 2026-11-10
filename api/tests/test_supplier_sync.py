@@ -360,13 +360,21 @@ def test_freno_una_consulta_global_por_hora_y_el_bloqueo_27_explicado(client, au
     eurocomp["error"] = 27
     ss.sync_all(db_session)  # el lunes siguiente Eurocomp responde 27
     st = next(x for x in client.get("/supplier-catalog/suppliers").json() if x["id"] == s.id)["api"]
-    assert "Solo Eurocomp puede desbloquearlo" in st["label"] and "Código 27" not in st["label"]
+    assert st["status"] == "bloqueado" and "bloqueó el acceso" in st["label"] and "Código 27" not in st["label"]
     calls = eurocomp["calls"]
-    # el refresco viejo de existencias tampoco consulta si hubo una global hace menos de una hora
-    assert ss.refresh_linked(db_session) == {"skipped": "consulta global reciente"}
+    # 10/11: bloqueada, NADA vuelve a llamar a Eurocomp: ni el lunes siguiente (el 02/11 y el 09/11 si llamo), ni el
+    # refresco viejo de existencias, ni una sincronizacion directa
+    assert ss.sync_all(db_session) == {"skipped": ss.BLOCKED_SKIP}
+    assert ss.refresh_linked(db_session) == {"skipped": ss.BLOCKED_SKIP}
+    with pytest.raises(ss.SyncRefused):
+        ss.sync_tenant(db_session, db_session.get(Tenant, tid))
     assert eurocomp["calls"] == calls
-    # desbloqueado por Eurocomp, el lunes siguiente vuelve con UNA consulta
+    # Eurocomp confirma el desbloqueo: el administrador lo indica (no llama a Eurocomp) y el lunes vuelve UNA consulta
+    r = client.post(f"/supplier-catalog/suppliers/{s.id}/resume")
+    assert r.status_code == 200 and r.json()["status"] != "bloqueado" and eurocomp["calls"] == calls
+    assert client.post(f"/supplier-catalog/suppliers/{s.id}/resume").status_code == 409  # ya no esta en pausa
     eurocomp["error"] = None
+    db_session.expire_all()
     assert "utiles" in ss.sync_all(db_session)[tid] and eurocomp["calls"] == calls + 1
 
 

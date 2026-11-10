@@ -74,7 +74,7 @@ const ACTIONS: [string, string, string][] = [
 ];
 
 export default function SupplierCatalog() {
-  const { toast, allows } = useSession();
+  const { toast, allows, me } = useSession();
   /* toast cambia de identidad en cada render del proveedor de sesion: si fuera dependencia de los efectos,
      un error al cargar (que muestra un toast) volveria a disparar la carga sin fin. */
   const toastRef = useRef(toast);
@@ -101,7 +101,18 @@ export default function SupplierCatalog() {
   useEffect(() => { loadSups(); }, [loadSups]);
   /* Proveedor conectado por API (SiReTT de Eurocomp): se sincroniza SOLO una vez por semana (lunes 3:17 a. m.). Sin
      boton de sincronizar (04/11, decision del usuario): no se le llenan de solicitudes a Eurocomp ni de datos la tienda. */
-  const apiSup = (sups || []).find((s) => ["conectado", "listo", "error"].includes(s.api.status));
+  const apiSup = (sups || []).find((s) => ["conectado", "listo", "error", "bloqueado"].includes(s.api.status));
+  /* 10/11: con la cuenta bloqueada por Eurocomp (26/27) Crimson deja de consultarlo; el administrador confirma aqui el
+     desbloqueo (no llama a Eurocomp: solo deja que la corrida semanal vuelva a consultar) */
+  const pausado = apiSup?.api.status === "bloqueado";
+  const [resuming, setResuming] = useState(false);
+  const resume = async () => {
+    if (!apiSup || !confirm("¿Eurocomp ya confirmó que desbloqueó la cuenta de Crimson? Si todavía no lo ha hecho, la próxima consulta vuelve a quedar bloqueada.")) return;
+    setResuming(true);
+    try { await api(`/supplier-catalog/suppliers/${apiSup.id}/resume`, { method: "POST" }); toast("Listo: la consulta semanal a Eurocomp se reanuda el próximo lunes"); loadSups(); }
+    catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
+    finally { setResuming(false); }
+  };
 
   const query = useCallback((offset = 0) => {
     const p = new URLSearchParams({ limit: "60", offset: String(offset), estado: f.estado });
@@ -148,7 +159,9 @@ export default function SupplierCatalog() {
         <span className="muted" style={{ fontSize: 13 }}>{withItems.length ? `${withItems.length} con catálogo cargado` : "Ninguno con catálogo todavía"}</span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           {canLink && withItems.length > 0 && <button className="btn btn--soft btn--sm" onClick={() => setSugOpen(true)}><Icon d={I.link} />Sugerencias de vínculo</button>}
-          {apiSup && <span className="muted" style={{ fontSize: 12, alignSelf: "center" }} title="Sin sincronización manual: una sola consulta por semana">{apiSup.name.split(" ")[0]} se actualiza solo los lunes, 3:17 a. m.</span>}
+          {apiSup && !pausado && <span className="muted" style={{ fontSize: 12, alignSelf: "center" }} title="Sin sincronización manual: una sola consulta por semana">{apiSup.name.split(" ")[0]} se actualiza solo los lunes, 3:17 a. m.</span>}
+          {apiSup && pausado && <span style={{ fontSize: 12, alignSelf: "center", color: "var(--bad)", fontWeight: 600 }}>{apiSup.name.split(" ")[0]} en pausa: nos bloqueó el acceso</span>}
+          {apiSup && pausado && me?.role === "admin" && <button className="btn btn--soft btn--sm" onClick={resume} disabled={resuming}>{resuming ? "Reanudando…" : "Eurocomp ya nos desbloqueó"}</button>}
           {canAdd && <button className="btn btn--crimson btn--sm" onClick={() => setImporting(true)}><Icon d={I.upload} />Importar lista</button>}
         </div>
       </div>

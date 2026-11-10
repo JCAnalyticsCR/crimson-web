@@ -203,6 +203,25 @@ def supplier_sync_now(sid: int, p: Principal = Depends(require("catalog", "crear
 MANUAL_OFF = "Eurocomp se sincroniza solo una vez por semana, los lunes a las 3:17 a. m.: no hay sincronización manual."
 
 
+@router.post("/suppliers/{sid}/resume")
+def supplier_resume(sid: int, p: Principal = Depends(require("catalog", "crear")), db: Session = Depends(get_db)):
+    """Eurocomp bloqueo la cuenta (codigo 26/27) y Crimson dejo de consultarlo. Cuando Eurocomp confirma que la reactivo,
+    el administrador lo indica aqui: NO llama a Eurocomp ahora, solo deja que la corrida semanal vuelva a consultar."""
+    _need_costs(p)
+    s = db.get(Supplier, sid)
+    if not s or s.tenant_id != p.tenant.id:
+        raise HTTPException(404, "Proveedor no encontrado")
+    if p.role != "admin":
+        raise HTTPException(403, "Solo un administrador puede reanudar la consulta a Eurocomp")
+    if not supplier_sync.is_eurocomp(s):
+        raise HTTPException(409, "Este proveedor no se consulta por servicio web")
+    t = db.get(Tenant, p.tenant.id)
+    if not supplier_sync.blocked(t):
+        raise HTTPException(409, "La consulta a Eurocomp no está en pausa")
+    supplier_sync.resume(db, t, p.user.id)
+    return supplier_sync.status(t, s)
+
+
 # ---------- auto_catalog: publicación automática configurable ----------
 
 class AutoCatalogIn(BaseModel):

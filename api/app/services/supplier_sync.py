@@ -16,9 +16,10 @@ para descubrir articulos nuevos, CABYS y fotos. De lo que YA estaba solo actuali
 nunca vuelve a traer fotos ni descripciones; apply_list(only_price_stock=True)), y el CABYS y las fotos se completan
 una sola vez por vinculo (lo recien vinculado o creado desde el panel, si le faltan). Lo que se agota en Eurocomp sale de la tienda en la
 sincronizacion siguiente (Ajustes de la tienda: "supplier_out_of_stock", ver services/availability) y sigue en el
-panel: nunca se desactiva ni se despublica el producto. Las existencias y costos de lo que Crimson YA vende (los vinculados)
-se refrescan cada 6 horas con la consulta por lista de codigos (`refresh_linked`): unas pocas llamadas chicas, sin
-limite de frecuencia en Eurocomp. Asi la tienda sigue diciendo "bajo pedido" con datos de horas, no de dias.
+panel: nunca se desactiva ni se despublica el producto. NO hay refresco cada 6 horas (apagado el 04/11: esas
+llamadas seguidas hicieron que Eurocomp bloqueara a Crimson, codigo 27) ni sincronizacion manual.
+BLOQUEO (10/11): si Eurocomp respondio 26 o 27, la tarea semanal NO vuelve a llamar (`blocked`) hasta que un
+administrador confirme en el catalogo de proveedores que Eurocomp levanto el bloqueo (`resume`).
 
 Seguridad de datos: si Eurocomp responde una lista sospechosamente corta (menos de la mitad de lo que habia) no se
 aplica, para no dejar inactivo medio catalogo por una respuesta cortada.
@@ -170,6 +171,12 @@ def status(t: Tenant, supplier: Supplier | None) -> dict:
     if client is None:
         return {"status": "pendiente", "label": "Conexión por API: pendiente de credenciales (SiReTT)"}
     s = _state(t)
+    if s.get("last_code") in BLOCKED_CODES:
+        return {
+            "status": "bloqueado",
+            "label": "En pausa: Eurocomp bloqueó el acceso de Crimson a su servicio web. Crimson ya no los consulta. Cuando Eurocomp confirme el desbloqueo, toque «Eurocomp ya nos desbloqueó» para reanudar la consulta semanal.",
+            **s,
+        }
     if s.get("last_stock_error") and (s.get("last_stock_try_at") or "") > (s.get("last_stock_at") or ""):
         return {"status": "error", "label": f"Conectado por API (SiReTT) · el último refresco de existencias falló: {s['last_stock_error']}", **s}
     if s.get("last_error") and (s.get("last_try_at") or "") > (s.get("last_ok_at") or ""):
@@ -186,6 +193,28 @@ def status(t: Tenant, supplier: Supplier | None) -> dict:
 # ---------- sincronizar ----------
 class SyncRefused(Exception):
     pass
+
+
+def blocked(t: Tenant) -> bool:
+    """Eurocomp suspendio (26) o bloqueo (27) la cuenta y nadie ha confirmado todavia que la reactivo. Mientras tanto NO
+    se le consulta, ni siquiera la corrida semanal: llamar bloqueado no arregla nada y suma faltas (el 02/11 y el 09/11
+    la tarea de los lunes llamo estando bloqueada; 10/11)."""
+    return _state(t).get("last_code") in BLOCKED_CODES
+
+
+BLOCKED_SKIP = "Eurocomp bloqueó el acceso de Crimson (código 26/27): no se consulta hasta que un administrador confirme el desbloqueo"
+
+
+def resume(db: Session, t: Tenant, user_id: int | None = None) -> dict:
+    """El administrador confirma que Eurocomp levanto el bloqueo: se limpia la marca y la corrida semanal vuelve a
+    consultar (no llama ahora). Si Eurocomp sigue respondiendo 27, queda bloqueado otra vez con una sola llamada."""
+    from .documents import audit
+
+    antes = _state(t).get("last_code")
+    _save_state(t, last_code=None, last_error=None, last_stock_error=None, resumed_at=datetime.now(UTC), resumed_by=user_id)
+    audit(db, t.id, user_id, "supplier_resume", "supplier", None, {"proveedor": "eurocomp", "codigo_anterior": antes})
+    db.commit()
+    return _state(t)
 
 
 # Una consulta global a Eurocomp (catalogo completo de la bodega) como maximo cada hora, venga de donde venga: el boton
@@ -334,6 +363,8 @@ def sync_tenant(
     """Descarga (si no viene ya descargado) y aplica para una empresa, guardando el estado (exito o error) aunque
     falle. Hace commit."""
     now = datetime.now(UTC)
+    if items is None and blocked(t):
+        raise SyncRefused(BLOCKED_SKIP)
     if items is None:
         _mark_global([t], now)
         db.commit()
@@ -401,6 +432,9 @@ def sync_all(db: Session, client: SirettClient | None = None) -> dict:
         return {"skipped": "ninguna empresa con el proveedor"}
     if (client or SirettClient.from_settings()) is None:
         return {"skipped": "sin credenciales de Eurocomp"}
+    if any(blocked(t) for t in tenants):  # la credencial es una sola: bloqueada para una, bloqueada para todas
+        log.warning("Eurocomp: %s", BLOCKED_SKIP)
+        return {"skipped": BLOCKED_SKIP}
     now = datetime.now(UTC)
     _mark_global(tenants, now)
     db.commit()
@@ -478,6 +512,8 @@ def refresh_linked(db: Session, client: SirettClient | None = None) -> dict:
     client = client or SirettClient.from_settings()
     if client is None:
         return {"skipped": "sin credenciales de Eurocomp"}
+    if any(blocked(t) for t in tenants):
+        return {"skipped": BLOCKED_SKIP}
     now = datetime.now(UTC)
     if any(global_wait(t, now) for t in tenants):
         log.info("Eurocomp (existencias): hubo una consulta global hace menos de una hora, no se consulta")
