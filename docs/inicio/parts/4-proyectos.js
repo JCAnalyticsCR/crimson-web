@@ -169,7 +169,7 @@
         play.addEventListener('click', e => { e.stopPropagation(); alternar(); });
         fr.addEventListener('click', alternar);
         fr.classList.add('is-paused');
-        fr.append(v, corners, osd, play, prog);
+        fr.append(v, corners, play, prog); // sin rotulos REC/CAM (pedido 10/11: "se ve muy IA")
       } else {
         const img = new Image();
         img.className = 'nvp-v__el';
@@ -179,7 +179,7 @@
         img.dataset.src = it.src;
         if (it.srcset) { img.dataset.srcset = it.srcset; img.sizes = '(max-width:1023px) 100vw, calc(100vw - 400px)'; }
         if (it.prev) img.style.backgroundImage = `url("${it.prev}")`; // la miniatura ya vista hace de respaldo
-        fr.append(img, corners, osd);
+        fr.append(img, corners);
       }
       media.append(fr);
 
@@ -188,7 +188,6 @@
       const lines = el('div', 'nvp-v__lines');
       if (it.pidio) lines.append(linea(it.tipo === 'prensa' ? 'El pedido:' : 'Se pidió:', it.pidio));
       if (it.instalo) lines.append(linea(it.tipo === 'prensa' ? 'Lo instalado:' : 'Se instaló:', it.instalo));
-      if (it.tipo === 'foto') lines.append(linea('', it.instalo ? 'Foto real de obra.' : 'Foto real de una instalación de Crimson.'));
       info.append(lines);
       const cta = el('div', 'nvp-v__cta');
       if (it.nota) {

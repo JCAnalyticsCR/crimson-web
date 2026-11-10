@@ -14,6 +14,60 @@
     loops.forEach(el => io.observe(el));
   }
 
+  /* ---------- accesos rapidos: desplegable en su lugar (no baja a "Nuestras soluciones") ---------- */
+  const drop = document.getElementById('nvt-drop');
+  const qs = [...document.querySelectorAll('.nvt-q')];
+  if (drop && qs.length) {
+    let abierto = null;
+    const cerrar = () => {
+      if (!abierto) return;
+      abierto.setAttribute('aria-expanded', 'false');
+      abierto = null;
+      drop.hidden = true;
+      drop.replaceChildren();
+    };
+    const abrir = a => {
+      const card = document.getElementById((a.getAttribute('href') || '').slice(1));
+      const sheet = card && document.getElementById(card.dataset.nvsOpen || '');
+      if (!sheet) return false;
+      cerrar();
+      const h = sheet.querySelector('h3');
+      const box = document.createElement('div');
+      box.className = 'nvt-drop__in';
+      const t = document.createElement('p');
+      t.className = 'nvt-drop__t';
+      t.textContent = h ? h.textContent : a.textContent.trim();
+      const d = document.createElement('p');
+      d.className = 'nvt-drop__p';
+      d.textContent = sheet.querySelector('.nvs-sheet__p')?.textContent || '';
+      const ul = document.createElement('ul');
+      ul.className = 'nvt-drop__pts';
+      [...sheet.querySelectorAll('.nvs-pts li')].slice(0, 3).forEach(li => { const x = document.createElement('li'); x.textContent = li.textContent; ul.append(x); });
+      const act = document.createElement('div');
+      act.className = 'nvt-drop__act';
+      sheet.querySelectorAll('.nvs-sheet__act a').forEach(x => act.append(x.cloneNode(true)));
+      const mas = document.createElement('button');
+      mas.type = 'button';
+      mas.className = 'nvt-drop__more';
+      mas.textContent = 'Ver detalle';
+      mas.addEventListener('click', () => { cerrar(); card.click(); });
+      act.append(mas);
+      box.append(t, d, ul, act);
+      drop.append(box);
+      drop.setAttribute('aria-label', t.textContent);
+      drop.hidden = false;
+      a.setAttribute('aria-expanded', 'true');
+      abierto = a;
+      return true;
+    };
+    qs.forEach(a => a.addEventListener('click', e => {
+      if (abierto === a) { e.preventDefault(); cerrar(); return; }
+      if (abrir(a)) e.preventDefault(); // sin la hoja (o sin JS) el enlace baja a la solucion como antes
+    }));
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && abierto) { const a = abierto; cerrar(); a.focus(); } });
+    document.addEventListener('click', e => { if (abierto && !e.target.closest('.nvt-quick')) cerrar(); });
+  }
+
   /* ---------- precio vigente ---------- */
   const rail = document.querySelector('[data-nvt-rail]');
   const cards = rail ? [...rail.querySelectorAll('[data-pid]')] : [];

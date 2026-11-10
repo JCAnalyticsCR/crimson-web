@@ -25,8 +25,8 @@
 <meta name="format-detection" content="telephone=yes">
 <script>document.documentElement.classList.add('js')</script>
 <link rel="stylesheet" href="inicio/base.css?v=17930740331793074033">
-<link rel="stylesheet" href="inicio/parts/1-portada.css?v=1793073992">
-<link rel="stylesheet" href="inicio/parts/2-tienda.css?v=1793073765">
+<link rel="stylesheet" href="inicio/parts/1-portada.css?v=1794351607">
+<link rel="stylesheet" href="inicio/parts/2-tienda.css?v=1794351584">
 <link rel="stylesheet" href="inicio/parts/3-soluciones.css?v=1793068035">
 <link rel="stylesheet" href="inicio/parts/4-proyectos.css?v=1793068240">
 <link rel="stylesheet" href="inicio/parts/5-cierre.css?v=1793069888">
@@ -165,7 +165,10 @@
         </a>
         <a class="nv-btn nv-btn--line nvh-btn" href="#soluciones">Ver soluciones</a>
       </div>
-      <p class="nvh-trust" style="--i:4"><span>Distribuidor autorizado Hikvision</span><span>Respaldo técnico local</span></p>
+      <p class="nvh-trust" style="--i:4">
+        <span><img class="nvh-trust__logo" src="assets/img/marca-hikvision-mono.png" alt="" width="600" height="120" decoding="async">Distribuidor autorizado Hikvision</span>
+        <span><svg class="nvh-trust__ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.2 5.2L3.6 17.4a1.6 1.6 0 0 0 2.3 2.3l5.9-5.9a4 4 0 0 0 5.2-5.2l-2.4 2.4-2.2-.6-.6-2.2z"/></svg>Respaldo técnico local</span>
+      </p>
     </div>
   </div>
 </section>
@@ -179,24 +182,27 @@
     <div class="nvt-quick__row" data-nv-in>
       <span class="nvt-pulse" aria-hidden="true"></span>
       <ul class="nvt-quick__list">
-      <li><a class="nvt-q" href="#sol-seguridad">
+      <li><a class="nvt-q" aria-expanded="false" aria-controls="nvt-drop" href="#sol-seguridad">
         <span class="nvt-q__ico" aria-hidden="true"><svg class="nv-ico" viewBox="0 0 24 24"><path d="M12 2.8 19.5 5.6v5.6c0 4.6-3.1 8.3-7.5 10-4.4-1.7-7.5-5.4-7.5-10V5.6z"/><circle cx="12" cy="11.4" r="3.4"/><circle cx="12" cy="11.4" r=".9"/></svg></span>
         <span class="nvt-q__t">Seguridad y video</span>
       </a></li>
-      <li><a class="nvt-q" href="#sol-redes">
+      <li><a class="nvt-q" aria-expanded="false" aria-controls="nvt-drop" href="#sol-redes">
         <span class="nvt-q__ico" aria-hidden="true"><svg class="nv-ico" viewBox="0 0 24 24"><path d="M2.6 9.2a13.5 13.5 0 0 1 18.8 0"/><path d="M5.8 12.6a9 9 0 0 1 12.4 0"/><path d="M9 16a4.5 4.5 0 0 1 6 0"/><circle cx="12" cy="19.4" r=".9"/></svg></span>
         <span class="nvt-q__t">Redes y Wi-Fi</span>
       </a></li>
-      <li><a class="nvt-q" href="#sol-software">
+      <li><a class="nvt-q" aria-expanded="false" aria-controls="nvt-drop" href="#sol-software">
         <span class="nvt-q__ico" aria-hidden="true"><svg class="nv-ico" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.4"/><path d="M9.6 14.4v-3.2a1.6 1.6 0 0 1 3.2 0v3.2M9.6 12.8h3.2M14.6 9.6v4.8"/><path d="M9 2.8V6M15 2.8V6M9 18v3.2M15 18v3.2M2.8 9H6M2.8 15H6M18 9h3.2M18 15h3.2"/></svg></span>
         <span class="nvt-q__t">IA y software</span>
       </a></li>
-      <li><a class="nvt-q" href="#sol-iot">
+      <li><a class="nvt-q" aria-expanded="false" aria-controls="nvt-drop" href="#sol-iot">
         <span class="nvt-q__ico" aria-hidden="true"><svg class="nv-ico" viewBox="0 0 24 24"><path d="M3.6 11 12 4l8.4 7"/><path d="M5.8 9.4V20h12.4V9.4"/><circle cx="12" cy="13.6" r="1.7"/><circle cx="8.6" cy="17.2" r=".9"/><circle cx="15.4" cy="17.2" r=".9"/><path d="m10.8 14.8-1.5 1.6M13.2 14.8l1.5 1.6"/></svg></span>
         <span class="nvt-q__t">IoT y automatización</span>
       </a></li>
       </ul>
     </div>
+    <!-- desplegable de cada acceso (pedido de Andres 10/11): abre aqui mismo un resumen breve, sin bajar la pagina.
+         2-tienda.js lo llena con el texto, los puntos y los botones de la hoja de esa solucion (3-soluciones.html). -->
+    <div class="nvt-drop" id="nvt-drop" role="region" aria-live="polite" hidden></div>
   </div>
 </nav>
 
@@ -540,10 +546,9 @@
          data-nvp-instalo="Domo en el acceso con grabación continua y vista remota desde el celular.">
         <span class="nvp-card__media"><img class="nvp-card__img" src="assets/img/obra-domo-poster.webp" width="540" height="960" alt="Cámara domo instalada sobre el acceso de una residencia" loading="lazy" decoding="async"></span>
         <span class="nvp-card__frame" aria-hidden="true"></span>
-        <span class="nvp-osd" aria-hidden="true"><span class="nvp-rec"><i></i>REC</span><span>CAM 01</span></span>
         <span class="nvp-card__body">
           <span class="nvp-tag">Videovigilancia</span>
-          <span class="nvp-card__t">Acceso residencial vigilado</span>
+          <span class="nvp-card__t">Acceso residencial en Alajuela</span>
           <span class="nvp-card__foot"><span class="nvp-card__r">Cada entrada queda grabada y se revisa desde cualquier lugar.</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
         </span>
         <span class="nv-sr">. Ver el video del caso</span>
@@ -555,10 +560,9 @@
          data-nvp-instalo="Lector biométrico en la puerta, con permisos por persona y horario.">
         <span class="nvp-card__media"><img class="nvp-card__img" src="assets/img/obra-biometrico-poster.webp" width="540" height="960" alt="Terminal biométrico de reconocimiento facial junto a una puerta" loading="lazy" decoding="async"></span>
         <span class="nvp-card__frame" aria-hidden="true"></span>
-        <span class="nvp-osd" aria-hidden="true"><span class="nvp-rec"><i></i>REC</span><span>CAM 02</span></span>
         <span class="nvp-card__body">
           <span class="nvp-tag">Control de acceso</span>
-          <span class="nvp-card__t">Acceso biométrico de personal</span>
+          <span class="nvp-card__t">Acceso biométrico para industria en San José</span>
           <span class="nvp-card__foot"><span class="nvp-card__r">Solo entra el personal autorizado y cada apertura queda registrada.</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
         </span>
         <span class="nv-sr">. Ver el video del caso</span>
@@ -566,14 +570,13 @@
     </li>
     <li class="nvp-item">
       <a class="nvp-card" href="assets/video/obra-bodega-960.mp4" data-nvp-tipo="video" data-nvp-clip="assets/video/obra-bodega" data-nvp-poster="assets/img/obra-bodega-poster.webp"
-         data-nvp-pidio="Eliminar los puntos ciegos: las cámaras se revisaban una por una."
-         data-nvp-instalo="Cámaras en caja, pasillos y andenes, con grabación centralizada en un monitor.">
+         data-nvp-pidio="Implementar una solución integral de CCTV y red."
+         data-nvp-instalo="Gabinete de red con grabador, puntos de red y cámaras en zonas estratégicas de la bodega.">
         <span class="nvp-card__media"><img class="nvp-card__img" src="assets/img/obra-bodega-poster.webp" width="540" height="960" alt="Monitor con la vista de todas las cámaras de una bodega" loading="lazy" decoding="async"></span>
         <span class="nvp-card__frame" aria-hidden="true"></span>
-        <span class="nvp-osd" aria-hidden="true"><span class="nvp-rec"><i></i>REC</span><span>CAM 03</span></span>
         <span class="nvp-card__body">
           <span class="nvp-tag">Videovigilancia</span>
-          <span class="nvp-card__t">Centro de monitoreo en bodega</span>
+          <span class="nvp-card__t">Centro de monitoreo en bodega de Heredia</span>
           <span class="nvp-card__foot"><span class="nvp-card__r">Toda la operación se ve y se revisa desde un solo lugar.</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
         </span>
         <span class="nv-sr">. Ver el video del caso</span>
@@ -585,10 +588,9 @@
          data-nvp-instalo="Cámaras con analítica de inteligencia artificial. El proyecto llegó al noticiero nacional.">
         <span class="nvp-card__media"><img class="nvp-card__img" src="assets/img/prensa-noticiero.webp" width="640" height="436" alt="Noticiero nacional: 20 cámaras con IA vigilan el barrio" loading="lazy" decoding="async"></span>
         <span class="nvp-card__frame" aria-hidden="true"></span>
-        <span class="nvp-osd" aria-hidden="true"><span class="nvp-rec"><i></i>En prensa</span><span>TV · CR</span></span>
         <span class="nvp-card__body">
           <span class="nvp-tag">Comunidad · IA</span>
-          <span class="nvp-card__t nvp-card__t--quote">“20 cámaras con IA vigilan el barrio”</span>
+          <span class="nvp-card__t nvp-card__t--quote">“20 cámaras con IA vigilan el barrio” en Alajuela</span>
           <span class="nvp-card__foot"><span class="nvp-card__r">Videovigilancia comunitaria, monitoreada por los vecinos.</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
         </span>
         <span class="nv-sr">. Ver la nota</span>
@@ -599,10 +601,9 @@
          data-nvp-instalo="Rack de datos con cableado estructurado.">
         <span class="nvp-card__media"><img class="nvp-card__img" src="assets/img/galeria/red-rack-datos-480.webp" srcset="assets/img/galeria/red-rack-datos-480.webp 480w, assets/img/galeria/red-rack-datos-960.webp 960w" sizes="(max-width:767px) 82vw, (max-width:1023px) 44vw, 380px" width="1125" height="2000" style="--foco:50% 38%" alt="Rack de datos con switch y cableado estructurado" loading="lazy" decoding="async"></span>
         <span class="nvp-card__frame" aria-hidden="true"></span>
-        <span class="nvp-osd" aria-hidden="true"><span class="nvp-rec nvp-rec--foto"><i></i>Foto de obra</span><span>CAM 05</span></span>
         <span class="nvp-card__body">
           <span class="nvp-tag">Redes</span>
-          <span class="nvp-card__t">Rack de datos</span>
+          <span class="nvp-card__t">Rack de datos en Hacienda Pinilla, Guanacaste</span>
           <span class="nvp-card__foot"><span class="nvp-card__r">Cableado estructurado, ordenado en su rack.</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
         </span>
         <span class="nv-sr">. Ver la foto en grande</span>
@@ -613,7 +614,6 @@
          data-nvp-instalo="Enlace punto a punto con cámaras de perímetro.">
         <span class="nvp-card__media"><img class="nvp-card__img" src="assets/img/galeria/perimetro-enlace-camaras-480.webp" srcset="assets/img/galeria/perimetro-enlace-camaras-480.webp 480w, assets/img/galeria/perimetro-enlace-camaras-960.webp 960w" sizes="(max-width:767px) 82vw, (max-width:1023px) 44vw, 380px" width="1126" height="2000" style="--foco:50% 52%" alt="Antena de enlace punto a punto y cámara bala en un poste" loading="lazy" decoding="async"></span>
         <span class="nvp-card__frame" aria-hidden="true"></span>
-        <span class="nvp-osd" aria-hidden="true"><span class="nvp-rec nvp-rec--foto"><i></i>Foto de obra</span><span>CAM 06</span></span>
         <span class="nvp-card__body">
           <span class="nvp-tag">Redes · Perímetro</span>
           <span class="nvp-card__t">Enlace de perímetro</span>
@@ -627,10 +627,9 @@
          data-nvp-instalo="Gabinete y enlace inalámbrico instalados en poste.">
         <span class="nvp-card__media"><img class="nvp-card__img" src="assets/img/galeria/comunidad-gabinete-poste-480.webp" srcset="assets/img/galeria/comunidad-gabinete-poste-480.webp 480w, assets/img/galeria/comunidad-gabinete-poste-960.webp 960w" sizes="(max-width:767px) 82vw, (max-width:1023px) 44vw, 380px" width="1600" height="2842" style="--foco:50% 35%" alt="Técnico instalando un gabinete y una antena de enlace en un poste" loading="lazy" decoding="async"></span>
         <span class="nvp-card__frame" aria-hidden="true"></span>
-        <span class="nvp-osd" aria-hidden="true"><span class="nvp-rec nvp-rec--foto"><i></i>Foto de obra</span><span>CAM 07</span></span>
         <span class="nvp-card__body">
           <span class="nvp-tag">Redes · Enlaces</span>
-          <span class="nvp-card__t">Enlace en poste</span>
+          <span class="nvp-card__t">Llegamos donde otros no llegan</span>
           <span class="nvp-card__foot"><span class="nvp-card__r">Gabinete y enlace inalámbrico instalados en poste.</span><span class="nv-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
         </span>
         <span class="nv-sr">. Ver la foto en grande</span>
@@ -906,9 +905,9 @@
 
 <script src="inicio/base.js?v=17930740331793074033" defer></script>
 <script src="inicio/parts/1-portada.js?v=1793073496" defer></script>
-<script src="inicio/parts/2-tienda.js?v=1793071688" defer></script>
+<script src="inicio/parts/2-tienda.js?v=1794351584" defer></script>
 <script src="inicio/parts/3-soluciones.js?v=1793071688" defer></script>
-<script src="inicio/parts/4-proyectos.js?v=1793071688" defer></script>
+<script src="inicio/parts/4-proyectos.js?v=1794351619" defer></script>
 <script src="inicio/parts/5-cierre.js?v=1793071688" defer></script>
 </body>
 </html>

@@ -193,7 +193,9 @@
   .nvh-btn{min-height:56px;padding:16px 28px}
   .nvh-trust{display:flex;flex-wrap:wrap;gap:8px 22px;margin-top:34px;font-size:13px;color:var(--nv-text-3)}
   .nvh-trust span{display:inline-flex;align-items:center;gap:8px}
-  .nvh-trust span::before{content:"";width:14px;height:1px;background:var(--nv-red)}
+  /* pedido 10/11: iconos en vez de la raya (logo de Hikvision y una herramienta), pequenos */
+  .nvh-trust__logo{height:12px;width:auto;opacity:.85}
+  .nvh-trust__ico{width:16px;height:16px;fill:none;stroke:var(--nv-red);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 
   .nvh-media{left:auto;width:56%;
     -webkit-mask-image:linear-gradient(90deg,transparent 0,#000 34%);mask-image:linear-gradient(90deg,transparent 0,#000 34%)}
