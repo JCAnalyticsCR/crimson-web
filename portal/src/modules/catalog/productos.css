@@ -39,3 +39,18 @@
 .prd-precio-btn:hover, .prd-precio-btn:focus-visible { border-color: var(--hair); }
 .prd-precio-btn:hover svg { opacity: .8; }
 .prd-precio-input { width: 130px; min-height: 34px; padding: 4px 8px; }
+
+/* ---------- Catálogo → Márgenes por categoría ---------- */
+.mrg-help { font-size: 13px; margin: 0; padding: 10px 18px; border-bottom: 1px solid var(--hair); }
+.mrg-table tbody tr.is-sel { background: var(--bg-2); }
+.mrg-acc { white-space: nowrap; text-align: right; }
+.mrg-acc .btn + .btn { margin-left: 6px; }
+.mrg-check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.4; cursor: pointer; }
+.mrg-check input { margin-top: 3px; }
+.mrg-resumen { margin: 14px 0 10px; padding: 12px 14px; border: 1px solid var(--hair); border-radius: 12px; background: var(--bg-2); font-size: 13px; }
+.mrg-resumen ul { margin: 6px 0 0; padding-left: 18px; color: var(--text-2); }
+.mrg-big { font-size: 22px; font-family: var(--mono); }
+.mrg-warn { margin: 8px 0 0; color: var(--warn); }
+.mrg-confirm { margin: 0 0 10px; padding: 10px 14px; border-left: 3px solid var(--crimson); background: var(--bg-2); font-size: 13.5px; }
+.mrg-prev { max-height: 380px; overflow-y: auto; }
+@media (max-width: 1100px) { .mrg-acc { text-align: left; } .mrg-acc .btn + .btn { margin-left: 0; } }

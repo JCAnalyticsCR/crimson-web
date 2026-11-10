@@ -32,8 +32,8 @@ con el MENOR precio que vende la tienda: el precio web (o el de lista) y el de c
   sacar todo siempre; para lo segundo basta un tope alto en Ajustes.)
 - `margin_guard_mode`: sin definir = la PRIMERA corrida es `informe` (no oculta nada) y queda `activo`. Un admin lo
   puede dejar en `informe`; en informe tambien se liberan los retenidos.
-- Margen objetivo del sugerido: el del producto (margin_pct, con el que se calculo su precio) o el de Ajustes
-  (default_margin_pct, 35 %), nunca menos que el minimo.
+- Margen objetivo del sugerido: el del producto (margin_pct, con el que se calculo su precio), el de su categoria (la
+  mas cercana con margen, Catalogo -> Margenes) o el de Ajustes (default_margin_pct, 35 %), nunca menos que el minimo.
 - Lo que el guardian guarda en Ajustes (ultima corrida, modo, avisos) se escribe releyendo la empresa con bloqueo y
   solo con sus llaves (save_settings): un PUT /settings confirmado mientras corria no se revierte.
 """
@@ -81,7 +81,8 @@ def money_txt(v, cur: str | None) -> str:
     return "$" + f"{n:,.2f}".replace(",", " ").replace(".", ",")
 
 
-def config(t: Tenant) -> dict:
+def config(t: Tenant, db: Session | None = None) -> dict:
+    """Con `db` agrega el margen que rige por categoria (producto -> categoria -> general) para el sugerido."""
     st = t.settings or {}
     raw = st.get("margin_guard_mode")
     cap = st.get("margin_guard_cap")
@@ -101,7 +102,19 @@ def config(t: Tenant) -> dict:
         "first_run": raw not in MODES,
         "cap": cap,
         "jump_pct": jump if jump > 0 else JUMP_PCT,
+        "cat_margins": _cat_margins(db, t.id) if db is not None else {},
     }
+
+
+def _cat_margins(db: Session, tid: int) -> dict[int, Decimal]:
+    from .category_margin import target_map
+
+    try:
+        with db.begin_nested():  # savepoint: si falla (worker antes de la migracion) la transaccion sigue sana
+            return target_map(db, tid)
+    except Exception:  # noqa: BLE001  sin margenes de categoria el sugerido usa el general, como antes
+        log.exception("margenes por categoria")
+        return {}
 
 
 @dataclass
@@ -148,7 +161,9 @@ class Rates:
 
 
 def _target(t: Tenant, p: Product, cfg: dict) -> Decimal:
-    own = d(p.margin_pct) if p.margin_pct is not None and d(p.margin_pct) > 0 else cfg["target_pct"]
+    # producto -> categoria (la mas cercana con margen) -> general
+    cat = cfg.get("cat_margins", {}).get(p.category_id) if p.category_id else None
+    own = d(p.margin_pct) if p.margin_pct is not None and d(p.margin_pct) > 0 else (cat if cat is not None else cfg["target_pct"])
     return max(own, cfg["min_pct"])
 
 
@@ -355,7 +370,7 @@ def _brake_signal(fx_flag: dict[str, Decimal], candidates: list) -> str | None:
 def run(db: Session, t: Tenant, *, reason: str = "", confirm: bool = False) -> dict:
     """Una corrida para una empresa. confirm=True: una persona ya verifico los datos y destraba el freno (saca de
     venta todo lo que este bajo el minimo). No hace commit (run_safe si). Devuelve el resumen (tambien en Ajustes)."""
-    cfg = config(t)
+    cfg = config(t, db)
     mode, now = cfg["mode"], datetime.now(UTC)
     rates = Rates(db)
     out: dict = dict.fromkeys(COUNTERS, 0)
@@ -475,7 +490,7 @@ def recheck(db: Session, t: Tenant, p: Product) -> None:
         return
     if not (p.active and p.show_on_web):
         return  # la tienda no lo muestra; el estado se conserva para cuando vuelva
-    now, cfg = datetime.now(UTC), config(t)
+    now, cfg = datetime.now(UTC), config(t, db)
     c = evaluate(t, p, Rates(db), cfg)
     if c in ("sin_costo", "sin_precio"):
         _release(p, c, now)
@@ -567,7 +582,7 @@ def apply(db: Session, t: Tenant, p: Product, user_id: int | None, ip: str | Non
 
     if p.margin_flagged_at is None:
         raise Stale("Este producto ya no está en Precios por revisar (ya se aplicó un precio o recuperó el margen). Actualizá la bandeja.")
-    now, cfg = datetime.now(UTC), config(t)
+    now, cfg = datetime.now(UTC), config(t, db)
     c = evaluate(t, p, Rates(db), cfg)
     if c == "sin_tasa":
         cur = p.currency if (p.currency or "CRC").upper() != "CRC" else p.cost_currency
@@ -668,7 +683,7 @@ def summary_html(db: Session, t: Tenant, base_url: str) -> tuple[str, str] | Non
     alerts = fx_alerts(db, t)
     if not rows and not alerts and not dud:
         return None
-    cfg = config(t)
+    cfg = config(t, db)
     last = (t.settings or {}).get("margin_guard_last") or {}
     link = f"{base_url.rstrip('/')}/aprobaciones?seccion=precios_por_revisar"
     fx_html = "".join(f"<p><b>Tipo de cambio:</b> {html.escape(a)}</p>" for a in alerts)

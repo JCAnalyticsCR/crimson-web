@@ -619,6 +619,88 @@ def price_adjust(data: PriceAdjustIn, p: Principal = Depends(require("catalog", 
     return {"items": rows, "changes": len(cambios), "skipped": len(rows) - len(cambios), "applied": bool(data.confirm and cambios)}
 
 
+# ---------- Margen por categoria (Catalogo -> Margenes) ----------
+class CategoryMarginIn(BaseModel):
+    margin_pct: Decimal = Field(gt=Decimal(0), lt=Decimal(95))
+    include_own: bool = False  # tambien los productos con margen propio (dejan de tenerlo y heredan el de la categoria)
+    token: str | None = Field(None, max_length=64)  # huella de la vista previa que se confirma
+
+
+def _costs_admin(p: Principal) -> None:
+    if not p.sees_costs:
+        raise HTTPException(403, "Sin permiso: catalog.costos")
+
+
+@router.get("/catalog/margins")
+def category_margins(p: Principal = Depends(require("catalog", "ver")), db: Session = Depends(get_db)):
+    """Categorias con su margen propio, el que rige (heredado o general) y cuantos productos abarcan. Solo quien ve costos."""
+    from ..services import category_margin as cm
+
+    _costs_admin(p)
+    return cm.overview(db, p.tenant)
+
+
+@router.get("/catalog/margins/{cid}/products")
+def category_margin_products(cid: int, q: str | None = Query(None, max_length=120), p: Principal = Depends(require("catalog", "ver")), db: Session = Depends(get_db)):
+    from ..services import category_margin as cm
+
+    _costs_admin(p)
+    try:
+        return cm.listing(db, p.tenant, cid, q)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+@router.post("/catalog/margins/{cid}/preview")
+def category_margin_preview(cid: int, data: CategoryMarginIn, p: Principal = Depends(require("catalog", "editar")), db: Session = Depends(get_db)):
+    """Vista previa: cuantos productos cambian y su precio antes y despues. No guarda nada."""
+    from ..services import category_margin as cm
+
+    _costs_admin(p)
+    try:
+        return cm.plan(db, p.tenant, cid, data.margin_pct, include_own=data.include_own)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@router.post("/catalog/margins/{cid}/apply")
+def category_margin_apply(cid: int, data: CategoryMarginIn, p: Principal = Depends(require("catalog", "editar")), db: Session = Depends(get_db)):
+    """Guarda el margen de la categoria y recalcula los precios de la vista previa confirmada (token). Si algo cambio
+    desde la vista previa responde 409 y no toca nada."""
+    from ..services import category_margin as cm
+
+    _costs_admin(p)
+    if not data.token:
+        raise HTTPException(422, "Falta confirmar la vista previa")
+    try:
+        out = cm.apply(db, p.tenant, cid, data.margin_pct, include_own=data.include_own, token=data.token, user_id=p.user.id, ip=p.ip)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    except cm.Stale as e:
+        db.rollback()
+        raise HTTPException(409, str(e)) from e
+    db.commit()
+    return out
+
+
+@router.delete("/catalog/margins/{cid}")
+def category_margin_clear(cid: int, p: Principal = Depends(require("catalog", "editar")), db: Session = Depends(get_db)):
+    """Quita el margen de la categoria (vuelve a regir el de la categoria padre o el general). No cambia precios."""
+    from ..services import category_margin as cm
+
+    _costs_admin(p)
+    try:
+        out = cm.clear(db, p.tenant, cid, user_id=p.user.id, ip=p.ip)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    db.commit()
+    return out
+
+
 def _margin_recheck(db: Session, p: Principal, pr: Product) -> None:
     """Producto en Precios por revisar (guardian de margen, plan 1.12) editado a mano: si su precio ya cumple el margen
     minimo vuelve a la venta ya. Despublicarlo y volverlo a publicar NO lo libera (sigue fuera si sigue bajo el minimo).

@@ -613,6 +613,9 @@ def cost_info(db: Session, tenant, products: Sequence[Product], fx: Decimal | No
         items[i.product_id].append(i)
     names = _supplier_names(db, [i.supplier_id for v in items.values() for i in v] + [p.supplier_id for p in products])
     default_margin = pricing.default_margin(tenant)
+    from .category_margin import target_map
+
+    cat_margin = target_map(db, tenant.id)  # producto -> categoria -> general
     out: dict[int, dict] = {}
     for p in products:
         linked = items.get(p.id, [])
@@ -632,7 +635,7 @@ def cost_info(db: Session, tenant, products: Sequence[Product], fx: Decimal | No
             info["margin_real_pct"] = pricing.margin_of(price_crc, cost_crc)
             info["margin_provisional"] = False
         elif price_crc and price_crc > 0:
-            info["margin_real_pct"] = d(p.margin_pct) if p.margin_pct is not None else default_margin
+            info["margin_real_pct"] = d(p.margin_pct) if p.margin_pct is not None else cat_margin.get(p.category_id, default_margin)
             info["margin_provisional"] = True
         else:
             info["margin_real_pct"] = None

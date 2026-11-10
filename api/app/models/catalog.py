@@ -28,6 +28,9 @@ class Category(TenantMixin, Base):
     description: Mapped[str | None] = mapped_column(Text)
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("category.id"))
     show_on_web: Mapped[bool] = mapped_column(Boolean, default=True)
+    # margen sobre la venta de la categoria (Catalogo -> Margenes). Lo heredan subcategorias y productos sin margen
+    # propio: producto -> categoria mas cercana -> general (Ajustes). Solo lo ve quien ve costos.
+    margin_pct: Mapped[float | None] = mapped_column(Numeric(6, 2))
 
 
 class Supplier(ArchiveMixin, TenantMixin, Base):
