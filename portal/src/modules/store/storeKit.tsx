@@ -63,7 +63,7 @@ export function freeShipGap(s: ShipPub | null | undefined, total: number): numbe
   return Math.max(0, Math.round((from - total) * 100) / 100);
 }
 /** O1-09: mientras la tienda no tenga direccion de retiro no se promete «retiro» en ningun texto de la vitrina */
-export const sinRetiro = (s: ShipPub | null | undefined) => !s?.pickup;
+export const sinRetiro = (s: ShipPub | null | undefined) => !!s && !s.pickup; // sin el dato (API viejo) no se toca nada
 export function quitarRetiro(texto: string): string {
   if (/^\s*envío o retiro\s*$/i.test(texto)) return "Envío a todo el país";
   return texto.replace(/\s*(o|y)\s+retiro( coordinado| en (tienda|sitio))?/gi, "");
