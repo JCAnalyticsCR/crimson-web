@@ -11,15 +11,15 @@ import { useSession } from "../../../app/session";
 import { Field, I, Icon, Loading } from "../../../ui/components";
 import { GalleryField } from "../../../ui/MediaPicker";
 import { ProductCard, StoreProvider, money, type StoreCtx, type VProd } from "../storeKit";
-import "../shop.css";
-import "../vitrina.css";
+import { EstilosTienda } from "./EstilosTienda";
 import { SaveBar } from "./SaveBar";
 import { SerpPreview } from "./SerpPreview";
 import { useDraft } from "./useDraft";
+import { Counter } from "./fields";
 import { PrecioTab } from "./PrecioWeb";
 
 export type Detail = {
-  id: number; name: string; code: string; brand: string | null; model: string | null; category_id: number | null; categories: { id: number; name: string }[];
+  id: number; name: string; web_name: string; web_subtitle: string; web_description: string; web_manual: boolean; code: string; brand: string | null; model: string | null; category_id: number | null; categories: { id: number; name: string }[];
   description_store: string; images: { url: string }[]; specs: Record<string, string>; derived_specs: Record<string, string>; datasheet_url: string;
   show_on_web: boolean; web_featured: boolean; currency: string; store_currency: string; tax_rate: number | string;
   price: number | string | null; web_price: number | string | null; compare_price: number | string | null; display_price: number | string | null;
@@ -28,13 +28,13 @@ export type Detail = {
   availability: { publico: { state: string | null; label: string | null; accion: string | null; plazo: string | null }; interno: Record<string, unknown> };
   path: string; seo: { title: string; description?: string; canonical?: string | null } | null;
 };
-export type Edit = Pick<Detail, "show_on_web" | "web_featured" | "description_store" | "images" | "specs" | "datasheet_url" | "category_id" | "brand" | "web_price">;
-const LABELS: Record<string, string> = { show_on_web: "Publicado", web_featured: "Fijado arriba", description_store: "Descripción", images: "Fotos", specs: "Ficha técnica", datasheet_url: "Ficha PDF", category_id: "Categoría", brand: "Marca", web_price: "Precio web" };
+export type Edit = Pick<Detail, "show_on_web" | "web_featured" | "description_store" | "images" | "specs" | "datasheet_url" | "category_id" | "brand" | "web_price" | "web_name" | "web_subtitle">;
+const LABELS: Record<string, string> = { web_name: "Nombre comercial", web_subtitle: "Bajada", show_on_web: "Publicado", web_featured: "Fijado arriba", description_store: "Descripción", images: "Fotos", specs: "Ficha técnica", datasheet_url: "Ficha PDF", category_id: "Categoría", brand: "Marca", web_price: "Precio web" };
 const TABS = ["Cómo se ve", "Nombre y textos", "Precio", "Fotos", "Ficha técnica", "Disponibilidad", "Google"] as const;
 
 const pick = (r: Record<string, unknown>): Edit => {
   const d = r as unknown as Detail;
-  return { show_on_web: d.show_on_web, web_featured: d.web_featured, description_store: d.description_store || "", images: d.images || [], specs: d.specs || {}, datasheet_url: d.datasheet_url || "", category_id: d.category_id, brand: d.brand || "", web_price: d.web_price };
+  return { web_name: d.web_name || "", web_subtitle: d.web_subtitle || "", show_on_web: d.show_on_web, web_featured: d.web_featured, description_store: d.description_store || "", images: d.images || [], specs: d.specs || {}, datasheet_url: d.datasheet_url || "", category_id: d.category_id, brand: d.brand || "", web_price: d.web_price };
 };
 
 export default function ProductoWebDrawer({ onSaved }: { onSaved?: () => void }) {
@@ -72,11 +72,15 @@ export default function ProductoWebDrawer({ onSaved }: { onSaved?: () => void })
           {tab === "Cómo se ve" && <CardPreview full={full} draft={x} />}
           {tab === "Nombre y textos" && (
             <>
-              <Field label="Nombre" hint="El nombre fiscal vive en facturas y cotizaciones: no se cambia aquí. El nombre comercial llega con la Ola 3."><input className="input" value={full.name} readOnly aria-readonly="true" /></Field>
+              <Field label="Nombre comercial" hint="El que ve el cliente en la tienda. Vacío = el nombre fiscal. Escrito aquí, ningún lote de «Contenido por aprobar» lo pisa."><input className="input" value={x.web_name} maxLength={120} onChange={(e) => d.set({ web_name: e.target.value })} /></Field>
+              <Counter value={x.web_name || full.name} max={60} />
+              <Field label="Nombre fiscal" hint="Vive en facturas, cotizaciones y Hacienda: no se cambia aquí."><input className="input" value={full.name} readOnly aria-readonly="true" /></Field>
+              <Field label="Bajada" hint="Una línea corta debajo del nombre en la ficha."><input className="input" value={x.web_subtitle} maxLength={160} onChange={(e) => d.set({ web_subtitle: e.target.value })} /></Field>
               <div className="grid-2">
                 <Field label="Marca"><input className="input" value={x.brand || ""} maxLength={60} onChange={(e) => d.set({ brand: e.target.value })} /></Field>
                 <Field label="Categoría"><select className="select" value={x.category_id ?? ""} onChange={(e) => d.set({ category_id: e.target.value ? Number(e.target.value) : null })}><option value="">Sin categoría</option>{full.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
               </div>
+              {full.web_description && <p className="mt-lead">La ficha muestra la descripción aprobada en «Contenido por aprobar»; esta queda de respaldo.</p>}
               <Field label="Descripción para la tienda" hint="Corta y útil: para qué sirve y qué la distingue."><textarea className="textarea" rows={6} maxLength={5000} value={x.description_store} onChange={(e) => d.set({ description_store: e.target.value })} /></Field>
               <div className="mt-row">
                 <label className="pw-check"><input type="checkbox" checked={x.show_on_web} disabled={!puedePublicar} onChange={(e) => d.set({ show_on_web: e.target.checked })} />Publicado en la tienda{!puedePublicar && <span className="meta" style={{ textTransform: "none" }}> (solo el administrador)</span>}</label>
@@ -114,11 +118,12 @@ export default function ProductoWebDrawer({ onSaved }: { onSaved?: () => void })
   }
   return (
     <div className="pw-bg" onMouseDown={(e) => e.target === e.currentTarget && cerrar()}>
-      <aside className="pw" role="dialog" aria-modal="true" aria-label={full ? `Ficha web: ${full.name}` : "Ficha web"}>
+      <aside className="pw" role="dialog" aria-modal="true" aria-label={full ? `Ficha web: ${full.web_name || full.name}` : "Ficha web"}>
         <header className="pw__head">
           <div style={{ minWidth: 0 }}>
             <div className="meta">{full?.code}</div>
-            <h2 className="h2 pw__title">{full?.name || "Cargando…"}</h2>
+            <h2 className="h2 pw__title">{full ? full.web_name || full.name : "Cargando…"}</h2>
+            {full?.web_name && <div className="meta" style={{ textTransform: "none" }}>Fiscal: {full.name}</div>}
           </div>
           <button className="x" onClick={cerrar} aria-label="Cerrar"><Icon d={I.x} /></button>
         </header>
@@ -138,7 +143,7 @@ function CardPreview({ full, draft }: { full: Detail; draft: Edit }) {
   };
   const cat = full.categories.find((c) => c.id === draft.category_id)?.name || null;
   const p: VProd = {
-    id: full.id, code: full.code, name: full.name, brand: draft.brand || null, image: draft.images[0]?.url || null, images: draft.images.map((i) => i.url),
+    id: full.id, code: full.code, name: full.name, display_name: draft.web_name.trim() || null, brand: draft.brand || null, image: draft.images[0]?.url || null, images: draft.images.map((i) => i.url),
     description: draft.description_store, category: cat, category_id: draft.category_id, path: `/p/${full.path}`, tax_rate: Number(full.tax_rate), item_type: "producto",
     display_price: full.display_price ?? 0, display_currency: full.store_currency, price_on_request: full.display_price == null || !Number(full.display_price),
     availability: { state: full.availability.publico.state || "consultar", label: full.availability.publico.label || "", accion: full.availability.publico.accion },
@@ -147,6 +152,7 @@ function CardPreview({ full, draft }: { full: Detail; draft: Edit }) {
   return (
     <div className="mt-stack">
       <p className="mt-lead">Así la ve su cliente en el catálogo{draft.show_on_web ? "" : " (hoy no está publicada)"}. Precio de hoy: {full.display_price != null ? money(full.display_price, full.store_currency) : "solo lo ve quien ve precios"}.</p>
+      <EstilosTienda />
       <div className="shop pw-card" inert>
         <StoreProvider value={ctx}><ProductCard p={p} /></StoreProvider>
       </div>

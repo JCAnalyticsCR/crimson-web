@@ -84,19 +84,24 @@ def _images(p: Product) -> list[str]:
 
 
 def faltas_of(p: Product, state: str | None, backed: bool) -> list[str]:
+    """Faltantes de calidad con lo que la tienda MUESTRA (Ola 3): el nombre visible (web_name o el fiscal), la
+    descripcion que sale en la ficha (web_description aprobada o la de tienda si sirve) y la ficha tecnica (web_specs
+    aprobadas, specs a mano o PDF)."""
+    from .catalog_fichas import store_description
+    from .catalog_text import shown_name
     from .store_health import external_image
 
     imgs = _images(p)
     out = []
-    if not (p.description_store or "").strip():
+    if not store_description(p):
         out.append("sin_descripcion")
     if len(imgs) == 1:
         out.append("una_foto")
     if not imgs:
         out.append("sin_foto")
-    if not (p.specs or {}) and not (p.datasheet_url or "").strip():
+    if not (p.web_specs or {}) and not (p.specs or {}) and not (p.datasheet_url or "").strip():
         out.append("sin_ficha")
-    if len(p.name or "") > NOMBRE_LARGO:
+    if len(shown_name(p)) > NOMBRE_LARGO:
         out.append("nombre_largo")
     if any(external_image(u) for u in imgs):
         out.append("foto_proveedor")
@@ -181,6 +186,8 @@ def listing(
             {
                 "id": x.id,
                 "name": x.name,
+                # Ola 3 (O3-01): nombre comercial aprobado; el panel lo muestra junto al fiscal
+                "web_name": (x.web_name or "").strip() or None,
                 "code": x.code,
                 "brand": x.brand,
                 "category": cat_name.get(x.category_id),
@@ -245,7 +252,7 @@ def apply(db: Session, p, pr: Product, vals: dict, *, desde: str, action: str = 
     unknown = set(vals) - set(FIELD_PERMS)
     if unknown:
         raise HTTPException(422, f"Campo no editable desde la tienda: {', '.join(sorted(unknown))}")
-    before = _snap(pr, vals)
+    before = _snap(pr, [*vals, "web_manual"])  # web_manual: se marca solo si una persona escribe el contenido
     norm = dict(vals)
     if "description_store" in norm:
         norm["description_store"] = (norm["description_store"] or "").strip() or None
@@ -334,6 +341,11 @@ def detail(db: Session, p, pr: Product) -> dict:
         "id": pr.id,
         "name": pr.name,
         "code": pr.code,
+        # Ola 3 (O3-01): contenido propio de la tienda (el nombre fiscal no cambia)
+        "web_name": pr.web_name or "",
+        "web_subtitle": pr.web_subtitle or "",
+        "web_description": pr.web_description or "",
+        "web_manual": bool(pr.web_manual),
         "brand": pr.brand,
         "model": pr.model,
         "category_id": pr.category_id,

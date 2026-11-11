@@ -4,8 +4,7 @@
    se guarda. Conmutador de 375, 768 y escritorio; en tablet y telefono se abre a pantalla completa. Datos ficticios. */
 import { ProductCard, StoreProvider, type StoreCtx, type VProd } from "../storeKit";
 import { themeVars, type Theme } from "../theme";
-import "../shop.css";
-import "../vitrina.css";
+import { EstilosTienda } from "./EstilosTienda";
 import { useState } from "react";
 
 const ANCHOS: [string, number | null][] = [["Teléfono", 375], ["Tablet", 768], ["Escritorio", null]];
@@ -25,6 +24,7 @@ export function PreviewPane({ theme, name, tagline, logo, full, onFull }: { them
   };
   const cuerpo = (
     <div className="ap-frame" style={{ width: ancho ? `${ancho}px` : "100%" }}>
+      <EstilosTienda />
       <div className="shop ap-shop" style={themeVars(theme)} inert>
         <StoreProvider value={ctx}>
           <div className="ap-head">

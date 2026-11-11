@@ -17,6 +17,8 @@ export type Section = {
   key: SectionKey;
   /** direccion bajo /mi-tienda ("" = el resumen) */
   path: string;
+  /** pantalla que vive fuera de Mi Tienda (el menu lleva alla) */
+  href?: string;
   label: string;
   hint: string;
   need: string;
@@ -34,8 +36,9 @@ export const SECTIONS: Section[] = [
   { key: "paginas", path: "paginas", label: "Páginas", hint: "Envíos, garantías, términos, privacidad y preguntas", need: "settings.configurar", group: "Tienda" },
   { key: "catalogo", path: "catalogo", label: "Catálogo", hint: "Todos los productos de la web, con filtros de calidad", need: "catalog.editar", group: "Catálogo" },
   { key: "categorias", path: "categorias", label: "Categorías", hint: "Orden, visibilidad, imagen y texto de cada categoría, y colecciones", need: "settings.configurar", group: "Catálogo" },
-  /* Ola 3 (O3-11): la pantalla «Contenido por aprobar» la trae la ola del catalogo; aqui queda su lugar en el menu */
-  { key: "contenido", path: "contenido-por-aprobar", label: "Contenido por aprobar", hint: "Nombres, fichas y descripciones propuestos", need: "settings.configurar", group: "Catálogo" },
+  /* Ola 3 (O3-11): «Contenido por aprobar» es la pantalla /productos/contenido (ContentReview); aprobar es del
+     administrador (catalog.publicar), como alla */
+  { key: "contenido", path: "contenido-por-aprobar", href: "/productos/contenido", label: "Contenido por aprobar", hint: "Nombres, fichas y descripciones propuestos", need: "catalog.publicar", group: "Catálogo" },
   { key: "pagos-envios", path: "pagos-envios", label: "Pagos y envíos", hint: "Tarifas, envío gratis, retiro, formas de pago y datos del comercio", need: "settings.configurar", group: "Venta" },
   { key: "seo", path: "seo", label: "SEO", hint: "Título, descripción y vista previa en Google", need: "settings.configurar", group: "Venta" },
   { key: "publicacion", path: "publicacion", label: "Publicación y dominio", hint: "Publicar, dominio, tipo de tienda y moneda", need: "settings.configurar", group: "Aparte" },
@@ -46,7 +49,7 @@ export const SECTIONS: Section[] = [
 
 export const GROUPS: Section["group"][] = ["Tienda", "Catálogo", "Venta", "Aparte"];
 
-export const sectionUrl = (s: Pick<Section, "path">) => (s.path ? `${BASE}/${s.path}` : BASE);
+export const sectionUrl = (s: Pick<Section, "path" | "href">) => s.href || (s.path ? `${BASE}/${s.path}` : BASE);
 
 /** Las secciones que esta cuenta puede abrir, en el orden del menu. */
 export function visibleSections(allows: (need?: string) => boolean, isAdmin: boolean): Section[] {

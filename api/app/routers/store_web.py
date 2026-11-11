@@ -64,6 +64,9 @@ class CatalogPatch(BaseModel):
     datasheet_url: str | None = Field(None, max_length=500, pattern=r"^(|/[^\s]*|https://[^\s]+)$")
     category_id: int | None = None
     brand: str | None = Field(None, max_length=60)
+    # Ola 3 (O3-01): nombre comercial y bajada; escribirlos a mano marca web_manual (ningun lote los pisa)
+    web_name: str | None = Field(None, max_length=120)
+    web_subtitle: str | None = Field(None, max_length=160)
 
     @field_validator("specs")
     @classmethod

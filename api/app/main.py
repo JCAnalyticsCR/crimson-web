@@ -68,9 +68,9 @@ from .routers import public_quotes as public_quotes_router
 from .routers import report_board as report_board_router
 from .routers import scope_items as scope_items_router
 from .routers import settings as settings_router
-from .routers import store_web as store_web_router
 from .routers import store_inventory as store_inventory_router
 from .routers import store_panel as store_panel_router
+from .routers import store_web as store_web_router
 from .routers import ventas3 as ventas3_router
 
 log = logging.getLogger("crimson")

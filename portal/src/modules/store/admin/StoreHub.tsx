@@ -29,7 +29,6 @@ const CatalogoWeb = lazy(() => import("./CatalogoWeb"));
 const Categorias = lazy(() => import("./CategoriasEditor"));
 const SeoSection = lazy(() => import("./StoreSeo"));
 const Portada = lazy(() => import("./PortadaEditor"));
-const Pendiente = lazy(() => import("./Pendiente"));
 const Historial = lazy(() => import("./Historial"));
 
 type Hub = {
@@ -135,7 +134,8 @@ export default function StoreHub() {
               <Route path="paginas" element={el("paginas", <Paginas />)} />
               <Route path="catalogo/*" element={el("catalogo", <CatalogoWeb />)} />
               <Route path="categorias" element={el("categorias", <Categorias />)} />
-              <Route path="contenido-por-aprobar" element={el("contenido", <Pendiente seccion="contenido" />)} />
+              {/* Ola 3: la pantalla vive en /productos/contenido; la direccion vieja lleva alla */}
+              <Route path="contenido-por-aprobar" element={<Navigate to="/productos/contenido" replace />} />
               <Route path="pagos-envios" element={el("pagos-envios", <PagosEnvios />)} />
               <Route path="seo" element={el("seo", <SeoSection />)} />
               <Route path="publicacion" element={el("publicacion", <Publicacion />)} />

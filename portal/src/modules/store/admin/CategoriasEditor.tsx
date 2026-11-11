@@ -1,14 +1,15 @@
 /* Mi Tienda -> Categorias y colecciones (O4-07), con el guardado unico (O4-02).
-   - Categorias: orden (subir y bajar, con teclado y tactil), ocultar de la tienda, imagen y texto para Google. El
-     nombre NO se cambia aqui hasta que la Ola 3 (O3-07a) guarde la direccion con alias y redireccion 301: renombrar
-     antes romperia los enlaces que Google ya tiene.
+   - Categorias: orden (subir y bajar, con teclado y tactil), ocultar de la tienda, imagen y texto para Google, y
+     renombrar con PATCH /categories/{id} de la Ola 3 (O3-07a): la direccion vieja queda como alias con 301, asi no se
+     pierden los enlaces que Google ya tiene. Renombrar es un registro aparte: se confirma y se aplica al momento.
    - Colecciones por regla con dato real («Listo para entregar» = en bodega hoy, «por menos de ₡60 000», una
      categoria o un texto): se actualizan solas con la existencia. Su pagina publica /coleccion/<direccion> la arma la
      tienda (Ola 2); el API ya la sirve (404 real para una direccion que no existe). */
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../../../lib/api";
 import { formatCRCInput, parseCRC } from "../../../lib/parseCRC";
-import { Card, Field, I, Icon, Loading } from "../../../ui/components";
+import { useSession } from "../../../app/session";
+import { Card, Field, I, Icon, Loading, Modal } from "../../../ui/components";
 import { ImageField } from "../../../ui/MediaPicker";
 import { SaveBar } from "./SaveBar";
 import { useHub } from "./StoreHub";
@@ -29,7 +30,17 @@ const EJEMPLOS: Coleccion[] = [
 
 export default function CategoriasEditor() {
   const { cfg } = useHub();
+  const { toast } = useSession();
   const [cats, setCats] = useState<Cat[] | null>(null);
+  const [renombrar, setRenombrar] = useState<{ cat: Cat; name: string } | null>(null);
+  const aplicarNombre = () => {
+    if (!renombrar) return;
+    const name = renombrar.name.trim();
+    if (name.length < 2 || name === renombrar.cat.name) { setRenombrar(null); return; }
+    api<Cat>(`/categories/${renombrar.cat.id}`, { method: "PATCH", json: { name } })
+      .then((c) => { setCats((xs) => (xs || []).map((x) => (x.id === c.id ? { ...x, name: c.name } : x))); toast("Categoría renombrada: la dirección vieja lleva a la nueva"); setRenombrar(null); })
+      .catch((e) => toast(e.message, "bad"));
+  };
   const [cuantos, setCuantos] = useState<Record<string, number | null>>({});
   useEffect(() => { api<Cat[]>("/categories").then(setCats).catch(() => setCats([])); }, []);
   const d = useDraft<Org>({
@@ -79,6 +90,7 @@ export default function CategoriasEditor() {
               <div className="mt-row" style={{ justifyContent: "space-between" }}>
                 <b style={{ fontSize: 13.5 }}>{c.name}{a.hidden && <span className="badge badge--muted" style={{ marginLeft: 6 }}>oculta</span>}</b>
                 <span className="mt-row">
+                  <button className="btn btn--ghost btn--sm" onClick={() => setRenombrar({ cat: c, name: c.name })} aria-label={`Renombrar ${c.name}`}>Renombrar</button>
                   <button className="btn btn--ghost btn--sm" onClick={() => mover(pid, i, -1)} disabled={i === 0} aria-label={`Subir ${c.name}`}>↑</button>
                   <button className="btn btn--ghost btn--sm" onClick={() => mover(pid, i, 1)} disabled={i === lista.length - 1} aria-label={`Bajar ${c.name}`}>↓</button>
                 </span>
@@ -103,7 +115,7 @@ export default function CategoriasEditor() {
     <>
       <Card title="Categorías">
         <div className="mt-stack">
-          <p className="mt-lead">El orden es el del menú y la portada de la tienda. Para cambiar el nombre de una categoría hay que esperar a que la tienda guarde la dirección vieja con redirección (Ola 3): así no se pierden los enlaces que Google ya tiene.</p>
+          <p className="mt-lead">El orden es el del menú y la portada de la tienda. Al renombrar una categoría, su dirección vieja sigue funcionando y lleva a la nueva.</p>
           {cats.length === 0 ? <p className="mt-lead">Todavía no hay categorías: se crean en Productos y servicios.</p> : rama(null, 0)}
         </div>
       </Card>
@@ -135,6 +147,14 @@ export default function CategoriasEditor() {
         </div>
       </Card>
       <SaveBar drafts={[d]} labels={LABELS} validate={validar} />
+      {renombrar && (
+        <Modal title={`Renombrar «${renombrar.cat.name}»`} onClose={() => setRenombrar(null)} foot={<><button className="btn btn--ghost" onClick={() => setRenombrar(null)}>Cancelar</button><button className="btn btn--crimson" onClick={aplicarNombre}>Renombrar</button></>}>
+          <div className="mt-stack">
+            <Field label="Nombre nuevo"><input className="input" value={renombrar.name} maxLength={120} onChange={(e) => setRenombrar({ ...renombrar, name: e.target.value })} /></Field>
+            <p className="mt-lead">La dirección de la categoría cambia con el nombre; la vieja queda redirigiendo (301) a la nueva, así no se pierden los enlaces de Google ni los compartidos.</p>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

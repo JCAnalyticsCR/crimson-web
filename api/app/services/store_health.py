@@ -85,6 +85,8 @@ def _compute(db: Session, t: Tenant) -> dict:
     from . import store_inventory as sinv
     from . import store_orders as so
     from . import store_showcase as sv
+    from .catalog_fichas import store_description
+    from .catalog_text import shown_name
 
     cfg = store_cfg(t)
     inv = sinv.settings_of(t)
@@ -119,13 +121,26 @@ def _compute(db: Session, t: Tenant) -> dict:
         db.scalars(
             select(Product)
             .where(Product.id.in_(ids))
-            .options(load_only(Product.id, Product.name, Product.description_store, Product.images, Product.specs, Product.datasheet_url))
+            .options(
+                load_only(
+                    Product.id,
+                    Product.name,
+                    Product.web_name,
+                    Product.description_store,
+                    Product.web_description,
+                    Product.images,
+                    Product.specs,
+                    Product.web_specs,
+                    Product.datasheet_url,
+                )
+            )
         ).all()
         if ids
         else []
     )
-    largos = sum(1 for p in detalle if len(p.name or "") > NOMBRE_LARGO)
-    sin_desc = sum(1 for p in detalle if not (p.description_store or "").strip())
+    # Ola 3: lo que la tienda muestra (nombre comercial o el fiscal; descripcion aprobada o la de tienda si sirve)
+    largos = sum(1 for p in detalle if len(shown_name(p)) > NOMBRE_LARGO)
+    sin_desc = sum(1 for p in detalle if not store_description(p))
     sin_foto = sum(1 for p in detalle if not [i for i in (p.images or []) if (i or {}).get("url")])
     fotos_prov = sum(1 for p in detalle if any(external_image((i or {}).get("url")) for i in (p.images or [])))
 

@@ -8,7 +8,7 @@ const allowsFor = (perms: Perms) => (need?: string) => canAny(perms, need);
 
 describe("secciones de Mi Tienda", () => {
   it("cada direccion devuelve su propia seccion", () => {
-    for (const s of SECTIONS) expect(sectionFor(sectionUrl(s))?.key).toBe(s.key);
+    for (const s of SECTIONS.filter((x) => !x.href)) expect(sectionFor(sectionUrl(s))?.key).toBe(s.key);
     expect(sectionFor("/mi-tienda/catalogo/123")?.key).toBe("catalogo");
     expect(sectionFor("/mi-tienda/")?.key).toBe("resumen");
     expect(sectionFor("/mi-tienda/no-existe")).toBeUndefined();
@@ -40,9 +40,10 @@ describe("secciones de Mi Tienda", () => {
     expect(visibleSections(allowsFor({ sales: ["ver"] }), false)).toEqual([]);
   });
 
-  it("deja el lugar de «Contenido por aprobar» (Ola 3) en el grupo Catálogo", () => {
+  it("«Contenido por aprobar» lleva a la pantalla de la Ola 3 y es solo del administrador", () => {
     const s = SECTIONS.find((x) => x.key === "contenido");
     expect(s?.group).toBe("Catálogo");
-    expect(sectionUrl(s!)).toBe("/mi-tienda/contenido-por-aprobar");
+    expect(sectionUrl(s!)).toBe("/productos/contenido");
+    expect(visibleSections(allowsFor({ catalog: ["ver", "editar"], settings: ["ver", "configurar"] }), false).map((x) => x.key)).not.toContain("contenido");
   });
 });

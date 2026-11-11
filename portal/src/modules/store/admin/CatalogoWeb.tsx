@@ -12,7 +12,7 @@ import ProductoWebDrawer from "./ProductoWebDrawer";
 import { BulkBar } from "./BulkBar";
 
 export type Item = {
-  id: number; name: string; code: string; brand: string | null; category: string | null; image: string | null; photos: number;
+  id: number; name: string; web_name?: string | null; code: string; brand: string | null; category: string | null; image: string | null; photos: number;
   show_on_web: boolean; web_featured: boolean; state: string | null; label: string | null; accion: string | null; faltas: string[];
   display_price: number | string | null; currency: string; path: string;
 };
@@ -94,7 +94,7 @@ export default function CatalogoWeb() {
                 {l.items.map((x) => (
                   <tr key={x.id}>
                     {selectable && <td><input type="checkbox" checked={selectable.selected.has(x.id)} onChange={() => selectable.toggle(x.id)} aria-label={`Seleccionar ${x.name}`} /></td>}
-                    <td data-label="Producto"><Link className="row-link" to={abrir(x.id)}>{x.name}</Link><div className="meta" style={{ textTransform: "none" }}>{x.code}{x.brand ? ` · ${x.brand}` : ""}{!x.show_on_web ? " · no publicado" : ""}</div></td>
+                    <td data-label="Producto"><Link className="row-link" to={abrir(x.id)}>{x.web_name || x.name}</Link><div className="meta" style={{ textTransform: "none" }}>{x.web_name ? `${x.name} · ` : ""}{x.code}{x.brand ? ` · ${x.brand}` : ""}{!x.show_on_web ? " · no publicado" : ""}</div></td>
                     <td data-label="Estado">{x.label || "—"}</td>
                     <td data-label="Precio" className="num">{x.display_price != null ? money(x.display_price, x.currency) : "—"}</td>
                     <td data-label="Le falta">{x.faltas.map((f) => FALTA_CORTA[f]).join(", ") || "Nada"}</td>
@@ -109,7 +109,9 @@ export default function CatalogoWeb() {
                   {selectable && <input className="cw-card__sel" type="checkbox" checked={selectable.selected.has(x.id)} onChange={() => selectable.toggle(x.id)} aria-label={`Seleccionar ${x.name}`} />}
                   <Link to={abrir(x.id)} className="cw-card__link">
                     <span className="cw-card__img">{x.image ? <img src={x.image} alt="" loading="lazy" width={160} height={160} /> : <span className="meta">Sin foto</span>}</span>
-                    <span className="cw-card__name">{x.name}</span>
+                    <span className="cw-card__name">{x.web_name || x.name}</span>
+                    {/* Ola 3: con nombre comercial, el fiscal queda debajo (es el de facturas y cotizaciones) */}
+                    {x.web_name && <span className="meta cw-card__fiscal" style={{ textTransform: "none" }}>Fiscal: {x.name}</span>}
                     <span className="meta" style={{ textTransform: "none" }}>{x.code}{x.brand ? ` · ${x.brand}` : ""}</span>
                     <span className="cw-card__row">
                       <span className={`badge ${x.accion === "comprar" ? "badge--ok" : "badge--warn"}`}>{x.label || "Sin dato"}</span>
