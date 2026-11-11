@@ -271,6 +271,34 @@ test("[O4-04] catálogo en cuadrícula con filtros y la ficha web en un cajón",
   await sinScroll(page);
 });
 
+test("[O4-05] edición en lote con vista previa, confirmación y deshacer; precio escrito con IVA", async ({ page, baseURL, servidor }, info) => {
+  solo768(info);
+  const h = { Authorization: `Bearer ${await token(servidor)}` };
+  const fijados = async () => ((await (await servidor.get("/api/store/catalog", { headers: h })).json()) as { items: { web_featured: boolean }[] }).items.filter((x) => x.web_featured).length;
+  const antes = await fijados();
+  await entrar(page, panel(baseURL), "/mi-tienda/catalogo");
+  await page.getByLabel("Seleccionar esta página").check();
+  const barra = page.getByRole("region", { name: "Edición en lote" });
+  await expect(barra).toContainText("seleccionados");
+  await barra.getByRole("button", { name: "Fijar arriba" }).click();
+  const vista = page.locator(".modal").filter({ hasText: "Fijar arriba" });
+  await expect(vista.getByRole("table", { name: "Antes y después" })).toBeVisible();
+  const filas = await vista.locator("tbody tr").count();
+  expect(await fijados()).toBe(antes);  // la vista previa no cambia nada
+  await vista.getByRole("button", { name: /^Aplicar a/ }).click();
+  await expect.poll(fijados).toBe(antes + filas);
+  await page.getByRole("button", { name: "Deshacer" }).click();
+  await expect.poll(fijados).toBe(antes);
+  await sinScroll(page, "lote");
+  // precio web: se escribe final con IVA y se ve el neto que se guarda (no se guarda: se descarta)
+  await page.locator(".cw-card").first().getByRole("link").click();
+  const cajon = page.getByRole("dialog", { name: /Ficha web/ });
+  await cajon.getByRole("tab", { name: "Precio" }).click();
+  await cajon.locator(".field").filter({ has: page.locator('label:text-is("Precio web final con IVA")') }).locator("input").fill("1.950");
+  await expect(cajon.getByText("1725.66372")).toBeVisible();
+  await cajon.getByRole("region", { name: "Cambios sin guardar" }).getByRole("button", { name: "Descartar" }).click();
+});
+
 /* O2-01d: el panel ya no viene en la entrada (src/app/PanelApp.tsx, con lazy()). Su arranque completo, con segundo
    factor: correo y contrasena, el paso «Verificación en dos pasos», el codigo de la app y adentro del panel. */
 test("[O2-01d] inicio de sesión del panel con segundo factor (2FA)", async ({ page, baseURL }) => {

@@ -91,3 +91,43 @@ def catalog_patch(pid: int, data: CatalogPatch, p: Principal = Depends(require("
     db.refresh(pr)
     return scat.detail(db, p, pr)
 
+
+# ---------- O4-05: edicion en lote con vista previa y deshacer ----------
+class BulkFilter(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    q: str | None = Field(None, max_length=120)
+    categoria: str | None = Field(None, max_length=12)
+    marca: str | None = Field(None, max_length=60)
+    estado: str | None = Field(None, max_length=20)
+    publicado: str | None = Field(None, pattern="^(si|no|todos)$")
+    falta: str | None = Field(None, max_length=30)
+
+
+class BulkIn(BaseModel):
+    """ids (lo marcado) o filtro («Seleccionar los N del filtro»). confirm=false: solo la vista previa."""
+
+    model_config = ConfigDict(extra="forbid")
+    accion: str = Field(pattern="^(publicar|ocultar|categoria|marca|fijar|soltar|precio_web)$")
+    valor: Decimal | int | str | None = None
+    ids: list[int] | None = Field(None, max_length=5000)
+    filtro: BulkFilter | None = None
+    confirm: bool = False
+
+
+@router.post("/store/catalog/bulk")
+def catalog_bulk(data: BulkIn, p: Principal = Depends(require("catalog", "editar")), db: Session = Depends(get_db)):
+    from ..services import store_bulk
+
+    if data.ids is None and data.filtro is None:
+        raise HTTPException(422, "Elija productos o un filtro")
+    filtro = data.filtro.model_dump(exclude_none=True) if data.filtro else None
+    if not data.confirm:
+        return store_bulk.preview(db, p, data.accion, data.valor, data.ids, filtro)
+    return store_bulk.apply(db, p, data.accion, data.valor, data.ids, filtro)
+
+
+@router.post("/store/catalog/bulk/{op}/undo")
+def catalog_bulk_undo(op: int, p: Principal = Depends(require("catalog", "editar")), db: Session = Depends(get_db)):
+    from ..services import store_bulk
+
+    return store_bulk.undo(db, p, op)

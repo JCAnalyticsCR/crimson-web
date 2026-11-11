@@ -9,6 +9,7 @@ import { api } from "../../../lib/api";
 import { Card, Empty, Loading } from "../../../ui/components";
 import { money } from "../storeKit";
 import ProductoWebDrawer from "./ProductoWebDrawer";
+import { BulkBar } from "./BulkBar";
 
 export type Item = {
   id: number; name: string; code: string; brand: string | null; category: string | null; image: string | null; photos: number;
@@ -35,7 +36,7 @@ export function useCatalogQuery() {
   return { sp, set, qs: qs.toString() };
 }
 
-export default function CatalogoWeb({ toolbar, selectable }: { toolbar?: (l: Listing, reload: () => void) => React.ReactNode; selectable?: { selected: Set<number>; toggle: (id: number) => void } } = {}) {
+export default function CatalogoWeb() {
   const { sp, set, qs } = useCatalogQuery();
   const loc = useLocation();
   const [l, setL] = useState<Listing | null>(null);
@@ -48,6 +49,15 @@ export default function CatalogoWeb({ toolbar, selectable }: { toolbar?: (l: Lis
   const falta = sp.get("falta");
   const estado = sp.get("estado");
   const abrir = (id: number) => `/mi-tienda/catalogo/${id}${loc.search}`;
+  /* O4-05: seleccion para la edicion en lote (se limpia al cambiar los filtros); `todos` = los N del filtro */
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const [todos, setTodos] = useState(false);
+  useEffect(() => { setSel(new Set()); setTodos(false); }, [qs]);
+  const toggle = (id: number) => { setTodos(false); setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; }); };
+  const selectable = { selected: sel, toggle };
+  const pagina = l?.items.map((x) => x.id) || [];
+  const todaLaPagina = pagina.length > 0 && pagina.every((id) => sel.has(id));
+  const filtro = Object.fromEntries(["q", "categoria", "marca", "estado", "publicado", "falta"].flatMap((k) => (sp.get(k) ? [[k, sp.get(k)!]] : [])));
 
   return (
     <>
@@ -70,12 +80,13 @@ export default function CatalogoWeb({ toolbar, selectable }: { toolbar?: (l: Lis
             </div>
           )}
           <div className="mt-row" style={{ justifyContent: "space-between" }}>
-            {l && toolbar ? toolbar(l, load) : <span />}
+            {l && l.items.length > 0 ? <label className="pw-check"><input type="checkbox" checked={todaLaPagina} onChange={() => { setTodos(false); setSel(todaLaPagina ? new Set() : new Set([...sel, ...pagina])); }} />Seleccionar esta página</label> : <span />}
             <div className="mt-row" role="group" aria-label="Vista">
               <button className={`btn btn--sm ${vista === "cuadricula" ? "btn--soft" : "btn--ghost"}`} aria-pressed={vista === "cuadricula"} onClick={() => set({ vista: null, pagina: sp.get("pagina") })}>Cuadrícula</button>
               <button className={`btn btn--sm ${vista === "tabla" ? "btn--soft" : "btn--ghost"}`} aria-pressed={vista === "tabla"} onClick={() => set({ vista: "tabla", pagina: sp.get("pagina") })}>Tabla</button>
             </div>
           </div>
+          {l && <BulkBar count={sel.size} total={l.total} all={todos} filtro={filtro} ids={[...sel]} categories={l.categories} onAll={() => setTodos(true)} onClear={() => { setSel(new Set()); setTodos(false); }} onDone={load} />}
           {err ? <p className="mt-lead">{err}</p> : !l ? <Loading /> : l.items.length === 0 ? <Empty title="Nada con esos filtros" hint="Quite un filtro o busque otra cosa." /> : vista === "tabla" ? (
             <table className="table table--stack cw-table">
               <thead><tr>{selectable && <th />}<th>Producto</th><th>Estado</th><th className="num">Precio</th><th>Le falta</th></tr></thead>
