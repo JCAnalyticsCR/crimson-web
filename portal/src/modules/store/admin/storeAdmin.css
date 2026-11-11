@@ -1,0 +1,51 @@
+/* Mi Tienda por secciones (O4-01..O4-08). Panel de TRABAJO: nada se anima salvo lo que se toca. Todo colapsa a una
+   columna en tablet (768 px) y en celular (375 px) sin scroll de lado. */
+
+/* ---------- hub: menu lateral, fichas o selector ---------- */
+.sh-hub { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px; align-items: start; }
+.sh-hub__nav { position: sticky; top: 72px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.sh-hub__group { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sh-hub__glabel { font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--text-3); padding: 0 10px 4px; }
+.sh-hub__link { display: flex; align-items: center; min-height: 40px; padding: 8px 10px; border-radius: 8px; color: var(--text-2); font-size: 13.5px; font-weight: 500; text-decoration: none; }
+.sh-hub__link:hover { background: var(--surface-2); color: var(--text); }
+.sh-hub__link.is-active { background: var(--crimson-soft); color: var(--text); box-shadow: inset 2px 0 0 var(--crimson); font-weight: 600; }
+.sh-hub__link--aparte { border: 1px dashed var(--hair-2); margin-top: 2px; }
+.sh-hub__select { display: none; }
+.sh-hub__body { display: grid; gap: 14px; min-width: 0; padding-bottom: 96px; /* lugar para la barra de guardado */ }
+
+@media (max-width: 1100px) {
+  .sh-hub { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .sh-hub__nav { position: static; flex-direction: row; gap: 6px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; padding-bottom: 4px; }
+  .sh-hub__group { flex-direction: row; gap: 6px; flex: 0 0 auto; }
+  .sh-hub__glabel { display: none; }
+  .sh-hub__link { flex: 0 0 auto; white-space: nowrap; min-height: 44px; border: 1px solid var(--hair); background: var(--surface); }
+  .sh-hub__link.is-active { box-shadow: none; border-color: var(--crimson); }
+}
+@media (max-width: 480px) {
+  .sh-hub__nav { display: none; }
+  .sh-hub__select { display: grid; gap: 4px; }
+  .sh-hub__select .select { min-height: 44px; }
+}
+
+/* ---------- constructor de paginas (antes rejillas en linea de Store.tsx) ---------- */
+.pg-builder { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 420px; }
+.pg-builder__list { border-right: 1px solid var(--hair); padding: 10px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pg-block { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+@media (max-width: 900px) {
+  .pg-builder { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .pg-builder__list { border-right: 0; border-bottom: 1px solid var(--hair); flex-direction: row; overflow-x: auto; }
+  .pg-builder__list .nav__link { flex: 0 0 auto; }
+  .pg-block { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---------- piezas comunes de las secciones ---------- */
+.sh-lead { margin: 0; font-size: 13.5px; color: var(--text-2); line-height: 1.5; max-width: 72ch; }
+.sh-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.sh-stack { display: grid; gap: 12px; min-width: 0; }
+.sh-box { border: 1px solid var(--hair); border-radius: 10px; padding: 12px; display: grid; gap: 10px; min-width: 0; }
+.sh-warn { margin: 0; font-size: 13px; color: var(--warn); font-weight: 600; }
+.sh-index { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: 10px; }
+.sh-index a { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--hair); border-radius: 10px; background: var(--surface); color: var(--text); text-decoration: none; min-height: 44px; }
+.sh-index a:hover { border-color: var(--hair-2); }
+.sh-index a span { font-size: 12.5px; color: var(--text-2); }
+

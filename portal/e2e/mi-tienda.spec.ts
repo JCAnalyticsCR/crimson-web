@@ -1,10 +1,11 @@
-/* Mi Tienda (panel) contra el API local de pruebas (O1-11b), a 768 px: va con `npm run e2e:compra`, que levanta el
-   API, el portal y crea un administrador de prueba con una contrasena al azar (playwright.compra.config.ts).
-   - No se puede despublicar con un solo clic: primero una ventana con el efecto escrito.
-   - Escribir un titular y luego guardar un banner no pierde nada (antes, el guardado del titular reiniciaba el
-     editor de banners y lo escrito ahi se perdia). */
+/* Mi Tienda (panel) contra el API local de pruebas, a 768 px (y el scroll, tambien a 375): va con
+   `npm run e2e:compra`, que levanta el API, el portal y crea un administrador de prueba con una contrasena al azar
+   (playwright.compra.config.ts).
+   - O1-11b: no se puede despublicar con un solo clic; escribir un titular y guardar un banner no pierde nada.
+   - O4-01: cada seccion tiene su direccion (recargar deja en la misma), la bandera panel_v2 apagada vuelve al panel de
+     una pagina y ninguna seccion tiene scroll de lado a 375 ni a 768 px. */
 import { createHmac } from "node:crypto";
-import type { APIRequestContext, Page } from "@playwright/test";
+import type { APIRequestContext, Page, TestInfo } from "@playwright/test";
 import { expect, test } from "./soporte/compra";
 
 const ADMIN = "panel.e2e@example.com";
@@ -30,21 +31,30 @@ function codigoTotp(secreto: string, paso = Math.floor(Date.now() / 30_000)): st
 const campo = (page: Page, rotulo: string, dentro = "") =>
   page.locator(`${dentro} .field`.trim()).filter({ has: page.locator(`label:text-is("${rotulo}")`) }).locator("input, textarea");
 const panel = (baseURL: string | undefined) => (baseURL || "").replace(/\/\/([a-z0-9-]+\.)*localhost/, "//127.0.0.1");
+const solo768 = (info: TestInfo) => test.skip(info.project.name !== "compra-w768", "criterio del panel: 768 px");
 
-async function entrar(page: Page, base: string) {
-  await page.goto(`${base}/login`);
+/* dentro de la aplicacion (el token vive en memoria: un goto cargaria la pagina de nuevo) */
+async function ir(page: Page, ruta: string) {
+  await page.evaluate((r) => { history.pushState({}, "", r); dispatchEvent(new PopStateEvent("popstate")); }, ruta);
+}
+
+async function login(page: Page) {
   await page.locator('input[type="email"]').fill(ADMIN);
   await page.locator('input[autocomplete="current-password"]').fill(CLAVE);
   await page.locator("button.lg-go").click();
-  await page.waitForURL((u) => !u.pathname.startsWith("/login"));
   const hola = page.locator(".welcome");  // la bienvenida del primer ingreso
   if (await hola.isVisible().catch(() => false) || await hola.waitFor({ timeout: 3000 }).then(() => true, () => false)) {
     await hola.getByRole("button", { name: /Empezar/ }).click();
     await expect(hola).toBeHidden();
   }
-  // dentro de la aplicacion (el token vive en memoria: un goto cargaria la pagina de nuevo y volveria al login)
-  await page.evaluate(() => { history.pushState({}, "", "/mi-tienda"); dispatchEvent(new PopStateEvent("popstate")); });
-  await expect(page.getByText("Vitrina de la tienda")).toBeVisible();
+}
+
+async function entrar(page: Page, base: string, ruta = "/mi-tienda") {
+  await page.goto(`${base}/login`);
+  await login(page);
+  await page.waitForURL((u) => !u.pathname.startsWith("/login"));
+  await ir(page, ruta);
+  await expect(page.locator(".sh-hub")).toBeVisible();
 }
 
 async function token(servidor: APIRequestContext): Promise<string> {
@@ -53,14 +63,15 @@ async function token(servidor: APIRequestContext): Promise<string> {
   return ((await r.json()) as { access_token: string }).access_token;
 }
 
-test.beforeEach(({}, info) => {
+const sinScrollDeLado = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+
+test.beforeEach(() => {
   test.skip(!CLAVE, "sin administrador de prueba (API ya levantado aparte): ver playwright.compra.config.ts");
-  test.skip(info.project.name !== "compra-w768", "criterio del panel: 768 px");
 });
 
-test("[O1-11b] despublicar pide confirmación con el efecto escrito", async ({ page, baseURL, servidor }) => {
-  const base = panel(baseURL);
-  await entrar(page, base);
+test("[O1-11b] despublicar pide confirmación con el efecto escrito", async ({ page, baseURL, servidor }, info) => {
+  solo768(info);
+  await entrar(page, panel(baseURL), "/mi-tienda/publicacion");
   await page.getByRole("button", { name: "Despublicar" }).click();
   const ventana = page.locator(".modal, [role=dialog]").filter({ hasText: "¿Despublicar la tienda?" });
   await expect(ventana).toBeVisible();
@@ -71,9 +82,9 @@ test("[O1-11b] despublicar pide confirmación con el efecto escrito", async ({ p
   expect(((await (await servidor.get("/api/store", { headers: h })).json()) as { published: boolean }).published).toBe(true);
 });
 
-test("[O1-11b] escribir un titular y luego guardar un banner no pierde nada", async ({ page, baseURL, servidor }) => {
-  const base = panel(baseURL);
-  await entrar(page, base);
+test("[O1-11b] escribir un titular y luego guardar un banner no pierde nada", async ({ page, baseURL, servidor }, info) => {
+  solo768(info);
+  await entrar(page, panel(baseURL), "/mi-tienda/portada");
   const titular = `Titular de prueba ${Date.now() % 100000}`;
   await campo(page, "Titular de la portada").fill(titular);
   // sin salir del titular: el clic en «+ Banner» lo guarda (al perder el foco) y a la vez agrega el banner
@@ -90,8 +101,55 @@ test("[O1-11b] escribir un titular y luego guardar un banner no pierde nada", as
   const sc = (await (await servidor.get("/api/store/showcase", { headers: h })).json()) as { headline: string; banners: { title: string; active: boolean }[] };
   expect(sc.headline).toBe(titular);
   expect(sc.banners.map((b) => [b.title, b.active])).toContainEqual(["Promo de prueba", false]);
-  // sin scroll de lado a 768 px
-  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  expect(await sinScrollDeLado(page)).toBeLessThanOrEqual(0);
+});
+
+test("[O4-01] cada sección tiene su dirección y recargar deja en la misma", async ({ page, baseURL }, info) => {
+  solo768(info);
+  await entrar(page, panel(baseURL));
+  const menu = page.getByRole("navigation", { name: "Secciones de Mi Tienda" });
+  await menu.getByRole("link", { name: "Pagos y envíos" }).click();
+  await expect(page).toHaveURL(/\/mi-tienda\/pagos-envios$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Pagos y envíos" })).toBeVisible();
+  await menu.getByRole("link", { name: "Páginas" }).click();
+  await expect(page).toHaveURL(/\/mi-tienda\/paginas$/);
+  await page.reload();
+  // el token vive en memoria: si la recarga pide entrar de nuevo, la direccion no cambia y vuelve a la misma seccion
+  if (await page.locator('input[type="email"]').isVisible({ timeout: 5000 }).catch(() => false)) await login(page);
+  await expect(page).toHaveURL(/\/mi-tienda\/paginas$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Páginas" })).toBeVisible();
+});
+
+test("[O4-01] con la bandera apagada el panel es el de una sola página", async ({ page, baseURL, servidor }, info) => {
+  solo768(info);
+  const h = { Authorization: `Bearer ${await token(servidor)}` };
+  expect((await servidor.put("/api/store", { headers: h, data: { panel_v2: false } })).ok()).toBeTruthy();
+  try {
+    await page.goto(`${panel(baseURL)}/login`);
+    await login(page);
+    await page.waitForURL((u) => !u.pathname.startsWith("/login"));
+    await ir(page, "/mi-tienda");
+    await expect(page.getByText("Configura el sitio a tu gusto")).toBeVisible();
+    await expect(page.locator(".sh-hub")).toHaveCount(0);
+    await page.getByRole("button", { name: "Usar Mi Tienda por secciones" }).click();
+    await expect(page.locator(".sh-hub")).toBeVisible();
+  } finally {
+    await servidor.put("/api/store", { headers: h, data: { panel_v2: true } });
+  }
+});
+
+test("[O4-01] ninguna sección tiene scroll de lado", async ({ page, baseURL }) => {
+  await entrar(page, panel(baseURL));
+  for (const ruta of ["/mi-tienda", "/mi-tienda/apariencia", "/mi-tienda/portada", "/mi-tienda/kits", "/mi-tienda/paginas", "/mi-tienda/catalogo", "/mi-tienda/categorias", "/mi-tienda/pagos-envios", "/mi-tienda/seo", "/mi-tienda/publicacion"]) {
+    await ir(page, ruta);
+    await expect(page.locator(".sh-hub__body")).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    expect(await sinScrollDeLado(page), ruta).toBeLessThanOrEqual(0);
+  }
+  // a 375 px el menu es un selector; a 768, la fila de fichas
+  const w = page.viewportSize()?.width || 0;
+  if (w <= 480) await expect(page.getByLabel("Sección de Mi Tienda")).toBeVisible();
+  else await expect(page.getByRole("navigation", { name: "Secciones de Mi Tienda" })).toBeVisible();
 });
 
 /* O2-01d: el panel ya no viene en la entrada (src/app/PanelApp.tsx, con lazy()). Su arranque completo, con segundo

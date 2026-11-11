@@ -45,10 +45,12 @@ type PShow = { id: number; name: string; code: string; price: number | null; cur
 
 const TABS = ["Portada", "Destacados y kits", "Páginas", "Por producto"] as const; // EX-NOGA: sin «Medición» (nada de Google)
 
-export default function StoreShowcaseAdmin() {
+/* O4-01: `only` deja ver solo esas pestanas (Mi Tienda por secciones las reparte en su menu); sin `only`, todas */
+export default function StoreShowcaseAdmin({ only }: { only?: (typeof TABS)[number][] } = {}) {
   const { toast } = useSession();
   const [d, setD] = useState<Showcase | null>(null);
-  const [tab, setTab] = useState<(typeof TABS)[number]>("Portada");
+  const tabs = only?.length ? TABS.filter((t) => only.includes(t)) : TABS;
+  const [tab, setTab] = useState<(typeof TABS)[number]>(tabs[0]);
   const [avisos, setAvisos] = useState<string[]>([]);
   /* O1-11b: editores con cambios sin guardar; cambiar de pestana los descarta, asi que antes se avisa */
   const [sucios, setSucios] = useState<Record<string, boolean>>({});
@@ -73,9 +75,9 @@ export default function StoreShowcaseAdmin() {
     <Card title="Vitrina de la tienda" extra={d && <a className="btn btn--ghost btn--sm" href={d.domain ? base : `${base}`} target="_blank" rel="noopener"><Icon d={I.store} />Ver vitrina</a>}>
       {!d ? <Loading /> : (
         <div style={{ display: "grid", gap: 14 }}>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} role="tablist">
-            {TABS.map((t) => <button key={t} role="tab" aria-selected={tab === t} className={`btn btn--sm ${tab === t ? "btn--crimson" : "btn--ghost"}`} onClick={() => cambiarTab(t)}>{t}</button>)}
-          </div>
+          {tabs.length > 1 && <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} role="tablist">
+            {tabs.map((t) => <button key={t} role="tab" aria-selected={tab === t} className={`btn btn--sm ${tab === t ? "btn--crimson" : "btn--ghost"}`} onClick={() => cambiarTab(t)}>{t}</button>)}
+          </div>}
 
           {tab === "Portada" && (
             <div style={{ display: "grid", gap: 12 }}>

@@ -54,6 +54,9 @@ STORE_DEFAULTS = {
     # O2-01b: contenido real en el HTML por tipo de ruta (services/store_ssr.py). Apagado: se enciende uno a la vez,
     # midiendo CLS y LCP en un celular lento.
     "ssr_body": {"ficha": False, "categoria": False, "portada": False},
+    # O4-01: Mi Tienda por secciones (menu lateral y direccion propia por seccion). Encendido; apagado vuelve al panel de
+    # una sola pagina, que sigue intacto (bandera para volver atras sin desplegar)
+    "panel_v2": True,
 }
 BUSINESS_FIELDS = ("legal_name", "legal_id", "address", "phone", "email", "hours")
 
@@ -139,6 +142,7 @@ class StoreIn(BaseModel):
     currency: str | None = None
     business: BusinessIn | None = None
     ssr_body: SsrBodyIn | None = None
+    panel_v2: bool | None = None
 
     @field_validator("shipping_rates")
     @classmethod
