@@ -5,7 +5,7 @@
    Si no hay snapshot (primera visita o falla), cae al endpoint /catalog como antes. */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Crumbs, EmptyHelp, Grid, IC, Ico, Skeleton, money, useAvailability, useHead, usePath, useStore, type SeoBlock, type VProd } from "./storeKit";
+import { Crumbs, EmptyHelp, Grid, IC, Ico, Skeleton, money, useAvailability, useFocusTrap, useHead, usePath, useStore, type SeoBlock, type VProd } from "./storeKit";
 import { filterCatalog, snapToVProd, type CatalogResult } from "./catalogFilter";
 import { useSnapshot } from "./useSnapshot";
 
@@ -166,13 +166,12 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
   // hoja de filtros (movil)
   const [sheet, setSheet] = useState(false);
   const sheetRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(sheetRef, sheet); // O2-03: el foco gira dentro de la hoja y vuelve a «Filtros» al cerrarla
   useEffect(() => {
     if (!sheet) return;
-    const prev = document.activeElement as HTMLElement | null;
-    sheetRef.current?.querySelector<HTMLElement>("button, input")?.focus();
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setSheet(false);
     document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("keydown", onKey); prev?.focus?.(); };
+    return () => document.removeEventListener("keydown", onKey);
   }, [sheet]);
 
   // O1-14: una categoria que no existe lo dice (antes, segun quien llegaba primero, listaba todo el catalogo)

@@ -17,7 +17,7 @@ import OrderStatus, { OrderLookup, rememberOrder } from "./OrderStatus";
 
 import ProductPage from "./ProductPage";
 import StoreHome from "./StoreHome";
-import { businessLines, catSlugs, freeShipGap, normAvail, rateText, safeStore, StoreProvider, type Business, type ShipPub, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
+import { businessLines, catSlugs, freeShipGap, normAvail, rateText, safeStore, StoreProvider, useFocusTrap, type Business, type ShipPub, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
 import "./shop.css";
 import "./vitrina.css";
 
@@ -125,6 +125,8 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
   const [cart, setCart] = useState<Line[]>(() => { try { return JSON.parse(store.get(cartKey) || "[]") as Line[]; } catch { return []; } });
   useEffect(() => { store.set(cartKey, JSON.stringify(cart)); }, [cart, cartKey]);
   const [drawer, setDrawer] = useState(false);
+  const drawerRef = useRef<HTMLElement>(null);
+  useFocusTrap(drawerRef, drawer); // O2-03: el foco no se escapa del cajon y vuelve al cerrarlo
   const [toast, setToast] = useState<string | null>(null);
   const [bump, setBump] = useState(0);
   const toastT = useRef<number | undefined>(undefined);
@@ -346,7 +348,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
       </footer>
 
       <div className="sh-scrim" data-open={drawer} onClick={() => setDrawer(false)} />
-      <aside className="sh-drawer" data-open={drawer} role="dialog" aria-modal="true" aria-label={isShop ? "Carrito" : "Cotización"} aria-hidden={!drawer}>
+      <aside ref={drawerRef} className="sh-drawer" data-open={drawer} role="dialog" aria-modal="true" aria-label={isShop ? "Carrito" : "Cotización"} aria-hidden={!drawer}>
         <div className="sh-drawer__head"><h2>{isShop ? "Tu carrito" : "Tu cotización"}</h2><button className="sh-x" onClick={() => setDrawer(false)} aria-label="Cerrar"><Ico d={IC.x} /></button></div>
         <div className="sh-drawer__body">
           {cart.length === 0 ? <div className="sh-empty" style={{ padding: "40px 0" }}><b>Todavía no agregaste nada.</b><button className="sh-btn sh-btn--ghost" onClick={() => { setDrawer(false); navigate(L("/catalogo")); }}>Ver catálogo</button></div>

@@ -142,6 +142,32 @@ export function catSlugs(cats: { id: number; name: string }[]): Record<number, s
   [...cats].sort((a, b) => a.id - b.id).forEach((c) => { let s = slugify(c.name); if (seen.has(s)) s = `${s}-${c.id}`; seen.add(s); out[c.id] = s; });
   return out;
 }
+/** O2-03: mientras el cajon del carrito o la hoja de filtros estan abiertos, Tab y Mayus+Tab giran dentro de ellos; al
+    abrir, el foco entra al primer control y, al cerrar, vuelve a donde estaba (si ese control sigue en la pagina). */
+const FOCOS = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+export function useFocusTrap(ref: { current: HTMLElement | null }, open: boolean) {
+  useEffect(() => {
+    const box = ref.current;
+    if (!open || !box) return;
+    const prev = document.activeElement as HTMLElement | null;
+    const items = () => [...box.querySelectorAll<HTMLElement>(FOCOS)].filter((el) => el.getClientRects().length > 0);
+    (items()[0] || box).focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const list = items();
+      if (!list.length) { e.preventDefault(); return; }
+      const first = list[0], last = list[list.length - 1], cur = document.activeElement;
+      if (e.shiftKey && (cur === first || !box.contains(cur))) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (cur === last || !box.contains(cur))) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      if (prev && prev !== document.body && document.contains(prev)) prev.focus({ preventScroll: true });
+    };
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
 /** ruta interna con el prefijo de la tienda */
 export const usePath = () => { const { base } = useStore(); return (p: string) => `${base}${p.startsWith("/") ? p : `/${p}`}` || "/"; };
 
