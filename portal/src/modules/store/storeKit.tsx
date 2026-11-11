@@ -443,9 +443,10 @@ export function Skeleton({ n = 8, rail = false }: { n?: number; rail?: boolean }
       {Array.from({ length: n }, (_, i) => (
         <li key={i}>
           <div className="vt-card vt-card--skel">
-            <span className="vt-card__link"><span className="vt-card__media sh-skel" /><span className="sh-skel" style={{ height: 12, width: "40%" }} /><span className="sh-skel" style={{ height: 36, width: "92%" }} /></span>
-            <span className="sh-skel" style={{ height: 14, width: "60%" }} />
-            <div className="vt-card__foot"><span className="sh-skel" style={{ height: 40, width: "52%" }} /><span className="sh-skel" style={{ height: 44, width: 44, borderRadius: "50%" }} /></div>
+            {/* O2-14: las mismas piezas que la tarjeta real, con texto invisible: al llegar los productos nada salta */}
+            <span className="vt-card__link"><span className="vt-card__media sh-skel" /><span className="vt-card__meta">&nbsp;</span><span className="vt-card__name">&nbsp;</span></span>
+            <p className="vt-card__ks">&nbsp;</p>
+            <div className="vt-card__foot"><div className="vt-card__buy"><span className="vt-price"><b>&nbsp;</b><small>&nbsp;</small></span><span className="vt-avail">&nbsp;</span></div><span className="vt-add sh-skel" /></div>
           </div>
         </li>
       ))}

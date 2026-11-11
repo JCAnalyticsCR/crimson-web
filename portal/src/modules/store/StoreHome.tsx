@@ -158,10 +158,12 @@ export default function StoreHome() {
      [showcase, snapshot] y ganaba el snapshot: portada sin kits. Ahora la actualizacion es funcional (nunca pisa lo
      que ya hay) y una referencia marca que /showcase llego. */
   const showcaseLlego = useRef(false);
+  // O2-14: lo que solo trae /showcase (kits y producto de portada) guarda su lugar hasta que llega: nada salta
+  const [llego, setLlego] = useState(false);
   useEffect(() => { if (snapD && !showcaseLlego.current) setD((cur) => cur ?? snapD); }, [snapD]);
 
   // /showcase: siempre se pide para traer los kits, el producto de portada y los datos definitivos
-  useEffect(() => { ctx.api<Showcase>("/showcase").then((r) => { showcaseLlego.current = true; setD(r); }).catch(() => setErr(true)); }, [ctx]);
+  useEffect(() => { ctx.api<Showcase>("/showcase").then((r) => { showcaseLlego.current = true; setD(r); setLlego(true); }).catch(() => { setErr(true); setLlego(true); }); }, [ctx]);
 
   /* O2-08: «Listos para entrega», solo con existencia propia y solo si hay 4 o más (del snapshot: la misma verdad que
      el listado) */
@@ -204,6 +206,7 @@ export default function StoreHome() {
             {datos.length > 0 && <p className="vt-hero__facts">{datos.join(" · ")}</p>}
           </div>
           {/* el producto de portada: lo elige el panel (con respaldos); es la imagen LCP */}
+          {!llego && <span className="vt-hero__prod vt-hero__prod--skel" aria-hidden="true"><span className="vt-hero__img sh-skel" /><span className="vt-hero__ptxt"><span className="sh-skel" style={{ height: 14, width: "40%" }} /><span className="sh-skel" style={{ height: 40, width: "90%" }} /><span className="sh-skel" style={{ height: 28, width: "50%" }} /></span></span>}
           {hero && (
             <Link className="vt-hero__prod" to={to(hero.path)}>
               <span className="vt-hero__img">{hero.image && <img src={hero.image} alt="" fetchPriority="high" loading="eager" decoding="async" width={480} height={480} />}</span>
@@ -219,6 +222,11 @@ export default function StoreHome() {
       </section>
 
       {/* ---------- sellos: icono de linea en tinta y dato concreto; garantia y devoluciones solo con el candado ---------- */}
+      {!d && (
+        <section className="vt-trust" aria-hidden="true">
+          <ul className="sh-wrap">{Array.from({ length: 4 }, (_, i) => <li key={i}><span className="vt-trust__ico sh-skel" /><div style={{ flex: 1 }}><b className="sh-skel" style={{ height: 14, width: "60%" }} /><span className="sh-skel" style={{ height: 30, marginTop: 6 }} /></div></li>)}</ul>
+        </section>
+      )}
       {sellos.length > 0 && (
         <section className="vt-trust" aria-label="Por qué comprar aquí">
           <ul className="sh-wrap">
@@ -249,7 +257,7 @@ export default function StoreHome() {
 
       {/* ---------- kits: los productos estrella. 1 a ancho completo, 2 en dos columnas, 3 o más en riel. Mientras
            carga, el espacio queda reservado: lo de abajo no salta. ---------- */}
-      {!d && !err && (
+      {!llego && !err && (
         <section className="vt-kits" aria-hidden="true">
           <div className="sh-wrap">
             <div className="vt-sec__head vt-sec__head--dark"><div><h2>Sistemas completos, armados por necesidad</h2></div></div>
@@ -257,7 +265,7 @@ export default function StoreHome() {
           </div>
         </section>
       )}
-      {d && d.kits.length > 0 && (
+      {llego && d && d.kits.length > 0 && (
         <section className="vt-kits" aria-labelledby="vt-kits">
           <div className="sh-wrap">
             <div className="vt-sec__head vt-sec__head--dark">

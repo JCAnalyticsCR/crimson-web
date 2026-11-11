@@ -38,7 +38,7 @@ No es la compra real: aquí no hay inventario, pago ni correo. La compra de punt
 |---|---|---|
 | `scroll.spec.ts` | Sin scroll horizontal y nada cortado por el borde, en las 12 pantallas de `soporte/pantallas.ts` | 320, 360, 375, 768, 1280 |
 | `capturas.spec.ts` | Capturas base de página completa (8 pantallas) | 375, 768, 1280 |
-| `axe.spec.ts` | Accesibilidad WCAG 2.1 A/AA en **modo informe**: no bloquea | 375, 1280 |
+| `axe.spec.ts` | Accesibilidad WCAG 2.1 A/AA. **Bloquean** (desde la Ola 2): contraste, enlaces y botones sin nombre; el resto en modo informe | 375, 1280 |
 | `compra-mock.spec.ts` | Recorrido ficha → carrito → 4 pasos del checkout → «Mi pedido», sobre el mock | 375, 1280 |
 | `compra.spec.ts` | La compra real contra el API local: **no** corre con `npm run e2e`, sino con `npm run e2e:compra` | 375, 768 |
 | `mi-tienda.spec.ts` | El panel (Mi Tienda) contra el API local, con un administrador de prueba de contraseña al azar: despublicar pide confirmación y escribir un titular y luego guardar un banner no pierde nada (O1-11b). Va con `npm run e2e:compra` | 768 |
@@ -46,6 +46,12 @@ No es la compra real: aquí no hay inventario, pago ni correo. La compra de punt
 | `pendientes.spec.ts` | Fallos conocidos, como `test.fixme` con su tarea | todos |
 | `venta-asistida.spec.ts` | Ficha «por confirmar» (O1-02) y desglose de IVA con `/item` lento (O1-03) | todos |
 | `tienda-carga.spec.ts` | La tienda reintenta si falla `/store-domain` y ofrece «Reintentar» (O1-18) | todos |
+| `sistema-visual.spec.ts` | Ola 2 (O2-03): rojo escaso en el CSS, objetivos de 44 px a 375 px y foco atrapado en el cajón y la hoja de filtros | todos |
+| `tarjeta.spec.ts` | Tarjeta de seis elementos (O2-06): dos columnas en celular, dato clave, nombre una sola vez, «Comparar» con teclado | todos |
+| `ficha.spec.ts` | Ficha en orden de decisión (O2-07): primera pantalla y media, «Agregado. En tu carrito», plegados, barra fija | todos |
+| `cabecera.spec.ts` | Cabecera de 56/64 px, categorías por prioridad y pie en 4 columnas (O2-05) | todos |
+| `carrito.spec.ts` | Carrito sobrio y enlace `/?carrito=` que pregunta y fusiona (O2-09) | todos |
+| `lento.spec.ts` | Texto al 200 % sin cortes (320 y 375) y, con `E2E_LENTO=1`, informe de celular lento (O2-14). Lo manual: `ACCESIBILIDAD.md` | 320, 375 |
 | `humo.spec.ts` | La portada pinta sin errores; también en **WebKit** (proyecto `webkit-375`: siempre en CI, local con `E2E_WEBKIT=1` tras `npx playwright install webkit`) | todos + WebKit |
 
 Agregar una pantalla: una entrada en `soporte/pantallas.ts` (con `base: true` entra también a capturas y axe).
@@ -225,7 +231,7 @@ cliente ve igual de roto.
 
 ## Accesibilidad
 
-`axe.spec.ts` no falla por hallazgos (modo informe hasta O2-02). La foto del 10/11 está en
+Desde la Ola 2 `axe.spec.ts` falla por contraste (O2-02) y por enlaces o botones sin nombre (O2-05); las demás reglas siguen en modo informe. La foto del 10/11 está en
 `linea-base/axe-2026-11-10.md`: dos reglas, las dos «serious» — contraste insuficiente (`color-contrast`, en
 casi todas las pantallas) y nombre accesible que no contiene el texto visible (`label-content-name-mismatch`,
 en el botón del carrito y los pasos del checkout).

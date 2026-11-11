@@ -8,6 +8,7 @@ const fijar = (page: import("@playwright/test").Page, a: AjustesE2e) =>
 
 test("[O1-04 j] 10 recargas seguidas: la sección de kits siempre está", async ({ page }, info) => {
   test.skip(info.project.name !== "w1280", "la carrera no depende del ancho: un solo ancho");
+  test.setTimeout(90_000); // 10 cargas completas: con la corrida entera en paralelo los 45 s quedaban justos
   // /showcase llega entre 0 y 12 ms despues del snapshot: justo la ventana en que el snapshot pisaba la portada
   await fijar(page, { portadaTras: -1 });
   await page.goto("/");

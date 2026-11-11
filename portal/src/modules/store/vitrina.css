@@ -210,7 +210,7 @@
   .vt-hero__cta .sh-btn { min-height: 48px; }
   /* en celular el producto va en fila: foto chica y datos, para que titular, boton y precio quepan arriba */
   .shop .vt-hero__prod { grid-template-columns: 112px minmax(0, 1fr); align-items: center; }
-  .vt-hero__img { aspect-ratio: 1; height: 100%; }
+  .vt-hero__img { aspect-ratio: auto; width: 100%; height: 100%; min-height: 112px; }
   .vt-hero__ptxt { padding: 10px 12px; }
   .vt-hero__ptxt .vt-price b { font-size: var(--fs-4); }
 }
@@ -457,7 +457,7 @@
 .vt-buy .sh-qty button { width: 44px; height: 50px; }
 .vt-buy__add { flex: 1 1 180px; min-height: 52px; font-size: var(--fs-2); }
 @media (max-width: 420px) {
-  .vt-buy { flex-wrap: nowrap; gap: 8px; }
+  .vt-buy { gap: 8px; }
   .vt-buy .sh-qty input { width: 34px; }
   .vt-buy__add { flex: 1 1 auto; min-width: 0; padding-inline: 12px; }
 }
@@ -806,3 +806,23 @@ span.vt-kitres__img { display: grid; place-items: center; background: var(--vt-i
 .shop :is(.vt-card__meta, .vt-info__brand) { text-transform: uppercase; letter-spacing: .04em; }
 /* el simbolo de colon va en su propio span: si un dia cambia la fuente, sale en la misma que la cifra */
 .vt-cur { font: inherit; }
+
+/* ---------- O2-14: texto al 200 % sin cortes (todo en rem; aqui lo que tenia ancho minimo rigido) ---------- */
+.shop .sh-drawer__foot { grid-template-columns: minmax(0, 1fr); }
+.shop .sh-drawer .sh-btn, .shop .vt-advice .sh-btn, .shop .vt-hero__cta .sh-btn { white-space: normal; text-align: center; line-height: 1.2; }
+.shop .vt-bar__right { flex-wrap: wrap; min-width: 0; justify-content: flex-end; }
+.shop .vt-sort, .shop .vt-sort .sh-select { min-width: 0; max-width: 100%; }
+.shop .vt-buy { flex-wrap: wrap; }
+.shop .vt-buy__add { flex: 1 1 140px; min-width: 0; }
+.shop .vt-more { white-space: normal; text-align: right; }
+.shop .vt-hero__prod, .shop .vt-hero__ptxt, .shop .vt-hero__copy { min-width: 0; }
+.shop .vt-hero h1, .shop .vt-hero__ptxt b, .shop .vt-essentials li { overflow-wrap: anywhere; }
+.shop .vt-pdp__detail { grid-template-columns: minmax(0, 1fr); }
+.shop .vt-sec__head .vt-more { flex: 0 1 auto; }
+.shop .vt-hero h1 { hyphens: auto; }
+.vt-hero__grid:has(.vt-hero__prod--skel) { grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); }
+@media (max-width: 899px) { .vt-hero__grid:has(.vt-hero__prod--skel) { grid-template-columns: minmax(0, 1fr); } }
+.vt-hero__prod--skel .sh-skel { display: block; }
+.vt-hero__prod--skel .vt-hero__ptxt { gap: 8px; }
+.vt-card--skel :is(.vt-card__meta, .vt-card__name, .vt-card__ks, .vt-price, .vt-avail) { color: transparent; }
+.vt-card--skel .vt-avail::before { visibility: hidden; }

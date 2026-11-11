@@ -321,8 +321,9 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
               {hasWa && <a className="vt-iconbtn vt-headwa" href={wa(S.whatsapp, `Hola ${S.name}, tengo una consulta.`)} target="_blank" rel="noopener noreferrer" aria-label="WhatsApp (se abre WhatsApp)"><Ico d={IC.wa} size={20} /><span className="vt-hide-m" aria-hidden="true">WhatsApp</span></a>}
               {isShop && <button type="button" className="vt-headlink vt-hide-m" onClick={() => go({ v: "mi-pedido" })}>Mi pedido</button>}
               {compare.length > 0 && <Link className="vt-iconbtn vt-cmpbtn" to={L("/comparar")} aria-label={`Comparar ${compare.length} producto(s)`}><Ico d={IC.compare} size={20} /><span className="sh-badge sh-badge--ink" aria-hidden="true">{compare.length}</span></Link>}
-              <button type="button" className="sh-btn sh-btn--sm sh-cartbtn" data-bump={bump % 2} onClick={() => setDrawer(true)} aria-label={`${isShop ? "Carrito" : "Cotización"}: ${count} artículo(s)`}>
-                <Ico d={IC.bag} /><span className="vt-hide-m" aria-hidden="true">{isShop ? "Carrito" : "Cotización"}</span>
+              {/* O2-14: el nombre sale del contenido («Carrito: 2 artículo(s)»), sin aria-label que contradiga lo visible */}
+              <button type="button" className="sh-btn sh-btn--sm sh-cartbtn" data-bump={bump % 2} onClick={() => setDrawer(true)}>
+                <Ico d={IC.bag} /><span className="vt-hide-m" aria-hidden="true">{isShop ? "Carrito" : "Cotización"}</span><span className="sh-sr">{`${isShop ? "Carrito" : "Cotización"}: ${count} artículo(s)`}</span>
                 {count > 0 && <span className="sh-badge" key={bump} aria-hidden="true">{count > 99 ? "99+" : count}</span>}
               </button>
             </div>
